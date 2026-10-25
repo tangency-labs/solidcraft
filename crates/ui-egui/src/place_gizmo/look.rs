@@ -28,10 +28,12 @@ fn casing() -> Color32 {
 /// How much wider than its core a casing is (both sides together).
 const CASE: f32 = 1.6;
 
-/// A closed outline in `core`, cased under it.
-pub(super) fn cased_closed(painter: &egui::Painter, pts: &[Pos2], w: f32, core: Color32) {
-    for s in [Stroke::new(w + CASE, casing()), Stroke::new(w, core)] {
-        painter.add(egui::Shape::closed_line(pts.to_vec(), s));
+/// The feature's footprint on the face while the marker drags it: a filled shape in the preview's
+/// own blue with a thin darker edge, so white stays reserved for the handles. It shows where the
+/// feature is going before the recomputed preview gets there.
+pub(super) fn footprint(painter: &egui::Painter, pts: &[Pos2], t: &Tokens) {
+    for shape in crate::viewport::projected_polygon(pts, t.preview_add.gamma_multiply(0.38), Stroke::new(1.2, t.manipulator)) {
+        painter.add(shape);
     }
 }
 
@@ -41,7 +43,14 @@ pub(super) fn cased_closed(painter: &egui::Painter, pts: &[Pos2], w: f32, core: 
 pub(super) struct CrossStyle {
     pub(super) hot: f32,
     pub(super) active: f32,
+    /// 1 normally, [`DIM`] while the other handle is in use.
+    pub(super) alpha: f32,
 }
+
+/// How much of itself the handle not in use keeps while the other one is dragged.
+pub(super) const DIM: f32 = 0.25;
+/// How long a handle takes to step back and to come forward again (seconds).
+pub(super) const DIM_S: f32 = 0.16;
 
 /// How long the marker's states take to grow into each other (seconds).
 pub(super) const GROW_S: f32 = 0.36;
@@ -74,7 +83,7 @@ const HEAD_HALF: f32 = 7.3;
 pub(super) fn crosshair(painter: &egui::Painter, c: Pos2, s: &CrossStyle, _t: &Tokens) {
     let reach = REACH_REST + (REACH_HOT - REACH_REST) * s.hot + (REACH_DRAG - REACH_HOT) * s.active;
     let solid = s.active > 0.5;
-    let (core, case) = (core(s.hot > 0.5), casing());
+    let (core, case) = (core(s.hot > 0.5).gamma_multiply(s.alpha), casing().gamma_multiply(s.alpha));
     let (core_w, case_w) = (LINE, LINE + CASE);
     // The arrowhead grows with the arm it ends: scaled and faded in by `hot`.
     let head = (HEAD_LEN * s.hot, HEAD_HALF * s.hot, s.hot);
@@ -116,6 +125,8 @@ pub(super) fn crosshair(painter: &egui::Painter, c: Pos2, s: &CrossStyle, _t: &T
 pub(super) struct RingStyle {
     pub(super) hot: f32,
     pub(super) active: f32,
+    /// 1 normally, [`DIM`] while the marker is dragged.
+    pub(super) alpha: f32,
 }
 
 /// The ring's size on screen (radius, pixels): fixed, like the move triad's arrows, whatever the
@@ -148,7 +159,7 @@ pub(super) fn ring(painter: &egui::Painter, at: &dyn Fn(f64) -> Option<Pos2>, gr
     let solid = s.active > 0.5;
     let steps = (2.0 * half / ARC_STEP_DEG).ceil().max(2.0) as usize;
     let pts: Vec<Pos2> = (0..=steps).filter_map(|i| at(grip - half.to_radians() + 2.0 * half.to_radians() * i as f64 / steps as f64)).collect();
-    let (core, case) = (core(s.hot > 0.5), casing());
+    let (core, case) = (core(s.hot > 0.5).gamma_multiply(s.alpha), casing().gamma_multiply(s.alpha));
     let pieces: Vec<Vec<Pos2>> = if solid { vec![pts] } else { dashed(&pts, RING_DASH, RING_GAP) };
     for piece in &pieces {
         painter.add(egui::Shape::line(piece.clone(), Stroke::new(RING_LINE + CASE, case)));

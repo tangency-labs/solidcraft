@@ -25,7 +25,7 @@ mod rest;
 mod snap_fit;
 
 use egui::{Pos2, vec2};
-use look::{CrossStyle, GROW_S, RING_PX, RingStyle, SWEEP_S, angle_label, cased_closed, compass, core, crosshair, ring};
+use look::{CrossStyle, DIM, DIM_S, GROW_S, RING_PX, RingStyle, SWEEP_S, angle_label, compass, crosshair, footprint, ring};
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::geom::Vec3;
 
@@ -243,18 +243,23 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     if hovered && !dragging {
         r.clone().on_hover_text(crate::i18n::tr_label(sp.move_tip));
     }
-    // Ease the two state factors; animate_bool_with_time repaints only while they are moving.
+    // The handle not in use steps back while the other one works (the ring's drag is last frame's).
+    let turning = ui.data(|m| m.get_temp::<bool>(id("turning"))).unwrap_or(false);
+    let dim = |ui: &egui::Ui, what: &str, on: bool| 1.0 - (1.0 - DIM) * ui.ctx().animate_bool_with_time(id(what), on, DIM_S);
+    // Ease the state factors; animate_bool_with_time repaints only while they are moving.
     let style = CrossStyle {
         hot: ui.ctx().animate_bool_with_time(id("hot"), hovered || dragging, GROW_S),
         active: ui.ctx().animate_bool_with_time(id("active"), dragging, GROW_S),
+        alpha: dim(ui, "marker_dim", turning),
     };
     if dragging {
         let pts: Option<Vec<Pos2>> = (sp.footprint)(app, d, base, n).into_iter().map(|p| proj.to_screen(p)).collect();
         if let Some(pts) = pts.filter(|p| p.len() >= 3) {
-            cased_closed(painter, &pts, 1.5, core(false));
+            footprint(painter, &pts, &t);
         }
     }
     crosshair(painter, bs, &style, &t);
+    let moving = dragging;
     if hovered || dragging {
         ui.ctx().set_cursor_icon(if dragging { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Move });
     }
@@ -292,9 +297,11 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     crate::scenario::publish_handle(&format!("{}:rotate", sp.name), gs);
     DRAWN.with(|h| h.borrow_mut().push(gs));
     let (hovered, dragging) = (r.hovered(), r.dragged());
+    ui.data_mut(|m| m.insert_temp(id("turning"), dragging));
     let style = RingStyle {
         hot: ui.ctx().animate_bool_with_time(id("ring_hot"), hovered || dragging, SWEEP_S),
         active: ui.ctx().animate_bool_with_time(id("ring_active"), dragging, GROW_S),
+        alpha: dim(ui, "ring_dim", moving),
     };
     ring(painter, &at, angle, bs, &style);
     // The compass stays put while the feature turns, so you can see how far you have gone.
