@@ -170,6 +170,38 @@ fn feature_circular_center_flip_uses_partial_arc_endpoints_and_full_circle_spaci
     }
 }
 
+/// A pattern made with the timeline rolled back to the start comes before the box it copies and
+/// replays the box from its definition. A change of the box's parameter reaches the copies as it
+/// reaches the box: the pattern's result was kept (its copies the old length) because nothing
+/// before it in the timeline had changed.
+#[test]
+fn a_pattern_before_the_feature_it_copies_follows_that_features_parameter() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "w", "expression": "18 mm"}));
+    run(&mut s, "solid.box", json!({"length": "w", "width": 10, "height": 10}));
+    run(&mut s, "timeline.rollback", json!({"position": 0}));
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["Box1"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 30}));
+    let lengths = |st: &solidcraft_doc::ModelState| {
+        st.bodies.iter().map(|b| (b.name.clone(), b.body.outline_bounds())).map(|(n, bb)| (n, bb.max.x - bb.min.x)).collect::<Vec<_>>()
+    };
+    let fresh = |s: &Session| {
+        let mut m = solidcraft_doc::Model::new();
+        m.no_cache = true;
+        m.evaluate(&s.doc);
+        lengths(&m.state())
+    };
+    for step in [json!({"name": "w", "expression": "21 mm"}), json!({"name": "w", "expression": "25 mm"})] {
+        run(&mut s, "parameters.change", step);
+        assert_eq!(lengths(&s.model.state()), fresh(&s), "rolled back");
+        run(&mut s, "timeline.rollback", json!({}));
+        assert_eq!(lengths(&s.model.state()), fresh(&s), "rolled forward");
+        run(&mut s, "timeline.rollback", json!({"position": 1}));
+    }
+    run(&mut s, "timeline.rollback", json!({}));
+    let got = lengths(&s.model.state());
+    assert!(got.len() == 2 && got.iter().all(|(_, l)| (l - 25.0).abs() < 1e-9), "the box and its copy, 25 mm: {got:?}");
+}
+
 #[test]
 fn feature_pattern_rejects_malformed_alignment_and_flip_atomically() {
     let mut s = feature_pattern_plate();

@@ -1442,7 +1442,43 @@ fn chain_fingerprint(
         }
         fp = h.finish();
     }
+    // A pattern or mirror of features replays its sources' definitions wherever they are in the
+    // timeline. One made with the timeline rolled back comes before them, where the chain doesn't
+    // cover them: its copies kept the size the sources had when they were made.
+    if let FeatureKind::Pattern { features, bodies, .. } | FeatureKind::Mirror { features, bodies, .. } = &f.kind
+        && bodies.is_empty()
+        && !features.is_empty()
+    {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        fp.hash(&mut h);
+        for g in replayed_sources(doc, features) {
+            fingerprint(0, g, vals, false, steps).hash(&mut h);
+        }
+        fp = h.finish();
+    }
     fp
+}
+
+/// The features a pattern or mirror of `features` replays: each source, and the sources of one
+/// that is itself a pattern or mirror of features (see `copy_plan`), each once.
+fn replayed_sources<'a>(doc: &'a Document, features: &[crate::FeatureName]) -> Vec<&'a Feature> {
+    let mut out: Vec<&Feature> = Vec::new();
+    let mut todo: Vec<String> = crate::plain(features);
+    // A bound on the walk, as on the copy plan's nesting: a design can't make it run on.
+    for _ in 0..1024 {
+        let Some(name) = todo.pop() else { break };
+        let Ok(g) = source_feature(doc, &name) else { continue };
+        if out.iter().any(|x| x.id == g.id) {
+            continue;
+        }
+        if let FeatureKind::Pattern { features, bodies, .. } | FeatureKind::Mirror { features, bodies, .. } = &g.kind
+            && bodies.is_empty()
+        {
+            todo.extend(crate::plain(features));
+        }
+        out.push(g);
+    }
+    out
 }
 
 /// Document-level inputs any feature may read: construction planes (resolved by name), sheet
