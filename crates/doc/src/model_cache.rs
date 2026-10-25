@@ -575,7 +575,7 @@ impl Model {
             return Err(bad("saved model: features"));
         }
         let (vals, param_errors) = evaluation_values(doc);
-        let step_digests = StepDigests::of(doc, &StepDigests::default());
+        let import_digests = ImportDigests::of(doc, &ImportDigests::default());
         let marker = doc.marker.unwrap_or(usize::MAX);
         let ctx = context_digest(doc, &vals);
         let mut before = Arc::new(ModelState::default());
@@ -588,7 +588,7 @@ impl Model {
             // A fingerprint reads the state before its feature (where the bodies it takes lie).
             // After a state the file left out, the saved one is taken: `evaluate` works that state
             // out, checks the fingerprints after it, and evaluates again from one that differs.
-            prev = if exact { chain_fingerprint(doc, &vals, f, prev, i >= marker, &step_digests, Some(&before)) } else { saved };
+            prev = if exact { chain_fingerprint(doc, &vals, f, prev, i >= marker, &import_digests, Some(&before)) } else { saved };
             if r.get("id").and_then(Json::as_u64) != Some(f.id) || saved != prev {
                 return Err(bad("saved model: the document changed"));
             }
@@ -618,7 +618,7 @@ impl Model {
             }
             results.push(result);
         }
-        let mut model = Model { results, param_errors, step_digests, frame_bodies, ..Model::default() };
+        let mut model = Model { results, param_errors, import_digests, frame_bodies, ..Model::default() };
         let unkept = model.results.iter().filter(|r| r.unkept).count();
         if unkept > 0 {
             // The features whose state the file did not keep, each evaluated again from the state
@@ -636,7 +636,7 @@ impl Model {
         let mut before = Arc::new(ModelState::default());
         if let Ok(mut cache) = model.cache.lock() {
             for (f, r) in doc.features.iter().zip(&model.results).filter(|(_, r)| !r.skipped && r.error.is_none()) {
-                let local = fingerprint(0, f, &vals, false, &model.step_digests) ^ placement_digest(doc, f, Some(&before));
+                let local = fingerprint(0, f, &vals, false, &model.import_digests) ^ placement_digest(doc, f, Some(&before));
                 cache.put(
                     cache_key(f, r.fingerprint, local, ctx, &before),
                     CachedEval {

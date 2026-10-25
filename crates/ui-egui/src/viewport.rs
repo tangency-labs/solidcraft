@@ -785,8 +785,8 @@ fn push_block(
     made.insert(key, block);
 }
 
-/// The model scene's instanced meshes: the shared triangles drawn more than once among the shown
-/// bodies (or large: [`INSTANCE_ALONE`]), and each body placed from them.
+/// The model scene's instanced meshes: imported reference meshes, shared triangles drawn more
+/// than once, and large bodies ([`INSTANCE_ALONE`]), with each body's placement.
 struct Instances {
     /// Each candidate body's shared mesh and placement, by body name.
     candidates: std::collections::HashMap<String, (std::sync::Arc<solidcraft_engine::geom::Mesh>, solidcraft_engine::doc::Mat)>,
@@ -797,20 +797,23 @@ struct Instances {
 }
 
 impl Instances {
-    /// The shown bodies' shared meshes, keeping those more than one body is drawn from and large
-    /// ones.
+    /// Keep reference meshes at every size: their triangles do not change when a joint moves.
+    /// Other bodies share triangles when repeated or large enough to warrant a separate draw.
     fn new(app: &SolveApp, shown: &[&solidcraft_engine::doc::ModelBody], shaded: bool) -> Instances {
         let kept = app.viewport.instanced_tris.lock().map(|mut k| std::mem::take(&mut *k)).unwrap_or_default();
         let mut candidates = std::collections::HashMap::new();
         if shaded {
             let mut uses: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
-            let placed: Vec<_> = shown.iter().filter_map(|b| Some((b.name.clone(), shared_mesh(app, b)?))).collect();
-            for (_, (mesh, _)) in &placed {
+            let placed: Vec<_> = shown.iter().filter_map(|b| Some((b.name.clone(), b.body.is_mesh(), shared_mesh(app, b)?))).collect();
+            for (_, _, (mesh, _)) in &placed {
                 *uses.entry(std::sync::Arc::as_ptr(mesh) as usize).or_default() += 1;
             }
             candidates = placed
                 .into_iter()
-                .filter(|(_, (m, _))| m.triangles.len() >= INSTANCE_ALONE || uses.get(&(std::sync::Arc::as_ptr(m) as usize)).is_some_and(|n| *n > 1))
+                .filter(|(_, reference, (m, _))| {
+                    *reference || m.triangles.len() >= INSTANCE_ALONE || uses.get(&(std::sync::Arc::as_ptr(m) as usize)).is_some_and(|n| *n > 1)
+                })
+                .map(|(name, _, mesh)| (name, mesh))
                 .collect();
         }
         Instances { candidates, meshes: Vec::new(), kept, lods: app.viewport.mesh_lods.clone() }
@@ -5773,6 +5776,51 @@ mod tests {
                 times[times.len() - 1],
                 prepared[prepared.len() / 2]
             );
+        }
+    }
+
+    #[test]
+    fn small_reference_meshes_reuse_display_triangles_when_their_occurrence_moves() {
+        use solidcraft_engine::doc::{Document, FeatureKind, MeshData};
+        let mut doc = Document::default();
+        let component = doc.add_component(Some("Part"), 0).unwrap();
+        let occurrence = doc.occurrences.iter_mut().find(|o| o.component == component).unwrap();
+        occurrence.grounded = false;
+        let occurrence = occurrence.id;
+        let meshes = vec![MeshData {
+            name: "Small mesh".into(),
+            positions: [0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 4.0].into(),
+            triangles: [0, 2, 1, 0, 1, 3, 0, 3, 2, 1, 2, 3].into(),
+            color: Some([0.8, 0.3, 0.1]),
+        }];
+        let id = doc.add_feature(FeatureKind::MeshImport { file: "small.stl".into(), meshes }, Some("Mesh")).unwrap();
+        doc.feature_mut(id).unwrap().component = component;
+        let mut app = SolveApp::new(solidcraft_engine::Session::new(doc), crate::Services::default());
+        app.ui.ground_shadow = false;
+        app.ui.visual_style = 1;
+        app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false });
+        let first = build_scene(&app);
+        assert_eq!(first.instanced.len(), 1, "a single reference mesh below the large-mesh threshold shares its triangles");
+        assert!(first.blocks.iter().all(|b| b.bytes.tris.is_empty()));
+        app.run("occurrence.move", json!({"occurrence":occurrence, "translate":[7,11,13], "axis":[1,1,0], "angle":"30 deg"})).unwrap();
+        let moved = build_scene(&app);
+        assert_eq!(moved.instanced.len(), 1);
+        assert!(std::sync::Arc::ptr_eq(&first.instanced[0].tris, &moved.instanced[0].tris));
+        assert!(moved.blocks.iter().all(|b| b.bytes.tris.is_empty()));
+        let expected = app.session.world_state().bodies[0].mesh();
+        let merged = moved.merged();
+        assert_ne!(first.merged().tris, merged.tris, "the placement changed");
+        let actual: Vec<[f32; 3]> = merged
+            .tris
+            .as_chunks::<{ crate::gpu::TRI_SIZE }>()
+            .0
+            .iter()
+            .map(|v| std::array::from_fn(|i| f32::from_le_bytes(v[4 * i..4 * i + 4].try_into().unwrap())))
+            .collect();
+        let expected: Vec<[f32; 3]> = expected.triangles.iter().flatten().map(|i| expected.positions[*i as usize].to_f32()).collect();
+        assert_eq!(actual.len(), expected.len());
+        for (a, b) in actual.iter().zip(expected) {
+            assert!(a.iter().zip(b).all(|(a, b)| (*a - b).abs() < 1e-4));
         }
     }
 
