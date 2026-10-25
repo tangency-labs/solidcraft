@@ -7,7 +7,7 @@
 //! | `solve_mutable_ray` | `SmShell::RayFire`'s `ShapePointSolve` |
 //! | `solve_mutable_brep_point` | `SmBrep::RayFire`'s `BrepPointSolve` |
 //! | [`LiveBrepObjects`] | Geometry pointers and live topology reads during the solve |
-//! | [`BrepFaceServices`], [`SidedFaceServices`], [`SideObject`] | `smsurf_GetSurfaceCache` / `SmFace::PointClassify` of face surfaces on mutable B-reps |
+//! | [`BrepFaceServices`], [`FaceCaches`], [`SidedFaceServices`], [`SideObject`] | `smsurf_GetSurfaceCache` / `SmFace::PointClassify` of face surfaces on mutable B-reps |
 //!
 //! Deviations: exact evaluation copies satisfy the solver's borrowed-geometry API.
 //! A checked, operation-local `RefCell` lends the original B-rep to lazy face queries;
@@ -356,8 +356,14 @@ impl FaceQueries<CacheObject> for LiveSurfaceContext<'_, '_, '_> {
 /// [`CacheObject::Surface`] of a face; a surface without handle gets its own cache.
 pub struct BrepFaceServices<'a> {
     brep: RefCell<&'a mut Brep>,
-    caches: RefCell<BTreeMap<FaceId, SurfaceCache<CacheObject>>>,
+    caches: RefCell<FaceCaches>,
 }
+
+/// The trimmed surface caches a [`BrepFaceServices`] made, by face. A caller that
+/// gives several services the same unchanged B-rep keeps them from one to the next
+/// ([`BrepFaceServices::with_caches`], [`BrepFaceServices::into_caches`]), as
+/// upstream keeps each cache on its surface until the face changes.
+pub type FaceCaches = BTreeMap<FaceId, SurfaceCache<CacheObject>>;
 
 impl core::fmt::Debug for BrepFaceServices<'_> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -369,10 +375,23 @@ impl<'a> BrepFaceServices<'a> {
     /// The services of `brep` (no cache is made yet).
     #[must_use]
     pub fn new(brep: &'a mut Brep) -> Self {
+        Self::with_caches(brep, FaceCaches::new())
+    }
+
+    /// The services of `brep` with the face caches an earlier service of the same
+    /// B-rep made (see [`FaceCaches`]); the B-rep must not have changed since.
+    #[must_use]
+    pub fn with_caches(brep: &'a mut Brep, caches: FaceCaches) -> Self {
         Self {
             brep: RefCell::new(brep),
-            caches: RefCell::new(BTreeMap::new()),
+            caches: RefCell::new(caches),
         }
+    }
+
+    /// The face caches made so far, for [`BrepFaceServices::with_caches`].
+    #[must_use]
+    pub fn into_caches(self) -> FaceCaches {
+        self.caches.into_inner()
     }
 
     /// Runs `f` on the B-rep between solves.

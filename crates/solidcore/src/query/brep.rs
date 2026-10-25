@@ -85,7 +85,7 @@ pub(crate) use ray::solve_mutable_brep_point;
 pub(crate) use ray::PreparationRequest;
 pub use ray::RayPreparation;
 pub(crate) use ray::RaySurfaceContext;
-pub use ray::{BrepFaceServices, LiveBrepObjects, SideObject, SidedFaceServices};
+pub use ray::{BrepFaceServices, FaceCaches, LiveBrepObjects, SideObject, SidedFaceServices};
 
 use core::cell::OnceCell;
 

@@ -2157,7 +2157,9 @@ impl<O: ClassObject, G: ClassGeometryMut<O>> SurfaceDrop<O> for MutableDrop<'_, 
                     .and_then(|(b, f)| geometry.topology_handle_in(b, EntityRef::Face(f)))
             }
         };
-        if let Some((b, EntityRef::Face(f))) = face.and_then(|o| self.0.topology_entity_mut(o)) {
+        if let Some((b, EntityRef::Face(f))) =
+            face.and_then(|o| self.0.topology_entity_for_query(o))
+        {
             return live_surface_global_point_solve(k, b, f, uv_domain, point, zone_tol_3d);
         }
         ReadOnlyDrop(&*self.0).global_point_solve(k, target, uv_domain, point, zone_tol_3d)

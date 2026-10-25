@@ -91,6 +91,13 @@ pub trait ClassGeometryMut<O>: ClassGeometry<O> {
     /// [`ClassGeometry::topology_entity`]); `None` for a handle the adapter cannot
     /// resolve (an invalid-input error for the caller).
     fn topology_entity_mut(&mut self, o: O) -> Option<(&mut Brep, EntityRef)>;
+    /// [`ClassGeometryMut::topology_entity_mut`] for a query (a classification or a
+    /// point solve on a face) that only makes caches and UV trim curves on the B-rep,
+    /// as upstream's queries of a face make them without editing it. An adapter that
+    /// keeps caches of the B-rep's faces keeps them over such a lend.
+    fn topology_entity_for_query(&mut self, o: O) -> Option<(&mut Brep, EntityRef)> {
+        self.topology_entity_mut(o)
+    }
 }
 
 /// The edits of part 5 over either kind of adapter.

@@ -8,6 +8,10 @@
 //!
 //! Deviations: borrowed arenas replace pointers; generated curves have local handles.
 //! This adapts the ported operations without copying their geometry algorithms.
+//! The faces' trimmed surface caches that face intersections make are kept for later
+//! face intersections, as upstream keeps them on the surfaces; upstream drops one when
+//! its face is edited, the pair drops a B-rep's caches at any mutable lend of it but
+//! a face intersection or a classification query.
 //! No input-dependent recursion is introduced.
 
 use super::notification_keys::NotificationKeys;
@@ -36,7 +40,7 @@ use crate::kernel::Kernel;
 use crate::math::{Point2, Point3};
 use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
-use crate::query::brep::BrepQuery;
+use crate::query::brep::{BrepQuery, FaceCaches};
 use crate::query::face::p2::{
     curve_on_classify, point_classify, CurveOnClassifyObjects, PointClassifyOptions,
 };
@@ -190,6 +194,11 @@ pub(super) struct ArenaPair<'a> {
     identities: Identities<'a>,
     cache_kernels: [Kernel; 2],
     caches: [std::cell::OnceCell<BrepCache<H>>; 2],
+    /// The trimmed surface caches of each B-rep's faces that face intersections made
+    /// (upstream keeps them on the surfaces). Any mutable use of a B-rep other than
+    /// a face intersection or a classification query
+    /// ([`ClassGeometryMut::topology_entity_for_query`]) empties them.
+    face_caches: [FaceCaches; 2],
 }
 
 /// The identity callbacks of each operand's edits that a [`MergeContext`] borrows for as
@@ -273,6 +282,7 @@ impl ArenaPair<'_> {
             identities: Identities::new(keys),
             cache_kernels,
             caches: [std::cell::OnceCell::new(), std::cell::OnceCell::new()],
+            face_caches: [FaceCaches::new(), FaceCaches::new()],
         }
     }
 
@@ -286,9 +296,17 @@ impl ArenaPair<'_> {
     }
 
     fn brep_mut(&mut self, h: H) -> Option<&mut Brep> {
-        self.breps
-            .get_mut(usize::try_from(h.b).ok()?)?
-            .as_deref_mut()
+        let slot = usize::try_from(h.b).ok()?;
+        self.clear_face_caches(slot);
+        self.breps.get_mut(slot)?.as_deref_mut()
+    }
+
+    /// Empties the face caches of the B-rep in `slot`: a caller about to lend the
+    /// B-rep mutably may change it, so they may no longer match.
+    fn clear_face_caches(&mut self, slot: usize) {
+        if let Some(caches) = self.face_caches.get_mut(slot) {
+            caches.clear();
+        }
     }
 
     fn brep_r(&self, h: H) -> crate::Result<&Brep> {
@@ -866,6 +884,7 @@ impl IntersectorBrep<H> for ArenaPair<'_> {
             return Err(invalid("vertex loop owner mismatch"));
         }
         let slot = usize::try_from(brep.b).map_err(|_| invalid("bad B-rep"))?;
+        self.clear_face_caches(slot);
         let b = self
             .breps
             .get_mut(slot)
@@ -907,6 +926,7 @@ impl IntersectorBrep<H> for ArenaPair<'_> {
             return Err(invalid("split edge owner mismatch"));
         }
         let slot = usize::try_from(brep.b).map_err(|_| invalid("bad B-rep"))?;
+        self.clear_face_caches(slot);
         let b = self
             .breps
             .get_mut(slot)
@@ -982,6 +1002,7 @@ impl IntersectorBrep<H> for ArenaPair<'_> {
     }
     fn set_vertex_point(&mut self, _k: &Kernel, vertex: H, point: Point3) -> crate::Result<()> {
         let slot = usize::try_from(vertex.b).map_err(|_| invalid("bad B-rep"))?;
+        self.clear_face_caches(slot);
         let b = self
             .breps
             .get_mut(slot)
@@ -1191,25 +1212,41 @@ impl IntersectorBrep<H> for ArenaPair<'_> {
         };
         // the faces may be of the two operands (`face_intersect_breps`)
         // the faces' caches are made on their B-rep(s) (smsurf_GetSurfaceCache)
-        let breps = if face1.b == face2.b {
-            fp3::FaceBreps::One(self.brep_m(face1)?)
-        } else {
-            let (i, j) = (
-                usize::try_from(face1.b).map_err(|_| invalid("handle names an absent B-rep"))?,
-                usize::try_from(face2.b).map_err(|_| invalid("handle names an absent B-rep"))?,
-            );
-            let [first, second] = &mut self.breps;
-            let (this, other) = match (i, j) {
-                (0, 1) => (first.as_deref_mut(), second.as_deref_mut()),
-                (1, 0) => (second.as_deref_mut(), first.as_deref_mut()),
-                _ => (None, None),
-            };
-            match (this, other) {
-                (Some(this), Some(other)) => fp3::FaceBreps::Two(this, other),
-                _ => return Err(invalid("handle names an absent B-rep")),
-            }
+        // (the faces' caches are kept for the next face intersection on the same
+        // B-reps: the intersection only adds the faces' UV trim curves)
+        let (i, j) = (
+            usize::try_from(face1.b).map_err(|_| invalid("handle names an absent B-rep"))?,
+            usize::try_from(face2.b).map_err(|_| invalid("handle names an absent B-rep"))?,
+        );
+        let [first, second] = &mut self.breps;
+        let [first_caches, second_caches] = &mut self.face_caches;
+        let (breps, face_caches) = match (i, j) {
+            (0, 0) => (
+                first.as_deref_mut().map(fp3::FaceBreps::One),
+                [Some(first_caches), None],
+            ),
+            (1, 1) => (
+                second.as_deref_mut().map(fp3::FaceBreps::One),
+                [Some(second_caches), None],
+            ),
+            (0, 1) => (
+                first
+                    .as_deref_mut()
+                    .zip(second.as_deref_mut())
+                    .map(|(t, o)| fp3::FaceBreps::Two(t, o)),
+                [Some(first_caches), Some(second_caches)],
+            ),
+            (1, 0) => (
+                second
+                    .as_deref_mut()
+                    .zip(first.as_deref_mut())
+                    .map(|(t, o)| fp3::FaceBreps::Two(t, o)),
+                [Some(second_caches), Some(first_caches)],
+            ),
+            _ => (None, [None, None]),
         };
-        let out = fp3::face_intersect_breps(
+        let breps = breps.ok_or_else(|| invalid("handle names an absent B-rep"))?;
+        let out = fp3::face_intersect_breps_cached(
             k,
             breps,
             fid(face1),
@@ -1217,6 +1254,7 @@ impl IntersectorBrep<H> for ArenaPair<'_> {
             approx_tol_3d,
             ang_tol_deg,
             &options,
+            face_caches,
         )?;
         // the B-rep of a classification object of `side` (see `IntersectObject`)
         let brep_of = |side: bool| if side { face2.b } else { face1.b };
@@ -1298,6 +1336,7 @@ impl IntersectorBrep<H> for ArenaPair<'_> {
         if brep.kind != K_BREP {
             return Err(invalid("not a B-rep handle"));
         }
+        self.clear_face_caches(slot);
         let b = self
             .breps
             .get_mut(slot)
@@ -1369,6 +1408,7 @@ impl IntersectorBrep<H> for ArenaPair<'_> {
             Some([]) => Some(&[]),
             Some(_) => return Err(invalid("face-use handles are not modelled")),
         };
+        self.clear_face_caches(slot);
         let breps = &mut self.breps;
         let b = breps
             .get_mut(slot)
@@ -1455,6 +1495,7 @@ impl ArenaPair<'_> {
         f: impl FnOnce(&mut Brep, &mut ed::NotifyEnv<'_>) -> crate::Result<R>,
     ) -> crate::Result<R> {
         let slot = usize::try_from(brep.b).map_err(|_| invalid("bad B-rep"))?;
+        self.clear_face_caches(slot);
         let b = self
             .breps
             .get_mut(slot)
@@ -1637,6 +1678,7 @@ impl IntersectorBrepP2<H> for ArenaPair<'_> {
         };
         let (surviving, to_delete) = (vertex(surviving)?, vertex(to_delete)?);
         let slot = usize::try_from(brep.b).map_err(|_| invalid("bad B-rep"))?;
+        self.clear_face_caches(slot);
         let breps = &mut self.breps;
         let b = breps
             .get_mut(slot)
@@ -1702,6 +1744,12 @@ impl ClassGeometryMut<H> for ArenaPair<'_> {
         let (_, entity) = ClassGeometry::topology_entity(self, o)?;
         Some((self.brep_mut(o)?, entity))
     }
+    fn topology_entity_for_query(&mut self, o: H) -> Option<(&mut Brep, EntityRef)> {
+        // a query keeps the faces' caches (see `face_caches`)
+        let (_, entity) = ClassGeometry::topology_entity(self, o)?;
+        let slot = usize::try_from(o.b).ok()?;
+        Some((self.breps.get_mut(slot)?.as_deref_mut()?, entity))
+    }
 }
 
 /// The mutable context of a topology handle's B-rep: its arena, the entity, the handles
@@ -1719,6 +1767,7 @@ impl MergeIntervalBrep<H> for ArenaPair<'_> {
         };
         let slot = usize::try_from(o.b).ok()?;
         self.caches.get_mut(slot)?.take();
+        self.clear_face_caches(slot);
         let brep = self.breps.get_mut(slot)?.as_deref_mut()?;
         let key_of: &dyn Fn(EntityRef) -> ObjectRef = self.identities.objects.get(slot)?.as_ref();
         let curve_ref: &dyn Fn(EdgeId, i64) -> ObjectRef =
@@ -1835,6 +1884,8 @@ impl IntersectorBrepP3<H> for ArenaPair<'_> {
             )?
         } else {
             // the edge and the classified edge use are in the two different B-reps
+            self.clear_face_caches(0);
+            self.clear_face_caches(1);
             let [first, second] = &mut self.breps;
             let (b, other) = match (edge.b, classify_edgeuse.b) {
                 (0, 1) => (first, second),
@@ -1923,6 +1974,7 @@ impl crate::topology::proto_topology::p3::BrepGlue<H> for ArenaPair<'_> {
             })
             .transpose()?;
         let slot = usize::try_from(brep.b).map_err(|_| invalid("bad B-rep"))?;
+        self.clear_face_caches(slot);
         let b = self
             .breps
             .get_mut(slot)

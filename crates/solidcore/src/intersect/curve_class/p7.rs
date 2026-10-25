@@ -2379,12 +2379,13 @@ fn resolve_face<O: ClassObject>(
     }
 }
 
-/// [`resolve_face`], mutably ([`ClassGeometryMut::topology_entity_mut`]).
+/// [`resolve_face`], mutably for the classification queries
+/// ([`ClassGeometryMut::topology_entity_for_query`]).
 fn resolve_face_mut<O: ClassObject>(
     geometry: &mut impl ClassGeometryMut<O>,
     face: O,
 ) -> Option<(&mut Brep, FaceId)> {
-    match geometry.topology_entity_mut(face)? {
+    match geometry.topology_entity_for_query(face)? {
         (b, EntityRef::Face(f)) => Some((b, f)),
         _ => None,
     }

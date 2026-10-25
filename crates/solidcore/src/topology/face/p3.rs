@@ -100,7 +100,7 @@ use crate::math::{Point3, Vec3, EFF_ZERO, PI};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
-use crate::query::brep::{BrepFaceServices, SideObject, SidedFaceServices};
+use crate::query::brep::{BrepFaceServices, FaceCaches, SideObject, SidedFaceServices};
 use crate::query::face::p2 as qf2;
 use crate::surface::surface::p2::{smos_max, TsectCurveType};
 use crate::surface::surface::p4::NoObject;
@@ -1606,6 +1606,8 @@ struct IntersectObjectsMut<'a> {
     curves_3d: &'a [Curve],
     uv1: &'a [Option<Curve>],
     uv2: &'a [Option<Curve>],
+    /// Set when an edit lent a B-rep ([`ClassGeometryMut::topology_entity_mut`]).
+    edited: bool,
 }
 
 impl IntersectObjectsMut<'_> {
@@ -1659,6 +1661,10 @@ impl ClassGeometryMut<IntersectObject> for IntersectObjectsMut<'_> {
         None
     }
     fn topology_entity_mut(&mut self, o: IntersectObject) -> Option<(&mut Brep, EntityRef)> {
+        self.edited = true;
+        self.topology_entity_for_query(o)
+    }
+    fn topology_entity_for_query(&mut self, o: IntersectObject) -> Option<(&mut Brep, EntityRef)> {
         let IntersectObject::Topology(e, side) = o else {
             return None;
         };
@@ -1742,7 +1748,6 @@ pub enum FaceBreps<'a> {
 /// # Errors
 ///
 /// Those of [`face_intersect`].
-#[allow(clippy::too_many_lines)] // one upstream routine
 pub fn face_intersect_breps(
     k: &Kernel,
     breps: FaceBreps<'_>,
@@ -1751,6 +1756,40 @@ pub fn face_intersect_breps(
     approx_tol_3d: f64,
     crv_ang_tol_deg: f64,
     options: &FaceIntersectOptions,
+) -> Result<FaceIntersection> {
+    face_intersect_breps_cached(
+        k,
+        breps,
+        f,
+        other,
+        approx_tol_3d,
+        crv_ang_tol_deg,
+        options,
+        [None, None],
+    )
+}
+
+/// [`face_intersect_breps`] keeping the trimmed surface caches the surface
+/// intersection makes on the lent B-reps in `face_caches` (this face's B-rep's, then
+/// the other face's; the second is unused with [`FaceBreps::One`]) for the next call
+/// on the same unchanged B-reps, as upstream keeps each face's cache on its surface.
+/// The caches must have been made on the B-rep they are given with, and the B-rep
+/// must not have changed since.
+///
+/// # Errors
+///
+/// Those of [`face_intersect`].
+#[allow(clippy::too_many_lines)] // one upstream routine
+#[allow(clippy::too_many_arguments)]
+pub fn face_intersect_breps_cached(
+    k: &Kernel,
+    breps: FaceBreps<'_>,
+    f: FaceId,
+    other: FaceId,
+    approx_tol_3d: f64,
+    crv_ang_tol_deg: f64,
+    options: &FaceIntersectOptions,
+    mut face_caches: [Option<&mut FaceCaches>; 2],
 ) -> Result<FaceIntersection> {
     let (mut this_brep, mut other_brep, shared) = match breps {
         FaceBreps::One(b) => (Some(b), None, None),
@@ -1833,25 +1872,37 @@ pub fn face_intersect_breps(
         };
         let (domain, other_domain) = (face2::uv_domain(b, f)?, face2::uv_domain(ob, other)?);
         let r = if let Some(this_brep) = this_brep.as_deref_mut() {
-            let mut services = vec![BrepFaceServices::new(this_brep)];
+            let [this_caches, other_caches] = &mut face_caches;
+            let taken = |slot: &mut Option<&mut FaceCaches>| {
+                slot.as_deref_mut().map(core::mem::take).unwrap_or_default()
+            };
+            let mut services = vec![BrepFaceServices::with_caches(this_brep, taken(this_caches))];
             if let Some(ob) = other_brep.as_deref_mut() {
-                services.push(BrepFaceServices::new(ob));
+                services.push(BrepFaceServices::with_caches(ob, taken(other_caches)));
             }
             let other_index = usize::from(other_side);
-            surface.global_surface_intersect_with_context(
+            let mut sided = SidedFaceServices(services);
+            let r = surface.global_surface_intersect_with_context(
                 k,
                 [
                     Some(SideObject(0, CacheObject::Surface(f))),
                     Some(SideObject(other_index, CacheObject::Surface(other))),
                 ],
-                &mut SidedFaceServices(services),
+                &mut sided,
                 &domain,
                 other_surface,
                 &other_domain,
                 use_surface_edges,
                 Some(approx_tol_3d),
                 Some(ang_tol_rad),
-            )?
+            );
+            // hand the caches back for the next call
+            for (service, slot) in sided.0.into_iter().zip(face_caches.iter_mut()) {
+                if let Some(slot) = slot.as_deref_mut() {
+                    *slot = service.into_caches();
+                }
+            }
+            r?
         } else {
             surface.global_surface_intersect(
                 k,
@@ -1971,8 +2022,17 @@ pub fn face_intersect_breps(
                 curves_3d: &curves_3d,
                 uv1: &uv_curves1,
                 uv2: &uv_curves2,
+                edited: false,
             };
-            cc1.extract_geometry_mut(k, &mut objects, &mut cc2, extract)?
+            let ex = cc1.extract_geometry_mut(k, &mut objects, &mut cc2, extract);
+            // an edit of the B-reps (not a query) may change what the kept face
+            // caches were made from
+            if objects.edited {
+                for slot in face_caches.iter_mut().flatten() {
+                    slot.clear();
+                }
+            }
+            ex?
         } else {
             cc1.extract_geometry(k, &objects, &mut cc2, extract)?
         };
