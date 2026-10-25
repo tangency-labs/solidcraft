@@ -409,9 +409,24 @@ impl Pool {
             let mut tagged = vec![0.0];
             tagged.extend(&exported);
             let (mut brep, _) = super::topology_vertexuse::import(&tagged)?;
-            // The vertexuse importer predates canonical arena owner keys. Preserve
-            // its native owned/unowned flag, but translate existing owners so
-            // canonical GetSurfaces sees the same standalone surfaces as C++.
+            // The vertexuse importer predates canonical arena owner keys. Each
+            // edge's curve is owned by its edge, as natively (the export carries
+            // no owner for edge curves); without this the B-rep cache leaves every
+            // curve out of its curve tree and point solves never reach an edge.
+            let edges: Vec<_> = brep.edges().ids().collect();
+            for edge in edges {
+                if let Some(curve) = brep
+                    .edge_mut(edge)
+                    .map_err(|error| harness(&error))?
+                    .curve
+                    .as_mut()
+                {
+                    curve.set_owner(Some(arena_identity(CacheObject::Edge(edge))), None);
+                }
+            }
+            // Preserve the importer's native owned/unowned flag for surfaces, but
+            // translate existing owners so canonical GetSurfaces sees the same
+            // standalone surfaces as C++.
             let faces: Vec<_> = brep.faces().ids().collect();
             for face in faces {
                 if let Some(surface) = brep
