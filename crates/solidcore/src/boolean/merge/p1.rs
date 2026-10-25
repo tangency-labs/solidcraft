@@ -52,7 +52,7 @@ use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3};
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
-use crate::query::brep::{self as qbrep, BoundingBoxOptions, BrepIdentity, BrepQuery};
+use crate::query::brep::{self as qbrep, BoundingBoxOptions, BrepQuery};
 use crate::topology::brep::p4;
 use crate::topology::edgeuse::p1 as eu;
 use crate::topology::shell;
@@ -295,7 +295,7 @@ pub fn find_brep_region_of_other_face(
         // (the classification's construction tolerance, the edge's, is not read)
         let Some(pc) = ignore_failure(classify_point_editing_disabled(
             k,
-            &BrepQuery::new(BrepIdentity::of_brep(brep)),
+            &BrepQuery::of_brep(brep),
             brep,
             point,
             0.0,
@@ -570,6 +570,7 @@ pub fn boolean_post_process(
                         .curve
                         .as_ref()
                         .and_then(crate::curve::curve::p2::Curve::owner),
+                    brep.geometry_owner_key(EntityRef::Edge(e)),
                 ));
             }
             ignore_failure(crate::topology::brep::p5::delete_topological_vertex(
@@ -579,14 +580,19 @@ pub fn boolean_post_process(
                 Some(v),
                 None,
             ))?;
-            for (e, owner) in owners {
+            for (e, owner, proven) in owners {
                 if !brep.edge_list().contains(&e) {
                     continue;
                 }
-                if let Some(curve) = brep.edge_mut(e)?.curve.as_mut() {
-                    if curve.owner() != owner {
+                let restored = brep.edge_mut(e)?.curve.as_mut().is_some_and(|curve| {
+                    let changed = curve.owner() != owner;
+                    if changed {
                         curve.set_owner(owner, None);
                     }
+                    changed
+                });
+                if restored {
+                    brep.set_geometry_owner_key(EntityRef::Edge(e), proven);
                 }
             }
         }

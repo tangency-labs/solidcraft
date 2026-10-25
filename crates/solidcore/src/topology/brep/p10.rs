@@ -739,6 +739,7 @@ fn build_faces(
 
         // Connect up face and faceuses and set FU fields
         rec.faceuse = Some(fu1); // FU1 is primary faceuse
+        b.set_geometry_owner_key(EntityRef::Face(f), Some(face_ref));
 
         // the surface reads the face's tolerance through GetFace()
         b.sync_face_surface_tolerance(f)?;
@@ -982,6 +983,7 @@ fn build_edges(
         rec.curve = Some(curve);
         rec.interval = re.interval;
         rec.tolerance = max2(re.zone_tol_3d, tol);
+        b.set_geometry_owner_key(EntityRef::Edge(e), Some(edge_ref));
         built.edge.push(Some(e));
     }
     Ok(())

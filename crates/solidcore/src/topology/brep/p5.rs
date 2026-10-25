@@ -983,6 +983,7 @@ fn set_edge_curve_owner(
             .as_mut()
             .ok_or_else(|| SolidError::null_pointer(OP))?;
         let _ = curve.set_owner(Some(owner), Some(brep));
+        b.set_geometry_owner_key(crate::error::EntityRef::Edge(edge), Some(owner));
         Ok(())
     })
 }
@@ -2413,11 +2414,10 @@ pub fn transform_with_notifications(
     notifications: Option<&mut EditNotifyEnv<'_>>,
 ) -> Result<()> {
     if let Some(env) = notifications {
-        transform_in(k, b, placement, scale, scale_tolerances, env, None)
+        transform_in(k, b, placement, scale, scale_tolerances, env)
     } else {
-        let owners = b.geometry_owner_keys.clone();
         plain_edit(k, b, |k, b, env| {
-            transform_in(k, b, placement, scale, scale_tolerances, env, Some(&owners))
+            transform_in(k, b, placement, scale, scale_tolerances, env)
         })
     }
 }
@@ -2429,7 +2429,6 @@ fn transform_in(
     scale: Option<Vec3>,
     scale_tolerances: bool,
     env: &mut EditNotifyEnv<'_>,
-    owners: Option<&std::collections::BTreeMap<crate::EntityRef, ObjectRef>>,
 ) -> Result<()> {
     let owner_keys = env.key_of;
     let mut notifications = Some(env);
@@ -2468,7 +2467,6 @@ fn transform_in(
     for edge in crate::topology::brep::p1::curve_owners(b, None, &|e| {
         transform_owner_key(
             b,
-            owners,
             crate::EntityRef::Edge(e),
             owner_keys(crate::EntityRef::Edge(e)),
         )
@@ -2497,7 +2495,6 @@ fn transform_in(
     for face in crate::topology::brep::p1::surface_owners(b, None, &|f| {
         transform_owner_key(
             b,
-            owners,
             crate::EntityRef::Face(f),
             owner_keys(crate::EntityRef::Face(f)),
         )
@@ -2613,15 +2610,11 @@ fn notify_edge_pre_edit(
     )
 }
 
-// Geometry may retain a constructor's caller keys while plain-edit notifications
-// use unique kernel identities. Match only a proven producer key or the actual
-// issued kernel identity; foreign and unowned geometry keep the native filter.
-fn transform_owner_key(
-    b: &Brep,
-    owners: Option<&std::collections::BTreeMap<crate::EntityRef, ObjectRef>>,
-    entity: crate::EntityRef,
-    kernel_key: ObjectRef,
-) -> ObjectRef {
+// Geometry may retain a constructor's caller keys while plain-edit or temporary
+// transform notifications use distinct identities. Match only a proven producer
+// key or the issued notification identity; foreign and unowned geometry keep the
+// native filter.
+fn transform_owner_key(b: &Brep, entity: crate::EntityRef, kernel_key: ObjectRef) -> ObjectRef {
     let owner = match entity {
         crate::EntityRef::Edge(edge) => b
             .edges()
@@ -2638,10 +2631,7 @@ fn transform_owner_key(
     if owner == Some(kernel_key) {
         kernel_key
     } else {
-        owners
-            .and_then(|keys| keys.get(&entity))
-            .copied()
-            .unwrap_or(kernel_key)
+        b.geometry_owner_key(entity).unwrap_or(kernel_key)
     }
 }
 

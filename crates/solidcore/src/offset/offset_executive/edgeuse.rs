@@ -632,6 +632,7 @@ impl OffsetBrep<Handle> for EdgeBrep<'_> {
             if let Some(c) = b.edge_mut(e)?.curve.as_mut() {
                 c.set_owner(Some(owner), None);
             }
+            b.set_geometry_owner_key(EntityRef::Edge(e), Some(owner));
             Ok(())
         })
     }

@@ -129,22 +129,30 @@ pub(crate) fn adopt_namespace_owners(b: &mut Brep, namespace: u32, other: bool) 
         .collect();
     for (f, own) in faces {
         let merged = notification_key(namespace, other, EntityRef::Face(f));
-        let face = b.face_mut(f)?;
-        if let Some(surface) = face.surface.as_mut() {
-            if surface.owner() == Some(merged) {
+        let adopted = b.face_mut(f)?.surface.as_mut().is_some_and(|surface| {
+            let matched = surface.owner() == Some(merged);
+            if matched {
                 surface.set_owner(Some(own));
-                b.sync_face_surface_tolerance(f)?;
             }
+            matched
+        });
+        if adopted {
+            b.set_geometry_owner_key(EntityRef::Face(f), Some(own));
+            b.sync_face_surface_tolerance(f)?;
         }
     }
     for (e, own) in edges {
         let merged = notification_key(namespace, other, EntityRef::Edge(e));
-        if let Some(curve) = b.edge_mut(e)?.curve.as_mut() {
-            if curve.owner().map(|o| o.key) == Some(merged.key)
-                && curve.owner().map(|o| o.type_code) == Some(merged.type_code)
-            {
+        let adopted = b.edge_mut(e)?.curve.as_mut().is_some_and(|curve| {
+            let matched = curve.owner().map(|o| o.key) == Some(merged.key)
+                && curve.owner().map(|o| o.type_code) == Some(merged.type_code);
+            if matched {
                 curve.set_owner(Some(own), None);
             }
+            matched
+        });
+        if adopted {
+            b.set_geometry_owner_key(EntityRef::Edge(e), Some(own));
         }
     }
     Ok(())
@@ -179,11 +187,22 @@ impl<'a, 'keys> GeometryOwnerScope<'a, 'keys> {
                 }
             }
             for face in crate::topology::brep::p1::faces(scope.body, None)? {
-                if let Some(surface) = scope.body.face_mut(face)?.surface.as_mut() {
-                    if surface.owner() == Some(arena_identity(CacheObject::Face(face))) {
-                        scope.faces.push(face);
-                        surface.set_owner(Some(keys.object(other, EntityRef::Face(face))));
-                    }
+                let rebound = scope
+                    .body
+                    .face_mut(face)?
+                    .surface
+                    .as_mut()
+                    .is_some_and(|surface| {
+                        let matched =
+                            surface.owner() == Some(arena_identity(CacheObject::Face(face)));
+                        if matched {
+                            surface.set_owner(Some(keys.object(other, EntityRef::Face(face))));
+                        }
+                        matched
+                    });
+                if rebound {
+                    scope.faces.push(face);
+                    scope.body.sync_face_surface_tolerance(face)?;
                 }
             }
         }
@@ -202,13 +221,18 @@ impl Drop for GeometryOwnerScope<'_, '_> {
             }
         }
         for &face in &self.faces {
-            if let Ok(record) = self.body.face_mut(face) {
-                if let Some(surface) = record.surface.as_mut() {
-                    if surface.owner() == Some(self.keys.object(self.other, EntityRef::Face(face)))
-                    {
+            let restored = self.body.face_mut(face).is_ok_and(|record| {
+                record.surface.as_mut().is_some_and(|surface| {
+                    let matched = surface.owner()
+                        == Some(self.keys.object(self.other, EntityRef::Face(face)));
+                    if matched {
                         surface.set_owner(Some(arena_identity(CacheObject::Face(face))));
                     }
-                }
+                    matched
+                })
+            });
+            if restored {
+                let _ = self.body.sync_face_surface_tolerance(face);
             }
         }
     }

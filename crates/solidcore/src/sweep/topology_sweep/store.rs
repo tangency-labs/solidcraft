@@ -484,23 +484,34 @@ impl<'a> SweepStore<'a> {
         b.set_key(bk.key);
         let edges: Vec<_> = b.edges().ids().collect();
         for e in edges {
-            if let Some(c) = &mut b.edge_mut(e)?.curve {
-                let _ = c.set_owner(
-                    Some(self.identities.object(namespace, EntityRef::Edge(e))),
-                    Some(bk),
-                );
+            let owner = self.identities.object(namespace, EntityRef::Edge(e));
+            let has_curve = if let Some(c) = &mut b.edge_mut(e)?.curve {
+                let _ = c.set_owner(Some(owner), Some(bk));
                 let kernel = &mut self
                     .kernels
                     .get_mut(context.0 as usize)
                     .ok_or_else(|| invalid("unknown context"))?
                     .kernel;
                 brep_p3::edge_curve_identity(&mut kernel.context, b, e)?;
+                true
+            } else {
+                false
+            };
+            if has_curve {
+                b.set_geometry_owner_key(EntityRef::Edge(e), Some(owner));
             }
         }
         let faces: Vec<_> = b.faces().ids().collect();
         for f in faces {
-            if let Some(s) = &mut b.face_mut(f)?.surface {
-                s.set_owner(Some(self.identities.object(namespace, EntityRef::Face(f))));
+            let owner = self.identities.object(namespace, EntityRef::Face(f));
+            let has_surface = if let Some(s) = &mut b.face_mut(f)?.surface {
+                s.set_owner(Some(owner));
+                true
+            } else {
+                false
+            };
+            if has_surface {
+                b.set_geometry_owner_key(EntityRef::Face(f), Some(owner));
             }
             // the owned surface carries its face's tolerance, as wherever a face gets its
             // surface (`SmFace::GetTolerance` through `SmSurface::GetFace`)

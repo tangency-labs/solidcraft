@@ -347,6 +347,7 @@ fn set_surface_owner(
     if let Some(surface) = brep.face_mut(face)?.surface.as_mut() {
         surface.set_owner(owner);
     }
+    brep.set_geometry_owner_key(EntityRef::Face(face), owner);
     // the surface reads the face's tolerance through GetFace() once it is owned again
     brep.sync_face_surface_tolerance(face)
 }

@@ -780,6 +780,39 @@ impl Brep {
         self.naming = naming;
     }
 
+    /// Producer-supplied owner identity recorded when geometry was bound to `entity`.
+    #[must_use]
+    pub(crate) fn geometry_owner_key(
+        &self,
+        entity: EntityRef,
+    ) -> Option<crate::geom::object::ObjectRef> {
+        self.geometry_owner_keys.get(&entity).copied()
+    }
+
+    /// All producer-supplied geometry owner identities recorded on this B-rep.
+    #[must_use]
+    pub(crate) const fn geometry_owner_keys(
+        &self,
+    ) -> &std::collections::BTreeMap<EntityRef, crate::geom::object::ObjectRef> {
+        &self.geometry_owner_keys
+    }
+
+    /// Updates or clears the producer-supplied geometry owner identity of `entity`.
+    pub(crate) fn set_geometry_owner_key(
+        &mut self,
+        entity: EntityRef,
+        owner: Option<crate::geom::object::ObjectRef>,
+    ) {
+        match owner {
+            Some(owner) => {
+                self.geometry_owner_keys.insert(entity, owner);
+            }
+            None => {
+                self.geometry_owner_keys.remove(&entity);
+            }
+        }
+    }
+
     /// `m_bEditingEnabled`.
     #[must_use]
     pub const fn editing_enabled(&self) -> bool {

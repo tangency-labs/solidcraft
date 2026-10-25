@@ -35,7 +35,7 @@ use crate::geom::context::{Context, MarkType};
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
 use crate::math::{Point3, EFF_ZERO};
-use crate::query::brep::{BrepIdentity, BrepQuery};
+use crate::query::brep::BrepQuery;
 use crate::topology::brep::p4::{self, DeleteEnv};
 use crate::topology::edgeuse::p1 as eu;
 use crate::topology::topology_traverser::{collect_wire_edges, Entity, Marks};
@@ -397,7 +397,7 @@ fn collect_wires_and_shell_vertices(
     // A pass keeps one query for the B-rep it classifies against, which it does not
     // edit; the other-wire pass makes a fresh one per classification (MergeEdge edits
     // `brep` in between).
-    let other_query = BrepQuery::new(BrepIdentity::of_brep(other));
+    let other_query = BrepQuery::of_brep(other);
     let mut done = !removes_primary(operation);
     while !done {
         done = true;
@@ -474,7 +474,7 @@ fn collect_wires_and_shell_vertices(
         let point = midpoint(kernels.other(), other, id)?;
         let region = classify_region(
             kernels.primary(),
-            &BrepQuery::new(BrepIdentity::of_brep(brep)),
+            &BrepQuery::of_brep(brep),
             brep,
             point,
             true,
@@ -500,7 +500,7 @@ fn collect_wires_and_shell_vertices(
     }
 
     if removes_primary(operation) {
-        let other_query = BrepQuery::new(BrepIdentity::of_brep(other));
+        let other_query = BrepQuery::of_brep(other);
         let vertices: Vec<_> = brep.vertices().ids().collect();
         for v in vertices {
             if brep_marks.is_marked(kernels.primary(), Entity::Vertex(v), brep_mark)
@@ -518,7 +518,7 @@ fn collect_wires_and_shell_vertices(
         }
     }
 
-    let brep_query = BrepQuery::new(BrepIdentity::of_brep(brep));
+    let brep_query = BrepQuery::of_brep(brep);
     let mut keep_vertices = Vec::new();
     for v in other.vertices().ids() {
         if other_marks.is_marked(kernels.other(), Entity::Vertex(v), other_mark)

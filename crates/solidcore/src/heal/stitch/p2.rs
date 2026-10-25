@@ -1505,10 +1505,14 @@ fn find_and_set_infinite_region_with_identity(
     void_setting: SetRegionVoidType,
     brep_bbox: Option<&Extent3d>,
 ) -> Result<()> {
+    let query = match identity {
+        Some(identity) => crate::query::brep::BrepQuery::new(identity),
+        None => crate::query::brep::BrepQuery::of_brep(b),
+    };
     crate::topology::brep::p5::find_and_set_infinite_region(
         k,
         b,
-        &crate::query::brep::BrepQuery::new(identity.unwrap_or_default()),
+        &query,
         shell_to_test,
         void_setting,
         brep_bbox,

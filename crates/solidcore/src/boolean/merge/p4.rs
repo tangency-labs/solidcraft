@@ -38,7 +38,7 @@ use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
 use crate::math::Vec3;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
-use crate::query::brep::{BrepIdentity, BrepQuery};
+use crate::query::brep::BrepQuery;
 use crate::topology::brep::p1 as bp;
 use crate::topology::edgeuse::p1 as eu;
 use crate::topology::face::p2 as face;
@@ -770,8 +770,8 @@ fn classify_remaining(
             )
         };
         // The pass only reads `opposite`, so one query (and its cache) serves every face;
-        // its geometry owners named by `opposite`'s naming scheme.
-        let query = BrepQuery::new(BrepIdentity::of_brep(opposite));
+        // its geometry owners named by `opposite`'s naming scheme and proven owners.
+        let query = BrepQuery::of_brep(opposite);
         for f in bp::faces(source, None)? {
             if source_marks.is_marked(source_k, Entity::Face(f), mark) {
                 continue;
@@ -1151,8 +1151,8 @@ fn find_and_set_infinite(
     void_setting: bp::SetRegionVoidType,
     bounding_box: Option<&crate::geom::extent3d::Extent3d>,
 ) -> Result<()> {
-    // (the query's geometry owners named by `primary`'s naming scheme)
-    let query = BrepQuery::new(BrepIdentity::of_brep(primary));
+    // (the query's geometry owners named by `primary`'s naming scheme and proven owners)
+    let query = BrepQuery::of_brep(primary);
     crate::topology::brep::p5::find_and_set_infinite_region(
         kernels.primary,
         primary,

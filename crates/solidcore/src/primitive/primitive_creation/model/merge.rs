@@ -155,25 +155,36 @@ fn rebind_owners(b: &mut Brep, to: impl Fn(EntityRef) -> ObjectRef) -> Result<()
     let edges: Vec<_> = b.edges().ids().collect();
     for edge in edges {
         let e = EntityRef::Edge(edge);
-        if let Some(curve) = b.edge_mut(edge)?.curve.as_mut() {
-            if curve
+        let new_owner = to(e);
+        let rebound = b.edge_mut(edge)?.curve.as_mut().is_some_and(|curve| {
+            let matched = curve
                 .owner()
-                .is_some_and(|o| own(e, CacheObject::Edge(edge)).contains(&o))
-            {
-                curve.set_owner(Some(to(e)), None);
+                .is_some_and(|o| own(e, CacheObject::Edge(edge)).contains(&o));
+            if matched {
+                curve.set_owner(Some(new_owner), None);
             }
+            matched
+        });
+        if rebound {
+            b.set_geometry_owner_key(e, Some(new_owner));
         }
     }
     let faces: Vec<_> = b.faces().ids().collect();
     for face in faces {
         let e = EntityRef::Face(face);
-        if let Some(surface) = b.face_mut(face)?.surface.as_mut() {
-            if surface
+        let new_owner = to(e);
+        let rebound = b.face_mut(face)?.surface.as_mut().is_some_and(|surface| {
+            let matched = surface
                 .owner()
-                .is_some_and(|o| own(e, CacheObject::Face(face)).contains(&o))
-            {
-                surface.set_owner(Some(to(e)));
+                .is_some_and(|o| own(e, CacheObject::Face(face)).contains(&o));
+            if matched {
+                surface.set_owner(Some(new_owner));
             }
+            matched
+        });
+        if rebound {
+            b.set_geometry_owner_key(e, Some(new_owner));
+            b.sync_face_surface_tolerance(face)?;
         }
     }
     Ok(())

@@ -36,7 +36,7 @@ use crate::kernel::Kernel;
 use crate::math::{Point2, Point3};
 use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
-use crate::query::brep::{BrepIdentity, BrepQuery};
+use crate::query::brep::BrepQuery;
 use crate::query::face::p2::{
     curve_on_classify, point_classify, CurveOnClassifyObjects, PointClassifyOptions,
 };
@@ -625,13 +625,9 @@ impl ProtoBrep<H> for ArenaPair<'_> {
     ) -> crate::Result<PointClassification<H>> {
         let operand = brep.b;
         let id = BrepId::from_index(u32::try_from(operand).map_err(|_| invalid("not an operand"))?);
-        let pc = BrepQuery::new(BrepIdentity::arena(id)).point_3d_classify(
-            k,
-            self.brep_m(brep)?,
-            point,
-            tolerance,
-            boundary_intersections,
-        )?;
+        let b = self.brep_m(brep)?;
+        let query = BrepQuery::of_brep_with_id(id, b);
+        let pc = query.point_3d_classify(k, b, point, tolerance, boundary_intersections)?;
         pc.map_objects(&mut |e| {
             Self::entity_h(operand, e)
                 .ok_or_else(|| invalid("classification object without a handle"))
@@ -1462,6 +1458,7 @@ impl TopologyObjects<H> for ArenaPair<'_> {
             &|owner| {
                 let candidate = match owner {
                     CacheObject::Edge(edge) => Some((
+                        EntityRef::Edge(edge),
                         self.keys.object(bi == 1, EntityRef::Edge(edge)),
                         b.edge(edge)
                             .ok()
@@ -1469,6 +1466,7 @@ impl TopologyObjects<H> for ArenaPair<'_> {
                             .and_then(SmCurve::owner),
                     )),
                     CacheObject::Face(face) => Some((
+                        EntityRef::Face(face),
                         self.keys.object(bi == 1, EntityRef::Face(face)),
                         b.face(face)
                             .ok()
@@ -1478,13 +1476,21 @@ impl TopologyObjects<H> for ArenaPair<'_> {
                     _ => None,
                 };
                 match candidate {
-                    Some((expected, actual))
-                        if matches!(self.keys, NotificationKeys::Caller(_))
-                            || actual == Some(expected) =>
-                    {
-                        expected
+                    Some((_, expected, actual)) if actual == Some(expected) => expected,
+                    Some((entity, expected, actual)) => {
+                        let proven = b.geometry_owner_key(entity);
+                        if let Some(proven) = proven {
+                            if actual == Some(proven) {
+                                return proven;
+                            }
+                        }
+                        if matches!(self.keys, NotificationKeys::Caller(_)) {
+                            proven.unwrap_or(expected)
+                        } else {
+                            arena_identity(owner)
+                        }
                     }
-                    _ => arena_identity(owner),
+                    None => arena_identity(owner),
                 }
             },
         )?;

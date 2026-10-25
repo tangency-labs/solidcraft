@@ -807,6 +807,7 @@ fn set_curve_owner(
     let owner = (env.key_of)(EntityRef::Edge(edge_id));
     let curve = required(b.edge_mut(edge_id)?.curve.as_mut(), "edge without curve")?;
     let (_, change) = curve.set_owner(Some(owner), None);
+    b.set_geometry_owner_key(EntityRef::Edge(edge_id), Some(owner));
     if let Some(change) = change {
         ignore_status(crate::geom::a_object::notify(
             env.attributes,
@@ -1539,8 +1540,10 @@ pub fn make_edge_in_face_with_vu(
         let new_face = b.add_face_record(crate::topology::Face::new(b.face(face)?.shell))?;
         let mut surface = required(b.face(face)?.surface.as_ref(), "split face without surface")?
             .copy_and_add_analytics(k)?;
-        surface.set_owner(Some((env.key_of)(EntityRef::Face(new_face))));
+        let new_face_owner = (env.key_of)(EntityRef::Face(new_face));
+        surface.set_owner(Some(new_face_owner));
         b.face_mut(new_face)?.surface = Some(surface);
+        b.set_geometry_owner_key(EntityRef::Face(new_face), Some(new_face_owner));
         set_face_tolerance(b, new_face, b.tolerance(), true, true)?;
         b.face_mut(new_face)?.uv_domain = b.face(face)?.uv_domain;
         let new_fu1 = b.add_faceuse_record(crate::topology::Faceuse::default())?;
