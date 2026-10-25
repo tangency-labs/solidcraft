@@ -3,6 +3,46 @@
 Status as of **2026-10-14**. SolidCraft supports parametric modelling (sketch →
 features → parametric timeline) as an open, pure-Rust, agent-drivable application.
 
+## Integration map
+
+Where pull requests are welcome right now. The CAD core comes first: sketching, solid
+modelling, assemblies and files have to be dependable before we build big new workspaces on
+top of them.
+
+- **Open**: send pull requests. Bigger changes still start from an issue (see
+  [CONTRIBUTING.md](CONTRIBUTING.md#before-you-start)).
+- **Talk first**: open an issue or comment on the RFC and agree the approach before writing
+  code. Pull requests without that agreement will usually be closed.
+- **Deferred**: not now. Ideas and requirements are welcome on the linked issues, but code
+  pull requests won't be reviewed until the area opens.
+
+| Area | Status | Why | Milestone |
+|---|---|---|---|
+| Solid modelling robustness (booleans, fillets, chamfers, shell, draft, patterns) | Open | Everything else is built on it. Each failing case is a clear, testable bug. | CAD core robustness |
+| Sketch and constraint solver | Open | Part of the CAD core. | CAD core robustness |
+| Parameters, configurations, timeline | Open | Part of the CAD core. | CAD core robustness |
+| Assemblies and joints | Open | In scope (M9) and in progress. | Assemblies |
+| Import, export and performance (STEP, IGES, 3MF, STL, OBJ, DXF; opening and rebuild speed) | Open | People need to get their work in and out. | Import, export & performance |
+| UI refresh (ribbon, toolbar, dialogs) | Open: coordinate on [#2016](https://github.com/tangency-labs/solidcraft/issues/2016) | The redesign is planned in one tracker so changes don't collide. | UI refresh |
+| Bug and crash fixes | Open | Always welcome, with a regression test. | Stability & bug fixes |
+| Translations | Open | See [docs/localization.md](docs/localization.md). | — |
+| Documentation | Open | | Contributor experience |
+| CI, tooling and contributor docs | Open | | Contributor experience |
+| Sheet metal and plastic | Open for fixes; talk first for new tools | The planned set (M10) is in; new tools need an agreed issue. | Stability & bug fixes |
+| Kernel internals | Talk first | The kernel is being replaced by [solidcore](https://github.com/bherbruck/solidcore). Don't rewrite the current kernel code for speed; report slow cases with the `kernel-perf` label. | solidcore kernel ([#1597](https://github.com/tangency-labs/solidcraft/issues/1597)) |
+| Surface modelling beyond what solids need | Talk first | Scope and order of work are in [#772](https://github.com/tangency-labs/solidcraft/issues/772). | — |
+| Render | Talk first | Work is planned in [#620](https://github.com/tangency-labs/solidcraft/issues/620); agree a piece there before starting. | — |
+| Drawings | Talk first | Needs a stable model underneath. Requirements and phases are in RFC [#860](https://github.com/tangency-labs/solidcraft/issues/860); foundations land in small packages ([docs/drawing-foundations.md](docs/drawing-foundations.md)). | — |
+| Manufacture / CAM | Deferred | The CAD core comes first: toolpaths are only as good as the model they are cut from, and CAM is a large area to review and maintain. Discussion: RFC [#1153](https://github.com/tangency-labs/solidcraft/issues/1153), plugin research [#1621](https://github.com/tangency-labs/solidcraft/issues/1621). | — |
+| Mesh workspace | Deferred | The CAD core comes first. Mesh import and Convert Mesh bug reports are still welcome. | — |
+| Form (T-splines) | Deferred | The CAD core comes first ([#446](https://github.com/tangency-labs/solidcraft/issues/446)). | — |
+| PCB / electronics | Deferred | The CAD core comes first. | — |
+| Simulation, animation | Deferred | The CAD core comes first. | — |
+
+Milestones are the current sprint goals:
+[milestones on GitHub](https://github.com/tangency-labs/solidcraft/milestones). Maintainers
+review pull requests linked to issues in these milestones first.
+
 ## At a glance
 
 | Question | Answer |
