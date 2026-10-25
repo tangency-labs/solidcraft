@@ -1197,23 +1197,16 @@ impl<'t, O: SolutionObject + 't> GlobalSolve<'t, O> for CsGlobalSolver<'t, '_, O
     ) -> Result<(SolutionPairType, Option<PreferredSolution>)> {
         // (surface::surface::p5)
         // the solutions name the solve's curve and surface (`&crCurve`, `this`)
-        match &self.operands {
-            Some(operands) => cs_identical_solutions_in(
-                self.kernel,
-                &self.base,
-                self.surface,
-                sol1,
-                sol2,
-                operands,
-            ),
-            None => cs_identical_solutions_in(
-                self.kernel,
-                &self.base,
-                self.surface,
-                sol1,
-                sol2,
-                &crate::geom::solution_array::OwnDomains,
-            ),
+        if let Some(operands) = &self.operands {
+            cs_identical_solutions_in(self.kernel, &self.base, self.surface, sol1, sol2, operands)
+        } else {
+            let domains = super::p1::SolveOperands {
+                operands: [
+                    super::p5::curve_operand(&self.base, 0, self.curve),
+                    super::p5::surface_operand(&self.base, 1, self.surface_cache, self.surface),
+                ],
+            };
+            cs_identical_solutions_in(self.kernel, &self.base, self.surface, sol1, sol2, &domains)
         }
     }
 }

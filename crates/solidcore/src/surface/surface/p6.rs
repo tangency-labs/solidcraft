@@ -1508,9 +1508,16 @@ impl<O: SolutionObject> SsGlobalSolver<'_, '_, O> {
     ) -> Result<(SolutionPairType, Option<PreferredSolution>)> {
         // If the parent thinks they're identical, then they are.
         // (the solutions name the two surfaces, `this` and `&crOtherSurface`)
-        let (sp_type, preferred) = match &self.operands {
-            Some(operands) => self.base.identical_solutions_in(sol1, sol2, operands)?,
-            None => self.base.identical_solutions(sol1, sol2)?,
+        let (sp_type, preferred) = if let Some(operands) = &self.operands {
+            self.base.identical_solutions_in(sol1, sol2, operands)?
+        } else {
+            let domains = super::p1::SolveOperands {
+                operands: [
+                    super::p5::surface_operand(&self.base, 0, self.caches[0], self.surface1),
+                    super::p5::surface_operand(&self.base, 1, self.caches[1], self.surface2),
+                ],
+            };
+            self.base.identical_solutions_in(sol1, sol2, &domains)?
         };
         if sp_type == SolutionPairType::Identical {
             return Ok((SolutionPairType::Identical, preferred));

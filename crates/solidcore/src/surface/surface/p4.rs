@@ -1508,7 +1508,7 @@ impl Surface {
         k: &Kernel,
         surface: Option<O>,
         cache: Option<&crate::surface::surface_cache::SurfaceCache<O>>,
-        context: Option<&mut dyn super::p1::SurfaceSolveContext<O>>,
+        mut context: Option<&mut dyn super::p1::SurfaceSolveContext<O>>,
         uv_domain: &Extent2d,
         op: SolverOperation,
         test_point: Point3,
@@ -1578,7 +1578,7 @@ impl Surface {
                                 }
                             }
                         }
-                    } else if let Some(context) = context {
+                    } else if let Some(context) = context.as_deref_mut() {
                         let built;
                         let cache = if let Some(cache) = cache {
                             cache
@@ -1671,9 +1671,12 @@ impl Surface {
             )?
             .without_objects()
         } else if let Some(surface) = surface {
-            self.global_point_solve_0(
+            self.global_point_solve_0_in(
                 k,
                 surface,
+                cache,
+                context,
+                point_test_off,
                 uv_domain,
                 op,
                 test_point,
@@ -1684,9 +1687,12 @@ impl Surface {
         } else {
             // no handle for the solutions' objects (upstream passes `this`): solve with
             // a stand-in and leave the objects null
-            let found = self.global_point_solve_0(
+            let found = self.global_point_solve_0_in(
                 k,
                 NoObject,
+                None,
+                None,
+                point_test_off,
                 uv_domain,
                 op,
                 test_point,

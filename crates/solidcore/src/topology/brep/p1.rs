@@ -97,9 +97,7 @@
 //! - Calls into units not ported yet return [`SolidError::Unported`] (every site is
 //!   tagged `UNPORTED(<unit>)`, one stub per call site with the code after it ported):
 //!   `SmFace::FaceIntersect` (`topology.face_p3`), `SmBrep::CalculateBoundingBox`, `LockBoundingBox`,
-//!   `UnLockBoundingBox` (`query.brep`), `SmBSplineSurface::CreateCornerBlend` with a
-//!   rational 3D curve before a non-B-spline one (`nurbs.b_spline_surface_n_lib_p2`,
-//!   whose port takes B-spline curves only).
+//!   `UnLockBoundingBox` (`query.brep`).
 //! - `CreateEdgeEdgeBlend` takes each edge use's B-rep (the second `None` when both are
 //!   in one B-rep), mutably: the edge use evaluations of `topology.edgeuse_p3` take it so.
 //!   It ignores both `EvaluateBinormal` statuses as upstream and goes on with the outputs
@@ -2697,7 +2695,6 @@ pub fn create_corner_blend(
         .iter()
         .map(|s| s.as_ref().map(|surface| BlendNeighbour { surface }))
         .collect();
-    let ordered_3d = corner_blend_bspline_curves(&ordered_3d, &ordered_uv, &surfs)?;
     let mut services = BrepFaceServices::new(&mut *b);
     BSplineSurface::create_corner_blend_with_context(
         k,
@@ -2710,57 +2707,6 @@ pub fn create_corner_blend(
         false,
         Some((&mut services, &handles)),
     )
-}
-
-/// The 3D curves `SmBSplineSurface::CreateCornerBlend` gets as `SmBSplineCurve`s (unit
-/// `nurbs.b_spline_surface_n_lib_p2`, whose port takes B-spline curves). Upstream passes
-/// any `SmCurve` and converts each, in order, with `sm_CreateNonRationalCurve`
-/// (SmBSplineSurfaceNLib.cpp:3100-3110), whose `SM_CAST_PTR(SmBSplineCurve, ..)` / `NER`
-/// returns `SM_ERR_NULL_POINTER` for the first curve of another kind. Its curve count
-/// check cannot fail here (the padding leaves at least 4 curves) and its earlier NULL UV
-/// curve / surface check (`:3078-3092`, bicubic patch) returns the same status. Before
-/// that curve only a rational curve's conversion can fail, so with one there (and the
-/// NULL check passing) the case is unported.
-fn corner_blend_bspline_curves(
-    curves: &[Curve],
-    uv_curves: &[Option<BSplineCurve>],
-    surfaces: &[Option<BlendNeighbour<'_>>],
-) -> Result<Vec<BSplineCurve>> {
-    let parts: Vec<Option<BSplineCurve>> = curves.iter().map(bspline_part).collect();
-    if parts.iter().all(Option::is_some) {
-        return Ok(parts.into_iter().flatten().collect());
-    }
-    // the NULL UV curve / surface check (bCreateBilinearPatch == FALSE)
-    let curve_cnt = curves.len();
-    let mut null_count = 0usize;
-    for (uv, srf) in uv_curves.iter().zip(surfaces).take(curve_cnt) {
-        if uv.is_none() || srf.is_none() {
-            null_count += 1;
-        }
-        if ((curve_cnt == 4 && null_count > 1) || (curve_cnt > 4 && null_count > 0))
-            && (uv.is_none() || srf.is_none())
-        {
-            return Err(SolidError::null_pointer(OP)); // NER(crUVCurves[ii]) / NER(crSurfaces[ii])
-        }
-    }
-    let mut converted = Vec::new();
-    for part in parts {
-        let Some(part) = part else {
-            if converted
-                .iter()
-                .any(|p: &BSplineCurve| p.is_rational().unwrap_or(true))
-            {
-                // UNPORTED(nurbs.b_spline_surface_n_lib_p2): SmBSplineSurface::CreateCornerBlend with a rational curve before a non-B-spline one
-                return Err(SolidError::unported(
-                    "SmBSplineSurface::CreateCornerBlend",
-                    "nurbs.b_spline_surface_n_lib_p2",
-                ));
-            }
-            return Err(SolidError::null_pointer(OP)); // NER(pNurb)
-        };
-        converted.push(part);
-    }
-    Ok(converted)
 }
 
 // ---- edge-to-edge blends (SmBrep::CreateEdgeEdgeBlend) ----------------------------------

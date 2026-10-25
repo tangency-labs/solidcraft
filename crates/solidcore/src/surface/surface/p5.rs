@@ -2410,6 +2410,34 @@ pub fn cs_identical_solutions_in<O: SolutionObject>(
     surface_identical_solutions(k, base, surface, sol1, sol2, 1, true, domains)
 }
 
+pub(super) fn curve_operand<O: SolutionObject>(
+    base: &GlobalSolver<'_, O>,
+    slot: usize,
+    curve: Option<&Curve>,
+) -> Option<(O, super::p1::OperandDomain)> {
+    base.tree(slot)
+        .ok()
+        .and_then(|t| t.owner_object().ok().flatten())
+        .zip(curve)
+        .map(|(h, c)| (h, super::p1::OperandDomain::Curve(c.natural_interval())))
+}
+
+pub(super) fn surface_operand<O: SolutionObject>(
+    base: &GlobalSolver<'_, O>,
+    slot: usize,
+    cache: Option<&crate::surface::surface_cache::SurfaceCache<O>>,
+    surface: Option<&Surface>,
+) -> Option<(O, super::p1::OperandDomain)> {
+    let handle = base
+        .tree(slot)
+        .ok()
+        .and_then(|t| t.owner_object().ok().flatten())
+        .or_else(|| cache.and_then(crate::surface::surface_cache::SurfaceCache::surface_handle));
+    handle
+        .zip(surface)
+        .map(|(h, s)| (h, super::p1::OperandDomain::Surface(s.natural_uv_domain())))
+}
+
 /// `SmCSIGlobalSolver::IdenticalSolutions`: as [`cs_identical_solutions`].
 ///
 /// # Errors
@@ -2454,16 +2482,13 @@ impl<O: SolutionObject> LsiGlobalSolver<'_, '_, O> {
         sol1: &Solution<O>,
         sol2: &Solution<O>,
     ) -> Result<(SolutionPairType, Option<PreferredSolution>)> {
-        surface_identical_solutions(
-            k,
-            &self.base,
-            self.surface,
-            sol1,
-            sol2,
-            1,
-            true,
-            &OwnDomains,
-        )
+        let domains = super::p1::SolveOperands {
+            operands: [
+                surface_operand(&self.base, 0, self.surface_cache, self.surface),
+                None,
+            ],
+        };
+        surface_identical_solutions(k, &self.base, self.surface, sol1, sol2, 1, true, &domains)
     }
 }
 
@@ -2479,16 +2504,13 @@ impl<O: SolutionObject> SpGlobalSolver<'_, '_, O> {
         sol1: &Solution<O>,
         sol2: &Solution<O>,
     ) -> Result<(SolutionPairType, Option<PreferredSolution>)> {
-        surface_identical_solutions(
-            k,
-            &self.base,
-            self.surface,
-            sol1,
-            sol2,
-            0,
-            false,
-            &OwnDomains,
-        )
+        let domains = super::p1::SolveOperands {
+            operands: [
+                surface_operand(&self.base, 1, self.surface_cache, self.surface),
+                None,
+            ],
+        };
+        surface_identical_solutions(k, &self.base, self.surface, sol1, sol2, 0, false, &domains)
     }
 }
 

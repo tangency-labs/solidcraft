@@ -1284,7 +1284,7 @@ pub(super) struct ReadOnly<'a, G> {
 
 /// `Unported` for an edit a read-only adapter cannot make.
 fn read_only(upstream: &'static str) -> SolidError {
-    // UNPORTED(topology.brep_p1): SmBrep mutable owning context
+    // DISPATCH GAP: SmBrep mutable owning context (read-only adapter without a Brep)
     SolidError::unported(upstream, "topology.brep_p1")
 }
 
