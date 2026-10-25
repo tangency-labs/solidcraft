@@ -319,12 +319,18 @@ const EXTENT_POINTS: usize = 32;
 
 /// The parameter box of a face on `label` over its boundary: each loop's points (`loops`, in
 /// order along each loop) projected onto the label, a periodic parameter unwrapped from one point
-/// to the next. What the face's NURBS form ([`surface`]) is built over; no pcurve is involved.
+/// to the next, and each loop after the first a whole number of periods along where that keeps
+/// the box smallest. What the face's NURBS form ([`surface`]) is built over; no pcurve is
+/// involved.
 pub fn extent(label: &Surface, loops: &[Vec<(&Curve, [f64; 2], bool)>]) -> Option<[[f64; 2]; 2]> {
     let eval = super::eval::SurfaceEval::new(label).ok()?;
     let period = eval.domain().period;
     let (mut lo, mut hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
     for l in loops {
+        // A loop is unwrapped from its own first point, so it can come out whole periods away
+        // from the loops before it (a hole beside the seam projects to the seam's other side),
+        // and a box over both is more than a turn wide.
+        let (mut l_lo, mut l_hi) = ([f64::INFINITY; 2], [f64::NEG_INFINITY; 2]);
         let mut prev: Option<[f64; 2]> = None;
         for (c, [t0, t1], forward) in l {
             let curve = super::eval::CurveEval::new(c).ok()?;
@@ -343,14 +349,31 @@ pub fn extent(label: &Surface, loops: &[Vec<(&Curve, [f64; 2], bool)>]) -> Optio
                 let pole = eval.pole(q);
                 for d in 0..2 {
                     if !pole.get(d).copied().unwrap_or(false) {
-                        lo[d] = lo[d].min(q[d]);
-                        hi[d] = hi[d].max(q[d]);
+                        l_lo[d] = l_lo[d].min(q[d]);
+                        l_hi[d] = l_hi[d].max(q[d]);
                     }
                 }
                 if !pole.iter().any(|p| *p) {
                     prev = Some(q);
                 }
             }
+        }
+        for d in 0..2 {
+            if !(l_lo[d] <= l_hi[d]) {
+                continue;
+            }
+            let shift = match period.get(d) {
+                Some(Some(per)) if lo[d] <= hi[d] => {
+                    // The whole periods around the ones that bring the loop's middle to the box's,
+                    // the one giving the smallest box.
+                    let k = ((lo[d] + hi[d] - l_lo[d] - l_hi[d]) / (2.0 * per)).round();
+                    let span = |k: f64| hi[d].max(l_hi[d] + k * per) - lo[d].min(l_lo[d] + k * per);
+                    [k, k - 1.0, k + 1.0].into_iter().min_by(|a, b| span(*a).total_cmp(&span(*b))).unwrap_or(k) * per
+                }
+                _ => 0.0,
+            };
+            lo[d] = lo[d].min(l_lo[d] + shift);
+            hi[d] = hi[d].max(l_hi[d] + shift);
         }
     }
     // At most one turn round a periodic direction; a boundary that never goes round it (a face

@@ -802,3 +802,30 @@ fn analytic_records_are_unbounded_with_independent_frames() {
     assert!(radius(f64::NAN).is_err());
     assert!(surface(&Surface::Torus { frame: a_frame(), major_radius: 1., minor_radius: 2. }, 0, &mut Budget(0)).is_err());
 }
+
+/// A cylinder face round its axis with a hole beside its seam: the seam at 350 degrees (so its
+/// loop projects from 350 degrees on), the hole at 15..25 degrees (which on its own projects a
+/// turn below). The face's box is the outer loop's turn with the hole in it; the hole's own
+/// placement made a box from 15 degrees that cut the turn short and left the seam outside it
+/// (#4598: a bored rod read back with its bore's pcurve a period off its face).
+#[test]
+fn a_hole_beside_the_seam_lies_in_its_face_turn() {
+    let (r, h) = (20.0f64, 60.0);
+    let cylinder = Surface::Cylinder { frame: Frame { origin: [0.; 3], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] }, radius: r };
+    let s = -10f64.to_radians();
+    let at = |a: f64, z: f64| [r * a.cos(), r * a.sin(), z];
+    let ring = |z: f64| Curve::Circle { frame: Frame { origin: [0., 0., z], x_axis: [s.cos(), s.sin(), 0.], y_axis: [-s.sin(), s.cos(), 0.] }, radius: r };
+    let (bottom, top) = (ring(0.), ring(h));
+    let seam = Curve::Line { start: at(s, 0.), end: at(s, h) };
+    let (a0, a1) = (15f64.to_radians(), 25f64.to_radians());
+    let hole =
+        Curve::Spline { knots: vec![0., 0., 1., 2., 3., 4., 4.], points: vec![at(a0, 25.), at(a1, 25.), at(a1, 35.), at(a0, 35.), at(a0, 25.)] };
+    let outer = vec![(&bottom, [0., TAU], true), (&seam, [0., 1.], true), (&top, [0., TAU], false), (&seam, [0., 1.], false)];
+    let inner = vec![(&hole, [0., 4.], true)];
+    let [u, v] = form::extent(&cylinder, &[outer, inner]).expect("an extent");
+    assert!((u[1] - u[0] - TAU).abs() < 1e-9, "one turn: {u:?}");
+    assert!((u[0].rem_euclid(TAU) - s.rem_euclid(TAU)).abs() < 1e-9, "from the seam: {u:?}");
+    let hole_u = a0 + ((u[0] - a0) / TAU).ceil() * TAU;
+    assert!(hole_u > u[0] && hole_u + (a1 - a0) < u[1], "the hole in the turn: {u:?}");
+    assert!(v[0].abs() < 1e-9 && (v[1] - h).abs() < 1e-9, "{v:?}");
+}
