@@ -1,3 +1,4 @@
+#include <optional>
 // SPDX-License-Identifier: Apache-2.0
 // difftest shim for unit `topology.proto_topology_p1`: SmOwningTopology (list operations),
 // SmAssembly / SmAssemblyInstance (instances, destructors, types), SmCopyBrepMap, the
@@ -50,6 +51,7 @@
 #include <SmNurbsSrf.h>
 #include <SmOwningTopology.h>
 #include <SmPlane.h>
+#include <SmSurfOfExtrusion.h>
 #include <SmPointClass.h>
 #include <SmPoly.h>
 #include <SmProtoTopology.h>
@@ -5016,8 +5018,12 @@ enum TObj : int64_t
     T_PRIMITIVE_BOX = 10,
     T_PRIMITIVE_SPHERE = 11,
     T_CALLER_FACE = 12,
+    T_EXTRUSION_FACE = 18,
     T_COPIED_BOX = 13,
     T_COPIED_SPHERE = 14,
+    T_PRIMITIVE_CYLINDER = 15,
+    T_PRIMITIVE_CONE = 16,
+    T_PRIMITIVE_TORUS = 17,
 };
 
 // SmCrvOnSurf's UV-line constructor is protected.
@@ -5025,6 +5031,46 @@ class ScCos : public SmCrvOnSurf
 {
 public:
     ScCos(SmPoint2d& a, SmPoint2d& b, SmSurface& s, const SmContext* ctx) : SmCrvOnSurf(a, b, s, NULL, 0, ctx) {}
+};
+
+template<class T> double scale_label(const std::vector<T*>& items, T* item) {
+    if (!item) return 0.0;
+    auto it=std::find(items.begin(),items.end(),item);
+    return it==items.end() ? 0.0 : (double)(std::distance(items.begin(),it)+1);
+}
+struct ScaleProbeFrame {
+    std::vector<double> initial_types;
+    std::vector<SmVertex*> vertices;
+    std::vector<SmEdge*> edges;
+    std::vector<SmFace*> faces;
+    std::vector<SmShell*> shells;
+    std::vector<SmRegion*> regions;
+    std::vector<SmEdgeuse*> edgeuses;
+    std::vector<std::pair<SmFaceuse*,SmFaceuse*>> faceuses;
+    explicit ScaleProbeFrame(SmBrep* body) {
+        SmTArray<SmVertex*> vs; body->GetVertices(vs); for(ULONG i=0;i<vs.GetSize();i++) vertices.push_back(vs[i]);
+        SmTArray<SmEdge*> es; body->GetEdges(es); for(ULONG i=0;i<es.GetSize();i++) { edges.push_back(es[i]); initial_types.push_back(es[i]->GetCurve()?(double)es[i]->GetCurve()->GetType():0.0); SmTArray<SmEdgeuse*> us; es[i]->GetEdgeuses(us); for(ULONG j=0;j<us.GetSize();j++) edgeuses.push_back(us[j]); }
+        SmTArray<SmFace*> fs; body->GetFaces(fs); for(ULONG i=0;i<fs.GetSize();i++) { faces.push_back(fs[i]); initial_types.push_back(fs[i]->GetSurface()?(double)fs[i]->GetSurface()->GetType():0.0); SmFaceuse *a=NULL,*b=NULL; fs[i]->GetFaceuses(a,b); faceuses.push_back({a,b}); }
+        SmTArray<SmShell*> ss; body->GetShells(ss); for(ULONG i=0;i<ss.GetSize();i++) shells.push_back(ss[i]);
+        SmTArray<SmRegion*> rs; body->GetRegions(rs); for(ULONG i=0;i<rs.GetSize();i++) regions.push_back(rs[i]);
+    }
+    void append(std::vector<double>& out) const {
+        out.insert(out.end(),{(double)shells.size(),(double)regions.size()});
+        for(auto edge: edges) {
+            out.push_back(edge->GetCurve()?(double)edge->GetCurve()->GetType():0.0);
+            SmTArray<SmEdgeuse*> uses; edge->GetEdgeuses(uses); out.push_back((double)uses.GetSize());
+            for(ULONG i=0;i<uses.GetSize();i++) { auto use=uses[i]; auto vu=use->GetVertexuse();
+                out.insert(out.end(),{scale_label(edgeuses,use),(double)use->GetOrientation(),scale_label(vertices,vu?vu->GetVertex():NULL),scale_label(edgeuses,use->GetMate()),scale_label(edgeuses,use->GetRadial()),scale_label(faces,use->GetFace())});
+            }
+        }
+        for(size_t i=0;i<faces.size();i++) {
+            out.push_back(faces[i]->GetSurface()?(double)faces[i]->GetSurface()->GetType():0.0);
+            for(auto use: {faceuses[i].first,faceuses[i].second}) {
+                if(use) { auto region=use->GetRegion(); out.insert(out.end(),{1.0,(double)use->GetOrientation(),scale_label(shells,use->GetShell()),scale_label(regions,region),region?(double)region->IsVoid():-1.0}); }
+                else out.insert(out.end(),{0.0,0.0,0.0,0.0,-1.0});
+            }
+        }
+    }
 };
 
 int32_t apply_transform_op(Rd& rd, SmObject* obj, SmApiStatus& s)
@@ -5093,7 +5139,7 @@ void append_constructed_transform_record(std::vector<double>& o, SmBrep* body)
         for (ULONG i=0;i<faces.GetSize();i++) o.push_back((double)faces[i]->GetRectangularTrim());
 }
 
-int32_t run_transform(Rd& rd, std::vector<double>& o)
+int32_t run_transform(Rd& rd, std::vector<double>& o, bool probe=false)
 {
     const SmContext& ctx = the_context();
     int64_t kind = rd.idx();
@@ -5127,7 +5173,7 @@ int32_t run_transform(Rd& rd, std::vector<double>& o)
     case T_COPIED_SPHERE:
     {
         SmPoint3d origin = rd.vec(); SmBrep* body = NULL; SmApiStatus created;
-        if (kind == T_PRIMITIVE_BOX || kind == T_COPIED_BOX) {
+        if (kind == T_PRIMITIVE_CYLINDER || kind == T_PRIMITIVE_CONE || kind == T_PRIMITIVE_TORUS || kind == T_PRIMITIVE_BOX || kind == T_COPIED_BOX) {
             double x=rd.num(), y=rd.num(), z=rd.num();
             created = SmApiCreateBox(origin, x, y, z, body);
         } else { double radius=rd.num(); created=SmApiCreateSphere(origin, radius, body); }
@@ -5140,12 +5186,41 @@ int32_t run_transform(Rd& rd, std::vector<double>& o)
         }
         obj = body; break;
     }
+    case T_PRIMITIVE_CYLINDER:
+    case T_PRIMITIVE_CONE:
+    case T_PRIMITIVE_TORUS:
+    {
+        SmPoint3d origin=rd.vec(); double a=rd.num(), b=rd.num(); SmBrep* body=NULL; SmApiStatus created;
+        if(kind==T_PRIMITIVE_CYLINDER) created=SmApiCreateCylinder(origin,a,b,body);
+        else if(kind==T_PRIMITIVE_TORUS) created=SmApiCreateTorus(origin,a,b,body);
+        else { double height=rd.num(); created=SmApiCreateCone(origin,a,b,height,body); }
+        if(created!=SM_SUCCESS || !body) { o.push_back((double)created); delete body; return SC_OK; }
+        obj=body; break;
+    }
     case T_CALLER_FACE:
+    case T_EXTRUSION_FACE:
     {
         SmPoint3d origin=rd.vec(); double width=rd.num(), height=rd.num();
         SmBrep* body=new(ctx) SmBrep(); SmFace* face=NULL;
-        SmPlane* surface=new(ctx) SmPlane(origin,SmVector3d(0,0,1),&ctx);
-        SmStatus created=body->CreateFaceFromSurface(surface,SmExtent2d(0,0,width,height),face);
+        SmSurface* surface=NULL;
+        SmExtent2d domain(0,0,width,height);
+        if(kind==T_EXTRUSION_FACE) {
+            gw_CURVE* nurb=sm_AllocateNurbCurve(2,2,5);
+            for(int i=0;i<3;++i) {
+                nurb->pol->Pw[i].x=origin.x+width*i/2.0;
+                nurb->pol->Pw[i].y=origin.y+(i==1?1.0:0.0);
+                nurb->pol->Pw[i].z=origin.z;
+                nurb->pol->Pw[i].w=1.0;
+            }
+            for(int i=0;i<6;++i) nurb->knt->U[i]=(i<3?0.0:1.0);
+            SmBSplineCurve* generator=new(ctx) SmBSplineCurve(nurb,3,FALSE);
+            domain=SmExtent2d(0,0,1,height);
+            SmSurfOfExtrusion* extrusion=new(ctx) SmSurfOfExtrusion(generator,origin,SmVector3d(0,0,1),domain,FALSE);
+            SmStatus made=extrusion->MakeNurb();
+            if(made!=SM_SUCCESS) { o.push_back((double)made); delete extrusion; delete body; return SC_OK; }
+            surface=extrusion;
+        } else surface=new(ctx) SmPlane(origin,SmVector3d(0,0,1),&ctx);
+        SmStatus created=body->CreateFaceFromSurface(surface,domain,face);
         if(created!=SM_SUCCESS || !face) { o.push_back((double)created); delete body; return SC_OK; }
         obj=body; break;
     }
@@ -5198,13 +5273,17 @@ int32_t run_transform(Rd& rd, std::vector<double>& o)
     }
     default: return SC_ERR_ARG;
     }
+    std::optional<ScaleProbeFrame> frame;
+    if (probe) frame.emplace((SmBrep*)obj);
     SmApiStatus s = 0;
     int32_t applied = apply_transform_op(rd, obj, s);
     if (applied != SC_OK) return applied;
     o.push_back((double)s);
-    if (kind == T_PRIMITIVE_BOX || kind == T_PRIMITIVE_SPHERE || kind == T_CALLER_FACE || kind == T_COPIED_BOX || kind == T_COPIED_SPHERE) {
+    if (frame) { o.push_back((double)frame->initial_types.size()); o.insert(o.end(), frame->initial_types.begin(), frame->initial_types.end()); }
+    if (kind == T_PRIMITIVE_CYLINDER || kind == T_PRIMITIVE_CONE || kind == T_PRIMITIVE_TORUS || kind == T_PRIMITIVE_BOX || kind == T_PRIMITIVE_SPHERE || kind == T_EXTRUSION_FACE || kind == T_CALLER_FACE || kind == T_COPIED_BOX || kind == T_COPIED_SPHERE) {
         append_constructed_transform_record(o, (SmBrep*)obj);
     }
+    if (frame) frame->append(o);
     if (source) {
         o.insert(o.end(), source_before.begin(), source_before.end());
         primitive_record::append(o, source);
@@ -5241,7 +5320,7 @@ int32_t run_transform_sequence(Rd& rd, std::vector<double>& o)
     const int64_t kind = rd.idx();
     SmBrep* body = NULL;
     SmApiStatus created = SM_SUCCESS;
-    if (kind == T_PRIMITIVE_BOX) {
+    if (kind == T_PRIMITIVE_CYLINDER || kind == T_PRIMITIVE_CONE || kind == T_PRIMITIVE_TORUS || kind == T_PRIMITIVE_BOX) {
         SmPoint3d origin = rd.vec();
         double x=rd.num(), y=rd.num(), z=rd.num();
         created = SmApiCreateBox(origin, x, y, z, body);
@@ -5283,6 +5362,7 @@ int32_t run(Rd& rd, std::vector<double>& o)
     case 1: s = run_proto(rd, o); break;
     case 2: s = run_transform(rd, o); break;
     case 3: s = run_transform_sequence(rd, o); break;
+    case 4: s = run_transform(rd, o, true); break;
     default: return SC_ERR_ARG;
     }
     if (s != SC_OK)

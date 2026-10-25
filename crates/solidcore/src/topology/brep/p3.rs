@@ -3054,6 +3054,54 @@ fn with_nurb<'a>(k: &Kernel, s: &'a Surface) -> Result<Option<Cow<'a, BSplineSur
                 Some(Cow::Owned(tmp.base().clone()))
             }
         }
+        SurfaceKind::SurfOfExtrusion(x) => {
+            if x.base().gw_nurb().is_some() {
+                Some(Cow::Borrowed(x.base()))
+            } else {
+                let mut tmp = x.as_ref().clone();
+                match tmp.make_nurb(k) {
+                    Err(e) if e.is_unported() => return Err(e),
+                    Ok(()) | Err(_) => {}
+                }
+                Some(Cow::Owned(tmp.base().clone()))
+            }
+        }
+        SurfaceKind::Cone(x) => {
+            if x.rev().base().gw_nurb().is_some() {
+                Some(Cow::Borrowed(x.rev().base()))
+            } else {
+                let mut tmp = x.as_ref().clone();
+                match tmp.make_nurb(k) {
+                    Err(e) if e.is_unported() => return Err(e),
+                    Ok(()) | Err(_) => {}
+                }
+                Some(Cow::Owned(tmp.rev().base().clone()))
+            }
+        }
+        SurfaceKind::Torus(x) => {
+            if x.base().base().gw_nurb().is_some() {
+                Some(Cow::Borrowed(x.base().base()))
+            } else {
+                let mut tmp = x.as_ref().clone();
+                match tmp.make_nurb(k) {
+                    Err(e) if e.is_unported() => return Err(e),
+                    Ok(()) | Err(_) => {}
+                }
+                Some(Cow::Owned(tmp.base().base().clone()))
+            }
+        }
+        SurfaceKind::Sphere(x) => {
+            if x.base().base().gw_nurb().is_some() {
+                Some(Cow::Borrowed(x.base().base()))
+            } else {
+                let mut tmp = x.as_ref().clone();
+                match tmp.make_nurb(k) {
+                    Err(e) if e.is_unported() => return Err(e),
+                    Ok(()) | Err(_) => {}
+                }
+                Some(Cow::Owned(tmp.base().base().clone()))
+            }
+        }
         _ => None,
     })
 }
@@ -3063,12 +3111,16 @@ const fn as_bspline_surface(s: &Surface) -> Option<&BSplineSurface> {
         SurfaceKind::BSpline(x) => Some(x),
         SurfaceKind::Plane(x) => Some(x.base()),
         SurfaceKind::SurfOfRevolution(x) => Some(x.base()),
+        SurfaceKind::SurfOfExtrusion(x) => Some(x.base()),
+        SurfaceKind::Cone(x) => Some(x.rev().base()),
+        SurfaceKind::Torus(x) => Some(x.base().base()),
+        SurfaceKind::Sphere(x) => Some(x.base().base()),
         _ => None,
     }
 }
 
 /// `TurnToNURBS`: makes every face surface and edge curve of the B-rep a plain
-/// B-spline: a B-spline kind (`SmPlane`, `SmSurfOfRevolution`) gets its B-spline
+/// B-spline: a B-spline kind (`SmPlane`, `SmSurfOfRevolution`, `SmSphere`, `SmCone`, `SmTorus`) gets its B-spline
 /// copy (`ReplaceSurface`, which rebuilds the UV trim curves); an `SmOffsetSurface` of a
 /// B-spline kind is approximated (`ApproximateOffsetSurface` at ten times the B-rep
 /// tolerance, chord length; a failed approximation skips the face), extended by 2% of
@@ -3086,9 +3138,14 @@ const fn as_bspline_surface(s: &Surface) -> Option<&BSplineSurface> {
 /// identity domain.
 pub fn turn_to_nurbs(k: &mut Kernel, b: &mut Brep, env: &mut NotifyEnv<'_>) -> Result<()> {
     with_caller_identities(k, b, env, None, |k, b, env| {
-        turn_to_nurbs_in(k, b, env, &|f| arena_identity(CacheObject::Face(f)), &|e| {
-            arena_identity(CacheObject::Edge(e))
-        })
+        turn_to_nurbs_in(
+            k,
+            b,
+            env,
+            &|f| arena_identity(CacheObject::Face(f)),
+            &|e| arena_identity(CacheObject::Edge(e)),
+            &|e| arena_identity(CacheObject::Edge(e)),
+        )
     })
 }
 
@@ -3099,12 +3156,18 @@ pub(crate) fn turn_to_nurbs_with_geometry_owners(
     k: &mut Kernel,
     b: &mut Brep,
     env: &mut NotifyEnv<'_>,
+    geometry_owner: &dyn Fn(EntityRef) -> ObjectRef,
 ) -> Result<()> {
     let key_of = env.key_of;
     with_caller_identities(k, b, env, None, |k, b, env| {
-        turn_to_nurbs_in(k, b, env, &|f| key_of(EntityRef::Face(f)), &|e| {
-            key_of(EntityRef::Edge(e))
-        })
+        turn_to_nurbs_in(
+            k,
+            b,
+            env,
+            &|f| geometry_owner(EntityRef::Face(f)),
+            &|e| geometry_owner(EntityRef::Edge(e)),
+            &|e| key_of(EntityRef::Edge(e)),
+        )
     })
 }
 
@@ -3115,6 +3178,7 @@ fn turn_to_nurbs_in(
     env: &mut NotifyEnv<'_>,
     face_owner: &dyn Fn(FaceId) -> ObjectRef,
     edge_owner: &dyn Fn(EdgeId) -> ObjectRef,
+    new_edge_owner: &dyn Fn(EdgeId) -> ObjectRef,
 ) -> Result<()> {
     ignore_soft(brep_notify(
         b,
@@ -3288,7 +3352,7 @@ fn turn_to_nurbs_in(
             env,
             [Some(r), None],
         )?;
-        let edge_ref = edge_owner(e);
+        let edge_ref = new_edge_owner(e);
         if let Some(c) = b.edge_mut(e)?.curve.as_mut() {
             let _ = c.set_owner(Some(edge_ref), None);
         }
