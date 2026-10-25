@@ -1076,6 +1076,48 @@ impl Plane {
         fire_ray: bool,
         distance_tolerance: f64,
     ) -> Result<SolutionArray<O>> {
+        self.global_line_intersect_with_base(
+            uv_domain,
+            line_point,
+            line_vector,
+            line_interval,
+            fire_ray,
+            distance_tolerance,
+            |sub_interval| {
+                Surface::from(self.clone()).base_global_line_intersect_in(
+                    k,
+                    surface,
+                    cache,
+                    uv_domain,
+                    line_point,
+                    line_vector,
+                    Some(sub_interval),
+                    fire_ray,
+                    distance_tolerance,
+                )
+            },
+        )
+    }
+
+    /// The body of [`Plane::global_line_intersect_in`]: `base` is
+    /// `SmSurface::GlobalLineIntersect` over the given line interval, which the plane
+    /// calls on itself (a caller holding the plane's [`Surface`] runs it there, with
+    /// the surface's owner and the caller's cache and face context).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Plane::global_line_intersect`] and of `base`.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn global_line_intersect_with_base<O: SolutionObject>(
+        &self,
+        uv_domain: &Extent2d,
+        line_point: Point3,
+        line_vector: Vec3,
+        line_interval: Option<&Extent1d>,
+        fire_ray: bool,
+        distance_tolerance: f64,
+        base: impl FnOnce(&Extent1d) -> Result<SolutionArray<O>>,
+    ) -> Result<SolutionArray<O>> {
         if line_vector.length_squared() < EFF_ZERO_SQ {
             return Err(SolidError::invalid_input(OP_LINE, "zero line vector"));
         }
@@ -1177,17 +1219,7 @@ impl Plane {
                     .unwrap_or(Extent1d::from_min_max(t_start - 1.0, t_end + 1.0));
                 // try global surface/curve solver (SmSurface::GlobalLineIntersect: the
                 // solutions name `surface`)
-                return Surface::from(self.clone()).base_global_line_intersect_in(
-                    k,
-                    surface,
-                    cache,
-                    uv_domain,
-                    line_point,
-                    line_vector,
-                    Some(&sub_interval),
-                    fire_ray,
-                    distance_tolerance,
-                );
+                return base(&sub_interval);
             }
 
             // test that 3D Points project to UVDomain

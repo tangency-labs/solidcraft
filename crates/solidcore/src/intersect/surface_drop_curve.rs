@@ -372,7 +372,10 @@ fn reborrow<'b, O: SolutionObject>(c: &'b mut DropSolveContext<'_, O>) -> DropSo
 /// `DropCurve(ctx, domain, curve, interval, tol, maxDist, maxDev, uvCurves,
 /// bKeepAllDropCurves, NULL, bCreatingUVTrimCurve)` (virtual): the plane override;
 /// other kinds run `SmSurface::DropCurve`. Returns the largest drop distance, the
-/// deviation and the UV curves.
+/// deviation and the UV curves. With the caller's face solve `context` the drop runs
+/// under it; without one, as for [`surface_global_point_solve`] (`DoTrace` runs with
+/// the surface cache's point testing off), the start point drop's `GlobalPointSolve`
+/// keeps its fast-drop solutions unclassified (no face test).
 #[allow(clippy::too_many_arguments)] // upstream's argument list
 fn surface_drop_curve<O: SolutionObject>(
     k: &Kernel,
@@ -399,7 +402,9 @@ fn surface_drop_curve<O: SolutionObject>(
             creating_uv_trim_curve,
             context,
         )?,
-        None => surface.drop_curve::<O>(
+        // (without one, the start drop keeps its fast-drop solutions unclassified:
+        // `DoTrace` leaves the cache's point testing off)
+        None => surface.drop_curve_face_tested::<O>(
             k,
             uv_domain,
             curve,
@@ -408,6 +413,7 @@ fn surface_drop_curve<O: SolutionObject>(
             keep_all,
             None,
             creating_uv_trim_curve,
+            None,
         )?,
     };
     Ok((r.max_drop_to_surf, r.max_approx_dev, r.uv_curves))

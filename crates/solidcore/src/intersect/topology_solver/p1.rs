@@ -1910,8 +1910,10 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
 /// vector `opt_vectors[0]` (3D curves and their UV trim curves), taken from the
 /// surface cache's alternate caches or made and cached there (silhouette curves of
 /// the surface to ten times `tolerance_3d` and 20 degrees, trimmed by the face).
-/// The surface cache is the per-call [`surface_cache`], so the alternate caches it
-/// searches first hold only what this call adds. The trimming works on the face
+/// The surface cache is the one the caller's
+/// [`TopologyObjects::surface_solve_context`] makes for the face's surface (else the
+/// per-call [`surface_cache`]); either is this call's copy, so the alternate caches
+/// it searches first hold only what this call adds. The trimming works on the face
 /// [`TopologyObjects::face_entity`] resolves; an adapter that resolves none returns
 /// [`SolidError::Unported`] for `SmFace::CreateCurvesByTrimming`. A trimmed UV curve
 /// that is not a B-spline (upstream caches it as NULL and `GetCopyOfCurves` fails

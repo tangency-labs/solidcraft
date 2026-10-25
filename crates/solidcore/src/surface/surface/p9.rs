@@ -556,6 +556,32 @@ fn filter_solution<O: SolutionObject>(
         k, surface, domain, curve, interval, u_conts, v_conts, t_conts, solution,
     )
 }
+/// The tolerance of the edge owning `curve` (`pCurveOwner->GetTolerance()` in
+/// `sm_ClassifyCurveSurfaceXSectPoint`), through a face-aware caller's `queries` and
+/// the curve's `handle`; `None` for a curve no edge owns, or when the caller cannot
+/// resolve it.
+///
+/// # Errors
+///
+/// Those of the caller's edge resolution.
+pub(super) fn curve_edge_tolerance<O>(
+    curve: &Curve,
+    handle: Option<O>,
+    queries: Option<&dyn crate::surface::surface_cache::face_context::FaceQueries<O>>,
+) -> Result<Option<f64>> {
+    if curve
+        .owner()
+        .is_none_or(|o| o.type_code != crate::geom::assert_array::labels::EDGE_TYPE)
+    {
+        return Ok(None);
+    }
+    match (queries, handle) {
+        (Some(queries), Some(handle)) => queries.curve_edge_tolerance(handle).transpose(),
+        _ => Ok(None),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn nearby_intersection(
     k: &Kernel,
     surface: &Surface,
@@ -564,9 +590,18 @@ fn nearby_intersection(
     interval: &Extent1d,
     uv: Point2,
     t: f64,
+    edge_tolerance: Option<f64>,
 ) -> Result<Option<(Point2, f64)>> {
-    let c =
-        super::p4::classify_curve_surface_xsect_point(k, surface, domain, curve, interval, uv, t)?;
+    let c = super::p4::classify_curve_surface_xsect_point_with(
+        k,
+        surface,
+        domain,
+        curve,
+        interval,
+        uv,
+        t,
+        edge_tolerance,
+    )?;
     Ok(c.found_guess.then_some((c.new_uv_guess, c.new_t_guess)))
 }
 fn surface_point_solve<O: Copy>(
@@ -627,6 +662,13 @@ impl<'a, O: SolutionObject + 'a> GlobalSolve<'a, O> for CsiGlobalSolver<'a, '_, 
 }
 
 impl<'a, O: SolutionObject + 'a> CsiGlobalSolver<'a, '_, O> {
+    /// The tolerance of the edge owning `curve` ([`curve_edge_tolerance`]) through
+    /// this solve's face services and curve operand.
+    fn curve_edge_tolerance(&self, curve: &Curve) -> Result<Option<f64>> {
+        let handle = self.operands.and_then(|o| o.operands[0]).map(|(h, _)| h);
+        curve_edge_tolerance(curve, handle, self.face_queries)
+    }
+
     fn solution(&self, branch: &Branch, t: f64, uv: Point2, deviation: f64) -> Result<Solution<O>> {
         let mut solution = Solution::new();
         solution.num_variables = 3;
@@ -1013,14 +1055,16 @@ impl<'a, O: SolutionObject + 'a> CsiGlobalSolver<'a, '_, O> {
                     return Ok(false);
                 }
                 if index < 1 {
+                    let curve = self.curve.ok_or(SolidError::null_pointer(OP))?;
                     if let Some(new_guess) = ignored(nearby_intersection(
                         k,
                         eval_surface,
                         &domain,
-                        self.curve.ok_or(SolidError::null_pointer(OP))?,
+                        curve,
                         &interval,
                         hit.uv,
                         hit.parameter,
+                        self.curve_edge_tolerance(curve)?,
                     ))?
                     .flatten()
                     {

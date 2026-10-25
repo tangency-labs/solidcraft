@@ -681,6 +681,7 @@ fn rust_combine(
         surface_cache: Some(&cache),
         curve_handle: Some(H(0)),
         surface_handle: Some(H(1)),
+        edge_tolerance: None,
     };
     let r = global_curve_intersect_combine_solutions(
         k,

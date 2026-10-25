@@ -2629,16 +2629,11 @@ mod tests {
         let mut input = input(Operation::ApiShell);
         input.source = Some(box_fixture);
         input.faces = vec![Selection::Source(0), Selection::Source(0)];
-        assert_eq!(
-            Runner
-                .run_rust(&case(&input))
-                .unwrap()
-                .deferred
-                .unwrap()
-                .symbol,
-            // the working copy is made; the box shell stops at a later dependency
-            "TrimSrfCache::build_tree_with_face for a face-owned surface"
-        );
+        // the working copy is made and the shell completes: its faces' surfaces reach
+        // their faces' trimmed caches
+        let output = Runner.run_rust(&case(&input)).unwrap();
+        assert!(output.deferred.is_none());
+        assert_eq!(output.ints.get("result.present"), Some(&vec![1]));
     }
 
     #[test]

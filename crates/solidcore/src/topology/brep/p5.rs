@@ -730,7 +730,10 @@ pub fn delete_topological_vertex_with_notifications(
                 &survivor_range,
                 0.001,
                 true,
-                [Some(JoinCurve::Deleted), Some(JoinCurve::Survivor)],
+                [
+                    Some(JoinCurve::Deleted(deleted_range)),
+                    Some(JoinCurve::Survivor(survivor_range)),
+                ],
             ))?;
         if let Some(coincidence) = coincidence {
             if let [solution] = coincidence.solutions.as_slice() {
@@ -870,14 +873,22 @@ fn edge_curve(b: &Brep, edge: EdgeId) -> Result<&Curve> {
         .as_ref()
         .ok_or_else(|| SolidError::null_pointer(OP))
 }
+/// The two curves of `DeleteTopologicalVertex`'s coincidence check as its solutions
+/// name them (upstream's `pDeleteCurve`, `pSurviveCurve`), with the natural interval
+/// `IdenticalSolutions` reads through them (`SmCurve::GetNaturalInterval`).
 #[derive(Clone, Copy, PartialEq)]
 enum JoinCurve {
-    Deleted,
-    Survivor,
+    Deleted(Extent1d),
+    Survivor(Extent1d),
 }
 impl crate::geom::solution_array::SolutionObject for JoinCurve {
     fn kind(&self) -> crate::geom::solution_array::ObjectKind {
         crate::geom::solution_array::ObjectKind::Curve
+    }
+    fn natural_interval(&self) -> Option<Extent1d> {
+        match self {
+            Self::Deleted(range) | Self::Survivor(range) => Some(*range),
+        }
     }
 }
 fn join_copied_curves(

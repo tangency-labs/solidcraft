@@ -3505,6 +3505,17 @@ impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized> Face
             q.face_point_classify_fast_drop(k, face, uv, src_tol)
         })
     }
+
+    fn curve_edge_tolerance(&self, curve: O) -> Option<Result<f64>> {
+        // `SmEdge::GetTolerance` of the curve's edge (`SmCurve::GetEdge`)
+        let inner = self.0.inner();
+        Some(
+            inner
+                .curve_edge(curve)
+                .and_then(|edge| edge.ok_or(SolidError::null_pointer(OP_FACE_CACHES)))
+                .and_then(|edge| inner.edge_tolerance(edge)),
+        )
+    }
 }
 
 impl<O: ClassObject + SolutionObject + Ord, G: IntersectorBrep<O> + ?Sized> TopologyObjects<O>

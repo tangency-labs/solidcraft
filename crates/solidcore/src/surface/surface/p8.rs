@@ -1157,16 +1157,32 @@ impl Surface {
         distance_tolerance: f64,
     ) -> Result<SolutionArray<O>> {
         match self.kind() {
-            SurfaceKind::Plane(p) => p.global_line_intersect_in(
-                k,
-                surface,
-                cache,
+            // (the plane's base solve runs on this surface, its face's, with the
+            // caller's cache and context)
+            SurfaceKind::Plane(p) => p.global_line_intersect_with_base(
                 uv_domain,
                 line_point,
                 line_vector,
                 line_interval,
                 fire_ray,
                 distance_tolerance,
+                |sub_interval| {
+                    self.base_global_line_intersect_from(
+                        k,
+                        surface,
+                        match cache {
+                            Some(cache) => LineCacheSource::Caller(cache),
+                            None => LineCacheSource::Fresh,
+                        },
+                        Some(context),
+                        uv_domain,
+                        line_point,
+                        line_vector,
+                        Some(sub_interval),
+                        fire_ray,
+                        distance_tolerance,
+                    )
+                },
             ),
             _ => self.base_global_line_intersect_from(
                 k,
@@ -1695,7 +1711,7 @@ impl Surface {
 
             // Check Surface/LineSegment Coincidence (its point solve reaches the
             // surface's face through the caller's context, when there is one)
-            let found = if let Some(context) = context {
+            let found = if let Some(context) = context.as_deref_mut() {
                 self.simple_coincidence_checker_with_context::<O>(
                     k,
                     uv_domain,
@@ -1723,6 +1739,17 @@ impl Surface {
             if found.is_some() {
                 sols.reset();
 
+                // (the drop's trace gets the surface's cache, `smsurf_GetSurfaceCache`:
+                // the caller's, else the face's through a face-aware context)
+                let mut from_context;
+                let held = match (held, context) {
+                    (Some(c), _) => Some(c),
+                    (None, Some(context)) if self.face()?.is_some() => {
+                        from_context = context.build_surface_cache(k, self, surface)?;
+                        Some(&mut from_context)
+                    }
+                    (None, _) => None,
+                };
                 let dropped = self.drop_and_trim_curve_in::<NoObject, O>(
                     k,
                     held,
@@ -2398,6 +2425,7 @@ impl Surface {
                 surface_cache: Some(surface_cache),
                 curve_handle,
                 surface_handle,
+                edge_tolerance: super::p9::curve_edge_tolerance(curve, curve_handle, face_queries)?,
             },
             &mut sols,
         ))?;

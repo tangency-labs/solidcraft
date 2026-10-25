@@ -51,6 +51,14 @@ pub trait FaceQueries<O>: Debug {
         uv: Point2,
         src_tol: f64,
     ) -> Result<(i32, Option<O>)>;
+
+    /// `SmEdge::GetTolerance` of the edge owning the curve behind `curve` (upstream's
+    /// `crCurve.GetOwner()`), for the curve/surface solves of a face's surface.
+    /// `None` (the default) when the adapter cannot resolve the curve's edge.
+    fn curve_edge_tolerance(&self, curve: O) -> Option<Result<f64>> {
+        let _ = curve;
+        None
+    }
 }
 
 /// The shared B-rep cache-face adapter in a caller's handle space.

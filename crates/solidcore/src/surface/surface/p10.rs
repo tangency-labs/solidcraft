@@ -127,7 +127,9 @@ struct XsectPointClass {
     point_type: TsectCurveType,
 }
 
-/// `sm_ClassifyCurveSurfaceXSectPoint` (`surface::surface::p4`).
+/// `sm_ClassifyCurveSurfaceXSectPoint` (`surface::surface::p4`); `edge_tolerance` is
+/// the tolerance of the curve's owning edge, when the caller resolves it.
+#[allow(clippy::too_many_arguments)]
 fn classify_curve_surface_xsect_point(
     k: &Kernel,
     surface: &Surface,
@@ -136,8 +138,18 @@ fn classify_curve_surface_xsect_point(
     interval: &Extent1d,
     uv: Point2,
     t: f64,
+    edge_tolerance: Option<f64>,
 ) -> Result<XsectPointClass> {
-    let c = p4::classify_curve_surface_xsect_point(k, surface, domain, curve, interval, uv, t)?;
+    let c = p4::classify_curve_surface_xsect_point_with(
+        k,
+        surface,
+        domain,
+        curve,
+        interval,
+        uv,
+        t,
+        edge_tolerance,
+    )?;
     Ok(XsectPointClass {
         guess: c.found_guess.then_some((c.new_uv_guess, c.new_t_guess)),
         point_type: c.point_type,
@@ -203,16 +215,32 @@ struct DropAndTrim {
 
 /// `SmSurface::DropAndTrimCurve(context, domain, curve, interval, tol, ..., TRUE,
 /// TRUE)` (upstream requires an `SmBSplineCurve`).
-fn drop_and_trim_curve(
+fn drop_and_trim_curve<O: SolutionObject>(
     k: &Kernel,
     surface: &Surface,
+    cache: Option<&SurfaceCache<O>>,
     domain: &Extent2d,
     curve: &Curve,
     interval: &Extent1d,
     tol: f64,
 ) -> Result<DropAndTrim> {
-    let r = surface
-        .drop_and_trim_curve::<ObjectHandle>(k, domain, curve, interval, tol, true, true, None)?;
+    // the trace gets the surface's cache (`smsurf_GetSurfaceCache`): for a face's
+    // surface, the face's cache the solve ran on
+    let mut held = match cache {
+        Some(c) if surface.face()?.is_some() => Some(c.map_handles(Ok)?),
+        _ => None,
+    };
+    let r = surface.drop_and_trim_curve_in::<ObjectHandle, O>(
+        k,
+        held.as_mut(),
+        domain,
+        curve,
+        interval,
+        tol,
+        true,
+        true,
+        None,
+    )?;
     Ok(DropAndTrim {
         dist_to_surface: r.max_drop_to_surf,
         uv_curves: r.uv_curves,
@@ -646,6 +674,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
                     &leaf.interval,
                     hit.uv,
                     hit.t,
+                    None,
                 );
                 // status ignored upstream (SE)
                 if let Some(XsectPointClass {
@@ -844,6 +873,9 @@ pub struct CombineContext<'a, O> {
     pub curve_handle: Option<O>,
     /// The surface's handle (upstream `&crSurface`).
     pub surface_handle: Option<O>,
+    /// The tolerance of the curve's owning edge (`pCurveOwner->GetTolerance()` of
+    /// `sm_ClassifyCurveSurfaceXSectPoint`), when the caller resolves it.
+    pub edge_tolerance: Option<f64>,
 }
 
 impl<O> Default for CombineContext<'_, O> {
@@ -853,6 +885,7 @@ impl<O> Default for CombineContext<'_, O> {
             surface_cache: None,
             curve_handle: None,
             surface_handle: None,
+            edge_tolerance: None,
         }
     }
 }
@@ -925,18 +958,27 @@ impl<O: SolutionObject> CombineContext<'_, O> {
 
 /// The point classification of the combination: whether `solution`'s start point is
 /// classified `SM_TC_COINCIDENT` (status ignored upstream).
+#[allow(clippy::too_many_arguments)]
 fn is_coincident_point<O>(
     k: &Kernel,
     surface: &Surface,
     uv_domain: &Extent2d,
     curve: &Curve,
     interval: &Extent1d,
+    edge_tolerance: Option<f64>,
     solution: &Solution<O>,
 ) -> Result<bool> {
     let uv = Point2::new(p(&solution.start, 1)?, p(&solution.start, 2)?);
     let t = p(&solution.start, 0)?;
     let class = ignored(classify_curve_surface_xsect_point(
-        k, surface, uv_domain, curve, interval, uv, t,
+        k,
+        surface,
+        uv_domain,
+        curve,
+        interval,
+        uv,
+        t,
+        edge_tolerance,
     ))?;
     Ok(class.is_some_and(|c| c.point_type == TsectCurveType::Coincident))
 }
@@ -1010,7 +1052,15 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
         } else {
             last_interval = NO_INDEX;
             last_point = 0;
-            if is_coincident_point(k, surface, uv_domain, curve, interval, &first)? {
+            if is_coincident_point(
+                k,
+                surface,
+                uv_domain,
+                curve,
+                interval,
+                ctx.edge_tolerance,
+                &first,
+            )? {
                 found_coincidence = true;
             }
         }
@@ -1141,7 +1191,15 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
 
                 // see if points bound a coincident segment region (the first solution)
                 let first = solutions.get_at(0)?;
-                if is_coincident_point(k, surface, uv_domain, curve, interval, &first)? {
+                if is_coincident_point(
+                    k,
+                    surface,
+                    uv_domain,
+                    curve,
+                    interval,
+                    ctx.edge_tolerance,
+                    &first,
+                )? {
                     found_coincidence = true;
                 }
             }
@@ -1474,7 +1532,15 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
         }
 
         // replace the coincident parts by the curve's drop onto the surface
-        let dropped = drop_and_trim_curve(k, surface, uv_domain, curve, interval, tol)?;
+        let dropped = drop_and_trim_curve(
+            k,
+            surface,
+            ctx.surface_cache,
+            uv_domain,
+            curve,
+            interval,
+            tol,
+        )?;
         if dropped.dist_to_surface > tol {
             return Ok(());
         }
