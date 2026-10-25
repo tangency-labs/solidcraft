@@ -2934,7 +2934,8 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
         let shown = snapping.then(|| crate::dialogs::SnapPoints::of(&ss.sketch));
         let visible = solidcraft_engine::view::SketchPointVisibility::new(&ss.sketch);
         let (_, selected_handles) = selected_spline_handles(&ss.sketch, &s.selection);
-        for (index, (p, locked)) in ss.sketch.points.iter().zip(ss.sketch.locked_points()).enumerate() {
+        let locked_points = ss.sketch.locked_points();
+        for (index, (p, locked)) in ss.sketch.points.iter().zip(locked_points.iter().copied()).enumerate() {
             if (!visible.takes(p) && !selected_handles.contains(&index)) || shown.as_ref().is_some_and(|f| !f.takes(p)) {
                 continue;
             }
@@ -2957,8 +2958,9 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
             }
             if let Some(sp) = proj.to_screen(ss.plane.to_world(mirror)) {
                 let dd = sp.distance(pos) - if s.active_sketch == Some(sid) { 2.0 } else { 0.0 };
-                if dd < 8.0 && best.wants(dd) {
-                    best.offer(dd, Hit::SketchPoint { sketch: sid, id: point.id.clone(), at: mirror });
+                let rank = (dd, prefer_free && locked_points.get(index).copied().unwrap_or(false));
+                if dd < 8.0 && best.wants(rank) {
+                    best.offer(rank, Hit::SketchPoint { sketch: sid, id: point.id.clone(), at: mirror });
                 }
             }
         }
@@ -7852,6 +7854,10 @@ mod tests {
             let offset = point_drag_offset(&sketch, &sketch.points[*handle].id, pointer_at);
             assert_eq!(point_drag_offset(&sketch, &sketch.points[*handle].id, sketch.point(*handle).unwrap()), Vec2::ZERO);
             assert!((pointer_at + offset).dist(sketch.point(*handle).unwrap()) < 1e-9);
+            let handle_position = sketch.point(*handle).unwrap();
+            let pointer_near_handle = handle_position + Vec2::new(-0.25, 0.5);
+            let handle_offset = point_drag_offset(&sketch, &sketch.points[*handle].id, pointer_near_handle);
+            assert!((pointer_near_handle + handle_offset).dist(handle_position) < 1e-9);
             let motion = Vec2::new(2.0, -3.0);
             assert!((pointer_at + motion + offset).dist(sketch.point(*handle).unwrap() + motion) < 1e-9);
         }
