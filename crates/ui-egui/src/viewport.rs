@@ -7843,7 +7843,7 @@ mod tests {
         assert!(hidden_points.is_empty());
         assert!(selected_spline_handle_mirrors(&sketch, &[]).is_empty());
 
-        let selection = [Sel::SketchCurve { id: "s1".into() }];
+        let selection = [Sel::SketchCurve { id: "s1".into(), sketch: None }];
         let (selected, visible_points) = selected_spline_handles(&sketch, &selection);
         assert_eq!(selected, ["s1".to_string()].into_iter().collect());
         let CurveKind::Spline { handles, .. } = &sketch.curves[spline].kind else { panic!("expected a fit spline") };
