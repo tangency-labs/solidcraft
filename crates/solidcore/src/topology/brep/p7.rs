@@ -90,6 +90,12 @@
 //!   changes are not notified), which `MakeFace` then replaces with its own
 //!   (upstream: one shared surface whose owner `MakeFace` restores). It claims its
 //!   marks through a fresh [`Marks`] record per call, as each call takes a new mark.
+//! - **Original-surface transfer ownership (#894).** Deliberately correcting pinned
+//!   C++ `SmBrep.cpp:18859-18889`, the original-transfer path never restores the old
+//!   owner after installation, even on a late failure. The installed original keeps
+//!   its identity and partial topology; its owner, geometry-owner registration and
+//!   cached tolerance agree with the installed face before returning the failure.
+//!   The legacy-copy path retains upstream's owner-restoration behavior.
 //! - **`MakeFace`** returns nothing when `MakeFaceTopology` fails; upstream still hands
 //!   back the region and shell it may have made (`MakeFaceWithCurves` warns about it).
 //! - **`GlueEdgesGeneral`**: the arena cannot share one curve between two edges, so
@@ -877,31 +883,46 @@ fn make_face_transfer_attempt_with_state(
             &options,
         )
     };
-    // Native restores the pre-existing owner before checking topology status.
-    transfer.surface_mut(b)?.set_owner(old_owner);
+    // Only the legacy copy leaves the original outside the installed face.
+    if legacy {
+        transfer.surface_mut(b)?.set_owner(old_owner);
+    }
     out.region = attempt.region;
     out.shell = attempt.shell;
     out.face = attempt.face;
-    if let Err(error) = attempt.status {
-        if matches!(error, SolidError::Upstream { .. }) {
-            out.status = Err(error);
-            return Ok(());
+    let result = (|| {
+        if let Err(error) = attempt.status {
+            if matches!(error, SolidError::Upstream { .. }) {
+                out.status = Err(error);
+                return Ok(());
+            }
+            return Err(error);
         }
-        return Err(error);
+        let new_face = attempt.face.ok_or_else(|| null("MakeFace made no face"))?;
+        b.face_mut(new_face)?.uv_domain = *uv_domain;
+        let tol = b.tolerance();
+        face_set_tolerance(b, new_face, tol, true, true)?;
+        let owner = this_face(new_face);
+        if legacy {
+            transfer.install(b, new_face)?;
+        }
+        transfer.surface_mut(b)?.set_owner(Some(owner));
+        b.geometry_owner_keys
+            .insert(EntityRef::Face(new_face), owner);
+        b.sync_face_surface_tolerance(new_face)?;
+        Ok(())
+    })();
+    if !legacy && (result.is_err() || out.status.is_err()) {
+        if let Some(face) = transfer.installed_face() {
+            // Topology may fail after installing the original. Keep that partial
+            // result canonical without changing its status or construction order.
+            let owner = this_face(face);
+            transfer.surface_mut(b)?.set_owner(Some(owner));
+            b.geometry_owner_keys.insert(EntityRef::Face(face), owner);
+            b.sync_face_surface_tolerance(face)?;
+        }
     }
-    let new_face = attempt.face.ok_or_else(|| null("MakeFace made no face"))?;
-    b.face_mut(new_face)?.uv_domain = *uv_domain;
-    let tol = b.tolerance();
-    face_set_tolerance(b, new_face, tol, true, true)?;
-    let owner = this_face(new_face);
-    if legacy {
-        transfer.install(b, new_face)?;
-    }
-    transfer.surface_mut(b)?.set_owner(Some(owner));
-    b.geometry_owner_keys
-        .insert(EntityRef::Face(new_face), owner);
-    b.sync_face_surface_tolerance(new_face)?;
-    Ok(())
+    result
 }
 
 /// `MakeFace`: makes a face on `surface` (over `uv_domain`) in `region` (the infinite
@@ -2960,6 +2981,113 @@ mod tests {
         // rather than merely equal geometry or a copied owner field.
         assert_eq!(installed.notify_key(), Some(key));
         assert_eq!(installed.owner(), Some(face_ref(face)));
+        assert_eq!(
+            b.geometry_owner_keys.get(&EntityRef::Face(face)),
+            Some(&face_ref(face))
+        );
+        assert_eq!(
+            installed.owner_zone_tol_3d(),
+            Some(b.face(face).unwrap().tolerance)
+        );
+    }
+
+    #[test]
+    fn transfer_failure_keeps_surface_owner_consistent_with_its_location() {
+        // Invalid arena ids are Rust-only failure injection, never C++ inputs.
+        for late in [false, true] {
+            for old_owner in [None, Some(face_ref(FaceId::from_index(99)))] {
+                let mut k = Kernel::default();
+                let mut b = if late {
+                    Brep::new_with_infinite_region().unwrap()
+                } else {
+                    Brep::new()
+                };
+                let mut surface = plane();
+                surface.set_owner(old_owner);
+                let key = k
+                    .context
+                    .geometry_key(surface.notify_identity_slot())
+                    .unwrap();
+                let mut transfer = p6::FaceSurfaceTransfer::new(surface);
+                let mut out = MakeFaceAttempt {
+                    status: Ok(()),
+                    region: None,
+                    shell: None,
+                    face: None,
+                };
+                let mut records = std::collections::BTreeMap::new();
+                let mut attributes = AttributeStore::default();
+                let mut env = ed::NotifyEnv {
+                    records: &mut records,
+                    attributes: &mut attributes,
+                    context: None,
+                    key_of: &key_of,
+                };
+                let vertices = [VertexId::from_index(99)];
+                let result = make_face_transfer_attempt_with_state(
+                    &mut k,
+                    &mut b,
+                    None,
+                    &[],
+                    &[],
+                    if late { &vertices } else { &[] },
+                    &mut transfer,
+                    &dom(),
+                    OrientType::Same,
+                    &MakeFaceOptions::default(),
+                    &face_ref,
+                    &mut ed::NotifyState::from_env(&mut env),
+                    false,
+                    &mut out,
+                );
+                assert_eq!(out.region, None);
+                if late {
+                    assert!(matches!(result, Err(SolidError::NotFound { .. })));
+                    assert!(out.status.is_ok());
+                    let face = out.face.unwrap();
+                    assert!(out.shell.is_some());
+                    assert_eq!(transfer.installed_face(), Some(face));
+                    assert!(
+                        matches!(transfer.into_location().unwrap(), p6::FaceSurfaceLocation::Installed(id) if id == face)
+                    );
+                    let record = b.face(face).unwrap();
+                    let installed = record.surface.as_ref().unwrap();
+                    assert!(matches!(
+                        installed.kind(),
+                        crate::surface::surface::SurfaceKind::Plane(_)
+                    ));
+                    assert_eq!(installed.notify_key(), Some(key));
+                    assert_eq!(installed.owner(), Some(face_ref(face)));
+                    assert_eq!(
+                        b.geometry_owner_keys.get(&EntityRef::Face(face)),
+                        Some(&face_ref(face))
+                    );
+                    assert_eq!(installed.owner_zone_tol_3d(), Some(record.tolerance));
+                } else {
+                    result.unwrap();
+                    assert!(matches!(
+                        out.status,
+                        Err(SolidError::Upstream {
+                            code: crate::error::SM_ERR_NULL_POINTER,
+                            ..
+                        })
+                    ));
+                    assert_eq!(out.face, None);
+                    assert_eq!(out.shell, None);
+                    assert!(b.faces().is_empty());
+                    assert!(b.geometry_owner_keys.is_empty());
+                    match transfer.into_location().unwrap() {
+                        p6::FaceSurfaceLocation::Owned(surface) => {
+                            assert_eq!(surface.notify_key(), Some(key));
+                            assert_eq!(surface.owner(), old_owner);
+                        }
+                        p6::FaceSurfaceLocation::Installed(_) => {
+                            panic!("surface installed before early failure")
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]
