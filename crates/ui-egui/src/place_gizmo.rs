@@ -372,7 +372,10 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     }
     if dragging {
         // The readout wraps to a half turn either way; the grab offset can carry the raw angle past it.
-        let shown = (angle + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+        let mut shown = (angle + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI;
+        if shown <= -std::f64::consts::PI + 1e-9 {
+            shown = std::f64::consts::PI;
+        }
         angle_label(painter, gs, bs, shown, on_point.as_deref().map(|name| (name, axis_colour(name, &t))), &t);
     }
 }
