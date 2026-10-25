@@ -2197,7 +2197,17 @@ impl Surface {
         //                   more than 1 when curve wanders in and out of surface
         //                   boundary by more than dDistanceTolerance
         if coincident {
-            // drop curve to surface
+            // drop curve to surface (the drop's trace gets the surface's cache,
+            // `smsurf_GetSurfaceCache`: the face's, through a face-aware context)
+            let mut from_context;
+            let cache = match (cache, context.as_mut()) {
+                (Some(c), _) => Some(c),
+                (None, Some(context)) if self.face()?.is_some() => {
+                    from_context = context.build_surface_cache(k, self, surface_handle)?;
+                    Some(&mut from_context)
+                }
+                (None, _) => None,
+            };
             let dropped = self.drop_and_trim_curve_in::<NoObject, O>(
                 k,
                 cache,

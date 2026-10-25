@@ -102,7 +102,7 @@ use solidcore::topology::topology::Topology;
 use solidcore::topology::vertex as vx;
 use solidcore::query::brep::{BrepIdentity, BrepQuery};
 use solidcore::topology::{
-    Brep, BrepId, EdgeId, EdgeuseId, FaceId, LoopId, RegionId, VertexId, VertexuseId,
+    Brep, BrepId, EdgeId, EdgeuseId, FaceId, LoopId, LoopuseId, RegionId, VertexId, VertexuseId,
 };
 use solidcore::{EntityRef, SolidError};
 use solidcore_ffi::units::boolean_topology_intersector_p1::{self as ffi, Op};
@@ -617,6 +617,8 @@ pub(super) const K_VERTEXUSE: u8 = 12;
 pub(super) const K_TRIM_CURVE: u8 = 13;
 /// A region (classification results).
 const K_REGION: u8 = 14;
+/// A loop use a face's trimmed surface cache names (Rust side only, never exported).
+const K_LOOPUSE: u8 = 15;
 
 /// An object handle: the B-rep (`2` for the curve stores, `-1` for the intersector),
 /// the kind and the index. Ordered as the shim sorts (`brep`, `kind`, `index`). A
@@ -923,6 +925,37 @@ impl Two {
             .and_then(|b| eu1::primary_edgeuse(b, eid(e)).ok().flatten())
             .is_some()
     }
+}
+
+/// The handle of an entity of B-rep `b` a face's trimmed surface cache names (its
+/// faces, edges, vertices, loop uses, edge uses and vertex uses).
+fn cache_entity_h(b: i8, e: EntityRef) -> solidcore::Result<H> {
+    Ok(match e {
+        EntityRef::Face(f) => hd(b, K_FACE, f.index()),
+        EntityRef::Edge(x) => hd(b, K_EDGE, x.index()),
+        EntityRef::Vertex(v) => hd(b, K_VERTEX, v.index()),
+        EntityRef::Loopuse(lu) => hd(b, K_LOOPUSE, lu.index()),
+        EntityRef::Edgeuse(eu) => hd(b, K_EDGEUSE, eu.index()),
+        EntityRef::Vertexuse(vu) => hd(b, K_VERTEXUSE, vu.index()),
+        _ => return Err(invalid("entity a surface cache does not name")),
+    })
+}
+
+/// The entity of B-rep `b` a surface cache handle names (inverse of
+/// [`cache_entity_h`]).
+fn cache_h_entity(b: i8, h: H) -> solidcore::Result<EntityRef> {
+    if h.b != b {
+        return Err(invalid("surface cache handle of another B-rep"));
+    }
+    Ok(match h.kind {
+        K_FACE => EntityRef::Face(fid(h)),
+        K_EDGE => EntityRef::Edge(eid(h)),
+        K_VERTEX => EntityRef::Vertex(vid(h)),
+        K_LOOPUSE => EntityRef::Loopuse(LoopuseId::from_index(h.i)),
+        K_EDGEUSE => EntityRef::Edgeuse(EdgeuseId::from_index(h.i)),
+        K_VERTEXUSE => EntityRef::Vertexuse(VertexuseId::from_index(h.i)),
+        _ => return Err(invalid("handle a surface cache does not name")),
+    })
 }
 
 impl ClassGeometry<H> for Two {
@@ -1967,6 +2000,30 @@ impl IntersectorBrep<H> for Two {
     }
     fn topology_objects(&self) -> &dyn TopologyObjects<H> {
         self
+    }
+    fn face_cache_target(&mut self, face: H) -> solidcore::Result<ti::FaceCacheTarget<'_, H>> {
+        if face.kind != K_FACE {
+            return Err(invalid("not a face handle"));
+        }
+        let b = face.b;
+        let surface = self
+            .face_surface_h(face)
+            .flatten()
+            .ok_or_else(|| invalid("face without surface"))?;
+        Ok(ti::FaceCacheTarget {
+            brep: self.brep_m(face)?,
+            face: fid(face),
+            surface,
+            handles: Box::new(move |e| cache_entity_h(b, e)),
+            entities: Box::new(move |h| cache_h_entity(b, h)),
+        })
+    }
+    fn face_entity_handles(&self, face: H) -> solidcore::Result<ti::EntityHandles<H>> {
+        if face.kind != K_FACE {
+            return Err(invalid("not a face handle"));
+        }
+        let b = face.b;
+        Ok(Box::new(move |e| cache_entity_h(b, e)))
     }
     fn brep_delete_face(&mut self, k: &mut Kernel, brep: H, face: H) -> solidcore::Result<()> {
         if brep.kind != K_BREP || face.b != brep.b {

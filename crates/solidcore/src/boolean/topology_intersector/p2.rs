@@ -119,8 +119,8 @@ use super::p1::{
     add_unique, brep_make_edge_in_face, can_imprint, cc_insert_topology_intersections, contains,
     eval_curve_point, face_face_intersect_curves, find_common_elements, ignore_soft,
     intersect_shell_vertices, intersect_wire_lamina_edges, new_curve_classification,
-    set_edge_class, surface_coincidence_check, FaceIntersectOutputs, IntersectionCurves,
-    IntersectionResults, IntersectorBrep, TopologyIntersector,
+    set_edge_class, solve_with_face_caches, surface_coincidence_check, FaceIntersectOutputs,
+    IntersectionCurves, IntersectionResults, IntersectorBrep, TopologyIntersector,
 };
 
 const OP_REGISTER: &str = "boolean::topology_intersector::p2::register_existing_ssi";
@@ -866,8 +866,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
         // temporarily disable EditingEnabled bit; Intersect Edge->Curve with Brep
         let old_edit = brep.set_editing_enabled(target, false)?;
-        let solved = {
-            let objects = brep.topology_objects();
+        let solved = solve_with_face_caches(k, brep, |objects| {
             let curve_ref = CurveRef {
                 curve: objects.curve(curve)?,
                 handle: curve,
@@ -886,7 +885,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     opt_vectors: &[],
                 },
             )
-        };
+        });
         brep.set_editing_enabled(target, old_edit)?;
         let solutions = solved?;
 
@@ -1105,8 +1104,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             .ok_or(invalid(OP_CLOSE_LOOP, "edge handle is unknown"))?;
         let tolerance = tol_of(geometry, edge)?;
         let old_edit = geometry.set_editing_enabled(brep, false)?;
-        let solved = {
-            let objects = geometry.topology_objects();
+        let solved = solve_with_face_caches(k, geometry, |objects| {
             let curve_ref = CurveRef {
                 curve: objects.curve(curve)?,
                 handle: curve,
@@ -1125,7 +1123,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     opt_vectors: &[],
                 },
             )
-        };
+        });
         geometry.set_editing_enabled(brep, old_edit)?;
 
         // check every solution - for a coincident solution

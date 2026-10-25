@@ -160,3 +160,13 @@ why = "same result topology and vertex positions, different vertex list order; d
 unit = "blend.fillet_executive_p1"
 case = "remove_topo_edges_mouse_two_struts"
 why = "RemoveTopoEdges with topo edges 1 and 2 of Mouse.smb in sequence: after the second deletion one edge use's UV curve on the plane differs (faces, surfaces and the remaining edge agree; each edge alone matches); in DeleteEdge / DeleteTopologicalVertex / SetSurface, not located (plan/findings.md: 'blend.fillet_executive_p1, RemoveTopoEdges and SetBevelCorner')"
+
+[[mismatch]]
+unit = "boolean.merge_p3"
+case = "piecewise_box_other_shell_vertex_imprint_2"
+why = "shell vertex on a box edge: C++ splits the edge (13 edges), Rust imprints it on a face (12 edges); deferred on main at the face solve's surface cache (SmFace handle of a surface's face), compared since the intersector's solves reach their faces' caches (plan/findings.md: 'boolean.merge_p3: shell vertex on a box edge finds no edge solution')"
+
+[[mismatch]]
+unit = "boolean.merge_p3"
+case = "piecewise_box_other_shell_vertex_imprint_3"
+why = "shell vertex on a box edge: C++ splits the edge (13 edges), Rust imprints it on a face (12 edges); deferred on main at the face solve's surface cache (SmFace handle of a surface's face), compared since the intersector's solves reach their faces' caches (plan/findings.md: 'boolean.merge_p3: shell vertex on a box edge finds no edge solution')"
