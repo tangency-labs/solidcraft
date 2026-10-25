@@ -4537,3 +4537,78 @@ fn join_leaves_a_hidden_body_alone() {
     run(&mut s, "browser.visibility", json!({"items": ["Plate (2)"], "visible": true}));
     assert_eq!(s.model.state().bodies.len(), 2);
 }
+
+/// A pre-command check that refuses one command id.
+fn refusing(id: &'static str) -> CommandCheck {
+    std::sync::Arc::new(move |cmd: &str, _: &Value, _: &Session| if cmd == id { Err(format!("{cmd} is not allowed here")) } else { Ok(()) })
+}
+
+#[test]
+fn without_a_command_check_every_command_runs() {
+    let mut s = Session::default();
+    assert!(s.command_check().is_none());
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0]}));
+    assert_eq!(s.doc.features.len(), 2);
+}
+
+#[test]
+fn a_command_check_refuses_a_command_and_leaves_the_design() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    s.set_command_check(Some(refusing("solid.box")));
+    let doc = s.doc.clone();
+    let (undo, revision) = (s.undo.len(), s.revision);
+    let r = s.execute("solid.box", &json!({"length": 5, "width": 5, "height": 5, "corner": [20, 0, 0]}));
+    match r {
+        Err(EngineError::Refused { cmd, reason }) => {
+            assert_eq!(cmd, "solid.box");
+            assert_eq!(reason, "solid.box is not allowed here");
+        }
+        other => panic!("expected a refusal, got {other:?}"),
+    }
+    assert!(std::sync::Arc::ptr_eq(&doc, &s.doc), "the design is unchanged");
+    assert_eq!((s.undo.len(), s.revision), (undo, revision));
+    // Other commands still run, and the check stays with the session across new designs,
+    // scripts and previews.
+    run(&mut s, "file.new", json!({"name": "Next"}));
+    assert!(s.execute("solid.box", &json!({"length": 1, "width": 1, "height": 1})).is_err(), "kept by file.new");
+    assert!(s.run_script(&json!([{"command": "solid.box", "params": {"length": 1, "width": 1, "height": 1}}])).is_err(), "scripts");
+    assert!(s.preview(&[("solid.box".into(), json!({"length": 1, "width": 1, "height": 1}))]).is_err(), "previews");
+    s.set_command_check(None);
+    run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1}));
+}
+
+#[test]
+fn a_command_check_can_count_the_features() {
+    const MAX: usize = 3;
+    let mut s = Session::default();
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<(String, Value)>::new()));
+    let log = seen.clone();
+    s.set_command_check(Some(std::sync::Arc::new(move |cmd: &str, params: &Value, s: &Session| {
+        if let Ok(mut log) = log.lock() {
+            log.push((cmd.to_string(), params.clone()));
+        }
+        if cmd.starts_with("solid.") && s.doc.features.len() >= MAX { Err(format!("at most {MAX} features")) } else { Ok(()) }
+    })));
+    for i in 0..MAX {
+        run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1, "corner": [i * 5, 0, 0]}));
+    }
+    let r = s.execute("solid.box", &json!({"length": 1, "width": 1, "height": 1, "corner": [50, 0, 0]}));
+    assert!(matches!(&r, Err(EngineError::Refused { .. })), "{r:?}");
+    assert_eq!(r.err().map(|e| e.to_string()).as_deref(), Some("at most 3 features"));
+    assert_eq!(s.doc.features.len(), MAX);
+    // The check saw each command's id and parameters.
+    let seen = seen.lock().map(|l| l.clone()).unwrap_or_default();
+    assert_eq!(seen.len(), MAX + 1);
+    assert!(seen.iter().all(|(id, p)| id == "solid.box" && p["length"] == 1));
+}
+
+#[test]
+fn a_command_check_that_panics_refuses_the_command() {
+    let mut s = Session::default();
+    s.set_command_check(Some(std::sync::Arc::new(|_: &str, _: &Value, _: &Session| -> std::result::Result<(), String> { panic!("host bug") })));
+    let r = s.execute("solid.box", &json!({"length": 1, "width": 1, "height": 1}));
+    assert!(matches!(r, Err(EngineError::Internal(..))), "{r:?}");
+    assert!(s.doc.features.is_empty());
+}

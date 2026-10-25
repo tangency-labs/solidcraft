@@ -66,6 +66,10 @@ pub enum EngineError {
     BadParams { cmd: String, msg: String },
     #[error("{0}")]
     Other(String),
+    /// The host's pre-command check ([`Session::set_command_check`]) refused the command; the
+    /// message is the reason it gave.
+    #[error("{reason}")]
+    Refused { cmd: String, reason: String },
     /// A command panicked; the document was kept as it was (a bug: please report it).
     #[error("internal error in `{0}` (the design was kept as it was): {1}")]
     Internal(String, String),
@@ -325,6 +329,11 @@ impl ComputedCommands {
     }
 }
 
+/// A check an app that embeds the engine runs before every command ([`Session::set_command_check`]):
+/// it is shown the command's id, its parameters and the session (read only), and returns `Ok` to
+/// let the command run or `Err(reason)` to refuse it.
+pub type CommandCheck = Arc<dyn Fn(&str, &Value, &Session) -> std::result::Result<(), String> + Send + Sync>;
+
 /// An editing session on one design.
 /// Starts an upload of a file (its name, its bytes) to EasyPrint and returns at once; the host
 /// reports how it went and opens the answer itself. `Err`: it couldn't start.
@@ -442,6 +451,9 @@ pub struct Session {
     /// that did is no edit of the design before it, so [`Session::execute`] never takes it for a
     /// change of render intent or part properties alone.
     replacements: u64,
+    /// The host's pre-command check (none by default: every command may run). It belongs to the
+    /// host, not the design: opening or starting a design keeps it, and scratch copies carry it.
+    command_check: Option<CommandCheck>,
     /// Record this session's top-level commands in the crash journal (the app's own design;
     /// never previews or other scratch sessions). See [`crash`].
     pub crash_journal: bool,
@@ -621,6 +633,7 @@ impl Session {
             #[cfg(test)]
             evaluations: 0,
             motion_traces: Default::default(),
+            command_check: None,
             crash_journal: false,
         }
     }
@@ -644,8 +657,10 @@ impl Session {
         // next frame, so commands sent right after `doc.open` or `file.new` are kept.
         let crash_journal = self.crash_journal;
         let replacements = self.replacements.wrapping_add(1);
+        let command_check = self.command_check.take();
         *self = fresh;
         self.crash_journal = crash_journal;
+        self.command_check = command_check;
         self.auto_project = auto_project;
         self.metric_tap_drill_major_less_pitch = metric_tap_drill_major_less_pitch;
         self.param_check = param_check;
@@ -655,6 +670,32 @@ impl Session {
         self.checkpoints = checkpoints;
         self.next_checkpoint = next_checkpoint;
         self.replacements = replacements;
+    }
+
+    /// Install (or with `None` remove) the check [`Session::execute`] runs before every command,
+    /// for an app that embeds the engine and decides which commands may run. A refusal comes back
+    /// as [`EngineError::Refused`] and leaves the session as it was.
+    pub fn set_command_check(&mut self, check: Option<CommandCheck>) {
+        self.command_check = check;
+    }
+
+    /// The check installed with [`Session::set_command_check`], to hand on to another session.
+    pub fn command_check(&self) -> Option<CommandCheck> {
+        self.command_check.clone()
+    }
+
+    /// Ask the host's check, if any, whether `spec` may run with `params`. A check that panics
+    /// refuses the command as an internal error instead of taking the session down.
+    fn check_command(&self, spec: &CommandSpec, params: &Value) -> Result<()> {
+        let Some(check) = &self.command_check else { return Ok(()) };
+        // The check sees the parameters as the command will (no parameters: an empty object).
+        let empty = Value::Object(Default::default());
+        let params = if params.is_null() { &empty } else { params };
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| check(spec.id, params, self))) {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(reason)) => Err(EngineError::Refused { cmd: spec.id.to_string(), reason }),
+            Err(_) => Err(EngineError::Internal(spec.id.to_string(), "the host's command check failed".into())),
+        }
     }
 
     /// The design has changes not in its file: in the document, or in what is hidden.
@@ -1131,7 +1172,9 @@ impl Session {
     }
 
     /// Run a command with JSON parameters (no dialogs). Undoable commands record an undo step
-    /// when they change the document; a failing or panicking command leaves it unchanged.
+    /// when they change the document; a failing or panicking command leaves it unchanged. The
+    /// host's check ([`Session::set_command_check`]) is asked first, on every call (commands that
+    /// a command runs through `execute` included).
     ///
     /// A command that takes `live` ([`CommandSpec::live`]) run with `live: true` is one frame of
     /// an interactive gesture: the model shows its sketch's new solution and keeps every later
@@ -1154,6 +1197,8 @@ impl Session {
             }
         }
         (spec.enabled)(self).map_err(|why| EngineError::Disabled(spec.id.to_string(), why))?;
+        // Before anything changes: a refusal leaves the session exactly as it was.
+        self.check_command(spec, params)?;
         let before = Snapshot {
             label: spec.label.to_string(),
             doc: self.doc.clone(),
@@ -1394,6 +1439,7 @@ impl Session {
             #[cfg(test)]
             evaluations: 0,
             motion_traces: self.motion_traces.clone(),
+            command_check: self.command_check.clone(),
             crash_journal: false,
         }
     }
