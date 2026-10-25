@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/solidcore", "crates/solidcore-ffi", "crates/difftest", "crates/nurbs-grid-mesh", "crates/ssi"]
+members = ["crates/solidcore", "crates/solidcore-ffi", "crates/difftest", "crates/nurbs-grid-mesh", "crates/ssi", "crates/solidcore-ssi"]
 default-members = ["crates/solidcore"]
 
 [workspace.package]

@@ -1,5 +1,6 @@
-//! `--ssi-corpus`: scores the C++ reference, the Rust port and the `ssi` crate against
-//! jyviko's exact ground-truth surface/surface intersection corpus
+//! `--ssi-corpus`: scores the C++ reference, the Rust port, the `ssi` crate and the `ssi`
+//! crate through `solidcore-ssi` against jyviko's exact ground-truth surface/surface
+//! intersection corpus
 //! (<https://github.com/jyviko/ssi-corpus>, commit `b04c8a6`, MIT OR Apache-2.0; fetched
 //! into `corpus/ssi/` by `scripts/fetch-ssi-corpus.sh`, never committed).
 //!
@@ -9,16 +10,20 @@
 //! ([`score`]); where the C++ and the port both answered, their outputs are also
 //! compared with the difftest rule (topology identical, values within
 //! [`crate::REL_TOL`]). The `ssi` engine ([`ssi_engine`]) is a method of its own, never
-//! compared for parity, and the only one a build without the `cpp` feature runs. This
+//! compared for parity; the `solidcore-ssi` engine ([`solidcore_ssi_engine`]) runs it
+//! from solidcore's own surfaces into the port's output form, sampled as the port's is
+//! ([`kernel`]). Those two are the engines a build without the `cpp` feature runs. This
 //! is a correctness report: it never changes a unit's difftest status.
 
 pub mod case;
 #[cfg(feature = "cpp")]
 pub mod engine;
 pub mod geom;
+pub mod kernel;
 pub mod polyset;
 pub mod raw;
 pub mod score;
+pub mod solidcore_ssi_engine;
 pub mod ssi_engine;
 
 use std::collections::BTreeMap;
@@ -43,12 +48,16 @@ pub const TIMEOUT: Duration = Duration::from_secs(300);
 /// The default approximation tolerance.
 pub const DEFAULT_TOL: &str = "1e-6";
 
-/// The engines, in report order: upstream SMLib (C++), the Rust port, the `ssi` crate.
-pub const ENGINES: [&str; 3] = ["cpp", "rust", "ssi"];
+/// How many engines there are.
+pub const N_ENGINES: usize = 4;
+
+/// The engines, in report order: upstream SMLib (C++), the Rust port, the `ssi` crate,
+/// and the `ssi` crate through `solidcore-ssi` on solidcore's own surfaces.
+pub const ENGINES: [&str; N_ENGINES] = ["cpp", "rust", "ssi", "solidcore-ssi"];
 
 /// Whether this build runs each of [`ENGINES`]: `cpp` and `rust` need the C++ kernel
-/// (feature `cpp`), `ssi` nothing.
-pub const BUILT: [bool; 3] = [cfg!(feature = "cpp"), cfg!(feature = "cpp"), true];
+/// (feature `cpp`), `ssi` and `solidcore-ssi` nothing.
+pub const BUILT: [bool; N_ENGINES] = [cfg!(feature = "cpp"), cfg!(feature = "cpp"), true, true];
 
 /// Whether the C++ and the port both run, so their outputs are compared for parity.
 const PARITY: bool = BUILT[0] && BUILT[1];
@@ -147,13 +156,13 @@ pub fn case_files(root: &Path, glob: Option<&str>) -> Result<Vec<PathBuf>, Harne
     Ok(v)
 }
 
-/// `--ssi-case <case.json> <tol|default> <cpp|rust|ssi> <out.json>`: one engine on one
+/// `--ssi-case <case.json> <tol|default> <cpp|rust|ssi|solidcore-ssi> <out.json>`: one engine on one
 /// case, writing the corpus runner's JSON. Exit `0` on success (including a deferred Rust
 /// run and a non-success status), `3` when a surface cannot be built, `2` otherwise.
 /// `cpp` and `rust` need the `cpp` feature.
 pub fn run_child(args: &[String]) -> ExitCode {
     let [case_path, tol, engine_name, out_path] = args else {
-        eprintln!("usage: difftest --ssi-case <case.json> <tol|default> <cpp|rust|ssi> <out.json>");
+        eprintln!("usage: difftest --ssi-case <case.json> <tol|default> <cpp|rust|ssi|solidcore-ssi> <out.json>");
         return ExitCode::from(2);
     };
     let tol = match parse_tol(tol) {
@@ -176,6 +185,7 @@ pub fn run_child(args: &[String]) -> ExitCode {
         #[cfg(feature = "cpp")]
         "rust" => engine::run_rust(&case, tol),
         "ssi" => ssi_engine::run_ssi(&case, tol),
+        "solidcore-ssi" => solidcore_ssi_engine::run_solidcore_ssi(&case, tol),
         other if ENGINES.contains(&other) => {
             eprintln!("difftest: engine `{other}` needs feature `cpp`");
             return ExitCode::from(2);
@@ -240,12 +250,12 @@ fn read_raw(path: &Path) -> RunResult {
 fn run_children(
     files: &[PathBuf],
     tol: &str,
-    rawdirs: &[PathBuf; 3],
+    rawdirs: &[PathBuf; N_ENGINES],
     jobs: usize,
-) -> Result<Vec<[RunResult; 3]>, HarnessError> {
+) -> Result<Vec<[RunResult; N_ENGINES]>, HarnessError> {
     let exe =
         std::env::current_exe().map_err(|e| HarnessError::new(format!("current_exe: {e}")))?;
-    let mut results: Vec<[RunResult; 3]> = files
+    let mut results: Vec<[RunResult; N_ENGINES]> = files
         .iter()
         .map(|_| std::array::from_fn(|_| Err("not run".to_string())))
         .collect();
@@ -374,13 +384,13 @@ fn truncate(s: &str, n: usize) -> String {
 /// timing.
 fn score_all(
     cases: &[SsiCase],
-    results: &[[RunResult; 3]],
+    results: &[[RunResult; N_ENGINES]],
     acc_tol: Option<f64>,
     cov_floor: f64,
     names: &BTreeMap<i64, String>,
     jobs: usize,
 ) -> Vec<Vec<Option<Score>>> {
-    let grade = |case: &SsiCase, res: &[RunResult; 3]| -> Vec<Option<Score>> {
+    let grade = |case: &SsiCase, res: &[RunResult; N_ENGINES]| -> Vec<Option<Score>> {
         res.iter()
             .zip(BUILT)
             .map(|(r, run)| match r {
@@ -502,7 +512,7 @@ pub fn run_corpus(root: &Path, opts: &CorpusOptions) -> ExitCode {
     let names = status_names(root);
     let acc_tol = tol.map(|t| 10.0 * t);
     let cov_floor = if tol.is_none() { 5e-3 } else { 0.0 };
-    let mut counts: [BTreeMap<String, usize>; 3] = Default::default();
+    let mut counts: [BTreeMap<String, usize>; N_ENGINES] = Default::default();
     let (mut compared, mut identical, mut same_verdict) = (0usize, 0usize, 0usize);
     let mut entries = Vec::new();
     let all_scores = score_all(&cases, &results, acc_tol, cov_floor, &names, opts.jobs);
@@ -532,7 +542,7 @@ pub fn run_corpus(root: &Path, opts: &CorpusOptions) -> ExitCode {
         }
         // Rust vs C++ parity where both answered
         let mut parity = "-".to_string();
-        if let [Ok(c), Ok(r), _] = res {
+        if let [Ok(c), Ok(r), ..] = res {
             if r.deferred.is_none() {
                 compared += 1;
                 let d = compare(&c.parity_output(), &r.parity_output(), &[]);

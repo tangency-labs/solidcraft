@@ -17,6 +17,8 @@ solidcore = { path = "../solidcore" }
 solidcore-ffi = { path = "../solidcore-ffi" }
 # The `ssi` engine of --ssi-corpus (a surface/surface intersection of its own, not a port).
 ssi = { path = "../ssi" }
+# The `solidcore-ssi` engine of --ssi-corpus (`ssi` behind the port's inputs and output).
+solidcore-ssi = { path = "../solidcore-ssi" }
 serde = { version = "1", features = ["derive"] }
 # float_roundtrip: parse decimals exactly (correctly rounded, as C strtod), not to within 1 ULP
 serde_json = { version = "1", features = ["float_roundtrip"] }

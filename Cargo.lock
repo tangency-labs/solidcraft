@@ -28,6 +28,7 @@ dependencies = [
  "serde_json",
  "solidcore",
  "solidcore-ffi",
+ "solidcore-ssi",
  "ssi",
  "toml",
 ]
@@ -198,6 +199,14 @@ version = "0.1.0"
 dependencies = [
  "cc",
  "serde_json",
+]
+
+[[package]]
+name = "solidcore-ssi"
+version = "0.1.0"
+dependencies = [
+ "solidcore",
+ "ssi",
 ]
 
 [[package]]

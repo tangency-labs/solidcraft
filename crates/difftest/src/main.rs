@@ -12,7 +12,7 @@
 //!          --jobs N (-j; default 1, 0 = all cores)   # units in N child processes (`difftest::jobs`)
 //! cargo run -p difftest --features cpp -- --unit <id> --fuzz N [--fuzz-out <dir>]   # FFI guard probing
 //! cargo run -p difftest --features cpp -- --ssi-corpus [--tol 1e-6|default] [--jobs N] [glob]
-//! cargo run -p difftest -- --ssi-corpus [glob]   # the `ssi` engine only; no `cpp` feature needed
+//! cargo run -p difftest -- --ssi-corpus [glob]   # the `ssi` and `solidcore-ssi` engines; no `cpp` needed
 //! cargo run -p difftest -- --solidcraft-cases [glob]   # Rust only; no `cpp` feature needed
 //! cargo run -p difftest --features cpp -- --green --digest-dir <dir> [--digest-debug]   # Rust side
 //!          only, one `<dir>/<unit>.digest` per unit (native vs wasm32: scripts/wasm-digest.sh)
