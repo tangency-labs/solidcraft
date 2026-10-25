@@ -750,7 +750,9 @@ impl Session {
         for f in self.doc.features.iter().filter(|f| !matches!(f.kind, solidcraft_doc::FeatureKind::FrameMember { .. })) {
             let Some(r) = self.model.result(f.id).filter(|r| r.error.is_none() && !r.skipped && !r.stale) else { continue };
             let made: Vec<&str> = r.state.bodies.iter().filter(|b| b.feature == f.id).map(|b| b.name.as_str()).collect();
-            reserve.extend(made.iter().filter(|n| solidcraft_doc::is_counted_body_name(n) && !self.doc.reserved_body_names.contains(**n)).map(|n| n.to_string()));
+            reserve.extend(
+                made.iter().filter(|n| solidcraft_doc::is_counted_body_name(n) && !self.doc.reserved_body_names.contains(**n)).map(|n| n.to_string()),
+            );
             let mut names = f.body_names.clone();
             names.resize(names.len().max(made.len()), String::new());
             for (slot, name) in names.iter_mut().zip(&made) {
