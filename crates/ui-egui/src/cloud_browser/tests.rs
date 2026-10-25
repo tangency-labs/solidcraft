@@ -121,6 +121,52 @@ fn home_controls_have_consistent_heights_and_left_alignment() {
 }
 
 #[test]
+fn file_actions_copy_a_local_design_to_cloud_without_changing_its_source() {
+    for navigation in [false, true] {
+        let (mut h, worker, _) = setup(true);
+        h.app.run("solid.box", json!({"length":8,"width":6,"height":4})).unwrap();
+        let path = h.dir.join("Local bracket.solidcraft");
+        h.app.run("file.save_as", json!({"path":path})).unwrap();
+        h.settle();
+        let original = std::fs::read(&path).unwrap();
+        if navigation {
+            h.app.home.show(0);
+            h.frames(2);
+            h.step(&json!({"click":{"handle":"home:save_cloud"}})).unwrap();
+        } else {
+            h.app.home.open = false;
+            h.frames(2);
+            h.step(&json!({"click":{"handle":"appbar:folder"}})).unwrap();
+            h.step(&json!({"widget":"Save to Cloud Project"})).unwrap();
+        }
+        h.frames(2);
+        assert!(h.app.cloud.browser.picker.is_some());
+        assert_eq!(h.app.session.path.as_deref(), path.to_str());
+        let picker = h.app.cloud.browser.picker.as_mut().unwrap();
+        picker.project = "Robot".into();
+        picker.name = "local-bracket".into();
+        h.frame();
+        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        let (job, save) = {
+            let jobs = worker.jobs.lock().unwrap();
+            let (job, Operation::Save { save, .. }) = jobs.last().unwrap() else { panic!("save required") };
+            (job.clone(), save.record.clone())
+        };
+        assert_eq!(save.destination.file, "parts/local-bracket");
+        job.update(|s| {
+            s.saved_locally = true;
+            s.phase = Phase::SavedLocally;
+            s.destination = Some(save.destination.clone());
+            s.revision = Some(save.id.clone());
+        })
+        .unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.cloud_binding().unwrap().destination, save.destination);
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+    }
+}
+
+#[test]
 fn home_browses_independent_repositories_and_keeps_entries_when_refresh_fails() {
     for dark in [false, true] {
         let (mut h, worker, destination) = setup(dark);
