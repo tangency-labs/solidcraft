@@ -619,8 +619,8 @@ fn a_circle_drawn_at_the_origin_can_be_moved() {
     let mut s = new_sketch();
     let drawn = run(&mut s, "sketch.circle.center", json!({"center": "origin", "radius": 10}));
     let c = ids(&drawn["curves"])[0].clone();
-    // The circle has a centre of its own, tied to the origin, instead of borrowing the origin.
-    assert!(sketch(&s).resolve_point(&format!("{c}.center")).is_some(), "the circle keeps a centre of its own");
+    // The circle's centre is a point of the sketch, and the sketch can name it.
+    assert!(sketch(&s).resolve_point(&format!("{c}.center")).is_some(), "the circle's centre is a point of the sketch");
     let moved = run(&mut s, "sketch.move", json!({"entities": [c], "translate": [10, 5]}));
     let sk = sketch(&s);
     let centre = sk.center(sk.curve_index(&c).unwrap()).unwrap();
