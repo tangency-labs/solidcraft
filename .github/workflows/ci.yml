@@ -38,6 +38,25 @@ permissions:
   contents: read
 
 jobs:
+  # What this run must check. `code`: false only when a pull_request or merge_group change
+  # touches nothing but docs (DOCS_ONLY below); those skip the build/test/difftest jobs, whose
+  # required checks then report "skipped" (passing). `full`: code and not a push to main. A
+  # push to main was already tested on the identical tree by the merge queue, so it runs only
+  # what publishes main's artifacts (difftest reports for the next PRs' exact-base ratchet,
+  # solids report); everything else is skipped there.
+  changes:
+    runs-on: blacksmith-2vcpu-ubuntu-2404
+    outputs:
+      code: ${{ steps.c.outputs.code }}
+      full: ${{ steps.c.outputs.full }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: c
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
+        run: scripts/ci/changes.sh "$EVENT" "$BASE" >> "$GITHUB_OUTPUT"
+
   ci-scripts:
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
@@ -56,6 +75,8 @@ jobs:
         run: scripts/ci/check-frozen-archives.sh "$BASE"
 
   clippy:
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
     runs-on: blacksmith-8vcpu-ubuntu-2404
     env:
       SOLIDCORE_CPP_DIR: ${{ github.workspace }}/.cpp
@@ -73,6 +94,8 @@ jobs:
         run: cargo clippy --workspace --all-targets --features difftest/cpp -- -D warnings
 
   test:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: blacksmith-8vcpu-ubuntu-2404
     env:
       SOLIDCORE_CPP_DIR: ${{ github.workspace }}/.cpp
@@ -84,13 +107,15 @@ jobs:
       # tests/primitives_solid.rs takes minutes unoptimised, so its four tests are
       # skipped here and run once, optimised, in the next step (the difftest-profile
       # solidcore it builds is the one the runner tests below reuse).
-      - run: >-
+      - if: needs.changes.outputs.full == 'true'
+        run: >-
           cargo test --workspace -- --exact
           --skip complete_spheres_and_tori_have_analytic_properties
           --skip primitives_are_closed_solids_with_analytic_properties
           --skip precise_sphere_properties_scale_and_translate
           --skip pole_free_sphere_tolerance_is_explicit_and_validated
       - name: Primitives solid tests (difftest profile)
+        if: needs.changes.outputs.full == 'true'
         run: cargo test --profile difftest -p solidcore --test primitives_solid
       # Solids: the primitives example's per-shape results (built, blocker, checks) for
       # the site's Solids page. It reuses the difftest-profile build above and exits 1
@@ -116,10 +141,14 @@ jobs:
       # [profile.difftest]); here rather than after the difftest run, so they no longer
       # add to its wall time.
       - uses: ./.github/actions/cpp-reference
+        if: needs.changes.outputs.full == 'true'
       - name: Difftest runner tests
+        if: needs.changes.outputs.full == 'true'
         run: cargo test --profile difftest -p difftest --features cpp
 
   wasm:
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
@@ -131,6 +160,8 @@ jobs:
 
   # Same packaging check the release workflow runs before publishing (no secrets).
   publish-dry-run:
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
@@ -140,6 +171,8 @@ jobs:
       - run: cargo publish -p solidcore --locked --dry-run
 
   deny:
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
@@ -154,6 +187,8 @@ jobs:
   # sweep's finished reports to the validated base with the same ratchet as `--baseline`;
   # `difftest` (the required check's name) fails unless every part succeeded.
   difftest-baseline:
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions:
       contents: read
@@ -191,8 +226,11 @@ jobs:
           retention-days: 1
 
   difftest-sweep:
-    # Starts with the other jobs (no `needs`): it is the critical path. Clippy with the cpp
-    # feature and the runner tests run in the clippy and test jobs, in parallel with this one.
+    # Starts right after `changes`: it is the critical path. Clippy with the cpp feature and
+    # the runner tests run in the clippy and test jobs, in parallel with this one. Also runs on
+    # pushes to main, where its reports are main's published set.
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: blacksmith-16vcpu-ubuntu-2404
     permissions:
       contents: read
@@ -284,6 +322,8 @@ jobs:
 
   # Mandatory on every pull_request and merge_group run, in parallel with the sweep.
   difftest-perturb:
+    needs: changes
+    if: needs.changes.outputs.full == 'true'
     runs-on: blacksmith-16vcpu-ubuntu-2404
     env:
       SOLIDCORE_CPP_DIR: ${{ github.workspace }}/.cpp
@@ -321,7 +361,8 @@ jobs:
   # The exact-base ratchet. Needs both the validated base and the finished sweep: if either
   # job fails or is skipped, this job is skipped and `difftest` fails.
   difftest-compare:
-    needs: [difftest-baseline, difftest-sweep]
+    needs: [changes, difftest-baseline, difftest-sweep]
+    if: needs.changes.outputs.full == 'true'
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - uses: actions/checkout@v4
@@ -357,15 +398,25 @@ jobs:
   # The required check ("difftest"). Runs even when a part failed or was skipped, and
   # succeeds only if every part succeeded.
   difftest:
-    needs: [difftest-baseline, difftest-sweep, difftest-perturb, difftest-compare]
+    needs: [changes, difftest-baseline, difftest-sweep, difftest-perturb, difftest-compare]
     if: always()
     runs-on: blacksmith-2vcpu-ubuntu-2404
     steps:
       - name: Require every difftest part
         env:
+          CHANGES: ${{ needs.changes.result }}
+          FULL: ${{ needs.changes.outputs.full }}
+          SWEEP: ${{ needs.difftest-sweep.result }}
           RESULTS: ${{ join(needs.*.result, ' ') }}
         run: |
-          echo "difftest-baseline difftest-sweep difftest-perturb difftest-compare: $RESULTS"
+          echo "changes difftest-baseline difftest-sweep difftest-perturb difftest-compare: $RESULTS"
+          [ "$CHANGES" = success ] || { echo "the changes job did not succeed"; exit 1; }
+          if [ "$FULL" != true ]; then
+            # docs-only change (everything skipped), or a push to main (only the sweep, which
+            # publishes main's reports, runs; the merge queue already ran the full gate)
+            case "$SWEEP" in success|skipped) echo "not a full run (full=$FULL)"; exit 0;; esac
+            echo "difftest-sweep: $SWEEP"; exit 1
+          fi
           for r in $RESULTS; do
             [ "$r" = success ] || { echo "a difftest part did not succeed"; exit 1; }
           done

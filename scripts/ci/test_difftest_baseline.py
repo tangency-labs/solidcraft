@@ -557,20 +557,23 @@ class WorkflowGateTests(unittest.TestCase):
 
     def test_perturbation_is_unconditional_and_parallel(self):
         perturb = self.jobs()["difftest-perturb"]
-        self.assertNotIn("needs:", perturb)
+        # Only gated on the docs-only/main-push classifier (scripts/ci/changes.sh), which
+        # every full pull_request and merge_group run passes: never on the base or sweep.
+        self.assertIn("needs: changes\n", perturb)
+        self.assertIn("if: needs.changes.outputs.full == 'true'", perturb)
         self.assertIn("--green --perturb", perturb)
         # No event filter on the job or its run step: pull_request and merge_group both run it.
         self.assertNotIn("github.event_name", perturb)
 
     def test_sweep_does_not_wait_for_the_base(self):
         sweep = self.jobs()["difftest-sweep"]
-        self.assertNotIn("needs:", sweep)
+        self.assertIn("needs: changes\n", sweep)  # the classifier only, never the base
         self.assertNotIn("difftest-baseline.sh", sweep)
         self.assertNotIn("--baseline", sweep)
 
     def test_compare_needs_validated_base_and_sweep_and_fails_closed(self):
         compare = self.jobs()["difftest-compare"]
-        self.assertIn("needs: [difftest-baseline, difftest-sweep]", compare)
+        self.assertIn("needs: [changes, difftest-baseline, difftest-sweep]", compare)
         self.assertNotIn("always()", compare)
         self.assertNotIn("continue-on-error", self.jobs()["difftest-baseline"])
         self.assertIn("--compare-reports", compare)
