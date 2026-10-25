@@ -644,7 +644,7 @@ fn plan_face(
     let pole_pair = |i: u32, j: u32| i != j && fixed.get(i as usize).zip(fixed.get(j as usize)).is_some_and(|(p, q)| p == q);
     let mut triangles = triangles;
     triangles.retain(|t| !(pole_pair(t[0], t[1]) || pole_pair(t[1], t[2]) || pole_pair(t[2], t[0])));
-    if !closed_boundary(&ranges, &fixed, &triangles) {
+    if !closed_boundary(&ranges, &fixed, &uvs, &triangles) {
         return Err(fail("triangulation does not follow the boundary"));
     }
     let mut all = uvs;
@@ -862,9 +862,13 @@ fn graded(a: [f64; 2], b: [f64; 2], sa: f64, sb: f64, h: f64, speed: [f64; 2], f
 
 /// Every boundary segment (consecutive nodes of a loop) is the side of exactly one triangle:
 /// the face covers its boundary with nothing missing or doubled, so it meets its neighbours
-/// exactly. Pole copies of one node (consecutive in a loop, at one point) are one vertex: the
-/// segment between them has no length, and a side ending on either copy is the same side.
-fn closed_boundary(ranges: &[std::ops::Range<usize>], fixed: &[Vec3], triangles: &[[u32; 3]]) -> bool {
+/// exactly. Some boundary nodes are one vertex, a side ending on any of them the same side: pole
+/// copies of one node (consecutive in a loop, at one point, the segment between them of no
+/// length), and nodes at the very same (u, v), which the triangulation takes as one point: two
+/// loops touching at a vertex they share (a ring standing on a perforated plate, tangent to the
+/// holes beside it). A seam's two uses are at one point in space but a period apart in (u, v),
+/// and stay two.
+fn closed_boundary(ranges: &[std::ops::Range<usize>], fixed: &[Vec3], uvs: &[[f64; 2]], triangles: &[[u32; 3]]) -> bool {
     let mut one: Vec<u32> = (0..fixed.len() as u32).collect();
     let root = |one: &[u32], mut i: u32| {
         while let Some(&j) = one.get(i as usize).filter(|j| **j != i) {
@@ -873,15 +877,28 @@ fn closed_boundary(ranges: &[std::ops::Range<usize>], fixed: &[Vec3], triangles:
         i
     };
     let segment = |r: &std::ops::Range<usize>, k: usize| ((r.start + k) as u32, (r.start + (k + 1) % r.len()) as u32);
+    let join = |one: &mut [u32], a: u32, b: u32| {
+        let (ra, rb) = (root(one, a), root(one, b));
+        if let Some(x) = one.get_mut(rb.max(ra) as usize) {
+            *x = ra.min(rb);
+        }
+    };
     for r in ranges {
         for k in 0..r.len() {
             let (a, b) = segment(r, k);
             if fixed.get(a as usize).zip(fixed.get(b as usize)).is_some_and(|(p, q)| p == q) {
-                let (ra, rb) = (root(&one, a), root(&one, b));
-                if let Some(x) = one.get_mut(rb.max(ra) as usize) {
-                    *x = ra.min(rb);
-                }
+                join(&mut one, a, b);
             }
+        }
+    }
+    // By value: −0.0 and 0.0 are one point.
+    let key = |q: &[f64; 2]| [(q[0] + 0.0).to_bits(), (q[1] + 0.0).to_bits()];
+    let mut first: HashMap<[u64; 2], u32> = HashMap::with_capacity(uvs.len());
+    for (i, q) in uvs.iter().enumerate().take(fixed.len()) {
+        let i = i as u32;
+        let f = *first.entry(key(q)).or_insert(i);
+        if f != i {
+            join(&mut one, f, i);
         }
     }
     let side = |a: u32, b: u32| {
