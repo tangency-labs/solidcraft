@@ -102932,6 +102932,1213 @@
      0.125
     ]
    }
+  },
+  {
+   "name": "failed_tangent_constant0_rev0_v0_topological",
+   "upstream_ref": "source/SMLib/src/SmVertex.cpp:716 / #521: zero derivative is not a removable-vertex certificate",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "closed": false,
+     "segs": [
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ]
+       },
+       "rev": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ],
+       "rev": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 0
+   }
+  },
+  {
+   "name": "failed_tangent_constant0_rev0_v1_topological",
+   "upstream_ref": "source/SMLib/src/SmVertex.cpp:716 / #521: zero derivative is not a removable-vertex certificate",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "closed": false,
+     "segs": [
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ]
+       },
+       "rev": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ],
+       "rev": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "failed_tangent_constant0_rev0_v2_topological",
+   "upstream_ref": "source/SMLib/src/SmVertex.cpp:716 / #521: zero derivative is not a removable-vertex certificate",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "closed": false,
+     "segs": [
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ]
+       },
+       "rev": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ],
+       "rev": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 2
+   }
+  },
+  {
+   "name": "failed_tangent_constant0_rev0_tangent",
+   "upstream_ref": "source/SMLib/src/SmVertex.cpp / #521: AngleBetween fails on a zero derivative",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "closed": false,
+     "segs": [
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ]
+       },
+       "rev": false
+      },
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ],
+       "rev": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 1,
+    "e1": 0,
+    "e2": 1,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "failed_tangent_constant0_rev1_v0_topological",
+   "upstream_ref": "source/SMLib/src/SmVertex.cpp:716 / #521: zero derivative is not a removable-vertex certificate",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "closed": false,
+     "segs": [
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ]
+       },
+       "rev": true
+      },
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ],
+       "rev": true
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 0
+   }
+  },
+  {
+   "name": "failed_tangent_constant0_rev1_v1_topological",
+   "upstream_ref": "source/SMLib/src/SmVertex.cpp:716 / #521: zero derivative is not a removable-vertex certificate",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "closed": false,
+     "segs": [
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ]
+       },
+       "rev": true
+      },
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ],
+       "rev": true
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "failed_tangent_constant0_rev1_v2_topological",
+   "upstream_ref": "source/SMLib/src/SmVertex.cpp:716 / #521: zero derivative is not a removable-vertex certificate",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "closed": false,
+     "segs": [
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ]
+       },
+       "rev": true
+      },
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ],
+       "rev": true
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 2
+   }
+  },
+  {
+   "name": "failed_tangent_constant0_rev1_tangent",
+   "upstream_ref": "source/SMLib/src/SmVertex.cpp / #521: AngleBetween fails on a zero derivative",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "closed": false,
+     "segs": [
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         0,
+         0,
+         1,
+         1
+        ]
+       },
+       "rev": true
+      },
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ],
+       "rev": true
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 1,
+    "e1": 0,
+    "e2": 1,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "failed_tangent_constant1_rev0_v0_topological",
+   "upstream_ref": "source/SMLib/src/SmVertex.cpp:716 / #521: zero derivative is not a removable-vertex certificate",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "closed": false,
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ],
+       "rev": false
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         1,
+         1,
+         2,
+         2
+        ]
+       },
+       "rev": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 0
+   }
+  },
+  {
+   "name": "failed_tangent_constant1_rev0_v1_topological",
+   "upstream_ref": "source/SMLib/src/SmVertex.cpp:716 / #521: zero derivative is not a removable-vertex certificate",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "closed": false,
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ],
+       "rev": false
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         1,
+         1,
+         2,
+         2
+        ]
+       },
+       "rev": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "failed_tangent_constant1_rev0_v2_topological",
+   "upstream_ref": "source/SMLib/src/SmVertex.cpp:716 / #521: zero derivative is not a removable-vertex certificate",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "closed": false,
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ],
+       "rev": false
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         1,
+         1,
+         2,
+         2
+        ]
+       },
+       "rev": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 2
+   }
+  },
+  {
+   "name": "failed_tangent_constant1_rev0_tangent",
+   "upstream_ref": "source/SMLib/src/SmVertex.cpp / #521: AngleBetween fails on a zero derivative",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "closed": false,
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ],
+       "rev": false
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         1,
+         1,
+         2,
+         2
+        ]
+       },
+       "rev": false
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 1,
+    "e1": 0,
+    "e2": 1,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "failed_tangent_constant1_rev1_v0_topological",
+   "upstream_ref": "source/SMLib/src/SmVertex.cpp:716 / #521: zero derivative is not a removable-vertex certificate",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "closed": false,
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ],
+       "rev": true
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         1,
+         1,
+         2,
+         2
+        ]
+       },
+       "rev": true
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 0
+   }
+  },
+  {
+   "name": "failed_tangent_constant1_rev1_v1_topological",
+   "upstream_ref": "source/SMLib/src/SmVertex.cpp:716 / #521: zero derivative is not a removable-vertex certificate",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "closed": false,
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ],
+       "rev": true
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         1,
+         1,
+         2,
+         2
+        ]
+       },
+       "rev": true
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "failed_tangent_constant1_rev1_v2_topological",
+   "upstream_ref": "source/SMLib/src/SmVertex.cpp:716 / #521: zero derivative is not a removable-vertex certificate",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "closed": false,
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ],
+       "rev": true
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         1,
+         1,
+         2,
+         2
+        ]
+       },
+       "rev": true
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 2
+   }
+  },
+  {
+   "name": "failed_tangent_constant1_rev1_tangent",
+   "upstream_ref": "source/SMLib/src/SmVertex.cpp / #521: AngleBetween fails on a zero derivative",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "closed": false,
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ],
+       "rev": true
+      },
+      {
+       "seg": "curve",
+       "curve": {
+        "dim": 3,
+        "cpts": [
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1,
+          0,
+          0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        "p": 1,
+        "u": [
+         1,
+         1,
+         2,
+         2
+        ]
+       },
+       "rev": true
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 1,
+    "e1": 0,
+    "e2": 1,
+    "tol_deg": 0.5
+   }
+  },
+  {
+   "name": "failed_tangent_control_v0_topological",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "closed": false,
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 0
+   }
+  },
+  {
+   "name": "failed_tangent_control_v1_topological",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "closed": false,
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 1
+   }
+  },
+  {
+   "name": "failed_tangent_control_v2_topological",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "closed": false,
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "topological",
+    "v": 2
+   }
+  },
+  {
+   "name": "failed_tangent_control_tangent",
+   "inputs": {
+    "brep": {
+     "kind": "chain",
+     "closed": false,
+     "segs": [
+      {
+       "seg": "line",
+       "a": [
+        0,
+        0,
+        0
+       ],
+       "b": [
+        1,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        0,
+        1
+       ]
+      },
+      {
+       "seg": "line",
+       "a": [
+        1,
+        0,
+        0
+       ],
+       "b": [
+        2,
+        0,
+        0
+       ],
+       "smline": true,
+       "ivl": [
+        1,
+        2
+       ]
+      }
+     ]
+    },
+    "init_gaps": false,
+    "op": "tangent",
+    "v": 1,
+    "e1": 0,
+    "e2": 1,
+    "tol_deg": 0.5
+   }
   }
  ]
 }
