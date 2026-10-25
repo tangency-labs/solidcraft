@@ -2153,14 +2153,8 @@ fn selected_spline_handle_mirrors(sk: &solidcraft_engine::sketch::Sketch, select
     mirrors
 }
 
-fn point_drag_offset(sk: &solidcraft_engine::sketch::Sketch, id: &str, hit_at: Vec2, pointer_at: Vec2) -> Vec2 {
-    // The mirrored guide endpoint is a visual alias for the stored handle point.
-    sk.resolve_point(id).and_then(|index| sk.point(index)).map_or(
-        Vec2::ZERO,
-        |point| {
-            if point.dist(hit_at) > 1e-9 { point - pointer_at } else { Vec2::ZERO }
-        },
-    )
+fn point_drag_offset(sk: &solidcraft_engine::sketch::Sketch, id: &str, pointer_at: Vec2) -> Vec2 {
+    sk.resolve_point(id).and_then(|index| sk.point(index)).map_or(Vec2::ZERO, |point| point - pointer_at)
 }
 
 #[derive(Clone)]
@@ -5519,7 +5513,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     // was grabbed, rather than going to the cursor.
                     let pointer_at = on_plane(app, a).unwrap_or(at);
                     let grab = (!dragged_with(app, &id).is_empty()).then_some(pointer_at);
-                    let offset = app.session.doc.sketch(sketch).ok().map_or(Vec2::ZERO, |sk| point_drag_offset(sk, &id, at, pointer_at));
+                    let offset = app.session.doc.sketch(sketch).ok().map_or(Vec2::ZERO, |sk| point_drag_offset(sk, &id, pointer_at));
                     app.viewport.point_drag = Some((id, app.session.undo.len(), grab, offset))
                 }
                 Some(Hit::SketchCurve { sketch, id, .. } | Hit::SketchMidpoint { sketch, id, .. }) if Some(sketch) == active => {
@@ -7855,11 +7849,8 @@ mod tests {
             assert_eq!(*handle_index, *handle);
             assert_eq!(*mirror, sketch.point(*fit).unwrap() * 2.0 - sketch.point(*handle).unwrap());
             let pointer_at = *mirror + Vec2::new(0.25, -0.5);
-            let offset = point_drag_offset(&sketch, &sketch.points[*handle].id, *mirror, pointer_at);
-            assert_eq!(
-                point_drag_offset(&sketch, &sketch.points[*handle].id, sketch.point(*handle).unwrap(), sketch.point(*handle).unwrap()),
-                Vec2::ZERO
-            );
+            let offset = point_drag_offset(&sketch, &sketch.points[*handle].id, pointer_at);
+            assert_eq!(point_drag_offset(&sketch, &sketch.points[*handle].id, sketch.point(*handle).unwrap()), Vec2::ZERO);
             assert!((pointer_at + offset).dist(sketch.point(*handle).unwrap()) < 1e-9);
             let motion = Vec2::new(2.0, -3.0);
             assert!((pointer_at + motion + offset).dist(sketch.point(*handle).unwrap() + motion) < 1e-9);
