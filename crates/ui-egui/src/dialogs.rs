@@ -5479,7 +5479,9 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d.extra.insert("base".into(), pt_expr(base));
             d.extra.insert("axis".into(), pt3(axis.0));
             // Standing on a flat face (a base of numbers there, square to it): placed there, so it
-            // can take reference edges of that face (#6380), with its own picked again.
+            // can take reference edges of that face (#6380), with its own picked again. Not the
+            // inputs a selection made when the window opened.
+            d.inputs.clear();
             let [x, y, z] = base.clone().map(|c| c.parse::<f64>().ok());
             if let (Some(x), Some(y), Some(z)) = (x, y, z)
                 && let Some(Sel::Face { body, index, .. }) = face_sel(s, Vec3::new(x, y, z))

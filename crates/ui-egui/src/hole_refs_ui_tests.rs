@@ -202,9 +202,14 @@ fn a_cylinder_is_placed_by_its_distances_from_two_edges() {
     assert_eq!(f.edge_names.len(), 2);
     assert!(h.app.session.model.result(f.id).is_some_and(|r| r.error.is_none()));
 
-    // Edit Feature: the edges again with their distances; a typed distance moves the base.
+    // Edit Feature (with the face selected): the edges again with their distances, each input
+    // once; a typed distance moves the base.
+    let top = crate::dialogs::face_sel(&h.app.session, Vec3::new(45.0, 35.0, 10.0)).unwrap();
+    h.app.session.selection = vec![top];
     h.step(&json!({"call": "ui.editFeature", "params": {"feature": f.id}})).unwrap();
     h.frames(4);
+    let labels: Vec<&str> = h.app.dialog.as_ref().unwrap().inputs.iter().map(|i| i.label).collect();
+    assert_eq!(labels, ["Reference 1", "Reference 2"]);
     assert!(picked_edge(&h, "Reference 1").is_some_and(|p| p.x.abs() < 1e-6), "{:?}", picked_edge(&h, "Reference 1"));
     assert!(picked_edge(&h, "Reference 2").is_some_and(|p| p.y.abs() < 1e-6), "{:?}", picked_edge(&h, "Reference 2"));
     assert_eq!(cylinder_dialog(&h).0, measured);
