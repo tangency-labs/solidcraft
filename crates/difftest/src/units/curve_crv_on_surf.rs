@@ -20,6 +20,14 @@
 //! them through the base curve's virtual knot queries. Every run has at least
 //! [`MIN_GENERATED`] generated cases; generated inputs the ffi wrapper rejects are
 //! redrawn. Any genuinely unported downstream call still defers the whole case.
+//!
+//! Deviations: the runner-local SMS reader validates counts below the exclusive
+//! `2^usize::BITS` bound, checks dimension and payload arithmetic and the available
+//! tokens before constructing the net, and grows storage incrementally. Valid point
+//! order, weights, knots, lazy float parsing and path-bearing errors are unchanged.
+
+#[path = "fixtures/crv_on_surf_sms.rs"]
+mod sms;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -254,46 +262,13 @@ enum Inputs {
 /// `m+q+2` v knots.
 fn read_sms(path: &str) -> Result<InlineSrf, HarnessError> {
     let text = std::fs::read_to_string(path).map_err(|e| harness(format!("{path}: {e}")))?;
-    let mut it = text.split_whitespace();
-    let mut num = || -> Result<f64, HarnessError> {
-        it.next()
-            .ok_or_else(|| harness(format!("{path}: truncated")))?
-            .parse::<f64>()
-            .map_err(|e| harness(format!("{path}: {e}")))
-    };
-    let int = |v: f64| -> Result<usize, HarnessError> {
-        if v.fract() != 0.0 || v < 0.0 {
-            return Err(harness(format!("{path}: bad count {v}")));
-        }
-        Ok(v as usize)
-    };
-    let n = int(num()?)?;
-    let m = int(num()?)?;
-    let p = int(num()?)?;
-    let q = int(num()?)?;
-    let rat = num()? != 0.0;
-    let mut net = Vec::with_capacity(n + 1);
-    for _ in 0..=n {
-        let mut row = Vec::with_capacity(m + 1);
-        for _ in 0..=m {
-            let (x, y, z) = (num()?, num()?, num()?);
-            let w = if rat { num()? } else { NOW };
-            row.push([x, y, z, w]);
-        }
-        net.push(row);
-    }
-    let u = (0..n + p + 2)
-        .map(|_| num())
-        .collect::<Result<Vec<_>, _>>()?;
-    let v = (0..m + q + 2)
-        .map(|_| num())
-        .collect::<Result<Vec<_>, _>>()?;
+    let s = sms::parse_sms(&text, path)?;
     Ok(InlineSrf {
-        net,
-        p,
-        q,
-        u,
-        v,
+        net: s.net,
+        p: s.p,
+        q: s.q,
+        u: s.u,
+        v: s.v,
         borrow_nurb: false,
     })
 }
