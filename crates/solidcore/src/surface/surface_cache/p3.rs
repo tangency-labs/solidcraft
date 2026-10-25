@@ -54,6 +54,12 @@
 //!   cache of a `1e-4`-scale face in the `topology.edgeuse_p3` adversarial fixtures,
 //!   measured on the C++ build), and `2^20` on 32-bit targets (wasm32), whose 4 GB
 //!   address space cannot hold a larger patch array.
+//! - **Approximation arithmetic.** The base tolerance test refuses refinement driven
+//!   by non-finite sampled angle lengths (see [`super::p2`]). The exact
+//!   `surface.surface_point_solve_p3` hang input reaches this failure while its
+//!   `1e300` control point is still finite. Generic traversal imposes no coordinate,
+//!   box-size or tolerance-finiteness cutoff: a large translation, a custom tester,
+//!   or an overflowing chord tolerance alone does not establish invalid refinement.
 //! - **Cyclic trees.** `FindUVNodes` walks the child links of a tree whose links form a
 //!   cycle forever (its stack grows without bound): the port stops after more node
 //!   visits than a tree of that size has (twice the node count plus one) with
@@ -824,7 +830,9 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
     ///
     /// # Errors
     ///
-    /// As [`SurfaceCache::subdivide_to_tolerances`], with `tester`'s errors.
+    /// As [`SurfaceCache::subdivide_to_tolerances`], with `tester`'s errors. Arithmetic
+    /// validation belongs to the tester; no coordinate or tolerance cutoff is imposed
+    /// on custom testers.
     pub fn subdivide_to_tolerances_with(
         &mut self,
         k: &Kernel,
@@ -1313,5 +1321,296 @@ fn ignore<T>(r: Result<T>) -> Result<Option<T>> {
         Ok(v) => Ok(Some(v)),
         Err(e) if e.is_unported() => Err(e),
         Err(_) => Ok(None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::nurbs::math::{CPoint, NOW};
+    use crate::surface::curve_bounded_surface::CurveBoundedSurface;
+    use crate::surface::surface::p1::{
+        cache_tolerances, make_surface_cache, make_trim_srf_cache, StepSurface,
+    };
+    use crate::surface::surface_cache::p1::SurfaceCacheOptions;
+
+    /// The exact surface of `surface.surface_point_solve_p3`'s `fuzz00349_rust_hang`
+    /// corpus input (`crates/difftest/tests/fuzz_corpus/surface.surface_point_solve_p3.json`),
+    /// built without the difftest/FFI coordinate validators.
+    fn corpus_surface() -> Surface {
+        let net = vec![
+            vec![
+                CPoint::new(
+                    0.000_282_115_039_950_964_9,
+                    0.0,
+                    0.0,
+                    0.940_383_466_503_216_2,
+                ),
+                CPoint::new(
+                    0.000_596_645_716_953_504_6,
+                    0.000_198_881_905_651_168_2,
+                    0.0,
+                    1.988_819_056_511_682,
+                ),
+                CPoint::new(
+                    0.000_413_727_792_694_957_6,
+                    1e300,
+                    0.0,
+                    1.379_092_642_316_525_3,
+                ),
+                CPoint::new(
+                    0.000_544_244_248_406_755,
+                    0.000_544_244_248_406_755,
+                    0.0,
+                    1.814_147_494_689_183_1,
+                ),
+            ],
+            vec![
+                CPoint::new(
+                    -0.000_254_573_732_578_935_63,
+                    0.0,
+                    0.000_190_172_254_527_736_9,
+                    1.059_209_724_859_549_1,
+                ),
+                CPoint::new(
+                    -0.000_222_818_281_601_881_3,
+                    9.270_842_217_628_493e-5,
+                    0.000_166_450_224_589_008_12,
+                    0.927_084_221_762_849_2,
+                ),
+                CPoint::new(
+                    -0.000_158_640_632_839_373_26,
+                    0.000_132_011_813_912_682_52,
+                    0.000_118_508_089_979_063_46,
+                    0.660_059_069_563_412_6,
+                ),
+                CPoint::new(
+                    -0.000_345_623_933_991_531_4,
+                    0.000_431_413_203_930_455,
+                    0.000_258_188_785_151_016_86,
+                    1.438_044_013_101_516_6,
+                ),
+            ],
+        ];
+        let nurb = NurbSurface::new(
+            net,
+            1,
+            3,
+            vec![0.0, 0.0, 1.0, 1.0],
+            vec![-0.767_456_479_409_241_3; 4]
+                .into_iter()
+                .chain(vec![2.150_404_835_288_109_8; 4])
+                .collect(),
+        )
+        .expect("corpus surface");
+        Surface::from(
+            CurveBoundedSurface::new(
+                Surface::from(BSplineSurface::from_nurb(nurb, false)),
+                Vec::new(),
+                Vec::new(),
+                true,
+            )
+            .expect("curve-bounded surface"),
+        )
+    }
+
+    /// The corpus input wraps its surface in an `SmSTEPSurface` (`"wrap": true`): the
+    /// approximation branch whose cache build hung.
+    fn corpus_step_surface() -> Surface {
+        Surface::from(StepSurface::new(corpus_surface(), true).expect("step surface"))
+    }
+
+    /// A cubic B-spline surface of ordinary shape, `scale` wide.
+    fn scaled_surface(scale: f64) -> Surface {
+        let net = (0..4)
+            .map(|i| {
+                (0..4)
+                    .map(|j| {
+                        CPoint::new(
+                            f64::from(i) * scale,
+                            f64::from(j) * scale,
+                            f64::from(i * j) * 0.3 * scale,
+                            1.0,
+                        )
+                    })
+                    .collect()
+            })
+            .collect();
+        let nurb = NurbSurface::new(
+            net,
+            3,
+            3,
+            vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+        )
+        .expect("scaled surface");
+        Surface::from(BSplineSurface::from_nurb(nurb, false))
+    }
+
+    fn assert_angle_arithmetic_error(error: &SolidError) {
+        assert!(
+            matches!(
+                error,
+                SolidError::InvalidInput { operation, reason }
+                    if *operation == "surface::surface_cache::p2::SurfaceCache::test_against_tolerances"
+                        && *reason == "non-finite approximation angle segment length"
+            ),
+            "expected the approximation angle arithmetic error, got {error:?}"
+        );
+    }
+
+    /// The exact corpus surface overflows sampled segment lengths in the angle
+    /// test. That arithmetic error now propagates from both cache constructors,
+    /// rather than driving a large approximation tree with zero "unit" directions.
+    #[test]
+    fn unmeasurable_corpus_surface_is_refused() {
+        let k = Kernel::default();
+        let surface = corpus_step_surface();
+
+        for error in [
+            make_trim_srf_cache::<i64>(&k, &surface, Some(0)).err(),
+            make_surface_cache::<i64>(&k, &surface, Some(0)).err(),
+        ] {
+            assert_angle_arithmetic_error(
+                &error.expect("invalid angle arithmetic must be refused"),
+            );
+        }
+    }
+
+    /// A separate synthetic rational net whose homogeneous coordinates normalize
+    /// to ordinary geometry. This is NOT a substitute for the original HANG-20
+    /// boundary fixtures, which include NOW sentinel and ordinary positive weights.
+    #[test]
+    fn huge_homogeneous_control_points_with_small_geometry_build() {
+        let k = Kernel::default();
+        let net = vec![
+            vec![
+                CPoint::new(-57.74e306, -4.79e306, -20.02e306, 1e306),
+                CPoint::new(-9e306, 3.69e306, -2.39e306, 1e306),
+            ],
+            vec![
+                CPoint::new(3.65e306, -7.33e306, -5.68e306, 1e306),
+                CPoint::new(-9e306, 4.03e306, -8.00e305, 1e306),
+            ],
+            vec![
+                CPoint::new(6.12e306, -7.88e305, 2.96e306, 1e306),
+                CPoint::new(6.83e306, 4.25e306, 1.05e306, 1e306),
+            ],
+        ];
+        let nurb = NurbSurface::new(
+            net,
+            2,
+            1,
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        )
+        .expect("boundary surface");
+        let surface = Surface::from(BSplineSurface::from_nurb(nurb, false));
+
+        let cache = make_trim_srf_cache::<i64>(&k, &surface, Some(0))
+            .expect("a normalizing huge control net must still build");
+        let nodes = cache.base().tree().map_or(0, |t| t.nodes().len());
+        assert!(nodes > 0);
+    }
+
+    fn translated_plane(x: f64) -> Surface {
+        let net = [0.0, 1.0]
+            .into_iter()
+            .map(|y| {
+                [0.0, 1.0]
+                    .into_iter()
+                    .map(|z| CPoint::new(x, y, z, NOW))
+                    .collect()
+            })
+            .collect();
+        let knots = vec![0.0, 0.0, 1.0, 1.0];
+        let nurb = NurbSurface::new(net, 1, 1, knots.clone(), knots).unwrap();
+        Surface::from(BSplineSurface::from_nurb(nurb, false))
+    }
+
+    #[test]
+    fn translated_measurable_geometry_keeps_builtin_subdivision() {
+        let k = Kernel::default();
+        let mut counts = Vec::new();
+        for x in [0.0, 1e155] {
+            let mut cache: SurfaceCache<i64> = SurfaceCache::new(
+                translated_plane(x),
+                Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+                SurfaceCacheOptions {
+                    max_side_length_3d: 0.75,
+                    ..SurfaceCacheOptions::default()
+                },
+            );
+            cache
+                .build_tree_base(&k)
+                .expect("translated unit sides are measurable");
+            counts.push(cache.tree().unwrap().nodes().len());
+        }
+        assert!(counts[0] > 1, "control must exercise subdivision");
+        assert_eq!(counts[0], counts[1]);
+    }
+
+    #[test]
+    fn custom_tester_can_split_translated_nodes_below_root() {
+        let k = Kernel::default();
+        let mut cache: SurfaceCache<i64> = SurfaceCache::new(
+            translated_plane(1e155),
+            Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+            SurfaceCacheOptions {
+                chord_height_tolerance: f64::INFINITY,
+                ..SurfaceCacheOptions::default()
+            },
+        );
+        let mut calls = 0;
+        cache
+            .build_tree_base_with(&k, &mut |c, _, n| {
+                calls += 1;
+                Ok(super::super::p2::ToleranceTest {
+                    needs_subdivision: c.aux(n)?.uv_domain.size().x > 0.3,
+                    direction: SurfParamType::U,
+                })
+            })
+            .expect("custom tester owns its measurement policy");
+        assert_eq!(calls, 7);
+        assert_eq!(cache.tree().unwrap().nodes().len(), 7);
+    }
+
+    /// Supported sizes keep their behaviour: an ordinary surface and one a hundred
+    /// million units wide both build the same 31-node tree.
+    #[test]
+    fn supported_sizes_build() {
+        let k = Kernel::default();
+        for scale in [1.0, 1e8] {
+            let surface =
+                Surface::from(StepSurface::new(scaled_surface(scale), true).expect("step"));
+            let tol = cache_tolerances(&k, &surface).expect("cache tolerances");
+            assert!(tol.chord_height_tol.is_finite(), "scale {scale}: {tol:?}");
+            let cache = make_trim_srf_cache::<i64>(&k, &surface, Some(0))
+                .expect("a supported size must build");
+            assert_eq!(
+                cache.base().tree().map_or(0, |t| t.nodes().len()),
+                31,
+                "scale {scale} node count changed"
+            );
+        }
+    }
+
+    /// A large finite tolerance alone is not an arithmetic failure.
+    #[test]
+    fn finite_tolerance_is_not_refused() {
+        let k = Kernel::default();
+        let opts = SurfaceCacheOptions {
+            chord_height_tolerance: f64::MAX,
+            ang_tol_rad: 0.0,
+            ..SurfaceCacheOptions::default()
+        };
+        let mut cache: SurfaceCache<i64> = SurfaceCache::new(
+            scaled_surface(1.0),
+            Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+            opts,
+        );
+        cache
+            .build_tree_base(&k)
+            .expect("a finite tolerance must still build");
     }
 }

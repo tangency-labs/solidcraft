@@ -22,6 +22,10 @@
 //!   [`ConstantsRequest`] in and [`NetConstants`] (`Some` for each requested value)
 //!   out; which outputs are requested still steers the control flow exactly as the
 //!   NULL tests do upstream.
+//! - Angle walks also report a non-finite segment length before normalization in
+//!   [`NetConstants::nonfinite_angle_length`]. This diagnostic does not change the
+//!   evaluations, arithmetic, branches or numeric outputs; approximate surface caches
+//!   use it to refuse further refinement driven by an invalid angle measurement.
 //! - The `const SmSurface*` of both routines is an evaluator closure standing for
 //!   `SmSurface::EvaluatePoint` (the virtual call, unit `surface.surface_p2`), so the
 //!   routines do not depend on the surface class hierarchy. Its errors propagate as
@@ -140,6 +144,10 @@ pub struct NetConstants {
     pub v_angle_deg: Option<f64>,
     /// Largest distance of a diagonal sample from its base segment.
     pub uv_chord_height: Option<f64>,
+    /// A requested angle walk encountered an infinite or NaN segment length before
+    /// normalization. Numeric outputs retain upstream's IEEE arithmetic, which can
+    /// hide this failure (e.g. division by infinity produces a zero direction).
+    pub nonfinite_angle_length: bool,
 }
 
 /// Accumulated (squared) outputs before the final conversion.
@@ -150,6 +158,7 @@ struct Acc {
     uv_ch: f64,
     max_u_ang_rad: f64,
     max_v_ang_rad: f64,
+    nonfinite_angle_length: bool,
 }
 
 impl Acc {
@@ -162,6 +171,7 @@ impl Acc {
             u_chord_height: req.u_chord_height.then(|| sqrt(self.u_ch)),
             v_chord_height: req.v_chord_height.then(|| sqrt(self.v_ch)),
             uv_chord_height: req.uv_chord_height.then(|| sqrt(self.uv_ch)),
+            nonfinite_angle_length: self.nonfinite_angle_length,
         }
     }
 }
@@ -284,6 +294,7 @@ pub fn compute_net_constants(
 
                 let mut curr_vec = next - curr;
                 let dist = curr_vec.length();
+                acc.nonfinite_angle_length |= !dist.is_finite();
 
                 // Skip control points within the zone tolerance.
                 if dist < zone_tol3d {
@@ -361,6 +372,7 @@ pub fn compute_net_constants(
 
                 let mut curr_vec = next - curr;
                 let dist = curr_vec.length();
+                acc.nonfinite_angle_length |= !dist.is_finite();
 
                 // Skip control points within the zone tolerance (coincident points).
                 if dist < zone_tol3d {
@@ -560,6 +572,7 @@ pub fn compute_surf_constants(
             if req.v_angle_deg {
                 let mut curr_vec = next - curr;
                 let dist = curr_vec.length();
+                acc.nonfinite_angle_length |= !dist.is_finite();
                 if dist < EFF_ZERO {
                     break; // avoid a divide by zero
                 }
@@ -622,6 +635,7 @@ pub fn compute_surf_constants(
             if req.u_angle_deg {
                 let mut curr_vec = next - curr;
                 let dist = curr_vec.length();
+                acc.nonfinite_angle_length |= !dist.is_finite();
                 if dist < EFF_ZERO {
                     break;
                 }
@@ -1165,6 +1179,42 @@ mod tests {
         assert_eq!(c.u_chord_height, Some(0.0));
         assert_eq!(c.uv_chord_height, Some(0.0));
         assert_eq!(c.u_angle_deg, Some(0.0));
+        assert!(!c.nonfinite_angle_length);
+    }
+
+    #[test]
+    fn angle_length_diagnostic_uses_differences_not_positions() {
+        let dom = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        let angles = ConstantsRequest {
+            u_chord_height: false,
+            v_chord_height: false,
+            uv_chord_height: false,
+            ..ConstantsRequest::ALL
+        };
+        for x in [0.0, 1e155] {
+            let mut eval = |uv: Point2| Ok(Vec3::new(x, uv.x, uv.y));
+            let c = compute_surf_constants(&mut eval, &dom, angles).unwrap();
+            assert!(!c.nonfinite_angle_length, "translation {x}");
+            assert_eq!((c.u_angle_deg, c.v_angle_deg), (Some(0.0), Some(0.0)));
+        }
+
+        let mut eval = |uv: Point2| Ok(Vec3::new(uv.x * 1e300, uv.y, 0.0));
+        let c = compute_surf_constants(&mut eval, &dom, angles).unwrap();
+        assert!(c.nonfinite_angle_length);
+        // Preserve the original computed outputs, even though division by infinity
+        // turns the u-direction into zero and reports spurious 90-degree turns.
+        assert_eq!((c.u_angle_deg, c.v_angle_deg), (Some(270.0), Some(0.0)));
+
+        let no_angles = ConstantsRequest {
+            u_angle_deg: false,
+            v_angle_deg: false,
+            ..angles
+        };
+        let c = compute_surf_constants(&mut eval, &dom, no_angles).unwrap();
+        assert!(
+            !c.nonfinite_angle_length,
+            "unrequested measurements must not run"
+        );
     }
 
     #[test]
