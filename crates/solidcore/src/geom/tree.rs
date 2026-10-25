@@ -63,7 +63,9 @@
 //! - The neighbour searches return a new `Vec` instead of appending to the
 //!   caller's `SmTArray`; the four direction-specific recursions (and the four
 //!   `Get*Side` functions) share one body parameterised by the
-//!   search direction, with the parent recursion turned into a loop.
+//!   search direction. Parent recursion is a loop; side descent uses an explicit
+//!   DFS continuation stack in the same child order, retaining the cycle guard
+//!   at depth > node count without an arbitrary geometry-depth bound.
 //! - The single-point constructor always allocates its node (and object-list
 //!   item) in the tree's arenas; upstream can also use caller-owned memory, which
 //!   is then invisible to `GetAllTreeNodes`/`GetNodeCount`.
@@ -1465,42 +1467,57 @@ impl<O: Copy + PartialEq> Tree<O> {
         node: NodeId,
         out: &mut Vec<NodeId>,
         search: &SideSearch,
-        mut bits: u64,
+        bits: u64,
         count: u64,
         depth: usize,
     ) -> Result<()> {
-        if depth > self.nodes.len() {
-            return Err(cyclic_links(search.op));
+        enum Frame {
+            Visit(NodeId, u64, u64, usize),
+            // Resolve child 2 only after child 1 finishes, preserving error timing.
+            SecondChild(NodeId, u64, u64, usize),
         }
-        let n = self.node(node)?;
-        if !n.aux_type.is_surface_subdivision() {
-            return Ok(());
-        }
-        if count == 0 {
-            bits = 0;
-        }
-        let split = self.surface_aux(node, search.op)?.split_dir;
-        let facing = search.facing.axis;
-        let cross = match facing {
-            SplitDir::U => SplitDir::V,
-            SplitDir::V => SplitDir::U,
-            SplitDir::Unknown => SplitDir::Unknown,
-        };
-        if n.child1.is_none() {
-            out.push(node);
-        } else if split == facing {
-            let c = self.child(node, search.facing.first, search.op)?;
-            self.side(c, out, search, bits, count, depth + 1)?;
-        } else if split == cross {
-            let (b1, b2) =
-                Self::split_targets(search.target_bits, search.target_count, bits, count);
-            if b1 {
-                let c1 = self.child(node, true, search.op)?;
-                self.side(c1, out, search, bits << 1, count + 1, depth + 1)?;
+
+        let mut stack = vec![Frame::Visit(node, bits, count, depth)];
+        while let Some(frame) = stack.pop() {
+            let (node, mut bits, count, depth) = match frame {
+                Frame::Visit(node, bits, count, depth) => (node, bits, count, depth),
+                Frame::SecondChild(node, bits, count, depth) => {
+                    let c2 = self.child(node, false, search.op)?;
+                    (c2, (bits << 1) | 1, count + 1, depth + 1)
+                }
+            };
+            if depth > self.nodes.len() {
+                return Err(cyclic_links(search.op));
             }
-            if b2 {
-                let c2 = self.child(node, false, search.op)?;
-                self.side(c2, out, search, (bits << 1) | 1, count + 1, depth + 1)?;
+            let n = self.node(node)?;
+            if !n.aux_type.is_surface_subdivision() {
+                continue;
+            }
+            if count == 0 {
+                bits = 0;
+            }
+            let split = self.surface_aux(node, search.op)?.split_dir;
+            let facing = search.facing.axis;
+            let cross = match facing {
+                SplitDir::U => SplitDir::V,
+                SplitDir::V => SplitDir::U,
+                SplitDir::Unknown => SplitDir::Unknown,
+            };
+            if n.child1.is_none() {
+                out.push(node);
+            } else if split == facing {
+                let c = self.child(node, search.facing.first, search.op)?;
+                stack.push(Frame::Visit(c, bits, count, depth + 1));
+            } else if split == cross {
+                let (b1, b2) =
+                    Self::split_targets(search.target_bits, search.target_count, bits, count);
+                if b2 {
+                    stack.push(Frame::SecondChild(node, bits, count, depth));
+                }
+                if b1 {
+                    let c1 = self.child(node, true, search.op)?;
+                    stack.push(Frame::Visit(c1, bits << 1, count + 1, depth + 1));
+                }
             }
         }
         Ok(())
@@ -1711,6 +1728,80 @@ mod tests {
             s.find_node(&unit_box()),
             Err(SolidError::InvalidInput { .. })
         ));
+    }
+
+    fn surface_leaf(t: &mut Tree<u32>, parent: Option<NodeId>) -> NodeId {
+        t.add_node(TreeNode {
+            parent,
+            aux_type: AuxDataType::AuxData,
+            data: surf(SplitDir::Unknown),
+            ..TreeNode::new()
+        })
+    }
+
+    fn split_surface_leaf(t: &mut Tree<u32>, node: NodeId, split: SplitDir) -> [NodeId; 2] {
+        let c1 = surface_leaf(t, Some(node));
+        let c2 = surface_leaf(t, Some(node));
+        let n = t.node_mut(node).unwrap();
+        n.data = surf(split);
+        n.child1 = Some(c1);
+        n.child2 = Some(c2);
+        [c1, c2]
+    }
+
+    #[test]
+    fn right_neighbors_deep_u_split_sibling_chain() {
+        let mut t = Tree::new(None);
+        let root = surface_leaf(&mut t, None);
+        t.set_top_node(Some(root));
+        let [left, mut facing] = split_surface_leaf(&mut t, root, SplitDir::U);
+        // Linear-time public-API construction: append two arena nodes and update
+        // just their parent per level, with no ancestor walks or tree cloning.
+        for _ in 0..20_000 {
+            [facing, _] = split_surface_leaf(&mut t, facing, SplitDir::U);
+        }
+        assert_eq!(t.right_neighbors(left).unwrap(), vec![facing]);
+    }
+
+    #[test]
+    fn mixed_split_neighbors_preserve_depth_first_order() {
+        let mut t = Tree::new(None);
+        let root = surface_leaf(&mut t, None);
+        t.set_top_node(Some(root));
+        let [left, right] = split_surface_leaf(&mut t, root, SplitDir::U);
+        let [lb, lt] = split_surface_leaf(&mut t, left, SplitDir::V);
+        let [rb, rt] = split_surface_leaf(&mut t, right, SplitDir::V);
+        let [rb_facing, _] = split_surface_leaf(&mut t, rb, SplitDir::U);
+        let [rbb, rbt] = split_surface_leaf(&mut t, rb_facing, SplitDir::V);
+        let [rbt_facing, _] = split_surface_leaf(&mut t, rbt, SplitDir::U);
+        let [rtb, rtt] = split_surface_leaf(&mut t, rt, SplitDir::V);
+        assert_eq!(
+            t.right_neighbors(left).unwrap(),
+            vec![rbb, rbt_facing, rtb, rtt]
+        );
+        // The left V split supplies nonzero target_count and both target bits.
+        assert_eq!(t.right_neighbors(lb).unwrap(), vec![rbb, rbt_facing]);
+        assert_eq!(t.right_neighbors(lt).unwrap(), vec![rtb, rtt]);
+    }
+
+    #[test]
+    fn downward_side_cycles_preserve_error_timing() {
+        for split in [SplitDir::U, SplitDir::V] {
+            let (mut t, [_, left, right, ..]) = grid();
+            let n = t.node_mut(right).unwrap();
+            n.data = surf(split);
+            n.child1 = Some(right);
+            // For a cross split, child 2 must not be resolved before the cyclic
+            // child-1 descent returns its error.
+            n.child2 = None;
+            assert!(matches!(
+                t.right_neighbors(left),
+                Err(SolidError::InvalidInput {
+                    operation: "geom::tree::Tree::right_neighbors",
+                    reason: "tree node links are cyclic",
+                })
+            ));
+        }
     }
 
     #[test]
