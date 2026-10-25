@@ -1,0 +1,152 @@
+{
+  "en": {
+    "cloud.add_storage": "Add new repository",
+    "cloud.additional_repository": "Choose another repository. Existing repositories stay connected.",
+    "cloud.testing": "Testing…",
+    "cmd.cloud.website": "Open on GitHub"
+  },
+  "cs": {
+    "cloud.add_storage": "Přidat nový repozitář",
+    "cloud.additional_repository": "Vyberte další repozitář. Stávající repozitáře zůstanou připojené.",
+    "cloud.testing": "Testování…",
+    "cmd.cloud.website": "Otevřít na GitHubu"
+  },
+  "da": {
+    "cloud.add_storage": "Tilføj nyt repository",
+    "cloud.additional_repository": "Vælg et andet lager. Eksisterende lagre forbliver tilsluttet.",
+    "cloud.testing": "Tester…",
+    "cmd.cloud.website": "Åbn på GitHub"
+  },
+  "de": {
+    "cloud.add_storage": "Neues Repository hinzufügen",
+    "cloud.additional_repository": "Wählen Sie ein weiteres Repository. Vorhandene Repositories bleiben verbunden.",
+    "cloud.testing": "Wird getestet…",
+    "cmd.cloud.website": "Auf GitHub öffnen"
+  },
+  "en-GB": {
+    "cloud.add_storage": "Add new repository",
+    "cloud.additional_repository": "Choose another repository. Existing repositories stay connected.",
+    "cloud.testing": "Testing…",
+    "cmd.cloud.website": "Open on GitHub"
+  },
+  "es": {
+    "cloud.add_storage": "Añadir nuevo repositorio",
+    "cloud.additional_repository": "Elige otro repositorio. Los repositorios existentes seguirán conectados.",
+    "cloud.testing": "Probando…",
+    "cmd.cloud.website": "Abrir en GitHub"
+  },
+  "fr": {
+    "cloud.add_storage": "Ajouter un nouveau dépôt",
+    "cloud.additional_repository": "Choisissez un autre dépôt. Les dépôts existants restent connectés.",
+    "cloud.testing": "Test en cours…",
+    "cmd.cloud.website": "Ouvrir sur GitHub"
+  },
+  "gl": {
+    "cloud.add_storage": "Engadir novo repositorio",
+    "cloud.additional_repository": "Escolle outro repositorio. Os repositorios existentes seguirán conectados.",
+    "cloud.testing": "Probando…",
+    "cmd.cloud.website": "Abrir en GitHub"
+  },
+  "hu": {
+    "cloud.add_storage": "Új tároló hozzáadása",
+    "cloud.additional_repository": "Válasszon másik tárolót. A meglévő tárolók csatlakoztatva maradnak.",
+    "cloud.testing": "Tesztelés…",
+    "cmd.cloud.website": "Megnyitás a GitHubon"
+  },
+  "id": {
+    "cloud.add_storage": "Tambahkan repositori baru",
+    "cloud.additional_repository": "Pilih repositori lain. Repositori yang ada tetap terhubung.",
+    "cloud.testing": "Menguji…",
+    "cmd.cloud.website": "Buka di GitHub"
+  },
+  "it": {
+    "cloud.add_storage": "Aggiungi nuovo repository",
+    "cloud.additional_repository": "Scegli un altro repository. I repository esistenti rimangono connessi.",
+    "cloud.testing": "Test in corso…",
+    "cmd.cloud.website": "Apri su GitHub"
+  },
+  "ja": {
+    "cloud.add_storage": "新しいリポジトリを追加",
+    "cloud.additional_repository": "別のリポジトリを選択します。既存のリポジトリの接続は維持されます。",
+    "cloud.testing": "テスト中…",
+    "cmd.cloud.website": "GitHubで開く"
+  },
+  "ko": {
+    "cloud.add_storage": "새 저장소 추가",
+    "cloud.additional_repository": "다른 저장소를 선택하세요. 기존 저장소의 연결은 유지됩니다.",
+    "cloud.testing": "테스트 중…",
+    "cmd.cloud.website": "GitHub에서 열기"
+  },
+  "ms": {
+    "cloud.add_storage": "Tambah repositori baharu",
+    "cloud.additional_repository": "Pilih repositori lain. Repositori sedia ada kekal disambungkan.",
+    "cloud.testing": "Menguji…",
+    "cmd.cloud.website": "Buka di GitHub"
+  },
+  "nl": {
+    "cloud.add_storage": "Nieuwe repository toevoegen",
+    "cloud.additional_repository": "Kies een andere repository. Bestaande repositories blijven verbonden.",
+    "cloud.testing": "Testen…",
+    "cmd.cloud.website": "Openen op GitHub"
+  },
+  "pl": {
+    "cloud.add_storage": "Dodaj nowe repozytorium",
+    "cloud.additional_repository": "Wybierz inne repozytorium. Istniejące repozytoria pozostaną połączone.",
+    "cloud.testing": "Testowanie…",
+    "cmd.cloud.website": "Otwórz w GitHub"
+  },
+  "pt-BR": {
+    "cloud.add_storage": "Adicionar novo repositório",
+    "cloud.additional_repository": "Escolha outro repositório. Os repositórios existentes continuam conectados.",
+    "cloud.testing": "Testando…",
+    "cmd.cloud.website": "Abrir no GitHub"
+  },
+  "ro": {
+    "cloud.add_storage": "Adaugă un depozit nou",
+    "cloud.additional_repository": "Alege alt depozit. Depozitele existente rămân conectate.",
+    "cloud.testing": "Se testează…",
+    "cmd.cloud.website": "Deschide pe GitHub"
+  },
+  "ru": {
+    "cloud.add_storage": "Добавить новый репозиторий",
+    "cloud.additional_repository": "Выберите другой репозиторий. Существующие репозитории останутся подключёнными.",
+    "cloud.testing": "Проверка…",
+    "cmd.cloud.website": "Открыть на GitHub"
+  },
+  "sv": {
+    "cloud.add_storage": "Lägg till nytt arkiv",
+    "cloud.additional_repository": "Välj ett annat arkiv. Befintliga arkiv förblir anslutna.",
+    "cloud.testing": "Testar…",
+    "cmd.cloud.website": "Öppna på GitHub"
+  },
+  "tr": {
+    "cloud.add_storage": "Yeni depo ekle",
+    "cloud.additional_repository": "Başka bir depo seçin. Mevcut depolar bağlı kalır.",
+    "cloud.testing": "Test ediliyor…",
+    "cmd.cloud.website": "GitHub’da aç"
+  },
+  "uk": {
+    "cloud.add_storage": "Додати новий репозиторій",
+    "cloud.additional_repository": "Виберіть інший репозиторій. Наявні репозиторії залишаться підключеними.",
+    "cloud.testing": "Перевірка…",
+    "cmd.cloud.website": "Відкрити на GitHub"
+  },
+  "vi": {
+    "cloud.add_storage": "Thêm kho lưu trữ mới",
+    "cloud.additional_repository": "Chọn kho lưu trữ khác. Các kho hiện có vẫn được kết nối.",
+    "cloud.testing": "Đang kiểm tra…",
+    "cmd.cloud.website": "Mở trên GitHub"
+  },
+  "zh": {
+    "cloud.add_storage": "添加新仓库",
+    "cloud.additional_repository": "选择另一个仓库。现有仓库将保持连接。",
+    "cloud.testing": "正在测试…",
+    "cmd.cloud.website": "在 GitHub 上打开"
+  },
+  "zh-TW": {
+    "cloud.add_storage": "新增儲存庫",
+    "cloud.additional_repository": "選擇其他儲存庫。現有儲存庫將保持連線。",
+    "cloud.testing": "測試中…",
+    "cmd.cloud.website": "在 GitHub 上開啟"
+  }
+}

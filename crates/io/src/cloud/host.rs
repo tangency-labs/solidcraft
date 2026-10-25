@@ -133,11 +133,13 @@ impl NativeHost {
                 for entry in &catalog {
                     destinations.insert(entry.destination.design_path()?, entry.destination.clone());
                 }
-                match GitRepository::open_cancellable(connection, executable, job.clone()).and_then(|repository| {
+                match GitRepository::open_cancellable(connection.clone(), executable, job.clone()).and_then(|repository| {
                     let entries = repository.list()?;
-                    for entry in catalog.iter_mut().filter(|e| e.phase == Phase::Synced) {
+                    for entry in catalog.iter_mut().filter(|e| matches!(e.phase, Phase::Ready | Phase::Synced) && !e.outdated) {
                         if !repository.matches_stored(entry).unwrap_or(false) {
                             entry.phase = Phase::Ready;
+                            entry.outdated = true;
+                            outbox.mark_outdated(&connection, entry)?;
                         }
                     }
                     Ok(entries)
@@ -228,9 +230,7 @@ impl NativeHost {
             pending = PendingSave::ordered(pending)?;
         }
         if pending.is_empty() {
-            if !connection.remote.is_empty() {
-                open_repository(connection.clone(), executable, job, access)?.refresh()?;
-            }
+            super::receive::refresh(&connection, executable, outbox, job, access)?;
             drop(lock);
             job.update(|status| {
                 status.phase = Phase::Synced;
@@ -298,6 +298,9 @@ impl NativeHost {
         if let Some(error) = first_error {
             return Err(error);
         }
+        if target.is_none() {
+            super::receive::refresh(&connection, executable, outbox, job, access)?;
+        }
         // A caller can immediately submit its next save or setup after this acknowledgement.
         drop(lock);
         job.update(|status| status.phase = Phase::Synced)
@@ -324,7 +327,12 @@ fn pending_revision(
     PendingSave::local_head(pending, destination, revision)
 }
 
-fn open_repository(connection: Connection, executable: &str, job: &Job, access: Option<&dyn super::NativeAccess>) -> Result<GitRepository> {
+pub(super) fn open_repository(
+    connection: Connection,
+    executable: &str,
+    job: &Job,
+    access: Option<&dyn super::NativeAccess>,
+) -> Result<GitRepository> {
     let token = if connection.provider == "github"
         && connection.authentication == solidcraft_cloud::Authentication::Https
         && !connection.credential.is_empty()

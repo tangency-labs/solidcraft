@@ -29,7 +29,7 @@ pub fn github_connection(repository: &str) -> Result<Connection> {
     Ok(Connection {
         credential: format!("cloud:{id}"),
         id,
-        name: repository.clone(),
+        name: format!("github.com/{repository}"),
         remote: format!("https://github.com/{repository}.git"),
         repository,
         authentication: Authentication::Https,
@@ -67,9 +67,47 @@ pub fn github_token_url(repository: &str) -> Result<String> {
     Ok(format!("{}&target_name={owner}", crate::github_setup().create_token_url()))
 }
 
+pub fn github_create_repository_url(repository: &str) -> Result<String> {
+    if repository.trim().is_empty() {
+        return Ok(crate::github_setup().create_repository_url().into());
+    }
+    let repository = github_repository(repository)?;
+    let name = repository.rsplit('/').next().ok_or_else(|| Error::Invalid("missing repository name".into()))?;
+    Ok(format!("https://github.com/new?name={name}&visibility=private"))
+}
+
+pub fn github_website(connection: &Connection) -> Result<String> {
+    let candidate = if connection.provider == "github" {
+        connection.repository.as_str()
+    } else {
+        let remote = connection.git_remote.as_ref().map(|r| r.fetch.as_str()).unwrap_or(&connection.remote);
+        if !crate::github_setup().matches_remote(remote) {
+            return Err(Error::Invalid("this connection has no GitHub website".into()));
+        }
+        remote.strip_prefix("git@github.com:").or_else(|| remote.strip_prefix("ssh://git@github.com/")).unwrap_or(remote)
+    };
+    let repository = github_repository(candidate)?;
+    Ok(format!("https://github.com/{repository}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn additional_repository_links_and_websites_keep_connections_separate() {
+        let first = github_connection("Owner/one").unwrap();
+        let second = github_connection("Owner/two").unwrap();
+        assert_ne!(first.id, second.id);
+        assert_ne!(first.credential, second.credential);
+        assert!(github_create_repository_url(&second.repository).unwrap().contains("name=two&visibility=private"));
+        assert_eq!(github_website(&second).unwrap(), "https://github.com/Owner/two");
+        let generic = Connection { provider: String::new(), remote: "git@github.com:Owner/two.git".into(), ..first.clone() };
+        assert_eq!(github_website(&generic).unwrap(), "https://github.com/Owner/two");
+        for remote in ["local/folder", "file:///tmp/repo", "https://evil.example/Owner/two"] {
+            assert!(github_website(&Connection { provider: String::new(), remote: remote.into(), ..first.clone() }).is_err());
+        }
+    }
+
     #[test]
     fn setup_ids_are_isolated_and_links_never_accept_arbitrary_urls() {
         let a = github_connection("https://github.com/Owner/designs.git").unwrap();
