@@ -57,7 +57,9 @@
 //!   tripled per split) keeps the two curves' caches for its whole recursion instead
 //!   (`Curve::global_point_solve_cached`), built at the first global solve as
 //!   upstream's; the build is deterministic, so the solutions are those of a fresh
-//!   cache. Other `DropPoint` callers still build one per call.
+//!   cache. [`Curve::drop_point_in`] keeps the caches of a caller's curves in a
+//!   [`DropPointCaches`] (`IsPointOnCurve` in `FindInteriorCurves`). Other
+//!   `DropPoint` callers still build one per call.
 //! - **Recursion.** `GlobalCoincidenceChecker` splits closed and half closed curves
 //!   recursively; past [`MAX_COINCIDENCE_DEPTH`] nested splits it fails with
 //!   `InvalidInput` (upstream recurses without bound). Each split makes three calls, so
@@ -134,6 +136,13 @@ impl SolutionObject for CurveHandle {
         Some(self.0)
     }
 }
+
+/// The curve caches of [`Curve::drop_point_in`], kept across calls on the same
+/// curves (performance only: upstream keeps each cache on its curve; see
+/// [`Curve::global_point_solve_cached`]). Slot `i` belongs to the caller's curve `i`,
+/// which must not change while the slots are used.
+#[derive(Debug, Default)]
+pub(crate) struct DropPointCaches(Vec<Option<CurveCache<CurveHandle>>>);
 
 // ---- CalculateBoundingBox --------------------------------------------------------------
 
@@ -538,6 +547,33 @@ impl Curve {
             op,
             &mut None,
         )
+    }
+
+    /// [`Curve::drop_point`] keeping the curve's cache for the global solve in slot
+    /// `index` of `caches` (see [`DropPointCaches`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`Curve::drop_point`].
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn drop_point_in(
+        &self,
+        k: &Kernel,
+        interval: &Extent1d,
+        point: Point3,
+        vec_to_inside: Option<Vec3>,
+        dist_tol: f64,
+        guess: Option<f64>,
+        op: SolverOperation,
+        caches: &mut DropPointCaches,
+        index: usize,
+    ) -> Result<DroppedPoint> {
+        if caches.0.len() <= index {
+            caches.0.resize_with(index + 1, || None);
+        }
+        let mut fresh = None;
+        let slot = caches.0.get_mut(index).unwrap_or(&mut fresh);
+        self.drop_point_cached(k, interval, point, vec_to_inside, dist_tol, guess, op, slot)
     }
 
     /// [`Curve::drop_point`] keeping the curve's cache for the global solve in

@@ -47,7 +47,9 @@
 //! the leaf node is not the surface of the cache the solver was given (upstream reads
 //! the patch through the node's owner whatever it is). `GlobalPointSolve` gained the
 //! out-parameter form [`Surface::global_point_solve_into`] so that a caller ignoring
-//! its status keeps what was found before the failure.
+//! its status keeps what was found before the failure. `CoincidenceCheck` keeps the
+//! curve cache of each boundary curve for all its intersections, as upstream keeps
+//! it on the curve, so each boundary curve builds one cache per check.
 //! Unported callees return [`SolidError::Unported`], also where upstream ignores the
 //! status. Recursion: none.
 
@@ -62,8 +64,8 @@ use super::p2::{
 use super::p4::{is_point_on_normal, NoObject};
 use super::p5::DropPointOptions;
 use super::p6::SampleOptions;
-use crate::curve::curve::p8::CurveIntersectOptions;
 use crate::curve::curve::{Curve, CurveKind};
+use crate::curve::curve_cache::CurveCache;
 use crate::curve::line::Line;
 use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
@@ -74,7 +76,9 @@ use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::global_solver::{GlobalSolve, SolutionRequested, SolveRequest, SolverOperation};
 use crate::geom::local_solve_nd::TerminationReason;
 use crate::geom::polar_box::{PolarBox, PolarBoxState};
-use crate::geom::solution_array::{Solution, SolutionArray, SolutionObject, SolutionType, SortKey};
+use crate::geom::solution_array::{
+    OperandObject, Solution, SolutionArray, SolutionObject, SolutionType, SortKey,
+};
 use crate::geom::tol::are_same;
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{Point3, Vec3};
@@ -320,7 +324,9 @@ fn boundary_uv(domain: &Extent2d, index: usize, t: f64) -> (Point2, Vec2) {
 }
 
 /// `eStat = GlobalCurveIntersect(..)`: the intersections of two boundary curves, none
-/// when the call fails.
+/// when the call fails. `cache0` and `cache1` hold the curves' caches across the
+/// calls of one coincidence check, as upstream keeps them on the boundary curves.
+#[allow(clippy::too_many_arguments)]
 fn boundary_intersections(
     k: &Kernel,
     crv0: &Curve,
@@ -328,15 +334,12 @@ fn boundary_intersections(
     crv1: &Curve,
     dom1: &Extent1d,
     tol: f64,
+    cache0: &mut Option<CurveCache<OperandObject>>,
+    cache1: &mut Option<CurveCache<OperandObject>>,
 ) -> Result<SolutionArray<NoObject>> {
-    Ok(ignored(crv0.global_curve_intersect(
-        k,
-        dom0,
-        crv1,
-        dom1,
-        tol,
-        &CurveIntersectOptions::<NoObject>::default(),
-    ))?
+    Ok(ignored(
+        crv0.global_curve_intersect_unnamed_cached(k, dom0, crv1, dom1, tol, false, cache0, cache1),
+    )?
     .unwrap_or_default())
 }
 
@@ -496,11 +499,18 @@ impl Surface {
             }
         }
 
+        // The boundary curves' caches, built at their first intersection and kept
+        // for the rest of the check (upstream keeps them on the curves).
+        let mut caches0: Vec<Option<CurveCache<OperandObject>>> = Vec::new();
+        caches0.resize_with(bdrys0.len(), || None);
+        let mut caches1: Vec<Option<CurveCache<OperandObject>>> = Vec::new();
+        caches1.resize_with(bdrys1.len(), || None);
+
         // Set this True as default, so that we can just return if found.
         res.are_coincident = true;
 
         // Double loop over the two surface's boundary curves.
-        for (ii, crv0) in bdrys0.iter_mut().enumerate() {
+        for ((ii, crv0), cache0) in bdrys0.iter_mut().enumerate().zip(caches0.iter_mut()) {
             let Some(crv0) = crv0.as_ref() else { continue };
             if crv0.is_degenerate(k, EFF_ZERO, None)? {
                 continue;
@@ -511,7 +521,7 @@ impl Surface {
                 domain0.v_interval()
             };
 
-            for (jj, crv1) in bdrys1.iter().enumerate() {
+            for ((jj, crv1), cache1) in bdrys1.iter().enumerate().zip(caches1.iter_mut()) {
                 let Some(crv1) = crv1.as_ref() else { continue };
                 let crv_dom1 = if jj == 0 || jj == 2 {
                     domain1.u_interval()
@@ -520,7 +530,9 @@ impl Surface {
                 };
 
                 // Check for intersections.
-                let sols = boundary_intersections(k, crv0, &crv_dom0, crv1, &crv_dom1, tol_3d)?;
+                let sols = boundary_intersections(
+                    k, crv0, &crv_dom0, crv1, &crv_dom1, tol_3d, cache0, cache1,
+                )?;
 
                 // Check each boundary intersection for surface coincidence.
                 for sol in sols.as_slice() {

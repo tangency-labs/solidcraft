@@ -73,6 +73,7 @@
 //! - **Not ported.** `Dump` and the `SM_DEBUG_CODE` drawing blocks; `SM_ASSERT`s.
 
 use crate::curve::conic::{Conic, ConicType};
+use crate::curve::curve::p6::DropPointCaches;
 use crate::curve::curve::Curve;
 use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
@@ -497,6 +498,10 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
         };
         self.solve_it(&request, &mut solutions)?;
 
+        // The caches of the drops on `out.curves_3d` (upstream keeps them on the
+        // curves): this loop only appends curves, so slot `i` stays curve `i`'s.
+        let mut drop_caches = DropPointCaches::default();
+
         // Now for each node pair do a test to see if produces a unique start point
         for sol in solutions.as_slice() {
             let uv_guess1 = Point2::new(sol.start.parameters[0], sol.start.parameters[1]);
@@ -560,10 +565,13 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
             }
 
             // skip start points that are already on xsect curves
-            if self
-                .base
-                .is_point_on_curve(k, surf_pnt, &out.curves_3d, None)?
-            {
+            if self.base.is_point_on_curve_cached(
+                k,
+                surf_pnt,
+                &out.curves_3d,
+                None,
+                &mut drop_caches,
+            )? {
                 continue;
             }
 

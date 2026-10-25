@@ -28,7 +28,9 @@
 //! - **Caches.** The caches are built for the call with [`make_curve_cache`] (see
 //!   unit `curve.curve_p5`), or kept across calls in slots the caller lends
 //!   (`global_curve_intersect_cached`, as upstream keeps them on the curves; the
-//!   composite curve offsetter uses it for its offset pairs); the same curve (by
+//!   composite curve offsetter uses it for its offset pairs, and
+//!   `global_curve_intersect_unnamed_cached` serves callers that name no handles,
+//!   such as the boundary curves of `SmSurface::CoincidenceCheck`); the same curve (by
 //!   identity, [`core::ptr::eq`]) shares one cache and so one tree, which makes the
 //!   intersection a self intersection, as upstream's shared object cache. A cache that cannot be built is
 //!   `SM_ERR_NULL_POINTER` (upstream `NER`).
@@ -301,6 +303,48 @@ impl Curve {
             cache1,
             cache2,
         )
+    }
+
+    /// [`Curve::global_curve_intersect`] for a caller that names no handles, keeping
+    /// the curves' caches in `cache1` (this curve's) and `cache2` (the other curve's;
+    /// unused when `other` is this curve) across calls, as
+    /// [`Curve::global_curve_intersect_cached`] does. The caches name the stand-in
+    /// handles of the unnamed solve (`operand_handles`), so a slot must belong to its
+    /// curve, unchanged since the cache was built, and keep its role: `cache1` always
+    /// holds a cache of a `self` curve and `cache2` one of an `other` curve.
+    ///
+    /// # Errors
+    ///
+    /// As [`Curve::global_curve_intersect`].
+    pub(crate) fn global_curve_intersect_unnamed_cached<O: SolutionObject>(
+        &self,
+        k: &Kernel,
+        interval: &Extent1d,
+        other: &Self,
+        other_interval: &Extent1d,
+        dist_tol: f64,
+        skip_global_coincidence_check: bool,
+        cache1: &mut Option<CurveCache<OperandObject>>,
+        cache2: &mut Option<CurveCache<OperandObject>>,
+    ) -> Result<SolutionArray<O>> {
+        let own = operand_handles(self, other);
+        let inner = CurveIntersectOptions {
+            skip_global_coincidence_check,
+            handles: [Some(own[0]), Some(own[1])],
+            analytic_handles: [Some(own[2]), Some(own[3])],
+        };
+        Ok(self
+            .global_curve_intersect_body(
+                k,
+                interval,
+                other,
+                other_interval,
+                dist_tol,
+                &inner,
+                cache1,
+                cache2,
+            )?
+            .without_objects())
     }
 
     /// The body of [`Curve::global_curve_intersect`] for a caller giving handles, with
@@ -1652,6 +1696,40 @@ mod tests {
                 &mut None,
             );
             assert_eq!(format!("{cached_self:?}"), format!("{fresh_self:?}"));
+        }
+        if fresh.is_ok() {
+            assert!(slot_a.is_some() && slot_b.is_some());
+        }
+    }
+
+    /// The unnamed solve with reused cache slots gives the solutions of the
+    /// uncached unnamed solve, call after call.
+    #[test]
+    fn unnamed_cached_slots_match_fresh_caches() {
+        let k = Kernel::default();
+        let a = Curve::from(HermiteCurve::new(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 1.0, 0.0),
+            Vec3::new(2.0, 0.0, 0.0),
+            Vec3::new(1.0, -1.0, 0.0),
+            3,
+        ));
+        let b = polyline(&[[0.0, 0.2, 0.0], [1.0, 0.1, 0.0], [2.0, 0.3, 0.0]]);
+        let none = CurveIntersectOptions::<H>::default();
+        let fresh = a.global_curve_intersect(&k, &unit(), &b, &unit(), 1e-6, &none);
+        let (mut slot_a, mut slot_b) = (None, None);
+        for _ in 0..3 {
+            let cached: Result<SolutionArray<H>> = a.global_curve_intersect_unnamed_cached(
+                &k,
+                &unit(),
+                &b,
+                &unit(),
+                1e-6,
+                false,
+                &mut slot_a,
+                &mut slot_b,
+            );
+            assert_eq!(format!("{cached:?}"), format!("{fresh:?}"));
         }
         if fresh.is_ok() {
             assert!(slot_a.is_some() && slot_b.is_some());

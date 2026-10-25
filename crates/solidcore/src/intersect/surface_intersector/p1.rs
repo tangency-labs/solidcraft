@@ -81,6 +81,7 @@
 
 use crate::blend::fillet_standard_solver::p1::FilletLaw;
 use crate::curve::curve::p3::PointSolveOptions;
+use crate::curve::curve::p6::DropPointCaches;
 use crate::curve::curve::Curve;
 use crate::curve::hermite_curve::HermiteCurve;
 use crate::error::{Result, SolidError, SM_ERR_NULL_POINTER};
@@ -1317,6 +1318,24 @@ impl<'s> SurfaceIntersector<'s> {
         curves_3d: &[Curve],
         skip: Option<usize>,
     ) -> Result<bool> {
+        self.is_point_on_curve_cached(k, point, curves_3d, skip, &mut DropPointCaches::default())
+    }
+
+    /// [`SurfaceIntersector::is_point_on_curve`] keeping the caches of the curves'
+    /// drops in `caches` across calls: slot `i` belongs to `curves_3d[i]`, which must
+    /// not change while the slots are used (curves may be appended).
+    ///
+    /// # Errors
+    ///
+    /// As [`SurfaceIntersector::is_point_on_curve`].
+    pub(crate) fn is_point_on_curve_cached(
+        &self,
+        k: &Kernel,
+        point: Point3,
+        curves_3d: &[Curve],
+        skip: Option<usize>,
+        caches: &mut DropPointCaches,
+    ) -> Result<bool> {
         for (jj, curve) in curves_3d.iter().enumerate() {
             // when given an optional skip index - skip it
             if skip == Some(jj) {
@@ -1337,7 +1356,7 @@ impl<'s> SurfaceIntersector<'s> {
                 let ivl = curve.natural_interval();
 
                 // Find nearest point on curve to test point within 10*tolerance.
-                let drop = match curve.drop_point(
+                let drop = match curve.drop_point_in(
                     k,
                     &ivl,
                     point,
@@ -1345,6 +1364,8 @@ impl<'s> SurfaceIntersector<'s> {
                     self.this_approx_tol_3d * 10.0,
                     None,
                     SolverOperation::Intersect,
+                    caches,
+                    jj,
                 ) {
                     Ok(d) => d,
                     Err(e) => return or_true(Err(e)),
