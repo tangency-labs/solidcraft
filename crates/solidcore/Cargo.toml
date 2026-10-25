@@ -11,6 +11,11 @@ readme = "README.md"
 keywords = ["cad", "brep", "nurbs", "geometry", "solid-modeling"]
 categories = ["graphics", "mathematics", "science"]
 
+[features]
+# Kernels start with the curve cache memo off (`Kernel::memoize_curve_caches`), to
+# run difftest and the tests in both positions. Results never depend on it.
+curve-memo-off = []
+
 [dependencies]
 thiserror.workspace = true
 

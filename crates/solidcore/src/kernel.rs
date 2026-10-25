@@ -193,6 +193,10 @@ pub struct Kernel {
     /// Boolean sets it for its duration (`boolean::merge::p4::manifold_boolean`). A
     /// [`Cell`] because the intersectors take `&Kernel`.
     pub cone_parallel_midpoint_test: Cell<bool>,
+    /// Not upstream: whether `make_curve_cache` keeps a memo of each curve cache in the
+    /// curve value (`true` unless the `curve-memo-off` feature is on). The memo never
+    /// changes a result, only the time; `false` builds every cache fresh, to check that.
+    pub memoize_curve_caches: bool,
 }
 
 impl Default for Kernel {
@@ -213,6 +217,7 @@ impl Kernel {
             fillet_point_step: Cell::new(None),
             upstream_ub_passed: Vec::new(),
             cone_parallel_midpoint_test: Cell::new(false),
+            memoize_curve_caches: !cfg!(feature = "curve-memo-off"),
         }
     }
 

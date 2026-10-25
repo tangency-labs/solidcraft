@@ -43,6 +43,9 @@
 //! | [`AuxDataType`], [`NodeGeomType`], [`SplitDir`], [`NodeClass`] | `SmAuxDataType`, `SmNodeGeomType`, `SmSurfParamType` (U/V), `SmNodeClassType` |
 //!
 //! Deviations:
+//! - **Handle space.** `Tree::retag_curve_tree` (not upstream) copies a curve
+//!   subdivision tree into another handle space, for the curve cache memo
+//!   (`curve.curve_p5`).
 //! - Pointers become arena indices: nodes live in [`Tree::nodes`] ([`NodeId`]) and
 //!   object-list items in [`Tree::lists`] ([`ListId`]), both in allocation order,
 //!   exactly the order of upstream's `SmMemBlockMgr::GetActiveElements`. Resetting
@@ -515,6 +518,57 @@ impl<O> Tree<O> {
         self.curve_spans = spans;
         self.curve_parents = parents;
         self.owner_curve = owner_curve;
+    }
+
+    /// This curve subdivision tree in another handle space, its owner curve named
+    /// `owner_curve` (not upstream: one memoised curve cache serves callers of every
+    /// handle space, see [`crate::curve::curve::p5::make_curve_cache`]). `None` when the
+    /// tree names other objects (object lists, surface data or an owner surface), which
+    /// a curve cache's tree does not.
+    pub(crate) fn retag_curve_tree<P>(&self, owner_curve: Option<P>) -> Option<Tree<P>> {
+        if self.owner_surface.is_some() || self.lists.iter().any(|l| l.object.is_some()) {
+            return None;
+        }
+        let mut nodes = Vec::with_capacity(self.nodes.len());
+        for n in &self.nodes {
+            let data = match &n.data {
+                NodeData::None => NodeData::None,
+                NodeData::ObjectList(l) => NodeData::ObjectList(*l),
+                NodeData::Curve(c) => NodeData::Curve(*c),
+                NodeData::Surface(_) => return None,
+            };
+            nodes.push(TreeNode {
+                parent: n.parent,
+                child1: n.child1,
+                child2: n.child2,
+                bbox: n.bbox,
+                aux_type: n.aux_type,
+                data,
+                geom_type: n.geom_type,
+            });
+        }
+        let lists = self
+            .lists
+            .iter()
+            .map(|l| ObjectList {
+                next: l.next,
+                bbox: l.bbox,
+                object: None,
+            })
+            .collect();
+        Some(Tree {
+            max_elements_per_node: self.max_elements_per_node,
+            min_size_ratio: self.min_size_ratio,
+            node_reduction: self.node_reduction,
+            owner: self.owner,
+            top: self.top,
+            nodes,
+            lists,
+            curve_spans: self.curve_spans.clone(),
+            curve_parents: self.curve_parents.clone(),
+            owner_curve,
+            owner_surface: None,
+        })
     }
 
     /// Sets the handle of the owning surface cache's surface

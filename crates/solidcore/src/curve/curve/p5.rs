@@ -41,9 +41,14 @@
 //!   copies the geometry and resets the owner (the `Notify` calls are the object
 //!   layer's).
 //! - **Caches.** Upstream keeps the cache on the curve and reuses it until the curve
-//!   changes; [`make_curve_cache`] builds a fresh one for the caller (the build is
-//!   deterministic, so it holds the same spans and tree). A caller that solves on one
-//!   unchanged curve repeatedly can keep the result (`Curve::global_point_solve_cached`,
+//!   changes (`SmCacheMgr`, deleted on `SM_NO_PRE_EDIT`). [`make_curve_cache`] keeps a
+//!   memo of its result in the curve value instead (`CurveMemo`): the build is a
+//!   deterministic function of the curve's geometry and the kernel's tolerance state
+//!   (`CurveMemoKey`), so a hit gives the cache a fresh build gives (the same spans and
+//!   tree, in the caller's handle space). An edit of the geometry through `&mut Curve`
+//!   starts an empty memo, clones share it, and [`Kernel::memoize_curve_caches`] turns
+//!   it off. No result depends on the memo. A caller that solves on one unchanged
+//!   curve repeatedly can also keep the result (`Curve::global_point_solve_cached`,
 //!   used by `GlobalCoincidenceChecker`). [`validate_curve_cache`] is the rest of
 //!   `CacheMakeOrValidate`: the `SM_OC_CURVE` type check and the reuse of an existing
 //!   cache; the context check has no counterpart (a [`Curve`] always
@@ -109,6 +114,8 @@ use crate::math::{max2, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::p2::ArcData;
 use crate::nurbs::b_spline_curve::{BSplineCurve, GapFix};
 use crate::nurbs::b_spline_surface::SurfParamType;
+use crate::surface::surface::p2::MAX_GEOMETRY_NESTING;
+use std::sync::{Arc, Mutex, OnceLock};
 
 const OP_CLEANUP: &str = "curve::curve::p5::crvs_cleanup";
 const OP_CACHE: &str = "curve::curve::p5::validate_curve_cache";
@@ -282,6 +289,159 @@ pub fn make_curve_cache<O: Copy + PartialEq>(
     curve: &Curve,
     handle: Option<O>,
 ) -> Result<CurveCache<O>> {
+    // not upstream: the memo of this build in the curve value (see CurveMemo)
+    let key = CurveMemoKey::of(k, curve);
+    if let Some(key) = &key {
+        if let Some(hit) = curve.memo().lookup(key, handle) {
+            return Ok(hit);
+        }
+    }
+    let cache = build_curve_cache(k, curve, handle)?;
+    if let Some(key) = key {
+        if let Some(neutral) = cache.retag::<()>(None) {
+            curve.memo().store(key, neutral);
+        }
+    }
+    Ok(cache)
+}
+
+/// The kernel and curve state [`make_curve_cache`]'s build reads besides the curve's
+/// geometry (not upstream): the tolerances and the context's scalar state. A memo
+/// entry is valid for a later build only when its key is equal (the context scalars
+/// bit for bit).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct CurveMemoKey {
+    tolerances: crate::kernel::Tolerances,
+    context_bits: [u64; 3],
+    context_flags: [bool; 2],
+}
+
+impl CurveMemoKey {
+    /// The key of a build of `curve` under `k`, or `None` when the build must not be
+    /// memoised: the memo is off, or the curve is not a pure value ([`memo_pure`]). The
+    /// owner is not an input: the build works on its own copy of the curve, which has
+    /// none.
+    fn of(k: &Kernel, curve: &Curve) -> Option<Self> {
+        if !k.memoize_curve_caches || !memo_pure(curve) {
+            return None;
+        }
+        let c = &k.context;
+        Some(Self {
+            tolerances: k.tolerances,
+            context_bits: [
+                c.this_zone_tol_3d().to_bits(),
+                c.stored_model_size_estimate().to_bits(),
+                c.stored_large_small_size_ratio().to_bits(),
+            ],
+            context_flags: [c.doing_boolean(), c.trim_uv_curves_at_corner_drops()],
+        })
+    }
+}
+
+/// Whether `curve`'s cache build reads nothing but the curve's own value, so that a memo
+/// of it is valid for every clone: B-spline, line, ellipse, hyperbola, parabola, Hermite
+/// and conic curves, and offset, projected and composite curves made only of such
+/// curves. Curves on surfaces, iso curves and curves in volumes hold a surface or volume
+/// with cache state of its own (the shared surface cache slot, lazy break and offset
+/// caches), so they are never memoised. The walk uses an explicit stack and gives up
+/// (no memo) past [`MAX_GEOMETRY_NESTING`] levels.
+fn memo_pure(curve: &Curve) -> bool {
+    let mut stack: Vec<(&Curve, usize)> = vec![(curve, 0)];
+    while let Some((c, depth)) = stack.pop() {
+        if depth > MAX_GEOMETRY_NESTING {
+            return false;
+        }
+        match c.kind() {
+            CurveKind::BSpline(_)
+            | CurveKind::Line(_)
+            | CurveKind::Ellipse(_)
+            | CurveKind::Hyperbola(_)
+            | CurveKind::Parabola(_)
+            | CurveKind::Hermite(_)
+            | CurveKind::Conic(_) => {}
+            CurveKind::Offset(o) => stack.extend(o.base_curve().map(|b| (b, depth + 1))),
+            CurveKind::Projected(p) => stack.push((p.curve(), depth + 1)),
+            CurveKind::Composite(cc) => {
+                stack.extend(cc.segments().iter().map(|seg| (&seg.curve, depth + 1)));
+            }
+            CurveKind::Iso(_) | CurveKind::CrvOnSurf(_) | CurveKind::CrvInVolume(_) => {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// One memoised build: its key and the cache, without a handle.
+#[derive(Debug)]
+struct CurveMemoEntry {
+    key: CurveMemoKey,
+    cache: CurveCache<()>,
+}
+
+/// The memo of a curve's [`CurveCache`] (not upstream; upstream keeps the cache in
+/// `SmCacheMgr`, keyed by the curve object). It lives in the [`Curve`] value: a clone
+/// shares it (same geometry, same cache), an edit through `&mut Curve` replaces it with
+/// an empty one, and it is freed with the last curve that shares it. So there is at
+/// most one cache per live curve value. A hit gives what a fresh build gives, so no
+/// result depends on the memo, its fill order or which clone filled it. It adds no
+/// auto-trait bound ([`Curve`] is `Send` and not `Sync`, as without it) and needs no
+/// `unsafe`.
+#[derive(Default)]
+pub(crate) struct CurveMemo(OnceLock<Arc<Mutex<Option<CurveMemoEntry>>>>);
+
+impl core::fmt::Debug for CurveMemo {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        // the memo is not part of the curve's observable state
+        f.write_str("CurveMemo")
+    }
+}
+
+impl CurveMemo {
+    /// An empty memo of its own.
+    pub(crate) const fn new() -> Self {
+        Self(OnceLock::new())
+    }
+
+    /// A memo shared with this one (for a clone of the curve).
+    pub(crate) fn share(&self) -> Self {
+        let slot = Arc::clone(self.0.get_or_init(Arc::default));
+        let shared = OnceLock::new();
+        let _ = shared.set(slot);
+        Self(shared)
+    }
+
+    /// The memoised cache for `key`, as a copy naming `handle`.
+    fn lookup<O: Copy + PartialEq>(
+        &self,
+        key: &CurveMemoKey,
+        handle: Option<O>,
+    ) -> Option<CurveCache<O>> {
+        let slot = self.0.get()?;
+        let entry = slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        entry
+            .as_ref()
+            .filter(|e| e.key == *key)
+            .and_then(|e| e.cache.retag(handle))
+    }
+
+    fn store(&self, key: CurveMemoKey, cache: CurveCache<()>) {
+        let slot = self.0.get_or_init(Arc::default);
+        let mut entry = slot
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *entry = Some(CurveMemoEntry { key, cache });
+    }
+}
+
+/// [`make_curve_cache`]'s build, without the memo.
+fn build_curve_cache<O: Copy + PartialEq>(
+    k: &Kernel,
+    curve: &Curve,
+    handle: Option<O>,
+) -> Result<CurveCache<O>> {
     // cast Object to SmCurve and get its interval
     let ivl = curve.natural_interval();
 
@@ -301,7 +461,7 @@ pub fn make_curve_cache<O: Copy + PartialEq>(
 
     // construct new CurveCache Object
     let mut cache = CurveCache::new(
-        curve.clone(),
+        curve.clone_detached(),
         ivl,
         CurveCacheOptions {
             make_full_tree: true,
@@ -2418,5 +2578,96 @@ mod tests {
         );
         let pt = line.evaluate_step_point(k, 0.5).unwrap();
         assert!(pt.distance(Vec3::new(3.0, 2.0, 0.0)) < 1e-12);
+    }
+
+    /// A closed cubic through 8 points of an ellipse.
+    fn ellipse_spline() -> Curve {
+        let mut pts: Vec<Point3> = (0..8)
+            .map(|i| {
+                let t = core::f64::consts::PI * f64::from(i) / 4.0;
+                Point3::new(5.0 * t.cos(), 3.0 * t.sin(), 0.5 * t)
+            })
+            .collect();
+        pts.push(pts[0]);
+        let c = BSplineCurve::interpolate_points(
+            &pts,
+            None,
+            3,
+            None,
+            None,
+            true,
+            crate::nurbs::crv_fit::p1::ParamMethod::ChordLength,
+        )
+        .unwrap();
+        Curve::from(c)
+    }
+
+    #[test]
+    fn memo_hit_is_the_fresh_build() {
+        let k = Kernel {
+            memoize_curve_caches: true,
+            ..Kernel::default()
+        };
+        let off = Kernel {
+            memoize_curve_caches: false,
+            ..Kernel::default()
+        };
+        for c in [
+            bseg([0.0, 0.0, 0.0], [1.0, 2.0, 3.0]),
+            ellipse_spline(),
+            hermite([0.0; 3], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]),
+        ] {
+            let fresh = format!("{:?}", make_curve_cache(&off, &c, Some(7u32)).unwrap());
+            let key = CurveMemoKey::of(&k, &c).unwrap();
+            assert!(c.memo().lookup(&key, None::<u32>).is_none());
+            let miss = format!("{:?}", make_curve_cache(&k, &c, Some(7u32)).unwrap());
+            assert!(c.memo().lookup(&key, None::<u32>).is_some());
+            let hit = format!("{:?}", make_curve_cache(&k, &c, Some(7u32)).unwrap());
+            // another handle space and a clone: the same as their fresh builds
+            let copy = c.clone();
+            let hit_copy = format!("{:?}", make_curve_cache(&k, &copy, Some(-1i64)).unwrap());
+            let fresh_copy = format!("{:?}", make_curve_cache(&off, &copy, Some(-1i64)).unwrap());
+            assert_eq!(miss, fresh);
+            assert_eq!(hit, fresh);
+            assert_eq!(hit_copy, fresh_copy);
+            // the memo was off for `off`, so it stored nothing
+            assert!(CurveMemoKey::of(&off, &c).is_none());
+        }
+    }
+
+    #[test]
+    fn memo_follows_edits_and_kernel_state() {
+        let k = Kernel {
+            memoize_curve_caches: true,
+            ..Kernel::default()
+        };
+        let mut c = ellipse_spline();
+        let key = CurveMemoKey::of(&k, &c).unwrap();
+        let _ = make_curve_cache(&k, &c, None::<u32>).unwrap();
+        let copy = c.clone();
+        assert!(copy.memo().lookup(&key, None::<u32>).is_some());
+        // an edit of one copy empties its memo only
+        c.reverse_parameterization(&k, &c.natural_interval())
+            .unwrap();
+        assert!(c.memo().lookup(&key, None::<u32>).is_none());
+        assert!(copy.memo().lookup(&key, None::<u32>).is_some());
+        let off = Kernel {
+            memoize_curve_caches: false,
+            ..Kernel::default()
+        };
+        let edited = format!("{:?}", make_curve_cache(&k, &c, None::<u32>).unwrap());
+        let edited_fresh = format!("{:?}", make_curve_cache(&off, &c, None::<u32>).unwrap());
+        assert_eq!(edited, edited_fresh);
+        // other tolerances do not match the stored key
+        let mut loose = Kernel {
+            memoize_curve_caches: true,
+            ..Kernel::default()
+        };
+        loose.tolerances.zone_tol_3d *= 10.0;
+        let loose_key = CurveMemoKey::of(&loose, &copy).unwrap();
+        assert!(copy.memo().lookup(&loose_key, None::<u32>).is_none());
+        // a Hermite curve is a pure value and memoised
+        let h = hermite([0.0; 3], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]);
+        assert!(CurveMemoKey::of(&k, &h).is_some());
     }
 }
