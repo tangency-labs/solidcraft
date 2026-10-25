@@ -2131,11 +2131,26 @@ fn selected_spline_handles(
         .iter()
         .filter_map(|id| sk.curve_index(id).and_then(|index| sk.curves.get(index)))
         .flat_map(|curve| match &curve.kind {
-            CurveKind::Spline { handles, .. } => handles.iter().copied().collect::<Vec<_>>(),
+            CurveKind::Spline { handles, .. } => handles.to_vec(),
             _ => Vec::new(),
         })
         .collect();
     (selected, handles)
+}
+
+fn selected_spline_handle_mirrors(sk: &solidcraft_engine::sketch::Sketch, selection: &[Sel]) -> Vec<(usize, Vec2)> {
+    let (selected, _) = selected_spline_handles(sk, selection);
+    let mut mirrors = Vec::new();
+    for id in selected {
+        let Some(index) = sk.curve_index(&id) else { continue };
+        let Some(curve) = sk.curves.get(index) else { continue };
+        let CurveKind::Spline { pts, handles, .. } = &curve.kind else { continue };
+        for (fit, handle) in pts.iter().zip(handles) {
+            let (Some(fit), Some(handle_pos)) = (sk.point(*fit), sk.point(*handle)) else { continue };
+            mirrors.push((*handle, fit * 2.0 - handle_pos));
+        }
+    }
+    mirrors
 }
 
 #[derive(Clone)]
@@ -2928,6 +2943,18 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
                     best.offer(rank, Hit::SketchPoint { sketch: sid, id: p.id.clone(), at: p.pos });
                 } else if woken && dd < WOKEN_CENTRE_PX && woken_far.as_ref().is_none_or(|(d0, _)| dd < *d0) {
                     woken_far = Some((dd, Hit::SketchPoint { sketch: sid, id: p.id.clone(), at: p.pos }));
+                }
+            }
+        }
+        for (index, mirror) in selected_spline_handle_mirrors(&ss.sketch, &s.selection) {
+            let Some(point) = ss.sketch.points.get(index) else { continue };
+            if shown.as_ref().is_some_and(|f| !f.takes(point)) {
+                continue;
+            }
+            if let Some(sp) = proj.to_screen(ss.plane.to_world(mirror)) {
+                let dd = sp.distance(pos) - if s.active_sketch == Some(sid) { 2.0 } else { 0.0 };
+                if dd < 8.0 && best.wants(dd) {
+                    best.offer(dd, Hit::SketchPoint { sketch: sid, id: point.id.clone(), at: mirror });
                 }
             }
         }
@@ -7084,6 +7111,7 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         .filter_map(|item| crate::sketch_modify_ui::point_id(&app.session, item).and_then(|id| sk.resolve_point(id)))
         .collect();
     let (_, selected_handles) = selected_spline_handles(sk, &app.session.selection);
+    let handle_mirrors = selected_spline_handle_mirrors(sk, &app.session.selection);
     for (i, p) in sk.points.iter().enumerate() {
         if !visible.takes(p) && !selected_handles.contains(&i) {
             continue;
@@ -7110,6 +7138,19 @@ fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
         }
         if selected.contains(&i) {
             painter.circle_stroke(sp, 6.0, Stroke::new(2.0, t.sel_edge));
+        }
+    }
+    for (i, mirror) in handle_mirrors {
+        let det = ss.report.point_determined.get(i).copied().unwrap_or(false);
+        let c = if sk.points.get(i).is_some_and(|point| point.link.is_none() && locked.get(i).copied().unwrap_or(false)) {
+            t.sketch_locked
+        } else if det {
+            t.sketch_point
+        } else {
+            t.sketch_point_free
+        };
+        if let Some(sp) = proj.to_screen(ss.plane.to_world(mirror)).filter(|_| !sk.view.hide_points) {
+            painter.rect_filled(Rect::from_center_size(sp, vec2(5.0, 5.0)), 0.0, c);
         }
     }
     // The markers and the status line are drawn straight onto the view: its side's colours (#4146).
@@ -7787,12 +7828,20 @@ mod tests {
         let (unselected, hidden_points) = selected_spline_handles(&sketch, &[]);
         assert!(unselected.is_empty());
         assert!(hidden_points.is_empty());
+        assert!(selected_spline_handle_mirrors(&sketch, &[]).is_empty());
 
         let selection = [Sel::SketchCurve { id: "s1".into() }];
         let (selected, visible_points) = selected_spline_handles(&sketch, &selection);
         assert_eq!(selected, ["s1".to_string()].into_iter().collect());
         let CurveKind::Spline { handles, .. } = &sketch.curves[spline].kind else { panic!("expected a fit spline") };
         assert_eq!(visible_points, handles.iter().copied().collect());
+        let mirrors = selected_spline_handle_mirrors(&sketch, &selection);
+        assert_eq!(mirrors.len(), handles.len());
+        let CurveKind::Spline { pts, .. } = &sketch.curves[spline].kind else { panic!("expected a fit spline") };
+        for ((handle_index, mirror), (fit, handle)) in mirrors.iter().zip(pts.iter().zip(handles)) {
+            assert_eq!(*handle_index, *handle);
+            assert_eq!(*mirror, sketch.point(*fit).unwrap() * 2.0 - sketch.point(*handle).unwrap());
+        }
     }
 
     #[test]
