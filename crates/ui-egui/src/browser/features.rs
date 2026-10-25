@@ -74,9 +74,23 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
     for index in indices {
         let Some(feature) = app.session.doc.features.get(index) else { continue };
         let (id, label, icon) = (feature.id, feature.name.clone(), crate::timeline::icon_of(&feature.kind));
+        let sketch = crate::timeline::TimelineKind::of(&feature.kind).profile_sketch();
+        // Behind the history marker or suppressed: not built, drawn faint as in the timeline.
+        let dim = feature.suppressed || app.session.doc.marker.is_some_and(|marker| index >= marker);
         let selected = app.session.selection.contains(&Sel::Feature { id });
         app.tree.remember(&format!("f:{id}"));
-        let r = draw_row(ui, ui.id().with(("browser_feature", id)), &Row { depth: depth + 1, icon, label: &label, selected, ..Default::default() });
+        let action = sketch.map(|_| ("sketch", "Edit Profile Sketch"));
+        let r = draw_row(
+            ui,
+            ui.id().with(("browser_feature", id)),
+            &Row { depth: depth + 1, icon, label: &label, selected, dim, action, ..Default::default() },
+        );
+        if r.action
+            && let Some(sketch) = sketch
+        {
+            app.edit_sketch(sketch.0);
+            continue;
+        }
         if let Some(rect) = r.rect {
             crate::scenario::publish_handle(&format!("row:browser-feature:{scope}:{id}"), rect.center());
             if app.tree.reveal_feature.as_ref().is_some_and(|target| target.id == id && target.path == path) {
@@ -384,5 +398,52 @@ mod tests {
             let item = crate::context_menu::items(&h.app, &Target::Viewport).into_iter().find(|item| item.id == id).unwrap();
             assert!(!item.enabled || item.params.as_ref().unwrap()["feature"] == json!(owner), "{id}: {item:?}");
         }
+    }
+
+    /// A feature's browser row has the timeline's actions: its sketch button and menu edit the
+    /// profile sketch, and the menu suppresses and rolls back; rolled-back rows stay listed.
+    #[test]
+    fn browser_feature_row_edits_its_sketch_suppresses_and_rolls_back() {
+        let mut h = Harness::new();
+        let sketch = h.app.run("sketch.create", json!({"plane":"XY","name":"Profile"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,15]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let pad = h.app.run("solid.extrude", json!({"distance":10,"body_name":"Plate"})).unwrap()["feature"].as_u64().unwrap();
+        let block = h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"body_name":"Block"})).unwrap()["feature"].as_u64().unwrap();
+        let (pad_name, block_name) = (h.app.session.doc.feature(pad).unwrap().name.clone(), h.app.session.doc.feature(block).unwrap().name.clone());
+        h.app.tree.expanded.insert("c0/features".into());
+        h.frames(2);
+        // Only a feature with a profile sketch gets the button.
+        assert!(crate::scenario::handle_at(&format!("action:{block_name}")).is_none());
+        h.step(&json!({"click": {"handle": format!("action:{pad_name}")}})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.session.active_sketch, Some(sketch), "the button opens the profile sketch");
+        h.app.finish_sketch();
+        h.frames(2);
+
+        let menu = |h: &Harness, id: u64| crate::context_menu::items(&h.app, &Target::Feature { id });
+        let edit = menu(&h, pad).into_iter().find(|item| item.id == "ui.editSketch").unwrap();
+        assert!(edit.enabled && edit.params.as_ref().unwrap()["sketch"] == json!(sketch), "{edit:?}");
+        assert!(!menu(&h, block).into_iter().find(|item| item.id == "ui.editSketch").unwrap().enabled);
+        let run = |h: &mut Harness, id: u64, command: &str| {
+            let item = menu(h, id).into_iter().find(|item| item.id == command).unwrap();
+            crate::context_menu::run_item(&mut h.app, &item, Pos2::ZERO);
+            for _ in 0..500 {
+                if h.app.deferred.is_none() && h.app.deferred_queue.is_empty() {
+                    break;
+                }
+                h.frame();
+            }
+            h.frames(2);
+        };
+        run(&mut h, block, "timeline.suppress");
+        assert!(h.app.session.doc.feature(block).unwrap().suppressed);
+        run(&mut h, block, "timeline.suppress");
+        assert!(!h.app.session.doc.feature(block).unwrap().suppressed, "the second click unsuppresses");
+        run(&mut h, pad, "timeline.roll_to");
+        let pad_index = h.app.session.doc.feature_index(pad).unwrap();
+        assert_eq!(h.app.session.doc.marker, Some(pad_index + 1), "the marker goes right after the feature");
+        let labels: Vec<_> = drawn_rows().into_iter().map(|(label, ..)| label).collect();
+        assert!(labels.contains(&block_name), "a rolled-back feature stays listed: {labels:?}");
     }
 }

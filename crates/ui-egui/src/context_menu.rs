@@ -354,17 +354,7 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Viewport => viewport_items(app),
         Target::Body { name } => body_items(app, std::slice::from_ref(name), true),
         Target::Sketch { id } => sketch_items(app, *id),
-        Target::Feature { id } => vec![
-            act("ui.editFeature", "Edit Feature", "edit").with(json!({"feature":id})).on(app.session.doc.feature(*id).is_some()),
-            act("ui.rename", "Rename", "rename").with(json!({"feature":id})).on(app.session.doc.feature(*id).is_some()),
-            act("ui.delete", "Delete", "delete").key("Del").with(json!({"items": [{"type": "feature", "id": id}]})).on(app
-                .session
-                .doc
-                .feature(*id)
-                .is_some()),
-            Item::sep(),
-            act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({"feature":id})).on(app.session.doc.feature(*id).is_some()),
-        ],
+        Target::Feature { id } => feature_items(app, *id),
         Target::Plane { id } => plane_items(app, *id),
         Target::OriginPlane { name } => origin_plane_items(app, name),
         Target::Component { id } => component_items(app, *id),
@@ -474,6 +464,27 @@ fn feature_and_sketch(app: &SolveApp, f: Option<u64>) -> (Option<u64>, Option<u6
         .and_then(|f| serde_json::to_value(&f.kind).ok())
         .and_then(|v| v.get("sketch").and_then(Value::as_u64).or_else(|| v.as_object()?.values().find_map(|x| x.get("sketch")?.as_u64())));
     (f, sketch)
+}
+
+/// A browser feature row's menu: the timeline's feature actions, so the browser alone is enough
+/// to edit, suppress and roll back.
+fn feature_items(app: &SolveApp, id: u64) -> Vec<Item> {
+    let feature = app.session.doc.feature(id);
+    let exists = feature.is_some();
+    let sketch = feature.and_then(|f| crate::timeline::TimelineKind::of(&f.kind).profile_sketch());
+    let suppressed = feature.is_some_and(|f| f.suppressed);
+    vec![
+        act("ui.editFeature", "Edit Feature", "edit").with(json!({"feature":id})).on(exists),
+        act("ui.editSketch", "Edit Profile Sketch", "sketch").with(json!({"sketch": sketch.map(|s| s.0)})).on(sketch.is_some()),
+        act("ui.rename", "Rename", "rename").with(json!({"feature":id})).on(exists),
+        act("timeline.suppress", if suppressed { "Unsuppress" } else { "Suppress" }, "suppress")
+            .with(json!({"feature":id, "suppressed": !suppressed}))
+            .on(exists),
+        act("timeline.roll_to", "Roll Back Here", "rollback").with(json!({"feature":id})).on(exists),
+        act("ui.delete", "Delete", "delete").key("Del").with(json!({"items": [{"type": "feature", "id": id}]})).on(exists),
+        Item::sep(),
+        act("ui.findTimeline", "Find in Timeline", "rollback").with(json!({"feature":id})).on(exists),
+    ]
 }
 
 /// The canvas menus put Repeat on
@@ -1454,6 +1465,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 app.start("sketch.create");
             }
         }
+        // They recompute the history from the changed feature on: off the frame, as the timeline does.
+        "timeline.suppress" | "timeline.roll_to" if item.params.is_some() => drop(app.run_heavy(&item.id, p)),
         id if item.params.is_some() => {
             let _ = app.run(id, p);
         }
