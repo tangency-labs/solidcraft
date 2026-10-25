@@ -351,7 +351,8 @@ pub fn create_skin_srf_boundary_derivs(
 /// # Errors
 ///
 /// [`NlibCode::Input`] when the end knots differ; `InvalidInput` with reason
-/// [`BARE_FLAG_REASON`] for upstream's sanity exit (an index past the knots);
+/// [`BARE_FLAG_REASON`] for upstream's sanity exit (an index past the knots) or
+/// overflow of the starting index `p + 1`;
 /// `InvalidInput` for knots that compare unordered.
 pub fn merge_knot_vectors(
     knr: &KnotVector<'_>,
@@ -373,8 +374,9 @@ pub fn merge_knot_vectors(
     let tol = PTOL * (r(mr)? - r(0)?);
     let mut xr = Vec::new();
     let mut xs = Vec::new();
-    let mut ii = p + 1;
-    let mut jj = p + 1;
+    let first = p.checked_add(1).ok_or_else(|| bare(OP))?;
+    let mut ii = first;
+    let mut jj = first;
     // `ii < mr - p` with upstream's signed arithmetic.
     let lt = |i: usize, mx: usize| i.checked_add(p).is_some_and(|ip| ip < mx);
 
@@ -1303,6 +1305,35 @@ mod tests {
         let bad = [0.0, 0.0, 0.0, 2.0, 2.0, 2.0];
         let kb = KnotVector::from_slice(&bad).unwrap();
         assert!(merge_knot_vectors(&kr, &kb, 2).is_err());
+    }
+
+    #[test]
+    fn merge_knot_vectors_start_index_overflow() {
+        let knots = [0.0, 0.0, 1.0, 1.0];
+        let kr = KnotVector::from_slice(&knots).unwrap();
+        let ks = KnotVector::from_slice(&knots).unwrap();
+        assert_eq!(
+            merge_knot_vectors(&kr, &ks, usize::MAX),
+            Err(SolidError::InvalidInput {
+                operation: "nurbs::srf_adv::p4::merge_knot_vectors",
+                reason: BARE_FLAG_REASON,
+            })
+        );
+    }
+
+    #[test]
+    fn merge_knot_vectors_endpoint_mismatch_precedes_start_index_overflow() {
+        let r = [0.0, 0.0, 1.0, 1.0];
+        let s = [0.0, 0.0, 2.0, 2.0];
+        let kr = KnotVector::from_slice(&r).unwrap();
+        let ks = KnotVector::from_slice(&s).unwrap();
+        assert_eq!(
+            merge_knot_vectors(&kr, &ks, usize::MAX),
+            Err(SolidError::nlib(
+                "nurbs::srf_adv::p4::merge_knot_vectors",
+                NlibCode::Input,
+            ))
+        );
     }
 
     #[test]
