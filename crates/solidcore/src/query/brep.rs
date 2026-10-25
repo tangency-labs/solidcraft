@@ -56,8 +56,10 @@
 //!   the identities and builds the cache lazily, on the first solve that needs it (so a
 //!   single-region B-rep never builds one, as upstream). A caller keeps one query while
 //!   the B-rep is not edited and makes a fresh one after an edit (upstream revalidates).
-//!   [`BrepIdentity::default`] is the identity of a lone B-rep (`BrepId` 0, geometry
-//!   owned by its arena records). The ray fires may add missing UV trim curves, which
+//!   [`BrepQuery::of_brep`] and [`BrepClassifier::of_brep`] resolve a lone B-rep's
+//!   identities from its [`Brep::naming`] scheme and proven owner keys
+//!   ([`BrepIdentity::default`] assumes [`arena_identity`]). The ray fires may add
+//!   missing UV trim curves, which
 //!   upstream's `const` method does to the B-rep itself; [`BrepClassifier`] serves
 //!   callers that hold the B-rep shared and makes a private copy on the first ray fire
 //!   only ([`Brep::clone_standing_for_self`]: its geometry keeps its owners, which the
@@ -354,8 +356,8 @@ fn no_owner(_: ObjectRef) -> Option<ObjectRef> {
 
 impl BrepIdentity<'static> {
     /// The identities of a B-rep whose geometry is owned by its records'
-    /// [`arena_identity`] (as the B-reps this crate builds and imports), without
-    /// intermediate owners.
+    /// [`arena_identity`] (such as imported B-reps), without intermediate owners. For a
+    /// B-rep whose naming scheme may be [`NamingScheme::Notify`], use [`Self::of_brep`].
     #[must_use]
     pub fn arena(brep_id: BrepId) -> Self {
         Self {
@@ -455,49 +457,7 @@ impl BrepQuery<'static> {
     /// producer geometry-owner identities (`Brep::geometry_owner_keys`).
     #[must_use]
     pub fn of_brep_with_id(brep_id: BrepId, b: &Brep) -> Self {
-        let identity = BrepIdentity::of_brep_with_id(brep_id, b);
-        let fallback: fn(CacheObject) -> ObjectRef = match b.naming() {
-            NamingScheme::Notify => notify_identity,
-            _ => arena_identity,
-        };
-        let mut overrides = std::collections::BTreeMap::new();
-        for (&entity, &proven) in b.geometry_owner_keys() {
-            let matches_fallback = match entity {
-                EntityRef::Edge(e) => b
-                    .edges()
-                    .get(e)
-                    .and_then(|edge| edge.curve.as_ref())
-                    .and_then(crate::curve::curve::p2::Curve::owner)
-                    .is_some_and(|actual| actual == fallback(CacheObject::Edge(e))),
-                EntityRef::Face(f) => b
-                    .faces()
-                    .get(f)
-                    .and_then(|face| face.surface.as_ref())
-                    .and_then(Surface::owner)
-                    .is_some_and(|actual| actual == fallback(CacheObject::Face(f))),
-                _ => true,
-            };
-            if !matches_fallback {
-                overrides.insert(entity, proven);
-            }
-        }
-        let proven_keys: Option<ProvenKeyFn<'static>> = (!overrides.is_empty()).then(|| {
-            Box::new(move |object| {
-                let entity = match object {
-                    CacheObject::Edge(e) | CacheObject::Curve(e) => Some(EntityRef::Edge(e)),
-                    CacheObject::Face(f) | CacheObject::Surface(f) => Some(EntityRef::Face(f)),
-                    _ => None,
-                };
-                entity
-                    .and_then(|e| overrides.get(&e).copied())
-                    .unwrap_or_else(|| fallback(object))
-            }) as ProvenKeyFn<'static>
-        });
-        Self {
-            identity,
-            proven_keys,
-            cache: OnceCell::new(),
-        }
+        Self::with_proven_owners(BrepIdentity::of_brep_with_id(brep_id, b), b)
     }
 }
 
@@ -508,6 +468,53 @@ impl<'a> BrepQuery<'a> {
         Self {
             identity,
             proven_keys: None,
+            cache: OnceCell::new(),
+        }
+    }
+
+    /// Queries of `b` with `identity` as the base naming, overriding edge/face keys where
+    /// `b` records a proven producer geometry-owner key (`Brep::geometry_owner_keys`) that
+    /// differs from `identity.keys`. Unowned (`None`) and foreign-owned geometry not
+    /// recorded in `b.geometry_owner_keys()` is still excluded.
+    #[must_use]
+    pub fn with_proven_owners(identity: BrepIdentity<'a>, b: &Brep) -> Self {
+        let base_keys = identity.keys;
+        let mut overrides = std::collections::BTreeMap::new();
+        for (&entity, &proven) in b.geometry_owner_keys() {
+            let matches_base = match entity {
+                EntityRef::Edge(e) => b
+                    .edges()
+                    .get(e)
+                    .and_then(|edge| edge.curve.as_ref())
+                    .and_then(crate::curve::curve::p2::Curve::owner)
+                    .is_some_and(|actual| actual == base_keys(CacheObject::Edge(e))),
+                EntityRef::Face(f) => b
+                    .faces()
+                    .get(f)
+                    .and_then(|face| face.surface.as_ref())
+                    .and_then(Surface::owner)
+                    .is_some_and(|actual| actual == base_keys(CacheObject::Face(f))),
+                _ => true,
+            };
+            if !matches_base {
+                overrides.insert(entity, proven);
+            }
+        }
+        let proven_keys: Option<ProvenKeyFn<'a>> = (!overrides.is_empty()).then(|| {
+            Box::new(move |object| {
+                let entity = match object {
+                    CacheObject::Edge(e) | CacheObject::Curve(e) => Some(EntityRef::Edge(e)),
+                    CacheObject::Face(f) | CacheObject::Surface(f) => Some(EntityRef::Face(f)),
+                    _ => None,
+                };
+                entity
+                    .and_then(|e| overrides.get(&e).copied())
+                    .unwrap_or_else(|| base_keys(object))
+            }) as ProvenKeyFn<'a>
+        });
+        Self {
+            identity,
+            proven_keys,
             cache: OnceCell::new(),
         }
     }
@@ -528,7 +535,11 @@ impl<'a> BrepQuery<'a> {
         self.identity
     }
 
-    fn effective_identity(&self) -> BrepIdentity<'_> {
+    /// The effective [`BrepIdentity`], including any proven geometry-owner overrides
+    /// recorded on the B-rep when built with [`Self::of_brep`] or
+    /// [`Self::with_proven_owners`].
+    #[must_use]
+    pub fn effective_identity(&self) -> BrepIdentity<'_> {
         BrepIdentity {
             brep_id: self.identity.brep_id,
             keys: match &self.proven_keys {
@@ -891,6 +902,27 @@ pub struct BrepClassifier<'a, 'b> {
     query: BrepQuery<'a>,
     source: &'b Brep,
     copy: Option<Brep>,
+}
+
+impl<'b> BrepClassifier<'static, 'b> {
+    /// The classifier of `brep` at [`BrepId`] `0`, resolving records by `brep`'s naming
+    /// scheme and proven producer geometry-owner identities ([`BrepQuery::of_brep`]).
+    #[must_use]
+    pub fn of_brep(brep: &'b Brep) -> Self {
+        Self::of_brep_with_id(BrepId::from_index(0), brep)
+    }
+
+    /// The classifier of `brep` at `brep_id`, resolving records by `brep`'s naming
+    /// scheme and proven producer geometry-owner identities
+    /// ([`BrepQuery::of_brep_with_id`]).
+    #[must_use]
+    pub fn of_brep_with_id(brep_id: BrepId, brep: &'b Brep) -> Self {
+        Self {
+            query: BrepQuery::of_brep_with_id(brep_id, brep),
+            source: brep,
+            copy: None,
+        }
+    }
 }
 
 impl<'a, 'b> BrepClassifier<'a, 'b> {
@@ -1386,5 +1418,38 @@ mod tests {
             (du.x, du.y, du.z, dv.x, dv.y, dv.z),
             (1.0, 0.0, 0.0, 0.0, 1.0, 0.0)
         );
+    }
+
+    #[test]
+    fn notify_named_primitive_box_builds_nonempty_trees_and_classifies_interior() {
+        let mut k = Kernel::default();
+        let box_brep =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0)
+                .unwrap();
+        assert_eq!(box_brep.naming(), NamingScheme::Notify);
+
+        let query = BrepQuery::of_brep(&box_brep);
+        let cache = query.cache(&k, &box_brep).unwrap();
+        assert!(cache.vertex_tree().is_some());
+        assert!(cache.curve_tree().is_some());
+        assert!(cache.surface_tree().is_some());
+
+        let inf = box_brep.infinite_region().unwrap();
+        let mut classifier = BrepClassifier::of_brep(&box_brep);
+        let inside = classifier
+            .point_3d_classify(&k, Point3::new(0.5, 0.5, 0.5), 1e-5, false)
+            .unwrap();
+        assert_eq!(inside.point_class(), PointClassType::Region);
+        let Some(EntityRef::Region(r_in)) = inside.object() else {
+            panic!("expected region classification, got {inside:?}");
+        };
+        assert_ne!(r_in, inf);
+        assert_eq!(classifier.brep().region(r_in).unwrap().is_void(), 0);
+
+        let outside = classifier
+            .point_3d_classify(&k, Point3::new(2.0, 2.0, 2.0), 1e-5, false)
+            .unwrap();
+        assert_eq!(outside.point_class(), PointClassType::Region);
+        assert_eq!(outside.object(), Some(EntityRef::Region(inf)));
     }
 }

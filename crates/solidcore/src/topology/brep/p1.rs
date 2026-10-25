@@ -573,7 +573,7 @@ impl core::fmt::Debug for GeometryAttributeFilter<'_> {
 
 /// The default expected owner of `f`'s surface under `b`'s recorded naming scheme,
 /// falling back to a proven caller owner recorded on `b`.
-fn default_face_owner(b: &Brep, f: FaceId) -> ObjectRef {
+pub(crate) fn default_face_owner(b: &Brep, f: FaceId) -> ObjectRef {
     let fallback = if b.naming() == NamingScheme::Notify {
         loopuse::notify_ref(EntityRef::Face(f))
     } else {
@@ -592,7 +592,7 @@ fn default_face_owner(b: &Brep, f: FaceId) -> ObjectRef {
 
 /// The default expected owner of `e`'s curve under `b`'s recorded naming scheme,
 /// falling back to a proven caller owner recorded on `b`.
-fn default_edge_owner(b: &Brep, e: EdgeId) -> ObjectRef {
+pub(crate) fn default_edge_owner(b: &Brep, e: EdgeId) -> ObjectRef {
     let fallback = if b.naming() == NamingScheme::Notify {
         loopuse::notify_ref(EntityRef::Edge(e))
     } else {
@@ -3021,7 +3021,8 @@ pub fn create_parallel_projection_curves(
         // pFace->GetSurface()->CreateParallelProjectionCurves(..): the surface reaches
         // its face's cache (smsurf_GetSurfaceCache) through the B-rep, lent to the
         // projection's live view
-        let identity = crate::query::brep::BrepIdentity::default();
+        let query = crate::query::brep::BrepQuery::of_brep(b);
+        let identity = query.effective_identity();
         let (curves_3d, uv_curves) = {
             use crate::intersect::topology_solver::p1::TopologyObjects;
             let live = crate::query::brep::LiveBrepObjects::new(b, &identity, None)?;

@@ -29,8 +29,9 @@
 //! advance for a preceding Surface and ignores ordinary evaluation errors (the
 //! output stays undefined); Unported errors still propagate. The containment tests of
 //! [`brep_relationship`] (`sm_PointInSolid`, `sm_CountContainedSamples`) classify on a
-//! private copy of each target ([`BrepClassifier`], keyed by
-//! [`BrepIdentity::default`]). No new recursion or allocation from serialized counts.
+//! private copy of each target ([`BrepClassifier::of_brep`], keyed by the target's
+//! recorded naming scheme and proven owner keys). No new recursion or allocation from
+//! serialized counts.
 
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::Curve;
@@ -48,8 +49,8 @@ use crate::kernel::Kernel;
 use crate::math::{Point2, Point3, Vec3};
 use crate::nurbs::b_spline_curve::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::query::brep::BrepClassifier;
 use crate::query::brep::{self as qbrep, BoundingBoxOptions};
-use crate::query::brep::{BrepClassifier, BrepIdentity};
 use crate::surface::surface::p1::zone_tol_3d;
 use crate::surface::surface::p4::NoObject;
 use crate::surface::surface::p5::DropPointOptions;
@@ -376,7 +377,7 @@ struct Target<'b>(BrepClassifier<'static, 'b>);
 
 impl<'b> Target<'b> {
     fn new(brep: &'b Brep) -> Self {
-        Self(BrepClassifier::new(brep, BrepIdentity::default()))
+        Self(BrepClassifier::of_brep(brep))
     }
 
     /// `pTarget->Point3DClassify(point, tolerance, FALSE, sPC)`: the point class and
@@ -1003,5 +1004,26 @@ mod tests {
                 Point3::UNDEF
             );
         }
+    }
+
+    #[test]
+    fn target_classifier_resolves_notify_named_primitive_box() {
+        let mut k = Kernel::default();
+        let box_brep =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 1.0, 1.0, 1.0)
+                .unwrap();
+        let mut target = Target::new(&box_brep);
+        assert_eq!(
+            target
+                .classify(&k, Point3::new(0.5, 0.5, 0.5), 1e-5)
+                .unwrap(),
+            (PointClassType::Region, true)
+        );
+        assert_eq!(
+            target
+                .classify(&k, Point3::new(2.0, 2.0, 2.0), 1e-5)
+                .unwrap(),
+            (PointClassType::Region, false)
+        );
     }
 }

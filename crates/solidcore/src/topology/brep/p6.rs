@@ -1455,11 +1455,14 @@ fn split_closed(
     // read its geometry under the caller's names, the ones its owners carry
     let key_of = env.key_of;
     let keys = |object| brep_p2::caller_cache_key(key_of, object);
-    let query = qbrep::BrepQuery::new(qbrep::BrepIdentity {
-        brep_id: BrepId::from_index(0),
-        keys: &keys,
-        owner_of: &|_| None,
-    });
+    let query = qbrep::BrepQuery::with_proven_owners(
+        qbrep::BrepIdentity {
+            brep_id: BrepId::from_index(0),
+            keys: &keys,
+            owner_of: &|_| None,
+        },
+        brep,
+    );
 
     // If the oldRegion was the infiniteRegion,
     // figure out which child is the new InfiniteRegion, if requested.

@@ -122,10 +122,11 @@ fn brep_regions_from_infinite(b: &Brep) -> Result<Vec<RegionId>> {
 /// `pBrep->FindAndSetInfiniteRegion()`: ray casts for the infinite region and moves
 /// it to the head of the region list.
 fn brep_find_and_set_infinite_region(k: &mut Kernel, b: &mut Brep) -> Result<()> {
+    let query = crate::query::brep::BrepQuery::of_brep(b);
     crate::topology::brep::p5::find_and_set_infinite_region(
         k,
         b,
-        &crate::query::brep::BrepQuery::default(),
+        &query,
         None,
         // SM_VS_INFINITEREGION_SWAP: SmBrep.h's native default.
         crate::topology::brep::p1::SetRegionVoidType::InfiniteRegionSwap,

@@ -247,10 +247,11 @@ fn transform_brep(
 /// `SmBrep::FindAndSetInfiniteRegion()` with upstream's default arguments (no shell to
 /// test, `SM_VS_INFINITEREGION_SWAP`, no bounding box).
 fn find_and_set_infinite_region(k: &mut Kernel, brep: &mut Brep) -> Result<()> {
+    let query = qbrep::BrepQuery::of_brep(brep);
     crate::topology::brep::p5::find_and_set_infinite_region(
         k,
         brep,
-        &qbrep::BrepQuery::default(),
+        &query,
         None,
         crate::topology::brep::p1::SetRegionVoidType::InfiniteRegionSwap,
         None,
@@ -287,11 +288,7 @@ fn brep_surfaces(brep: &Brep) -> Result<Vec<FaceId>> {
             .as_ref()
             .ok_or_else(|| SolidError::null_pointer(OP))?;
         // add all standalone face->Surfaces to the list
-        if surface.owner()
-            == Some(crate::topology::brep_cache::arena_identity(
-                crate::topology::brep_cache::CacheObject::Face(f),
-            ))
-        {
+        if surface.owner() == Some(crate::topology::brep::p1::default_face_owner(brep, f)) {
             out.push(f);
         }
     }
