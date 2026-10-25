@@ -54,6 +54,7 @@ function fake(world = {}) {
 const names = (calls) => calls.map((c) => c[0]);
 const find = (calls, n) => calls.find((c) => c[0] === n);
 const labeled = (at) => ({ event: 'labeled', label: { name: 'in progress' }, created_at: at });
+const said = (body, login = 'github-actions[bot]') => ({ event: 'commented', body, user: { login } });
 const pr = (number, login = 'other', state = 'open', extra = {}) => ({
   event: 'cross-referenced',
   source: { issue: {
@@ -186,6 +187,38 @@ test('unclaim by a maintainer releases, by a stranger does not', async () => {
   await claim.handleComment({ github: w.github, context: ctx('/unclaim', { user: 'mallory', assignees: ['bob'], labels: ['in progress'] }), now: NOW });
   assert.equal(find(w.calls, 'removeLabel'), undefined);
   assert.equal(find(w.calls, 'react')[1].content, 'eyes');
+});
+
+test('unclaim by a claimant the bot could not assign releases, by a stranger does not', async () => {
+  const timeline = [labeled(ago(5 * H)), said('Claimed by @alice through #50. The claim lapses after 14 days without pushes.')];
+  let w = fake({ timeline });
+  await claim.handleComment({ github: w.github, context: ctx('/unclaim', { labels: ['in progress'] }), now: NOW });
+  assert.equal(find(w.calls, 'removeLabel')[1].name, 'in progress');
+  assert.equal(find(w.calls, 'removeAssignees'), undefined);
+  assert.equal(find(w.calls, 'react')[1].content, '+1');
+  w = fake({ timeline });
+  await claim.handleComment({ github: w.github, context: ctx('/unclaim', { user: 'mallory', labels: ['in progress'] }), now: NOW });
+  assert.equal(find(w.calls, 'removeLabel'), undefined);
+  assert.match(find(w.calls, 'comment')[1].body, /Only the person who claimed this/);
+  w = fake({ timeline, perms: { carol: 'write' } });
+  await claim.handleComment({ github: w.github, context: ctx('/unclaim', { user: 'carol', labels: ['in progress'] }), now: NOW });
+  assert.ok(find(w.calls, 'removeLabel'));
+});
+
+test('only the bot\'s latest claim reply, before any release or assignment, names the claimant', async () => {
+  const cases = [
+    [said('Claimed by @mallory.', 'mallory')], // not the bot
+    [said('Claimed by @mallory.'), { event: 'unlabeled', label: { name: 'in progress' } }, labeled(ago(H))], // released since
+    [said('Claimed by @mallory.'), said('Claimed by @bob.')], // taken over
+  ];
+  for (const timeline of cases) {
+    const w = fake({ timeline });
+    await claim.handleComment({ github: w.github, context: ctx('/unclaim', { user: 'mallory', labels: ['in progress'] }), now: NOW });
+    assert.equal(find(w.calls, 'removeLabel'), undefined);
+  }
+  const w = fake({ timeline: [said('Claimed by @mallory.')] }); // someone is assigned since
+  await claim.handleComment({ github: w.github, context: ctx('/unclaim', { user: 'mallory', assignees: ['bob'], labels: ['in progress'] }), now: NOW });
+  assert.equal(find(w.calls, 'removeLabel'), undefined);
 });
 
 test('unclaim on an owner-assigned issue works only for the owner', async () => {
