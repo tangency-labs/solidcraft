@@ -583,7 +583,7 @@ fn play(s: &mut Session, p: &Value) -> Result<Value> {
     if !invalid.is_empty() {
         return Err(bad(cmd, format!("macro `{}` got bad values — {}", loaded.name.as_deref().unwrap_or("macro"), invalid.join("; "))));
     }
-    let mark = (s.doc.clone(), s.active_sketch, s.pending_moves.clone(), s.redo.clone(), s.undo.clone());
+    let mark = (s.doc.clone(), s.active_sketch, s.pending_moves.clone(), s.redo.clone(), s.undo.clone(), s.visibility.clone());
     let _top = TopLevel::enter();
     let outcome = eval_rhai(s, &loaded.source, &bound);
     match outcome {
@@ -593,9 +593,9 @@ fn play(s: &mut Session, p: &Value) -> Result<Value> {
             // holding the design as it was before Play, so one Ctrl+Z undoes the macro
             // (docs/macros.md). A macro that changed nothing adds no undo step.
             s.undo = mark.4;
-            if !std::sync::Arc::ptr_eq(&s.doc, &mark.0) || s.active_sketch != mark.1 || s.pending_moves != mark.2 {
+            if !std::sync::Arc::ptr_eq(&s.doc, &mark.0) || s.active_sketch != mark.1 || s.pending_moves != mark.2 || s.visibility != mark.5 {
                 let label = loaded.name.clone().filter(|n| !n.is_empty()).unwrap_or_else(|| "Play Macro".to_string());
-                s.undo.push(crate::Snapshot { label, doc: mark.0, active_sketch: mark.1, pending_moves: mark.2 });
+                s.undo.push(crate::Snapshot { label, doc: mark.0, active_sketch: mark.1, pending_moves: mark.2, visibility: mark.5 });
                 if s.undo.len() > crate::MAX_UNDO {
                     s.undo.remove(0);
                 }
@@ -608,6 +608,7 @@ fn play(s: &mut Session, p: &Value) -> Result<Value> {
             s.pending_moves = mark.2;
             s.redo = mark.3;
             s.undo = mark.4;
+            s.visibility = mark.5;
             s.refresh();
             Err(e)
         }
