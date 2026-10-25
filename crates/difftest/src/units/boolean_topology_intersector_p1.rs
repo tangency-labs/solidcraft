@@ -4068,10 +4068,13 @@ fn run_part2_op(
             }
             // (where upstream reads a freed proto edge, UB-175, the shim's verbatim copy
             // unlinks the stale entries and answers -2; the port goes on with its defined
-            // teardown and records the condition on the kernel)
+            // teardown and records the condition on the kernel. After a failed imprint,
+            // UB-242, both stop and the shim answers -2.)
             k.upstream_ub_passed.clear();
             let r = ti.intersect_insert_relate(k, two, TI_HANDLE);
-            if r.is_ok() && k.upstream_ub_passed.contains(&"UB-175") {
+            if k.upstream_ub_passed.contains(&"UB-242")
+                || (r.is_ok() && k.upstream_ub_passed.contains(&"UB-175"))
+            {
                 o.push(NULL_DEREF);
                 return Ok(());
             }

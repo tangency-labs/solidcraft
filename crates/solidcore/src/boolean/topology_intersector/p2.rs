@@ -1148,7 +1148,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     /// Those of the manager's construction, `IntersectTopology` and
     /// `ResolveIntersections` (the manager then stays installed, as upstream leaks
     /// it); every error of the imprint, after deleting the manager (SolidCraft fix
-    /// af8db37: upstream goes on with the half-imprinted B-reps);
+    /// af8db37: upstream goes on with the half-imprinted B-reps, UB-242, which
+    /// [`Kernel::note_upstream_ub`] records);
     /// [`SolidError::InvalidInput`] without both B-reps. Where the manager's
     /// destructor would read a freed proto edge upstream (UB-175) the port's defined
     /// teardown goes on and [`Kernel::note_upstream_ub`] records `"UB-175"`.
@@ -1201,6 +1202,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 if let Some(mut mgr) = self.proto_topo_mgr.take() {
                     let _ = mgr.destroy();
                 }
+                // upstream goes on here with the half-imprinted B-reps (UB-242)
+                k.note_upstream_ub("UB-242");
                 return Err(e);
             }
         }

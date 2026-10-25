@@ -25,11 +25,16 @@ use serde_json::{json, Value};
 
 use solidcore::boolean::api_brep as boolean;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::geom::object::ObjectRef;
 use solidcore::geom::vector3d::{Point3, Vec3};
 use solidcore::kernel::Kernel;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::primitive::api_primitives as primitives;
+use solidcore::surface::surface::p2::SurfaceKind;
+use solidcore::surface::surface::Surface;
 use solidcore::topology::brep::p1::regions;
+use solidcore::topology::brep::p2::ArenaNotifyState;
+use solidcore::topology::brep::p3;
 use solidcore::topology::proto_topology::p1::api_transform::{
     api_rotate, api_translate, TransformObject,
 };
@@ -39,8 +44,12 @@ use solidcore::SolidError;
 use crate::ssi::glob_match;
 use crate::HarnessError;
 
-/// Accuracy passed to `SmApiBrepComputeVolume`.
-pub const VOLUME_ACCURACY: f64 = 1e-6;
+/// Relative accuracy passed to `SmApiBrepComputeVolume`: its finest (upstream clamps
+/// to `[1e-8, 1e-1]`). The cases check volumes to absolute tolerances as tight as
+/// `0.01` on `30603` (3e-7 relative), finer than `1e-6` integrates: at `1e-6` both
+/// engines measure the same B-rep of #3396's stack `0.157` over its closed form, at
+/// `1e-8` `0.0008`.
+pub const VOLUME_ACCURACY: f64 = 1e-8;
 
 /// The body a case's expectations are checked on.
 pub const RESULT: &str = "result";
@@ -486,6 +495,10 @@ pub struct Measured {
     pub volume: f64,
     /// Regions other than the infinite one.
     pub lumps: usize,
+    /// Faces, edges and vertices (`GetNumFaces`, `GetNumEdges`, `GetNumVertices`).
+    pub topology: [usize; 3],
+    /// Faces on a cylinder (`SmCone::IsCylinder`).
+    pub cylinder_faces: usize,
 }
 
 /// How a case's run ended.
@@ -519,6 +532,25 @@ fn take(bodies: &BTreeMap<String, Brep>, id: &str) -> Result<Brep, Run> {
         .get(id)
         .cloned()
         .ok_or_else(|| Run::Error(format!("no body `{id}`")))
+}
+
+/// `SmApiBrepCopy(b)`: a copy that owns its geometry, so a later `SmApiTranslate`
+/// moves its curves and surfaces with its vertices. A plain [`Clone`] is not upstream's
+/// copy: its geometry keeps the source's owner names and stays put when the clone is
+/// transformed. Copy `n` names its objects in its own key domain.
+fn copy(k: &mut Kernel, b: &Brep, n: u64) -> Result<Brep, Run> {
+    let named = |entity, domain: u64| {
+        let r = p3::topology_ref(0, entity);
+        ObjectRef {
+            type_code: r.type_code,
+            key: ObjectKey(domain + r.type_code as u64 * 1_000_000 + (r.key.0 & 0xffff_ffff)),
+        }
+    };
+    let target_key = |entity| named(entity, n * 100_000_000);
+    let mut state = ArenaNotifyState::new(&Brep::new());
+    let mut env = state.env(None);
+    env.key_of = &target_key;
+    p3::api_brep_copy(k, &mut env, Some(b), &|entity| named(entity, 0)).map_err(|e| solid(&e))
 }
 
 /// A cylinder along Z turned onto `axis` about `origin`.
@@ -583,10 +615,13 @@ fn step_rust(k: &mut Kernel, bodies: &mut BTreeMap<String, Brep>, step: &Step) -
             ..
         } => {
             let mut target = take(bodies, a)?;
+            let tool_source = take(bodies, b)?;
+            let mut copies = 0;
             let [p0, p1] = p.pitch;
             for j in 0..p.count[1] {
                 for i in 0..p.count[0] {
-                    let mut tool = take(bodies, b)?;
+                    copies += 1;
+                    let mut tool = copy(k, &tool_source, copies)?;
                     let (fi, fj) = (i as f64, j as f64);
                     let shift = Vec3::new(
                         p0[0] * fi + p1[0] * fj,
@@ -638,16 +673,38 @@ fn measure(k: &Kernel, b: &mut Brep) -> Result<Measured, SolidError> {
         .into_iter()
         .filter(|r| Some(*r) != infinite)
         .count();
-    Ok(Measured { volume, lumps })
+    let mut cylinder_faces = 0;
+    for &f in b.face_list() {
+        if let Some(SurfaceKind::Cone(c)) = b.face(f)?.surface.as_ref().map(Surface::kind) {
+            if c.is_cylinder() {
+                cylinder_faces += 1;
+            }
+        }
+    }
+    Ok(Measured {
+        volume,
+        lumps,
+        topology: [
+            b.face_list().len(),
+            b.edge_list().len(),
+            b.vertex_list().len(),
+        ],
+        cylinder_faces,
+    })
 }
 
 /// Runs `case` on solidcore.
 pub fn run_rust(case: &Case) -> Run {
     let mut k = Kernel::default();
     let mut bodies = BTreeMap::new();
-    for step in &case.steps {
-        if let Err(stop) = step_rust(&mut k, &mut bodies, step) {
-            return stop;
+    for (n, step) in case.steps.iter().enumerate() {
+        match step_rust(&mut k, &mut bodies, step) {
+            Ok(()) => {}
+            // Name the failing step (1-based) and the body it writes.
+            Err(Run::Error(msg)) => {
+                return Run::Error(format!("step {} (`{}`): {msg}", n + 1, step.id()))
+            }
+            Err(stop) => return stop,
         }
     }
     match bodies.get_mut(RESULT) {
@@ -695,8 +752,8 @@ pub fn checks(e: &Expect, m: &Measured) -> Vec<Check> {
     if let Some(n) = e.cylinder_faces_max {
         out.push(Check {
             name: "cylinder_faces_max",
-            status: "unchecked",
-            detail: format!("at most {n}; solidcore has no cylinder surface kind yet"),
+            status: pass(m.cylinder_faces <= n),
+            detail: format!("at most {n}, got {}", m.cylinder_faces),
         });
     }
     if e.sheet_corner.is_some() {
@@ -755,7 +812,14 @@ fn run_entry(run: &Run, verdict: &str, checks: &[Check]) -> Value {
         Run::Done(m) => {
             e.insert(
                 "measured".into(),
-                json!({"volume": crate::json::num(m.volume), "lumps": m.lumps}),
+                json!({
+                    "volume": crate::json::num(m.volume),
+                    "lumps": m.lumps,
+                    "faces": m.topology[0],
+                    "edges": m.topology[1],
+                    "vertices": m.topology[2],
+                    "cylinder_faces": m.cylinder_faces,
+                }),
             );
             e.insert(
                 "checks".into(),
@@ -806,11 +870,15 @@ pub fn run_cases(root: &Path, opts: &CasesOptions) -> ExitCode {
                 format!("{}: {}", d.blocked_by, d.symbol)
             }
             Run::Error(msg) => msg.clone(),
-            Run::Done(_) => c
-                .iter()
-                .map(|c| format!("{} {}: {}", c.name, c.status, c.detail))
-                .collect::<Vec<_>>()
-                .join("; "),
+            Run::Done(m) => {
+                let [f, e, v] = m.topology;
+                let checked = c
+                    .iter()
+                    .map(|c| format!("{} {}: {}", c.name, c.status, c.detail))
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                format!("{checked} [F/E/V {f}/{e}/{v}]")
+            }
         };
         println!("{:<64} rust {v:<10} {detail}", l.id);
         entries.push(json!({
@@ -948,12 +1016,16 @@ mod tests {
         let ok = Measured {
             volume: 268.02,
             lumps: 2,
+            topology: [4, 4, 4],
+            cylinder_faces: 0,
         };
         assert_eq!(verdict(&e, &Run::Done(ok)).0, "PASS");
         // The bug: the whole intersect came out empty.
         let empty = Measured {
             volume: 0.0,
             lumps: 0,
+            topology: [0, 0, 0],
+            cylinder_faces: 0,
         };
         let (v, c) = verdict(&e, &Run::Done(empty));
         assert_eq!(v, "FAIL");
@@ -961,13 +1033,19 @@ mod tests {
         let nan = Measured {
             volume: f64::NAN,
             lumps: 2,
+            ..ok
         };
         assert_eq!(verdict(&e, &Run::Done(nan)).0, "FAIL");
         let faces = Expect {
             cylinder_faces_max: Some(4),
             ..e.clone()
         };
-        assert_eq!(verdict(&faces, &Run::Done(ok)).0, "UNCHECKED");
+        assert_eq!(verdict(&faces, &Run::Done(ok)).0, "PASS");
+        let split = Measured {
+            cylinder_faces: 5,
+            ..ok
+        };
+        assert_eq!(verdict(&faces, &Run::Done(split)).0, "FAIL");
         assert_eq!(verdict(&faces, &Run::Done(empty)).0, "FAIL");
         let d = Run::Deferred(Deferral {
             blocked_by: "u".into(),
@@ -1035,7 +1113,9 @@ mod tests {
                     &loaded.case.expect,
                     &Run::Done(Measured {
                         volume: 1.0,
-                        lumps: 1
+                        lumps: 1,
+                        topology: [1, 0, 0],
+                        cylinder_faces: 0,
                     })
                 )
                 .0,

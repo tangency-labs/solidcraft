@@ -227,7 +227,8 @@ bool set_rels_maps_ok(SmProtoTopologyManager* mgr, int64_t ctor_kind)
 // build) and the members reached through accessors, plus one addition: before the delete,
 // whether ~SmProtoTopologyManager would read a freed proto edge (UB-175); if so the stale
 // entries are unlinked first, so the run stays defined, and `ub` is set (the port answers
-// InvalidInput there). The real IntersectInsertRelate is no longer exercised by this
+// InvalidInput there). A second addition stops after a failed ImprintIntersections (UB-242),
+// where upstream goes on with half-imprinted B-reps: `ub` is set there too. The real IntersectInsertRelate is no longer exercised by this
 // difftest, so re-diff this copy against upstream whenever the pinned commit moves.
 SmStatus iir_verbatim(SmTopologyIntersector* ti, bool& ub)
 {
@@ -258,6 +259,15 @@ SmStatus iir_verbatim(SmTopologyIntersector* ti, bool& ub)
 
   // If that didn't work, inform the public
   SE_MSG( eStat, _T("\nSmProtoExecutive: Error returned from ImprintIntersections().\n") );
+
+  // (addition, UB-242: upstream goes on to SetRelationships with the half-imprinted
+  // B-reps; stop here as the port does, deleting the manager as below, and answer -2)
+  if (eStat != SM_SUCCESS)
+    {
+      if(m_pProtoTopoMgr) { mgr_teardown_stale(m_pProtoTopoMgr, true); delete m_pProtoTopoMgr ; m_pProtoTopoMgr = NULL; }
+      ub = true;
+      return eStat;
+    }
 
   // Set relationship maps.
   eStat = ti->SetRelationships();

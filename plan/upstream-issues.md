@@ -1463,7 +1463,7 @@ meantime, whoever merges renumbers the new entry and every reference to it (here
 - **Confirmed:** yes (ASan, in the fork's C API tests); not reproduced in the solidcore difftest.
 - **Severity:** crash/UB (use-after-free).
 - **Fix:** tangency-labs/smlib af8db37: `IntersectInsertRelate` deletes the proto topology manager and returns the imprint's error, and `PiecewiseMerge` returns the error of its first `IntersectInsertRelate` (`SER`); the callers already propagate it.
-- **Rust port:** carries the fix (`TopologyIntersector::intersect_insert_relate`, `merge::p3::piecewise_merge`; test `piecewise_merge_ends_on_a_failed_intersect_insert_relate`).
+- **Rust port:** carries the fix (`TopologyIntersector::intersect_insert_relate`, `merge::p3::piecewise_merge`; test `piecewise_merge_ends_on_a_failed_intersect_insert_relate`). Since 2026-10-24 `intersect_insert_relate` also records `"UB-242"` in `Kernel::upstream_ub_passed`. The `boolean.topology_intersector_p2` shim's copy of `IntersectInsertRelate` now stops after a failed imprint in the same way, and both sides answer `-2`. Two generated cases (gen0111 torus/ellipsoid, gen0498 Endcap/toruswvy) reach it once `FaceIntersect` makes face caches on the lent B-reps. In both, the C++ `SmEdgeDefinition::Imprint` and `ImprintIntersections` return `SM_ERR_NULL_POINTER` exactly as the port does (checked with gdb).
 
 ### Topology
 
@@ -4178,3 +4178,9 @@ Numbering paragraph at the top says.
   port, these cases reached the port's UB-175 check; the C++ goes on (results of 8 and 7
   records).
 - **Confirmed:** by the port's teardown replay only; the C++ build was not instrumented.
+
+#### FAIL-3665. `SmApiBooleanDifference` fails (`SM_ERR`, 1001) cutting a column whose corner meets an internally tangent circle
+- **Location:** `SmMerge::MakeFaceuse` (three cases) and `SmBrep::MakeFaceTopology` (one), reached from `SmApiBooleanDifference`.
+- **What happens:** In `fixtures/solidcraft/3665-column-in-channel.json` every case fails at the cut of the r 3.04 cylinder centred at (0, 20) from the column (step 12 of `column_in_channel`, step 14 of the other three). That circle is internally tangent to the column's r 23.04 wall (r 23.039 in `control_column_clear`), so the column ends in a sharp corner on the wall. SolidCraft's expected volumes are closed forms; SMLib never reaches the final union.
+- **How found:** a standalone SM_API driver running the case steps on the C++ reference build (`SmApiCreateBox/Cylinder`, `SmApiBooleanIntersection/Difference`, `SmApiBrepCopy`), with gdb return breakpoints on `SmMerge::MakeFaceuse`, `SmBrep::MakeFaceTopology` and `SmBrep::TestClosureSplitRegion`.
+- **Confirmed:** yes, on the C++ build for main 92454ca60. The Rust port fails at the same step in the same function (`boolean::merge::p2::make_faceuse` and `topology::brep::p6`, status 1001).
