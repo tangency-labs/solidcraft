@@ -39,7 +39,8 @@
 //!   ones are `calloc`ed); `set_size` to the current size keeps the values, as
 //!   upstream.
 //! - [`Matrix::try_new`] (caller-chosen sizes) and [`Matrix::set_size`] return
-//!   `InvalidInput` when `rows * cols` overflows or cannot be allocated, leaving the
+//!   `InvalidInput` when `rows * cols` overflows, storage exceeds
+//!   [`crate::limits::MAX_ALLOC_BYTES`], or cannot be allocated, leaving the
 //!   matrix unchanged (upstream's `smos_Calloc` returns `NULL` and the row-pointer
 //!   loop writes through it). [`Matrix::new`] is for small sizes fixed at the call
 //!   site.
@@ -161,22 +162,20 @@ impl Matrix {
     ///
     /// # Errors
     ///
-    /// [`SolidError::InvalidInput`] when `rows * cols` overflows or the elements
-    /// cannot be allocated (upstream's `smos_Calloc` then returns `NULL` and the
-    /// constructor writes through it).
+    /// [`SolidError::InvalidInput`] when `rows * cols` overflows, storage exceeds
+    /// [`crate::limits::MAX_ALLOC_BYTES`], or the elements cannot be allocated
+    /// (upstream's `smos_Calloc` then returns `NULL` and the constructor writes
+    /// through it).
     pub fn try_new(rows: usize, cols: usize) -> Result<Self> {
         const OP: &str = "geom::matrix::Matrix::try_new";
         let len = rows.checked_mul(cols).ok_or(SolidError::InvalidInput {
             operation: OP,
             reason: "element count overflows",
         })?;
-        let mut data = Vec::new();
-        data.try_reserve_exact(len)
-            .map_err(|_| SolidError::InvalidInput {
-                operation: OP,
-                reason: "matrix too large to allocate",
-            })?;
-        data.resize(len, 0.0);
+        let data = crate::limits::try_filled(len, 0.0).ok_or(SolidError::InvalidInput {
+            operation: OP,
+            reason: "matrix too large to allocate",
+        })?;
         Ok(Self { rows, cols, data })
     }
 
@@ -845,6 +844,43 @@ mod tests {
         assert!(a.set_size(1 << 40, 1 << 20).is_err());
         assert_eq!(a, keep);
         assert_eq!(Matrix::try_new(2, 3).unwrap(), Matrix::new(2, 3));
+    }
+
+    #[test]
+    fn allocation_ceiling_rejected() {
+        let rows = crate::limits::MAX_ALLOC_BYTES / size_of::<f64>() + 1;
+        assert!(matches!(
+            Matrix::try_new(rows, 1),
+            Err(SolidError::InvalidInput {
+                operation: "geom::matrix::Matrix::try_new",
+                reason: "matrix too large to allocate",
+            })
+        ));
+    }
+
+    #[test]
+    fn element_count_overflow_rejected() {
+        assert!(matches!(
+            Matrix::try_new(usize::MAX, 2),
+            Err(SolidError::InvalidInput {
+                operation: "geom::matrix::Matrix::try_new",
+                reason: "element count overflows",
+            })
+        ));
+    }
+
+    #[test]
+    fn failed_resize_preserves_matrix() {
+        let mut a = m(2, 3, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        let keep = a.clone();
+        let rows = crate::limits::MAX_ALLOC_BYTES / size_of::<f64>() + 1;
+        for (rows, cols) in [(rows, 1), (usize::MAX, 2)] {
+            assert!(matches!(
+                a.set_size(rows, cols),
+                Err(SolidError::InvalidInput { .. })
+            ));
+            assert_eq!(a, keep);
+        }
     }
 
     #[test]
