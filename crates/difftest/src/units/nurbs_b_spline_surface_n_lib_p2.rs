@@ -263,31 +263,13 @@ fn read_sms(path: &str) -> Result<InlineSrf, HarnessError> {
     Ok(InlineSrf { net, p, q, u, v })
 }
 
-/// Reads an upstream 3D `.smc` text file: `n`, `p`, rational flag, dimension (3),
-/// `n+1` points (`x y z`, or `wx wy wz w` when rational), `n+p+2` knots.
 fn read_smc(path: &str) -> Result<InlineCrv, HarnessError> {
-    let v = numbers(path)?;
-    let mut it = v.into_iter();
-    let mut num = || {
-        it.next()
-            .ok_or_else(|| harness(format!("{path}: truncated")))
-    };
-    let n = int(path, num()?)?;
-    let p = int(path, num()?)?;
-    let rat = num()? != 0.0;
-    if int(path, num()?)? != 3 {
-        return Err(harness(format!("{path}: not a 3D curve")));
-    }
-    let mut cpts = Vec::with_capacity(n + 1);
-    for _ in 0..=n {
-        let (x, y, z) = (num()?, num()?, num()?);
-        let w = if rat { num()? } else { NOW };
-        cpts.push([x, y, z, w]);
-    }
-    let u = (0..n + p + 2)
-        .map(|_| num())
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(InlineCrv { cpts, p, u })
+    let c = crate::fixtures::text_curve::read_3d(path)?;
+    Ok(InlineCrv {
+        cpts: c.cpts,
+        p: c.p,
+        u: c.u,
+    })
 }
 
 fn srf(s: &SrfIn) -> Result<InlineSrf, HarnessError> {

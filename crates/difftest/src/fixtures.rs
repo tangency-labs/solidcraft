@@ -15,6 +15,8 @@
 
 #[cfg(feature = "cpp")]
 pub(crate) mod regions;
+#[cfg(feature = "cpp")]
+pub(crate) mod text_curve;
 
 use std::fs;
 use std::path::{Path, PathBuf};
