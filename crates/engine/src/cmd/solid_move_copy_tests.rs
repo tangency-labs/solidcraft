@@ -14,6 +14,25 @@ fn volume(body: &solidcraft_doc::ModelBody) -> f64 {
     solidcraft_kernel::measure(&body.body).unwrap().volume
 }
 
+/// A box of 20 mm with its corner at `corner`, as a body of its own.
+fn cube20_at(s: &mut Session, name: &str, corner: [i32; 3]) {
+    run(s, "solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": name, "corner": corner}));
+}
+
+/// The copy of `source`: the body that sits where the source landed after the move. Which
+/// copy is which is read from the geometry, not from the order the bodies are listed in.
+fn copy_of(s: &Session, source: &str, translate: Vec3) -> String {
+    let state = s.model.state();
+    let from = state.body(source).expect("the source body is in the model").mesh().bounds().min;
+    let want = Vec3::new(from.x + translate.x, from.y + translate.y, from.z + translate.z);
+    state
+        .bodies
+        .iter()
+        .find(|b| b.name != source && b.mesh().bounds().min.dist(want) < 1e-6)
+        .map(|b| b.name.clone())
+        .expect("the move must have copied the body")
+}
+
 /// The name of the body a command made, as the command reported it.
 fn created(reply: &Value) -> String {
     reply["created_bodies"].as_array().and_then(|a| a.first()).and_then(Value::as_str).expect("the command must report the body it made").to_string()
@@ -79,6 +98,39 @@ fn a_copied_body_keeps_the_material_of_the_body_it_came_from() {
     let copy = created(&reply);
     let source = s.doc.materials.get("Cube").expect("the source body keeps its material").clone();
     assert_eq!(s.doc.materials.get(&copy), Some(&source), "the copy must keep the material of the body it came from");
+}
+
+#[test]
+fn each_copied_body_keeps_the_look_and_the_material_of_the_body_it_came_from() {
+    let mut s = Session::default();
+    cube20(&mut s, "Alpha");
+    cube20_at(&mut s, "Beta", [50, 0, 0]);
+    run(&mut s, "appearance.assign", json!({"bodies": ["Alpha"], "appearance": "ABS - Blue"}));
+    run(&mut s, "appearance.assign", json!({"bodies": ["Beta"], "appearance": "ABS - Red"}));
+    run(&mut s, "material.assign", json!({"bodies": ["Alpha"], "material": "Aluminum"}));
+    run(&mut s, "material.assign", json!({"bodies": ["Beta"], "material": "Steel"}));
+
+    // One move, two bodies: each copy keeps the look of the body it came from, not the look of
+    // the body copied before it.
+    run(&mut s, "solid.move", json!({"bodies": ["Beta", "Alpha"], "translate": [30, 0, 0], "copy": true}));
+    assert_eq!(s.model.state().bodies.len(), 4, "two sources and their two copies");
+
+    let translate = Vec3::new(30.0, 0.0, 0.0);
+    let alpha = copy_of(&s, "Alpha", translate);
+    let beta = copy_of(&s, "Beta", translate);
+    assert_ne!(alpha, beta, "the two bodies must have two different copies");
+
+    let alpha_look = s.doc.appearances.bodies.get("Alpha").expect("the source body keeps its look").name.clone();
+    let beta_look = s.doc.appearances.bodies.get("Beta").expect("the source body keeps its look").name.clone();
+    assert_ne!(alpha_look, beta_look, "the two bodies must have different looks for this to mean anything");
+    assert_eq!(
+        s.doc.appearances.bodies.get(&alpha).map(|l| l.name.clone()),
+        Some(alpha_look.clone()),
+        "the copy of Alpha must keep the look of Alpha"
+    );
+    assert_eq!(s.doc.appearances.bodies.get(&beta).map(|l| l.name.clone()), Some(beta_look.clone()), "the copy of Beta must keep the look of Beta");
+    assert_eq!(s.doc.materials.get(&alpha).map(String::as_str), Some("Aluminum"), "the copy of Alpha must keep the material of Alpha");
+    assert_eq!(s.doc.materials.get(&beta).map(String::as_str), Some("Steel"), "the copy of Beta must keep the material of Beta");
 }
 
 #[test]
