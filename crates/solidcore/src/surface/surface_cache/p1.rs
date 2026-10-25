@@ -265,16 +265,24 @@ const fn bspline_curve_of(curve: &Curve) -> Option<&BSplineCurve> {
 /// virtual: the B-spline, plane (an `SmLine`) and surface of revolution (an
 /// `SmCircle` in the sweep direction) overrides, the base class body for the other
 /// kinds. The curve is held as a [`Curve`] so the derived classes' overrides
-/// (evaluation, length, degeneracy) stay in effect; the 3D tolerance is `0.0` as
-/// upstream's callers pass (the overrides do not use it).
+/// (evaluation, length, degeneracy) stay in effect. The caller's 3D approximation
+/// tolerance is forwarded, with `0.0` selecting the automatic tolerance.
 fn create_iso_parametric_curve(
     k: &Kernel,
     surface: &Surface,
     param: SurfParamType,
     iso: f64,
+    approx_tol_3d: f64,
     domain: Option<Extent2d>,
 ) -> Result<Curve> {
-    let r = surface.create_iso_parametric_curve(k, param, iso, 0.0, domain.as_ref(), false)?;
+    let r = surface.create_iso_parametric_curve(
+        k,
+        param,
+        iso,
+        approx_tol_3d,
+        domain.as_ref(),
+        false,
+    )?;
     match surface.kind() {
         // the SmSurface body (surface.surface_p5) makes a B-spline
         SurfaceKind::CurveBounded(_)
@@ -711,7 +719,7 @@ impl PatchBoundaryBoundingPlanes {
         bspline_of(surface).ok_or(SolidError::null_pointer(OP_BOUNDARY))?;
         // make the curve through the virtual (the SmPlane and SmSurfOfRevolution
         // overrides; 3D Tol SM_BIG_DOUBLE: not used by any of them)
-        create_iso_parametric_curve(k, surface, spt, param, None)
+        create_iso_parametric_curve(k, surface, spt, param, 0.0, None)
     }
 
     /// The UV end points of boundary `index` (`GetBoundaryUVEndPoints`).
@@ -3004,14 +3012,38 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
 
         // build isoParameter curves
         let d = Some(*uv_domain);
-        let c0 =
-            create_iso_parametric_curve(k, &self.surface, SurfParamType::U, uv_domain.min().x, d)?;
-        let c1 =
-            create_iso_parametric_curve(k, &self.surface, SurfParamType::V, uv_domain.min().y, d)?;
-        let c2 =
-            create_iso_parametric_curve(k, &self.surface, SurfParamType::U, uv_domain.max().x, d)?;
-        let c3 =
-            create_iso_parametric_curve(k, &self.surface, SurfParamType::V, uv_domain.max().y, d)?;
+        let c0 = create_iso_parametric_curve(
+            k,
+            &self.surface,
+            SurfParamType::U,
+            uv_domain.min().x,
+            approx_tol_3d,
+            d,
+        )?;
+        let c1 = create_iso_parametric_curve(
+            k,
+            &self.surface,
+            SurfParamType::V,
+            uv_domain.min().y,
+            approx_tol_3d,
+            d,
+        )?;
+        let c2 = create_iso_parametric_curve(
+            k,
+            &self.surface,
+            SurfParamType::U,
+            uv_domain.max().x,
+            approx_tol_3d,
+            d,
+        )?;
+        let c3 = create_iso_parametric_curve(
+            k,
+            &self.surface,
+            SurfParamType::V,
+            uv_domain.max().y,
+            approx_tol_3d,
+            d,
+        )?;
         let curves = [c0, c1, c2, c3];
 
         // when domain is same as cache domain - cache curves
@@ -3072,12 +3104,12 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
 
         // IsoParamCurves
         let d = Some(*domain);
-        let bot_u = create_iso_parametric_curve(k, surface, SurfParamType::U, uv_bot.x, d)?;
-        let bot_v = create_iso_parametric_curve(k, surface, SurfParamType::V, uv_bot.y, d)?;
-        let mid_u = create_iso_parametric_curve(k, surface, SurfParamType::U, uv_mid.x, d)?;
-        let mid_v = create_iso_parametric_curve(k, surface, SurfParamType::V, uv_mid.y, d)?;
-        let top_u = create_iso_parametric_curve(k, surface, SurfParamType::U, uv_top.x, d)?;
-        let top_v = create_iso_parametric_curve(k, surface, SurfParamType::V, uv_top.y, d)?;
+        let bot_u = create_iso_parametric_curve(k, surface, SurfParamType::U, uv_bot.x, 0.0, d)?;
+        let bot_v = create_iso_parametric_curve(k, surface, SurfParamType::V, uv_bot.y, 0.0, d)?;
+        let mid_u = create_iso_parametric_curve(k, surface, SurfParamType::U, uv_mid.x, 0.0, d)?;
+        let mid_v = create_iso_parametric_curve(k, surface, SurfParamType::V, uv_mid.y, 0.0, d)?;
+        let top_u = create_iso_parametric_curve(k, surface, SurfParamType::U, uv_top.x, 0.0, d)?;
+        let top_v = create_iso_parametric_curve(k, surface, SurfParamType::V, uv_top.y, 0.0, d)?;
 
         // 3D Udir and Vdir IsoParamCurve lengths
         let len = |c: &Curve, ivl: &Extent1d| -> Result<f64> {
@@ -3463,6 +3495,88 @@ mod tests {
         let finer = c.iso_boundary_curves(&k, &d, 0.0001).unwrap();
         assert!(!finer.cached);
         assert_eq!(c.iso_curve_tolerance(), 0.0001);
+    }
+
+    #[test]
+    fn iso_boundary_curves_forward_approximation_tolerance() {
+        use crate::nurbs::math::CPoint;
+        use crate::surface::offset_surface::OffsetSurface;
+
+        let k = Kernel::default();
+        let net = (0..3_i32)
+            .map(|i| {
+                (0..3_i32)
+                    .map(|j| {
+                        CPoint::new(
+                            f64::from(i),
+                            f64::from(j),
+                            0.5 * f64::from(i * i)
+                                + 0.3 * f64::from(j * j)
+                                + 0.2 * f64::from(i * j),
+                            NOW,
+                        )
+                    })
+                    .collect()
+            })
+            .collect();
+        let knots = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        let nurb = NurbSurface::new(net, 2, 2, knots.clone(), knots).unwrap();
+        let base = Surface::from(BSplineSurface::from_nurb(nurb, false));
+        // An offset uses the approximating base implementation, not the exact
+        // B-spline or plane iso-curve overrides.
+        let surface = Surface::from(
+            OffsetSurface::new(&k, 0.4, base, true, crate::geom::extent2d::SS_NONE).unwrap(),
+        );
+        let domain = Extent2d::from_bounds(0.1, 0.15, 0.85, 0.9);
+        let boundaries = [
+            (SurfParamType::U, domain.min().x),
+            (SurfParamType::V, domain.min().y),
+            (SurfParamType::U, domain.max().x),
+            (SurfParamType::V, domain.max().y),
+        ];
+        let curve_data = |curve: &Curve| {
+            let spline = bspline_curve_of(curve).unwrap();
+            (
+                spline.control_points().unwrap().to_vec(),
+                spline.knots(None).unwrap(),
+            )
+        };
+        let direct = |tol| {
+            boundaries.map(|(param, iso)| {
+                let curve = surface
+                    .create_iso_parametric_curve(&k, param, iso, tol, Some(&domain), false)
+                    .unwrap()
+                    .curve;
+                curve_data(&curve)
+            })
+        };
+        let automatic = direct(0.0);
+        let tight = direct(1e-9);
+        let loose = direct(1e-5);
+        for i in 0..4 {
+            assert_ne!(tight[i], loose[i], "boundary {i} must depend on tolerance");
+            assert_ne!(
+                tight[i], automatic[i],
+                "tight boundary {i} must differ from default"
+            );
+            assert_ne!(
+                loose[i], automatic[i],
+                "loose boundary {i} must differ from default"
+            );
+        }
+        for (tol, expected) in [(1e-9, tight), (1e-5, loose)] {
+            // Fresh caches prevent reuse of a tighter curve for a looser request.
+            let mut cache =
+                SurfaceCache::<u32>::new(surface.clone(), domain, SurfaceCacheOptions::default());
+            let actual = cache.iso_boundary_curves(&k, &domain, tol).unwrap();
+            for (i, curve) in actual.curves.iter().enumerate() {
+                assert_eq!(
+                    curve_data(curve),
+                    expected[i],
+                    "boundary {i}, tolerance {tol}"
+                );
+            }
+        }
     }
 
     #[test]
