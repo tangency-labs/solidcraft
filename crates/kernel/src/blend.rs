@@ -610,7 +610,14 @@ mod tests {
         assert!(fillet_g2(&body, &[], 2.0).is_err());
         assert!(fillet_g2(&body, &[Vec3::new(f64::NAN, 0.0, 0.0)], 2.0).is_err());
         assert!(fillet_g2(&body, &[Vec3::new(1000.0, 0.0, 0.0)], 2.0).is_err());
-        assert!(fillet_g2(&body, &edge, 25.0).is_err());
+        // Wider than the faces (20), over their far edges, cliffs: cut as if they went on. The
+        // section is the quintic from 25 out on each face, its inner control points a third and
+        // two thirds of the way to the corner; it takes the region between it and the corner
+        // inside the 20 x 20 section (clipped polygon of the curve, 2e5 pieces), along 20.
+        let wide = fillet_g2(&body, &edge, 25.0).unwrap();
+        let v = crate::measure(&wide).unwrap().volume;
+        assert!((v - 6138.1606889014).abs() < 1e-6 * 6138.1606889014, "{v}");
+        assert!(wide.validity().is_empty());
     }
 
     /// A box with a cylinder joined across one side (#556): the bottom edge of that side runs
@@ -813,7 +820,15 @@ mod tests {
             for point in [Vec3::new(slope * 2.0, 2.0, 20.0), Vec3::new(40.0 - slope * 2.0, 2.0, 20.0)] {
                 assert!(has_vertex(&result, point, 1e-8));
             }
-            assert!(chamfer(&body, &pick, 25.0).is_err());
+            // Past the faces (20 deep, 20 high), over their far edges, cliffs: cut as if the
+            // faces and the sloped end planes went on. The plane 25 back on each face takes, of
+            // the section, z >= y - 5 (y, z in [0, 20]), each line of it 40 - 2 slope y long
+            // between the end planes: 11500 - 4625 slope.
+            let past = chamfer(&body, &pick, 25.0).unwrap();
+            let removed = 11500.0 - 4625.0 * slope;
+            let actual = crate::measure(&body).unwrap().volume - crate::measure(&past).unwrap().volume;
+            assert!((actual - removed).abs() < 1e-6 * removed, "{actual} vs {removed}");
+            assert!(past.validity().is_empty());
             // A fillet ends in each sloped end plane along an ellipse: the removed section's
             // length is taken at its centroid, c from the edge.
             let rounded = fillet(&body, &pick, 2.0).unwrap();

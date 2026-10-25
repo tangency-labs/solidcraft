@@ -207,12 +207,15 @@ fn hostile_inputs_are_errors() {
         assert_eq!(c.shell(&[[10.0, 10.0, 20.0]], 0.1, t).unwrap_err(), Error::Argument, "thickness {t}");
     }
     // Sizes SMLib cannot build fail as errors, whatever SMLib says.
-    for (what, r) in [("radius larger than the cube", c.fillet(&mid, 0.1, 50.0)), ("chamfer past the faces", c.chamfer(&mid, 0.1, 30.0))] {
-        match r {
-            Ok(b) => panic!("{what}: SMLib built a body of volume {:?}, counts {:?}", b.volume(ACC), b.counts()),
-            Err(e) => eprintln!("{what}: {e:?}"),
-        }
+    match c.fillet(&mid, 0.1, 50.0) {
+        Ok(b) => panic!("radius larger than the cube: SMLib built a body of volume {:?}, counts {:?}", b.volume(ACC), b.counts()),
+        Err(e) => eprintln!("radius larger than the cube: {e:?}"),
     }
+    // A chamfer past the faces runs over their far edges, cliffs: it is cut as if the faces went
+    // on (the plane y + z = 10 through the setbacks 30 back from the edge y = z = 20), leaving the
+    // triangle y + z <= 10 of the cube's section along x: 50 x 20.
+    let past = c.chamfer(&mid, 0.1, 30.0).unwrap();
+    assert!((volume(&past) - 1000.0).abs() < 1e-6 * 1000.0, "{}", volume(&past));
     // A wall with no room inside it never reaches SMLib's offset.
     assert_eq!(c.shell(&[[10.0, 10.0, 20.0]], 0.1, -15.0).unwrap_err(), Error::NoRoom);
     assert_eq!(c.offset_faces(&[[10.0, 10.0, 20.0]], 0.1, -20.0).unwrap_err(), Error::NoRoom);

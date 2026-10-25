@@ -557,8 +557,17 @@ mod tests {
         let g = fillet_variable(&b, Vec3::new(10.0, 10.0, 30.0), Vec3::new(10.0, 0.0, 30.0), 3.0, 3.0).unwrap();
         let k = crate::fillet(&b, &[Vec3::new(10.0, 10.0, 30.0)], 3.0).unwrap();
         assert!(rel(measure(&g).unwrap().volume, measure(&k).unwrap().volume) < 1e-6);
-        // Too big for the faces: refused.
-        assert!(fillet_variable(&b, Vec3::new(10.0, 10.0, 30.0), Vec3::new(10.0, 0.0, 30.0), 2.0, 50.0).is_err());
+        // Wider than the faces: past r = 10 the contact on the top leaves it across its far edge
+        // x = 0 (past r = 30 the one on the side across its bottom), cliffs. The round is built as
+        // if the faces went on, and what it removes is cut from the box: at each y the section of
+        // the r x r square at the edge less the quarter disc about (10 - r, 30 - r), inside
+        // [0, 10] x [0, 30], in closed form (a, b from the disc's centre: a, b in [0, r],
+        // a^2 + b^2 >= r^2, a >= r - 10, b >= r - 30), integrated along y by Gauss-Legendre
+        // between the kinks at r = 10 and 30: 2453.81232061 removed, 3546.18767939 left (to 1e-4,
+        // as the variable rounds above).
+        let w = fillet_variable(&b, Vec3::new(10.0, 10.0, 30.0), Vec3::new(10.0, 0.0, 30.0), 2.0, 50.0).unwrap();
+        let vw = measure(&w).unwrap().volume;
+        assert!(rel(vw, 3546.1876793935) < 1e-4, "{vw} vs 3546.1876793935");
     }
 
     /// A radius through a middle point: straight pieces (exact: each piece removes
@@ -704,9 +713,15 @@ mod tests {
         assert!(fillet_variable_spline(&b, at, start, &unclamped).is_err());
         let dips = RadiusSpline { radii: vec![2.0, 0.0, 0.0, 3.0, 2.0], ..law.clone() };
         assert!(fillet_variable_spline(&b, at, start, &dips).is_err());
-        // A middle radius beyond the faces: too large.
+        // A middle radius beyond the faces (up to 21.25 on the top 10 wide): the contact on the top
+        // leaves it across its far edge, a cliff, and the round is cut as if the top went on: at
+        // each y the r x r square at the edge less the quarter disc about (10 - r, 30 - r), inside
+        // [0, 10] x [0, 30], in closed form, integrated along y (Gauss-Legendre, split at the
+        // knot and where r crosses 10): 726.5334566720 removed.
         let big = RadiusSpline { radii: vec![2.0, 2.0, 40.0, 3.0, 2.0], ..law };
-        assert!(matches!(fillet_variable_spline(&b, at, start, &big), Err(KernelError::TooLarge(_))));
+        let wide = fillet_variable_spline(&b, at, start, &big).unwrap();
+        let vw = fine_volume(&wide);
+        assert!(rel(vw, 6000.0 - 726.5334566720) < 1e-4, "{vw} vs {}", 6000.0 - 726.5334566720);
     }
 
     #[test]
