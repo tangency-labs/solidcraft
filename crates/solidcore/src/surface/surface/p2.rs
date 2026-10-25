@@ -233,6 +233,7 @@ use crate::surface::surf_of_extrusion::SurfOfExtrusion;
 use crate::surface::surf_of_revolution::p3::intersect_revolved;
 use crate::surface::surf_of_revolution::{Revolved, SurfOfRevolution};
 use crate::surface::surface::p1::{StepSurface, SurfaceIntersectContext, SurfaceSolveContext};
+use crate::surface::surface::p8::BoundaryMemo;
 use crate::surface::surface::p8::FaceSolveCache;
 use crate::surface::surface_cache::p1::SurfaceCache;
 use crate::surface::torus::Torus;
@@ -352,6 +353,9 @@ pub struct Surface {
     /// The identity a context issued this surface object for its notifications
     /// (upstream passes the object itself, known by address); a copy has none.
     notify_identity: IdentitySlot,
+    /// Not upstream: the memo of the natural boundary curves `CoincidenceCheck` makes
+    /// (`BoundaryMemo`); a copy starts an empty one, an edit replaces it.
+    boundary_memo: BoundaryMemo,
 }
 
 /// What a surface's cache slot (`SmAObject::m_pCacheObj`) holds, as far as a reader of
@@ -454,6 +458,7 @@ impl Clone for Surface {
             owner_zone_tol_3d: None,
             cache_slot: CacheSlot::default(),
             notify_identity: IdentitySlot::new(),
+            boundary_memo: BoundaryMemo::new(),
         };
         s.update_owned_bases();
         s
@@ -694,6 +699,7 @@ impl Surface {
             owner_zone_tol_3d: self.owner_zone_tol_3d,
             cache_slot: self.cache_slot.share(),
             notify_identity: IdentitySlot::new(),
+            boundary_memo: BoundaryMemo::new(),
         })
     }
 
@@ -740,6 +746,7 @@ impl Surface {
             owner_zone_tol_3d: self.owner_zone_tol_3d,
             cache_slot: self.cache_slot.share(),
             notify_identity: IdentitySlot::new(),
+            boundary_memo: BoundaryMemo::new(),
         }
     }
 }
@@ -890,6 +897,7 @@ impl Surface {
             owner_zone_tol_3d: None,
             cache_slot: CacheSlot::default(),
             notify_identity: IdentitySlot::new(),
+            boundary_memo: BoundaryMemo::new(),
         }
     }
 
@@ -1087,6 +1095,11 @@ impl Surface {
         self.cache_slot.same(&other.cache_slot)
     }
 
+    /// The boundary curve memo of `CoincidenceCheck` (see `BoundaryMemo`).
+    pub(crate) const fn boundary_memo(&self) -> &BoundaryMemo {
+        &self.boundary_memo
+    }
+
     /// The concrete kind.
     #[must_use]
     pub const fn kind(&self) -> &SurfaceKind {
@@ -1095,6 +1108,8 @@ impl Surface {
 
     /// The concrete kind, mutable.
     pub fn kind_mut(&mut self) -> &mut SurfaceKind {
+        // an edit makes another surface value: start an empty boundary memo
+        self.boundary_memo = BoundaryMemo::new();
         &mut self.kind
     }
 
@@ -2059,6 +2074,7 @@ impl Surface {
         k: &Kernel,
         new_step_uv_domain: &Extent2d,
     ) -> Result<()> {
+        self.boundary_memo = BoundaryMemo::new();
         match &mut self.kind {
             SurfaceKind::BSpline(s) => s.adjust_step_uv_domain(new_step_uv_domain),
             SurfaceKind::CurveBounded(_)
@@ -2082,6 +2098,7 @@ impl Surface {
     ///
     /// Those of the kind's override (the base default is `SM_ERR`).
     pub fn reverse(&mut self, k: &Kernel, param: SurfParamType) -> Result<()> {
+        self.boundary_memo = BoundaryMemo::new();
         match &mut self.kind {
             SurfaceKind::BSpline(s) => s.reverse(param),
             SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => base_edit(),
@@ -2144,6 +2161,7 @@ impl Surface {
     ///
     /// Those of the kind's override (the base default is `SM_ERR`).
     pub fn reparameterize(&mut self, k: &Kernel, new_domain: &Extent2d) -> Result<()> {
+        self.boundary_memo = BoundaryMemo::new();
         match &mut self.kind {
             SurfaceKind::BSpline(s) => s.reparameterize(new_domain),
             SurfaceKind::CurveBounded(_)
@@ -2168,6 +2186,7 @@ impl Surface {
     ///
     /// Those of the kind's override (the base default is `SM_ERR`).
     pub fn swap_uv(&mut self, k: &Kernel) -> Result<()> {
+        self.boundary_memo = BoundaryMemo::new();
         match &mut self.kind {
             SurfaceKind::BSpline(s) => s.swap_uv(),
             SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => base_edit(),
@@ -2243,6 +2262,7 @@ impl Surface {
         scale: Option<Vec3>,
         depth: usize,
     ) -> Result<()> {
+        self.boundary_memo = BoundaryMemo::new();
         match &mut self.kind {
             SurfaceKind::Cone(s) => s.transform(k, rotate_n_move, scale),
             SurfaceKind::Sphere(s) => s.transform(k, rotate_n_move, scale),
@@ -2282,6 +2302,7 @@ impl Surface {
         trim_domain: &mut Extent2d,
         options: TrimOptions,
     ) -> Result<()> {
+        self.boundary_memo = BoundaryMemo::new();
         match &mut self.kind {
             SurfaceKind::BSpline(s) => s.trim_with_domain_with(trim_domain, options),
             SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) => base_edit(),

@@ -325,6 +325,15 @@ impl CurveMemoKey {
         if !k.memoize_curve_caches || !memo_pure(curve) {
             return None;
         }
+        Self::of_kernel(k)
+    }
+
+    /// The kernel part of a memo key, for any memo of a build that reads `k` only
+    /// through its tolerances and context scalars; `None` when the memo is off.
+    pub(crate) fn of_kernel(k: &Kernel) -> Option<Self> {
+        if !k.memoize_curve_caches {
+            return None;
+        }
         let c = &k.context;
         Some(Self {
             tolerances: k.tolerances,

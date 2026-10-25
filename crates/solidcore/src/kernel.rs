@@ -265,8 +265,10 @@ pub struct Kernel {
     /// [`Cell`] because the intersectors take `&Kernel`.
     pub cone_parallel_midpoint_test: Cell<bool>,
     /// Not upstream: whether `make_curve_cache` keeps a memo of each curve cache in the
-    /// curve value (`true` unless the `curve-memo-off` feature is on). The memo never
-    /// changes a result, only the time; `false` builds every cache fresh, to check that.
+    /// curve value, and `CoincidenceCheck` a memo of each surface's boundary curves in
+    /// the surface value (`true` unless the `curve-memo-off` feature is on). The memos
+    /// never change a result, only the time; `false` builds everything fresh, to check
+    /// that.
     pub memoize_curve_caches: bool,
     /// Opt-in fixes of upstream defects (all off: upstream behaviour).
     pub fixes: UpstreamFixes,

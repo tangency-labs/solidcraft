@@ -16,6 +16,12 @@
 //! | [`extract_iso_curve`] | `sm_ExtractIsoCurve` (static) |
 //! | [`intersect_srf_bndry_crv`] | `sm_IntersectSrfBndryCrv` (static) |
 //!
+//! Deviations (not upstream, beyond the port): `CoincidenceCheck` keeps the surfaces'
+//! natural boundary curves in a memo in each surface value (`BoundaryMemo`), where
+//! upstream makes them again for every check. The curves are a function of the surface
+//! value, the domain and the kernel's tolerances, so a hit gives what a fresh build
+//! gives; `Kernel::memoize_curve_caches` turns it off with the curve cache memo.
+//!
 //! Deviations: out-parameters become return values. The caller's object handles
 //! (`O`, the objects named in solutions) replace the `this` and `&crCurve` pointers
 //! upstream stores in them. Solvers read the patches of the surface cache they were
@@ -64,6 +70,7 @@ use super::p2::{
 use super::p4::{is_point_on_normal, NoObject};
 use super::p5::DropPointOptions;
 use super::p6::SampleOptions;
+use crate::curve::curve::p5::CurveMemoKey;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::curve_cache::CurveCache;
 use crate::curve::line::Line;
@@ -96,6 +103,8 @@ use crate::surface::plane::Coincidence;
 use crate::surface::surface::p7::SpGlobalSolver;
 use crate::surface::surface_cache::p1::SurfaceCache;
 use crate::surface::surface_cache::BezierPatch;
+use std::borrow::Cow;
+use std::sync::OnceLock;
 
 /// A surface's solve cache kept by a caller across [`Surface::global_line_intersect_held`]
 /// calls (upstream keeps one cache on each surface): `None` until the first call
@@ -304,6 +313,104 @@ fn b_spline_part(curve: &Curve) -> Option<&BSplineCurve> {
 /// The 3D side curves of the natural UV trim loop of `surface` over `domain`
 /// (`CreateNaturalUVTrimCurves(ctx, domain, SM_SP_V, FALSE, ..)`); the status is
 /// not checked upstream.
+/// The key of a memoised [`trim_curves`] result (not upstream): the kernel inputs of the
+/// build ([`CurveMemoKey::of_kernel`]) and the domain's bits.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct BoundaryMemoKey {
+    kernel: CurveMemoKey,
+    domain: [u64; 4],
+}
+
+impl BoundaryMemoKey {
+    /// The key of `trim_curves(k, surface, domain)`, or `None` when it must not be
+    /// memoised: the memo is off, or the surface is not a pure value. B-spline, plane,
+    /// cone, sphere and torus surfaces build their sides from their own value (their
+    /// `CreateIsoParametricCurve` overrides read nothing else); the other kinds hold
+    /// curves, other surfaces or volumes, or approximate through the base body.
+    fn of(k: &Kernel, surface: &Surface, domain: &Extent2d) -> Option<Self> {
+        let pure_kind = matches!(
+            surface.kind(),
+            SurfaceKind::BSpline(_)
+                | SurfaceKind::Plane(_)
+                | SurfaceKind::Cone(_)
+                | SurfaceKind::Sphere(_)
+                | SurfaceKind::Torus(_)
+        );
+        if !pure_kind {
+            return None;
+        }
+        Some(Self {
+            kernel: CurveMemoKey::of_kernel(k)?,
+            domain: [
+                domain.min().x.to_bits(),
+                domain.min().y.to_bits(),
+                domain.max().x.to_bits(),
+                domain.max().y.to_bits(),
+            ],
+        })
+    }
+}
+
+/// One memoised [`trim_curves`] result.
+#[derive(Debug)]
+struct BoundaryMemoEntry {
+    key: BoundaryMemoKey,
+    curves: Vec<Option<Curve>>,
+}
+
+/// The memo of a surface's natural boundary curves for `CoincidenceCheck` (not
+/// upstream: upstream makes the four curves again for every check, here every face
+/// pair of a boolean). It lives in the [`Surface`] value and is filled once; a copy
+/// starts an empty one and an edit through `&mut Surface` replaces it. The curves are a
+/// function of the surface value and the key, so a hit gives what a fresh build gives,
+/// and the curves carry their own curve cache memos, so their caches are built once
+/// too. Lent by reference: the check only reads the curves. One entry per live surface,
+/// freed with it; no `unsafe`, and the surface stays `Send`.
+#[derive(Default)]
+pub(crate) struct BoundaryMemo(OnceLock<BoundaryMemoEntry>);
+
+impl core::fmt::Debug for BoundaryMemo {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        // the memo is not part of the surface's observable state
+        f.write_str("BoundaryMemo")
+    }
+}
+
+impl BoundaryMemo {
+    /// An empty memo.
+    pub(crate) const fn new() -> Self {
+        Self(OnceLock::new())
+    }
+}
+
+/// [`trim_curves`] through the surface's [`BoundaryMemo`]: borrowed from the memo on a
+/// hit (or after filling it), built and owned when the key differs or the surface is
+/// not memoised.
+fn boundary_curves<'s>(
+    k: &Kernel,
+    surface: &'s Surface,
+    domain: &Extent2d,
+) -> Result<Cow<'s, [Option<Curve>]>> {
+    let Some(key) = BoundaryMemoKey::of(k, surface, domain) else {
+        return trim_curves(k, surface, domain).map(Cow::Owned);
+    };
+    let memo = &surface.boundary_memo().0;
+    if let Some(entry) = memo.get() {
+        if entry.key == key {
+            return Ok(Cow::Borrowed(&entry.curves));
+        }
+        return trim_curves(k, surface, domain).map(Cow::Owned);
+    }
+    let curves = trim_curves(k, surface, domain)?;
+    if let Err(entry) = memo.set(BoundaryMemoEntry { key, curves }) {
+        return Ok(Cow::Owned(entry.curves));
+    }
+    match memo.get() {
+        Some(entry) => Ok(Cow::Borrowed(&entry.curves)),
+        None => trim_curves(k, surface, domain).map(Cow::Owned),
+    }
+}
+
 fn trim_curves(k: &Kernel, surface: &Surface, domain: &Extent2d) -> Result<Vec<Option<Curve>>> {
     let t = ignored(surface.create_natural_uv_trim_curves(k, domain, SurfParamType::V, false))?;
     Ok(t.map(|t| t.curves_3d.into_iter().map(Some).collect())
@@ -480,8 +587,11 @@ impl Surface {
         // Now we're looking for any partial overlap.
 
         // Create two sets of boundary curves.
-        let mut bdrys0 = trim_curves(k, self, &domain0)?;
-        let mut bdrys1 = trim_curves(k, other, &domain1)?;
+        // (not upstream: kept on the surfaces across checks, see BoundaryMemo)
+        let all0 = boundary_curves(k, self, &domain0)?;
+        let all1 = boundary_curves(k, other, &domain1)?;
+        let mut bdrys0: Vec<Option<&Curve>> = all0.iter().map(Option::as_ref).collect();
+        let mut bdrys1: Vec<Option<&Curve>> = all1.iter().map(Option::as_ref).collect();
 
         // We check angles a lot, so get a good angular tolerance.
         let bbox = bbox0.union(&bbox1);
@@ -3690,5 +3800,76 @@ mod tests {
                 "{on_curve:?} {on_surface:?}"
             );
         }
+    }
+
+    /// Two overlapping bilinear patches in the same plane, the second one shifted.
+    fn overlapping_pair() -> (Surface, Surface) {
+        let patch = |x: f64| {
+            Surface::from(
+                BSplineSurface::create_bilinear_surface(
+                    Vec3::new(x, 0.0, 0.0),
+                    Vec3::new(x + 2.0, 0.0, 0.0),
+                    Vec3::new(x, 3.0, 0.0),
+                    Vec3::new(x + 2.0, 3.0, 0.0),
+                )
+                .unwrap(),
+            )
+        };
+        (patch(0.0), patch(1.0))
+    }
+
+    #[test]
+    fn boundary_memo_hit_is_the_fresh_build() {
+        let on = Kernel {
+            memoize_curve_caches: true,
+            ..Kernel::default()
+        };
+        let off = Kernel {
+            memoize_curve_caches: false,
+            ..Kernel::default()
+        };
+        let (a, b) = overlapping_pair();
+        let want = format!(
+            "{:?}",
+            a.base_coincidence_check(&off, &b, 1e-6, false).unwrap()
+        );
+        assert!(a.boundary_memo().0.get().is_none());
+        let (mut a, b) = overlapping_pair();
+        let first = format!(
+            "{:?}",
+            a.base_coincidence_check(&on, &b, 1e-6, false).unwrap()
+        );
+        assert!(a.boundary_memo().0.get().is_some());
+        assert!(b.boundary_memo().0.get().is_some());
+        let second = format!(
+            "{:?}",
+            a.base_coincidence_check(&on, &b, 1e-6, false).unwrap()
+        );
+        assert_eq!(first, want);
+        assert_eq!(second, want);
+        // a copy starts empty, an edit empties the memo
+        assert!(a.clone().boundary_memo().0.get().is_none());
+        let _ = a.kind_mut();
+        assert!(a.boundary_memo().0.get().is_none());
+        // other tolerances miss and build again, with the same result
+        let mut loose = Kernel {
+            memoize_curve_caches: true,
+            ..Kernel::default()
+        };
+        loose.tolerances.zone_tol_3d *= 10.0;
+        let (a2, b2) = overlapping_pair();
+        let _ = a2.base_coincidence_check(&on, &b2, 1e-6, false).unwrap();
+        let fresh = format!(
+            "{:?}",
+            overlapping_pair()
+                .0
+                .base_coincidence_check(&loose, &b2, 1e-6, false)
+                .unwrap()
+        );
+        let missed = format!(
+            "{:?}",
+            a2.base_coincidence_check(&loose, &b2, 1e-6, false).unwrap()
+        );
+        assert_eq!(missed, fresh);
     }
 }
