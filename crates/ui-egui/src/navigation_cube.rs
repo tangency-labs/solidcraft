@@ -1,4 +1,5 @@
-//! Original, code-drawn navigation cube. Flat faces share invisible picking regions.
+//! Original, code-drawn navigation cube with chamfered edges and corners: every one of its
+//! 26 views (6 faces, 12 edges, 8 corners) is one flat facet that picks it.
 use super::*;
 use crate::icons::navigation::{Facet, arrow, curved_arrow, paint_cube};
 use solidcraft_engine::geom::Ring;
@@ -7,9 +8,13 @@ pub(super) const SIZE: f32 = 112.0;
 // Paint and picking use the same original coordinate space, scaled as a group.
 pub(super) const DESIGN_SIZE: f32 = 164.0;
 const HALF: f64 = 40.0;
-// Corner squares lie on the six flat faces, preserving a sharp cube silhouette.
-// The remaining regions belong to the face, including the middle of each edge.
-const INSET: f64 = 0.68;
+// How deep an edge chamfer bites into its two faces, and how far a corner chamfer reaches
+// along each face edge, as fractions of the half side.
+const EDGE_CUT: f64 = 0.2;
+const CORNER_CUT: f64 = 0.36;
+// Half side of a face's octagon, and where its cut corners start.
+const FACE: f64 = 1.0 - EDGE_CUT;
+const CUT: f64 = FACE - CORNER_CUT;
 
 fn project(cam: &Camera, v: Vec3, scale: f64) -> egui::Vec2 {
     let (r, u, _) = cam.basis();
@@ -33,6 +38,15 @@ fn direction_label(d: Vec3) -> String {
         .join(" · ")
 }
 
+/// The view's name in the program's language; automation handles keep `direction_label`.
+fn view_name(d: Vec3) -> String {
+    direction_label(d)
+        .split(" · ")
+        .map(|part| crate::i18n::tr(&format!("ui.heading_{}", part.to_ascii_lowercase())).to_string())
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
 fn facets(cam: &Camera, c: Pos2, half: f64) -> Vec<Facet> {
     if !cam.is_valid() {
         return Vec::new();
@@ -50,41 +64,42 @@ fn facets(cam: &Camera, c: Pos2, half: f64) -> Vec<Facet> {
             let b = project(cam, *b - centre, half);
             a.y.atan2(a.x).total_cmp(&b.y.atan2(b.x))
         });
-        let vertices = Ring::new(vertices);
-        let outer_edges = vertices
-            .edges()
-            .map(|(a, b)| [(a.x, b.x), (a.y, b.y), (a.z, b.z)].into_iter().filter(|(a, b)| a.abs() == 1.0 && a == b).count() >= 2)
-            .collect();
+        // Neighbouring facets meet at an angle, so every boundary is a visible crease.
+        let outer_edges = vec![true; vertices.len()];
         let points = vertices.into_iter().map(|v| c + project(cam, v, half)).collect();
         out.push(Facet {
             direction: d,
             points,
             outer_edges,
             centre: at,
-            label: direction_label(d),
+            label: view_name(d),
             text_axes: axes.map(|(r, u)| (project(cam, r, 1.0), -project(cam, u, 1.0))),
             depth,
         });
     };
-    // Nine coplanar patches per square face. The middle and four side patches
-    // share the face target; three corner squares share one isometric target.
-    for (n, r, u) in [
+    let faces = [
         (Vec3::X, Vec3::Y, Vec3::Z),
         (-Vec3::X, -Vec3::Y, Vec3::Z),
         (Vec3::Y, -Vec3::X, Vec3::Z),
         (-Vec3::Y, Vec3::X, Vec3::Z),
         (Vec3::Z, Vec3::X, Vec3::Y),
         (-Vec3::Z, Vec3::X, -Vec3::Y),
-    ] {
-        let bands = [(-1.0, -INSET, -1.0), (-INSET, INSET, 0.0), (INSET, 1.0, 1.0)];
-        for (x0, x1, sx) in bands {
-            for (y0, y1, sy) in bands {
-                add(
-                    if sx != 0.0 && sy != 0.0 { n + r * sx + u * sy } else { n },
-                    n,
-                    [(x0, y0), (x1, y0), (x1, y1), (x0, y1)].into_iter().map(|(x, y)| n + r * x + u * y).collect(),
-                    if sx == 0.0 && sy == 0.0 { Some((r, u)) } else { None },
-                );
+    ];
+    // Each face is an octagon: its square with the four corners cut off.
+    for (n, r, u) in faces {
+        let corners = [(FACE, CUT), (CUT, FACE)].into_iter().flat_map(|(a, b)| [(a, b), (a, -b), (-a, b), (-a, -b)]);
+        add(n, n, corners.map(|(a, b)| n + r * a + u * b).collect(), Some((r, u)));
+    }
+    // Two perpendicular faces share an edge chamfer, three share a corner chamfer.
+    let normals = faces.map(|(n, ..)| n);
+    for (i, &a) in normals.iter().enumerate() {
+        for (j, &b) in normals.iter().enumerate().skip(i + 1).filter(|(_, b)| a.dot(**b) == 0.0) {
+            let along = a.cross(b);
+            let edge = [(a, b), (b, a)].into_iter().flat_map(|(p, q)| [p + q * FACE + along * CUT, p + q * FACE - along * CUT]);
+            add(a + b, (a + b) / (a + b).len(), edge.collect(), None);
+            for &c in normals.iter().skip(j + 1).filter(|c| a.dot(**c) == 0.0 && b.dot(**c) == 0.0) {
+                let corner = [(a, b, c), (a, c, b), (b, a, c), (b, c, a), (c, a, b), (c, b, a)].map(|(p, q, s)| p + q * FACE + s * CUT);
+                add(a + b + c, (a + b + c) / (a + b + c).len(), corner.to_vec(), None);
             }
         }
     }
@@ -165,7 +180,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
         }
         let pieces: Vec<_> = faces.iter().filter(|f| f.direction == face.direction).collect();
         let centre = pieces.iter().fold(egui::Vec2::ZERO, |sum, f| sum + f.centre.to_vec2()) / pieces.len() as f32;
-        crate::scenario::publish_handle(&format!("navigation_cube:{}", face.label.to_ascii_lowercase().replace(" · ", "_")), centre.to_pos2());
+        crate::scenario::publish_handle(
+            &format!("navigation_cube:{}", direction_label(face.direction).to_ascii_lowercase().replace(" · ", "_")),
+            centre.to_pos2(),
+        );
         // Keep principal-axis handles for existing automation, using only visible faces.
         let world = app.cam.from_frame(face.direction);
         let axis = match (world.x, world.y, world.z) {
@@ -185,7 +203,10 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect) {
     if let Some(face) = hovered.and_then(|i| faces.get(i)) {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         ui.interact(Rect::from_center_size(hover.unwrap_or(face.centre), vec2(2.0, 2.0)), ui.id().with("navigation_cube_tip"), Sense::hover())
-            .on_hover_text(format!("{} view. Drag to orbit{}.", face.label, if app.preferences.free_orbit { "" } else { "; hold Shift to snap" }));
+            .on_hover_text(crate::i18n::format(
+                if app.preferences.free_orbit { "ui.navigation_cube_view_free" } else { "ui.navigation_cube_view" },
+                &[("view", &face.label)],
+            ));
         if ui.input(|i| i.pointer.primary_clicked()) {
             navigate(app, None, Some(face.direction));
         }
@@ -249,61 +270,38 @@ mod tests {
     }
 
     #[test]
-    fn cube_targets_are_only_six_faces_and_eight_corners_in_both_up_frames() {
+    fn cube_targets_are_six_faces_twelve_edges_and_eight_corners_in_both_up_frames() {
         for up in [UpAxis::Z, UpAxis::Y] {
             let mut directions = Vec::new();
             for view in [StandardView::Front, StandardView::Back, StandardView::Top, StandardView::Bottom, StandardView::Left, StandardView::Right] {
                 let mut cam = Camera { up, ..Default::default() };
                 cam.set_view(view);
                 for facet in facets(&cam, Pos2::ZERO, HALF) {
-                    let axes = [facet.direction.x, facet.direction.y, facet.direction.z].into_iter().filter(|v| *v != 0.0).count();
-                    assert!(axes == 1 || axes == 3, "cube edges must not be independent targets: {}", facet.label);
                     if !directions.contains(&facet.direction) {
                         directions.push(facet.direction);
                     }
                 }
             }
-            assert_eq!(directions.len(), 14);
+            let rank = |d: &&Vec3| [d.x, d.y, d.z].into_iter().filter(|v| *v != 0.0).count();
+            assert_eq!([1, 2, 3].map(|n| directions.iter().filter(|d| rank(d) == n).count()), [6, 12, 8]);
         }
     }
 
     #[test]
-    fn former_edge_strips_click_the_face_and_hover_without_internal_seams() {
+    fn chamfers_around_a_square_on_face_click_their_edge_and_corner_views() {
         let mut h = crate::scenario::Harness::new();
         h.call("ui.prefs", json!({"navigator_style":"cube"}));
-        let ctx = crate::fonts::test_context();
         h.app.preferences.look_at_anim = false;
         for up in ["z", "y"] {
             h.call("ui.prefs", json!({"up_axis":up}));
-            h.call("ui.view", json!({"view":"front"}));
-            let camera = h.app.cam;
-            let outer = crate::scenario::rect_of("axis_view:outer").unwrap();
-            let half = HALF * f64::from(outer.width() / DESIGN_SIZE);
-            let faces = facets(&camera, outer.center(), half);
-            assert!(crate::scenario::handle_at("navigation_cube:front_right").is_none());
-            assert!(crate::scenario::handle_at("navigation_cube:top_front").is_none());
-            for direction in [Vec3::X, -Vec3::X, Vec3::Z, -Vec3::Z] {
-                let p = outer.center() + project(&camera, direction * 0.84, half);
-                let hovered = hit(&faces, p).unwrap();
-                assert_eq!(faces[hovered].direction, -Vec3::Y);
-                h.call("ui.move", json!({"x":p.x,"y":p.y}));
+            for (name, direction) in
+                [("top_front", Vec3::Z - Vec3::Y), ("front_right", Vec3::X - Vec3::Y), ("bottom_front_left", -Vec3::Z - Vec3::Y - Vec3::X)]
+            {
+                h.call("ui.view", json!({"view":"front"}));
+                let p = crate::scenario::handle_at(&format!("navigation_cube:{name}")).unwrap();
                 h.call("ui.click", json!({"x":p.x,"y":p.y}));
-                assert_eq!(h.app.cam, camera, "a former edge strip must select FRONT, never a diagonal view");
-                let t = Tokens::light();
-                let output = paint_frame(&ctx, |ui| {
-                    paint_cube(ui.painter(), &faces, Some(hovered), t, false, 1.0);
-                });
-                let centre = Rect::from_center_size(outer.center(), vec2(2.0, 2.0) * (INSET * half) as f32);
-                let mut outline = 0;
-                for shape in &output.shapes {
-                    if let Shape::LineSegment { points: [a, b], stroke } = &shape.shape
-                        && stroke.color == t.accent
-                    {
-                        outline += 1;
-                        assert!(!centre.contains(a.lerp(*b, 0.5)), "face subdivisions must not draw hover seams");
-                    }
-                }
-                assert_eq!(outline, 12, "one continuous face outline around the four corner targets");
+                let expected = h.app.cam.from_frame(direction.normalized().unwrap());
+                assert!(h.app.cam.back().dist(expected) < 2e-6, "{up} {name}");
             }
         }
     }
@@ -340,7 +338,7 @@ mod tests {
         let faces = facets(&Camera::default(), pos2(100.0, 100.0), HALF);
         for t in [Tokens::light(), Tokens::dark()] {
             assert_ne!(t.navigation_cube(false).cube_face, t.cube_face);
-            for name in ["FRONT", "RIGHT", "TOP · FRONT · RIGHT"] {
+            for name in ["FRONT", "RIGHT", "TOP · FRONT", "TOP · FRONT · RIGHT"] {
                 let hovered = faces.iter().position(|f| f.label == name).unwrap();
                 let output = paint_frame(&ctx, |ui| {
                     paint_cube(ui.painter(), &faces, Some(hovered), t.navigation_cube(true), false, 1.0);
@@ -361,7 +359,7 @@ mod tests {
     }
 
     #[test]
-    fn idle_principal_views_have_square_faces_without_visible_picking_seams() {
+    fn principal_views_show_the_face_ringed_by_its_four_edge_and_four_corner_chamfers() {
         let ctx = crate::fonts::test_context();
         for up in [UpAxis::Z, UpAxis::Y] {
             for view in [StandardView::Front, StandardView::Back, StandardView::Top, StandardView::Bottom, StandardView::Left, StandardView::Right] {
@@ -369,30 +367,24 @@ mod tests {
                 cam.set_view(view);
                 let centre = pos2(100.0, 100.0);
                 let faces = facets(&cam, centre, HALF);
-                assert_eq!(faces.len(), 9, "one square face partitioned into nine coplanar picking regions");
+                let rank = |f: &&Facet| [f.direction.x, f.direction.y, f.direction.z].into_iter().filter(|v| *v != 0.0).count();
+                assert_eq!([1, 2, 3].map(|n| faces.iter().filter(|f| rank(f) == n).count()), [1, 4, 4], "{up:?} {view:?}");
+                assert_eq!(faces.iter().filter(|f| f.text_axes.is_some()).count(), 1, "only the face carries a label");
                 let bounds = Rect::from_points(&faces.iter().flat_map(|f| f.points.iter().copied()).collect::<Vec<_>>());
                 let expected = Rect::from_center_size(centre, vec2(80.0, 80.0));
                 assert!(
                     bounds.min.distance(expected.min) < 1e-4 && bounds.max.distance(expected.max) < 1e-4,
-                    "the silhouette must reach all four square corners"
+                    "the chamfers reach the cube's outline"
                 );
                 let output = paint_frame(&ctx, |ui| {
                     paint_cube(ui.painter(), &faces, None, Tokens::light(), false, 1.0);
                 });
-                let mesh = output.shapes.iter().find_map(|s| if let Shape::Mesh(m) = &s.shape { Some(m) } else { None }).unwrap();
-                let fill = mesh.vertices.first().unwrap().color;
-                assert!(mesh.vertices.iter().all(|v| v.color == fill), "picking regions must have identical face shading");
-                for s in &output.shapes {
-                    if let Shape::LineSegment { points: [a, b], .. } = &s.shape {
-                        assert!(
-                            (a.x - expected.left()).abs() < 1e-4 && (b.x - expected.left()).abs() < 1e-4
-                                || (a.x - expected.right()).abs() < 1e-4 && (b.x - expected.right()).abs() < 1e-4
-                                || (a.y - expected.top()).abs() < 1e-4 && (b.y - expected.top()).abs() < 1e-4
-                                || (a.y - expected.bottom()).abs() < 1e-4 && (b.y - expected.bottom()).abs() < 1e-4,
-                            "idle outlines must lie on the cube perimeter, never on a picking boundary"
-                        );
-                    }
-                }
+                let seams = output
+                    .shapes
+                    .iter()
+                    .filter(|s| matches!(&s.shape, Shape::LineSegment { stroke, .. } if stroke.color == Tokens::light().cube_border));
+                // The octagon's 8 sides, then 3 more per edge strip and per corner hexagon.
+                assert_eq!(seams.count(), 32, "every facet boundary is drawn once");
             }
         }
     }
@@ -439,6 +431,43 @@ mod tests {
             assert!(!mesh.vertices.is_empty());
             assert!(mesh.vertices.iter().all(|v| (0.0..=1.0).contains(&v.uv.x) && (0.0..=1.0).contains(&v.uv.y)));
         }
+    }
+
+    #[test]
+    fn face_labels_follow_the_program_language_and_fit_their_face() {
+        let ctx = crate::fonts::test_context();
+        for catalog in crate::i18n::LOCALES {
+            let _language = crate::i18n::scope(catalog.id);
+            for (view, id) in [
+                (StandardView::Front, "ui.heading_front"),
+                (StandardView::Back, "ui.heading_back"),
+                (StandardView::Top, "ui.heading_top"),
+                (StandardView::Bottom, "ui.heading_bottom"),
+                (StandardView::Left, "ui.heading_left"),
+                (StandardView::Right, "ui.heading_right"),
+            ] {
+                let mut cam = Camera::default();
+                cam.set_view(view);
+                let faces = facets(&cam, pos2(100.0, 100.0), HALF);
+                let face = faces.iter().find(|f| f.text_axes.is_some()).unwrap();
+                assert_eq!(face.label, crate::i18n::tr(id), "{} {id}", catalog.id);
+                let output = paint_frame(&ctx, |ui| face_text(ui.painter(), face, Tokens::light().cube_text, 14.0));
+                for shape in &output.shapes {
+                    if let Shape::Mesh(mesh) = &shape.shape {
+                        assert!(mesh.vertices.iter().all(|v| contains(&face.points, v.pos)), "{} {id}: the label overflows its face", catalog.id);
+                    }
+                }
+            }
+        }
+        let _german = crate::i18n::scope("de");
+        let mut labels: Vec<_> =
+            facets(&Camera::default(), Pos2::ZERO, HALF).into_iter().filter(|f| f.text_axes.is_some()).map(|f| f.label).collect();
+        labels.sort();
+        assert_eq!(labels, ["OBEN", "RECHTS", "VORNE"]);
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.prefs", json!({"navigator_style":"cube", "language":"de"}));
+        assert!(crate::scenario::handle_at("navigation_cube:front").is_some(), "automation handles stay language-neutral");
+        assert!(crate::scenario::handle_at("navigation_cube:top_front_right").is_some());
     }
 
     #[test]
@@ -571,7 +600,14 @@ mod tests {
         h.call("ui.prefs", json!({"navigator_style":"cube"}));
         h.app.preferences.look_at_anim = false;
         let before = h.app.session.doc.to_json();
-        for (name, direction) in [("top", Vec3::Z), ("front", -Vec3::Y), ("right", Vec3::X), ("top_front_right", Vec3::Z - Vec3::Y + Vec3::X)] {
+        for (name, direction) in [
+            ("top", Vec3::Z),
+            ("front", -Vec3::Y),
+            ("right", Vec3::X),
+            ("top_front", Vec3::Z - Vec3::Y),
+            ("front_right", Vec3::X - Vec3::Y),
+            ("top_front_right", Vec3::Z - Vec3::Y + Vec3::X),
+        ] {
             h.call("ui.view", json!({"view":"iso"}));
             let p = crate::scenario::handle_at(&format!("navigation_cube:{name}")).unwrap();
             let scale = crate::scenario::rect_of("axis_view:outer").unwrap().width() / DESIGN_SIZE;
