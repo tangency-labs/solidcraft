@@ -5435,10 +5435,41 @@ mod tests {
                 (-2..=2).all(|dy| (-2..=2).all(|dx| on_cpu.get(((y + dy).clamp(0, n - 1) * n + (x + dx).clamp(0, n - 1)) as usize) == Some(&true)))
             };
             let missed = (0..on_cpu.len()).filter(|&i| inside(i) && !on_gpu[i]).count();
-            assert!(missed * 200 < area, "face {f}: {missed} of its {area} hovered pixels do not light (the highlight fights the model)");
+            let lights = missed * 200 < area;
+            // A failure keeps its pictures: this failed once in a loaded full-suite run on Metal
+            // and has not been reproduced since (#1383). The mask is red where the face does not
+            // light on the GPU, grey over the rest of the face as the CPU lights it.
+            let kept = if lights {
+                String::new()
+            } else {
+                let mask: Vec<u8> = (0..on_cpu.len())
+                    .flat_map(|i| match (inside(i) && !on_gpu[i], on_cpu[i]) {
+                        (true, _) => [255, 0, 0, 255],
+                        (false, true) => [128, 128, 128, 255],
+                        (false, false) => [255, 255, 255, 255],
+                    })
+                    .collect();
+                let changed = on_gpu.iter().filter(|x| **x).count();
+                let pictures =
+                    [("gpu_plain", &gpu_plain), ("gpu_hovered", &gpu), ("cpu_plain", &cpu_plain), ("cpu_hovered", &cpu), ("missed", &mask)];
+                format!("; {changed} pixels change on the GPU; {}", keep_failed_pictures(&format!("hover-face-{f}"), &pictures, SIZE))
+            };
+            assert!(lights, "face {f}: {missed} of its {area} hovered pixels do not light (the highlight fights the model){kept}");
             checked += 1;
         }
         assert!(checked >= 3, "{checked} faces seen lit");
+    }
+
+    /// Saves a failing pixel test's pictures (straight RGBA, `size` × `size`) as PNGs in a folder
+    /// of their own under the temporary folder, and says where.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn keep_failed_pictures(name: &str, pictures: &[(&str, &Vec<u8>)], size: u32) -> String {
+        let dir = std::env::temp_dir().join(format!("solidcraft-{name}-{}", std::process::id()));
+        let saved = std::fs::create_dir_all(&dir).is_ok()
+            && pictures.iter().all(|(file, rgba)| {
+                image::RgbaImage::from_raw(size, size, rgba.to_vec()).is_some_and(|img| img.save(dir.join(format!("{file}.png"))).is_ok())
+            });
+        if saved { format!("pictures in {}", dir.display()) } else { format!("the pictures could not be saved in {}", dir.display()) }
     }
 
     /// An origin plane lying on a body's face is tinted evenly over it (#1739: a box built at the
