@@ -1275,6 +1275,51 @@ impl Curve {
         }
     }
 
+    /// [`Curve::evaluate`] into the caller's slice (`num_derivs = out.len() - 1`):
+    /// the entries the evaluation returns are written, the others are set to
+    /// [`Vec3::UNDEF`] (what [`at`] reads for a missing entry). The B-spline kinds
+    /// evaluate without a heap allocation ([`BSplineCurve::evaluate_into`]).
+    ///
+    /// # Errors
+    ///
+    /// As [`Curve::evaluate`]; `SM_ERR` for an empty `out`.
+    pub fn evaluate_into(
+        &self,
+        k: &Kernel,
+        t: f64,
+        from_left: bool,
+        non_zero_tangents: bool,
+        out: &mut [Vec3],
+    ) -> Result<()> {
+        let base = match &self.kind {
+            CurveKind::BSpline(c) => Some(c),
+            CurveKind::Hyperbola(c) => Some(c.base()),
+            CurveKind::Ellipse(c) => Some(c.base()),
+            CurveKind::Parabola(c) => Some(c.base()),
+            CurveKind::Composite(_)
+            | CurveKind::Hermite(_)
+            | CurveKind::Conic(_)
+            | CurveKind::Projected(_)
+            | CurveKind::Iso(_)
+            | CurveKind::Offset(_)
+            | CurveKind::CrvInVolume(_)
+            | CurveKind::CrvOnSurf(_)
+            | CurveKind::Line(_) => None,
+        };
+        if let Some(b) = base {
+            return b.evaluate_into(t, from_left, non_zero_tangents, out);
+        }
+        let num_derivs = out
+            .len()
+            .checked_sub(1)
+            .ok_or_else(|| SolidError::sm_err(OP_EVAL))?;
+        let pv = self.evaluate(k, t, num_derivs, from_left, non_zero_tangents)?;
+        for (i, slot) in out.iter_mut().enumerate() {
+            *slot = at(&pv, i);
+        }
+        Ok(())
+    }
+
     /// The point at `t` (`EvaluatePoint`).
     ///
     /// # Errors

@@ -1563,8 +1563,10 @@ impl EvalFunction for FindCurveDistanceExtrema<'_> {
         out.f_prime = 0.0;
         out.found_answer = false;
 
-        let pv1 = self.curve1.evaluate(k, t, 2, true, true)?;
-        let pv2 = self.curve2.evaluate(k, t, 2, true, true)?;
+        let mut pv1 = [Vec3::ZERO; 3];
+        let mut pv2 = [Vec3::ZERO; 3];
+        self.curve1.evaluate_into(k, t, true, true, &mut pv1)?;
+        self.curve2.evaluate_into(k, t, true, true, &mut pv2)?;
         let (a0, a1, a2) = (at(&pv1, 0), at(&pv1, 1), at(&pv1, 2));
         let (b0, b1, b2) = (at(&pv2, 0), at(&pv2, 1), at(&pv2, 2));
 

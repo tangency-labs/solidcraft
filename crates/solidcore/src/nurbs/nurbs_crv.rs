@@ -20,7 +20,7 @@
 //! | [`crv_get_epolygon`]               | `sm_CrvGetEPolygon`                         |
 //! | [`basis_derivs`], [`BasisDerivs`]  | `sm_BasisDerivs`                            |
 //! | [`crv_rational_basis_derivs`]      | `sm_CrvRationalBasisDerivs`                 |
-//! | [`crv_derivs`]                     | `sm_CrvDerivs`                              |
+//! | [`crv_derivs`], [`crv_derivs_into`] | `sm_CrvDerivs`                            |
 //! | [`basis_eval`]                     | `sm_BasisEval`                              |
 //! | [`crv_eval`]                       | `sm_CrvEval`                                |
 //! | `to_euclid` (crate)                | `TO_EUCLID` (`SmNurbsCrv.h`)                |
@@ -979,19 +979,40 @@ pub fn crv_rational_basis_derivs(
 /// [`basis_derivs`] and with [`NlibCode::Index`] when the span's control points are
 /// missing.
 pub fn crv_derivs(cur: &Curve, u: f64, side: Side, der: usize) -> Result<Vec<Vec3>> {
-    const OP: &str = OP_CDERIVS;
     if der >= MAX_DERIV {
-        return Err(nlib(OP, NlibCode::MaxDerivative));
+        return Err(nlib(OP_CDERIVS, NlibCode::MaxDerivative));
     }
+    let mut cd = vec![Vec3::ZERO; der + 1];
+    crv_derivs_into(cur, u, side, &mut cd)?;
+    Ok(cd)
+}
+
+/// [`crv_derivs`] into the caller's slice: `out[k] = C^(k)(u)` for `k < out.len()`
+/// (`der = out.len() - 1`), without a heap allocation.
+///
+/// Errors as [`crv_derivs`]; an empty `out` is [`NlibCode::MaxDerivative`] as well.
+pub fn crv_derivs_into(cur: &Curve, u: f64, side: Side, out: &mut [Vec3]) -> Result<()> {
+    const OP: &str = OP_CDERIVS;
+    let der = match out.len().checked_sub(1) {
+        Some(der) if der < MAX_DERIV => der,
+        _ => return Err(nlib(OP, NlibCode::MaxDerivative)),
+    };
     if cur.degree() < SMALL_DEGREE {
-        crv_derivs_n::<SMALL_DEGREE>(cur, u, side, der)
+        crv_derivs_n::<SMALL_DEGREE>(cur, u, side, der, out)
     } else {
-        crv_derivs_n::<MAX_DEGREE>(cur, u, side, der)
+        crv_derivs_n::<MAX_DEGREE>(cur, u, side, der, out)
     }
 }
 
-/// [`crv_derivs`] with scratch width `N` (see [`basis_derivs_into`]); `der < MAX_DERIV`.
-fn crv_derivs_n<const N: usize>(cur: &Curve, u: f64, side: Side, der: usize) -> Result<Vec<Vec3>> {
+/// [`crv_derivs_into`] with scratch width `N` (see [`basis_derivs_into`]);
+/// `der < MAX_DERIV`, `out.len() == der + 1`.
+fn crv_derivs_n<const N: usize>(
+    cur: &Curve,
+    u: f64,
+    side: Side,
+    der: usize,
+    out: &mut [Vec3],
+) -> Result<()> {
     const OP: &str = OP_CDERIVS;
     let pu = cur.degree();
     let mut bd = [[0.0_f64; N]; MAX_DERIV];
@@ -1017,8 +1038,7 @@ fn crv_derivs_n<const N: usize>(cur: &Curve, u: f64, side: Side, der: usize) -> 
     let pts = pts.get(..npts).ok_or_else(|| oob(OP))?;
 
     // C^(k) = Sum_i(BasisVal[k][i] * P[i]).
-    let mut cd = Vec::with_capacity(der + 1);
-    for row in bd.get(..=der).ok_or_else(|| oob(OP))? {
+    for (row, slot) in bd.get(..=der).ok_or_else(|| oob(OP))?.iter().zip(out) {
         let mut c = Vec3::new(0.0, 0.0, 0.0);
         for (i, q) in pts.iter().enumerate().take(pu + 1) {
             let b = row.get(i).copied().ok_or_else(|| oob(OP))?;
@@ -1026,9 +1046,9 @@ fn crv_derivs_n<const N: usize>(cur: &Curve, u: f64, side: Side, der: usize) -> 
             c.y += b * q.y;
             c.z += b * q.z;
         }
-        cd.push(c);
+        *slot = c;
     }
-    Ok(cd)
+    Ok(())
 }
 
 /// All non-vanishing basis functions of degree `p` at `u` (`sm_BasisEval`):

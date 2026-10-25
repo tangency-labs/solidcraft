@@ -138,8 +138,8 @@ use crate::nurbs::iges::{iges_126_curve, Entity126};
 use crate::nurbs::knots::Side;
 use crate::nurbs::math::{CPoint, MatrixType, RealMatrix, NOW, NOZ};
 use crate::nurbs::nurbs_crv::{
-    allocate_nurb_curve, copy_nurb_curve, crv_derivs, crv_eval, crv_remove_knots, extract_frame,
-    fixup_knot_vector, get_knots, to_euclid,
+    allocate_nurb_curve, copy_nurb_curve, crv_derivs, crv_derivs_into, crv_eval, crv_remove_knots,
+    extract_frame, fixup_knot_vector, get_knots, to_euclid, MAX_DERIV,
 };
 
 const OP_DATA: &str = "nurbs::b_spline_curve::p1::BSplineCurve::from_data";
@@ -965,6 +965,43 @@ impl BSplineCurve {
         if num_derivs == 0 {
             return Ok(vec![self.evaluate_point(t)?]);
         }
+        if num_derivs >= MAX_DERIV {
+            // (NLib's order error, after the NURB check, without allocating an output
+            // of that size)
+            let cur = self.nurb_ref()?;
+            let side = if from_left { Side::Left } else { Side::Right };
+            return crv_derivs(cur, t, side, num_derivs).map_err(SolidError::nl_ser(OP_EVAL));
+        }
+        let mut pv = vec![Vec3::ZERO; num_derivs + 1];
+        self.evaluate_into(t, from_left, non_zero_tangents, &mut pv)?;
+        Ok(pv)
+    }
+
+    /// [`BSplineCurve::evaluate`] into the caller's slice: `out[k]` is derivative `k`,
+    /// `num_derivs = out.len() - 1` (below `GW_MAX_DERIV`), without a heap allocation
+    /// (except for the rare zero-tangent re-evaluation).
+    ///
+    /// # Errors
+    ///
+    /// As [`BSplineCurve::evaluate`]; `SM_ERR` for an empty `out`.
+    pub fn evaluate_into(
+        &self,
+        t: f64,
+        from_left: bool,
+        non_zero_tangents: bool,
+        out: &mut [Vec3],
+    ) -> Result<()> {
+        let num_derivs = out
+            .len()
+            .checked_sub(1)
+            .ok_or_else(|| SolidError::sm_err(OP_EVAL))?;
+        // pass simple calls along to EvaluatePoint
+        if num_derivs == 0 {
+            if let Some(slot) = out.first_mut() {
+                *slot = self.evaluate_point(t)?;
+            }
+            return Ok(());
+        }
 
         // natural extent
         let cur = self.nurb_ref()?;
@@ -978,19 +1015,16 @@ impl BSplineCurve {
         }
 
         let side = if from_left { Side::Left } else { Side::Right };
-        let mut pv = crv_derivs(cur, t, side, num_derivs).map_err(SolidError::nl_ser(OP_EVAL))?;
-        if pv.len() != num_derivs + 1 {
-            return Err(SolidError::sm_err(OP_EVAL));
-        }
+        crv_derivs_into(cur, t, side, out).map_err(SolidError::nl_ser(OP_EVAL))?;
 
         // When asked, find a direction for zero-length first derivatives from the
         // 2nd derivative value.
         if non_zero_tangents {
-            let p0 = pv.first().copied().unwrap_or(Vec3::UNDEF);
+            let p0 = out.first().copied().unwrap_or(Vec3::UNDEF);
             let scaled_zero = EFF_ZERO * (1.0 + p0.max_dimension());
             let new_len = 1.1 * scaled_zero;
 
-            let d1 = pv.get(1).copied().unwrap_or(Vec3::UNDEF);
+            let d1 = out.get(1).copied().unwrap_or(Vec3::UNDEF);
             if num_derivs >= 1 && d1.length_squared() < new_len * new_len {
                 if num_derivs < 2 {
                     // recurse so the next section sets the 1st derivative; the call
@@ -999,11 +1033,11 @@ impl BSplineCurve {
                     let vals = self
                         .evaluate(t, 2, from_left, false)
                         .unwrap_or_else(|_| vec![Vec3::UNDEF; 3]);
-                    if let (Some(slot), Some(&v)) = (pv.get_mut(1), vals.get(1)) {
+                    if let (Some(slot), Some(&v)) = (out.get_mut(1), vals.get(1)) {
                         *slot = v;
                     }
                 } else {
-                    let d2 = pv.get(2).copied().unwrap_or(Vec3::UNDEF);
+                    let d2 = out.get(2).copied().unwrap_or(Vec3::UNDEF);
                     let len = d2.length();
                     if len > new_len {
                         let mut d1 = (new_len / len) * d2;
@@ -1012,14 +1046,14 @@ impl BSplineCurve {
                         if t > self.natural_interval().mid() {
                             d1 *= -1.0;
                         }
-                        if let Some(slot) = pv.get_mut(1) {
+                        if let Some(slot) = out.get_mut(1) {
                             *slot = d1;
                         }
                     }
                 }
             }
         }
-        Ok(pv)
+        Ok(())
     }
 
     /// Tessellates the curve over `interval` (`Tessellate`): bisection with the chord
@@ -1822,6 +1856,45 @@ mod tests {
         ];
         let u = vec![0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 1.0, 1.0, 1.0];
         BSplineCurve::from_nurb(Curve::new(pw, 3, u).unwrap(), 3, false)
+    }
+
+    #[test]
+    fn evaluate_into_matches_evaluate_bit_for_bit() {
+        let bits = |v: &[Vec3]| -> Vec<[u64; 3]> {
+            v.iter()
+                .map(|p| [p.x.to_bits(), p.y.to_bits(), p.z.to_bits()])
+                .collect()
+        };
+        // the second curve has a zero first derivative at t = 0 (repeated point)
+        let pw = vec![
+            CPoint::new(0.0, 0.0, 0.0, NOW),
+            CPoint::new(0.0, 0.0, 0.0, NOW),
+            CPoint::new(3.0, 2.0, 1.0, NOW),
+            CPoint::new(4.0, 0.0, 0.0, NOW),
+        ];
+        let u = vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        let cusp = BSplineCurve::from_nurb(Curve::new(pw, 3, u).unwrap(), 3, false);
+        for c in [cubic(), cusp] {
+            for t in [-0.25, 0.0, 0.3, 0.5, 0.75, 1.0, 1.5] {
+                for from_left in [true, false] {
+                    for nzt in [true, false] {
+                        for nd in 0..MAX_DERIV + 2 {
+                            let full = c.evaluate(t, nd, from_left, nzt);
+                            let mut out = vec![Vec3::new(7.0, 7.0, 7.0); nd + 1];
+                            let r = c.evaluate_into(t, from_left, nzt, &mut out);
+                            match full {
+                                Ok(full) => {
+                                    assert!(r.is_ok());
+                                    assert_eq!(bits(&full), bits(&out));
+                                }
+                                Err(e) => assert_eq!(r.err(), Some(e)),
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(cubic().evaluate_into(0.5, true, false, &mut []).is_err());
     }
 
     #[test]
