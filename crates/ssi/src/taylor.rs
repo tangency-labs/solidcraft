@@ -866,9 +866,7 @@ mod tests {
         assert!(one.c[1..].iter().all(|x| x.abs() < 1e-14), "{:?}", one.c);
     }
 
-    #[path = "../../bin/ssi_corpus_runner/json.rs"]
-    #[allow(dead_code)]
-    mod json;
+    use super::test_json as json;
 
     use crate::invert::Side;
     use crate::trace2d::{critical, Inside};
@@ -1155,3 +1153,11 @@ mod tests {
         }
     }
 }
+
+// The corpus runner's JSON reader, shared with the tests above. Declared here, outside the inline
+// `tests` module, so its #[path] is relative to src/ (inside `tests` it went through the
+// nonexistent src/taylor/tests/, which fails to resolve on Linux).
+#[cfg(test)]
+#[path = "bin/ssi_corpus_runner/json.rs"]
+#[allow(dead_code)]
+mod test_json;
