@@ -158,7 +158,7 @@ pub enum InstallKind {
     WindowsMsi,
     /// The portable `.zip`, unpacked somewhere.
     WindowsPortable,
-    /// The lone `SolidCraft-<version>-windows-x64.exe`.
+    /// The lone `solidcraft-<version>-windows-x64.exe`.
     WindowsExe,
     /// `SolidCraft.app`, at this path (the bundle).
     MacApp(PathBuf),
@@ -350,7 +350,7 @@ pub fn asset_name(kind: &InstallKind, arch: &str, version: &str) -> Option<Strin
         InstallKind::WindowsMsi => format!("solidcraft-windows-{}.msi", windows?),
         InstallKind::WindowsPortable => format!("solidcraft-windows-{}-portable.zip", windows?),
         // Only x64 has the lone .exe; elsewhere the portable zip is the same thing.
-        InstallKind::WindowsExe if windows == Some("x64") => format!("SolidCraft-{version}-windows-x64.exe"),
+        InstallKind::WindowsExe if windows == Some("x64") => format!("solidcraft-{version}-windows-x64.exe"),
         InstallKind::WindowsExe => format!("solidcraft-windows-{}-portable.zip", windows?),
         InstallKind::MacApp(_) => "solidcraft-macos-universal.dmg".into(),
         InstallKind::Dev | InstallKind::Web | InstallKind::Other => return None,

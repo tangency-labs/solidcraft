@@ -122,7 +122,7 @@ fn an_msi_install_outside_program_files_is_recognised() {
     assert_eq!(kind(Some(r"D:\Program Files\SolidCraft2\")), InstallKind::WindowsPortable, "a folder whose name only starts the same");
 }
 
-/// The assets of v0.10.0, as published.
+/// The assets of v0.10.0, as published, with the `.exe` under its lower-case name (#6769).
 fn release() -> Release {
     let names = [
         "SHA256SUMS.txt",
@@ -130,7 +130,7 @@ fn release() -> Release {
         "solidcraft-0.10.0-linux-x86_64.AppImage.zsync",
         "solidcraft-0.10.0-linux-x86_64.tar.gz",
         "solidcraft-0.10.0-linux-aarch64.tar.gz",
-        "SolidCraft-0.10.0-windows-x64.exe",
+        "solidcraft-0.10.0-windows-x64.exe",
         "solidcraft-linux-aarch64.AppImage",
         "solidcraft-linux-aarch64.deb",
         "solidcraft-linux-x86_64.AppImage",
@@ -170,7 +170,7 @@ fn each_installation_gets_its_own_file() {
     assert_eq!(name(InstallKind::WindowsMsi, "aarch64").as_deref(), Some("solidcraft-windows-arm64.msi"));
     assert_eq!(name(InstallKind::WindowsMsi, "x86").as_deref(), Some("solidcraft-windows-x86.msi"));
     assert_eq!(name(InstallKind::WindowsPortable, "x86_64").as_deref(), Some("solidcraft-windows-x64-portable.zip"));
-    assert_eq!(name(InstallKind::WindowsExe, "x86_64").as_deref(), Some("SolidCraft-0.10.0-windows-x64.exe"));
+    assert_eq!(name(InstallKind::WindowsExe, "x86_64").as_deref(), Some("solidcraft-0.10.0-windows-x64.exe"));
     assert_eq!(name(InstallKind::WindowsExe, "aarch64").as_deref(), Some("solidcraft-windows-arm64-portable.zip"));
     assert_eq!(name(InstallKind::MacApp("/A.app".into()), "aarch64").as_deref(), Some("solidcraft-macos-universal.dmg"));
     assert_eq!(name(InstallKind::Other, "x86_64"), None);
