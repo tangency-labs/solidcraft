@@ -5430,7 +5430,7 @@ mod refused_ok_tests {
         let preview = crate::preview::compute(
             &app.session,
             &commands,
-            crate::preview::Colors { body: [1; 4], added: [2; 4], new_body: [3; 4], removed: [4; 4], edge: [5; 4] },
+            crate::preview::Colors { body: [1; 4], added: [2; 4], new_body: [3; 4], removed: [4; 4], edge: [5; 4], ghost: false },
         )
         .expect("the angled plane previews");
 
