@@ -1219,7 +1219,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
     let layout = shell_layout(app);
     let floating = Container::for_layout(layout, Surface::Panel).floating();
     let labels = app.preferences.ribbon_labels;
-    let compact = app.preferences.ribbon_compact;
+    let small_icons = app.preferences.ribbon_small_icons;
     let button_height = if labels { BUTTON_HEIGHT } else { ICON_BUTTON_HEIGHT };
     let group_height = if labels { GROUP_HEIGHT } else { ICON_GROUP_HEIGHT };
     let ribbon_height = ribbon_height(labels);
@@ -1370,7 +1370,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     })
                     .collect();
                 if !cells.is_empty() {
-                    let width = grid_width(cells.len(), labels, compact);
+                    let width = grid_width(cells.len(), labels, small_icons);
                     widths.push(ButtonSize { width, min_width: width });
                 }
                 PanelSize { buttons: widths, grid: !cells.is_empty() }
@@ -1562,7 +1562,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     );
                 }
                 for (index, c) in gallery.iter().enumerate() {
-                    let cell = grid_cell(pos2(button_x, top), index, gallery.len(), labels, compact);
+                    let cell = grid_cell(pos2(button_x, top), index, gallery.len(), labels, small_icons);
                     let info = crate::render_workspace::interactive_command_info(app, c);
                     let resp = ui.interact(cell, ui.id().with(("cmd", c.id)), Sense::click_and_drag());
                     let active = running.as_deref() == Some(c.id);
@@ -1614,8 +1614,8 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             // RIBBON_TAB_INSET from the card's bottom edge (and from its left edge in the first
             // section): its corner is concentric with the card's.
             let lr = Rect::from_min_size(
-                pos2(px + RIBBON_TAB_INSET, top + group_height - section_height(compact) - (RIBBON_TAB_INSET - 1.0)),
-                vec2((width - 2.0 * RIBBON_TAB_INSET).max(0.0), section_height(compact)),
+                pos2(px + RIBBON_TAB_INSET, top + group_height - section_height(small_icons) - (RIBBON_TAB_INSET - 1.0)),
+                vec2((width - 2.0 * RIBBON_TAB_INSET).max(0.0), section_height(small_icons)),
             );
             let lresp = ui.interact(lr, ui.id().with(("panel", panel)), Sense::click());
             crate::scenario::publish_handle(&format!("panel:{tab}:{panel}"), lr.center());
@@ -1870,17 +1870,17 @@ const ROW_H: f32 = 30.0;
 /// A small icon cell of a panel's grid.
 const CELL: egui::Vec2 = vec2(24.0, 20.0);
 
-/// The section label row under a panel's buttons; the compact ribbon's is lower, leaving room
+/// The section label row under a panel's buttons; the small-icon ribbon's is lower, leaving room
 /// for three rows of cells.
-fn section_height(compact: bool) -> f32 {
-    if compact { 16.0 } else { 20.0 }
+fn section_height(small_icons: bool) -> f32 {
+    if small_icons { 16.0 } else { 20.0 }
 }
 
 /// The width of a grid of `cells` cells. The standard ribbon keeps the constraint gallery's
-/// rows (two under labelled buttons, one in the icon-only ribbon); the compact ribbon's grids
+/// rows (two under labelled buttons, one in the icon-only ribbon); the small-icon ribbon's grids
 /// are three rows high, filled column by column.
-fn grid_width(cells: usize, labels: bool, compact: bool) -> f32 {
-    if compact {
+fn grid_width(cells: usize, labels: bool, small_icons: bool) -> f32 {
+    if small_icons {
         let rows = if labels { crate::workspace::GRID_ROWS } else { 1 };
         cells.div_ceil(rows).max(1) as f32 * 26.0 - 2.0
     } else if labels {
@@ -1891,8 +1891,8 @@ fn grid_width(cells: usize, labels: bool, compact: bool) -> f32 {
 }
 
 /// Cell `index` of a grid of `cells` cells whose top left corner is `at` (the group's top).
-fn grid_cell(at: egui::Pos2, index: usize, cells: usize, labels: bool, compact: bool) -> Rect {
-    let (column, row, offset) = if compact {
+fn grid_cell(at: egui::Pos2, index: usize, cells: usize, labels: bool, small_icons: bool) -> Rect {
+    let (column, row, offset) = if small_icons {
         let rows = if labels { crate::workspace::GRID_ROWS } else { 1 };
         (index / rows, index % rows, vec2(0.0, if labels { 3.0 } else { 10.0 }))
     } else {
@@ -1900,7 +1900,7 @@ fn grid_cell(at: egui::Pos2, index: usize, cells: usize, labels: bool, compact: 
         let columns = if labels { cells.div_ceil(2).max(1) } else { cells.max(1) };
         (index % columns, index / columns, vec2(0.0, 6.0))
     };
-    let step = if compact { vec2(26.0, 21.0) } else { vec2(27.0, 23.0) };
+    let step = if small_icons { vec2(26.0, 21.0) } else { vec2(27.0, 23.0) };
     Rect::from_min_size(at + offset + vec2(column as f32 * step.x, row as f32 * step.y), CELL)
 }
 
@@ -3921,7 +3921,7 @@ mod ribbon_gallery_tests {
     }
 
     #[test]
-    fn the_compact_ribbon_adds_grids_and_the_standard_one_stays_as_it_was() {
+    fn the_small_icon_ribbon_adds_grids_and_the_standard_one_stays_as_it_was() {
         let mut h = Harness::new();
         h.call("ui.resize", json!({"width":1800,"height":900}));
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
@@ -3930,7 +3930,7 @@ mod ribbon_gallery_tests {
         assert!(rect_of("button:sketch.ellipse").is_none());
         assert!(rect_of("button:sketch.constraint.concentric").is_none());
         assert_eq!(rect_of("button:sketch.trim").map(|r| r.height()), Some(BUTTON_HEIGHT));
-        h.app.preferences.ribbon_compact = true;
+        h.app.preferences.ribbon_small_icons = true;
         h.frames(3);
         for id in ["sketch.ellipse", "sketch.extend", "sketch.constraint.concentric", "sketch.intersect"] {
             assert_eq!(rect_of(&format!("button:{id}")).map(|r| r.size()), Some(CELL), "{id}");

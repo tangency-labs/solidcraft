@@ -105,14 +105,14 @@ pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         }
                     }
                     ui_kit::row(ui, app.tr("prefs.ribbon"), |ui| {
-                        let mut selected = usize::from(app.preferences.ribbon_compact);
+                        let mut selected = usize::from(app.preferences.ribbon_small_icons);
                         if ui_kit::segmented(
                             ui,
                             &mut selected,
-                            &[app.tr("prefs.ribbon_standard"), app.tr("prefs.ribbon_compact")],
+                            &[app.tr("prefs.ribbon_standard"), app.tr("prefs.ribbon_small_icons")],
                             Default::default(),
                         ) {
-                            app.preferences.ribbon_compact = selected == 1;
+                            app.preferences.ribbon_small_icons = selected == 1;
                         }
                     });
                     ui_kit::row(ui, app.tr("prefs.tooltips"), |ui| {

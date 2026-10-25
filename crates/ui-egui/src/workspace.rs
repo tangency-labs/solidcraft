@@ -44,7 +44,7 @@ pub const CONSTRAINT_GALLERY: &[&str] = &[
     "sketch.constraint.perpendicular",
 ];
 
-/// The compact ribbon (an Interface preference): panels add these commands as small icon cells
+/// The small-icon ribbon (an Interface preference): panels add these commands as small icon cells
 /// after their large buttons, three rows high and up to [`GRID_COLUMNS`] wide, filled column by
 /// column so every command keeps its place. Icons come from each spec; the full names are in
 /// the tooltips.
@@ -130,17 +130,17 @@ pub const GRIDS: &[Grid] = &[
 ];
 
 /// A panel's small icon cells by default, in their fixed order (empty for panels without a
-/// grid): the compact ribbon's, or the constraint gallery.
-pub fn grid(tab: &str, panel: &str, compact: bool) -> &'static [&'static str] {
-    if compact {
+/// grid): the small-icon ribbon's, or the constraint gallery.
+pub fn grid(tab: &str, panel: &str, small_icons: bool) -> &'static [&'static str] {
+    if small_icons {
         return GRIDS.iter().find(|g| g.tab == tab && g.panel == panel).map_or(&[], |g| g.ids);
     }
     if (tab, panel) == ("SKETCH", "CONSTRAIN") { CONSTRAINT_GALLERY } else { &[] }
 }
 
 /// Where a command sits in its panel's default grid.
-pub fn grid_index(tab: &str, panel: &str, id: &str, compact: bool) -> Option<usize> {
-    grid(tab, panel, compact).iter().position(|g| *g == id)
+pub fn grid_index(tab: &str, panel: &str, id: &str, small_icons: bool) -> Option<usize> {
+    grid(tab, panel, small_icons).iter().position(|g| *g == id)
 }
 
 pub struct CommandGroup {
@@ -894,7 +894,7 @@ mod tests {
     }
 
     #[test]
-    fn compact_grids_fit_their_cells_and_name_known_commands_once() {
+    fn small_icon_grids_fit_their_cells_and_name_known_commands_once() {
         for g in GRIDS {
             assert!(SECTIONS.iter().any(|s| s.tab == g.tab && s.panel == g.panel), "{}/{}", g.tab, g.panel);
             assert!(g.ids.len() <= GRID_ROWS * GRID_COLUMNS, "{}/{} has {} cells", g.tab, g.panel, g.ids.len());
@@ -904,7 +904,7 @@ mod tests {
                 assert!(solidcraft_engine::find_command(id).is_some(), "unknown grid id {id}");
             }
         }
-        // The compact grid keeps the gallery's commands first, in its order.
+        // The small-icon grid keeps the gallery's commands first, in its order.
         assert!(grid("SKETCH", "CONSTRAIN", true).starts_with(CONSTRAINT_GALLERY));
     }
 

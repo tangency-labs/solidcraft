@@ -4,7 +4,7 @@
     "Show Small": "Show Small",
     "Small": "Small",
     "prefs.ribbon": "Ribbon",
-    "prefs.ribbon_compact": "Compact",
+    "prefs.ribbon_small_icons": "Small icons",
     "prefs.ribbon_standard": "Standard",
     "prefs.tooltip_descriptions": "Show tool descriptions",
     "prefs.tooltips": "Tooltips"
@@ -14,7 +14,7 @@
     "Show Small": "Klein anzeigen",
     "Small": "Klein",
     "prefs.ribbon": "Ribbon",
-    "prefs.ribbon_compact": "Kompakt",
+    "prefs.ribbon_small_icons": "Kleine Symbole",
     "prefs.ribbon_standard": "Standard",
     "prefs.tooltip_descriptions": "Werkzeugbeschreibungen anzeigen",
     "prefs.tooltips": "Tooltips"
@@ -24,7 +24,7 @@
     "Show Small": "小さく表示",
     "Small": "小",
     "prefs.ribbon": "リボン",
-    "prefs.ribbon_compact": "コンパクト",
+    "prefs.ribbon_small_icons": "小さいアイコン",
     "prefs.ribbon_standard": "標準",
     "prefs.tooltip_descriptions": "ツールの説明を表示",
     "prefs.tooltips": "ツールチップ"
@@ -34,7 +34,7 @@
     "Show Small": "显示小图标",
     "Small": "小",
     "prefs.ribbon": "功能区",
-    "prefs.ribbon_compact": "紧凑",
+    "prefs.ribbon_small_icons": "小图标",
     "prefs.ribbon_standard": "标准",
     "prefs.tooltip_descriptions": "显示工具说明",
     "prefs.tooltips": "工具提示"

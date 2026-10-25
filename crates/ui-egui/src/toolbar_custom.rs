@@ -121,9 +121,12 @@ impl ToolbarCustom {
     }
 
     /// A command's button on a panel is a small grid cell: the user's choice, or the ribbon's
-    /// (`compact`: the compact ribbon's grids).
-    pub fn is_small(&self, tab: &str, panel: &str, id: &str, compact: bool) -> bool {
-        self.small.get(&format!("{WORKSPACE}/{tab}/{id}")).copied().unwrap_or_else(|| crate::workspace::grid_index(tab, panel, id, compact).is_some())
+    /// (`small_icons`: the small-icon ribbon's grids).
+    pub fn is_small(&self, tab: &str, panel: &str, id: &str, small_icons: bool) -> bool {
+        self.small
+            .get(&format!("{WORKSPACE}/{tab}/{id}"))
+            .copied()
+            .unwrap_or_else(|| crate::workspace::grid_index(tab, panel, id, small_icons).is_some())
     }
     fn migrate(&mut self) {
         use std::collections::BTreeSet;
@@ -186,13 +189,13 @@ fn key(tab: &str, panel: &str) -> String {
 }
 
 /// The buttons a panel shows: the user's list, or the first `promoted` commands of the panel
-/// (and, in the compact ribbon, its grid).
+/// (and, in the small-icon ribbon, its grid).
 pub fn buttons(app: &SolveApp, tab: &str, panel: &str, cmds: &[&'static CommandSpec], promoted: usize) -> Vec<&'static CommandSpec> {
     match app.toolbar_custom.panels.get(&key(tab, panel)) {
         Some(ids) => ids.iter().filter_map(|id| solidcraft_engine::find_command(id)).collect(),
         None => {
             let mut out: Vec<_> = cmds.iter().take(promoted).copied().collect();
-            if app.preferences.ribbon_compact {
+            if app.preferences.ribbon_small_icons {
                 for c in crate::workspace::grid(tab, panel, true).iter().filter_map(|id| solidcraft_engine::find_command(id)) {
                     if !out.iter().any(|o| o.id == c.id) {
                         out.push(c);
@@ -207,18 +210,18 @@ pub fn buttons(app: &SolveApp, tab: &str, panel: &str, cmds: &[&'static CommandS
 /// A panel's small grid cells, in order: the ribbon's own grid commands in their fixed places,
 /// then the ones the user made small, in button order.
 pub fn grid_cells(app: &SolveApp, tab: &str, panel: &str, shown: &[&'static CommandSpec]) -> Vec<&'static CommandSpec> {
-    let compact = app.preferences.ribbon_compact;
-    let mut cells: Vec<_> = shown.iter().copied().filter(|c| app.toolbar_custom.is_small(tab, panel, c.id, compact)).collect();
-    let fixed = crate::workspace::grid(tab, panel, compact).len();
-    cells.sort_by_key(|c| crate::workspace::grid_index(tab, panel, c.id, compact).unwrap_or(fixed));
+    let small_icons = app.preferences.ribbon_small_icons;
+    let mut cells: Vec<_> = shown.iter().copied().filter(|c| app.toolbar_custom.is_small(tab, panel, c.id, small_icons)).collect();
+    let fixed = crate::workspace::grid(tab, panel, small_icons).len();
+    cells.sort_by_key(|c| crate::workspace::grid_index(tab, panel, c.id, small_icons).unwrap_or(fixed));
     cells
 }
 
 /// Show a command's button small (a grid cell) or large on a tab.
 pub fn set_small(app: &mut SolveApp, tab: &str, id: &str, small: bool) {
     let k = format!("{WORKSPACE}/{tab}/{id}");
-    let compact = app.preferences.ribbon_compact;
-    let default = home_panel(tab, id).is_some_and(|panel| crate::workspace::grid_index(tab, panel, id, compact).is_some());
+    let small_icons = app.preferences.ribbon_small_icons;
+    let default = home_panel(tab, id).is_some_and(|panel| crate::workspace::grid_index(tab, panel, id, small_icons).is_some());
     if small == default {
         app.toolbar_custom.small.remove(&k);
     } else {
@@ -312,9 +315,9 @@ pub fn reorder(app: &mut SolveApp, tab: &str, id: &str, panel: &str, before: Opt
     }
     // A button dropped on a grid cell becomes a small cell; a small cell dropped anywhere else
     // becomes a full-size button.
-    let compact = app.preferences.ribbon_compact;
-    let into_grid = before.is_some_and(|b| app.toolbar_custom.is_small(tab, panel, b, compact));
-    let from_grid = pinned_on(app, tab, id).is_some_and(|from| app.toolbar_custom.is_small(tab, from, id, compact));
+    let small_icons = app.preferences.ribbon_small_icons;
+    let into_grid = before.is_some_and(|b| app.toolbar_custom.is_small(tab, panel, b, small_icons));
+    let from_grid = pinned_on(app, tab, id).is_some_and(|from| app.toolbar_custom.is_small(tab, from, id, small_icons));
     if into_grid || from_grid {
         set_small(app, tab, id, into_grid);
     }
@@ -358,7 +361,7 @@ pub fn command_items(app: &SolveApp, id: &str) -> Vec<Item> {
         Item::action("ui.toolbarPin", "Pin to Toolbar", "plus").with(json!({ "command": id }))
     });
     if let Some(panel) = pinned_on(app, &tab, id) {
-        let small = app.toolbar_custom.is_small(&tab, panel, id, app.preferences.ribbon_compact);
+        let small = app.toolbar_custom.is_small(&tab, panel, id, app.preferences.ribbon_small_icons);
         let label = if small { "Show Large" } else { "Show Small" };
         v.push(Item::action("ui.toolbarSize", label, "settings").with(json!({ "command": id, "small": !small })));
     }
@@ -475,7 +478,7 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
                                     // Small: an icon cell of the panel's grid instead of a large button.
                                     if on {
                                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                            let mut small = app.toolbar_custom.is_small(&tab, panel, c.id, app.preferences.ribbon_compact);
+                                            let mut small = app.toolbar_custom.is_small(&tab, panel, c.id, app.preferences.ribbon_small_icons);
                                             let r = ui_kit::checkbox(ui, crate::i18n::tr_label("Small"), &mut small);
                                             crate::scenario::publish_handle(&format!("customize:small:{}", c.id), r.rect.center());
                                             if r.changed() {

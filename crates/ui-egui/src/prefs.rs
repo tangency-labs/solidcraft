@@ -931,7 +931,7 @@ preference_settings! {
     /// Where a dialog's OK and Cancel sit: under its inputs (the default) or in its title row (#6708).
     dialog_buttons: crate::ui_kit::DialogButtons = Default::default(), PAGE_INTERFACE;
     /// Ribbon panels add more commands as grids of small icons beside their large buttons.
-    ribbon_compact: bool = false, PAGE_INTERFACE;
+    ribbon_small_icons: bool = false, PAGE_INTERFACE;
     /// Ribbon tooltips show a tool's description where it has one.
     ribbon_help: bool = true, PAGE_INTERFACE;
     /// Interface scale (1 = 100 %).
@@ -4480,7 +4480,7 @@ mod tests {
             ("ribbon_labels", json!(false), PAGE_INTERFACE),
             ("sketch_tab_always", json!(true), PAGE_INTERFACE),
             ("dialog_buttons", json!("top"), PAGE_INTERFACE),
-            ("ribbon_compact", json!(true), PAGE_INTERFACE),
+            ("ribbon_small_icons", json!(true), PAGE_INTERFACE),
             ("ribbon_help", json!(false), PAGE_INTERFACE),
             ("timeline_left", json!(true), PAGE_INTERFACE),
             ("timeline_under_browser", json!(true), PAGE_INTERFACE),
