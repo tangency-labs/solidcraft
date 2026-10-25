@@ -35,8 +35,13 @@ pub struct Solution {
 /// `SolveCubicEqn` (4) or `SolveQuarticEqn` (5) on `coefficients` (ascending
 /// powers) with zero tolerance `tol`.
 ///
-/// Quartics with `tol > 1` are rejected: upstream then reads an uninitialised
-/// resolvent-cubic root (undefined behaviour).
+/// Quartics with `tol > 1` are rejected unless `|coefficients[4]| < tol`, when
+/// upstream falls back to the lower-degree solver. Otherwise the rejected inputs
+/// may reach an uninitialised resolvent-cubic root read (undefined behaviour):
+/// upstream also has further defined fallbacks on the resolvent input (e.g.
+/// `fabs(r) < tol`), so the guard stays conservative. Remaining over-rejection
+/// predates this guard; equality and NaN leading coefficients do not take the
+/// fallback and remain rejected.
 pub fn solve(coefficients: &[f64], tol: f64) -> Result<Solution, FfiError> {
     let degree = match coefficients.len() {
         3 => 2,
@@ -44,7 +49,17 @@ pub fn solve(coefficients: &[f64], tol: f64) -> Result<Solution, FfiError> {
         5 => 4,
         n => return Err(FfiError::InvalidArgument(format!("{n} coefficients"))),
     };
-    if degree == 4 && tol > 1.0 {
+    // Resolvent reachable ⟺ NOT (|c4| < tol): exactly `|c4| >= tol || |c4| is
+    // NaN` (a negated `!(a < b)` would trip `neg_cmp_op_on_partial_ord` while
+    // changing nothing; NaN reaches the resolvent upstream too, so it stays
+    // rejected). `get` avoids the denied direct indexing.
+    if degree == 4
+        && tol > 1.0
+        && coefficients
+            .get(4)
+            .copied()
+            .is_some_and(|a| a.abs() >= tol || a.abs().is_nan())
+    {
         return Err(FfiError::InvalidArgument(format!("quartic tol {tol}")));
     }
     let mut out = [0.0f64; 4];
