@@ -9,6 +9,7 @@
 
 pub mod p21;
 mod parallel;
+mod tessellated;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
@@ -23,10 +24,11 @@ use p21::{Entity, Exchange, Param};
 /// The representation the file's unlisted topology is read as, under an id the reader keeps for
 /// it (it is used only when the file's representations hold nothing to read).
 const UNLISTED: u64 = u64::MAX;
-/// Whether an item of representation `rep` is read as a body: a solid or surface model, and in
-/// the file's unlisted topology ([`UNLISTED`]) a shell or face on its own too.
+/// Whether an item of representation `rep` is read as a body: a solid or surface model, a
+/// tessellated one (AP242 triangles, read as a mesh body or named in a warning), and in the file's
+/// unlisted topology ([`UNLISTED`]) a shell or face on its own too.
 fn body_item(rep: u64, name: &str) -> bool {
-    solidcore_step::topology::is_solid_item(name) || (rep == UNLISTED && solidcore_step::topology::is_body_item(name))
+    solidcore_step::topology::is_solid_item(name) || tessellated::is_name(name) || (rep == UNLISTED && solidcore_step::topology::is_body_item(name))
 }
 
 /// Deepest assembly nesting followed.
@@ -770,6 +772,15 @@ impl Reader {
         if name.is_empty() { format!("solid #{item}") } else { format!("solid '{name}'") }
     }
 
+    fn failure_label(&self, item: u64, batch: usize) -> String {
+        if self.ex.get(item).is_some_and(tessellated::is_item) {
+            let product = self.batches.get(batch).map_or("Import", |b| b.product.as_str());
+            format!("product '{product}', tessellated item #{item}")
+        } else {
+            self.label(item)
+        }
+    }
+
     /// Bodies of a representation's items (following mapped items), placed by `m`.
     fn rep_bodies(&mut self, rep: u64, m: &M4, path: &[String], product: &str, instance: Option<&str>, out: &mut Vec<usize>, depth: usize) {
         if depth > MAX_ASSEMBLY_DEPTH {
@@ -895,7 +906,8 @@ impl Reader {
             }
             if let Some(again) = self.unreadable.get(&item) {
                 if let Some(msg) = again.clone() {
-                    self.refused(item, &msg);
+                    let label = self.failure_label(item, p.batch);
+                    self.note(IssueKind::Refused, Some(item), 0, format!("{label}: not imported: {msg}"));
                 }
                 continue;
             }
@@ -1038,15 +1050,12 @@ impl Reader {
                     });
                 }
                 Err(parallel::Failure { read, msg }) => {
-                    if read {
-                        let label = self.label(item);
-                        self.note(IssueKind::NotImported, Some(item), 0, format!("{label}: not imported: {msg}"));
-                    } else {
-                        self.refused(item, &msg);
-                    }
+                    let label = if tessellated::is_item(e) { format!("product '{product}', tessellated item #{item}") } else { self.label(item) };
+                    let kind = if read { IssueKind::NotImported } else { IssueKind::Refused };
+                    self.note(kind, Some(item), 0, format!("{label}: not imported: {msg}"));
                     // Later instances don't read the item again.
                     if !self.oriented.contains_key(&item) {
-                        self.unreadable.insert(item, (!read).then_some(msg));
+                        self.unreadable.insert(item, (!read || tessellated::is_item(e)).then_some(msg));
                     }
                 }
             }
@@ -1382,11 +1391,7 @@ impl StepReading {
             Err(e) => return Err(KernelError::Invalid(e)),
         };
         let mut rd = Reader::new(ex.clone(), workers);
-        rd.solid_items = ex
-            .entities
-            .values()
-            .filter(|e| matches!(e.name(), "MANIFOLD_SOLID_BREP" | "BREP_WITH_VOIDS" | "FACETED_BREP" | "SHELL_BASED_SURFACE_MODEL"))
-            .count();
+        rd.solid_items = ex.entities.values().filter(|e| solidcore_step::topology::is_solid_item(e.name()) || tessellated::is_item(e)).count();
         rd.watch = watch.clone();
         solidcraft_profile::scope("import", "step.index", || rd.index());
         // Roots: product definitions that are nobody's component.
@@ -1406,7 +1411,7 @@ impl StepReading {
             .iter()
             .flat_map(|(r, (items, _))| items.iter().map(move |i| (*r, *i)))
             .filter(|(_, i)| !rd.used_items.contains(i))
-            .filter(|(_, i)| ex.get(*i).is_some_and(|e| solidcore_step::topology::is_solid_item(e.name())))
+            .filter(|(_, i)| ex.get(*i).is_some_and(|e| solidcore_step::topology::is_solid_item(e.name()) || tessellated::is_item(e)))
             .map(|(r, _)| r)
             .collect();
         loose.sort();
