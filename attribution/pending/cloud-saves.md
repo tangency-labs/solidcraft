@@ -1,0 +1,2 @@
+| docs/book/src/guide/images/cloud-saves-setup.png | SolidCraft contributors | actual SolidCraft 0.22 desktop screenshot of guided GitHub setup, illustrating the Cloud Saves user guide; captured through the control channel with an isolated profile | MIT OR Apache-2.0 |
+| docs/book/src/guide/images/cloud-saves-home.png | SolidCraft contributors | actual SolidCraft 0.22 desktop screenshot of an original analytic mesh assembly queued in a cloud project on Start, illustrating local-save status in the Cloud Saves user guide | MIT OR Apache-2.0 |
