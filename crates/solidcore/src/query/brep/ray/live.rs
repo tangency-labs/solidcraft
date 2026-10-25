@@ -346,6 +346,13 @@ impl FaceQueries<CacheObject> for LiveSurfaceContext<'_, '_, '_> {
     ) -> Result<(i32, Option<CacheObject>)> {
         self.0.classify(k, face, uv, tolerance, true, false, false)
     }
+    fn curve_edge_tolerance(&self, curve: CacheObject) -> Option<Result<f64>> {
+        match self.0.curve_edge(curve) {
+            Ok(Some(edge)) => Some(self.0.edge_tolerance(edge)),
+            Ok(None) => None,
+            Err(e) => Some(Err(e)),
+        }
+    }
 }
 
 /// A mutable B-rep's owning-face services for surface solves (upstream's
@@ -532,6 +539,17 @@ impl FaceQueries<CacheObject> for BrepFaceServices<'_> {
     ) -> Result<(i32, Option<CacheObject>)> {
         self.classify(k, face, uv, tolerance, true, false, false)
     }
+    fn curve_edge_tolerance(&self, curve: CacheObject) -> Option<Result<f64>> {
+        let (CacheObject::Curve(edge) | CacheObject::Edge(edge)) = curve else {
+            return None;
+        };
+        Some(
+            self.brep
+                .try_borrow()
+                .map_err(borrow_conflict)
+                .and_then(|brep| crate::topology::edge::tolerance(&brep, edge)),
+        )
+    }
 }
 
 /// An object of one of several B-reps: the index of its B-rep and its handle there.
@@ -610,5 +628,11 @@ impl FaceQueries<SideObject> for SidedFaceServices<'_> {
             .side(face)?
             .face_point_classify_fast_drop(k, face.1, uv, tolerance)?;
         Ok((class, object.map(|o| SideObject(face.0, o))))
+    }
+    fn curve_edge_tolerance(&self, curve: SideObject) -> Option<Result<f64>> {
+        match self.side(curve) {
+            Ok(side) => side.curve_edge_tolerance(curve.1),
+            Err(e) => Some(Err(e)),
+        }
     }
 }

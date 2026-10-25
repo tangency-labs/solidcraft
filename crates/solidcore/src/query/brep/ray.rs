@@ -284,6 +284,13 @@ impl FaceQueries<CacheObject> for RaySurfaceContext<'_> {
     ) -> Result<(i32, Option<CacheObject>)> {
         self.classify(k, face, uv, src_tol, true)
     }
+
+    fn curve_edge_tolerance(&self, curve: CacheObject) -> Option<Result<f64>> {
+        let (CacheObject::Curve(edge) | CacheObject::Edge(edge)) = curve else {
+            return None;
+        };
+        Some(crate::topology::edge::tolerance(self.brep, edge))
+    }
 }
 
 #[cfg(test)]

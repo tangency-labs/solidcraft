@@ -119,7 +119,9 @@ use crate::topology::topology as topo;
 use crate::topology::topology_traverser::face_edges;
 use crate::topology::vertex;
 use crate::topology::vertexuse as vu1;
-use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, LoopId, LoopuseId, VertexId, VertexuseId};
+use crate::topology::{
+    Brep, BrepId, EdgeId, EdgeuseId, FaceId, LoopId, LoopuseId, VertexId, VertexuseId,
+};
 
 pub use crate::topology::topology_traverser::has_lamina_edge;
 
@@ -1543,6 +1545,119 @@ impl<'a> IntersectObjects<'a> {
             _ => None,
         }
     }
+
+    fn distinct_breps(&self) -> [&'a Brep; 2] {
+        [self.b, self.other]
+    }
+
+    /// [`ClassGeometry::owner_entity`] for the borrowed lifetime.
+    pub(crate) fn object_owner_entity(&self, owner: ObjectRef) -> Option<(&'a Brep, EntityRef)> {
+        let same = core::ptr::eq(self.b, self.other);
+        let breps = self.distinct_breps();
+        let slice = if same { &breps[..1] } else { &breps[..] };
+        if owner.type_code == edge::TYPE {
+            for &b in slice {
+                for e in b.edges().ids() {
+                    let entity = EntityRef::Edge(e);
+                    if b.geometry_owner_key(entity) == Some(owner)
+                        || b.notify_serial().is_some_and(|s| {
+                            crate::topology::brep::p3::topology_ref(s, entity) == owner
+                        })
+                    {
+                        return Some((b, entity));
+                    }
+                }
+            }
+            let mut fallback = None;
+            for &b in slice {
+                for e in b.edges().ids() {
+                    let actual = b.edge(e).ok().and_then(|r| r.curve.as_ref()?.owner());
+                    if actual == Some(owner)
+                        && crate::topology::brep::p1::default_edge_owner(b, e) == owner
+                    {
+                        if fallback.is_some() {
+                            return None;
+                        }
+                        fallback = Some((b, EntityRef::Edge(e)));
+                    }
+                }
+            }
+            return fallback;
+        }
+        if owner.type_code == face2::TYPE {
+            for &b in slice {
+                for f in b.faces().ids() {
+                    let entity = EntityRef::Face(f);
+                    if b.geometry_owner_key(entity) == Some(owner)
+                        || b.notify_serial().is_some_and(|s| {
+                            crate::topology::brep::p3::topology_ref(s, entity) == owner
+                        })
+                    {
+                        return Some((b, entity));
+                    }
+                }
+            }
+            let mut fallback = None;
+            for &b in slice {
+                for f in b.faces().ids() {
+                    let actual = b.face(f).ok().and_then(|r| r.surface.as_ref()?.owner());
+                    if actual == Some(owner)
+                        && crate::topology::brep::p1::default_face_owner(b, f) == owner
+                    {
+                        if fallback.is_some() {
+                            return None;
+                        }
+                        fallback = Some((b, EntityRef::Face(f)));
+                    }
+                }
+            }
+            return fallback;
+        }
+        None
+    }
+
+    /// [`ClassGeometry::owner_of`] for the borrowed lifetime.
+    pub(crate) fn object_owner_of(&self, owner: ObjectRef) -> Option<ObjectRef> {
+        if owner.type_code != eu1::TYPE {
+            return None;
+        }
+        let same = core::ptr::eq(self.b, self.other);
+        let breps = self.distinct_breps();
+        let slice = if same { &breps[..1] } else { &breps[..] };
+        let edge_owner_in = |b: &Brep, e: EdgeId| -> ObjectRef {
+            b.geometry_owner_key(EntityRef::Edge(e))
+                .or_else(|| b.edge(e).ok()?.curve.as_ref()?.owner())
+                .unwrap_or_else(|| crate::topology::brep::p1::default_edge_owner(b, e))
+        };
+        for &b in slice {
+            for eu in b.edgeuses().ids() {
+                let entity = EntityRef::Edgeuse(eu);
+                if b.notify_serial()
+                    .is_some_and(|s| crate::topology::brep::p3::topology_ref(s, entity) == owner)
+                {
+                    let e = eu1::edge(b, eu).ok()??;
+                    return Some(edge_owner_in(b, e));
+                }
+            }
+        }
+        let mut fallback = None;
+        for &b in slice {
+            for eu in b.edgeuses().ids() {
+                let actual = b
+                    .edgeuse(eu)
+                    .ok()
+                    .and_then(|r| r.uv_trim_curve.as_ref()?.owner());
+                if actual == Some(owner) {
+                    let e = eu1::edge(b, eu).ok()??;
+                    if fallback.is_some() {
+                        return None;
+                    }
+                    fallback = Some(edge_owner_in(b, e));
+                }
+            }
+        }
+        fallback
+    }
 }
 
 impl ClassGeometry<IntersectObject> for IntersectObjects<'_> {
@@ -1558,6 +1673,9 @@ impl ClassGeometry<IntersectObject> for IntersectObjects<'_> {
         match o {
             IntersectObject::Topology(EntityRef::Vertex(v), side) => {
                 self.brep(side).vertex(v).ok().map(|v| v.tolerance)
+            }
+            IntersectObject::Topology(EntityRef::Edge(e), side) => {
+                self.brep(side).edge(e).ok().map(|e| e.tolerance)
             }
             IntersectObject::Topology(EntityRef::Face(f), side) => {
                 self.brep(side).face(f).ok().map(|f| f.tolerance)
@@ -1590,6 +1708,21 @@ impl ClassGeometry<IntersectObject> for IntersectObjects<'_> {
         // side `true` only for the other face's B-rep when it is a different one
         let side = !core::ptr::eq(brep, self.b);
         (!side || core::ptr::eq(brep, self.other)).then_some(IntersectObject::Topology(e, side))
+    }
+    fn brep_id(&self, brep: &Brep) -> Option<BrepId> {
+        if core::ptr::eq(brep, self.b) {
+            Some(BrepId::from_index(0))
+        } else if core::ptr::eq(brep, self.other) {
+            Some(BrepId::from_index(1))
+        } else {
+            None
+        }
+    }
+    fn owner_entity(&self, owner: ObjectRef) -> Option<(&Brep, EntityRef)> {
+        self.object_owner_entity(owner)
+    }
+    fn owner_of(&self, owner: ObjectRef) -> Option<ObjectRef> {
+        self.object_owner_of(owner)
     }
 }
 
@@ -1652,6 +1785,15 @@ impl ClassGeometry<IntersectObject> for IntersectObjectsMut<'_> {
     }
     fn topology_handle_in(&self, brep: &Brep, e: EntityRef) -> Option<IntersectObject> {
         self.view().topology_handle_in(brep, e)
+    }
+    fn brep_id(&self, brep: &Brep) -> Option<BrepId> {
+        self.view().brep_id(brep)
+    }
+    fn owner_entity(&self, owner: ObjectRef) -> Option<(&Brep, EntityRef)> {
+        self.view().object_owner_entity(owner)
+    }
+    fn owner_of(&self, owner: ObjectRef) -> Option<ObjectRef> {
+        self.view().object_owner_of(owner)
     }
 }
 
