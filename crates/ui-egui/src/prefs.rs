@@ -905,6 +905,9 @@ preference_settings! {
     timeline_left_width: f32 = 130.0, PAGE_INTERFACE;
     /// Share the browser column, vertically, instead of a separate left column.
     timeline_under_browser: bool = false, PAGE_INTERFACE;
+    /// Compact history: the browser lists each component's features in history order with the
+    /// marker, and neither timeline is shown.
+    history_in_browser: bool = false, PAGE_INTERFACE;
     /// Fold the shared-column history to its header.
     timeline_collapsed: bool = false, PAGE_INTERFACE;
     /// The browser's share of the column's height when History sits under it, which the user

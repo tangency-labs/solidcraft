@@ -1369,12 +1369,16 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             let body = p.get("body").and_then(Value::as_str);
             let f = id_of(&p, "feature").or_else(|| body.and_then(|b| body_feature(app, b)));
             if let Some(f) = f {
-                app.ui.show_timeline = true;
-                crate::timeline_left::reveal_feature(app, f);
-                // From a face or body, the Browser shows the feature in that body's copy. From a
-                // sketch, plane or feature row there is no body: that row is the Browser's view.
-                if let Some(body) = body {
-                    crate::browser::reveal_feature(app, f, body);
+                if app.preferences.history_in_browser {
+                    crate::browser::reveal_in_history(app, f);
+                } else {
+                    app.ui.show_timeline = true;
+                    crate::timeline_left::reveal_feature(app, f);
+                    // From a face or body, the Browser shows the feature in that body's copy. From a
+                    // sketch, plane or feature row there is no body: that row is the Browser's view.
+                    if let Some(body) = body {
+                        crate::browser::reveal_feature(app, f, body);
+                    }
                 }
                 let _ = app.run("select.set", json!({"items": [{"type": "feature", "id": f}]}));
                 app.tree.timeline_reveal = Some(f);

@@ -105,14 +105,31 @@ pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         }
                     }
                     ui_kit::row(ui, app.tr("prefs.history"), |ui| {
-                        let mut selected = if app.preferences.timeline_left { if app.preferences.timeline_under_browser { 2 } else { 1 } } else { 0 };
+                        let mut selected = if app.preferences.history_in_browser {
+                            3
+                        } else if app.preferences.timeline_left {
+                            if app.preferences.timeline_under_browser { 2 } else { 1 }
+                        } else {
+                            0
+                        };
                         if ui_kit::segmented(
                             ui,
                             &mut selected,
-                            &[crate::i18n::tr("prefs.bottom"), crate::i18n::tr("prefs.left"), crate::i18n::tr("prefs.under_browser")],
+                            &[
+                                crate::i18n::tr("prefs.bottom"),
+                                crate::i18n::tr("prefs.left"),
+                                crate::i18n::tr("prefs.under_browser"),
+                                crate::i18n::tr("prefs.in_browser"),
+                            ],
                             ui_kit::Segments { proportional: true, compact: true, ..Default::default() },
                         ) {
-                            let _ = app.run("view.history_layout", json!({"dock": match selected { 1=>"left",2=>"under_browser",_=>"bottom" }}));
+                            let dock = match selected {
+                                1 => "left",
+                                2 => "under_browser",
+                                3 => "browser",
+                                _ => "bottom",
+                            };
+                            let _ = app.run("view.history_layout", json!({ "dock": dock }));
                         }
                     });
                     for (short, legacy) in [
@@ -193,7 +210,13 @@ pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                     ui_kit::LayoutPreview {
                         compact: app.ui.layout == crate::shell::LayoutMode::Docked,
                         labels: app.preferences.ribbon_labels,
-                        history: if app.preferences.timeline_left { if app.preferences.timeline_under_browser { 2 } else { 1 } } else { 0 },
+                        history: if app.preferences.history_in_browser {
+                            3
+                        } else if app.preferences.timeline_left {
+                            if app.preferences.timeline_under_browser { 2 } else { 1 }
+                        } else {
+                            0
+                        },
                         translucent: app.preferences.browser_float,
                     }
                 })

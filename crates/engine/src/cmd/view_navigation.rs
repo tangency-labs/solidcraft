@@ -75,7 +75,7 @@ CommandSpec::new("view.render_dock", "Move Render Dock", crate::checked!("view.r
 CommandSpec::new("view.layout", "Workspace layout", layout)
     .icon("settings").noundo().doc_only().params("mode: floating|compact → validated workspace layout; display only, never opens a dialog"),
 CommandSpec::new("view.history_layout", "History layout", history_layout)
-    .icon("settings").noundo().doc_only().params("width?: 1..1000000; dock?: bottom|left|under_browser; collapsed?: bool → validated layout request; display only, never opens a dialog"),
+    .icon("settings").noundo().doc_only().params("width?: 1..1000000; dock?: bottom|left|under_browser|browser (browser: the history in the browser, no timeline); collapsed?: bool → validated layout request; display only, never opens a dialog"),
 CommandSpec::new("view.graphics_preset", "Graphics Preset", graphics_preset)
     .icon("settings").noundo().doc_only().params("preset: performance|quality → preset, enabled, display_quality, supersampling, supersampling_adaptive; Quality: AO, Fine, adaptive 2x SSAA; Performance: no AO, Normal, no SSAA"),
 CommandSpec::new("view.ambient_occlusion", "Ambient Occlusion", ambient_occlusion)
@@ -365,8 +365,8 @@ fn history_layout(_s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(value) = p.get("dock") {
         let dock = value
             .as_str()
-            .filter(|v| matches!(*v, "bottom" | "left" | "under_browser"))
-            .ok_or_else(|| bad(cmd, "dock must be bottom, left or under_browser"))?;
+            .filter(|v| matches!(*v, "bottom" | "left" | "under_browser" | "browser"))
+            .ok_or_else(|| bad(cmd, "dock must be bottom, left, under_browser or browser"))?;
         result.insert("dock".into(), json!(dock));
     }
     if let Some(value) = p.get("collapsed") {

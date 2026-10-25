@@ -60,6 +60,10 @@ pub(crate) fn reveal_body(app: &mut SolveApp, body: &str) {
     }
 }
 
+pub(crate) fn reveal_in_history(app: &mut SolveApp, id: u64) {
+    features::reveal_in_history(app, id);
+}
+
 #[cfg(test)]
 #[path = "browser_model_tests.rs"]
 mod model_tests;

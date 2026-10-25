@@ -1143,7 +1143,8 @@ impl SolveApp {
                     self.preferences.timeline_left_width = ui_kit::history_snap_width(width as f32);
                 }
                 if let Some(dock) = v.get("dock").and_then(Value::as_str) {
-                    self.preferences.timeline_left = dock != "bottom";
+                    self.preferences.timeline_left = !matches!(dock, "bottom" | "browser");
+                    self.preferences.history_in_browser = dock == "browser";
                     self.preferences.timeline_under_browser = dock == "under_browser";
                     self.preferences.timeline_collapsed = false;
                     self.preferences.timeline_left_browser_collapsed = false;
@@ -2389,7 +2390,7 @@ impl SolveApp {
         let floating = render_workspace::active(self) || ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Panel).floating();
         timeline::follow_view_pick(self);
         render_ui::focus_shortcut(self, ui);
-        let show_timeline = self.ui.show_timeline && !render_workspace::active(self);
+        let show_timeline = self.ui.show_timeline && !render_workspace::active(self) && !self.preferences.history_in_browser;
         let left_timeline = show_timeline && self.preferences.timeline_left;
         timeline_left::animate_folds(self, ui.ctx());
         if !floating && !self.embedded {
