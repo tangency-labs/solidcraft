@@ -362,3 +362,5 @@ SC_EXPORT int32_t sc_intersect_curve_class_p6_run_picked(
     return run_impl(op, kind, scale, tol, flags, index, a, na, b, nb, input, pick, editing,
         out, cap, len);
 }
+
+#include "intersect_curve_class_p6_peer.inc"

@@ -23,6 +23,13 @@ pub const MAX_INTERVALS: usize = 32;
 
 mod sys {
     extern "C" {
+        pub fn sc_intersect_curve_class_p6_peer_scoped(
+            mode: i32,
+            out: *mut f64,
+            cap: i64,
+            len: *mut i64,
+        ) -> i32;
+        pub fn sc_intersect_curve_class_p6_peer(out: *mut f64, cap: i64, len: *mut i64) -> i32;
         pub fn sc_intersect_curve_class_p6_run(
             op: i32,
             kind: i32,
@@ -693,4 +700,34 @@ mod isolated_tests {
             }
         }
     }
+}
+
+/// Paired fillet classifications over two actual independently constructed boxes.
+/// # Errors
+/// Native construction or output-buffer errors.
+pub fn paired_fillet() -> Result<Vec<f64>, FfiError> {
+    call_with_buffer(32768, |out, len| {
+        // SAFETY: the native entrypoint receives only the allocated output buffer.
+        unsafe { sys::sc_intersect_curve_class_p6_peer(out.as_mut_ptr(), out.len() as i64, len) }
+    })
+}
+
+/// Real local peer scope (1), metadata-free legacy call (2), or disabled scope (3).
+/// # Errors
+/// Invalid mode, native construction or output-buffer errors.
+pub fn paired_fillet_scoped(mode: i32) -> Result<Vec<f64>, FfiError> {
+    if !(1..=3).contains(&mode) {
+        return Err(bad());
+    }
+    call_with_buffer(32768, |out, len| {
+        // SAFETY: checked mode and an allocated output buffer.
+        unsafe {
+            sys::sc_intersect_curve_class_p6_peer_scoped(
+                mode,
+                out.as_mut_ptr(),
+                out.len() as i64,
+                len,
+            )
+        }
+    })
 }
