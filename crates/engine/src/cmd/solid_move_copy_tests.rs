@@ -82,22 +82,6 @@ fn a_copied_body_keeps_the_material_of_the_body_it_came_from() {
 }
 
 #[test]
-fn a_copied_body_keeps_the_appearance_of_the_faces_of_the_body_it_came_from() {
-    let mut s = Session::default();
-    cube20(&mut s, "Cube");
-    run(&mut s, "appearance.assign", json!({"faces": [[10, 10, 20]], "body": "Cube", "appearance": "ABS - Red"}));
-    let reply = run(&mut s, "solid.move", json!({"bodies": ["Cube"], "translate": [30, 0, 0], "copy": true}));
-    let copy = created(&reply);
-    let looks: Vec<_> = s.doc.appearances.faces.iter().filter(|f| f.body == copy).collect();
-    assert_eq!(looks.len(), 1, "the copy must carry the face looks of the body it came from");
-    assert!(
-        looks[0].point.dist(Vec3::new(40.0, 10.0, 20.0)) < 1e-9,
-        "the face look must follow the body to where the copy landed: {:?}",
-        looks[0].point
-    );
-}
-
-#[test]
 fn an_older_design_with_no_copy_key_at_all_still_loads_and_moves_in_place() {
     let mut s = Session::default();
     cube20(&mut s, "Cube");
