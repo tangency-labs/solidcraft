@@ -1827,7 +1827,7 @@ pub fn make_edge_topology(
             shell_transfer_children(k, b, end_shell, start_shell)?;
         }
         region_remove_shell(b, end_shell)?;
-        // delete pEndShell
+        // delete pEndShell (SmBrep.cpp:13724): ~SmShell, ported as shell::destroy
         shell::destroy(k, b, end_shell, env)?;
     }
 

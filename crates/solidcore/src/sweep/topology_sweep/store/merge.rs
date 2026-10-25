@@ -745,10 +745,10 @@ impl PiecewiseAccess for Driver<'_, '_> {
         // new face B-rep with the original other). The users also name the surfaces
         // of other bodies (the original other's own); upstream registers those pairs
         // too, but no surface of the next Merge's operands ever matches them, so they
-        // are skipped here (face ids are per body).
+        // are skipped here (face ids are per body). See [`next_merge_pair`].
         let (a, af) = self.surface_face(skip)?;
         let (b, bf) = self.surface_face(user)?;
-        if a == self.session.destination && self.session.primary == Some(b) && a != b {
+        if next_merge_pair(self.session.destination, self.session.primary, a, b) {
             self.session.intersector.register_empty_ssi(af, bf);
         }
         Ok(())
@@ -790,6 +790,25 @@ impl PiecewiseAccess for Driver<'_, '_> {
         }
         Ok(())
     }
+}
+
+/// Whether a `RegisterExistingSSI(pSkip2, pSurfUser)` pair of `SmMerge::PiecewiseMerge`
+/// (`SmMerge.cpp:638`) can ever be found by the next Merge, whose operands are the
+/// final result `destination` (`m_vTI.m_pBrep = pFinalResult`, cpp:647) and the new
+/// face B-rep `primary` (`m_vTI.m_pOther = m_vTI.m_pBrep`, cpp:646), before the table
+/// is cleared after it (`ClearExistingSSI`, cpp:682). Upstream keys the table by
+/// surface pointer and `SmTopologyIntersector::CheckIfHaveExistingSSI`
+/// (`SmTopologyIntersector.cpp:184-248`) matches a pair only when both pointers are
+/// the queried operand surfaces, so a pair naming a surface of any other body is
+/// registered but never matches. The port's table keys surfaces by per-body face id,
+/// where such a pair could alias an operand face, so it is not registered instead.
+fn next_merge_pair(
+    destination: BrepId,
+    primary: Option<BrepId>,
+    skip_body: BrepId,
+    user_body: BrepId,
+) -> bool {
+    skip_body == destination && primary == Some(user_body) && skip_body != user_body
 }
 
 #[cfg(test)]
@@ -1279,5 +1298,54 @@ mod tests {
         assert_eq!(store.merge_operands(merge).unwrap(), (dest, source));
         assert!(store.take_cleanup_errors().is_empty());
         store.delete_merge(merge);
+    }
+
+    #[test]
+    fn only_pairs_of_the_next_merge_operands_are_registered() {
+        let [dest, face_brep, other] = [0, 1, 2].map(BrepId::from_index);
+        // (final-result surface, new face B-rep surface): the next Merge can find it
+        assert!(next_merge_pair(dest, Some(face_brep), dest, face_brep));
+        // a user naming the original other's surface, a reversed pair, a pair on one
+        // body, or no primary: upstream registers these but never matches them
+        assert!(!next_merge_pair(dest, Some(face_brep), dest, other));
+        assert!(!next_merge_pair(dest, Some(face_brep), other, face_brep));
+        assert!(!next_merge_pair(dest, Some(face_brep), face_brep, dest));
+        assert!(!next_merge_pair(dest, Some(dest), dest, dest));
+        assert!(!next_merge_pair(dest, None, dest, face_brep));
+    }
+
+    #[test]
+    fn registering_a_pair_outside_the_operands_succeeds_without_an_entry() {
+        use crate::boolean::merge::p3::PiecewiseAccess;
+        use crate::geom::extent2d::Extent2d;
+        use crate::surface::plane::Plane;
+        use crate::topology::{Face, ShellId};
+        let (mut store, source, dest, _, _) = models(true);
+        let third = store.new_brep(dest).unwrap();
+        let face_of = |store: &mut SweepStore, body| {
+            let face = store
+                .brep_mut(body)
+                .unwrap()
+                .add_face_record(Face {
+                    surface: Some(Plane::from_normal(Vec3::ZERO, Vec3::Z).into()),
+                    uv_domain: Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+                    ..Face::new(ShellId::from_index(0))
+                })
+                .unwrap();
+            store.object_ref(body, EntityRef::Face(face)).unwrap()
+        };
+        let in_dest = face_of(&mut store, dest);
+        let in_third = face_of(&mut store, third);
+        store
+            .with_merge(dest, dest, source, 0.1, 0.2, |store, id| {
+                store.run_merge(id, |_, driver| {
+                    // the session's primary is the destination itself: no pair of the
+                    // next merge: both calls succeed (upstream registers them too)
+                    driver.register_empty_ssi(in_dest, in_third)?;
+                    driver.register_empty_ssi(in_third, in_dest)?;
+                    Ok(())
+                })
+            })
+            .unwrap();
     }
 }

@@ -641,7 +641,8 @@ fn merge_shells(
 
     // remove it from its region, then the region when empty
     let reg = eu1::shell_region(b, del)?.ok_or_else(|| null("shell without region"))?;
-    // pReg->Remove(pDelShell); delete pDelShell; then pReg->GetSize()
+    // pReg->Remove(pDelShell); delete pDelShell (SmBrep.cpp:10200, 10429: ~SmShell, ported
+    // as shell::destroy); then pReg->GetSize()
     crate::topology::shell::region_remove_shell(b, reg, del)?;
     crate::topology::shell::destroy(k, b, del, env)?;
     if b.region(reg)?.shells.is_empty() {
