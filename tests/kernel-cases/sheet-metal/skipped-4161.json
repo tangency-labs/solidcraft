@@ -34,5 +34,9 @@
  {
   "source": "tangency-labs/solidcraft#4968",
   "why": "no geometry: included bend angles in sheet-metal exports (feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5269",
+  "why": "no kernel geometry: flat-pattern DXF export clamps a degree-9 Bezier (file export)"
  }
 ]

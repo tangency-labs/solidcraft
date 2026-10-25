@@ -110,5 +110,33 @@
  {
   "source": "tangency-labs/solidcraft#5076",
   "why": "no reproduction: shell of a user's loft (free-form, a stated limit); see the loft shell case from #4743"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5245",
+  "why": "render: cursor offset on old Intel OpenGL (dup of #2063)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5247",
+  "why": "no reproduction: \"shell worked fine in previous versions\", no message or design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5249",
+  "why": "no reproduction: a shell refused on a box with a sketched circle, screenshots only (it worked in an earlier version)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5301",
+  "why": "no geometry: a sketch offset circle not fully constrained (sketch)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5330",
+  "why": "no geometry: sketch offset of an offset spline (sketch curve fitting)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5339",
+  "why": "no geometry: a spline's offset is fitted from many points (sketch curve fitting, dup of #5330)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5378",
+  "why": "no reproduction: Thicken fails, no message or design"
  }
 ]

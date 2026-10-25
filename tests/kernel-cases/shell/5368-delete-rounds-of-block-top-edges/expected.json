@@ -1,0 +1,12 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#5368",
+  "tangency-labs/solidcraft#5182"
+ ],
+ "what": "the four rounds of a block's top edges (r2, sharp vertical edges) deleted, so the planar top and sides extend to close the gap: refused ('only planar neighbours can extend to close the gap yet')",
+ "source": "analytic",
+ "method": "every neighbour of the rounds is planar; deleting them restores the sharp block: V = 35*25*25 = 21875, 6 faces. The points are the rounds' mid-points at 45 deg",
+ "body_count": 1,
+ "faces": 6,
+ "volume_mm3": 21875.0
+}

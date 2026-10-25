@@ -1,0 +1,17 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#5306"
+ ],
+ "what": "a 90 deg flange on the edge inside an open rectangular notch of a sheet-metal plate (100x60, notch 20 wide, 15 deep from the far edge): the flange was built on the plate's outer edge instead",
+ "source": "analytic",
+ "method": "T 2, R 2, K 0.5, inside flange on the notch's bottom edge (y = 45, x 40..60): the plate (less the notch) is set back 4 under it; a quarter-annulus bend (r 2..4, axis at y 41, z 4: centroid 41 + (56/3)/(3 pi), 4 - (56/3)/(3 pi)) and a 16 mm leg (y 43..45, z 4..20). The centre of mass is graded (to 0.5 mm, room for the corner reliefs the rule may add): a flange on an outer edge moves it by many millimetres",
+ "body_count": 1,
+ "center_of_mass": [
+  50.0,
+  29.6542,
+  1.5993
+ ],
+ "tolerance": {
+  "abs_mm": 0.5
+ }
+}

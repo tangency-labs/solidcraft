@@ -1,0 +1,22 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#5324"
+ ],
+ "what": "a 4x4 square, standing on the middle of the bottom edge of a closed 60x40 rectangle path, swept round the whole path (drawn from a corner): truck's solid was 59% too small and offset, with no error",
+ "source": "analytic",
+ "method": "the section is centred on the path, so each mitre adds and removes equal wedges: V = 4*4*200 = 3200. The ring's outer box is the path's grown by 2: x -32..32, y -22..22, z -2..2",
+ "body_count": 1,
+ "volume_mm3": 3200.0,
+ "bbox": {
+  "min": [
+   -32.0,
+   -22.0,
+   -2.0
+  ],
+  "max": [
+   32.0,
+   22.0,
+   2.0
+  ]
+ }
+}

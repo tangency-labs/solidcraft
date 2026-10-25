@@ -198,5 +198,21 @@
  {
   "source": "tangency-labs/solidcraft#5173",
   "why": "no kernel geometry: an edge pick at a corner point picks one edge silently (command validation)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5278",
+  "why": "needs the user design: a dovetail mount with chamfered holes and rounds; no small stand-in"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5299",
+  "why": "needs the user design: a U-shaped part with a hole, a 10 mm chamfer reaching the faces' edges; screenshots only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5328",
+  "why": "no geometry: a fillet option not to follow tangent edges (feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5401",
+  "why": "no geometry: the report arrived empty"
  }
 ]

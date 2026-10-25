@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#5323"
+ ],
+ "what": "a circle r5 swept along a 3D polyline (30, 25, 20 mm) whose two corners turn in different planes: truck's solid was 0.64% short (5852.75 for 5890.49), with no warning",
+ "source": "analytic",
+ "method": "the section is symmetric about the path, so each mitred corner adds outside the wedge it removes inside: V = pi*5^2*(30+25+20) = 5890.486",
+ "body_count": 1,
+ "volume_mm3": 5890.4862
+}

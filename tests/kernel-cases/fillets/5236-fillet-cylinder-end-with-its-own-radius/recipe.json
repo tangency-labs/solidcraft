@@ -1,0 +1,25 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 10,
+    "height": 30,
+    "body_name": "Pin"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      10,
+      0,
+      30
+     ]
+    ],
+    "radius": 10
+   }
+  }
+ ]
+}
