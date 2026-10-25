@@ -105,6 +105,7 @@ use crate::nurbs::knots::Side;
 use crate::surface::surface::p1::evaluate_1st_derivatives;
 use crate::surface::surface::p2::surface_cache;
 use crate::surface::surface::Surface;
+use crate::surface::surface_cache::p1::SurfaceCache;
 use crate::topology::{EdgeId, FaceId, VertexId};
 
 /// A light source (`SmLightSource`): white light from a point or in a direction.
@@ -197,24 +198,51 @@ fn line_plane_intersect(
     Some((line_point + t * line_vector, Vec2::new(u, v), t))
 }
 
+/// Classifies a point of a face-owned surface against the surface's face
+/// (`SmFace::PointClassify` of `sm_IsPointValid`), for a tracer whose surfaces are
+/// faces of a B-rep the caller prepared.
+pub trait RayFaceClassifier: core::fmt::Debug {
+    /// Whether `uv` is a valid point of the tracer's surface `surface` (index in the
+    /// tracer's list) and the topology object coincident with it. A classification
+    /// error keeps the point (`TRUE`, no object), as upstream; [`SolidError::Unported`]
+    /// is returned as an error.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] from the classification.
+    fn is_point_valid(
+        &self,
+        k: &Kernel,
+        surface: usize,
+        uv: Point2,
+        src_zone_tol: f64,
+    ) -> Result<(bool, Option<RayObject>)>;
+}
+
 /// `sm_IsPointValid`: whether `uv` is a valid point of the surface (inside its face,
 /// or its natural domain when it has no face), and the topology object coincident
 /// with the point.
 fn is_point_valid(
+    k: &Kernel,
     surface: &Surface,
+    index: usize,
+    faces: Option<&dyn RayFaceClassifier>,
     uv: Point2,
-    _src_zone_tol: f64,
+    src_zone_tol: f64,
 ) -> Result<(bool, Option<RayObject>)> {
     match surface_face(surface)? {
         // no face - check uv against the natural domain
         None => Ok((surface.natural_uv_domain().contains_point(uv, 0.0), None)),
-        Some(_face) => {
-            // UNPORTED(query.face_p2): SmFace::PointClassify
-            Err(SolidError::unported(
-                "SmFace::PointClassify",
-                "query.face_p2",
-            ))
-        }
+        Some(_face) => match faces {
+            Some(faces) => faces.is_point_valid(k, index, uv, src_zone_tol),
+            None => {
+                // UNPORTED(query.face_p2): SmFace::PointClassify
+                Err(SolidError::unported(
+                    "SmFace::PointClassify",
+                    "query.face_p2",
+                ))
+            }
+        },
     }
 }
 
@@ -541,6 +569,7 @@ impl Lsi3LocalSolver {
         k: &Kernel,
         surface: &Surface,
         element: &SurfaceGridElement<usize>,
+        faces: Option<&dyn RayFaceClassifier>,
     ) -> LocalSolveResult {
         let mut out = LocalSolveResult {
             status: Ok(()),
@@ -548,7 +577,7 @@ impl Lsi3LocalSolver {
             found_intersection: false,
             solution: Solution::new(),
         };
-        out.status = self.local_solve_into(k, surface, element, &mut out);
+        out.status = self.local_solve_into(k, surface, element, faces, &mut out);
         out
     }
 
@@ -557,6 +586,7 @@ impl Lsi3LocalSolver {
         k: &Kernel,
         surface: &Surface,
         element: &SurfaceGridElement<usize>,
+        faces: Option<&dyn RayFaceClassifier>,
         out: &mut LocalSolveResult,
     ) -> Result<()> {
         // locals
@@ -676,7 +706,14 @@ impl Lsi3LocalSolver {
             // save solution with lowest in-range ray parameter value
             if hit.t < min_t_found && self.line_interval.contains_value(hit.t, 0.0) {
                 // see if point is valid (within surface trim boundaries)
-                let (valid, object) = is_point_valid(surface, hit.uv, self.d3d_tolerance)?;
+                let (valid, object) = is_point_valid(
+                    k,
+                    surface,
+                    element.surface,
+                    faces,
+                    hit.uv,
+                    self.d3d_tolerance,
+                )?;
                 if valid {
                     // save the solution
                     out.found_intersection = true;
@@ -791,6 +828,8 @@ pub struct RayTracer<'s> {
     surfaces: Vec<&'s Surface>,
     /// `m_pSkipElement`: an element `FireRay` does not test.
     pub skip_element: Option<ElementId>,
+    /// How a face-owned surface's points are classified against its face.
+    faces: Option<&'s dyn RayFaceClassifier>,
     /// `m_bHitAnyThing`: stop at the first hit instead of finding the closest.
     pub hit_any_thing: bool,
 }
@@ -819,6 +858,7 @@ impl<'s> RayTracer<'s> {
             grid,
             solver,
             surfaces: Vec::new(),
+            faces: None,
             skip_element: None,
             hit_any_thing: false,
         }
@@ -863,6 +903,12 @@ impl<'s> RayTracer<'s> {
     pub fn register_surface(&mut self, surface: &'s Surface) -> usize {
         self.surfaces.push(surface);
         self.surfaces.len() - 1
+    }
+
+    /// Sets how the points of face-owned surfaces are classified against their faces
+    /// (`SmFace::PointClassify` of `sm_IsPointValid`).
+    pub fn set_face_classifier(&mut self, faces: &'s dyn RayFaceClassifier) {
+        self.faces = Some(faces);
     }
 
     /// The surfaces added so far (`m_sSurfaces`).
@@ -986,7 +1032,7 @@ impl<'s> RayTracer<'s> {
                         operation: OP,
                         reason: "surface grid element refers to an unregistered surface",
                     })?;
-                let solved = self.solver.local_solve(k, surface, &leaf);
+                let solved = self.solver.local_solve(k, surface, &leaf, self.faces);
                 // (the status is ignored; Unported always propagates)
                 if let Err(e) = &solved.status {
                     if e.is_unported() {
@@ -1055,11 +1101,28 @@ impl<'s> RayTracer<'s> {
     /// and those of the cache and tree builds, of
     /// [`RayTracer::add_surface_with_bbox`] and of [`Grid::expand_hierarchy`].
     pub fn add_surface_to_grid(&mut self, k: &Kernel, surface: &'s Surface) -> Result<()> {
-        const OP: &str = "intersect::ray_tracer::add_surface_to_grid";
         // build the surface spatial decomposition by building the surface cache; its
         // nodes refer to the surface (`mBA_pSurface`) by the index the tracer lists it
         // under below
-        let mut cache = surface_cache::<usize>(k, surface, Some(self.surfaces.len()))?;
+        let cache = surface_cache::<usize>(k, surface, Some(self.surfaces.len()))?;
+        self.add_surface_with_cache(k, surface, cache)
+    }
+
+    /// [`RayTracer::add_surface_to_grid`] for a caller that built the surface's cache
+    /// itself, as upstream's `smsurf_GetSurfaceCache` does for a face-owned surface
+    /// through its face. `cache` was built with the surface handle
+    /// `self.surfaces().len()`.
+    ///
+    /// # Errors
+    ///
+    /// As [`RayTracer::add_surface_to_grid`] after the cache build.
+    pub fn add_surface_with_cache(
+        &mut self,
+        k: &Kernel,
+        surface: &'s Surface,
+        mut cache: SurfaceCache<usize>,
+    ) -> Result<()> {
+        const OP: &str = "intersect::ray_tracer::add_surface_with_cache";
         let top = cache
             .get_tree(k)?
             .top_node()

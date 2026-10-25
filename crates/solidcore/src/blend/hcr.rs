@@ -67,7 +67,7 @@
 //! - `DrawVisibleCurves`, `IsConcaveSilhouette` and `IsFrontFacingFace` are not owned by
 //!   this unit (no caller, graphics only).
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::curve::curve::Curve;
 use crate::error::{ignore_status, ignored, Result, SolidError};
@@ -87,15 +87,18 @@ use crate::intersect::curve_class::p1::IntervalPosition;
 use crate::intersect::point_class::{
     ClassGeometry, ClassObject, ClassObjectKind, PointClassType, PointClassification,
 };
-use crate::intersect::ray_tracer::RayTracer;
+use crate::intersect::ray_tracer::{RayFaceClassifier, RayObject, RayTracer};
 use crate::kernel::Kernel;
-use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
+use crate::math::{Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::{self as qbrep, BoundingBoxOptions};
+use crate::query::face::p2::{point_classify_prepared, PointClassifyOptions};
+use crate::surface::surface::p2::surface_cache;
 use crate::surface::surface::{Surface, SurfaceKind};
+use crate::surface::surface_cache::face_context::prepare_face_surface_cache;
 use crate::surface::volume::Volume;
 use crate::topology::{edge, edgeuse, vertex, vertexuse};
 use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, RegionId, VertexId};
@@ -481,6 +484,90 @@ pub struct HcrOptions {
 enum RaySurface {
     Face(FaceId),
     Owned(Box<Surface>),
+}
+
+/// First cache handle of a scene entity: below it are the tracer's surface indices.
+const ENTITY_HANDLE_BASE: usize = usize::MAX / 2;
+
+/// The handles `prepare_face_surface_cache` addresses the scene's entities by, in the
+/// tracer's usize handle space above [`ENTITY_HANDLE_BASE`], and the inverse table.
+fn entity_handles(b: &Brep) -> (BTreeMap<EntityRef, usize>, Vec<EntityRef>) {
+    let all: Vec<EntityRef> = b
+        .faces()
+        .iter()
+        .map(|(id, _)| EntityRef::Face(id))
+        .chain(b.edges().iter().map(|(id, _)| EntityRef::Edge(id)))
+        .chain(b.vertices().iter().map(|(id, _)| EntityRef::Vertex(id)))
+        .chain(b.loopuses().iter().map(|(id, _)| EntityRef::Loopuse(id)))
+        .chain(b.edgeuses().iter().map(|(id, _)| EntityRef::Edgeuse(id)))
+        .chain(
+            b.vertexuses()
+                .iter()
+                .map(|(id, _)| EntityRef::Vertexuse(id)),
+        )
+        .collect();
+    let map = all
+        .iter()
+        .enumerate()
+        .map(|(i, e)| (*e, ENTITY_HANDLE_BASE + i))
+        .collect();
+    (map, all)
+}
+
+/// `sm_IsPointValid` over the scene: classifies a point of a ray surface against the
+/// scene face owning it, by tracer surface index.
+#[derive(Debug)]
+struct SceneFaceClassifier<'a> {
+    scene: &'a Brep,
+    faces: Vec<Option<FaceId>>,
+}
+
+impl RayFaceClassifier for SceneFaceClassifier<'_> {
+    fn is_point_valid(
+        &self,
+        k: &Kernel,
+        surface: usize,
+        uv: Point2,
+        src_zone_tol: f64,
+    ) -> Result<(bool, Option<RayObject>)> {
+        let face = self
+            .faces
+            .get(surface)
+            .copied()
+            .flatten()
+            .ok_or(undefined("ray surface face"))?;
+        let mut pc = PointClassification::new(src_zone_tol);
+        let classified = point_classify_prepared(
+            k,
+            self.scene,
+            face,
+            uv,
+            &mut pc,
+            PointClassifyOptions {
+                src_zone_tol_3d: src_zone_tol,
+                do_boundary_intersections: false,
+                use_uv_classification: true,
+                ..PointClassifyOptions::default()
+            },
+        );
+        match classified {
+            Ok(()) => {}
+            Err(e) if e.is_unported() => return Err(e),
+            // signal an error and keep the point just in case
+            Err(_) => return Ok((true, None)),
+        }
+        let valid = matches!(
+            pc.point_class(),
+            PointClassType::Face | PointClassType::Edge | PointClassType::Vertex
+        );
+        let object = match pc.object() {
+            Some(EntityRef::Face(f)) => Some(RayObject::Face(f)),
+            Some(EntityRef::Edge(e)) => Some(RayObject::Edge(e)),
+            Some(EntityRef::Vertex(v)) => Some(RayObject::Vertex(v)),
+            _ => None,
+        };
+        Ok((valid, object))
+    }
 }
 
 /// The ray tracer state of [`Hcr::is_point_visible`] (`m_pRayTracer`, its grid).
@@ -1378,6 +1465,83 @@ impl Hcr {
         }
 
         let setup = self.ray.as_ref().ok_or(undefined("ray tracer"))?;
+        // Each surface's cache is built before the tracer borrows the surfaces: a
+        // face-owned surface builds its trimmed cache through its face, which may
+        // create the face's UV trim curves on the scene (`smsurf_GetSurfaceCache`).
+        // The handle is the index the tracer lists the surface under; a surface whose
+        // cache fails is not listed (the status is ignored upstream).
+        let mut caches = Vec::new();
+        let mut listed_faces: Vec<Option<FaceId>> = Vec::new();
+        let mut entities: Option<(BTreeMap<EntityRef, usize>, Vec<EntityRef>)> = None;
+        for s in &setup.surfaces {
+            let face_owned = match *s {
+                RaySurface::Face(f) => {
+                    let surface = self
+                        .scene
+                        .face(f)?
+                        .surface
+                        .as_ref()
+                        .ok_or(undefined("face without surface"))?;
+                    match s {
+                        RaySurface::Face(_) if surface.face()?.is_some() => Some(f),
+                        _ => None,
+                    }
+                }
+                RaySurface::Owned(_) => None,
+            };
+            let built = match (face_owned, s) {
+                (Some(f), _) => {
+                    let (to_handle, to_entity) =
+                        entities.get_or_insert_with(|| entity_handles(&self.scene));
+                    prepare_face_surface_cache(
+                        k,
+                        &mut self.scene,
+                        f,
+                        listed_faces.len(),
+                        &|e| to_handle.get(&e).copied().ok_or(undefined("cache entity")),
+                        &|h| {
+                            h.checked_sub(ENTITY_HANDLE_BASE)
+                                .and_then(|i| to_entity.get(i))
+                                .copied()
+                                .ok_or(undefined("cache handle"))
+                        },
+                    )
+                }
+                (None, RaySurface::Face(f)) => {
+                    let surface = self
+                        .scene
+                        .face(*f)?
+                        .surface
+                        .as_ref()
+                        .ok_or(undefined("face without surface"))?;
+                    surface_cache::<usize>(k, surface, Some(listed_faces.len()))
+                }
+                (None, RaySurface::Owned(surface)) => {
+                    surface_cache::<usize>(k, surface, Some(listed_faces.len()))
+                }
+            };
+            let mut cache = match built {
+                Ok(cache) => cache,
+                Err(e) if e.is_unported() => return Err(e),
+                Err(_) => {
+                    caches.push(None);
+                    continue;
+                }
+            };
+            // `AddSurfaceToGrid` lists the surface only once its tree has a top node
+            let has_top = match cache.get_tree(k) {
+                Ok(tree) => tree.top_node().is_some(),
+                Err(e) if e.is_unported() => return Err(e),
+                Err(_) => false,
+            };
+            if has_top {
+                listed_faces.push(face_owned);
+                caches.push(Some(cache));
+            } else {
+                caches.push(None);
+            }
+        }
+
         // The tracer borrows the surfaces, so it is rebuilt per ray: FireRay re-marks the
         // grid per call (Setup3DDDA), at O(surfaces) extra cost per ray. `Grid::new`
         // fails only for a zero voxel count, which the sizes above exclude (upstream
@@ -1385,7 +1549,12 @@ impl Hcr {
         let grid = Grid::new(&setup.bbox, setup.size)?;
         let mut tracer = RayTracer::new(grid, setup.approx_tol, 1.0e-10);
         tracer.set_solver_tolerance(setup.approx_tol); // [B387]
-        for s in &setup.surfaces {
+        let classifier = SceneFaceClassifier {
+            scene: &self.scene,
+            faces: listed_faces,
+        };
+        tracer.set_face_classifier(&classifier);
+        for (s, cache) in setup.surfaces.iter().zip(caches) {
             let surface = match *s {
                 RaySurface::Face(f) => self
                     .scene
@@ -1395,7 +1564,9 @@ impl Hcr {
                     .ok_or(undefined("face without surface"))?,
                 RaySurface::Owned(ref s) => &**s,
             };
-            ignore_status(tracer.add_surface_to_grid(k, surface))?;
+            if let Some(cache) = cache {
+                ignore_status(tracer.add_surface_with_cache(k, surface, cache))?;
+            }
         }
 
         // create a ray segment [rayEnd RayStart], and rayVec = [0 0 -1]

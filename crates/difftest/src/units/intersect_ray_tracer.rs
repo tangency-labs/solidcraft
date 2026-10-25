@@ -581,7 +581,7 @@ fn run_rust(k: &Kernel, i: &Inputs, st: &mut Stats) -> solidcore::Result<Vec<f64
                 solver.have_t_min_t_max = *have_t;
                 solver.t_min_of_bbox = *t_min;
                 solver.t_max_of_bbox = *t_max;
-                let r = solver.local_solve(k, surf, leaf);
+                let r = solver.local_solve(k, surf, leaf, None);
                 match &r.status {
                     Ok(()) => rec.push(0.0),
                     Err(e @ SolidError::Unported { .. }) => return Err(e.clone()),
