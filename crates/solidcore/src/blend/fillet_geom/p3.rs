@@ -48,10 +48,9 @@
 //!   calls do).
 //! - **Fillet intersector.** `ReCalcFilletGeom` builds the
 //!   [`fillet_intersector::FilletIntersector`] over copies of the solver's offset
-//!   surfaces (as the offset tests above). Its `DoPointIntersection` is a DISPATCH GAP:
-//!   the base driver (`intersect.surface_intersector_p4`) does not reach the fillet
-//!   intersector's overrides yet, and the solver does not implement the intersector's
-//!   `FilletSolverOps`, so it returns [`SolidError::Unported`].
+//!   surfaces (as the offset tests above). Its `DoPointIntersection` runs
+//!   the base driver with the fillet overrides ([`fillet_intersector::FilletIntersector::do_point_intersection`]),
+//!   stepping through the solver as `IntersectorSolver` (`blend.fillet_solver_p4`).
 //! - **Analytic fillets.** `CalcConeFilletGeom` / `CalcTorusFilletGeom`
 //!   (`blend.fillet_solver_p2`) read copies of the sorted vertex uses' points
 //!   (`SmTArray<SmTsectPnt*>` upstream; the builders only read them).
@@ -84,9 +83,9 @@ use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
 use crate::geom::geom_utility::p1::line_closest_point;
 use crate::geom::global_solver::{SolutionRequested, SolverOperation};
 use crate::intersect::surface_intersector::p1::{IntersectionPointType, SrfIndex, TsectPnt};
+use crate::intersect::surface_intersector::p4::PointIntersectionOptions;
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQRT};
-use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::surface::surface::p4::NoObject;
@@ -189,13 +188,6 @@ pub fn new_solver_fillet_geom(
     Ok(geom)
 }
 
-/// The output of `SmFilletIntersector::DoPointIntersection` (the curve type and
-/// deviation are not read by `ReCalcFilletGeom`).
-struct PointIntersection {
-    _curve_3d: Option<BSplineCurve>,
-    _uv_curves: [Option<BSplineCurve>; 2],
-}
-
 /// The fillet intersector `ReCalcFilletGeom` traces with (no solution objects; the
 /// current fillet geometry is a pseudo-B-rep geometry id).
 type FilletIntersector<'s> = fillet_intersector::FilletIntersector<'s, 's, NoObject, FilletGeomId>;
@@ -203,24 +195,40 @@ type FilletIntersector<'s> = fillet_intersector::FilletIntersector<'s, 's, NoObj
 /// `sFI.DoPointIntersection(crContext, sTsectPnts, bExtendBefore, bExtendAfter,
 /// pOptMarchDir, NULL, &dTolerance, &dAngTol, ...)`: writes each point's curve
 /// parameter (negative when it is not on the traced curve).
+///
+/// The points are copied into the intersector's point arena, the inherited driver
+/// runs with the `SmFilletIntersector` overrides
+/// ([`fillet_intersector::FilletIntersector::do_point_intersection`], stepping through
+/// `solver` as `IntersectorSolver`; `FlushCurve` stores into `pseudo`), and every
+/// point is copied back whatever the result (the error is returned after the copy).
 fn do_point_intersection(
     fi: &mut FilletIntersector<'_>,
+    solver: &mut dyn FilletSolverOps,
+    pseudo: &mut FilletBrep,
     k: &Kernel,
     tsect_pnts: &mut [TsectPnt],
-    extend: [bool; 2],
-    march_dir: Vec3,
-    tolerances: [f64; 2],
-) -> Result<PointIntersection> {
-    // DISPATCH GAP: SmSurfaceIntersector::DoPointIntersection on an SmFilletIntersector
-    // reaches its ComputeNextPoint / FlushCurve / ComputePointValues / TestSpanAccuracy
-    // overrides; the port's base driver (intersect.surface_intersector_p4) would call
-    // the basic intersector's versions (plan/findings.md, blend.fillet_intersector), and
-    // the solver's FilletSolver does not implement fillet_intersector::FilletSolverOps.
-    unported_on(
-        (fi, k, tsect_pnts, extend, march_dir, tolerances),
-        "SmSurfaceIntersector::DoPointIntersection (SmFilletIntersector overrides)",
-        "intersect.surface_intersector_p4",
-    )
+    opts: &PointIntersectionOptions,
+) -> Result<()> {
+    use crate::blend::fillet_solver::p4::IntersectorSolver;
+
+    let ids: Vec<_> = tsect_pnts
+        .iter()
+        .map(|p| fi.base.base.alloc_point(p.clone()))
+        .collect();
+    let trace = [
+        fi.base.base.surface(SrfIndex::First),
+        fi.base.base.surface(SrfIndex::Second),
+    ];
+    let r = match IntersectorSolver::new(solver, trace) {
+        Ok(mut is) => fi
+            .do_point_intersection(&mut is, pseudo, k, &ids, opts)
+            .map(|_| ()),
+        Err(e) => Err(e),
+    };
+    for (p, &id) in tsect_pnts.iter_mut().zip(&ids) {
+        p.clone_from(fi.base.base.point(id)?);
+    }
+    r
 }
 
 /// Whether `c` is of a kind derived from `SmBSplineCurve` (`SM_CAST_PTR` succeeds):
@@ -1037,17 +1045,27 @@ impl FilletBrep {
                     .iter()
                     .map(|&vu| self.fillet_vertexuse(vu).map(|r| r.tsect_pnt().clone()))
                     .collect::<Result<Vec<_>>>()?;
-                do_point_intersection(
+                let traced = do_point_intersection(
                     &mut fi,
+                    &mut *solver,
+                    self,
                     k,
                     &mut pnts,
-                    [extend_before, extend_after],
-                    march_dir,
-                    [tolerance, ang_tol],
-                )?;
+                    &PointIntersectionOptions {
+                        extend_before_start: extend_before,
+                        extend_after_end: extend_after,
+                        start_direction: Some(march_dir),
+                        end_direction: None,
+                        approx_tol_3d: Some(tolerance),
+                        ang_tol_rad: Some(ang_tol),
+                    },
+                );
+                // the points are the vertex uses' SmTsectPnts upstream (written in
+                // place even when the call fails): copy them back before SER(eStat)
                 for (&vu, p) in tsect_pnts.iter().zip(&pnts) {
                     self.fillet_vertexuse_mut(vu)?.set_tsect_pnt(p);
                 }
+                traced?;
 
                 success = true;
                 for &vu in tsect_pnts.iter().skip(1) {
