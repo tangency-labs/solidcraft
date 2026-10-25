@@ -36,6 +36,8 @@
 //! - `read_indexed`: skipped unless the stream is good and (ASCII) has a
 //!   non-whitespace byte left, or (binary) holds a whole record with count and
 //!   indices `<= 2^20` (upstream reads uninitialised values otherwise).
+//!   Failed ASCII index extraction is compared as `SM_ERR`, not skipped: upstream's
+//!   line skip returns before using the indices, and the shim discards them.
 //!
 //! C++ does not expose deletion, so the shim *predicts* which handles die from the
 //! state before each deleting op (the Rust side reports its store's real liveness).
@@ -642,6 +644,23 @@ impl RustRun {
                 let res = self
                     .store
                     .read_indexed_attributes_from_db(&mut self.all, reader);
+                // The safe reader rejects an index that C++ leaves unwritten (or
+                // writes with failbit). Upstream then reaches GOTO_NEXT_ATTLINE:
+                // get() fails and returns SM_ERR before any index is used. The
+                // shim discards those indices on error, so compare that defined
+                // error path rather than skipping it or inventing index values.
+                if matches!(
+                    &res,
+                    Err(SolidError::InvalidInput {
+                        operation: "geom::attribute::AttributeStore::read_indexed_attributes_from_db",
+                        reason: "attribute index could not be extracted",
+                    })
+                ) {
+                    if let Some(stream) = reader.in_stream_mut().filter(|s| s.fail()) {
+                        let _ = stream.get();
+                        return Ok(Step::Status(1001));
+                    }
+                }
                 for (i, slot) in self.all.iter().enumerate() {
                     if let Some(h) = slot {
                         if before.get(i).copied().flatten().is_none() {
@@ -1423,6 +1442,22 @@ impl UnitDiff for Runner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn indexed_extraction_failure_compares_native_error_without_placeholders() {
+        for data in ["2 4\nabc\n", "2 4\n", "3 1 tail\n"] {
+            let v = serde_json::json!({
+                "n_objects": 1,
+                "ops": [["read_indexed"], ["read_indexed"]],
+                "stream": {"data": data.as_bytes(), "file_type": 0, "byte_swap": false},
+            });
+            let rust = run_rust_case(&v).unwrap();
+            assert_eq!(rust.ints["status"], vec![1001, ST_SKIP], "{data:?}");
+            assert!(rust.ints["placeholders"].is_empty(), "{data:?}");
+            let cpp = run_cpp_case(&v).unwrap();
+            assert_eq!(rust, cpp, "{data:?}");
+        }
+    }
 
     /// Every op runs (status 0) in a good share of generated scripts, so skips and
     /// unresolved references do not hide parts of the unit.

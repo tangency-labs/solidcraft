@@ -91,6 +91,9 @@
 //!   uninitialised variable), a count or index above [`MAX_INDEXED_ATTRIBUTES`]
 //!   (upstream allocates the size asked for, or wraps for `ULONG_MAX`), and a reader
 //!   without a stream are [`SolidError::InvalidInput`], before anything is created.
+//!   For safety, ASCII counts must fit the remaining input and indices grow only
+//!   after successful extraction; truncated or malformed index lists are rejected
+//!   with [`SolidError::InvalidInput`] instead of leaving invented zero entries.
 //! - `Mark` (`m_lMark`), `Dump`, `AssertValid`, `GetMemoryUsed` and the persistence
 //!   getters (`GetNumLongElements`, ...) belong to other units or are unused; the
 //!   attribute's data is exposed through [`Attribute::value`].
@@ -1435,12 +1438,18 @@ impl AttributeStore {
         }
         let n = count as usize;
         let indices = if ascii {
+            db.ensure_available(n, 1, OP)?;
             let s = db.in_stream_mut().ok_or_else(no_stream)?;
-            let mut v = vec![0u64; n];
-            for x in &mut v {
-                if let Some(value) = s.extract_ulong() {
-                    *x = value;
-                }
+            let mut v = Vec::new();
+            for _ in 0..n {
+                let value =
+                    s.extract_ulong()
+                        .filter(|_| !s.fail())
+                        .ok_or(SolidError::InvalidInput {
+                            operation: OP,
+                            reason: "attribute index could not be extracted",
+                        })?;
+                v.push(value);
             }
             if let Err(e) = goto_next_attline(s) {
                 return Ok(IndexedAttributes {
@@ -1872,14 +1881,77 @@ mod tests {
         assert_eq!(all.len(), 4);
         assert!(all[0].is_none() && all[1].is_some() && all[3].is_some());
         assert_eq!(s.get(all[1].unwrap()).unwrap().attribute_id(), ids::UNKNOWN);
+        let before_store = s.clone();
+        let before_all = all.clone();
         assert!(s
             .read_indexed_attributes_from_db(&mut all, &mut db)
             .unwrap()
             .is_empty());
+        assert_eq!(s, before_store);
+        assert_eq!(all, before_all);
         assert!(matches!(
             s.read_indexed_attributes_from_db(&mut all, &mut db),
             Err(SolidError::Upstream { code: 1001, .. })
         ));
+    }
+
+    #[test]
+    fn read_indexed_ascii_max_count_without_payload() {
+        let mut s = AttributeStore::new();
+        let h = s.insert(Attribute::long(7, 42, Behavior::Copy)).unwrap();
+        let mut all = vec![Some(h), None];
+        let before_store = s.clone();
+        let before_all = all.clone();
+        let mut db = DatabaseReader::with_stream(
+            FileType::Ascii,
+            InputStream::new(format!("{MAX_INDEXED_ATTRIBUTES}\n").into_bytes()),
+        );
+        assert!(matches!(
+            s.read_indexed_attributes_from_db_partial(&mut all, &mut db),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        assert_eq!(s, before_store);
+        assert_eq!(all, before_all);
+    }
+
+    #[test]
+    fn read_indexed_ascii_rejects_incomplete_extraction() {
+        for data in ["3 1  \n", "3 1 2", "2 1 tail\n"] {
+            let mut s = AttributeStore::new();
+            let mut all = vec![None];
+            let before_store = s.clone();
+            let before_all = all.clone();
+            let mut db = DatabaseReader::with_stream(
+                FileType::Ascii,
+                InputStream::new(data.as_bytes().to_vec()),
+            );
+            assert!(matches!(
+                s.read_indexed_attributes_from_db_partial(&mut all, &mut db),
+                Err(SolidError::InvalidInput { .. })
+            ));
+            assert_eq!(s, before_store);
+            assert_eq!(all, before_all);
+        }
+    }
+
+    #[test]
+    fn read_indexed_ascii_preserves_indices_on_failed_line_skip() {
+        let mut s = AttributeStore::new();
+        let mut all = vec![None];
+        let before_store = s.clone();
+        let before_all = all.clone();
+        let mut db =
+            DatabaseReader::with_stream(FileType::Ascii, InputStream::new(b"2 3 1".to_vec()));
+        let read = s
+            .read_indexed_attributes_from_db_partial(&mut all, &mut db)
+            .unwrap();
+        assert_eq!(read.indices, vec![3, 1]);
+        assert!(matches!(
+            read.status,
+            Some(SolidError::Upstream { code: 1001, .. })
+        ));
+        assert_eq!(s, before_store);
+        assert_eq!(all, before_all);
     }
 
     #[test]
