@@ -22,7 +22,7 @@
 //! for the `1e-4`-scale faces), below the port's `MAX_SUBDIVISION_NODES` bound; a case
 //! past that bound would be deferred to `surface.surface_cache_p3`.
 //!
-//! Known mismatches (`known_mismatches.toml`): `EvaluateBinormal` with `bUse3DOnly` on
+//! Known mismatches (`known_mismatches/topology.edgeuse_p3.toml`): `EvaluateBinormal` with `bUse3DOnly` on
 //! `Endcap.smb` (a file without UV trim curves). `SmBrep::ReadFromFile`'s healer leaves
 //! an `SmTrimSrfCache` without a tree on each face's surface; `EvaluateBinormal`
 //! reuses it, and its tree is built later with the surface's owner cleared

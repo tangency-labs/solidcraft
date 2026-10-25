@@ -122,7 +122,7 @@ pub struct CaseResult {
     pub perturbed: Option<&'static str>,
     /// The Rust side's [`Output::diagnostics`] (reported, never compared).
     pub diagnostics: BTreeMap<String, i64>,
-    /// The case is listed in `known_mismatches.toml` (the entry's `why`).
+    /// The case is listed in `known_mismatches/<unit>.toml` (the entry's `why`).
     pub known_mismatch: Option<String>,
 }
 
@@ -140,7 +140,7 @@ pub enum CaseOutcome {
     Deferred,
     /// Skipped because the platform's C++ standard library is not libstdc++.
     SkippedPlatform,
-    /// A mismatch listed in `known_mismatches.toml` ([`crate::known`]): not a pass,
+    /// A mismatch listed in `known_mismatches/<unit>.toml` ([`crate::known`]): not a pass,
     /// keeps the unit from being green, reported like a failure.
     KnownMismatch,
 }
@@ -539,7 +539,7 @@ pub fn run_unit(unit: &dyn UnitDiff, ctx: &CaseContext, opts: &RunOptions) -> Un
         if !missing.is_empty() {
             res.harness_error = Some(format!(
                 "{}: no such case(s): {}",
-                crate::known::KNOWN_MISMATCHES,
+                crate::known::path_for(unit.id()),
                 missing.join(", ")
             ));
             return res;
@@ -674,7 +674,7 @@ pub fn run_unit(unit: &dyn UnitDiff, ctx: &CaseContext, opts: &RunOptions) -> Un
         {
             cr.harness_error = Some(format!(
                 "listed in {} but the case is now {}: remove the entry",
-                crate::known::KNOWN_MISMATCHES,
+                crate::known::path_for(unit.id()),
                 cr.outcome().as_str()
             ));
         }
@@ -1032,9 +1032,9 @@ mod tests {
     fn known_root(tag: &str, list: &str) -> CaseContext {
         let root =
             std::env::temp_dir().join(format!("difftest-known-{tag}-{}", std::process::id()));
-        let dir = root.join("crates/difftest");
+        let dir = root.join(crate::known::KNOWN_MISMATCHES_DIR);
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("known_mismatches.toml"), list).unwrap();
+        std::fs::write(dir.join("empty.unit.toml"), list).unwrap();
         CaseContext { root, seeds: 0 }
     }
 

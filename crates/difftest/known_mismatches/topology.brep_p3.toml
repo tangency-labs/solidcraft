@@ -1,0 +1,9 @@
+[[mismatch]]
+unit = "topology.brep_p3"
+case = "nurbs_off_Mouse_0.1"
+why = "TurnToNURBS tracker: C++ sm_FixUVTrimCurves trims two UV trim curves at their vertex drop points and stretches them back (Trim + EditParameterization, two SM_NO_POST_EDITs each); the port skips that step on purpose (WR-255, #570), so its tracker lacks those 4 events (plan/findings.md: topology.brep_p3: TurnToNURBS UV trim curve edits notify)"
+
+[[mismatch]]
+unit = "topology.brep_p3"
+case = "nurbs_off_Mouse_-0.05"
+why = "TurnToNURBS tracker: C++ sm_FixUVTrimCurves trims two UV trim curves at their vertex drop points and stretches them back (Trim + EditParameterization, two SM_NO_POST_EDITs each); the port skips that step on purpose (WR-255, #570), so its tracker lacks those 4 events (plan/findings.md: topology.brep_p3: TurnToNURBS UV trim curve edits notify)"

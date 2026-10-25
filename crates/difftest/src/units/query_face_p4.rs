@@ -31,7 +31,7 @@
 //! (unit `topology.face_p2`'s `Exact`); the cases are still compared, since the loop
 //! classification is integer-valued. Two scale-`1e-3` cylinder cases where the
 //! approximation moves the bisector across a loop are known mismatches
-//! (`crates/difftest/known_mismatches.toml`).
+//! (`crates/difftest/known_mismatches/query.face_p4.toml`).
 //!
 //! **Rejected** (both sides report `rejected`): the inputs the FFI wrapper documents,
 //! where `ClassifyLoops` would read outside its arrays.

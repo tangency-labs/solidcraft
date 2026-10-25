@@ -1,0 +1,19 @@
+[[mismatch]]
+unit = "offset.offset_geometry_creation"
+case = "gen0248"
+why = "deferred on main at the extended surface's cache (SmFace handle of a surface's face); compared since the drop onto the other extended surface reaches its face's cache: the trace's output differs (plan/findings.md: 'offset.offset_geometry_creation: drops onto a seeded extended surface through a freshly built face cache')"
+
+[[mismatch]]
+unit = "offset.offset_geometry_creation"
+case = "gen0346"
+why = "deferred on main at the extended surface's cache (SmFace handle of a surface's face); compared since the drop onto the other extended surface reaches its face's cache: the trace's output differs (plan/findings.md: 'offset.offset_geometry_creation: drops onto a seeded extended surface through a freshly built face cache')"
+
+[[mismatch]]
+unit = "offset.offset_geometry_creation"
+case = "gen0350"
+why = "deferred on main at the extended surface's cache (SmFace handle of a surface's face); compared since the drop onto the other extended surface reaches its face's cache: the trace's output differs (plan/findings.md: 'offset.offset_geometry_creation: drops onto a seeded extended surface through a freshly built face cache')"
+
+[[mismatch]]
+unit = "offset.offset_geometry_creation"
+case = "gen0508"
+why = "deferred on main at the extended surface's cache (SmFace handle of a surface's face); compared since the drop onto the other extended surface reaches its face's cache: the trace's output differs (plan/findings.md: 'offset.offset_geometry_creation: drops onto a seeded extended surface through a freshly built face cache')"

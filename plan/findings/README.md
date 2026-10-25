@@ -14,5 +14,5 @@ Never append to a shared file. Findings from before 2026-10-25 are in the frozen
   `<same name without .md>--addendum-<YYYY-MM-DD>-<slug>.md` whose first line after the
   title is `Updates: <path>` (plus the archive heading, for an archive entry). Fixing a
   typo in your own PR's file before it merges is fine.
-- **References** from code, `known_mismatches.toml` or unit notes give the file path,
+- **References** from code, `crates/difftest/known_mismatches/<unit>.toml` or unit notes give the file path,
   e.g. `plan/findings/topology.brep_p3--turn-to-nurbs-uv-trim-notify.md`.

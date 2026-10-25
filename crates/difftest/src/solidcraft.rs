@@ -1315,10 +1315,26 @@ mod tests {
 
     #[test]
     fn every_case_file_loads() {
+        // No hard-coded total (every new case file would edit it and conflict): every
+        // file in the directory is a case file, and every case of every file loads.
+        let dir = cases_dir(&crate::case::repo_root());
+        let mut expected = 0;
+        for e in std::fs::read_dir(&dir).unwrap() {
+            let p = e.unwrap().path();
+            assert_eq!(
+                p.extension().and_then(|x| x.to_str()),
+                Some("json"),
+                "{p:?}"
+            );
+            let v: Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+            let n = v["cases"].as_array().map_or(0, Vec::len);
+            assert!(n > 0, "{p:?}: no cases");
+            expected += n;
+        }
         let cases = all();
         assert_eq!(
             cases.len(),
-            76,
+            expected,
             "{:?}",
             cases.iter().map(|c| &c.id).collect::<Vec<_>>()
         );

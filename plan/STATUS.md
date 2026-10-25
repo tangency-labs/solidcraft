@@ -21,7 +21,7 @@ From the difftest reports of CI run 40029966086 on `main` (the merge of PR #670)
 - **Cases:** 554,873 in all: 550,446 pass, **0 fail**, 4,186 deferred (they reach a call
   the port still stubs), 234 rejected by FFI guards (inputs that are undefined or crash
   in C++), 7 known mismatches.
-- **Known mismatches** (`crates/difftest/known_mismatches.toml`, each with a findings
+- **Known mismatches** (`crates/difftest/known_mismatches/<unit id>.toml`, each with a findings
   entry): `blend.fillet_intersector` `rv_next_clipped_step` (the clipped `StepSolve`
   branch differs by a few ULP), and six `topology.brep_p3` TurnToNURBS tracker cases
   (upstream curve and surface edits send `SM_NO_PRE_EDIT`/`SM_NO_POST_EDIT`

@@ -1,0 +1,29 @@
+[[mismatch]]
+unit = "intersect.curve_class_p4"
+case = "gen1570"
+why = "GetLoopCrossings -> SetProps_Stage2 seam flags differ (gen1570: a sphere face with a vertex at the pole); unchanged by keeping snapshot surface owners, cause not found (plan/findings.md: 'snapshot surfaces keep their face owner')"
+
+[[mismatch]]
+unit = "intersect.curve_class_p4"
+case = "gen1622"
+why = "GetLoopCrossings -> SetProps_Stage2 seam flags differ (gen1570: a sphere face with a vertex at the pole); unchanged by keeping snapshot surface owners, cause not found (plan/findings.md: 'snapshot surfaces keep their face owner')"
+
+[[mismatch]]
+unit = "intersect.curve_class_p4"
+case = "gen1841"
+why = "GetLoopCrossings -> SetProps_Stage2 seam flags differ (gen1570: a sphere face with a vertex at the pole); unchanged by keeping snapshot surface owners, cause not found (plan/findings.md: 'snapshot surfaces keep their face owner')"
+
+[[mismatch]]
+unit = "intersect.curve_class_p4"
+case = "gen1876"
+why = "GetLoopCrossings -> SetProps_Stage2 seam flags differ (gen1570: a sphere face with a vertex at the pole); unchanged by keeping snapshot surface owners, cause not found (plan/findings.md: 'snapshot surfaces keep their face owner')"
+
+[[mismatch]]
+unit = "intersect.curve_class_p4"
+case = "gen1968"
+why = "GetLoopCrossings -> SetProps_Stage2 seam flags differ (gen1570: a sphere face with a vertex at the pole); unchanged by keeping snapshot surface owners, cause not found (plan/findings.md: 'snapshot surfaces keep their face owner')"
+
+[[mismatch]]
+unit = "intersect.curve_class_p4"
+case = "gen2061"
+why = "GetLoopCrossings -> SetProps_Stage2 seam flags differ (gen1570: a sphere face with a vertex at the pole); unchanged by keeping snapshot surface owners, cause not found (plan/findings.md: 'snapshot surfaces keep their face owner')"
