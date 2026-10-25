@@ -137,10 +137,10 @@ fn spline_tangent_guides_are_hidden_from_normal_sketch_drawing_and_extend_both_s
         let control_offset = if index == 0 { natural[0][1] - positions[index] } else { natural[index - 1][2] - positions[index] };
         let chord = if index == 0 { positions[1].dist(positions[0]) } else { positions[index - 1].dist(positions[index]) };
         assert!(
-            (position.dist(fit_point) - control_offset.len() * (3.0 * 3.5 / chord)).abs() < 1e-9,
-            "handle {index}: arm {}, expected 3.5 times the previous handle length {}",
+            (position.dist(fit_point) - control_offset.len() * (3.0 * 4.55 / chord)).abs() < 1e-9,
+            "handle {index}: arm {}, expected 1.3 times the previous handle length {}",
             position.dist(fit_point),
-            control_offset.len() * (3.0 * 3.5 / chord)
+            control_offset.len() * (3.0 * 4.55 / chord)
         );
     }
 
