@@ -502,6 +502,24 @@ impl Surface {
         self.v = v;
     }
 
+    /// A copy with the storage shrunk to the indices in use: the same surface as a
+    /// clone followed by [`Surface::compress`], without copying the unused storage
+    /// first.
+    #[must_use]
+    pub fn compressed_copy(&self) -> Self {
+        Self {
+            net: self.cpts(),
+            n: self.n,
+            m: self.m,
+            p: self.p,
+            q: self.q,
+            u: self.u_knots().to_vec(),
+            r: self.r,
+            v: self.v_knots().to_vec(),
+            s: self.s,
+        }
+    }
+
     /// Swaps the roles of u and v, `S_new(v, u) = S_old(u, v)` (`N_SwapUV`): the net
     /// is transposed into new `(m+1) x (n+1)` storage, degrees and knot vectors are
     /// exchanged.

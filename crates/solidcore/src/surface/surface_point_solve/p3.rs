@@ -13,14 +13,15 @@
 //! Deviations: out-parameters become result records; object pointers become caller
 //! handles. Direct local solutions retain the default variable count; the existing
 //! `LocalPointSolve` dispatcher sets it to two, as upstream does. Out-of-bounds
-//! evaluation uses a private surface copy, restoring the caller's state by
-//! construction. Copying checks every owned geometry branch against the `MAX_GEOMETRY_NESTING` (32)
+//! evaluation is enabled in place on the surface and restored after, as upstream's
+//! `SmTemporaryChangeValue`. The nesting check of the former evaluation copy still
+//! runs: it checks every owned geometry branch against the `MAX_GEOMETRY_NESTING` (32)
 //! depth bound. `CheckCrease` returns immediately because upstream disables it with
 //! `constexpr sbDoCreaseSubdomains = FALSE`. The local driver is iterative with
 //! upstream's fixed bound of 35.
 
 use super::p1::ErrorNormType;
-use super::p2::with_out_of_bounds_enabled;
+use super::p2::with_out_of_bounds_enabled_in_place;
 use super::{SurfPtGlobalSolver, SurfPtSolveStepper};
 use crate::curve::curve::p2::CurvePropertyType;
 use crate::curve::curve::p3::PointSolveOptions;
@@ -441,10 +442,9 @@ impl Surface {
         guess: Point2,
         surface_object: Option<O>,
     ) -> Result<LocalPointSolve<O>> {
-        if let Some(surface) = with_out_of_bounds_enabled(self)? {
-            return surface.local_point_solve_1_body(k, domain, op, point, guess, surface_object);
-        }
-        self.local_point_solve_1_body(k, domain, op, point, guess, surface_object)
+        with_out_of_bounds_enabled_in_place(self, || {
+            self.local_point_solve_1_body(k, domain, op, point, guess, surface_object)
+        })
     }
 
     fn local_point_solve_1_body<O: Copy>(

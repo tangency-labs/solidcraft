@@ -128,6 +128,8 @@
 //!   `IsDegenerateCurve` runs the `SmSurface` base body on a copy of the B-spline
 //!   wrapped as a `Surface` (without owner).
 
+use core::cell::Cell;
+
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
@@ -412,8 +414,10 @@ pub struct BSplineSurface {
     pub(crate) nurb: Option<Surface>,
     /// `m_bNurbIsBorrowed`.
     pub(crate) nurb_is_borrowed: bool,
-    /// `m_bOutOfBoundsEnabled`: evaluate beyond the natural domain.
-    pub(crate) out_of_bounds_enabled: bool,
+    /// `m_bOutOfBoundsEnabled`: evaluate beyond the natural domain. A `Cell`, so a
+    /// solve can enable it for its scope on a shared surface, as upstream's
+    /// `SmTemporaryChangeValue` does on a `const` one (no copy of the surface).
+    pub(crate) out_of_bounds_enabled: Cell<bool>,
     /// `m_eKnotType`.
     pub(crate) knot_type: KnotType,
     /// `m_eBSplineSurfaceForm`.
@@ -661,7 +665,7 @@ impl BSplineSurface {
         Self {
             nurb: None,
             nurb_is_borrowed: false,
-            out_of_bounds_enabled: false,
+            out_of_bounds_enabled: Cell::new(false),
             knot_type: KnotType::Unspecified,
             form: BSplineSurfaceForm::Unspecified,
         }
@@ -768,7 +772,7 @@ impl BSplineSurface {
         Self {
             nurb,
             nurb_is_borrowed: false,
-            out_of_bounds_enabled: self.out_of_bounds_enabled,
+            out_of_bounds_enabled: Cell::new(self.out_of_bounds_enabled.get()),
             knot_type: self.knot_type,
             form: self.form,
         }
@@ -783,7 +787,7 @@ impl BSplineSurface {
         Self {
             nurb: self.nurb.as_ref().map(copy_nurb_surface),
             nurb_is_borrowed: false,
-            out_of_bounds_enabled: self.out_of_bounds_enabled,
+            out_of_bounds_enabled: Cell::new(self.out_of_bounds_enabled.get()),
             knot_type: self.knot_type,
             form: self.form,
         }
@@ -854,13 +858,20 @@ impl BSplineSurface {
 
     /// Mutable access to the out-of-bounds evaluation flag (`GetOutOfBoundsEnabled`).
     pub fn out_of_bounds_enabled_mut(&mut self) -> &mut bool {
-        &mut self.out_of_bounds_enabled
+        self.out_of_bounds_enabled.get_mut()
     }
 
     /// Whether evaluation beyond the natural domain is enabled (`IsOutOfBoundsEnabled`).
     #[must_use]
     pub fn is_out_of_bounds_enabled(&self) -> bool {
-        self.out_of_bounds_enabled
+        self.out_of_bounds_enabled.get()
+    }
+
+    /// Sets the out-of-bounds evaluation flag through a shared reference: for a
+    /// temporary change that the caller restores (`SmTemporaryChangeValue` on
+    /// `GetOutOfBoundsEnabled()` of a `const` surface).
+    pub(crate) fn set_out_of_bounds_enabled_in_place(&self, enabled: bool) {
+        self.out_of_bounds_enabled.set(enabled);
     }
 
     /// Whether the NURB is borrowed (`IsNurbBorrowed`).
@@ -2223,7 +2234,7 @@ impl BSplineSurface {
         Ok(Self {
             nurb: Some(sur),
             nurb_is_borrowed: false,
-            out_of_bounds_enabled: false,
+            out_of_bounds_enabled: Cell::new(false),
             knot_type,
             form,
         })

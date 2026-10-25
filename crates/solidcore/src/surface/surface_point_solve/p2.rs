@@ -44,9 +44,8 @@
 //!   [`SolidError::Unported`] always propagates.
 //! - **Out-of-bounds evaluation.** `Solve` enables out-of-bounds evaluation of an
 //!   `SmBSplineSurface` (a B-spline, plane or surface of revolution) for the duration
-//!   of the solve (`SmTemporaryChangeValue`). The solver borrows its surface, so the
-//!   port solves on a copy with the flag set; solutions carry the caller's object
-//!   handle, so the copy is not visible.
+//!   of the solve (`SmTemporaryChangeValue`), in place on the borrowed surface (the
+//!   flag is a `Cell`), as upstream; the flag is restored after the solve.
 //! - **Solutions' objects** are the caller's handle for the surface (`O`, upstream
 //!   the `SmSurface*`).
 //! - **Unported callees.** `SmSurface::LocalPointSolve` (`surface.surface_p5`) for
@@ -970,14 +969,7 @@ impl SurfPtGlobalSolver<'_> {
     ) -> Result<SolutionArray<O>> {
         // We have to enable out-of-bounds evaluations.  Otherwise, the evaluators
         // will silently clamp, leading to wrong answers.
-        if let Some(oob_surface) = with_out_of_bounds_enabled(self.base.surface())? {
-            let mut solver = self.with_surface(&oob_surface);
-            let solutions = solver.solve_body(k, surface_obj);
-            // (the closure is a property of the geometry: keep what was computed)
-            self.copy_closure_from(&solver);
-            return solutions;
-        }
-        self.solve_body(k, surface_obj)
+        with_out_of_bounds_enabled_in_place(self.base.surface(), || self.solve_body(k, surface_obj))
     }
 
     /// The body of [`Self::solve`], once out-of-bounds evaluation is enabled.
@@ -1228,6 +1220,42 @@ pub(crate) fn with_out_of_bounds_enabled(surface: &Surface) -> Result<Option<Sur
         | SurfaceKind::SrfInVolume(_) => {}
     }
     Ok(Some(copy))
+}
+
+/// Runs `f` with out-of-bounds evaluation enabled on `surface` itself when it is an
+/// `SmBSplineSurface` (B-spline, plane, surface of revolution) without it, and restores
+/// the flag after (`SmTemporaryChangeValue` on `GetOutOfBoundsEnabled()`, in place as
+/// upstream). The nesting check of [`with_out_of_bounds_enabled`]'s copy still runs, so
+/// errors stay the same.
+///
+/// # Errors
+///
+/// Those of [`Surface::check_evaluation_copy_depth`] and of `f`.
+pub(crate) fn with_out_of_bounds_enabled_in_place<R>(
+    surface: &Surface,
+    f: impl FnOnce() -> Result<R>,
+) -> Result<R> {
+    let base = match surface.kind() {
+        SurfaceKind::BSpline(b) => b,
+        SurfaceKind::Plane(p) => p.base(),
+        SurfaceKind::Cone(s) => s.rev().base(),
+        SurfaceKind::Sphere(s) => s.base().base(),
+        SurfaceKind::Torus(s) => s.base().base(),
+        SurfaceKind::SurfOfRevolution(s) => s.base(),
+        SurfaceKind::SurfOfExtrusion(s) => s.base(),
+        SurfaceKind::CurveBounded(_)
+        | SurfaceKind::Step(_)
+        | SurfaceKind::OffsetSurface(_)
+        | SurfaceKind::SrfInVolume(_) => return f(),
+    };
+    if base.is_out_of_bounds_enabled() {
+        return f();
+    }
+    surface.check_evaluation_copy_depth(0)?;
+    base.set_out_of_bounds_enabled_in_place(true);
+    let result = f();
+    base.set_out_of_bounds_enabled_in_place(false);
+    result
 }
 
 /// `pSurf->EvaluatePoint(uv, rPt)` with its status ignored: `prev` on failure.
@@ -2274,5 +2302,28 @@ mod tests {
         assert!(this
             .line_search_bracketted(&k, &mut prev, ErrorNormType::Gap)
             .is_err());
+    }
+
+    fn oob(s: &Surface) -> bool {
+        match s.kind() {
+            SurfaceKind::BSpline(b) => b.is_out_of_bounds_enabled(),
+            _ => panic!("not a B-spline"),
+        }
+    }
+
+    #[test]
+    fn out_of_bounds_in_place_is_scoped_and_restored_on_error() {
+        let s = bilinear(0.0);
+        assert!(!oob(&s));
+        let r = with_out_of_bounds_enabled_in_place(&s, || {
+            assert!(oob(&s));
+            // a nested scope sees the flag set and leaves it set
+            let inner = with_out_of_bounds_enabled_in_place(&s, || Ok(oob(&s)));
+            assert_eq!(inner.ok(), Some(true));
+            assert!(oob(&s));
+            Err::<(), _>(SolidError::sm_err("test"))
+        });
+        assert!(r.is_err());
+        assert!(!oob(&s));
     }
 }

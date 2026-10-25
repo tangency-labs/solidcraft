@@ -547,9 +547,10 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         }
 
         // When the surface is not a SmBSplineSurface - test the surface over the
-        // node's subdomain.
-        let cache_surface = self.surface().clone();
-        let surface_to_test: Option<&Surface> = match cache_surface.kind() {
+        // node's subdomain. (The cache surface is copied only where the copy is read:
+        // the B-spline based kinds test the node's patch, and read the copy only in
+        // the surface-evaluation fallbacks below.)
+        let compound_copy: Option<Surface> = match self.surface().kind() {
             SurfaceKind::Cone(_)
             | SurfaceKind::Sphere(_)
             | SurfaceKind::Torus(_)
@@ -560,8 +561,9 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             SurfaceKind::CurveBounded(_)
             | SurfaceKind::Step(_)
             | SurfaceKind::OffsetSurface(_)
-            | SurfaceKind::SrfInVolume(_) => Some(&cache_surface),
+            | SurfaceKind::SrfInVolume(_) => Some(self.surface().clone()),
         };
+        let surface_to_test: Option<&Surface> = compound_copy.as_ref();
 
         let mut subdivide = false;
         let mut direction = SurfParamType::U;
@@ -650,7 +652,13 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             // Returning more than 1-1/2 full revolutions indicates that the control
             // net is not suitable for estimating the angles: use surface evaluations.
             if u_ang_deg > 540.0 || v_ang_deg > 540.0 {
-                let surf: &Surface = surface_to_test.unwrap_or(&cache_surface);
+                let cache_surface;
+                let surf: &Surface = if let Some(s) = surface_to_test {
+                    s
+                } else {
+                    cache_surface = self.surface().clone();
+                    &cache_surface
+                };
                 let mut eval = |uv: Point2| surf.evaluate_point(k, uv);
                 let sc = compute_surf_constants(&mut eval, &node_domain, ANGLES)?;
                 u_ang_deg = sc.u_angle_deg.unwrap_or(0.0);
@@ -708,7 +716,12 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                 Self::size_tolerances_from_corners(c.u0v0, c.u1v0, c.u1v1, c.u0v1)
             } else {
                 // compute from sample surface IsoCurves - expensive
-                Self::size_tolerances_from_surface(k, &cache_surface, &node_domain)?
+                if let Some(s) = surface_to_test {
+                    Self::size_tolerances_from_surface(k, s, &node_domain)?
+                } else {
+                    let cache_surface = self.surface().clone();
+                    Self::size_tolerances_from_surface(k, &cache_surface, &node_domain)?
+                }
             };
             aspect_ratio = sizes.aspect_ratio;
             max_side_length = sizes.max_side_length_3d;

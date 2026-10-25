@@ -757,9 +757,7 @@ pub fn allocate_nurb_surface(
 /// (`sm_AllocateAndCopyNurbSurface`).
 #[must_use]
 pub fn copy_nurb_surface(from: &Surface) -> Surface {
-    let mut c = from.clone();
-    c.compress();
-    c
+    from.compressed_copy()
 }
 
 // ---- Bezier decomposition ---------------------------------------------------------

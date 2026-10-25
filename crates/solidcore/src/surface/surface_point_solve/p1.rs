@@ -247,21 +247,6 @@ impl<'s> SurfacePointSolver<'s> {
         self.b_spline
     }
 
-    /// The same problem over `surface` (the surface data re-read from it; every other
-    /// field copied), for a solve on a copy of the surface.
-    pub(super) fn with_surface<'t>(&self, surface: &'t Surface) -> SurfacePointSolver<'t> {
-        SurfacePointSolver {
-            surface,
-            domain: self.domain,
-            test_pt: self.test_pt,
-            dir_vec: self.dir_vec,
-            solver_op: self.solver_op,
-            b_spline: b_spline_part(surface),
-            tight_tol: self.tight_tol,
-            loose_tol: self.loose_tol,
-        }
-    }
-
     /// `crGap` reduced to its component along the direction for the directed
     /// operation (`dDot * m_sDirVec`), else unchanged.
     fn directed(&self, gap: Vec3) -> Vec3 {
@@ -525,22 +510,6 @@ impl<'s> SurfPtGlobalSolver<'s> {
             closed_in_u: None,
             closed_in_v: None,
         })
-    }
-
-    /// The same solver over `surface` (see [`SurfacePointSolver::with_surface`]),
-    /// keeping the closure computed so far.
-    pub(super) fn with_surface<'t>(&self, surface: &'t Surface) -> SurfPtGlobalSolver<'t> {
-        SurfPtGlobalSolver {
-            base: self.base.with_surface(surface),
-            closed_in_u: self.closed_in_u,
-            closed_in_v: self.closed_in_v,
-        }
-    }
-
-    /// Takes over the closure `other` has computed (the same surface geometry).
-    pub(super) fn copy_closure_from(&mut self, other: &SurfPtGlobalSolver<'_>) {
-        self.closed_in_u = other.closed_in_u;
-        self.closed_in_v = other.closed_in_v;
     }
 
     /// Whether the surface is closed over the domain in `which_dir` (`SM_SP_U` or
