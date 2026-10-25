@@ -393,6 +393,9 @@ impl<'a, E: EvalNFunctions + ?Sized> LocalSolveNd<'a, E> {
     ///
     /// A failing [`EvalNFunctions::set_intervals`], interval or periodicity arrays
     /// not sized like `guess` (`InvalidInput`), and `Unported` from the equation set.
+    /// [`SolidError::InvalidInput`] when the Jacobian element count overflows,
+    /// storage exceeds [`crate::limits::MAX_ALLOC_BYTES`], or the elements cannot
+    /// be allocated (see [`Matrix::try_new`]).
     pub fn solve_it(&mut self, guess: &[f64], acceptable_accuracy: f64) -> Result<NdSolution> {
         const OP: &str = "geom::local_solve_nd::LocalSolveNd::solve_it";
         let invalid = |reason| SolidError::InvalidInput {
@@ -410,7 +413,7 @@ impl<'a, E: EvalNFunctions + ?Sized> LocalSolveNd<'a, E> {
             return Err(invalid("periodicity count differs from the guess size"));
         }
 
-        let mut jacobian = Matrix::new(n, n);
+        let mut jacobian = Matrix::try_new(n, n)?;
         let mut equation_values = vec![0.0; n];
         let mut next_guess = vec![0.0; n];
         let mut step_unclamped = vec![0.0; n];
@@ -422,7 +425,7 @@ impl<'a, E: EvalNFunctions + ?Sized> LocalSolveNd<'a, E> {
         }
 
         // additional state for checking two kinds of clamping
-        let mut jacobian2 = Matrix::new(n, n);
+        let mut jacobian2 = Matrix::try_new(n, n)?;
         let mut next_guess_clamped = vec![0.0; n];
         let mut next_guess_clamped_scaled = vec![0.0; n];
         let mut equation_values2 = vec![0.0; n];
@@ -821,6 +824,21 @@ mod tests {
             calls: 0,
             fd,
         }
+    }
+
+    #[test]
+    fn oversized_jacobian_fails_before_evaluation() {
+        let mut e = cubic(false);
+        let mut s = LocalSolveNd::new(&mut e, None, None);
+        let guess = vec![0.0; 65_536];
+        assert!(matches!(
+            s.solve_it(&guess, EFF_ZERO_SQRT),
+            Err(SolidError::InvalidInput {
+                operation: "geom::matrix::Matrix::try_new",
+                reason: "matrix too large to allocate",
+            })
+        ));
+        assert_eq!(s.evaluator().calls, 0);
     }
 
     #[test]
