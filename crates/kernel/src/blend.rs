@@ -310,20 +310,15 @@ pub fn fillet_each(body: &Body, edges: &[Vec3], radii: &[f64]) -> Result<Body> {
     crate::blend_smlib::fillet_each(body, edges, radii).and_then(|b| closed(body, b))
 }
 
-/// The points' edges (the nearest edge of the body to each) grouped where they share a face or
-/// a vertex, directly or through other points' edges: indices into `pts`. `None` when a point
+/// The points' edges (each the edge a blend's pick there takes) grouped where they share a face
+/// or a vertex, directly or through other points' edges: indices into `pts`. `None` when a point
 /// has no edge near it.
 fn interacting_groups(body: &Body, pts: &[Vec3]) -> Option<Vec<Vec<usize>>> {
     let rec = Faces::of(body).ok()?;
-    let size = body.size();
-    let tol = (size * 2e-3).max(1e-3);
+    let (picked, _) = crate::blend_smlib::picked_edges(body, pts).ok()?;
     // What each point's edge touches: its faces and its ends.
     let mut groups: Vec<(BTreeSet<u32>, BTreeSet<u32>, Vec<usize>)> = Vec::new();
-    for (i, p) in pts.iter().enumerate() {
-        let (idx, dist) = body.nearest_edge(*p, tol).ok()??;
-        if dist > size * 0.05 + 1e-3 {
-            return None;
-        }
+    for (i, idx) in picked.into_iter().enumerate() {
         let mut faces = rec.faces_of(idx);
         let mut ends: BTreeSet<u32> = rec.rec.edges.get(idx)?.vertices.into_iter().collect();
         let mut members = vec![i];
@@ -390,9 +385,10 @@ pub fn chamfer_sides(body: &Body, edges: &[Vec3], d1: f64, side: ChamferSide, fl
 
 /// The picked edges' tangent chains, for a blend that is to run along them: `picks` (each the
 /// nearest edge of `body` to it), then a point on every other edge that continues one of them
-/// tangentially (within 0.5° at a shared vertex), until no more do. An edge only one face uses
-/// ends a chain, and so does a smooth edge (its two faces meet tangentially, within 0.5°): it has
-/// no corner to round. Picks that find no edge are refused.
+/// tangentially (within 0.5° at a shared vertex), until no more do. Each pick takes its edge as a
+/// blend does (a pick at a vertex where a seam meets a rim takes the rim). An edge only one face
+/// uses ends a chain, and so do a seam and a smooth edge (its two faces meet tangentially, within
+/// 0.5°): they have no corner to round. Picks that find no edge are refused.
 pub fn tangent_chain(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
     /// Edges meeting at an angle below this continue one another.
     const TANGENT_DEGREES: f64 = 0.5;
@@ -400,13 +396,9 @@ pub fn tangent_chain(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
         return Err(KernelError::Invalid("select 1…1000 edges by finite points".into()));
     }
     let rec = Faces::of(body)?;
-    let size = body.size();
+    let (seeds, hidden) = crate::blend_smlib::picked_edges(body, picks)?;
     let mut chain: Vec<usize> = Vec::new();
-    for p in picks {
-        let (e, dist) = body.nearest_edge(*p, (size * 2e-3).max(1e-3))?.ok_or_else(|| KernelError::Invalid("the body has no edges".into()))?;
-        if dist > size * 0.05 + 1e-3 {
-            return Err(KernelError::Invalid(format!("no edge near the pick at ({:.3}, {:.3}, {:.3})", p.x, p.y, p.z)));
-        }
+    for e in seeds {
         if !chain.contains(&e) {
             chain.push(e);
         }
@@ -439,7 +431,8 @@ pub fn tangent_chain(body: &Body, picks: &[Vec3]) -> Result<Vec<Vec3>> {
         for v in edge.vertices {
             let Some(d) = leaving(e, v) else { continue };
             for (f, other) in rec.rec.edges.iter().enumerate() {
-                if chain.contains(&f) || other.uses.len() < 2 || !other.vertices.contains(&v) || smooth(f) {
+                let passed_over = hidden.get(f).copied().unwrap_or(false);
+                if passed_over || chain.contains(&f) || other.uses.len() < 2 || !other.vertices.contains(&v) || smooth(f) {
                     continue;
                 }
                 if leaving(f, v).is_some_and(|g| d.dot(g) < -cos) {
@@ -478,6 +471,29 @@ mod tests {
     /// Whether a vertex of `b` lies within `tol` of `p`.
     fn has_vertex(b: &Body, p: Vec3, tol: f64) -> bool {
         crate::native::brep_record(b).unwrap().vertices.iter().any(|v| v3(v.point).dist(p) < tol)
+    }
+
+    /// The ladder's 08-chamfers/008: a boss on a block, rounded where it meets the block, picked
+    /// at the top of its seam. The pick takes the top rim, and the chain keeps to it: it never
+    /// runs down the seam into the round's own seam, which continues it tangentially.
+    #[test]
+    fn a_chain_picked_where_a_seam_meets_a_rim_keeps_to_the_rim() {
+        let block = crate::build::box_solid(Vec3::ZERO, Vec3::new(40.0, 30.0, 20.0)).unwrap();
+        let boss = crate::build::cylinder(Vec3::new(15.0, 15.0, 20.0), Vec3::Z, 8.0, 10.0).unwrap();
+        let joined = crate::boolean(&block, &boss, crate::BoolOp::Union).unwrap().unwrap();
+        let rec = joined.record();
+        // The seam: the edge both of whose uses lie on the boss's side.
+        let seam = rec.edges.iter().find(|e| e.uses.len() == 2 && e.uses[0].face == e.uses[1].face).unwrap();
+        let ends = seam.vertices.map(|v| v3(rec.vertices[v as usize].point));
+        let (foot, top) = if ends[0].z < ends[1].z { (ends[0], ends[1]) } else { (ends[1], ends[0]) };
+        let rounded = fillet(&joined, &[foot], 1.0).unwrap();
+        let chain = tangent_chain(&rounded, &[top]).unwrap();
+        assert_eq!(chain, vec![top], "the chain left the top rim");
+        assert!(chamfer(&rounded, &chain, 1.0).is_ok());
+        // Even from a pick on the seam itself, the chain takes no seam: the round's continues
+        // the boss's tangentially but has no corner to blend.
+        let side = (top + Vec3::new(top.x, top.y, 21.0)) * 0.5;
+        assert_eq!(tangent_chain(&rounded, &[side]).unwrap(), vec![side], "the chain ran into the round's seam");
     }
 
     #[test]

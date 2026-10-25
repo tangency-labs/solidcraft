@@ -64,6 +64,14 @@ pub(crate) fn fillet_variable(body: &Body, edge_at: Vec3, start: Vec3, spline: &
     imp::variable(body, edge_at, start, spline)
 }
 
+/// The edges `picks` select, in the body's edge order, as a blend resolves them, and per edge
+/// whether a pick passes it over (a seam or a smooth join: never a blend's edge), for a caller
+/// that selects edges to blend ([`crate::tangent_chain`]).
+pub(crate) fn picked_edges(body: &Body, picks: &[Vec3]) -> Result<(Vec<usize>, Vec<bool>)> {
+    let picked = imp::resolve(body, picks)?;
+    Ok((picked.edges, picked.hidden))
+}
+
 #[derive(Clone, Copy)]
 enum Kind {
     Round,
@@ -105,16 +113,18 @@ mod imp {
         let mesh = body.mesh(&crate::MeshTolerance::chord((body.size() * 2e-3).max(1e-3)))?;
         let seams = crate::topo::seam_flags(body, &mesh);
         let (smooth, _) = crate::smooth_edges::flags(body, &mesh);
+        let hidden: Vec<bool> =
+            (0..mesh.edges.len()).map(|i| seams.get(i).copied().unwrap_or(false) || smooth.get(i).copied().unwrap_or(false)).collect();
         let reach = pick_tolerance(body);
         let tie = (body.size() * 1e-6).max(1e-6);
-        let mut out = Picked { edges: Vec::with_capacity(picks.len()), points: Vec::with_capacity(picks.len()) };
+        let mut out = Picked { edges: Vec::with_capacity(picks.len()), points: Vec::with_capacity(picks.len()), hidden: Vec::new() };
         for p in picks {
             // The nearest edge, and the nearest that is no seam.
             let (mut any, mut edge): (Option<(f64, usize)>, Option<(f64, usize)>) = (None, None);
             for (i, line) in mesh.edges.iter().enumerate() {
                 let d =
                     line.windows(2).filter_map(|w| if let [a, b] = w { Some(p.dist_to_segment(*a, *b)) } else { None }).fold(f64::INFINITY, f64::min);
-                let seam = seams.get(i).copied().unwrap_or(false) || smooth.get(i).copied().unwrap_or(false);
+                let seam = hidden.get(i).copied().unwrap_or(false);
                 for (slot, take) in [(&mut any, true), (&mut edge, !seam)] {
                     if take && slot.is_none_or(|(bd, _)| d < bd) {
                         *slot = Some((d, i));
@@ -132,6 +142,7 @@ mod imp {
             out.edges.push(i);
             out.points.push([mid.x, mid.y, mid.z]);
         }
+        out.hidden = hidden;
         Ok(out)
     }
 
@@ -140,6 +151,8 @@ mod imp {
         pub(super) edges: Vec<usize>,
         /// A point halfway along each.
         pub(super) points: Vec<[f64; 3]>,
+        /// Per edge of the body: does a pick pass it over (a seam or a smooth join)?
+        pub(super) hidden: Vec<bool>,
     }
 
     fn sizes_ok(what: &str, sizes: &[f64]) -> Result<()> {
@@ -347,6 +360,36 @@ mod tests {
             let picked = imp::resolve(&c, &[Vec3::new(8.0 * a.cos(), 8.0 * a.sin(), 10.0)]).unwrap();
             let [_, _, z] = picked.points[0];
             assert!((z - 10.0).abs() < 1e-9, "the pick at {a} took an edge through z = {z}");
+        }
+    }
+
+    #[test]
+    fn a_pick_where_a_bosss_seam_meets_its_base_takes_the_base_circle() {
+        // A boss joined onto a block, as the ladder's running part has (07-fillets/017 picks
+        // its base circle where the seam starts): its side lies on both sides of its seam.
+        let block = box_solid(Vec3::new(0.0, 0.0, 0.0), Vec3::new(40.0, 30.0, 20.0)).unwrap();
+        let boss = crate::cylinder(Vec3::new(15.0, 15.0, 20.0), Vec3::new(0.0, 0.0, 1.0), 8.0, 10.0).unwrap();
+        let b = crate::boolean(&block, &boss, crate::BoolOp::Union).unwrap().unwrap();
+        let mesh = b.mesh(&crate::MeshTolerance::chord(0.01)).unwrap();
+        let seams = crate::topo::seam_flags(&b, &mesh);
+        let record = b.record();
+        let one_face: Vec<usize> = crate::history::edge_faces(record)
+            .iter()
+            .zip(&record.edges)
+            .enumerate()
+            .filter(|(_, (faces, e))| faces.len() == 1 && e.uses.len() == 2)
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(one_face.len(), 1, "the boss's side meets itself along its seam");
+        for &i in &one_face {
+            assert!(seams[i], "edge {i}, the boss's side on both of its sides, is a seam");
+            assert!(!mesh.edge_pickable(i), "edge {i} is drawn and picked as a seam");
+            // Its end on the base circle, where a pick takes the circle.
+            let line = &mesh.edges[i];
+            let foot = [line[0], line[line.len() - 1]].into_iter().find(|p| (p.z - 20.0).abs() < 1e-6).unwrap();
+            let picked = imp::resolve(&b, &[foot]).unwrap();
+            let [_, _, z] = picked.points[0];
+            assert!((z - 20.0).abs() < 1e-9, "the pick at {foot:?} took an edge through z = {z}");
         }
     }
 
