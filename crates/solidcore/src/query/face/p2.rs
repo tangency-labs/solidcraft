@@ -20,6 +20,7 @@
 //! | `ClassObject for EntityRef`           | the `SmObject*` of a classification of B-rep topology |
 //! | [`BrepCacheFace`] | `GetFace()` of a face surface's trimmed cache (`SmTrimSrfCache::BuildTree`, `PointClassify`) |
 //! | [`face_surface_cache`], [`FaceSurfaceCache`], [`note_face_surface_cache`] | `smsurf_GetSurfaceCache(GetSurface())` through `SmCacheMgrTSrf::CacheMakeOrValidate` |
+//! | [`owned_surface_cache`], [`solve_surface_cache_of_face`] | `smsurf_GetSurfaceCache(pSurface)` / `GetTree` of a face-owned surface (a solve's cache) |
 //! | [`face_cache_tree`] | `SmSurfaceCache::GetTree` of a face surface's trimmed cache |
 //!
 //! Deviations:
@@ -403,6 +404,77 @@ pub fn face_surface_cache(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<FaceSur
         .clone_for_evaluation()?;
     // `GetFace()` is NULL while the owner is cleared
     let cleared = b.is_surface_owner_cleared(f);
+    surface_cache_of_face(k, b, f, &surface, cleared)
+}
+
+/// [`face_surface_cache`] of `surface`, a surface whose owner is face `f`: the face's
+/// own surface, or a copy of it that kept the face as owner (an offset's extended
+/// surface). The cache kept is `surface`'s own (its cache slot, shared with its
+/// evaluation copies), as upstream keys it by the surface object; the face's surface
+/// owner being cleared only matters when `surface` is that surface.
+///
+/// # Errors
+///
+/// Those of [`face_surface_cache`].
+pub fn owned_surface_cache(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    surface: &Surface,
+) -> Result<FaceSurfaceCache> {
+    let cleared = b.is_surface_owner_cleared(f)
+        && b.face(f)?
+            .surface
+            .as_ref()
+            .is_some_and(|fs| fs.shares_cache_slot_with(surface));
+    surface_cache_of_face(k, b, f, surface, cleared)
+}
+
+/// The cache a numerical solve on `surface` (owned by face `f`, owner key `owner`)
+/// gets through `smsurf_GetSurfaceCache` / `GetTree`: the surface's trimmed cache
+/// ([`owned_surface_cache`]: the one it keeps, else one made with the face and kept),
+/// its tree built with the face as `GetTree` builds it ([`face_cache_tree`]), handed
+/// out as a copy in the solve's handle space (`map`, with the solve's surface `handle`)
+/// while the kept cache goes back to the surface. `None` when no trimmed cache could be made (the caller builds
+/// the plain surface cache, as upstream falls back to it).
+///
+/// # Errors
+///
+/// Those of [`owned_surface_cache`], of the tree build and of `map`.
+pub fn solve_surface_cache_of_face<O: Copy + PartialEq>(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    owner: crate::geom::object::ObjectRef,
+    surface: &Surface,
+    handle: Option<O>,
+    map: impl Fn(EntityRef) -> Result<O>,
+) -> Result<Option<SurfaceCache<O>>> {
+    let mut lease = owned_surface_cache(k, b, f, surface)?;
+    if !lease.trimmed {
+        return Ok(None);
+    }
+    let built = (|| {
+        let tolerance = BrepCacheFace { b: &mut *b, f }.zone_tol_3d(k, EntityRef::Face(f))?;
+        lease
+            .cache
+            .bind_face(owner, EntityRef::Face(f), tolerance)?;
+        face_cache_tree(k, b, f, &mut lease.cache)?;
+        let mut copy = lease.cache.map_handles(&map)?;
+        copy.base_mut().set_surface_handle(handle);
+        Ok(copy.into_base())
+    })();
+    lease.release();
+    built.map(Some)
+}
+
+fn surface_cache_of_face(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    surface: &Surface,
+    cleared: bool,
+) -> Result<FaceSurfaceCache> {
     let mut standalone = surface.clone_for_evaluation()?;
     if cleared {
         let _ = standalone.set_owner(None::<crate::geom::object::ObjectRef>);
@@ -414,7 +486,7 @@ pub fn face_surface_cache(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<FaceSur
             cache.base_mut().surface_mut().adopt_owner_of(if cleared {
                 &standalone
             } else {
-                &surface
+                surface
             });
             // If the face was modified and Brep editing is no longer enabled
             // then delete the old cache and create a new one.
@@ -434,7 +506,7 @@ pub fn face_surface_cache(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<FaceSur
             let built = if cleared {
                 get_trim_surface_cache(k, &standalone, handle)
             } else {
-                get_surface_cache_with_face(k, &surface, handle, &mut BrepCacheFace { b, f })
+                get_surface_cache_with_face(k, surface, handle, &mut BrepCacheFace { b, f })
             }?;
             let trimmed = built.base().trimmed_dispatch;
             return Ok(FaceSurfaceCache {
@@ -452,7 +524,7 @@ pub fn face_surface_cache(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<FaceSur
     let built = if cleared {
         make_trim_srf_cache(k, &standalone, handle)
     } else {
-        make_trim_srf_cache_with_face(k, &surface, handle, &mut BrepCacheFace { b, f })
+        make_trim_srf_cache_with_face(k, surface, handle, &mut BrepCacheFace { b, f })
     };
     match built {
         Ok(cache) => Ok(FaceSurfaceCache {
@@ -471,7 +543,7 @@ pub fn face_surface_cache(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<FaceSur
                 _ => Ok(FaceSurfaceCache {
                     cache: TrimSrfCache::from_base(make_surface_cache(
                         k,
-                        if cleared { &standalone } else { &surface },
+                        if cleared { &standalone } else { surface },
                         handle,
                     )?),
                     trimmed: false,

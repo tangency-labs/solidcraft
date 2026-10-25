@@ -38,11 +38,8 @@ use crate::offset::offset_geometry_creation::{
 };
 use crate::query::edge::ClosestPoint;
 use crate::surface::surface::Surface;
-use crate::surface::surface_cache::face_context::{
-    FaceQueries, MappedCacheFace, PreparedFaceQueries,
-};
+use crate::surface::surface_cache::face_context::{FaceQueries, PreparedFaceQueries};
 use crate::surface::surface_cache::SurfaceCache;
-use crate::surface::trim_srf_cache::CacheFace;
 use crate::surface::volume::Volume;
 use crate::topology::edge::{self, NotifyEnv, SetCurveOptions};
 use crate::topology::edgeuse::{p1 as eu, p2 as eu2, p3 as eu3};
@@ -584,16 +581,6 @@ fn cache_handle(arena: Arena) -> impl Fn(EntityRef) -> Result<Handle> {
     move |entity| Ok(Handle::topology(arena, entity))
 }
 
-fn cache_entity(arena: Arena) -> impl Fn(Handle) -> Result<EntityRef> {
-    move |handle| match handle.entity()? {
-        (a, entity) if a == arena => Ok(entity),
-        _ => Err(SolidError::invalid_input(
-            OP,
-            "cache handle belongs to the other B-rep",
-        )),
-    }
-}
-
 impl FaceQueries<Handle> for EdgeBrep<'_> {
     fn face_zone_tol_3d(&self, face: Handle) -> Result<f64> {
         let (arena, f) = face.face()?;
@@ -651,10 +638,8 @@ impl OffsetBrep<Handle> for EdgeBrep<'_> {
         surface: &Surface,
         handle: Option<Handle>,
     ) -> Result<SurfaceCache<Handle>> {
-        use crate::query::face::p2::BrepCacheFace;
-        use crate::surface::surface::p1::{
-            get_surface_cache, make_surface_cache, make_trim_srf_cache_with_face,
-        };
+        use crate::query::face::p2::solve_surface_cache_of_face;
+        use crate::surface::surface::p1::{get_surface_cache, make_surface_cache};
         // the solve's GetTree: a reused cache whose tree is not built builds it now
         let with_tree = |mut cache: SurfaceCache<Handle>| {
             if cache.tree().is_none() {
@@ -684,32 +669,12 @@ impl OffsetBrep<Handle> for EdgeBrep<'_> {
                 "surface owner is not the selected B-rep face",
             ));
         }
+        // the surface's trimmed cache, kept with it as upstream keeps it (reused by
+        // later solves on the same surface)
         let map = cache_handle(arena);
-        let unmap = cache_entity(arena);
-        let mut context = MappedCacheFace::new(BrepCacheFace { b, f: face }, &map, &unmap)?;
-        match make_trim_srf_cache_with_face(k, surface, handle, &mut context) {
-            Ok(mut cache) => {
-                cache.bind_face(
-                    owner,
-                    Handle::topology(arena, EntityRef::Face(face)),
-                    context.zone_tol_3d(k, context.face())?,
-                )?;
-                if cache.base().tree().is_none()
-                    || (!cache.base().have_t_surface_cache
-                        && surface.face()?.is_some()
-                        && cache.base().face_containment_done
-                            != crate::surface::surface_cache::p1::FaceContainment::UnderConstruction)
-                {
-                    cache.build_tree_with_face(k, &mut context)?;
-                }
-                Ok(cache.into_base())
-            }
-            Err(
-                e @ (SolidError::Unported { .. }
-                | SolidError::InvalidInput { .. }
-                | SolidError::NotFound { .. }),
-            ) => Err(e),
-            Err(_) => make_surface_cache(k, surface, handle),
+        match solve_surface_cache_of_face(k, b, face, owner, surface, handle, map)? {
+            Some(cache) => Ok(cache),
+            None => make_surface_cache(k, surface, handle),
         }
     }
 
