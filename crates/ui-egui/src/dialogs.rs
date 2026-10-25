@@ -1887,6 +1887,17 @@ pub fn planar_face(s: &Session, body: &str, face: usize) -> Option<(Vec3, Vec3)>
     found
 }
 
+/// The fillet or chamfer feature whose blend a body face is (a piece or copy of one too).
+pub fn blend_feature(s: &Session, body: &str, face: usize) -> Option<u64> {
+    use solidcraft_engine::doc::persistent_name;
+    let st = s.world_state();
+    let b = st.body(body)?;
+    let names = solidcraft_engine::doc::naming::face_names(b);
+    let name = names.get(face).filter(|n| persistent_name::is_blend(n))?;
+    let f = s.doc.feature(persistent_name::made_by(name)?)?;
+    matches!(f.kind, FeatureKind::Fillet { .. } | FeatureKind::Chamfer { .. }).then_some(f.id)
+}
+
 thread_local! {
     /// The planar faces looked up last, with the model state they were found in (kept, so the
     /// pointer stays its own). Each lookup tessellates the whole body, about 0.1 s for an

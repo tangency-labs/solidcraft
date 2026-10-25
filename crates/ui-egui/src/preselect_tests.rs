@@ -789,6 +789,42 @@ fn press_pull_then_curved_face_offsets_it() {
     assert!(matches!(app.dialog.as_ref().unwrap().kind, Kind::Extrude { .. }));
 }
 
+/// Press Pull on a fillet's round face reopens the fillet to change its radius, as the
+/// command does, rather than an Offset Face that refuses it (#1932): picked first, or picked
+/// with Press Pull already open.
+#[test]
+fn fillet_face_then_press_pull_edits_its_fillet() {
+    let script = json!([
+        {"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20}},
+        {"command": "solid.fillet", "params": {"edges": [[20, 0, 20], [40, 15, 20], [20, 30, 20], [0, 15, 20]], "radius": 3}}
+    ]);
+    // On the front round: its axis runs along X at y 3, z 17.
+    let p = Vec3::new(20.0, 3.0 - 3.0 * std::f64::consts::FRAC_1_SQRT_2, 17.0 + 3.0 * std::f64::consts::FRAC_1_SQRT_2);
+    let round = |app: &SolveApp| {
+        let names = solidcraft_engine::doc::naming::face_names_at(&app.session.model.state(), &[p]);
+        assert!(names[0].contains("blend"), "{names:?}");
+        let st = app.session.model.state();
+        let b = st.body("Body1").unwrap();
+        let index = solidcraft_engine::doc::naming::face_names(b).iter().position(|n| *n == names[0]).unwrap();
+        Sel::Face { body: "Body1".into(), index, point: p }
+    };
+    let mut app = app_with(script.clone());
+    let fillet = app.session.doc.features.last().unwrap().id;
+    let sel = round(&app);
+    let d = start(&mut app, vec![sel], "solid.press_pull");
+    assert!(matches!(&d.kind, Kind::Fillet { radius, chamfer: false, .. } if radius.starts_with('3')), "{:?}", d.kind);
+    assert_eq!(d.editing.map(|e| e.0), Some(fillet));
+
+    let mut app = app_with(script);
+    app.start("solid.press_pull");
+    let sel = round(&app);
+    let index = if let Sel::Face { index, .. } = &sel { *index } else { 0 };
+    crate::viewport::dialog_pick(&mut app, &crate::viewport::Hit::Face { body: "Body1".into(), index, point: p }, sel);
+    let d = app.dialog.clone().unwrap();
+    assert!(matches!(d.kind, Kind::Fillet { .. }), "{:?}", d.kind);
+    assert_eq!(d.editing.map(|e| e.0), Some(fillet));
+}
+
 #[test]
 fn faces_then_shell_and_face_then_hole() {
     let mut app = boxed();
