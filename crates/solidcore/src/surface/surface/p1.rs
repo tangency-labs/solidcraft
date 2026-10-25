@@ -3488,6 +3488,10 @@ pub struct CsiGlobalSolver<'t, 's, O> {
     pub interval: Extent1d,
     /// `m_crUVDomain`.
     pub uv_domain: Extent2d,
+    /// The handles and parameter domains of the solve's curve and surface, which the
+    /// solutions name (`IdenticalSolutions` reads them through upstream's objects);
+    /// `None` reads them from the handles themselves.
+    pub operands: Option<SolveOperands<O>>,
 }
 
 impl<'t, 's, O: SolutionObject> CsiGlobalSolver<'t, 's, O> {
@@ -3512,6 +3516,7 @@ impl<'t, 's, O: SolutionObject> CsiGlobalSolver<'t, 's, O> {
             found_coincidence,
             interval,
             uv_domain,
+            operands: None,
         }
     }
 }

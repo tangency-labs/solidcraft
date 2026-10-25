@@ -351,32 +351,34 @@ fn surface_of(k: &Kernel, s: &SrfIn) -> Result<Option<Surface>, HarnessError> {
 }
 
 /// A solution object: the op's curve (with its natural interval) or surface (with its
-/// natural domain).
+/// natural domain), or an opaque handle of either that cannot reach its geometry.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Obj {
     Curve([f64; 2]),
     Surface([f64; 4]),
+    OpaqueCurve,
+    OpaqueSurface,
 }
 
 impl SolutionObject for Obj {
     fn kind(&self) -> ObjectKind {
         match self {
-            Obj::Curve(_) => ObjectKind::Curve,
-            Obj::Surface(_) => ObjectKind::Surface,
+            Obj::Curve(_) | Obj::OpaqueCurve => ObjectKind::Curve,
+            Obj::Surface(_) | Obj::OpaqueSurface => ObjectKind::Surface,
         }
     }
 
     fn natural_interval(&self) -> Option<Extent1d> {
         match self {
             Obj::Curve(i) => Some(ivl_of(*i)),
-            Obj::Surface(_) => None,
+            _ => None,
         }
     }
 
     fn natural_uv_domain(&self) -> Option<Extent2d> {
         match self {
             Obj::Surface(d) => Some(dom_of(*d)),
-            Obj::Curve(_) => None,
+            _ => None,
         }
     }
 }
@@ -503,20 +505,36 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
             let Some(c) = curve_of(curve)? else {
                 return Ok(vec![-3.0]);
             };
-            let (co, so) = (curve_obj(&c), surface_obj(&s));
-            match st(s.global_curve_intersect::<Obj>(
-                &k,
-                [co, so],
-                &dom_of(*dom),
-                &c,
-                &ivl_of(*ivl),
-                *tol,
-            ))? {
-                Ok(sols) => {
-                    o.push(0.0);
-                    put_solutions(&mut o, &sols, Some(co), so);
+            // Once with handles that know their domains, once with opaque handles (as a
+            // B-rep's, which cannot reach their geometry): both must give the C++ result,
+            // so a difference reports both runs, which cannot match it.
+            let mut runs = Vec::new();
+            for (co, so) in [
+                (curve_obj(&c), surface_obj(&s)),
+                (Obj::OpaqueCurve, Obj::OpaqueSurface),
+            ] {
+                let mut r = Vec::new();
+                match st(s.global_curve_intersect::<Obj>(
+                    &k,
+                    [co, so],
+                    &dom_of(*dom),
+                    &c,
+                    &ivl_of(*ivl),
+                    *tol,
+                ))? {
+                    Ok(sols) => {
+                        r.push(0.0);
+                        put_solutions(&mut r, &sols, Some(co), so);
+                    }
+                    Err(c) => r.push(c),
                 }
-                Err(c) => o.push(c),
+                runs.push(r);
+            }
+            let opaque = runs.pop().unwrap_or_default();
+            o = runs.pop().unwrap_or_default();
+            if o != opaque {
+                o.push(-9.0);
+                o.extend(opaque);
             }
         }
         OpIn::LocalLine {

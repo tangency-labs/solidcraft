@@ -22,7 +22,7 @@
 //! | [`sp_local_solve`]                                  | `sm_SpLocalSolve` (static)                    |
 //! | [`filter_solution`]                                 | `sm_FilterSolution` (static)                  |
 //! | [`SpGlobalSolver`]'s and [`LsiGlobalSolver`]'s `identical_solutions` | `SmSPGlobalSolver::IdenticalSolutions`, `SmLSIGlobalSolver::IdenticalSolutions` |
-//! | [`cs_identical_solutions`], [`cs_identical_solutions_in`], [`csi_identical_solutions`] | `SmCSGlobalSolver::IdenticalSolutions`, `SmCSIGlobalSolver::IdenticalSolutions` |
+//! | [`cs_identical_solutions`], [`cs_identical_solutions_in`], [`csi_identical_solutions`], [`csi_identical_solutions_in`] | `SmCSGlobalSolver::IdenticalSolutions`, `SmCSIGlobalSolver::IdenticalSolutions` |
 //!
 //! Deviations:
 //! - **Solver classes without a Rust struct.** `SmCSGlobalSolver` and
@@ -2422,7 +2422,24 @@ pub fn csi_identical_solutions<O: SolutionObject>(
     sol1: &Solution<O>,
     sol2: &Solution<O>,
 ) -> Result<(SolutionPairType, Option<PreferredSolution>)> {
-    surface_identical_solutions(k, base, surface, sol1, sol2, 1, true, &OwnDomains)
+    csi_identical_solutions_in(k, base, surface, sol1, sol2, &OwnDomains)
+}
+
+/// [`csi_identical_solutions`] reading the parameter intervals of the solutions'
+/// objects through `domains` (the solve's operands, which upstream's objects are).
+///
+/// # Errors
+///
+/// As [`csi_identical_solutions`].
+pub fn csi_identical_solutions_in<O: SolutionObject>(
+    k: &Kernel,
+    base: &GlobalSolver<'_, O>,
+    surface: Option<&Surface>,
+    sol1: &Solution<O>,
+    sol2: &Solution<O>,
+    domains: &dyn ParameterDomains<O>,
+) -> Result<(SolutionPairType, Option<PreferredSolution>)> {
+    surface_identical_solutions(k, base, surface, sol1, sol2, 1, true, domains)
 }
 
 impl<O: SolutionObject> LsiGlobalSolver<'_, '_, O> {
