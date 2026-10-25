@@ -862,15 +862,18 @@ fn value_box_full(
 /// The gap left between a value box and the command window (px).
 const DIALOG_GAP: f32 = 4.0;
 
-/// Where a value box goes so it does not cover the command window: whole, to the side of the
-/// geometry that is farther from the window, and inside the drawing area (`view`), like a box
-/// kept in view (#6608). The sides are tried in order: beside the window first, so the box
-/// stays near its geometry, then above and below it.
+/// Where a value box goes so it does not cover the command window: whole, beside the window
+/// (leaving a gap of `DIALOG_GAP`), and inside the drawing area (`view`), like a box kept in
+/// view (#6608). The sides are tried in order: the left of the window, then its right, then
+/// above and below it, and the first side that leaves the box clear of the window wins. A box
+/// that misses the window keeps its place, and one that no side clears keeps it too.
 fn clear_of_dialog(rect: egui::Rect, dialog: egui::Rect, view: Option<egui::Rect>) -> egui::Rect {
     if !rect.intersects(dialog) {
         return rect;
     }
-    // The sides the box could go to: each moves it whole, just past the window's edge.
+    // The sides the box could go to: each moves it whole, just past the window's edge. The
+    // left one comes first: it slides the box back over the part that overlaps it, instead of
+    // jumping it over the whole window.
     let sides = [
         egui::vec2(dialog.left() - DIALOG_GAP - rect.right(), 0.0),
         egui::vec2(dialog.right() + DIALOG_GAP - rect.left(), 0.0),
