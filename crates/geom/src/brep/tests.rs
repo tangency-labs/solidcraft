@@ -829,3 +829,17 @@ fn a_hole_beside_the_seam_lies_in_its_face_turn() {
     assert!(hole_u > u[0] && hole_u + (a1 - a0) < u[1], "the hole in the turn: {u:?}");
     assert!(v[0].abs() < 1e-9 && (v[1] - h).abs() < 1e-9, "{v:?}");
 }
+
+/// A face's box reaches its boundary's extremes, not its samples' nearest ones: an ellipse cut
+/// from a cylinder of radius 20 by a plane at 45 degrees rises 20 above its centre, at an angle
+/// between the points the box is sampled at. Short of it, the face's NURBS form stopped below the
+/// edge (#4598: the bore of a re-imported rod ended 2.3e-4 short of where it meets the rod).
+#[test]
+fn a_face_box_reaches_its_boundary_extremes() {
+    let r = 20.0f64;
+    let cylinder = Surface::Cylinder { frame: Frame { origin: [0.; 3], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] }, radius: r };
+    let c = std::f64::consts::FRAC_1_SQRT_2;
+    let cut = Curve::Ellipse { frame: Frame { origin: [0., 0., 30.], x_axis: [c, 0., c], y_axis: [0., 1., 0.] }, radii: [r * 2f64.sqrt(), r] };
+    let [_, v] = form::extent(&cylinder, &[vec![(&cut, [0.1, 0.1 + TAU], true)]]).expect("an extent");
+    assert!((v[0] - 10.0).abs() < 1e-9 && (v[1] - 50.0).abs() < 1e-9, "{v:?}");
+}
