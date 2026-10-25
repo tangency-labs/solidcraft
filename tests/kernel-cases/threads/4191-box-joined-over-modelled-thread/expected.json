@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4191"
+ ],
+ "what": "a 20x20x10 block joined round the bottom of an O6 x 50 stud carrying a modelled M6 thread: 'boolean Union: no result' (the same block joined before threading worked)",
+ "source": "invariants",
+ "method": "the block encloses the stud's bottom 10 mm, thread and all, so the join is one connected solid: one valid closed body. The modelled thread's volume is not closed-form",
+ "body_count": 1,
+ "timeout_s": 600
+}

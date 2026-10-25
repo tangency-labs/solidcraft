@@ -1,0 +1,131 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "YZ",
+    "name": "Slotted ring"
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     -1.5,
+     22.45
+    ],
+    "through": [
+     0,
+     -22.5
+    ],
+    "end": [
+     1.5,
+     22.45
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      1.5,
+      22.45
+     ],
+     [
+      1.5,
+      39.972
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     1.5,
+     39.972
+    ],
+    "through": [
+     0,
+     -40
+    ],
+    "end": [
+     -1.5,
+     39.972
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -1.5,
+      39.972
+     ],
+     [
+      -1.5,
+      22.45
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "distance": 75,
+    "direction": "symmetric",
+    "operation": "new_body"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": "XZ",
+    "name": "Oblique cut"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -37.5,
+      0.014
+     ],
+     [
+      14.033,
+      -51.519
+     ],
+     [
+      -65.453,
+      -51.519
+     ],
+     [
+      -65.453,
+      0.014
+     ]
+    ],
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "through_all": true,
+    "distance": 10,
+    "direction": "symmetric",
+    "operation": "cut"
+   }
+  }
+ ]
+}

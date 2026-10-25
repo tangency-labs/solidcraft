@@ -1,0 +1,10 @@
+[
+ {
+  "source": "tangency-labs/solidcraft#4260",
+  "why": "UI only: count fields without step arrows"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4274",
+  "why": "UI only: image canvas in sketches (feature request)"
+ }
+]

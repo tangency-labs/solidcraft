@@ -1,0 +1,22 @@
+[
+ {
+  "source": "tangency-labs/solidcraft#4165",
+  "why": "UI only: surface bodies shown with the solid icon in the browser"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4173",
+  "why": "no reproduction: an intersect revolve redefined on an unknown part, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4234",
+  "why": "no geometry: a loft from a model face (feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4257",
+  "why": "no kernel geometry: surface bodies report a volume and mass (measure, document)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4358",
+  "why": "no kernel geometry: surface loft picks lost between copied sketches with the same curve ids (selection)"
+ }
+]
