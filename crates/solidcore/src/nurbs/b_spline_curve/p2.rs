@@ -1334,11 +1334,15 @@ impl BSplineCurve {
                 .ok_or_else(|| invalid(OP_C0, "no knots"))
         };
 
+        let Some(degree_plus) = degree.checked_add(1) else {
+            return Ok(false);
+        };
+
         // when every knot is of multiplicity degree (+1 on the ends)
         // and the curve is non-rational
         let mut is_piecewise_c0 = !self.is_rational()?
-            && mult(0)? == degree + 1
-            && mult(unique_knot_count.wrapping_sub(1))? == degree + 1;
+            && mult(0)? == degree_plus
+            && mult(unique_knot_count.wrapping_sub(1))? == degree_plus;
 
         // Check all internal knot multiplicities equal lDegree
         if is_piecewise_c0 {
@@ -1952,6 +1956,14 @@ mod tests {
         assert_eq!(c.number_of_unique_knots().unwrap(), 3);
         assert!(!c.is_piecewise_c0().unwrap());
         assert!(!c.is_intersector_approx().unwrap());
+    }
+
+    #[test]
+    fn piecewise_c0_rejects_unrepresentable_endpoint_multiplicity() {
+        let nurb =
+            Curve::new(vec![CPoint::new(0.0, 0.0, 0.0, NOW)], usize::MAX, vec![0.0]).unwrap();
+        let c = BSplineCurve::from_nurb(nurb, 3, false);
+        assert_eq!(c.is_piecewise_c0(), Ok(false));
     }
 
     #[test]
