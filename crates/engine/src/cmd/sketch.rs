@@ -1246,7 +1246,12 @@ fn circle_center(s: &mut Session, p: &Value) -> Result<Value> {
     let id = str_(p, "id").map(str::to_string);
     let (out, info) = draw(s, p, cmd, |sk, doc| {
         let c = req_parg(sk, doc, p, "center", cmd)?;
-        let ci = sk.add_circle(c.pos(), r, c.idx(), id.as_deref())?;
+        // The origin is the sketch's frame, not a hold on the geometry: a circle centred there
+        // keeps a centre of its own, tied to the origin as any other drawn geometry is, so it
+        // is not fixed geometry the sketch cannot move (#5034). A centre held by a parameter or
+        // by projected geometry keeps that hold: the circle follows it.
+        let own = c.idx().is_some_and(|i| sk.point_index("origin") == Some(i));
+        let ci = sk.add_circle(c.pos(), r, if own { None } else { c.idx() }, id.as_deref())?;
         mark_construction(sk, &[ci], p);
         // A point the circle was drawn through stays on it (#3099): with a placed centre, that
         // sets the radius.

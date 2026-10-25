@@ -612,6 +612,22 @@ fn move_rotation_turns_line_angle_dimension() {
     assert!(close(d.len(), length) && close(d.angle(), 120f64.to_radians()), "{d:?}");
 }
 
+/// #5034: a circle drawn with its centre on the fixed origin is ordinary geometry: it keeps a
+/// centre of its own, and `sketch.move` takes it to the place asked for.
+#[test]
+fn a_circle_drawn_at_the_origin_can_be_moved() {
+    let mut s = new_sketch();
+    let drawn = run(&mut s, "sketch.circle.center", json!({"center": "origin", "radius": 10}));
+    let c = ids(&drawn["curves"])[0].clone();
+    // The circle has a centre of its own, tied to the origin, instead of borrowing the origin.
+    assert!(sketch(&s).resolve_point(&format!("{c}.center")).is_some(), "the circle keeps a centre of its own");
+    let moved = run(&mut s, "sketch.move", json!({"entities": [c], "translate": [10, 5]}));
+    let sk = sketch(&s);
+    let centre = sk.center(sk.curve_index(&c).unwrap()).unwrap();
+    assert!(centre.dist(Vec2::new(10.0, 5.0)) < 1e-7, "the circle moved where it was asked to: {centre:?}");
+    assert!(moved["sketch"]["solved"].as_bool().unwrap_or(false), "the sketch stayed solved: {moved}");
+}
+
 /// #1485: after a circle is trimmed between two construction lines, clicking the trimmed end
 /// picks the construction line's end lying there, not the arc's own; the tangent arc still starts
 /// from the trimmed arc, tangent to it.

@@ -2550,6 +2550,17 @@ fn transform_in_place(sk: &mut Sketch, cs: &[usize], ps: &[usize], f: &dyn Fn(Ve
     if pts.iter().any(|q| sk.points.get(*q).is_some_and(|x| x.fixed || x.link.is_some())) {
         return Err(bad(cmd, "fixed or projected geometry cannot move"));
     }
+    // A point the origin holds goes where the move takes it: the coincidence that held it
+    // there is dropped (#5034).
+    let moved: Vec<usize> = pts
+        .iter()
+        .copied()
+        .filter(|q| {
+            let p = sk.point(*q).unwrap_or_default();
+            (f(p) - p).len() > TOL
+        })
+        .collect();
+    release_origin_holds(sk, &moved);
     for q in pts {
         if let Some(x) = sk.points.get_mut(q) {
             x.pos = f(x.pos);
@@ -2628,6 +2639,15 @@ fn rotate_axis_constraints(sk: &mut Sketch, doc: &mut solidcraft_doc::Document, 
         doc.set_param(&name, &expr, None, None)?;
     }
     Ok(())
+}
+
+/// Drop the coincidences that held the moved points to the sketch's origin: a move translates
+/// the geometry it is given, and the origin does not travel with it (#5034).
+fn release_origin_holds(sk: &mut Sketch, pts: &[usize]) {
+    let Some(origin) = sk.point_index("origin") else { return };
+    sk.constraints.retain(
+        |c| !matches!(&c.kind, ConstraintKind::Coincident { p, q } if (pts.contains(p) && *q == origin) || (pts.contains(q) && *p == origin)),
+    );
 }
 
 fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
