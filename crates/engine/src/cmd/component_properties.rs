@@ -118,7 +118,10 @@ fn properties(s: &Session, doc: &Document, selected: &[u64], descendants: bool, 
         for body in state.bodies.iter().filter(|b| doc.model_body_component(b) == component) {
             let transform: Mat = doc.model_body_offset(body).map(|offset| solidcraft_doc::mat_mul(&transform, offset)).unwrap_or(transform);
             let placed = solidcraft_kernel::transform_matrix(&body.body, transform)?;
-            let measured = solidcraft_kernel::measure(&placed)?;
+            let mut measured = solidcraft_kernel::measure(&placed)?;
+            if let Some(sheet) = state.sheets.iter().find(|sheet| sheet.body == body.definition_name()) {
+                sheet.correct_perforation_properties(&mut measured, &transform)?;
+            }
             let density = doc.density(&body.name);
             let body_mass = measured.volume * density / 1000.0;
             volume += measured.volume;

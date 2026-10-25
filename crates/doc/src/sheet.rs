@@ -2056,6 +2056,57 @@ impl SheetBody {
             .sum()
     }
 
+    /// Include the physical holes that perforation fields leave out of the B-rep measurement.
+    /// `placement` maps this sheet's geometry into the measurement's frame. Hole cylinders
+    /// lie on panels, clear of bends; their volume moments follow each panel's current fold.
+    /// Bounding boxes and B-rep topology are unchanged by these interior holes.
+    pub fn correct_perforation_properties(&self, measured: &mut kernel::BodyMeasure, placement: &Mat) -> Result<()> {
+        if self.perforations.is_empty() {
+            return Ok(());
+        }
+        let invalid = || DocError::Invalid(format!("invalid perforation physical properties for `{}`", self.body));
+        if !(self.t.is_finite() && self.t > 0.0) || placement.iter().flatten().any(|v| !v.is_finite()) {
+            return Err(invalid());
+        }
+        let panels: Vec<_> = self.panels().into_iter().map(|(i, region)| (mat_mul(placement, &self.world(i)), region)).collect();
+        let flat = mat_mul(placement, &self.world(None));
+        let (mut removed, mut area_delta, mut moment_delta) = (0.0, 0.0, Vec3::ZERO);
+        for p in &self.perforations {
+            if !([p.diameter, p.pitch, p.margin].iter().all(|v| v.is_finite()) && p.diameter > 0.0 && p.pitch > p.diameter && p.margin >= 0.0) {
+                return Err(invalid());
+            }
+            let holes = self.perforation_holes(p)?;
+            let disk = std::f64::consts::PI * (p.diameter / 2.0).powi(2);
+            let volume = disk * self.t;
+            removed += holes.len() as f64 * volume;
+            area_delta += holes.len() as f64 * (std::f64::consts::PI * p.diameter * self.t - 2.0 * disk);
+            for hole in holes {
+                let world = if self.flat || panels.len() == 1 {
+                    &flat
+                } else {
+                    &panels.iter().find(|(_, region)| region.contains(hole)).ok_or_else(invalid)?.0
+                };
+                let center = apply_point(world, v3(hole) + Vec3::Z * (self.t / 2.0));
+                // Moments about the measured centre avoid subtracting large world moments
+                // when a small sheet is placed far from the origin.
+                moment_delta += (measured.centroid - center) * volume;
+            }
+        }
+        if removed == 0.0 {
+            return Ok(());
+        }
+        let volume = measured.volume - removed;
+        let area = measured.area + area_delta;
+        let centroid = measured.centroid + moment_delta / volume;
+        if !(volume.is_finite() && volume > 0.0 && area.is_finite() && area >= 0.0 && centroid.is_finite()) {
+            return Err(invalid());
+        }
+        measured.volume = volume;
+        measured.area = area;
+        measured.centroid = centroid;
+        Ok(())
+    }
+
     /// Topology counted by faces and loops: a round hole is one face bounded by two closed circular
     /// edges (one vertex each), where the sewn solid splits it into arcs. Returns the change to
     /// the sewn (faces, edges, vertices).
