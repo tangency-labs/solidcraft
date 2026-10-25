@@ -48,8 +48,9 @@
 //! - **Temporary state.** The out-of-bounds convergence upstream enables on the surface
 //!   for the call (`SmTemporaryChangeValue`) runs on an evaluation copy with the flag
 //!   set. The surface cache flags (`m_bPointTestEnabled` off, `m_bProcessBoundaryCurves`
-//!   on) are the defaults of an unowned surface's cache in the port; a face-owned
-//!   surface's point solve is [`SolidError::Unported`] (`query.face_p2`) there. The
+//!   on) are modelled by the start point drop keeping every solution
+//!   ([`Surface::global_point_solve_point_test_off`], `SmSurfaceDropLib.cpp:4310-4316`)
+//!   unless the caller's face test or context replaces it. The
 //!   curve cache is built fresh (`make_curve_cache`); a failed build is
 //!   `SM_ERR_NULL_POINTER` (`NER`).
 //! - **Offset surface.** `SmOffsetSurface(1.0, *this, FALSE, lSingularities)` is a
@@ -778,7 +779,9 @@ impl Surface {
                 classify,
             )?
         } else {
-            this.global_point_solve(
+            // the cache's point testing is off for the whole call (`sChange1`,
+            // SmSurfaceDropLib.cpp:4315): GlobalPointSolve keeps every solution
+            this.global_point_solve_point_test_off(
                 k,
                 fs.surface, // `this`'s handle when the caller gave a record (minimize ignores it)
                 &s_uv_domain,
