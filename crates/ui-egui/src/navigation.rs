@@ -652,12 +652,22 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
 }
 
 /// The 3D mouse's motion this frame (#1336), on a page `rect` whose camera may do `caps`: the cap
-/// pans and zooms every page, and turns the view only where the page may orbit and no sketch is
-/// being edited (a sketch keeps its view square to it). [`handle`] calls it for its page; the 3D
+/// pans and zooms every page, and turns the view where the page may orbit. In a sketch, turning
+/// stays off while the camera is in its initial sketch orientation. [`handle`] calls it for its page; the 3D
 /// mouse only reads the device and queues the motion ([`crate::space_mouse::navigate_frame`]).
 pub(crate) fn device(app: &mut SolveApp, rect: Rect, caps: NavCaps) {
     let Some(queued) = app.viewport.device_motion.take() else { return };
-    let turn = caps.orbit && app.session.active_sketch.is_none();
+    let sketch_view_is_initial = solidcraft_engine::view::open_sketch_plane(&app.session).is_some_and(|plane| {
+        let normal = plane.normal();
+        let mut initial = app.cam.looking_from(normal);
+        if normal.z.abs() > 0.999 {
+            initial.yaw = if normal.z > 0.0 { (-plane.x.y).atan2(plane.x.x) } else { plane.x.y.atan2(plane.x.x) };
+        }
+        let (right, up, back) = app.cam.basis();
+        let (initial_right, initial_up, initial_back) = initial.basis();
+        right.dot(initial_right) > 0.999 && up.dot(initial_up) > 0.999 && back.dot(initial_back) > 0.999
+    });
+    let turn = caps.orbit && !sketch_view_is_initial;
     let height = f64::from(rect.height().max(1.0));
     device_camera(&mut app.cam, queued.motion, queued.seconds, height, turn, app.preferences.zoom_reverse, app.preferences.free_orbit);
 }
@@ -1386,14 +1396,17 @@ mod tests {
         }
     }
 
-    /// While a sketch is edited the cap pans and zooms, and the view stays square to the sketch.
+    /// While a sketch is edited the cap pans and zooms without turning a square-on view; after the
+    /// view is tilted away from the sketch, the cap can turn it again.
     #[test]
-    fn the_3d_mouse_never_turns_a_sketch_being_edited() {
+    fn the_3d_mouse_turns_a_sketch_only_after_the_view_is_tilted() {
         use crate::space_mouse::{DeviceMotion, Motion};
+        use solidcraft_engine::render::Camera;
         let mut s = solidcraft_engine::Session::default();
         s.execute("sketch.create", &serde_json::json!({"plane": "XY"})).unwrap();
         let mut app = crate::SolveApp::new(s, crate::Services::default());
         assert!(app.session.active_sketch.is_some());
+        app.cam = Camera { yaw: 0.0, pitch: std::f64::consts::FRAC_PI_2, ..Camera::default() };
         let before = app.cam;
         app.viewport.device_motion = Some(DeviceMotion { motion: Motion { translation: [1.0; 3], rotation: [1.0; 3] }, seconds: 0.05 });
         let page = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
@@ -1401,6 +1414,19 @@ mod tests {
         assert_eq!((app.cam.yaw, app.cam.pitch, app.cam.roll), (before.yaw, before.pitch, before.roll));
         assert_ne!(app.cam.target, before.target);
         assert!(app.cam.distance < before.distance);
+
+        app.cam.roll = 0.1;
+        let tilted = app.cam;
+        app.viewport.device_motion = Some(DeviceMotion { motion: Motion { translation: [0.0; 3], rotation: [0.0, 0.0, 0.1] }, seconds: 0.05 });
+        super::device(&mut app, page, super::NavCaps::MODEL);
+        assert_ne!((app.cam.yaw, app.cam.pitch, app.cam.roll), (tilted.yaw, tilted.pitch, tilted.roll));
+
+        app.cam.pitch = 1.2;
+        let tilted = app.cam;
+        app.viewport.device_motion = Some(DeviceMotion { motion: Motion { translation: [0.0; 3], rotation: [0.0, 0.1, 0.0] }, seconds: 0.05 });
+        super::device(&mut app, page, super::NavCaps::MODEL);
+        assert_ne!((app.cam.yaw, app.cam.pitch, app.cam.roll), (tilted.yaw, tilted.pitch, tilted.roll));
+
         // Nothing queued, nothing moves.
         let still = app.cam;
         super::device(&mut app, page, super::NavCaps::MODEL);
