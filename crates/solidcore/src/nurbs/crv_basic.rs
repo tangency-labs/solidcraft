@@ -99,6 +99,8 @@
 // Branches keep upstream's `if( x NEQ NL_NOZ ) ... else ...` order for traceability.
 #![allow(clippy::if_not_else)]
 
+use std::sync::Arc;
+
 use crate::error::{NlibCode, Result, SolidError};
 use crate::limits;
 use crate::math::Vec3;
@@ -130,14 +132,17 @@ fn invalid(operation: &'static str, reason: &'static str) -> SolidError {
 ///
 /// The indices in use are kept apart from the storage (which may be larger), as
 /// upstream; the constructors guarantee that the storage holds them.
+///
+/// The control point and knot storage are shared copy-on-write (`Arc`, written
+/// through [`Arc::make_mut`]): a clone shares them until one side writes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Curve {
     /// Control point storage, at least `n + 1` entries.
-    pw: Vec<CPoint>,
+    pw: Arc<Vec<CPoint>>,
     n: usize,
     p: usize,
     /// Knot storage, at least `m + 1` entries.
-    u: Vec<f64>,
+    u: Arc<Vec<f64>>,
     m: usize,
 }
 
@@ -157,7 +162,13 @@ impl Curve {
             .len()
             .checked_sub(1)
             .ok_or_else(|| invalid("nurbs::crv_basic::Curve::new", "empty knot vector"))?;
-        Ok(Self { pw, n, p, u, m })
+        Ok(Self {
+            pw: Arc::new(pw),
+            n,
+            p,
+            u: Arc::new(u),
+            m,
+        })
     }
 
     /// Curve over the first `n + 1` control points of `pw` and the first `m + 1`
@@ -180,7 +191,13 @@ impl Curve {
                 "storage smaller than (n, m)",
             ));
         }
-        Ok(Self { pw, n, p, u, m })
+        Ok(Self {
+            pw: Arc::new(pw),
+            n,
+            p,
+            u: Arc::new(u),
+            m,
+        })
     }
 
     /// A zero-filled curve with indices `(n, m)` and degree `p`.
@@ -189,10 +206,10 @@ impl Curve {
         let np = n.checked_add(1).ok_or_else(mem)?;
         let nk = m.checked_add(1).ok_or_else(mem)?;
         Ok(Self {
-            pw: limits::try_filled(np, CPoint::default()).ok_or_else(mem)?,
+            pw: Arc::new(limits::try_filled(np, CPoint::default()).ok_or_else(mem)?),
             n,
             p,
-            u: limits::try_filled(nk, 0.0).ok_or_else(mem)?,
+            u: Arc::new(limits::try_filled(nk, 0.0).ok_or_else(mem)?),
             m,
         })
     }
@@ -229,7 +246,9 @@ impl Curve {
 
     /// Mutable control points in use, `Pw[0..=n]`.
     pub fn cpts_mut(&mut self) -> &mut [CPoint] {
-        self.pw.get_mut(..=self.n).unwrap_or(&mut [])
+        Arc::make_mut(&mut self.pw)
+            .get_mut(..=self.n)
+            .unwrap_or(&mut [])
     }
 
     /// The knots in use, `U[0..=m]` (`N_CrvGetKnots`).
@@ -240,7 +259,9 @@ impl Curve {
 
     /// Mutable knots in use, `U[0..=m]`.
     pub fn knots_mut(&mut self) -> &mut [f64] {
-        self.u.get_mut(..=self.m).unwrap_or(&mut [])
+        Arc::make_mut(&mut self.u)
+            .get_mut(..=self.m)
+            .unwrap_or(&mut [])
     }
 
     /// Sizes of the control point and knot storage (highest storable indices plus
@@ -274,8 +295,8 @@ impl Curve {
                 "storage smaller than the indices",
             ));
         }
-        self.pw = pw;
-        self.u = u;
+        self.pw = Arc::new(pw);
+        self.u = Arc::new(u);
         Ok(())
     }
 
@@ -310,10 +331,15 @@ impl Curve {
 
     /// Shrinks the storage to exactly the indices in use (`N_CrvCompress`).
     pub fn compress(&mut self) {
+        if self.pw.len() == self.n.saturating_add(1) && self.u.len() == self.m.saturating_add(1) {
+            // (already exactly the indices in use: the same storage values, kept
+            // shared)
+            return;
+        }
         let pw = self.cpts().to_vec();
         let u = self.knots().to_vec();
-        self.pw = pw;
-        self.u = u;
+        self.pw = Arc::new(pw);
+        self.u = Arc::new(u);
     }
 
     /// Copies this curve into `dst` (`N_CrvCopy`): a NULL (`None`) destination is
@@ -1277,6 +1303,21 @@ pub fn cross_bound_deriv_crv_non_rat_srf(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clones_share_storage_until_written() {
+        let a = line2();
+        let mut b = a.clone();
+        assert!(Arc::ptr_eq(&a.pw, &b.pw) && Arc::ptr_eq(&a.u, &b.u));
+        b.compress();
+        assert!(Arc::ptr_eq(&a.pw, &b.pw));
+        b.knots_mut()[0] = -1.0;
+        assert!(!Arc::ptr_eq(&a.u, &b.u) && Arc::ptr_eq(&a.pw, &b.pw));
+        b.cpts_mut()[0] = CPoint::ZERO;
+        assert!(!Arc::ptr_eq(&a.pw, &b.pw));
+        assert_eq!(a, line2());
+        assert_ne!(a, b);
+    }
 
     fn line2() -> Curve {
         Curve::new(
