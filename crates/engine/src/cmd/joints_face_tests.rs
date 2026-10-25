@@ -211,7 +211,9 @@ fn origins_take_a_long_piece_name() {
     run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 2, "corner": [100, 200, 0]}));
     run(&mut s, "solid.hole", json!({"position": [110, 210, 2], "diameter": 6}));
     let top = face_name(&mut s, "Tray", Vec3::new(20.0, 20.0, 1.0));
-    assert!(top.len() > 512, "{}: {top}", top.len());
+    // Split-face names are bounded at 512 bytes (#5860), so the name is as long as a piece name gets;
+    // joints take far more than that (`MAX_FACE_NAME`), so none is refused for its length.
+    assert!(top.len() > 400 && top.len() <= 512, "{}: {top}", top.len());
     let wall = face_name(&mut s, "Tray", Vec3::new(53.0, 50.0, 0.5));
     let foot = face_name(&mut s, "Bracket", Vec3::new(113.0, 210.0, 1.0));
     let under = face_name(&mut s, "Bracket", Vec3::new(105.0, 205.0, 0.0));
