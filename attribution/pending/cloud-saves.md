@@ -1,0 +1,2 @@
+| docs/book/src/guide/images/cloud-saves-setup.png | SolidCraft contributors | actual SolidCraft 0.40.0 desktop screenshot of guided GitHub setup with automatic repository discovery and a new token; isolated profile and public-safe examples | MIT OR Apache-2.0 |
+| docs/book/src/guide/images/cloud-saves-home.png | SolidCraft contributors | actual SolidCraft 0.40.0 desktop screenshot of synchronized original sample designs and model previews on Start; isolated profile and public-safe examples | MIT OR Apache-2.0 |

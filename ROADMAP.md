@@ -42,7 +42,7 @@ reaches the app only when that branch merges. They are rough, not a promise.
 - **[Assemblies & joints](https://github.com/tangency-labs/solidcraft/milestone/3)**: in progress, 4 of 19 pieces done. Joints, motion studies and exploded views already work; placement rules, linked sub-assemblies, fastener stacks and weldment corners are the pieces left.
 - **[Import & export](https://github.com/tangency-labs/solidcraft/milestone/5)**: in progress, 7 of 39 pieces done. FreeCAD, SolidWorks and point-cloud import, and mesh export options.
 - **[AI agents & MCP](https://github.com/tangency-labs/solidcraft/milestone/18)**: in progress, 2 of 8 pieces done. Agent chat and the MCP server.
-- **[Interface, web app & plugins](https://github.com/tangency-labs/solidcraft/milestone/4)**: in progress, 31 of 96 pieces done. Ribbon redesign, navigation, themes, the web app and plugins.
+- **[Interface, web app & plugins](https://github.com/tangency-labs/solidcraft/milestone/4)**: in progress, 31 of 96 pieces done. Ribbon redesign, navigation, themes, the web app and plugins. Git-backed Cloud Saves is in review ([#4838](https://github.com/tangency-labs/solidcraft/issues/4838)).
 - **[SMLib kernel migration](https://github.com/tangency-labs/solidcraft/milestone/1)**: in progress, 1 tracking issue open. The kernel is moving from truck to NVIDIA's SMLib (usd-brep, Apache-2.0) on the `kernel-smlib` branch; it is not in releases yet. Tracked in [#4012](https://github.com/tangency-labs/solidcraft/issues/4012).
 
 ## Next
