@@ -2121,7 +2121,7 @@ fn selected_spline_handles(
     let selected: std::collections::HashSet<String> = selection
         .iter()
         .filter_map(|item| match item {
-            Sel::SketchCurve { id } => sk.curve_index(id).and_then(|index| {
+            Sel::SketchCurve { id, .. } => sk.curve_index(id).and_then(|index| {
                 matches!(sk.curves.get(index).map(|curve| &curve.kind), Some(CurveKind::Spline { control: false, .. })).then(|| id.clone())
             }),
             _ => None,
