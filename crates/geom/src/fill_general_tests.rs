@@ -148,10 +148,17 @@ fn a_planar_polygon_is_its_plane_and_a_point_lifts_it() {
 #[test]
 fn hostile_loops_and_specs_are_refused() {
     let ok = |s: &FillSpec| fill_general(1, &mut tube_end(10.0, false), s);
-    for (tol, angle, crown) in
-        [(0.0, ANGLE, 0.0), (f64::NAN, ANGLE, 0.0), (TOL, -1.0, 0.0), (TOL, ANGLE, f64::NAN), (TOL, ANGLE, -0.95), (TOL, ANGLE, 1e300)]
-    {
-        assert!(ok(&FillSpec { tol, angle_tol: angle, crown, points: &[] }).is_err(), "{tol} {angle} {crown}");
+    for bad in [0.0, -0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+        for (tol, angle_tol) in [(bad, ANGLE), (TOL, bad)] {
+            let result = ok(&FillSpec { tol, angle_tol, crown: 0.0, points: &[] });
+            assert!(
+                matches!(result, Err(SplineError::Invalid(ref message)) if message == "the fill tolerances must be positive"),
+                "tol={tol:?}, angle_tol={angle_tol:?}: {result:?}"
+            );
+        }
+    }
+    for crown in [f64::NAN, -0.95, 1e300] {
+        assert!(ok(&FillSpec { crown, ..spec(&[]) }).is_err(), "{crown}");
     }
     assert!(ok(&spec(&[Vec3::new(f64::NAN, 0.0, 0.0)])).is_err());
     assert!(ok(&spec(&vec![Vec3::ZERO; MAX_FILL_POINTS + 1])).is_err());
