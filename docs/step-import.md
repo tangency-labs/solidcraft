@@ -17,6 +17,15 @@ camera moves. Large assemblies keep their tree open without resolving every part
 folder again on each frame. Geometry edits, assembly changes and uncaptured or reverted
 positions refresh those queries; selection, visibility and locking are read live.
 
+The reader also matches exact local-coordinate geometry and topology from separate STEP
+items. Hashes select candidates; a bijective entity comparison verifies them. Different units
+remain separate. Definitions link only when their names, product identity and appearances
+agree; uninterpreted product properties keep distinct definitions separate. Other exact matches
+share geometry storage and display buffers while retaining their identities and styles.
+New imports can embed a versioned shared STEP source with explicit original-entity mappings,
+so save/reopen preserves the source without depending on the optional native cache. Import
+features can select source body indices instead of rebuilding the rest of the assembly.
+
 Hover picking pauses while the mouse moves the view and resumes when navigation stops.
 A 3D mouse moving the view leaves it on: the pointer hand is free, so preselection and
 clicks keep working while the other hand turns the view. Picking uses the current camera

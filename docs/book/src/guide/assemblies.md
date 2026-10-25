@@ -12,6 +12,16 @@ triad, then **Capture Position** to keep it or **Revert** to put it back. SolidC
 the next command if a move wasn't captured. **Ground** fixes an occurrence in place, and
 **Unground** (the same row of the browser's context menu) frees it again.
 
+STEP imports keep repeated parts linked. Identical geometry can share display buffers even
+when its names or appearances differ. Repeated sibling instances in an imported assembly
+appear in a collapsed group; expand it to pick one placement, or use its row or eye to select
+or show/hide the whole group. Groups stay within their original assembly parent.
+
+Use **Make independent** on a placement's context menu before editing just that copy. It
+keeps the placement and its position, and copies its history; for a nested placement it copies
+only the shared ancestors along that path. Other placements keep their original definitions.
+References that cannot be isolated safely refuse the command without changing the design.
+
 The design's first part is grounded when it is made: the first occurrence placed directly in the
 design by **New Component**, **Create Components from Bodies** or an import. Parts made after it,
 standard parts and copies made with Paste or Paste New start free, so do parts made inside other

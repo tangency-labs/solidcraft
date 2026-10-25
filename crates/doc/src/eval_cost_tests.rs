@@ -171,7 +171,7 @@ fn placed_imports(parts: usize) -> Document {
         let comp = doc.add_component(Some(&format!("Part {i}")), 0).unwrap();
         let o = doc.occurrences.iter_mut().find(|o| o.component == comp).unwrap();
         o.transform = rigid(Vec3::new(0.0, 0.0, 5.0 * i as f64), Vec3::ZERO, Vec3::Z, 0.05 * i as f64);
-        let kind = FeatureKind::Import { file: format!("part{i}.step"), step, components: Vec::new(), skip: Vec::new() };
+        let kind = FeatureKind::Import { file: format!("part{i}.step"), step: step.into(), components: Vec::new(), skip: Default::default() };
         let id = doc.add_feature(kind, Some(&format!("Part {i}"))).unwrap();
         doc.feature_mut(id).unwrap().component = comp;
     }
@@ -351,7 +351,7 @@ fn an_imported_file_is_fingerprinted_by_its_text() {
     let mut copy = doc.clone();
     for f in &mut copy.features {
         if let FeatureKind::Import { step, .. } = &mut f.kind {
-            *step = Arc::from(step.to_string());
+            *step = step.expanded_text().unwrap().into_owned().into();
         }
     }
     let work = counted(|| model.evaluate(&copy));
@@ -363,7 +363,7 @@ fn an_imported_file_is_fingerprinted_by_its_text() {
     let other = kernel::box_solid(Vec3::ZERO, Vec3::new(4.0, 4.0, 4.0)).unwrap();
     let text: Arc<str> = kernel::step_export(&[&other], "test").unwrap().into();
     if let Some(FeatureKind::Import { step, .. }) = copy.features.last_mut().map(|f| &mut f.kind) {
-        *step = text;
+        *step = text.into();
     }
     let work = counted(|| model.evaluate(&copy));
     assert_eq!(work.digested, 1);

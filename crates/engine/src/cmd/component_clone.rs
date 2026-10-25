@@ -1,5 +1,6 @@
 //! Independent copies of a component definition graph, assembled and evaluated atomically.
 use solidcraft_doc::BodyName;
+use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::params::bad;
@@ -9,6 +10,46 @@ use solidcraft_doc::{Document, Feature, FeatureKind, Mat, Occurrence};
 
 const CMD: &str = "component.paste_new";
 const MAX_WORK: usize = 10_000;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Scope {
+    Tree,
+    DetachTree,
+    DetachDefinition,
+}
+
+impl Scope {
+    fn shallow(self) -> bool {
+        self == Self::DetachDefinition
+    }
+    fn detaches(self) -> bool {
+        self != Self::Tree
+    }
+}
+
+struct SharedBase {
+    feature: u64,
+    parts: BTreeMap<usize, (String, Vec<String>)>,
+}
+
+pub(super) struct Copied {
+    pub component: u64,
+    pub occurrence: u64,
+    pub components: BTreeMap<u64, u64>,
+    pub occurrences: BTreeMap<u64, u64>,
+    pub bodies: BTreeMap<String, String>,
+    feature_ids: Vec<u64>,
+    body_count: usize,
+    frozen: Vec<String>,
+    pub notices: Vec<String>,
+}
+
+impl Copied {
+    fn report(self) -> Value {
+        json!({"component":self.component,"occurrence":self.occurrence,"features":self.feature_ids,
+            "components":self.components.len(),"bodies":self.body_count,"frozen_bodies":self.frozen,"notices":self.notices})
+    }
+}
 
 fn mesh_distance(mesh: &solidcraft_geom::Mesh, point: solidcraft_geom::Vec3) -> f64 {
     mesh.triangles
@@ -218,15 +259,30 @@ pub(super) fn paste(
     parent: u64,
     params: &Value,
 ) -> Result<Value> {
-    let (scratch, out) = build(s, &Source::of(s), component, source_occurrence, transform, parent, None, params)?;
+    copy(s, component, source_occurrence, transform, parent, params, Scope::Tree).map(Copied::report)
+}
+
+pub(super) fn copy(
+    s: &mut Session,
+    component: u64,
+    source_occurrence: Option<Occurrence>,
+    transform: Mat,
+    parent: u64,
+    params: &Value,
+    scope: Scope,
+) -> Result<Copied> {
+    let (mut scratch, copied) = build_copy(s, &Source::of(s), component, source_occurrence, transform, parent, None, params, scope)?;
+    let visibility = scope.detaches().then(|| std::mem::take(&mut scratch.visibility));
     s.accept_computed(scratch);
-    Ok(out)
+    if let Some(visibility) = visibility {
+        s.visibility = visibility;
+    }
+    Ok(copied)
 }
 
 /// [`paste`] from `origin` into `s`: the computed session to accept, and what the paste made.
 /// `parent_path`: the placement of `parent` the copy is placed by (default: the source
 /// placement's parent's).
-#[allow(clippy::too_many_arguments)]
 pub(super) fn build(
     s: &Session,
     origin: &Source<'_>,
@@ -237,6 +293,21 @@ pub(super) fn build(
     parent_path: Option<Vec<u64>>,
     params: &Value,
 ) -> Result<(Session, Value)> {
+    build_copy(s, origin, component, source_occurrence, transform, parent, parent_path, params, Scope::Tree)
+        .map(|(scratch, copied)| (scratch, copied.report()))
+}
+
+fn build_copy(
+    s: &Session,
+    origin: &Source<'_>,
+    component: u64,
+    source_occurrence: Option<Occurrence>,
+    transform: Mat,
+    parent: u64,
+    parent_path: Option<Vec<u64>>,
+    params: &Value,
+    scope: Scope,
+) -> Result<(Session, Copied)> {
     let source = origin.doc;
     let source_parameters: BTreeMap<_, _> = source.params.iter().map(|p| (p.name.as_str(), p)).collect();
     let generated_parameters: BTreeSet<_> = source
@@ -246,7 +317,7 @@ pub(super) fn build(
         .map(|p| p.name.as_str())
         .chain(source.features.iter().flat_map(|f| f.param_names.iter().map(String::as_str)))
         .collect();
-    let definitions = graph(source, component)?;
+    let definitions = if scope.shallow() { vec![component] } else { graph(source, component)? };
     let definition_records: BTreeMap<_, _> = source.components.iter().map(|c| (c.id, c)).collect();
     let selected: BTreeSet<_> = definitions.iter().copied().collect();
     if source.marker.is_some_and(|m| m < source.features.len()) {
@@ -286,6 +357,8 @@ pub(super) fn build(
     let mut used_bodies: BTreeSet<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
     let mut new_ids = Vec::new();
     let mut frozen = Vec::new();
+    let mut shared_bases: BTreeMap<u64, SharedBase> = BTreeMap::new();
+    let mut import_sources = BTreeMap::new();
     // Allocate definitions, discarding their automatic placeholder occurrence except root.
     for old in &definitions {
         let c = definition_records.get(old).ok_or_else(|| bad(CMD, "missing definition"))?;
@@ -301,6 +374,7 @@ pub(super) fn build(
             added.metadata = c.metadata.clone();
             added.properties = c.properties.clone();
             added.identification_color = c.identification_color;
+            added.imported_from = c.imported_from;
         }
         components.insert(*old, new);
         if *old != component {
@@ -308,7 +382,14 @@ pub(super) fn build(
         }
     }
     let root = *components.get(&component).ok_or_else(|| bad(CMD, "missing clone root"))?;
-    let root_occurrence = scratch.doc.occurrence_of(root).map(|o| o.id).ok_or_else(|| bad(CMD, "missing cloned placement"))?;
+    let automatic = scratch.doc.occurrence_of(root).map(|o| o.id).ok_or_else(|| bad(CMD, "missing cloned placement"))?;
+    let root_occurrence = if scope.detaches() {
+        let old = source_occurrence.as_ref().ok_or_else(|| bad(CMD, "detaching requires an exact placement"))?;
+        scratch.doc_mut().occurrences.retain(|o| o.id != automatic);
+        old.id
+    } else {
+        automatic
+    };
     let mut clone_path = if let Some(path) = parent_path {
         path
     } else if let Some(o) = &source_occurrence {
@@ -320,23 +401,41 @@ pub(super) fn build(
     };
     clone_path.push(root_occurrence);
     if let Some(o) = scratch.doc_mut().occurrences.iter_mut().find(|o| o.id == root_occurrence) {
+        o.component = root;
         o.transform = transform;
         // A copy starts free, even of a grounded part (#2804); the parts inside it keep theirs.
-        o.grounded = false;
+        o.grounded = scope.detaches() && source_occurrence.as_ref().is_some_and(|o| o.grounded);
+        if scope.detaches()
+            && let Some(old) = &source_occurrence
+        {
+            o.name.clone_from(&old.name);
+        }
     }
     if let Some(o) = &source_occurrence {
         occurrences.insert(o.id, root_occurrence);
     }
     for old in source.occurrences.iter().filter(|o| selected.contains(&o.parent)) {
-        let child = *components.get(&old.component).ok_or_else(|| bad(CMD, "missing child definition"))?;
+        let child = match components.get(&old.component) {
+            Some(child) => *child,
+            None if scope.shallow() => old.component,
+            None => return Err(bad(CMD, "missing child definition")),
+        };
         let owner = *components.get(&old.parent).ok_or_else(|| bad(CMD, "missing parent definition"))?;
-        let pose = origin.pending_moves.get(&old.id).copied().unwrap_or(old.transform);
+        let pose = if scope.detaches() { old.transform } else { origin.pending_moves.get(&old.id).copied().unwrap_or(old.transform) };
         if !super::component::valid_position(&pose) {
             return Err(bad(CMD, "invalid internal pending occurrence transform"));
         }
         let id = scratch.doc_mut().add_occurrence(child, owner, pose)?;
         if let Some(o) = scratch.doc_mut().occurrences.iter_mut().find(|o| o.id == id) {
             o.grounded = old.grounded;
+            if scope.detaches() {
+                o.name.clone_from(&old.name);
+            }
+        }
+        if scope.detaches()
+            && let Some(pose) = s.pending_moves.get(&old.id)
+        {
+            scratch.pending_moves.insert(id, *pose);
         }
         occurrences.insert(old.id, id);
     }
@@ -393,30 +492,110 @@ pub(super) fn build(
         let entered = entry.and_then(|f| origin.model.result(f.id)).map(|r| r.state.clone());
         let base = entered.as_ref().and_then(|st| st.body(&body.name)).or_else(|| before.as_ref().and_then(|st| st.body(&body.name))).unwrap_or(body);
         let baseline_component = source.model_body_component(base);
-        let geometry = solidcraft_kernel::transform_matrix(&base.body, offset)?;
-        let step = solidcraft_kernel::step_export(&[&geometry], "SolidCraft independent reassigned body")?;
+        let imported = source.feature(base.feature).and_then(|f| match &f.kind {
+            FeatureKind::Import { step, skip, .. } => Some((f, step, skip)),
+            _ => None,
+        });
+        let shared = if let Some((feature, step, filter)) = imported {
+            let (imp, names) = match import_sources.entry(feature.id) {
+                Entry::Occupied(entry) => entry.into_mut(),
+                Entry::Vacant(entry) => {
+                    let imp = match filter {
+                        solidcraft_doc::ImportFilter::Only { only } => step.import_only(only)?,
+                        solidcraft_doc::ImportFilter::Skip(_) => step.import_shared()?,
+                    };
+                    let before = origin.model.state_before(feature.id);
+                    let names: BTreeMap<_, _> = solidcraft_doc::import_body_names(&before, &feature.body_names, &imp, filter)
+                        .into_iter()
+                        .enumerate()
+                        .filter_map(|(index, name)| name.map(|name| (name, index)))
+                        .collect();
+                    entry.insert((imp, names))
+                }
+            };
+            let index = names.get(&base.name).copied().ok_or_else(|| bad(CMD, "imported baseline lost its source body"))?;
+            let selected = imp.bodies.get(index).ok_or_else(|| bad(CMD, "imported baseline source index"))?;
+            if solidcraft_kernel::exact_geometry_eq(&base.body, &selected.body)? == Some(true) {
+                Some((step, selected.planned_index, feature.link_faces.get(index).cloned().unwrap_or_default()))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
         let new_name = unique(&body.name, &mut used_bodies, origin.other_design);
         bodies.insert(body.name.clone(), new_name.clone());
         // From another design it is named as what it is there, an imported body, numbered as
         // the timeline numbers its features ("BodyImport1").
-        let feature_name = if origin.other_design {
-            let name =
-                (1..=MAX_WORK + 1).map(|n| format!("BodyImport{n}")).find(|n| !used_features.contains(n)).unwrap_or_else(|| "BodyImport".into());
-            used_features.insert(name.clone());
-            name
-        } else {
-            unique(&format!("{} Base", body.name), &mut used_features, false)
+        let base_name = |used_features: &mut BTreeSet<String>| {
+            if origin.other_design {
+                let name =
+                    (1..=MAX_WORK + 1).map(|n| format!("BodyImport{n}")).find(|n| !used_features.contains(n)).unwrap_or_else(|| "BodyImport".into());
+                used_features.insert(name.clone());
+                name
+            } else {
+                unique(&format!("{} Base", body.name), used_features, false)
+            }
         };
-        let id = scratch.doc_mut().add_feature(
-            FeatureKind::Import { file: format!("{} independent base", body.name), step: step.into(), components: Vec::new(), skip: Vec::new() },
-            Some(&feature_name),
-        )?;
+        if let Some((step, index, links)) = shared {
+            let base = match shared_bases.entry(base.feature) {
+                Entry::Occupied(entry) => entry.into_mut(),
+                Entry::Vacant(entry) => {
+                    let name = base_name(&mut used_features);
+                    let id = scratch.doc_mut().add_feature(
+                        FeatureKind::Import {
+                            file: format!("{} independent base", body.name),
+                            step: step.clone(),
+                            components: Vec::new(),
+                            skip: solidcraft_doc::ImportFilter::Only { only: Vec::new() },
+                        },
+                        Some(&name),
+                    )?;
+                    if let Some(f) = scratch.doc_mut().feature_mut(id) {
+                        f.component = root;
+                    }
+                    features.insert(base.feature, id);
+                    new_ids.push(id);
+                    entry.insert(SharedBase { feature: id, parts: BTreeMap::new() })
+                }
+            };
+            if base.parts.insert(index, (new_name, links)).is_some() {
+                return Err(bad(CMD, "one imported source body has multiple baseline identities"));
+            }
+            continue;
+        }
+        let kind = {
+            let geometry = solidcraft_kernel::transform_matrix(&base.body, offset)?;
+            let step = solidcraft_kernel::step_export(&[&geometry], "SolidCraft independent reassigned body")?;
+            FeatureKind::Import {
+                file: format!("{} independent base", body.name),
+                step: step.into(),
+                components: Vec::new(),
+                skip: Default::default(),
+            }
+        };
+        let feature_name = base_name(&mut used_features);
+        let id = scratch.doc_mut().add_feature(kind, Some(&feature_name))?;
         if let Some(f) = scratch.doc_mut().feature_mut(id) {
             f.component = *components.get(&baseline_component).ok_or_else(|| bad(CMD, "reassigned baseline is outside copied component graph"))?;
             f.body_names = vec![new_name];
         }
         new_ids.push(id);
         frozen.push(body.name.clone());
+    }
+    for base in shared_bases.into_values() {
+        let f = scratch.doc_mut().feature_mut(base.feature).ok_or_else(|| bad(CMD, "shared base feature missing"))?;
+        let FeatureKind::Import { skip: solidcraft_doc::ImportFilter::Only { only }, .. } = &mut f.kind else {
+            return Err(bad(CMD, "shared base selection missing"));
+        };
+        only.reserve(base.parts.len());
+        f.body_names.reserve(base.parts.len());
+        f.link_faces.reserve(base.parts.len());
+        for (index, (name, links)) in base.parts {
+            only.push(index as u64);
+            f.body_names.push(name);
+            f.link_faces.push(links);
+        }
     }
     // Allocate all history IDs before rewriting any forward reference.
     for f in &feats {
@@ -587,9 +766,27 @@ pub(super) fn build(
             parameters: parameters.clone(),
         })?;
     }
-    let mut notices = super::component_clone_assembly::clone_assembly(scratch.doc_mut(), source, &occurrences, &features, &bodies)?;
-    // Joints and motion to the outside are left behind (those notices); what follows is what
-    // the copied features point at outside it.
+    let mut policy = super::component_clone_assembly::CopyPolicy::default();
+    if scope.detaches() {
+        policy.path.clone_from(&clone_path);
+        let canonical = source.occurrence_of(component).ok_or_else(|| bad(CMD, "missing source placement"))?.id;
+        let remaining = scratch.doc.occurrence_of(component).ok_or_else(|| bad(CMD, "missing remaining source placement"))?.id;
+        policy.root = Some((canonical, root_occurrence, remaining));
+        for old in source.occurrences.iter().filter(|o| occurrences.contains_key(&o.id)) {
+            if !components.contains_key(&old.component) {
+                policy.unchanged.insert(old.id);
+            }
+        }
+        // A shared child's first placement may live outside this assembly. Follow definitions,
+        // reusing the complete graph already visited when the copy includes its descendants.
+        let reachable = if scope.shallow() { Some(graph(source, component)?.into_iter().collect()) } else { None };
+        super::component_clone_assembly::check_detach_references(source, &occurrences, &policy.path, reachable.as_ref().unwrap_or(&selected))?;
+    }
+    let (mut notices, joints) = if scope.detaches() {
+        super::component_clone_assembly::clone_assembly_mode(scratch.doc_mut(), source, &occurrences, &features, &bodies, &policy)?
+    } else {
+        (super::component_clone_assembly::clone_assembly(scratch.doc_mut(), source, &occurrences, &features, &bodies)?, BTreeMap::new())
+    };
     let assembly_notices = notices.len();
     let mut reference_work = 0usize;
     for feature in &feats {
@@ -748,6 +945,11 @@ pub(super) fn build(
     for body in state.bodies.iter().filter(|b| selected.contains(&source.model_body_component(b))) {
         let new = bodies.get(&body.name).ok_or_else(|| bad(CMD, format!("body {} has no clone identity", body.name)))?;
         let cloned = copied_bodies.get(new.as_str()).ok_or_else(|| bad(CMD, format!("copy did not reproduce body {}", body.name)))?;
+        if source.model_body_offset(body) == scratch.doc.model_body_offset(cloned)
+            && solidcraft_kernel::exact_geometry_eq(&body.body, &cloned.body)? == Some(true)
+        {
+            continue;
+        }
         let a = solidcraft_kernel::transform_matrix(&body.body, *source.model_body_offset(body).unwrap_or(&solidcraft_doc::IDENTITY))?;
         let b = solidcraft_kernel::transform_matrix(&cloned.body, *scratch.doc.model_body_offset(cloned).unwrap_or(&solidcraft_doc::IDENTITY))?;
         let ma = solidcraft_kernel::measure(&a)?;
@@ -793,8 +995,51 @@ pub(super) fn build(
         }
     }
     scratch.selection = vec![Sel::Occurrence { path: clone_path }];
-    let out = json!({"component":root,"occurrence":root_occurrence,"features":new_ids,"components":components.len(),"bodies":expected_count,"frozen_bodies":frozen,"notices":notices});
-    Ok((scratch, out))
+    if scope.detaches() {
+        copy_visibility(&mut scratch.visibility, &features, &names, &joints);
+    }
+    Ok((
+        scratch,
+        Copied {
+            component: root,
+            occurrence: root_occurrence,
+            components,
+            occurrences,
+            bodies,
+            feature_ids: new_ids,
+            body_count: expected_count,
+            frozen,
+            notices,
+        },
+    ))
+}
+
+fn copy_visibility(
+    visibility: &mut solidcraft_doc::Visibility,
+    features: &BTreeMap<u64, u64>,
+    names: &BTreeMap<String, String>,
+    joints: &BTreeMap<u64, u64>,
+) {
+    for (entries, ids) in [
+        (&mut visibility.hidden_sketches, features),
+        (&mut visibility.shown_sketches, features),
+        (&mut visibility.hidden_profiles, features),
+        (&mut visibility.shown_dimensions, features),
+        (&mut visibility.hidden_joints, joints),
+    ] {
+        for index in 0..entries.len() {
+            if let Some(new) = entries.get(index).and_then(|old| ids.get(old)).copied()
+                && entries.get(index) != Some(&new)
+            {
+                entries.push(new);
+            }
+        }
+    }
+    for index in 0..visibility.hidden_origin.len() {
+        if let Some(new) = visibility.hidden_origin.get(index).and_then(|old| names.get(old)).cloned() {
+            visibility.hidden_origin.push(new);
+        }
+    }
 }
 
 /// A copied body transfer moves its bodies between the copies of its components; one from

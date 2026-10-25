@@ -1,6 +1,7 @@
 //! Reference triangles belong to a definition, even while its occurrences move. Keep one lazy
 //! source mesh and map it into each pose; retain the exact placed B-rep separately in ModelBody.
-use std::sync::{Arc, OnceLock};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 
 use solidcraft_geom::tess::TessPlan;
 use solidcraft_geom::{Mesh, Vec3};
@@ -18,7 +19,19 @@ pub(super) struct PlacedMesh {
     plan_meshes: Arc<[OnceLock<Option<Arc<Mesh>>>; 4]>,
     transform: crate::Mat,
     pub(super) tolerance: f64,
+    /// Keep a shared imported source alive without retaining a design or a placement chain.
+    imported: Option<Arc<PlacedMesh>>,
+    display: Option<kernel::DisplayShare>,
+    /// Keep this feature's prepared selection alive, independently of the shared display source.
+    prepared: Option<Arc<kernel::StepImport>>,
 }
+
+#[derive(PartialEq, Eq, Hash)]
+enum SourceKey {
+    Import([u8; 64], u64, [u64; 4]),
+    Display(usize),
+}
+static IMPORTED: OnceLock<Mutex<HashMap<SourceKey, Weak<PlacedMesh>>>> = OnceLock::new();
 
 impl PlacedMesh {
     /// Share the original definition, never a chain of previously placed meshes. A source's
@@ -35,6 +48,9 @@ impl PlacedMesh {
                 plan_meshes: original.plan_meshes.clone(),
                 transform: crate::mat_mul(transform, &original.transform),
                 tolerance: original.tolerance,
+                imported: original.imported.clone(),
+                display: original.display.clone(),
+                prepared: original.prepared.clone(),
             },
             None => Self {
                 body: source.body.clone(),
@@ -43,7 +59,74 @@ impl PlacedMesh {
                 plan_meshes: source.plan_mesh.clone(),
                 transform: *transform,
                 tolerance: source.display_tol(),
+                imported: None,
+                display: None,
+                prepared: None,
             },
+        })
+    }
+
+    pub(super) fn imported(body: &kernel::ImportedBody, digest: [u8; 64], prepared: &Arc<kernel::StepImport>) -> Option<Self> {
+        Self::shared(
+            &body.geometry,
+            body.placement,
+            SourceKey::Import(digest, body.geometry_item, body.geometry_units.map(f64::to_bits)),
+            None,
+            Some(prepared.clone()),
+        )
+    }
+
+    pub(super) fn from_display(body: &Body) -> Option<Self> {
+        let (display, transform) = body.display_share()?;
+        Self::shared(display.original(), transform, SourceKey::Display(display.id()), Some(display.clone()), None)
+    }
+
+    fn shared(
+        body: &Body,
+        transform: crate::Mat,
+        key: SourceKey,
+        display: Option<kernel::DisplayShare>,
+        prepared: Option<Arc<kernel::StepImport>>,
+    ) -> Option<Self> {
+        if !proper_rigid(&transform) {
+            return None;
+        }
+        let mut cache = IMPORTED.get_or_init(Default::default).lock().ok()?;
+        let source = match cache.get(&key).and_then(Weak::upgrade) {
+            Some(source) => source,
+            None => {
+                // Weak entries never keep closed designs' geometry alive. Bound stale keys too.
+                if cache.len() >= 10_000 {
+                    cache.retain(|_, source| source.strong_count() > 0);
+                    if cache.len() >= 10_000 {
+                        cache.clear();
+                    }
+                }
+                let source = Arc::new(Self {
+                    body: body.clone(),
+                    mesh: Arc::new(OnceLock::new()),
+                    plans: Arc::new(Default::default()),
+                    plan_meshes: Arc::new(Default::default()),
+                    transform: crate::IDENTITY,
+                    tolerance: (body.size() * 1e-3).max(1e-3),
+                    imported: None,
+                    display,
+                    prepared: None,
+                });
+                cache.insert(key, Arc::downgrade(&source));
+                source
+            }
+        };
+        Some(Self {
+            body: source.body.clone(),
+            mesh: source.mesh.clone(),
+            plans: source.plans.clone(),
+            plan_meshes: source.plan_meshes.clone(),
+            transform,
+            tolerance: source.tolerance,
+            imported: Some(source),
+            display: None,
+            prepared,
         })
     }
 
@@ -217,6 +300,43 @@ mod tests {
         assert!(edges.iter().all(|e| e[0].z == e[1].z));
         // Bad indices and zero-area facets do not invent outlines or panic.
         assert!(mesh_outlines(&[Vec3::ZERO, Vec3::X, Vec3::X * 2.], &[[0, 1, 99], [0, 1, 2]]).is_empty());
+    }
+
+    #[test]
+    fn selected_import_keeps_shared_display_without_retaining_the_full_preparation() {
+        let a = kernel::box_solid(Vec3::ZERO, Vec3::new(2., 3., 4.)).unwrap();
+        let b = kernel::cylinder(Vec3::ZERO, Vec3::Z, 2., 8.).unwrap();
+        let text = kernel::step_export(&[&a, &b], "selected import lifetime").unwrap();
+        // The direct reader does not retain this full preparation in the recent-import cache.
+        let full = Arc::new(kernel::step_import(&text).unwrap());
+        let source = kernel::StepSource::from(text);
+        let digest: [u8; 64] = source.payload_digest().as_bytes().try_into().unwrap();
+        let original = PlacedMesh::imported(&full.bodies[0], digest, &full).unwrap();
+        let selected = source.import_only(&[full.bodies[0].planned_index as u64]).unwrap();
+        let independent = PlacedMesh::imported(&selected.bodies[0], digest, &selected).unwrap();
+        assert!(Arc::ptr_eq(&original.source_mesh().0, &independent.source_mesh().0));
+        let full_lifetime = Arc::downgrade(&full);
+        drop(original);
+        drop(full);
+        assert!(full_lifetime.upgrade().is_none(), "one selected part must not retain the full preparation");
+        assert!(!independent.source_mesh().0.triangles.is_empty());
+    }
+
+    #[test]
+    fn restored_display_shares_keep_one_mesh_and_their_own_placed_geometry() {
+        let local = kernel::box_solid(Vec3::ZERO, Vec3::new(2., 3., 4.)).unwrap();
+        let share = kernel::DisplayShare::new(local.clone());
+        let pose = crate::rigid(Vec3::new(15., 0., 0.), Vec3::ZERO, Vec3::Z, 0.);
+        let mut a = ModelBody::new("A".into(), local.with_display_share(&share, crate::IDENTITY), 1);
+        let mut b = ModelBody::new("B".into(), kernel::transform_matrix(share.original(), pose).unwrap().with_display_share(&share, pose), 2);
+        a.mesh_placement = PlacedMesh::from_display(&a.body).map(Arc::new);
+        b.mesh_placement = PlacedMesh::from_display(&b.body).map(Arc::new);
+        let (ma, pa) = a.mesh_in_place();
+        let (mb, pb) = b.mesh_in_place();
+        assert!(Arc::ptr_eq(&ma, &mb));
+        assert_eq!(pa, crate::IDENTITY);
+        assert_eq!(pb, pose);
+        assert!((kernel::measure(&b.body).unwrap().centroid.x - 16.).abs() < 1e-9);
     }
 
     #[test]

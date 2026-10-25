@@ -687,7 +687,7 @@ fn has_native_features(s: &Session, component: u64) -> bool {
     s.doc.features.iter().any(|f| f.component == component && !matches!(f.kind, FeatureKind::Sketch { .. }))
 }
 
-fn collect_component_keys(s: &Session, prefix: &str, component: u64, root_extras: bool, keys: &mut FoldKeys) {
+fn collect_component_keys(s: &Session, prefix: &str, component: u64, root_extras: bool, instances: &BTreeMap<u64, Vec<u64>>, keys: &mut FoldKeys) {
     keys.open.insert(prefix.to_string());
     for folder in FOLDERS {
         if folder_has_items(s, component, folder) {
@@ -696,6 +696,9 @@ fn collect_component_keys(s: &Session, prefix: &str, component: u64, root_extras
     }
     for g in s.doc.browser_groups.iter().filter(|g| g.component == component) {
         keys.open.insert(format!("{prefix}/g{}", g.id));
+    }
+    for definition in instances.get(&component).into_iter().flatten() {
+        keys.closed.insert(format!("{prefix}/instances:{definition}"));
     }
     if has_native_features(s, component) {
         keys.closed.insert(format!("{prefix}/features"));
@@ -728,7 +731,7 @@ fn collect_component_keys(s: &Session, prefix: &str, component: u64, root_extras
     }
 }
 
-fn walk_fold(s: &Session, start: &[u64], root_extras: bool, keys: &mut FoldKeys, cmd: &str) -> Result<()> {
+fn walk_fold(s: &Session, start: &[u64], root_extras: bool, instances: &BTreeMap<u64, Vec<u64>>, keys: &mut FoldKeys, cmd: &str) -> Result<()> {
     let mut stack = vec![start.to_vec()];
     let mut count = 0usize;
     while let Some(path) = stack.pop() {
@@ -738,7 +741,7 @@ fn walk_fold(s: &Session, start: &[u64], root_extras: bool, keys: &mut FoldKeys,
         }
         let component = if path.is_empty() { 0 } else { s.occurrence_placement(&path)?.component };
         let prefix = if path.is_empty() { "c0".to_string() } else { occurrence_fold_key(&path) };
-        collect_component_keys(s, &prefix, component, root_extras && path.is_empty(), keys);
+        collect_component_keys(s, &prefix, component, root_extras && path.is_empty(), instances, keys);
         for child in s.occurrence_children(&path)? {
             if child.path.len() > 64 {
                 continue;
@@ -751,11 +754,24 @@ fn walk_fold(s: &Session, start: &[u64], root_extras: bool, keys: &mut FoldKeys,
 
 fn fold_tree(s: &mut Session, p: &Value, open: bool, cmd: &str) -> Result<Value> {
     let scope = fold_scope(s, p, cmd)?;
+    let imported: BTreeSet<_> = s.doc.components.iter().filter(|c| c.imported_from.is_some()).map(|c| c.id).collect();
+    let mut counts = BTreeMap::<(u64, u64), usize>::new();
+    for o in &s.doc.occurrences {
+        if imported.contains(&o.component) {
+            *counts.entry((o.parent, o.component)).or_default() += 1;
+        }
+    }
+    let mut instances = BTreeMap::<u64, Vec<u64>>::new();
+    for ((parent, definition), count) in counts {
+        if count > 1 {
+            instances.entry(parent).or_default().push(definition);
+        }
+    }
     let mut keys = FoldKeys { open: BTreeSet::new(), closed: BTreeSet::new() };
     match &scope {
-        FoldScope::Component(id) => collect_component_keys(s, &format!("c{id}"), *id, false, &mut keys),
-        FoldScope::Tree => walk_fold(s, &[], true, &mut keys, cmd)?,
-        FoldScope::Occurrence(path) => walk_fold(s, path, false, &mut keys, cmd)?,
+        FoldScope::Component(id) => collect_component_keys(s, &format!("c{id}"), *id, false, &instances, &mut keys),
+        FoldScope::Tree => walk_fold(s, &[], true, &instances, &mut keys, cmd)?,
+        FoldScope::Occurrence(path) => walk_fold(s, path, false, &instances, &mut keys, cmd)?,
     }
     if !open {
         // Collapse All folds what is under the clicked row; the row itself stays open.

@@ -6,6 +6,35 @@ use solidcraft_engine::Sel;
 use crate::test_support::{click, component_box as fixture};
 
 #[test]
+fn imported_instance_groups_select_hide_expand_and_release_an_independent_member() {
+    let (mut h, component, first) = fixture();
+    let feature = h.app.session.model.state().bodies[0].feature;
+    h.app.session.doc_mut().components.iter_mut().find(|c| c.id == component).unwrap().imported_from = Some(feature);
+    let second = h.app.run("occurrence.copy", json!({"occurrence":first,"translate":[30,0,0]})).unwrap()["occurrence"].as_u64().unwrap();
+    h.frames(2);
+    let group = format!("c0/instances:{component}");
+    assert!(!h.app.tree.order.contains(&super::occurrence_key(&[first])));
+    assert!(!h.app.tree.order.contains(&super::occurrence_key(&[second])));
+    crate::test_support::click(&mut h, &format!("row:{group}"));
+    assert_eq!(h.app.session.selection, vec![Sel::Occurrence { path: vec![first] }, Sel::Occurrence { path: vec![second] }]);
+    let eye = crate::scenario::handle_at("eye:Block (2)").unwrap();
+    h.call("ui.click", json!({"x":eye.x,"y":eye.y}));
+    assert!(h.app.session.occurrence_hidden(&[first]) && h.app.session.occurrence_hidden(&[second]));
+    crate::test_support::click(&mut h, &format!("fold:{group}"));
+    assert!(h.app.tree.order.contains(&super::occurrence_key(&[first])));
+    assert!(h.app.tree.order.contains(&super::occurrence_key(&[second])));
+    h.app.run("browser.collapse_all", json!({})).unwrap();
+    h.app.run("browser.expand_all", json!({})).unwrap();
+    h.frames(2);
+    assert!(h.app.tree.order.contains(&super::occurrence_key(&[second])), "Expand All opens automatic instance groups too");
+    h.app.run("component.make_independent", json!({"path":[second]})).unwrap();
+    h.frames(2);
+    assert!(crate::scenario::handle_at(&format!("row:{group}")).is_none());
+    assert!(h.app.tree.order.contains(&super::occurrence_key(&[first])));
+    assert!(h.app.tree.order.contains(&super::occurrence_key(&[second])));
+}
+
+#[test]
 fn navigating_and_selecting_reuse_placements_but_rows_read_live_view_state() {
     let (mut h, component, occurrence) = fixture();
     let first = super::model_placement(&mut h.app, &[occurrence]).unwrap();

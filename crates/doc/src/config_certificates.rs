@@ -931,11 +931,6 @@ impl Document {
     }
 }
 
-pub(crate) fn payload_digest(payload: &str) -> String {
-    use sha2::{Digest, Sha256};
-    format!("{:x}", Sha256::digest(payload.as_bytes()))
-}
-
 #[cfg(test)]
 #[path = "config_shell_tests.rs"]
 mod shell_tests;

@@ -102,9 +102,9 @@ struct SourceProperties {
     faces: Vec<(usize, solidcraft_doc::appearance::Look)>,
 }
 
-/// What a linked file last gave, by the file: digests of its bytes, of the STEP text it gave and
-/// of its face names, and that read's warnings and source properties. Update Links evaluates
-/// a file again only when its bytes or the linked bodies changed since (#5606). Bounded, oldest first out.
+/// What a linked file last gave, by the file: fingerprints of its bytes, STEP source and face
+/// names, and that read's warnings and source properties. Update Links evaluates a file again
+/// only when its bytes or the linked bodies changed since (#5606). Bounded, oldest first out.
 static READS: Mutex<Vec<LinkRead>> = Mutex::new(Vec::new());
 const READS_SIZE: usize = 256;
 
@@ -129,7 +129,7 @@ fn digest<T: Hash + ?Sized>(value: &T) -> u64 {
     h.finish()
 }
 
-/// Warnings and source properties of the last read of `file`, when it had these bytes and gave the STEP text
+/// Warnings and source properties of the last read of `file`, when it had these bytes and gave the STEP source
 /// `step` and the face names `faces`: the bodies it gives are the ones the link holds.
 fn unchanged_read(file: &Path, bytes: u64, step: u64, faces: u64) -> Option<(Vec<String>, Vec<SourceProperties>)> {
     let file = absolute(file);
@@ -151,7 +151,7 @@ fn remember_read(file: &Path, bytes: u64, feature: &solidcraft_io::StepFeature, 
     reads.push(LinkRead {
         file,
         bytes,
-        step: digest(step.as_bytes()),
+        step: step.fingerprint(),
         faces: digest(faces),
         warnings: feature.warnings.clone(),
         properties: properties.to_vec(),
@@ -607,8 +607,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             .feature(link.feature)
             .filter(|_| !link.inherited.is_empty() && link.inherited.iter().all(|p| p.faces.is_some()))
             .map(|f| digest(f.link_faces.as_slice()));
-        if let Some((known, properties)) = kept_faces.and_then(|faces| unchanged_read(&file, digest(bytes.as_slice()), digest(old.as_bytes()), faces))
-        {
+        if let Some((known, properties)) = kept_faces.and_then(|faces| unchanged_read(&file, digest(bytes.as_slice()), old.fingerprint(), faces)) {
             warnings.extend(known);
             // Another component or session may have evaluated this source first. Its
             // cached geometry says nothing about this link's inherited properties.
@@ -688,7 +687,7 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// `comp`'s linked design as it was last read (its bodies) and as its file is now, read before
 /// anything in the design changes.
-fn read_linked(s: &Session, comp: u64, link: &DesignLink) -> std::result::Result<(std::sync::Arc<str>, PathBuf, Vec<u8>), String> {
+fn read_linked(s: &Session, comp: u64, link: &DesignLink) -> std::result::Result<(crate::kernel::StepSource, PathBuf, Vec<u8>), String> {
     let Some(FeatureKind::Import { step: old, .. }) = s.doc.feature(link.feature).filter(|f| f.component == comp).map(|f| &f.kind) else {
         return Err(format!("its linked bodies (feature {}) are gone; break the link or insert the design again", link.feature));
     };

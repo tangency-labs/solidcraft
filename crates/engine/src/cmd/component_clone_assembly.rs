@@ -14,6 +14,108 @@ const MAX_REFERENCES: usize = 100_000;
 const MAX_TEXT: usize = 1_048_576;
 const MAX_NAME: usize = 8192;
 
+#[derive(Default)]
+pub(super) struct CopyPolicy {
+    /// Canonical source root, retained selected root, and remaining source root.
+    pub root: Option<(u64, u64, u64)>,
+    pub unchanged: BTreeSet<u64>,
+    pub path: Vec<u64>,
+}
+
+impl CopyPolicy {
+    fn selected(&self, id: u64) -> bool {
+        self.root.is_some_and(|(_, selected, _)| id == selected)
+    }
+
+    fn internal(&self, id: u64, occurrences: &BTreeMap<u64, u64>) -> bool {
+        occurrences.contains_key(&id) && !self.selected(id)
+    }
+
+    fn copied(&self, id: u64, occurrences: &BTreeMap<u64, u64>) -> Option<u64> {
+        if let Some((source, selected, _)) = self.root {
+            if id == source {
+                return Some(selected);
+            }
+            if id == selected {
+                return None;
+            }
+        }
+        occurrences.get(&id).copied()
+    }
+
+    fn keep_source(&self, id: &mut u64) {
+        if let Some((source, selected, remaining)) = self.root
+            && source == selected
+            && *id == source
+        {
+            *id = remaining;
+        }
+    }
+}
+
+/// An unscoped relationship below an unchanged shared definition cannot identify this copy.
+pub(super) fn check_detach_references(source: &Document, occurrences: &BTreeMap<u64, u64>, path: &[u64], reachable: &BTreeSet<u64>) -> Result<()> {
+    let ids: BTreeMap<_, _> = source.occurrences.iter().map(|o| (o.id, o)).collect();
+    let check = |id: u64| -> Result<()> {
+        if id == 0 || occurrences.contains_key(&id) {
+            return Ok(());
+        }
+        let occurrence = ids.get(&id).ok_or_else(|| invalid("missing relationship placement"))?;
+        if reachable.contains(&occurrence.parent) {
+            return Err(invalid("a relationship below an unchanged shared child cannot be isolated to this placement"));
+        }
+        Ok(())
+    };
+    for joint in &source.assembly.joints {
+        check(joint.a.occurrence)?;
+        check(joint.b.occurrence)?;
+    }
+    for origin in &source.assembly.origins {
+        check(origin.origin.occurrence)?;
+    }
+    for set in &source.assembly.contact_sets {
+        for id in &set.occurrences {
+            check(*id)?;
+        }
+    }
+    for view in &source.assembly.exploded {
+        for (id, _) in &view.moves {
+            check(*id)?;
+        }
+    }
+    for link in &source.assembly.links {
+        if let Some(coupling) = &link.coupling {
+            for size in coupling.sizes() {
+                if let Size::Circle(o) = size {
+                    check(o.occurrence)?;
+                }
+            }
+            if let Coupling::Cam(cam) = coupling {
+                if let Some(tip) = &cam.tip {
+                    check(tip.occurrence)?;
+                }
+                if let CamProfile::Edges { occurrence, .. } = &cam.profile {
+                    check(*occurrence)?;
+                }
+            }
+        }
+    }
+    for feature in &source.features {
+        if let crate::doc::FeatureKind::Sketch { plane, .. } | crate::doc::FeatureKind::ConstructionPlane { plane } = &feature.kind
+            && let Some(anchor) = super::sketch::face::anchor(plane)
+            && (anchor.path.starts_with(path) || anchor.author_path.starts_with(path))
+        {
+            return Err(invalid("detach this placement's face attachment before making it independent"));
+        }
+        if let crate::doc::FeatureKind::Emboss { face: Some(face), .. } = &feature.kind
+            && face.path.starts_with(path)
+        {
+            return Err(invalid("detach this placement's Emboss attachment before making it independent"));
+        }
+    }
+    Ok(())
+}
+
 fn invalid(message: &str) -> EngineError {
     EngineError::Other(format!("Paste New assembly: {message}"))
 }
@@ -244,11 +346,24 @@ fn origin(
     occurrences: &BTreeMap<u64, u64>,
     features: &BTreeMap<u64, u64>,
     bodies: &BTreeMap<String, String>,
+    policy: &CopyPolicy,
+) -> Option<JointOrigin> {
+    remap_origin(origin, policy.copied(origin.occurrence, occurrences)?, features, bodies, policy.unchanged.contains(&origin.occurrence))
+}
+
+fn remap_origin(
+    origin: &JointOrigin,
+    occurrence: u64,
+    features: &BTreeMap<u64, u64>,
+    bodies: &BTreeMap<String, String>,
+    unchanged: bool,
 ) -> Option<JointOrigin> {
     let mut out = origin.clone();
-    out.occurrence = *occurrences.get(&origin.occurrence)?;
-    for face in out.snap.face_names_mut() {
-        *face = face_name(face, features, bodies)?;
+    out.occurrence = occurrence;
+    if !unchanged {
+        for face in out.snap.face_names_mut() {
+            *face = face_name(face, features, bodies)?;
+        }
     }
     Some(out)
 }
@@ -277,6 +392,17 @@ pub(super) fn clone_assembly_with_joint_ids(
     occurrences: &BTreeMap<u64, u64>,
     features: &BTreeMap<u64, u64>,
     bodies: &BTreeMap<String, String>,
+) -> Result<(Vec<String>, BTreeMap<u64, u64>)> {
+    clone_assembly_mode(doc, source, occurrences, features, bodies, &CopyPolicy::default())
+}
+
+pub(super) fn clone_assembly_mode(
+    doc: &mut Document,
+    source: &Document,
+    occurrences: &BTreeMap<u64, u64>,
+    features: &BTreeMap<u64, u64>,
+    bodies: &BTreeMap<String, String>,
+    policy: &CopyPolicy,
 ) -> Result<(Vec<String>, BTreeMap<u64, u64>)> {
     budget(&source.assembly)?;
     budget(&doc.assembly)?;
@@ -307,13 +433,27 @@ pub(super) fn clone_assembly_with_joint_ids(
     // Reserve from one persistent counter, committing it only when the entire copy succeeds.
     let mut item_id = doc.next_item_id()?.saturating_sub(1);
     let mut a = doc.assembly.clone();
+    let moving_joints: BTreeSet<_> = source
+        .assembly
+        .joints
+        .iter()
+        .filter(|j| {
+            !policy.internal(j.a.occurrence, occurrences)
+                && !policy.internal(j.b.occurrence, occurrences)
+                && (policy.selected(j.a.occurrence) || policy.selected(j.b.occurrence))
+        })
+        .map(|j| j.id)
+        .collect();
     let mut messages = Vec::new();
     let mut origin_names = a.origins.iter().map(|o| o.name.clone()).collect();
     for old in &source.assembly.origins {
-        if !occurrences.contains_key(&old.origin.occurrence) {
+        if policy.selected(old.origin.occurrence) {
             continue;
         }
-        if let Some(new) = origin(&old.origin, occurrences, features, bodies) {
+        if policy.copied(old.origin.occurrence, occurrences).is_none() {
+            continue;
+        }
+        if let Some(new) = origin(&old.origin, occurrences, features, bodies, policy) {
             let mut item = old.clone();
             item.name = unique_name(&old.name, &mut origin_names)?;
             item.origin = new;
@@ -326,11 +466,15 @@ pub(super) fn clone_assembly_with_joint_ids(
     let mut joints = BTreeMap::new();
     let mut touched_joints = BTreeSet::new();
     for old in &source.assembly.joints {
-        if !occurrences.contains_key(&old.a.occurrence) && !occurrences.contains_key(&old.b.occurrence) {
+        if moving_joints.contains(&old.id) {
+            joints.insert(old.id, old.id);
+            continue;
+        }
+        if !policy.internal(old.a.occurrence, occurrences) && !policy.internal(old.b.occurrence, occurrences) {
             continue;
         }
         touched_joints.insert(old.id);
-        match (origin(&old.a, occurrences, features, bodies), origin(&old.b, occurrences, features, bodies)) {
+        match (origin(&old.a, occurrences, features, bodies, policy), origin(&old.b, occurrences, features, bodies, policy)) {
             (Some(aa), Some(bb)) => {
                 let mut item = old.clone();
                 item.id = next_id(&mut item_id)?;
@@ -344,6 +488,22 @@ pub(super) fn clone_assembly_with_joint_ids(
         }
     }
     for old in &source.assembly.links {
+        if moving_joints.contains(&old.a) || moving_joints.contains(&old.b) {
+            if touched_joints.contains(&old.a) || touched_joints.contains(&old.b) {
+                return Err(invalid("a motion link crosses the independent placement's boundary"));
+            }
+            if let Some(coupling) = &old.coupling {
+                let child_geometry =
+                    coupling.sizes().into_iter().any(|size| matches!(size, Size::Circle(o) if policy.internal(o.occurrence, occurrences)))
+                        || matches!(coupling, Coupling::Cam(cam)
+                        if cam.tip.as_ref().is_some_and(|o| policy.internal(o.occurrence, occurrences))
+                            || matches!(&cam.profile, CamProfile::Edges { occurrence, .. } if policy.internal(*occurrence, occurrences)));
+                if child_geometry {
+                    return Err(invalid("a boundary motion link's child geometry cannot be isolated to this placement"));
+                }
+            }
+            continue;
+        }
         if !touched_joints.contains(&old.a) && !touched_joints.contains(&old.b) {
             continue;
         }
@@ -352,19 +512,20 @@ pub(super) fn clone_assembly_with_joint_ids(
         // profile and its follower's tip.
         let faces = item.coupling.as_mut().is_none_or(|c| {
             let sizes = c.sizes_mut().into_iter().all(|size| match size {
-                Size::Circle(o) => origin(o, occurrences, features, bodies).map(|new| *o = new).is_some(),
+                Size::Circle(o) => origin(o, occurrences, features, bodies, policy).map(|new| *o = new).is_some(),
                 _ => true,
             });
             let Coupling::Cam(cam) = c else { return sizes };
             let tip = match &mut cam.tip {
-                Some(t) => origin(t, occurrences, features, bodies).map(|new| *t = new).is_some(),
+                Some(t) => origin(t, occurrences, features, bodies, policy).map(|new| *t = new).is_some(),
                 None => true,
             };
             let profile = match &mut cam.profile {
                 CamProfile::Sketch { sketch, .. } => features.get(sketch).map(|new| *sketch = *new).is_some(),
                 CamProfile::Edges { occurrence, names, .. } => {
-                    occurrences.get(occurrence).map(|new| *occurrence = *new).is_some()
-                        && names.iter_mut().all(|n| n.is_empty() || face_name(n, features, bodies).map(|new| *n = new).is_some())
+                    let unchanged = policy.unchanged.contains(occurrence);
+                    policy.copied(*occurrence, occurrences).map(|new| *occurrence = new).is_some()
+                        && (unchanged || names.iter_mut().all(|n| n.is_empty() || face_name(n, features, bodies).map(|new| *n = new).is_some()))
                 }
             };
             sizes && tip && profile
@@ -380,10 +541,10 @@ pub(super) fn clone_assembly_with_joint_ids(
     }
     let mut contact_names = a.contact_sets.iter().map(|x| x.name.clone()).collect();
     for old in &source.assembly.contact_sets {
-        if !old.occurrences.iter().any(|o| occurrences.contains_key(o)) {
+        if !old.occurrences.iter().any(|o| policy.internal(*o, occurrences)) {
             continue;
         }
-        if let Some(ids) = old.occurrences.iter().map(|o| occurrences.get(o).copied()).collect::<Option<Vec<_>>>() {
+        if let Some(ids) = old.occurrences.iter().map(|o| policy.copied(*o, occurrences)).collect::<Option<Vec<_>>>() {
             let mut item = old.clone();
             item.id = next_id(&mut item_id)?;
             item.name = unique_name(&old.name, &mut contact_names)?;
@@ -395,6 +556,12 @@ pub(super) fn clone_assembly_with_joint_ids(
     }
     let mut study_names = a.studies.iter().map(|x| x.name.clone()).collect();
     for old in &source.assembly.studies {
+        if old.keys.iter().any(|k| moving_joints.contains(&k.joint)) {
+            if old.keys.iter().any(|k| touched_joints.contains(&k.joint)) {
+                return Err(invalid("a motion study crosses the independent placement's boundary"));
+            }
+            continue;
+        }
         if !old.keys.iter().any(|k| touched_joints.contains(&k.joint)) {
             continue;
         }
@@ -412,20 +579,103 @@ pub(super) fn clone_assembly_with_joint_ids(
     }
     let mut view_names = a.exploded.iter().map(|x| x.name.clone()).collect();
     for old in &source.assembly.exploded {
-        if !old.moves.iter().any(|(o, _)| occurrences.contains_key(o)) {
+        if !old.moves.iter().any(|(o, _)| policy.internal(*o, occurrences)) {
             continue;
         }
-        if old.moves.iter().all(|(o, _)| occurrences.contains_key(o)) {
+        if old.moves.iter().all(|(o, _)| policy.copied(*o, occurrences).is_some()) {
             let mut item = old.clone();
             item.id = next_id(&mut item_id)?;
             item.name = unique_name(&old.name, &mut view_names)?;
             for (o, _) in &mut item.moves {
-                *o = *occurrences.get(o).ok_or_else(|| invalid("missing copied exploded occurrence"))?;
+                *o = policy.copied(*o, occurrences).ok_or_else(|| invalid("missing copied exploded occurrence"))?;
             }
             a.exploded.push(item);
         } else {
             report(&mut messages, "exploded view", &old.name);
         }
+    }
+    if !policy.path.is_empty() {
+        let relocate = |o: &mut JointOrigin| -> Result<()> {
+            if policy.selected(o.occurrence) {
+                *o = remap_origin(o, o.occurrence, features, bodies, policy.unchanged.contains(&o.occurrence))
+                    .ok_or_else(|| invalid("cannot retain the selected placement's joint face"))?;
+            }
+            Ok(())
+        };
+        // Internal relationships still belong to the source definition. Only a relationship
+        // on the selected physical root follows it; its copied children get their own records.
+        for joint in a.joints.iter_mut().take(source.assembly.joints.len()) {
+            if touched_joints.contains(&joint.id) {
+                policy.keep_source(&mut joint.a.occurrence);
+                policy.keep_source(&mut joint.b.occurrence);
+            } else {
+                relocate(&mut joint.a)?;
+                relocate(&mut joint.b)?;
+            }
+        }
+        for named in a.origins.iter_mut().take(source.assembly.origins.len()) {
+            relocate(&mut named.origin)?;
+        }
+        for link in a.links.iter_mut().take(source.assembly.links.len()) {
+            let internal = touched_joints.contains(&link.a) || touched_joints.contains(&link.b);
+            let relocate_link = |o: &mut JointOrigin| -> Result<()> {
+                if internal {
+                    policy.keep_source(&mut o.occurrence);
+                    Ok(())
+                } else {
+                    relocate(o)
+                }
+            };
+            if let Some(coupling) = &mut link.coupling {
+                for size in coupling.sizes_mut() {
+                    if let Size::Circle(o) = size {
+                        relocate_link(o)?;
+                    }
+                }
+                if let Coupling::Cam(cam) = coupling {
+                    if let Some(tip) = &mut cam.tip {
+                        relocate_link(tip)?;
+                    }
+                    if let CamProfile::Edges { occurrence, names, .. } = &mut cam.profile {
+                        if internal {
+                            policy.keep_source(occurrence);
+                        } else if policy.selected(*occurrence) && !policy.unchanged.contains(occurrence) {
+                            for name in names {
+                                if !name.is_empty() {
+                                    *name = face_name(name, features, bodies).ok_or_else(|| invalid("cannot retain the cam profile face"))?;
+                                }
+                            }
+                        }
+                    }
+                    if (moving_joints.contains(&link.a) || moving_joints.contains(&link.b))
+                        && let CamProfile::Sketch { sketch, .. } = &mut cam.profile
+                        && let Some(new) = features.get(sketch)
+                    {
+                        *sketch = *new;
+                    }
+                }
+            }
+        }
+        for set in a.contact_sets.iter_mut().take(source.assembly.contact_sets.len()) {
+            if set.occurrences.iter().any(|o| policy.internal(*o, occurrences)) {
+                for o in &mut set.occurrences {
+                    policy.keep_source(o);
+                }
+            }
+        }
+        for view in a.exploded.iter_mut().take(source.assembly.exploded.len()) {
+            if view.moves.iter().any(|(o, _)| policy.internal(*o, occurrences)) {
+                for (o, _) in &mut view.moves {
+                    policy.keep_source(o);
+                }
+            }
+        }
+        if source.assembly.traces.iter().any(|t| t.occurrence.starts_with(&policy.path)) {
+            return Err(invalid("detach this placement's motion trace before making it independent"));
+        }
+    }
+    if !policy.path.is_empty() && !messages.is_empty() {
+        return Err(invalid("cannot preserve this placement's assembly references while making it independent"));
     }
     budget(&a)?;
     doc.next_id = item_id.checked_add(1).ok_or_else(|| invalid("assembly identifier space is exhausted"))?;

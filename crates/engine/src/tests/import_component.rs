@@ -212,8 +212,8 @@ fn an_imported_assembly_moves_as_one_until_it_is_unlocked() {
     let rig = occurrence_named(&s, "rig:1");
     let inside: Vec<u64> = s.doc.occurrences.iter().filter(|o| o.id != rig).map(|o| o.id).collect();
     assert_eq!(inside.len(), 6);
-    let pin = corner_of(&s, "Pin:2");
-    let arm = corner_of(&s, "Arm:1");
+    let pin = corner_of(&s, "Pin-3");
+    let arm = corner_of(&s, "Arm-1");
 
     // The whole import is one rigid body: no part of it moves against the others.
     let (dof, r) = dofs(&mut s);
@@ -226,14 +226,14 @@ fn an_imported_assembly_moves_as_one_until_it_is_unlocked() {
 
     // Moving the import's component moves everything in it.
     run(&mut s, "occurrence.move", json!({"occurrence": "rig:1", "translate": [0, 0, 50]}));
-    assert!(close(corner_of(&s, "Pin:2"), pin + Vec3::new(0.0, 0.0, 50.0)), "{:?}", corner_of(&s, "Pin:2"));
-    assert!(close(corner_of(&s, "Arm:1"), arm + Vec3::new(0.0, 0.0, 50.0)));
+    assert!(close(corner_of(&s, "Pin-3"), pin + Vec3::new(0.0, 0.0, 50.0)), "{:?}", corner_of(&s, "Pin-3"));
+    assert!(close(corner_of(&s, "Arm-1"), arm + Vec3::new(0.0, 0.0, 50.0)));
     // A part inside doesn't move on its own; the refusal says what to move instead.
-    for part in ["Pin:2", "Pin:1"] {
+    for part in ["Pin-3", "Pin-1"] {
         let e = s.execute("occurrence.move", &json!({"occurrence": part, "translate": [30, 0, 0]})).unwrap_err().to_string();
         assert!(e.contains("move rig"), "{e}");
     }
-    assert!(close(corner_of(&s, "Pin:2"), pin + Vec3::new(0.0, 0.0, 50.0)));
+    assert!(close(corner_of(&s, "Pin-3"), pin + Vec3::new(0.0, 0.0, 50.0)));
 
     // Next to a grounded part of mine the import is still one rigid body.
     run(&mut s, "component.create", json!({"name": "Mine"}));
@@ -251,9 +251,9 @@ fn an_imported_assembly_moves_as_one_until_it_is_unlocked() {
     let r = run(&mut s, "component.unlock", json!({"component": "rig"}));
     assert_eq!(r["joints"].as_array().unwrap().len(), 6, "{r}");
     assert_eq!(s.undo.len(), undo + 1);
-    run(&mut s, "occurrence.move", json!({"occurrence": "Pin:2", "translate": [30, 0, 0]}));
-    assert!(close(corner_of(&s, "Pin:2"), pin + Vec3::new(30.0, 0.0, 50.0)), "{:?}", corner_of(&s, "Pin:2"));
-    assert!(close(corner_of(&s, "Arm:1"), arm + Vec3::new(0.0, 0.0, 50.0)), "the others stay");
+    run(&mut s, "occurrence.move", json!({"occurrence": "Pin-3", "translate": [30, 0, 0]}));
+    assert!(close(corner_of(&s, "Pin-3"), pin + Vec3::new(30.0, 0.0, 50.0)), "{:?}", corner_of(&s, "Pin-3"));
+    assert!(close(corner_of(&s, "Arm-1"), arm + Vec3::new(0.0, 0.0, 50.0)), "the others stay");
     run(&mut s, "edit.undo", json!({}));
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(s.doc.assembly.joints.len(), 6, "undo locks it again");
@@ -395,7 +395,7 @@ fn a_joint_on_an_imported_part_takes_its_own_hole() {
     let _ = std::fs::remove_dir_all(&dir);
 
     // A pin jointed into B's hole, picked on its wall.
-    let on_b = occurrence_named(&s, "B:1");
+    let on_b = occurrence_named(&s, "B-1");
     let pin = run(&mut s, "component.create", json!({"name": "Pin"}))["occurrence"].as_u64().unwrap();
     run(&mut s, "solid.cylinder", json!({"radius": 3, "height": 10, "base": [0, -40, 0]}));
     run(&mut s, "component.activate", json!({"component": "root"}));
@@ -405,7 +405,7 @@ fn a_joint_on_an_imported_part_takes_its_own_hole() {
     let st = s.model.state();
     // A's hole has the very name B's has (the case this is about).
     let solidcraft_doc::joints::Snap::CircleCenter { face: Some(name), .. } = &o.snap else { panic!("{:?}", o.snap) };
-    let a_comp = s.doc.occurrences.iter().find(|x| x.id == occurrence_named(&s, "A:1")).unwrap().component;
+    let a_comp = s.doc.occurrences.iter().find(|x| x.id == occurrence_named(&s, "A-1")).unwrap().component;
     let a_body = st.bodies.iter().find(|x| s.doc.model_body_component(x) == a_comp).unwrap();
     assert!(solidcraft_doc::naming::face_names(a_body).iter().any(|n| n == name), "{name}");
     let f = solidcraft_doc::joints::resolve_origin(&s.doc, &st, &o).unwrap();
@@ -424,11 +424,9 @@ fn bodies_by_component(s: &mut Session) -> Vec<(String, Vec<String>)> {
         .collect()
 }
 
-/// Renaming one body of an imported assembly renames that body and nothing else (#2175). An
-/// Import keeps its bodies' names by their place in the file, and builds no body for the file's
-/// later instances of a repeated part: the rename stored the names by their place in the model,
-/// so once the design was rebuilt the bodies after those instances took the wrong names and left
-/// their components.
+/// Renaming one body of an imported assembly renames that body and nothing else (#2175).
+/// Repeated parts are built once; bodies after their later placements keep their names,
+/// component assignments and positions when the design is rebuilt.
 #[test]
 fn renaming_an_imported_body_after_a_repeated_part_keeps_every_body_in_its_component() {
     let dir = temp_dir("rename-after-repeat");
@@ -453,8 +451,6 @@ fn renaming_an_imported_body_after_a_repeated_part_keeps_every_body_in_its_compo
 
     let mut s = Session::default();
     run(&mut s, "file.insert_step", json!({"path": path}));
-    let f = &s.doc.features[0];
-    assert!(matches!(&f.kind, solidcraft_doc::FeatureKind::Import { skip, .. } if *skip == [2, 3]), "{:?}", f.body_names);
     let names = |s: &Session| s.model.state().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
     assert_eq!(names(&s), ["Bracket", "Pin", "Plate", "Knob"]);
     let mut expected = bodies_by_component(&mut s);
