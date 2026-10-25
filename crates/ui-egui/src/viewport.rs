@@ -4124,13 +4124,18 @@ fn transient_messages(app: &mut SolveApp, ui: &egui::Ui, viewport: Rect) -> Vec<
     if let Some(since) = app.computing_since() {
         let seconds = ((crate::now_ms() - since) / 1000.0).floor().max(0.0);
         let text = crate::i18n::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))]);
-        if let Some(r) = paint_toast(ui, free, text, false, true) {
+        // Stop: a recompute that never finishes no longer leaves only quitting (#4053).
+        let stop = crate::i18n::tr("dialog.computing_stop");
+        if let Some((r, clicked)) = paint_toast_with(ui, free, text, ToastLead::Spinner, &[(stop, ToastKind::Secondary)]) {
             obstacles.push(r);
             crate::scenario::publish_rect("toast:computing", r);
             if app.status.is_none() {
                 crate::scenario::publish_rect("toast", r);
             }
             shown.push(r);
+            if clicked.is_some() {
+                app.stop_computing();
+            }
         }
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
     }
@@ -4257,6 +4262,7 @@ fn paint_toast_with(ui: &egui::Ui, free: Rect, text: String, lead: ToastLead, ac
                 ToastKind::Dismiss => crate::ui_kit::button(ui, *label, crate::ui_kit::Button::Small),
             })
             .inner;
+        crate::scenario::publish_handle(&format!("toast:{label}"), response.rect.center());
         if response.clicked() {
             clicked = Some(index);
         }

@@ -18,6 +18,13 @@
 //! as a dry run. Each check evaluates the history after the deleted feature, so it is computed
 //! the same way ([`DeleteCheck`]): the window goes on while it computes, then the delete runs, or
 //! the confirmation opens, with the check's results already in the cache.
+//!
+//! Stop on the computing notice gives up waiting (#4053): a join that never finishes (a sketch
+//! given many holes under a joined extrude) left the window computing for minutes with no way
+//! out but to quit, losing what was not saved. The design stays as it was and the commands
+//! waiting are dropped. A worker thread cannot be stopped from outside, so the stopped one runs
+//! on unseen; the same command asked for again on the same design takes it up instead of
+//! computing it a second time beside it.
 
 use serde_json::Value;
 
@@ -126,6 +133,10 @@ impl SolveApp {
             self.deferred_queue.push((id.to_string(), params));
             return Ok(Value::Null);
         }
+        if let Some(job) = self.take_up_stopped(id, &params) {
+            self.deferred = Some(job);
+            return Ok(Value::Null);
+        }
         match self.begin_deferred(id, &params) {
             Start::Later(job) => {
                 self.deferred = Some(job);
@@ -150,6 +161,42 @@ impl SolveApp {
         let r = self.run_with_kept(kept, |app| app.run(id, params));
         self.session.unprime();
         r
+    }
+
+    /// Stop waiting for what computes off the window thread (#4053): the history command, those
+    /// waiting behind it and a feature waiting to start after it, a delete's check, or a feature
+    /// editor being prepared. Nothing of it is applied; the design stays as it is now. The stopped
+    /// command's worker finishes on its own and is kept for [`SolveApp::take_up_stopped`]; a
+    /// delete's check and a feature editor are dropped.
+    pub fn stop_computing(&mut self) {
+        let job = self.deferred.take();
+        let check = self.delete_check.take();
+        let edit = self.pending_feature_edit.take();
+        if job.is_none() && check.is_none() && edit.is_none() {
+            return;
+        }
+        self.deferred_queue.clear();
+        // A feature started from a sketch waits for the marker to be back; stopped, it is not
+        // back, and the feature would go in where the sketch was.
+        self.start_after_roll = None;
+        if let Some(job) = job {
+            self.stopped = Some(job);
+        }
+        self.set_status(crate::i18n::tr("dialog.computing_stopped"), false);
+    }
+
+    /// The stopped command's job when `id` with `params` is asked for again on the design it was
+    /// computed for. A stopped job of an older design is let go; one of another command stays.
+    fn take_up_stopped(&mut self, id: &str, params: &Value) -> Option<Deferred> {
+        let job = self.stopped.take()?;
+        if job.revision != self.session.revision {
+            return None;
+        }
+        if job.command.0 == id && job.command.1 == *params {
+            return Some(job);
+        }
+        self.stopped = Some(job);
+        None
     }
 
     /// Since when a command, or a delete's check, has been computing off the window thread (ms),
@@ -262,8 +309,15 @@ impl SolveApp {
         let command = (id.to_string(), params.clone());
         let commands = vec![command.clone()];
         let (tx, rx) = std::sync::mpsc::channel();
+        #[cfg(test)]
+        let gate = self.apply_gate.clone();
         let spawned = std::thread::Builder::new().name("history".into()).spawn(move || {
-            let _ = tx.send(ahead.evaluate(&commands).ok());
+            let evaluated = ahead.evaluate(&commands).ok();
+            #[cfg(test)]
+            if let Some(Ok(gate)) = gate.as_ref().map(|g| g.lock()) {
+                let _ = gate.recv();
+            }
+            let _ = tx.send(evaluated);
         });
         if spawned.is_err() {
             return Start::Now(None, None);

@@ -161,6 +161,93 @@ fn a_design_changed_while_a_move_computes_is_computed_again() {
     assert_eq!(marker(&h), Some(2));
 }
 
+/// Each history worker waits for a send on the returned sender before it reports done: one that
+/// is never let go stands for a join that never finishes.
+fn hold_workers(h: &mut Harness) -> std::sync::mpsc::Sender<()> {
+    let (release, gate) = std::sync::mpsc::channel();
+    h.app.apply_gate = Some(std::sync::Arc::new(std::sync::Mutex::new(gate)));
+    release
+}
+
+/// Stop on the computing notice (#4053): a marker move whose join never finished left the window
+/// computing until the app was quit. Stopped, nothing is applied, the move waiting behind it is
+/// dropped, and the design is as it was, also once the stopped worker ends.
+#[test]
+fn stop_on_the_computing_notice_leaves_the_design_as_it_was() {
+    let mut h = block_boss_hole();
+    let release = hold_workers(&mut h);
+    h.app.run_heavy("timeline.roll_to", json!({"position": 1})).unwrap();
+    h.app.run_heavy("timeline.roll_to", json!({"position": 2})).unwrap();
+    h.frames(2);
+    assert!(h.app.computing_since().is_some(), "computing");
+    h.step(&json!({"click": {"handle": "toast:Stop"}})).unwrap();
+    assert!(h.app.computing_since().is_none(), "nothing computes any more");
+    assert!(h.app.deferred_queue.is_empty(), "the move waiting is dropped");
+    assert!(h.app.status.as_ref().is_some_and(|(msg, _, error)| !error && msg.starts_with("Stopped")), "{:?}", h.app.status);
+    // The stopped worker ending later changes nothing.
+    release.send(()).unwrap();
+    std::thread::sleep(Duration::from_millis(100));
+    until_settled(&mut h);
+    assert_eq!(marker(&h), None, "the marker stays at the end");
+    let hole = std::f64::consts::PI * 4.0 * 15.0;
+    let v = h.app.run("inspect.measure", json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+    assert!((v - (12500.0 - hole)).abs() < 1.0, "{v}");
+}
+
+/// A feature started in a sketch waits for the marker to roll back to the end; stopped, the
+/// marker is not back, so the feature does not start where the sketch was.
+#[test]
+fn stopping_the_roll_back_drops_the_feature_waiting_for_it() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    let sketch = h.app.session.active_sketch.expect("sketch opened");
+    h.app.run("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [20, 10]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("solid.extrude", json!({"distance": 5})).unwrap();
+    h.app.edit_feature(sketch);
+    let release = hold_workers(&mut h);
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    h.app.start("solid.extrude");
+    assert!(h.app.deferred.is_some() && h.app.start_after_roll.is_some(), "Extrude waits for the marker");
+    let marker_at_sketch = marker(&h);
+    h.app.stop_computing();
+    assert!(h.app.start_after_roll.is_none());
+    release.send(()).unwrap();
+    until_settled(&mut h);
+    assert!(h.app.dialog.is_none(), "Extrude opened with the marker still at the sketch");
+    assert_eq!(marker(&h), marker_at_sketch, "the design is as it was");
+}
+
+/// The same move asked for again takes up the stopped worker rather than starting a second one
+/// beside it; a design changed meanwhile lets it go and computes afresh.
+#[test]
+fn a_stopped_move_asked_for_again_takes_up_its_worker() {
+    let mut h = block_boss_hole();
+    let release = hold_workers(&mut h);
+    h.app.run_heavy("timeline.roll_to", json!({"position": 1})).unwrap();
+    let started = h.app.computing_since();
+    h.app.stop_computing();
+    assert!(h.app.stopped.is_some());
+    h.app.run_heavy("timeline.roll_to", json!({"position": 1})).unwrap();
+    assert!(h.app.stopped.is_none());
+    assert_eq!(h.app.computing_since(), started, "the first worker, taken up");
+    release.send(()).unwrap();
+    until_settled(&mut h);
+    assert_eq!(marker(&h), Some(1));
+    h.step(&json!({"expect": {"volume": 12000}})).unwrap();
+    // Stopped, then the design changes: the stopped move is let go, and the move computes afresh.
+    h.app.run_heavy("timeline.roll_to", json!({})).unwrap();
+    h.app.stop_computing();
+    h.app.run("solid.box", json!({"corner": [40, 5, 0], "length": 5, "width": 5, "height": 5, "operation": "join"})).unwrap();
+    h.app.run_heavy("timeline.roll_to", json!({})).unwrap();
+    assert!(h.app.stopped.is_none(), "an older design's worker is let go");
+    for _ in 0..2 {
+        let _ = release.send(());
+    }
+    until_settled(&mut h);
+    assert_eq!(marker(&h), None);
+}
+
 fn sketches_with_later_bodies() -> (Harness, Vec<u64>) {
     let mut h = Harness::new();
     h.app.home.open = false;
@@ -218,6 +305,24 @@ fn switching_from_a_sketch_to_a_feature_keeps_the_original_marker_with_backgroun
     until_settled(&mut h);
     assert_eq!(marker(&h), None);
     assert_eq!(h.app.session.model.state().bodies.len(), bodies, "all later bodies return");
+}
+
+/// Stop while a feature's editor is prepared from a sketch (the marker rolling forward through a
+/// join that never finishes, #4053): the editor does not open, and the design stays as it is now.
+#[test]
+fn stop_while_a_feature_editor_is_prepared_opens_nothing() {
+    let (mut h, sketches) = sketches_with_later_bodies();
+    let feature = h.app.session.doc.features[3].id;
+    h.app.edit_sketch(sketches[0]);
+    let at_sketch = marker(&h);
+    h.app.edit_feature(feature);
+    assert!(h.app.computing_since().is_some(), "the editor is prepared off the window thread");
+    h.app.stop_computing();
+    assert!(h.app.computing_since().is_none());
+    until_settled(&mut h);
+    assert!(h.app.dialog.is_none(), "the editor opened after Stop");
+    assert_eq!(h.app.session.active_sketch, None);
+    assert_eq!(marker(&h), at_sketch, "the marker stays where it was");
 }
 
 #[test]
