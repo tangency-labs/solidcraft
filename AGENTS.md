@@ -232,8 +232,10 @@ into `upstream/` (see README), then run `scripts/fetch-cpp.sh`, or
   (`scripts/fetch-reports.sh` downloads it). Quote your summary lines in the PR instead.
 - **Never append to a shared file.** Every finding and every upstream issue is its own
   new file: `plan/findings/<slug>.md` and `plan/upstream-issues/<slug>.md` (formats in
-  each directory's `README.md`). `plan/findings.md` and `plan/upstream-issues.md` are
-  frozen archives: do not add to them. Two PRs that each add a file never conflict.
+  each directory's `README.md`). Records are never edited after they merge (like ADRs):
+  an update is an addendum file. The old shared `plan/findings.md` and
+  `plan/upstream-issues.md` were split into those directories; CI fails if either comes
+  back. Two PRs that each add a file never conflict.
   Known difftest mismatches likewise live in `crates/difftest/known_mismatches/<unit id>.toml`
   (one file per unit; see `crates/difftest/src/known.rs`), and SolidCraft cases in
   `fixtures/solidcraft/<issue>-<slug>.json` (one file per issue).
@@ -285,10 +287,11 @@ The kernel core is one big call cycle, so the plan dropped ~2,300 calls as *back
   `crates/difftest/src/plan.rs`).
 - `plan/findings/<slug>.md`, one file per finding: Rust-vs-C++ disagreements, upstream
   bugs, nondeterminism (e.g. upstream `srand(time(NULL))`), anything a later agent must
-  know. Older findings are in the frozen `plan/findings.md`.
+  know. A reference to `plan/findings.md: <heading>` (older code comments): grep the
+  heading under `plan/findings/`.
 - `plan/upstream-issues/<slug>.md`, one file per issue: upstream C++ defects (problems
-  only, with location, trigger, how found and whether the C++ build confirmed it). Older
-  issues are in the frozen `plan/upstream-issues.md`; the site reads both.
+  only, with location, trigger, how found and whether the C++ build confirmed it). The
+  site reads them all. A `plan/upstream-issues.md` ID: grep it under that directory.
 - `reports/difftest/<unit>.json`: difftest output. Not committed: CI uploads main's set
   as an artifact; `scripts/fetch-reports.sh` downloads it.
 - `plan/PROGRESS.md`: the checklist (generated; never edit by hand).

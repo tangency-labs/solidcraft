@@ -7,8 +7,9 @@ A short summary of where the port stands. Per-unit detail lives elsewhere:
 - **`plan/PROGRESS.md`:** the generated checklist. CI regenerates it; never edit it by
   hand. The copy on `main` was last regenerated on 2026-10-21 and lags the site.
 - **`plan/units/<id>.toml`:** each unit's status and notes.
-- **`plan/findings.md`:** Rust-vs-C++ disagreements, harness notes and handoffs
-  (append-only). **`plan/upstream-issues.md`:** upstream C++ defects.
+- **`plan/findings/`:** Rust-vs-C++ disagreements, harness notes and handoffs, one file
+  each (never edited later; updates are addendum files). **`plan/upstream-issues/`:**
+  upstream C++ defects, one file each.
 - **`plan/STATUS-history.md`:** this file's earlier contents (2026-10-12 to 2026-10-22),
   archived unchanged.
 
@@ -118,4 +119,4 @@ first (`cpp-guard:` / `cpp-crash-guard:` = inputs kept away from a C++ crash, `h
 
 Refresh the snapshot from a recent main CI run (`gh run list --branch main`, then
 `gh run download <id> -n difftest-reports`) instead of appending "latest" lines. Handoff
-notes and investigations belong in `plan/findings.md` or the PR, not here.
+notes and investigations belong in a new `plan/findings/<slug>.md` or the PR, not here.

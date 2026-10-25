@@ -1,0 +1,13 @@
+#### WR-35. `SmCurvePropertyGS::BranchMayContainAnswers` corner and angle bugs
+- **Severity:** Wrong result
+- **Area:** Curves
+- **Location:** `SmCurve.cpp:12219` (`double dZV = 1.0 * j;`), `SmCurvePropertyGS::BranchMayContainAnswers` (def. `:12141`).
+- **What happens:** Branches are pruned or kept incorrectly:
+  - The "corner" points use `j` for z, so only 4 distinct box points are tried, each twice.
+  - The `SM_CP_PERPENDICULAR_TO_VECTOR` / `SM_CP_MAXIMA_TO_PLANE` test adds degrees to radians before comparing with `PI/2`.
+  - `SmCurvePropertyGS` also declares its own `m_cpOptVectors`, which shadows `SmGlobalSolver`'s (`source/SMLib/inc/SmGlobalSolver.h:98`), so the property vectors never reach the base checks.
+- **Trigger:** A perpendicular-to-vector property solve.
+- **How found:** read during porting.
+- **Confirmed:** no.
+- **Severity:** wrong result.
+- **Rust port:** Ported as is.

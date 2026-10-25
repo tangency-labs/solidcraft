@@ -1,0 +1,11 @@
+#### UB-157. `CreateBlendSurface` with rails of different natural intervals writes past `sIntParams`
+- **Severity:** Crash / undefined behaviour
+- **Area:** Topology
+- **Location:** `SmBSplineSurfaceNLib.cpp:5305`-`5378` (`SmBSplineSurface::CreateSkinnedSurface`, reads `sIntParams[lNumSections+ii]` at `:5366` and writes it at `:5378`); reached from `SmSurface::CreateBlendSurface` (`SmSurface.cpp:15375`, via `SmDerivSurfDefinition::SkinDerivSurface`, `:3503`), which passes only one parameter per cross section (`sParams`, 101 values). `CreateBlendSurface` also ignores the statuses of both `GetSampleValues` calls (`SmSurface.cpp:15443`, `:15452`) and goes on with partly filled sample arrays.
+- **What happens:** With two rails, `CreateSkinnedSurface` expects `2 * lNumSections` intersection parameters. When `SyncronizeKnotsOfCurves` changes the natural interval of rail 2, the loop reads and writes past the end of the `SmTArray` copy: heap corruption.
+- **Trigger:** `CreateBlendSurface` with two B-spline curves whose natural intervals differ (e.g. `[0, 1]` and `[0, 2]` knot vectors) on surfaces the curves can be dropped onto.
+- **How found:** crash in the C++ reference run (`surface.surface_p8`, generated blend cases: `corrupted size vs. prev_size` in `N_EndNurbs` under `CreateSkinnedSurface`).
+- **Confirmed:** yes (heap corruption without the shim's probe; with it, 2000 cases run clean).
+- **Severity:** crash/UB.
+- **Rust port:** The sample statuses fail the call at the first failing sample (`SM_ERR`). Skinning with too few intersection parameters returns `InvalidInput` ("too few intersection parameters"). The shim probes both conditions (the `GetSampleValues` pair and the rail synchronisation on copies) and reports `SM_ERR` / `1007` instead of running the undefined part.
+- **Also reached from:** `SmBrep::CreateEdgeEdgeBlend` (`SmBrep.cpp`, blend flags 1-3), which hands its trimmed, reparameterised edge rails to `CreateBlendSurface`: heap corruption in the `topology.brep_p1` difftest (valgrind: invalid read/write of 8 bytes just past a 128-double `sIntParams` copy, edge-edge blends on the upstream `.smb` files) once that shim ran the blend. The `topology.brep_p1` shim replays `CreateEdgeEdgeBlend` up to the blend call on its own rails and applies the same probe.

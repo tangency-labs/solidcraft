@@ -378,7 +378,7 @@ ratchet waivers once the PR has merged.
 * **Absolute floor** only where the runner documents one via
   `abs_floors()` (key + value + reason, written into the report). Do not add a
   floor to make a case pass; if the C++ and Rust genuinely disagree, record it in
-  `plan/findings.md` and leave the unit non-green.
+  a new `plan/findings/<slug>.md` and leave the unit non-green.
 * Key sets and array lengths must match. A case with a harness error (bad
   input, panic) fails. A unit with zero cases fails.
 

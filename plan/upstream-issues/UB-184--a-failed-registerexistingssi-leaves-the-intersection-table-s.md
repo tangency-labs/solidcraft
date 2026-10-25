@@ -1,0 +1,13 @@
+#### UB-184. A failed `RegisterExistingSSI` leaves the intersection table's lists out of step
+- **Severity:** Wrong result
+- **Area:** Intersection
+- **Location:** `source/SMLib/src/SmTopologyIntersector.cpp:276-315` (`SER(SM_ERR)` at :303), `SmTopologyIntersector::RegisterExistingSSI`; read at :211 by `CheckIfHaveExistingSSI`.
+- **What happens:** `RegisterExistingSSI` adds both surfaces to `m_vBrepSurfaces` / `m_vOtherSurfaces` first and the results last. A 3D curve that is not an `SmBSplineCurve` (or a null entry) returns `SM_ERR` from inside the copy loop, so the results list stays one entry shorter (and the copies made so far leak). A later `CheckIfHaveExistingSSI` that matches that surface pair reads `m_vResults[ii]` with `ii` one past the results' size. `m_vResults` is an `SmTArray`, which allocates at least 16 zeroed slots, so there are three outcomes:
+  - **Null dereference:** the failed registration was the table's first, so `m_pData` is still NULL.
+  - **Zeroed slot:** otherwise, with no later registration. `m_p3DCurves` is NULL there, so the call reports an existing intersection with no curves.
+  - **Wrong curves:** after any later successful registration, `ii` indexes the next pair's results, so the failed pair inherits another pair's curves (and every later pair is shifted). This is the likely case in practice.
+- **Trigger:** `RegisterExistingSSI(s1, s2, {line or NULL}, ..)` for a non-B-spline 3D curve (an `SmLine`, `SmCompositeCurve`, ...), then `CheckIfHaveExistingSSI(s1, s2)`; also a `crUVCurves1/2` shorter than `cr3DCurves`, which the copy loop indexes in step with the 3D list.
+- **How found:** read during porting (`boolean.topology_intersector_p2`, PR #203).
+- **Confirmed:** no (source inspection; the difftest shim only registers B-spline curves and equal-length lists).
+- **Severity:** undefined behaviour (null dereference) in the first case, a wrong result in the other two, after an error status.
+- **Rust port:** Faithful on the table (surfaces added, results not). `CheckIfHaveExistingSSI` then fails with `SolidError::InvalidInput` ("intersection table lists differ in length") in all three cases. For the zeroed and misaligned cases, which are defined upstream, that is a deviation: the port refuses instead of reproducing a wrong result. A UV list shorter than the 3D list is `InvalidInput` in `register_existing_ssi`.

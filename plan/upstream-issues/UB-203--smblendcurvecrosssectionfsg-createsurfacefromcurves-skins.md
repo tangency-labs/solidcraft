@@ -1,0 +1,10 @@
+#### UB-203. `SmBlendCurveCrossSectionFSG::CreateSurfaceFromCurves` skins incompatible data as synchronised
+- **Severity:** Crash / undefined behaviour
+- **Area:** Surfaces and volumes
+- **Location:** `source/SMLib/src/SmFilletStandardSolver.cpp:4458` (`SmBlendCurveCrossSectionFSG::CreateSurfaceFromCurves`: `CreateSkinnedSurface(..., bSyncronized = TRUE, ...)`), through `SmBSplineSurfaceNLib.cpp` `SmBSplineSurface::CreateSkinnedSurface` into `NL_SrfAdv.cpp:13262` `N_CreateSkinSrfBoundaryContinuity` with `cmp = NL_YES`, which reads the cross sections' and the derivative curves' control points with the first cross section's count.
+- **What happens:** Two inputs are not compatible although the call says so: (a) a point cross section (`CreatePointCurve` where the rails meet within the tolerance, `:4132`) among the blend curves; (b) with `bNeedG1Continuity`, the cross-boundary derivative surfaces: the strips are ruled surfaces linear in u, `N_AdjustDerivSrf` (`NL_SrfAdv.cpp:13316`) swaps and extends them successfully (the blend curves are Bezier), and the first skinning attempt takes the 2-point derivative curve along the ruling as the cross-boundary data of a degree 3, 5 or 7 section. The skinning then reads past the derivative / point curve's control points.
+- **Trigger:** (b) every `G1` blend-curve fillet that is skinned (not ruled or revolved), for example the `blend.fillet_standard_solver_p1` difftest case `gen2400` of a 6000-seed run (seed `7089734759426696442`: continuity 3, blend scale 2.5, `tol = 0.05`, straight non-parallel rails): the C++ surface holds denormals (`1.344e-321`, `3.686e-310`) and `6.8e61`.
+- **How found:** generated difftest case.
+- **Confirmed:** yes for (b) (the case above); no for (a).
+- **Severity:** crash/UB (out-of-bounds read).
+- **Rust port:** The bounds-checked skinning fails the first attempt (`InvalidInput`) and `CreateSkinnedSurface` retries as upstream does after a failure. The shim rejects both inputs (a dry run of the knot insertion and the ruled / revolved tests).

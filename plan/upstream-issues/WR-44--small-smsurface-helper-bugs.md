@@ -1,0 +1,13 @@
+#### WR-44. Small `SmSurface` helper bugs
+- **Severity:** Wrong result
+- **Area:** Surfaces and volumes
+- **Location:**
+  - `SmSurface.cpp:11574` `sm_MergeDoubleArrays`: stops when either array is exhausted, dropping the other's tail.
+  - `:3303` `SmDerivSurfDefinition::CreateCrossSectionCurves`: takes the third-derivative Taylor coefficient from the second derivatives.
+  - `SmCrvOnSurf.cpp:811` `EvaluateSurface1stDerivDerivs`: the zero fill `for (ii = 2; ii > lNumDers; ii++)` never runs.
+- **What happens:** Silently wrong merged arrays, cross sections and derivative slots.
+- **Trigger:** `sm_MergeDoubleArrays([0,1,2], [0.5])`.
+- **How found:** read during porting.
+- **Confirmed:** no.
+- **Severity:** wrong result.
+- **Rust port:** Ported as written.

@@ -8,7 +8,7 @@ Standard library only (Python 3.11+ for tomllib). Every number comes from the re
 plan/units/*.toml, plan/PROGRESS.md (claims), harness/callgraph/units.json,
 reports/difftest/*.json (not committed: CI's artifact, see scripts/fetch-reports.sh),
 reports/solids/solids.json (not committed: CI's artifact, see scripts/fetch-solids.sh),
-reports/ssi-corpus.json, plan/upstream-issues.md, the
+reports/ssi-corpus.json, plan/upstream-issues/*.md, the
 module file headers under crates/solidcore/src and git history (timeline). Output is
 deterministic: sorted, and the only date is the commit date of HEAD.
 
@@ -440,55 +440,33 @@ def markdown(text):
 
 
 def parse_issues():
-    text = (ROOT / "plan/upstream-issues.md").read_text()
-    lines = text.splitlines()
-    intro, entries = [], []
-    severity = area = ""
-    cur = None
-    for line in lines:
-        if line.startswith("# "):
-            continue
-        h = re.match(r"(#{2,4}) (.*)$", line)
-        if h:
-            level, title = len(h.group(1)), h.group(2).strip()
-            if level == 2:
-                severity, area = title, ""
-            elif level == 3:
-                area = title
-            if level == 4:
-                m = re.match(r"([A-Z]+)-(\d+)\.\s*(.*)$", title)
-                cur = {"series": m.group(1) if m else "OTHER", "num": int(m.group(2)) if m else 0,
-                       "id": f"{m.group(1)}-{m.group(2)}" if m else title,
-                       "title": m.group(3) if m else title, "severity": severity, "area": area,
-                       "body": []}
-                entries.append(cur)
-            else:
-                cur = None
-            continue
-        if cur is not None:
-            cur["body"].append(line)
-        elif not entries and not severity:
-            intro.append(line)
-    for e in entries:
-        body = "\n".join(e["body"]).strip()
-        e["body"] = body
-        fields = dict(re.findall(r"^- \*\*([^*]+?):\*\*\s*(.*)$", body, re.M))
-        conf = fields.get("Confirmed", "").strip().lower()
-        e["confirmed"] = "yes" if conf.startswith("yes") else ("no" if conf.startswith("no") else "unknown")
-        e["how_found"] = fields.get("How found", "")
-        e["psirt"] = "[PSIRT]" in e["title"]
-    return "\n".join(intro).strip(), entries + parse_issue_files()
+    """Upstream issues: the intro is plan/upstream-issues/README.md (without its title),
+    the entries are the files in that directory (parse_issue_files)."""
+    readme = ROOT / "plan/upstream-issues/README.md"
+    lines = readme.read_text().splitlines() if readme.exists() else []
+    intro = "\n".join(l for l in lines if not l.startswith("<!-- archive:"))
+    intro = re.sub(r"\A# [^\n]*\n", "", intro).strip()
+    return intro, parse_issue_files()
+
+
+def issue_file_order(path):
+    """Name order, except that `<ID>--...--dupN.md` follows the other files of its ID, so
+    the site's `#<id>-dupN` anchors keep pointing at the same entries as in the archive."""
+    m = re.search(r"--dup(\d+)$", path.stem)
+    return (path.stem.split("--")[0], int(m.group(1)) if m else 1, path.name)
 
 
 def parse_issue_files():
-    """New entries: one file each under plan/upstream-issues/ (plan/upstream-issues/README.md).
+    """Entries: one file each under plan/upstream-issues/ (plan/upstream-issues/README.md).
 
-    A file is a `#### <ID>. <title>` heading followed by the usual field bullets, with
-    `- **Severity:**` and `- **Area:**` standing in for the frozen file's section headings.
-    Files are read in name order so the page is deterministic.
+    A file is a `#### <ID>. <title>` heading followed by the usual field bullets, starting
+    with `- **Severity:**` and `- **Area:**` (the section headings of the former archive).
+    Only those leading Severity/Area lines are header fields; a Severity bullet further
+    down (archive entries have their own) stays in the body. Files are read in name order
+    (issue_file_order) so the page is deterministic.
     """
     entries = []
-    for path in sorted((ROOT / "plan/upstream-issues").glob("*.md")):
+    for path in sorted((ROOT / "plan/upstream-issues").glob("*.md"), key=issue_file_order):
         if path.name == "README.md":
             continue
         lines = path.read_text().splitlines()
@@ -497,16 +475,26 @@ def parse_issue_files():
             continue
         title = lines[head][5:].strip()
         m = re.match(r"([A-Z]+)-(\d+)\.\s*(.*)$", title)
-        body = "\n".join(lines[head + 1:]).strip()
+        header, i = {}, head + 1
+        while i < len(lines):
+            f = re.match(r"^- \*\*(Severity|Area):\*\*\s*(.*)$", lines[i])
+            if lines[i].strip() and (not f or f.group(1) in header):
+                break
+            if f:
+                header[f.group(1)] = f.group(2).strip()
+            i += 1
+        body = "\n".join(lines[i:]).strip()
         fields = dict(re.findall(r"^- \*\*([^*]+?):\*\*\s*(.*)$", body, re.M))
-        body = "\n".join(l for l in body.splitlines()
-                         if not re.match(r"^- \*\*(Severity|Area):\*\*", l)).strip()
+        for k in ("Severity", "Area"):
+            if k not in header and k in fields:  # header field not at the top: take it out
+                header[k] = fields[k].strip()
+                body = re.sub(rf"^- \*\*{k}:\*\*.*\n?", "", body, count=1, flags=re.M).strip()
         conf = fields.get("Confirmed", "").strip().lower()
         entries.append({
             "series": m.group(1) if m else "OTHER", "num": int(m.group(2)) if m else 0,
             "id": f"{m.group(1)}-{m.group(2)}" if m else title,
             "title": m.group(3) if m else title,
-            "severity": fields.get("Severity", "").strip(), "area": fields.get("Area", "").strip(),
+            "severity": header.get("Severity", ""), "area": header.get("Area", ""),
             "body": body,
             "confirmed": "yes" if conf.startswith("yes") else ("no" if conf.startswith("no") else "unknown"),
             "how_found": fields.get("How found", ""),
@@ -1158,9 +1146,8 @@ counts). Click a column heading to sort.</p>
     ser_opts += "".join(f'<option value="{esc(k)}">{esc(k)} ({sc[k]})</option>' for k in sorted(set(sc) - set(SERIES)))
     body = f"""
 <h1>Upstream issues</h1>
-<p class="muted">{len(issues)} entries from <a href="{REPO_URL}/blob/main/plan/upstream-issues.md"><code>plan/upstream-issues.md</code></a>
-and <a href="{REPO_URL}/tree/main/plan/upstream-issues"><code>plan/upstream-issues/</code></a>,
-rendered as written: {', '.join(f'{sc[k]} {k}' for k in SERIES if sc[k])}; {cc['yes']} confirmed by a C++ run.</p>
+<p class="muted">{len(issues)} entries from <a href="{REPO_URL}/tree/main/plan/upstream-issues"><code>plan/upstream-issues/</code></a>
+(one file each), rendered as written: {', '.join(f'{sc[k]} {k}' for k in SERIES if sc[k])}; {cc['yes']} confirmed by a C++ run.</p>
 {('<p class="warn">Duplicate IDs in the source file: ' + ', '.join(esc(d) for d in dups) + '. Both entries are shown; the later one is linked as <code>#&lt;id&gt;-dup2</code>.</p>') if dups else ''}
 <details class="intro"><summary>About this list</summary>{markdown(intro_md)}</details>
 <div class="filters" data-list="issues">

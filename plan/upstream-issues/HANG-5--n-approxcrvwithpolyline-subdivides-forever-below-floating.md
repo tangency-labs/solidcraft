@@ -1,0 +1,11 @@
+#### HANG-5. `N_ApproxCrvWithPolyline` subdivides forever below floating-point resolution
+- **Severity:** Hang
+- **Area:**
+- **Location:** `NL_CrvGeom.cpp:1531`, `N_ApproxCrvWithPolyline`.
+- **What happens:** The degenerate-segment test `dd < tolsq` never succeeds, so coincident control points keep splitting. With `tol <= 0` the last vertex is also never appended.
+- **Trigger:** `tol = 0`; or a relative tolerance on a zero-length curve.
+- **How found:** read during porting.
+- **Confirmed:** no.
+- **Severity:** hang.
+- **Rust port:** Stops after `POLYLINE_MAX_SPLITS` with `NotConverged`.
+- **Fuzz sweep trigger (2026-10-20):** `N_CreateSweepScale` (`NL_SrfAdv.cpp:15353`, polyline at `:15516` within `E / 2`) with a sweeping tolerance below floating-point resolution of the trajectory: `E = 1e-300`, or a trajectory control point at `±1e300` / `-2^63` (`nlib.srf_adv_p6` `fuzz00381`, `fuzz00486`, `fuzz01019`, `fuzz01105`, `fuzz01236`, `fuzz01549`, `fuzz01582`, `fuzz01615`, `fuzz01772`); `SmBSplineSurface::CreateSweepSurface` with `tol = 1e-300` (`nurbs.b_spline_surface_n_lib_p1` `fuzz00530`); `SmApiCreateSweep` (fixed `dTol = 1e-5`, `SmApiSurfaces.cpp:328`) with a path control point at `±1e300` (`sweep.api_surfaces` `fuzz00106`, `fuzz00357`, `fuzz00476`, `fuzz00668`, `fuzz00746`, `fuzz00805`, `fuzz01000`, `fuzz01115`, `fuzz01151`, `fuzz01999`). Change "Confirmed" to yes (C++ timeouts). The `nlib.srf_adv_p6` and `nurbs.b_spline_surface_n_lib_p1` FFIs require a non-translational sweep tolerance of at least `MIN_SWEEP_TOL_FRACTION = 1e-6` times the trajectory's control polygon length; `sweep.api_surfaces` is not guarded yet (open).
