@@ -43,7 +43,8 @@
 //! multiplicity exactly `degree + 1` and interior multiplicity at most the degree);
 //! NURB data of any dimension, 2D data (`z = NL_NOZ`) included, since upstream handles
 //! it; positive weights except for `Extrude` (as `CreateLinearSweep`, any weights);
-//! B-spline curves where upstream takes `SmBSplineCurve*` and no `NULL` curve where upstream dereferences it unchecked (all but
+//! B-spline curves (including real `SmLine` / `SmCircle` subclasses for `Extrude`)
+//! where upstream takes `SmBSplineCurve*` and no `NULL` curve where upstream dereferences it unchecked (all but
 //! `Revolution` and `SkinPrimitive`); `SmApiCreateCurve` with at least 4 points and
 //! positive arc / circle radii (a failing constructor is `SC_ERR_ARG`); at most 12
 //! skin profiles; a skin-from-faces degree of 1 to 3 with 1 to 4 positive-radius
@@ -234,7 +235,9 @@ fn check_knots(knots: &[f64], p: usize) -> Result<(), FfiError> {
 enum Need {
     /// An `SmBSplineCurve` of any dimension with positive weights.
     BSplinePosWeights,
-    /// An `SmBSplineCurve` of any dimension (`CreateLinearSweep`).
+    /// An `SmBSplineCurve` of any dimension, including `SmLine` / `SmCircle`
+    /// subclasses (`SmLine.h:49`, `SmCircle.h:59`, `SmEllipse.h:243`).
+    /// `SmBSplineSurface.cpp:1588-1629` (`CreateLinearSweep`) uses their NURB.
     BSplineAnyDim,
     /// Any `SmCurve`.
     AnyCurve,
@@ -303,7 +306,7 @@ fn check_curve(c: &CurveSpec, need: Need, nullable: bool) -> Result<(), FfiError
             if *radius <= 0.0 {
                 return Err(bad("circle: radius must be positive"));
             }
-            if matches!(c, CurveSpec::AnalyticCircle { .. }) && need != Need::AnyCurve {
+            if matches!(c, CurveSpec::AnalyticCircle { .. }) && need == Need::BSplinePosWeights {
                 return Err(bad(
                     "analytic circle where upstream takes an SmBSplineCurve",
                 ));
@@ -312,7 +315,7 @@ fn check_curve(c: &CurveSpec, need: Need, nullable: bool) -> Result<(), FfiError
         CurveSpec::LineSegment { start, end } => {
             finite(start, "line")?;
             finite(end, "line")?;
-            if need != Need::AnyCurve {
+            if need == Need::BSplinePosWeights {
                 return Err(bad("line where upstream takes an SmBSplineCurve"));
             }
         }
