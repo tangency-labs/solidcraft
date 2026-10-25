@@ -465,11 +465,163 @@ impl UnitDiff for Runner {
             direction,
             domain,
             controls,
-            // (the kernel asks for diagonals only for B-spline and extrusion
-            // surfaces, `SubdivideByBlock`; a cone's diagonal `SmCrvOnSurf` is unported)
+            // Preserve historical generated inputs; real cylinder/cone diagonals
+            // are covered by the named analytic-diagonal regression fixtures.
             diagonals: diagonals && analytic_cone == 0,
             line: line(),
         })
         .ok()
+    }
+}
+
+#[cfg(all(test, feature = "cpp"))]
+mod tests {
+    use super::*;
+
+    const NAMES: [&str; 4] = [
+        "analytic_diagonal_cylinder_u_disabled",
+        "analytic_diagonal_cylinder_u_enabled",
+        "analytic_diagonal_cone_u_disabled",
+        "analytic_diagonal_cone_u_enabled",
+    ];
+
+    fn context() -> CaseContext {
+        CaseContext {
+            root: crate::case::repo_root(),
+            seeds: 0,
+        }
+    }
+
+    fn fixtures() -> Result<Vec<Case>, HarnessError> {
+        let cases = context().fixture_cases(Runner.id())?;
+        let selected: Vec<_> = cases
+            .iter()
+            .filter(|case| {
+                matches!(&case.source, crate::case::CaseSource::Fixture { path, .. }
+                    if path == "fixtures/surface.surface_p9/analytic-diagonals.json")
+            })
+            .collect();
+        assert_eq!(selected.len(), NAMES.len());
+        NAMES
+            .iter()
+            .map(|name| {
+                let matching: Vec<_> = cases.iter().filter(|case| case.name == *name).collect();
+                assert_eq!(matching.len(), 1, "{name}");
+                let case = matching.first().ok_or_else(|| harness(name))?;
+                assert!(selected.contains(case), "{name}");
+                Ok((*case).clone())
+            })
+            .collect()
+    }
+
+    fn assert_close(actual: f64, expected: f64) {
+        assert!(
+            (actual - expected).abs() <= crate::REL_TOL * actual.abs().max(expected.abs()),
+            "{actual} != {expected}"
+        );
+    }
+
+    fn assert_splits(case: &Case, output: &Output) -> Result<(), HarnessError> {
+        assert!(output.error.is_none(), "{}: {output:?}", case.name);
+        assert!(output.deferred.is_none(), "{}: {output:?}", case.name);
+        assert!(output.rejected.is_none(), "{}: {output:?}", case.name);
+        assert_eq!(
+            output.values.get("status"),
+            Some(&vec![0.0]),
+            "{}",
+            case.name
+        );
+        let inputs: Inputs = case.parse()?;
+        let splits = output.values.get("out").ok_or_else(|| harness("out"))?;
+        assert_eq!(splits.len(), if inputs.diagonals { 9 } else { 2 });
+        assert!(splits
+            .iter()
+            .all(|v| v.is_finite() && (0.4..=1.6).contains(v)));
+        assert!(splits
+            .windows(2)
+            .all(|pair| matches!(pair, [a, b] if a < b)));
+        assert_close(*splits.first().ok_or_else(|| harness("first split"))?, 0.4);
+        assert_close(*splits.last().ok_or_else(|| harness("last split"))?, 1.6);
+        // Shape expectations for these regressions, not a replacement native oracle.
+        if inputs.diagonals {
+            for (actual, expected) in splits
+                .iter()
+                .zip([0.4, 0.55, 0.7, 0.85, 1.0, 1.15, 1.3, 1.45, 1.6])
+            {
+                assert_close(*actual, expected);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn analytic_diagonal_fixtures_are_discovered_and_paired() {
+        let cases = fixtures().unwrap();
+        let discovered = Runner.cases(&context()).unwrap();
+        for (index, case) in cases.iter().enumerate() {
+            assert_eq!(discovered.iter().filter(|c| c.name == case.name).count(), 1);
+            let inputs: Inputs = case.parse().unwrap();
+            assert_eq!(inputs.op, 0);
+            assert!(!inputs.analytic_plane && !inputs.analytic_revolution);
+            assert_eq!(inputs.analytic_cone, if index < 2 { 1 } else { 2 });
+            assert_eq!(inputs.direction, 0);
+            assert_eq!(inputs.domain, [0.125, 0.2, 0.375, 0.8]);
+            assert_eq!(inputs.controls, [0.05, 15.0, 0.0]);
+            assert_eq!(inputs.diagonals, index % 2 == 1);
+            assert_eq!(inputs.line, line());
+            for (index, point) in inputs.net.iter().enumerate() {
+                assert_eq!(
+                    *point,
+                    [(index / 3) as f64 * 0.5, (index % 3) as f64 * 0.5, 0.0]
+                );
+            }
+        }
+        for pair in cases.as_chunks::<2>().0 {
+            let mut disabled = pair[0].inputs.clone();
+            let mut enabled = pair[1].inputs.clone();
+            disabled.as_object_mut().unwrap().remove("diagonals");
+            enabled.as_object_mut().unwrap().remove("diagonals");
+            assert_eq!(disabled, enabled);
+        }
+    }
+
+    #[test]
+    fn analytic_diagonal_controls_have_meaningful_splits() {
+        for pair in fixtures().unwrap().as_chunks::<2>().0 {
+            let disabled = Runner.run_rust(&pair[0]).unwrap();
+            let enabled = Runner.run_rust(&pair[1]).unwrap();
+            assert_splits(&pair[0], &disabled).unwrap();
+            assert_splits(&pair[1], &enabled).unwrap();
+            assert_ne!(disabled.values["out"], enabled.values["out"]);
+        }
+    }
+
+    #[test]
+    fn analytic_diagonal_native_outputs_match_complete_arrays() {
+        assert!(Runner.abs_floors().is_empty());
+        for pair in fixtures().unwrap().as_chunks::<2>().0 {
+            let mut native = Vec::new();
+            let mut rust = Vec::new();
+            for case in pair {
+                let cpp = Runner.run_cpp(case).unwrap();
+                let rs = Runner.run_rust(case).unwrap();
+                assert_splits(case, &cpp).unwrap();
+                assert_splits(case, &rs).unwrap();
+                let diff = crate::compare(&cpp, &rs, Runner.abs_floors());
+                assert!(diff.pass(), "{}: {diff:?}", case.name);
+                assert_eq!(diff.values_compared, cpp.values["out"].len() + 1);
+                if case.parse::<Inputs>().unwrap().diagonals {
+                    let mut perturbed = rs.clone();
+                    perturbed.values.get_mut("out").unwrap()[1] *= 1.01;
+                    let negative = crate::compare(&cpp, &perturbed, Runner.abs_floors());
+                    assert!(!negative.pass(), "{}: interior change missed", case.name);
+                    assert_eq!(negative.mismatch_count, 1);
+                }
+                native.push(cpp);
+                rust.push(rs);
+            }
+            assert_ne!(native[0].values["out"], native[1].values["out"]);
+            assert_ne!(rust[0].values["out"], rust[1].values["out"]);
+        }
     }
 }
