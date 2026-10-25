@@ -199,6 +199,23 @@ pub enum Step {
         /// Turn in degrees.
         angle_deg: f64,
     },
+    /// A circle of `radius` swept along `path` (built in `plane`, moved by `origin`),
+    /// capped at both ends: `SmApiCreatePipeSweep` for one segment,
+    /// `SmApiCreateSweepAlongPlanarPath` of a circle normal to the path start for more.
+    Pipe {
+        /// Body written.
+        id: String,
+        /// Pipe radius.
+        radius: f64,
+        /// Lines and arcs joined end to end, in the plane's (u, v) coordinates.
+        path: Vec<Seg>,
+        /// Plane of the path (default XY).
+        #[serde(default)]
+        plane: ProfilePlane,
+        /// Where the plane's origin sits.
+        #[serde(default)]
+        origin: P3,
+    },
     /// Reflection of `body` in the plane `normal = at`; the original is not changed, join
     /// the two with a `union` step. `SM_API` has no mirror, so this defers (see `step_rust`).
     Mirror {
@@ -466,6 +483,7 @@ impl Step {
             | Self::Intersection { id, .. }
             | Self::Extrude { id, .. }
             | Self::Revolve { id, .. }
+            | Self::Pipe { id, .. }
             | Self::Mirror { id, .. }
             | Self::Fillet { id, .. }
             | Self::OffsetFaces { id, .. }
@@ -481,6 +499,7 @@ impl Step {
             | Self::Cylinder { .. }
             | Self::Extrude { .. }
             | Self::Revolve { .. }
+            | Self::Pipe { .. }
             | Self::SheetCorner { .. } => Vec::new(),
             Self::Union { a, b, .. }
             | Self::Difference { a, b, .. }
@@ -567,6 +586,19 @@ pub fn validate(case: &Case) -> Result<(), String> {
                     .all(|x| x.is_finite())
                     && angle_deg.is_finite()
                     && valid_profile(profile)
+            }
+            Step::Pipe {
+                radius,
+                path,
+                origin,
+                ..
+            } => {
+                radius.is_finite()
+                    && origin.iter().all(|x| x.is_finite())
+                    && path
+                        .iter()
+                        .all(|s| matches!(s, Seg::Line { .. } | Seg::Arc { .. }))
+                    && valid_profile(path)
             }
             Step::Mirror { at, .. } => at.is_finite(),
             Step::Fillet { edges, radius, .. } => {
@@ -902,6 +934,60 @@ fn step_rust(k: &mut Kernel, bodies: &mut BTreeMap<String, Brep>, step: &Step) -
             )
             .map_err(|e| solid(&e))?
         }
+        Step::Pipe {
+            radius,
+            path,
+            plane,
+            origin,
+            ..
+        } => {
+            let cs = profile_curves(k, path, *plane, *origin)?;
+            if let [single] = cs.as_slice() {
+                sweeps::create_pipe_sweep(k, *radius, Some(single), true).map_err(|e| solid(&e))?
+            } else {
+                // The profile: a circle at the origin turned from +Z onto the path's start
+                // tangent; the sweep moves its centre to the path start.
+                let (u, v) = match path.first() {
+                    Some(Seg::Line { from, to }) => (to[0] - from[0], to[1] - from[1]),
+                    Some(Seg::Arc { start_deg, .. }) => {
+                        let (s, c) = start_deg.to_radians().sin_cos();
+                        (-s, c)
+                    }
+                    _ => return Err(Run::Error("pipe path starts with no line or arc".into())),
+                };
+                let t = match plane {
+                    ProfilePlane::Xy => Vec3::new(u, v, 0.0),
+                    ProfilePlane::Yz => Vec3::new(0.0, u, v),
+                    ProfilePlane::Zx => Vec3::new(v, 0.0, u),
+                }
+                .unitize()
+                .map_err(|e| solid(&e))?;
+                let mut circle = Curve::from(
+                    curves::create_analytic_circle(k, Vec3::new(0.0, 0.0, 0.0), *radius)
+                        .map_err(|e| solid(&e))?,
+                );
+                let z = Vec3::new(0.0, 0.0, 1.0);
+                let cos = t.dot(z).clamp(-1.0, 1.0);
+                if cos < 1.0 {
+                    let axis = if cos > -1.0 {
+                        z.cross(t)
+                    } else {
+                        Vec3::new(1.0, 0.0, 0.0)
+                    };
+                    api_rotate(
+                        k,
+                        Some(TransformObject::Curve(&mut circle)),
+                        Vec3::new(0.0, 0.0, 0.0),
+                        axis,
+                        cos.acos().to_degrees(),
+                    )
+                    .map_err(|e| solid(&e))?;
+                }
+                let refs: Vec<&Curve> = cs.iter().collect();
+                sweeps::create_sweep_along_planar_path(k, &[&circle], &refs, true, 3)
+                    .map_err(|e| solid(&e))?
+            }
+        }
         // SM_API has no mirror and no matrix transform: SmBrep::Mirror and
         // SmBrep::Transform(double[4][4]) are SMLib-level and not ported. The nearest
         // SM_API route, SmApiScaleByPt with a reflecting scale, is refused for any body
@@ -1232,7 +1318,7 @@ mod tests {
         let cases = all();
         assert_eq!(
             cases.len(),
-            72,
+            76,
             "{:?}",
             cases.iter().map(|c| &c.id).collect::<Vec<_>>()
         );
@@ -1486,5 +1572,14 @@ mod tests {
             r#"{"op": "mirror", "id": "a", "body": "b", "normal": "w"}"#
         )
         .is_err());
+        let pipe = r#"{"op": "pipe", "id": "result", "radius": 1, "path": [{"kind": "line", "from": [0, 0], "to": [5, 0]}]}"#;
+        assert!(validate(&case(vec![step(pipe)])).is_ok());
+        let no_path = pipe.replace(r#"[{"kind": "line", "from": [0, 0], "to": [5, 0]}]"#, "[]");
+        assert!(validate(&case(vec![step(&no_path)])).is_err());
+        let circle_path = pipe.replace(
+            r#"{"kind": "line", "from": [0, 0], "to": [5, 0]}"#,
+            r#"{"kind": "circle", "center": [0, 0], "radius": 5}"#,
+        );
+        assert!(validate(&case(vec![step(&circle_path)])).is_err());
     }
 }
