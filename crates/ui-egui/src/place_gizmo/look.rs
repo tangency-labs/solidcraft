@@ -80,6 +80,9 @@ const REACH_DRAG: f32 = 42.0;
 /// A dotted arm's dash and gap.
 const DASH: f32 = 5.5;
 const GAP: f32 = 2.3;
+/// What the marker needs around its centre when fully grown, plus a gap, so another manipulator
+/// (the dialog's drag arrow) can keep clear of it.
+pub(super) const MARKER_CLEAR: f32 = REACH_DRAG + 6.0;
 /// The arrowhead: an open chevron this long, this wide either side of the arm.
 const HEAD_LEN: f32 = 12.6;
 const HEAD_HALF: f32 = 7.3;

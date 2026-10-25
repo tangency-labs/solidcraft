@@ -96,6 +96,12 @@ fn spec(app: &SolveApp, d: &Dialog) -> Option<&'static Spec> {
     TOOLS.iter().copied().find(|s| (s.serves)(d))
 }
 
+/// How much of the screen around the base the dialog's drag arrow leaves to the move marker
+/// (pixels): the marker's full reach and a gap, so the arrow stands above it. Zero without handles.
+pub(crate) fn arrow_clearance(app: &SolveApp, d: &Dialog) -> f32 {
+    if spec(app, d).is_some() { look::MARKER_CLEAR } else { 0.0 }
+}
+
 /// Does this command's face place also snap to sketch points on the face, so its marker can be
 /// dragged onto one?
 pub(crate) fn snaps_to_points(app: &SolveApp, id: &str) -> bool {

@@ -474,14 +474,28 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     if let (Kind::Extrude { direction: crate::dialogs::TWO_SIDES | crate::dialogs::TWO_SIDES_REVERSED, distance2, .. }, Some(n)) = (&mut d.kind, dir)
         && let Some(l2) = crate::length_input::eval(&app.session.doc, distance2, ValueKind::Length).ok().filter(|v| v.is_finite())
     {
-        drag_arrow(&app.session.doc, ui, painter, proj, base, bs, -(n * sign), l2, true, egui::Id::new("sc_manipulator2"), half_height, distance2);
+        drag_arrow(
+            &app.session.doc,
+            ui,
+            painter,
+            proj,
+            base,
+            bs,
+            -(n * sign),
+            l2,
+            true,
+            egui::Id::new("sc_manipulator2"),
+            half_height,
+            0.0,
+            distance2,
+        );
     }
     // A chamfer of two distances: Distance 2 gets its own arrow along the other face.
     let faces = chamfer_face_dirs(app, d, base);
     if let (Kind::Fillet { distance2, .. }, Some((_, t2))) = (&mut d.kind, faces)
         && let Some(l2) = crate::length_input::eval(&app.session.doc, distance2, ValueKind::Length).ok().filter(|v| v.is_finite())
     {
-        drag_arrow(&app.session.doc, ui, painter, proj, base, bs, t2, l2, false, egui::Id::new("sc_manipulator2"), half_height, distance2);
+        drag_arrow(&app.session.doc, ui, painter, proj, base, bs, t2, l2, false, egui::Id::new("sc_manipulator2"), half_height, 0.0, distance2);
     }
     // A rectangular pattern's second direction gets its own arrow for Spacing 2 (#2462), as the
     // first direction's arrow sets Spacing.
@@ -493,7 +507,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
         if let Some(spacing2) = spacing2
             && let Some(l2) = crate::length_input::eval(&app.session.doc, spacing2, ValueKind::Length).ok().filter(|v| v.is_finite())
         {
-            drag_arrow(&app.session.doc, ui, painter, proj, base, bs, n2, l2, false, egui::Id::new("sc_manipulator2"), half_height, spacing2);
+            drag_arrow(&app.session.doc, ui, painter, proj, base, bs, n2, l2, false, egui::Id::new("sc_manipulator2"), half_height, 0.0, spacing2);
         }
     }
     // An offset plane shows where it will be: at the distance, or through the picked point.
@@ -551,7 +565,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             crate::length_input::eval(&app.session.doc, depth, ValueKind::Length).ok().filter(|v| v.is_finite()).unwrap_or(0.0)
         };
         let before = depth.clone();
-        drag_arrow(&app.session.doc, ui, painter, proj, base, bs, -n, l, false, egui::Id::new("sc_manipulator_depth"), half_height, depth);
+        drag_arrow(&app.session.doc, ui, painter, proj, base, bs, -n, l, false, egui::Id::new("sc_manipulator_depth"), half_height, 0.0, depth);
         // Dragging the depth turns "through all" into a distance.
         if *depth != before {
             opts.all = false;
@@ -588,6 +602,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             false,
             egui::Id::new("sc_manipulator_offset2"),
             half_height,
+            0.0,
             distance2,
         ) {
             // Its own area and field, so it does not share Distance's focus or text.
@@ -602,6 +617,8 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             );
         }
     }
+    // A placement marker at the base: the arrow stands above it and the base dot is the marker's.
+    let clear = crate::place_gizmo::arrow_clearance(app, d);
     let Some((label, kind, value)) = d.primary() else { return };
     let len = all_span.or_else(|| {
         if to_span.is_some() && value.trim().is_empty() {
@@ -632,6 +649,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             signed,
             egui::Id::new("sc_manipulator"),
             half_height,
+            clear,
             dragged,
         ) {
             if (to_span.is_some() || symmetric_scale != 1.0)
@@ -643,7 +661,9 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
             if symmetric && let Some(bt) = proj.to_screen(base - n * half) {
                 arrow(painter, bs, bt, t.manipulator);
             }
-            painter.circle(bs, 3.5, t.manipulator, Stroke::new(1.0, Color32::WHITE));
+            if clear == 0.0 {
+                painter.circle(bs, 3.5, t.manipulator, Stroke::new(1.0, Color32::WHITE));
+            }
             box_at = ts + vec2(14.0, -12.0);
         }
     }
@@ -753,7 +773,9 @@ fn to_segment(p: Pos2, a: Pos2, b: Pos2) -> f32 {
 /// A draggable arrow from `base` along `n` showing `l` (at least a short stub); dragging writes
 /// the snapped length into `value`. The tip and the stem take the drag (#1740): pressed on the
 /// stem, the arrow keeps its length until the pointer moves, and then moves with it as far as the
-/// pointer does. Returns the tip's screen position.
+/// pointer does. Returns the tip's screen position. `clear_px` keeps that many screen points at
+/// the base free: the arrow starts past them and its shortest length grows by them, so it stands
+/// above a placement marker drawn at the base instead of through it.
 #[allow(clippy::too_many_arguments)]
 fn drag_arrow(
     doc: &solidcraft_engine::doc::Document,
@@ -767,18 +789,21 @@ fn drag_arrow(
     signed: bool,
     id: egui::Id,
     half_height: f64,
+    clear_px: f32,
     value: &mut String,
 ) -> Option<Pos2> {
     let t = Tokens::get();
-    let min = 40.0 * 2.0 * half_height / f64::from(proj.rect.height().max(1.0));
+    let min = f64::from(40.0 + clear_px) * 2.0 * half_height / f64::from(proj.rect.height().max(1.0));
     let tip = |length: f64| {
         let shown = if length.abs() < min { min * if length < 0.0 { -1.0 } else { 1.0 } } else { length };
         proj.to_screen(base + n * shown)
     };
     let mut ts = tip(l)?;
+    // Where the drawn arrow starts: the base, or past the cleared marker.
+    let start = |ts: Pos2| if clear_px > 0.0 && (ts - bs).length() > clear_px { bs + (ts - bs).normalized() * clear_px } else { bs };
     let at_tip = egui::Rect::from_center_size(ts, vec2(20.0, 20.0));
     // Over the stem, the arrow answers where the pointer is.
-    let on_stem = ui.input(|i| i.pointer.hover_pos()).filter(|p| !at_tip.contains(*p) && to_segment(*p, bs, ts) <= ARROW_STEM_REACH);
+    let on_stem = ui.input(|i| i.pointer.hover_pos()).filter(|p| !at_tip.contains(*p) && to_segment(*p, start(ts), ts) <= ARROW_STEM_REACH);
     let area = on_stem.map_or(at_tip, |p| egui::Rect::from_center_size(p, vec2(2.0 * ARROW_STEM_REACH, 2.0 * ARROW_STEM_REACH)));
     let r = ui.interact(area, id, egui::Sense::drag());
     // How far along the arrow the press was short of its end: the drag keeps that gap.
@@ -813,7 +838,7 @@ fn drag_arrow(
     crate::scenario::publish_handle(if id == egui::Id::new("sc_manipulator") { "arrow" } else { "arrow2" }, ts);
     let hot = r.hovered() || r.dragged();
     let col = if hot { t.accent } else { t.manipulator };
-    arrow(painter, bs, ts, col);
+    arrow(painter, start(ts), ts, col);
     if hot {
         painter.circle_stroke(ts, 8.0, Stroke::new(1.5, col));
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
