@@ -2312,6 +2312,11 @@ fn new_name(state: &mut ModelState, f: &Feature, k: usize) -> String {
         && !n.is_empty()
         && state.body(n).is_none()
     {
+        // A pinned `BodyN` counts as handed out, so a design evaluated again from its stored
+        // names ends with the counter it had when the counter numbered them.
+        if let Some(number) = n.strip_prefix("Body").filter(|_| crate::is_counted_body_name(n)).and_then(|d| d.parse::<usize>().ok()) {
+            state.body_counter = state.body_counter.max(number);
+        }
         return n.clone();
     }
     // Bodies past the stored names (a profile added after the feature was made) are numbered
