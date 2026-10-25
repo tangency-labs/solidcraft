@@ -14,12 +14,18 @@
 //! stale. Never add a case here to get a unit green; every entry needs a
 //! `plan/findings/<slug>.md` entry. Every entry's `unit` must equal the file name.
 //!
+//! An entry whose disagreement comes from the C library the C++ reference runs on (e.g.
+//! glibc's allocator reusing a freed address under an upstream use-after-free) names it
+//! in `libc`. On any other C library the entry does not apply: the case runs as an
+//! ordinary case and must pass.
+//!
 //! ```toml
 //! # crates/difftest/known_mismatches/curve.curve_p1.toml
 //! [[mismatch]]
 //! unit = "curve.curve_p1"
 //! case = "gen0042"
 //! why = "C++ succeeds with 0 points, Rust returns status_3 (plan/findings/...)"
+//! # libc = "glibc"   # optional: only where the C++ reference runs on glibc
 //! ```
 
 use std::path::Path;
@@ -49,6 +55,33 @@ pub struct KnownMismatch {
     pub case: String,
     /// Why it disagrees (C++ vs Rust status) and where it is recorded.
     pub why: String,
+    /// The C library the disagreement depends on; `None` applies everywhere.
+    #[serde(default)]
+    pub libc: Option<Libc>,
+}
+
+impl KnownMismatch {
+    /// Whether the entry applies to this build of the C++ reference.
+    pub fn applies(&self) -> bool {
+        self.libc.is_none_or(Libc::is_current)
+    }
+}
+
+/// A C library a known mismatch can be restricted to ([`KnownMismatch::libc`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Libc {
+    /// GNU libc (Linux `*-gnu` targets), whose allocator the CI reference uses.
+    Glibc,
+}
+
+impl Libc {
+    /// Whether the C++ reference in this process runs on this C library.
+    pub fn is_current(self) -> bool {
+        match self {
+            Self::Glibc => cfg!(all(target_os = "linux", target_env = "gnu")),
+        }
+    }
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -116,6 +149,26 @@ mod tests {
         .unwrap_err();
         assert!(e.0.contains("known_mismatches/a.c.toml"), "{}", e.0);
         assert!(for_unit(Path::new("."), "../x").is_err());
+    }
+
+    #[test]
+    fn libc_restricted_entries_apply_only_on_that_libc() {
+        let entry = |libc: &str| {
+            parse(
+                &format!("[[mismatch]]\nunit = \"a.b\"\ncase = \"c\"\nwhy = \"w\"\n{libc}"),
+                "a.b",
+            )
+        };
+        let any = entry("").unwrap();
+        assert_eq!(any[0].libc, None);
+        assert!(any[0].applies());
+        let glibc = entry("libc = \"glibc\"\n").unwrap();
+        assert_eq!(glibc[0].libc, Some(Libc::Glibc));
+        assert_eq!(
+            glibc[0].applies(),
+            cfg!(all(target_os = "linux", target_env = "gnu"))
+        );
+        assert!(entry("libc = \"musl\"\n").is_err());
     }
 
     #[test]

@@ -558,8 +558,13 @@ pub fn report_units(dir: &Path) -> Result<Vec<String>, HarnessError> {
 }
 
 /// Value-share violation of `res`, if any. Only meaningful for a unit that does not
-/// already fail.
+/// already fail. A unit whose every case was `skipped(platform)` (e.g. a libstdc++-only
+/// reference on libc++) compared nothing and has no share to check, like a unit-level
+/// `skipped(platform)`.
 pub fn value_share(res: &UnitResult) -> Option<Violation> {
+    if !res.cases.is_empty() && res.skipped_platform() == res.cases.len() {
+        return None;
+    }
     let passed = res.passed();
     let with_values = res.passed_with_values();
     // Exact integer arithmetic for `with_values / passed < MIN_VALUE_SHARE` (= 3/4).
@@ -740,6 +745,7 @@ mod tests {
                 });
             }
             "rejected" => c.rejected = Some("bad".into()),
+            "skipped(platform)" => c.skipped_platform = Some("libc++".into()),
             "fail" => c.diff.mismatch_count = 1,
             "known_mismatch" => {
                 c.diff.mismatch_count = 1;
@@ -946,6 +952,14 @@ mod tests {
         // Deferred cases do not count either way, but some pass must compare a value.
         assert!(value_share(&unit(vec![case("a", "deferred", 0)])).is_some());
         assert!(value_share(&unit(vec![case("a", "pass", 1), case("b", "deferred", 0)])).is_none());
+        // A unit whose every case is platform-skipped compared nothing: no share to
+        // check. One case that ran brings the floor back.
+        let skipped = |n: usize| (0..n).map(|i| case(&format!("s{i}"), "skipped(platform)", 0));
+        assert!(value_share(&unit(skipped(3).collect())).is_none());
+        let mut v: Vec<_> = skipped(3).collect();
+        v.push(case("e", "pass", 0));
+        assert!(value_share(&unit(v)).is_some());
+        assert!(value_share(&unit(Vec::new())).is_some());
     }
 
     #[test]
