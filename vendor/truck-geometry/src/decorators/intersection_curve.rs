@@ -168,6 +168,9 @@ where
     // parameters of the point that begins its piece instead of a search of the whole surfaces:
     // that search ran for every point and made dividing an intersection edge on a large B-spline
     // surface take seconds. A point the hinted projection misses is searched for as before.
+    // Bounded work: the division fails (both lists empty) instead of going on when it would
+    // evaluate more than `DIVISION_BUDGET` pieces or a piece's midpoint parameter no longer
+    // splits it; a chord off the curve is never taken as its division.
     fn parameter_division(&self, range: (f64, f64), tol: f64) -> (Vec<f64>, Vec<Point3>) {
         // SolidCraft: a tolerance finer than truck's (or not a number) divides at truck's
         // instead of panicking: the points are only found to within it anyway. truck asserted
@@ -175,7 +178,8 @@ where
         let tol = if tol >= TOLERANCE { tol } else { TOLERANCE };
         let start = self.hinted_triple(range.0, None);
         let end = self.hinted_triple(range.1, None);
-        hinted_sub_division(self, range, (start, end), tol, 100)
+        let mut budget = DIVISION_BUDGET;
+        hinted_sub_division(self, range, (start, end), tol, 100, &mut budget).unwrap_or_default()
     }
 }
 
@@ -215,38 +219,50 @@ where
     }
 }
 
-// SolidCraft: `algo::curve::sub_parameter_division`, carrying each end's parameters.
+// SolidCraft: the most pieces one intersection curve's division evaluates (two projections
+// each). A curve that dense is not one the curve's tolerance can follow: on a twisted B-spline
+// wall crossing a cylinder the chord test kept failing, and the division, depth-bounded only,
+// branched on for good (#2891).
+const DIVISION_BUDGET: usize = 1 << 14;
+
+// SolidCraft: `algo::curve::sub_parameter_division`, carrying each end's parameters. `budget`
+// counts the pieces left to evaluate across every branch; `None` when it runs out, the depth
+// runs out or a midpoint parameter no longer lies strictly inside its piece.
 fn hinted_sub_division<C, S>(
     curve: &IntersectionCurve<C, S>,
     range: (f64, f64),
     ends: (Triple, Triple),
     tol: f64,
     trials: usize,
-) -> (Vec<f64>, Vec<Point3>)
+    budget: &mut usize,
+) -> Option<(Vec<f64>, Vec<Point3>)>
 where
     C: ParametricCurve3D,
     S: ParametricSurface3D + SearchNearestParameter<D2, Point = Point3>,
 {
+    *budget = budget.checked_sub(1)?;
     let (p0, p1) = (ends.0 .0, ends.1 .0);
     let gen = p0.midpoint(p1);
     let p = 0.5 + (0.2 * HashGen::hash1(gen) - 0.1);
     let t = range.0 * (1.0 - p) + range.1 * p;
     let mid = p0 + (p1 - p0) * p;
     let dist2 = curve.hinted_triple(t, Some(ends.0)).0.distance2(mid);
-    if dist2 < tol * tol || trials == 0 {
-        (vec![range.0, range.1], vec![p0, p1])
-    } else {
-        let mid_param = (range.0 + range.1) / 2.0;
-        let mid_value = curve.hinted_triple(mid_param, Some(ends.0));
-        let (mut params, mut pts) =
-            hinted_sub_division(curve, (range.0, mid_param), (ends.0, mid_value), tol, trials - 1);
-        let _ = (params.pop(), pts.pop());
-        let (new_params, new_pts) =
-            hinted_sub_division(curve, (mid_param, range.1), (mid_value, ends.1), tol, trials - 1);
-        params.extend(new_params);
-        pts.extend(new_pts);
-        (params, pts)
+    if dist2 < tol * tol {
+        return Some((vec![range.0, range.1], vec![p0, p1]));
     }
+    let mid_param = (range.0 + range.1) / 2.0;
+    if trials == 0 || !(range.0 < mid_param && mid_param < range.1) {
+        return None;
+    }
+    let mid_value = curve.hinted_triple(mid_param, Some(ends.0));
+    let (mut params, mut pts) =
+        hinted_sub_division(curve, (range.0, mid_param), (ends.0, mid_value), tol, trials - 1, budget)?;
+    let _ = (params.pop(), pts.pop());
+    let (new_params, new_pts) =
+        hinted_sub_division(curve, (mid_param, range.1), (mid_value, ends.1), tol, trials - 1, budget)?;
+    params.extend(new_params);
+    pts.extend(new_pts);
+    Some((params, pts))
 }
 
 impl<C, S> Cut for IntersectionCurve<C, S>
