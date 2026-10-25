@@ -130,13 +130,18 @@ fn spline_tangent_guides_are_hidden_from_normal_sketch_drawing_and_extend_both_s
     sk.add_spline_handles(spline).unwrap();
 
     let CurveKind::Spline { pts, handles, .. } = &sk.curves[spline].kind else { panic!("expected a fit spline") };
-    let natural = solidcraft_sketch::curves::fit_beziers(&positions);
+    let natural = solidcraft_sketch::fit_beziers(&positions);
     for (index, handle) in handles.iter().enumerate() {
         let position = sk.point(*handle).unwrap();
         let fit_point = sk.point(pts[index]).unwrap();
-        let control_offset =
-            if index + 1 == handles.len() { natural.last().unwrap()[2] - positions[index] } else { natural[index][1] - positions[index] };
-        assert!((position.dist(fit_point) - control_offset.len() * 3.0).abs() < 1e-9);
+        let control_offset = if index == 0 { natural[0][1] - positions[index] } else { natural[index - 1][2] - positions[index] };
+        let chord = if index == 0 { positions[1].dist(positions[0]) } else { positions[index - 1].dist(positions[index]) };
+        assert!(
+            (position.dist(fit_point) - control_offset.len() * (3.0 / chord)).abs() < 1e-9,
+            "handle {index}: arm {}, expected three times control offset per chord {}",
+            position.dist(fit_point),
+            control_offset.len() * (3.0 / chord)
+        );
     }
 
     let helper = sk.curves.iter().position(|curve| curve.spline_handle_of.as_deref() == Some("s1")).unwrap();

@@ -2115,7 +2115,7 @@ pub(crate) fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
 }
 
 fn selected_spline_handles(
-    sk: &solidcraft_sketch::Sketch,
+    sk: &solidcraft_engine::sketch::Sketch,
     selection: &[Sel],
 ) -> (std::collections::HashSet<String>, std::collections::HashSet<usize>) {
     let selected: std::collections::HashSet<String> = selection
@@ -6654,24 +6654,25 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
             if !solidcraft_engine::view::sketch_curve_visible(&ss.sketch, i) && !selected_handle {
                 continue;
             }
-            let parts = if selected_handle {
-                solidcraft_engine::view::spline_handle_display_line(&ss.sketch, i)
-                    .map(|(a, b)| vec![to2(&[ss.plane.to_world(a), ss.plane.to_world(b)])])
-                    .unwrap_or_default()
+            let (parts, complete) = if selected_handle {
+                (
+                    solidcraft_engine::view::spline_handle_display_line(&ss.sketch, i)
+                        .map(|(a, b)| vec![to2(&[ss.plane.to_world(a), ss.plane.to_world(b)])])
+                        .unwrap_or_default(),
+                    true,
+                )
             } else {
                 let sampled = if bx.crossing {
                     crate::sketch_display::curve_sample(app, ss.feature, i, &ss.plane, proj)
                 } else {
                     std::sync::Arc::new(crate::sketch_display::curve_unclipped(&ss.sketch, i, &ss.plane, proj, app.viewport.pixels_per_point()))
                 };
-                sampled.parts.iter().map(|part| to2(part)).collect()
+                (sampled.parts.iter().map(|part| to2(part)).collect(), sampled.quality == solidcraft_engine::render::SamplingQuality::Complete)
             };
             let takes = if bx.crossing {
                 parts.iter().any(|part| bx.takes(part))
             } else {
-                sampled.quality == solidcraft_engine::render::SamplingQuality::Complete
-                    && !parts.is_empty()
-                    && parts.iter().all(|part| bx.takes(part))
+                complete && !parts.is_empty() && parts.iter().all(|part| bx.takes(part))
             };
             if takes {
                 out.push(Sel::SketchCurve { id: c.id.clone(), sketch: None });
@@ -7776,7 +7777,7 @@ mod tests {
 
     #[test]
     fn tangent_guides_and_handle_points_follow_spline_selection() {
-        let mut sketch = solidcraft_sketch::Sketch::new();
+        let mut sketch = solidcraft_engine::sketch::Sketch::new();
         let points =
             [Vec2::new(0., 0.), Vec2::new(8., 6.), Vec2::new(17., 2.)].into_iter().map(|point| sketch.add_point(point, None).unwrap()).collect();
         let spline =
