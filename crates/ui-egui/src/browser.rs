@@ -157,7 +157,11 @@ use crate::SolveApp;
 /// The Browser's rows on screen: (label, row rect, fold arrow area, open).
 /// Other presentations expose their geometry through `semantic_content::output`.
 pub fn drawn_rows() -> Vec<crate::semantic_content::DrawnRow> {
-    crate::semantic_content::output(crate::semantic_content::ContentOwner::BROWSER).rows
+    use crate::semantic_content::{ContentOwner, output};
+    // The design tree over the view (`dialog_tree`) shows these rows while the browser makes way.
+    let mut rows = output(ContentOwner::BROWSER).rows;
+    rows.extend(output(ContentOwner::DESIGN_TREE).rows);
+    rows
 }
 
 pub fn drawn_occurrences() -> Vec<crate::semantic_content::DrawnOccurrence> {
@@ -1574,6 +1578,25 @@ fn model_feature_indices(app: &SolveApp, component: u64, sketches: bool) -> Vec<
     }
 }
 
+/// The design's Origin, Bodies and Construction rows as the browser draws them (a click picks
+/// for an open dialog as there), for the design tree over the view while a dialog holds the left
+/// column (`dialog_tree`, #6710).
+fn design_tree(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions) {
+    prepare_model(app);
+    // The root's folders as the browser draws them (`browser_cache`).
+    let mut cache = app.tree.cache.take().unwrap_or_default();
+    cache.prepare(app);
+    let folders = ["bodies", "construction"].map(|folder| cache.folder(app, 0, None, folder));
+    app.tree.cache = Some(cache);
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        origin_rows(app, ui, 0, acts);
+        for (folder, data) in ["bodies", "construction"].into_iter().zip(&folders) {
+            folder_rows_at(app, ui, 0, None, folder, 0, acts, data);
+        }
+    });
+}
+
 fn browser_rows(app: &mut SolveApp, ui: &mut egui::Ui) {
     crate::semantic_content::show(
         app,
@@ -1627,6 +1650,7 @@ pub(crate) fn render_content(app: &mut SolveApp, ui: &mut egui::Ui, request: cra
     match request {
         crate::semantic_content::ContentRequest::Browser { shrink_height } => rows_scrolling(app, ui, &mut acts, shrink_height),
         crate::semantic_content::ContentRequest::ActiveBodiesOrigin => active_bodies_origin(app, ui, &mut acts),
+        crate::semantic_content::ContentRequest::DesignTree => design_tree(app, ui, &mut acts),
     }
     acts
 }
