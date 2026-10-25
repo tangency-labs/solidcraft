@@ -12,8 +12,8 @@
 //! call), patches to the read B-rep data and an op. Both sides read the file
 //! (`SmBrepData::ReadFromFile` / [`BrepData::read_from_file`]), patch it, build the
 //! B-rep and dump the result in the layout documented in the FFI module: integers to
-//! `ints`, doubles to `dbls` (subnormals as 0) and bit for bit to `dbl_bits`, `kinds`
-//! the interleaving. A Rust `InvalidInput` is the guard's `-2`.
+//! `ints`, doubles to `dbls` (subnormals as 0; pure reader/build cases also audit raw
+//! `dbl_bits`), `kinds` the interleaving. A Rust `InvalidInput` is the guard's `-2`.
 //!
 //! Generated cases pick a file, flags and patches (zone tolerance, manifold flag,
 //! healer version, borrowed geometry, flag stamps, the implied regions of an IGES
@@ -136,7 +136,18 @@ fn path_of(i: &Inputs) -> Result<String, HarnessError> {
         .into_owned())
 }
 
-fn to_output(items: &[Item]) -> Output {
+/// Whether `i` runs only the `.smb` reader and pointer-wiring build (no analytic
+/// surface recognition, healer, closure ray-fire or curve projection), so every float
+/// can be audited bit for bit (`dbl_bits`). Once geometry solvers run, 1–3 ULP
+/// transcendental (`sin`/`cos`/`atan2`) differences between system `libm` and Rust are
+/// compared through `dbls` under the standard `1e-9` relative tolerance (as in
+/// [`snapshot`]).
+fn bit_audit(i: &Inputs) -> bool {
+    let [_, add_analytics, _, _, _, healer_enabled] = i.options;
+    !add_analytics && !healer_enabled && matches!(i.op, OpIn::Make | OpIn::RemoveAll { .. })
+}
+
+fn to_output(items: &[Item], include_bits: bool) -> Output {
     let ints: Vec<i64> = items
         .iter()
         .filter_map(|x| match x {
@@ -160,11 +171,15 @@ fn to_output(items: &[Item]) -> Output {
         .into_iter()
         .map(|v| if v.is_subnormal() { 0.0 } else { v })
         .collect();
-    Output::new()
+    let out = Output::new()
         .ints("ints", ints)
         .values("dbls", dbls)
-        .ints("dbl_bits", bits)
-        .ints("kinds", kinds)
+        .ints("kinds", kinds);
+    if include_bits {
+        out.ints("dbl_bits", bits)
+    } else {
+        out
+    }
 }
 
 /// Why the C++ side must not build these inputs, if it must not: requests on which
@@ -243,6 +258,8 @@ fn changes_indices(k: &Kernel, bytes: &[u8], patches: &[PatchIn]) -> bool {
 /// record indexing keeps from upstream (`-2`, UB-164), so upstream never runs.
 fn builds(i: &Inputs, data: &BrepData) -> bool {
     let mut k = Kernel::default();
+    // Compare against pinned C++ c9c5979 (pre-tangency-labs/smlib@5af7070, WR-255 / #570).
+    k.context.set_trim_uv_curves_at_corner_drops(true);
     let mut data = data.clone();
     let Ok(mut b) = Brep::new_with_infinite_region() else {
         return true;
@@ -330,8 +347,9 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
         patches,
         op,
     };
+    let include_bits = bit_audit(i);
     ffi::run(&req)
-        .map(|items| to_output(&items))
+        .map(|items| to_output(&items, include_bits))
         .map_err(|e| harness(format!("ffi: {e}")))
 }
 
@@ -522,6 +540,8 @@ fn rust(i: &Inputs) -> Result<Dump, HarnessError> {
     let path = path_of(i)?;
     let bytes = std::fs::read(&path).map_err(|e| harness(format!("{path}: {e}")))?;
     let mut k = Kernel::default();
+    // Compare against pinned C++ c9c5979 (pre-tangency-labs/smlib@5af7070, WR-255 / #570).
+    k.context.set_trim_uv_curves_at_corner_drops(true);
     let mut data = match BrepData::read_from_file(&k, bytes, FileType::Ascii) {
         Ok(d) => d,
         Err(e @ SolidError::Unported { .. }) => return Ok(Err(e)),
@@ -1142,9 +1162,8 @@ pub(crate) fn snapshot(k: &Kernel, b: &Brep) -> Result<Output, HarnessError> {
     let g = Graph::walk(b).map_err(|e| harness(e.to_string()))?;
     let mut items = Vec::new();
     export(k, b, &g, &BTreeMap::new(), &mut items).map_err(|e| harness(e.to_string()))?;
-    let mut output = to_output(&items).int("validate_only", i64::from(b.validate_only()));
     // This caller uses the normal relative comparison, not p10's bit audit.
-    output.ints.remove("dbl_bits");
+    let mut output = to_output(&items, false).int("validate_only", i64::from(b.validate_only()));
     output.values.insert(
         "dbls".into(),
         items
@@ -1211,8 +1230,10 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        match rust(&case.parse()?)? {
-            Ok(items) => Ok(to_output(&items)),
+        let inputs: Inputs = case.parse()?;
+        let include_bits = bit_audit(&inputs);
+        match rust(&inputs)? {
+            Ok(items) => Ok(to_output(&items, include_bits)),
             Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
         }
     }

@@ -19,7 +19,7 @@
 //! | [`remove_loop`]                              | `SmFace::RemoveLoop`                         |
 //! | [`remove_uv_trim_curves`]                    | `SmFace::RemoveUVTrimCurves`                 |
 //! | [`swap_uv`]                                  | `SmFace::SwapUV`                             |
-//! | [`move_seam`], [`MoveSeamOptions`], [`MoveSeamResult`], [`SeamProblem`] | `SmFace::MoveSeam` |
+//! | [`move_seam`], [`move_seam_notified`], [`MoveSeamOptions`], [`MoveSeamResult`], [`SeamProblem`] | `SmFace::MoveSeam` |
 //! | [`split_at_seam`], [`SeamSplit`]             | `SmFace::SplitAtSeam`                        |
 //! | [`shrink_geometry`], [`shrink_geometry_with`] | `SmFace::ShrinkGeometry`                    |
 //! | [`FixSeamPlanType`]                          | `SmFixSeamPlanType` (`SmTypes.h`)            |
@@ -1537,10 +1537,49 @@ fn vertexuse_uv(k: &Kernel, b: &mut Brep, vu: VertexuseId, prev: Point2) -> Resu
 /// [`SolidError::Unported`] (`GetUpwardLoopuses`, `IsCrossedByEdge`, `HasNearMisses`,
 /// `GetUpwardVertexuses`, `GetBrep`, `SmFace::Notify` (also through `ReplaceSurface`),
 /// `HasSeamProblem`, the split).
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one upstream routine
+#[allow(clippy::too_many_arguments)] // one upstream routine
 pub fn move_seam<O: LoopObject>(
     k: &Kernel,
     b: &mut Brep,
+    f: FaceId,
+    this: ObjectRef,
+    crv_class_u: &mut CurveClassification<O>,
+    crv_class_v: &mut CurveClassification<O>,
+    problem: SeamProblem,
+    opts: MoveSeamOptions,
+    props: Option<&FaceProps<O>>,
+    geometry: &impl ClassGeometry<O>,
+    resolve: &dyn Fn(O) -> Option<EntityRef>,
+) -> Result<MoveSeamResult> {
+    move_seam_notified(
+        k,
+        b,
+        None,
+        f,
+        this,
+        crv_class_u,
+        crv_class_v,
+        problem,
+        opts,
+        props,
+        geometry,
+        resolve,
+    )
+}
+
+/// [`move_seam`] with an optional notification environment `env` for its surface
+/// replacement (`ReplaceSurface` / `SetSurface`), so callers such as
+/// `SmHealData::Fix_MoveSeam` receive the face's `SM_NO_POST_EDIT` in their topology
+/// change tracker while `this` stays the surface's owner identity.
+///
+/// # Errors
+///
+/// As [`move_seam`].
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one upstream routine
+pub fn move_seam_notified<O: LoopObject>(
+    k: &Kernel,
+    b: &mut Brep,
+    mut env: Option<&mut crate::topology::edge::NotifyEnv<'_>>,
     f: FaceId,
     this: ObjectRef,
     crv_class_u: &mut CurveClassification<O>,
@@ -1925,7 +1964,22 @@ pub fn move_seam<O: LoopObject>(
 
             // replace the face surface
             surface = joined.clone();
-            if has_brep(b, f)? {
+            if let Some(env) = env.as_deref_mut() {
+                if has_brep(b, f)? {
+                    brep_p2::replace_surface(
+                        k,
+                        b,
+                        env,
+                        f,
+                        joined,
+                        this,
+                        OldSurface::Delete,
+                        false,
+                    )?;
+                } else {
+                    set_surface_notified(b, env, f, this, joined, true, [None, None])?;
+                }
+            } else if has_brep(b, f)? {
                 replace_surface(k, b, f, this, joined)?;
             } else {
                 set_surface(b, f, this, joined, true)?;

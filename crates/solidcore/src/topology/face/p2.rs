@@ -58,16 +58,17 @@
 //!   leaves the caller's default point ([`Point2::UNDEF`]); a failed `DropPoint` is
 //!   no drop point; a failed evaluation keeps the previous value (initially
 //!   [`Vec3::UNDEF`]).
-//! - **`sm_FixUVTrimCurves` does not trim and re-stretch the UV trim curves**
+//! - **`sm_FixUVTrimCurves` does not trim and re-stretch the UV trim curves by default**
 //!   (tangency-labs/solidcore#570, the fix of tangency-labs/smlib@5af7070). Upstream
 //!   drops the vertex's UV point onto each of the two curves, `Trim`s the curve there
 //!   and `EditParameterization`s it back over its old interval before moving the end
 //!   point. The stretch moves every interior parameter of the trim off its edge's by
 //!   the trimmed length (a 1e-6 corner gap left a thread edge's trim 5e-5 off its
 //!   edge, tolerance 1e-5), and any point classification builds the trim cache that
-//!   runs it. Only the end control points move here, by the UV gap
-//!   (`plan/upstream-issues.md` WR-255). No difftest case reaches the trim: the
-//!   fixture trims meet their vertices, so the drop point is the trim's end.
+//!   runs it. By default only the end control points move here, by the UV gap
+//!   (`plan/upstream-issues.md` WR-255); [`crate::geom::context::Context::set_trim_uv_curves_at_corner_drops`]
+//!   re-enables the pinned-`c9c5979` `DropPoint` + `Trim` + `EditParameterization`
+//!   stretch where a difftest compares against the unmodified C++ reference.
 //! - **Edit notifications.** [`fix_uv_trim_curves_notified`] notifies its two
 //!   `EditEndPoint`s (`SM_NO_PRE_EDIT` / `SM_NO_POST_EDIT`, caller and first data
 //!   object the UV trim curve under its kernel-issued identity) through the caller's
@@ -123,8 +124,9 @@ use crate::error::{ignore_status, EntityRef, Result, SolidError};
 use crate::geom::a_object;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
+use crate::geom::global_solver::SolverOperation;
 use crate::geom::object::{self, NotifyOperation, ObjectRef};
-use crate::geom::tol::zone_tol3d;
+use crate::geom::tol::{are_same, zone_tol3d};
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::intersect::curve_class::p1::{CurveClassification, CurveInterval};
 use crate::intersect::curve_class::p4::ClassificationInit;
@@ -2450,12 +2452,63 @@ pub fn fix_uv_trim_curves_notified(
     let _prev_edge_gap = surf_vertex.distance(prev_edge_point);
     let _ = tol_3d;
 
-    // move the UVTrimCurve end points to the vertex's UV point (#570). Upstream first
-    // drops that point onto each curve, trims the curve there and stretches it back
-    // over its interval (DropPoint, Trim, EditParameterization): that slides every
-    // interior parameter of the trim off its edge's by the trimmed length. Only the
-    // end control points move now, by the UV gap (tangency-labs/smlib@5af7070).
-    let _ = (uv_curr_edge_gap, uv_prev_edge_gap);
+    // Move the UVTrimCurve end points to the vertex's UV point (#570 / WR-255).
+    // By default (`!k.context.trim_uv_curves_at_corner_drops()`), only the end control
+    // points move (`tangency-labs/smlib@5af7070`), keeping interior parameters aligned
+    // with the 3D edge. Pinned-`c9c5979` difftest callers may opt into upstream's
+    // DropPoint + Trim + EditParameterization stretch.
+    if k.context.trim_uv_curves_at_corner_drops() {
+        let curr_drop = ignored(held_curve(b, curr_holder)?.drop_point(
+            k,
+            &curr_ivl,
+            uv_vertex_3d,
+            None,
+            1.1 * (EFF_ZERO + uv_curr_edge_gap),
+            Some(t_curr),
+            SolverOperation::Intersect,
+        ))?;
+        let prev_drop = ignored(held_curve(b, prev_holder)?.drop_point(
+            k,
+            &prev_ivl,
+            uv_vertex_3d,
+            None,
+            1.1 * (EFF_ZERO + uv_prev_edge_gap),
+            Some(t_prev),
+            SolverOperation::Intersect,
+        ))?;
+        if let Some(d) = curr_drop.filter(|d| d.success) {
+            let t_curr_new = d.parameter;
+            if !are_same(t_curr, t_curr_new) {
+                let mut trim_ivl = Extent1d::new();
+                if eu1::orientation(b, eu_current)? == OrientType::Same {
+                    let _ = trim_ivl.set_min_max(t_curr_new, curr_ivl.max());
+                } else {
+                    let _ = trim_ivl.set_min_max(curr_ivl.min(), t_curr_new);
+                }
+                if !are_same(trim_ivl.min(), trim_ivl.max()) {
+                    let c = held_curve_mut(b, curr_holder)?;
+                    c.trim(k, &mut trim_ivl, TrimMode::Notify)?;
+                    c.edit_parameterization(k, &curr_ivl)?;
+                }
+            }
+        }
+        if let Some(d) = prev_drop.filter(|d| d.success) {
+            let t_prev_new = d.parameter;
+            if !are_same(t_prev, t_prev_new) {
+                let mut trim_ivl = Extent1d::new();
+                if eu1::orientation(b, eu_previous)? == OrientType::Same {
+                    let _ = trim_ivl.set_min_max(prev_ivl.min(), t_prev_new);
+                } else {
+                    let _ = trim_ivl.set_min_max(t_prev_new, prev_ivl.max());
+                }
+                if !are_same(trim_ivl.min(), trim_ivl.max()) {
+                    let c = held_curve_mut(b, prev_holder)?;
+                    c.trim(k, &mut trim_ivl, TrimMode::Notify)?;
+                    c.edit_parameterization(k, &prev_ivl)?;
+                }
+            }
+        }
+    }
 
     // get current edgeuse->EndWeights (statuses ignored)
     let end_weight = |c: &Curve, start: bool| -> f64 {

@@ -32,71 +32,6 @@ case = "gen0300"
 why = "the importer's approximation of the analytic edge curves moves the loop bisector's UV line (rel 1.6e-8) across a loop at scale 1e-3 (plan/findings.md: query.face_p4: two scale-1e-3 cylinder cases move with the importer's curve approximation) [ints.classify_loop_ios[2] cpp 2 rust 1]"
 
 [[mismatch]]
-unit = "topology.brep_p10"
-case = "healer10_always_Defeature_inset_cube"
-why = "still differs with ClassifyLoops' loop bisector keeping its B-rep edits (the healer copies its snapshot's UV trims, tolerance growth and gap caches back); cause not traced (plan/findings.md: ClassifyLoops' loop bisector keeps its B-rep edits: 37 of 49 listed cases match, 12 topology.brep_p10 cases still differ) [ints.ints[1336] cpp 1 rust 0]"
-
-[[mismatch]]
-unit = "topology.brep_p10"
-case = "read_Boolean_extrudeHoles1"
-why = "still differs with ClassifyLoops' loop bisector keeping its B-rep edits (the healer copies its snapshot's UV trims, tolerance growth and gap caches back); cause not traced (plan/findings.md: ClassifyLoops' loop bisector keeps its B-rep edits: 37 of 49 listed cases match, 12 topology.brep_p10 cases still differ) [values.dbls.len cpp 909 rust 921]"
-
-[[mismatch]]
-unit = "topology.brep_p10"
-case = "read_Solids_InsetTaperedExtrude"
-why = "still differs with ClassifyLoops' loop bisector keeping its B-rep edits (the healer copies its snapshot's UV trims, tolerance growth and gap caches back); cause not traced (plan/findings.md: ClassifyLoops' loop bisector keeps its B-rep edits: 37 of 49 listed cases match, 12 topology.brep_p10 cases still differ) [ints.dbl_bits[805] cpp 4556438595713448769 rust 4556438595713597268]"
-
-[[mismatch]]
-unit = "topology.brep_p10"
-case = "read_Solids_fillet_ts"
-why = "still differs with ClassifyLoops' loop bisector keeping its B-rep edits (the healer copies its snapshot's UV trims, tolerance growth and gap caches back); cause not traced (plan/findings.md: ClassifyLoops' loop bisector keeps its B-rep edits: 37 of 49 listed cases match, 12 topology.brep_p10 cases still differ) [values.dbls.len cpp 1659 rust 1683]"
-
-[[mismatch]]
-unit = "topology.brep_p10"
-case = "gen0115"
-why = "still differs with ClassifyLoops' loop bisector keeping its B-rep edits (the healer copies its snapshot's UV trims, tolerance growth and gap caches back); cause not traced (plan/findings.md: ClassifyLoops' loop bisector keeps its B-rep edits: 37 of 49 listed cases match, 12 topology.brep_p10 cases still differ) [values.dbls[648] cpp 2.917160020417993e-3 rust 2.9171595358599514e-3]"
-
-[[mismatch]]
-unit = "topology.brep_p10"
-case = "gen0117"
-why = "still differs with ClassifyLoops' loop bisector keeping its B-rep edits (the healer copies its snapshot's UV trims, tolerance growth and gap caches back); cause not traced (plan/findings.md: ClassifyLoops' loop bisector keeps its B-rep edits: 37 of 49 listed cases match, 12 topology.brep_p10 cases still differ) [ints.ints[166] cpp 1 rust 0]"
-
-[[mismatch]]
-unit = "topology.brep_p10"
-case = "read_Fillet_bottle"
-why = "still differs with ClassifyLoops' loop bisector keeping its B-rep edits (the healer copies its snapshot's UV trims, tolerance growth and gap caches back); cause not traced (plan/findings.md: ClassifyLoops' loop bisector keeps its B-rep edits: 37 of 49 listed cases match, 12 topology.brep_p10 cases still differ) [ints.dbl_bits[2437] cpp 4533227276183232325 rust 4533227276183193973]"
-
-[[mismatch]]
-unit = "topology.brep_p10"
-case = "read_Fillet_cyl_cyl_shell"
-why = "still differs with ClassifyLoops' loop bisector keeping its B-rep edits (the healer copies its snapshot's UV trims, tolerance growth and gap caches back); cause not traced (plan/findings.md: ClassifyLoops' loop bisector keeps its B-rep edits: 37 of 49 listed cases match, 12 topology.brep_p10 cases still differ) [ints.dbl_bits[351] cpp 4541087340294538906 rust 4541087340294541262]"
-
-[[mismatch]]
-unit = "topology.brep_p10"
-case = "read_Fillet_fillet0227"
-why = "still differs with ClassifyLoops' loop bisector keeping its B-rep edits (the healer copies its snapshot's UV trims, tolerance growth and gap caches back); cause not traced (plan/findings.md: ClassifyLoops' loop bisector keeps its B-rep edits: 37 of 49 listed cases match, 12 topology.brep_p10 cases still differ) [ints.dbl_bits[587] cpp 4584643767240576693 rust 4584643767240344909]"
-
-[[mismatch]]
-unit = "topology.brep_p10"
-case = "read_Solids_extrusion2"
-why = "still differs with ClassifyLoops' loop bisector keeping its B-rep edits (the healer copies its snapshot's UV trims, tolerance growth and gap caches back); cause not traced (plan/findings.md: ClassifyLoops' loop bisector keeps its B-rep edits: 37 of 49 listed cases match, 12 topology.brep_p10 cases still differ) [ints.dbl_bits[3949] cpp 4566519071875143604 rust 4566519071875138963]"
-
-[[mismatch]]
-unit = "topology.brep_p10"
-case = "gen0040"
-why = "still differs with ClassifyLoops' loop bisector keeping its B-rep edits (the healer copies its snapshot's UV trims, tolerance growth and gap caches back); cause not traced (plan/findings.md: ClassifyLoops' loop bisector keeps its B-rep edits: 37 of 49 listed cases match, 12 topology.brep_p10 cases still differ) [ints.ints[1681] cpp 1 rust 0]"
-
-[[mismatch]]
-unit = "topology.brep_p10"
-case = "gen0165"
-why = "still differs with ClassifyLoops' loop bisector keeping its B-rep edits (the healer copies its snapshot's UV trims, tolerance growth and gap caches back); cause not traced (plan/findings.md: ClassifyLoops' loop bisector keeps its B-rep edits: 37 of 49 listed cases match, 12 topology.brep_p10 cases still differ) [ints.ints[170] cpp 1 rust 0]"
-
-[[mismatch]]
-unit = "topology.brep_p10"
-case = "project_t0_Defeature_brep1"
-why = "ProjectAndTrim removes every face; C++ keeps the former solid region as the infinite region, the port keeps the original one (its SmTopology fields differ: cpp 99999999, rust 0) (plan/findings.md: 'topology.brep_p10 project_t0_Defeature_brep1: the region left after ProjectAndTrim')"
-
-[[mismatch]]
 unit = "intersect.curve_class_p4"
 case = "gen1570"
 why = "GetLoopCrossings -> SetProps_Stage2 seam flags differ (gen1570: a sphere face with a vertex at the pole); unchanged by keeping snapshot surface owners, cause not found (plan/findings.md: 'snapshot surfaces keep their face owner')"
@@ -127,9 +62,9 @@ case = "gen2061"
 why = "GetLoopCrossings -> SetProps_Stage2 seam flags differ (gen1570: a sphere face with a vertex at the pole); unchanged by keeping snapshot surface owners, cause not found (plan/findings.md: 'snapshot surfaces keep their face owner')"
 
 [[mismatch]]
-unit = "topology.brep_p1"
-case = "Endcap_heal"
-why = "Endcap.smb HealBrep: Cache_FaceProps_Stage3 builds a trimmed surface cache (CreateUVTrimCurves: a UV trim curve, tolerance growth) where C++ reuses the one its load-time heal (ReadFromFile -> MakeTopologyFromData) kept on the surface; the import from the C++ export carries no surface cache (plan/findings.md: 'topology.brep_p1 Endcap_heal: the load-time heal's trimmed cache is not imported')"
+unit = "topology.brep_p10"
+case = "read_Solids_fillet_ts"
+why = "SmHealData::Fix_CoinVertices dangling-pointer heap reuse (UB-255): UpdateTargetLists frees both pSurvivorProps and pDeletedProps on SM_NO_MERGE_IN_BREP, Fix_CoinVertices rewrites sProbArray to the freed pSurvivorProps, and once glibc's 7-slot tcache bin fills on the 6th merge, new SmVertexProps reuses pSurvivorProps's address so C++ merges 3 extra 3-way vertex clusters (22 vertices, 1 shell vs Rust's fresh-id 25 vertices, 2 shells; plan/findings.md: 'topology.brep_p10, topology.brep_p1, sweep.api_brep: heal/notify/ProjectAndTrim fixes and `read_Solids_fillet_ts` UAF root cause')"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p1"
@@ -195,3 +130,8 @@ why = "planar-path sweep at 1e4-1e6 scale: C++ succeeds, Rust's union of the Pro
 unit = "primitive.primitive_creation_p2"
 case = "gen0252"
 why = "planar-path sweep at 1e4-1e6 scale: C++ succeeds, Rust's union of the ProjectAndTrim pieces returns SM_ERR (boolean::merge::p3) and leaves DoingBoolean set; cause not traced (plan/findings.md: 'primitive.primitive_creation_p2: planar-path sweeps at 1e4-1e6 scale fail their union after ProjectAndTrim')"
+
+[[mismatch]]
+unit = "primitive.primitive_creation_p2"
+case = "gen0071"
+why = "planar-path sweep at 1e4-1e6 scale (formerly deferred at TrimSrfCache without a face handle in CreateParallelProjectionCurves): C++ succeeds, Rust's union of the ProjectAndTrim pieces returns SM_ERR (boolean::merge::p3); same family as gen0003..gen0252 (plan/findings.md: 'primitive.primitive_creation_p2: planar-path sweeps at 1e4-1e6 scale fail their union after ProjectAndTrim')"
