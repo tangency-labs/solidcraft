@@ -29,8 +29,10 @@ use solidcore::geom::a_object::BooleanOperation;
 use solidcore::geom::attribute::{ids, Attribute, AttributeStore, Behavior, ObjectKey};
 use solidcore::geom::context::MarkLock;
 use solidcore::kernel::Kernel;
+use solidcore::math::Point3;
 use solidcore::topology::brep_cache::{arena_identity, CacheObject};
-use solidcore::topology::{brep::p1 as bp, Brep, FaceId};
+use solidcore::topology::topology_traverser::Marks;
+use solidcore::topology::{brep::p1 as bp, Brep, FaceId, NamingScheme};
 use solidcore::SolidError;
 use solidcore_ffi::units::boolean_merge_p3 as ffi;
 
@@ -125,7 +127,7 @@ fn engine_output(status: i64, manifold: bool, lamina: u64, result: bool) -> Outp
 /// The engine mirrors the native `EngineAccess`: the context-only constructor's
 /// members (`KernelManifoldIntersector::new`), the same explicit tolerances and
 /// `SetMergeOptions`, manifold flag true and lamina mode 0 before the call.
-fn engine_probe(i: &Inputs, pool: &mut Pool) -> Result<Output, HarnessError> {
+fn engine_probe(k: &mut Kernel, i: &Inputs, pool: &mut Pool) -> Result<Output, HarnessError> {
     let mut breps = std::mem::take(&mut pool.breps).into_iter();
     let mut primary = if i.a.is_empty() { None } else { breps.next() };
     let mut other = if i.b.is_empty() { None } else { breps.next() };
@@ -139,11 +141,10 @@ fn engine_probe(i: &Inputs, pool: &mut Pool) -> Result<Output, HarnessError> {
         state: ManifoldState::default(),
         attributes: AttributeStore::default(),
     });
-    let mut k = Kernel::default();
     let mut manifold = true;
     let mut lamina = 0;
     let result = port::non_manifold_boolean(
-        &mut k,
+        k,
         &mut driver,
         &mut primary,
         &mut other,
@@ -390,59 +391,35 @@ struct Pool {
     engine: Option<port::MergeEngine>,
 }
 impl Pool {
-    fn load(i: &Inputs) -> Result<Self, HarnessError> {
+    fn load(k: &mut Kernel, i: &Inputs) -> Result<Self, HarnessError> {
         let mut breps = Vec::new();
 
         for operand in i.a.iter().chain(&i.b) {
-            let exported = ffi::eval(&encode(&Inputs {
-                family: 5,
-                operation: 0,
-                options: None,
-                a: vec![operand.clone()],
-                b: Vec::new(),
-                tree: Vec::new(),
-                expected_refusal: None,
-            }))
-            .map_err(|error| harness(&error))?;
-            // export_graph starts at validate_only; vertexuse import expects a
-            // leading success tag. Geometry comes only from fixture construction.
-            let mut tagged = vec![0.0];
-            tagged.extend(&exported);
-            let (mut brep, _) = super::topology_vertexuse::import(&tagged)?;
-            // The vertexuse importer predates canonical arena owner keys. Each
-            // edge's curve is owned by its edge, as natively (the export carries
-            // no owner for edge curves); without this the B-rep cache leaves every
-            // curve out of its curve tree and point solves never reach an edge.
-            let edges: Vec<_> = brep.edges().ids().collect();
-            for edge in edges {
-                if let Some(curve) = brep
-                    .edge_mut(edge)
+            let [x, y, z] = operand.point;
+            let point = Point3::new(x, y, z);
+            let mut brep = if let Some([dx, dy, dz]) = operand.size {
+                solidcore::primitive::api_primitives::create_box(k, point, dx, dy, dz)
                     .map_err(|error| harness(&error))?
-                    .curve
-                    .as_mut()
-                {
-                    curve.set_owner(Some(arena_identity(CacheObject::Edge(edge))), None);
-                }
-            }
-            // Preserve the importer's native owned/unowned flag for surfaces, but
-            // translate existing owners so canonical GetSurfaces sees the same
-            // standalone surfaces as C++.
-            let faces: Vec<_> = brep.faces().ids().collect();
-            for face in faces {
-                if let Some(surface) = brep
-                    .face_mut(face)
-                    .map_err(|error| harness(&error))?
-                    .surface
-                    .as_mut()
-                {
-                    if surface.owner().is_some() {
-                        surface.set_owner(Some(arena_identity(CacheObject::Face(face))));
-                    }
-                }
-                // a new owner key drops the cached face tolerance: record it again
-                brep.sync_face_surface_tolerance(face)
-                    .map_err(|error| harness(&error))?;
-            }
+            } else {
+                let mut b = empty_brep(
+                    k,
+                    solidcore::geom::tol::USE_DEFAULT,
+                    solidcore::geom::tol::USE_DEFAULT,
+                    None,
+                )
+                .map_err(|error| harness(&error))?;
+                let inf = b.infinite_region();
+                let mut state = solidcore::topology::brep::p2::ArenaNotifyState::new(&b);
+                solidcore::topology::brep::p9::make_shell_vertex(
+                    &mut b,
+                    inf,
+                    point,
+                    &mut state.env(Some(&mut k.context)),
+                )
+                .map_err(|error| harness(&error))?;
+                b
+            };
+            brep.use_arena_naming().map_err(|error| harness(&error))?;
             breps.push(brep);
         }
         Ok(Self {
@@ -672,6 +649,14 @@ impl PiecewiseAccess for Pool {
         (self.primary, self.other)
     }
     fn set_operands(&mut self, a: Option<usize>, b: Option<usize>) {
+        if let Some(engine) = self.engine.as_mut() {
+            if self.primary != a {
+                engine.state.primary_marks = Marks::default();
+            }
+            if self.other != b {
+                engine.state.other_marks = Marks::default();
+            }
+        }
         self.primary = a;
         self.other = b;
     }
@@ -694,7 +679,8 @@ impl PiecewiseAccess for Pool {
                 a,
                 b,
                 &mut engine.attributes,
-            )
+            )?;
+            engine.adopt_operand_owners(Some(a), Some(b))
         })
     }
     fn clear_relationships(&mut self) -> solidcore::Result<()> {
@@ -767,6 +753,7 @@ impl PiecewiseAccess for Pool {
         let tolerance = self.brep(source)?.tolerance();
         set_tolerance(k, &mut result, tolerance, true, true)?;
         result.set_editing_enabled(true);
+        result.set_naming(NamingScheme::Arena);
         let id = self.breps.len();
         self.breps.push(result); // append only: a handle is never reused
         Ok(id)
@@ -799,7 +786,8 @@ impl PiecewiseAccess for Pool {
                 lock.mark_type1(),
                 lock.mark_type2(),
                 &mut keep,
-            )
+            )?;
+            engine.adopt_operand_owners(Some(a), Some(b))
         })
     }
     fn release_marks(&mut self, k: &mut Kernel, lock: &mut MarkLock) -> solidcore::Result<()> {
@@ -922,11 +910,11 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         return Err(harness("fixture-only family is not a unit operation"));
     }
     ffi::validate(&encode(i)).map_err(|error| harness(&error))?;
-    let mut pool = Pool::load(i)?;
-    if i.family == ENGINE_PROBE {
-        return engine_probe(i, &mut pool);
-    }
     let mut k = Kernel::default();
+    let mut pool = Pool::load(&mut k, i)?;
+    if i.family == ENGINE_PROBE {
+        return engine_probe(&mut k, i, &mut pool);
+    }
     let opts = i.options.map(options);
     let mut values = vec![0.0];
     let result: solidcore::Result<()> = match i.family {
@@ -1176,7 +1164,7 @@ mod tests {
 
     #[test]
     fn single_success_records_compare_rust_geometry_controls_and_nulls() {
-        let mut pool = Pool::load(&inputs()).unwrap();
+        let mut pool = Pool::load(&mut Kernel::default(), &inputs()).unwrap();
         let graph = fixture_graph();
         let mut native = vec![0.0, 1.0, 1.0, 1.0, 0.0, graph.len() as f64];
         native.extend(&graph);
@@ -1212,7 +1200,7 @@ mod tests {
 
     #[test]
     fn list_success_records_compare_actual_outputs_and_surface_count() {
-        let pool = Pool::load(&inputs()).unwrap();
+        let pool = Pool::load(&mut Kernel::default(), &inputs()).unwrap();
         let graph = fixture_graph();
         let mut native = vec![0.0, 1.0, -1.0, graph.len() as f64];
         native.extend(&graph);
@@ -1251,8 +1239,8 @@ mod tests {
         fn engine(pool: &Pool) -> &KernelManifoldIntersector {
             &pool.engine.as_ref().unwrap().intersector
         }
-        let mut pool = Pool::load(&inputs()).unwrap();
         let mut k = Kernel::default();
+        let mut pool = Pool::load(&mut k, &inputs()).unwrap();
         pool.construct(&mut k, &mut Some(0), &mut Some(1), 0.0, 0.0, None)
             .unwrap();
         assert_eq!(pool.surfaces(0).unwrap().len(), 6);
@@ -1290,8 +1278,8 @@ mod tests {
 
     #[test]
     fn piecewise_dependency_errors_name_the_next_missing_owner() {
-        let mut pool = Pool::load(&inputs()).unwrap();
         let mut k = Kernel::default();
+        let mut pool = Pool::load(&mut k, &inputs()).unwrap();
         // without SmMerge's constructor the pool holds no m_vTI
         assert!(matches!(
             pool.clear_relationships(),

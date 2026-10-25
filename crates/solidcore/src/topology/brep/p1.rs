@@ -153,7 +153,8 @@ use crate::topology::topology_traverser::{Entity, Marks};
 use crate::topology::vertex;
 use crate::topology::vertexuse;
 use crate::topology::{
-    Brep, EdgeId, EdgeuseId, FaceId, LoopId, RegionId, ShellId, VertexId, Vertexuse, VertexuseId,
+    Brep, EdgeId, EdgeuseId, FaceId, LoopId, NamingScheme, RegionId, ShellId, VertexId, Vertexuse,
+    VertexuseId,
 };
 
 /// `SmBoolean` `TRUE` / `FALSE`.
@@ -572,8 +573,46 @@ impl core::fmt::Debug for GeometryAttributeFilter<'_> {
     }
 }
 
+/// The default expected owner of `f`'s surface under `b`'s recorded naming scheme,
+/// falling back to a proven caller owner recorded on `b`.
+fn default_face_owner(b: &Brep, f: FaceId) -> ObjectRef {
+    let fallback = if b.naming() == NamingScheme::Notify {
+        loopuse::notify_ref(EntityRef::Face(f))
+    } else {
+        arena_identity(CacheObject::Face(f))
+    };
+    let actual = b.face(f).ok().and_then(|x| x.surface.as_ref()?.owner());
+    if actual != Some(fallback) {
+        if let Some(proven) = b.geometry_owner_key(EntityRef::Face(f)) {
+            if actual == Some(proven) {
+                return proven;
+            }
+        }
+    }
+    fallback
+}
+
+/// The default expected owner of `e`'s curve under `b`'s recorded naming scheme,
+/// falling back to a proven caller owner recorded on `b`.
+fn default_edge_owner(b: &Brep, e: EdgeId) -> ObjectRef {
+    let fallback = if b.naming() == NamingScheme::Notify {
+        loopuse::notify_ref(EntityRef::Edge(e))
+    } else {
+        arena_identity(CacheObject::Edge(e))
+    };
+    let actual = b.edge(e).ok().and_then(|x| x.curve.as_ref()?.owner());
+    if actual != Some(fallback) {
+        if let Some(proven) = b.geometry_owner_key(EntityRef::Edge(e)) {
+            if actual == Some(proven) {
+                return proven;
+            }
+        }
+    }
+    fallback
+}
+
 /// `GetSurfaces`: the surfaces owned by their faces (`pSurface->GetOwner() == pFace`,
-/// the owner being the face's [`arena_identity`]), in face order, those carrying
+/// resolved in `b`'s recorded naming scheme), in face order, those carrying
 /// `attribute` when given.
 ///
 /// # Errors
@@ -584,7 +623,7 @@ pub fn surfaces<'b>(
     b: &'b Brep,
     attribute: Option<&GeometryAttributeFilter<'_>>,
 ) -> Result<Vec<&'b Surface>> {
-    surface_owners(b, attribute, &|id| arena_identity(CacheObject::Face(id)))?
+    surface_owners(b, attribute, &|id| default_face_owner(b, id))?
         .into_iter()
         .map(|id| {
             b.face(id)?
@@ -624,8 +663,8 @@ pub(crate) fn surface_owners(
     Ok(out)
 }
 
-/// `GetCurves`: the 3D curves owned by their edges (`pCurve->GetOwner() == pEdge`, the
-/// owner being the edge's [`arena_identity`]), in edge order, those carrying
+/// `GetCurves`: the 3D curves owned by their edges (`pCurve->GetOwner() == pEdge`,
+/// resolved in `b`'s recorded naming scheme), in edge order, those carrying
 /// `attribute` when given.
 ///
 /// # Errors
@@ -635,7 +674,7 @@ pub fn curves<'b>(
     b: &'b Brep,
     attribute: Option<&GeometryAttributeFilter<'_>>,
 ) -> Result<Vec<&'b Curve>> {
-    curve_owners(b, attribute, &|id| arena_identity(CacheObject::Edge(id)))?
+    curve_owners(b, attribute, &|id| default_edge_owner(b, id))?
         .into_iter()
         .map(|id| {
             b.edge(id)?

@@ -780,6 +780,63 @@ impl Brep {
         self.naming = naming;
     }
 
+    /// Relabels geometry owned by this B-rep's own topology records under
+    /// [`NamingScheme::Arena`] ([`brep_cache::arena_identity`]), preserving shared or
+    /// unowned geometry and syncing face surface tolerances.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::NotFound`] for a dangling face or edge id (none in practice).
+    pub fn use_arena_naming(&mut self) -> Result<()> {
+        let edges: Vec<EdgeId> = self.edges.ids().collect();
+        for edge in edges {
+            let entity = EntityRef::Edge(edge);
+            let arena = brep_cache::arena_identity(brep_cache::CacheObject::Edge(edge));
+            let notify = loopuse::notify_ref(entity);
+            let proven = self.geometry_owner_key(entity);
+            let rebound = self.edge_mut(edge)?.curve.as_mut().is_some_and(|curve| {
+                let matched = curve.owner().is_some_and(|o| {
+                    o == arena
+                        || (o.key, o.type_code) == (notify.key, notify.type_code)
+                        || Some(o) == proven
+                });
+                if matched {
+                    curve.set_owner(Some(arena), None);
+                }
+                matched
+            });
+            if rebound {
+                self.set_geometry_owner_key(entity, Some(arena));
+            }
+        }
+        let faces: Vec<FaceId> = self.faces.ids().collect();
+        for face in faces {
+            let entity = EntityRef::Face(face);
+            let arena = brep_cache::arena_identity(brep_cache::CacheObject::Face(face));
+            let notify = loopuse::notify_ref(entity);
+            let proven = self.geometry_owner_key(entity);
+            let rebound = self
+                .face_mut(face)?
+                .surface
+                .as_mut()
+                .is_some_and(|surface| {
+                    let matched = surface
+                        .owner()
+                        .is_some_and(|o| o == arena || o == notify || Some(o) == proven);
+                    if matched {
+                        surface.set_owner(Some(arena));
+                    }
+                    matched
+                });
+            if rebound {
+                self.set_geometry_owner_key(entity, Some(arena));
+                self.sync_face_surface_tolerance(face)?;
+            }
+        }
+        self.naming = NamingScheme::Arena;
+        Ok(())
+    }
+
     /// Producer-supplied owner identity recorded when geometry was bound to `entity`.
     #[must_use]
     pub(crate) fn geometry_owner_key(

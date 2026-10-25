@@ -144,6 +144,26 @@ impl MergeEngine {
             attributes: AttributeStore::default(),
         })
     }
+
+    /// Hand geometry created under this engine's notification namespace back to each
+    /// operand's recorded naming scheme ([`Brep::naming`](crate::topology::Brep::naming)).
+    ///
+    /// # Errors
+    /// [`SolidError::NotFound`] for a dangling topology record (none in practice).
+    pub fn adopt_operand_owners(
+        &self,
+        primary: Option<&mut Brep>,
+        other: Option<&mut Brep>,
+    ) -> Result<()> {
+        if let Some(namespace) = self.intersector.namespace() {
+            for (body, is_other) in [(primary, false), (other, true)] {
+                if let Some(body) = body {
+                    crate::boolean::merge::p4::adopt_namespace_owners(body, namespace, is_other)?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 impl DependencyMerge {
@@ -246,13 +266,7 @@ impl BooleanDriver for DependencyMerge {
         // merge: geometry the merge made owns under the record's own name in the
         // B-rep's scheme, as every other record's geometry (upstream's owner is the
         // record itself).
-        if let Some(namespace) = engine.intersector.namespace() {
-            for (body, is_other) in [(primary.as_mut(), false), (other.as_mut(), true)] {
-                if let Some(body) = body {
-                    crate::boolean::merge::p4::adopt_namespace_owners(body, namespace, is_other)?;
-                }
-            }
-        }
+        engine.adopt_operand_owners(primary.as_mut(), other.as_mut())?;
         Ok(if assigned { primary.take() } else { None })
     }
 }
@@ -603,7 +617,7 @@ fn copy_brep(
     add_analytics: bool,
 ) -> Result<Brep> {
     let mut state = crate::topology::brep::p2::ArenaNotifyState::default();
-    crate::topology::brep::p3::copy_brep(
+    let mut brep = crate::topology::brep::p3::copy_brep(
         k,
         &mut state.env(None),
         source,
@@ -612,7 +626,9 @@ fn copy_brep(
         reverse_map,
         copy_attributes,
         add_analytics,
-    )
+    )?;
+    brep.set_naming(crate::topology::NamingScheme::Notify);
+    Ok(brep)
 }
 
 /// `SmBrep::MergeBrep(source, pOptCopyBrepMap, pOptReverseMap, bAddAnalytics)`

@@ -117,11 +117,6 @@ case = "project_t0_Defeature_brep1"
 why = "ProjectAndTrim removes every face; C++ keeps the former solid region as the infinite region, the port keeps the original one (its SmTopology fields differ: cpp 99999999, rust 0) (plan/findings.md: 'topology.brep_p10 project_t0_Defeature_brep1: the region left after ProjectAndTrim')"
 
 [[mismatch]]
-unit = "boolean.merge_p3"
-case = "upstream_merge_breps_operation_3"
-why = "same result topology and vertex positions, different vertex list order: C++ lists one part's exclusive vertices last (plan/findings.md: 'boolean.merge_p3: vertex list order after merges that imprint edges into faces'; issue #832)"
-
-[[mismatch]]
 unit = "intersect.curve_class_p4"
 case = "gen1570"
 why = "GetLoopCrossings -> SetProps_Stage2 seam flags differ (gen1570: a sphere face with a vertex at the pole); unchanged by keeping snapshot surface owners, cause not found (plan/findings.md: 'snapshot surfaces keep their face owner')"
@@ -155,41 +150,6 @@ why = "GetLoopCrossings -> SetProps_Stage2 seam flags differ (gen1570: a sphere 
 unit = "topology.brep_p1"
 case = "Endcap_heal"
 why = "Endcap.smb HealBrep: Cache_FaceProps_Stage3 builds a trimmed surface cache (CreateUVTrimCurves: a UV trim curve, tolerance growth) where C++ reuses the one its load-time heal (ReadFromFile -> MakeTopologyFromData) kept on the surface; the import from the C++ export carries no surface cache (plan/findings.md: 'topology.brep_p1 Endcap_heal: the load-time heal's trimmed cache is not imported')"
-
-[[mismatch]]
-unit = "boolean.merge_p3"
-case = "upstream_piecewise_boxes_2_keep_other"
-why = "same result topology and vertex positions, different vertex list order: C++ lists one part's exclusive vertices last (plan/findings.md: 'boolean.merge_p3: vertex list order after merges that imprint edges into faces'; issue #832)"
-
-[[mismatch]]
-unit = "boolean.merge_p3"
-case = "upstream_piecewise_boxes_3_keep_other"
-why = "same result topology and vertex positions, different vertex list order: C++ lists one part's exclusive vertices last (plan/findings.md: 'boolean.merge_p3: vertex list order after merges that imprint edges into faces'; issue #832)"
-
-[[mismatch]]
-unit = "boolean.merge_p3"
-case = "upstream_merge_breps_operation_0"
-why = "same result topology and vertex positions, different vertex list order; deferred on main (SmRegion::GetBrep / SmFace::Point3DClassify), compared since PR #816 (plan/findings.md: 'boolean.merge_p3: vertex list order after merges that imprint edges into faces'; 'Public boolean e2e (PR #816): cases newly compared once the context stubs were wired'; issue #832)"
-
-[[mismatch]]
-unit = "boolean.merge_p3"
-case = "upstream_merge_breps_operation_1"
-why = "same result topology and vertex positions, different vertex list order; deferred on main (SmRegion::GetBrep / SmFace::Point3DClassify), compared since PR #816 (plan/findings.md: 'boolean.merge_p3: vertex list order after merges that imprint edges into faces'; 'Public boolean e2e (PR #816): cases newly compared once the context stubs were wired'; issue #832)"
-
-[[mismatch]]
-unit = "boolean.merge_p3"
-case = "upstream_merge_breps_operation_2"
-why = "same result topology and vertex positions, different vertex list order; deferred on main (SmRegion::GetBrep / SmFace::Point3DClassify), compared since PR #816 (plan/findings.md: 'boolean.merge_p3: vertex list order after merges that imprint edges into faces'; 'Public boolean e2e (PR #816): cases newly compared once the context stubs were wired'; issue #832)"
-
-[[mismatch]]
-unit = "boolean.merge_p3"
-case = "upstream_piecewise_boxes_0"
-why = "same result topology and vertex positions, different vertex list order; deferred on main (SmRegion::GetBrep / SmFace::Point3DClassify), compared since PR #816 (plan/findings.md: 'boolean.merge_p3: vertex list order after merges that imprint edges into faces'; 'Public boolean e2e (PR #816): cases newly compared once the context stubs were wired'; issue #832)"
-
-[[mismatch]]
-unit = "boolean.merge_p3"
-case = "upstream_piecewise_boxes_1"
-why = "same result topology and vertex positions, different vertex list order; deferred on main (SmRegion::GetBrep / SmFace::Point3DClassify), compared since PR #816 (plan/findings.md: 'boolean.merge_p3: vertex list order after merges that imprint edges into faces'; 'Public boolean e2e (PR #816): cases newly compared once the context stubs were wired'; issue #832)"
 
 [[mismatch]]
 unit = "blend.fillet_executive_p1"

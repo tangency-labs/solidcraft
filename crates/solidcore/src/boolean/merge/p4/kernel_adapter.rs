@@ -166,11 +166,13 @@ struct GeometryOwnerScope<'a, 'keys> {
     body: &'a mut Brep,
     keys: NotificationKeys<'keys>,
     other: bool,
-    edges: Vec<EdgeId>,
-    faces: Vec<FaceId>,
+    edges: Vec<(EdgeId, ObjectRef)>,
+    faces: Vec<(FaceId, ObjectRef)>,
 }
 impl<'a, 'keys> GeometryOwnerScope<'a, 'keys> {
     fn new(body: &'a mut Brep, keys: NotificationKeys<'keys>, other: bool) -> Result<Self> {
+        use crate::topology::NamingScheme;
+        let naming = body.naming();
         let mut scope = Self {
             body,
             keys,
@@ -180,29 +182,38 @@ impl<'a, 'keys> GeometryOwnerScope<'a, 'keys> {
         };
         if matches!(keys, NotificationKeys::Namespace(_)) {
             for edge in crate::topology::brep::p1::edges(scope.body, None)? {
+                let expected = if naming == NamingScheme::Notify {
+                    crate::topology::loopuse::notify_ref(EntityRef::Edge(edge))
+                } else {
+                    arena_identity(CacheObject::Edge(edge))
+                };
                 if let Some(curve) = scope.body.edge_mut(edge)?.curve.as_mut() {
-                    if curve.owner() == Some(arena_identity(CacheObject::Edge(edge))) {
-                        scope.edges.push(edge);
+                    if curve.owner() == Some(expected) {
+                        scope.edges.push((edge, expected));
                         curve.set_owner(Some(keys.object(other, EntityRef::Edge(edge))), None);
                     }
                 }
             }
             for face in crate::topology::brep::p1::faces(scope.body, None)? {
+                let expected = if naming == NamingScheme::Notify {
+                    crate::topology::loopuse::notify_ref(EntityRef::Face(face))
+                } else {
+                    arena_identity(CacheObject::Face(face))
+                };
                 let rebound = scope
                     .body
                     .face_mut(face)?
                     .surface
                     .as_mut()
                     .is_some_and(|surface| {
-                        let matched =
-                            surface.owner() == Some(arena_identity(CacheObject::Face(face)));
+                        let matched = surface.owner() == Some(expected);
                         if matched {
                             surface.set_owner(Some(keys.object(other, EntityRef::Face(face))));
                         }
                         matched
                     });
                 if rebound {
-                    scope.faces.push(face);
+                    scope.faces.push((face, expected));
                     scope.body.sync_face_surface_tolerance(face)?;
                 }
             }
@@ -212,22 +223,22 @@ impl<'a, 'keys> GeometryOwnerScope<'a, 'keys> {
 }
 impl Drop for GeometryOwnerScope<'_, '_> {
     fn drop(&mut self) {
-        for &edge in &self.edges {
+        for &(edge, expected) in &self.edges {
             if let Ok(record) = self.body.edge_mut(edge) {
                 if let Some(curve) = record.curve.as_mut() {
                     if curve.owner() == Some(self.keys.object(self.other, EntityRef::Edge(edge))) {
-                        curve.set_owner(Some(arena_identity(CacheObject::Edge(edge))), None);
+                        curve.set_owner(Some(expected), None);
                     }
                 }
             }
         }
-        for &face in &self.faces {
+        for &(face, expected) in &self.faces {
             let restored = self.body.face_mut(face).is_ok_and(|record| {
                 record.surface.as_mut().is_some_and(|surface| {
                     let matched = surface.owner()
                         == Some(self.keys.object(self.other, EntityRef::Face(face)));
                     if matched {
-                        surface.set_owner(Some(arena_identity(CacheObject::Face(face))));
+                        surface.set_owner(Some(expected));
                     }
                     matched
                 })
