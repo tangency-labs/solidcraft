@@ -2055,6 +2055,7 @@ mod tests {
             model: model.into(),
             key: None,
             http,
+            request_timeout_s: 300,
         }
     }
 
@@ -2127,6 +2128,7 @@ mod tests {
             model: "muse-spark-1.3-contributor".into(),
             key: None,
             http,
+            request_timeout_s: 300,
         };
         let mut b = ApiBackend::start(cfg, go_ctx()).unwrap();
         b.prompt(&[PromptPart::Text("hi".into())]);
@@ -2444,6 +2446,7 @@ mod tests {
             model: "m".into(),
             key: None,
             http,
+            request_timeout_s: 300,
         };
         let mut b = ApiBackend::start(cfg, go_ctx()).unwrap();
         b.prompt(&[PromptPart::Text("hi".into())]);
