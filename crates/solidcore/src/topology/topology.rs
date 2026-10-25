@@ -31,6 +31,7 @@
 //! | [`TopologyChangeLists::reset_arrays`]        | `SmTopologyChangeCallback::ReSetArrays`, `~SmTopologyChangeCallback` |
 //! | [`TopologyChangeCallback`]                   | `SmTopologyChangeCallback` (constructor)         |
 //! | [`NotifyCallback::execute`] for `TopologyChangeCallback` | `SmTopologyChangeCallback::Execute` |
+//! | [`NotifyCallback::owner_link`] for `TopologyChangeCallback` | the `GetOwner()` / `GetEdge()` its geometry walk reads |
 //! | `add_unique`, `remove_key` (private) | `SmTopologyChangeCallback::AddUnique`, `Remove` |
 //! | [`TrackTopologyChanges`]                     | `SmTrackTopologyChanges`                         |
 //! | [`TrackTopologyChanges::new`]                | `SmTrackTopologyChanges::SmTrackTopologyChanges` |
@@ -761,6 +762,11 @@ impl NotifyCallback for TopologyChangeCallback {
     fn as_any(&self) -> Option<&dyn core::any::Any> {
         Some(self)
     }
+    /// The owner link the geometry walk of a later `SM_NO_POST_EDIT` follows
+    /// (upstream: `GetOwner()` / `GetEdge()` of the object).
+    fn owner_link(&mut self, object: ObjectKey, owner: Option<ObjectRef>) {
+        change_state(&self.state).owners.insert(object, owner);
+    }
 }
 
 /// Tracks changes to a B-rep's topology graph through its context's system notify
@@ -1179,6 +1185,35 @@ mod tests {
         let ev = lists.notify_events[0];
         assert_eq!(ev.operation, NotifyOperation::PostEdit);
         assert_eq!((ev.caller, ev.data1), (Some(curve), Some(curve)));
+    }
+
+    /// Reported owner links (a UV trim curve's edge use, the edge use's edge) carry a
+    /// curve's `SM_NO_POST_EDIT` to the edge, as upstream's `GetOwner()` / `GetEdge()`
+    /// walk; a curve without a reported link stays a failure.
+    #[test]
+    fn owner_links_reach_the_edge_through_an_edgeuse() {
+        let curve = topo(crate::curve::curve::p2::BSPLINE_CURVE_TYPE, 77);
+        let edgeuse = topo(16005, 6);
+        let edge = topo(16016, 7);
+        let mut cb = TopologyChangeCallback::new(1);
+        cb.owner_link(curve.key, Some(edgeuse));
+        cb.owner_link(edgeuse.key, Some(edge));
+        cb.execute(NotifyOperation::PostEdit, curve, Some(curve), None, None)
+            .unwrap();
+        assert!(cb.failure().is_none());
+        let lists = cb.lists();
+        assert_eq!(lists.chg_list, vec![edge.key]);
+        assert_eq!(lists.notify_events.len(), 1);
+        let unlinked = topo(crate::curve::curve::p2::BSPLINE_CURVE_TYPE, 78);
+        assert!(cb
+            .execute(
+                NotifyOperation::PostEdit,
+                unlinked,
+                Some(unlinked),
+                None,
+                None
+            )
+            .is_err());
     }
 
     /// `ChangeOwner` maintains the owner map; other events must not invent entries.

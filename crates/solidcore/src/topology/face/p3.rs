@@ -8,7 +8,7 @@
 //! |----------------------------------------------|-------------------------------------------|
 //! | [`compute_loop_orientation`]                 | `SmFace::ComputeLoopOrientation`          |
 //! | [`create_composites`]                        | `SmFace::CreateComposites`                |
-//! | [`create_uv_trim_curves`], [`UvTrimCurveGaps`] | `SmFace::CreateUVTrimCurves`            |
+//! | [`create_uv_trim_curves`], [`create_uv_trim_curves_notified`], [`UvTrimCurveGaps`] | `SmFace::CreateUVTrimCurves` |
 //! | [`face_intersect`], [`FaceIntersectOptions`], [`FaceIntersection`], [`IntersectObject`] | `SmFace::FaceIntersect` |
 //! | [`notify`]                                   | `SmFace::Notify`                          |
 //! | [`set_tolerance`]                            | `SmFace::SetTolerance` (`SM_USE_OLDTOL`)  |
@@ -18,6 +18,11 @@
 //! | [`has_lamina_edge`]                          | `SmFace::HasLaminaEdge` (CO-PORTED in `topology.topology_traverser`, re-exported) |
 //!
 //! Deviations:
+//! - **UV trim curve edit notifications.** Only the end point moves of
+//!   `sm_FixUVTrimCurves` notify ([`create_uv_trim_curves_notified`], through the
+//!   caller's [`NotifyEnv`]); `SmBSplineCurve::EditParameterization` of the curves
+//!   `SmSurface::DropIsoCurve` builds notifies nobody (no edge use owns them yet, so no
+//!   change tracker records it; `plan/findings.md`).
 //! - **Object model.** A face is a record in the [`Brep`]'s arenas; the methods are free
 //!   functions taking the B-rep and the face's id. Out-parameters are return values.
 //!   Where upstream dereferences null (a face without surface, an edge without curve, an
@@ -813,6 +818,25 @@ pub fn create_uv_trim_curves(
     adjust_tolerances: bool,
     opt_uv_curves: Option<(&mut [Option<Curve>], &[OrientType])>,
 ) -> Result<UvTrimCurveGaps> {
+    create_uv_trim_curves_notified(k, b, f, adjust_tolerances, opt_uv_curves, None)
+}
+
+/// [`create_uv_trim_curves`] whose UV trim curve edits notify through `env`: the end
+/// point moves of `sm_FixUVTrimCurves` ([`face2::fix_uv_trim_curves_notified`]). The
+/// other geometry edits on the way (`EditParameterization` of the curves
+/// `DropIsoCurve` builds, before any edge use owns them) still notify nobody.
+///
+/// # Errors
+///
+/// Those of [`create_uv_trim_curves`]; those of the notifications.
+pub fn create_uv_trim_curves_notified(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    adjust_tolerances: bool,
+    opt_uv_curves: Option<(&mut [Option<Curve>], &[OrientType])>,
+    env: Option<&mut NotifyEnv<'_>>,
+) -> Result<UvTrimCurveGaps> {
     // queried before the surface owner is cleared, as upstream: the surface is still
     // face-owned, so `GetSingularities`' approximation tolerance
     // (`SmTol::GetApproxTol3d(this)`) is the face's
@@ -831,7 +855,7 @@ pub fn create_uv_trim_curves(
     // (recorded on the B-rep: a nested `smsurf_GetSurfaceCache` of the face's surface
     // then finds no face, so it does not build the face's UV trim curves itself)
     b.begin_surface_owner_cleared(f);
-    let result = create_uv_trim_curves_body(k, b, f, adjust_tolerances, opt_uv_curves, &pre);
+    let result = create_uv_trim_curves_body(k, b, f, adjust_tolerances, opt_uv_curves, &pre, env);
     // SmRescueSurfaceOwner's destructor restores the owner on every return
     b.end_surface_owner_cleared(f);
     if let Some(s) = b.face_mut(f)?.surface.as_mut() {
@@ -858,6 +882,7 @@ fn create_uv_trim_curves_body(
     adjust_tolerances: bool,
     mut opt_uv_curves: Option<(&mut [Option<Curve>], &[OrientType])>,
     pre: &PreRescue,
+    mut env: Option<&mut NotifyEnv<'_>>,
 ) -> Result<UvTrimCurveGaps> {
     let mut mean_cs_gap = 0.0;
     let mut max_cs_gap = 0.0_f64;
@@ -992,7 +1017,7 @@ fn create_uv_trim_curves_body(
                     );
 
                     // status ignored upstream
-                    let fixed = ignored(face2::fix_uv_trim_curves(
+                    let fixed = ignored(face2::fix_uv_trim_curves_notified(
                         k,
                         b,
                         eu,
@@ -1001,6 +1026,7 @@ fn create_uv_trim_curves_body(
                         tol_3d,
                         uv_gap_size,
                         &uv_domain,
+                        env.as_deref_mut(),
                     ))?
                     .unwrap_or(false);
 

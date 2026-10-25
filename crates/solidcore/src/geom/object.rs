@@ -13,6 +13,7 @@
 //! | [`ObjectRef`]                                | an `SmObject*` argument of `Notify` / `Execute`   |
 //! | [`NotifyOperation`]                          | `SmNotifyOperation`                               |
 //! | [`notify`]                                   | `SmObject::Notify`                                |
+//! | [`report_owner_link`]                        | (none: the `GetOwner()` a callback reads)         |
 //! | [`assert_valid`]                             | `SmObject::AssertValid`                           |
 //! | [`TemporaryChangeValue`]                     | `SmTemporaryChangeValue<TYPE>`                    |
 //! | [`TemporaryChangeValue::empty`]              | `SmTemporaryChangeValue()`                        |
@@ -230,6 +231,27 @@ pub fn notify(
     // Call system callback if present.
     if let Some(scb) = context.sys_notify_callback_mut() {
         let _status = scb.execute(operation, caller, data1, data2, data3);
+    }
+}
+
+/// Reports to the context's user and system notify callbacks (each only if set) that
+/// `object` is owned by `owner` ([`crate::geom::context::NotifyCallback::owner_link`]):
+/// upstream callbacks read an object's owner through its pointer, the port's
+/// [`ObjectRef`] carries no links. Notifies nothing; an object with a null context
+/// reports to nobody.
+pub fn report_owner_link(
+    context: Option<&mut Context>,
+    object: ObjectKey,
+    owner: Option<ObjectRef>,
+) {
+    let Some(context) = context else {
+        return;
+    };
+    if let Some(ucb) = context.user_notify_callback_mut() {
+        ucb.owner_link(object, owner);
+    }
+    if let Some(scb) = context.sys_notify_callback_mut() {
+        scb.owner_link(object, owner);
     }
 }
 

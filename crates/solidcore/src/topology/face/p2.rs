@@ -22,7 +22,8 @@
 //! | [`OdeArea`]                             | `SmODEAreaIFEO::Evaluate`                         |
 //! | [`create_curves_by_trimming`], [`TrimmedCurves`] | `SmFace::CreateCurvesByTrimming`         |
 //! | [`create_curves_from_face`], [`FaceCurves`] | `SmFace::CreateCurvesFromFace`                |
-//! | [`fix_uv_trim_curves`]                  | `sm_FixUVTrimCurves`                              |
+//! | [`fix_uv_trim_curves`], [`fix_uv_trim_curves_notified`] | `sm_FixUVTrimCurves`              |
+//! | `notified_end_point_edit` (private)     | `SmBSplineCurve::EditEndPoint`'s `SM_NO_PRE_EDIT` / `SM_NO_POST_EDIT` |
 //! | [`find_best_uv_curve`]                  | `sm_FindBestUVCurve` (static)                     |
 //! | [`RescueSurfaceOwner`]                  | `SmRescueSurfaceOwner` (constructor, destructor)  |
 //! | [`remove_suspect_split_at_seam_uv_trim_curves`] | `sm_RemoveSuspectSplitAtSeamUVTrimCurves` |
@@ -67,6 +68,14 @@
 //!   runs it. Only the end control points move here, by the UV gap
 //!   (`plan/upstream-issues.md` WR-255). No difftest case reaches the trim: the
 //!   fixture trims meet their vertices, so the drop point is the trim's end.
+//! - **Edit notifications.** [`fix_uv_trim_curves_notified`] notifies its two
+//!   `EditEndPoint`s (`SM_NO_PRE_EDIT` / `SM_NO_POST_EDIT`, caller and first data
+//!   object the UV trim curve under its kernel-issued identity) through the caller's
+//!   [`NotifyEnv`]; [`fix_uv_trim_curves`] has none and notifies nobody. Upstream
+//!   callbacks read the curve's owner (the edge use holding it) and that edge use's
+//!   edge through the pointers; here they are reported first
+//!   ([`object::report_owner_link`]). `SmCurve::Notify`'s object cache drop has no
+//!   counterpart (a UV trim curve keeps no object cache here).
 //! - **`EditEndPoint`** (non-virtual `SmBSplineCurve`) is applied to B-spline and line
 //!   UV trim curves (a line's NURB is made first and its analytic data refreshed
 //!   after, as `SmLine::RefreshAnalytics`); a UV trim curve of another kind is
@@ -111,9 +120,10 @@ use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p2::CurveKind;
 use crate::curve::curve::Curve;
 use crate::error::{ignore_status, EntityRef, Result, SolidError};
+use crate::geom::a_object;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
-use crate::geom::object::ObjectRef;
+use crate::geom::object::{self, NotifyOperation, ObjectRef};
 use crate::geom::tol::zone_tol3d;
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::intersect::curve_class::p1::{CurveClassification, CurveInterval};
@@ -135,6 +145,7 @@ use crate::surface::surface::p1::map_to_2d;
 use crate::surface::surface::p7::approx_derivative_lengths;
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::surface::volume::Volume;
+use crate::topology::edge::NotifyEnv;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p3 as eu3;
 use crate::topology::topology as topo;
@@ -2229,6 +2240,62 @@ fn held_curve_mut(b: &mut Brep, holder: EdgeuseId) -> Result<&mut Curve> {
         .ok_or_else(|| null("edge use without UV trim curve"))
 }
 
+/// [`edit_end_point`] of the UV trim curve `holder` holds, between the
+/// `Notify(SM_NO_PRE_EDIT / SM_NO_POST_EDIT, this, SM_NO_GET_OWNER(this), NULL)` calls
+/// `SmBSplineCurve::EditEndPoint` makes (`SM_NO_GET_OWNER` is null): the curve is
+/// notified under its kernel-issued identity in `env`'s context. A callback walking
+/// the curve's owner reads the edge use `holder` and its edge
+/// ([`object::report_owner_link`], identities from `env`'s `key_of`). An edit that
+/// fails sends no `SM_NO_POST_EDIT`, as upstream's `SER` returns. The curve's object
+/// cache, which `SmCurve::Notify` drops before an edit, has no counterpart on a UV trim
+/// curve here. Without a context the edit notifies nobody.
+///
+/// # Errors
+///
+/// Those of [`edit_end_point`], of the attribute handlers ([`a_object::notify`]);
+/// `InvalidInput` for an exhausted identity domain.
+fn notified_end_point_edit(
+    b: &mut Brep,
+    env: Option<&mut NotifyEnv<'_>>,
+    holder: EdgeuseId,
+    point: Point3,
+    edit_start: bool,
+    weight: Option<f64>,
+) -> Result<()> {
+    let Some(env) = env.filter(|e| e.context.is_some()) else {
+        return edit_end_point(held_curve_mut(b, holder)?, point, edit_start, weight);
+    };
+    let holder_ref = (env.key_of)(EntityRef::Edgeuse(holder));
+    let edge_ref = eu1::edge(b, holder)?.map(|e| (env.key_of)(EntityRef::Edge(e)));
+    let this = {
+        let curve = held_curve_mut(b, holder)?;
+        let Some(ctx) = env.context.as_deref_mut() else {
+            return Err(null("EditEndPoint: no context"));
+        };
+        ObjectRef {
+            type_code: curve.type_code(),
+            key: ctx.geometry_key(curve.notify_identity_slot())?,
+        }
+    };
+    // (the links a callback reads through GetOwner() / GetEdge())
+    object::report_owner_link(env.context.as_deref_mut(), this.key, Some(holder_ref));
+    object::report_owner_link(env.context.as_deref_mut(), holder_ref.key, edge_ref);
+    let notify = |env: &mut NotifyEnv<'_>, operation| {
+        a_object::notify(
+            env.attributes,
+            env.context.as_deref_mut(),
+            operation,
+            this,
+            Some(this),
+            None,
+            None,
+        )
+    };
+    notify(env, NotifyOperation::PreEdit)?;
+    edit_end_point(held_curve_mut(b, holder)?, point, edit_start, weight)?;
+    notify(env, NotifyOperation::PostEdit)
+}
+
 /// `SmBSplineCurve::EditEndPoint(point, bEditStart, pdWeight)` of a UV trim curve.
 fn edit_end_point(
     curve: &mut Curve,
@@ -2266,7 +2333,7 @@ fn edit_end_point(
 /// [`SolidError::NotFound`] for a dangling id; [`SolidError::InvalidInput`] for missing
 /// topology, curves or surface upstream dereferences; those of the curve evaluations
 /// and edits.
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
 pub fn fix_uv_trim_curves(
     k: &Kernel,
     b: &mut Brep,
@@ -2276,6 +2343,39 @@ pub fn fix_uv_trim_curves(
     tol_3d: f64,
     uv_dist_between: f64,
     uv_domain: &Extent2d,
+) -> Result<bool> {
+    fix_uv_trim_curves_notified(
+        k,
+        b,
+        eu_current,
+        eu_previous,
+        vertex,
+        tol_3d,
+        uv_dist_between,
+        uv_domain,
+        None,
+    )
+}
+
+/// [`fix_uv_trim_curves`] whose end point edits notify through `env`: each
+/// `EditEndPoint` sends `SM_NO_PRE_EDIT` and `SM_NO_POST_EDIT` with the edited UV trim
+/// curve as caller and first data object ([`notified_end_point_edit`]). Without `env`
+/// (or without its context) the edits notify nobody.
+///
+/// # Errors
+///
+/// Those of [`fix_uv_trim_curves`]; those of the notifications.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+pub fn fix_uv_trim_curves_notified(
+    k: &Kernel,
+    b: &mut Brep,
+    eu_current: EdgeuseId,
+    eu_previous: EdgeuseId,
+    vertex: VertexId,
+    tol_3d: f64,
+    uv_dist_between: f64,
+    uv_domain: &Extent2d,
+    mut env: Option<&mut NotifyEnv<'_>>,
 ) -> Result<bool> {
     // no work - current gap is zero
     if uv_dist_between < EFF_ZERO / 10.0 {
@@ -2374,23 +2474,33 @@ pub fn fix_uv_trim_curves(
     let w_prev = end_weight(held_curve(b, prev_holder)?, edit_prev_start);
 
     // move Currcurve endPoint to target point - no protection from introducing kinks
-    {
-        let c = held_curve_mut(b, curr_holder)?;
-        if c.is_rational()? {
-            edit_end_point(c, uv_vertex_3d * w_curr, edit_curr_start, Some(w_curr))?;
-        } else {
-            edit_end_point(c, uv_vertex_3d, edit_curr_start, None)?;
-        }
+    if held_curve(b, curr_holder)?.is_rational()? {
+        let p = uv_vertex_3d * w_curr;
+        notified_end_point_edit(
+            b,
+            env.as_deref_mut(),
+            curr_holder,
+            p,
+            edit_curr_start,
+            Some(w_curr),
+        )?;
+    } else {
+        notified_end_point_edit(
+            b,
+            env.as_deref_mut(),
+            curr_holder,
+            uv_vertex_3d,
+            edit_curr_start,
+            None,
+        )?;
     }
 
     // move PrevCurve endPoint to target point
-    {
-        let c = held_curve_mut(b, prev_holder)?;
-        if c.is_rational()? {
-            edit_end_point(c, uv_vertex_3d * w_prev, edit_prev_start, Some(w_prev))?;
-        } else {
-            edit_end_point(c, uv_vertex_3d, edit_prev_start, None)?;
-        }
+    if held_curve(b, prev_holder)?.is_rational()? {
+        let p = uv_vertex_3d * w_prev;
+        notified_end_point_edit(b, env, prev_holder, p, edit_prev_start, Some(w_prev))?;
+    } else {
+        notified_end_point_edit(b, env, prev_holder, uv_vertex_3d, edit_prev_start, None)?;
     }
 
     // all done

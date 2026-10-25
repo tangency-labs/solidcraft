@@ -1600,7 +1600,7 @@ pub fn replace_surface(
 
     // when asked - build new UVTrimCurves
     if create_uv_trim_curves {
-        face_create_uv_trim_curves(k, b, top_face)?;
+        face_create_uv_trim_curves(k, b, env, top_face)?;
     }
 
     // all done
@@ -1860,9 +1860,15 @@ fn face_notify(
 }
 
 /// `SER(pTopFace->CreateUVTrimCurves(TRUE, NULL, NULL, ..))`
-/// ([`face3::create_uv_trim_curves`]; the gap statistics are dropped).
-fn face_create_uv_trim_curves(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<()> {
-    face3::create_uv_trim_curves(k, b, f, true, None).map(|_| ())
+/// ([`face3::create_uv_trim_curves_notified`]: its UV trim curve edits notify through
+/// `env`; the gap statistics are dropped).
+fn face_create_uv_trim_curves(
+    k: &Kernel,
+    b: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+    f: FaceId,
+) -> Result<()> {
+    face3::create_uv_trim_curves_notified(k, b, f, true, None, Some(env)).map(|_| ())
 }
 
 /// `pRegion->PostInsert(pShell)`: the new shell goes to the tail of the region's shell

@@ -21,6 +21,7 @@
 //! | [`Context::sys_notify_callback`]          | `SmContext::GetSysNotifyCallback`               |
 //! | [`Context::user_notify_callback_mut`], [`Context::sys_notify_callback_mut`] | the same getters, for `Execute` |
 //! | [`NotifyCallback`], [`NotifyCallback::execute`] | `SmNotifyCallback`, `SmNotifyCallback::Execute` |
+//! | [`NotifyCallback::owner_link`]            | (none: the `GetOwner()` / `GetEdge()` a callback reads) |
 //! | [`Context::set_sys_notify_callback`]      | `SmContext::SetSysNotifyCallback`               |
 //! | [`Context::this_model_size_estimate`]     | `SmContext::GetThisModelSizeEstimate`           |
 //! | [`Context::set_this_model_size_estimate`] | `SmContext::SetThisModelSizeEstimate` (inline, `SM_USE_OLDTOL` build) |
@@ -184,6 +185,17 @@ pub trait NotifyCallback: std::fmt::Debug + Send {
     /// nobody needs to recognise.
     fn as_any(&self) -> Option<&dyn core::any::Any> {
         None
+    }
+
+    /// Records the object `object` is owned by (`SmCurve::GetOwner`,
+    /// `SmSurface::GetOwner`, `SmEdgeuse::GetEdge`; `None` for a null owner) for the
+    /// notifications that follow. An upstream callback reads these links from the
+    /// notified objects themselves; an [`object::ObjectRef`] carries none, so the
+    /// notifying code reports a link no notification announces (a UV trim curve's edge
+    /// use, that edge use's edge) before the notification a callback needs it for
+    /// ([`object::report_owner_link`]). The default ignores it.
+    fn owner_link(&mut self, object: ObjectKey, owner: Option<object::ObjectRef>) {
+        let _ = (object, owner);
     }
 }
 
