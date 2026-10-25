@@ -1482,3 +1482,173 @@ fn fit_piece(p: &[Vec2], tol: f64, exact: bool, out: &mut Vec<LinkGeom>) {
         }
     }
 }
+
+/// The rim of a hole opening a click ray passed through: the body it belongs to and one
+/// point on each of the rim's edges, in world space. Each point names its edge the way an
+/// edge pick does, so the caller can hand the rim to `sketch.project` as ordinary edge refs.
+pub struct HoleRim {
+    pub body: String,
+    pub points: Vec<Vec3>,
+}
+
+/// Per-body scan limits for [`hole_rim_along_ray`]: a body past any of them is skipped, so
+/// a click on a huge body still gets its error rather than hanging.
+const HOLE_SCAN_MAX_FACES: usize = 8_000;
+const HOLE_SCAN_MAX_EDGES: usize = 20_000;
+const HOLE_SCAN_MAX_TRIANGLES: usize = 400_000;
+
+/// The rim of the nearest hole opening the ray `origin + t*dir` (t > 0) passes through:
+/// a point that lies inside a planar face's outer loop and inside one of its inner loops.
+/// Hidden bodies are skipped; a placed body is tested in the mesh frame
+/// [`crate::ModelBody::mesh_in_place`] already uses.
+pub fn hole_rim_along_ray(st: &ModelState, visibility: &crate::Visibility, origin: Vec3, dir: Vec3) -> Option<HoleRim> {
+    let dir = dir.normalized()?;
+    let mut best: Option<(f64, HoleRim)> = None;
+    for mb in &st.bodies {
+        if visibility.hidden_bodies.contains(&mb.name) || mb.body.face_count() > HOLE_SCAN_MAX_FACES || mb.body.edge_count() > HOLE_SCAN_MAX_EDGES {
+            continue;
+        }
+        let (mesh, m) = mb.mesh_in_place();
+        if mesh.triangles.len() > HOLE_SCAN_MAX_TRIANGLES {
+            continue;
+        }
+        // Test in the mesh frame: a placement shares its definition's mesh.
+        let moved = !crate::is_identity(&m);
+        let (o, d) = if moved {
+            match crate::mat_inverse(&m) {
+                Some(inv) => (crate::apply_point(&inv, origin), crate::apply_vector(&inv, dir)),
+                None => continue,
+            }
+        } else {
+            (origin, dir)
+        };
+        for face in 0..mb.body.face_count() {
+            let Some(plane) = mb.body.planar_face(face) else { continue };
+            let Some(p) = plane.intersect_ray(o, d) else { continue };
+            let t = (p - o).dot(d);
+            if t <= 1e-9 || best.as_ref().is_some_and(|(bt, _)| t >= *bt) {
+                continue;
+            }
+            let Some(edges) = inner_loop_at(&mesh, face as u32, &plane, p) else { continue };
+            let mut points: Vec<Vec3> = edges.iter().filter_map(|&e| edge_midpoint(&mesh, e)).collect();
+            if points.is_empty() {
+                continue;
+            }
+            if moved {
+                points.iter_mut().for_each(|p| *p = crate::apply_point(&m, *p));
+            }
+            best = Some((t, HoleRim { body: mb.name.clone(), points }));
+        }
+    }
+    best.map(|(_, rim)| rim)
+}
+
+/// The closed loops bounding `face` in `mesh`, as (polygon, edge ids). An edge that bounds
+/// the face twice (a seam between two pieces of the same surface) is not a loop side.
+fn face_loops(mesh: &Mesh, face: u32) -> Vec<(Vec<Vec3>, Vec<usize>)> {
+    let sides: Vec<usize> = mesh
+        .edge_faces
+        .iter()
+        .enumerate()
+        .filter(|(_, fs)| fs.contains(&face) && !(fs.len() == 2 && fs[0] == fs[1]))
+        .map(|(e, _)| e)
+        .filter(|&e| mesh.edges.get(e).is_some_and(|p| p.len() >= 2))
+        .collect();
+    // Chain the edge polylines into closed loops, matching endpoints on a 1e-6 grid.
+    let key = |p: &Vec3| ((p.x * 1e6).round() as i64, (p.y * 1e6).round() as i64, (p.z * 1e6).round() as i64);
+    let mut ends: std::collections::HashMap<(i64, i64, i64), Vec<usize>> = std::collections::HashMap::new();
+    for &e in &sides {
+        let poly = &mesh.edges[e];
+        ends.entry(key(&poly[0])).or_default().push(e);
+        ends.entry(key(&poly[poly.len() - 1])).or_default().push(e);
+    }
+    let mut used: std::collections::HashSet<usize> = std::collections::HashSet::new();
+    let mut loops = Vec::new();
+    for &first in &sides {
+        if used.contains(&first) {
+            continue;
+        }
+        used.insert(first);
+        let mut poly = mesh.edges[first].clone();
+        let mut ids = vec![first];
+        let start = key(&poly[0]);
+        let mut at = key(&poly[poly.len() - 1]);
+        let mut closed = at == start;
+        while !closed && ids.len() <= sides.len() {
+            let Some(next) = ends.get(&at).into_iter().flatten().find(|e| !used.contains(e)).copied() else { break };
+            used.insert(next);
+            let step: Vec<Vec3> =
+                if key(&mesh.edges[next][0]) == at { mesh.edges[next].clone() } else { mesh.edges[next].iter().rev().cloned().collect() };
+            poly.extend(step.into_iter().skip(1));
+            at = key(&poly[poly.len() - 1]);
+            ids.push(next);
+            closed = at == start;
+        }
+        if closed && poly.len() >= 3 {
+            loops.push((poly, ids));
+        }
+    }
+    loops
+}
+
+/// When `p` (a point on the planar face `face` of `mesh`) lies inside the face's outer loop
+/// and inside one of its inner loops, the edge ids of the smallest such inner loop; `None`
+/// when it is on material, outside the face, or the face has no opening there.
+fn inner_loop_at(mesh: &Mesh, face: u32, plane: &Plane, p: Vec3) -> Option<Vec<usize>> {
+    let flat: Vec<(Vec<Vec2>, Vec<usize>, f64)> = face_loops(mesh, face)
+        .into_iter()
+        .map(|(pts, ids)| {
+            let poly: Vec<Vec2> = pts.iter().map(|q| plane.to_local(*q)).collect();
+            (poly.clone(), ids, poly_area(&poly))
+        })
+        .collect();
+    if flat.len() < 2 {
+        return None;
+    }
+    let at = plane.to_local(p);
+    let outer = flat.iter().max_by(|a, b| a.2.total_cmp(&b.2))?;
+    if !point_in_poly(at, &outer.0) {
+        return None;
+    }
+    flat.iter().filter(|(poly, _, area)| *area < outer.2 && point_in_poly(at, poly)).min_by(|a, b| a.2.total_cmp(&b.2)).map(|(_, ids, _)| ids.clone())
+}
+
+fn poly_area(poly: &[Vec2]) -> f64 {
+    (0..poly.len()).map(|i| poly[i].cross(poly[(i + 1) % poly.len()])).sum::<f64>().abs() * 0.5
+}
+
+/// Even-odd point-in-polygon test in the face's 2D frame.
+fn point_in_poly(p: Vec2, poly: &[Vec2]) -> bool {
+    let mut inside = false;
+    let mut j = poly.len() - 1;
+    for i in 0..poly.len() {
+        let (a, b) = (poly[i], poly[j]);
+        if (a.y > p.y) != (b.y > p.y) && p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
+}
+
+/// The midpoint along mesh edge `e`'s polyline: a point on the edge, enough to name it.
+fn edge_midpoint(mesh: &Mesh, e: usize) -> Option<Vec3> {
+    let poly = mesh.edges.get(e)?;
+    match poly.len() {
+        0 => None,
+        1 => Some(poly[0]),
+        2 => Some(poly[0].lerp(poly[1], 0.5)),
+        _ => {
+            let total: f64 = poly.windows(2).map(|w| w[0].dist(w[1])).sum();
+            let mut walk = total * 0.5;
+            for w in poly.windows(2) {
+                let seg = w[0].dist(w[1]);
+                if walk <= seg {
+                    return Some(w[0].lerp(w[1], if seg > 0.0 { walk / seg } else { 0.0 }));
+                }
+                walk -= seg;
+            }
+            Some(*poly.last()?)
+        }
+    }
+}

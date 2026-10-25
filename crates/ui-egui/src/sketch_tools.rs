@@ -887,6 +887,30 @@ pub fn on_click(app: &mut SolveApp, tool: &mut Tool, proj: &Proj, pos: Pos2) {
             }
         }
         Mode::ModelRef => {
+            // #6449: a click in a hole opening is neither a face hit (the opening has no
+            // triangles) nor an edge hit (the rim is beyond the pick radius), and it used to
+            // be swallowed in silence. Project the rim instead; an origin plane behind the
+            // opening does not take the click. A click that hits nothing says so.
+            if cmd == "sketch.project"
+                && !hits.iter().any(|h| {
+                    matches!(h, Hit::Vertex { .. } | Hit::Edge { .. } | Hit::Face { .. } | Hit::SketchCurve { .. } | Hit::SketchPoint { .. })
+                })
+            {
+                let (o, d) = proj.ray(pos);
+                let rim = {
+                    let st = app.session.world_state();
+                    solidcraft_engine::doc::project::hole_rim_along_ray(&st, &app.session.visibility, o, d)
+                };
+                if let Some(rim) = rim {
+                    let refs: Vec<Value> = rim.points.iter().map(|p| json!({"edge": [p.x, p.y, p.z], "body": rim.body})).collect();
+                    let _ = app.run(cmd, json!({"refs": refs}));
+                    return;
+                }
+                if !hits.iter().any(|h| matches!(h, Hit::Plane { .. } | Hit::Axis { .. })) {
+                    app.set_status("Project: nothing under the cursor", true);
+                    return;
+                }
+            }
             let r = hits.iter().find_map(|h| model_ref(app, h));
             let Some(r) = r else { return };
             match cmd {

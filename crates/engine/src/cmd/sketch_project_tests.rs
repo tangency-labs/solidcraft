@@ -709,3 +709,73 @@ fn a_face_seen_edge_on_projects_as_its_silhouette_and_follows_edits() {
     let solidcraft_sketch::CurveKind::Line { a, b } = sk.curves[ci].kind else { panic!("not a line") };
     assert!((sk.point(a).unwrap().x - 50.0).abs() < 1e-6 && (sk.point(b).unwrap().x - 50.0).abs() < 1e-6);
 }
+
+/// #6449: a ray through a hole opening finds the rim, Project links it as the hole's arcs,
+/// and a point in a large opening that `nearest_face` refuses still gets its rim.
+#[test]
+fn a_ray_through_a_hole_opening_projects_its_rim() {
+    use solidcraft_doc::Visibility;
+    use solidcraft_doc::project::hole_rim_along_ray;
+    use solidcraft_geom::Vec3;
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":20}));
+    run(&mut s, "solid.hole", json!({"position":[20,15,20],"diameter":10,"depth":20}));
+    let st = s.model.state();
+    let vis = Visibility::default();
+    let down = Vec3::new(0., 0., -1.);
+    let rim = hole_rim_along_ray(&st, &vis, Vec3::new(20., 15., 30.), down).expect("a ray through the opening finds the rim");
+    assert_eq!(rim.body, "Body1");
+    assert_eq!(rim.points.len(), 2, "a circular hole is two semicircle edges");
+    for p in &rim.points {
+        let r = ((p.x - 20.).powi(2) + (p.y - 15.).powi(2)).sqrt();
+        assert!((r - 5.).abs() < 1e-6 && (p.z - 20.).abs() < 1e-6, "rim point on the hole circle: {p:?}");
+    }
+    // An angled ray through the opening still finds it.
+    assert!(hole_rim_along_ray(&st, &vis, Vec3::new(20., 15., 30.), Vec3::new(0.05, 0.05, -1.)).is_some());
+    // A ray through material finds nothing.
+    assert!(hole_rim_along_ray(&st, &vis, Vec3::new(5., 5., 30.), down).is_none());
+    // A ray aimed away finds nothing.
+    assert!(hole_rim_along_ray(&st, &vis, Vec3::new(20., 15., 30.), Vec3::new(0., 0., 1.)).is_none());
+    // A hidden body is skipped.
+    let mut hidden = vis.clone();
+    hidden.hidden_bodies.push("Body1".into());
+    assert!(hole_rim_along_ray(&st, &hidden, Vec3::new(20., 15., 30.), down).is_none());
+    drop(st);
+
+    // The rim edges project onto a sketch above as two linked arcs of the hole radius about its centre.
+    let id = run(&mut s, "sketch.create", json!({"plane":"XY","offset":30}))["sketch"].as_u64().unwrap();
+    let refs: Vec<Value> = rim.points.iter().map(|p| json!({"edge":[p.x,p.y,p.z],"body":"Body1"})).collect();
+    run(&mut s, "sketch.project", json!({"refs": refs}));
+    let st = s.model.state();
+    let sk = &st.sketch(id).unwrap().sketch;
+    let arcs: Vec<_> = sk.curves.iter().filter(|c| c.link.is_some()).collect();
+    assert_eq!(arcs.len(), 2);
+    for c in &arcs {
+        let solidcraft_sketch::CurveKind::Arc { c: ci, a, .. } = c.kind else { panic!("expected an arc, got {:?}", c.kind) };
+        let (centre, end) = (sk.point(ci).unwrap(), sk.point(a).unwrap());
+        assert!((centre.x - 20.).abs() < 1e-6 && (centre.y - 15.).abs() < 1e-6, "arc centred on the hole: {centre:?}");
+        assert!(((end - centre).len() - 5.).abs() < 1e-6, "arc of the hole radius");
+    }
+
+    // A diameter 80 mm hole in a 100 mm plate: its centre is past the face-pick limit, so the
+    // click cannot be answered as a face — "the face no longer exists" — but the rim ray finds it.
+    let mut big = Session::default();
+    run(&mut big, "solid.box", json!({"length":100,"width":100,"height":10}));
+    run(&mut big, "solid.hole", json!({"position":[50,50,10],"diameter":80,"depth":10}));
+    let st = big.model.state();
+    let face_at_centre = solidcraft_doc::project::resolve(
+        &big.doc,
+        &std::collections::BTreeMap::new(),
+        &st,
+        &solidcraft_geom::Plane::XY,
+        solidcraft_sketch::LinkKind::Project,
+        &solidcraft_sketch::LinkSource::Face { body: "Body1".into(), at: Vec3::new(50., 50., 10.) },
+    );
+    assert_eq!(face_at_centre.err().map(|e| e.to_string()).as_deref(), Some("the face no longer exists"));
+    let rim = hole_rim_along_ray(&st, &vis, Vec3::new(50., 50., 20.), down).expect("the rim ray still finds the large opening");
+    assert_eq!(rim.points.len(), 2);
+    for p in &rim.points {
+        let r = ((p.x - 50.).powi(2) + (p.y - 50.).powi(2)).sqrt();
+        assert!((r - 40.).abs() < 1e-6, "rim of the large hole: {p:?}");
+    }
+}

@@ -152,3 +152,41 @@ fn a_rectangle_put_onto_a_projected_edge_is_still_a_profile_to_click() {
     assert_eq!(bounded_by, sides);
     assert!(ss.sketch.curves.iter().any(|curve| curve.id == projected && curve.link.is_some()), "the projected edge stays");
 }
+
+/// #6449: with Project active, a click in a hole opening projects the rim (the opening has
+/// no triangles and the rim is beyond the pick radius), and a click that hits nothing says
+/// so instead of looking like the tool ignored it.
+#[test]
+fn clicking_a_hole_opening_projects_its_rim_and_a_miss_is_an_error() {
+    let mut h = Harness::new();
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    h.app.run("solid.hole", json!({"position":[20,15,20],"diameter":10,"depth":20})).unwrap();
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY","offset":30})).unwrap()["sketch"].as_u64().unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.step(&json!({"start":"sketch.project"})).unwrap();
+    h.step(&json!({"click":{"world":[20,15,20]}})).unwrap();
+    {
+        let state = h.app.session.world_state();
+        let sk = &state.sketch(sketch).unwrap().sketch;
+        let arcs: Vec<_> = sk.curves.iter().filter(|c| c.link.is_some()).collect();
+        assert!(arcs.len() >= 2, "the rim projects as linked arcs, got {:?}", sk.curves.iter().map(|c| c.link.is_some()).collect::<Vec<_>>());
+        for c in &arcs {
+            let solidcraft_engine::sketch::CurveKind::Arc { c: ci, a, .. } = c.kind else { panic!("expected an arc, got {:?}", c.kind) };
+            let (centre, end) = (sk.point(ci).unwrap(), sk.point(a).unwrap());
+            assert!((centre.x - 20.).abs() < 1e-6 && (centre.y - 15.).abs() < 1e-6, "arc centred on the hole: {centre:?}");
+            assert!(((end - centre).len() - 5.).abs() < 1e-6, "arc of the hole radius");
+        }
+    }
+    // With the origin hidden, a click that hits nothing says so and adds nothing.
+    h.call("ui.set", json!({"hiddenOrigin":["O","X","Y","Z","XY","XZ","YZ"]}));
+    let before = h.app.session.world_state().sketch(sketch).unwrap().sketch.curves.len();
+    // A screen point just outside the plate's top-right corner: on screen, past any pick radius.
+    let [cx, cy] = h.at(&json!({"world":[40,30,20]})).unwrap();
+    h.step(&json!({"click":[cx + 20.0, cy - 20.0]})).unwrap();
+    assert!(
+        h.app.status.as_ref().is_some_and(|(text, _, error)| *error && text.contains("nothing")),
+        "the miss is an error on the status line: {:?}",
+        h.app.status
+    );
+    assert_eq!(h.app.session.world_state().sketch(sketch).unwrap().sketch.curves.len(), before);
+}
