@@ -35,6 +35,7 @@ use solidcore::primitive::api_primitives as primitives;
 use solidcore::surface::surface::p2::SurfaceKind;
 use solidcore::surface::surface::Surface;
 use solidcore::sweep::api_brep as sweeps;
+use solidcore::sweep::api_surfaces::create_skin_primitive;
 use solidcore::topology::brep::p1::regions;
 use solidcore::topology::brep::p2::ArenaNotifyState;
 use solidcore::topology::brep::p3;
@@ -216,6 +217,18 @@ pub enum Step {
         #[serde(default)]
         origin: P3,
     },
+    /// `SmApiCreateSkinPrimitive`: a solid lofted through `sections` in order, each one
+    /// closed profile, of `degree` in the loft direction (1, ruled, by default), capped
+    /// at the first and last section.
+    Loft {
+        /// Body written.
+        id: String,
+        /// The sections, at least two.
+        sections: Vec<LoftSection>,
+        /// Degree in the loft direction: 1 linear, 2 quadratic, 3 cubic.
+        #[serde(default = "ruled")]
+        degree: usize,
+    },
     /// Reflection of `body` in the plane `normal = at`; the original is not changed, join
     /// the two with a `union` step. `SM_API` has no mirror, so this defers (see `step_rust`).
     Mirror {
@@ -321,6 +334,20 @@ pub enum Seg {
     },
 }
 
+/// One section of a `loft`: a closed profile built in `plane` and moved by `origin`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LoftSection {
+    /// One closed loop of segments, in the plane's (u, v) coordinates.
+    pub profile: Vec<Seg>,
+    /// Plane of the profile (default XY).
+    #[serde(default)]
+    pub plane: ProfilePlane,
+    /// Where the plane's origin sits.
+    #[serde(default)]
+    pub origin: P3,
+}
+
 /// The plane a profile is drawn in, as a right-handed rotation of XY.
 #[derive(Debug, Clone, Copy, Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -407,6 +434,10 @@ fn z_axis() -> P3 {
     [0.0, 0.0, 1.0]
 }
 
+fn ruled() -> usize {
+    1
+}
+
 /// A loaded case: `<file stem>/<name>` and its file.
 #[derive(Debug, Clone)]
 pub struct Loaded {
@@ -484,6 +515,7 @@ impl Step {
             | Self::Extrude { id, .. }
             | Self::Revolve { id, .. }
             | Self::Pipe { id, .. }
+            | Self::Loft { id, .. }
             | Self::Mirror { id, .. }
             | Self::Fillet { id, .. }
             | Self::OffsetFaces { id, .. }
@@ -500,6 +532,7 @@ impl Step {
             | Self::Extrude { .. }
             | Self::Revolve { .. }
             | Self::Pipe { .. }
+            | Self::Loft { .. }
             | Self::SheetCorner { .. } => Vec::new(),
             Self::Union { a, b, .. }
             | Self::Difference { a, b, .. }
@@ -599,6 +632,12 @@ pub fn validate(case: &Case) -> Result<(), String> {
                         .iter()
                         .all(|s| matches!(s, Seg::Line { .. } | Seg::Arc { .. }))
                     && valid_profile(path)
+            }
+            Step::Loft { sections, .. } => {
+                sections.len() >= 2
+                    && sections.iter().all(|s| {
+                        s.origin.iter().all(|x| x.is_finite()) && valid_profile(&s.profile)
+                    })
             }
             Step::Mirror { at, .. } => at.is_finite(),
             Step::Fillet { edges, radius, .. } => {
@@ -987,6 +1026,21 @@ fn step_rust(k: &mut Kernel, bodies: &mut BTreeMap<String, Brep>, step: &Step) -
                 sweeps::create_sweep_along_planar_path(k, &[&circle], &refs, true, 3)
                     .map_err(|e| solid(&e))?
             }
+        }
+        Step::Loft {
+            sections, degree, ..
+        } => {
+            let mut counts = Vec::new();
+            let mut cs = Vec::new();
+            for s in sections {
+                let section = profile_curves(k, &s.profile, s.plane, s.origin)?;
+                counts.push(section.len());
+                cs.extend(section);
+            }
+            let refs: Vec<Option<&Curve>> = cs.iter().map(Some).collect();
+            create_skin_primitive(k, &counts, &refs, *degree, true)
+                .map_err(|e| solid(&e))?
+                .brep
         }
         // SM_API has no mirror and no matrix transform: SmBrep::Mirror and
         // SmBrep::Transform(double[4][4]) are SMLib-level and not ported. The nearest
@@ -1597,5 +1651,14 @@ mod tests {
             r#"{"kind": "circle", "center": [0, 0], "radius": 5}"#,
         );
         assert!(validate(&case(vec![step(&circle_path)])).is_err());
+        let loft = r#"{"op": "loft", "id": "result", "sections": [{"profile": [{"kind": "circle", "center": [0, 0], "radius": 2}]}, {"profile": [{"kind": "circle", "center": [0, 0], "radius": 1}], "origin": [0, 0, 5]}]}"#;
+        assert!(validate(&case(vec![step(loft)])).is_ok());
+        let Step::Loft { degree, .. } = step(loft) else {
+            panic!("not a loft")
+        };
+        assert_eq!(degree, 1);
+        let one = r#"{"op": "loft", "id": "result", "sections": [{"profile": [{"kind": "circle", "center": [0, 0], "radius": 2}]}]}"#;
+        assert!(validate(&case(vec![step(one)])).is_err());
+        assert!(serde_json::from_str::<Step>(&loft.replace("\"origin\"", "\"orign\"")).is_err());
     }
 }

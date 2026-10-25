@@ -664,7 +664,9 @@ nice -n 10 cargo run -p difftest -- --solidcraft-cases '3526-*'        # ids (<f
 
 * **Steps** (`"op"`): `box`, `sphere`, `cylinder` (`axis`, default +Z), `union`,
   `difference` (optional `pattern`: the tool cut once per grid position, one cut after
-  the other), `intersection`, `fillet` (edges by a point on each), `offset_faces` (faces
+  the other), `intersection`, `loft` (`SmApiCreateSkinPrimitive` through `sections`,
+  each one closed `profile` with its `plane` and `origin`; `degree` 1, ruled, by
+  default; capped at both ends), `fillet` (edges by a point on each), `offset_faces` (faces
   by a point on each), `sheet_corner` (the deferred sheet-flange recipe below). Each
   writes the body `id`; the last writes `result`.
 * **Expectations** (`expect`): `lumps` (bounded regions; `0` = nothing left), `volume`
