@@ -1,19 +1,9 @@
 [[mismatch]]
 unit = "offset.offset_geometry_creation"
-case = "gen0248"
-why = "deferred on main at the extended surface's cache (SmFace handle of a surface's face); compared since the drop onto the other extended surface reaches its face's cache: the trace's output differs (plan/findings.md: 'offset.offset_geometry_creation: drops onto a seeded extended surface through a freshly built face cache')"
-
-[[mismatch]]
-unit = "offset.offset_geometry_creation"
 case = "gen0346"
-why = "deferred on main at the extended surface's cache (SmFace handle of a surface's face); compared since the drop onto the other extended surface reaches its face's cache: the trace's output differs (plan/findings.md: 'offset.offset_geometry_creation: drops onto a seeded extended surface through a freshly built face cache')"
+why = "the last op (MateEdges) self-intersects one SmSphere extended surface: the Rust GlobalSurfaceIntersect finds no curve and returns SM_ERR before ReplaceEdgeCurves; C++ also returns SM_ERR (1001), but only after ReplaceEdgeCurves has replaced the edge curve (dropping two edge uses' UV trim curves), so the recorded edge states differ (plan/findings/offset.offset_geometry_creation--addendum-2026-10-25-slicing-uv-curve-copy.md)"
 
 [[mismatch]]
 unit = "offset.offset_geometry_creation"
 case = "gen0350"
-why = "deferred on main at the extended surface's cache (SmFace handle of a surface's face); compared since the drop onto the other extended surface reaches its face's cache: the trace's output differs (plan/findings.md: 'offset.offset_geometry_creation: drops onto a seeded extended surface through a freshly built face cache')"
-
-[[mismatch]]
-unit = "offset.offset_geometry_creation"
-case = "gen0508"
-why = "deferred on main at the extended surface's cache (SmFace handle of a surface's face); compared since the drop onto the other extended surface reaches its face's cache: the trace's output differs (plan/findings.md: 'offset.offset_geometry_creation: drops onto a seeded extended surface through a freshly built face cache')"
+why = "ExtendTrimEdges on an SmSphere face: the offset edge use's degree-1 UV trim curve ends with C++ knots 0.0296/0.1588/0.8554 against the Rust 0.0411/0.1687/0.8571 (control points equal); the Rust drop onto the other extended surface returns two seam pieces; where the C++ knots come from is not localised yet (plan/findings/offset.offset_geometry_creation--addendum-2026-10-25-slicing-uv-curve-copy.md)"

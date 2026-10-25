@@ -887,6 +887,23 @@ fn b_spline_of<O: ClassObject>(
     b_spline_part(curve_of(geometry, h)?)
 }
 
+/// `SmBSplineCurve::Copy(crContext, SmBSplineCurve*&)`, the non-virtual overload a
+/// call on an `SmBSplineCurve*` binds: `new SmBSplineCurve(*this)`, a plain B-spline
+/// copy of the curve's B-spline part whatever its kind (an `SmLine` or conic loses
+/// its analytic data; a NURB that is not made yet stays unmade, as the copy
+/// constructor copies only an existing one). A curve that is not an `SmBSplineCurve`
+/// cannot be behind such a pointer.
+fn b_spline_overload_copy(c: &Curve) -> Result<Curve> {
+    Ok(Curve::from(match c.kind() {
+        CurveKind::BSpline(b) => b.clone(),
+        CurveKind::Line(l) => l.base.clone(),
+        CurveKind::Ellipse(e) => e.base().clone(),
+        CurveKind::Hyperbola(h) => h.base().clone(),
+        CurveKind::Parabola(p) => p.base().clone(),
+        _ => return Err(dangling("UV trim curve is not a B-spline curve")),
+    }))
+}
+
 /// `new SmBSplineCurve(*pCurve)`, or the `SmBSplineCurve` data a static B-spline
 /// routine reads: a plain B-spline copy of the NURB part of an `SmBSplineCurve` kind
 /// (a line's NURB is made when it has none); `None` for the other kinds. Only for the
@@ -2050,7 +2067,10 @@ impl OffsetGeometryCreation {
                                 edgeuse_create_uv_trim_curve(k, brep, tan_eu, false, false)?;
                             curve_of(brep, h)?.clone()
                         }
-                        Some(h) => curve_of(brep, h)?.copy(k)?,
+                        // (`pUVCurve->Copy(crContext, pUVCurve)` on an `SmBSplineCurve*`
+                        // binds the non-virtual `SmBSplineCurve*&` overload: a plain
+                        // B-spline copy, a line's analytic data is dropped)
+                        Some(h) => b_spline_overload_copy(curve_of(brep, h)?)?,
                     };
                     // (SmBSplineCurve *pUVCurve = pTanEU->GetUVTrimCurve(): the NURB data of
                     // a B-spline kind, which CreateExtendedCurve reads)
@@ -2559,7 +2579,10 @@ impl OffsetGeometryCreation {
                 // LiftedCurve failed to Drop to OtherExtSurf - Unable to do dropping - just use
                 // original UV and copy it (the status of the copy is ignored)
                 let other = other_uv_curve.ok_or(dangling("null UV curve copied"))?;
-                let copy = curve_of(brep, other)?.copy(k)?;
+                // (`pOtherUVCurve->Copy(crContext, pOtherUVCurve)` on an
+                // `SmBSplineCurve*` binds the non-virtual `SmBSplineCurve*&` overload:
+                // a plain B-spline copy, a line's analytic data is dropped)
+                let copy = b_spline_overload_copy(curve_of(brep, other)?)?;
                 store_curve(brep, copy)?
             } else {
                 // When Lifted Curve dropped to OtherExtSurf
