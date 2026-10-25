@@ -1,5 +1,6 @@
 //! The Symmetry tool's third pick may be the origin point or an origin axis (#1075); with three
 //! lines, the construction line between the other two is the symmetry line in any pick order (#1796).
+//! A constraint tool's pick may be a body's edge, a mirrored copy's too (#6348).
 
 use serde_json::json;
 use solidcraft_engine::geom::Vec2;
@@ -95,4 +96,37 @@ fn three_selected_lines_take_the_construction_line_as_the_symmetry_line() {
     // Without a construction line among them, the last one stays the symmetry line.
     let params = crate::tools::constraint_preselection("sketch.constraint.symmetry", &sel(["left", "right", "mid"]), None).unwrap();
     assert_eq!(params["line"], "mid");
+}
+
+/// A plate from x = 20 to 120 (y 0..50, 20 thick) mirrored about YZ, a sketch on its top with the
+/// plate's top face projected, and a line at x = -100 over the copy, whose outer top edge is at
+/// x = -120 and not in the sketch. Collinear: the line, then that edge. The click on the edge
+/// projects it, and the line goes onto it, in one undo step (#6348).
+#[test]
+fn collinear_with_an_edge_of_a_mirrored_body_projects_the_edge() {
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane":"XY","name":"Base"})).unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[20,0],"p1":[120,50]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("solid.extrude", json!({"sketch":"Base","distance":"20 mm"})).unwrap();
+    h.app.run("solid.mirror", json!({"bodies":["Body1"],"plane":"YZ"})).unwrap();
+    h.app.run("sketch.create", json!({"plane":{"face":[70,25,20]},"name":"Top"})).unwrap();
+    h.app.run("sketch.line", json!({"points":[[-100,10],[-100,40]],"ids":["side"]})).unwrap();
+    h.app.cam.target = solidcraft_engine::geom::Vec3::new(-60.0, 25.0, 20.0);
+    h.app.cam.distance = 300.0;
+    h.settle();
+    let sketch = h.app.session.active_sketch.unwrap();
+    let links = |h: &Harness| h.app.session.doc.sketch(sketch).unwrap().links.len();
+    assert_eq!(links(&h), 1, "the plate's top face only");
+    h.app.start("sketch.constraint.collinear");
+    let line = h.call("ui.at", json!({"sketch":[-100,25]}))["result"].clone();
+    h.step(&json!({ "click": line })).unwrap();
+    let edge = h.call("ui.at", json!({"world":[-120,25,20]}))["result"].clone();
+    h.step(&json!({ "click": edge })).unwrap();
+    assert_eq!(links(&h), 2, "the copy's edge is projected");
+    let (a, b) = (point(&h, "side.start"), point(&h, "side.end"));
+    assert!((a.x + 120.0).abs() < 1e-6 && (b.x + 120.0).abs() < 1e-6, "on the copy's edge: {a:?} {b:?}");
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(links(&h), 1, "undone with the constraint");
+    assert!((point(&h, "side.start").x + 100.0).abs() < 1e-6);
 }

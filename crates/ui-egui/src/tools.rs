@@ -264,11 +264,21 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
             // Symmetry's third pick may be an origin axis lying along the sketch's own x or y
             // (#1075); the command names those `x` / `y`.
             let axis_ok = tool.cmd == "sketch.constraint.symmetry" && tool.picks.len() == 2;
-            if let Some(id) = hits.iter().find_map(|h| match h {
+            let entity = hits.iter().find_map(|h| match h {
                 Hit::SketchPoint { id, .. } | Hit::SketchCurve { id, .. } => Some(id.clone()),
                 Hit::Axis { name } if axis_ok => sketch_axis_of(app, name).map(str::to_string),
                 _ => None,
-            }) {
+            });
+            // With nothing of the sketch there, a body's edge or vertex is picked (kept as its
+            // reference): the command projects it, so any body can be constrained to, a mirrored
+            // copy too (#6348). Projected geometry is already fixed, so Fix takes sketch entities.
+            let model = || {
+                hits.iter()
+                    .filter(|h| tool.cmd != "sketch.constraint.fix" && matches!(h, Hit::Edge { .. } | Hit::Vertex { .. }))
+                    .find_map(|h| crate::sketch_tools::model_ref(app, h))
+                    .map(|r| r.to_string())
+            };
+            if let Some(id) = entity.or_else(model) {
                 tool.picks.push(id);
             }
             if tool.picks.len() >= n {
@@ -662,17 +672,17 @@ fn symmetry_args(picks: &[Value], sketch: Option<&solidcraft_engine::sketch::Ske
 }
 
 fn run_pick(app: &mut SolveApp, t: &Tool) {
-    let k = &t.picks;
+    // An entity id, or a model edge's or vertex's reference.
+    let k: Vec<Value> = t.picks.iter().map(|pick| serde_json::from_str(pick).ok().filter(Value::is_object).unwrap_or_else(|| json!(pick))).collect();
     let params = match t.cmd {
         "sketch.constraint.fix" => json!({"entity": k[0]}),
         "sketch.constraint.coincident" => json!({"a": k[0], "b": k[1]}),
         // In pick order: a point and a line either way round, or two lines to centre.
         "sketch.constraint.midpoint" => json!({"a": k[0], "b": k[1]}),
         "sketch.constraint.symmetry" => {
-            let picks: Vec<Value> = k.iter().map(|pick| json!(pick)).collect();
             let params = {
                 let state = app.session.world_state();
-                symmetry_args(&picks, app.session.active_sketch.and_then(|id| state.sketch(id)).map(|ss| &ss.sketch))
+                symmetry_args(&k, app.session.active_sketch.and_then(|id| state.sketch(id)).map(|ss| &ss.sketch))
             };
             let Some(params) = params else {
                 app.set_status("Symmetry: pick two points or two curves and the line between them", true);
