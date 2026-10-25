@@ -310,7 +310,14 @@ const ELEMENTS: &[Element] = &[
         FileView::recent_row(
             ui,
             "gallery:file:recent",
-            RecentRow { title: "Sample Plate", path: "Designs/sample-plate.solidcraft", when: "Open now", workspace: "Design", thumbnail: None, thumbnail_failed: false },
+            RecentRow {
+                title: "Sample Plate",
+                path: "Designs/sample-plate.solidcraft",
+                when: "Open now",
+                workspace: "Design",
+                thumbnail: None,
+                thumbnail_failed: false,
+            },
         );
     }),
     element!("file_sample", |ui, _| {
