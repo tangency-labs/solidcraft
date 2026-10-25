@@ -71,8 +71,7 @@
 //!   copy is a new handle), so there is nothing to reset.
 //! - **Callees not ported yet** are private stubs returning [`SolidError::Unported`],
 //!   each tagged `UNPORTED(<unit>)`:
-//!   `SmFace::Point3DClassify` (`query.face_p1`), `MergeCurveClasses`
-//!   (`boolean.topology_intersector_p3`, ported in draft PR #211), and the stub of [`p1`](super::p1)
+//!   `SmFace::Point3DClassify` (`query.face_p1`) and the stub of [`p1`](super::p1)
 //!   for `SmFace::FaceIntersect` (`topology.face_p3`). `SmFace::GetEdges` /
 //!   `GetVertices` / `GetBrep` go through [`IntersectorBrep::face_edges`] and siblings. The code after a stub is ported in
 //!   full. `SmBrep::DeleteEdge` / `DeleteVertex` (`topology.brep_p4`) go through
@@ -122,6 +121,7 @@ use super::p1::{
     set_edge_class, solve_with_face_caches, surface_coincidence_check, FaceIntersectOutputs,
     IntersectionCurves, IntersectionResults, IntersectorBrep, TopologyIntersector,
 };
+use super::p3::IntersectorBrepP3;
 
 const OP_REGISTER: &str = "boolean::topology_intersector::p2::register_existing_ssi";
 const OP_SQUEEZE: &str = "boolean::topology_intersector::p2::check_for_squeeze_vertices";
@@ -253,24 +253,6 @@ impl<O: Ord + Copy> Mates<O> for MapMates<O> {
 }
 
 // ---- unported callees ----------------------------------------------------------------------
-
-/// `MergeCurveClasses(rCrvClass1, rCrvClass2, bMergeSingularities, rbTopologyWasDeleted,
-/// paDeletedEdges, paDeletedVertices)`: what it deleted. Draft PR #211 ports it as
-/// `TopologyIntersector::merge_curve_classes` (`boolean::topology_intersector::p3`), a
-/// method that also takes the kernel and the B-reps: wiring it changes the call site in
-/// [`TopologyIntersector::iir_edge_brep`] to `self.merge_curve_classes(k, brep, ..)` and
-/// widens that function's bound to `IntersectorBrepP3`.
-fn merge_curve_classes<O>(
-    _crv_class1: &mut CurveClassification<O>,
-    _crv_class2: &mut CurveClassification<O>,
-    _merge_singularities: bool,
-) -> Result<DeletedTopology<O>> {
-    // UNPORTED(boolean.topology_intersector_p3): SmTopologyIntersector::MergeCurveClasses
-    Err(SolidError::unported(
-        "SmTopologyIntersector::MergeCurveClasses",
-        "boolean.topology_intersector_p3",
-    ))
-}
 
 // ---- results ---------------------------------------------------------------------------------
 
@@ -823,12 +805,12 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     /// # Errors
     ///
     /// Those of `sm_SetEdgeClass`, `BrepCurveSolve` and `InsertTopologyIntersections`;
-    /// [`SolidError::Unported`] for `MergeCurveClasses` (`boolean.topology_intersector_p3`);
+    /// Those of `MergeCurveClasses` ([`TopologyIntersector::merge_curve_classes`]);
     /// [`SolidError::InvalidInput`] for an unknown edge or one without curve.
     pub fn iir_edge_brep(
         &mut self,
         k: &mut Kernel,
-        brep: &mut impl IntersectorBrepP2<O>,
+        brep: &mut impl IntersectorBrepP3<O>,
         edge: O,
         target: O,
         swap_order: bool,
@@ -893,10 +875,15 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         cc_insert_topology_intersections(k, &*brep, &mut crv_class2, &solutions)?;
 
         // merge curveClassifications into Breps
-        let merged = if swap_order {
-            merge_curve_classes(&mut crv_class2, &mut crv_class1, true)?
+        let merge = if swap_order {
+            self.merge_curve_classes(k, brep, &mut crv_class2, &mut crv_class1, true)?
         } else {
-            merge_curve_classes(&mut crv_class1, &mut crv_class2, true)?
+            self.merge_curve_classes(k, brep, &mut crv_class1, &mut crv_class2, true)?
+        };
+        let merged = DeletedTopology {
+            topology_deleted: merge.topology_was_deleted,
+            deleted_edges: merge.deleted_edges.unwrap_or_default(),
+            deleted_vertices: merge.deleted_vertices.unwrap_or_default(),
         };
 
         // set output values and return
@@ -927,7 +914,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     pub fn close_intersection_loop(
         &mut self,
         k: &mut Kernel,
-        brep: &mut impl IntersectorBrepP2<O>,
+        brep: &mut impl IntersectorBrepP3<O>,
         brep_vertex: Option<O>,
     ) -> Result<bool> {
         // check input
