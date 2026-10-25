@@ -636,3 +636,37 @@ fn loops_touching_at_a_shared_vertex_bound_the_face() {
     let Some((_, triangles)) = cdt::triangulate(&uvs, &ranges, fill) else { panic!("triangulates") };
     assert!(closed_boundary(&ranges, &fixed, &uvs, &triangles), "the triangles follow both holes through their shared vertex");
 }
+
+/// A face whose loop is a thin lune meshes: a half disc of radius 2.5 less a circle through the
+/// same ends 0.03 mm inside it at the middle, its inner side split at 11.25°. Each edge is
+/// sampled to the 0.1 mm chord on its own: the outer arc's chords (every 22.5°) sag 0.048 mm,
+/// more than the curves are apart, so the one from 0° to 22.5° passes inside the inner side's
+/// node at 11.25° and crosses its chords; no triangulation follows a boundary that crosses
+/// itself (the sliver caps of a joined ring of cylinder segments). The crossing chords are
+/// halved on their edges until none cross.
+#[test]
+fn a_thin_lune_whose_chords_cross_meshes() {
+    use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
+    let (r, gap, h, tol) = (2.5, 0.03, 5.0, 0.1);
+    // The inner circle: centre (−d, 0) and radius r + d·…, through (0, ±r), its middle at r − gap.
+    let d = (r * r - (r - gap) * (r - gap)) / (2.0 * (r - gap));
+    let (centre, r2) = (Vec2::new(-d, 0.0), r - gap + d);
+    let top = r.atan2(d);
+    let split = 11.25f64.to_radians();
+    let segs = vec![
+        Seg2::Arc { center: Vec2::ZERO, radius: r, start: -0.5 * PI, sweep: PI },
+        Seg2::Arc { center: centre, radius: r2, start: top, sweep: split - top },
+        Seg2::Arc { center: centre, radius: r2, start: split, sweep: -top - split },
+    ];
+    let lune = Region2 { outer: Loop2 { segs }, holes: vec![] };
+    let Some(body) = ok(crate::extrude(&Plane::XY, &[lune], 0.0, h)).pop() else { panic!("one body") };
+    let rec = record(&body);
+    let (p, stats) = match plan(&rec, tol, None) {
+        Ok(r) => r,
+        Err(e) => panic!("lune: {e}"),
+    };
+    assert_eq!(stats.planar + stats.structured + stats.delaunay, body.face_count(), "every face planned");
+    let m = p.evaluate();
+    assert_watertight(&m, "lune");
+    assert!(m.measure().volume > 0.0, "inside out");
+}

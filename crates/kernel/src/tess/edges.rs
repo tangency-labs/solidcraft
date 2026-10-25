@@ -118,6 +118,50 @@ pub(crate) fn sample_edge(b: &brep::Brep, ei: usize, rules: &Rules, h: f64) -> R
     Ok(Nodes { points: out.iter().map(|p| p.1).collect(), params: out.iter().map(|p| p.0).collect() })
 }
 
+/// Edge `ei`'s nodes with each of its segments `segs` (counted from its start) halved at the
+/// middle of its curve parameters, the new node on the curve (on a line, halfway between the two,
+/// as [`sample_edge`] spaces a line's nodes). A segment too short to halve in floating point keeps
+/// its two nodes. More than [`MAX_EDGE_NODES`] nodes, or a curve that does not evaluate there, is
+/// an error naming the edge.
+pub(crate) fn split_segments(b: &brep::Brep, ei: usize, nodes: &mut Nodes, segs: &[u32]) -> Result<()> {
+    let fail = |why: String| KernelError::Failed(format!("tessellation: edge {ei}: {why}"));
+    let edge = b.edges.get(ei).ok_or_else(|| fail("no such edge".into()))?;
+    let mut segs = segs.to_vec();
+    segs.sort_unstable();
+    segs.dedup();
+    let n = nodes.points.len().min(nodes.params.len());
+    if n + segs.len() > MAX_EDGE_NODES {
+        return Err(fail(format!("more than {MAX_EDGE_NODES} nodes")));
+    }
+    let curve = match edge.curve {
+        Curve::Line { .. } => None,
+        _ => Some(CurveEval::new(edge.parameters()).map_err(|e| fail(e.to_string()))?),
+    };
+    let (mut points, mut params) = (Vec::with_capacity(n + segs.len()), Vec::with_capacity(n + segs.len()));
+    let mut next = segs.iter().copied().peekable();
+    for k in 0..n {
+        let (Some(&p), Some(&t)) = (nodes.points.get(k), nodes.params.get(k)) else { continue };
+        points.push(p);
+        params.push(t);
+        if next.next_if_eq(&(k as u32)).is_none() {
+            continue;
+        }
+        let (Some(&q), Some(&u)) = (nodes.points.get(k + 1), nodes.params.get(k + 1)) else { continue };
+        let m = 0.5 * (t + u);
+        if !(m > t.min(u) && m < t.max(u)) {
+            continue;
+        }
+        let pm = match &curve {
+            None => (p + q) * 0.5,
+            Some(c) => c.point(m).filter(|p| p.is_finite()).ok_or_else(|| fail(format!("the curve does not evaluate at t = {m}")))?,
+        };
+        points.push(pm);
+        params.push(m);
+    }
+    *nodes = Nodes { points, params };
+    Ok(())
+}
+
 /// Angle (radians) between two directions; zero when either is empty.
 fn turn(a: Vec3, b: Vec3) -> f64 {
     let (la, lb) = (a.len(), b.len());

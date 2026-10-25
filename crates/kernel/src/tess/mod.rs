@@ -30,6 +30,7 @@ pub(crate) mod sag;
 pub(crate) mod seam;
 pub(crate) mod size;
 pub(crate) mod surface;
+pub(crate) mod tangle;
 pub(crate) mod uv;
 
 use std::collections::HashMap;
@@ -64,6 +65,9 @@ const PARALLEL_EDGES: usize = 256;
 const MAX_LINES: usize = 8192;
 /// Most points Ruppert refinement may add to one face, beyond its seeds.
 const MAX_REFINE: usize = 20_000;
+/// Most rounds of splitting the edge segments where a face's sampled boundary crosses itself:
+/// each round halves them, so their chords sag a quarter as far.
+const MAX_UNTANGLE: u32 = 16;
 
 fn unsupported(what: impl std::fmt::Display) -> KernelError {
     KernelError::Failed(format!("not supported yet: tessellation: {what}"))
@@ -154,13 +158,21 @@ pub(crate) fn plan(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result
     .collect::<Result<_>>()?;
     relax_crowded_faces(b, &jobs, &rules, &mut nodes)?;
     let indexed: Vec<usize> = (0..faces.len()).collect();
-    let planned = crate::par::map("face tessellation", &indexed, curved >= PARALLEL_FACES, |&fi| {
-        let (Some(face), Some(eval), Some(map), Some(size)) = (faces.get(fi), evals.get(fi), params.get(fi), sizes.get(fi)) else {
+    let face_boundary = |fi: usize, nodes: &[edges::Nodes]| {
+        let (Some(face), Some(eval), Some(map)) = (faces.get(fi), evals.get(fi), params.get(fi)) else {
             return Err(unsupported(format!("face {fi}: missing")));
         };
-        let loops = boundary(b, fi, face, eval, map, &nodes, &rules)?;
+        boundary(b, fi, face, eval, map, nodes, &rules)
+    };
+    let mut boundaries: Vec<Boundary> =
+        crate::par::map("face boundaries", &indexed, curved >= PARALLEL_FACES, |&fi| face_boundary(fi, &nodes)).into_iter().collect::<Result<_>>()?;
+    untangle(b, &evals, &edge_faces, &mut nodes, &mut boundaries, &face_boundary)?;
+    let planned = crate::par::map("face tessellation", &indexed, curved >= PARALLEL_FACES, |&fi| {
+        let (Some(face), Some(eval), Some(size), Some(fb)) = (faces.get(fi), evals.get(fi), sizes.get(fi), boundaries.get(fi)) else {
+            return Err(unsupported(format!("face {fi}: missing")));
+        };
         let mut stats = PlanStats::default();
-        let fp = plan_face(fi, kind(face.parameters()), eval, &loops, &rules, *size, &mut stats)?;
+        let fp = plan_face(fi, kind(face.parameters()), eval, &fb.loops, &rules, *size, &mut stats)?;
         let fwd = forward.get(fi).copied().unwrap_or(true);
         let fp =
             FacePlan { flip: !fwd, triangles: if fwd { fp.triangles } else { fp.triangles.into_iter().map(|[a, b, c]| [a, c, b]).collect() }, ..fp };
@@ -204,13 +216,14 @@ fn boundary(
     map: &surface::Params,
     nodes: &[edges::Nodes],
     rules: &size::Rules,
-) -> Result<Vec<seam::Loop>> {
+) -> Result<Boundary> {
     let dom = uv::domain(s);
     let fail = |e: u32, why: String| unsupported(format!("face {fi} ({}): edge {e}: {why}", kind(&face.surface)));
-    let mut loops = Vec::with_capacity(face.loops.len());
+    let mut out = Boundary { loops: Vec::with_capacity(face.loops.len()), segments: Vec::with_capacity(face.loops.len()) };
     for l in &face.loops {
         let Loop::Edges { edges } = l else { continue };
         let (mut pts, mut uvs): (Vec<Vec3>, Vec<[f64; 2]>) = (Vec::new(), Vec::new());
+        let mut segs: Vec<(u32, u32)> = Vec::new();
         // Where the previous edge ended, and the periods its pcurve was moved by.
         let (mut end, mut shift): (Option<[f64; 2]>, [f64; 2]) = (None, [0.0; 2]);
         for oe in edges {
@@ -255,6 +268,9 @@ fn boundary(
             end = eq.last().copied();
             ep.pop();
             eq.pop();
+            // The segment from each node on: the edge's own, counted from its start.
+            let m = ep.len() as u32;
+            segs.extend((0..m).map(|j| (oe.edge, if oe.forward { j } else { m - 1 - j })));
             pts.extend(ep);
             uvs.extend(eq);
         }
@@ -263,12 +279,88 @@ fn boundary(
         if let Some(k) = (0..n).find(|&k| uvs.get(k).is_some_and(|q| !pole(q)) && uvs.get((k + n - 1) % n).is_some_and(|q| !pole(q))) {
             uvs.rotate_left(k);
             pts.rotate_left(k);
+            segs.rotate_left(k);
         }
         if pts.len() >= 2 {
-            loops.push(seam::Loop { uv: uvs, pts });
+            out.loops.push(seam::Loop { uv: uvs, pts });
+            out.segments.push(segs);
         }
     }
-    Ok(loops)
+    Ok(out)
+}
+
+/// A face's boundary loops, and for each loop node the edge segment that starts there: the
+/// edge, and the segment's place along it from its start vertex.
+struct Boundary {
+    loops: Vec<seam::Loop>,
+    segments: Vec<Vec<(u32, u32)>>,
+}
+
+/// Edges are sampled to the chord tolerance each on its own, so where two curves of one face
+/// run closer than their chords sag (the two arcs of a thin lune, a sliver cap between two
+/// cylinders), the chords may cross although the curves do not, and no triangulation follows
+/// such a boundary. The edge segments whose chords cross another of the face (in its loop or
+/// another, see [`tangle::crossing`]) are halved at their curve parameter's middle, on the edge,
+/// so every face of the edge gets the new nodes; the faces of every edge split are checked again,
+/// until no chords cross. Boundaries that still cross after [`MAX_UNTANGLE`] rounds, or would
+/// put more than [`edges::MAX_EDGE_NODES`] on an edge, are an error naming the face and edges.
+fn untangle(
+    b: &brep::Brep,
+    evals: &[EvalSurface],
+    edge_faces: &[Vec<usize>],
+    nodes: &mut [edges::Nodes],
+    boundaries: &mut [Boundary],
+    face_boundary: &(dyn Fn(usize, &[edges::Nodes]) -> Result<Boundary> + Sync),
+) -> Result<()> {
+    let crossing = |fi: usize, fb: &Boundary| -> Vec<(u32, u32)> {
+        let Some(s) = evals.get(fi) else { return Vec::new() };
+        tangle::crossing(s, &fb.loops).into_iter().filter_map(|(l, k)| fb.segments.get(l)?.get(k).copied()).collect()
+    };
+    let indexed: Vec<usize> = (0..boundaries.len()).collect();
+    let curved = evals.iter().filter(|e| !matches!(e, EvalSurface::Plane { .. })).count();
+    let found: Vec<Vec<(u32, u32)>> = crate::par::map("boundary crossings", &indexed, curved >= PARALLEL_FACES, |&fi| {
+        Ok(boundaries.get(fi).map_or_else(Vec::new, |fb| crossing(fi, fb)))
+    })
+    .into_iter()
+    .collect::<Result<_>>()?;
+    let mut tangled: Vec<(usize, Vec<(u32, u32)>)> = found.into_iter().enumerate().filter(|(_, c)| !c.is_empty()).collect();
+    for round in 0..=MAX_UNTANGLE {
+        let Some((fi, first)) = tangled.first() else { return Ok(()) };
+        if round == MAX_UNTANGLE {
+            let mut es: Vec<u32> = first.iter().map(|(e, _)| *e).collect();
+            es.sort_unstable();
+            es.dedup();
+            let kind = b.faces.get(*fi).map_or("?", |f| kind(&f.surface));
+            return Err(unsupported(format!(
+                "face {fi} ({kind}): boundary crosses itself: edges {es:?} run closer together than their chords can follow after {MAX_UNTANGLE} halvings"
+            )));
+        }
+        let mut split: Vec<(u32, u32)> = tangled.iter().flat_map(|(_, c)| c.iter().copied()).collect();
+        split.sort_unstable();
+        split.dedup();
+        let mut redo: Vec<usize> = Vec::new();
+        for run in split.chunk_by(|a, c| a.0 == c.0) {
+            let Some(&(e, _)) = run.first() else { continue };
+            let segs: Vec<u32> = run.iter().map(|(_, k)| *k).collect();
+            let Some(slot) = nodes.get_mut(e as usize) else { continue };
+            edges::split_segments(b, e as usize, slot, &segs)?;
+            redo.extend(edge_faces.get(e as usize).into_iter().flatten().copied());
+        }
+        redo.sort_unstable();
+        redo.dedup();
+        tangled.clear();
+        for fi in redo {
+            let fb = face_boundary(fi, nodes)?;
+            let c = crossing(fi, &fb);
+            if let Some(slot) = boundaries.get_mut(fi) {
+                *slot = fb;
+            }
+            if !c.is_empty() {
+                tangled.push((fi, c));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Bounded work for the facet angle: a face whose boundary would get more than
