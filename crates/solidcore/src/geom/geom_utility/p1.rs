@@ -74,8 +74,9 @@
 //!   written only when the points are scattered) is [`BestFitLine::m`].
 //! - `smgu_PolygonArea` with no points reads `sPoints[-1]` upstream; the port returns
 //!   [`SolidError::InvalidInput`]. The derivative functions check the derivative array
-//!   length (upstream reads out of bounds) and return only the directional derivatives
-//!   upstream writes.
+//!   length and consumed index arithmetic (upstream reads out of bounds), returning
+//!   `InvalidInput` for unrepresentable indices, and return only the directional
+//!   derivatives upstream writes.
 //! - `smgu_AddSorted` takes `Vec`s for `SmTArray`s; `sm_AddPoint`'s `ULONG&` count and
 //!   `SmPoint3d[2]` array are a `Vec` of at most two points.
 //! - `SM_ASSERT*` and `SM_DEBUG_CODE` blocks are not compiled upstream (release build)
@@ -1528,7 +1529,8 @@ fn deriv_at(derivs: &[Vec3], i: usize, op: &'static str) -> Result<Vec3> {
 /// Returns `min(highest_u, highest_v, 3) + 1` vectors: the position, then the
 /// derivatives upstream sets.
 ///
-/// Errors: `InvalidInput` when `derivs` is too short for the requested derivatives.
+/// Errors: `InvalidInput` when a consumed derivative index overflows or `derivs` is
+/// too short for the requested derivatives.
 pub fn directional_derivs(
     dir: Vec2,
     highest_u_deriv: usize,
@@ -1536,29 +1538,35 @@ pub fn directional_derivs(
     derivs: &[Vec3],
 ) -> Result<Vec<Vec3>> {
     const OP: &str = "geom::geom_utility::p1::directional_derivs";
-    let d = |i: usize| deriv_at(derivs, i, OP);
-    let hv = highest_v_deriv;
+    let d = |u: usize, v: usize| {
+        let i = highest_v_deriv
+            .checked_add(1)
+            .and_then(|stride| u.checked_mul(stride))
+            .and_then(|i| i.checked_add(v))
+            .ok_or_else(|| invalid(OP, "derivative index overflow"))?;
+        deriv_at(derivs, i, OP)
+    };
 
     // unitize sDir (status ignored: a zero vector stays unchanged)
     let dir = dir.unitize().unwrap_or(dir);
     let (x, y) = (dir.x, dir.y);
 
-    let mut out = vec![d(0)?];
+    let mut out = vec![deriv_at(derivs, 0, OP)?];
 
     if highest_u_deriv >= 1 && highest_v_deriv >= 1 {
-        out.push(x * d(hv + 1)? + y * d(1)?);
+        out.push(x * d(1, 0)? + y * d(0, 1)?);
     }
 
     if highest_u_deriv >= 2 && highest_v_deriv >= 2 {
-        out.push(x * x * d(2 * (hv + 1))? + 2.0 * x * y * d(hv + 1 + 1)? + y * y * d(2)?);
+        out.push(x * x * d(2, 0)? + 2.0 * x * y * d(1, 1)? + y * y * d(0, 2)?);
     }
 
     if highest_u_deriv >= 3 && highest_v_deriv >= 3 {
         out.push(
-            x * x * x * d(3 * (hv + 1))?
-                + 3.0 * x * x * y * d(2 * (hv + 1) + 1)?
-                + 3.0 * x * y * y * d(hv + 1 + 2)?
-                + y * y * y * d(3)?,
+            x * x * x * d(3, 0)?
+                + 3.0 * x * x * y * d(2, 1)?
+                + 3.0 * x * y * y * d(1, 2)?
+                + y * y * y * d(0, 3)?,
         );
     }
 
@@ -1572,15 +1580,26 @@ pub fn directional_derivs(
 ///
 /// Returns `min(highest_deriv, 3) + 1` vectors.
 ///
-/// Errors: `InvalidInput` when `derivs` is too short for the requested derivatives.
+/// Errors: `InvalidInput` when the layout stride or a consumed derivative index
+/// overflows, or `derivs` is too short for the requested derivatives.
 pub fn vol_directional_derivs(
     dir: Vec3,
     highest_deriv: usize,
     derivs: &[Vec3],
 ) -> Result<Vec<Vec3>> {
     const OP: &str = "geom::geom_utility::p1::vol_directional_derivs";
-    let n1 = highest_deriv + 1;
-    let sv = |u: usize, v: usize, w: usize| deriv_at(derivs, (u * n1 + v) * n1 + w, OP);
+    let n1 = highest_deriv
+        .checked_add(1)
+        .ok_or_else(|| invalid(OP, "derivative index overflow"))?;
+    let sv = |u: usize, v: usize, w: usize| {
+        let i = u
+            .checked_mul(n1)
+            .and_then(|i| i.checked_add(v))
+            .and_then(|i| i.checked_mul(n1))
+            .and_then(|i| i.checked_add(w))
+            .ok_or_else(|| invalid(OP, "derivative index overflow"))?;
+        deriv_at(derivs, i, OP)
+    };
 
     let dir = dir.unitize_or_z();
     let (x, y, z) = (dir.x, dir.y, dir.z);
@@ -1920,6 +1939,176 @@ mod tests {
         vd[1] = Vec3::Z; // Dw
         let r = vol_directional_derivs(v(0., 0., 2.), 1, &vd).unwrap();
         assert_eq!(r, vec![Vec3::ZERO, Vec3::Z]);
+    }
+
+    #[test]
+    fn derivs_address_overflow() {
+        let surface_op = "geom::geom_utility::p1::directional_derivs";
+        let volume_op = "geom::geom_utility::p1::vol_directional_derivs";
+        assert_eq!(
+            directional_derivs(Vec2::new(1.0, 0.0), 1, usize::MAX, &[Vec3::ZERO; 2]),
+            Err(invalid(surface_op, "derivative index overflow"))
+        );
+        assert_eq!(
+            vol_directional_derivs(Vec3::Z, usize::MAX, &[Vec3::ZERO; 4]),
+            Err(invalid(volume_op, "derivative index overflow"))
+        );
+        let k = 1usize << (usize::BITS / 2);
+        assert_eq!(
+            vol_directional_derivs(Vec3::Z, k, &[Vec3::ZERO]),
+            Err(invalid(volume_op, "derivative index overflow"))
+        );
+        // Zero coefficients still consume the same derivative entries.
+        assert_eq!(
+            directional_derivs(Vec2::ZERO, 1, usize::MAX, &[Vec3::ZERO; 2]),
+            Err(invalid(surface_op, "derivative index overflow"))
+        );
+        // Surface position is read before its branch-local stride arithmetic.
+        assert_eq!(
+            directional_derivs(Vec2::ZERO, 1, usize::MAX, &[]),
+            Err(invalid(surface_op, "derivative array too short"))
+        );
+        // Volume checks n+1 before reading position, but not unused products.
+        assert_eq!(
+            vol_directional_derivs(Vec3::ZERO, usize::MAX, &[]),
+            Err(invalid(volume_op, "derivative index overflow"))
+        );
+        assert_eq!(
+            vol_directional_derivs(Vec3::ZERO, k, &[]),
+            Err(invalid(volume_op, "derivative array too short"))
+        );
+    }
+
+    #[test]
+    fn derivs_position_short_and_zero_directions() {
+        let p = v(7.0, -2.0, 5.0);
+        let surface_op = "geom::geom_utility::p1::directional_derivs";
+        let volume_op = "geom::geom_utility::p1::vol_directional_derivs";
+        for (hu, hv) in [(0, 0), (0, usize::MAX), (usize::MAX, 0), (0, 4), (4, 0)] {
+            assert_eq!(directional_derivs(Vec2::ZERO, hu, hv, &[p]), Ok(vec![p]));
+            assert_eq!(
+                directional_derivs(Vec2::ZERO, hu, hv, &[]),
+                Err(invalid(surface_op, "derivative array too short"))
+            );
+        }
+        assert_eq!(vol_directional_derivs(Vec3::ZERO, 0, &[p]), Ok(vec![p]));
+        assert_eq!(
+            vol_directional_derivs(Vec3::ZERO, 0, &[]),
+            Err(invalid(volume_op, "derivative array too short"))
+        );
+        for order in 1..=4 {
+            assert_eq!(
+                directional_derivs(Vec2::ZERO, order, order, &[p]),
+                Err(invalid(surface_op, "derivative array too short"))
+            );
+            assert_eq!(
+                vol_directional_derivs(Vec3::ZERO, order, &[p]),
+                Err(invalid(volume_op, "derivative array too short"))
+            );
+        }
+        let mut surface = [v(2.0, 3.0, 4.0); 16];
+        surface[0] = p;
+        assert_eq!(
+            directional_derivs(Vec2::ZERO, 3, 3, &surface),
+            Ok(vec![p, Vec3::ZERO, Vec3::ZERO, Vec3::ZERO])
+        );
+        let volume = [v(2.0, 3.0, 4.0); 64];
+        assert_eq!(
+            vol_directional_derivs(Vec3::ZERO, 3, &volume),
+            vol_directional_derivs(Vec3::Z, 3, &volume)
+        );
+        assert_eq!(
+            vol_directional_derivs(Vec3::ZERO, 3, &volume).unwrap(),
+            vec![volume[0]; 4]
+        );
+    }
+
+    fn mixed_deriv(u: usize, v: usize, w: usize) -> Vec3 {
+        let (u, v, w) = (u as f64, v as f64, w as f64);
+        Vec3::new(
+            1.0 + u + 4.0 * v + 16.0 * w,
+            2.0 + u * v + w,
+            3.0 + u - v * w,
+        )
+    }
+
+    #[test]
+    fn derivs_surface_mixed_orders_and_strides() {
+        let dir = Vec2::new(3.0, -4.0);
+        let unit = dir.unitize().unwrap();
+        let (x, y) = (unit.x, unit.y);
+        let d = |u, v| mixed_deriv(u, v, 0);
+        let expected = [
+            d(0, 0),
+            x * d(1, 0) + y * d(0, 1),
+            x * x * d(2, 0) + 2.0 * x * y * d(1, 1) + y * y * d(0, 2),
+            x * x * x * d(3, 0)
+                + 3.0 * x * x * y * d(2, 1)
+                + 3.0 * x * y * y * d(1, 2)
+                + y * y * y * d(0, 3),
+        ];
+        // Order four is a Rust layout control, not an upstream order-four guarantee.
+        for (hu, hv) in [(1, 1), (2, 2), (3, 3), (4, 4), (1, 4), (4, 2)] {
+            let mut buffer = [Vec3::ZERO; 25];
+            for u in 0..=hu {
+                for v in 0..=hv {
+                    buffer[u * (hv + 1) + v] = d(u, v);
+                }
+            }
+            let order = hu.min(hv).min(3);
+            // Only the consumed prefix is needed, not the full declared rectangle.
+            let end = order * (hv + 1) + 1;
+            assert_eq!(
+                directional_derivs(dir, hu, hv, &buffer[..end]).unwrap(),
+                expected[..=order]
+            );
+        }
+    }
+
+    #[test]
+    fn derivs_volume_mixed_orders_and_strides() {
+        let dir = v(2.0, -3.0, 6.0);
+        let unit = dir.unitize_or_z();
+        let (x, y, z) = (unit.x, unit.y, unit.z);
+        let d = mixed_deriv;
+        let expected = [
+            d(0, 0, 0),
+            x * d(1, 0, 0) + y * d(0, 1, 0) + z * d(0, 0, 1),
+            x * x * d(2, 0, 0)
+                + 2.0 * x * y * d(1, 1, 0)
+                + 2.0 * x * z * d(1, 0, 1)
+                + y * y * d(0, 2, 0)
+                + 2.0 * y * z * d(0, 1, 1)
+                + z * z * d(0, 0, 2),
+            x * x * x * d(3, 0, 0)
+                + 3.0 * x * x * y * d(2, 1, 0)
+                + 3.0 * x * x * z * d(2, 0, 1)
+                + 3.0 * x * y * y * d(1, 2, 0)
+                + 6.0 * x * y * z * d(1, 1, 1)
+                + 3.0 * x * z * z * d(1, 0, 2)
+                + y * y * y * d(0, 3, 0)
+                + 3.0 * y * y * z * d(0, 2, 1)
+                + 3.0 * y * z * z * d(0, 1, 2)
+                + z * z * z * d(0, 0, 3),
+        ];
+        // Order four preserves the existing Rust stride, not an upstream guarantee.
+        for order in 1usize..=4 {
+            let n1 = order + 1;
+            let mut buffer = [Vec3::ZERO; 125];
+            for u in 0..=order {
+                for v in 0..=order {
+                    for w in 0..=order {
+                        buffer[(u * n1 + v) * n1 + w] = d(u, v, w);
+                    }
+                }
+            }
+            let consumed_order = order.min(3);
+            let end = consumed_order * n1 * n1 + 1;
+            assert_eq!(
+                vol_directional_derivs(dir, order, &buffer[..end]).unwrap(),
+                expected[..=consumed_order]
+            );
+        }
     }
 
     #[test]
