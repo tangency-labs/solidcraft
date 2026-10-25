@@ -1038,6 +1038,106 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
     /// `SmFilletNx1ClosedCorner` / `SmFilletNx2Corner` overrides to fillet corner p2).
     fn corner_tangent_solver(&self, corner: O, solver: O) -> Result<Option<O>>;
 
+    /// Context-aware `SmFilletSolver::GetFilletCorner(lIndex)` for adapters that look up
+    /// corners in `executive`'s vertex-corner map.
+    fn solver_corner_in(
+        &self,
+        _executive: &FilletExecutive<O>,
+        solver: O,
+        index: usize,
+    ) -> Result<Option<O>> {
+        self.solver_corner(solver, index)
+    }
+
+    /// Context-aware `SmFilletSolver::GetOtherFilletCorner(pCorner)`.
+    fn solver_other_corner_in(
+        &self,
+        _executive: &FilletExecutive<O>,
+        solver: O,
+        corner: O,
+    ) -> Result<Option<O>> {
+        self.solver_other_corner(solver, corner)
+    }
+
+    /// Context-aware `SmFilletCorner::GetTangentFilletSolver(pFS)` for adapters that
+    /// evaluate G1 continuity with `k` and resolve solvers in `executive`.
+    fn corner_tangent_solver_in(
+        &self,
+        _k: &Kernel,
+        _executive: &FilletExecutive<O>,
+        corner: O,
+        solver: O,
+    ) -> Result<Option<O>> {
+        self.corner_tangent_solver(corner, solver)
+    }
+
+    /// Target `EdgeId` of `pFS->GetEdgeuse(0)->GetEdge()` for `CreateSmoothEdgeSequence`.
+    fn smooth_solver_edge0_id(&self, _solver: O) -> Result<crate::topology::EdgeId> {
+        Err(SolidError::invalid_input(
+            "ExecutiveAccess::smooth_solver_edge0_id",
+            "adapter does not host target B-rep edges",
+        ))
+    }
+
+    /// Borrow the target `Brep` for `CreateSmoothEdgeSequence`.
+    fn smooth_target_brep(&self) -> Result<&crate::topology::Brep> {
+        Err(SolidError::invalid_input(
+            "ExecutiveAccess::smooth_target_brep",
+            "adapter does not host a target B-rep",
+        ))
+    }
+
+    /// Mutate the target `Brep` during `CreateSmoothEdgeSequence`.
+    fn smooth_with_target_mut<T>(
+        &mut self,
+        _edges: &[crate::topology::EdgeId],
+        _f: impl FnOnce(&mut crate::topology::Brep) -> Result<T>,
+    ) -> Result<T> {
+        Err(SolidError::invalid_input(
+            "ExecutiveAccess::smooth_with_target_mut",
+            "adapter does not host a target B-rep",
+        ))
+    }
+
+    /// Set a joined curve on `edge` (`pE->SetCurve(pNewCurve, TRUE)`).
+    fn smooth_set_edge_curve(
+        &mut self,
+        _k: &mut Kernel,
+        _edge: crate::topology::EdgeId,
+        _curve: crate::curve::curve::Curve,
+    ) -> Result<()> {
+        Err(SolidError::invalid_input(
+            "ExecutiveAccess::smooth_set_edge_curve",
+            "adapter does not host a target B-rep",
+        ))
+    }
+
+    /// `SM_CAST_PTR(SmCurveBasedFS, solver)->GetOriginalCurve()`.
+    fn smooth_solver_original_curve(
+        &self,
+        _solver: O,
+    ) -> Result<Option<&crate::curve::curve::Curve>> {
+        Ok(None)
+    }
+
+    /// `SM_CAST_PTR(SmCurveBasedFS, solver)->SetOriginalCurve(curve)`.
+    fn smooth_set_solver_original_curve(
+        &mut self,
+        _solver: O,
+        _curve: crate::curve::curve::Curve,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    /// `SM_CAST_PTR(SmVariableRadiusFS, solver)->SetFilletLawInterval(interval)`.
+    fn smooth_set_solver_law_interval(
+        &mut self,
+        _solver: O,
+        _interval: crate::geom::extent1d::Extent1d,
+    ) -> Result<()> {
+        Ok(())
+    }
+
     /// `SmFilletCorner::GetSetBackDist()`: the inline read of `m_dSetBackDist`
     /// (`FilletCorner::set_back_dist`).
     fn corner_setback_distance(&self, corner: O) -> Result<f64>;
@@ -1115,6 +1215,96 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
     /// `FilletSolver::set_fillet_surface_generator` (`blend.fillet_solver_p1`) with
     /// the generator's record.
     fn set_surface_generator(&mut self, solver: O, generator: O) -> Result<()>;
+}
+
+impl<O, T> super::p1::SmoothSequenceAccess<O> for T
+where
+    O: ClassObject + SolutionObject + Ord,
+    T: ExecutiveAccess<O> + ?Sized,
+{
+    fn smooth_edge_edgeuses(&self, edge: O) -> Result<Vec<O>> {
+        self.edge_edgeuses(edge)
+    }
+
+    fn smooth_solver_edge(&self, solver: O) -> Result<O> {
+        self.solver_edge(solver)
+    }
+
+    fn smooth_solver_corner(
+        &self,
+        executive: &FilletExecutive<O>,
+        solver: O,
+        index: usize,
+    ) -> Result<Option<O>> {
+        self.solver_corner_in(executive, solver, index)
+    }
+
+    fn smooth_solver_other_corner(
+        &self,
+        executive: &FilletExecutive<O>,
+        solver: O,
+        corner: O,
+    ) -> Result<Option<O>> {
+        self.solver_other_corner_in(executive, solver, corner)
+    }
+
+    fn smooth_corner_tangent_solver(
+        &self,
+        k: &Kernel,
+        executive: &FilletExecutive<O>,
+        corner: O,
+        solver: O,
+    ) -> Result<Option<O>> {
+        self.corner_tangent_solver_in(k, executive, corner, solver)
+    }
+
+    fn smooth_solver_edge0_id(&self, solver: O) -> Result<crate::topology::EdgeId> {
+        ExecutiveAccess::smooth_solver_edge0_id(self, solver)
+    }
+
+    fn smooth_target_brep(&self) -> Result<&crate::topology::Brep> {
+        ExecutiveAccess::smooth_target_brep(self)
+    }
+
+    fn smooth_with_target_mut<R>(
+        &mut self,
+        edges: &[crate::topology::EdgeId],
+        f: impl FnOnce(&mut crate::topology::Brep) -> Result<R>,
+    ) -> Result<R> {
+        ExecutiveAccess::smooth_with_target_mut(self, edges, f)
+    }
+
+    fn smooth_set_edge_curve(
+        &mut self,
+        k: &mut Kernel,
+        edge: crate::topology::EdgeId,
+        curve: crate::curve::curve::Curve,
+    ) -> Result<()> {
+        ExecutiveAccess::smooth_set_edge_curve(self, k, edge, curve)
+    }
+
+    fn smooth_solver_original_curve(
+        &self,
+        solver: O,
+    ) -> Result<Option<&crate::curve::curve::Curve>> {
+        ExecutiveAccess::smooth_solver_original_curve(self, solver)
+    }
+
+    fn smooth_set_solver_original_curve(
+        &mut self,
+        solver: O,
+        curve: crate::curve::curve::Curve,
+    ) -> Result<()> {
+        ExecutiveAccess::smooth_set_solver_original_curve(self, solver, curve)
+    }
+
+    fn smooth_set_solver_law_interval(
+        &mut self,
+        solver: O,
+        interval: crate::geom::extent1d::Extent1d,
+    ) -> Result<()> {
+        ExecutiveAccess::smooth_set_solver_law_interval(self, solver, interval)
+    }
 }
 
 /// A mark lock's context identity and mark type; the adapter keeps its real

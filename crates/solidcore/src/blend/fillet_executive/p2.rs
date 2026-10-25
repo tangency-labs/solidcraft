@@ -52,10 +52,10 @@
 //!   `SmFilletLaw::Evaluate` and reads its first value, uninitialised after a failure;
 //!   the port propagates the error.
 //! - The upstream debug drawing (`SM_GFX_CODE`) is omitted.
-//! - Calls into units that are not ported return [`SolidError::Unported`]:
-//!   `LoadFilletSolver` and `CreateSmoothEdgeSequence` (`blend.fillet_executive_p1`), and the adapter defaults of [`ExecutiveAccess`].
+//! - Calls into units that are not ported return [`SolidError::Unported`] through the
+//!   adapter defaults of [`ExecutiveAccess`].
 
-use crate::blend::fillet_executive::p1::SolverLoadingAccess;
+use crate::blend::fillet_executive::p1::{SmoothSequenceAccess, SolverLoadingAccess};
 use crate::blend::fillet_executive::p3::{
     ContextMark, ErrorInfo, ExecutionOptions, ExecutiveAccess, FilletExecutive,
 };
@@ -385,22 +385,6 @@ pub enum SolverSpec<'a, O> {
         /// `SetReverseTrim(bReverseTrim)`.
         reverse_trim: bool,
     },
-}
-
-// ---- unported executive members (blend.fillet_executive_p1) --------------------------------
-
-/// `SmFilletExecutive::CreateSmoothEdgeSequence(rSmoothSequence)` (unit
-/// `blend.fillet_executive_p1`).
-fn create_smooth_edge_sequence<O>(
-    executive: &mut FilletExecutive<O>,
-    sequence: &[O],
-) -> Result<()> {
-    let _ = (executive, sequence);
-    // UNPORTED(blend.fillet_executive_p1): SmFilletExecutive::CreateSmoothEdgeSequence
-    Err(SolidError::unported(
-        "SmFilletExecutive::CreateSmoothEdgeSequence",
-        "blend.fillet_executive_p1",
-    ))
 }
 
 // ---- SetFilletParameters -------------------------------------------------------------------
@@ -1017,38 +1001,38 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     ///
     /// # Errors
     ///
-    /// Those of [`FilletExecutive::collect_tangent_edge_sequence`] and
-    /// `CreateSmoothEdgeSequence`.
+    /// Those of [`FilletExecutive::collect_tangent_edge_sequence_narrow`] and
+    /// [`FilletExecutive::create_smooth_edge_sequence`].
     pub fn process_smooth_edge_sequences<A>(&mut self, k: &mut Kernel, access: &mut A) -> Result<()>
     where
         A: ExecutiveAccess<O> + ?Sized,
     {
-        self.process_smooth_edge_sequences_with(k, |executive, solvers, sequence| {
-            executive.collect_tangent_edge_sequence(access, solvers, sequence)
-        })
+        self.process_smooth_edge_sequences_narrow(k, access)
     }
 
-    /// Run `ProcessSmoothEdgeSequences` with the caller's live tangent collector.
-    ///
-    /// Zero or one retained solver needs no collection. Larger lists use the
-    /// collector in native order, followed by `CreateSmoothEdgeSequence`.
+    /// Narrow-trait entry point for `ProcessSmoothEdgeSequences` over
+    /// [`SmoothSequenceAccess`].
     ///
     /// # Errors
-    /// The collector's errors or missing `CreateSmoothEdgeSequence` implementation.
-    pub fn process_smooth_edge_sequences_with(
+    ///
+    /// Those of [`FilletExecutive::collect_tangent_edge_sequence_narrow`] and
+    /// [`FilletExecutive::create_smooth_edge_sequence`].
+    pub fn process_smooth_edge_sequences_narrow<A>(
         &mut self,
         k: &mut Kernel,
-        mut collect: impl FnMut(&Self, &mut Vec<Option<O>>, &mut Vec<O>) -> Result<()>,
-    ) -> Result<()> {
-        let _ = k;
+        access: &mut A,
+    ) -> Result<()>
+    where
+        A: SmoothSequenceAccess<O> + ?Sized,
+    {
         // Copy the FilletSolver pointers into a separate array.
         let mut solvers: Vec<Option<O>> = self.solvers.iter().copied().map(Some).collect();
         let mut sequence = Vec::new();
 
         // Each pass removes at least one solver from the list.
         while solvers.len() > 1 {
-            collect(self, &mut solvers, &mut sequence)?;
-            create_smooth_edge_sequence(self, &sequence)?;
+            self.collect_tangent_edge_sequence_narrow(k, access, &mut solvers, &mut sequence)?;
+            self.create_smooth_edge_sequence(k, access, &sequence)?;
         }
         Ok(())
     }
@@ -1075,6 +1059,26 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     where
         A: ExecutiveAccess<O> + ?Sized,
     {
+        let k = Kernel::default();
+        self.collect_tangent_edge_sequence_narrow(&k, access, solvers, sequence)
+    }
+
+    /// Narrow-trait entry point for [`FilletExecutive::collect_tangent_edge_sequence`]
+    /// using caller kernel `k` and [`SmoothSequenceAccess`].
+    ///
+    /// # Errors
+    ///
+    /// Those of [`FilletExecutive::collect_tangent_edge_sequence`].
+    pub fn collect_tangent_edge_sequence_narrow<A>(
+        &self,
+        k: &Kernel,
+        access: &A,
+        solvers: &mut Vec<Option<O>>,
+        sequence: &mut Vec<O>,
+    ) -> Result<()>
+    where
+        A: SmoothSequenceAccess<O> + ?Sized,
+    {
         sequence.clear();
 
         if solvers.len() < 2 {
@@ -1086,7 +1090,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         for list in &self.law_sequence_edges {
             for fs in solvers.iter() {
                 let fs = fs.ok_or_else(|| null!("null fillet solver"))?;
-                let this_edge = access.solver_edge(fs)?;
+                let this_edge = access.smooth_solver_edge(fs)?;
                 if list.contains(&this_edge) {
                     start_edge = list.first().copied(); // First in list.
                     break;
@@ -1114,11 +1118,11 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             // Traverse backwards, unless the start edge is given.
             if start_edge.is_none() {
                 let corner0 = access
-                    .solver_corner(fs, 0)?
+                    .smooth_solver_corner(self, fs, 0)?
                     .ok_or_else(|| null!("solver without corner"))?;
 
                 let mut curr_fs = fs;
-                let mut prev_fs = access.corner_tangent_solver(corner0, fs)?;
+                let mut prev_fs = access.smooth_corner_tangent_solver(k, self, corner0, fs)?;
 
                 if prev_fs == Some(curr_fs) {
                     continue; // Single closed loop.
@@ -1146,10 +1150,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                     }
 
                     let prev_corner = access
-                        .solver_other_corner(prev, curr_corner)?
+                        .smooth_solver_other_corner(self, prev, curr_corner)?
                         .ok_or_else(|| null!("solver without other corner"))?;
                     curr_fs = prev;
-                    prev_fs = access.corner_tangent_solver(prev_corner, curr_fs)?;
+                    prev_fs = access.smooth_corner_tangent_solver(k, self, prev_corner, curr_fs)?;
                     curr_corner = prev_corner;
                 }
             }
@@ -1157,13 +1161,13 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             // Traverse forwards.
             if let Some(edge) = start_edge {
                 fs = self
-                    .fillet_solver_of_edge(access, edge)?
+                    .fillet_solver_of_edge_with(edge, |e| access.smooth_edge_edgeuses(e))?
                     .ok_or_else(|| null!("no solver of edge"))?;
             }
 
-            let corner0 = access.solver_corner(fs, 0)?;
+            let corner0 = access.smooth_solver_corner(self, fs, 0)?;
             let corner1 = access
-                .solver_corner(fs, 1)?
+                .smooth_solver_corner(self, fs, 1)?
                 .ok_or_else(|| null!("solver without end corner"))?;
 
             if Some(corner1) == corner0 {
@@ -1171,7 +1175,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             }
 
             let curr_fs = fs;
-            let mut next_fs = access.corner_tangent_solver(corner1, fs)?;
+            let mut next_fs = access.smooth_corner_tangent_solver(k, self, corner1, fs)?;
             if next_fs.is_some() && sequence.is_empty() {
                 sequence.push(fs);
             }
@@ -1201,10 +1205,10 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
                 }
 
                 let next_corner = access
-                    .solver_other_corner(next, curr_corner)?
+                    .smooth_solver_other_corner(self, next, curr_corner)?
                     .ok_or_else(|| null!("solver without other corner"))?;
                 let curr_fs = next;
-                next_fs = access.corner_tangent_solver(next_corner, curr_fs)?;
+                next_fs = access.smooth_corner_tangent_solver(k, self, next_corner, curr_fs)?;
                 curr_corner = next_corner;
             }
 
@@ -1678,6 +1682,188 @@ where
     match result {
         Ok(value) => reverted.map(|()| value),
         Err(error) => Err(error),
+    }
+}
+
+/// Borrow-free `SmTemporaryRadiusChange` state for concrete target [`Brep`](crate::topology::Brep)
+/// callers (`blend::fillet_geom::p2::calc_rail_int_edgeuse_impl`).
+#[derive(Debug, Clone)]
+pub struct DirectTemporaryRadiusChange {
+    saved_bsp: Option<BSplineCurve>,
+    start_rad: f64,
+    end_rad: f64,
+}
+
+impl Default for DirectTemporaryRadiusChange {
+    fn default() -> Self {
+        Self {
+            saved_bsp: None,
+            start_rad: -1.0,
+            end_rad: -1.0,
+        }
+    }
+}
+
+impl DirectTemporaryRadiusChange {
+    /// Construct and run `SmTemporaryRadiusChange::SetUp` (ignoring ordinary statuses
+    /// just like the C++ constructor).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] from `set_up`.
+    pub fn new(
+        vrfs: Option<&mut crate::blend::fillet_standard_solver::p1::VariableRadiusFs>,
+        target: &crate::topology::Brep,
+        rail_index: usize,
+        side_eu: crate::topology::EdgeuseId,
+    ) -> Result<Self> {
+        let mut change = Self::default();
+        if let Some(vrfs) = vrfs {
+            ignored(change.set_up(vrfs, target, rail_index, side_eu))?;
+        }
+        Ok(change)
+    }
+
+    fn set_up(
+        &mut self,
+        vrfs: &mut crate::blend::fillet_standard_solver::p1::VariableRadiusFs,
+        target: &crate::topology::Brep,
+        rail_index: usize,
+        side_eu: crate::topology::EdgeuseId,
+    ) -> Result<()> {
+        use crate::topology::{edge, edgeuse};
+
+        self.saved_bsp = None;
+        self.start_rad = -1.0;
+        self.end_rad = -1.0;
+
+        if !vrfs.offset_radii_can_change()? {
+            return Ok(());
+        }
+        let law = vrfs.fillet_law();
+        let is_bspline = matches!(law.kind, FilletLawKind::BSpline { .. });
+        if !is_bspline && !matches!(law.kind, FilletLawKind::Linear { .. }) {
+            return Ok(());
+        }
+        let law_orientation = vrfs.fillet_law_orientation();
+        let edge_map = law.edge_map;
+        let edge_ivl = vrfs.fillet_law_interval();
+
+        let mut at_start = crate::topology::brep_data::UNSURE;
+        let eu = vrfs
+            .curve_based
+            .solver
+            .edgeuse(rail_index)?
+            .ok_or_else(|| null!("no rail edge use"))?;
+        let e = edgeuse::p1::edge(target, eu)?.ok_or_else(|| null!("edge use without edge"))?;
+        let edge_v1 = edge::start_vertex(target, e)?;
+        let edge_v2 = match edge_v1 {
+            Some(v1) => edge::other_vertex(target, e, Some(v1))?,
+            None => None,
+        };
+
+        let side_edge = edgeuse::p1::edge(target, side_eu)?
+            .ok_or_else(|| null!("side edge use without edge"))?;
+        let side_v1 = edge::start_vertex(target, side_edge)?;
+        let side_v2 = match side_v1 {
+            Some(v1) => edge::other_vertex(target, side_edge, Some(v1))?,
+            None => None,
+        };
+
+        if edge_v1 == edge_v2 {
+            at_start = 1;
+        } else {
+            if edge_v1 == side_v1 || edge_v1 == side_v2 {
+                at_start = 1;
+            }
+            if edge_v2 == side_v1 || edge_v2 == side_v2 {
+                at_start = 0;
+            }
+        }
+
+        if law_orientation {
+            at_start = i32::from(at_start == 0);
+        }
+
+        let law_t = if at_start != 0 {
+            edge_map.min()
+        } else {
+            edge_map.max()
+        };
+        let unit_ivl = Extent1d::from_min_max(0.0, 1.0);
+        if !unit_ivl.is_value_on_boundary(law_t, EFF_ZERO).0 {
+            return Ok(());
+        }
+
+        if edge_ivl.length() <= 0.0 {
+            return Ok(());
+        }
+
+        let edge_t = if at_start != 0 {
+            edge_ivl.min()
+        } else {
+            edge_ivl.max()
+        };
+
+        let values = law_evaluate(&mut vrfs.law, edge_t, &edge_ivl, false)?;
+        let [end_rad, _, _] = values;
+
+        if is_bspline {
+            let mut const_bsp = BSplineCurve::create_line_segment(
+                3,
+                Point3::new(end_rad, 1.0, 0.0),
+                Point3::new(end_rad, 2.0, 0.0),
+            )?;
+            ignored(const_bsp.edit_parameterization(&unit_ivl))?;
+
+            if let FilletLawKind::BSpline {
+                law_curve,
+                extended_law,
+            } = &mut vrfs.law.kind
+            {
+                self.saved_bsp = Some(core::mem::replace(law_curve, const_bsp));
+                *extended_law = None;
+            }
+        } else if let FilletLawKind::Linear {
+            start_radius,
+            end_radius,
+        } = &mut vrfs.law.kind
+        {
+            self.start_rad = *start_radius;
+            self.end_rad = *end_radius;
+            *start_radius = end_rad;
+            *end_radius = end_rad;
+        }
+        Ok(())
+    }
+
+    /// Restore the law curve or linear radii (`SmTemporaryRadiusChange::Revert`).
+    pub fn revert(
+        mut self,
+        vrfs: Option<&mut crate::blend::fillet_standard_solver::p1::VariableRadiusFs>,
+    ) {
+        let Some(vrfs) = vrfs else {
+            return;
+        };
+        if let Some(saved) = self.saved_bsp.take() {
+            if let FilletLawKind::BSpline {
+                law_curve,
+                extended_law,
+            } = &mut vrfs.law.kind
+            {
+                *law_curve = saved;
+                *extended_law = None;
+            }
+        } else if self.start_rad > -EFF_ZERO && self.end_rad > -EFF_ZERO {
+            if let FilletLawKind::Linear {
+                start_radius,
+                end_radius,
+            } = &mut vrfs.law.kind
+            {
+                *start_radius = self.start_rad;
+                *end_radius = self.end_rad;
+            }
+        }
     }
 }
 

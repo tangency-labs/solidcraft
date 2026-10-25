@@ -190,6 +190,25 @@ impl FilletCorner {
         exec: &FilletExecutiveData,
         fs: FilletSolverId,
     ) -> Result<Option<FilletSolverId>> {
+        self.tangent_fillet_solver_nx1_closed_with_lookup(k, b, fs, |eu| {
+            exec.fillet_solver_of_edgeuse(eu)
+        })
+    }
+
+    /// Borrowed-lookup form of [`FilletCorner::tangent_fillet_solver_nx1_closed`] for
+    /// live executive adapters whose solver identities are generic handles.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for an unset `m_pSolverEUs`; those of
+    /// [`test_g1_continuity`].
+    pub fn tangent_fillet_solver_nx1_closed_with_lookup<S: Copy + Eq>(
+        &self,
+        k: &Kernel,
+        b: &Brep,
+        fs: S,
+        mut solver_of: impl FnMut(EdgeuseId) -> Option<S>,
+    ) -> Result<Option<S>> {
         let solver_eus = self
             .solver_eus
             .as_deref()
@@ -197,7 +216,7 @@ impl FilletCorner {
         let [edge_use] = solver_eus else {
             return Ok(None); // SM_ASSERT_ERR
         };
-        let fil_solver = exec.fillet_solver_of_edgeuse(*edge_use);
+        let fil_solver = solver_of(*edge_use);
 
         if fil_solver != Some(fs) {
             return Ok(None); // SM_ASSERT_ERR
@@ -229,6 +248,23 @@ impl FilletCorner {
         exec: &FilletExecutiveData,
         fs: FilletSolverId,
     ) -> Result<Option<FilletSolverId>> {
+        self.tangent_fillet_solver_nx2_with_lookup(k, b, fs, |eu| exec.fillet_solver_of_edgeuse(eu))
+    }
+
+    /// Borrowed-lookup form of [`FilletCorner::tangent_fillet_solver_nx2`] for live
+    /// executive adapters whose solver identities are generic handles.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for an unset `m_pSolverEUs`; those of
+    /// [`test_g1_continuity`].
+    pub fn tangent_fillet_solver_nx2_with_lookup<S: Copy + Eq>(
+        &self,
+        k: &Kernel,
+        b: &Brep,
+        fs: S,
+        mut solver_of: impl FnMut(EdgeuseId) -> Option<S>,
+    ) -> Result<Option<S>> {
         let solver_eus = self
             .solver_eus
             .as_deref()
@@ -246,8 +282,8 @@ impl FilletCorner {
             return Ok(None); // not an error.
         }
 
-        let fs0 = exec.fillet_solver_of_edgeuse(*eu0);
-        let fs1 = exec.fillet_solver_of_edgeuse(*eu1_);
+        let fs0 = solver_of(*eu0);
+        let fs1 = solver_of(*eu1_);
 
         if fs0 == Some(fs) {
             return Ok(fs1);

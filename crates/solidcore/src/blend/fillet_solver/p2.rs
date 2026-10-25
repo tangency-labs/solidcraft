@@ -70,7 +70,6 @@ use crate::blend::fillet_solver::p1::{
     FilletSolver, FilletSolverOps, FilletSphereSolveEnfo, FilletSurfaceGeneratorType,
     RailRailIntersectEnfo, RailUvCurveIntersectEnfo,
 };
-use crate::blend::fillet_standard_solver::p1::VARIABLE_RADIUS_FS_TYPE;
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::Curve;
 use crate::curve::line::Line;
@@ -1443,110 +1442,147 @@ impl FilletSolver {
         // Temporarily replace the variable-radius functions with a constant. [Reg Iter:306]
         // `SmTemporaryRadiusChange::SetUp` does nothing unless the solver is an
         // `SmVariableRadiusFS` (`SM_CAST_PTR`), first for this solver, then the other.
-        if ops.is_kind_of(VARIABLE_RADIUS_FS_TYPE)? {
-            // UNPORTED(blend.fillet_executive_p2): SmTemporaryRadiusChange::SetUp (justified: findings.md "blend.fillet_solver_p2: SmTemporaryRadiusChange needs the executive's handles")
-            return unported_temporary_radius_change();
-        }
-        if other.is_kind_of(VARIABLE_RADIUS_FS_TYPE)? {
-            // UNPORTED(blend.fillet_executive_p2): SmTemporaryRadiusChange::SetUp (justified: findings.md "blend.fillet_solver_p2: SmTemporaryRadiusChange needs the executive's handles")
-            return unported_temporary_radius_change();
-        }
-
-        // Append a good lRailIndex->OtherSurface UVguessPoint into sGuessT
-        let do_surf2_calcs = true;
-        let surf1_index = 0;
-        let mut surface1 = take_surface(ops.solver(), rail_index)?;
-        let loaded = ops.load_initial_values(
-            k,
-            brep,
-            do_surf2_calcs,
-            rail_index,
-            &mut surface1,
-            surf1_index,
-            &mut intervals,
-            &mut periodicities,
-            &mut guess_t,
-        );
-        put_surface(ops.solver_mut(), rail_index, surface1)?;
-        let loaded = loaded?;
-
-        // Append a good lOtherRailIndex->OtherSurface UVguessPoint into sGuessT
-        let mut other_surface1 = take_surface(other.solver(), other_rail_index)?;
-        let other_loaded = other.load_initial_values(
-            k,
-            brep,
-            do_surf2_calcs,
-            other_rail_index,
-            &mut other_surface1,
-            surf1_index,
-            &mut intervals,
-            &mut periodicities,
-            &mut guess_t,
-        );
-        put_surface(other.solver_mut(), other_rail_index, other_surface1)?;
-        let other_loaded = other_loaded?;
-
-        let tol = ops.solver().approx_tol_3d + other.solver().approx_tol_3d;
-
-        // Set Solver Manager
-        let mut eval = RailRailEval(
-            RailRailIntersectEnfo::new(rail_index, ops, other_rail_index, other),
-            k,
-        );
-        let mut ls = LocalSolveNd::new(&mut eval, Some(&intervals), Some(&periodicities));
-        ls.set_desired_accuracy(EFF_ZERO_SQ);
-        ls.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
-        ls.set_maximum_iterations(30);
-
-        // Solve it
-        let sol = ls.solve_it(&guess_t, tol)?;
-        if !sol.found {
-            return Ok(false);
-        }
-
-        let surf2_index = loaded
-            .ok_or_else(|| invalid("LoadInitialValues set no second surface index"))?
-            .surface2_index;
-        let other_surf2_index = other_loaded
-            .ok_or_else(|| invalid("LoadInitialValues set no second surface index"))?
-            .surface2_index;
-        let x = &sol.x;
-        let rail_srf = srf_of_rail(rail_index)?;
-        let rail_other_srf = srf_of_rail(1 - rail_index)?;
-        *tsect.uv_pos_mut(rail_srf) =
-            Point2::new(sol_at(x, surf1_index)?, sol_at(x, surf1_index + 1)?);
-        *tsect.uv_pos_mut(rail_other_srf) =
-            Point2::new(sol_at(x, surf2_index)?, sol_at(x, surf2_index + 1)?);
-
-        // Load other fillet surface variables being solved for into the fillet point.
-        for (cnt, i) in ((surf2_index + 2)..other_surf2_index).enumerate() {
-            if cnt == MAX_USER_DOUBLES {
-                return Err(sm_err());
+        let other_side_eu = other.solver().edgeuse(other_rail_index)?;
+        let this_side_eu = ops.solver().edgeuse(rail_index)?;
+        let temp_this = match (ops.variable_radius_mut(), other_side_eu) {
+            (Some(vrfs), Some(side)) => {
+                let target = brep.ok_or_else(|| {
+                    invalid("variable-radius RailRailIntersect requires target B-rep")
+                })?;
+                crate::blend::fillet_executive::p2::DirectTemporaryRadiusChange::new(
+                    Some(vrfs),
+                    target,
+                    rail_index,
+                    side,
+                )?
             }
-            if let Some(slot) = tsect.user_doubles.get_mut(cnt) {
-                *slot = sol_at(x, i)?;
+            _ => crate::blend::fillet_executive::p2::DirectTemporaryRadiusChange::default(),
+        };
+        let temp_other = match (other.variable_radius_mut(), this_side_eu) {
+            (Some(vrfs), Some(side)) => {
+                let Some(target) = brep else {
+                    temp_this.revert(ops.variable_radius_mut());
+                    return Err(invalid(
+                        "variable-radius RailRailIntersect requires target B-rep",
+                    ));
+                };
+                match crate::blend::fillet_executive::p2::DirectTemporaryRadiusChange::new(
+                    Some(vrfs),
+                    target,
+                    other_rail_index,
+                    side,
+                ) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        temp_this.revert(ops.variable_radius_mut());
+                        return Err(e);
+                    }
+                }
             }
-        }
+            _ => crate::blend::fillet_executive::p2::DirectTemporaryRadiusChange::default(),
+        };
 
-        let o_srf = srf_of_rail(other_rail_index)?;
-        let o_other_srf = srf_of_rail(1 - other_rail_index)?;
-        *other_tsect.uv_pos_mut(o_srf) =
-            Point2::new(sol_at(x, surf1_index)?, sol_at(x, surf1_index + 1)?);
-        *other_tsect.uv_pos_mut(o_other_srf) = Point2::new(
-            sol_at(x, other_surf2_index)?,
-            sol_at(x, other_surf2_index + 1)?,
-        );
+        let result = (|| -> Result<bool> {
+            // Append a good lRailIndex->OtherSurface UVguessPoint into sGuessT
+            let do_surf2_calcs = true;
+            let surf1_index = 0;
+            let mut surface1 = take_surface(ops.solver(), rail_index)?;
+            let loaded = ops.load_initial_values(
+                k,
+                brep,
+                do_surf2_calcs,
+                rail_index,
+                &mut surface1,
+                surf1_index,
+                &mut intervals,
+                &mut periodicities,
+                &mut guess_t,
+            );
+            put_surface(ops.solver_mut(), rail_index, surface1)?;
+            let loaded = loaded?;
 
-        // Load values into rOtherTsectPnt.
-        for (cnt, i) in ((other_surf2_index + 2)..x.len()).enumerate() {
-            if cnt == MAX_USER_DOUBLES {
-                return Err(sm_err());
+            // Append a good lOtherRailIndex->OtherSurface UVguessPoint into sGuessT
+            let mut other_surface1 = take_surface(other.solver(), other_rail_index)?;
+            let other_loaded = other.load_initial_values(
+                k,
+                brep,
+                do_surf2_calcs,
+                other_rail_index,
+                &mut other_surface1,
+                surf1_index,
+                &mut intervals,
+                &mut periodicities,
+                &mut guess_t,
+            );
+            put_surface(other.solver_mut(), other_rail_index, other_surface1)?;
+            let other_loaded = other_loaded?;
+
+            let tol = ops.solver().approx_tol_3d + other.solver().approx_tol_3d;
+
+            // Set Solver Manager
+            let mut eval = RailRailEval(
+                RailRailIntersectEnfo::new(rail_index, ops, other_rail_index, other),
+                k,
+            );
+            let mut ls = LocalSolveNd::new(&mut eval, Some(&intervals), Some(&periodicities));
+            ls.set_desired_accuracy(EFF_ZERO_SQ);
+            ls.set_boundary_handler(BoundaryHandler::TotalBoundaryHits, 8);
+            ls.set_maximum_iterations(30);
+
+            // Solve it
+            let sol = ls.solve_it(&guess_t, tol)?;
+            if !sol.found {
+                return Ok(false);
             }
-            if let Some(slot) = other_tsect.user_doubles.get_mut(cnt) {
-                *slot = sol_at(x, i)?;
+
+            let surf2_index = loaded
+                .ok_or_else(|| invalid("LoadInitialValues set no second surface index"))?
+                .surface2_index;
+            let other_surf2_index = other_loaded
+                .ok_or_else(|| invalid("LoadInitialValues set no second surface index"))?
+                .surface2_index;
+            let x = &sol.x;
+            let rail_srf = srf_of_rail(rail_index)?;
+            let rail_other_srf = srf_of_rail(1 - rail_index)?;
+            *tsect.uv_pos_mut(rail_srf) =
+                Point2::new(sol_at(x, surf1_index)?, sol_at(x, surf1_index + 1)?);
+            *tsect.uv_pos_mut(rail_other_srf) =
+                Point2::new(sol_at(x, surf2_index)?, sol_at(x, surf2_index + 1)?);
+
+            // Load other fillet surface variables being solved for into the fillet point.
+            for (cnt, i) in ((surf2_index + 2)..other_surf2_index).enumerate() {
+                if cnt == MAX_USER_DOUBLES {
+                    return Err(sm_err());
+                }
+                if let Some(slot) = tsect.user_doubles.get_mut(cnt) {
+                    *slot = sol_at(x, i)?;
+                }
             }
-        }
-        Ok(true)
+
+            let o_srf = srf_of_rail(other_rail_index)?;
+            let o_other_srf = srf_of_rail(1 - other_rail_index)?;
+            *other_tsect.uv_pos_mut(o_srf) =
+                Point2::new(sol_at(x, surf1_index)?, sol_at(x, surf1_index + 1)?);
+            *other_tsect.uv_pos_mut(o_other_srf) = Point2::new(
+                sol_at(x, other_surf2_index)?,
+                sol_at(x, other_surf2_index + 1)?,
+            );
+
+            // Load values into rOtherTsectPnt.
+            for (cnt, i) in ((other_surf2_index + 2)..x.len()).enumerate() {
+                if cnt == MAX_USER_DOUBLES {
+                    return Err(sm_err());
+                }
+                if let Some(slot) = other_tsect.user_doubles.get_mut(cnt) {
+                    *slot = sol_at(x, i)?;
+                }
+            }
+            Ok(true)
+        })();
+
+        temp_other.revert(other.variable_radius_mut());
+        temp_this.revert(ops.variable_radius_mut());
+        result
     }
 
     /// `CreateCliffRollOverSideFG(pRailOnCliff, pSideEdge, pSideFace, bTrimSideFaces,
@@ -2024,15 +2060,6 @@ fn support_edge_at(pseudo: &FilletBrep, v: VertexId) -> Result<Option<(EdgeId, V
 fn filleted_edge_opt(s: &FilletSolver, b: &Brep) -> Result<Option<EdgeId>> {
     let eu0 = s.edgeuse(0)?.ok_or_else(|| invalid("no edge use"))?;
     eu::edge(b, eu0)
-}
-
-/// `SmTemporaryRadiusChange::SetUp` of an `SmVariableRadiusFS` (unit
-/// `blend.fillet_executive_p2`; every call site carries its own `UNPORTED` tag).
-fn unported_temporary_radius_change<T>() -> Result<T> {
-    Err(SolidError::unported(
-        "SmTemporaryRadiusChange::SetUp",
-        "blend.fillet_executive_p2",
-    ))
 }
 
 /// `(*pCC)[i]` (an index past the classification is out of bounds upstream).

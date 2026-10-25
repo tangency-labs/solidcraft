@@ -40,6 +40,7 @@
 //! | [`FilletExecutive::new`], [`ExecutiveObjects`] | `SmFilletExecutive::SmFilletExecutive`        |
 //! | [`FilletExecutive::load_fillet_solver`] | `LoadFilletSolver` |
 //! | [`FilletExecutive::create_fillet_corners`] | `CreateFilletCorners` |
+//! | [`FilletExecutive::create_smooth_edge_sequence`] | `CreateSmoothEdgeSequence` |
 //! | [`remove_topo_edges`]                  | `RemoveTopoEdges`                                     |
 //! | [`FilletExecutive::set_bevel_corner`]  | `SetBevelCorner`                                      |
 //! | [`FilletExecutive::add_fillet_surface_generator`] | `AddFilletSurfaceGenerator`                |
@@ -824,8 +825,20 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     where
         A: ExecutiveAccess<O> + ?Sized,
     {
-        Ok(access
-            .edge_edgeuses(edge)?
+        self.fillet_solver_of_edge_with(edge, |e| access.edge_edgeuses(e))
+    }
+
+    /// Closure-backed form of [`FilletExecutive::fillet_solver_of_edge`].
+    ///
+    /// # Errors
+    ///
+    /// Those of `edgeuses_of`.
+    pub fn fillet_solver_of_edge_with(
+        &self,
+        edge: O,
+        mut edgeuses_of: impl FnMut(O) -> Result<Vec<O>>,
+    ) -> Result<Option<O>> {
+        Ok(edgeuses_of(edge)?
             .into_iter()
             .find_map(|eu| self.fillet_solver_of_edgeuse(eu)))
     }
@@ -1028,6 +1041,295 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             None => Err(SolidError::null_pointer(OP)),
         }
     }
+
+    /// `SmFilletExecutive::CreateSmoothEdgeSequence(rSmoothSequence)` (`SmFilletExecutive.cpp:4704`):
+    /// orients the edges of `sequence` into sequence order, trims each edge curve to its
+    /// edge interval, rescales and translates intervals after the first so consecutive
+    /// segments meet with C1 derivative continuity, joins all segments into one
+    /// [`BSplineCurve`], updates any `CurveBasedFs` original curve / `VariableRadiusFs`
+    /// law interval, and installs copies of the joined curve on every edge.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR_NULL_POINTER` when a solver has no primary edge use, an edge has no curve
+    /// derived from `SmBSplineCurve`, or `CreateByJoining` fails (`NER(pCompCurve)`);
+    /// those of the adapter and B-rep operations.
+    pub fn create_smooth_edge_sequence<A>(
+        &mut self,
+        k: &mut Kernel,
+        access: &mut A,
+        sequence: &[O],
+    ) -> Result<()>
+    where
+        A: SmoothSequenceAccess<O> + ?Sized,
+    {
+        const OP: &str =
+            "blend::fillet_executive::p1::FilletExecutive::create_smooth_edge_sequence";
+        if sequence.len() < 2 {
+            return Ok(());
+        }
+
+        let mut edges = Vec::new();
+        let mut shares_edge_curve = Vec::new();
+        for &fs in sequence {
+            let edge_id = access.smooth_solver_edge0_id(fs)?;
+            let shares = match (
+                access.smooth_solver_original_curve(fs)?,
+                access.smooth_target_brep()?.edge(edge_id)?.curve.as_ref(),
+            ) {
+                (Some(orig), Some(edge_crv)) => orig.approx_eq(k, edge_crv)?,
+                _ => false,
+            };
+            edges.push(edge_id);
+            shares_edge_curve.push(shares);
+        }
+
+        let mut bs_curves = access.smooth_with_target_mut(&edges, |target| {
+            crate::error::ignore_status(topo_edge::orient_edge_sequence(k, target, &edges))?;
+
+            let mut prev_ivl = Extent1d::new();
+            let mut curves = Vec::new();
+            for (ii, &edge_id) in edges.iter().enumerate() {
+                let mut edge_ivl = topo_edge::interval(target, edge_id)?;
+                let edge_tol = topo_edge::tolerance(target, edge_id)?;
+                let mut tk = Kernel::new(&crate::kernel::KernelOptions {
+                    tolerances: crate::kernel::Tolerances {
+                        zone_tol_3d: edge_tol,
+                        ..k.tolerances
+                    },
+                    ..crate::kernel::KernelOptions::default()
+                });
+                tk.rng = k.rng.clone();
+                let mut trim_ivl = edge_ivl;
+                let crv = target
+                    .edge_mut(edge_id)?
+                    .curve
+                    .as_mut()
+                    .ok_or_else(|| SolidError::null_pointer(OP))?;
+                crate::error::ignore_status(crv.trim(
+                    &tk,
+                    &mut trim_ivl,
+                    crate::nurbs::b_spline_curve_n_lib::TrimMode::Notify,
+                ))?;
+
+                if ii > 0 {
+                    let prev_edge_id = *edges
+                        .get(ii - 1)
+                        .ok_or_else(|| SolidError::null_pointer(OP))?;
+                    let prev_param1 = prev_ivl.max();
+                    let curr_param0 = edge_ivl.min();
+                    let prev_crv = target
+                        .edge(prev_edge_id)?
+                        .curve
+                        .as_ref()
+                        .ok_or_else(|| SolidError::null_pointer(OP))?;
+                    let curr_crv = target
+                        .edge(edge_id)?
+                        .curve
+                        .as_ref()
+                        .ok_or_else(|| SolidError::null_pointer(OP))?;
+                    let prev_deriv = eval_first_deriv_ignored(k, prev_crv, prev_param1)?;
+                    let curr_deriv = eval_first_deriv_ignored(k, curr_crv, curr_param0)?;
+                    let prev_len = prev_deriv.length();
+                    let curr_len = curr_deriv.length();
+
+                    // Keep the Min of the current interval the same, scale its Max by the deriv length ratio.
+                    let scale = curr_len / prev_len;
+                    let scaled_end = edge_ivl.min() + scale * edge_ivl.length();
+                    crate::error::ignore_status(edge_ivl.set_min_max(edge_ivl.min(), scaled_end))?;
+
+                    // Domains are the right lengths, make sure they're consecutive.
+                    if !crate::geom::tol::are_same(edge_ivl.min(), prev_ivl.max()) {
+                        edge_ivl.translate(prev_ivl.max() - edge_ivl.min());
+                    }
+
+                    let crv = target
+                        .edge_mut(edge_id)?
+                        .curve
+                        .as_mut()
+                        .ok_or_else(|| SolidError::null_pointer(OP))?;
+                    crate::error::ignore_status(crv.edit_parameterization(k, &edge_ivl))?;
+                    target.edge_mut(edge_id)?.interval = edge_ivl;
+                }
+
+                let curr_crv = target
+                    .edge(edge_id)?
+                    .curve
+                    .as_ref()
+                    .ok_or_else(|| SolidError::null_pointer(OP))?;
+                curves.push(curve_as_bspline(curr_crv, OP)?);
+                prev_ivl = edge_ivl;
+            }
+            Ok(curves)
+        })?;
+
+        for ((&fs, &edge_id), &shares) in sequence.iter().zip(&edges).zip(&shares_edge_curve) {
+            if shares {
+                if let Some(edited) = access.smooth_target_brep()?.edge(edge_id)?.curve.clone() {
+                    access.smooth_set_solver_original_curve(fs, edited)?;
+                }
+            }
+        }
+
+        let comp_curve = match BSplineCurve::create_by_joining(&mut bs_curves, None) {
+            Ok(c) => c,
+            Err(e) if e.is_unported() => return Err(e),
+            Err(_) => return Err(SolidError::null_pointer(OP)),
+        };
+
+        for (ii, ((&fs, &edge_id), &shares)) in sequence
+            .iter()
+            .zip(&edges)
+            .zip(&shares_edge_curve)
+            .enumerate()
+        {
+            let new_curve = if ii == 0 {
+                crate::curve::curve::Curve::from(comp_curve.clone())
+            } else {
+                crate::curve::curve::Curve::from(comp_curve.copy())
+            };
+            if shares {
+                access.smooth_set_solver_original_curve(fs, new_curve.clone())?;
+            }
+            let ivl = topo_edge::interval(access.smooth_target_brep()?, edge_id)?;
+            access.smooth_set_solver_law_interval(fs, ivl)?;
+            access.smooth_set_edge_curve(k, edge_id, new_curve)?;
+        }
+
+        Ok(())
+    }
+}
+
+fn eval_first_deriv_ignored(
+    k: &Kernel,
+    crv: &crate::curve::curve::Curve,
+    param: f64,
+) -> Result<crate::math::Vec3> {
+    match crv.evaluate(k, param, 1, false, true) {
+        Ok(vals) => Ok(vals.get(1).copied().unwrap_or(crate::math::Vec3::UNDEF)),
+        Err(e) if e.is_unported() => Err(e),
+        Err(_) => Ok(crate::math::Vec3::UNDEF),
+    }
+}
+
+fn curve_as_bspline(crv: &crate::curve::curve::Curve, op: &'static str) -> Result<BSplineCurve> {
+    use crate::curve::curve::CurveKind;
+    match crv.kind() {
+        CurveKind::BSpline(b) => Ok(b.clone()),
+        CurveKind::Line(l) => Ok(l.base_with_nurb()?.into_owned()),
+        CurveKind::Ellipse(e) => Ok(e.base().clone()),
+        CurveKind::Parabola(p) => Ok(p.base().clone()),
+        CurveKind::Hyperbola(h) => Ok(h.base.clone()),
+        _ => Err(SolidError::null_pointer(op)),
+    }
+}
+
+/// Live adapter operations used by `CollectTangentEdgeSequence` and
+/// `CreateSmoothEdgeSequence`.
+pub trait SmoothSequenceAccess<O: ClassObject + SolutionObject + Ord> {
+    /// `pEdge->GetEdgeuses(sEdgeuses)` (used by `GetFilletSolverOfEdge`).
+    ///
+    /// # Errors
+    /// Object resolution or topology query failures.
+    fn smooth_edge_edgeuses(&self, edge: O) -> Result<Vec<O>>;
+    /// `pFS->GetEdge()`: the target edge handle of `solver`.
+    ///
+    /// # Errors
+    /// Object resolution or missing solver edge (`SM_ERR_NULL_POINTER`).
+    fn smooth_solver_edge(&self, solver: O) -> Result<O>;
+    /// `pFS->GetFilletCorner(index)`: corner of `solver`'s start (`0`) or end (`1`) vertex.
+    ///
+    /// # Errors
+    /// Object resolution or pending corner-map failures.
+    fn smooth_solver_corner(
+        &self,
+        executive: &FilletExecutive<O>,
+        solver: O,
+        index: usize,
+    ) -> Result<Option<O>>;
+    /// `pFS->GetOtherFilletCorner(corner)`: the corner at the opposite end of `solver`.
+    ///
+    /// # Errors
+    /// Those of [`SmoothSequenceAccess::smooth_solver_corner`].
+    fn smooth_solver_other_corner(
+        &self,
+        executive: &FilletExecutive<O>,
+        solver: O,
+        corner: O,
+    ) -> Result<Option<O>> {
+        let c0 = self.smooth_solver_corner(executive, solver, 0)?;
+        let c1 = self.smooth_solver_corner(executive, solver, 1)?;
+        if c0 == Some(corner) {
+            Ok(c1)
+        } else if c1 == Some(corner) {
+            Ok(c0)
+        } else {
+            Ok(None)
+        }
+    }
+    /// `pCorner->GetTangentFilletSolver(solver)`.
+    ///
+    /// # Errors
+    /// Object resolution or continuity evaluation failures.
+    fn smooth_corner_tangent_solver(
+        &self,
+        k: &Kernel,
+        executive: &FilletExecutive<O>,
+        corner: O,
+        solver: O,
+    ) -> Result<Option<O>>;
+    /// Target `EdgeId` of `pFS->GetEdgeuse(0)->GetEdge()` for `CreateSmoothEdgeSequence`.
+    ///
+    /// # Errors
+    /// Object resolution or missing edge use / edge (`SM_ERR_NULL_POINTER`).
+    fn smooth_solver_edge0_id(&self, solver: O) -> Result<EdgeId>;
+    /// Borrow the target `Brep` (`CreateSmoothEdgeSequence`).
+    ///
+    /// # Errors
+    /// Missing target B-rep.
+    fn smooth_target_brep(&self) -> Result<&Brep>;
+    /// Mutate the target `Brep` during `OrientEdgeSequence`, `Trim`, `EditParameterization`,
+    /// and `SetInterval`, invalidating any cached `CurveCache` for `edges`.
+    ///
+    /// # Errors
+    /// Missing target B-rep or callback errors.
+    fn smooth_with_target_mut<T>(
+        &mut self,
+        edges: &[EdgeId],
+        f: impl FnOnce(&mut Brep) -> Result<T>,
+    ) -> Result<T>;
+    /// Set a joined curve on `edge` (`pE->SetCurve(pNewCurve, TRUE)`) and invalidate caches.
+    ///
+    /// # Errors
+    /// Topology notification or B-rep mutation failures.
+    fn smooth_set_edge_curve(
+        &mut self,
+        k: &mut Kernel,
+        edge: EdgeId,
+        curve: crate::curve::curve::Curve,
+    ) -> Result<()>;
+    /// `SM_CAST_PTR(SmCurveBasedFS, solver)->GetOriginalCurve()`.
+    ///
+    /// # Errors
+    /// Solver lookup failure.
+    fn smooth_solver_original_curve(
+        &self,
+        solver: O,
+    ) -> Result<Option<&crate::curve::curve::Curve>>;
+    /// `SM_CAST_PTR(SmCurveBasedFS, solver)->SetOriginalCurve(curve)`.
+    ///
+    /// # Errors
+    /// Solver lookup failure.
+    fn smooth_set_solver_original_curve(
+        &mut self,
+        solver: O,
+        curve: crate::curve::curve::Curve,
+    ) -> Result<()>;
+    /// `SM_CAST_PTR(SmVariableRadiusFS, solver)->SetFilletLawInterval(interval)`.
+    ///
+    /// # Errors
+    /// Solver lookup failure.
+    fn smooth_set_solver_law_interval(&mut self, solver: O, interval: Extent1d) -> Result<()>;
 }
 
 // ---- RemoveTopoEdges -----------------------------------------------------------------------

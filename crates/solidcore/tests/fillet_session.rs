@@ -347,7 +347,10 @@ fn smooth_prelude_requires_live_tangent_context_for_multiple_solvers() {
     assert_eq!(session.executive().solvers.len(), 2);
     let solvers = session.executive().solvers.clone();
     let error = session.process_smooth_edge_sequences(&mut k).unwrap_err();
-    assert!(error.is_unported());
+    assert!(matches!(error, solidcore::SolidError::InvalidInput { .. }));
+    assert_eq!(session.executive().solvers, solvers);
+    session.create_corners(&k, None).unwrap();
+    session.process_smooth_edge_sequences(&mut k).unwrap();
     assert_eq!(session.executive().solvers, solvers);
 }
 

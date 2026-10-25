@@ -319,7 +319,7 @@ pub(crate) fn loader_rust(i: &LoaderScript) -> Result<Output, HarnessError> {
                 .solver
                 .set_fillet_geom_for_surfaces(solver.solver.fillet_geoms.first().copied());
         }
-        access.solvers.push(solver);
+        access.solvers.push(super::SolverEntry::ConstantRadius(solver));
     }
     let mut executive = executive(Some(Handle::Brep(0)));
     executive.pseudo_brep = Some(Handle::Pseudo);
@@ -369,7 +369,7 @@ pub(crate) fn loader_rust(i: &LoaderScript) -> Result<Output, HarnessError> {
             }
             loader_snapshot(&access, &executive, &mut out)?;
             for solver in &access.solvers {
-                let back_pointer_set = solver.solver.fillet_executive().is_some();
+                let back_pointer_set = solver.base().fillet_executive().is_some();
                 out.push(flag(back_pointer_set));
                 let same_pseudo = if back_pointer_set {
                     let pseudo = executive.pseudo_brep.ok_or_else(missing_error)?;
@@ -378,8 +378,8 @@ pub(crate) fn loader_rust(i: &LoaderScript) -> Result<Output, HarnessError> {
                     false
                 };
                 out.push(flag(same_pseudo));
-                out.push(solver.solver.g1_knots.len() as f64);
-                out.extend(&solver.solver.g1_knots);
+                out.push(solver.base().g1_knots.len() as f64);
+                out.extend(&solver.base().g1_knots);
             }
         }
         Ok(out)

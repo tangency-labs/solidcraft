@@ -137,11 +137,6 @@ const OP_DESTROY: &str = "blend::fillet_geom::p2::FilletBrep::destroy_geom";
 /// The "nothing found" index of `sm_SrfSrfIntersection`'s curve selection.
 const NO_CURVE: usize = 9999;
 
-/// A call into a unit that is not ported yet; `_args` are upstream's arguments.
-fn unported_on<A, T>(_args: A, upstream: &'static str, unit: &'static str) -> Result<T> {
-    Err(SolidError::unported(upstream, unit))
-}
-
 /// `SER(..)` of a call whose failure upstream ignores: [`SolidError::Unported`]
 /// propagates, any other error becomes `None`.
 fn ignore_status<T>(r: Result<T>) -> Result<Option<T>> {
@@ -289,6 +284,13 @@ impl RailSolvers<'_> {
                 "unresolved adjacent fillet solver",
             )),
         }
+    }
+
+    fn variable_radius_mut(
+        &mut self,
+        id: FilletSolverId,
+    ) -> Result<Option<&mut crate::blend::fillet_standard_solver::p1::VariableRadiusFs>> {
+        Ok(self.solver_ops_mut(id)?.variable_radius_mut())
     }
 
     fn geom_solver(fb: &FilletBrep, g: FilletGeomId) -> Result<FilletSolverId> {
@@ -516,35 +518,32 @@ fn rail_edgeuse_intersect(
     g: FilletGeomId,
     solvers: &mut RailSolvers<'_>,
     target: &mut Brep,
+    temp_radius_solver: Option<FilletSolverId>,
     rail_index: usize,
     side_eu: EdgeuseId,
     guess: f64,
     tsect: &mut TsectPnt,
 ) -> Result<Option<f64>> {
-    let si = RailSolvers::geom_solver(fb, g)?;
-    let fs = solvers.solver_ops_mut(si)?;
-    fb.rail_edgeuse_intersect_with_geometry(k, g, fs, target, rail_index, side_eu, guess, tsect)
-}
+    use crate::blend::fillet_executive::p2::DirectTemporaryRadiusChange;
 
-/// `SmTemporaryRadiusChange(pFS, lRailIndex, pSideEU)` (unit
-/// `blend.fillet_executive_p2`): its set-up returns at once for a `NULL` solver (not an
-/// `SmVariableRadiusFS`); for a solver it is unported.
-fn temporary_radius_change(
-    fs: Option<&FilletSolver>,
-    rail_index: usize,
-    side_eu: EdgeuseId,
-) -> Result<()> {
-    match fs {
-        None => Ok(()),
-        Some(fs) => {
-            // UNPORTED(blend.fillet_executive_p2): SmTemporaryRadiusChange::SetUp
-            unported_on(
-                (fs, rail_index, side_eu),
-                "SmTemporaryRadiusChange::SetUp",
-                "blend.fillet_executive_p2",
-            )
+    let change = match temp_radius_solver {
+        Some(si) => {
+            let vrfs = solvers.variable_radius_mut(si)?;
+            DirectTemporaryRadiusChange::new(vrfs, target, rail_index, side_eu)?
+        }
+        None => DirectTemporaryRadiusChange::default(),
+    };
+    let si = RailSolvers::geom_solver(fb, g)?;
+    let result = {
+        let fs = solvers.solver_ops_mut(si)?;
+        fb.rail_edgeuse_intersect_with_geometry(k, g, fs, target, rail_index, side_eu, guess, tsect)
+    };
+    if let Some(si) = temp_radius_solver {
+        if let Ok(vrfs) = solvers.variable_radius_mut(si) {
+            change.revert(vrfs);
         }
     }
+    result
 }
 
 // ---- sm_SrfSrfIntersection --------------------------------------------------------------
@@ -1331,13 +1330,13 @@ impl FilletBrep {
             let mut edgeuse_parameter = 0.0;
             for &guess in &guess_edge_parameters {
                 // Temporarily change this to a constant-radius function.
-                let fs_for_change = if corners.corner(corner)?.is_calc_as_const_rad() {
+                let temp_si = if corners.corner(corner)?.is_calc_as_const_rad() {
                     let si = RailSolvers::geom_solver(self, g1)?;
-                    Some(solvers.solver(si)?)
+                    let _ = solvers.solver(si)?;
+                    Some(si)
                 } else {
                     None
                 };
-                temporary_radius_change(fs_for_change, rail_index, side_eu1)?;
 
                 // rTsectPnt1 is the vertex use's own point: written in place also on a
                 // failure
@@ -1347,6 +1346,7 @@ impl FilletBrep {
                     g1,
                     solvers,
                     target,
+                    temp_si,
                     rail_index,
                     side_eu1,
                     guess,
@@ -1370,13 +1370,14 @@ impl FilletBrep {
                 fs.set_extension_factor(2.0 * ext_factor);
 
                 for &guess in &guess_edge_parameters {
-                    temporary_radius_change(Some(solvers.solver(si)?), rail_index, side_eu1)?;
+                    let _ = solvers.solver(si)?;
                     let r = rail_edgeuse_intersect(
                         self,
                         k,
                         g1,
                         solvers,
                         target,
+                        Some(si),
                         rail_index,
                         side_eu1,
                         guess,
@@ -1492,13 +1493,14 @@ impl FilletBrep {
             for &guess in &guess_edge_parameters {
                 // Temporarily change this to a constant-radius function.
                 let si = RailSolvers::geom_solver(self, g2)?;
-                temporary_radius_change(Some(solvers.solver(si)?), other_rail_index, side_eu2)?;
+                let _ = solvers.solver(si)?;
                 let r = rail_edgeuse_intersect(
                     self,
                     k,
                     g2,
                     solvers,
                     target,
+                    Some(si),
                     other_rail_index,
                     side_eu2,
                     guess,

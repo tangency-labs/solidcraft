@@ -804,6 +804,25 @@ impl FilletCorner {
         exec: &FilletExecutiveData,
         fs: FilletSolverId,
     ) -> Result<Option<FilletSolverId>> {
+        self.tangent_fillet_solver_with_lookup(k, b, fs, |eu| exec.fillet_solver_of_edgeuse(eu))
+    }
+
+    /// Borrowed-lookup form of [`FilletCorner::tangent_fillet_solver`] for live
+    /// executive adapters whose solver identities are generic handles.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for a 1x1, 2x2, closed Nx1 or Nx2 corner without
+    /// `m_pSolverEUs`; those of
+    /// [`FilletCorner::tangent_fillet_solver_nx1_closed_with_lookup`] and
+    /// [`FilletCorner::tangent_fillet_solver_nx2_with_lookup`].
+    pub fn tangent_fillet_solver_with_lookup<S: Copy + Eq>(
+        &self,
+        k: &Kernel,
+        b: &Brep,
+        fs: S,
+        mut solver_of: impl FnMut(EdgeuseId) -> Option<S>,
+    ) -> Result<Option<S>> {
         const OP: &str = "blend::fillet_corner::p1::tangent_fillet_solver";
         match self.kind {
             FilletCornerKind::OneByOne => {
@@ -814,7 +833,7 @@ impl FilletCorner {
                 let [eu] = eus else {
                     return Ok(None);
                 };
-                let my_fs = exec.fillet_solver_of_edgeuse(*eu);
+                let my_fs = solver_of(*eu);
                 if my_fs != Some(fs) {
                     return Ok(None);
                 }
@@ -828,8 +847,8 @@ impl FilletCorner {
                 let [eu0, eu1_] = eus else {
                     return Ok(None);
                 };
-                let fs1 = exec.fillet_solver_of_edgeuse(*eu0);
-                let fs2 = exec.fillet_solver_of_edgeuse(*eu1_);
+                let fs1 = solver_of(*eu0);
+                let fs2 = solver_of(*eu1_);
                 if fs1 == Some(fs) {
                     return Ok(fs2);
                 }
@@ -838,8 +857,12 @@ impl FilletCorner {
                 }
                 Ok(None)
             }
-            FilletCornerKind::NByOneClosed => self.tangent_fillet_solver_nx1_closed(k, b, exec, fs),
-            FilletCornerKind::NByTwo => self.tangent_fillet_solver_nx2(k, b, exec, fs),
+            FilletCornerKind::NByOneClosed => {
+                self.tangent_fillet_solver_nx1_closed_with_lookup(k, b, fs, solver_of)
+            }
+            FilletCornerKind::NByTwo => {
+                self.tangent_fillet_solver_nx2_with_lookup(k, b, fs, solver_of)
+            }
             _ => Ok(None),
         }
     }

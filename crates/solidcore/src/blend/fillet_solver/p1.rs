@@ -1800,6 +1800,14 @@ pub trait FilletSolverOps: AsFilletSolverOps {
         Ok(FilletSolverType::Unknown)
     }
 
+    /// `SM_CAST_PTR(SmVariableRadiusFS, this)`: mutable borrow when the concrete solver
+    /// is a [`VariableRadiusFs`](crate::blend::fillet_standard_solver::p1::VariableRadiusFs).
+    fn variable_radius_mut(
+        &mut self,
+    ) -> Option<&mut crate::blend::fillet_standard_solver::p1::VariableRadiusFs> {
+        None
+    }
+
     /// `((SmConstantDistanceFS*)this)->GetDistance()`: the rail distance of a
     /// constant-distance solver, read by `SmFindClippedRadiusEFO` (a cast upstream
     /// makes only for a [`FilletSolverType::ConstDist`] solver). Added by

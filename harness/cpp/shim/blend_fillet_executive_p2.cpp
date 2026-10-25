@@ -368,6 +368,104 @@ void op_exec(Rd& rd, std::vector<double>& o)
         delete box;
         return;
     }
+    if (sub >= 3)
+    {
+        SmTArray<SmEdge*> all;
+        box->GetEdges(all);
+        SmExtent1d ivl = all[0]->GetInterval();
+        double split_t = 0.35 * ivl.GetMin() + 0.65 * ivl.GetMax();
+        SmEdge* e1 = NULL;
+        SmEdge* e2 = NULL;
+        SmVertex* v_mid = NULL;
+        SmStatus s = box->MakeVertexSplitEdge(all[0], split_t, e1, e2, v_mid);
+        if (s != SM_SUCCESS || !e1 || !e2)
+        {
+            o.push_back(st(s == SM_SUCCESS ? SM_ERR : s));
+            delete box;
+            return;
+        }
+        e2->ReverseOrientation();
+        SmExtent1d e2_ivl(0.0, 2.0);
+        e2->GetCurve()->EditParameterization(e2_ivl);
+        e2->SetInterval(e2_ivl);
+
+        std::vector<SmFilletLaw*> owned_laws;
+        {
+            Executive ex(*box->GetContext(), box);
+            SmTArray<SmEdge*> edges;
+            edges.Add(e2);
+            edges.Add(e1);
+            for (int64_t i = 1; i < k - 1 && i < (int64_t)all.GetSize(); i++)
+                edges.Add(all[(ULONG)i]);
+
+            SmTArray<SmFilletSurfaceGeneratorType> xs;
+            xs.Add(SM_FSG_LINEAR);
+            SmTArray<SmFilletSolverType> rt;
+            rt.Add(sub == 5 ? SM_FS_VARIABLE_RADIUS : SM_FS_CONST_RADIUS);
+            SmTArray<double> rv;
+            rv.Add(1.0);
+            SmTArray<SmFilletLaw*> laws;
+            if (sub == 5)
+            {
+                for (ULONG i = 0; i < edges.GetSize(); i++)
+                {
+                    SmLinearFilletLaw* law = new (*box->GetContext()) SmLinearFilletLaw(1.0, 2.0);
+                    owned_laws.push_back(law);
+                    laws.Add(law);
+                }
+            }
+            s = ex.SetFilletParameters(box, edges, xs, rt, rv, sub == 5 ? &laws : NULL, 0.0, 0.0,
+                                       0.0, 0.0, 1, 1.0);
+            if (s == SM_SUCCESS)
+                s = ex.CreateFilletCorners();
+            if (s != SM_SUCCESS)
+            {
+                o.push_back(st(s));
+            }
+            else if (sub == 3)
+            {
+                SmTArray<SmFilletSolver*> list(ex.GetFilletSolvers());
+                SmTArray<SmFilletSolver*> seq;
+                o.push_back(st(ex.CollectTangentEdgeSequence(list, seq)));
+                o.push_back((double)seq.GetSize());
+                o.push_back((double)list.GetSize());
+            }
+            else
+            {
+                SmStatus ps = ex.ProcessSmoothEdgeSequences();
+                o.push_back(st(ps));
+                if (ps == SM_SUCCESS)
+                {
+                    o.push_back(e1->GetInterval().GetMin());
+                    o.push_back(e1->GetInterval().GetMax());
+                    o.push_back(e2->GetInterval().GetMin());
+                    o.push_back(e2->GetInterval().GetMax());
+                    if (sub == 5)
+                    {
+                        const SmTArray<SmFilletSolver*>& fs = ex.GetFilletSolvers();
+                        SmVariableRadiusFS* vr0 = SM_CAST_PTR(SmVariableRadiusFS, fs[0]);
+                        SmVariableRadiusFS* vr1 = SM_CAST_PTR(SmVariableRadiusFS, fs[1]);
+                        o.push_back(vr0 ? vr0->GetFilletLawInterval().GetMin() : -1.0);
+                        o.push_back(vr0 ? vr0->GetFilletLawInterval().GetMax() : -1.0);
+                        o.push_back(vr1 ? vr1->GetFilletLawInterval().GetMin() : -1.0);
+                        o.push_back(vr1 ? vr1->GetFilletLawInterval().GetMax() : -1.0);
+                        put_curve(o, SM_CAST_PTR(SmBSplineCurve, e1->GetCurve()));
+                        put_curve(o, vr0 ? SM_CAST_PTR(SmBSplineCurve, vr0->GetOriginalCurve())
+                                         : NULL);
+                    }
+                    else
+                    {
+                        put_curve(o, SM_CAST_PTR(SmBSplineCurve, e1->GetCurve()));
+                        put_curve(o, SM_CAST_PTR(SmBSplineCurve, e2->GetCurve()));
+                    }
+                }
+            }
+        }
+        for (SmFilletLaw* l : owned_laws)
+            delete l;
+        delete box;
+        return;
+    }
     {
         Executive ex(*box->GetContext(), box);
         SmStatus s = SM_SUCCESS;

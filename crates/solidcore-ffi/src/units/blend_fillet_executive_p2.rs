@@ -156,7 +156,7 @@ fn validate_op(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
             rd.value()?;
         }
         Op::Exec => {
-            let sub = rd.index(2)?;
+            let sub = rd.index(5)?;
             let k = rd.index(BOX_EDGES)?;
             // SetFilletBrepEdgeMap reads the rails of each solver's fillet geometry,
             // which only CalcFilletGeom builds: with solvers fresh from
@@ -165,6 +165,9 @@ fn validate_op(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
                 return Err(bad(
                     "edge map with solvers whose geometry was not calculated",
                 ));
+            }
+            if sub >= 3 && k < 2 {
+                return Err(bad("split-edge smooth sequence requires at least 2 solvers"));
             }
             rd.box_block()?;
         }

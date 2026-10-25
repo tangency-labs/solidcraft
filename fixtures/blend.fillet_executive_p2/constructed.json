@@ -4033,6 +4033,42 @@
     "continuity": 1,
     "thumbweight": 1.0
    }
+  },
+  {
+   "name": "exec_collect_smooth_split",
+   "inputs": {
+    "op": "exec",
+    "sub": 3,
+    "solvers": 3,
+    "box": {
+     "origin": [0.0, 0.0, 0.0],
+     "size": [10.0, 20.0, 30.0]
+    }
+   }
+  },
+  {
+   "name": "exec_process_smooth_split_const",
+   "inputs": {
+    "op": "exec",
+    "sub": 4,
+    "solvers": 3,
+    "box": {
+     "origin": [0.0, 0.0, 0.0],
+     "size": [10.0, 20.0, 30.0]
+    }
+   }
+  },
+  {
+   "name": "exec_process_smooth_split_vr",
+   "inputs": {
+    "op": "exec",
+    "sub": 5,
+    "solvers": 2,
+    "box": {
+     "origin": [0.0, 0.0, 0.0],
+     "size": [10.0, 20.0, 30.0]
+    }
+   }
   }
  ]
 }

@@ -2175,6 +2175,11 @@ impl FilletSolverOps for VariableRadiusFs {
     fn solver_type(&self) -> Result<FilletSolverType> {
         Ok(VariableRadiusFs::solver_type(self))
     }
+
+    /// `SM_CAST_PTR(SmVariableRadiusFS, this)`.
+    fn variable_radius_mut(&mut self) -> Option<&mut VariableRadiusFs> {
+        Some(self)
+    }
 }
 
 // ---- surface generators -------------------------------------------------------------------------
