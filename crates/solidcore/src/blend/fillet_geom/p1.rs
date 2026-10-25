@@ -614,6 +614,16 @@ impl<'c> CornerLookup<'c> {
         }
     }
 
+    /// Lookup backed by [`FilletExecutiveData::corners`] (`SmFilletExecutive` routines).
+    #[must_use]
+    pub const fn of_executive(exec: &'c FilletExecutiveData) -> Self {
+        Self {
+            table: None,
+            this: None,
+            exec: Some(exec),
+        }
+    }
+
     /// The corner `id` (`GetFilletCorner()`, dereferenced).
     ///
     /// # Errors
@@ -626,6 +636,11 @@ impl<'c> CornerLookup<'c> {
                 return Ok(this);
             }
         }
+        if let Some(exec) = self.exec {
+            if let Some(c) = exec.corners.get(&id) {
+                return Ok(c);
+            }
+        }
         match self.table {
             Some(table) => usize::try_from(id.0)
                 .ok()
@@ -633,7 +648,7 @@ impl<'c> CornerLookup<'c> {
                 .ok_or_else(|| {
                     SolidError::invalid_input(OP_CORNER, "fillet corner id not in the corner table")
                 }),
-            None if self.this.is_some() => Err(SolidError::invalid_input(
+            None if self.this.is_some() || self.exec.is_some() => Err(SolidError::invalid_input(
                 OP_CORNER,
                 "fillet vertex or edge of another corner",
             )),

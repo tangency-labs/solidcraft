@@ -2065,6 +2065,11 @@ fn corner_rust(i: &Inputs) -> Result<Output, HarnessError> {
             corner_rec(&fc, &rm, &mut rec)?;
             if !insert {
                 super::blend_fillet_corner_p3::put_fillet_brep(&mut rec, &new_brep)?;
+                super::blend_fillet_corner_p3::put_error_info(
+                    &mut rec,
+                    &exec.error,
+                    fc.filleted_vertex(),
+                );
             }
             squeeze_output(&rec)
         }

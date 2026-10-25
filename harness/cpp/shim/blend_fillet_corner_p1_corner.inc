@@ -678,7 +678,7 @@ SmBrep* c1_new_fillet_brep(C1Corner& C)
     return fb;
 }
 
-// The record of the face-building ops: `0 status` corner Model fillet-B-rep.
+// The record of the face-building ops: `0 status` corner Model fillet-B-rep error-info.
 void c1_put_face_op(C1Corner& C, SmStatus r, SmBrep* fb, std::vector<double>& o)
 {
     o.push_back(0.0);
@@ -686,6 +686,7 @@ void c1_put_face_op(C1Corner& C, SmStatus r, SmBrep* fb, std::vector<double>& o)
     c1_put_corner(o, C.c, C.M);
     C.M.put(o);
     p3_put_fillet_brep(o, fb);
+    p3_put_error_info(o, C.exec->GetFilletErrorInfo(), C.vertex);
     C.exec->*C1ExecPeek::fillet() = NULL;
 }
 

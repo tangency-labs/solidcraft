@@ -97,9 +97,8 @@
 //!   entries, compressed at the end. `m_pExecutive->m_bDoGlobalMerge` and
 //!   `m_vTopoEdges` (`RemoveFromTopoEdges`, CO-PORTED from `blend.fillet_executive_p1`)
 //!   and `m_sErrorInfo` ([`FilletExecutiveData::error`]) are fields of
-//!   [`FilletExecutiveData`]. `m_pBrep->DeleteEdge` (`topology.brep_p4`) and
-//!   `CreateEndPatch`'s `NoteFilletError` (`blend.fillet_executive_p1`) are `Unported`
-//!   stubs.
+//!   [`FilletExecutiveData`]. `m_pBrep->DeleteEdge` (`topology.brep_p4`) is an
+//!   `Unported` stub.
 //! - **`MakeFaceBrep`** builds into [`CornerEnv::fillet`] (`m_pExecutive->m_pFilletBrep`;
 //!   `None` is the `NULL` upstream dereferences) through `SmBrep::MakeFaceWithCurves`
 //!   with that B-rep's notification environment; the face gets a clone of the corner
@@ -131,12 +130,12 @@ use std::collections::BTreeMap;
 
 use crate::blend::fillet_corner::p2::is_b_spline_kind;
 use crate::blend::fillet_corner::p3::{
-    CornerEnv, FilletCorner, FilletCornerKind, FilletExecutiveData,
+    CornerEnv, ExecutiveErrorObject, FilletCorner, FilletCornerKind, FilletExecutiveData,
 };
 use crate::blend::fillet_custom_solver::{InitialValues, JacobianLoad, OffsetSurface, SurfaceId};
 use crate::blend::fillet_geom::p1::{
-    CornerLookup, FilStatus, FilletBrep, FilletCornerType, FilletEdgeType, FilletErrorType,
-    FilletGeomId, FilletGeomType, FilletSolverId, FilletVertexType,
+    CornerLookup, FilStatus, FilletBrep, FilletEdgeType, FilletErrorType, FilletGeomId,
+    FilletGeomType, FilletSolverId, FilletVertexType,
 };
 use crate::blend::fillet_geom::p4::set_edge_curve;
 use crate::blend::fillet_solver::p1::{
@@ -184,7 +183,7 @@ const OP_REVOLUTION: &str = "blend::fillet_corner::p1::create_srf_of_revolution"
 const OP_PLANAR: &str = "blend::fillet_corner::p1::create_planar_surface";
 
 /// The reason of the inputs upstream dereferences null on.
-const NULL_DEREF: &str = "upstream dereferences null";
+pub(super) const NULL_DEREF: &str = "upstream dereferences null";
 
 /// The angle limit of `sm_CheckFaceComplimentaryCornerConcavity` ("Here we test against
 /// 2 degrees").
@@ -1182,27 +1181,6 @@ const OP_MAKE_FACE: &str = "blend::fillet_corner::p1::make_face_brep";
 const OP_CONST_RAD: &str = "blend::fillet_corner::p1::make_constant_radius_fillet";
 const OP_INSERT: &str = "blend::fillet_corner::p1::insert_intersection_topology";
 
-/// `SmFilletExecutive::NoteFilletError(eErrorType, eCornerType, eStatus, cName, cpVertex,
-/// pSurface1, pSurface2, pEU1, pEU2, cComment)` (unit `blend.fillet_executive_p1`).
-#[allow(clippy::too_many_arguments)]
-fn note_fillet_error(
-    _exec: &mut FilletExecutiveData,
-    _error_type: FilletErrorType,
-    _corner_type: FilletCornerType,
-    _status: FilStatus,
-    _name: &str,
-    _vertex: Option<VertexId>,
-    _surfaces: [Option<&Surface>; 2],
-    _edgeuses: [Option<EdgeuseId>; 2],
-    _comment: &str,
-) -> Result<()> {
-    // UNPORTED(blend.fillet_executive_p1): SmFilletExecutive::NoteFilletError
-    Err(SolidError::unported(
-        "SmFilletExecutive::NoteFilletError",
-        "blend.fillet_executive_p1",
-    ))
-}
-
 /// `SmBrep::DeleteEdge` on the pseudo B-rep (unit `topology.brep_p4`).
 fn pseudo_brep_delete_edge(_pseudo: &mut FilletBrep, _e: EdgeId) -> Result<()> {
     // UNPORTED(topology.brep_p4): SmBrep::DeleteEdge -- justified: plan/findings.md "topology.brep_p4: the last stubs (PR #441)": the corner geometry pass holds no Kernel, and the pseudo B-rep's fillet records (edge list, SmFilletEdge/SmFilletVertex members) would have to drop what DeleteEdge deletes
@@ -1718,9 +1696,9 @@ impl FilletCorner {
     /// # Errors
     ///
     /// `SM_ERR_NULL_POINTER` for such an edge without original face;
-    /// [`SolidError::InvalidInput`] for a face without surface (upstream dereferences it);
-    /// those of the copy; [`SolidError::Unported`] from `SmFilletExecutive::NoteFilletError`
-    /// (`blend.fillet_executive_p1`) after a failed `MakeFaceBrep`.
+    /// [`SolidError::InvalidInput`] for a face without surface or a `MakeFaceBrep` null
+    /// dereference; `SM_ERR` after noting a vertex-problem fillet error when `MakeFaceBrep`
+    /// fails; those of the copy.
     pub fn create_end_patch(&mut self, env: &mut CornerEnv<'_>) -> Result<()> {
         // for every filletCorner->FilletEdge
         for curr_edge in self.edges.clone() {
@@ -1752,21 +1730,26 @@ impl FilletCorner {
             // Create Face (and Edges and Verts) in m_pFilletBrep from m_vSurfaces with call m_pFilletBrep->MakeFaceWithCurves()
             match self.make_face_brep(env) {
                 Ok(()) => {}
-                Err(e @ SolidError::Unported { .. }) => return Err(e),
+                Err(e) if e.is_unported() => return Err(e),
+                Err(
+                    e @ SolidError::InvalidInput {
+                        reason: NULL_DEREF, ..
+                    },
+                ) => return Err(e),
                 Err(_) => {
                     // when MakeFaceBrep() failed - Note FilletError
-                    note_fillet_error(
-                        env.exec,
+                    env.exec.error.note_corner_error(
                         FilletErrorType::VertexProblem,
                         self.corner_type(),
                         FilStatus::Failure,
-                        self.kind.name(),
-                        self.filleted_vertex(),
+                        Some(self.kind.name()),
+                        self.filleted_vertex()
+                            .map(ExecutiveErrorObject::TargetVertex),
                         [None, None], // For now, we don't generally have just two surfaces.
                         [None, None], // For now, we don't generally have just two edgeuses.
-                        "Fillet Corner Error: Corner End Face Creation Error",
-                    )?;
-                    // FILEXEC_CORNER_ERR(this, "Corner Face Creation Error"): a message, then SM_ERR
+                        Some("Fillet Corner Error: Corner End Face Creation Error"),
+                    );
+                    // FILEXEC_CORNER_ERR(this, "Corner End Face Creation Error"): a message, then SM_ERR
                     return Err(SolidError::sm_err(OP_END_PATCH));
                 }
             }

@@ -75,6 +75,8 @@ pub enum Op {
     /// `SmFilletCorner::MakeAnalyticCornerSurface` (unit `blend.fillet_corner_p2`): its
     /// `SmBoolean` is the status (`1` / `0`; a `SER` / `NER` status reads as `1`).
     AnalyticSurface = 5,
+    /// `SmFilletExecutive::TestAndConvertBigRadFillet`.
+    BigRad = 6,
 }
 
 mod sys {
@@ -184,6 +186,59 @@ pub fn validate_corner_op(op: Op, input: &[f64]) -> Result<(), FfiError> {
         bound: MAX_MAGNITUDE,
     };
     let b = validate_block(&mut rd)?;
+    if op == Op::BigRad {
+        rd.opt_index(b.ng())?
+            .ok_or_else(|| bad("big_rad: geom -1"))?;
+        let nc = rd.index(4)?;
+        for _ in 0..nc {
+            rd.index(10)?;
+            let v_edge = rd.opt_index(b.nt)?;
+            let v_sub = rd.index(1)?;
+            if v_edge.is_none() && v_sub != 0 {
+                return Err(bad("big_rad: vertex sub without edge"));
+            }
+            rd.flag()?;
+            rd.finites(2)?;
+            let ne = rd.index(MAX_LIST)?;
+            for _ in 0..ne {
+                rd.opt_index(b.ne())?
+                    .ok_or_else(|| bad("big_rad: corner edge -1"))?;
+            }
+        }
+        let nfc = rd.index(nc)?;
+        for _ in 0..nfc {
+            rd.opt_index(nc)?
+                .ok_or_else(|| bad("big_rad: fillet corner -1"))?;
+        }
+        let ns = rd.index(4)?;
+        for _ in 0..ns {
+            rd.finites(3)?;
+            if rd.flag()? {
+                rd.opt_index(b.nf)?
+                    .ok_or_else(|| bad("big_rad: face0 -1"))?;
+                rd.index(3)?;
+                rd.finite()?;
+                rd.opt_index(b.nf)?
+                    .ok_or_else(|| bad("big_rad: face1 -1"))?;
+                rd.index(3)?;
+                rd.finite()?;
+            }
+            let ngo = rd.index(4)?;
+            for _ in 0..ngo {
+                rd.opt_index(b.ng())?
+                    .ok_or_else(|| bad("big_rad: owned geom -1"))?;
+            }
+        }
+        for _ in 0..b.ng() {
+            rd.opt_index(ns)?;
+        }
+        let nfs = rd.index(ns)?;
+        for _ in 0..nfs {
+            rd.opt_index(ns)?
+                .ok_or_else(|| bad("big_rad: solver -1"))?;
+        }
+        return rd.done();
+    }
     rd.index(10)?; // kind
     let v_edge = rd.opt_index(b.nt)?;
     let v_sub = rd.index(1)?;

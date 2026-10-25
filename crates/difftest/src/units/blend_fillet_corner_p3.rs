@@ -46,10 +46,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use solidcore::blend::fillet_corner::p3::{
-    CornerEnv, CornerFilletBrep, FilletCorner, FilletCornerKind, FilletExecutiveData,
+    CornerEnv, CornerFilletBrep, ExecutiveErrorObject, FilletCorner, FilletCornerKind,
+    FilletExecutiveData,
 };
+use solidcore::blend::fillet_custom_solver::{OffsetSurface, SurfaceId};
+use solidcore::blend::fillet_executive::p3::ErrorInfo;
 use solidcore::blend::fillet_geom::p1::{FilletCornerId, FilletCornerType, FilletSolverId};
-use solidcore::blend::fillet_solver::p1::{FilletSolver, FilletSurfaceGenerator};
+use solidcore::blend::fillet_solver::p1::{FilletSolver, FilletSurfaceGenerator, OffsetSurfaceSlot};
 use solidcore::intersect::surface_intersector::p1::SrfIndex;
 use solidcore::kernel::Kernel;
 use solidcore::math::EFF_ZERO_RAD;
@@ -190,6 +193,50 @@ impl CornerOp {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct BigRadCornerIn {
+    kind: usize,
+    v_edge: i64,
+    #[serde(default)]
+    v_sub: usize,
+    #[serde(default)]
+    adjusted: bool,
+    tol: f64,
+    tan: f64,
+    #[serde(default)]
+    edges: Vec<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BigRadRailsIn {
+    f0: usize,
+    eu0: usize,
+    d0: f64,
+    f1: usize,
+    eu1: usize,
+    d1: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BigRadSolverIn {
+    tol: f64,
+    ang: f64,
+    tang: f64,
+    #[serde(default)]
+    rails: Option<BigRadRailsIn>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct BigRadIn {
+    model: Model,
+    fg: usize,
+    corners: Vec<BigRadCornerIn>,
+    fillet_corners: Vec<usize>,
+    solvers: Vec<BigRadSolverIn>,
+    geom_solvers: Vec<i64>,
+    fillet_solvers: Vec<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "case", rename_all = "snake_case")]
 enum Inputs {
     Create {
@@ -212,6 +259,7 @@ enum Inputs {
         model: Model,
         corner: CornerIn,
     },
+    BigRad(BigRadIn),
 }
 
 const KINDS: [FilletCornerKind; 11] = [
@@ -853,8 +901,8 @@ pub(super) fn corner_rust_status(
     let faces = rm.target_faces.clone();
     // m_pFilletBrep: `new (ctx) SmBrep()` (its constructor makes the infinite region)
     let mut fillet_brep = Brep::new_with_infinite_region().map_err(h)?;
+    let mut exec = FilletExecutiveData::default();
     let r = {
-        let mut exec = FilletExecutiveData::default();
         let mut records = BTreeMap::new();
         let mut attributes = solidcore::geom::attribute::AttributeStore::default();
         let mut env = CornerEnv {
@@ -900,6 +948,7 @@ pub(super) fn corner_rust_status(
     rm.put(&mut rec)?;
     put_corner_surfaces(&mut rec, &c.surfaces)?;
     put_fillet_brep(&mut rec, &fillet_brep)?;
+    put_error_info(&mut rec, &exec.error, c.filleted_vertex());
     corner_output(&rec)
 }
 
@@ -986,6 +1035,532 @@ pub(super) fn put_fillet_brep(o: &mut Vec<f64>, b: &Brep) -> Result<(), HarnessE
         }
     }
     Ok(())
+}
+
+/// Executive error info as `p3_put_error_info` writes it.
+pub(super) fn put_error_info(
+    o: &mut Vec<f64>,
+    info: &ErrorInfo<ExecutiveErrorObject>,
+    corner_vert: Option<VertexId>,
+) {
+    o.push(f64::from(info.code));
+    o.push(info.corner_type as i64 as f64);
+    let vtag = match info.vertex {
+        None => -1.0,
+        Some(ExecutiveErrorObject::TargetVertex(v)) if Some(v) == corner_vert => 1.0,
+        Some(_) => 0.0,
+    };
+    o.push(vtag);
+    let nb = info.entity_name.as_bytes();
+    o.push(nb.len() as f64);
+    for &b in nb {
+        o.push(f64::from(b));
+    }
+    let cb = info.comment.as_bytes();
+    o.push(cb.len() as f64);
+    for &b in cb {
+        o.push(f64::from(b));
+    }
+}
+
+fn big_rad_input(b: &BigRadIn) -> Result<Vec<f64>, HarnessError> {
+    let mut o = Vec::new();
+    push_model(&mut o, &b.model)?;
+    o.push(b.fg as f64);
+    o.push(b.corners.len() as f64);
+    for c in &b.corners {
+        o.extend([
+            c.kind as f64,
+            c.v_edge as f64,
+            c.v_sub as f64,
+            flag(c.adjusted),
+            c.tol,
+            c.tan,
+            c.edges.len() as f64,
+        ]);
+        for &e in &c.edges {
+            o.push(e as f64);
+        }
+    }
+    o.push(b.fillet_corners.len() as f64);
+    for &ci in &b.fillet_corners {
+        o.push(ci as f64);
+    }
+    o.push(b.solvers.len() as f64);
+    for s in &b.solvers {
+        o.extend([s.tol, s.ang, s.tang, flag(s.rails.is_some())]);
+        if let Some(r) = &s.rails {
+            o.extend([
+                r.f0 as f64,
+                r.eu0 as f64,
+                r.d0,
+                r.f1 as f64,
+                r.eu1 as f64,
+                r.d1,
+            ]);
+        }
+        o.push(0.0); // ngo = 0 so M.geoms matches rm.geoms
+    }
+    for &si in &b.geom_solvers {
+        o.push(si as f64);
+    }
+    o.push(b.fillet_solvers.len() as f64);
+    for &si in &b.fillet_solvers {
+        o.push(si as f64);
+    }
+    Ok(o)
+}
+
+fn big_rad_output(rec: &[f64]) -> Result<Output, HarnessError> {
+    let first = rec
+        .first()
+        .copied()
+        .ok_or_else(|| harness("empty big_rad record"))?;
+    if first == REFUSED {
+        return Ok(Output::rejected("upstream would dereference null"));
+    }
+    let converted = rec
+        .get(1)
+        .copied()
+        .ok_or_else(|| harness("short big_rad record"))?;
+    let tail = rec.get(2..).unwrap_or_default().to_vec();
+    Ok(Output::new()
+        .int("status", first as i64)
+        .int("converted", converted as i64)
+        .values("state", tail))
+}
+
+fn big_rad_cpp(b: &BigRadIn) -> Result<Output, HarnessError> {
+    let input = big_rad_input(b)?;
+    let flat = ffi::corner(Op::BigRad, &input).map_err(|e| harness(e.to_string()))?;
+    big_rad_output(&flat)
+}
+
+fn big_rad_rust(k: &Kernel, b: &BigRadIn) -> Result<Output, HarnessError> {
+    ffi::validate_corner_op(Op::BigRad, &big_rad_input(b)?)
+        .map_err(|e| harness(e.to_string()))?;
+    let h = |e: SolidError| harness(e.to_string());
+    let mut rm = RustModel::build(&b.model)?;
+    let fg = rm.geom(b.fg)?;
+    let mut exec = FilletExecutiveData::default();
+    for (ci, c) in b.corners.iter().enumerate() {
+        let kind = *KINDS.get(c.kind).ok_or_else(|| harness("kind"))?;
+        let vert = match usize::try_from(c.v_edge) {
+            Ok(e) => {
+                let edge = *rm
+                    .target_edges
+                    .get(e)
+                    .ok_or_else(|| harness("target edge"))?;
+                let [vs, ve] = rm.target.edge(edge).map_err(h)?.vertices;
+                Some(if c.v_sub == 0 { vs } else { ve })
+            }
+            Err(_) => None,
+        };
+        let mut fc = FilletCorner::new(kind, vert, None, None, c.tol, c.tan);
+        fc.topology_adjusted = c.adjusted;
+        for &ei in &c.edges {
+            fc.edges.push(rm.edge(ei)?);
+        }
+        exec.corners.insert(FilletCornerId(ci as u32), fc);
+    }
+    for &ci in &b.fillet_corners {
+        exec.fillet_corners.push(FilletCornerId(ci as u32));
+    }
+    let mut solvers = Vec::new();
+    for (si, s) in b.solvers.iter().enumerate() {
+        let mut fs = FilletSolver::new(s.tol, s.ang, s.tang);
+        if let Some(r) = &s.rails {
+            let face_eu = |rm: &RustModel, fi: usize, eui: usize| -> Result<(FaceId, EdgeuseId), HarnessError> {
+                let f = *rm.target_faces.get(fi).ok_or_else(|| harness("face"))?;
+                let loops = solidcore::topology::face::p2::loops(&rm.target, f, false, None).map_err(h)?;
+                let l = *loops.first().ok_or_else(|| harness("loop"))?;
+                let eus = solidcore::topology::loopuse::loop_edgeuses(&rm.target, l).map_err(h)?;
+                let eu = *eus.get(eui).ok_or_else(|| harness("eu"))?;
+                Ok((f, eu))
+            };
+            let (f0, eu0) = face_eu(&rm, r.f0, r.eu0)?;
+            let (f1, eu1_id) = face_eu(&rm, r.f1, r.eu1)?;
+            let s0_base = rm.target.face(f0).map_err(h)?.surface.clone().ok_or_else(|| harness("s0"))?;
+            let s1_base = rm.target.face(f1).map_err(h)?.surface.clone().ok_or_else(|| harness("s1"))?;
+            let mut os0 = OffsetSurface::new(
+                &rm.k,
+                r.d0,
+                s0_base,
+                SurfaceId::Face(f0),
+                solidcore::surface::offset_surface::SS_UNKNOWN,
+            )
+            .map_err(h)?;
+            let mut os1 = OffsetSurface::new(
+                &rm.k,
+                r.d1,
+                s1_base,
+                SurfaceId::Face(f1),
+                solidcore::surface::offset_surface::SS_UNKNOWN,
+            )
+            .map_err(h)?;
+            os0.set_allow_extension(true);
+            os1.set_allow_extension(true);
+            fs.edgeuses = [Some(eu0), Some(eu1_id)];
+            fs.set_surface(
+                0,
+                Some(OffsetSurfaceSlot {
+                    key: (si * 2 + 1) as u64,
+                    surface: os0,
+                }),
+            )
+            .map_err(h)?;
+            fs.set_surface(
+                1,
+                Some(OffsetSurfaceSlot {
+                    key: (si * 2 + 2) as u64,
+                    surface: os1,
+                }),
+            )
+            .map_err(h)?;
+        }
+        solvers.push(fs);
+    }
+    for (gi, &si) in b.geom_solvers.iter().enumerate() {
+        let gid = rm.geom(gi)?;
+        rm.fb.geom_mut(gid).map_err(h)?.solver =
+            usize::try_from(si).ok().map(|i| FilletSolverId(i as u32));
+    }
+    for &si in &b.fillet_solvers {
+        exec.fillet_solvers.push(FilletSolverId(si as u32));
+    }
+
+    let res = exec.test_and_convert_big_rad_fillet(
+        k,
+        &mut rm.target,
+        &mut rm.fb,
+        &mut solvers,
+        fg,
+    );
+    let (st, converted) = match res {
+        Ok(conv) => (0.0, conv),
+        Err(e) if e.is_unported() => {
+            return Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())))
+        }
+        Err(e) => (status(&e), false),
+    };
+    let mut rec = vec![st, flag(converted)];
+    if st == 0.0 {
+        rec.push(exec.fillet_corners.len() as f64);
+        for &cid in &exec.fillet_corners {
+            rec.push(f64::from(cid.0));
+        }
+        rec.push(exec.fillet_solvers.len() as f64);
+        for &sid in &exec.fillet_solvers {
+            rec.push(f64::from(sid.0));
+        }
+        if converted {
+            let new_id = FilletCornerId(b.corners.len() as u32);
+            let nc = exec.corners.get(&new_id).ok_or_else(|| harness("new corner"))?;
+            rec.push(nc.corner_type() as i64 as f64);
+            rec.push(nc.vertices.len() as f64);
+            for &v in &nc.vertices {
+                rec.push(rm.vertex_index(Some(v)));
+            }
+            rec.push(nc.edges.len() as f64);
+            for &e in &nc.edges {
+                rec.push(rm.edge_index(Some(e)));
+            }
+            rec.push(nc.approx_tol_3d);
+            rec.push(nc.tangency_tol_radians);
+            rec.push((rm.target_edges.len() * 2) as f64);
+            for &te in &rm.target_edges {
+                let [vs, ve] = rm.target.edge(te).map_err(h)?.vertices;
+                for tv in [vs, ve] {
+                    rec.push(
+                        exec.vertex_corner_map
+                            .get(&tv)
+                            .map_or(-1.0, |c| f64::from(c.0)),
+                    );
+                }
+            }
+        }
+        rm.put(&mut rec)?;
+    }
+    big_rad_output(&rec)
+}
+
+/// Curated `TestAndConvertBigRadFillet` cases exercising full corner conversion
+/// (`squeeze = 0` & `1`, converging `CalcRailIntRail` on 3 orthogonal planes, edge
+/// reversal, corner-edge relation updates, index swap in `m_vFilletCorners`) as well as
+/// non-converting early-outs and error statuses.
+fn big_rad_cases() -> Result<Vec<Case>, HarnessError> {
+    let mk_vert = |point: [f64; 3],
+                   vtype: i32,
+                   status: i32,
+                   corner: i64,
+                   face: i64,
+                   mates: [i64; 2]| VertexIn {
+        point,
+        vtype: i64::from(vtype),
+        status: i64::from(status),
+        corner,
+        pc_class: if face >= 0 { 102 } else { 100 },
+        pc_kind: if face >= 0 { 3 } else { 0 },
+        pc_index: face,
+        pc_sub: 0,
+        pc_face: face,
+        t_param: 0.0,
+        uv: [0.2, 0.2],
+        mates,
+    };
+    let mk_edge = |v0: usize, v1: usize, etype: i32, corner: i64, g0: i64, g1: i64| EdgeIn {
+        vs: v0,
+        ve: v1,
+        etype: i64::from(etype),
+        status: 1, // SM_FIL_PROCESSED
+        corner,
+        curve: Some(line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0])),
+        interval: Some([0.0, 1.0]),
+        fbe: [-1, -1],
+        eus: [
+            EuIn {
+                uv_curve: None,
+                geom: g0,
+                vu_uv: [0.2, 0.2],
+            },
+            EuIn {
+                uv_curve: None,
+                geom: g1,
+                vu_uv: [0.2, 0.2],
+            },
+        ],
+    };
+
+    // Base converting setup:
+    // Target faces: f0 = XY plane z=0, f1 = XZ plane y=0, f2 = YZ plane x=0.
+    // fg = geom 0 between corner 0 (Nx2, target vert (0,0)) and corner 1 (Nx2, target vert (0,1)).
+    // Rail 0: v0 (1, 0.2, 0) -> v1 (0, 0.2, 0)  (dir = (-1, 0, 0)), MATE vertices on f0 (z=0), mates v4 & v5.
+    // Rail 1: v2 (0.2, 0, 0.2) -> v3 (0.8, 0, 0.2) (dir = (+0.6, 0, 0), dot < 0!).
+    // Extra rails into v0 (geom 1, solver 1 on f0 & f1) and v1 (geom 2, solver 2 on f0 & f2) so that
+    // after squeezing rail 0 (moving v1's uses onto v0), v0 has geoms [1, 2] and CalcRailIntRail
+    // converges on f0 at (0.2, 0.2, 0.0)!
+    let base_case = |swap_mates_to_rail1: bool, reverse_cs: bool, swap_fc_order: bool| -> BigRadIn {
+        let (vt0, vt1) = if swap_mates_to_rail1 {
+            (4, 10) // RailXRail on rail 0, Mate on rail 1 -> squeeze = 1!
+        } else {
+            (10, 4) // Mate on rail 0, RailXRail on rail 1 -> squeeze = 0!
+        };
+        let mut vertices = vec![
+            mk_vert([1.0, 0.2, 0.0], vt0, 1, 0, 0, [4, -1]), // v0: start of rail 0 (corner 0)
+            mk_vert([0.0, 0.2, 0.0], vt0, 1, 1, 0, [-1, -1]), // v1: end of rail 0 (corner 1)
+            mk_vert([0.2, 0.0, 0.2], vt1, 1, 0, 0, [4, -1]), // v2: start of rail 1 (corner 0)
+            mk_vert([0.8, 0.0, 0.2], vt1, 1, 1, 0, [-1, -1]), // v3: end of rail 1 (corner 1)
+            mk_vert([0.2, 0.0, 0.3], 10, 1, 0, 1, [0, 2]),   // v4: mate on f1
+            mk_vert([0.0, 0.3, 0.2], 10, 1, 0, 2, [-1, -1]), // v5: extra vertex for rail of geom 1/2
+        ];
+        if swap_mates_to_rail1 {
+            if let Some(v0) = vertices.get_mut(0) {
+                v0.mates = [-1, -1];
+            }
+            if let Some(v2) = vertices.get_mut(2) {
+                v2.mates = [4, -1];
+            }
+        }
+        // Edges:
+        // e0: rail 0 of geom 0 (v0 -> v1)
+        // e1: rail 1 of geom 0 (v2 -> v3)
+        // e2: cross-section of corner 1 (end corner): connects v3 & v1
+        // e3: cross-section of corner 0 (start corner): connects v0 & v2
+        // e4: rail of geom 1 connected to squeezed start vertex (v0 or v2) -> v5
+        // e5: rail of geom 2 connected to squeezed end vertex (v1 or v3) -> v5
+        let sq_sv = if swap_mates_to_rail1 { 2 } else { 0 };
+        let sq_ev = if swap_mates_to_rail1 { 3 } else { 1 };
+        let ot_ev = if swap_mates_to_rail1 { 1 } else { 3 };
+        let ot_sv = if swap_mates_to_rail1 { 0 } else { 2 };
+        let (cs_end_a, cs_end_b) = if reverse_cs {
+            (sq_ev, ot_ev) // GetVertex() != ot_ev -> triggers SM_REVERSE_FILLET_EDGE!
+        } else {
+            (ot_ev, sq_ev)
+        };
+        let (cs_start_a, cs_start_b) = if reverse_cs {
+            (ot_sv, sq_sv) // GetVertex() != sq_sv -> triggers SM_REVERSE_FILLET_EDGE!
+        } else {
+            (sq_sv, ot_sv)
+        };
+        let edges = vec![
+            mk_edge(0, 1, 9, -1, 0, -1),                     // e0: SM_FE_RAIL (9) of geom 0
+            mk_edge(2, 3, 9, -1, 0, -1),                     // e1: SM_FE_RAIL (9) of geom 0
+            mk_edge(cs_end_a, cs_end_b, 1, 1, 0, 2),         // e2: SM_FE_CROSS_SECTION (1) of corner 1 (prim has fg=0 -> modified to mate's fg=2!)
+            mk_edge(cs_start_a, cs_start_b, 1, 0, 1, 0),     // e3: SM_FE_CROSS_SECTION (1) of corner 0 (prim has fg=1, mate cleared!)
+            mk_edge(sq_sv, 5, 9, -1, 1, -1),                 // e4: SM_FE_RAIL of geom 1
+            mk_edge(sq_ev, 5, 9, -1, 2, -1),                 // e5: SM_FE_RAIL of geom 2
+        ];
+        let model = Model {
+            targets: vec![line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0])],
+            faces: vec![
+                plane_srf([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]), // f0: z=0 (normal +Z)
+                plane_srf([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]), // f1: y=0 (normal -Y)
+                plane_srf([0.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]), // f2: x=0 (normal +X)
+            ],
+            fillet_brep: Vec::new(),
+            vertices,
+            edges,
+            geoms: vec![
+                GeomIn {
+                    gtype: 1,
+                    status: 0,
+                    rails: [0, 1],
+                    other1: Vec::new(),
+                    other2: Vec::new(),
+                    center: None,
+                    surface: None,
+                    sides: Vec::new(),
+                },
+                GeomIn {
+                    gtype: 1,
+                    status: 0,
+                    rails: [4, -1],
+                    other1: Vec::new(),
+                    other2: Vec::new(),
+                    center: None,
+                    surface: None,
+                    sides: Vec::new(),
+                },
+                GeomIn {
+                    gtype: 1,
+                    status: 0,
+                    rails: [5, -1],
+                    other1: Vec::new(),
+                    other2: Vec::new(),
+                    center: None,
+                    surface: None,
+                    sides: Vec::new(),
+                },
+            ],
+        };
+        BigRadIn {
+            model,
+            fg: 0,
+            corners: vec![
+                BigRadCornerIn {
+                    kind: 7, // NByTwo
+                    v_edge: 0,
+                    v_sub: 0,
+                    adjusted: false,
+                    tol: 1.0e-5,
+                    tan: 1.0e-2,
+                    edges: vec![3],
+                },
+                BigRadCornerIn {
+                    kind: 7, // NByTwo
+                    v_edge: 0,
+                    v_sub: 1,
+                    adjusted: false,
+                    tol: 1.0e-5,
+                    tan: 1.0e-2,
+                    edges: vec![2],
+                },
+            ],
+            fillet_corners: if swap_fc_order { vec![1, 0] } else { vec![0, 1] },
+            solvers: vec![
+                BigRadSolverIn {
+                    tol: 1.0e-5,
+                    ang: 1.0e-3,
+                    tang: 1.0e-2,
+                    rails: None,
+                },
+                BigRadSolverIn {
+                    tol: 1.0e-5,
+                    ang: 1.0e-3,
+                    tang: 1.0e-2,
+                    rails: Some(BigRadRailsIn {
+                        f0: 0,
+                        eu0: 0,
+                        d0: 0.2,
+                        f1: 1,
+                        eu1: 0,
+                        d1: -0.2,
+                    }),
+                },
+                BigRadSolverIn {
+                    tol: 1.0e-5,
+                    ang: 1.0e-3,
+                    tang: 1.0e-2,
+                    rails: Some(BigRadRailsIn {
+                        f0: 0,
+                        eu0: 3,
+                        d0: 0.2,
+                        f1: 2,
+                        eu1: 0,
+                        d1: 0.2,
+                    }),
+                },
+            ],
+            geom_solvers: vec![0, 1, 2],
+            fillet_solvers: vec![0, 1, 2],
+        }
+    };
+
+    let mut raw: Vec<(&str, BigRadIn)> = vec![
+        ("big_rad_convert_squeeze0", base_case(false, false, false)),
+        ("big_rad_convert_squeeze0_rev_swap", base_case(false, true, true)),
+        ("big_rad_convert_squeeze1", base_case(true, true, false)),
+    ];
+
+    // Non-converting: topology_adjusted == true
+    {
+        let mut c = base_case(false, false, false);
+        if let Some(c0) = c.corners.get_mut(0) {
+            c0.adjusted = true;
+        }
+        raw.push(("big_rad_skip_adjusted", c));
+    }
+    // Non-converting: same rail direction (dot > 0)
+    {
+        let mut c = base_case(false, false, false);
+        if let Some(v2) = c.model.vertices.get_mut(2) {
+            v2.point = [0.8, 0.0, 0.2];
+        }
+        if let Some(v3) = c.model.vertices.get_mut(3) {
+            v3.point = [0.2, 0.0, 0.2];
+        }
+        raw.push(("big_rad_skip_same_dir", c));
+    }
+    // Non-converting: non-Nx2 corner type
+    {
+        let mut c = base_case(false, false, false);
+        if let Some(c1) = c.corners.get_mut(1) {
+            c1.kind = 9; // ConvexNByN
+        }
+        raw.push(("big_rad_skip_corner_type", c));
+    }
+    // Error: neither rail has two SM_FV_MATE vertices -> SM_ERR
+    {
+        let mut c = base_case(false, false, false);
+        if let Some(v0) = c.model.vertices.get_mut(0) {
+            v0.vtype = 4;
+        }
+        if let Some(v2) = c.model.vertices.get_mut(2) {
+            v2.vtype = 4;
+        }
+        raw.push(("big_rad_err_no_mate_rail", c));
+    }
+    // Error: start corner has NULL GetFilletCorner -> SM_ERR_NULL_POINTER
+    {
+        let mut c = base_case(false, false, false);
+        if let Some(v0) = c.model.vertices.get_mut(0) {
+            v0.corner = -1;
+        }
+        raw.push(("big_rad_err_null_corner", c));
+    }
+
+    raw.into_iter()
+        .map(|(name, b)| {
+            let v = serde_json::to_value(Inputs::BigRad(b))
+                .map_err(|e| harness(e.to_string()))?;
+            Ok(Case {
+                unit: "blend.fillet_corner_p3".into(),
+                name: name.into(),
+                source: crate::case::CaseSource::Inline,
+                inputs: v,
+            })
+        })
+        .collect()
 }
 
 /// The corner's surfaces as the shim's `p3_put_surfaces` writes them: per surface its kind
@@ -1598,6 +2173,7 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
             solvers,
         } => create_cpp(brep, *validate_only, *init_gaps, *eu, more, solvers),
         Inputs::Corner { op, model, corner } => corner_cpp(*op, model, corner),
+        Inputs::BigRad(b) => big_rad_cpp(b),
     }
 }
 
@@ -1615,6 +2191,7 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
             ffi::validate_corner(&corner_input(model, corner)?).map_err(|e| harness(e.to_string()))?;
             corner_rust(k, *op, model, corner)
         }
+        Inputs::BigRad(b) => big_rad_rust(k, b),
     }
 }
 
@@ -1646,7 +2223,7 @@ impl UnitDiff for Runner {
                 Inputs::Corner { op, model, corner } => {
                     corner_input(model, corner).is_ok_and(|v| ffi::corner(op.ffi(), &v).is_ok())
                 }
-                Inputs::Create { .. } => true,
+                Inputs::Create { .. } | Inputs::BigRad(_) => true,
             };
             if ok {
                 return serde_json::to_value(inputs).ok();
@@ -1660,7 +2237,9 @@ impl UnitDiff for Runner {
             seeds: ctx.seeds.max(MIN_GENERATED),
             ..ctx.clone()
         };
-        default_cases(self, &ctx)
+        let mut out = default_cases(self, &ctx)?;
+        out.extend(big_rad_cases()?);
+        Ok(out)
     }
 }
 
