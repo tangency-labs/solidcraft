@@ -22,7 +22,7 @@ fn child() {
     println!("FRESH {}", serde_json::to_string(&fresh).unwrap());
     // Dying while starting up, before any command: in a graphics driver, with or without what
     // a native crash handler caught.
-    if mode == "startup" || mode == "native" {
+    if mode == "startup" || mode == "native" || mode == "signal" {
         phase("window");
         phase("adapter request");
         set_environment("Renderer: Vulkan Test GPU (driver 1.2.3)");
@@ -35,6 +35,18 @@ fn child() {
             )
             .unwrap();
             fs::write(dump, b"MDMP fake").unwrap();
+        }
+        // What the macOS signal handler writes: no minidump, a walk up the stack instead (with
+        // a frame that isn't text, one far too long, and far too many).
+        if mode == "signal" {
+            let (info, _) = native_paths().unwrap();
+            let mut frames = vec![json!("libAGXMetalG13X.dylib+0x1A2B3C"), json!(42), json!("x".repeat(5000))];
+            frames.extend((0..100).map(|i| json!(format!("solidcraft+0x{i:X} frame{i}"))));
+            let v = json!({"signal": "SIGSEGV", "number": 11, "code": "SIGSEGV", "name": "segmentation fault",
+                "detail": "read of 0x0000000000000010 (SEGV_MAPERR)", "address": "0x0000000201A2B3C0",
+                "module": "/System/Library/Extensions/AGXMetalG13X.bundle/Contents/MacOS/libAGXMetalG13X.dylib",
+                "offset": "0x1A2B3C", "thread": 4242, "thread_name": "main", "pid": 77, "frames": frames});
+            fs::write(info, v.to_string()).unwrap();
         }
         std::process::abort();
     }
@@ -380,6 +392,29 @@ fn a_native_crash_is_reported_with_the_module_the_step_and_the_minidump() {
     let _ = run_child(&d, "none");
     let (s, _) = only_report(&d);
     assert_eq!(s.count, 2);
+    let _ = fs::remove_dir_all(&d);
+}
+
+#[test]
+fn a_crash_signal_is_reported_with_its_thread_and_its_walk_up_the_stack() {
+    let d = fresh_dir("signal");
+    let (_, ok) = run_child(&d, "signal");
+    assert!(!ok, "the child aborted");
+    let (_, ok) = run_child(&d, "none");
+    assert!(ok);
+    let (s, v) = only_report(&d);
+    assert_eq!(s.kind, "unclean_exit");
+    assert!(s.message.contains("segmentation fault (SIGSEGV) in libAGXMetalG13X.dylib+0x1A2B3C during startup (device creation"), "{}", s.message);
+    assert_eq!(v["native"]["signal"], "SIGSEGV");
+    let bt: Vec<&str> = v["backtrace"].as_array().unwrap().iter().map(|f| f.as_str().unwrap()).collect();
+    assert_eq!(bt[0], "SIGSEGV segmentation fault (read of 0x0000000000000010 (SEGV_MAPERR))");
+    assert_eq!(bt[2], "on thread 4242 (main)");
+    assert_eq!(bt[3], "libAGXMetalG13X.dylib+0x1A2B3C");
+    // Frames that aren't text are dropped, long ones cut, and only so many kept.
+    assert_eq!(bt[4], format!("{}… (5000 bytes)", "x".repeat(300)));
+    assert_eq!(bt[5], "solidcraft+0x0 frame0");
+    assert_eq!(bt.len(), 3 + MAX_FRAMES, "{bt:?}");
+    assert!(v.get("minidump_path").is_none(), "{v}");
     let _ = fs::remove_dir_all(&d);
 }
 

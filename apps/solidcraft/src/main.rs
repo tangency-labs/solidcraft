@@ -24,6 +24,8 @@ mod control_server;
 mod device_lost;
 #[cfg(target_os = "windows")]
 mod native_crash;
+#[cfg(target_os = "macos")]
+mod native_crash_macos;
 #[cfg(target_os = "windows")]
 mod native_frame;
 #[cfg(target_os = "macos")]
@@ -738,10 +740,12 @@ fn main() -> eframe::Result {
             solidcraft_engine::crash::install(dir, build)
         })
         .unwrap_or_default();
-    // A crash in native code (a graphics driver) says where it happened: the exception and the
-    // module on Windows, and on every system the startup step the app was in.
+    // A crash in native code (a graphics driver) says where it happened: the exception or signal
+    // and the module on Windows and macOS, and on every system the startup step the app was in.
     #[cfg(target_os = "windows")]
     native_crash::install();
+    #[cfg(target_os = "macos")]
+    native_crash_macos::install();
     // Windows with only OpenGL to start: the system title bar instead of ours (#2063).
     let started = match &wgpu_options.wgpu_setup {
         eframe::egui_wgpu::WgpuSetup::CreateNew(setup) => setup.instance_descriptor.backends,

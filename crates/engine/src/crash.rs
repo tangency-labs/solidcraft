@@ -20,9 +20,10 @@
 //! - **Startup steps** ([`phase`]): the journal keeps the step the app is in while it gets its
 //!   window and graphics device up, so a crash inside a graphics driver still says where it
 //!   happened, and the renderer ([`set_environment`]) once it is known.
-//! - **Native crashes** (Windows): the app's exception filter writes what it caught (exception
-//!   code, faulting module and offset) and a minidump next to the journal ([`native_paths`]);
-//!   the next start puts both into the unclean exit's report.
+//! - **Native crashes** (Windows, macOS): the app's exception filter or signal handler writes what
+//!   it caught (exception code or signal, faulting module and offset, on macOS a walk up the stack)
+//!   and on Windows a minidump next to the journal ([`native_paths`]); the next start puts them
+//!   into the unclean exit's report.
 //!
 //! Reports are folders `crashes/<time>-<signature>/` holding `report.json`, and when known
 //! `design.solidcraft`, `replay.json` and `minidump.dmp`. Nothing is ever sent anywhere.
@@ -368,7 +369,8 @@ pub fn phase(step: &str) {
 }
 
 /// Where a native crash handler writes what it caught for this run: a small JSON file
-/// (`code`, `name`, `address`, `module`, `offset`, `detail`, `thread`) and a minidump. The next
+/// (`code`, `name`, `address`, `module`, `offset`, `detail`, `thread`, and from macOS
+/// `thread_name` and `frames`) and a minidump. The next
 /// start reports both with this run's unclean exit. `None` before [`install`] or without a journal.
 pub fn native_paths() -> Option<(PathBuf, PathBuf)> {
     let s = STATE.get()?;
@@ -843,7 +845,14 @@ fn unclean_exit(dir: &Path, build: &Build, journal: &Path) {
             let mut frames = vec![format!("{code} {name}{}", field("detail").map(|d| format!(" ({d})")).unwrap_or_default())];
             frames.push(format!("at {module}+{offset} (address {})", field("address").unwrap_or_else(|| "?".into())));
             if let Some(t) = native.as_ref().and_then(|n| n.get("thread")).and_then(Value::as_u64) {
-                frames.push(format!("on thread {t}"));
+                frames.push(match field("thread_name").filter(|n| !n.is_empty()) {
+                    Some(n) => format!("on thread {t} ({n})"),
+                    None => format!("on thread {t}"),
+                });
+            }
+            // The handler's own walk up the stack (macOS): `module+offset symbol+offset`.
+            if let Some(walk) = native.as_ref().and_then(|n| n.get("frames")).and_then(Value::as_array) {
+                frames.extend(walk.iter().filter_map(Value::as_str).take(MAX_FRAMES).map(|f| limited(f, 300)));
             }
             (
                 format!("SolidCraft {was} (started {when}) crashed with {name} ({code}) in {at} {during}"),
