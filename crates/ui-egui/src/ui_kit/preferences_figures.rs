@@ -242,10 +242,11 @@ pub(crate) fn paint_layout(ui: &mut egui::Ui, state: super::preferences::LayoutP
     let object_centre = c.at((viewport_left + 120.0 - inset) * 0.5, (top + viewport_bottom) * 0.5);
     crate::icons::glyphs::brand_mark_silhouette(&p, object_centre, c.width(22.0), quiet);
     p.circle_filled(c.at(110.0 - inset, top + 7.0), c.width(3.5), quiet);
+    let history_fill = if state.history_translucent && !state.compact { t.selected_bg.gamma_multiply(0.60) } else { t.selected_bg };
     let history = match state.history {
-        1 => panel(inset, top, 10.0, bottom - top, "", t.selected_bg),
-        2 => panel(bx, top + browser_height + gap, bw, bottom - top - browser_height - gap, "History", t.selected_bg),
-        _ => panel(inset, bottom - 10.0, 120.0 - inset * 2.0, 10.0, "History", t.selected_bg),
+        1 => panel(inset, top, 10.0, bottom - top, "", history_fill),
+        2 => panel(bx, top + browser_height + gap, bw, bottom - top - browser_height - gap, "History", history_fill),
+        _ => panel(inset, bottom - 10.0, 120.0 - inset * 2.0, 10.0, "History", history_fill),
     };
     if state.history == 1 {
         // A single vertical mark reads as the narrow icon-only history rail.

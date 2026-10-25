@@ -165,6 +165,13 @@ pub(crate) fn floating_rect(app: &SolveApp, available: Rect) -> Rect {
     Rect::from_min_max(min, pos2((min.x + strip_width(app)).min((available.right() - gap).max(min.x)), (available.bottom() - gap).max(min.y)))
 }
 
+/// The floating history card's fill: the same translucent panel as the floating browser when
+/// the history-float preference is on, otherwise the usual opaque panel.
+fn card_fill(app: &SolveApp, floating: bool) -> egui::Color32 {
+    let t = Tokens::get();
+    if floating && app.preferences.history_float { t.panel.gamma_multiply(crate::browser::FLOAT_ALPHA) } else { t.panel }
+}
+
 /// Full-height left card, or a card sharing the browser column below it.
 pub fn left_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
     let t = Tokens::get();
@@ -177,7 +184,8 @@ pub fn left_panel(app: &mut SolveApp, ui: &mut egui::Ui) {
             return;
         }
         let container = Container::new(ui.ctx(), Surface::Panel).joined(crate::ui_kit::DockEdges { left: true, top: true, ..Default::default() });
-        let frame = container.frame(ui.ctx(), t.panel, crate::frame::Side::Left).inner_margin(t.space_4);
+        let fill = card_fill(app, container.floating());
+        let frame = container.frame(ui.ctx(), fill, crate::frame::Side::Left).inner_margin(t.space_4);
         let inner = (bounds.size() - frame.total_margin().sum()).max(egui::Vec2::ZERO);
         let card = Container::new(ui.ctx(), Surface::Panel)
             .area(egui::Id::new("sc_timeline_left_card"))
@@ -1668,6 +1676,82 @@ mod tests {
         harness.step(&json!({"drag": [[rail.x, rail.y], [rail.x - 40.0, rail.y]]})).unwrap();
         let narrower = harness.app.preferences.browser_width;
         assert!(narrower < wider - 20.0, "dragging it left should narrow it again: {wider} -> {narrower}");
+    }
+
+    /// The Interface page's History card row writes the same preference the card reads (#6571);
+    /// a docked layout leaves it inert, as the browser row is.
+    #[test]
+    fn the_interface_page_toggles_the_history_card_translucency() {
+        for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+            let mut harness = Harness::new();
+            harness.app.home.open = false;
+            harness.app.ui.layout = mode;
+            harness.frames(2);
+            crate::prefs::open_at(&mut harness.app, crate::prefs::PAGE_INTERFACE);
+            harness.frames(4);
+            let row = crate::i18n::tr("prefs.history_card");
+            harness.step(&json!({"click": {"handle": format!("dialog:{row}:{}", crate::i18n::tr("prefs.translucent"))}})).unwrap();
+            harness.frames(4);
+            assert_eq!(harness.app.preferences.history_float, mode == crate::shell::LayoutMode::Floating, "{mode:?}");
+        }
+    }
+
+    /// The floating history card follows the same Opaque/Translucent choice as the floating
+    /// browser (#6571); a docked column keeps its opaque panel.
+    #[test]
+    fn a_translucent_history_card_shows_the_workspace_through_it() {
+        for (mode, stacked) in [
+            (crate::shell::LayoutMode::Floating, false),
+            (crate::shell::LayoutMode::Floating, true),
+            (crate::shell::LayoutMode::Docked, false),
+            (crate::shell::LayoutMode::Docked, true),
+        ] {
+            let mut harness = Harness::new();
+            harness.app.home.open = false;
+            harness.app.ui.layout = mode;
+            harness.app.preferences.timeline_left = true;
+            harness.app.preferences.timeline_under_browser = stacked;
+            harness.app.preferences.history_float = false;
+            harness.call("ui.resize", json!({"width": 1400, "height": 900}));
+            harness.frames(30);
+            let floating = Container::for_layout(mode, Surface::Panel).floating();
+            // The panel colour only reaches the screen through the card's frame, which wraps (and
+            // therefore contains) the card's inner rect. Read the frame's fill as painted, before
+            // and after the choice, rather than recomputing theme tokens outside a frame. A
+            // floating Area fades in, with egui scaling its whole layer, so measure only after
+            // that fade has run out.
+            let opaque = card_paint_fill(&harness);
+            harness.app.preferences.history_float = true;
+            harness.frames(30);
+            let see_through = card_paint_fill(&harness);
+            if floating {
+                assert_eq!(
+                    see_through,
+                    opaque.gamma_multiply(crate::browser::FLOAT_ALPHA),
+                    "{mode:?}, stacked={stacked}: the floating card's frame should gain the browser's translucency"
+                );
+            } else {
+                assert_eq!(see_through, opaque, "{mode:?}, stacked={stacked}: a docked card keeps its opaque panel");
+            }
+        }
+    }
+
+    /// The history card's frame fill: the only painted rect with a fill covering the whole card.
+    fn card_paint_fill(harness: &Harness) -> egui::Color32 {
+        let card = crate::scenario::rect_of("history:vertical").expect("the history card is drawn");
+        let mut fills = Vec::new();
+        for shape in &harness.shapes {
+            crate::test_support::each_shape(&shape.shape, &mut |shape| {
+                if let egui::Shape::Rect(rect) = shape
+                    && rect.fill.a() > 0
+                    && rect.rect.contains_rect(card)
+                {
+                    fills.push(rect.fill);
+                }
+            });
+        }
+        assert_eq!(fills.len(), 1, "the card's frame paints one fill over the whole card");
+        fills[0]
     }
 
     #[test]

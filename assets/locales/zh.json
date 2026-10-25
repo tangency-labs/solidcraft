@@ -1452,7 +1452,7 @@
   "prefs.interval_minutes": "{n} 分钟",
   "prefs.labels": "标签",
   "prefs.layout": "布局",
-  "prefs.layout_note": "紧凑模式将面板停靠在窗口边缘。浏览器半透明仅适用于浮动模式。助手面板的位置在助手页面中设置。",
+  "prefs.layout_note": "紧凑模式将面板停靠在窗口边缘。浏览器和历史的半透明仅适用于浮动模式。助手面板的位置在助手页面中设置。",
   "prefs.left": "左侧",
   "prefs.left_click": "左键单击",
   "prefs.live_input": "实时输入",

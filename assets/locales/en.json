@@ -1452,7 +1452,7 @@
   "prefs.interval_minutes": "{n} min",
   "prefs.labels": "Labels",
   "prefs.layout": "Layout",
-  "prefs.layout_note": "Compact docks panels to the window edges. Browser translucency is available in Floating. Change the Assistant side on the Assistant page.",
+  "prefs.layout_note": "Compact docks panels to the window edges. Browser and history translucency are available in Floating. Change the Assistant side on the Assistant page.",
   "prefs.left": "Left",
   "prefs.left_click": "Left click",
   "prefs.live_input": "Live input",

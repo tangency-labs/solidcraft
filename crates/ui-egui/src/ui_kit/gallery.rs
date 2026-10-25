@@ -44,7 +44,9 @@ const ELEMENTS: &[Element] = &[
                 |ui| {
                     text(ui, "Controls", Text::Inline);
                 },
-                |ui, ()| layout_preview(ui, LayoutPreview { compact: true, labels: false, history: 2, translucent: false }),
+                |ui, ()| {
+                    layout_preview(ui, LayoutPreview { compact: true, labels: false, history: 2, translucent: false, history_translucent: false })
+                },
             )
         });
     }),

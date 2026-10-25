@@ -71,6 +71,14 @@ pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                             }
                         });
                     });
+                    ui_kit::row(ui, app.tr("prefs.history_card"), |ui| {
+                        ui.add_enabled_ui(app.ui.layout == crate::shell::LayoutMode::Floating, |ui| {
+                            let mut selected = usize::from(app.preferences.history_float);
+                            if ui_kit::segmented(ui, &mut selected, &[app.tr("prefs.opaque"), app.tr("prefs.translucent")], Default::default()) {
+                                app.preferences.history_float = selected == 1;
+                            }
+                        });
+                    });
                     // Where a dialog's and a sketch's OK and Cancel also sit (#6709).
                     ui_kit::row(ui, "", |ui| {
                         let check = setting::view_confirm_corner(app, ui).on_hover_text(app.tr("prefs.view_confirm_corner_note"));
@@ -82,6 +90,7 @@ pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         labels: app.preferences.ribbon_labels,
                         history: if app.preferences.timeline_left { if app.preferences.timeline_under_browser { 2 } else { 1 } } else { 0 },
                         translucent: app.preferences.browser_float,
+                        history_translucent: app.preferences.history_float,
                     }
                 })
             },

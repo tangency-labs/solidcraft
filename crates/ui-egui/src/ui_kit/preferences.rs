@@ -494,9 +494,10 @@ pub(crate) struct LayoutPreview {
     pub labels: bool,
     pub history: usize,
     pub translucent: bool,
+    pub history_translucent: bool,
 }
 
-/// One live shell specimen follows all four layout choices; it is a schematic, not a second scene.
+/// One live shell specimen follows all five layout choices; it is a schematic, not a second scene.
 pub(crate) fn layout_preview(ui: &mut Ui, state: LayoutPreview) {
     super::preferences_figures::paint_layout(ui, state);
 }

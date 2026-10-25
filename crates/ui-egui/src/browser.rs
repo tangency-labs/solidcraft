@@ -829,8 +829,8 @@ const MIN_BROWSER_WIDTH: f32 = 170.0;
 const MAX_BROWSER_WIDTH: f32 = 620.0;
 /// How wide a grip the sidebar's right edge offers, counted inwards from the edge.
 const BROWSER_RAIL: f32 = 6.0;
-/// How opaque the floating browser's card is; the workspace shows through the rest.
-const BROWSER_FLOAT_ALPHA: f32 = 0.4;
+/// How opaque the floating browser's and history's cards are; the workspace shows through the rest.
+pub(crate) const FLOAT_ALPHA: f32 = 0.4;
 
 pub(crate) fn browser_width(remembered: f32) -> f32 {
     if remembered.is_finite() { remembered.clamp(MIN_BROWSER_WIDTH, MAX_BROWSER_WIDTH) } else { crate::prefs::DEFAULT_BROWSER_WIDTH }
@@ -884,7 +884,7 @@ pub fn browser(app: &mut SolveApp, ui: &mut egui::Ui) {
     app.shell.browser = None;
     let min_height = HEADER_H + 2.0 * (CARD_INSET + 1.0);
     if bounds.is_positive() && bounds.height() >= min_height {
-        let fill = if container.floating() && app.preferences.browser_float { t.panel.gamma_multiply(BROWSER_FLOAT_ALPHA) } else { t.panel };
+        let fill = if container.floating() && app.preferences.browser_float { t.panel.gamma_multiply(FLOAT_ALPHA) } else { t.panel };
         let frame = container.frame(ui.ctx(), fill, crate::frame::Side::Left).inner_margin(CARD_INSET as i8);
         let inner_width = (bounds.width() - frame.total_margin().sum().x).max(0.0);
         let inner_height = (bounds.height() - frame.total_margin().sum().y).max(0.0);
