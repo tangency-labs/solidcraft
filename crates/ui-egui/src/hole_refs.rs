@@ -307,6 +307,7 @@ pub(crate) fn canvas(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter,
             at,
             focus,
             false,
+            crate::canvas::box_place(app, proj),
         );
         if let Some(r) = r {
             crate::scenario::publish_handle(&format!("canvas:{label}"), r.center());

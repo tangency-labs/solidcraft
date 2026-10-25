@@ -350,7 +350,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj
             // beside the centre would cover the handles the user is reaching for.
             let off = if triad.is_some() { vec2(crate::gizmo::LEN_PX as f32 + 16.0, -12.0) } else { vec2(16.0, -30.0) };
             let box_at = rotation.map_or(bs + off, |(end, _)| end + vec2(16.0, -12.0));
-            value_box_with(ui, label, value, box_at, focus || dragging, true);
+            value_box_with(ui, label, value, box_at, focus || dragging, true, box_place(app, proj));
         }
         app.dialog = Some(d);
         return;
@@ -680,6 +680,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
                 (ts + vec2(14.0, 8.0), egui::Align2::LEFT_TOP),
                 *distance2 != before,
                 false,
+                box_place(app, proj),
             );
         }
     }
@@ -739,12 +740,28 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     let note = crate::drag_extrude::step_note(app);
     // Also without an arrow (the value does not evaluate yet): the box still keeps off the handles.
     let box_at = crate::place_gizmo::yield_box(ui, anchor, box_at);
-    value_box_noted(ui, label, value, box_at, focus || *value != before, note.as_deref());
+    value_box_noted(ui, label, value, box_at, focus || *value != before, note.as_deref(), box_place(app, proj));
     if *value != before
         && let Kind::Extrude { all, .. } = &mut d.kind
     {
         *all = false;
     }
+}
+
+/// Where a value box may sit on the canvas: clear of the command window, inside the drawing
+/// area.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct BoxPlace {
+    /// The command window's rectangle: a box that would cover it moves out of it (#6608).
+    pub dialog: Option<egui::Rect>,
+    /// The drawing area the box stays in.
+    pub view: Option<egui::Rect>,
+}
+
+/// The place the value boxes of a command may take: clear of the command window, inside the
+/// drawing area.
+pub(crate) fn box_place(app: &SolveApp, proj: &Proj) -> BoxPlace {
+    BoxPlace { dialog: app.viewport.dialog_rect, view: Some(proj.rect) }
 }
 
 /// The command's main value in the viewport, next to the geometry: the keyboard goes here while
@@ -756,21 +773,21 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
 /// the pointer is over it: the wheel steps its value (`value_step`), which moves the arrow tip
 /// the box follows, and a box sliding out from under the pointer would hand the next notch to
 /// the camera.
-fn value_box(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool) {
-    value_box_with(ui, label, value, at, select_all, false);
+fn value_box(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool, place: BoxPlace) {
+    value_box_with(ui, label, value, at, select_all, false, place);
 }
 
 /// [`value_box`]; with `keep_tab` Tab stays in the box for the caller (the Move box steps
 /// through its values with it).
-fn value_box_with(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool, keep_tab: bool) {
+fn value_box_with(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool, keep_tab: bool, place: BoxPlace) {
     let ids = (egui::Id::new("sc_canvas_area"), egui::Id::new("sc_canvas_value"));
-    value_box_in(ui, ids, label, value, (at, egui::Align2::LEFT_TOP), select_all, keep_tab);
+    value_box_in(ui, ids, label, value, (at, egui::Align2::LEFT_TOP), select_all, keep_tab, place);
 }
 
 /// [`value_box`] with a note after the field (a pull's step size).
-fn value_box_noted(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool, note: Option<&str>) {
+fn value_box_noted(ui: &mut egui::Ui, label: &str, value: &mut String, at: Pos2, select_all: bool, note: Option<&str>, place: BoxPlace) {
     let ids = (egui::Id::new("sc_canvas_area"), egui::Id::new("sc_canvas_value"));
-    value_box_full(ui, ids, label, value, (at, egui::Align2::LEFT_TOP), (select_all, false), note);
+    value_box_full(ui, ids, label, value, (at, egui::Align2::LEFT_TOP), (select_all, false), note, place);
 }
 
 /// [`value_box_with`] under its own ids (its area's and its field's), for a value beside the main
@@ -784,8 +801,9 @@ pub(crate) fn value_box_in(
     at: (Pos2, egui::Align2),
     select_all: bool,
     keep_tab: bool,
+    place: BoxPlace,
 ) -> Option<egui::Rect> {
-    value_box_full(ui, ids, label, value, at, (select_all, keep_tab), None)
+    value_box_full(ui, ids, label, value, at, (select_all, keep_tab), None, place)
 }
 
 /// [`value_box_in`] with a short dimmed note after the field (a pull's step size).
@@ -797,6 +815,7 @@ fn value_box_full(
     (at, pivot): (Pos2, egui::Align2),
     (select_all, keep_tab): (bool, bool),
     note: Option<&str>,
+    place: BoxPlace,
 ) -> Option<egui::Rect> {
     let t = Tokens::get();
     // Held in place while the pointer is over it and value stepping is on (see `value_box`): by
@@ -807,6 +826,15 @@ fn value_box_full(
         .memory(|m| m.area_rect(area))
         .filter(|r| crate::value_step::enabled(ui.ctx()) && pointer.is_some_and(|p| r.contains(p)))
         .map_or(at, |r| pivot.pos_in_rect(&r));
+    // #6608: the box moves out of the command window it would otherwise cover: it keeps its
+    // place by its geometry, but a box that would cover the window moves out of it.
+    let at = match place.dialog {
+        Some(dialog) => {
+            let kept = clear_of_dialog(rect_at(at, pivot, box_size(ui, area, label, note)), dialog, place.view);
+            pivot.pos_in_rect(&kept)
+        }
+        None => at,
+    };
     let mut field = None;
     Container::new(ui.ctx(), Surface::Canvas).area(area).fixed_pos(at).pivot(pivot).order(egui::Order::Foreground).show(ui.ctx(), |ui| {
         Container::popup_frame(ui.style()).inner_margin(egui::Margin::symmetric(6, 3)).show(ui, |ui| {
@@ -829,6 +857,74 @@ fn value_box_full(
         });
     });
     field
+}
+
+/// The gap left between a value box and the command window (px).
+const DIALOG_GAP: f32 = 4.0;
+
+/// Where a value box goes so it does not cover the command window: whole, to the side of the
+/// geometry that is farther from the window, and inside the drawing area (`view`), like a box
+/// kept in view (#6608). The sides are tried in order: beside the window first, so the box
+/// stays near its geometry, then above and below it.
+fn clear_of_dialog(rect: egui::Rect, dialog: egui::Rect, view: Option<egui::Rect>) -> egui::Rect {
+    if !rect.intersects(dialog) {
+        return rect;
+    }
+    // The sides the box could go to: each moves it whole, just past the window's edge.
+    let sides = [
+        egui::vec2(dialog.left() - DIALOG_GAP - rect.right(), 0.0),
+        egui::vec2(dialog.right() + DIALOG_GAP - rect.left(), 0.0),
+        egui::vec2(0.0, dialog.top() - DIALOG_GAP - rect.bottom()),
+        egui::vec2(0.0, dialog.bottom() + DIALOG_GAP - rect.top()),
+    ];
+    for d in sides {
+        let moved = keep_in_view(rect.translate(d), view);
+        // This side leaves the box on the window: the next one may clear it.
+        if moved.intersects(dialog) {
+            continue;
+        }
+        return moved;
+    }
+    rect
+}
+
+/// A rectangle kept inside the drawing area: one that would leave it moves back to its edge.
+fn keep_in_view(rect: egui::Rect, view: Option<egui::Rect>) -> egui::Rect {
+    let Some(view) = view else { return rect };
+    let size = rect.size();
+    let min = rect.min.clamp(view.min, (view.max - size).max(view.min));
+    egui::Rect::from_min_size(min, size)
+}
+
+/// The rectangle a value box of `size` takes when its pivot sits at `at`.
+fn rect_at(at: Pos2, pivot: egui::Align2, size: egui::Vec2) -> egui::Rect {
+    let offset = pivot.pos_in_rect(&egui::Rect::from_min_size(Pos2::ZERO, size));
+    egui::Rect::from_min_size(at - egui::vec2(offset.x, offset.y), size)
+}
+
+/// The size of a value box: the one it had last frame, or measured from the fonts when it is
+/// new (its label, its field, and the margin the popup frame puts around them).
+fn box_size(ui: &egui::Ui, area: egui::Id, label: &str, note: Option<&str>) -> egui::Vec2 {
+    if let Some(r) = ui.ctx().memory(|m| m.area_rect(area)) {
+        let size = r.size();
+        if size.is_finite() && size.x > 0.0 && size.y > 0.0 {
+            return size;
+        }
+    }
+    let t = Tokens::get();
+    let font = egui::FontId::proportional(t.font_caption);
+    let width = |text: String| ui.painter().layout_no_wrap(text, font.clone(), t.text_dim).size().x;
+    let mut w = width(crate::i18n::tr_label(label).to_string()) + t.space_24 * 3.0;
+    let mut parts = 1;
+    if let Some(note) = note {
+        w += width(note.to_string());
+        parts += 1;
+    }
+    // The gap between the row's parts, and the popup frame's margin around them.
+    let gap = ui.spacing().item_spacing.x;
+    let height = ui.fonts_mut(|fonts| fonts.row_height(&font));
+    let size = egui::vec2(w + gap * parts as f32 + 12.0, height + 6.0);
+    if size.is_finite() && size.x > 0.0 && size.y > 0.0 { size } else { crate::sketch_dims::BOX }
 }
 
 /// How far (logical points) from an arrow's stem a press still takes the arrow.
@@ -1455,7 +1551,7 @@ fn draw_revolve(
         });
     } else if let Kind::Revolve { angle, .. } = &mut d.kind {
         let dragging = *angle != angle_before;
-        value_box(ui, crate::i18n::tr_label("Angle"), angle, box_at, focus || dragging);
+        value_box(ui, crate::i18n::tr_label("Angle"), angle, box_at, focus || dragging, box_place(app, proj));
     }
 }
 
@@ -1667,6 +1763,41 @@ mod tests {
         assert_eq!(format_len(&solidcraft_engine::doc::Document::default(), 12.0), "12 mm");
         assert_eq!(format_len(&solidcraft_engine::doc::Document::default(), -2.5), "-2.5 mm");
         assert_eq!(format_len(&solidcraft_engine::doc::Document::default(), -0.0001), "-0.0001 mm");
+    }
+
+    /// #6608: a canvas value box never covers the command window: it moves out of it.
+    #[test]
+    fn a_value_box_keeps_clear_of_the_command_window() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", serde_json::json!({"length": 40, "width": 30, "height": 20})).unwrap();
+        h.app.session.selection = vec![Sel::Body { name: "Body1".into() }];
+        h.step(&serde_json::json!({"start": "solid.move"})).unwrap();
+        h.frames(6);
+        let box_rect = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_canvas_area"))).expect("the value box");
+        let window = h.app.viewport.dialog_rect.expect("the command window");
+        // Drag the command window over the value box: the box must move out of it.
+        let title = crate::scenario::handle_at("dialog:title").expect("the window's title");
+        let dx = box_rect.center().x - 20.0 - window.left();
+        h.call("ui.drag", serde_json::json!({"x0": title.x, "y0": title.y, "x1": title.x + dx, "y1": title.y, "steps": 8}));
+        h.frames(6);
+        let window = h.app.viewport.dialog_rect.unwrap();
+        assert!(window.contains(box_rect.center()), "the window {window:?} did not reach the value box {box_rect:?}");
+        let kept = h.ctx.memory(|m| m.area_rect(egui::Id::new("sc_canvas_area"))).expect("the value box");
+        assert!(!kept.intersects(window), "the value box {kept:?} covers the command window {window:?}");
+    }
+
+    /// A box that lands on the command window moves out of it, whole, and a box that misses it
+    /// stays where it is (#6608).
+    #[test]
+    fn a_value_box_moves_out_of_the_command_window() {
+        let dialog = egui::Rect::from_min_size(egui::pos2(700.0, 200.0), egui::vec2(280.0, 300.0));
+        let view = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 700.0));
+        let on_the_window = egui::Rect::from_min_size(egui::pos2(800.0, 350.0), egui::vec2(140.0, 24.0));
+        let kept = clear_of_dialog(on_the_window, dialog, Some(view));
+        assert!(!kept.intersects(dialog), "the box {kept:?} still covers the window {dialog:?}");
+        assert_eq!(kept.size(), on_the_window.size(), "the box keeps its size");
+        let clear = egui::Rect::from_min_size(egui::pos2(100.0, 100.0), egui::vec2(140.0, 24.0));
+        assert_eq!(clear_of_dialog(clear, dialog, Some(view)), clear, "a box that misses the window stays");
     }
 }
 

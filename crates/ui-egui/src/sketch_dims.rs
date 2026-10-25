@@ -534,7 +534,7 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
 }
 
 /// About the size of a value box, for keeping it in view.
-const BOX: egui::Vec2 = egui::vec2(76.0, 24.0);
+pub(crate) const BOX: egui::Vec2 = egui::vec2(76.0, 24.0);
 
 /// Where a value box whose top left would be `pos` goes so it stays in the drawing area `view`:
 /// as it is when it fits; else mirrored through the pointer (a box set off the cursor, past the
