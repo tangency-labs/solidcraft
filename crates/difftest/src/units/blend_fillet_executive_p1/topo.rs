@@ -132,9 +132,8 @@ fn try_generate(rng: &mut Rng) -> Option<TopoIn> {
     if n_edges == 0 {
         return None;
     }
-    // one edge per case: after an earlier topo edge replaced a face's surface, the
-    // port's later B-rep edits can diverge (plan/findings.md, RemoveTopoEdges; fixture
-    // `remove_topo_edges_mouse_two_struts`); lists of several edges are fixtures
+    // one edge per generated case; multi-edge sequences (whose earlier merge can
+    // delete a later listed edge unless disjoint) are covered by fixtures
     let edges = vec![rng.below(n_edges as u64) as i64];
     Some(TopoIn {
         brep,

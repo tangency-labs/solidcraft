@@ -67,11 +67,6 @@ case = "read_Solids_fillet_ts"
 why = "SmHealData::Fix_CoinVertices dangling-pointer heap reuse (UB-255): UpdateTargetLists frees both pSurvivorProps and pDeletedProps on SM_NO_MERGE_IN_BREP, Fix_CoinVertices rewrites sProbArray to the freed pSurvivorProps, and once glibc's 7-slot tcache bin fills on the 6th merge, new SmVertexProps reuses pSurvivorProps's address so C++ merges 3 extra 3-way vertex clusters (22 vertices, 1 shell vs Rust's fresh-id 25 vertices, 2 shells; plan/findings.md: 'topology.brep_p10, topology.brep_p1, sweep.api_brep: heal/notify/ProjectAndTrim fixes and `read_Solids_fillet_ts` UAF root cause')"
 
 [[mismatch]]
-unit = "blend.fillet_executive_p1"
-case = "remove_topo_edges_mouse_two_struts"
-why = "RemoveTopoEdges with topo edges 1 and 2 of Mouse.smb in sequence: after the second deletion one edge use's UV curve on the plane differs (faces, surfaces and the remaining edge agree; each edge alone matches); in DeleteEdge / DeleteTopologicalVertex / SetSurface, not located (plan/findings.md: 'blend.fillet_executive_p1, RemoveTopoEdges and SetBevelCorner')"
-
-[[mismatch]]
 unit = "offset.offset_geometry_creation"
 case = "gen0248"
 why = "deferred on main at the extended surface's cache (SmFace handle of a surface's face); compared since the drop onto the other extended surface reaches its face's cache: the trace's output differs (plan/findings.md: 'offset.offset_geometry_creation: drops onto a seeded extended surface through a freshly built face cache')"
