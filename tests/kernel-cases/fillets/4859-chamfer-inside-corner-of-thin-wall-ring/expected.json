@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4859"
+ ],
+ "what": "an inside (concave) vertical corner of a 25x15 ring with a 2 mm wall, 10 high, chamfered 2 mm: truck refused it ('2 mm is too large for this chamfer: the result changes 108 mm3')",
+ "source": "analytic",
+ "method": "a chamfer of a concave edge fills it: + 2*2/2 * 10 = 20. V = (25*15 - 21*11)*10 + 20 = 1460. Faces: 4 outer, 4 inner, the chamfer, top, bottom = 11",
+ "body_count": 1,
+ "faces": 11,
+ "volume_mm3": 1460.0
+}

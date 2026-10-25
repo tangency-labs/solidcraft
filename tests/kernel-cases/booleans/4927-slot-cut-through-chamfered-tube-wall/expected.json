@@ -1,0 +1,10 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4927"
+ ],
+ "what": "a 5 mm slot cut end to end through one wall of a tube (r 20..30 x 100) whose top rims are chamfered (2.5 outside, 4 inside): the cut hung (moving the chamfers after the cut worked)",
+ "source": "analytic",
+ "method": "tube pi (30^2-20^2) 100 less the chamfer rings (Pappus: 2 pi (30 - 2.5/3) 2.5^2/2 and 2 pi (20 + 4/3) 4^2/2). The slot y -2.3..2.7, x > 0 through all removes Int_0^100 Int_-2.3^2.7 (sqrt(ro^2-y^2) - sqrt(ri^2-y^2)) dy dz, the radii following the chamfers near the top (python quadrature). The C-shaped tube is one body",
+ "body_count": 1,
+ "volume_mm3": 150481.462
+}

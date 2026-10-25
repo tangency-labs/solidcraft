@@ -1,0 +1,130 @@
+{
+ "commands": [
+  {
+   "command": "solid.cylinder",
+   "params": {
+    "radius": 20,
+    "height": 30,
+    "body_name": "Cyl"
+   }
+  },
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "edges": [
+     [
+      20,
+      0,
+      30
+     ]
+    ],
+    "distance": 5
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Cove",
+    "project_edges": false
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      15,
+      30
+     ],
+     [
+      20,
+      30
+     ],
+     [
+      20,
+      25
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     15,
+     30
+    ],
+    "through": [
+     16.464466094067262,
+     26.464466094067262
+    ],
+    "end": [
+     20,
+     25
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      15,
+      30
+     ],
+     [
+      20,
+      25
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "sketch": "Cove",
+    "profiles": [
+     {
+      "point": [
+       19,
+       29
+      ]
+     },
+     {
+      "point": [
+       16.6,
+       27.0
+      ]
+     }
+    ],
+    "axis": "y",
+    "angle": "360 deg",
+    "operation": "cut",
+    "targets": [
+     "Cyl"
+    ]
+   }
+  }
+ ]
+}

@@ -1,0 +1,45 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     0,
+     0,
+     0
+    ],
+    "length": 40,
+    "width": 30,
+    "height": 20,
+    "body_name": "Block"
+   }
+  },
+  {
+   "command": "solid.draft",
+   "params": {
+    "faces": [
+     [
+      20,
+      0,
+      10
+     ]
+    ],
+    "angle": "10 deg",
+    "neutral": "XY"
+   }
+  },
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "edges": [
+     [
+      20,
+      3.52654,
+      20
+     ]
+    ],
+    "distance": 2
+   }
+  }
+ ]
+}

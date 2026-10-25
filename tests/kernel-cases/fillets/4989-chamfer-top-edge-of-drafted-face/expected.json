@@ -1,0 +1,11 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#4989"
+ ],
+ "what": "the top edge of a face drafted 10 deg (the front of a 40x30x20 block, neutral plane at its base), chamfered 2 mm: refused ('the blend is larger than the neighbouring faces; the largest radius that fits is 0.071 mm')",
+ "source": "analytic",
+ "method": "the draft tilts the front face in by 20 tan10 at the top: - 0.5*20*(20 tan10)*40. The edge between the top and the drafted face has an 80 deg wedge; an equal 2 mm chamfer removes the triangle 0.5*2*2*sin80 along its 40 mm (the end faces are square to it). Faces 7",
+ "body_count": 1,
+ "faces": 7,
+ "volume_mm3": 22510.5995
+}

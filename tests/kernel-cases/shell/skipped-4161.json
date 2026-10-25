@@ -86,5 +86,29 @@
  {
   "source": "tangency-labs/solidcraft#4822",
   "why": "no reproduction: a screenshot only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4886",
+  "why": "no geometry: sketch offset of a mixed line/spline chain (sketch, a stated limit)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4988",
+  "why": "no geometry: the report arrived empty"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4990",
+  "why": "no geometry: the report arrived empty"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5019",
+  "why": "no geometry: sketch offset joining coincident ends (sketch)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5050",
+  "why": "no reproduction: shell of a user's revolved free-form profile (a stated limit; a plain tapered cup works); see the case from #4567"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5076",
+  "why": "no reproduction: shell of a user's loft (free-form, a stated limit); see the loft shell case from #4743"
  }
 ]

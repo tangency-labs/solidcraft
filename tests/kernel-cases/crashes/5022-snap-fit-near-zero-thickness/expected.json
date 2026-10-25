@@ -1,0 +1,9 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#5022"
+ ],
+ "what": "a snap fit 1e-9 mm thick on a box: it got past validation and panicked in the kernel ('tolerance must be no less than 1e-6')",
+ "source": "invariants",
+ "method": "a 1e-9 mm wall is no solid: the right answer is a clean refusal, never a panic",
+ "outcome": "refused"
+}

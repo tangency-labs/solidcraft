@@ -1,0 +1,85 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Bracket"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -50,
+      0
+     ],
+     [
+      50,
+      0
+     ],
+     [
+      50,
+      85
+     ],
+     [
+      30.675635228421154,
+      222.5
+     ],
+     [
+      -30.675635228421154,
+      222.5
+     ],
+     [
+      -50,
+      85
+     ]
+    ],
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Bracket",
+    "distance": 23,
+    "body_name": "Bracket"
+   }
+  },
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "edges": [
+     [
+      0,
+      0,
+      0
+     ]
+    ],
+    "distance": 220,
+    "distance2": 11
+   }
+  }
+ ]
+}

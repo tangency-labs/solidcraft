@@ -1,0 +1,59 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -15,
+     -10,
+     0
+    ],
+    "length": 30,
+    "width": 20,
+    "height": 10,
+    "body_name": "Box"
+   }
+  },
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      15,
+      10,
+      5
+     ],
+     [
+      15,
+      -10,
+      5
+     ],
+     [
+      -15,
+      10,
+      5
+     ],
+     [
+      -15,
+      -10,
+      5
+     ]
+    ],
+    "radius": 4
+   }
+  },
+  {
+   "command": "solid.chamfer",
+   "params": {
+    "edges": [
+     [
+      0,
+      -10,
+      0
+     ]
+    ],
+    "distance": 1
+   }
+  }
+ ]
+}

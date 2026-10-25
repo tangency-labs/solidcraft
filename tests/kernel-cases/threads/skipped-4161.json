@@ -58,5 +58,21 @@
  {
   "source": "tangency-labs/solidcraft#4799",
   "why": "no geometry: cosmetic threads don't cut the model, by design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4913",
+  "why": "duplicate of threads/3311-two-tapped-holes-both-modelled-threaded: a second modelled thread after the first"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4963",
+  "why": "no geometry: a modelled thread needs the tap-drill hole, by design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4971",
+  "why": "no geometry: no coarse M28 in ISO metric (designation; M28x2 works)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5055",
+  "why": "no geometry: no coarse thread past M56 (designation; M75x2 works)"
  }
 ]

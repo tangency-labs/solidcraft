@@ -110,5 +110,21 @@
  {
   "source": "tangency-labs/solidcraft#4814",
   "why": "no geometry: Convert Mesh needs the mesh's component active (dup of #4609)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4898",
+  "why": "no geometry: SVG curves offset as a mixed chain and moved (sketch, dup of #2149)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#4918",
+  "why": "no geometry: Convert Mesh takes constant-section prisms only (dup of #4586)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5090",
+  "why": "no kernel geometry: an open mesh body measures a negative volume (mesh measure)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5091",
+  "why": "no geometry: KiCad board import (feature request)"
  }
 ]
