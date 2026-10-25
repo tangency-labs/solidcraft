@@ -28,6 +28,8 @@ use serde_json::Value;
 
 use solidcore::heal::heal_data::p1::api_heal_brep;
 use solidcore::kernel::Kernel;
+use solidcore::math::Point3;
+use solidcore::primitive::api_primitives::create_box;
 use solidcore::SolidError;
 use solidcore_ffi::units::heal_heal_data_p1 as ffi;
 
@@ -45,6 +47,8 @@ pub const MIN_GENERATED: usize = 320;
 
 /// `SM_ERR_INVALID_INPUT`.
 const SM_ERR_INVALID_INPUT: f64 = 1007.0;
+/// `SM_SUCCESS`.
+const SM_SUCCESS: f64 = 1000.0;
 
 /// The difftest runner.
 pub struct Runner;
@@ -123,23 +127,31 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
         }
         Inputs::Api { api } => {
             let mut k = Kernel::default();
-            // The C++ side heals a box made by `SmApiCreateBox`, which the Rust side
-            // cannot build yet (unit primitive.api_primitives): healing any stand-in
-            // B-rep would compare a different input. Build the box with the ported
-            // `SmApiCreateBox` when that lands and compare its status here.
+            // The C++ side heals a box made by `SmApiCreateBox(origin, dx, dy, dz)`;
+            // the output is `create_status heal_status`.
+            let mut create_status = 0.0;
             let r = match api.box_size {
                 None => api_heal_brep(&mut k, None),
-                Some(_) => {
-                    return Ok(Output::deferred(
-                        "primitive.api_primitives",
-                        "SmApiCreateBox",
-                    ));
+                Some([dx, dy, dz]) => {
+                    match create_box(&mut k, Point3::new(0.0, 0.0, 0.0), dx, dy, dz) {
+                        Ok(mut b) => {
+                            create_status = SM_SUCCESS;
+                            api_heal_brep(&mut k, Some(&mut b))
+                        }
+                        Err(SolidError::InvalidInput { .. }) => {
+                            return Ok(Output::new().values("out", vec![SM_ERR_INVALID_INPUT, 0.0]));
+                        }
+                        Err(e) => {
+                            return Ok(Output::unported(&e)
+                                .unwrap_or_else(|| Output::err(e.to_string())));
+                        }
+                    }
                 }
             };
             Ok(match r {
-                Ok(()) => Output::new().values("out", vec![0.0, 0.0]),
+                Ok(()) => Output::new().values("out", vec![create_status, SM_SUCCESS]),
                 Err(SolidError::InvalidInput { .. }) => {
-                    Output::new().values("out", vec![0.0, SM_ERR_INVALID_INPUT])
+                    Output::new().values("out", vec![create_status, SM_ERR_INVALID_INPUT])
                 }
                 Err(e) => Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string())),
             })
