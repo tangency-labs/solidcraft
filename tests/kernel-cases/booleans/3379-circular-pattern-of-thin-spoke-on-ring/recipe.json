@@ -45,7 +45,8 @@
     "operation": "join",
     "targets": [
      "rim"
-    ]
+    ],
+    "touching": "one_body"
    }
   },
   {

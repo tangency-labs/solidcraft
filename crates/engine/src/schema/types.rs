@@ -8,7 +8,7 @@ use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::de::Error as _;
 use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
-use solidcraft_doc::{Expr, Operation, ThinSide};
+use solidcraft_doc::{Expr, Operation, ThinSide, Touching};
 use solidcraft_geom::{Vec2, Vec3};
 
 use super::check::whole;
@@ -375,6 +375,34 @@ impl JsonSchema for OperationParam {
         enum_schema(
             &OPERATIONS,
             "How the feature combines with existing bodies: new, join, cut or intersect. The others are aliases. Matching ignores case, spaces, '_' and '-'.",
+        )
+    }
+}
+
+/// What a join makes of solids that only touch or don't touch, as `Touching::parse` reads it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TouchingParam(pub Touching);
+
+/// The feature commands' message for a `touching` they don't know.
+const TOUCHING_MESSAGE: &str = "`touching` must be separate or one_body";
+
+impl<'de> Deserialize<'de> for TouchingParam {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::String(s) => Touching::parse(&s).map(TouchingParam).ok_or_else(|| D::Error::custom(whole(TOUCHING_MESSAGE))),
+            _ => Err(D::Error::custom(whole(TOUCHING_MESSAGE))),
+        }
+    }
+}
+
+impl JsonSchema for TouchingParam {
+    fn schema_name() -> Cow<'static, str> {
+        "Touching".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        enum_schema(
+            &["separate", "one_body"],
+            "What a join makes of solids that only touch, along an edge or at a point, or don't touch: separate bodies (separate, the default) or one body of several pieces (one_body).",
         )
     }
 }

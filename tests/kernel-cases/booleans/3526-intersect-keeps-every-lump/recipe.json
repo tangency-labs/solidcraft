@@ -25,7 +25,8 @@
     "operation": "join",
     "targets": [
      "Balls"
-    ]
+    ],
+    "touching": "one_body"
    }
   },
   {

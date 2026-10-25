@@ -84,11 +84,22 @@ impl<'a> Faces<'a> {
     }
 }
 
-/// Per edge (in `Body::edges` order): is it a seam between two pieces of one curved surface?
+/// Per edge (in `Body::edges` order): is it a seam of a curved surface, between two pieces of it
+/// or where one face of it meets itself (a whole turn of a cylinder, its seam used twice)?
 /// `mesh` is the body's tessellation, whose edges are the record's.
 pub fn seam_flags(b: &Body, _mesh: &Mesh) -> Vec<bool> {
-    let faces = Faces::new(b.record(), (b.size() * 1e-4).max(1e-6) * 10.0);
-    edge_faces(b.record()).iter().map(|fs| matches!(fs[..], [x, y] if !faces.planar(x) && faces.same(x, y))).collect()
+    let record = b.record();
+    let faces = Faces::new(record, (b.size() * 1e-4).max(1e-6) * 10.0);
+    record
+        .edges
+        .iter()
+        .zip(edge_faces(record))
+        .map(|(e, fs)| match fs[..] {
+            [x, y] => !faces.planar(x) && faces.same(x, y),
+            [x] => e.uses.len() == 2 && !faces.planar(x),
+            _ => false,
+        })
+        .collect()
 }
 
 /// Merged face/edge/vertex counts (see module docs). `mesh` must be `b.mesh(..)`: faces of no

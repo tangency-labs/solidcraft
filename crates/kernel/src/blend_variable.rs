@@ -224,13 +224,10 @@ struct EdgeSetup {
 }
 
 impl EdgeSetup {
-    /// The edge of `body` nearest `at`.
+    /// The edge of `body` a pick at `at` takes, as the blend takes it.
     fn new(body: &Body, at: Vec3) -> Result<EdgeSetup> {
-        let size = body.size();
-        let (edge, dist) = body.nearest_edge(at, (size * 2e-3).max(1e-3))?.ok_or_else(|| KernelError::Invalid(format!("no edge at {at:?}")))?;
-        if dist > size * 0.05 + 1e-3 {
-            return Err(KernelError::Invalid(format!("no edge at {at:?}")));
-        }
+        let (picked, _) = crate::blend_smlib::picked_edges(body, &[at])?;
+        let edge = *picked.first().ok_or_else(|| KernelError::Invalid(format!("no edge at {at:?}")))?;
         let rec = Faces::of(body)?;
         if !rec.straight(edge) {
             return Err(unsupported("only straight edges take a variable radius"));
@@ -239,7 +236,7 @@ impl EdgeSetup {
         let [v0, v1] = rec.rec.edges.get(edge).ok_or_else(|| KernelError::Failed("edge not found".into()))?.vertices;
         let (p0, p1) = rec.ends(edge).ok_or_else(|| KernelError::Failed("edge not found".into()))?;
         let d = (p1 - p0).normalized().ok_or_else(|| KernelError::Failed("zero-length edge".into()))?;
-        Ok(EdgeSetup { rec, fr, edge, v0, v1, p0, p1, d, tol: (size * 1e-7).max(1e-9) })
+        Ok(EdgeSetup { rec, fr, edge, v0, v1, p0, p1, d, tol: (body.size() * 1e-7).max(1e-9) })
     }
 
     /// How far a blend of radius `r` reaches into each face from the edge.

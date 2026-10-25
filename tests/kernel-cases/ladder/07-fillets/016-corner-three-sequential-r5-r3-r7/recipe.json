@@ -24,7 +24,8 @@
       20
      ]
     ],
-    "radius": 3
+    "radius": 3,
+    "tangent_chain": false
    }
   },
   {
