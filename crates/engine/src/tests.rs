@@ -203,26 +203,31 @@ fn join_merges_into_the_body_it_meets() {
     assert!(rel(volume(&mut s), 2064.0) < 1e-6);
 }
 
-/// A join that meets no body keeps what it made as a body of its own beside the first body
-/// (`touching: separate`, the default), and says so with the edit that makes them one; with
-/// `touching: one_body` it joins the first body as a separate lump.
+/// A join that meets no body still joins the first body, as a separate lump, and says nothing:
+/// pieces that touch nothing stay one body.
 #[test]
 fn join_meeting_nothing_keeps_the_first_body() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
     let r = run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 4, "corner": [40, 0, 0], "operation": "join"}));
-    assert_eq!(r["notice"]["contact"], "apart", "{r}");
-    assert_eq!(r["notice"]["action"]["params"]["set"], json!({"touching": "one_body"}), "{r}");
-    assert_eq!(s.model.state().bodies.len(), 2);
-    assert!(rel(volume(&mut s), 1064.0) < 1e-6);
-    run(&mut s, "edit.undo", json!({}));
-    let r =
-        run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 4, "corner": [40, 0, 0], "operation": "join", "touching": "one_body"}));
     assert!(r.get("notice").is_none(), "{r}");
     let st = s.model.state();
     assert_eq!(st.bodies.len(), 1);
     assert_eq!(st.bodies[0].body.lumps().unwrap().len(), 2);
     assert!(rel(volume(&mut s), 1064.0) < 1e-6);
+}
+
+/// A join of a box touching the first only along an edge keeps it a body of its own and says
+/// so, with the edit that makes them one body.
+#[test]
+fn join_touching_along_an_edge_keeps_a_separate_body() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    let r = run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [10, 10, 0], "operation": "join"}));
+    assert_eq!(r["notice"]["contact"], "along_edge", "{r}");
+    assert_eq!(r["notice"]["message"], "These bodies only touch along an edge, so they were kept as separate bodies.", "{r}");
+    assert_eq!(r["notice"]["action"]["params"]["set"], json!({"touching": "one_body"}), "{r}");
+    assert_eq!(s.model.state().bodies.len(), 2);
 }
 
 /// A 1 mm floor extruded into a through hole, from the sketch the plate was extruded from: the

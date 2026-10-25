@@ -103,9 +103,8 @@ fn a_cut_leaves_what_stands_beside_it() {
 }
 
 /// A join adds only its sketch: a block against a wall narrower than the block adds nothing
-/// beside the wall, a block 0.1 mm from a wall leaves the gap (and, meeting nothing, stays a body
-/// of its own), and a pad flush with a block's side does not reach a neighbour 0.8 mm from that
-/// side.
+/// beside the wall, a block 0.1 mm from a wall leaves the gap, and a pad flush with a block's
+/// side does not reach a neighbour 0.8 mm from that side.
 #[test]
 fn a_join_adds_only_its_sketch() {
     let wall = || {
@@ -120,11 +119,8 @@ fn a_join_adds_only_its_sketch() {
 
     let mut s = wall();
     rectangle(&mut s, at_height(0.0), [2.1, 10.0], [20.0, 50.0], 30.0, "join", Value::Null);
-    let names = bodies(&s);
-    assert_eq!(names.len(), 2, "{names:?}");
-    let total: f64 = names.iter().map(|b| volume(&s, b)).sum();
-    assert!(same(total, 2.0 * 40.0 * 30.0 + 17.9 * 40.0 * 30.0), "{total}");
-    assert!(names.iter().all(|b| !has(&s, b, [2.05, 30.0, 15.0])), "the 0.1 mm gap is filled");
+    assert!(same(volume(&s, "Wall"), 2.0 * 40.0 * 30.0 + 17.9 * 40.0 * 30.0), "{}", volume(&s, "Wall"));
+    assert!(!has(&s, "Wall", [2.05, 30.0, 15.0]), "the 0.1 mm gap is filled");
 
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"length": 300, "width": 200, "height": 100, "body_name": "A"}));

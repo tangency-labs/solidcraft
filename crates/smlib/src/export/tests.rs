@@ -192,6 +192,41 @@ mod native_tests {
         assert!((got - want).abs() < 1e-6 * want, "volume {got} vs {want}");
     }
 
+    /// A 100 x 60 x 30 block less a loft from its whole 100 x 60 outline at z = 20 (flush with its
+    /// sides) down to a 10 x 10 pad at z = 11: the slab above z = 20 is cut loose, touching the
+    /// rest along the outline's four edges round the pocket the loft leaves. SMLib keeps the
+    /// pocket as a void of its own, bounded by the slab's underside and the loft's faces, so each
+    /// solid's one boundary faces both the void and the space round the solids. The record has
+    /// the two solids' closed shells, each listed by its solid and by the infinite region (the
+    /// pocket is part of the empty space once the solids' shared edges are split), and no void.
+    #[test]
+    fn solids_touching_round_a_pocket_have_one_shell_each_and_no_void() {
+        use crate::sweeps::Curve;
+        let block = Brep::make_box([0.0; 3], [100.0, 60.0, 30.0]).unwrap();
+        let rect = |pts: [[f64; 3]; 4]| -> Vec<Curve> { (0..4).map(|i| Curve::Line { start: pts[i], end: pts[(i + 1) % 4] }).collect() };
+        let pad = rect([[2.0, 2.0, 11.0], [12.0, 2.0, 11.0], [12.0, 12.0, 11.0], [2.0, 12.0, 11.0]]);
+        let top = rect([[0.0, 0.0, 20.0], [100.0, 0.0, 20.0], [100.0, 60.0, 20.0], [0.0, 60.0, 20.0]]);
+        let tool = Brep::loft(&[pad, top], 1, true).unwrap();
+        let r = block.boolean(&tool, crate::BooleanOp::Subtract).unwrap().unwrap();
+        assert!(r.check(CheckLevel::All).unwrap().is_valid());
+        let arrays = r.arrays().unwrap();
+        let types = arrays.ints.get(&crate::flat::REGION_TYPE).cloned().unwrap_or_default();
+        assert_eq!(types.iter().skip(1).filter(|t| **t != 0).count(), 1, "SMLib keeps the pocket as a void: {types:?}");
+        let record = r.to_native().unwrap();
+        assert_eq!(record.shells.len(), 2);
+        assert_eq!(record.regions.len(), 3);
+        assert!(record.regions.iter().all(|g| !g.void));
+        assert_eq!(record.regions[0].shells.len(), 2, "the infinite region lists both solids");
+        record.check_geometry().unwrap();
+        // V = 180000 - h/6 (A0 + 4 Am + A1), h = 9, Am = 55 x 35.
+        let want = 180000.0 - 9.0 / 6.0 * (100.0 + 4.0 * 55.0 * 35.0 + 6000.0);
+        let back = Brep::from_record(&record, true).unwrap();
+        let check = back.check(CheckLevel::All).unwrap();
+        assert!(check.is_valid(), "{check}");
+        let got = back.mass_properties(MEASURE_ACCURACY).unwrap().volume;
+        assert!((got - want).abs() < 1e-6 * want, "volume {got} vs {want}");
+    }
+
     #[test]
     fn hostile_arrays_are_errors_never_panics() {
         let good = Brep::make_box([0.0; 3], [1.0, 2.0, 3.0]).unwrap().arrays().unwrap();

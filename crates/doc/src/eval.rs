@@ -777,7 +777,8 @@ impl ModelState {
         self.fitted.get(&feature)?.iter().fold(None, |acc, r| Some(acc.map_or((*r, *r), |(lo, hi): (f64, f64)| (lo.min(*r), hi.max(*r)))))
     }
 
-    /// How the solids join `feature` kept as separate bodies met, when it kept any apart.
+    /// How the pieces join `feature` split off into bodies of their own touched the others, when
+    /// it split any off.
     pub fn kept_separate(&self, feature: u64) -> Option<KeptSeparate> {
         self.kept_separate.get(&feature).copied()
     }
@@ -830,28 +831,30 @@ pub struct ModelState {
     /// The radius spline of each edge a fillet tapered (a point on the edge with it, by feature
     /// id, see `FilletFit::Taper`).
     tapered: BTreeMap<u64, Vec<(Vec3, kernel::Taper)>>,
-    /// How the solids a join kept as separate bodies met (by feature id), for its notice.
+    /// How the pieces a join split off into bodies of their own touched the others (by feature
+    /// id), for its notice.
     kept_separate: BTreeMap<u64, KeptSeparate>,
 }
 
-/// How the solids a join kept as separate bodies (`Touching::Separate`) met: the most any two
-/// of them shared, least first.
+/// How a piece a join split off into a body of its own (`Touching::Separate`) touched the
+/// pieces it was joined with: the most any such piece shared with another, least first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum KeptSeparate {
-    /// Nothing: they don't touch.
-    Apart,
     /// A point.
     AtPoint,
+    /// A line or a point their boundaries don't hold (a face tangent to another): found on the
+    /// exact geometry, which doesn't say which.
+    Touching,
     /// A curve: an edge of both.
     AlongEdge,
 }
 
 impl KeptSeparate {
-    /// Its id in a feature's result: `apart`, `at_point` or `along_edge`.
+    /// Its id in a feature's result: `at_point`, `touching` or `along_edge`.
     pub fn id(self) -> &'static str {
         match self {
-            KeptSeparate::Apart => "apart",
             KeptSeparate::AtPoint => "at_point",
+            KeptSeparate::Touching => "touching",
             KeptSeparate::AlongEdge => "along_edge",
         }
     }
@@ -859,8 +862,8 @@ impl KeptSeparate {
     /// What a feature's result says about it.
     pub fn notice(self) -> &'static str {
         match self {
-            KeptSeparate::Apart => "These bodies don't touch, so they were kept as separate bodies.",
             KeptSeparate::AtPoint => "These bodies only touch at a point, so they were kept as separate bodies.",
+            KeptSeparate::Touching => "These bodies only touch along a line or at a point, so they were kept as separate bodies.",
             KeptSeparate::AlongEdge => "These bodies only touch along an edge, so they were kept as separate bodies.",
         }
     }
@@ -3143,10 +3146,14 @@ fn join(state: &mut ModelState, tools: Vec<Traced>, target_idx: &[usize]) -> Res
     Ok(joined)
 }
 
-/// With `Touching::Separate`: the pieces of the joined body `name` that share no area with each
-/// other become bodies of their own, named as a cut's pieces are; pieces that share a face stay
-/// one body. How the pieces kept apart met, when it has any (a sheet metal or mesh body keeps
-/// its pieces).
+/// With `Touching::Separate`: the joined body `name` never keeps two pieces that touch only
+/// along an edge or at a point, since they cannot be one solid. Its pieces that share a face are
+/// one group. The groups that hold the material of the body before the feature (the first group
+/// where that is not known) stay in it, each unless it touches one already kept; every other
+/// group that touches another along an edge or at a point (as the record says, or on the exact
+/// geometry where SMLib left the contact out) becomes a body of its own, named as a cut's pieces
+/// are; groups that touch nothing stay in the joined body, which keeps its name. How
+/// the pieces split off touched, when any were (a sheet metal or mesh body keeps its pieces).
 fn separate_touching(state: &mut ModelState, name: &str) -> Result<Option<KeptSeparate>> {
     let Some(i) = state.bodies.iter().position(|b| b.name == name) else { return Ok(None) };
     let Some(mb) = state.bodies.get(i).filter(|b| !b.body.is_mesh() && !state.sheets.iter().any(|s| s.body == name)) else { return Ok(None) };
@@ -3170,31 +3177,116 @@ fn separate_touching(state: &mut ModelState, name: &str) -> Result<Option<KeptSe
         }
     }
     let mut groups: Vec<Vec<usize>> = Vec::new();
-    let mut group_of: BTreeMap<usize, usize> = BTreeMap::new();
+    let mut group_of: Vec<usize> = Vec::with_capacity(n);
+    let mut by_root: BTreeMap<usize, usize> = BTreeMap::new();
     for k in 0..n {
-        let g = *group_of.entry(find(&root, k)).or_insert_with(|| {
+        let g = *by_root.entry(find(&root, k)).or_insert_with(|| {
             groups.push(Vec::new());
             groups.len() - 1
         });
         if let Some(list) = groups.get_mut(g) {
             list.push(k);
         }
+        group_of.push(g);
     }
-    if groups.len() < 2 {
-        return Ok(None);
+    // The groups each group touches along an edge or at a point (groups never share a face), and
+    // the most any two of them share.
+    let mut touches: Vec<Vec<usize>> = vec![Vec::new(); groups.len()];
+    let mut most: Option<KeptSeparate> = None;
+    for c in &contacts {
+        let (Some(&a), Some(&b)) = (group_of.get(c.regions[0]), group_of.get(c.regions[1])) else { continue };
+        if a == b {
+            continue;
+        }
+        for (g, h) in [(a, b), (b, a)] {
+            if let Some(list) = touches.get_mut(g).filter(|l| !l.contains(&h)) {
+                list.push(h);
+            }
+        }
+        most = most.max(Some(if c.contact == Contact::Vertex { KeptSeparate::AtPoint } else { KeptSeparate::AlongEdge }));
     }
-    // The most any two of the separate pieces share (never a face).
-    let kept = contacts
-        .iter()
-        .filter(|c| find(&root, c.regions[0]) != find(&root, c.regions[1]))
-        .map(|c| if c.contact == Contact::Vertex { KeptSeparate::AtPoint } else { KeptSeparate::AlongEdge })
-        .max()
-        .unwrap_or(KeptSeparate::Apart);
-    let pieces = mb.body.parts(&groups)?;
+    // Groups the record has apart may still touch where SMLib left the contact out of the
+    // topology (a face tangent to another along a line).
+    if groups.len() > 1 {
+        for [a, b] in unrecorded_touches(&mb.body.parts(&groups)?, &touches)? {
+            for (g, h) in [(a, b), (b, a)] {
+                if let Some(list) = touches.get_mut(g) {
+                    list.push(h);
+                }
+            }
+            most = most.max(Some(KeptSeparate::Touching));
+        }
+    }
+    let Some(most) = most else { return Ok(None) };
+    // What stays in the joined body: the groups that touch nothing, and those of the body before
+    // the feature, each unless it touches one already kept.
+    let mut anchor = groups_from_body(mb, &groups).filter(|a| a.contains(&true)).unwrap_or_default();
+    if anchor.is_empty() {
+        anchor = (0..groups.len()).map(|g| g == 0).collect();
+    }
+    let mut stays: Vec<bool> = touches.iter().map(Vec::is_empty).collect();
+    for g in 0..groups.len() {
+        let free = touches.get(g).is_some_and(|t| !t.iter().any(|h| stays.get(*h) == Some(&true)));
+        if free
+            && anchor.get(g) == Some(&true)
+            && let Some(slot) = stays.get_mut(g)
+        {
+            *slot = true;
+        }
+    }
+    let mut kept: Vec<usize> = groups.iter().zip(&stays).filter(|(_, s)| **s).flat_map(|(g, _)| g.iter().copied()).collect();
+    kept.sort_unstable();
+    let parts: Vec<Vec<usize>> = std::iter::once(kept).chain(groups.into_iter().zip(&stays).filter(|(_, s)| !**s).map(|(g, _)| g)).collect();
+    let pieces = mb.body.parts(&parts)?;
     let mut taken: std::collections::BTreeSet<String> = state.bodies.iter().map(|b| b.name.clone()).collect();
     let named = named_pieces(mb, pieces, &mut taken);
     state.bodies.splice(i..=i, named);
-    Ok(Some(kept))
+    Ok(Some(most))
+}
+
+/// The pairs of `pieces` (positions) that touch though `touches` (the pieces each touches, as
+/// the record says) doesn't list them: their least distance on the exact faces and edges is
+/// within the larger of their record tolerances. A distance only the meshes give is not trusted
+/// to say they touch.
+fn unrecorded_touches(pieces: &[Body], touches: &[Vec<usize>]) -> Result<Vec<[usize; 2]>> {
+    let meshes = pieces
+        .iter()
+        .map(|p| {
+            let chord = (p.size() * 1e-4).max(1e-6);
+            Ok((p.mesh(&kernel::MeshTolerance::chord(chord))?, chord))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let shapes: Vec<kernel::DistanceShape> = pieces.iter().zip(&meshes).map(|(p, (m, chord))| kernel::DistanceShape::new(p, m, *chord)).collect();
+    let mut out = Vec::new();
+    for (a, (sa, pa)) in shapes.iter().zip(pieces).enumerate() {
+        for (b, (sb, pb)) in shapes.iter().zip(pieces).enumerate().skip(a + 1) {
+            if touches.get(a).is_some_and(|t| t.contains(&b)) || !sa.bounds().meets(&sb.bounds()) {
+                continue;
+            }
+            let tol = pa.record().tolerance.max(pb.record().tolerance);
+            if kernel::body_distance(sa, sb, tol)?.is_some_and(|d| d.exact && d.distance <= tol) {
+                out.push([a, b]);
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Which of `groups` (of positions in `mb`'s material regions) hold material of the body named
+/// as `mb` before the feature: a face of theirs came from one of its faces. `None` where the
+/// body's lineage is not known.
+fn groups_from_body(mb: &ModelBody, groups: &[Vec<usize>]) -> Option<Vec<bool>> {
+    let from = mb.lineage()?.faces_from_body(&mb.name);
+    let record = mb.body.record();
+    let regions = record.material_regions();
+    let holds = |k: usize| {
+        let shells = regions.get(k).and_then(|&r| record.regions.get(r)).map(|r| r.shells.as_slice()).unwrap_or_default();
+        shells.iter().any(|&s| match record.shells.get(s as usize) {
+            Some(solidcraft_geom::brep::Shell::Faces { faces, .. }) => faces.iter().any(|f| from.get(f.face as usize) == Some(&true)),
+            _ => false,
+        })
+    };
+    Some(groups.iter().map(|g| g.iter().any(|&k| holds(k))).collect())
 }
 
 /// The bodies the pieces of `mb` become: the first keeps its name, the others are numbered after

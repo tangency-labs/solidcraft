@@ -851,13 +851,12 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
             face_uses.get_mut(f).ok_or_else(|| invalid("face"))?.push((s, same));
         }
     }
-    // Each record shell is one closed boundary between an empty region and a material one: the
-    // faces with the same runtime shell on the empty side and on the material side, as the empty
-    // side uses them. Solids touching along an edge or at a vertex share their empty side's
-    // runtime shell but not their material side's, so each gets its own record shell (the edges
-    // and vertices they share are split below). A sheet's one shell holds both uses of each
-    // face: the `same` one is kept.
-    let mut groups: Vec<((usize, usize), Vec<(u32, bool)>)> = Vec::new();
+    // Each record shell is one closed boundary of material: the faces of one runtime shell on the
+    // material side, as the empty side uses them. Solids touching along an edge or at a vertex
+    // share their empty side's runtime shell but not their material side's, so each gets its own
+    // record shell (the edges and vertices they share are split below). A sheet's one shell holds
+    // both uses of each face: the `same` one is kept.
+    let mut groups: Vec<Group> = Vec::new();
     for (s, uses) in shell_faceuses.iter().enumerate() {
         for fu in uses.clone() {
             let (f, same) = faceuse(fu)?;
@@ -866,13 +865,13 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
                     if !same {
                         continue;
                     }
-                    (*a, *a)
+                    Side::Sheet(*a)
                 }
                 Some([(a, _), (b, _)]) => {
                     let other = if *a == s { *b } else { *a };
                     let (here, there) = (region_of.get(s).copied().unwrap_or(0), region_of.get(other).copied().unwrap_or(0));
                     match (material(here), material(there)) {
-                        (false, true) => (s, other),
+                        (false, true) => Side::Solid(other),
                         (true, false) => continue,
                         _ => return Err(unsupported("a face between two material regions or two empty ones")),
                     }
@@ -880,30 +879,22 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
                 _ => return Err(invalid("a face without its two uses")),
             };
             let agrees = faces.get(f).ok_or_else(|| invalid("face"))?.agrees;
-            let at = match groups.iter().position(|(k, _)| *k == key) {
+            let at = match groups.iter().position(|g| g.side == key) {
                 Some(at) => at,
                 None => {
-                    groups.push((key, Vec::new()));
+                    groups.push(Group { side: key, empty: Vec::new(), faces: Vec::new() });
                     groups.len() - 1
                 }
             };
-            groups.get_mut(at).ok_or_else(|| invalid("shell"))?.1.push((index(f)?, same == agrees));
-        }
-    }
-    let mut regions = Vec::with_capacity(region_shells.len());
-    for (r, block) in region_shells.iter().enumerate() {
-        let mut listed = Vec::new();
-        for s in block.clone() {
-            for (g, ((empty, solid), _)) in groups.iter().enumerate() {
-                let id = index(g)?;
-                if (*empty == s || *solid == s) && !listed.contains(&id) {
-                    listed.push(id);
-                }
+            let group = groups.get_mut(at).ok_or_else(|| invalid("shell"))?;
+            if !group.empty.contains(&s) {
+                group.empty.push(s);
             }
+            group.faces.push((index(f)?, same == agrees));
         }
-        regions.push(b::Region { shells: listed, void: r > 0 && !material(r) });
     }
-    let shells: Vec<Vec<(u32, bool)>> = groups.into_iter().map(|(_, faces)| faces).collect();
+    let mut regions = record_regions(&region_shells, &region_of, &groups, material)?;
+    let shells: Vec<Vec<(u32, bool)>> = groups.into_iter().map(|g| g.faces).collect();
     // Shells renumbered in first appearance walking the regions.
     let mut order: Vec<u32> = Vec::new();
     for r in &regions {
@@ -937,6 +928,141 @@ fn native_ordered(arrays: &Arrays) -> Res<(b::Brep, Report, Order)> {
         other => other,
     };
     made.map(|(brep, order)| (brep, report, order))
+}
+
+/// Which runtime shell a record shell is made from.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Side {
+    /// The material side of a closed boundary.
+    Solid(usize),
+    /// A sheet's one shell, both uses of each face in it.
+    Sheet(usize),
+}
+
+/// One record shell: its runtime shell, the runtime shells on its empty side, and its faces as
+/// the empty side uses them.
+struct Group {
+    side: Side,
+    empty: Vec<usize>,
+    faces: Vec<(u32, bool)>,
+}
+
+/// The record's regions, each listing its record shells (`groups` by index), outer first.
+///
+/// A material region is SMLib's own. An empty one is too, except where solids touch along a
+/// closed chain of edges round a pocket of empty space (a loft whose wide end is flush with a
+/// block's sides cuts the slab above it loose): SMLib keeps the pocket as a void of its own,
+/// bounded by faces of more than one solid, or of one solid on both sides of where it touches
+/// itself. The record splits what the solids share, so no shell bounds the pocket on its own:
+/// each solid's one closed boundary faces both the pocket and the empty space round the solids,
+/// and the pocket is part of that space. Empty regions a solid's boundary faces together are one
+/// record region: the infinite region where it is among them, otherwise the void whose outer
+/// shell bounds it alone (its solids face no other region of the set).
+fn record_regions(
+    region_shells: &[std::ops::Range<usize>],
+    region_of: &[usize],
+    groups: &[Group],
+    material: impl Fn(usize) -> bool,
+) -> Res<Vec<b::Region>> {
+    let n = region_shells.len();
+    let region = |s: usize| region_of.get(s).copied().ok_or_else(|| invalid("shell region"));
+    // The empty regions each solid's boundary faces, joined (each set's root its lowest region).
+    let mut root: Vec<usize> = (0..n).collect();
+    fn find(root: &[usize], mut r: usize) -> usize {
+        while let Some(&up) = root.get(r).filter(|up| **up != r) {
+            r = up;
+        }
+        r
+    }
+    for g in groups {
+        let mut it = g.empty.iter();
+        let Some(&first) = it.next() else { continue };
+        let mut a = find(&root, region(first)?);
+        for &s in it {
+            let b = find(&root, region(s)?);
+            let (lo, hi) = (a.min(b), a.max(b));
+            if let Some(slot) = root.get_mut(hi) {
+                *slot = lo;
+            }
+            a = lo;
+        }
+    }
+    let set: Vec<usize> = (0..n).map(|r| find(&root, r)).collect();
+    // A region's outer runtime shell bounds it alone when every solid it faces faces no region
+    // but this one.
+    let alone = |r: usize| -> Res<bool> {
+        let Some(outer) = region_shells.get(r).and_then(|b| (b.start < b.end).then_some(b.start)) else { return Ok(false) };
+        for g in groups.iter().filter(|g| g.empty.contains(&outer)) {
+            for &s in &g.empty {
+                if region(s)? != r {
+                    return Ok(false);
+                }
+            }
+        }
+        Ok(true)
+    };
+    // The record region of each set of empty regions.
+    let mut kept = vec![None; n];
+    for r in 0..n {
+        let s = set.get(r).copied().unwrap_or(r);
+        if material(r) || s != r {
+            continue;
+        }
+        let members: Vec<usize> = (0..n).filter(|q| set.get(*q) == Some(&r)).collect();
+        let keep = if members.len() == 1 || members.contains(&0) {
+            r
+        } else {
+            let mut candidates = Vec::new();
+            for &q in &members {
+                if alone(q)? {
+                    candidates.push(q);
+                }
+            }
+            match candidates.as_slice() {
+                [q] => *q,
+                _ => return Err(unsupported("solids touching round pockets of empty space that no one shell bounds")),
+            }
+        };
+        if let Some(slot) = kept.get_mut(r) {
+            *slot = Some(keep);
+        }
+    }
+    let mut regions = Vec::with_capacity(n);
+    for (r, block) in region_shells.iter().enumerate() {
+        let mut listed: Vec<u32> = Vec::new();
+        let list = |s: usize, listed: &mut Vec<u32>| -> Res<()> {
+            for (g, group) in groups.iter().enumerate() {
+                let here = match group.side {
+                    Side::Solid(m) => m == s || group.empty.contains(&s),
+                    Side::Sheet(a) => a == s,
+                };
+                let id = index(g)?;
+                if here && !listed.contains(&id) {
+                    listed.push(id);
+                }
+            }
+            Ok(())
+        };
+        if material(r) {
+            for s in block.clone() {
+                list(s, &mut listed)?;
+            }
+        } else {
+            let s = set.get(r).copied().unwrap_or(r);
+            if kept.get(s).copied().flatten() != Some(r) {
+                continue;
+            }
+            // This region's shells first, its outer shell the record region's, then the pockets'.
+            let members = std::iter::once(r).chain((0..n).filter(|q| *q != r && set.get(*q) == Some(&s)));
+            for q in members {
+                for s in region_shells.get(q).cloned().unwrap_or_default() {
+                    list(s, &mut listed)?;
+                }
+            }
+        }
+        regions.push(b::Region { shells: listed, void: r > 0 && !material(r) });
+    }
+    Ok(regions)
 }
 
 /// The mapped records before renumbering.
