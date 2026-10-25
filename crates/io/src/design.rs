@@ -52,6 +52,10 @@ const POINTS_MAGIC: &[u8; 8] = b"SCPNTS01";
 const MAX_PREVIEW_BYTES: usize = 8 << 20;
 const MAX_PREVIEW_TRIANGLES: usize = 100_000;
 
+fn step_part(name: &str) -> bool {
+    name.ends_with(".step") || name.ends_with(".step-source")
+}
+
 /// Untrusted, display-only evaluated meshes. Never used for editing, picking or measurement.
 #[derive(Default)]
 pub struct DesignPreview {
@@ -93,7 +97,7 @@ struct PackageWriter {
 /// The uncompressed size a part may have. STEP and mesh blobs may be larger than the
 /// design file because they are stored compressed when they would not fit otherwise.
 fn part_limit(name: &str) -> usize {
-    if name.ends_with(".step") {
+    if step_part(name) {
         max_step_part()
     } else if name.ends_with(".mesh") {
         max_mesh_part()
@@ -110,27 +114,46 @@ impl PackageWriter {
         Ok(self.zip.finish().map_err(invalid)?.into_inner())
     }
     fn part(&mut self, name: &str, bytes: &[u8], compressed: bool) -> Result<()> {
-        if bytes.len() > part_limit(name) {
+        if !self.start_part(name, bytes.len(), compressed)? {
+            return Ok(());
+        }
+        self.zip.write_all(bytes).map_err(invalid)
+    }
+    fn start_part(&mut self, name: &str, length: usize, compressed: bool) -> Result<bool> {
+        if length > part_limit(name) {
             return Err(invalid("part too large"));
         }
         if !self.names.insert(name.to_owned()) {
-            return Ok(());
+            return Ok(false);
         }
-        self.expanded = self.expanded.checked_add(bytes.len()).ok_or_else(|| invalid("expanded size overflow"))?;
+        self.expanded = self.expanded.checked_add(length).ok_or_else(|| invalid("expanded size overflow"))?;
         if self.expanded > max_expanded() || self.names.len() > MAX_ENTRIES {
             return Err(invalid("package too large"));
         }
         let method = if compressed { zip::CompressionMethod::Deflated } else { zip::CompressionMethod::Stored };
         // A mesh past the file limit uses the STEP level: level 1 of a large payload leaves
         // more on disk, and this part exists only because compression is what makes it fit.
-        let level = if name.ends_with(".step") || (name.ends_with(".mesh") && bytes.len() > max_part()) { STEP_LEVEL } else { 1 };
+        let level = if step_part(name) || (name.ends_with(".mesh") && length > max_part()) { STEP_LEVEL } else { 1 };
         // A part of 4 GiB or more (only with a raised file limit, #4086) needs a ZIP64 entry.
         let options = zip::write::SimpleFileOptions::default()
             .compression_method(method)
             .compression_level(compressed.then_some(level))
-            .large_file(bytes.len() as u64 >= u64::from(u32::MAX));
+            .large_file(length as u64 >= u64::from(u32::MAX));
         self.zip.start_file(name, options).map_err(invalid)?;
-        self.zip.write_all(bytes).map_err(invalid)
+        Ok(true)
+    }
+    fn step_library(&mut self, source: &solidcraft_kernel::StepSource) -> Result<Value> {
+        // Measure/hash without an escaped copy of a potentially large STEP payload. Serialize
+        // directly into the compressed entry on the second pass.
+        let mut hash = JsonHash { hash: Sha256::new(), length: 0, limit: max_step_part() };
+        serde_json::to_writer(&mut hash, source).map_err(invalid)?;
+        self.resolved =
+            self.resolved.checked_add(hash.length).filter(|n| *n <= max_expanded()).ok_or_else(|| invalid("resolved payloads too large"))?;
+        let name = format!("blobs/{:x}.step-source", hash.hash.finalize());
+        if self.start_part(&name, hash.length, true)? {
+            serde_json::to_writer(&mut self.zip, source).map_err(invalid)?;
+        }
+        Ok(Value::String(name))
     }
     /// Would `entries` more optional parts of `extra` bytes, stored uncompressed, still keep
     /// the file within `budget` and its expanded size within the reader's budget?
@@ -153,6 +176,26 @@ impl PackageWriter {
         let name = format!("blobs/{}.{extension}", digest(bytes));
         self.part(&name, bytes, compressed)?;
         Ok(Value::String(name))
+    }
+}
+
+struct JsonHash {
+    hash: Sha256,
+    length: usize,
+    limit: usize,
+}
+impl Write for JsonHash {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.length = self
+            .length
+            .checked_add(bytes.len())
+            .filter(|n| *n <= self.limit)
+            .ok_or_else(|| std::io::Error::other("shared STEP source exceeds the payload budget"))?;
+        self.hash.update(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
     }
 }
 
@@ -220,12 +263,27 @@ fn write_container(
     doc.render.validate().map_err(invalid)?;
     let mut writer = PackageWriter::new();
     let mut features = Vec::with_capacity(doc.features.len());
+    let mut sources = std::collections::HashMap::new();
     for feature in &doc.features {
         let replacements = match &feature.kind {
             FeatureKind::Import { step, .. } => {
                 // STEP is text and shrinks several times: always compressed, so an import as large
                 // as MAX_STEP_BYTES still fits in a design file.
-                let blob = writer.blob(step.as_bytes(), "step", true)?;
+                let key = match step {
+                    solidcraft_kernel::StepSource::Text(text) => (Arc::as_ptr(text) as *const () as usize, false),
+                    solidcraft_kernel::StepSource::Shared(source) => (Arc::as_ptr(source) as usize, true),
+                };
+                let blob = match sources.get(&key) {
+                    Some(blob) => Value::clone(blob),
+                    None => {
+                        let blob = match step {
+                            solidcraft_kernel::StepSource::Text(text) => writer.blob(text.as_bytes(), "step", true)?,
+                            solidcraft_kernel::StepSource::Shared(_) => writer.step_library(step)?,
+                        };
+                        sources.insert(key, blob.clone());
+                        blob
+                    }
+                };
                 fields([("step", Value::String(String::new())), ("step_blob", blob)])
             }
             FeatureKind::MeshImport { meshes, .. } => {
@@ -538,7 +596,8 @@ impl<R: Read + Seek> PackageReader<R> {
         Ok(bytes)
     }
     fn blob(&mut self, value: &Value, field: &str, extension: &str) -> Result<&[u8]> {
-        self.limited_blob(value, field, extension, part_limit(&format!("blob.{extension}")))
+        let limit = value.get(field).and_then(Value::as_str).map_or_else(max_part, part_limit);
+        self.limited_blob(value, field, extension, limit)
     }
     fn limited_blob(&mut self, value: &Value, field: &str, extension: &str, limit: usize) -> Result<&[u8]> {
         let name = value.get(field).and_then(Value::as_str).ok_or_else(|| invalid(format!("missing `{field}` reference")))?;
@@ -777,14 +836,38 @@ fn is_container_source(source: &mut FileSource) -> Result<bool> {
     Ok(is_design_container(&prefix))
 }
 
+fn step_source<R: Read + Seek>(
+    reader: &mut PackageReader<R>,
+    value: &Value,
+    sources: &mut BTreeMap<String, solidcraft_kernel::StepSource>,
+) -> Result<solidcraft_kernel::StepSource> {
+    let reference = value.get("step_blob").and_then(Value::as_str).ok_or_else(|| invalid("missing STEP source reference"))?;
+    if let Some(source) = sources.get(reference) {
+        return Ok(source.clone());
+    }
+    let source: solidcraft_kernel::StepSource = if reference.ends_with(".step-source") {
+        serde_json::from_slice(reader.blob(value, "step_blob", "step-source")?).map_err(invalid)?
+    } else {
+        std::str::from_utf8(reader.blob(value, "step_blob", "step")?).map_err(invalid)?.into()
+    };
+    sources.insert(reference.to_owned(), source.clone());
+    Ok(source)
+}
+
 /// A newer build's container: a feature, picture or point cloud whose payload doesn't read here
 /// is kept as the file has it, and so is every part this build has no use for.
-fn hydrate_newer<R: Read + Seek>(doc: &mut Document, metadata: &Value, container: Value, reader: &mut PackageReader<R>) -> Result<()> {
+fn hydrate_newer<R: Read + Seek>(
+    doc: &mut Document,
+    metadata: &Value,
+    container: Value,
+    reader: &mut PackageReader<R>,
+    sources: &mut BTreeMap<String, solidcraft_kernel::StepSource>,
+) -> Result<()> {
     let file = Arc::make_mut(doc.newer_file.as_mut().ok_or_else(|| invalid("not a newer design"))?);
     for (index, feature) in doc.features.iter_mut().enumerate() {
         let Some(value) = metadata.get("features").and_then(|v| v.get(index)) else { continue };
         let readable = match &mut feature.kind {
-            FeatureKind::Import { .. } => reader.blob(value, "step_blob", "step").map(|_| ()),
+            FeatureKind::Import { .. } => step_source(reader, value, sources).map(|_| ()),
             FeatureKind::MeshImport { meshes, .. } => {
                 let mut check = meshes.clone();
                 check.iter_mut().enumerate().try_for_each(|(i, mesh)| {
@@ -832,8 +915,14 @@ fn hydrate_newer<R: Read + Seek>(doc: &mut Document, metadata: &Value, container
             file.parts.push((name.clone(), reader.limited_part(&name, part_limit(&name))?.into()));
         }
     }
-    // Looking counts against what a design may expand to only once: the reads below are the real ones.
-    reader.hydrated = 0;
+    // Decoded STEP sources remain shared after this probe. Account their retained bytes once;
+    // the other payloads are read again below.
+    reader.hydrated = sources.keys().try_fold(0usize, |bytes, name| {
+        bytes
+            .checked_add(reader.blobs.get(name).map_or(0, Vec::len))
+            .filter(|bytes| *bytes <= max_expanded())
+            .ok_or_else(|| invalid("resolved payloads too large"))
+    })?;
     Ok(())
 }
 
@@ -908,8 +997,9 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
         (file.format, file.reads_up_to, file.unknown_changes) = (current, current, vec![says]);
         doc.newer_file = Some(Arc::new(file));
     }
+    let mut sources = BTreeMap::<String, solidcraft_kernel::StepSource>::new();
     if doc.newer_file.is_some() {
-        hydrate_newer(&mut doc, &metadata, container, reader)?;
+        hydrate_newer(&mut doc, &metadata, container, reader, &mut sources)?;
     }
     for (index, feature) in doc.features.iter_mut().enumerate() {
         let value = metadata.get("features").and_then(|v| v.get(index)).ok_or_else(|| invalid("missing feature metadata"))?;
@@ -918,7 +1008,7 @@ fn read_document<R: Read + Seek>(reader: &mut PackageReader<R>) -> Result<Docume
                 if !step.is_empty() {
                     return Err(invalid("ambiguous embedded STEP and blob"));
                 }
-                *step = std::str::from_utf8(reader.blob(value, "step_blob", "step")?).map_err(invalid)?.into();
+                *step = step_source(reader, value, &mut sources)?;
             }
             FeatureKind::MeshImport { meshes, .. } => {
                 for (index, mesh) in meshes.iter_mut().enumerate() {
@@ -1241,8 +1331,11 @@ mod tests {
     fn seekable_preview_defers_large_source_blob_until_document_read() {
         let mut doc = Document::new("Deferred source");
         let step = noise(2_600_000);
-        doc.add_feature(FeatureKind::Import { file: "large.step".into(), step: step.clone().into(), components: Vec::new(), skip: Vec::new() }, None)
-            .unwrap();
+        doc.add_feature(
+            FeatureKind::Import { file: "large.step".into(), step: step.clone().into(), components: Vec::new(), skip: Default::default() },
+            None,
+        )
+        .unwrap();
         let preview = DesignPreview { meshes: vec![mesh()] };
         let bytes = write_design_container_with_preview(&doc, DesignCompression::Fast, Some(&preview)).unwrap();
         let count = std::rc::Rc::new(std::cell::Cell::new(0));
@@ -1359,8 +1452,11 @@ mod tests {
     fn native_cache_round_trip_and_preview_defer_original_sources() {
         let mut doc = Document::new("Native cache");
         let step = noise(2_600_000);
-        doc.add_feature(FeatureKind::Import { file: "large.step".into(), step: step.clone().into(), components: Vec::new(), skip: Vec::new() }, None)
-            .unwrap();
+        doc.add_feature(
+            FeatureKind::Import { file: "large.step".into(), step: step.clone().into(), components: Vec::new(), skip: Default::default() },
+            None,
+        )
+        .unwrap();
         let bodies = native_geometry();
         let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&bodies)).unwrap();
         let entries = parts(&bytes);
@@ -1849,7 +1945,7 @@ mod tests {
                     file: "example.step".into(),
                     step: "ISO-10303-21;\nEND-ISO-10303-21;".into(),
                     components: Vec::new(),
-                    skip: Vec::new(),
+                    skip: Default::default(),
                 },
                 None,
             )
@@ -2224,7 +2320,8 @@ mod tests {
             panic!("the reopened design lost its import");
         };
         assert!(before.len() > crate::MAX_DESIGN_BYTES && before == after, "the reopened STEP text differs");
-        let reopened = crate::step_import_feature(after.as_bytes(), "large.step").unwrap();
+        let text = after.expanded_text().unwrap();
+        let reopened = crate::step_import_feature(text.as_bytes(), "large.step").unwrap();
         assert_eq!(reopened.body_names, imported.body_names);
         assert_eq!(reopened.import.bodies.len(), 1);
     }
@@ -2378,7 +2475,8 @@ mod tests {
         // 64 MiB that deflate to a few hundred kilobytes, declared as a 1 KiB STEP source.
         let mut doc = Document::new("Bomb");
         let step = format!("ISO-10303-21;{}", " ".repeat(64 << 20));
-        doc.add_feature(FeatureKind::Import { file: "bomb.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new() }, None).unwrap();
+        doc.add_feature(FeatureKind::Import { file: "bomb.step".into(), step: step.into(), components: Vec::new(), skip: Default::default() }, None)
+            .unwrap();
         let honest = write_design_container(&doc).unwrap();
         assert!(honest.len() < 1 << 20);
         let central = honest.windows(4).position(|v| v == b"PK\x01\x02").unwrap();
@@ -2694,8 +2792,11 @@ mod tests {
             .collect();
         let step = solidcraft_kernel::step_export(&bodies.iter().collect::<Vec<_>>(), "SolidCraft storage benchmark").unwrap();
         let mut doc = Document::new("Generated STEP benchmark");
-        doc.add_feature(FeatureKind::Import { file: "generated.step".into(), step: step.into(), components: Vec::new(), skip: Vec::new() }, None)
-            .unwrap();
+        doc.add_feature(
+            FeatureKind::Import { file: "generated.step".into(), step: step.into(), components: Vec::new(), skip: Default::default() },
+            None,
+        )
+        .unwrap();
         measure_storage(&doc, "step");
     }
 

@@ -1460,7 +1460,7 @@ struct Instances {
     /// The meshes drawn as instances, in the order their first placement came, by address.
     meshes: Vec<(std::sync::Arc<solidcraft_engine::geom::Mesh>, crate::gpu::InstancedMesh)>,
     /// Where a mesh's look already is in `meshes`, so placing a body is a lookup, not a scan.
-    by_mesh: std::collections::HashMap<(usize, crate::gpu::InstanceLook), usize>,
+    by_mesh: std::collections::HashMap<(usize, crate::gpu::InstanceLook, Option<(u32, u32)>), usize>,
     kept: InstancedTris,
     lods: crate::mesh_lod::MeshLods,
 }
@@ -1492,49 +1492,94 @@ impl Instances {
         Instances { candidates, meshes: Vec::new(), by_mesh: std::collections::HashMap::new(), kept, lods: app.viewport.mesh_lods.clone() }
     }
 
-    /// Draw `b` as an instance when it is one, in colour `col` (its alpha for a see-through
-    /// `look`): its shared mesh and placement.
+    /// Draw `b` as an instance, retaining its face palette slots and placement.
     fn place(
         &mut self,
         b: &solidcraft_engine::doc::ModelBody,
-        col: crate::gpu::PaletteIndex,
+        slots: crate::scene_palette::BodySlots,
         look: crate::gpu::InstanceLook,
+        faces: &std::collections::HashMap<usize, solidcraft_engine::doc::appearance::Look>,
+        classes: &[crate::gpu::TriClass],
         oit: bool,
     ) -> Option<(std::sync::Arc<solidcraft_engine::geom::Mesh>, solidcraft_engine::doc::Mat)> {
         let (mesh, m, lod_eligible) = self.candidates.get(&b.name)?.clone();
         // A smaller single reference mesh formerly used the sorted CPU glass stream.
-        if !lod_eligible && matches!(look, crate::gpu::InstanceLook::Glass | crate::gpu::InstanceLook::Faded) && !oit {
+        if !lod_eligible
+            && !oit
+            && (matches!(look, crate::gpu::InstanceLook::Glass | crate::gpu::InstanceLook::Faded)
+                || classes.iter().any(|class| *class != crate::gpu::TriClass::Opaque))
+        {
             return None;
         }
+        if !faces.is_empty() && mesh.triangles.iter().flatten().any(|i| *i as usize >= mesh.positions.len().min(mesh.normals.len())) {
+            return None;
+        }
+        if faces.is_empty() {
+            self.place_range(&mesh, &m, slots.instance, look, None, b.is_closed(), lod_eligible)?;
+        } else {
+            let count = u32::try_from(mesh.triangles.len().checked_mul(3)?).ok()?;
+            let appearance = |triangle: usize| match mesh.tri_face.get(triangle).filter(|f| faces.contains_key(&(**f as usize))) {
+                None => (slots.instance, look),
+                Some(face) => {
+                    let mode = match classes.get(*face as usize) {
+                        Some(crate::gpu::TriClass::Opaque) => crate::gpu::InstanceLook::Opaque,
+                        Some(crate::gpu::TriClass::Glass) => crate::gpu::InstanceLook::Glass,
+                        Some(crate::gpu::TriClass::Faded) => crate::gpu::InstanceLook::Faded,
+                        None => look,
+                    };
+                    (slots.face(*face as usize), mode)
+                }
+            };
+            let mut start = 0u32;
+            let mut current = appearance(0);
+            for end in (3..count).step_by(3) {
+                let next = appearance(end as usize / 3);
+                if next != current {
+                    self.place_range(&mesh, &m, current.0, current.1, Some(start..end), b.is_closed(), lod_eligible)?;
+                    start = end;
+                    current = next;
+                }
+            }
+            self.place_range(&mesh, &m, current.0, current.1, (start != 0).then_some(start..count), b.is_closed(), lod_eligible)?;
+        }
+        Some((mesh, m))
+    }
+
+    fn place_range(
+        &mut self,
+        mesh: &std::sync::Arc<solidcraft_engine::geom::Mesh>,
+        m: &solidcraft_engine::doc::Mat,
+        col: crate::gpu::PaletteIndex,
+        look: crate::gpu::InstanceLook,
+        range: Option<std::ops::Range<u32>>,
+        closed: bool,
+        lod_eligible: bool,
+    ) -> Option<()> {
         let rows = [0, 1, 2].map(|r| [m[0][r] as f32, m[1][r] as f32, m[2][r] as f32, m[3][r] as f32]);
-        let key = std::sync::Arc::as_ptr(&mesh) as usize;
-        let at = match self.by_mesh.get(&(key, look)).copied() {
+        let key = std::sync::Arc::as_ptr(mesh) as usize;
+        let batch = (key, look, range.as_ref().map(|r| (r.start, r.end)));
+        let at = match self.by_mesh.get(&batch).copied() {
             Some(at) => at,
             None => {
-                // The same triangles (and levels) for each look of a mesh.
-                let made = self.meshes.iter().find(|(k, _)| std::sync::Arc::ptr_eq(k, &mesh)).map(|(_, i)| (i.tris.clone(), i.levels.clone()));
-                let (tris, levels) = match made {
-                    Some(made) => made,
-                    None => (
-                        match self.kept.get(&key).filter(|(k, _)| std::sync::Arc::ptr_eq(k, &mesh)) {
-                            Some((_, t)) => t.clone(),
-                            None => taken_shared_tris(&mesh).unwrap_or_else(|| std::sync::Arc::new(crate::gpu::SharedTris::new(&mesh))),
-                        },
-                        // Keep the existing detail of newly instanced single reference meshes.
-                        if lod_eligible { self.lods.levels(&mesh).map(|l| l.as_ref().clone()).unwrap_or_default() } else { Vec::new() },
-                    ),
+                let tris = match self.kept.get(&key).filter(|(k, _)| std::sync::Arc::ptr_eq(k, mesh)) {
+                    Some((_, t)) => t.clone(),
+                    None => {
+                        let tris = taken_shared_tris(mesh).unwrap_or_else(|| std::sync::Arc::new(crate::gpu::SharedTris::new(mesh)));
+                        self.kept.insert(key, (mesh.clone(), tris.clone()));
+                        tris
+                    }
                 };
-                self.meshes.push((
-                    mesh.clone(),
-                    crate::gpu::InstancedMesh { key: key as u64, tris, instances: Vec::new(), look, levels, closed: b.is_closed() },
-                ));
-                self.by_mesh.insert((key, look), self.meshes.len() - 1);
-                self.meshes.len() - 1
+                let levels = if lod_eligible && range.is_none() { self.lods.levels(mesh).map(|l| l.as_ref().clone()).unwrap_or_default() } else { Vec::new() };
+                self.meshes
+                    .push((mesh.clone(), crate::gpu::InstancedMesh { key: key as u64, tris, instances: Vec::new(), look, levels, range, closed }));
+                let at = self.meshes.len() - 1;
+                self.by_mesh.insert(batch, at);
+                at
             }
         };
         let (_, inst) = self.meshes.get_mut(at)?;
         inst.place(rows, col);
-        Some((mesh, m))
+        Some(())
     }
 
     /// The instanced meshes, keeping their triangles for the next scene (and, for a scene of
@@ -1567,7 +1612,11 @@ fn shared_mesh(
         return None;
     }
     let q = current();
-    Some(if q == DisplayQuality::Normal { b.mesh_in_place() } else { b.plan_mesh_in_place_at(q).unwrap_or_else(|| b.mesh_in_place()) })
+    Some(if q == DisplayQuality::Normal && !app.viewport.gpu.is_some_and(|g| g.tess) {
+        b.mesh_in_place()
+    } else {
+        b.plan_mesh_in_place_at(q).unwrap_or_else(|| b.mesh_in_place())
+    })
 }
 
 pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
@@ -1812,7 +1861,9 @@ fn body_scene(
         }
         let closed = b.is_closed();
         let class = plan_class(app, &face_classes);
-        let planned = class.and_then(|class| drawn_plan(app, b, true).map(|plan| (plan, class)));
+        let planned = (!instances.candidates.contains_key(&b.name))
+            .then(|| class.and_then(|class| drawn_plan(app, b, true).map(|plan| (plan, class))))
+            .flatten();
         let on_gpu = planned.is_some();
         if let Some((plan, class)) = planned {
             sc.planned.push(crate::gpu::PlannedBody { plan, face_colors: face_colors.clone(), class, closed });
@@ -1832,8 +1883,9 @@ fn body_scene(
             crate::gpu::InstanceLook::Opaque => 255,
         };
         set_palette_color(&mut arena, &mut sc.palette, slots.instance, [col[0], col[1], col[2], alpha]);
-        let instanced =
-            (!on_gpu && face_looks.is_empty()).then(|| instances.place(b, slots.instance, look, app.viewport.gpu.is_some_and(|g| g.oit))).flatten();
+        let instanced = (!on_gpu)
+            .then(|| instances.place(b, slots, look, face_looks, &face_classes, app.viewport.gpu.is_some_and(|g| g.oit)))
+            .flatten();
         let name = b.name.clone();
         let body = match instanced {
             Some((mesh, place)) => BodyDraw {
@@ -4140,6 +4192,7 @@ impl HighlightInstances {
                     look: crate::gpu::InstanceLook::Opaque,
                     levels: Vec::new(),
                     closed: true,
+                    range: None,
                 });
                 self.by_mesh.insert(key, self.meshes.len() - 1);
                 self.meshes.len() - 1
@@ -9107,7 +9160,6 @@ mod tests {
         let app = three_placed_parts(part);
         let st = crate::open_meshing::session_world(&app.session);
         assert_eq!(st.bodies.len(), 3);
-        eprintln!("DBG before {}", st.bodies.iter().filter(|b| b.cached_mesh().is_some()).count());
         let scene = build_scene(&app);
         assert_eq!(scene.instanced.len(), 1, "one shared mesh");
         assert_eq!(scene.instanced[0].count(), 3, "a placement per occurrence");

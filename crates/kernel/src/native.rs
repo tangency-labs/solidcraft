@@ -15,6 +15,17 @@ fn refused(e: file::Error) -> KernelError {
     KernelError::Invalid(e.to_string())
 }
 
+/// Number-for-number geometry and topology equality, independent of paint.
+pub fn exact_geometry_eq(a: &Body, b: &Body) -> Result<Option<bool>> {
+    if a.same_shape(b) {
+        return Ok(Some(true));
+    }
+    if a.is_mesh() || b.is_mesh() {
+        return Ok(None);
+    }
+    Ok(Some(a.record() == b.record()))
+}
+
 /// Explicit topology, spatial geometry, construction certificates and history, exactly: the
 /// body's own record and what it carries. Failure is a cache miss at the IO boundary, never a
 /// failed document save.

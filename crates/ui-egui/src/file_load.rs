@@ -861,10 +861,10 @@ fn step_opening(
         }
         let next = opening.progress().0;
         if staged.read_for != Some(next)
-            && let Some(text) = opening.next_import()
+            && let Some(reading) = watch(progress.clone(), || opening.import_reading())
         {
             staged.read_for = Some(next);
-            staged.reading = watch(progress.clone(), || solidcraft_engine::kernel::StepReading::new(&text)).ok();
+            staged.reading = reading.ok();
             continue;
         }
         let more = scoped(scope.clone(), || watch(progress.clone(), || opening.step()));

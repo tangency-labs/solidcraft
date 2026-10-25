@@ -458,6 +458,9 @@ pub struct InstancedMesh {
     pub levels: Vec<(Arc<SharedTris>, f32)>,
     /// The triangles enclose a volume (see [`PlannedBody::closed`]).
     pub closed: bool,
+    /// An appearance's contiguous triangle range in the shared index buffer. Ranges use full
+    /// detail because coarser meshes do not preserve the original face boundaries.
+    pub range: Option<std::ops::Range<u32>>,
 }
 
 impl InstancedMesh {
@@ -477,7 +480,8 @@ impl InstancedMesh {
             let row = |r: usize| [f(inst, 16 * r), f(inst, 16 * r + 4), f(inst, 16 * r + 8), f(inst, 16 * r + 12)];
             let rows = [row(0), row(1), row(2)];
             let index = inst.get(48..52).and_then(|b| b.try_into().ok()).map_or(0, u32::from_le_bytes);
-            for (p, n) in self.tris.corners().flatten() {
+            let range = self.range.clone().unwrap_or(0..u32::MAX);
+            for (p, n) in self.tris.corners().skip(range.start as usize / 3).take(range.end.saturating_sub(range.start) as usize / 3).flatten() {
                 let moved = rows.map(|r| r[0] * p[0] + r[1] * p[1] + r[2] * p[2] + r[3]);
                 let turned = rows.map(|r| r[0] * n[0] + r[1] * n[1] + r[2] * n[2]);
                 for x in moved.iter().chain(&turned) {
@@ -1341,6 +1345,7 @@ struct LevelDraw {
     /// The placements drawn from it, first `count` of them ([`Batches::cull`]).
     instances: wgpu::Buffer,
     count: u32,
+    range: Option<std::ops::Range<u32>>,
 }
 
 /// An [`InstancedMesh`] on the GPU: its triangles and coarser levels (shared with the next scene
@@ -1380,14 +1385,27 @@ impl LevelDraw {
             SharedGpu::Indexed { vertices, indices, count } => {
                 pass.set_vertex_buffer(0, vertices.slice(..));
                 pass.set_index_buffer(indices.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..*count, 0, 0..self.count);
-                tally.triangles(*count, self.count);
+                let range = self.range.clone().unwrap_or(0..*count);
+                if range.start > range.end || range.end > *count {
+                    return;
+                }
+                tally.triangles(range.end - range.start, self.count);
+                pass.draw_indexed(range, 0, 0..self.count);
             }
             SharedGpu::Unshared(batch) => {
+                let mut at = 0u32;
                 for (buffer, count) in &batch.parts {
+                    let end = at.saturating_add(*count);
+                    let range = self.range.clone().unwrap_or(0..u32::MAX);
+                    let start = range.start.max(at).min(end) - at;
+                    let stop = range.end.min(end).max(at) - at;
+                    at = end;
+                    if start >= stop {
+                        continue;
+                    }
                     pass.set_vertex_buffer(0, buffer.slice(..));
-                    pass.draw(0..*count, 0..self.count);
-                    tally.triangles(*count, self.count);
+                    pass.draw(start..stop, 0..self.count);
+                    tally.triangles(stop - start, self.count);
                 }
             }
         }
@@ -1921,13 +1939,21 @@ impl Batches {
         let mut kept = std::mem::take(&mut self.instanced_tris);
         let mut out = Vec::with_capacity(meshes.len());
         for m in meshes {
+            if m.range
+                .as_ref()
+                .is_some_and(|r| r.start > r.end || r.end as usize > m.tris.indices.len() || !r.start.is_multiple_of(3) || !r.end.is_multiple_of(3))
+            {
+                continue;
+            }
             let count = u32::try_from(m.count()).unwrap_or(u32::MAX);
             if count == 0 {
                 continue;
             }
             let placements = m.instances.get(..count as usize * INSTANCE_SIZE).unwrap_or_default().to_vec();
             let mut levels = Vec::with_capacity(1 + m.levels.len());
-            for (i, (tris, error)) in std::iter::once((&m.tris, 0.0f32)).chain(m.levels.iter().map(|(t, e)| (t, *e))).enumerate() {
+            for (i, (tris, error)) in
+                std::iter::once((&m.tris, 0.0f32)).chain(m.levels.iter().filter(|_| m.range.is_none()).map(|(t, e)| (t, *e))).enumerate()
+            {
                 let key = Arc::as_ptr(tris) as usize;
                 let shared = || donor?.instanced_tris.get(&key).filter(|(b, _)| Arc::ptr_eq(b, tris)).cloned();
                 let gpu = match kept.remove(&key).or_else(|| self.instanced_tris.remove(&key)).filter(|(b, _)| Arc::ptr_eq(b, tris)).or_else(shared) {
@@ -1947,7 +1973,7 @@ impl Batches {
                 };
                 self.uploads.placements += placements.len() as u64;
                 let count = if i == 0 { count } else { 0 };
-                levels.push(LevelDraw { tris: gpu.1.clone(), flat: tris.flat, error, instances, count });
+                levels.push(LevelDraw { tris: gpu.1.clone(), flat: tris.flat, error, instances, count, range: m.range.clone() });
                 self.instanced_tris.insert(key, gpu);
             }
             if !levels.is_empty() {
@@ -5608,6 +5634,7 @@ mod glass_tests {
                             look: InstanceLook::Opaque,
                             levels: Vec::new(),
                             closed: false,
+                            range: None,
                         };
                         for (x, z, color) in [(-4.5, 1.0, front), (4.5, -1.0, rear)] {
                             let rows = [[1.0, 0.0, 0.0, x], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, z]];

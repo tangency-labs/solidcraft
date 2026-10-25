@@ -1,0 +1,26 @@
+{
+  "en": {
+    "cmd.component_make_independent": "Make independent"
+  },
+  "ar": {
+    "cmd.component_make_independent": "جعله مستقلاً"
+  },
+  "de": {
+    "cmd.component_make_independent": "Unabhängig machen"
+  },
+  "he": {
+    "cmd.component_make_independent": "הפוך לעצמאי"
+  },
+  "ja": {
+    "cmd.component_make_independent": "独立させる"
+  },
+  "ko": {
+    "cmd.component_make_independent": "독립적으로 만들기"
+  },
+  "vi": {
+    "cmd.component_make_independent": "Tạo bản độc lập"
+  },
+  "zh": {
+    "cmd.component_make_independent": "设为独立"
+  }
+}

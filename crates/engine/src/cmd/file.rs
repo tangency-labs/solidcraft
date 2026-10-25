@@ -2450,11 +2450,12 @@ mod tests {
         let mut imports = 0;
         let mut n = 0;
         while !steps.done() {
-            if let Some(text) = steps.next_import() {
-                assert!(text.contains("ISO-10303-21"));
+            let held = steps.import_reading().map(|reading| {
                 imports += 1;
-            }
+                reading.unwrap().finish_shared().unwrap()
+            });
             steps.step();
+            drop(held);
             n += 1;
             assert_eq!(steps.progress().0, n);
         }

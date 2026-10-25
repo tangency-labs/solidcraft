@@ -89,13 +89,18 @@ impl OpenSteps {
         self.next >= self.stop
     }
 
-    /// The STEP text the next feature imports, when it is an import that is not suppressed: a
-    /// caller can read it in parts first (`kernel::StepReading`), and while it holds that
-    /// reading's result the step finds the file read.
-    pub fn next_import(&self) -> Option<Arc<str>> {
+    /// Prepare the next unsuppressed import for staged conversion, retaining its body selection.
+    /// Keep the finished import alive until [`Self::step`] consumes it from the cache.
+    pub fn import_reading(&self) -> Option<Result<solidcraft_kernel::StepReading>> {
         let f = self.doc.features.get(self.next).filter(|_| !self.done())?;
         match &f.kind {
-            FeatureKind::Import { step, .. } if !f.suppressed => Some(step.clone()),
+            FeatureKind::Import { step, skip, .. } if !f.suppressed => Some(
+                match skip {
+                    solidcraft_doc::ImportFilter::Only { only } => step.reading_only(only),
+                    solidcraft_doc::ImportFilter::Skip(_) => step.reading(),
+                }
+                .map_err(Into::into),
+            ),
             _ => None,
         }
     }

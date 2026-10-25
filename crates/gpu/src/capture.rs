@@ -723,6 +723,7 @@ mod tests {
                     look: crate::view::InstanceLook::Opaque,
                     levels: Vec::new(),
                     closed: true,
+                    range: None,
                 };
                 let mut sc = GpuScene::default();
                 let red = sc.color([200, 30, 30, 255]);
