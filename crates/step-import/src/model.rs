@@ -269,6 +269,8 @@ impl BodyKind {
 pub struct Body {
     /// `#id` of the representation item.
     pub step_id: u64,
+    /// The representation item's name, when it has one.
+    pub name: Option<String>,
     /// Its kind.
     pub kind: BodyKind,
     /// Length unit of its representation context, in millimetres (already applied).
@@ -285,6 +287,15 @@ pub struct Body {
     pub vertices: Vec<Vertex>,
 }
 
+/// A non-fatal import diagnostic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Diagnostic {
+    /// Entity the diagnostic is about, when it has one.
+    pub step_id: Option<u64>,
+    /// Human-readable description.
+    pub message: String,
+}
+
 /// A body that could not be mapped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Skipped {
@@ -299,12 +310,17 @@ pub struct Skipped {
 /// Everything imported from one file.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Model {
+    /// Part 21 header metadata.
+    pub header: crate::part21::Header,
     /// `FILE_SCHEMA` names.
     pub schemas: Vec<String>,
     /// Bodies in entity id order.
     pub bodies: Vec<Body>,
     /// Bodies that could not be mapped, with the reason.
     pub skipped: Vec<Skipped>,
+    /// Non-fatal diagnostics: missing/multiple unit contexts and ignored assembly
+    /// instancing. An empty list means the model was mapped without ambiguity.
+    pub diagnostics: Vec<Diagnostic>,
     /// Number of `MAPPED_ITEM`s and `CONTEXT_DEPENDENT_SHAPE_REPRESENTATION`s (assembly
     /// instancing), which are not applied: each body is imported once, in the
     /// coordinates of the representation that defines it.

@@ -290,6 +290,7 @@ pub fn write(model: &Model) -> Result<String, ExportError> {
 mod tests {
     use super::*;
     use step_import::model::{Edge, Face, Loop, OrientedEdge, Shell, Vertex};
+    use step_import::part21::Header;
 
     fn line(origin: [f64; 3], dir: [f64; 3], magnitude: f64) -> Curve {
         Curve::Line {
@@ -375,6 +376,7 @@ mod tests {
         };
         let body = Body {
             step_id: 10,
+            name: Some("triangle".into()),
             kind: BodyKind::ManifoldSolid,
             unit_mm: 1.0,
             uncertainty_mm: None,
@@ -389,9 +391,11 @@ mod tests {
             vertices,
         };
         Model {
+            header: Header::default(),
             schemas: vec!["CONFIG_CONTROL_DESIGN".into()],
             bodies: vec![body],
             skipped: Vec::new(),
+            diagnostics: Vec::new(),
             assembly_instances: 0,
         }
     }

@@ -160,9 +160,34 @@ impl Instance {
     }
 }
 
+/// The metadata from the Part 21 `HEADER` section.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Header {
+    /// `FILE_DESCRIPTION` descriptions.
+    pub descriptions: Vec<String>,
+    /// `FILE_DESCRIPTION` implementation level.
+    pub implementation_level: String,
+    /// `FILE_NAME` name.
+    pub file_name: String,
+    /// `FILE_NAME` time stamp.
+    pub time_stamp: String,
+    /// `FILE_NAME` authors.
+    pub authors: Vec<String>,
+    /// `FILE_NAME` organizations.
+    pub organizations: Vec<String>,
+    /// `FILE_NAME` preprocessor version.
+    pub preprocessor_version: String,
+    /// `FILE_NAME` originating system.
+    pub originating_system: String,
+    /// `FILE_NAME` authorization.
+    pub authorization: String,
+}
+
 /// A parsed exchange file.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct StepFile {
+    /// Header metadata.
+    pub header: Header,
     /// `FILE_SCHEMA` names, e.g. `CONFIG_CONTROL_DESIGN` (AP203) or
     /// `AUTOMOTIVE_DESIGN` (AP214).
     pub schemas: Vec<String>,
@@ -547,14 +572,54 @@ pub fn parse(bytes: &[u8], limits: &Limits) -> Result<StepFile, ParseError> {
                 while p.tok != Tok::Keyword("ENDSEC".into()) {
                     let r = p.record()?;
                     p.expect(&Tok::Semi, "';' after a header entity")?;
-                    if r.name == "FILE_SCHEMA" {
-                        if let Some(Param::List(l)) = r.params.first() {
-                            for s in l {
-                                if let Param::Str(s) = s {
-                                    out.schemas.push(s.clone());
+                    match r.name.as_str() {
+                        "FILE_SCHEMA" => {
+                            if let Some(Param::List(l)) = r.params.first() {
+                                for s in l {
+                                    if let Param::Str(s) = s {
+                                        out.schemas.push(s.clone());
+                                    }
                                 }
                             }
                         }
+                        "FILE_DESCRIPTION" => {
+                            if let Some(Param::List(l)) = r.params.first() {
+                                out.header.descriptions = l
+                                    .iter()
+                                    .filter_map(|p| match p {
+                                        Param::Str(s) => Some(s.clone()),
+                                        _ => None,
+                                    })
+                                    .collect();
+                            }
+                            if let Some(Param::Str(s)) = r.params.get(1) {
+                                out.header.implementation_level.clone_from(s);
+                            }
+                        }
+                        "FILE_NAME" => {
+                            let string = |i: usize| match r.params.get(i) {
+                                Some(Param::Str(s)) => s.clone(),
+                                _ => String::new(),
+                            };
+                            let strings = |i: usize| match r.params.get(i) {
+                                Some(Param::List(l)) => l
+                                    .iter()
+                                    .filter_map(|p| match p {
+                                        Param::Str(s) => Some(s.clone()),
+                                        _ => None,
+                                    })
+                                    .collect(),
+                                _ => Vec::new(),
+                            };
+                            out.header.file_name = string(0);
+                            out.header.time_stamp = string(1);
+                            out.header.authors = strings(2);
+                            out.header.organizations = strings(3);
+                            out.header.preprocessor_version = string(4);
+                            out.header.originating_system = string(5);
+                            out.header.authorization = string(6);
+                        }
+                        _ => {}
                     }
                 }
                 p.bump()?;
@@ -607,6 +672,10 @@ mod tests {
     fn parses_tiny_file() {
         let f = parse(TINY.as_bytes(), &Limits::default()).unwrap();
         assert_eq!(f.schemas, vec!["CONFIG_CONTROL_DESIGN".to_string()]);
+        assert_eq!(f.header.file_name, "t");
+        assert_eq!(f.header.time_stamp, "2026-01-01");
+        assert_eq!(f.header.descriptions, vec!["x".to_string()]);
+        assert_eq!(f.header.implementation_level, "2;1");
         assert_eq!(f.entities.len(), 4);
         let Instance::Simple(r) = &f.entities[&1] else {
             panic!()

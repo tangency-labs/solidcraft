@@ -18,8 +18,8 @@ use std::fmt;
 
 use crate::geom::{self, build_frame, conic_angle, dist, unit};
 use crate::model::{
-    BSplineCurve, BSplineSurface, Body, BodyKind, Bound, Curve, Edge, Face, Frame, Loop, Model,
-    OrientedEdge, Shell, Skipped, Surface, Vertex, P3,
+    BSplineCurve, BSplineSurface, Body, BodyKind, Bound, Curve, Diagnostic, Edge, Face, Frame,
+    Loop, Model, OrientedEdge, Shell, Skipped, Surface, Vertex, P3,
 };
 use crate::part21::{Instance, Limits, Param, Record, StepFile};
 
@@ -885,6 +885,10 @@ impl<'a> Mapper<'a> {
         }
         Ok(Body {
             step_id: id,
+            name: match r.params.first() {
+                Some(Param::Str(name)) if !name.is_empty() => Some(name.clone()),
+                _ => None,
+            },
             kind,
             unit_mm: u.mm,
             uncertainty_mm: u.uncertainty,
@@ -1221,6 +1225,44 @@ fn positive(x: f64, what: &str) -> R<f64> {
 }
 
 /// Maps every B-rep body of `file`.
+/// Report references that point at no entity in the data section.
+fn collect_dangling_references(file: &StepFile, diagnostics: &mut Vec<Diagnostic>) {
+    fn visit(param: &Param, missing: &mut Vec<u64>) {
+        match param {
+            Param::Ref(id) => missing.push(*id),
+            Param::List(items) => {
+                for item in items {
+                    visit(item, missing);
+                }
+            }
+            Param::Typed(_, value) => visit(value, missing),
+            _ => {}
+        }
+    }
+    let mut seen = std::collections::BTreeSet::new();
+    for (id, inst) in &file.entities {
+        let records: &[Record] = match inst {
+            Instance::Simple(record) => std::slice::from_ref(record),
+            Instance::Complex(records) => records,
+        };
+        for record in records {
+            for param in &record.params {
+                let mut missing = Vec::new();
+                visit(param, &mut missing);
+                for target in missing {
+                    if !file.entities.contains_key(&target) && seen.insert((*id, target)) {
+                        diagnostics.push(Diagnostic {
+                            step_id: Some(*id),
+                            message: format!("dangling reference #{target}"),
+                        });
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Maps every B-rep body of `file`.
 pub fn map_file(file: &StepFile, limits: &Limits) -> Model {
     let m = Mapper {
         file,
@@ -1244,9 +1286,24 @@ pub fn map_file(file: &StepFile, limits: &Limits) -> Model {
         _ => Units::default(),
     };
     let mut model = Model {
+        header: file.header.clone(),
         schemas: file.schemas.clone(),
         ..Model::default()
     };
+    if all_units.is_empty() {
+        model.diagnostics.push(Diagnostic {
+            step_id: None,
+            message: "no GLOBAL_UNIT_ASSIGNED_CONTEXT; assuming millimetres/degrees".into(),
+        });
+    } else if all_units.len() > 1 {
+        model.diagnostics.push(Diagnostic {
+            step_id: None,
+            message: format!(
+                "{} distinct unit contexts; using the default fallback for bodies without an explicit context",
+                all_units.len()
+            ),
+        });
+    }
     for (id, inst) in &file.entities {
         let rec = match inst {
             Instance::Simple(r) => r,
@@ -1264,9 +1321,14 @@ pub fn map_file(file: &StepFile, limits: &Limits) -> Model {
         let Some(&(name, kind)) = BODY_NAMES.iter().find(|(n, _)| *n == rec.name) else {
             continue;
         };
-        let units = match contexts.get(id) {
-            Some(ctx) => m.context_units(*ctx),
-            None => Ok(fallback),
+        let units = if let Some(ctx) = contexts.get(id) {
+            m.context_units(*ctx)
+        } else {
+            model.diagnostics.push(Diagnostic {
+                step_id: Some(*id),
+                message: "body has no representation context; using the file unit fallback".into(),
+            });
+            Ok(fallback)
         };
         match units.and_then(|u| m.body(*id, kind, rec, u)) {
             Ok(b) => model.bodies.push(b),
@@ -1277,6 +1339,16 @@ pub fn map_file(file: &StepFile, limits: &Limits) -> Model {
             }),
         }
     }
+    if model.assembly_instances > 0 {
+        model.diagnostics.push(Diagnostic {
+            step_id: None,
+            message: format!(
+                "{} assembly instance(s) are counted but not applied; bodies are in their defining representation coordinates",
+                model.assembly_instances
+            ),
+        });
+    }
+    collect_dangling_references(file, &mut model.diagnostics);
     model
 }
 
@@ -1302,6 +1374,60 @@ mod tests {
         let (k, _) = implied_knots("UNIFORM_CURVE", 2, 4).unwrap();
         assert_eq!(k.len(), 7);
         assert!(implied_knots("BEZIER_CURVE", 3, 6).is_err());
+    }
+
+    #[test]
+    fn diagnostics_report_missing_and_multiple_unit_contexts() {
+        let m = model("#1=CARTESIAN_POINT('',(0.,0.,0.));");
+        assert!(m
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("no GLOBAL_UNIT")));
+
+        let m = model(
+            "#1=(GEOMETRIC_REPRESENTATION_CONTEXT(3) GLOBAL_UNIT_ASSIGNED_CONTEXT((#10)) REPRESENTATION_CONTEXT('',''));             #2=(GEOMETRIC_REPRESENTATION_CONTEXT(3) GLOBAL_UNIT_ASSIGNED_CONTEXT((#11)) REPRESENTATION_CONTEXT('',''));             #10=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.));             #11=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.CENTI.,.METRE.));",
+        );
+        assert!(m
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("distinct unit contexts")));
+    }
+
+    #[test]
+    fn diagnostics_report_unapplied_assembly_instances() {
+        let m = model("#1=MAPPED_ITEM('',#2,#3);");
+        assert_eq!(m.assembly_instances, 1);
+        assert!(m
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("assembly instance")));
+    }
+
+    #[test]
+    fn body_name_and_missing_context_are_reported() {
+        let m = model(
+            "#1=MANIFOLD_SOLID_BREP('named',#2);\
+             #2=CLOSED_SHELL('',(#3));\
+             #3=ADVANCED_FACE('',(),#4,.T.);\
+             #4=PLANE('',#5);\
+             #5=AXIS2_PLACEMENT_3D('',#6,$,$);\
+             #6=CARTESIAN_POINT('',(0.,0.,0.));",
+        );
+        assert_eq!(m.bodies.len(), 1);
+        assert_eq!(m.bodies[0].name.as_deref(), Some("named"));
+        assert!(m
+            .diagnostics
+            .iter()
+            .any(|d| d.message.contains("no representation context")));
+    }
+
+    #[test]
+    fn dangling_references_outside_bodies_are_reported() {
+        let m = model("#1=PRODUCT('p','p','',(#9));");
+        assert!(m
+            .diagnostics
+            .iter()
+            .any(|d| d.step_id == Some(1) && d.message.contains("dangling reference #9")));
     }
 
     #[test]

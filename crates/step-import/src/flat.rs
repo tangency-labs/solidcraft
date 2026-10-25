@@ -337,6 +337,7 @@ pub fn decode(data: &[f64]) -> Result<Body, String> {
     }
     Ok(Body {
         step_id: 0,
+        name: None,
         kind,
         unit_mm: 1.0,
         uncertainty_mm: None,
