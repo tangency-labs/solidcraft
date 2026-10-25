@@ -248,16 +248,6 @@ fn go_gemini_tools(tools: &[Value]) -> Vec<Value> {
         .collect()
 }
 
-/// A tool call's `input`/`args` under the Go reply parsers' strict rule: only
-/// an object (or missing/null) is accepted, exactly as the endpoints send.
-fn go_args_object(raw: Option<&Value>) -> Result<Value, String> {
-    match raw {
-        None | Some(Value::Null) => Ok(json!({})),
-        Some(v @ Value::Object(_)) => Ok(v.clone()),
-        Some(_) => Err("the tool arguments must be a JSON object".to_string()),
-    }
-}
-
 /// Append `item` to the last message with `role` (creating one), so roles keep
 /// alternating: Anthropic/Messages merges into `content`, Gemini into `parts`.
 /// One turn answers each tool call with its own OpenAI `tool` message here.
@@ -437,7 +427,6 @@ fn go_call_names(history: &[Value]) -> std::collections::HashMap<String, String>
     names
 }
 
-/// Append `part` to `contents`, merging into the last content with `role`.
 fn go_push_part(contents: &mut Vec<Value>, role: &str, part: Value) {
     go_push_item(contents, role, "parts", part);
 }
@@ -595,7 +584,7 @@ fn go_messages_reply(body: &Value) -> Reply {
                     let id = b.get("id").and_then(Value::as_str).map_or_else(|| format!("toolu-{}", acc.calls.len()), str::to_string);
                     let name = b.get("name").and_then(Value::as_str).unwrap_or("").to_string();
                     let raw_args = b.get("input").map(|i| i.to_string()).unwrap_or_else(|| "{}".to_string());
-                    let arguments = go_args_object(b.get("input"));
+                    let arguments = tool_arguments(b.get("input"));
                     acc.push_call(id, name, arguments, raw_args);
                 }
                 _ => {}
@@ -618,7 +607,7 @@ fn go_gemini_reply(body: &Value) -> Reply {
                 }
                 let name = call.get("name").and_then(Value::as_str).unwrap_or("").to_string();
                 let raw_args = call.get("args").map(|a| a.to_string()).unwrap_or_else(|| "{}".to_string());
-                let arguments = go_args_object(call.get("args"));
+                let arguments = tool_arguments(call.get("args"));
                 // Unique across rounds: `go_call_names` maps the whole history, so a
                 // repeated `call-0` would answer an old result with the newest name.
                 let id = format!("go-{}", GO_GEMINI_CALL_COUNTER.fetch_add(1, Ordering::Relaxed));
@@ -1171,8 +1160,6 @@ impl Worker {
         }
     }
 
-    /// POST `body` to `url` with `headers`: the shared envelope under `post`
-    /// and `go_post`, which differ only in URL, extra headers, and key header.
     fn post_to(&self, url: String, headers: Vec<(String, String)>, body: &Value) -> Result<(u16, Value), String> {
         let req = HttpRequest { method: "POST", url, headers, body: Some(body.to_string().into_bytes()), timeout_s: self.limit_s() };
         self.send(req)
