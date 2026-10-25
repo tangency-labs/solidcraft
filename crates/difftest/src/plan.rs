@@ -62,10 +62,15 @@ pub fn parse_unit(text: &str) -> Result<PlanUnit, String> {
         .get("id")
         .and_then(toml::Value::as_str)
         .ok_or_else(|| "missing id".to_string())?;
-    let status = v
-        .get("status")
-        .and_then(toml::Value::as_str)
-        .unwrap_or("todo");
+    let status = match v.get("status") {
+        None => "todo",
+        Some(value) => value.as_str().ok_or_else(|| {
+            format!(
+                "unit {id}: status must be a string, found {}",
+                value.type_str()
+            )
+        })?,
+    };
     if !STATUSES.contains(&status) {
         return Err(format!(
             "unit {id}: unknown status `{status}` (expected one of {})",
@@ -108,6 +113,54 @@ mod tests {
         assert_eq!(green_units(&u), vec!["a".to_string(), "c".to_string()]);
         assert!(parse_unit("id = \"x\"\nstatus = \"done\"\n").is_err());
         assert!(parse_unit("status = \"green\"\n").is_err());
+    }
+
+    #[test]
+    fn rejects_non_string_statuses() {
+        for (status, kind) in [
+            ("[\"green\"]", "array"),
+            ("1", "integer"),
+            ("true", "boolean"),
+            ("{ value = \"green\" }", "table"),
+        ] {
+            let err =
+                parse_unit(&format!("id = \"malformed.unit\"\nstatus = {status}\n")).unwrap_err();
+            assert_eq!(
+                err,
+                format!("unit malformed.unit: status must be a string, found {kind}")
+            );
+        }
+    }
+
+    #[test]
+    fn accepts_all_string_statuses() {
+        for status in STATUSES {
+            let unit = parse_unit(&format!("id = \"x\"\nstatus = \"{status}\"\n")).unwrap();
+            assert_eq!(unit.id, "x");
+            assert_eq!(unit.status, *status);
+        }
+    }
+
+    #[test]
+    fn missing_status_defaults_to_todo() {
+        let unit = parse_unit("id = \"x\"\n").unwrap();
+        assert_eq!(unit.status, "todo");
+    }
+
+    #[test]
+    fn load_rejects_non_string_status_instead_of_omitting_unit() {
+        let dir = std::env::temp_dir().join(format!(
+            "difftest-plan-malformed-status-{}",
+            std::process::id()
+        ));
+        let units = dir.join("plan").join("units");
+        fs::create_dir_all(&units).unwrap();
+        fs::write(units.join("a.toml"), "id = \"a\"\nstatus = \"green\"\n").unwrap();
+        fs::write(units.join("b.toml"), "id = \"b\"\nstatus = [\"green\"]\n").unwrap();
+        let err = load(&dir).unwrap_err().to_string();
+        assert!(err.contains("b.toml"));
+        assert!(err.contains("unit b: status must be a string, found array"));
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
