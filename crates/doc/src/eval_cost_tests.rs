@@ -434,6 +434,7 @@ fn a_body_is_measured_once_while_it_stays_the_same() {
             radius: "2".into(),
             height: "10".into(),
             operation: Operation::NewBody,
+            references: Vec::new(),
         };
         doc.add_feature(kind, None).unwrap();
     };
