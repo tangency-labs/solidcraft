@@ -18,6 +18,14 @@
 //! classification. Missing downstream services remain explicit deferrals. Every
 //! run has at least [`MIN_GENERATED`] generated cases; generated inputs the ffi
 //! wrapper rejects are redrawn.
+//!
+//! Deviations: the runner-local SMS reader validates counts below the exclusive
+//! `2^usize::BITS` bound, checks dimension and payload arithmetic and available
+//! tokens before constructing the net, and grows storage incrementally. Valid
+//! point order, weights, knots and eager float parsing are unchanged.
+
+#[path = "fixtures/trim_srf_cache_sms.rs"]
+mod sms;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -196,55 +204,19 @@ struct Inputs {
 
 // ---- file readers -------------------------------------------------------------------
 
-fn numbers(path: &str) -> Result<Vec<f64>, HarnessError> {
-    let text = std::fs::read_to_string(path).map_err(|e| harness(format!("{path}: {e}")))?;
-    text.split_whitespace()
-        .map(|t| {
-            t.parse::<f64>()
-                .map_err(|e| harness(format!("{path}: {e}")))
-        })
-        .collect()
-}
-
-fn int(path: &str, v: f64) -> Result<usize, HarnessError> {
-    if v.fract() != 0.0 || v < 0.0 {
-        return Err(harness(format!("{path}: bad count {v}")));
-    }
-    Ok(v as usize)
-}
-
 /// Reads an upstream `.sms` text file: `n m`, `p q`, rational flag, `(n+1)(m+1)`
 /// points (`x y z`, or `wx wy wz w` when rational, v index fastest), `n+p+2` u knots,
 /// `m+q+2` v knots.
 fn read_sms(path: &str) -> Result<InlineSrf, HarnessError> {
-    let v = numbers(path)?;
-    let mut it = v.into_iter();
-    let mut num = || {
-        it.next()
-            .ok_or_else(|| harness(format!("{path}: truncated")))
-    };
-    let n = int(path, num()?)?;
-    let m = int(path, num()?)?;
-    let p = int(path, num()?)?;
-    let q = int(path, num()?)?;
-    let rat = num()? != 0.0;
-    let mut net = Vec::with_capacity(n + 1);
-    for _ in 0..=n {
-        let mut row = Vec::with_capacity(m + 1);
-        for _ in 0..=m {
-            let (x, y, z) = (num()?, num()?, num()?);
-            let w = if rat { num()? } else { NOW };
-            row.push([x, y, z, w]);
-        }
-        net.push(row);
-    }
-    let u = (0..n + p + 2)
-        .map(|_| num())
-        .collect::<Result<Vec<_>, _>>()?;
-    let v = (0..m + q + 2)
-        .map(|_| num())
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(InlineSrf { net, p, q, u, v })
+    let text = std::fs::read_to_string(path).map_err(|e| harness(format!("{path}: {e}")))?;
+    let s = sms::parse_sms(&text, path)?;
+    Ok(InlineSrf {
+        net: s.net,
+        p: s.p,
+        q: s.q,
+        u: s.u,
+        v: s.v,
+    })
 }
 
 fn srf(s: &SrfIn) -> Result<InlineSrf, HarnessError> {
