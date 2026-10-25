@@ -879,6 +879,7 @@
   "cmd.render_start": "渲染图像",
   "cmd.render_status": "渲染进度",
   "cmd.select_clear": "清除选择",
+  "cmd.selection_get": "获取选择",
   "cmd.sheet_convert": "转换为钣金",
   "cmd.sheet_export_bend_table": "导出折弯表",
   "cmd.sheet_export_dxf": "将展开图导出为 DXF",

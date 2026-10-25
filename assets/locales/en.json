@@ -879,6 +879,7 @@
   "cmd.render_start": "Render Image",
   "cmd.render_status": "Render Progress",
   "cmd.select_clear": "Clear Selection",
+  "cmd.selection_get": "Get Selection",
   "cmd.sheet_convert": "Convert to Sheet Metal",
   "cmd.sheet_export_bend_table": "Export Bend Table",
   "cmd.sheet_export_dxf": "Export Flat Pattern as DXF",

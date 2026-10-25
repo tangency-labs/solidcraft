@@ -879,6 +879,7 @@
   "cmd.render_start": "画像をレンダリング",
   "cmd.render_status": "レンダリングの進行状況",
   "cmd.select_clear": "選択をクリア",
+  "cmd.selection_get": "選択を取得",
   "cmd.sheet_convert": "板金に変換",
   "cmd.sheet_export_bend_table": "曲げテーブルをエクスポート",
   "cmd.sheet_export_dxf": "展開図を DXF としてエクスポート",

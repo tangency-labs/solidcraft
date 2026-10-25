@@ -136,6 +136,8 @@ MCP server sends its folders this way on every request ([mcp.md](mcp.md)). Witho
 | `engine.commands` | — | every command: id, label, tab, panel, icon, shortcut, params doc, enabled |
 | `document.inspect` | `measure?`: bool | parameters, timeline (errors, timings), bodies, sketches, selection (assembly joints: `engine.execute` `joint.inspect {joint?}`, which reads only: each joint's two origins with the occurrence, the snap as saved, the feature, face, edge or sketch curve its names refer to, and whether it resolves or why not; kind, offset, angle, flip, values, limits, expressions and motion links) |
 
+The selection alone is the engine command `selection.get` (run it with `engine.execute`; read-only, no undo step, headless too): `{count, items}`, each item as `select.set` takes it (`type`, `body`, `index`, `point`, `id`, `sketch`, `path`…) with `kind` and, unless `detail: false`, what it resolves to: a face's persistent `name`, `surface` (`plane` with `normal`, `cylinder` with `origin`, `axis` and `radius`, `cone`, `sphere`, `torus`, or `other`) and `area_mm2`; an edge's persistent `name`, `curve` (`line`, `circle`, `arc`, `other`), `length_mm`, `start`, `end` and, when round, `center`, `axis` and `radius`; a body's `volume_mm3`, `feature` and `visible`; a body item's `component` and `occurrence_path` in an assembly; a sketch item's `sketch` and `entity` (a line's `sketch_midpoint` gives `midpoint` and its `position`). `ui.selection` (below) reports the window's view of it with the open dialog's inputs and the hovered item.
+
 Commands never open dialogs when run this way. `solidcraft-cli commands` prints the same registry.
 
 ### Slow commands and the window (#1989)

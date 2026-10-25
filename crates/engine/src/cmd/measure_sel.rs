@@ -63,7 +63,7 @@ fn polyline_dist(e: &[Vec3], point: Vec3) -> f64 {
 
 /// The mesh edge a selection means: by index if it still passes through the point, otherwise
 /// (or with no index) the nearest.
-fn edge_index(m: &Mesh, index: Option<usize>, point: Vec3) -> Option<usize> {
+pub(super) fn edge_index(m: &Mesh, index: Option<usize>, point: Vec3) -> Option<usize> {
     let tol = m.bounds().diagonal().max(1.0) * 1e-6;
     if let Some(index) = index.filter(|&i| m.edges.get(i).is_some_and(|e| polyline_dist(e, point) < tol)) {
         return Some(index);
@@ -141,7 +141,7 @@ fn arc_points(center: Vec3, axis: UnitVec3, start: Vec3, angle: f64) -> Vec<Vec3
 
 /// The solved sketch holding a picked curve or point: `sketch` when given, else the active
 /// sketch, else the last sketch with that id.
-fn sketch_of<'a>(
+pub(super) fn sketch_of<'a>(
     s: &Session,
     st: &'a solidcraft_doc::ModelState,
     sketch: Option<u64>,
@@ -365,6 +365,23 @@ fn describe(s: &Session, sel: &Sel) -> Option<Item> {
         Sel::Profile { sketch, index } => profile(st.sketch(*sketch)?, *index),
         _ => None,
     }
+}
+
+/// What `selection.get` reports of a picked item beyond its identity: the measurement
+/// `inspect.measure` gives it (length, area, volume, radius…), its direction where it has one
+/// (a planar face's normal, a straight edge's direction) and, for an edge, whether it is a line,
+/// a circle, an arc or another curve.
+pub(super) fn resolve(s: &Session, sel: &Sel) -> Option<(Value, Option<Vec3>)> {
+    let item = describe(s, sel)?;
+    let mut json = item.json;
+    if matches!(sel, Sel::Edge { .. }) {
+        json["curve"] = match item.shape {
+            Shape::Line { .. } => json!("line"),
+            Shape::Round { .. } => json.get("round").cloned().unwrap_or_else(|| json!("arc")),
+            _ => json!("other"),
+        };
+    }
+    Some((json, item.dir))
 }
 
 fn sample<T: Copy>(v: &[T], max: usize) -> Vec<T> {
