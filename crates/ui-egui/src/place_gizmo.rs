@@ -176,12 +176,12 @@ pub(crate) fn pulled(deg: f64, n: Vec3, step: f64, free: bool) -> f64 {
     }
 }
 
-/// The colour of the world axis a compass point's name ends in (the move triad's X, Y, Z).
+/// The colour of the world axis a compass point's name ends in (the one set of axis colours).
 fn axis_colour(name: &str, t: &Tokens) -> egui::Color32 {
     match name.chars().last() {
-        Some('X') => t.gizmo[0],
-        Some('Y') => t.gizmo[1],
-        _ => t.gizmo[2],
+        Some('X') => t.axis_x,
+        Some('Y') => t.axis_y,
+        _ => t.axis_z,
     }
 }
 
