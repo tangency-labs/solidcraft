@@ -551,9 +551,12 @@ where
 }
 
 /// Sub-curve on `[a, b]` (inside the curve's range).
-fn sub_curve<C: Cut + BoundedCurve + Clone>(c: &C, a: f64, b: f64) -> C {
+fn sub_curve<C: Cut + BoundedCurve + Clone>(c: &C, a: f64, b: f64, eps: f64) -> R<C> {
+    // Check before cutting: even evaluating a piece this short can fail in the curve library.
+    if !a.is_finite() || !b.is_finite() || !(b - a > eps) {
+        return Err("degenerate spline edge".into());
+    }
     let (t0, t1) = c.range_tuple();
-    let eps = (t1 - t0).abs() * 1e-9;
     let mut out = c.clone();
     if a > t0 + eps {
         out = out.cut(a);
@@ -561,7 +564,11 @@ fn sub_curve<C: Cut + BoundedCurve + Clone>(c: &C, a: f64, b: f64) -> C {
     if b < t1 - eps {
         let _ = out.cut(b);
     }
-    out
+    let (lo, hi) = out.range_tuple();
+    if !(hi - lo > eps) {
+        return Err("degenerate spline edge".into());
+    }
+    Ok(out)
 }
 
 /// Pieces of a spline edge from `ps` to `pe` (two pieces for a closed edge). The vertices may
@@ -571,20 +578,25 @@ where
     C: ParametricCurve<Point = mt::Point3> + BoundedCurve + SearchNearestParameter<mt::D1, Point = mt::Point3> + Cut + Clone + Invertible,
 {
     let (t0, t1) = c.range_tuple();
+    let span = t1 - t0;
+    // Knot ranges use an absolute zero threshold; retain the relative seam tolerance too.
+    let eps = mt::TOLERANCE.max(span * 1e-7);
+    if !t0.is_finite() || !t1.is_finite() || !span.is_finite() || !(span > eps) {
+        return Err("degenerate spline edge".into());
+    }
     let (ts, ds) = nearest_param(c, ps).ok_or("spline evaluation failed")?;
     let (te, de) = nearest_param(c, pe).ok_or("spline evaluation failed")?;
     if !(ds <= snap && de <= snap) {
         return Err(format!("edge vertices are {:.3e} mm off their curve", ds.max(de)));
     }
-    let span = t1 - t0;
-    let near = |a: f64, b: f64| (a - b).abs() <= span * 1e-7;
+    let near = |a: f64, b: f64| (a - b).abs() <= eps;
     let mut pieces = if closed {
         // Whole closed curve starting at the vertex.
         if near(ts, t0) || near(ts, t1) {
             let m = t0 + span * 0.5;
-            vec![sub_curve(c, t0, m), sub_curve(c, m, t1)]
+            vec![sub_curve(c, t0, m, eps)?, sub_curve(c, m, t1, eps)?]
         } else {
-            vec![sub_curve(c, ts, t1), sub_curve(c, t0, ts)]
+            vec![sub_curve(c, ts, t1, eps)?, sub_curve(c, t0, ts, eps)?]
         }
     } else {
         let (mut a, mut b) = if sense { (ts, te) } else { (te, ts) };
@@ -595,7 +607,7 @@ where
             } else if near(a, t1) {
                 a = t0;
             } else {
-                let mut v = vec![sub_curve(c, a, t1), sub_curve(c, t0, b)];
+                let mut v = vec![sub_curve(c, a, t1, eps)?, sub_curve(c, t0, b, eps)?];
                 if !sense {
                     v.reverse();
                     v.iter_mut().for_each(|x| x.invert());
@@ -603,10 +615,7 @@ where
                 return Ok(v);
             }
         }
-        if b - a <= span * 1e-9 {
-            return Err("degenerate spline edge".into());
-        }
-        vec![sub_curve(c, a, b)]
+        vec![sub_curve(c, a, b, eps)?]
     };
     if !sense {
         pieces.reverse();
