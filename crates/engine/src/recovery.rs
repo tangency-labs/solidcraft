@@ -162,9 +162,7 @@ pub fn load(dir: &Path, id: &str) -> Result<(Document, Entry)> {
     if !valid_id(id) {
         return Err(EngineError::Other(format!("no recovered design `{id}`")));
     }
-    let entry = read_entry(&file(dir, id, "json"))
-        .filter(|e| e.id == id)
-        .ok_or_else(|| EngineError::Other(format!("no recovered design `{id}`")))?;
+    let entry = read_entry(&file(dir, id, "json")).filter(|e| e.id == id).ok_or_else(|| EngineError::Other(format!("no recovered design `{id}`")))?;
     let path = design_file(dir, id);
     let bytes = solidcraft_io::vfs::read(&path.to_string_lossy(), solidcraft_io::MAX_DESIGN_BYTES)
         .map_err(|e| EngineError::Other(format!("recovered design `{id}`: {e}")))?;
@@ -174,9 +172,7 @@ pub fn load(dir: &Path, id: &str) -> Result<(Document, Entry)> {
 /// Delete an entry. Only a real one: `<id>.json` must describe entry `id` and its design must
 /// be there, so a folder and id that merely name someone's `part.solidcraft` delete nothing.
 pub fn remove(dir: &Path, id: &str) -> Result<()> {
-    let is_entry = valid_id(id)
-        && read_entry(&file(dir, id, "json")).is_some_and(|e| e.id == id)
-        && design_file(dir, id).is_file();
+    let is_entry = valid_id(id) && read_entry(&file(dir, id, "json")).is_some_and(|e| e.id == id) && design_file(dir, id).is_file();
     if !is_entry {
         return Err(EngineError::Other(format!("no recovered design `{id}`")));
     }
@@ -643,5 +639,4 @@ mod tests {
         assert!(remove(&d, "device").is_err());
         fs::remove_dir_all(&d).unwrap();
     }
-
 }
