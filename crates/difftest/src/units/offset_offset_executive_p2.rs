@@ -55,6 +55,9 @@
 //! Positive B-rep tolerances avoid the unported automatic `SetTolerance` path;
 //! member approximation tolerance still covers zero, negative and -1 sentinel.
 //! All numeric keys have ZERO absolute floor; signed-zero inputs are retained.
+//! A fixture case whose native vertex positions follow heap addresses (upstream
+//! `SmRelation` walks in address-hash order) sets `heap_ordered_vertices`, which omits
+//! only the result B-reps' vertex bounds on both sides; see [`Inputs::heap_ordered_vertices`].
 //!
 //! This unit is necessarily PARTIAL: current positive geometry operations reach
 //! genuine missing manifold/copy/face-construction/shrink/merge/stitch work.
@@ -291,6 +294,15 @@ struct Inputs {
     tolerance: f64,
     #[serde(default)]
     config: Config,
+    /// The returned/retained B-reps' vertex bounds are not compared (counts, kinds and
+    /// tolerance still are). Set only on fixture cases whose native vertex positions
+    /// depend on heap addresses: `DoSolidOffset` walks `SmRelation`s whose
+    /// `std::unordered_map` buckets are keyed by object address, so the order of the
+    /// tolerance-merge averaging of degenerate side-wall vertices follows the heap
+    /// layout of the process (plan/findings.md, "offset.offset_executive_p2:
+    /// exact-2tol shell vertex bounds follow native heap layout").
+    #[serde(default)]
+    heap_ordered_vertices: bool,
 }
 impl Inputs {
     fn native(&self) -> ffi::Request {
@@ -1224,10 +1236,20 @@ fn rust_result_projection(brep: &Brep) -> HResult<ResultProjection> {
         values,
     })
 }
-fn project_result(output: Output, key: &str, projection: Option<ResultProjection>) -> Output {
-    let Some(projection) = projection else {
+/// Emits a result projection; with `heap_ordered` (see [`Inputs::heap_ordered_vertices`])
+/// only the B-rep tolerance of `values` is kept, not the vertex bounds.
+fn project_result(
+    output: Output,
+    key: &str,
+    projection: Option<ResultProjection>,
+    heap_ordered: bool,
+) -> Output {
+    let Some(mut projection) = projection else {
         return output.int(&format!("{key}.present"), 0);
     };
+    if heap_ordered {
+        projection.values.truncate(1);
+    }
     output
         .int(&format!("{key}.present"), 1)
         .ints(&format!("{key}.counts"), projection.counts)
@@ -1388,7 +1410,7 @@ fn native_output(input: &Inputs, snapshot: &ffi::Snapshot) -> HResult<Output> {
             .as_ref()
             .map(|block| decode_block(block).map(|decoded| native_result_projection(&decoded)))
             .transpose()?;
-        output = project_result(output, key, projection);
+        output = project_result(output, key, projection, input.heap_ordered_vertices);
     }
     Ok(output)
 }
@@ -1796,8 +1818,9 @@ fn rust_output(input: &Inputs) -> RResult<Output> {
         vec![i64::from(source_pure), i64::from(foreign_pure)],
     )
 ;
-    output = project_result(output, "result", result_projection);
-    output = project_result(output, "executive_offset", offset_projection);
+    let heap_ordered = input.heap_ordered_vertices;
+    output = project_result(output, "result", result_projection, heap_ordered);
+    output = project_result(output, "executive_offset", offset_projection, heap_ordered);
     for (key, projection) in [
         ("source.before", source_before),
         ("source.after", source_after),
@@ -1904,6 +1927,7 @@ fn generated(rng: &mut Rng) -> Inputs {
             create_offset_solid: flags & 8 != 0,
             skip_stitch_merge: flags & 16 != 0,
         },
+        heap_ordered_vertices: false,
     };
     match category {
         0 | 1 => {
@@ -2021,6 +2045,7 @@ mod tests {
             faces: Vec::new(),
             tolerance: 1e-6,
             config: Config::default(),
+            heap_ordered_vertices: false,
         }
     }
     fn case(input: &Inputs) -> Case {
