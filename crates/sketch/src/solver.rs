@@ -1817,14 +1817,16 @@ fn initial_x(sk: &Sketch, lay: &Layout) -> Vec<f64> {
 /// point.
 fn build_blocks<'a>(sk: &'a Sketch, lay: &Layout, on_curve: &[(usize, usize)]) -> (Vec<(Block<'a>, Vec<usize>)>, Vec<bool>) {
     let mut raw = Vec::new();
-    for c in &sk.curves {
+    for (k, c) in sk.curves.iter().enumerate() {
         if let CurveKind::Spline { pts, periodic: true, .. } = &c.kind
             && let (Some(a), Some(b)) = (pts.first(), pts.last())
             && a != b
         {
             raw.push(Block::Closure { a: *a, b: *b });
         }
-        if let CurveKind::Arc { c, a, b } = c.kind {
+        if let CurveKind::Arc { c, a, b } = c.kind
+            && !sk.offset_arc_follows_source(k)
+        {
             raw.push(Block::Arc { c, a, b });
         }
     }

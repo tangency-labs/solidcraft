@@ -988,6 +988,10 @@ pub(crate) fn read(sk: &Sketch, before: &dyn Fn(usize) -> Option<Vec2>, on_curve
     }
     for (k, rd) in rounds.iter().enumerate() {
         let Some(Round { c, ends: Some((a, b)) }) = *rd else { continue };
+        // An offset's arc follows its source's centre; its held ends don't place it (#6569).
+        if sk.offset_arc_follows_source(k) {
+            continue;
+        }
         match r_of(k) {
             Some(r) => {
                 rel(c, a, Rel::Dist(r));
