@@ -19,6 +19,7 @@ pub const ERR_NO_ROOM: i32 = -1103;
 pub const ERR_NO_CUT: i32 = -1104;
 pub const ERR_UNSUPPORTED: i32 = -1105;
 pub const ERR_NO_EFFECT: i32 = -1107;
+pub const ERR_WALLS_TOUCH: i32 = -1110;
 
 pub const BOOLEAN_UNION: i32 = 0;
 pub const BOOLEAN_SUBTRACT: i32 = 1;

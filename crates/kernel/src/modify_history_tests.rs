@@ -552,6 +552,17 @@ mod smlib {
         verified(&r, &plate, reach(2.5 * 1.5));
     }
 
+    /// A 40 x 40 x 10 plate with an r2 hole 3 from its side, shelled 1.5 open at the top: the
+    /// hole's offset just reaches the side's, so the walls would meet along a line. Refused,
+    /// saying so and with the wall, never as SMLib's bare status.
+    #[test]
+    fn a_shell_whose_walls_would_meet_is_refused_saying_so() {
+        let hole = Loop2::circle(Vec2::new(5.0, 20.0), 2.0);
+        let plate = extrude(&Plane::XY, &[Region2 { outer: square(0.0, 0.0, 40.0, 40.0), holes: vec![hole] }], 0.0, 10.0).unwrap().pop().unwrap();
+        let e = offset_backend::shell(&plate, &[Vec3::new(35.0, 20.0, 10.0)], 1.5).unwrap_err().to_string();
+        assert!(e.contains("the 1.5 mm walls would meet along a line"), "{e}");
+    }
+
     #[test]
     fn offset_moves_a_face() {
         let b = ell();

@@ -58,6 +58,6 @@ pub(crate) fn heal(body: &Body, keep: &[Vec<Vec3>]) -> Result<Body> {
         }
     }
     let tolerance = record.tolerance * 10.0;
-    let (healed, history) = crate::offset_backend::run("healing", body, |b| b.merge_faces(&kept, tolerance))?;
+    let (healed, history) = crate::offset_backend::run("healing", body, None, |b| b.merge_faces(&kept, tolerance))?;
     Ok(healed.with_checked_history(history, &crate::record::counts(&[body])).with_split_lines(body.splits.clone()))
 }

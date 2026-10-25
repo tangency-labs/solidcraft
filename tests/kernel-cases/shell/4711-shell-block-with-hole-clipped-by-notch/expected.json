@@ -2,9 +2,9 @@
  "sources": [
   "tangency-labs/solidcraft#4711"
  ],
- "what": "a 2 mm shell, open at the bottom, of a 60x40x10 block whose r3 through hole breaks out into a 10x10 notch at its edge: truck took 75 s and failed ('boolean Cut: no result')",
+ "what": "a 2 mm shell, open at the bottom, of a 60x40x10 block with an r3 through hole 4 mm from its front face, beside a 10x10 notch at that edge: the walls from the hole and from the front would meet along a line, so the right answer is a refusal that says so (truck took 75 s and failed ('boolean Cut: no result'); SMLib refused it, but as 'status 1027')",
  "source": "invariants",
- "method": "every wall has room for 2 mm (the thinnest, between the hole and the block's side, is 4 mm), so the shell exists: one valid closed body with one shell, open at the bottom. The cavity's corners at the hole's break-out follow the offset surfaces, so the volume is not closed-form (the reporter's script)",
- "body_count": 1,
- "shells": 1
+ "method": "the hole (centre (22.5, 7), r3) is 7 - 3 = 4 mm from the front face y = 0, and two 2 mm walls take 4 = 2 x 2 mm: the hole wall's offset (r 3 + 2 = 5) is tangent to the front's (y = 2) at (22.5, 2), so the cavity pinches to zero thickness along the line x = 22.5, y = 2, which bounds no solid. A thinner wall leaves the walls apart, a thicker one makes them cross and merge; at exactly 2 mm the shell is refused, naming the cause. Expected message: \"shell: the 2 mm walls would meet along a line (between a hole and the side, for example), which leaves no solid there; use a thinner or thicker wall, or move the feature\".",
+ "outcome": "refused",
+ "refusal": "shell: the 2 mm walls would meet along a line (between a hole and the side, for example), which leaves no solid there; use a thinner or thicker wall, or move the feature"
 }

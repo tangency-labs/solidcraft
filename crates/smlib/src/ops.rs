@@ -182,7 +182,9 @@ impl Brep {
 
     /// Hollowed to a wall of `thickness` (negative: inside the original surface, positive:
     /// outside), open at the faces nearest to `open_faces` (each within `tolerance`); none gives
-    /// a closed hollow body. An inward wall that leaves no room inside is [`Error::NoRoom`].
+    /// a closed hollow body. An inward wall that leaves no room inside is [`Error::NoRoom`]; one
+    /// whose walls would just meet (a hole exactly twice the wall from a side) is
+    /// [`Error::WallsTouch`].
     pub fn shell(&self, open_faces: &[[f64; 3]], tolerance: f64, thickness: f64) -> Result<Brep> {
         self.pick_op(ffi::ops::Pick::Shell, open_faces, tolerance, thickness, true)
     }

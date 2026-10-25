@@ -223,6 +223,24 @@ fn hostile_inputs_are_errors() {
     assert_untouched(&c, 8000.0, [6, 12, 8]);
 }
 
+/// Rig case shell/4711: a 60 x 40 x 10 block with an r3 through hole at (22.5, 7), 4 from the
+/// front face, and a 10 x 10 notch on that edge, shelled 2 inward open at the bottom: the hole's
+/// offset (r5) is tangent to the front's (y = 2), so the walls meet along a line and the offset
+/// bounds no solid there. Refused as such; 1.5 (the walls apart) and 2.5 (crossing, merged)
+/// build.
+#[test]
+fn a_shell_whose_walls_would_meet_is_refused_as_such() {
+    let block = Brep::make_box([0.0; 3], [60.0, 40.0, 10.0]).unwrap();
+    let pin = Brep::make_cylinder([22.5, 7.0, -5.0], 3.0, 20.0).unwrap();
+    let notch = Brep::make_box([25.0, -5.0, -5.0], [10.0, 10.0, 20.0]).unwrap();
+    let part = block.boolean(&pin, BooleanOp::Subtract).unwrap().unwrap().boolean(&notch, BooleanOp::Subtract).unwrap().unwrap();
+    let bottom = [[50.0, 30.0, 0.0]];
+    assert_eq!(part.shell(&bottom, 0.1, -2.0).unwrap_err(), Error::WallsTouch);
+    for t in [1.5, 2.5] {
+        shot(&part.shell(&bottom, 0.1, -t).unwrap(), &format!("shell-4711-{t}"));
+    }
+}
+
 #[test]
 fn boolean_history_through_tagged_operands() {
     // A slot across the top of the cube: the cube's 6 faces give 7 result faces (the top is cut
