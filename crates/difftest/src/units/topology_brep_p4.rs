@@ -19,6 +19,17 @@
 //! reached them in does not matter. The `Check` operation runs nothing and compares
 //! the imported model with the C++ records, which proves the encodings agree while the
 //! operations still defer.
+//!
+//! Deviations: the runner-local native record decoder validates finite,
+//! nonnegative integral counts below the exclusive `2^usize::BITS` bound and
+//! checks available tokens before iterating records or lists. Storage grows
+//! incrementally; valid record ordering, labels and float bits are unchanged.
+
+#[path = "fixtures/topology_brep_records.rs"]
+mod records;
+
+use records::{parse_records, Model, Rec};
+
 use super::topology_vertexuse::{self as shared, BrepIn};
 use crate::case::CaseContext;
 use crate::output::Topology;
@@ -235,123 +246,6 @@ const KINDS: [&str; 10] = [
     "vertexuses",
     "vertices",
 ];
-
-/// A field of a record: a plain integer, a link to a record of a kind, a list of such
-/// links (a count, then the labels) or a real.
-#[derive(Clone, Copy)]
-enum Slot {
-    I,
-    R(usize),
-    L(usize),
-    F,
-}
-use Slot::{F, I, L, R};
-
-/// The fields of each kind, in the order the shim writes them (`emit_records`).
-const LAYOUT: [&[Slot]; 10] = [
-    // region: in the B-rep, shells (in list order from the head)
-    &[I, L(1)],
-    // shell: region, type (`m_tShellType`), has a list head (`m_pList`), the head as a face
-    // use, as an edge use, as a vertex use (by the type; `-1` for the other two)
-    &[R(0), I, I, R(2), R(6), R(8)],
-    // face use: shell, face, mate, orientation, loop uses
-    &[R(1), R(3), R(2), I, L(4)],
-    // face: face use, domain (u0 v0 u1 v1), rectangular trim, tolerance, has a surface,
-    // surface owned by the face, natural domain of the surface (u0 v0 u1 v1), the surface
-    // point at the centre of that domain (evaluated: 1/0, then x y z)
-    &[R(2), F, F, F, F, I, F, I, I, F, F, F, F, I, F, F, F],
-    // loop use: face use, loop, mate, start type, start edge use, start vertex use,
-    // orientation
-    &[R(2), R(5), R(4), I, R(6), R(8), I],
-    // loop: loop use
-    &[R(4)],
-    // edge use: edge, owner type, owner loop use, owner shell, cw, ccw, vertex use,
-    // orientation, has a UV trim curve
-    &[R(7), I, R(4), R(1), R(6), R(6), R(8), I, I],
-    // edge: tolerance, interval, edge uses, has a curve, natural interval of the curve
-    &[F, F, F, L(6), I, F, F],
-    // vertex use: vertex, owner type, owner edge use, loop use, shell, UV point
-    &[R(9), I, R(6), R(4), R(1), F, F],
-    // vertex: point, tolerance, vertex uses
-    &[F, F, F, F, L(8)],
-];
-
-/// One record: its label, its integer fields (links are labels, `-1` null; a list is
-/// its count and its labels), the kind each integer links to (if it does) and its reals.
-#[derive(Debug, Clone, PartialEq)]
-struct Rec {
-    label: i64,
-    ints: Vec<i64>,
-    links: Vec<Option<usize>>,
-    floats: Vec<f64>,
-}
-
-impl Rec {
-    fn new(label: i64) -> Self {
-        Self {
-            label,
-            ints: Vec::new(),
-            links: Vec::new(),
-            floats: Vec::new(),
-        }
-    }
-    fn i(&mut self, x: i64) {
-        self.ints.push(x);
-        self.links.push(None);
-    }
-    fn r(&mut self, kind: usize, x: i64) {
-        self.ints.push(x);
-        self.links.push(Some(kind));
-    }
-    fn l(&mut self, kind: usize, xs: &[i64]) {
-        self.i(xs.len() as i64);
-        for &x in xs {
-            self.r(kind, x);
-        }
-    }
-    fn f(&mut self, x: f64) {
-        self.floats.push(x);
-    }
-}
-
-type Model = [Vec<Rec>; 10];
-
-/// The records the shim wrote (`emit_records`), as given by [`LAYOUT`].
-fn parse_records(v: &[f64]) -> Result<Model, HarnessError> {
-    let mut at = 0usize;
-    let mut next = || -> Result<f64, HarnessError> {
-        let x = *v.get(at).ok_or_else(|| err("short record output"))?;
-        at += 1;
-        Ok(x)
-    };
-    let mut model: Model = Default::default();
-    for (slots, out) in LAYOUT.iter().zip(model.iter_mut()) {
-        let n = next()? as usize;
-        for _ in 0..n {
-            let mut rec = Rec::new(next()? as i64);
-            for slot in *slots {
-                match *slot {
-                    I => rec.i(next()? as i64),
-                    R(k) => rec.r(k, next()? as i64),
-                    L(k) => {
-                        let count = next()? as usize;
-                        let mut xs = Vec::new();
-                        for _ in 0..count {
-                            xs.push(next()? as i64);
-                        }
-                        rec.l(k, &xs);
-                    }
-                    F => rec.f(next()?),
-                }
-            }
-            out.push(rec);
-        }
-    }
-    if at != v.len() {
-        return Err(err("trailing record output"));
-    }
-    Ok(model)
-}
 
 /// The label of record `index` of a kind with `pre` records before the operation.
 fn label(pre: usize, index: u32) -> i64 {
