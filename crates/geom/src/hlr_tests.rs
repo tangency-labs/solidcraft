@@ -2897,25 +2897,133 @@ fn mixed_scene(o: &Options) -> (Vec<Prepared>, Vec<Placement>) {
     (defs, scene)
 }
 
-/// Timing, not a check (`cargo test --release -p solidcraft-geom --lib hlr_timing -- --ignored
-/// --nocapture`): preparing the bodies, then 100 placements (`SOLIDCRAFT_BENCH_HLR=N` for N),
-/// each turned differently, on one thread, two workers and one worker per core.
+/// Timing (`cargo test --release -p solidcraft-geom --lib hlr_timing -- --ignored --nocapture`).
+/// Each scene is drawn on one thread, two workers and one worker per core, in a rotated order
+/// over three rounds; the first round's drawings must not depend on the thread count (compared
+/// outside the timed part). Scenes: 100 placements (`SOLIDCRAFT_BENCH_HLR=N` for N) of four
+/// bodies each turned differently; the same grid at one turn sharing four definitions, against
+/// one definition prepared per placement; and sixteen thin bars seen from above, crossing 8x8.
+/// The first of the four phases is grouping, silhouette tracing, tracks and screen sampling.
 #[test]
 #[ignore]
 fn hlr_timing() {
     let n = std::env::var("SOLIDCRAFT_BENCH_HLR").ok().and_then(|s| s.parse().ok()).unwrap_or(100);
     let o = Options::default();
-    let started = std::time::Instant::now();
     let bodies = [cuboid([0.; 3], [8.; 3]), cylinder(4., 10.), sphere(4.), torus(5., 1.5)];
-    let defs: Vec<Prepared> = bodies.iter().map(|b| prepare(b, &o).unwrap()).collect();
-    eprintln!("prepare {} bodies: {:.3} s", defs.len(), started.elapsed().as_secs_f64());
-    let scene: Vec<Placement> = (0..n).map(|k| turned_about_z(k % 4, 0.07 * k as f64, [14. * (k % 10) as f64, 14. * (k / 10) as f64, 0.])).collect();
+    let started = std::time::Instant::now();
+    let shared: Vec<Prepared> = bodies.iter().map(|b| prepare(b, &o).unwrap()).collect();
+    eprintln!("prepare {} bodies: {:.3} s", shared.len(), started.elapsed().as_secs_f64());
+    let started = std::time::Instant::now();
+    let own: Vec<Prepared> = (0..n).map(|k| prepare(&bodies[k % 4], &o).unwrap()).collect();
+    eprintln!("prepare {n} definitions: {:.3} s", started.elapsed().as_secs_f64());
+    let at = |k: usize| [14. * (k % 10) as f64, 14. * (k / 10) as f64, 0.];
+    let turned: Vec<Placement> = (0..n).map(|k| turned_about_z(k % 4, 0.07 * k as f64, at(k))).collect();
+    let alike: Vec<Placement> = (0..n).map(|k| turned_about_z(k % 4, 0.3, at(k))).collect();
+    let unshared: Vec<Placement> = (0..n).map(|k| turned_about_z(k, 0.3, at(k))).collect();
+    let bar = vec![prepare(&cuboid([-18., -0.5, 0.], [18., 0.5, 1.]), &o).unwrap()];
+    let half = std::f64::consts::FRAC_PI_2;
+    let bars: Vec<Placement> = (0..8)
+        .map(|k| identity(0, [0., -14. + 4. * k as f64, 0.]))
+        .chain((0..8).map(|k| turned_about_z(0, half, [-14. + 4. * k as f64, 0., 2.])))
+        .collect();
+    let iso = View::new(Vec3::new(-1., -1., -1.), Vec3::new(0., 0., 1.)).unwrap();
+    let top = View::new(Vec3::new(0., 0., -1.), Vec3::new(0., 1., 0.)).unwrap();
+    let scenes: [(&str, &[Prepared], &[Placement], &View); 4] = [
+        ("turned", &shared, &turned, &iso),
+        ("alike, shared", &shared, &alike, &iso),
+        ("alike, unshared", &own, &unshared, &iso),
+        ("bars", &bar, &bars, &top),
+    ];
+    for (name, defs, scene, view) in scenes {
+        let mut drawn = Vec::new();
+        for round in 0..3 {
+            for i in 0..3 {
+                let threads = [1, 2, 0][(round + i) % 3];
+                let started = std::time::Instant::now();
+                let d = hidden_lines(defs, scene, view, &Options { threads, ..o }, &never).unwrap();
+                let seconds = started.elapsed().as_secs_f64();
+                let s = &d.stats;
+                eprintln!("{name}, {} placements, threads {threads}: {seconds:.3} s, phases {:.0?} ms, {} rays", scene.len(), s.phase_ms, s.rays);
+                if round == 0 {
+                    drawn.push(fingerprint(d));
+                }
+            }
+        }
+        assert!(drawn.windows(2).all(|w| w[0] == w[1]), "{name}: the thread count changed the drawing");
+    }
+}
+
+#[test]
+fn permuting_or_removing_placements_moves_only_their_lines() {
+    // One prepared box at three positions far apart on screen, so none hides another: every
+    // line names its placement by its current index, whatever the order or count.
+    let def = prepare(&cuboid([0.; 3], [1.; 3]), &Options::default()).unwrap();
     let view = View::new(Vec3::new(-1., -1., -1.), Vec3::new(0., 0., 1.)).unwrap();
-    for threads in [1, 2, 0] {
-        let started = std::time::Instant::now();
-        let d = hidden_lines(&defs, &scene, &view, &Options { threads, ..o }, &never).unwrap();
-        let s = &d.stats;
-        eprintln!("{n} placements, threads {threads}: {:.3} s, phases {:.0?} ms, {} rays", started.elapsed().as_secs_f64(), s.phase_ms, s.rays);
+    let at = [[0., 0., 0.], [6., -6., 0.], [-6., 6., 0.]];
+    let draw = |order: &[usize]| {
+        let scene: Vec<Placement> = order.iter().map(|&i| identity(0, at[i])).collect();
+        hidden_lines(std::slice::from_ref(&def), &scene, &view, &Options::default(), &never).unwrap()
+    };
+    // Each line keyed by the position it was placed at: bit for bit, or with its pieces' ends
+    // rounded to 1e-9 mm (the view-local frame follows the scene, so a smaller scene rounds
+    // its coordinates differently in the last bits).
+    let lines = |order: &[usize], exact: bool| {
+        let r = |v: f64| (v * 1e9).round() / 1e9 + 0.;
+        let mut keyed: Vec<(usize, String)> = draw(order)
+            .lines
+            .iter()
+            .map(|l| {
+                let pieces = if exact {
+                    format!("{:?}", l.pieces)
+                } else {
+                    let rounded: Vec<_> = l
+                        .pieces
+                        .iter()
+                        .map(|p| {
+                            let ends: Vec<_> = p
+                                .geometry
+                                .iter()
+                                .map(|g| match g {
+                                    Seg2::Line { a, b } => [r(a.x), r(a.y), r(b.x), r(b.y)],
+                                    _ => [f64::NAN; 4],
+                                })
+                                .collect();
+                            format!("{:?} {:?} {} {:?} {ends:?}", p.t.map(r), p.visibility, p.covered, p.accuracy)
+                        })
+                        .collect();
+                    format!("{rounded:?}")
+                };
+                (order[l.placement], format!("{:?} {pieces}", l.source))
+            })
+            .collect();
+        keyed.sort();
+        keyed
+    };
+    let base = lines(&[0, 1, 2], true);
+    assert_eq!(base.iter().filter(|(p, _)| *p == 1).count(), 12, "{base:?}");
+    for order in [[2, 0, 1], [1, 2, 0]] {
+        assert_eq!(lines(&order, true), base, "{order:?}");
+    }
+    let without: Vec<_> = lines(&[0, 1, 2], false).into_iter().filter(|(p, _)| *p != 1).collect();
+    assert_eq!(lines(&[0, 2], false), without);
+    // Analytic and exact: each box draws the first one's lines moved by its own screen offset.
+    let d = draw(&[0, 1, 2]);
+    for (p, offset) in at.iter().enumerate().skip(1) {
+        let [dx, dy] = view.screen(Vec3::new(offset[0], offset[1], offset[2]));
+        for l in d.lines.iter().filter(|l| l.placement == p) {
+            let first = d.lines.iter().find(|f| f.placement == 0 && f.source == l.source).unwrap();
+            assert_eq!(l.pieces.len(), first.pieces.len(), "{:?}", l.source);
+            for (a, b) in l.pieces.iter().zip(&first.pieces) {
+                assert_eq!((a.visibility, a.accuracy), (b.visibility, b.accuracy));
+                assert!(matches!(a.accuracy, crate::section::CurveAccuracy::Analytic), "{:?}", a.accuracy);
+                for (g, h) in a.geometry.iter().zip(&b.geometry) {
+                    let (Seg2::Line { a: ga, b: gb }, Seg2::Line { a: ha, b: hb }) = (g, h) else { panic!("a box edge is a line: {g:?}") };
+                    for (u, v) in [(ga, ha), (gb, hb)] {
+                        assert!((u.x - v.x - dx).abs() < 1e-9 && (u.y - v.y - dy).abs() < 1e-9, "{u:?} vs {v:?} + ({dx}, {dy})");
+                    }
+                }
+            }
+        }
     }
 }
 
