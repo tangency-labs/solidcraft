@@ -2091,7 +2091,7 @@ mod tests {
         // A non-dimension constraint, and a plain curve, get no toggle item.
         h.app.session.selection = vec![Sel::SketchConstraint { id: horiz }];
         assert!(!items(&h.app, &Target::Viewport).iter().any(|i| i.id == "sketch.toggle_driven"), "a horizontal constraint is not a dimension");
-        h.app.session.selection = vec![Sel::SketchCurve { id: l }];
+        h.app.session.selection = vec![Sel::SketchCurve { id: l, sketch: None }];
         assert!(!items(&h.app, &Target::Viewport).iter().any(|i| i.id == "sketch.toggle_driven"));
     }
 
