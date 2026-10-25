@@ -147,7 +147,9 @@ use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::face::p2 as fp2;
 use crate::topology::face::p3::{IntersectObject, IntersectObjects};
 use crate::topology::topology_traverser::{self as tt, Marks};
-use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, FaceuseId, RegionId, ShellId, VertexId};
+use crate::topology::{
+    Brep, EdgeId, EdgeuseId, FaceId, FaceuseId, LoopId, RegionId, ShellId, VertexId, VertexuseId,
+};
 
 const OP: &str = "topology::brep::p7";
 
@@ -445,7 +447,7 @@ type SelfClassification = CurveClassification<IntersectObject>;
 /// each of `faces` (the remaining arguments default).
 fn classify_on_faces(
     k: &Kernel,
-    objects: &IntersectObjects<'_>,
+    objects: &mut SelfMergeObjects<'_, '_>,
     faces: &[FaceId],
     face: FaceId,
     uv_curve: IntersectObject,
@@ -469,7 +471,7 @@ fn classify_on_faces(
         },
     )?;
     for &f in faces {
-        qf2::curve_on_classify(k, objects.b, f, objects, true, &mut cc, false, false, true)?;
+        qf2::curve_on_classify_mut(k, f, objects, true, &mut cc, false, false, true)?;
     }
     Ok(cc)
 }
@@ -545,6 +547,48 @@ impl ClassGeometryMut<IntersectObject> for SelfMergeObjects<'_, '_> {
             IntersectObject::Topology(e, _) => Some((&mut *self.b, e)),
             _ => None,
         }
+    }
+}
+
+impl qf2::CurveOnClassifyObjects<IntersectObject> for SelfMergeObjects<'_, '_> {
+    fn face(&self, f: FaceId) -> IntersectObject {
+        self.view().face(f)
+    }
+    fn vertex(&self, v: VertexId) -> IntersectObject {
+        self.view().vertex(v)
+    }
+    fn edge(&self, e: EdgeId) -> IntersectObject {
+        self.view().edge(e)
+    }
+    fn vertexuse(&self, vu: VertexuseId) -> IntersectObject {
+        self.view().vertexuse(vu)
+    }
+    fn edgeuse(&self, eu: EdgeuseId) -> IntersectObject {
+        self.view().edgeuse(eu)
+    }
+    fn edge_curve(&self, e: EdgeId) -> IntersectObject {
+        self.view().edge_curve(e)
+    }
+    fn trim_curve(&self, eu: EdgeuseId) -> IntersectObject {
+        self.view().trim_curve(eu)
+    }
+    fn face_surface(&self, f: FaceId) -> Option<IntersectObject> {
+        self.view().face_surface(f)
+    }
+    fn loop_id(&self, tgt_loop: IntersectObject) -> Option<LoopId> {
+        self.view().loop_id(tgt_loop)
+    }
+}
+
+impl qf2::FaceBrep for SelfMergeObjects<'_, '_> {
+    fn brep(&self) -> &Brep {
+        self.b
+    }
+}
+
+impl qf2::CurveOnClassifyBrep<IntersectObject> for SelfMergeObjects<'_, '_> {
+    fn brep_mut(&mut self) -> &mut Brep {
+        self.b
     }
 }
 
@@ -2208,23 +2252,6 @@ pub fn merge_self_intersection_curves(
     for (i, c) in curves.iter().enumerate() {
         let tol = tol_3d;
         let curve_3d = IntersectObject::Curve(i);
-        let objects = IntersectObjects {
-            b: &*b,
-            other: &*b,
-            side: false,
-            curves_3d: &curves_3d,
-            uv1: &uv1,
-            uv2: &uv2,
-        };
-        let mut cc1 = classify_on_faces(
-            k,
-            &objects,
-            &all_faces,
-            face,
-            IntersectObject::UvCurve(i, false),
-            c.uv_curve_1.natural_interval(),
-            tol,
-        )?;
         let mut merge_objects = SelfMergeObjects {
             b: &mut *b,
             curves_3d: &mut curves_3d,
@@ -2233,6 +2260,15 @@ pub fn merge_self_intersection_curves(
             env: &mut *env,
             curve_ref,
         };
+        let mut cc1 = classify_on_faces(
+            k,
+            &mut merge_objects,
+            &all_faces,
+            face,
+            IntersectObject::UvCurve(i, false),
+            c.uv_curve_1.natural_interval(),
+            tol,
+        )?;
         let new_faces = set_curve_and_merge(k, &mut merge_objects, &mut cc1, curve_3d)?;
         all_faces.extend(new_faces);
         // (the intervals are copied: the gluing below edits the B-rep the
@@ -2243,17 +2279,17 @@ pub fn merge_self_intersection_curves(
                 continue;
             }
             let e1 = mid_edge(ivl)?;
-            let objects = IntersectObjects {
-                b: &*b,
-                other: &*b,
-                side: false,
-                curves_3d: &curves_3d,
+            let mut merge_objects = SelfMergeObjects {
+                b: &mut *b,
+                curves_3d: &mut curves_3d,
                 uv1: &uv1,
                 uv2: &uv2,
+                env: &mut *env,
+                curve_ref,
             };
             let mut cc2 = classify_on_faces(
                 k,
-                &objects,
+                &mut merge_objects,
                 &all_faces,
                 face,
                 IntersectObject::UvCurve(i, true),
@@ -2263,14 +2299,6 @@ pub fn merge_self_intersection_curves(
             if cc2.size() != 1 {
                 continue;
             }
-            let mut merge_objects = SelfMergeObjects {
-                b: &mut *b,
-                curves_3d: &mut curves_3d,
-                uv1: &uv1,
-                uv2: &uv2,
-                env: &mut *env,
-                curve_ref,
-            };
             let new_faces = set_curve_and_merge(k, &mut merge_objects, &mut cc2, curve_3d)?;
             all_faces.extend(new_faces);
             let [ivl2] = cc2.intervals() else {

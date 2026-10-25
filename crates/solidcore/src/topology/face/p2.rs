@@ -109,6 +109,12 @@
 //!   the B-rep stays there.
 //! - **`CreateCurvesByTrimming`** drops its unused `bForceUVClassify` argument; the
 //!   output arrays are asked for with `want_3d` / `want_uv`.
+//! - **`CalculateAnInternalPoint` / `CreateCurvesByTrimming`** take the B-rep mutably:
+//!   their classifications run on it in place, so what upstream's `const` queries leave
+//!   on the B-rep stays there. Callers that hold only `&Brep` (the topology solver's
+//!   face silhouettes, `sm_CountContainedSamples`) use the crate-private `_snapshot`
+//!   entries, which classify on a private copy and drop those edits (temporary; see
+//!   `query::face::p2`).
 //! - **Unported callees.** `SmCurveClassification::ReSet` in the constructor of a curve
 //!   (`intersect.curve_class_p2`; `SmFace::CurveOnClassify` follows it), the face member
 //!   `GetUpwardFaceuse` of an opaque handle in `SmCurveInterval::GetIvlBound_EdgeuseObj`,
@@ -785,9 +791,10 @@ fn classify_curve_on_face_in_place(
     curve: &Curve,
     with_uv_curve: bool,
     tol: f64,
+    data_size: usize,
 ) -> Result<Vec<CurveInterval<ClassHandle>>> {
     let mut objects = FaceClassify { brep: b, curve };
-    let init = classification_init(k, &objects, f, curve, with_uv_curve, tol, 0);
+    let init = classification_init(k, &objects, f, curve, with_uv_curve, tol, data_size);
     let mut classification = CurveClassification::with_curve(k, &init)?;
     // bHasBigGaps, bDoCheck3d: FALSE; bUVSpaceOkay: TRUE (the defaults)
     curve_on_classify_mut(
@@ -1288,9 +1295,112 @@ pub fn review_start_and_stop_on_seam_crv_classifies<O: ClassObject>(
 /// [`SolidError::NotFound`] for a dangling id; `SM_ERR` (upstream: output `(0, 0, 0)`)
 /// without surface, for a surface without owner, and when no line meets the face
 /// interior; [`SolidError::Unported`] from the line classification.
-pub fn calculate_an_internal_point(k: &Kernel, b: &Brep, f: FaceId) -> Result<Point3> {
+pub fn calculate_an_internal_point(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<Point3> {
+    internal_point(k, b, f)
+}
+
+/// [`calculate_an_internal_point`] for a caller that holds only `&Brep`
+/// (`query::api_queries`' `sm_CountContainedSamples`, whose sample B-rep is borrowed
+/// next to the classified target): the line classifications run on a private copy of
+/// the B-rep ([`qf3::face_classify_uv_line`]), so their lazy edits are dropped.
+///
+/// # Errors
+///
+/// As [`calculate_an_internal_point`].
+pub(crate) fn calculate_an_internal_point_snapshot(
+    k: &Kernel,
+    b: &Brep,
+    f: FaceId,
+) -> Result<Point3> {
+    internal_point(k, b, f)
+}
+
+/// The B-rep forms the face queries `CalculateAnInternalPoint` and
+/// `CreateCurvesByTrimming` classify on: `&mut Brep` in place
+/// ([`curve_on_classify_mut`]), `&Brep` on the classification's snapshot.
+trait QueryBrep: FaceBrep + Sized {
+    /// `sm_FaceClassifyUVLine` of face `f` with `objects`.
+    #[allow(clippy::too_many_arguments)] // sm_FaceClassifyUVLine's arguments
+    fn classify_uv_line(
+        k: &Kernel,
+        f: FaceId,
+        objects: &mut UvLineObjects<Self>,
+        start: Point2,
+        end: Point2,
+        src_zone_tol_3d: f64,
+        cc: &mut CurveClassification<UvLineHandle>,
+    ) -> Result<()>;
+
+    /// [`classify_curve_on_face`] of face `f`.
+    #[allow(clippy::too_many_arguments)] // upstream's constructor arguments
+    fn classify_curve(
+        &mut self,
+        k: &Kernel,
+        f: FaceId,
+        curve: &Curve,
+        with_uv_curve: bool,
+        tol: f64,
+        data_size: usize,
+    ) -> Result<Vec<CurveInterval<ClassHandle>>>;
+}
+
+impl QueryBrep for &Brep {
+    fn classify_uv_line(
+        k: &Kernel,
+        f: FaceId,
+        objects: &mut UvLineObjects<Self>,
+        start: Point2,
+        end: Point2,
+        src_zone_tol_3d: f64,
+        cc: &mut CurveClassification<UvLineHandle>,
+    ) -> Result<()> {
+        let b = objects.b;
+        qf3::face_classify_uv_line(k, b, f, objects, start, end, src_zone_tol_3d, cc)
+    }
+
+    fn classify_curve(
+        &mut self,
+        k: &Kernel,
+        f: FaceId,
+        curve: &Curve,
+        with_uv_curve: bool,
+        tol: f64,
+        data_size: usize,
+    ) -> Result<Vec<CurveInterval<ClassHandle>>> {
+        classify_curve_on_face(k, self, f, curve, with_uv_curve, tol, data_size)
+    }
+}
+
+impl QueryBrep for &mut Brep {
+    fn classify_uv_line(
+        k: &Kernel,
+        f: FaceId,
+        objects: &mut UvLineObjects<Self>,
+        start: Point2,
+        end: Point2,
+        src_zone_tol_3d: f64,
+        cc: &mut CurveClassification<UvLineHandle>,
+    ) -> Result<()> {
+        qf3::face_classify_uv_line_mut(k, f, objects, start, end, src_zone_tol_3d, cc)
+    }
+
+    fn classify_curve(
+        &mut self,
+        k: &Kernel,
+        f: FaceId,
+        curve: &Curve,
+        with_uv_curve: bool,
+        tol: f64,
+        data_size: usize,
+    ) -> Result<Vec<CurveInterval<ClassHandle>>> {
+        classify_curve_on_face_in_place(k, self, f, curve, with_uv_curve, tol, data_size)
+    }
+}
+
+/// `CalculateAnInternalPoint` on `b` (see [`QueryBrep`]).
+fn internal_point<B: QueryBrep>(k: &Kernel, b: B, f: FaceId) -> Result<Point3> {
     // locals
-    let face = b.face(f)?;
+    let face = b.brep().face(f)?;
     let uv_dom = face.uv_domain;
     let u_min = uv_dom.u_min();
     let u_max = uv_dom.u_max();
@@ -1310,12 +1420,7 @@ pub fn calculate_an_internal_point(k: &Kernel, b: &Brep, f: FaceId) -> Result<Po
     }
 
     let mut classification: CurveClassification<UvLineHandle> = CurveClassification::new(k);
-    let mut uv_objects = UvLineObjects {
-        b,
-        f,
-        line: None,
-        resolve_topology: true,
-    };
+    let mut uv_objects = UvLineObjects::new(b, f);
 
     // first for constant U then V isoparameter lines
     for ii in 0..2 {
@@ -1332,9 +1437,8 @@ pub fn calculate_an_internal_point(k: &Kernel, b: &Brep, f: FaceId) -> Result<Po
             };
 
             // classify the target UVLine (status ignored)
-            ignore_status(qf3::face_classify_uv_line(
+            ignore_status(B::classify_uv_line(
                 k,
-                b,
                 f,
                 &mut uv_objects,
                 start,
@@ -1356,6 +1460,11 @@ pub fn calculate_an_internal_point(k: &Kernel, b: &Brep, f: FaceId) -> Result<Po
                     let curve_parameter = ivl.interval.evaluate(0.45);
                     let Ok(uv3) = uv_crv.evaluate_point(k, curve_parameter) else {
                         continue;
+                    };
+                    // pSurface: the face's surface, read after the classification's
+                    // edits (it stays the same surface)
+                    let Some(surf) = uv_objects.brep().face(f)?.surface.as_ref() else {
+                        return Err(SolidError::sm_err(OP));
                     };
                     let Ok(p) = surf.evaluate_point(k, Point2::new(uv3.x, uv3.y)) else {
                         continue;
@@ -1516,7 +1625,7 @@ pub fn points_in_face(
             // classify the isoParameter UVTrimCurve against the face
             let tol = b.face(f)?.tolerance;
             let crv = Curve::from(uv_curve.clone());
-            let intervals = classify_curve_on_face_in_place(k, b, f, &crv, true, tol)?;
+            let intervals = classify_curve_on_face_in_place(k, b, f, &crv, true, tol, 0)?;
             if intervals
                 .iter()
                 .any(|ivl| ivl.mid.point_class() == PointClassType::Face)
@@ -2088,7 +2197,62 @@ pub struct TrimmedCurves {
 #[allow(clippy::too_many_arguments)]
 pub fn create_curves_by_trimming(
     k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    curve_tolerance: Option<f64>,
+    curves_3d: Option<&[Option<Curve>]>,
+    uv_curves: Option<&[Option<Curve>]>,
+    want_3d: bool,
+    want_uv: bool,
+) -> Result<TrimmedCurves> {
+    curves_by_trimming(
+        k,
+        b,
+        f,
+        curve_tolerance,
+        curves_3d,
+        uv_curves,
+        want_3d,
+        want_uv,
+    )
+}
+
+/// [`create_curves_by_trimming`] for a caller that holds only `&Brep`
+/// (`intersect::topology_solver`'s face silhouettes, whose objects lend the face's
+/// B-rep read-only): the classifications run on a private copy of the B-rep
+/// ([`classify_curve_on_face`]), so their lazy edits are dropped.
+///
+/// # Errors
+///
+/// As [`create_curves_by_trimming`].
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn create_curves_by_trimming_snapshot(
+    k: &Kernel,
     b: &Brep,
+    f: FaceId,
+    curve_tolerance: Option<f64>,
+    curves_3d: Option<&[Option<Curve>]>,
+    uv_curves: Option<&[Option<Curve>]>,
+    want_3d: bool,
+    want_uv: bool,
+) -> Result<TrimmedCurves> {
+    curves_by_trimming(
+        k,
+        b,
+        f,
+        curve_tolerance,
+        curves_3d,
+        uv_curves,
+        want_3d,
+        want_uv,
+    )
+}
+
+/// `CreateCurvesByTrimming` on `b` (see [`QueryBrep`]).
+#[allow(clippy::too_many_arguments)]
+fn curves_by_trimming<B: QueryBrep>(
+    k: &Kernel,
+    mut b: B,
     f: FaceId,
     curve_tolerance: Option<f64>,
     curves_3d: Option<&[Option<Curve>]>,
@@ -2101,7 +2265,7 @@ pub fn create_curves_by_trimming(
     let mut new_uv: Vec<Option<Curve>> = Vec::new();
 
     // get max allowed distance from output 3DCurves to face
-    let face_tol = tolerance(b, f)?;
+    let face_tol = tolerance(b.brep(), f)?;
     let tol_3d = match curve_tolerance {
         Some(t) => face_tol.max(t),
         None => face_tol,
@@ -2109,8 +2273,8 @@ pub fn create_curves_by_trimming(
 
     if let Some(uv_list) = uv_curves {
         // a reasonable 2d tolerance based on the 3d tol
-        let surf = surface_deref(b, f)?;
-        let uv_scale = approx_derivative_lengths(k, surf, &uv_domain(b, f)?)?;
+        let surf = surface_deref(b.brep(), f)?;
+        let uv_scale = approx_derivative_lengths(k, surf, &uv_domain(b.brep(), f)?)?;
         let mut uv_scale_avg = 0.5 * (uv_scale.x + uv_scale.y);
         if uv_scale_avg < tol_3d / 1000.0 {
             uv_scale_avg = tol_3d / 1000.0;
@@ -2126,7 +2290,7 @@ pub fn create_curves_by_trimming(
             }
 
             // classify the UVCurve against the face
-            let intervals = classify_curve_on_face(k, b, f, curve, true, tol_uv, 20)?;
+            let intervals = b.classify_curve(k, f, curve, true, tol_uv, 20)?;
 
             // for every curve classification
             for ivl in &intervals {
@@ -2185,7 +2349,7 @@ pub fn create_curves_by_trimming(
             }
 
             // Classify the curve against the face
-            let intervals = classify_curve_on_face(k, b, f, curve, false, tol_3d, 20)?;
+            let intervals = b.classify_curve(k, f, curve, false, tol_3d, 20)?;
 
             for ivl in &intervals {
                 if ivl.mid.point_class() == PointClassType::Face
@@ -3130,12 +3294,12 @@ mod tests {
         let f = b.add_face(s).unwrap();
         let k = Kernel::default();
         assert!(matches!(
-            calculate_an_internal_point(&k, &b, f),
+            calculate_an_internal_point(&k, &mut b, f),
             Err(SolidError::Upstream { .. })
         ));
         b.face_mut(f).unwrap().surface = Some(plane());
         assert!(matches!(
-            calculate_an_internal_point(&k, &b, f),
+            calculate_an_internal_point(&k, &mut b, f),
             Err(SolidError::Upstream { .. })
         ));
         b.face_mut(f)
@@ -3150,7 +3314,7 @@ mod tests {
         // no loops: no line interval classifies into the face (the line statuses are
         // ignored), so the final SM_ERR
         assert!(matches!(
-            calculate_an_internal_point(&k, &b, f),
+            calculate_an_internal_point(&k, &mut b, f),
             Err(SolidError::Upstream { .. })
         ));
     }
@@ -3177,7 +3341,8 @@ mod tests {
         b.face_mut(f).unwrap().uv_domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
         let k = Kernel::default();
         let uv = [None];
-        let r = create_curves_by_trimming(&k, &b, f, None, None, Some(&uv), true, true).unwrap();
+        let r =
+            create_curves_by_trimming(&k, &mut b, f, None, None, Some(&uv), true, true).unwrap();
         assert_eq!(r.curves_3d.map(|v| v.len()), Some(0));
         assert_eq!(r.uv_curves.map(|v| v.len()), Some(0));
         let line = Curve::from(
@@ -3186,10 +3351,10 @@ mod tests {
         let uv = [Some(line)];
         // a face without loops: CurveOnClassify's status
         assert!(matches!(
-            create_curves_by_trimming(&k, &b, f, Some(1.0), None, Some(&uv), false, true),
+            create_curves_by_trimming(&k, &mut b, f, Some(1.0), None, Some(&uv), false, true),
             Err(SolidError::Upstream { .. })
         ));
-        assert!(create_curves_by_trimming(&k, &b, f, None, None, None, true, false).is_err());
+        assert!(create_curves_by_trimming(&k, &mut b, f, None, None, None, true, false).is_err());
     }
 
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]

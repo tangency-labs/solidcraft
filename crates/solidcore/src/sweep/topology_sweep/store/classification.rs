@@ -8,19 +8,23 @@
 //! | `axis_inside_face` | the `SmFace::CurveOnClassify` axis check in `SmPrimitiveCreation::CreateRotationalSweep` |
 //! | `Geometry`, `Handle` | caller-owned object and topology resolution for classification |
 //!
-//! Deviations: borrowed typed handles replace object pointers. Lazy vertex/face
-//! gap updates use a private topology snapshot, as the existing query boundary
-//! views do. No classification algorithm or recursion is introduced; decisions
+//! Deviations: borrowed typed handles replace object pointers. The classification
+//! runs on the face's B-rep in place (`curve_on_classify_mut`); the gaps this
+//! adapter answers through `ClassGeometry::vertex_face_gap` (a `&self` query) are
+//! computed on a private copy of it, so those lazy gap updates are not kept. No classification algorithm or recursion is introduced; decisions
 //! use the existing curve/face classifier and its interval midpoint classes.
 
 use crate::curve::curve::Curve;
 use crate::error::{EntityRef, Result};
 use crate::geom::object::ObjectRef;
 use crate::intersect::curve_class::p1::CurveClassification;
+use crate::intersect::curve_class::p5::ClassGeometryMut;
 use crate::intersect::point_class::{ClassGeometry, ClassObject, ClassObjectKind, PointClassType};
 use crate::kernel::Kernel;
 use crate::math::Point3;
-use crate::query::face::p2::{curve_on_classify, CurveOnClassifyObjects};
+use crate::query::face::p2::{
+    curve_on_classify_mut, CurveOnClassifyBrep, CurveOnClassifyObjects, FaceBrep,
+};
 use crate::surface::surface::Surface;
 use crate::surface::volume::Volume;
 use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, LoopId, VertexId, VertexuseId};
@@ -46,7 +50,7 @@ impl ClassObject for Handle {
 
 struct Geometry<'a> {
     kernel: &'a Kernel,
-    brep: &'a Brep,
+    brep: &'a mut Brep,
     axis: &'a Curve,
 }
 
@@ -56,7 +60,7 @@ impl ClassGeometry<Handle> for Geometry<'_> {
             Handle::Axis => Some(self.axis),
             Handle::EdgeCurve(e) => self.brep.edge(e).ok()?.curve.as_ref(),
             Handle::Trim(eu) => {
-                crate::topology::edgeuse::p1::uv_trim_curve(self.brep, eu)
+                crate::topology::edgeuse::p1::uv_trim_curve(&*self.brep, eu)
                     .ok()?
                     .0
             }
@@ -93,7 +97,7 @@ impl ClassGeometry<Handle> for Geometry<'_> {
     }
     fn topology_entity(&self, o: Handle) -> Option<(&Brep, EntityRef)> {
         if let Handle::Topology(e) = o {
-            Some((self.brep, e))
+            Some((&*self.brep, e))
         } else {
             None
         }
@@ -115,7 +119,7 @@ impl ClassGeometry<Handle> for Geometry<'_> {
             return None;
         };
         for &vu in &self.brep.vertex(v).ok()?.vertexuses {
-            let Some(fu) = crate::topology::vertexuse::faceuse(self.brep, vu).ok()? else {
+            let Some(fu) = crate::topology::vertexuse::faceuse(&*self.brep, vu).ok()? else {
                 continue;
             };
             if self.brep.faceuse(fu).ok()?.face != Some(f) {
@@ -176,9 +180,37 @@ impl CurveOnClassifyObjects<Handle> for Geometry<'_> {
     }
 }
 
-pub(crate) fn axis_inside_face(k: &Kernel, b: &Brep, face: FaceId, axis: &Curve) -> Result<bool> {
+impl ClassGeometryMut<Handle> for Geometry<'_> {
+    fn curve_mut(&mut self, _o: Handle) -> Option<&mut Curve> {
+        // the axis is the caller's (read-only); ClassifyFaceInterval does not edit it
+        None
+    }
+    fn topology_entity_mut(&mut self, o: Handle) -> Option<(&mut Brep, EntityRef)> {
+        let (_, e) = self.topology_entity(o)?;
+        Some((&mut *self.brep, e))
+    }
+}
+
+impl FaceBrep for Geometry<'_> {
+    fn brep(&self) -> &Brep {
+        self.brep
+    }
+}
+
+impl CurveOnClassifyBrep<Handle> for Geometry<'_> {
+    fn brep_mut(&mut self) -> &mut Brep {
+        self.brep
+    }
+}
+
+pub(crate) fn axis_inside_face(
+    k: &Kernel,
+    b: &mut Brep,
+    face: FaceId,
+    axis: &Curve,
+) -> Result<bool> {
     let tolerance = b.face(face)?.tolerance;
-    let geometry = Geometry {
+    let mut geometry = Geometry {
         kernel: k,
         brep: b,
         axis,
@@ -189,7 +221,7 @@ pub(crate) fn axis_inside_face(k: &Kernel, b: &Brep, face: FaceId, axis: &Curve)
         axis.natural_interval(),
         tolerance,
     );
-    curve_on_classify(k, b, face, &geometry, true, &mut cc, false, true, true)?;
+    curve_on_classify_mut(k, face, &mut geometry, true, &mut cc, false, true, true)?;
     Ok(cc
         .intervals()
         .iter()

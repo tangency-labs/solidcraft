@@ -104,7 +104,7 @@
 //!   caller's context issued, so a change tracker sees the same event as upstream.
 //!   `CreateUVTrimCurves` is `topology::face::p3::create_uv_trim_curves`.
 //! - **`HasSeamProblem`** (`topology.face_p4`) runs on the face's own B-rep objects
-//!   ([`crate::topology::face::p4::has_seam_problem_in_brep`]), so the classification
+//!   ([`crate::topology::face::p4::has_seam_problem_in_brep_mut`]), so the classification
 //!   handle type must name them. The seam curves its classifications name are the
 //!   handle type's temporaries (upstream's classifications own them); `SplitAtSeam`'s
 //!   merges read them through the caller's [`ClassGeometry`], and a handle it cannot
@@ -249,7 +249,7 @@ pub struct SeamProblem {
 /// bTgtLoopsOnly)`: rebuilds the classifications and the problem.
 ///
 /// The classifications name the face's own B-rep objects
-/// ([`crate::topology::face::p4::has_seam_problem_in_brep`]); the other optional
+/// ([`crate::topology::face::p4::has_seam_problem_in_brep_mut`]); the other optional
 /// arguments keep their defaults (periodicity tested, local face properties).
 fn has_seam_problem<O: LoopObject>(
     k: &Kernel,
@@ -260,7 +260,7 @@ fn has_seam_problem<O: LoopObject>(
     problem: &mut SeamProblem,
     tgt_loops_only: bool,
 ) -> Result<bool> {
-    let check = crate::topology::face::p4::has_seam_problem_in_brep(
+    let check = crate::topology::face::p4::has_seam_problem_in_brep_mut(
         k,
         b,
         f,

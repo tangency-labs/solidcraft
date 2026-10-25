@@ -106,7 +106,7 @@ use crate::query::face::p2::{
 use crate::surface::surface::p2::{surface_cache, Surface, SurfaceKind};
 use crate::surface::surface_cache::p1::{AltCacheKey, AltSrfCacheType};
 use crate::surface::trim_srf_cache::POINT_CLASS_UNKNOWN;
-use crate::topology::face::p2::create_curves_by_trimming;
+use crate::topology::face::p2::create_curves_by_trimming_snapshot;
 
 const OP_MAY: &str = "intersect::topology_solver::p1::TopologySolver::may_contain_answer";
 const OP_TWO_TREES: &str = "intersect::topology_solver::p1::TopologySolver::solve_two_trees";
@@ -1914,7 +1914,9 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
 /// [`TopologyObjects::surface_solve_context`] makes for the face's surface (else the
 /// per-call [`surface_cache`]); either is this call's copy, so the alternate caches
 /// it searches first hold only what this call adds. The trimming works on the face
-/// [`TopologyObjects::face_entity`] resolves; an adapter that resolves none returns
+/// [`TopologyObjects::face_entity`] resolves, which the objects lend read-only, so it
+/// classifies on a copy of that B-rep and drops the lazy edits upstream's `const`
+/// `CreateCurvesByTrimming` leaves on it; an adapter that resolves none returns
 /// [`SolidError::Unported`] for `SmFace::CreateCurvesByTrimming`. A trimmed UV curve
 /// that is not a B-spline (upstream caches it as NULL and `GetCopyOfCurves` fails
 /// on it) is `SM_ERR_NULL_POINTER`.
@@ -1991,7 +1993,7 @@ pub(super) fn face_silhouettes<O: SolutionObject>(
     };
     let curves_3d: Vec<Option<Curve>> = curves_3d.into_iter().map(Some).collect();
     let curves_uv: Vec<Option<Curve>> = curves_uv.into_iter().map(Some).collect();
-    let trimmed = create_curves_by_trimming(
+    let trimmed = create_curves_by_trimming_snapshot(
         k,
         b,
         f,

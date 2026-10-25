@@ -397,7 +397,7 @@ fn face_has_seam_problem(
     crate::intersect::curve_class::p1::CurveClassification<HealLoopHandle>,
     crate::topology::face::p1::SeamProblem,
 )> {
-    let check = crate::topology::face::p4::has_seam_problem_in_brep(
+    let check = crate::topology::face::p4::has_seam_problem_in_brep_mut(
         k,
         b,
         f,

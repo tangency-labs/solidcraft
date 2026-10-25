@@ -3520,8 +3520,14 @@ fn orient_ray_votes(
             // Get Surface Normal for this point.
             let dom = b.face(face)?.uv_domain;
             // the face's surface reaches its face's cache (smsurf_GetSurfaceCache),
-            // made on the B-rep: an exact evaluation copy of the surface meanwhile
-            let surface = surface.clone_for_evaluation()?;
+            // made on the B-rep: an exact evaluation copy of the surface meanwhile (the
+            // face's surface, read again after the trimming's in-place edits)
+            let surface = b
+                .face(face)?
+                .surface
+                .as_ref()
+                .ok_or(null_deref("face without surface"))?
+                .clone_for_evaluation()?;
             let tolerance_3d = b.tolerance();
             let mut sols = crate::geom::solution_array::SolutionArray::new();
             surface.global_point_solve_into_with_context::<CacheObject>(

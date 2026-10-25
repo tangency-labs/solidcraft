@@ -650,7 +650,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     Ok(match resolved {
         Resolved::Face(f) => match &i.op {
             OpIn::Internal => {
-                match solidcore::topology::face::p2::calculate_an_internal_point(&k, &b, f) {
+                match solidcore::topology::face::p2::calculate_an_internal_point(&k, &mut b, f) {
                     Ok(p) => Output::new().values("point", p.to_array()),
                     Err(e) => rust_err(&e),
                 }

@@ -30,7 +30,10 @@
 //! output stays undefined); Unported errors still propagate. The containment tests of
 //! [`brep_relationship`] (`sm_PointInSolid`, `sm_CountContainedSamples`) classify on a
 //! private copy of each target ([`BrepClassifier::of_brep`], keyed by the target's
-//! recorded naming scheme and proven owner keys). No new recursion or allocation from
+//! recorded naming scheme and proven owner keys); `sm_CountContainedSamples`'
+//! `SmApiFaceInternalPoint` of each sample face runs on a copy of the sample B-rep
+//! (borrowed next to the target), while the public [`face_internal_point`] works on its
+//! B-rep in place. No new recursion or allocation from
 //! serialized counts.
 
 use crate::curve::curve::p1::GlobalPointSolveOptions;
@@ -425,7 +428,9 @@ fn count_contained_samples(
         points.push(sample.vertex(vertex)?.point);
     }
     for face in brep_faces(sample)? {
-        if let Some(point) = ignored(face_internal_point(k, sample, face))? {
+        // SmApiFaceInternalPoint on a sample borrowed next to the classified target: on a
+        // copy of the sample (module Deviations)
+        if let Some(point) = ignored(face::calculate_an_internal_point_snapshot(k, sample, face))? {
             points.push(point);
         }
     }
@@ -678,9 +683,11 @@ pub fn face_bounding_box(k: &Kernel, brep: &Brep, face: FaceId, tight: bool) -> 
     crate::query::face::p1::calculate_bounding_box(k, brep, face, false)
 }
 
-/// Interior face point (`SmApiFaceInternalPoint`). Errors from the face query
+/// Interior face point (`SmApiFaceInternalPoint`). The face's line classifications run
+/// on `brep` in place, so the lazy edits upstream's `const` query makes (UV trim
+/// curves, gap caches, tolerance growth) stay on it. Errors from the face query
 /// propagate, including explicit deferrals of its unfinished dependencies.
-pub fn face_internal_point(k: &Kernel, brep: &Brep, face: FaceId) -> Result<Point3> {
+pub fn face_internal_point(k: &Kernel, brep: &mut Brep, face: FaceId) -> Result<Point3> {
     face::calculate_an_internal_point(k, brep, face)
 }
 
