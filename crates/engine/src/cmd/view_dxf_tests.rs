@@ -157,7 +157,7 @@ fn view_dxf_keeps_every_occurrence_while_sharing_geometry() {
     let result = export(&mut s, camera(StandardView::Top), "dashed");
     assert_eq!(result["stats"]["bodies"], 3);
     assert_eq!(result["stats"]["shared_meshes"], 1);
-    assert_eq!(result["stats"]["worker_limit"], meshes::WORKERS);
+    assert_eq!(result["stats"]["worker_limit"], mesh_lines::WORKERS);
     assert!(result["hidden"].as_u64().unwrap() > 0);
     let lines = solidcraft_io::read_dxf(result["dxf"].as_str().unwrap()).unwrap();
     let mut centers = std::collections::BTreeSet::new();

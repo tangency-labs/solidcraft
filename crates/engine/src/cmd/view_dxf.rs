@@ -1,14 +1,11 @@
 //! A drawing of the visible bodies and shown sketches from a supplied viewport camera. No
-//! screen pixels, grid, selection highlights or tessellation diagonals are exported.
+//! screen pixels, grid, selection highlights or tessellation diagonals are exported. The lines
+//! come from [`crate::mesh_lines`]; this command chooses the bodies and writes the DXF.
 
-#[path = "view_dxf_meshes.rs"]
-mod meshes;
-#[path = "view_dxf_progress.rs"]
-mod progress;
-#[path = "view_dxf_projection.rs"]
-mod projection;
 #[path = "view_dxf_sketch.rs"]
 pub(super) mod sketch;
+
+use std::collections::BTreeMap;
 
 use serde_json::{Value, json};
 use solidcraft_geom::Vec2;
@@ -16,6 +13,7 @@ use solidcraft_io::{DxfEntity, DxfLayer, DxfLinetype, DxfShape};
 use solidcraft_render::Camera;
 
 use super::CommandSpec;
+use crate::mesh_lines::{self, Stage, View};
 use crate::params::{bad, str_};
 use crate::{Result, Session};
 
@@ -57,11 +55,12 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         solidcraft_io::vfs::check(path).map_err(|e| crate::EngineError::Other(e.to_string()))?;
     }
     let started = std::time::Instant::now();
-    progress::Stage::new("dxf_meshes", 1).check().map_err(|e| bad(CMD, e))?;
-    let meshes = meshes::prepare(s, tolerance)?;
+    Stage::new("dxf_meshes", 1).check().map_err(|e| bad(CMD, e))?;
+    let meshes = mesh_lines::prepare(s, CMD, tolerance, |b| s.body_visible(&b.name))?;
     let prepare_ms = started.elapsed().as_secs_f64() * 1000.;
-    let drawing = projection::drawing(&meshes, &sketch::parts(s, tolerance).map_err(|e| bad(CMD, e))?, &cam).map_err(|e| bad(CMD, e))?;
-    let writing = progress::Stage::new("dxf_write", 1);
+    let sketch = sketch::parts(s, tolerance).map_err(|e| bad(CMD, e))?;
+    let drawing = mesh_lines::drawing(&meshes, &sketch, &View::from_camera(&cam)).map_err(|e| bad(CMD, e))?;
+    let writing = Stage::new("dxf_write", 1);
     writing.check().map_err(|e| bad(CMD, e))?;
     let mut visible = 0;
     let mut hidden = 0;
@@ -79,7 +78,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         };
         entities.push(DxfEntity { layer: layer.into(), shape: DxfShape::Line(line.a, line.b) });
     }
-    let mut entities = projection::connect(entities);
+    let mut entities = connect(entities);
     let sketch = sketch_entities(drawing.sketch, dashed, &mut entities);
     let mut layers = vec![DxfLayer::new("VISIBLE", 7)];
     if dashed {
@@ -92,7 +91,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     writing.check().map_err(|e| bad(CMD, e))?;
     let mut result = json!({"visible":visible,"hidden":hidden,"sketch":sketch,"units":"mm","tolerance":tolerance,"projection":if cam.fov > 0.0 {"perspective"} else {"orthographic"}});
     result["stats"] = json!({"bodies":meshes.placements.len(),"shared_meshes":meshes.meshes.len(),"triangles":meshes.triangles,
-        "mesh_bytes":meshes.bytes,"worker_limit":meshes::WORKERS,"segments":drawing.segments,"occlusion_work":drawing.work,
+        "mesh_bytes":meshes.bytes,"worker_limit":mesh_lines::WORKERS,"segments":drawing.segments,"occlusion_work":drawing.work,
         "prepare_ms":prepare_ms,"projection_ms":drawing.projection_ms,"occlusion_ms":drawing.occlusion_ms});
     if let Some(path) = path {
         solidcraft_io::vfs::check(path).map_err(|e| crate::EngineError::Other(e.to_string()))?;
@@ -106,7 +105,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// Sketch runs as entities: visible ones on SKETCH, hidden ones dashed on HIDDEN or omitted.
 /// Returns the number of SKETCH entities.
-fn sketch_entities(paths: Vec<projection::Path>, dashed: bool, entities: &mut Vec<DxfEntity>) -> usize {
+fn sketch_entities(paths: Vec<mesh_lines::Path>, dashed: bool, entities: &mut Vec<DxfEntity>) -> usize {
     let mut count = 0;
     for path in paths.into_iter().filter(|p| dashed || !p.hidden) {
         let layer = if path.hidden { "HIDDEN" } else { "SKETCH" };
@@ -118,6 +117,51 @@ fn sketch_entities(paths: Vec<projection::Path>, dashed: bool, entities: &mut Ve
         entities.push(DxfEntity { layer: layer.into(), shape });
     }
     count
+}
+
+/// Keep the hidden curves connected: restarting a dash on every short chord would make a
+/// small circular hole look solid. Degree-two joins continue; junctions end the polyline.
+fn connect(entities: Vec<DxfEntity>) -> Vec<DxfEntity> {
+    let mut result = Vec::new();
+    let mut lines = Vec::new();
+    for entity in entities {
+        match entity {
+            DxfEntity { layer, shape: DxfShape::Line(a, b) } if layer == "HIDDEN" => lines.push((a, b)),
+            e => result.push(e),
+        }
+    }
+    let extent = lines.iter().flat_map(|(a, b)| [a, b]).fold(1.0_f64, |s, p| s.max(p.x.abs()).max(p.y.abs()));
+    let eps = extent * 1e-8;
+    let key = |p: Vec2| [(p.x / eps).round() as i64, (p.y / eps).round() as i64];
+    let mut nodes: BTreeMap<[i64; 2], Vec<usize>> = BTreeMap::new();
+    for (i, (a, b)) in lines.iter().enumerate() {
+        nodes.entry(key(*a)).or_default().push(i);
+        nodes.entry(key(*b)).or_default().push(i);
+    }
+    let mut used = vec![false; lines.len()];
+    for (i, (a, b)) in lines.iter().enumerate() {
+        if used.get(i).copied().unwrap_or(true) {
+            continue;
+        }
+        if let Some(v) = used.get_mut(i) {
+            *v = true;
+        }
+        let mut points = vec![*a, *b];
+        for _ in 0..2 {
+            while let Some(end) = points.last().copied() {
+                let Some(neighbours) = nodes.get(&key(end)).filter(|n| n.len() == 2) else { break };
+                let Some(next) = neighbours.iter().copied().find(|i| used.get(*i) == Some(&false)) else { break };
+                let Some((a, b)) = lines.get(next) else { break };
+                if let Some(v) = used.get_mut(next) {
+                    *v = true;
+                }
+                points.push(if key(*a) == key(end) { *b } else { *a });
+            }
+            points.reverse();
+        }
+        result.push(DxfEntity { layer: "HIDDEN".into(), shape: DxfShape::Polyline { points } });
+    }
+    result
 }
 
 #[cfg(test)]
