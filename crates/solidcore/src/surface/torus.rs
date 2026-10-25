@@ -44,6 +44,9 @@
 //!   (upstream ignores it and reads the corner it may not have written).
 //!   [`Torus::intersect_with_plane`] runs the inherited `IntersectWithPlane` with the
 //!   torus's iso circles.
+//! - **Iso endpoint angles.** Correct upstream's explicit-domain endpoint vectors
+//!   to be relative to the iso circle's center, not the torus origin (#774).
+//!   Extraction, periodic wrapping and interval-length policy remain unchanged.
 //! - **Copies.** As upstream's copy constructor, which leaves `m_bInsideOut` at its
 //!   default, `Clone` (and [`Torus::copy`]) resets [`Torus::inside_out`] to `false`.
 //!   The constructor also leaves it `false` (its `bInsideOut` only orients the minor
@@ -1211,7 +1214,6 @@ fn iso_curve(
     let nurb_min_point = iso.curve.evaluate_point(nurb_ivl.min())?;
     let nurb_max_point = iso.curve.evaluate_point(nurb_ivl.max())?;
     let nurb_min_vec = nurb_min_point - torus_origin;
-    let nurb_max_vec = nurb_max_point - torus_origin;
 
     // get iso circle parameters
     let (circle_center, x_axis, y_axis, radius, inside_out, anal_domain) = if step_param
@@ -1256,10 +1258,12 @@ fn iso_curve(
         // get angles to min/max points inside periodic interval (statuses ignored
         // upstream; a failed angle is 0)
         let circle_z_axis = x_axis.cross(y_axis);
+        let circle_min_vec = nurb_min_point - circle_center;
+        let circle_max_vec = nurb_max_point - circle_center;
         let min_ang_rad =
-            ignored(circle_z_axis.ccw_angle_between(x_axis, nurb_min_vec))?.unwrap_or(0.0);
+            ignored(circle_z_axis.ccw_angle_between(x_axis, circle_min_vec))?.unwrap_or(0.0);
         let max_ang_rad =
-            ignored(circle_z_axis.ccw_angle_between(x_axis, nurb_max_vec))?.unwrap_or(0.0);
+            ignored(circle_z_axis.ccw_angle_between(x_axis, circle_max_vec))?.unwrap_or(0.0);
         let min_ang_deg = anal_domain
             .contains_periodic_value(min_ang_rad * 180.0 / PI, 360.0, -1.0)
             .periodic_value;
@@ -1365,6 +1369,100 @@ mod tests {
             None,
         )
         .expect("torus")
+    }
+
+    #[test]
+    fn iso_circle_full_turn_domains_and_conversions() {
+        let k = Kernel::default();
+        let frames = [
+            Axis2Placement::IDENTITY,
+            Axis2Placement::new(
+                Vec3::new(1.0, 2.0, 0.5),
+                Vec3::new(0.0, 1.0, 0.0),
+                Vec3::new(0.0, 0.0, 1.0),
+            ),
+        ];
+        for frame in &frames {
+            for shift in [0.0, 45.0] {
+                let analytic = Extent2d::from_bounds(shift, shift, shift + 360.0, shift + 360.0);
+                for swap in [false, true] {
+                    for inside_out in [false, true] {
+                        let mut t = Torus::create_canonical(
+                            &k,
+                            frame,
+                            3.0,
+                            1.0,
+                            TorusOptions {
+                                swap_uv: swap,
+                                inside_out,
+                                circle_nurb: None,
+                            },
+                            Some(&analytic),
+                        )
+                        .expect("torus");
+
+                        // The constructor orients the generator but
+                        // deliberately leaves the torus flag false. Exercise
+                        // consistently oriented iso circles here.
+                        t.inside_out = inside_out;
+                        let domain = t.base.base.natural_uv_domain();
+                        for minor in [true, false] {
+                            let param = if minor == swap {
+                                SurfParamType::V
+                            } else {
+                                SurfParamType::U
+                            };
+                            let fixed = if param == SurfParamType::U {
+                                domain.u_interval().evaluate(0.25)
+                            } else {
+                                domain.v_interval().evaluate(0.25)
+                            };
+                            for explicit in [false, true] {
+                                let iso = t
+                                    .create_iso_parametric_curve(
+                                        &k,
+                                        param,
+                                        fixed,
+                                        explicit.then_some(&domain),
+                                        false,
+                                    )
+                                    .expect("iso circle");
+                                let CurveKind::Ellipse(circle) = iso.curve.kind() else {
+                                    panic!("expected circle");
+                                };
+                                let interval = circle.step_interval();
+                                assert!(
+                                    (interval.min() - shift).abs() < 1e-9
+                                        && (interval.max() - (shift + 360.0)).abs() < 1e-9,
+                                    "minor={minor} explicit={explicit} swap={swap} inside_out={inside_out}: {interval:?}"
+                                );
+                                for fraction in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                                    let step = interval.evaluate(fraction);
+                                    let nurb = circle
+                                        .convert_t_from_step_to_nurbs(&k, step)
+                                        .expect("STEP to NURBS");
+                                    assert!(nurb.is_finite());
+                                    let back = circle
+                                        .convert_t_from_nurbs_to_step(&k, nurb)
+                                        .expect("NURBS to STEP");
+                                    assert!(back.is_finite());
+                                    let p =
+                                        circle.base().evaluate_point(nurb).expect("NURBS point");
+                                    let requested = circle
+                                        .evaluate_step_point(step)
+                                        .expect("requested STEP point");
+                                    let returned = circle
+                                        .evaluate_step_point(back)
+                                        .expect("returned STEP point");
+                                    assert!((p - requested).length() < 1e-9);
+                                    assert!((p - returned).length() < 1e-9);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]
