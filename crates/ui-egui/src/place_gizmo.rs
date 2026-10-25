@@ -25,7 +25,7 @@ mod rest;
 mod snap_fit;
 
 use egui::{Pos2, vec2};
-use look::{CrossStyle, GROW_S, RING_PX, RingStyle, SWEEP_S, angle_label, cased_closed, core, crosshair, ring};
+use look::{CrossStyle, GROW_S, RING_PX, RingStyle, SWEEP_S, angle_label, cased_closed, compass, core, crosshair, ring};
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::geom::Vec3;
 
@@ -149,6 +149,36 @@ pub(crate) fn stepped(deg: f64, step: f64, free: bool) -> f64 {
     if free { deg } else { (deg / step).round() * step }
 }
 
+/// The face's four compass points: the in-face directions along the world axes, as the Snap Fit
+/// combo names them (`+X`, `−Y`, …), each with its angle about `n` from [`axes`]'s x.
+pub(crate) fn cardinals(n: Vec3) -> Vec<(String, f64)> {
+    crate::dialogs_plastic::hook_dirs(n).into_iter().map(|(name, d)| (name, angle_of(d, n))).collect()
+}
+
+/// Within this many degrees of a compass point the turn is pulled onto it.
+const PULL_DEG: f64 = 8.0;
+
+/// `deg` pulled onto a compass point of the face when within [`PULL_DEG`] of one, otherwise
+/// rounded to `step`; `free` leaves it alone.
+pub(crate) fn pulled(deg: f64, n: Vec3, step: f64, free: bool) -> f64 {
+    if free {
+        return deg;
+    }
+    let off = |a: f64| ((a - deg + 180.0).rem_euclid(360.0) - 180.0).abs();
+    match cardinals(n).into_iter().map(|(_, a)| a.to_degrees()).min_by(|a, b| off(*a).total_cmp(&off(*b))) {
+        Some(a) if off(a) <= PULL_DEG => a,
+        _ => stepped(deg, step, false),
+    }
+}
+
+/// The compass point `angle` sits on, if any.
+fn at_cardinal(n: Vec3, angle: f64) -> Option<String> {
+    cardinals(n)
+        .into_iter()
+        .find(|(_, a)| ((a - angle + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI).abs() < 1e-6)
+        .map(|(name, _)| name)
+}
+
 /// A circle of radius `r` about `base` across `n`.
 pub(crate) fn circle(base: Vec3, n: Vec3, r: f64) -> Vec<Vec3> {
     let (x, y) = axes(n);
@@ -267,6 +297,11 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
         active: ui.ctx().animate_bool_with_time(id("ring_active"), dragging, GROW_S),
     };
     ring(painter, &at, angle, bs, &style);
+    // The compass stays put while the feature turns, so you can see how far you have gone.
+    if style.active > 0.01 {
+        let dirs: Vec<f64> = cardinals(n).into_iter().map(|(_, a)| a).collect();
+        compass(painter, &at, bs, &dirs, style.active);
+    }
     if hovered && !dragging {
         r.clone().on_hover_text(crate::i18n::tr_label(turn.tip));
     }
@@ -274,7 +309,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
         ui.ctx().set_cursor_icon(if dragging { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Grab });
     }
     if dragging {
-        angle_label(painter, gs, angle, &t);
+        angle_label(painter, gs, bs, angle, at_cardinal(n, angle).as_deref(), &t);
     }
 }
 

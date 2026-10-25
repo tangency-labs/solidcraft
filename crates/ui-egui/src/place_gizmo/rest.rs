@@ -1,9 +1,9 @@
-//! Rest: the marker moves the pad, the knob turns a rectangular one in 5° steps (Alt or Ctrl held:
-//! free), kept as the command's `along`.
+//! Rest: the marker moves the pad, the ring turns a rectangular one in 5° steps, pulled onto the
+//! face's compass points when near one (Alt or Ctrl held: free), kept as the command's `along`.
 
 use solidcraft_engine::geom::Vec3;
 
-use super::{Spec, Turn, angle_of, circle, dir_at, len, pt, rect, stepped, vec3_of};
+use super::{Spec, Turn, angle_of, circle, dir_at, len, pt, pulled, rect, vec3_of};
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
 use crate::dialogs_plastic::Pl;
@@ -33,7 +33,7 @@ fn footprint(app: &SolveApp, d: &Dialog, base: Vec3, n: Vec3) -> Vec<Vec3> {
     }
 }
 
-/// Half the length of a rectangular pad; a round one has no knob.
+/// Half the length of a rectangular pad; a round one has no ring.
 fn reach(app: &SolveApp, d: &Dialog) -> Option<f64> {
     let Kind::Plastic(Pl::Rest { round: false, length, .. }) = &d.kind else { return None };
     Some(len(app, length) * 0.5)
@@ -45,7 +45,7 @@ fn angle(_: &SolveApp, d: &Dialog, n: Vec3) -> f64 {
 }
 
 fn set(_: &SolveApp, d: &mut Dialog, n: Vec3, raw: f64, free: bool) -> f64 {
-    let a = stepped(raw.to_degrees(), STEP_DEG, free).to_radians();
+    let a = pulled(raw.to_degrees(), n, STEP_DEG, free).to_radians();
     d.extra.insert("along".into(), pt(dir_at(n, a)));
     a
 }

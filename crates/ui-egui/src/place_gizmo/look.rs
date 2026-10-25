@@ -210,8 +210,40 @@ fn dashed(pts: &[Pos2], dash: f32, gap: f32) -> Vec<Vec<Pos2>> {
     out
 }
 
-/// The turn ring's angle readout beside the grip at `at`.
-pub(super) fn angle_label(painter: &egui::Painter, at: Pos2, angle: f64, t: &Tokens) {
-    let text = format!("{:.0}°", angle.to_degrees());
-    painter.text(at + vec2(12.0, -12.0), egui::Align2::LEFT_CENTER, text, egui::FontId::proportional(t.font_body), t.text);
+/// The compass: a short tick just outside the ring at each of the face's compass points, in the
+/// unturned frame, so it stays put while the ring turns. Faded in by `alpha`.
+pub(super) fn compass(painter: &egui::Painter, at: &dyn Fn(f64) -> Option<Pos2>, centre: Pos2, dirs: &[f64], alpha: f32) {
+    let (core, case) = (core(true).gamma_multiply(alpha), casing().gamma_multiply(alpha));
+    for &a in dirs {
+        let Some(g) = at(a) else { continue };
+        let out = (g - centre).normalized();
+        if !out.is_finite() {
+            continue;
+        }
+        let (p, q) = (g + out * TICK_FROM, g + out * (TICK_FROM + TICK_LEN));
+        painter.line_segment([p, q], Stroke::new(RING_LINE + CASE, case));
+        painter.line_segment([p, q], Stroke::new(RING_LINE, core));
+    }
+}
+
+/// A compass tick starts this far outside the ring and is this long.
+const TICK_FROM: f32 = 4.0;
+const TICK_LEN: f32 = 7.0;
+
+/// The turn ring's readout while turning, beside the grip at `at`, away from the ring's `centre`:
+/// the angle, and the compass point it was pulled onto ("90° · +X").
+pub(super) fn angle_label(painter: &egui::Painter, at: Pos2, centre: Pos2, angle: f64, on: Option<&str>, t: &Tokens) {
+    let text = match on {
+        Some(name) => format!("{:.0}° · {name}", angle.to_degrees()),
+        None => format!("{:.0}°", angle.to_degrees()),
+    };
+    let out = (at - centre).normalized();
+    let out = if out.is_finite() { out } else { vec2(1.0, 0.0) };
+    let anchor = at + out * (GRIP_LEN + GRIP_OUT + 6.0);
+    let align = if out.x >= 0.0 { egui::Align2::LEFT_CENTER } else { egui::Align2::RIGHT_CENTER };
+    let font = egui::FontId::proportional(t.font_body);
+    let galley = painter.layout_no_wrap(text, font, t.text);
+    let rect = align.anchor_size(anchor, galley.size()).expand2(vec2(5.0, 2.0));
+    painter.rect(rect, 4.0, t.panel.gamma_multiply(0.92), Stroke::new(1.0, t.manipulator), egui::StrokeKind::Inside);
+    painter.galley(rect.shrink2(vec2(5.0, 2.0)).min, galley, t.text);
 }
