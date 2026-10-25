@@ -406,20 +406,31 @@ impl<'a> BrepFaceServices<'a> {
     }
 
     fn cache(&self, k: &Kernel, face: FaceId) -> Result<SurfaceCache<CacheObject>> {
+        self.cache_mapped(k, face, Ok)
+    }
+
+    /// [`BrepFaceServices::cache`] with its handles mapped by `map`: one copy of the
+    /// kept cache, made directly in the caller's handle space.
+    fn cache_mapped<P: Copy + PartialEq>(
+        &self,
+        k: &Kernel,
+        face: FaceId,
+        map: impl Fn(CacheObject) -> Result<P>,
+    ) -> Result<SurfaceCache<P>> {
         if let Some(cache) = self
             .caches
             .try_borrow()
             .map_err(borrow_conflict)?
             .get(&face)
         {
-            return cache.map_handles(Ok);
+            return cache.map_handles(map);
         }
         let cache = prepare_surface_cache(
             k,
             &mut **self.brep.try_borrow_mut().map_err(borrow_conflict)?,
             face,
         )?;
-        let result = cache.map_handles(Ok)?;
+        let result = cache.map_handles(map)?;
         self.caches
             .try_borrow_mut()
             .map_err(borrow_conflict)?
@@ -556,11 +567,16 @@ impl SurfaceSolveContext<SideObject> for SidedFaceServices<'_> {
         let Some(SideObject(i, c)) = handle else {
             return crate::surface::surface::p2::surface_cache(k, surface, None);
         };
-        self.0
-            .get_mut(i)
-            .ok_or_else(|| SolidError::invalid_input(OP, "handle of an absent B-rep"))?
-            .build_surface_cache(k, surface, Some(c))?
-            .map_handles(|c| Ok(SideObject(i, c)))
+        let services = self
+            .0
+            .get(i)
+            .ok_or_else(|| SolidError::invalid_input(OP, "handle of an absent B-rep"))?;
+        // (as `BrepFaceServices::build_surface_cache`, mapped to this side in the one
+        // copy the fetch makes)
+        match c {
+            CacheObject::Surface(face) => services.cache_mapped(k, face, |c| Ok(SideObject(i, c))),
+            _ => Err(SolidError::invalid_input(OP, "expected surface handle")),
+        }
     }
     fn face_queries(&self) -> Option<&dyn FaceQueries<SideObject>> {
         Some(self)
