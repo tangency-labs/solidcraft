@@ -2298,8 +2298,19 @@ fn drop_edge_curve_in_face(
             });
         }
     }
-    let dropped = surface.drop_and_trim_curve::<crate::topology::ObjectHandle>(
+    // the face's surface cache (upstream's tracer fetches it for the face-owned surface)
+    let mut cache = crate::surface::surface::p1::SurfaceSolveContext::build_surface_cache(
+        &mut crate::query::brep::BrepFaceServices::new(&mut *b),
         k,
+        surface,
+        Some(crate::topology::brep_cache::CacheObject::Surface(face)),
+    )?;
+    let dropped = surface.drop_and_trim_curve_in::<
+        crate::topology::ObjectHandle,
+        crate::topology::brep_cache::CacheObject,
+    >(
+        k,
+        Some(&mut cache),
         domain,
         curve,
         interval,

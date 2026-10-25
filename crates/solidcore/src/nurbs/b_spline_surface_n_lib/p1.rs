@@ -244,20 +244,24 @@ struct DroppedCurves {
 /// with the surface's owner) for a plane, the base body
 /// ([`crate::surface::surface::Surface::drop_curve_base`]) otherwise. The surface is
 /// the caller's (a face's surface keeps its owner).
-fn drop_curve(
+fn drop_curve<O: crate::geom::solution_array::SolutionObject>(
     k: &Kernel,
     srf: &crate::surface::surface::Surface,
     domain: &Extent2d,
     curve: &BSplineCurve,
     interval: &Extent1d,
     approx_tol: f64,
+    context: Option<crate::intersect::surface_drop_lib::p3::DropSolveContext<'_, O>>,
 ) -> Result<DroppedCurves> {
     use crate::curve::curve::{Curve as AnyCurve, CurveKind};
 
     let curve = AnyCurve::from(curve.clone());
-    let out = srf.drop_curve::<crate::surface::surface::p4::NoObject>(
-        k, domain, &curve, interval, approx_tol, true, None, true,
-    )?;
+    let out = match context {
+        Some(context) => srf.drop_curve_with_context::<O>(
+            k, domain, &curve, interval, approx_tol, true, None, true, context,
+        )?,
+        None => srf.drop_curve::<O>(k, domain, &curve, interval, approx_tol, true, None, true)?,
+    };
     // the drop gives `SmBSplineCurve`s (for a plane a UV `SmLine` or B-spline)
     let uv_curves = out
         .uv_curves
@@ -982,6 +986,30 @@ pub fn create_non_rational_curve(
     opt_base_surface: Option<&crate::surface::surface::Surface>,
     approx_tol: f64,
 ) -> Result<(BSplineCurve, Option<BSplineCurve>)> {
+    create_non_rational_curve_with_context::<crate::surface::surface::p4::NoObject>(
+        k,
+        curve,
+        opt_uv_trim_curve,
+        opt_base_surface,
+        approx_tol,
+        None,
+    )
+}
+
+/// [`create_non_rational_curve`] whose drop onto `opt_base_surface` runs under the
+/// caller's face context.
+///
+/// # Errors
+///
+/// As [`create_non_rational_curve`], and those of the context.
+pub fn create_non_rational_curve_with_context<O: crate::geom::solution_array::SolutionObject>(
+    k: &Kernel,
+    curve: &BSplineCurve,
+    opt_uv_trim_curve: Option<&BSplineCurve>,
+    opt_base_surface: Option<&crate::surface::surface::Surface>,
+    approx_tol: f64,
+    context: Option<crate::intersect::surface_drop_lib::p3::DropSolveContext<'_, O>>,
+) -> Result<(BSplineCurve, Option<BSplineCurve>)> {
     // for rational curves
     if curve.is_rational()? {
         // Build arc-length parameterized nonRational curve approximation
@@ -993,7 +1021,7 @@ pub fn create_non_rational_curve(
         if let Some(base) = opt_base_surface {
             let trim_ivl = new_curve.natural_interval();
             let domain = base.natural_uv_domain();
-            let dropped = drop_curve(k, base, &domain, &new_curve, &trim_ivl, approx_tol)?;
+            let dropped = drop_curve(k, base, &domain, &new_curve, &trim_ivl, approx_tol, context)?;
             new_uv_trim_curve = Some(
                 dropped
                     .uv_curves

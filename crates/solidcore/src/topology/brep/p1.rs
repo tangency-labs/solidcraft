@@ -134,6 +134,7 @@ use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::{BlendNeighbour, OrientType};
 use crate::nurbs::knots::Side;
+use crate::query::brep::BrepFaceServices;
 use crate::query::brep::{self as qbrep, BoundingBoxOptions};
 use crate::surface::surface::p2::{BlendEndType, CurvatureType, DerivSurfDefinition};
 use crate::surface::surface::p4::NoObject;
@@ -2576,17 +2577,29 @@ pub fn create_corner_blend(
     ordered_surfs.rotate_right(1);
 
     // pass the call along (FALSE = bicubic patch through curves and crossTangents)
-    let b: &Brep = b;
-    let mut surfs: Vec<Option<BlendNeighbour<'_>>> = Vec::with_capacity(ordered_surfs.len());
+    // the neighbour surfaces are evaluation copies (keeping their owners), so the
+    // drops can hold the B-rep mutably through the face services
+    let mut owned: Vec<Option<Surface>> = Vec::with_capacity(ordered_surfs.len());
     for face in &ordered_surfs {
-        let surface = match face {
-            Some(f) => face2::surface(b, *f)?,
+        let copy = match face {
+            Some(f) => face2::surface(b, *f)?
+                .map(Surface::clone_for_evaluation)
+                .transpose()?,
             None => None,
         };
-        surfs.push(surface.map(|surface| BlendNeighbour { surface }));
+        owned.push(copy);
     }
+    let handles: Vec<Option<CacheObject>> = ordered_surfs
+        .iter()
+        .map(|face| face.map(CacheObject::Surface))
+        .collect();
+    let surfs: Vec<Option<BlendNeighbour<'_>>> = owned
+        .iter()
+        .map(|s| s.as_ref().map(|surface| BlendNeighbour { surface }))
+        .collect();
     let ordered_3d = corner_blend_bspline_curves(&ordered_3d, &ordered_uv, &surfs)?;
-    BSplineSurface::create_corner_blend(
+    let mut services = BrepFaceServices::new(&mut *b);
+    BSplineSurface::create_corner_blend_with_context(
         k,
         &ordered_3d,
         &eu_orients,
@@ -2595,6 +2608,7 @@ pub fn create_corner_blend(
         approx_tol_3d,
         tangency_tol_radians,
         false,
+        Some((&mut services, &handles)),
     )
 }
 
