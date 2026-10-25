@@ -7158,9 +7158,9 @@ mod tests {
         h.app.ui.show_grid = false;
         h.app.ui.ground_shadow = false;
         h.app.ui.visual_style = 1;
-        h.app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false });
+        h.app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
         h.app.run("solid.box", json!({"body_name":"Part","length":2,"width":3,"height":4})).unwrap();
-        let world = h.app.session.world_state();
+        let world = h.app.session.world_state().unwrap();
         for body in &world.bodies {
             let _ = body.mesh();
             let _ = body.plan_mesh();
@@ -7178,7 +7178,7 @@ mod tests {
         for (counter, value) in warm.iter() {
             assert_eq!(value, 0, "{counter:?}: {warm:?}");
         }
-        assert!(std::sync::Arc::ptr_eq(&world, &h.app.session.world_state()));
+        assert!(std::sync::Arc::ptr_eq(&world, &h.app.session.world_state().unwrap()));
     }
     use crate::navigation::*;
 

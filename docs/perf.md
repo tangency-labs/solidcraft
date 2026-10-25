@@ -94,9 +94,11 @@ The initial contracts exercise existing reuse guarantees:
 | Warm body selection in 1- and 12-body designs | Zero model/feature evaluation, fingerprinting, imported-byte hashing, reference meshing, placement, joint or naming preparation; a geometry edit must evaluate and mesh |
 | Camera-only frame after preparation | Zero model/feature evaluation, reference meshing, model-scene rebuilding and packed triangle bytes; the cold frame must build and pack |
 | Joint drive and refresh | One full mobility analysis for a published report, zero for quiet drives and discarded refresh reports; placement steps must still be observed |
+| Open-chain rigid drive | At most one model evaluation, one fingerprint per feature and four solves; zero feature evaluations, with actual transformed triangles checked |
 | Retained trace playback and Undo/Redo | Zero samples; changing the driving expression must sample exactly the requested 19 points once |
 | Sketch auto-constraint | The common solve/analysis totals match the existing detailed solver profile; only the published report performs redundancy analysis |
 | Joined mesh/name preparation | Cold work includes workers; ready cells retain their identity and perform zero new preparation |
+| Joined world placement | All 33 cold transforms, zero warm transforms, then all 33 after a placement change; bounds and reused bodies must agree |
 
 These tests also assert the operation's results. A zero counter without an observed cold or
 invalidated case is insufficient evidence that the hook measures the work.
@@ -117,6 +119,49 @@ design sizes, camera-only frames, rigid/reference-mesh reuse, unchanged traces, 
 inputs, Undo/Redo, joint residual storage and sketch diagnostic publication. Numerical solver
 work limits and geometry/display algorithms are unchanged. GPU upload accounting, more granular
 change revisions and consolidated refresh scheduling remain separate work.
+
+### Residual work verified with the recorder (2026-10-25)
+
+Verification on the work-profile branch rebased onto `bda32419` includes the JSON-cache,
+parameter-pass and owner-lookup improvements already merged there. Windows x64, Intel Core
+i9-14900K, release profile with work profiling compiled but no active capture during timed
+samples. Each condition starts a fresh process, warms eight operations and times 64 alternating
+poses. Three interleaved rounds rotate the order of baseline, evaluation omitted, final refresh
+solve omitted and both omitted. Separate captures measure work; separate clocked runs attribute
+time. These are engine/placement measurements, without UI-scene packing, GPU work or presentation.
+
+The omissions were temporary ablations to estimate headroom, not production changes:
+
+| Fixture / operation | Baseline command | Evaluation omitted | Final solve omitted | Both omitted |
+|---|---:|---:|---:|---:|
+| 1 independent box / drive | 0.0274 ms | 0.0253 ms | 0.0252 ms | 0.0220 ms |
+| 256 independent boxes / drive | 0.8821 ms | 0.5366 ms | 0.7923 ms | 0.4560 ms |
+| SO-101, 13 bodies / drive | 2.8230 ms | 0.1331 ms | 2.8176 ms | 0.1096 ms |
+| SO-101, 13 bodies / reach | 2.8317 ms | 0.1384 ms | 2.8385 ms | 0.1177 ms |
+
+Medians of three per-run medians. Including world placement and canonical mesh preparation,
+SO-101 reach is 4.0061 -> 1.1348 ms with evaluation omitted; the 256-box drive is
+2.7263 -> 2.2780 ms with both omissions. The final solve alone is close to measurement spread
+for SO-101; fewer calls are not automatically a meaningful latency improvement.
+
+The captures explain the difference. SO-101 generates zero JSON bytes on the warmed base, but
+still hashes 17,457,378 definition-text bytes in one fingerprint. A separate clocked run averages
+2.658 ms in evaluation, 2.649 ms of that in fingerprinting. This overlaps the imported-payload
+fingerprint work in #5480. The 256-box drive instead visits 256 unchanged fingerprints and hashes
+56,071 bytes, with zero JSON bytes and zero evaluated features. Evaluation averages 0.340 ms,
+including 0.113 ms of fingerprinting. The final refresh accounts for one additional placement
+solve: four -> three for drive, two -> one for reach. Trial/response solves remain necessary.
+
+All 64 command responses and occurrence matrices, final world-space mesh hashes (positions,
+normals and triangle/face indices), body/triangle counts and Undo/Redo agree in the independent
+box and SO-101 comparisons. The SO-101 selection control records zero in every work unit.
+
+Skipping evaluation for every pose is nevertheless incorrect. A 10 x 10 x 4 mm plate cut by a
+2 x 2 x 6 mm box in another component must rebuild its cut when a slider moves it 5 mm relative
+to that tool. The correct volume is 392 mm³; omitting evaluation keeps the old cut at 384 mm³,
+changes the mesh hash and fails Undo/Redo equivalence. These figures therefore bound conditional
+headroom: a follow-up must preserve cross-component geometry dependencies. They are not a gain
+already delivered by instrumentation or a prediction for the complete desktop frame.
 
 ## Edges made by booleans: each point evaluated once (2026-10-16)
 

@@ -467,7 +467,14 @@ fn joint_drive_reuses_reference_tessellation_across_rigid_poses() {
     let local = original.body("Crank").unwrap().mesh();
     let bounds = local.bounds();
     for (pose, angle) in [37., 91., 37., 0.].into_iter().enumerate() {
-        let driven = run(&mut session, "joint.drive", json!({"joint":"Crank","value":angle}));
+        let (driven, operation) = capture(|| run(&mut session, "joint.drive", json!({"joint":"Crank","value":angle})));
+        assert!(operation.complete(), "{operation:?}");
+        assert!(operation.get(Counter::ModelEvaluations) <= 1, "one pose must not refresh the model twice: {operation:?}");
+        assert!(operation.get(Counter::FeatureFingerprints) <= session.doc.features.len() as u64, "one visit per definition: {operation:?}");
+        assert_eq!(operation.get(Counter::FeatureEvaluations), 0, "rigid motion keeps its definition: {operation:?}");
+        // This open chain needs at most the trial, placement, response and final refresh solves.
+        // Upper bounds allow follow-ups to remove the redundant final refresh work.
+        assert!(operation.get(Counter::JointSolves) <= 4, "a pose must not repeat additional solves: {operation:?}");
         assert_eq!(driven["moved"], true);
         assert!(Arc::ptr_eq(&definitions, &session.model.state()));
         let world = session.world_state().unwrap();

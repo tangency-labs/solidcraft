@@ -4391,7 +4391,7 @@ dependencies = [
 
 [[package]]
 name = "solidcraft-work"
-version = "0.22.0"
+version = "0.40.0-rc.2"
 
 [[package]]
 name = "spade"

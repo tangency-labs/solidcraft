@@ -100,7 +100,7 @@ fn counted(f: impl FnOnce()) -> Counts {
         moved: work.get(Counter::BodyTransforms).try_into().unwrap(),
         digested: work.get(Counter::ImportDigests).try_into().unwrap(),
         joint_faces: work.get(Counter::JointFaceMeasurements).try_into().unwrap(),
-        measures: COUNTS.get().measures,
+        ..COUNTS.get()
     }
 }
 
@@ -1729,4 +1729,52 @@ fn tools_are_apart_only_when_they_neither_meet_nor_nest() {
     assert!(!super::tools_clearly_apart(&[tube.clone(), rod(0.0, 0.0, 4.5)]));
     // A rod in the tube's bore, clear of its wall, is apart from it.
     assert!(super::tools_clearly_apart(&[tube, rod(0.0, 0.0, 3.0)]));
+}
+
+#[test]
+fn joined_world_placements_report_every_transformed_body() {
+    use solidcraft_work::{Counter, capture};
+    let mut doc = Document::new("joined placement accounting");
+    let component = doc.add_component(Some("Parts"), 0).unwrap();
+    for i in 0..33 {
+        let id = doc
+            .add_feature(
+                FeatureKind::Box {
+                    corner: point_expr(Vec3::new(f64::from(i) * 3.0, 0.0, 0.0)),
+                    length: "1".into(),
+                    width: "1".into(),
+                    height: "1".into(),
+                    operation: Operation::NewBody,
+                },
+                None,
+            )
+            .unwrap();
+        doc.feature_mut(id).unwrap().component = component;
+    }
+    let mut model = Model::new();
+    model.evaluate(&doc);
+    let state = model.state();
+    assert_eq!(state.bodies.len(), 33);
+    let mut placed = crate::eval::PlacedBodies::default();
+    for shift in [2.0, 5.0] {
+        place(&mut doc, component, rigid(Vec3::new(shift, 0.0, 0.0), Vec3::ZERO, Vec3::Z, 0.0));
+        let (world, work) = capture(|| crate::eval::world_state_reusing(&doc, &state, &mut placed));
+        let world = world.unwrap();
+        assert!(work.complete(), "{work:?}");
+        assert_eq!(work.get(Counter::BodyTransforms), 33, "every joined worker belongs to the operation: {work:?}");
+        assert_eq!(world.bodies.len(), state.bodies.len());
+        for (source, moved) in state.bodies.iter().zip(&world.bodies) {
+            let expected = source.body.outline_bounds();
+            let actual = moved.body.outline_bounds();
+            assert!((actual.min - expected.min - Vec3::new(shift, 0.0, 0.0)).len() < 1e-9);
+            assert!((actual.max - expected.max - Vec3::new(shift, 0.0, 0.0)).len() < 1e-9);
+        }
+        let (warm, work) = capture(|| crate::eval::world_state_reusing(&doc, &state, &mut placed));
+        let warm = warm.unwrap();
+        assert!(work.complete(), "{work:?}");
+        assert_eq!(work.get(Counter::BodyTransforms), 0, "ready placements must be reused: {work:?}");
+        for (before, after) in world.bodies.iter().zip(&warm.bodies) {
+            assert!(before.body.same(&after.body));
+        }
+    }
 }

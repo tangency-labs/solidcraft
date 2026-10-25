@@ -1249,12 +1249,14 @@ fn hash_feature_json(f: &Feature, steps: &StepDigests, h: &mut impl Hasher) {
     if let Some(seen) = seen
         && seen.0 == *f
     {
+        record_work(WorkCounter::FingerprintBytesHashed, seen.1.len() as u64);
         seen.1.hash(h);
         return;
     }
     #[cfg(test)]
     cost_tests::count_written();
     let json = feature_json(f, steps);
+    record_work(WorkCounter::FingerprintBytesHashed, json.len() as u64);
     json.hash(h);
     let entry = Arc::new((f.clone(), json));
     let mut written = WRITTEN.lock().unwrap_or_else(|e| e.into_inner());
@@ -8594,7 +8596,8 @@ pub fn world_state_reusing(doc: &Document, st: &ModelState, placed_before: &mut 
     // command in a design with placed components more than the copies.
     let reused: Vec<_> = jobs.iter().map(|(b, bm, name)| placed_before.taken(b, bm, name)).collect();
     let fresh: Vec<_> = jobs.iter().zip(&reused).filter(|(_, r)| r.is_none()).map(|(job, _)| job).collect();
-    let mut placed_fresh = kernel::map_on_threads(&fresh, 16, |(b, bm, name)| placed_before.placed(b, bm, name.clone())).into_iter();
+    let work = solidcraft_work::Context::current();
+    let mut placed_fresh = kernel::map_on_threads(&fresh, 16, |(b, bm, name)| work.run(|| placed_before.placed(b, bm, name.clone()))).into_iter();
     let mut moved = reused.into_iter().map(|r| match r {
         Some(placed) => Some(Ok(placed)),
         None => placed_fresh.next().flatten(),

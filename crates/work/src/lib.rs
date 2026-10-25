@@ -39,7 +39,7 @@ pub enum Counter {
 }
 
 impl Counter {
-    pub const ALL: [Self; 25] = [
+    pub const ALL: &[Self] = &[
         Self::ModelEvaluations,
         Self::FeatureFingerprints,
         Self::FingerprintBytesHashed,
@@ -116,7 +116,7 @@ impl Counts {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (Counter, u64)> + '_ {
-        Counter::ALL.into_iter().map(|counter| (counter, self.get(counter)))
+        Counter::ALL.iter().copied().map(|counter| (counter, self.get(counter)))
     }
 
     #[cfg(feature = "capture")]
@@ -337,12 +337,12 @@ mod tests {
     #[test]
     fn counters_have_unique_names_and_slots() {
         let (_, work) = capture(|| {
-            for (i, counter) in Counter::ALL.into_iter().enumerate() {
+            for (i, counter) in Counter::ALL.iter().copied().enumerate() {
                 record(counter, i as u64 + 1);
             }
         });
         assert!(work.complete());
-        for (i, counter) in Counter::ALL.into_iter().enumerate() {
+        for (i, counter) in Counter::ALL.iter().copied().enumerate() {
             assert_eq!(work.get(counter), i as u64 + 1);
             assert!(Counter::ALL.iter().filter(|other| other.name() == counter.name()).count() == 1);
         }
