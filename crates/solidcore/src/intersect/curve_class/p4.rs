@@ -82,6 +82,7 @@ use crate::intersect::curve_class::p1::{
 };
 use crate::intersect::curve_class::p2::ResetOptions;
 use crate::intersect::curve_class::p3::curve_is_degenerate;
+use crate::intersect::curve_class::p5::ClassGeometryMut;
 use crate::intersect::point_class::{
     object_zone_tol_3d, ClassGeometry, ClassObject, PointClassType, PointClassification,
 };
@@ -321,6 +322,29 @@ fn set_props_stage_2<O: LoopObject, G: ClassGeometry<O>>(
     // an `InvalidInput` of `FaceProps` is an upstream null dereference (UB-131 for the
     // face pointer `SetProps_Gaps` left unset): it propagates instead of being ignored
     match props.set_props_stage2(k, b, f, face_index, HealerOpType::All) {
+        Err(e @ SolidError::InvalidInput { .. }) => Err(e),
+        r => ignore_status(r),
+    }
+}
+
+/// [`set_props_stage_2`] on the face's B-rep in place
+/// ([`FaceProps::set_props_stage2_mut`]).
+fn set_props_stage_2_mut<O: LoopObject, G: ClassGeometryMut<O>>(
+    k: &Kernel,
+    geometry: &mut G,
+    props: &mut FaceProps<O>,
+    face: Option<O>,
+    face_index: u64,
+) -> Result<()> {
+    let face =
+        face.ok_or_else(|| SolidError::invalid_input(OP_CROSS, "loop without a face (UB-131)"))?;
+    let Some((b, EntityRef::Face(f))) = geometry.topology_entity_mut(face) else {
+        return Err(SolidError::invalid_input(
+            OP_CROSS,
+            "unresolved mutable face",
+        ));
+    };
+    match props.set_props_stage2_mut(k, b, f, face_index, HealerOpType::All) {
         Err(e @ SolidError::InvalidInput { .. }) => Err(e),
         r => ignore_status(r),
     }
@@ -927,7 +951,7 @@ impl<O: ClassObject> CurveClassification<O> {
         };
 
         // init rtn and output
-        let mut out = LoopCrossings {
+        let out = LoopCrossings {
             crossing_counts: vec![0; loops.len()],
             raw_touches: Vec::new(),
             done_touches: Vec::new(),
@@ -949,7 +973,76 @@ impl<O: ClassObject> CurveClassification<O> {
             };
             set_props_stage_2(k, geometry, props, face, face_index)?;
         }
+        self.loop_crossings_at_stage_2(k, geometry, loops, props, out, loop0)
+    }
 
+    /// [`CurveClassification::get_loop_crossings`] over mutable classification objects:
+    /// the `SetProps_Stage2` it may run edits the face's B-rep in place
+    /// ([`FaceProps::set_props_stage2_mut`] on the B-rep of the first loop's face), so
+    /// the UV trim curves, the tolerance growth and the gap caches of its seam check stay
+    /// there, as upstream's `GetLoopCrossings` leaves them.
+    ///
+    /// # Errors
+    ///
+    /// As [`CurveClassification::get_loop_crossings`]; [`SolidError::InvalidInput`] for
+    /// a face handle `geometry` cannot resolve mutably when stage 2 is computed.
+    pub fn get_loop_crossings_mut<G: ClassGeometryMut<O>>(
+        &self,
+        k: &Kernel,
+        geometry: &mut G,
+        loops: &[O],
+        face_props: Option<&mut FaceProps<O>>,
+    ) -> Result<LoopCrossings<O>>
+    where
+        O: LoopObject,
+    {
+        // direct optional input and output
+        let mut local_props = FaceProps::<O>::new();
+        let props: &mut FaceProps<O> = match face_props {
+            Some(p) => p,
+            None => &mut local_props,
+        };
+
+        // init rtn and output
+        let out = LoopCrossings {
+            crossing_counts: vec![0; loops.len()],
+            raw_touches: Vec::new(),
+            done_touches: Vec::new(),
+            sm_err: false,
+        };
+
+        // no work - no TgtLoops
+        let Some(&loop0) = loops.first() else {
+            return Ok(out);
+        };
+
+        // must have Face SM_PROPSTAGE_2 Props - when pOptFaceProps is not given
+        if props.prop_stage < PropStage::Stage2A {
+            let face = loop_face(&*geometry, loop0)?;
+            let face_index = if props.face_index == UNDEF_ULONG {
+                0
+            } else {
+                props.face_index
+            };
+            set_props_stage_2_mut(k, geometry, props, face, face_index)?;
+        }
+        self.loop_crossings_at_stage_2(k, &*geometry, loops, props, out, loop0)
+    }
+
+    /// The rest of `GetLoopCrossings` once the face props are at stage 2.
+    #[allow(clippy::too_many_lines)] // one upstream routine
+    fn loop_crossings_at_stage_2<G: ClassGeometry<O>>(
+        &self,
+        k: &Kernel,
+        geometry: &G,
+        loops: &[O],
+        props: &mut FaceProps<O>,
+        mut out: LoopCrossings<O>,
+        loop0: O,
+    ) -> Result<LoopCrossings<O>>
+    where
+        O: LoopObject,
+    {
         // Tgt Face and Surface Props
         let face = loop_face(geometry, loop0)?;
         let face_xsect_tol_3d = xsect_tol_3d_from_zones(k, props.zone_tol_3d, props.zone_tol_3d);
