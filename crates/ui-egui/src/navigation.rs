@@ -898,9 +898,10 @@ const WRAP_MARGIN: f32 = 4.0;
 /// stopping where the screen ends. One move at a time; the next waits until the pointer has
 /// reported the jump ([`unwrapped_delta`]). Where the cursor can't be moved (Wayland, the
 /// browser) the request does nothing, the jump never arrives and the drag stops at the edge. A
-/// synthetic drag (control channel, scripts) has no real cursor to move.
+/// synthetic drag (control channel, scripts) has no real cursor to move. With
+/// `orbit_cursor_wrap` off in the preferences the drag stops at the edge of the screen.
 pub(crate) fn wrap_cursor(app: &mut SolveApp, ui: &egui::Ui, rect: Rect) {
-    if app.viewport.cursor_wrap.is_some() || app.synthetic_press {
+    if !app.preferences.orbit_cursor_wrap || app.viewport.cursor_wrap.is_some() || app.synthetic_press {
         return;
     }
     let Some(at) = ui.input(|i| i.pointer.latest_pos()) else { return };
@@ -2512,7 +2513,8 @@ mod tests {
 
     /// An orbit drag that reaches the edge of the view keeps turning round the model: the cursor
     /// moves to the other side, and the frame that reports the jump turns the view only by the
-    /// hand's motion. Events from before the move don't ask for a second one.
+    /// hand's motion. Events from before the move don't ask for a second one. With
+    /// `orbit_cursor_wrap` off the cursor is never moved.
     #[test]
     fn an_orbit_drag_at_the_edge_moves_the_cursor_across_and_keeps_turning() {
         use crate::prefs::NavButton;
@@ -2578,6 +2580,13 @@ mod tests {
         assert!((turn(before, app.cam.yaw) - step).abs() < step.abs() * 0.01, "and keeps turning the same way");
         frame(&mut app, vec![Event::PointerButton { pos: pos2(54.0, 300.0), button, pressed: false, modifiers: mods }]);
         frame(&mut app, vec![]);
+        assert_eq!(app.viewport.cursor_wrap, None);
+        // With the preference off, the same drag reaches the edge and the cursor stays there.
+        app.preferences.orbit_cursor_wrap = false;
+        frame(&mut app, vec![Event::PointerButton { pos: at, button, pressed: true, modifiers: mods }]);
+        for x in [620.0, 700.0, 780.0, 800.0, 806.0] {
+            assert!(frame(&mut app, vec![Event::PointerMoved(pos2(x, 300.0))]).is_empty(), "no cursor move with wrapping off ({x})");
+        }
         assert_eq!(app.viewport.cursor_wrap, None);
     }
 
