@@ -19,6 +19,8 @@ pub const DOWNLOADS_PREFIX: &str = "/downloads/";
 /// Where what a command wrote to an engine path goes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WriteTo {
+    /// The optional folder on the same-origin server.
+    Server,
     /// The browser's private storage: the design (or recovery file) keeps its name there.
     Opfs,
     /// A file on the computer, through its handle.
@@ -32,7 +34,9 @@ pub enum WriteTo {
 /// Route a write by its path. OPFS paths always go to OPFS, whatever the browser can do: a design
 /// opened from the browser's storage keeps saving there until the user picks Save As.
 pub fn route(path: &str) -> WriteTo {
-    if path.starts_with(OPFS_PREFIX) {
+    if path.starts_with(crate::server::PREFIX) {
+        WriteTo::Server
+    } else if path.starts_with(OPFS_PREFIX) {
         WriteTo::Opfs
     } else if parse(path).is_some() {
         WriteTo::Disk
