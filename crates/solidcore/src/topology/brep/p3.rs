@@ -719,6 +719,16 @@ pub(crate) fn seed_records(
     b: &Brep,
     key_of: &dyn Fn(EntityRef) -> ObjectRef,
 ) {
+    if records.is_empty() {
+        // Bulk build (sorted input is O(n)); the same map as entry-by-entry.
+        *records = entities(b)
+            .into_iter()
+            .map(|e| key_of(e).key)
+            .chain([p2::brep_ref(b).key])
+            .map(|k| (k, topo::Topology::default()))
+            .collect();
+        return;
+    }
     for e in entities(b) {
         records.entry(key_of(e).key).or_default();
     }

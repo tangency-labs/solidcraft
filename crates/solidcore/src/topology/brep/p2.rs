@@ -786,6 +786,14 @@ impl ArenaNotifyState {
         all.extend(b.edges().iter().map(|(x, _)| EntityRef::Edge(x)));
         all.extend(b.vertexuses().iter().map(|(x, _)| EntityRef::Vertexuse(x)));
         all.extend(b.vertices().iter().map(|(x, _)| EntityRef::Vertex(x)));
+        if self.records.is_empty() {
+            // Bulk build (sorted input is O(n)); the same map as entry-by-entry.
+            self.records = all
+                .into_iter()
+                .map(|e| (notify_ref(e).key, Topology::default()))
+                .collect();
+            return;
+        }
         for e in all {
             self.records.entry(notify_ref(e).key).or_default();
         }
