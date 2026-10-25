@@ -514,7 +514,8 @@ impl<'a> KnotVector<'a> {
             });
         }
         // n = m - p - 1 (may be negative upstream: then every i is out of range).
-        let n = match m.checked_sub(p + 1) {
+        // Subtract in checked steps to avoid overflowing p + 1.
+        let n = match m.checked_sub(p).and_then(|n| n.checked_sub(1)) {
             Some(n) if i <= n => n,
             _ => {
                 return Err(SolidError::Nlib {
@@ -622,7 +623,8 @@ impl<'a> KnotVector<'a> {
             });
         }
         // n = m - p - 1 (may be negative upstream: then every i is out of range).
-        let n = match m.checked_sub(p + 1) {
+        // Subtract in checked steps to avoid overflowing p + 1.
+        let n = match m.checked_sub(p).and_then(|n| n.checked_sub(1)) {
             Some(n) if i <= n => n,
             _ => {
                 return Err(SolidError::Nlib {
@@ -950,6 +952,67 @@ mod tests {
         // Left derivative at the domain end.
         let e = kv(&EX23).basis_i_derivs(7, 2, 5.0, Side::Left, 1).unwrap();
         assert_eq!(e, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn basis_i_eval_rejects_excessive_degrees() {
+        let k = kv(&EX23);
+        for p in [k.last_index(), k.last_index() + 1, usize::MAX] {
+            for side in [Side::Left, Side::Right] {
+                assert_eq!(
+                    k.basis_i_eval(0, p, 2.5, side),
+                    Err(SolidError::Nlib {
+                        operation: OP_BASIS_I_EVAL,
+                        code: NlibCode::Index,
+                    })
+                );
+                assert_eq!(
+                    k.basis_i_eval(0, p, -1.0, side),
+                    Err(SolidError::Nlib {
+                        operation: OP_BASIS_I_EVAL,
+                        code: NlibCode::Parameter,
+                    })
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn basis_i_derivs_rejects_excessive_degrees() {
+        let k = kv(&EX23);
+        for p in [k.last_index(), k.last_index() + 1, usize::MAX] {
+            for side in [Side::Left, Side::Right] {
+                assert_eq!(
+                    k.basis_i_derivs(0, p, 2.5, side, 3),
+                    Err(SolidError::Nlib {
+                        operation: OP_BASIS_I_DERIVS,
+                        code: NlibCode::Index,
+                    })
+                );
+                assert_eq!(
+                    k.basis_i_derivs(0, p, -1.0, side, 3),
+                    Err(SolidError::Nlib {
+                        operation: OP_BASIS_I_DERIVS,
+                        code: NlibCode::Parameter,
+                    })
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn basis_i_quadratic_endpoints_and_derivatives() {
+        let k = kv(&[0.0, 0.0, 0.0, 1.0, 1.0, 1.0]);
+        assert_eq!(k.basis_i_eval(0, 2, 0.0, Side::Right).unwrap(), 1.0);
+        assert_eq!(k.basis_i_eval(2, 2, 1.0, Side::Left).unwrap(), 1.0);
+        assert_eq!(
+            k.basis_i_derivs(0, 2, 0.0, Side::Right, 3).unwrap(),
+            vec![1.0, -2.0, 2.0, 0.0]
+        );
+        assert_eq!(
+            k.basis_i_derivs(2, 2, 1.0, Side::Left, 3).unwrap(),
+            vec![1.0, 2.0, 2.0, 0.0]
+        );
     }
 
     #[test]
