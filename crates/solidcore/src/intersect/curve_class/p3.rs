@@ -30,6 +30,14 @@
 //!   classification to a propagated surf/surf/surf point (`SmVertex::SetPoint`):
 //!   [`CurveClassification::insert_point_class_mut`] makes it through a
 //!   [`MergeIntervalBrep`]; [`CurveClassification::insert_point_class`] defers there.
+//! - **Interval reference.** `InsertPointClass` writes the input classification through
+//!   the reference `rPtClass_Interval` to slot `lIndex` it took before an
+//!   `EditIntervalMin` / `EditIntervalMax` that may collapse an interval: the port writes
+//!   to whatever interval now sits in that slot, and drops the write when the collapse
+//!   left the slot past the end (upstream writes a spare slot of the array that `SetSize`
+//!   resets before reuse), instead of failing on the index. This copies an upstream defect
+//!   on purpose (UB-256,
+//!   `plan/upstream-issues/UB-256--insert-point-class-stale-interval-reference.md`).
 //! - **Out-params.** `FindInterval` returns a [`FoundInterval`]; `InsertPointClass` returns
 //!   `rbInsertionMade`; `sm_ChangeEdgePointClassToNearVertex` returns
 //!   `rbChangedToVertexFlag`; `MergePointClass`'s optional output arrays are
@@ -252,6 +260,25 @@ fn insert_at<O: ClassObject>(
     interval: &CurveInterval<O>,
 ) -> Result<()> {
     cc.insert_at(k, index, *interval)
+}
+
+/// Slot `index` of the interval array, as `InsertPointClass` reaches it through the
+/// reference `rPtClass_Interval = (*this)[lIndex]` it took before an `EditIntervalMin` /
+/// `EditIntervalMax` that may collapse an interval: after a collapse the slot holds the
+/// interval that moved down into it, or lies past the end (`None`: the write lands in a
+/// spare slot of the array that `SetSize` resets before it is used again). This copies an
+/// upstream defect on purpose, for parity (UB-256,
+/// `plan/upstream-issues/UB-256--insert-point-class-stale-interval-reference.md`): the
+/// write can land on the interval that moved into the slot.
+fn slot_mut<O: ClassObject>(
+    cc: &mut CurveClassification<O>,
+    index: usize,
+) -> Option<&mut CurveInterval<O>> {
+    if index < cc.size() {
+        cc.at_mut(index).ok()
+    } else {
+        None
+    }
 }
 
 /// `SmCurveClassification::EditIntervalMin(index, param, collapseDegenerateIntervals)`.
@@ -1069,7 +1096,10 @@ impl<O: ClassObject> CurveClassification<O> {
                             pt_class_pre_snap_param,
                             true,
                         ))?;
-                        self.at_mut(index)?.start = *point_class;
+                        // (upstream's stale reference to slot `index`, UB-256 parity: `slot_mut`)
+                        if let Some(slot) = slot_mut(self, index) {
+                            slot.start = *point_class;
+                        }
                     } else {
                         ignore_status(edit_interval_max(
                             k,
@@ -1079,7 +1109,10 @@ impl<O: ClassObject> CurveClassification<O> {
                             pt_class_pre_snap_param,
                             true,
                         ))?;
-                        self.at_mut(index)?.end = *point_class;
+                        // (upstream's stale reference to slot `index`, UB-256 parity: `slot_mut`)
+                        if let Some(slot) = slot_mut(self, index) {
+                            slot.end = *point_class;
+                        }
                     }
 
                     // no need to insert point
