@@ -369,7 +369,8 @@ fn rust(i: &Inputs, initial: &[f64]) -> Result<Output, HarnessError> {
                 let surface = f
                     .surface
                     .as_ref()
-                    .ok_or_else(|| SolidError::sm_err("difftest::brep_p9"))?;
+                    .ok_or_else(|| SolidError::sm_err("difftest::brep_p9"))?
+                    .clone();
                 let y = if i.variant == 1 { 2.0 } else { 0.5 };
                 let (x0, x1) = if i.variant == 2 {
                     (0.25, 0.75)
@@ -383,14 +384,9 @@ fn rust(i: &Inputs, initial: &[f64]) -> Result<Output, HarnessError> {
                     3,
                 );
                 line.edit_parameterization(&interval)?;
-                let dropped = port::drop_edge_curve(
-                    &k,
-                    surface,
-                    &f.uv_domain,
-                    &Curve::from(line),
-                    &interval,
-                    f.tolerance,
-                )?;
+                // the face-owned surface: the drop reaches its face
+                let dropped =
+                    port::drop_edge_curve_on_face(&k, &mut b, face, &Curve::from(line), &interval)?;
                 record.extend([
                     dropped.max_drop_to_surf,
                     dropped.max_approx_dev,

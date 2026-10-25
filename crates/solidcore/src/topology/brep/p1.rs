@@ -2316,21 +2316,15 @@ pub fn brep_intersect(
     crv_angle_tolerance_deg: f64,
     want_points: bool,
 ) -> Result<(Vec<Curve>, Option<Vec<Point3>>)> {
-    // init output
-    let mut curves_3d: Vec<Option<Curve>> = Vec::new();
-    let mut points: Option<Vec<Point3>> = want_points.then(Vec::new);
-
-    // get all thisBrep and otherBrep Faces
     let this_faces = faces(b, None)?;
     let other_faces = faces(other, None)?;
-
-    // for every thisBrep Face
-    for &this_face in &this_faces {
-        // (NER: arena ids are never null)
-        // for every otherBrep Face
-        for &other_face in &other_faces {
-            // intersect the faces
-            let (mut curves, mut pts) = face_intersect(
+    brep_intersect_faces(
+        k,
+        &this_faces,
+        &other_faces,
+        want_points,
+        |this_face, other_face| {
+            face_intersect(
                 k,
                 b,
                 this_face,
@@ -2338,7 +2332,74 @@ pub fn brep_intersect(
                 other_face,
                 approx_tol_3d,
                 crv_angle_tolerance_deg,
+            )
+        },
+    )
+}
+
+/// [`brep_intersect`] of a B-rep with itself (`brep->BrepIntersect(ctx, brep, ..)`),
+/// the B-rep lent mutably: each face's surface reaches its face, so the faces' trimmed
+/// caches (and their UV trim curves) are made on it as upstream's
+/// `smsurf_GetSurfaceCache` does.
+///
+/// # Errors
+///
+/// As [`brep_intersect`].
+pub fn brep_intersect_self(
+    k: &Kernel,
+    b: &mut Brep,
+    approx_tol_3d: f64,
+    crv_angle_tolerance_deg: f64,
+    want_points: bool,
+) -> Result<(Vec<Curve>, Option<Vec<Point3>>)> {
+    let this_faces = faces(b, None)?;
+    brep_intersect_faces(
+        k,
+        &this_faces,
+        &this_faces,
+        want_points,
+        |this_face, other_face| {
+            let options = crate::topology::face::p3::FaceIntersectOptions {
+                want_points: true,
+                ..Default::default()
+            };
+            let out = crate::topology::face::p3::face_intersect_breps(
+                k,
+                crate::topology::face::p3::FaceBreps::One(&mut *b),
+                this_face,
+                other_face,
+                approx_tol_3d,
+                crv_angle_tolerance_deg,
+                &options,
             )?;
+            Ok((
+                out.curves_3d.into_iter().map(Some).collect(),
+                out.points_3d.unwrap_or_default(),
+            ))
+        },
+    )
+}
+
+/// The face-pair loop of `SmBrep::BrepIntersect`, with `face_pair` the
+/// `SmFace::FaceIntersect` of one pair.
+fn brep_intersect_faces(
+    k: &Kernel,
+    this_faces: &[FaceId],
+    other_faces: &[FaceId],
+    want_points: bool,
+    mut face_pair: impl FnMut(FaceId, FaceId) -> Result<(Vec<Option<Curve>>, Vec<Point3>)>,
+) -> Result<(Vec<Curve>, Option<Vec<Point3>>)> {
+    // init output
+    let mut curves_3d: Vec<Option<Curve>> = Vec::new();
+    let mut points: Option<Vec<Point3>> = want_points.then(Vec::new);
+
+    // for every thisBrep Face
+    for &this_face in this_faces {
+        // (NER: arena ids are never null)
+        // for every otherBrep Face
+        for &other_face in other_faces {
+            // intersect the faces
+            let (mut curves, mut pts) = face_pair(this_face, other_face)?;
 
             // accumulate the outputs
             curves_3d.append(&mut curves);

@@ -77,6 +77,7 @@ use crate::geom::solution_array::{Solution, SolutionArray, SolutionObject, Solut
 use crate::geom::tol::are_same;
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{Point3, Vec3};
+use crate::intersect::surface_drop_lib::p3::DropSolveContext;
 use crate::kernel::Kernel;
 use crate::math::{
     max2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_RAD, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE,
@@ -228,7 +229,7 @@ fn sp_local_solve<O: SolutionObject>(
 
 /// `SmSurface::DropCurve(ctx, domain, curve, interval, tol, .., keepAll, NULL, FALSE)`
 /// (virtual): the UV curves of the drop, the largest drop distance and the deviation.
-fn surface_drop_curve(
+fn surface_drop_curve<O: SolutionObject>(
     k: &Kernel,
     surface: &Surface,
     domain: &Extent2d,
@@ -236,9 +237,14 @@ fn surface_drop_curve(
     interval: &Extent1d,
     tol: f64,
     keep_all: bool,
+    context: Option<DropSolveContext<'_, O>>,
 ) -> Result<(Vec<Curve>, f64, f64)> {
-    let d =
-        surface.drop_curve::<NoObject>(k, domain, curve, interval, tol, keep_all, None, false)?;
+    let d = match context {
+        Some(context) => surface.drop_curve_with_context::<O>(
+            k, domain, curve, interval, tol, keep_all, None, false, context,
+        )?,
+        None => surface.drop_curve::<O>(k, domain, curve, interval, tol, keep_all, None, false)?,
+    };
     Ok((d.uv_curves, d.max_drop_to_surf, d.max_approx_dev))
 }
 
@@ -1725,6 +1731,7 @@ impl Surface {
                         &line_interval_used,
                         distance_tolerance,
                         false,
+                        None::<DropSolveContext<'_, NoObject>>,
                     )?;
                     uv_curves = curves;
                     dist_to_surface = dist;
@@ -2208,7 +2215,7 @@ impl Surface {
                 }
                 (None, _) => None,
             };
-            let dropped = self.drop_and_trim_curve_in::<NoObject, O>(
+            let dropped = self.drop_and_trim_curve_in_context::<NoObject, O>(
                 k,
                 cache,
                 uv_domain,
@@ -2218,6 +2225,10 @@ impl Surface {
                 true,
                 true,
                 None,
+                context.as_mut().map(|solver| DropSolveContext {
+                    solver: &mut **solver,
+                    handle: surface_handle,
+                }),
             )?;
             let mut dist_to_surface = dropped.max_drop_to_surf;
             let mut uv_curves: Vec<Curve> = dropped.uv_curves;
@@ -2236,6 +2247,10 @@ impl Surface {
                     interval,
                     distance_tolerance,
                     false,
+                    context.as_mut().map(|solver| DropSolveContext {
+                        solver: &mut **solver,
+                        handle: surface_handle,
+                    }),
                 ))? {
                     uv_curves = curves;
                     dist_to_surface = dist;

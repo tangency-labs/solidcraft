@@ -2250,6 +2250,26 @@ pub struct EdgeCurveDrop {
     pub max_approx_dev: f64,
 }
 
+/// [`drop_edge_curve`] onto the surface of face `face` of `b` with the face's own
+/// UV domain and tolerance: the projection prefix of `MakeEdgeInFaceWithVU` for a
+/// face-owned surface, which classifies and builds its caches through the face.
+///
+/// # Errors
+/// As [`drop_edge_curve`], and those of the face classification.
+pub fn drop_edge_curve_on_face(
+    k: &Kernel,
+    b: &mut Brep,
+    face: FaceId,
+    curve: &Curve,
+    interval: &Extent1d,
+) -> Result<EdgeCurveDrop> {
+    let record = b.face(face)?;
+    let surface =
+        required(record.surface.as_ref(), "face without surface")?.clone_for_evaluation()?;
+    let (uv_domain, tolerance) = (record.uv_domain, record.tolerance);
+    drop_edge_curve_in_face(k, b, face, &surface, &uv_domain, curve, interval, tolerance)
+}
+
 /// [`drop_edge_curve`] onto face `face` of `b`, whose surface `surface` is (a copy for
 /// evaluation): upstream's surface is owned by the face, so the start point drop's
 /// fast-drop trim test classifies on the face

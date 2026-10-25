@@ -75,6 +75,7 @@ use crate::geom::tol::{are_same, are_same_to_tol};
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::intersect::surface_drop_curve::SurfaceDropCurve;
+use crate::intersect::surface_drop_lib::p3::DropSolveContext;
 use crate::intersect::surface_tracer::tracer_surface_cache;
 use crate::kernel::Kernel;
 use crate::math::{max2, rad_to_deg, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI, UNDEF_DOUBLE};
@@ -970,6 +971,7 @@ fn drop_curve_trace<C: SolutionObject>(
     interval: &Extent1d,
     curve_is_on_surface: bool,
     approx_tol_3d: Option<f64>,
+    context: Option<DropSolveContext<'_, C>>,
 ) -> Result<Trace> {
     // prepare the SurfaceDropCurve operation object
     let mut drop = SurfaceDropCurve::new(k, surface, uv_domain, curve, interval)?;
@@ -977,10 +979,10 @@ fn drop_curve_trace<C: SolutionObject>(
 
     // get and checkout surface cache (NER)
     let out = if let Some(cache) = cache {
-        drop.drop_trace(k, cache, approx_tol_3d, None)?
+        drop.drop_trace(k, cache, approx_tol_3d, None, context)?
     } else {
         let mut cache = tracer_surface_cache::<TraceCacheObj>(k, &drop.base)?;
-        drop.drop_trace(k, &mut cache, approx_tol_3d, None)?
+        drop.drop_trace(k, &mut cache, approx_tol_3d, None, None)?
     };
     Ok(Trace {
         uv_curves: out.uv_curves,
@@ -1088,7 +1090,42 @@ impl Surface {
         approx_tol_3d: f64,
         keep_all_drop_curves: bool,
         curve_is_on_surface: bool,
+        record: Option<DropFailRecord<'_, O>>,
+    ) -> Result<DropAndTrim> {
+        self.drop_and_trim_curve_in_context::<O, C>(
+            k,
+            cache,
+            uv_domain,
+            curve,
+            interval,
+            approx_tol_3d,
+            keep_all_drop_curves,
+            curve_is_on_surface,
+            record,
+            None,
+        )
+    }
+
+    /// [`Surface::drop_and_trim_curve_in`] whose trace drops under the caller's face
+    /// solve `context` (`smsurf_GetSurfaceCache` inside each `DropCurve` of the trace
+    /// hands back the face's cache of a face-owned surface); used with a held `cache`.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Surface::drop_and_trim_curve_in`] and the context.
+    #[allow(clippy::too_many_arguments)]
+    pub fn drop_and_trim_curve_in_context<O: SolutionObject, C: SolutionObject>(
+        &self,
+        k: &Kernel,
+        cache: Option<&mut SurfaceCache<C>>,
+        uv_domain: &Extent2d,
+        curve: &Curve,
+        interval: &Extent1d,
+        approx_tol_3d: f64,
+        keep_all_drop_curves: bool,
+        curve_is_on_surface: bool,
         mut record: Option<DropFailRecord<'_, O>>,
+        context: Option<DropSolveContext<'_, C>>,
     ) -> Result<DropAndTrim> {
         // init outputs
         let mut out = DropAndTrim {
@@ -1114,6 +1151,7 @@ impl Surface {
             } else {
                 Some(approx_tol_3d)
             },
+            context,
         )?;
 
         for ((uv, &max_drop), &dev) in trace

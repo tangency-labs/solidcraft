@@ -95,6 +95,7 @@ use crate::geom::solution_array::{ObjectKind, Solution, SolutionObject, Solution
 use crate::geom::tol::is_zero;
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{Point3, Vec3};
+use crate::intersect::surface_drop_lib::p3::DropSolveContext;
 use crate::intersect::surface_tracer::{
     flush_curve, trace_curve_base, NextPoint, SurfaceTrace, SurfaceTracer, TraceOutput, TracePoint,
     TracePointId, TracePointType,
@@ -360,12 +361,20 @@ fn drop_iso_curve(
     })
 }
 
+/// A shorter-lived copy of the face solve context, for one drop.
+fn reborrow<'b, O: SolutionObject>(c: &'b mut DropSolveContext<'_, O>) -> DropSolveContext<'b, O> {
+    DropSolveContext {
+        solver: &mut *c.solver,
+        handle: c.handle,
+    }
+}
+
 /// `DropCurve(ctx, domain, curve, interval, tol, maxDist, maxDev, uvCurves,
 /// bKeepAllDropCurves, NULL, bCreatingUVTrimCurve)` (virtual): the plane override;
 /// other kinds run `SmSurface::DropCurve`. Returns the largest drop distance, the
 /// deviation and the UV curves.
 #[allow(clippy::too_many_arguments)] // upstream's argument list
-fn surface_drop_curve(
+fn surface_drop_curve<O: SolutionObject>(
     k: &Kernel,
     surface: &Surface,
     uv_domain: &Extent2d,
@@ -374,17 +383,33 @@ fn surface_drop_curve(
     approx_tol: f64,
     keep_all: bool,
     creating_uv_trim_curve: bool,
+    context: Option<DropSolveContext<'_, O>>,
 ) -> Result<(f64, f64, Vec<Curve>)> {
-    let r = surface.drop_curve::<NoObject>(
-        k,
-        uv_domain,
-        curve,
-        interval,
-        approx_tol,
-        keep_all,
-        None,
-        creating_uv_trim_curve,
-    )?;
+    // `smsurf_GetSurfaceCache` inside the drop hands back the face's cache of a
+    // face-owned surface: the caller's solve context builds it
+    let r = match context {
+        Some(context) => surface.drop_curve_with_context::<O>(
+            k,
+            uv_domain,
+            curve,
+            interval,
+            approx_tol,
+            keep_all,
+            None,
+            creating_uv_trim_curve,
+            context,
+        )?,
+        None => surface.drop_curve::<O>(
+            k,
+            uv_domain,
+            curve,
+            interval,
+            approx_tol,
+            keep_all,
+            None,
+            creating_uv_trim_curve,
+        )?,
+    };
     Ok((r.max_drop_to_surf, r.max_approx_dev, r.uv_curves))
 }
 
@@ -834,6 +859,17 @@ impl<'s> SurfaceDropCurve<'s> {
     ///
     /// Those of the drop.
     pub fn interior_curves(&mut self, k: &Kernel, out: &mut TraceOutput) -> Result<()> {
+        self.interior_curves_in::<NoObject>(k, out, None)
+    }
+
+    /// [`SurfaceDropCurve::interior_curves`] whose drop runs under the caller's face
+    /// solve context.
+    fn interior_curves_in<O: SolutionObject>(
+        &mut self,
+        k: &Kernel,
+        out: &mut TraceOutput,
+        context: Option<DropSolveContext<'_, O>>,
+    ) -> Result<()> {
         if !out.uv_curves.is_empty() {
             return Ok(());
         }
@@ -850,6 +886,7 @@ impl<'s> SurfaceDropCurve<'s> {
             self.base.approx_tol_3d,
             true,
             false,
+            context,
         )?;
 
         for c in uv_curves {
@@ -1594,6 +1631,7 @@ impl<'s> SurfaceDropCurve<'s> {
         cache: &mut SurfaceCache<O>,
         approx_tol_3d: Option<f64>,
         ang_tol_rad: Option<f64>,
+        context: Option<DropSolveContext<'_, O>>,
     ) -> Result<TraceOutput> {
         // set object values from input
         if let Some(tol) = approx_tol_3d {
@@ -1608,7 +1646,7 @@ impl<'s> SurfaceDropCurve<'s> {
         let saved_boundary = cache.process_boundary_curves;
         cache.point_test_enabled = false;
         cache.process_boundary_curves = true;
-        let r = self.drop_trace_body(k, cache);
+        let r = self.drop_trace_body(k, cache, context);
         cache.point_test_enabled = saved_point_test;
         cache.process_boundary_curves = saved_boundary;
         r
@@ -1619,6 +1657,7 @@ impl<'s> SurfaceDropCurve<'s> {
         &mut self,
         k: &Kernel,
         cache: &mut SurfaceCache<O>,
+        mut context: Option<DropSolveContext<'_, O>>,
     ) -> Result<TraceOutput> {
         let mut out = TraceOutput::default();
 
@@ -1630,11 +1669,17 @@ impl<'s> SurfaceDropCurve<'s> {
         let active = self.base.start_points.clone();
         for tsp in active {
             self.base.curve_trace_direction = 1.0;
-            self.trace_curve_2_in(k, tsp, &mut out, Some(cache))?;
+            self.trace_curve_2_in(
+                k,
+                tsp,
+                &mut out,
+                Some(cache),
+                context.as_mut().map(reborrow),
+            )?;
         }
 
         // trace dropCurve segments that don't start on a BreakPoint
-        self.interior_curves(k, &mut out)?;
+        self.interior_curves_in(k, &mut out, context)?;
         Ok(out)
     }
 
@@ -1654,18 +1699,19 @@ impl<'s> SurfaceDropCurve<'s> {
         start: TracePointId,
         out: &mut TraceOutput,
     ) -> Result<()> {
-        self.trace_curve_2_in::<crate::surface::surface::p4::NoObject>(k, start, out, None)
+        self.trace_curve_2_in::<NoObject>(k, start, out, None, None)
     }
 
     /// [`SurfaceDropCurve::trace_curve_2`] with the cache `DoTrace` checked out
     /// (`TraceCurve2` reads `GetDomainWithContinuity` through
     /// `smsurf_GetSurfaceCache`, the same cache the drop holds); `None` builds one.
-    fn trace_curve_2_in<O: Copy + PartialEq>(
+    fn trace_curve_2_in<O: SolutionObject>(
         &mut self,
         k: &Kernel,
         start: TracePointId,
         out: &mut TraceOutput,
         cache: Option<&SurfaceCache<O>>,
+        mut context: Option<DropSolveContext<'_, O>>,
     ) -> Result<()> {
         self.base.curve_points.push(start);
         let breaks = self
@@ -1725,6 +1771,7 @@ impl<'s> SurfaceDropCurve<'s> {
                 self.base.approx_tol_3d,
                 !self.curve_is_on_surface, // Maybe reject off-surface curves.
                 true,
+                context.as_mut().map(reborrow),
             ) {
                 Ok(d) => Some(d),
                 Err(e) if e.is_unported() => return Err(e),
@@ -2155,7 +2202,7 @@ impl<'s> SurfaceTrace<'s> for SurfaceDropCurve<'s> {
         approx_tol_3d: Option<f64>,
         ang_tol_rad: Option<f64>,
     ) -> Result<TraceOutput> {
-        self.drop_trace(k, cache, approx_tol_3d, ang_tol_rad)
+        self.drop_trace(k, cache, approx_tol_3d, ang_tol_rad, None)
     }
 }
 
