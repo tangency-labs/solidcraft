@@ -1153,8 +1153,11 @@ impl BSplineSurface {
         if need_stride {
             // Criteria for not overwriting ourselves in the output array
             let ok_v_stride = v_stride >= pt_size;
-            let row_size = v_stride.saturating_mul((end_v + 1).saturating_sub(start_v));
-            let ok_u_stride = u_stride >= row_size;
+            let row_size = end_v
+                .checked_add(1)
+                .and_then(|end| end.checked_sub(start_v))
+                .and_then(|count| v_stride.checked_mul(count));
+            let ok_u_stride = row_size.is_some_and(|size| u_stride >= size);
 
             // check inputs - consistent indexing and strides
             if empty || outside || !ok_u_stride || !ok_v_stride {
@@ -1595,6 +1598,100 @@ mod tests {
             .expect("expert");
         assert_eq!(v.len(), 16);
         assert_eq!(v.get(12..16), Some(&[2.0, 4.0, 1.0, 2.0][..]));
+    }
+
+    #[test]
+    fn control_points_expert_max_end_v_rejected() {
+        let s = patch(true);
+        let block = ControlPointBlock {
+            start_u: 0,
+            end_u: 1,
+            start_v: 0,
+            end_v: usize::MAX,
+            u_stride: 8,
+            v_stride: 4,
+        };
+        assert_eq!(
+            s.control_points_expert(ControlPointForm::HomogeneousRational, &block),
+            Err(SolidError::invalid_input(
+                OP_EXPERT,
+                "inconsistent input args"
+            ))
+        );
+    }
+
+    #[test]
+    fn control_points_expert_invalid_ranges_and_strides() {
+        let s = patch(true);
+        for (start_u, end_u, start_v, end_v, u_stride, v_stride) in [
+            (0, usize::MAX, 0, 1, 8, 4),
+            (0, 1, usize::MAX, usize::MAX, 8, 4),
+            (usize::MAX, 0, 0, 1, 8, 4),
+            (0, 1, usize::MAX, 0, 8, 4),
+            (1, 0, 0, 1, 8, 4),
+            (0, 1, 1, 0, 8, 4),
+            (0, 1, 0, 1, usize::MAX, usize::MAX),
+            (0, 1, 0, 1, usize::MAX, usize::MAX / 2 + 1),
+            (0, 1, 0, 1, 8, 3),
+            (0, 1, 0, 1, 7, 4),
+        ] {
+            let block = ControlPointBlock {
+                start_u,
+                end_u,
+                start_v,
+                end_v,
+                u_stride,
+                v_stride,
+            };
+            assert_eq!(
+                s.control_points_expert(ControlPointForm::HomogeneousRational, &block),
+                Err(SolidError::invalid_input(
+                    OP_EXPERT,
+                    "inconsistent input args"
+                )),
+                "{block:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn control_points_expert_single_point_ignores_strides() {
+        let s = patch(true);
+        for stride in [0, usize::MAX] {
+            let block = ControlPointBlock {
+                start_u: 1,
+                end_u: 1,
+                start_v: 2,
+                end_v: 2,
+                u_stride: stride,
+                v_stride: stride,
+            };
+            assert_eq!(
+                s.control_points_expert(ControlPointForm::HomogeneousRational, &block),
+                Ok(vec![2.0, 4.0, 1.0, 2.0])
+            );
+            let outside = ControlPointBlock {
+                start_v: usize::MAX,
+                end_v: usize::MAX,
+                ..block
+            };
+            assert_eq!(
+                s.control_points_expert(ControlPointForm::HomogeneousRational, &outside),
+                Err(SolidError::invalid_input(
+                    OP_EXPERT,
+                    "control point index outside the net"
+                ))
+            );
+            let empty = ControlPointBlock {
+                start_u: usize::MAX,
+                end_u: 0,
+                ..block
+            };
+            assert_eq!(
+                s.control_points_expert(ControlPointForm::HomogeneousRational, &empty),
+                Ok(Vec::new())
+            );
+        }
     }
 
     #[test]
