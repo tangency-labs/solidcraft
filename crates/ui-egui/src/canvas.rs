@@ -509,7 +509,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     // Holes: the depth arrow points into the material (empty depth: through all); the
     // diameter is typed in the box.
     let mut dir = dir;
-    // Extrude taper: a handle beside the arrow tip; dragging it sideways tilts the walls.
+    // Extrude taper: a gauge beside the arrow's foot; dragging its grip sideways tilts the walls.
     let cam_right = app.cam.basis().0;
     if let (Kind::Extrude { direction: 0 | 1, distance, taper, taper_present, to_offset, .. }, Some(n)) = (&mut d.kind, dir) {
         let n = n * sign;
@@ -536,7 +536,8 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
                 })
                 .collect();
             let limits = taper_limits(&regions, l.abs());
-            taper_handle(ui, painter, proj, base - e * (40.0 * px), n * l, -e, ang, limits, taper);
+            let arm = n * (TAPER_ARM * px * l.signum());
+            taper_handle(ui, painter, proj, base - e * (TAPER_SIDE * px), arm, -e, ang, limits, taper);
             if *taper != before {
                 *taper_present = true;
             }
@@ -1131,40 +1132,77 @@ pub(crate) fn taper_limits(regions: &[&solidcraft_engine::geom::Region2], height
     (if inward.is_finite() { -at(inward) } else { -MAX }, if outward.is_finite() { at(outward) } else { MAX })
 }
 
-/// The taper handle: a line from `foot` along the extrude (`span`) leaning by `angle` towards
-/// `e`, with a ring at its end; dragging the ring sideways sets the angle (1° steps, Alt/Ctrl:
-/// free), within `limits` ([`taper_limits`]).
+/// How far (points) the taper gauge stands to the side of the distance arrow's foot, and how long
+/// its arm is: well clear of the arrow, which takes drags within [`ARROW_STEM_REACH`] of its stem.
+const TAPER_SIDE: f64 = 72.0;
+const TAPER_ARM: f64 = 48.0;
+/// How much slower than the pointer a drag turns the taper gauge's arm.
+const TAPER_GEAR: f64 = 4.0;
+
+/// The taper handle (#2402): a small gauge pivoting at `foot`, so that it reads as an angle
+/// rather than as a second distance alongside the arrow. A dotted line along `arm` marks no
+/// taper, the arm leans from it by `angle` towards `e`, and an arc joins the two; the grip at the
+/// arm's end is a curved double arrow along its swing. Dragging the grip sideways sets the angle
+/// (1° steps, Alt/Ctrl: free), within `limits` ([`taper_limits`]).
 #[allow(clippy::too_many_arguments)]
 fn taper_handle(
     ui: &mut egui::Ui,
     painter: &egui::Painter,
     proj: &Proj,
     foot: Vec3,
-    span: Vec3,
+    arm: Vec3,
     e: Vec3,
     angle: f64,
     limits: (f64, f64),
     value: &mut String,
 ) {
     let t = Tokens::get();
-    let l = span.len();
-    let end = foot + span + e * (l * angle.tan().clamp(-10.0, 10.0));
-    let (Some(fs), Some(es)) = (proj.to_screen(foot), proj.to_screen(end)) else { return };
-    let r = ui.interact(egui::Rect::from_center_size(es, vec2(16.0, 16.0)), egui::Id::new("sc_taper"), egui::Sense::drag());
+    let l = arm.len();
+    let Some(n) = arm.normalized() else { return };
+    let a = angle.clamp(-std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2);
+    let at = |a: f64, r: f64| proj.to_screen(foot + (n * a.cos() + e * a.sin()) * r);
+    let (Some(fs), Some(zs), Some(es)) = (proj.to_screen(foot), at(0.0, l), at(a, l)) else { return };
+    let r = ui.interact(egui::Rect::from_center_size(es, vec2(20.0, 20.0)), egui::Id::new("sc_taper"), egui::Sense::drag());
+    let r = r.on_hover_text(crate::i18n::tr("ui.taper_angle"));
     crate::scenario::publish_handle("taper", es);
     let hot = r.hovered() || r.dragged();
     let col = if hot { t.accent } else { t.manipulator };
-    painter.add(egui::Shape::dashed_line(&[fs, es], Stroke::new(1.2, col), 5.0, 3.0));
-    painter.circle(es, if hot { 6.5 } else { 5.0 }, t.overlay, Stroke::new(2.0, col));
+    painter.add(egui::Shape::dashed_line(&[fs, zs], Stroke::new(1.0, col), 2.0, 3.0));
+    painter.line_segment([fs, es], Stroke::new(2.0, col));
+    if a.abs() > 1e-3 {
+        let arc: Vec<Pos2> = (0..=16).filter_map(|i| at(a * f64::from(i) / 16.0, 0.6 * l)).collect();
+        painter.add(egui::Shape::line(arc, Stroke::new(1.2, col)));
+    }
+    // The grip: about 22° of the swing either way of the arm's end, an arrowhead at each end.
+    let grip: Vec<Pos2> = (0..=12).filter_map(|i| at(a + 0.38 * (f64::from(i) / 6.0 - 1.0), l)).collect();
+    for (tip, from) in [(grip.first(), grip.get(1)), (grip.last(), grip.len().checked_sub(2).and_then(|i| grip.get(i)))] {
+        if let (Some(&tip), Some(&from)) = (tip, from) {
+            let u = (tip - from).normalized();
+            let side = vec2(-u.y, u.x) * 3.5;
+            painter.add(egui::Shape::convex_polygon(vec![tip + u * 3.0, tip - u * 5.0 + side, tip - u * 5.0 - side], col, Stroke::NONE));
+        }
+    }
+    painter.add(egui::Shape::line(grip, Stroke::new(2.0, col)));
+    painter.circle(es, if hot { 5.0 } else { 4.0 }, col, Stroke::new(1.5, t.overlay));
     if hot {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }
+    // The arm is short, so the drag is geared down: the taper's tangent moves with the pointer
+    // as if the arm were TAPER_GEAR times as long (about 3 points a degree near no taper), from
+    // where the drag started.
+    let start = egui::Id::new("sc_taper").with("start");
+    let s = r.interact_pointer_pos().and_then(|p| along(proj, p, foot + arm, e));
+    if r.drag_started()
+        && let Some(s) = s
+    {
+        ui.data_mut(|d| d.insert_temp(start, (s, a.tan())));
+    }
     if r.dragged()
-        && let Some(p) = r.interact_pointer_pos()
-        && let Some(s) = along(proj, p, foot + span, e)
+        && let Some(s) = s
     {
         crate::tool_modifiers::set_manipulator_dragging(true);
-        let mut deg = s.atan2(l).to_degrees();
+        let (s0, tan0) = ui.data(|d| d.get_temp::<(f64, f64)>(start)).unwrap_or((s, a.tan()));
+        let mut deg = (tan0 + (s - s0) / (TAPER_GEAR * l)).atan().to_degrees();
         let (lo, hi) = limits;
         if crate::tool_modifiers::manipulator_free() {
             deg = deg.clamp(lo, hi);
