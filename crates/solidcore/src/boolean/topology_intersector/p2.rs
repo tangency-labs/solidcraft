@@ -118,8 +118,9 @@ use super::p1::{
     add_unique, brep_make_edge_in_face, can_imprint, cc_insert_topology_intersections, contains,
     eval_curve_point, face_face_intersect_curves, find_common_elements, ignore_soft,
     intersect_shell_vertices, intersect_wire_lamina_edges, new_curve_classification,
-    set_edge_class, solve_with_face_caches, surface_coincidence_check, FaceIntersectOutputs,
-    IntersectionCurves, IntersectionResults, IntersectorBrep, TopologyIntersector,
+    set_edge_class, solve_with_face_caches, surface_coincidence_check,
+    surface_solve_with_face_caches, FaceIntersectOutputs, IntersectionCurves, IntersectionResults,
+    IntersectorBrep, TopologyIntersector,
 };
 use super::p3::IntersectorBrepP3;
 
@@ -1992,24 +1993,31 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         face_dom = d;
                     }
 
-                    let sol = {
-                        let surface = brep.surface(surf_h).ok_or(invalid(
+                    // (the surface reaches its face's cache through the face,
+                    // `smsurf_GetSurfaceCache`)
+                    let surface = brep
+                        .surface(surf_h)
+                        .ok_or(invalid(
                             OP_EDGE_FACE_COIN,
                             "surface handle cannot be resolved",
-                        ))?;
-                        let curve = curve_of(brep, Some(curve_h))?;
-                        // (status unchecked: not coincident on failure)
-                        ignore_soft(surface.simple_coincidence_checker(
+                        ))?
+                        .clone_for_evaluation()?;
+                    let curve = curve_of(brep, Some(curve_h))?.clone_for_evaluation()?;
+                    // (status unchecked: not coincident on failure)
+                    let sol = ignore_soft(surface_solve_with_face_caches(k, brep, |context| {
+                        surface.simple_coincidence_checker_with_context(
                             k,
                             &face_dom,
-                            curve,
+                            &curve,
                             &edge_dom,
                             approx_tol,
                             false,
                             [Some(curve_h), Some(surf_h)],
-                        ))?
-                        .flatten()
-                    };
+                            None,
+                            context,
+                        )
+                    }))?
+                    .flatten();
                     let Some(sol) = sol else {
                         continue;
                     };
