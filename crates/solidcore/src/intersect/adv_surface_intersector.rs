@@ -41,8 +41,8 @@
 //!   (`surface.surface_cache_p3`). Without caches the nodes have no data
 //!   (`NER`, `SM_ERR_NULL_POINTER`).
 //! - **Polar boxes.** `BranchIsGaussSeparate` builds a missing polar box lazily
-//!   (`GetPolarBox`); the caches are shared here, so a missing box is built on a
-//!   copy of the cache and not stored back. (`SolveBranch` resets
+//!   (`GetPolarBox`); the caches are shared here, so a missing box is built without
+//!   storing it ([`SurfaceCache::polar_box_unstored`]; the values are the same). (`SolveBranch` resets
 //!   `m_bSeperateGaussMaps` to `TRUE` on entry, so it never calls it.)
 //! - **Points.** `ComputeSingularityPoint` takes intersection point ids of the
 //!   base's arena ([`AdvSurfaceIntersector::compute_singularity_point`]) or a
@@ -82,7 +82,7 @@ use crate::geom::geom_utility::p1::point_project_to_plane;
 use crate::geom::global_solver::{
     self, Branch, GlobalSolve, GlobalSolver, SolutionRequested, SolveRequest, SolverOperation,
 };
-use crate::geom::polar_box::{PolarBox, PolarBoxState};
+use crate::geom::polar_box::PolarBox;
 use crate::geom::solution_array::{Solution, SolutionArray, SolutionObject, SolutionType};
 use crate::geom::tree::{AuxDataType, NodeId, TreeNode};
 use crate::geom::vector2d::Point2;
@@ -648,13 +648,9 @@ impl<'s, 't, O: SolutionObject + 't> AdvSurfaceIntersector<'s, 't, O> {
             .flatten()
             .ok_or(SolidError::null_pointer(OP_GAUSS))?;
         let id = id.ok_or(SolidError::null_pointer(OP_GAUSS))?;
-        let stored = cache.aux(id)?.polar_box;
-        if stored.state() != PolarBoxState::Uninitialized {
-            return Ok(stored);
-        }
-        // built lazily upstream; built on a copy here (the caches are shared)
-        let mut copy = cache.clone();
-        copy.polar_box(k, id)
+        // built lazily upstream; built without storing it here (the caches are
+        // shared), which gives the same box
+        cache.polar_box_unstored(k, id)
     }
 
     /// The body of [`GlobalSolve::solve_branch`] (`SolveBranch`).
