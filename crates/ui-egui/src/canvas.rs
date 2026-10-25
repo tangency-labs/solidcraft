@@ -1162,7 +1162,11 @@ fn taper_handle(
     let a = angle.clamp(-std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2);
     let at = |a: f64, r: f64| proj.to_screen(foot + (n * a.cos() + e * a.sin()) * r);
     let (Some(fs), Some(zs), Some(es)) = (proj.to_screen(foot), at(0.0, l), at(a, l)) else { return };
-    let r = ui.interact(egui::Rect::from_center_size(es, vec2(20.0, 20.0)), egui::Id::new("sc_taper"), egui::Sense::drag());
+    // The grip: about 22° of the swing either way of the arm's end, an arrowhead at each end.
+    let grip: Vec<Pos2> = (0..=12).filter_map(|i| at(a + 0.38 * (f64::from(i) / 6.0 - 1.0), l)).collect();
+    // The whole double arrow takes the drag, not only the arm's end.
+    let area = egui::Rect::from_points(&grip).expand(5.0).union(egui::Rect::from_center_size(es, vec2(20.0, 20.0)));
+    let r = ui.interact(area, egui::Id::new("sc_taper"), egui::Sense::drag());
     let r = r.on_hover_text(crate::i18n::tr("ui.taper_angle"));
     crate::scenario::publish_handle("taper", es);
     let hot = r.hovered() || r.dragged();
@@ -1173,8 +1177,6 @@ fn taper_handle(
         let arc: Vec<Pos2> = (0..=16).filter_map(|i| at(a * f64::from(i) / 16.0, 0.6 * l)).collect();
         painter.add(egui::Shape::line(arc, Stroke::new(1.2, col)));
     }
-    // The grip: about 22° of the swing either way of the arm's end, an arrowhead at each end.
-    let grip: Vec<Pos2> = (0..=12).filter_map(|i| at(a + 0.38 * (f64::from(i) / 6.0 - 1.0), l)).collect();
     for (tip, from) in [(grip.first(), grip.get(1)), (grip.last(), grip.len().checked_sub(2).and_then(|i| grip.get(i)))] {
         if let (Some(&tip), Some(&from)) = (tip, from) {
             let u = (tip - from).normalized();
@@ -1187,22 +1189,21 @@ fn taper_handle(
     if hot {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }
-    // The arm is short, so the drag is geared down: the taper's tangent moves with the pointer
-    // as if the arm were TAPER_GEAR times as long (about 3 points a degree near no taper), from
-    // where the drag started.
+    // The arm is short, so the drag is geared down: from where the drag started, the angle turns
+    // as if the arm were TAPER_GEAR times as long (about 3 points a degree at any angle).
     let start = egui::Id::new("sc_taper").with("start");
     let s = r.interact_pointer_pos().and_then(|p| along(proj, p, foot + arm, e));
     if r.drag_started()
         && let Some(s) = s
     {
-        ui.data_mut(|d| d.insert_temp(start, (s, a.tan())));
+        ui.data_mut(|d| d.insert_temp(start, (s, a)));
     }
     if r.dragged()
         && let Some(s) = s
     {
         crate::tool_modifiers::set_manipulator_dragging(true);
-        let (s0, tan0) = ui.data(|d| d.get_temp::<(f64, f64)>(start)).unwrap_or((s, a.tan()));
-        let mut deg = (tan0 + (s - s0) / (TAPER_GEAR * l)).atan().to_degrees();
+        let (s0, a0) = ui.data(|d| d.get_temp::<(f64, f64)>(start)).unwrap_or((s, a));
+        let mut deg = (a0 + (s - s0) / (TAPER_GEAR * l)).to_degrees();
         let (lo, hi) = limits;
         if crate::tool_modifiers::manipulator_free() {
             deg = deg.clamp(lo, hi);
