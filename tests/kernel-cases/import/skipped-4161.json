@@ -126,5 +126,21 @@
  {
   "source": "tangency-labs/solidcraft#5091",
   "why": "no geometry: KiCad board import (feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5202",
+  "why": "UI only: the history marker on a hidden sketch"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5210",
+  "why": "render: web import paths that don't draw STEP bodies"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5293",
+  "why": "no geometry: Convert Mesh takes constant-section prisms only, as designed (dup of #358)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5321",
+  "why": "no kernel geometry: two DXF writers (file export)"
  }
 ]

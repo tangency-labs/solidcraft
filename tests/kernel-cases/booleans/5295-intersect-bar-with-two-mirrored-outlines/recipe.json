@@ -1,0 +1,117 @@
+{
+ "commands": [
+  {
+   "command": "solid.box",
+   "params": {
+    "corner": [
+     -50,
+     -10,
+     0
+    ],
+    "length": 100,
+    "width": 20,
+    "height": 20,
+    "body_name": "Bar"
+   }
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Ends",
+    "project_edges": false
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -50,
+      0
+     ],
+     [
+      -30,
+      0
+     ],
+     [
+      -36,
+      20
+     ],
+     [
+      -50,
+      20
+     ]
+    ],
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      50,
+      0
+     ],
+     [
+      30,
+      0
+     ],
+     [
+      36,
+      20
+     ],
+     [
+      50,
+      20
+     ]
+    ],
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "sketch": "Ends",
+    "profiles": [
+     {
+      "point": [
+       -45,
+       10
+      ]
+     },
+     {
+      "point": [
+       45,
+       10
+      ]
+     }
+    ],
+    "distance": 20,
+    "direction": "symmetric",
+    "operation": "intersect"
+   }
+  }
+ ]
+}

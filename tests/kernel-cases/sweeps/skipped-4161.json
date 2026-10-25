@@ -162,5 +162,25 @@
  {
   "source": "tangency-labs/solidcraft#5192",
   "why": "no geometry: \"unknown sketch line\" for the axis (command parameters), no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5209",
+  "why": "no kernel geometry: surface extrude takes the curve of the same id from another sketch (selection, dup of #4057)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5283",
+  "why": "no single right answer: where a loft from a polygon to an ellipse splits its side faces is the method's choice"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5317",
+  "why": "duplicate of #4689: a revolve profile with an edge on the axis splits its flat face into sectors"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5410",
+  "why": "no geometry: a sketch can't attach to a face whose history is ambiguous (document, dup of #4325)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5419",
+  "why": "no reproduction: a loft from two circles to one user contour (a mismatched loop count), black viewport, no design"
  }
 ]

@@ -74,5 +74,29 @@
  {
   "source": "tangency-labs/solidcraft#5055",
   "why": "no geometry: no coarse thread past M56 (designation; M75x2 works)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5238",
+  "why": "duplicate of threads/3311-two-tapped-holes-both-modelled-threaded: a second modelled thread on the same body"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5277",
+  "why": "no reproduction: a slow modelled M8x1 thread on an unknown large part, no design"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5282",
+  "why": "no geometry: a 20 mm hole is refused for a modelled M20 by design (drill 17.5)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5382",
+  "why": "duplicate of threads/3311-two-tapped-holes-both-modelled-threaded: a second modelled M8 thread on the same body"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5384",
+  "why": "duplicate of threads/3311-two-tapped-holes-both-modelled-threaded (and #5382)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5417",
+  "why": "no reproduction: \"tree too deep\" on an M12x1.5 modelled thread in an unknown hole (dup of #2892)"
  }
 ]

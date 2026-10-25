@@ -214,5 +214,93 @@
  {
   "source": "tangency-labs/solidcraft#5189",
   "why": "render: lost GPU device (wgpu) in Preferences and the viewport"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5211",
+  "why": "render: GPU out of memory and a capture buffer (#2195), no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5229",
+  "why": "no reproduction: the display triangulation library's assertion, title only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5243",
+  "why": "no geometry: an empty crash report"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5248",
+  "why": "no geometry: motion trace curves are not associative (feature request)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5251",
+  "why": "no geometry: an empty crash report"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5263",
+  "why": "no reproduction: unclean exit in solid.box after a run of boxes, no sizes and no replay"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5274",
+  "why": "no geometry: unclean exit while dragging a sliding joint (garbage in the window: graphics)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5314",
+  "why": "render: lost GPU device (wgpu), no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5359",
+  "why": "no reproduction: unclean exit after parameter changes in a user's design of box patterns and a loft, nothing given"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5360",
+  "why": "no reproduction: truck intersection-curve panic during a timeline reorder, the design is not given"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5361",
+  "why": "render: Save As thumbnail capture buffer (#4791), no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5372",
+  "why": "render: lost GPU device (wgpu), no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5383",
+  "why": "no reproduction: the display triangulation library's assertion, title only"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5395",
+  "why": "no geometry: unclean exit with no command and no replay"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5407",
+  "why": "UI only: moving a sketch dimension, gone after a restart"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5411",
+  "why": "no geometry: an empty crash report (occurrence.properties, document)"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5421",
+  "why": "no geometry: unclean exit after selections, nothing running"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5429",
+  "why": "no reproduction: unclean exit in inspect.interference while an agent cut an O-ring groove in a user's part"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5437",
+  "why": "render: the capture buffer map failure (#2195), no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5438",
+  "why": "render: lost GPU device (wgpu), no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5448",
+  "why": "render: a GPU buffer map failure (#4791), no geometry"
+ },
+ {
+  "source": "tangency-labs/solidcraft#5460",
+  "why": "no reproduction: unclean exit during an extrude, title only"
  }
 ]

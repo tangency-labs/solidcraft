@@ -1,0 +1,13 @@
+{
+ "sources": [
+  "tangency-labs/solidcraft#5300",
+  "tangency-labs/solidcraft#5236",
+  "tangency-labs/solidcraft#3317"
+ ],
+ "what": "the outer top edge of a tube with a 1 mm wall (r 9..10, 20 high) filleted 1 mm: the round spans the whole wall top and meets the inner wall at its edge; truck refused it",
+ "source": "analytic",
+ "method": "the round removes the corner region (1 - pi/4) r^2 (r = 1) at the outer top edge; by Pappus its centroid is at radius 9 + (1/6)/(1-pi/4) = 9.7766: V = pi*(100-81)*20 - 2 pi 9.7766 (1 - pi/4). The top annulus is used up, so the faces are the outer cylinder, the round, the inner cylinder and the bottom = 4",
+ "body_count": 1,
+ "faces": 4,
+ "volume_mm3": 1180.6226
+}

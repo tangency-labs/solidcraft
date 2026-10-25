@@ -1,0 +1,109 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      -20,
+      0
+     ],
+     "x_dir": [
+      0,
+      1,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "P"
+   }
+  },
+  {
+   "command": "sketch.rectangle.two_point",
+   "params": {
+    "p0": [
+     -2,
+     -2
+    ],
+    "p1": [
+     2,
+     2
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      1,
+      0
+     ]
+    },
+    "name": "Q"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      -30,
+      -20
+     ],
+     [
+      30,
+      -20
+     ],
+     [
+      30,
+      20
+     ],
+     [
+      -30,
+      20
+     ]
+    ],
+    "closed": true
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.sweep",
+   "params": {
+    "sketch": "P",
+    "path_sketch": "Q",
+    "path": [
+     "l1",
+     "l2",
+     "l3",
+     "l4"
+    ],
+    "operation": "new"
+   }
+  }
+ ]
+}
