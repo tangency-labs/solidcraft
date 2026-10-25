@@ -1274,7 +1274,6 @@ fn move_seam<O: LoopObject>(
                     ok_to_split: split,
                 },
                 Some(p),
-                &NoGeometry,
                 // (no new topology without split; a handle would be InvalidInput)
                 &|_| None,
             )
@@ -1346,14 +1345,14 @@ fn merged_changes<O: LoopObject>(
 /// handles have no B-rep meaning here (as in [`merged_changes`]): a merge that makes
 /// topology is `InvalidInput` from the resolver, never an invented id.
 fn split_face_at_seam<O: LoopObject>(
-    k: &Kernel,
+    k: &mut Kernel,
     b: &mut Brep,
     f: FaceId,
     p: &mut FaceProps<O>,
 ) -> Result<(Vec<FaceId>, Changes)> {
     let problem = props_seam_problem(p);
     let split = with_classes(p, |cu, cv, p| {
-        fp1::split_at_seam(k, b, f, cu, cv, problem, Some(p), &NoGeometry, &|_| None)
+        fp1::split_at_seam(k, b, f, cu, cv, problem, Some(p), &|_| None)
     })?;
     let added = split
         .faces

@@ -1689,7 +1689,7 @@ fn put_uv_curves(o: &mut Vec<f64>, b: &Brep) {
 }
 
 #[allow(clippy::too_many_lines)]
-fn run_rust_brep(k: &Kernel, b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
+fn run_rust_brep(k: &mut Kernel, b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fail> {
     let mut o = vec![0.0];
     let f = |e: SolidError| fail(&e);
     match op {
@@ -1964,7 +1964,7 @@ fn run_rust(i: &OpIn) -> Result<Output, HarnessError> {
                 return Ok(Output::err("no_entity_of_that_kind"));
             };
             let (mut b, _) = shared::import(&ex)?;
-            run_rust_brep(&k, &mut b, &op)
+            run_rust_brep(&mut k, &mut b, &op)
         }
         None => run_rust_geom(&mut k, i),
     };

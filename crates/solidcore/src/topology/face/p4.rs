@@ -17,6 +17,7 @@
 //! | [`global_line_intersect`], [`global_line_intersect_held`] | `SmFace::GlobalLineIntersect`  |
 //! | [`find_vertex_sector`], [`VertexSector`], [`FindVertexSectorArgs`] | `SmFace::FindVertexSector` |
 //! | [`has_seam_problem`], [`SeamCheck`], [`HasSeamProblemOptions`] | `SmFace::HasSeamProblem`  |
+//! | [`BrepSeamObjects`], `merge_seam_intervals` (crate) | the `SmObject`s of `HasSeamProblem` / `SplitAtSeam`'s `MergeIntervals` |
 //! | [`ClassifyProblem`]                          | `SmClassifyProblem` (`SmCurveClass.h`)       |
 //!
 //! Deviations:
@@ -87,6 +88,14 @@
 //!   and 3, and [`SeamCheck`] returns the curves (`seam_u`, `seam_v`). The copies
 //!   `SetProps_Stage2` keeps in the face properties hold the handles only: a later
 //!   caller that resolves their curves needs the curves of the `SeamCheck`.
+//!   `SplitAtSeam`'s merges (`merge_seam_intervals`) rebuild them from the face's
+//!   surface as this function builds them.
+//! - **[`BrepSeamObjects`] as merge objects.** Over `&mut Brep`
+//!   ([`BrepSeamObjects::for_merge`]) they are the [`MergeIntervalBrep`] of
+//!   `SplitAtSeam`'s `MergeIntervals`: its edits notify into the objects' own empty
+//!   records under [`crate::topology::loopuse`]'s identities (a split edge's new curve
+//!   in a kind of its own), and a vertex/face gap is the vertex use's cached one,
+//!   since the merge holds the kernel mutably.
 //! - **`HasSeamProblem` and `SetProps_Stage2`** call each other upstream. Without stage 2
 //!   face properties the port runs [`FaceProps::set_props_stage2_with`] with this
 //!   function (and the caller's classification objects) as its seam call, passing the
@@ -106,6 +115,7 @@
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::Curve;
 use crate::error::{EntityRef, Result, SolidError};
+use crate::geom::attribute::{AttributeStore, ObjectKey};
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p2::ContinuityType;
@@ -116,7 +126,8 @@ use crate::geom::tol::{self, SmallTopoType};
 use crate::geom::vector2d::Point2;
 use crate::heal::face_props::{FaceProps, HealerOpType, LoopObject, PropStage, Tri};
 use crate::intersect::curve_class::p1::{CrvDirOnFaceType, CurveClassification, CurveInterval};
-use crate::intersect::curve_class::p5::ClassGeometryMut;
+use crate::intersect::curve_class::p5::{ClassGeometryMut, MergedTopology, PartialMergeError};
+use crate::intersect::curve_class::p6::{MergeContext, MergeIntervalBrep};
 use crate::intersect::point_class::{
     ClassGeometry, ClassObject, ClassObjectKind, PointClassType, PointClassification,
 };
@@ -144,9 +155,11 @@ use crate::topology::face::p2::{
     review_start_and_stop_on_seam_crv_classifies, UvLineHandle, UvLineObjects,
 };
 use crate::topology::loopuse::{self, AttributeFilter};
+use crate::topology::topology::Topology;
 use crate::topology::vertex;
 use crate::topology::vertexuse;
 use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, LoopId, LoopuseId, VertexId, VertexuseId};
+use std::collections::BTreeMap;
 
 const OP: &str = "topology::face::p4";
 
@@ -1521,6 +1534,67 @@ where
     }
 }
 
+impl<R: core::ops::DerefMut, O: ClassObject> MergeIntervalBrep<O> for WithSeam<'_, R, O>
+where
+    R::Target: MergeIntervalBrep<O>,
+{
+    fn merge_context(&mut self, object: O) -> Option<MergeContext<'_, O>> {
+        self.inner.merge_context(object)
+    }
+    fn merge_context_with_curve_identity(
+        &mut self,
+        object: O,
+    ) -> Option<crate::intersect::curve_class::p6::MergeContextWithIdentity<'_, O>> {
+        self.inner.merge_context_with_curve_identity(object)
+    }
+}
+
+/// `pCrvClass->MergeIntervals(&faces, &edges, &vertices, this)` of
+/// `SmFace::SplitAtSeam` on face `f`'s own B-rep ([`BrepSeamObjects::for_merge`]), for
+/// the `dir` seam classification [`has_seam_problem`] made: the merge's status with its
+/// partial output ([`CurveClassification::merge_intervals_mut`]).
+///
+/// Upstream's classification owns its seam curve; the port's names it with a
+/// temporary handle ([`ClassObject::temporary`]), so the seam curve and its UV curve
+/// are rebuilt here from the face's surface exactly as [`has_seam_problem`] builds
+/// them (`CreateSeamCurve(dir, TRUE)`). A surface that makes no seam curve leaves the
+/// temporaries unresolved (an invalid-input error of the merge).
+///
+/// # Errors
+///
+/// Those of [`BrepSeamObjects::for_merge`] (the merge's own failures come back as the
+/// inner result).
+pub(crate) fn merge_seam_intervals<O: LoopObject>(
+    k: &mut Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    dir: SurfParamType,
+    c: &mut CurveClassification<O>,
+) -> Result<core::result::Result<MergedTopology<O>, PartialMergeError<O>>> {
+    // (a failure to rebuild the seam leaves it unresolved, as above)
+    let seam = match b.face(f)?.surface.as_ref() {
+        Some(s) => s.create_seam_curve(k, dir, true).ok().flatten(),
+        None => None,
+    };
+    let seam = seam.map(|s| (s.uv_curve().clone(), Curve::from(s)));
+    let (ci, ui) = if dir == SurfParamType::V {
+        SEAM_V_TEMPS
+    } else {
+        SEAM_U_TEMPS
+    };
+    let mut inner = BrepSeamObjects::for_merge(b, f)?;
+    let mut objects = WithSeam {
+        inner: &mut inner,
+        seam: seam
+            .as_ref()
+            .and_then(|(_, c)| O::temporary(ci, ClassObjectKind::Curve).map(|h| (h, c))),
+        seam_uv: seam
+            .as_ref()
+            .and_then(|(uv, _)| O::temporary(ui, ClassObjectKind::Curve).map(|h| (h, uv))),
+    };
+    Ok(c.merge_intervals_mut_with_partial(k, &mut objects, false))
+}
+
 /// The inputs of [`has_seam_problem`] after the face (`HasSeamProblem`'s optional
 /// arguments).
 pub struct HasSeamProblemOptions<'a, O: LoopObject> {
@@ -2001,13 +2075,24 @@ const OP_SEAM_OBJECTS: &str = "topology::face::p4::BrepSeamObjects";
 /// ([`ClassObject::temporary`]). Tolerances, points and vertex/face gaps are those
 /// stored in `b` (a gap is computed on a snapshot, as `GetVertexFaceGap` fills a lazy
 /// cache).
+///
+/// Over `&mut Brep` the objects are also the [`MergeIntervalBrep`] of
+/// `SmFace::SplitAtSeam`'s `MergeIntervals` ([`BrepSeamObjects::for_merge`]): the
+/// merge edits the face's own B-rep, with its notifications kept in the objects' own
+/// (otherwise empty) records and attribute store.
 #[derive(Debug)]
 pub struct BrepSeamObjects<'b, O, B = &'b Brep> {
-    k: &'b Kernel,
+    /// The kernel of the vertex/face gap computation; `None` for the merge objects,
+    /// whose merge holds the kernel mutably (a gap is then the vertex use's cached one).
+    k: Option<&'b Kernel>,
     b: B,
     f: FaceId,
     face: O,
     surface: Option<O>,
+    /// The notification records of the merge's edits (see [`MergeIntervalBrep`]).
+    records: BTreeMap<ObjectKey, Topology>,
+    /// The attribute store of the merge's edits.
+    attributes: AttributeStore,
 }
 
 impl<'b, O: LoopObject, B: FaceBrep> BrepSeamObjects<'b, O, B> {
@@ -2020,6 +2105,11 @@ impl<'b, O: LoopObject, B: FaceBrep> BrepSeamObjects<'b, O, B> {
     /// curves or the seam temporaries (a limitation of the handle type, not an upstream
     /// status).
     pub fn new(k: &'b Kernel, b: B, f: FaceId) -> Result<Self> {
+        Self::build(Some(k), b, f)
+    }
+
+    /// [`Self::new`] with an optional gap kernel.
+    fn build(k: Option<&'b Kernel>, b: B, f: FaceId) -> Result<Self> {
         let no = || {
             SolidError::invalid_input(
                 OP_SEAM_OBJECTS,
@@ -2058,11 +2148,13 @@ impl<'b, O: LoopObject, B: FaceBrep> BrepSeamObjects<'b, O, B> {
             f,
             face: O::from_face(f).ok_or_else(no)?,
             surface,
+            records: BTreeMap::new(),
+            attributes: AttributeStore::default(),
         })
     }
 
     /// The B-rep entity `o` names (the face handle included).
-    fn entity(&self, o: O) -> Option<EntityRef> {
+    pub(crate) fn entity(&self, o: O) -> Option<EntityRef> {
         if o == self.face {
             return Some(EntityRef::Face(self.f));
         }
@@ -2140,8 +2232,17 @@ impl<O: LoopObject, B: FaceBrep> ClassGeometry<O> for BrepSeamObjects<'_, O, B> 
                 .map(|(f, _)| f)?,
         };
         let vu = vertex::vertexuse_of_face(self.b.brep(), v, Some(f)).ok()??;
+        let Some(k) = self.k else {
+            // the merge objects: the vertex use's gap when there is none or it is
+            // cached; an uncached gap is unresolved (the merge holds the kernel)
+            if !vertexuse::has_vertex_face_gap(self.b.brep(), vu).ok()? {
+                return Some(0.0);
+            }
+            let gap = self.b.brep().vertexuse(vu).ok()?.vertex_face_gap;
+            return gap.is_init().then_some(gap.gap_3d);
+        };
         let mut snapshot = self.b.brep().clone_sharing_surface_caches();
-        let gap = vertexuse::vertex_face_gap(self.k, &mut snapshot, vu, false).ok()?;
+        let gap = vertexuse::vertex_face_gap(k, &mut snapshot, vu, false).ok()?;
         Some(gap.map_or(0.0, |g| g.gap_3d))
     }
 
@@ -2221,6 +2322,61 @@ impl<O: LoopObject> ClassGeometryMut<O> for BrepSeamObjects<'_, O, &mut Brep> {
     fn topology_entity_mut(&mut self, o: O) -> Option<(&mut Brep, EntityRef)> {
         let e = self.entity(o)?;
         Some((&mut *self.b, e))
+    }
+}
+
+impl<'b, O: LoopObject> BrepSeamObjects<'b, O, &'b mut Brep> {
+    /// The objects of face `f` of `b` for `SmFace::SplitAtSeam`'s `MergeIntervals`
+    /// ([`CurveClassification::merge_intervals_mut`]), which holds the kernel
+    /// mutably: a vertex/face gap is the vertex use's cached one.
+    ///
+    /// # Errors
+    ///
+    /// As [`BrepSeamObjects::new`].
+    pub fn for_merge(b: &'b mut Brep, f: FaceId) -> Result<Self> {
+        Self::build(None, b, f)
+    }
+}
+
+/// The face's own B-rep for every topology handle: `MergeIntervals` edits the
+/// entities upstream's `SmObject` pointers name. Its notifications go to the objects'
+/// own records under `loopuse::notify_ref` identities (the B-rep carries no
+/// attribute store or context callbacks), with a split edge's new curve named the
+/// same way.
+impl<O: LoopObject> MergeIntervalBrep<O> for BrepSeamObjects<'_, O, &mut Brep> {
+    fn merge_context(&mut self, o: O) -> Option<MergeContext<'_, O>> {
+        let target = self.entity(o)?;
+        if !matches!(
+            target,
+            EntityRef::Vertex(_) | EntityRef::Edge(_) | EntityRef::Face(_) | EntityRef::Region(_)
+        ) {
+            return None;
+        }
+        let (f, face) = (self.f, self.face);
+        Some(MergeContext {
+            brep: &mut *self.b,
+            target,
+            handle: Box::new(move |e| match e {
+                EntityRef::Face(x) if x == f => face,
+                _ => O::from_topology(e).unwrap_or(face),
+            }),
+            notifications: edge::NotifyEnv {
+                records: &mut self.records,
+                attributes: &mut self.attributes,
+                context: None,
+                key_of: &loopuse::notify_ref,
+            },
+            curve_ref: &merge_curve_ref,
+        })
+    }
+}
+
+/// The identity of edge `e`'s curve of type `type_code` made by a seam merge: the
+/// edge's [`loopuse::notify_ref`] key in a kind of its own.
+fn merge_curve_ref(e: EdgeId, type_code: i64) -> ObjectRef {
+    ObjectRef {
+        type_code,
+        key: ObjectKey(1 + (11_u64 << 32) + u64::from(e.index())),
     }
 }
 

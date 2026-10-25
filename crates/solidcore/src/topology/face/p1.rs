@@ -76,19 +76,25 @@
 //!   (UB-137).
 //! - **`bUseJGU`** (`static constexpr FALSE` in `SplitAtSeam`) branches are dead code
 //!   upstream and are not ported. The `SmTemporaryChangeValue`s of `SplitAtSeam`
-//!   (`m_bEditingEnabled`, `GetDoingBooleanRef`) are not set: they guard
-//!   `HasSeamProblem` and `MergeIntervals`, whose ports read neither flag
-//!   (its topology edits defer to `intersect.curve_class_p6`, the imprinting after
-//!   `GetPointObjZoneTol3d`). `SplitAtSeam` takes the caller's [`ClassGeometry`] for
-//!   the zone tolerances `MergeIntervals` reads.
-//! - **`MergeIntervals`** returns handles; the port maps its new faces, edges and
-//!   vertices to ids with the caller's `resolve` and returns
+//!   (the B-rep's editing flag, `GetDoingBooleanRef`) set both flags from the merges
+//!   to the routine's end and restore them on every return.
+//! - **`MergeIntervals`** edits the face's own B-rep
+//!   ([`crate::topology::face::p4::BrepSeamObjects::for_merge`], through
+//!   `CurveClassification::merge_intervals_mut`), so `MoveSeam` / `SplitAtSeam` take
+//!   the kernel mutably and no caller classification geometry. Its notifications go
+//!   to the merge objects' own empty records, not to `move_seam_notified`'s `env`.
+//!   The seam curve upstream's classification owns is rebuilt from the face's surface
+//!   as `HasSeamProblem` builds it (`merge_seam_intervals`); a vertex/face gap the
+//!   merge reads is the vertex use's cached one (the merge holds the kernel). It
+//!   returns handles; the port maps its new faces, edges and vertices to ids through
+//!   the face's objects, else the caller's `resolve`, and returns
 //!   [`SolidError::InvalidInput`] for a handle that does not resolve to an entity of
 //!   the expected kind (upstream's lists hold the pointers directly). Its own status
-//!   is ignored, as upstream.
-//! - **`IsCrossedByEdge` / `HasNearMisses`** return a plain boolean upstream; a
-//!   failure of the port other than [`SolidError::Unported`] (or, for
-//!   `HasNearMisses`, [`SolidError::InvalidInput`] for a handle `geometry` cannot
+//!   is ignored, as upstream, keeping the lists it filled before a failure.
+//! - **`IsCrossedByEdge` / `HasNearMisses`** run on the face's own B-rep objects
+//!   ([`crate::topology::face::p4::BrepSeamObjects`]) and return a plain boolean
+//!   upstream; a failure of the port other than [`SolidError::Unported`] (or, for
+//!   `HasNearMisses`, [`SolidError::InvalidInput`] for a handle the objects cannot
 //!   resolve) reads as `FALSE`.
 //! - **Notifications** (`SmFace::Notify`, `topology.face_p3`) run with the empty
 //!   notification environment a B-rep face carries (as `topology::loopuse`'s do):
@@ -107,8 +113,8 @@
 //!   ([`crate::topology::face::p4::has_seam_problem_in_brep_mut`]), so the classification
 //!   handle type must name them. The seam curves its classifications name are the
 //!   handle type's temporaries (upstream's classifications own them); `SplitAtSeam`'s
-//!   merges read them through the caller's [`ClassGeometry`], and a handle it cannot
-//!   resolve is [`SolidError::InvalidInput`].
+//!   merges rebuild them (above), and a handle the merge cannot resolve is
+//!   [`SolidError::InvalidInput`].
 //!   `SmEdgeuse::NormalizedEvaluate` and `GetOrCreateUVTrimCurve` call
 //!   [`crate::topology::edgeuse::p3`] (wired in PR #117).
 //!   `SmBrep::ReplaceSurface` is [`brep_p2::replace_surface`], which reaches
@@ -156,6 +162,7 @@ use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::edgeuse::p3 as eu3;
 use crate::topology::face::p2 as fp2;
 use crate::topology::face::p3 as fp3;
+use crate::topology::face::p4::BrepSeamObjects;
 use crate::topology::loopuse as lu1;
 use crate::topology::trimming_tools as tt;
 use crate::topology::vertex as vx;
@@ -328,21 +335,29 @@ fn has_near_misses<O: LoopObject>(
 }
 
 /// `pCrvClass->MergeIntervals(&faces, &edges, &vertices, this)` (unit
-/// `intersect.curve_class_p5`; the original face is a debug-only argument there): the
-/// faces, edges and vertices the merge made, resolved to ids by `resolve`.
+/// `intersect.curve_class_p5`; the original face is a debug-only argument there) on
+/// face `f`'s own B-rep for its `dir` seam
+/// ([`crate::topology::face::p4::merge_seam_intervals`]): the faces, edges and
+/// vertices the merge made, resolved to ids by the face's objects, else by `resolve`.
 fn merge_intervals<O: LoopObject>(
-    k: &Kernel,
+    k: &mut Kernel,
     c: &mut CurveClassification<O>,
-    geometry: &impl ClassGeometry<O>,
+    dir: SurfParamType,
+    b: &mut Brep,
+    f: FaceId,
     resolve: &dyn Fn(O) -> Option<EntityRef>,
 ) -> Result<SeamSplit> {
-    // (the merge's status is ignored, as upstream; a handle `geometry` or the caller
-    // cannot resolve is caller error and propagates)
-    let merged = match c.merge_intervals(k, geometry, false) {
+    // (the merge's status is ignored, as upstream, keeping what it made before a
+    // failure; a handle the objects cannot resolve is caller error and propagates)
+    let merged = match crate::topology::face::p4::merge_seam_intervals(k, b, f, dir, c)? {
         Ok(merged) => merged,
-        Err(e) if e.is_unported() || matches!(e, SolidError::InvalidInput { .. }) => return Err(e),
-        Err(_) => return Ok(SeamSplit::default()),
+        Err(e) if e.error.is_unported() || matches!(e.error, SolidError::InvalidInput { .. }) => {
+            return Err(e.error)
+        }
+        Err(e) => *e.merged,
     };
+    let objects = BrepSeamObjects::new(k, &*b, f)?;
+    let resolve = |o: O| objects.entity(o).or_else(|| resolve(o));
     let mut out = SeamSplit::default();
     for o in merged.faces {
         match resolve(o) {
@@ -1539,7 +1554,7 @@ fn vertexuse_uv(k: &Kernel, b: &mut Brep, vu: VertexuseId, prev: Point2) -> Resu
 /// `HasSeamProblem`, the split).
 #[allow(clippy::too_many_arguments)] // one upstream routine
 pub fn move_seam<O: LoopObject>(
-    k: &Kernel,
+    k: &mut Kernel,
     b: &mut Brep,
     f: FaceId,
     this: ObjectRef,
@@ -1548,7 +1563,6 @@ pub fn move_seam<O: LoopObject>(
     problem: SeamProblem,
     opts: MoveSeamOptions,
     props: Option<&FaceProps<O>>,
-    geometry: &impl ClassGeometry<O>,
     resolve: &dyn Fn(O) -> Option<EntityRef>,
 ) -> Result<MoveSeamResult> {
     move_seam_notified(
@@ -1562,7 +1576,6 @@ pub fn move_seam<O: LoopObject>(
         problem,
         opts,
         props,
-        geometry,
         resolve,
     )
 }
@@ -1577,7 +1590,7 @@ pub fn move_seam<O: LoopObject>(
 /// As [`move_seam`].
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one upstream routine
 pub fn move_seam_notified<O: LoopObject>(
-    k: &Kernel,
+    k: &mut Kernel,
     b: &mut Brep,
     mut env: Option<&mut crate::topology::edge::NotifyEnv<'_>>,
     f: FaceId,
@@ -1587,7 +1600,6 @@ pub fn move_seam_notified<O: LoopObject>(
     problem: SeamProblem,
     opts: MoveSeamOptions,
     props: Option<&FaceProps<O>>,
-    geometry: &impl ClassGeometry<O>,
     resolve: &dyn Fn(O) -> Option<EntityRef>,
 ) -> Result<MoveSeamResult> {
     use SurfParamType as Sp;
@@ -1644,21 +1656,22 @@ pub fn move_seam_notified<O: LoopObject>(
     // original (a B-spline kind: no owned bases)
     surface.set_owner_zone_tol_3d(surface0.owner_zone_tol_3d());
 
-    let crosses_u = match props {
-        Some(p) => names(p.bad_crossed_seam_dir, Sp::U),
-        None => is_crossed_by_edge(geometry, crv_class_u)?,
-    };
-    let crosses_v = match props {
-        Some(p) => names(p.bad_crossed_seam_dir, Sp::V),
-        None => is_crossed_by_edge(geometry, crv_class_v)?,
-    };
-    let near_miss_u = match props {
-        Some(p) => names(p.bad_near_miss_seam_dir, Sp::U),
-        None => has_near_misses(k, crv_class_u, geometry)?,
-    };
-    let near_miss_v = match props {
-        Some(p) => names(p.bad_near_miss_seam_dir, Sp::V),
-        None => has_near_misses(k, crv_class_v, geometry)?,
+    // (the classifications name the face's own B-rep objects)
+    let (crosses_u, crosses_v, near_miss_u, near_miss_v) = if let Some(p) = props {
+        (
+            names(p.bad_crossed_seam_dir, Sp::U),
+            names(p.bad_crossed_seam_dir, Sp::V),
+            names(p.bad_near_miss_seam_dir, Sp::U),
+            names(p.bad_near_miss_seam_dir, Sp::V),
+        )
+    } else {
+        let objects = BrepSeamObjects::new(k, &*b, f)?;
+        (
+            is_crossed_by_edge(&objects, crv_class_u)?,
+            is_crossed_by_edge(&objects, crv_class_v)?,
+            has_near_misses(k, crv_class_u, &objects)?,
+            has_near_misses(k, crv_class_v, &objects)?,
+        )
     };
     let fix_seam_both = (crosses_u || near_miss_u) && (crosses_v || near_miss_v);
 
@@ -2010,7 +2023,6 @@ pub fn move_seam_notified<O: LoopObject>(
             crv_class_v,
             problem,
             props,
-            geometry,
             resolve,
             0,
         ))? {
@@ -2063,14 +2075,13 @@ fn order(a: f64, b: f64) -> (f64, f64) {
 /// (`HasSeamProblem`; the deferrals of `MergeIntervals`' callees).
 #[allow(clippy::too_many_arguments)] // one upstream routine
 pub fn split_at_seam<O: LoopObject>(
-    k: &Kernel,
+    k: &mut Kernel,
     b: &mut Brep,
     f: FaceId,
     crv_class_u: &mut CurveClassification<O>,
     crv_class_v: &mut CurveClassification<O>,
     problem: SeamProblem,
     props: Option<&FaceProps<O>>,
-    geometry: &impl ClassGeometry<O>,
     resolve: &dyn Fn(O) -> Option<EntityRef>,
 ) -> Result<SeamSplit> {
     split_at_seam_depth(
@@ -2081,7 +2092,6 @@ pub fn split_at_seam<O: LoopObject>(
         crv_class_v,
         problem,
         props,
-        geometry,
         resolve,
         0,
     )
@@ -2089,14 +2099,13 @@ pub fn split_at_seam<O: LoopObject>(
 
 #[allow(clippy::too_many_arguments)]
 fn split_at_seam_depth<O: LoopObject>(
-    k: &Kernel,
+    k: &mut Kernel,
     b: &mut Brep,
     f: FaceId,
     crv_class_u: &mut CurveClassification<O>,
     crv_class_v: &mut CurveClassification<O>,
     mut problem: SeamProblem,
     props: Option<&FaceProps<O>>,
-    geometry: &impl ClassGeometry<O>,
     resolve: &dyn Fn(O) -> Option<EntityRef>,
     depth: usize,
 ) -> Result<SeamSplit> {
@@ -2104,7 +2113,7 @@ fn split_at_seam_depth<O: LoopObject>(
     if depth > MAX_SPLIT_AT_SEAM_DEPTH {
         return Err(null("SplitAtSeam: recursion too deep"));
     }
-    let mut out = SeamSplit::default();
+    let out = SeamSplit::default();
 
     // no work - FaceProps says no missing seam
     if let Some(p) = props {
@@ -2152,16 +2161,52 @@ fn split_at_seam_depth<O: LoopObject>(
     let merge_u = names(problem.crossed, Sp::U) || names(problem.missing, Sp::U);
     let merge_v = names(problem.crossed, Sp::V) || names(problem.missing, Sp::V);
 
+    // allow Brep modifications (upstream's SmTemporaryChangeValue of
+    // pBrep->m_bEditingEnabled and the context's DoingBoolean flag, restored on
+    // every return)
+    let editing = b.editing_enabled();
+    let doing_boolean = k.context.doing_boolean();
+    b.set_editing_enabled(true);
+    k.context.set_doing_boolean(true);
+    let r = split_at_seam_merges(
+        k,
+        b,
+        f,
+        crv_class_u,
+        crv_class_v,
+        props,
+        resolve,
+        depth,
+        (merge_u, merge_v),
+    );
+    b.set_editing_enabled(editing);
+    k.context.set_doing_boolean(doing_boolean);
+    r
+}
+
+/// The merges of [`split_at_seam_depth`] (`merge` = `(bMergeU, bMergeV)`), with the
+/// B-rep's editing and the context's Boolean flag set.
+#[allow(clippy::too_many_arguments)]
+fn split_at_seam_merges<O: LoopObject>(
+    k: &mut Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    crv_class_u: &mut CurveClassification<O>,
+    crv_class_v: &mut CurveClassification<O>,
+    props: Option<&FaceProps<O>>,
+    resolve: &dyn Fn(O) -> Option<EntityRef>,
+    depth: usize,
+    (merge_u, merge_v): (bool, bool),
+) -> Result<SeamSplit> {
+    use SurfParamType as Sp;
+    let mut out = SeamSplit::default();
     let mut this_new = SeamSplit::default();
     if merge_u {
         fp2::remove_suspect_split_at_seam_uv_trim_curves(b, crv_class_u, |o| match resolve(o) {
             Some(EntityRef::Vertex(v)) => Some(v),
             _ => None,
         })?;
-        // (upstream sets pBrep->m_bEditingEnabled and the context's DoingBoolean flag
-        // around the merges with SmTemporaryChangeValue; neither is set here: the B-rep
-        // flag is unit topology.brep_p1's and the context flag needs a mutable kernel)
-        this_new = merge_intervals(k, crv_class_u, geometry, resolve)?;
+        this_new = merge_intervals(k, crv_class_u, Sp::U, b, f, resolve)?;
         if !merge_v {
             out.faces.extend_from_slice(&this_new.faces);
             out.edges.extend_from_slice(&this_new.edges);
@@ -2201,7 +2246,6 @@ fn split_at_seam_depth<O: LoopObject>(
                     &mut cv,
                     this_problem,
                     props,
-                    geometry,
                     resolve,
                     depth + 1,
                 ))?
@@ -2219,7 +2263,7 @@ fn split_at_seam_depth<O: LoopObject>(
             Some(EntityRef::Vertex(v)) => Some(v),
             _ => None,
         })?;
-        this_new = merge_intervals(k, crv_class_v, geometry, resolve)?;
+        this_new = merge_intervals(k, crv_class_v, Sp::V, b, f, resolve)?;
         out.faces.extend_from_slice(&this_new.faces);
         out.edges.extend_from_slice(&this_new.edges);
         out.vertices.extend_from_slice(&this_new.vertices);
@@ -2233,7 +2277,6 @@ mod tests {
     use crate::geom::attribute::ObjectKey;
     use crate::intersect::point_class::{ClassObject, ClassObjectKind};
     use crate::surface::plane::Plane;
-    use crate::surface::volume::Volume;
     use crate::topology::{Faceuse, FaceuseId};
 
     #[derive(Debug, Clone, Copy, PartialEq)]
@@ -2248,24 +2291,6 @@ mod tests {
     impl LoopObject for H {
         fn from_loop(l: LoopId) -> Self {
             Self(l)
-        }
-    }
-
-    /// Classification geometry for the null handles here: resolves nothing.
-    struct NoGeometry;
-
-    impl ClassGeometry<H> for NoGeometry {
-        fn curve(&self, _: H) -> Option<&Curve> {
-            None
-        }
-        fn surface(&self, _: H) -> Option<&Surface> {
-            None
-        }
-        fn volume(&self, _: H) -> Option<&Volume> {
-            None
-        }
-        fn point(&self, _: H) -> Option<Point3> {
-            None
         }
     }
 
@@ -2509,7 +2534,7 @@ mod tests {
     #[test]
     fn seams_quiet_and_non_periodic() {
         let (mut b, f) = plane_face();
-        let k = Kernel::default();
+        let mut k = Kernel::default();
         let mut cu = CurveClassification::<H>::new(&k);
         let mut cv = CurveClassification::<H>::new(&k);
         let mut p = SeamProblem {
@@ -2518,7 +2543,7 @@ mod tests {
             near_miss: SurfParamType::Neither,
         };
         let r = move_seam(
-            &k,
+            &mut k,
             &mut b,
             f,
             me(f),
@@ -2527,7 +2552,6 @@ mod tests {
             p,
             MoveSeamOptions::default(),
             None,
-            &NoGeometry,
             &|_| None,
         )
         .unwrap();
@@ -2535,31 +2559,19 @@ mod tests {
         assert_eq!(r.v, FixSeamPlanType::NoChanges);
         // a plane is periodic in neither direction
         p.crossed = SurfParamType::Both;
-        let s = split_at_seam(
-            &k,
-            &mut b,
-            f,
-            &mut cu,
-            &mut cv,
-            p,
-            None,
-            &NoGeometry,
-            &|_| None,
-        )
-        .unwrap();
+        let s = split_at_seam(&mut k, &mut b, f, &mut cu, &mut cv, p, None, &|_| None).unwrap();
         assert_eq!(s, SeamSplit::default());
         // face properties saying no missing seam end the split early
         let mut props = FaceProps::<H>::new();
         props.bad_missing_seam_dir = SurfParamType::Neither;
         let s = split_at_seam(
-            &k,
+            &mut k,
             &mut b,
             f,
             &mut cu,
             &mut cv,
             p,
             Some(&props),
-            &NoGeometry,
             &|_| None,
         )
         .unwrap();
@@ -2568,7 +2580,7 @@ mod tests {
         // face has nothing to move
         props.bad_crossed_seam_dir = SurfParamType::U;
         let e = move_seam(
-            &k,
+            &mut k,
             &mut b,
             f,
             me(f),
@@ -2577,7 +2589,6 @@ mod tests {
             p,
             MoveSeamOptions::default(),
             Some(&props),
-            &NoGeometry,
             &|_| None,
         );
         let r = e.unwrap();
@@ -2589,7 +2600,7 @@ mod tests {
     #[test]
     fn split_at_seam_depth_is_bounded() {
         let (mut b, f) = plane_face();
-        let k = Kernel::default();
+        let mut k = Kernel::default();
         let mut cu = CurveClassification::<H>::new(&k);
         let mut cv = CurveClassification::<H>::new(&k);
         let p = SeamProblem {
@@ -2598,14 +2609,13 @@ mod tests {
             near_miss: SurfParamType::Neither,
         };
         let e = split_at_seam_depth(
-            &k,
+            &mut k,
             &mut b,
             f,
             &mut cu,
             &mut cv,
             p,
             None,
-            &NoGeometry,
             &|_| None,
             MAX_SPLIT_AT_SEAM_DEPTH + 1,
         );

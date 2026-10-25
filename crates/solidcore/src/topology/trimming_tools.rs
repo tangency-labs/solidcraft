@@ -367,24 +367,6 @@ fn face_edges(b: &Brep, f: FaceId) -> Result<Vec<EdgeId>> {
 
 use crate::topology::brep::p1::HealLoopHandle;
 
-/// Classification geometry for [`HealLoopHandle`]s in seam splits: resolves nothing.
-struct SeamGeometry;
-
-impl crate::intersect::point_class::ClassGeometry<HealLoopHandle> for SeamGeometry {
-    fn curve(&self, _: HealLoopHandle) -> Option<&Curve> {
-        None
-    }
-    fn surface(&self, _: HealLoopHandle) -> Option<&Surface> {
-        None
-    }
-    fn volume(&self, _: HealLoopHandle) -> Option<&crate::surface::volume::Volume> {
-        None
-    }
-    fn point(&self, _: HealLoopHandle) -> Option<Point3> {
-        None
-    }
-}
-
 /// `SmFace::HasSeamProblem(rCrvClassU, rCrvClassV, eCrossed, eMissing, eNearMiss)` (unit
 /// `topology.face_p4`).
 fn face_has_seam_problem(
@@ -413,7 +395,7 @@ fn face_has_seam_problem(
 
 /// `SmFace::HasSeamProblem` and, when it reports one, `SmFace::SplitAtSeam` (unit
 /// `topology.face_p1`) appending the new faces.
-fn face_split_at_seam_problem(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<Vec<FaceId>> {
+fn face_split_at_seam_problem(k: &mut Kernel, b: &mut Brep, f: FaceId) -> Result<Vec<FaceId>> {
     let (has, mut cu, mut cv, problem) = face_has_seam_problem(k, b, f)?;
     if !has {
         return Ok(Vec::new());
@@ -426,7 +408,6 @@ fn face_split_at_seam_problem(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<Vec
         &mut cv,
         problem,
         None,
-        &SeamGeometry,
         &|o: HealLoopHandle| match o {
             HealLoopHandle::Topo(EntityRef::Vertex(v)) => Some(EntityRef::Vertex(v)),
             _ => None,
@@ -608,7 +589,7 @@ pub fn clear_uv_trim_curves(b: &mut Brep, f: FaceId) -> Result<()> {
 ///
 /// [`SolidError::Unported`] (`SmFace::HasSeamProblem`, `topology.face_p4`;
 /// `SmFace::SplitAtSeam`, `topology.face_p1`).
-pub fn split_at_seams(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<Vec<FaceId>> {
+pub fn split_at_seams(k: &mut Kernel, b: &mut Brep, f: FaceId) -> Result<Vec<FaceId>> {
     face_split_at_seam_problem(k, b, f)
 }
 
