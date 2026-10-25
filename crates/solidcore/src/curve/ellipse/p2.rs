@@ -66,7 +66,8 @@
 //!   STEP interval are bounded: where upstream would loop forever (a shift that no
 //!   longer changes the midpoint, from STEP angles beyond about 2^61 (~2.3e18) degrees) or for more
 //!   than [`MAX_PERIOD_SHIFTS`] shifts, the set-up returns
-//!   [`SolidError::NotConverged`] with the converter left impossible.
+//!   [`SolidError::NotConverged`] with the converter left impossible and the saved
+//!   STEP interval restored, so the temporary full-circle domain does not leak.
 //! - **Notifications.** `SmBSplineCurve::SetFromGwNurb` and `Transform` send
 //!   `SM_NO_POST_EDIT`, whose `SmEllipse::Notify` override rebuilds the polar
 //!   converter (status ignored); the port calls [`Ellipse::set_up_polar_conversion`]
@@ -2110,6 +2111,7 @@ pub(crate) fn set_up_polar_conversion(
             let next_mid = this_mid - 360.0;
             shifts += 1;
             if next_mid == this_mid || shifts > MAX_PERIOD_SHIFTS {
+                e.set_step_interval(anal_ivl);
                 return Err(stuck());
             }
             lowest_deg -= 360.0;
@@ -2120,6 +2122,7 @@ pub(crate) fn set_up_polar_conversion(
             let next_mid = this_mid + 360.0;
             shifts += 1;
             if next_mid == this_mid || shifts > MAX_PERIOD_SHIFTS {
+                e.set_step_interval(anal_ivl);
                 return Err(stuck());
             }
             lowest_deg += 360.0;
@@ -2340,13 +2343,23 @@ mod tests {
             assert!(e.polar.is_polar_conversion_possible());
         }
         // Upstream never ends: adding a turn no longer changes the midpoint.
-        let mut e = arc(9.223_372_036_854_776e18);
-        let err = e.set_up_polar_conversion(&k).unwrap_err();
-        assert!(matches!(err, SolidError::NotConverged { .. }), "{err:?}");
-        assert!(!e.polar.is_polar_conversion_possible());
         // Representable shifts beyond the bound stop as well.
-        let mut e = arc(1e12);
-        assert!(e.set_up_polar_conversion(&k).is_err());
+        for start in [
+            9.223_372_036_854_776e18,
+            -9.223_372_036_854_776e18,
+            1e12,
+            -1e12,
+        ] {
+            let mut e = arc(start);
+            let original = e.step_interval();
+            for _ in 0..2 {
+                let err = e.set_up_polar_conversion(&k).unwrap_err();
+                assert!(matches!(err, SolidError::NotConverged { .. }), "{err:?}");
+                assert!(!e.polar.is_polar_conversion_possible());
+                assert_eq!(e.step_interval().min(), original.min());
+                assert_eq!(e.step_interval().max(), original.max());
+            }
+        }
     }
 
     #[test]
