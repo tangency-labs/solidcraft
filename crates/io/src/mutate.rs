@@ -525,6 +525,31 @@ outer
         survives("design JSON", &mutations(&json, true, 0xde6), usize::MAX, |b| crate::read_design(b).ok().map(|d| d.features.len()));
     }
 
+    /// A drawing, as a container and as plain JSON: every mutation gives an error or a drawing,
+    /// never a panic, and `file_kind` always answers.
+    #[test]
+    fn drawings_survive_mutation() {
+        use solidcraft_geom::drawing_sheet::{DrawingBorderProfile, Orientation, PaperSize, Sheet};
+        let mut ids = solidcraft_doc::ids::IdSource::seeded(0xd4a);
+        let a3 = Sheet::standard(PaperSize::A3, Orientation::Landscape);
+        let mut drawing = solidcraft_doc::drawing::Drawing::new("Fuzz", "en", "Sheet 1", a3, Some(DrawingBorderProfile::iso()), &mut ids).unwrap();
+        let id = drawing.allocate_id(&mut ids).unwrap();
+        drawing.sources.push(solidcraft_doc::drawing::Source { id, path: "plate.solidcraft".into() });
+        let container = crate::write_drawing_container(&drawing).unwrap();
+        assert!(crate::read_drawing(&container).is_ok());
+        survives("drawing container", &mutations(&container, false, 0xd4b), usize::MAX, |b| {
+            let _ = crate::file_kind(b);
+            let _ = crate::read_design(b);
+            crate::read_drawing(b).ok().map(|d| d.sheets.len())
+        });
+        let json = drawing.to_json().unwrap().into_bytes();
+        assert!(crate::read_drawing(&json).is_ok());
+        survives("drawing JSON", &mutations(&json, true, 0xd4c), usize::MAX, |b| {
+            let _ = crate::file_kind(b);
+            crate::read_drawing(b).ok().map(|d| d.sheets.len())
+        });
+    }
+
     /// Standard base64 (RFC 4648) of `bytes`, for a data URI.
     fn base64(bytes: &[u8]) -> String {
         const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
