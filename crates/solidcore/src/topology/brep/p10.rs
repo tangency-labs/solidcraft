@@ -92,7 +92,7 @@ use crate::math::{max2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::{self as qbrep, BoundingBoxOptions};
-use crate::query::face::p2::CurveOnClassifyObjects;
+use crate::query::face::p2::{CurveOnClassifyBrep, CurveOnClassifyObjects, FaceBrep};
 use crate::surface::surface::Surface;
 use crate::topology::brep::p1;
 use crate::topology::brep::p4;
@@ -1740,7 +1740,8 @@ fn create_parallel_projection_curves(
 /// `false`), curve `i` being [`IntersectObject::Curve`]`(i)` and its UV curve
 /// [`IntersectObject::UvCurve`]`(i, false)`. Upstream's `MergeIntervals` edits the B-rep
 /// through the classification's `SmFace*`, `SmEdge*` and `SmVertex*` pointers, so the
-/// adapter holds the B-rep mutably and hands the classification read-only views of it.
+/// adapter holds the B-rep mutably and hands the classification read-only views of it;
+/// `CurveOnClassify` classifies on that B-rep in place ([`CurveOnClassifyBrep`]).
 struct MergeCurvesWorld<'a, 'e> {
     b: &'a mut Brep,
     curves_3d: Vec<Curve>,
@@ -1864,10 +1865,19 @@ impl MergeIntervalBrep<IntersectObject> for MergeCurvesWorld<'_, '_> {
     }
 }
 
-impl crate::topology::brep::p2::MergeCurvesObjects<IntersectObject> for MergeCurvesWorld<'_, '_> {
+impl FaceBrep for MergeCurvesWorld<'_, '_> {
     fn brep(&self) -> &Brep {
         self.b
     }
+}
+
+impl CurveOnClassifyBrep<IntersectObject> for MergeCurvesWorld<'_, '_> {
+    fn brep_mut(&mut self) -> &mut Brep {
+        self.b
+    }
+}
+
+impl crate::topology::brep::p2::MergeCurvesObjects<IntersectObject> for MergeCurvesWorld<'_, '_> {
     fn edge_of(&self, object: IntersectObject) -> Option<EdgeId> {
         match object {
             IntersectObject::Topology(EntityRef::Edge(e), _) => Some(e),

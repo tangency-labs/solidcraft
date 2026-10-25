@@ -102,7 +102,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::{self as qbrep, BoundingBoxOptions};
 use crate::query::edge as qedge;
 use crate::query::face::p1 as qface1;
-use crate::query::face::p2::{curve_on_classify, CurveOnClassifyObjects};
+use crate::query::face::p2::{curve_on_classify_mut, CurveOnClassifyBrep};
 use crate::surface::surface::{Surface, SurfaceKind};
 use crate::surface::trim_srf_cache::TrimSrfCache;
 use crate::topology::brep::p1;
@@ -1944,10 +1944,8 @@ fn shell_transfer_children(k: &mut Kernel, b: &mut Brep, from: ShellId, to: Shel
 /// [`MergeIntervalBrep`]: the adapter holds the B-rep the curves merge into, which
 /// upstream's `MergeIntervals` edits through the classification's topology pointers.
 pub trait MergeCurvesObjects<O: ClassObject>:
-    CurveOnClassifyObjects<O> + MergeIntervalBrep<O>
+    CurveOnClassifyBrep<O> + MergeIntervalBrep<O>
 {
-    /// The B-rep the curves merge into (`this`).
-    fn brep(&self) -> &Brep;
     /// The edge behind an edge handle (an interval's `m_vMid.GetObject()`).
     fn edge_of(&self, object: O) -> Option<EdgeId>;
     /// The face behind a face handle (a new face of `MergeIntervals`).
@@ -1991,8 +1989,8 @@ pub struct MergedCurves {
 /// `uv_curves`, used on the first face only) lying on the surface of `face` into the
 /// face, splitting it (and the faces split off it) into new faces. Curves shorter than
 /// `tolerance` are skipped. Each curve is classified against each face
-/// ([`curve_on_classify`]), coincident-maybe intervals are squeezed, the intervals are
-/// merged into the B-rep `objects` holds ([`MergeCurvesObjects::brep`], edited through
+/// in place ([`curve_on_classify_mut`]), coincident-maybe intervals are squeezed, the
+/// intervals are merged into the B-rep `objects` holds ([`crate::query::face::p2::FaceBrep::brep`], edited through
 /// [`MergeIntervalBrep`]; a failed merge is ignored, as upstream \[B674\]) and the edges
 /// the curve classifies to are collected. The context's `DoingBoolean` flag is set for
 /// the duration.
@@ -2073,12 +2071,10 @@ fn merge_curves_body<O: ClassObject + Copy>(
             cc.set_intersect_data(surface, options.intersection_surface, None, true, None);
 
             // classify the curve against the surface->Face
-            let objs = &*objects;
-            let _modified = curve_on_classify(
+            let _modified = curve_on_classify_mut(
                 k,
-                objs.brep(),
                 f,
-                objs,
+                objects,
                 true,
                 &mut cc,
                 options.use_projection,

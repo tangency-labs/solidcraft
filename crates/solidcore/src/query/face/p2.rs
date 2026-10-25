@@ -30,9 +30,10 @@
 //!   `curve_on_classify_cached`, which run the same code on a private copy of the B-rep
 //!   (`SnapshotObjects` over `CurveOnClassifyCache`'s snapshot; the healer copies some of
 //!   its edits back). That entry goes once its last callers are converted: the stage 3 /
-//!   `ClassifyLoops` path, the `topology::face::p2` and `topology::brep::p10` adapters, the
-//!   leaf callers (sweep, `topology::brep::p7`, `topology::face::p1`, trimming tools), and
-//!   the boolean, proto-topology, `topology::face::p3` and fillet classifiers.
+//!   `ClassifyLoops` path, the `&Brep` face queries of `topology::face::p2`
+//!   (`CalculateAnInternalPoint`, `CreateCurvesByTrimming`), the leaf callers (sweep,
+//!   `topology::brep::p7`, `topology::face::p1`, trimming tools), and the boolean,
+//!   proto-topology, `topology::face::p3` and fillet classifiers.
 //! - **Object model.** The face is a record of a [`Brep`]; the functions take the
 //!   B-rep and the face's id. Classification objects are [`EntityRef`]s (the face, edge
 //!   or vertex). `SmFace::PointClassify`'s status is the result: `Ok(())` for

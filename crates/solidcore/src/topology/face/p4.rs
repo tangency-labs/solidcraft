@@ -415,10 +415,17 @@ fn face_classify_uv_line(
     end: Point2,
     tol: f64,
 ) -> Result<UvLineIntervals> {
-    let b: &Brep = b;
     let mut objects = UvLineObjects::new(b, f);
     let mut cc = CurveClassification::new(k);
-    crate::query::face::p3::face_classify_uv_line(k, b, f, &mut objects, start, end, tol, &mut cc)?;
+    crate::query::face::p3::face_classify_uv_line_mut(
+        k,
+        f,
+        &mut objects,
+        start,
+        end,
+        tol,
+        &mut cc,
+    )?;
     Ok(cc.intervals().to_vec())
 }
 

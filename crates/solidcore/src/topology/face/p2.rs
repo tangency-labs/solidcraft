@@ -130,6 +130,7 @@ use crate::geom::tol::{are_same, zone_tol3d};
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::intersect::curve_class::p1::{CurveClassification, CurveInterval};
 use crate::intersect::curve_class::p4::ClassificationInit;
+use crate::intersect::curve_class::p5::ClassGeometryMut;
 use crate::intersect::point_class::{ClassGeometry, ClassObject, ClassObjectKind, PointClassType};
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ};
@@ -139,7 +140,8 @@ use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
 use crate::nurbs::knots::Side;
 use crate::query::face::p2::{
-    curve_on_classify_cached, CurveOnClassifyCache, CurveOnClassifyObjects,
+    curve_on_classify_cached, curve_on_classify_mut, CurveOnClassifyBrep, CurveOnClassifyCache,
+    CurveOnClassifyObjects, FaceBrep,
 };
 use crate::query::face::p3 as qf3;
 use crate::surface::offset_surface::{OffsetSurface, SS_UNKNOWN};
@@ -412,17 +414,18 @@ impl ClassObject for UvLineHandle {
 
 /// The UV line `sm_FaceClassifyUVLine` made last (`sCurveClassification.GetCurve()`),
 /// and the face `f` of `b` whose objects the other handles name.
-pub(crate) struct UvLineObjects<'a> {
-    b: &'a Brep,
+pub(crate) struct UvLineObjects<B> {
+    b: B,
     f: FaceId,
     line: Option<Curve>,
     resolve_topology: bool,
 }
 
-impl<'a> UvLineObjects<'a> {
-    /// The objects of face `f` of `b`, before `sm_FaceClassifyUVLine` makes its line
-    /// (also used by `topology::face::p4`'s `GlobalLineIntersect`).
-    pub(crate) const fn new(b: &'a Brep, f: FaceId) -> Self {
+impl<B> UvLineObjects<B> {
+    /// The objects of face `f` of `b` (`&Brep`, or `&mut Brep` to classify in place),
+    /// before `sm_FaceClassifyUVLine` makes its line (also used by
+    /// `topology::face::p4`'s `GlobalLineIntersect`).
+    pub(crate) const fn new(b: B, f: FaceId) -> Self {
         Self {
             b,
             f,
@@ -432,18 +435,18 @@ impl<'a> UvLineObjects<'a> {
     }
 }
 
-impl ClassGeometry<UvLineHandle> for UvLineObjects<'_> {
+impl<B: FaceBrep> ClassGeometry<UvLineHandle> for UvLineObjects<B> {
     fn curve(&self, o: UvLineHandle) -> Option<&Curve> {
         match o {
             UvLineHandle::Line => self.line.as_ref(),
-            UvLineHandle::EdgeCurve(e) => self.b.edge(e).ok()?.curve.as_ref(),
-            UvLineHandle::Trim(eu) => eu1::uv_trim_curve(self.b, eu).ok()?.0,
+            UvLineHandle::EdgeCurve(e) => self.b.brep().edge(e).ok()?.curve.as_ref(),
+            UvLineHandle::Trim(eu) => eu1::uv_trim_curve(self.b.brep(), eu).ok()?.0,
             _ => None,
         }
     }
     fn surface(&self, o: UvLineHandle) -> Option<&Surface> {
         match o {
-            UvLineHandle::Surface => self.b.face(self.f).ok()?.surface.as_ref(),
+            UvLineHandle::Surface => self.b.brep().face(self.f).ok()?.surface.as_ref(),
             _ => None,
         }
     }
@@ -455,15 +458,15 @@ impl ClassGeometry<UvLineHandle> for UvLineObjects<'_> {
     }
     fn classification_vertex_point(&self, o: UvLineHandle) -> Option<Point3> {
         match o {
-            UvLineHandle::Vertex(v) => self.b.vertex(v).ok().map(|v| v.point),
+            UvLineHandle::Vertex(v) => self.b.brep().vertex(v).ok().map(|v| v.point),
             _ => None,
         }
     }
     fn topology_zone_tol_3d(&self, o: UvLineHandle) -> Option<f64> {
         match o {
-            UvLineHandle::Vertex(v) => self.b.vertex(v).ok().map(|v| v.tolerance),
-            UvLineHandle::Edge(e) => self.b.edge(e).ok().map(|e| e.tolerance),
-            UvLineHandle::Face => self.b.face(self.f).ok().map(|f| f.tolerance),
+            UvLineHandle::Vertex(v) => self.b.brep().vertex(v).ok().map(|v| v.tolerance),
+            UvLineHandle::Edge(e) => self.b.brep().edge(e).ok().map(|e| e.tolerance),
+            UvLineHandle::Face => self.b.brep().face(self.f).ok().map(|f| f.tolerance),
             _ => None,
         }
     }
@@ -482,7 +485,7 @@ impl ClassGeometry<UvLineHandle> for UvLineObjects<'_> {
             | UvLineHandle::EdgeCurve(_)
             | UvLineHandle::Trim(_) => return None,
         };
-        Some((self.b, e))
+        Some((self.b.brep(), e))
     }
     fn topology_handle(&self, e: EntityRef) -> Option<UvLineHandle> {
         if !self.resolve_topology {
@@ -499,7 +502,7 @@ impl ClassGeometry<UvLineHandle> for UvLineObjects<'_> {
     }
 }
 
-impl CurveOnClassifyObjects<UvLineHandle> for UvLineObjects<'_> {
+impl<B: FaceBrep> CurveOnClassifyObjects<UvLineHandle> for UvLineObjects<B> {
     fn face(&self, _f: FaceId) -> UvLineHandle {
         UvLineHandle::Face
     }
@@ -530,7 +533,7 @@ impl CurveOnClassifyObjects<UvLineHandle> for UvLineObjects<'_> {
     }
 }
 
-impl qf3::ClassifyCurveObjects<UvLineHandle> for UvLineObjects<'_> {
+impl<B: FaceBrep> qf3::ClassifyCurveObjects<UvLineHandle> for UvLineObjects<B> {
     fn set_classify_curves(
         &mut self,
         curve: Curve,
@@ -538,6 +541,29 @@ impl qf3::ClassifyCurveObjects<UvLineHandle> for UvLineObjects<'_> {
     ) -> Result<(UvLineHandle, Option<UvLineHandle>)> {
         self.line = Some(curve);
         Ok((UvLineHandle::Line, None))
+    }
+}
+
+impl ClassGeometryMut<UvLineHandle> for UvLineObjects<&mut Brep> {
+    fn curve_mut(&mut self, _o: UvLineHandle) -> Option<&mut Curve> {
+        // ClassifyFaceInterval does not edit the classified line
+        None
+    }
+    fn topology_entity_mut(&mut self, o: UvLineHandle) -> Option<(&mut Brep, EntityRef)> {
+        let (_, e) = self.topology_entity(o)?;
+        Some((&mut *self.b, e))
+    }
+}
+
+impl<B: FaceBrep> FaceBrep for UvLineObjects<B> {
+    fn brep(&self) -> &Brep {
+        self.b.brep()
+    }
+}
+
+impl CurveOnClassifyBrep<UvLineHandle> for UvLineObjects<&mut Brep> {
+    fn brep_mut(&mut self) -> &mut Brep {
+        self.b
     }
 }
 
@@ -586,15 +612,19 @@ impl ClassObject for ClassHandle {
     }
 }
 
-/// The objects behind the [`ClassHandle`]s of one `CurveOnClassify` call.
-struct FaceClassifyObjects<'c> {
+/// The objects behind the [`ClassHandle`]s of one `CurveOnClassify` call over the
+/// face's B-rep `B` (`&Brep` for the snapshot entry, `&mut Brep` to classify in place).
+struct FaceClassify<'c, B> {
     /// The B-rep of the face.
-    brep: &'c Brep,
+    brep: B,
     /// The classified curve.
     curve: &'c Curve,
 }
 
-impl CurveOnClassifyObjects<ClassHandle> for FaceClassifyObjects<'_> {
+/// [`FaceClassify`] over a shared B-rep (the `curve_on_classify_cached` snapshot entry).
+type FaceClassifyObjects<'c> = FaceClassify<'c, &'c Brep>;
+
+impl<B: FaceBrep> CurveOnClassifyObjects<ClassHandle> for FaceClassify<'_, B> {
     fn face(&self, f: FaceId) -> ClassHandle {
         ClassHandle::Face(f)
     }
@@ -603,6 +633,7 @@ impl CurveOnClassifyObjects<ClassHandle> for FaceClassifyObjects<'_> {
     }
     fn face_surface(&self, f: FaceId) -> Option<ClassHandle> {
         self.brep
+            .brep()
             .face(f)
             .ok()
             .and_then(|r| r.surface.as_ref())
@@ -631,32 +662,37 @@ impl CurveOnClassifyObjects<ClassHandle> for FaceClassifyObjects<'_> {
     }
 }
 
-impl ClassGeometry<ClassHandle> for FaceClassifyObjects<'_> {
+impl<B: FaceBrep> ClassGeometry<ClassHandle> for FaceClassify<'_, B> {
     fn classification_vertex_point(&self, o: ClassHandle) -> Option<Point3> {
         match o {
-            ClassHandle::Vertex(v) => self.brep.vertex(v).ok().map(|v| v.point),
+            ClassHandle::Vertex(v) => self.brep.brep().vertex(v).ok().map(|v| v.point),
             _ => None,
         }
     }
     fn topology_zone_tol_3d(&self, o: ClassHandle) -> Option<f64> {
         match o {
-            ClassHandle::Vertex(v) => self.brep.vertex(v).ok().map(|v| v.tolerance),
-            ClassHandle::Face(f) => self.brep.face(f).ok().map(|f| f.tolerance),
-            ClassHandle::Edge(e) => self.brep.edge(e).ok().map(|e| e.tolerance),
+            ClassHandle::Vertex(v) => self.brep.brep().vertex(v).ok().map(|v| v.tolerance),
+            ClassHandle::Face(f) => self.brep.brep().face(f).ok().map(|f| f.tolerance),
+            ClassHandle::Edge(e) => self.brep.brep().edge(e).ok().map(|e| e.tolerance),
             _ => None,
         }
     }
     fn curve(&self, o: ClassHandle) -> Option<&Curve> {
         match o {
             ClassHandle::Curve => Some(self.curve),
-            ClassHandle::EdgeCurve(e) => self.brep.edge(e).ok()?.curve.as_ref(),
-            ClassHandle::Trim(eu) => eu1::uv_trim_curve(self.brep, eu).ok()?.0,
+            ClassHandle::EdgeCurve(e) => self.brep.brep().edge(e).ok()?.curve.as_ref(),
+            ClassHandle::Trim(eu) => eu1::uv_trim_curve(self.brep.brep(), eu).ok()?.0,
             _ => None,
         }
     }
     fn surface(&self, o: ClassHandle) -> Option<&Surface> {
         match o {
-            ClassHandle::Surface(f) => self.brep.face(f).ok().and_then(|r| r.surface.as_ref()),
+            ClassHandle::Surface(f) => self
+                .brep
+                .brep()
+                .face(f)
+                .ok()
+                .and_then(|r| r.surface.as_ref()),
             _ => None,
         }
     }
@@ -680,7 +716,7 @@ impl ClassGeometry<ClassHandle> for FaceClassifyObjects<'_> {
             | ClassHandle::Trim(_)
             | ClassHandle::Curve => return None,
         };
-        Some((self.brep, e))
+        Some((self.brep.brep(), e))
     }
     fn topology_handle(&self, e: EntityRef) -> Option<ClassHandle> {
         match e {
@@ -693,6 +729,30 @@ impl ClassGeometry<ClassHandle> for FaceClassifyObjects<'_> {
             EntityRef::Vertexuse(vu) => Some(ClassHandle::Vertexuse(vu)),
             _ => None,
         }
+    }
+}
+
+impl ClassGeometryMut<ClassHandle> for FaceClassify<'_, &mut Brep> {
+    fn curve_mut(&mut self, _o: ClassHandle) -> Option<&mut Curve> {
+        // the classified curve is the caller's (read-only); ClassifyFaceInterval does
+        // not edit it
+        None
+    }
+    fn topology_entity_mut(&mut self, o: ClassHandle) -> Option<(&mut Brep, EntityRef)> {
+        let (_, e) = self.topology_entity(o)?;
+        Some((&mut *self.brep, e))
+    }
+}
+
+impl<B: FaceBrep> FaceBrep for FaceClassify<'_, B> {
+    fn brep(&self) -> &Brep {
+        self.brep.brep()
+    }
+}
+
+impl CurveOnClassifyBrep<ClassHandle> for FaceClassify<'_, &mut Brep> {
+    fn brep_mut(&mut self) -> &mut Brep {
+        self.brep
     }
 }
 
@@ -714,9 +774,10 @@ fn classify_curve_on_face(
     classify_curve_on_face_cached(k, b, f, curve, with_uv_curve, tol, data_size, &mut cache)
 }
 
-/// [`classify_curve_on_face`] on the caller's B-rep: the UV trim curves (with their
-/// edge tolerance growth) and gap caches the classification makes stay on `b`, as
-/// upstream's `const` `CurveOnClassify` leaves them.
+/// [`classify_curve_on_face`] on the caller's B-rep in place
+/// ([`curve_on_classify_mut`]): the UV trim curves (with their edge tolerance growth),
+/// gap caches and trimmed surface cache the classification makes stay on `b`, as
+/// upstream's `const` `CurveOnClassify` leaves them, also when it fails.
 fn classify_curve_on_face_in_place(
     k: &Kernel,
     b: &mut Brep,
@@ -725,11 +786,48 @@ fn classify_curve_on_face_in_place(
     with_uv_curve: bool,
     tol: f64,
 ) -> Result<Vec<CurveInterval<ClassHandle>>> {
-    let mut cache = CurveOnClassifyCache::default();
-    let intervals =
-        classify_curve_on_face_cached(k, b, f, curve, with_uv_curve, tol, 0, &mut cache);
-    cache.apply_uv_trim_updates(b)?;
-    intervals
+    let mut objects = FaceClassify { brep: b, curve };
+    let init = classification_init(k, &objects, f, curve, with_uv_curve, tol, 0);
+    let mut classification = CurveClassification::with_curve(k, &init)?;
+    // bHasBigGaps, bDoCheck3d: FALSE; bUVSpaceOkay: TRUE (the defaults)
+    curve_on_classify_mut(
+        k,
+        f,
+        &mut objects,
+        true,
+        &mut classification,
+        false,
+        false,
+        true,
+    )?;
+    Ok(classification.intervals().to_vec())
+}
+
+/// `SmCurveClassification(curve, curve->GetNaturalInterval(), uv_curve, tol, data_size,
+/// data, FALSE, TRUE, this->GetSurface())`.
+fn classification_init<B: FaceBrep>(
+    k: &Kernel,
+    objects: &FaceClassify<'_, B>,
+    f: FaceId,
+    curve: &Curve,
+    with_uv_curve: bool,
+    tol: f64,
+    data_size: usize,
+) -> ClassificationInit<ClassHandle> {
+    ClassificationInit {
+        curve: Some(ClassHandle::Curve),
+        interval: curve.natural_interval(),
+        uv_curve: with_uv_curve.then_some(ClassHandle::Curve),
+        src_zone_tol_3d: zone_tol3d(k, tol),
+        opt_data_size: data_size,
+        is_curve_owned: false,
+        is_curve_current: true,
+        // this->GetSurface()
+        surface1: CurveOnClassifyObjects::face_surface(objects, f),
+        surface2: None,
+        uv_curve2: None,
+        ti: None,
+    }
 }
 
 #[allow(clippy::too_many_arguments)] // upstream's constructor arguments
@@ -744,20 +842,7 @@ fn classify_curve_on_face_cached(
     cache: &mut CurveOnClassifyCache,
 ) -> Result<Vec<CurveInterval<ClassHandle>>> {
     let objects = FaceClassifyObjects { brep: b, curve };
-    let init = ClassificationInit {
-        curve: Some(ClassHandle::Curve),
-        interval: curve.natural_interval(),
-        uv_curve: with_uv_curve.then_some(ClassHandle::Curve),
-        src_zone_tol_3d: zone_tol3d(k, tol),
-        opt_data_size: data_size,
-        is_curve_owned: false,
-        is_curve_current: true,
-        // this->GetSurface()
-        surface1: CurveOnClassifyObjects::face_surface(&objects, f),
-        surface2: None,
-        uv_curve2: None,
-        ti: None,
-    };
+    let init = classification_init(k, &objects, f, curve, with_uv_curve, tol, data_size);
     let mut classification = CurveClassification::with_curve(k, &init)?;
     // bHasBigGaps, bDoCheck3d: FALSE; bUVSpaceOkay: TRUE (the defaults)
     curve_on_classify_cached(
@@ -775,9 +860,10 @@ fn classify_curve_on_face_cached(
     Ok(classification.intervals().to_vec())
 }
 
-/// Classifies an explicit edge interval for the B-rep coincidence validator.
-/// The existing curve-classification core keeps the caller's interval and its
-/// post-call trim/gap updates, including updates made before a failed status.
+/// Classifies an explicit edge interval for the B-rep coincidence validator, on the
+/// caller's B-rep in place ([`curve_on_classify_mut`]): the classification keeps the
+/// caller's interval, and the trim/gap updates it makes stay on `b`, including those
+/// made before a failed status.
 pub(crate) fn classify_interval_on_face(
     k: &Kernel,
     b: &mut Brep,
@@ -786,7 +872,7 @@ pub(crate) fn classify_interval_on_face(
     interval: Extent1d,
     tol: f64,
 ) -> Result<Vec<PointClassType>> {
-    let objects = FaceClassifyObjects { brep: b, curve };
+    let mut objects = FaceClassify { brep: b, curve };
     let init = ClassificationInit {
         curve: Some(ClassHandle::Curve),
         interval,
@@ -801,20 +887,16 @@ pub(crate) fn classify_interval_on_face(
         ti: None,
     };
     let mut classification = CurveClassification::with_curve(k, &init)?;
-    let mut cache = CurveOnClassifyCache::default();
-    let result = curve_on_classify_cached(
+    let result = curve_on_classify_mut(
         k,
-        b,
         f,
-        &objects,
+        &mut objects,
         true,
         &mut classification,
         false,
         false,
         true,
-        &mut cache,
     );
-    cache.apply_uv_trim_updates(b)?;
     if let Err(error) = result {
         if error.is_unported() {
             return Err(error);
