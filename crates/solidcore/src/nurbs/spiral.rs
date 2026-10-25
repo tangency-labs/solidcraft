@@ -41,6 +41,10 @@
 //!   [`allocate_nurb_volume`] returns a zero-filled volume (upstream `smos_Calloc`).
 //!   `sm_AllocateAndCopyNurbVolume` returns `NULL` for a volume without a control
 //!   mesh; a [`Volume`] always has one, so [`copy_nurb_volume`] always succeeds.
+//! - Caller-sized interpolation and volume arrays are capped at
+//!   [`crate::limits::MAX_ALLOC_BYTES`] per allocation, returning the existing
+//!   allocation error above the ceiling even if an overcommitting allocator would
+//!   accept the reservation.
 
 use std::f64::consts::TAU;
 
@@ -245,11 +249,12 @@ pub fn approx_spiral(spec: &SpiralSpec) -> Result<ApproxSpiral> {
         let count = usize::try_from(n_spans.saturating_add(1))
             .map_err(|_| SolidError::nlib(OP, NlibCode::Input))?;
         let mut pnts: Vec<Vec3> = Vec::new();
-        pnts.try_reserve_exact(count)
-            .map_err(|_| SolidError::InvalidInput {
+        if !crate::limits::try_reserve_total(&mut pnts, count) {
+            return Err(SolidError::InvalidInput {
                 operation: OP,
                 reason: "too many interpolation points",
-            })?;
+            });
+        }
         let d_theta = TWOPI * sp.turns / n_spans as f64;
 
         pnts.push(Vec3::new(sp.r0, 0.0, 0.0));
@@ -355,10 +360,7 @@ fn too_big() -> SolidError {
 }
 
 fn zeroed<T: Clone>(len: usize, v: T) -> Result<Vec<T>> {
-    let mut out = Vec::new();
-    out.try_reserve_exact(len).map_err(|_| too_big())?;
-    out.resize(len, v);
-    Ok(out)
+    crate::limits::try_filled(len, v).ok_or_else(too_big)
 }
 
 impl Volume {
@@ -563,6 +565,28 @@ mod tests {
             usize::try_from(CURVE_CPT_LIMIT - 6 + 2).unwrap()
         );
         assert!(r.num_points > CURVE_CPT_LIMIT - 6 + 1);
+    }
+
+    #[test]
+    fn volume_rejects_control_points_above_allocation_ceiling() {
+        const COUNT: usize = crate::limits::MAX_ALLOC_BYTES / size_of::<CPoint>() + 1;
+        assert_eq!(
+            allocate_nurb_volume([COUNT - 1, 0, 0], [0; 3], [0; 3]).unwrap_err(),
+            too_big()
+        );
+    }
+
+    #[test]
+    fn volume_rejects_knots_above_allocation_ceiling() {
+        const COUNT: usize = crate::limits::MAX_ALLOC_BYTES / size_of::<f64>() + 1;
+        for dir in 0..3 {
+            let mut knot_hi = [0; 3];
+            knot_hi[dir] = COUNT - 1;
+            assert_eq!(
+                allocate_nurb_volume([0; 3], [0; 3], knot_hi).unwrap_err(),
+                too_big()
+            );
+        }
     }
 
     #[test]
