@@ -37,6 +37,10 @@
 //! - `N_BasisDerivs` scales the derivatives by `p!/(p-k)!` in an `int`; where that
 //!   product overflows (signed overflow is undefined upstream) Rust returns
 //!   [`SolidError::InvalidInput`].
+//! - `basis_derivs` limits combined output/workspace storage (including row headers)
+//!   to 8 MiB before allocating, returning `NL_MEM_ERR` above that practical bound.
+//!   This keeps a single basis evaluation small even on wasm32; fallible reservation
+//!   alone cannot prevent memory-overcommit exhaustion when zero-filling huge orders.
 
 use std::collections::TryReserveError;
 
@@ -69,6 +73,25 @@ fn endless(operation: &'static str) -> SolidError {
 
 fn nlib(operation: &'static str, code: NlibCode) -> SolidError {
     SolidError::Nlib { operation, code }
+}
+
+/// Combined heap-storage ceiling for a single basis evaluation, not a degree limit.
+const BASIS_DERIVS_MAX_BYTES: usize = 8 * 1024 * 1024;
+
+/// Account for `nd`, square `ndu`, two rows of `a`, and `left`/`right` before
+/// any allocation. Native-sized row headers also bound metadata-heavy zero rows.
+fn check_derivs_allocation(rows: usize, w: usize, op: &'static str) -> Result<()> {
+    let bytes = w.checked_mul(size_of::<f64>()).and_then(|row_values| {
+        let row_bytes = row_values.checked_add(size_of::<Vec<f64>>())?;
+        let all_rows = rows.checked_add(w)?.checked_add(2)?;
+        all_rows
+            .checked_mul(row_bytes)?
+            .checked_add(row_values.checked_mul(2)?)
+    });
+    match bytes {
+        Some(bytes) if bytes <= BASIS_DERIVS_MAX_BYTES => Ok(()),
+        _ => Err(nlib(op, NlibCode::Memory)),
+    }
 }
 
 /// A zero `rows x w` array (upstream `N_AllocReal2dArray(rows - 1, w - 1)`).
@@ -608,7 +631,9 @@ pub struct BasisDerivs {
 ///
 /// [`NlibCode::Numerical`] when a knot difference is below `1e-24` (more than
 /// `p + 1` equal knots); [`NlibCode::Memory`] when the `(der + 1) x (p + 1)` or
-/// `(p + 1) x (p + 1)` arrays cannot be allocated; errors of
+/// `(p + 1) x (p + 1)` arrays cannot be allocated, their sizes overflow, or combined
+/// output/workspace storage (values and row headers) exceeds the practical 8 MiB
+/// budget, even if the allocator could reserve it; errors of
 /// [`KnotVector::find_span`]; `InvalidInput` where upstream would index out of bounds
 /// or overflow its `int` derivative factor.
 #[allow(clippy::too_many_lines)] // one upstream routine, kept in its original shape
@@ -632,14 +657,17 @@ pub fn basis_derivs(
 
     // Get maximum derivative index; rows above p stay zero.
     let mder = sgn(p.min(der), OP)?;
-    let rows = der.checked_add(1).ok_or_else(|| out_of_range(OP))?;
+    let rows = der
+        .checked_add(1)
+        .ok_or_else(|| nlib(OP, NlibCode::Memory))?;
     let w = p.checked_add(1).ok_or_else(|| out_of_range(OP))?;
+    check_derivs_allocation(rows, w, OP)?;
     let mut nd = zeros2(rows, w, OP)?;
 
-    let mut left = vec![0.0; w];
-    let mut right = vec![0.0; w];
+    let mut left = crate::limits::try_filled(w, 0.0).ok_or_else(|| nlib(OP, NlibCode::Memory))?;
+    let mut right = crate::limits::try_filled(w, 0.0).ok_or_else(|| nlib(OP, NlibCode::Memory))?;
     let mut ndu = zeros2(w, w, OP)?;
-    let mut a = vec![vec![0.0; w]; 2];
+    let mut a = zeros2(2, w, OP)?;
 
     // Compute the basis functions.
     wr2(&mut ndu, 0, 0, 1.0, OP)?;
@@ -905,6 +933,77 @@ mod tests {
                 ),
                 "der = {der}"
             );
+        }
+    }
+
+    #[test]
+    fn derivs_representable_order_and_square_workspace_are_bounded() {
+        let cubic = [0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0];
+        // Previously each reservation could succeed under overcommit (>100 GiB).
+        assert!(matches!(
+            basis_derivs(&kv(&cubic), 3, 0.5, Side::Left, 2_147_483_648),
+            Err(SolidError::Nlib {
+                code: NlibCode::Memory,
+                ..
+            })
+        ));
+        assert!(matches!(
+            basis_derivs(&kv(&cubic), 3, 0.5, Side::Left, usize::MAX),
+            Err(SolidError::Nlib {
+                code: NlibCode::Memory,
+                ..
+            })
+        ));
+        let mut square = vec![0.0; 1024];
+        square.extend(vec![1.0; 1024]);
+        // A tiny output does not excuse the square workspace from the budget.
+        assert!(matches!(
+            basis_derivs(&kv(&square), 1023, 0.5, Side::Left, 0),
+            Err(SolidError::Nlib {
+                code: NlibCode::Memory,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn derivs_budget_includes_metadata_and_all_workspace_at_boundary() {
+        let row = size_of::<f64>() + size_of::<Vec<f64>>();
+        let workspace = 3 * row + 2 * size_of::<f64>();
+        let max_rows = (BASIS_DERIVS_MAX_BYTES - workspace) / row;
+        assert!(check_derivs_allocation(max_rows, 1, "test").is_ok());
+        for (rows, w) in [
+            (max_rows + 1, 1),
+            (BASIS_DERIVS_MAX_BYTES / size_of::<f64>(), 1),
+            (1, 1024),
+            (usize::MAX, 1),
+            (1, usize::MAX),
+            (usize::MAX / 2, 2),
+        ] {
+            assert!(
+                matches!(
+                    check_derivs_allocation(rows, w, "test"),
+                    Err(SolidError::Nlib {
+                        code: NlibCode::Memory,
+                        ..
+                    })
+                ),
+                "rows={rows}, w={w}"
+            );
+        }
+    }
+
+    #[test]
+    fn derivs_bounded_high_orders_preserve_full_output_shape() {
+        for (knots, p) in [
+            (&[0.0, 1.0][..], 0),
+            (&[0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0][..], 3),
+        ] {
+            let b = basis_derivs(&kv(knots), p, 0.5, Side::Left, 4096).unwrap();
+            assert_eq!(b.derivs.len(), 4097);
+            assert!(b.derivs.iter().all(|row| row.len() == p + 1));
+            assert!(b.derivs.iter().skip(p + 1).flatten().all(|&v| v == 0.0));
+            assert_eq!(b.derivs[0].iter().sum::<f64>(), 1.0);
         }
     }
 
