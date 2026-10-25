@@ -106,3 +106,9 @@ checked against the captured expected revision, connection and project. `/1`
 receipts remain readable; readers supporting only `/1` request an upgrade before
 using `/2`. This is local acknowledgement metadata; the Git snapshot envelope and
 queued revision identities remain unchanged.
+
+Local cache records may carry an optional `outdated` boolean (default `false`). It
+records an observed mismatch with the repository and is updated only if the cached
+head still matches the observed revision, document and manifest. It survives restarts
+and failed pulls; a verified replacement clears it. This is device-local recovery
+metadata and is never written into the shared repository format.

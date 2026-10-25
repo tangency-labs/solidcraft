@@ -268,6 +268,36 @@ fn offline_children_update_the_parents_conflict_copy_and_retries_do_not_commit_a
 }
 
 #[test]
+fn listing_observes_outdated_cached_heads_without_downloading_source_assets() {
+    run_test(async {
+        let repository = repository();
+        let (api, connection) = adapter(repository.clone());
+        let initial = stage(&connection, b"first", None);
+        let published = api.publish(&initial.record, || recover(&initial), |_| Ok(())).await.unwrap();
+        let cached = crate::CachedEntry::new(initial.record.clone(), published.destination.clone(), Some(published.revision), true).unwrap();
+        let mut catalog = crate::stored_designs(vec![cached], vec![]).unwrap();
+        assert_eq!(api.list_with_status(&mut catalog).await.unwrap(), vec![published.destination]);
+        assert!(!catalog[0].outdated);
+        let changed = stage(&connection, b"second", Some(initial.record.id));
+        api.publish(&changed.record, || recover(&changed), |_| Ok(())).await.unwrap();
+        repository.lock().unwrap().requests.clear();
+        api.list_with_status(&mut catalog).await.unwrap();
+        assert!(catalog[0].outdated);
+        assert_eq!(catalog[0].phase, crate::jobs::Phase::Ready);
+        let repo = repository.lock().unwrap();
+        let source_hashes: std::collections::BTreeSet<_> = changed
+            .record
+            .manifest
+            .assets
+            .values()
+            .flat_map(|a| a.chunks.iter())
+            .map(|c| blob_hash(&changed.objects[&c.path().unwrap()], 40).unwrap())
+            .collect();
+        assert!(repo.requests.iter().all(|(_, path, _)| !source_hashes.iter().any(|hash| path.ends_with(hash))), "listing fetches metadata only");
+    });
+}
+
+#[test]
 fn previews_fetch_only_the_image_and_optional_corruption_does_not_block_opening() {
     run_test(async {
         let repository = repository();

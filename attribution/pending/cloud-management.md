@@ -1,0 +1,1 @@
+| assets/locales/pending/cloud-management.json | SolidCraft contributors | original Cloud Saves management and multiple-repository interface translations for all supported languages | MIT OR Apache-2.0 |

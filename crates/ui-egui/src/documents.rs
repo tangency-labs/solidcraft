@@ -1215,10 +1215,23 @@ const TAB_MENU: [crate::app_bar::TabMenuRow<'static>; 3] = [
 pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
     let info = tabs_info(app);
     let paths = tab_paths(app);
+    let cloud: Vec<_> = (0..info.len())
+        .map(|index| {
+            let session = app.docs.slots.get(index).and_then(Option::as_ref).map_or(&app.session, |slot| &slot.session);
+            crate::cloud_browser::tabs::indicator(app, session)
+        })
+        .collect();
     let n = info.len();
     let locale = solidcraft_ui_text::Locale::for_language(&app.preferences.language);
     let names: Vec<String> = info.iter().map(|(name, _)| locale.given_name(name)).collect();
-    let places: Vec<String> = info.iter().zip(&paths).map(|((_, dirty), path)| tab_place(path.as_deref(), *dirty)).collect();
+    let places: Vec<String> = info
+        .iter()
+        .zip(&paths)
+        .enumerate()
+        .map(|(index, ((_, dirty), path))| {
+            cloud.get(index).and_then(Option::as_ref).map_or_else(|| tab_place(path.as_deref(), *dirty), |indicator| indicator.tooltip.clone())
+        })
+        .collect();
     let selected = if app.docs.slots.is_empty() { 0 } else { app.docs.active };
     let mut rename = app.menu.rename.take();
     let renaming = renaming_tab_state(rename.as_ref());
@@ -1229,7 +1242,14 @@ pub fn tabs(app: &mut SolveApp, ui: &mut egui::Ui, r: Rect, x0: f32, x1: f32) {
                 .iter()
                 .zip(&names)
                 .zip(&places)
-                .map(|(((list_name, dirty), name), place)| crate::app_bar::DocTab { name, list_name, dirty: *dirty, place })
+                .enumerate()
+                .map(|(index, (((list_name, dirty), name), place))| crate::app_bar::DocTab {
+                    name,
+                    list_name,
+                    dirty: *dirty,
+                    place,
+                    status: cloud.get(index).and_then(Option::as_ref).map(|indicator| indicator.status),
+                })
                 .collect(),
             selected,
             shown_selected: (!app.home.open).then_some(selected),

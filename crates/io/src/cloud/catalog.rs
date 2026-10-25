@@ -203,9 +203,27 @@ impl LocalOutbox {
         self.remove_pending(save)
     }
 
+    pub(super) fn mark_outdated(&self, connection: &Connection, observed: &solidcraft_cloud::StoredDesign) -> Result<()> {
+        let _lock = self.process_lock("catalog.lock", "this connection's catalog is being updated; saved copies are retained")?;
+        if let Some(mut current) = self.cached(connection, &observed.destination)?
+            && current.mark_outdated(observed)?
+        {
+            crate::safe_write::write_atomic(&self.path(&cache_path(&observed.destination)?)?, current.write()?.as_bytes(), false).map_err(storage)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn cache_synchronized_checkout(&self, connection: &Connection, destination: &Destination, snapshot: &Snapshot) -> Result<()> {
+        self.cache_snapshot(connection, destination, snapshot, true)
+    }
+
     /// Retain a verified checkout snapshot without queuing it or inventing a publication.
     /// The caller holds the checkout lock across its read and this cache update.
     pub(super) fn cache_checkout(&self, connection: &Connection, destination: &Destination, snapshot: &Snapshot) -> Result<()> {
+        self.cache_snapshot(connection, destination, snapshot, false)
+    }
+
+    fn cache_snapshot(&self, connection: &Connection, destination: &Destination, snapshot: &Snapshot, synchronized: bool) -> Result<()> {
         let revision = solidcraft_cloud::revision(&snapshot.manifest).map(str::to_owned);
         let save = PendingSave::describe(connection, &destination.project, &destination.file, revision.clone(), snapshot.manifest.clone())?;
         super::check_document(&snapshot.document)?;
@@ -228,14 +246,16 @@ impl LocalOutbox {
                 return Ok(());
             }
         }
-        let confirmed = match &current {
-            Some(c) => {
-                c.confirmed
-                    && c.revision == revision
-                    && solidcraft_cloud::manifest_digest(&c.save.manifest)? == solidcraft_cloud::manifest_digest(&save.manifest)?
-            }
-            None => false,
-        };
+        let confirmed = synchronized
+            || match &current {
+                Some(c) => {
+                    c.confirmed
+                        && !c.outdated
+                        && c.revision == revision
+                        && solidcraft_cloud::manifest_digest(&c.save.manifest)? == solidcraft_cloud::manifest_digest(&save.manifest)?
+                }
+                None => false,
+            };
         for (path, bytes) in &snapshot.objects {
             self.store(path, bytes)?;
         }

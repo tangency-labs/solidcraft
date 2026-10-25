@@ -146,6 +146,12 @@ pub struct Review<'a, A> {
 
 /// Draw the page; the entry chosen this frame, if any.
 pub fn show<A>(ui: &mut egui::Ui, page: Page<'_, A>) -> Option<A> {
+    show_with_start_extension(ui, page, |_| {})
+}
+
+/// Draw a host section between the Start action tiles and recent files. Other page bodies
+/// keep their ordinary layout and do not call the extension.
+pub fn show_with_start_extension<A>(ui: &mut egui::Ui, page: Page<'_, A>, mut extension: impl FnMut(&mut egui::Ui)) -> Option<A> {
     let t = Tokens::get();
     let Page { id, name, interactive, back, rail, title, hint, error, body } = page;
     let mut chosen = None;
@@ -172,7 +178,7 @@ pub fn show<A>(ui: &mut egui::Ui, page: Page<'_, A>) -> Option<A> {
                     });
                 });
                 if let Some(body) = body.take() {
-                    content(ui, id, (title.as_ref(), hint.as_ref(), error.as_deref()), body, true, &mut chosen);
+                    content(ui, id, (title.as_ref(), hint.as_ref(), error.as_deref()), body, true, &mut chosen, &mut extension);
                 }
             } else {
                 let rail_rect = egui::Rect::from_min_size(full.min, vec2(t.file_nav_width, full.height()));
@@ -186,7 +192,7 @@ pub fn show<A>(ui: &mut egui::Ui, page: Page<'_, A>) -> Option<A> {
                 let body_rect = egui::Rect::from_min_max(egui::pos2(rail_rect.right(), full.top()), full.max);
                 ui.scope_builder(egui::UiBuilder::new().max_rect(body_rect), |ui| {
                     if let Some(body) = body.take() {
-                        content(ui, id, (title.as_ref(), hint.as_ref(), error.as_deref()), body, false, &mut chosen);
+                        content(ui, id, (title.as_ref(), hint.as_ref(), error.as_deref()), body, false, &mut chosen, &mut extension);
                     }
                 });
             }
@@ -221,7 +227,15 @@ fn publish(id: &str, response: &egui::Response) {
     solidcraft_ui_registry::publish_rect(id, response.rect);
 }
 
-fn content<A>(ui: &mut egui::Ui, id: &str, heading: (&str, &str, Option<&str>), body: Body<'_, A>, narrow: bool, chosen: &mut Option<A>) {
+fn content<A>(
+    ui: &mut egui::Ui,
+    id: &str,
+    heading: (&str, &str, Option<&str>),
+    body: Body<'_, A>,
+    narrow: bool,
+    chosen: &mut Option<A>,
+    extension: &mut dyn FnMut(&mut egui::Ui),
+) {
     let t = Tokens::get();
     let (title, hint, error) = heading;
     let mut body = Some(body);
@@ -236,7 +250,7 @@ fn content<A>(ui: &mut egui::Ui, id: &str, heading: (&str, &str, Option<&str>), 
                 crate::text(ui, message, crate::Text::Error(&format!("{id}_status")));
             }
             match body.take() {
-                Some(Body::Start(start)) => start_content(ui, id, *start, chosen),
+                Some(Body::Start(start)) => start_content(ui, id, *start, chosen, extension),
                 Some(Body::Tiles(tiles)) => tile_grid(ui, tiles, chosen),
                 Some(Body::Reviews(reviews)) => review_list(ui, id, reviews, chosen),
                 None => {}
@@ -258,7 +272,7 @@ fn tile_grid<A>(ui: &mut egui::Ui, tiles: Tiles<'_, A>, chosen: &mut Option<A>) 
     });
 }
 
-fn start_content<A>(ui: &mut egui::Ui, id: &str, start: Start<'_, A>, chosen: &mut Option<A>) {
+fn start_content<A>(ui: &mut egui::Ui, id: &str, start: Start<'_, A>, chosen: &mut Option<A>, extension: &mut dyn FnMut(&mut egui::Ui)) {
     let t = Tokens::get();
     let Start { banner, actions_title, actions, recent_title, recent_empty, recent, samples_title, samples } = start;
     if let Some(banner) = banner {
@@ -286,6 +300,7 @@ fn start_content<A>(ui: &mut egui::Ui, id: &str, start: Start<'_, A>, chosen: &m
     }
     FileView::section(ui, &actions_title, t.space_12, |ui| tile_grid(ui, actions, chosen));
     ui.add_space(t.file_section_gap);
+    extension(ui);
     FileView::section(ui, &recent_title, t.space_10, |ui| {
         if recent.is_empty() {
             FileView::detail(ui, &recent_empty);

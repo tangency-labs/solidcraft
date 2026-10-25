@@ -82,6 +82,11 @@ pub(super) fn image(app: &SolveApp, destination: &Destination) -> Option<(egui::
     let texture = app.cloud.browser.previews.entries.get(&key(destination)?)?.texture.as_ref()?;
     Some((texture.id(), texture.size_vec2()))
 }
+pub(super) fn failed(app: &SolveApp, destination: &Destination) -> bool {
+    key(destination)
+        .and_then(|key| app.cloud.browser.previews.entries.get(&key))
+        .is_some_and(|entry| entry.pending.is_none() && entry.image.is_none() && entry.texture.is_none())
+}
 pub(super) fn touch(app: &mut SolveApp, destination: Destination) {
     let Some(key) = key(&destination) else { return };
     let Some(connection) = app.session.cloud_settings().connection(&destination.connection).cloned() else { return };

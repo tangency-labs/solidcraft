@@ -1149,6 +1149,29 @@ pub const ELEMENTS: &[Element] = &[
             },
         );
     }),
+    element!("file_status", |ui, _| {
+        FileView::recent_list(ui, |ui| {
+            for (index, (label, tone)) in
+                [("Pushing", FileStatusTone::Pending), ("Outdated", FileStatusTone::Attention), ("Synced", FileStatusTone::Current)]
+                    .into_iter()
+                    .enumerate()
+            {
+                FileView::recent_row_with_status(
+                    ui,
+                    &format!("gallery:file:status:{index}"),
+                    RecentRow {
+                        title: "Cloud bracket",
+                        path: "Workshop/parts/bracket",
+                        when: "",
+                        workspace: "Design",
+                        thumbnail: None,
+                        thumbnail_failed: false,
+                    },
+                    FileStatus { label, tone, pulse: tone != FileStatusTone::Current },
+                );
+            }
+        });
+    }),
     element!("file_control_row", |ui, state| {
         FileView::control_row(ui, |ui| {
             button(ui, "Save", Button::Normal);
@@ -1998,6 +2021,21 @@ pub const ELEMENTS: &[Element] = &[
             button(ui, "Replace", Button::DangerOutlined);
         });
     }),
+    element!("busy_button", "dialog:row:Gallery", Some("dialog:button:Gallery:Synchronize"), |ui, _| {
+        row(ui, "Gallery", |ui| {
+            busy_button(ui, "Synchronize", "send", true, false);
+        });
+    }),
+    element!("busy_button_loading", "dialog:row:Gallery", Some("dialog:button:Gallery:Synchronize"), |ui, _| {
+        row(ui, "Gallery", |ui| {
+            busy_button(ui, "Synchronize", "send", true, true);
+        });
+    }),
+    element!("busy_button_disabled", "dialog:row:Gallery", Some("dialog:button:Gallery:Synchronize"), |ui, _| {
+        row(ui, "Gallery", |ui| {
+            busy_button(ui, "Synchronize", "send", false, false);
+        });
+    }),
     element!("button_at", |ui, _| {
         let t = Tokens::get();
         let (rect, _) = ui.allocate_exact_size(vec2(t.space_24 * 5.0, t.file_action_height), egui::Sense::hover());
@@ -2751,4 +2789,76 @@ fn preference_widgets_and_figures_board_in_both_themes() {
         }
     }
     solidcraft_theme::set_dark(previous);
+}
+
+#[test]
+fn file_status_dots_fade_without_moving_rows_or_labels() {
+    for dark in [false, true] {
+        solidcraft_theme::set_dark(dark);
+        for (tone, pulse) in [(FileStatusTone::Pending, true), (FileStatusTone::Attention, true), (FileStatusTone::Current, false)] {
+            let ctx = crate::test_support::context();
+            solidcraft_theme::apply(&ctx);
+            let mut colors = Vec::new();
+            let mut positions = Vec::new();
+            for time in [0.0, 1.0, 2.0] {
+                let mut output = ctx.run_ui(egui::RawInput { time: Some(time), ..Default::default() }, |ui| {
+                    ui.add_enabled_ui(tone != FileStatusTone::Attention, |ui| {
+                        FileView::recent_row_with_status(
+                            ui,
+                            "pulse",
+                            RecentRow {
+                                title: "Bracket",
+                                path: "Workshop/parts/bracket",
+                                when: "",
+                                workspace: "Design",
+                                thumbnail: None,
+                                thumbnail_failed: false,
+                            },
+                            FileStatus { label: "Status", tone, pulse },
+                        );
+                    });
+                });
+                output.textures_delta.clear();
+                let dot = solidcraft_ui_registry::rect_of("pulse:status-dot").unwrap();
+                let color = output
+                    .shapes
+                    .iter()
+                    .find_map(|s| match &s.shape {
+                        egui::Shape::Circle(c) if c.center == dot.center() => Some(c.fill),
+                        _ => None,
+                    })
+                    .unwrap();
+                colors.push(color);
+                positions.push(solidcraft_ui_registry::rect_of("pulse:status").unwrap());
+            }
+            assert_eq!(positions[0], positions[1]);
+            assert_eq!(positions[1], positions[2]);
+            assert_eq!(colors[0], colors[2], "the fade repeats smoothly");
+            if pulse {
+                assert!(colors[1].a() < colors[0].a() / 2, "pending and disabled outdated dots fade");
+            } else {
+                assert_eq!(colors[0], colors[1], "synced stays steady");
+            }
+            ctx.global_style_mut(|style| style.animation_time = 0.0);
+            let mut output = ctx.run_ui(egui::RawInput { time: Some(3.0), ..Default::default() }, |ui| {
+                FileView::recent_row_with_status(
+                    ui,
+                    "still",
+                    RecentRow {
+                        title: "Bracket",
+                        path: "Workshop/parts/bracket",
+                        when: "",
+                        workspace: "Design",
+                        thumbnail: None,
+                        thumbnail_failed: false,
+                    },
+                    FileStatus { label: "Status", tone, pulse },
+                );
+            });
+            output.textures_delta.clear();
+            let dot = solidcraft_ui_registry::rect_of("still:status-dot").unwrap();
+            assert!(output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Circle(c) if c.center == dot.center() && c.fill == tone.color())));
+            ctx.global_style_mut(|style| style.animation_time = 0.15);
+        }
+    }
 }

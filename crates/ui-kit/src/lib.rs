@@ -103,7 +103,7 @@ pub use drag::*;
 pub use fields::*;
 pub use fields::{Expressions, cell_editor, install_expressions, wide_cell_editor};
 pub use file_view::Icon;
-pub use file_view::{FileView, RecentRow, RecoveryMessage, SampleCard};
+pub use file_view::{FileStatus, FileStatusTone, FileView, RecentRow, RecoveryMessage, SampleCard};
 pub use framing::*;
 pub use history::*;
 pub use history_group::*;
