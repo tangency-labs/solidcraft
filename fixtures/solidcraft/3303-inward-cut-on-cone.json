@@ -1,0 +1,358 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/3303",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/3309",
+ "test": "crates/kernel/src/frustum_cut_tests.rs: inward_face_cut_trims_the_cone_at_its_exact_depth (PR is a draft, kernel-paused, not merged)",
+ "summary": "An inward extrude cut of -4.4 mm on the circular top face of a widening conical frustum (SolidCraft's tapered extrude of a radius 1 circle, height 10, taper atan(0.4) = 21.8014 deg, so radius 1 + 0.4*z, 5 at the top) failed: 'not supported yet: the exact fallback for where the bodies meet ... takes planar faces only, and the target has 2 curved faces (cone) and the tool has 2 curved faces (cylinder)'. The cutting cylinder (radius 5, the top face's) touches the cone only along the top rim circle and shares the top face's plane. Geometry is the PR test's (frustum on the z axis; the issue's body sat at x = -6.769, y = 15.405), the frustum built here by revolving its (z, r) section about z, with the PR test's three cutters plus radius 5.1 (clear of the rim) and 4.9 (across it) as controls. Volumes are integrals of the disc area pi*(1 + 0.4*z)^2 over the retained heights, cross-checked by a 2500 x 2500 midpoint grid in (r, z) weighted by 2*pi*r (within 1e-5 mm^3, 5e-4 for the thin ring) and by Gauss-Legendre quadrature (exact). The tolerance is 0.01 mm^3, as in the other boolean cases.",
+ "cases": [
+  {
+   "name": "cut_to_depth_touching_rim",
+   "note": "#3303: the face cut of -4.4 mm as the issue made it, a cylinder of radius 5 from z = 5.6 to the top face z = 10. Its wall touches the cone only along the top rim circle (r = 5, z = 10) and its top cap lies in the frustum's top face.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "frustum",
+     "plane": "zx",
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0.0,
+         0.0
+        ],
+        [
+         10.0,
+         0.0
+        ],
+        [
+         10.0,
+         5.0
+        ],
+        [
+         0.0,
+         1.0
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "tool",
+     "origin": [
+      0.0,
+      0.0,
+      5.6
+     ],
+     "radius": 5.0,
+     "height": 4.4
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "frustum",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 86.42580033088386,
+     "tol": 0.01,
+     "formula": "V(5.6) = pi*5.6*(1^2 + 1*3.24 + 3.24^2)/3 (frustum of height 5.6, radii 1 and 3.24), V(z) = int_0^z pi*(1 + 0.4*t)^2 dt = pi*(z + 0.4*z^2 + 0.16*z^3/3)"
+    }
+   }
+  },
+  {
+   "name": "cut_past_top_touching_rim",
+   "note": "The PR test's second cutter: the same cylinder run 0.1 past the top (z = 5.6 to 10.1), so the caps no longer share a plane but the wall still touches the rim circle.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "frustum",
+     "plane": "zx",
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0.0,
+         0.0
+        ],
+        [
+         10.0,
+         0.0
+        ],
+        [
+         10.0,
+         5.0
+        ],
+        [
+         0.0,
+         1.0
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "tool",
+     "origin": [
+      0.0,
+      0.0,
+      5.6
+     ],
+     "radius": 5.0,
+     "height": 4.5
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "frustum",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 86.42580033088386,
+     "tol": 0.01,
+     "formula": "V(5.6) = pi*5.6*(1^2 + 1*3.24 + 3.24^2)/3, V(z) = int_0^z pi*(1 + 0.4*t)^2 dt = pi*(z + 0.4*z^2 + 0.16*z^3/3)"
+    }
+   }
+  },
+  {
+   "name": "interior_band_cut",
+   "note": "The PR test's third cutter: radius 5 from z = 2 to 8, clear of the cone everywhere (the cone reaches r = 5 only at z = 10), so the band is removed and two frustums remain.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "frustum",
+     "plane": "zx",
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0.0,
+         0.0
+        ],
+        [
+         10.0,
+         0.0
+        ],
+        [
+         10.0,
+         5.0
+        ],
+        [
+         0.0,
+         1.0
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "tool",
+     "origin": [
+      0.0,
+      0.0,
+      2.0
+     ],
+     "radius": 5.0,
+     "height": 6.0
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "frustum",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 2,
+    "volume": {
+     "value": 145.93745073475785,
+     "tol": 0.01,
+     "formula": "V(2) + V(10) - V(8), V(z) = int_0^z pi*(1 + 0.4*t)^2 dt = pi*(z + 0.4*z^2 + 0.16*z^3/3)"
+    }
+   }
+  },
+  {
+   "name": "control_clear_of_rim",
+   "note": "Control: the cutter of cut_past_top_touching_rim with radius 5.1, clear of the rim by 0.1 mm. Same result.",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "frustum",
+     "plane": "zx",
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0.0,
+         0.0
+        ],
+        [
+         10.0,
+         0.0
+        ],
+        [
+         10.0,
+         5.0
+        ],
+        [
+         0.0,
+         1.0
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "tool",
+     "origin": [
+      0.0,
+      0.0,
+      5.6
+     ],
+     "radius": 5.1,
+     "height": 4.5
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "frustum",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 86.42580033088386,
+     "tol": 0.01,
+     "formula": "V(5.6) = pi*5.6*(1^2 + 1*3.24 + 3.24^2)/3, V(z) = int_0^z pi*(1 + 0.4*t)^2 dt = pi*(z + 0.4*z^2 + 0.16*z^3/3)"
+    }
+   }
+  },
+  {
+   "name": "control_across_rim",
+   "note": "Control: radius 4.9. The wall crosses the cone at z = (4.9 - 1)/0.4 = 9.75, leaving the lower frustum and a separate thin ring outside r = 4.9 between z = 9.75 and 10 (triangular section, legs 0.25 in z and 0.1 in r).",
+   "steps": [
+    {
+     "op": "revolve",
+     "id": "frustum",
+     "plane": "zx",
+     "axis_point": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "axis_dir": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "angle_deg": 360.0,
+     "profile": [
+      {
+       "kind": "polygon",
+       "points": [
+        [
+         0.0,
+         0.0
+        ],
+        [
+         10.0,
+         0.0
+        ],
+        [
+         10.0,
+         5.0
+        ],
+        [
+         0.0,
+         1.0
+        ]
+       ]
+      }
+     ]
+    },
+    {
+     "op": "cylinder",
+     "id": "tool",
+     "origin": [
+      0.0,
+      0.0,
+      5.6
+     ],
+     "radius": 4.9,
+     "height": 4.5
+    },
+    {
+     "op": "difference",
+     "id": "result",
+     "a": "frustum",
+     "b": "tool"
+    }
+   ],
+   "expect": {
+    "lumps": 2,
+    "volume": {
+     "value": 86.81326342482659,
+     "tol": 0.01,
+     "formula": "V(5.6) + ring, ring = V(10) - V(9.75) - pi*4.9^2*0.25 = 2*pi*(4.9 + 0.1/3)*(0.25*0.1/2) (Pappus) = 0.3874630939, V(z) = int_0^z pi*(1 + 0.4*t)^2 dt = pi*(z + 0.4*z^2 + 0.16*z^3/3)"
+    }
+   }
+  }
+ ]
+}
