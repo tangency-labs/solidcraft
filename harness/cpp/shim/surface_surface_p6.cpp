@@ -22,6 +22,7 @@
 #include "sc_shim.h"
 
 #include "StdAfx.h"
+#include <SmAxis2Placement.h>
 #include <SmBSplineCurve.h>
 #include <SmBSplineSurface.h>
 #include <SmContext.h>
@@ -37,6 +38,7 @@
 #include <SmNurbsSrf.h>
 #include <SmPlane.h>
 #include <SmSolutionArray.h>
+#include <SmSphere.h>
 #include <SmSurfOfRevolution.h>
 #include <SmSurface.h>
 #include <SmSurfTypes.h>
@@ -762,6 +764,20 @@ SmCurve* read_curve(Rd& rd, const SmContext& ctx)
 SmSurface* read_surface(Rd& rd, const SmContext& ctx)
 {
     int64_t kind = rd.idx();
+    if (kind == 4)
+    {
+        SmSphere* sphere = NULL;
+        SmStatus stt = SmSphere::CreateCanonical(
+            ctx, SmAxis2Placement(SmPoint3d(0, 0, 0), SmVector3d(1, 0, 0), SmVector3d(0, 1, 0)),
+            2.0, sphere);
+        if (stt != SM_SUCCESS || sphere == NULL)
+        {
+            if (sphere)
+                delete sphere;
+            return NULL;
+        }
+        return sphere;
+    }
     if (kind == 3)
     {
         // an SmSurfOfRevolution::CreateCanonical of an SmLine generator

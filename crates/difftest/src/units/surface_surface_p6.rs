@@ -5,11 +5,12 @@
 //!
 //! C++: `solidcore_ffi::units::surface_surface_p6` (upstream `source/SMLib/src/SmSurface.cpp`,
 //! called through `SmSurface*` on B-spline surfaces, planes, curve-bounded surfaces and
-//! surfaces of revolution). Rust: `solidcore::surface::surface::p6`.
+//! surfaces of revolution and canonical spheres). Rust: `solidcore::surface::surface::p6`.
 //!
 //! A case is one `op` on a `surface` (`{"bspline": {oob, form, net, p, q, u, v}}` with
 //! control points as stored `[x, y, z, w]`, rows in u; `{"plane": {o, n}}`; `{"bounded":
-//! {basis, implicit}}`; `{"revolution": {a, b, p, axis, swap}}`; or `{"sms": file}`). Both
+//! {basis, implicit}}`; `{"revolution": {a, b, p, axis, swap}}`; `{"sphere": {}}` (fixed
+//! canonical radius 2, origin/X/Y frame); or `{"sms": file}`). Both
 //! sides produce the flat record documented in the ffi module (status first); the runner
 //! reports it as the `out` values. A Rust error maps to its `SmStatus` (`1007` for
 //! `InvalidInput`, `-1` for one upstream cannot return); `Unported` defers the case.
@@ -23,6 +24,7 @@ use serde_json::Value;
 
 use solidcore::curve::curve::Curve as SmCurve;
 use solidcore::curve::line::Line;
+use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::extent3d::Extent3d;
@@ -40,6 +42,7 @@ use solidcore::nurbs::math::{CPoint, NOW};
 use solidcore::nurbs::srf_basic::Surface as NlSurface;
 use solidcore::surface::curve_bounded_surface::CurveBoundedSurface;
 use solidcore::surface::plane::Plane;
+use solidcore::surface::sphere::Sphere;
 use solidcore::surface::surf_of_revolution::SurfOfRevolution;
 use solidcore::surface::surface::p2::{DerivSurfDefinition, TangencyType};
 use solidcore::surface::surface::p6::{sc_local_solve, SampleOptions, ScLocalSolveNodes};
@@ -87,6 +90,8 @@ fn default_form() -> u8 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum SrfIn {
+    /// Canonical radius-2 sphere at the origin with the standard X/Y frame.
+    Sphere {},
     Bspline(BssIn),
     Plane {
         o: [f64; 3],
@@ -256,6 +261,7 @@ fn shape(s: &BssIn) -> Result<(usize, usize), HarnessError> {
 
 fn push_srf(o: &mut Vec<f64>, s: &SrfIn) -> Result<(), HarnessError> {
     match &resolve(s)? {
+        SrfIn::Sphere {} => o.push(4.0),
         SrfIn::Sms(_) => return Err(harness("unresolved surface file")),
         SrfIn::Revolution {
             a,
@@ -472,6 +478,17 @@ fn box_of(d: [f64; 6]) -> Extent3d {
 /// The surface, `None` when its construction fails (the shim's `-3`).
 fn surface_of(k: &Kernel, s: &SrfIn) -> Result<Option<Surface>, HarnessError> {
     Ok(match &resolve(s)? {
+        SrfIn::Sphere {} => Sphere::create_canonical(
+            k,
+            &Axis2Placement::new(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+            ),
+            2.0,
+        )
+        .ok()
+        .map(Surface::from),
         SrfIn::Sms(_) => return Err(harness("unresolved surface file")),
         SrfIn::Revolution {
             a,
@@ -1497,6 +1514,142 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    fn sphere_natural_trim_fixture() -> Inputs {
+        let file: Value = serde_json::from_str(include_str!(
+            "../../../../fixtures/surface.surface_p6/sphere-natural-trim.json"
+        ))
+        .unwrap();
+        let cases = file["cases"].as_array().unwrap();
+        assert_eq!(cases.len(), 1);
+        assert_eq!(
+            cases[0]["name"],
+            "sphere_canonical_r2_interior_natural_trim_u"
+        );
+        serde_json::from_value(cases[0]["inputs"].clone()).unwrap()
+    }
+
+    fn assert_sphere_trim_record(record: &[f64], dom: [f64; 4]) {
+        assert_eq!(record.len(), 146);
+        assert!(record.iter().all(|x| x.is_finite()));
+        assert_eq!(&record[..2], &[0.0, 4.0]);
+        let [u0, v0, u1, v1] = dom;
+        for (edge, block) in record[2..].as_chunks::<36>().0.iter().enumerate() {
+            assert_eq!(block[0], [2.0, 1.0, 1.0, 2.0][edge]);
+            assert_eq!(block[1], 0.0);
+            let interval = if edge % 2 == 0 { [v0, v1] } else { [u0, u1] };
+            assert_eq!(&block[2..4], &interval);
+            assert_eq!(&block[19..21], &[0.0, 1.0]);
+            let points = block[4..19].as_chunks::<3>().0;
+            for p in points {
+                let radius = (p[0] * p[0] + p[1] * p[1] + p[2] * p[2]).sqrt();
+                assert!(crate::compare::values_agree(radius, 2.0, None));
+            }
+            let sagitta_sq: f64 = (0..3)
+                .map(|axis| (points[2][axis] - (points[0][axis] + points[4][axis]) / 2.0).powi(2))
+                .sum();
+            assert!(sagitta_sq > 0.01, "edge {edge} must be curved");
+            for (j, p) in block[21..36].as_chunks::<3>().0.iter().enumerate() {
+                let t = j as f64 / 4.0;
+                let expected = match edge {
+                    0 => [u0, v0 + (v1 - v0) * t, 0.0],
+                    1 => [u0 + (u1 - u0) * t, v0, 0.0],
+                    2 => [u1, v0 + (v1 - v0) * t, 0.0],
+                    _ => [u0 + (u1 - u0) * t, v1, 0.0],
+                };
+                assert_eq!(*p, expected);
+            }
+        }
+    }
+
+    #[test]
+    fn sphere_natural_trim_fixture_and_protocol_are_exact() {
+        let i = sphere_natural_trim_fixture();
+        assert!(matches!(i.surface, SrfIn::Sphere {}));
+        let (op, wire) = cpp_input(&i).unwrap();
+        assert_eq!(op, Op::Trim);
+        assert_eq!(wire, [4.0, 0.125, 0.25, 0.375, 0.75, 0.0, 0.0]);
+        ffi::validate(op, &wire).unwrap();
+        let ctx = CaseContext {
+            root: std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."),
+            seeds: 0,
+        };
+        let cases = default_cases(&Runner, &ctx).unwrap();
+        let found: Vec<_> = cases
+            .iter()
+            .filter(|c| c.name == "sphere_canonical_r2_interior_natural_trim_u")
+            .collect();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].inputs, serde_json::to_value(i).unwrap());
+    }
+
+    #[test]
+    fn sphere_natural_trim_rust_identity_and_geometry() {
+        use solidcore::curve::curve::CurveKind;
+        use solidcore::surface::surface::SurfaceKind;
+        let i = sphere_natural_trim_fixture();
+        let k = Kernel::default();
+        let s = surface_of(&k, &i.surface).unwrap().unwrap();
+        assert!(matches!(s.kind(), SurfaceKind::Sphere(_)));
+        assert_eq!(surface_obj(0, &s), Obj::Surface(0, [0.0, 0.0, 1.0, 1.0]));
+        let OpIn::Trim { dom, side, remove } = i.op else {
+            panic!("expected trim")
+        };
+        assert_eq!(dom, [0.125, 0.25, 0.375, 0.75]);
+        assert_eq!(side, 0);
+        assert!(!remove);
+        let sample_uv = [
+            Point2::new(0.125, 0.25),
+            Point2::new(0.25, 0.5),
+            Point2::new(0.375, 0.75),
+        ];
+        let before: Vec<_> = sample_uv
+            .iter()
+            .map(|uv| s.evaluate_point(&k, *uv).unwrap())
+            .collect();
+        let trim = s
+            .create_natural_uv_trim_curves(&k, &dom_of(dom), param_of(side).unwrap(), remove)
+            .unwrap();
+        assert_eq!(trim.curves_3d.len(), 4);
+        assert_eq!(trim.uv_curves.len(), 4);
+        for c in &trim.curves_3d {
+            assert!(matches!(c.kind(), CurveKind::Ellipse(e) if e.is_circle()));
+        }
+        for c in &trim.uv_curves {
+            assert!(matches!(
+                SmCurve::from(c.clone()).kind(),
+                CurveKind::Line(_)
+            ));
+        }
+        assert_eq!(surface_obj(0, &s), Obj::Surface(0, [0.0, 0.0, 1.0, 1.0]));
+        let after: Vec<_> = sample_uv
+            .iter()
+            .map(|uv| s.evaluate_point(&k, *uv).unwrap())
+            .collect();
+        assert_eq!(before, after);
+        let record = rust_run(&i).unwrap_or_else(|_| panic!("Rust trim must succeed"));
+        assert_sphere_trim_record(&record, dom);
+    }
+
+    #[cfg(feature = "cpp")]
+    #[test]
+    fn sphere_natural_trim_cpp_full_records_and_interior_sensitivity() {
+        let i = sphere_natural_trim_fixture();
+        let (op, wire) = cpp_input(&i).unwrap();
+        let native = ffi::eval(op, &wire).unwrap();
+        let mut rust = rust_run(&i).unwrap_or_else(|_| panic!("Rust trim must succeed"));
+        for record in [&native, &rust] {
+            assert_sphere_trim_record(record, [0.125, 0.25, 0.375, 0.75]);
+        }
+        let cpp = Output::new().values("out", native);
+        let comparison =
+            crate::compare::compare(&cpp, &Output::new().values("out", rust.clone()), &[]);
+        assert!(comparison.pass(), "{comparison:?}");
+        assert_eq!(comparison.values_compared, 146);
+        assert_ne!(rust[12], 0.0);
+        rust[12] += 1e-4;
+        assert!(!crate::compare::compare(&cpp, &Output::new().values("out", rust), &[]).pass());
+    }
 
     /// Prints generated case `P6_CASE` as JSON (a debugging aid:
     /// `P6_CASE=6 cargo test -p difftest --features cpp --lib p6_dump_case -- --ignored --nocapture`).

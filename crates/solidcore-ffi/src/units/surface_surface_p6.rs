@@ -7,7 +7,8 @@
 //! `SmBSplineSurface(gw_SURFACE*, FALSE, NULL)`), `1 O[3] N[3]` (`SmPlane(O, N)`), `2 basis
 //! implicit` (an `SmCurveBoundedSurface` without boundary curves over a B-spline or plane
 //! basis block) or `3 A[3] B[3] P[3] axis[3] swap` (`SmSurfOfRevolution::CreateCanonical` of
-//! the `SmLine(A, B)` generator about the axis through `P`). A curve block is `0 dim n p m
+//! the `SmLine(A, B)` generator about the axis through `P`), or `4` (a canonical radius-2
+//! `SmSphere` at the origin with the standard X/Y frame). A curve block is `0 dim n p m
 //! cpts(x y z w) knots` (an `SmBSplineCurve(gw_CURVE*, dim, FALSE)`) or `1 A[3] B[3]`
 //! (`SmLine::CreateLineSegment`, 3D). A domain is `u0 v0 u1 v1`, an interval `a b`, a box
 //! `min[3] max[3]`. A solution is `type nvars value end_value start[5] end[5]` (its objects
@@ -176,9 +177,13 @@ fn dist_to_axis(p: [f64; 3], o: [f64; 3], a: [f64; 3]) -> f64 {
     (c[0] * c[0] + c[1] * c[1] + c[2] * c[2]).sqrt() / la
 }
 
-/// A surface block: its domain and whether it is a plain B-spline.
+/// A surface block: its domain and eligibility as a B-spline-backed solver patch
+/// (including the canonical Sphere).
 fn surface_kind(rd: &mut Reader<'_>, nested: bool) -> Result<(Domain, bool), FfiError> {
-    let kind = rd.index(3)?;
+    let kind = rd.index(4)?;
+    if kind == 4 {
+        return Ok((Some([0.0, 0.0, 1.0, 1.0]), true));
+    }
     if kind == 3 {
         let a = rd.vec3()?;
         let b = rd.vec3()?;
@@ -451,4 +456,74 @@ pub fn eval(op: Op, input: &[f64]) -> Result<Vec<f64>, FfiError> {
             )
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sphere_kind_uses_existing_generic_validation() {
+        let mut rd = Reader::new(&[4.0, 123.0]);
+        assert_eq!(
+            surface_kind(&mut rd, false).unwrap(),
+            (Some([0.0, 0.0, 1.0, 1.0]), true)
+        );
+        assert_eq!(rd.num().unwrap(), 123.0);
+        rd.done().unwrap();
+        let mut nested = Reader::new(&[2.0, 4.0, 1.0]);
+        assert_eq!(
+            surface_kind(&mut nested, false).unwrap(),
+            (Some([0.0, 0.0, 1.0, 1.0]), false)
+        );
+        nested.done().unwrap();
+        assert!(surface_kind(&mut Reader::new(&[2.0, 2.0, 4.0, 1.0, 1.0]), false).is_err());
+        for side in 0..=4 {
+            for remove in [0.0, 1.0] {
+                validate(
+                    Op::Trim,
+                    &[4.0, 0.0, 0.0, 1.0, 1.0, f64::from(side), remove],
+                )
+                .unwrap();
+            }
+        }
+        for input in [
+            vec![4.0, 0.5, 0.0, 0.5, 1.0, 0.0, 0.0],
+            vec![4.0, -0.1, 0.0, 1.0, 1.0, 0.0, 0.0],
+            vec![4.0, 0.0, 0.0, f64::NAN, 1.0, 0.0, 0.0],
+            vec![4.0, 0.0],
+            vec![4.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 2.0],
+            vec![5.0],
+        ] {
+            assert!(validate(Op::Trim, &input).is_err());
+        }
+        validate(Op::Trim, &[2.0, 4.0, 1.0, 0.0, 0.0, 1.0, 1.0, 3.0, 1.0]).unwrap();
+        validate(Op::Cont, &[4.0, 1.0]).unwrap();
+        let line = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+        let mut classify = vec![4.0];
+        classify.extend(line);
+        classify.extend([0.0; 14]);
+        validate(Op::Classify, &classify).unwrap();
+        let mut sample = vec![4.0, 4.0, 0.0];
+        sample.extend([0.0; 7]); // six values and has_ref
+        sample.extend(line);
+        sample.extend([0.0, 1.0, 0.0, 0.0, 0.0, 0.0]);
+        validate(Op::Sample, &sample).unwrap();
+        let mut intersect = vec![4.0, 0.0, 0.0, 1.0, 1.0];
+        intersect.extend(line);
+        intersect.extend([0.0, 1.0, 1e-6]);
+        let mut scc = intersect.clone();
+        scc.push(0.0);
+        validate(Op::Scc, &scc).unwrap();
+        intersect.extend([0.5, 0.5, 0.5]);
+        validate(Op::Lci, &intersect).unwrap();
+        let mut ssid = vec![4.0, 4.0, 1e-6];
+        ssid.extend([0.0; 28]);
+        validate(Op::Ssid, &ssid).unwrap();
+        let mut scls = vec![4.0, 0.0, 0.0, 1.0, 1.0];
+        scls.extend([0.0; 17]); // continuities, boxes, has_cbox
+        scls.extend([1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0]); // line
+        scls.extend([0.0, 1.0, 0.0, 0.0, 1e-6, 0.0, 0.0, 0.0, 0.0, 3.0, 0.0, 0.0]);
+        validate(Op::Scls, &scls).unwrap();
+    }
 }
