@@ -101,6 +101,12 @@ struct Encoded {
     parts: Vec<usize>,
 }
 
+/// What a decoded body must share with the one encoded: its faces, edges, vertices and shells.
+fn same_topology(a: &solidcraft_kernel::Body, b: &solidcraft_kernel::Body) -> bool {
+    let counts = |x: &solidcraft_kernel::Body| (x.face_count(), x.edge_count(), x.vertex_count(), x.shell_count());
+    counts(a) == counts(b)
+}
+
 impl Encoded {
     fn of(model: &SavedModel) -> Result<Self> {
         // What to encode: every body, and the part every placed copy shows.
@@ -117,7 +123,14 @@ impl Encoded {
             }));
         }
         let bodies: Vec<&solidcraft_kernel::Body> = model.bodies.iter().chain(shares.iter().map(|s| s.original())).collect();
-        let encoded = solidcraft_kernel::map_on_threads(&bodies, 16, |b| solidcraft_kernel::encode_native_body(b).ok());
+        // A body is kept only when it decodes to itself: one the codec gave back with other
+        // topology (two loose vertices more on a pattern copy cut by an extrude) would open as
+        // another body. Then the model isn't kept, and opening the design evaluates it.
+        let encoded = solidcraft_kernel::map_on_threads(&bodies, 16, |b| {
+            let bytes = solidcraft_kernel::encode_native_body(b).ok()?;
+            let back = solidcraft_kernel::decode_native_body(&bytes).ok()?;
+            same_topology(b, &back).then_some(bytes)
+        });
         let mut slices = Vec::new();
         let mut by_digest = std::collections::HashMap::new();
         let mut index = Vec::with_capacity(encoded.len());

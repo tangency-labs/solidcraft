@@ -966,6 +966,56 @@ mod tests {
         assert!(d.rejected.is_empty());
     }
 
+    /// A design whose saved model would give a body back with other topology opens with the
+    /// bodies it was saved with. A pattern copy cut by an automatic extrude came back from the
+    /// native codec with two loose vertices more (10 faces, 18 edges, 12 vertices instead of 10);
+    /// such a body is not kept, the design is saved without its model and evaluated on opening.
+    #[test]
+    fn a_design_opens_with_the_bodies_it_was_saved_with_when_one_does_not_decode_to_itself() {
+        let mut session = Session::new(Document::new("Roundtrip"));
+        for (cmd, p) in [
+            ("solid.cylinder", json!({"axis": "Z", "base": [-2, -17, -2], "body_name": "B2", "height": 11, "radius": 6})),
+            ("sketch.create", json!({"plane": "YZ"})),
+            (
+                "sketch.line",
+                json!({"closed": true, "ids": ["w3a", "w3b", "w3c", "w3d"], "infer": true, "points": [[-3, -22], [1, -22], [1, -17], [-3, -17]]}),
+            ),
+            ("sketch.dimension", json!({"entities": ["w3a"], "type": "length", "value": 9})),
+            ("solid.extrude", json!({"distance": -1, "operation": "cut"})),
+            ("solid.box", json!({"corner": [27, -22, 0], "height": 12, "length": "d3", "operation": "new", "width": 3})),
+            ("sketch.create", json!({"plane": "YZ"})),
+            (
+                "sketch.line",
+                json!({"closed": true, "ids": ["w6a", "w6b", "w6c", "w6d"], "infer": true, "points": [[-16, -23], [2, -23], [2, -15], [-16, -15]]}),
+            ),
+            ("sketch.dimension", json!({"entities": ["w6a"], "type": "length", "value": 11})),
+            ("solid.extrude", json!({"distance": 18, "operation": "new"})),
+            ("solid.extrude", json!({"distance": -5, "operation": "new"})),
+            ("sketch.create", json!({"plane": "YZ"})),
+            ("sketch.circle.center", json!({"center": [15, -8], "radius": 9})),
+            ("solid.extrude", json!({"distance": "d8", "operation": "new"})),
+            ("solid.pattern.circular", json!({"axis": "Y", "bodies": ["Body4"], "count": 3})),
+            ("solid.extrude", json!({"distance": -16, "operation": "auto"})),
+        ] {
+            session.execute(cmd, &p).unwrap();
+        }
+        let counts = |s: &Session| {
+            s.model
+                .state()
+                .bodies
+                .iter()
+                .map(|b| (b.name.clone(), b.body.face_count(), b.body.edge_count(), b.body.vertex_count()))
+                .collect::<Vec<_>>()
+        };
+        let bytes = session.design_container(solidcraft_io::DesignCompression::Fast, false, true).unwrap();
+        let path = std::env::temp_dir().join(format!("solidcraft-roundtrip-{}.solidcraft", std::process::id()));
+        std::fs::write(&path, &bytes).unwrap();
+        let mut reopened = Session::default();
+        reopened.execute("doc.open", &json!({"path": path})).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(counts(&reopened), counts(&session));
+    }
+
     #[test]
     fn saved_model_needs_no_meshes_and_is_adopted_only_for_its_document() {
         let mut session = Session::new(Document::new("Saved model"));
