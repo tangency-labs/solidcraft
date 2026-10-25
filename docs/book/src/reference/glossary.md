@@ -258,6 +258,22 @@ The first instance is the original.
 - **Elsewhere:** instance, element, occurrence.
 - **For translators:** not an occurrence of a component.
 
+### reference edge
+
+A straight edge of a flat face that a Single hole's centre or a cylinder's base centre keeps a
+set distance from, measured in that face's plane.
+
+Up to two reference edges place one hole or cylinder. Each distance is a parameter, and the
+feature follows its edges when the part changes.
+
+- **In SolidCraft:** the `references` parameter of `solid.hole` and `solid.cylinder` (each
+  `{edge, distance}`); the windows' Reference 1, Reference 2 and Distance 1, Distance 2 rows; the
+  "Reference distance" input (`ui.reference_1`, `ui.reference_2`, `ui.reference_distance`).
+- **Don't use:** datum edge, anchor edge.
+- **Elsewhere:** reference edge, edge offset, distance from edge.
+- **For translators:** an edge of a body, not a construction axis or a reference plane; the
+  distance is a length, not a reference value for light or material.
+
 ### rollback marker
 
 The marker in the timeline after which no feature is computed.
@@ -351,6 +367,9 @@ share a catalogue entry. Each meaning below gets its own term and, in time, its 
 | | the middle display quality | normal (quality) | `ui.display_quality_normal` |
 | Quantity | the number of pattern instances | count | the pattern dialogs' Quantity rows, `ui.quantity` |
 | | what the motion plot shows: value, velocity or acceleration | plotted quantity | the motion study's Quantity row, `motion.plot_quantity` |
+| Reference | an edge a hole or cylinder keeps its distance from | *reference edge* | `references` of `solid.hole` and `solid.cylinder`, `ui.reference_1` |
+| | the measured values a material is checked against | reference (material) | `material.editor.reference` |
+| | the distance a light's intensity is given for | reference distance (light) | `render.cpu_light_reference` |
 
 Some translations show the clash today: Japanese and Chinese show a hole's flat bottom with the
 word for "unfold" or "plane", Chinese shows "Round" as "fillet", and Chinese and Russian show the
