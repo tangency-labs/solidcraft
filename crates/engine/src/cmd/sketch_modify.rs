@@ -182,10 +182,7 @@ fn cut_points(sk: &Sketch, ci: usize) -> Vec<(f64, Vec2, usize)> {
 fn pin(sk: &mut Sketch, p: usize, cutter: usize) -> Result<()> {
     let at = sk.point(p).unwrap_or_default();
     // An end point of the cutter there: coincident with it; otherwise on the curve.
-    let ends: Vec<usize> = match sk.curves.get(cutter).map(|c| c.kind.clone()) {
-        Some(CurveKind::Line { a, b }) | Some(CurveKind::Arc { a, b, .. }) => vec![a, b],
-        _ => Vec::new(),
-    };
+    let ends: Vec<usize> = sk.curves.get(cutter).and_then(|c| c.kind.ends()).map(|(a, b)| vec![a, b]).unwrap_or_default();
     if let Some(e) = ends.into_iter().find(|e| sk.point(*e).is_some_and(|q| q.dist(at) < TOL * 10.0)) {
         if e != p {
             add_c(sk, ConstraintKind::Coincident { p, q: e })?;
@@ -612,7 +609,7 @@ const EXTEND_REACH: f64 = 50.0;
 pub fn extend_preview(sk: &solidcraft_sketch::Sketch, ci: usize, hover_pos: Vec2) -> Option<Vec2> {
     use solidcraft_sketch::{CurveKind, Shape};
 
-    let curve = sk.curves.get(ci)?;
+    let curve = sk.curves.get(ci).filter(|c| !c.infinite)?;
     let (a, b) = match &curve.kind {
         CurveKind::Line { a: pa, b: pb } => (*pa, *pb),
         CurveKind::Arc { a: pa, b: pb, .. } => (*pa, *pb),
@@ -781,32 +778,8 @@ pub fn extend_preview(sk: &solidcraft_sketch::Sketch, ci: usize, hover_pos: Vec2
         }
     }
 
-    // CRITICAL CHECK 3: Verify no other curve endpoint coincides with the hit point.
-    // If another curve already ends at this location, we should not create a new overlapping line.
-    if let Some(hit) = best_hit {
-        for (oi2, _other_curve) in sk.curves.iter().enumerate() {
-            if oi2 == ci {
-                continue;
-            }
-
-            // Get endpoints of the other curve
-            let ends = match &sk.curves.get(oi2).map(|c| &c.kind) {
-                Some(CurveKind::Line { a, b }) => [a, b],
-                Some(CurveKind::Arc { a, b, .. }) => [a, b],
-                _ => continue,
-            };
-
-            for &end_idx in &ends {
-                if let Some(pt) = sk.point(*end_idx) {
-                    // If an existing point is at the hit location (within tolerance), block extension.
-                    if pt.dist(hit) < tol_preview * 10.0 {
-                        return None;
-                    }
-                }
-            }
-        }
-    }
-
+    // A hit that is already another curve's end is joined by the extension, so it is a stop like
+    // any other: the preview shows the line running to it.
     best_hit.or(Some(end_pt + dir * EXTEND_REACH))
 }
 
@@ -948,11 +921,8 @@ fn arc_stop(sk: &Sketch, ci: usize, aim: &ArcAim) -> Option<usize> {
         return Some(aim.far);
     }
     sk.curves.iter().enumerate().filter(|(i, _)| *i != ci).find_map(|(_, c)| {
-        let ends = match c.kind {
-            CurveKind::Line { a, b } | CurveKind::Arc { a, b, .. } => [a, b],
-            _ => return None,
-        };
-        ends.into_iter().find(|p| at_hit(*p))
+        let (a, b) = c.kind.ends()?;
+        [a, b].into_iter().find(|p| at_hit(*p))
     })
 }
 
@@ -975,16 +945,25 @@ fn add_arc_extension(sk: &mut Sketch, ci: usize, aim: &ArcAim, stop: Option<usiz
     Ok(sk.points.get(stop).map(|x| x.id.clone()).unwrap_or_default())
 }
 
-/// Whether `q` already is another curve's end: extending there would double geometry that is
-/// there, so extend refuses instead of adding an overlapping curve.
-fn ends_at_curve_end(sk: &Sketch, ci: usize, q: Vec2) -> bool {
-    sk.curves.iter().enumerate().filter(|(i, _)| *i != ci).any(|(_, c)| {
-        let ends = match &c.kind {
-            CurveKind::Line { a, b } | CurveKind::Arc { a, b, .. } => [*a, *b],
-            _ => return false,
-        };
-        ends.iter().any(|e| sk.point(*e).is_some_and(|pt| pt.dist(q) < TOL * 10.0))
+/// The point the extension stops at when the sketch already has one there: an end of another
+/// curve at the hit. Joining that point keeps the extension attached to the geometry that is
+/// there instead of laying a second point over it. `None` when the stop needs a new point.
+fn stop_point(sk: &Sketch, ci: usize, q: Vec2) -> Option<usize> {
+    sk.curves.iter().enumerate().filter(|(i, _)| *i != ci).find_map(|(_, c)| {
+        let (a, b) = c.kind.ends()?;
+        [a, b].into_iter().find(|p| sk.point(*p).is_some_and(|pt| pt.dist(q) <= TOL * 10.0))
     })
+}
+
+/// Add the line an extension needs, from the growing end to the stop: the sketch's own point
+/// when the stop already is one, a new point otherwise.
+fn add_line_extension(sk: &mut Sketch, end: usize, q: Vec2, stop: Option<usize>) -> Result<String> {
+    let b = match stop {
+        Some(p) => p,
+        None => sk.add_point(q, None)?,
+    };
+    sk.add_curve(CurveKind::Line { a: end, b }, None)?;
+    Ok(sk.points.get(b).map(|x| x.id.clone()).unwrap_or_default())
 }
 
 /// Whether the growing end of an arc already carries geometry: another curve starts there, or a
@@ -1036,8 +1015,15 @@ fn extend_arc(sk: &mut Sketch, ci: usize, at: Vec2) -> Result<String> {
         }
         return add_arc_extension(sk, ci, &aim, stop);
     }
-    // Held to what stopped it, the end stays on the geometry it reached.
-    pin(sk, aim.end, aim.cutter)?;
+    // Held to the point that is already there or to what else stopped it, the end stays on the
+    // geometry it reached.
+    if let Some(stop) = stop {
+        if stop != aim.end {
+            add_c(sk, ConstraintKind::Coincident { p: aim.end, q: stop })?;
+        }
+    } else {
+        pin(sk, aim.end, aim.cutter)?;
+    }
     Ok(sk.points.get(aim.end).map(|x| x.id.clone()).unwrap_or_default())
 }
 
@@ -1059,6 +1045,11 @@ fn extend(s: &mut Session, p: &Value) -> Result<Value> {
         }
         let ci = curve_arg(sk, p, cmd)?;
         refuse_offset_ends(sk, ci, "extend", cmd)?;
+        // An infinite line already reaches across the view: moving one of its two points would
+        // move the whole line instead of extending it.
+        if sk.curves.get(ci).is_some_and(|c| c.infinite) {
+            return Err(bad(cmd, "an infinite line has no end to extend: make it a normal line first"));
+        }
         // An arc grows along its own circle, either way round: in place when its end is free, as
         // a new arc when the end already carries geometry.
         if matches!(sk.curves.get(ci).map(|c| &c.kind), Some(CurveKind::Arc { .. })) {
@@ -1142,22 +1133,15 @@ fn extend(s: &mut Session, p: &Value) -> Result<Value> {
 
         // Nothing in the way stops the extension: it runs as far as the preview draws, so the
         // click adds the line the user saw rather than reporting that there is nothing to reach.
-        let (q, cutter) = match best {
-            Some((_, q, oi)) => {
-                // A target that is already another curve's end would double that geometry.
-                if ends_at_curve_end(sk, ci, q) {
-                    return Err(bad(cmd, "the extension target coincides with existing geometry"));
-                }
-                (q, Some(oi))
-            }
-            None => (sk.point(end).unwrap_or_default() + extension_direction * EXTEND_REACH, None),
+        // A stop that is already another curve's end joins that point instead of doubling it.
+        let (q, cutter, stop) = match best {
+            Some((_, q, oi)) => (q, Some(oi), stop_point(sk, ci, q)),
+            None => (sk.point(end).unwrap_or_default() + extension_direction * EXTEND_REACH, None, None),
         };
 
         // The end joined to other geometry stays where it is: add a line from it.
         if !neighbors.is_empty() {
-            let np = sk.add_point(q, None)?;
-            sk.add_curve(CurveKind::Line { a: end, b: np }, None)?;
-            return Ok(sk.points.get(np).map(|x| x.id.clone()).unwrap_or_default());
+            return add_line_extension(sk, end, q, stop);
         }
 
         // An end held by a constraint, or lying on a circle or arc, stays where it is too: the
@@ -1185,32 +1169,37 @@ fn extend(s: &mut Session, p: &Value) -> Result<Value> {
         };
 
         if end_is_held {
-            let np = sk.add_point(q, None)?;
-            sk.add_curve(CurveKind::Line { a: end, b: np }, None)?;
-            return Ok(sk.points.get(np).map(|x| x.id.clone()).unwrap_or_default());
+            return add_line_extension(sk, end, q, stop);
         }
 
-        // A free end moves along instead, if the solver lets it.
-        if let Some(pt) = sk.points.get_mut(end) {
+        // A free end moves along instead, if the solver lets it. The attempt is made on a copy,
+        // so an end the solver cannot put where it belongs leaves the sketch as it was for the
+        // new line below.
+        let mut attempt = sk.clone();
+        if let Some(pt) = attempt.points.get_mut(end) {
             pt.pos = q;
         }
-        // Held to what stopped it, an end stays where the extension put it; an end with nothing
-        // to hold it is simply placed there.
-        if let Some(cutter) = cutter {
-            pin(sk, end, cutter)?;
+        // Held to the point that is already there or to what else stopped it, an end stays where
+        // the extension put it; an end with nothing to hold it is simply placed there.
+        if let Some(stop) = stop {
+            if stop != end {
+                add_c(&mut attempt, ConstraintKind::Coincident { p: end, q: stop })?;
+            }
+        } else if let Some(cutter) = cutter {
+            pin(&mut attempt, end, cutter)?;
         }
         let before = sk.points.iter().map(|p| p.pos).collect::<Vec<_>>();
-        let hold = solidcraft_sketch::Hold { points: (0..sk.points.len()).filter(|i| *i != end).collect(), radii: (0..sk.curves.len()).collect() };
-        let moved = solidcraft_sketch::solve_with(sk, &hold, None, solidcraft_sketch::Analysis::StatusOnly, None).ok()
-            && sk.point(end).is_some_and(|point| point.dist(q) <= TOL)
-            && sk.points.iter().enumerate().all(|(i, point)| i == end || point.pos.dist(before[i]) <= TOL);
+        let hold =
+            solidcraft_sketch::Hold { points: (0..attempt.points.len()).filter(|i| *i != end).collect(), radii: (0..attempt.curves.len()).collect() };
+        let moved = solidcraft_sketch::solve_with(&mut attempt, &hold, None, solidcraft_sketch::Analysis::StatusOnly, None).ok()
+            && attempt.point(end).is_some_and(|point| point.dist(q) <= TOL)
+            && attempt.points.iter().enumerate().all(|(i, point)| i == end || point.pos.dist(before[i]) <= TOL);
         if moved {
+            *sk = attempt;
             return Ok(sk.points.get(end).map(|x| x.id.clone()).unwrap_or_default());
         }
         // The solve could not put the end where it belongs: add a new line instead.
-        let np = sk.add_point(q, None)?;
-        sk.add_curve(CurveKind::Line { a: end, b: np }, None)?;
-        Ok(sk.points.get(np).map(|x| x.id.clone()).unwrap_or_default())
+        add_line_extension(sk, end, q, stop)
     })?;
     Ok(json!({"moved": out, "sketch": info}))
 }

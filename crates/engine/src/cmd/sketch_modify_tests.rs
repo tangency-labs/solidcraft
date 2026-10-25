@@ -396,6 +396,89 @@ fn extend_with_nothing_in_the_way_adds_the_line_the_preview_shows() {
 }
 
 #[test]
+fn line_extend_joins_a_stop_that_is_another_curves_end() {
+    // The end being extended already carries geometry (a horizontal line meets it there), so the
+    // extension is a new line. The first stop on the way is the end of another line: the new line
+    // joins that point instead of refusing or laying a second point over it.
+    let mut s = new_sketch();
+    let vertical = ids(&run(&mut s, "sketch.line", json!({"points":[[0,0],[0,45],[15,45]],"connect":false,"infer":false}))["curves"])[0].clone();
+    let top = ids(&run(&mut s, "sketch.line", json!({"points":[[0,47],[10,47]],"connect":false,"infer":false}))["curves"])[0].clone();
+    let before = sketch(&s);
+    let stop = before.resolve_point(&format!("{top}.start")).expect("the top line's start");
+    assert!(before.point(stop).is_some_and(|p| p.dist(Vec2::new(0.0, 47.0)) < 1e-9));
+    let (curves, points) = (before.curves.len(), before.points.len());
+    let ci = before.curve_index(&vertical).expect("the vertical line");
+    let preview = super::extend_preview(&before, ci, Vec2::new(0.0, 45.0));
+
+    run(&mut s, "sketch.extend", json!({"curve": vertical, "at": [0,45]}));
+
+    assert!(preview.is_some_and(|q| q.dist(Vec2::new(0.0, 47.0)) < 1e-6), "the preview shows the line to the stop: {preview:?}");
+
+    let sk = sketch(&s);
+    assert_eq!(sk.curves.len(), curves + 1, "the extension is a new line");
+    assert_eq!(sk.points.len(), points, "the extension joins the point that is there");
+    assert!(matches!(sk.curves[sk.curves.len() - 1].kind, CurveKind::Line { b, .. } if b == stop), "the new line ends on the existing point");
+
+    // A free end moves onto the point that is there, and is held to it instead of doubling it.
+    let mut s = new_sketch();
+    let vertical = ids(&run(&mut s, "sketch.line", json!({"points":[[0,0],[0,45]],"connect":false,"infer":false}))["curves"])[0].clone();
+    let top = ids(&run(&mut s, "sketch.line", json!({"points":[[0,47],[10,47]],"connect":false,"infer":false}))["curves"])[0].clone();
+    let before = sketch(&s);
+    let stop = before.resolve_point(&format!("{top}.start")).expect("the top line's start");
+    run(&mut s, "sketch.extend", json!({"curve": vertical, "at": [0,45]}));
+    let sk = sketch(&s);
+    assert_eq!((sk.curves.len(), sk.points.len()), (before.curves.len(), before.points.len()), "the line itself reaches the point");
+    let end = sk.resolve_point(&format!("{vertical}.end")).expect("the line's end");
+    assert!(sk.point(end).is_some_and(|p| p.dist(Vec2::new(0.0, 47.0)) < 1e-9), "{end}");
+    assert!(
+        sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Coincident { p, q } if (p, q) == (end, stop) || (p, q) == (stop, end))),
+        "the end is held to the point that was already there"
+    );
+}
+
+#[test]
+fn extend_joins_the_end_of_a_freeform_curve() {
+    // A line whose end is free grows onto a spline's start instead of laying a second point over
+    // the spline's own end.
+    let mut s = new_sketch();
+    let line = ids(&run(&mut s, "sketch.line", json!({"points":[[0,0],[5,0]],"connect":false,"infer":false}))["curves"])[0].clone();
+    let spline = ids(&run(&mut s, "sketch.spline.fit_point", json!({"points":[[10,0],[15,5],[20,0]],"connect":false}))["curves"])[0].clone();
+    let before = sketch(&s);
+    let stop = before.resolve_point(&format!("{spline}.start")).expect("the spline's start");
+    run(&mut s, "sketch.extend", json!({"curve": line, "at": [5,0]}));
+    let sk = sketch(&s);
+    assert_eq!((sk.curves.len(), sk.points.len()), (before.curves.len(), before.points.len()));
+    let end = sk.resolve_point(&format!("{line}.end")).expect("the line's end");
+    assert!(
+        sk.point(end).zip(sk.point(stop)).is_some_and(|(a, b)| a.dist(b) < 1e-9),
+        "the line ends on the spline's own point: {:?} / {:?}",
+        sk.point(end),
+        sk.point(stop)
+    );
+    assert!(
+        sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Coincident { p, q } if (p, q) == (end, stop) || (p, q) == (stop, end))),
+        "the end is held to the spline's point"
+    );
+
+    // An arc whose end is free grows onto a conic's start the same way.
+    let mut s = new_sketch();
+    let arc = ids(&run(&mut s, "sketch.arc.center_point", json!({"center":[0,0],"start":[10,0],"end":[0,10],"connect":false}))["curves"])[0].clone();
+    let conic =
+        ids(&run(&mut s, "sketch.conic", json!({"start":[0,-10],"end":[-20,-10],"apex":[-10,-20],"rho":0.5,"connect":false}))["curves"])[0].clone();
+    let before = sketch(&s);
+    let stop = before.resolve_point(&format!("{conic}.start")).expect("the conic's start");
+    run(&mut s, "sketch.extend", json!({"curve": arc, "at": [10,0]}));
+    let sk = sketch(&s);
+    assert_eq!((sk.curves.len(), sk.points.len()), (before.curves.len(), before.points.len()));
+    let end = sk.resolve_point(&format!("{arc}.start")).expect("the arc's start");
+    assert!(sk.point(end).is_some_and(|p| p.dist(Vec2::new(0.0, -10.0)) < 1e-6), "{end}");
+    assert!(
+        sk.constraints.iter().any(|c| matches!(c.kind, ConstraintKind::Coincident { p, q } if (p, q) == (end, stop) || (p, q) == (stop, end))),
+        "the arc ends on the conic's own point"
+    );
+}
+
+#[test]
 fn exact_extend_refuses_ambiguous_stop_without_history_change() {
     let mut s = new_sketch();
     run(&mut s, "sketch.line", json!({"points":[[0,0],[5,0]],"connect":false,"infer":false}));
