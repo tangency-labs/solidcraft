@@ -750,9 +750,12 @@ impl ExtendAt {
 /// The degree-`p` Bezier curve that continues `Pw[0..=p]` beyond `whr` with the same
 /// homogeneous derivatives there (`N_BezCrvExtend`); `rev` reverses the extension's
 /// parametrization. Returns `Qw[0..=p]`.
+/// Returns `InvalidInput` if `p + 1` overflows or `pw` has fewer than `p + 1`
+/// points; additional input points are ignored.
 pub fn crv_extend(pw: &[CPoint], p: usize, whr: ExtendAt, rev: bool) -> Result<Vec<CPoint>> {
     let op = OP_CRV_EXTEND;
     let n = p.checked_add(1).ok_or_else(|| out_of_range(op))?;
+    let pw = pw.get(..n).ok_or_else(|| out_of_range(op))?;
     let mut qw = vec![CPoint::ZERO; n];
 
     match whr {
@@ -1004,6 +1007,104 @@ mod tests {
         let q = crv_extend(&pw, 1, ExtendAt::Start, false).unwrap();
         assert_eq!(q[1], pw[0]);
         assert_eq!(q[0].x, -1.0);
+    }
+
+    #[test]
+    fn crv_extend_huge_degree_rejects_short_input() {
+        let pw = [cp(1.0, 2.0, 3.0)];
+        for input in [&pw[..0], &pw[..]] {
+            for p in [usize::MAX - 1, usize::MAX] {
+                for whr in [ExtendAt::Start, ExtendAt::End] {
+                    for rev in [false, true] {
+                        assert!(matches!(
+                            crv_extend(input, p, whr, rev),
+                            Err(SolidError::InvalidInput { .. })
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn crv_extend_requires_complete_prefix() {
+        let pw = [cp(0.0, 0.0, 0.0), cp(1.0, 2.0, 3.0)];
+        for input in [&pw[..0], &pw[..1], &pw[..]] {
+            for whr in [ExtendAt::Start, ExtendAt::End] {
+                for rev in [false, true] {
+                    assert!(matches!(
+                        crv_extend(input, 2, whr, rev),
+                        Err(SolidError::InvalidInput { .. })
+                    ));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn crv_extend_degree_zero_preserves_point() {
+        let pw = [cp(1.0, 2.0, 3.0)];
+        for whr in [ExtendAt::Start, ExtendAt::End] {
+            for rev in [false, true] {
+                assert_eq!(crv_extend(&pw, 0, whr, rev).unwrap(), pw);
+                assert!(matches!(
+                    crv_extend(&[], 0, whr, rev),
+                    Err(SolidError::InvalidInput { .. })
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn crv_extend_degree_seventeen_reverses_and_ignores_extra_points() {
+        let mut pw: Vec<_> = (0..18)
+            .map(|i| cp(f64::from(i), f64::from(i % 3), f64::from(i % 5)))
+            .collect();
+        pw.push(cp(999.0, -999.0, 123.0));
+        for whr in [ExtendAt::Start, ExtendAt::End] {
+            // NL_Bezier.cpp:5417-5558 seeds the chosen endpoint and builds
+            // outward from it. Without rev, the point at distance i from the
+            // seed is sum_j C(i,j) * 2^(i-j) * (-1)^j * P[j] (Start), or
+            // the same sum using P[17-j] (End). Check the seed, the first
+            // point that differs from rev for this fixture, and the far end.
+            // These integer-valued sums are exactly representable in f64.
+            let forward = crv_extend(&pw[..18], 17, whr, false).unwrap();
+            assert_eq!(forward.len(), 18);
+            match whr {
+                ExtendAt::Start => {
+                    assert_eq!(forward[17], pw[0]);
+                    assert_eq!(forward[13], cp(-4.0, 17.0, -4.0));
+                    assert_eq!(forward[0], cp(-17.0, -17_539_616.0, 49_838_048.0));
+                }
+                ExtendAt::End => {
+                    assert_eq!(forward[0], pw[17]);
+                    assert_eq!(forward[4], cp(21.0, -15.0, -29.0));
+                    assert_eq!(forward[17], cp(34.0, 17_539_618.0, 22_894_754.0));
+                }
+            }
+            let reversed = crv_extend(&pw[..18], 17, whr, true).unwrap();
+            assert_eq!(reversed.len(), 18);
+            // The rev branches instead scale Dw by -1 (Start) or by
+            // alternating +1/-1 (End). Substitution in the binomial recurrence
+            // gives Q[j] = 2 * endpoint - P[j], NOT forward[17-j] or -P[j].
+            // Check every coordinate, including the unchanged unit weight.
+            for (j, point) in reversed.iter().enumerate() {
+                let j = i32::try_from(j).unwrap();
+                let (x, y, z) = match whr {
+                    ExtendAt::Start => (-j, -(j % 3), -(j % 5)),
+                    ExtendAt::End => (34 - j, 4 - j % 3, 4 - j % 5),
+                };
+                assert_eq!(*point, cp(f64::from(x), f64::from(y), f64::from(z)));
+            }
+            // Only P[0..=17] participates: P[18] is dropped, not clamped
+            // into the endpoint or included in either recurrence.
+            for rev in [false, true] {
+                assert_eq!(
+                    crv_extend(&pw, 17, whr, rev).unwrap(),
+                    crv_extend(&pw[..18], 17, whr, rev).unwrap()
+                );
+            }
+        }
     }
 
     #[test]
