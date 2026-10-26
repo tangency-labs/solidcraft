@@ -239,7 +239,7 @@ impl FaceSurfaceTransfer {
         }
     }
 
-    pub(super) fn owned_surface(&self) -> Result<&Surface> {
+    pub(crate) fn owned_surface(&self) -> Result<&Surface> {
         self.owned
             .as_ref()
             .ok_or_else(|| SolidError::null_pointer(OP))

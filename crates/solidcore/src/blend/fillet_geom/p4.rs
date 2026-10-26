@@ -41,8 +41,10 @@
 //! - **Curves.** Upstream's curve arrays hold pointers into the edges and copies are
 //!   made at the end of `MakeFaceBrep`; here the arrays hold clones, and the final
 //!   copies are made the same way (`Copy` for the 3D curves, the copy constructor for
-//!   the UV curves). The fillet surface the new face consumes is a copy (the fillet
-//!   geometry keeps its own). `SetCurve` on a fillet edge applies the
+//!   the UV curves). The retained session transfers the original fillet surface to
+//!   its managed face, recording early destruction and partial installation on
+//!   failure. The legacy indexed API retains its copied-surface contract.
+//!   `SetCurve` on a fillet edge applies the
 //!   `SM_NO_CHANGE_GEOMETRY` resets directly (as `blend.fillet_geom_p1` does: the
 //!   pseudo B-rep has no notification environment) and `SetOwner` of the new curve is
 //!   implied by the edge holding it.
@@ -2062,11 +2064,50 @@ impl FilletBrep {
             self.geom_mut(g)?.fillet_surface = Some(location);
             status?;
         } else {
-            // UNPORTED(blend.fillet_geom_p4): original-surface transfer through the cliff trim tool.
-            return Err(SolidError::unported(
-                "SmFilletGeom::MakeFaceBrep (cliff surface transfer)",
-                "blend.fillet_geom_p4",
-            ));
+            use crate::topology::trimming_tools::{
+                trim_surface_with_model_space_curves_transfer, TrimCurvesInput,
+                TrimSurfaceLocation, TrimSurfaceTransfer,
+            };
+
+            let input = TrimCurvesInput {
+                loop_counts: curve_loops,
+                curves: curves_3d,
+                orientations: lists1.orients,
+                loop_points: Vec::new(),
+                uv_domain,
+                surface_orientation: OrientType::Same,
+            };
+            let owned = self.geom_mut(g)?.fillet_surface.take().ok_or_else(nul)?;
+            let super::p1::FilletSurfaceStorage::Owned(surface) = owned else {
+                self.geom_mut(g)?.fillet_surface = Some(owned);
+                return Err(SolidError::invalid_input(
+                    OP_FACE,
+                    "surface already transferred",
+                ));
+            };
+            let mut transfer = TrimSurfaceTransfer::new(*surface);
+            let status = trim_surface_with_model_space_curves_transfer(
+                k,
+                brep,
+                region,
+                d3d_tol,
+                input,
+                &mut transfer,
+                env,
+            );
+            self.geom_mut(g)?.fillet_surface = match transfer.into_location()? {
+                TrimSurfaceLocation::Owned(surface) => {
+                    Some(super::p1::FilletSurfaceStorage::Owned(surface))
+                }
+                TrimSurfaceLocation::Installed(face) => {
+                    Some(super::p1::FilletSurfaceStorage::ManagedFace {
+                        body: (env.key_of)(EntityRef::Brep(crate::topology::BrepId::from_index(0))),
+                        face,
+                    })
+                }
+                TrimSurfaceLocation::Destroyed => None,
+            };
+            status?;
         }
 
         Ok(())
