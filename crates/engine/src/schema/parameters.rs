@@ -943,8 +943,8 @@ pub struct ExprEvaluateKeys {
     /// follow the design's length unit.
     #[serde(default, deserialize_with = "evaluate_unit")]
     pub unit: Option<String>,
-    /// What it must evaluate to: `length`, `angle` or `unitless` (`number` too). Default: the
-    /// unit's kind, or what the expression is. Not read when `unit` is `text`.
+    /// What it must evaluate to: `length`, `angle`, `mass`, `volume`, `area` or `unitless` (`number`
+    /// too). Default: the unit's kind, or what the expression is. Not read when `unit` is `text`.
     #[serde(default, deserialize_with = "evaluate_kind")]
     pub kind: Option<String>,
 }
@@ -987,8 +987,8 @@ fn expression_required(schema: &mut Schema) {
 }
 
 /// Evaluate an expression against the design's parameters, without changing anything: its
-/// value (in mm for a length, radians for an angle), its value in the unit asked for, what it
-/// names, or why it fails. `name = expression` is worth its expression and says what it would
+/// value (in mm for a length, radians for an angle, grams for a mass, mm³ for a volume and mm² for
+/// an area), its value in the unit asked for, what it names, or why it fails. `name = expression` is worth its expression and says what it would
 /// define.
 ///
 /// `kind` is not read when `unit` is `text`, as the handler leaves it.
@@ -1023,6 +1023,9 @@ pub enum EvalKind {
     Length,
     Angle,
     Unitless,
+    Mass,
+    Volume,
+    Area,
 }
 
 impl From<Kind> for EvalKind {
@@ -1031,6 +1034,9 @@ impl From<Kind> for EvalKind {
             Kind::Length => EvalKind::Length,
             Kind::Angle => EvalKind::Angle,
             Kind::Unitless => EvalKind::Unitless,
+            Kind::Mass => EvalKind::Mass,
+            Kind::Volume => EvalKind::Volume,
+            Kind::Area => EvalKind::Area,
         }
     }
 }
@@ -1042,6 +1048,9 @@ impl EvalKind {
             EvalKind::Length => "length",
             EvalKind::Angle => "angle",
             EvalKind::Unitless => "unitless",
+            EvalKind::Mass => "mass",
+            EvalKind::Volume => "volume",
+            EvalKind::Area => "area",
         }
     }
 }
@@ -1075,12 +1084,13 @@ pub enum ExprEvaluatedBody {
     Value {
         /// Always true.
         ok: bool,
-        /// Its value: mm for a length, radians for an angle.
+        /// Its value: mm for a length, radians for an angle, g for a mass, mm³ for a volume, mm² for
+        /// an area.
         value: f64,
         /// What it is.
         kind: EvalKind,
-        /// Its value in the unit asked for; with none, degrees for an angle and the value itself
-        /// otherwise.
+        /// Its value in the unit asked for; with none, in its kind's unit (degrees for an angle,
+        /// kilograms for a mass) and the value itself otherwise.
         display_value: f64,
         /// The parameters it names.
         references: Vec<String>,
