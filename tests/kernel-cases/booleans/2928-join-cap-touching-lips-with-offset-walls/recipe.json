@@ -131,6 +131,14 @@
    "command": "solid.extrude",
    "params": {
     "sketch": "Base",
+    "profiles": [
+     {
+      "point": [
+       4,
+       0
+      ]
+     }
+    ],
     "distance": 2,
     "operation": "new",
     "body_name": "Base"
