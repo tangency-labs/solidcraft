@@ -2394,6 +2394,7 @@
   "ui.agent_chat_key_in_env": "已设置密钥",
   "ui.agent_chat_left": "左侧",
   "ui.agent_chat_limit": "智能体已达到每条消息 {limit} 项更改的上限。再发送一条消息可让它继续。",
+  "ui.agent_chat_login_found": "已找到登录信息",
   "ui.agent_chat_minimize": "最小化为细条",
   "ui.agent_chat_mode_all": "全部",
   "ui.agent_chat_mode_ask": "询问",

@@ -2394,6 +2394,7 @@
   "ui.agent_chat_key_in_env": "キー設定済み",
   "ui.agent_chat_left": "左",
   "ui.agent_chat_limit": "エージェントが1メッセージあたりの変更上限 {limit} に達しました。続けさせるには、もう一度メッセージを送ってください。",
+  "ui.agent_chat_login_found": "ログイン情報あり",
   "ui.agent_chat_minimize": "細いバーに最小化",
   "ui.agent_chat_mode_all": "すべて",
   "ui.agent_chat_mode_ask": "確認",
