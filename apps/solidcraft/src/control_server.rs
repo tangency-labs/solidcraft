@@ -388,7 +388,6 @@ impl Lines {
 struct Subscription {
     lines: Arc<Lines>,
     stop: Arc<AtomicBool>,
-    _counted: Subscriber,
 }
 
 impl Subscription {
@@ -406,10 +405,13 @@ impl Subscription {
         let stop = Arc::new(AtomicBool::new(false));
         let first = lines.turn.lock().unwrap_or_else(PoisonError::into_inner);
         let (l, s) = (lines.clone(), stop.clone());
-        std::thread::Builder::new().stack_size(64 * 1024).spawn(move || send_events(design, &l, &s, seen)).ok()?;
+        // The connection's seat on the watch rides the events thread: it leaves when the thread
+        // does, so the next failed write to a closed client retires it even while the connection's
+        // own thread is slow to see the end of the stream (#7226).
+        std::thread::Builder::new().stack_size(64 * 1024).spawn(move || send_events(design, &l, &s, seen, counted)).ok()?;
         let sent = send(&mut &lines.socket, reply);
         drop(first);
-        Some((Subscription { lines, stop, _counted: counted }, sent))
+        Some((Subscription { lines, stop }, sent))
     }
 }
 
@@ -429,8 +431,10 @@ impl Drop for Subscription {
 }
 
 /// The `design.changed` lines of a subscribed connection, each time the design differs from the
-/// last one it was told of (`seen`), until `stop`.
-fn send_events(design: &DesignWatch, lines: &Lines, stop: &AtomicBool, mut seen: (String, u64)) {
+/// last one it was told of (`seen`), until `stop`. Owns the connection's seat on the watch
+/// (`counted`), so the seat leaves exactly when this thread does: on `stop`, or on the first
+/// write a closed client refuses (#7226).
+fn send_events(design: &DesignWatch, lines: &Lines, stop: &AtomicBool, mut seen: (String, u64), _counted: Subscriber) {
     while !stop.load(Ordering::Relaxed) {
         let Some(now) = design.wait(&seen, stop, Duration::from_secs(1)).filter(|now| *now != seen) else { continue };
         if lines.send(&json!({"event": "design.changed", "params": {"document_id": now.0, "revision": now.1}})).is_err() {
@@ -841,11 +845,17 @@ mod tests {
         assert_eq!(next(&mut lines), json!({"id": 3, "ok": true, "result": "ui.view"}));
         writeln!(quiet_out, "{}", json!({"id": 2, "method": "ui.view"})).unwrap();
         assert_eq!(next(&mut quiet), json!({"id": 2, "ok": true, "result": "ui.view"}), "no events without subscribing");
-        // Closed, it is no longer counted.
+        // Closed, it is no longer counted. Each publish asks the events thread for one more line,
+        // and its write to the closed connection is what retires the seat; that keeps the wait off
+        // the connection's own thread, which anything else this process is doing may hold up past
+        // the deadline (#7226).
         drop((out, lines));
+        let mut revision = 11;
         let deadline = Instant::now() + Duration::from_secs(10);
         while WATCH.subscribed() && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(10));
+            WATCH.publish("d-1", revision);
+            revision += 1;
+            std::thread::sleep(Duration::from_millis(20));
         }
         assert!(!WATCH.subscribed());
     }
