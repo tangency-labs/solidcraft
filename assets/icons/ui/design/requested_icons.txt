@@ -143,6 +143,7 @@ loft	false
 lookat	false
 material	false
 measure	false
+mesh_body	false
 mesh_export	false
 min_radius	false
 mirror	false

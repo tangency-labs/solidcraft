@@ -2020,6 +2020,8 @@ struct Entry {
     patterns: Option<String>,
     label: String,
     icon: &'static str,
+    /// The tooltip's message id, if the row has one ([`Row::tip`]).
+    tip: Option<&'static str>,
     visible: bool,
     selected: bool,
     color: Option<Color32>,
@@ -2034,14 +2036,23 @@ struct Entry {
 
 impl Entry {
     fn body(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody, world: String) -> Self {
+        // A mesh body (an imported STL, 3MF, OBJ, …) has no faces to model on; an open shell is a
+        // surface body, not a solid.
+        let (icon, tip) = if b.body.is_mesh() {
+            ("mesh_body", "ui.body_kind_mesh")
+        } else if b.is_surface() {
+            ("surface", "ui.body_kind_surface")
+        } else {
+            ("body", "ui.body_kind_solid")
+        };
         Self {
             thing: Thing::Body(world.clone()),
             key: b.name.clone(),
             row_key: format!("b:{world}"),
             patterns: None,
             label: b.name.clone(),
-            // An open shell is a surface body, not a solid.
-            icon: if b.is_surface() { "surface" } else { "body" },
+            icon,
+            tip: Some(tip),
             visible: !app.session.visibility.hidden_bodies.contains(&world),
             selected: app.session.selection.iter().any(|s| matches!(s, Sel::Body { name } if name == &world)),
             color: None,
@@ -2072,6 +2083,7 @@ impl Entry {
                 f.name.clone()
             },
             icon: "sketch",
+            tip: None,
             visible: sketch_visible(app, f.id),
             selected: active || app.session.selection.iter().any(|s| matches!(s, Sel::Feature { id } if *id == f.id)),
             color: if lost { Some(t.error) } else { active.then_some(t.sketch_accent) },
@@ -2097,6 +2109,7 @@ impl Entry {
             patterns: None,
             label: f.name.clone(),
             icon: crate::timeline::icon_of(&f.kind),
+            tip: None,
             visible: !app.session.visibility.hidden_origin.contains(&f.name),
             selected: app.session.selection.contains(&sel),
             color: None,
@@ -2485,6 +2498,7 @@ fn entry_row(
             fold: pattern_key.map(|_| patterns_open),
             eye: Some(visible),
             icon: e.icon,
+            kind_tip: e.tip,
             label: &e.label,
             name: true,
             selected,

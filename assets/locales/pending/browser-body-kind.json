@@ -1,0 +1,37 @@
+{
+  "en": {
+    "ui.body_kind_mesh": "Mesh body",
+    "ui.body_kind_solid": "Solid body",
+    "ui.body_kind_surface": "Surface body"
+  },
+  "ar": {
+    "ui.body_kind_mesh": "جسم شبكي",
+    "ui.body_kind_solid": "جسم مصمت",
+    "ui.body_kind_surface": "جسم سطحي"
+  },
+  "de": {
+    "ui.body_kind_mesh": "Netzkörper",
+    "ui.body_kind_solid": "Volumenkörper",
+    "ui.body_kind_surface": "Flächenkörper"
+  },
+  "he": {
+    "ui.body_kind_mesh": "גוף רשת משולשים",
+    "ui.body_kind_solid": "גוף מוצק",
+    "ui.body_kind_surface": "גוף משטח"
+  },
+  "ja": {
+    "ui.body_kind_mesh": "メッシュボディ",
+    "ui.body_kind_solid": "ソリッドボディ",
+    "ui.body_kind_surface": "サーフェスボディ"
+  },
+  "vi": {
+    "ui.body_kind_mesh": "Khối lưới (Mesh)",
+    "ui.body_kind_solid": "Khối đặc",
+    "ui.body_kind_surface": "Thân bề mặt"
+  },
+  "zh": {
+    "ui.body_kind_mesh": "网格实体",
+    "ui.body_kind_solid": "实体",
+    "ui.body_kind_surface": "曲面实体"
+  }
+}

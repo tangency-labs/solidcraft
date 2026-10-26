@@ -443,3 +443,41 @@ fn collapsed_rail_shares_header_hover_inset_and_expands_from_its_whole_card() {
     }
     crate::theme::set_dark(previous);
 }
+
+/// #6907: a mesh body's row has its own icon and tooltip, so it can be told from a solid one.
+#[test]
+fn mesh_and_solid_body_rows_have_different_icons_and_tooltips() {
+    use solidcraft_engine::doc::{Document, FeatureKind, MeshData};
+    use solidcraft_engine::geom::Vec3;
+    let solid = solidcraft_engine::kernel::box_solid(Vec3::ZERO, Vec3::new(10., 10., 10.)).unwrap();
+    let mesh = solid.tessellate(0.01).unwrap();
+    let mut doc = Document::default();
+    doc.add_feature(
+        FeatureKind::MeshImport {
+            file: "box.stl".into(),
+            meshes: vec![MeshData {
+                name: "Mesh".into(),
+                positions: mesh.positions.iter().flat_map(|p| [p.x, p.y, p.z]).collect(),
+                triangles: mesh.triangles.iter().flatten().copied().collect(),
+                color: None,
+            }],
+        },
+        Some("Imported mesh"),
+    )
+    .unwrap();
+    let mut h = Harness::new();
+    h.app.session = solidcraft_engine::Session::new(doc);
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"corner":[20,0,0],"operation":"new_body","body_name":"Solid"})).unwrap();
+    h.settle();
+    let rows = entries(&h.app, 0, "bodies");
+    let row = |name: &str| rows.iter().find(|e| e.key == name).unwrap_or_else(|| panic!("no {name} row in {:?}", body_rows(&h.app)));
+    assert_eq!((row("Mesh").icon, row("Mesh").tip), ("mesh_body", Some("ui.body_kind_mesh")));
+    assert_eq!((row("Solid").icon, row("Solid").tip), ("body", Some("ui.body_kind_solid")));
+    assert_eq!(crate::i18n::tr("ui.body_kind_mesh"), "Mesh body");
+    assert_eq!(crate::i18n::tr("ui.body_kind_solid"), "Solid body");
+    // Its own drawing in the mesh colours, not the solid body's grey cube.
+    let icon = crate::icon_svg::resolve("mesh_body");
+    assert!(!icon.placeholder);
+    assert_ne!(icon.master, crate::icon_svg::resolve("body").master);
+    assert_eq!(icon.accent, crate::icon_svg::accent_index("mesh"));
+}
