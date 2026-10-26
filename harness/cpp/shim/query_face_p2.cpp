@@ -26,6 +26,8 @@
 // Before classifying, the trimmed surface cache of each face surface involved is deleted
 // (SmCacheMgr::DeleteObjectsCache): reading a file can leave one, and the port has no
 // object caches, so both sides classify through the loops.
+#include "sc_analytic_export.h"
+#include "sc_exact_curve_export.h"
 #include "sc_shim.h"
 #include "support/topology_fixture.h"
 
@@ -664,6 +666,7 @@ void export_graph(SmBrep* brep, Graph& g, std::vector<double>& o)
     for (SmFace* p : g.faces)
     {
         SmSurface* s = p->*FPeek::srf();
+        sc_analytic_export::put_exact_head(o, s, the_context());
         put_surface(o, s);
         o.push_back((double)g.find(2, p->*FPeek::fu()));
         SmExtent2d d = p->*FPeek::dom();
@@ -719,7 +722,7 @@ void export_graph(SmBrep* brep, Graph& g, std::vector<double>& o)
         for (SmTopology* t : list_of(p->GetList()))
             v.push_back(g.find(6, t));
         put_list(o, v);
-        put_curve(o, p->GetCurve());
+        sc_exact_curve_export::put_export_curve(o, p->GetCurve(), the_context(), put_curve);
     }
     for (SmVertexuse* p : g.vertexuses)
     {

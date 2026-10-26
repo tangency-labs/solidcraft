@@ -5,13 +5,14 @@
 //! file, optionally with rebuilt UV trim curves, or `CreateFaceFromSurface` over a
 //! B-spline surface or a real `SmPlane`), optionally overwrites stored face, edge and
 //! vertex tolerances, then runs `SmFace::PointClassify`, `sm_ClassifyParamOnFaces` (a
-//! verbatim copy) or `SmFace::CurveOnClassify`. There is no Rust B-rep reader or builder
-//! yet, so the Rust side imports the edited graph the shim exports (unit
-//! `topology.face_p2`'s layout and importer: topology, tolerances, UV domains, planes and
-//! B-spline surfaces, B-spline and line curves, UV trim curves) and runs the port on it.
-//! A face whose surface, or one of whose loop edges' curves, is an `SmBSplineSurface` /
-//! `SmBSplineCurve` subclass the export carries only as its B-spline part is not
-//! compared (both sides report `inexact_geometry`).
+//! verbatim copy) or `SmFace::CurveOnClassify`. The Rust side imports the edited graph
+//! the shim exports using `topology.face_p2`'s importer: topology, tolerances, UV
+//! domains, planes, B-splines and losslessly round-tripped analytic surfaces and EDGE
+//! curves. UV trim curves retain their ordinary B-spline export. The shared exporters
+//! preserve supported revolution/extrusion surfaces and ellipse/circle EDGE curves,
+//! including their analytic data and flags. Unsupported subclasses and representations
+//! that fail the exporters' lossless round-trip checks remain `inexact_geometry`;
+//! neither engine's classification is compared for those faces.
 //!
 //! **Points.** The classified parameter point is computed from the imported B-rep
 //! (identically for both sides, then passed to both): a fraction of the face's UV
@@ -1062,11 +1063,9 @@ fn gen_at(rng: &mut Rng) -> At {
     }
 }
 
-/// The upstream `.smb` files whose faces the export carries exactly (B-spline surfaces
-/// and curves; the other files of `topology.edgeuse_p1`'s list have surfaces of
-/// revolution, extrusion, cones, spheres or tori, which the export carries only as
-/// their B-spline parts). `Mouse.smb` and `box_with_large_fillet.smb` have several
-/// faces (two and one of them inexact).
+/// The historically preferred upstream files with mostly plain B-spline geometry.
+/// Keep this selection and its random draw order stable as exact analytic transport
+/// broadens coverage; each selected face still passes the runtime losslessness check.
 const EXACT_FILES: [&str; 7] = [
     "Endcap.smb",
     "Mouse.smb",
