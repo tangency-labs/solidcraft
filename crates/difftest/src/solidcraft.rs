@@ -1177,12 +1177,40 @@ fn step_rust(k: &mut Kernel, bodies: &mut BTreeMap<String, Brep>, step: &Step) -
                     .into(),
             }))
         }
-        // No Rust `SmApiFilletEdges` yet: it belongs to `blend.fillet_executive_p1`.
-        Step::Fillet { .. } => {
-            return Err(Run::Deferred(Deferral {
-                blocked_by: "blend.fillet_executive_p1".into(),
-                symbol: "SmApiFilletEdges".into(),
-            }))
+        Step::Fillet {
+            body,
+            edges,
+            radius,
+            ..
+        } => {
+            let source = bodies
+                .get(body)
+                .ok_or_else(|| Run::Error(format!("no body `{body}`")))?;
+            let mut target = copy(k, source, 1)?;
+            let body_edges =
+                solidcore::query::api_queries::get_edges(&target).map_err(|e| solid(&e))?;
+            let selected = edges
+                .iter()
+                .map(|point| {
+                    let pick = solidcore::query::api_queries::find_edge(k, &target, p3(*point))
+                        .map_err(|e| solid(&e))?;
+                    body_edges
+                        .get(pick.index)
+                        .copied()
+                        .ok_or_else(|| Run::Error("fillet edge index is outside the body".into()))
+                })
+                .collect::<Result<Vec<_>, Run>>()?;
+            solidcore::blend::fillet_executive::api::fillet_edges(
+                k,
+                &mut target,
+                &selected,
+                *radius,
+                1,
+                1,
+                1.0,
+            )
+            .map_err(|e| solid(&e))?;
+            target
         }
         // SM_API offsets or shells whole bodies only (SmApiOffsetBrepFull,
         // SmApiShellBrepFull); nothing offsets selected faces.
@@ -1599,6 +1627,33 @@ mod tests {
             );
             let (v, _) = verdict(&l.case.expect, &run);
             assert!(VERDICTS.contains(&v), "{}", l.id);
+        }
+    }
+
+    #[test]
+    fn fillet_box_matches_analytic_removed_volume() {
+        let removed = (1.0 - std::f64::consts::PI / 4.0) * 0.5 * 0.5 * 20.0;
+        let case: Case = serde_json::from_value(json!({
+            "name": "single-edge-round",
+            "steps": [
+                {"op": "box", "id": "box", "origin": [0.0, 0.0, 0.0],
+                 "size": [10.0, 20.0, 30.0]},
+                {"op": "fillet", "id": "result", "body": "box",
+                 "edges": [[0.0, 10.0, 0.0]], "radius": 0.5}
+            ],
+            "expect": {"lumps": 1, "volume": {
+                "value": 6000.0 - removed, "tol": removed * 0.001,
+                "formula": "box minus one quarter-round edge cut"
+            }}
+        }))
+        .unwrap();
+        let run = run_rust(&case);
+        let (result, checks) = verdict(&case.expect, &run);
+        assert_eq!(result, "PASS", "{run:?}: {checks:?}");
+        if let Run::Done(measured) = run {
+            assert_eq!(measured.topology, [7, 15, 10]);
+        } else {
+            panic!("fillet did not produce a measured body");
         }
     }
 
