@@ -2005,19 +2005,22 @@ pub(super) fn plastic_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &F
                 apply_traced(doc, st, f, tool, Operation::Join, std::slice::from_ref(&target))
             }
         }
-        FeatureKind::SnapFit { position, direction, hook, length, thickness, width, catch_depth, catch_length, body } => {
+        FeatureKind::SnapFit { position, direction, hook, length, thickness, width, catch_depth, catch_length, base_height, new_body, body } => {
             let target = body_under(st, body, position.0)?;
             let size = |what: &str, e: &str| plastic_size("snap fit", what, len(e)?);
             let (l, t, w) = (size("length", length)?, size("thickness", thickness)?, size("width", width)?);
             let (cd, cl) = (size("catch_depth", catch_depth)?, size("catch_length", catch_length)?);
+            let bh = base_height.as_deref().map(|e| size("base_height", e)).transpose()?.unwrap_or(0.0);
             if !(cl < l) {
                 return Err(DocError::Invalid("the snap fit's catch must be shorter than its arm".into()));
             }
             let (x, y, z) = local_frame(direction.0, Some(hook.0))?;
             let delta = (l * 0.05).clamp(1e-3, 0.5);
             // Side profile (x = toward the catch, y = up the arm), extruded across the width.
-            let pts =
-                [Vec2::new(-t, -delta), Vec2::new(0.0, -delta), Vec2::new(0.0, l - cl), Vec2::new(cd, l - cl), Vec2::new(0.0, l), Vec2::new(-t, l)];
+            // The base reaches `base_height` below the face; a joined arm bites `delta` into
+            // the wall, a separate body sits flush on it.
+            let y0 = if *new_body { -bh } else { -delta - bh };
+            let pts = [Vec2::new(-t, y0), Vec2::new(0.0, y0), Vec2::new(0.0, l - cl), Vec2::new(cd, l - cl), Vec2::new(0.0, l), Vec2::new(-t, l)];
             let o = position.0 - y * (w / 2.0);
             let pl = Plane::new(o, x, z).ok_or_else(|| DocError::Invalid("snap fit frame".into()))?;
             let mut lp = Loop2::polygon(&pts);
@@ -2028,7 +2031,8 @@ pub(super) fn plastic_eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &F
             let (lo, hi) = if sgn > 0.0 { (0.0, w) } else { (-w, 0.0) };
             let tool = kernel::extrude(&pl, &[Region2 { outer: lp, holes: Vec::new() }], lo, hi)?;
             let tool = tool.into_iter().map(|b| crate::lineage::part_tool(b, "arm")).collect();
-            apply_traced(doc, st, f, tool, Operation::Join, std::slice::from_ref(&target))
+            let op = if *new_body { Operation::NewBody } else { Operation::Join };
+            apply_traced(doc, st, f, tool, op, std::slice::from_ref(&target))
         }
         FeatureKind::Rest { position, direction, along, width, length, height, draft, thickness, body } => {
             let target = body_under(st, body, position.0)?;

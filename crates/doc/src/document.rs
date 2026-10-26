@@ -1273,6 +1273,14 @@ pub enum FeatureKind {
         /// The catch's height along the arm.
         #[walk(length = "Catch length")]
         catch_length: Expr,
+        /// The base extends this far below the face (none: the arm starts at the face).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Base height")]
+        base_height: Option<Expr>,
+        /// Make the snap fit its own body instead of joining the target, so it can be
+        /// patterned or moved on its own.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        new_body: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         body: Option<BodyName>,
     },
