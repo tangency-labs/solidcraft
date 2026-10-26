@@ -688,10 +688,11 @@ fn a_triangle_counts_only_where_it_meets_the_tiles() {
     assert_eq!(admit_picture(&one_triangle(huge), &two).unwrap().projected_pixel_tests, Some(400));
     // A sum at its end is refused by name, not wrapped; no one triangle's count can overflow, its
     // sides being two samples a pixel of at most 65536 pixels.
-    let view = Projection::Ortho { frame, grid }.view(&one_triangle(thin), 1).unwrap();
-    let triangle = view.project(&one_triangle(thin).meshes[0], 0, None, true).unwrap().unwrap();
+    let scene = one_triangle(thin);
+    let view = Projection::Ortho { frame, grid }.view(&scene, 1).unwrap();
+    let placed = view.place(corners(&scene.meshes[0], 0).unwrap().0).unwrap().unwrap();
     let mut sum = u64::MAX;
-    let e = add_pixel_tests(&mut sum, &triangle, [0, 99, 0, 49], u64::MAX).unwrap_err();
+    let e = add_pixel_tests(&mut sum, placed.bounds, [0, 99, 0, 49], u64::MAX).unwrap_err();
     assert_eq!(e.message, "pixel work overflow");
 }
 
