@@ -13,7 +13,7 @@ pub const MAX_ASSET_BYTES: usize = 512 << 20;
 pub const MAX_MANIFEST_BYTES: usize = 16 << 20;
 const MAX_TOTAL_BYTES: usize = 768 << 20;
 const MAX_ENTRIES: usize = 10_000;
-const REQUIRED: &[&str] = &["sha256", "chunks/1"];
+const REQUIRED: &[&str] = &["sha256", "chunks/1", crate::management::LIFECYCLE];
 
 pub fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
@@ -125,6 +125,9 @@ impl Manifest {
             }
         }
         let manifest: Self = serde_json::from_value(value).map_err(|e| invalid(e.to_string()))?;
+        if manifest.change()?.is_some() && !manifest.required.iter().any(|c| c == crate::management::LIFECYCLE) {
+            return Err(invalid("lifecycle metadata requires its capability"));
+        }
         check_hash(&manifest.document_hash)?;
         let mut total = 0usize;
         for (name, asset) in &manifest.assets {
@@ -172,7 +175,7 @@ impl Snapshot {
         let mut snapshot = Self {
             manifest: Manifest {
                 format: FORMAT.into(),
-                required: REQUIRED.iter().map(|s| (*s).into()).collect(),
+                required: ["sha256", "chunks/1"].iter().map(|s| (*s).into()).collect(),
                 document_hash: digest(&document),
                 assets: BTreeMap::new(),
                 extra: BTreeMap::new(),

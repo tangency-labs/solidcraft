@@ -139,6 +139,9 @@ pub fn stored_designs(cached: Vec<CachedEntry>, pending: Vec<PendingSave>) -> Re
     let key = |d: &Destination| (d.connection.clone(), d.project.clone(), d.file.clone());
     let mut entries = BTreeMap::new();
     for entry in cached {
+        if entry.save.manifest.deleted() {
+            continue;
+        }
         let manifest_hash = manifest_digest(&entry.save.manifest)?;
         entries.insert(
             key(&entry.destination),
@@ -158,9 +161,15 @@ pub fn stored_designs(cached: Vec<CachedEntry>, pending: Vec<PendingSave>) -> Re
     let parents: BTreeSet<_> = pending.iter().filter_map(|p| p.expected_revision.as_ref()).collect();
     let mut counts = BTreeMap::new();
     for save in pending.iter().filter(|p| !parents.contains(&p.id)) {
+        *counts.entry(key(&save.destination)).or_insert(0usize) += 1;
+    }
+    for save in pending.iter().filter(|p| !parents.contains(&p.id)) {
         let key = key(&save.destination);
-        let count = counts.entry(key.clone()).or_insert(0usize);
-        *count += 1;
+        let count = counts.get(&key).copied().unwrap_or_default();
+        if save.manifest.deleted() && count == 1 {
+            entries.remove(&key);
+            continue;
+        }
         let mut local_revisions = entries.remove(&key).map(|entry| entry.local_revisions).unwrap_or_default();
         let title = save
             .manifest
@@ -175,10 +184,10 @@ pub fn stored_designs(cached: Vec<CachedEntry>, pending: Vec<PendingSave>) -> Re
             key,
             StoredDesign {
                 destination: save.destination.clone(),
-                revision: if *count == 1 { Some(save.id.clone()) } else { None },
+                revision: if count == 1 { Some(save.id.clone()) } else { None },
                 document_hash: save.manifest.document_hash.clone(),
                 manifest_hash: manifest_digest(&save.manifest)?,
-                phase: if *count == 1 { Phase::SavedLocally } else { Phase::Failed },
+                phase: if count == 1 { Phase::SavedLocally } else { Phase::Failed },
                 conflict: false,
                 outdated: false,
                 local_revisions,

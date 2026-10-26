@@ -54,6 +54,7 @@ pub(crate) use features::{rail_fit_form, sweep_orientation};
 pub(crate) use features_more::{MAX_SKETCH_ID, SidePoint, SketchFrameId, axes_mask, side_point, sketch_frame_id};
 pub(crate) use file::mesh_crease_angle;
 pub use file::open_steps::OpenSteps;
+pub(crate) use file::rename_design;
 pub(crate) use file::{NAMES_MESSAGE, UP_MESSAGE, names_form, up_form, usable_path};
 pub(crate) use inspect::color_param;
 pub use join_pieces::{Addition, addition};
@@ -385,6 +386,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(file::COMMANDS.iter());
     v.extend(print_face::COMMANDS.iter());
     v.extend(cloud::COMMANDS.iter());
+    v.extend(cloud::management::COMMANDS.iter());
     v.extend(metadata::COMMANDS.iter());
     v.extend(inspect::COMMANDS.iter());
     v.extend(compare::COMMANDS.iter());

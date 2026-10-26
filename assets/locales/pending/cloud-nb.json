@@ -14,6 +14,7 @@
     "cloud.create_repo": "1. Opprett et privat lager",
     "cloud.create_token": "2. Opprett tilgangstoken",
     "cloud.default_repository": "Standard for nye skylagringer",
+    "cloud.delete_confirm": "Flytte dette designet til papirkurven? Historikken beholdes for gjenoppretting.",
     "cloud.design_changed": "Designet ble endret. Åpne Lagre i skyprosjekt på nytt.",
     "cloud.design_name": "Designnavn",
     "cloud.destination_hint": "Lagres i prosjektets mappe for deler. Frakoblede lagringer beholdes på denne enheten til de er synkronisert.",
@@ -40,6 +41,7 @@
     "cloud.local_version": "Lokal versjon",
     "cloud.local_versions": "Velg en lokal versjon",
     "cloud.local_versions_hint": "Velg en versjon å åpne. Alle versjoner beholdes.",
+    "cloud.manage": "Administrer design i skyen",
     "cloud.name_used": "Navnet er allerede i bruk. Velg et annet navn.",
     "cloud.needs_attention": "Krever oppmerksomhet",
     "cloud.reconnect": "Koble til på nytt…",
@@ -86,9 +88,14 @@
     "cmd.cloud.cancel": "Avbryt skyoperasjon",
     "cmd.cloud.configure": "Konfigurer skylagring",
     "cmd.cloud.connect": "Koble til GitHub",
+    "cmd.cloud.delete": "Flytt til papirkurven",
+    "cmd.cloud.discard": "Forkast handling i kø",
+    "cmd.cloud.history": "Versjonshistorikk",
     "cmd.cloud.list": "Åpne lager",
     "cmd.cloud.open": "Åpne design fra skyen",
     "cmd.cloud.open.finish": "Fullfør åpning av design fra skyen",
+    "cmd.cloud.rename": "Gi designet nytt navn",
+    "cmd.cloud.restore": "Gjenopprett revisjon",
     "cmd.cloud.save": "Lagre i skyprosjekt",
     "cmd.cloud.settings": "Innstillinger for skylagring",
     "cmd.cloud.ssh.generate": "Generer SSH-nøkkel",
@@ -97,6 +104,7 @@
     "cmd.cloud.test": "Test lagertilkobling",
     "cmd.cloud.thumbnail": "Last inn forhåndsvisning av design",
     "cmd.cloud.thumbnail.finish": "Fullfør innlasting av forhåndsvisning",
+    "cmd.cloud.trash": "Papirkurv",
     "cmd.cloud.website": "Åpne på GitHub"
   }
 }

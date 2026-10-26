@@ -23,6 +23,10 @@ impl Host for Worker {
             | Operation::Synchronize(c)
             | Operation::Thumbnail { connection: c, .. }
             | Operation::Open { connection: c, .. }
+            | Operation::Trash(c)
+            | Operation::History { connection: c, .. }
+            | Operation::Manage { connection: c, .. }
+            | Operation::Discard { connection: c, .. }
             | Operation::Save { connection: c, .. } => c.id.clone(),
         };
         let job = Job::new(connection)?;
