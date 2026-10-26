@@ -12,8 +12,9 @@
 //! recurses once with maximum length zero; an explicit depth limit of two guards
 //! that invariant. Split arrays are limited to 1,000,000 entries before allocation
 //! or concatenation. Unsupported surface virtuals return `Unported`, never an
-//! approximate replacement (the diagonal curves of a cone, sphere or torus, which
-//! the port's B-spline-only `SmCrvOnSurf` cannot carry). Iso curves come from the
+//! approximate replacement. The diagonal curves of a cone, sphere or torus are
+//! `SmCrvOnSurf` over the analytic surface itself ([`CrvOnSurf`] holds any
+//! [`Surface`]). Iso curves come from the
 //! kind's own `CreateIsoParametricCurve`, and implicit iso curves evaluate the plane,
 //! cone, sphere and torus through their own evaluation, as upstream's virtuals;
 //! curve-bounded, STEP, offset and in-volume surfaces build both kinds of iso curve
@@ -58,14 +59,12 @@ fn bss(surface: &Surface) -> Result<Cow<'_, BSplineSurface>> {
         SurfaceKind::BSpline(s) => Ok(Cow::Borrowed(s)),
         SurfaceKind::Plane(p) => Ok(p.base_for_query()),
         SurfaceKind::Cone(_) | SurfaceKind::Sphere(_) | SurfaceKind::Torus(_) => {
-            // DISPATCH GAP: only the diagonal `SmCrvOnSurf` of `FindTessellationSplits`
-            // gets here (iso curves dispatch to the kinds' own overrides; the kernel
-            // asks for diagonals only for B-spline and extrusion surfaces): the port's
-            // `CrvOnSurf` holds a B-spline surface, upstream's the analytic one.
-            // UNPORTED(surface.surface_p9): SmCrvOnSurf over an analytic surface
-            Err(SolidError::unported(
-                "SmCrvOnSurf::SmCrvOnSurf(analytic surface)",
-                "surface.surface_p9",
+            // (unreachable: iso curves of these kinds dispatch to the kinds' own
+            // overrides, and the diagonal `SmCrvOnSurf` of `FindTessellationSplits`
+            // holds the analytic surface itself, as upstream, not a B-spline view)
+            Err(SolidError::invalid_input(
+                OP,
+                "surface has no B-spline view",
             ))
         }
         SurfaceKind::SurfOfRevolution(s) => Ok(Cow::Borrowed(s.base())),

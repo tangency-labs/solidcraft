@@ -72,7 +72,7 @@ pub fn eval_surface_kind(
     // Only finite values are required: scale, chord height, maximum side and
     // the CSI domain (disjoint, touching or sliver) are all defined in C++.
     // The angle range and the [0,1] split/iso domain stay bounded as before.
-    if !(0..=4).contains(&surface_kind)
+    if !(0..=6).contains(&surface_kind)
         // The one-node Rust CSI harness tree does not model `BuildTree`, which
         // subdivides a revolution (or cone); keep those CSI out of the comparison.
         || (surface_kind >= 2 && op == 2)

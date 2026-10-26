@@ -61,7 +61,8 @@ struct Inputs {
     analytic_plane: bool,
     #[serde(default)]
     analytic_revolution: bool,
-    /// 1: the corpus cylinder, 2: a canonical cone (shim kinds 3 and 4).
+    /// 1: the corpus cylinder, 2: a canonical cone, 3: a canonical sphere, 4: a
+    /// canonical torus (shim kinds 3 to 6).
     #[serde(default)]
     analytic_cone: u8,
     net: [[f64; 3]; 9],
@@ -111,6 +112,33 @@ fn surface(k: &Kernel, i: &Inputs) -> Result<Surface, HarnessError> {
         )
         .map_err(harness)?;
         return Ok(Surface::from(cone));
+    }
+    if i.analytic_cone == 3 {
+        let placement = solidcore::geom::axis2_placement::Axis2Placement::new(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+        let sphere = solidcore::surface::sphere::Sphere::create_canonical(k, &placement, 1.5)
+            .map_err(harness)?;
+        return Ok(Surface::from(sphere));
+    }
+    if i.analytic_cone == 4 {
+        let placement = solidcore::geom::axis2_placement::Axis2Placement::new(
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+        let torus = solidcore::surface::torus::Torus::create_canonical(
+            k,
+            &placement,
+            2.0,
+            0.5,
+            solidcore::surface::torus::TorusOptions::default(),
+            None,
+        )
+        .map_err(harness)?;
+        return Ok(Surface::from(torus));
     }
     if i.analytic_revolution {
         let generator = Curve::from(BSplineCurve::from_nurb(

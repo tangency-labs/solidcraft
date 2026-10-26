@@ -8,6 +8,8 @@
 #include <SmSurfOfRevolution.h>
 #include <SmCone.h>
 #include <SmCylinder.h>
+#include <SmSphere.h>
+#include <SmTorus.h>
 #include <SmAxis2Placement.h>
 #include <SmBSplineCurve.h>
 #include <SmContext.h>
@@ -68,6 +70,20 @@ SC_EXPORT int32_t sc_surface_surface_p9_eval(int32_t op, int32_t surface_kind, c
         if (SmCone::CreateCanonical(context, placement, 0.5, 1.5, 2.0, cone) != SM_SUCCESS || !cone)
             { delete cone; return SC_ERR_ARG; }
         surface = cone;
+    } else if (surface_kind == 5) {
+        // a canonical sphere (radius 1.5)
+        SmAxis2Placement placement(SmPoint3d(0,0,0), SmVector3d(1,0,0), SmVector3d(0,1,0));
+        SmSphere* sphere = NULL;
+        if (SmSphere::CreateCanonical(context, placement, 1.5, sphere) != SM_SUCCESS || !sphere)
+            { delete sphere; return SC_ERR_ARG; }
+        surface = sphere;
+    } else if (surface_kind == 6) {
+        // a canonical torus (major radius 2, minor radius 0.5)
+        SmAxis2Placement placement(SmPoint3d(0,0,0), SmVector3d(1,0,0), SmVector3d(0,1,0));
+        SmTorus* torus = NULL;
+        if (SmTorus::CreateCanonical(context, placement, 2.0, 0.5, torus) != SM_SUCCESS || !torus)
+            { delete torus; return SC_ERR_ARG; }
+        surface = torus;
     } else if (surface_kind == 1) {
         surface = new(context) SmPlane(SmPoint3d(0,0,0), SmVector3d(1,0,0), SmVector3d(0,1,0), SmVector2d(1,1), SmExtent2d(0,0,1,1), &context);
     } else {
