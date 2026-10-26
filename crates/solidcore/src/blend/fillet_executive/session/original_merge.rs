@@ -117,7 +117,7 @@ impl FilletTagMergeAccess<FilletObject> for MergeAccess<'_, '_> {
     }
 }
 
-fn destroy_tags(objects: &mut SessionObjects<'_>, tags: &[FilletObject]) -> Result<()> {
+pub(super) fn destroy_tags(objects: &mut SessionObjects<'_>, tags: &[FilletObject]) -> Result<()> {
     let mut cleanup = Ok(());
     for tag in tags {
         let removed = match tag {
@@ -152,35 +152,45 @@ impl FilletSession<'_> {
         self.objects.target.set_editing_enabled(true);
         let result = self.with_original_trim_marks(k, |session, k, locks, serial| {
             session.select_and_delete_with_marks(k, locks, serial, output)?;
-            let mut tags = Vec::new();
-            let merged = session.executive.tag_and_merge_fillet_faces(
-                k,
-                &mut MergeAccess(&mut session.objects),
-                FilletObject::Body(FilletBody::Target),
-                FilletObject::IntermediateBrep,
-                &mut tags,
-            );
-            let retained = merged.and_then(|()| {
-                tags.iter()
-                    .map(|object| match object {
-                        FilletObject::Attribute(handle) => Ok(*handle),
-                        _ => Err(invalid("merge tag is not an actual attribute")),
-                    })
-                    .collect::<Result<Vec<_>>>()
-            });
-            match retained {
-                Ok(handles) => {
-                    session.objects.merge_attributes = Some(handles);
-                    Ok(())
-                }
-                Err(error) => {
-                    let _ = destroy_tags(&mut session.objects, &tags);
-                    Err(error)
-                }
-            }
+            session.tag_and_merge_retained(k)
         });
         self.objects.target.set_editing_enabled(editing);
         result
+    }
+
+    /// Tag the eligible surviving edges and copy the intermediate body into the
+    /// target, retaining the temporary tags for the post-merge tail. Errors destroy
+    /// the tags. The caller holds the original trim mark scope.
+    pub(super) fn tag_and_merge_retained(&mut self, k: &mut Kernel) -> Result<()> {
+        if self.objects.merge_attributes.is_some() {
+            return Err(invalid("fillet faces have already been merged"));
+        }
+        let mut tags = Vec::new();
+        let merged = self.executive.tag_and_merge_fillet_faces(
+            k,
+            &mut MergeAccess(&mut self.objects),
+            FilletObject::Body(FilletBody::Target),
+            FilletObject::IntermediateBrep,
+            &mut tags,
+        );
+        let retained = merged.and_then(|()| {
+            tags.iter()
+                .map(|object| match object {
+                    FilletObject::Attribute(handle) => Ok(*handle),
+                    _ => Err(invalid("merge tag is not an actual attribute")),
+                })
+                .collect::<Result<Vec<_>>>()
+        });
+        match retained {
+            Ok(handles) => {
+                self.objects.merge_attributes = Some(handles);
+                Ok(())
+            }
+            Err(error) => {
+                let _ = destroy_tags(&mut self.objects, &tags);
+                Err(error)
+            }
+        }
     }
 }
 

@@ -10,6 +10,7 @@
 //! | [`FilletExecutive::do_filleting`] | `SmFilletExecutive::DoFilleting` |
 //! | [`FilletExecutive`], [`ErrorInfo`] | executive/error-info member data (co-ported from p1) |
 //! | [`ExecutiveAccess`] | borrowed access to dependency-owned objects |
+//! | [`FilletExecutive::finish_merged_fillet`], [`FilletFinishAccess`] | the `DoFilleting` tail after `MergeBrep` |
 //!
 //! Deviations: debug drawing/output is omitted. Handles follow the existing
 //! topology-intersector adapter model: an adapter resolves topology to typed ids
@@ -269,6 +270,149 @@ impl<O: ClassObject + SolutionObject + Ord, A: ExecutiveAccess<O>> FilletTagMerg
     }
     fn tag_merge_bodies(&mut self, k: &mut Kernel, target: O, fillet: O) -> Result<()> {
         self.merge_brep(k, target, fillet, None, None, true)
+    }
+}
+
+/// The capabilities of the post-merge tail of `DoFilleting` (`SmFilletExecutive.cpp`
+/// 3532-3644): intermediate destruction, final stitching, E-attribute remapping,
+/// `RemoveTopoEdges`, `BooleanPostProcess`, the per-face `PreEdit` notification and
+/// `OrientTrimmedSurfaces`. Each method is the [`ExecutiveAccess`] method of the same
+/// name without its `finish_` prefix.
+pub trait FilletFinishAccess<O: ClassObject + SolutionObject + Ord> {
+    /// `delete m_pFilletBrep` after its intersector references have been cleared.
+    ///
+    /// # Errors
+    /// Lookup or destruction failures.
+    fn finish_delete_brep(&mut self, k: &mut Kernel, brep: O) -> Result<()>;
+    /// `GetTolerance` of the target.
+    ///
+    /// # Errors
+    /// Lookup failures.
+    fn finish_tolerance(&self, k: &Kernel, brep: O) -> Result<f64>;
+    /// `SmStitch::DoStitching` with the `DoFilleting` configuration.
+    ///
+    /// # Errors
+    /// Only an unresolved handle; stitch failures are [`StitchAttempt::status`].
+    fn finish_do_stitching(
+        &mut self,
+        k: &mut Kernel,
+        brep: O,
+        tolerance: f64,
+        settings: StitchSettings,
+    ) -> Result<StitchAttempt>;
+    /// `SmAttribute::GetUsers`, preserving order.
+    ///
+    /// # Errors
+    /// Lookup failures.
+    fn finish_attribute_users(&self, attribute: O) -> Result<Vec<O>>;
+    /// `SmFilletExecutive::RemoveTopoEdges`.
+    ///
+    /// # Errors
+    /// Those of the removal.
+    fn finish_remove_topo_edges(
+        &mut self,
+        k: &mut Kernel,
+        executive: &mut FilletExecutive<O>,
+    ) -> Result<()>;
+    /// `SmMerge::BooleanPostProcess(bCheckAllEdges)`.
+    ///
+    /// # Errors
+    /// Those of the post-process.
+    fn finish_boolean_post_process(
+        &mut self,
+        k: &mut Kernel,
+        executive: &mut FilletExecutive<O>,
+        check_all_edges: bool,
+    ) -> Result<()>;
+    /// `SmBrep::GetFaces`, preserving list order.
+    ///
+    /// # Errors
+    /// Lookup failures.
+    fn finish_faces(&self, brep: O) -> Result<Vec<O>>;
+    /// `SmFace::Notify`.
+    ///
+    /// # Errors
+    /// Those of the notification.
+    fn finish_notify_face(
+        &mut self,
+        k: &mut Kernel,
+        face: O,
+        operation: NotifyOperation,
+        data1: Option<O>,
+        data2: Option<O>,
+        data3: Option<O>,
+    ) -> Result<()>;
+    /// `SmBrep::OrientTrimmedSurfaces`.
+    ///
+    /// # Errors
+    /// Those of the orientation.
+    fn finish_orient_trimmed_surfaces(
+        &mut self,
+        k: &mut Kernel,
+        brep: O,
+        outward: bool,
+        maybe_not_solid: &mut bool,
+        just_unify: bool,
+    ) -> Result<()>;
+}
+
+impl<O: ClassObject + SolutionObject + Ord, A: ExecutiveAccess<O>> FilletFinishAccess<O> for A {
+    fn finish_delete_brep(&mut self, _k: &mut Kernel, brep: O) -> Result<()> {
+        self.delete_brep(brep)
+    }
+    fn finish_tolerance(&self, k: &Kernel, brep: O) -> Result<f64> {
+        self.tolerance(k, brep, false)
+    }
+    fn finish_do_stitching(
+        &mut self,
+        k: &mut Kernel,
+        brep: O,
+        tolerance: f64,
+        settings: StitchSettings,
+    ) -> Result<StitchAttempt> {
+        self.do_stitching(k, brep, tolerance, None, None, settings, None, None)
+    }
+    fn finish_attribute_users(&self, attribute: O) -> Result<Vec<O>> {
+        self.attribute_users(attribute)
+    }
+    fn finish_remove_topo_edges(
+        &mut self,
+        k: &mut Kernel,
+        executive: &mut FilletExecutive<O>,
+    ) -> Result<()> {
+        self.remove_topo_edges(k, executive)
+    }
+    fn finish_boolean_post_process(
+        &mut self,
+        k: &mut Kernel,
+        executive: &mut FilletExecutive<O>,
+        check_all_edges: bool,
+    ) -> Result<()> {
+        self.boolean_post_process(k, executive, check_all_edges)
+    }
+    fn finish_faces(&self, brep: O) -> Result<Vec<O>> {
+        self.faces(brep)
+    }
+    fn finish_notify_face(
+        &mut self,
+        k: &mut Kernel,
+        face: O,
+        operation: NotifyOperation,
+        data1: Option<O>,
+        data2: Option<O>,
+        data3: Option<O>,
+    ) -> Result<()> {
+        self.notify_face(k, face, operation, data1, data2, data3)
+    }
+    fn finish_orient_trimmed_surfaces(
+        &mut self,
+        k: &mut Kernel,
+        brep: O,
+        outward: bool,
+        maybe_not_solid: &mut bool,
+        just_unify: bool,
+    ) -> Result<()> {
+        self.orient_trimmed_surfaces(k, brep, outward, maybe_not_solid, just_unify, None)
     }
 }
 
@@ -2510,6 +2654,85 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         access.tag_merge_bodies(k, target, fillet)
     }
 
+    /// The tail of `DoFilleting` after `MergeBrep` (`SmFilletExecutive.cpp` 3532-3644):
+    /// clear the intersector's fillet references, delete the fillet B-rep, stitch
+    /// up to five times (doubling the tolerance), remap the surviving tagged edges
+    /// into `topo_edges`, `RemoveTopoEdges`, `BooleanPostProcess(TRUE)`, notify every
+    /// target face `PreEdit` and orient the target. `attributes` are the temporary
+    /// tags of [`Self::tag_and_merge_fillet_faces`]; the caller destroys them after
+    /// this returns, on every result (upstream `SmObjsDelete`).
+    ///
+    /// # Errors
+    /// Deletion, stitching (after the last try), removal and post-process failures;
+    /// ordinary notification and orientation failures are ignored as upstream.
+    pub fn finish_merged_fillet(
+        &mut self,
+        k: &mut Kernel,
+        access: &mut impl FilletFinishAccess<O>,
+        target: O,
+        fillet: O,
+        attributes: &[O],
+    ) -> Result<()> {
+        if self.intersector.other_brep() == Some(fillet) {
+            self.intersector.set_other_brep(None);
+        }
+        if self.intersector.primary_brep() == Some(fillet) {
+            self.intersector.set_primary_brep(None);
+        }
+        access.finish_delete_brep(k, fillet)?;
+        self.fillet = None;
+        let mut tolerance = access.finish_tolerance(k, target)?;
+        for attempt in 0..5 {
+            let stitch =
+                access.finish_do_stitching(k, target, tolerance, StitchSettings::default())?;
+            if stitch.status.is_none() && stitch.lamina == 0 {
+                break;
+            }
+            if let Some(error) = &stitch.status {
+                if error.is_unported() {
+                    return Err(error.clone());
+                }
+                if attempt == 4 {
+                    self.error.code = 7; // SM_FILERR_BAD_MERGE
+                    self.error.comment =
+                        "Fillet Stitching Failure: Error Stitching Fillets To Original Brep".into();
+                    return Err(failure());
+                }
+            }
+            tolerance *= 2.0;
+        }
+        self.intersector.set_primary_brep(Some(target));
+        self.topo_edges.clear();
+        for attribute in attributes {
+            if let Some(user) = access.finish_attribute_users(*attribute)?.first().copied() {
+                self.topo_edges.push(Some(user));
+            }
+        }
+        // Upstream cbi_MAP_TOPO_EDGES=0: do not collect mapped intersections.
+        access.finish_remove_topo_edges(k, self)?;
+        access.finish_boolean_post_process(k, self, true)?;
+        for face in access.finish_faces(target)? {
+            // SmTypes.h:659: SM_NO_GET_BREP(face) expands to a null object.
+            ignore(access.finish_notify_face(
+                k,
+                face,
+                NotifyOperation::PreEdit,
+                Some(face),
+                None,
+                None,
+            ))?;
+        }
+        let mut maybe_not_solid = false;
+        ignore(access.finish_orient_trimmed_surfaces(
+            k,
+            target,
+            true,
+            &mut maybe_not_solid,
+            false,
+        ))?;
+        Ok(())
+    }
+
     fn trim_and_merge(
         &mut self,
         k: &mut Kernel,
@@ -2530,74 +2753,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
         let mut attributes = Vec::new();
         let result = (|| {
             self.tag_and_merge_fillet_faces(k, access, target, fillet, &mut attributes)?;
-            if self.intersector.other_brep() == Some(fillet) {
-                self.intersector.set_other_brep(None);
-            }
-            if self.intersector.primary_brep() == Some(fillet) {
-                self.intersector.set_primary_brep(None);
-            }
-            access.delete_brep(fillet)?;
-            self.fillet = None;
-            let mut tolerance = access.tolerance(k, target, false)?;
-            for attempt in 0..5 {
-                let stitch = access.do_stitching(
-                    k,
-                    target,
-                    tolerance,
-                    None,
-                    None,
-                    StitchSettings::default(),
-                    None,
-                    None,
-                )?;
-                if stitch.status.is_none() && stitch.lamina == 0 {
-                    break;
-                }
-                if let Some(error) = &stitch.status {
-                    if error.is_unported() {
-                        return Err(error.clone());
-                    }
-                    if attempt == 4 {
-                        self.error.code = 7; // SM_FILERR_BAD_MERGE
-                        self.error.comment =
-                            "Fillet Stitching Failure: Error Stitching Fillets To Original Brep"
-                                .into();
-                        return Err(failure());
-                    }
-                }
-                tolerance *= 2.0;
-            }
-            self.intersector.set_primary_brep(Some(target));
-            self.topo_edges.clear();
-            for attribute in &attributes {
-                if let Some(user) = access.attribute_users(*attribute)?.first().copied() {
-                    self.topo_edges.push(Some(user));
-                }
-            }
-            // Upstream cbi_MAP_TOPO_EDGES=0: do not collect mapped intersections.
-            access.remove_topo_edges(k, self)?;
-            access.boolean_post_process(k, self, true)?;
-            for face in access.faces(target)? {
-                // SmTypes.h:659: SM_NO_GET_BREP(face) expands to a null object.
-                ignore(access.notify_face(
-                    k,
-                    face,
-                    NotifyOperation::PreEdit,
-                    Some(face),
-                    None,
-                    None,
-                ))?;
-            }
-            let mut maybe_not_solid = false;
-            ignore(access.orient_trimmed_surfaces(
-                k,
-                target,
-                true,
-                &mut maybe_not_solid,
-                false,
-                None,
-            ))?;
-            Ok(())
+            self.finish_merged_fillet(k, access, target, fillet, &attributes)
         })();
         // SmObjsDelete lives through orientation; also clean up on errors/deferrals.
         let mut cleanup = Ok(());

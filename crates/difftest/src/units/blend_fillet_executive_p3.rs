@@ -755,6 +755,9 @@ fn rust(input: &Inputs) -> Result<Output, HarnessError> {
         if !input.record.is_empty() {
             return Err(HarnessError::new("mixed fixture forms"));
         }
+        if let Some(out) = end_to_end::upstream_example(example)? {
+            return Ok(out);
+        }
         // These fixture constructors are the actual missing API entrypoints, not
         // geometric passes or a replacement for direct p3 parity.
         let symbol = match example {
@@ -762,10 +765,6 @@ fn rust(input: &Inputs) -> Result<Output, HarnessError> {
             0 => "SmApiCircularFillet",
             // UNPORTED(blend.fillet_executive_p1): SmApiChamferFillet
             1 => "SmApiChamferFillet",
-            // UNPORTED(blend.fillet_executive_p1): SmApiFilletEdges
-            2 => "SmApiFilletEdges",
-            // UNPORTED(blend.fillet_executive_p1): SmApiFilletEdgesPerEdge
-            3 => "SmApiFilletEdgesPerEdge",
             // UNPORTED(blend.fillet_executive_p1): SmApiVariableRadiusFillet
             4 => "SmApiVariableRadiusFillet",
             // UNPORTED(blend.fillet_executive_p1): SmApiSetBevelCorners

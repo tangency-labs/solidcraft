@@ -51,6 +51,7 @@ use crate::surface::surface::Surface;
 use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, VertexId};
 
 mod classification;
+mod finish;
 mod original_merge;
 mod original_trim;
 pub use original_trim::{OriginalSurfaceDeletion, OriginalSurfaceSelection};
@@ -614,6 +615,56 @@ impl<'target> FilletSession<'target> {
                 xsect_types: &[xsect],
                 radius_types: &[FilletSolverType::ConstRadius],
                 radius_values: &[radius],
+                var_rad_laws: None,
+                approx_tol: -1.0,
+                ang_tol_deg: -1.0,
+                tan_tol_deg: -1.0,
+                xsect_tol: -1.0,
+                continuity,
+                thumbweight,
+            },
+        )
+    }
+
+    /// `SetDoGlobalMerge(TRUE)` then the per-edge `SetFilletParameters` overload
+    /// (`SmFilletExecutive.cpp:865`) with constant-radius solvers, as
+    /// `SmApiFilletEdgesPerEdge` does: one cross-section type and radius per edge
+    /// (or one for all), default tolerances and no laws.
+    ///
+    /// # Errors
+    /// Native invalid input for an empty edge list or mismatched list sizes; real
+    /// parameter/constructor/loader errors.
+    pub fn prepare_per_edge_constant_radius(
+        &mut self,
+        k: &mut Kernel,
+        edges: &[EdgeId],
+        radii: &[f64],
+        xsect_types: &[FilletSurfaceGeneratorType],
+        continuity: u32,
+        thumbweight: f64,
+    ) -> Result<()> {
+        if edges.is_empty() {
+            return Err(SolidError::Upstream {
+                operation: OP,
+                code: crate::error::SM_ERR_INVALID_INPUT,
+                entity: None,
+            });
+        }
+        let radius_types = vec![FilletSolverType::ConstRadius; edges.len()];
+        let edges = edges
+            .iter()
+            .map(|id| FilletObject::Topology(FilletBody::Target, EntityRef::Edge(*id)))
+            .collect::<Vec<_>>();
+        self.executive.set_do_global_merge(true);
+        self.executive.set_fillet_parameters(
+            k,
+            &mut self.objects,
+            &FilletParameters {
+                brep: Some(FilletObject::Body(FilletBody::Target)),
+                edges: &edges,
+                xsect_types,
+                radius_types: &radius_types,
+                radius_values: radii,
                 var_rad_laws: None,
                 approx_tol: -1.0,
                 ang_tol_deg: -1.0,

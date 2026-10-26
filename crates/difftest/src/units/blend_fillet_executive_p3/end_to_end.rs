@@ -300,9 +300,9 @@ fn run_rust(input: &RealSolid) -> SolidResult<Vec<f64>> {
     let mut geometry = Vec::new();
     crate::util::primitive::append(&k, &body, &mut geometry)?;
     section(&mut values, &geometry);
-    // Unreachable while apply is unported. Before connecting the real API,
-    // replace this draft with its actual post-cleanup attribute store and
-    // entity identities; a fresh constructor alone does not justify emptiness.
+    // The public API leaves no attribute on the body: the executive's fillet-edge
+    // attribute and the temporary merge tags are destroyed with its session, as
+    // upstream's executive destructor and SmObjsDelete do, and the box carries none.
     let store = solidcore::geom::attribute::AttributeStore::default();
     let attributes = solidcore::mass::integrator::properties::PropertyAttributes {
         store: &store,
@@ -331,13 +331,69 @@ fn run_rust(input: &RealSolid) -> SolidResult<Vec<f64>> {
     }
     Ok(values)
 }
-fn apply(_: &mut Kernel, _: &mut Brep, _: &[EdgeId], _: &RealSolid) -> SolidResult<()> {
-    // Replaced with the actual session API once the session worker's commit is
-    // available. The harness never owns an alternate executive implementation.
-    Err(SolidError::Unported {
-        upstream: "SmApiFilletEdges",
-        unit: "blend.fillet_executive_p1",
-    })
+fn apply(k: &mut Kernel, body: &mut Brep, edges: &[EdgeId], input: &RealSolid) -> SolidResult<()> {
+    solidcore::blend::fillet_executive::api::fillet_edges(
+        k,
+        body,
+        edges,
+        input.radius,
+        input.xsect,
+        input.continuity,
+        input.thumbweight,
+    )
+}
+/// `TestSmFillets.cpp` examples 2 and 3 on the 10x10x10 box with its first four
+/// edges in `GetEdges` order: `SmApiFilletEdges(r=1, circular)` and
+/// `SmApiFilletEdgesPerEdge(r = 0.5 + 0.25 i, circular)`. Returns the shim's
+/// `[status, faces, edges, vertices]` record, or `None` for the other examples.
+pub(super) fn upstream_example(example: usize) -> Result<Option<Output>, HarnessError> {
+    if !matches!(example, 2 | 3) {
+        return Ok(None);
+    }
+    let run = || -> SolidResult<Vec<f64>> {
+        let mut k = Kernel::default();
+        let mut body =
+            solidcore::primitive::api_primitives::create_box(&mut k, Vec3::ZERO, 10.0, 10.0, 10.0)?;
+        let selected: Vec<EdgeId> = p1::edges(&body, None)?.into_iter().take(4).collect();
+        let result = if example == 2 {
+            solidcore::blend::fillet_executive::api::fillet_edges(
+                &mut k, &mut body, &selected, 1.0, 1, 1, 1.0,
+            )
+        } else {
+            let radii: Vec<f64> = (0..selected.len()).map(|i| 0.5 + 0.25 * i as f64).collect();
+            let types = vec![
+                solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType::Circular;
+                selected.len()
+            ];
+            solidcore::blend::fillet_executive::api::fillet_edges_per_edge(
+                &mut k, &mut body, &selected, &radii, &types, 1, 1.0,
+            )
+        };
+        let result_status = match result {
+            Ok(()) => 0.0,
+            Err(error) => status(error)?,
+        };
+        Ok(vec![
+            result_status,
+            p1::faces(&body, None)?.len() as f64,
+            p1::edges(&body, None)?.len() as f64,
+            p1::vertices(&body, None)?.len() as f64,
+        ])
+    };
+    match run() {
+        Ok(values) => {
+            let mut out = Output::new();
+            out.ints.insert(
+                "api_status_counts".into(),
+                values.into_iter().map(|v| v as i64).collect(),
+            );
+            Ok(Some(out))
+        }
+        Err(error) => match Output::unported(&error) {
+            Some(deferred) => Ok(Some(deferred)),
+            None => Err(HarnessError::new(error.to_string())),
+        },
+    }
 }
 pub(super) fn rust(input: &RealSolid) -> Result<Output, HarnessError> {
     ffi::validate_real_solid(&input.wire()).map_err(|e| HarnessError::new(e.to_string()))?;
