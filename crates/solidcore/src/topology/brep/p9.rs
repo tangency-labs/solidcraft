@@ -1679,7 +1679,14 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
             .unwrap_or(end);
         }
         edge::insert_manifold_edge_end(b, edge_id, Some(end), false)?;
-        let new_face = b.add_face_record(crate::topology::Face::new(b.face(face)?.shell))?;
+        // the split face's shell as `GetShell` reads it, through its primary face use
+        // (the port's `Face::shell` is a cache the native shell moves do not maintain)
+        let cached_shell = b.face(face)?.shell;
+        let shell = match b.face(face)?.faceuse {
+            Some(fu) => b.faceuse(fu)?.shell.unwrap_or(cached_shell),
+            None => cached_shell,
+        };
+        let new_face = b.add_face_record(crate::topology::Face::new(shell))?;
         let mut surface = required(b.face(face)?.surface.as_ref(), "split face without surface")?
             .copy_and_add_analytics(k)?;
         let new_face_owner = (env.key_of)(EntityRef::Face(new_face));

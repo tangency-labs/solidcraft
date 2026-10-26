@@ -47,6 +47,7 @@ pub mod edge;
 pub mod edgeuse;
 pub mod face;
 pub mod geometry_write;
+pub mod integrity;
 pub mod loopuse;
 pub mod part_file;
 pub mod proto_topology;
@@ -398,7 +399,12 @@ impl Default for Vertex {
 /// An edge (`SmEdge`): a bounded curve between two vertices.
 #[derive(Debug, Clone)]
 pub struct Edge {
-    /// Start and end vertex (equal for a closed edge).
+    /// Start and end vertex (equal for a closed edge), as set when the edge was made.
+    /// Upstream has no such field: `GetVertices` / `GetStartVertex` read the ends through
+    /// the edge and vertex uses ([`edge::vertices`], [`edge::start_end_vertices`]), and
+    /// topology edits inside an operation (vertex merges, edge splits) rewire only those
+    /// uses. Inside an operation read the ends through the uses; the public operations
+    /// refresh this pair before they return ([`Brep::refresh_cached_topology`]).
     pub vertices: [VertexId; 2],
     /// `m_pList` (CO-PORTED): the edge's edge uses in radial list order; the first is
     /// the primary edge use (`GetPrimaryEdgeuse`).
@@ -423,9 +429,12 @@ pub struct LoopEdge {
 /// A closed boundary loop of a face (`SmLoop`).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Loop {
-    /// Face this loop bounds.
+    /// Face this loop bounds. Port-only: upstream's `GetFace` goes through the loop use
+    /// and its face use. Refreshed by [`Brep::refresh_cached_topology`].
     pub face: FaceId,
-    /// Edges in traversal order.
+    /// Edges in traversal order. Port-only builder data (upstream walks the loop use's
+    /// edge uses); after a refresh ([`Brep::refresh_cached_topology`]) the primary loop
+    /// use's edge-use cycle.
     pub edges: Vec<LoopEdge>,
     /// `m_pLU` (CO-PORTED): the primary loop use (`GetLoopuse`).
     pub loopuse: Option<LoopuseId>,
@@ -435,9 +444,14 @@ pub struct Loop {
 /// `topology.face_p2` ([`face::p2`]).
 #[derive(Debug, Clone)]
 pub struct Face {
-    /// Shell containing this face.
+    /// Shell containing this face. Port-only: upstream's `GetShell` reads the primary
+    /// face use's owner, and the native shell moves update only that; read it through
+    /// the face use inside an operation. Refreshed by [`Brep::refresh_cached_topology`].
     pub shell: ShellId,
-    /// Boundary loops; upstream keeps the outer loop first.
+    /// Boundary loops; upstream keeps the outer loop first. Port-only: upstream reaches
+    /// them through the primary face use's loop uses. Refreshed by
+    /// [`Brep::refresh_cached_topology`] in upstream's iteration order, the primary face
+    /// use's loop-use list order.
     pub loops: Vec<LoopId>,
     /// `m_pSurface`: the face's surface (`GetSurface`).
     pub surface: Option<Surface>,
@@ -474,7 +488,9 @@ impl Face {
 /// A shell (`SmShell`): a connected set of faces.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Shell {
-    /// Faces of the shell, in insertion order.
+    /// Faces of the shell, in insertion order. Port-only: upstream reaches them through
+    /// the shell's face uses; after a refresh ([`Brep::refresh_cached_topology`]) in
+    /// upstream's iteration order, the shell's face-use member order, each face once.
     pub faces: Vec<FaceId>,
     /// `m_pListOwner` (CO-PORTED): the region owning the shell (`GetRegion`).
     pub region: Option<RegionId>,
@@ -1523,6 +1539,67 @@ impl Brep {
         })
     }
 
+    /// Rewrites the port's cached topology fields from the links upstream reads them
+    /// through (not an upstream port: upstream stores none of them). [`Edge::vertices`]
+    /// from the edge uses ([`edge::start_end_vertices`], `GetStartVertex` /
+    /// `GetEndVertex`); [`Face::shell`] from the primary face use (`GetShell`);
+    /// [`Face::loops`] from the primary face use's loop uses; [`Loop::face`] through the
+    /// primary loop use and its face use (`GetFace`); [`Loop::edges`] from the primary
+    /// loop use's edge-use cycle; [`Shell::faces`] from the shell's face uses. The public
+    /// operations call it before they return, so the fields are true for their callers;
+    /// topology edits inside an operation maintain only the use links. Only these
+    /// fields change, and never a result: a field whose links are missing or cannot be
+    /// read keeps its value.
+    pub fn refresh_cached_topology(&mut self) {
+        use crate::topology::integrity as derive;
+        let ids: Vec<EdgeId> = self.edges.ids().collect();
+        for e in ids {
+            let has_uses = self.edges.get(e).is_some_and(|r| !r.edgeuses.is_empty());
+            if !has_uses {
+                continue;
+            }
+            if let Ok((Some(start), Some(end))) = edge::start_end_vertices(self, e) {
+                if let Some(r) = self.edges.get_mut(e) {
+                    r.vertices = [start, end];
+                }
+            }
+        }
+        let ids: Vec<FaceId> = self.faces.ids().collect();
+        for f in ids {
+            let shell = derive::derived_face_shell(self, f);
+            let loops = derive::derived_face_loops(self, f);
+            if let Some(r) = self.faces.get_mut(f) {
+                if let Some(shell) = shell {
+                    r.shell = shell;
+                }
+                if let Some(loops) = loops {
+                    r.loops = loops;
+                }
+            }
+        }
+        let ids: Vec<LoopId> = self.loops.ids().collect();
+        for l in ids {
+            let face = derive::derived_loop_face(self, l);
+            let edges = derive::derived_loop_edges(self, l);
+            if let Some(r) = self.loops.get_mut(l) {
+                if let Some(face) = face {
+                    r.face = face;
+                }
+                if let Some(edges) = edges {
+                    r.edges = edges;
+                }
+            }
+        }
+        let ids: Vec<ShellId> = self.shells.ids().collect();
+        for s in ids {
+            if let Some(faces) = derive::derived_shell_faces(self, s) {
+                if let Some(r) = self.shells.get_mut(s) {
+                    r.faces = faces;
+                }
+            }
+        }
+    }
+
     /// Adds an edge from `start` to `end`; both vertices must exist.
     pub fn add_edge(&mut self, start: VertexId, end: VertexId) -> Result<EdgeId> {
         const OP: &str = "topology::Brep::add_edge";
@@ -1556,7 +1633,11 @@ impl Brep {
     }
 
     /// Adds a loop to `face` from edges in traversal order. Every edge must exist and
-    /// consecutive uses must share a vertex, closing back to the first.
+    /// consecutive uses must share a vertex, closing back to the first. An edge's ends
+    /// are read through its edge and vertex uses (`GetVertices`) when those name both
+    /// ends, and from its creation-time [`Edge::vertices`] otherwise (a builder edge from
+    /// [`Brep::add_edge`], before its uses are linked), so a loop built mid-operation
+    /// never reads a stale pair.
     pub fn add_loop(&mut self, face: FaceId, edges: Vec<LoopEdge>) -> Result<LoopId> {
         const OP: &str = "topology::Brep::add_loop";
         if self.faces.get(face).is_none() {
@@ -1568,7 +1649,12 @@ impl Brep {
                 .edges
                 .get(use_.edge)
                 .ok_or_else(|| not_found(OP, use_.edge))?;
-            let [a, b] = e.vertices;
+            // through the uses once they name both ends; a builder edge (no edge uses,
+            // or edge uses whose vertex uses are not linked yet) has only its pair
+            let [a, b] = match edge::start_end_vertices(self, use_.edge) {
+                Ok((Some(a), Some(b))) => [a, b],
+                _ => e.vertices,
+            };
             ends.push(if use_.forward { (a, b) } else { (b, a) });
         }
         let closes = ends

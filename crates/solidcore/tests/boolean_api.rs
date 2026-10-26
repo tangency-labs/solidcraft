@@ -148,6 +148,7 @@ fn run(case: &Case) -> Result<(), String> {
         Err(e) if e.is_unported() => return Err(format!("Unported on the public path: {e}")),
         Err(e) => return Err(format!("boolean failed: {e}")),
     };
+    solidcore::topology::integrity::check(&brep).map_err(|e| format!("integrity: {e}"))?;
     let solid = solidcore::topology::brep::p2::is_manifold_solid(&brep)
         .map_err(|e| format!("is_manifold_solid: {e}"))?;
     if !solid {

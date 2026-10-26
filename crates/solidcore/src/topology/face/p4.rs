@@ -390,7 +390,12 @@ pub fn is_connected_to(b: &Brep, f: FaceId, target: Option<EntityRef>) -> Result
         EntityRef::Edge(e) => Ok(edge::faces(b, e, None)?.contains(&f)),
         EntityRef::Face(x) => Ok(x == f),
         EntityRef::Faceuse(fu) => Ok(faceuse_face(b, fu)? == Some(f)),
-        EntityRef::Loop(l) => Ok(b.loop_(l)?.face == f),
+        // `pLoop->GetFace()`: through the loop use and its face use (the port's
+        // `Loop::face` cache only where those links are missing)
+        EntityRef::Loop(l) => {
+            let cached = b.loop_(l)?.face;
+            Ok(crate::topology::integrity::derived_loop_face(b, l).unwrap_or(cached) == f)
+        }
         EntityRef::Loopuse(lu) => {
             let fu = b
                 .loopuse(lu)?

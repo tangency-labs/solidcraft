@@ -58,12 +58,14 @@ fn patterned_sphere_cut_matches_two_separate_cuts() {
         let shift = Vec3::new(5.0 * f64::from(i), 0.0, 0.0);
         api_translate(&mut k, Some(TransformObject::Brep(&mut tool)), shift).unwrap();
         patterned = boolean_difference(&mut k, patterned, tool).unwrap();
+        solidcore::topology::integrity::check(&patterned).unwrap();
     }
 
     let mut separate = create_box(&mut k, Point3::new(0.0, 0.0, 0.0), 30.0, 20.0, 5.0).unwrap();
     for x in [12.0, 17.0] {
         let tool = create_sphere(&mut k, Point3::new(x, 20.0, 0.0), 10.0).unwrap();
         separate = boolean_difference(&mut k, separate, tool).unwrap();
+        solidcore::topology::integrity::check(&separate).unwrap();
     }
 
     assert_eq!(

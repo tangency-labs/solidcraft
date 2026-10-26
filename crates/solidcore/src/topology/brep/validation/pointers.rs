@@ -491,7 +491,11 @@ pub fn validate_pointers(
         }
         let loops = face2::loops(b, f, false, None)?;
         for (j, &l) in loops.iter().enumerate() {
-            r.check(b, 29, b.loop_(l)?.face == f, EntityRef::Loop(l))?;
+            // SmBrep.cpp:31357 `pL->GetFace() == pF`; SmLoop::GetFace is
+            // m_pLU->GetFaceuse()->GetFace() (SmLoop.h:61), not the port's Loop::face cache
+            let loop_face =
+                crate::topology::integrity::derived_loop_face(b, l).unwrap_or(b.loop_(l)?.face);
+            r.check(b, 29, loop_face == f, EntityRef::Loop(l))?;
             let Some(lu) = b.loop_(l)?.loopuse else {
                 r.check(b, 30, false, EntityRef::Loop(l))?;
                 return Ok(0);

@@ -151,7 +151,10 @@ impl<'k> PrimitiveModel<'k> {
         let mut pc = PrimitiveCreation::new(brep.infinite_region(), 0, true);
         let mut model = Self::new(k, brep);
         let value = body(&mut pc, &mut model)?;
-        Ok((model.into_brep()?, value))
+        let mut brep = model.into_brep()?;
+        // (not upstream: the port's cached topology fields, true for the caller)
+        brep.refresh_cached_topology();
+        Ok((brep, value))
     }
 
     /// Takes B-rep `id` out of the model (a B-rep an operation made).

@@ -137,6 +137,9 @@ fn observe(k: &mut Kernel, name: &str) -> String {
         Ok(b) => b,
         Err(e) => return format!("boolean: {e:?}"),
     };
+    if let Err(e) = solidcore::topology::integrity::check(&brep) {
+        return format!("integrity: {e:?}");
+    }
     let store = AttributeStore::new();
     let key_of = |_| ObjectKey(0);
     let attrs = PropertyAttributes {

@@ -1129,7 +1129,10 @@ pub fn api_brep_copy(
             entity: None,
         });
     };
-    copy_brep(k, env, brep, source_key, None, None, true, false)
+    let mut copy = copy_brep(k, env, brep, source_key, None, None, true, false)?;
+    // (not upstream: the port's cached topology fields, true for the caller)
+    copy.refresh_cached_topology();
+    Ok(copy)
 }
 
 /// Identities and optional separate notification context of a copy's source.
@@ -1905,7 +1908,16 @@ fn merge_brep_in(
             _ => None,
         })
         .ok_or(null_deref("unmapped edge"))?;
-        let [a, c] = other.edge(e)?.vertices;
+        // Upstream has no such pair: it copies the edge and vertex use links above and
+        // reads the ends through them. Take the source's ends the same way (its cached
+        // pair is not maintained by topology edits, so it can be stale on a Boolean's
+        // result). An edge without edge uses, or whose uses do not name both ends, keeps
+        // its cached pair, so the copy never fails where upstream's does not.
+        let [cached_start, cached_end] = other.edge(e)?.vertices;
+        let [a, c] = match edge::start_end_vertices(other, e) {
+            Ok((start, end)) => [start.unwrap_or(cached_start), end.unwrap_or(cached_end)],
+            Err(_) => [cached_start, cached_end],
+        };
         let va = mapped(EntityRef::Vertex(a), &map, |x| match x {
             EntityRef::Vertex(x) => Some(x),
             _ => None,

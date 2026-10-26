@@ -1316,7 +1316,10 @@ pub fn api_shell_brep_full(
         &working_faces,
         &mut working_notifications,
     );
-    outcome.result
+    let mut result = outcome.result?;
+    // (not upstream: the port's cached topology, true again for the caller)
+    result.refresh_cached_topology();
+    Ok(result)
 }
 
 /// Full-offset API: guard native null with 1007, then call the static executive.
@@ -1329,7 +1332,10 @@ pub fn api_offset_brep_full(
     notifications: &mut OffsetNotifications<'_>,
 ) -> Result<Brep> {
     let original = original.ok_or_else(|| invalid_input(OP_API_OFFSET))?;
-    offset_brep(kernel, original, options, notifications)
+    let mut result = offset_brep(kernel, original, options, notifications)?;
+    // (not upstream: the port's cached topology, true again for the caller)
+    result.refresh_cached_topology();
+    Ok(result)
 }
 
 fn configured_executive(original: &Brep, options: OffsetOptions) -> OffsetExecutive {

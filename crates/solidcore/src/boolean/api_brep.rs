@@ -49,6 +49,10 @@
 //! - **Nullable tree output.** Tree operands are `Option<Brep>` slots, preserving
 //!   consumed entries on failure and defined null outputs of repeated leaves.
 //! - The debug drawing (`SM_DEBUG_CODE`) and `SM_ASSERT_VALID` checks are not ported.
+//! - **Cached topology.** Every returned B-rep has the port's own cached fields
+//!   ([`crate::topology::Edge::vertices`], `Face::shell`, ..., which topology edits
+//!   inside the merge do not maintain) rewritten from its use links by
+//!   [`Brep::refresh_cached_topology`]; nothing else changes.
 
 use crate::boolean::merge::MergeOptions;
 use crate::error::{Result, SolidError};
@@ -155,10 +159,13 @@ fn merge_boolean(
             operation,
         )?
     };
-    Ok(BooleanOutcome {
-        result: result.ok_or_else(|| SolidError::null_pointer(OP_BOOLEAN))?,
-        other,
-    })
+    let mut result = result.ok_or_else(|| SolidError::null_pointer(OP_BOOLEAN))?;
+    // (not upstream: the port's cached topology fields, true again for the caller)
+    result.refresh_cached_topology();
+    if let Some(o) = other.as_mut() {
+        o.refresh_cached_topology();
+    }
+    Ok(BooleanOutcome { result, other })
 }
 
 fn is_manifold_solid(brep: &Brep) -> Result<bool> {
@@ -251,13 +258,16 @@ pub fn merge_breps(
     };
     // `SmMerge::merge_breps(rBreps, lKernelOperation, rpResult)`, then `SM_ERR` when it
     // succeeds without a result.
-    crate::boolean::merge::p3::merge_breps(
+    let mut result = crate::boolean::merge::p3::merge_breps(
         k,
         breps,
         kernel_operation,
         None,
         &mut crate::boolean::merge::p3::DependencyMerge::default(),
-    )
+    )?;
+    // (not upstream: the port's cached topology fields, true again for the caller)
+    result.refresh_cached_topology();
+    Ok(result)
 }
 
 /// Booleans two B-reps with full merge-option control (`SmApiBooleanWithOptions`):
@@ -294,9 +304,14 @@ pub fn boolean_lists(
     surfaces2: &[Surface],
     operation: i32,
 ) -> Result<BooleanListsResult> {
-    crate::boolean::merge::p3::boolean_lists(
+    let mut out = crate::boolean::merge::p3::boolean_lists(
         k, breps1, surfaces1, breps2, surfaces2, operation, None,
-    )
+    )?;
+    // (not upstream: the port's cached topology fields, true again for the caller)
+    for b in &mut out.breps {
+        b.refresh_cached_topology();
+    }
+    Ok(out)
 }
 
 /// Combines B-reps by CSG trees in postfix notation (`SmApiBooleanTrees`, wrapping
@@ -319,7 +334,12 @@ pub fn boolean_trees(
         post_fix_trees,
         None,
         &mut crate::boolean::merge::p3::DependencyMerge::default(),
-    )
+    )?;
+    // (not upstream: the port's cached topology fields, true again for the caller)
+    for b in breps.iter_mut().flatten() {
+        b.refresh_cached_topology();
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -183,7 +183,10 @@ pub fn api_heal_brep(k: &mut Kernel, b: Option<&mut Brep>) -> Result<()> {
             "no B-rep",
         ));
     };
-    brep_heal_brep(k, b, HealerOpType::All)
+    brep_heal_brep(k, b, HealerOpType::All)?;
+    // (not upstream: the port's cached topology fields, true for the caller)
+    b.refresh_cached_topology();
+    Ok(())
 }
 
 impl<O: LoopObject> HealData<O> {

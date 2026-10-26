@@ -26,6 +26,7 @@ fn slab_and_tower_sliced(k: &mut Kernel) -> Brep {
     let slab = create_box(k, Point3::new(0.0, 0.0, 0.0), 40.0, 40.0, 5.0).unwrap();
     let tower = create_box(k, Point3::new(15.0, 15.0, 5.0), 10.0, 10.0, 10.0).unwrap();
     let body = boolean_union(k, slab, tower).unwrap();
+    solidcore::topology::integrity::check(&body).unwrap();
     let sheet = create_plane(k, Point3::new(-10.0, -10.0, 5.0), 60.0, 60.0).unwrap();
     boolean(k, body, sheet, BooleanOperation::Slice)
         .unwrap()

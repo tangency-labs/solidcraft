@@ -25,6 +25,10 @@
 //!   `rpResult`). The optional face arrays of the curve sweeps are always returned.
 //! - **Context.** `SmApiGetOrCreateContext()` is the caller's [`Kernel`], used for the
 //!   curve copies.
+//! - **Cached topology.** Every returned B-rep has the port's own cached fields
+//!   ([`crate::topology::Edge::vertices`], `Face::shell`, ..., not maintained by topology
+//!   edits) rewritten from its use links by [`Brep::refresh_cached_topology`]; nothing
+//!   else changes.
 //! - **Pointers.** A `NULL` curve that upstream tests for is `None`: the entries of the
 //!   consumed curve arrays (copied first, `SM_ERR_INVALID_INPUT` for `NULL`), the
 //!   entries of a curve-sweep profile (passed on, upstream skips them), and the path,
@@ -300,7 +304,7 @@ pub fn create_sweep_along_planar_path(
     let profiles: Vec<Curve> = profile_curves.iter().map(|c| (*c).clone()).collect();
     let paths: Vec<Curve> = path_curves.iter().map(|c| (*c).clone()).collect();
     // The static entry point makes its own B-rep in the context of the model's.
-    let (_, result) = PrimitiveModel::build_new(k, |_, model| {
+    let (_, mut result) = PrimitiveModel::build_new(k, |_, model| {
         let id = PrimitiveCreation::create_sweep_along_planar_path(
             model,
             PrimitiveModel::MAIN,
@@ -313,6 +317,8 @@ pub fn create_sweep_along_planar_path(
         )?;
         model.take_brep(id)
     })?;
+    // (not upstream: the port's cached topology fields, true for the caller)
+    result.refresh_cached_topology();
     Ok(result)
 }
 
@@ -602,7 +608,11 @@ fn build(
     k: &mut Kernel,
     body: impl FnOnce(&mut PrimitiveCreation, &mut PrimitiveModel<'_>) -> Result<()>,
 ) -> Result<Brep> {
-    PrimitiveModel::build_new(k, body).map(|(brep, ())| brep)
+    PrimitiveModel::build_new(k, body).map(|(mut brep, ())| {
+        // (not upstream: the port's cached topology fields, true for the caller)
+        brep.refresh_cached_topology();
+        brep
+    })
 }
 
 /// The start, side and end faces of a curve sweep.
@@ -613,12 +623,14 @@ fn curve_sweep(
     k: &mut Kernel,
     body: impl FnOnce(&mut PrimitiveCreation, &mut PrimitiveModel<'_>, &mut SweepFaces) -> Result<()>,
 ) -> Result<CurveSweep> {
-    let (brep, (start_faces, side_faces, end_faces)) =
+    let (mut brep, (start_faces, side_faces, end_faces)) =
         PrimitiveModel::build_new(k, |pc, model| {
             let mut faces = SweepFaces::default();
             body(pc, model, &mut faces)?;
             Ok(faces)
         })?;
+    // (not upstream: the port's cached topology fields, true for the caller)
+    brep.refresh_cached_topology();
     Ok(CurveSweep {
         brep,
         start_faces,
