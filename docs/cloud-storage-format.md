@@ -104,6 +104,21 @@ published as a new child of the current revision, retaining earlier Git history.
 Management uses the same durable outbox, asset validation, publication receipts
 and restart recovery as an ordinary save. Opening never changes these records.
 
+Conflict copies use the reserved project-relative path
+`conflicts/<original-path>-<first-12-hex-digits-of-captured-revision>`. Readers derive
+the original path from this convention, including copies created on another device.
+An explicit resolution capture requires `conflict-resolution/1` in addition to
+`lifecycle/1`, and stores `{"kind":"resolve","file":"parts/original",`
+`"revision":"<observed-original-revision>","keep":"local"}` (or `"remote"`). Its
+ordinary expected parent identifies the observed conflict copy. Both heads are
+compared within the same repository tree. One commit writes the copy's recoverable
+delete tombstone and, for keep-local, the replacement original. Published manifests
+use ordinary lifecycle metadata; the resolution capability belongs to the queued
+intent. A retry recognizes the source tombstone's revision and never republishes
+an old replacement over a later edit. Desktop cache writes precede the receipt and
+queue removal; the browser commits both cache heads and acknowledgement in one
+IndexedDB transaction. Existing immutable assets are reused.
+
 Upload immutable objects first, then publish the document and manifest together in one Git commit. Update the branch without forcing. A changed parent requires checking the target design again; unrelated changes may be retried, while competing design edits must be preserved.
 
 Local and browser queues must retain the requested snapshot until publication is confirmed. A pending record includes its full destination, original connection endpoint (without credentials), and expected prior revision; offline children depend on their captured parent revisions and are published in that order. After a parent is published as a conflict copy, its queued children follow that confirmed destination without changing their captured identities or touching the competing original. A later competing edit at that destination produces another recoverable conflict copy. Credential renewal is allowed, but changing a connection's repository or branch cannot redirect previously queued designs. Queues are isolated by repository connection. Interrupted publication must not be reported as synchronized. A migration creates a new recoverable revision rather than rewriting history. Upgrade recognition begins with the first cloud-capable release.

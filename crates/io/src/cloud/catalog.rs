@@ -221,7 +221,24 @@ impl LocalOutbox {
                 return Err(Error::Conflict);
             }
         }
-        if receipt.is_none() || cached.is_none() {
+        if let Some(entries) = solidcraft_cloud::conflicts::confirmed(save, published)? {
+            for entry in &entries {
+                self.check_captured_document(&entry.save)?;
+                if let Some(current) = self.cached(&save.connection, &entry.destination)? {
+                    self.check_captured_document(&current.save)?;
+                }
+            }
+            for entry in entries {
+                let current = self.cached(&save.connection, &entry.destination)?;
+                if current.as_ref().map(|c| solidcraft_cloud::conflicts::may_replace(save, c)).transpose()?.unwrap_or(true) {
+                    let path = self.path(&cache_path(&entry.destination)?)?;
+                    if let Some(parent) = path.parent() {
+                        fs::create_dir_all(parent).map_err(storage)?;
+                    }
+                    crate::safe_write::write_atomic(&path, entry.write()?.as_bytes(), false).map_err(storage)?;
+                }
+            }
+        } else if receipt.is_none() || cached.is_none() {
             let path = self.path(&cache_path(&published.destination)?)?;
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent).map_err(storage)?;

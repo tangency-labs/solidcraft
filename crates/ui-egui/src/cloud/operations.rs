@@ -50,7 +50,10 @@ pub(crate) fn submitted(app: &mut SolveApp, command: &str, params: &Value, resul
     }
     let Some(id) = result.get("operation").and_then(Value::as_str) else { return };
     let command = if command == "file.save" && app.session.cloud_binding().is_some() { "cloud.save" } else { command };
-    if !matches!(command, "cloud.save" | "cloud.sync" | "cloud.test" | "cloud.rename" | "cloud.delete" | "cloud.restore" | "cloud.discard") {
+    if !matches!(
+        command,
+        "cloud.save" | "cloud.sync" | "cloud.test" | "cloud.rename" | "cloud.delete" | "cloud.restore" | "cloud.discard" | "cloud.resolve"
+    ) {
         return;
     }
     // The worker returns its resolved connection. Polling status must never replace

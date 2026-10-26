@@ -2865,3 +2865,51 @@ fn file_status_dots_fade_without_moving_rows_or_labels() {
         }
     }
 }
+
+#[test]
+fn translated_file_actions_fit_the_reserved_column_in_both_themes() {
+    use crate::test_support::{raster, textures_update};
+    crate::test_support::install_catalog();
+    let _language = solidcraft_ui_text::scope("de");
+    let previous = solidcraft_theme::is_dark();
+    for dark in [false, true] {
+        solidcraft_theme::set_dark(dark);
+        let ctx = crate::test_support::context();
+        solidcraft_theme::apply(&ctx);
+        let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(700.0, 150.0));
+        let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), ..Default::default() }, |ui| {
+            ui.set_width(680.0);
+            let right = ui.max_rect().right();
+            let label = "Don't Save";
+            assert_ne!(solidcraft_ui_text::tr_label(label), label);
+            let (row, action) = FileView::recent_row_with_action(
+                ui,
+                "translated-action",
+                RecentRow {
+                    title: "Bracket",
+                    path: "Workshop/parts/bracket",
+                    when: "",
+                    workspace: "Design",
+                    thumbnail: None,
+                    thumbnail_failed: false,
+                },
+                FileStatus { label: "Conflict", tone: FileStatusTone::Conflict, pulse: false },
+                true,
+                Some((label, true)),
+            );
+            let action = action.unwrap();
+            assert!(row.rect.right() <= action.rect.left());
+            assert!(action.rect.right() <= right + 0.1, "translated button must stay inside the available row");
+        });
+        if let Some(directory) = std::env::var_os("SOLIDCRAFT_CLOUD_EVIDENCE") {
+            std::fs::create_dir_all(&directory).unwrap();
+            let mut textures = std::collections::HashMap::new();
+            textures_update(&mut textures, &output.textures_delta);
+            output.textures_delta.clear();
+            raster(&ctx, output.shapes, output.pixels_per_point, bounds, &textures)
+                .save(std::path::Path::new(&directory).join(format!("translated-cloud-action-{}.png", if dark { "dark" } else { "light" })))
+                .unwrap();
+        }
+    }
+    solidcraft_theme::set_dark(previous);
+}
