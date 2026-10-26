@@ -159,7 +159,7 @@ use crate::kernel::Kernel;
 use crate::math::EFF_ZERO_DEG;
 use crate::math::{max2, min2, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
-use crate::nurbs::b_spline_surface::SurfParamType;
+use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
 use crate::surface::offset_surface::{OffsetSurface, SS_UNKNOWN};
@@ -1547,40 +1547,13 @@ impl Surface {
                 flags.v_side == Side::Left,
                 flags.only_upper_half,
             ),
-            // inherited from SmBSplineSurface
-            SurfaceKind::Cone(s) => s.rev().base().evaluate_simple(
-                uv,
-                highest_u_deriv,
-                highest_v_deriv,
-                flags.u_side == Side::Left,
-                flags.v_side == Side::Left,
-                flags.only_upper_half,
-            ),
-            SurfaceKind::SurfOfRevolution(s) => s.base().evaluate_simple(
-                uv,
-                highest_u_deriv,
-                highest_v_deriv,
-                flags.u_side == Side::Left,
-                flags.v_side == Side::Left,
-                flags.only_upper_half,
-            ),
-            SurfaceKind::SurfOfExtrusion(s) => s.base().evaluate_simple(
-                uv,
-                highest_u_deriv,
-                highest_v_deriv,
-                flags.u_side == Side::Left,
-                flags.v_side == Side::Left,
-                flags.only_upper_half,
-            ),
-            SurfaceKind::Sphere(s) => s.base().base().evaluate_simple(
-                uv,
-                highest_u_deriv,
-                highest_v_deriv,
-                flags.u_side == Side::Left,
-                flags.v_side == Side::Left,
-                flags.only_upper_half,
-            ),
-            SurfaceKind::Torus(s) => s.base().base().evaluate_simple(
+            // inherited from SmBSplineSurface, which reads m_pNurb: upstream's analytic
+            // surfaces always hold one (the port makes it on demand, kind_with_nurb)
+            SurfaceKind::Cone(_)
+            | SurfaceKind::SurfOfRevolution(_)
+            | SurfaceKind::SurfOfExtrusion(_)
+            | SurfaceKind::Sphere(_)
+            | SurfaceKind::Torus(_) => self.analytic_base_with_nurb(k)?.evaluate_simple(
                 uv,
                 highest_u_deriv,
                 highest_v_deriv,
@@ -1641,11 +1614,13 @@ impl Surface {
     ) -> Result<()> {
         let base = match self.kind() {
             SurfaceKind::BSpline(s) => Some(s),
-            SurfaceKind::Cone(s) => Some(s.rev().base()),
-            SurfaceKind::SurfOfRevolution(s) => Some(s.base()),
-            SurfaceKind::SurfOfExtrusion(s) => Some(s.base()),
-            SurfaceKind::Sphere(s) => Some(s.base().base()),
-            SurfaceKind::Torus(s) => Some(s.base().base()),
+            // inherited from SmBSplineSurface, which reads m_pNurb: upstream's analytic
+            // surfaces always hold one (the port makes it on demand, kind_with_nurb)
+            SurfaceKind::Cone(_)
+            | SurfaceKind::SurfOfRevolution(_)
+            | SurfaceKind::SurfOfExtrusion(_)
+            | SurfaceKind::Sphere(_)
+            | SurfaceKind::Torus(_) => Some(self.analytic_base_with_nurb(k)?),
             SurfaceKind::Plane(_)
             | SurfaceKind::CurveBounded(_)
             | SurfaceKind::OffsetSurface(_)
@@ -2007,31 +1982,11 @@ impl Surface {
                 };
                 let r = match self.kind() {
                     SurfaceKind::BSpline(s) => s.calculate_bounding_box(k, uv_domain, &req)?,
-                    SurfaceKind::Cone(s) => {
-                        s.rev()
-                            .base()
-                            .calculate_bounding_box_of(k, uv_domain, &req, Some(self))?
-                    }
-                    SurfaceKind::Sphere(s) => {
-                        s.base()
-                            .base()
-                            .calculate_bounding_box_of(k, uv_domain, &req, Some(self))?
-                    }
-                    SurfaceKind::Torus(s) => {
-                        s.base()
-                            .base()
-                            .calculate_bounding_box_of(k, uv_domain, &req, Some(self))?
-                    }
-                    SurfaceKind::SurfOfRevolution(s) => {
-                        s.base()
-                            .calculate_bounding_box_of(k, uv_domain, &req, Some(self))?
-                    }
-                    SurfaceKind::SurfOfExtrusion(s) => {
-                        s.base()
-                            .calculate_bounding_box_of(k, uv_domain, &req, Some(self))?
-                    }
                     SurfaceKind::Plane(p) => plane_bounding_box(k, p, uv_domain, &req)?,
-                    _ => unreachable_kind()?,
+                    _ => {
+                        let base = self.analytic_base_with_nurb(k)?;
+                        base.calculate_bounding_box_of(k, uv_domain, &req, Some(self))?
+                    }
                 };
                 Ok(SurfaceBoxes {
                     normal_box: r.normal,
@@ -2046,6 +2001,20 @@ impl Surface {
                 s.calculate_bounding_box(k, self, uv_domain, want, expand_pos_boxes_by_zone_tol_3d)
             }
         }
+    }
+
+    /// The B-spline part of an analytic kind with its NURB (`GetOrCreateGwNurbPointer`
+    /// from a `const` method: [`Surface::kind_with_nurb`], which makes a missing NURB
+    /// once and keeps it on the surface).
+    pub(crate) fn analytic_base_with_nurb(&self, k: &Kernel) -> Result<&BSplineSurface> {
+        Ok(match self.kind_with_nurb(k)? {
+            SurfaceKind::Cone(s) => s.rev().base(),
+            SurfaceKind::Sphere(s) => s.base().base(),
+            SurfaceKind::Torus(s) => s.base().base(),
+            SurfaceKind::SurfOfRevolution(s) => s.base(),
+            SurfaceKind::SurfOfExtrusion(s) => s.base(),
+            _ => return unreachable_kind(),
+        })
     }
 
     /// The base body of [`Surface::calculate_bounding_box`].
@@ -4106,7 +4075,6 @@ impl<'a> SssIntersectEnfo<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nurbs::b_spline_surface::BSplineSurface;
 
     /// A bilinear patch over `[0, 1]^2` spanning `(0,0,0)..(2,1,0)` with a twist.
     fn bilinear() -> Surface {

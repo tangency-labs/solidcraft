@@ -24,14 +24,25 @@
 //! | [`DatabaseReader::read_booleans`]     | `SmDatabaseIO::ReadBooleans`                     |
 //! | [`DatabaseReader::read_short`]        | `SmDatabaseIO::ReadShort`                        |
 //! | [`DatabaseReader::read_char`]         | `SmDatabaseIO::ReadChar`                         |
+//! | [`DatabaseReader::read_characters`]   | `SmDatabaseIO::ReadCharacters`                   |
 //! | [`DatabaseReader::read_type`]         | `SmDatabaseIO::ReadType`                         |
 //! | [`DatabaseReader::go_to_next_line`]   | `SmDatabaseIO::GoToNextLine`                     |
+//! | [`DatabaseWriter`]                    | `SmDatabaseIO` / `SmDatabaseIOFile` (write side) |
+//! | [`DatabaseWriter::open_for_write`]    | `SmDatabaseIOFile::OpenFileForWrite` (new file)  |
+//! | [`DatabaseWriter::write_long`] / [`DatabaseWriter::write_longs`] | `WriteLong` / `WriteLongs` |
+//! | [`DatabaseWriter::write_double`] / [`DatabaseWriter::write_doubles`] | `WriteDouble` / `WriteDoubles` |
+//! | [`DatabaseWriter::write_boolean`] / [`DatabaseWriter::write_booleans`] | `WriteBoolean` / `WriteBooleans` |
+//! | [`DatabaseWriter::write_short`] / [`DatabaseWriter::write_char`] | `WriteShort` / `WriteChar` |
+//! | [`DatabaseWriter::write_characters`]  | `SmDatabaseIO::WriteCharacters`                  |
+//! | [`DatabaseWriter::write_type`]        | `SmDatabaseIO::WriteType`                        |
+//! | [`DatabaseWriter::out_str`] ... [`fixed16`] | `*GetOutStreamPtr() << value` (`fixed`, precision 16) |
 //! | [`is_big_endian`]                     | `SmDatabaseIO::IsBigEndian`                      |
 //! | [`byte_swap_f64`]                     | `ByteSwap64(double)`, `ByteSwap128(double)`      |
 //! | [`byte_swap_u64`]                     | `ByteSwap64(unsigned long)`, `ByteSwap64(unsigned long long)` |
 //! | [`byte_swap_u32`]                     | `ByteSwap32(unsigned long)`, `ByteSwap32(uint32_t)` |
 //! | [`byte_swap_u16`]                     | `ByteSwap16(unsigned short)`                     |
 //! | [`InputStream`]                       | the `std::istream` behind `m_pStreamIn` (libstdc++ semantics) |
+//! | [`InputStream::getline`]              | `std::istream::getline(char*, std::streamsize)`  |
 //! | [`FileType`]                          | `SmFileType`                                     |
 //!
 //! Deviations:
@@ -58,8 +69,13 @@
 //!   `__builtin_object_size` when the caller is optimised, as the upstream build is.
 //! - `ByteSwap32(unsigned short)` is not ported: it is only reached when
 //!   `sizeof(short) != 2` and always returns 0 (its shifts are truncated to 16 bits).
-//! - `ReadCharacters` and the write side (`Write*`, `OpenFileForWrite`) belong to
-//!   other units and are not here.
+//! - **Write side.** [`DatabaseWriter`] keeps the stream in memory (no filesystem on
+//!   wasm32): only a new file (`bNewFile = TRUE`) is supported and appending is the
+//!   caller's. Upstream's byte-swapped `WriteLong`/`WriteLongs` swap the variable's
+//!   address instead of its value (`ByteSwap64((unsigned long long) &llLong)`) and so
+//!   write garbage on big-endian machines or with `SM_BYTESWAP`; the port swaps the
+//!   value. On the little-endian reference build with `SM_ASCII` or `SM_BINARY` no
+//!   swap happens and the output agrees.
 //! - **Nesting bound.** Upstream recurses through nested polymorphic reads (a curve
 //!   holding a curve holding ...) without limit. The port stops at
 //!   [`MAX_READ_NESTING`] = 32 levels ([`DatabaseReader::enter_nested`]); upstream
@@ -340,6 +356,42 @@ impl InputStream {
                 break;
             }
         }
+    }
+
+    /// `istream::getline(buf, n)` (delimiter `'\n'`): the bytes stored in the
+    /// `n`-byte buffer (without the terminating NUL). Stores at most `n - 1` bytes,
+    /// stopping before the end of the data (`eofbit`) or at a newline (consumed, not
+    /// stored); when the buffer fills before a newline, `failbit` is set and the next
+    /// byte is left in the stream. Nothing extracted sets `failbit`, as does a stream
+    /// that was not good (nothing is read; the buffer is empty).
+    pub fn getline(&mut self, n: usize) -> Vec<u8> {
+        let mut out = Vec::new();
+        if !self.sentry(false) {
+            return out;
+        }
+        let mut gcount = 0usize;
+        while gcount + 1 < n {
+            match self.peek_byte() {
+                Some(c) if c != b'\n' => {
+                    out.push(c);
+                    self.pos += 1;
+                    gcount += 1;
+                }
+                _ => break,
+            }
+        }
+        match self.peek_byte() {
+            None => self.set_state(IoState::EOF),
+            Some(b'\n') => {
+                gcount += 1;
+                self.pos += 1;
+            }
+            Some(_) => self.set_state(IoState::FAIL),
+        }
+        if gcount == 0 {
+            self.set_state(IoState::FAIL);
+        }
+        out
     }
 
     /// `istream::get()`: the next byte, or `None` (`eofbit|failbit`) at the end
@@ -967,6 +1019,13 @@ impl DatabaseReader {
         Ok(c)
     }
 
+    /// Reads `n` bytes (`ReadCharacters`; never swapped: `char` is one byte).
+    pub fn read_characters(&mut self, n: usize) -> Result<Vec<u8>> {
+        let items =
+            self.read_raw_items::<1>(n, "topology::database_io::DatabaseReader::read_characters")?;
+        Ok(items.into_iter().map(|[c]| c).collect())
+    }
+
     /// Reads an object type header (`ReadType`): in ASCII the line
     /// `Object Type <code>` and, when `with_dim`, `Curve Dim <dim>`; in binary a
     /// long and optionally an unsigned long.
@@ -1001,6 +1060,218 @@ impl DatabaseReader {
                 type_code: Some(type_code),
                 dim,
             })
+        }
+    }
+}
+
+// ---- write side -----------------------------------------------------------------------
+
+/// `std::ostream << double` with `fixed` and `precision(16)` (glibc `%.16f`): `inf`,
+/// `-inf`, `nan` and `-nan` for the special values.
+#[must_use]
+pub fn fixed16(x: f64) -> String {
+    if x.is_nan() {
+        if x.is_sign_negative() {
+            "-nan".to_string()
+        } else {
+            "nan".to_string()
+        }
+    } else if x.is_infinite() {
+        if x < 0.0 {
+            "-inf".to_string()
+        } else {
+            "inf".to_string()
+        }
+    } else {
+        format!("{x:.16}")
+    }
+}
+
+/// Writes values to an SMLib database stream (upstream `SmDatabaseIO` write side over
+/// the stream `SmDatabaseIOFile::OpenFileForWrite` opens), kept in memory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DatabaseWriter {
+    file_type: FileType,
+    byte_swap: bool,
+    out: Vec<u8>,
+}
+
+impl DatabaseWriter {
+    /// `SmDatabaseIOFile::OpenFileForWrite(name, eType, TRUE)`: an empty stream of
+    /// `file_type`, byte-swapped for [`FileType::ByteSwap`] or on a big-endian machine.
+    /// An ASCII stream writes doubles `fixed` with precision 16 ([`fixed16`]).
+    #[must_use]
+    pub fn open_for_write(file_type: FileType) -> Self {
+        Self {
+            file_type,
+            byte_swap: file_type.default_byte_swap(),
+            out: Vec::new(),
+        }
+    }
+
+    /// The file type (`GetFileType`).
+    #[must_use]
+    pub fn file_type(&self) -> FileType {
+        self.file_type
+    }
+
+    /// Whether binary values are byte-swapped (`m_bByteSwap`).
+    #[must_use]
+    pub fn byte_swap(&self) -> bool {
+        self.byte_swap
+    }
+
+    /// The bytes written so far (the file's contents).
+    #[must_use]
+    pub fn bytes(&self) -> &[u8] {
+        &self.out
+    }
+
+    /// The bytes written (the file's contents).
+    #[must_use]
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.out
+    }
+
+    /// Hook before writing (`BeginWriting`); does nothing in the base writer.
+    pub fn begin_writing(&mut self) {}
+
+    /// Hook after writing (`EndWriting`); does nothing in the base writer.
+    pub fn end_writing(&mut self) {}
+
+    /// `*GetOutStreamPtr() << "text"`.
+    pub fn out_str(&mut self, s: &str) -> &mut Self {
+        self.out.extend_from_slice(s.as_bytes());
+        self
+    }
+
+    /// `*GetOutStreamPtr() << value` for a signed integer (`long`, `int`, `short`).
+    pub fn out_i64(&mut self, v: i64) -> &mut Self {
+        self.out.extend_from_slice(v.to_string().as_bytes());
+        self
+    }
+
+    /// `*GetOutStreamPtr() << value` for an unsigned integer (`ULONG`).
+    pub fn out_u64(&mut self, v: u64) -> &mut Self {
+        self.out.extend_from_slice(v.to_string().as_bytes());
+        self
+    }
+
+    /// `*GetOutStreamPtr() << value` for a double ([`fixed16`]).
+    pub fn out_f64(&mut self, v: f64) -> &mut Self {
+        self.out.extend_from_slice(fixed16(v).as_bytes());
+        self
+    }
+
+    /// `v0 << " " << v1 << ...`: doubles separated by single spaces (not an upstream
+    /// function).
+    pub fn out_reals(&mut self, values: &[f64]) -> &mut Self {
+        for (i, &v) in values.iter().enumerate() {
+            if i > 0 {
+                self.out_str(" ");
+            }
+            self.out_f64(v);
+        }
+        self
+    }
+
+    /// One line of doubles, the common shape of the geometry writers (not an upstream
+    /// function): `v0 << " " << v1 ... << "\n"` in ASCII, `WriteDouble` of each in
+    /// binary.
+    pub fn reals(&mut self, values: &[f64]) {
+        if self.file_type == FileType::Ascii {
+            self.out_reals(values).out_str("\n");
+        } else {
+            self.write_doubles(values);
+        }
+    }
+
+    fn put(&mut self, bytes: &[u8]) {
+        self.out.extend_from_slice(bytes);
+    }
+
+    /// Writes a signed 8-byte integer (`WriteLong`).
+    pub fn write_long(&mut self, v: i64) {
+        let v = if self.byte_swap {
+            byte_swap_u64(v as u64) as i64
+        } else {
+            v
+        };
+        self.put(&v.to_ne_bytes());
+    }
+
+    /// Writes unsigned 8-byte integers (`WriteLongs`).
+    pub fn write_longs(&mut self, values: &[u64]) {
+        for &v in values {
+            let v = if self.byte_swap { byte_swap_u64(v) } else { v };
+            self.put(&v.to_ne_bytes());
+        }
+    }
+
+    /// Writes a double (`WriteDouble`).
+    pub fn write_double(&mut self, v: f64) {
+        let v = if self.byte_swap { byte_swap_f64(v) } else { v };
+        self.put(&v.to_ne_bytes());
+    }
+
+    /// Writes doubles (`WriteDoubles`).
+    pub fn write_doubles(&mut self, values: &[f64]) {
+        for &v in values {
+            self.write_double(v);
+        }
+    }
+
+    /// Writes bytes (`WriteCharacters`; never swapped: `char` is one byte).
+    pub fn write_characters(&mut self, chars: &[u8]) {
+        self.put(chars);
+    }
+
+    /// Writes a 4-byte `SmBoolean` (`WriteBoolean`; never swapped, as upstream).
+    pub fn write_boolean(&mut self, v: i32) {
+        self.put(&v.to_ne_bytes());
+    }
+
+    /// Writes 4-byte `SmBoolean`s (`WriteBooleans`), byte-swapped when enabled.
+    pub fn write_booleans(&mut self, values: &[i32]) {
+        for &v in values {
+            if self.byte_swap {
+                self.put(&byte_swap_u32(v as u32).to_ne_bytes());
+            } else {
+                self.put(&v.to_ne_bytes());
+            }
+        }
+    }
+
+    /// Writes a 2-byte `short` (`WriteShort`).
+    pub fn write_short(&mut self, v: i16) {
+        let v = if self.byte_swap {
+            byte_swap_u16(v as u16) as i16
+        } else {
+            v
+        };
+        self.put(&v.to_ne_bytes());
+    }
+
+    /// Writes one byte (`WriteChar`; never swapped).
+    pub fn write_char(&mut self, c: u8) {
+        self.put(&[c]);
+    }
+
+    /// Writes an object type header (`WriteType`): in ASCII the line
+    /// `Object Type <code>` and, with `dim`, `Curve Dim <dim>`; in binary a long and
+    /// optionally a second long.
+    pub fn write_type(&mut self, type_code: i64, dim: Option<u64>) {
+        if self.file_type == FileType::Ascii {
+            self.out_str("Object Type ").out_i64(type_code);
+            self.out_str("\n");
+            if let Some(d) = dim {
+                self.out_str("Curve Dim ").out_u64(d).out_str("\n");
+            }
+        } else {
+            self.write_long(type_code);
+            if let Some(d) = dim {
+                self.write_long(d as i64);
+            }
         }
     }
 }

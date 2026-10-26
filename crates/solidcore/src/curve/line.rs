@@ -51,6 +51,7 @@
 //! | [`Line::trim`]                               | `Trim`                                            |
 //! | [`Line::assert_valid`]                       | `AssertValid`                                     |
 //! | [`Line::read_from_db`]                       | `ReadFromDB`                                      |
+//! | [`Line::write_to_db`]                        | `WriteToDB`                                       |
 //! | [`Line::is_kind_of`], [`Line::TYPE`], [`Line::type_string`], [`Line::class_string`] | `IsKindOf`, `GetType`, `GetClassType`, `GetTypeString`, `GetClassString` (`SM_COMMON`) |
 //! | [`Line::step_interval`], [`Line::max_analytic_domain`], [`Line::degree`], [`Line::number_natural_knots`] | `GetSTEPInterval`, `GetMaxAnalyticDomain`, `GetDegree`, `GetNumberNaturalKnots` (inline) |
 //! | [`Line::line_point`], [`Line::line_vector`], [`Line::line_scale`], [`Line::inside_out`] | `GetLinePoint`, `GetLineVector`, `GetLineScale`, `GetInsideOut` (inline) |
@@ -139,7 +140,7 @@ use crate::nurbs::b_spline_curve_n_lib::{InValueType, TrimMode};
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::math::NOW;
 use crate::nurbs::nurbs_crv::allocate_nurb_curve;
-use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
+use crate::topology::database_io::{DatabaseReader, DatabaseWriter, FileType, InputStream};
 
 const OP_SEGMENT: &str = "curve::line::Line::create_line_segment";
 const OP_OFFSET: &str = "curve::line::Line::create_simple_offset";
@@ -2166,6 +2167,33 @@ impl Line {
             Err(_) => {}
         }
         Ok(line)
+    }
+
+    /// `WriteToDB`: writes the line point, vector, analytic domain, scale and
+    /// inside-out flag, then the B-spline curve part.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when the B-spline part has no NURB (upstream ignores the part's
+    /// status; its virtual `GetOrCreateGwNurbPointer` always has one to write).
+    pub fn write_to_db(&self, db: &mut DatabaseWriter, version: u64) -> Result<()> {
+        let (p, v) = (self.point, self.vector);
+        let (lo, hi) = (self.anal_domain.min(), self.anal_domain.max());
+        let inside_out = i32::from(self.inside_out);
+        if db.file_type() == FileType::Ascii {
+            db.out_reals(&[p.x, p.y, p.z]);
+            db.out_str(" SmLine Line Point \n");
+            db.out_reals(&[v.x, v.y, v.z]);
+            db.out_str(" SmLine Line Vector \n");
+            db.out_reals(&[lo, hi]).out_str(" SmLine Line Domain \n");
+            db.out_f64(self.scale).out_str(" SmLine Line Scale \n");
+            db.out_i64(inside_out.into());
+            db.out_str(" SmLine InsideOut Flag \n");
+        } else {
+            db.write_doubles(&[p.x, p.y, p.z, v.x, v.y, v.z, lo, hi, self.scale]);
+            db.write_boolean(inside_out);
+        }
+        self.base.write_to_db(db, version)
     }
 }
 

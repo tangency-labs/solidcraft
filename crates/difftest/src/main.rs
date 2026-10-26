@@ -149,6 +149,17 @@ fn main() -> ExitCode {
     if raw.first().map(String::as_str) == Some("--step-case") {
         return difftest::step::run_child(raw.get(1..).unwrap_or(&[]));
     }
+    // Child of unit `corpus.parity`: one side on one model file
+    // (see `difftest::units::corpus_parity::run_child`).
+    if raw.first().map(String::as_str) == Some("--corpus-parity-child") {
+        #[cfg(feature = "cpp")]
+        return difftest::units::corpus_parity::run_child(raw.get(1..).unwrap_or(&[]));
+        #[cfg(not(feature = "cpp"))]
+        {
+            eprintln!("difftest: --corpus-parity-child needs feature `cpp`");
+            return ExitCode::from(2);
+        }
+    }
     // Child of `--fuzz`: one batch of fuzz cases (see `difftest::fuzz::run_child`).
     if raw.first().map(String::as_str) == Some("--fuzz-exec") {
         return fuzz::run_child(raw.get(1..).unwrap_or(&[]));

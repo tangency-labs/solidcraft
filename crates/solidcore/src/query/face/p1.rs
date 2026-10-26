@@ -164,8 +164,9 @@ pub fn calculate_bounding_box_in(
 
     let surface = fp2::surface(b, f)?
         .ok_or_else(|| SolidError::invalid_input(OP_FACE_BOX, "face without surface"))?;
-    let u_deg = surface.degree(SurfParamType::U);
-    let v_deg = surface.degree(SurfParamType::V);
+    // (GetDegree makes a missing NURB: a lazy surface of extrusion is still linear in V)
+    let u_deg = surface.degree_with_nurb(k, SurfParamType::U)?;
+    let v_deg = surface.degree_with_nurb(k, SurfParamType::V)?;
 
     // If one of the directions of the surface is linear we can compute the bounding box
     // using the edges and vertices.

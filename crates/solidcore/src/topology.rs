@@ -41,11 +41,14 @@
 pub mod brep;
 pub mod brep_cache;
 pub mod brep_data;
+pub mod brep_data_write;
 pub mod database_io;
 pub mod edge;
 pub mod edgeuse;
 pub mod face;
+pub mod geometry_write;
 pub mod loopuse;
+pub mod part_file;
 pub mod proto_topology;
 pub mod shell;
 #[allow(clippy::module_inception)]

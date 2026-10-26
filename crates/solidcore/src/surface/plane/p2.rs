@@ -15,6 +15,7 @@
 //! | [`Plane::transform`]                       | `Transform`                                       |
 //! | [`Plane::trim_with_domain`]                | `TrimWithDomain`                                  |
 //! | [`Plane::read_from_db`]                    | `ReadFromDB` (static)                             |
+//! | [`Plane::write_to_db`]                     | `WriteToDB`                                       |
 //! | [`Plane::make_new_plane_line`]             | `MakeNewPlaneLine`                                |
 //! | [`Plane::make_new_plane_ellipse`]          | `MakeNewPlaneEllipse`                             |
 //!
@@ -87,7 +88,7 @@ use crate::surface::surface::p2::{
 };
 use crate::surface::surface::p7::base_evaluate_normal;
 use crate::surface::surface::{Surface, SurfaceKind};
-use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
+use crate::topology::database_io::{DatabaseReader, DatabaseWriter, FileType, InputStream};
 
 use super::p1::{is_grazing_intersection, Plane};
 
@@ -372,6 +373,38 @@ impl Plane {
             anal_uv_domain,
             uv_scale,
         })
+    }
+
+    /// `WriteToDB`: writes the placement origin and axes, the analytic UV domain
+    /// corners and the UV scales, then the B-spline surface part with its NURB (made
+    /// on a copy when missing, as the virtual `GetOrCreateGwNurbPointer` makes it).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Plane::base_with_nurb`] (upstream ignores the B-spline part's
+    /// status, which cannot fail once the NURB exists).
+    pub fn write_to_db(&self, db: &mut DatabaseWriter, version: u64) -> Result<()> {
+        let o = self.position.origin();
+        let x = self.position.x_axis();
+        let y = self.position.y_axis();
+        let (lo, hi) = (self.anal_uv_domain.min(), self.anal_uv_domain.max());
+        let scale = self.uv_scale;
+        if db.file_type() == FileType::Ascii {
+            db.out_reals(&[o.x, o.y, o.z]);
+            db.out_str(" SmPlane Placement Origin \n");
+            db.out_reals(&[x.x, x.y, x.z]);
+            db.out_str(" SmPlane Placement X Axis \n");
+            db.out_reals(&[y.x, y.y, y.z]);
+            db.out_str(" SmPlane Placement Y Axis \n");
+            db.out_reals(&[lo.x, lo.y, hi.x, hi.y]);
+            db.out_str(" SmPlane AnalUVDomain \n");
+            db.out_reals(&[scale.x, scale.y]);
+            db.out_str(" SmPlane UV Scale \n");
+        } else {
+            db.write_doubles(&[o.x, o.y, o.z, x.x, x.y, x.z, y.x, y.y, y.z]);
+            db.write_doubles(&[lo.x, lo.y, hi.x, hi.y, scale.x, scale.y]);
+        }
+        self.base_with_nurb()?.write_to_db(db, version)
     }
 
     // ---- recognition ------------------------------------------------------------------

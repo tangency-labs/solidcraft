@@ -365,9 +365,10 @@ struct BoundaryMemoEntry {
 /// function of the surface value and the key, so a hit gives what a fresh build gives,
 /// and the curves carry their own curve cache memos, so their caches are built once
 /// too. Lent by reference: the check only reads the curves. One entry per live surface,
-/// freed with it; no `unsafe`, and the surface stays `Send`.
+/// freed with it; no `unsafe`, and the surface stays `Send`. The entry is boxed so the
+/// memo adds only a small cell, not the whole entry, to every `Surface` value.
 #[derive(Default)]
-pub(crate) struct BoundaryMemo(OnceLock<BoundaryMemoEntry>);
+pub(crate) struct BoundaryMemo(OnceLock<Box<BoundaryMemoEntry>>);
 
 impl core::fmt::Debug for BoundaryMemo {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -402,7 +403,7 @@ fn boundary_curves<'s>(
         return trim_curves(k, surface, domain).map(Cow::Owned);
     }
     let curves = trim_curves(k, surface, domain)?;
-    if let Err(entry) = memo.set(BoundaryMemoEntry { key, curves }) {
+    if let Err(entry) = memo.set(Box::new(BoundaryMemoEntry { key, curves })) {
         return Ok(Cow::Owned(entry.curves));
     }
     match memo.get() {

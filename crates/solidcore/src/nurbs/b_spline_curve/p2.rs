@@ -30,6 +30,7 @@
 //! | [`BSplineCurve::set_control_point`]               | `SetControlPoint`                      |
 //! | [`BSplineCurve::adjust_step_interval`]            | `AdjustSTEPInterval`                   |
 //! | [`BSplineCurve::read_from_db`]                    | `ReadFromDB`                           |
+//! | [`BSplineCurve::write_to_db`]                     | `WriteToDB`                            |
 //!
 //! The other members of the file belong to `nurbs.b_spline_curve_p1`, `_p3`, ... and
 //! `nurbs.b_spline_curve_n_lib`.
@@ -110,7 +111,7 @@ use crate::nurbs::geom::dist_cpt_cpt;
 use crate::nurbs::knots::Side;
 use crate::nurbs::math::{CPoint, NOW, NOZ};
 use crate::nurbs::nurbs_crv::{allocate_nurb_curve, is_ncrv_degenerate, to_euclid};
-use crate::topology::database_io::{DatabaseReader, FileType, InputStream};
+use crate::topology::database_io::{DatabaseReader, DatabaseWriter, FileType, InputStream};
 
 /// `SmCrvOnSurf_TYPE` (`CURV_BASE_TYPE + 48`).
 const CRV_ON_SURF_TYPE: i64 = BSplineCurve::TYPE - 33 + 48;
@@ -1933,6 +1934,91 @@ impl BSplineCurve {
         }
         Ok(new_curve)
     }
+
+    /// `WriteToDB`: writes the NURB's header (last control point index, degree,
+    /// rational flag and dimension, then for `version > 32` the knot type and form),
+    /// its control points (`x y`, `x y z`, `wx wy w` or `wx wy wz w`: Euclidean for a
+    /// non-rational NURB, weighted for a rational one) and its knots.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` without NURB (`GetOrCreateGwNurbPointer` cannot make one for a
+    /// B-spline; the analytic kinds always hold theirs).
+    pub fn write_to_db(&self, db: &mut DatabaseWriter, version: u64) -> Result<()> {
+        let cur = self.nurb_ref()?;
+        let n = cur.n() as i64;
+        let p = cur.degree() as i16;
+        let knot_type = self.knot_type as u64;
+        let form = self.form as u64;
+
+        // set type flag for different types of output
+        let rat: i16 = i16::from(cur.is_rational());
+        let dim: i16 = if cur.is_3d() { 3 } else { 2 };
+
+        // output header, n, p, rat, and dim
+        let ascii = db.file_type() == FileType::Ascii;
+        if ascii {
+            db.out_i64(n).out_str(" Number of Control Points \n");
+            db.out_i64(p.into()).out_str(" Degree \n");
+            db.out_i64(rat.into()).out_str(" RationalFlag \n");
+            db.out_i64(dim.into()).out_str(" Dimension \n");
+            if version > 32 {
+                db.out_u64(knot_type);
+                db.out_str(
+                    " Knot Type Enum: 1=2d NonRational, 2=3d NonRational, 3=2d Rational, \
+                     4=3d Rational\n",
+                );
+                db.out_u64(form).out_str(" BSplineCurveForm Enum\n");
+            }
+        } else {
+            db.write_long(n);
+            db.write_short(p);
+            db.write_short(rat);
+            db.write_short(dim);
+            if version > 32 {
+                db.write_long(knot_type as i64);
+                db.write_long(form as i64);
+            }
+        }
+
+        // for every control point, by curve type
+        for pw in cur.cpts() {
+            let [x, y, z] = cpt_to_xyz(*pw);
+            let values = match (rat == 1, dim == 3) {
+                // 2-D non-rational
+                (false, false) => [x, y, 0.0, 0.0],
+                // 3-D non-rational
+                (false, true) => [x, y, z, 0.0],
+                // 2-D rational
+                (true, false) => [pw.x, pw.y, pw.w, 0.0],
+                // 3-D rational
+                (true, true) => [pw.x, pw.y, pw.z, pw.w],
+            };
+            let count = 2 + usize::from(dim == 3) + usize::from(rat == 1);
+            db.reals(values.get(..count).unwrap_or_default());
+        }
+
+        // for every knot
+        for &u in cur.knots() {
+            db.reals(&[u]);
+        }
+        Ok(())
+    }
+}
+
+/// `N_CPtToXYZ`: the Euclidean coordinates of a control point (`z` of a 2D point is
+/// `0`; a weighted point is divided by its weight).
+fn cpt_to_xyz(pw: CPoint) -> [f64; 3] {
+    let mut x = pw.x;
+    let mut y = pw.y;
+    let mut z = if pw.z == NOZ { 0.0 } else { pw.z };
+    if pw.w != NOW {
+        let w = pw.w;
+        x /= w;
+        y /= w;
+        z /= w;
+    }
+    [x, y, z]
 }
 
 #[cfg(test)]
