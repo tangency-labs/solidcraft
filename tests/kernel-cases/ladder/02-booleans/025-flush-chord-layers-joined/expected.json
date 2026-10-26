@@ -8,5 +8,5 @@
  "method": "the layers only meet face to face, so V is their sum: Body1 = pi 37^2 1.2 + (pi 37^2 - the four bands y -29..-24, -13..-8, 8..11, 24..27 of the disc, Int 2 sqrt(37^2 - y^2) dy) 2.4; Body2 = pi (37^2-35^2) 2; Body3 = pi 37^2 2.4. The bands run out to the rim, so the space inside r35 under Body1 opens to the outside: one shell (the reporter's 52-command script, generic dimensions)",
  "body_count": 1,
  "shells": 1,
- "volume_mm3": 24340.9358
+ "volume_mm3": 24340.935804077
 }

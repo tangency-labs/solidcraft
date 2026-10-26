@@ -1,7 +1,32 @@
 {
  "sources": [],
  "what": "a closed periodic fit-point spline through 6 points, extruded 10",
- "source": "invariants",
- "method": "the fit's parametrisation is the spline's own: no closed-form area, and how many side faces a periodic spline makes is the kernel's own; one valid body",
- "body_count": 1
+ "source": "analytic",
+ "method": "a periodic fit spline is the cyclic C2 cubic through its points with chord-length knots (crates/sketch/src/periodic.rs); A = 1/2 loop int (x y' - y x') over its six spans (Gauss, exact on the polynomials) = 1228.101202178, its length L by Gauss = 124.240003044; V = 10 A, area 2 A + 10 L. Faces: one side face per span + the caps; edges 6 + 6 + 6 vertical; vertices 12. The points are symmetric about both axes, so the curve is: x reaches 20 at (+-20, 0) (vertical tangent there), y reaches 19.600203460 between (10, 17) and (-10, 17); centre of mass (0, 0, 5)",
+ "body_count": 1,
+ "tolerance": {
+  "rel": 1e-05
+ },
+ "volume_mm3": 12281.012021778,
+ "area_mm2": 3698.602434791,
+ "center_of_mass": [
+  0,
+  0,
+  5
+ ],
+ "faces": 8,
+ "edges": 18,
+ "vertices": 12,
+ "bbox": {
+  "min": [
+   -20,
+   -19.600203460293468,
+   0
+  ],
+  "max": [
+   20,
+   19.600203460293468,
+   10
+  ]
+ }
 }

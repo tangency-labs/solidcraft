@@ -4,6 +4,6 @@
  "source": "analytic",
  "method": "V = (2/3) pi (20^3 - 18^3); faces: outer sphere, inner sphere, base ring",
  "body_count": 1,
- "volume_mm3": 4540.648581988447,
+ "volume_mm3": 4540.648581988,
  "faces": 3
 }

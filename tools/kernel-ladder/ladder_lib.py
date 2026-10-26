@@ -150,3 +150,35 @@ def iso_groove_fraction_int(d, P):
     """ISO 68-1 basic internal profile: fraction of a pitch the groove takes at radius r <= d/2."""
     t = math.tan(PI / 6)
     return lambda r: (P / 8 + 2 * (d / 2 - r) * t) / P
+
+def cyclic_spline(P):
+    """The periodic C2 cubic through the points P (2D, not repeated at the end), chord-length knots
+    (crates/sketch/src/periodic.rs): per span (h, f) with f(s) -> ((x, x'), (y, y')), s in [0, h]."""
+    n = len(P)
+    h = [math.dist(P[i], P[(i + 1) % n]) for i in range(n)]
+    def moments(y):
+        # h[i-1] M[i-1] + 2 (h[i-1] + h[i]) M[i] + h[i] M[i+1] = 6 (slope after - slope before)
+        A = [[0.0] * n for _ in range(n)]
+        b = [0.0] * n
+        for i in range(n):
+            ip, im = (i + 1) % n, (i - 1) % n
+            A[i][im] += h[im]
+            A[i][i] += 2 * (h[im] + h[i])
+            A[i][ip] += h[i]
+            b[i] = 6 * ((y[ip] - y[i]) / h[i] - (y[i] - y[im]) / h[im])
+        for c in range(n):
+            for r in range(n):
+                if r != c:
+                    f = A[r][c] / A[c][c]
+                    A[r] = [a - f * q for a, q in zip(A[r], A[c])]
+                    b[r] -= f * b[c]
+        return [b[i] / A[i][i] for i in range(n)]
+    M = [moments([p[k] for p in P]) for k in range(2)]
+    def span(i):
+        j = (i + 1) % n
+        def f(s):
+            a, c = (h[i] - s) / h[i], s / h[i]
+            return tuple((a * P[i][k] + c * P[j][k] + ((a ** 3 - a) * M[k][i] + (c ** 3 - c) * M[k][j]) * h[i] ** 2 / 6,
+                          (P[j][k] - P[i][k]) / h[i] + (-(3 * a * a - 1) * M[k][i] + (3 * c * c - 1) * M[k][j]) * h[i] / 6) for k in range(2))
+        return h[i], f
+    return [span(i) for i in range(n)]

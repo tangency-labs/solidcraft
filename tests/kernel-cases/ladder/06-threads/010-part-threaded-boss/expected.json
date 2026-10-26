@@ -1,7 +1,23 @@
 {
  "sources": [],
  "what": "the running part with a modelled M16 thread on its d16 boss",
- "source": "invariants",
- "method": "the boss stands on the base (thread to a shoulder) and has an M5 hole in its top; modelled threads are faceted, so later tiers build on the part before this step and 11-cumulative-parts adds it last",
- "body_count": 1
+ "source": "analytic",
+ "method": "the boss (r8, z 20..30) stands on the base's top face, a shoulder: the groove stops with its centre w = 0.932735 above it (004's rule, M16 P = 2) and runs out past the free top end; its root r = 8 - 5H/8 = 6.917 stays clear of the M5 tap drill (r 2.1) in the boss. V = the tier-05 part - (pi 8^2 (30 - 20 - w) - 2 pi int_{20+w}^30 int r m(r) dr dz), m as in 001; the bbox is the part's. Later tiers build on the part before this step and 11-cumulative-parts adds the thread last",
+ "body_count": 1,
+ "volume_mm3": 53208.190964337,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   35
+  ]
+ },
+ "tolerance": {
+  "rel": 0.0001
+ }
 }
