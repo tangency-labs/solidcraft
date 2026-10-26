@@ -476,8 +476,17 @@ impl Document {
 
     /// Evaluate a rule: `Thickness` in its expressions is the rule's thickness.
     pub fn rule_values(&self, vals: &std::collections::BTreeMap<String, Value>, r: &SheetRule) -> Result<RuleValues> {
+        self.rule_values_at(vals, r, None)
+    }
+
+    /// Evaluate a rule for a sheet `thickness` thick (a converted body's own thickness), or the
+    /// rule's thickness: `Thickness` in its expressions is the sheet's.
+    pub fn rule_values_at(&self, vals: &std::collections::BTreeMap<String, Value>, r: &SheetRule, thickness: Option<f64>) -> Result<RuleValues> {
         let look = |n: &str| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`")));
-        let t = expr::eval_with(&r.thickness, &look)?.to_kind(Kind::Length)?;
+        let t = match thickness {
+            Some(t) => t,
+            None => expr::eval_with(&r.thickness, &look)?.to_kind(Kind::Length)?,
+        };
         if !(t > 0.0 && t < 1e4) {
             return Err(DocError::Invalid("the sheet thickness must be positive".into()));
         }
