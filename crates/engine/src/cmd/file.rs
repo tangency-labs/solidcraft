@@ -304,8 +304,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(stem) = default_name_for(&doc.name, path) {
         doc.name = stem;
     }
-    s.replace_design(Session::opened(doc, saved.as_ref()));
-    s.path = Some(path.to_string());
+    s.replace_design(Session::opened_at(doc, saved.as_ref(), Some(path)));
     s.disk = disk;
     s.read_only = read_only;
     let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
@@ -402,16 +401,7 @@ fn write_file(s: &mut Session, path: &str, format: &str, compression: &str, prev
         "compact" => solidcraft_io::DesignCompression::Compact,
         _ => return Err(bad("file.save", "compression must be fast or compact")),
     };
-    // Linked designs are kept relative to the folder the design is saved in.
-    let links = super::component_link::rebased(&s.doc, s.path.as_deref(), path);
-    let old_links = (links != s.doc.links).then(|| std::mem::replace(&mut s.doc_mut().links, links));
-    let r = write_bytes(s, path, format, compression, preview, cache);
-    if r.is_err()
-        && let Some(old) = old_links
-    {
-        s.doc_mut().links = old;
-    }
-    r
+    write_bytes(s, path, format, compression, preview, cache)
 }
 
 fn write_bytes(
@@ -423,8 +413,8 @@ fn write_bytes(
     cache: bool,
 ) -> Result<Value> {
     let bytes = match format {
-        "container" => s.design_container(compression, preview, cache)?,
-        "json" => solidcraft_io::write_design(&s.design()),
+        "container" => s.design_container_at(Some(path), compression, preview, cache)?,
+        "json" => solidcraft_io::write_design(&s.design_at(Some(path))),
         _ => return Err(bad("file.save", "format must be container or json")),
     };
     // Atomic, keeping the version being replaced as `<file>.bak`.
@@ -437,17 +427,38 @@ fn write_bytes(
 }
 
 impl Session {
+    /// Open a design with its file location, resolving component links before history keeps
+    /// them. Absolute in-memory targets survive Save As, undo, redo and recovery unchanged.
+    pub fn opened_at(mut doc: Document, saved: Option<&solidcraft_doc::SavedModel>, path: Option<&str>) -> Self {
+        super::component_link::resolve_design_links(&mut doc, path);
+        let mut session = Self::opened(doc, saved);
+        session.path = path.map(str::to_owned);
+        session
+    }
+
+    /// Prepare only the file's copy with relative paths; saving never rewrites live history.
+    pub(crate) fn design_at(&self, path: Option<&str>) -> std::borrow::Cow<'_, Document> {
+        let mut design = std::borrow::Cow::Borrowed(&*self.doc);
+        if let Some(path) = path {
+            let links = super::component_link::rebased(&self.doc, self.path.as_deref(), path);
+            if links != self.doc.links {
+                design.to_mut().links = links;
+            }
+        }
+        if !self.visibility.is_empty() {
+            design.to_mut().visibility = self.visibility.clone();
+        }
+        design
+    }
+
     /// Take up a save that ran on `done`, a [`Session::scratch`] copy of this session that
     /// `file.save` or `file.save_as` ran on (on another thread, so the window keeps drawing)
-    /// while this one did not change: the name and link paths the save gave the design, its
+    /// while this one did not change: the name the save gave the design, its
     /// file, and its saved state, as running the command here would have left them.
     pub fn adopt_save(&mut self, done: &Session) {
         if done.doc.name != self.doc.name {
             let (from, to) = (self.doc.name.clone(), done.doc.name.clone());
             rename_design(self, &from, &to);
-        }
-        if done.doc.links != self.doc.links {
-            self.doc_mut().links.clone_from(&done.doc.links);
         }
         self.path.clone_from(&done.path);
         self.disk = done.disk;
@@ -467,7 +478,17 @@ impl Session {
     /// Container bytes for desktop and browser saves. Only already evaluated bodies
     /// and warm meshes are eligible; saving never forces evaluation or tessellation.
     pub fn design_container(&self, compression: solidcraft_io::DesignCompression, preview: bool, cache: bool) -> solidcraft_io::Result<Vec<u8>> {
-        let design = self.design();
+        self.design_container_at(self.path.as_deref(), compression, preview, cache)
+    }
+
+    fn design_container_at(
+        &self,
+        path: Option<&str>,
+        compression: solidcraft_io::DesignCompression,
+        preview: bool,
+        cache: bool,
+    ) -> solidcraft_io::Result<Vec<u8>> {
+        let design = self.design_at(path);
         let geometry = cache.then(|| saved_geometry(self, &design)).flatten();
         let preview = preview.then(|| saved_preview(self)).flatten();
         let thumbnail = cache.then(|| thumbnail::saved(self)).flatten();
@@ -708,8 +729,7 @@ fn recover(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(stem) = entry.path.as_deref().and_then(|path| default_name_for(&doc.name, path)) {
         doc.name = stem;
     }
-    s.replace_design(Session::new(doc));
-    s.path = entry.path.clone();
+    s.replace_design(Session::opened_at(doc, None, entry.path.as_deref()));
     s.mark_unsaved();
     if bool_(p, "discard").unwrap_or(false) {
         crate::recovery::remove(&dir, id)?;

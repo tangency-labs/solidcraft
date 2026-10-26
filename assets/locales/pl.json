@@ -568,6 +568,7 @@
   "cmd.document_metadata": "Właściwości projektu",
   "cmd.document_metadata_remove": "Usuń właściwość projektu",
   "cmd.document_metadata_set": "Zmień właściwości projektu",
+  "cmd.document_revision": "Wersja projektu",
   "cmd.document_units": "Zmień jednostki projektu",
   "cmd.edit_checkpoint": "Punkt kontrolny",
   "cmd.edit_restore_checkpoint": "Przywróć punkt kontrolny",

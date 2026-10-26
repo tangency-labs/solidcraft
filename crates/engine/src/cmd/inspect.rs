@@ -1,5 +1,10 @@
 //! Inspection: measure bodies, describe the document, sketches and model topology.
 
+use std::collections::BTreeMap;
+use std::hash::{BuildHasher, RandomState};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock, Weak};
+
 use serde_json::{Value, json};
 use solidcraft_sketch::CurveKind;
 
@@ -18,6 +23,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .params("bodies?: [names] (default all) → closed per body; volume_mm3, center_of_mass, density_g_cm3 and mass_g only for closed, consistently oriented bodies; area, bbox and counts for all; total.open_bodies_skipped counts bodies excluded from volume/mass totals; or items: [1-2 selections] (face/edge: type, body, point; index optional) → length/area/volume; diameter, radius, circumference or arc_length/angle_deg of circles, arcs and cylinders; slot sizes; min (distance_mm, from, to), max, center_distance (centre to centre, or from an axis) and angle"),
     CommandSpec::new("document.inspect", "Inspect Design", inspect).icon("inspect").noundo().params("measure?: bool (include body measurements)"),
+    CommandSpec::new("document.revision", "Design Revision", revision).icon("inspect").noundo().params(
+        "→ document_id (this open design's id: kept while it stays open, another for each design started or opened), \
+         revision (moves whenever the design, what is hidden or a component's uncaptured position changes, \
+         never on a selection or a view; from one counter for the whole run, so it never repeats). Read-only",
+    ),
     CommandSpec::new("sketch.inspect", "Inspect Sketch", sketch_inspect).icon("inspect").noundo().params("sketch?: id|name (default active)"),
     CommandSpec::new("model.edges", "List Edges", model_edges).icon("inspect").noundo().params("body: name"),
     CommandSpec::new("model.faces", "List Faces", model_faces).icon("inspect").noundo().params(
@@ -239,6 +249,59 @@ fn sketch_inspect(s: &mut Session, p: &Value) -> Result<Value> {
     }
     .ok_or_else(|| bad("sketch.inspect", "no such sketch (and none is active)"))?;
     sketch_json(s, id).ok_or_else(|| EngineError::Other("that sketch is not evaluated (rolled back or not a sketch)".into()))
+}
+
+/// Revisions of every design of this run (#6646).
+static NEXT_REVISION: AtomicU64 = AtomicU64::new(1);
+
+/// The design as `document.revision` last saw it, which its revision names.
+pub(crate) struct Followed {
+    /// Held weakly: a design something holds weakly is never changed in place (`Arc::make_mut`
+    /// moves it), and its address can't go to another design meanwhile.
+    doc: Weak<solidcraft_doc::Document>,
+    visibility: crate::Visibility,
+    pending_moves: BTreeMap<u64, solidcraft_doc::Mat>,
+    revision: u64,
+}
+
+/// A new design's id: one for this run, then a number, so no two designs of one run, or of two
+/// runs, have the same.
+pub(crate) fn new_document_id() -> String {
+    static RUN: OnceLock<u64> = OnceLock::new();
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    let run = RUN.get_or_init(|| {
+        let started = web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+        // Hashed with this process's random keys (where the system has them), so two runs differ
+        // even with the clock set back.
+        RandomState::new().hash_one(started)
+    });
+    format!("{run:016x}-{}", NEXT.fetch_add(1, Ordering::Relaxed))
+}
+
+impl Session {
+    /// The revision of what the design holds now (`document.revision`), a new one when it changed
+    /// since last asked. Changes between two asks that end where they began (an edit undone) need
+    /// no new one: the design is the one that revision named.
+    pub fn design_revision(&mut self) -> u64 {
+        let seen = |f: &Followed| {
+            std::ptr::eq(f.doc.as_ptr(), Arc::as_ptr(&self.doc)) && f.visibility == self.visibility && f.pending_moves == self.pending_moves
+        };
+        match self.followed.as_ref().filter(|f| seen(f)) {
+            Some(f) => f.revision,
+            None => {
+                let revision = NEXT_REVISION.fetch_add(1, Ordering::Relaxed);
+                let (doc, visibility, pending_moves) = (Arc::downgrade(&self.doc), self.visibility.clone(), self.pending_moves.clone());
+                self.followed = Some(Followed { doc, visibility, pending_moves, revision });
+                revision
+            }
+        }
+    }
+}
+
+/// `document.revision`: the design's id and [`Session::design_revision`].
+fn revision(s: &mut Session, _p: &Value) -> Result<Value> {
+    let revision = s.design_revision();
+    Ok(json!({"document_id": s.document_id, "revision": revision}))
 }
 
 fn inspect(s: &mut Session, p: &Value) -> Result<Value> {

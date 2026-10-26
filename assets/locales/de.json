@@ -631,6 +631,7 @@
   "cmd.document_metadata": "Konstruktionseigenschaften",
   "cmd.document_metadata_remove": "Konstruktionseigenschaft entfernen",
   "cmd.document_metadata_set": "Konstruktionseigenschaften ändern",
+  "cmd.document_revision": "Konstruktionsrevision",
   "cmd.document_units": "Einheiten der Konstruktion ändern",
   "cmd.edit_checkpoint": "Prüfpunkt",
   "cmd.edit_restore_checkpoint": "Prüfpunkt wiederherstellen",

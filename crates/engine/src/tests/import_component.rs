@@ -415,3 +415,66 @@ fn a_joint_on_an_imported_part_takes_its_own_hole() {
     let pin_at = solidcraft_doc::apply_point(&solidcraft_doc::joints::occurrence_world(&s.doc, pin), Vec3::new(0.0, -40.0, 0.0));
     assert!(Vec3::new(pin_at.x, pin_at.y, 0.0).dist(Vec3::new(70.0, 10.0, 0.0)) < 1e-6, "the pin's base is at {pin_at:?}");
 }
+
+/// Each component's bodies, by component name.
+fn bodies_by_component(s: &mut Session) -> Vec<(String, Vec<String>)> {
+    components(s)
+        .iter()
+        .map(|c| (c["name"].as_str().unwrap().to_string(), c["bodies"].as_array().unwrap().iter().map(|b| b.as_str().unwrap().to_string()).collect()))
+        .collect()
+}
+
+/// Renaming one body of an imported assembly renames that body and nothing else (#2175). An
+/// Import keeps its bodies' names by their place in the file, and builds no body for the file's
+/// later instances of a repeated part: the rename stored the names by their place in the model,
+/// so once the design was rebuilt the bodies after those instances took the wrong names and left
+/// their components.
+#[test]
+fn renaming_an_imported_body_after_a_repeated_part_keeps_every_body_in_its_component() {
+    let dir = temp_dir("rename-after-repeat");
+    // Bracket and Pin placed twice, then Plate and Knob: the file's bodies are Bracket, Pin,
+    // Bracket, Pin, Plate, Knob, and the Import builds Bracket, Pin, Plate, Knob.
+    let mut a = Session::default();
+    run(&mut a, "solid.box", json!({"length": 20, "width": 10, "height": 10, "body_name": "Bracket"}));
+    run(&mut a, "solid.box", json!({"length": 4, "width": 4, "height": 16, "corner": [8, 3, 10], "operation": "new_body", "body_name": "Pin"}));
+    run(&mut a, "component.from_bodies", json!({"bodies": ["Bracket", "Pin"]}));
+    for part in ["Bracket", "Pin"] {
+        run(&mut a, "occurrence.copy", json!({"component": part, "translate": [0, 25, 0]}));
+    }
+    run(
+        &mut a,
+        "solid.box",
+        json!({"length": 60, "width": 50, "height": 3, "corner": [-20, -10, -3], "operation": "new_body", "body_name": "Plate"}),
+    );
+    run(&mut a, "solid.box", json!({"length": 6, "width": 6, "height": 6, "corner": [30, 30, 0], "operation": "new_body", "body_name": "Knob"}));
+    run(&mut a, "component.from_bodies", json!({"bodies": ["Plate", "Knob"]}));
+    let path = dir.join("fixture.step").to_string_lossy().to_string();
+    run(&mut a, "file.export", json!({"path": path}));
+
+    let mut s = Session::default();
+    run(&mut s, "file.insert_step", json!({"path": path}));
+    let f = &s.doc.features[0];
+    assert!(matches!(&f.kind, solidcraft_doc::FeatureKind::Import { skip, .. } if *skip == [2, 3]), "{:?}", f.body_names);
+    let names = |s: &Session| s.model.state().bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&s), ["Bracket", "Pin", "Plate", "Knob"]);
+    let mut expected = bodies_by_component(&mut s);
+    let boxes = shown_boxes(&s);
+
+    let mut rename = |s: &mut Session, old: &str, new: &str| {
+        run(s, "body.rename", json!({"body": old, "name": new}));
+        for (_, bodies) in &mut expected {
+            for b in bodies.iter_mut().filter(|b| *b == old) {
+                *b = new.to_string();
+            }
+        }
+        // Rebuilt from the stored names, the design is the same.
+        run(s, "timeline.compute_all", json!({}));
+        assert_eq!(bodies_by_component(s), expected);
+        assert_eq!(shown_boxes(s), boxes, "every body is where it was");
+    };
+    rename(&mut s, "Plate", "Base plate");
+    rename(&mut s, "Pin", "Peg");
+    rename(&mut s, "Knob", "Handle");
+    assert_eq!(names(&s), ["Bracket", "Peg", "Base plate", "Handle"]);
+    let _ = std::fs::remove_dir_all(&dir);
+}

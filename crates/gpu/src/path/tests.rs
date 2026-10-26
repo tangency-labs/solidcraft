@@ -542,6 +542,22 @@ fn path_devices_are_vulkan_or_metal_only() {
 }
 
 #[test]
+fn viewport_path_backends_keep_windows_on_its_selected_backend() {
+    for backend in [wgpu::Backend::Dx12, wgpu::Backend::Gl, wgpu::Backend::Vulkan] {
+        let allowed = viewport_path_backends(backend, true);
+        assert_eq!(allowed, wgpu::Backends::from(backend));
+        assert_eq!(allowed.contains(wgpu::Backends::VULKAN), backend == wgpu::Backend::Vulkan);
+    }
+}
+
+#[test]
+fn viewport_path_backends_preserve_other_platforms() {
+    for backend in [wgpu::Backend::Vulkan, wgpu::Backend::Gl, wgpu::Backend::Metal] {
+        assert_eq!(viewport_path_backends(backend, false), crate::select::path_backends());
+    }
+}
+
+#[test]
 fn admission_rejects_hostile_parameters_and_transparency() {
     let mut scene = sphere(white());
     let mut r = request(16);

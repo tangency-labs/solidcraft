@@ -819,7 +819,7 @@ fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
                 *names = pins;
                 f.body_names.clear();
             } else {
-                f.body_names.clone_from(made);
+                f.pin_body_names(made);
             }
         }
     }
@@ -828,15 +828,18 @@ fn rename_body(s: &mut Session, p: &Value) -> Result<Value> {
         *names = pins;
         f.body_names.clear();
     } else {
-        while f.body_names.len() < siblings.len().max(k + 1) {
-            let i = f.body_names.len();
-            f.body_names.push(siblings.get(i).cloned().unwrap_or_default());
+        // An Import keeps its names by the file's body index, its skipped bodies' too (#2175).
+        let slots = f.body_name_slots(siblings.len().max(k + 1));
+        if let Some(end) = slots.last().map(|s| s + 1).filter(|end| f.body_names.len() < *end) {
+            f.body_names.resize(end, String::new());
         }
-        for (slot, current) in f.body_names.iter_mut().zip(&siblings) {
-            slot.clone_from(current);
+        for (slot, current) in slots.iter().zip(&siblings) {
+            if let Some(stored) = f.body_names.get_mut(*slot) {
+                stored.clone_from(current);
+            }
         }
-        if let Some(slot) = f.body_names.get_mut(k) {
-            *slot = name.to_string();
+        if let Some(stored) = slots.get(k).and_then(|slot| f.body_names.get_mut(*slot)) {
+            *stored = name.to_string();
         }
     }
     // Later features refer to bodies by name.

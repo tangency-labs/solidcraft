@@ -56,6 +56,10 @@ mod neutral_click_tests;
 #[path = "symmetry_pick_tests.rs"]
 mod symmetry_pick_tests;
 
+#[cfg(test)]
+#[path = "sketch_centre_align_ui_tests.rs"]
+mod centre_align_ui_tests;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     /// Click points; `n` points complete the shape (0 = chain until finished).
@@ -150,7 +154,9 @@ pub fn hint(id: &str) -> String {
         "sketch.dimension" => {
             "Dimension: pick one or two entities and type the value (or click to place it first); click a dimension to edit it; Enter applies".into()
         }
-        "sketch.constraint.horizontal_vertical" => "Horizontal/Vertical: pick a line or two points; hold Shift to pick a line midpoint".into(),
+        "sketch.constraint.horizontal_vertical" => {
+            "Horizontal/Vertical: pick a line, two points, or a point and a line; hold Shift to pick a line midpoint".into()
+        }
         "sketch.slot.center_to_center" | "sketch.slot.overall" => "Slot: click both ends, then the width".into(),
         "sketch.constraint.midpoint" => "MidPoint: pick a point and a line, or two lines to centre the second on the first".into(),
         _ if id.starts_with("sketch.constraint.") => "Constraint: pick the sketch entities".into(),
@@ -252,11 +258,23 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                 } else {
                     tool.point_picks.push(point);
                 }
-            } else if !shift
-                && tool.point_picks.is_empty()
-                && let Some(Hit::SketchCurve { id, straight: true, .. }) = hit
-            {
-                let _ = app.run(tool.cmd, json!({"line": id}));
+            } else if !shift && let Some(Hit::SketchCurve { id, straight: true, .. }) = hit {
+                // A line picked on its own is made horizontal/vertical; a line picked after a
+                // point aligns that point with the line (a circle's centre with a square's
+                // edge, #617).
+                let first = tool.point_picks.first().cloned();
+                let params = match first {
+                    None => Some(json!({"line": id})),
+                    Some(point) => {
+                        let state = app.session.world_state();
+                        app.session.active_sketch.and_then(|sid| state.sketch(sid)).and_then(|ss| point_line_alignment(&ss.sketch, &point, id))
+                    }
+                };
+                if let Some(params) = params
+                    && app.run(tool.cmd, params).is_ok()
+                {
+                    tool.point_picks.clear();
+                }
             }
         }
         Kind::Pick(n) => {
@@ -264,11 +282,21 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
             // Symmetry's third pick may be an origin axis lying along the sketch's own x or y
             // (#1075); the command names those `x` / `y`.
             let axis_ok = tool.cmd == "sketch.constraint.symmetry" && tool.picks.len() == 2;
-            if let Some(id) = hits.iter().find_map(|h| match h {
+            let entity = hits.iter().find_map(|h| match h {
                 Hit::SketchPoint { id, .. } | Hit::SketchCurve { id, .. } => Some(id.clone()),
                 Hit::Axis { name } if axis_ok => sketch_axis_of(app, name).map(str::to_string),
                 _ => None,
-            }) {
+            });
+            // With nothing of the sketch there, a body's edge or vertex is picked (kept as its
+            // reference): the command projects it, so any body can be constrained to, a mirrored
+            // copy too (#6348). Projected geometry is already fixed, so Fix takes sketch entities.
+            let model = || {
+                hits.iter()
+                    .filter(|h| tool.cmd != "sketch.constraint.fix" && matches!(h, Hit::Edge { .. } | Hit::Vertex { .. }))
+                    .find_map(|h| crate::sketch_tools::model_ref(app, h))
+                    .map(|r| r.to_string())
+            };
+            if let Some(id) = entity.or_else(model) {
                 tool.picks.push(id);
             }
             if tool.picks.len() >= n {
@@ -532,6 +560,28 @@ fn run_shape(app: &mut SolveApp, t: &Tool) -> Result<Vec<String>, String> {
     Ok(result["curves"].as_array().into_iter().flatten().filter_map(|c| c.as_str().map(str::to_string)).collect())
 }
 
+/// #617: Aligning a point with a straight line (a circle's centre with a square's edge) aligns
+/// the point with the line's midpoint, in the mode the line's dominant axis suggests. None when
+/// the curve is not a line.
+pub(crate) fn point_line_alignment(sk: &solidcraft_engine::sketch::Sketch, point: &Value, line: &str) -> Option<Value> {
+    let points = point_line_points(sk, point, line)?;
+    let mode = line_axis_mode(sk, line)?;
+    Some(json!({"points": points, "mode": mode}))
+}
+
+/// The `points` pair aligning `point` with the midpoint of `line`; None when `line` is not a line.
+pub(crate) fn point_line_points(sk: &solidcraft_engine::sketch::Sketch, point: &Value, line: &str) -> Option<[Value; 2]> {
+    let l = sk.curve_index(line)?;
+    matches!(sk.shape(l)?, solidcraft_engine::sketch::Shape::Line { .. }).then(|| [point.clone(), json!({"midpoint": line})])
+}
+
+/// The axis a straight line is closest to: the alignment mode when a point is aligned with it (#617).
+fn line_axis_mode(sk: &solidcraft_engine::sketch::Sketch, line: &str) -> Option<&'static str> {
+    let solidcraft_engine::sketch::Shape::Line { a, b } = sk.shape(sk.curve_index(line)?)? else { return None };
+    let d = b - a;
+    Some(if d.x.abs() >= d.y.abs() { "horizontal" } else { "vertical" })
+}
+
 /// Only consume a complete, unambiguous selection; command validation owns geometry.
 pub(crate) fn constraint_preselection(
     command: &str,
@@ -561,6 +611,14 @@ pub(crate) fn constraint_preselection(
         ("sketch.constraint.equal", _) if selection.len() >= 3 => selected_ids(true, 3).map(|ids| json!({"curves":ids})),
         ("sketch.constraint.curvature", [SketchCurve { id: a, .. }, SketchCurve { id: b, .. }]) if a != b => Some(json!({"a":a,"b":b})),
         ("sketch.constraint.horizontal_vertical", [SketchCurve { id, .. }]) => Some(json!({"line":id})),
+        // A point and a straight line (a circle's centre and a square's edge, #617): align the
+        // point with the line, in the mode the line's own axis suggests.
+        ("sketch.constraint.horizontal_vertical", [SketchPoint { id }, SketchCurve { id: line, .. }]) => {
+            point_line_alignment(sketch?, &json!(id), line)
+        }
+        ("sketch.constraint.horizontal_vertical", [SketchCurve { id: line, .. }, SketchPoint { id }]) => {
+            point_line_alignment(sketch?, &json!(id), line)
+        }
         ("sketch.constraint.horizontal_vertical", _) => crate::selection::alignment_points(selection).map(|points| json!({"points": points})),
         ("sketch.constraint.coincident", [a, b]) => {
             let entity = |s: &solidcraft_engine::Sel| match s {
@@ -662,17 +720,17 @@ fn symmetry_args(picks: &[Value], sketch: Option<&solidcraft_engine::sketch::Ske
 }
 
 fn run_pick(app: &mut SolveApp, t: &Tool) {
-    let k = &t.picks;
+    // An entity id, or a model edge's or vertex's reference.
+    let k: Vec<Value> = t.picks.iter().map(|pick| serde_json::from_str(pick).ok().filter(Value::is_object).unwrap_or_else(|| json!(pick))).collect();
     let params = match t.cmd {
         "sketch.constraint.fix" => json!({"entity": k[0]}),
         "sketch.constraint.coincident" => json!({"a": k[0], "b": k[1]}),
         // In pick order: a point and a line either way round, or two lines to centre.
         "sketch.constraint.midpoint" => json!({"a": k[0], "b": k[1]}),
         "sketch.constraint.symmetry" => {
-            let picks: Vec<Value> = k.iter().map(|pick| json!(pick)).collect();
             let params = {
                 let state = app.session.world_state();
-                symmetry_args(&picks, app.session.active_sketch.and_then(|id| state.sketch(id)).map(|ss| &ss.sketch))
+                symmetry_args(&k, app.session.active_sketch.and_then(|id| state.sketch(id)).map(|ss| &ss.sketch))
             };
             let Some(params) = params else {
                 app.set_status("Symmetry: pick two points or two curves and the line between them", true);

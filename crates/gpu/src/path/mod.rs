@@ -92,11 +92,16 @@ pub fn host() -> Result<ImageHost> {
 /// Open an independent job device on the viewport's selected adapter. In particular,
 /// software fallback and safe mode must not rediscover a failing hardware driver.
 /// An explicit incompatible SOLIDCRAFT_GPU policy leaves this executor unavailable.
-/// The path tracer runs on Vulkan, or Metal on macOS: a viewport on another backend is reopened on the same
-/// GPU through one of them, and without one the executor is unavailable and images render on the CPU.
+/// The path tracer runs on Vulkan, or Metal on macOS. On Windows it must keep the viewport's
+/// backend: opening Vulkan drivers that startup avoided can crash inside native driver code.
+/// Elsewhere a viewport on another backend is reopened on the same GPU through one of them.
+/// Without a usable adapter the executor is unavailable; CPU image methods remain usable.
 pub fn host_on_adapter(adapter: &wgpu::Adapter) -> Result<ImageHost> {
     let policy = crate::select::Policy::from_env().map_err(gpu)?;
     let info = adapter.get_info();
+    if !viewport_path_backends(info.backend, cfg!(target_os = "windows")).intersects(crate::select::path_backends()) {
+        return Err(gpu(format!("{VULKAN_ONLY}; the viewport uses {:?}", info.backend)));
+    }
     if !policy.admits(crate::select::tier_of(info.device_type)) {
         return Err(gpu(format!("viewport adapter does not satisfy SOLIDCRAFT_GPU={}", policy.name())));
     }
@@ -114,6 +119,11 @@ pub fn host_on_adapter(adapter: &wgpu::Adapter) -> Result<ImageHost> {
 
 // D3D12 shader compilation is avoided; the user can select a CPU image method instead.
 const VULKAN_ONLY: &str = "the GPU path tracer requires a Vulkan driver (Metal on macOS); select a CPU image method when none is available";
+
+/// Backends a viewport's path device may open, before any driver is loaded.
+fn viewport_path_backends(backend: wgpu::Backend, windows: bool) -> wgpu::Backends {
+    if windows { wgpu::Backends::from(backend) } else { crate::select::path_backends() }
+}
 
 // Path resources need six storage buffers (geometry, BVH, accumulation, HDRI,
 // textures, medium-failure counts). Request that limit only on this independent path device: raster and

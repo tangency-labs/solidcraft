@@ -300,6 +300,11 @@ To change a feature after it is made, read its definition with `execute` `timeli
 `{"extent": {"distance": "30"}}`). The fields per feature type are listed in the book's
 *Solid features* chapter.
 
+To tell whether the design changed since a call, without reading all of it again, `execute`
+`document.revision` answers `{document_id, revision}`: `revision` moves only when the design
+changes, and `document_id` names the open design (another one after `new_design` or `open`).
+See [control-protocol.md](control-protocol.md#following-the-design).
+
 Resources: `solidcraft://design` (inspect JSON with measurements) and `solidcraft://commands`
 (the catalog).
 

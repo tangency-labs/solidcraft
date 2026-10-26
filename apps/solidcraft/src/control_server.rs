@@ -13,11 +13,15 @@ use solidcraft_engine::MAX_LINE;
 use solidcraft_engine::control_auth;
 use solidcraft_engine::control_pending;
 use solidcraft_ui_egui::ControlRequest;
+use solidcraft_ui_egui::control::{DESIGN_WATCH, DesignWatch, Subscriber};
 
 /// Connections served at once, so a flood must not be able to spawn threads without end.
 const MAX_CONNECTIONS: usize = 16;
 /// Lines that are not JSON before the connection is closed, so garbage cannot loop forever.
 const MAX_BAD_LINES: usize = 8;
+/// How long a subscribed connection waits after a `design.changed` line before the next: what
+/// changes meanwhile (a parameter dragged) goes out as one line, the latest (#6985).
+const EVENT_GAP: Duration = Duration::from_millis(100);
 
 static OPEN: AtomicUsize = AtomicUsize::new(0);
 /// The token files this launch wrote (its control port, the agent chat's endpoint), removed
@@ -365,10 +369,91 @@ fn busy_message(p: &Pending, method: &str) -> String {
     )
 }
 
-fn serve(stream: TcpStream, token: &str, tx: Sender<ControlRequest>, ctx: egui::Context, patient: bool) {
-    serve_with(stream, token, tx, ctx, patient, WAITS, &RUNNING);
+/// A subscribed connection's socket, for its replies and its events: each line is written whole
+/// and alone, so an event never lands inside a reply (#6985).
+struct Lines {
+    socket: TcpStream,
+    turn: Mutex<()>,
 }
 
+impl Lines {
+    fn send(&self, line: &Value) -> std::io::Result<()> {
+        let _turn = self.turn.lock().unwrap_or_else(PoisonError::into_inner);
+        send(&mut &self.socket, line)
+    }
+}
+
+/// A connection's `control.subscribe` (#6985): its `design.changed` lines, sent from a thread of
+/// their own until the connection ends.
+struct Subscription {
+    lines: Arc<Lines>,
+    stop: Arc<AtomicBool>,
+    _counted: Subscriber,
+}
+
+impl Subscription {
+    /// Write `reply`, the window's answer to `control.subscribe` naming the design `seen`, on
+    /// `out`, then send `design`'s changes after it: the reply goes out before any event. `None`,
+    /// with nothing written, when no thread or socket was left for the events.
+    fn start(
+        design: &'static DesignWatch,
+        counted: Subscriber,
+        out: &TcpStream,
+        seen: (String, u64),
+        reply: &Value,
+    ) -> Option<(Self, std::io::Result<()>)> {
+        let lines = Arc::new(Lines { socket: out.try_clone().ok()?, turn: Mutex::new(()) });
+        let stop = Arc::new(AtomicBool::new(false));
+        let first = lines.turn.lock().unwrap_or_else(PoisonError::into_inner);
+        let (l, s) = (lines.clone(), stop.clone());
+        std::thread::Builder::new().stack_size(64 * 1024).spawn(move || send_events(design, &l, &s, seen)).ok()?;
+        let sent = send(&mut &lines.socket, reply);
+        drop(first);
+        Some((Subscription { lines, stop, _counted: counted }, sent))
+    }
+}
+
+/// The design a `control.subscribe` reply names.
+fn design_of(reply: &Value) -> Option<(String, u64)> {
+    let result = reply.get("result")?;
+    Some((result.get("document_id")?.as_str()?.to_string(), result.get("revision")?.as_u64()?))
+}
+
+impl Drop for Subscription {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        // The socket closes now, not when the thread next looks; a line blocked on a client that
+        // stopped reading ends too.
+        let _ = self.lines.socket.shutdown(std::net::Shutdown::Both);
+    }
+}
+
+/// The `design.changed` lines of a subscribed connection, each time the design differs from the
+/// last one it was told of (`seen`), until `stop`.
+fn send_events(design: &DesignWatch, lines: &Lines, stop: &AtomicBool, mut seen: (String, u64)) {
+    while !stop.load(Ordering::Relaxed) {
+        let Some(now) = design.wait(&seen, stop, Duration::from_secs(1)).filter(|now| *now != seen) else { continue };
+        if lines.send(&json!({"event": "design.changed", "params": {"document_id": now.0, "revision": now.1}})).is_err() {
+            break;
+        }
+        seen = now;
+        std::thread::sleep(EVENT_GAP);
+    }
+}
+
+/// Write `reply` on the connection: through its subscription once it has one.
+fn answer(out: &mut TcpStream, events: Option<&Subscription>, reply: &Value) -> std::io::Result<()> {
+    match events {
+        Some(e) => e.lines.send(reply),
+        None => send(out, reply),
+    }
+}
+
+fn serve(stream: TcpStream, token: &str, tx: Sender<ControlRequest>, ctx: egui::Context, patient: bool) {
+    serve_with(stream, token, tx, ctx, patient, WAITS, &RUNNING, &DESIGN_WATCH);
+}
+
+#[allow(clippy::too_many_arguments)]
 fn serve_with(
     stream: TcpStream,
     token: &str,
@@ -377,6 +462,7 @@ fn serve_with(
     patient: bool,
     waits: Waits,
     running: &'static Running,
+    design: &'static DesignWatch,
 ) {
     let connection = running.connections.fetch_add(1, Ordering::Relaxed) + 1;
     let Ok(read) = stream.try_clone() else { return };
@@ -385,12 +471,15 @@ fn serve_with(
     let mut bad = 0usize;
     let mut authenticated = false;
     let mut pending: Option<Pending> = None;
+    let mut events: Option<Subscription> = None;
     loop {
+        // A first `control.subscribe` on its way to the window (#6985).
+        let mut joining = None;
         let line = match read_line(&mut reader, MAX_LINE) {
             Ok(Some(l)) => String::from_utf8_lossy(&l).into_owned(),
             Ok(None) => break,
             Err(e) => {
-                let _ = send(&mut out, &json!({"ok": false, "error": e.to_string()}));
+                let _ = answer(&mut out, events.as_ref(), &json!({"ok": false, "error": e.to_string()}));
                 break;
             }
         };
@@ -434,6 +523,14 @@ fn serve_with(
                 } else if let Some(p) = pending.as_ref().filter(|_| late.is_none()) {
                     // Nothing more is queued behind it, to run unseen when it ends.
                     json!({"ok": false, "busy": true, "error": busy_message(p, &method)})
+                } else if method == "control.subscribe" && events.is_some() {
+                    if late.is_some() {
+                        // As below: finished, and the client moved on without asking.
+                        pending = None;
+                    }
+                    // Its events already say how the design moves; a second answer could only
+                    // arrive behind a newer one.
+                    json!({"ok": false, "error": "already subscribed: this connection is sent design.changed lines; ask document.revision for the design now"})
                 } else {
                     if late.is_some() {
                         // Finished, and the client moved on without asking: it is dropped.
@@ -443,6 +540,9 @@ fn serve_with(
                     let wait = if patient || method == "engine.batch" { waits.long } else { waits.short };
                     let what = control_pending::describe(&method, &params);
                     let effect = control_pending::effect(&method, &params);
+                    // Counted before the window answers, so it publishes every change from its
+                    // answer on.
+                    joining = (method == "control.subscribe").then(|| design.join());
                     let (req, rrx) = ControlRequest::new(method.clone(), params);
                     let ticket = running.add(connection, &id, &req);
                     if tx.send(req).is_err() {
@@ -472,7 +572,20 @@ fn serve_with(
                 json!({"ok": false, "error": format!("bad JSON: {e}")})
             }
         };
-        if send(&mut out, &reply).is_err() {
+        // Subscribed once the window named the design (not when it refused or timed out).
+        let sent = match joining.and_then(|counted| design_of(&reply).map(|seen| (counted, seen))) {
+            Some((counted, seen)) => match Subscription::start(design, counted, &out, seen, &reply) {
+                Some((subscription, sent)) => {
+                    events = Some(subscription);
+                    sent
+                }
+                None => {
+                    send(&mut out, &json!({"id": reply.get("id"), "ok": false, "error": "not subscribed: no thread or socket left for the events"}))
+                }
+            },
+            None => answer(&mut out, events.as_ref(), &reply),
+        };
+        if sent.is_err() {
             break;
         }
         if bad >= MAX_BAD_LINES {
@@ -512,7 +625,7 @@ mod tests {
         static RUNNING: Running = Running::new();
         std::thread::spawn(move || {
             if let Some(stream) = listener.incoming().flatten().next() {
-                serve_with(stream, token, tx, egui::Context::default(), false, waits, &RUNNING);
+                serve_with(stream, token, tx, egui::Context::default(), false, waits, &RUNNING, &DESIGN_WATCH);
             }
         });
         let s = TcpStream::connect(addr).unwrap();
@@ -578,7 +691,7 @@ mod tests {
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
                 let tx = tx.clone();
-                std::thread::spawn(move || serve_with(stream, token, tx, egui::Context::default(), false, waits, &RUNNING));
+                std::thread::spawn(move || serve_with(stream, token, tx, egui::Context::default(), false, waits, &RUNNING, &DESIGN_WATCH));
             }
         });
         let open = || {
@@ -646,6 +759,95 @@ mod tests {
         // Asking `control.running` did not take the export's reply from its connection.
         let r = export(json!({"id": 9, "method": "control.pending"}));
         assert_eq!((&r["result"]["pending"], &r["result"]["done"]), (&json!(7), &json!(true)), "{r}");
+    }
+
+    /// #6985: a connection that sends `control.subscribe` gets the design in the reply, then a
+    /// `design.changed` line each time the window publishes another: never before the reply,
+    /// none for the same design, the latest after a burst, each line whole between its replies.
+    /// A second subscribe is refused without reaching the window. A connection that did not
+    /// subscribe gets no events, and one that closed is no longer counted.
+    #[test]
+    fn subscribed_connections_are_told_of_design_changes() {
+        static RUNNING: Running = Running::new();
+        static WATCH: DesignWatch = DesignWatch::new();
+        let token = "0123456789abcdef0123456789abcdef";
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = channel::<ControlRequest>();
+        // The window: it answers `control.subscribe` as the app does, publishing the design first;
+        // then the design changes at once, before the reply may have been written.
+        std::thread::spawn(move || {
+            for req in rx {
+                if req.method == "control.subscribe" {
+                    WATCH.publish("d-1", 3);
+                    let _ = req.reply.send(json!({"ok": true, "result": {"document_id": "d-1", "revision": 3}}));
+                    WATCH.publish("d-1", 4);
+                } else {
+                    let _ = req.reply.send(json!({"ok": true, "result": req.method}));
+                }
+            }
+        });
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let tx = tx.clone();
+                std::thread::spawn(move || serve_with(stream, token, tx, egui::Context::default(), false, WAITS, &RUNNING, &WATCH));
+            }
+        });
+        let open = || {
+            let s = TcpStream::connect(addr).unwrap();
+            s.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+            (s.try_clone().unwrap(), BufReader::new(s))
+        };
+        let next = |lines: &mut BufReader<TcpStream>| -> Value {
+            let mut l = String::new();
+            lines.read_line(&mut l).unwrap();
+            serde_json::from_str(&l).unwrap()
+        };
+        let changed = |id: &str, revision: u64| json!({"event": "design.changed", "params": {"document_id": id, "revision": revision}});
+
+        let (mut quiet_out, mut quiet) = open();
+        writeln!(quiet_out, "{}", json!({"id": 1, "method": "ui.view", "token": token})).unwrap();
+        assert_eq!(next(&mut quiet)["id"], 1);
+
+        let (mut out, mut lines) = open();
+        writeln!(out, "{}", json!({"id": 1, "method": "control.subscribe", "token": token})).unwrap();
+        assert_eq!(next(&mut lines), json!({"id": 1, "ok": true, "result": {"document_id": "d-1", "revision": 3}}));
+        assert_eq!(next(&mut lines), changed("d-1", 4), "the change after the window's answer comes after the reply");
+        assert!(WATCH.subscribed());
+        // The design it was told of is no news; another revision is.
+        WATCH.publish("d-1", 4);
+        WATCH.publish("d-1", 5);
+        assert_eq!(next(&mut lines), changed("d-1", 5));
+        // A burst ends with its latest.
+        for revision in 6..=10 {
+            WATCH.publish("d-1", revision);
+        }
+        let mut last = 5;
+        while last < 10 {
+            let e = next(&mut lines);
+            let revision = e["params"]["revision"].as_u64().unwrap();
+            assert!(e["event"] == "design.changed" && revision > last, "{e} after {last}");
+            last = revision;
+        }
+        // Another tab: another id, whatever its revision.
+        WATCH.publish("d-2", 2);
+        assert_eq!(next(&mut lines), changed("d-2", 2));
+        // Subscribed already: refused here (the window would have published d-1 again).
+        writeln!(out, "{}", json!({"id": 2, "method": "control.subscribe"})).unwrap();
+        let r = next(&mut lines);
+        assert!(r["id"] == 2 && r["ok"] == false && r["error"].as_str().is_some_and(|e| e.starts_with("already subscribed")), "{r}");
+        // Replies still come, whole, and nothing else was sent meanwhile.
+        writeln!(out, "{}", json!({"id": 3, "method": "ui.view"})).unwrap();
+        assert_eq!(next(&mut lines), json!({"id": 3, "ok": true, "result": "ui.view"}));
+        writeln!(quiet_out, "{}", json!({"id": 2, "method": "ui.view"})).unwrap();
+        assert_eq!(next(&mut quiet), json!({"id": 2, "ok": true, "result": "ui.view"}), "no events without subscribing");
+        // Closed, it is no longer counted.
+        drop((out, lines));
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while WATCH.subscribed() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!WATCH.subscribed());
     }
 
     /// A timed-out request that only reads is not said to "still apply", nor is one that only

@@ -632,7 +632,7 @@ fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
     let doc = s.doc_mut();
     for (id, made) in &keep {
         if let Some(f) = doc.feature_mut(*id) {
-            f.body_names.clone_from(made);
+            f.pin_body_names(made);
         }
     }
     for id in &ids {

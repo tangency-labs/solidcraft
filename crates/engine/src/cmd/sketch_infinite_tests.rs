@@ -99,6 +99,22 @@ fn trim_and_extend_use_the_whole_line_but_never_trim_it() {
 }
 
 #[test]
+fn extend_refuses_it_instead_of_moving_it() {
+    // An infinite line has no end to grow from: moving one of its two points would move the whole
+    // line, so the command says why and leaves it alone.
+    let mut s = new_sketch();
+    run(&mut s, "sketch.line", json!({"points": [[25, 50], [25, 60]], "ids": ["inf"]}));
+    run(&mut s, "sketch.infinite", json!({"curves": ["inf"]}));
+    let before = s.doc.to_json();
+    let e = s.execute("sketch.extend", &json!({"curve": "inf", "at": [25, 50]})).unwrap_err().to_string();
+    assert!(e.contains("infinite"), "{e}");
+    assert_eq!(s.doc.to_json(), before);
+    let sk = sketch(&s);
+    let ci = sk.curve_index("inf").expect("the infinite line");
+    assert!(crate::cmd::extend_preview(&sk, ci, Vec2::new(25.0, 50.0)).is_none(), "no preview to offer");
+}
+
+#[test]
 fn fillets_and_chamfers_refuse_it_and_mirrors_copy_it() {
     let mut s = new_sketch();
     run(&mut s, "sketch.line", json!({"points": [[0, 0], [20, 0], [20, 20]], "ids": ["a", "b"]}));

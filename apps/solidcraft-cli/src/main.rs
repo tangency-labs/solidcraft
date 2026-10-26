@@ -262,8 +262,7 @@ fn load_checked(path: &str, check: solidcraft_engine::schema::ParamCheck) -> Res
     let bytes = solidcraft_engine::io::vfs::read(path, solidcraft_engine::io::MAX_DESIGN_BYTES).map_err(|e| format!("{path}: {e}"))?;
     if solidcraft_engine::io::is_design_container(&bytes) {
         let doc = solidcraft_engine::io::read_design(&bytes).map_err(|e| format!("{path}: {e}"))?;
-        let mut session = Session::new(doc);
-        session.path = Some(path.to_owned());
+        let mut session = Session::opened_at(doc, None, Some(path));
         session.param_check = check;
         return Ok(session);
     }
@@ -845,7 +844,7 @@ pub(crate) fn cmd_bench_open(args: &[String]) -> Result<(), String> {
         return Ok(());
     }
     let t = std::time::Instant::now();
-    let s = Session::opened(doc, saved.as_ref());
+    let s = Session::opened_at(doc, saved.as_ref(), (!step).then_some(path.as_str()));
     drop(read);
     // Taken from the file: nothing evaluated (SOLIDCRAFT_NO_MODEL_CACHE evaluates anyway), or
     // only the features whose state a thinned file left out.

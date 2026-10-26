@@ -367,6 +367,8 @@ pub(crate) struct Row<'a> {
     pub(crate) radio: Option<bool>,
     /// Trailing badges: "lock", "pin".
     pub(crate) badges: &'a [&'a str],
+    /// A button at the row's right end: (icon, tooltip label), e.g. a feature's profile sketch.
+    pub(crate) action: Option<(&'a str, &'a str)>,
     /// Lit by the selection or the 3D view's pointer: the item's own row, or a row leading to it.
     pub(crate) mark: Mark,
 }
@@ -392,6 +394,8 @@ pub(crate) struct RowResp {
     pub(crate) fold: bool,
     pub(crate) eye: bool,
     pub(crate) radio: bool,
+    /// The row's [`Row::action`] button was clicked.
+    pub(crate) action: bool,
     pub(crate) hovered: bool,
     /// The row's response (drag and drop).
     pub(crate) resp: Option<egui::Response>,
@@ -438,8 +442,30 @@ pub(crate) fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
     let fold_r = Rect::from_min_max(pos2(x - 4.0, r.top()), pos2(x + 15.0, r.bottom()));
     let eye_r = Rect::from_center_size(pos2(x + 14.0 + 8.0, cy), vec2(19.0, r.height()));
     let radio_r = Rect::from_center_size(pos2(x + 32.0 + 6.0, cy), vec2(15.0, r.height()));
+    // The label follows the fold arrow, eye, radio and icon (drawn below in that order). It is
+    // laid out first, so the action button can sit right after the name and read as the row's.
+    let label_x = x + 14.0 + 18.0 + if row.radio.is_some() { 15.0 } else { 0.0 } + if row.icon.is_empty() { 0.0 } else { 21.0 };
+    let col =
+        if row.selected { crate::theme::TabAccent::current(ui.ctx()).ink } else { row.color.unwrap_or(if row.dim { t.text_dim } else { t.text }) };
+    let label_display = if row.name { crate::i18n::tr_name(row.label) } else { crate::i18n::tr_dyn(row.label) };
+    let font = if row.selected { crate::fonts::semibold(t.font_label) } else { FontId::proportional(t.font_label) };
+    // The label stops before the action, the badges and the card's edge; a longer name ends in
+    // an ellipsis and its full text is in the tooltip.
+    let badges_width = row.badges.len() as f32 * 15.0;
+    let action_width = if row.action.is_some() { 22.0 } else { 0.0 };
+    let room = (r.right() - 4.0 - badges_width - action_width - label_x).max(0.0);
+    let mut job = egui::text::LayoutJob::simple(label_display.to_string(), font, col, room);
+    job.wrap.max_rows = 1;
+    job.wrap.break_anywhere = true;
+    job.wrap.overflow_character = Some('\u{2026}');
+    let galley = ui.painter().layout_job(job);
+    let lw = galley.size().x;
+    let elided = galley.elided;
+    let action_r = Rect::from_min_size(pos2(label_x + lw + 2.0, r.top()), vec2(20.0, r.height()));
     let at = |p: Pos2| -> u8 {
-        if row.fold.is_some() && fold_r.contains(p) {
+        if row.action.is_some() && action_r.contains(p) {
+            4
+        } else if row.fold.is_some() && fold_r.contains(p) {
             1
         } else if row.eye.is_some() && eye_r.contains(p) {
             2
@@ -486,34 +512,29 @@ pub(crate) fn draw_row(ui: &mut egui::Ui, id: egui::Id, row: &Row) -> RowResp {
         icons::paint_icon(ui.painter(), ir, row.icon, if row.dim { DIM_ICON_OPACITY } else { 1.0 });
         x += 21.0;
     }
-    let col =
-        if row.selected { crate::theme::TabAccent::current(ui.ctx()).ink } else { row.color.unwrap_or(if row.dim { t.text_dim } else { t.text }) };
-    let label_display = if row.name { crate::i18n::tr_name(row.label) } else { crate::i18n::tr_dyn(row.label) };
-    let font = if row.selected { crate::fonts::semibold(t.font_label) } else { FontId::proportional(t.font_label) };
-    // The label stops before the badges and the card's edge; a longer name ends in an ellipsis
-    // and its full text is in the tooltip.
-    let badges_width = row.badges.len() as f32 * 15.0;
-    let room = (r.right() - 4.0 - badges_width - x).max(0.0);
-    let mut job = egui::text::LayoutJob::simple(label_display.to_string(), font, col, room);
-    job.wrap.max_rows = 1;
-    job.wrap.break_anywhere = true;
-    job.wrap.overflow_character = Some('\u{2026}');
-    let galley = ui.painter().layout_job(job);
-    let lw = galley.size().x;
-    let elided = galley.elided;
     crate::scenario::publish_rect(&format!("row_label:{}", row.label), Rect::from_min_size(pos2(x, cy - galley.size().y / 2.0), galley.size()));
     ui.painter().with_clip_rect(ui.painter().clip_rect().intersect(r)).galley(pos2(x, cy - galley.size().y / 2.0), galley, col);
-    let mut bx = (x + lw + 6.0).min(r.right() - 16.0);
+    let mut bx = (x + lw + 6.0 + action_width).min(r.right() - 16.0);
     for b in row.badges {
         let br = Rect::from_center_size(pos2(bx + 6.0, cy), vec2(12.0, 12.0));
         badge(ui.painter(), br, b, t.text_dim);
         bx += 15.0;
+    }
+    if let Some((icon, _)) = row.action {
+        if hover_on == 4 {
+            ui.painter().rect_filled(action_r.shrink2(vec2(1.0, 3.0)), t.radius_sm.saturating_sub(1), t.hover);
+        }
+        let ir = Rect::from_center_size(action_r.center(), vec2(14.0, 14.0));
+        icons::paint_icon(ui.painter(), ir, icon, if hover_on == 4 { 1.0 } else { 0.6 });
+        out.action = resp.clicked() && click_on == 4;
+        crate::scenario::publish_handle(&format!("action:{}", row.label), action_r.center());
     }
     crate::scenario::publish_handle(&format!("row:{}", row.label), r.center());
     let tip = match hover_on {
         1 => Some(if row.fold == Some(true) { crate::i18n::tr("ui.collapse") } else { crate::i18n::tr("ui.expand") }),
         2 => Some(if row.eye == Some(true) { crate::i18n::tr("ui.hide") } else { crate::i18n::tr("ui.show") }),
         3 => Some(if row.radio == Some(true) { crate::i18n::tr("ui.active_component") } else { crate::i18n::tr("ui.activate") }),
+        4 => row.action.map(|(_, tip)| crate::i18n::tr_label(tip)),
         _ => None,
     };
     let resp = match tip {

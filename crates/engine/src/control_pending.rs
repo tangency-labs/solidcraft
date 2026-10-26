@@ -32,7 +32,9 @@ impl Effect {
 /// (`ui.screenshot` with a `path`, and `ui.render`, write a file: see [`effect`].)
 const READ_METHODS: &[&str] = &[
     "control.pending",
+    "control.subscribe",
     "document.inspect",
+    "document.revision",
     "engine.commands",
     "ui.at",
     "ui.handles",
@@ -54,6 +56,7 @@ pub fn command_reads_only(id: &str) -> bool {
         || id.starts_with("model.")
         || id.ends_with(".inspect")
         || id.ends_with(".list")
+        || id == "document.revision"
         || matches!(id, "document.inspect" | "engine.commands" | "render.status" | "render.backends" | "render.settings.get" | "file.slicers")
 }
 

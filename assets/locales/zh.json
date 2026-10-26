@@ -754,6 +754,7 @@
   "cmd.document_metadata": "设计属性",
   "cmd.document_metadata_remove": "删除设计属性",
   "cmd.document_metadata_set": "更改设计属性",
+  "cmd.document_revision": "设计版本号",
   "cmd.document_units": "更改设计单位",
   "cmd.edit_checkpoint": "检查点",
   "cmd.edit_restore_checkpoint": "恢复检查点",

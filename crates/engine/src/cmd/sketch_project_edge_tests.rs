@@ -226,3 +226,64 @@ fn an_edge_link_saved_without_a_name_is_found_as_before_and_named_by_the_next_ed
     assert_eq!(trouble(&s), "");
     assert_line(&s, 150.0, (0.0, 50.0), "width 150");
 }
+
+/// The ends of curve `curve` of sketch `Top` as the model solves it.
+fn line_of(s: &Session, curve: &str) -> (Vec2, Vec2) {
+    let st = s.model.state();
+    let sk = &st.sketch(s.doc.find_feature("Top").unwrap().id).unwrap().sketch;
+    match sk.shape(sk.curve_index(curve).unwrap()) {
+        Some(Shape::Line { a, b }) => (a, b),
+        other => panic!("not a line: {other:?}"),
+    }
+}
+
+/// An edge of a mirrored body is constrained to like any other body's edge (#6348). The plate
+/// mirrored about YZ gives a copy from x = -width to 0. Collinear with the copy's outer top
+/// edge (x = -width) projects that edge into the sketch and holds the line on it, in one step;
+/// the link keeps the copy's edge name, so the line follows the copy when the width changes,
+/// and after the design is saved and opened. A vertex of the copy works the same way, and a
+/// reference that misses every edge changes nothing.
+#[test]
+fn a_line_is_constrained_collinear_with_an_edge_of_a_mirrored_body() {
+    let mut s = Session::default();
+    plate(&mut s);
+    run(&mut s, "solid.mirror", json!({"bodies": ["Body1"], "plane": "YZ", "name": "Twin"}));
+    let copy = s.model.state().bodies.iter().find(|b| b.name != "Body1").map(|b| b.name.clone()).expect("the mirrored copy");
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": "20 mm", "name": "Top"}));
+    run(&mut s, "sketch.line", json!({"points": [[-90, 5], [-90, 45]]}));
+    let before = s.doc.clone();
+    let out = run(&mut s, "sketch.constraint.collinear", json!({"a": "l1", "b": {"edge": [-100, 25, 20], "body": copy}}));
+    assert_eq!(out["created"]["curves"].as_array().map(Vec::len), Some(1), "the projected edge: {out}");
+    let stored = s.doc.sketch(s.doc.find_feature("Top").unwrap().id).unwrap();
+    assert_eq!(stored.links.len(), 1);
+    assert!(matches!(&stored.links[0].source, LinkSource::Edge { body, .. } if *body == copy), "{:?}", stored.links[0].source);
+    let name = stored.links[0].edge_name.clone().expect("the copy's edge keeps its name");
+    // Undone in one step: the projection and the constraint together.
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.to_json(), before.to_json());
+    run(&mut s, "edit.redo", json!({}));
+    run(&mut s, "sketch.finish", json!({}));
+    let on_edge = |s: &Session, x: f64, when: &str| {
+        let (a, b) = line_of(s, "l1");
+        assert!((a.x - x).abs() < 1e-6 && (b.x - x).abs() < 1e-6, "{when}: expected the line on x = {x}: {a:?} {b:?}");
+    };
+    on_edge(&s, -100.0, "constrained");
+    for width in [150.0, 60.0] {
+        set_width(&mut s, width);
+        assert_eq!(trouble(&s), "", "width {width}");
+        assert!(!link(&s).lost, "width {width}");
+        on_edge(&s, -width, &format!("width {width}"));
+    }
+    let opened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_eq!(link(&opened).edge_name.as_deref(), Some(name.as_str()));
+    on_edge(&opened, -60.0, "opened");
+    // A vertex of the copy: the line's end goes onto its corner (-60, 50, 20).
+    run(&mut s, "sketch.edit", json!({"sketch": "Top"}));
+    run(&mut s, "sketch.constraint.coincident", json!({"a": "l1.end", "b": {"vertex": [-60, 50, 20], "body": copy}}));
+    let (_, end) = line_of(&s, "l1");
+    assert!(end.dist(Vec2::new(-60.0, 50.0)) < 1e-6, "{end:?}");
+    // Nothing there: an error, and the sketch as it was.
+    let before = s.doc.to_json();
+    assert!(s.execute("sketch.constraint.collinear", &json!({"a": "l1", "b": {"edge": [500, 500, 20], "body": copy}})).is_err());
+    assert_eq!(s.doc.to_json(), before);
+}

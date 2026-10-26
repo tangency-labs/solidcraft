@@ -55,6 +55,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 width: String,
                 catch_depth: String,
                 catch_length: String,
+                base_height: String,
+                new_body: bool,
             },
             /// The rule manager: the rule shown (index into the rules, past the end for a new one).
             Rules {
@@ -103,6 +105,8 @@ fn snap_fit(app: &SolveApp) -> Pl {
         width: crate::dialogs::length_default(&app.session, "5"),
         catch_depth: crate::dialogs::length_default(&app.session, "1"),
         catch_length: crate::dialogs::length_default(&app.session, "2"),
+        base_height: String::new(),
+        new_body: false,
     }
 }
 
@@ -185,7 +189,7 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pl, inputs: &[SelInpu
                 enter |= opt_field(ui, "Clearance", gap, crate::length_input::unit(&app.session.doc), "from the rule");
             }
         }
-        Pl::SnapFit { hook, length, thickness, width, catch_depth, catch_length } => {
+        Pl::SnapFit { hook, length, thickness, width, catch_depth, catch_length, base_height, new_body } => {
             let dirs = face_normal(app, inputs).map(hook_dirs).unwrap_or_default();
             if !dirs.is_empty() {
                 let names: Vec<&str> = dirs.iter().map(|(n, _)| n.as_str()).collect();
@@ -196,6 +200,12 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Pl, inputs: &[SelInpu
             enter |= expr_row(ui, "Width", width);
             enter |= expr_row(ui, "Catch Depth", catch_depth);
             enter |= expr_row(ui, "Catch Length", catch_length);
+            enter |= opt_field(ui, "Base Height", base_height, crate::length_input::unit(&app.session.doc), "at the face");
+            form_row(ui, "Body", |ui| {
+                let mut op = usize::from(*new_body);
+                combo(ui, "pl_snap_body", &["Join", "New Body"], &mut op);
+                *new_body = op == 1;
+            });
         }
         Pl::Rest { round, width, length, height, draft, thickness } => {
             form_row(ui, "Shape", |ui| {
@@ -296,7 +306,7 @@ pub fn commands(app: &SolveApp, k: &Pl, inputs: &[SelInput], extra: &Map<String,
             }
             ("plastic.lip", p)
         }
-        Pl::SnapFit { hook, length, thickness, width, catch_depth, catch_length } => {
+        Pl::SnapFit { hook, length, thickness, width, catch_depth, catch_length, base_height, new_body } => {
             let mut p = placed("a point on a face")?;
             let n = extra
                 .get("direction")
@@ -308,6 +318,10 @@ pub fn commands(app: &SolveApp, k: &Pl, inputs: &[SelInput], extra: &Map<String,
                 [("length", length), ("thickness", thickness), ("width", width), ("catch_depth", catch_depth), ("catch_length", catch_length)]
             {
                 p[key] = json!(v);
+            }
+            put(&mut p, &[("base_height", base_height)]);
+            if *new_body {
+                p["new_body"] = json!(true);
             }
             ("plastic.snap_fit", p)
         }
@@ -365,7 +379,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
             }
             (Pl::simple_restore(kind)?, "plastic.lip", face.0)
         }
-        FeatureKind::SnapFit { position, direction, hook, length, thickness, width, catch_depth, catch_length, body } => {
+        FeatureKind::SnapFit { position, direction, hook, length, thickness, width, catch_depth, catch_length, base_height, new_body, body } => {
             extra.insert("direction".into(), pt(direction.0));
             if let Some(b) = body {
                 extra.insert("body".into(), json!(b));
@@ -381,6 +395,8 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
                 width: shown_expr(width, ValueKind::Length),
                 catch_depth: shown_expr(catch_depth, ValueKind::Length),
                 catch_length: shown_expr(catch_length, ValueKind::Length),
+                base_height: base_height.as_deref().map(|v| shown_expr(v, ValueKind::Length)).unwrap_or_default(),
+                new_body: *new_body,
             };
             (f, "plastic.snap_fit", position.0)
         }

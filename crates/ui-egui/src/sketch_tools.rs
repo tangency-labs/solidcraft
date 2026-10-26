@@ -676,7 +676,7 @@ fn active_sketch(app: &SolveApp) -> Option<u64> {
 }
 
 /// A model reference for a hit (for Project and friends).
-fn model_ref(app: &SolveApp, h: &Hit) -> Option<Value> {
+pub(crate) fn model_ref(app: &SolveApp, h: &Hit) -> Option<Value> {
     let active = active_sketch(app);
     Some(match h {
         Hit::Vertex { body, point } => json!({"vertex": [point.x, point.y, point.z], "body": body}),

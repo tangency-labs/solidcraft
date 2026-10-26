@@ -754,6 +754,7 @@
   "cmd.document_metadata": "Design Properties",
   "cmd.document_metadata_remove": "Remove Design Property",
   "cmd.document_metadata_set": "Change Design Properties",
+  "cmd.document_revision": "Design Revision",
   "cmd.document_units": "Change Design Units",
   "cmd.edit_checkpoint": "Checkpoint",
   "cmd.edit_restore_checkpoint": "Restore Checkpoint",

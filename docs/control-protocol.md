@@ -28,7 +28,9 @@ the one found; use `--connect` for another.
 Requests are one line `{"id": …, "method": "…", "params": {…}}`; replies are described below. Each request is one line `{"id": …, "method": "…", "params": {…}}`; each reply is one
 line `{"id": …, "ok": true, "result": …}` or `{"id": …, "ok": false, "error": "…"}`. Requests are
 handled on the UI thread between frames; pointer and keyboard input is injected as real egui
-events, one pointer event per frame.
+events, one pointer event per frame. A connection that sent `control.subscribe` is also sent
+event lines `{"event": "…", "params": {…}}`, which have no `id`
+([Following the design](#following-the-design)).
 
 ### Token
 
@@ -134,9 +136,65 @@ MCP server sends its folders this way on every request ([mcp.md](mcp.md)). Witho
 | `engine.script` | `commands`: `[{command, params}, …]` | results, stops at the first error |
 | `engine.batch` | `commands`: `[{command, params}, …]` (at most 10 000), `rollback?`: bool (default true), `timings?`, `profile?`, `coalesce_parameters?`: bool (default false) | `{completed, results, undone}`, plus `failed: {index, command, error}` when a step fails, and with `timings` `timings: [{index, command, ms}]` (the failing step included) and `total_ms`; `profile` adds each step's `profile: {boolean_ms, tessellate_ms, other_ms}`. Runs the steps in one request, so within one frame, each as `engine.execute` runs it. The first failure stops the batch, and with `rollback` the design goes back to how it was before it (`undone`: the steps taken back, `rolled_back`: whether the design is back as it was, `false` only when the checkpoint could not restore it). Refused before anything runs, with an error starting `engine.batch unavailable`, while the agent cursor is shown or when a step loads a file (`doc.open`, `file.insert_step`, `file.insert_mesh`). Send such steps one by one. With `coalesce_parameters`, each run of consecutive plain parameter edits (`parameters.change` with only a name and an expression, or with `changes`) is set as one `parameters.change {changes}`, so the design rebuilds once for the run. Every step still gets its own result (with `coalesced`: the run's length), and the run is one undo step. The run skips the states between its edits: an edit that would be refused on its own, but not once the run's later edits are in, goes through. A run whose combined edit is refused (a new parameter, a bad expression) runs step by step, so the refused step is named. Answered when done, for up to 3600 s |
 | `engine.commands` | — | every command: id, label, tab, panel, icon, shortcut, params doc, enabled |
+| `document.revision` | — | `{document_id, revision}`: the active design's id and a number that moves whenever the design changes, for programs that follow it ([Following the design](#following-the-design)) |
+| `control.subscribe` | — | `{document_id, revision}`, as `document.revision`; the connection is then sent a `design.changed` line whenever they change ([Following the design](#following-the-design)) |
 | `document.inspect` | `measure?`: bool | parameters, timeline (errors, timings), bodies, sketches, selection (assembly joints: `engine.execute` `joint.inspect {joint?}`, which reads only: each joint's two origins with the occurrence, the snap as saved, the feature, face, edge or sketch curve its names refer to, and whether it resolves or why not; kind, offset, angle, flip, values, limits, expressions and motion links) |
 
 Commands never open dialogs when run this way. `solidcraft-cli commands` prints the same registry.
+
+### Following the design
+
+A program that follows the open design (a renderer kept in step, a live link) asks
+`document.revision`, which only reads and does not wait behind design changes (a slow command
+computing, a file loading, the agent cursor acting one out), and exports only when the answer
+changes (#6646):
+
+```text
+{"id":1,"method":"document.revision","token":"…"}
+→ {"id":1,"ok":true,"result":{"document_id":"18f3a0c2d4e5b6a7-1","revision":3}}
+```
+
+- `document_id` names the active design (its tab) while it stays open, through edits, saves and
+  renames. Two open designs have different ids even with the same name, and each design started
+  or opened gets a new one, also one opened or started in the same tab. Ids of one run never
+  match those of another. Treat it as an opaque string.
+- `revision` moves whenever the design changes: an edit, a parameter, undo or redo, a design
+  opened or started, what is hidden or shown (saved with the design), a component moved and not
+  captured yet. It stays the same for reads, a selection, a camera move, a section or an analysis
+  view. Revisions come from one counter for the whole run, so a revision never names two
+  states, and it never goes back: changes undone before the next ask that end where the design
+  was need no new one (its revision still names that design).
+
+Switching tabs changes `document_id`; back on a tab its revision is the one it had, if nothing
+changed it meanwhile. Compare both values, and export when either differs from the last
+answer. The same answer comes from `engine.execute` `document.revision` (and so from scripts and
+MCP `execute`), which waits its turn behind design changes like any command.
+
+A client need not ask again and again: after `control.subscribe` on its connection, the app
+sends it a line whenever the active design changes (#6985):
+
+```text
+{"id":1,"method":"control.subscribe","token":"…"}
+→ {"id":1,"ok":true,"result":{"document_id":"18f3a0c2d4e5b6a7-1","revision":3}}
+{"event":"design.changed","params":{"document_id":"18f3a0c2d4e5b6a7-1","revision":4}}
+{"event":"design.changed","params":{"document_id":"18f3a0c2d4e5b6a7-2","revision":5}}
+```
+
+- The reply is what `document.revision` answers then (and, like it, does not wait behind design
+  changes); no event comes before it. From there on, each `design.changed` line carries what
+  `document.revision` would answer, sent when its `document_id` or `revision` differs from the
+  last one this connection was told: an edit, undo or redo, a design opened or started, a tab
+  switched.
+- Lines are coalesced, not sent per frame: at most about ten a second, and changes made faster
+  (a parameter dragged) are followed by one line with the latest. Once the design stops
+  changing, the last line names it as it is.
+- An event has `event` and `params` and no `id`; every reply still has its request's `id`. Each
+  event is a whole line of its own, between replies, never inside one. Ignore events you don't
+  know.
+- Only connections that subscribed get events, until they close (or shut their sending side). A
+  second `control.subscribe` on a subscribed connection is refused with `already subscribed`;
+  ask `document.revision` for the design now. A `control.subscribe` that timed out or failed did
+  not subscribe the connection: send it again.
 
 ### Slow commands and the window (#1989)
 

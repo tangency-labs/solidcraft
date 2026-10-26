@@ -448,6 +448,18 @@ pub fn recovery_path() -> String {
     format!("{OPFS}{RECOVERY}")
 }
 
+/// A recovery file lives in OPFS, but its relative links belong to the original design's
+/// folder (which can be on disk). Resolve them before Open sees the temporary file location.
+pub fn prepare_recovery(original_path: Option<&str>) -> Result<String, String> {
+    let path = recovery_path();
+    let bytes = vfs::read(&path, solidcraft_engine::io::MAX_DESIGN_BYTES).map_err(|e| e.to_string())?;
+    let mut doc = solidcraft_engine::io::read_design(&bytes).map_err(|e| e.to_string())?;
+    solidcraft_engine::resolve_design_links(&mut doc, original_path);
+    let bytes = solidcraft_engine::io::write_design_container(&doc).map_err(|e| e.to_string())?;
+    vfs::insert(&path, bytes);
+    Ok(path)
+}
+
 /// Pick files on the computer: the File System Access picker where there is one, else an
 /// `<input type=file>`. Read files arrive in `files.incoming`.
 pub fn pick_from_disk(files: &Rc<Files>, intent: Intent) {

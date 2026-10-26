@@ -130,7 +130,9 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
                 vec![diameter, height, hole_diameter, hole_depth, fillet, rib_thickness, rib_length, rib_offset]
             }
             Pl::Lip { width, height, gap, .. } => vec![width, height, gap],
-            Pl::SnapFit { length, thickness, width, catch_depth, catch_length, .. } => vec![length, thickness, width, catch_depth, catch_length],
+            Pl::SnapFit { length, thickness, width, catch_depth, catch_length, base_height, .. } => {
+                vec![length, thickness, width, catch_depth, catch_length, base_height]
+            }
             Pl::Rest { width, length, height, thickness, .. } => vec![width, length, height, thickness],
             Pl::Rules { values, .. } => {
                 let kinds = solidcraft_engine::doc::plastic::PlasticRule::library()

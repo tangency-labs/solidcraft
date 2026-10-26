@@ -498,15 +498,25 @@ mod web {
                     });
                 });
             let Some(recover) = answer else { return };
-            *self.files.recovery.borrow_mut() = None;
             if recover {
-                self.app.open_path(&files::recovery_path());
+                let recovery = match files::prepare_recovery(path.as_deref()) {
+                    Ok(recovery) => recovery,
+                    Err(error) => {
+                        self.app.set_status(error, true);
+                        return;
+                    }
+                };
+                self.app.open_path(&recovery);
+                if self.app.session.path.as_deref() != Some(recovery.as_str()) {
+                    return;
+                }
                 // It belongs to its own file again (saving goes there); it is unsaved.
                 self.app.session.path = path;
                 self.app.session.doc_mut().name = name;
                 self.app.session.mark_unsaved();
                 self.app.home.open = false;
             }
+            *self.files.recovery.borrow_mut() = None;
             files::autosave(&self.files, None);
         }
 
