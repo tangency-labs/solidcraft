@@ -67,7 +67,8 @@ fn every_option_reaches_the_command() {
     choose(&mut h, "Form", "Trapezoidal (ISO 2904)");
     choose(&mut h, "Size", "20 mm");
     assert_eq!(params(&h)["designation"], "Tr20x4", "a new size takes its standard pitch");
-    choose(&mut h, "Pitch", "2 mm");
+    type_in(&mut h, "Designation", "Tr20x2");
+    choose(&mut h, "Pitch", "4 mm");
     choose(&mut h, "Hand", "Left");
     choose(&mut h, "Starts", "2");
     choose(&mut h, "Extent", "Length");
@@ -84,7 +85,7 @@ fn every_option_reaches_the_command() {
     assert_eq!(
         p,
         json!({
-            "designation": "Tr20x2", "form": "trapezoidal", "hand": "left", "starts": 2, "extent": "length", "length": "6 mm",
+            "designation": "Tr20x4", "form": "trapezoidal", "hand": "left", "starts": 2, "extent": "length", "length": "6 mm",
             "ease_in": "standard", "ease_out": "1.5 mm", "tip": "chamfer", "chamfer_angle": "30 deg", "chamfer_depth": "0.5 mm",
             "modeled": true,
         })
@@ -110,15 +111,15 @@ fn only_the_fields_that_apply_are_shown() {
     let inputs = |h: &Harness| h.app.dialog.as_ref().unwrap().inputs.iter().map(|i| i.label).collect::<Vec<_>>();
     assert_eq!(inputs(&h), ["Cylindrical face"], "a full thread with plain ends starts at no end in particular");
 
-    choose(&mut h, "Form", "Buttress (ISO 3030)");
+    choose(&mut h, "Form", "Buttress (DIN 513)");
     assert!(shown("Steep Flank") && shown("Size"));
     choose(&mut h, "Steep Flank", "Start");
     assert_eq!(params(&h)["steep_flank"], "start");
     choose(&mut h, "Form", "Buttress (ASME B1.9)");
     assert!(shown("Steep Flank") && !shown("Size") && !shown("Pitch"), "no size list for the ASME buttress");
     assert_eq!(params(&h)["steep_flank"], "start");
-    choose(&mut h, "Form", "Square");
-    assert!(!shown("Steep Flank"));
+    choose(&mut h, "Form", "Acme (ASME B1.5)");
+    assert!(!shown("Steep Flank") && shown("Size") && !shown("Pitch"), "an Acme size names its threads per inch");
     assert!(params(&h).get("steep_flank").is_none(), "the steep flank is a buttress option");
 
     choose(&mut h, "Extent", "Up to");
@@ -183,11 +184,11 @@ fn a_form_change_keeps_what_still_applies() {
     choose(&mut h, "Form", "Trapezoidal (ISO 2904)");
     assert!(params(&h).get("designation").is_none(), "the face's metric size is not carried to another form");
     choose(&mut h, "Size", "20 mm");
-    choose(&mut h, "Form", "Buttress (ISO 3030)");
+    choose(&mut h, "Form", "Buttress (DIN 513)");
     assert_eq!(params(&h)["designation"], "S20x4", "20 mm is a buttress size too");
     choose(&mut h, "Form", "Trapezoidal (ISO 2904)");
     choose(&mut h, "Size", "8 mm");
-    choose(&mut h, "Form", "Buttress (ISO 3030)");
+    choose(&mut h, "Form", "Buttress (DIN 513)");
     assert!(params(&h).get("designation").is_none(), "8 mm is not a buttress size");
     choose(&mut h, "Form", "ISO metric");
     h.frames(2);
@@ -214,32 +215,71 @@ fn the_command_error_is_what_the_dialog_shows() {
 }
 
 #[test]
-fn designations_name_their_form_size_and_pitch() {
-    let form = |value: &str| FORMS.iter().find(|f| f.value == value).unwrap();
-    assert_eq!(parse(form("trapezoidal"), "Tr20x4"), Some((20.0, 4.0)));
-    assert_eq!(parse(form("trapezoidal"), "Tr40x14(P7)"), Some((40.0, 7.0)), "a two-start lead 14 names pitch 7");
-    assert_eq!(parse(form("buttress"), "S20x4"), Some((20.0, 4.0)));
-    assert_eq!(parse(form("metric"), "M10x1"), Some((10.0, 1.0)));
-    assert_eq!(parse(form("trapezoidal"), "M10x1"), None);
-    assert_eq!(parse(form("acme"), "Tr20x4"), None);
-    for (designation, value) in [("M8", "metric"), ("Tr20x4", "trapezoidal"), ("S20x4", "buttress"), ("", "metric")] {
-        assert_eq!(FORMS[Options::for_saved(designation, "").form].value, value, "{designation}");
-    }
-    assert_eq!(Options::for_saved("M8", "4 mm").extent, LENGTH);
-    assert_eq!(pitches(form("trapezoidal"), 40.0, 7.0), [10.0, 7.0, 3.0]);
+fn the_forms_are_the_documents_and_square_is_not_offered() {
+    assert!(FORMS.iter().all(|(_, f)| f.refused().is_none()), "a form the command refuses is not offered");
+    assert_eq!(FORMS.len(), ThreadForm::ALL.len() - 1);
+    assert_eq!(parse(ThreadForm::Trapezoidal, "Tr40x14(P7)"), Some((40.0, 7.0)), "a two-start lead 14 names pitch 7");
+    assert_eq!(parse(ThreadForm::Trapezoidal, "M10x1"), None);
+    assert_eq!(pitches(ThreadForm::Metric, 8.0, 1.25), [1.25, 1.0, 0.75, 0.5, 0.35, 0.25, 0.2]);
+    assert_eq!(example(ThreadForm::ButtressAsme), "2.5-8 BUTT");
+    assert_eq!(example(ThreadForm::Trapezoidal), "Tr20x4");
 }
 
-/// Editing a saved length thread reopens with a Length extent and its value.
+/// The face's size follows the form.
 #[test]
-fn a_saved_thread_reopens_with_its_extent() {
-    let mut h = Harness::new();
-    h.app.run("solid.cylinder", json!({"radius":4,"height":10})).unwrap();
-    let Sel::Face { point, .. } = thread_face(&h.app, "Body1") else { panic!("a face") };
-    let id = h.app.run("solid.thread", json!({"face":point,"designation":"M8x1","length":"3 mm"})).unwrap()["feature"].as_u64().unwrap();
-    h.app.edit_feature(id);
+fn the_face_size_follows_the_form() {
+    let mut h = shaft();
+    let shown_size = |h: &Harness| match &h.app.dialog.as_ref().unwrap().kind {
+        Kind::Thread { designation, .. } => designation.clone(),
+        k => panic!("{k:?}"),
+    };
+    assert_eq!(shown_size(&h), "M8");
+    choose(&mut h, "Form", "Trapezoidal (ISO 2904)");
     h.frames(2);
-    assert_eq!(options(&h).extent, LENGTH);
-    assert!(shown("Length"));
-    let p = params(&h);
-    assert_eq!((&p["params"]["length"], &p["params"]["extent"], &p["params"]["designation"]), (&json!("3 mm"), &json!("length"), &json!("M8x1")));
+    assert_eq!(shown_size(&h), "Tr8x1.5");
+    assert!(params(&h).get("designation").is_none(), "the face's size stays automatic");
+}
+
+/// Editing a saved thread reopens every option it was made with, and OK gives them back.
+#[test]
+fn a_saved_thread_reopens_with_every_option() {
+    for (made, picks) in [
+        (
+            json!({"designation":"S20x4","steep_flank":"start","hand":"left","starts":2,"length":"12 mm","from":[10,0,20],"modeled":true,
+                "ease_in":"standard","ease_out":"1 mm","tip":"chamfer","chamfer_angle":"30 deg","chamfer_depth":"0.5 mm"}),
+            vec!["Cylindrical face", START_END],
+        ),
+        (json!({"designation":"M20","from":[10,0,20],"up_to":[10,0,5]}), vec!["Cylindrical face", START_END, UP_TO]),
+        (json!({"designation":"M20","up_to":"XY","from":[10,0,20]}), vec!["Cylindrical face", START_END, UP_TO]),
+    ] {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1600,"height":1400}));
+        h.app.run("solid.cylinder", json!({"radius":10,"height":20})).unwrap();
+        let Sel::Face { point, .. } = thread_face(&h.app, "Body1") else { panic!("a face") };
+        let mut command = made.clone();
+        command["face"] = json!([point.x, point.y, point.z]);
+        let id = h.app.run("solid.thread", command).unwrap_or_else(|e| panic!("{made}: {e}"))["feature"].as_u64().unwrap();
+        h.app.edit_feature(id);
+        h.frames(2);
+        let d = h.app.dialog.as_ref().unwrap();
+        assert_eq!(d.inputs.iter().map(|i| i.label).collect::<Vec<_>>(), picks, "{made}");
+        let p = params(&h)["params"].clone();
+        for (key, value) in made.as_object().unwrap() {
+            match key.as_str() {
+                "from" | "up_to" if value.is_array() => {
+                    let near = |a: &Value, b: &Value| (0..3).all(|i| (a[i].as_f64().unwrap() - b[i].as_f64().unwrap()).abs() < 0.5);
+                    assert!(near(&p[key], value), "{key}: {} vs {value}", p[key]);
+                }
+                _ => assert_eq!(&p[key], value, "{key} in {p}"),
+            }
+        }
+        let extent = if made.get("length").is_some() { "length" } else { "up_to" };
+        assert_eq!(p["extent"], extent);
+        if made["designation"] == "S20x4" {
+            assert_eq!(p["form"], "buttress", "the form is saved resolved");
+            assert!(shown("Steep Flank") && shown("Chamfer Angle") && shown("Ease Out Length"));
+        }
+        let (cmd, params) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
+        h.app.session.execute(&cmd, &params).unwrap_or_else(|e| panic!("{made}: OK on the reopened dialog: {e}"));
+    }
 }
