@@ -304,7 +304,7 @@ fn operation_length_defaults_follow_every_design_unit() {
         ("sheet.fold", &[""]),
         ("plastic.boss", &["6", "10", "3", "", "", "1", "3", "1"]),
         ("plastic.lip", &["1.5", "2", ""]),
-        ("plastic.snap_fit", &["10", "1.5", "5", "1", "2"]),
+        ("plastic.snap_fit", &["10", "1.5", "5", "1", "2", ""]),
         ("plastic.rest", &["10", "15", "2", ""]),
         ("joint.create", &["0", "0", "0"]),
         ("joint.gear", &["10", "20"]),
