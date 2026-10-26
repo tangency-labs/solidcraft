@@ -587,8 +587,8 @@ double p3_check_default_patch(SmFilletCorner* c, const std::vector<SmFilletEdge*
             }
         }
         SmCurve* curve = fe == ov.edge ? ov.curve : fe->GetCurve();
-        if (curve == NULL)
-            return P3C_REFUSE; // CreateCornerBlend reads every boundary curve
+        // A NULL curve is not refused: CreateCornerBlend returns SM_ERR below four curves,
+        // else sm_CreateNonRationalCurve casts null-safely and returns SM_ERR_NULL_POINTER.
         uv.Add(ps);
         c3d.Add(curve);
         orients.Add(SM_OT_SAME);

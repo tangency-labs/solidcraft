@@ -1479,6 +1479,13 @@ impl FilletCorner {
             let _ = total_edges;
 
             // build the corner patch from the ordered array boundary information
+            // CreateCornerBlend checks `cr3DCurves.GetSize() < 4 -> SM_ERR` before it
+            // touches any curve (a null one is SM_ERR_NULL_POINTER afterwards).
+            if ordered_3d.len() < 4 {
+                return Err(SolidError::sm_err(
+                    "nurbs::b_spline_surface_n_lib::p2::BSplineSurface::create_corner_blend",
+                ));
+            }
             let mut curves_3d = Vec::with_capacity(ordered_3d.len());
             for c in &ordered_3d {
                 let c = c
