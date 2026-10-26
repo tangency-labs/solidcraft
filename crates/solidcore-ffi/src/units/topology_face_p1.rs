@@ -26,12 +26,12 @@
 //! | `RemoveUv`      | - | `-2 \| status curve*n_eu` (`RemoveUVTrimCurves`) |
 //! | `SwapUv`        | - | `-2 \| status domain orientation curve*n_eu` (`SwapUV`) |
 //! | `Shrink`        | - | `status domain (surface_domain \| -1)` (`ShrinkGeometry`) |
-//! | `Probe`         | - | `-2 \| has crossed missing near_miss class_u class_v` (`HasSeamProblem`; a class is `tgt_only n mid_class*n`) |
-//! | `MoveSeam`      | `props crossed missing near closed_u closed_v center split` | `-2 \| -3 \| -4 \| status res_u res_v n_faces n_edges n_vertices` |
-//! | `SplitAtSeam`   | as `MoveSeam` | `-2 \| -3 \| -4 \| status n_faces n_edges n_vertices` |
+//! | `MoveSeam`      | `props crossed missing near closed_u closed_v center split` | `-2 \| -3 \| -4 \| seam status res_u res_v n_faces n_edges n_vertices` |
+//! | `SplitAtSeam`   | as `MoveSeam` | `-2 \| -3 \| -4 \| seam status n_faces n_edges n_vertices` |
 //!
-//! The seam ops classify the face's seams with `HasSeamProblem` first and pass its
-//! classifications and enums on; with `props` an `SmFaceProps` carrying the given
+//! The seam ops classify the face's seams with `HasSeamProblem` first, record what it
+//! found (`seam` = `has crossed missing near_miss class_u class_v`, a class being
+//! `tgt_only n mid_class*n`) and pass its classifications and enums on; with `props` an `SmFaceProps` carrying the given
 //! `m_eBadCrossedSeam`, `m_eBadMissingSeam`, `m_eBadNearMissSeam` (`SmSurfParamType`
 //! values) and `m_bClosedU` / `m_bClosedV` (`SmBoolean`) is passed too.
 
@@ -52,7 +52,6 @@ pub enum Op {
     RemoveUv = 7,
     SwapUv = 8,
     Shrink = 9,
-    Probe = 10,
     MoveSeam = 11,
     SplitAtSeam = 12,
     UvDomainAfterTrimShift = 13,
@@ -176,7 +175,7 @@ pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
             flag(*center, "center")?;
             flag(*split, "split")?;
         }
-        (Op::Rect | Op::Flip | Op::RemoveUv | Op::SwapUv | Op::Shrink | Op::Probe, []) => {}
+        (Op::Rect | Op::Flip | Op::RemoveUv | Op::SwapUv | Op::Shrink, []) => {}
         _ => return Err(bad("wrong argument count")),
     }
     raw(op, path, input)

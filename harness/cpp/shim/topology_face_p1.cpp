@@ -44,7 +44,6 @@ enum : int32_t
     OP_REMOVE_UV = 7,
     OP_SWAP_UV = 8,
     OP_SHRINK = 9,
-    OP_PROBE = 10,
     OP_MOVE_SEAM = 11,
     OP_SPLIT_AT_SEAM = 12,
     OP_UV_DOMAIN_AFTER_TRIM_SHIFT = 13,
@@ -538,24 +537,6 @@ void fp1_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
             o.push_back(-1.0);
         break;
     }
-    case OP_PROBE:
-    {
-        if (f->GetSurface() == nullptr || f->GetUpwardFaceuse() == nullptr)
-        {
-            o.push_back(FP1_NULL_DEREF);
-            break;
-        }
-        SmCurveClassification cu, cv;
-        SmSurfParamType c = SM_SP_UNKNOWN, m = SM_SP_UNKNOWN, n = SM_SP_UNKNOWN;
-        SmBoolean has = f->HasSeamProblem(cu, cv, c, m, n);
-        o.push_back(flg(has));
-        o.push_back((double)c);
-        o.push_back((double)m);
-        o.push_back((double)n);
-        fp1_put_class(o, cu);
-        fp1_put_class(o, cv);
-        break;
-    }
     case OP_MOVE_SEAM:
     case OP_SPLIT_AT_SEAM:
     {
@@ -569,7 +550,7 @@ void fp1_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         }
         SmCurveClassification cu, cv;
         SmSurfParamType c = SM_SP_UNKNOWN, m = SM_SP_UNKNOWN, n = SM_SP_UNKNOWN;
-        f->HasSeamProblem(cu, cv, c, m, n);
+        SmBoolean has = f->HasSeamProblem(cu, cv, c, m, n);
         SmFaceProps props(&ctx);
         if (si.props)
         {
@@ -627,6 +608,14 @@ void fp1_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
                 trap = true;
         }
         fp1_trapped(trap, o, [&](std::vector<double>& to) {
+            // the seam problem HasSeamProblem found (compared: the Rust side computes
+            // its own)
+            to.push_back(flg(has));
+            to.push_back((double)c);
+            to.push_back((double)m);
+            to.push_back((double)n);
+            fp1_put_class(to, cu);
+            fp1_put_class(to, cv);
             SmTArray<SmFace*> fs;
             SmTArray<SmEdge*> es;
             SmTArray<SmVertex*> vs;

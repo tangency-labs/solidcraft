@@ -12,11 +12,13 @@
 //! (`out`, laid out as in the ffi module): statuses, domains, gaps, curve samples and
 //! the orientation / UV trim curve state after the mutating ops.
 //!
-//! `MoveSeam` / `SplitAtSeam` take `HasSeamProblem`'s classifications and enums
-//! (`topology.face_p4`, unported): the C++ side computes them before the call, the Rust
-//! side asks the shim for them (`Probe`) and rebuilds classifications of the same shape
-//! (target-loop flag, interval count, middle point classes), which is all the port reads
-//! before its first unported callee. With `props` both sides also pass face properties
+//! `MoveSeam` / `SplitAtSeam` take `HasSeamProblem`'s classifications and enums. Each
+//! side computes its own: the C++ side calls `SmFace::HasSeamProblem` before the call,
+//! the Rust side `topology::face::p4::has_seam_problem_in_brep_mut` (default arguments)
+//! on its own B-rep, and both record what it found (`has crossed missing near_miss`,
+//! then per direction the target-loop flag, interval count and middle point classes),
+//! so the seam problem is compared as a value and no C++ result reaches the Rust call.
+//! With `props` both sides also pass face properties
 //! with the given seam verdicts and closed flags. The classification handles name the
 //! B-rep's own entities, surface, curves and seam temporaries (as upstream's `SmObject`
 //! pointers do), so the seam problem a `MoveSeam` with split recomputes after the move
@@ -56,7 +58,7 @@ use solidcore::geom::object::ObjectRef;
 use solidcore::heal::face_props::{FaceProps, LoopObject, Tri};
 use solidcore::intersect::curve_class::p1::CurveClassification;
 use solidcore::intersect::point_class::{
-    ClassObject, ClassObjectKind, PointClassType,
+    ClassObject, ClassObjectKind,
 };
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
@@ -64,6 +66,7 @@ use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::face::p1 as fp1;
 use solidcore::topology::face::p2 as fp2;
+use solidcore::topology::face::p4 as fp4;
 use solidcore::topology::{Brep, EdgeId, EdgeuseId, FaceId, LoopId, VertexId};
 use solidcore::{EntityRef, SolidError};
 use solidcore_ffi::units::topology_face_p1::{self as ffi, Op};
@@ -428,10 +431,9 @@ fn key_of(e: EntityRef) -> ObjectRef {
     }
 }
 
-/// A classification object. The classifications rebuilt from the probe hold none; the
-/// ones the seam calls' own `HasSeamProblem` makes name the B-rep's entities, its
-/// surface, edge and trim curves and the seam temporaries, as upstream's `SmObject`
-/// pointers do (`topology::face::p4::BrepSeamObjects` requires all of them).
+/// A classification object. The classifications `HasSeamProblem` makes name the B-rep's
+/// entities, its surface, edge and trim curves and the seam temporaries, as upstream's
+/// `SmObject` pointers do (`topology::face::p4::BrepSeamObjects` requires all of them).
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum H {
     Topo(EntityRef),
@@ -609,66 +611,49 @@ fn face_props(p: Option<PropsIn>) -> Result<Option<FaceProps<H>>, Fail> {
     Ok(Some(fp))
 }
 
-/// Reads one classification of the probe (`tgt_only n mid_class*n`).
-fn read_class(k: &Kernel, v: &[f64], at: &mut usize) -> Result<CurveClassification<H>, Fail> {
-    let mut next = || -> Result<f64, Fail> {
-        let x = v
-            .get(*at)
-            .copied()
-            .ok_or_else(|| Fail::Harness(harness("probe too short")))?;
-        *at += 1;
-        Ok(x)
-    };
-    let mut c = CurveClassification::<H>::new(k);
-    c.set_tgt_loops_only(next()? != 0.0);
-    let n = next()? as usize;
-    c.set_size(k, n).map_err(|e| fail(&e))?;
-    for i in 0..n {
-        let pc = PointClassType::from_code(next()? as i32)
-            .ok_or_else(|| Fail::Harness(harness("probe point class")))?;
-        c.at_mut(i)
-            .map_err(|e| fail(&e))?
-            .mid
-            .set_class_object(pc, None);
+/// Puts one classification (`tgt_only n mid_class*n`, as the shim's `fp1_put_class`).
+fn put_class(o: &mut Vec<f64>, c: &CurveClassification<H>) -> Result<(), Fail> {
+    o.push(flag(c.tgt_loops_only()));
+    o.push(c.size() as f64);
+    for i in 0..c.size() {
+        let pc = c.at(i).map_err(|e| fail(&e))?.mid.point_class();
+        o.push(f64::from(pc as i32));
     }
-    Ok(c)
+    Ok(())
 }
 
-/// The seam inputs `HasSeamProblem` gives the C++ side: `None` when the shim refuses the
-/// face (`-2`).
-#[allow(clippy::type_complexity)]
-fn probe(
+/// The seam ops' own `HasSeamProblem` (default arguments) on the face, recorded
+/// (`has crossed missing near_miss class_u class_v`) as the shim records the C++ one;
+/// returns its classifications and enums for the seam call.
+fn seam_problem(
     k: &Kernel,
-    i: &Inputs,
+    b: &mut Brep,
+    f: FaceId,
+    o: &mut Vec<f64>,
 ) -> Result<
-    Option<(
+    (
         fp1::SeamProblem,
         CurveClassification<H>,
         CurveClassification<H>,
-    )>,
+    ),
     Fail,
 > {
-    let mut v = vec![i.face as f64];
-    let path = shared::path_of(&i.brep)?;
-    v.extend(brep_block(&i.brep)?);
-    let out = ffi::eval(Op::Probe, &path, &v).map_err(|e| harness(format!("c++ probe: {e}")))?;
-    if out.get(1) == Some(&NULL_DEREF) {
-        return Ok(None);
-    }
-    let code = |j: usize| -> Result<u8, Fail> {
-        out.get(j)
-            .map(|x| *x as u8)
-            .ok_or_else(|| Fail::Harness(harness("probe too short")))
-    };
-    let problem = fp1::SeamProblem {
-        crossed: surf_param(code(2)?)?,
-        missing: surf_param(code(3)?)?,
-        near_miss: surf_param(code(4)?)?,
-    };
-    let mut at = 5;
-    let cu = read_class(k, &out, &mut at)?;
-    let cv = read_class(k, &out, &mut at)?;
-    Ok(Some((problem, cu, cv)))
+    let check = fp4::has_seam_problem_in_brep_mut::<H>(
+        k,
+        b,
+        f,
+        fp4::HasSeamProblemOptions::default(),
+    )
+    .map_err(|e| fail(&e))?;
+    o.push(flag(check.has_problem));
+    o.extend([
+        f64::from(check.problem.crossed as u8),
+        f64::from(check.problem.missing as u8),
+        f64::from(check.problem.near_miss as u8),
+    ]);
+    put_class(o, &check.class_u)?;
+    put_class(o, &check.class_v)?;
+    Ok((check.problem, check.class_u, check.class_v))
 }
 
 /// The C++ shim's null guards for loop `l` of face `f` (`LoopRoundTrip`).
@@ -878,9 +863,7 @@ fn rust_record(i: &Inputs, ex: &[f64]) -> Result<Vec<f64>, Fail> {
                 o.push(NULL_DEREF);
                 return Ok(o);
             }
-            let Some((problem, mut cu, mut cv)) = probe(&k, i)? else {
-                return Err(Fail::Harness(harness("probe refused a face with surface")));
-            };
+            let (problem, mut cu, mut cv) = seam_problem(&k, &mut b, f, &mut o)?;
             let fp = face_props(*props)?;
             let opts = fp1::MoveSeamOptions {
                 ok_to_move_to_center: *center,
@@ -914,9 +897,7 @@ fn rust_record(i: &Inputs, ex: &[f64]) -> Result<Vec<f64>, Fail> {
                 o.push(NULL_DEREF);
                 return Ok(o);
             }
-            let Some((problem, mut cu, mut cv)) = probe(&k, i)? else {
-                return Err(Fail::Harness(harness("probe refused a face with surface")));
-            };
+            let (problem, mut cu, mut cv) = seam_problem(&k, &mut b, f, &mut o)?;
             let fp = face_props(*props)?;
             let r = fp1::split_at_seam(
                 &mut k,
