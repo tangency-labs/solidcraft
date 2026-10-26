@@ -371,7 +371,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
     /// Register a known empty surface intersection without a geometry backend.
     /// This is the empty-array branch of [`Self::register_existing_ssi`].
-    pub(crate) fn register_empty_ssi(&mut self, brep_surface: Option<O>, other_surface: Option<O>) {
+    pub fn register_empty_ssi(&mut self, brep_surface: Option<O>, other_surface: Option<O>) {
         let table = self.intersection_table.get_or_insert_with(Default::default);
         table.brep_surfaces.push(brep_surface);
         table.other_surfaces.push(other_surface);

@@ -952,9 +952,9 @@ pub trait ExecutiveAccess<O: ClassObject + SolutionObject + Ord> {
     ) -> Result<()>;
 
     /// `SmFilletCorner::InsertIntersectionTopology()`: delegate to the already ported
-    /// `blend::fillet_corner::p1::FilletCorner::insert_intersection_topology` (fillet
-    /// corner p1) on the corner `corner` resolves to, with its `CornerEnv` (the target
-    /// and fillet B-reps). Its status propagates (`SER`, `SmFilletExecutive.cpp:2758`,
+    /// `blend::fillet_corner::p1::FilletCorner::insert_intersection_topology_with_context` (fillet
+    /// corner p1) on the corner `corner` resolves to, with the executive's insertion
+    /// context (its topology intersector, the target and fillet B-reps). Its status propagates (`SER`, `SmFilletExecutive.cpp:2758`,
     /// `:3148`).
     fn insert_corner_topology(
         &mut self,

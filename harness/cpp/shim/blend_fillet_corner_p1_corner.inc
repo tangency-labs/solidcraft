@@ -115,7 +115,19 @@ struct C1Corner
             }
             e->SetOriginalFace(M.targetFaces[(size_t)f]);
         }
-        if (vEdge >= 0)
+        if (vEdge <= -2)
+        {
+            // vertex vSub of target face -(vEdge + 2), GetVertices order
+            int64_t f = -(vEdge + 2);
+            SmTArray<SmVertex*> fv;
+            if ((size_t)f < M.targetFaces.size())
+                M.targetFaces[(size_t)f]->GetVertices(fv);
+            if (vSub < 0 || (ULONG)vSub >= fv.GetSize())
+                ok = false;
+            else
+                vertex = fv[(ULONG)vSub];
+        }
+        else if (vEdge >= 0)
         {
             if ((size_t)vEdge >= M.targetEdges.size())
                 ok = false;
@@ -736,38 +748,87 @@ void c1_make_face(C1Corner& C, Rd& rd, std::vector<double>& o)
     c1_put_face_op(C, r, fb, o);
 }
 
-// `ns surface..` -> `status` corner Model: InsertIntersectionTopology on those m_vSurfaces,
-// with the Model's fillet B-rep as m_pFilletBrep. The executive's constructor makes its edge
-// attribute (m_pAttributeE) with no users and CreateFilletBrep is not run, so every
-// fillet-B-rep edge is skipped before the topology intersector's merge. Not run where it
-// reaches the executive's topology intersector (RegisterExistingSSI: a blending corner with
-// faces at its vertex and surfaces): a Rust stub of unit blend.fillet_executive_p1. A
+// m_pIntersectionTable of an SmTopologyIntersector (a private member, reached through an
+// explicit instantiation, which ignores access).
+struct C1TableTag
+{
+    typedef SmIntersectionTable* SmTopologyIntersector::*type;
+    friend type c1_table(C1TableTag);
+};
+template <typename Tag, typename Tag::type M> struct C1Rob
+{
+    friend typename Tag::type c1_table(Tag) { return M; }
+};
+template struct C1Rob<C1TableTag, &SmTopologyIntersector::m_pIntersectionTable>;
+
+// The executive topology intersector's intersection table: `n`, then per entry the brep
+// surface (index of the face in `vf` whose surface it is, -1 for NULL, -2 otherwise), the
+// other surface (index in the corner's m_vSurfaces, -1 for NULL, -2 otherwise) and whether
+// the entry's results have curve arrays.
+void c1_put_ssi_table(std::vector<double>& o, SmTopologyIntersector& ti, SmTArray<SmFace*>& vf,
+                      SmFilletCorner* c)
+{
+    SmIntersectionTable* t = ti.*c1_table(C1TableTag());
+    if (t == NULL)
+    {
+        o.push_back(0.0);
+        return;
+    }
+    ULONG n = t->m_vBrepSurfaces.GetSize();
+    o.push_back((double)n);
+    const SmTArray<SmSurface*>& cs = c->*P3CornerPeek::surfs();
+    for (ULONG ii = 0; ii < n; ++ii)
+    {
+        SmSurface* b = t->m_vBrepSurfaces[ii];
+        double bi = b == NULL ? -1.0 : -2.0;
+        for (ULONG f = 0; b != NULL && f < vf.GetSize(); ++f)
+            if (vf[f]->GetSurface() == b)
+            {
+                bi = (double)f;
+                break;
+            }
+        o.push_back(bi);
+        SmSurface* s = ii < t->m_vOtherSurfaces.GetSize() ? t->m_vOtherSurfaces[ii] : NULL;
+        double si = s == NULL ? -1.0 : -2.0;
+        for (ULONG jj = 0; s != NULL && jj < cs.GetSize(); ++jj)
+            if (cs[jj] == s)
+            {
+                si = (double)jj;
+                break;
+            }
+        o.push_back(si);
+        o.push_back(ii < t->m_vResults.GetSize() && t->m_vResults[ii].m_p3DCurves != NULL ? 1.0
+                                                                                         : 0.0);
+    }
+}
+
+// `ns surface..` -> `status` table corner Model: InsertIntersectionTopology on those
+// m_vSurfaces, with the Model's fillet B-rep as m_pFilletBrep, on the executive's
+// constructor-made topology intersector; `table` is its intersection table after the call
+// (c1_put_ssi_table). The executive's constructor makes its edge attribute (m_pAttributeE)
+// with no users and CreateFilletBrep is not run, so every fillet-B-rep edge is skipped
+// before the merge (MergeCurveOnSurfaces, UpdateTopologyChanges); a blending corner
+// registers each face at its vertex with each corner surface (RegisterExistingSSI). A
 // blending corner without vertex is refused (m_cpVertex->GetFaces).
 void c1_insert(C1Corner& C, Rd& rd, std::vector<double>& o)
 {
     SmFilletCorner* c = C.c;
     if (!c1_read_surfaces(C, rd))
         return;
-    if (c->*P3CornerPeek::blending())
-    {
-        if (C.vertex == NULL)
-        {
-            o.push_back(C1_REFUSE);
-            return;
-        }
-        SmTArray<SmFace*> vf;
+    SmTArray<SmFace*> vf;
+    if (C.vertex != NULL)
         C.vertex->GetFaces(vf);
-        if (vf.GetSize() > 0 && (c->*P3CornerPeek::surfs()).GetSize() > 0)
-        {
-            o.push_back(C1_NOT_RUN);
-            return;
-        }
+    else if (c->*P3CornerPeek::blending())
+    {
+        o.push_back(C1_REFUSE);
+        return;
     }
     C.exec->*C1ExecPeek::fillet() = C.M.filletBrep;
     SmStatus r = c->InsertIntersectionTopology();
     C.exec->*C1ExecPeek::fillet() = NULL;
     o.push_back(0.0);
     o.push_back(st(r));
+    c1_put_ssi_table(o, C.exec->GetTopologyIntersector(), vf, c);
     c1_put_corner(o, c, C.M);
     C.M.put(o);
 }

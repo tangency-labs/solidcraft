@@ -41,7 +41,8 @@
 //! [`super::blend_fillet_geom_p1`]), as unit `blend.fillet_corner_p3`'s corner ops do. After
 //! the block: `kind v_edge v_sub` (the derived class `0..=10` in the order of
 //! `solidcore::blend::fillet_corner::p3::FilletCornerKind`; the filleted vertex as the
-//! start (`0`) / end (`1`) vertex of target wire edge `v_edge`, `-1` none), the solver and
+//! start (`0`) / end (`1`) vertex of target wire edge `v_edge`, `-1` none; `v_edge <= -2`:
+//! vertex `v_sub` of target face `-(v_edge + 2)` in `SmFace::GetVertices` order), the solver and
 //! all edge uses (`has n (edge which)..`: target wire edge, `0` its primary edge use / `1`
 //! the mate; `has = 0` for NULL), the corner's fillet vertices (`n v..`) and fillet edges
 //! (`n e..`), the flags `bevel blending chamfer degenerate ext_patch adjusted`, then
@@ -349,7 +350,8 @@ pub enum CornerOp {
     EndPatch = 9,
     /// `MakeFaceBrep` on given corner surfaces.
     MakeFace = 10,
-    /// `InsertIntersectionTopology` with given corner surfaces.
+    /// `InsertIntersectionTopology` with given corner surfaces (`status table corner model`,
+    /// `table` the executive topology intersector's intersection table).
     Insert = 11,
     /// `MakeConstantRadiusFillet` with a solver per model geometry.
     ConstRad = 12,
@@ -406,10 +408,22 @@ pub fn validate_corner(op: CornerOp, input: &[f64]) -> Result<(), FfiError> {
     };
     let b = validate_block(&mut rd)?;
     let kind = rd.index(10)?;
-    let v_edge = rd.opt_index(b.nt)?;
-    let v_sub = rd.index(1)?;
-    if v_edge.is_none() && v_sub != 0 {
-        return Err(bad("vertex sub without edge"));
+    // `v_edge <= -2`: vertex `v_sub` of target face `-(v_edge + 2)` (`GetVertices`
+    // order; an index past its vertices is refused by the shim)
+    let v_face = rd.num()?;
+    if v_face <= -2.0 {
+        if v_face.fract() != 0.0 || -(v_face + 2.0) >= b.nf as f64 {
+            return Err(bad(format!("bad face vertex face {v_face} (len {})", b.nf)));
+        }
+        rd.index(MAX_LIST)?;
+    } else {
+        if v_face != -1.0 && (v_face.fract() != 0.0 || v_face < 0.0 || v_face >= b.nt as f64) {
+            return Err(bad(format!("bad optional index {v_face} (len {})", b.nt)));
+        }
+        let v_sub = rd.index(1)?;
+        if v_face == -1.0 && v_sub != 0 {
+            return Err(bad("vertex sub without edge"));
+        }
     }
     corner_eu_list(&mut rd, b.nt)?;
     corner_eu_list(&mut rd, b.nt)?;
