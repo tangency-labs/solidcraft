@@ -246,6 +246,7 @@ crate::dialog_descriptor::dialog_descriptors! {
                 suggested: Option<String>,
                 /// The picks used for the suggestion, so an unchanged dialog does no geometry work.
                 of: Vec<Sel>,
+                options: crate::dialogs_thread::Options,
             },
             /// A rib (one wall along open curves) or a web (a wall per curve).
             Rib {
@@ -834,14 +835,8 @@ impl Dialog {
                 vec![SelInput::new("Body to split", BODIES, false), SelInput::new("Splitting tool", PLANES | FACES | AXES, false)],
             ),
             "solid.thread" => Dialog::new(
-                Kind::Thread {
-                    designation: String::new(),
-                    length: String::new(),
-                    handedness: ThreadHandedness::Right,
-                    suggested: None,
-                    of: Vec::new(),
-                },
-                vec![SelInput::new("Cylindrical face", FACES, false)],
+                Kind::Thread { designation: String::new(), length: String::new(), suggested: None, of: Vec::new(), options: Default::default() },
+                crate::dialogs_thread::inputs(),
             ),
             "material.assign" => Dialog::new(Kind::Material { index: 1, editor: Default::default() }, vec![SelInput::new("Bodies", BODIES, true)]),
             "inspect.section" => Dialog::new(
@@ -1055,8 +1050,8 @@ impl Dialog {
     /// Resolve a newly selected face without replacing an authored size or changing the
     /// document. Clearing the face also clears a suggestion that no longer applies.
     fn sync_thread(&mut self, s: &Session) {
-        let Kind::Thread { designation, suggested, of, .. } = &mut self.kind else { return };
-        if !designation.trim().is_empty() && suggested.as_deref() != Some(designation.as_str()) {
+        let Kind::Thread { designation, suggested, of, options, .. } = &mut self.kind else { return };
+        if !options.suggests() || !designation.trim().is_empty() && suggested.as_deref() != Some(designation.as_str()) {
             return;
         }
         let picks = self.inputs.first().map(|i| i.items.as_slice()).unwrap_or_default();
@@ -3187,8 +3182,14 @@ pub(crate) fn preset_to_object(d: &mut Dialog, on: bool) {
 }
 
 fn set_object(inputs: &mut Vec<SelInput>, active: &mut usize, label: &'static str, on: bool) {
+    set_object_accepting(inputs, active, label, FACES | selection::VERTICES, on);
+}
+
+/// Add or remove the pick input `label` accepting `accept`; the active input moves to it when it
+/// is added.
+pub(crate) fn set_object_accepting(inputs: &mut Vec<SelInput>, active: &mut usize, label: &'static str, accept: selection::Accept, on: bool) {
     if on && !object_on(inputs, label) {
-        inputs.push(SelInput::new(label, FACES | selection::VERTICES, false));
+        inputs.push(SelInput::new(label, accept, false));
         *active = inputs.len() - 1;
     } else if !on && object_on(inputs, label) {
         inputs.retain(|i| i.label != label);
@@ -4231,16 +4232,13 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             need(0, "faces")?;
             ("solid.offset_face", json!({"faces": face_points(0)}))
         }
-        Kind::Thread { designation, length, suggested, handedness, .. } => {
+        Kind::Thread { designation, length, suggested, options, .. } => {
             need(0, "a cylindrical face")?;
             let mut p = json!({"face": face_points(0).into_iter().next().unwrap_or(Value::Null)});
             if !designation.trim().is_empty() && suggested.as_deref() != Some(designation.as_str()) {
                 p["designation"] = json!(designation.trim());
             }
-            put(&mut p, &[("length", length)]);
-            if !handedness.is_right() {
-                p["handedness"] = json!(handedness);
-            }
+            crate::dialogs_thread::put_params(&mut p, length, options, &d.inputs);
             ("solid.thread", p)
         }
         Kind::Material { index, editor } => {
@@ -5771,18 +5769,15 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Thread { face, designation, length, modeled, handedness } => {
+        FeatureKind::Thread { face, designation, length, modeled, .. } => {
             let mut d = start("solid.thread")?;
             if *modeled {
                 d.extra.insert("modeled".into(), json!(true));
             }
-            d.kind = Kind::Thread {
-                designation: designation.clone().unwrap_or_default(),
-                length: length.as_deref().map(str::to_string).unwrap_or_default(),
-                handedness: *handedness,
-                suggested: None,
-                of: Vec::new(),
-            };
+            let designation = designation.clone().unwrap_or_default();
+            let length = length.as_deref().map(str::to_string).unwrap_or_default();
+            let options = crate::dialogs_thread::Options::for_saved(&designation, &length);
+            d.kind = Kind::Thread { designation, length, suggested: None, of: Vec::new(), options };
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = face_sel(s, face.0).into_iter().collect();
             }
