@@ -1271,6 +1271,35 @@ impl<'target> FilletSession<'target> {
             approx_tol,
             ang_tol_rad,
             tan_tol_rad,
+            None,
+        )
+    }
+
+    /// [`FilletSession::new_constant_radius_solver`] with `SmConstantRadiusFS`'s
+    /// `pdOptSecondRadius`: the offset radius of the second surface (`radius` is the
+    /// first's), for the unequal setbacks of a chamfer.
+    ///
+    /// # Errors
+    /// Those of [`FilletSession::new_constant_radius_solver`].
+    #[allow(clippy::too_many_arguments)] // the native constructor's parameters
+    pub fn new_constant_radius_solver_with_second(
+        &mut self,
+        k: &Kernel,
+        edgeuse: EdgeuseId,
+        radius: f64,
+        second_radius: f64,
+        approx_tol: f64,
+        ang_tol_rad: f64,
+        tan_tol_rad: f64,
+    ) -> Result<FilletSolverId> {
+        self.objects.allocate_constant_radius_solver(
+            k,
+            edgeuse,
+            radius,
+            approx_tol,
+            ang_tol_rad,
+            tan_tol_rad,
+            Some(second_radius),
         )
     }
 
@@ -1360,6 +1389,53 @@ impl<'target> FilletSession<'target> {
         continuity: u32,
         thumbweight: f64,
     ) -> Result<()> {
+        self.prepare_per_edge(
+            k,
+            edges,
+            radii,
+            xsect_types,
+            FilletSolverType::ConstRadius,
+            continuity,
+            thumbweight,
+        )
+    }
+
+    /// [`FilletSession::prepare_per_edge_constant_radius`] with constant-distance solvers
+    /// (`SM_FS_CONST_DIST`): `distances` are the chords across each blend.
+    ///
+    /// # Errors
+    /// Those of [`FilletSession::prepare_per_edge_constant_radius`].
+    pub fn prepare_per_edge_constant_distance(
+        &mut self,
+        k: &mut Kernel,
+        edges: &[EdgeId],
+        distances: &[f64],
+        xsect_types: &[FilletSurfaceGeneratorType],
+        continuity: u32,
+        thumbweight: f64,
+    ) -> Result<()> {
+        self.prepare_per_edge(
+            k,
+            edges,
+            distances,
+            xsect_types,
+            FilletSolverType::ConstDist,
+            continuity,
+            thumbweight,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)] // the native overload's parameters
+    fn prepare_per_edge(
+        &mut self,
+        k: &mut Kernel,
+        edges: &[EdgeId],
+        radii: &[f64],
+        xsect_types: &[FilletSurfaceGeneratorType],
+        radius_type: FilletSolverType,
+        continuity: u32,
+        thumbweight: f64,
+    ) -> Result<()> {
         if edges.is_empty() {
             return Err(SolidError::Upstream {
                 operation: OP,
@@ -1367,7 +1443,7 @@ impl<'target> FilletSession<'target> {
                 entity: None,
             });
         }
-        let radius_types = vec![FilletSolverType::ConstRadius; edges.len()];
+        let radius_types = vec![radius_type; edges.len()];
         let edges = edges
             .iter()
             .map(|id| FilletObject::Topology(FilletBody::Target, EntityRef::Edge(*id)))
@@ -3244,6 +3320,7 @@ impl SessionObjects<'_> {
         approx_tol: f64,
         ang_tol_rad: f64,
         tan_tol_rad: f64,
+        second_radius: Option<f64>,
     ) -> Result<FilletSolverId> {
         let id = FilletSolverId(
             u32::try_from(self.solvers.len()).map_err(|_| invalid("too many solvers"))?,
@@ -3261,7 +3338,7 @@ impl SessionObjects<'_> {
             tan_tol_rad,
             radius,
             edgeuse,
-            None,
+            second_radius,
         )?;
         // `new SmConstantRadiusFS(..)`: the plain solver, not the assisted one
         solver.plain = true;
@@ -3428,6 +3505,7 @@ impl FilletParametersAccess<FilletObject> for SessionObjects<'_> {
                 approx_tol,
                 ang_tol_rad,
                 tan_tol_rad,
+                None,
             ),
             SolverSpec::ConstantDistance {
                 approx_tol,

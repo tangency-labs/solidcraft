@@ -14,6 +14,7 @@
 //! | `order_edgeuses_by_brep` (private) | `sm_OrderEdgeusesByBrep` |
 //! | [`api_shell_brep_full`], [`ShellCopyIdentities`] | `SmApiShellBrepFull` (and its working copy's identities) |
 //! | [`api_offset_brep_full`] | `SmApiOffsetBrepFull` |
+//! | [`faceuse_offset`] | `SmOffsetGeometryCreation::FaceuseOffset` over the owned B-rep |
 //!
 //! Deviations: original B-reps and the kernel are explicit arguments, not retained
 //! pointers. Options replace scalar flag lists; owned results replace output pointers.
@@ -1373,6 +1374,28 @@ pub fn api_offset_brep_full(
     Ok(result)
 }
 
+/// `SmOffsetGeometryCreation(distance, approx_tol_3d).FaceuseOffset(faceuse, TRUE)`: the
+/// face's surface offset by `distance` along the normal of the source face use (against
+/// it for an opposite one), made analytic when possible, its self-intersections skipped.
+/// `None` when no offset surface was made.
+///
+/// # Errors
+///
+/// Those of `FaceuseOffset` (the face use's face, its surface, the offset surface).
+pub fn faceuse_offset(
+    kernel: &Kernel,
+    original: &Brep,
+    faceuse: FaceuseId,
+    distance: f64,
+    approx_tol_3d: f64,
+) -> Result<Option<crate::surface::surface::Surface>> {
+    let creator = crate::offset::offset_geometry_creation::OffsetGeometryCreation::new(
+        distance,
+        approx_tol_3d,
+    );
+    Ok(super::face::build(kernel, &creator, original, faceuse, true)?.0)
+}
+
 fn configured_executive(original: &Brep, options: OffsetOptions) -> OffsetExecutive {
     let mut executive = OffsetExecutive::new(
         OffsetOperation::SolidOffset,
@@ -1839,6 +1862,41 @@ mod tests {
     use crate::surface::plane::Plane;
     use crate::surface::surface::Surface;
     use crate::topology::{Faceuse, FaceuseId, Region, Shell};
+
+    /// `faceuse_offset` offsets a box face's plane: a plane parallel to it, `distance` away.
+    #[test]
+    fn faceuse_offset_of_a_box_face_is_a_plane_at_the_distance() {
+        use crate::math::Point2;
+        use crate::surface::surface::p2::SurfaceKind;
+        let mut k = Kernel::default();
+        let brep = crate::primitive::api_primitives::create_box(
+            &mut k,
+            crate::math::Point3::new(0.0, 0.0, 0.0),
+            1.0,
+            2.0,
+            3.0,
+        )
+        .unwrap();
+        let f = bp1::faces(&brep, None).unwrap()[0];
+        let faceuse = face::faceuses(&brep, f).unwrap().0.unwrap();
+        let SurfaceKind::Plane(source) = face::surface(&brep, f).unwrap().unwrap().kind() else {
+            panic!("a box face is a plane");
+        };
+        let on_source = source.evaluate_point(Point2::new(0.0, 0.0));
+        let made = faceuse_offset(&k, &brep, faceuse, 0.25, 1e-6)
+            .unwrap()
+            .unwrap();
+        let SurfaceKind::Plane(made) = made.kind() else {
+            panic!("an offset plane stays a plane");
+        };
+        let [a, b, c] = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0)]
+            .map(|(u, v)| made.evaluate_point(Point2::new(u, v)));
+        let normal = (b - a).cross(c - a);
+        let normal = normal * (1.0 / normal.length());
+        for q in [a, b, c] {
+            assert!(((q - on_source).dot(normal).abs() - 0.25).abs() < 1e-12);
+        }
+    }
 
     /// `sm_OrderEdgeusesByBrep`: the B-rep's edge uses come from the end of its
     /// face/face-use/edge-use order, each once; an edge use not in the B-rep goes last.

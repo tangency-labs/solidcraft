@@ -584,6 +584,110 @@ mod tests {
         crate::primitive::api_primitives::create_box(k, Vec3::ZERO, 10.0, 20.0, 30.0).unwrap()
     }
 
+    #[test]
+    fn second_radius_offsets_the_second_surface_by_its_own_radius() {
+        let offsets = |second: Option<f64>| {
+            let mut k = Kernel::default();
+            let mut body = boxed(&mut k);
+            let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+            let edge = p1::edges(session.target(), None).unwrap()[0];
+            let edgeuse = session.blend_edgeuse(&k, edge).unwrap().unwrap();
+            let solver = match second {
+                Some(r) => session
+                    .new_constant_radius_solver_with_second(&k, edgeuse, 0.5, r, 1e-6, 0.5, 0.03)
+                    .unwrap(),
+                None => session
+                    .new_constant_radius_solver(&k, edgeuse, 0.5, 1e-6, 0.5, 0.03)
+                    .unwrap(),
+            };
+            session
+                .solver(solver)
+                .unwrap()
+                .base()
+                .offsets_data()
+                .unwrap()
+                .surfaces
+                .map(|s| s.unwrap().surface.offset_distance().abs())
+        };
+        assert_eq!(offsets(None), [0.5, 0.5]);
+        assert_eq!(offsets(Some(1.0)), [0.5, 1.0]);
+    }
+
+    #[test]
+    fn per_edge_constant_distance_prepares_constant_distance_solvers() {
+        let mut k = Kernel::default();
+        let mut body = boxed(&mut k);
+        let edges = p1::edges(&body, None).unwrap();
+        let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+        session
+            .prepare_per_edge_constant_distance(
+                &mut k,
+                &edges[..2],
+                &[0.5, 0.75],
+                &[FilletSurfaceGeneratorType::Circular; 2],
+                1,
+                1.0,
+            )
+            .unwrap();
+        for i in 0..2 {
+            let solver = session.solver(FilletSolverId(i)).unwrap();
+            assert!(matches!(
+                solver,
+                crate::blend::fillet_executive::session::SolverObject::ConstantDistance(_)
+            ));
+        }
+    }
+
+    #[test]
+    fn all_edge_setup_loads_one_solver_per_edge_with_the_blending_handler() {
+        for solver_kind in [
+            AllEdgeSolver::ConstantRadius,
+            AllEdgeSolver::ConstantDistance,
+        ] {
+            let mut k = Kernel::default();
+            let mut body = boxed(&mut k);
+            let mut session = FilletSession::new(&mut k, &mut body).unwrap();
+            let generator = session
+                .add_surface_generator(FilletSurfaceGenerator::Linear)
+                .unwrap();
+            session.set_self_intersection_handler(Some(MakeSurfaceBlendSih::new(1.0)));
+            let edges = p1::edges(session.target(), None).unwrap();
+            for (i, edge) in edges.iter().enumerate() {
+                let edgeuse = session.blend_edgeuse(&k, *edge).unwrap().unwrap();
+                let solver = match solver_kind {
+                    AllEdgeSolver::ConstantRadius => session
+                        .new_constant_radius_solver(&k, edgeuse, 0.5, 1e-6, 0.5, 0.03)
+                        .unwrap(),
+                    AllEdgeSolver::ConstantDistance => session
+                        .new_constant_distance_solver(&k, edgeuse, 0.5, 1e-6, 0.5, 0.03)
+                        .unwrap(),
+                };
+                assert_eq!(solver.0 as usize, i);
+                session.set_solver_generator(solver, generator).unwrap();
+                session.load_solver(&k, solver).unwrap();
+                let base = session.solver(solver).unwrap().base();
+                assert_eq!(
+                    base.self_intersection_handler().unwrap(),
+                    Some(crate::blend::fillet_intersector::HandlingAlgorithmType::Blending)
+                );
+            }
+            // clearing the executive's handler is seen by every loaded solver
+            session.set_self_intersection_handler(None);
+            for i in 0..edges.len() {
+                let id = FilletSolverId(u32::try_from(i).unwrap());
+                let base = session.solver(id).unwrap().base();
+                assert_eq!(base.self_intersection_handler().unwrap(), None);
+            }
+            session.create_corners(&k, None).unwrap();
+            let corners = session.fillet_corners().unwrap();
+            assert_eq!(corners.len(), 8);
+            for corner in &corners {
+                session.set_corner_bevel(*corner, true).unwrap();
+                assert!(session.corner(*corner).unwrap().is_bevel_corner());
+            }
+        }
+    }
+
     fn sized_box(k: &mut Kernel, length: f64, width: f64, height: f64) -> Brep {
         crate::primitive::api_primitives::create_box(k, Vec3::ZERO, length, width, height).unwrap()
     }
