@@ -3684,6 +3684,27 @@ fn body_at(st: &ModelState, body: &Option<crate::BodyName>, points: &[Vec3]) -> 
         .ok_or_else(|| DocError::Invalid("there is no body".into()))
 }
 
+/// Whether the whole line through `p` along `dir` (both ways) meets the box (slab test). A zero
+/// component of `dir` keeps the line in its slab only when `p` is already within it.
+fn line_meets_box(p: Vec3, dir: Vec3, b: &solidcraft_geom::Aabb3) -> bool {
+    if b.is_empty() {
+        return false;
+    }
+    let (mut lo, mut hi) = (f64::NEG_INFINITY, f64::INFINITY);
+    for (o, d, min, max) in [(p.x, dir.x, b.min.x, b.max.x), (p.y, dir.y, b.min.y, b.max.y), (p.z, dir.z, b.min.z, b.max.z)] {
+        if d == 0.0 || !d.is_finite() {
+            if !(min..=max).contains(&o) {
+                return false;
+            }
+            continue;
+        }
+        let (t0, t1) = ((min - o) / d, (max - o) / d);
+        lo = lo.max(t0.min(t1));
+        hi = hi.min(t0.max(t1));
+    }
+    lo <= hi
+}
+
 /// A hole stays on its face when the model changes: a position now inside a body moves back
 /// against the drilling direction to the surface, one now above it moves down onto it. Only the
 /// bodies in `scope` count (every body when it is empty, see [`hole_scope`]). Edit Hole seeds from
@@ -3694,6 +3715,12 @@ pub fn hole_on_surface(st: &ModelState, p: Vec3, dir: Vec3, scope: &[String]) ->
     let mut best: Option<Vec3> = None;
     for b in st.bodies.iter().filter(|b| in_hole_scope(scope, b)) {
         let m = b.mesh();
+        // Every test below casts along the line through `p`: a mesh whose box that line misses
+        // has no triangle to hit, so skip it before scanning its triangles (in an assembly of
+        // hundreds of parts, these scans were most of a hole's time).
+        if !line_meets_box(p, dir, &m.bounds().inflated(eps * 8.0)) {
+            continue;
+        }
         // Already on the surface: the drill enters right here.
         if let Some((t, _)) = m.raycast(p - dir * eps, dir)
             && t < eps * 4.0
@@ -3710,15 +3737,18 @@ pub fn hole_on_surface(st: &ModelState, p: Vec3, dir: Vec3, scope: &[String]) ->
     best.unwrap_or(p)
 }
 
-/// The faces of the model near `p`: for each, how far `p` is from it, the outward normal there
-/// (the surface's own normal for planes, cylinders and spheres, turned the way the face looks out
-/// of its body; the nearest mesh facet's otherwise) and, for a plane, how far `p` is from the
-/// plane itself. Only faces within `reach` of `p`, nearest first, of the bodies in `scope`
-/// (every body when it is empty).
-fn faces_through(st: &ModelState, p: Vec3, reach: f64, scope: &[String]) -> Vec<(f64, Vec3, Option<f64>)> {
-    let mut out: Vec<(f64, Vec3, Option<f64>)> = Vec::new();
-    for b in st.bodies.iter().filter(|b| !b.body.is_mesh() && in_hole_scope(scope, b)) {
+/// The faces of the model near `p`, nearest first, before their surfaces are looked at: for
+/// each, how far `p` is from it, its body, its index and the outward normal of its nearest mesh
+/// facet. Only faces within `reach` of `p`, of the bodies in `scope` (every body when it is
+/// empty). Ties keep body order, then face order.
+fn faces_near(st: &ModelState, p: Vec3, reach: f64, scope: &[String]) -> Vec<NearFace> {
+    let mut out: Vec<NearFace> = Vec::new();
+    for (i, b) in st.bodies.iter().enumerate().filter(|(_, b)| !b.body.is_mesh() && in_hole_scope(scope, b)) {
         let m = b.mesh();
+        // No facet is nearer `p` than the mesh's box: one beyond `reach` has none to give.
+        if !m.bounds().inflated(reach).contains(p) {
+            continue;
+        }
         // The nearest facet of each face of this body.
         let mut near: BTreeMap<u32, (f64, Vec3)> = BTreeMap::new();
         for (t, f) in m.triangles.iter().zip(&m.tri_face) {
@@ -3729,53 +3759,67 @@ fn faces_through(st: &ModelState, p: Vec3, reach: f64, scope: &[String]) -> Vec<
                 near.insert(*f, (d, n));
             }
         }
-        for (f, (d, facet)) in near {
-            let (exact, off) = match kernel::face_surface(&b.body, f as usize) {
-                Some(kernel::FaceSurface::Plane { normal, point }) => (Some(*normal), Some((p - point).dot(normal).abs())),
-                Some(kernel::FaceSurface::Cylinder { origin, axis, .. }) => {
-                    let v = p - origin;
-                    ((v - axis * v.dot(axis)).normalized(), None)
-                }
-                Some(kernel::FaceSurface::Sphere { center, .. }) => ((p - center).normalized(), None),
-                // Square to the line through the apex, not the nearest facet's normal (#10698).
-                Some(kernel::FaceSurface::Cone { apex, axis, half_angle }) => {
-                    let v = p - apex;
-                    let out = (v - axis * v.dot(axis)).normalized();
-                    (out.and_then(|u| (u * half_angle.cos() - axis * half_angle.sin()).normalized()), None)
-                }
-                // Away from the nearest point of the ring the tube goes round.
-                Some(kernel::FaceSurface::Torus { center, axis, major, .. }) => {
-                    let v = p - center;
-                    let ring = (v - axis * v.dot(axis)).normalized().map(|u| center + u * major);
-                    (ring.and_then(|q| (p - q).normalized()), None)
-                }
-                _ => (None, None),
-            };
-            let n = match exact {
-                Some(n) if n.dot(facet) < 0.0 => -n,
-                Some(n) => n,
-                None => facet,
-            };
-            out.push((d, n, off));
-        }
+        out.extend(near.into_iter().map(|(f, (d, n))| (d, i, f, n)));
     }
     out.sort_by(|a, b| a.0.total_cmp(&b.0));
     out
 }
 
-/// The faces near `p` a hole placed there goes by (as [`faces_through`]): those of the bodies in
+/// A face of [`faces_near`]: its distance from the point, its body, its index and the outward
+/// normal of its nearest mesh facet.
+type NearFace = (f64, usize, u32, Vec3);
+
+/// One face of [`faces_near`] as [`faces_through`] gives it: the distance, the outward normal
+/// (the surface's own normal for planes, cylinders, spheres, cones and tori, turned the way the
+/// face looks out of its body; the nearest mesh facet's otherwise) and, for a plane, how far `p`
+/// is from the plane itself. Classifying the surface is the costly part, so callers that stop at
+/// the first face that answers them ask for no more than that.
+fn face_through(st: &ModelState, p: Vec3, (d, body, f, facet): NearFace) -> (f64, Vec3, Option<f64>) {
+    #[cfg(test)]
+    cost_tests::count(|c| c.surfaces += 1);
+    let exact = st.bodies.get(body).and_then(|b| kernel::face_surface(&b.body, f as usize));
+    let (exact, off) = match exact {
+        Some(kernel::FaceSurface::Plane { normal, point }) => (Some(*normal), Some((p - point).dot(normal).abs())),
+        Some(kernel::FaceSurface::Cylinder { origin, axis, .. }) => {
+            let v = p - origin;
+            ((v - axis * v.dot(axis)).normalized(), None)
+        }
+        Some(kernel::FaceSurface::Sphere { center, .. }) => ((p - center).normalized(), None),
+        // Square to the line through the apex, not the nearest facet's normal (#10698).
+        Some(kernel::FaceSurface::Cone { apex, axis, half_angle }) => {
+            let v = p - apex;
+            let out = (v - axis * v.dot(axis)).normalized();
+            (out.and_then(|u| (u * half_angle.cos() - axis * half_angle.sin()).normalized()), None)
+        }
+        // Away from the nearest point of the ring the tube goes round.
+        Some(kernel::FaceSurface::Torus { center, axis, major, .. }) => {
+            let v = p - center;
+            let ring = (v - axis * v.dot(axis)).normalized().map(|u| center + u * major);
+            (ring.and_then(|q| (p - q).normalized()), None)
+        }
+        _ => (None, None),
+    };
+    let n = match exact {
+        Some(n) if n.dot(facet) < 0.0 => -n,
+        Some(n) => n,
+        None => facet,
+    };
+    (d, n, off)
+}
+
+/// The faces near `p` a hole placed there goes by (as [`faces_near`]): those of the bodies in
 /// `scope`, the hole's own, when one of them passes within `on` of `p`, else those of every body.
 /// Where a plate's face touches another body both faces pass through `p`, and a hole that drills
 /// the plate goes by the plate's face, never the other body's (#12066). A hole placed on another
 /// body's face, to drill through it into its own body behind, still goes by that face.
-fn hole_faces_through(st: &ModelState, p: Vec3, reach: f64, on: f64, scope: &[String]) -> Vec<(f64, Vec3, Option<f64>)> {
+fn hole_faces_near(st: &ModelState, p: Vec3, reach: f64, on: f64, scope: &[String]) -> Vec<NearFace> {
     if !scope.is_empty() {
-        let own = faces_through(st, p, reach, scope);
-        if own.first().is_some_and(|(d, _, _)| *d <= on) {
+        let own = faces_near(st, p, reach, scope);
+        if own.first().is_some_and(|c| c.0 <= on) {
             return own;
         }
     }
-    faces_through(st, p, reach, &[])
+    faces_near(st, p, reach, &[])
 }
 
 /// The way a hole placed at `p` drills: into the material, against the outward normal of the
@@ -3785,17 +3829,22 @@ fn hole_faces_through(st: &ModelState, p: Vec3, reach: f64, on: f64, scope: &[St
 /// of the bodies in `scope` (the bodies the hole drills; empty for every body) decide.
 pub fn hole_direction_at(st: &ModelState, p: Vec3, scope: &[String]) -> Option<Vec3> {
     let size = st.bodies.iter().map(|b| b.body.size()).fold(1.0, f64::max);
-    let faces = hole_faces_through(st, p, f64::INFINITY, size * 1e-4, scope);
-    if let Some((d, n, _)) = faces.first()
-        && *d <= size * 1e-4
+    // Every face of the model, nearest first; each surface is classified only when the rules
+    // below reach it. Classifying all of them first took most of a hole's time in an assembly
+    // of hundreds of parts, where the nearest face nearly always answers.
+    let near = hole_faces_near(st, p, f64::INFINITY, size * 1e-4, scope);
+    let mut faces = near.iter().map(|c| face_through(st, p, *c));
+    let first = faces.next();
+    if let Some((d, n, _)) = first
+        && d <= size * 1e-4
     {
-        return Some(-*n);
+        return Some(-n);
     }
-    if let Some((_, n, _)) = faces.iter().find(|(_, _, off)| off.is_some_and(|o| o <= size * 1e-4)) {
-        return Some(-*n);
+    if let Some((_, n, _)) = first.into_iter().chain(faces).find(|(_, _, off)| off.is_some_and(|o| o <= size * 1e-4)) {
+        return Some(-n);
     }
     let reach = st.bodies.iter().map(crate::appearance::pick_tolerance).fold(0.0, f64::max);
-    faces.first().filter(|(d, _, _)| *d <= reach).map(|(_, n, _)| -*n)
+    first.filter(|(d, _, _)| *d <= reach).map(|(_, n, _)| -n)
 }
 
 /// A hole placed on a face drills into the material: when its direction leaves every face it
@@ -3808,7 +3857,7 @@ pub fn hole_direction_at(st: &ModelState, p: Vec3, scope: &[String]) -> Option<V
 /// the plate there, drills the plate (#12066).
 fn hole_dir_into_face(st: &ModelState, p: Vec3, dir: Vec3, scope: &[String]) -> Vec3 {
     let size = st.bodies.iter().map(|b| b.body.size()).fold(1.0, f64::max);
-    let faces = hole_faces_through(st, p, size * 1e-5, size * 1e-5, scope);
+    let faces: Vec<_> = hole_faces_near(st, p, size * 1e-5, size * 1e-5, scope).into_iter().map(|c| face_through(st, p, c)).collect();
     if faces.is_empty() || faces.iter().any(|(_, n, _)| n.dot(dir) < -1e-9) {
         return dir;
     }
