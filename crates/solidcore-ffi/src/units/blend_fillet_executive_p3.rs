@@ -112,6 +112,15 @@ extern "C" {
         cap: i64,
         len: *mut i64,
     ) -> i32;
+    fn sc_blend_fillet_executive_p3_real_solid_setback(
+        input: *const f64,
+        n: i64,
+        setback: *const f64,
+        setback_n: i64,
+        out: *mut f64,
+        cap: i64,
+        len: *mut i64,
+    ) -> i32;
 
 }
 
@@ -189,6 +198,38 @@ pub fn real_variable_solid(input: &[f64], end_radius: f64) -> Result<Vec<f64>, F
             input.as_ptr(),
             input.len() as i64,
             end_radius,
+            out.as_mut_ptr(),
+            out.len() as i64,
+            len,
+        )
+    })
+}
+
+/// Validate the unchanged box wire and the separate XYZ/distance fixture block.
+/// Finiteness defines this bridge's input format, not the native setter's policy;
+/// zero and negative finite distances remain representable.
+pub fn validate_real_solid_setback(input: &[f64], setback: [f64; 4]) -> Result<(), FfiError> {
+    validate_real_solid(input)?;
+    if setback.iter().any(|value| !value.is_finite()) {
+        return Err(FfiError::InvalidArgument(
+            "non-finite corner setback fixture".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Run the actual executive with a setback assignment after corner creation.
+/// The output is the complete [`real_solid`] record, including ordinary operation
+/// errors. A missing unique vertex or prepared corner is a malformed fixture;
+/// callers must report bridge errors as harness errors, not C++-undefined inputs.
+pub fn real_solid_setback(input: &[f64], setback: [f64; 4]) -> Result<Vec<f64>, FfiError> {
+    validate_real_solid_setback(input, setback)?;
+    call_with_buffer(65536, |out, len| unsafe {
+        sc_blend_fillet_executive_p3_real_solid_setback(
+            input.as_ptr(),
+            input.len() as i64,
+            setback.as_ptr(),
+            4,
             out.as_mut_ptr(),
             out.len() as i64,
             len,
@@ -516,13 +557,18 @@ pub fn curve_sih_source(
 /// (0/1).
 pub fn validate_surface_surface(input: &[f64]) -> Result<(), FfiError> {
     if input.len() != 30 || input.iter().any(|v| !v.is_finite()) {
-        return Err(FfiError::InvalidArgument("invalid surface-surface wire".into()));
+        return Err(FfiError::InvalidArgument(
+            "invalid surface-surface wire".into(),
+        ));
     }
     let code = input.get(27).copied().unwrap_or(-1.0);
     if code < 0.0 || code.fract() != 0.0 || code >= 18446744073709551616.0 {
         return Err(FfiError::InvalidArgument("invalid native ULONG".into()));
     }
-    if input.get(28..30).is_none_or(|f| f.iter().any(|v| *v != 0.0 && *v != 1.0)) {
+    if input
+        .get(28..30)
+        .is_none_or(|f| f.iter().any(|v| *v != 0.0 && *v != 1.0))
+    {
         return Err(FfiError::InvalidArgument("invalid flag".into()));
     }
     Ok(())
@@ -567,7 +613,10 @@ pub fn validate_surface_surface_bodies(input: &[f64]) -> Result<(), FfiError> {
     if code < 0.0 || code.fract() != 0.0 || code >= 18446744073709551616.0 {
         return Err(FfiError::InvalidArgument("invalid native ULONG".into()));
     }
-    if input.get(30..32).is_none_or(|f| f.iter().any(|v| *v != 0.0 && *v != 1.0)) {
+    if input
+        .get(30..32)
+        .is_none_or(|f| f.iter().any(|v| *v != 0.0 && *v != 1.0))
+    {
         return Err(FfiError::InvalidArgument("invalid flag".into()));
     }
     Ok(())
@@ -604,7 +653,11 @@ mod source_tests {
     fn curve_sih_rejects_invalid_step_back() {
         for step_back in [0.0, -1.0, f64::NAN, f64::INFINITY] {
             assert!(super::curve_sih_source(step_back, &cylinder(), None).is_err());
-            assert!(super::curve_sih_solid(step_back, &[10.0, 10.0, 10.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0]).is_err());
+            assert!(super::curve_sih_solid(
+                step_back,
+                &[10.0, 10.0, 10.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0]
+            )
+            .is_err());
         }
     }
     #[test]
@@ -725,6 +778,43 @@ mod real_solid_tests {
     use super::validate_real_solid;
     fn record() -> Vec<f64> {
         vec![10.0, 20.0, 30.0, 0.5, 1.0, 1.0, 1.0, 1.0, 0.0]
+    }
+    #[test]
+    fn setback_block_keeps_the_complete_legacy_wire_and_finite_distance_domain() {
+        let mut value = record();
+        for distance in [-8.0, 0.0, 8.0] {
+            assert!(
+                super::validate_real_solid_setback(&value, [60.0, 40.0, 20.0, distance]).is_ok()
+            );
+        }
+        for index in 0..4 {
+            let mut block = [60.0, 40.0, 20.0, 8.0];
+            block[index] = f64::NAN;
+            assert!(super::validate_real_solid_setback(&value, block).is_err());
+        }
+        value[7] = 2.0;
+        assert!(super::validate_real_solid_setback(&value, [60.0, 40.0, 20.0, 8.0]).is_err());
+    }
+    #[test]
+    fn native_setback_block_count_is_checked_before_reading_it() {
+        let value = record();
+        let block = [60.0, 40.0, 20.0, 8.0];
+        let mut out = [0.0; 1];
+        let mut len = 0;
+        for count in [-1, 0, 3, 5] {
+            let status = unsafe {
+                super::sc_blend_fillet_executive_p3_real_solid_setback(
+                    value.as_ptr(),
+                    value.len() as i64,
+                    block.as_ptr(),
+                    count,
+                    out.as_mut_ptr(),
+                    1,
+                    &raw mut len,
+                )
+            };
+            assert_eq!(status, crate::SC_ERR_ARG);
+        }
     }
     #[test]
     fn variable_endpoint_is_separate_and_complete_wire_still_checked() {

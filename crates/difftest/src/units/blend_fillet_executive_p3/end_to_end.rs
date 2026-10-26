@@ -130,10 +130,13 @@ impl Source {
     fn wire(&self) -> (f64, [f64; ffi::SOURCE_PARAMS]) {
         let mut p = [0.0; ffi::SOURCE_PARAMS];
         let boxes = |p: &mut [f64; ffi::SOURCE_PARAMS], a: &BoxSpec, b: &BoxSpec| {
-            for (slot, v) in p
-                .iter_mut()
-                .zip(a.origin.iter().chain(&a.size).chain(&b.origin).chain(&b.size))
-            {
+            for (slot, v) in p.iter_mut().zip(
+                a.origin
+                    .iter()
+                    .chain(&a.size)
+                    .chain(&b.origin)
+                    .chain(&b.size),
+            ) {
                 *slot = *v;
             }
         };
@@ -167,6 +170,19 @@ impl Source {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CornerSetback {
+    vertex: [f64; 3],
+    distance: f64,
+}
+impl CornerSetback {
+    fn wire(self) -> [f64; 4] {
+        let [x, y, z] = self.vertex;
+        [x, y, z, self.distance]
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct RealSolid {
     #[serde(default)]
@@ -180,6 +196,8 @@ pub(super) struct RealSolid {
     radius: f64,
     #[serde(default)]
     radius_end: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    corner_setback: Option<CornerSetback>,
     xsect: u32,
     continuity: u32,
     thumbweight: f64,
@@ -285,6 +303,24 @@ impl RealSolid {
     /// Rejects mixed or incomplete forms (a box needs `dimensions`; a source no
     /// `dimensions`, the full checkpoint, and exactly one of `edges` / `all_edges`).
     fn check_form(&self) -> Result<(), HarnessError> {
+        if self
+            .corner_setback
+            .is_some_and(|setback| setback.wire().iter().any(|value| !value.is_finite()))
+        {
+            return Err(HarnessError::new("non-finite corner setback fixture"));
+        }
+        if self.corner_setback.is_some()
+            && (self.checkpoint != Checkpoint::Full
+                || self.source.is_some()
+                || self.radius_end.is_some()
+                || self.piecewise_merge
+                || self.curve_blend_sih.is_some()
+                || self.shell.is_some())
+        {
+            return Err(HarnessError::new(
+                "corner setback requires the full constant-radius box without merge options",
+            ));
+        }
         if (self.select.is_some() || self.shell.is_some())
             && (self.checkpoint != Checkpoint::Full
                 || self.source.is_some()
@@ -310,7 +346,9 @@ impl RealSolid {
             ));
         }
         if self.piecewise_merge && self.checkpoint != Checkpoint::Full {
-            return Err(HarnessError::new("piecewise merge needs the full checkpoint"));
+            return Err(HarnessError::new(
+                "piecewise merge needs the full checkpoint",
+            ));
         }
         if self.curve_blend_sih.is_some()
             && (self.piecewise_merge || self.checkpoint != Checkpoint::Full)
@@ -333,6 +371,10 @@ impl RealSolid {
     /// [`Self::check_form`], then the shim's wire validation for the chosen form.
     fn validate(&self) -> Result<(), HarnessError> {
         self.check_form()?;
+        if let Some(setback) = self.corner_setback {
+            return ffi::validate_real_solid_setback(&self.wire(), setback.wire())
+                .map_err(|e| HarnessError::new(e.to_string()));
+        }
         match (&self.source, self.radius_end) {
             (Some(source), _) => {
                 ffi::validate_real_source(&self.source_wire(source), source.path().is_some())
@@ -362,7 +404,13 @@ pub(super) struct SurfaceSurface {
 }
 impl SurfaceSurface {
     fn wire(&self) -> Vec<f64> {
-        let mut out: Vec<f64> = self.first.iter().chain(&self.second).flatten().copied().collect();
+        let mut out: Vec<f64> = self
+            .first
+            .iter()
+            .chain(&self.second)
+            .flatten()
+            .copied()
+            .collect();
         out.extend([
             self.radius1,
             self.radius2,
@@ -457,6 +505,11 @@ fn solid_output(
 
 pub(super) fn cpp(input: &RealSolid) -> Result<Output, HarnessError> {
     input.check_form()?;
+    if let Some(setback) = input.corner_setback {
+        let (values, step) = super::fresh_cpp(|| ffi::real_solid_setback(&input.wire(), setback.wire()))
+            .map_err(|e| HarnessError::new(e.to_string()))?;
+        return Ok(super::with_point_step(output(&values)?, step));
+    }
     if let Some(shell) = input.shell {
         let mut wire = input.wire();
         wire.extend([shell.distance, f64::from(u8::from(shell.open_top))]);
@@ -601,7 +654,21 @@ fn build(k: &mut Kernel, input: &RealSolid) -> Result<SolidResult<Brep>, Harness
         }),
     })
 }
-fn run_rust(k: &mut Kernel, body: SolidResult<Brep>, input: &RealSolid) -> SolidResult<Vec<f64>> {
+enum RealSolidRunError {
+    Fixture(HarnessError),
+    Kernel(SolidError),
+}
+impl From<SolidError> for RealSolidRunError {
+    fn from(error: SolidError) -> Self {
+        Self::Kernel(error)
+    }
+}
+
+fn run_rust(
+    k: &mut Kernel,
+    body: SolidResult<Brep>,
+    input: &RealSolid,
+) -> Result<Vec<f64>, RealSolidRunError> {
     let mut body = body?;
     let edges = p1::edges(&body, None)?;
     let mut selected = Vec::<EdgeId>::new();
@@ -632,9 +699,17 @@ fn run_rust(k: &mut Kernel, body: SolidResult<Brep>, input: &RealSolid) -> Solid
         }
     }
     if input.checkpoint != Checkpoint::Full {
-        return prefix::run(k, &mut body, &selected, input, &before);
+        return prefix::run(k, &mut body, &selected, input, &before).map_err(Into::into);
     }
-    let result = apply(k, &mut body, &selected, input);
+    let result = if let Some(setback) = input.corner_setback {
+        match setback_fillet_edges(k, &mut body, &selected, input, setback) {
+            Ok(()) => Ok(()),
+            Err(RealSolidRunError::Kernel(error)) => Err(error),
+            Err(error @ RealSolidRunError::Fixture(_)) => return Err(error),
+        }
+    } else {
+        apply(k, &mut body, &selected, input)
+    };
     let result_status = match result {
         Ok(()) => 0.0,
         Err(error) => status(error)?,
@@ -684,6 +759,61 @@ fn run_rust(k: &mut Kernel, body: SolidResult<Brep>, input: &RealSolid) -> Solid
     }
     Ok(values)
 }
+/// Configure one actual retained corner between native corner creation and filleting.
+fn setback_fillet_edges(
+    k: &mut Kernel,
+    body: &mut Brep,
+    edges: &[EdgeId],
+    input: &RealSolid,
+    setback: CornerSetback,
+) -> Result<(), RealSolidRunError> {
+    use solidcore::blend::fillet_executive::session::FilletSession;
+    use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
+
+    let point = Vec3::from(setback.vertex);
+    let mut matches = Vec::new();
+    for vertex in p1::vertices(body, None)? {
+        if solidcore::topology::vertex::point(body, vertex)? == point {
+            matches.push(vertex);
+        }
+    }
+    let [vertex] = matches.as_slice() else {
+        return Err(RealSolidRunError::Fixture(HarnessError::new(
+            "corner setback requires one actual vertex at the requested coordinates",
+        )));
+    };
+    {
+        let mut session = FilletSession::new(k, body)?;
+        session.prepare_constant_radius_edges(
+            k,
+            edges,
+            input.radius,
+            input.xsect,
+            input.continuity,
+            input.thumbweight,
+        )?;
+        session.create_corners(k, None)?;
+        let mut corners = Vec::new();
+        for corner in session.fillet_corners()? {
+            if session.corner(corner)?.filleted_vertex() == Some(*vertex) {
+                corners.push(corner);
+            }
+        }
+        let [corner] = corners.as_slice() else {
+            return Err(RealSolidRunError::Fixture(HarnessError::new(
+                "corner setback requires one created corner at the requested vertex",
+            )));
+        };
+        session.set_corner_setback(*corner, setback.distance)?;
+        session.do_filleting(k, None)?;
+    }
+    // SmApiSetBevelCorners ignores the ordinary StitchAndOrient return status.
+    match stitch_and_orient(k, body, &StitchAndOrientOptions::default()) {
+        Ok(()) | Err(SolidError::Upstream { .. } | SolidError::InvalidInput { .. }) => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
 fn apply(k: &mut Kernel, body: &mut Brep, edges: &[EdgeId], input: &RealSolid) -> SolidResult<()> {
     if let Some(end) = input.radius_end {
         return solidcore::blend::fillet_executive::api::variable_radius_fillet(
@@ -1207,7 +1337,8 @@ pub(super) fn rust(input: &RealSolid) -> Result<Output, HarnessError> {
             };
             Ok(super::with_point_step(out, super::rust_point_step(&k)))
         }
-        Err(error) => match Output::unported(&error) {
+        Err(RealSolidRunError::Fixture(error)) => Err(error),
+        Err(RealSolidRunError::Kernel(error)) => match Output::unported(&error) {
             Some(deferred) => Ok(deferred),
             None => Err(HarnessError::new(error.to_string())),
         },
@@ -1228,7 +1359,10 @@ fn surface_surface_output(values: &[f64]) -> Result<Output, HarnessError> {
     let mut out = Output::new();
     let mut head = vec![status];
     if !rest.is_empty() {
-        head.extend(rest.get(..3).ok_or_else(|| HarnessError::new("missing counts"))?);
+        head.extend(
+            rest.get(..3)
+                .ok_or_else(|| HarnessError::new("missing counts"))?,
+        );
         rest = rest.get(3..).unwrap_or_default();
         let topology = take_section(&mut rest)?;
         if topology.iter().any(|v| !v.is_finite() || v.fract() != 0.0) {
@@ -1322,6 +1456,120 @@ mod tests {
             "xsect": 1, "continuity": 1, "thumbweight": 1, "edges": [2]
         }))
         .expect("valid fixture schema")
+    }
+
+    fn setback_input(distance: f64) -> super::RealSolid {
+        serde_json::from_value(serde_json::json!({
+            "dimensions": [60,40,20], "radius": 5,
+            "xsect": 1, "continuity": 1, "thumbweight": 1, "edges": [0,1,5],
+            "corner_setback": { "vertex": [60,40,20], "distance": distance }
+        }))
+        .expect("valid setback fixture schema")
+    }
+
+    #[test]
+    fn corner_setback_preserves_legacy_wire_and_absent_field_serialization() {
+        let mut input = setback_input(8.0);
+        let wire = input.wire();
+        assert_eq!(
+            wire,
+            [60.0, 40.0, 20.0, 5.0, 1.0, 1.0, 1.0, 3.0, 0.0, 1.0, 5.0]
+        );
+        assert_eq!(
+            input.corner_setback.expect("setback").wire(),
+            [60.0, 40.0, 20.0, 8.0]
+        );
+        assert!(input.validate().is_ok());
+        input.corner_setback = None;
+        assert_eq!(input.wire(), wire);
+        assert!(serde_json::to_value(&input)
+            .expect("serialize")
+            .get("corner_setback")
+            .is_none());
+    }
+
+    #[test]
+    fn corner_setback_rejects_mixed_forms_before_execution() {
+        let original = setback_input(8.0);
+        let mut invalid = Vec::new();
+        for checkpoint in [
+            super::Checkpoint::Prepared,
+            super::Checkpoint::IntermediateFaces,
+        ] {
+            let mut input = original.clone();
+            input.checkpoint = checkpoint;
+            invalid.push(input);
+        }
+        let mut input = original.clone();
+        input.radius_end = Some(2.0);
+        invalid.push(input);
+        let mut input = original.clone();
+        input.piecewise_merge = true;
+        invalid.push(input);
+        let mut input = original.clone();
+        input.curve_blend_sih = Some(1.0);
+        invalid.push(input);
+        let mut input = original.clone();
+        input.dimensions = None;
+        input.source = Some(super::Source::Cylinder {
+            origin: [0.0; 3],
+            radius: 10.0,
+            height: 20.0,
+        });
+        invalid.push(input);
+        let mut input = original;
+        input.all_edges = true;
+        invalid.push(input);
+        for input in invalid {
+            assert!(super::cpp(&input).is_err());
+            assert!(super::rust(&input).is_err());
+        }
+    }
+
+    #[test]
+    fn corner_setback_nonfinite_values_are_fixture_errors() {
+        for (vertex, distance) in [
+            ([f64::NAN, 40.0, 20.0], 8.0),
+            ([60.0, 40.0, 20.0], f64::INFINITY),
+        ] {
+            let mut input = setback_input(8.0);
+            input.corner_setback = Some(super::CornerSetback { vertex, distance });
+            assert!(input.check_form().is_err());
+            assert!(super::cpp(&input).is_err());
+            assert!(super::rust(&input).is_err());
+        }
+    }
+
+    #[test]
+    fn corner_setback_requires_actual_vertex_and_prepared_corner() {
+        for vertex in [[59.0, 40.0, 20.0], [0.0, 0.0, 0.0]] {
+            let mut input = setback_input(8.0);
+            input.corner_setback.as_mut().expect("setback").vertex = vertex;
+            // A malformed fixture must not turn into a compared 1006/1007 or rejection.
+            assert!(super::cpp(&input).is_err());
+            assert!(super::rust(&input).is_err());
+        }
+    }
+
+    #[test]
+    fn corner_setback_changes_the_actual_full_pipeline_result() {
+        let result = super::rust(&setback_input(8.0)).expect("actual setback pipeline");
+        let zero = super::rust(&setback_input(0.0)).expect("actual zero setback pipeline");
+        assert_eq!(
+            result.ints["api_status_vertex_edge_face_counts"],
+            [0, 23, 36, 15]
+        );
+        assert_eq!(
+            zero.ints["api_status_vertex_edge_face_counts"],
+            [0, 13, 21, 10]
+        );
+        assert_eq!(result.ints["mass_status"], [0]);
+        assert_eq!(zero.ints["mass_status"], [0]);
+        assert_ne!(
+            result.values["mass_properties"],
+            zero.values["mass_properties"]
+        );
+        assert!(!result.values["result_geometry"].is_empty());
     }
 
     #[test]
