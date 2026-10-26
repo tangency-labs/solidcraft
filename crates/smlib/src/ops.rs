@@ -55,6 +55,40 @@ fn pick_error((s, at): ffi::ops::PickError) -> Error {
     }
 }
 
+/// One edge round an opened corner's hole ([`Brep::blend_setback_open`]): its index in the
+/// sheet's edge order, the face beside it in its face order, and whether that face, run
+/// counter-clockwise about its outward normal, runs the edge from its start vertex to its end.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HoleEdge {
+    pub edge: usize,
+    pub face: usize,
+    pub forward: bool,
+}
+
+/// The edges round an opened corner's hole, in order: each starts where the one before it ends.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Hole {
+    pub edges: Vec<HoleEdge>,
+}
+
+/// The holes `smlib_blend_setback_open` wrote: `corners` of them, each n and n triples.
+fn holes(values: &[i64], corners: usize) -> Option<Vec<Hole>> {
+    let mut at = 0usize;
+    let mut out = Vec::with_capacity(corners);
+    for _ in 0..corners {
+        let n = usize::try_from(*values.get(at)?).ok()?;
+        at += 1;
+        let mut edges = Vec::with_capacity(n);
+        for _ in 0..n {
+            let (e, f, fw) = (values.get(at)?, values.get(at + 1)?, values.get(at + 2)?);
+            edges.push(HoleEdge { edge: usize::try_from(*e).ok()?, face: usize::try_from(*f).ok()?, forward: *fw != 0 });
+            at += 3;
+        }
+        out.push(Hole { edges });
+    }
+    (at == values.len()).then_some(out)
+}
+
 impl Brep {
     /// `self` and `other` combined by `op`: `None` when the result is empty (disjoint bodies
     /// intersected, a body subtracted by one that encloses it). Several separate solids come back
@@ -181,6 +215,42 @@ impl Brep {
             Blend::Chamfer => ffi::ops::BLEND_CHAMFER,
         };
         ffi::ops::blend_setback(kind, &self.0, edges, sizes, corners, setbacks, tolerance).map(Brep).map_err(pick_error)
+    }
+
+    /// [`Brep::blend_setback`] with each set-back corner left open: SMLib's patch between the
+    /// corner's setback sections is removed, so the result is a sheet whose only free edges are
+    /// the holes', one [`Hole`] per corner in `corners`' order (a vertex picked twice gives its
+    /// hole twice). A corner whose patch SMLib does not build as a disc of faces of its own is
+    /// [`Error::Unsupported`].
+    pub fn blend_setback_open(
+        &self,
+        kind: Blend,
+        edges: &[[f64; 3]],
+        sizes: &[f64],
+        corners: &[[f64; 3]],
+        setbacks: &[f64],
+        tolerance: f64,
+    ) -> Result<(Brep, Vec<Hole>)> {
+        init()?;
+        if edges.len() > MAX_POINTS
+            || edges.is_empty()
+            || sizes.len() != edges.len()
+            || corners.is_empty()
+            || corners.len() > MAX_POINTS
+            || setbacks.len() != corners.len()
+        {
+            return Err(Error::Argument);
+        }
+        let kind = match kind {
+            Blend::Round => ffi::ops::BLEND_ROUND,
+            Blend::Curvature => ffi::ops::BLEND_CURVATURE,
+            Blend::Chord => ffi::ops::BLEND_CHORD,
+            Blend::Chamfer => ffi::ops::BLEND_CHAMFER,
+        };
+        let (h, values) = ffi::ops::blend_setback_open(kind, &self.0, edges, sizes, corners, setbacks, tolerance).map_err(pick_error)?;
+        // A buffer that does not read as the C API documents it is a buffer error.
+        let holes = holes(&values, corners.len()).ok_or_else(|| error(ffi::ERR_BUFFER))?;
+        Ok((Brep(h), holes))
     }
 
     /// The one edge nearest to `edge` (within `tolerance`) rounded with a radius

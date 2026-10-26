@@ -32,7 +32,7 @@ pub mod trim;
 
 pub use check::{CheckLevel, CheckReport};
 pub use measure::{MEASURE_ACCURACY, MassProperties};
-pub use ops::{Blend, BooleanOp, ChamferSecond, MAX_POINTS, MAX_UNION_BREPS};
+pub use ops::{Blend, BooleanOp, ChamferSecond, Hole, HoleEdge, MAX_POINTS, MAX_UNION_BREPS};
 
 /// Why an SMLib call failed.
 #[derive(Clone, Debug, PartialEq)]

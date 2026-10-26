@@ -94,6 +94,18 @@ pub struct SeamReport {
     pub verdict: SeamVerdict,
     /// The stations in order: what a viewport shades.
     pub points: Vec<Vec3>,
+    /// What each of `points` measured, in the same order.
+    pub stations: Vec<SeamStation>,
+}
+
+/// One station of a seam: how far along the edge, and the three metrics there.
+#[derive(Clone, Copy, Debug, Serialize)]
+pub struct SeamStation {
+    /// 0 at the edge's start, 1 at its end.
+    pub edge_fraction: f64,
+    pub gap_mm: f64,
+    pub normal_angle_deg: f64,
+    pub curvature_jump_per_mm: f64,
 }
 
 /// The seam diagnostics of one body.
@@ -294,6 +306,7 @@ fn seam(
     let mut angle = None;
     let mut jump = None;
     let mut points = Vec::with_capacity(samples);
+    let mut stations = Vec::with_capacity(samples);
     for k in 0..samples {
         let f = fraction(k);
         let Some((at, tangent)) = curve.derivs(t0 + (t1 - t0) * f) else { continue };
@@ -312,10 +325,17 @@ fn seam(
         // edge) the curvatures are compared in one frame, since bending away from one face is
         // bending towards the other.
         let signed = if na.dot(nb) < 0.0 { ka + kb } else { ka - kb };
+        let station = SeamStation {
+            edge_fraction: f,
+            gap_mm: qa.dist(qb),
+            normal_angle_deg: na.dot(nb).clamp(-1.0, 1.0).acos().to_degrees(),
+            curvature_jump_per_mm: signed.abs(),
+        };
         points.push(at);
-        keep(&mut gap, qa.dist(qb), at, f);
-        keep(&mut angle, na.dot(nb).clamp(-1.0, 1.0).acos().to_degrees(), at, f);
-        keep(&mut jump, signed.abs(), at, f);
+        stations.push(station);
+        keep(&mut gap, station.gap_mm, at, f);
+        keep(&mut angle, station.normal_angle_deg, at, f);
+        keep(&mut jump, station.curvature_jump_per_mm, at, f);
     }
     let (gap, angle, jump) = (gap?, angle?, jump?);
     let verdict = if gap.value > tolerances.gap_mm {
@@ -337,6 +357,7 @@ fn seam(
         curvature_jump_per_mm: jump,
         verdict,
         points,
+        stations,
     })
 }
 
