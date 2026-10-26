@@ -435,6 +435,10 @@ impl Default for UiState {
 /// Host services injected by the app so this crate stays portable.
 #[derive(Default)]
 pub struct Services {
+    /// Wait for a host-backed save before allowing the design to close.
+    pub persist_save: Option<Box<dyn Fn(&str) -> Option<save_job::PersistFuture>>>,
+    /// Notify the host of the existing changed-elsewhere question’s answer.
+    pub save_conflict_answer: Option<Box<dyn Fn(open_elsewhere::DiskAnswer)>>,
     /// Ask for a file to open. The extensions are the file type the command reads, offered as
     /// the picker's first filter (`&[]`: designs, CAD files and meshes, #1801).
     pub pick_open: Option<Box<dyn Fn(&[&str]) -> FilePickerFuture>>,
@@ -662,6 +666,7 @@ pub struct SolveApp {
     pub disk_prompt: bool,
     /// Update Links or Open Linked Design waiting for a network server to be allowed.
     pub network_prompt: Option<network_prompt::NetworkPrompt>,
+    pub(crate) host_save: Option<save_job::HostSave>,
     /// Designs left by crashed apps, offered for recovery.
     pub recoverable: Vec<solidcraft_engine::recovery::Entry>,
     /// Discard all was clicked in the recovery window: its confirmation is showing (#9299).
@@ -867,6 +872,7 @@ impl SolveApp {
             lock_prompts: Vec::new(),
             disk_prompt: false,
             network_prompt: None,
+            host_save: None,
             recoverable: Vec::new(),
             recovery_discard_all: false,
             quick_measure: Default::default(),
@@ -1166,7 +1172,7 @@ impl SolveApp {
         if solidcraft_engine::panels::commands::is_command(id) {
             return self.run_panel_command(id, &params).map_err(solidcraft_engine::panels::commands::error_text);
         }
-        if self.file_load.busy() || self.file_picker.is_some() || self.saving.is_some() {
+        if self.file_load.busy() || self.file_picker.is_some() || self.saving.is_some() || self.host_save.is_some() {
             return Err("a file operation is in progress".into());
         }
         // The editor's own marker moves come through here, so only Undo, Redo and Play close it.
@@ -2829,7 +2835,7 @@ impl SolveApp {
         if ctx.input(|i| i.pointer.button_clicked(egui::PointerButton::Extra1) || (i.key_pressed(egui::Key::BrowserBack) && !typing)) {
             edit_in_place::back(self);
         }
-        if self.saving.is_some() || self.edit_in_place.refreshing() {
+        if self.saving.is_some() || self.host_save.is_some() || self.edit_in_place.refreshing() {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
         open_meshing::tick(self, ctx);

@@ -1,0 +1,72 @@
+{
+  "en": {
+    "web.server.place": "Server folder",
+    "web.server.browser": "Browser storage",
+    "web.server.computer": "Computer",
+    "web.server.open": "Open design",
+    "web.server.save": "Save design",
+    "web.server.choose_computer": "Choose file on computer…",
+    "web.server.new_folder": "New folder",
+    "web.server.name": "Design name",
+    "web.server.refresh": "Refresh",
+    "web.server.up": "Up",
+    "web.server.open_folder": "Server folder…",
+    "web.server.location": "Server folder /{path}"
+  },
+  "ja": {
+    "web.server.place": "サーバーフォルダー",
+    "web.server.browser": "ブラウザー内のストレージ",
+    "web.server.computer": "コンピューター",
+    "web.server.open": "デザインを開く",
+    "web.server.save": "デザインを保存",
+    "web.server.choose_computer": "コンピューター上のファイルを選択…",
+    "web.server.new_folder": "新しいフォルダー",
+    "web.server.name": "デザイン名",
+    "web.server.refresh": "更新",
+    "web.server.up": "上へ",
+    "web.server.open_folder": "サーバーフォルダー…",
+    "web.server.location": "サーバーフォルダー /{path}"
+  },
+  "zh": {
+    "web.server.place": "服务器文件夹",
+    "web.server.browser": "浏览器存储",
+    "web.server.computer": "计算机",
+    "web.server.open": "打开设计",
+    "web.server.save": "保存设计",
+    "web.server.choose_computer": "选择计算机上的文件…",
+    "web.server.new_folder": "新建文件夹",
+    "web.server.name": "设计名称",
+    "web.server.refresh": "刷新",
+    "web.server.up": "上一级",
+    "web.server.open_folder": "服务器文件夹…",
+    "web.server.location": "服务器文件夹 /{path}"
+  },
+  "de": {
+    "web.server.place": "Serverordner",
+    "web.server.browser": "Browserspeicher",
+    "web.server.computer": "Computer",
+    "web.server.open": "Design öffnen",
+    "web.server.save": "Design speichern",
+    "web.server.choose_computer": "Datei auf dem Computer auswählen…",
+    "web.server.new_folder": "Neuer Ordner",
+    "web.server.name": "Designname",
+    "web.server.refresh": "Aktualisieren",
+    "web.server.up": "Nach oben",
+    "web.server.open_folder": "Serverordner…",
+    "web.server.location": "Serverordner /{path}"
+  },
+  "ko": {
+    "web.server.place": "서버 폴더",
+    "web.server.browser": "브라우저 저장소",
+    "web.server.computer": "컴퓨터",
+    "web.server.open": "디자인 열기",
+    "web.server.save": "디자인 저장",
+    "web.server.choose_computer": "컴퓨터에서 파일 선택…",
+    "web.server.new_folder": "새 폴더",
+    "web.server.name": "디자인 이름",
+    "web.server.refresh": "새로 고침",
+    "web.server.up": "상위 폴더",
+    "web.server.open_folder": "서버 폴더…",
+    "web.server.location": "서버 폴더 /{path}"
+  }
+}

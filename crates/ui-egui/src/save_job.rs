@@ -8,6 +8,14 @@ use solidcraft_engine::Session;
 
 use crate::SolveApp;
 
+/// Completion of a host-backed file write.
+pub type PersistFuture = std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>>>>;
+
+pub(crate) struct HostSave {
+    command: &'static str,
+    future: PersistFuture,
+}
+
 /// A save being written on a worker thread.
 pub struct Saving {
     command: &'static str,
@@ -41,12 +49,37 @@ pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
         }
         // No thread to write on: save here, as before.
     }
-    let _ = app.run(command, params);
+    let result = app.run(command, params);
+    if result.is_ok() && begin_host_save(app, command) {
+        return true;
+    }
+    false
+}
+
+fn begin_host_save(app: &mut SolveApp, command: &'static str) -> bool {
+    if let Some(path) = app.session.path.as_deref()
+        && let Some(future) = app.services.persist_save.as_ref().and_then(|persist| persist(path))
+    {
+        app.session.mark_unsaved();
+        app.host_save = Some(HostSave { command, future });
+        return true;
+    }
     false
 }
 
 /// Take up a finished save (`wait`: wait for a running one).
 pub fn tick(app: &mut SolveApp, wait: bool) {
+    if let Some(pending) = app.host_save.as_mut() {
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        let std::task::Poll::Ready(result) = pending.future.as_mut().poll(&mut context) else { return };
+        let command = pending.command;
+        app.host_save = None;
+        if result.is_ok() {
+            app.session.mark_saved();
+        }
+        app.finish_command(command, &result.map(|()| serde_json::json!({})));
+        crate::documents::saved_for_close(app);
+    }
     let Some(saving) = app.saving.as_ref() else { return };
     let outcome = if wait {
         saving.done.recv().ok()
@@ -66,6 +99,9 @@ pub fn tick(app: &mut SolveApp, wait: bool) {
         Some((_, Err(e))) => Err(e),
         None => Err(format!("{command}: the save stopped")),
     };
+    if r.is_ok() && begin_host_save(app, command) {
+        return;
+    }
     app.finish_command(command, &r);
     crate::documents::saved_for_close(app);
 }
@@ -163,6 +199,36 @@ mod tests {
         assert_eq!(h.app.session.path.as_deref(), path.to_str());
         assert_eq!(h.app.session.doc.name, "Plate");
         assert!(h.app.session.is_dirty(), "the sphere is not in the file");
+    }
+
+    #[test]
+    fn host_save_waits_for_acknowledgement_and_failure_keeps_the_design_open() {
+        use std::{cell::RefCell, rc::Rc, task::Poll};
+        for success in [false, true] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+            let answer = Rc::new(RefCell::new(None));
+            let reply = answer.clone();
+            h.app.services.persist_save = Some(Box::new(move |_| {
+                let reply = reply.clone();
+                Some(Box::pin(std::future::poll_fn(move |_| reply.borrow_mut().take().map_or(Poll::Pending, Poll::Ready))))
+            }));
+            let path = h.dir.join("server.solidcraft");
+            h.app.session.path = Some(path.to_string_lossy().into_owned());
+            crate::documents::request_quit(&mut h.app);
+            crate::documents::answer_prompt(&mut h.app, crate::documents::Answer::Save);
+            super::tick(&mut h.app, true);
+            assert!(h.app.host_save.is_some());
+            assert!(h.app.file_picker_busy() && h.app.session.is_dirty());
+            assert!(h.app.run("solid.box", json!({"length": 5, "width": 5, "height": 5})).is_err());
+            crate::documents::request_quit(&mut h.app);
+            assert!(!h.app.quit_requested);
+            *answer.borrow_mut() = Some(if success { Ok(()) } else { Err("HTTP 412".into()) });
+            super::tick(&mut h.app, false);
+            assert!(!h.app.file_picker_busy());
+            assert_eq!(h.app.session.is_dirty(), !success);
+            assert_eq!(h.app.quit_requested, success);
+        }
     }
 
     /// #3044: Save writes on a worker while the window keeps drawing; the design waits (commands

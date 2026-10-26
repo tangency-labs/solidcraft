@@ -19,6 +19,8 @@ pub const DOWNLOADS_PREFIX: &str = "/downloads/";
 /// Where what a command wrote to an engine path goes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WriteTo {
+    /// The optional folder on the same-origin server.
+    Server,
     /// The browser's private storage: the design (or recovery file) keeps its name there.
     Opfs,
     /// A file on the computer, through its handle.
@@ -32,7 +34,9 @@ pub enum WriteTo {
 /// Route a write by its path. OPFS paths always go to OPFS, whatever the browser can do: a design
 /// opened from the browser's storage keeps saving there until the user picks Save As.
 pub fn route(path: &str) -> WriteTo {
-    if path.starts_with(OPFS_PREFIX) {
+    if path.starts_with(crate::server::PREFIX) {
+        WriteTo::Server
+    } else if path.starts_with(OPFS_PREFIX) {
         WriteTo::Opfs
     } else if parse(path).is_some() {
         WriteTo::Disk
@@ -117,6 +121,8 @@ pub fn opens_design(extensions: &[&str]) -> bool {
 /// Where an Open for `extensions` (what the command reads; `&[]`: anything) is answered.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum OpenRoute {
+    /// The optional server folder picker, which also offers computer and browser storage.
+    Server,
     /// The browser's open dialog for a design: the file keeps its handle, so Save writes back.
     Disk,
     /// The "Files in this browser" window, where the browser can't open a design from the disk.
@@ -127,8 +133,11 @@ pub enum OpenRoute {
 }
 
 /// Choose how an Open for `extensions` asks for its file; `api`: the browser can open a file
-/// from the disk and keep its handle.
-pub fn open_route(api: bool, extensions: &[&str]) -> OpenRoute {
+/// from the disk and keep its handle; `server`: the optional server folder is enabled.
+pub fn open_route(api: bool, server: bool, extensions: &[&str]) -> OpenRoute {
+    if server && opens_design(extensions) {
+        return OpenRoute::Server;
+    }
     match (opens_design(extensions), api) {
         (true, true) => OpenRoute::Disk,
         (true, false) => OpenRoute::Panel,
@@ -685,10 +694,10 @@ mod tests {
     /// types in every browser (#2052); designs keep the disk dialog or the browser's files.
     #[test]
     fn opens_of_other_files_use_a_file_input_for_their_types() {
-        assert_eq!(open_route(true, &["dxf"]), OpenRoute::Upload);
-        assert_eq!(open_route(false, &["png", "jpg", "jpeg"]), OpenRoute::Upload);
-        assert_eq!(open_route(true, &[]), OpenRoute::Disk);
-        assert_eq!(open_route(false, &["solidcraft"]), OpenRoute::Panel);
+        assert_eq!(open_route(true, false, &["dxf"]), OpenRoute::Upload);
+        assert_eq!(open_route(false, false, &["png", "jpg", "jpeg"]), OpenRoute::Upload);
+        assert_eq!(open_route(true, false, &[]), OpenRoute::Disk);
+        assert_eq!(open_route(false, false, &["solidcraft"]), OpenRoute::Panel);
         assert_eq!(accept_list(&["dxf"]), ".dxf");
         assert_eq!(accept_list(&["png", ".JPG", "", "jpeg"]), ".png,.jpg,.jpeg");
         assert_eq!(accept_list(&[]), "");

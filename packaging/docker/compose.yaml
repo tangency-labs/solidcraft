@@ -24,3 +24,8 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # Optional shared designs (off by default). The NAS folder must be writable by uid 101.
+    # environment:
+    #   SOLIDCRAFT_SERVER_FOLDER: "1"
+    # volumes:
+    #   - /mnt/nas/solidcraft:/designs:rw

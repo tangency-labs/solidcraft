@@ -543,6 +543,8 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
         http_download: Some(std::sync::Arc::new(http_download)),
         // Already an installed app: only the browser build offers to install.
         install_app: None,
+        persist_save: None,
+        save_conflict_answer: None,
         can_restore: None,
         restore_file: None,
         download_design: None,
