@@ -9,7 +9,7 @@ use solidcraft_engine::Sel;
 use solidcraft_engine::geom::{Vec2, Vec3};
 use solidcraft_engine::render::{Camera, Mat4, Rgb};
 use solidcraft_engine::sketch::CurveKind;
-use solidcraft_engine::view::{GridFade, GridPlane, colors, grid_ext, grid_plane, grid_step, sketch_lines_with_sampler};
+use solidcraft_engine::view::{GridFade, GridPlane, colors, grid_ext, grid_marks, grid_plane, grid_step, grid_step_units, sketch_lines_with_sampler};
 use std::hash::{Hash, Hasher};
 
 use crate::gpu::{Frame, GpuScene, GpuTarget, SceneSlot, ViewportCallback};
@@ -446,6 +446,8 @@ fn sketch_scene_key(app: &SolveApp, proj: &Proj) -> u64 {
     // Finished sketches are drawn over the bodies when the preference says so.
     app.preferences.reference_geometry_through_bodies.hash(&mut h);
     app.preferences.sketch_halo.hash(&mut h);
+    // The labeled step is chosen in the design's units.
+    app.session.doc.units.hash(&mut h);
     (std::sync::Arc::as_ptr(&crate::open_meshing::shown_world(app)) as usize).hash(&mut h);
     crate::sketch_display::projection_key(proj, app.viewport.pixels_per_point()).hash(&mut h);
     h.finish()
@@ -1121,7 +1123,7 @@ fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
     let mut fill_budget = 131_072;
     let sketch_plane = solidcraft_engine::view::open_sketch_plane(s);
     if sketch_plane.is_some() || (app.ui.show_grid && !active_view(app).hide_grid) {
-        let (minor, major) = grid_step(app.cam.half_height());
+        let (minor, major) = view_grid_step(app);
         // An open sketch always has its grid on its own plane; otherwise the ground plane: XY with
         // Z up, XZ with Y up (laid out in the camera's Z-up frame), or the upright origin plane
         // facing the view when the ground is seen edge-on.
@@ -1201,7 +1203,7 @@ fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
         // When enabled, a finished sketch's own curves sit on a wider halo (#4862) to read on a
         // shaded face. Projected (reference) curves get none: they trace the face's own edges.
         // All the halos go first, so one curve's halo never cuts into another where they meet.
-        let unit = grid_step(app.cam.half_height()).0;
+        let unit = view_grid_step(app).0;
         let mut strokes = Vec::new();
         for (pts, col, cons) in sketch_lines_with_sampler(&ss.sketch, &ss.plane, active, &ss.report.curve_determined, |_, index, plane| {
             crate::sketch_display::curve_sample(app, sid, index, plane, proj).parts.clone()
@@ -1235,7 +1237,7 @@ fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
             }
         }
     }
-    let guide_unit = grid_step(app.cam.half_height()).0;
+    let guide_unit = view_grid_step(app).0;
     for points in crate::sketch_attachment_ui::display_guide_lines(app, proj) {
         for (a, b) in dashes(&points, &[guide_unit * 0.25, guide_unit * 0.15]) {
             sc.line(a.to_f32(), b.to_f32(), c4(tk.warning), 1.5, true);
@@ -2955,7 +2957,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 {
                     for pts in &crate::sketch_display::curve_sample(app, *sketch, ci, &ss.plane, &display_proj(app)).parts {
                         let mode = ss.sketch.curves.get(ci).map_or(0, |c| if c.centerline { 2 } else { u8::from(c.construction) });
-                        for (a, b) in sketch_segments(pts, mode, grid_step(app.cam.half_height()).0) {
+                        for (a, b) in sketch_segments(pts, mode, view_grid_step(app).0) {
                             feedback.line(a.to_f32(), b.to_f32(), c4(t.sel_edge), 3.5, true);
                         }
                     }
@@ -2972,7 +2974,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
                 {
                     for pts in &crate::sketch_display::curve_sample(app, ss.feature, ci, &ss.plane, &display_proj(app)).parts {
                         let mode = ss.sketch.curves.get(ci).map_or(0, |c| if c.centerline { 2 } else { u8::from(c.construction) });
-                        for (a, b) in sketch_segments(pts, mode, grid_step(app.cam.half_height()).0) {
+                        for (a, b) in sketch_segments(pts, mode, view_grid_step(app).0) {
                             feedback.line(a.to_f32(), b.to_f32(), c4(t.sel_edge), 3.5, true);
                         }
                     }
@@ -3233,7 +3235,7 @@ pub fn sketch_point_at(app: &SolveApp, proj: &Proj, pos: Pos2) -> Option<(Vec2, 
     if crate::drag_snap::suppressed() {
         return Some((lp, None));
     }
-    let (minor, _) = grid_step(app.cam.half_height());
+    let (minor, _) = view_grid_step(app);
     let step = minor / 10.0;
     if let Some(p) = crate::sketch_tools::refine_snap(app, proj, &ss.sketch, &ss.plane, lp) {
         return Some(p);
@@ -3922,6 +3924,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         app.viewport.boxsel = None;
     }
     crate::preview::paint_sketches(app, &painter, &proj);
+    paint_grid_marks(app, &painter, &proj);
     crate::ref_images::show(app, ui, &painter, &proj);
     crate::dialogs_assembly::origins(app, &painter, &proj);
     crate::dialogs_assembly::joint_glyphs(app, &painter, &proj);
@@ -4599,6 +4602,175 @@ fn points_2d(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
 /// A grid line's colour, as faint as the fade makes it.
 fn grid_colour(c: [u8; 4], alpha: f32) -> [u8; 4] {
     [c[0], c[1], c[2], (f64::from(c[3]) * f64::from(alpha)).round().clamp(0.0, 255.0) as u8]
+}
+
+/// Spacing of the grid on screen, in millimetres, round in the design's units.
+fn view_grid_step(app: &SolveApp) -> (f64, f64) {
+    grid_step_units(app.cam.half_height(), &app.session.doc.units)
+}
+
+/// Font-atlas pixel coordinates on a grid number, swapped for the font texture once the frame's
+/// atlas has stopped growing.
+const GRID_MARK_PIXELS: egui::TextureId = egui::TextureId::User(u64::from_le_bytes(*b"gridmark"));
+
+struct GridMarkAtlas;
+
+impl egui::plugin::Plugin for GridMarkAtlas {
+    fn debug_name(&self) -> &'static str {
+        "grid mark atlas"
+    }
+
+    fn output_hook(&mut self, ctx: &egui::Context, output: &mut egui::FullOutput) {
+        let size = ctx.fonts(|f| f.font_image_size());
+        let normalize = vec2(1.0 / size[0].max(1) as f32, 1.0 / size[1].max(1) as f32);
+        for shape in &mut output.shapes {
+            if let Shape::Mesh(mesh) = &mut shape.shape
+                && mesh.texture_id == GRID_MARK_PIXELS
+            {
+                let mesh = std::sync::Arc::make_mut(mesh);
+                mesh.texture_id = egui::TextureId::default();
+                for v in &mut mesh.vertices {
+                    v.uv = (v.uv.to_vec2() * normalize).to_pos2();
+                }
+            }
+        }
+    }
+}
+
+/// Numbers on the open sketch's plane, on the axes through its origin. The model grid has
+/// none. Each plate lies in the plane, so orbiting and panning foreshorten it with the grid,
+/// and the fill is half transparent. Zooming out coarsens the step.
+fn paint_grid_marks(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+    let Some(plane) = solidcraft_engine::view::open_sketch_plane(&app.session) else { return };
+    let (minor, major) = view_grid_step(app);
+    if !(minor.is_finite() && major.is_finite() && major > 0.0) {
+        return;
+    }
+    let extent = (app.cam.half_height() * 3.0 / major).ceil() * major;
+    if !extent.is_finite() || extent <= 0.0 {
+        return;
+    }
+    let height = f64::from(proj.rect.height());
+    let mm_per_px = 2.0 * app.cam.half_height() / height;
+    if height < 1.0 || !(mm_per_px.is_finite() && mm_per_px > 0.0) {
+        return;
+    }
+    let atlas = painter.ctx().fonts(|f| f.font_image_size());
+    if atlas[0] == 0 || atlas[1] == 0 {
+        return;
+    }
+    painter.ctx().add_plugin(GridMarkAtlas);
+    let (centre, u, v) = solidcraft_engine::view::sketch_grid_frame(&plane, app.cam.target, major);
+    let t = Tokens::get();
+    let view = app.viewport.layout.as_ref().map(|l| l.drawable).filter(|r| r.is_finite() && r.is_positive()).unwrap_or(proj.rect);
+    let font = FontId::proportional(t.font_caption);
+    let plate = Color32::from_rgba_unmultiplied(t.viewport_bottom.r(), t.viewport_bottom.g(), t.viewport_bottom.b(), 128);
+    let mut placed: Vec<Rect> = Vec::new();
+    let origin = proj.to_screen(plane.origin);
+    let normal = plane.normal();
+    for mark in grid_marks(plane.origin, u, v, centre, extent, major, &app.session.doc.units) {
+        let Some(tick) = proj.to_screen(mark.at) else { continue };
+        if origin.is_some_and(|o| tick.distance(o) < 16.0) {
+            continue;
+        }
+        let from_origin = mark.at - plane.origin;
+        let axis = if from_origin.dot(u).abs() >= from_origin.dot(v).abs() { u } else { v };
+        let Some(axis) = axis.normalized() else { continue };
+        let Some(side) = normal.cross(axis).normalized() else { continue };
+        let galley = painter.layout_no_wrap(mark.text.clone(), font.clone(), t.text);
+        let box_size = galley.size() + vec2(6.0, 2.0);
+        let Some((at, right, down)) = plane_label_frame(proj, mark.at, axis, side, mm_per_px, box_size.y * 0.5 + 4.0) else {
+            continue;
+        };
+        let half = box_size / 2.0;
+        let corners = [
+            at + right * -half.x + down * -half.y,
+            at + right * half.x + down * -half.y,
+            at + right * half.x + down * half.y,
+            at + right * -half.x + down * half.y,
+        ];
+        let bounds = Rect::from_points(&corners);
+        if !view.contains(at) || !bounds.is_positive() || placed.iter().any(|r| r.intersects(bounds)) {
+            continue;
+        }
+        placed.push(bounds);
+        let plate_shape = Shape::rect_filled(Rect::from_center_size(Pos2::ZERO, box_size), 2.0, plate);
+        paint_on_plane(painter, plate_shape, at, Pos2::ZERO, right, down, false, atlas);
+        let text = Shape::Text(egui::epaint::TextShape::new(Pos2::ZERO, galley.clone(), t.text));
+        paint_on_plane(painter, text, at, galley.rect.center(), right, down, true, atlas);
+        // The overlay tests read this label. The tessellator drops a fully transparent shape,
+        // so the visible number is only the plate-locked mesh above.
+        let mut marker = egui::epaint::TextShape::new(at - galley.size() / 2.0, galley, t.text);
+        marker.opacity_factor = 0.0;
+        painter.add(marker);
+    }
+}
+
+/// Where a number sits in the sketch plane. `right` and `down` are the screen images of one
+/// point of text along the axis and across it, so the plate foreshortens with the plane.
+/// The digits face the camera and stay upright: the only turns are the ones that follow the axis.
+fn plane_label_frame(proj: &Proj, at: Vec3, mut axis: Vec3, mut side: Vec3, mm_per_px: f64, lift_px: f32) -> Option<(Pos2, egui::Vec2, egui::Vec2)> {
+    let step = mm_per_px;
+    let lift = f64::from(lift_px) * mm_per_px;
+    let sample = |axis: Vec3, side: Vec3| -> Option<(Pos2, egui::Vec2, egui::Vec2)> {
+        let center = at + side * lift;
+        let origin = proj.to_screen(center)?;
+        let right = proj.to_screen(center + axis * step)? - origin;
+        let down = -(proj.to_screen(center + side * step)? - origin);
+        (right.x.is_finite() && down.y.is_finite()).then_some((origin, right, down))
+    };
+    let (_, right, down) = sample(axis, side)?;
+    // A view from the back of the plane would mirror the glyphs. Reversing the baseline
+    // makes them face the camera without taking them off the axis.
+    if right.x * down.y - right.y * down.x < 0.0 {
+        axis = -axis;
+    }
+    let (_, _, down) = sample(axis, side)?;
+    // The other facing-the-camera orientation is a half turn. Take it only when the tops of
+    // the digits point down, so a tilted axis stays readable instead of flipping over.
+    if down.y < 0.0 {
+        axis = -axis;
+        side = -side;
+    }
+    let (origin, right, down) = sample(axis, side)?;
+    let area = (right.x * down.y - right.y * down.x).abs();
+    if area < 0.05 || right.length() < 0.15 {
+        return None;
+    }
+    Some((origin, right, down))
+}
+
+/// Draw `shape` as if it were laid out at `local_origin`, mapped onto the sketch plane.
+/// `pixel_uvs` keeps glyph coordinates in atlas pixels until the frame ends.
+fn paint_on_plane(
+    painter: &egui::Painter,
+    shape: Shape,
+    origin: Pos2,
+    local_origin: Pos2,
+    right: egui::Vec2,
+    down: egui::Vec2,
+    pixel_uvs: bool,
+    atlas: [usize; 2],
+) {
+    let primitives =
+        painter.ctx().tessellate(vec![egui::epaint::ClippedShape { clip_rect: Rect::EVERYTHING, shape }], painter.ctx().pixels_per_point());
+    for primitive in primitives {
+        let egui::epaint::Primitive::Mesh(mut mesh) = primitive.primitive else { continue };
+        if mesh.vertices.is_empty() {
+            continue;
+        }
+        if pixel_uvs {
+            mesh.texture_id = GRID_MARK_PIXELS;
+            for v in &mut mesh.vertices {
+                v.uv = pos2(v.uv.x * atlas[0] as f32, v.uv.y * atlas[1] as f32);
+            }
+        }
+        for v in &mut mesh.vertices {
+            let local = v.pos - local_origin;
+            v.pos = origin + right * local.x + down * local.y;
+        }
+        painter.add(Shape::mesh(mesh));
+    }
 }
 
 /// Where the ground grid is centred: where the view's axis (`back`, through the camera's target

@@ -607,3 +607,180 @@ fn frame_rate_readout_stays_beside_a_right_pane() {
         in_corner(&h);
     }
 }
+
+fn grid_texts(h: &Harness) -> Vec<(String, Pos2)> {
+    let mut out = Vec::new();
+    fn walk(shape: &Shape, out: &mut Vec<(String, Pos2)>) {
+        match shape {
+            Shape::Text(text) => out.push((text.galley.text().to_string(), text.pos + text.galley.size() / 2.0)),
+            Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, out)),
+            _ => {}
+        }
+    }
+    for clipped in &h.shapes {
+        walk(&clipped.shape, &mut out);
+    }
+    out
+}
+
+fn look_straight_down(h: &mut Harness, distance: f64) {
+    h.app.home.open = false;
+    h.app.cancel_view_animation();
+    h.app.cam.set_view(solidcraft_engine::render::StandardView::Top);
+    h.app.cam.target = Vec3::ZERO;
+    h.app.cam.distance = distance;
+    h.app.cam.fov = 0.0;
+    h.frame();
+}
+
+fn mark_near(h: &Harness, label: &str, world: Vec3) -> bool {
+    let Some(rect) = h.app.viewport.rect else { return false };
+    let Some(at) = projection(&h.app, rect).to_screen(world) else { return false };
+    grid_texts(h).iter().any(|(text, pos)| text == label && pos.distance(at) < 20.0)
+}
+
+/// The half-transparent plate drawn on the sketch plane nearest `world`.
+fn grid_mark_box(h: &Harness, world: Vec3) -> Option<std::sync::Arc<egui::Mesh>> {
+    let rect = h.app.viewport.rect?;
+    let at = projection(&h.app, rect).to_screen(world)?;
+    let mut best: Option<(f32, std::sync::Arc<egui::Mesh>)> = None;
+    fn walk(shape: &Shape, at: Pos2, best: &mut Option<(f32, std::sync::Arc<egui::Mesh>)>) {
+        match shape {
+            // The fill is half transparent. Feathered edges are fully clear, so the plate is
+            // the mesh that reaches alpha 128 and never goes above it.
+            Shape::Mesh(mesh)
+                if mesh.vertices.len() >= 4
+                    && mesh.vertices.iter().any(|v| v.color.a() == 128)
+                    && mesh.vertices.iter().all(|v| v.color.a() <= 128) =>
+            {
+                let n = mesh.vertices.len() as f32;
+                let centre = mesh.vertices.iter().fold(egui::Vec2::ZERO, |sum, v| sum + v.pos.to_vec2()) / n;
+                let distance = centre.to_pos2().distance(at);
+                if distance < 40.0 && best.as_ref().is_none_or(|(so_far, _)| distance < *so_far) {
+                    *best = Some((distance, std::sync::Arc::clone(mesh)));
+                }
+            }
+            Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, at, best)),
+            _ => {}
+        }
+    }
+    for clipped in &h.shapes {
+        walk(&clipped.shape, at, &mut best);
+    }
+    best.map(|(_, mesh)| mesh)
+}
+
+/// How closely the plate's long direction matches `axis` on screen. A screen-aligned plate
+/// stays horizontal; one locked to the sketch plane follows the axis as the view tilts.
+fn plane_alignment(h: &Harness, world: Vec3, axis: Vec3) -> Option<f32> {
+    let mesh = grid_mark_box(h, world)?;
+    let n = mesh.vertices.len() as f32;
+    let centre = mesh.vertices.iter().fold(egui::Vec2::ZERO, |sum, v| sum + v.pos.to_vec2()) / n;
+    let (mut xx, mut xy, mut yy) = (0.0_f32, 0.0, 0.0);
+    for v in &mesh.vertices {
+        let d = v.pos.to_vec2() - centre;
+        xx += d.x * d.x;
+        xy += d.x * d.y;
+        yy += d.y * d.y;
+    }
+    let trace = xx + yy;
+    let det = xx * yy - xy * xy;
+    let lambda = 0.5 * (trace + (trace * trace - 4.0 * det).max(0.0).sqrt());
+    let long = if xy.abs() > 1e-3 {
+        vec2(xy, lambda - xx)
+    } else if xx >= yy {
+        vec2(1.0, 0.0)
+    } else {
+        vec2(0.0, 1.0)
+    };
+    let long = long / long.length().max(1e-6);
+    let rect = h.app.viewport.rect?;
+    let proj = projection(&h.app, rect);
+    let screen = proj.to_screen(world + axis)? - proj.to_screen(world)?;
+    let screen = screen / screen.length().max(1e-6);
+    Some((long.x * screen.x + long.y * screen.y).abs())
+}
+
+/// The axes show the major step in the design's units. Zooming out coarsens that step.
+#[test]
+fn grid_numbers_follow_zoom_and_the_design_units() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    look_straight_down(&mut h, 200.0);
+    assert!(mark_near(&h, "25", Vec3::new(25.0, 0.0, 0.0)), "x: {:?}", grid_texts(&h));
+    assert!(mark_near(&h, "-50", Vec3::new(-50.0, 0.0, 0.0)), "x negative: {:?}", grid_texts(&h));
+    assert!(mark_near(&h, "25", Vec3::new(0.0, 25.0, 0.0)), "y: {:?}", grid_texts(&h));
+    assert!(!mark_near(&h, "0", Vec3::ZERO), "the origin is not numbered");
+    let plate = grid_mark_box(&h, Vec3::new(25.0, 0.0, 0.0)).expect("the number sits on a plate");
+    assert!(plate.vertices.iter().any(|v| v.color.a() == 128) && plate.vertices.iter().all(|v| v.color.a() <= 128), "the plate is half transparent");
+
+    h.app.cancel_view_animation();
+    h.app.cam.set_view(solidcraft_engine::render::StandardView::Iso);
+    h.app.cam.target = Vec3::ZERO;
+    h.app.cam.distance = 200.0;
+    h.app.cam.fov = 0.0;
+    h.frame();
+    assert!(mark_near(&h, "25", Vec3::new(25.0, 0.0, 0.0)), "angled view stays on the sketch plane: {:?}", grid_texts(&h));
+    assert!(mark_near(&h, "25", Vec3::new(0.0, 25.0, 0.0)), "angled y: {:?}", grid_texts(&h));
+    let along_x = plane_alignment(&h, Vec3::new(-50.0, 0.0, 0.0), Vec3::X);
+    let along_y = plane_alignment(&h, Vec3::new(0.0, 100.0, 0.0), Vec3::Y);
+    assert!(along_x.is_some_and(|align| align > 0.95), "the x plate follows the axis, not the screen: {along_x:?}");
+    assert!(along_y.is_some_and(|align| align > 0.95), "the y plate follows the axis, not the screen: {along_y:?}");
+
+    look_straight_down(&mut h, 800.0);
+    assert!(mark_near(&h, "100", Vec3::new(100.0, 0.0, 0.0)), "zoomed out: {:?}", grid_texts(&h));
+    assert!(!mark_near(&h, "25", Vec3::new(25.0, 0.0, 0.0)), "the fine step drops out");
+
+    h.app.run("document.units", json!({"units": "in"})).unwrap();
+    look_straight_down(&mut h, 200.0);
+    assert!(mark_near(&h, "1", Vec3::new(25.4, 0.0, 0.0)), "inches: {:?}", grid_texts(&h));
+    assert!(mark_near(&h, "-2", Vec3::new(-50.8, 0.0, 0.0)), "inches: {:?}", grid_texts(&h));
+    assert!(!mark_near(&h, "25", Vec3::new(25.0, 0.0, 0.0)), "millimetre numbers leave with the units");
+}
+
+/// Turning the view never mirrors a number or turns it upside down. The plate still follows
+/// its axis, including when the sketch plane is seen from the back.
+#[test]
+fn grid_numbers_stay_upright_as_the_view_turns() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.cam.fov = 0.0;
+    h.app.cam.distance = 200.0;
+    h.app.cam.target = Vec3::ZERO;
+    h.app.cam.roll = 0.0;
+    look_straight_down(&mut h, 200.0);
+    let rect = h.app.viewport.rect.expect("viewport");
+    let mm = 2.0 * h.app.cam.half_height() / f64::from(rect.height());
+    for plane in [solidcraft_engine::geom::Plane::XY, solidcraft_engine::geom::Plane::XZ, solidcraft_engine::geom::Plane::YZ] {
+        for step in 0..12 {
+            let yaw = f64::from(step) * std::f64::consts::TAU / 12.0;
+            for pitch in [-1.2, -0.45, 0.2, 0.7, 1.2] {
+                h.app.cam.yaw = yaw;
+                h.app.cam.pitch = pitch;
+                let proj = projection(&h.app, rect);
+                for axis in [plane.x, plane.y] {
+                    let Some(side) = plane.normal().cross(axis).normalized() else { continue };
+                    let Some((_, right, down)) = plane_label_frame(&proj, plane.origin + axis * 50.0, axis, side, mm, 12.0) else {
+                        continue;
+                    };
+                    let det = right.x * down.y - right.y * down.x;
+                    assert!(det > 0.0, "{plane:?} yaw {yaw} pitch {pitch} mirrors the digits: right {right:?} down {down:?}");
+                    assert!(down.y >= -1e-3, "{plane:?} yaw {yaw} pitch {pitch} turns the digits over: right {right:?} down {down:?}");
+                }
+            }
+        }
+    }
+}
+
+/// The model grid stays unlabeled. Numbers belong to the open sketch.
+#[test]
+fn model_view_hides_grid_numbers() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.ui.show_grid = true;
+    look_straight_down(&mut h, 200.0);
+    assert!(h.app.session.active_sketch.is_none());
+    assert!(!mark_near(&h, "-50", Vec3::new(-50.0, 0.0, 0.0)), "{:?}", grid_texts(&h));
+    assert!(!mark_near(&h, "25", Vec3::new(0.0, 25.0, 0.0)), "{:?}", grid_texts(&h));
+}

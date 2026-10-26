@@ -459,7 +459,7 @@ pub fn refine_snap(
     {
         let (dx, dy) = ((lp.x - prev.x).abs(), (lp.y - prev.y).abs());
         // The free coordinate still follows the grid.
-        let step = solidcraft_engine::view::grid_step(app.cam.half_height()).0 / 10.0;
+        let step = solidcraft_engine::view::grid_step_units(app.cam.half_height(), &app.session.doc.units).0 / 10.0;
         let g = |v: f64| (v / step).round() * step;
         if dy < tol && dx > tol {
             best = Some((dy, "H", Vec2::new(g(lp.x), prev.y)));
