@@ -43,6 +43,22 @@ pub(crate) fn fillet_setback(body: &Body, edges: &[Vec3], radius: f64, setbacks:
     imp::blend_setback(body, edges, &vec![radius; edges.len()], setbacks)
 }
 
+/// A set-back blend whose corners SMLib leaves open ([`fillet_setback_open`]): the sheet, its
+/// history over the body it was made from, and per corner the edges round its hole in order,
+/// each its index in the sheet's edge order with whether the face beside it runs it forwards
+/// (counter-clockwise about the solid's outward normal).
+pub(crate) struct OpenCorners {
+    pub(crate) sheet: Body,
+    pub(crate) holes: Vec<Vec<(usize, bool)>>,
+}
+
+/// [`fillet_setback`] with each set-back corner left open: SMLib builds the rounds up to the
+/// corners' setback sections and the curves on the faces between them, and leaves out the patch
+/// that would fill each corner, for the caller to fill.
+pub(crate) fn fillet_setback_open(body: &Body, edges: &[Vec3], radius: f64, setbacks: &[(Vec3, f64)]) -> Result<OpenCorners> {
+    imp::blend_setback_open(body, edges, &vec![radius; edges.len()], setbacks)
+}
+
 /// Curvature-continuous rounds with the setback of a round of `radius` ([`crate::fillet_g2`]).
 pub(crate) fn fillet_g2(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
     imp::blend(body, "G2 fillet", Kind::Curvature, edges, &vec![radius; edges.len()])
@@ -204,6 +220,43 @@ mod imp {
         run(body, what, &picked.edges, |b| b.blend_setback(Blend::Round, &picked.points, sizes, &corners, &distances, tol))
     }
 
+    /// [`blend_setback`] with the set-back corners left open (`super::OpenCorners`).
+    pub(super) fn blend_setback_open(body: &Body, edges: &[Vec3], sizes: &[f64], setbacks: &[(Vec3, f64)]) -> Result<super::OpenCorners> {
+        let what = "fillet with open setback corners";
+        body.require_brep(what)?;
+        sizes_ok(what, sizes)?;
+        if setbacks.is_empty() || setbacks.len() > solidcraft_smlib::MAX_POINTS {
+            return Err(KernelError::Invalid(format!("{what}: give 1…{} corners", solidcraft_smlib::MAX_POINTS)));
+        }
+        if setbacks.iter().any(|(p, d)| !p.is_finite() || !(d.is_finite() && *d > 1e-6 && *d < 1e6)) {
+            return Err(KernelError::Invalid(format!("{what}: each corner is a finite point with a positive, finite setback")));
+        }
+        let picked = resolve(body, edges)?;
+        let corners = corner_vertices(body, setbacks.iter().map(|(p, _)| *p))?;
+        let distances: Vec<f64> = setbacks.iter().map(|(_, d)| *d).collect();
+        let tol = pick_tolerance(body);
+        let (sheet, holes, order) =
+            run_with(body, what, &picked.edges, |b| b.blend_setback_open(Blend::Round, &picked.points, sizes, &corners, &distances, tol))?;
+        // SMLib's indices in the sheet's own orders.
+        let place = |list: &[usize], i: usize| if list.is_empty() { Some(i) } else { list.get(i).copied() };
+        let renumber = |hole: &solidcraft_smlib::Hole| -> Result<Vec<(usize, bool)>> {
+            hole.edges
+                .iter()
+                .map(|h| {
+                    let edge = match &order {
+                        Some(o) => place(&o.edges, h.edge),
+                        None => Some(h.edge),
+                    };
+                    edge.filter(|e| *e < sheet.edge_count())
+                        .map(|e| (e, h.forward))
+                        .ok_or_else(|| failed(what, "hole", "an edge SMLib names is not in the sheet"))
+                })
+                .collect()
+        };
+        let holes = holes.iter().map(renumber).collect::<Result<Vec<_>>>()?;
+        Ok(super::OpenCorners { sheet, holes })
+    }
+
     /// The body's vertex nearest each point, within the pick tolerance: the ends of its edges.
     fn corner_vertices(body: &Body, picks: impl Iterator<Item = Vec3>) -> Result<Vec<[f64; 3]>> {
         let mesh = body.mesh(&crate::MeshTolerance::chord((body.size() * 2e-3).max(1e-3)))?;
@@ -249,10 +302,21 @@ mod imp {
 
     /// `op` on `body` in SMLib, tagged as operand 0, checked, decoded, with its history.
     fn run(body: &Body, what: &str, edges: &[usize], op: impl FnOnce(&Brep) -> solidcraft_smlib::Result<Brep>) -> Result<Body> {
+        run_with(body, what, edges, |b| op(b).map(|r| (r, ()))).map(|(out, (), _)| out)
+    }
+
+    /// [`run`] for an `op` that also gives something of its own, with where SMLib's faces and
+    /// edges of the result are in the body's orders.
+    fn run_with<T>(
+        body: &Body,
+        what: &str,
+        edges: &[usize],
+        op: impl FnOnce(&Brep) -> solidcraft_smlib::Result<(Brep, T)>,
+    ) -> Result<(Body, T, Option<solidcraft_smlib::history::Order>)> {
         guard(what, || {
             let (sb, order) = smlib_body_ordered(body)?;
             let tagged = sb.tagged(0).map_err(|e| failed(what, "tag", e))?;
-            let r = op(&tagged).map_err(|e| match e {
+            let (r, extra) = op(&tagged).map_err(|e| match e {
                 SmError::Unsupported => super::unsupported(&format!("this {what}, which SMLib cannot build exactly")),
                 SmError::NoEffect => KernelError::Failed(format!("SMLib made no change: the {what} reported success but built no face")),
                 SmError::NoRoom => KernelError::TooLarge(format!("the {what} is larger than the faces beside its edges allow")),
@@ -266,8 +330,8 @@ mod imp {
                 return Err(failed(what, step, check));
             }
             let (out, result_order) = body_from_smlib_ordered(&r)?;
-            let history = match (order, result_order) {
-                (Some(o), Some(ro)) => match r.history().map_err(|e| failed(what, "history", e))?.history(&[o], &ro) {
+            let history = match (order, &result_order) {
+                (Some(o), Some(ro)) => match r.history().map_err(|e| failed(what, "history", e))?.history(&[o], ro) {
                     Ok(mut h) => {
                         let operand = History::identity(body).edges;
                         let replaced = blended(body, edges, &h);
@@ -281,7 +345,7 @@ mod imp {
                 },
                 _ => None,
             };
-            Ok(out.with_checked_history(history, &record::counts(&[body])).inherit_regularization_protection(body))
+            Ok((out.with_checked_history(history, &record::counts(&[body])).inherit_regularization_protection(body), extra, result_order))
         })
     }
 

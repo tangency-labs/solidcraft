@@ -166,9 +166,10 @@ pub use build::{
     loft_with_rails, path_polyline, planar_face_record, revolve, revolve_whole, sphere, sweep, sweep_with, torus,
 };
 pub use continuity::{
-    ContinuityReport, ContinuityTolerances, EdgePick, MAX_SAMPLES, MIN_SAMPLES, SeamReport, SeamVerdict, SeamWorst, pick_edges, seam_diagnostics,
+    ContinuityReport, ContinuityTolerances, EdgePick, MAX_SAMPLES, MIN_SAMPLES, SeamReport, SeamStation, SeamVerdict, SeamWorst, pick_edges,
+    seam_diagnostics,
 };
-pub use corner_g2::{CornerPatch, corner_g2_patch, seam_error};
+pub use corner_g2::{CURVATURE_SHARE, DEFAULT_SETBACK_FACTOR};
 pub use delete_face::delete_faces;
 pub use distance::{BodyDistance, DistanceShape, body_distance};
 pub use draft_corners::{CornerFill, CornerOption, CornerRefusal, CornerReport, DraftCorner, draft_corners};

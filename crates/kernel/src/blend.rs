@@ -228,17 +228,123 @@ pub fn fillet_setback(body: &Body, edges: &[Vec3], radius: f64, setbacks: &[(Vec
     crate::blend_smlib::fillet_setback(body, edges, radius, setbacks).and_then(|b| closed(body, b))
 }
 
-/// [`fillet`] whose corners where three blended edges meet are G2 patches. SMLib's fillet
-/// corners are a sphere or a Coons patch that meets the rounds tangentially, so this is refused
-/// rather than quietly given those corners; [`fillet`] (the default) is unchanged.
-pub fn fillet_g2_corners(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
+/// [`fillet`] whose corners where three or more rounded edges meet are G2 patches
+/// ([`crate::corner_g2`]): each such corner is set back, `setbacks` naming a corner by a point at
+/// its vertex and the distance its patch starts along each edge there (the others take
+/// [`crate::DEFAULT_SETBACK_FACTOR`] times the radius), SMLib leaves it open, and a patch that
+/// meets the rounds and the faces round it to the second order fills it. The faces are sewn
+/// into one solid. Without such a corner this is [`fillet`]. Refused: a corner where an edge is
+/// not rounded (SMLib sets back only corners where all are), a setback that does not reach past
+/// where the rounds would meet, a hole that is no height field over its plane or a patch that
+/// does not meet its neighbours within the tolerances.
+pub fn fillet_g2_corners(body: &Body, edges: &[Vec3], radius: f64, setbacks: &[(Vec3, f64)]) -> Result<Body> {
     let _span = solidcraft_profile::span("kernel", "fillet_g2_corners");
     body.require_brep("fillet")?;
     if !(radius.is_finite() && radius > 0.0) {
         return Err(KernelError::Invalid("the blend radius must be finite and positive".into()));
     }
-    let _ = edges;
-    Err(crate::blend_smlib::unsupported("a fillet with G2 corner patches"))
+    let (picked, _) = crate::blend_smlib::picked_edges(body, edges)?;
+    let rec = body.record();
+    let picked: BTreeSet<usize> = picked.into_iter().collect();
+    // Each vertex's edges (a closed edge's one vertex once).
+    let mut at: std::collections::BTreeMap<u32, BTreeSet<usize>> = std::collections::BTreeMap::new();
+    for (i, e) in rec.edges.iter().enumerate() {
+        if e.uses.is_empty() {
+            continue;
+        }
+        for v in e.vertices {
+            at.entry(v).or_default().insert(i);
+        }
+    }
+    let point = |v: u32| rec.vertices.get(v as usize).map(|x| v3(x.point));
+    let mut corners: Vec<Vec3> = Vec::new();
+    for (v, around) in &at {
+        let rounded = around.iter().filter(|e| picked.contains(e)).count();
+        if rounded < 3 {
+            continue;
+        }
+        let p = point(*v).ok_or_else(|| KernelError::Failed("fillet: a vertex reference".into()))?;
+        if rounded < around.len() {
+            return Err(unsupported(&format!(
+                "a G2 corner at ({:.3}, {:.3}, {:.3}) where an edge is not rounded (the corner is set back, and SMLib sets back only a corner where every edge is)",
+                p.x, p.y, p.z
+            )));
+        }
+        corners.push(p);
+    }
+    if corners.is_empty() {
+        return fillet(body, edges, radius);
+    }
+    // Each corner's setback: the one given at its vertex, else the default.
+    let reach = body.size() * 0.05 + 1e-3;
+    let mut distance = vec![crate::corner_g2::DEFAULT_SETBACK_FACTOR * radius; corners.len()];
+    for (p, d) in setbacks {
+        let k = corners
+            .iter()
+            .enumerate()
+            .map(|(k, c)| (c.dist(*p), k))
+            .filter(|(d, _)| *d <= reach)
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, k)| k)
+            .ok_or_else(|| {
+                KernelError::Invalid(format!(
+                    "the setback at ({:.3}, {:.3}, {:.3}) names no G2 corner (a vertex where three or more rounded edges meet)",
+                    p.x, p.y, p.z
+                ))
+            })?;
+        if let Some(slot) = distance.get_mut(k) {
+            *slot = *d;
+        }
+    }
+    let set_back: Vec<(Vec3, f64)> = corners.iter().copied().zip(distance).collect();
+    let open = crate::blend_smlib::fillet_setback_open(body, edges, radius, &set_back)?;
+    let mut patches = Vec::with_capacity(open.holes.len());
+    for hole in &open.holes {
+        let (patch, _) = crate::corner_g2::corner_patch(&open.sheet, hole, radius)?;
+        patches.push(patch);
+    }
+    let mut parts: Vec<&Body> = vec![&open.sheet];
+    parts.extend(patches.iter());
+    let sewn = crate::stitch(&parts, 0.0)?;
+    let open_shells = sewn.validity();
+    if !open_shells.is_empty() {
+        return Err(KernelError::Failed(format!("fillet: the G2 corners do not close the body: {}", open_shells.join("; "))));
+    }
+    let history = corner_history(&sewn, body, &open.sheet, &patches);
+    closed(body, sewn.with_checked_history(history, &crate::record::counts(&[body])))
+}
+
+/// The history of the sewn G2-cornered fillet over `[body]`: the sewing's history (over the
+/// sheet and the patches) carried through the sheet's (over the body); each patch face made from
+/// the edges whose rounds meet at its corner, as SMLib's own corner patch is, each of its edges
+/// the sheet's.
+fn corner_history(sewn: &Body, body: &Body, sheet: &Body, patches: &[Body]) -> Option<crate::history::History> {
+    use crate::history::{EdgeOrigin, FaceOrigin};
+    let outer = sewn.history()?.clone();
+    let inner = sheet.history()?;
+    let mut parts = vec![inner.clone()];
+    for patch in patches {
+        let own = patch.history()?;
+        // The patch's face comes from the rounded edges the sheet's faces beside it come from.
+        let mut origins: BTreeSet<FaceOrigin> = BTreeSet::new();
+        for e in &own.edges {
+            for o in &e.origins {
+                let EdgeOrigin::Edge { edge, .. } = o else { continue };
+                for f in inner.edges.get(*edge).map(|x| x.faces.as_slice()).unwrap_or_default() {
+                    let beside = inner.faces.get(*f).map(|x| x.origins.as_slice()).unwrap_or_default();
+                    origins.extend(beside.iter().copied().filter(|g| matches!(g, FaceOrigin::Edge { .. })));
+                }
+            }
+        }
+        let mut h = own.clone().substituted(0, inner).ok()?;
+        for f in &mut h.faces {
+            *f = crate::record::generated(origins.iter().copied().collect());
+        }
+        parts.push(h);
+    }
+    let h = outer.over(&parts.iter().collect::<Vec<_>>()).ok()?;
+    h.check_counts((sewn.face_count(), sewn.edge_count()), &crate::record::counts(&[body])).ok()?;
+    Some(h)
 }
 
 /// The step of the radius search: three significant digits of the requested radius.

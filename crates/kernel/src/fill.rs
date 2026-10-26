@@ -15,8 +15,9 @@ use solidcraft_geom::Vec3;
 use solidcraft_geom::brep::eval::SurfaceEval;
 use solidcraft_geom::brep::{self as b, Curve2, eval::CurveEval};
 use solidcraft_geom::bspline::{HPoint, SplineError};
-use solidcraft_geom::fill_general::{Across, MAX_FILL_POINTS};
+use solidcraft_geom::fill_general::{Across, MAX_FILL_POINTS, Station};
 use solidcraft_geom::fill_iso::{IsoEdge, IsoFill, IsoSpec};
+use solidcraft_geom::fill_matched::{MatchedFill, MatchedSpec};
 
 use crate::body::Body;
 use crate::bridge::Continuity;
@@ -184,6 +185,60 @@ fn general_fill(
         point_gap: a.point_deviation,
     };
     Ok((made, report))
+}
+
+/// How far (degrees) the loop may turn at a vertex for it not to be a corner of the loop.
+const CORNER_TURN_DEG: f64 = 1.0;
+
+/// The one-face sheet on the loop `chain` of `body`'s own edges (each a free edge of the face
+/// beside it), a height field over the loop's plane that meets every face beside the loop with
+/// G2 (`solidcraft_geom::fill_matched`), within [`face_tolerance`] of the loop, its normal within
+/// [`PATCH_ANGLE_TOL_DEG`] and its normal curvature across the loop within `curvature_tol` of
+/// each face's, clear of the loop's corners (a vertex where the loop turns, where two faces
+/// meet). Each edge's pcurve is its exact projection onto the plane. Its history is over
+/// `[body]`: the face is new, each edge the body's own.
+pub(crate) fn matched_patch(body: &Body, chain: &[(usize, bool)], curvature_tol: f64) -> Result<(Body, MatchedFill)> {
+    body.require_brep("patch")?;
+    if chain.len() < 2 {
+        return Err(KernelError::Invalid("a patch needs a loop of two or more edges".into()));
+    }
+    let record = crate::native::brep_record(body)?;
+    let size = body.size().max(solidcraft_geom::LINEAR_TOL);
+    let mut sides = Vec::with_capacity(chain.len());
+    let mut beside = Vec::with_capacity(chain.len());
+    for &(e, forward) in chain {
+        sides.push(Side::new(&record, e, forward)?);
+        beside.push(Beside::new(&record, e, forward, true, size)?);
+    }
+    // A vertex of the loop is a corner where the loop turns there: the edge arriving and the one
+    // leaving go different ways.
+    let n = chain.len();
+    let mut corner = vec![false; n];
+    for (k, slot) in corner.iter_mut().enumerate() {
+        let prev = (k + n - 1) % n;
+        let (Some(a), Some(b)) = (sides.get(prev), sides.get(k)) else { continue };
+        let (Some(arrive), Some(leave)) = (a.direction(1.0), b.direction(0.0)) else { continue };
+        *slot = arrive.dot(leave) < CORNER_TURN_DEG.to_radians().cos();
+    }
+    let mut stations = |k: usize, ts: &[f64]| -> std::result::Result<Vec<Station>, String> {
+        let (Some(side), Some(face)) = (sides.get_mut(k), beside.get(k)) else { return Err("no such edge".into()) };
+        let edge = record.edges.get(face.edge).ok_or("edge reference")?;
+        let [a, z] = edge.interval;
+        ts.iter()
+            .map(|&t| {
+                let p = side.point(t).ok_or("an edge has no point there")?;
+                let across = face.across(&record, a + (z - a) * t).map_err(|e| e.to_string())?.ok_or("an edge has no tangent there")?;
+                let at_corner = t == 0.0 && corner.get(k).copied().unwrap_or(false);
+                Ok(Station { p, up: across.normal, across: Some(across), corner: at_corner, clash: false })
+            })
+            .collect()
+    };
+    let spec = MatchedSpec { tol: face_tolerance(body), angle_tol: PATCH_ANGLE_TOL_DEG.to_radians(), curvature_tol };
+    let fill = solidcraft_geom::fill_matched::fill_matched(n, &mut stations, &spec).map_err(spline_error)?;
+    let projection = Projection { origin: fill.fill.origin, axes: fill.fill.axes };
+    let surface = crate::surfaces::spline_surface(&fill.fill.surface);
+    let made = patch_body(body, &record, chain, surface, fill.fill.counter_clockwise, &Pcurves::Projected(&projection), face_tolerance(body))?;
+    Ok((made, fill))
 }
 
 /// A loop edge as the patch takes it: a non-rational B-spline on the edge's interval, running
@@ -482,6 +537,14 @@ impl Side {
         let [a, z] = self.interval;
         let s = t.min(1.0);
         self.curve.point(if self.forward { a + (z - a) * s } else { z - (z - a) * s })
+    }
+
+    /// The unit direction the loop runs the edge in at `t`.
+    fn direction(&self, t: f64) -> Option<Vec3> {
+        let [a, z] = self.interval;
+        let s = t.clamp(0.0, 1.0);
+        let (_, d) = self.curve.derivs(if self.forward { a + (z - a) * s } else { z - (z - a) * s })?;
+        (if self.forward { d } else { d * -1.0 }).normalized()
     }
 }
 
