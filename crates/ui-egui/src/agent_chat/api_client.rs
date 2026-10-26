@@ -1830,7 +1830,8 @@ mod tests {
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
         b.prompt(&[PromptPart::Text("measure it".into())]);
         let events = wait_for_turn(&mut b);
-        assert!(matches!(events.first(), Some(Event::Ready { .. })), "{events:?}");
+        assert_eq!(events.first(), Some(&Event::ToolsAvailable(false)));
+        assert!(events.iter().any(|e| matches!(e, Event::Ready { .. })), "{events:?}");
         assert!(events.iter().any(|e| matches!(e, Event::Tool { status: Some(ToolStatus::Failed), .. })), "{events:?}");
         assert!(events.iter().any(|e| matches!(e, Event::Text { text, .. } if text == "Done.")), "{events:?}");
         assert!(matches!(events.last(), Some(Event::TurnEnded { reason }) if reason.is_empty()), "{events:?}");
@@ -2706,7 +2707,8 @@ mod tests {
         let mut b = ApiBackend::start(cfg, ctx).unwrap();
         b.prompt(&[PromptPart::Text("measure it".into())]);
         let events = wait_for_turn(&mut b);
-        assert!(matches!(events.first(), Some(Event::Ready { .. })), "{events:?}");
+        assert_eq!(events.first(), Some(&Event::ToolsAvailable(false)));
+        assert!(events.iter().any(|e| matches!(e, Event::Ready { .. })), "{events:?}");
         assert!(events.iter().any(|e| matches!(e, Event::Tool { status: Some(ToolStatus::Failed), .. })), "{events:?}");
         assert!(events.iter().any(|e| matches!(e, Event::Text { text, .. } if text == "Done.")), "{events:?}");
         assert!(matches!(events.last(), Some(Event::TurnEnded { reason }) if reason.is_empty()), "{events:?}");
