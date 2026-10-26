@@ -157,6 +157,9 @@ pub(super) fn tick(app: &mut SolveApp, statuses: &[JobStatus]) {
                             keep = false;
                             trash(app, &destination.connection);
                         }
+                        Change::Resolve { .. } => {
+                            keep = false;
+                        }
                         Change::Restore { .. } => {
                             keep = false;
                             super::open(app, &destination);
@@ -380,6 +383,7 @@ pub(super) fn show(app: &mut SolveApp, ctx: &egui::Context) {
             Change::Rename { file } => ("cloud.rename", json!({"file":file})),
             Change::Delete => ("cloud.delete", json!({})),
             Change::Restore { commit, file } => ("cloud.restore", json!({"commit":commit,"file":file})),
+            Change::Resolve { revision, keep, .. } => ("cloud.resolve", json!({"remote_revision":revision,"keep":keep})),
         };
         params["destination"] = json!(panel.destination);
         params["revision"] = json!(panel.revision);

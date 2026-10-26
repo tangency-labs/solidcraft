@@ -58,6 +58,19 @@ using their disk destination. Repository selection never changes the saved defau
 
 ### Design management
 
+`cloud.resolve` takes a conflict destination, its observed `revision`, the observed
+`remote_revision` of its original, and `keep: local|remote`. Its typed input/output
+schemas are registered in `schema/cloud.rs`. `solidcraft_cloud::conflicts` owns
+path recognition, the two-head comparison, atomic publication planning and cache
+normalization. Both platform adapters reuse the existing management outbox; assets
+are captured once, reused by hash, and retained through retries. The Home chooser
+reuses catalog metadata; an original missing from the live list needs a history
+lookup to inspect its tombstone. It opens on demand;
+automatic presentation is limited to a fresh conflict from the active editor.
+Rename/keep-both uses `cloud.rename`. Orange conflict status is derived from reserved
+paths as well as local publication receipts, so another device can resolve copies.
+
+
 `solidcraft_cloud::management` defines rename, Trash and restore intents, bounded
 history entries and matching confirmed-management notifications. The intents use
 the required `lifecycle/1` manifest capability, so they travel through the existing

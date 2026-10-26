@@ -30,6 +30,7 @@ pub(crate) enum FileStatusTone {
     Pending,
     Current,
     Attention,
+    Conflict,
     Available,
 }
 
@@ -61,7 +62,7 @@ impl FileStatusTone {
         let t = Tokens::get();
         match self {
             Self::Unsaved => t.app_bar_text,
-            Self::Pending => t.warning,
+            Self::Pending | Self::Conflict => t.warning,
             Self::Current => t.form_success,
             Self::Attention => t.error,
             Self::Available => t.form_primary,
@@ -345,6 +346,40 @@ impl FileView {
 
     pub(crate) fn recent_row_with_status(ui: &mut Ui, id: &str, row: RecentRow<'_>, status: FileStatus<'_>) -> Response {
         Self::recent_row_content(ui, id, row, Some(status))
+    }
+
+    /// A stable action column keeps row status and buttons aligned across the list.
+    pub(crate) fn recent_row_with_action(
+        ui: &mut Ui,
+        id: &str,
+        row: RecentRow<'_>,
+        status: FileStatus<'_>,
+        enabled: bool,
+        action: Option<(&str, bool)>,
+    ) -> (Response, Option<Response>) {
+        let Some((label, visible)) = action else {
+            return (ui.add_enabled_ui(enabled, |ui| Self::recent_row_with_status(ui, id, row, status)).inner, None);
+        };
+        let t = Tokens::get();
+        let width = ui.painter().layout_no_wrap(label.into(), FontId::proportional(t.font_button), t.form_ink).size().x + t.space_24;
+        let available = ui.available_width();
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = t.space_8;
+            let response = ui
+                .scope(|ui| {
+                    ui.set_width((available - width - t.space_8).max(0.0));
+                    ui.add_enabled_ui(enabled, |ui| Self::recent_row_with_status(ui, id, row, status)).inner
+                })
+                .inner;
+            let action = if visible {
+                Some(super::button(ui, label, super::Button::Enabled(true)))
+            } else {
+                ui.allocate_space(vec2(width, 0.0));
+                None
+            };
+            (response, action)
+        })
+        .inner
     }
 
     fn recent_row_content(ui: &mut Ui, id: &str, row: RecentRow<'_>, status: Option<FileStatus<'_>>) -> Response {

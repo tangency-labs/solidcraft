@@ -12,6 +12,7 @@ pub enum Change {
     Rename { file: String },
     Delete,
     Restore { commit: String, file: String },
+    Resolve { file: String, revision: Option<String>, keep: crate::conflicts::Keep },
 }
 
 impl Change {
@@ -32,6 +33,12 @@ impl Change {
                 check_commit(commit)?;
                 Destination { file: file.clone(), ..destination.clone() }.validate()?;
             }
+            Self::Resolve { file, revision, .. } => {
+                let original = crate::conflicts::original(destination)?.ok_or_else(|| Error::Invalid("not a conflict copy".into()))?;
+                if &original.file != file || revision.as_ref().is_some_and(|r| r.is_empty() || r.len() > 128 || r.chars().any(char::is_control)) {
+                    return Err(Error::Invalid("invalid conflict resolution target".into()));
+                }
+            }
             Self::Delete => {}
         }
         Ok(())
@@ -39,7 +46,9 @@ impl Change {
 
     pub fn destination(&self, source: &Destination) -> Destination {
         match self {
-            Self::Rename { file } => Destination { file: file.clone(), ..source.clone() },
+            Self::Rename { file } | Self::Resolve { file, keep: crate::conflicts::Keep::Local, .. } => {
+                Destination { file: file.clone(), ..source.clone() }
+            }
             _ => source.clone(),
         }
     }
@@ -49,6 +58,7 @@ impl Change {
             Self::Rename { .. } => "Rename",
             Self::Delete => "Move to Trash",
             Self::Restore { .. } => "Restore",
+            Self::Resolve { .. } => "Resolve conflict",
         }
     }
 }
@@ -134,6 +144,9 @@ impl Manifest {
     pub fn set_change(&mut self, change: &Change) -> Result<()> {
         if !self.required.iter().any(|c| c == LIFECYCLE) {
             self.required.push(LIFECYCLE.into());
+        }
+        if matches!(change, Change::Resolve { .. }) && !self.required.iter().any(|c| c == crate::conflicts::CAPABILITY) {
+            self.required.push(crate::conflicts::CAPABILITY.into());
         }
         self.extra.insert("lifecycle".into(), serde_json::to_value(change).map_err(|e| Error::Invalid(e.to_string()))?);
         self.extra.remove("moved_to");

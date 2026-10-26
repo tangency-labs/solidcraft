@@ -366,7 +366,23 @@ impl GitRepository {
             super::check_document(&bytes)?;
         }
         let existing = self.committed(&base, &manifest_path)?;
-        let publication = Publication::prepare_with_parent(save, snapshot, marker.as_deref(), existing.as_deref(), parent)?;
+        let resolution_target = if let Some(destination) = solidcraft_cloud::conflicts::target(save)? {
+            let prefix = destination.design_path()?;
+            if let Some(bytes) = self.read(&format!("{prefix}/manifest.json"))? {
+                Manifest::read(&bytes)?;
+            }
+            if let Some(bytes) = self.read(&format!("{prefix}/document.json"))? {
+                super::check_document(&bytes)?;
+            }
+            if let Some(bytes) = self.committed(&base, &format!("{prefix}/document.json"))? {
+                super::check_document(&bytes)?;
+            }
+            self.committed(&base, &format!("{prefix}/manifest.json"))?
+        } else {
+            None
+        };
+        let publication =
+            Publication::prepare_with_target(save, snapshot, marker.as_deref(), existing.as_deref(), parent, resolution_target.as_deref())?;
         if matches!(save.manifest.change()?, Some(solidcraft_cloud::management::Change::Rename { .. })) && !publication.already_published {
             let target = publication.destination.design_path()?;
             let manifest = self.committed(&base, &format!("{target}/manifest.json"))?;

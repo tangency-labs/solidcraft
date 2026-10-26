@@ -143,6 +143,7 @@ pub fn stored_designs(cached: Vec<CachedEntry>, pending: Vec<PendingSave>) -> Re
             continue;
         }
         let manifest_hash = manifest_digest(&entry.save.manifest)?;
+        let conflict = entry.conflict || crate::conflicts::original(&entry.destination)?.is_some();
         entries.insert(
             key(&entry.destination),
             StoredDesign {
@@ -152,7 +153,7 @@ pub fn stored_designs(cached: Vec<CachedEntry>, pending: Vec<PendingSave>) -> Re
                 manifest_hash,
                 phase: if entry.confirmed && !entry.outdated { Phase::Synced } else { Phase::Ready },
                 outdated: entry.outdated,
-                conflict: entry.conflict,
+                conflict,
                 local_revisions: Vec::new(),
             },
         );
@@ -186,7 +187,7 @@ pub fn stored_designs(cached: Vec<CachedEntry>, pending: Vec<PendingSave>) -> Re
                 document_hash: save.manifest.document_hash.clone(),
                 manifest_hash: manifest_digest(&save.manifest)?,
                 phase: if *count == 1 { Phase::SavedLocally } else { Phase::Failed },
-                conflict: false,
+                conflict: crate::conflicts::original(&save.destination)?.is_some(),
                 outdated: false,
                 local_revisions,
             },

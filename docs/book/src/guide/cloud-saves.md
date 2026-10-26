@@ -106,7 +106,8 @@ gently fade in and out:
 - **Outdated** (red): the repository has changed since the retained copy. Choose
   **Synchronize Repository** before opening it; **Pulling** (yellow) appears while it updates.
 - **Available** (blue): a listed design or retained copy whose publication has not been confirmed.
-- **Conflict** or **Error** (red): inspect the reported details before continuing.
+- **Conflict** (orange): choose **Resolve conflict** beside the design.
+- **Error** (red): inspect the reported details before continuing.
 
 **Synchronize Repository** uploads queued saves and receives changes to previously
 opened designs, including when no saves are waiting. Loading indicators keep the
@@ -130,6 +131,24 @@ have no dot, just like saved local files. Hover over a status dot for the reposi
 project and status.
 Local file tabs retain their usual white unsaved marker.
 Edits made while an upload runs remain unsaved until you save again.
+
+### Resolve a conflict
+
+When another version reaches the repository first, SolidCraft saves your work as a
+separate conflict copy. Start marks it orange and provides **Resolve conflict**.
+Choose **Keep local** to replace the original with this copy, **Keep remote** to
+keep the original, or enter a new project-relative path and choose **Keep both**.
+The resolved copy remains recoverable in Trash. Earlier versions remain in Git
+history. Renaming keeps both designs active.
+
+The chooser uses the locally loaded list and can inspect a removed original.
+Synchronization checks both revisions
+again before publishing; another change stops the choice so you can review it.
+Offline choices are saved on this device and finish during synchronization.
+Start leaves conflict resolution to you. A conflict from saving the active design
+can open the chooser in that document. Unsaved edits in open tabs are preserved.
+
+![Choosing which cloud version to keep, or keeping both under different names](images/cloud-saves-conflict.png)
 
 ### Rename, Trash, and version history
 

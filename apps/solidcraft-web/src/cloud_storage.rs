@@ -469,6 +469,18 @@ impl Store {
             } else {
                 None
             };
+            let resolved = solidcraft_cloud::conflicts::confirmed(&save, &published)?;
+            let mut resolved_cache = Vec::new();
+            for entry in resolved.iter().flatten() {
+                store.check_cached_document(entry).await?;
+                let current = store.cached(&entry.destination).await?;
+                if let Some(current) = &current {
+                    store.check_cached_document(current).await?;
+                }
+                if current.as_ref().map(|c| solidcraft_cloud::conflicts::may_replace(&save, c)).transpose()?.unwrap_or(true) {
+                    resolved_cache.push((cache_key(&entry.destination)?, entry.write()?));
+                }
+            }
             let mut entry = CachedEntry::new(save, published.destination.clone(), Some(published.revision.clone()), true)?;
             entry.conflict = published.conflict;
             let cached = entry.write()?;
@@ -482,10 +494,13 @@ impl Store {
                 .build()
                 .map_err(storage)?;
             transaction.object_store("receipts").map_err(storage)?.put(receipt).with_key(entry.save.id.as_str()).await.map_err(storage)?;
-            if update_cache {
+            if resolved.is_none() && update_cache {
                 transaction.object_store("cached").map_err(storage)?.put(cached).with_key(key.as_str()).await.map_err(storage)?;
             }
-            if let Some(old_key) = old_key {
+            for (key, cached) in resolved_cache {
+                transaction.object_store("cached").map_err(storage)?.put(cached).with_key(key.as_str()).await.map_err(storage)?;
+            }
+            if let Some(old_key) = old_key.filter(|_| resolved.is_none()) {
                 transaction.object_store("cached").map_err(storage)?.delete(old_key.as_str()).await.map_err(storage)?;
             }
             transaction.object_store("pending").map_err(storage)?.delete(entry.save.id.as_str()).await.map_err(storage)?;
