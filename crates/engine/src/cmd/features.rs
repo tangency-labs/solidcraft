@@ -1451,7 +1451,9 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
                     // The display mesh flags seams (a smooth surface meeting itself, as down the side
                     // of a cylinder), which nobody means by a pick where they end.
                     match b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(tol)) {
-                        Ok(m) => Some((size, m.edges, m.seams)),
+                        // An edge where the faces meet tangentially (the spans of a spline wall
+                        // meeting) can't be blended either: nobody means it by a pick.
+                        Ok(m) => Some((size, m.edges, m.seams.iter().zip(&m.smooth_edges).map(|(s, t)| *s || *t).chain(m.seams.iter().skip(m.smooth_edges.len()).copied()).collect())),
                         Err(_) => b.body.edges(tol).ok().map(|edges| (size, edges.into_iter().map(|e| e.points).collect(), Vec::new())),
                     }
                 })
@@ -1459,7 +1461,8 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
         });
         // A point where several edges meet (a corner) is ambiguous: the kernel would round one of
         // them, picked silently (#5173). Edges that carry straight on through the point (the two
-        // halves of a circle) are one edge to whoever picked it, and seams don't count. Directions
+        // halves of a circle) are one edge to whoever picked it, and seams and tangent joins don't
+        // count. Directions
         // come from the polylines' end chords, which lean off a curve's tangent: within about 45°
         // of opposite counts as carrying on (edges at a real corner are far from opposite).
         let mut nearest = f64::INFINITY;

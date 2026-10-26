@@ -27,6 +27,13 @@
    }
   },
   {
+   "command": "occurrence.ground",
+   "params": {
+    "occurrence": "Part:1",
+    "grounded": false
+   }
+  },
+  {
    "command": "occurrence.move",
    "params": {
     "occurrence": "Part:1",

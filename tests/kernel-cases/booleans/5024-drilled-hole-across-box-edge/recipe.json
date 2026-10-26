@@ -12,7 +12,7 @@
    "command": "solid.hole",
    "params": {
     "position": [
-     -1,
+     0,
      15,
      20
     ],

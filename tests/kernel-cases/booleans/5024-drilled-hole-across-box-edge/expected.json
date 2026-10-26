@@ -2,9 +2,9 @@
  "sources": [
   "tangency-labs/solidcraft#5024"
  ],
- "what": "a drilled O8 hole, 10 deep with a 118 deg point, placed 1 mm off a 40x30x20 box's top face, across its edge: 17-54 s in truck",
+ "what": "a drilled O8 hole, 10 deep with a 118 deg point, centred on the top edge of a 40x30x20 box (x = 0): half of it in the box, across the edge: 17-54 s in truck",
  "source": "analytic",
- "method": "the hole's axis is at x = -1, y = 15, so only its part at x >= 0 removes material: the circular segment of the O8 section beyond x = 0 (r^2 acos(d/r) - d sqrt(r^2-d^2), d = 1) over the 10 mm to the shoulder, plus the same segment of the point cone's section (radius 4 - s tan59 at s below the shoulder, down to radius 1), integrated (python quadrature). V = 24000 - 172.16874 - 11.10370",
+ "method": "the hole's axis lies in the box's side plane x = 0, so the box keeps half of the drilled cut: V = 40*30*20 - (pi r^2 d + pi r^2 h/3)/2, r = 4, d = 10, the point's height h = r / tan 59 deg (main refuses a position off the face, so the centre is on the edge, not 1 mm past it)",
  "body_count": 1,
- "volume_mm3": 23816.7276
+ "volume_mm3": 23728.5376
 }
