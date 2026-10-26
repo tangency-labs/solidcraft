@@ -245,6 +245,8 @@ pub struct UpstreamFixes {
     pub torus_signed_gen_curve_interval: bool,
     /// A sheet sweep's open-profile wires are glued where the curves meet (WR-409, #1113).
     pub sheet_sweep_joins_profile_wires: bool,
+    /// `SmFilletVertex::CalcSetBackVert` measures a corner setback from the vertex `GetStartVertex()` marks over the edge's own interval, not from `GetVertex()` over the curve's natural interval, so an edge whose primary edge use runs against its curve is not measured from its far end (WR-445, #1169).
+    pub fillet_setback_from_start_vertex: bool,
 }
 
 /// Options for [`Kernel::new`].
