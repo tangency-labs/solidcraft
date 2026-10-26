@@ -609,12 +609,14 @@ fn the_y_distance_gets_a_drag_arrow_along_the_sketch_y_axis() {
 /// entities come back as preview geometry as the values change, before OK.
 #[test]
 fn the_move_window_previews_the_moved_entities() {
-    let mut h = rectangle();
+    let mut h = Harness::new();
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.circle.center", json!({"center": [-50, 0], "radius": 5, "id": "c1"})).unwrap();
+    h.settle();
     h.step(&json!({"start": "sketch.move"})).unwrap();
-    let picks: Vec<Sel> = curve_ids(&h).iter().map(|id| Sel::SketchCurve { id: id.clone(), sketch: None }).collect();
     {
         let d = h.app.dialog.as_mut().unwrap();
-        d.inputs[0].items = vec![picks[0].clone()];
+        d.inputs[0].items = vec![Sel::SketchCurve { id: "c1".into(), sketch: None }];
         if let Kind::SketchModify(Mod::Move { y, .. }) = &mut d.kind {
             *y = "7".into();
         } else {
@@ -637,7 +639,7 @@ fn the_move_window_previews_the_moved_entities() {
         cut_tint: true,
     };
     let built = crate::preview::compute(&h.app.session, &cmds, colors).expect("the move previews");
-    assert_eq!(built.sketches.len(), 1, "the moved curves preview");
+    assert_eq!(built.sketches.len(), 1, "the moved curve previews");
     assert!(!built.sketches[0].curves.is_empty(), "the preview carries the moved curve");
 }
 
