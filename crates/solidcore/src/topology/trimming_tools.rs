@@ -79,8 +79,9 @@
 //!   (UB-120) cannot be passed.
 //! - **`CheckLoop`** takes the surface separately, as upstream; `CheckFace` passes a
 //!   copy of the face's surface (the edge use UV extremes need the B-rep mutably).
-//!   Its gap limit also honours a shared vertex's zone tolerance (#476); upstream
-//!   uses only the edge intersection tolerance and rejects consistent widened vertices.
+//!   With the opt-in `Kernel::fixes.check_loop_vertex_tolerance` (WR-381, #476) its gap
+//!   limit also honours a shared vertex's zone tolerance; upstream (the default) uses only
+//!   the edge intersection tolerance and rejects consistent widened vertices.
 //! - **Callees.** `SmBrep::MakeFaceWithCurves` (`topology.brep_p7`) and
 //!   `SmBrep::MakeFacesWithCurves` (`topology.brep_p8`) call their ports. Unported callees
 //!   return [`SolidError::Unported`]: `SmFace::FlipFaceOrientation` and `SmFace::SplitAtSeam` (`topology.face_p1`),
@@ -2030,7 +2031,8 @@ fn edge_zone_tol(k: &Kernel, b: &Brep, e: Option<EdgeId>) -> Result<f64> {
     })
 }
 
-// Only a genuinely shared topological vertex can enlarge the edge/edge limit.
+// Only a genuinely shared topological vertex can enlarge the edge/edge limit, and only
+// with the opt-in `Kernel::fixes.check_loop_vertex_tolerance` (WR-381, #476).
 // Use the previous edge use's mate: its vertex use is the previous end regardless
 // of either edge use's orientation (including closed edges and reversed loops).
 fn loop_junction_tolerance(
@@ -2044,6 +2046,9 @@ fn loop_junction_tolerance(
         edge_zone_tol(k, b, eu1::edge(b, current)?)?,
         edge_zone_tol(k, b, eu1::edge(b, previous)?)?,
     );
+    if !k.fixes.check_loop_vertex_tolerance {
+        return Ok(edge_limit);
+    }
     let Some(start_use) = eu1::vertexuse(b, current)? else {
         return Ok(edge_limit);
     };
@@ -2061,10 +2066,26 @@ fn loop_junction_tolerance(
     Ok(edge_limit)
 }
 
+// A projected endpoint is known only modulo the natural period. Exact UV trims
+// keep their chosen sheet. This lift is only for the UV gap test: surface points
+// are evaluated at the original parameters so a real 3D gap cannot be hidden by
+// a B-spline clamping an out-of-domain periodic representative.
+fn nearest_period(value: f64, target: f64, period: f64) -> f64 {
+    if !value.is_finite() || !target.is_finite() || !period.is_finite() || period <= 0.0 {
+        return value;
+    }
+    let lifted = value + ((target - value) / period).round() * period;
+    if lifted.is_finite() {
+        lifted
+    } else {
+        value
+    }
+}
+
 /// `CheckLoop`: for each pair of consecutive edge uses of the loop whose UV ends differ
-/// (by more than `1e-10`), the surface points must be within the larger of the edges'
-/// intersection tolerance and their shared vertex's zone tolerance (else closure 3,
-/// signalled only) and the UV jump must stay under a tenth of
+/// (by more than `1e-10`), the surface points must be within the edges'
+/// intersection tolerance (with `Kernel::fixes.check_loop_vertex_tolerance`, the larger of
+/// it and their shared vertex's zone tolerance; else closure 3, signalled only) and the UV jump must stay under a tenth of
 /// the natural domain in each direction, unless both ends are singular in that
 /// direction or the gap is certified by [`is_loop_uv_gap_within_tolerance`] (not across
 /// a seam). A large UV jump gives closure 1 when an end is singular, else `SM_ERR`.
@@ -2486,9 +2507,15 @@ mod tests {
         (b, l)
     }
 
+    fn fixed_kernel() -> Kernel {
+        let mut k = Kernel::default();
+        k.fixes.check_loop_vertex_tolerance = true;
+        k
+    }
+
     #[test]
-    fn loop_gap_uses_shared_vertex_tolerance() {
-        let k = Kernel::default();
+    fn issue_476_loop_gap_uses_shared_vertex_tolerance() {
+        let k = fixed_kernel();
         let surface = Surface::from(crate::surface::plane::Plane::from_normal(
             Vec3::ZERO,
             Vec3::Z,
@@ -2517,9 +2544,28 @@ mod tests {
     }
 
     #[test]
-    fn loop_junction_uses_previous_end_not_previous_start() {
-        use crate::topology::{Edge, Edgeuse, VertexId, Vertexuse, VertexuseId};
+    fn issue_476_default_keeps_the_edge_only_gap_limit() {
+        // Default (SMLib): a gap the widened shared vertex would cover is closure 3.
         let k = Kernel::default();
+        assert!(!k.fixes.check_loop_vertex_tolerance);
+        let surface = Surface::from(crate::surface::plane::Plane::from_normal(
+            Vec3::ZERO,
+            Vec3::Z,
+        ));
+        let (mut b, l) = vertex_gap_loop(1.3e-5, 2.6e-5, true);
+        assert_eq!(check_loop(&k, &mut b, &surface, l, 1e-5, None).unwrap(), 3);
+        // The same loop with the field on is accepted.
+        let (mut b, l) = vertex_gap_loop(1.3e-5, 2.6e-5, true);
+        assert_eq!(
+            check_loop(&fixed_kernel(), &mut b, &surface, l, 1e-5, None).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn issue_476_loop_junction_uses_previous_end_not_previous_start() {
+        use crate::topology::{Edge, Edgeuse, VertexId, Vertexuse, VertexuseId};
+        let k = fixed_kernel();
         let (mut b, l) = vertex_gap_loop(1.3e-5, 2.6e-5, false);
         // The first edge leaves a tight vertex; its far end joins the second edge
         // at the widened vertex. Looking at the previous start gives the wrong limit.
@@ -2680,6 +2726,67 @@ mod tests {
                 assert!(off.is_err(), "profile {start:?} -> {end:?}: {off:?}");
             }
         }
+    }
+
+    // Both opt-in CheckLoop fixes on one junction: a seam edge use keeps its exact UV
+    // trim on the far sheet (WR-440 lifts its projected neighbours) and is displaced in
+    // V by a 3D gap that only the widened shared vertices cover (WR-381). Each field
+    // alone leaves the loop failing; both together close it.
+    #[test]
+    fn issue_476_and_530_fixes_combine_on_a_mixed_seam_gap() {
+        use crate::topology::VertexId;
+        let mut k = Kernel::default();
+        let mut b = crate::topology::brep::p3::new_brep(&mut k, tol::USE_DEFAULT, tol::USE_DEFAULT)
+            .unwrap();
+        crate::primitive::primitive_creation::p1::analytic_rotational_sweep(
+            &mut k,
+            &mut b,
+            &line3([2.0, 0.0, 0.0], [2.0, 0.0, 3.0]),
+            Vec3::ZERO,
+            Vec3::Z,
+        )
+        .unwrap();
+        for i in 0..b.vertices().len() {
+            b.vertex_mut(VertexId::from_index(i as u32))
+                .unwrap()
+                .tolerance = 0.01;
+        }
+        let loops: Vec<_> = b.loops().iter().map(|(id, _)| id).collect();
+        let mut checked = 0;
+        for l in loops {
+            let surface = b
+                .face(b.loop_(l).unwrap().face)
+                .unwrap()
+                .surface
+                .clone()
+                .unwrap();
+            let Some(eu) = loop_edgeuses(&b, l).unwrap().into_iter().find(|&eu| {
+                let (a, z) = edge_uv_ends(&k, &mut b, eu).unwrap();
+                a.y != z.y
+            }) else {
+                continue;
+            };
+            let (mut a, mut z) = edge_uv_ends(&k, &mut b, eu).unwrap();
+            a.x = surface.natural_uv_domain().max().x;
+            z.x = a.x;
+            if eu1::orientation(&b, eu).unwrap() == OrientType::Opposite {
+                core::mem::swap(&mut a, &mut z);
+            }
+            a.y += 0.001;
+            z.y += 0.001;
+            b.edgeuse_mut(eu).unwrap().uv_trim_curve = Some(uv_line([a.x, a.y], [z.x, z.y]));
+            let mut run = |vertex: bool, seam: bool| {
+                k.fixes.check_loop_vertex_tolerance = vertex;
+                k.fixes.check_loop_projected_seam_ends = seam;
+                check_loop(&k, &mut b, &surface, l, 1e-5, None)
+            };
+            assert_eq!(run(true, true).unwrap(), 0, "both fixes");
+            assert_eq!(run(false, true).unwrap(), 3, "seam fix only: 3D gap");
+            assert!(run(true, false).is_err(), "vertex fix only: raw seam jump");
+            assert_ne!(run(false, false).ok(), Some(0), "SMLib");
+            checked += 1;
+        }
+        assert!(checked > 0);
     }
 
     #[test]

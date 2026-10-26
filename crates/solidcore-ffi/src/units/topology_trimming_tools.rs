@@ -528,6 +528,9 @@ fn brep_args(op: Op, rd: &mut Reader<'_>, c: [usize; 10]) -> Result<(), FfiError
                     }
                 }
             }
+            if rd.flag()? {
+                rd.index(1_000_000_000)?;
+            }
         }
         Op::BCheckFace => {
             rd.below(n_f)?;

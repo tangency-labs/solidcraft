@@ -1666,6 +1666,1142 @@
      0
     ]
    }
+  },
+  {
+   "name": "projected_seam_cone_eu0",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 0
+   }
+  },
+  {
+   "name": "projected_seam_cone_eu1",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 1
+   }
+  },
+  {
+   "name": "projected_seam_cone_eu2",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 2
+   }
+  },
+  {
+   "name": "projected_seam_cone_eu3",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/cone.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "cone.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 3
+   }
+  },
+  {
+   "name": "projected_seam_torus_eu0",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 0
+   }
+  },
+  {
+   "name": "projected_seam_torus_eu1",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 1
+   }
+  },
+  {
+   "name": "projected_seam_torus_eu2",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 2
+   }
+  },
+  {
+   "name": "projected_seam_torus_eu3",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/torus.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "torus.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 3
+   }
+  },
+  {
+   "name": "projected_seam_surf_rev_eu0",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 0
+   }
+  },
+  {
+   "name": "projected_seam_surf_rev_eu1",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 1
+   }
+  },
+  {
+   "name": "projected_seam_surf_rev_eu2",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 2
+   }
+  },
+  {
+   "name": "projected_seam_surf_rev_eu3",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/surf_rev.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "surf_rev.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 3
+   }
+  },
+  {
+   "name": "projected_seam_plane_square_eu0",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 0
+   }
+  },
+  {
+   "name": "projected_seam_plane_square_eu1",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 1
+   }
+  },
+  {
+   "name": "projected_seam_plane_square_eu2",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 2
+   }
+  },
+  {
+   "name": "projected_seam_plane_square_eu3",
+   "upstream_ref": "#530; public TestFiles/pt_TestFiles/plane_square.smb",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "file",
+     "file": "plane_square.smb",
+     "rebuild": false
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 3
+   }
+  },
+  {
+   "name": "projected_seam_closed_u_eu0",
+   "upstream_ref": "#530; analytic degree-one square tube, closed u",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          0.0,
+          1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          -1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          0.0,
+          -1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          -1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        2.0,
+        3.0,
+        4.0,
+        4.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        3.0,
+        3.0
+       ]
+      }
+     },
+     "dom": [
+      0.0,
+      0.0,
+      4.0,
+      3.0
+     ]
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 0
+   }
+  },
+  {
+   "name": "projected_seam_closed_u_eu1",
+   "upstream_ref": "#530; analytic degree-one square tube, closed u",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          0.0,
+          1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          -1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          0.0,
+          -1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          -1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        2.0,
+        3.0,
+        4.0,
+        4.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        3.0,
+        3.0
+       ]
+      }
+     },
+     "dom": [
+      0.0,
+      0.0,
+      4.0,
+      3.0
+     ]
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 1
+   }
+  },
+  {
+   "name": "projected_seam_closed_u_eu2",
+   "upstream_ref": "#530; analytic degree-one square tube, closed u",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          0.0,
+          1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          -1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          0.0,
+          -1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          -1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        2.0,
+        3.0,
+        4.0,
+        4.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        3.0,
+        3.0
+       ]
+      }
+     },
+     "dom": [
+      0.0,
+      0.0,
+      4.0,
+      3.0
+     ]
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 2
+   }
+  },
+  {
+   "name": "projected_seam_closed_u_eu3",
+   "upstream_ref": "#530; analytic degree-one square tube, closed u",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          0.0,
+          1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          -1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          0.0,
+          -1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          -1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        1.0,
+        2.0,
+        3.0,
+        4.0,
+        4.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        3.0,
+        3.0
+       ]
+      }
+     },
+     "dom": [
+      0.0,
+      0.0,
+      4.0,
+      3.0
+     ]
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 3
+   }
+  },
+  {
+   "name": "projected_seam_closed_v_eu0",
+   "upstream_ref": "#530; analytic degree-one square tube, closed v",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          -1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          -1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        3.0,
+        3.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        2.0,
+        3.0,
+        4.0,
+        4.0
+       ]
+      }
+     },
+     "dom": [
+      0.0,
+      0.0,
+      3.0,
+      4.0
+     ]
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 0
+   }
+  },
+  {
+   "name": "projected_seam_closed_v_eu1",
+   "upstream_ref": "#530; analytic degree-one square tube, closed v",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          -1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          -1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        3.0,
+        3.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        2.0,
+        3.0,
+        4.0,
+        4.0
+       ]
+      }
+     },
+     "dom": [
+      0.0,
+      0.0,
+      3.0,
+      4.0
+     ]
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 1
+   }
+  },
+  {
+   "name": "projected_seam_closed_v_eu2",
+   "upstream_ref": "#530; analytic degree-one square tube, closed v",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          -1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          -1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        3.0,
+        3.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        2.0,
+        3.0,
+        4.0,
+        4.0
+       ]
+      }
+     },
+     "dom": [
+      0.0,
+      0.0,
+      3.0,
+      4.0
+     ]
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 2
+   }
+  },
+  {
+   "name": "projected_seam_closed_v_eu3",
+   "upstream_ref": "#530; analytic degree-one square tube, closed v",
+   "inputs": {
+    "op": "b_check_loop",
+    "brep": {
+     "kind": "face",
+     "surface": {
+      "bspline": {
+       "net": [
+        [
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          -1.0,
+          0.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          0.0,
+          -1.7976931348623157e+308
+         ]
+        ],
+        [
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          -1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          0.0,
+          -1.0,
+          3.0,
+          -1.7976931348623157e+308
+         ],
+         [
+          1.0,
+          0.0,
+          3.0,
+          -1.7976931348623157e+308
+         ]
+        ]
+       ],
+       "p": 1,
+       "q": 1,
+       "u": [
+        0.0,
+        0.0,
+        3.0,
+        3.0
+       ],
+       "v": [
+        0.0,
+        0.0,
+        1.0,
+        2.0,
+        3.0,
+        4.0,
+        4.0
+       ]
+      }
+     },
+     "dom": [
+      0.0,
+      0.0,
+      3.0,
+      4.0
+     ]
+    },
+    "l": 0,
+    "tol": 1e-05,
+    "list": true,
+    "project": 3
+   }
   }
  ]
 }
