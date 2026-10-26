@@ -15,6 +15,7 @@
 //! | [`proto_vertex_distance_to`]          | `SmProtoVertex::DistanceTo`                       |
 //! | [`proto_vertex_capture_distance`]     | `SmProtoVertex::GetCaptureDistance`               |
 //! | [`proto_vertex_contains_point`]       | `SmProtoVertex::ContainsPoint`                    |
+//! | [`proto_vertex_containment_radius`]   | fork `SmProtoVertex::GetContainmentRadius`        |
 //! | [`ProtoTopologyManager::capture_distance`] | `SmProtoTopologyManager::GetCaptureDistance` (already in `topology::proto_topology`) |
 //! | [`face_vertices`]                     | `SmFace::GetVertices(SmTArray&, ..)` (CO-PORTED, `topology.face_p4`) |
 //! | `ClassObject for EntityRef`           | the `SmObject*` of a classification of B-rep topology |
@@ -24,6 +25,9 @@
 //! | [`face_cache_tree`] | `SmSurfaceCache::GetTree` of a face surface's trimmed cache |
 //!
 //! Deviations:
+//! - **Opt-in fix (WR-305, #1057).** With `Kernel::fixes.classify_edge_interval`,
+//!   `CurveOnClassify` runs the fork's `ClassifyEdgeInterval` on each interval before
+//!   `ClassifyFaceInterval` (`CurveClassification::classify_edge_interval`).
 //! - **Classification B-rep (temporary).** [`curve_on_classify_mut`] runs on the face's own
 //!   B-rep through [`CurveOnClassifyBrep`] and makes upstream's lazy edits (UV trim curves,
 //!   gap caches, the trimmed cache's tolerance growth) on it in place, in upstream order.
@@ -1194,20 +1198,28 @@ pub fn proto_vertex_capture_distance<O: ClassObject>(mgr: &ProtoTopologyManager<
     mgr.capture_distance()
 }
 
-/// `SmProtoVertex::ContainsPoint`: whether `position` is within the larger of the
-/// proto vertex's own tolerance (`m_dTol`) and the manager's capture distance of its
-/// position.
+/// The radius of the ball around the proto vertex's position whose points are in it:
+/// the larger of its own tolerance (`m_dTol`) and the manager's capture distance (the
+/// SMLib fork's `SmProtoVertex::GetContainmentRadius`, split out of `ContainsPoint`).
+#[must_use]
+pub fn proto_vertex_containment_radius<O: ClassObject>(
+    mgr: &ProtoTopologyManager<O>,
+    pv: &ProtoVertex,
+) -> f64 {
+    // m_dTol >= Local object Tols. Takes precedence over CaptureDistance [B673]
+    max2(pv.raw_tolerance(), proto_vertex_capture_distance(mgr))
+}
+
+/// `SmProtoVertex::ContainsPoint`: whether `position` is within
+/// [`proto_vertex_containment_radius`] of the proto vertex's position.
 #[must_use]
 pub fn proto_vertex_contains_point<O: ClassObject>(
     mgr: &ProtoTopologyManager<O>,
     pv: &ProtoVertex,
     position: Point3,
 ) -> bool {
-    // m_dTol >= Local object Tols. Takes precedence over CaptureDistance [B673]
-    pv.position().closer_than(
-        max2(pv.raw_tolerance(), proto_vertex_capture_distance(mgr)),
-        position,
-    )
+    pv.position()
+        .closer_than(proto_vertex_containment_radius(mgr, pv), position)
 }
 
 // ---- SmFace::CurveOnClassify ------------------------------------------------------------
@@ -2015,8 +2027,14 @@ pub fn curve_on_classify_mut<O: ClassObject>(
             continue;
         }
 
+        // WR-305: an interval running along a boundary edge between two points on it is
+        // on that edge
+        if k.fixes.classify_edge_interval {
+            cc.classify_edge_interval(k, &*objects, ii)?;
+        }
+
         // classify the interval - avoiding point classification if possible
-        if ivl.mid.point_class() == PointClassType::Unknown {
+        if cc.at(ii)?.mid.point_class() == PointClassType::Unknown {
             cc.classify_face_interval_mut(
                 k,
                 &mut WithMadeTrimCurves {

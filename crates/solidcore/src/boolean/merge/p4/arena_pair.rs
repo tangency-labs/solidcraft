@@ -1265,6 +1265,14 @@ impl IntersectorBrep<H> for ArenaPair<'_> {
         let b = self.brep_r(face)?;
         crate::query::face::p1::calculate_bounding_box(k, b, fid(face), tight)
     }
+    fn vertex_update_edge_intervals(&mut self, k: &Kernel, vertex: H) -> crate::Result<()> {
+        if vertex.kind != K_VERTEX {
+            return Err(invalid("not a vertex handle"));
+        }
+        self.with_edit_env(brep_h(vertex.b), |b, env| {
+            crate::topology::brep::p1::update_vertex_edge_intervals(k, b, env, vid(vertex))
+        })
+    }
     fn vertex_brep(&self, vertex: H) -> crate::Result<Option<H>> {
         let b = self.brep_r(vertex)?;
         Ok(vx::brep(b, vid(vertex))?.map(|_| brep_h(vertex.b)))

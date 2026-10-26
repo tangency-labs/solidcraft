@@ -809,6 +809,26 @@ pub struct VertexDefinition<O> {
     final_vtx1: Option<O>,
     /// `m_pFinalVtx2`.
     final_vtx2: Option<O>,
+    /// Not upstream (WR-410, tangency-labs/solidcore#1059; the SolidCraft fork's
+    /// `m_dCrossingSine`): the sine of the angle at which the intersection curve that
+    /// placed this definition crosses its source edge; `-1` when no such crossing placed
+    /// it ([`VertexDefinition::place_by_crossing`]).
+    crossing_sine: f64,
+}
+
+/// Not upstream (WR-410; the SolidCraft fork's `sm_CrossingError`): how far along its
+/// edge a crossing at angle `asin(crossing_sine)`, whose points lie `gap` apart, may
+/// misplace a vertex definition: the gap over the sine, or `BIG_DOUBLE` when the curve
+/// runs along the edge (within the angular tolerance) or the angle is unknown.
+fn crossing_error(gap: f64, crossing_sine: f64) -> f64 {
+    // (upstream's `!(sine >= min)`: a NaN sine is unknown too)
+    if crossing_sine.partial_cmp(&crate::geom::tol::ang_tol_rad().sin())
+        == Some(core::cmp::Ordering::Less)
+        || crossing_sine.is_nan()
+    {
+        return BIG_DOUBLE;
+    }
+    max2(gap, 0.0) / crossing_sine
 }
 
 impl<O: ClassObject> VertexDefinition<O> {
@@ -840,6 +860,7 @@ impl<O: ClassObject> VertexDefinition<O> {
             proto_vertex: owner,
             final_vtx1: None,
             final_vtx2: None,
+            crossing_sine: -1.0,
         };
 
         if !vd.pc1.are_parameters_set() {
@@ -863,6 +884,88 @@ impl<O: ClassObject> VertexDefinition<O> {
     #[must_use]
     pub const fn position(&self) -> Point3 {
         self.position
+    }
+
+    /// Not upstream (WR-410, tangency-labs/solidcore#1059; the SolidCraft fork's
+    /// `SmVertexDefinition::PlaceByCrossing`): places this definition by another
+    /// intersection curve's crossing of its source edge (`pc1`, `pc2`, the crossing's
+    /// classifications against this definition's objects, at angle
+    /// `asin(crossing_sine)`) when that crossing fixes it more closely. The first
+    /// crossing placed it. A later one replaces the point parameters on the source
+    /// objects (an edge's t, a face's uv), the gap, the position and the crossing angle
+    /// only when its points lie within both objects' tolerance of each other (a farther
+    /// one is another point the proto vertex took in) and its misplacement bound
+    /// ([`crossing_error`]) is smaller. Returns whether it was placed again.
+    ///
+    /// # Errors
+    ///
+    /// Those of `FindObjPoint3d`, the objects' zone tolerances and
+    /// [`find_position_from_pcs`].
+    pub fn place_by_crossing(
+        &mut self,
+        k: &Kernel,
+        geometry: &impl ClassGeometry<O>,
+        pc1: &PointClassification<O>,
+        pc2: &PointClassification<O>,
+        crossing_sine: f64,
+    ) -> Result<bool> {
+        if self.crossing_sine < 0.0 {
+            // The first crossing to reach this VertexDefinition placed it.
+            self.crossing_sine = crossing_sine;
+            return Ok(false);
+        }
+
+        // This VertexDefinition with the crossing's point parameters.
+        let mut pcs = [self.pc1, self.pc2];
+        for (pc, new) in pcs.iter_mut().zip([pc1, pc2]) {
+            if !new.are_parameters_set() {
+                return Ok(false);
+            }
+            match pc.point_class() {
+                PointClassType::Edge => pc.set_t_param(new.t_param(), false),
+                PointClassType::Face => pc.set_uv_param(new.uv_param()),
+                _ => continue,
+            }
+            pc.set_gap_3d(new.gap_3d(k, geometry, None)?);
+        }
+        let [mut pc1, mut pc2] = pcs;
+        let pt1 = pc1.find_obj_point_3d(k, geometry)?;
+        let pt2 = pc2.find_obj_point_3d(k, geometry)?;
+        let gap = max2(
+            max2(pt1.distance(pt2), pc1.gap_3d(k, geometry, None)?),
+            pc2.gap_3d(k, geometry, None)?,
+        );
+
+        // Points farther apart than both source objects' tolerances are no point on
+        // both: the crossing is another point that the ProtoVertex's containment radius
+        // took in (the far end of a short curve it absorbs), not this one placed again.
+        let obj_tol = max2(
+            pc1.obj_zone_tol_3d(k, geometry)?,
+            pc2.obj_zone_tol_3d(k, geometry)?,
+        );
+        // (upstream's `!(gap <= tol)` and `!(new < old)`: NaN keeps the placement)
+        if !matches!(
+            gap.partial_cmp(&obj_tol),
+            Some(core::cmp::Ordering::Less | core::cmp::Ordering::Equal)
+        ) {
+            return Ok(false);
+        }
+        let (new_error, old_error) = (
+            crossing_error(gap, crossing_sine),
+            crossing_error(self.gap, self.crossing_sine),
+        );
+        if new_error.partial_cmp(&old_error) != Some(core::cmp::Ordering::Less) {
+            return Ok(false);
+        }
+
+        let position = find_position_from_pcs(k, geometry, &mut pc1, &mut pc2)?;
+        self.pc1 = pc1;
+        self.pc2 = pc2;
+        self.position = position.position;
+        self.tol = max2(self.tol, position.deviation);
+        self.gap = gap;
+        self.crossing_sine = crossing_sine;
+        Ok(true)
     }
 
     /// The tolerance (`GetTolerance`, as an `SmZoneTol3d`).
@@ -1517,9 +1620,25 @@ pub struct ProtoVertex {
     vertex_defs: Vec<VertexDefId>,
     /// `m_sProtoEdges` (a closed proto edge is listed twice).
     proto_edges: Vec<ProtoEdgeId>,
+    /// The SMLib fork's `m_bAbsorbedProtoEdge`: a degenerate proto edge of ours was dropped,
+    /// so our vertices stand for its curve (WR-306, opt-in).
+    absorbed_proto_edge: bool,
 }
 
 impl ProtoVertex {
+    /// Whether a degenerate proto edge of this proto vertex was dropped (the fork's
+    /// `AbsorbedProtoEdge`, WR-306).
+    #[must_use]
+    pub const fn absorbed_proto_edge(&self) -> bool {
+        self.absorbed_proto_edge
+    }
+
+    /// Marks a degenerate proto edge of this proto vertex as dropped (the fork's
+    /// `SetAbsorbedProtoEdge`, WR-306).
+    pub fn set_absorbed_proto_edge(&mut self) {
+        self.absorbed_proto_edge = true;
+    }
+
     /// The position (`GetPosition`).
     #[must_use]
     pub const fn position(&self) -> Point3 {
@@ -2315,6 +2434,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 tol,
                 vertex_defs: Vec::new(),
                 proto_edges: Vec::new(),
+                absorbed_proto_edge: false,
             },
         )
         .map(ProtoVertexId)
@@ -2348,6 +2468,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 tol,
                 vertex_defs: vec![vd_id],
                 proto_edges: Vec::new(),
+                absorbed_proto_edge: false,
             },
         )
         .map(ProtoVertexId)
@@ -2629,6 +2750,58 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         Ok(None)
     }
 
+    /// Not upstream (WR-410, tangency-labs/solidcore#1059; the SolidCraft fork's
+    /// `SmProtoVertex::AddCrossing`): an intersection curve crosses an edge at `pv`
+    /// (`pc1`, `pc2`, the crossing's classifications, with their parameters set, at angle
+    /// `asin(crossing_sine)`). The vertex definition of the crossing's source objects
+    /// takes its position from the crossing that fixes it best
+    /// ([`VertexDefinition::place_by_crossing`]); placed again, it moves `pv` (the
+    /// average of its definitions) with it and widens `pv`'s tolerance to its own.
+    /// Nothing for an unknown angle or no matching definition.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for deleted objects; those of
+    /// [`VertexDefinition::place_by_crossing`].
+    pub fn add_crossing(
+        &mut self,
+        k: &Kernel,
+        geometry: &impl ClassGeometry<O>,
+        pv: ProtoVertexId,
+        pc1: &PointClassification<O>,
+        pc2: &PointClassification<O>,
+        crossing_sine: f64,
+    ) -> Result<()> {
+        // (upstream's `!(sine >= 0)`: a NaN sine is unknown)
+        if crossing_sine.is_nan() || crossing_sine < 0.0 {
+            return Ok(());
+        }
+        let topo1 = as_topology(pc1.object());
+        let topo2 = as_topology(pc2.object());
+        let Some(vd) = self.find_matching_vertex_definition(pv, topo1, topo2)? else {
+            return Ok(());
+        };
+
+        // Placed again by a crossing that fixes it more closely, it moves this
+        // ProtoVertex, the average of its VertexDefinitions, with it.
+        let old = self.vd(vd)?.position;
+        let moved = self
+            .vertex_def_mut(vd)
+            .ok_or(dangling("vertex definition is deleted"))?
+            .place_by_crossing(k, geometry, pc1, pc2, crossing_sine)?;
+        if moved {
+            let (new, vd_tol) = {
+                let v = self.vd(vd)?;
+                (v.position, v.tolerance(k))
+            };
+            let count = self.pv(Some(pv))?.vertex_defs.len() as f64;
+            let p = self.pv_mut(pv)?;
+            p.position += (new - old) / count;
+            p.tol = max2(p.tol, vd_tol);
+        }
+        Ok(())
+    }
+
     /// The vertex definition at `pv` closest to `position`
     /// (`GetClosestVertexDefinition`; the first of equally close ones).
     ///
@@ -2711,6 +2884,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         let o = self.pv(Some(other))?.clone();
         let this = self.pv_mut(pv)?;
         this.tol = max2(this.tol, o.tol);
+        this.absorbed_proto_edge = this.absorbed_proto_edge || o.absorbed_proto_edge;
 
         // the average of all VDs, starting with what is here already
         let mut ave_pos = (this.vertex_defs.len() as f64) * this.position;

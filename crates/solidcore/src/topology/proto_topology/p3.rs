@@ -15,6 +15,11 @@
 //! | [`ProtoTopologyManager::resolve_overlapping_proto_edges`] | `SmProtoTopologyManager::ResolveOverlappingProtoEdges` |
 //!
 //! Deviations:
+//! - **Vertices placed by their best edge crossing** (not upstream, WR-410,
+//!   tangency-labs/solidcore#1059, opt-in `Kernel::fixes.boolean_vertex_by_best_crossing`;
+//!   the SolidCraft fork's `FindOrCreateProtoEdge` change): after each end's proto vertex,
+//!   [`ProtoTopologyManager::add_crossing`] with the angle at which the face pair's curve
+//!   crosses the edge its end lies on (`crossing_sine`).
 //! - **Removed proto edges** (SolidCraft fix, tangency-labs/smlib 93efd6d, UB-239).
 //!   Upstream's `SplitIntersectingProtoEdges` deletes the combined-away proto edge while
 //!   proto faces (coincident lists) and other proto edges (overlap lists) still name
@@ -355,6 +360,19 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 &mut ci2.start,
             ))?
             .and_then(|r| r.0);
+            // not upstream (WR-410, #1059, opt-in): placed by its best edge crossing
+            if let (Some(pv), true) = (start_pv, k.fixes.boolean_vertex_by_best_crossing) {
+                let sine = crossing_sine(
+                    k,
+                    &*geometry,
+                    classification1,
+                    ci1,
+                    classification2,
+                    ci2,
+                    false,
+                )?;
+                self.add_crossing(k, &*geometry, pv, &ci1.start, &ci2.start, sine)?;
+            }
         }
         if can_imprint(ci1.end.point_class()) && can_imprint(ci2.end.point_class()) {
             end_pv = ignore_soft(self.find_or_create_proto_vertex_pcs(
@@ -364,6 +382,19 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 &mut ci2.end,
             ))?
             .and_then(|r| r.0);
+            // not upstream (WR-410, #1059, opt-in): placed by its best edge crossing
+            if let (Some(pv), true) = (end_pv, k.fixes.boolean_vertex_by_best_crossing) {
+                let sine = crossing_sine(
+                    k,
+                    &*geometry,
+                    classification1,
+                    ci1,
+                    classification2,
+                    ci2,
+                    true,
+                )?;
+                self.add_crossing(k, &*geometry, pv, &ci1.end, &ci2.end, sine)?;
+            }
         }
 
         // Can't create a ProtoEdge without both PVs.
@@ -1691,6 +1722,106 @@ fn set_slot<O: Copy>(list: &mut [Option<O>], index: usize, vertex: O) {
     }
 }
 
+/// Not upstream (WR-410; the SolidCraft fork's `sm_EdgeCrossingSine`): the sine of the
+/// angle at which a curve interval's curve (`curve`, over `interval`) crosses the edge its
+/// end classification `pc` lies on, at the interval's end (`at_end`) or start; `-1` when
+/// that end is not on an edge with a curve, its parameters are unset, an evaluation
+/// fails or a tangent vanishes.
+///
+/// # Errors
+///
+/// [`SolidError::Unported`] from the evaluations.
+fn edge_crossing_sine<O: ClassObject>(
+    k: &Kernel,
+    geometry: &impl ProtoBrep<O>,
+    curve: Option<O>,
+    interval: Extent1d,
+    pc: &PointClassification<O>,
+    at_end: bool,
+) -> Result<f64> {
+    let edge_curve = pc
+        .edge_object()
+        .and_then(|e| geometry.edge_curve(e))
+        .flatten()
+        .and_then(|c| geometry.curve(c));
+    let curve = curve.and_then(|c| geometry.curve(c));
+    let (Some(edge_curve), Some(curve)) = (edge_curve, curve) else {
+        return Ok(-1.0);
+    };
+    if !pc.are_parameters_set() {
+        return Ok(-1.0);
+    }
+    let mut t = pc.pre_snap_param();
+    if t == BIG_DOUBLE || t == crate::math::UNDEF_DOUBLE {
+        t = if at_end {
+            interval.max()
+        } else {
+            interval.min()
+        };
+    }
+    let tangent = |r: Result<Vec<Vec3>>| -> Result<Option<Vec3>> {
+        match r {
+            Ok(d) => Ok(d.get(1).copied()),
+            Err(e) if e.is_unported() => Err(e),
+            Err(_) => Ok(None),
+        }
+    };
+    let (Some(c), Some(e)) = (
+        tangent(curve.evaluate(k, t, 1, !at_end, false))?,
+        tangent(edge_curve.evaluate(k, pc.t_param(), 1, true, false))?,
+    ) else {
+        return Ok(-1.0);
+    };
+    let len = c.length() * e.length();
+    if len.is_nan() || len <= 0.0 {
+        return Ok(-1.0);
+    }
+    Ok(c.cross(e).length() / len)
+}
+
+/// Not upstream (WR-410; the SolidCraft fork's `sm_CrossingSine`): the sine of the angle
+/// at which a face pair's intersection curve crosses an edge at one end (`at_end`, else
+/// the start) of the curve interval pair `ci1`, `ci2`: the smaller of the two when both
+/// ends lie on edges, `-1` when neither does.
+///
+/// # Errors
+///
+/// Those of [`edge_crossing_sine`].
+fn crossing_sine<O: ClassObject>(
+    k: &Kernel,
+    geometry: &impl ProtoBrep<O>,
+    classification1: &CurveClassification<O>,
+    ci1: &CurveInterval<O>,
+    classification2: &CurveClassification<O>,
+    ci2: &CurveInterval<O>,
+    at_end: bool,
+) -> Result<f64> {
+    let pick = |ci: &CurveInterval<O>| if at_end { ci.end } else { ci.start };
+    let sine1 = edge_crossing_sine(
+        k,
+        geometry,
+        classification1.curve(),
+        ci1.interval,
+        &pick(ci1),
+        at_end,
+    )?;
+    let sine2 = edge_crossing_sine(
+        k,
+        geometry,
+        classification2.curve(),
+        ci2.interval,
+        &pick(ci2),
+        at_end,
+    )?;
+    if sine1 < 0.0 {
+        return Ok(sine2);
+    }
+    if sine2 < 0.0 {
+        return Ok(sine1);
+    }
+    Ok(sine1.min(sine2))
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::p1::proto::{ProtoGeometry, ProtoTopology, VertexDefinition};
@@ -1953,5 +2084,40 @@ mod tests {
         assert_eq!(pool.glued, vec![(vtx(0), vtx(1))]);
         // the second definition, whose B-rep 1 vertex is gone, is deleted
         assert_eq!(m.proto_vertex(pv).unwrap().vertex_definitions().len(), 1);
+    }
+
+    /// A vertex definition first placed by a grazing crossing is placed again by a
+    /// steeper one, whose misplacement bound along the edge (gap over sine) is smaller,
+    /// and not by a later, more grazing one (WR-410, #1059).
+    #[test]
+    fn issue_1059_a_steeper_crossing_places_the_vertex_definition() {
+        let k = Kernel::default();
+        let pool = Pool::new();
+        let curve = H(0, ClassObjectKind::Curve);
+        let on_curve = |t: f64| {
+            let mut pc = PointClassification::new(1e-6);
+            pc.set_class_object(PointClassType::Curve, Some(curve));
+            pc.set_t_param(t, false);
+            pc
+        };
+        // two points 1e-8 apart, within the curve's zone tolerance
+        let (pc1, pc2) = (on_curve(0.5), on_curve(0.5 + 1e-9));
+        let mut vd = VertexDefinition::new(
+            &k,
+            &pool,
+            &pc1,
+            &pc2,
+            Vec3::new(5.0, 0.0, 0.0),
+            1e-6,
+            0.0,
+            None,
+        )
+        .unwrap();
+        // the first crossing to arrive places it, here at a grazing angle
+        assert!(!vd.place_by_crossing(&k, &pool, &pc1, &pc2, 0.02).unwrap());
+        // a steeper crossing fixes it more closely
+        assert!(vd.place_by_crossing(&k, &pool, &pc1, &pc2, 0.9).unwrap());
+        // a more grazing one than that does not
+        assert!(!vd.place_by_crossing(&k, &pool, &pc1, &pc2, 0.5).unwrap());
     }
 }
