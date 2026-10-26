@@ -87,6 +87,12 @@ and the [foundation ledger](docs/drawing-foundations.md) track the bounded imple
 packages. The first geometry increment defines validated section records in a plane-local
 frame; the ledger separates that contract from section producers and the Drawing workspace.
 
+Drawing UI scaffold: the native workspace now supplies the shared four-tab ribbon,
+source Browser, compact dockable sheet strip and resizable Sheet Settings/options
+panel. Planned tools remain unavailable; only existing source services execute.
+Drawing files and paper rendering are still deferred. See the
+[UI implementation roadmap](docs/drawing-workspace-ui.md).
+
 Desktop view DXF export runs in the file-operation worker with five-stage progress and
 cooperative cancellation. Curve tolerance (0.0001–1 mm, default 0.01 mm) is remembered alongside
 the hidden-edge setting. Cancelled exports preserve the model and the previous destination;

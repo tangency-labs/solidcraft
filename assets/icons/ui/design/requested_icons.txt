@@ -80,6 +80,7 @@ decal	false
 delete	false
 delete_face	false
 dimension	false
+dots	false
 draft	false
 draft_analysis	false
 drive	false
@@ -153,6 +154,7 @@ pattern_rect	false
 perforate	false
 perspective	false
 pipe	false
+placeholder	true
 plane	false
 plane_along_path	false
 plane_angle	false

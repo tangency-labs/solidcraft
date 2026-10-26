@@ -31,6 +31,8 @@ mod component_clone_assembly;
 mod construct;
 mod delete;
 mod diagnostics;
+mod drawing_ui;
+pub use drawing_ui::pending_icon as drawing_pending_icon;
 mod edit;
 mod face;
 mod features;
@@ -304,6 +306,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(view_navigation::COMMANDS.iter());
     v.extend(view_dxf::COMMANDS.iter());
     v.extend(diagnostics::COMMANDS.iter());
+    v.extend(drawing_ui::COMMANDS.iter());
     v.extend(render::COMMANDS.iter());
     v
 }

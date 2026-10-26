@@ -108,6 +108,7 @@ pub(crate) struct State {
 /// One source of occlusion for navigation, picking, overlays and fit.
 pub(crate) fn covered_rects(app: &SolveApp) -> Vec<Rect> {
     let mut rects = Vec::new();
+    rects.extend(crate::drawing_workspace::covered_rects(app));
     if Container::for_layout(app.ui.layout, Surface::Panel).floating() {
         rects.extend(app.shell.cards.iter().copied());
         rects.extend(app.shell.panels.iter().copied());
@@ -148,6 +149,15 @@ pub(crate) fn workspace_content(app: &SolveApp, mut content: Rect) -> Rect {
     }
     if let Some(browser) = app.shell.browser {
         content.min.x = (browser.right() + gap).clamp(content.left(), content.right());
+    }
+    if Container::for_layout(app.ui.layout, Surface::Panel).floating()
+        && let Some(settings) = crate::drawing_workspace::settings_rect(app)
+    {
+        if app.preferences.drawing_panel_side == "left" {
+            content.min.x = (settings.right() + gap).clamp(content.left(), content.right());
+        } else {
+            content.max.x = (settings.left() - gap).clamp(content.left(), content.right());
+        }
     }
     content
 }

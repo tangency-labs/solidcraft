@@ -6,6 +6,41 @@ use solidcraft_engine::doc::FeatureKind;
 
 pub const TABS: &[&str] = &["MODEL", "SURFACE", "ASSEMBLE", "INSERT", "INSPECT", "MANAGE", "VIEW"];
 
+pub const DRAWING_TABS: &[&str] = &["DRAWING LAYOUT", "DRAWING ANNOTATE", "DRAWING PARTS", "DRAWING REVIEW"];
+
+pub fn drawing_tab(tab: &str) -> bool {
+    DRAWING_TABS.contains(&tab)
+}
+
+/// Unique saved tab keys keep Drawing customisations separate from Design.
+pub fn tab_label(tab: &str) -> &str {
+    match tab {
+        "DRAWING LAYOUT" => "Layout",
+        "DRAWING ANNOTATE" => "Annotate",
+        "DRAWING PARTS" => "Parts & Tables",
+        "DRAWING REVIEW" => "Review",
+        _ => tab,
+    }
+}
+
+/// Workspace switching has one lifecycle for menus and automation.
+pub fn enter(app: &mut crate::SolveApp, workspace: &str) -> Result<(), String> {
+    match workspace {
+        "drawing" => {
+            if crate::render_workspace::active(app) {
+                crate::render_workspace::enter(app, false)?;
+            }
+            crate::drawing_workspace::enter(app, true)
+        }
+        "design" if crate::drawing_workspace::active(app) => crate::drawing_workspace::enter(app, false),
+        "design" | "render" => {
+            crate::drawing_workspace::enter(app, false)?;
+            crate::render_workspace::enter(app, workspace == "render")
+        }
+        _ => Err("workspace must be design, render or drawing".into()),
+    }
+}
+
 /// Reading order of the compact, three-column constraint gallery. Icons come from each spec.
 pub const CONSTRAINT_GALLERY: &[&str] = &[
     "sketch.constraint.horizontal_vertical",
@@ -70,6 +105,25 @@ const CONFIGURE: &[&str] = &["parameters.change", "config.table", "config.config
 pub const AGENT_ONLY: &[&str] = &["sketch.solve"];
 
 pub const SECTIONS: &[Section] = &[
+    Section {
+        tab: "DRAWING LAYOUT",
+        panel: "VIEWS",
+        promoted: 3,
+        ids: &["drawing.view.base", "drawing.view.projected", "drawing.view.section", "drawing.view.detail"],
+    },
+    Section { tab: "DRAWING LAYOUT", panel: "ARRANGE", promoted: 1, ids: &["drawing.views.align"] },
+    Section { tab: "DRAWING LAYOUT", panel: "INSERT", promoted: 1, ids: &["drawing.image", "drawing.line"] },
+    Section { tab: "DRAWING LAYOUT", panel: "RESOURCES", promoted: 1, ids: &["drawing.resources"] },
+    Section { tab: "DRAWING ANNOTATE", panel: "MEASURE", promoted: 2, ids: &["drawing.dimension", "drawing.hole_callout"] },
+    Section { tab: "DRAWING ANNOTATE", panel: "NOTES", promoted: 2, ids: &["drawing.note", "drawing.leader"] },
+    Section { tab: "DRAWING ANNOTATE", panel: "SYMBOLS", promoted: 2, ids: &["drawing.datum", "drawing.centre_mark"] },
+    Section { tab: "DRAWING ANNOTATE", panel: "ARRANGE", promoted: 2, ids: &["drawing.annotations.align", "drawing.annotations.space"] },
+    Section { tab: "DRAWING PARTS", panel: "ASSEMBLY", promoted: 2, ids: &["drawing.parts_list", "drawing.balloon"] },
+    Section { tab: "DRAWING PARTS", panel: "TABLES", promoted: 2, ids: &["drawing.table.edit", "drawing.revision_table"] },
+    Section { tab: "DRAWING PARTS", panel: "SOURCE", promoted: 2, ids: &["assembly.bom", "sheet.flat_pattern"] },
+    Section { tab: "DRAWING REVIEW", panel: "CHANGES", promoted: 2, ids: &["drawing.update", "drawing.check"] },
+    Section { tab: "DRAWING REVIEW", panel: "REVISION", promoted: 2, ids: &["drawing.revision", "drawing.revision_table"] },
+    Section { tab: "DRAWING REVIEW", panel: "OUTPUT", promoted: 2, ids: &["drawing.export", "drawing.print"] },
     Section {
         tab: "MODEL",
         panel: "SKETCH",
@@ -277,6 +331,23 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("contact.check", "Contact"),
     ("contact.enable_sets", "Contact Sets"),
     ("document.inspect", "Inspect"),
+    ("drawing.annotations.align", "Align Notes"),
+    ("drawing.annotations.space", "Space Notes"),
+    ("drawing.check", "Check Drawing"),
+    ("drawing.dimension", "Dimension"),
+    ("drawing.export", "Export"),
+    ("drawing.hole_callout", "Hole Callout"),
+    ("drawing.image", "Image"),
+    ("drawing.leader", "Leader"),
+    ("drawing.note", "Note"),
+    ("drawing.print", "Print Drawing"),
+    ("drawing.resources", "Resources"),
+    ("drawing.revision", "Add Revision"),
+    ("drawing.revision_table", "Revision Tbl."),
+    ("drawing.table.edit", "Edit Table"),
+    ("drawing.update", "Update"),
+    ("drawing.view.projected", "Projected"),
+    ("drawing.view.section", "Section View"),
     ("document.units", "Units"),
     ("inspect.accessibility", "Access"),
     ("inspect.center_of_mass", "Mass Center"),
@@ -324,6 +395,18 @@ pub fn ribbon_button_label(command: &CommandSpec) -> &str {
     RIBBON_LABELS.iter().find(|(id, _)| *id == command.id).map_or(command.label, |(_, label)| *label)
 }
 
+/// Source utilities retain their Design names; Drawing makes the inspected scope explicit.
+pub fn ribbon_button_label_in<'a>(tab: &str, command: &'a CommandSpec) -> &'a str {
+    if drawing_tab(tab) {
+        match command.id {
+            "assembly.bom" => return "Source BOM",
+            "sheet.flat_pattern" => return "Source Flat",
+            _ => {}
+        }
+    }
+    ribbon_button_label(command)
+}
+
 /// Registry placement → default ribbon destination, after explicit id overrides.
 pub const PLACEMENTS: &[(&str, &str, &str, &str)] = &[
     ("SOLID", "CREATE", "MODEL", "CREATE"),
@@ -360,6 +443,8 @@ pub fn panels(tab: &str) -> Vec<&'static str> {
 pub fn destination(c: &CommandSpec) -> Option<(&'static str, &'static str)> {
     // A few shared commands have a canonical home that differs from their first occurrence.
     let primary = match c.id {
+        "assembly.bom" => Some(("INSPECT", "CHECK")),
+        "sheet.flat_pattern" => Some(("SHEET METAL", "FLAT")),
         "sheet.manage_rules" => Some(("MANAGE", "RULES")),
         "sheet.convert" => Some(("MODEL", "MODIFY")),
         "parameters.change" => Some(("MANAGE", "PARAMETERS")),
@@ -444,6 +529,9 @@ pub fn sheet_body(app: &crate::SolveApp) -> Option<String> {
 }
 
 pub fn visible_tabs(app: &crate::SolveApp) -> Vec<&'static str> {
+    if crate::drawing_workspace::active(app) {
+        return DRAWING_TABS.to_vec();
+    }
     if crate::render_workspace::active(app) {
         return vec!["RENDER"];
     }
@@ -460,7 +548,7 @@ pub fn visible_tabs(app: &crate::SolveApp) -> Vec<&'static str> {
 /// Select contextual tabs on entry (or a different sheet body), allowing the other tabs to
 /// remain usable for the rest of that context. Sketch takes precedence over sheet metal.
 pub fn sync_context(app: &mut crate::SolveApp) {
-    if crate::render_workspace::active(app) {
+    if crate::render_workspace::active(app) || crate::drawing_workspace::active(app) {
         return;
     }
     let context = app.session.active_sketch.map(|id| format!("sketch:{id}")).or_else(|| sheet_body(app).map(|body| format!("sheet:{body}")));
@@ -544,6 +632,65 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn drawing_uses_the_ribbon_without_changing_the_source_design() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("solid.box", json!({"length":40,"width":20,"height":3})).unwrap();
+        h.app.ui.tab = "SURFACE".into();
+        let before = h.app.session.doc.clone();
+        let revision = h.app.session.revision;
+        h.call("ui.workspace", json!({"workspace":"drawing"}));
+        h.frames(4);
+        assert_eq!(visible_tabs(&h.app), DRAWING_TABS);
+        for tab in DRAWING_TABS {
+            assert!(crate::scenario::handle_at(&format!("tab:{tab}")).is_some(), "{tab}");
+        }
+        h.step(&json!({"click":{"handle":"button:drawing.view.base"}})).unwrap();
+        h.frames(3);
+        assert!(crate::scenario::rect_of("drawing:settings").is_some(), "known options open from the shared ribbon");
+        assert!(h.widget("Apply (not implemented)").is_some());
+        assert!(h.app.run("drawing.view.base", json!({})).is_err(), "the preview never enables engine execution");
+        h.step(&json!({"click":{"handle":"drawing:settings:close"}})).unwrap();
+        h.step(&json!({"click":{"handle":"tab:DRAWING PARTS"}})).unwrap();
+        h.step(&json!({"click":{"handle":"button:assembly.bom"}})).unwrap();
+        h.frames(2);
+        assert!(h.app.bom.is_some(), "Source BOM opens the existing inspector");
+        assert_eq!(h.app.ui.tab, "DRAWING PARTS");
+        assert_eq!(h.app.session.doc, before);
+        assert_eq!(h.app.session.revision, revision);
+        h.app.bom = None;
+        h.call("ui.workspace", json!({"workspace":"design"}));
+        h.frames(2);
+        assert_eq!(h.app.ui.tab, "SURFACE", "return restores the source workspace context");
+    }
+
+    #[test]
+    fn drawing_search_and_panels_work_from_the_keyboard() {
+        let mut h = crate::scenario::Harness::new();
+        h.call("ui.workspace", json!({"workspace":"drawing"}));
+        h.frames(3);
+        let before = h.app.session.doc.clone();
+        let revision = h.app.session.revision;
+        h.step(&json!({"key":"S"})).unwrap();
+        assert!(h.app.ui.palette_open, "S opens the shared Drawing command search");
+        h.step(&json!({"text":"Base View"})).unwrap();
+        h.step(&json!({"key":"Enter"})).unwrap();
+        h.frames(2);
+        assert!(!h.app.ui.palette_open);
+        assert!(crate::scenario::rect_of("drawing:settings").is_some(), "search opens known options");
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("drawing:settings").is_none(), "Escape closes options");
+        h.step(&json!({"click":{"handle":"drawing:sheets:settings"}})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("drawing:settings").is_some());
+        h.step(&json!({"key":"Escape"})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("drawing:settings").is_none(), "Escape closes Sheet Settings");
+        assert_eq!(h.app.session.doc, before);
+        assert_eq!(h.app.session.revision, revision);
+    }
+
+    #[test]
     fn modify_groups_order_commands_and_keep_unlisted_commands_at_the_end() {
         let specs = solidcraft_engine::command_specs();
         let (commands, _) = layout("MODEL", "MODIFY", &specs).unwrap();
@@ -587,7 +734,12 @@ mod tests {
                     continue;
                 }
                 if command.label.chars().count() > 12 || command.label.split_whitespace().any(|word| word.chars().count() > 9) {
-                    assert!(RIBBON_LABELS.iter().any(|(id, _)| *id == command.id), "missing compact label for {}", command.id);
+                    assert!(
+                        RIBBON_LABELS.iter().any(|(id, _)| *id == command.id)
+                            || ribbon_button_label_in(section.tab, command) != ribbon_button_label(command),
+                        "missing compact label for {}",
+                        command.id
+                    );
                 }
             }
         }
@@ -598,6 +750,13 @@ mod tests {
         }
         assert_eq!(ribbon_button_label(solidcraft_engine::find_command("sketch.create").unwrap()), "New Sketch");
         assert_eq!(solidcraft_engine::find_command("sketch.create").unwrap().label, "Create Sketch");
+        for (id, design, drawing) in [("assembly.bom", "Bill of Materials", "Source BOM"), ("sheet.flat_pattern", "Flat Pattern", "Source Flat")] {
+            let command = solidcraft_engine::find_command(id).unwrap();
+            assert_eq!(ribbon_button_label(command), design);
+            assert_eq!(ribbon_button_label_in("MODEL", command), design);
+            assert_eq!(ribbon_button_label_in("DRAWING PARTS", command), drawing);
+            assert!(drawing.chars().count() <= 13);
+        }
     }
 
     #[test]

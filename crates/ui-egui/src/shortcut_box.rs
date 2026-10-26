@@ -128,6 +128,19 @@ fn keyword_score(q: &str, keywords: &str) -> u32 {
 /// (tab, panel; `None` off the toolbar), in the current language.
 pub type Row = (&'static str, &'static str, &'static str, Option<(&'static str, &'static str)>);
 
+fn available_in_workspace(app: &SolveApp, id: &str) -> bool {
+    if crate::drawing_workspace::active(app) {
+        id.starts_with("drawing.") || matches!(id, "assembly.bom" | "sheet.flat_pattern" | "document.metadata")
+    } else {
+        !id.starts_with("drawing.")
+    }
+}
+
+fn can_start(app: &SolveApp, id: &str) -> bool {
+    solidcraft_engine::find_command(id).is_some_and(|c| c.info(&app.session).enabled)
+        || (crate::drawing_workspace::active(app) && crate::drawing_workspace::can_open_options(id))
+}
+
 /// Commands matching `q`, best first. With an empty query, recent commands come first, then
 /// everything by name.
 ///
@@ -138,6 +151,7 @@ pub fn search(app: &SolveApp, q: &str) -> Vec<Row> {
     let mut v: Vec<(u32, Row)> = command_specs()
         .into_iter()
         .filter(|c| !crate::workspace::AGENT_ONLY.contains(&c.id))
+        .filter(|c| available_in_workspace(app, c.id))
         .filter_map(|c| {
             let (home_tab, home_panel) = crate::workspace::destination(c).unwrap_or(("", ""));
             let (label, tab, panel) = (crate::i18n::tr_label(c.label), crate::i18n::tr_label(home_tab), crate::i18n::tr_label(home_panel));
@@ -411,14 +425,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                 56
                             })
                             .collect();
-                        design = if query.trim().is_empty() { Vec::new() } else { design_rows(app, &query) };
+                        design = if query.trim().is_empty() || crate::drawing_workspace::active(app) { Vec::new() } else { design_rows(app, &query) };
                     }
-                    let enabled: Vec<_> = rows
-                        .iter()
-                        .map(|r| solidcraft_engine::find_command(r.0).is_some_and(|c| c.info(&app.session).enabled))
-                        .chain(design.iter().map(|_| true))
-                        .take(MAX_RESULTS)
-                        .collect();
+                    let enabled: Vec<_> = rows.iter().map(|r| can_start(app, r.0)).chain(design.iter().map(|_| true)).take(MAX_RESULTS).collect();
                     if down || up {
                         let step = if down { 1 } else { enabled.len().saturating_sub(1) };
                         for _ in 0..enabled.len() {
@@ -483,7 +492,14 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                         let shortcut = crate::keymap::effective(app, id).unwrap_or_default();
                                         item.shortcut = &shortcut;
                                         let path = place.map_or_else(|| id.to_string(), |(tab, panel)| format!("{tab} › {panel}"));
-                                        let response = item.search_row(ui, &query, &path, None);
+                                        let response = ui
+                                            .scope(|ui| {
+                                                if solidcraft_engine::find_command(id).is_some_and(|c| !c.info(&app.session).enabled) {
+                                                    ui.set_opacity(0.35);
+                                                }
+                                                item.search_row(ui, &query, &path, None)
+                                            })
+                                            .inner;
                                         if item.highlighted && (up || down) {
                                             ui.scroll_to_rect(response.rect, None);
                                         }
@@ -580,7 +596,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
         } else {
             let index = picked.unwrap_or(app.sbox.index);
-            if let Some((id, ..)) = rows.get(index).filter(|r| solidcraft_engine::find_command(r.0).is_some_and(|c| c.info(&app.session).enabled)) {
+            if let Some((id, ..)) = rows.get(index).filter(|r| can_start(app, r.0)) {
                 app.sbox.used(id);
                 close(app);
                 app.start(id);
@@ -663,6 +679,20 @@ mod tests {
         let mut other = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
         other.sbox.load(&app.sbox.prefs());
         assert_eq!((other.sbox.pinned.clone(), other.sbox.recent.len()), (vec!["solid.extrude".to_string()], 2));
+    }
+
+    #[test]
+    fn drawing_search_exposes_only_drawing_and_explicit_source_actions() {
+        let mut app = SolveApp::new(Default::default(), Default::default());
+        assert!(!search(&app, "").iter().any(|row| row.0.starts_with("drawing.")));
+        crate::workspace::enter(&mut app, "drawing").unwrap();
+        let rows = search(&app, "");
+        assert!(rows.iter().any(|row| row.0 == "drawing.view.base"));
+        assert!(rows.iter().any(|row| row.0 == "assembly.bom"));
+        assert!(!rows.iter().any(|row| row.0 == "solid.extrude"));
+        assert!(can_start(&app, "drawing.view.base"), "known options are inspectable");
+        assert!(!can_start(&app, "drawing.view.section"), "uncertain tools cannot start");
+        assert!(!solidcraft_engine::find_command("drawing.view.base").unwrap().info(&app.session).enabled);
     }
 
     #[test]

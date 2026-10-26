@@ -215,9 +215,16 @@ labels; `prefs:measure_axis_distances` identifies the checkbox.
 | `ui.resize` | `width`, `height` | |
 | `app.quit` | `force?` (quit without asking about unsaved designs) | `quitting` (the window closes), `asking` (a "save changes?" prompt is open) |
 
-`ui.workspace {workspace?: "design" | "render"}` reads or changes the active workspace.
+`ui.workspace {workspace?: "design" | "render" | "drawing"}` reads or changes the active workspace.
 Entering Render requires finishing the current modelling operation; returning restores
 the Design camera. See [the integrated Render workspace](render-workspace.md).
+Drawing currently exposes the native UI scaffold with a blank canvas. Planned
+operations refuse engine execution; `ui.start` can inspect the agreed Base View,
+Projected View, Dimension and Note option layouts. `ui.prefs` accepts
+`drawing_sheet_dock` (`top`, `bottom`, `under_browser`), `drawing_panel_side`
+(`left`, `right`) and `drawing_panel_width` (240–560). These preferences do not
+edit the source design.
+See [Drawing UI implementation](drawing-workspace-ui.md).
 
 ### Continuous camera motion
 

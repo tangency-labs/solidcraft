@@ -506,6 +506,11 @@ preference_settings! {
     timeline_left_width: f32 = 130.0, PAGE_INTERFACE;
     /// Share the browser column, vertically, instead of a separate left column.
     timeline_under_browser: bool = false, PAGE_INTERFACE;
+    /// Drawing sheet strip placement; independent of Design's feature history.
+    drawing_sheet_dock: String = "top".into(), PAGE_INTERFACE;
+    /// Drawing properties use the same left/right, resizable panel pattern as Assistant.
+    drawing_panel_side: String = "right".into(), PAGE_INTERFACE;
+    drawing_panel_width: f32 = 320.0, PAGE_INTERFACE, accept(240.0..=560.0);
     /// Fold the shared-column history to its header.
     timeline_collapsed: bool = false, PAGE_INTERFACE;
     /// Whether the browser beside the vertical history is collapsed to its rail.
@@ -1485,6 +1490,12 @@ pub fn set(app: &mut SolveApp, p: &serde_json::Value) -> Result<serde_json::Valu
     }
     if !accepted::ui_scale(&new) || !accepted::look_at_speed(&new) {
         return Err("`ui_scale` must be 0.5…2.5 and `look_at_speed` 0.25…4".into());
+    }
+    if !accepted::drawing_panel_width(&new)
+        || !["top", "bottom", "under_browser"].contains(&new.drawing_sheet_dock.as_str())
+        || !["left", "right"].contains(&new.drawing_panel_side.as_str())
+    {
+        return Err("Drawing preferences require a valid docking position and panel width of 240…560".into());
     }
     if solidcraft_engine::doc::display_quality::DisplayQuality::parse(&new.display_quality).is_none() {
         return Err("`display_quality` must be coarse, normal, fine or ultra".into());

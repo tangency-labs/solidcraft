@@ -17,6 +17,12 @@ fn command_accent(icon: &str) -> Color32 {
     crate::icon_svg::primary(icon, crate::theme::is_dark(), crate::theme::vision())
 }
 
+/// Planned Drawing tools stay visually unavailable, but reviewed option layouts can open.
+/// Execution availability remains entirely owned by the engine command.
+fn can_start(app: &SolveApp, command: &solidcraft_engine::CommandSpec) -> bool {
+    command.info(&app.session).enabled || (crate::drawing_workspace::active(app) && crate::drawing_workspace::can_open_options(command.id))
+}
+
 /// Accent for a tab or a panel with a more specific semantic role.
 fn panel_accent(t: &Tokens, tab: &str, panel: &str) -> Color32 {
     if panel == "CONSTRAIN" {
@@ -762,6 +768,7 @@ fn ribbon_button_galley(painter: &egui::Painter, label: &str, width: f32, color:
 
 /// Ribbon headings use the translated labels, with normal word casing instead of registry caps.
 fn ribbon_label(app: &SolveApp, label: &str) -> String {
+    let label = crate::workspace::tab_label(label);
     let label = app
         .tr_label(label)
         .split_whitespace()
@@ -957,7 +964,14 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             painter.line_segment([ws.right_top(), ws.right_bottom()], Stroke::new(1.0, t.border));
         }
         let render = crate::render_workspace::active(app);
-        let workspace_icon = if render { "ws_render" } else { "ws_design" };
+        let drawing = crate::drawing_workspace::active(app);
+        let workspace_icon = if drawing {
+            "ws_drawing"
+        } else if render {
+            "ws_render"
+        } else {
+            "ws_design"
+        };
         icons::paint_icon(
             &painter,
             Rect::from_center_size(pos2(ws.center().x, ws.top() + if labels { 39.0 } else { 25.0 }), vec2(30.0, 30.0)),
@@ -967,7 +981,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
         ribbon_text(
             ui,
             pos2(ws.center().x, ws.top() + if labels { 69.0 } else { 50.0 }),
-            app.tr(if render { "ui.render" } else { "ui.design" }),
+            if drawing { app.tr_label("Drawing") } else { app.tr(if render { "ui.render" } else { "ui.design" }) },
             t.font_button,
             t.text,
             true,
@@ -1025,7 +1039,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     .map(|c| {
                         let family = crate::sketch_families::family(c.id)
                             .filter(|f| tab == "SKETCH" && *panel == "CREATE" && f.commands.first().copied() == Some(c.id));
-                        let label = family.map_or_else(|| crate::workspace::ribbon_button_label(c), |f| f.label);
+                        let label = family.map_or_else(|| crate::workspace::ribbon_button_label_in(&tab, c), |f| f.label);
                         if labels {
                             ButtonSize { width: ribbon_button_width(&painter, app.tr_label(label)), min_width: BUTTON_MIN_WIDTH }
                         } else {
@@ -1161,7 +1175,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let family_open = family.is_some_and(|f| egui::Popup::is_id_open(ui.ctx(), ui.id().with(("family", f.label)).with("popup")));
                 if !finish && (resp.is_pointer_button_down_on() || running.as_deref() == Some(selected.id) || family_open) {
                     painter.rect(whole, t.radius_sm, accent.soft, Stroke::new(1.0, accent.color), egui::StrokeKind::Inside);
-                } else if resp.hovered() && info.enabled {
+                } else if resp.hovered() && can_start(app, selected) {
                     painter.rect_filled(whole, t.radius_sm, t.hover);
                 }
                 let icon = if selected.id == "sketch.finish" { "finish" } else { selected.icon };
@@ -1170,8 +1184,8 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                     Rect::from_center_size(pos2(br.center().x, whole.top() + if labels { 16.0 } else { button_height / 2.0 }), vec2(side, side));
                 icons::paint_icon(&painter, icon_rect, icon, if info.enabled { 1.0 } else { 0.35 });
                 let tr_label = app.tr_label(selected.label).to_string();
-                resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled() && info.enabled, &tr_label));
-                if ribbon_tooltip(app, resp, selected, info.disabled_reason.as_deref()).clicked() && info.enabled {
+                resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled() && can_start(app, selected), &tr_label));
+                if ribbon_tooltip(app, resp, selected, info.disabled_reason.as_deref()).clicked() && can_start(app, selected) {
                     let id = selected.id;
                     app.start(id);
                 }
@@ -1202,7 +1216,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         sketch_menu_rows(app, ui, &variants, &mut menu, &mut toggle);
                     });
                 } else if labels {
-                    let label = app.tr_label(crate::workspace::ribbon_button_label(selected));
+                    let label = app.tr_label(crate::workspace::ribbon_button_label_in(&tab, selected));
                     let color = if info.enabled { t.text } else { t.text_dim };
                     let galley = ribbon_button_galley(&painter, label, whole.width() - BUTTON_LABEL_PADDING, color);
                     painter.galley(pos2(whole.center().x, whole.top() + 32.0), galley, t.text);
@@ -1355,7 +1369,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                             // focused: the first or the last), instead of egui's own spatial move.
                             let (down, up) = ui.input(|i| (i.key_pressed(egui::Key::ArrowDown), i.key_pressed(egui::Key::ArrowUp)));
                             if down || up {
-                                let enabled: Vec<&str> = cmds.iter().filter(|c| c.info(&app.session).enabled).map(|c| c.id).collect();
+                                let enabled: Vec<&str> = cmds.iter().filter(|c| can_start(app, c)).map(|c| c.id).collect();
                                 let focused = ui.ctx().memory(|m| m.focused());
                                 let at = enabled.iter().position(|id| focused == Some(dropdown_row_id(id)));
                                 let n = enabled.len();
@@ -1424,7 +1438,14 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                             }
                             for c in cmds {
                                 let info = c.info(&app.session);
-                                let response = crate::ui_kit::command_menu_button(ui, c.id, c.label, c.icon, c.shortcut.unwrap_or(""), info.enabled);
+                                let response = ui
+                                    .scope(|ui| {
+                                        if !info.enabled && can_start(app, c) {
+                                            ui.set_opacity(0.35);
+                                        }
+                                        crate::ui_kit::command_menu_button(ui, c.id, c.label, c.icon, c.shortcut.unwrap_or(""), can_start(app, c))
+                                    })
+                                    .inner;
                                 crate::scenario::publish_handle(&format!("toolbar:{}", c.id), response.rect.center());
                                 if response.clicked() {
                                     app.start(c.id);
@@ -1616,7 +1637,8 @@ fn dropdown_row(app: &SolveApp, ui: &mut egui::Ui, c: &'static solidcraft_engine
     let info = c.info(&app.session);
     let (rect, _) = ui.allocate_exact_size(vec2(width, ROW_H), Sense::hover());
     // Every row drags onto the toolbar (to pin it there); enabled rows also start their command.
-    let sense = if info.enabled { Sense::click_and_drag() } else { Sense::drag() };
+    let interactive = can_start(app, c);
+    let sense = if interactive { Sense::click_and_drag() } else { Sense::drag() };
     let resp = ui.interact(rect, dropdown_row_id(c.id), sense);
     // Focus can settle on the following frame, after the key event has gone.
     // Keep the focused row visible even then in a drop-down taller than the window.
@@ -1631,10 +1653,10 @@ fn dropdown_row(app: &SolveApp, ui: &mut egui::Ui, c: &'static solidcraft_engine
     let pin = ui.interact(pr, ui.id().with(("dropdown_pin", c.id)), Sense::click());
     let pointer_on = (resp.hovered() || pin.hovered()) && !egui::DragAndDrop::has_any_payload(ui.ctx());
     let label = app.tr_label(c.label).to_string();
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled() && info.enabled, &label));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled() && interactive, &label));
     crate::scenario::publish_handle(&format!("toolbar:{}", c.id), rect.center());
     crate::scenario::publish_handle(&format!("dropdown:{}", c.id), rect.center());
-    let hot = info.enabled && (pointer_on || resp.has_focus());
+    let hot = interactive && (pointer_on || resp.has_focus());
     let mut row = crate::ui_kit::MenuItem::new(c.id, &label, c.icon);
     row.enabled = info.enabled;
     row.highlighted = hot;
@@ -1664,7 +1686,7 @@ fn dropdown_row(app: &SolveApp, ui: &mut egui::Ui, c: &'static solidcraft_engine
     if resp.secondary_clicked() {
         return RowAction::Menu(resp.interact_pointer_pos().unwrap_or(rect.left_bottom()));
     }
-    if resp.clicked() && info.enabled {
+    if resp.clicked() && interactive {
         return RowAction::Start;
     }
     RowAction::None
@@ -1809,7 +1831,7 @@ pub const ESCAPE_TWICE_S: f64 = 0.4;
 
 /// Global keyboard shortcuts (when no text field has focus).
 pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
-    if design_shown(app) {
+    if design_shown(app) && !crate::drawing_workspace::active(app) {
         crate::navigation::step_key_hold(app, ctx);
     } else {
         app.viewport.key_hold = None;
@@ -1835,7 +1857,12 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
         (keys, i.modifiers)
     });
     // Home hides the design: only New, Open and Preferences work there.
-    let shown = design_shown(app);
+    // An empty Drawing workspace has no drawing history, selection or camera. Shortcuts
+    // must not silently edit the source design behind it. Explicit source editors retain
+    // their existing shortcuts while open.
+    let drawing =
+        crate::drawing_workspace::active(app) && app.bom.is_none() && app.design_properties.is_none() && !crate::dialogs_sheet::flat_active(app);
+    let shown = design_shown(app) && !drawing;
     if shown {
         crate::edit_clipboard::handle(app, ctx);
     } else {
@@ -1843,6 +1870,16 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     }
     for (k, repeat) in keys {
         use egui::Key;
+        if drawing && k == Key::S && !mods.command && !mods.shift && !mods.alt {
+            app.start("ui.palette");
+            continue;
+        }
+        if drawing && k == Key::Escape {
+            if crate::drawing_workspace::close_panel(app) {
+                app.esc_handled = true;
+            }
+            continue;
+        }
         // Only Esc pressed twice in a row finishes a sketch: any other key in between resets it.
         if k != Key::Escape {
             app.last_escape = None;
@@ -2682,7 +2719,7 @@ mod ribbon_label_tests {
                 for command in commands.iter().take(count) {
                     for catalog in crate::i18n::LOCALES {
                         let locale = crate::i18n::Locale::for_language(catalog.id);
-                        let label = locale.label(crate::workspace::ribbon_button_label(command));
+                        let label = locale.label(crate::workspace::ribbon_button_label_in(section.tab, command));
                         let width = ribbon_button_width(&painter, label) - BUTTON_LABEL_PADDING;
                         let galley = ribbon_button_galley(&painter, label, width, Color32::WHITE);
                         assert!(galley.rows.len() <= 2, "{}: {label}", command.id);
