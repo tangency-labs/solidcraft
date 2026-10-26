@@ -52,7 +52,7 @@ fn note_add(s: &mut Session, p: &Value) -> Result<Value> {
     let anchor = req_vec3(CMD, p, "anchor")?;
     let text = str_(p, "text").ok_or_else(|| bad(CMD, "`text` is required"))?;
     if !Note::text_is_valid(text) {
-        return Err(bad(CMD, &format!("`text` must not be empty and must be at most {} characters", solidcraft_doc::notes::MAX_NOTE_CHARS)));
+        return Err(bad(CMD, format!("`text` must not be empty and must be at most {} characters", solidcraft_doc::notes::MAX_NOTE_CHARS)));
     }
     if s.doc.notes.len() >= MAX_NOTES {
         return Err(bad(CMD, "too many notes"));
@@ -75,7 +75,7 @@ fn note_update(s: &mut Session, p: &Value) -> Result<Value> {
     let text = match str_(p, "text") {
         Some(t) if Note::text_is_valid(t) => Some(t.to_string()),
         Some(_) => {
-            return Err(bad(CMD, &format!("`text` must not be empty and must be at most {} characters", solidcraft_doc::notes::MAX_NOTE_CHARS)));
+            return Err(bad(CMD, format!("`text` must not be empty and must be at most {} characters", solidcraft_doc::notes::MAX_NOTE_CHARS)));
         }
         None => None,
     };
