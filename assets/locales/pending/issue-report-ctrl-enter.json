@@ -1,0 +1,18 @@
+{
+  "en": {
+    "Ctrl+Enter continues on GitHub.": "Ctrl+Enter continues on GitHub.",
+    "⌘Enter continues on GitHub.": "⌘Enter continues on GitHub."
+  },
+  "de": {
+    "Ctrl+Enter continues on GitHub.": "Strg+Enter geht weiter zu GitHub.",
+    "⌘Enter continues on GitHub.": "⌘Enter geht weiter zu GitHub."
+  },
+  "ja": {
+    "Ctrl+Enter continues on GitHub.": "Ctrl+EnterでGitHubに進みます。",
+    "⌘Enter continues on GitHub.": "⌘EnterでGitHubに進みます。"
+  },
+  "zh": {
+    "Ctrl+Enter continues on GitHub.": "按Ctrl+Enter在GitHub中继续。",
+    "⌘Enter continues on GitHub.": "按⌘Enter在GitHub中继续。"
+  }
+}

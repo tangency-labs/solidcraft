@@ -1132,6 +1132,34 @@ mod tests {
         }
     }
 
+    /// Ctrl+Enter (⌘Enter on a Mac) continues on GitHub from a field, without a line break, and
+    /// asks for a description first like the button does (#7203).
+    #[test]
+    fn issue_report_ctrl_enter_continues_on_github() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
+        h.frames(8);
+        assert!(h.widget(form::shortcut_hint(h.ctx.os())).is_some(), "the dialog says so");
+        let enter = egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND };
+        let press = |h: &mut crate::scenario::Harness| {
+            h.frame_with(vec![enter.clone()]);
+            let mut commands = h.output.commands.clone();
+            h.frames(2);
+            commands.extend(h.output.commands.clone());
+            commands
+        };
+        let commands = press(&mut h);
+        assert!(!commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(_))));
+        assert!(h.app.issue_report.draft.as_ref().unwrap().missing_description, "an empty description is asked for");
+        h.frame_with(vec![egui::Event::Text("The preview disappeared".into())]);
+        let commands = press(&mut h);
+        assert!(commands.iter().any(|c| matches!(c, egui::OutputCommand::OpenUrl(url) if url.url.starts_with(ISSUE_URL))), "{commands:?}");
+        let draft = h.app.issue_report.draft.as_ref().unwrap();
+        assert_eq!(draft.description, "The preview disappeared", "no line break");
+        assert!(draft.opened_github);
+    }
+
     #[test]
     fn crash_draft_marks_later_detection_without_losing_native_evidence() {
         let message =

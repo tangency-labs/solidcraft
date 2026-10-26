@@ -12,6 +12,11 @@ const ALL_GUIDANCE: [&str; 4] = [
     "Opens your browser. Review and submit your report on GitHub.",
 ];
 
+/// The keys that continue on GitHub from any field (#7203), as this computer spells them.
+pub(super) fn shortcut_hint(os: egui::os::OperatingSystem) -> &'static str {
+    if os == egui::os::OperatingSystem::Mac { "⌘Enter continues on GitHub." } else { "Ctrl+Enter continues on GitHub." }
+}
+
 fn answer(ui: &mut Ui, label: &str, hint: &str, text: &mut String, id: &str, rows: usize) -> egui::Response {
     ui_kit::text(ui, tr_label(label), ui_kit::Text::Heading(label));
     ui_kit::text(ui, tr_label(hint), ui_kit::Text::Note(hint));
@@ -89,7 +94,10 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
     let t = crate::theme::Tokens::get();
     let screen = ctx.content_rect();
     let cards = ((screen.width() - 2.0 * t.space_16) / t.form_card_width).clamp(0.5, 2.6);
-    let (closed, action) = ui_kit::Window::new(Id::new("sc_issue_report"), "bug_report", tr_label("Report a bug"))
+    // Ctrl+Enter (⌘Enter on a Mac) in any field continues on GitHub. Read before the fields see
+    // it, so it adds no line break.
+    let submit = ctx.input_mut(|i| i.consume_key(egui::Modifiers::COMMAND, egui::Key::Enter));
+    let (closed, mut action) = ui_kit::Window::new(Id::new("sc_issue_report"), "bug_report", tr_label("Report a bug"))
         .cards(cards)
         .anchor(egui::Align2::CENTER_TOP, vec2(0.0, t.space_16))
         .fields()
@@ -164,6 +172,7 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                                 draft.missing_description = false;
                             }
                         }
+                        ui_kit::text(ui, tr_label(shortcut_hint(ui.ctx().os())), ui_kit::Text::Note("shortcut"));
                         let steps = answer(
                             ui,
                             "Steps to reproduce (optional)",
@@ -194,6 +203,9 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                     });
             });
         });
+    if submit && action == ui_kit::Action::None {
+        action = ui_kit::Action::Ok;
+    }
     // TextEdit applies this frame's events while it is drawn. Export only after every editor
     // has processed its input, including diagnostic redactions.
     match action {
