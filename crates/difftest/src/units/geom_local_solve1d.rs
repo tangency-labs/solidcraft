@@ -734,7 +734,8 @@ impl UnitDiff for Runner {
                 maximize: rng.chance(0.5),
             }
         } else {
-            let n = rng.below(24) as usize;
+            // At least one step: an empty queue yields no outputs to compare (vacuous).
+            let n = 1 + rng.below(24) as usize;
             let alt = rng.chance(0.6);
             let steps = (0..n)
                 .map(|k| {
