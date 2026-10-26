@@ -1522,13 +1522,14 @@ mod tests {
     fn unculled_solves_stop_at_the_branch_bound() {
         // fuzz01043: boxes of `-1.8e308` weights cull nothing, so the global solve
         // visited branches for minutes (issue #504). It now stops past
-        // `MAX_SOLVE_BRANCHES`; `GlobalCurveSolve` ignores the solve's status (as
-        // upstream) and keeps the 20 solutions found by then.
+        // `MAX_SOLVE_BRANCHES` (`2^23`); `GlobalCurveSolve` ignores the solve's status
+        // (as upstream) and keeps the 139 solutions found by then (20 under the old
+        // `2^20`). It takes about 14 s in the difftest profile, the optimised build CI
+        // runs the unit runners in (`--profile difftest --features cpp`).
         let out = corpus_rust("fuzz01043_rust_hang");
         assert_eq!(out.ints["status"], vec![0], "{out:?}");
-        assert_eq!(out.values["out"].first(), Some(&20.0), "{out:?}");
+        assert_eq!(out.values["out"].first(), Some(&139.0), "{out:?}");
     }
-
 
     /// Generated cases mostly run (pass or defer), not harness errors.
     #[test]

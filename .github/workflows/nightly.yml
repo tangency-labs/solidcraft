@@ -67,6 +67,12 @@ jobs:
           echo "fuzz: $failed unit(s) failed"
           test "$failed" -eq 0
 
+      # Owner-approved (2026-10-26): a regression too slow for every PR (~3 min): the
+      # tiny-scale torus booleans finish under MAX_SOLVE_BRANCHES (geom::global_solver).
+      - name: Slow regressions
+        if: ${{ !cancelled() }}
+        run: cargo test -p solidcore --release --test max_solve_branches_tiny_torus -- --ignored
+
       - name: Upload fuzz reproducers (failures and diagnostic notes)
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
