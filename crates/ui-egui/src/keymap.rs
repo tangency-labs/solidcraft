@@ -1671,7 +1671,9 @@ mod tests {
         let e = bind(&mut a, "solid.revolve", "M", false).unwrap_err();
         assert!(e.contains("already used by Move/Copy"), "{e}");
         bind(&mut a, "solid.revolve", "M", true).unwrap();
-        assert_eq!(commands_for(&a, "M"), vec!["solid.revolve"]);
+        // The sketch Move keeps its own M: a model command and a sketch tool share the key (#4163).
+        assert!(commands_for(&a, "M").contains(&"solid.revolve"));
+        assert!(commands_for(&a, "M").contains(&"sketch.move"));
         assert_eq!(effective(&a, "solid.move"), None);
         assert!(bind(&mut a, "solid.revolve", "Ctrl+Z", false).is_err(), "reserved");
         // Kept between runs.
