@@ -9,6 +9,7 @@
 //! |---------------------------------------------------|----------------------------------------|
 //! | [`BSplineCurve::is_intersector_approx`]           | `IsIntersectorApprox`                  |
 //! | [`BSplineCurve::calculate_bounding_box`], [`BoundingBoxRequest`], [`BoundingBoxes`] | `CalculateBoundingBox` |
+//! | [`BSplineCurve::is_planar`], [`Planar`]     | `SmCurve::IsPlanar`                    |
 //! | [`BSplineCurve::create_analytic_curve`], [`AnalyticCurve`] | `CreateAnalyticCurve`         |
 //! | [`BSplineCurve::create_by_joining`]               | `CreateByJoining`                      |
 //! | [`BSplineCurve::create_point_curve`]              | `CreatePointCurve`                     |
@@ -88,14 +89,14 @@ use crate::curve::curve::{Curve, CurveKind};
 use crate::curve::ellipse::{Ellipse, EllipseOptions};
 use crate::curve::line::{BoundedLineOptions, Line};
 use crate::curve::offset_curve::OffsetCurve;
-use crate::error::{Result, SolidError};
+use crate::error::{ignored, Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::geom_utility::p1::triangle_area_squared;
 use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::polar_box::PolarBox;
-use crate::geom::pseudo_box::PseudoBox;
+use crate::geom::pseudo_box::{Planar, PseudoBox};
 use crate::geom::tol::{are_same, is_zero, is_zero_to_tol, ANG_TOL_DEG, ZONE_TOL_3D};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
@@ -439,6 +440,27 @@ impl BSplineCurve {
         req: BoundingBoxRequest,
     ) -> Result<BoundingBoxes> {
         self.calculate_bounding_box_onto(interval, req, PseudoBox::new())
+    }
+
+    /// `IsPlanar` (`SmCurve::IsPlanar` on a B-spline curve): [`PseudoBox::is_planar`] of
+    /// the curve's pseudo box over its natural interval, with the plane point, the
+    /// (not unitised) plane normal and the deviation (`tol == EFF_ZERO` lets the box pick
+    /// its scaled zero).
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] from [`BSplineCurve::calculate_bounding_box`] (whose
+    /// other failures leave the default box, as upstream ignores the status).
+    pub fn is_planar(&self, tol: f64) -> Result<Planar> {
+        let req = BoundingBoxRequest {
+            normal: false,
+            pseudo: true,
+            polar: false,
+        };
+        let pseudo = ignored(self.calculate_bounding_box(&self.natural_interval(), req))?
+            .and_then(|b| b.pseudo)
+            .unwrap_or_else(PseudoBox::new);
+        Ok(pseudo.is_planar(tol))
     }
 
     /// [`BSplineCurve::calculate_bounding_box`] onto the caller's pseudo box (upstream's

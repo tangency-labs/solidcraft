@@ -1,0 +1,39 @@
+# C++ merges across a continuation that folds; the port refuses it (SolidCraft change from
+# tangency-labs/smlib 1b6f5fa, tangency-labs/solidcore#434). The case becomes a
+# `deviation(#434)` once difftest has that outcome (#989); it is a declared, deliberate
+# divergence, not an unfixed port bug.
+[[mismatch]]
+unit = "surface.surface_p3"
+case = "gen0041"
+why = "CoverCoincidentSurface refuses a cover whose continued domain folds: this surface's Du x Dv normal turns back (dot <= 0) between neighbouring samples of the 21 x 21 grid over the domain the merge would use. C++ success=true, Rust success=false. SolidCraft change, tangency-labs/smlib 1b6f5fa, tangency-labs/solidcore#434 (plan/findings/surface.surface_p3--cover-refuses-a-folded-continuation.md)."
+
+[[mismatch]]
+unit = "surface.surface_p3"
+case = "gen1448"
+why = "CoverCoincidentSurface refuses a cover whose continued domain folds: this surface's Du x Dv normal turns back (dot <= 0) between neighbouring samples of the 21 x 21 grid over the domain the merge would use. C++ success=true, Rust success=false. SolidCraft change, tangency-labs/smlib 1b6f5fa, tangency-labs/solidcore#434 (plan/findings/surface.surface_p3--cover-refuses-a-folded-continuation.md)."
+
+[[mismatch]]
+unit = "surface.surface_p3"
+case = "gen1514"
+why = "CoverCoincidentSurface refuses a cover whose continued domain folds: this surface's Du x Dv normal turns back (dot <= 0) between neighbouring samples of the 21 x 21 grid over the domain the merge would use. C++ success=true, Rust success=false. SolidCraft change, tangency-labs/smlib 1b6f5fa, tangency-labs/solidcore#434 (plan/findings/surface.surface_p3--cover-refuses-a-folded-continuation.md)."
+
+[[mismatch]]
+unit = "surface.surface_p3"
+case = "gen1567"
+why = "CoverCoincidentSurface refuses a cover whose continued domain folds: this surface's Du x Dv normal turns back (dot <= 0) between neighbouring samples of the 21 x 21 grid over the domain the merge would use. C++ success=true, Rust success=false. SolidCraft change, tangency-labs/smlib 1b6f5fa, tangency-labs/solidcore#434 (plan/findings/surface.surface_p3--cover-refuses-a-folded-continuation.md)."
+
+[[mismatch]]
+unit = "surface.surface_p3"
+case = "gen2066"
+why = "CoverCoincidentSurface refuses a cover whose continued domain folds: this surface's Du x Dv normal turns back (dot <= 0) between neighbouring samples of the 21 x 21 grid over the domain the merge would use. C++ success=true, Rust success=false. SolidCraft change, tangency-labs/smlib 1b6f5fa, tangency-labs/solidcore#434 (plan/findings/surface.surface_p3--cover-refuses-a-folded-continuation.md)."
+
+[[mismatch]]
+unit = "surface.surface_p3"
+case = "gen2303"
+why = "CoverCoincidentSurface refuses a cover whose continued domain folds: this surface's Du x Dv normal turns back (dot <= 0) between neighbouring samples of the 21 x 21 grid over the domain the merge would use. C++ success=true, Rust success=false. SolidCraft change, tangency-labs/smlib 1b6f5fa, tangency-labs/solidcore#434 (plan/findings/surface.surface_p3--cover-refuses-a-folded-continuation.md)."
+
+[[mismatch]]
+unit = "surface.surface_p3"
+case = "gen2376"
+why = "CoverCoincidentSurface refuses a cover whose continued domain folds: this surface's Du x Dv normal turns back (dot <= 0) between neighbouring samples of the 21 x 21 grid over the domain the merge would use. C++ success=true, Rust success=false. SolidCraft change, tangency-labs/smlib 1b6f5fa, tangency-labs/solidcore#434 (plan/findings/surface.surface_p3--cover-refuses-a-folded-continuation.md)."
+

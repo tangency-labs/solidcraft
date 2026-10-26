@@ -47,6 +47,13 @@
 //!   runs in between, so the order is upstream's).
 //!   [`Surface::cover_coincident_surface`] keeps returning [`SolidError::Unported`]
 //!   (`topology.face_p1`) for a face-owned surface for callers without the B-rep.
+//! - **A folded continuation is not covered.** SolidCraft change,
+//!   tangency-labs/smlib 1b6f5fa (`SmSurface::CoverCoincidentSurface`, before its
+//!   `AdjustSTEPUVDomain`): when a B-spline-based surface would be extended past its
+//!   natural domain, its normal may neither vanish nor turn back between neighbouring
+//!   samples of a 21 x 21 grid over the domain the merge uses; otherwise the cover fails
+//!   (the faces keep the edge between them) instead of merging onto a continuation that
+//!   is not one sheet. tangency-labs/solidcore#434.
 
 use crate::error::{ignored, Result, SolidError};
 use crate::geom::assert_array::labels;
@@ -93,6 +100,11 @@ const SMP_CNT: usize = 5;
 const NUM_SAMPLES: usize = 6;
 /// `lNumBdrySamples` of `CoverCoincidentSurface`: the samples along each boundary.
 const NUM_BDRY_SAMPLES: usize = 15;
+/// `lNumFoldSamples` of the fork's `CoverCoincidentSurface`: the `21 x 21` grid over the
+/// extended domain whose normals must neither vanish nor turn back.
+const NUM_FOLD_SAMPLES: usize = 21;
+/// `lNumFoldSamples - 1.0`: the grid's step in fractions of the domain.
+const NUM_FOLD_SAMPLES_DENOM: f64 = (NUM_FOLD_SAMPLES - 1) as f64;
 
 /// `Side` of an upstream `bFromLeft` flag.
 const fn side(from_left: bool) -> Side {
@@ -1151,6 +1163,56 @@ impl Surface {
         let orig_domain = self.step_uv_domain();
         let update_domain = orig_domain.union(&new_domain);
 
+        // SolidCraft change, tangency-labs/smlib 1b6f5fa (tangency-labs/solidcore#434): a
+        // B-spline surface covers past its natural domain by continuing its end spans, and
+        // that continuation need not be one sheet: the straight lines of a swept planar
+        // sector run on through the sector's centre and turn back over it, and a curved end
+        // span bends round. Points of `other` then drop onto the wrong sheet, the merged
+        // face's UV domain spans the fold, and the face rebuilt on it gets UV trims far from
+        // its edges (two swept arc walls sharing their top and bottom planes, joined: UV gaps
+        // and the wrong volume). The continued surface must not fold over the domain the
+        // merge will use: its normal must not vanish or turn back between neighbouring
+        // samples of a grid over that domain.
+        if out_of_bounds_enabled(self).is_some()
+            && !update_domain.is_contained_by(&orig_domain, 0.0)
+        {
+            let Some((_, reference)) = self.step_normal(k, orig_domain.evaluate(0.5, 0.5))? else {
+                return Ok(failure);
+            };
+            let mut previous: Vec<Vec3> = Vec::new();
+            for ii in 0..NUM_FOLD_SAMPLES {
+                let mut row: Vec<Vec3> = Vec::with_capacity(NUM_FOLD_SAMPLES);
+                for jj in 0..NUM_FOLD_SAMPLES {
+                    let uv = update_domain.evaluate(
+                        ii as f64 / NUM_FOLD_SAMPLES_DENOM,
+                        jj as f64 / NUM_FOLD_SAMPLES_DENOM,
+                    );
+                    let Some((normal, length)) = self.step_normal(k, uv)? else {
+                        return Ok(failure);
+                    };
+                    // A normal of no length is a fold or a pole (`!(length > limit)`, so an
+                    // incomparable length refuses too).
+                    if length.partial_cmp(&(EFF_ZERO_SQRT * reference))
+                        != Some(core::cmp::Ordering::Greater)
+                    {
+                        return Ok(failure);
+                    }
+                    let unit = normal / length;
+                    if row
+                        .last()
+                        .is_some_and(|previous_in_row| unit.dot(*previous_in_row) <= 0.0)
+                        || previous
+                            .get(jj)
+                            .is_some_and(|above| unit.dot(*above) <= 0.0)
+                    {
+                        return Ok(failure);
+                    }
+                    row.push(unit);
+                }
+                previous = row;
+            }
+        }
+
         // (status ignored upstream)
         ignored(self.adjust_step_uv_domain(k, &update_domain))?;
 
@@ -1162,6 +1224,27 @@ impl Surface {
             covered_step_domain: Some(new_domain),
             remove_uv_trim_curves_of: self.face_owner(),
         })
+    }
+
+    /// The normal (`Du × Dv`) and its length at `uv` in the STEP parameterisation
+    /// (`EvaluateSTEP(uv, 1, 1, .., TRUE, ..)`); `None` when the evaluation fails, which
+    /// `CoverCoincidentSurface`'s fold rule treats as "not coincident".
+    ///
+    /// # Errors
+    ///
+    /// Those of the evaluation.
+    fn step_normal(&self, k: &Kernel, uv: Point2) -> Result<Option<(Vec3, f64)>> {
+        let Some(d) = ignored(self.evaluate_step(k, uv, 1, 1, EvaluateFlags::default()))? else {
+            return Ok(None);
+        };
+        let (Some(du), Some(dv)) = (
+            d.get(1).and_then(|row| row.first()).copied(),
+            d.first().and_then(|row| row.get(1)).copied(),
+        ) else {
+            return Ok(None);
+        };
+        let normal = du.cross(dv);
+        Ok(Some((normal, normal.length())))
     }
 
     /// The face that owns this surface directly (`GetOwner()` when it is an `SmFace`),
@@ -1690,5 +1773,69 @@ mod tests {
         set_out_of_bounds_enabled(&mut s, true);
         set_out_of_bounds_enabled(&mut s, false);
         assert_eq!(gen_flag(&s), Some(false));
+    }
+
+    /// A B-spline surface covers past its natural domain by continuing its end spans, and
+    /// that continuation need not be one sheet. This one's u derivative vanishes at
+    /// `u = 1.5` and turns back: it must not cover a coincident plane that needs that
+    /// continuation (SolidCraft change, tangency-labs/smlib 1b6f5fa, #434).
+    #[test]
+    fn cover_refuses_a_continuation_that_folds() -> Result<()> {
+        use crate::nurbs::b_spline_surface::p1::BSplineSurface as Bss;
+        use crate::nurbs::math::CPoint;
+        use crate::nurbs::srf_basic::Surface as NlSurface;
+
+        let k = Kernel::default();
+        // u: the cubic Bezier through x = 0, 1, 2, 23/9 (its x derivative is zero at
+        // u = 1.5: 0.25 - 1.5 + 2.25 * 5/9); v: straight in y. The sheet is z = 0 and the
+        // natural u domain is [0, 1], so only the continuation past u = 1 folds.
+        let xs = [0.0, 1.0, 2.0, 2.0 + 5.0 / 9.0];
+        let net = xs
+            .iter()
+            .map(|x| {
+                vec![
+                    CPoint::from_point(Vec3::new(*x, 0.0, 0.0)),
+                    CPoint::from_point(Vec3::new(*x, 1.0, 0.0)),
+                ]
+            })
+            .collect();
+        let nl = NlSurface::new(
+            net,
+            3,
+            1,
+            vec![0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            vec![0.0, 0.0, 1.0, 1.0],
+        )?;
+        let mut this = Surface::from(Bss::from_nurb(nl, false));
+        // The coincident plane patch from x = 0 to x = 3 (u = 1.5 on the surface above).
+        let net = vec![
+            vec![
+                CPoint::from_point(Vec3::new(0.0, 0.0, 0.0)),
+                CPoint::from_point(Vec3::new(0.0, 1.0, 0.0)),
+            ],
+            vec![
+                CPoint::from_point(Vec3::new(3.0, 0.0, 0.0)),
+                CPoint::from_point(Vec3::new(3.0, 1.0, 0.0)),
+            ],
+        ];
+        let other = Surface::from(Bss::from_nurb(
+            NlSurface::new(
+                net,
+                1,
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+                vec![0.0, 0.0, 1.0, 1.0],
+            )?,
+            false,
+        ));
+
+        let covered = this.cover_coincident_surface(&k, &other, 1.0e-6, None)?;
+        assert!(
+            !covered.success,
+            "the fold at u = 1.5 must not be covered: {covered:?}"
+        );
+        // Nothing was changed by the refused cover.
+        assert_eq!(this.step_uv_domain().u_interval().max(), 1.0);
+        Ok(())
     }
 }

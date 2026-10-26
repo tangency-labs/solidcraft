@@ -32,6 +32,7 @@ use solidcore::kernel::Kernel;
 use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
 use solidcore::primitive::api_curves as curves;
 use solidcore::primitive::api_primitives as primitives;
+use solidcore::primitive::primitive_creation::SweepOptions;
 use solidcore::surface::surface::p2::SurfaceKind;
 use solidcore::surface::surface::Surface;
 use solidcore::sweep::api_brep as sweeps;
@@ -229,6 +230,24 @@ pub enum Step {
         #[serde(default = "ruled")]
         degree: usize,
     },
+    /// `SmApiCreateCurveSweep`: the closed `profile` (built in `plane`, moved by
+    /// `origin`, so its plane is normal to the path's start tangent) swept along the
+    /// single `path` arc or line (in the XY plane at the world origin), capped at both
+    /// ends. The profile keeps its place relative to the path's start.
+    Sweep {
+        /// Body written.
+        id: String,
+        /// Closed loops of segments, in the plane's (u, v) coordinates.
+        profile: Vec<Seg>,
+        /// Plane of the profile (default XY).
+        #[serde(default)]
+        plane: ProfilePlane,
+        /// Where the plane's origin sits.
+        #[serde(default)]
+        origin: P3,
+        /// The path: one arc or line in the plane's (u, v) coordinates.
+        path: Seg,
+    },
     /// Reflection of `body` in the plane `normal = at`; the original is not changed, join
     /// the two with a `union` step. `SM_API` has no mirror, so this defers (see `step_rust`).
     Mirror {
@@ -359,6 +378,8 @@ pub enum ProfilePlane {
     Yz,
     /// u along Z, v along X, normal +Y.
     Zx,
+    /// u along X, v along Z, normal -Y (XY turned +90 degrees about X).
+    Xz,
 }
 
 /// The axis a mirror plane is perpendicular to.
@@ -516,6 +537,7 @@ impl Step {
             | Self::Revolve { id, .. }
             | Self::Pipe { id, .. }
             | Self::Loft { id, .. }
+            | Self::Sweep { id, .. }
             | Self::Mirror { id, .. }
             | Self::Fillet { id, .. }
             | Self::OffsetFaces { id, .. }
@@ -533,6 +555,7 @@ impl Step {
             | Self::Revolve { .. }
             | Self::Pipe { .. }
             | Self::Loft { .. }
+            | Self::Sweep { .. }
             | Self::SheetCorner { .. } => Vec::new(),
             Self::Union { a, b, .. }
             | Self::Difference { a, b, .. }
@@ -559,6 +582,13 @@ fn valid_profile(profile: &[Seg]) -> bool {
             } => pt(center) && radius.is_finite() && start_deg.is_finite() && end_deg.is_finite(),
             Seg::Circle { center, radius } => pt(center) && radius.is_finite(),
         })
+}
+
+/// A sweep path has only lines and arcs (and its numbers are finite, checked by
+/// [`valid_profile`]).
+fn valid_path_segments(path: &[Seg]) -> bool {
+    path.iter()
+        .all(|s| matches!(s, Seg::Line { .. } | Seg::Arc { .. }))
 }
 
 /// Every step reads only bodies written before it, the last step writes [`RESULT`],
@@ -628,9 +658,7 @@ pub fn validate(case: &Case) -> Result<(), String> {
             } => {
                 radius.is_finite()
                     && origin.iter().all(|x| x.is_finite())
-                    && path
-                        .iter()
-                        .all(|s| matches!(s, Seg::Line { .. } | Seg::Arc { .. }))
+                    && valid_path_segments(path)
                     && valid_profile(path)
             }
             Step::Loft { sections, .. } => {
@@ -640,6 +668,16 @@ pub fn validate(case: &Case) -> Result<(), String> {
                     })
             }
             Step::Mirror { at, .. } => at.is_finite(),
+            Step::Sweep {
+                profile,
+                origin,
+                path,
+                ..
+            } => {
+                origin.iter().all(|x| x.is_finite())
+                    && valid_profile(profile)
+                    && valid_path_segments(std::slice::from_ref(path))
+            }
             Step::Fillet { edges, radius, .. } => {
                 edges.iter().flatten().all(|x| x.is_finite()) && radius.is_finite()
             }
@@ -858,18 +896,20 @@ fn profile_curves(
         }
     }
     // XY -> YZ is the turn x -> y -> z -> x: 120 degrees about (1, 1, 1); ZX is 240.
+    // XZ is XY turned 90 degrees about X, so u is x and v is z.
     let turn = match plane {
         ProfilePlane::Xy => None,
-        ProfilePlane::Yz => Some(120.0),
-        ProfilePlane::Zx => Some(240.0),
+        ProfilePlane::Yz => Some((Vec3::new(1.0, 1.0, 1.0), 120.0)),
+        ProfilePlane::Zx => Some((Vec3::new(1.0, 1.0, 1.0), 240.0)),
+        ProfilePlane::Xz => Some((Vec3::X, 90.0)),
     };
     for c in &mut out {
-        if let Some(deg) = turn {
+        if let Some((axis, deg)) = turn {
             api_rotate(
                 k,
                 Some(TransformObject::Curve(c)),
                 Vec3::new(0.0, 0.0, 0.0),
-                Vec3::new(1.0, 1.0, 1.0),
+                axis,
                 deg,
             )
             .map_err(|e| solid(&e))?;
@@ -949,6 +989,7 @@ fn step_rust(k: &mut Kernel, bodies: &mut BTreeMap<String, Brep>, step: &Step) -
                 ProfilePlane::Xy => Vec3::new(0.0, 0.0, 1.0),
                 ProfilePlane::Yz => Vec3::new(1.0, 0.0, 0.0),
                 ProfilePlane::Zx => Vec3::new(0.0, 1.0, 0.0),
+                ProfilePlane::Xz => Vec3::new(0.0, -1.0, 0.0),
             };
             sweeps::create_linear_sweep(k, &refs, normal, *distance, true).map_err(|e| solid(&e))?
         }
@@ -998,6 +1039,7 @@ fn step_rust(k: &mut Kernel, bodies: &mut BTreeMap<String, Brep>, step: &Step) -
                     ProfilePlane::Xy => Vec3::new(u, v, 0.0),
                     ProfilePlane::Yz => Vec3::new(0.0, u, v),
                     ProfilePlane::Zx => Vec3::new(v, 0.0, u),
+                    ProfilePlane::Xz => Vec3::new(u, 0.0, v),
                 }
                 .unitize()
                 .map_err(|e| solid(&e))?;
@@ -1042,6 +1084,33 @@ fn step_rust(k: &mut Kernel, bodies: &mut BTreeMap<String, Brep>, step: &Step) -
                 .map_err(|e| solid(&e))?
                 .brep
         }
+        Step::Sweep {
+            profile,
+            plane,
+            origin,
+            path,
+            ..
+        } => {
+            let cs = profile_curves(k, profile, *plane, *origin)?;
+            // The path is one arc or line in the XY plane at the world origin (no plane
+            // turn, no translation), so the profile's plane is normal to its start tangent.
+            let path = profile_curves(k, std::slice::from_ref(path), ProfilePlane::Xy, [0.0; 3])?
+                .into_iter()
+                .next()
+                .ok_or_else(|| Run::Error("sweep path has no curve".into()))?;
+            let refs: Vec<Option<&Curve>> = cs.iter().map(Some).collect();
+            let options = SweepOptions {
+                cap_ends: true,
+                // `SMLIB_SWEEP_FOLLOW`: the profile turns with the path's frame.
+                translational_sweep: false,
+                move_profile_center_to_path: false,
+                orient_profile_perpendicular_to_path: false,
+                move_to_profile: false,
+            };
+            sweeps::create_curve_sweep(k, &refs, Some(&path), None, None, Some(&options))
+                .map_err(|e| solid(&e))?
+                .brep
+        }
         // SM_API has no mirror and no matrix transform: SmBrep::Mirror and
         // SmBrep::Transform(double[4][4]) are SMLib-level and not ported. The nearest
         // SM_API route, SmApiScaleByPt with a reflecting scale, is refused for any body
@@ -1083,7 +1152,49 @@ fn step_rust(k: &mut Kernel, bodies: &mut BTreeMap<String, Brep>, step: &Step) -
     Ok(())
 }
 
+/// Makes the NURB of every analytic surface that the operation left without one (a
+/// boolean result's swept faces carry an `SmSurfOfExtrusion` whose base has none).
+/// Upstream's first `SmBSplineSurface::CalculateBoundingBox` makes it through the virtual
+/// `GetOrCreateGwNurbPointer`; the port's bounding box is a `const` method and returns
+/// `SM_ERR` instead, so the volume of such a body would fail here (recorded in
+/// plan/findings/query.brep--boolean-results-need-their-analytic-nurbs.md).
+fn make_missing_nurbs(k: &Kernel, b: &mut Brep) -> Result<(), SolidError> {
+    for f in b.face_list().to_vec() {
+        let Ok(face) = b.face_mut(f) else { continue };
+        let Some(surface) = face.surface.as_mut() else {
+            continue;
+        };
+        let missing = match surface.kind() {
+            SurfaceKind::Plane(s) => s.base().gw_nurb().is_none(),
+            SurfaceKind::Cone(s) => s.rev().base().gw_nurb().is_none(),
+            SurfaceKind::Sphere(s) => s.base().base().gw_nurb().is_none(),
+            SurfaceKind::Torus(s) => s.base().base().gw_nurb().is_none(),
+            SurfaceKind::SurfOfRevolution(s) => s.base().gw_nurb().is_none(),
+            SurfaceKind::SurfOfExtrusion(s) => s.base().gw_nurb().is_none(),
+            SurfaceKind::BSpline(_)
+            | SurfaceKind::CurveBounded(_)
+            | SurfaceKind::Step(_)
+            | SurfaceKind::OffsetSurface(_)
+            | SurfaceKind::SrfInVolume(_) => false,
+        };
+        if !missing {
+            continue;
+        }
+        match surface.kind_mut() {
+            SurfaceKind::Plane(s) => s.make_nurb()?,
+            SurfaceKind::Cone(s) => s.make_nurb(k)?,
+            SurfaceKind::Sphere(s) => s.make_nurb(k)?,
+            SurfaceKind::Torus(s) => s.make_nurb(k)?,
+            SurfaceKind::SurfOfRevolution(s) => s.make_nurb(k)?,
+            SurfaceKind::SurfOfExtrusion(s) => s.make_nurb(k)?,
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
 fn measure(k: &Kernel, b: &mut Brep) -> Result<Measured, SolidError> {
+    make_missing_nurbs(k, b)?;
     let store = AttributeStore::default();
     let attrs = PropertyAttributes {
         store: &store,
