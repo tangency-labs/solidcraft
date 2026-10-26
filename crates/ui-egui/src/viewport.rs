@@ -5791,8 +5791,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         unavailable_note(app, &painter, rect);
     }
     let overlay_rect = crate::shell::bottom_readout_rect(app, rect);
-    crate::viewport_details::legacy_legends(app, ui, overlay_rect);
+    let free = crate::viewport_details::legacy_legends(app, ui, overlay_rect);
     placement_note(app, &painter, overlay_rect);
+    crate::selection_length::paint(app, &painter, free);
     crate::frame_rate::paint(app, ui, &painter, overlay_rect);
 
     // ---- interaction ----
