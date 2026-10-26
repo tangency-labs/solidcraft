@@ -1273,7 +1273,7 @@ struct ArcEnd {
 fn arc_end(sk: &Sketch, ci: usize, toward: Vec2, cmd: &str) -> Result<Option<ArcEnd>> {
     let Some(CurveKind::Arc { a, b, .. }) = sk.curves.get(ci).map(|c| c.kind.clone()) else { return Ok(None) };
     let Some(Shape::Round { c: centre, r, start, sweep }) = sk.shape(ci) else { return Ok(None) };
-    if !(r.is_finite() && r > 0.0) || !start.is_finite() || !sweep.is_finite() {
+    if !(r.is_finite() && r > 0.0 && start.is_finite() && sweep.is_finite()) {
         return Err(bad(cmd, "the arc's circle is not usable"));
     }
     // A whole circle has no end to grow from.

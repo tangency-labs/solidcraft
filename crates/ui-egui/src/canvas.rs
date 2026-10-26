@@ -1587,10 +1587,10 @@ fn measure_line(
         painter.layout_no_wrap(crate::prefs::show_mm(app, d, 1), egui::FontId::proportional(solidcraft_theme::Tokens::get().font_label), t.text);
     let own = egui::Rect::from_min_size(mid + vec2(10.0, -14.0), galley.size() + vec2(10.0, 6.0));
     let rect = moved_label(proj, own, labels.offset(0));
-    pick_numbers(painter, sa, sb, rect);
+    let numbers = pick_numbers(painter, sa, sb, rect);
     crate::scenario::publish_target("measure:label", rect);
     if app.preferences.measure_axis_distances {
-        measure_components(app, ui, painter, proj, a, b, rect, labels);
+        measure_components(app, ui, painter, proj, a, b, rect, numbers, labels);
     }
     if rect != own {
         painter.line_segment([mid, rect.clamp(mid)], Stroke::new(1.0, t.manipulator));
@@ -1602,7 +1602,7 @@ fn measure_line(
 
 /// "1" and "2" beside the measured line's ends (#6020), as the panel lists the picks: each just
 /// past its end, away from the line and from the distance `label`.
-fn pick_numbers(painter: &egui::Painter, sa: Pos2, sb: Pos2, label: egui::Rect) {
+fn pick_numbers(painter: &egui::Painter, sa: Pos2, sb: Pos2, label: egui::Rect) -> [egui::Rect; 2] {
     let t = Tokens::get();
     let galleys = ["1", "2"].map(|n| painter.layout_no_wrap(n.to_string(), egui::FontId::proportional(t.font_label), t.text));
     let size = galleys.iter().map(|g| g.size()).fold(egui::Vec2::ZERO, |a, b| a.max(b)) + vec2(8.0, 4.0);
@@ -1612,6 +1612,7 @@ fn pick_numbers(painter: &egui::Painter, sa: Pos2, sb: Pos2, label: egui::Rect) 
         painter.galley(rect.center() - galley.size() * 0.5, galley, t.text);
         crate::scenario::publish_target(&format!("measure:item:{n}"), rect);
     }
+    rects
 }
 
 /// Where "1" and "2" go, each `size` (text and padding): just past its end of the line, away
@@ -1653,12 +1654,13 @@ fn measure_components(
     a: Vec3,
     b: Vec3,
     total: egui::Rect,
+    numbers: [egui::Rect; 2],
     labels: &mut MeasureLabels,
 ) {
     let t = Tokens::get();
     let x = Vec3::new(b.x, a.y, a.z);
     let y = Vec3::new(b.x, b.y, a.z);
-    let mut occupied = vec![total];
+    let mut occupied = vec![total, numbers[0], numbers[1]];
     for (i, (axis, start, end, color)) in [("x", a, x, t.axis_x), ("y", x, y, t.axis_y), ("z", y, b, t.axis_z)].into_iter().enumerate() {
         let color = color.lerp_to_gamma(t.text, 0.25);
         let distance = start.dist(end);
