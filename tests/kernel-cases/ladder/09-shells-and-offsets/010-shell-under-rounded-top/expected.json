@@ -1,7 +1,26 @@
 {
  "sources": [],
  "what": "the stock with r3 rounds on its four top edges, shelled 2 mm open at the bottom",
- "source": "invariants",
- "method": "walls meeting rounds and their corner patches; one valid body",
- "body_count": 1
+ "source": "analytic",
+ "method": "the vertical edges stay sharp, so each pair of top rounds meets in a mitre at a corner (08/011's identity): outside, (1-pi/4) 3^2 (2 60 + 2 40) removed, less 4 x 3^3 (5/3 - pi/2) counted twice; the cavity is the 56 x 36 x 18 box (open at z = 0) with its top edges rounded 3 - 2 = 1, mitred alike. V = outside - cavity. Faces: 9 outside (bottom ring aside: top, 4 sides, 4 rounds), 9 inside, the bottom ring; vertices: 8 at the mitres' ends outside, 8 inside, 8 round the ring; edges 40 (Euler-Poincare with the ring's two loops)",
+ "body_count": 1,
+ "volume_mm3": 11375.173947397,
+ "faces": 19,
+ "edges": 40,
+ "vertices": 24,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   20
+  ]
+ },
+ "tolerance": {
+  "rel": 1e-05
+ }
 }

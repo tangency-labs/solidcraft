@@ -1,7 +1,23 @@
 {
  "sources": [],
  "what": "the running part shelled 1.5 mm open at the bottom",
- "source": "invariants",
- "method": "a shell around holes, a slot, a window, rounds and chamfers; one valid body",
- "body_count": 1
+ "source": "analytic",
+ "method": "V = the tier-08 part - its cavity, the part's inside at 1.5 from every face but the open bottom, the offset faces extended to meet at the part's concave edges (as every shell in this tier: sharp inner corners). Cavity: the L section (x 1.5..58.5; y 1.5..38.5 under z 18.5, y 31.5..38.5 under z 33.5) less the r5 -> r3.5 front rounds, the wall's r3 -> r1.5 round and its 2 mm chamfer -> a (1.5 sqrt2 - 1) chamfer; the boss column r6.5 z 18.5..28.5 with its 1 mm chamfer -> 0.121, the concave r1 -> r2.5 at its root (Pappus), less the M5 hole grown 1.5 (r3.6, its floor's edge kept sharp); less the slot grown to width 11, the M6 tap drill to r4, the d3.3 hole to r3.15 (its overlaps with the wall's inner round and chamfer, 0.6808 and 0.4392, added back), the window grown 1.5 through the wall's 7 mm inside (Steiner, A + L t + pi t^2, its two corners sharp: + 2 t^2 (tan(th/2) - th/2)), and its overlap with the inner round (0.0416) added back = 37609.223572. A distance-based offset (concave edges rounded r1.5) would leave a cavity 49.17 larger. Bbox: the part's",
+ "body_count": 1,
+ "volume_mm3": 15397.712974981,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   35
+  ]
+ },
+ "tolerance": {
+  "rel": 0.0001
+ }
 }
