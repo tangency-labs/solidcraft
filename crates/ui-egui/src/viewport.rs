@@ -18,6 +18,10 @@ use crate::selection::{BoxSel, origin_quads, origin_size, ray_quad};
 use crate::theme::Tokens;
 use crate::{SolveApp, icons};
 
+fn cam_body_visible(app: &SolveApp, name: &str) -> bool {
+    app.session.body_visible(name) && crate::manufacture_workspace::setup_shows_body(app, name)
+}
+
 #[cfg(test)]
 #[path = "viewport_appearance_tests.rs"]
 mod appearance_tests;
@@ -372,7 +376,7 @@ pub(crate) fn in_view_centre(app: &SolveApp, proj: &Proj) -> Option<Vec3> {
     let st = crate::open_meshing::shown_world(app);
     let b = body_bounds(app, &st)
         .iter()
-        .filter(|(name, b)| !b.is_empty() && app.session.body_visible(name) && in_view(proj, b))
+        .filter(|(name, b)| !b.is_empty() && cam_body_visible(app, name) && in_view(proj, b))
         .fold(solidcraft_engine::geom::Aabb3::EMPTY, |a, (_, b)| a.union(b));
     (!b.is_empty()).then(|| b.center())
 }
@@ -420,6 +424,7 @@ fn scene_key(app: &SolveApp) -> u64 {
     app.session.visibility.shown_sketches.hash(&mut h);
     app.session.visibility.hidden_folders.hash(&mut h);
     app.session.visibility.hidden_profiles.hash(&mut h);
+    crate::manufacture_workspace::setup_body_key(app).hash(&mut h);
     app.session.active_component.hash(&mut h);
     app.session.active_occurrence_path.hash(&mut h);
     app.preview.effective_replaced().hash(&mut h);
@@ -655,7 +660,7 @@ fn update_refinement(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj) {
         if b.name != *name || b.body.is_mesh() {
             continue;
         }
-        let shown = app.session.body_visible(&b.name) && !app.preview.effective_replaced().contains(&b.name);
+        let shown = cam_body_visible(app, &b.name) && !app.preview.effective_replaced().contains(&b.name);
         let on_screen = match screen_box(proj, bx, 0.0).filter(|_| shown) {
             Some(r) => r.intersects(proj.rect).then(|| f64::from(r.width().max(r.height())) * ppp),
             // A corner behind the eye: the view is inside or right by the box.
@@ -965,7 +970,7 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
     let mut run: Vec<BodyDraw> = Vec::new();
     let mut run_key = std::collections::hash_map::DefaultHasher::new();
     let shown: Vec<&solidcraft_engine::doc::ModelBody> =
-        st.bodies.iter().filter(|b| app.session.body_visible(&b.name) && !app.preview.effective_replaced().contains(&b.name)).collect();
+        st.bodies.iter().filter(|b| cam_body_visible(app, &b.name) && !app.preview.effective_replaced().contains(&b.name)).collect();
     // Bodies drawn from the same triangles more than once (a part placed by many occurrences)
     // are drawn as instances of them: one copy of the triangles on the GPU, and none moved on
     // the CPU.
@@ -1066,7 +1071,7 @@ pub(crate) fn build_scene(app: &SolveApp) -> GpuScene {
         let col = c4(Tokens::view().text.gamma_multiply(0.9));
         let mut kept = app.viewport.section_index.lock().map(|mut k| std::mem::take(&mut *k)).unwrap_or_default();
         let mut made = Vec::new();
-        for b in st.bodies.iter().filter(|b| app.session.body_visible(&b.name)) {
+        for b in st.bodies.iter().filter(|b| cam_body_visible(app, &b.name)) {
             let mesh = b.mesh();
             let index = match kept.iter().position(|(m, i)| std::sync::Arc::ptr_eq(m, &mesh) && i.normal() == n) {
                 Some(k) => kept.swap_remove(k).1,
@@ -1246,7 +1251,7 @@ fn ground_shadow(sc: &mut GpuScene, app: &SolveApp, st: &std::sync::Arc<solidcra
     let mut b = solidcraft_engine::geom::Aabb3::EMPTY;
     let boxes = body_bounds(app, st);
     for (x, (_, bb)) in st.bodies.iter().zip(boxes.iter()) {
-        if bb.is_empty() || !app.session.body_visible(&x.name) {
+        if bb.is_empty() || !cam_body_visible(app, &x.name) {
             continue;
         }
         for i in 0..8 {
@@ -1824,7 +1829,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     // Bounds retain the state's body order. Looking each one up by name made both passes
     // quadratic for assemblies with many small parts.
     for (i, b) in st.bodies.iter().enumerate() {
-        if !app.session.body_visible(&b.name) {
+        if !cam_body_visible(app, &b.name) {
             continue;
         }
         // Bodies whose box the ray misses (or enters behind the best hit so far) are skipped.
@@ -1888,7 +1893,7 @@ fn pick_hits(app: &SolveApp, proj: &Proj, pos: Pos2, other_sketch_points: bool, 
     let mut bestv = Near::new(all);
     let mut beste = Near::new(all);
     for (i, b) in st.bodies.iter().enumerate() {
-        if !app.session.body_visible(&b.name) {
+        if !cam_body_visible(app, &b.name) {
             continue;
         }
         // Only bodies whose outline on screen is near the cursor can have an edge under it.
@@ -2071,7 +2076,7 @@ fn feature_parts(app: &SolveApp, id: u64, shown_only: bool) -> Vec<Sel> {
     let st = crate::open_meshing::shown_world(app);
     let mut out = Vec::new();
     for b in &st.bodies {
-        if shown_only && (!app.session.body_visible(&b.name) || app.preview.effective_replaced().contains(&b.name)) {
+        if shown_only && (!cam_body_visible(app, &b.name) || app.preview.effective_replaced().contains(&b.name)) {
             continue;
         }
         if b.feature == id {
@@ -2102,7 +2107,7 @@ fn displayed_selection(app: &SolveApp, item: &Sel) -> Vec<Sel> {
             .occurrence_bodies(path, true)
             .unwrap_or_default()
             .into_iter()
-            .filter(|name| app.session.body_visible(name))
+            .filter(|name| cam_body_visible(app, name))
             .map(|name| Sel::Body { name })
             .collect(),
         _ => grouped_selection(&app.session, item),
@@ -2844,14 +2849,14 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
         match x {
             Sel::Face { body, index, .. } => {
                 // A live preview stands in for the body: its old faces would fight with it.
-                if let Some(b) = st.body(body).filter(|_| app.session.body_visible(body) && !app.preview.effective_replaced().contains(body)) {
+                if let Some(b) = st.body(body).filter(|_| cam_body_visible(app, body) && !app.preview.effective_replaced().contains(body)) {
                     face_tris(&mut feedback, &shown(b), *index, c4(t.sel_face), false);
                     hidden_face_outline(&mut feedback, &drawn_mesh(app, b), *index, t.sel_edge);
                 }
             }
             Sel::Body { name } => {
                 if let Some(b) = st.body(name)
-                    && app.session.body_visible(name)
+                    && cam_body_visible(app, name)
                 {
                     if let Some(plan) = highlight_plan(app, b, &active_bodies) {
                         feedback.selected_planned.push(plan);
@@ -2866,7 +2871,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             }
             Sel::Edge { body, index, point } => {
                 if let Some(b) = st.body(body)
-                    && app.session.body_visible(body)
+                    && cam_body_visible(app, body)
                 {
                     let m = drawn_mesh(app, b);
                     if let Some(e) = edge_of(&m, *index, *point) {
@@ -2939,7 +2944,7 @@ pub(crate) fn build_highlight(app: &SolveApp) -> GpuScene {
             selected_faces.entry(body.as_str()).or_default().insert(*index);
         }
     }
-    for b in st.bodies.iter().filter(|b| app.session.body_visible(&b.name) && !app.preview.effective_replaced().contains(&b.name)) {
+    for b in st.bodies.iter().filter(|b| cam_body_visible(app, &b.name) && !app.preview.effective_replaced().contains(&b.name)) {
         let whole = hovered_whole.contains(b.name.as_str());
         let faces: Vec<usize> =
             if whole { (0..b.body.face_count()).collect() } else { hovered_faces.get(b.name.as_str()).cloned().unwrap_or_default() };
@@ -4403,7 +4408,7 @@ fn box_select(app: &mut SolveApp, proj: &Proj, bx: BoxSel, add: bool) {
         let active_bodies =
             app.session.active_occurrence_path.as_ref().filter(|_| scoped_bodies).and_then(|p| app.session.occurrence_bodies(p, true).ok());
         for b in &st.bodies {
-            if !app.session.body_visible(&b.name) || (scoped_bodies && body_faded(app, b, &active_bodies)) {
+            if !cam_body_visible(app, &b.name) || (scoped_bodies && body_faded(app, b, &active_bodies)) {
                 continue;
             }
             let m = b.mesh();
@@ -4655,6 +4660,7 @@ pub(crate) fn standalone_points(app: &SolveApp) -> Vec<Vec3> {
 
 /// Sketch points and the status of the active sketch (constraint glyphs: `sketch_tools`).
 fn overlays(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
+    crate::manufacture_setup::paint_overlays(app, painter, proj);
     let t = Tokens::get();
     let st = crate::open_meshing::shown_world(app);
     for item in &app.session.selection {

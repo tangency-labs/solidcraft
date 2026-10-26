@@ -620,7 +620,7 @@ fn manufacture_ops(app: &SolveApp) -> Vec<Item> {
 
 /// Work-area menu while Manufacture is active: CAM commands, not Design's Extrude/Fillet.
 fn manufacture_viewport_items(app: &SolveApp) -> Vec<Item> {
-    let setup_open = false;
+    let setup_open = crate::manufacture_setup::dialog_open(app);
     let has_setup = !app.manufacture_workspace.active_setup.is_empty() || !app.session.doc.cam.setups.is_empty();
     let anything_hidden = !app.session.visibility.hidden_bodies.is_empty()
         || !app.session.visibility.hidden_sketches.is_empty()
@@ -1282,9 +1282,22 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.repeat" => {
             app.repeat_last();
         }
-        "ui.ok" => {}
-        "ui.cancel" => crate::dialogs::cancel(app),
-        "ui.editSetup" => {}
+        "ui.ok" => crate::manufacture_setup::commit(app),
+        "ui.cancel" => {
+            if crate::manufacture_setup::dialog_open(app) {
+                crate::manufacture_setup::cancel(app);
+            } else {
+                crate::dialogs::cancel(app);
+            }
+        }
+        "ui.editSetup" => {
+            let name = app.manufacture_workspace.active_setup.clone();
+            if !name.is_empty() {
+                crate::manufacture_setup::open_edit(app, &name);
+            } else if let Some(name) = app.session.doc.cam.setups.first().map(|s| s.name.clone()) {
+                crate::manufacture_setup::open_edit(app, &name);
+            }
+        }
         "ui.hideAll" => {
             let items: Vec<String> = app.session.world_state().bodies.iter().map(|b| b.name.clone()).collect();
             if !items.is_empty() {
@@ -2752,5 +2765,7 @@ mod workspace_menu_tests {
         assert!(!radial_items(&h.app).iter().any(|i| i.id == "solid.extrude"));
         assert!(radial_items(&h.app).iter().any(|i| i.id == "manufacture.setup.new"));
         assert!(!menu.iter().find(|i| i.id == "ui.ok").unwrap().enabled, "OK waits for the SETUP window");
+        crate::manufacture_setup::open_new(&mut h.app);
+        assert!(items(&h.app, &Target::Viewport).iter().find(|i| i.id == "ui.ok").unwrap().enabled);
     }
 }
