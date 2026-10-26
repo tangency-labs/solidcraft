@@ -31,7 +31,9 @@
 //! also limit bytes and nesting.
 //!
 //! Writers read a [`Prepared`] scene, which only [`Scene::prepare`] makes, so none reads one that
-//! wasn't checked. Clipping will happen there too, once, before any writer (A8).
+//! wasn't checked, and format it on their number grid ([`Prepared::on_grid`], [`grid`]'s rules),
+//! so every format draws the same joints, closures and merges. Clipping will happen in
+//! `prepare` too, once, before any writer (A8).
 
 use serde::{Deserialize, Serialize};
 
@@ -40,8 +42,10 @@ use std::f64::consts::FRAC_PI_2;
 use crate::{EPS, Region2, Seg2, Vec2};
 
 pub mod annotate;
+pub mod grid;
 pub mod text;
 
+pub use grid::{Grid, GridGroup, GridItem, GridPath, GridPoint, GridReport, OnGrid, Piece};
 use text::{Font, TextRun};
 
 /// The widest line a scene may draw, in millimetres.
