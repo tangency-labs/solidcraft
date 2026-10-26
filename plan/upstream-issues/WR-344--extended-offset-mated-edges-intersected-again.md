@@ -1,0 +1,10 @@
+#### WR-344. `SmOffsetExecutive::PiecewiseMerge` intersects again the offset faces an extended offset already mated
+- **Severity:** Wrong result (spurious vertices and a sliver edge on the shelled rim)
+- **Area:** Offset
+- **Location:** `source/SMLib/src/SmOffsetExecutive.cpp`, `SmOffsetExecutive::PiecewiseMerge`: the `sNoSSI` relation is built from cap-face pairs and, for a manifold edge with no cap face, only when `IsTangentSector` holds.
+- **What happens:** with extended convex edges every edge without a cap face has its two faces' offsets mated along it (`EdgeuseOffset`): they already share their intersection edge. The merge still intersects the pair again; the new curve need not match the mated edge, and the merge splits faces at the mismatch.
+- **Trigger:** a cone frustum (r 20 to r 30, drafted 9.46 degrees) built as two half faces, shelled 2 inward open at the top: the plane/offset-cone curve stops 0.0036 short of the inner seam, splitting the rim into three spurious vertices and a tiny edge.
+- **How found:** SolidCraft regression rig on the SMLib fork (tangency-labs/solidcore#469).
+- **Confirmed:** on the fork's C++ build (tangency-labs/smlib@85bbfaf): two-half frusta at 9.46 and 15 degrees give 7 faces, 12 edges, 8 vertices and the closed-form volume.
+- **Fix (fork commit 85bbfaf):** with extended convex edges, a manifold edge without a cap face relates its pair in `sNoSSI` as a tangent edge does (the tangency test is skipped).
+- **Rust port:** opt-in `Kernel::fixes.offset_extended_edges_mated` (default `false`, upstream behaviour), read in `OffsetExecutive::piecewise_merge` (`crates/solidcore/src/offset/offset_executive/p1.rs`). Test `issue_469_extended_offset_mated_edges_not_intersected_again` (`crates/solidcore/src/offset/offset_executive/p2.rs`; a two-half frustum from `create_partial_cone` 0-180 and 180-360 unioned, shelled -2 open at the top). No difftest case compares the opt-in path (the offset runners use the default kernel). Fixes tangency-labs/solidcore#469.

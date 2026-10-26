@@ -278,6 +278,7 @@ impl Config {
         ShellOptions {
             offset: self.offset(),
             create_offset_solid: self.create_offset_solid,
+            merge_sheet_side_walls: false,
         }
     }
 }

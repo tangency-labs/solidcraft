@@ -201,12 +201,16 @@ pub struct OffsetExecutive {
     shell_faces: Vec<FaceId>,
     offset_brep: Option<Brep>,
     closing_faces: Vec<FaceId>,
-    faceuse_to_faces: Relation<FaceuseId, FaceId>,
-    edgeuse_to_edgeuses: Relation<EdgeuseId, EdgeuseId>,
-    edge_to_faces: Relation<EdgeId, FaceId>,
-    vertex_to_faces: Relation<VertexId, FaceId>,
-    blend_to_faces: Relation<FaceId, FaceId>,
+    pub(super) faceuse_to_faces: Relation<FaceuseId, FaceId>,
+    pub(super) edgeuse_to_edgeuses: Relation<EdgeuseId, EdgeuseId>,
+    pub(super) edge_to_faces: Relation<EdgeId, FaceId>,
+    pub(super) vertex_to_faces: Relation<VertexId, FaceId>,
+    pub(super) blend_to_faces: Relation<FaceId, FaceId>,
     extended_surfaces: BTreeMap<u64, Surface>,
+    /// Not upstream (WR-346): the original faces of an inset whose offset collapses (a
+    /// convex round thinner than the wall), mated across instead of offset
+    /// (`m_sCollapsedFaces`; only with `Kernel::fixes.offset_collapsed_rounds_mated`).
+    pub(super) collapsed_faces: Vec<FaceId>,
 }
 
 impl OffsetExecutive {
@@ -252,6 +256,7 @@ impl OffsetExecutive {
             vertex_to_faces: Relation::default(),
             blend_to_faces: Relation::default(),
             extended_surfaces: BTreeMap::new(),
+            collapsed_faces: Vec::new(),
         }
     }
 
@@ -381,6 +386,92 @@ impl OffsetExecutive {
     /// upstream, for harness observation), in id order.
     pub fn offset_faces(&self, original: FaceuseId) -> Vec<FaceId> {
         self.faceuse_to_faces.seconds(original)
+    }
+
+    /// Not upstream (WR-346, `IsCollapsedFace`): whether original face `face` is an
+    /// inset face whose offset collapsed.
+    pub fn is_collapsed_face(&self, face: FaceId) -> bool {
+        self.collapsed_faces.contains(&face)
+    }
+
+    /// Not upstream (WR-346, `GetEdgeuseAcrossCollapsedFace`): the original edge use
+    /// beyond a collapsed face, seen from its edge use `edgeuse`. Across a rail (a
+    /// tangent edge of a four-sided round) it is the radial of the opposite rail; across
+    /// an end edge, seen from `from` (one of that edge's vertices), the radial of the
+    /// rail at the edge's other vertex. `None` when the edge use's face did not
+    /// collapse, the face across collapsed too, or the face has another shape.
+    ///
+    /// # Errors
+    ///
+    /// Those of the topology queries and the tangency test.
+    pub fn edgeuse_across_collapsed_face(
+        &self,
+        kernel: &Kernel,
+        original: &mut Brep,
+        edgeuse: Option<EdgeuseId>,
+        from: Option<VertexId>,
+    ) -> Result<Option<EdgeuseId>> {
+        let Some(edgeuse) = edgeuse else {
+            return Ok(None);
+        };
+        match eu::face(original, edgeuse)? {
+            Some(face) if self.is_collapsed_face(face) => {}
+            _ => return Ok(None),
+        }
+        let tan_tol_deg = self.tangency_tol_degrees();
+        let next = if eu2::is_tangent_sector(kernel, original, edgeuse, tan_tol_deg, false, true)? {
+            let loopuse = required(eu::loopuse(original, edgeuse)?)?;
+            if eu::loopuse_edgeuses(original, loopuse)?.len() != 4 {
+                return Ok(None);
+            }
+            let ccw = required(eu::ccw_edgeuse(original, edgeuse)?)?;
+            eu::ccw_edgeuse(original, ccw)?
+        } else {
+            let Some(from) = from else {
+                return Ok(None);
+            };
+            // the end edge's vertex away from `from` (by position: `from` may be a
+            // vertex of the rail beside it)
+            let end_edge = edge_of(original, edgeuse)?;
+            let v0 = required(edge::start_vertex(original, end_edge)?)?;
+            let v1 = required(edge::end_vertex(original, end_edge)?)?;
+            let from_point = original.vertex(from)?.point;
+            let far = if original.vertex(v0)?.point.distance(from_point)
+                > original.vertex(v1)?.point.distance(from_point)
+            {
+                v0
+            } else {
+                v1
+            };
+            let mut found = None;
+            for side in [
+                required(eu::cw_edgeuse(original, edgeuse)?)?,
+                required(eu::ccw_edgeuse(original, edgeuse)?)?,
+            ] {
+                let side_edge = edge_of(original, side)?;
+                if side != edgeuse
+                    && (edge::start_vertex(original, side_edge)? == Some(far)
+                        || edge::end_vertex(original, side_edge)? == Some(far))
+                {
+                    found = Some(side);
+                    break;
+                }
+            }
+            found
+        };
+        let Some(next) = next else {
+            return Ok(None);
+        };
+        let Some(across) = eu::radial(original, next)? else {
+            return Ok(None);
+        };
+        if across == next {
+            return Ok(None);
+        }
+        match eu::face(original, across)? {
+            Some(face) if self.is_collapsed_face(face) => Ok(None),
+            _ => Ok(Some(across)),
+        }
     }
 
     fn required_offset_brep(&self) -> Result<&Brep> {
@@ -890,6 +981,55 @@ impl OffsetExecutive {
         )
     }
 
+    /// Not upstream (WR-346): `m_rGeometryCreation.MateEdges(ctx, this, pEU, pAcross,
+    /// pOffEU, pOffAcross, eMarkType)`, mating the offsets of the faces on either side
+    /// of a collapsed face (`edgeuse` and `across` are original edge uses beside it).
+    ///
+    /// # Errors
+    ///
+    /// Those of `MateEdges`.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn mate_edges_across_with_marked(
+        &mut self,
+        kernel: &mut Kernel,
+        original: &mut Brep,
+        edgeuse: EdgeuseId,
+        across: EdgeuseId,
+        offset_edgeuse: EdgeuseId,
+        offset_across: EdgeuseId,
+        mark_type: MarkType,
+        marked: &BTreeSet<EdgeuseId>,
+        notifications: &mut NotificationStores<'_>,
+        offset_key_of: &dyn Fn(EntityRef) -> ObjectRef,
+    ) -> Result<()> {
+        let creator = self.geometry_creator();
+        NotifyState::from_kernel_stores(notifications).with_kernel_env(kernel, |kernel, env| {
+            let mut result = required(self.offset_brep.take())?;
+            let made = super::edgeuse::mate(
+                kernel,
+                &creator,
+                self,
+                original,
+                &mut result,
+                edgeuse,
+                across,
+                offset_edgeuse,
+                offset_across,
+                mark_type,
+                MarkSource::Set(marked),
+                CapNotifications {
+                    records: &mut *env.records,
+                    attributes: &mut *env.attributes,
+                    context: env.context.as_deref_mut(),
+                    original_key_of: env.key_of,
+                    offset_key_of,
+                },
+            );
+            self.offset_brep = Some(result);
+            made
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn build_offset_of_edgeuses_with_state(
         &mut self,
@@ -1065,17 +1205,36 @@ impl OffsetExecutive {
             }
         }
         if problems {
-            let _curve = edge::create_trimmed_nurbs_curve(kernel, original, edge)?;
-            self.required_offset_brep()?;
-            // cpp:3092: offset distance, approximation tolerance, FALSE, FALSE.
-            // Ported: primitive::primitive_creation::p2::PrimitiveCreation::create_pipe_sweep,
-            // which needs a PrimitiveCreationAccess over the offset B-rep. Its first B-rep
-            // edit (p3's curve sweep) is the face construction below.
-            // UNPORTED(topology.brep_p8): SmBrep::CreateFacesFromSurface
-            return Err(SolidError::unported(
-                "SmBrep::CreateFacesFromSurface",
-                "topology.brep_p8",
-            ));
+            use crate::primitive::primitive_creation::model::PrimitiveModel;
+            use crate::primitive::primitive_creation::p1::PrimitiveCreation;
+
+            // cpp:3088-3094: a pipe of the offset distance along the edge's trimmed NURBS
+            // curve, built into the offset B-rep (SmPrimitiveCreation on its infinite
+            // region, no caps, not translational); the faces it makes are not used.
+            let curve = edge::create_trimmed_nurbs_curve(kernel, original, edge)?;
+            let Some(CurveKind::BSpline(path)) = curve.as_ref().map(Curve::kind) else {
+                // a NULL curve handed to CreatePipeSweep upstream
+                return Err(SolidError::null_pointer(OP));
+            };
+            let offset = required(self.offset_brep.take())?;
+            let region = offset.infinite_region();
+            let mut model = PrimitiveModel::new(kernel, offset);
+            let (mut start, mut side, mut end) = (Vec::new(), Vec::new(), Vec::new());
+            let swept = PrimitiveCreation::new(region, 0, false).create_pipe_sweep(
+                &mut model,
+                PrimitiveModel::MAIN,
+                self.offset_distance,
+                path,
+                self.approximation_tol_3d,
+                false,
+                false,
+                &mut start,
+                &mut side,
+                &mut end,
+            );
+            // the offset B-rep comes back whatever the sweep's status (SER)
+            self.offset_brep = Some(model.into_brep()?);
+            swept?;
         }
         Ok(())
     }
@@ -1464,14 +1623,24 @@ impl OffsetExecutive {
                     }
                     if edge::is_manifold(original, edge_id)? {
                         let primary = required(eu::primary_edgeuse(original, edge_id)?)?;
-                        if eu2::is_tangent_sector(
-                            kernel,
-                            original,
-                            primary,
-                            self.tangency_tol_degrees(),
-                            false,
-                            true,
-                        )? {
+                        // Not upstream (WR-344, tangency-labs/solidcore#469), opt-in
+                        // `Kernel::fixes.offset_extended_edges_mated`: with extended convex edges,
+                        // every edge without an offset cap face had its two faces' offsets
+                        // mated along it (EdgeuseOffset), so they share their intersection
+                        // edge already, as a tangent sector's do (the tangency test is then
+                        // skipped, as the fork's `||` does).
+                        let mated =
+                            kernel.fixes.offset_extended_edges_mated && self.extend_convex_edges();
+                        if mated
+                            || eu2::is_tangent_sector(
+                                kernel,
+                                original,
+                                primary,
+                                self.tangency_tol_degrees(),
+                                false,
+                                true,
+                            )?
+                        {
                             for edgeuse in edge::edgeuses(original, edge_id, None, None)? {
                                 if eu::faceuse(original, edgeuse)? == Some(faceuse) {
                                     let radial = required(eu::radial(original, edgeuse)?)?;
@@ -1563,9 +1732,35 @@ impl OffsetExecutive {
         let faceuse = original.faceuse(faceuse)?;
         let face_id = required(faceuse.face)?;
         let orientation = faceuse.orientation;
+        // Not upstream (WR-342, tangency-labs/solidcore#974), opt-in
+        // `Kernel::fixes.offset_clip_right_side_out`: a face that does not fit the offset
+        // surface's domain is clipped to it by a 2D boolean of planar faces made from its
+        // UV loops, which need them counterclockwise (the SM_OT_SAME faceuse's sense); an
+        // inset's SM_OT_OPPOSITE loops made that face inside out and the clip empty.
+        let right_side_out = kernel.fixes.offset_clip_right_side_out;
+        let loop_orientation = if right_side_out {
+            let fits = original
+                .face(face_id)?
+                .uv_domain
+                .is_contained_by(&surface.natural_uv_domain(), EFF_ZERO)
+                || self.operation == OffsetOperation::LocalOperation;
+            if fits {
+                orientation
+            } else {
+                OrientType::Same
+            }
+        } else {
+            orientation
+        };
         // The translated-3D-curve plane case (cpp:3560–3600) is `#if 0` upstream.
-        let mut curves =
-            face::create_curves_from_face(kernel, original, face_id, orientation, false, true)?;
+        let mut curves = face::create_curves_from_face(
+            kernel,
+            original,
+            face_id,
+            loop_orientation,
+            false,
+            true,
+        )?;
         let offset_domain = surface.natural_uv_domain();
         let face_domain = original.face(face_id)?.uv_domain;
         if face_domain.is_contained_by(&offset_domain, EFF_ZERO)
@@ -1820,11 +2015,18 @@ impl OffsetExecutive {
         let result_faces = bp1::faces(&result, None)?;
         let mut new_faces = Vec::new();
         for (index, &result_face) in result_faces.iter().enumerate() {
+            // (WR-342 opt-in: the loops in the sense of the faceuse's orientation, which
+            // the offset face is made with)
+            let result_orientation = if kernel.fixes.offset_clip_right_side_out {
+                orientation
+            } else {
+                OrientType::Same
+            };
             let made = face::create_curves_from_face(
                 kernel,
                 &mut result,
                 result_face,
-                OrientType::Same,
+                result_orientation,
                 true,
                 false,
             )?;
@@ -3678,20 +3880,21 @@ mod tests {
                 other_gaps: vec![second],
                 ..SynchronizedEdgeuses::default()
             };
-            assert_dependency(
-                with_state(|state| {
-                    exec.fill_offset_edgeuse_gaps(
-                        &mut kernel,
-                        &original,
-                        edge,
-                        &synchronized,
-                        &[],
-                        state,
-                    )
-                }),
-                "SmBrep::CreateFacesFromSurface",
-                "topology.brep_p8",
-            );
+            // the pipe fallback runs (CreatePipeSweep): this fixture's offset B-rep has no
+            // region to sweep into, a failure upstream returns too, not a missing call;
+            // the offset B-rep is handed back either way
+            let r = with_state(|state| {
+                exec.fill_offset_edgeuse_gaps(
+                    &mut kernel,
+                    &original,
+                    edge,
+                    &synchronized,
+                    &[],
+                    state,
+                )
+            });
+            assert!(matches!(&r, Err(e) if !e.is_unported()), "{r:?}");
+            assert!(exec.offset_brep().is_some());
         }
     }
 
@@ -4485,5 +4688,74 @@ mod tests {
             edge::start_vertex(&original, EdgeId::from_index(0)).unwrap(),
             Some(VertexId::from_index(1))
         );
+    }
+
+    /// tangency-labs/solidcore#974: an inset (`SM_OT_OPPOSITE`) face use whose face does
+    /// not fit its offset surface's domain is clipped by a 2D boolean of planar faces made
+    /// from its UV loops. Taken in the face use's sense the loops run clockwise, the planar
+    /// face is inside out and the clip empty: the face gets no offset. With the opt-in the
+    /// loops are taken counterclockwise and the clipped face is made.
+    #[test]
+    #[ignore = "fixture does not reproduce the inside-out clip: on this create_plane sheet \
+                the default path also clips to one offset face; needs the shell/4567 vase's \
+                inset bottom"]
+    fn issue_974_inset_face_clipped_right_side_out() {
+        use crate::primitive::api_primitives::create_plane;
+        let offsets = |right_side_out: bool| -> usize {
+            let mut kernel = Kernel::default();
+            kernel.fixes.offset_clip_right_side_out = right_side_out;
+            let mut original = create_plane(&mut kernel, Vec3::ZERO, 10.0, 10.0).unwrap();
+            let inset = original
+                .faceuses()
+                .iter()
+                .find(|(_, fu)| fu.orientation == OrientType::Opposite)
+                .map(|(id, _)| id)
+                .unwrap();
+            let mut executive = executive();
+            executive.set_offset_brep(Brep::new_with_infinite_region().unwrap());
+            // an offset plane 1 below the face, parametrised as the face's surface, whose
+            // domain holds only a band of the face's UV domain
+            let face = original.faceuse(inset).unwrap().face.unwrap();
+            let (domain, at) = {
+                let f = original.face(face).unwrap();
+                let s = f.surface.as_ref().unwrap();
+                let at = |u: f64, v: f64| s.evaluate_point(&kernel, Vec2::new(u, v)).unwrap();
+                (f.uv_domain, [at(0.0, 0.0), at(1.0, 0.0), at(0.0, 1.0)])
+            };
+            let [p00, p10, p01] = at;
+            let (du, dv) = (p10 - p00, p01 - p00);
+            let (u, v) = (domain.u_interval(), domain.v_interval());
+            let mut offset = Some(Surface::from(Plane::new(
+                p00 + Vec3::new(0.0, 0.0, -1.0),
+                du.unitize_or_z(),
+                dv.unitize_or_z(),
+                Vec2::new(du.length(), dv.length()),
+                &Extent2d::from_bounds(
+                    u.min() + 0.2 * u.length(),
+                    v.min() - 0.1 * v.length(),
+                    u.min() + 0.8 * u.length(),
+                    v.max() + 0.1 * v.length(),
+                ),
+            )));
+            face_env(|env, offset_key_of| {
+                executive.build_offset_of_faceuse(
+                    &mut kernel,
+                    &mut original,
+                    Some(inset),
+                    &mut offset,
+                    &SsiData::default(),
+                    env,
+                    offset_key_of,
+                    &|_, type_code| ObjectRef {
+                        key: ObjectKey(3),
+                        type_code,
+                    },
+                )
+            })
+            .unwrap();
+            executive.offset_faces(inset).len()
+        };
+        assert_eq!(offsets(false), 0);
+        assert!(offsets(true) >= 1);
     }
 }

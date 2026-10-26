@@ -1154,6 +1154,19 @@ impl CreatorExecutive<Handle> for Executive<'_> {
             .collect()
     }
 
+    fn has_collapsed_faces(&self) -> bool {
+        !self.inner.collapsed_faces.is_empty()
+    }
+
+    fn is_collapsed_face(&self, face: Handle) -> bool {
+        match face.object {
+            Object::Topology(Arena::Original, EntityRef::Face(f)) => {
+                self.inner.is_collapsed_face(f)
+            }
+            _ => false,
+        }
+    }
+
     fn offset_edgeuse(&self, original: Handle) -> Option<Handle> {
         match original.object {
             Object::Topology(Arena::Original, EntityRef::Edgeuse(u)) => self
@@ -1260,4 +1273,55 @@ pub(super) fn build(
         mark_type,
     )?;
     backend.take_output(made)
+}
+
+/// Not upstream (WR-346): `MateEdges(ctx, this, pEdgeuse, pAcross, pOffsetEU,
+/// pOffAcross, eMarkType)` over the executive's original and offset B-reps, mating the
+/// offsets of the faces on either side of a collapsed face.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn mate(
+    kernel: &Kernel,
+    creator: &OffsetGeometryCreation,
+    executive: &mut OffsetExecutive,
+    original: &mut Brep,
+    offset: &mut Brep,
+    edgeuse: EdgeuseId,
+    other: EdgeuseId,
+    offset_edgeuse: EdgeuseId,
+    other_offset_edgeuse: EdgeuseId,
+    mark_type: MarkType,
+    marks: MarkSource<'_>,
+    notifications: CapNotifications<'_>,
+) -> Result<()> {
+    let mut backend = EdgeBrep {
+        kernel,
+        original,
+        offset,
+        curves: Vec::new(),
+        surfaces: Vec::new(),
+        records: notifications.records,
+        attributes: notifications.attributes,
+        context: notifications.context,
+        original_key_of: notifications.original_key_of,
+        offset_key_of: notifications.offset_key_of,
+        marks,
+    };
+    let mut exec = Executive {
+        inner: executive,
+        original_key_of: notifications.original_key_of,
+        offset_key_of: notifications.offset_key_of,
+        made: BTreeMap::new(),
+    };
+    let original_use = |u| Handle::topology(Arena::Original, EntityRef::Edgeuse(u));
+    let offset_use = |u| Handle::topology(Arena::Offset, EntityRef::Edgeuse(u));
+    creator.mate_edges(
+        kernel,
+        &mut backend,
+        &mut exec,
+        Some(original_use(edgeuse)),
+        Some(original_use(other)),
+        Some(offset_use(offset_edgeuse)),
+        Some(offset_use(other_offset_edgeuse)),
+        mark_type,
+    )
 }

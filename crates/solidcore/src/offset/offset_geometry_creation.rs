@@ -301,6 +301,17 @@ pub trait OffsetExecutive<O> {
     fn extend_convex_edges(&self) -> bool;
     /// `GetShellFaces`: the faces to shell rather than offset (empty without a list).
     fn shell_faces(&self) -> Vec<O>;
+    /// Not upstream (WR-346): whether any inset face's offset collapsed (a convex round
+    /// thinner than the wall); `false` unless `Kernel::fixes.offset_collapsed_rounds_mated`.
+    fn has_collapsed_faces(&self) -> bool {
+        false
+    }
+    /// Not upstream (WR-346, `IsCollapsedFace`): whether original face `face` is an
+    /// inset face whose offset collapsed.
+    fn is_collapsed_face(&self, face: O) -> bool {
+        let _ = face;
+        false
+    }
     /// `GetOffsetEdgeuse`: the offset edge use related to `original`, only when exactly
     /// one is (`m_vEUToEU` is a many-to-many `SmRelation`; none or several give `None`).
     fn offset_edgeuse(&self, original: O) -> Option<O>;
@@ -1879,10 +1890,11 @@ impl OffsetGeometryCreation {
                 // See if base edgeuse is tangent and save it along with the curve on the
                 // correct surface to be used during intersection.
                 if bcw != base_edgeuse {
-                    Self::collect_neighbour(
+                    self.collect_neighbour(
                         k,
                         brep,
                         executive,
+                        base_vertex,
                         base_vertex,
                         base_edge,
                         bcw,
@@ -1907,10 +1919,11 @@ impl OffsetGeometryCreation {
                         let other_base_edge = brep
                             .edgeuse_edge(other_base)?
                             .ok_or(dangling("edge use without edge"))?;
-                        Self::collect_neighbour(
+                        self.collect_neighbour(
                             k,
                             brep,
                             executive,
+                            base_vertex,
                             other_base_vertex,
                             other_base_edge,
                             obccw,
@@ -1937,10 +1950,11 @@ impl OffsetGeometryCreation {
                 // See if base edgeuse is tangent and save it along with the curve on the
                 // correct surface to be used during intersection.
                 if bccw != base_edgeuse {
-                    Self::collect_neighbour(
+                    self.collect_neighbour(
                         k,
                         brep,
                         executive,
+                        base_vertex,
                         base_vertex,
                         base_edge,
                         bccw,
@@ -1965,10 +1979,11 @@ impl OffsetGeometryCreation {
                         let other_base_edge = brep
                             .edgeuse_edge(other_base)?
                             .ok_or(dangling("edge use without edge"))?;
-                        Self::collect_neighbour(
+                        self.collect_neighbour(
                             k,
                             brep,
                             executive,
+                            base_vertex,
                             other_base_vertex,
                             other_base_edge,
                             obcw,
@@ -2270,12 +2285,16 @@ impl OffsetGeometryCreation {
     /// each base edge use): a lamina or tangent neighbour goes to the tangent lists
     /// with the base UV curve; otherwise, when the base edge and the neighbour's edge
     /// are not tangent at the vertex, the offset of the neighbour's radial edge use
-    /// goes to the adjacent list.
+    /// goes to the adjacent list. (Not upstream, WR-346: a neighbour whose radial lies
+    /// on a collapsed face gives the offset of the edge use across that face, seen from
+    /// `base_vertex`, instead.)
     #[allow(clippy::too_many_arguments)]
     fn collect_neighbour<O: ClassObject + SolutionObject>(
+        &self,
         k: &Kernel,
         brep: &mut impl OffsetBrep<O>,
         executive: &mut impl OffsetExecutive<O>,
+        base_vertex: O,
         vertex: O,
         base_edge: O,
         neighbour: O,
@@ -2285,6 +2304,19 @@ impl OffsetGeometryCreation {
         tan_uvs: &mut Vec<Option<O>>,
         off_adj_eus: &mut Vec<O>,
     ) -> Result<()> {
+        // Not upstream (WR-346): across a collapsed face, trim to the extended surface
+        // of the face beyond it.
+        if executive.has_collapsed_faces() {
+            let radial = brep.edgeuse_radial(neighbour)?;
+            if let Some(across) =
+                self.edgeuse_across_collapsed_face(k, brep, &*executive, radial, Some(base_vertex))?
+            {
+                if let Some(off_across) = executive.offset_edgeuse(across) {
+                    off_adj_eus.push(off_across);
+                }
+                return Ok(());
+            }
+        }
         let n_edge = brep
             .edgeuse_edge(neighbour)?
             .ok_or(dangling("edge use without edge"))?;
@@ -2307,6 +2339,117 @@ impl OffsetGeometryCreation {
             }
         }
         Ok(())
+    }
+
+    /// Not upstream (WR-346, `SmOffsetExecutive::GetEdgeuseAcrossCollapsedFace`): the
+    /// original edge use beyond a collapsed face, seen from its edge use `edgeuse`.
+    /// Across a rail (a tangent edge of a four-sided round) it is the radial of the
+    /// opposite rail; across an end edge, seen from `from` (one of that edge's
+    /// vertices), the radial of the rail at the edge's other vertex. `None` when the
+    /// edge use's face did not collapse, the face across collapsed too, or the face has
+    /// another shape. The four-sided test walks the loop's CCW edge uses; the end edge's
+    /// two vertices are `GetVertex` / `GetOtherVertex`.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for dangling topology; those of the tangency test.
+    pub fn edgeuse_across_collapsed_face<O: ClassObject + SolutionObject>(
+        &self,
+        k: &Kernel,
+        brep: &mut impl OffsetBrep<O>,
+        executive: &impl OffsetExecutive<O>,
+        edgeuse: Option<O>,
+        from: Option<O>,
+    ) -> Result<Option<O>> {
+        let Some(edgeuse) = edgeuse else {
+            return Ok(None);
+        };
+        match brep.edgeuse_face(edgeuse)? {
+            Some(face) if executive.is_collapsed_face(face) => {}
+            _ => return Ok(None),
+        }
+        let tan_tol_deg = self.tangency_tol_degrees();
+        let next = if brep.edgeuse_is_tangent_sector(k, edgeuse, tan_tol_deg)? {
+            // a four-sided loop (bounded walk: a fifth step means more sides)
+            let mut sides = 1;
+            let mut cur = brep
+                .edgeuse_ccw(edgeuse)?
+                .ok_or(dangling("edge use without CCW"))?;
+            while cur != edgeuse && sides <= 4 {
+                sides += 1;
+                cur = brep
+                    .edgeuse_ccw(cur)?
+                    .ok_or(dangling("edge use without CCW"))?;
+            }
+            if sides != 4 {
+                return Ok(None);
+            }
+            let ccw = brep
+                .edgeuse_ccw(edgeuse)?
+                .ok_or(dangling("edge use without CCW"))?;
+            brep.edgeuse_ccw(ccw)?
+        } else {
+            let Some(from) = from else {
+                return Ok(None);
+            };
+            // the end edge's vertex away from `from` (by position: `from` may be a
+            // vertex of the rail beside it)
+            let end_edge = brep
+                .edgeuse_edge(edgeuse)?
+                .ok_or(dangling("edge use without edge"))?;
+            let v0 = brep
+                .edge_vertex(end_edge)?
+                .ok_or(dangling("edge without vertex"))?;
+            let v1 = brep
+                .edge_other_vertex(end_edge, v0)?
+                .ok_or(dangling("edge without other vertex"))?;
+            let from_point = brep.vertex_point(from)?;
+            let far = if brep.vertex_point(v0)?.distance(from_point)
+                > brep.vertex_point(v1)?.distance(from_point)
+            {
+                v0
+            } else {
+                v1
+            };
+            let sides = [
+                brep.edgeuse_cw(edgeuse)?
+                    .ok_or(dangling("edge use without CW"))?,
+                brep.edgeuse_ccw(edgeuse)?
+                    .ok_or(dangling("edge use without CCW"))?,
+            ];
+            let mut found = None;
+            for side in sides {
+                if side == edgeuse {
+                    continue;
+                }
+                let side_edge = brep
+                    .edgeuse_edge(side)?
+                    .ok_or(dangling("edge use without edge"))?;
+                let s0 = brep.edge_vertex(side_edge)?;
+                let s1 = match s0 {
+                    Some(s0) => brep.edge_other_vertex(side_edge, s0)?,
+                    None => None,
+                };
+                if s0 == Some(far) || s1 == Some(far) {
+                    found = Some(side);
+                    break;
+                }
+            }
+            found
+        };
+        let Some(next) = next else {
+            return Ok(None);
+        };
+        let Some(across) = brep.edgeuse_radial(next)? else {
+            return Ok(None);
+        };
+        if across == next {
+            return Ok(None);
+        }
+        match brep.edgeuse_face(across)? {
+            Some(face) if executive.is_collapsed_face(face) => Ok(None),
+            _ => Ok(Some(across)),
+        }
     }
 
     /// `GlobalPointSolve(interval, op, point, tol, target, NULL, requested, solutions)`
