@@ -64,19 +64,21 @@ void put_surface(std::vector<double> &o, SmSurface *s) {
         put(o, normal);
     }
 }
-SmCurve *build(const SmContext &ctx, const double *in) {
+SmCurve *build(const SmContext &ctx, const double *in, SmStatus &cst) {
+  cst = SM_SUCCESS;
   int kind = int(in[13]), n = int(in[14]);
   const double *p = in + 19;
   if (kind == 0) {
     SmLine *c = nullptr;
-    if (SmLine::CreateLineSegment(ctx, 3, v3(p), v3(p + 4 * (n - 1)), c) !=
-        SM_SUCCESS)
+    cst = SmLine::CreateLineSegment(ctx, 3, v3(p), v3(p + 4 * (n - 1)), c);
+    if (cst != SM_SUCCESS)
       return nullptr;
     return c;
   }
   if (kind == 2) {
     SmCircle *c = nullptr;
-    if (SmApiCreateCircle(v3(p), p[3], c) != SM_SUCCESS)
+    cst = SmApiCreateCircle(v3(p), p[3], c);
+    if (cst != SM_SUCCESS)
       return nullptr;
     return c;
   }
@@ -84,8 +86,8 @@ SmCurve *build(const SmContext &ctx, const double *in) {
     SmEllipse *c = nullptr;
     SmAxis2Placement frame;
     frame.SetCanonical(v3(p), SmVector3d(1, 0, 0), SmVector3d(0, 1, 0));
-    if (SmEllipse::CreateCanonical(ctx, frame, p[3], p[4 * (n - 1) + 3], c) !=
-        SM_SUCCESS)
+    cst = SmEllipse::CreateCanonical(ctx, frame, p[3], p[4 * (n - 1) + 3], c);
+    if (cst != SM_SUCCESS)
       return nullptr;
     return c;
   }
@@ -157,7 +159,14 @@ SC_EXPORT int32_t sc_sweep_trans_sweep_geometry_eval(const double *in,
         put_curve(o, c);
     }
   } else if (op == 5) {
-    std::unique_ptr<SmCurve> c(build(ctx, in));
+    SmStatus cst;
+    std::unique_ptr<SmCurve> c(build(ctx, in, cst));
+    // A constructor that returns a failure status is a defined outcome (no
+    // crash): its status is compared, as the Rust side propagates the error.
+    if (!c && cst != SM_SUCCESS) {
+      o.push_back(status(cst));
+      return sc_copy_out(o.data(), int64_t(o.size()), out, cap, len);
+    }
     if (!c)
       return SC_ERR_ARG;
     SmSweepCheckType state;
@@ -169,10 +178,15 @@ SC_EXPORT int32_t sc_sweep_trans_sweep_geometry_eval(const double *in,
   } else if (op <= 7) {
     std::unique_ptr<SmBrep> b(new (ctx) SmBrep());
     SmEdge *e = nullptr;
-    SmCurve *c = build(ctx, in);
+    SmStatus cst;
+    SmCurve *c = build(ctx, in, cst);
     // CreateWireEdgeFromCurve dereferences its consumed argument before
-    // checking any status. Constructors can reject finite, distinct points /
-    // positive radii.
+    // checking any status, so it is never called with null: a constructor
+    // failure status is itself the compared outcome.
+    if (!c && cst != SM_SUCCESS) {
+      o.push_back(status(cst));
+      return sc_copy_out(o.data(), int64_t(o.size()), out, cap, len);
+    }
     if (!c)
       return SC_ERR_ARG;
     st = b->CreateWireEdgeFromCurve(c, SmExtent1d(in[15], in[16]), e);
@@ -249,7 +263,12 @@ SC_EXPORT int32_t sc_sweep_trans_sweep_geometry_eval(const double *in,
           v3(in + 4), SmVector3d(1, 0, 0), SmVector3d(0, 1, 0),
           SmVector2d(1, 1), SmExtent2d(SmPoint2d(0, 0), SmPoint2d(1, 1)), &ctx);
     else {
-      std::unique_ptr<SmCurve> c(build(ctx, in));
+      SmStatus cst;
+      std::unique_ptr<SmCurve> c(build(ctx, in, cst));
+      if (!c && cst != SM_SUCCESS) {
+        o.push_back(status(cst));
+        return sc_copy_out(o.data(), int64_t(o.size()), out, cap, len);
+      }
       auto bs = SM_CAST_PTR(SmBSplineCurve, c.get());
       if (!bs)
         return SC_ERR_ARG;

@@ -685,17 +685,6 @@ fn build(kernel: &mut Kernel, fixture: &Fixture, tolerance: f64, namespace: u64)
                 &mut fenv,
             )
             .map_err(setup)?;
-            // the shim's representable_topology(result, 1, 1, 4, 8, 4)
-            if [
-                brep.faces().len(),
-                brep.loops().len(),
-                brep.edges().len(),
-                brep.edgeuses().len(),
-                brep.vertices().len(),
-            ] != [1, 1, 4, 8, 4]
-            {
-                return Err(bad("sheet constructor did not build a single rectangular face"));
-            }
         }
         Fixture::Box { .. } => return Err(bad("box fixtures use the primitive constructor")),
     }
@@ -718,9 +707,6 @@ fn build_box(
     let [dx, dy, dz] = size;
     let mut brep = solidcore::primitive::api_primitives::create_box(kernel, v3(origin), dx, dy, dz)
         .map_err(setup)?;
-    if brep.faces().len() != 6 || brep.edges().len() != 12 || brep.vertices().len() != 8 {
-        return Err(bad("box constructor did not build a closed box"));
-    }
     brep.set_tolerance(tolerance);
     Ok(brep)
 }
@@ -2678,7 +2664,7 @@ mod tests {
     }
 
     #[test]
-    fn incomplete_native_boxes_are_rejected_without_hiding_valid_selection_errors() {
+    fn empty_native_boxes_are_compared_unless_a_face_is_selected() {
         let context = CaseContext {
             root: repo_root(),
             seeds: 0,
@@ -2701,16 +2687,28 @@ mod tests {
                     assert!(!output.values.is_empty());
                 }
                 compared += 1;
-            } else {
+            } else if case.name.ends_with("_selected") {
+                // The tiny box is an empty B-rep: no face 0 to select.
                 assert_eq!(
                     cpp.rejected.as_deref(),
                     Some("native fixture constructor status_1001")
                 );
                 assert!(cpp.ints.is_empty() && cpp.values.is_empty());
                 rejected += 1;
+            } else {
+                // Null selection: the empty box is built and the API status
+                // (1007) is compared against Rust.
+                let rust = Runner.run_rust(&case).unwrap();
+                for output in [&cpp, &rust] {
+                    assert!(output.rejected.is_none() && output.error.is_none());
+                    assert_eq!(output.ints["status"], [1007]);
+                }
+                let comparison = crate::compare::compare(&cpp, &rust, Runner.abs_floors());
+                assert!(comparison.pass(), "{}: {comparison:?}", case.name);
+                compared += 1;
             }
         }
-        assert_eq!((rejected, compared), (8, 2));
+        assert_eq!((rejected, compared), (4, 6));
     }
 
     fn assert_native_constructor_control(case: &Case, cpp: &Output, counts: [i64; 5]) {
@@ -2748,12 +2746,12 @@ mod tests {
     }
 
     #[test]
-    fn incomplete_native_sheets_are_rejected_without_hiding_valid_controls() {
+    fn degenerate_native_sheets_are_compared_alongside_valid_controls() {
         let context = CaseContext {
             root: repo_root(),
             seeds: 0,
         };
-        let (mut rejected, mut compared) = (0, 0);
+        let (rejected, mut compared) = (0, 0);
         for case in context.fixture_cases(Runner.id()).unwrap() {
             if !case.name.starts_with("review_sheet_") {
                 continue;
@@ -2764,15 +2762,17 @@ mod tests {
                 assert_native_constructor_control(&case, &cpp, [1, 1, 4, 8, 4]);
                 compared += 1;
             } else {
-                assert_eq!(
-                    cpp.rejected.as_deref(),
-                    Some("native fixture constructor status_1001")
-                );
-                assert!(cpp.ints.is_empty() && cpp.values.is_empty());
-                rejected += 1;
+                // Merged/dropped-face sheets are defined native results, built
+                // and compared as is (not rejections).
+                let rust = Runner.run_rust(&case).unwrap();
+                assert!(cpp.rejected.is_none() && rust.rejected.is_none());
+                let comparison = crate::compare::compare(&cpp, &rust, Runner.abs_floors());
+                assert!(comparison.pass(), "{}: {comparison:?}", case.name);
+                assert!(comparison.exact_compared > 0);
+                compared += 1;
             }
         }
-        assert_eq!((rejected, compared), (9, 4));
+        assert_eq!((rejected, compared), (0, 13));
     }
 
     #[test]
