@@ -266,6 +266,10 @@ impl SurfPtGlobalSolver<'_> {
         let (mut best_idx_u, mut best_idx_v) = best_idx;
         let mut uv = Point2::UNDEF;
 
+        // The suspicious triangle guess, kept as a candidate with `fixes.point_solve_keeps_triangle_guess`
+        // (WR-444, #1164): the nearest control point found below can be worse.
+        let mut triangle: Option<(Point2, usize, usize)> = None;
+
         // find closest ControlPoint triangle with point closest to target
         let suspicious = match self.find_polygon_triangle_guess((best_idx_u, best_idx_v)) {
             Ok(t) => {
@@ -286,6 +290,12 @@ impl SurfPtGlobalSolver<'_> {
                             suspicious = false;
                         }
                     }
+                }
+                if suspicious
+                    && k.fixes.point_solve_keeps_triangle_guess
+                    && op != SolverOperation::Signed3dDirectedMaximize
+                {
+                    triangle = Some((b.domain().clamp_point(uv), best_idx_u, best_idx_v));
                 }
                 suspicious
             }
@@ -422,8 +432,30 @@ impl SurfPtGlobalSolver<'_> {
             );
         }
 
+        let uv = b.domain().clamp_point(uv);
+
+        // Return the better of the triangle guess and the control-point guess, judged on
+        // the surface itself (`fixes.point_solve_keeps_triangle_guess`, WR-444, #1164).
+        if let Some((tri_uv, tri_u, tri_v)) = triangle {
+            let on_surface = |guess: Point2| match self.calc_func_val(k, guess) {
+                Ok(v) => Ok(Some(v)),
+                Err(e) if e.is_unported() => Err(e),
+                Err(_) => Ok(None),
+            };
+            if let (Some(tri), Some(cpt)) = (on_surface(tri_uv)?, on_surface(uv)?) {
+                if tri < cpt {
+                    return Ok(PolygonGuess {
+                        uv: tri_uv,
+                        best_idx_u: tri_u,
+                        best_idx_v: tri_v,
+                        suspicious,
+                    });
+                }
+            }
+        }
+
         Ok(PolygonGuess {
-            uv: b.domain().clamp_point(uv),
+            uv,
             best_idx_u,
             best_idx_v,
             suspicious,
@@ -2140,6 +2172,119 @@ mod tests {
         );
         let r = g.find_rough_guess(&k).unwrap();
         assert!(r.uv.x > 0.5 && r.uv.y > 0.5);
+    }
+
+    /// A rational strip of `runs` straight runs stacked 5 apart in z and joined end to end by
+    /// turns (weight 0.7), like the turns of a coil (#1164). Along a run the control points are
+    /// 20 to 40 apart, staggered from one run to the next, and the inner ones sit 1.5 above the run, so
+    /// the control net is off the surface between knots. Returns the surface and its domain.
+    fn stacked_runs_strip(runs: usize) -> (Surface, Extent2d) {
+        use crate::nurbs::b_spline_curve::p1::KnotType;
+        use crate::nurbs::b_spline_surface::p1::{BSplineSurfaceForm, CanonicalSurfaceData};
+        let sag = 1.5;
+        let mut path: Vec<(f64, f64, f64)> = Vec::new();
+        for r in 0..runs {
+            let z = 5.0 * r as f64;
+            let xs: Vec<f64> = if r % 2 == 0 {
+                vec![0.0, 40.0, 80.0, 120.0, 160.0]
+            } else {
+                vec![160.0, 140.0, 100.0, 60.0, 20.0, 0.0]
+            };
+            let n = xs.len();
+            for (i, x) in xs.into_iter().enumerate() {
+                let zz = if i > 0 && i + 1 < n { z + sag } else { z };
+                path.push((x, zz, 1.0));
+            }
+            if r + 1 < runs {
+                let xt = if r % 2 == 0 { 170.0 } else { -10.0 };
+                path.push((xt, z + 2.5, 0.7));
+            }
+        }
+        let n = path.len();
+        let mut pts = Vec::new();
+        let mut w = Vec::new();
+        for &(x, z, wt) in &path {
+            for y in [0.0, 1.0] {
+                pts.push(Point3::new(x, y, z));
+                w.push(wt);
+            }
+        }
+        let spans = n - 2;
+        let knots: Vec<f64> = (0..=spans).map(|i| i as f64).collect();
+        let mut mult = vec![1usize; spans + 1];
+        mult[0] = 3;
+        mult[spans] = 3;
+        let s = BSplineSurface::create_canonical(&CanonicalSurfaceData {
+            u_degree: 2,
+            v_degree: 1,
+            control_points: &pts,
+            form: BSplineSurfaceForm::Unspecified,
+            u_multiplicities: &mult,
+            v_multiplicities: &[2, 2],
+            u_knots: &knots,
+            v_knots: &[0.0, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&w),
+            uv_domain: None,
+        })
+        .unwrap();
+        (
+            Surface::from(s),
+            Extent2d::from_bounds(0.0, 0.0, spans as f64, 1.0),
+        )
+    }
+
+    /// #1164: on a rational surface whose control points are farther apart than its neighbouring
+    /// parts, the nearest control point is on the wrong run. Upstream drops the control-net
+    /// triangle guess for it, and from what is left (that control point's guess and the grid
+    /// search's) the solve finds nothing; with the fix the triangle guess is kept and the point is found.
+    #[test]
+    fn a_point_solve_finds_the_point_on_stacked_runs_with_the_fix() {
+        let (s, dom) = stacked_runs_strip(4);
+        let solve = |fixed: bool, target: Point3| {
+            let mut k = Kernel::default();
+            k.fixes.point_solve_keeps_triangle_guess = fixed;
+            s.global_point_solve(
+                &k,
+                Some(Srf),
+                &dom,
+                SolverOperation::Intersect,
+                target,
+                1e-6,
+                None,
+                SolutionRequested::All,
+            )
+            .unwrap()
+        };
+        let at = |u: f64| {
+            eval_point(&Kernel::default(), &s, Point2::new(u, 0.5), Point3::UNDEF).unwrap()
+        };
+
+        // a point on the first run, inside the second span
+        let target = at(0.8395);
+        assert_eq!(solve(false, target).len(), 0, "upstream finds the point");
+        let found = solve(true, target);
+        assert_eq!(found.len(), 1);
+        let sol = found.get(0).unwrap();
+        let uv = Point2::new(sol.start.param(0).unwrap(), sol.start.param(1).unwrap());
+        assert!(
+            eval_point(&Kernel::default(), &s, uv, Point3::UNDEF)
+                .unwrap()
+                .distance(target)
+                < 1e-6,
+            "{uv:?}"
+        );
+
+        // over the whole strip the fix never loses a point upstream finds, and finds some it
+        // misses
+        let mut gained = 0;
+        for i in 0..400 {
+            let target = at(dom.u_interval().max() * (f64::from(i) + 0.5) / 400.0);
+            let (before, after) = (solve(false, target).len(), solve(true, target).len());
+            assert!(after >= before, "lost the point at {target:?}");
+            gained += usize::from(after > before);
+        }
+        assert!(gained > 0);
     }
 
     #[test]
