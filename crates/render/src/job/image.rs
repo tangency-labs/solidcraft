@@ -6,10 +6,11 @@
 //! projected triangles, glass sorted back to front) and then draws each tile.
 
 use std::collections::BTreeMap;
+use std::sync::LazyLock;
 
 use serde::Serialize;
 use solidcraft_geom::pixel_grid::{MAX_SIDE_PX, PixelGrid};
-use solidcraft_geom::{Plane, Vec2, Vec3};
+use solidcraft_geom::{Plane, Vec2, Vec3, srgb};
 
 use super::{CancelToken, ErrorCode, ImageRequest, JobError, Phase, Progress, Result};
 use crate::{Camera, FaceAppearance, Mat4, ProductScene, RenderFormat, RenderMode, RenderOperation, RenderRequest};
@@ -1284,12 +1285,25 @@ fn raster_pixel(
     Ok(())
 }
 
+/// Each sRGB code's linear value, as [`srgb::decode8`] gives it.
+static DECODED: LazyLock<[f64; 256]> = LazyLock::new(|| std::array::from_fn(|code| srgb::decode8(code as u8)));
+
+/// Where each sRGB code from 1 up starts: the linear value of the sRGB value halfway between it
+/// and the code below.
+static CODE_STARTS: LazyLock<[f64; 255]> = LazyLock::new(|| std::array::from_fn(|code| srgb::decode((code as f64 + 0.5) / 255.0)));
+
 fn decode(v: u8) -> f64 {
-    let s = f64::from(v) / 255.0;
-    if s <= 0.04045 { s / 12.92 } else { ((s + 0.055) / 1.055).powf(2.4) }
+    // A u8 always indexes 256 entries.
+    DECODED[usize::from(v)]
 }
+
+/// The sRGB code of a linear value, as [`srgb::encode8`] gives it, without its power: the code is
+/// the number of code starts at or below the value. Within a billionth of a start, where the
+/// formula's own rounding (about 1e-15) could fall either way, the formula decides.
 fn encode(v: f64) -> u8 {
     let l = v.clamp(0.0, 1.0);
-    let s = if l <= 0.0031308 { l * 12.92 } else { 1.055 * l.powf(1.0 / 2.4) - 0.055 };
-    (s * 255.0).round() as u8
+    let starts = &*CODE_STARTS;
+    let code = starts.partition_point(|&start| start <= l);
+    let near = |i: usize| starts.get(i).is_some_and(|&start| (l - start).abs() <= start * 1e-9);
+    if !l.is_finite() || near(code) || code.checked_sub(1).is_some_and(near) { srgb::encode8(l) } else { code as u8 }
 }

@@ -721,3 +721,34 @@ fn picture_timing() {
         time(&format!("{width} × {height} px, {name}"), &|| picture(scene(), request.clone()).len());
     }
 }
+
+/// The sRGB tables give exactly `geom::srgb`'s codes and values: at every code start and the
+/// floating-point numbers around it, at the edges of the band where the formula decides, and
+/// across a million values spread over 0 to 1 and outside it.
+#[test]
+fn srgb_tables_give_the_formulas_codes() {
+    use solidcraft_geom::srgb;
+    for code in 0..=255u8 {
+        assert_eq!(decode(code).to_bits(), srgb::decode8(code).to_bits(), "code {code}");
+    }
+    let check = |v: f64| assert_eq!(encode(v), srgb::encode8(v), "{v:e}");
+    for &start in CODE_STARTS.iter() {
+        for steps in -64i64..=64 {
+            check(f64::from_bits((start.to_bits() as i64 + steps) as u64));
+        }
+        for edge in [1.0 - 1e-9, 1.0 + 1e-9, 1.0 - 2e-9, 1.0 + 2e-9] {
+            check(start * edge);
+        }
+    }
+    for i in 0..=1_000_000 {
+        check(f64::from(i) / 1_000_000.0);
+        check(f64::from(i) * 1.3e-6 - 0.15);
+    }
+    for v in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.0, f64::MIN_POSITIVE, 0.0031308, 0.0031308 + 1e-12] {
+        check(v);
+    }
+    // The codes decode to round trip.
+    for code in 0..=255u8 {
+        assert_eq!(encode(decode(code)), code);
+    }
+}
