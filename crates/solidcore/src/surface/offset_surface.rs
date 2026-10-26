@@ -59,7 +59,7 @@
 //!   base surface when extension is allowed (only the fillet standard solver allows
 //!   it) and the point lies outside the domain, and store it in `m_pExtendedSurface`
 //!   through a `const` cast. The `&self` evaluators keep it too, in a pending slot (a
-//!   `Cell`) that supersedes the stored extension until a `&mut self` method folds it
+//!   `Cell`-like slot) that supersedes the stored extension until a `&mut self` method folds it
 //!   in: later evaluations, `GetNaturalUVDomain` and `GetKnots` see it as upstream (a
 //!   point solve on the offset that leaves the base domain sees the extended natural
 //!   domain from then on). The `*_extending` (`&mut self`) evaluators store it at once.
@@ -99,8 +99,9 @@
 //!   too: `SmOffsetSurface::GetSingularities()` (no arguments, returning the stored
 //!   flags) hides the virtual rather than overriding it.
 
-use core::cell::Cell;
 use core::ptr;
+use core::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, PoisonError};
 
 use crate::curve::curve::Curve;
 use crate::error::{ignored, Result, SolidError};
@@ -165,11 +166,11 @@ const MAT_LEN: usize = (2 * MAX_DERIVS + 1) * (2 * MAX_DERIVS + 1);
 /// clamped to the domain.
 #[derive(Debug)]
 pub struct OffsetSurface {
-    /// `m_dOffsetDistance`. A [`Cell`] so that a copy of a fillet solver's offset
+    /// `m_dOffsetDistance`. Interior-mutable ([`F64Cell`]) so that a copy of a fillet solver's offset
     /// surface (the surface a fillet trace intersects) can follow the distance the
     /// solver sets on its own, as upstream's intersector and solver share one object
     /// ([`OffsetSurface::set_offset_distance`] takes `&self`).
-    offset_distance: Cell<f64>,
+    offset_distance: F64Cell,
     /// `m_bAllowExtension`.
     allow_extension: bool,
     /// `m_bOwnsSurface`.
@@ -197,7 +198,7 @@ pub struct OffsetSurface {
 impl Clone for OffsetSurface {
     fn clone(&self) -> Self {
         Self {
-            offset_distance: Cell::new(self.offset_distance.get()),
+            offset_distance: F64Cell::new(self.offset_distance.get()),
             allow_extension: self.allow_extension,
             owns_surface: self.owns_surface,
             surface: Box::new(self.surface.clone_keeping_owner()),
@@ -211,16 +212,55 @@ impl Clone for OffsetSurface {
     }
 }
 
-/// The extension an [`OffsetSurface`]'s `&self` evaluators made (a [`core::cell::Cell`]:
-/// upstream's `const` evaluators write `m_pExtendedSurface`).
+/// An `f64` with `Cell`'s `get`/`set` through `&self`, stored as its bits in an
+/// [`AtomicU64`] (relaxed) so that the surface stays `Sync`: a B-rep's edge arenas,
+/// which hold surfaces through their curves, are shared between a B-rep and its
+/// classification snapshot through an `Arc`, and the B-rep must stay `Send`. The bits
+/// round-trip exactly.
+#[derive(Debug)]
+struct F64Cell(AtomicU64);
+
+impl F64Cell {
+    fn new(v: f64) -> Self {
+        Self(AtomicU64::new(v.to_bits()))
+    }
+
+    fn get(&self) -> f64 {
+        f64::from_bits(self.0.load(Ordering::Relaxed))
+    }
+
+    fn set(&self, v: f64) {
+        self.0.store(v.to_bits(), Ordering::Relaxed);
+    }
+}
+
+/// The extension an [`OffsetSurface`]'s `&self` evaluators made (upstream's `const`
+/// evaluators write `m_pExtendedSurface`). A `Cell`-like slot (`take`/`set` through
+/// `&self`) over a [`Mutex`] so that the surface stays `Sync` (see [`F64Cell`]); no lock
+/// is held while geometry runs, and a poisoned lock is recovered (its value is a whole
+/// `Option` either way).
 #[derive(Default)]
-struct PendingExtension(Cell<Option<Box<Surface>>>);
+struct PendingExtension(Mutex<Option<Box<Surface>>>);
+
+impl PendingExtension {
+    fn take(&self) -> Option<Box<Surface>> {
+        self.0.lock().unwrap_or_else(PoisonError::into_inner).take()
+    }
+
+    fn set(&self, e: Option<Box<Surface>>) {
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = e;
+    }
+
+    fn get_mut(&mut self) -> &mut Option<Box<Surface>> {
+        self.0.get_mut().unwrap_or_else(PoisonError::into_inner)
+    }
+}
 
 impl core::fmt::Debug for PendingExtension {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let e = self.0.take();
+        let e = self.take();
         let r = f.debug_tuple("PendingExtension").field(&e).finish();
-        self.0.set(e);
+        self.set(e);
         r
     }
 }
@@ -372,7 +412,7 @@ impl OffsetSurface {
                 (u, v, s)
             };
         let mut off = Self {
-            offset_distance: Cell::new(offset_distance),
+            offset_distance: F64Cell::new(offset_distance),
             allow_extension: false,
             owns_surface,
             surface: Box::new(surface),
@@ -489,16 +529,16 @@ impl OffsetSurface {
     /// Runs `f` on the surface upstream's `m_pExtendedSurface` holds now: the pending
     /// extension, else the stored one.
     fn with_current_extension<T>(&self, f: impl FnOnce(Option<&Surface>) -> T) -> T {
-        let pending = self.pending_extension.0.take();
+        let pending = self.pending_extension.take();
         let r = f(pending.as_deref().or(self.extended_surface.as_deref()));
-        self.pending_extension.0.set(pending);
+        self.pending_extension.set(pending);
         r
     }
 
     /// Runs an evaluation body with the current extension; an extension it makes
     /// becomes the pending one (upstream stores it at once, through a `const` cast).
     ///
-    /// Invariant: the pending extension is taken out of its `Cell` while `f` runs, so
+    /// Invariant: the pending extension is taken out of its slot while `f` runs, so
     /// `f` must not call a `&self` method of this same offset (it would see only the
     /// stored extension, and an extension it made would be overwritten when this one is
     /// put back). Today's bodies (`point_with`, `evaluate_with`, `step_inversion_with`)
@@ -506,16 +546,16 @@ impl OffsetSurface {
     fn with_extension<T>(&self, f: impl FnOnce(&mut Extension<'_>) -> T) -> T {
         let mut ext = Extension {
             stored: self.extended_surface.as_deref(),
-            made: self.pending_extension.0.take(),
+            made: self.pending_extension.take(),
         };
         let r = f(&mut ext);
-        self.pending_extension.0.set(ext.made);
+        self.pending_extension.set(ext.made);
         r
     }
 
     /// Stores a pending extension in `m_pExtendedSurface`.
     fn fold_pending_extension(&mut self) {
-        if let Some(m) = self.pending_extension.0.get_mut().take() {
+        if let Some(m) = self.pending_extension.get_mut().take() {
             self.extended_surface = Some(m);
         }
     }
@@ -534,7 +574,7 @@ impl OffsetSurface {
         if theirs != mine {
             let copy =
                 other.with_current_extension(|e| e.map(|e| Box::new(e.clone_keeping_owner())));
-            self.pending_extension.0.set(copy);
+            self.pending_extension.set(copy);
         }
     }
 
@@ -542,8 +582,8 @@ impl OffsetSurface {
     /// `SmSurface` body) made since it was copied: upstream runs that body on this
     /// object, whose `m_pExtendedSurface` it sets.
     pub(crate) fn keep_extension_made_by(&self, other: &Self) {
-        if let Some(m) = other.pending_extension.0.take() {
-            self.pending_extension.0.set(Some(m));
+        if let Some(m) = other.pending_extension.take() {
+            self.pending_extension.set(Some(m));
         }
     }
 
@@ -553,7 +593,7 @@ impl OffsetSurface {
     pub(crate) fn take_extension_of(&mut self, other: &Self) {
         let current =
             other.with_current_extension(|e| e.map(|e| Box::new(e.clone_keeping_owner())));
-        *self.pending_extension.0.get_mut() = None;
+        *self.pending_extension.get_mut() = None;
         self.extended_surface = current;
     }
 
@@ -734,7 +774,7 @@ impl OffsetSurface {
         let extended_surface =
             self.with_current_extension(|e| e.map(|e| Box::new(e.clone_exact_bounded())));
         Self {
-            offset_distance: Cell::new(self.offset_distance.get()),
+            offset_distance: F64Cell::new(self.offset_distance.get()),
             allow_extension: self.allow_extension,
             owns_surface: self.owns_surface,
             surface,
@@ -756,7 +796,7 @@ impl OffsetSurface {
                 .transpose()
         })?;
         Ok(Self {
-            offset_distance: Cell::new(self.offset_distance.get()),
+            offset_distance: F64Cell::new(self.offset_distance.get()),
             allow_extension: self.allow_extension,
             owns_surface: self.owns_surface,
             surface,
@@ -1922,7 +1962,7 @@ fn read_body(k: &Kernel, db: &mut DatabaseReader, version: u64) -> Result<Offset
     let singularities = base_singularities(k, &base_surface)?;
 
     Ok(OffsetSurface {
-        offset_distance: Cell::new(offset_distance),
+        offset_distance: F64Cell::new(offset_distance),
         allow_extension: allow_extension != 0,
         owns_surface: true,
         surface: Box::new(base_surface),

@@ -179,9 +179,13 @@ fn memo_on_and_off_give_bit_identical_results() {
 
 #[test]
 fn curves_and_breps_stay_send() {
-    // (`Curve` and `Brep` are not `Sync` on main either: `CrvOnSurf` and the offset
-    // surface hold `Cell`/`RefCell` caches)
+    // `Brep` shares its edge arenas with a classification snapshot through an `Arc`,
+    // which is `Send` only when the curves are `Sync` too: their interior caches
+    // (`CrvOnSurf`'s breaks, the offset surface's distance and extension, the B-spline
+    // surface's out-of-bounds flag) are atomics or mutexes, not `Cell`/`RefCell`
     fn assert_send<T: Send>() {}
+    fn assert_sync<T: Sync>() {}
     assert_send::<Curve>();
+    assert_sync::<Curve>();
     assert_send::<Brep>();
 }

@@ -110,7 +110,7 @@
 //!   are private and exposed only immutably, so infallible `Clone` and temporary
 //!   evaluation snapshots can safely copy this validated graph exactly.
 
-use std::cell::RefCell;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use crate::curve::curve::p1::ApproximateCurveOptions;
 use crate::curve::curve::p2::{
@@ -276,8 +276,10 @@ pub struct CrvOnSurf {
     surface: Box<Surface>,
     /// `m_vUVDomain`: the domain of interest on the surface.
     uv_domain: Extent2d,
-    /// `m_bNeedBreaks`, `m_vBreaks`: mutable even in upstream's const queries.
-    break_cache: RefCell<BreakCache>,
+    /// `m_bNeedBreaks`, `m_vBreaks`: mutable even in upstream's const queries (a
+    /// [`Mutex`] rather than a `RefCell`, so that the curve stays `Sync` and a B-rep
+    /// can share its edge arenas through an `Arc` while staying `Send`).
+    break_cache: Mutex<BreakCache>,
     /// `m_lOwnerFlag`: 0 shares both parts, 1 owns (a copy of) the curve, 2 owns copies
     /// of both, 3 owns both originals.
     owner_flag: u64,
@@ -296,7 +298,7 @@ impl Clone for CrvOnSurf {
             uv_curve: Box::new(self.uv_curve.clone_exact_bounded()),
             surface: Box::new(self.surface.clone_exact_bounded()),
             uv_domain: self.uv_domain,
-            break_cache: self.break_cache.clone(),
+            break_cache: Mutex::new(self.lock_break_cache().clone()),
             owner_flag: self.owner_flag,
             bs_approx: self.bs_approx.as_deref().map(|c| Box::new(c.clone_exact())),
             max_gap_3d: self.max_gap_3d,
@@ -314,12 +316,20 @@ impl CrvOnSurf {
             uv_curve: Box::new(self.uv_curve.clone_for_evaluation_depth(depth)?),
             surface: Box::new(self.surface.clone_exact_bounded()),
             uv_domain: self.uv_domain,
-            break_cache: self.break_cache.clone(),
+            break_cache: Mutex::new(self.lock_break_cache().clone()),
             owner_flag: self.owner_flag,
             bs_approx: self.bs_approx.as_deref().map(|c| Box::new(c.clone_exact())),
             max_gap_3d: self.max_gap_3d,
             parametrization_matches: self.parametrization_matches,
         })
+    }
+
+    /// The break cache, locked only for the access (a poisoned lock is recovered: the
+    /// cache is written whole).
+    fn lock_break_cache(&self) -> MutexGuard<'_, BreakCache> {
+        self.break_cache
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 
     /// `SmCrvOnSurf_TYPE` (`CURV_BASE_TYPE + 48`).
@@ -333,7 +343,7 @@ impl CrvOnSurf {
             uv_curve: Box::new(uv_curve),
             surface: Box::new(surface),
             uv_domain: Extent2d::new(),
-            break_cache: RefCell::new(BreakCache {
+            break_cache: Mutex::new(BreakCache {
                 need_breaks: true,
                 breaks: Vec::new(),
             }),
@@ -456,7 +466,10 @@ impl CrvOnSurf {
 
         let mut c = Self::bare(uv_curve, surface, 0)?;
         c.uv_domain = self.uv_domain;
-        c.break_cache.get_mut().need_breaks = self.need_breaks();
+        c.break_cache
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner)
+            .need_breaks = self.need_breaks();
 
         // set the owner flag
         c.owner_flag = if owns_curve && owns_surface {
@@ -467,7 +480,10 @@ impl CrvOnSurf {
 
         // copy curve discontinuity break points when appropriate
         if !self.need_breaks() {
-            c.break_cache.get_mut().breaks = self.breaks();
+            c.break_cache
+                .get_mut()
+                .unwrap_or_else(PoisonError::into_inner)
+                .breaks = self.breaks();
         }
 
         if let Some(a) = &self.bs_approx {
@@ -512,19 +528,22 @@ impl CrvOnSurf {
     /// Whether the break cache still has to be computed (`m_bNeedBreaks`).
     #[must_use]
     pub fn need_breaks(&self) -> bool {
-        self.break_cache.borrow().need_breaks
+        self.lock_break_cache().need_breaks
     }
 
     /// A snapshot of the cached breaks (`m_vBreaks`). Returning owned values keeps
     /// callers from holding a cache borrow across a knot query.
     #[must_use]
     pub fn breaks(&self) -> Vec<f64> {
-        self.break_cache.borrow().breaks.clone()
+        self.lock_break_cache().breaks.clone()
     }
 
     /// Loads the break cache (`m_bNeedBreaks`, `m_vBreaks`), as `ReadFromDB` does.
     pub fn set_breaks_cache(&mut self, need_breaks: bool, breaks: Vec<f64>) {
-        *self.break_cache.get_mut() = BreakCache {
+        *self
+            .break_cache
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner) = BreakCache {
             need_breaks,
             breaks,
         };
@@ -971,7 +990,7 @@ impl CrvOnSurf {
         }
 
         // cache the discontinuity break points
-        *self.break_cache.borrow_mut() = BreakCache {
+        *self.lock_break_cache() = BreakCache {
             need_breaks: false,
             breaks: knots.clone(),
         };
@@ -1333,7 +1352,13 @@ impl CrvOnSurf {
         let curve = self.as_curve();
         let result = curve.drop_point_base(k, interval, point, vec_to_inside, dist_tol, guess, op);
         if let CurveKind::CrvOnSurf(c) = curve.into_kind() {
-            *self.break_cache.get_mut() = c.break_cache.into_inner();
+            *self
+                .break_cache
+                .get_mut()
+                .unwrap_or_else(PoisonError::into_inner) = c
+                .break_cache
+                .into_inner()
+                .unwrap_or_else(PoisonError::into_inner);
         }
         result
     }
@@ -1369,7 +1394,10 @@ impl CrvOnSurf {
         // when appropriate scale breaks
         if !self.need_breaks() {
             let ivl = self.uv_curve.natural_interval();
-            let cache = self.break_cache.get_mut();
+            let cache = self
+                .break_cache
+                .get_mut()
+                .unwrap_or_else(PoisonError::into_inner);
             if ivl.length() > EFF_ZERO && new_param.length() > EFF_ZERO {
                 // for every break
                 for b in &mut cache.breaks {
