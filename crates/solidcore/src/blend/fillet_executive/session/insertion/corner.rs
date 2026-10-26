@@ -1,9 +1,10 @@
 //! Corner insertion on the same retained intersector and bodies as geometry insertion.
 
-use super::geometry::SurfaceBinding;
+use super::geometry::{InsertionBody, SurfaceBinding};
 use super::live::{LiveCurveBinding, LiveGeometryInsertion};
 use super::FaceMarker;
 use crate::blend::fillet_corner::p1::CornerInsertionContext;
+use crate::blend::fillet_executive::session::FilletObject;
 use crate::blend::fillet_geom::p1::{FilletBrep, FilletCornerId};
 use crate::blend::fillet_geom::p4::IntersectionTopologyContext;
 use crate::error::{Result, SolidError};
@@ -110,6 +111,23 @@ impl CornerInsertionContext for LiveGeometryInsertion<'_> {
         let surface_face = surface_face.ok_or_else(|| {
             SolidError::invalid_input(OP, "corner patch surface without fillet B-rep face")
         })?;
+        // The fillet stitch's lamina-sliver removal can delete that face (and with it
+        // the surface it owns) before insertion. Upstream `m_vSurfaces[jj]` then
+        // dangles and `RegisterExistingSSI` only stores the pointer, so the entry
+        // never matches a live face's surface: register it under the destroyed
+        // face's handle, which no face loop queries.
+        if !self.intermediate.face_list().contains(&surface_face)
+            && self.intermediate.face(surface_face)?.surface.is_none()
+        {
+            return self.register_bound_handle(
+                target,
+                face,
+                Some(FilletObject::FaceSurface(
+                    InsertionBody::Intermediate,
+                    surface_face,
+                )),
+            );
+        }
         let patch = LiveGeometryInsertion::capture_managed_surface(self, surface_face)?
             .ok_or_else(|| SolidError::invalid_input(OP, "corner patch face without surface"))?;
         LiveGeometryInsertion::register_bound_intersection(self, target, face, Some(&patch))

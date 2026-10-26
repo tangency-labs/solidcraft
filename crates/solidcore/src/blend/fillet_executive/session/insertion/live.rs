@@ -173,6 +173,17 @@ impl LiveGeometryInsertion<'_> {
         if let Some(binding) = surface {
             binding.resolve_in_body(self.intermediate)?;
         }
+        self.register_bound_handle(target, face, surface.map(SurfaceBinding::face_surface))
+    }
+    /// [`Self::register_bound_intersection`] with the other surface already named by
+    /// its face-surface handle (that of a destroyed face for a dangling upstream
+    /// pointer, which no face loop queries).
+    pub(super) fn register_bound_handle(
+        &mut self,
+        target: &mut Brep,
+        face: FaceId,
+        other: Option<FilletObject>,
+    ) -> Result<()> {
         let actual = if target.face(face)?.surface.is_some() {
             Some(
                 SurfaceBinding::capture_in_body(self.context, target, InsertionBody::Target, face)?
@@ -185,8 +196,7 @@ impl LiveGeometryInsertion<'_> {
         // queries (`CheckIfHaveExistingSSI(pFace->GetSurface(), ..)`): the faces'
         // current surfaces, so a registered pair is found by a later global or
         // piecewise merge.
-        self.ti
-            .register_empty_ssi(actual, surface.map(SurfaceBinding::face_surface));
+        self.ti.register_empty_ssi(actual, other);
         Ok(())
     }
     fn merge_actual_curve(
