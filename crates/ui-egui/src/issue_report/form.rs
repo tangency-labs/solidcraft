@@ -12,11 +12,6 @@ const ALL_GUIDANCE: [&str; 4] = [
     "Opens your browser. Review and submit your report on GitHub.",
 ];
 
-/// The keys that continue on GitHub from any field (#7203), as this computer spells them.
-pub(super) fn shortcut_hint(os: egui::os::OperatingSystem) -> &'static str {
-    if os == egui::os::OperatingSystem::Mac { "⌘Enter continues on GitHub." } else { "Ctrl+Enter continues on GitHub." }
-}
-
 fn answer(ui: &mut Ui, label: &str, hint: &str, text: &mut String, id: &str, rows: usize) -> egui::Response {
     ui_kit::text(ui, tr_label(label), ui_kit::Text::Heading(label));
     ui_kit::text(ui, tr_label(hint), ui_kit::Text::Note(hint));
@@ -234,4 +229,9 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
         draft.focus_requested = false;
     }
     (retake, closed || action == ui_kit::Action::Cancel)
+}
+
+/// The keys that continue on GitHub from any field (#7203), as this computer spells them.
+pub(super) fn shortcut_hint(os: egui::os::OperatingSystem) -> &'static str {
+    if os == egui::os::OperatingSystem::Mac { "⌘Enter continues on GitHub." } else { "Ctrl+Enter continues on GitHub." }
 }
