@@ -343,6 +343,27 @@
   }
  },
  {
+  "note": "Component placements start closed (a large assembly shows one row per component); their arrows open them."
+ },
+ {
+  "expect": {
+   "hidden_handles": [
+    "row:Body2",
+    "row:Sketch1"
+   ]
+  }
+ },
+ {
+  "click": {
+   "handle": "fold:Component2:1"
+  }
+ },
+ {
+  "click": {
+   "handle": "fold:Component1:1"
+  }
+ },
+ {
   "expect": {
    "shown_handles": [
     "row:Body2"

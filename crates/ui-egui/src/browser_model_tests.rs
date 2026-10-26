@@ -93,7 +93,7 @@ fn a_face_picked_in_the_viewport_opens_the_browser_to_its_placements_body() {
     let second = super::model_placement(&mut h.app, &[copy]).unwrap().bodies[0].world.clone();
     h.app.ui.show_browser = true;
     let (one, two) = (super::occurrence_key(&[occurrence]), super::occurrence_key(&[copy]));
-    h.app.tree.collapsed.extend([one.clone(), two.clone(), format!("{two}/bodies")]);
+    h.app.tree.collapsed.insert(format!("{two}/bodies"));
     h.frames(2);
     assert!(!h.app.tree.order.contains(&format!("b:{second}")), "the body's row is closed away");
     let face = Sel::Face { body: second.clone(), index: 0, point: solidcraft_engine::geom::Vec3::new(55.0, 5.0, 10.0) };
@@ -101,8 +101,8 @@ fn a_face_picked_in_the_viewport_opens_the_browser_to_its_placements_body() {
     assert_eq!(h.app.tree.reveal.as_deref(), Some(second.as_str()));
     h.frames(2);
     assert!(h.app.tree.reveal.is_none(), "revealed");
-    assert!(!h.app.tree.collapsed.contains(&two) && !h.app.tree.collapsed.contains(&format!("{two}/bodies")));
-    assert!(h.app.tree.collapsed.contains(&one), "the other placement stays as it was");
+    assert!(h.app.tree.expanded.contains(&two) && !h.app.tree.collapsed.contains(&format!("{two}/bodies")));
+    assert!(!h.app.tree.expanded.contains(&one), "the other placement stays as it was");
     assert!(h.app.tree.order.contains(&format!("b:{second}")), "the row is drawn");
     assert!(!h.app.tree.order.contains(&format!("b:{first}")), "the other placement's row stays closed away");
 }

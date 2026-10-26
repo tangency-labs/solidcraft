@@ -12,6 +12,9 @@ fn replaced_body_name_uses_evaluated_owner_in_browser_and_component_actions() {
     assert_eq!(context_menu::component_bodies(&h.app, owner), ["Block"]);
     h.app.run("solid.remove", json!({"bodies":["Block"]})).unwrap();
     h.app.run("solid.box", json!({"corner":[30,0,0],"length":5,"width":5,"height":5,"body_name":"Block"})).unwrap();
+    // Placements start closed: open the component's placement so its Bodies folder is listed.
+    let occurrence = h.app.session.doc.occurrence_of(owner).unwrap().id;
+    h.app.tree.expanded.insert(super::occurrence_key(&[occurrence]));
     h.frames(2);
     let state = h.app.session.model.state();
     let body = state.body("Block").unwrap();
@@ -20,7 +23,6 @@ fn replaced_body_name_uses_evaluated_owner_in_browser_and_component_actions() {
     assert!(context_menu::component_bodies(&h.app, owner).is_empty());
     let cache = h.app.tree.cache.as_ref().unwrap();
     assert_eq!(cache.root.folders[0].as_ref().unwrap().entries().map(|entry| entry.key.as_str()).collect::<Vec<_>>(), ["Block"]);
-    let occurrence = h.app.session.doc.occurrence_of(owner).unwrap().id;
     assert!(cache.occurrences.get([occurrence].as_slice()).unwrap().folders[0].as_ref().unwrap().entries().next().is_none());
     let bounds = h.app.session.world_state().body("Block").unwrap().mesh().bounds();
     assert!((bounds.min.x - 30.0).abs() < 1e-9);
@@ -60,6 +62,9 @@ fn folder_visibility_shortcut_targets_only_the_clicked_placement() {
 #[test]
 fn browser_reuses_unchanged_rows_and_refreshes_live_state_and_replaced_documents() {
     let (mut h, _, first, second) = fixture();
+    // Placements start closed: open the second one so its body rows are cached.
+    h.app.tree.expanded.insert(super::occurrence_key(&[second]));
+    h.frames(2);
     let second_body = h.app.session.occurrence_bodies(&[second], false).unwrap().pop().unwrap();
     let first_body = h.app.session.occurrence_bodies(&[first], false).unwrap().pop().unwrap();
     let row = |h: &Harness| {
@@ -101,7 +106,8 @@ fn click(h: &mut Harness, path: &[u64], control: &str) {
 #[test]
 fn save_mesh_browser_pick_uses_the_body_of_the_clicked_placement() {
     let (mut h, _, first, second) = fixture();
-    h.app.tree.collapsed.insert(super::occurrence_key(&[first]));
+    // Placements start closed: open the second one only.
+    h.app.tree.expanded.insert(super::occurrence_key(&[second]));
     let expected = h.app.session.occurrence_bodies(&[second], true).unwrap();
     h.app.start("file.save_mesh");
     h.settle();
@@ -178,8 +184,8 @@ fn occurrence_eye_and_fold_are_independent_and_survive_rename() {
     let second_body = h.app.session.occurrence_bodies(&[second], true).unwrap()[0].clone();
     assert!(!h.app.session.body_visible(&second_body));
     click(&mut h, &[second], "fold");
-    assert!(h.app.tree.collapsed.contains(&format!("o:{second}")));
-    assert!(!h.app.tree.collapsed.contains(&format!("o:{first}")));
+    assert!(h.app.tree.expanded.contains(&format!("o:{second}")));
+    assert!(!h.app.tree.expanded.contains(&format!("o:{first}")));
     h.app.run("component.rename", json!({"component":component,"name":"Renamed Block"})).unwrap();
     h.frames(3);
     assert!(h.app.session.occurrence_hidden(&[second]));
@@ -281,14 +287,16 @@ fn occurrence_nested_shared_child_has_distinct_rows_and_scope() {
     h.app.run("component.activate", json!({"component":0})).unwrap();
     let other = h.app.run("occurrence.copy", json!({"component":parent_component,"translate":[80,0,0]})).unwrap()["occurrence"].as_u64().unwrap();
     h.frames(3);
+    // Placements start closed: open the copy to reach its child's row.
+    click(&mut h, &[other], "fold");
     click(&mut h, &[other, child], "row");
     assert_eq!(h.app.session.selection, vec![Sel::Occurrence { path: vec![other, child] }]);
     assert!((crate::viewport::selection_bounds(&h.app).unwrap().center().x - 85.0).abs() < 1e-8);
     let items = context_menu::items(&h.app, &Target::Occurrence { path: vec![other, child] });
     assert!(items.iter().any(|i| i.label.starts_with("Shared child:")));
     click(&mut h, &[other, child], "fold");
-    assert!(h.app.tree.collapsed.contains(&format!("o:{other}/{child}")));
-    assert!(!h.app.tree.collapsed.contains(&format!("o:{parent_occurrence}/{child}")));
+    assert!(h.app.tree.expanded.contains(&format!("o:{other}/{child}")));
+    assert!(!h.app.tree.expanded.contains(&format!("o:{parent_occurrence}/{child}")));
     click(&mut h, &[other, child], "eye");
     assert!(h.app.session.occurrence_visible(&[parent_occurrence, child]));
     assert!(!h.app.session.occurrence_visible(&[other, child]));
@@ -333,7 +341,10 @@ fn a_body_dropped_on_a_bodies_folder_moves_into_that_component() {
     h.app.home.open = false;
     h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Plate"})).unwrap();
     h.app.run("solid.box", json!({"corner":[20,0,0],"length":5,"width":5,"height":5,"body_name":"Lid"})).unwrap();
-    let part = h.app.run("component.create", json!({"name":"Part"})).unwrap()["component"].as_u64().unwrap();
+    let created = h.app.run("component.create", json!({"name":"Part"})).unwrap();
+    let part = created["component"].as_u64().unwrap();
+    // Placements start closed: open Part's to show its body.
+    h.app.tree.expanded.insert(format!("o:{}", created["occurrence"].as_u64().unwrap()));
     h.app.run("solid.box", json!({"corner":[40,0,0],"length":5,"width":5,"height":5,"body_name":"Pin"})).unwrap();
     h.app.run("component.activate", json!({"component":0})).unwrap();
     h.frames(4);
@@ -374,7 +385,35 @@ fn a_copied_component_pastes_into_its_parent_not_into_itself() {
     assert_eq!((pasted.component, pasted.parent), (component, 0), "an instance of Block, in the design");
     assert_eq!(h.app.session.selection, vec![Sel::Occurrence { path: vec![pasted.id] }]);
     assert!((pasted.transform[3][0] - 50.0).abs() < 1e-9, "where the copied instance is");
-    assert!(!crate::browser::is_open(&h.app, &format!("o:{}", pasted.id), true), "it arrives folded");
+    assert!(!crate::browser::is_open(&h.app, &format!("o:{}", pasted.id), false), "it arrives folded");
+}
+
+#[test]
+fn placements_start_closed_and_find_in_browser_opens_the_path_to_its_body() {
+    let mut h = Harness::new();
+    let outer = h.app.run("component.create", json!({"name":"Frame"})).unwrap()["occurrence"].as_u64().unwrap();
+    let inner = h.app.run("component.create", json!({"name":"Part"})).unwrap()["occurrence"].as_u64().unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Deep"})).unwrap();
+    h.app.run("component.activate", json!({"component":0})).unwrap();
+    h.frames(3);
+    let row = |path: &str| crate::scenario::handle_at(&format!("row:occurrence:{path}"));
+    assert!(row(&outer.to_string()).is_some(), "the top-level placement shows");
+    assert!(row(&format!("{outer}/{inner}")).is_none(), "a placement's contents stay hidden until it is opened");
+    click(&mut h, &[outer], "fold");
+    assert!(row(&format!("{outer}/{inner}")).is_some(), "opening a placement shows its children");
+    click(&mut h, &[outer], "fold");
+    assert!(row(&format!("{outer}/{inner}")).is_none(), "closing it hides them again");
+    let deep = h.app.session.occurrence_bodies(&[outer, inner], false).unwrap()[0].clone();
+    h.app.tree.reveal = Some(deep);
+    h.frames(3);
+    assert!(h.app.tree.expanded.contains(&format!("o:{outer}")) && h.app.tree.expanded.contains(&format!("o:{outer}/{inner}")));
+    assert!(row(&format!("{outer}/{inner}")).is_some(), "Find in Browser opened the placements holding the body");
+    h.app.run("browser.collapse_all", json!({})).unwrap();
+    h.frames(3);
+    assert!(row(&format!("{outer}/{inner}")).is_none(), "Collapse All closes the placements");
+    h.app.run("browser.expand_all", json!({})).unwrap();
+    h.frames(3);
+    assert!(row(&format!("{outer}/{inner}")).is_some(), "Expand All opens them");
 }
 
 /// #4217: whether a component's Bodies folder folds away, under Always, Several bodies only and

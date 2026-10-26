@@ -236,6 +236,39 @@
   }
  },
  {
+  "expect": {
+   "browser_lacks": [
+    "Body3"
+   ]
+  }
+ },
+ {
+  "click": {
+   "chevron": "Body3:1"
+  }
+ },
+ {
+  "expect": {
+   "browser_has": [
+    "Body3"
+   ],
+   "browser_selected": false
+  }
+ },
+ {
+  "click": {
+   "chevron": "Body3:1"
+  }
+ },
+ {
+  "expect": {
+   "browser_lacks": [
+    "Body3"
+   ],
+   "browser_selected": false
+  }
+ },
+ {
   "note": "Folders that start open close with their arrow, and open again."
  },
  {
@@ -366,39 +399,6 @@
   "expect": {
    "browser_has": [
     "Canvas1"
-   ],
-   "browser_selected": false
-  }
- },
- {
-  "expect": {
-   "browser_has": [
-    "Body3"
-   ]
-  }
- },
- {
-  "click": {
-   "chevron": "Body3:1"
-  }
- },
- {
-  "expect": {
-   "browser_lacks": [
-    "Body3"
-   ],
-   "browser_selected": false
-  }
- },
- {
-  "click": {
-   "chevron": "Body3:1"
-  }
- },
- {
-  "expect": {
-   "browser_has": [
-    "Body3"
    ],
    "browser_selected": false
   }

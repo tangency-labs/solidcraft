@@ -626,12 +626,15 @@ fn expand_and_collapse_all_open_the_browser_tree_from_the_design_menu() {
     let occ = created["occurrence"].as_u64().unwrap();
     let child = app.run("component.create", json!({"name": "Inner", "parent_path": [occ]})).unwrap()["occurrence"].as_u64().unwrap();
     let path = vec![occ];
+    // Placements start closed: open this one and its child, then fold from it.
+    act(&mut app, &Target::Occurrence { path: path.clone() }, "Expand All");
+    assert!(app.tree.expanded.contains(&format!("o:{occ}/{child}")), "{:?}", app.tree.expanded);
     act(&mut app, &Target::Occurrence { path: path.clone() }, "Collapse All");
-    assert!(app.tree.collapsed.contains(&format!("o:{occ}/{child}")), "its children fold: {:?}", app.tree.collapsed);
-    assert!(!app.tree.collapsed.contains(&format!("o:{occ}")), "the clicked row stays open: {:?}", app.tree.collapsed);
+    assert!(!app.tree.expanded.contains(&format!("o:{occ}/{child}")), "its children fold: {:?}", app.tree.expanded);
+    assert!(app.tree.expanded.contains(&format!("o:{occ}")), "the clicked row stays open: {:?}", app.tree.expanded);
     assert!(!app.tree.collapsed.contains("c0/bodies"), "a placement's collapse leaves the rest of the tree: {:?}", app.tree.collapsed);
     act(&mut app, &Target::Occurrence { path }, "Expand All");
-    assert!(!app.tree.collapsed.contains(&format!("o:{occ}/{child}")), "{:?}", app.tree.collapsed);
+    assert!(app.tree.expanded.contains(&format!("o:{occ}/{child}")), "{:?}", app.tree.expanded);
 }
 
 #[test]

@@ -52,7 +52,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("browser.expand_all", "Expand All", expand_all).icon("folder").noundo().params(
         "path?: [occurrence ids] (that placement and its descendants); component?: id (that component's own folders); \
-         omit both for the whole tree, including folders that start closed (Origin, Named Views, Features). \
+         omit both for the whole tree, including rows that start closed (Origin, Named Views, Features, placements). \
          Display only: open/closed rows are not saved in the design and are not an undo step → open, open_by_default, closed_by_default",
     ),
     CommandSpec::new("browser.collapse_all", "Collapse All", collapse_all).icon("folder").noundo().params(
@@ -625,7 +625,7 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "visible": visible, "changed": items.len(), "visibility": s.visibility }))
 }
 
-/// Browser rows that start open (`c0`, Bodies, placements) vs closed (Origin, Features).
+/// Browser rows that start open (`c0`, Bodies) vs closed (Origin, Features, placements).
 struct FoldKeys {
     open: BTreeSet<String>,
     closed: BTreeSet<String>,
@@ -688,7 +688,12 @@ fn has_native_features(s: &Session, component: u64) -> bool {
 }
 
 fn collect_component_keys(s: &Session, prefix: &str, component: u64, root_extras: bool, keys: &mut FoldKeys) {
-    keys.open.insert(prefix.to_string());
+    // Placements start closed in the browser; component rows start open.
+    if prefix.starts_with("o:") {
+        keys.closed.insert(prefix.to_string());
+    } else {
+        keys.open.insert(prefix.to_string());
+    }
     for folder in FOLDERS {
         if folder_has_items(s, component, folder) {
             keys.open.insert(format!("{prefix}/{folder}"));
@@ -765,6 +770,7 @@ fn fold_tree(s: &mut Session, p: &Value, open: bool, cmd: &str) -> Result<Value>
             FoldScope::Occurrence(path) => occurrence_fold_key(path),
         };
         keys.open.remove(&own);
+        keys.closed.remove(&own);
     }
     if keys.open.len().saturating_add(keys.closed.len()) > MAX_FOLD_KEYS {
         return Err(bad(cmd, "expand/collapse exceeds 10000 browser rows"));
@@ -2544,7 +2550,7 @@ mod tests {
         assert!(open.contains(&"c0/bodies".into()), "{open:?}");
         assert!(open.contains(&format!("c0/g{g}")), "{open:?}");
         assert!(open.contains(&"c0/sketches".into()), "{open:?}");
-        assert!(open.contains(&format!("o:{occ}")), "{open:?}");
+        assert!(closed.contains(&format!("o:{occ}")), "placements start closed: {closed:?}");
         assert!(closed.contains(&"origin".into()) && closed.contains(&"namedviews".into()) && closed.contains(&"docsettings".into()), "{closed:?}");
         assert!(closed.contains(&"c0/features".into()), "{closed:?}");
         assert_eq!(s.undo.len(), n, "display-only: no undo step");
@@ -2553,18 +2559,20 @@ mod tests {
         assert_eq!(collapsed["open"], false);
         let open = strs(&collapsed, "open_by_default");
         assert!(!open.contains(&"c0".into()), "the design row stays visible: {open:?}");
-        assert!(open.contains(&"c0/bodies".into()) && open.contains(&format!("o:{occ}")), "{open:?}");
+        assert!(open.contains(&"c0/bodies".into()), "{open:?}");
+        assert!(strs(&collapsed, "closed_by_default").contains(&format!("o:{occ}")), "{collapsed}");
 
         let below = run(&mut s, "browser.collapse_all", json!({"path": [occ]}));
         let open = strs(&below, "open_by_default");
-        assert!(!open.contains(&format!("o:{occ}")), "the clicked row stays open: {open:?}");
+        let own = format!("o:{occ}");
+        assert!(!open.contains(&own) && !strs(&below, "closed_by_default").contains(&own), "the clicked row stays open: {below}");
         assert!(!open.contains(&"c0/bodies".into()), "{open:?}");
         assert!(strs(&below, "closed_by_default").iter().all(|k| !k.starts_with("c0") && k != "origin"), "{below}");
 
         let only = run(&mut s, "browser.expand_all", json!({"component": created["component"]}));
         let open = strs(&only, "open_by_default");
         assert!(open.iter().any(|k| k.starts_with('c') && k != "c0" && !k.starts_with("c0/")), "{open:?}");
-        assert!(!open.contains(&format!("o:{occ}")), "{open:?}");
+        assert!(!open.contains(&format!("o:{occ}")) && !strs(&only, "closed_by_default").contains(&format!("o:{occ}")), "{only}");
     }
 
     #[test]

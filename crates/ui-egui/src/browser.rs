@@ -51,10 +51,7 @@ pub(crate) fn reveal_body(app: &mut SolveApp, body: &str) {
     else {
         return;
     };
-    app.tree.collapsed.remove("c0");
-    for depth in 1..=path.len() {
-        app.tree.collapsed.remove(&occurrence_key(&path[..depth]));
-    }
+    open_path(app, &path);
     let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(&path) };
     app.tree.collapsed.remove(&scope);
     app.tree.collapsed.remove(&format!("{scope}/bodies"));
@@ -689,6 +686,14 @@ fn reveal_path(app: &mut SolveApp) -> Option<Vec<u64>> {
     let body = app.tree.reveal.clone()?;
     prepare_model(app);
     app.tree.model.as_mut()?.body_path(&app.session, &body)
+}
+
+/// Opens the design row and every placement down to `path` (placements start closed).
+pub(crate) fn open_path(app: &mut SolveApp, path: &[u64]) {
+    app.tree.collapsed.remove("c0");
+    for depth in 1..=path.len() {
+        app.tree.expanded.insert(occurrence_key(&path[..depth]));
+    }
 }
 
 pub(crate) fn is_open(app: &SolveApp, key: &str, default: bool) -> bool {
@@ -1590,9 +1595,9 @@ fn occurrence_key(path: &[u64]) -> String {
 }
 
 /// Show a placement's row closed: a pasted (or moved) component arrives folded, whatever a row
-/// at that path showed before.
+/// at that path showed before. Placements start closed, so this forgets an earlier opening.
 pub(crate) fn close_placement(app: &mut SolveApp, path: &[u64]) {
-    app.tree.collapsed.insert(occurrence_key(path));
+    app.tree.expanded.remove(&occurrence_key(path));
 }
 
 /// A placement, rather than a component definition: repeated child IDs remain distinct
@@ -1614,10 +1619,12 @@ fn occurrence_rows_inner(
     placement: &mut cache::Node,
 ) {
     let key = &placement.key;
+    // Placements start closed: a design with many components shows one row per top-level
+    // placement until opened. Find in Browser opens the ones holding its body.
     if reveal_path(app).is_some_and(|rp| rp.starts_with(path)) {
-        app.tree.collapsed.remove(key);
+        app.tree.expanded.insert(key.clone());
     }
-    let open = is_open(app, key, true);
+    let open = is_open(app, key, false);
     let on_screen = ui.is_rect_visible(row_rect(ui));
     let active = app.session.active_occurrence_path.as_deref() == Some(path)
         || (app.session.active_occurrence_path.is_none() && app.session.active_component == placement.component && placement.first);
@@ -1683,7 +1690,7 @@ fn occurrence_rows_inner(
         }
     }
     if r.fold {
-        toggle(app, key, true);
+        toggle(app, key, false);
     }
     if r.eye {
         let _ = app.run("browser.visibility", json!({"visible": app.session.occurrence_hidden(path), "paths": [path]}));
