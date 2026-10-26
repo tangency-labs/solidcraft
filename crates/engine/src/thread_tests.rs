@@ -479,11 +479,11 @@ fn hex_nut(hole: f64) -> Session {
     s
 }
 
-/// Issue 602: rounding the edges of a hex boss on a threaded shaft froze the app. The thread's
-/// thousands of facets were healed pair by pair, once per feature after it, and the fillet's
-/// preview then compared each of them with the whole old body.
-#[test]
-fn fillet_beside_a_modelled_thread_finishes() {
+/// A screw with a modeled M5 thread of `length` millimetres: the number of faces the thread left
+/// on it, and how long the fillet of the boss's top edges took. The fillet is the work under test:
+/// it healed the thread's facets and compared each of them with the whole old body, which froze
+/// the app for minutes (#602).
+fn fillet_beside_a_thread(length: f64) -> (usize, std::time::Duration) {
     let mut s = Session::default();
     for (id, p) in [
         ("sketch.create", json!({"plane": "XY"})),
@@ -494,12 +494,11 @@ fn fillet_beside_a_modelled_thread_finishes() {
         ("sketch.polygon.circumscribed", json!({"center": [0, 0], "radius": 2, "sides": 6})),
         ("sketch.finish", json!({})),
         ("solid.extrude", json!({"distance": 3, "profiles": [{"point": [0, 0]}], "operation": "join", "targets": ["Screw"]})),
-        ("solid.thread", json!({"face": [2.5, 0, 5], "designation": "M5", "length": 4, "modeled": true})),
+        ("solid.thread", json!({"face": [2.5, 0, 5], "designation": "M5", "length": length, "modeled": true})),
     ] {
         run(&mut s, id, p);
     }
-    let faces_before = s.model.state().body("Screw").map(|b| b.body.face_count()).unwrap_or(0);
-    assert!(faces_before > 1000, "the thread is faceted: {faces_before} faces");
+    let faces = s.model.state().body("Screw").map(|b| b.body.face_count()).unwrap_or(0);
     let volume_before = volume(&mut s, "Screw");
     let top: Vec<Value> = (0..6)
         .map(|i| {
@@ -509,7 +508,74 @@ fn fillet_beside_a_modelled_thread_finishes() {
         .collect();
     let started = std::time::Instant::now();
     run(&mut s, "solid.fillet", json!({"edges": top, "radius": 0.3}));
-    assert!(started.elapsed().as_secs() < 30, "the fillet took {:?}", started.elapsed());
+    let took = started.elapsed();
     let volume_after = volume(&mut s, "Screw");
     assert!(volume_after < volume_before && volume_after > volume_before * 0.99, "{volume_before} -> {volume_after}");
+    (faces, took)
+}
+
+/// Whether a job several times the size took at most about linear: `pair` times the small job,
+/// then the big one. The quadratic that the bug cost grows with the square of the work, so eight
+/// times the small time is the limit. The load of the other test binaries can rise between the two
+/// runs, so a pair that misses is measured again, up to three times. Load only ever slows a run,
+/// so each size keeps its fastest time and the ratio is taken of those: a retry cannot pass a
+/// regression on a small run that a spike happened to slow, once an earlier small run was fast.
+///
+/// `slack` is the room the noise of a busy machine gets, on top of the ratio.
+fn scales_linearly(mut pair: impl FnMut() -> (std::time::Duration, std::time::Duration), slack: std::time::Duration) -> Result<(), String> {
+    let limit = |small: f64| 8.0 * small + slack.as_secs_f64();
+    let (mut small, mut big) = (f64::INFINITY, f64::INFINITY);
+    let mut runs = Vec::new();
+    for _ in 0..3 {
+        let (s, b) = pair();
+        small = small.min(s.as_secs_f64());
+        big = big.min(b.as_secs_f64());
+        runs.push(format!("{s:?} then {b:?}"));
+        if big < limit(small) {
+            return Ok(());
+        }
+    }
+    Err(format!("{}; fastest {small:.3} s and {big:.3} s, limit {:.3} s", runs.join(", "), limit(small)))
+}
+
+#[test]
+fn scales_linearly_keeps_each_sizes_fastest_run() {
+    let pairs = |p: Vec<(u64, u64)>| {
+        let mut p = p.into_iter().map(|(s, b)| (std::time::Duration::from_millis(s), std::time::Duration::from_millis(b)));
+        move || p.next().unwrap_or((std::time::Duration::from_secs(1), std::time::Duration::from_secs(1)))
+    };
+    let slack = std::time::Duration::from_millis(0);
+    // Linear: four times the work, four times the time.
+    assert!(scales_linearly(pairs(vec![(5, 20)]), slack).is_ok());
+    // A big run slowed by load, then a quiet pair.
+    assert!(scales_linearly(pairs(vec![(5, 80), (5, 20)]), slack).is_ok());
+    // A quadratic cost (16x) whose later small runs a spike slowed: the fast first one still counts.
+    let r = scales_linearly(pairs(vec![(5, 80), (15, 80), (15, 80)]), slack);
+    assert!(r.as_ref().is_err_and(|e| e.contains("fastest 0.005 s and 0.080 s, limit 0.040 s")), "{r:?}");
+}
+
+/// Issue 602: rounding the edges of a hex boss on a threaded shaft froze the app. The thread's
+/// thousands of facets were healed pair by pair, once per feature after it, and the fillet's
+/// preview then compared each of them with the whole old body.
+///
+/// A ratio and not a limit: a test must not depend on wall-clock timing (CONTRIBUTING.md), the
+/// machine is busy. The longer thread leaves about five times the facets, and the fillet healed
+/// them in a time that grew with their square: linear is about 5x, the quadratic 25x or more.
+#[test]
+fn fillet_beside_a_modelled_thread_finishes() {
+    /// The room the noise of a run on a busy machine gets, on top of the ratio.
+    const SLACK: std::time::Duration = std::time::Duration::from_millis(500);
+    let mut faces = 0;
+    if let Err(missed) = scales_linearly(
+        || {
+            let (_, small) = fillet_beside_a_thread(1.0);
+            let (facets, big) = fillet_beside_a_thread(8.0);
+            faces = facets;
+            (small, big)
+        },
+        SLACK,
+    ) {
+        panic!("the fillet beside the thread does not scale linearly: {missed}");
+    }
+    assert!(faces > 1000, "the thread is faceted: {faces} faces");
 }

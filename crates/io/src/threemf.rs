@@ -1331,9 +1331,13 @@ pub(crate) mod tests {
     /// Placements in every part draw on one budget (T4): three parts fanning out 300 ways each
     /// (27 million placements of an empty object) stop at it, and only the build item that went
     /// over fails.
+    ///
+    /// The clock is not read: the budget is spent inside the reader, so the reader stops on its
+    /// own and the test says what it wants to know, not how long it took. The one object that
+    /// survives and the warning that names the build item that went over are what show the budget
+    /// works (#2999 dropped the clock from the sibling tests the same way).
     #[test]
     fn parts_share_the_placement_budget() {
-        let t = std::time::Instant::now();
         let fan = |id: u32, path: &str| assembly(id, &vec![(path, 1); 300]);
         let root = root_model(&fan(10, "/3D/Objects/a.model"), r#"<item p:path="/3D/Objects/a.model" objectid="9"/><item objectid="10"/>"#);
         let a = model_part("millimeter", &format!("{}{}", fan(1, "/3D/Objects/b.model"), tet_object(9, "Tet", 1.0)));
@@ -1344,7 +1348,6 @@ pub(crate) mod tests {
         let (objs, warnings) = read_3mf(&package).unwrap();
         assert_eq!(objs.len(), 1);
         assert!(warnings.len() == 1 && warnings[0].starts_with("build item 2") && warnings[0].contains("placements"), "{warnings:?}");
-        assert!(t.elapsed() < std::time::Duration::from_secs(30), "took {:?}", t.elapsed());
     }
 
     /// A loop through three parts with different object ids is found, and a chain of parts deeper
