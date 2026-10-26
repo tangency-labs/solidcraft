@@ -192,31 +192,6 @@ impl crate::blend::fillet_solver::p5::RailClassificationContext for Context<'_> 
     }
 }
 
-/// Issued pseudo-B-rep identity for new recovery curves. Notification routing is
-/// deliberately unavailable until the recovery API supplies the actual curve key.
-pub(super) struct Ownership {
-    pub serial: u64,
-    pub brep: ObjectRef,
-}
-impl crate::blend::fillet_solver::p1::RailOwnership for Ownership {
-    fn edge_owner(&self, edge: EdgeId) -> crate::error::Result<(ObjectRef, Option<ObjectRef>)> {
-        Ok((
-            crate::topology::brep::p3::topology_ref(self.serial, EntityRef::Edge(edge)),
-            Some(self.brep),
-        ))
-    }
-    fn owner_changed(
-        &mut self,
-        _: crate::curve::curve::p2::OwnerChange,
-    ) -> crate::error::Result<()> {
-        // UNPORTED(blend.fillet_solver_p5): ProcessRollOver retained curve notification context.
-        Err(crate::error::SolidError::unported(
-            "SmFilletSolver::ProcessRollOver (actual curve notification context)",
-            "blend.fillet_solver_p5",
-        ))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -299,5 +274,104 @@ mod tests {
         assert!(objects
             .topology_handle_in(&foreign, EntityRef::Edge(foreign_edge))
             .is_none());
+    }
+    #[test]
+    fn actual_box_rail_crossing_retains_concrete_solver_virtuals() {
+        use super::super::{live_solver_ops, FilletObject, FilletSession};
+        use crate::blend::fillet_geom::p1::{FilStatus, FilletVertexType};
+        use crate::blend::fillet_solver::p3::{calc_rail_x_edge, calc_rail_x_edge_with_ops};
+        use crate::topology::edgeuse::p1 as eu;
+
+        let mut k = Kernel::default();
+        let mut target = create_box(&mut k, Point3::ZERO, 10., 20., 30.).unwrap();
+        let edge = target.edges().ids().next().unwrap();
+        let mut session = FilletSession::new(&mut k, &mut target).unwrap();
+        session
+            .prepare_constant_radius_edges(&mut k, &[edge], 0.5, 1, 1, 1.)
+            .unwrap();
+        session.create_corners(&k, None).unwrap();
+        session.process_smooth_edge_sequences(&mut k).unwrap();
+        session.create_corner_vertices(&mut k).unwrap();
+        session.adjust_corner_topology(&mut k).unwrap();
+        session.calculate_solver_geometry(&mut k).unwrap();
+        let FilletObject::Solver(id) = session.executive.solvers[0] else {
+            panic!("actual solver")
+        };
+        let objects = &mut session.objects;
+        let vertex = objects.corners[0].vertices[0];
+        assert_eq!(
+            objects
+                .pseudo
+                .fillet_vertex(vertex)
+                .unwrap()
+                .fillet_vertex_type(),
+            FilletVertexType::RailXEdgeuse
+        );
+        let Some(EntityRef::Edgeuse(side_use)) = objects
+            .pseudo
+            .fillet_vertex(vertex)
+            .unwrap()
+            .point_class_object()
+        else {
+            panic!("actual side use")
+        };
+        let side = eu::edge(objects.target, side_use).unwrap().unwrap();
+        let solver = objects.solvers[id.0 as usize].as_mut().unwrap();
+        let geom = solver.base().first_fillet_geom().unwrap();
+        let which = solver
+            .base()
+            .find_index_of_rail_x_side_edgeuse(objects.target, side_use)
+            .unwrap();
+        let rail = objects.pseudo.geom(geom).unwrap().rail(which).unwrap();
+        let expected = objects.pseudo.vertex_point(vertex).unwrap();
+        let base = calc_rail_x_edge(
+            solver.base_mut(),
+            &k,
+            objects.target,
+            &mut objects.pseudo,
+            vertex,
+            geom,
+            which,
+            rail,
+            side,
+            None,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(
+                base,
+                crate::error::SolidError::Upstream {
+                    code: 1001,
+                    operation: "blend::fillet_solver::p1",
+                    ..
+                }
+            ),
+            "{base:?}"
+        );
+        objects.pseudo.brep_mut().vertex_mut(vertex).unwrap().point = Point3::UNDEF;
+        objects
+            .pseudo
+            .fillet_vertex_mut(vertex)
+            .unwrap()
+            .set_status(FilStatus::Unprocessed);
+        calc_rail_x_edge_with_ops(
+            live_solver_ops(solver).unwrap(),
+            &k,
+            objects.target,
+            &mut objects.pseudo,
+            vertex,
+            geom,
+            which,
+            rail,
+            side,
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            objects.pseudo.fillet_vertex(vertex).unwrap().status(),
+            FilStatus::Processed
+        );
+        let actual = objects.pseudo.vertex_point(vertex).unwrap();
+        assert!(actual.distance(expected) < 1e-9, "{actual:?} {expected:?}");
     }
 }

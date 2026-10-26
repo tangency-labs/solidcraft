@@ -15,12 +15,15 @@ use crate::blend::fillet_geom::p1::{
     CliffHandle, FilStatus, FilletBrep, FilletEdgeType, FilletGeomId, FilletVertex,
 };
 use crate::curve::curve::{p2::OwnerChange, Curve};
-use crate::error::{ignored, Result, SolidError};
+use crate::error::{ignored, EntityRef, Result, SolidError};
 use crate::geom::{global_solver::SolverOperation, object::ObjectRef};
 use crate::kernel::Kernel;
 use crate::math::{Point3, Vec3};
 use crate::surface::surface::Surface;
-use crate::topology::{edge, edgeuse::p1 as eu, EdgeId, Vertex, VertexId};
+use crate::topology::{edge, edgeuse::p1 as eu, Brep, EdgeId, Vertex, VertexId};
+fn invalid(reason: &'static str) -> SolidError {
+    SolidError::invalid_input(OP, reason)
+}
 const OP: &str = "blend::fillet_solver::p1::rails";
 
 /// Caller-owned object identities and notification routing for new rail curves.
@@ -29,7 +32,130 @@ pub trait RailOwnership {
     fn edge_owner(&self, edge: EdgeId) -> Result<(ObjectRef, Option<ObjectRef>)>;
     /// Deliver the notification produced by `Curve::set_owner`.
     fn owner_changed(&mut self, change: OwnerChange) -> Result<()>;
+    /// Set the owner of the actual installed rail curve. The default preserves the
+    /// original adapter contract; retained contexts may notify before assignment.
+    ///
+    /// # Errors
+    /// Identity resolution or notification transport failures.
+    fn set_curve_owner(
+        &mut self,
+        _edge: EdgeId,
+        curve: &mut Curve,
+        owner: ObjectRef,
+        brep: Option<ObjectRef>,
+    ) -> Result<()> {
+        let (_, notification) = curve.set_owner(Some(owner), brep);
+        if let Some(notification) = notification {
+            self.owner_changed(notification)?;
+        }
+        Ok(())
+    }
 }
+/// Retained notification context for the actual installed recovery curve.
+pub struct RetainedRailOwnership<'a> {
+    serial: u64,
+    attributes: &'a mut crate::geom::attribute::AttributeStore,
+    context: &'a mut crate::geom::context::Context,
+}
+impl<'a> RetainedRailOwnership<'a> {
+    /// Lend the actual notification context while operating on its retained pseudo
+    /// body. A fresh body is issued its actual identity; foreign domains are refused.
+    /// The same stores and metadata remain visible to the action and are restored
+    /// on returned errors. Completed geometry/topology writes are never rolled back.
+    /// # Errors
+    /// Identity/domain or notification-lease refusal before the action; otherwise
+    /// the action's error with its completed mutation prefix retained.
+    pub fn with_context<T>(
+        k: &mut Kernel,
+        pseudo: &mut FilletBrep,
+        attributes: &mut crate::geom::attribute::AttributeStore,
+        action: impl FnOnce(&mut Kernel, &mut FilletBrep, &mut RetainedRailOwnership<'_>) -> Result<T>,
+    ) -> Result<T> {
+        if let Some(serial) = pseudo.brep().notify_serial() {
+            if k.context
+                .issued_brep_serial(pseudo.brep().notify_identity())
+                != Some(serial)
+            {
+                return Err(invalid("rollover pseudo B-rep belongs to another context"));
+            }
+        } else {
+            k.context
+                .brep_serial(pseudo.brep_mut().notify_identity_slot())?;
+        }
+        crate::geom::context::Context::with_notification_context(k, |k, context| {
+            let mut ownership = RetainedRailOwnership::new(pseudo.brep(), attributes, context)?;
+            action(k, pseudo, &mut ownership)
+        })?
+    }
+
+    /// Borrow the actual pseudo body domain and retained notification stores.
+    /// # Errors
+    /// Missing identity or a body issued by a different notification Context.
+    pub fn new(
+        pseudo: &Brep,
+        attributes: &'a mut crate::geom::attribute::AttributeStore,
+        context: &'a mut crate::geom::context::Context,
+    ) -> Result<Self> {
+        let serial = pseudo
+            .notify_serial()
+            .ok_or_else(|| invalid("pseudo B-rep has no kernel identity"))?;
+        if context.issued_brep_serial(pseudo.notify_identity()) != Some(serial) {
+            return Err(invalid("rollover pseudo B-rep belongs to another context"));
+        }
+        Ok(Self {
+            serial,
+            attributes,
+            context,
+        })
+    }
+}
+impl RailOwnership for RetainedRailOwnership<'_> {
+    fn edge_owner(&self, edge: EdgeId) -> Result<(ObjectRef, Option<ObjectRef>)> {
+        Ok((
+            crate::topology::brep::p3::topology_ref(self.serial, EntityRef::Edge(edge)),
+            // SM_NO_GET_BREP is NULL in the pinned build.
+            None,
+        ))
+    }
+    fn owner_changed(&mut self, _: OwnerChange) -> Result<()> {
+        // UNPORTED(blend.fillet_solver_p5): this legacy callback has no actual Curve identity.
+        Err(SolidError::unported(
+            "SmFilletSolver::ProcessRollOver (actual curve notification context)",
+            "blend.fillet_solver_p5",
+        ))
+    }
+    fn set_curve_owner(
+        &mut self,
+        _edge: EdgeId,
+        curve: &mut Curve,
+        owner: ObjectRef,
+        _: Option<ObjectRef>,
+    ) -> Result<()> {
+        let old_owner = curve.owner();
+        if old_owner != Some(owner) && curve.dim() == 3 {
+            let type_code = curve.type_code();
+            let key = self.context.geometry_key(curve.notify_identity_slot())?;
+            let actual = ObjectRef { type_code, key };
+            // SmCurve::SetOwner notifies while GetOwner still returns the old owner.
+            crate::geom::object::report_owner_link(Some(self.context), actual.key, old_owner);
+            crate::error::ignore_status(crate::geom::a_object::notify(
+                self.attributes,
+                Some(self.context),
+                crate::geom::object::NotifyOperation::ChangeOwner,
+                actual,
+                Some(owner),
+                None,
+                old_owner,
+            ))?;
+        }
+        curve.set_owner(Some(owner), None);
+        if let Some(key) = curve.notify_key() {
+            crate::geom::object::report_owner_link(Some(self.context), key, Some(owner));
+        }
+        Ok(())
+    }
+}
+
 pub(crate) struct SupportIntersection<'a> {
     pub start: VertexId,
     pub end: Option<VertexId>,
@@ -180,11 +306,7 @@ impl Rails<'_> {
         crate::blend::fillet_geom::p1::set_rail_curve(self.fillets.brep_mut(), edge, curve)?;
         let (owner, brep) = self.ownership.edge_owner(edge)?;
         let curve = required(self.fillets.brep_mut().edge_mut(edge)?.curve.as_mut())?;
-        let (_, notification) = curve.set_owner(Some(owner), brep);
-        if let Some(notification) = notification {
-            self.ownership.owner_changed(notification)?;
-        }
-        Ok(())
+        self.ownership.set_curve_owner(edge, curve, owner, brep)
     }
 
     fn split_rail(
@@ -356,5 +478,258 @@ impl Rails<'_> {
             curve.reverse_parameterization(self.k, &interval)?;
         }
         self.install_curve(support, curve)
+    }
+}
+
+#[cfg(test)]
+mod rollover_notification_tests {
+    use super::*;
+    use crate::blend::fillet_geom::p1::{FilletBrep, FilletGeom, FilletGeomType, FilletVertex};
+    use crate::blend::fillet_solver::p1::split_rail;
+    use crate::geom::attribute::{AttributeStore, ObjectKey};
+    use crate::geom::context::{Context as NotifyContext, NotifyCallback};
+    use crate::geom::object::NotifyOperation;
+    use crate::kernel::Kernel;
+    use crate::math::Vec3;
+    use std::collections::BTreeMap;
+    use std::sync::{Arc, Mutex};
+
+    #[derive(Debug, Clone, PartialEq)]
+    struct Event {
+        system: bool,
+        caller: ObjectRef,
+        data: [Option<ObjectRef>; 3],
+        observed_owner: Option<ObjectRef>,
+    }
+    #[derive(Debug)]
+    struct Callback {
+        system: bool,
+        events: Arc<Mutex<Vec<Event>>>,
+        owners: BTreeMap<ObjectKey, Option<ObjectRef>>,
+    }
+    impl NotifyCallback for Callback {
+        fn execute(
+            &mut self,
+            operation: NotifyOperation,
+            caller: ObjectRef,
+            data1: Option<ObjectRef>,
+            data2: Option<ObjectRef>,
+            data3: Option<ObjectRef>,
+        ) -> Result<()> {
+            assert_eq!(operation, NotifyOperation::ChangeOwner);
+            self.events.lock().unwrap().push(Event {
+                system: self.system,
+                caller,
+                data: [data1, data2, data3],
+                observed_owner: *self.owners.get(&caller.key).unwrap(),
+            });
+            // Native ignores callback failures, including dependency statuses.
+            Err(SolidError::unported("test callback", "test"))
+        }
+        fn owner_link(&mut self, object: ObjectKey, owner: Option<ObjectRef>) {
+            self.owners.insert(object, owner);
+        }
+    }
+
+    fn rail(k: &mut Kernel) -> (FilletBrep, FilletGeomId, EdgeId, ObjectRef) {
+        let mut fb = FilletBrep::new();
+        k.context
+            .brep_serial(fb.brep_mut().notify_identity_slot())
+            .unwrap();
+        let vertices = [Vec3::ZERO, Vec3::X].map(|point| {
+            let v = fb.brep_mut().add_vertex(point).unwrap();
+            fb.insert_fillet_vertex(v, FilletVertex::new(k, None));
+            v
+        });
+        let edge = fb
+            .make_fillet_edge(Some(vertices[0]), Some(vertices[1]), None)
+            .unwrap();
+        let serial = fb.brep().notify_serial().unwrap();
+        let owner = crate::topology::brep::p3::topology_ref(serial, EntityRef::Edge(edge));
+        let mut curve = Curve::from(crate::curve::line::Line::from_points(
+            Vec3::ZERO,
+            Vec3::X,
+            3,
+        ));
+        curve.set_owner(Some(owner), None);
+        let original = ObjectRef {
+            type_code: curve.type_code(),
+            key: k
+                .context
+                .geometry_key(curve.notify_identity_slot())
+                .unwrap(),
+        };
+        fb.brep_mut().edge_mut(edge).unwrap().curve = Some(curve);
+        fb.brep_mut().edge_mut(edge).unwrap().tolerance = 0.125;
+        let geom = fb.add_geom(FilletGeom::new(k, None, FilletGeomType::Default).unwrap());
+        (fb, geom, edge, original)
+    }
+
+    #[test]
+    fn retained_scope_registers_fresh_body_and_preserves_error_prefix_without_foreign_rebinding() {
+        let mut k = Kernel::default();
+        k.context.set_doing_boolean(true);
+        let mut pseudo = FilletBrep::new();
+        assert_eq!(pseudo.brep().notify_serial(), None);
+        let mut attributes = AttributeStore::default();
+        let result: Result<()> = RetainedRailOwnership::with_context(
+            &mut k,
+            &mut pseudo,
+            &mut attributes,
+            |k, pseudo, ownership| {
+                assert!(k.context.doing_boolean());
+                assert!(ownership.context.doing_boolean());
+                pseudo.brep_mut().add_vertex(Vec3::X)?;
+                Err(SolidError::invalid_input(
+                    "scope control",
+                    "after actual write",
+                ))
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(pseudo.brep().vertices().len(), 1);
+        let serial = pseudo.brep().notify_serial().unwrap();
+        assert_eq!(
+            k.context
+                .issued_brep_serial(pseudo.brep().notify_identity()),
+            Some(serial)
+        );
+        assert!(k.context.doing_boolean());
+        let mut foreign = Kernel::default();
+        let mut foreign_body = FilletBrep::new();
+        RetainedRailOwnership::with_context(
+            &mut foreign,
+            &mut foreign_body,
+            &mut attributes,
+            |_, _, _| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(foreign_body.brep().notify_serial(), Some(serial));
+        let mut entered = false;
+        assert!(RetainedRailOwnership::with_context(
+            &mut foreign,
+            &mut pseudo,
+            &mut attributes,
+            |_, _, _| {
+                entered = true;
+                Ok(())
+            }
+        )
+        .is_err());
+        assert!(!entered);
+        assert_eq!(pseudo.brep().notify_serial(), Some(serial));
+        assert_eq!(pseudo.brep().vertices().len(), 1);
+        assert_eq!(
+            k.context
+                .issued_brep_serial(pseudo.brep().notify_identity()),
+            Some(serial)
+        );
+    }
+
+    #[test]
+    fn rollover_split_notifies_actual_copy_before_owner_and_keeps_callback_failures_ignored() {
+        let mut k = Kernel::default();
+        let (mut fb, geom, old_edge, original) = rail(&mut k);
+        let events = Arc::new(Mutex::new(Vec::new()));
+        for system in [false, true] {
+            let callback = Some(Box::new(Callback {
+                system,
+                events: events.clone(),
+                owners: BTreeMap::new(),
+            }) as Box<dyn NotifyCallback>);
+            if system {
+                k.context.set_sys_notify_callback(callback);
+            } else {
+                k.context.set_user_notify_callback(callback);
+            }
+        }
+        let mut attributes = AttributeStore::default();
+        let (_, new_edge) = NotifyContext::with_notification_context(&mut k, |k, context| {
+            let mut ownership =
+                RetainedRailOwnership::new(fb.brep(), &mut attributes, context).unwrap();
+            split_rail(k, &mut fb, &mut ownership, geom, old_edge)
+        })
+        .unwrap()
+        .unwrap();
+        let installed = fb.brep().edge(new_edge).unwrap().curve.as_ref().unwrap();
+        let actual = ObjectRef {
+            type_code: installed.type_code(),
+            key: installed.notify_key().unwrap(),
+        };
+        assert_ne!(actual, original);
+        let owner = crate::topology::brep::p3::topology_ref(
+            fb.brep().notify_serial().unwrap(),
+            EntityRef::Edge(new_edge),
+        );
+        // Virtual Curve::copy constructs a fresh, unowned wrapper.
+        let old_owner = None;
+        assert_eq!(
+            *events.lock().unwrap(),
+            vec![
+                Event {
+                    system: false,
+                    caller: actual,
+                    data: [Some(owner), None, old_owner],
+                    observed_owner: old_owner
+                },
+                Event {
+                    system: true,
+                    caller: actual,
+                    data: [Some(owner), None, old_owner],
+                    observed_owner: old_owner
+                },
+            ]
+        );
+        assert_eq!(installed.owner(), Some(owner));
+        assert_eq!(fb.brep().edge(new_edge).unwrap().tolerance, 0.125);
+        assert!(k.context.user_notify_callback().is_some());
+        assert!(k.context.sys_notify_callback().is_some());
+    }
+
+    #[test]
+    fn rollover_identity_refusal_retains_installed_copy_and_prior_topology_without_late_tolerance()
+    {
+        let mut k = Kernel::default();
+        let (mut fb, geom, old_edge, _) = rail(&mut k);
+        let old_vertices = fb.brep().vertices().len();
+        let old_edges = fb.edge_list().len();
+        let mut attributes = AttributeStore::default();
+        let error = NotifyContext::with_notification_context(&mut k, |k, context| {
+            let mut ownership =
+                RetainedRailOwnership::new(fb.brep(), &mut attributes, context).unwrap();
+            // A real active identity lease refuses issuance at the actual install.
+            let lease = ownership.context.lend_notify().unwrap();
+            let result = split_rail(k, &mut fb, &mut ownership, geom, old_edge);
+            ownership.context.install_lease(lease);
+            result
+        })
+        .unwrap()
+        .unwrap_err();
+        assert!(matches!(error, SolidError::InvalidInput { .. }));
+        assert_eq!(fb.brep().vertices().len(), old_vertices + 1);
+        assert_eq!(fb.edge_list().len(), old_edges + 1);
+        let new_edge = *fb.edge_list().last().unwrap();
+        let installed = fb.brep().edge(new_edge).unwrap();
+        assert!(installed.curve.is_some());
+        assert_eq!(installed.tolerance, 0.0);
+        assert_eq!(installed.curve.as_ref().unwrap().owner(), None);
+    }
+
+    #[test]
+    fn rollover_refuses_foreign_domain_even_with_equal_numeric_serial() {
+        let mut k = Kernel::default();
+        let (fb, _, _, _) = rail(&mut k);
+        let mut foreign = Kernel::default();
+        let mut other = Brep::new();
+        foreign
+            .context
+            .brep_serial(other.notify_identity_slot())
+            .unwrap();
+        assert_eq!(fb.brep().notify_serial(), other.notify_serial());
+        let mut attributes = AttributeStore::default();
+        assert!(
+            RetainedRailOwnership::new(fb.brep(), &mut attributes, &mut foreign.context).is_err()
+        );
+        assert!(attributes.attributes(ObjectKey(0)).is_empty());
     }
 }

@@ -53,6 +53,7 @@
 #include <SmTorus.h>
 
 #include <stdexcept>
+#include <memory>
 
 // Library members whose signatures name the solver class carry the renamed name in this TU
 // and so do not exist in the library. Only copied code the shim never runs (the renamed
@@ -88,6 +89,8 @@ extern "C" SmVertex* sc_fsp1_solver_vertex(void* fs, uint32_t index);
 extern "C" uint32_t sc_fsp1_solver_rail_on_face(void* fs, SmFace* face);
 extern "C" uint32_t sc_fsp1_solver_rail_x_side(void* fs, SmEdgeuse* side);
 
+extern "C" void* sc_fsp1_split_fixture_new(SmFilletExecutive**, SmFilletGeom**);
+
 namespace
 {
 // Ops (keep in sync with crates/solidcore-ffi/src/units/blend_fillet_solver_p1.rs).
@@ -103,6 +106,7 @@ enum : int32_t
     S_QUERIES = 7,
     S_ANALYTIC_REV = 8,
     S_ROLLOVER = 9,
+    S_SPLIT_RAIL = 10,
 };
 
 // An SmEdge outside any B-rep's lists (no edge uses); its context comes from the B-rep.
@@ -557,6 +561,96 @@ void run_queries(Rd& rd, const char* path, std::vector<double>& o)
     sc_fsp1_solver_delete(fs);
     delete b;
 }
+// A passive scope forwards both original callbacks, including non-owner events.
+struct SplitOwnerEvent {
+    bool system;
+    SmObject* caller;
+    SmObject* data1;
+    SmObject* data2;
+    SmObject* data3;
+    SmObject* observed_owner;
+    ULONG type;
+};
+struct SplitOwnerRecorder : SmNotifyCallback {
+    bool system;
+    SmNotifyCallback* previous;
+    std::vector<SplitOwnerEvent>& events;
+    SplitOwnerRecorder(bool sys, SmNotifyCallback* prior, std::vector<SplitOwnerEvent>& output)
+        : system(sys), previous(prior), events(output) {}
+    SmStatus Execute(SmNotifyOperation op, SmObject* object, SmObject* a, SmObject* b, SmObject* c) override {
+        if (op == SM_NO_CHANGE_OWNER) {
+            SmCurve* curve = SM_CAST_PTR(SmCurve, object);
+            if (!curve) throw std::logic_error("split owner caller is not a curve");
+            events.push_back({system, object, a, b, c, curve->GetOwner(), curve->GetType()});
+        }
+        return previous ? previous->Execute(op, object, a, b, c) : SM_SUCCESS;
+    }
+};
+struct SplitOwnerScope {
+    SmContext* context;
+    SplitOwnerRecorder user;
+    SplitOwnerRecorder system;
+    SplitOwnerScope(SmContext* c, std::vector<SplitOwnerEvent>& events)
+        : context(c), user(false,c->GetUserNotifyCallback(),events), system(true,c->GetSysNotifyCallback(),events) {
+        context->SetUserNotifyCallback(&user); context->SetSysNotifyCallback(NULL); context->SetSysNotifyCallback(&system);
+    }
+    ~SplitOwnerScope() { context->SetUserNotifyCallback(user.previous); context->SetSysNotifyCallback(NULL); context->SetSysNotifyCallback(system.previous); }
+};
+static void run_split_rail(std::vector<double>& out) {
+    SmFilletExecutive* raw_exec=nullptr; SmFilletGeom* geom=nullptr;
+    void* solver=sc_fsp1_split_fixture_new(&raw_exec,&geom);
+    std::unique_ptr<SmFilletExecutive> executive(raw_exec);
+    struct SolverCleanup { void* solver; ~SolverCleanup(){sc_fsp1_solver_delete(solver);} } cleanup{solver};
+    SmFilletBrep* pseudo=executive->GetPseudoBrep();
+    std::unique_ptr<SmFilletVertex> start(new(pseudo) SmFilletVertex());
+    std::unique_ptr<SmFilletVertex> end(new(pseudo) SmFilletVertex());
+    start->SetPoint(SmPoint3d(0,0,0)); end->SetPoint(SmPoint3d(1,0,0));
+    SmFilletEdge* raw_rail=nullptr;
+    SmStatus built=SmFilletEdge::MakeFilletEdge(pseudo,start.get(),end.get(),raw_rail);
+    if(built!=SM_SUCCESS || !raw_rail) throw std::logic_error("split rail setup");
+    // Edges destroy their EU/VU pairs before the unlinked vertices are released.
+    std::unique_ptr<SmFilletVertex> vertex;
+    std::unique_ptr<SmFilletEdge> rail(raw_rail);
+    SmLine* line=nullptr;
+    built=SmLine::CreateLineSegment(*pseudo->GetContext(),3,SmPoint3d(0,0,0),SmPoint3d(1,0,0),line);
+    if(built!=SM_SUCCESS || !line) throw std::logic_error("split line setup");
+    rail->SetCurve(line); line->SetOwner(rail.get()); rail->SetTolerance(.125);
+    std::vector<SplitOwnerEvent> events;
+    SmFilletVertex* raw_vertex=nullptr; SmFilletEdge* raw_new=nullptr;
+    SmStatus status;
+    {
+        SplitOwnerScope observers((SmContext*)pseudo->GetContext(),events);
+        status=sm_SplitRail(geom,rail.get(),raw_vertex,raw_new);
+    }
+    vertex.reset(raw_vertex);
+    std::unique_ptr<SmFilletEdge> new_rail(raw_new);
+    out.push_back(status==SM_SUCCESS?0:double(status));
+    out.push_back(double(events.size()));
+    for(const auto& event:events) {
+        out.insert(out.end(),{double(event.system),double(event.type),double(new_rail && event.caller==new_rail->GetCurve()),
+            double(event.data1==raw_new),double(event.data2==nullptr),double(event.data3==nullptr),double(event.observed_owner==nullptr)});
+    }
+    if(status!=SM_SUCCESS || !new_rail || !vertex) return;
+    SmCurve* copied=new_rail->GetCurve();
+    SmTArray<SmEdgeuse*> old_eus,new_eus; rail->GetEdgeuses(old_eus); new_rail->GetEdgeuses(new_eus);
+    SmTArray<SmVertexuse*> start_vus,end_vus,middle_vus; start->GetVertexuses(start_vus); end->GetVertexuses(end_vus); vertex->GetVertexuses(middle_vus);
+    out.insert(out.end(),{double(copied->GetType()),double(copied!=line),double(copied->GetOwner()==new_rail.get()),
+        double(rail->GetVertex()==start.get()),double(rail->GetOtherVertex(start.get())==vertex.get()),
+        double(new_rail->GetVertex()==vertex.get()),double(new_rail->GetOtherVertex(vertex.get())==end.get()),
+        double(old_eus.GetSize()),double(new_eus.GetSize()),double(start_vus.GetSize()),double(middle_vus.GetSize()),double(end_vus.GetSize())});
+    SmExtent1d domain=copied->GetNaturalInterval();
+    out.insert(out.end(),{new_rail->GetTolerance(),domain.GetMin(),domain.GetMax()});
+    out.insert(out.end(),{start->GetTolerance(),vertex->GetTolerance(),end->GetTolerance()});
+    // The middle FV point is not initialized by the actual helper: never read it.
+    for(SmFilletVertex* endpoint:{start.get(),end.get()}) {
+        const SmPoint3d& point=endpoint->GetPoint(); out.insert(out.end(),{point[0],point[1],point[2]});
+    }
+    for(double fraction:{0.,.5,1.}) {
+        SmPoint3d point; const auto evaluated=copied->EvaluatePoint(domain.Evaluate(fraction),point);
+        out.push_back(evaluated==SM_SUCCESS?0:double(evaluated));
+        if(evaluated==SM_SUCCESS) out.insert(out.end(),{point[0],point[1],point[2]});
+    }
+}
 } // namespace
 
 SC_EXPORT int32_t sc_blend_fillet_solver_p1_static_eval(int32_t op, const char* path, const double* in,
@@ -580,6 +674,7 @@ SC_EXPORT int32_t sc_blend_fillet_solver_p1_static_eval(int32_t op, const char* 
     case S_QUERIES: run_queries(rd, path, o); break;
     case S_ANALYTIC_REV: run_analytic_rev(rd, o); break;
     case S_ROLLOVER: run_rollover(rd, path, o); break;
+    case S_SPLIT_RAIL: run_split_rail(o); break;
     default: return SC_ERR_ARG;
     }
     (void)n_in;

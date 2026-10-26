@@ -4,8 +4,8 @@
 //!
 //! | Rust | Upstream |
 //! |------|----------|
-//! | [`FilletSolver::test_roll_over`] | `SmFilletSolver::TestRollOver` |
-//! | [`FilletSolver::process_roll_over`] | `SmFilletSolver::ProcessRollOver` |
+//! | [`FilletSolver::test_roll_over`], [`FilletSolver::test_roll_over_with_ops`] | `SmFilletSolver::TestRollOver` |
+//! | [`FilletSolver::process_roll_over`], [`FilletSolver::process_roll_over_with_ops`] | `SmFilletSolver::ProcessRollOver` |
 //!
 //! Deviations: pseudo-B-rep objects use typed arenas and geometry uses the same
 //! typed ids as the solver list. Completed mutations survive failures. Only unavailable
@@ -16,7 +16,7 @@
 //! Internal short intervals are retained in descending order for refinement.
 //! See `p5/recovery.rs` for the bounded segment-walk deviation. No recursion.
 
-use super::p1::FilletSolver;
+use super::p1::{FilletSolver, FilletSolverOps};
 use crate::blend::fillet_classification::{FilletClassObject, LegacyClassificationObjects};
 use crate::blend::fillet_geom::p1::{
     FilletBrep, FilletCornerId, FilletCornerType, FilletGeomId, FilletGeomType,
@@ -159,7 +159,32 @@ impl FilletSolver {
         adjusted_corners: &mut Vec<FilletCornerId>,
         ownership: &mut impl RolloverOwnership,
     ) -> Result<()> {
-        let geoms = self.fillet_geoms();
+        Self::test_roll_over_with_ops(
+            self,
+            k,
+            target,
+            fillets,
+            context,
+            adjusted_corners,
+            ownership,
+        )
+    }
+
+    /// Classify rails and recover rollover with the actual concrete solver's virtuals.
+    /// Existing base entry points delegate to the same implementation.
+    ///
+    /// # Errors
+    /// As [`Self::test_roll_over_with_context`], retaining each mutation before failure.
+    pub fn test_roll_over_with_ops(
+        solver: &mut dyn FilletSolverOps,
+        k: &Kernel,
+        target: &mut Brep,
+        fillets: &mut FilletBrep,
+        context: &mut impl RailClassificationContext,
+        adjusted_corners: &mut Vec<FilletCornerId>,
+        ownership: &mut impl RolloverOwnership,
+    ) -> Result<()> {
+        let geoms = solver.solver().fillet_geoms();
         for id in geoms {
             for ii in 0..2 {
                 let rail = fillets
@@ -182,7 +207,7 @@ impl FilletSolver {
                         curve: Some(context.rail_curve(rail)),
                         interval: Some(interval),
                         uv_curve: context.rail_mate_uv_curve(fillets.brep(), mate),
-                        zone_tol_3d: self.approx_tol_3d,
+                        zone_tol_3d: solver.solver().approx_tol_3d,
                         ..ResetOptions::default()
                     },
                 )?;
@@ -196,7 +221,7 @@ impl FilletSolver {
                     context.classify(k, target, pseudo, face, cc)
                 })?;
                 finish_classification(
-                    self,
+                    solver,
                     k,
                     target,
                     fillets,
@@ -206,7 +231,8 @@ impl FilletSolver {
                     &mut MissingClassification,
                 )?;
             }
-            self.process_roll_over(
+            Self::process_roll_over_with_ops(
+                solver,
                 k,
                 target,
                 fillets,
@@ -238,8 +264,35 @@ impl FilletSolver {
         adjusted_corners: &mut Vec<FilletCornerId>,
         ownership: &mut impl RolloverOwnership,
     ) -> Result<()> {
+        Self::process_roll_over_with_ops(
+            self,
+            k,
+            target,
+            fillets,
+            id,
+            corner_type,
+            adjusted_corners,
+            ownership,
+        )
+    }
+
+    /// Process rollover through the actual concrete solver's virtual operations.
+    ///
+    /// # Errors
+    /// As [`Self::process_roll_over`], preserving the original mutation/error order.
+    #[allow(clippy::too_many_arguments)]
+    pub fn process_roll_over_with_ops(
+        solver: &mut dyn FilletSolverOps,
+        k: &Kernel,
+        target: &mut Brep,
+        fillets: &mut FilletBrep,
+        id: FilletGeomId,
+        corner_type: &impl Fn(FilletCornerId) -> Result<FilletCornerType>,
+        adjusted_corners: &mut Vec<FilletCornerId>,
+        ownership: &mut impl RolloverOwnership,
+    ) -> Result<()> {
         recovery::Recovery {
-            solver: self,
+            solver,
             k,
             target,
             fillets,
@@ -276,7 +329,7 @@ trait ClassificationOps {
     }
     fn refine(
         &mut self,
-        solver: &mut FilletSolver,
+        solver: &mut dyn FilletSolverOps,
         k: &Kernel,
         target: &mut Brep,
         fillets: &mut FilletBrep,
@@ -290,7 +343,7 @@ trait ClassificationOps {
             .curve_class
             .take()
             .ok_or_else(|| SolidError::null_pointer(OP))?;
-        let result = super::p3::refine_rail_curve_classification_scoped(
+        let result = super::p3::refine_rail_curve_classification_scoped_with_ops(
             solver,
             k,
             target,
@@ -310,7 +363,7 @@ struct MissingClassification;
 impl ClassificationOps for MissingClassification {}
 
 fn finish_classification(
-    solver: &mut FilletSolver,
+    solver: &mut dyn FilletSolverOps,
     k: &Kernel,
     target: &mut Brep,
     fillets: &mut FilletBrep,
@@ -319,7 +372,7 @@ fn finish_classification(
     rail: EdgeId,
     ops: &mut impl ClassificationOps,
 ) -> Result<()> {
-    let small = squeeze_rail(k, fillets, rail, solver.approx_tol_3d, ops)?;
+    let small = squeeze_rail(k, fillets, rail, solver.solver().approx_tol_3d, ops)?;
     // Refinement is warning-only upstream, but retain its completed mutations
     // and propagate an unavailable implementation rather than faking success.
     ignored(ops.refine(solver, k, target, fillets, geom, which, rail, &small))?;

@@ -21,6 +21,7 @@
 #include <SmExtent1d.h>
 #include <SmExtent2d.h>
 #include <SmFilletSolver.h>
+#include <SmFilletExecutive.h>
 #include <SmLine.h>
 #include <SmMatrix.h>
 #include <SmOffsetSurface.h>
@@ -736,4 +737,17 @@ extern "C" uint32_t sc_fsp1_solver_rail_on_face(void* fs, SmFace* face)
 extern "C" uint32_t sc_fsp1_solver_rail_x_side(void* fs, SmEdgeuse* side)
 {
     return (uint32_t)((SmFilletSolver*)fs)->FindIndexOfRailXSideEdgeuse(side);
+}
+
+// Actual library objects for the copied-source static helper: the executive owns
+// its pseudo body, while this unregistered solver owns its constructor-created FG.
+extern "C" void* sc_fsp1_split_fixture_new(SmFilletExecutive** executive, SmFilletGeom** geometry)
+{
+    *executive = new (the_context()) SmFilletExecutive(the_context(), NULL);
+    auto* solver = new (the_context()) ShimFS(the_context(), 1e-5, 0.1, 0.01);
+    solver->SetFilletExecutive(*executive);
+    SmTArray<SmFilletGeom*> geoms;
+    solver->GetFilletGeoms(geoms);
+    *geometry = geoms[0];
+    return solver;
 }

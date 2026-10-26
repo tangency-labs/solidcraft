@@ -368,6 +368,8 @@ pub enum StaticOp {
     AnalyticRev,
     /// `sm_TestManifoldTangentRollover`.
     Rollover,
+    /// Direct actual `sm_SplitRail` notification/identity component.
+    SplitRail,
 }
 
 impl StaticOp {
@@ -383,6 +385,7 @@ impl StaticOp {
             StaticOp::Queries => 7,
             StaticOp::AnalyticRev => 8,
             StaticOp::Rollover => 9,
+            StaticOp::SplitRail => 10,
         }
     }
 
@@ -411,6 +414,7 @@ fn validate_static_args(
 ) -> Result<(), FfiError> {
     let [_, _, _, n_f, _, _, n_eu, n_e, _, _] = counts;
     match op {
+        StaticOp::SplitRail => {}
         StaticOp::FindNext => {
             let n = rd.index(MAX_ARRAY)?;
             rd.index(MAX_ARRAY)?;

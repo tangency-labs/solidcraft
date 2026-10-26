@@ -12,7 +12,7 @@
 //! | [`FilletSolver::split_and_trim_fillet_surface`]      | `SmFilletSolver::SplitAndTrimFilletSurface`    |
 //! | [`FilletSolver::step_solve`], [`StepSolveOutcome`]   | `SmFilletSolver::StepSolve`                    |
 //! | [`refine_rail_curve_classification`]                 | `sm_RefineRailCurveClassification`             |
-//! | [`calc_rail_x_edge`]                                 | `sm_CalcRailXEdge` (static)                    |
+//! | [`calc_rail_x_edge`], [`calc_rail_x_edge_with_ops`] | `sm_CalcRailXEdge` (static)                    |
 //! | [`FilletSolver::process_full_roll_over`]             | `SmFilletSolver::ProcessFullRollOver`          |
 //! | `impl EvalFunction for FindClippedRadiusEfo`         | `SmFindClippedRadiusEFO` as `SmEvalFunctionObject` |
 //! | `impl EvalNFunctions for FilletSphereSolveEnfo`      | `SmFilletSphereSolveENFO` as `SmEvalNFunctionsObject` |
@@ -1067,6 +1067,33 @@ pub fn refine_rail_curve_classification_scoped(
     rail: EdgeId,
     classification: &mut CurveClassification<FilletClassObject>,
 ) -> Result<()> {
+    refine_rail_curve_classification_scoped_with_ops(
+        solver,
+        k,
+        target,
+        fillets,
+        rail_index,
+        small_intervals,
+        rail,
+        classification,
+    )
+}
+
+/// Refine a scoped classification with the actual solver's virtual operations.
+///
+/// # Errors
+/// As [`refine_rail_curve_classification_scoped`].
+#[allow(clippy::too_many_arguments)]
+pub fn refine_rail_curve_classification_scoped_with_ops(
+    solver: &mut dyn FilletSolverOps,
+    k: &Kernel,
+    target: &mut Brep,
+    fillets: &FilletBrep,
+    rail_index: usize,
+    small_intervals: &[usize],
+    rail: EdgeId,
+    classification: &mut CurveClassification<FilletClassObject>,
+) -> Result<()> {
     const OP_R: &str = "blend::fillet_solver::p3::refine_rail_curve_classification";
     // Locals
     let rail_face = fillets.fillet_edge(rail)?.orig_face;
@@ -1196,7 +1223,7 @@ pub fn refine_rail_curve_classification_scoped(
 /// [`SolidError::InvalidInput`] here. `Unported` propagates.
 #[allow(clippy::too_many_arguments)]
 fn rail_edgeuse_param(
-    solver: &mut FilletSolver,
+    solver: &mut dyn FilletSolverOps,
     k: &Kernel,
     target: &mut Brep,
     rail_index: usize,
@@ -1234,6 +1261,37 @@ fn rail_edgeuse_param(
 #[allow(clippy::too_many_arguments)]
 pub fn calc_rail_x_edge(
     solver: &mut FilletSolver,
+    k: &Kernel,
+    target: &mut Brep,
+    fillets: &mut FilletBrep,
+    vertex: VertexId,
+    fillet_geom: FilletGeomId,
+    rail_index: usize,
+    rail: EdgeId,
+    side_edge: EdgeId,
+    guess: Option<Point3>,
+) -> Result<()> {
+    calc_rail_x_edge_with_ops(
+        solver,
+        k,
+        target,
+        fillets,
+        vertex,
+        fillet_geom,
+        rail_index,
+        rail,
+        side_edge,
+        guess,
+    )
+}
+
+/// [`calc_rail_x_edge`] with the actual solver's virtual operations retained.
+///
+/// # Errors
+/// As [`calc_rail_x_edge`], including failures from the actual solver's virtuals.
+#[allow(clippy::too_many_arguments)]
+pub fn calc_rail_x_edge_with_ops(
+    solver: &mut dyn FilletSolverOps,
     k: &Kernel,
     target: &mut Brep,
     fillets: &mut FilletBrep,

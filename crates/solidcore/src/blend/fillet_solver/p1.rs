@@ -3079,7 +3079,7 @@ pub fn trim_rail(k: &Kernel, b: &mut Brep, rail: EdgeId, trim_interval: &Extent1
 
 #[path = "p1/rails.rs"]
 pub(crate) mod rails;
-pub use rails::{compute_support_edge, split_rail, RailOwnership};
+pub use rails::{compute_support_edge, split_rail, RailOwnership, RetainedRailOwnership};
 
 #[cfg(test)]
 mod tests {
