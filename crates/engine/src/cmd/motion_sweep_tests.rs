@@ -417,6 +417,40 @@ fn find_limits_of_the_hinge_sample_spans_a_turn() {
     let touching = r["touching_at_start"].as_array().cloned().unwrap_or_default();
     assert!(touching.len() == 1 && touching[0].as_array().is_some_and(|p| p.contains(&json!("Leaf A:1")) && p.contains(&json!("Leaf B:1"))), "{r}");
     assert!(r["overlapping_at_start"].as_array().is_some_and(Vec::is_empty), "{r}");
+    // The same whole turn fits `joint.sweep`'s own work now (pairs whose boxes only touch cost
+    // nothing), where it ran out going from 60° to 0° two degrees at a time.
+    let r = run(&mut s, "joint.sweep", json!({"joint": "Hinge", "from": 60, "to": 0, "step": 2}));
+    assert!(r["stopped_by"].is_null(), "{r}");
+}
+
+/// Two parts of two bodies each: a post with a pin of radius 5 on Z and a stop block at
+/// (40…50, 10…20), and an arm turning about Z with a pin of radius 3 inside the post's (the pins
+/// are in each other where it starts, as deep wherever the arm turns) and a 4 mm plate from x 10
+/// to 60. The plate's faces, 2 mm off the axis, meet the block's corners as the door's do: the
+/// pins in each other must not hide that.
+#[test]
+fn find_limits_sees_arms_meet_behind_pins_already_in_each_other() {
+    let mut s = Session::default();
+    for (name, corner, size, radius) in [("Post", [40.0, 10.0, 0.0], [10.0, 10.0, 20.0], 5), ("Arm", [10.0, -2.0, 0.0], [50.0, 4.0, 20.0], 3)] {
+        block(&mut s, name, corner, size);
+        run(&mut s, "solid.cylinder", json!({"base": [0, 0, 0], "axis": [0, 0, 1], "radius": radius, "height": 20, "operation": "new"}));
+    }
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let post = occ(&s, "Post");
+    run(&mut s, "occurrence.ground", json!({"occurrence": post, "grounded": true}));
+    let at = |o: &str| json!({"occurrence": o, "point": [0, 0, 0], "z": [0, 0, 1]});
+    run(&mut s, "joint.create", json!({"type": "revolute", "a": at("Post"), "b": at("Arm"), "flip": true, "name": "Swing"}));
+    let corners = [(40.0f64, 10.0f64), (50.0, 10.0), (40.0, 20.0), (50.0, 20.0)];
+    let max = corners.iter().map(|(x, y)| y.atan2(*x) - (2.0 / x.hypot(*y)).asin()).fold(f64::INFINITY, f64::min).to_degrees();
+    let min = corners.iter().map(|(x, y)| y.atan2(*x) + (2.0 / x.hypot(*y)).asin()).fold(f64::NEG_INFINITY, f64::max).to_degrees() - 360.0;
+    let r = run(&mut s, "joint.find_limits", json!({"joint": "Swing", "refine": 0.001}));
+    let (lo, hi, lo_by, hi_by) = limits(&r);
+    // The joint's value may grow either way round Z.
+    let near = |a: f64, b: f64| (a - b).abs() < 0.05;
+    assert!((near(hi, max) && near(lo, min)) || (near(hi, -min) && near(lo, -max)), "{lo}° … {hi}°, the block is met at {max}° and {min}°: {r}");
+    assert!(by_parts(&lo_by, "Arm:1", "Post:1") && by_parts(&hi_by, "Arm:1", "Post:1"), "{r}");
+    let overlapping = r["overlapping_at_start"].as_array().cloned().unwrap_or_default();
+    assert!(overlapping.len() == 1 && by_parts(&overlapping[0], "Arm:1", "Post:1") && num(&overlapping[0]["depth_mm"]) > 1.0, "{r}");
 }
 
 #[test]
