@@ -11,7 +11,7 @@ use solidcraft_geom::Vec3;
 
 use super::size::Turn;
 use spade::handles::FixedVertexHandle;
-use spade::{AngleLimit, ConstrainedDelaunayTriangulation, Point2, RefinementParameters, Triangulation};
+use spade::{AngleLimit, ConstrainedDelaunayTriangulation, Point2, PositionInTriangulation, RefinementParameters, Triangulation};
 
 type Cdt = ConstrainedDelaunayTriangulation<Point2<f64>>;
 
@@ -50,9 +50,6 @@ pub(crate) struct Fill<'a> {
     /// varies: a plane is shaded the same by any triangles, so planar faces skip it (around many
     /// small holes it grades out from each rim and multiplies the triangles).
     pub shape: bool,
-    /// A side crossing one already kept is left out instead of refusing the loops (the last
-    /// resort for a boundary that crosses itself, see `fallback`).
-    pub lenient: bool,
 }
 
 /// Triangulate the region bounded by `loops` (ranges of `boundary`, each closed). Boundary
@@ -86,9 +83,6 @@ pub(crate) fn triangulate(boundary: &[[f64; 2]], loops: &[std::ops::Range<usize>
                 continue;
             }
             if !cdt.can_add_constraint(a, b) {
-                if fill.lenient {
-                    continue;
-                }
                 return None;
             }
             cdt.add_constraint(a, b);
@@ -250,7 +244,22 @@ fn refine_sag(cdt: &mut Cdt, sag: &Sag, budget: usize, from: &dyn Fn(Point2<f64>
             let off = |q: Point2<f64>, chord: Vec3| gap(q, chord) > sag.tol;
             let middle = gap(c, (a + b + d) * (1.0 / 3.0));
             if middle > sag.tol || sag.turn.is_some_and(|t| t.exceeds(spread([na, nb, nd]), middle)) {
-                todo.push(c);
+                // A triangle's centroid is inside it, but for a sliver whose corners lie on one line
+                // to rounding: an ear on consecutive boundary nodes of a nearly straight stretch. Its
+                // centroid lies on the boundary chord, and inserting it there would split the
+                // boundary, which the neighbouring face shares. Such a sliver is split at the middles
+                // of its inner edges instead.
+                let on_boundary = matches!(cdt.locate(c), PositionInTriangulation::OnEdge(e) if cdt.is_constraint_edge(e.as_undirected()));
+                if !on_boundary {
+                    todo.push(c);
+                    continue;
+                }
+                for e in face.adjacent_edges() {
+                    if !e.is_constraint_edge() {
+                        let [p, q] = e.positions();
+                        todo.push(Point2::new(0.5 * (p.x + q.x), 0.5 * (p.y + q.y)));
+                    }
+                }
                 continue;
             }
             for (e, (pa, pb)) in face.adjacent_edges().into_iter().zip([(a, b), (b, d), (d, a)]) {
@@ -273,28 +282,19 @@ fn refine_sag(cdt: &mut Cdt, sag: &Sag, budget: usize, from: &dyn Fn(Point2<f64>
             if added >= budget {
                 return added;
             }
-            if insert_off_boundary(cdt, p) {
+            // The boundary's nodes are its edges', shared with the neighbouring face: a point that
+            // lands on the boundary (a sliver's middle on a nearly straight stretch, on the chord to
+            // rounding) is no inner point, and inserting it would split the boundary.
+            let p = spade::mitigate_underflow(p);
+            if matches!(cdt.locate(p), PositionInTriangulation::OnEdge(e) if cdt.is_constraint_edge(e.as_undirected())) {
+                continue;
+            }
+            if cdt.insert(p).is_ok() {
                 added += 1;
             }
         }
     }
     added
-}
-
-/// Insert `p` unless it lies exactly on a side of the boundary (the middle of a sliver along
-/// it, at a cone's apex): that would split the side, while the face's boundary nodes are shared
-/// with its neighbours, which would not have the new one, and the face lost its plan.
-fn insert_off_boundary(cdt: &mut Cdt, p: Point2<f64>) -> bool {
-    let p = spade::mitigate_underflow(p);
-    if !(p.x.is_finite() && p.y.is_finite()) {
-        return false;
-    }
-    if let spade::PositionInTriangulation::OnEdge(e) = cdt.locate(p)
-        && cdt.is_constraint_edge(e.as_undirected())
-    {
-        return false;
-    }
-    cdt.insert(p).is_ok()
 }
 
 /// Per face (by index): inside the region the constraint loops bound. A flood fill from the
@@ -476,7 +476,7 @@ mod tests {
         for refine in [false, true] {
             let refine = refine.then_some((Sag { eval: &flat, tol: 1e-3, h: 0.1, turn: None, scale: [2.0, 1.0] }, 2000));
             let label = refine.is_some();
-            let Some((extra, tris)) = triangulate(&b, &loops, Fill { seeds: &[[0.2, 0.2], [0.5, 0.5]], refine, shape: true, lenient: false }) else {
+            let Some((extra, tris)) = triangulate(&b, &loops, Fill { seeds: &[[0.2, 0.2], [0.5, 0.5]], refine, shape: true }) else {
                 panic!("meshes")
             };
             let mut uv = b.clone();
@@ -496,25 +496,10 @@ mod tests {
     }
 
     #[test]
-    fn a_point_on_a_boundary_side_is_not_inserted() {
-        let mut cdt = Cdt::new();
-        let corners = [[0.0, 0.0], [4.0, 0.0], [4.0, 1.0], [0.0, 1.0]];
-        let Ok(handles) = corners.iter().map(|p| cdt.insert(Point2::new(p[0], p[1]))).collect::<Result<Vec<_>, _>>() else { panic!("insert") };
-        for k in 0..4 {
-            cdt.add_constraint(handles[k], handles[(k + 1) % 4]);
-        }
-        assert!(!insert_off_boundary(&mut cdt, Point2::new(2.0, 0.0)));
-        assert!(!insert_off_boundary(&mut cdt, Point2::new(f64::NAN, 0.5)));
-        assert_eq!((cdt.num_constraints(), cdt.num_vertices()), (4, 4));
-        assert!(insert_off_boundary(&mut cdt, Point2::new(2.0, 0.5)));
-        assert_eq!((cdt.num_constraints(), cdt.num_vertices()), (4, 5));
-    }
-
-    #[test]
     fn crossing_loops_are_refused() {
         let b = [[0.0, 0.0], [1.0, 1.0], [1.0, 0.0], [0.0, 1.0]];
         let whole = std::slice::from_ref(&(0..4));
-        assert!(triangulate(&b, whole, Fill { seeds: &[], refine: None, shape: false, lenient: false }).is_none());
+        assert!(triangulate(&b, whole, Fill { seeds: &[], refine: None, shape: false }).is_none());
     }
 
     #[test]
@@ -538,7 +523,7 @@ mod tests {
         // A parameter that is zero in exact arithmetic, left at 1e-300 by projection.
         let b = [[1e-300, 0.0], [1.0, -1e-310], [1.0, 1.0], [0.0, 1.0]];
         let whole = std::slice::from_ref(&(0..4));
-        let Some((extra, tris)) = triangulate(&b, whole, Fill { seeds: &[], refine: None, shape: false, lenient: false }) else { panic!("meshes") };
+        let Some((extra, tris)) = triangulate(&b, whole, Fill { seeds: &[], refine: None, shape: false }) else { panic!("meshes") };
         assert!(extra.is_empty());
         assert_eq!(tris.len(), 2);
     }
