@@ -215,7 +215,12 @@ impl CommandSpec {
     /// undo step and the evaluation).
     pub(crate) fn run_nested(&self, s: &mut Session, p: &Value) -> Result<Value> {
         (self.enabled)(s).map_err(|why| crate::EngineError::Disabled(self.id.to_string(), why))?;
-        (self.run)(s, p)
+        let r = (self.run)(s, p);
+        // A parameter error that did not name the command names it here (see `Session::execute`).
+        match r {
+            Err(crate::EngineError::BadParams { cmd, msg }) if cmd.is_empty() => Err(crate::EngineError::BadParams { cmd: self.id.to_string(), msg }),
+            other => other,
+        }
     }
     pub fn info(&self, s: &Session) -> CommandInfo {
         let e = (self.enabled)(s);

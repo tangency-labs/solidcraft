@@ -73,7 +73,7 @@ pub(super) fn interference(s: &mut Session, p: &Value) -> Result<Value> {
         },
     };
     let budget = std::time::Duration::from_secs_f64(budget_s);
-    let want = string_list(p, "bodies");
+    let want = string_list(cmd, p, "bodies")?;
     let st = s.world_state();
     let (meshes_left, bodies): (Vec<&solidcraft_doc::ModelBody>, Vec<&solidcraft_doc::ModelBody>) =
         st.bodies.iter().filter(|b| want.is_empty() || want.contains(&b.name)).partition(|b| b.body.is_mesh());

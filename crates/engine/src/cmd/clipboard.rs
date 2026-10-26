@@ -8,7 +8,7 @@ use serde_json::{Value, json};
 use solidcraft_doc::{FeatureKind, PlaneRef};
 
 use super::CommandSpec;
-use crate::params::{bad, string_list, vec3};
+use crate::params::{bad, name_or_id_list, vec3};
 use crate::{Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -22,10 +22,8 @@ pub static COMMANDS: &[CommandSpec] = &[
 
 fn copy(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.copy";
-    let mut keys = string_list(p, "features");
-    if let Some(Value::Array(a)) = p.get("features") {
-        keys.extend(a.iter().filter_map(Value::as_u64).map(|n| n.to_string()));
-    }
+    // The features are named or numbered, and both kinds can sit in one list.
+    let keys = name_or_id_list(cmd, p, "features")?;
     if keys.is_empty() || keys.len() > 1000 {
         return Err(bad(cmd, "`features` must list 1…1000 features"));
     }

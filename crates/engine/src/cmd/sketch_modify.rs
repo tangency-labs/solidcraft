@@ -1951,7 +1951,7 @@ fn offset_group(sk: &mut Sketch, ids: &[String], eligible: &std::collections::Ha
 
 fn offset(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.offset";
-    let ids = string_list(p, "curves");
+    let ids = string_list(cmd, p, "curves")?;
     if ids.is_empty() || ids.len() > 500 {
         return Err(bad(cmd, "`curves` must list 1…500 curves"));
     }
@@ -2229,7 +2229,7 @@ fn freeze_offset_profiles(doc: &mut solidcraft_doc::Document, sketch: u64, bound
 
 /// Curves and lone points named in `entities`.
 fn entities(sk: &Sketch, p: &Value, cmd: &str) -> Result<(Vec<usize>, Vec<usize>)> {
-    let ids = string_list(p, "entities");
+    let ids = string_list(cmd, p, "entities")?;
     if ids.is_empty() {
         return Err(bad(cmd, "`entities` must list sketch curves or points"));
     }
@@ -2505,7 +2505,7 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
         let rot = rotate(c, ang);
         let f = move |q: Vec2| rot(q) + t;
         let mut links = Vec::new();
-        for entity in string_list(p, "entities") {
+        for entity in string_list(cmd, p, "entities")? {
             if let Some(link) = super::sketch_create::text_link(sk, &entity)
                 && !links.iter().any(|old| old == link)
             {

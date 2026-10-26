@@ -71,17 +71,17 @@ pub struct SketchClip {
 }
 
 /// Curve and point ids named by `entities`, or the selected sketch geometry.
-fn chosen(s: &Session, p: &Value) -> Vec<String> {
+fn chosen(s: &Session, p: &Value, cmd: &str) -> Result<Vec<String>> {
     if p.get("entities").is_some() {
-        return string_list(p, "entities");
+        return string_list(cmd, p, "entities");
     }
-    s.selection
+    Ok(s.selection
         .iter()
         .filter_map(|sel| match sel {
             Sel::SketchCurve { id, .. } | Sel::SketchPoint { id } => Some(id.clone()),
             _ => None,
         })
-        .collect()
+        .collect())
 }
 
 fn text_of(sk: &Sketch, ci: usize) -> Option<&str> {
@@ -92,7 +92,7 @@ fn text_of(sk: &Sketch, ci: usize) -> Option<&str> {
 fn copy(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.copy";
     let id = target_sketch(s, p, cmd)?;
-    let ids = chosen(s, p);
+    let ids = chosen(s, p, cmd)?;
     if ids.is_empty() {
         return Err(bad(cmd, "select the sketch curves or points to copy"));
     }
@@ -211,7 +211,7 @@ fn cut(s: &mut Session, p: &Value) -> Result<Value> {
     if !(p.is_object() || p.is_null()) {
         return Err(bad("sketch.cut", "params must be an object"));
     }
-    let entities = chosen(s, p);
+    let entities = chosen(s, p, "sketch.cut")?;
     let mut q = if p.is_null() { json!({}) } else { p.clone() };
     q["entities"] = json!(entities);
     let out = copy(s, &q)?;

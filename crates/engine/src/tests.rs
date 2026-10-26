@@ -898,6 +898,9 @@ fn hostile_params_never_panic() {
 /// list means "every body" to most commands, so a number, an object or a list with a number in
 /// it was read as no list at all: a cut meant for one body cut every body it touched, and the
 /// command reported success.
+///
+/// `null` is not in this list: the schema contract declares these parameters optional and
+/// reads `null` as absent, so it keeps the meaning it always had (no list given).
 #[test]
 fn a_list_parameter_of_the_wrong_type_is_refused() {
     let mut s = Session::default();
@@ -905,8 +908,9 @@ fn a_list_parameter_of_the_wrong_type_is_refused() {
     run(&mut s, "solid.box", json!({"corner": [60, 0, 0], "length": 10, "width": 10, "height": 20, "body_name": "Block"}));
     let before = volume(&mut s);
     // A tool crossing both bodies, meant for the Block only.
-    for targets in [json!(7), json!(true), json!(null), json!({"body": "Block"}), json!(["Block", 42])] {
-        let params = json!({"corner": [35, 2, -1], "length": 30, "width": 3, "height": 30, "operation": "cut", "body_name": "Slot", "targets": targets});
+    for targets in [json!(7), json!(true), json!({"body": "Block"}), json!(["Block", 42])] {
+        let params =
+            json!({"corner": [35, 2, -1], "length": 30, "width": 3, "height": 30, "operation": "cut", "body_name": "Slot", "targets": targets});
         let err = s.execute("solid.box", &params).expect_err("a list parameter of the wrong type is refused");
         let EngineError::BadParams { cmd, msg } = &err else {
             panic!("{params}: {err}");

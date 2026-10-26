@@ -548,7 +548,7 @@ fn blend(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn centerline(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.centerline";
-    let ids = string_list(p, "curves");
+    let ids = string_list(cmd, p, "curves")?;
     if ids.is_empty() {
         return Err(bad(cmd, "`curves` must list lines"));
     }
@@ -573,7 +573,7 @@ fn centerline(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn infinite_line(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.infinite";
-    let ids = string_list(p, "curves");
+    let ids = string_list(cmd, p, "curves")?;
     if ids.is_empty() {
         return Err(bad(cmd, "`curves` must list lines"));
     }
@@ -893,7 +893,7 @@ fn tangent_centre(sk: &Sketch, a: usize, b: usize, r: f64, near: Vec2) -> Option
 }
 
 fn tangent_curves(sk: &Sketch, p: &Value, cmd: &str, n: usize) -> Result<Vec<usize>> {
-    let ids = string_list(p, "curves");
+    let ids = string_list(cmd, p, "curves")?;
     if ids.len() != n {
         return Err(bad(cmd, format!("`curves` must list {n} curves")));
     }

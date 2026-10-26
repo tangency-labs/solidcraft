@@ -77,7 +77,7 @@ fn curvature_comb(s: &mut Session, p: &Value) -> Result<Value> {
     let density = num(p, "density").map(|d| d.clamp(2.0, 2000.0) as usize).unwrap_or(40);
     let st = s.model.state();
     let mut combs: Vec<(String, Vec<(Vec3, f64, Vec3)>)> = Vec::new();
-    let curves = string_list(p, "curves");
+    let curves = string_list(cmd, p, "curves")?;
     if !curves.is_empty() {
         let id = match p.get("sketch") {
             Some(Value::Number(n)) => n.as_u64(),
@@ -228,7 +228,7 @@ fn minimum_radius(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "inspect.minimum_radius";
     let st = s.model.state();
     let mut items: Vec<(String, Option<(f64, Vec3)>)> = Vec::new();
-    let curves = string_list(p, "curves");
+    let curves = string_list(cmd, p, "curves")?;
     if !curves.is_empty() {
         let id = match p.get("sketch") {
             Some(Value::Number(n)) => n.as_u64(),
@@ -318,7 +318,7 @@ fn isocurves(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn center_of_mass(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "inspect.center_of_mass";
-    let names = string_list(p, "bodies");
+    let names = string_list(cmd, p, "bodies")?;
     // The world state, as Measure reads: placed occurrences where they are, each placement once.
     let st = s.world_state();
     let mut out = Vec::new();

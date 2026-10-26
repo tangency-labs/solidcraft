@@ -107,10 +107,11 @@ pub fn measure_json(b: &solidcraft_doc::ModelBody) -> Value {
 }
 
 fn measure(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "inspect.measure";
     if let Some(items) = p.get("items") {
         return super::measure_sel::measure_items(s, items);
     }
-    let want = string_list(p, "bodies");
+    let want = string_list(cmd, p, "bodies")?;
     let st = s.world_state();
     let selected: Vec<_> = st.bodies.iter().filter(|b| want.is_empty() || want.contains(&b.name)).collect();
     // Each body is measured on its own: on all cores, in body order.
@@ -131,7 +132,7 @@ fn measure(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     if !want.is_empty() && bodies.len() != want.len() {
-        return Err(bad("inspect.measure", "unknown body name"));
+        return Err(bad(cmd, "unknown body name"));
     }
     // Sheet metal keeps the edges where bends meet flat faces (so bends stay visible): count its
     // B-rep faces as they are, without merging coplanar neighbours.
@@ -450,7 +451,7 @@ fn model_threads(s: &mut Session, _p: &Value) -> Result<Value> {
 
 fn physical_material(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "material.assign";
-    let bodies = string_list(p, "bodies");
+    let bodies = string_list(cmd, p, "bodies")?;
     let material = str_(p, "material").ok_or_else(|| bad(cmd, "`material` must be a material name"))?;
     let canonical = s.doc.material_name(material).ok_or_else(|| bad(cmd, format!("unknown material `{material}` (see material.list)")))?;
     let st = s.model.state();
@@ -486,7 +487,7 @@ pub(super) fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
     use solidcraft_doc::appearance::FaceLook;
     let cmd = "appearance.assign";
     let look = appearance_look(cmd, p)?;
-    let bodies = string_list(p, "bodies");
+    let bodies = string_list(cmd, p, "bodies")?;
     let st = s.model.state();
     if bodies.iter().any(|b| st.body(b).is_none()) {
         return Err(bad(cmd, "`bodies` must list existing bodies"));
@@ -508,7 +509,7 @@ pub(super) fn appearance(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     let mut comps: Vec<u64> = Vec::new();
-    for c in string_list(p, "components") {
+    for c in string_list(cmd, p, "components")? {
         let id = s
             .doc
             .find_component(&c)

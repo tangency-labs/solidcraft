@@ -63,7 +63,7 @@ fn tie_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.loose_ends.tie";
     let only = match p.get("points") {
         None | Some(Value::Null) => None,
-        Some(Value::Array(a)) if a.iter().all(Value::is_string) => Some(string_list(p, "points")),
+        Some(Value::Array(a)) if a.iter().all(Value::is_string) => Some(string_list(cmd, p, "points")?),
         Some(_) => return Err(bad(cmd, "`points` must be a list of point ids")),
     };
     let (added, info) = edit(s, p, cmd, true, |sk, _| {

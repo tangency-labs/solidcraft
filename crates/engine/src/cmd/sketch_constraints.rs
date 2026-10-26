@@ -86,7 +86,7 @@ fn curve(sk: &Sketch, v: Option<&Value>, cmd: &str) -> Result<usize> {
 
 fn c_polygon(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.constraint.polygon";
-    let ids = string_list(p, "lines");
+    let ids = string_list(cmd, p, "lines")?;
     if ids.len() < 3 || ids.len() > 200 {
         return Err(bad(cmd, "`lines` must list 3 to 200 lines of a closed chain"));
     }
@@ -361,7 +361,7 @@ fn guess(sk: &Sketch, ents: &[String], cmd: &str) -> Result<ConstraintKind> {
 
 fn smart_constrain(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.constrainer";
-    let ents = string_list(p, "entities");
+    let ents = string_list(cmd, p, "entities")?;
     let (mut before, mut residual) = (None, None);
     let mut name = "";
     let (id, info) = edit(s, p, cmd, true, |sk, _| {

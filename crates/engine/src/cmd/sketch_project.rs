@@ -477,7 +477,7 @@ fn break_link(s: &mut Session, p: &Value) -> Result<Value> {
         }
         links.push(l.to_string());
     }
-    for e in crate::params::string_list(p, "entities") {
+    for e in crate::params::string_list(cmd, p, "entities")? {
         let l = sk
             .curves
             .iter()

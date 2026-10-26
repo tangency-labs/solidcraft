@@ -1178,6 +1178,13 @@ impl Session {
                 Err(EngineError::Internal(spec.id.to_string(), msg))
             }
         };
+        // A parameter error that did not name the command names it here: the engine knows which
+        // command ran, and the reader of the parameters may not (#6651).
+        let r = match r {
+            Ok(r) => Ok(r),
+            Err(EngineError::BadParams { cmd, msg }) if cmd.is_empty() => Err(EngineError::BadParams { cmd: spec.id.to_string(), msg }),
+            Err(e) => Err(e),
+        };
         // New/open/recover can replace the Session. Device ownership belongs to the host,
         // so its capability metadata survives those document lifecycle commands.
         self.render_viewport = host_viewport;

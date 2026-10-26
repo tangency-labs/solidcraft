@@ -242,7 +242,7 @@ fn flange(s: &mut Session, p: &Value) -> Result<Value> {
         }
         "contour" => {
             let sketch = sketch_id(s, p.get("sketch"), cmd, "sketch")?;
-            let curves = string_list(p, "curves");
+            let curves = string_list(cmd, p, "curves")?;
             if curves.is_empty() || curves.len() > 1000 {
                 return Err(bad(cmd, "`curves` must list the open chain's lines"));
             }
@@ -464,7 +464,7 @@ fn path_flange(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sheet.path_flange";
     let edge = p.get("edge").and_then(vec3).ok_or_else(|| bad(cmd, "`edge` must be a point [x, y, z] on a sheet edge"))?;
     let sketch = sketch_id(s, p.get("sketch"), cmd, "sketch")?;
-    let curves = string_list(p, "curves");
+    let curves = string_list(cmd, p, "curves")?;
     if curves.is_empty() || curves.len() > sheet::MAX_PATH_LINES {
         return Err(bad(cmd, format!("`curves` must list the path's lines (1…{})", sheet::MAX_PATH_LINES)));
     }

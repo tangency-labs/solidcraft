@@ -929,7 +929,7 @@ fn draw_line(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let closed = bool_(p, "closed").unwrap_or(false);
     let infer = bool_(p, "infer").unwrap_or(false);
-    let ids = string_list(p, "ids");
+    let ids = string_list(cmd, p, "ids")?;
     let ((curves, cons), info) = draw(s, p, cmd, |sk, doc| {
         let args: Vec<PArg> = list.iter().map(|v| parg(sk, doc, v, cmd)).collect::<Result<_>>()?;
         let n = args.len();
@@ -2038,7 +2038,7 @@ fn c_equal(s: &mut Session, p: &Value) -> Result<Value> {
 /// can, so a dimensioned curve keeps its size and the others take it, whatever the order.
 fn equal_curves(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.constraint.equal";
-    let ids = string_list(p, "curves");
+    let ids = string_list(cmd, p, "curves")?;
     if !(2..=200).contains(&ids.len()) {
         return Err(bad(cmd, "`curves` must list 2 to 200 lines or circles/arcs"));
     }
@@ -2308,7 +2308,7 @@ fn round_center(sk: &Sketch, c: usize) -> Option<usize> {
 fn c_fix(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.constraint.fix";
     let want = bool_(p, "fixed");
-    let mut refs = string_list(p, "entities");
+    let mut refs = string_list(cmd, p, "entities")?;
     if let Some(e) = str_(p, "entity") {
         refs.insert(0, e.to_string());
     }
@@ -2373,7 +2373,7 @@ pub(super) fn line_pts(sk: &Sketch, l: usize) -> Option<(Vec2, Vec2)> {
 
 fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.dimension";
-    let ents = string_list(p, "entities");
+    let ents = string_list(cmd, p, "entities")?;
     if ents.is_empty() || ents.len() > 2 {
         return Err(bad(cmd, "`entities` must list one or two sketch entities"));
     }
@@ -2871,7 +2871,7 @@ fn line_ends(sk: &Sketch, l: usize) -> (usize, usize) {
 
 fn construction(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.construction";
-    let ids = string_list(p, "curves");
+    let ids = string_list(cmd, p, "curves")?;
     if ids.is_empty() {
         return Err(bad(cmd, "`curves` must list curve ids"));
     }
@@ -2905,7 +2905,7 @@ fn construction(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.delete";
-    let ids = string_list(p, "entities");
+    let ids = string_list(cmd, p, "entities")?;
     if ids.is_empty() {
         return Err(bad(cmd, "`entities` must list sketch entity ids"));
     }

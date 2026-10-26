@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use solidcraft_doc::{Feature, FeatureKind};
 
 use super::CommandSpec;
-use crate::params::{bad, bool_, num, str_, string_list};
+use crate::params::{bad, bool_, name_or_id_list, num, str_};
 use crate::{EngineError, Result, Sel, Session, Snapshot};
 
 pub static COMMANDS: &[CommandSpec] = &[
@@ -174,10 +174,8 @@ fn feature_id(s: &Session, v: Option<&Value>, cmd: &str) -> Result<u64> {
 
 fn delete(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.delete";
-    let mut keys = string_list(p, "features");
-    if let Some(Value::Array(a)) = p.get("features") {
-        keys.extend(a.iter().filter_map(Value::as_u64).map(|n| n.to_string()));
-    }
+    // The features are named or numbered, and both kinds can sit in one list.
+    let mut keys = name_or_id_list(cmd, p, "features")?;
     if let Some(f) = p.get("feature") {
         keys.push(match f {
             Value::Number(n) => n.to_string(),

@@ -328,7 +328,7 @@ fn move_bodies(s: &mut Session, p: &Value) -> Result<Value> {
 fn copy_bodies(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.copy_bodies";
     let to = if p.get("component").is_some() { component(s, p, "component", cmd)? } else { s.active_component };
-    let names = string_list(p, "bodies");
+    let names = string_list(cmd, p, "bodies")?;
     if names.is_empty() || names.len() > 1000 {
         return Err(bad(cmd, "`bodies` must list 1…1000 bodies"));
     }
@@ -354,7 +354,7 @@ fn copy_bodies(s: &mut Session, p: &Value) -> Result<Value> {
         // The copy is made where its body is, so it starts out in the same place.
         scratch.active_component = from;
         scratch.active_occurrence_path = None;
-        let mut made = string_list(&scratch.execute("solid.move", &json!({"bodies": bodies, "copy": true}))?, "created_bodies");
+        let mut made = string_list(cmd, &scratch.execute("solid.move", &json!({"bodies": bodies, "copy": true}))?, "created_bodies")?;
         // Each copy is its body's name numbered as all copies are (`Cube (2)`, `Cube (2)(2)`): the
         // move names a copy of `Cube (2)` `Cube (2) (2)`.
         if made.len() == bodies.len() {
@@ -397,7 +397,7 @@ pub(crate) fn transfer_constructor_result(s: &mut Session, p: &Value) -> Result<
 fn move_sketches(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "component.move_sketches";
     let to = component(s, p, "component", cmd)?;
-    let keys = string_list(p, "sketches");
+    let keys = string_list(cmd, p, "sketches")?;
     let mut ids = Vec::new();
     for k in &keys {
         match s.doc.find_feature(k) {

@@ -56,7 +56,7 @@ pub(super) fn open_in_easyprint(s: &mut Session, p: &Value) -> Result<Value> {
     if !bool_(p, "consent").unwrap_or(false) {
         return Err(bad(cmd, "this uploads the model to Printables' servers: ask the user, then pass `consent: true`"));
     }
-    let Exported { bytes, ext, fell_back, .. } = export_bodies(s, cmd, &string_list(p, "bodies"), format)?;
+    let Exported { bytes, ext, fell_back, .. } = export_bodies(s, cmd, &string_list(cmd, p, "bodies")?, format)?;
     if bytes.len() > MAX_BYTES {
         let mb = bytes.len().div_ceil(1_000_000);
         return Err(bad(cmd, format!("the model is {mb} MB and EasyPrint takes {} MB at most: send fewer bodies", MAX_BYTES / 1_000_000)));
