@@ -647,3 +647,77 @@ fn hostile_pictures_are_refused() {
     // As the product image refuses a size over the resolver's limits.
     assert_eq!(bad(&|r| (r.projection, r.tiles) = (a0, vec![PixelWindow { x0: 0, y0: 0, x1: 5000, y1: 5000 }])), invalid, "a tile over its limits");
 }
+
+/// A sphere of `bands` × `2 · bands` quads with smooth normals: `4 · bands²` triangles.
+fn sphere(name: &str, colour: [u8; 3], centre: Vec3, radius: f64, bands: u32) -> ProductMesh {
+    let mut mesh = Mesh::default();
+    for i in 0..=bands {
+        for j in 0..=2 * bands {
+            let (polar, azimuth) = (std::f64::consts::PI * f64::from(i) / f64::from(bands), std::f64::consts::PI * f64::from(j) / f64::from(bands));
+            let n = Vec3::new(polar.sin() * azimuth.cos(), polar.sin() * azimuth.sin(), polar.cos());
+            mesh.positions.push(centre + n * radius);
+            mesh.normals.push(n);
+        }
+    }
+    let at = |i: u32, j: u32| i * (2 * bands + 1) + j;
+    for i in 0..bands {
+        for j in 0..2 * bands {
+            mesh.triangles.extend([[at(i, j), at(i + 1, j), at(i + 1, j + 1)], [at(i, j), at(i + 1, j + 1), at(i, j + 1)]]);
+            mesh.tri_face.extend([0, 0]);
+        }
+    }
+    ProductMesh { name: name.into(), mesh: Arc::new(mesh), color: colour, opacity: 1.0, surface: None, transmission: None, faces: Vec::new() }
+}
+
+/// Timing, not a check (`cargo test --release -p solidcraft-render --lib picture_timing -- --ignored
+/// --nocapture`): a 65,548-triangle front view drawn as the product image, as one picture at
+/// 300 dpi, in 64-row strips at 300 dpi and in 64-row strips at 1200 dpi (4096 px wide at most).
+#[test]
+#[ignore]
+fn picture_timing() {
+    let scene = || {
+        let mut glass = block("Glass", [40, 200, 120], Vec3::new(0.0, -60.0, 0.0), Vec3::new(30.0, 2.0, 20.0));
+        glass.opacity = 0.4;
+        let mut meshes = vec![
+            sphere("Ball", [180, 120, 60], Vec3::ZERO, 40.0, 128),
+            block("Base", [60, 140, 200], Vec3::new(0.0, 0.0, -45.0), Vec3::new(60.0, 30.0, 5.0)),
+            glass,
+        ];
+        meshes.push(block("Post", [200, 200, 200], Vec3::new(50.0, 0.0, 0.0), Vec3::new(4.0, 4.0, 40.0)));
+        scene(meshes)
+    };
+    let frame = OrthoFrame { basis: Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Z }, scale: 1.0, shift: Vec2::new(70.0, 55.0) };
+    let ortho = |dpi: f64| Projection::Ortho { frame, grid: PixelGrid::new(0.0, 0.0, 140.0, 110.0, dpi).unwrap() };
+    let strips = |p: Projection| {
+        let (width, height) = p.size();
+        // A tile is at most 4096 px wide (the compact budget's side).
+        let rows = (0..height.div_ceil(64)).map(|i| (i * 64, ((i + 1) * 64).min(height)));
+        rows.flat_map(|(y0, y1)| (0..width.div_ceil(4096)).map(move |j| PixelWindow { x0: j * 4096, y0, x1: ((j + 1) * 4096).min(width), y1 }))
+            .collect()
+    };
+    let time = |name: &str, run: &dyn Fn() -> usize| {
+        let mut runs: Vec<f64> = (0..3)
+            .map(|_| {
+                let started = std::time::Instant::now();
+                std::hint::black_box(run());
+                started.elapsed().as_secs_f64() * 1000.0
+            })
+            .collect();
+        runs.sort_by(f64::total_cmp);
+        eprintln!("{name}: median {:.0} ms ({:.0} to {:.0})", runs[1], runs[0], runs[2]);
+    };
+    let mut front = Camera { distance: 300.0, ..Default::default() };
+    front.set_view(StandardView::Front);
+    let image = ImageRequest { camera: front, width: 1600, height: 1200, ..request() };
+    time("product image 1600 × 1200, PNG", &|| finish(ImageTask::new(scene(), image.clone(), CancelToken::default()).unwrap()).len());
+    for (name, projection, strip, supersample) in [
+        ("300 dpi, one tile, 2 × 2", ortho(300.0), false, Supersample::Two),
+        ("300 dpi, 64-row strips, 2 × 2", ortho(300.0), true, Supersample::Two),
+        ("1200 dpi, 64-row strips, 1 × 1", ortho(1200.0), true, Supersample::One),
+    ] {
+        let (width, height) = projection.size();
+        let tiles = if strip { strips(projection) } else { vec![PixelWindow { x0: 0, y0: 0, x1: width, y1: height }] };
+        let request = PictureRequest { projection, tiles, supersample, roles: Vec::new(), background: None };
+        time(&format!("{width} × {height} px, {name}"), &|| picture(scene(), request.clone()).len());
+    }
+}
