@@ -122,9 +122,9 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::point_project_to_plane;
 use crate::geom::geom_utility::p2::{circle_plane_intersect, ContinuityType, CurveIntersection};
-use crate::geom::global_solver::{SolutionRequested, SolverOperation};
+use crate::geom::global_solver::{ObjectZoneTol, SolutionRequested, SolverOperation};
 use crate::geom::solution_array::{SolutionArray, SolutionObject, SolutionType};
-use crate::geom::tol::are_same;
+use crate::geom::tol::{are_same, zone_tol_3d_of_curve};
 use crate::intersect::point_class::{ClassGeometry, ClassObject};
 use crate::kernel::Kernel;
 use crate::math::{
@@ -3605,6 +3605,9 @@ impl OffsetGeometryCreation {
                             let mut arc_ivl = arc.natural_interval();
                             let arc_h = store_curve(brep, Curve::from(arc.clone()))?;
                             let rays = [ray_vector];
+                            // SmTol::GetZoneTol3d(pArc): the arc has no owner, so its
+                            // curve branch gives the system zone tolerance
+                            let zone_tol = |o: O| zone_tol_3d_of_curve(k, curve_of(brep, o)?);
                             let sols: SolutionArray<O> = curve_of(brep, arc_h)?
                                 .global_point_solve(
                                     k,
@@ -3618,7 +3621,7 @@ impl OffsetGeometryCreation {
                                         opt_vectors: Some(&rays),
                                         handle: Some(arc_h),
                                         analytic_handle: None,
-                                        zone_tol_3d: None,
+                                        zone_tol_3d: Some(ObjectZoneTol(&zone_tol)),
                                     },
                                 )?;
                             if let Some(sol) = sols.get(0) {

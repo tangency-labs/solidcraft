@@ -4519,6 +4519,162 @@ fn edge_cases() -> Vec<(String, Value)> {
     }];
     add("cone_have_tangent_gaps_no_samples", i);
 
+    // EdgeuseOffset's torus caps on box_with_large_fillet's convex edge 14 (edge uses 0
+    // and 22): the original edge gets the centre circle, the offset edges of edge uses 0
+    // (edge 14) and 1 (edge 12) the two rails, so the rails start a minor radius from the
+    // centre line's start. A plain torus, the rail swap (rail 2 has the centre line's
+    // radius), a self-intersecting torus whose arc the axis ray trims, one whose ray
+    // misses the arc, and seeded tori (their own rng).
+    {
+        let circle = |r: f64, z: f64| {
+            let w = std::f64::consts::FRAC_1_SQRT_2;
+            CrvIn {
+                dim: 3,
+                cpts: vec![
+                    [r, 0.0, z, 1.0],
+                    [r * w, r * w, z * w, w],
+                    [0.0, r, z, 1.0],
+                    [-r * w, r * w, z * w, w],
+                    [-r, 0.0, z, 1.0],
+                ],
+                p: 2,
+                u: vec![0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0],
+            }
+        };
+        let torus_case = |dist: f64, analytics: bool, c0: CrvIn, c1: CrvIn, c2: CrvIn| {
+            let f = "box_with_large_fillet.smb";
+            let mut i = base(f, Some(f), dist);
+            i.analytics = analytics;
+            i.pairs = pairs(30, 1);
+            i.ops = vec![
+                OpIn::AddCurve { curve: c0 },
+                OpIn::AddCurve { curve: c1 },
+                OpIn::AddCurve { curve: c2 },
+                OpIn::SetEdgeCurve {
+                    e: h(0, K_EDGE, 14),
+                    c: h(2, K_CURVE, 0),
+                },
+                OpIn::SetEdgeCurve {
+                    e: h(1, K_EDGE, 14),
+                    c: h(2, K_CURVE, 1),
+                },
+                OpIn::SetEdgeCurve {
+                    e: h(1, K_EDGE, 12),
+                    c: h(2, K_CURVE, 2),
+                },
+                OpIn::EdgeuseOffset {
+                    orig: h(0, K_EDGEUSE, 0),
+                    other_orig: h(0, K_EDGEUSE, 1),
+                    off: h(1, K_EDGEUSE, 0),
+                    other_off: h(1, K_EDGEUSE, 1),
+                },
+                OpIn::EdgeState {
+                    e: h(1, K_EDGE, 14),
+                },
+                OpIn::EdgeState {
+                    e: h(1, K_EDGE, 12),
+                },
+            ];
+            i
+        };
+        let a260 = 260.0_f64.to_radians();
+        for (name, dist, analytics, c0, c1, c2) in [
+            (
+                "plain",
+                0.5,
+                true,
+                circle(2.0, 0.0),
+                circle(2.5, 0.0),
+                circle(1.5, 0.0),
+            ),
+            (
+                "plain_no_analytics",
+                0.5,
+                false,
+                circle(2.0, 0.0),
+                circle(2.5, 0.0),
+                circle(1.5, 0.0),
+            ),
+            (
+                "swap",
+                0.5,
+                true,
+                circle(2.0, 0.0),
+                circle(2.5, 0.0),
+                circle(2.0, 0.5),
+            ),
+            (
+                "self_intersecting_trim",
+                3.0,
+                true,
+                circle(1.0, 0.0),
+                circle(1.0, 3.0),
+                circle(1.0 + 3.0 * a260.cos(), 3.0 * a260.sin()),
+            ),
+            (
+                "self_intersecting_miss",
+                3.0,
+                true,
+                circle(1.0, 0.0),
+                circle(4.0, 0.0),
+                circle(1.0, 3.0),
+            ),
+        ] {
+            add(
+                &format!("box_edgeuse_offset_torus_cap_{name}"),
+                torus_case(dist, analytics, c0, c1, c2),
+            );
+        }
+        let mut rng = Rng::new(0xFF_5E77_04D5);
+        let mut made = 0;
+        for _ in 0..64 {
+            if made == 8 {
+                break;
+            }
+            let major = rng.uniform(1.0, 4.0);
+            let minor = rng.uniform(0.2, 2.0 * major);
+            let t1 = rng.uniform(-170.0, 170.0).to_radians();
+            let t2 = t1 + rng.uniform(20.0, 170.0).to_radians();
+            let (r1, r2) = (major + minor * t1.cos(), major + minor * t2.cos());
+            if r1 < 0.05 || r2 < 0.05 {
+                continue;
+            }
+            let analytics = rng.chance(0.5);
+            add(
+                &format!("box_edgeuse_offset_torus_cap_seeded{made}"),
+                torus_case(
+                    minor,
+                    analytics,
+                    circle(major, 0.0),
+                    circle(r1, minor * t1.sin()),
+                    circle(r2, minor * t2.sin()),
+                ),
+            );
+            made += 1;
+        }
+    }
+
+    // EdgeuseOffset on box_with_large_fillet's tangent, non-convex edge 3 (edge uses 7
+    // and 29): with offset edge uses on one edge (no gaps: nothing built) and on two
+    // edges (edge 3 and edge 10, gaps: SM_ERR), and without an offset edge use
+    for (name, off, other_off) in [
+        ("same_edge", h(1, K_EDGEUSE, 7), h(1, K_EDGEUSE, 29)),
+        ("gaps", h(1, K_EDGEUSE, 7), h(1, K_EDGEUSE, 16)),
+        ("gaps_reversed", h(1, K_EDGEUSE, 16), h(1, K_EDGEUSE, 7)),
+        ("no_offset", NULL_H, h(1, K_EDGEUSE, 16)),
+    ] {
+        let f = "box_with_large_fillet.smb";
+        let mut i = base(f, Some(f), 0.25);
+        i.pairs = pairs(30, 1);
+        i.ops = vec![OpIn::EdgeuseOffset {
+            orig: h(0, K_EDGEUSE, 7),
+            other_orig: h(0, K_EDGEUSE, 29),
+            off,
+            other_off,
+        }];
+        add(&format!("box_edgeuse_offset_tangent_sector_{name}"), i);
+    }
+
     out
 }
 
