@@ -23,7 +23,6 @@ macro_rules! planned {
 mod bom;
 mod browser;
 mod cam;
-mod manufacture;
 pub(crate) mod clearance;
 mod clipboard;
 mod compare;
@@ -37,6 +36,7 @@ mod edit;
 mod face;
 mod features;
 mod features_more;
+mod manufacture;
 pub(crate) use face::{FaceRefForm, face_ref_form};
 pub(crate) use features::profiles as feature_profiles;
 pub(crate) use features::{EdgeRefForm, edge_ref_form, sketch_key};

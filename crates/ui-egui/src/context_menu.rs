@@ -509,16 +509,7 @@ fn feature_and_sketch(app: &SolveApp, f: Option<u64>) -> (Option<u64>, Option<u6
 /// top, then what fits the selection, our extras after a separator.
 fn flyout(id: &str, label: &str, icon: &str, children: Vec<Item>) -> Item {
     let enabled = children.iter().any(|c| c.enabled && !c.is_sep() && !c.is_heading());
-    Item {
-        id: id.into(),
-        label: label.into(),
-        shortcut: String::new(),
-        enabled,
-        icon: icon.into(),
-        params: None,
-        children,
-        swatch: None,
-    }
+    Item { id: id.into(), label: label.into(), shortcut: String::new(), enabled, icon: icon.into(), params: None, children, swatch: None }
 }
 
 fn cmds(app: &SolveApp, ids: &[&str]) -> Vec<Item> {
@@ -672,9 +663,7 @@ fn manufacture_viewport_items(app: &SolveApp) -> Vec<Item> {
         ),
         act("ui.showLog", "Show Log", "list").key("Ctrl+L"),
         cmd(app, "browser.expand_all", "Expand All Children"),
-        act("ui.findBrowser", "Find in Browser", "list")
-            .with(json!({"body": sel_body.clone().unwrap_or_default()}))
-            .on(sel_body.is_some()),
+        act("ui.findBrowser", "Find in Browser", "list").with(json!({"body": sel_body.clone().unwrap_or_default()})).on(sel_body.is_some()),
     ]
 }
 
