@@ -43,6 +43,7 @@ struct DocView {
     copied_placements: Vec<Vec<u64>>,
     cut_bodies: Vec<String>,
     cut_placements: Vec<Vec<u64>>,
+    tree: crate::browser::DesignTree,
 }
 
 impl DocSlot {
@@ -104,11 +105,13 @@ fn take_view(app: &mut SolveApp) -> DocView {
         copied_placements: std::mem::take(&mut app.copied_placements),
         cut_bodies: std::mem::take(&mut app.cut_bodies),
         cut_placements: std::mem::take(&mut app.cut_placements),
+        tree: app.tree.take_design(),
     }
 }
 
 fn put_view(app: &mut SolveApp, v: DocView) {
     app.render_workspace.view = v.render;
+    app.tree.put_design(v.tree);
     crate::render_workspace::invalidate_images(app);
     crate::render_workspace::invalidate_scene(app);
     crate::render_workspace::sync_backend(app);
@@ -120,6 +123,14 @@ fn put_view(app: &mut SolveApp, v: DocView) {
 
 /// Put `slot` into the app and return what was there.
 fn swap_in(app: &mut SolveApp, mut slot: DocSlot) -> DocSlot {
+    // What the design asked for finishes in it, before another design is shown (#6990): a rename
+    // being typed commits as a click elsewhere does, and the history's commands computing off
+    // the window thread are waited for.
+    crate::context_menu::finish_rename(app, None, true);
+    app.settle_deferred();
+    // Questions and offers about the design leave with it: they name its items by number.
+    app.menu.confirm = None;
+    crate::stand_up::leave(app);
     if crate::render_workspace::active(app) {
         let _ = crate::render_workspace::enter(app, false);
     }
@@ -1357,6 +1368,140 @@ mod tests {
         assert_eq!(a.docs.active, 0);
         close(&mut a, 0, true);
         assert!(active_is_blank(&a) && a.home.open);
+    }
+
+    /// Two designs, each with one part (numbered 1, placed as occurrence 2) holding a box.
+    fn two_tabs() -> SolveApp {
+        let mut a = app();
+        a.run("component.create", json!({"name": "Bracket A"})).unwrap();
+        a.run("solid.box", json!({"length": 30, "width": 20, "height": 10})).unwrap();
+        new_design(&mut a);
+        a.run("component.create", json!({"name": "Bracket B"})).unwrap();
+        a.run("solid.box", json!({"length": 20, "width": 20, "height": 40})).unwrap();
+        switch(&mut a, 0);
+        a
+    }
+
+    #[test]
+    fn tab_switch_keeps_browser_folders_per_design() {
+        let mut a = two_tabs();
+        crate::browser::toggle(&mut a, "o:2/bodies", true);
+        switch(&mut a, 1);
+        assert!(!a.tree.collapsed.contains("o:2/bodies"), "folded in tab 2 too: {:?}", a.tree.collapsed);
+    }
+
+    #[test]
+    fn tab_switch_drops_browser_picks_of_the_other_design() {
+        let mut a = two_tabs();
+        a.tree.picked_components = vec![1];
+        switch(&mut a, 1);
+        crate::delete::delete_selection(&mut a);
+        assert!(a.menu.confirm.is_none(), "Delete in tab 2 asks about: {:?}", a.menu.confirm.as_ref().map(|c| (&c.params, &c.report)));
+    }
+
+    #[test]
+    fn tab_switch_closes_the_delete_question() {
+        let mut a = two_tabs();
+        a.tree.picked_components = vec![1];
+        crate::delete::delete_selection(&mut a);
+        assert!(a.menu.confirm.is_some(), "tab 1 asks to delete Bracket A");
+        switch(&mut a, 1);
+        let open = a.menu.confirm.is_some();
+        crate::delete::confirm(&mut a, true);
+        let names: Vec<_> = a.session.doc.components.iter().map(|c| c.name.clone()).collect();
+        assert!(!open && names.contains(&"Bracket B".to_string()), "question open in tab 2: {open}; after Delete, tab 2 parts: {names:?}");
+    }
+
+    #[test]
+    fn background_undo_stays_in_its_tab() {
+        let mut a = app();
+        a.run("solid.box", json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        new_design(&mut a);
+        a.run("solid.sphere", json!({"diameter": 8})).unwrap();
+        a.run("solid.sphere", json!({"diameter": 4})).unwrap();
+        switch(&mut a, 0);
+        a.apply_off_thread = Some(std::time::Duration::ZERO);
+        let _ = a.run_heavy("edit.undo", json!({}));
+        assert!(a.computing_since().is_some());
+        switch(&mut a, 1);
+        let ctx = egui::Context::default();
+        for _ in 0..500 {
+            a.poll_deferred(&ctx);
+            if a.deferred.is_none() && a.deferred_queue.is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let tab2 = a.session.doc.features.len();
+        switch(&mut a, 0);
+        let tab1 = a.session.doc.features.len();
+        assert_eq!((tab1, tab2), (0, 2), "Undo started in tab 1: features after (tab 1, tab 2) = ({tab1}, {tab2}), expected (0, 2)");
+    }
+
+    #[test]
+    fn tab_switch_keeps_the_hidden_section_per_design() {
+        let mut a = two_tabs();
+        a.run("inspect.section", json!({"plane": {"origin": [0, 0, 5], "normal": [0, 0, 1]}})).unwrap();
+        crate::browser::set_section_shown(&mut a, false);
+        assert!(a.session.section.is_none());
+        switch(&mut a, 1);
+        assert!(a.session.section.is_none());
+        crate::browser::set_section_shown(&mut a, true);
+        assert!(a.session.section.is_none(), "the eye in tab 2 cut tab 2 with tab 1's plane: {:?}", a.session.section);
+    }
+
+    #[test]
+    fn tab_switch_closes_capture_position() {
+        let mut a = two_tabs();
+        a.tree.capture_prompt = Some("solid.box".into());
+        switch(&mut a, 1);
+        assert!(a.tree.capture_prompt.is_none(), "tab 1's Capture Position question is still open in tab 2");
+    }
+
+    #[test]
+    fn tab_switch_drops_the_stand_up_offer() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-probe-standup-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("tall_in_y.step").to_string_lossy().to_string();
+        let mut src = app();
+        src.run("solid.box", json!({"length": 10, "width": 40, "height": 5})).unwrap();
+        src.run("file.export", json!({"path": path})).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(&path, text.replace("'SolidCraft','SolidCraft'", "'SolidCraft','Example CAD'")).unwrap();
+        let mut a = app();
+        a.run("component.create", json!({"name": "Post"})).unwrap();
+        a.run("solid.box", json!({"length": 10, "width": 10, "height": 80})).unwrap();
+        a.open_path(&path);
+        assert_eq!(a.docs.count(), 2, "the STEP file opened in its own tab");
+        assert!(a.stand_up.is_some(), "the offer is up for the STEP file");
+        switch(&mut a, 0);
+        let before = solidcraft_engine::view::bounds(&a.session);
+        let r = crate::stand_up::stand_up(&mut a);
+        let after = solidcraft_engine::view::bounds(&a.session);
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            (after.max.z - before.max.z).abs() < 1e-6,
+            "Stand up in tab 1 turned tab 1's box ({r:?}): z {:.1} -> {:.1}",
+            before.max.z,
+            after.max.z
+        );
+    }
+
+    #[test]
+    fn tab_switch_ends_a_rename() {
+        let mut a = two_tabs();
+        a.menu.rename = Some(crate::context_menu::Rename {
+            what: crate::context_menu::RenameWhat::Component(1),
+            text: "Bracket A".into(),
+            at: egui::Pos2::ZERO,
+            focused: true,
+            inline: false,
+        });
+        switch(&mut a, 1);
+        let open = a.menu.rename.is_some();
+        crate::context_menu::finish_rename(&mut a, Some("Renamed in tab 1"), true);
+        let names: Vec<_> = a.session.doc.components.iter().map(|c| c.name.clone()).collect();
+        assert!(!open && names == ["Bracket B"], "rename open in tab 2: {open}; tab 2 parts after it commits: {names:?}");
     }
 
     /// Direct tab creation remains available, including reuse of an untouched launch design.

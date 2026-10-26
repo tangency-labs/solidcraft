@@ -152,7 +152,54 @@ pub struct TreeState {
     cache: Option<cache::Cache>,
 }
 
+/// The browser state that belongs to one design, kept with its tab: which folders are open and
+/// the Analysis folder's eyes (#6990).
+#[derive(Clone, Debug, Default)]
+pub(crate) struct DesignTree {
+    collapsed: BTreeSet<String>,
+    expanded: BTreeSet<String>,
+    hidden_section: Option<(solidcraft_engine::geom::Vec3, solidcraft_engine::geom::Vec3)>,
+    section_dialog: Option<crate::dialogs::SectionDraft>,
+    analysis_hidden: bool,
+    section_hidden: bool,
+}
+
 impl TreeState {
+    /// Leave the design shown: take what belongs to it, and drop what names its items by number
+    /// or name (picks, Shift-click anchors, scroll targets, Capture Position, the canvas panel),
+    /// which the next design's items would answer to (#6990).
+    pub(crate) fn take_design(&mut self) -> DesignTree {
+        self.picked_components.clear();
+        self.picked_canvases.clear();
+        self.picked_joints.clear();
+        self.picked_timeline_groups.clear();
+        self.anchor = None;
+        self.timeline_anchor = None;
+        self.reveal = None;
+        self.reveal_feature = None;
+        self.timeline_reveal = None;
+        self.capture_prompt = None;
+        self.canvas_panel = None;
+        DesignTree {
+            collapsed: std::mem::take(&mut self.collapsed),
+            expanded: std::mem::take(&mut self.expanded),
+            hidden_section: self.hidden_section.take(),
+            section_dialog: self.section_dialog.take(),
+            analysis_hidden: std::mem::take(&mut self.analysis_hidden),
+            section_hidden: std::mem::take(&mut self.section_hidden),
+        }
+    }
+
+    /// Show a design's own browser state.
+    pub(crate) fn put_design(&mut self, d: DesignTree) {
+        self.collapsed = d.collapsed;
+        self.expanded = d.expanded;
+        self.hidden_section = d.hidden_section;
+        self.section_dialog = d.section_dialog;
+        self.analysis_hidden = d.analysis_hidden;
+        self.section_hidden = d.section_hidden;
+    }
+
     fn remember(&mut self, key: &str) {
         if let Some(slot) = self.order.get_mut(self.order_len) {
             if slot != key {

@@ -209,6 +209,12 @@ impl SolveApp {
             Ok(replies) => Some(replies),
         };
         let Some(check) = self.delete_check.take() else { return };
+        self.finish_check(check, replies);
+    }
+
+    /// A delete's check is in (`None`: its thread is gone): the delete carries on, checked again
+    /// when the design changed meanwhile.
+    fn finish_check(&mut self, check: DeleteCheck, replies: Option<Vec<Result<Value, String>>>) {
         match replies {
             None => self.set_status("the delete could not be checked", true),
             Some(_) if check.revision != self.session.revision => check.then.restart(self),
@@ -224,14 +230,7 @@ impl SolveApp {
                 return;
             }
             if let Some(job) = self.deferred.take() {
-                let (id, params) = job.command;
-                let superseded = replaced_by_a_later_one(&id) && self.deferred_queue.first().is_some_and(|(q, _)| *q == id);
-                if job.revision != self.session.revision {
-                    // The design changed meanwhile: computed again for the design as it is now.
-                    let _ = self.run_heavy(&id, params);
-                } else if !superseded {
-                    let _ = self.run_evaluated(&id, params, job.evaluated.flatten().as_ref(), job.kept);
-                }
+                self.finish_deferred(job);
             }
         }
         if self.deferred.is_none() && !self.deferred_queue.is_empty() {
@@ -246,6 +245,49 @@ impl SolveApp {
         {
             self.start_interactive(&id, Some(sketch));
         }
+    }
+
+    /// A command whose evaluation is in runs for real.
+    fn finish_deferred(&mut self, job: Deferred) {
+        let (id, params) = job.command;
+        let superseded = replaced_by_a_later_one(&id) && self.deferred_queue.first().is_some_and(|(q, _)| *q == id);
+        if job.revision != self.session.revision {
+            // The design changed meanwhile: computed again for the design as it is now.
+            let _ = self.run_heavy(&id, params);
+        } else if !superseded {
+            let _ = self.run_evaluated(&id, params, job.evaluated.flatten().as_ref(), job.kept);
+        }
+    }
+
+    /// Before another design is shown (a tab switch): the command computing off the window
+    /// thread, those waiting their turn and a delete's check finish now, in the design that asked
+    /// for them, rather than in whichever design is shown when they are in (#6990). The window
+    /// waits for them; a sketch waiting for the marker to settle is not started.
+    pub(crate) fn settle_deferred(&mut self) {
+        self.start_after_roll = None;
+        if self.deferred.is_none() && self.deferred_queue.is_empty() && self.delete_check.is_none() {
+            return;
+        }
+        // Everything asked for from here on runs at once.
+        let off = self.apply_off_thread.take();
+        if let Some(mut job) = self.deferred.take() {
+            if job.evaluated.is_none() {
+                job.evaluated = Some(job.done.recv().ok().flatten());
+            }
+            self.finish_deferred(job);
+        }
+        let mut queue = std::mem::take(&mut self.deferred_queue).into_iter().peekable();
+        while let Some((id, params)) = queue.next() {
+            if replaced_by_a_later_one(&id) && queue.peek().is_some_and(|(q, _)| *q == id) {
+                continue;
+            }
+            let _ = self.run_heavy(&id, params);
+        }
+        if let Some(check) = self.delete_check.take() {
+            let replies = check.done.recv().ok();
+            self.finish_check(check, replies);
+        }
+        self.apply_off_thread = off;
     }
 
     /// Start evaluating a command ahead. `None` when it should just run: not asked for
