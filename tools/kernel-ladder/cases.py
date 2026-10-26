@@ -885,8 +885,11 @@ case(T8, "006-curved-edge-2", "a 2 mm chamfer on the top edge of a cylinder r10 
      {"body_count": 1, "volume_mm3": PI * 100 * 20 - 2 * 2 * PI * (10 - 2 / 3), "faces": 4},
      "a cone chamfer: Pappus on the triangle (area 2) with its centroid at radius 10 - 2/3")
 case(T8, "007-chamfer-then-fillets", "a 3 mm chamfer on the top front edge, then r2 rounds on the front vertical edges that meet it",
-     [K([[30, 0, 20]], 3), F([[0, 0, 5], [60, 0, 5]], 2)], {"body_count": 1},
-     "rounds running into a chamfer face; one valid body", base=B1, source="invariants")
+     [K([[30, 0, 20]], 3), F([[0, 0, 5], [60, 0, 5]], 2)],
+     {"body_count": 1, "volume_mm3": VB - 4.5 * 60 - 2 * SPANDREL * 4 * 17 - 2 * SPANDREL * 4 * 2 * XBAR, "faces": 9, "edges": 21, "vertices": 14, "bbox": BBOX, "tolerance": {"rel": 1e-5}},
+     "the chamfer removes 3^2/2 60. The front vertical edges then run z 0..17; each r2 round removes (1-pi/4) 2^2 17 below and runs on up into the chamfer face z = 17 + y: "
+     "over its section it removes a column y high, int y dA = (1-pi/4) 2^2 x 2 (10-3pi)/(12-3pi) (the section's centroid). Faces 6 + chamfer + 2 rounds; vertices: 6 round the bottom, "
+     "4 of the top face, the front face's 2 top corners, the 2 tops of the rounds' tangent lines on the ends (z = 19): 14; edges 21 (Euler)", base=B1)
 V8 = V7 - 0.5 * 2 * PI * (8 - 1 / 3) - 2 * 60
 case(T8, "008-part-chamfers", "the running part: 1 mm on the boss top edge, 2 mm on the back wall's top back edge",
      [K([[23, 15, 30]], 1), K([[30, 40, 35]], 2)],
