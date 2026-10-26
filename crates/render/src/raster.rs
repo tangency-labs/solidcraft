@@ -170,7 +170,14 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                         {
                             continue;
                         }
-                        let z = (w0 * a[2] + w1 * b[2] + w2 * cc[2]) as f32;
+                        let mut z = (w0 * a[2] + w1 * b[2] + w2 * cc[2]) as f32;
+                        // The cut wins a tie: where a body stands on another, its bottom seen
+                        // through the cut and the other's top are the same plane, a rounding
+                        // apart (the viewport marks the cap there again with its back faces
+                        // pulled forward, `CAP_MARK_BIAS`).
+                        if inside && scene.clip.is_some() && !pass.glass() {
+                            z -= z.abs() * DEPTH_EPS as f32;
+                        }
                         let i = y * sw + x;
                         if c.depth.get(i).is_some_and(|d| z < *d) {
                             // A see-through body is blended over what is already drawn and
