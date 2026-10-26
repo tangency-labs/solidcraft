@@ -18,6 +18,10 @@ const MAX_BODY: usize = 24_000;
 const MAX_REPORT: usize = 32_000;
 const MAX_IMAGE_PIXELS: usize = 16_000_000;
 const ISSUE_URL: &str = "https://github.com/tangency-labs/solidcraft/issues/new";
+/// How long a screenshot waits for a preview being computed before it shows it unfinished.
+const PREVIEW_WAIT_MS: f64 = 10_000.0;
+/// Keystrokes kept while a capture hides the report.
+const MAX_HELD: usize = 4096;
 
 thread_local! {
     static CAD_INPUT_BLOCKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -104,7 +108,20 @@ impl Drop for CadInput {
 pub struct ReportState {
     pub draft: Option<Draft>,
     pending: Option<Pending>,
+    /// A screenshot waiting for the preview being computed (#7171).
+    waiting: Option<Waiting>,
+    /// What was typed while a capture hid the report, for the form once it is back.
+    held: Vec<egui::Event>,
+    /// The report's field that had focus when a capture hid it.
+    refocus: Option<egui::Id>,
     cad_focus: Option<egui::Id>,
+}
+
+struct Waiting {
+    deadline: f64,
+    /// [`context_signature`] when it began: the preview it waits for belongs to the report
+    /// unless the design, the dialog or the selection changed meanwhile.
+    context: u64,
 }
 
 pub struct Draft {
@@ -269,16 +286,24 @@ impl std::fmt::Write for Fingerprint {
     }
 }
 
-fn source_signature(app: &SolveApp, dialog: Option<&dialogs::Dialog>) -> u64 {
+/// What a report's context is drawn from: the design, the dialog and the selection.
+fn context_signature(app: &SolveApp, dialog: Option<&dialogs::Dialog>) -> u64 {
     let mut h = Fingerprint(std::collections::hash_map::DefaultHasher::new());
     app.session.revision.hash(&mut h.0);
     app.docs.active.hash(&mut h.0);
     app.docs.count().hash(&mut h.0);
     app.session.doc.name.hash(&mut h.0);
+    let _ = write!(&mut h, "{:?}{:?}", dialog, app.session.selection);
+    h.0.finish()
+}
+
+/// [`context_signature`] and the preview shown with it.
+fn source_signature(app: &SolveApp, dialog: Option<&dialogs::Dialog>) -> u64 {
+    let mut h = Fingerprint(std::collections::hash_map::DefaultHasher::new());
+    context_signature(app, dialog).hash(&mut h.0);
     app.preview.key.hash(&mut h.0);
     app.preview.error.hash(&mut h.0);
     app.preview.busy.hash(&mut h.0);
-    let _ = write!(&mut h, "{:?}{:?}", dialog, app.session.selection);
     h.0.finish()
 }
 
@@ -492,14 +517,24 @@ pub fn begin(app: &mut SolveApp, ctx: &egui::Context, dialog: Option<&dialogs::D
 }
 
 fn cancel_capture(app: &mut SolveApp) {
+    app.issue_report.waiting = None;
     if let Some(pending) = app.issue_report.pending.take() {
         app.queued_shots.retain(|(token, ..)| *token != pending.token);
     }
 }
 
 fn capture(app: &mut SolveApp, ctx: &egui::Context, dialog: Option<&dialogs::Dialog>) {
+    capture_unless_busy(app, ctx, dialog, true);
+}
+
+/// Take a screenshot for the report; `wait`: while the preview is being computed, wait for it
+/// with the report open ([`tick`] takes it once it is done, #7171).
+fn capture_unless_busy(app: &mut SolveApp, ctx: &egui::Context, dialog: Option<&dialogs::Dialog>, wait: bool) {
     cancel_capture(app);
     let current_source = source_signature(app, dialog);
+    let context = context_signature(app, dialog);
+    let full = app.queued_shots.len() >= 16;
+    let busy = app.preview.busy;
     let Some(draft) = app.issue_report.draft.as_mut() else { return };
     draft.image = None;
     draft.texture = None;
@@ -509,16 +544,39 @@ fn capture(app: &mut SolveApp, ctx: &egui::Context, dialog: Option<&dialogs::Dia
                 .into();
         return;
     }
-    if app.preview.busy || app.queued_shots.len() >= 16 {
+    if wait && (busy || full) {
+        draft.note = "Waiting for the preview to finish to take the screenshot…".into();
+        app.issue_report.waiting = Some(Waiting { deadline: crate::now_ms() + PREVIEW_WAIT_MS, context });
+        ctx.request_repaint();
+        return;
+    }
+    if full {
         draft.note = "Screenshot unavailable while the preview is updating. Reopen the report after it settles, or continue with text.".into();
         return;
+    }
+    if busy {
+        draft.note = "The preview is still being computed: the screenshot shows it unfinished.".into();
+        let line = format!(
+            "\nThe preview was still being computed {:.0} s after the report opened; the screenshot shows it unfinished.\n",
+            PREVIEW_WAIT_MS / 1000.0
+        );
+        if !draft.body.contains(line.trim()) {
+            draft.body.push_str(&line);
+            truncate(&mut draft.body, MAX_BODY);
+        }
+    }
+    // The form hides for the capture: give its focused field back after it.
+    if draft.focus_requested {
+        app.issue_report.refocus = ctx.memory(|m| m.focused());
     }
     let Some(token) = app.shot_token.checked_add(1) else {
         draft.note = "Screenshot request limit reached; restart the app to capture another frame.".into();
         return;
     };
     app.shot_token = token;
-    draft.note = "Capturing the current app view locally…".into();
+    if !busy {
+        draft.note = "Capturing the current app view locally…".into();
+    }
     let now = crate::now_ms();
     app.issue_report.pending = Some(Pending {
         token,
@@ -536,6 +594,24 @@ pub(crate) fn pending(app: &SolveApp) -> bool {
 }
 
 pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
+    if let Some(waiting) = &app.issue_report.waiting {
+        let settled = !app.preview.busy && app.queued_shots.len() < 16;
+        let (late, context) = (crate::now_ms() >= waiting.deadline, waiting.context);
+        if settled || late {
+            app.issue_report.waiting = None;
+            let dialog = app.dialog.clone();
+            // The preview the report waited for is what it shows now.
+            let source = source_signature(app, dialog.as_ref());
+            if context_signature(app, dialog.as_ref()) == context
+                && let Some(draft) = app.issue_report.draft.as_mut()
+            {
+                draft.source_signature = source;
+            }
+            capture_unless_busy(app, ctx, dialog.as_ref(), false);
+        } else {
+            ctx.request_repaint_after(std::time::Duration::from_millis(50));
+        }
+    }
     let problem = app.issue_report.pending.as_ref().and_then(|p| {
         if signature(app, app.dialog.as_ref()) != p.signature || p.window != ctx.content_rect() || p.pixels_per_point != ctx.pixels_per_point() {
             Some("The model, inputs or view changed during capture. Retake the current view.")
@@ -577,10 +653,42 @@ pub(crate) fn receive(app: &mut SolveApp, token: u64, image: Arc<ColorImage>) {
     }
 }
 
+/// While a capture hides the report, what is typed waits for the form to come back, which gets
+/// its focused field back: a screenshot taken once the preview is done can hide the form while
+/// its user types (#7171).
+pub(crate) fn hold_input(app: &mut SolveApp, raw: &mut egui::RawInput) {
+    let state = &mut app.issue_report;
+    if state.draft.is_none() {
+        state.held.clear();
+    } else if state.pending.is_some() {
+        let mut kept = Vec::with_capacity(raw.events.len());
+        for event in raw.events.drain(..) {
+            if matches!(
+                event,
+                egui::Event::Text(_) | egui::Event::Key { .. } | egui::Event::Paste(_) | egui::Event::Copy | egui::Event::Cut | egui::Event::Ime(_)
+            ) {
+                if state.held.len() < MAX_HELD {
+                    state.held.push(event);
+                }
+            } else {
+                kept.push(event);
+            }
+        }
+        raw.events = kept;
+    } else if !state.held.is_empty() {
+        let mut events = std::mem::take(&mut state.held);
+        events.append(&mut raw.events);
+        raw.events = events;
+    }
+}
+
 /// The report card is hidden only while a frame is captured, so it cannot cover the evidence.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if pending(app) {
         return;
+    }
+    if let Some(id) = app.issue_report.refocus.take() {
+        ctx.memory_mut(|m| m.request_focus(id));
     }
     let Some(mut draft) = app.issue_report.draft.take() else { return };
     let (retake, close) = form::show(app, &mut draft, ctx);
@@ -1255,6 +1363,76 @@ mod tests {
         assert!(h.app.issue_report.draft.is_some());
         assert!(!h.app.file_load.busy(), "native drop must not queue an asynchronous open behind the draft");
         assert_eq!(h.app.docs.count(), tabs_before);
+    }
+
+    /// A report opened while the preview is being computed waits for it, open, and takes the
+    /// screenshot once it is done (#7171). It used to refuse and ask to reopen the report.
+    #[test]
+    fn issue_report_screenshot_waits_for_the_preview_then_is_taken() {
+        let mut app = app();
+        let ctx = crate::fonts::test_context();
+        app.preview.busy = true;
+        begin(&mut app, &ctx, None, None);
+        assert!(!pending(&app) && app.issue_report.waiting.is_some());
+        assert!(app.issue_report.draft.as_ref().unwrap().note.contains("Waiting for the preview"));
+        tick(&mut app, &ctx);
+        assert!(!pending(&app), "the preview is still being computed");
+        app.preview.busy = false;
+        app.preview.key += 1;
+        tick(&mut app, &ctx);
+        assert!(pending(&app), "taken once the preview is done");
+        let token = app.issue_report.pending.as_ref().unwrap().token;
+        receive(&mut app, token, Arc::new(ColorImage::new([4, 3], vec![egui::Color32::GREEN; 12])));
+        let draft = app.issue_report.draft.as_ref().unwrap();
+        assert!(draft.image.is_some(), "{}", draft.note);
+        assert!(!draft.body.contains("still being computed"));
+        // A selection changed while it waits: the report's context no longer matches the view.
+        app.preview.busy = true;
+        begin(&mut app, &ctx, None, None);
+        app.session.selection = vec![Sel::Feature { id: 1 }];
+        app.preview.busy = false;
+        tick(&mut app, &ctx);
+        let draft = app.issue_report.draft.as_ref().unwrap();
+        assert!(!pending(&app) && draft.image.is_none() && draft.note.contains("Settings or model changed"), "{}", draft.note);
+    }
+
+    /// A preview still being computed after a while is what the screenshot shows, and the report
+    /// says so: a hanging preview is often what is being reported.
+    #[test]
+    fn issue_report_screenshot_of_a_preview_that_takes_too_long_shows_it_unfinished() {
+        let mut app = app();
+        let ctx = crate::fonts::test_context();
+        app.preview.busy = true;
+        begin(&mut app, &ctx, None, None);
+        app.issue_report.waiting.as_mut().unwrap().deadline = -1.0;
+        tick(&mut app, &ctx);
+        assert!(pending(&app) && app.issue_report.waiting.is_none());
+        let draft = app.issue_report.draft.as_ref().unwrap();
+        assert!(draft.note.contains("unfinished") && draft.body.contains("still being computed 10 s after"), "{}", draft.note);
+        let token = app.issue_report.pending.as_ref().unwrap().token;
+        receive(&mut app, token, Arc::new(ColorImage::new([4, 3], vec![egui::Color32::GREEN; 12])));
+        assert!(app.issue_report.draft.as_ref().unwrap().image.is_some());
+    }
+
+    /// What is typed while a capture hides the report goes into the field it was typed in.
+    #[test]
+    fn issue_report_typing_while_a_capture_hides_the_report_is_kept() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
+        h.frames(8);
+        h.frame_with(vec![egui::Event::Text("The preview ".into())]);
+        let (ctx, dialog) = (h.ctx.clone(), h.app.dialog.clone());
+        capture(&mut h.app, &ctx, dialog.as_ref());
+        assert!(pending(&h.app));
+        h.frame_with(vec![egui::Event::Text("vanished".into())]);
+        h.frame_with(vec![egui::Event::Text(".".into())]);
+        let token = h.app.issue_report.pending.as_ref().unwrap().token;
+        receive(&mut h.app, token, Arc::new(ColorImage::new([4, 3], vec![egui::Color32::GREEN; 12])));
+        h.frames(4);
+        let draft = h.app.issue_report.draft.as_ref().unwrap();
+        assert_eq!(draft.description, "The preview vanished.");
+        assert!(draft.image.is_some());
     }
 
     #[test]

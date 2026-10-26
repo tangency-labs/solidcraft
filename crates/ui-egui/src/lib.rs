@@ -2036,8 +2036,15 @@ impl SolveApp {
         control::publish_design(self, &control::DESIGN_WATCH);
     }
 
-    /// Inject synthetic events (one pointer event per frame).
+    /// The frame's input before the app reads it: synthetic events, then what is typed while a
+    /// capture hides the report waits for it (the control channel's typing too).
     pub fn raw_input_hook(&mut self, raw: &mut egui::RawInput) {
+        self.synthetic_input(raw);
+        issue_report::hold_input(self, raw);
+    }
+
+    /// Inject synthetic events (one pointer event per frame).
+    fn synthetic_input(&mut self, raw: &mut egui::RawInput) {
         if self.synthetic.is_empty() {
             return;
         }
