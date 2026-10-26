@@ -3356,15 +3356,22 @@ fn c6_compute_point_values(
         let mut found_forw = flags.found_answer;
 
         // :3619 bigger step in the small-step case; upstream passes `dStep` again, not
-        // `dBigStep` (ported as written), into the same `sStepForw`
+        // `dBigStep` (ported as written, WR-456), into the same `sStepForw`. With
+        // `fixes.fillet_point_bigger_step_retry` the retry solves with the bigger step.
         if !found_forw && step < 1.0e-4 {
             let big_step = 1.0e-3;
+            let mut big = big_step;
+            let retry_step = if k.fixes.fillet_point_bigger_step_retry {
+                &mut big
+            } else {
+                &mut step
+            };
             step_solve(
                 ops,
                 k,
                 brep.as_deref_mut(),
                 point,
-                &mut step,
+                retry_step,
                 uv_domain1,
                 uv_domain2,
                 &mut flags,
@@ -3634,6 +3641,99 @@ mod tests_c6 {
         let mut p = TsectPnt::new();
         let _ = run(&mut fs, &k2, 1.0, &mut p, None);
         assert_eq!(k2.fillet_point_step.get(), Some(7.0e-4));
+    }
+
+    /// `Variable` that records the finite-difference solves' first guesses
+    /// (`load_initial_values`) and makes the solve after the first guess find nothing.
+    struct Probe {
+        inner: Variable,
+        guesses: Vec<Vec<f64>>,
+    }
+
+    impl FilletSolverOps for Probe {
+        fn solver(&self) -> &FilletSolver {
+            self.inner.solver()
+        }
+        fn solver_mut(&mut self) -> &mut FilletSolver {
+            self.inner.solver_mut()
+        }
+        fn setup_offset_values(
+            &mut self,
+            tsect: &TsectPnt,
+            offset_dist: Option<&mut f64>,
+        ) -> Result<()> {
+            self.inner.setup_offset_values(tsect, offset_dist)
+        }
+        fn jacobian_size(&self) -> Result<usize> {
+            Ok(4)
+        }
+        fn load_jacobian(
+            &mut self,
+            k: &Kernel,
+            num_equations: &mut usize,
+            num_parameters: &mut usize,
+            load: &mut crate::blend::fillet_custom_solver::JacobianLoad<'_>,
+            f: &mut [f64],
+            jacobian: Option<&mut crate::geom::matrix::Matrix>,
+        ) -> Result<bool> {
+            let found = FilletSolverOps::load_jacobian(
+                &mut self.inner.0,
+                k,
+                num_equations,
+                num_parameters,
+                load,
+                f,
+                jacobian,
+            )?;
+            if self.guesses.len() == 1 {
+                // no root: the first solve ends without a point
+                for v in f.iter_mut() {
+                    *v += 1.0;
+                }
+            }
+            Ok(found)
+        }
+        fn load_initial_values(
+            &mut self,
+            _k: &Kernel,
+            _brep: Option<&mut Brep>,
+            _do_surf2_calcs: bool,
+            _rail_index: usize,
+            _surface1: &mut OffsetSurface,
+            _surface1_index: usize,
+            _intervals: &mut crate::geom::extent1d::ExtentNd,
+            _periodicities: &mut Vec<bool>,
+            guess_t: &mut Vec<f64>,
+        ) -> Result<Option<crate::blend::fillet_custom_solver::InitialValues>> {
+            self.guesses.push(guess_t.clone());
+            Ok(None)
+        }
+    }
+
+    /// WR-456 (#1181): after a failed small forward step the retry steps by the bigger
+    /// step with the fix, and by the small one again as upstream does without it.
+    #[test]
+    fn bigger_step_retry_uses_the_bigger_step_with_the_fix() {
+        let (a, b) = (xy(0.0), xz());
+        let mut moves = Vec::new();
+        for fixed in [false, true] {
+            let mut k = Kernel::default();
+            k.fixes.fillet_point_bigger_step_retry = fixed;
+            let mut ops = Probe {
+                inner: Variable(solver(&k, &a, &b)),
+                guesses: Vec::new(),
+            };
+            let mut p = TsectPnt::new();
+            let r = run(&mut ops, &k, 1.0, &mut p, None);
+            assert!(ops.guesses.len() >= 2, "{r:?} {:?}", ops.guesses);
+            // how far each of the first two guesses lies from the point's uv
+            let from = |g: &[f64]| (g[0] - 0.5).hypot(g[1] - 0.25);
+            let (first, retry) = (from(&ops.guesses[0]), from(&ops.guesses[1]));
+            assert!(first > 0.0 && first < 1.0e-4, "{first}");
+            moves.push(retry / first);
+        }
+        assert!((moves[0] - 1.0).abs() < 1.0e-9, "{moves:?}");
+        assert!((moves[1] - 100.0).abs() < 1.0e-6, "{moves:?}");
     }
 
     #[test]
