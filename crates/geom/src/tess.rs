@@ -249,16 +249,35 @@ impl EvalSurface {
         if let Some(n) = n.normalized().filter(|_| n.len2() > 1e-20 * (du.len2() * dv.len2()).max(1e-300)) {
             return (p, n);
         }
-        // Step into the parameter domain around the degenerate point.
+        // Step into the parameter domain around the degenerate point: never past the end of an
+        // interval, where the extrapolated surface folds back over the pole and its normal
+        // points the other way.
         let h = 1e-6 * (1.0 + u.abs().max(v.abs()));
+        let inside = |d: usize, t: f64, s: f64| self.interval(d).is_none_or(|(lo, hi)| (lo..=hi).contains(&(t + s * h)));
         for (su, sv) in [(1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)] {
-            if let Some((_, a, b)) = self.derivs(u + su * h, v + sv * h)
+            if inside(0, u, su)
+                && inside(1, v, sv)
+                && let Some((_, a, b)) = self.derivs(u + su * h, v + sv * h)
                 && let Some(n) = self.oriented(a.cross(b)).normalized()
             {
                 return (p, n);
             }
         }
         (p, Vec3::Z)
+    }
+
+    /// The active parameter interval along `d` (0: u, 1: v) of a spline, or of a revolution's
+    /// profile; `None` where the parameter is unbounded (a plane, a revolution's angle).
+    fn interval(&self, d: usize) -> Option<(f64, f64)> {
+        match self {
+            EvalSurface::Plane { .. } => None,
+            EvalSurface::Nurbs { degree, knots, count, .. } => {
+                Some((*knots.get(d)?.get(*degree.get(d)?)?, *knots.get(d)?.get(*count.get(d)?)?))
+            }
+            EvalSurface::Revolved { profile, swap, .. } => (d == usize::from(*swap))
+                .then(|| Some((*profile.knots.get(profile.degree)?, *profile.knots.get(profile.ctrl.len())?)))
+                .flatten(),
+        }
     }
 
     /// Mirror transforms reverse the cross product of the mapped derivatives.
@@ -276,7 +295,7 @@ impl EvalSurface {
     pub fn wrap(&self, uv: [f64; 2]) -> [f64; 2] {
         if let EvalSurface::Revolved { profile, swap, .. } = self {
             let d = usize::from(*swap);
-            let range = (|| Some((*profile.knots.get(profile.degree)?, *profile.knots.get(profile.ctrl.len())?)))();
+            let range = self.interval(d);
             let mut out = uv;
             if let (Some(r), Some(x)) = (range, out.get_mut(d))
                 && !(r.0..=r.1).contains(x)
@@ -286,11 +305,10 @@ impl EvalSurface {
             }
             return out;
         }
-        let EvalSurface::Nurbs { degree, knots, count, closed, .. } = self else { return uv };
-        let range = |d: usize| Some((*knots.get(d)?.get(*degree.get(d)?)?, *knots.get(d)?.get(*count.get(d)?)?));
+        let EvalSurface::Nurbs { closed, .. } = self else { return uv };
         let mut out = uv;
         for d in 0..2 {
-            if let (true, Some(r)) = (closed[d], range(d))
+            if let (true, Some(r)) = (closed[d], self.interval(d))
                 && !(r.0..=r.1).contains(&uv[d])
             {
                 out[d] = uv::wrap_into(uv[d], r);
@@ -639,8 +657,10 @@ mod tests {
                 let (u, v) = (i as f64 / 10.0, j as f64);
                 let (p, n) = s.eval(u, v);
                 assert!((p.len() - 3.0).abs() < 1e-12, "{p:?}");
-                // At the pole (u = 1) the normal comes from a step inside: within ~1e-6 rad.
-                assert!(n.cross(p).len() < 3e-5, "normal {n:?} not radial at {p:?}");
+                // S_u × S_v points into this sphere. At the pole (u = 1) the normal comes from
+                // a step inside: within ~1e-6 rad, and the same way (a step past the pole would
+                // turn it over).
+                assert!(n.cross(p).len() < 3e-5 && n.dot(p) < 0.0, "normal {n:?} not inward at {p:?}");
             }
         }
     }
