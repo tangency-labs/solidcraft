@@ -6313,7 +6313,10 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                     } else {
                         parallel_tapped_wall(st, p, dir, r).unwrap_or(p + dir.any_perp() * r + dir * (r * 0.5))
                     };
-                    let mut t = thread_on_impl(st, f.id, wall, Some(d), None, true, false, *handedness)?;
+                    // A tapped hole's screw direction, as the thread's hand.
+                    let hand = if handedness.is_right() { ThreadHand::Right } else { ThreadHand::Left };
+                    let ask = thread::ThreadAsk { designation: Some(d), tapped: true, hand, ..Default::default() };
+                    let mut t = thread_on(st, f.id, wall, &ask)?.info;
                     if let Some(depth) = thread_depth {
                         let available = t.end - t.start;
                         if depth > available {
