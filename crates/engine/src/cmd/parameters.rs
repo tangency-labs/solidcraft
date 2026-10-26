@@ -143,6 +143,11 @@ fn change_param(s: &mut Session, p: &Value) -> Result<Value> {
     out["recomputed"] = json!(s.model.last_recomputed);
     out["restored"] = json!(s.model.last_restored);
     out["errors"] = json!(failing(s));
+    // An edit stores the expression just as creating the feature does, so it says the same
+    // thing about plain numbers read as mm (#5887).
+    if let Some(w) = super::features::unit_warning_for_param(&s.doc, &name) {
+        out["unit_warnings"] = json!([w]);
+    }
     Ok(out)
 }
 
@@ -165,9 +170,13 @@ fn change_many(s: &mut Session, changes: &Value, solved: &crate::SketchValues) -
     s.settle_value_edit(solved)?;
     let (vals, _) = s.doc.param_values();
     let values: serde_json::Map<String, Value> = list.iter().map(|(n, _)| (n.clone(), json!(vals.get(n).map(|v| v.v)))).collect();
+    let warnings: Vec<String> = list.iter().filter_map(|(n, _)| super::features::unit_warning_for_param(&s.doc, n)).collect();
     let mut out = json!({"changed": values, "recomputed": s.model.last_recomputed, "restored": s.model.last_restored, "errors": failing(s)});
     if !switched.is_empty() {
         out["switched"] = json!(switched);
+    }
+    if !warnings.is_empty() {
+        out["unit_warnings"] = json!(warnings);
     }
     Ok(out)
 }

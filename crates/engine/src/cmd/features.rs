@@ -564,6 +564,34 @@ pub(super) fn check_expr(s: &Session, e: &str, kind: Kind, cmd: &str, what: &str
     s.doc.eval(e, kind).map(|_| ()).map_err(|err| bad(cmd, format!("{what}: {err}")))
 }
 
+/// What to say about an input whose plain numbers are read as mm, if anything (#5887). A bare
+/// number on its own takes the design's unit, but one inside an expression keeps the mm
+/// default, so the two readings can mean different lengths.
+pub(super) fn unit_warning(doc: &solidcraft_doc::Document, label: &str, e: &str, kind: Kind) -> Option<String> {
+    let (as_mm, as_design) = doc.design_unit_mismatch(e, kind)?;
+    let u = doc.units.trim();
+    let mm = |v: f64| format!("{v:.4}").trim_end_matches('0').trim_end_matches('.').to_string();
+    Some(format!(
+        "`{label}`: a plain number inside an expression is read as mm, so `{}` is {} mm, not the {} mm it would be in `{u}`. Give the number its unit (`1 {u}`) to mean {u}.",
+        e.trim(),
+        mm(as_mm),
+        mm(as_design)
+    ))
+}
+
+/// The same for a model parameter that stands for a feature input (`d1`), so an edit through
+/// `parameters.change` says what creating the feature would have said.
+pub(super) fn unit_warning_for_param(doc: &solidcraft_doc::Document, name: &str) -> Option<String> {
+    for f in &doc.features {
+        for (p, (label, e, kind)) in f.param_names.iter().zip(f.kind.inputs()) {
+            if p == name {
+                return unit_warning(doc, label, &e, kind);
+            }
+        }
+    }
+    None
+}
+
 /// Add a feature, evaluate, and report its result (an evaluation error fails the command).
 pub(super) fn add_feature(s: &mut Session, p: &Value, kind: FeatureKind) -> Result<Value> {
     add_feature_in(s, p, kind, true)
@@ -580,9 +608,16 @@ fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, world: bool) ->
         super::component::to_active_frame(s, &mut kind);
     }
     // Bare lengths typed in an inch (or cm…) design mean that unit.
+    let mut unit_warnings = Vec::new();
     if s.doc.units.trim() != "mm" {
         let doc = s.doc.clone();
-        for (_, e, k) in kind.inputs_mut() {
+        for (label, e, k) in kind.inputs_mut() {
+            // A bare number inside an expression keeps the mm default, so it means something
+            // else than the same number on its own would (#5887). Say so where it changes the
+            // value; the expression itself is left alone.
+            if let Some(w) = unit_warning(&doc, label, e.as_str(), k) {
+                unit_warnings.push(w);
+            }
             *e = doc.with_design_unit(e, k).into();
         }
     }
@@ -732,6 +767,7 @@ fn add_feature_in(s: &mut Session, p: &Value, kind: FeatureKind, world: bool) ->
         warning,
         ms: r.map(|r| r.ms),
         param_warnings: Vec::new(),
+        unit_warnings,
     };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
 }

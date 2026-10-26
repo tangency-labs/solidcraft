@@ -393,3 +393,19 @@ fn inch_extrude_secondary_lengths_and_unchanged_edit_keep_their_physical_sizes()
     let reopened = Session::new(solidcraft_engine::doc::Document::from_json(&h.app.session.doc.to_json()).unwrap());
     assert_eq!(reopened.doc.length_inputs(), h.app.session.doc.length_inputs());
 }
+
+/// Somebody driving the app never sees a command's reply, so the status line says when an
+/// input's plain numbers were read as mm (#5887, raised in review of #6017).
+#[test]
+fn the_status_line_says_when_an_expression_is_read_as_mm() {
+    let mut h = design("in");
+    h.app.run("parameters.add", json!({"name": "w", "expression": "2 in"})).unwrap();
+    // A bare number takes the design's unit, so there is nothing to say.
+    h.app.run("solid.box", json!({"length": 3, "width": 10, "height": 10, "corner": [0, 0, 0]})).unwrap();
+    assert!(h.app.status.as_ref().is_none_or(|s| !s.0.contains("read as mm")), "a bare number takes the design unit: {:?}", h.app.status);
+    // An expression keeps the mm default for its plain numbers, and the status line says so.
+    h.app.run("parameters.change", json!({"name": "d1", "expression": "w + 1"})).unwrap();
+    let said = h.app.status.clone().map(|s| s.0).unwrap_or_default();
+    assert!(said.contains("read as mm") && said.contains("51.8") && said.contains("76.2"), "{said}");
+    assert!(h.app.status.as_ref().is_some_and(|s| !s.2), "it is a warning, not an error: {:?}", h.app.status);
+}

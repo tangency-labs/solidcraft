@@ -184,6 +184,10 @@ pub struct FeatureResult {
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
+    /// Inputs whose plain numbers were read as mm in a design that measures in another unit,
+    /// where that changes the value (#5887). Always reported, unlike `param_warnings`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unit_warnings: Vec<String>,
 }
 
 #[cfg(test)]
