@@ -1,4 +1,4 @@
-#### WR-460. `MakeEdgeInFaceWithVU` leaves a vertex tolerance below twice its gap to the new edge's end
+#### WR-469. `MakeEdgeInFaceWithVU` leaves a vertex tolerance below twice its gap to the new edge's end
 - **Severity:** Wrong result
 - **Area:** Topology, attributes, solvers
 - **Location:** `source/SMLib/src/SmBrep.cpp`, `SmBrep::MakeEdgeInFaceWithVU` (`:12242`), its tolerance tail (`:13457`, "recompute modified vertex tolerances"); `SmVertex::RefreshTolerance` (`source/SMLib/src/SmVertex.cpp:2313`). The check that refuses the result is `SmBrep::ValidateAndUpdateTolerances` test 0/2 (`SmBrep.cpp:33327`), reached from `AssertValid`.
