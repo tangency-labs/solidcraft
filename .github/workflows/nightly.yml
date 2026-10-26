@@ -2,8 +2,9 @@ name: Nightly difftest
 
 # Slow checks that are too expensive for every pull request:
 # * `--fuzz` on every green or partial unit (probes the FFI guards for crashes, panics
-#   and hangs; see crates/difftest/README.md). Failing inputs are uploaded as an artifact;
-#   copy them into fixtures/<unit>/ as regression cases once fixed.
+#   and hangs; see crates/difftest/README.md). Reproducers include failures and diagnostic
+#   notes, which remain nonfailures. Retain them even when the run succeeds; copy fixed
+#   cases into fixtures/<unit>/ as regressions.
 # Runs on GitHub's runners, like Run workflow in ci.yml.
 on:
   schedule:
@@ -66,10 +67,10 @@ jobs:
           echo "fuzz: $failed unit(s) failed"
           test "$failed" -eq 0
 
-      - name: Upload failing fuzz inputs
-        if: failure()
+      - name: Upload fuzz reproducers (failures and diagnostic notes)
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: fuzz-failures
-          path: bin/fuzz
+          path: bin/fuzz/*/fuzz*.json
           if-no-files-found: ignore
