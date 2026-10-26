@@ -103,6 +103,11 @@ fn items(d: &Dialog, i: usize) -> &[Sel] {
     crate::selection::items(&d.inputs, i)
 }
 
+/// The placements picked as components (a component clicked in the browser).
+fn occurrences(d: &Dialog) -> Vec<Vec<u64>> {
+    items(d, 0).iter().filter_map(|s| if let Sel::Occurrence { path } = s { Some(path.clone()) } else { None }).collect()
+}
+
 /// The centre of the picked bodies where they are before this move.
 fn bodies_center(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
     let st = match d.editing {
@@ -110,8 +115,13 @@ fn bodies_center(app: &SolveApp, d: &Dialog) -> Option<Vec3> {
         None => app.session.model.state(),
     };
     let mut bb: Option<(Vec3, Vec3)> = None;
-    for n in items(d, 0).body_names() {
-        let Some(b) = st.body(&n) else { continue };
+    let mut names = items(d, 0).body_names();
+    for path in occurrences(d) {
+        names.extend(app.session.occurrence_bodies(&path, true).unwrap_or_default());
+    }
+    let world = app.session.world_state();
+    for n in names {
+        let Some(b) = st.body(&n).or_else(|| world.body(&n)) else { continue };
         let x = b.mesh().bounds();
         bb = Some(match bb {
             None => (x.min, x.max),
@@ -164,8 +174,12 @@ fn deg(v: f64) -> String {
 pub fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
     let Kind::Move { mode, x, y, z, rx, ry, rz, angle } = &d.kind else { return Err("not a move".into()) };
     let bodies = items(d, 0).body_names();
-    if bodies.is_empty() {
+    let placements = occurrences(d);
+    if bodies.is_empty() && placements.is_empty() {
         return Err("select bodies first".into());
+    }
+    if !bodies.is_empty() && !placements.is_empty() {
+        return Err("pick bodies or components, not both".into());
     }
     let need_point = |i: usize, what: &str| sel_point(items(d, i).first()).ok_or(format!("select {what} first"));
     let num = |t: Vec3| json!([mm(t.x), mm(t.y), mm(t.z)]);
@@ -222,9 +236,47 @@ pub fn params(app: &SolveApp, d: &Dialog) -> Result<Value, String> {
         }
     }
     if d.extra.get("copy").and_then(Value::as_bool).unwrap_or(false) {
+        if !placements.is_empty() {
+            return Err("Create Copy needs bodies, not components".into());
+        }
         p["copy"] = json!(true);
     }
     Ok(p)
+}
+
+/// What OK runs: `solid.move` on bodies, or one `occurrence.move` per picked component, which
+/// moves that placement (its transform) and leaves the other placements of the component alone.
+pub fn commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, String> {
+    let p = params(app, d)?;
+    let placements = occurrences(d);
+    if placements.is_empty() {
+        return Ok(vec![("solid.move".into(), p)]);
+    }
+    let translate = match p.get("translate").and_then(Value::as_array) {
+        Some(t) if t.len() == 3 => {
+            let mut v = [0.0; 3];
+            for (slot, x) in v.iter_mut().zip(t) {
+                *slot = match x {
+                    Value::String(e) => len(app, e)?,
+                    other => other.as_f64().ok_or("not a number")?,
+                };
+            }
+            v
+        }
+        _ => [0.0; 3],
+    };
+    let mut out = Vec::new();
+    for path in placements {
+        let Some(id) = path.last() else { continue };
+        let mut q = json!({ "occurrence": id, "path": path, "space": "world", "translate": translate });
+        for k in ["axis", "angle"] {
+            if let Some(v) = p.get(k) {
+                q[k] = v.clone();
+            }
+        }
+        out.push(("occurrence.move".to_string(), q));
+    }
+    Ok(out)
 }
 
 /// An axis line: origin axes and sketch lines, or a straight body edge.

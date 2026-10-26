@@ -899,6 +899,18 @@ impl Dialog {
         // text it edits, not its path.)
         let preselection: &[Sel] = if matches!(d.kind, Kind::Text(_)) { &[] } else { &s.selection };
         for sel in preselection {
+            // A component picked in the browser is moved as a placement in Move only: other
+            // dialogs (Remove, Combine, joints) keep taking only what was picked.
+            if let Sel::Occurrence { .. } = sel
+                && matches!(d.kind, Kind::Move { .. })
+            {
+                if let Some(inp) = d.inputs.first_mut()
+                    && !inp.items.contains(sel)
+                {
+                    inp.items.push(sel.clone());
+                }
+                continue;
+            }
             let as_body = match sel {
                 Sel::Face { body, .. } | Sel::Edge { body, .. } | Sel::Vertex { body, .. } => Some(Sel::Body { name: body.to_string() }),
                 _ => None,
@@ -4020,7 +4032,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             };
             ("inspect.section", json!({"plane": plane, "offset": offset, "flip": flip, "hatch": hatch}))
         }
-        Kind::Move { .. } => return Ok(vec![("solid.move".into(), crate::dialogs_move::params(app, d)?)]),
+        Kind::Move { .. } => return crate::dialogs_move::commands(app, d),
         Kind::Hole { diameter, depth, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } => {
             need(0, if opts.multiple { "sketch points" } else { "a face position" })?;
             let ty = match *kind {
