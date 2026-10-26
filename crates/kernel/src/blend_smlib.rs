@@ -37,6 +37,12 @@ pub(crate) fn fillet_each(body: &Body, edges: &[Vec3], radii: &[f64]) -> Result<
     imp::blend(body, "fillet", Kind::Round, edges, radii)
 }
 
+/// A constant-radius round whose corners at `setbacks` (a point at each corner's vertex, and the
+/// distance its patch starts along each edge there) are set back ([`crate::fillet_setback`]).
+pub(crate) fn fillet_setback(body: &Body, edges: &[Vec3], radius: f64, setbacks: &[(Vec3, f64)]) -> Result<Body> {
+    imp::blend_setback(body, edges, &vec![radius; edges.len()], setbacks)
+}
+
 /// Curvature-continuous rounds with the setback of a round of `radius` ([`crate::fillet_g2`]).
 pub(crate) fn fillet_g2(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
     imp::blend(body, "G2 fillet", Kind::Curvature, edges, &vec![radius; edges.len()])
@@ -177,6 +183,42 @@ mod imp {
         };
         let tol = pick_tolerance(body);
         run(body, what, &picked.edges, |b| b.blend(kind, &picked.points, sizes, tol))
+    }
+
+    /// Rounds with corner setbacks: each corner point picks the body's nearest vertex (within
+    /// the pick tolerance), handed to SMLib at that vertex's own position.
+    pub(super) fn blend_setback(body: &Body, edges: &[Vec3], sizes: &[f64], setbacks: &[(Vec3, f64)]) -> Result<Body> {
+        let what = "fillet with corner setbacks";
+        body.require_brep(what)?;
+        sizes_ok(what, sizes)?;
+        if setbacks.is_empty() || setbacks.len() > solidcraft_smlib::MAX_POINTS {
+            return Err(KernelError::Invalid(format!("{what}: give 1…{} corners", solidcraft_smlib::MAX_POINTS)));
+        }
+        if setbacks.iter().any(|(p, d)| !p.is_finite() || !(d.is_finite() && *d > 1e-6 && *d < 1e6)) {
+            return Err(KernelError::Invalid(format!("{what}: each corner is a finite point with a positive, finite setback")));
+        }
+        let picked = resolve(body, edges)?;
+        let corners = corner_vertices(body, setbacks.iter().map(|(p, _)| *p))?;
+        let distances: Vec<f64> = setbacks.iter().map(|(_, d)| *d).collect();
+        let tol = pick_tolerance(body);
+        run(body, what, &picked.edges, |b| b.blend_setback(Blend::Round, &picked.points, sizes, &corners, &distances, tol))
+    }
+
+    /// The body's vertex nearest each point, within the pick tolerance: the ends of its edges.
+    fn corner_vertices(body: &Body, picks: impl Iterator<Item = Vec3>) -> Result<Vec<[f64; 3]>> {
+        let mesh = body.mesh(&crate::MeshTolerance::chord((body.size() * 2e-3).max(1e-3)))?;
+        let ends: Vec<Vec3> = mesh.edges.iter().flat_map(|l| l.first().into_iter().chain(l.last())).copied().collect();
+        let reach = pick_tolerance(body);
+        picks
+            .map(|p| {
+                ends.iter()
+                    .map(|v| (v.dist(p), *v))
+                    .filter(|(d, _)| *d <= reach)
+                    .min_by(|a, b| a.0.total_cmp(&b.0))
+                    .map(|(_, v)| [v.x, v.y, v.z])
+                    .ok_or_else(|| KernelError::Invalid(format!("no corner near the setback point ({:.3}, {:.3}, {:.3})", p.x, p.y, p.z)))
+            })
+            .collect()
     }
 
     pub(super) fn sides(body: &Body, edges: &[Vec3], d1: f64, side: crate::ChamferSide, flip: bool) -> Result<Body> {

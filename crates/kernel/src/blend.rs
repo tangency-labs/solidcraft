@@ -212,6 +212,19 @@ pub fn fillet(body: &Body, edges: &[Vec3], radius: f64) -> Result<Body> {
     crate::blend_smlib::fillet(body, edges, radius).and_then(|b| closed(body, b))
 }
 
+/// [`fillet`] with corner setbacks: each `(at, distance)` sets back the corner at the vertex
+/// nearest `at`, a vertex where every edge is rounded, so its patch starts `distance` along
+/// each of its edges from the vertex (one distance for all of a corner's edges: SMLib keeps one
+/// per corner). The rounds run whole up to their sections there, and the patch between them
+/// meets each face in a curve from one round's contact line to the next. The distance must reach
+/// past where the rounds would meet without it (past the radius at a square corner); a corner
+/// where some edge is not rounded is refused as not supported, a setback as long as an edge at
+/// its corner as too large.
+pub fn fillet_setback(body: &Body, edges: &[Vec3], radius: f64, setbacks: &[(Vec3, f64)]) -> Result<Body> {
+    body.require_brep("fillet")?;
+    crate::blend_smlib::fillet_setback(body, edges, radius, setbacks).and_then(|b| closed(body, b))
+}
+
 /// [`fillet`] whose corners where three blended edges meet are G2 patches. SMLib's fillet
 /// corners are a sphere or a Coons patch that meets the rounds tangentially, so this is refused
 /// rather than quietly given those corners; [`fillet`] (the default) is unchanged.
