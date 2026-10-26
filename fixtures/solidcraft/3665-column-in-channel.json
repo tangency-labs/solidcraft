@@ -7,6 +7,9 @@
   {
    "name": "column_in_channel",
    "note": "#3665 (fix 1): the column stands on the channel floor and fills the channel between the two pellet circles, flush with the outer wall, the boss and the housing's top.",
+   "fixes": [
+    "cone_parallel_line_midpoint"
+   ],
    "steps": [
     {
      "op": "cylinder",
@@ -154,6 +157,9 @@
   {
    "name": "column_beside_tangent_opening",
    "note": "Bug 2, found on the user's design after fix 1: first the r 3.04 opening at (0, 20) is cut through the floor. It touches the wall, so the floor face under the column pinches to a point there, at the column's own sharp corner. SolidCraft's fix was never shipped (tangency-labs/solidcraft#3992); its local test is column_beside_an_opening_tangent_to_the_wall_combines.",
+   "fixes": [
+    "cone_parallel_line_midpoint"
+   ],
    "steps": [
     {
      "op": "cylinder",
@@ -318,6 +324,9 @@
   {
    "name": "control_column_clear",
    "note": "control: the column of the opening case, 0.001 clear of the floor and both walls (radii 20.001 and 23.039, from z 2.801), stays a second lump.",
+   "fixes": [
+    "cone_parallel_line_midpoint"
+   ],
    "steps": [
     {
      "op": "cylinder",
@@ -482,6 +491,9 @@
   {
    "name": "control_column_overlapping",
    "note": "control: the column of the opening case, 0.001 into the floor and both walls (radii 19.999 and 23.041, from z 2.799). It adds the flush column plus the band r 19.999..20 above the boss (z 11..12.5); the rest of the overlap is housing already.",
+   "fixes": [
+    "cone_parallel_line_midpoint"
+   ],
    "steps": [
     {
      "op": "cylinder",

@@ -1235,6 +1235,7 @@ fn enable_fix(k: &mut Kernel, name: &str) -> Result<(), String> {
     let field = match name {
         "sweep_frame_on_planar_path_normal" => &mut k.fixes.sweep_frame_on_planar_path_normal,
         "cover_refuses_folded_continuation" => &mut k.fixes.cover_refuses_folded_continuation,
+        "cone_parallel_line_midpoint" => &mut k.fixes.cone_parallel_line_midpoint,
         _ => return Err(format!("unknown `fixes` entry `{name}`")),
     };
     *field = true;
