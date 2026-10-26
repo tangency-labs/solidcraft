@@ -603,6 +603,36 @@ fn parameters_header_drag_retains_offset_and_bounds_the_card() {
     }
 }
 
+#[test]
+fn parameters_are_translucent_only_by_their_own_preference_in_the_floating_layout() {
+    // The browser's own setting doesn't carry over: each card has its own.
+    for (layout, float, browser, expected) in [
+        (LayoutMode::Floating, true, false, Some(0.4)),
+        (LayoutMode::Floating, false, true, None),
+        (LayoutMode::Docked, true, true, None),
+        (LayoutMode::Docked, false, false, None),
+    ] {
+        let mut h = fixture();
+        h.call("ui.set", json!({"layout":layout}));
+        h.app.preferences.parameters_float = float;
+        h.app.preferences.browser_float = browser;
+        h.app.start("parameters.change");
+        h.frames(4);
+        assert_eq!(crate::params_dialog::translucency(&h.app), expected, "{layout:?} parameters {float} browser {browser}");
+        assert!(h.app.params.is_some() && scenario::rect_of("dialog:footer").is_some(), "{layout:?} {float}: still drawn");
+    }
+
+    // Preferences › Interface › Parameters: Opaque | Translucent sets it.
+    let mut h = fixture();
+    h.call("ui.set", json!({"layout":LayoutMode::Floating}));
+    h.call("ui.prefs", json!({"open":"Interface"}));
+    h.frames(2);
+    h.step(&json!({"click":{"handle":"dialog:Parameters:Translucent"}})).unwrap();
+    assert!(h.app.preferences.parameters_float);
+    h.step(&json!({"click":{"handle":"dialog:Parameters:Opaque"}})).unwrap();
+    assert!(!h.app.preferences.parameters_float);
+}
+
 fn physical_editor(h: &mut Harness) -> &mut crate::material_editor::Editor {
     let dialogs::Kind::Material { editor, .. } = &mut h.app.dialog.as_mut().unwrap().kind else { panic!("physical material panel") };
     editor

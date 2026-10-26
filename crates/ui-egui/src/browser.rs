@@ -808,8 +808,9 @@ const MIN_BROWSER_WIDTH: f32 = 170.0;
 const MAX_BROWSER_WIDTH: f32 = 620.0;
 /// How wide a grip the sidebar's right edge offers, counted inwards from the edge.
 const BROWSER_RAIL: f32 = 6.0;
-/// How opaque the floating browser's card is; the workspace shows through the rest.
-const BROWSER_FLOAT_ALPHA: f32 = 0.4;
+/// How opaque the floating browser's card is, and a Parameters window set to Translucent; the
+/// workspace shows through the rest.
+pub(crate) const BROWSER_FLOAT_ALPHA: f32 = 0.4;
 
 pub(crate) fn browser_width(remembered: f32) -> f32 {
     if remembered.is_finite() { remembered.clamp(MIN_BROWSER_WIDTH, MAX_BROWSER_WIDTH) } else { crate::prefs::DEFAULT_BROWSER_WIDTH }

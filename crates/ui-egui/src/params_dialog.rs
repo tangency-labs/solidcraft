@@ -177,6 +177,12 @@ pub(crate) fn cancel_on_escape(app: &mut SolveApp, ctx: &egui::Context) -> bool 
 }
 
 /// Draw the dialog when it is open. Called once per frame.
+/// The Parameters window's opacity when it is set to Translucent (Preferences › Interface) in the
+/// floating layout: the floating browser's; `None` keeps it solid.
+pub(crate) fn translucency(app: &SolveApp) -> Option<f32> {
+    (app.ui.layout == crate::shell::LayoutMode::Floating && app.preferences.parameters_float).then_some(crate::browser::BROWSER_FLOAT_ALPHA)
+}
+
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // Completions are offered only under a focused text box; gathering them evaluates every
     // parameter, so a design changing command after command (an agent building over MCP)
@@ -210,6 +216,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     )
     .wide()
     .body_rows(16.0)
+    .translucent(translucency(app))
     .reset_scroll(d.reset_scroll);
     let panel = if side == crate::frame::Side::Left {
         let available = palette.map_or(viewport.width(), |r| (r.left() - viewport.left() - crate::theme::Tokens::get().space_8).max(0.0));

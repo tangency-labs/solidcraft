@@ -86,6 +86,8 @@ pub(crate) struct Footer<'a> {
     /// Parent surface corners; the footer inherits only its two bottom corners.
     pub corners: Option<egui::CornerRadius>,
     pub secondary_left: bool,
+    /// The band's fill when not the usual footer colour (a translucent card's).
+    pub fill: Option<egui::Color32>,
 }
 
 pub(crate) fn footer(ui: &mut Ui, ok_label: &str, cancel_label: &str, ok_enabled: bool, options: Footer<'_>) -> Action {
@@ -100,7 +102,7 @@ pub(super) fn footer_with_left(
     options: Footer<'_>,
     left: impl FnOnce(&mut Ui),
 ) -> Action {
-    let Footer { apply: apply_label, status, selected, danger, confirm, corners, secondary_left } = options;
+    let Footer { apply: apply_label, status, selected, danger, confirm, corners, secondary_left, fill } = options;
     let t = Tokens::get();
     let ok_enabled = ok_enabled && !ok_label.is_empty();
     // The footer is a full-width band (the card has no margin of its own): its own fill, a rule
@@ -113,7 +115,7 @@ pub(super) fn footer_with_left(
     ui.painter().rect_filled(
         band,
         egui::CornerRadius { nw: 0, ne: 0, sw: corners.sw.saturating_sub(1), se: corners.se.saturating_sub(1) },
-        t.dialog_footer,
+        fill.unwrap_or(t.dialog_footer),
     );
     t.secondary_hline(ui.painter(), band.x_range(), band.top(), t.dialog_rule);
     scenario::publish_rect("dialog:footer", band);

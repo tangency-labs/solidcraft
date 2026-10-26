@@ -71,6 +71,14 @@ pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                             }
                         });
                     });
+                    ui_kit::row(ui, app.tr("prefs.parameters"), |ui| {
+                        ui.add_enabled_ui(app.ui.layout == crate::shell::LayoutMode::Floating, |ui| {
+                            let mut selected = usize::from(app.preferences.parameters_float);
+                            if ui_kit::segmented(ui, &mut selected, &[app.tr("prefs.opaque"), app.tr("prefs.translucent")], Default::default()) {
+                                app.preferences.parameters_float = selected == 1;
+                            }
+                        });
+                    });
                     ui_kit::text(ui, app.tr("prefs.layout_note"), ui_kit::Text::Hint("layout"));
                     ui_kit::LayoutPreview {
                         compact: app.ui.layout == crate::shell::LayoutMode::Docked,

@@ -73,6 +73,7 @@ pub(crate) struct Panel<'a> {
     frame: egui::Frame,
     width: f32,
     body_rows: Option<f32>,
+    alpha: f32,
     ok: &'a str,
     cancel: &'a str,
     reset_scroll: bool,
@@ -144,6 +145,7 @@ impl<'a> Panel<'a> {
             frame,
             width: Tokens::get().form_card_width,
             body_rows: None,
+            alpha: 1.0,
             ok: "OK",
             cancel: "Cancel",
             reset_scroll: false,
@@ -182,6 +184,13 @@ impl<'a> Panel<'a> {
         self
     }
 
+    /// Let the workspace show through the card's background and footer, at `alpha` opacity (as
+    /// the translucent browser does); its fields and text stay solid. `None` keeps it opaque.
+    pub(crate) fn translucent(mut self, alpha: Option<f32>) -> Self {
+        self.alpha = alpha.filter(|a| a.is_finite()).map_or(1.0, |a| a.clamp(0.0, 1.0));
+        self
+    }
+
     /// The painted anchor also drives dragging, including the shell's edge clearance.
     fn bounded_anchor(&self, ctx: &egui::Context) -> egui::Pos2 {
         let viewport = self.viewport;
@@ -206,7 +215,11 @@ impl<'a> Panel<'a> {
             crate::frame::Side::Right => anchor.x,
             crate::frame::Side::Left => anchor.x + self.width.min(self.viewport.width().max(0.0)),
         };
-        super::Container::new(ctx, super::Surface::Feature).tool_frame(self.frame, right >= self.viewport.right() - 0.5)
+        let mut frame = super::Container::new(ctx, super::Surface::Feature).tool_frame(self.frame, right >= self.viewport.right() - 0.5);
+        if self.alpha < 1.0 {
+            frame.fill = frame.fill.gamma_multiply(self.alpha);
+        }
+        frame
     }
 
     pub(crate) fn window(&self, ctx: &egui::Context) -> egui::Window<'a> {
@@ -337,7 +350,13 @@ impl<'a> Panel<'a> {
                 self.ok,
                 self.cancel,
                 valid && !state.applying,
-                super::Footer { apply: heading.apply_label, status: state.text.as_deref(), corners: Some(corners), ..Default::default() },
+                super::Footer {
+                    apply: heading.apply_label,
+                    status: state.text.as_deref(),
+                    corners: Some(corners),
+                    fill: (self.alpha < 1.0).then(|| t.dialog_footer.gamma_multiply(self.alpha)),
+                    ..Default::default()
+                },
             );
             if state.busy {
                 let rect = egui::Rect::from_min_size(
