@@ -48,6 +48,8 @@ mod lineage;
 pub mod metadata;
 pub use metadata::Metadata;
 pub mod motion;
+pub mod notes;
+pub use notes::Note;
 mod name_lookup;
 mod names;
 pub mod naming;

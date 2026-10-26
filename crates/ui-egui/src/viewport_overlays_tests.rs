@@ -2800,3 +2800,36 @@ fn a_section_card_shows_every_row_and_reads_like_its_pill() {
         }
     }
 }
+
+/// Notes (#1631): the callout is laid out in screen space at the projected anchor, so it
+/// faces the camera at any rotation, follows the anchor, and hidden notes are not drawn.
+#[test]
+fn note_callouts_are_screen_facing_and_follow_the_anchor() {
+    fn shot(h: &Harness) -> Vec<DrawnNote> {
+        let proj = display_proj(&h.app);
+        let mut out = Vec::new();
+        draw(&h.ctx, |ui| out = note_callouts(&h.app, ui.painter(), &proj));
+        out
+    }
+    let mut h = Harness::new();
+    h.app.run("note.add", json!({"anchor": [10.0, 5.0, 20.0], "text": "Check clearance here."})).unwrap();
+    h.settle();
+    let first = shot(&h);
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0].text, "Check clearance here.");
+    assert!(first[0].text_rect.width() > 0.0 && first[0].text_rect.height() > 0.0);
+
+    // Another rotation: the same text, drawn at a new place — the callout faces the screen.
+    h.call("ui.view", json!({"view": "front"}));
+    h.settle();
+    let second = shot(&h);
+    assert_eq!(second.len(), 1);
+    assert_eq!(second[0].text, first[0].text);
+    assert_ne!(second[0].anchor, first[0].anchor, "the anchor follows the model as it turns");
+
+    // A hidden note is kept but not drawn.
+    let id = h.app.session.doc.notes[0].id;
+    h.app.run("note.update", json!({"note": id, "hidden": true})).unwrap();
+    h.settle();
+    assert!(shot(&h).is_empty());
+}
