@@ -1,0 +1,11 @@
+{
+ "sources": [],
+ "what": "a modelled internal Tr20x4 thread in a d16 (D1 = d - P) bore through a 40x40x24 block",
+ "source": "analytic",
+ "method": "groove volume per turn 2 pi int r w(r) dr over the material it cuts (Pappus on the axial section; a screw motion), w(r) = P - flat - depth (tan a + tan b); six whole turns through the block, both ends free, so V = stock - 6 x that. Tolerance 0.01%: SMLib's exact screw sweep. ISO 2904 internal: the nut's crest flat 0.366 P at D1 = d - P = 16, its root at D4 = d + 2 ac = 20.5; the groove from the bore wall r 8 out to r 10.25, w(r) = P - 0.366 P - (r - 8) 2 tan15",
+ "body_count": 1,
+ "volume_mm3": 32097.519700251,
+ "tolerance": {
+  "rel": 0.0001
+ }
+}

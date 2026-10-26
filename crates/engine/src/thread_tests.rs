@@ -782,3 +782,118 @@ fn a_blind_tapped_hole_stops_clear_of_its_bottom() {
     let got = exact_volume(&s, "Block");
     assert!((got - want).abs() < before * 1e-4, "{got} vs {want}");
 }
+
+/// A form's groove width at radius r between its root and crest: the pitch less the tooth, the
+/// tooth `flat` wide at the crest radius `crest` and widening by tan a + tan b per unit of depth.
+fn form_turn(p: f64, flat: f64, crest: f64, a: f64, b: f64, r0: f64, r1: f64, internal: bool) -> f64 {
+    let t = a.to_radians().tan() + b.to_radians().tan();
+    let n = 2000;
+    let w = |r: f64| p - flat - (if internal { r - crest } else { crest - r }) * t;
+    (0..n).map(|i| r0 + (r1 - r0) * (i as f64 + 0.5) / n as f64).map(|r| 2.0 * PI * r * w(r) * (r1 - r0) / n as f64).sum()
+}
+
+/// Every standard form cut into a shaft of its major diameter over six turns, right- and
+/// left-handed: the groove takes 2π∫ r w(r) dr per turn (Pappus on the section, screw motion),
+/// w from the standard's profile, from its external minor diameter to the shaft's surface.
+#[test]
+fn every_form_cuts_its_standard_profile() {
+    let inch = 25.4;
+    // (form, designation, d, P, crest flat, flanks, external minor radius)
+    let tr_ac = 0.25;
+    let acme_a = 0.020 * inch;
+    let t3 = 3f64.to_radians().tan() + 30f64.to_radians().tan();
+    let t7 = 7f64.to_radians().tan() + 1.0;
+    let cases = [
+        ("trapezoidal", "Tr20x4", 20.0, 4.0, 2.0 * (1.0 - 15f64.to_radians().tan()), (15.0, 15.0), 10.0 - 2.0 - tr_ac),
+        ("acme", "3/4-6 ACME", 0.75 * inch, inch / 6.0, inch / 12.0 * (1.0 - 14.5f64.to_radians().tan()), (14.5, 14.5), 0.375 * inch - inch / 12.0 - acme_a / 2.0),
+        ("buttress", "S20x4", 20.0, 4.0, (4.0 - 3.0 * t3) / 2.0, (3.0, 30.0), 10.0 - 0.86777 * 4.0),
+        ("buttress_asme", "1.5-8 BUTT", 1.5 * inch, inch / 8.0, (inch / 8.0 - 0.6 * inch / 8.0 * t7) / 2.0, (7.0, 45.0), 0.75 * inch - 0.6 * inch / 8.0),
+    ];
+    for (form, designation, d, p, flat, (a, b), r3) in cases {
+        let mut volumes = Vec::new();
+        for hand in ["right", "left"] {
+            let mut s = Session::default();
+            let len = 6.0 * p;
+            run(&mut s, "solid.cylinder", json!({"radius": d / 2.0, "height": len, "body_name": "Shaft"}));
+            let before = exact_volume(&s, "Shaft");
+            let th = run(&mut s, "solid.thread", json!({"face": [d / 2.0, 0, len / 2.0], "form": form, "designation": designation, "hand": hand, "modeled": true}));
+            assert!(th["thread"].is_null(), "{th}");
+            let st = s.model.state();
+            assert!(st.body("Shaft").unwrap().body.validity().is_empty(), "{designation} {hand}");
+            let want = 6.0 * form_turn(p, flat, d / 2.0, a, b, r3, d / 2.0, false);
+            let got = before - exact_volume(&s, "Shaft");
+            assert!((got - want).abs() < want * 1e-4, "{designation} {hand}: removed {got}, the standard's profile {want}");
+            volumes.push(got);
+        }
+        assert!((volumes[0] - volumes[1]).abs() < volumes[0] * 1e-5, "{designation}: right {} left {}", volumes[0], volumes[1]);
+    }
+}
+
+/// A left-handed groove turns the other way: on the helix z = P θ / 2π (right-handed) the shaft
+/// is cut once a turn, on z = -P θ / 2π it is cut all along. Both: a right- and a left-handed
+/// groove, crossing.
+#[test]
+fn a_left_handed_thread_turns_the_other_way() {
+    let (d, p, len) = (10.0, 1.5, 9.0);
+    let r = (d / 2.0 + d / 2.0 - 5.0 * p * 3f64.sqrt() / 16.0) / 2.0;
+    let on = |s: &Session, sign: f64| -> usize {
+        let st = s.model.state();
+        let body = &st.body("Shaft").unwrap().body;
+        // Along each helix sense from every groove point on the z = 4.5 circle, count how often
+        // the line stays in the groove: a groove lies on one of them.
+        (0..36)
+            .filter(|i| {
+                let a0 = *i as f64 * 10f64.to_radians();
+                let z0 = 4.5;
+                let probe = |a: f64| Vec3::new(r * (a0 + a).cos(), r * (a0 + a).sin(), z0 + sign * p * a / std::f64::consts::TAU);
+                !body.contains(probe(0.0)) && (1..12).all(|k| !body.contains(probe(k as f64 * 0.5)))
+            })
+            .count()
+    };
+    let mut volumes = Vec::new();
+    for hand in ["right", "left", "both"] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": d / 2.0, "height": len, "body_name": "Shaft"}));
+        let before = exact_volume(&s, "Shaft");
+        run(&mut s, "solid.thread", json!({"face": [5, 0, 4.5], "designation": "M10", "hand": hand, "modeled": true}));
+        assert!(s.model.state().body("Shaft").unwrap().body.validity().is_empty(), "{hand}");
+        let (right, left) = (on(&s, 1.0), on(&s, -1.0));
+        match hand {
+            "right" => assert!(right > 0 && left == 0, "right: {right} {left}"),
+            "left" => assert!(left > 0 && right == 0, "left: {right} {left}"),
+            _ => assert!(left > 0 && right > 0, "both: {right} {left}"),
+        }
+        volumes.push(before - exact_volume(&s, "Shaft"));
+    }
+    let want = 6.0 * ext_turn(d, p, d / 2.0);
+    assert!((volumes[0] - want).abs() < want * 1e-4 && (volumes[1] - want).abs() < want * 1e-4, "{volumes:?} vs {want}");
+    // Crossing, the two grooves share some of their volume.
+    assert!(volumes[2] > want * 1.2 && volumes[2] < 2.0 * want, "{volumes:?}");
+}
+
+/// A trapezoidal nut: the groove from the drilled minor diameter D1 = d - P out to the
+/// internal root D4 = d + 2 ac (ISO 2904), 2π∫ r w(r) dr per turn.
+#[test]
+fn an_internal_trapezoidal_thread_cuts_out_to_its_root() {
+    let (d, p, ac) = (20.0, 4.0, 0.25);
+    let d1 = d - p;
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [-20, -20, 0], "length": 40, "width": 40, "height": 6.0 * p, "body_name": "Nut"}));
+    run(&mut s, "solid.cylinder", json!({"base": [0, 0, -1], "radius": d1 / 2.0, "height": 6.0 * p + 2.0, "body_name": "Bore"}));
+    run(&mut s, "solid.combine", json!({"target": "Nut", "tools": ["Bore"], "operation": "cut"}));
+    let before = exact_volume(&s, "Nut");
+    run(&mut s, "solid.thread", json!({"face": [d1 / 2.0, 0, 3.0 * p], "designation": "Tr20x4", "modeled": true}));
+    let flat = p / 2.0 * (1.0 - 15f64.to_radians().tan());
+    let want = 6.0 * form_turn(p, flat, d1 / 2.0, 15.0, 15.0, d1 / 2.0, d / 2.0 + ac, true);
+    let got = before - exact_volume(&s, "Nut");
+    assert!((got - want).abs() < want * 1e-4, "{got} vs {want}");
+}
+
+/// No current standard defines a square thread: it is refused, saying what to use.
+#[test]
+fn a_square_thread_is_refused() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 20}));
+    let e = s.execute("solid.thread", &json!({"face": [10, 0, 10], "form": "square", "designation": "20x4"})).err().map(|e| e.to_string());
+    assert!(e.unwrap_or_default().contains("no current standard defines a square thread"));
+}

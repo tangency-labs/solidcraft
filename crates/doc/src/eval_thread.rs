@@ -1,7 +1,8 @@
-//! Threads: the ISO metric sizes, the cosmetic thread on a cylindrical face, and the modelled
+//! Threads: the cosmetic thread on a cylindrical face, and the modelled
 //! thread's groove cut along a helix.
 
 use super::*;
+use crate::thread_forms::{SteepFlank, ThreadForm, ThreadHand, ThreadTip};
 
 /// A cosmetic thread: on which cylinder, its size, and the threaded part of the axis.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -10,8 +11,6 @@ pub struct ThreadInfo {
     pub body: String,
     pub designation: String,
     pub major_diameter: f64,
-    /// Radius of the actual cylindrical face when the cosmetic thread is evaluated.
-    pub radius: f64,
     pub pitch: f64,
     pub internal: bool,
     pub axis_point: Vec3,
@@ -19,76 +18,36 @@ pub struct ThreadInfo {
     /// Threaded part along the axis from `axis_point`.
     pub start: f64,
     pub end: f64,
+    #[serde(default)]
+    pub form: ThreadForm,
+    #[serde(default)]
+    pub hand: ThreadHand,
+    #[serde(default = "crate::thread_forms::one_start")]
+    pub starts: u32,
 }
-
-/// ISO metric coarse threads: (nominal diameter, pitch).
-const ISO_COARSE: [(f64, f64); 22] = [
-    (1.6, 0.35),
-    (2.0, 0.4),
-    (2.5, 0.45),
-    (3.0, 0.5),
-    (4.0, 0.7),
-    (5.0, 0.8),
-    (6.0, 1.0),
-    (8.0, 1.25),
-    (10.0, 1.5),
-    (12.0, 1.75),
-    (14.0, 2.0),
-    (16.0, 2.0),
-    (18.0, 2.5),
-    (20.0, 2.5),
-    (22.0, 2.5),
-    (24.0, 3.0),
-    (27.0, 3.0),
-    (30.0, 3.5),
-    (36.0, 4.0),
-    (42.0, 4.5),
-    (48.0, 5.0),
-    (56.0, 5.5),
-];
 
 /// Nominal diameters and coarse pitches (mm) used for automatic ISO metric thread sizing.
 /// Other diameter/pitch pairs can be supplied as explicit designations.
 pub fn metric_thread_sizes() -> &'static [(f64, f64)] {
-    &ISO_COARSE
+    &crate::thread_forms::ISO_COARSE
 }
 
 /// "M8" or "M8x1" → (nominal diameter, pitch).
 pub fn parse_metric_thread(s: &str) -> Option<(f64, f64)> {
-    let t = s.trim().to_ascii_uppercase();
-    let body = t.strip_prefix('M')?;
-    let (d, p) = match body.split_once(['X', '×']) {
-        Some((d, p)) => (d.trim().parse::<f64>().ok()?, Some(p.trim().parse::<f64>().ok()?)),
-        None => (body.trim().parse::<f64>().ok()?, None),
-    };
-    let pitch = match p {
-        Some(p) => p,
-        None => ISO_COARSE.iter().find(|(n, _)| (n - d).abs() < 1e-9)?.1,
-    };
-    (d.is_finite() && pitch.is_finite() && d > 0.0 && pitch > 0.0 && pitch < d).then_some((d, pitch))
-}
-
-/// The metric thread a cylinder of this diameter takes: a shaft is the major diameter, a hole
-/// the tap drill (major − pitch).
-fn thread_for(diameter: f64, internal: bool) -> Option<(f64, f64)> {
-    ISO_COARSE
-        .iter()
-        .map(|&(n, p)| (n, p, if internal { n - p } else { n }))
-        .min_by(|a, b| (a.2 - diameter).abs().total_cmp(&(b.2 - diameter).abs()))
-        .filter(|(_, _, want)| (want - diameter).abs() <= 0.15 * diameter)
-        .map(|(n, p, _)| (n, p))
-}
-
-pub(crate) fn format_thread(d: f64, p: f64) -> String {
-    let coarse = ISO_COARSE.iter().any(|(n, q)| (n - d).abs() < 1e-9 && (q - p).abs() < 1e-9);
-    let num = |x: f64| if (x - x.round()).abs() < 1e-9 { format!("{}", x.round()) } else { format!("{x}") };
-    if coarse { format!("M{}", num(d)) } else { format!("M{}x{}", num(d), num(p)) }
+    ThreadForm::Metric.parse(s, 1).ok().filter(|z| (z.lead - z.pitch).abs() < 1e-12).map(|z| (z.major, z.pitch))
 }
 
 /// The automatic ISO metric designation for a cylindrical face, using the same fit check as
 /// a thread feature without an explicit size. This query does not change the model.
 pub fn suggested_thread(st: &ModelState, p: Vec3) -> Result<String> {
-    thread_on(st, 0, p, &ThreadAsk::default()).map(|t| t.info.designation)
+    suggested_thread_in(st, p, ThreadForm::Metric)
+}
+
+/// The standard designation of `form` that fits the cylindrical face at `p` (a shaft its major
+/// diameter, a hole its drill), with the same fit check as a thread feature without an explicit
+/// size. This query does not change the model.
+pub fn suggested_thread_in(st: &ModelState, p: Vec3, form: ThreadForm) -> Result<String> {
+    thread_on(st, 0, p, &ThreadAsk { form: Some(form), ..Default::default() }).map(|t| t.info.designation)
 }
 
 /// How far a thread runs along its face.
@@ -108,7 +67,13 @@ pub(super) enum Extent {
 /// What a thread feature asks for: its size, how far it runs and from which end.
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct ThreadAsk<'a> {
+    /// The form; `None`: the one `designation`'s prefix names, else metric.
+    pub form: Option<ThreadForm>,
     pub designation: Option<&'a str>,
+    pub hand: ThreadHand,
+    /// Starts; 0 is taken as 1.
+    pub starts: u32,
+    pub steep: SteepFlank,
     pub extent: Extent,
     /// A point near the end of the face the thread starts at.
     pub from: Option<Vec3>,
@@ -135,6 +100,7 @@ pub(super) struct ThreadOn {
     cyl: kernel::CylinderFace,
     /// How the thread's start and end meet the face (modelled threads only).
     ends: [End; 2],
+    steep: SteepFlank,
 }
 
 /// The free-end test of a face's two ends (`side` 0 at its start, 1 at its end), each made
@@ -180,33 +146,50 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
         .ok_or_else(|| DocError::Invalid("no cylindrical face there to thread".into()))?;
     let mb = st.bodies.get(bi).ok_or_else(|| DocError::Invalid("threaded body".into()))?;
     let dia = cyl.radius * 2.0;
-    let (major, pitch) = match ask.designation {
-        Some(s) => parse_metric_thread(s).ok_or_else(|| DocError::Invalid(format!("unknown thread `{s}` (ISO metric, like M8 or M8x1)")))?,
-        None => thread_for(dia, cyl.internal).ok_or_else(|| DocError::Invalid(format!("no metric thread fits a {dia:.2} mm cylinder")))?,
+    let form = match (ask.form, ask.designation.and_then(ThreadForm::of_designation)) {
+        (Some(f), _) | (None, Some(f)) => f,
+        (None, None) => ThreadForm::Metric,
     };
-    let (major, pitch) = match &tapped_size {
-        Some(size) => (size.major_diameter, size.pitch),
-        None => match designation {
-            Some(s) => parse_metric_thread(s).ok_or_else(|| DocError::Invalid(format!("unknown thread `{s}` (ISO metric, like M8 or M8x1)")))?,
-            None => thread_for(dia, cyl.internal).ok_or_else(|| DocError::Invalid(format!("no metric thread fits a {dia:.2} mm cylinder")))?,
-        },
+    if let Some(why) = form.refused() {
+        return Err(DocError::Invalid(why.into()));
+    }
+    let starts = ask.starts.max(1);
+    if starts > 8 {
+        return Err(DocError::Invalid("a thread has 1 to 8 starts".into()));
+    }
+    let size = match ask.designation {
+        Some(s) => form.parse(s, starts).map_err(DocError::Invalid)?,
+        None => {
+            let (d, p) = form.fit(dia, cyl.internal).ok_or_else(|| {
+                DocError::Invalid(if form.sizes().is_empty() {
+                    format!("{} threads have no size table: give the designation ({})", form.name(), form.format(50.8, 25.4 / 8.0, 25.4 / 8.0))
+                } else {
+                    format!("no {} thread fits a {dia:.2} mm cylinder", form.name())
+                })
+            })?;
+            crate::thread_forms::ThreadSize { form, major: d, pitch: p, lead: p * f64::from(starts) }
+        }
     };
-    let name = tapped_size.as_ref().map(|s| s.designation.clone()).unwrap_or_else(|| format_thread(major, pitch));
-    let fits = if let Some(size) = tapped_size.as_ref().filter(|s| s.family != crate::TappedThreadFamily::Metric) {
-        // Fit the recommended physical drill, without borrowing an ISO minor-diameter rule.
-        cyl.internal && (size.tap_drill - dia).abs() < 0.15 * major
-    } else if cyl.internal {
-        (major - pitch * 1.0825 - dia).abs() < 0.2 * major || (major - pitch - dia).abs() < 0.15 * major
+    let (major, pitch) = (size.major, size.pitch);
+    let designation = form.format(major, pitch, size.lead);
+    let minor = 2.0 * form.groove(major, pitch, true).crest_r;
+    let fits = if cyl.internal {
+        (minor - dia).abs() < 0.2 * major || (form.drill(major, pitch) - dia).abs() < 0.15 * major
     } else {
-        (major - dia).abs() < 0.15 * major || (turned && dia > major)
+        (major - dia).abs() < 0.15 * major
     };
     if !fits {
-        return Err(DocError::Invalid(format!("an {} thread does not fit a {dia:.2} mm {}", name, if cyl.internal { "hole" } else { "shaft" })));
+        return Err(DocError::Invalid(format!("an {designation} thread does not fit a {dia:.2} mm {}", if cyl.internal { "hole" } else { "shaft" })));
     }
-    // The radii the groove cuts: from the minor diameter (ISO 68-1: 5H/8 under the major) to
-    // the major, and to the face itself where it lies outside that.
-    let minor_r = major / 2.0 - 5.0 * pitch * 3f64.sqrt() / 16.0;
-    let band = (cyl.radius.min(minor_r), cyl.radius.max(major / 2.0));
+    // The radii the groove cuts: from the external thread's minor diameter (a nut's: its minor)
+    // to the major (a nut's root), and to the face itself where it lies outside that.
+    let (r_lo, r_hi) = if cyl.internal {
+        let g = form.groove(major, pitch, true);
+        (g.crest_r, g.root_r)
+    } else {
+        (form.groove(major, pitch, false).root_r, major / 2.0)
+    };
+    let band = (cyl.radius.min(r_lo), cyl.radius.max(r_hi));
     let mut ends = FaceEnds { body: &mb.body, cyl: &cyl, band, pitch, free: [None; 2] };
     let (lo, hi) = (cyl.start, cyl.end);
     let along = |q: Vec3| (q - cyl.axis_point).dot(cyl.axis);
@@ -260,17 +243,19 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
     let info = ThreadInfo {
         feature,
         body: mb.name.clone(),
-        designation: format_thread(major, pitch),
+        designation,
         major_diameter: major,
-        radius: cyl.radius,
         pitch,
         internal: cyl.internal,
         axis_point: cyl.axis_point,
         axis: cyl.axis,
         start: a,
         end: b,
+        form,
+        hand: ask.hand,
+        starts,
     };
-    Ok(ThreadOn { info, cyl, ends })
+    Ok(ThreadOn { info, cyl, ends, steep: ask.steep })
 }
 
 /// The end of the face (0: its start, 1: its end) a thread of limited length starts at: the end
@@ -302,141 +287,198 @@ fn start_side(ends: &mut FaceEnds, from: Option<f64>, at: f64) -> Result<usize> 
     }
 }
 
-/// A thread's groove as a screw sweep: its trapezoid `section` in `plane` (an axial plane
-/// through `base`), carried `turns` turns about `axis` through `base`, rising `pitch` per turn.
+/// A thread's groove as a screw sweep: its `section` in `plane` (an axial plane through `base`),
+/// carried `turns` turns about `axis` through `base`, rising `pitch` per turn (negative: a
+/// left-handed groove).
 struct GrooveShape {
     plane: Plane,
-    section: [Vec2; 4],
+    section: Vec<Vec2>,
     base: Vec3,
     axis: Vec3,
     pitch: f64,
     turns: f64,
 }
 
-/// The helical space between the teeth of a modelled ISO metric thread (ISO 68-1 basic
-/// profile, 60° flanks): cut from the shaft (external) or the hole wall (internal), running from
-/// `start` to `end` along the axis. `radius` is the face's own radius, `face` its extent along
-/// the axis and `ends` how the thread's two ends meet it.
-fn thread_groove_shape(t: &ThreadInfo, radius: f64, face: (f64, f64), ends: [End; 2]) -> Result<GrooveShape> {
-    let (p, d) = (t.pitch, t.major_diameter);
-    let h = p * 3f64.sqrt() / 2.0;
-    let slope = (std::f64::consts::PI / 6.0).tan();
+/// The helical spaces between the teeth of a modelled thread of the form's profile: cut from
+/// the shaft (external) or the hole wall (internal), running from `start` to `end` along the
+/// axis, one groove per start and hand. `radius` is the face's own radius, `face` its extent
+/// along the axis and `ends` how the thread's two ends meet it.
+fn thread_grooves(t: &ThreadInfo, radius: f64, face: (f64, f64), ends: [End; 2], steep: SteepFlank) -> Result<Vec<GrooveShape>> {
+    let (p, d, form) = (t.pitch, t.major_diameter, t.form);
+    let lead = p * f64::from(t.starts.max(1));
     let len = t.end - t.start;
     if !(p > 1e-3 && len > 1e-6) {
         return Err(DocError::Invalid("thread too short".into()));
     }
-    if len / p > 190.0 {
-        return Err(DocError::Invalid(format!("a modelled thread is limited to 190 turns ({:.0} mm at this pitch); use a cosmetic one", 190.0 * p)));
+    if len / lead > 190.0 {
+        return Err(DocError::Invalid(format!("a modelled thread is limited to 190 turns ({:.0} mm at this lead); use a cosmetic one", 190.0 * lead)));
     }
-    // How deep the groove cuts into the material: from the hole wall out to the major diameter,
-    // or from the shaft's surface in to the root. Next to nothing (a hole as wide as the thread,
-    // #995) is refused: the faceted cut would leave the face faceted and unthreaded.
-    let basic = 5.0 * h / 8.0;
-    let depth = if t.internal { d / 2.0 - radius } else { radius - (d / 2.0 - basic) };
+    let mut g = form.groove(d, p, t.internal);
+    if steep == SteepFlank::Start {
+        std::mem::swap(&mut g.flank_lo, &mut g.flank_hi);
+    }
+    let alt = |dia: f64| form.fit(dia, t.internal).map(|(n, q)| form.format(n, q, q)).filter(|a| *a != t.designation);
+    // How deep the groove cuts into the material: from the hole wall out to the internal
+    // thread's root, or from the shaft's surface in to the external thread's root. Next to
+    // nothing (a hole as wide as the thread, #995) is refused: the cut would leave the face
+    // unthreaded.
+    let basic = g.basic_depth;
+    let depth = if t.internal { g.root_r - radius } else { radius - g.root_r };
+    let drill = show_mm(form.drill(d, p));
     if !(depth >= basic / 4.0) {
         let (m, dia) = (&t.designation, 2.0 * radius);
         let cut = format!("it would cut {:.2} mm of the thread's {basic:.2} mm depth", depth.max(0.0));
-        let alt = thread_for(dia, t.internal).map(|(n, q)| format_thread(n, q)).filter(|a| a != m);
         let shown = show_mm(dia);
         return Err(DocError::Invalid(if t.internal {
-            let alt = alt.map(|a| format!(", or thread this hole {a}")).unwrap_or_default();
-            format!("this {shown} mm hole is too wide for a modelled {m} thread: {cut}; drill {} mm for {m}{alt}", show_mm(d - p))
+            let alt = alt(dia).map(|a| format!(", or thread this hole {a}")).unwrap_or_default();
+            format!("this {shown} mm hole is too wide for a modelled {m} thread: {cut}; drill {drill} mm for {m}{alt}")
         } else {
-            let alt = alt.map(|a| format!(", or thread this shaft {a}")).unwrap_or_default();
+            let alt = alt(dia).map(|a| format!(", or thread this shaft {a}")).unwrap_or_default();
             format!("this {shown} mm shaft is too thin for a modelled {m} thread: {cut}; make the shaft {} mm for {m}{alt}", show_mm(d))
         }));
     }
-    // (radius, half width of the groove) at its two ends: a trapezoid in the axial plane.
-    let (r0, w0, r1, w1) = if t.internal {
-        // From inside the hole wall out to the major diameter, where the bolt's crest sits
-        // (the root flat is P/8 wide).
-        let r_in = radius.min(d / 2.0 - 5.0 * h / 8.0) - 0.1 * p;
-        (r_in, (p / 8.0 + 2.0 * (d / 2.0 - r_in) * slope) / 2.0, d / 2.0, p / 16.0)
-    } else {
-        // From the root (5H/8 under the major diameter, flat P/4 wide) out past the surface.
-        let r_root = d / 2.0 - 5.0 * h / 8.0;
-        let r_out = radius.max(d / 2.0) + 0.05 * p;
-        (r_root, p / 8.0, r_out, (p / 4.0 + 2.0 * (r_out - r_root) * slope) / 2.0)
-    };
-    if w0.max(w1) * 2.0 >= p * 0.98 {
+    // The section's radial span: from the root out past the surface (external), or from inside
+    // the hole wall out to the root (internal), so the cut leaves no skin.
+    let (r0, r1) = if t.internal { (radius.min(g.crest_r) - 0.1 * p, g.root_r) } else { (g.root_r, radius.max(d / 2.0) + 0.05 * p) };
+    let wide = if t.internal { r0 } else { r1 };
+    if g.width(p, wide) >= p * 0.98 {
         // The groove would be wider than a pitch: the face is far inside the thread (a hole
         // narrower than its minor diameter, a shaft thicker than its major one, #2688).
         let (m, dia) = (&t.designation, 2.0 * radius);
-        let alt = thread_for(dia, t.internal).map(|(n, q)| format_thread(n, q)).filter(|a| a != m);
         let shown = show_mm(dia);
         return Err(DocError::Invalid(if t.internal {
-            let alt = alt.map(|a| format!(", or thread this hole {a}")).unwrap_or_default();
-            format!(
-                "this {shown} mm hole is too narrow for a modelled {m} thread (its teeth would fill the hole); drill {} mm for {m}{alt}",
-                show_mm(d - p)
-            )
+            let alt = alt(dia).map(|a| format!(", or thread this hole {a}")).unwrap_or_default();
+            format!("this {shown} mm hole is too narrow for a modelled {m} thread (its teeth would fill the hole); drill {drill} mm for {m}{alt}")
         } else {
-            let alt = alt.map(|a| format!(", or thread this shaft {a}")).unwrap_or_default();
+            let alt = alt(dia).map(|a| format!(", or thread this shaft {a}")).unwrap_or_default();
             format!("this {shown} mm shaft is too thick for a modelled {m} thread; make the shaft {} mm for {m}{alt}", show_mm(d))
         }));
     }
-    let k = t.axis;
-    let u = k.cross(if k.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) });
-    let u = u.normalized().ok_or_else(|| DocError::Invalid("thread axis".into()))?;
+    let (lo0, hi0) = g.extents(p, r0);
+    let (lo1, hi1) = g.extents(p, r1);
+    let section = vec![Vec2::new(r0, -lo0), Vec2::new(r1, -lo1), Vec2::new(r1, hi1), Vec2::new(r0, hi0)];
+    if !(r0.is_finite() && r1.is_finite() && r0 > 0.0) {
+        return Err(DocError::Invalid("thread dimensions are out of range".into()));
+    }
     // Past a free end of the face the groove runs out into the air, a pitch beyond it. Before
-    // a closed one it stops with its widest part (half `w` either side of its centre) clear of
-    // the face's end, so it never cuts into the shoulder there; inside the face it stops square
-    // at the threaded length's end.
-    let w = w0.max(w1);
+    // a closed one it stops with its section clear of the face's end (its centre as far inside
+    // as the section reaches that way), so it never cuts into the shoulder there; inside the
+    // face it stops square at the threaded length's end.
+    let (w_lo, w_hi) = (lo0.max(lo1), hi0.max(hi1));
     let s0 = match ends[0] {
         End::Free => t.start - p,
-        End::Closed => t.start.max(face.0 + w),
+        End::Closed => t.start.max(face.0 + w_lo),
         End::Inside => t.start,
     };
     let s1 = match ends[1] {
         End::Free => t.end + p,
-        End::Closed => t.end.min(face.1 - w),
+        End::Closed => t.end.min(face.1 - w_hi),
         End::Inside => t.end,
     };
     if !(s1 - s0 > p * 1e-3) {
         return Err(DocError::Invalid(format!(
             "the thread is too short to model between the shoulders: its groove needs {} mm clear of each",
-            show_mm(w)
+            show_mm(w_lo.max(w_hi))
         )));
     }
+    let k = *t.axis;
+    let u = k.cross(if k.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) });
+    let u = u.normalized().ok_or_else(|| DocError::Invalid("thread axis".into()))?;
     let base = t.axis_point + k * s0;
-    let plane = Plane { origin: base, x: u, y: *k };
-    let section = [Vec2::new(r0, -w0), Vec2::new(r1, -w1), Vec2::new(r1, w1), Vec2::new(r0, w0)];
-    if !(r0.is_finite() && r1.is_finite()) {
-        return Err(DocError::Invalid("thread dimensions are too large".into()));
+    let hands: &[f64] = match t.hand {
+        ThreadHand::Right => &[1.0],
+        ThreadHand::Left => &[-1.0],
+        ThreadHand::Both => &[1.0, -1.0],
+    };
+    let n = t.starts.max(1);
+    let mut out = Vec::new();
+    for &h in hands {
+        for j in 0..n {
+            // Start j is the first turned a j-th of a turn on: the same helix a j-th of the
+            // lead along.
+            let a = std::f64::consts::TAU * f64::from(j) / f64::from(n);
+            let x = u * a.cos() + k.cross(u) * a.sin();
+            // A left-handed groove: turning the same way about the reversed axis while rising
+            // along it (the screw motion about −k rising −lead per turn).
+            let (axis, pitch) = if h > 0.0 { (k, lead) } else { (-k, -lead) };
+            out.push(GrooveShape { plane: Plane { origin: base, x, y: k }, section: section.clone(), base, axis, pitch, turns: (s1 - s0) / lead });
+        }
     }
-    Ok(GrooveShape { plane, section, base, axis: *k, pitch: p, turns: (s1 - s0) / p })
+    Ok(out)
 }
 
 /// Evaluate a thread feature: a cosmetic thread is listed in the model's threads, a modelled
 /// one cut into its body.
 pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
-    let FeatureKind::Thread { face, designation, length, modeled, from, up_to } = &f.kind else {
+    let FeatureKind::Thread {
+        face,
+        designation,
+        length,
+        modeled,
+        from,
+        up_to,
+        form,
+        hand,
+        starts,
+        ease_in,
+        ease_out,
+        tip,
+        chamfer_angle: _,
+        chamfer_depth: _,
+        steep_flank,
+    } = &f.kind
+    else {
         return Err(DocError::Invalid("not a thread".into()));
     };
+    if ease_in.is_some() || ease_out.is_some() {
+        return Err(DocError::Invalid("a thread runout (ease in, ease out) is not built yet".into()));
+    }
+    if *tip != ThreadTip::None {
+        return Err(DocError::Invalid("a chamfered thread tip is not built yet".into()));
+    }
+    if *starts > 1 {
+        return Err(DocError::Invalid("a thread with several starts is not built yet".into()));
+    }
     let extent = match (length, up_to) {
         (Some(e), _) => Extent::Length(val(vals, e, Kind::Length)?),
         (None, Some(crate::ThreadLimit::Face(q))) => Extent::UpToPoint(q.0),
         (None, Some(crate::ThreadLimit::Plane(pl))) => Extent::UpTo(doc.resolve_plane_in(vals, pl, 0, Some(st))?),
         (None, None) => Extent::Full,
     };
-    let ask = ThreadAsk { designation: designation.as_deref(), extent, from: from.map(|q| q.0), modeled: *modeled };
-    let ThreadOn { info: t, cyl, ends } = thread_on(st, f.id, face.0, &ask)?;
+    // A form left at its default is the one the designation names (`Tr20x4`).
+    let form = (*form != ThreadForm::Metric).then_some(*form);
+    let ask = ThreadAsk {
+        form,
+        designation: designation.as_deref(),
+        hand: *hand,
+        starts: *starts,
+        steep: *steep_flank,
+        extent,
+        from: from.map(|q| q.0),
+        modeled: *modeled,
+    };
+    let ThreadOn { info: t, cyl, ends, steep } = thread_on(st, f.id, face.0, &ask)?;
     if !*modeled {
         st.threads.push(t);
         return Ok(());
     }
     let i = st.bodies.iter().position(|b| b.name == t.body).ok_or_else(|| DocError::Invalid("threaded body".into()))?;
     let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
-    // The exact groove: SMLib's screw sweep, cut by a B-rep boolean.
-    let g = thread_groove_shape(&t, cyl.radius, (cyl.start, cyl.end), ends)?;
-    let section = Region2 { outer: solidcraft_geom::Loop2::polygon(&g.section), holes: Vec::new() };
-    let groove = kernel::sweep_helix(&g.plane, &section, g.base, g.axis, g.pitch, g.turns)?;
-    let (nb, groove_faces) = (kernel::boolean(&input.body, &groove, BoolOp::Cut)?, groove.face_count());
+    // The exact grooves: SMLib's screw sweeps, cut by one B-rep boolean.
+    let mut grooves = Vec::new();
+    for g in thread_grooves(&t, cyl.radius, (cyl.start, cyl.end), ends, steep)? {
+        let section = Region2 { outer: solidcraft_geom::Loop2::polygon(&g.section), holes: Vec::new() };
+        grooves.push(kernel::sweep_helix(&g.plane, &section, g.base, g.axis, g.pitch, g.turns)?);
+    }
+    let tool = match grooves.as_slice() {
+        [one] => one.clone(),
+        many => kernel::union_all(&many.iter().collect::<Vec<_>>())?,
+    };
+    let (nb, groove_faces) = (kernel::boolean(&mb.body, &tool, BoolOp::Cut)?, tool.face_count());
     let nb = nb.ok_or_else(|| DocError::Invalid("the thread removed everything".into()))?;
     // The groove's faces have no role to name them by.
     let groove = crate::lineage::Lineage::unnamed_faces(groove_faces);
-    let lineage = input.lineage.and_then(|l| crate::lineage::Lineage::step(&nb, &[&l, &groove]));
+    let lineage = mb.traced().lineage.and_then(|l| crate::lineage::Lineage::step(&nb, &[&l, &groove]));
     let nb = Traced { body: nb, lineage };
     if let Some(slot) = st.bodies.get_mut(i) {
         *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
