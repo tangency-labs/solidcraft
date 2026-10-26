@@ -3657,7 +3657,12 @@ fn an_exact_pick_of_a_region_cut_by_the_face_outline_takes_only_that_region() {
         let state = s2.model.state();
         let Some(solidcraft_doc::FeatureKind::Extrude { profiles, .. }) = s2.doc.features.last().map(|f| &f.kind) else { panic!("an extrude") };
         let count = solidcraft_doc::profile_selection_indices(state.sketch(id).unwrap(), profiles).unwrap().len();
-        let v = state.bodies.iter().filter(|b| b.name.starts_with("Pad")).map(|b| b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-2)).unwrap().measure().volume).sum();
+        let v = state
+            .bodies
+            .iter()
+            .filter(|b| b.name.starts_with("Pad"))
+            .map(|b| b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-2)).unwrap().measure().volume)
+            .sum();
         (v, count)
     };
     for (profiles, want, n) in [

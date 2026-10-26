@@ -718,7 +718,8 @@ mod tests {
     }
 
     fn volumes(s: &Session) -> BTreeMap<String, i64> {
-        s.world_state().unwrap()
+        s.world_state()
+            .unwrap()
             .bodies
             .iter()
             .map(|b| (b.name.clone(), (solidcraft_kernel::measure(&b.body).unwrap().volume * 1000.0).round() as i64))
@@ -726,7 +727,8 @@ mod tests {
     }
 
     fn centroids(s: &Session) -> BTreeMap<String, [i64; 3]> {
-        s.world_state().unwrap()
+        s.world_state()
+            .unwrap()
             .bodies
             .iter()
             .map(|b| {
@@ -740,7 +742,8 @@ mod tests {
     /// coarser than what a link's STEP round trip changes in a round face.
     fn shapes(s: &Session) -> Vec<[i64; 4]> {
         let mut out: Vec<[i64; 4]> = s
-            .world_state().unwrap()
+            .world_state()
+            .unwrap()
             .bodies
             .iter()
             .map(|b| {

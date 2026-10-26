@@ -1962,13 +1962,7 @@ impl Model {
                 Err(e) => Some(e.to_string().trim_start_matches("the operation failed: ").to_string()),
             };
             if !self.no_cache {
-                let e = CachedEval {
-                    error: error.clone(),
-                    warning: warning.clone(),
-                    ms,
-                    bytes: state.added_bytes(&before),
-                    state: state.clone(),
-                };
+                let e = CachedEval { error: error.clone(), warning: warning.clone(), ms, bytes: state.added_bytes(&before), state: state.clone() };
                 if let Some(k) = &self.kept.0 {
                     k.put(key, &e);
                 }
@@ -2165,9 +2159,9 @@ pub fn draft_corner_options(ss: &SolvedSketch, sel: &ProfileSel, distance: f64, 
 /// line nor an arc), then the tangent rule, with a note in `notes` saying where and why.
 fn draft_corner_for(ss: &SolvedSketch, r: &Region2, distance: f64, taper: f64, notes: &mut Vec<String>) -> Result<kernel::DraftCorner> {
     let reports = kernel::draft_corners(r, distance, taper)?;
-    let inexact = reports.iter().find(|c| {
-        c.options.iter().any(|o| o.rule == kernel::DraftCorner::PreserveCurvature && o.fill == Err(kernel::CornerRefusal::NotExact))
-    });
+    let inexact = reports
+        .iter()
+        .find(|c| c.options.iter().any(|o| o.rule == kernel::DraftCorner::PreserveCurvature && o.fill == Err(kernel::CornerRefusal::NotExact)));
     Ok(match inexact {
         Some(c) => {
             notes.push(format!(
@@ -4394,7 +4388,8 @@ fn feature_tools_with_constructor(
                 let tools: Vec<Traced> = regions
                     .iter()
                     .map(|r| {
-                        let roles = crate::lineage::ProfileRoles { sketch: Some(&ss), region: Some(r), caps: caps.clone(), thin: thin_roles.as_ref() };
+                        let roles =
+                            crate::lineage::ProfileRoles { sketch: Some(&ss), region: Some(r), caps: caps.clone(), thin: thin_roles.as_ref() };
                         let corner = match extent.corner {
                             Some(c) => c,
                             None => draft_corner_for(&ss, r, len, taper, &mut notes)?,

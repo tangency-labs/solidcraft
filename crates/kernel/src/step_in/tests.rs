@@ -471,7 +471,16 @@ fn cube_entities() -> String {
         let (p, q) = (pts[*a], pts[*b]);
         let d = (q.0 - p.0, q.1 - p.1, q.2 - p.2);
         s += &format!("#{}=DIRECTION('',({}.,{}.,{}.));\n#{}=VECTOR('',#{},1.);\n", 600 + 2 * k, d.0, d.1, d.2, 601 + 2 * k, 600 + 2 * k);
-        s += &format!("#{}=LINE('',#{},#{});\n#{}=EDGE_CURVE('',#{},#{},#{},.T.);\n", 300 + k, 200 + a, 601 + 2 * k, 320 + k, 210 + a, 210 + b, 300 + k);
+        s += &format!(
+            "#{}=LINE('',#{},#{});\n#{}=EDGE_CURVE('',#{},#{},#{},.T.);\n",
+            300 + k,
+            200 + a,
+            601 + 2 * k,
+            320 + k,
+            210 + a,
+            210 + b,
+            300 + k
+        );
     }
     // Faces: (edge, forward?) loops counter-clockwise seen from outside, and plane frames.
     let faces: [(&[(usize, bool)], (i32, i32, i32), (i32, i32, i32)); 6] = [

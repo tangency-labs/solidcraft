@@ -236,9 +236,10 @@ impl Builder<'_, '_> {
     /// A vertex of the loop is on one of the axis's poles (within its tolerance).
     fn through_pole(&self, es: &[(u32, bool)], ax: &Axis) -> bool {
         es.iter().any(|&u| {
-            self.start(u).ok().and_then(|v| self.vertices.get(v as usize)).is_some_and(|x| {
-                ax.poles.iter().flatten().any(|p| Vec3::from(x.point).dist(*p) <= self.tol.max(x.tolerance))
-            })
+            self.start(u)
+                .ok()
+                .and_then(|v| self.vertices.get(v as usize))
+                .is_some_and(|x| ax.poles.iter().flatten().any(|p| Vec3::from(x.point).dist(*p) <= self.tol.max(x.tolerance)))
         })
     }
 

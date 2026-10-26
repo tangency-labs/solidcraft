@@ -335,7 +335,15 @@ impl Sketch {
                 Some(o) => o.clone(),
                 None => self.fresh("w")?,
             };
-            self.wires.push(Wire { id: wid, pts, space: WireSpace::Component, link: Some(id.to_string()), fit: Vec::new(), arc: None, exact: Vec::new() });
+            self.wires.push(Wire {
+                id: wid,
+                pts,
+                space: WireSpace::Component,
+                link: Some(id.to_string()),
+                fit: Vec::new(),
+                arc: None,
+                exact: Vec::new(),
+            });
         }
         Ok(())
     }

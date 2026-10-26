@@ -1453,7 +1453,16 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
                     match b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(tol)) {
                         // An edge where the faces meet tangentially (the spans of a spline wall
                         // meeting) can't be blended either: nobody means it by a pick.
-                        Ok(m) => Some((size, m.edges, m.seams.iter().zip(&m.smooth_edges).map(|(s, t)| *s || *t).chain(m.seams.iter().skip(m.smooth_edges.len()).copied()).collect())),
+                        Ok(m) => Some((
+                            size,
+                            m.edges,
+                            m.seams
+                                .iter()
+                                .zip(&m.smooth_edges)
+                                .map(|(s, t)| *s || *t)
+                                .chain(m.seams.iter().skip(m.smooth_edges.len()).copied())
+                                .collect(),
+                        )),
                         Err(_) => b.body.edges(tol).ok().map(|edges| (size, edges.into_iter().map(|e| e.points).collect(), Vec::new())),
                     }
                 })

@@ -785,7 +785,8 @@ fn middle(vertices: &mut Vec<[f64; 3]>, made: &mut std::collections::HashMap<usi
     if let Some(v) = made.get(&k) {
         return Ok(*v);
     }
-    let p = CurveEval::new(edge.parameters()).ok().and_then(|c| c.point(t)).ok_or_else(|| KernelError::Failed("patch: an edge has no middle".into()))?;
+    let p =
+        CurveEval::new(edge.parameters()).ok().and_then(|c| c.point(t)).ok_or_else(|| KernelError::Failed("patch: an edge has no middle".into()))?;
     let v = u32::try_from(vertices.len()).map_err(|_| KernelError::Failed("patch: vertex budget".into()))?;
     vertices.push([p.x, p.y, p.z]);
     made.insert(k, v);

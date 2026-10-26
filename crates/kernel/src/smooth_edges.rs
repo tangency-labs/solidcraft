@@ -425,4 +425,3 @@ mod tests {
         assert!(ruled_of(straight, true, &mut 0).is_none());
     }
 }
-

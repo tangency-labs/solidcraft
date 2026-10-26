@@ -173,9 +173,10 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
     let tapped = match (ask.tapped, ask.designation) {
         (false, _) => None,
         (true, None) => return Err(DocError::Invalid("a tapped hole needs a designation".into())),
-        (true, Some(name)) => Some(crate::parse_tapped_thread(name).ok_or_else(|| {
-            DocError::Invalid(format!("unknown tapped thread `{name}` (ISO metric or a catalogued UNC/UNF, G or Rp size)"))
-        })?),
+        (true, Some(name)) => Some(
+            crate::parse_tapped_thread(name)
+                .ok_or_else(|| DocError::Invalid(format!("unknown tapped thread `{name}` (ISO metric or a catalogued UNC/UNF, G or Rp size)")))?,
+        ),
     };
     let size = match (&tapped, ask.designation) {
         (Some(t), _) => crate::thread_forms::ThreadSize { form, major: t.major_diameter, pitch: t.pitch, lead: t.pitch },

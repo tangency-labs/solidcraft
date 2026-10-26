@@ -1160,7 +1160,8 @@ fn model_text(h: &Harness, param: &str) -> [f32; 2] {
     let sk = h
         .app
         .session
-        .world_state().unwrap()
+        .world_state()
+        .unwrap()
         .sketch(h.app.session.doc.features.iter().find(|f| f.name.starts_with("Sketch")).unwrap().id)
         .unwrap()
         .sketch

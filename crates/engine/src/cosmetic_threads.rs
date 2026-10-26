@@ -353,7 +353,8 @@ mod tests {
                         &crate::view::Palette::DEFAULT,
                         Default::default(),
                         true,
-                    ).unwrap();
+                    )
+                    .unwrap();
                     assert!(scene.lines.iter().any(|l| l.width == 0.85 && !l.on_top));
                     let marked = crate::render::render(&scene, &cam, 320, 240).rgba;
                     scene.lines.retain(|l| l.width != 0.85);
