@@ -778,19 +778,16 @@ impl<'a> Mapper<'a> {
             "ORIENTED_FACE" => {
                 let inner = self.face(ref_of(param(r, 2)?)?, c, depth + 1)?;
                 if !boolean(param(r, 3)?)? {
-                    let f = c
-                        .faces
-                        .get(inner)
-                        .cloned()
-                        .map_or_else(|| invalid("face"), Ok)?;
-                    let mut f = f;
+                    // Face rows are not memoized, so this freshly mapped inner row
+                    // is not yet referenced by a shell. Reverse it in place rather
+                    // than appending a clone and leaving an orphaned inner face.
+                    let f = c.faces.get_mut(inner).map_or_else(|| invalid("face"), Ok)?;
                     f.step_id = id;
                     f.same_sense = !f.same_sense;
                     for l in &mut f.loops {
                         l.orientation = !l.orientation;
                     }
-                    c.faces.push(f);
-                    return Ok(c.faces.len() - 1);
+                    return Ok(inner);
                 }
                 Ok(inner)
             }
@@ -1363,6 +1360,50 @@ mod tests {
         map_file(&f, &Limits::default())
     }
 
+    /// Millimetre units and the representation context that assigns them to the
+    /// `SHELL_BASED_SURFACE_MODEL` #5 of the oriented-face fixtures.
+    const ORIENTED_FACE_CONTEXT: &str = "#20=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.));\
+         #21=(GEOMETRIC_REPRESENTATION_CONTEXT(3) GLOBAL_UNIT_ASSIGNED_CONTEXT((#20)) REPRESENTATION_CONTEXT('',''));\
+         #22=MANIFOLD_SURFACE_SHAPE_REPRESENTATION('',(#5),#21);";
+
+    /// An ordinary planar `FACE` #6 on the non-collinear triangle #9/#10/#11,
+    /// with its only bound `#7` a `.T.` `FACE_OUTER_BOUND`.
+    const ORIENTED_FACE_TRIANGLE: &str = "#6=FACE('',(#7));\
+         #7=FACE_OUTER_BOUND('',#8,.T.);\
+         #8=POLY_LOOP('',(#9,#10,#11));\
+         #9=CARTESIAN_POINT('',(0.,0.,0.));\
+         #10=CARTESIAN_POINT('',(3.,0.,0.));\
+         #11=CARTESIAN_POINT('',(0.,4.,0.));";
+
+    fn oriented_face_model(body: &str) -> Model {
+        model(&format!(
+            "{ORIENTED_FACE_TRIANGLE}{body}{ORIENTED_FACE_CONTEXT}"
+        ))
+    }
+
+    /// Two `ORIENTED_FACE`s over the same base `FACE` #6, each in its own open
+    /// shell; `shells` is the item list of `SHELL_BASED_SURFACE_MODEL` #5.
+    fn oriented_face_mixed_model(shells: &str) -> Model {
+        oriented_face_model(&format!(
+            "#3=ORIENTED_FACE('',*,#6,.T.);\
+             #4=ORIENTED_FACE('',*,#6,.F.);\
+             #5=SHELL_BASED_SURFACE_MODEL('',({shells}));\
+             #13=OPEN_SHELL('',(#3));\
+             #14=OPEN_SHELL('',(#4));"
+        ))
+    }
+
+    /// A fixture is complete only if it maps to exactly one millimetre body
+    /// without skips or diagnostics.
+    fn assert_single_oriented_face_body(m: &Model) -> &Body {
+        assert_eq!(m.bodies.len(), 1);
+        assert!(m.skipped.is_empty(), "skipped: {:?}", m.skipped);
+        assert!(m.diagnostics.is_empty(), "diagnostics: {:?}", m.diagnostics);
+        let b = &m.bodies[0];
+        assert_eq!(b.unit_mm, 1.0);
+        b
+    }
+
     #[test]
     fn implied_knot_forms() {
         let (k, m) = implied_knots("QUASI_UNIFORM_CURVE", 3, 6).unwrap();
@@ -1444,5 +1485,99 @@ mod tests {
         // a reference cycle stops at the depth bound
         let m = model("#1=MANIFOLD_SOLID_BREP('',#2);#2=ORIENTED_CLOSED_SHELL('',*,#2,.F.);");
         assert!(m.skipped[0].reason.contains("too deep"));
+    }
+
+    #[test]
+    fn oriented_face_reverse_maps_wrapper_in_place() {
+        let m = oriented_face_model(
+            "#3=ORIENTED_FACE('',*,#6,.F.);\
+             #5=SHELL_BASED_SURFACE_MODEL('',(#13));\
+             #13=OPEN_SHELL('',(#3));",
+        );
+        let b = assert_single_oriented_face_body(&m);
+        assert_eq!(b.kind, BodyKind::ShellModel);
+        assert_eq!(b.faces.len(), 1);
+        assert_eq!(b.shells.len(), 1);
+        assert_eq!(b.shells[0].faces, vec![0]);
+        let f = &b.faces[0];
+        assert_eq!(f.step_id, 3);
+        assert!(!f.same_sense);
+        assert_eq!(f.loops.len(), 1);
+        assert!(f.loops[0].outer);
+        assert!(!f.loops[0].orientation);
+        assert_eq!(b.edges.len(), 3);
+        assert_eq!(b.vertices.len(), 3);
+    }
+
+    #[test]
+    fn oriented_face_positive_control_keeps_inner_face() {
+        let m = oriented_face_model(
+            "#3=ORIENTED_FACE('',*,#6,.T.);\
+             #5=SHELL_BASED_SURFACE_MODEL('',(#13));\
+             #13=OPEN_SHELL('',(#3));",
+        );
+        let b = assert_single_oriented_face_body(&m);
+        assert_eq!(b.faces.len(), 1);
+        assert_eq!(b.shells.len(), 1);
+        assert_eq!(b.shells[0].faces, vec![0]);
+        let f = &b.faces[0];
+        assert_eq!(f.step_id, 6);
+        assert!(f.same_sense);
+        assert_eq!(f.loops.len(), 1);
+        assert!(f.loops[0].outer);
+        assert!(f.loops[0].orientation);
+        assert_eq!(b.edges.len(), 3);
+        assert_eq!(b.vertices.len(), 3);
+    }
+
+    #[test]
+    fn oriented_face_mixed_positive_then_reverse_shares_base_face() {
+        let m = oriented_face_mixed_model("#13,#14");
+        let b = assert_single_oriented_face_body(&m);
+        assert_eq!(b.faces.len(), 2);
+        assert_eq!(b.shells.len(), 2);
+        assert_eq!(b.shells[0].step_id, 13);
+        assert_eq!(b.shells[0].faces, vec![0]);
+        assert_eq!(b.shells[1].step_id, 14);
+        assert_eq!(b.shells[1].faces, vec![1]);
+        // The `.T.` wrapper row is mapped first and must not be mutated by the
+        // later `.F.` reverse.
+        assert_eq!(b.faces[0].step_id, 6);
+        assert!(b.faces[0].same_sense);
+        assert!(b.faces[0].loops[0].orientation);
+        assert_eq!(b.faces[1].step_id, 4);
+        assert!(!b.faces[1].same_sense);
+        assert!(!b.faces[1].loops[0].orientation);
+        // Both wrappers describe the same bounds and geometry.
+        assert!(b.faces[0].loops[0].outer);
+        assert_eq!(b.faces[0].loops[0].bound, b.faces[1].loops[0].bound);
+        assert_eq!(b.faces[0].surface, b.faces[1].surface);
+        // POLY_LOOP vertex/edge caching is shared between the two uses.
+        assert_eq!(b.edges.len(), 3);
+        assert_eq!(b.vertices.len(), 3);
+    }
+
+    #[test]
+    fn oriented_face_mixed_reverse_then_positive_shares_base_face() {
+        let m = oriented_face_mixed_model("#14,#13");
+        let b = assert_single_oriented_face_body(&m);
+        assert_eq!(b.faces.len(), 2);
+        assert_eq!(b.shells.len(), 2);
+        assert_eq!(b.shells[0].step_id, 14);
+        assert_eq!(b.shells[0].faces, vec![0]);
+        assert_eq!(b.shells[1].step_id, 13);
+        assert_eq!(b.shells[1].faces, vec![1]);
+        assert_eq!(b.faces[0].step_id, 4);
+        assert!(!b.faces[0].same_sense);
+        assert!(!b.faces[0].loops[0].orientation);
+        // The later `.T.` wrapper maps a fresh positive row.
+        assert_eq!(b.faces[1].step_id, 6);
+        assert!(b.faces[1].same_sense);
+        assert!(b.faces[1].loops[0].orientation);
+        assert!(b.faces[0].loops[0].outer);
+        assert_eq!(b.faces[0].loops[0].bound, b.faces[1].loops[0].bound);
+        assert_eq!(b.faces[0].surface, b.faces[1].surface);
+        assert_eq!(b.edges.len(), 3);
+        assert_eq!(b.vertices.len(), 3);
     }
 }
