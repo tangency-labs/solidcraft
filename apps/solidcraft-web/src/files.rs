@@ -513,9 +513,9 @@ fn input_picker(files: &Rc<Files>, intent: Intent) {
     input.set_type("file");
     // Everything the browser build imports, from the format registry: cadmpeg is pure Rust, so
     // FreeCAD and Rhino files are part of it; plus the DXF and SVG drawings Open and Insert take.
-    let accept =
-        solidcraft_engine::io::formats::open_extensions(true).iter().chain(&["dxf", "svg"]).map(|e| format!(".{e}")).collect::<Vec<_>>().join(",");
-    input.set_accept(&accept);
+    let mut extensions = solidcraft_engine::io::formats::open_extensions(true);
+    extensions.extend(["dxf", "svg"]);
+    input.set_accept(&disk::input_accept(&extensions, apple_touch()));
     // Attached (hidden) while it is open: some browsers ignore a click on a detached input.
     let _ = input.set_attribute("style", "display:none");
     if let Some(body) = doc.body() {
@@ -546,7 +546,7 @@ fn input_picker(files: &Rc<Files>, intent: Intent) {
 /// `None` when the dialog was closed or the file could not be read.
 pub fn pick_upload(files: &Rc<Files>, extensions: &[&str]) -> impl std::future::Future<Output = Option<String>> + use<> {
     // Shown now, in the click: a file dialog needs the user's gesture.
-    let chosen = choose_file(&disk::accept_list(extensions));
+    let chosen = choose_file(&disk::input_accept(extensions, apple_touch()));
     let limit = disk::upload_limit(extensions);
     let files = files.clone();
     async move {
@@ -571,6 +571,14 @@ pub fn pick_upload(files: &Rc<Files>, extensions: &[&str]) -> impl std::future::
             }
         }
     }
+}
+
+/// The page runs on an iPhone or iPad, whose file inputs offer every file (`disk::input_accept`).
+fn apple_touch() -> bool {
+    web_sys::window().is_some_and(|w| {
+        let nav = w.navigator();
+        disk::apple_touch(&nav.user_agent().unwrap_or_default(), nav.max_touch_points())
+    })
 }
 
 /// Show a hidden `<input type=file>` offering `accept` (call in the click). The promise answers
