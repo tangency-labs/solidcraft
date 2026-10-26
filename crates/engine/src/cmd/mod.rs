@@ -40,7 +40,7 @@ mod edit;
 mod face;
 mod features;
 mod features_more;
-pub(crate) use bom::{SAME_AS_COMPONENT, occurrence_bom_type};
+pub(crate) use bom::{SAME_AS_COMPONENT, occurrence_bom_type, record_item_numbers};
 pub(crate) use component::path_ids;
 pub(crate) use face::{FaceRefForm, face_ref_form};
 pub(crate) use features::profiles as feature_profiles;

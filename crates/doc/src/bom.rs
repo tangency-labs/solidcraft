@@ -13,8 +13,8 @@
 //! component and the type it counts as there), however its part number or contents read. Its
 //! mass is what one of its parts weighs as the row stands for it (`Holds`), so the rows of any
 //! list add up to the assembly once. The keys, what rows stand for, their members and `row_of`
-//! stay inside this crate until item numbers and balloons read them. Placements are rigid, so each definition is weighed once
-//! however often it is placed, and kept in the [`Tree`] for every list made from it. The
+//! stay inside this crate until balloons read them; item numbers are saved by key ([`numbers`]). Placements are rigid, so
+//! each definition is weighed once however often it is placed, and kept in the [`Tree`] for every list made from it. The
 //! assembly's own mass is weighed the same way, never added up from rows: a row whose definitions
 //! weigh differently has none.
 //!
@@ -25,20 +25,30 @@
 //! for in the one material an assembly around it shares: the bill of materials says one thing
 //! about the part everywhere. It only names: mass still comes from the bodies.
 
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
+
+use serde::{Deserialize, Serialize};
 
 use crate::{BomType, Component, DocError, Document, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, ModelBody, ModelState, Result};
 
-/// A bill of materials view.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+mod numbers;
+
+pub use numbers::{ItemNumber, ItemNumbers, MAX_ITEM, Numbering, Order, number, record};
+
+/// A bill of materials view, saved by the word commands use for it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum View {
     /// Parts only: every part at any depth, counted through its subassemblies.
     #[default]
+    #[serde(rename = "flat")]
     PartsOnly,
     /// Structured, first level: the assembly's direct contents, a subassembly as one row.
+    #[serde(rename = "top")]
     FirstLevel,
     /// Structured, all levels: the assembly's direct contents, each subassembly a row with its own
     /// contents listed under it, to any depth (1, 1.1, 1.1.1).
+    #[serde(rename = "all")]
     AllLevels,
 }
 
@@ -62,7 +72,8 @@ impl View {
 }
 
 /// What one row gathers.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Group {
     /// The definitions that share a part number; a definition without one is a row of its own.
     #[default]
@@ -107,7 +118,7 @@ pub struct Request {
 }
 
 /// A component as one placement counts: its id and the bill of materials type it counts as there.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct Member {
     pub component: u64,
     pub bom_type: BomType,
@@ -116,8 +127,9 @@ pub struct Member {
 /// A row's identity: the key members of the rows it is listed under (outermost first; none at the
 /// top), and its own lowest member. It doesn't change with the row's part number or contents, so
 /// item numbers, overrides and balloons can follow the row through those edits.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub(crate) struct RowKey {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) parents: Vec<Member>,
     pub(crate) member: Member,
 }
@@ -176,9 +188,15 @@ impl Static {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Row {
     pub(crate) key: RowKey,
-    /// Its position among the rows it is listed with, from 1: its item number until numbers are
-    /// saved.
+    /// Its item number among the rows it is listed with: the one saved for it, else its position
+    /// from 1 (the view not numbered yet) or the next number after the saved ones ([`numbers`]).
     pub item: u32,
+    /// Its item number isn't saved yet.
+    pub provisional: bool,
+    /// Its item number is locked: a renumber keeps it.
+    pub locked: bool,
+    /// Another row listed with it has the same item number.
+    pub duplicate: bool,
     pub bom_type: BomType,
     /// What one of its parts stands for when weighed.
     pub(crate) stands_for: Holds,
@@ -228,10 +246,12 @@ pub struct Total {
 pub struct Bom {
     /// The assembly listed: a component, or 0 for the design.
     pub source: u64,
-    /// By part number, rows without one after them by name, one part's rows by type; each row's
-    /// children likewise.
+    /// By part number, rows without one after them by name, one part's rows by type (`list_order`);
+    /// each row's children likewise. In a numbered view, by item number.
     pub rows: Vec<Row>,
     pub total: Total,
+    /// Its item numbers are saved: it has been numbered ([`ItemNumbers`]).
+    pub numbered: bool,
     /// Each member path, and where its row is (its position among the rows, then among each one's
     /// children): `row_of` reads it. Empty unless the list was made with its members.
     index: HashMap<Vec<u64>, Vec<usize>>,
@@ -411,16 +431,7 @@ impl<'a> Tree<'a> {
             grouped.entry(GroupKey { part, bom_type: entry.member.bom_type, kit }).or_default().push(i);
         }
         let mut rows: Vec<Row> = grouped.values().filter_map(|members| self.row(listing, paths, members, under, parents, per)).collect();
-        // By part number; rows without one after them, by name; one part's rows by type.
-        rows.sort_by(|a, b| {
-            (a.part_number.is_empty(), &a.part_number, &a.names, &a.components, a.bom_type).cmp(&(
-                b.part_number.is_empty(),
-                &b.part_number,
-                &b.names,
-                &b.components,
-                b.bom_type,
-            ))
-        });
+        rows.sort_by(list_order);
         for (item, row) in (1..).zip(&mut rows) {
             row.item = item;
         }
@@ -473,6 +484,9 @@ impl<'a> Tree<'a> {
         let mut row = Row {
             key: RowKey { parents: parents.to_vec(), member },
             item: 0,
+            provisional: true,
+            locked: false,
+            duplicate: false,
             bom_type: member.bom_type,
             stands_for: first.holds,
             // Filled in by `name_materials`, which reads each definition once.
@@ -622,6 +636,18 @@ impl<'a> Tree<'a> {
         // A negative volume (a body inside out) is unknown, never a negative mass.
         body.volume().map(|v| v * scale).filter(|v| *v >= 0.0).map(|v| (v * self.doc.density(&body.name) / 1000.0, 1))
     }
+}
+
+/// The order a level lists its rows in until it is numbered: by part number; rows without one
+/// after them, by name; one part's rows by type.
+fn list_order(a: &Row, b: &Row) -> Ordering {
+    (a.part_number.is_empty(), &a.part_number, &a.names, &a.components, a.bom_type).cmp(&(
+        b.part_number.is_empty(),
+        &b.part_number,
+        &b.names,
+        &b.components,
+        b.bom_type,
+    ))
 }
 
 /// What a row gathers by: a part number, borrowed from its definition, or the definition.
@@ -816,8 +842,9 @@ pub(crate) fn list_with(tree: &mut Tree, request: &Request, members: bool) -> Re
     // What a folded part holds is gathered by part number in any list; all levels gathers every
     // level as it gathers the first.
     let under = if request.view == View::AllLevels { request.group } else { Group::PartNumber };
-    let rows = tree.level(&listing, &mut paths, &top, request.group, under, &[], 1);
-    let mut bom = Bom { source: request.source, rows, total: Total::default(), index: HashMap::new() };
+    let mut rows = tree.level(&listing, &mut paths, &top, request.group, under, &[], 1);
+    let numbered = numbers::apply(&mut rows, numbers::saved(tree.doc, request.source, request.view));
+    let mut bom = Bom { source: request.source, rows, total: Total::default(), numbered, index: HashMap::new() };
     if members {
         bom.index_members();
     }

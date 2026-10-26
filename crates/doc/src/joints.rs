@@ -573,6 +573,9 @@ pub struct Assembly {
     pub studies: Vec<crate::motion::MotionStudy>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exploded: Vec<crate::motion::ExplodedView>,
+    /// The bill of materials views numbered, with their saved item numbers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub item_numbers: Vec<crate::bom::ItemNumbers>,
 }
 
 impl Assembly {
@@ -628,6 +631,7 @@ impl Assembly {
             && !self.contact_all
             && self.studies.is_empty()
             && self.exploded.is_empty()
+            && self.item_numbers.is_empty()
     }
 }
 

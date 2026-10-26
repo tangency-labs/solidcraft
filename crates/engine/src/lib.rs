@@ -916,6 +916,14 @@ impl Session {
                         None if render_only => self.refresh_render(&previous_doc),
                         None => self.refresh_from(&previous_doc),
                     }
+                    // A row the change added takes its item number in the same undo step; numbers
+                    // draw nothing, so the model and the placed world stay.
+                    if spec.undoable && outermost && live.is_none() {
+                        let numbered = self.doc.clone();
+                        if cmd::record_item_numbers(self) {
+                            self.refresh_render(&numbered);
+                        }
+                    }
                 }
                 Ok(v)
             }

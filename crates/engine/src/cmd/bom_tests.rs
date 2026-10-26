@@ -1673,3 +1673,149 @@ fn all_levels_gathers_every_level_as_the_first() {
         [deep_row("1", "SUB", "normal", 1, 1), deep_row("1.1", "BOLT", "normal", 1, 1), deep_row("1.2", "BOLT", "normal", 1, 1)]
     );
 }
+
+/// Each row of a reply as `assembly.bom` gives it: item, part number, and its numbering flags.
+fn numbers(r: &Value) -> Vec<(String, String, String)> {
+    r["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| {
+            let flags: String =
+                [("provisional", 'p'), ("locked", 'l'), ("duplicate", 'd')].iter().filter(|(k, _)| row[*k] == true).map(|(_, c)| *c).collect();
+            (row["item"].to_string().trim_matches('"').to_string(), row["part_number"].as_str().unwrap().to_string(), flags)
+        })
+        .collect()
+}
+
+fn numbered_row(item: &str, part_number: &str, flags: &str) -> (String, String, String) {
+    (item.into(), part_number.into(), flags.into())
+}
+
+#[test]
+fn a_new_rows_item_number_is_saved_in_the_changes_undo_step() {
+    let dir = scratch("numbers");
+    let mut s = assembly();
+    let unnumbered = run(&mut s, "assembly.bom", json!({}));
+    assert_eq!(unnumbered["numbered"], false);
+    assert!(unnumbered["rows"].as_array().unwrap().iter().all(|r| r.get("provisional").is_none()), "a view never numbered reads as before");
+    let undo = s.undo.len();
+    let r = run(&mut s, "assembly.bom.renumber", json!({"start": 10, "step": 10}));
+    assert_eq!((r["numbered"].as_bool(), numbers(&r)), (Some(true), vec![numbered_row("10", "PL-100", ""), numbered_row("20", "PN-040", "")]));
+    assert_eq!(s.undo.len(), undo + 1, "one undo step");
+    // A new part: its number is saved with it, in its own undo step.
+    run(&mut s, "component.create", json!({"name": "Bracket", "activate": false}));
+    run(&mut s, "component.metadata.set", json!({"component": "Bracket", "part_number": "BR-001"}));
+    assert_eq!(s.undo.len(), undo + 3);
+    let after = run(&mut s, "assembly.bom", json!({}));
+    assert_eq!(after["numbered"], true);
+    assert_eq!(numbers(&after), [numbered_row("10", "PL-100", ""), numbered_row("20", "PN-040", ""), numbered_row("21", "BR-001", "")]);
+    assert_eq!(s.doc.assembly.item_numbers[0].items.len(), 3);
+    // Undone, the part and its number go together; redone, both come back.
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!((s.doc.assembly.item_numbers[0].items.len(), numbers(&run(&mut s, "assembly.bom", json!({}))).len()), (2, 2));
+    run(&mut s, "edit.redo", json!({}));
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(numbers(&run(&mut s, "assembly.bom", json!({}))), numbers(&after));
+    // Saved and opened again, in both formats; the CSV lists by item number.
+    for (file, format) in [("numbers.json", "json"), ("numbers.solidcraft", "container")] {
+        let path = dir.join(file);
+        run(&mut s, "file.save_as", json!({"path": path, "format": format}));
+        let mut back = Session::default();
+        run(&mut back, "doc.open", json!({"path": path}));
+        assert_eq!(numbers(&run(&mut back, "assembly.bom", json!({}))), numbers(&after), "{format}");
+        assert_eq!(back.doc.assembly.item_numbers, s.doc.assembly.item_numbers, "{format}");
+    }
+    let csv = dir.join("numbers.csv");
+    run(&mut s, "assembly.bom", json!({"path": csv}));
+    let items: Vec<String> =
+        std::fs::read_to_string(&csv).unwrap().lines().skip(1).map(|l| l.split(',').take(2).collect::<Vec<_>>().join(",")).collect();
+    assert_eq!(items, ["\"10\",\"PL-100\"", "\"20\",\"PN-040\"", "\"21\",\"BR-001\""]);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn item_set_marks_duplicates_and_locks_and_a_renumber_keeps_locks() {
+    let mut s = assembly();
+    run(&mut s, "component.create", json!({"name": "Bracket", "activate": false}));
+    run(&mut s, "component.metadata.set", json!({"component": "Bracket", "part_number": "BR-001"}));
+    let undo = s.undo.len();
+    // The view isn't numbered yet: the others keep the numbers they show.
+    let r = run(&mut s, "assembly.bom.item.set", json!({"row": "3", "item": 1, "locked": true}));
+    assert_eq!(numbers(&r), [numbered_row("1", "BR-001", "d"), numbered_row("1", "PN-040", "ld"), numbered_row("2", "PL-100", "")]);
+    assert_eq!(r["duplicates"], json!([1]));
+    assert_eq!(s.undo.len(), undo + 1);
+    let r = run(&mut s, "assembly.bom.renumber", json!({}));
+    assert_eq!(numbers(&r), [numbered_row("1", "PN-040", "l"), numbered_row("2", "BR-001", ""), numbered_row("3", "PL-100", "")]);
+    // A row under another, by its item as shown: the pin in the hinge.
+    let r = run(&mut s, "assembly.bom.item.set", json!({"levels": "all", "row": "3.1", "locked": true}));
+    let pin = r["rows"].as_array().unwrap().iter().find(|row| row["part_number"] == "PN-040").unwrap();
+    assert_eq!((&pin["item"], &pin["locked"]), (&json!("3.1"), &json!(true)), "{r}");
+    assert_eq!(r["duplicates"], json!([]));
+    assert_eq!(s.doc.assembly.item_numbers.len(), 2, "each view numbered on its own");
+}
+
+#[test]
+fn numbering_evaluates_nothing() {
+    let mut s = bolts();
+    s.evaluations = 0;
+    run(&mut s, "assembly.bom.renumber", json!({"levels": "top"}));
+    run(&mut s, "assembly.bom.item.set", json!({"levels": "top", "row": 1, "item": 5}));
+    run(&mut s, "component.metadata.set", json!({"component": 1, "description": "Bolt"}));
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(s.evaluations, 0, "item numbers change no geometry");
+    // A placement and a new part added to a numbered design are evaluated as in one never
+    // numbered; the new part's row takes its number without another evaluation.
+    let mut plain = bolts();
+    plain.evaluations = 0;
+    s.evaluations = 0;
+    for session in [&mut s, &mut plain] {
+        run(session, "occurrence.copy", json!({"component": 1, "translate": [0, 40, 0]}));
+        run(session, "parts.insert", json!({"family": "hex_nut", "size": "M6", "point": [90, 0, 0], "direction": [0, 0, 1]}));
+    }
+    assert_eq!(s.evaluations, plain.evaluations);
+    assert!(run(&mut s, "assembly.bom", json!({"levels": "top"}))["rows"].as_array().unwrap().iter().all(|r| r.get("provisional").is_none()));
+}
+
+#[test]
+fn hostile_numbering_is_refused_without_a_change() {
+    let mut s = assembly();
+    let undo = s.undo.len();
+    for p in [
+        json!({"start": 0}),
+        json!({"start": -1}),
+        json!({"start": 1.5}),
+        json!({"start": "1"}),
+        json!({"start": 1_000_000}),
+        json!({"step": 0}),
+        json!({"start": 999_999, "step": 1}),
+        json!({"order": "up"}),
+        json!({"order": 1}),
+        json!({"levels": "deep"}),
+        json!({"component": "Nope"}),
+    ] {
+        assert!(s.execute("assembly.bom.renumber", &p).is_err(), "{p}");
+    }
+    for p in [
+        json!({}),
+        json!({"item": 1}),
+        json!({"row": "1"}),
+        json!({"row": "x", "item": 1}),
+        json!({"row": "1..2", "item": 1}),
+        json!({"row": "", "item": 1}),
+        json!({"row": -1, "item": 1}),
+        json!({"row": [1], "item": 1}),
+        json!({"row": "9", "item": 1}),
+        json!({"row": "1.1", "item": 1}),
+        json!({"row": "1".repeat(2000), "item": 1}),
+        json!({"row": "1", "item": 0}),
+        json!({"row": "1", "item": "2"}),
+        json!({"row": "1", "locked": "yes"}),
+    ] {
+        assert!(s.execute("assembly.bom.item.set", &p).is_err(), "{p}");
+    }
+    assert_eq!(s.undo.len(), undo);
+    assert!(s.doc.assembly.item_numbers.is_empty());
+}

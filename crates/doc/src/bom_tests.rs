@@ -522,3 +522,267 @@ fn what_adds_to_a_row_follows_what_it_stands_for() {
         assert_eq!(adds(Holds::AllButPurchased, t), !matches!(t, Reference | Purchased), "{t:?}");
     }
 }
+
+/// `how` applied to the view `request` lists, its numbering saved as the engine saves it; whether
+/// anything changed.
+fn numbered(doc: &mut Document, request: Request, how: Numbering) -> bool {
+    let state = ModelState::default();
+    let Some(numbers) = super::number(&mut Tree::new(doc, &state), &request, how).unwrap() else { return false };
+    let saved = &mut doc.assembly.item_numbers;
+    saved.retain(|n| (n.source, n.view) != (numbers.source, numbers.view));
+    saved.push(numbers);
+    true
+}
+
+/// [`record`] as the engine runs it after a change; whether anything changed.
+fn recorded(doc: &mut Document) -> bool {
+    let state = ModelState::default();
+    let Some(numbers) = record(&mut Tree::new(doc, &state)) else { return false };
+    doc.assembly.item_numbers = numbers;
+    true
+}
+
+const RENUMBER: Numbering = Numbering::Renumber { start: 1, step: 1, order: Order::List };
+
+/// Each row, followed by the rows under it: item, names, and its numbering flags as letters
+/// (provisional, locked, duplicate).
+fn items(bom: &Bom) -> Vec<(String, String, String)> {
+    bom.rows_deep()
+        .into_iter()
+        .map(|(item, r)| {
+            let flags = [(r.provisional, 'p'), (r.locked, 'l'), (r.duplicate, 'd')].iter().filter(|(on, _)| *on).map(|(_, c)| *c).collect();
+            (item_text(&item), r.names.join("; "), flags)
+        })
+        .collect()
+}
+
+fn item(item: &str, names: &str, flags: &str) -> (String, String, String) {
+    (item.into(), names.into(), flags.into())
+}
+
+/// Parts A, B and C at the top, part numbers P1 to P3.
+fn three_parts() -> (Document, [(u64, u64); 3]) {
+    let mut doc = Document::default();
+    let parts = ["A", "B", "C"].map(|name| add(&mut doc, name, 0));
+    for (i, (part, _)) in parts.iter().enumerate() {
+        number(&mut doc, *part, &format!("P{}", i + 1));
+    }
+    (doc, parts)
+}
+
+#[test]
+fn numbering_a_view_saves_its_numbers_and_new_rows_take_the_next() {
+    let (mut doc, [_, (b, ob), _]) = three_parts();
+    // Never numbered: positions, provisional, and nothing saved by a change.
+    let bom = listed(&doc, Request::default()).unwrap();
+    assert!(!bom.numbered);
+    assert_eq!(items(&bom), [item("1", "A", "p"), item("2", "B", "p"), item("3", "C", "p")]);
+    assert!(!recorded(&mut doc), "a design never numbered saves nothing");
+    assert!(numbered(&mut doc, Request::default(), RENUMBER));
+    assert!(!numbered(&mut doc, Request::default(), RENUMBER), "the same numbers again change nothing");
+    let bom = listed(&doc, Request::default()).unwrap();
+    assert!(bom.numbered);
+    assert_eq!(items(&bom), [item("1", "A", ""), item("2", "B", ""), item("3", "C", "")]);
+    // A new part, first by part number: the highest number + 1, listed by it, saved by the next change.
+    let (d, _) = add(&mut doc, "D", 0);
+    number(&mut doc, d, "P0");
+    assert_eq!(items(&listed(&doc, Request::default()).unwrap()).last(), Some(&item("4", "D", "p")));
+    assert!(recorded(&mut doc));
+    assert!(!recorded(&mut doc), "saved once");
+    assert_eq!(items(&listed(&doc, Request::default()).unwrap()).last(), Some(&item("4", "D", "")));
+    // B removed leaves a gap, and back it has its number again.
+    doc.occurrences.retain(|o| o.id != ob);
+    assert_eq!(items(&listed(&doc, Request::default()).unwrap()), [item("1", "A", ""), item("3", "C", ""), item("4", "D", "")]);
+    assert!(!recorded(&mut doc), "a gap isn't filled");
+    // Setting another row's number keeps B's: it isn't listed, but it is saved.
+    assert!(numbered(&mut doc, Request::default(), Numbering::Set { row: vec![1], item: None, locked: Some(true) }));
+    assert!(numbered(&mut doc, Request::default(), Numbering::Set { row: vec![1], item: None, locked: Some(false) }));
+    let (e, _) = add(&mut doc, "E", 0);
+    assert!(recorded(&mut doc));
+    place(&mut doc, b, 0);
+    let bom = listed(&doc, Request::default()).unwrap();
+    assert_eq!(items(&bom), [item("1", "A", ""), item("2", "B", ""), item("3", "C", ""), item("4", "D", ""), item("5", "E", "")]);
+    assert_eq!(bom.rows.last().map(|r| r.key.member.component), Some(e));
+    // A renumber closing the gaps in item order, or in the list's order (by part number).
+    doc.occurrences.retain(|o| o.component != b);
+    assert!(numbered(&mut doc, Request::default(), Numbering::Renumber { start: 1, step: 1, order: Order::Item }));
+    assert_eq!(items(&listed(&doc, Request::default()).unwrap()), [item("1", "A", ""), item("2", "C", ""), item("3", "D", ""), item("4", "E", "")]);
+    assert!(numbered(&mut doc, Request::default(), Numbering::Renumber { start: 10, step: 5, order: Order::List }));
+    assert_eq!(
+        items(&listed(&doc, Request::default()).unwrap()),
+        [item("10", "D", ""), item("15", "A", ""), item("20", "C", ""), item("25", "E", "")]
+    );
+    // The renumber forgot B: back, it is new.
+    place(&mut doc, b, 0);
+    assert_eq!(items(&listed(&doc, Request::default()).unwrap()).last(), Some(&item("26", "B", "p")));
+}
+
+/// A view numbered twice, which only a damaged file has: listing reads the first numbering, and
+/// recording drops the second, so a change never lists the view again for it.
+#[test]
+fn a_view_numbered_twice_keeps_its_first_numbering() {
+    let (mut doc, _) = three_parts();
+    assert!(numbered(&mut doc, Request::default(), RENUMBER));
+    let mut second = doc.assembly.item_numbers[0].clone();
+    second.items.iter_mut().for_each(|i| i.number += 10);
+    doc.assembly.item_numbers.push(second);
+    let first = [item("1", "A", ""), item("2", "B", ""), item("3", "C", "")];
+    assert_eq!(items(&listed(&doc, Request::default()).unwrap()), first);
+    assert!(recorded(&mut doc));
+    assert_eq!(doc.assembly.item_numbers.len(), 1);
+    assert_eq!(items(&listed(&doc, Request::default()).unwrap()), first);
+    assert!(!recorded(&mut doc));
+}
+
+#[test]
+fn a_row_keeps_its_number_through_a_part_number_edit() {
+    let (mut doc, [(a, _), _, _]) = three_parts();
+    assert!(numbered(&mut doc, Request::default(), RENUMBER));
+    number(&mut doc, a, "P9");
+    assert!(!recorded(&mut doc), "no new row");
+    assert_eq!(items(&listed(&doc, Request::default()).unwrap()), [item("1", "A", ""), item("2", "B", ""), item("3", "C", "")]);
+}
+
+/// The defect the plan names: a renumber with locked rows never gives two rows one number.
+#[test]
+fn a_renumber_keeps_locked_numbers_and_never_gives_two_rows_one() {
+    let (mut doc, _) = three_parts();
+    let (d, _) = add(&mut doc, "D", 0);
+    number(&mut doc, d, "P4");
+    // Setting a number numbers the view first; one another row has is marked on both.
+    assert!(numbered(&mut doc, Request::default(), Numbering::Set { row: vec![3], item: Some(2), locked: Some(true) }));
+    assert_eq!(
+        items(&listed(&doc, Request::default()).unwrap()),
+        [item("1", "A", ""), item("2", "B", "d"), item("2", "C", "ld"), item("4", "D", "")]
+    );
+    for (start, step, want) in [(1, 1, ["1", "3", "2", "4"]), (2, 1, ["3", "4", "2", "5"]), (1, 2, ["1", "3", "2", "5"])] {
+        assert!(numbered(&mut doc, Request::default(), Numbering::Renumber { start, step, order: Order::List }));
+        let bom = listed(&doc, Request::default()).unwrap();
+        let by_name: BTreeMap<String, (String, String)> = items(&bom).into_iter().map(|(i, n, f)| (n, (i, f))).collect();
+        let got: Vec<&str> = ["A", "B", "C", "D"].iter().map(|n| by_name[*n].0.as_str()).collect();
+        assert_eq!(got, want, "from {start} by {step}");
+        assert!(bom.rows.iter().all(|r| !r.duplicate), "from {start} by {step}");
+        assert_eq!(by_name["C"].1, "l");
+    }
+    // Unlocked, the next renumber moves it.
+    assert!(numbered(&mut doc, Request::default(), Numbering::Set { row: vec![2], item: None, locked: Some(false) }));
+    assert!(numbered(&mut doc, Request::default(), RENUMBER));
+    assert_eq!(items(&listed(&doc, Request::default()).unwrap()), [item("1", "A", ""), item("2", "B", ""), item("3", "C", ""), item("4", "D", "")]);
+}
+
+#[test]
+fn all_levels_are_numbered_within_each_parent() {
+    let mut doc = Document::default();
+    let (frame, _) = add(&mut doc, "Frame", 0);
+    let (bolt, _) = add(&mut doc, "Bolt", 0);
+    number(&mut doc, frame, "F");
+    number(&mut doc, bolt, "B");
+    let (beam, _) = add(&mut doc, "Beam", frame);
+    number(&mut doc, beam, "F1");
+    let all = view(View::AllLevels);
+    assert!(numbered(&mut doc, all, RENUMBER));
+    assert_eq!(items(&listed(&doc, all).unwrap()), [item("1", "Bolt", ""), item("2", "Frame", ""), item("2.1", "Beam", "")]);
+    // A plate in the frame is the frame's next; the design's parts-only view isn't numbered.
+    let (plate, _) = add(&mut doc, "Plate", frame);
+    number(&mut doc, plate, "F0");
+    assert_eq!(items(&listed(&doc, all).unwrap()).last(), Some(&item("2.2", "Plate", "p")));
+    assert!(recorded(&mut doc));
+    assert_eq!(items(&listed(&doc, all).unwrap()).last(), Some(&item("2.2", "Plate", "")));
+    assert!(!listed(&doc, Request::default()).unwrap().numbered);
+    // Renumbered in the list's order, each level from the start.
+    assert!(numbered(&mut doc, all, Numbering::Renumber { start: 5, step: 5, order: Order::List }));
+    assert_eq!(
+        items(&listed(&doc, all).unwrap()),
+        [item("5", "Bolt", ""), item("10", "Frame", ""), item("10.5", "Plate", ""), item("10.10", "Beam", "")]
+    );
+    // A component's own list is numbered apart from the design's.
+    let own = Request { source: frame, ..all };
+    assert!(!listed(&doc, own).unwrap().numbered);
+    assert!(numbered(&mut doc, own, RENUMBER));
+    assert_eq!(items(&listed(&doc, own).unwrap()), [item("1", "Plate", ""), item("2", "Beam", "")]);
+    assert_eq!(items(&listed(&doc, all).unwrap())[2], item("10.5", "Plate", ""));
+}
+
+/// A numbering keeps the list options it was made with: the next change saves the rows they list.
+/// A list with other options reads the same numbers by row, the rest provisional.
+#[test]
+fn a_numbering_keeps_its_list_options_and_other_lists_read_its_numbers() {
+    let (mut doc, [_, (b, _), _]) = three_parts();
+    number(&mut doc, b, "P1");
+    let by_definition = Request { group: Group::Definition, ..Request::default() };
+    assert!(numbered(&mut doc, Request::default(), RENUMBER));
+    assert_eq!(items(&listed(&doc, Request::default()).unwrap()), [item("1", "A; B", ""), item("2", "C", "")]);
+    assert_eq!(items(&listed(&doc, by_definition).unwrap()), [item("1", "A", ""), item("2", "C", ""), item("3", "B", "p")]);
+    assert!(!recorded(&mut doc), "the numbering lists by part number: nothing new");
+    assert!(numbered(&mut doc, by_definition, Numbering::Set { row: vec![3], item: Some(7), locked: None }));
+    let saved = &doc.assembly.item_numbers;
+    assert_eq!((saved.len(), saved[0].group), (1, Group::Definition), "one numbering a view, with the options last used");
+    assert_eq!(items(&listed(&doc, by_definition).unwrap()), [item("1", "A", ""), item("2", "C", ""), item("7", "B", "")]);
+}
+
+#[test]
+fn numbers_are_refused_outside_their_range_and_rows_are_found_as_shown() {
+    let (mut doc, _) = three_parts();
+    let refused = |doc: &mut Document, how: Numbering| {
+        let state = ModelState::default();
+        super::number(&mut Tree::new(doc, &state), &Request::default(), how).unwrap_err().to_string()
+    };
+    for (start, step) in [(0, 1), (1, 0), (MAX_ITEM + 1, 1)] {
+        assert!(refused(&mut doc, Numbering::Renumber { start, step, order: Order::List }).contains("1 to 999999"), "{start} by {step}");
+    }
+    assert!(refused(&mut doc, Numbering::Renumber { start: MAX_ITEM - 1, step: 1, order: Order::List }).contains("passes 999999"));
+    assert!(refused(&mut doc, Numbering::Renumber { start: 1, step: MAX_ITEM, order: Order::List }).contains("passes 999999"));
+    assert!(refused(&mut doc, Numbering::Set { row: vec![4], item: Some(1), locked: None }).contains("item 4"));
+    assert!(refused(&mut doc, Numbering::Set { row: vec![1, 1], item: Some(1), locked: None }).contains("item 1.1"));
+    assert!(refused(&mut doc, Numbering::Set { row: vec![1], item: Some(0), locked: None }).contains("1 to 999999"));
+    assert!(doc.assembly.item_numbers.is_empty(), "nothing saved");
+    // The highest number is taken; a renumber that would pass it is refused whole.
+    assert!(numbered(&mut doc, Request::default(), Numbering::Renumber { start: MAX_ITEM - 2, step: 1, order: Order::List }));
+    assert_eq!(listed(&doc, Request::default()).unwrap().rows.last().map(|r| r.item), Some(MAX_ITEM));
+}
+
+/// A damaged file's numbers: one out of range is no number, and of a key saved twice the first
+/// holds. A component's numbering goes with it.
+#[test]
+fn saved_numbers_are_read_leniently_and_go_with_their_component() {
+    let (mut doc, [(a, _), (b, _), (c, _)]) = three_parts();
+    let key = |component| RowKey { parents: vec![], member: Member { component, bom_type: Normal } };
+    let saved = |key, number| ItemNumber { key, number, locked: false };
+    doc.assembly.item_numbers.push(ItemNumbers {
+        source: 0,
+        view: View::PartsOnly,
+        group: Group::PartNumber,
+        fold: false,
+        purchased_contents: false,
+        items: vec![saved(key(a), 4), saved(key(a), 9), saved(key(b), 0), saved(key(c), MAX_ITEM + 1)],
+    });
+    assert_eq!(items(&listed(&doc, Request::default()).unwrap()), [item("4", "A", ""), item("5", "B", "p"), item("6", "C", "p")]);
+    let (sub, _) = add(&mut doc, "Sub", 0);
+    add(&mut doc, "Inner", sub);
+    assert!(numbered(&mut doc, Request { source: sub, ..Request::default() }, RENUMBER));
+    assert_eq!(doc.assembly.item_numbers.len(), 2);
+    doc.components.retain(|c| c.id != sub);
+    doc.occurrences.retain(|o| o.component != sub && o.parent != sub);
+    assert!(recorded(&mut doc));
+    assert_eq!(doc.assembly.item_numbers.iter().map(|n| n.source).collect::<Vec<_>>(), [0], "the design's is kept");
+}
+
+/// Numbers are saved in the design under `assembly.item_numbers`, and change no geometry.
+#[test]
+fn item_numbers_are_saved_and_are_part_properties() {
+    let (mut doc, _) = three_parts();
+    let before = doc.clone();
+    assert!(numbered(&mut doc, Request { fold: true, ..view(View::AllLevels) }, RENUMBER));
+    assert!(doc.differs_only_in_part_properties(&before));
+    assert!(!doc.differs_only_in_part_properties(&doc.clone()), "no change is no part-properties change");
+    let json = serde_json::to_value(&doc.assembly).unwrap();
+    let first = &json["item_numbers"][0];
+    assert_eq!(
+        (&first["source"], &first["levels"], &first["group_by"], &first["group_children"]),
+        (&json!(0), &json!("all"), &json!("part_number"), &json!(true))
+    );
+    assert_eq!(first["items"][0], json!({"member": {"component": doc.components[0].id, "bom_type": "normal"}, "number": 1}));
+    // Through the whole design, as a save writes it: a design whose assembly holds only numbers keeps them.
+    assert_eq!(Document::from_json(&doc.to_json()).unwrap().assembly, doc.assembly);
+    assert!(serde_json::to_value(&before.assembly).unwrap().get("item_numbers").is_none(), "a design never numbered saves nothing new");
+}

@@ -440,6 +440,8 @@
   "cmd.appearance_library": "Erscheinungsbild-Bibliothek",
   "cmd.appearance_list": "Erscheinungsbilder auflisten",
   "cmd.assembly_bom": "Stückliste",
+  "cmd.assembly_bom_item_set": "Positionsnummer ändern",
+  "cmd.assembly_bom_renumber": "Positionen neu nummerieren",
   "cmd.body_rename": "Körper umbenennen",
   "cmd.browser_group": "Neue Gruppe",
   "cmd.browser_move": "Browser-Elemente verschieben",

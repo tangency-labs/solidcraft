@@ -414,3 +414,26 @@ quoted; children follow their row) or a `.json` file. The window lists the same 
 between the levels and groupings and shows children under their part, edits a picked row's part
 number, description and revision, and exports them. Changing part properties or a bill of
 materials type changes no geometry, so it doesn't evaluate the model or re-seat joints again.
+
+**Item numbers.** Until a view is numbered, a row's `item` is its place in the list, and it can
+change as parts come and go. Numbering a view saves its numbers in the design, one numbering for
+each assembly (the design, or a `component`) and each `levels`, with the list options it was
+numbered with:
+
+- `assembly.bom.renumber {component?, levels?, start?, step?, order?}` numbers every row from
+  `start` by `step` (both 1 by default), each level on its own: in `all`, the rows under a row
+  are numbered within it (2.1, 2.2). `order: "list"` (the default) goes by part number, as an
+  unnumbered list does; `order: "item"` keeps the current order and closes the gaps.
+- `assembly.bom.item.set {component?, levels?, row, item?, locked?}` changes one row, named by
+  the item it shows now (`"3"`, or `"2.1"` under row 2). A number another row already has is
+  allowed, and both rows say `duplicate`. A locked number stays through a renumber, which skips
+  it, so no two rows get one number.
+
+Once a view is numbered, a part added takes the highest number at its level + 1, saved in the
+same undo step as the change that added it. A part removed leaves a gap until the next renumber,
+and if it comes back it gets its old number, so a number on a printed drawing never comes to mean
+another part. The number follows the row through part-number edits. A numbered view lists each
+level by item number, and `assembly.bom` says `numbered: true`; a row says `provisional` when its
+number isn't saved yet (a list made with other options), and `locked` and `duplicate` when they
+apply. Saved numbers are plain numbers: how they are padded (007) is up to the table that shows
+them. Numbering changes no geometry, so it doesn't evaluate the model.

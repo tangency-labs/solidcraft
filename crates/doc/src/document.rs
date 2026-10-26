@@ -2801,18 +2801,21 @@ impl Document {
     }
 
     /// Only part properties changed (components' metadata and free properties, occurrences'
-    /// bill of materials types): nothing to evaluate. The same whole-Document proof as
-    /// [`Document::differs_only_in_render`].
+    /// bill of materials types, saved item numbers): nothing to evaluate. The same whole-Document
+    /// proof as [`Document::differs_only_in_render`].
     pub fn differs_only_in_part_properties(&self, previous: &Document) -> bool {
         if self.components.len() != previous.components.len()
             || self.components.iter().zip(&previous.components).any(|(a, b)| a.id != b.id)
             || self.occurrences.len() != previous.occurrences.len()
             || self.occurrences.iter().zip(&previous.occurrences).any(|(a, b)| a.id != b.id)
-            || (self.components == previous.components && self.occurrences == previous.occurrences)
+            || (self.components == previous.components
+                && self.occurrences == previous.occurrences
+                && self.assembly.item_numbers == previous.assembly.item_numbers)
         {
             return false;
         }
         let mut normalized = previous.clone();
+        normalized.assembly.item_numbers.clone_from(&self.assembly.item_numbers);
         for (n, c) in normalized.components.iter_mut().zip(&self.components) {
             n.metadata = c.metadata.clone();
             n.properties = c.properties.clone();

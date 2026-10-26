@@ -250,6 +250,22 @@ features are computed.
 - **Elsewhere:** folder, group.
 - **For translators:** not a rigid group (a joint) and not a fixed browser *folder*.
 
+### item number
+
+The number that names a row of a bill of materials, the one a parts list and a balloon show.
+
+Until a bill of materials view is numbered, it is the row's place in the list and can change.
+Once the view is numbered it is saved with the row, kept when the row's part number changes, and
+a new row takes the next number at its level. A row listed under another reads as both numbers
+(2.1).
+
+- **In SolidCraft:** each `assembly.bom` row's `item`, with `provisional`, `locked` and
+  `duplicate`; `assembly.bom.renumber` and `assembly.bom.item.set`; the design file's
+  `assembly.item_numbers`.
+- **Don't use:** position, balloon number, find number; index.
+- **Elsewhere:** item number, item, find number, balloon number.
+- **For translators:** a label, not a quantity or a count; not a part number.
+
 ### material
 
 The physical substance of a body, which sets its density and mechanical properties.

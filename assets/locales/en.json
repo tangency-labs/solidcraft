@@ -487,6 +487,8 @@
   "cmd.appearance_library": "Appearance Library",
   "cmd.appearance_list": "List Appearances",
   "cmd.assembly_bom": "Bill of Materials",
+  "cmd.assembly_bom_item_set": "Change Item Number",
+  "cmd.assembly_bom_renumber": "Renumber Items",
   "cmd.body_rename": "Rename Body",
   "cmd.browser_group": "New Group",
   "cmd.browser_move": "Move Browser Items",

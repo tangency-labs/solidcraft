@@ -487,6 +487,8 @@
   "cmd.appearance_library": "外观库",
   "cmd.appearance_list": "列出外观",
   "cmd.assembly_bom": "物料清单",
+  "cmd.assembly_bom_item_set": "更改项目编号",
+  "cmd.assembly_bom_renumber": "重新编号项目",
   "cmd.body_rename": "重命名实体",
   "cmd.browser_group": "新建组",
   "cmd.browser_move": "移动浏览器项目",

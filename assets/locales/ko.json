@@ -440,6 +440,8 @@
   "cmd.appearance_library": "외관 라이브러리",
   "cmd.appearance_list": "외관 목록",
   "cmd.assembly_bom": "자재 명세서",
+  "cmd.assembly_bom_item_set": "항목 번호 변경",
+  "cmd.assembly_bom_renumber": "항목 번호 다시 매기기",
   "cmd.body_rename": "바디 이름 변경",
   "cmd.browser_group": "새 그룹",
   "cmd.browser_move": "브라우저 항목 이동",

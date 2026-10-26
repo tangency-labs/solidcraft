@@ -4,12 +4,15 @@
 //! `occurrence.bom_type` lets one occurrence count as another bill of materials type.
 //!
 //! `assembly.bom` presents the rows of a bill of materials view of the design, or of one
-//! component, as JSON, optionally written to a CSV or JSON file. The rows and every rule behind
-//! them (bill of materials types, folding, materials, mass) are `solidcraft_doc::bom`'s.
+//! component, as JSON, optionally written to a CSV or JSON file. `assembly.bom.renumber` and
+//! `assembly.bom.item.set` number a view, which saves its item numbers; [`record_item_numbers`]
+//! saves a numbered view's new rows' numbers after each change. The rows and every rule behind
+//! them (bill of materials types, folding, materials, mass, item numbers) are
+//! `solidcraft_doc::bom`'s.
 
 use serde_json::{Map, Value, json};
 use solidcraft_doc::BomType;
-use solidcraft_doc::bom::{self, Bom, Group, Mass, Request, Row, Tree, View};
+use solidcraft_doc::bom::{self, Bom, Group, MAX_ITEM, Mass, Numbering, Order, Request, Row, Tree, View};
 use solidcraft_doc::metadata::{BOM_TYPE, DESCRIPTION, MATERIAL, MAX_KEYS, MAX_TEXT_BYTES, PART_NUMBER, REVISION, WELL_KNOWN};
 
 use super::CommandSpec;
@@ -68,7 +71,26 @@ pub static COMMANDS: &[CommandSpec] = &[
          row that weighs what is placed inside it shows the one material all of that shares, else \"\"), mass_g?, components, \
          properties, children?, static? ([\"material\"]: a value typed in for the component, shown in place of the worked-out \
          one)}] sorted by part number, total_occurrences (children included), total_mass_g (with mass: \
-         what the assembly weighs, measured from the design rather than added up from rows; null when unknown)",
+         what the assembly weighs, measured from the design rather than added up from rows; null when unknown), numbered \
+         (the view's item numbers are saved: assembly.bom.renumber). In a numbered view each level is listed by item number \
+         and a row says provisional (its number not saved yet: a row added since shows the next number at its level, saved \
+         by the next change), locked and duplicate when true",
+    ),
+    CommandSpec::new("assembly.bom.renumber", "Renumber Items", renumber).icon("bom").params(
+        "component?, levels?, group_by?, group_children?, show_purchased_contents?: the view, as assembly.bom takes them; \
+         start?: 1; step?: 1 (whole numbers, 1 to 999999); order?: list (default: by part number, as an unnumbered view \
+         lists) | item (in item-number order, closing the gaps). Numbers every row from start by step, each level on its \
+         own (in all levels, within its parent); locked rows keep their numbers and the others skip them; rows that are \
+         gone are forgotten. Saves the view's numbers, with these list options: after it, a row added takes the highest \
+         number at its level + 1 and a row removed leaves a gap until the next renumber. One undo step → the view as \
+         assembly.bom gives it",
+    ),
+    CommandSpec::new("assembly.bom.item.set", "Change Item Number", item_set).icon("bom").params(
+        "component?, levels?, group_by?, group_children?, show_purchased_contents?: the view, as assembly.bom takes them; \
+         row: the row's item as the view shows it now (\"3\", or \"1.2\" under row 1); item?: 1 to 999999 (a number \
+         another row has is allowed: both are marked duplicate); locked?: true|false (a renumber keeps a locked number). \
+         A view not numbered yet is numbered first, every row keeping the number it shows. One undo step → the view as \
+         assembly.bom gives it, with duplicates: [item numbers used twice at the row's level]",
     ),
 ];
 
@@ -278,16 +300,17 @@ fn grams(mass: Mass) -> Value {
 /// row's children (a folded part's contents, one level) are listed in it.
 fn rows_json(list: &Bom, view: View, mass: bool) -> Vec<Value> {
     if view == View::AllLevels {
-        list.rows_deep().iter().map(|(item, row)| row_json(row, item, mass, false)).collect()
+        list.rows_deep().iter().map(|(item, row)| row_json(row, item, mass, list.numbered, false)).collect()
     } else {
-        list.rows.iter().map(|row| row_json(row, &[row.item], mass, true)).collect()
+        list.rows.iter().map(|row| row_json(row, &[row.item], mass, list.numbered, true)).collect()
     }
 }
 
 /// One row, `item` its item numbers from the top (`[2, 1]` reads 2.1), with its children in it when
 /// `nested`. A row listed under another reads its item as "2.1" and gives `each`, and leaves out
-/// its components and properties (the output #1888 set).
-fn row_json(row: &Row, item: &[u32], mass: bool, nested: bool) -> Value {
+/// its components and properties (the output #1888 set). Its numbering flags are given when true;
+/// provisional only in a `numbered` view (in one never numbered every number is).
+fn row_json(row: &Row, item: &[u32], mass: bool, numbered: bool, nested: bool) -> Value {
     let mut v = json!({"part_number": row.part_number, "description": row.description, "revision": row.revision,
         "bom_type": row.bom_type.as_str(), "count": row.count, "definition": row.names.join("; "), "material": row.materials.join("; ")});
     if item.len() <= 1 {
@@ -300,6 +323,11 @@ fn row_json(row: &Row, item: &[u32], mass: bool, nested: bool) -> Value {
     }
     if mass {
         v["mass_g"] = grams(row.mass);
+    }
+    for (flag, on) in [("provisional", numbered && row.provisional), ("locked", row.locked), ("duplicate", row.duplicate)] {
+        if on {
+            v[flag] = json!(true);
+        }
     }
     if !row.statics.is_empty() {
         v["static"] = json!(row.statics.iter().map(|s| s.key()).collect::<Vec<_>>());
@@ -314,7 +342,7 @@ fn row_json(row: &Row, item: &[u32], mass: bool, nested: bool) -> Value {
                 if let Some(last) = under.last_mut() {
                     *last = c.item;
                 }
-                row_json(c, &under, mass, true)
+                row_json(c, &under, mass, numbered, true)
             })
             .collect();
     }
@@ -380,7 +408,98 @@ fn bom(s: &mut Session, p: &Value) -> Result<Value> {
     if request.mass {
         out.insert("total_mass_g".into(), grams(list.total.mass));
     }
+    out.insert("numbered".into(), json!(list.numbered));
     Ok(Value::Object(out))
+}
+
+/// A whole number from 1 to [`MAX_ITEM`] (`default` when not given).
+fn item_number(p: &Value, k: &str, default: Option<u32>, cmd: &str) -> Result<Option<u32>> {
+    match p.get(k) {
+        None | Some(Value::Null) => Ok(default),
+        Some(v) => v
+            .as_u64()
+            .and_then(|n| u32::try_from(n).ok())
+            .filter(|n| (1..=MAX_ITEM).contains(n))
+            .map(Some)
+            .ok_or_else(|| bad(cmd, format!("`{k}` is a whole number from 1 to {MAX_ITEM}"))),
+    }
+}
+
+/// The view numbered as `how` says, its numbers saved (only a real change touches the design), and
+/// the view as `assembly.bom` gives it.
+fn renumbered(s: &mut Session, p: &Value, how: Numbering, cmd: &str) -> Result<(Value, Bom)> {
+    let request = Request { mass: false, ..request(s, p, cmd)? };
+    let state = s.model.state();
+    let numbers = bom::number(&mut Tree::new(&s.doc, &state), &request, how).map_err(|e| bad(cmd, e.to_string()))?;
+    if let Some(numbers) = numbers {
+        let saved = &mut s.doc_mut().assembly.item_numbers;
+        match saved.iter_mut().find(|n| n.source == numbers.source && n.view == numbers.view) {
+            Some(old) => *old = numbers,
+            None => saved.push(numbers),
+        }
+    }
+    let list = bom::list(&mut Tree::new(&s.doc, &state), &request).map_err(|e| bad(cmd, e.to_string()))?;
+    let reply = json!({"component": request.source, "levels": request.view.as_str(), "numbered": list.numbered,
+        "rows": rows_json(&list, request.view, false), "total_occurrences": list.total.occurrences});
+    Ok((reply, list))
+}
+
+fn renumber(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "assembly.bom.renumber";
+    let start = item_number(p, "start", Some(1), cmd)?.unwrap_or(1);
+    let step = item_number(p, "step", Some(1), cmd)?.unwrap_or(1);
+    let order = match p.get("order") {
+        None | Some(Value::Null) => Order::List,
+        Some(Value::String(o)) if o == "list" => Order::List,
+        Some(Value::String(o)) if o == "item" => Order::Item,
+        Some(_) => return Err(bad(cmd, "`order` is list or item")),
+    };
+    Ok(renumbered(s, p, Numbering::Renumber { start, step, order }, cmd)?.0)
+}
+
+fn item_set(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "assembly.bom.item.set";
+    let shown = || bad(cmd, "`row` is the row's item as the view shows it: \"3\", or \"1.2\" under row 1");
+    let row: Vec<u32> = match p.get("row") {
+        Some(Value::Number(n)) => vec![n.as_u64().and_then(|n| u32::try_from(n).ok()).ok_or_else(shown)?],
+        Some(Value::String(text)) if text.len() <= 1024 => {
+            text.split('.').map(|n| n.trim().parse::<u32>().map_err(|_| shown())).collect::<Result<_>>()?
+        }
+        _ => return Err(shown()),
+    };
+    let item = item_number(p, "item", None, cmd)?;
+    let locked = match p.get("locked") {
+        None | Some(Value::Null) => None,
+        Some(Value::Bool(b)) => Some(*b),
+        Some(_) => return Err(bad(cmd, "`locked` is true or false")),
+    };
+    if item.is_none() && locked.is_none() {
+        return Err(bad(cmd, "give `item`, `locked` or both"));
+    }
+    let (mut reply, list) = renumbered(s, p, Numbering::Set { row: row.clone(), item, locked }, cmd)?;
+    // The rows listed with it: under the row above it (the top level for a row of its own).
+    let above = row.split_last().map_or(&[][..], |(_, above)| above);
+    let mut level: &[Row] = &list.rows;
+    for &i in above {
+        level = level.iter().find(|r| r.item == i).map_or(&[][..], |r| r.children.as_slice());
+    }
+    let mut duplicates: Vec<u32> = level.iter().filter(|r| r.duplicate).map(|r| r.item).collect();
+    duplicates.dedup();
+    reply["duplicates"] = json!(duplicates);
+    Ok(reply)
+}
+
+/// After a change, each numbered view's new rows get their numbers in the design ([`bom::record`]),
+/// so they are saved in the change's undo step. A design with no view numbered lists nothing.
+/// Whether the design changed.
+pub(crate) fn record_item_numbers(s: &mut Session) -> bool {
+    if s.doc.assembly.item_numbers.is_empty() {
+        return false;
+    }
+    let state = s.model.state();
+    let Some(numbers) = bom::record(&mut Tree::new(&s.doc, &state)) else { return false };
+    s.doc_mut().assembly.item_numbers = numbers;
+    true
 }
 
 #[cfg(test)]
