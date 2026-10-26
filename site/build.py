@@ -976,7 +976,8 @@ for difftest counts and blockers.</p>
         rep = reports.get(u["id"], (None, None))[0]
         nfn = len(callgraph.get(u["id"], {}).get("functions", []))
         if rep:
-            # a case whose C++ reference is a confirmed defect (cpp_defect) counts as passed
+            # a confirmed C++ defect run anyway (cpp_defect) counts as passed; a parked one
+            # (not run) is neither passed nor failed and is listed on the unit page
             cp = rep.get("cases_passed", 0) + rep.get("cases_cpp_defect", 0)
             cd, cf = rep.get("cases_deferred", 0), rep.get("cases_failed", 0)
             blockers = sorted(rep.get("deferred_by_unit", {}).items(), key=lambda kv: (-kv[1], kv[0]))
@@ -1062,11 +1063,20 @@ counts). Click a column heading to sort.</p>
                            "the Rust result is kept and the case counts as passed): "
                            + ", ".join(f'<code>{esc(c.get("name", ""))}</code> ({esc(c.get("cpp_defect", ""))})'
                                        for c in defects) + "</p>") if defects else ""
+            parked = [c for c in rep.get("cases", []) if isinstance(c, dict) and c.get("outcome") == "parked"]
+            parked_cases = ("<p>Parked cases: the C++ reference is verified wrong (a confirmed upstream "
+                            "issue), so they are not run in the gate and count neither as passed nor as "
+                            "failed. A nightly job runs them against upstream's latest release and reports "
+                            "any that start to agree; removing the entry's <code>cpp_defect</code> runs one "
+                            "again. "
+                            + ", ".join(f'<code>{esc(c.get("name", ""))}</code> ({esc(c.get("cpp_defect", ""))})'
+                                        for c in parked) + "</p>") if parked else ""
             diff = f"""
 <dl class="facts">
 <div><dt>Cases</dt><dd>{fmt_int(rep.get('cases_total', 0))}</dd></div>
 <div><dt>Passed</dt><dd>{fmt_int(rep.get('cases_passed', 0))}</dd></div>
 {f"<div><dt>C++ defect (counted as passed)</dt><dd>{fmt_int(rep['cases_cpp_defect'])}</dd></div>" if rep.get('cases_cpp_defect') else ''}
+{f"<div><dt>Parked (C++ defect, not run)</dt><dd>{fmt_int(rep['cases_parked'])}</dd></div>" if rep.get('cases_parked') else ''}
 {f"<div><dt>Known mismatch</dt><dd>{fmt_int(rep['cases_known_mismatch'])}</dd></div>" if rep.get('cases_known_mismatch') else ''}
 <div><dt>Deferred</dt><dd>{fmt_int(rep.get('cases_deferred', 0))}</dd></div>
 <div><dt>Failed</dt><dd>{fmt_int(rep.get('cases_failed', 0))}</dd></div>
@@ -1077,6 +1087,7 @@ counts). Click a column heading to sort.</p>
 </dl>
 {('<p>Absolute floors: <code>' + esc(json.dumps(floors)) + '</code></p>') if floors else ''}
 {cpp_defects}
+{parked_cases}
 <h3>Blocked by</h3>
 {('<div class="scroll narrow"><table><thead><tr><th>Unported unit</th><th>Deferred cases</th></tr></thead><tbody>' + dtable + '</tbody></table></div>') if dtable else '<p class="muted">Nothing: no deferred cases.</p>'}
 <p><a href="../reports/{esc(uid)}.json">Report JSON</a> (per-case results, from CI's latest <code>main</code> run)</p>"""

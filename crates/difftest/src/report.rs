@@ -120,6 +120,9 @@ pub fn unit_report(r: &UnitResult) -> Value {
     if r.cpp_defects() > 0 {
         m.insert("cases_cpp_defect".into(), json!(r.cpp_defects()));
     }
+    if r.parked() > 0 {
+        m.insert("cases_parked".into(), json!(r.parked()));
+    }
     m.insert("max_rel_err".into(), num(r.max_rel_err()));
     m.insert(
         "cases".into(),
@@ -159,6 +162,8 @@ pub struct ReportCounts {
     pub known: u64,
     /// Confirmed C++ reference defects (successes, but not passing cases).
     pub cpp_defect: u64,
+    /// Parked cases (confirmed C++ defects, not run; neither passes nor failures).
+    pub parked: u64,
     /// Successful cases with no numeric/topological comparisons.
     pub vacuous: u64,
 }
@@ -176,6 +181,7 @@ impl ReportCounts {
             rejected: n(r.rejected()),
             known: n(r.known_mismatches()),
             cpp_defect: n(r.cpp_defects()),
+            parked: n(r.parked()),
             vacuous: n(r.vacuous()),
         }
     }
@@ -193,6 +199,7 @@ impl ReportCounts {
             rejected: n("cases_rejected").unwrap_or(0),
             known: n("cases_known_mismatch").unwrap_or(0),
             cpp_defect: n("cases_cpp_defect").unwrap_or(0),
+            parked: n("cases_parked").unwrap_or(0),
             vacuous: n("cases_vacuous").unwrap_or(0),
         })
     }
@@ -200,7 +207,7 @@ impl ReportCounts {
     /// `status=… cases=… passed=… failed=… deferred=… rejected=…`.
     pub fn describe(&self) -> String {
         format!(
-            "status={} cases={} passed={} failed={} deferred={} rejected={} known={} cpp_defect={} vacuous={}",
+            "status={} cases={} passed={} failed={} deferred={} rejected={} known={} cpp_defect={} parked={} vacuous={}",
             self.status,
             self.total,
             self.passed,
@@ -209,6 +216,7 @@ impl ReportCounts {
             self.rejected,
             self.known,
             self.cpp_defect,
+            self.parked,
             self.vacuous
         )
     }
@@ -270,6 +278,9 @@ pub fn summary_line(r: &UnitResult) -> String {
     if r.cpp_defects() > 0 {
         let _ = write!(s, " cpp_defect={}", r.cpp_defects());
     }
+    if r.parked() > 0 {
+        let _ = write!(s, " parked={}", r.parked());
+    }
     if r.skipped_platform() > 0 {
         let _ = write!(s, " skipped_platform={}", r.skipped_platform());
     }
@@ -310,7 +321,7 @@ mod tests {
         assert_eq!(ReportCounts::parse(&text), Some(ReportCounts::of(&r)));
         assert_eq!(
             ReportCounts::of(&r).describe(),
-            "status=fail cases=0 passed=0 failed=0 deferred=0 rejected=0 known=0 cpp_defect=0 vacuous=0"
+            "status=fail cases=0 passed=0 failed=0 deferred=0 rejected=0 known=0 cpp_defect=0 parked=0 vacuous=0"
         );
     }
 
@@ -352,6 +363,7 @@ mod tests {
                 diagnostics: std::collections::BTreeMap::new(),
                 known_mismatch: Some("test comparison".into()),
                 cpp_defect: None,
+                parked: false,
             };
             let report = case_json(&case);
             assert_eq!(report["outcome"], "known_mismatch");
@@ -376,6 +388,7 @@ mod tests {
             diagnostics: std::collections::BTreeMap::new(),
             known_mismatch: Some("C++ uses a freed pointer".into()),
             cpp_defect: Some("UB-1".into()),
+            parked: false,
         };
         let c = case_json(&case);
         assert_eq!(c["outcome"], "cpp_defect");

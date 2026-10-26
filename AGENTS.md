@@ -54,7 +54,8 @@ documents one per key in `abs_floors()`, recorded in its report). Never loosen a
 goes in a new `plan/findings/<slug>.md` (unit, inputs, both values, suspected cause) and the unit
 stays `blocked`. Sole exception: a case where the C++ reference is verified wrong (a confirmed
 `plan/upstream-issues/` entry) is listed with `cpp_defect = "<id>"` in its known-mismatch entry
-and counts as passing (`crates/difftest/README.md`); never use it for a Rust divergence.
+and is parked: not run in the gate, not counted as a pass, and does not block green; removing
+the marker runs it again (`crates/difftest/README.md`); never use it for a Rust divergence.
 
 **Git.** Work happens through pull requests to github.com/tangency-labs/solidcore. Never
 push to `main` directly, never force-push shared branches, never rewrite `main`'s

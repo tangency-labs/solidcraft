@@ -269,14 +269,14 @@ compared (a harness error on the C++ side still fails it). Unit status:
 
 | status | condition |
 |---|---|
-| `green` | ≥1 case, every case passes or is a `cpp_defect`, 0 deferred, 0 `known_mismatch` |
+| `green` | ≥1 case, every case passes, is parked or is a `cpp_defect`, 0 deferred, 0 `known_mismatch` |
 | `partial` | no failing case, ≥1 deferred or `known_mismatch` |
 | `fail` | any failing case, harness error, or no cases |
 
 The report records `status`, `cases_passed`/`cases_failed`/`cases_deferred`
-(and `cases_known_mismatch`/`cases_cpp_defect` when nonzero),
+(and `cases_known_mismatch`/`cases_cpp_defect`/`cases_parked` when nonzero),
 `deferred_by_unit` (`{"<blocking unit>": <cases>}`, sorted), and per case
-`outcome` (`pass|fail|deferred|rejected|known_mismatch|cpp_defect`) plus
+`outcome` (`pass|fail|deferred|rejected|known_mismatch|cpp_defect|parked`) plus
 `deferred: {unit, symbol}`. When the
 blocking unit lands and its stubs are wired, re-run: the deferred count drops
 and the unit can move from `partial` to `green`.
@@ -299,7 +299,7 @@ crash trap that ran the call in a forked child and saw it crash, returns
 `Output::deferred`: deferrals are decided by the Rust side only, and a C++-side
 deferral is a harness error.
 
-## Known mismatches and confirmed C++ defects
+## Known mismatches and parked C++ defects
 
 A disagreement that cannot be fixed faithfully is listed in
 `crates/difftest/known_mismatches/<unit id>.toml` (format and rules: `src/known.rs`)
@@ -312,10 +312,31 @@ An entry may add `cpp_defect = "<id>"` only when the C++ reference itself is ver
 wrong and the Rust result is the correct one: `<id>` (`UB-`/`WR-`/`ND-`/`HANG-<n>`)
 must name exactly one `plan/upstream-issues/<id>--<slug>.md` with `- **Confirmed:**
 yes` (checked when the list is loaded; a bad id fails the unit). Such a case is
-`cpp_defect`: reported separately with its mismatches (`cases_cpp_defect`, a
-`cpp-defect` line in the run output, its own row on the site) and **counted as a
-success**: it does not keep the unit from `green`, and the site's units table counts
-it as passed. Rust divergences and unexplained disagreements are never `cpp_defect`.
+**parked**: the gate does not run it, it counts neither as a pass nor as a failure,
+and it does not keep the unit from `green`. It is reported with outcome `parked` and
+its issue id (`cases_parked`, ` parked=N` on the summary line, a `parked <case> (<id>)`
+line in the run output, its own row and case list on the site's unit page). Rust
+divergences and unexplained disagreements are never `cpp_defect`.
+
+**Un-parking.** Delete the entry's `cpp_defect` line and the case runs again as an
+ordinary known mismatch (or delete the whole entry once it agrees). There is no other
+switch. Upstream (NVIDIA usd-brep) changes rarely and takes no outside contributions,
+so parked cases are expected to stay parked until a release fixes the defect.
+
+**Upstream watch** (`.github/workflows/parked-upstream.yml`, outside the gate): each
+night it only asks upstream for its tags and HEAD (`git ls-remote`) and stops when
+that is the state it has already seen. When upstream changed (or on a manual run) it
+builds the C++ reference with `harness/cpp/build.sh` from upstream's HEAD instead of
+the pinned commit (only the SMLib/SM_API sources the harness builds), runs
+`difftest --run-parked` on every unit with a parked case, and opens or updates one
+issue, `usd-brep <tag> released: N parked cases now agree, adopt?` (or `... none
+changed`). `--run-parked` runs only the parked cases: one that still disagrees is
+reported as `cpp_defect` (with its mismatches), one that agrees as an ordinary `pass`.
+`scripts/ci/parked_upstream.py` selects the units and writes the issue. Upstream's
+unpinned HEAD runs only in the `run-parked` job, which has a read-only token (credentials
+not kept in the checkout) and no sccache or rust-cache; its one cache, the C++ build, uses
+a `parked-upstream-*` key that main CI never restores. A separate `report` job, the only
+one with `issues: write`, reads the uploaded reports and runs nothing else.
 
 ## Regression gate (`--baseline`, value share)
 
@@ -323,11 +344,12 @@ Passing cases must retain their identities, outcomes and value coverage.
 `--baseline D` compares a full unit run against `D/<unit>.json`: passing cases
 must remain passing, including against `known_mismatch`; cases that compared
 float/integer/topology values must keep value coverage. Deferred, failing and
-known-mismatch and `cpp_defect` cases cannot disappear. Each must remain one of
-those two (adding or dropping the `cpp_defect` marker) or become a genuine pass;
+known-mismatch, `cpp_defect` and parked cases cannot disappear. Each must remain one
+of those three (adding or dropping the `cpp_defect` marker) or become a genuine pass;
 it cannot become deferred, rejected or failing. A baseline pass may not become
-`known_mismatch` or `cpp_defect`, so marking a passing case never waives it. Every retained case
-that compared values must keep value coverage. Rejected fixture constructors may be
+`known_mismatch`, `cpp_defect` or parked, so marking a passing case never waives it.
+Every retained case that compared values must keep value coverage, except a case that
+is now parked (it is not run). Rejected fixture constructors may be
 removed; new passing cases and genuine fixes are allowed. Changed seeds and
 `--filter` with `--baseline` are errors, so generated cases cannot silently vanish.
 With `--green`, dropped baseline units fail in the parent before parallel workers
@@ -338,8 +360,8 @@ have no earlier report. This avoids parsing the full corpus in every worker.
 
 The separate value-share floor remains 75% of a unit's passing cases and at
 least one value-bearing case. Both-error and vacuous passes stay in the
-denominator. Known mismatches and `cpp_defect` cases are not passes (not in the
-value-share count) and cannot waive new discrepancies.
+denominator. Known mismatches, `cpp_defect` and parked cases are not passes (not in
+the value-share count) and cannot waive new discrepancies.
 
 CI runs the gate as parallel jobs (`.github/workflows/ci.yml`): `difftest-baseline`
 fetches and validates the exact-base artifact (below) while `difftest-sweep` runs
@@ -403,7 +425,7 @@ ratchet waivers once the PR has merged.
   `abs_floors()` (key + value + reason, written into the report). Do not add a
   floor to make a case pass; if the C++ and Rust genuinely disagree, record it in
   a new `plan/findings/<slug>.md` and leave the unit non-green (the one
-  exception is a confirmed C++ defect, `cpp_defect` above).
+  exception is a confirmed C++ defect, parked with `cpp_defect` above).
 * Key sets and array lengths must match. A case with a harness error (bad
   input, panic) fails. A unit with zero cases fails.
 

@@ -87,6 +87,11 @@ pub struct RunOptions {
     /// reported as a failed (timed-out) case instead of hanging the worker.
     /// Default: no limit (byte-identical to the unset behaviour).
     pub case_timeout: Option<Duration>,
+    /// Run only the parked cases (`known_mismatches/<unit>.toml` entries with a
+    /// `cpp_defect`) and nothing else: the nightly check against a newer C++ reference
+    /// (`--run-parked`). A parked case that now agrees is an ordinary pass here, not a
+    /// stale-entry error. Off by default: the gate never runs parked cases.
+    pub run_parked: bool,
 }
 
 /// Relative perturbation used by [`RunOptions::perturb`] (10x the tolerance).
@@ -126,6 +131,9 @@ pub struct CaseResult {
     pub known_mismatch: Option<String>,
     /// The listing names a confirmed C++ reference defect (the entry's `cpp_defect`).
     pub cpp_defect: Option<String>,
+    /// The case is parked: listed with a `cpp_defect`, so it was not run
+    /// ([`CaseOutcome::Parked`]).
+    pub parked: bool,
 }
 
 /// Classification of one case.
@@ -146,14 +154,18 @@ pub enum CaseOutcome {
     /// keeps the unit from being green, reported like a failure.
     KnownMismatch,
     /// A listed mismatch whose entry names a confirmed defect of the C++ reference
-    /// (`cpp_defect`, [`crate::known`]): the Rust result is the correct one. Not a pass
-    /// (the C++ still disagrees), but a success: it does not keep the unit from being
-    /// green. Reported separately, with its mismatches.
+    /// (`cpp_defect`, [`crate::known`]) that was run anyway ([`RunOptions::run_parked`])
+    /// and still disagrees: the Rust result is the correct one. Not a pass, but it does
+    /// not keep the unit from being green. Reported separately, with its mismatches.
     CppDefect,
+    /// A case listed with a `cpp_defect` (a confirmed upstream issue), not run: parked
+    /// until upstream fixes the defect. Neither a pass nor a failure; it does not keep
+    /// the unit from being green. Removing the entry's `cpp_defect` runs it again.
+    Parked,
 }
 
 impl CaseOutcome {
-    /// `pass`, `fail`, `deferred`, `rejected`, `known_mismatch` or `cpp_defect`.
+    /// `pass`, `fail`, `deferred`, `rejected`, `known_mismatch`, `cpp_defect` or `parked`.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Pass => "pass",
@@ -163,6 +175,7 @@ impl CaseOutcome {
             Self::SkippedPlatform => "skipped(platform)",
             Self::KnownMismatch => "known_mismatch",
             Self::CppDefect => "cpp_defect",
+            Self::Parked => "parked",
         }
     }
 }
@@ -171,7 +184,9 @@ impl CaseResult {
     /// Classification, excluding native fixture rejections from parity results.
     /// A harness error always fails.
     pub fn outcome(&self) -> CaseOutcome {
-        if self.harness_error.is_some() {
+        if self.parked {
+            CaseOutcome::Parked
+        } else if self.harness_error.is_some() {
             CaseOutcome::Fail
         } else if self.rejected.is_some() {
             CaseOutcome::Rejected
@@ -198,6 +213,11 @@ impl CaseResult {
     /// Case is a listed confirmed C++ reference defect that still mismatches.
     pub fn is_cpp_defect(&self) -> bool {
         self.outcome() == CaseOutcome::CppDefect
+    }
+
+    /// Case is parked (listed with a `cpp_defect`, not run).
+    pub fn is_parked(&self) -> bool {
+        self.outcome() == CaseOutcome::Parked
     }
 
     /// Case passes (not deferred, no harness error, no mismatch).
@@ -239,8 +259,9 @@ impl CaseResult {
 /// Status of a unit run (AGENTS.md section 4a).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnitStatus {
-    /// No failures, deferrals or known mismatches (platform skips excluded). Confirmed
-    /// C++ reference defects ([`CaseOutcome::CppDefect`]) count as successes.
+    /// No failures, deferrals or known mismatches (platform skips excluded). Parked cases
+    /// ([`CaseOutcome::Parked`]) and confirmed C++ reference defects run anyway
+    /// ([`CaseOutcome::CppDefect`]) do not keep a unit from being green.
     /// An entirely platform-skipped run retains this canonical verdict but has no parity passes.
     Green,
     /// No failing case and at least one deferred case or known mismatch.
@@ -398,6 +419,11 @@ impl UnitResult {
     /// Number of listed confirmed C++ reference defects that still mismatch.
     pub fn cpp_defects(&self) -> usize {
         self.cases.iter().filter(|c| c.is_cpp_defect()).count()
+    }
+
+    /// Number of parked cases (listed with a `cpp_defect`, not run).
+    pub fn parked(&self) -> usize {
+        self.cases.iter().filter(|c| c.is_parked()).count()
     }
 
     /// Number of deferred cases.
@@ -579,6 +605,30 @@ pub fn run_unit(unit: &dyn UnitDiff, ctx: &CaseContext, opts: &RunOptions) -> Un
             }
         }
         let entry = known.iter().find(|k| k.case == case.name);
+        let parked_id = entry.and_then(|k| k.cpp_defect.clone());
+        if opts.run_parked != parked_id.is_some() {
+            if parked_id.is_none() {
+                continue; // --run-parked runs the parked cases only
+            }
+            // A confirmed C++ defect is parked: not run, reported with its issue id.
+            res.cases.push(CaseResult {
+                name: case.name.clone(),
+                source: case.source.clone(),
+                inputs: case.inputs.clone(),
+                diff: CaseDiff::default(),
+                harness_error: None,
+                both_errored: false,
+                rejected: None,
+                deferred: None,
+                skipped_platform: None,
+                perturbed: None,
+                diagnostics: BTreeMap::new(),
+                known_mismatch: entry.map(|k| k.why.clone()),
+                cpp_defect: parked_id,
+                parked: true,
+            });
+            continue;
+        }
         // Platform-dependent cases (libstdc++-only C++ reference behaviour): on a
         // non-libstdc++ build report them as skipped(platform) without running.
         if !solidcore_ffi::cpp_stdlib_is_libstdcxx() {
@@ -597,6 +647,7 @@ pub fn run_unit(unit: &dyn UnitDiff, ctx: &CaseContext, opts: &RunOptions) -> Un
                     diagnostics: BTreeMap::new(),
                     known_mismatch: entry.map(|k| k.why.clone()),
                     cpp_defect: entry.and_then(|k| k.cpp_defect.clone()),
+                    parked: false,
                 };
                 res.cases.push(cr);
                 continue;
@@ -628,6 +679,7 @@ pub fn run_unit(unit: &dyn UnitDiff, ctx: &CaseContext, opts: &RunOptions) -> Un
             diagnostics: BTreeMap::new(),
             known_mismatch: entry.map(|k| k.why.clone()),
             cpp_defect: entry.and_then(|k| k.cpp_defect.clone()),
+            parked: false,
         };
         if let Ok(c) = &cpp {
             if let Some(reason) = &c.rejected {
@@ -692,8 +744,10 @@ pub fn run_unit(unit: &dyn UnitDiff, ctx: &CaseContext, opts: &RunOptions) -> Un
             }
         }
         res.timing.compare += t0.elapsed();
+        // (--run-parked: a parked case that now agrees is the news, not a stale entry)
         if cr.known_mismatch.is_some()
             && !opts.perturb
+            && !(opts.run_parked && cr.outcome() == CaseOutcome::Pass)
             && cr.harness_error.is_none()
             && !matches!(
                 cr.outcome(),
@@ -836,6 +890,7 @@ mod tests {
             diagnostics: BTreeMap::new(),
             known_mismatch: None,
             cpp_defect: None,
+            parked: false,
         };
         let d = || {
             Some(Deferred {
@@ -893,6 +948,20 @@ mod tests {
         );
         r.cases.push(known);
         assert_eq!(r.status(), UnitStatus::Partial);
+        r.cases.truncate(1);
+        let mut parked = case(None, true);
+        parked.known_mismatch = Some("C++ uses a freed pointer".into());
+        parked.cpp_defect = Some("UB-1".into());
+        parked.parked = true;
+        assert_eq!(parked.outcome(), CaseOutcome::Parked);
+        assert!(!parked.pass() && !parked.fail());
+        r.cases.push(parked);
+        assert_eq!(
+            r.status(),
+            UnitStatus::Green,
+            "a parked case is not run and does not block green"
+        );
+        assert_eq!((r.passed(), r.parked(), r.cpp_defects()), (1, 1, 0));
         r.cases.truncate(1);
         let mut agrees = defect;
         agrees.diff = CaseDiff::default();
@@ -1092,6 +1161,58 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("empty.unit.toml"), list).unwrap();
         CaseContext { root, seeds: 0 }
+    }
+
+    /// `empty.unit`'s list with `case` parked on a confirmed upstream issue `UB-1`.
+    fn parked_root(tag: &str, case: &str) -> CaseContext {
+        let ctx = known_root(
+            tag,
+            &format!(
+                "[[mismatch]]\nunit = \"empty.unit\"\ncase = \"{case}\"\nwhy = \"w\"\ncpp_defect = \"UB-1\"\n"
+            ),
+        );
+        let dir = ctx.root.join(crate::known::UPSTREAM_ISSUES_DIR);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("UB-1--x.md"),
+            "#### UB-1. x\n- **Confirmed:** yes\n",
+        )
+        .unwrap();
+        ctx
+    }
+
+    #[test]
+    fn parked_cases_are_not_run_and_run_parked_runs_only_them() {
+        // The gate: the parked case is not run, is counted as parked and keeps the unit
+        // green; the other case runs as usual.
+        let r = run_unit(
+            &EmptyOrErr,
+            &parked_root("parked", "err"),
+            &RunOptions::default(),
+        );
+        assert_eq!(r.cases[1].outcome(), CaseOutcome::Parked);
+        assert_eq!(r.cases[1].cpp_defect.as_deref(), Some("UB-1"));
+        assert_eq!((r.passed(), r.failed(), r.parked()), (1, 0, 1));
+        assert_eq!(r.status(), UnitStatus::Green);
+        assert!(crate::report::summary_line(&r).contains(" parked=1"));
+        let report = crate::report::unit_report(&r);
+        assert_eq!(report["cases_parked"], 1);
+        assert_eq!(report["cases"][1]["outcome"], "parked");
+        assert_eq!(report["cases"][1]["cpp_defect"], "UB-1");
+
+        // --run-parked: only the parked case runs; still disagreeing, it is a cpp_defect.
+        let run = RunOptions {
+            run_parked: true,
+            ..RunOptions::default()
+        };
+        let r = run_unit(&EmptyOrErr, &parked_root("run-parked", "err"), &run);
+        assert_eq!(r.cases.len(), 1);
+        assert_eq!(r.cases[0].outcome(), CaseOutcome::CppDefect);
+        // A parked case that now agrees is an ordinary pass, not a stale entry.
+        let r = run_unit(&EmptyOrErr, &parked_root("run-parked-agrees", "ok"), &run);
+        assert_eq!(r.cases.len(), 1);
+        assert_eq!(r.cases[0].outcome(), CaseOutcome::Pass);
+        assert!(r.cases[0].harness_error.is_none());
     }
 
     #[test]
