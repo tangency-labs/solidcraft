@@ -12,7 +12,8 @@
 // One entry point, sc_curve_curve_p7_eval(op, in, n_in, out, cap, out_len). Layouts are
 // documented in crates/solidcore-ffi/src/units/curve_curve_p7.rs, which validates every
 // input. A curve block is `kind dim ...` (0: SmBSplineCurve `oob n p m cpts(x y z w) knots`;
-// 1: SmHermiteCurve `P1 D1 P2 D2`; 2: bounded SmLine `P V d0 d1 scale io`).
+// 1: SmHermiteCurve `P1 D1 P2 D2`; 2: bounded SmLine `P V d0 d1 scale io`;
+// 3: fixed real SmEllipse, dim 3, no further payload).
 #include "sc_shim.h"
 
 #include "StdAfx.h"
@@ -28,6 +29,7 @@
 #include <SmGeomUtility.h>
 #include <SmGlobalSolver.h>
 #include <SmHermiteCurve.h>
+#include <SmEllipse.h>
 #include <SmLine.h>
 #include <SmNurbsCrv.h>
 #include <SmProjectedCurve.h>
@@ -1834,6 +1836,13 @@ SmCurve* read_curve(Rd& rd, const SmContext& ctx)
         SmBSplineCurve* c = new (ctx) SmBSplineCurve(read_nurb(rd), dim, FALSE);
         c->SetOutOfBoundsEnabled(oob ? TRUE : FALSE);
         return c;
+    }
+    if (kind == 3)
+    {
+        // Fixed genuine ellipse; angular degrees differ from its natural [0,1] domain.
+        return new (ctx) SmEllipse(SmPoint3d(0., 0., 0.), SmVector3d(1., 0., 0.),
+                                  SmVector3d(0., 1., 0.), SmExtent1d(0., 180.),
+                                  3., 2., 3, &ctx, NULL, FALSE);
     }
     if (kind == 2)
     {

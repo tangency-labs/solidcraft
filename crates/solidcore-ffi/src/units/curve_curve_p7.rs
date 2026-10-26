@@ -6,7 +6,9 @@
 //!
 //! A curve block is `0 dim oob n p m cpts(x y z w) knots` (an `SmBSplineCurve`) or
 //! `1 dim P1[3] D1[3] P2[3] D2[3]` (an `SmHermiteCurve`); lines (`2 ...`) are rejected (the
-//! solvers decompose curves through the curve cache). `vecs` is `nv V[nv]` (`NULL` for
+//! solvers decompose curves through the curve cache). `3 3` is a genuine fixed ellipse:
+//! origin, canonical X/Y, semiaxes 3/2, angular degrees 0..180, natural interval 0..1.
+//! `vecs` is `nv V[nv]` (`NULL` for
 //! `nv = 0`). A `cache` is `0` (the curve's object cache, `SmCacheMgr::GetOrCreateObjectCache`)
 //! or `1 a b full chord angle offaxis minseg aux max3d ratio` (an `SmCurveCache` built and
 //! tessellated by the shim; not `aux` without `full`, whose pruned leaves hold parent data
@@ -20,7 +22,7 @@
 //!
 //! `xforms` is `nt (O[3] X[3] Y[3] has_s S[3])*nt`, transforms applied to the curve before
 //! them in order (`SmAxis2Placement::SetCanonical(O, X, Y)`, then `SmCurve::Transform`
-//! with the scale `S` when `has_s`; B-splines only, `nt = 0` for none).
+//! with the scale `S` when `has_s`; B-splines and the fixed ellipse, `nt = 0` for none).
 //! A solution `sol` is `type nvar nobj o0 o1 n0 n1 sval s[P] eval e[P]` with
 //! `P = max(nvar, 2)`; objects are `0` (first curve), `1` (second), `2` (another), `-1`
 //! (`NULL`); nodes are pre-order indices in the first / second tree (`-1` = `NULL`). The
@@ -180,7 +182,7 @@ fn line(rd: &mut Reader<'_>) -> Result<(f64, f64), FfiError> {
 
 /// A curve block (see the module docs).
 fn curve_block(rd: &mut Reader<'_>) -> Result<CurveInfo, FfiError> {
-    let kind = rd.index(2)?;
+    let kind = rd.index(3)?;
     let dim = rd.index(3)?;
     if dim < 2 {
         return Err(bad("curve block: dimension must be 2 or 3"));
@@ -197,7 +199,7 @@ fn curve_block(rd: &mut Reader<'_>) -> Result<CurveInfo, FfiError> {
             }
             Ok(CurveInfo { a: 0.0, b: 1.0 })
         }
-        _ => {
+        2 => {
             if dim != 3 {
                 return Err(bad("line block: dimension must be 3"));
             }
@@ -207,6 +209,12 @@ fn curve_block(rd: &mut Reader<'_>) -> Result<CurveInfo, FfiError> {
                 a: -MAX_COORD / 8.0,
                 b: MAX_COORD / 8.0,
             })
+        }
+        _ => {
+            if dim != 3 {
+                return Err(bad("ellipse block: dimension must be 3"));
+            }
+            Ok(CurveInfo { a: 0.0, b: 1.0 })
         }
     }
 }
@@ -320,14 +328,14 @@ fn proj_vecs(rd: &mut Reader<'_>, need: usize, unit: &[usize]) -> Result<(), Ffi
     Ok(())
 }
 
-/// Whether the next curve block is a B-spline (kind `0`).
+/// Whether the next curve inherits B-spline transform capability (kinds `0`, `3`).
 fn next_is_bspline(rd: &Reader<'_>) -> bool {
-    rd.input.get(rd.at) == Some(&0.0)
+    matches!(rd.input.get(rd.at), Some(0.0 | 3.0))
 }
 
 /// The transforms `nt (O[3] X[3] Y[3] has_s S[3])*nt` after a curve block, applied to it
 /// in order (`SmAxis2Placement::SetCanonical(O, X, Y)`, then `SmCurve::Transform` with
-/// the scale `S` when `has_s`): B-splines only, at most [`MAX_TRANSFORMS`], origins of
+/// the scale `S` when `has_s`): B-splines and the fixed ellipse, at most [`MAX_TRANSFORMS`], origins of
 /// magnitude at most `MAX_COORD / MAX_TRANSFORMS`, non-parallel axes and scales of
 /// magnitude within `[1e-3, 1]` (so transformed points stay within a few `MAX_COORD`).
 fn transforms(rd: &mut Reader<'_>, bspline: bool) -> Result<(), FfiError> {
