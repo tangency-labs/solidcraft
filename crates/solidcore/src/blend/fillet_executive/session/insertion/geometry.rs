@@ -8,7 +8,7 @@ mod topology_objects;
 
 use super::super::{FilletBody, FilletObject};
 use super::curves::InsertionCurves;
-use crate::blend::fillet_geom::p1::{FilletBrep, FilletGeomId, FilletSurfaceStorage};
+use crate::blend::fillet_geom::p1::FilletBrep;
 use crate::curve::curve::Curve;
 use crate::geom::attribute::AttributeStore;
 use crate::geom::attribute::ObjectKey;
@@ -622,54 +622,33 @@ impl<'a> InsertionGeometry<'a> {
     ) -> Result<SurfaceBinding> {
         SurfaceBinding::capture_in_body(context, self.body_mut(role), role, face)
     }
-    /// Capture the actual managed fillet Surface without a numerical copy.
-    /// # Errors
-    /// Foreign managed body or unavailable owned-Surface binding.
-    pub fn capture_fillet_surface(
-        &mut self,
-        context: &mut Context,
-        geometry: FilletGeomId,
-    ) -> Result<Option<SurfaceBinding>> {
-        let Some(storage) = self.pseudo.geom(geometry)?.fillet_surface.as_ref() else {
-            return Ok(None);
-        };
-        let (body, face) = match storage {
-            FilletSurfaceStorage::ManagedFace { body, face } => (*body, *face),
-            FilletSurfaceStorage::Owned(_) => {
-                // UNPORTED(blend.fillet_executive_p1): actual owned fillet Surface binding.
-                return Err(SolidError::unported(
-                    "SmFilletGeom::GetFilletSurface (owned insertion binding)",
-                    "blend.fillet_executive_p1",
-                ));
-            }
-        };
-        if body != self.body_identity(InsertionBody::Intermediate)? {
-            return Err(invalid("managed fillet Surface belongs to a foreign body"));
-        }
-        self.capture_surface(context, InsertionBody::Intermediate, face)
-            .map(Some)
-    }
     /// Resolve that same Surface instance; a replacement in the Face slot fails.
     /// # Errors
     /// Foreign body, deleted Face/Surface or replaced geometry identity.
     pub fn bound_surface(&self, binding: SurfaceBinding) -> Result<&Surface> {
         binding.resolve_in_body(self.body(binding.role))
     }
-    /// Actual owner Face, including the real Surface owner check.
+    /// `SmSurface::GetFace()` of a bound face-slot surface: its owner when that is a
+    /// Face, `None` for no owner or an owner of another kind.
     /// # Errors
-    /// Missing original Surface or unresolved foreign owner.
+    /// Missing original Surface, or an owner no insertion body resolves to one
+    /// entity.
     pub fn surface_face(&self, binding: SurfaceBinding) -> Result<Option<FilletObject>> {
         let Some(owner) = self.bound_surface(binding)?.owner() else {
             return Ok(None);
         };
-        if let Some((role, entity @ EntityRef::Face(_))) = self.owner_binding(owner) {
-            return Ok(Some(Self::handle(role, entity)));
+        match self.owner_binding(owner) {
+            Some((role, entity @ EntityRef::Face(_))) => Ok(Some(Self::handle(role, entity))),
+            // Not `IsKindOf(SmFace_TYPE)` and not a surface: the owner walk stops.
+            Some(_) => Ok(None),
+            // A face-slot surface is owned by its own face (`SetSurface` sets the
+            // owner, and the face's B-rep is one of the insertion bodies): an owner no
+            // insertion body resolves (another B-rep's, a geometry's or an ambiguous
+            // key) has no upstream counterpart.
+            None => Err(invalid(
+                "face-slot Surface owner outside the insertion bodies",
+            )),
         }
-        // UNPORTED(blend.fillet_executive_p1): actual foreign Surface owner lookup.
-        Err(SolidError::unported(
-            "SmSurface::GetFace (foreign insertion owner)",
-            "blend.fillet_executive_p1",
-        ))
     }
     fn owner_binding(&self, owner: ObjectRef) -> Option<(InsertionBody, EntityRef)> {
         let mut found = None;
@@ -905,6 +884,7 @@ impl ProtoTopology<FilletObject> for InsertionGeometry<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blend::fillet_geom::p1::FilletGeomId;
     use crate::primitive::api_primitives::create_box;
     use crate::Kernel;
 
@@ -1083,6 +1063,58 @@ mod tests {
         assert!(
             TopologyObjects::brep_cache(&view, FilletObject::Body(FilletBody::Target)).is_err()
         );
+    }
+
+    #[test]
+    fn bound_surface_face_follows_upstream_get_face() {
+        let mut k = Kernel::default();
+        let mut target = box_at(&mut k, 0.0);
+        let mut intermediate = box_at(&mut k, 100.0);
+        let mut pseudo = FilletBrep::new();
+        *pseudo.brep_mut() = box_at(&mut k, 200.0);
+        let mut view = InsertionGeometry::new(&mut target, &mut pseudo, &mut intermediate).unwrap();
+        let face = FaceId::from_index(0);
+        let binding = view
+            .capture_surface(&mut k.context, InsertionBody::Target, face)
+            .unwrap();
+        let serial = view.target.notify_serial().unwrap();
+        let set_owner = |view: &mut InsertionGeometry<'_>, owner| {
+            view.target
+                .face_mut(face)
+                .unwrap()
+                .surface
+                .as_mut()
+                .unwrap()
+                .set_owner(owner);
+        };
+        // Its own face.
+        set_owner(&mut view, Some(topology_ref(serial, EntityRef::Face(face))));
+        assert_eq!(
+            view.surface_face(binding).unwrap(),
+            Some(FilletObject::Topology(
+                FilletBody::Target,
+                EntityRef::Face(face)
+            ))
+        );
+        // No owner, or an owner that is not a face: `GetFace()` is NULL.
+        set_owner(&mut view, None);
+        assert_eq!(view.surface_face(binding).unwrap(), None);
+        let vertex = view.target.vertices().ids().next().unwrap();
+        set_owner(
+            &mut view,
+            Some(topology_ref(serial, EntityRef::Vertex(vertex))),
+        );
+        assert_eq!(view.surface_face(binding).unwrap(), None);
+        // An owner no insertion body holds is a broken binding, not a missing port.
+        set_owner(
+            &mut view,
+            Some(ObjectRef {
+                type_code: -123,
+                key: ObjectKey(u64::MAX),
+            }),
+        );
+        let error = view.surface_face(binding).unwrap_err();
+        assert!(!error.is_unported());
     }
 
     #[test]

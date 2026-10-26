@@ -9,7 +9,7 @@ mod live;
 use super::{
     invalid, Attribute, AttributeHandle, AttributeStore, Behavior, Brep, EdgeId, EntityRef,
     ErrorInfo, FaceId, FilletBody, FilletBrep, FilletCorner, FilletObject, FilletSession, Kernel,
-    Result, SolidError, SolverObject,
+    Result, SolverObject,
 };
 use crate::blend::fillet_executive::topology_changes::TopologyChangesAccess;
 use crate::boolean::topology_intersector::p1::TopologyIntersector;
@@ -339,11 +339,25 @@ impl TopologyChangesAccess<FilletObject> for TargetTopologyChanges<'_> {
                 return Ok(None);
             }
         }
-        // UNPORTED(blend.fillet_executive_p1): actual marker-user object classification.
-        Err(SolidError::unported(
-            "SmFilletExecutive::UpdateTopologyChanges (actual marker user)",
-            "blend.fillet_executive_p1",
-        ))
+        // `SM_CAST_PTR(SmFace, sAllObjects[ii])` is NULL for every other kind of
+        // object. The marker is a standalone reference added to one face of the base
+        // B-rep, and face splits copy it to faces of that B-rep: a user of the base
+        // B-rep that is not one of its faces (other topology, or the key of an object
+        // since destroyed, which upstream's destructor removes from the users) is
+        // skipped like a non-face user.
+        if crate::topology::brep::p3::topology_entity(self.target_serial, user).is_some() {
+            return Ok(None);
+        }
+        // A face of another B-rep cannot carry the marker; any other object (a
+        // geometry or a non-topology user) is not a face.
+        if let Some(serial) = self.pseudo.brep().notify_serial() {
+            if let Some(EntityRef::Face(_)) =
+                crate::topology::brep::p3::topology_entity(serial, user)
+            {
+                return Err(invalid("split-face marker user is a pseudo-B-rep face"));
+            }
+        }
+        Ok(None)
     }
     fn change_geometries(&self, solver: FilletObject) -> Result<Vec<FilletObject>> {
         let FilletObject::Solver(id) = solver else {
@@ -421,6 +435,7 @@ mod tests {
     use crate::geom::tol::USE_DEFAULT;
     use crate::math::Vec3;
     use crate::topology::brep::p3::{new_brep, topology_ref};
+    use crate::SolidError;
 
     #[test]
     fn real_marker_copy_and_editing_are_scoped_on_all_results() {
@@ -484,6 +499,50 @@ mod tests {
                     .is_empty());
             }
         }
+    }
+
+    #[test]
+    fn marker_users_that_are_not_base_faces_are_skipped() {
+        let mut k = Kernel::default();
+        let mut target = new_brep(&mut k, USE_DEFAULT, USE_DEFAULT).unwrap();
+        let shell = target.add_shell().unwrap();
+        let face = target.add_face(shell).unwrap();
+        let vertex = target.add_vertex(Vec3::new(0., 0., 0.)).unwrap();
+        let serial = target.notify_serial().unwrap();
+        let mut pseudo = FilletBrep::new();
+        *pseudo.brep_mut() = new_brep(&mut k, USE_DEFAULT, USE_DEFAULT).unwrap();
+        let pseudo_shell = pseudo.brep_mut().add_shell().unwrap();
+        let pseudo_face = pseudo.brep_mut().add_face(pseudo_shell).unwrap();
+        let pseudo_serial = pseudo.brep().notify_serial().unwrap();
+        let attributes = AttributeStore::new();
+        let access =
+            TargetTopologyChanges::new(serial, &mut target, &mut pseudo, &attributes, &[], &[])
+                .unwrap();
+        let key = |serial, entity| topology_ref(serial, entity).key;
+        assert_eq!(
+            access
+                .change_face(key(serial, EntityRef::Face(face)))
+                .unwrap(),
+            Some(FilletObject::Topology(
+                FilletBody::Target,
+                EntityRef::Face(face)
+            ))
+        );
+        // `SM_CAST_PTR(SmFace, ..)` is NULL for other topology of the base B-rep, and
+        // a destroyed face is no user upstream.
+        for user in [
+            key(serial, EntityRef::Vertex(vertex)),
+            key(serial, EntityRef::Shell(shell)),
+            key(serial, EntityRef::Face(FaceId::from_index(99))),
+            ObjectKey(7),
+        ] {
+            assert_eq!(access.change_face(user).unwrap(), None);
+        }
+        // A face of another B-rep cannot carry the base face's marker.
+        let error = access
+            .change_face(key(pseudo_serial, EntityRef::Face(pseudo_face)))
+            .unwrap_err();
+        assert!(!error.is_unported());
     }
 
     #[test]

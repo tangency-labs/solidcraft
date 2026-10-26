@@ -22,8 +22,10 @@
 //! executive's intersector (taken before the first merge: the two arenas' typed ids
 //! may coincide where upstream pointers differ), and a split of one base B-rep's face
 //! leaves the other side's rails alone. A side edge with an original face in a
-//! two-B-rep session, and `SM_BT_BLEND` end curves on a second base B-rep, are
-//! `Unported`; no surface/surface case reaches them. The executive is the session's
+//! two-B-rep session is an invalid-input error: upstream's surface/surface side
+//! edges are `CreateEndCurve` cross sections without one, so its side loop skips
+//! them. `SM_BT_BLEND` end curves on a second base B-rep are `Unported`; no
+//! surface/surface case reaches them. The executive is the session's
 //! (upstream a fresh `SmFilletExecutive` on the stack), which owns the cross-section
 //! generator (on the stack upstream). The fillet B-rep is the session's intermediate
 //! body. The trimming of the original surfaces (only with `lBaseTrimType != 0`, which

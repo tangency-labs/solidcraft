@@ -2370,10 +2370,21 @@ impl FaceShrinkAccess<FilletObject> for SessionObjects<'_> {
                 ))));
             }
         }
-        // UNPORTED(blend.fillet_executive_p3): actual foreign face-owner resolver.
-        Err(SolidError::unported(
-            "SmFilletGeom::GetFilletSurface owner (live face context)",
-            "blend.fillet_executive_p3",
+        // `GetFilletSurface()->GetFace()`: the face owning the surface, whichever face
+        // of the fillet B-rep that is (fillet surfaces only ever become faces there,
+        // `MakeFaceBrep(m_pFilletBrep)`).
+        if let Some(intermediate) = self.intermediate.as_ref() {
+            for face in intermediate.faces().ids() {
+                if owner == self.intermediate_identity(EntityRef::Face(face))? {
+                    return Ok(Some(FilletObject::IntermediateTopology(EntityRef::Face(
+                        face,
+                    ))));
+                }
+            }
+        }
+        // A face of another B-rep never owns a fillet surface.
+        Err(invalid(
+            "fillet surface owned by a face outside the fillet B-rep",
         ))
     }
     fn shrink_actual_face(&mut self, k: &mut Kernel, face: FilletObject) -> Result<()> {
