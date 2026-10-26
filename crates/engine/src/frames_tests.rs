@@ -370,3 +370,28 @@ fn an_explicit_sketch_plane_is_read_in_the_frame_asked_for() {
         assert!(e.contains(why), "{p}: {e}");
     }
 }
+
+/// #3383: a root body joined into a body of a component turned a quarter turn about X stays where
+/// it is in the world: the join overlaps the plate by 10 x 5 x 5 and is one solid. When the
+/// component moves on, the join follows where both bodies are placed.
+#[test]
+fn a_combine_tool_stays_where_it_is_placed() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Part"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 10, "corner": [-20, -20, 0], "body_name": "Plate"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "axis": [1, 0, 0], "angle": "90 deg"}));
+    run(&mut s, "component.capture_position", json!({}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [-5, -5, -25], "operation": "new", "body_name": "Boss"}));
+    run(&mut s, "solid.combine", json!({"target": "Plate", "tools": ["Boss"]}));
+    let lumps = |s: &Session| s.model.state().body("Plate").map(|b| b.body.lumps().unwrap().len());
+    assert_eq!(lumps(&s), Some(1), "the boss overlaps the plate where it is shown");
+    assert!((volume(&mut s) - 16750.0).abs() < 1e-6, "{}", volume(&mut s));
+    let (lo, hi) = world_bbox(&s, "Plate");
+    assert!(near(lo, Vec3::new(-20.0, -10.0, -25.0)) && near(hi, Vec3::new(20.0, 5.0, 20.0)), "{lo:?} {hi:?}");
+    // Raised 10 mm, the plate (z -10..30) clears the boss (z -25..-15).
+    run(&mut s, "occurrence.move", json!({"occurrence": "Part:1", "translate": [0, 0, 10]}));
+    run(&mut s, "component.capture_position", json!({}));
+    assert_eq!(lumps(&s), Some(2), "the boss stays where it is in the world");
+    assert!((volume(&mut s) - 17000.0).abs() < 1e-6, "{}", volume(&mut s));
+}
