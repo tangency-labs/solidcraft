@@ -4205,85 +4205,6 @@ struct ExtrudeConstructor {
     interval: (f64, f64),
 }
 
-/// The tool of an Extrude whose profile is a whole planar face of its one target (the face's
-/// outline projected into the sketch), started at the face (#2040). The projection fits an edge
-/// that is no line or arc, so the profile's tool lies a hair off the body all round its outline,
-/// and the boolean fails there. A join takes the body's own face swept instead, which is sewn on
-/// along it. A cut whose walls take nothing from the body (all of it within the depth lies over
-/// the face) takes a slab beyond the depth plane instead, which meets the body only across that
-/// plane; one whose walls cut into the body at some edges keeps those walls, exactly, and moves
-/// the others off it (`kernel::cut_tool`). `None` (the profile's own tool) otherwise. With the
-/// interval along the normal it spans.
-fn whole_face_tool(
-    st: &ModelState,
-    targets: &[String],
-    ss: &SolvedSketch,
-    r: &Region2,
-    operation: Operation,
-    lo: f64,
-    hi: f64,
-) -> Option<(Traced, (f64, f64))> {
-    if !matches!(operation, Operation::Join | Operation::Cut) || hi - lo <= 0.0 {
-        return None;
-    }
-    // An outline of lines and arcs is the face's own: the profile's tool already meets the body
-    // exactly, and keeps the names later features attach to (#489).
-    if r.outer.segs.iter().all(|s| matches!(s, solidcraft_geom::Seg2::Line { .. } | solidcraft_geom::Seg2::Arc { .. })) {
-        return None;
-    }
-    let mut candidates = st.bodies.iter().filter(|b| targets.is_empty() || targets.contains(&b.name));
-    let target = candidates.next()?;
-    if candidates.next().is_some() {
-        return None;
-    }
-    let face = kernel::matching_face(&target.body, &ss.plane, r, &[lo, hi])?;
-    let n = ss.plane.normal();
-    let tol = target.body.size() * 1e-6 + 1e-9;
-    let up = face.normal.dot(n) > 0.0;
-    let (at_lo, at_hi) = ((face.height - lo).abs() <= tol, (face.height - hi).abs() <= tol);
-    let roles = |region| crate::lineage::ProfileRoles {
-        sketch: Some(ss),
-        region: Some(region),
-        caps: [Some(crate::lineage::extrude_cap_role(lo)), Some(crate::lineage::extrude_cap_role(hi))],
-        thin: None,
-    };
-    match operation {
-        // Out of the body from the face.
-        Operation::Join if (up && at_lo) || (!up && at_hi) => {
-            let built = centered_extrude(&ss.plane, r, lo, hi, Some(ss), None).ok()?;
-            let [built] = built.as_slice() else { return None };
-            let exact = kernel::face_prism(&target.body, face, hi - lo, true, &built.body).ok()?;
-            kernel::can_join_touching_faces(&target.body, &exact).then(|| (roles(r).tool(exact, Some(&built.body)), (lo, hi)))
-        }
-        // Into the body from the face, its walls touching it at most.
-        Operation::Cut if ((up && at_hi) || (!up && at_lo)) && !kernel::cut_takes_only_the_face(&target.body, face, hi - lo) => {
-            // Some walls go into the body: those that only touch it are moved off.
-            let built = centered_extrude(&ss.plane, r, lo, hi, Some(ss), None).ok()?;
-            let [built] = built.as_slice() else { return None };
-            let (tool, off) = kernel::cut_tool(&target.body, face, hi - lo, Some(&built.body))?;
-            let span = if up { (lo, hi + off) } else { (lo - off, hi) };
-            Some((roles(r).tool(tool, Some(&built.body)), span))
-        }
-        Operation::Cut if (up && at_hi) || (!up && at_lo) => {
-            // Over the whole body, from the depth plane out past it.
-            let reach = target.body.size() * 2.0 + (hi - lo);
-            let c = r.outer.centroid();
-            let p = |x: f64, y: f64| Vec2::new(c.x + x * reach, c.y + y * reach);
-            let line = |a: Vec2, b: Vec2| solidcraft_geom::Seg2::Line { a, b };
-            let corners = [p(-1.0, -1.0), p(1.0, -1.0), p(1.0, 1.0), p(-1.0, 1.0)];
-            let segs = (0..4).filter_map(|i| Some(line(*corners.get(i)?, *corners.get((i + 1) % 4)?))).collect();
-            let slab = Region2 { outer: solidcraft_geom::Loop2 { segs }, holes: vec![] };
-            let (l, h) = if up { (lo, hi + reach) } else { (lo - reach, hi) };
-            let built = centered_extrude(&ss.plane, &slab, l, h, None, None).ok()?;
-            let [built] = built.as_slice() else { return None };
-            #[cfg(test)]
-            whole_face_tests::slab_taken();
-            Some((roles(&slab).tool(built.body.clone(), None), (l, h)))
-        }
-        _ => None,
-    }
-}
-
 /// Construct planar caps locally before placing the completed tool.
 fn centered_extrude(
     plane: &Plane,
@@ -5538,10 +5459,8 @@ fn copy_misses(st: &ModelState, f: &Feature, targets: &[String], tools: &[Traced
         .filter(|b| all || if targets.is_empty() { b.component == f.component || b.feature == f.id } else { targets.contains(&b.name) })
         .all(|b| {
             tools.iter().all(|t| {
-                // A diagnostic must neither reject an otherwise valid cut nor add its own
-                // retries to the feature's report. An inconclusive probe is not a miss.
-                let (intersection, _) = kernel::capture_boolean_diagnostics(|| kernel::boolean(&b.body, &t.body, BoolOp::Intersect));
-                matches!(intersection, Ok(None))
+                // An inconclusive probe is not a miss: it must not reject an otherwise valid cut.
+                matches!(kernel::boolean(&b.body, &t.body, BoolOp::Intersect), Ok(None))
             })
         })
 }
@@ -7810,10 +7729,6 @@ mod chain_tests {
 #[cfg(test)]
 #[path = "eval_cost_tests.rs"]
 mod cost_tests;
-
-#[cfg(test)]
-#[path = "eval_whole_face_tests.rs"]
-mod whole_face_tests;
 
 #[cfg(test)]
 mod body_name_tests {

@@ -1082,6 +1082,20 @@ pub(crate) fn loft_numbered_loops(sections: &[(Plane, NumberedLoop)], reversed: 
     // What each section is matched to: the normal the windings share, and the corners' directions
     // from the centre (the lead's for the first section, then the section before).
     let (mut normal, mut dirs) = (first_normal, corners(&lead.0, &lead.1.oriented(lead.0.normal().dot(first_normal) < 0.0)).1);
+    // The share of the lead's perimeter before each of its vertices: where a circle section
+    // breaks when the matched directions do not go round in order.
+    let lead_len: f64 = lead.1.lp.segs.iter().map(Seg2::length).sum();
+    let fractions: Vec<f64> = lead
+        .1
+        .lp
+        .segs
+        .iter()
+        .scan(0.0, |before, s| {
+            let f = *before / lead_len;
+            *before += s.length();
+            Some(f)
+        })
+        .collect();
     let mut out = Vec::with_capacity(ordered.len());
     for (p, l) in &ordered {
         let back = p.normal().dot(normal) < 0.0;
@@ -1089,7 +1103,7 @@ pub(crate) fn loft_numbered_loops(sections: &[(Plane, NumberedLoop)], reversed: 
         // Break angles: the matched corners seen in this plane. A re-split circle runs counter-
         // clockwise in its plane; wound the other way when the plane faces back.
         let angles: Vec<f64> = local.iter().map(|d| d.angle()).collect();
-        let mut r = l.oriented(back).resample(n, &angles).oriented(back);
+        let mut r = l.oriented(back).resample(n, &angles, &fractions, false).oriented(back);
         // Start where every vertex lines up best with the matched one of the same number (the
         // largest sum of dot products of their directions from the centroids): the single vertex
         // closest in direction twisted non-convex sections (#881).

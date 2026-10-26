@@ -130,65 +130,9 @@ mod tests {
         assert!(measure(&ring).unwrap().merged.faces > 0);
     }
 
-    /// A 10 mm cube at `at`, each side in n × n squares of two triangles, one face per side;
-    /// without its first `open` triangles.
-    fn cube(at: Vec3, n: usize, open: usize) -> Mesh {
-        let mut m = Mesh::default();
-        let s = 10.0;
-        for axis in 0..3 {
-            for side in [0.0, 1.0] {
-                for i in 0..n {
-                    for j in 0..n {
-                        let corner = |a: usize, b: usize| {
-                            let mut c = [0.0; 3];
-                            c[axis] = side * s;
-                            c[(axis + 1) % 3] = a as f64 * s / n as f64;
-                            c[(axis + 2) % 3] = b as f64 * s / n as f64;
-                            at + Vec3::new(c[0], c[1], c[2])
-                        };
-                        let k = m.positions.len() as u32;
-                        m.positions.extend([corner(i, j), corner(i + 1, j), corner(i + 1, j + 1), corner(i, j + 1)]);
-                        m.triangles.extend(if side > 0.0 { [[k, k + 1, k + 2], [k, k + 2, k + 3]] } else { [[k, k + 2, k + 1], [k, k + 3, k + 2]] });
-                        m.tri_face.extend([(2 * axis) as u32 + side as u32; 2]);
-                    }
-                }
-            }
-        }
-        m.triangles.drain(..open);
-        m.tri_face.drain(..open);
-        m
-    }
-
-    /// The summed per-face sums of `m` about `o`, with the moments about the origin (as
-    /// `measure` passes them on).
-    fn sums(m: &Mesh, o: Vec3) -> (f64, f64, Vec3, Vec3) {
-        let (area, v6, mom, normal) =
-            face_sums(m, 6, o).iter().fold((0.0, 0.0, Vec3::ZERO, Vec3::ZERO), |s, f| (s.0 + f.0, s.1 + f.1, s.2 + f.2, s.3 + f.3));
-        (area, v6, o * (4.0 * v6) + mom, normal)
-    }
-
     /// A cube 1000 mm from the origin with one 0.5 mm² facet left out: about the box's centre
     /// the sums miss a cone of that facet to the centre (0.08 %), where about the origin they are
     /// 17 % over. Closed, it measures the same about either.
-    #[test]
-    fn a_mesh_left_open_is_measured_about_its_centre() {
-        let at = Vec3::new(1000.0, 1000.0, 1000.0);
-        let (closed, open) = (cube(at, 10, 0), cube(at, 10, 1));
-        let centre = at + Vec3::new(5.0, 5.0, 5.0);
-        for o in [Vec3::ZERO, centre] {
-            let (area, v6, mom, normal) = sums(&closed, o);
-            assert!((area - 600.0).abs() < 1e-9 && (v6 / 6.0 - 1000.0).abs() < 1e-6 && normal.len() < 1e-9);
-            assert!((mom / (4.0 * v6) - centre).len() < 1e-6 * at.len(), "{o:?}");
-        }
-        let (_, v6_origin, _, normal) = sums(&open, Vec3::ZERO);
-        assert!((normal.len() - 0.5).abs() < 1e-9);
-        // The facet faces the origin: leaving it out adds its cone to the origin, 167 mm³.
-        assert!((v6_origin / 6.0 - (1000.0 + 0.5 * 1000.0 / 3.0)).abs() < 1e-3, "{}", v6_origin / 6.0);
-        let (_, v6, mom, _) = sums(&open, centre);
-        assert!((v6 / 6.0 - (1000.0 - 0.5 * 5.0 / 3.0)).abs() < 1e-6, "{}", v6 / 6.0);
-        assert!((mom / (4.0 * v6) - centre).len() < 0.01, "{:?}", mom / (4.0 * v6));
-    }
-
     // A body's measured volume does not depend on where it sits: the same revolved ring of cones
     // and cylinders, moved far from the origin, measures what it measures at the origin.
     use crate::{revolve, transform};

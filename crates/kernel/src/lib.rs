@@ -150,7 +150,6 @@ mod tspline;
 mod untouched_faces_tests;
 mod validity;
 pub mod watch;
-mod whole_face;
 
 pub use blend::{ChamferSide, chamfer, chamfer_sides, fillet, fillet_each, fillet_g2, fillet_g2_corners, fillet_max, fillet_max_each, fillet_setback, tangent_chain};
 pub use blend_corner::fillet_radii;
@@ -220,7 +219,6 @@ pub use topo::{CylinderFace, cylinder_end_at, cylinder_face, cylinder_face_at, m
 pub use topo::{TopoCounts, merged_topology, seam_flags};
 pub use tspline::tspline_sheet;
 pub use validity::{SmlibCheck, Validity, smlib_built, smlib_dump_dir, validity};
-pub use whole_face::{WholeFace, cut_takes_only_the_face, cut_tool, face_prism, matching_face};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum KernelError {

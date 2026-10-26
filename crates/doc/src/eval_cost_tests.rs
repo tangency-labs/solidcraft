@@ -245,7 +245,7 @@ fn editing_a_sketch_on_a_turned_occurrence_reuses_its_frame_bodies() {
     let state = model.state();
     let raw = state.bodies.first().unwrap();
     let index = raw.body.face_sources().unwrap().iter().position(|s| matches!(s, Some(kernel::FaceSource::Box { axis: 2, high: true, .. }))).unwrap();
-    let world = world_state(&doc, &state);
+    let world = world_state(&doc, &state).unwrap();
     let shown = world.bodies.first().unwrap();
     let picked = shown.body.face_plane(index).unwrap();
     let anchor = doc.capture_face_anchor(raw, index, &picked, &path, 0, &[]).unwrap();
@@ -469,8 +469,8 @@ fn placed_bodies_taken_as_before_keep_their_measure() {
     let mut state = ModelState::default();
     state.bodies.push(ModelBody::new("Pin".into(), kernel::cylinder(Vec3::ZERO, Vec3::Z, 2.0, 8.0).unwrap(), 1));
     let mut cache = PlacedBodies::default();
-    let before = world_state_reusing(&doc, &state, &mut cache);
+    let before = world_state_reusing(&doc, &state, &mut cache).unwrap();
     let centroid = before.bodies[0].measure().unwrap().centroid;
-    let again = world_state_reusing(&doc, &state, &mut cache);
+    let again = world_state_reusing(&doc, &state, &mut cache).unwrap();
     assert_eq!(counted(|| assert_eq!(again.bodies[0].measure().unwrap().centroid, centroid)).measures, 0);
 }

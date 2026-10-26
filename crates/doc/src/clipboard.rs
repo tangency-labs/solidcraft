@@ -269,7 +269,7 @@ impl crate::Feature {
             K::Draft { neutral, .. } => remap_plane(neutral, ids, bodies, 0)?,
             K::ReplaceFace { target, .. } => remap_plane(target, ids, bodies, 0)?,
             K::SurfaceExtend { up_to: Some(crate::ExtendTo::Plane(plane)), .. } => remap_plane(plane, ids, bodies, 0)?,
-            K::Thread { up_to: Some(crate::ThreadLimit::Plane(plane)), .. } => remap_plane(plane, ids, names, bodies, 0)?,
+            K::Thread { up_to: Some(crate::ThreadLimit::Plane(plane)), .. } => remap_plane(plane, ids, bodies, 0)?,
             K::ConstructionAxis { def } => {
                 for r in def.refs_mut() {
                     remap_geo(r, ids, bodies, 0)?;
