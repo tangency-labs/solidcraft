@@ -28,8 +28,9 @@ mod sys {
 ///
 /// # Errors
 /// Invalid layouts or inputs that cannot construct a curve without undefined reads;
-/// native shim failures. A rejected native geometry constructor returns a shim error
-/// before its null result can reach a topology builder.
+/// native shim failures. A native geometry constructor that fails returns its
+/// upstream status as the whole output, before its null result can reach a
+/// topology builder.
 pub fn eval(input: &[f64]) -> Result<Vec<f64>, FfiError> {
     let bad = || FfiError::InvalidArgument("invalid translational sweep layout".into());
     if input.len() < 19 || input.iter().any(|v| !v.is_finite()) {
@@ -98,7 +99,9 @@ mod tests {
     #[test]
     fn rejected_native_constructors_never_reach_topology_builders() {
         // These pass the layout guard. Before the shim checked build(), operations
-        // 6 and 7 dereferenced null and terminated the process with SIGSEGV.
+        // 6 and 7 dereferenced null and terminated the process with SIGSEGV. The
+        // constructor's failure status (SM_ERR_INVALID_INPUT, 1007) is now the
+        // compared outcome of every curve-consuming operation, alone in the output.
         for kind in [0.0, 2.0] {
             for op in 0..=8 {
                 for face_kind in [0.0, 1.0] {
@@ -113,7 +116,7 @@ mod tests {
                     }
                     let result = eval(&input);
                     if (5..=7).contains(&op) || (op == 8 && face_kind == 1.0) {
-                        assert_eq!(result, Err(FfiError::Status(SC_ERR_ARG)), "{input:?}");
+                        assert_eq!(result, Ok(vec![1007.0]), "{input:?}");
                     } else {
                         assert!(result.is_ok(), "{input:?}: {result:?}");
                     }
