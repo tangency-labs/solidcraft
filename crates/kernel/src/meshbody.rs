@@ -40,17 +40,6 @@ impl TriMesh {
     }
 
     /// Distinct undirected triangle sides.
-    /// The diagonal of the box around the vertices: a mesh body's size ([`Body::size`]),
-    /// measured once when the body is made. 0 when it has none.
-    pub(crate) fn span(&self) -> f64 {
-        let mut b = solidcraft_geom::Aabb3::EMPTY;
-        for p in &self.positions {
-            b.add(*p);
-        }
-        let d = b.diagonal();
-        if d.is_finite() && d > 0.0 { d } else { 0.0 }
-    }
-
     pub(crate) fn edge_count(&self) -> usize {
         let mut set = std::collections::HashSet::new();
         for t in &self.triangles {

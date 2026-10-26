@@ -881,8 +881,8 @@ fn a_stood_up_nested_step_part_is_cut_and_joined_from_its_face() {
             .unwrap();
         run(&mut s, "sketch.circle.center", json!({"center": [centre.x, centre.y], "radius": 3}));
         run(&mut s, "sketch.finish", json!({}));
-        assert_eq!(crate::auto_operation(&s, &json!({"distance": -5})), Some("cut"), "top level {top_level}");
-        assert_eq!(crate::auto_operation(&s, &json!({"distance": 5})), Some("join"), "top level {top_level}");
+        assert_eq!(crate::auto_operation(&s, &json!({"distance": -5})).unwrap(), Some("cut"), "top level {top_level}");
+        assert_eq!(crate::auto_operation(&s, &json!({"distance": 5})).unwrap(), Some("join"), "top level {top_level}");
         let volume = |s: &mut Session| run(s, "inspect.measure", json!({"bodies": ["NestedBlock"]}))["total"]["volume_mm3"].as_f64().unwrap();
         let block = 40.0 * 24.0 * 10.0;
         let hole = std::f64::consts::PI * 3.0 * 3.0;

@@ -2232,7 +2232,7 @@ mod tests {
             .to_owned();
         let horiz = h.app.run("sketch.constrainer", json!({"entities":[l]})).unwrap()["constraint"].as_str().unwrap().to_owned();
         let is_driven = |h: &crate::scenario::Harness| {
-            h.app.session.world_state().sketch(sid).unwrap().sketch.constraints.iter().any(|c| c.id == dim && c.driven)
+            crate::open_meshing::session_world(&h.app.session).sketch(sid).unwrap().sketch.constraints.iter().any(|c| c.id == dim && c.driven)
         };
 
         // A selected dimension offers the toggle, aimed at that constraint.
@@ -2318,7 +2318,7 @@ mod tests {
             h.app.run("sketch.offset", json!({"curves":[source],"distance":2,"chain":false})).unwrap()["curves"][0].as_str().unwrap().to_owned();
         h.app.run("sketch.line", json!({"points":[[10,-5],[10,5]],"connect":false,"infer":false})).unwrap();
         let sid = h.app.session.active_sketch.unwrap();
-        let state = h.app.session.world_state();
+        let state = crate::open_meshing::session_world(&h.app.session);
         let sk = &state.sketch(sid).unwrap().sketch;
         let Shape::Line { a, b } = sk.shape(sk.curve_index(&output).unwrap()).unwrap() else { panic!("offset must be a line") };
         let cut = Vec2::new(15.0, a.y);
@@ -2336,9 +2336,9 @@ mod tests {
         assert!(item.enabled);
         assert_eq!(item.params, Some(json!({"curve":output})));
         h.step(&json!({"click":{"handle":"menu:sketch.offset.break"}})).unwrap();
-        assert!(h.app.session.world_state().sketch(sid).unwrap().sketch.offset_distance(&output).is_none());
+        assert!(crate::open_meshing::session_world(&h.app.session).sketch(sid).unwrap().sketch.offset_distance(&output).is_none());
         h.app.run("sketch.trim", json!({"curve":output,"at":[cut.x,cut.y]})).unwrap();
-        let state = h.app.session.world_state();
+        let state = crate::open_meshing::session_world(&h.app.session);
         let sk = &state.sketch(sid).unwrap().sketch;
         let remaining = sk.shape(sk.curve_index(&output).unwrap()).unwrap();
         assert!(matches!(remaining, Shape::Line { a, b } if (a.dist(b) - 10.0).abs() < 1e-6), "{remaining:?}");
@@ -2350,7 +2350,7 @@ mod tests {
         let mut h = crate::scenario::Harness::new();
         h.app.home.open = false;
         h.app.run("solid.cylinder", json!({"diameter":30,"height":20})).unwrap();
-        let state = h.app.session.world_state();
+        let state = crate::open_meshing::session_world(&h.app.session);
         let body = state.bodies.first().unwrap();
         let faces = body.body.faces(0.1).unwrap();
         let flat = faces.iter().find(|f| f.plane_normal.is_some()).unwrap();

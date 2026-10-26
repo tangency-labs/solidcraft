@@ -1438,7 +1438,7 @@ mod tests {
             app.preferences.cosmetic_threads = cosmetic_threads;
             for hatch in [false, true] {
                 app.session.section_hatch = hatch;
-                assert_eq!(view_scene(&app, Default::default()).plain_cap, !hatch);
+                assert_eq!(view_scene(&app, Default::default()).unwrap().plain_cap, !hatch);
                 app.session.selection = vec![Sel::Plane { name: "XZ".into() }];
                 app.start("inspect.section");
                 let Some(crate::dialogs::Kind::Section { hatch: preview_hatch, .. }) = app.dialog.as_mut().map(|d| &mut d.kind) else {
@@ -1446,7 +1446,7 @@ mod tests {
                 };
                 *preview_hatch = !hatch;
                 assert_eq!(
-                    view_scene(&app, Default::default()).plain_cap,
+                    view_scene(&app, Default::default()).unwrap().plain_cap,
                     hatch,
                     "the preview's hatch overrides the session with cosmetic_threads={cosmetic_threads}"
                 );

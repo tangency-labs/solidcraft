@@ -1450,7 +1450,7 @@ fn edge_points(s: &Session, p: &Value, cmd: &str) -> Result<Vec<Vec3>> {
                     let tol = (size * 2e-3).max(1e-3);
                     // The display mesh flags seams (a smooth surface meeting itself, as down the side
                     // of a cylinder), which nobody means by a pick where they end.
-                    match b.body.display_mesh(tol) {
+                    match b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(tol)) {
                         Ok(m) => Some((size, m.edges, m.seams)),
                         Err(_) => b.body.edges(tol).ok().map(|edges| (size, edges.into_iter().map(|e| e.points).collect(), Vec::new())),
                     }
@@ -2327,13 +2327,6 @@ fn clearance_diameter(size: &str, fit: &str) -> Option<f64> {
         "loose" | "coarse" => Some(row.3),
         _ => None,
     }
-}
-
-/// The refusal for a thread designation `parse_metric_thread` does not know. A plain `M<d>` with
-/// a sane diameter but no ISO coarse pitch (M28, M7) gets two pitches to try: the largest common
-/// pitch up to about an eighth of the diameter, and the next finer one.
-fn unknown_metric_thread(t: &str, examples: &str) -> String {
-    fine_only_hint(t).unwrap_or_else(|| format!("unknown thread `{t}` (ISO metric, like {examples})"))
 }
 
 /// The pitches to try for a plain `M<d>` that has no ISO coarse pitch, `None` for anything else.

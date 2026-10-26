@@ -338,7 +338,7 @@ fn the_walls_of_an_open_thin_extrude_take_sketches_that_follow_their_thickness()
 
 /// A point inside each flat, vertical face of the first body: (what it is, point).
 fn flat_side_faces(s: &Session) -> Vec<(String, [f64; 3])> {
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let mut out = Vec::new();
     let Some(body) = world.bodies.first() else { return out };
     let mesh = body.mesh();
@@ -369,7 +369,7 @@ fn the_round_sides_of_a_thin_ring_are_named_by_the_circle_they_run_beside() {
     run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 10}));
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.extrude", json!({"sketch": "Outline", "thin": true, "thickness": 2, "distance": 5, "name": "Ring"}));
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let names = solidcraft_doc::naming::face_names(world.bodies.first().unwrap());
     // Each round side is two half cylinders, told apart by their numbers.
     let walls: Vec<_> = names.iter().filter(|name| name.contains(":wall:")).collect();

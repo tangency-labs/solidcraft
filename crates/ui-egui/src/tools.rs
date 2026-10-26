@@ -315,7 +315,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                 if id.starts_with("mid:") { return Some(id); }
                 // An earlier dimension may already have materialized this midpoint.
                 // Picking that point retains the same midpoint intent on subsequent dimensions.
-                let state = app.session.world_state();
+                let state = crate::open_meshing::session_world(&app.session);
                 let ss = app.session.active_sketch.and_then(|sid| state.sketch(sid))?;
                 let point = ss.sketch.resolve_point(&id)?;
                 ss.sketch.constraints.iter().find_map(|c| match c.kind {
@@ -326,7 +326,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                 })
             }).filter(|id| {
                 let Some(line) = id.strip_prefix("mid:") else { return false };
-                let state = app.session.world_state();
+                let state = crate::open_meshing::session_world(&app.session);
                 app.session
                     .active_sketch
                     .and_then(|sid| state.sketch(sid))
@@ -731,7 +731,7 @@ fn run_pick(app: &mut SolveApp, t: &Tool) {
         "sketch.constraint.midpoint" => json!({"a": k[0], "b": k[1]}),
         "sketch.constraint.symmetry" => {
             let params = {
-                let state = app.session.world_state();
+                let state = crate::open_meshing::session_world(&app.session);
                 symmetry_args(&k, app.session.active_sketch.and_then(|id| state.sketch(id)).map(|ss| &ss.sketch))
             };
             let Some(params) = params else {

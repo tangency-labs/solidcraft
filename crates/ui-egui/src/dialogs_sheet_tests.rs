@@ -858,7 +858,7 @@ fn path_flange_dialog_follows_the_path() {
         app.run("sketch.create", json!({"plane": {"origin": [0, 0, 15], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Path"})).unwrap();
         app.run("sketch.line", json!({"points": [[0, 0], [a, -a], [a + 30.0, -a]], "ids": ["p1", "p2"]})).unwrap();
         app.run("sketch.finish", json!({})).unwrap();
-        let path = app.session.world_state().sketches.last().map(|ss| ss.feature);
+        let path = crate::open_meshing::session_world(&app.session).sketches.last().map(|ss| ss.feature);
         // A newer sketch with the same line ids: the picks name the path's sketch (#3726).
         app.run("sketch.create", json!({"plane": {"origin": [0, 0, 60], "x_dir": [1, 0, 0], "y_dir": [0, 1, 0]}, "name": "Other"})).unwrap();
         app.run("sketch.line", json!({"points": [[50, 50], [60, 50], [60, 60]], "ids": ["p1", "p2"]})).unwrap();
@@ -1134,7 +1134,7 @@ fn flat_circles(app: &mut SolveApp, dialog: &Dialog, rect: Rect) -> Vec<egui::ep
 #[test]
 fn flat_perforations_match_export_centres_and_cutout_style() {
     let (mut app, dialog) = perforated_flat();
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let sheet = state.sheets.last().unwrap();
     let holes = sheet.perforation_holes(&sheet.perforations[0]).unwrap();
     let rect = Rect::from_min_size(Pos2::ZERO, vec2(1400.0, 900.0));
@@ -1156,7 +1156,7 @@ fn flat_perforations_match_export_centres_and_cutout_style() {
     assert_eq!(flat_circles(&mut app, &dialog, rect).len(), 155);
     assert_eq!(app.flat_view.perforations.as_ptr(), cached, "navigation reuses the centres");
     app.run("sheet.perforate", json!({"diameter": 2, "pitch": 10})).unwrap();
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let sheet = state.sheets.last().unwrap();
     let expected: usize = sheet.perforations.iter().map(|p| sheet.perforation_holes(p).unwrap().len()).sum();
     assert!(expected > 155);
@@ -1201,7 +1201,7 @@ fn hem_handle_runs_along_the_hem_to_its_tip() {
         let commands = apply_commands(&app, &d).unwrap();
         run_all(&mut app, commands);
         // The 5 mm hem layer: its tip is the far end of the added layer, along the sheet.
-        let m = app.session.world_state().body(&body).unwrap().mesh();
+        let m = crate::open_meshing::session_world(&app.session).body(&body).unwrap().mesh();
         // The straight part of the layer, past the fold.
         let layer_z = |z: f64| if flipped { z > 2.505 } else { z < -0.01 };
         let tip_y = m.positions.iter().filter(|v| layer_z(v.z)).map(|v| v.y).fold(f64::NEG_INFINITY, f64::max);

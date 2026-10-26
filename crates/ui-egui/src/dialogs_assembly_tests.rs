@@ -374,7 +374,7 @@ fn straight_edge_snap_follows_a_rotated_occurrence() {
     let transform = app.session.doc.occurrence_of(b).unwrap().transform;
     let mid = solidcraft_engine::doc::apply_point(&transform, Vec3::new(30.0, 10.0, 10.0));
     let axis = solidcraft_engine::doc::apply_vector(&transform, Vec3::Y);
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let mesh = st.body("Body2").unwrap().mesh();
     let index = mesh.edges.iter().position(|e| polyline_mid(e).dist(mid) < 1e-6).unwrap();
     let snap = snap_of(&app.session, &Sel::Edge { body: "Body2".into(), index, point: mid }).unwrap();

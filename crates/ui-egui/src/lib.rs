@@ -1415,7 +1415,7 @@ impl SolveApp {
             self.last_command = Some((spec.id.to_string(), spec.label.to_string()));
         }
         if let Some(mut t) = tools::Tool::for_command(id) {
-            let state = self.session.world_state();
+            let state = crate::open_meshing::session_world(&self.session);
             let sketch = self.session.active_sketch.and_then(|s| state.sketch(s)).map(|ss| &ss.sketch);
             if let Some(params) = tools::constraint_preselection(id, &self.session.selection, sketch) {
                 if self.run(id, params).is_ok() {

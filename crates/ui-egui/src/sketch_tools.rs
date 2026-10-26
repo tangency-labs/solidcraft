@@ -529,7 +529,7 @@ pub fn glyph_deletion(sk: &solidcraft_engine::sketch::Sketch, id: &str) -> Vec<s
 
 /// [`glyph_deletion`] in the active sketch.
 pub fn active_glyph_deletion(app: &SolveApp, id: &str) -> Vec<solidcraft_engine::Sel> {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     match active_sketch(app).and_then(|s| st.sketch(s)) {
         Some(ss) => glyph_deletion(&ss.sketch, id),
         None => vec![solidcraft_engine::Sel::SketchConstraint { id: id.to_string() }],
@@ -1161,7 +1161,7 @@ fn extend_preview_piece(app: &SolveApp, sketch: u64, id: &str) -> Option<Vec<Vec
     if active_sketch(app) != Some(sketch) {
         return None;
     }
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let sk = st.sketch(sketch)?;
     let hover_pos = hover.0;
     let ci = sk.sketch.curve_index(id)?;

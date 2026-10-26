@@ -416,7 +416,7 @@ fn whole_body_highlight_cost_from_the_models_own_triangles() {
         h.app.run("solid.torus", json!({"major": 100, "minor": 10, "center": [k as f64 * 220.0, 0.0, 0.0], "body_name": name.clone()})).unwrap();
         names.push(name);
     }
-    let st = h.app.session.world_state();
+    let st = crate::open_meshing::session_world(&h.app.session);
     let triangles: usize = st.bodies.iter().map(|b| b.mesh().triangles.len()).sum();
     st.warm_meshes(|| true);
     for b in &st.bodies {

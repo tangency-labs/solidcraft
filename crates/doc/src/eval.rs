@@ -4538,9 +4538,6 @@ fn feature_tools_with_constructor(
                 revolve_axis(&ss, axis, &axis_state(doc, st, f.component, axis), &|name| construction_axis_in(Some(doc), st, name, f.component))?;
             // To Object is in this feature's component frame: the model as seen from there.
             let tst = if to.is_some() { state_in_frame(doc, st, f.component)? } else { std::borrow::Cow::Borrowed(st) };
-            // Where the tool meets its targets is measured where they are shown (#3383).
-            let shown = targets_as_shown(st, f, &feature_op(f).1)?;
-            let st: &ModelState = &shown;
             let angles = if to.is_some() {
                 (0.0, None)
             } else {

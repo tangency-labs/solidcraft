@@ -141,10 +141,10 @@ fn clicking_a_parameter_suggestion_fills_the_length_box() {
     h.frames(1);
     assert_focus(&h, 0);
     assert_eq!(h.app.tool.as_ref().unwrap().dims[0].value, "width");
-    let sketch = |h: &Harness| h.app.session.world_state().sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.len();
+    let sketch = |h: &Harness| crate::open_meshing::session_world(&h.app.session).sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.len();
     assert_eq!(sketch(&h), 0, "the click on the list placed no point");
     h.step(&json!({"key": "Enter"})).unwrap();
-    let state = h.app.session.world_state();
+    let state = crate::open_meshing::session_world(&h.app.session);
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     assert_eq!(sk.curves.len(), 1);
     let length = sk.shape(0).map(|s| match s {
@@ -162,7 +162,7 @@ fn two_point_circle_takes_a_typed_diameter() {
     assert_eq!(h.app.tool.as_ref().unwrap().dims.iter().map(|b| b.label).collect::<Vec<_>>(), ["Diameter"]);
     type_value(&mut h, "30");
     h.step(&json!({"key": "Enter"})).unwrap();
-    let state = h.app.session.world_state();
+    let state = crate::open_meshing::session_world(&h.app.session);
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     assert_eq!(sk.curves.len(), 1, "{:?}", h.app.status);
     assert!(sk.radius(0).is_some_and(|r| (r - 15.0).abs() < 1e-6), "{:?}", sk.radius(0));

@@ -1059,9 +1059,7 @@ impl Dialog {
             return;
         }
         *of = picks.to_vec();
-        *suggested = crate::dialogs_thread::suggested(s, picks.map(|value| {
-                solidcraft_engine::doc::parse_metric_thread(&value).map(|(d, p)| crate::dialogs_thread::designation(d, p)).unwrap_or(value)
-            }), options);
+        *suggested = crate::dialogs_thread::suggested(s, picks, options);
         *designation = suggested.clone().unwrap_or_default();
     }
 
@@ -1251,7 +1249,7 @@ impl Dialog {
         {
             return Some(chain.faces.clone());
         }
-        let state = s.world_state();
+        let state = crate::open_meshing::session_world(s);
         let mut by_body = std::collections::BTreeMap::<&str, Vec<Vec3>>::new();
         for pick in picks {
             if let Sel::Face { body, point, .. } = pick {
@@ -1593,7 +1591,7 @@ fn default_profiles(s: &Session) -> Vec<Sel> {
 }
 
 fn single_profile(s: &Session, sketch: u64) -> Vec<Sel> {
-    match s.world_state().sketch(sketch).map(|ss| ss.profiles.len()) {
+    match crate::open_meshing::session_world(s).sketch(sketch).map(|ss| ss.profiles.len()) {
         Some(1) => vec![Sel::Profile { sketch, index: 0 }],
         _ => Vec::new(),
     }
@@ -3196,7 +3194,7 @@ pub(crate) fn set_object_accepting(inputs: &mut Vec<SelInput>, active: &mut usiz
 
 /// The plane an extrude's picked profiles lie in: the first pick's sketch plane, or its planar face.
 fn profile_plane(s: &Session, first: &Sel) -> Option<solidcraft_engine::geom::Plane> {
-    let st = s.world_state();
+    let st = crate::open_meshing::session_world(s);
     match first {
         Sel::Profile { sketch, .. } => st.sketch(*sketch).map(|ss| ss.plane),
         Sel::Face { body, index, .. } => st.body(body)?.body.planar_face(*index),
@@ -3210,7 +3208,7 @@ fn object_target(s: &Session, reference: &solidcraft_engine::geom::Plane, sel: &
     const TOLERANCE: f64 = 1e-6;
     match sel {
         Sel::Face { body, index, .. } => {
-            let st = s.world_state();
+            let st = crate::open_meshing::session_world(s);
             let Some(b) = st.body(body) else { return false };
             b.body
                 .planar_face(*index)
@@ -4851,7 +4849,7 @@ fn named_refill(s: &Session, body: Option<&str>, name: &str, point: Vec3, edge: 
         .find(|(_, definition, _, _, _)| definition == source.definition_name())
         .map(|(world, _, _, _, frame)| (world, solidcraft_engine::doc::apply_point(&frame, point)))
         .unwrap_or_else(|| (source.name.clone(), point));
-    s.world_state().body(&body)?;
+    crate::open_meshing::session_world(s).body(&body)?;
     Some(if edge { Sel::Edge { body, index, point } } else { Sel::Face { body, index, point } })
 }
 
@@ -6245,7 +6243,7 @@ mod extrude_mixed_pick_tests {
         // The new sketch's profile is taken at once.
         h.step(&json!({"start":"solid.extrude"})).unwrap();
         h.frames(2);
-        let st = h.app.session.world_state();
+        let st = crate::open_meshing::session_world(&h.app.session);
         let box_body = &st.bodies[0];
         let top = (0..64)
             .find(|i| box_body.body.planar_face(*i).is_some_and(|p| p.normal().z > 0.99 && (p.origin.z - 10.0).abs() < 1e-9))
@@ -6262,7 +6260,7 @@ mod extrude_mixed_pick_tests {
         h.frames(2);
         h.step(&json!({"key":"Enter"})).unwrap();
         assert!(h.app.dialog.is_none(), "OK: {:?}", h.app.dialog.as_ref().and_then(|d| d.error.clone()));
-        let st = h.app.session.world_state();
+        let st = crate::open_meshing::session_world(&h.app.session);
         let volume: f64 = st.bodies.iter().map(|b| solidcraft_engine::doc::kernel::measure(&b.body).unwrap().volume).sum();
         assert!((volume - 8000.0).abs() < 1e-6, "the box grown to 20 mm: {volume}");
     }
@@ -6282,7 +6280,7 @@ mod shell_body_tests {
         let mut h = Harness::new();
         h.app.run("solid.box", json!({"length":20,"width":20,"height":20,"corner":[0,0,0]})).unwrap();
         h.app.run("solid.box", json!({"length":20,"width":20,"height":10,"corner":[0,0,20],"operation":"new"})).unwrap();
-        let st = h.app.session.world_state();
+        let st = crate::open_meshing::session_world(&h.app.session);
         let (lower, upper) = (st.bodies[0].name.to_string(), st.bodies[1].name.to_string());
         h.app.run("browser.visibility", json!({"visible":false,"items":[lower]})).unwrap();
         h.step(&json!({"call":"ui.view","params":{"view":"bottom"}})).unwrap();

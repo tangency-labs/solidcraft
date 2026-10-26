@@ -93,7 +93,7 @@ fn rectangular_cut_pattern_counts_only_target_contacts_and_keeps_landing_copies(
     run(&mut s, "solid.cylinder", json!({"radius":2,"height":20,"base":[10,15,-5],"operation":"cut","targets":["Plate"],"name":"Cut"}));
     let reply = run(&mut s, "solid.pattern.rectangular", json!({"features":["Cut"],"dir1":[1,0,0],"count1":4,"spacing1":20}));
     assert_eq!(reply["warning"], "2 of 3 cut copies remove no material");
-    let state = s.world_state();
+    let state = s.world_state().unwrap();
     let plate = &state.body("Plate").unwrap().body;
     assert!(!plate.contains(solidcraft_geom::Vec3::new(30., 15., 5.)));
     assert!(state.body("Neighbor").unwrap().body.contains(solidcraft_geom::Vec3::new(50., 15., 5.)));
@@ -756,7 +756,7 @@ fn patterns_and_mirrors_of_a_rib() {
     run(&mut s, "solid.pattern.circular", json!({"features": ["Rib"], "axis": {"origin": [0, 0, -100], "dir": [0, 0, 1]}, "count": 4, "angle": 360}));
     let ribs = [Vec3::new(12.0, 0.0, 8.0), Vec3::new(0.0, 12.0, 8.0), Vec3::new(-12.0, 0.0, 8.0), Vec3::new(0.0, -12.0, 8.0)];
     let check = |s: &Session, inside: &[Vec3]| {
-        let st = s.world_state();
+        let st = s.world_state().unwrap();
         assert!(s.model.results.iter().all(|r| r.error.is_none()), "{:?}", s.model.results.iter().map(|r| &r.error).collect::<Vec<_>>());
         assert_eq!(st.bodies.len(), 1);
         let body = &st.bodies[0].body;
@@ -853,7 +853,7 @@ fn patterns_and_mirrors_of_patterns_and_mirrors() {
         for r in &s.model.results {
             assert!(r.error.is_none(), "{what}: {}: {:?}", r.name, r.error);
         }
-        let st = s.world_state();
+        let st = s.world_state().unwrap();
         assert_eq!(st.bodies.len(), 1, "{what}");
         let body = &st.bodies[0].body;
         for [x, y] in &holes {

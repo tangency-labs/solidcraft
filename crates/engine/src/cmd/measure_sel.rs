@@ -372,7 +372,8 @@ fn describe(s: &Session, st: &solidcraft_doc::ModelState, sel: &Sel) -> Option<I
 /// A picked item's exact shape with its points (an edge's polyline) and triangles (a face's),
 /// as Measure sees it: what [`crate::snap`] takes an item's centres, middle and ends from.
 pub(crate) fn shape_of(s: &Session, sel: &Sel) -> Option<(Shape, Vec<Vec3>, Vec<[Vec3; 3]>)> {
-    let item = describe(s, sel)?;
+    let world = s.world_state().ok()?;
+    let item = describe(s, &world, sel)?;
     Some(match item.geo {
         Geo::Points(p) => (item.shape, p, Vec::new()),
         Geo::Tris(t) => (item.shape, Vec::new(), t),

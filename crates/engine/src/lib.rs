@@ -224,7 +224,7 @@ impl Ahead {
     /// front end can say how far a batch has got.
     pub fn evaluate_counting(self, commands: &[(String, Value)], step: &std::sync::atomic::AtomicUsize) -> Result<Evaluated> {
         let (after, _) = self.0.preview_in_place(commands, Some(step))?;
-        after.world_state().warm_display();
+        after.world_state()?.warm_display();
         Ok(Evaluated(after.model))
     }
 

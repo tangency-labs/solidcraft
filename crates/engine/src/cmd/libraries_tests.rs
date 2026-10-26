@@ -90,7 +90,7 @@ fn catalog_world_instance_targets_map_once_and_invalid_targets_are_atomic() {
     assert!(face.point.dist(solidcraft_geom::Vec3::new(1., 1., 2.)) < 1e-9);
     assert_eq!(face.look, look.to_look());
     assert_eq!(s.undo.len(), history.0 + 1);
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let placed = world.body(&instance).unwrap();
     assert!(s.doc.face_colors(placed).iter().any(|(_, assigned)| assigned == &look.to_look()));
     apply_entry(&mut s, &file, &c.entries[1], json!({"bodies":[instance]})).unwrap();

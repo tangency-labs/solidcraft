@@ -102,8 +102,8 @@ fn pictures_show_appearances() {
 fn the_renderer_counts_what_it_draws() {
     let Some(c) = capturer() else { return };
     let drawn = |s: &Session| {
-        let cam = view::home_camera(s);
-        let scene = view::scene_with_guides(s, &cam, None, Guides { grid: false, axes: false });
+        let cam = view::home_camera(s).unwrap();
+        let scene = view::scene_with_guides(s, &cam, None, Guides { grid: false, axes: false }).unwrap();
         let triangles: usize = scene.meshes.iter().map(|m| m.mesh.triangles.len()).sum();
         c.rgba(&scene, &cam, 160, 100).unwrap();
         (c.last_stats(), triangles as u64)
@@ -187,10 +187,10 @@ fn pictures_show_a_plain_cut_without_the_hatch() {
         ("solid.box", json!({"length": 40, "width": 30, "height": 20})),
         ("appearance.assign", json!({"bodies": ["Body1"], "color": [40, 160, 90]})),
     ]);
-    let cam = view::home_camera(&s);
+    let cam = view::home_camera(&s).unwrap();
     let mut picture = |hatch: bool| {
         s.execute("inspect.section", &json!({"plane": {"origin": [0, 15, 0], "normal": [0, -1, 0]}, "hatch": hatch})).unwrap();
-        c.rgba(&view::scene(&s, &cam), &cam, 300, 220).unwrap()
+        c.rgba(&view::scene(&s, &cam).unwrap(), &cam, 300, 220).unwrap()
     };
     let solid = |img: &[u8]| pixels(img).filter(|p| p[..3].iter().zip([40u8, 160, 90]).all(|(a, b)| a.abs_diff(b) <= 3)).count();
     let (hatched, plain) = (picture(true), picture(false));
@@ -222,9 +222,9 @@ fn a_body_behind_the_cut_does_not_colour_the_cap() {
             s.execute("inspect.section", &json!({"plane": {"origin": [0, 6, 0], "normal": [0, -1, 0]}, "hatch": hatch})).unwrap();
         }
         for fov in [0.0, 0.6] {
-            let mut cam = view::home_camera(&alone);
+            let mut cam = view::home_camera(&alone).unwrap();
             cam.fov = fov;
-            let picture = |s: &Session| c.rgba(&view::scene(s, &cam), &cam, 300, 220).unwrap();
+            let picture = |s: &Session| c.rgba(&view::scene(s, &cam).unwrap(), &cam, 300, 220).unwrap();
             let (a, b) = (picture(&alone), picture(&with));
             let differ = pixels(&a).zip(pixels(&b)).filter(|(p, q)| p.iter().zip(q).any(|(x, y)| x.abs_diff(*y) > 8)).count();
             assert_eq!(differ, 0, "hatch {hatch}, fov {fov}: the inner body shows through the cap in {differ} pixels");

@@ -881,7 +881,7 @@ fn midpoint_then_edge_creates_a_distance_in_one_undo_step() {
         h.step(&json!({"key":"Enter"})).unwrap();
         assert!(!crate::dim_view::editing());
         assert_eq!(h.app.session.undo.len(), undo + 1);
-        let state = h.app.session.world_state();
+        let state = crate::open_meshing::session_world(&h.app.session);
         let solved = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
         assert!(solved.report.ok());
         let sk = &solved.sketch;
@@ -907,7 +907,7 @@ fn midpoint_face_sketch() -> Harness {
     h.app.finish_sketch();
     h.app.run("solid.extrude", json!({"distance":10})).unwrap();
     h.app.run("sketch.create", json!({"plane":{"face":[0,5,10]}})).unwrap();
-    let state = h.app.session.world_state();
+    let state = crate::open_meshing::session_world(&h.app.session);
     let ss = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
     let plane = ss.plane;
     assert!(ss.sketch.curves.iter().any(|c| c.link.is_some()));
@@ -985,7 +985,7 @@ fn midpoint_pairs_dimension_sketch_and_projected_model_edges() {
         if crate::dim_view::editing() {
             h.step(&json!({"key":"Enter"})).unwrap();
         }
-        let state = h.app.session.world_state();
+        let state = crate::open_meshing::session_world(&h.app.session);
         let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
         let c = sk.constraints.iter().rev().find(|c| c.kind.is_dimension()).expect("two MID picks commit a distance");
         let ConstraintKind::Distance { p, q, .. } = c.kind else { panic!("expected midpoint distance for {projected:?}: {:?}", c.kind) };
@@ -1040,7 +1040,7 @@ fn midpoint_dimension_orientation_follows_the_pointer_before_placement() {
             }
             let mut h = midpoint_face_sketch();
             if held_y {
-                let state = h.app.session.world_state();
+                let state = crate::open_meshing::session_world(&h.app.session);
                 let ss = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
                 let short = ss.sketch.curves.iter().find(|c| c.link.is_none()).unwrap().id.clone();
                 let bottom = ss
@@ -1062,7 +1062,7 @@ fn midpoint_dimension_orientation_follows_the_pointer_before_placement() {
                 h.settle();
             }
             if reused {
-                let state = h.app.session.world_state();
+                let state = crate::open_meshing::session_world(&h.app.session);
                 let ss = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
                 let mid_ref = |point: [f64; 2]| {
                     ss.sketch
@@ -1113,7 +1113,7 @@ fn midpoint_dimension_orientation_follows_the_pointer_before_placement() {
             if crate::dim_view::editing() {
                 h.step(&json!({"key":"Enter"})).unwrap();
             }
-            let state = h.app.session.world_state();
+            let state = crate::open_meshing::session_world(&h.app.session);
             let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
             let c = sk.constraints.iter().rev().find(|c| c.kind.is_dimension()).unwrap();
             assert!(if horizontal { matches!(c.kind, ConstraintKind::DistanceX { .. }) } else { matches!(c.kind, ConstraintKind::DistanceY { .. }) });

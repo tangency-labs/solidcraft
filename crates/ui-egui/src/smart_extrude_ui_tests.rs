@@ -132,7 +132,7 @@ fn a_new_start_object_decides_the_operation_again() {
     drag_to(&mut h, 5.0);
     assert_eq!(state(&h), (0, CUT, true), "into the box: Cut");
     // Start: From Object, the box's bottom face (as the Start choice and a pick there make it).
-    let st = h.app.session.world_state();
+    let st = crate::open_meshing::session_world(&h.app.session);
     let b = st.bodies.first().expect("the box");
     let bottom =
         (0..64).find(|i| b.body.planar_face(*i).is_some_and(|p| p.normal().z < -0.99 && p.origin.z.abs() < 1e-9)).expect("the box's bottom face");

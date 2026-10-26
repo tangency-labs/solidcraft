@@ -95,7 +95,7 @@ fn sketch_on_a_part_in_another_component_joins_and_cuts_it() {
         // Through All with no distance cut nothing and made a separate body.
         (json!({"through_all":true,"direction":"negative"}), "cut", 1000. - 10. / 3. * added),
     ] {
-        assert_eq!(crate::auto_operation(&s, &params), Some(expected), "{params}");
+        assert_eq!(crate::auto_operation(&s, &params).unwrap(), Some(expected), "{params}");
         for operation in ["auto", expected] {
             let mut t = s.scratch();
             let mut p = params.clone();
@@ -156,7 +156,7 @@ fn every_inward_extrude_into_a_part_in_another_component_cuts_it() {
             if from_sketch {
                 p["profiles"] = json!("all");
             }
-            let auto = crate::auto_operation(&t, &p);
+            let auto = crate::auto_operation(&t, &p).unwrap();
             if operation == "auto" && auto != Some(expected) {
                 wrong.push(format!("{params}: auto reads {auto:?}, expected {expected}"));
             }
@@ -1400,7 +1400,7 @@ fn a_tapered_cut_that_widens_cuts_from_small_corners() {
         let pocket = w * h * l + k * (w + h) * l * l + 4.0 / 3.0 * k * k * l.powi(3) - c * (r * r * l + r * k * l * l + k * k * l.powi(3) / 3.0);
         let v = volume(&mut s);
         assert!((v - (318.0 * 212.0 * 20.0 - pocket)).abs() < 1e-3 * pocket, "{deg}°: {v}, a {pocket} mm³ pocket");
-        assert_eq!(s.world_state().bodies.len(), 1);
+        assert_eq!(s.world_state().unwrap().bodies.len(), 1);
     }
 }
 
@@ -2094,7 +2094,7 @@ fn duplicate_and_excess_profile_picks_are_refused_quickly() {
     let e = s.execute("solid.extrude", &json!({"sketch": "Bottom", "distance": 5, "profiles": points})).unwrap_err().to_string();
     assert!(e.contains("2 profile points are given, but Bottom has 1"), "{e}");
     assert!(started.elapsed().as_secs_f64() < 5.0, "refusing took {:?}", started.elapsed());
-    assert!(s.world_state().bodies.is_empty(), "nothing was built");
+    assert!(s.world_state().unwrap().bodies.is_empty(), "nothing was built");
     // One pick of the profile still builds.
     run(&mut s, "solid.loft", json!({"sections": [{"sketch": "Bottom", "profiles": [0]}, {"sketch": "Top"}]}));
 }
@@ -2276,7 +2276,7 @@ fn a_sketch_coil_never_panics_on_hostile_parameters() {
 }
 
 fn placed_bounds(s: &Session, name: &str) -> solidcraft_geom::Aabb3 {
-    s.world_state().body(name).unwrap_or_else(|| panic!("no {name}")).mesh().bounds()
+    s.world_state().unwrap().body(name).unwrap_or_else(|| panic!("no {name}")).mesh().bounds()
 }
 
 fn about(a: f64, b: f64) -> bool {
@@ -2300,7 +2300,7 @@ fn twice_placed_blade(s: &mut Session) -> (String, String) {
     let copy = run(s, "occurrence.copy", json!({"occurrence": made["occurrence"]}));
     run(s, "occurrence.move", json!({"occurrence": copy["occurrence"], "axis": [1, 0, 0], "angle": "90 deg"}));
     run(s, "occurrence.move", json!({"occurrence": copy["occurrence"], "translate": [100, 0, 0], "space": "world"}));
-    let names: Vec<String> = s.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+    let names: Vec<String> = s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
     assert_eq!(names.len(), 2, "{names:?}");
     unground_all(s);
     (names[0].clone(), names[1].clone())
@@ -2357,7 +2357,7 @@ fn an_imported_assembly_with_a_repeated_part_moves_as_one() {
     let mut s = Session::default();
     run(&mut s, "file.insert_step", json!({"path": path}));
     unground_all(&mut s);
-    let names: Vec<String> = s.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+    let names: Vec<String> = s.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
     assert_eq!(names.len(), 2, "{names:?}");
     let before: Vec<_> = names.iter().map(|n| placed_bounds(&s, n)).collect();
     let r = run(&mut s, "solid.move", json!({"bodies": names, "translate": [240, -100, 0]}));
@@ -2386,7 +2386,7 @@ fn placed_plate(s: &mut Session, name: &str, x0: f64, angle: f64) {
 }
 
 fn world_bounds(s: &Session, name: &str) -> solidcraft_geom::Aabb3 {
-    s.world_state().body(name).unwrap_or_else(|| panic!("no {name}")).mesh().bounds()
+    s.world_state().unwrap().body(name).unwrap_or_else(|| panic!("no {name}")).mesh().bounds()
 }
 
 fn near(a: f64, b: f64) -> bool {

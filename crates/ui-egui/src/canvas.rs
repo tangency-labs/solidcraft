@@ -585,7 +585,7 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     // An offset plane shows where it will be: at the distance, or through the picked point.
     let through = crate::dialogs::offset_through_point(d).and_then(|p| match p {
         Sel::Vertex { point, .. } => Some(*point),
-        Sel::SketchPoint { id } => sketch_point_at(app, &app.session.world_state(), id),
+        Sel::SketchPoint { id } => sketch_point_at(app, &crate::open_meshing::session_world(&app.session), id),
         _ => None,
     });
     if let (Kind::OffsetPlane { offset }, Some(n)) = (&d.kind, dir)

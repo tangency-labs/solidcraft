@@ -291,7 +291,7 @@ fn an_edge_on_the_cut_face_draws_over_the_cap() {
 /// the cap: the cap's pixels are where the picture without lines shows the hatch (warm, with
 /// warm pixels 3 px around, so the cut's outline doesn't count).
 fn edges_through_the_cap(c: &Capturer, s: &Session, cam: &Camera, (origin, normal): (Vec3, Vec3), (w, h): (u32, u32)) -> usize {
-    let mut sc = view::scene(s, cam);
+    let mut sc = view::scene(s, cam).unwrap();
     let behind = |p: &Vec3| (*p - origin).dot(normal) < -0.5;
     let segments = sc
         .lines
@@ -335,7 +335,7 @@ fn edges_of_a_pocket_behind_the_cut_stay_under_the_cap() {
     s.execute("inspect.section", &json!({"plane": {"origin": [0, -16, 0], "normal": [0, -1, 0]}})).unwrap();
     for (mode, c) in capturers() {
         for fov in [0.0, 0.6] {
-            let mut cam = view::home_camera(&s);
+            let mut cam = view::home_camera(&s).unwrap();
             cam.fov = fov;
             let n = edges_through_the_cap(c, &s, &cam, plane, (360, 300));
             assert!(n <= 2, "{mode} depth, fov {fov}: the pocket's edges show through the cap in {n} px");
@@ -361,7 +361,7 @@ fn edges_of_a_cut_hub_stay_under_the_cap_as_the_view_turns() {
         for fov in [0.0, 0.6] {
             let mut shown = Vec::new();
             for i in 0..12 {
-                let mut cam = view::home_camera(&s);
+                let mut cam = view::home_camera(&s).unwrap();
                 (cam.fov, cam.yaw, cam.pitch) = (fov, -1.2 + 0.075 * f64::from(i), 0.35);
                 shown.push(edges_through_the_cap(c, &s, &cam, plane, (900, 760)));
             }

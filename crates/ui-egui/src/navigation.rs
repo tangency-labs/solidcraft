@@ -659,7 +659,7 @@ pub(crate) fn device(app: &mut SolveApp, rect: Rect, caps: NavCaps) {
     if app.viewport.device_motion.is_none() && app.viewport.bridge_motion.is_none() {
         return;
     }
-    let sketch_view_is_initial = solidcraft_engine::view::open_sketch_plane(&app.session).is_some_and(|plane| {
+    let sketch_view_is_initial = solidcraft_engine::view::open_sketch_plane(&app.session).ok().flatten().is_some_and(|plane| {
         let normal = plane.normal();
         let mut initial = app.cam.looking_from(normal);
         if normal.z.abs() > 0.999 {
