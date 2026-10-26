@@ -1191,6 +1191,12 @@ fn find_limits_searches_the_joint_as_edited_and_leaves_a_free_side() {
     assert!(f.limits[0].1 == untouched.1 || f.limits[0].2 == untouched.2, "{:?} {:?}", f.limits, f.found);
     assert!(f.found[0].contains(crate::i18n::tr_label("Minimum")) && f.found[0].contains(crate::i18n::tr_label("Maximum")), "{:?}", f.found);
     assert!(f.found_note.is_none(), "{:?}", f.found_note);
+    // Edited after the search, the joint is no longer the one searched (its notes then go).
+    let searched = f.searched.clone().expect("what was searched");
+    assert!(searched.current(&app, f));
+    f.flip = !f.flip;
+    assert!(!searched.current(&app, f), "a flipped joint is not the one searched");
+    f.flip = !f.flip;
     // A form that can't be applied says why instead.
     f.offset[2] = "nonsense".into();
     find_limits(&app, f, id);

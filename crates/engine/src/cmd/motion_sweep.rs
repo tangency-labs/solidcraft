@@ -38,7 +38,7 @@ pub const SWEEP_DOC: &str = "joint: id|name; from, to: its value the sweep runs 
 pub const FIND_LIMITS_DOC: &str = "joint: id|name; index? (one value; default every value); refine?, step?, occurrences?, \
      against?, contact_sets? (as joint.sweep) → values: [{index, dof, unit, value (now), min, max, min_by, max_by, range}], \
      each value swept both ways from where it is, its own limits ignored, closed loops following; each side stops at the \
-     first contact (bisected to `refine`), where a loop cannot close, or at another joint's limit: min_by/max_by {a, b, at} | \
+     first contact (bisected to `refine`), where a loop cannot close, or at another limit (another value's, or another joint's through a motion link): min_by/max_by {a, b, at} | \
      \"loop\" | \"limit\" | \"turn\" (an angle with no contact within a turn: a turn from the other side, or ±180° from \
      now when nothing is met at all) | \"range\" (a distance with no contact within the parts' reach: min/max null); \
      touching_at_start, overlapping_at_start: [{a, b, depth_mm}] (already passing into each other: they stop it only going \
@@ -196,8 +196,10 @@ pub(super) fn find_limits(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let refine = positive(p, "refine", 1e3, cmd)?.unwrap_or(0.01);
     let step = positive(p, "step", 1e9, cmd)?;
-    // No two parts to check (the joint turns the only part there is): nothing can be met.
-    let geometry = checked_pairs(s, p, cmd)?;
+    // No two parts to check (the joint turns the only part there is): nothing can be met. Parts
+    // the call names that make no pair are refused, as `joint.sweep` refuses them.
+    let named = p.get("occurrences").is_some_and(|v| !v.is_null()) || bool_(p, "contact_sets").unwrap_or(false);
+    let geometry = if named { pairs_to_check(s, p, cmd)? } else { checked_pairs(s, p, cmd)? };
     let geometry = geometry.has_pairs().then_some(geometry);
     let now = s.doc.assembly.joints.iter().find(|j| j.id == id).map(|j| j.values.clone()).unwrap_or_default();
     // A distance is searched as far as the parts reach: past it, a straight move meets nothing new.

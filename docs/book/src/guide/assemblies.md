@@ -387,8 +387,8 @@ already in each other where the joint is now are named, and stop the search only
 deeper. The search runs while the window goes on (Cancel drops it). `joint.find_limits {joint,
 index?, refine?, step?, occurrences?, against?, contact_sets?}` answers the same: for each value
 its `min` and `max` (`null` where a distance meets nothing), what stopped each side (`min_by`,
-`max_by`: the two parts and where they touch, or `"loop"`, `"limit"` (another joint's, through
-a motion link), `"turn"` or `"range"`), the `range` searched, and the parts `touching_at_start`
+`max_by`: the two parts and where they touch, or `"loop"`, `"limit"` (the limit of
+another of its values, or of another joint through a motion link), `"turn"` or `"range"`), the `range` searched, and the parts `touching_at_start`
 and `overlapping_at_start` (with `depth_mm`). The joint's own limits are left out of the search,
 closed loops follow, and each side is bisected to `refine` as `joint.sweep` does.
 
