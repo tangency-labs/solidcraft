@@ -28,8 +28,13 @@
 //! It does not certify simple loops, holes inside their outer loop or a path that never doubles
 //! back. Validation after parsing cannot bound parsing allocations: an encoded-input boundary must
 //! also limit bytes and nesting.
+//!
+//! Writers read a [`Prepared`] scene, which only [`Scene::prepare`] makes, so none reads one that
+//! wasn't checked. Clipping will happen there too, once, before any writer (A8).
 
 use serde::{Deserialize, Serialize};
+
+use std::f64::consts::FRAC_PI_2;
 
 use crate::{EPS, Region2, Seg2, Vec2};
 
@@ -132,7 +137,44 @@ fn meet(a: &Seg2, b: &Seg2) -> bool {
     a.end().dist(b.start()) <= EPS
 }
 
+/// A scene that passed [`Scene::validate`]: what every writer reads.
+#[derive(Clone, Copy, Debug)]
+pub struct Prepared<'a> {
+    scene: &'a Scene,
+}
+
+impl<'a> Prepared<'a> {
+    pub fn size_mm(&self) -> Vec2 {
+        self.scene.size_mm
+    }
+
+    /// The groups, in paint order.
+    pub fn groups(&self) -> &'a [Group] {
+        &self.scene.groups
+    }
+}
+
+/// The ends of the pieces of at most a quarter turn the arc of `sweep` radians from `start`
+/// round `center` is drawn in, in order, the last its own end. For writers that draw an arc from
+/// its ends (SVG's `A`): there a half turn's centre is ill-conditioned, and moves by up to 1e-2 mm
+/// once its ends are rounded to the nanometre (six decimals of a millimetre), where a quarter
+/// turn's stays under 1e-6 mm.
+pub fn arc_pieces(center: Vec2, radius: f64, start: f64, sweep: f64) -> impl Iterator<Item = Vec2> {
+    // A scene's sweeps are at most a whole turn and a little: one to four pieces.
+    let n = ((sweep.abs() / FRAC_PI_2) - 1e-9).ceil().clamp(1.0, 4.0) as usize;
+    (1..=n).map(move |k| {
+        let angle = if k == n { start + sweep } else { start + sweep * (k as f64 / n as f64) };
+        center + Vec2::from_angle(angle) * radius
+    })
+}
+
 impl Scene {
+    /// The scene, checked ([`Scene::validate`]), for the writers.
+    pub fn prepare(&self) -> Result<Prepared<'_>> {
+        self.validate()?;
+        Ok(Prepared { scene: self })
+    }
+
     /// Checks the scene against the limits in the module's notes, counting its records first.
     pub fn validate(&self) -> Result<()> {
         let mut budget = Budget(0);
