@@ -413,7 +413,8 @@ pub struct InstancedMesh {
     /// Coarser copies of the triangles, finest first, each with how far it strays from them (mm,
     /// in the part's frame): a placement small on screen is drawn from the coarsest whose error
     /// stays under [`LOD_PX`] there ([`Batches::cull`]).
-    pub levels: Vec<(Arc<SharedTris>, f32)>,
+    /// Shared across batches; absent until the levels are available.
+    pub levels: Option<Arc<[(Arc<SharedTris>, f32)]>>,
     /// An appearance's contiguous triangle range in the shared index buffer. Ranges use full
     /// detail because coarser meshes do not preserve the original face boundaries.
     pub range: Option<std::ops::Range<u32>>,
@@ -1824,7 +1825,7 @@ impl Batches {
             let mut draw = self.retained_instances.remove(&key).unwrap_or_else(|| InstancedDraw {
                 key,
                 look: m.look,
-                levels: Vec::with_capacity(1 + m.levels.len()),
+                levels: Vec::with_capacity(1 + m.levels.as_ref().map_or(0, |l| l.len())),
                 bounds: m.tris.bounds,
                 placements: Vec::new(),
                 shown: None,
@@ -1839,8 +1840,9 @@ impl Batches {
                 draw.shown = None;
             }
             let mut made = 0;
-            for (i, (tris, error)) in
-                std::iter::once((&m.tris, 0.0f32)).chain(m.levels.iter().filter(|_| m.range.is_none()).map(|(t, e)| (t, *e))).enumerate()
+            for (i, (tris, error)) in std::iter::once((&m.tris, 0.0f32))
+                .chain(m.levels.iter().filter(|_| m.range.is_none()).flat_map(|levels| levels.iter()).map(|(t, e)| (t, *e)))
+                .enumerate()
             {
                 let key = Arc::as_ptr(tris) as usize;
                 let gpu = match self.instanced_tris.get(&key).cloned().or_else(|| kept.remove(&key)).filter(|(b, _)| Arc::ptr_eq(b, tris)) {
@@ -4755,7 +4757,7 @@ mod glass_tests {
             ..Default::default()
         };
         let tris = Arc::new(SharedTris::new(&mesh));
-        let mut part = InstancedMesh { key: 1, tris, instances: Vec::new(), look: InstanceLook::Opaque, levels: Vec::new(), range: None };
+        let mut part = InstancedMesh { key: 1, tris, instances: Vec::new(), look: InstanceLook::Opaque, levels: None, range: None };
         part.place([[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]], PaletteIndex(0));
         let renderer =
             Renderer::new(&device, GpuTarget { format: wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false }, None);

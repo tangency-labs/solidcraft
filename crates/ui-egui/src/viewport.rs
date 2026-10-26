@@ -1515,7 +1515,7 @@ impl Instances {
             Some(at) => at,
             None => {
                 let tris = self.geometry(mesh).tris.clone();
-                let levels = if range.is_none() { self.lods.levels(mesh).map(|l| l.as_ref().clone()).unwrap_or_default() } else { Vec::new() };
+                let levels = if range.is_none() { self.lods.levels(mesh) } else { None };
                 self.meshes.push((mesh.clone(), crate::gpu::InstancedMesh { key: key as u64, tris, instances: Vec::new(), look, levels, range }));
                 let at = self.meshes.len() - 1;
                 self.by_mesh.insert(batch, at);
@@ -1534,7 +1534,7 @@ impl Instances {
             geometry.looks.retain(|_, look| look.used);
             used.contains(key)
         });
-        self.lods.retain(&used);
+        self.lods.retain();
         if let Ok(mut k) = app.viewport.instanced_tris.lock() {
             *k = self.kept;
         }
@@ -3740,7 +3740,7 @@ impl HighlightInstances {
                     tris,
                     instances: Vec::new(),
                     look: crate::gpu::InstanceLook::Opaque,
-                    levels: Vec::new(),
+                    levels: None,
                     range: None,
                 });
                 self.by_mesh.insert(key, self.meshes.len() - 1);
@@ -8310,7 +8310,10 @@ mod tests {
         eprintln!(
             "levels of detail made in {:.1} s: {:?}",
             t.elapsed().as_secs_f64(),
-            lod.instanced.iter().map(|m| m.levels.iter().map(|(t, e)| (t.indices.len() / 3, *e)).collect::<Vec<_>>()).collect::<Vec<_>>()
+            lod.instanced
+                .iter()
+                .map(|m| m.levels.iter().flat_map(|l| l.iter()).map(|(t, e)| (t.indices.len() / 3, *e)).collect::<Vec<_>>())
+                .collect::<Vec<_>>()
         );
         // `SOLIDCRAFT_BENCH_PNG=dir`: the view drawn from each placement's own triangles, in full
         // as instances, and from the levels (`SOLIDCRAFT_BENCH_PNG_ONLY=1`: then stop).
@@ -8501,7 +8504,7 @@ mod tests {
         let key = scene_key(&app);
         let first = build_scene(&app);
         assert_eq!(first.instanced.len(), 1);
-        assert!(first.instanced[0].levels.is_empty(), "drawn in full meanwhile");
+        assert!(first.instanced[0].levels.is_none(), "drawn in full meanwhile");
         let began = std::time::Instant::now();
         while app.viewport.mesh_lods.busy() {
             assert!(began.elapsed() < std::time::Duration::from_secs(120), "the levels are made");
@@ -8509,7 +8512,7 @@ mod tests {
         }
         assert_ne!(scene_key(&app), key, "the scene is built again when they are");
         let scene = build_scene(&app);
-        let levels = &scene.instanced[0].levels;
+        let levels = scene.instanced[0].levels.as_ref().unwrap();
         assert!(levels.len() >= 2, "{} levels", levels.len());
         // Small on screen: the sphere about 30 px across.
         app.fit_view();

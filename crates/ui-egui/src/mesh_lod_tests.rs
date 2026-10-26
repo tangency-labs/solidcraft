@@ -58,7 +58,15 @@ fn a_large_meshs_levels_are_made_once_on_a_worker() {
         last = (n, *error);
     }
     assert!(Arc::ptr_eq(&levels, &lods.levels(&mesh).unwrap()), "made once");
-    // Let go when no longer drawn.
-    lods.retain(&HashSet::new());
-    assert!(lods.levels(&mesh).is_none(), "made again when asked again");
+    // Leaving the draw list (hidden or refined) retains work for a live definition.
+    let generation = lods.generation();
+    lods.retain();
+    assert!(Arc::ptr_eq(&levels, &lods.levels(&mesh).unwrap()));
+    assert_eq!(generation, lods.generation());
+    assert!(!lods.busy());
+    let source = Arc::downgrade(&mesh);
+    drop(mesh);
+    assert!(source.upgrade().is_none(), "levels do not retain closed designs' source geometry");
+    lods.retain();
+    assert!(lods.0.lock().unwrap().by_mesh.is_empty());
 }

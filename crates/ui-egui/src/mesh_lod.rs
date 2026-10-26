@@ -6,8 +6,8 @@
 //!
 //! Display only: the reference mesh (picking, measuring, exports) is never simplified.
 
-use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Mutex};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, Weak};
 
 use solidcraft_engine::geom::Mesh;
 
@@ -21,16 +21,16 @@ const MIN_LEVEL: usize = 1_000;
 const MAX_JOBS: usize = 2;
 
 /// A mesh's levels: coarser copies, finest first, each with its error (mm).
-pub(crate) type Levels = Arc<Vec<(Arc<SharedTris>, f32)>>;
+pub(crate) type Levels = Arc<[(Arc<SharedTris>, f32)]>;
 
-/// The levels made (and being made), by mesh address with the mesh held, so its address stays
-/// its own.
+/// The levels made (and being made), by mesh address. A weak handle guards its identity without
+/// keeping the source alive after its definition is released.
 #[derive(Clone, Default)]
 pub(crate) struct MeshLods(Arc<Mutex<State>>);
 
 #[derive(Default)]
 struct State {
-    by_mesh: HashMap<usize, (Arc<Mesh>, Option<Levels>)>,
+    by_mesh: HashMap<usize, (Weak<Mesh>, Option<Levels>)>,
     /// Counts the levels made: the scene is built again when it changes.
     generation: u64,
     making: usize,
@@ -45,30 +45,32 @@ impl MeshLods {
         }
         let key = Arc::as_ptr(mesh) as usize;
         let mut state = self.0.lock().ok()?;
-        if let Some((_, levels)) = state.by_mesh.get(&key).filter(|(held, _)| Arc::ptr_eq(held, mesh)) {
+        if let Some((_, levels)) = state.by_mesh.get(&key).filter(|(held, _)| std::ptr::eq(held.as_ptr(), Arc::as_ptr(mesh))) {
             return levels.clone();
         }
         if state.making >= MAX_JOBS {
             return None;
         }
-        state.by_mesh.insert(key, (mesh.clone(), None));
+        state.by_mesh.insert(key, (Arc::downgrade(mesh), None));
         state.making += 1;
         let (shared, source) = (self.0.clone(), mesh.clone());
         let started = std::thread::Builder::new().name("mesh-lod".into()).spawn(move || {
-            let levels = Arc::new(make(&source));
+            let identity = Arc::downgrade(&source);
+            let levels: Levels = make(&source).into();
+            drop(source);
             if let Ok(mut state) = shared.lock() {
-                if let Some(slot) = state.by_mesh.get_mut(&key).filter(|(held, _)| Arc::ptr_eq(held, &source)) {
+                if let Some(slot) = state.by_mesh.get_mut(&key).filter(|(held, _)| Weak::ptr_eq(held, &identity)) {
                     slot.1 = Some(levels);
+                    state.generation = state.generation.wrapping_add(1);
                 }
                 state.making = state.making.saturating_sub(1);
-                state.generation = state.generation.wrapping_add(1);
             }
         });
         if started.is_err() {
             // No threads (the browser): drawn in full.
             state.making = state.making.saturating_sub(1);
             if let Some(slot) = state.by_mesh.get_mut(&key) {
-                slot.1 = Some(Arc::new(Vec::new()));
+                slot.1 = Some(Arc::from([]));
             }
         }
         None
@@ -84,10 +86,11 @@ impl MeshLods {
         self.0.lock().is_ok_and(|s| s.making > 0)
     }
 
-    /// Let go of the levels of meshes not in `used` (by address); those being made stay.
-    pub(crate) fn retain(&self, used: &HashSet<usize>) {
+    /// A source temporarily drawn at another refinement keeps its levels. Release them once
+    /// neither the document nor a worker holds that source.
+    pub(crate) fn retain(&self) {
         if let Ok(mut state) = self.0.lock() {
-            state.by_mesh.retain(|k, (_, levels)| levels.is_none() || used.contains(k));
+            state.by_mesh.retain(|_, (source, _)| source.strong_count() > 0);
         }
     }
 }
@@ -96,8 +99,9 @@ impl MeshLods {
 /// [`MIN_LEVEL`]).
 fn make(mesh: &Mesh) -> Vec<(Arc<SharedTris>, f32)> {
     let n = mesh.triangles.len();
-    let targets: Vec<usize> = [4, 16, 64].into_iter().map(|d| n / d).filter(|t| *t >= MIN_LEVEL).collect();
-    solidcraft_engine::geom::simplify::levels(&mesh.positions, &mesh.triangles, &targets)
+    let targets = [4, 16, 64].map(|d| n / d);
+    let count = targets.iter().take_while(|n| **n >= MIN_LEVEL).count();
+    solidcraft_engine::geom::simplify::levels(&mesh.positions, &mesh.triangles, targets.get(..count).unwrap_or_default())
         .iter()
         .map(|l| (Arc::new(SharedTris::from_level(l)), l.error as f32))
         .collect()
