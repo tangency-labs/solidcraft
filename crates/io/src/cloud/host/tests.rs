@@ -94,6 +94,54 @@ fn published(job: &Job) -> solidcraft_cloud::jobs::JobStatus {
 }
 
 #[test]
+fn restart_exposes_local_catalog_before_requesting_provider_access() {
+    #[derive(Default)]
+    struct Access(std::sync::Mutex<Vec<solidcraft_cloud::jobs::JobStatus>>);
+    impl super::super::NativeAccess for Access {
+        fn uses_provider_api(&self, _: &Connection) -> bool {
+            true
+        }
+        fn provider_repository(&self, _: &Connection, job: &Job) -> Result<Box<dyn super::super::ProviderRepository>> {
+            self.0.lock().unwrap().push(job.status()?);
+            Err(Error::Storage("cellular connection unavailable".into()))
+        }
+        fn credential(&self, _: &str) -> Result<Option<String>> {
+            panic!("local listing must not need credentials")
+        }
+        fn store_credential(&self, _: &str, _: &str) -> Result<()> {
+            panic!("local listing must not write credentials")
+        }
+        fn prepare(&self, _: Connection, _: &Job) -> Result<Connection> {
+            panic!("local listing must not run setup")
+        }
+    }
+    let fixture = Fixture::new();
+    let connection = fixture.connection("local-first");
+    let cached = save(&connection, "parts/cached", "Cached project", None);
+    let pending = save(&connection, "parts/queued", "Queued project", None);
+    let outbox = fixture.outbox(&connection);
+    let snapshot = cached.record.recover(|path| Ok(cached.objects[path].clone())).unwrap();
+    outbox.cache_synchronized_checkout(&connection, &cached.record.destination, &snapshot).unwrap();
+    outbox.stage(&pending).unwrap();
+    drop(outbox);
+    let access = std::sync::Arc::new(Access::default());
+    let restarted = fixture.host().with_access(access.clone());
+    let result = complete(&restarted.submit(Operation::List(connection), String::new()).unwrap());
+    assert_eq!(result.phase, Phase::Ready, "offline refresh retains local projects");
+    let observed = access.0.lock().unwrap();
+    let local = observed.first().unwrap();
+    assert_eq!(local.phase, Phase::Working, "remote refresh remains in progress");
+    assert_eq!(
+        local.result,
+        Some(serde_json::json!([cached.record.destination, pending.record.destination])),
+        "cached and queued projects must be published before network access"
+    );
+    assert_eq!(local.catalog.len(), 2);
+    assert!(local.catalog.iter().any(|e| e.phase == Phase::SavedLocally));
+    assert_eq!(result.result, local.result);
+}
+
+#[test]
 fn provider_api_uses_native_recovery_without_git_and_manages_revisions_across_restart() {
     use solidcraft_cloud::{
         Destination, Manifest, Publication, Published,
@@ -103,6 +151,9 @@ fn provider_api_uses_native_recovery_without_git_and_manages_revisions_across_re
     #[derive(Default)]
     struct Remote {
         online: bool,
+        full_reads: usize,
+        unavailable: Option<String>,
+        cancel_on_open: Option<Job>,
         files: BTreeMap<String, Vec<u8>>,
         commits: Vec<BTreeMap<String, Vec<u8>>>,
     }
@@ -182,16 +233,33 @@ fn provider_api_uses_native_recovery_without_git_and_manages_revisions_across_re
                 .filter(|d| snapshot(&state.files, d).is_ok_and(|s| s.manifest.deleted() && !s.manifest.moved()))
                 .collect())
         }
-        fn open(&mut self, destination: &Destination) -> Result<Snapshot> {
+        fn open(&mut self, destination: &Destination, _cache: &LocalOutbox) -> Result<Snapshot> {
             self.test()?;
-            snapshot(&self.0.lock().unwrap().files, destination)
+            let mut state = self.0.lock().unwrap();
+            state.full_reads += 1;
+            if let Some(job) = state.cancel_on_open.take() {
+                job.cancel()?;
+                return Err(offline());
+            }
+            if state.unavailable.as_deref() == Some(destination.file.as_str()) {
+                return Err(Error::Invalid("test unreadable design".into()));
+            }
+            snapshot(&state.files, destination)
+        }
+        fn is_current(&mut self, cached: &solidcraft_cloud::StoredDesign, _cache: &LocalOutbox) -> Result<bool> {
+            self.test()?;
+            let state = self.0.lock().unwrap();
+            let path = format!("{}/manifest.json", cached.destination.design_path()?);
+            let manifest = Manifest::read(state.files.get(&path).ok_or_else(offline)?)?;
+            cached.matches_manifest(&manifest)
         }
         fn thumbnail(&mut self, _: &Destination) -> Result<Option<Vec<u8>>> {
             self.test()?;
             Ok(None)
         }
         fn history(&mut self, d: &Destination) -> Result<History> {
-            let s = self.open(d)?;
+            self.test()?;
+            let s = snapshot(&self.0.lock().unwrap().files, d)?;
             Ok(History {
                 revision: solidcraft_cloud::revision(&s.manifest).map(str::to_owned),
                 revisions: vec![Revision {
@@ -248,6 +316,21 @@ fn provider_api_uses_native_recovery_without_git_and_manages_revisions_across_re
         assert_eq!(published(&host.submit(Operation::Synchronize(connection.clone()), executable.clone()).unwrap()).phase, Phase::Synced);
     }
     assert_eq!(remote.lock().unwrap().commits.len(), 1);
+    let reads = remote.lock().unwrap().full_reads;
+    let cached_open = complete(
+        &host
+            .submit(
+                Operation::Open {
+                    connection: connection.clone(),
+                    destination: Destination { connection: connection.id.clone(), project: "Robot".into(), file: "parts/bracket".into() },
+                    local_revision: None,
+                },
+                executable.clone(),
+            )
+            .unwrap(),
+    );
+    assert_eq!(cached_open.phase, Phase::Ready);
+    assert_eq!(remote.lock().unwrap().full_reads, reads, "a synchronized local design needs only a metadata check, not another asset download");
     let destination = Destination { connection: connection.id.clone(), project: "Robot".into(), file: "parts/bracket".into() };
     let renamed = Destination { file: "parts/renamed".into(), ..destination.clone() };
     let rename = published(
@@ -303,6 +386,45 @@ fn provider_api_uses_native_recovery_without_git_and_manages_revisions_across_re
     assert_eq!(listed.result, Some(serde_json::json!([renamed])));
     assert!(fixture.outbox(&connection).pending().unwrap().is_empty());
     assert!(connection.checkout.is_empty());
+
+    let outbox = fixture.outbox(&connection);
+    let mut updated = Vec::new();
+    for file in ["parts/a-download-failure", "parts/b-cache-failure", "parts/c-valid"] {
+        let cached = save(&connection, file, "Cached revision", None);
+        let mut snapshot = cached.record.recover(|path| Ok(cached.objects[path].clone())).unwrap();
+        snapshot.manifest.extra.insert("revision".into(), cached.record.id.clone().into());
+        outbox.cache_synchronized_checkout(&connection, &cached.record.destination, &snapshot).unwrap();
+        let existing = snapshot.manifest.write().unwrap();
+        let newer = save(&connection, file, "New remote revision", Some(cached.record.id));
+        let snapshot = newer.record.recover(|path| Ok(newer.objects[path].clone())).unwrap();
+        let publication = Publication::prepare(&newer.record, snapshot, None, Some(&existing)).unwrap();
+        remote.lock().unwrap().files.extend(publication.files);
+        updated.push(newer.record);
+    }
+    {
+        let mut state = remote.lock().unwrap();
+        state.unavailable = Some(updated[0].destination.file.clone());
+        state.files.insert(format!("{}/document.json", updated[1].destination.design_path().unwrap()), b"corrupt document".to_vec());
+    }
+    let job = Job::new(connection.id.clone()).unwrap();
+    let result = super::super::provider::refresh(&outbox, &connection, &job, &mut Api(remote.clone(), connection.clone()));
+    assert!(
+        matches!(result, Err(Error::Invalid(message)) if message == "test unreadable design"),
+        "report the first failure after attempting every design"
+    );
+    for failed in &updated[..2] {
+        assert!(outbox.cached(&connection, &failed.destination).unwrap().unwrap().outdated, "failed downloads and cache writes remain outdated");
+    }
+    let valid = outbox.cached(&connection, &updated[2].destination).unwrap().unwrap();
+    assert!(!valid.outdated && valid.confirmed);
+    assert_eq!(valid.revision.as_deref(), Some(updated[2].id.as_str()), "an earlier failure must not starve a later healthy design");
+
+    let cancelled = Job::new(connection.id.clone()).unwrap();
+    let reads = remote.lock().unwrap().full_reads;
+    remote.lock().unwrap().cancel_on_open = Some(cancelled.clone());
+    let result = super::super::provider::refresh(&outbox, &connection, &cancelled, &mut Api(remote.clone(), connection.clone()));
+    assert!(matches!(result, Err(Error::Storage(message)) if message.contains("cancelled")));
+    assert_eq!(remote.lock().unwrap().full_reads, reads + 1, "cancellation must stop immediately instead of attempting later designs");
 }
 
 #[test]

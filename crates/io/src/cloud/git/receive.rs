@@ -15,13 +15,10 @@ impl GitRepository {
         self.confirm_paths("HEAD", &paths)?;
         if let Some(remote) = self.pinned_remote()? {
             for url in remote.push.iter().collect::<BTreeSet<_>>() {
-                let reference = self.text(&["ls-remote", "--heads", "--", url, &self.connection.branch])?;
-                let commit = reference
-                    .split_whitespace()
-                    .next()
-                    .filter(|sha| matches!(sha.len(), 40 | 64) && sha.bytes().all(|b| b.is_ascii_hexdigit()))
+                let commit = self
+                    .remote_branch(url)?
                     .ok_or_else(|| storage("publish this design's branch before synchronizing; local copies are retained"))?;
-                self.confirm_paths(commit, &paths)?;
+                self.confirm_paths(&commit, &paths)?;
             }
         }
         Ok(())

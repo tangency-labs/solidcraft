@@ -14,6 +14,7 @@ use sha2::Digest as _;
 use crate::{Connection, Destination, Error, Manifest, PROJECT_MARKER, PendingSave, Project, Publication, Published, Result, Snapshot};
 
 mod management;
+mod opening;
 #[cfg(test)]
 mod tests;
 
@@ -297,30 +298,6 @@ impl GitHub {
         crate::Thumbnail::png(&manifest, |path| objects.get(path).cloned().ok_or_else(|| storage("preview unavailable")))
     }
 
-    pub async fn open(&self, destination: &Destination, check_document: impl Fn(&[u8]) -> Result<()>) -> Result<Snapshot> {
-        let (tree, manifest, document) = self.head(destination, check_document).await?;
-        self.open_head(destination, tree, manifest, document).await
-    }
-
-    async fn open_head(&self, destination: &Destination, tree: Tree, manifest: Manifest, document: Vec<u8>) -> Result<Snapshot> {
-        let mut objects = BTreeMap::new();
-        for asset in manifest.assets.values() {
-            for chunk in &asset.chunks {
-                let path = chunk.path()?;
-                if let std::collections::btree_map::Entry::Vacant(entry) = objects.entry(path.clone()) {
-                    let bytes = self
-                        .read(&tree, &format!("{}/{path}", destination.project), crate::CHUNK_BYTES)
-                        .await?
-                        .ok_or_else(|| invalid("asset chunk missing"))?;
-                    entry.insert(bytes);
-                }
-            }
-        }
-        Snapshot::hydrate(&manifest, &document, |path| objects.get(path).cloned().ok_or_else(|| invalid("asset chunk missing")))?;
-        objects.extend(self.preview_objects(&tree, destination, &manifest).await?);
-        Ok(Snapshot { manifest, document, objects })
-    }
-
     pub async fn publish(
         &self,
         save: &PendingSave,
@@ -404,11 +381,18 @@ impl GitHub {
                     return Err(Error::Conflict);
                 }
             }
+            let attributes_path = format!("{}/.gitattributes", publication.destination.project);
+            tree.check_path(&attributes_path)?;
+            if let Some(existing) = tree.files.get(&attributes_path)
+                && blob_hash(Publication::GIT_ATTRIBUTES, existing.len())? != *existing
+            {
+                return Err(storage("cloud project .gitattributes has custom changes; preserve them before synchronizing"));
+            }
             let mut changes = Vec::new();
             let object_prefix = format!("{}/objects/", publication.destination.project);
             for (path, bytes) in publication.files {
                 tree.check_path(&path)?;
-                if path.starts_with(&object_prefix)
+                if (path.starts_with(&object_prefix) || path == attributes_path)
                     && let Some(existing) = tree.files.get(&path)
                 {
                     // Verify reuse against Git's blob identity without downloading large assets.

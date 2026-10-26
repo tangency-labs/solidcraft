@@ -223,7 +223,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         "cloud_settings:sync",
                         tr("cmd.cloud.sync"),
                         applied && !active,
-                        app.cloud.operations.busy("cloud.sync", &c.id),
+                        crate::cloud_browser::synchronizing(app, &c.id),
                     ) && let Err(error) = app.run("cloud.sync", json!({"connection":c.id}))
                     {
                         editor.error = Some(error);
@@ -289,7 +289,7 @@ fn busy_button(ui: &mut egui::Ui, id: &str, label: &str, enabled: bool, busy: bo
     let icon = if id.starts_with("cloud_settings:cancel") {
         "stop"
     } else if id == "cloud_settings:sync" {
-        "send"
+        "sync"
     } else {
         "inspect"
     };

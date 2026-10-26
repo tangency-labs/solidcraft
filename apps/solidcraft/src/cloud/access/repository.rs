@@ -30,8 +30,20 @@ impl ProviderRepository for Repository {
     fn trash(&mut self) -> Result<Vec<Destination>> {
         self.call(|api| async move { api.list_deleted().await })
     }
-    fn open(&mut self, destination: &Destination) -> Result<Snapshot> {
-        self.call(|api| async move { api.open(destination, check_document).await })
+    fn open(&mut self, destination: &Destination, cache: &solidcraft_engine::io::cloud::LocalOutbox) -> Result<Snapshot> {
+        let job = self.job.clone();
+        self.call(|api| async move {
+            api.open_cached(destination, check_document, cache, |done, total| {
+                if job.cancelled()? {
+                    return Err(Error::Storage("opening cancelled".into()));
+                }
+                job.update(|status| status.download_progress = Some((done, total)))
+            })
+            .await
+        })
+    }
+    fn is_current(&mut self, cached: &StoredDesign, cache: &solidcraft_engine::io::cloud::LocalOutbox) -> Result<bool> {
+        self.call(|api| async move { api.is_current_cached(cached, cache).await })
     }
     fn thumbnail(&mut self, destination: &Destination) -> Result<Option<Vec<u8>>> {
         self.call(|api| async move { api.thumbnail(destination, check_document).await })
