@@ -65,6 +65,7 @@ fn cache_kernel(k: &Kernel, context: &Context) -> Kernel {
         upstream_ub_passed: Vec::new(),
         memoize_curve_caches: k.memoize_curve_caches,
         fixes: k.fixes,
+        notify_records: BTreeMap::new(),
     }
 }
 
