@@ -2115,3 +2115,66 @@ impl UnitDiff for Runner {
 #[path = "blend_fillet_executive_p2/loader.rs"]
 mod loader;
 pub(crate) use loader::{loader_cpp, loader_rust, LoaderScript};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solidcore::blend::fillet_executive::p2::{
+        with_temporary_radius_change, with_temporary_radius_change_with_fixes, TemporaryRadiusChange,
+    };
+
+    #[test]
+    fn temporary_radius_setup_error_never_enters_the_filleting_body() {
+        let mut access = Access {
+            breps: vec![Brep::new()],
+            pseudo: FilletBrep::new(),
+            generators: vec![],
+            solvers: vec![],
+            corners: vec![],
+            laws: vec![FilletLaw::linear(1.0, 2.0, None)],
+            edge_caches: BTreeMap::new(),
+        };
+        let solver = Handle::Solver(0);
+        let side = Handle::Edgeuse(EdgeuseId::from_index(0));
+        let expected = missing_error();
+        // The additive API keeps the existing constructor's pinned default.
+        assert!(TemporaryRadiusChange::new(&mut access, solver, 0, side).is_ok());
+        let mut default_body_called = false;
+        // Revert can fail for this intentionally absent solver; the body still ran.
+        let _ = with_temporary_radius_change(&mut access, solver, 0, side, |_| {
+            default_body_called = true;
+            Ok(())
+        });
+        assert!(default_body_called);
+        let mut fixes = solidcore::kernel::UpstreamFixes::default();
+        fixes.temporary_radius_setup_errors = true;
+        let error =
+            TemporaryRadiusChange::new_with_fixes(&mut access, solver, 0, side, &fixes).unwrap_err();
+        assert_eq!(error, expected);
+
+        let mut body_called = false;
+        let error = with_temporary_radius_change_with_fixes(
+            &mut access,
+            solver,
+            0,
+            side,
+            &fixes,
+            |_| {
+                body_called = true;
+                Ok(())
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error, expected);
+        assert!(!body_called);
+        assert_eq!(access.laws.len(), 1);
+        assert!(matches!(
+            access.laws[0].kind,
+            FilletLawKind::Linear {
+                start_radius: 1.0,
+                end_radius: 2.0
+            }
+        ));
+        assert!(access.solvers.is_empty());
+    }
+}

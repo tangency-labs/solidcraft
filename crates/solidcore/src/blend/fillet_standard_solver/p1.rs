@@ -3834,6 +3834,31 @@ mod tests {
     }
 
     #[test]
+    fn failed_radius_law_keeps_both_offset_distances() {
+        let mut curve_based = CurveBasedFs::new(1e-6, 0.5, 0.03);
+        curve_based.solver = cr().solver;
+        let mut fs = VariableRadiusFs {
+            curve_based,
+            law: FilletLaw::new(FilletLawKind::Base),
+            law_orientation: false,
+            law_interval: Extent1d::from_min_max(0.0, 1.0),
+        };
+        let distances = |fs: &VariableRadiusFs| {
+            fs.curve_based
+                .solver
+                .surfaces
+                .each_ref()
+                .map(|s| s.as_ref().unwrap().surface.offset_distance())
+        };
+        let before = distances(&fs);
+        let mut point = TsectPnt::new();
+        point.user_doubles[0] = 0.5;
+        let expected = fs.law.evaluate(0.5, &fs.law_interval, false).unwrap_err();
+        assert_eq!(fs.setup_offset_values(&point).unwrap_err(), expected);
+        assert_eq!(distances(&fs), before);
+    }
+
+    #[test]
     fn variable_radius_queries() {
         let k = &Kernel::default();
         let mut cb = CurveBasedFs::new(1e-6, 0.5, 0.03);
