@@ -115,22 +115,26 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
             },
             Sel::Edge { .. } | Sel::Vertex { .. } => skip("edges and vertices are deleted with their body or face".into()),
             // In the sketch being edited, a profile stands for the curves around it (#7107);
-            // its holes are shapes of their own and stay.
+            // its holes are shapes of their own and stay. A letter's outline stands for its
+            // whole text, so no counters are left behind.
             Sel::Profile { sketch, index } if s.active_sketch == Some(*sketch) => {
                 let st = s.model.state();
-                let own = s.doc.sketch(*sketch).ok();
-                let ids: Vec<String> = st
-                    .sketch(*sketch)
-                    .and_then(|ss| ss.profiles.get(*index))
-                    .map(|pr| solidcraft_sketch::distinct_curves(&pr.outer_curves))
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|id| own.is_some_and(|sk| sk.curve_index(id).is_some() || sk.wire_index(id).is_some()))
-                    .collect();
-                if ids.is_empty() {
+                let (Some(ss), Ok(sk)) = (st.sketch(*sketch), s.doc.sketch(*sketch)) else {
+                    skip("nothing around that profile can be deleted".into());
+                    continue;
+                };
+                let outer = ss.profiles.get(*index).map(|pr| solidcraft_sketch::distinct_curves(&pr.outer_curves)).unwrap_or_default();
+                let before = entities.len();
+                for c in outer.iter().filter_map(|id| sk.curves.iter().find(|c| &c.id == id)) {
+                    let text = c.link.as_ref().filter(|l| sk.link(l).is_some_and(|l| l.kind == solidcraft_sketch::LinkKind::Text));
+                    let id = text.unwrap_or(&c.id);
+                    if !entities.contains(id) {
+                        entities.push(id.clone());
+                    }
+                }
+                if entities.len() == before {
                     skip("nothing around that profile can be deleted".into());
                 }
-                entities.extend(ids);
             }
             Sel::Profile { .. } => skip("a profile goes with its sketch".into()),
             Sel::ExternalSketchCurve { .. } | Sel::ExternalSketchPoint { .. } => skip("edit the source sketch to delete its geometry".into()),
@@ -537,6 +541,27 @@ mod tests {
         let err = s.execute("selection.delete", &item).unwrap_err().to_string();
         assert!(err.contains("a profile goes with its sketch"), "{err}");
         assert_eq!(curves(&s, sk), before);
+    }
+
+    /// A picked letter goes with its whole text, counters too (an O's inside is a profile of
+    /// its own), and the rectangle beside it stays.
+    #[test]
+    fn a_letter_profile_deletes_its_whole_text_while_sketching() {
+        let mut s = Session::default();
+        let sk = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]}));
+        run(&mut s, "sketch.text", json!({"text": "OB", "at": [60, 0], "height": 10}));
+        let (index, rect) = {
+            let st = s.model.state();
+            let ss = st.sketch(sk).unwrap();
+            let text = |id: &String| ss.sketch.curves.iter().any(|c| &c.id == id && c.link.is_some());
+            let index = ss.profiles.iter().position(|p| p.outer_curves.iter().all(text)).unwrap();
+            (index, ss.sketch.curves.iter().filter(|c| c.link.is_none()).map(|c| c.id.clone()).collect::<Vec<_>>())
+        };
+        assert_eq!(rect.len(), 4, "{rect:?}");
+        assert!(curves(&s, sk).len() > 4, "the text has outlines");
+        run(&mut s, "selection.delete", json!({"items": [{"type": "profile", "sketch": sk, "index": index}]}));
+        assert_eq!(curves(&s, sk), rect, "the whole text goes, the rectangle stays");
     }
 
     fn curves(s: &Session, sk: u64) -> Vec<String> {
