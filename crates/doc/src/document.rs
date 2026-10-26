@@ -3820,8 +3820,7 @@ impl Document {
 
     /// Why a name cannot be a parameter name (None = fine).
     pub fn param_name_problem(name: &str) -> Option<String> {
-        let mut cs = name.chars();
-        if !matches!(cs.next(), Some(c) if c.is_alphabetic() || c == '_') || !cs.all(|c| c.is_alphanumeric() || c == '_') {
+        if !expr::is_name_shaped(name) {
             return Some(format!("`{name}` is not a valid parameter name (letters, digits and _, starting with a letter)"));
         }
         if name.len() > 64 {

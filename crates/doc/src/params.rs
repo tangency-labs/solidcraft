@@ -128,14 +128,28 @@ impl Document {
         self.param(n).is_some() || self.text_param(n).is_some() || self.features.iter().any(|f| f.param_names.iter().any(|x| x == n))
     }
 
+    /// Every name a parameter, a text parameter or a feature input has (the names `name_taken` refuses), to gather once:
+    /// asking `name_taken` for each candidate searched the whole design once per candidate, quadratic in the named inputs.
+    fn taken_names(&self) -> impl Iterator<Item = &str> {
+        let inputs = self.features.iter().flat_map(|f| f.param_names.iter().map(String::as_str));
+        self.params.iter().map(|p| p.name.as_str()).chain(self.text_params.iter().map(|p| p.name.as_str())).chain(inputs)
+    }
+
+    /// The first of `base`, `base2`, `base3`, … that no parameter or feature input has.
+    fn free_name(&self, base: &str) -> String {
+        let taken: std::collections::HashSet<&str> = self.taken_names().collect();
+        // One candidate more than there are names, so one of them is free.
+        (1..=taken.len() + 1)
+            .map(|n| if n == 1 { base.to_string() } else { format!("{base}{n}") })
+            .find(|name| !taken.contains(name.as_str()))
+            .unwrap_or_else(|| base.to_string())
+    }
+
     /// The next free `dN` name.
     pub fn next_d_name(&self) -> String {
-        // Every taken name at once: asking `name_taken` for d1, d2, … searched the whole
-        // design once per number, quadratic in the number of named inputs.
         // Their numbers, so trying d1, d2 … writes no names: a design with thousands of named
         // inputs wrote that many for every new one.
-        let names = self.params.iter().map(|p| p.name.as_str()).chain(self.features.iter().flat_map(|f| f.param_names.iter().map(String::as_str)));
-        let taken = numbers_after("d", names);
+        let taken = numbers_after("d", self.taken_names());
         let n = (1..).find(|n| !taken.contains(n)).unwrap_or(1);
         format!("d{n}")
     }
@@ -821,6 +835,32 @@ impl Document {
     /// dimension, favourite and comment that refers to it follows. Returns how many
     /// references were updated.
     pub fn rename_param(&mut self, old: &str, new: &str) -> Result<usize> {
+        self.rename_param_with(old, new, expr::rename_reference)
+    }
+
+    /// Rename the parameters and feature inputs of an older design whose names are now units
+    /// (`names`, which a format step listed as the design opened): `g` becomes `g_param` (or
+    /// `g_param2`, … when that is taken), every expression that uses it follows as the build that
+    /// saved the design read it (`2 g` was 2 × `g`, not 2 grams), and its comment says why. No
+    /// value changes. A listed name that isn't reserved now, or that nothing has, is left alone.
+    pub(crate) fn rename_unit_word_params(&mut self, names: &[String]) -> Result<()> {
+        for old in names {
+            if !expr::is_reserved(old) || !self.name_taken(old) {
+                continue;
+            }
+            let new = self.free_name(&format!("{old}_param"));
+            self.rename_param_with(old, &new, expr::rename_word)?;
+            let note = format!("renamed from `{old}`, which is now a unit");
+            let had = self.param_comment(&new);
+            let comment = if had.is_empty() { note } else { format!("{had} ({note})") };
+            // A comment already at its longest keeps its own text: the rename is what matters.
+            let _ = self.set_param_comment(&new, &comment);
+        }
+        Ok(())
+    }
+
+    /// [`Document::rename_param`], renaming the name in expressions with `rename`.
+    fn rename_param_with(&mut self, old: &str, new: &str, rename: fn(&str, &str, &str) -> String) -> Result<usize> {
         let new = new.trim();
         if !self.name_taken(old) {
             return Err(DocError::Unknown(format!("parameter `{old}`")));
@@ -845,7 +885,7 @@ impl Document {
             if p.name == old {
                 p.name = new.to_string();
             }
-            let r = expr::rename_reference(&p.expr, old, new);
+            let r = rename(&p.expr, old, new);
             if r != p.expr {
                 p.expr = r;
                 n += 1;
@@ -858,14 +898,14 @@ impl Document {
                 }
             }
             for e in f.kind.placement_exprs_mut() {
-                let r = expr::rename_reference(e, old, new);
+                let r = rename(e, old, new);
                 if r != *e {
                     *e = r.into();
                     n += 1;
                 }
             }
             for (_, e, _) in f.kind.inputs_mut() {
-                let r = expr::rename_reference(e, old, new);
+                let r = rename(e, old, new);
                 if r != *e {
                     *e = r.into();
                     n += 1;
@@ -879,14 +919,14 @@ impl Document {
                     }
                 }
                 for e in sketch.patterns.iter_mut().flat_map(|p| p.count_expression.iter_mut().chain(p.expressions.values_mut())) {
-                    let r = expr::rename_reference(e, old, new);
+                    let r = rename(e, old, new);
                     if r != *e {
                         *e = r;
                         n += 1;
                     }
                 }
                 for e in sketch.text_exprs_mut() {
-                    let r = expr::rename_reference(e, old, new);
+                    let r = rename(e, old, new);
                     if r != *e {
                         *e = r;
                         n += 1;
@@ -923,19 +963,19 @@ impl Document {
         }
         // Configuration cells refer to parameters too.
         for rule in &mut self.configs.rules {
-            rule.rename_parameter(old, new);
+            rule.rename_parameter(old, new, rename);
         }
         // A text parameter's cells are texts, not expressions.
         let texts: BTreeSet<String> = self.text_params.iter().map(|p| p.name.clone()).collect();
         for r in &mut self.configs.rows {
             for (column, cell) in self.configs.columns.iter().zip(&mut r.cells) {
                 if !text && matches!(column, crate::config::Column::Param(c) if !texts.contains(c)) {
-                    *cell = expr::rename_reference(cell, old, new);
+                    *cell = rename(cell, old, new);
                 }
             }
         }
         for e in self.assembly.exprs_mut() {
-            let r = expr::rename_reference(e, old, new);
+            let r = rename(e, old, new);
             if r != *e {
                 *e = r;
                 n += 1;
@@ -944,7 +984,7 @@ impl Document {
         // Sheet metal and plastic rules and canvas planes hold expressions too (#4420).
         let rules = self.sheet.rules.iter_mut().flat_map(|r| r.fields_mut()).chain(self.plastic.rules.iter_mut().flat_map(|r| r.fields_mut()));
         for (_, e) in rules {
-            let r = expr::rename_reference(e, old, new);
+            let r = rename(e, old, new);
             if r != *e {
                 *e = r;
                 n += 1;
@@ -952,7 +992,7 @@ impl Document {
         }
         for c in &mut self.canvases {
             c.plane.walk_exprs_mut(&mut |(_, e, _, _)| {
-                let r = expr::rename_reference(e, old, new);
+                let r = rename(e, old, new);
                 if r != *e {
                     *e = r.into();
                     n += 1;
@@ -966,6 +1006,18 @@ impl Document {
     }
 
     /// Set a parameter's comment (stored parameters keep it, feature inputs in `param_comments`).
+    /// The comment of a parameter, a text parameter or a feature input, where
+    /// [`Document::set_param_comment`] keeps it.
+    fn param_comment(&self, name: &str) -> &str {
+        if let Some(p) = self.param(name) {
+            return &p.comment;
+        }
+        if let Some(p) = self.text_param(name) {
+            return &p.comment;
+        }
+        self.param_comments.get(name).map_or("", String::as_str)
+    }
+
     pub fn set_param_comment(&mut self, name: &str, comment: &str) -> Result<()> {
         if comment.len() > 4096 {
             return Err(DocError::Invalid("comment too long".into()));

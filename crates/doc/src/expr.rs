@@ -597,10 +597,14 @@ fn lex(s: &str) -> Result<Vec<Tok>, DocError> {
     Ok(lex_spans(s)?.into_iter().map(|(t, _, _)| t).collect())
 }
 
+/// Is the identifier token at `i` a function's name, called (followed by `(`)?
+fn is_call(toks: &[Tok], i: usize) -> bool {
+    matches!(toks.get(i + 1), Some(Tok::Op('(')))
+}
+
 /// Is the identifier token at `i` a reference to a parameter (not a call, unit or constant)?
 fn is_reference(toks: &[Tok], i: usize, id: &str) -> bool {
-    let is_call = matches!(toks.get(i + 1), Some(Tok::Op('(')));
-    !is_call && unit(id).is_none() && !is_constant(id)
+    !is_call(toks, i) && unit(id).is_none() && !is_constant(id)
 }
 
 /// Identifiers an expression refers to (excluding units, constants and functions).
@@ -642,6 +646,18 @@ fn scan_references(s: &str) -> Vec<String> {
 
 /// The expression with every reference to `old` renamed to `new` (text otherwise kept).
 pub fn rename_reference(s: &str, old: &str, new: &str) -> String {
+    rename_where(s, old, new, is_reference)
+}
+
+/// [`rename_reference`] as a build in which `old` was not a unit read the expression: every
+/// `old` that isn't called is renamed (`2 g` was 2 × the parameter `g`). It renames an older
+/// design's parameter named after what is now a unit.
+pub fn rename_word(s: &str, old: &str, new: &str) -> String {
+    rename_where(s, old, new, |toks, i, _| !is_call(toks, i))
+}
+
+/// `s` with each identifier `old` that `rename` (tokens, its index, `old`) picks replaced by `new`.
+fn rename_where(s: &str, old: &str, new: &str, rename: impl Fn(&[Tok], usize, &str) -> bool) -> String {
     let Ok(spans) = lex_spans(s) else { return s.to_string() };
     let toks: Vec<Tok> = spans.iter().map(|(t, _, _)| t.clone()).collect();
     let mut out = String::with_capacity(s.len());
@@ -649,7 +665,7 @@ pub fn rename_reference(s: &str, old: &str, new: &str) -> String {
     for (i, (t, a, b)) in spans.iter().enumerate() {
         if let Tok::Id(id) = t
             && id == old
-            && is_reference(&toks, i, id)
+            && rename(toks.as_slice(), i, id.as_str())
         {
             out.push_str(s.get(last..*a).unwrap_or_default());
             out.push_str(new);
@@ -687,7 +703,7 @@ pub fn is_bare_number(s: &str) -> bool {
 
 /// Is `s` shaped like a parameter name: a letter or `_`, then letters, digits and `_`? The shape
 /// only; whether the name is free or reserved is `Document::param_name_problem`'s business.
-fn is_name_shaped(s: &str) -> bool {
+pub(crate) fn is_name_shaped(s: &str) -> bool {
     let mut cs = s.chars();
     matches!(cs.next(), Some(c) if c.is_alphabetic() || c == '_') && cs.all(|c| c.is_alphanumeric() || c == '_')
 }
@@ -1661,6 +1677,7 @@ mod tests {
             }
             let _ = references(&s);
             let _ = rename_reference(&s, "width", "w2");
+            let _ = rename_word(&s, "mm", "mm_param");
             let _ = is_literal(&s);
         }
     }
@@ -1705,6 +1722,10 @@ mod tests {
     fn rename_and_literals() {
         assert_eq!(rename_reference("width*2 + widths + width(1) + sin(width)", "width", "w"), "w*2 + widths + width(1) + sin(w)");
         assert_eq!(rename_reference("10 mm", "mm", "x"), "10 mm");
+        // An older build's reading renames a word even where it is now a unit; calls stay.
+        assert_eq!(rename_word("10 mm + mm(1) + mms + sin(mm) + 2mm^2", "mm", "mm_param"), "10 mm_param + mm(1) + mms + sin(mm_param) + 2mm_param^2");
+        assert_eq!(rename_word("width*2 + width(1)", "width", "w"), rename_reference("width*2 + width(1)", "width", "w"));
+        assert_eq!(rename_word("1 $ mm", "mm", "x"), "1 $ mm", "text that doesn't lex is kept");
         assert!(is_literal("20") && is_literal("-1.5 in") && is_literal("3 deg"));
         assert!(!is_literal("d1") && !is_literal("2 * 3") && !is_literal("2 width"));
         assert!(is_bare_number(" -1.5 ") && is_bare_number("+2") && !is_bare_number("20 mm") && !is_bare_number("(2)"));

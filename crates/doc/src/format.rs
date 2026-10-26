@@ -448,12 +448,49 @@ impl Formats<'_> {
 }
 
 /// Take a short list of names out of a file's JSON: its `format_pending` (the pending changes it
-/// has).
+/// has), or the [`UNIT_WORD_PARAMS`] an upgrade listed. `noun` is what the file is, for the
+/// refusal of a damaged list ("damaged design: …").
 fn take_names(v: &mut Value, key: &str, noun: &str) -> Result<Option<Vec<String>>> {
     let Some(list) = v.as_object_mut().and_then(|o| o.remove(key)) else { return Ok(None) };
     let invalid = || DocError::Invalid(format!("damaged {noun}: `{key}` is not a short list of names"));
     let list = list.as_array().filter(|l| l.len() <= 1000).ok_or_else(invalid)?;
     list.iter().map(|n| n.as_str().filter(|n| n.len() <= 128).map(str::to_string).ok_or_else(invalid)).collect::<Result<_>>().map(Some)
+}
+
+/// Where format steps list the parameters, text parameters and feature inputs of an older design
+/// named after what a newer build made a unit (`g`, `kg`…). [`read`] takes the list out and
+/// renames them (`Document::rename_unit_word_params`), as the build that saved the design read
+/// them.
+const UNIT_WORD_PARAMS: &str = "unit_word_params";
+
+/// List under [`UNIT_WORD_PARAMS`] which of `words` name a parameter, a text parameter or a
+/// feature input of `v`, in the order of `words`, after the names an earlier step listed (a
+/// damaged list is refused, as `read` refuses it). The names are read once, each looked up in `words`, so a hostile file's
+/// size can't make it slow. A change that makes words units calls this from its step, with its
+/// own words as they were when it was made.
+fn list_unit_word_params(v: &mut Value, words: &[&str]) -> Result<()> {
+    let mut listed = take_names(v, UNIT_WORD_PARAMS, "design")?.unwrap_or_default();
+    let mut hit = vec![false; words.len()];
+    let params =
+        ["params", "text_params"].into_iter().filter_map(|key| v.get(key)).filter_map(Value::as_array).flatten().filter_map(|p| p.get("name"));
+    let inputs =
+        v.get("features").and_then(Value::as_array).into_iter().flatten().filter_map(|f| f.get("param_names")).filter_map(Value::as_array).flatten();
+    for name in params.chain(inputs).filter_map(Value::as_str) {
+        if let Some(h) = words.iter().position(|w| *w == name).and_then(|i| hit.get_mut(i)) {
+            *h = true;
+        }
+    }
+    for (word, _) in words.iter().zip(&hit).filter(|(_, h)| **h) {
+        if !listed.iter().any(|n| n.as_str() == *word) {
+            listed.push(word.to_string());
+        }
+    }
+    if !listed.is_empty()
+        && let Some(o) = v.as_object_mut()
+    {
+        o.insert(UNIT_WORD_PARAMS.into(), listed.into());
+    }
+    Ok(())
 }
 
 pub fn format_string(n: u32) -> String {
@@ -689,6 +726,7 @@ pub fn read(s: &str) -> Result<Document> {
     let legacy_wires = validate_wires(&v, version)?;
     validate_body_transfers(&v)?;
     DESIGN.upgrade(&mut v, version, applied.as_deref())?;
+    let unit_words = take_names(&mut v, UNIT_WORD_PARAMS, "design")?.unwrap_or_default();
     let mut d: Document = serde_json::from_value(v).map_err(|e| DocError::Invalid(format!("design file: {e}")))?;
     check_typed_numbers(&d)?;
     let mut legacy_by_feature = std::collections::BTreeMap::<usize, Vec<usize>>::new();
@@ -788,7 +826,7 @@ pub fn read(s: &str) -> Result<Document> {
     }
     // Fill in what older designs (and hand-edited files) may lack; a no-op otherwise.
     crate::format_offsets::validate_typed(&d)?;
-    normalise(&mut d)?;
+    normalise(&mut d, &unit_words)?;
     // `next_id` is trusted by nothing: a hand-edited or generated file may omit it or leave it stale,
     // and the next feature, component or occurrence would then reuse an id that is already taken.
     let largest =
@@ -1245,8 +1283,9 @@ fn rigid(m: &crate::Mat) -> bool {
         && t[..3].iter().all(|v| v.abs() <= MAX_REAL)
 }
 
-/// Feature input names and component occurrences, which format 1 files may predate.
-fn normalise(d: &mut Document) -> Result<()> {
+/// Feature input names and component occurrences, which format 1 files may predate, and new
+/// names for the parameters an upgrade found named after what are now units (`unit_words`).
+fn normalise(d: &mut Document, unit_words: &[String]) -> Result<()> {
     d.normalise_component_color_indices()?;
     d.name_all_feature_inputs();
     let missing: Vec<(u64, u64)> =
@@ -1254,7 +1293,7 @@ fn normalise(d: &mut Document) -> Result<()> {
     for (c, p) in missing {
         d.add_occurrence(c, p, crate::IDENTITY)?;
     }
-    Ok(())
+    d.rename_unit_word_params(unit_words)
 }
 
 #[cfg(test)]
@@ -1683,6 +1722,33 @@ mod tests {
         file["format_pending"] = Value::from(pending_names());
         let opened = read(&file.to_string()).unwrap();
         assert_eq!(opened.format_pending, pending_names());
+    }
+
+    /// The parameters an upgrade lists under `unit_word_params` (#4811) are renamed as the design
+    /// opens when their names are reserved words now, as the build that saved it read them; the
+    /// list is never saved, and a damaged one is refused.
+    #[test]
+    fn listed_parameters_named_after_reserved_words_are_renamed_as_the_design_opens() {
+        let mut file: Value = serde_json::from_str(&Document::new("A").to_json()).unwrap();
+        file["params"] = serde_json::json!([
+            {"name": "mm", "expr": "3", "unit": ""},
+            {"name": "twice", "expr": "2 mm", "unit": ""},
+            {"name": "width", "expr": "10", "unit": "mm"}
+        ]);
+        file[UNIT_WORD_PARAMS] = serde_json::json!(["mm", "width", "absent"]);
+        let opened = read(&file.to_string()).unwrap();
+        let params: Vec<(&str, &str)> = opened.params.iter().map(|p| (p.name.as_str(), p.expr.as_str())).collect();
+        assert_eq!(params, [("mm_param", "3"), ("twice", "2 mm_param"), ("width", "10")], "a free name is left alone");
+        assert_eq!(opened.param_values().0["twice"].v, 6.0);
+        assert_eq!(opened.param("mm_param").map(|p| p.comment.as_str()), Some("renamed from `mm`, which is now a unit"));
+        let saved: Value = serde_json::from_str(&opened.to_json()).unwrap();
+        assert_eq!(saved.get(UNIT_WORD_PARAMS), None);
+        assert_eq!(read(&opened.to_json()).unwrap(), opened);
+        for damaged in [serde_json::json!("mm"), serde_json::json!([1]), serde_json::json!(["x".repeat(200)]), serde_json::json!(vec!["mm"; 1001])] {
+            file[UNIT_WORD_PARAMS] = damaged;
+            let error = read(&file.to_string()).unwrap_err().to_string();
+            assert!(error.contains("`unit_word_params` is not a short list"), "{error}");
+        }
     }
 
     /// 24 added the corner relief of an edge flange: a no-op step carries a 23 design up, a flange
