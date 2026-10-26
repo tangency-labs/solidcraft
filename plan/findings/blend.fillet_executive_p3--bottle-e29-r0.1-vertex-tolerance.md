@@ -26,8 +26,9 @@ e30/e32, sphere_diff_3cylinders e1/e2/e4/e5 at r=0.1/0.5/2.0), agree exactly
 
 Suspected cause: the merge's vertex tolerance growth (a vertex the C++ widens to about
 1e-2 while merging the fillet faces into the target) rather than the deletion itself,
-since every point and the topology agree. Not investigated further. The case is not
-committed as a fixture: it would fail the gate, and it is not a known C++ defect. Add it
-back with the fix.
+since every point and the topology agree. It also disagrees when run alone (so it is not
+the ND-3 `sdStaticStep` order effect). Investigation is a follow-up. The case is
+committed as `sweep4-bottle-e29-r0.1` in `fixtures/blend.fillet_executive_p3/sweep_round4.json`
+and listed in `crates/difftest/known_mismatches/blend.fillet_executive_p3.toml`.
 
 Found in the round-4 stub sweep of the fillet executive p1 integration branch.

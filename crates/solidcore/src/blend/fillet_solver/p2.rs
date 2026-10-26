@@ -2382,7 +2382,7 @@ mod tests {
         fn load_initial_values(
             &mut self,
             _k: &Kernel,
-            _brep: Option<&Brep>,
+            _brep: Option<&mut Brep>,
             _do_surf2_calcs: bool,
             _rail_index: usize,
             _surface1: &mut OffsetSurface,

@@ -363,12 +363,31 @@ fn output(mut values: &[f64]) -> Result<Output, HarnessError> {
     Ok(out)
 }
 
+/// The shim's `SC_P3_CRASHED`: a source case whose native run crashed in the shim's
+/// fork crash trap.
+const NATIVE_CRASH: i32 = -1100;
+
+/// A source case's C++ record, or its rejection when the native fillet crashed in the
+/// shim's fork crash trap (undefined in C++: AGENTS.md section 5.6; the upstream
+/// crashes are UB-209 and UB-261). Rust is not run on a rejected case.
+fn source_output(result: Result<Vec<f64>, solidcore_ffi::FfiError>) -> Result<Output, HarnessError> {
+    match result {
+        Ok(values) => output(&values),
+        Err(solidcore_ffi::FfiError::Status(NATIVE_CRASH)) => Ok(Output::rejected(
+            "native C++ crash in SmApiFilletEdges (shim fork crash trap; UB-209, UB-261)",
+        )),
+        Err(e) => Err(HarnessError::new(e.to_string())),
+    }
+}
+
 pub(super) fn cpp(input: &RealSolid) -> Result<Output, HarnessError> {
     input.check_form()?;
     if let (Some(step_back), Some(source)) = (input.curve_blend_sih, &input.source) {
-        let values = ffi::curve_sih_source(step_back, &input.source_wire(source), source.path())
-            .map_err(|e| HarnessError::new(e.to_string()))?;
-        return output(&values);
+        return source_output(ffi::curve_sih_source(
+            step_back,
+            &input.source_wire(source),
+            source.path(),
+        ));
     }
     if let Some(step_back) = input.curve_blend_sih {
         let values = ffi::curve_sih_solid(step_back, &input.wire())
@@ -381,9 +400,7 @@ pub(super) fn cpp(input: &RealSolid) -> Result<Output, HarnessError> {
         } else {
             ffi::real_source
         };
-        let values = run(&input.source_wire(source), source.path())
-            .map_err(|e| HarnessError::new(e.to_string()))?;
-        return output(&values);
+        return source_output(run(&input.source_wire(source), source.path()));
     }
     if input.checkpoint != Checkpoint::Full {
         return prefix::cpp(input);

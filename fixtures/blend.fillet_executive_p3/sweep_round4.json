@@ -1,0 +1,103 @@
+{
+  "cases": [
+    {
+      "name": "sweep4-bottle-e29-r0.1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/bottle.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            29
+          ]
+        }
+      }
+    },
+    {
+      "name": "sweep4-sphere_diff_3cylinders-all-r0.1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/sphere_diff_3cylinders.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true
+        }
+      }
+    },
+    {
+      "name": "sweep4-brepForFillet2-all-r0.1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/brepForFillet2.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true
+        }
+      }
+    },
+    {
+      "name": "sweep4-native-crash-extrusion1002-all-r0.1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/extrusion1002.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "all_edges": true
+        }
+      }
+    },
+    {
+      "name": "sweep4-native-crash-sphere_diff_3cylinders-e30-r0.1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "file",
+            "path": {
+              "$upstream_file": "Fillet/sphere_diff_3cylinders.smb"
+            }
+          },
+          "radius": 0.1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            30
+          ]
+        }
+      }
+    }
+  ]
+}
