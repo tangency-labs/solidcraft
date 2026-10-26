@@ -1145,6 +1145,7 @@
   "motion.key_here": "Inserir quadro-chave aqui",
   "motion.key_here_hint": "Adicionar um quadro-chave neste passo com o valor atual da junta",
   "motion.no_collisions": "Sem colisões durante o estudo",
+  "motion.plot_quantity": "Quantidade",
   "motion.step_back": "Passo anterior",
   "motion.step_forward": "Próximo passo",
   "motion.to_end": "Para o fim",

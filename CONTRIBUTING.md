@@ -2,7 +2,7 @@
 
 SolidCraft is an open-source parametric 3D CAD app written in pure Rust.
 You sketch on a plane, constrain the sketch, turn profiles into solids, and
-change a parameter to watch the timeline rebuild. It runs as a desktop app (Windows, Linux), in
+change a parameter to watch the timeline rebuild. It runs as a desktop app (Windows, macOS, Linux), in
 the browser (wasm + WebGPU/WebGL2), headless from a CLI, and as an MCP server that AI agents can
 model with.
 

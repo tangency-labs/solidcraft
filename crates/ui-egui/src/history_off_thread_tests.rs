@@ -85,6 +85,41 @@ fn a_command_computed_off_the_thread_is_not_evaluated_again() {
     assert!((v - (12500.0 - hole)).abs() < 1.0, "{v}");
 }
 
+/// A parameter change computed off the window thread runs here without computing a feature
+/// again, even with the evaluation cache emptied meanwhile (a design whose states pass its
+/// budget): it evaluates once before its sketch stores the new solution and once after, and the
+/// first of those is kept for the run here too, not only the last.
+#[test]
+fn a_parameter_change_computed_off_the_thread_is_not_evaluated_again() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    for (id, p) in [
+        ("parameters.add", json!({"name": "W", "expression": "40 mm"})),
+        ("sketch.create", json!({"plane": "XY", "name": "Base"})),
+        ("sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]})),
+        ("sketch.dimension", json!({"entities": ["l1"], "value": "W"})),
+        ("sketch.finish", json!({})),
+        ("solid.extrude", json!({"distance": 10})),
+        ("solid.box", json!({"corner": [5, 5, 10], "length": 10, "width": 10, "height": 5, "operation": "join"})),
+    ] {
+        h.app.run(id, p).unwrap();
+    }
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    h.app.run_heavy("parameters.change", json!({"name": "W", "expression": "50 mm"})).unwrap();
+    for _ in 0..500 {
+        if h.app.deferred.as_mut().is_some_and(crate::deferred::Deferred::finished) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    h.app.session.model.cache = Default::default();
+    let before = h.app.session.model.recomputed;
+    until_settled(&mut h);
+    assert_eq!(h.app.session.model.recomputed - before, 0, "nothing computed again on the window thread, in either evaluation");
+    let v = h.app.run("inspect.measure", json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+    assert!((v - (50.0 * 20.0 * 10.0 + 500.0)).abs() < 1.0, "{v}");
+}
+
 #[test]
 fn a_marker_moved_again_replaces_the_move_still_waiting() {
     let mut h = block_boss_hole();

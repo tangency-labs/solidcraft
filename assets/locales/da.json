@@ -1177,6 +1177,7 @@
   "motion.key_here": "Sæt punkt her",
   "motion.key_here_hint": "Tilføj et animationspunkt i dette trin med ledets aktuelle værdi",
   "motion.no_collisions": "Ingen kollisioner under analysen",
+  "motion.plot_quantity": "Antal",
   "motion.step_back": "Trin tilbage",
   "motion.step_forward": "Trin frem",
   "motion.to_end": "Til slutningen",

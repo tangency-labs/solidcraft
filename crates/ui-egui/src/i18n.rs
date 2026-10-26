@@ -566,6 +566,21 @@ mod tests {
         }
     }
 
+    /// "Quantity" is the number of instances in the pattern dialogs and the plotted value in the
+    /// motion study (#6538): each meaning has its own entry, and the label is the count.
+    #[test]
+    fn pattern_quantity_is_the_count_and_the_motion_plot_keeps_its_own() {
+        for catalog in LOCALES {
+            let locale = Locale(catalog);
+            assert_eq!(locale.label("Quantity"), locale.text("ui.quantity"), "{}", catalog.id);
+            assert_eq!(locale.label("Quantity 2"), locale.text("ui.quantity_2"), "{}", catalog.id);
+        }
+        let de = Locale::for_language("de");
+        assert_eq!(de.label("Quantity"), "Anzahl");
+        assert_eq!(de.label("motion.plot_quantity"), "Größe");
+        assert_eq!(Locale::for_language("en").label("motion.plot_quantity"), "Quantity");
+    }
+
     #[test]
     fn every_ui_label_literal_reaches_an_english_catalog_entry() {
         let english: Messages = serde_json::from_str(ENGLISH.source).unwrap();

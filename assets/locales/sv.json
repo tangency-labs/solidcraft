@@ -970,6 +970,7 @@
   "motion.key_here": "Nyckel här",
   "motion.key_here_hint": "Lägg till en nyckel vid detta steg med ledens nuvarande värde",
   "motion.no_collisions": "Inga kollisioner under studien",
+  "motion.plot_quantity": "Antal",
   "motion.step_back": "Steg bakåt",
   "motion.step_forward": "Steg framåt",
   "motion.to_end": "Till slutet",

@@ -976,6 +976,7 @@
   "motion.key_here": "Inserisci fotogramma chiave qui",
   "motion.key_here_hint": "Aggiungi un fotogramma chiave in questo passo con il valore attuale del giunto",
   "motion.no_collisions": "Nessuna collisione durante lo studio",
+  "motion.plot_quantity": "Quantità",
   "motion.step_back": "Passo indietro",
   "motion.step_forward": "Passo avanti",
   "motion.to_end": "Alla fine",

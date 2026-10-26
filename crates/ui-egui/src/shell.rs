@@ -122,6 +122,7 @@ pub(crate) fn covered_rects(app: &SolveApp) -> Vec<Rect> {
     rects.extend(app.shell.browser.filter(|_| app.ui.show_browser));
     rects.extend(app.viewport.palette_rect.filter(|_| app.session.active_sketch.is_some()));
     rects.extend(app.viewport.dialog_rect.filter(|_| app.dialog.is_some() || app.tree.redefine.is_some()));
+    rects.extend(crate::view_confirm::rect(app));
     rects.retain(|r| r.is_finite() && r.is_positive());
     rects
 }

@@ -970,6 +970,7 @@
   "motion.key_here": "Kulcs ide",
   "motion.key_here_hint": "Kulcs hozzáadása ennél a lépésnél a csukló jelenlegi értékével",
   "motion.no_collisions": "Nincs ütközés a vizsgálat során",
+  "motion.plot_quantity": "Mennyiség",
   "motion.step_back": "Lépés vissza",
   "motion.step_forward": "Lépés tovább",
   "motion.to_end": "A végére",

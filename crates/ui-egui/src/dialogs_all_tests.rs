@@ -448,6 +448,53 @@ fn remaining_dialogs_keep_kit_chrome_and_cancel_restores_preview() {
     }
 }
 
+/// OK and Cancel in the view's corner (#6709) do what the dialog's own do: the check applies and
+/// closes, the cross cancels without a change, and the check is grey (and does nothing) whenever
+/// the dialog's OK is.
+#[test]
+fn view_corner_ok_and_cancel_answer_the_dialog_like_its_own_buttons() {
+    for how in ["ok", "cancel"] {
+        let mut h = fixture();
+        h.call("ui.resize", json!({"width":1600,"height":1200}));
+        h.call("ui.prefs", json!({"view_confirm_corner": true}));
+        h.app.dialog = Some(representative(&h, "solid.revolve"));
+        h.settle();
+        assert_eq!(scenario::count_of("view:confirm:ok:enabled"), scenario::count_of("dialog:ok:enabled"));
+        assert_eq!(scenario::count_of("view:confirm:ok:enabled"), Some(1.0));
+        let (design, bodies) = (h.app.session.doc.to_json(), h.app.session.world_state().bodies.len());
+        h.step(&json!({"click":{"handle":format!("view:confirm:{how}")}})).unwrap();
+        h.settle();
+        assert!(h.app.dialog.is_none(), "{how}: the dialog closes");
+        if how == "ok" {
+            assert_eq!(h.app.session.world_state().bodies.len(), bodies + 1, "the check made the revolve");
+        } else {
+            assert_eq!(h.app.session.doc.to_json(), design, "the cross leaves the design as it was");
+        }
+        assert!(scenario::rect_of("view:confirm").is_none(), "{how}: no dialog and no sketch, no pair");
+    }
+
+    // A dialog whose OK is grey: so is the check, and clicking it changes nothing.
+    let mut h = fixture();
+    h.call("ui.resize", json!({"width":1600,"height":1200}));
+    h.call("ui.prefs", json!({"view_confirm_corner": true}));
+    h.app.start("solid.shell");
+    h.settle();
+    assert_eq!(scenario::count_of("dialog:ok:enabled"), Some(0.0));
+    assert_eq!(scenario::count_of("view:confirm:ok:enabled"), Some(0.0));
+    let design = h.app.session.doc.to_json();
+    h.step(&json!({"click":{"handle":"view:confirm:ok"}})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_some(), "a grey check does nothing");
+    assert_eq!(h.app.session.doc.to_json(), design);
+    // Measure only closes: its check stays grey and the cross is its Close.
+    h.app.start("inspect.measure");
+    h.settle();
+    assert_eq!(scenario::count_of("view:confirm:ok:enabled"), Some(0.0));
+    h.step(&json!({"click":{"handle":"view:confirm:cancel"}})).unwrap();
+    h.settle();
+    assert!(h.app.dialog.is_none(), "the cross closes Measure");
+}
+
 fn resized_box_editor(command: &str, params: Value) -> (Harness, u64) {
     let mut h = Harness::new();
     for (id, params) in [

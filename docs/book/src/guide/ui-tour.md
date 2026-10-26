@@ -67,6 +67,10 @@
   keep the nearest quarter-turn heading. The house, the navigation bar's Home button and a middle-button double-click in the view go
   home, framing what is shown now (Navigation › **Middle double-click** can make it Fit, which
   keeps the orientation, or turn it off).
+  Interface › **OK and Cancel in the view's corner** puts a large check and cross at the view's
+  top right while a dialog or a sketch is open, and moves the axis view or cube down below them.
+  With a dialog open they do what its OK and Cancel do (the check is grey whenever OK is); in a
+  sketch without a dialog they are Finish Sketch and Cancel Sketch.
   Right-click for the marking menu: eight commands around the cursor, plus a
   menu for whatever is under it. Near the window's bottom or right edge a menu opens above or
   to the left of the cursor, so it stays in view.

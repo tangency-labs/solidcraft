@@ -1026,6 +1026,7 @@
   "motion.key_here": "Wstaw klatkę kluczową tutaj",
   "motion.key_here_hint": "Dodaj klatkę kluczową w tym kroku z bieżącą wartością złącza",
   "motion.no_collisions": "Brak kolizji w trakcie badania",
+  "motion.plot_quantity": "Liczba",
   "motion.step_back": "Krok wstecz",
   "motion.step_forward": "Krok naprzód",
   "motion.to_end": "Na koniec",

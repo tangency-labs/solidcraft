@@ -194,6 +194,11 @@ added under the previous name keeps working, see the [compatibility notes](https
 }
 ```
 
+If a terminal doesn't find `solidcraft-cli` (older Windows installers don't put its folder on
+`PATH`; see below for where it is), give its full path (by default
+`C:\Program Files\SolidCraft\solidcraft-cli.exe`):
+`claude mcp add solidcraft -- "C:\Program Files\SolidCraft\solidcraft-cli.exe" mcp`.
+
 Claude Desktop (`claude_desktop_config.json`), bridged to a running app:
 
 ```json

@@ -970,6 +970,7 @@
   "motion.key_here": "Key di sini",
   "motion.key_here_hint": "Tambah key pada langkah ini dengan nilai sambungan saat ini",
   "motion.no_collisions": "Tidak ada tabrakan sepanjang studi",
+  "motion.plot_quantity": "Jumlah",
   "motion.step_back": "Mundur satu langkah",
   "motion.step_forward": "Maju satu langkah",
   "motion.to_end": "Ke akhir",

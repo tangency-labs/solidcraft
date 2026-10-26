@@ -309,6 +309,81 @@ fn opening_different_command_dialogs_keeps_published_navigation_positions() {
     }
 }
 
+/// OK and Cancel in the view's corner (#6709): the pair holds the content's top right corner and
+/// the axis view or cube moves down below it, clear of the pair and the navigation bar; without
+/// the pair (or without room for it) nothing moves.
+#[test]
+fn the_corner_pair_takes_the_top_right_and_the_view_navigator_moves_below_it() {
+    let corner = vec2(92.0, 48.0);
+    for style in [crate::prefs::NavigatorStyle::Axes, crate::prefs::NavigatorStyle::Cube] {
+        for (width, height) in [(1400.0, 900.0), (700.0, 450.0), (310.0, 240.0), (160.0, 160.0), (90.0, 50.0)] {
+            let vp = Rect::from_min_size(pos2(20.0, 30.0), vec2(width, height));
+            let content = Rect::from_min_max(pos2(vp.left() + width * 0.25, vp.top()), vp.max);
+            let plain = Layout::with_content(vp, content, &[], 1.0, style, egui::Vec2::ZERO);
+            let held = Layout::with_content(vp, content, &[], 1.0, style, corner);
+            assert!(!plain.confirm.is_positive(), "{plain:?}");
+            assert_eq!(held.navigation, plain.navigation, "the navigation bar never moves");
+            assert!(!held.axis_view.intersect(held.navigation).is_positive(), "{held:?}");
+            if !held.confirm.is_positive() {
+                assert_eq!(held.axis_view, plain.axis_view, "no room for the pair: {held:?}");
+                continue;
+            }
+            assert_eq!(held.confirm.size(), corner);
+            assert!(content.contains_rect(held.confirm), "{held:?}");
+            assert_eq!((held.confirm.right(), held.confirm.top()), (content.right() - 8.0, content.top() + 8.0));
+            assert!(!held.drawable.intersect(held.confirm).is_positive(), "fit keeps the model clear of it");
+            if held.axis_view.is_positive() {
+                assert!(held.axis_view.top() >= held.confirm.bottom(), "{style:?} {width}x{height}: {held:?}");
+                assert_eq!(held.axis_view.right(), content.right());
+                assert!(content.contains_rect(held.axis_view));
+            }
+        }
+    }
+    let roomy = Layout::with_content(
+        Rect::from_min_size(pos2(0.0, 0.0), vec2(1400.0, 900.0)),
+        Rect::from_min_size(pos2(0.0, 0.0), vec2(1400.0, 900.0)),
+        &[],
+        1.0,
+        crate::prefs::NavigatorStyle::Axes,
+        corner,
+    );
+    assert!(roomy.confirm.is_positive() && roomy.axis_view.is_positive(), "{roomy:?}");
+}
+
+/// The pair in the running app: shown only with the preference and while a dialog is open, the
+/// axis view below it, and the pointer over it reaching neither picking nor navigation.
+#[test]
+fn the_corner_pair_follows_the_dialog_and_keeps_the_pointer_from_the_model() {
+    for mode in [crate::shell::LayoutMode::Floating, crate::shell::LayoutMode::Docked] {
+        let mut h = Harness::new();
+        h.call("ui.set", json!({"layout":mode}));
+        h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+        h.settle();
+        let axis = crate::scenario::rect_of("axis_view:outer").unwrap();
+        h.app.start("solid.fillet");
+        h.settle();
+        assert!(crate::scenario::rect_of("view:confirm").is_none(), "off by default");
+        assert_eq!(crate::scenario::rect_of("axis_view:outer"), Some(axis));
+        h.call("ui.prefs", json!({"view_confirm_corner": true}));
+        h.settle();
+        let pair = crate::scenario::rect_of("view:confirm").expect("the pair while a dialog is open");
+        let moved = crate::scenario::rect_of("axis_view:outer").unwrap();
+        assert!(moved.top() >= pair.bottom() && moved.right() == axis.right(), "{mode:?}: {moved:?} below {pair:?}");
+        assert!(crate::shell::covered(&h.app, pair.center()), "one of the shell's covered rects");
+        let dialog = h.app.viewport.dialog_rect.unwrap();
+        assert!(!dialog.intersects(pair), "{mode:?}: {dialog:?} / {pair:?}");
+        let (ok, cancel) = (crate::scenario::rect_of("view:confirm:ok").unwrap(), crate::scenario::rect_of("view:confirm:cancel").unwrap());
+        assert!(pair.contains_rect(ok) && pair.contains_rect(cancel) && ok.right() < cancel.left(), "the check, then the cross in the corner");
+        assert!(ok.width() >= 40.0 && ok.height() >= 40.0, "large enough to hit easily");
+        h.step(&json!({"move":[pair.center().x, pair.center().y]})).unwrap();
+        assert_eq!(h.app.viewport.mouse, None, "{mode:?}: the model under the pair never sees the pointer");
+        h.app.dialog = None;
+        h.settle();
+        assert!(crate::scenario::rect_of("view:confirm").is_none(), "gone with the dialog");
+        assert_eq!(crate::scenario::rect_of("axis_view:outer"), Some(axis), "{mode:?}: the axis view returns");
+    }
+}
+
 #[test]
 fn tiny_viewports_never_overlap_navigation_and_axis_view() {
     for width in [39.0, 40.0, 90.0, 120.0, 160.0, 310.0] {

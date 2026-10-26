@@ -727,7 +727,7 @@ apart from the per-feature milliseconds. The
 kernel's test suite passes, including four new tests for the prism route and its identity rule.
 
 Reproduce after compiling a release build, without other builds running: time
-`target/release/solidcraft-cli eval <design> --quiet` with `/usr/bin/time -v`, alternating the
+`target/release/solidcraft-cli eval <design>` with `/usr/bin/time -v`, alternating the
 baseline and patched binaries, and compare the middle of the runs. The corpus (20 generated designs:
 hole plates, box grids, assemblies, many-sketch parts) and the measuring scripts are in
 https://github.com/sahenjp/solidcraft-perf under `perf/`.

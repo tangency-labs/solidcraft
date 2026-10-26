@@ -201,3 +201,50 @@ fn the_distance_row_has_a_copy_button_that_copies_the_shown_value() {
     }
     assert_eq!(copied, [want]);
 }
+
+/// STL outlines are real distances even though they are not B-rep operands.
+#[test]
+fn measure_imported_stl_edges_and_vertices_from_viewport_clicks() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.set_origin_shown(false);
+    h.app.ui.show_browser = false;
+    let path = h.dir.join("measure.stl");
+    h.app.run("solid.box", json!({"length":20,"width":30,"height":10})).unwrap();
+    h.app.run("file.save_mesh", json!({"path":path})).unwrap();
+    h.app.run("file.new", json!({})).unwrap();
+    let imported = h.app.run("file.insert_mesh", json!({"path":path})).unwrap();
+    h.app.run("component.activate", json!({"component":"root"})).unwrap();
+    h.app.run("occurrence.copy", json!({"component":imported["component"],"translate":[40,0,0]})).unwrap();
+    h.call("ui.view", json!({"view":"iso"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.frames(4);
+
+    for offset in [0., 40.] {
+        h.app.start("inspect.measure");
+        h.step(&json!({"click":{"world":[offset + 20.,0,5]}})).unwrap();
+        assert!(
+            matches!(h.app.dialog.as_ref().unwrap().inputs[0].items.as_slice(), [Sel::Edge { .. }]),
+            "must select the outline, not the whole STL face"
+        );
+        assert_eq!(result(&h)["items"][0]["type"], "edge");
+        assert!((result(&h)["items"][0]["length_mm"].as_f64().unwrap() - 10.).abs() < 1e-6);
+        let texts = painted_text(&mut h);
+        assert!(texts.iter().any(|text| text.contains("10.00 mm")), "{texts:?}");
+        h.step(&json!({"click":{"world":[offset,0,5]}})).unwrap();
+        assert!(h.app.dialog.as_ref().unwrap().inputs[0].items.iter().all(|s| matches!(s, Sel::Edge { .. })));
+        assert!((result(&h)["distance_mm"].as_f64().unwrap() - 20.).abs() < 1e-6);
+        assert!(result(&h)["angle_deg"].as_f64().unwrap().abs() < 1e-6);
+        h.call("ui.key", json!({"key":"Escape"}));
+        h.app.session.selection.clear();
+        h.app.start("inspect.measure");
+        for x in [offset, offset + 20.] {
+            h.step(&json!({"click":{"world":[x,0,10]}})).unwrap();
+        }
+        assert!(h.app.dialog.as_ref().unwrap().inputs[0].items.iter().all(|s| matches!(s, Sel::Vertex { .. })));
+        assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 2);
+        assert!((result(&h)["distance_mm"].as_f64().unwrap() - 20.).abs() < 1e-6);
+        h.call("ui.key", json!({"key":"Escape"}));
+        h.app.session.selection.clear();
+    }
+}

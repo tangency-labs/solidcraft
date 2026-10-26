@@ -162,3 +162,79 @@ mod exit_keeps_view {
         assert!(app.cam_anim.is_none(), "no animation back");
     }
 }
+
+/// OK and Cancel in the view's corner (#6709): in a sketch without a dialog, the check is Finish
+/// Sketch and the cross Cancel Sketch, as on the ribbon; with a dialog open in the sketch, the pair
+/// answers the dialog and the sketch stays open.
+mod view_corner {
+    use crate::scenario::{self, Harness};
+    use serde_json::json;
+
+    fn sketching() -> Harness {
+        let mut h = Harness::new();
+        h.call("ui.prefs", json!({"view_confirm_corner": true}));
+        h.step(&json!({"start": "sketch.create"})).unwrap();
+        h.step(&json!({"click": {"plane": "XY"}})).unwrap();
+        h.app.run("sketch.line", json!({"points": [[0, 0], [30, 10]]})).unwrap();
+        h.settle();
+        assert!(h.app.session.active_sketch.is_some());
+        h
+    }
+
+    #[test]
+    fn the_check_finishes_and_the_cross_cancels_the_sketch() {
+        let mut h = sketching();
+        assert!(scenario::rect_of("view:confirm").is_some(), "the pair while a sketch is open");
+        assert_eq!(scenario::count_of("view:confirm:ok:enabled"), Some(1.0));
+        h.step(&json!({"click": {"handle": "view:confirm:ok"}})).unwrap();
+        h.settle();
+        assert_eq!(h.app.session.active_sketch, None, "finished");
+        assert_eq!(h.app.session.doc.features.len(), 1, "the sketch is kept");
+        assert!(scenario::rect_of("view:confirm").is_none());
+
+        let mut h = sketching();
+        h.step(&json!({"click": {"handle": "view:confirm:cancel"}})).unwrap();
+        h.settle();
+        assert_eq!(h.app.session.active_sketch, None, "cancelled");
+        assert!(h.app.session.doc.features.is_empty(), "a new sketch goes with what was drawn in it");
+    }
+
+    #[test]
+    fn a_refused_cancel_shows_its_error_and_keeps_the_sketch() {
+        let mut h = Harness::new();
+        h.call("ui.prefs", json!({"view_confirm_corner": true}));
+        for (command, params) in [
+            ("sketch.create", json!({"plane": "XY", "name": "S"})),
+            ("sketch.line", json!({"points": [[0, 0], [10, 0]]})),
+            ("sketch.finish", json!({})),
+            ("sketch.edit", json!({"sketch": "S"})),
+            ("sketch.line", json!({"points": [[0, 5], [10, 5]]})),
+            ("edit.undo", json!({})),
+            ("edit.undo", json!({})),
+        ] {
+            h.app.run(command, params).unwrap();
+        }
+        h.settle();
+        let design = h.app.session.doc.to_json();
+        h.step(&json!({"click": {"handle": "view:confirm:cancel"}})).unwrap();
+        h.settle();
+        assert!(h.app.session.active_sketch.is_some(), "the refused cancel leaves the sketch open");
+        assert_eq!(h.app.session.doc.to_json(), design);
+        let (message, _, error) = h.app.status.clone().expect("the refusal is shown");
+        assert!(error && message.contains("Undo"), "{message}");
+    }
+
+    #[test]
+    fn a_dialog_in_the_sketch_takes_the_pair() {
+        let mut h = sketching();
+        h.app.start("sketch.offset");
+        h.settle();
+        assert!(h.app.dialog.is_some());
+        assert_eq!(scenario::count_of("view:confirm:ok:enabled"), scenario::count_of("dialog:ok:enabled"));
+        h.step(&json!({"click": {"handle": "view:confirm:cancel"}})).unwrap();
+        h.settle();
+        assert!(h.app.dialog.is_none(), "the cross cancels the dialog");
+        assert!(h.app.session.active_sketch.is_some(), "and leaves the sketch open");
+        assert!(scenario::rect_of("view:confirm").is_some(), "the pair answers the sketch again");
+    }
+}

@@ -970,6 +970,7 @@
   "motion.key_here": "在此建立關鍵影格",
   "motion.key_here_hint": "在此步驟新增關鍵影格，使用接頭目前的值",
   "motion.no_collisions": "整個研究中沒有碰撞",
+  "motion.plot_quantity": "數量",
   "motion.step_back": "上一步",
   "motion.step_forward": "下一步",
   "motion.to_end": "到結尾",

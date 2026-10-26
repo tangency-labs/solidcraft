@@ -1057,6 +1057,7 @@
   "motion.key_here": "Insertar fotograma clave aquí",
   "motion.key_here_hint": "Añadir un fotograma clave en este paso con el valor actual de la unión",
   "motion.no_collisions": "Sin colisiones durante el estudio",
+  "motion.plot_quantity": "Cantidad",
   "motion.step_back": "Paso atrás",
   "motion.step_forward": "Paso adelante",
   "motion.to_end": "Al final",

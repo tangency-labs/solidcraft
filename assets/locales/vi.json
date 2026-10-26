@@ -971,6 +971,7 @@
   "motion.key_here": "Đặt khóa tại đây",
   "motion.key_here_hint": "Thêm một khóa tại bước này với giá trị hiện tại của khớp nối",
   "motion.no_collisions": "Không có va chạm trong suốt quá trình khảo sát",
+  "motion.plot_quantity": "Số lượng",
   "motion.step_back": "Lùi một bước",
   "motion.step_forward": "Tiến một bước",
   "motion.to_end": "Đến cuối",

@@ -970,6 +970,7 @@
   "motion.key_here": "Sleutel hier",
   "motion.key_here_hint": "Voeg een sleutel toe op deze stap met de huidige waarde van de verbinding",
   "motion.no_collisions": "Geen botsingen in de studie",
+  "motion.plot_quantity": "Aantal",
   "motion.step_back": "Stap terug",
   "motion.step_forward": "Stap verder",
   "motion.to_end": "Naar het einde",

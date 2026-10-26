@@ -340,6 +340,7 @@ fn print_json(v: &Value, file: Option<&str>) -> Result<(), String> {
 fn cmd_run(args: &[String]) -> Result<(), String> {
     install_renderer();
     let json_out = json_out(args)?;
+    known_args("run", args, &["--in", "--out", "--save", "--json-out"], &["--quiet", "--results", "--timings", "--profile", "--allow-errors"], true)?;
     let base = flag(args, "--in");
     let path = positional(args);
     if path.is_none() && base.is_none() {
@@ -444,6 +445,7 @@ fn timeline_ok(s: &Session) -> Result<(), String> {
 
 fn cmd_eval(args: &[String]) -> Result<(), String> {
     let json_out = json_out(args)?;
+    known_args("eval", args, &["--in", "--json-out"], &[], true)?;
     let path = flag(args, "--in").or_else(|| positional(args).map(String::as_str)).ok_or_else(usage)?;
     let mut s = load(path)?;
     let m = s.execute("inspect.measure", &json!({})).map_err(|e| e.to_string())?;

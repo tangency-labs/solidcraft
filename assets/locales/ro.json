@@ -970,6 +970,7 @@
   "motion.key_here": "Cheie aici",
   "motion.key_here_hint": "Adaugă o cheie la acest pas cu valoarea curentă a îmbinării",
   "motion.no_collisions": "Nicio coliziune în studiu",
+  "motion.plot_quantity": "Cantitate",
   "motion.step_back": "Pas înapoi",
   "motion.step_forward": "Pas înainte",
   "motion.to_end": "La sfârșit",

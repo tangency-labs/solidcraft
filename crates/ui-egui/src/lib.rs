@@ -264,6 +264,7 @@ pub mod ui_kit;
 mod ui_kit_guard_tests;
 pub mod update;
 mod value_step;
+mod view_confirm;
 pub mod view_pick;
 pub mod viewport;
 mod viewport_layout;
@@ -2002,6 +2003,8 @@ impl SolveApp {
                     self.show_workspace(ui);
                 }
             });
+        // Before the dialog: a click on the view's OK or Cancel is for this frame's dialog.
+        view_confirm::show(self, ui.ctx());
         dialogs::show(self, ui.ctx());
         issue_report::CadInput::block(self, ui, report_input);
         sketch_palette::show(self, ui.ctx());

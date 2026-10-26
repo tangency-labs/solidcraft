@@ -1,5 +1,6 @@
 # cargo-nextest settings for CI (`cargo xtask test` does not use nextest).
-# CI builds the tests once and runs them in one job on a 32 vCPU runner (.github/workflows/ci.yml).
+# CI builds the tests once and runs them in one job on a 32 vCPU runner (.github/workflows/ci.yml),
+# except the GPU path tracer's tests (the gpu-path group below), which run in four shards of their own.
 
 [profile.ci]
 # Heavy tests (one to twelve minutes each on a CI runner) that pull requests skip. They run on
@@ -72,6 +73,7 @@ priority = 100
 # Each nextest test has its own process/device. Concurrent cold lavapipe path
 # compiles contend for CPU and can exhaust the 600 s pipeline setup budget.
 # Serialize this module per CI shard; other tests retain their normal parallelism.
+# CI runs these in their own job (GPU path tests in ci.yml), split into count partitions.
 [test-groups.gpu-path]
 max-threads = 1
 

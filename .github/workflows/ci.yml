@@ -9,12 +9,14 @@
 # Documentation, packaging, the other workflows and the GitHub bots' scripts select nothing:
 # no native job runs for them, on pull requests or on main.
 # Tests are built and run in one job on a big runner, slowest first, starting beside the repository
-# checks (no archive to upload and download). A few heavy tests (see .config/nextest.toml) are
-# skipped on pull requests and run on pushes to main and nightly. The Windows jobs (D3D12 shaders
-# and app startup), the reference tests and the doc tests run on main and nightly only, not on
-# pull requests (the fast lane, in Select checks); a break there is fixed forward on main. Only
-# main saves the build caches; pull requests restore them. sccache is on a Blacksmith sticky disk that
-# only main commits.
+# checks (no archive to upload and download). The GPU path tracer's tests run one at a time
+# (.config/nextest.toml), so they have a job of their own in four shards (GPU path tests). A few
+# heavy tests (see .config/nextest.toml) are skipped on pull requests and run on pushes to main and
+# nightly. The reference tests and the doc tests run in the merge queue, on main and nightly, not
+# on pull requests (the fast lane, in Select checks); a break there is fixed forward on main. The
+# Windows jobs (D3D12 shaders and app startup) run nightly, and in the merge queue only for a group
+# that changes what they exercise. Only main saves the build caches; pull requests restore them.
+# sccache is on a Blacksmith sticky disk that only main commits.
 # A push to main runs only the repository checks when a passing merge-queue run tested that very
 # commit, or when nothing a build reads changed since the last push to main whose run passed.
 # Otherwise it runs everything.
@@ -30,7 +32,7 @@
 # reads `ci` from the newest run of a commit, so a run without it would block a PR that passed.
 # Cross-compilation is opt-in through Run workflow; release builds remain in release.yml.
 # Every Linux job runs on Blacksmith's Ubuntu 24.04 runners (blacksmith-<N>vcpu-ubuntu-2404), sized
-# per job: 32 vCPU for the tests, 16 for Clippy, the archive build (nightly) and the merge queue's, 8 for compiles, doc and reference tests, 4 for the light checks, 2 for Select checks and ci.
+# per job: 32 vCPU for the tests, 16 for Clippy, the GPU path tests, the archive build (nightly) and the merge queue's, 8 for compiles, doc and reference tests, 4 for the light checks, 2 for Select checks and ci.
 # The Windows shader job runs on Blacksmith's Windows Server 2025 runners (blacksmith-8vcpu-windows-2025);
 # the Windows app startup smoke stays on windows-latest, which has a desktop session that presents frames.
 # Pull requests, forks included, the merge queue, pushes to main and the nightly run all use them:
@@ -103,6 +105,9 @@ jobs:
       kernel: ${{ steps.paths.outputs.kernel }}
       goldens: ${{ steps.paths.outputs.goldens }}
       windows: ${{ steps.paths.outputs.windows }}
+      # The GPU path tests run: native, and the whole workspace or solidcraft-gpu selected. The
+      # job's `if` and the `ci` job's check both read this, so they cannot disagree.
+      gpu: ${{ steps.paths.outputs.gpu }}
       full: ${{ steps.paths.outputs.full }}
       # Code changed on a pull request that has no approved-for-ci label yet: only Quick compile.
       quick: ${{ steps.paths.outputs.quick }}
@@ -122,6 +127,8 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PUSH_SHA: ${{ github.sha }}
+          GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
@@ -144,6 +151,23 @@ jobs:
             full=$(sed -n 's/^full=//p' "$RUNNER_TEMP/ci-affected")
             packages=$(sed -n 's/^packages=//p' "$RUNNER_TEMP/ci-affected")
           }
+          # Whether the NUL-separated paths in $1 (the diff $2) reach what the Windows D3D12 jobs
+          # exercise: the GPU crate and its shaders, the app and its startup, the viewport's wgpu
+          # glue, the vendored egui-wgpu, their scripts, or a lockfile change that moves the
+          # graphics stack (wgpu, naga, egui, winit, windows). Pull requests and merge groups share it.
+          windows_paths() {
+            while IFS= read -r -d '' path; do
+              case "$path" in
+                crates/gpu/*|apps/solidcraft/*|crates/ui-egui/src/gpu.rs|vendor/egui-wgpu/*) windows=true ;;
+                tools/windows-*.ps1|.github/workflows/ci.yml|rust-toolchain*|.cargo/*) windows=true ;;
+              esac
+            done < "$1"
+            if [ "$windows" = false ] && grep -qxz 'Cargo.lock' "$1" \
+              && git diff "$2" -- Cargo.lock \
+                | grep -Eq '^[ +-]name = "(wgpu[a-z_-]*|naga|egui[a-z_-]*|eframe|winit|windows[a-z_-]*|d3d12)"'; then
+              windows=true
+            fi
+          }
           if [ "$EVENT_NAME" = push ]; then
             # The queue lands the very commit its merge_group run tested. If that run passed,
             # testing the push again proves nothing new; otherwise (a merge that skipped the
@@ -164,13 +188,25 @@ jobs:
               # push before may never have run: a newer push cancels a waiting one).
               echo "$tested..$PUSH_SHA changes no code: repository checks only."
             else
-              # Code changed (or the push can't be compared): main runs everything.
+              # Code changed (or the push can't be compared): main runs everything but Windows.
+              # The merge queue ran Windows for the changes that reach it, and the nightly runs it
+              # for everything else (it passed 129 of 129 non-PR runs before this).
               full=true
               packages=
               native=true
+            fi
+          elif [ "$EVENT_NAME" = merge_group ]; then
+            native=true
+            # Windows (about 16 runner-minutes) only for a group that changes what it exercises;
+            # the nightly runs it whatever changed. A group that can't be compared runs it.
+            if git diff --no-renames --name-only -z "$GROUP_BASE_SHA...$GROUP_HEAD_SHA" > "$RUNNER_TEMP/ci-paths"; then
+              windows_paths "$RUNNER_TEMP/ci-paths" "$GROUP_BASE_SHA...$GROUP_HEAD_SHA"
+            else
               windows=true
             fi
+            echo "windows=$windows for $GROUP_BASE_SHA...$GROUP_HEAD_SHA"
           elif [ "$EVENT_NAME" != pull_request ]; then
+            # The nightly run and Run workflow: everything, Windows included.
             native=true
             windows=true
           else
@@ -185,19 +221,9 @@ jobs:
               case "$path" in
                 crates/kernel/*|vendor/truck-*|tests/robustness/*) goldens=true ;;
               esac
-              # What the Windows D3D12 jobs exercise: the GPU crate and its shaders, the app and
-              # its startup, the viewport's wgpu glue, the vendored egui-wgpu, their scripts.
-              case "$path" in
-                crates/gpu/*|apps/solidcraft/*|crates/ui-egui/src/gpu.rs|vendor/egui-wgpu/*) windows=true ;;
-                tools/windows-*.ps1|.github/workflows/ci.yml|rust-toolchain*|.cargo/*) windows=true ;;
-              esac
             done < "$RUNNER_TEMP/ci-paths"
-            # A lockfile change that moves the graphics stack (wgpu, naga, egui, winit, windows).
-            if [ "$windows" = false ] && grep -qxz 'Cargo.lock' "$RUNNER_TEMP/ci-paths" \
-              && git diff "$BASE_SHA...$HEAD_SHA" -- Cargo.lock \
-                | grep -Eq '^[ +-]name = "(wgpu[a-z_-]*|naga|egui[a-z_-]*|eframe|winit|windows[a-z_-]*|d3d12)"'; then
-              windows=true
-            fi
+            # Computed as for a merge group, then turned off below (the fast lane).
+            windows_paths "$RUNNER_TEMP/ci-paths" "$BASE_SHA...$HEAD_SHA"
             # Pull requests build and test the touched packages and their dependents; nothing
             # selected means no code changed.
             select_packages "$RUNNER_TEMP/ci-paths"
@@ -242,8 +268,16 @@ jobs:
               goldens=false
             fi
           fi
+          # The GPU path tests (their own job) run with the other tests, when solidcraft-gpu is
+          # among the packages they test.
+          gpu=false
+          if [ "$native" = true ]; then
+            case " $packages " in *" solidcraft-gpu "*) gpu=true ;; esac
+            if [ "$full" = true ]; then gpu=true; fi
+          fi
           {
             echo "native=$native"
+            echo "gpu=$gpu"
             echo "kernel=$kernel"
             echo "goldens=$goldens"
             echo "windows=$windows"
@@ -487,8 +521,10 @@ jobs:
           scope=(--workspace)
           if [ "$FULL" != true ]; then scope=(); for p in $PACKAGES; do scope+=(-p "$p"); done; fi
           status=0
+          # The GPU path tracer's tests run in their own job (GPU path tests): one at a time, they
+          # took about 36 of this job's 45 minutes.
           cargo nextest run "${scope[@]}" --cargo-profile ci --locked --profile ci --no-tests=pass \
-            --ignore-default-filter -E "$base" || status=1
+            --ignore-default-filter -E "($base) & not (package(=solidcraft-gpu) & test(/^path::/))" || status=1
           if [ "$status" != 0 ]; then
             # A failed golden gets the hint to re-record it (junit.xml lists the failures).
             if [ -f "$junit" ] && tr '\n' ' ' < "$junit" | grep -q '<testcase name="tests::robustness_goldens::[^"]*"[^>]*>[[:space:]]*<failure'; then
@@ -505,6 +541,96 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: junit
+          path: ${{ env.CARGO_TARGET_DIR || 'target' }}/nextest/ci/junit.xml
+          retention-days: 7
+
+  gpu-path-tests:
+    name: GPU path tests (${{ matrix.shard }}/4)
+    # The GPU path tracer's tests (about 108) compile their pipelines on lavapipe, one test at a
+    # time (the gpu-path test group in .config/nextest.toml keeps them within the 600 s pipeline
+    # setup budget). Serial, they took about 36 minutes, the longest chain in Native Linux tests;
+    # here four shards run beside it. Their filter is the one Native Linux tests leaves out, so
+    # every test runs exactly once.
+    # 16 vCPU, not 8: lavapipe compiles on every core, and on 8 vCPU one test went past the 600 s
+    # budget (665 s, against 204 s for the same test in another run) and a shard took 35 minutes.
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.result == 'success' && needs.changes.outputs.gpu == 'true' }}
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    env:
+      # As in Native Linux tests: lavapipe draws, and a test without an adapter fails.
+      SOLIDCRAFT_GPU: software
+      SOLIDCRAFT_REQUIRE_GPU: "1"
+      # lavapipe's own shader cache (below).
+      MESA_SHADER_CACHE_DIR: /home/runner/.cache/mesa-gpu
+      CARGO_INCREMENTAL: "0"
+      RUSTC_WRAPPER: sccache
+      SCCACHE_DIR: /home/runner/.cache/sccache
+      SCCACHE_CACHE_SIZE: 20G
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install a software Vulkan driver (lavapipe)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1
+      - name: Size parallel compiles to the job's memory
+        run: scripts/ci/build-jobs.sh
+      - uses: dtolnay/rust-toolchain@stable
+      # sccache lives on a Blacksmith sticky disk (an ext4 volume cloned from the last snapshot,
+      # no 10 GB limit and no download). Only main commits it; pull requests, the merge queue and
+      # forks mount a clone and never write back, so nothing they build can reach main's cache.
+      # The shards build the same thing, so only the first one commits it (and saves the cache).
+      - name: Mount the compiler cache
+        uses: useblacksmith/stickydisk@3f6be1451e3cad893b778bc93495c80452a5da26 # v1.7.2
+        continue-on-error: true
+        with:
+          key: ${{ github.repository }}-sccache-gpu
+          path: /home/runner/.cache/sccache
+          commit: ${{ github.ref == 'refs/heads/main' && matrix.shard == 1 && 'on-change' || 'false' }}
+      # The first test in a shard to build the path pipeline compiles it cold on lavapipe (335 to
+      # 665 s, against the 600 s setup budget); every later one reads Mesa's disk cache (about
+      # 30 s). Keeping that cache from main's last run lets the first test read it too, until the
+      # shaders change. Same sticky disk rules as the compiler cache.
+      - name: Mount lavapipe's shader cache
+        uses: useblacksmith/stickydisk@3f6be1451e3cad893b778bc93495c80452a5da26 # v1.7.2
+        continue-on-error: true
+        with:
+          key: ${{ github.repository }}-mesa-gpu
+          path: /home/runner/.cache/mesa-gpu
+          commit: ${{ github.ref == 'refs/heads/main' && matrix.shard == 1 && 'on-change' || 'false' }}
+      # Main saves the cache; every other run restores it, read-only.
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          key: native-gpu
+          save-if: ${{ github.ref == 'refs/heads/main' && matrix.shard == 1 }}
+      - name: Set up compiler cache
+        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
+        with:
+          version: v0.16.0
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-nextest
+      - name: Run one shard of the GPU path tests
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          # None of these is in the default filter (the heavy tests), so pull requests, the merge
+          # queue, main and nightly all run every one of them, as before. `count` deals the tests
+          # out in turn (27 each); `hash` split them 41/40/27 across three shards.
+          cargo nextest run -p solidcraft-gpu --cargo-profile ci --locked --profile ci --no-tests=pass \
+            --ignore-default-filter -E 'test(/^path::/)' --partition "count:$SHARD/4"
+      - name: Compiler cache statistics
+        if: always()
+        run: sccache --show-stats
+      - name: Upload test timings
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: junit-gpu-${{ matrix.shard }}
           path: ${{ env.CARGO_TARGET_DIR || 'target' }}/nextest/ci/junit.xml
           retention-days: 7
 
@@ -769,7 +895,7 @@ jobs:
     # commit's real run instead: the merge queue reads `ci` from the newest run of a commit, so a
     # run without a passing `ci` would block a pull request that passed (#1850, #3182, #3252).
     name: ci
-    needs: [changes, checks, quick-compile, clippy, build-tests, tests, doc-tests, oracle, windows-fxc, windows-startup]
+    needs: [changes, checks, quick-compile, clippy, build-tests, tests, gpu-path-tests, doc-tests, oracle, windows-fxc, windows-startup]
     if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions:
@@ -817,6 +943,8 @@ jobs:
           BUILD: ${{ needs.build-tests.result }}
           EVENT_NAME: ${{ github.event_name }}
           TESTS: ${{ needs.tests.result }}
+          GPU_RUN: ${{ needs.changes.outputs.gpu }}
+          GPU: ${{ needs.gpu-path-tests.result }}
           DOCS: ${{ needs.doc-tests.result }}
           ORACLE: ${{ needs.oracle.result }}
           WINDOWS_FXC: ${{ needs.windows-fxc.result }}
@@ -835,6 +963,10 @@ jobs:
               test "$BUILD" = success
             fi
             test "$TESTS" = success
+          fi
+          # The same output decides whether the GPU path tests run (their job's `if`).
+          if [ "$GPU_RUN" = true ]; then
+            test "$GPU" = success
           fi
           if [ "$DOCTESTS" = true ]; then
             test "$DOCS" = success

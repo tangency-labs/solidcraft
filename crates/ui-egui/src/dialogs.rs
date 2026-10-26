@@ -2502,10 +2502,31 @@ pub(crate) fn sync_feature_edit_sketch(app: &mut SolveApp) {
     });
 }
 
+/// A dialog's primary and closing actions. Measure only closes; a deletion's primary action
+/// says what it does.
+pub(crate) fn action_labels(kind: &Kind) -> (&'static str, &'static str) {
+    match kind {
+        Kind::Measure { .. } => ("", "Close"),
+        Kind::ConfirmDelete { .. } => ("Delete", "Cancel"),
+        Kind::SaveMesh(k) => (crate::dialogs_save_mesh::button(k), "Cancel"),
+        Kind::ViewDxf { .. } => ("Export DXF…", "Cancel"),
+        _ => ("OK", "Cancel"),
+    }
+}
+
+/// Whether OK and Cancel in the view's corner act on the dialog (#6709): every docked dialog;
+/// a deletion asks in a modal card of its own, which the corner must not answer.
+pub(crate) fn corner_confirms(d: &Dialog) -> bool {
+    !matches!(d.kind, Kind::ConfirmDelete { .. })
+}
+
 /// Show the active dialog (if any), docked flush to an edge of the viewport just below the axis
 /// view, sized to its content. The right edge is its place, except while a sketch is open: the
 /// Sketch Palette keeps the right there, and the dialog takes the left so both stay on screen.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
+    // A click in the view's corner is for the dialog open this frame, or for none.
+    let corner = app.viewport.corner.take();
+    app.viewport.corner_ok = false;
     sync_feature_edit_sketch(app);
     if app.tree.redefine.is_none() {
         app.viewport.dialog_rect = None;
@@ -2596,14 +2617,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         }
         _ => !has_ok || !d.previews() || (built.unwrap_or_else(|| apply_commands(app, &d).is_ok()) && app.preview.error.is_none()),
     };
-    // Measure only closes; a deletion's primary action says what it does.
-    let (ok_label, close_label) = match &d.kind {
-        Kind::Measure { .. } => ("", "Close"),
-        Kind::ConfirmDelete { .. } => ("Delete", "Cancel"),
-        Kind::SaveMesh(k) => (crate::dialogs_save_mesh::button(k), "Cancel"),
-        Kind::ViewDxf { .. } => ("Export DXF…", "Cancel"),
-        _ => ("OK", "Cancel"),
-    };
+    let (ok_label, close_label) = action_labels(&d.kind);
+    // What the footer's OK takes, for the check in the view's corner too (#6709).
+    let ok_enabled = valid && !ok_label.is_empty() && app.applying.is_none();
     let panel = crate::ui_kit::Panel::new(&heading, egui::Id::new(("sc_dialog", title(&d.kind))), anchor, drag_bounds, side, frame)
         .actions(ok_label, close_label);
     let panel = if matches!(d.kind, Kind::Appearance(_) | Kind::Material { .. }) {
@@ -2707,6 +2723,18 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
         });
         app.viewport.dialog_rect = response.map(|r| r.response.rect);
+        // OK and Cancel in the view's corner do what the dialog's own do (#6709).
+        if app.issue_report.draft.is_none() {
+            match corner {
+                Some(crate::ui_kit::Action::Ok) if ok_enabled => {
+                    ok = true;
+                    apply_again = false;
+                }
+                Some(crate::ui_kit::Action::Cancel) => cancel = true,
+                _ => {}
+            }
+        }
+        app.viewport.corner_ok = ok_enabled;
     }
     if let Some(r) = app.viewport.dialog_rect {
         crate::scenario::publish_rect("dialog:outer", r);

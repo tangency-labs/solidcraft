@@ -36,6 +36,12 @@ fillet, chamfer, offset (O), mirror, patterns, move/copy and scale. With trim on
 piece to remove it, or press and drag a path across several pieces: the ones it crosses light up
 and all go when you let go, in one undo step (`sketch.trim.path`).
 
+Tools with several variants (line and midpoint line; two-point, three-point, centre and rounded
+rectangle; the circle, arc, slot, polygon and spline variants) share one toolbar button with a
+drop-down. The button and the family's shortcut start the variant you picked last, so a
+shortcut such as L can start a Midpoint Line; pick the variant you want from the drop-down to
+change it ([Keyboard shortcuts](shortcuts.md)).
+
 The Sketch Palette's **Construction Geometries** option hides construction curves while you
 work. A hidden construction curve cannot be picked by a click or by a box. Nothing invisible
 is selectable. The option belongs to one sketch and is saved with the design. Centerlines are

@@ -22,6 +22,19 @@ impl Scratch {
         std::fs::write(&path, json!({"commands": [{"command": "solid.box", "params": {"length": 2, "width": 3, "height": 4}}]}).to_string()).unwrap();
         path
     }
+
+    fn saving_script(&self) -> (PathBuf, PathBuf) {
+        let path = self.0.join("saving.json");
+        let saved = self.0.join("script-ran.solidcraft");
+        std::fs::write(
+            &path,
+            json!({"commands": [{"command": "solid.box", "params": {"length": 2, "width": 3, "height": 4}},
+                {"command": "file.save_as", "params": {"path": saved}}]})
+            .to_string(),
+        )
+        .unwrap();
+        (path, saved)
+    }
 }
 
 impl Drop for Scratch {
@@ -41,6 +54,92 @@ fn json_output(output: Output) -> Value {
 
 fn body_count(path: &Path) -> Value {
     json_output(cli().arg("eval").arg(path).output().unwrap())["body_count"].clone()
+}
+
+#[test]
+fn run_rejects_invalid_options_before_script_execution_or_output_writes() {
+    let dir = Scratch::new();
+    let (script, script_saved) = dir.saving_script();
+    let cases = [
+        (&["--out"][..], "--out needs a value"),
+        (&["--save"][..], "--save needs a value"),
+        (&["--in"][..], "--in needs a value"),
+        (&["--out", "--quiet"][..], "--out needs a value"),
+        (&["--ouut", "part.step"][..], "doesn't take --ouut"),
+        (&["--unknown"][..], "doesn't take --unknown"),
+    ];
+    for existing in [false, true] {
+        let saved = dir.0.join(format!("{existing}.solidcraft"));
+        let exported = dir.0.join(format!("{existing}.step"));
+        let report = dir.0.join(format!("{existing}.json"));
+        let outputs = [&saved, &exported, &report];
+        if existing {
+            for path in outputs {
+                std::fs::write(path, b"existing output").unwrap();
+            }
+        }
+        for (extra, message) in cases {
+            let output = cli()
+                .arg("run")
+                .arg(&script)
+                .arg("--save")
+                .arg(&saved)
+                .arg("--out")
+                .arg(&exported)
+                .arg("--json-out")
+                .arg(&report)
+                .args(extra)
+                .output()
+                .unwrap();
+            assert_eq!(output.status.code(), Some(1), "{extra:?}");
+            assert!(String::from_utf8_lossy(&output.stderr).contains(message), "{extra:?}: {}", String::from_utf8_lossy(&output.stderr));
+            assert!(output.stdout.is_empty());
+            assert!(!script_saved.exists(), "invalid arguments must be rejected before the script runs");
+            for path in outputs {
+                if existing {
+                    assert_eq!(std::fs::read(path).unwrap(), b"existing output");
+                } else {
+                    assert!(!path.exists());
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn eval_and_inspect_reject_invalid_options_before_script_execution_or_reporting() {
+    let dir = Scratch::new();
+    let (script, script_saved) = dir.saving_script();
+    let cases = [
+        (&["--in"][..], "--in needs a value"),
+        (&["--in", "--quiet"][..], "--in needs a value"),
+        (&["--out", "part.step"][..], "doesn't take --out"),
+        (&["--unknown"][..], "doesn't take --unknown"),
+    ];
+    for command in ["eval", "inspect"] {
+        for existing in [false, true] {
+            let report = dir.0.join(format!("{command}-{existing}.json"));
+            if existing {
+                std::fs::write(&report, b"existing report").unwrap();
+            }
+            for (extra, message) in cases {
+                let output = cli().arg(command).arg(&script).arg("--json-out").arg(&report).args(extra).output().unwrap();
+                assert_eq!(output.status.code(), Some(1), "{command} {extra:?}");
+                assert!(
+                    String::from_utf8_lossy(&output.stderr).contains(message),
+                    "{command} {extra:?}: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+                assert!(output.stdout.is_empty());
+                assert!(!script_saved.exists(), "invalid arguments must be rejected before the script runs");
+                if existing {
+                    assert_eq!(std::fs::read(&report).unwrap(), b"existing report");
+                } else {
+                    assert!(!report.exists());
+                }
+            }
+        }
+    }
 }
 
 #[test]
