@@ -402,6 +402,65 @@ pub struct PlaneAtAngleParams {
     pub common: PlaneCommon,
 }
 
+/// A rigid matrix, in row-major order, with translation in its last column.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum MoveMatrix {
+    Flat3([f64; 12]),
+    Flat4([f64; 16]),
+    Rows3([[f64; 4]; 3]),
+    Rows4([[f64; 4]; 4]),
+}
+
+/// Move or copy bodies, rotating about an origin before translating, in world coordinates.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct MoveParams {
+    /// Bodies to move or copy.
+    pub bodies: StringList,
+    /// Translation after rotation; default zero. Coordinates are lengths.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "PointExpr3")]
+    pub translate: Option<PointExpr3>,
+    /// Rotation pivot; default world origin. Coordinates are lengths.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "PointExpr3")]
+    pub origin: Option<PointExpr3>,
+    /// Non-zero rotation direction; default Z.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "Point3")]
+    pub axis: Option<Point3>,
+    /// Angle expression; default zero.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "AngleExpr")]
+    pub angle: Option<AngleExpr>,
+    /// Rigid matrix instead of translate, origin, axis and angle. Scales, shears and mirrors are refused.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "MoveMatrix")]
+    pub matrix: Option<MoveMatrix>,
+    /// With matrix: positive rotation tolerance, at most 1e-3; default 1e-9.
+    #[serde(default)]
+    pub tolerance: Option<f64>,
+    /// Keep the source bodies and transform new copies; default false.
+    #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "bool")]
+    pub copy: Option<bool>,
+    #[serde(flatten, deserialize_with = "super::feature_common")]
+    pub common: super::FeatureCommon,
+}
+
+/// A body feature, or the repeated placements moved together (and any root bodies moved).
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum MoveResult {
+    Feature(FeatureResult),
+    Placements {
+        placements: Vec<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        bodies: Option<FeatureResult>,
+    },
+}
+
 /// What a feature command returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct FeatureResult {

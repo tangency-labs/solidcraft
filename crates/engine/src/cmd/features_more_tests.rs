@@ -2462,3 +2462,40 @@ fn align_axes_are_world_axes_on_a_placed_component() {
     assert!(near(after.min.y, before.min.y + 20.0) && near(after.max.y, before.max.y + 20.0), "y: {after:?}");
     assert!(near(after.min.z, before.min.z) && near(after.max.z, before.max.z), "z: {after:?}");
 }
+
+#[test]
+fn move_origin_and_matrix_use_world_coordinates_for_placed_bodies() {
+    use solidcraft_geom::Vec3;
+    for transform in [
+        json!({"origin": ["110 mm", "15 mm", 0], "angle": "90 deg", "translate": ["0 mm", "0 mm", "7 mm"]}),
+        json!({"matrix": [0,-1,0,125, 1,0,0,-95, 0,0,1,7]}),
+        json!({"origin": {"x": "110 mm", "y": 15, "z": 0}, "angle": "90 deg", "translate": {"x": 0, "y": 0, "z": "7 mm"}}),
+    ] {
+        let mut s = Session::default();
+        placed_plate(&mut s, "Plate", 100.0, 90.0);
+        let mut p = transform;
+        p["bodies"] = json!(["Plate"]);
+        run(&mut s, "solid.move", p);
+        let b = world_bounds(&s, "Plate");
+        assert!(b.min.dist(Vec3::new(95.0, 5.0, 7.0)) < 1e-6 && b.max.dist(Vec3::new(125.0, 25.0, 15.0)) < 1e-6, "{b:?}");
+    }
+}
+
+#[test]
+fn move_origin_and_matrix_apply_to_each_repeated_placement() {
+    use solidcraft_geom::Vec3;
+    for transform in [json!({"origin": ["50 mm", 0, 0], "angle": "90 deg"}), json!({"matrix": [0,-1,0,50, 1,0,0,-50, 0,0,1,0]})] {
+        let mut s = Session::default();
+        let (a, b) = twice_placed_blade(&mut s);
+        let mut p = transform;
+        p["bodies"] = json!([a, b]);
+        let undo = s.undo.len();
+        let result = run(&mut s, "solid.move", p);
+        assert_eq!(result["placements"].as_array().unwrap().len(), 2);
+        let a = placed_bounds(&s, &a);
+        let b = placed_bounds(&s, &b);
+        assert!(a.min.dist(Vec3::new(42.0, -50.0, 0.0)) < 1e-6 && a.max.dist(Vec3::new(50.0, -30.0, 30.0)) < 1e-6, "{a:?}");
+        assert!(b.min.dist(Vec3::new(50.0, 50.0, 0.0)) < 1e-6 && b.max.dist(Vec3::new(80.0, 70.0, 8.0)) < 1e-6, "{b:?}");
+        assert_eq!(s.undo.len(), undo + 1);
+    }
+}

@@ -6644,7 +6644,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Move { bodies, translate, rotate_axis, angle, copy } => {
+        kind @ FeatureKind::Move { bodies, .. } => {
             let mut d = start("solid.move")?;
             // Move stores distances in the first body's frame, which can differ from the
             // feature's component. Refill the world distances that the command accepts.
@@ -6658,19 +6658,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                         .map(|(.., frame)| frame)
                 })
                 .unwrap_or_else(|| feature_frame(s, f.component));
-            let mut world_translate = translate.clone();
-            if !solidcraft_engine::doc::is_identity(&frame) {
-                solidcraft_engine::doc::map_vector_expr(&frame, &mut world_translate);
-            }
-            crate::dialogs_move::for_feature(
-                &s.doc,
-                &mut d,
-                &solidcraft_engine::doc::plain(bodies),
-                &world_translate,
-                rotate_axis.map(Vec3::from),
-                angle.as_ref(),
-                *copy,
-            );
+            crate::dialogs_move::for_feature(&s.doc, &mut d, kind, &frame);
             d
         }
         other => {
