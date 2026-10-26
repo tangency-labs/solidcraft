@@ -58,8 +58,11 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     Stage::new("dxf_meshes", 1).check().map_err(|e| bad(CMD, e))?;
     let meshes = mesh_lines::prepare(s, CMD, tolerance, |b| s.body_visible(&b.name))?;
     let prepare_ms = started.elapsed().as_secs_f64() * 1000.;
-    let sketch = sketch::parts(s, tolerance).map_err(|e| bad(CMD, e))?;
-    let drawing = mesh_lines::drawing(&meshes, &sketch, &View::from_camera(&cam)).map_err(|e| bad(CMD, e))?;
+    // The sketch runs (up to 4,000,000 points) go once the lines are made, not through writing.
+    let drawing = {
+        let sketch = sketch::parts(s, tolerance).map_err(|e| bad(CMD, e))?;
+        mesh_lines::drawing(&meshes, &sketch, &View::from_camera(&cam)).map_err(|e| bad(CMD, e))?
+    };
     let writing = Stage::new("dxf_write", 1);
     writing.check().map_err(|e| bad(CMD, e))?;
     let mut visible = 0;

@@ -171,6 +171,37 @@ fn view_dxf_keeps_every_occurrence_while_sharing_geometry() {
     }
     assert!(centers.len() >= 3, "{centers:?}");
     assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
+    // The definition's first placement hidden: the others are still drawn from the shared mesh.
+    let first = s.world_state().bodies.first().map(|b| b.name.clone()).unwrap();
+    run(&mut s, "browser.visibility", json!({"items":[first],"visible":false}));
+    let result = export(&mut s, camera(StandardView::Top), "dashed");
+    assert_eq!((result["stats"]["bodies"].clone(), result["stats"]["shared_meshes"].clone()), (json!(2), json!(1)), "{result}");
+}
+
+/// The lines themselves, worked by hand: a plain 40 x 30 x 10 box seen from the front is its
+/// 40 x 10 outline. Every line lies along one of its four sides, they add up to its 100 mm
+/// perimeter, and nothing is hidden.
+#[test]
+fn view_dxf_front_view_of_a_box_is_its_outline() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":10,"body_name":"Plate"}));
+    let v = export(&mut s, camera(StandardView::Front), "dashed");
+    assert_eq!(v["hidden"], 0, "{v}");
+    let lines: Vec<(Vec2, Vec2)> = solidcraft_io::read_dxf(v["dxf"].as_str().unwrap())
+        .unwrap()
+        .into_iter()
+        .filter_map(|g| if let solidcraft_io::Geom2::Line(a, b) = g { Some((a, b)) } else { None })
+        .collect();
+    let lo = lines.iter().fold(Vec2::new(f64::INFINITY, f64::INFINITY), |m, (a, b)| Vec2::new(m.x.min(a.x).min(b.x), m.y.min(a.y).min(b.y)));
+    let hi = lines.iter().fold(Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY), |m, (a, b)| Vec2::new(m.x.max(a.x).max(b.x), m.y.max(a.y).max(b.y)));
+    assert!(((hi - lo) - Vec2::new(40.0, 10.0)).len() < 1e-6, "{lo:?} {hi:?}");
+    let near = |x: f64, y: f64| (x - y).abs() < 1e-6;
+    for (a, b) in &lines {
+        let along = (near(a.x, b.x) && (near(a.x, lo.x) || near(a.x, hi.x))) || (near(a.y, b.y) && (near(a.y, lo.y) || near(a.y, hi.y)));
+        assert!(along, "{a:?} {b:?} isn't along the outline");
+    }
+    let length: f64 = lines.iter().map(|(a, b)| a.dist(*b)).sum();
+    assert!((length - 100.0).abs() < 1e-6, "{length}");
 }
 
 #[test]

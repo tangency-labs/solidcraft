@@ -89,8 +89,9 @@ fn rigid(m: &Mat) -> bool {
         && (x.cross(y).dot(z) - 1.).abs() < 1e-9
 }
 
-/// The export meshes of the bodies `shown` keeps, at the chord `tolerance`. Errors name the
-/// command `cmd`.
+/// The export meshes of the bodies `shown` keeps, at the chord `tolerance`. Errors about the
+/// placements name the command `cmd`; a body with no exportable surface, the memory budget and
+/// cancellation come back as the meshing stage's own errors.
 pub(crate) fn prepare(s: &Session, cmd: &str, tolerance: f64, shown: impl Fn(&ModelBody) -> bool) -> Result<Scene> {
     let world = s.world_state();
     let state = s.model.state();
