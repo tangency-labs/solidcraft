@@ -1071,7 +1071,9 @@ case(T10, "007-pattern-bodies", "a pin r3 h10 patterned 4 times at 10 mm as bodi
      {"body_count": 4, "volume_mm3": 4 * PI * 9 * 10, "faces": 12}, "four separate pins")
 case(T10, "008-part-vents", "the running part with a d3 vent hole in its top patterned 4 times at 5 mm",
      [H(position=[30, 24, 20], diameter=3, name="Vent"), C("solid.pattern.rectangular", features=["Vent"], dir1=[1, 0, 0], count1=4, spacing1=5)],
-     {"body_count": 1}, "holes through the shelled top skin; one valid body", base=C9, source="invariants")
+     {"body_count": 1, "volume_mm3": V9 - 4 * PI * 1.5 ** 2 * 1.5, "bbox": {"min": [0, 0, 0], "max": [60, 40, 35]}, "tolerance": {"rel": 1e-4}},
+     "pattern = 4 x the feature: each d3 vent goes through the shelled top skin (z 18.5..20) into the cavity and meets nothing else (the M6 hole's tube is 7.3 away, "
+     "the wall's 6 past y = 24): V = 09/011 - 4 pi 1.5^2 1.5; the bbox is the part's", base=C9)
 C10 = up(T10, "008-part-vents")
 
 # ---------------------------------------------------------------- 11 cumulative parts
