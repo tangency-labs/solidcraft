@@ -1,0 +1,132 @@
+{
+  "en": {
+    "cloud.git_username": "Username",
+    "cloud.git_password": "Password or token",
+    "cloud.git_password_hint": "Stored in the system credential store. Leave blank to keep the saved password or token."
+  },
+  "en-GB": {
+    "cloud.git_username": "Username",
+    "cloud.git_password": "Password or token",
+    "cloud.git_password_hint": "Stored in the system credential store. Leave blank to keep the saved password or token."
+  },
+  "cs": {
+    "cloud.git_username": "Uživatelské jméno",
+    "cloud.git_password": "Heslo nebo token",
+    "cloud.git_password_hint": "Uloženo v systémovém úložišti přihlašovacích údajů. Prázdné pole zachová uložené heslo nebo token."
+  },
+  "da": {
+    "cloud.git_username": "Brugernavn",
+    "cloud.git_password": "Adgangskode eller token",
+    "cloud.git_password_hint": "Gemmes i systemets legitimationslager. Lad feltet være tomt for at beholde den gemte adgangskode eller token."
+  },
+  "de": {
+    "cloud.git_username": "Benutzername",
+    "cloud.git_password": "Passwort oder Token",
+    "cloud.git_password_hint": "Wird im Anmeldedatenspeicher des Systems gespeichert. Leer lassen, um das gespeicherte Passwort oder Token beizubehalten."
+  },
+  "es": {
+    "cloud.git_username": "Nombre de usuario",
+    "cloud.git_password": "Contraseña o token",
+    "cloud.git_password_hint": "Se guarda en el almacén de credenciales del sistema. Déjalo vacío para conservar la contraseña o el token guardado."
+  },
+  "fr": {
+    "cloud.git_username": "Nom d’utilisateur",
+    "cloud.git_password": "Mot de passe ou jeton",
+    "cloud.git_password_hint": "Enregistré dans le gestionnaire d’identifiants du système. Laissez vide pour conserver le mot de passe ou le jeton enregistré."
+  },
+  "gl": {
+    "cloud.git_username": "Nome de usuario",
+    "cloud.git_password": "Contrasinal ou token",
+    "cloud.git_password_hint": "Gárdase no almacén de credenciais do sistema. Déixao baleiro para conservar o contrasinal ou token gardado."
+  },
+  "hu": {
+    "cloud.git_username": "Felhasználónév",
+    "cloud.git_password": "Jelszó vagy token",
+    "cloud.git_password_hint": "A rendszer hitelesítőadat-tárában tárolva. Hagyja üresen a mentett jelszó vagy token megtartásához."
+  },
+  "id": {
+    "cloud.git_username": "Nama pengguna",
+    "cloud.git_password": "Kata sandi atau token",
+    "cloud.git_password_hint": "Disimpan di penyimpanan kredensial sistem. Biarkan kosong untuk mempertahankan kata sandi atau token tersimpan."
+  },
+  "it": {
+    "cloud.git_username": "Nome utente",
+    "cloud.git_password": "Password o token",
+    "cloud.git_password_hint": "Salvato nell’archivio delle credenziali di sistema. Lascia vuoto per mantenere la password o il token salvato."
+  },
+  "ja": {
+    "cloud.git_username": "ユーザー名",
+    "cloud.git_password": "パスワードまたはトークン",
+    "cloud.git_password_hint": "システムの資格情報ストアに保存します。保存済みのパスワードやトークンを使う場合は空欄にしてください。"
+  },
+  "ko": {
+    "cloud.git_username": "사용자 이름",
+    "cloud.git_password": "비밀번호 또는 토큰",
+    "cloud.git_password_hint": "시스템 자격 증명 저장소에 저장됩니다. 저장된 비밀번호나 토큰을 유지하려면 비워 두세요."
+  },
+  "ms": {
+    "cloud.git_username": "Nama pengguna",
+    "cloud.git_password": "Kata laluan atau token",
+    "cloud.git_password_hint": "Disimpan dalam stor kelayakan sistem. Biarkan kosong untuk mengekalkan kata laluan atau token yang disimpan."
+  },
+  "nb": {
+    "cloud.git_username": "Brukernavn",
+    "cloud.git_password": "Passord eller token",
+    "cloud.git_password_hint": "Lagres i systemets legitimasjonslager. La feltet stå tomt for å beholde lagret passord eller token."
+  },
+  "nl": {
+    "cloud.git_username": "Gebruikersnaam",
+    "cloud.git_password": "Wachtwoord of token",
+    "cloud.git_password_hint": "Opgeslagen in de referentieopslag van het systeem. Laat leeg om het opgeslagen wachtwoord of token te behouden."
+  },
+  "pl": {
+    "cloud.git_username": "Nazwa użytkownika",
+    "cloud.git_password": "Hasło lub token",
+    "cloud.git_password_hint": "Przechowywane w systemowym magazynie poświadczeń. Pozostaw puste, aby zachować zapisane hasło lub token."
+  },
+  "pt-BR": {
+    "cloud.git_username": "Nome de usuário",
+    "cloud.git_password": "Senha ou token",
+    "cloud.git_password_hint": "Armazenado no gerenciador de credenciais do sistema. Deixe em branco para manter a senha ou o token salvo."
+  },
+  "ro": {
+    "cloud.git_username": "Nume de utilizator",
+    "cloud.git_password": "Parolă sau token",
+    "cloud.git_password_hint": "Stocat în managerul de acreditări al sistemului. Lăsați necompletat pentru a păstra parola sau tokenul salvat."
+  },
+  "ru": {
+    "cloud.git_username": "Имя пользователя",
+    "cloud.git_password": "Пароль или токен",
+    "cloud.git_password_hint": "Хранится в системном хранилище учётных данных. Оставьте поле пустым, чтобы сохранить прежний пароль или токен."
+  },
+  "sv": {
+    "cloud.git_username": "Användarnamn",
+    "cloud.git_password": "Lösenord eller token",
+    "cloud.git_password_hint": "Lagras i systemets autentiseringslager. Lämna tomt för att behålla det sparade lösenordet eller token."
+  },
+  "tr": {
+    "cloud.git_username": "Kullanıcı adı",
+    "cloud.git_password": "Parola veya belirteç",
+    "cloud.git_password_hint": "Sistemin kimlik bilgisi deposunda saklanır. Kayıtlı parola veya belirteci korumak için boş bırakın."
+  },
+  "uk": {
+    "cloud.git_username": "Ім’я користувача",
+    "cloud.git_password": "Пароль або токен",
+    "cloud.git_password_hint": "Зберігається в системному сховищі облікових даних. Залиште порожнім, щоб зберегти попередній пароль або токен."
+  },
+  "vi": {
+    "cloud.git_username": "Tên người dùng",
+    "cloud.git_password": "Mật khẩu hoặc mã truy cập",
+    "cloud.git_password_hint": "Được lưu trong kho thông tin xác thực của hệ thống. Để trống để giữ mật khẩu hoặc mã truy cập đã lưu."
+  },
+  "zh": {
+    "cloud.git_username": "用户名",
+    "cloud.git_password": "密码或令牌",
+    "cloud.git_password_hint": "保存在系统凭据存储中。留空可保留已保存的密码或令牌。"
+  },
+  "zh-TW": {
+    "cloud.git_username": "使用者名稱",
+    "cloud.git_password": "密碼或權杖",
+    "cloud.git_password_hint": "儲存在系統認證存放區中。留空以保留已儲存的密碼或權杖。"
+  }
+}

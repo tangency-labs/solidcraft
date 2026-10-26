@@ -34,6 +34,10 @@ impl Operations {
 }
 
 pub(crate) fn submitted(app: &mut SolveApp, command: &str, params: &Value, result: &Value) {
+    // Editing a setup field does not test or acknowledge the saved connection's push.
+    if command == "cloud.test" && params.get("metadata_only").and_then(Value::as_bool) == Some(true) {
+        return;
+    }
     if command == "cloud.cancel" {
         if let Some(id) = params.get("operation").and_then(Value::as_str) {
             app.cloud.operations.cancelling.insert(id.into());

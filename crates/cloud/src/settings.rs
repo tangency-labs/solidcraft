@@ -63,8 +63,11 @@ pub struct Connection {
     pub remote: String,
     pub branch: String,
     pub authentication: Authentication,
+    /// Standalone HTTP(S) Git username; its password lives in the system keychain.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub https_username: String,
     pub ssh_identity: SshIdentity,
-    /// An opaque host credential identifier, never the token itself.
+    /// An opaque host credential identifier, never the token itself. Connections may share it.
     pub credential: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_remote: Option<GitRemote>,
@@ -81,6 +84,7 @@ impl Default for Connection {
             remote: "origin".into(),
             branch: "main".into(),
             authentication: Authentication::Https,
+            https_username: String::new(),
             ssh_identity: SshIdentity::System,
             credential: "cloud:github".into(),
             git_remote: None,
@@ -148,6 +152,9 @@ impl Connection {
         {
             return Err(Error::Invalid("choose an SSH private key file".into()));
         }
+        if self.https_username.len() > 256 || self.https_username.chars().any(|c| c.is_control() || c == ':') {
+            return Err(Error::Invalid("invalid Git username".into()));
+        }
         Ok(())
     }
 }
@@ -176,14 +183,10 @@ impl Settings {
             return Err(Error::Invalid("too many repository connections".into()));
         }
         let mut ids = std::collections::BTreeSet::new();
-        let mut credentials = std::collections::BTreeSet::new();
         for connection in &self.connections {
             connection.validate()?;
             if !ids.insert(&connection.id) {
                 return Err(Error::Invalid("repository connections must have unique identifiers".into()));
-            }
-            if !connection.credential.is_empty() && !credentials.insert(&connection.credential) {
-                return Err(Error::Invalid("repository connections must have independent credential identifiers".into()));
             }
         }
         if self.default_connection.as_ref().is_some_and(|id| self.connection(id).is_none()) {
@@ -306,8 +309,11 @@ mod tests {
         let restored: Settings = serde_json::from_slice(&serde_json::to_vec(&settings).unwrap()).unwrap();
         assert_eq!(restored, settings);
         settings.connections[1].credential = "cloud:github".into();
-        assert!(settings.validate().is_err());
+        settings.validate().unwrap();
+        assert_ne!(settings.connections[0].id, settings.connections[1].id);
+        // Renewing one connection leaves the other's saved token reference intact.
         settings.connections[1].credential = "cloud:work".into();
+        assert_eq!(settings.connections[0].credential, "cloud:github");
         settings.connections[1].id = "github".into();
         assert!(settings.validate().is_err());
     }

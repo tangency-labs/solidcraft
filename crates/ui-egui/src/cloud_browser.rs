@@ -434,38 +434,24 @@ pub(crate) fn home(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     ui_kit::FileView::section(ui, tr("cloud.title"), t.space_10, |ui| {
         ui_kit::FileView::control_row(ui, |ui| {
-            if connection.is_none() {
-                if button(ui, "cloud:connect", tr("cmd.cloud.connect"), app.cloud.setup.is_none()) {
-                    app.start("cloud.connect");
-                }
-            } else {
-                let mut action = None;
-                let label = tr("cloud.add_storage");
-                let width = ui.painter().layout_no_wrap(label.into(), egui::FontId::proportional(t.font_label), t.form_ink).size().x
-                    + t.space_24
-                    + t.space_12 * 2.0;
-                let response = ui
-                    .add_enabled_ui(app.cloud.setup.is_none(), |ui| {
-                        ui_kit::settings_control_width(ui, width, |ui| {
-                            ui_kit::dropdown_menu(ui, "cloud_add_storage", label, |ui| {
-                                if ui_kit::button(ui, tr("cmd.cloud.connect"), ui_kit::Button::Normal).clicked() {
-                                    action = Some("cloud.connect");
-                                    ui.close();
-                                }
-                                #[cfg(not(target_arch = "wasm32"))]
-                                if ui_kit::button(ui, tr("cloud.git_add"), ui_kit::Button::Normal).clicked() {
-                                    action = Some("cloud.configure");
-                                    ui.close();
-                                }
-                            })
+            let mut action = None;
+            let label = tr("cloud.add_storage");
+            let width = ui.painter().layout_no_wrap(label.into(), egui::FontId::proportional(t.font_label), t.form_ink).size().x
+                + t.space_24
+                + t.space_12 * 2.0;
+            let response = ui
+                .add_enabled_ui(app.cloud.setup.is_none(), |ui| {
+                    ui_kit::settings_control_width(ui, width, |ui| {
+                        ui_kit::dropdown_menu(ui, "cloud_add_storage", label, |ui| {
+                            action = crate::cloud_setup::repository_choices(ui);
                         })
                     })
-                    .inner;
-                crate::scenario::publish_target("cloud:connect", response.rect);
-                crate::scenario::publish_target("cloud:add_storage", response.rect);
-                if let Some(command) = action {
-                    app.start(command);
-                }
+                })
+                .inner;
+            crate::scenario::publish_target("cloud:connect", response.rect);
+            crate::scenario::publish_target("cloud:add_storage", response.rect);
+            if let Some(command) = action {
+                app.start(command);
             }
             let saving = app.session.cloud_save_pending()
                 || app

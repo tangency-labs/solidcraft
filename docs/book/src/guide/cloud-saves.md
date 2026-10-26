@@ -6,8 +6,8 @@ You can connect more than one repository.
 
 ## Connect GitHub
 
-1. On **Start**, find **Cloud Saves** and choose **Connect GitHub**.
-2. Choose **Create a private repository**. GitHub opens with the name
+1. On **Start**, find **Cloud Saves** and choose **Add new repository → GitHub**.
+2. Below the **Repository** field, choose **Create**. GitHub opens with the name
    `solidcraft-designs` and private visibility selected. Check these choices and
    create the repository. You can also use a repository you already own.
 3. Choose **Create access token**. GitHub opens with the token name, description,
@@ -18,12 +18,22 @@ You can connect more than one repository.
 4. Copy the generated token, paste it into SolidCraft, and choose **Connect GitHub**. SolidCraft discovers
    your GitHub account and uses its `solidcraft-designs` repository, checks
    access and write permission, initializes an empty repository, and remembers the
-   connection. A desktop connection also creates a local checkout automatically.
+   connection. Both desktop and browser access the repository through GitHub’s HTTPS API.
 
-To use another repository, expand **Advanced** and enter its `owner/repository`
-name or GitHub URL. The token form then also prefills that repository's owner.
+Leave **Repository** on Automatic to use your account's `solidcraft-designs` repository,
+or enter an `owner/repository` name or GitHub URL. The field checks availability using
+the selected token, with a spinner and then a status dot inside the field. Hover for
+details. An already connected repository is detected immediately. The token form
+also prefills the selected repository's owner.
 
-[![The guided GitHub connection dialog, with repository and token links and the token field.](images/cloud-saves-setup.png)](images/cloud-saves-setup.png)
+For another repository, **Access token** lists your existing GitHub connections.
+Choose one to reuse its saved token, or choose **New…** at the bottom to create
+and enter a separate token. With no existing connections, **New…** is selected.
+The reused token must grant access to the additional repository: update its
+**Only select repositories** selection on GitHub if necessary. Each connection
+keeps its token selection; reconnecting one with a new token preserves the others.
+
+[![The guided GitHub connection dialog lists saved tokens and New… at the bottom.](images/cloud-saves-setup.png)](images/cloud-saves-setup.png)
 
 An organization may require approval before its token works. A read-only token,
 an expired token, a renamed repository or an unavailable keychain produces an error;
@@ -36,7 +46,7 @@ SolidCraft remembers it for future saves, including after a browser restart.
 Desktop stores tokens in the operating system's credential store. The browser
 keeps them in a separate local credential database. Tokens are never included in
 designs or shared repository metadata. Treat a token like a password, and use a
-trusted browser profile and device. Desktop reuses the same token for Git over HTTPS.
+trusted browser profile and device.
 
 ## Save and synchronize
 
@@ -62,13 +72,16 @@ file again.
 
 On **Start**, use the repository selector to browse connected repositories and
 click a design to open it. Other open designs and unsaved edits are preserved.
-**Refresh** reloads the list; **Synchronize Repository** retries pending saves for
-the selected repository. A failed refresh keeps the last displayed list; availability
+Locally stored projects and previews appear as soon as local storage is loaded,
+while the repository refresh and startup synchronization continue in the background.
+**Synchronize Repository**, marked with two opposing arrows, downloads changes and
+uploads pending saves for the selected repository. The button remains disabled until
+the operation and its updated list finish. A failed check keeps the last displayed list; availability
 offline depends on the designs retained by local storage. **Add new repository** connects
 another GitHub repository or desktop Git checkout. Additional GitHub setup shows
 the repository field and suggests an unused name; you can enter an existing
 repository instead. The repository selector switches between all connected
-repositories, each with independent credentials and queues. **Open on GitHub**, next
+repositories, each with its own token selection and queue. **Open on GitHub**, next
 to **Synchronize Repository**, opens the selected repository in your browser.
 
 The picker refuses names already shown in that project. If another device creates
@@ -169,9 +182,9 @@ Newer storage formats ask you to upgrade before opening or saving.
 Open **Cloud Saves Settings** from Start, or choose **Settings → Cloud Saves**.
 The repository table shows a label derived from each remote, such as
 `github.com/owner/solidcraft-designs`. Select a row to test or synchronize it,
-reconnect with a replacement token, or open its Git settings. Use the **Default**
-checkbox to choose the destination for new cloud saves. **Add new repository**
-connects another GitHub repository; **Checkout Git repository** configures a desktop
+reconnect a GitHub repository with a replacement token, or edit a standalone Git
+repository’s settings. Use the **Default** checkbox to choose the destination for new cloud saves. **Add new repository**
+offers **GitHub** for guided token setup and **Git** for a standalone desktop
 checkout. Progress and cancellation stay in a fixed footer below the actions.
 
 Connection changes take effect when you choose **Apply** or **OK** and local
@@ -187,7 +200,9 @@ them. Existing designs keep their destinations when you change the default.
 [![Cloud Saves settings lists connected repositories in a table with default checkboxes and remove buttons.](images/cloud-saves-settings.png)](images/cloud-saves-settings.png)
 
 **Synchronize after saving** publishes each locally recorded save in the background.
-**Retry pending saves automatically** retries after startup and at regular intervals.
+**Retry pending saves automatically** synchronizes each repository once at startup and
+retries failed startup attempts with increasing delays. Saving refreshes the repository
+before publishing. Use **Synchronize Repository** to fetch changes during a session.
 You can also synchronize a selected repository immediately or cancel an active
 operation. Cancelling an upload keeps its durable local save.
 
@@ -197,7 +212,9 @@ Use **Connect GitHub** again with the same repository and a replacement token.
 Leave the token field blank to reuse the saved token after a temporary network
 failure. A failed replacement does not replace a working connection's credential.
 
-An app-managed checkout is an ordinary Git checkout that a desktop client can use.
+A standalone Git connection uses an ordinary checkout that other desktop clients can use.
+To work with a GitHub repository this way, clone it with Git and connect its checkout
+through **Add new repository → Git**.
 SolidCraft commits the files belonging to its save and preserves unrelated staged
 and unstaged changes. It waits for external merges or rebases to finish.
 Git configuration and signing remain in effect. If no author identity is available,
@@ -205,20 +222,27 @@ the app uses `SolidCraft <cloud@solidcraft.invalid>` for that save only.
 
 ### Connect an existing checkout
 
-1. Open **Settings → Cloud Saves → Checkout Git repository…**.
-2. Name the connection and choose the checkout's top-level folder with **Browse…**.
+1. On Start, choose **Add new repository → Git**.
+   The **New Git repository** modal opens directly. The same action is available
+   in **Settings → Cloud Saves**.
+2. Choose the checkout's top-level folder with **Browse…**.
    Enter the branch currently checked out in that folder.
 3. Enter a remote name such as `origin`, an HTTPS or SSH URL, a `file://` URL,
    or a local path. Leave Remote empty to keep revisions only in this checkout.
 4. Choose authentication. **System configuration** uses Git's existing credential
-   helpers and SSH configuration. **HTTPS** reuses a guided GitHub connection's
-   saved token, or the system credential helpers for other connections. For
+   helpers and SSH configuration. **HTTPS** lets you enter a username and password
+   or access token, saved in the operating system's credential store. For
    **SSH**, choose **System keys and agent** or **Choose key** and browse to the
    private key. An encrypted key can be unlocked in your SSH agent or system prompt.
 5. Choose **Test Repository Connection**. Review the fetch and push destinations,
-   then choose **Use this connection → Apply**. Failed tests keep your entries for retry.
+   then choose **Use this connection**. From Start, the connection is saved directly;
+   from Settings, choose **Apply** to persist the staged connection. Failed tests keep your entries for retry.
 
 Select an existing connection and choose **Git connection settings** to edit it.
+For HTTPS, edit the username or enter a replacement password/token. Leave the
+password field empty to keep the saved secret, then test and apply the connection.
+Failed verification leaves the previously saved connection intact. Credentials
+are scoped to the verified fetch and push URLs, including their repository paths.
 Changes must pass another test. Cancelling the editor or Preferences preserves the
 previous connection. The optional **Git executable** field applies to all connections;
 leave it empty to find Git through PATH. Private keys remain on this device.
@@ -241,8 +265,9 @@ pair in its local data folder under `cloud/ssh/key-…/`. Existing keys are pres
 The private key is selected for this connection automatically.
 
 Choose **Copy public key** and add it to your Git host's SSH settings. GitHub
-connections also offer **Open host SSH settings**. Choose **Test Repository
-Connection**, then **Use this connection → Apply** after the test succeeds.
+repositories can use [GitHub’s SSH settings](https://github.com/settings/keys).
+Choose **Test Repository Connection**, then **Use this connection** after the test
+succeeds. In Preferences, choose **Apply** to persist the staged connection.
 Generation creates local files immediately; Cancel leaves the pair available
 locally while discarding the proposed connection changes.
 

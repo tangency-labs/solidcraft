@@ -68,6 +68,28 @@ fn complete_configuration(worker: &Worker, fail: bool) {
 }
 
 #[test]
+fn add_repository_menu_separates_provider_setup_from_git_settings() {
+    for dark in [false, true] {
+        let (mut h, _) = setup(dark);
+        assert!(crate::scenario::rect_of("cloud_settings:advanced").is_none());
+        h.step(&json!({"click":{"handle":"cloud_settings:connect"}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"dialog:list:cloud_provider_github"}})).unwrap();
+        h.frames(2);
+        assert!(h.app.cloud.setup.is_some());
+        assert!(h.app.cloud.editor.as_ref().unwrap().git.is_none());
+        h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"cloud_settings:connect"}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"dialog:list:cloud_provider_git"}})).unwrap();
+        h.frames(2);
+        assert!(h.app.cloud.setup.is_none());
+        assert!(h.app.cloud.editor.as_ref().unwrap().git.is_some());
+    }
+}
+
+#[test]
 fn apply_waits_for_durability_across_tabs_and_cancel_keeps_the_last_apply() {
     for dark in [false, true] {
         let (mut h, worker) = setup(dark);
@@ -214,15 +236,8 @@ fn repository_rows_select_remove_and_keep_test_progress_in_place() {
         let second = worker.settings.connections[1].id.clone();
         h.step(&json!({"click":{"handle":format!("cloud_settings:row:{second}")}})).unwrap();
         assert_eq!(h.app.cloud.editor.as_ref().unwrap().selected.as_deref(), Some(second.as_str()));
-        let controls = [
-            "cloud_settings:test",
-            "cloud_settings:sync",
-            "cloud_settings:reconnect",
-            "cloud_settings:advanced",
-            "cloud_settings:add_git",
-            "cloud_settings:status",
-            "cloud_settings:sync_after_save",
-        ];
+        let controls =
+            ["cloud_settings:test", "cloud_settings:sync", "cloud_settings:reconnect", "cloud_settings:status", "cloud_settings:sync_after_save"];
         let before: Vec<_> = controls.iter().map(|id| crate::scenario::rect_of(id).unwrap()).collect();
         h.step(&json!({"click":{"handle":"cloud_settings:test"}})).unwrap();
         let jobs = worker.jobs.lock().unwrap();

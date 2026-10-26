@@ -13,6 +13,10 @@ pub(crate) mod git;
 
 pub(crate) const HELP: &str = "https://tangency-labs.github.io/solidcraft/guide/cloud-saves.html";
 
+pub(crate) fn connections(app: &SolveApp) -> &[Connection] {
+    app.cloud.editor.as_ref().map(|e| e.draft.connections.as_slice()).unwrap_or(&app.session.cloud_settings().connections)
+}
+
 pub(crate) struct Editor {
     baseline: Settings,
     draft: Settings,
@@ -186,9 +190,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     let enabled = editor.pending.is_none() && !editor.dialog_open() && !app.session.cloud_configuring() && app.cloud.setup.is_none();
     ui_kit::settings_heading(ui, tr("cloud.title"), tr("cloud.settings_hint"));
     let mut reconnect = None;
-    let mut connect = false;
-    #[cfg(not(target_arch = "wasm32"))]
-    let mut advanced = false;
+    let mut connect = None;
     #[cfg(not(target_arch = "wasm32"))]
     let mut edit = None;
     ui.add_enabled_ui(enabled && app.services.cloud_host.is_some(), |ui| {
@@ -230,7 +232,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                         reconnect = Some(c.clone());
                     }
                     #[cfg(not(target_arch = "wasm32"))]
-                    if button(ui, "cloud_settings:advanced", tr("cloud.git_edit"), !active) {
+                    if c.provider != "github" && button(ui, "cloud_settings:advanced", tr("cloud.git_edit"), !active) {
                         edit = Some(c.clone());
                     }
                 });
@@ -241,10 +243,6 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if all.iter().any(|s| s.connection == c.id && s.storage_persistent == Some(false)) {
                     ui_kit::text(ui, tr("cloud.storage_temporary"), ui_kit::Text::Report("cloud_storage_persistence", true));
                 }
-            }
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                advanced = button(ui, "cloud_settings:add_git", tr("cloud.git_add"), editor.draft.connections.len() < 128);
             }
         });
         ui_kit::settings_section(ui, "cloud_sync", tr("cmd.cloud.sync"), |ui| {
@@ -268,15 +266,15 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     ui.hyperlink_to(crate::i18n::tr_label("Help"), HELP);
     app.cloud.editor = Some(editor);
-    if connect {
-        app.start("cloud.connect");
+    if let Some(command) = connect {
+        app.start(command);
     }
     if let Some(connection) = reconnect {
         app.start("cloud.connect");
         crate::cloud_setup::prefill(app, connection);
     }
     #[cfg(not(target_arch = "wasm32"))]
-    if advanced || edit.is_some() {
+    if edit.is_some() {
         app.start("cloud.configure");
         if let Some(connection) = edit {
             git::prefill(app, connection);

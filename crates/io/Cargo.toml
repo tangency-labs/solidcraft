@@ -50,3 +50,5 @@ ssh-key = { version = "0.6.7", default-features = false, features = ["std", "ed2
 rand_chacha = "0.3"
 zeroize = { version = "1", features = ["alloc"] }
 tempfile = "3"
+url = "2"
+percent-encoding = "2"

@@ -12,6 +12,7 @@ use std::{io::Read, sync::Arc};
 use tower::{BoxError, service_fn};
 
 pub struct Access;
+mod repository;
 
 fn storage() -> Error {
     Error::Storage("system credential store unavailable; unlock it and reconnect".into())
@@ -25,6 +26,31 @@ pub(super) fn entry(id: &str) -> Result<keyring::Entry> {
 }
 
 impl NativeAccess for Access {
+    fn check_repository(&self, connection: &Connection, input: solidcraft_cloud::jobs::RepositoryCheckInput, job: &Job) -> Result<bool> {
+        if !self.uses_provider_api(connection) {
+            return Err(Error::Invalid("unsupported setup provider".into()));
+        }
+        let token = match input.token {
+            Some(token) => token,
+            None => zeroize::Zeroizing::new(self.credential(&connection.credential)?.ok_or_else(storage)?),
+        };
+        let runtime = tokio::runtime::Builder::new_current_thread().build().map_err(|_| Error::Storage("GitHub worker unavailable".into()))?;
+        tokio::task::LocalSet::new().block_on(&runtime, async {
+            let client = client(&token, job.clone()).map_err(|_| Error::Storage("GitHub client unavailable".into()))?;
+            solidcraft_cloud::github::exists(client, &connection.repository).await
+        })
+    }
+
+    fn uses_provider_api(&self, connection: &Connection) -> bool {
+        connection.provider == "github" && connection.authentication == solidcraft_cloud::Authentication::Https
+    }
+    fn provider_repository(&self, connection: &Connection, job: &Job) -> Result<Box<dyn solidcraft_engine::io::cloud::ProviderRepository>> {
+        if !self.uses_provider_api(connection) {
+            return Err(Error::Invalid("unsupported provider API".into()));
+        }
+        let token = zeroize::Zeroizing::new(self.credential(&connection.credential)?.ok_or_else(storage)?);
+        Ok(Box::new(repository::Repository { connection: connection.clone(), job: job.clone(), token }))
+    }
     fn credential(&self, id: &str) -> Result<Option<String>> {
         match entry(id)?.get_password() {
             Ok(token) => Ok(Some(token)),
@@ -61,6 +87,7 @@ impl NativeAccess for Access {
 }
 
 fn client(token: &str, job: Job) -> std::result::Result<octocrab::Octocrab, BoxError> {
+    const API_BYTES: usize = solidcraft_cloud::MAX_MANIFEST_BYTES * 2 + solidcraft_cloud::CHUNK_BYTES;
     solidcraft_cloud::setup::check_token(token)?;
     let tls = ureq::tls::TlsConfig::builder()
         .root_certs(ureq::tls::RootCerts::PlatformVerifier)
@@ -87,7 +114,7 @@ fn client(token: &str, job: Job) -> std::result::Result<octocrab::Octocrab, BoxE
                 return Err(BoxError::from("unsupported API destination"));
             }
             let bytes = body.collect().await?.to_bytes();
-            if bytes.len() > solidcraft_cloud::MAX_MANIFEST_BYTES {
+            if bytes.len() > API_BYTES {
                 return Err("request too large".into());
             }
             let mut builder = http::Request::builder().method(parts.method).uri(parts.uri);
@@ -101,8 +128,8 @@ fn client(token: &str, job: Job) -> std::result::Result<octocrab::Octocrab, BoxE
                 *headers = response.headers().clone();
             }
             let mut output = Vec::new();
-            response.body_mut().as_reader().take(1024 * 1024 + 1).read_to_end(&mut output)?;
-            if output.len() > 1024 * 1024 {
+            response.body_mut().as_reader().take(API_BYTES as u64 + 1).read_to_end(&mut output)?;
+            if output.len() > API_BYTES {
                 return Err("response too large".into());
             }
             if job.cancelled()? {

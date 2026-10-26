@@ -1,9 +1,9 @@
 //! Repository rows and a fixed operation footer for the Cloud Saves preferences page.
 use super::*;
 
-pub(super) fn table(ui: &mut egui::Ui, editor: &mut Editor, statuses: &[JobStatus]) -> bool {
+pub(super) fn table(ui: &mut egui::Ui, editor: &mut Editor, statuses: &[JobStatus]) -> Option<&'static str> {
     let mut remove = None;
-    let mut add = false;
+    let mut add = None;
     ui_kit::table(
         ui,
         "cloud_repositories",
@@ -54,7 +54,11 @@ pub(super) fn table(ui: &mut egui::Ui, editor: &mut Editor, statuses: &[JobStatu
             ui.add_enabled_ui(editor.draft.connections.len() < 128, |ui| {
                 let response = table.add_prompt(ui, tr("cloud.add_storage"), tr("cloud.add_storage"));
                 crate::scenario::publish_target("cloud_settings:connect", response.rect);
-                add = response.clicked();
+                if let Some(choice) =
+                    ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Popup).menu(&response).show(crate::cloud_setup::repository_choices)
+                {
+                    add = choice.inner;
+                }
             });
         },
     );

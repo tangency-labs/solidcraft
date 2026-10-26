@@ -20,7 +20,7 @@ fn storage(error: impl std::fmt::Display) -> Error {
     Error::Storage(error.to_string())
 }
 
-fn check_cancelled(job: &Job) -> Result<()> {
+pub(super) fn check_cancelled(job: &Job) -> Result<()> {
     if job.cancelled()? { Err(storage("operation cancelled; durable saves retained")) } else { Ok(()) }
 }
 
@@ -43,6 +43,11 @@ impl NativeHost {
         root: &std::path::Path,
     ) -> Result<()> {
         check_cancelled(job)?;
+        if let Some(access) = access
+            && super::provider::connection(&operation).is_some_and(|connection| access.uses_provider_api(connection))
+        {
+            return super::provider::run(operation, outbox, job, access);
+        }
         match operation {
             Operation::Discard { connection, destination, revision } => {
                 management::discard(outbox, &connection, &destination, &revision, executable, job, access)?;
@@ -371,7 +376,7 @@ pub(super) fn pending_tip(outbox: &LocalOutbox, connection: &Connection, destina
     pending_revision(outbox, connection, destination, None)
 }
 
-fn pending_revision(
+pub(super) fn pending_revision(
     outbox: &LocalOutbox,
     connection: &Connection,
     destination: &solidcraft_cloud::Destination,
@@ -393,8 +398,8 @@ pub(super) fn open_repository(
     job: &Job,
     access: Option<&dyn super::NativeAccess>,
 ) -> Result<GitRepository> {
-    let token = if connection.provider == "github"
-        && connection.authentication == solidcraft_cloud::Authentication::Https
+    let token = if connection.authentication == solidcraft_cloud::Authentication::Https
+        && (connection.provider == "github" || !connection.https_username.is_empty())
         && !connection.credential.is_empty()
     {
         access.map(|access| access.credential(&connection.credential)).transpose()?.flatten()
@@ -409,6 +414,28 @@ pub(super) fn open_repository(
 }
 
 impl Host for NativeHost {
+    fn check_repository(&self, connection: Connection, input: solidcraft_cloud::jobs::RepositoryCheckInput) -> Result<Job> {
+        connection.validate()?;
+        let access = self.access.clone().ok_or_else(|| storage("repository checking is unavailable"))?;
+        let job = Job::new(connection.id.clone())?;
+        let worker = job.clone();
+        std::thread::Builder::new()
+            .name("solidcraft-cloud-check".into())
+            .spawn(move || {
+                let result = access.check_repository(&connection, input, &worker).and_then(|exists| {
+                    worker.update(|s| {
+                        s.result = Some(serde_json::json!({"exists":exists}));
+                        s.phase = Phase::Ready;
+                    })
+                });
+                if let Err(error) = result {
+                    let _ = worker.fail(error);
+                }
+            })
+            .map_err(storage)?;
+        Ok(job)
+    }
+
     fn store_credential(&self, id: String, token: String) -> Result<Job> {
         solidcraft_cloud::setup::check_token(&token)?;
         if id.is_empty() || id.len() > 4096 || id.chars().any(char::is_control) {

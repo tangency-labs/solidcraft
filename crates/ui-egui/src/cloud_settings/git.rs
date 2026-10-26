@@ -1,29 +1,38 @@
-//! Native checkout setup. Tests resolve destinations; Preferences owns durable application.
+//! Native checkout setup. Home connects directly; Preferences stages edits for Apply.
 use super::*;
 use solidcraft_cloud::{Authentication, SshIdentity};
 use std::sync::Arc;
 
+mod https;
 mod key;
 
 pub(crate) struct Wizard {
     connection: Connection,
     executable: String,
     existing: bool,
+    staged: bool,
+    applying: bool,
     pending: Option<String>,
     verified: Option<(Connection, String)>,
     error: Option<String>,
     owner: Arc<()>,
     key: Option<key::Editor>,
+    https: https::Editor,
 }
 
 pub(crate) fn open(app: &mut SolveApp) {
-    crate::prefs::open_at(app, crate::prefs::PAGE_CLOUD);
-    begin(app);
-    let Some(editor) = app.cloud.editor.as_mut() else { return };
-    if editor.pending.is_some() || editor.git.is_some() || app.cloud.setup.is_some() {
+    if app.cloud.git_setup.is_some() || app.cloud.editor.as_ref().is_some_and(|e| e.pending.is_some() || e.git.is_some()) || app.cloud.setup.is_some()
+    {
         return;
     }
-    editor.git = Some(Wizard {
+    let staged = app.prefs_window.open && app.prefs_window.section == crate::prefs::PAGE_CLOUD;
+    let executable = if staged {
+        begin(app);
+        app.cloud.editor.as_ref().map(|e| e.draft.git_executable.clone()).unwrap_or_default()
+    } else {
+        app.session.cloud_settings().git_executable.clone()
+    };
+    let wizard = Wizard {
         connection: Connection {
             id: "git".into(),
             name: String::new(),
@@ -32,18 +41,36 @@ pub(crate) fn open(app: &mut SolveApp) {
             authentication: Authentication::System,
             ..Default::default()
         },
-        executable: editor.draft.git_executable.clone(),
+        executable,
         existing: false,
+        staged,
+        applying: false,
         pending: None,
         verified: None,
         error: None,
         owner: Arc::new(()),
         key: None,
-    });
+        https: https::Editor::default(),
+    };
+    put(app, wizard);
+}
+
+fn wizard_mut(app: &mut SolveApp) -> Option<&mut Wizard> {
+    if app.cloud.git_setup.is_some() { app.cloud.git_setup.as_mut() } else { app.cloud.editor.as_mut().and_then(|e| e.git.as_mut()) }
+}
+
+fn put(app: &mut SolveApp, wizard: Wizard) {
+    if wizard.staged {
+        if let Some(editor) = app.cloud.editor.as_mut() {
+            editor.git = Some(wizard);
+        }
+    } else {
+        app.cloud.git_setup = Some(wizard);
+    }
 }
 
 pub(crate) fn prefill(app: &mut SolveApp, connection: Connection) {
-    if let Some(wizard) = app.cloud.editor.as_mut().and_then(|e| e.git.as_mut()) {
+    if let Some(wizard) = wizard_mut(app) {
         wizard.connection = connection;
         wizard.existing = true;
         wizard.verified = None;
@@ -57,6 +84,10 @@ pub(crate) fn cancel(app: &mut SolveApp) {
 }
 
 fn cancel_test(app: &mut SolveApp, wizard: &Wizard) {
+    if wizard.applying {
+        return;
+    }
+    wizard.https.cancel();
     if let Some(key) = &wizard.key {
         key.cancel(app);
     }
@@ -70,18 +101,23 @@ impl Wizard {
         !self.connection.checkout.trim().is_empty()
             && !self.connection.branch.is_empty()
             && self.connection.validate().is_ok()
+            && self.https.valid(&self.connection)
             && Settings { git_executable: self.executable.clone(), ..Default::default() }.validate().is_ok()
     }
 
     fn verified(&self) -> bool {
-        self.verified.as_ref().is_some_and(|(connection, executable)| connection == &self.connection && executable == &self.executable)
+        self.https.unchanged()
+            && self.verified.as_ref().is_some_and(|(connection, executable)| connection == &self.connection && executable == &self.executable)
     }
 
-    fn poll(&mut self, all: &[JobStatus]) -> Result<(), String> {
-        let Some(id) = &self.pending else { return Ok(()) };
+    fn poll(&mut self, all: &[JobStatus]) -> Result<bool, String> {
+        let Some(id) = &self.pending else { return Ok(false) };
         let status = all.iter().find(|s| s.operation == *id).ok_or_else(|| tr("cloud.setup_failed").to_owned())?;
         match status.phase {
             Phase::Ready => {
+                if self.applying {
+                    return Ok(true);
+                }
                 let mut connection: Connection =
                     serde_json::from_value(status.result.clone().ok_or_else(|| tr("cloud.setup_failed").to_owned())?).map_err(|e| e.to_string())?;
                 connection.validate().map_err(|e| e.to_string())?;
@@ -91,13 +127,15 @@ impl Wizard {
                 self.pending = None;
                 self.error = None;
             }
+            Phase::Synced if self.applying => return Ok(true),
             Phase::Failed | Phase::Cancelled => {
                 self.pending = None;
+                self.applying = false;
                 return Err(status.message.clone().unwrap_or_else(|| tr("cloud.setup_failed").into()));
             }
             _ => {}
         }
-        Ok(())
+        Ok(false)
     }
 }
 
@@ -111,7 +149,7 @@ enum Pick {
 fn pick(app: &mut SolveApp, field: Pick, owner: Arc<()>) {
     let complete = move |app: &mut SolveApp, path: Option<String>| {
         if let Some(path) = path
-            && let Some(wizard) = app.cloud.editor.as_mut().and_then(|e| e.git.as_mut())
+            && let Some(wizard) = wizard_mut(app)
             && Arc::ptr_eq(&owner, &wizard.owner)
             && wizard.pending.is_none()
         {
@@ -139,7 +177,8 @@ fn field(ui: &mut egui::Ui, key: &str, value: &mut String, browse: bool) -> bool
                 + ui.spacing().item_spacing.x;
             let width = if browse { (ui.available_width() - browse_width).max(t.space_24) } else { ui.available_width() };
             let r = ui_kit::settings_control_width(ui, width, |ui| {
-                ui_kit::bounded_cell_editor(ui, egui::Id::new(("cloud_git_field", key)), value, "", false, 4096)
+                let limit = if key == "cloud.git_username" { 256 } else { 4096 };
+                ui_kit::bounded_cell_editor(ui, egui::Id::new(("cloud_git_field", key)), value, "", false, limit)
             });
             crate::scenario::publish_target(&format!("cloud_git:{key}"), r.rect);
             if browse {
@@ -151,18 +190,31 @@ fn field(ui: &mut egui::Ui, key: &str, value: &mut String, browse: bool) -> bool
 }
 
 pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
-    let Some(mut wizard) = app.cloud.editor.as_mut().and_then(|e| e.git.take()) else { return };
-    if let Err(error) = wizard.poll(&statuses(app)) {
-        wizard.pending = None;
+    let Some(mut wizard) = app.cloud.git_setup.take().or_else(|| app.cloud.editor.as_mut().and_then(|e| e.git.take())) else { return };
+    if let Err(error) = https::poll(app, &mut wizard) {
         wizard.error = Some(error);
+    }
+    match wizard.poll(&statuses(app)) {
+        Ok(true) => {
+            crate::cloud_browser::select(app, &wizard.connection.id);
+            app.set_status(tr("cloud.connected"), false);
+            return;
+        }
+        Err(error) => {
+            wizard.pending = None;
+            wizard.applying = false;
+            wizard.error = Some(error);
+        }
+        Ok(false) => {}
     }
     key::poll(app, &mut wizard);
     wizard.connection.name = wizard.connection.repository_label();
-    let busy = wizard.pending.is_some() || wizard.key.as_ref().is_some_and(key::Editor::busy);
+    let busy = wizard.pending.is_some() || wizard.https.busy() || wizard.key.as_ref().is_some_and(key::Editor::busy);
     let enabled = !busy && !app.file_picker_busy() && !app.session.cloud_configuring();
     let mut browse = None;
     let primary = tr(if wizard.verified() { "cloud.git_use" } else { "cmd.cloud.test" });
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("cloud_git_setup"), "settings", tr("cloud.git_edit"))
+    let title = tr(if wizard.existing { "cloud.git_edit" } else { "cloud.git_new" });
+    let (closed, action) = ui_kit::Window::new(egui::Id::new("cloud_git_setup"), "settings", title)
         .fields()
         .cards(2.2)
         .actions(primary, "Cancel", None)
@@ -187,12 +239,17 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         crate::scenario::publish_target(&format!("cloud_git:{key}"), r.rect);
                         if r.clicked() {
                             wizard.connection.authentication = kind;
+                            if wizard.connection.authentication != Authentication::Https {
+                                wizard.https.clear();
+                            }
                             if wizard.connection.authentication != Authentication::Ssh {
                                 wizard.connection.ssh_identity = SshIdentity::System;
+                                wizard.key = None;
                             }
                         }
                     }
                 });
+                https::show(ui, &mut wizard);
                 if wizard.connection.authentication == Authentication::Ssh {
                     ui_kit::settings_block(ui, tr("cloud.git_ssh"), choice_label_width, |ui| {
                         let mut custom = matches!(wizard.connection.ssh_identity, SshIdentity::File(_));
@@ -256,36 +313,55 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // Revalidate after this frame's edits: a formerly verified destination cannot slip through.
     if action == ui_kit::Action::Ok && enabled && wizard.valid() && !wizard.key.as_ref().is_some_and(key::Editor::editing) {
         let result = if wizard.verified() {
-            let editor = app.cloud.editor.as_mut();
-            editor.ok_or_else(|| tr("cloud.settings_changed").to_owned()).and_then(|editor| {
-                editor.stage(wizard.connection.clone())?;
-                editor.draft.git_executable = wizard.executable.clone();
-                Ok(())
-            })
-        } else {
-            let mut candidate = wizard.connection.clone();
-            candidate.git_remote = None;
-            if !wizard.existing {
-                candidate.id = "git".into();
+            if wizard.staged {
+                app.cloud.editor.as_mut().ok_or_else(|| tr("cloud.settings_changed").to_owned()).and_then(|editor| {
+                    editor.stage(wizard.connection.clone())?;
+                    editor.draft.git_executable = wizard.executable.clone();
+                    Ok(())
+                })
+            } else {
+                let mut settings = app.session.cloud_settings().clone();
+                if let Some(connection) = settings.connections.iter_mut().find(|c| c.id == wizard.connection.id) {
+                    *connection = wizard.connection.clone();
+                } else {
+                    settings.connections.push(wizard.connection.clone());
+                }
+                if settings.default_connection.is_none() {
+                    settings.default_connection = Some(wizard.connection.id.clone());
+                }
+                settings.git_executable = wizard.executable.clone();
+                app.run("cloud.configure", json!({"settings":settings})).and_then(|reply| {
+                    wizard.pending = Some(reply.get("operation").and_then(|v| v.as_str()).ok_or_else(|| tr("cloud.setup_failed").to_owned())?.into());
+                    wizard.applying = true;
+                    Ok(())
+                })
             }
-            app.run("cloud.test", json!({"proposed":candidate,"git_executable":wizard.executable})).and_then(|reply| {
-                wizard.pending = Some(reply.get("operation").and_then(|v| v.as_str()).ok_or_else(|| tr("cloud.setup_failed").to_owned())?.into());
-                Ok(())
-            })
+        } else {
+            https::test(app, &mut wizard)
         };
-        if wizard.verified() && result.is_ok() {
+        if wizard.staged && wizard.verified() && result.is_ok() {
             app.set_status(tr("cloud.setup_ready"), false);
             return;
         }
         wizard.error = result.err();
     }
     let owner = wizard.owner.clone();
-    if let Some(editor) = app.cloud.editor.as_mut() {
-        editor.git = Some(wizard);
-    }
+    put(app, wizard);
     if let Some(field) = browse {
         pick(app, field, owner);
     }
+}
+
+fn test(app: &mut SolveApp, wizard: &mut Wizard) -> Result<(), String> {
+    let mut candidate = wizard.connection.clone();
+    candidate.git_remote = None;
+    if !wizard.existing {
+        candidate.id = "git".into();
+    }
+    app.run("cloud.test", json!({"proposed":candidate,"git_executable":wizard.executable})).and_then(|reply| {
+        wizard.pending = Some(reply.get("operation").and_then(|v| v.as_str()).ok_or_else(|| tr("cloud.setup_failed").to_owned())?.into());
+        Ok(())
+    })
 }
 
 #[cfg(test)]

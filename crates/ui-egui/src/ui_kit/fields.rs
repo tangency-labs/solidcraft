@@ -527,8 +527,63 @@ pub(crate) fn bounded_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String,
     cell_editor_frame(ui, id, value, hint, invalid, limit, true)
 }
 
-fn cell_editor_frame(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, invalid: bool, limit: usize, frame: bool) -> Response {
+/// Inline validation occupies a reserved slot inside an input; text and row geometry
+/// stay fixed through idle, checking and terminal states. The tooltip is also accessible text.
+pub(crate) enum InputStatus<'a> {
+    Checking(&'a str),
+    Valid(&'a str),
+    Warning(&'a str),
+    Invalid(&'a str),
+}
+
+pub(crate) fn checked_cell_editor(
+    ui: &mut Ui,
+    id: egui::Id,
+    value: &mut String,
+    hint: &str,
+    limit: usize,
+    status: Option<InputStatus<'_>>,
+) -> Response {
     let t = Tokens::get();
+    let response = cell_editor_status(ui, id, value, hint, false, limit, CellFrame::Checked);
+    let rect = egui::Rect::from_center_size(
+        egui::pos2(response.rect.right() - t.form_inset - t.space_16 / 2.0, response.rect.center().y),
+        vec2(t.space_16, t.space_16),
+    );
+    if let Some(status) = status {
+        let (text, color) = match status {
+            InputStatus::Checking(text) => {
+                egui::Spinner::new().color(t.form_dim).paint_at(ui, rect);
+                (text, None)
+            }
+            InputStatus::Valid(text) => (text, Some(t.form_success)),
+            InputStatus::Warning(text) => (text, Some(t.warning)),
+            InputStatus::Invalid(text) => (text, Some(t.form_error)),
+        };
+        if let Some(color) = color {
+            ui.painter().circle_filled(rect.center(), t.space_3, color);
+        }
+        ui.interact(rect, id.with("status"), egui::Sense::hover())
+            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
+        scenario::publish_target("dialog:input_status", rect);
+        return response.on_hover_text(text);
+    }
+    response
+}
+
+fn cell_editor_frame(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, invalid: bool, limit: usize, frame: bool) -> Response {
+    cell_editor_status(ui, id, value, hint, invalid, limit, if frame { CellFrame::Input } else { CellFrame::Plain })
+}
+
+enum CellFrame {
+    Input,
+    Plain,
+    Checked,
+}
+
+fn cell_editor_status(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, invalid: bool, limit: usize, kind: CellFrame) -> Response {
+    let t = Tokens::get();
+    let frame = !matches!(kind, CellFrame::Plain);
     let editor = text_input(egui::TextEdit::singleline(value))
         .char_limit(limit)
         .id(id)
@@ -549,6 +604,12 @@ fn cell_editor_frame(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, 
         editor
     } else {
         editor.frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(t.space_8 as i8, 0)))
+    };
+    let editor = if matches!(kind, CellFrame::Checked) {
+        let inset = t.form_inset.round() as i8;
+        editor.margin(egui::Margin { left: inset, right: inset.saturating_add((t.space_16 + t.space_4).round() as i8), top: 0, bottom: 0 })
+    } else {
+        editor
     };
     let mut response = ui.add_sized(vec2(dimension(ui.available_width()), row_height()), editor);
     super::text_menu::menu(ui, &mut response, value, super::text_menu::Field::LINE.limited(limit));

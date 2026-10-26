@@ -95,7 +95,7 @@ fn blob_hash(bytes: &[u8], hash_length: usize) -> Result<String> {
 
 pub use crate::setup::github_repository as repository_name;
 mod setup;
-pub use setup::prepare;
+pub use setup::{exists, prepare};
 
 impl GitHub {
     /// The platform supplies an authenticated Octocrab client. Browser builds use its public

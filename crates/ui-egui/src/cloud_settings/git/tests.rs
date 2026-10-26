@@ -4,8 +4,13 @@ use solidcraft_cloud::jobs::{Host, Job, Operation};
 use std::sync::Mutex;
 
 #[derive(Default)]
-struct Worker(Mutex<Vec<(Job, Operation, String)>>);
+struct Worker(Mutex<Vec<(Job, Operation, String)>>, Mutex<Vec<(Job, String, String)>>);
 impl Host for Worker {
+    fn store_credential(&self, id: String, secret: String) -> solidcraft_cloud::Result<Job> {
+        let job = Job::new(String::new())?;
+        self.1.lock().unwrap().push((job.clone(), id, secret));
+        Ok(job)
+    }
     fn submit(&self, operation: Operation, executable: String) -> solidcraft_cloud::Result<Job> {
         let job = Job::new("git".into())?;
         match &operation {
@@ -23,19 +28,65 @@ impl Host for Worker {
     }
 }
 
+#[test]
+fn https_credentials_are_editable_and_replacements_wait_for_verification_and_apply() {
+    let (mut h, worker) = setup(true);
+    fill(&mut h);
+    let old = {
+        let w = wizard(&mut h);
+        w.existing = true;
+        w.connection.id = "git-existing".into();
+        w.connection.authentication = Authentication::Https;
+        w.connection.https_username = "old-user".into();
+        w.connection.credential = "working-secret".into();
+        w.connection.clone()
+    };
+    h.app.cloud.editor.as_mut().unwrap().draft.connections.push(old.clone());
+    h.frames(8);
+    assert!(crate::scenario::rect_of("cloud_git:password").is_some());
+    wizard(&mut h).connection.https_username = "new-user".into();
+    click(&mut h, "cloud_git:password");
+    h.step(&json!({"text":"replacement with spaces"})).unwrap();
+    click(&mut h, "dialog:ok");
+    assert!(wizard(&mut h).https.busy());
+    assert!(!worker.0.lock().unwrap().iter().any(|(_, op, _)| matches!(op, Operation::Test(_))));
+    let (stored, id, encoded) = worker.1.lock().unwrap().last().unwrap().clone();
+    assert_ne!(id, old.credential);
+    assert_eq!(solidcraft_cloud::credentials::decode_password(&encoded).unwrap().as_str(), "replacement with spaces");
+    stored.update(|s| s.phase = Phase::Ready).unwrap();
+    h.frames(3);
+    let (job, candidate, _) = test_job(&worker);
+    assert_eq!(candidate.credential, id);
+    assert_eq!(candidate.https_username, "new-user");
+    job.fail(solidcraft_cloud::Error::Storage("authentication failed".into())).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.cloud.editor.as_ref().unwrap().draft.connections, [old]);
+    assert!(!wizard(&mut h).verified());
+    click(&mut h, "dialog:ok");
+    verified(&worker);
+    h.frames(3);
+    click(&mut h, "dialog:ok");
+    let draft = &h.app.cloud.editor.as_ref().unwrap().draft.connections[0];
+    assert_eq!(draft.credential, id);
+    assert_eq!(draft.https_username, "new-user");
+    assert!(h.app.session.cloud_settings().connections.is_empty(), "Apply is still required");
+}
+
 fn setup(dark: bool) -> (Harness, Arc<Worker>) {
     let worker = Arc::new(Worker::default());
     let mut h = Harness::new();
     h.app = SolveApp::new(Default::default(), Services { cloud_host: Some(worker.clone()), ..Default::default() });
     h.app.preferences.theme = if dark { "dark" } else { "light" }.into();
     h.frames(3);
+    h.app.start("cloud.settings");
+    h.frames(2);
     h.app.start("cloud.configure");
     h.frames(3);
     (h, worker)
 }
 
 fn wizard(h: &mut Harness) -> &mut Wizard {
-    h.app.cloud.editor.as_mut().unwrap().git.as_mut().unwrap()
+    wizard_mut(&mut h.app).unwrap()
 }
 fn fill(h: &mut Harness) {
     let w = wizard(h);
@@ -62,6 +113,52 @@ fn verified(worker: &Worker) -> Connection {
     })
     .unwrap();
     connection
+}
+
+#[test]
+fn home_checkout_opens_only_its_modal_and_waits_for_durable_connection() {
+    for dark in [false, true] {
+        let (mut h, worker) = setup(dark);
+        click(&mut h, "dialog:cancel");
+        click(&mut h, "prefs:cancel");
+        h.app.home.open = true;
+        h.app.start("cloud.configure");
+        h.frames(3);
+        assert!(!h.app.prefs_window.open);
+        assert!(h.app.cloud.editor.is_none());
+        assert!(!wizard(&mut h).staged && !wizard(&mut h).existing);
+        fill(&mut h);
+        click(&mut h, "dialog:ok");
+        let connection = verified(&worker);
+        h.frames(3);
+        click(&mut h, "dialog:ok");
+        assert!(wizard(&mut h).applying);
+        assert!(h.app.session.cloud_settings().connections.is_empty());
+        let job = {
+            let jobs = worker.0.lock().unwrap();
+            let (job, Operation::Configure(_), _) = jobs.last().unwrap() else { panic!("configuration") };
+            job.clone()
+        };
+        job.fail(solidcraft_cloud::Error::Storage("disk full".into())).unwrap();
+        h.frames(3);
+        assert!(!h.app.prefs_window.open);
+        assert!(wizard(&mut h).error.as_deref().unwrap().contains("disk full"));
+        click(&mut h, "dialog:ok");
+        let (job, settings) = {
+            let jobs = worker.0.lock().unwrap();
+            let (job, Operation::Configure(settings), _) = jobs.last().unwrap() else { panic!("configuration") };
+            (job.clone(), settings.clone())
+        };
+        job.update(|s| {
+            s.phase = Phase::Synced;
+            s.result = Some(json!(settings));
+        })
+        .unwrap();
+        h.frames(3);
+        assert!(h.app.cloud.git_setup.is_none());
+        assert!(!h.app.prefs_window.open);
+        assert_eq!(h.app.session.cloud_settings().connections, [connection]);
+    }
 }
 fn click(h: &mut Harness, handle: &str) {
     h.step(&json!({"click":{"handle":handle}})).unwrap();
@@ -191,7 +288,11 @@ fn delayed_folder_picker_cannot_modify_a_reopened_editor() {
 #[test]
 fn editing_a_connection_preserves_its_credentials_and_other_destinations() {
     let (mut h, worker) = setup(true);
-    let first = solidcraft_cloud::setup::github_connection("example/personal").unwrap();
+    let first = Connection {
+        provider: String::new(),
+        checkout: "/example/checkout".into(),
+        ..solidcraft_cloud::setup::github_connection("example/personal").unwrap()
+    };
     let second = solidcraft_cloud::setup::github_connection("example/work").unwrap();
     let original = Settings {
         connections: vec![first.clone(), second.clone()],

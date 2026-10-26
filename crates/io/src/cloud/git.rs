@@ -21,7 +21,7 @@ pub struct GitRepository {
     executable: OsString,
     connection: Connection,
     job: Option<solidcraft_cloud::jobs::Job>,
-    token: Option<String>,
+    token: Option<zeroize::Zeroizing<String>>,
     ssh_askpass: Option<PathBuf>,
 }
 
@@ -46,18 +46,25 @@ impl GitRepository {
         }
         crate::vfs::check(&connection.checkout).map_err(storage)?;
         let checkout = fs::canonicalize(&connection.checkout).map_err(storage)?;
-        let repository = Self {
+        let mut repository = Self {
             checkout,
             executable: if executable.is_empty() { "git".into() } else { executable.into() },
             connection,
             job,
-            token,
+            token: None,
             ssh_askpass: None,
         };
         let root = repository.text(&["rev-parse", "--show-toplevel"])?;
         if fs::canonicalize(root.trim()).map_err(storage)? != repository.checkout {
             return Err(storage("checkout location must be the repository's top-level folder"));
         }
+        // Resolve local Git configuration without supplying any credentials. Pin its
+        // endpoints before a helper can offer a password to a network operation.
+        if token.is_some() && repository.connection.provider.is_empty() {
+            repository.connection.git_remote = repository.pinned_remote()?;
+            super::auth::check_git_destinations(&repository.connection)?;
+        }
+        repository.token = token.map(zeroize::Zeroizing::new);
         if repository.token.is_some() {
             repository.check_token_destination()?;
         }
@@ -71,6 +78,11 @@ impl GitRepository {
     }
 
     fn check_token_destination(&self) -> Result<()> {
+        if self.connection.provider.is_empty() {
+            self.pinned_remote()?;
+            super::auth::check_git_destinations(&self.connection)?;
+            return Ok(());
+        }
         let repository = solidcraft_cloud::setup::github_repository(&self.connection.repository)?;
         let expected = format!("https://github.com/{repository}.git");
         let remote = self.remote_identity()?.ok_or_else(|| storage("choose this GitHub repository's remote"))?;

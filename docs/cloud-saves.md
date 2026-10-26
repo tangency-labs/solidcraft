@@ -18,7 +18,7 @@ Existing infrastructure is preferred over new protocol, cryptographic, database,
 | GitHub client | Octocrab 0.54.5 with default features disabled and a small browser service/executor adapter. Real typed Git Database read/write calls compile, and public Git reads executed in Chromium. |
 | Browser queue and metadata | `indexed_db_futures` provides schema upgrades, indices, durability options, and explicit transaction completion; its required APIs passed the browser-target compile probe. |
 | OPFS assets | Shared OPFS adapter in `apps/solidcraft-web/src/files.rs`, with bounded reads and awaited write/close. |
-| Native credentials | Existing `keyring` service with per-connection credential identifiers. |
+| Native credentials | Existing `keyring` service with opaque credential identifiers. |
 | SSH key generation | `ssh-key` for Ed25519 and encrypted OpenSSH serialization; system Git/OpenSSH still handles existing keys and agents. Native encrypted-key roundtrip and wrong-passphrase checks passed. |
 | Locking and atomic writes | Standard-library file locks and existing `solidcraft_io::safe_write`; no extra locking or atomic-write library is needed. |
 | Encoding | Existing `serde`, `serde_json`, `sha2`, and `zstd`; no new serialization, hashing, or compression implementation. |
@@ -74,9 +74,16 @@ publication, and immutable receipts make restarts idempotent.
 
 Host setup and repository access are separate adapters. A host setup adapter supplies guided authentication, repository discovery/creation, and host settings links. The native repository adapter uses standard Git; a browser adapter uses a CORS-compatible provider interface. Adding GitLab or Gitea setup must not change the snapshot format.
 
+The GitHub wizard can reuse another connection's opaque credential identifier.
+The selector includes pending connections in Cloud Saves preferences and selects
+the current connection on reconnect. **New…** stores a separate credential before
+testing access, preserving working credentials if verification fails. Reuse sends
+no token bytes through the UI or engine; the normal provider setup verifies the
+selected token's permissions for the additional repository.
+
 Engine commands own user-visible behavior and asynchronous operation identifiers. UI modules render state and issue those commands. Credentials stay in host credential storage, never in document metadata, remote URLs, command logs, or manifests.
 
-Desktop Git must preserve credential helpers, SSH agents/configuration, signing, unrelated staged and unstaged work, and linked worktrees. A connection-specific key override affects only its subprocess. Key generation must not overwrite existing keys. Publishing is non-forced and reports synchronization only after confirmation.
+Desktop Git preserves system credential helpers when System configuration is selected, SSH agents/configuration, signing, unrelated staged and unstaged work, and linked worktrees. Explicit HTTPS credentials use a per-command helper scoped to verified fetch/push URLs, with path matching and redirects disabled. The username is local connection metadata; the password or token is a bounded, versioned keychain payload. Replacement credentials receive a fresh opaque reference before testing, so failure or Preferences cancellation preserves the saved connection. A blank password field reuses its existing reference. A connection-specific key override affects only its subprocess. Key generation must not overwrite existing keys. Publishing is non-forced and reports synchronization only after confirmation.
 
 Browser integration must persist connection metadata and pending saves in IndexedDB, with assets and recovery data in OPFS. Restart recovery must retry the captured snapshot rather than silently substituting later unsaved edits. Quota and credential failures leave the requested save recoverable.
 
@@ -247,12 +254,23 @@ changing snapshot or outbox code.
 GitHub setup uses a guided fine-grained personal access token. The token link is visible
 from the first frame. By default, GitHub selects the signed-in account and provider
 setup uses `GET /user` to resolve its `solidcraft-designs` repository. An optional
-Advanced override accepts an existing repository name or URL. The link prefills
+Repository field accepts an existing repository name or URL. Its empty Automatic
+value keeps account discovery. The link prefills
 name, description, Contents write and Metadata read permissions, the overridden
 resource owner when supplied, and `expires_in=none` (no
 expiration, subject to host policy). The wizard guides users through **Only select
 repositories**, selecting their repository, and generating/copying the token.
 The same setup runs on desktop and WASM.
+
+`cloud.test` with `metadata_only: true` checks repository metadata without initializing
+or writing it. `Session::set_cloud_repository_check_token` supplies a one-shot token
+outside JSON and the command recorder; saved tokens use their opaque credential id.
+The host's `check_repository` uses the shared Octocrab check on desktop and WASM.
+The wizard waits 400 ms after input stops, cancels obsolete checks, and handles a
+15-second UI timeout. An unchanged input is checked once; returning from GitHub can
+retry an unavailable result. Connected repositories are detected locally, including
+pending Preferences entries. The shared UI kit reserves the field's status slot in
+every state, and Create uses the same control-column alignment immediately below it.
 
 `cloud.connect` submits `Operation::Setup` with a proposed connection and an opaque
 credential identifier. It returns an operation id and, when ready, a verified connection;

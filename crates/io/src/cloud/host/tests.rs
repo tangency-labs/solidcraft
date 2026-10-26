@@ -94,6 +94,218 @@ fn published(job: &Job) -> solidcraft_cloud::jobs::JobStatus {
 }
 
 #[test]
+fn provider_api_uses_native_recovery_without_git_and_manages_revisions_across_restart() {
+    use solidcraft_cloud::{
+        Destination, Manifest, Publication, Published,
+        management::{Change, History, Revision},
+    };
+    use std::sync::{Arc, Mutex};
+    #[derive(Default)]
+    struct Remote {
+        online: bool,
+        files: BTreeMap<String, Vec<u8>>,
+        commits: Vec<BTreeMap<String, Vec<u8>>>,
+    }
+    struct Access(Arc<Mutex<Remote>>);
+    struct Api(Arc<Mutex<Remote>>, Connection);
+    fn offline() -> Error {
+        Error::Storage("test offline".into())
+    }
+    fn snapshot(files: &BTreeMap<String, Vec<u8>>, destination: &Destination) -> Result<Snapshot> {
+        let path = destination.design_path()?;
+        let manifest = Manifest::read(files.get(&format!("{path}/manifest.json")).ok_or_else(offline)?)?;
+        let document = files.get(&format!("{path}/document.json")).ok_or_else(offline)?.clone();
+        let objects = files
+            .iter()
+            .filter_map(|(p, b)| {
+                p.strip_prefix(&format!("{}/", destination.project)).filter(|p| p.starts_with("objects/")).map(|p| (p.into(), b.clone()))
+            })
+            .collect();
+        Ok(Snapshot { manifest, document, objects })
+    }
+    impl super::super::NativeAccess for Access {
+        fn credential(&self, _: &str) -> Result<Option<String>> {
+            Err(offline())
+        }
+        fn store_credential(&self, _: &str, _: &str) -> Result<()> {
+            Err(offline())
+        }
+        fn prepare(&self, connection: Connection, _: &Job) -> Result<Connection> {
+            Ok(connection)
+        }
+        fn uses_provider_api(&self, _: &Connection) -> bool {
+            true
+        }
+        fn provider_repository(&self, connection: &Connection, _: &Job) -> Result<Box<dyn super::super::ProviderRepository>> {
+            Ok(Box::new(Api(self.0.clone(), connection.clone())))
+        }
+    }
+    impl super::super::ProviderRepository for Api {
+        fn test(&mut self) -> Result<()> {
+            if self.0.lock().unwrap().online { Ok(()) } else { Err(offline()) }
+        }
+        fn list(&mut self, stored: &mut [solidcraft_cloud::StoredDesign]) -> Result<Vec<Destination>> {
+            self.test()?;
+            let state = self.0.lock().unwrap();
+            for entry in stored {
+                let matches = match snapshot(&state.files, &entry.destination) {
+                    Ok(s) => entry.matches_manifest(&s.manifest)?,
+                    Err(_) => false,
+                };
+                if !matches {
+                    entry.outdated = true;
+                    entry.phase = Phase::Ready;
+                }
+            }
+            state
+                .files
+                .keys()
+                .filter_map(|p| p.strip_prefix("Robot/").and_then(|p| p.strip_suffix("/manifest.json")))
+                .filter_map(|file| {
+                    let destination = Destination { connection: self.1.id.clone(), project: "Robot".into(), file: file.into() };
+                    match snapshot(&state.files, &destination) {
+                        Ok(s) if !s.manifest.deleted() => Some(Ok(destination)),
+                        Ok(_) => None,
+                        Err(e) => Some(Err(e)),
+                    }
+                })
+                .collect()
+        }
+        fn trash(&mut self) -> Result<Vec<Destination>> {
+            self.test()?;
+            let state = self.0.lock().unwrap();
+            Ok(state
+                .files
+                .keys()
+                .filter_map(|p| p.strip_prefix("Robot/").and_then(|p| p.strip_suffix("/manifest.json")))
+                .map(|file| Destination { connection: self.1.id.clone(), project: "Robot".into(), file: file.into() })
+                .filter(|d| snapshot(&state.files, d).is_ok_and(|s| s.manifest.deleted() && !s.manifest.moved()))
+                .collect())
+        }
+        fn open(&mut self, destination: &Destination) -> Result<Snapshot> {
+            self.test()?;
+            snapshot(&self.0.lock().unwrap().files, destination)
+        }
+        fn thumbnail(&mut self, _: &Destination) -> Result<Option<Vec<u8>>> {
+            self.test()?;
+            Ok(None)
+        }
+        fn history(&mut self, d: &Destination) -> Result<History> {
+            let s = self.open(d)?;
+            Ok(History {
+                revision: solidcraft_cloud::revision(&s.manifest).map(str::to_owned),
+                revisions: vec![Revision {
+                    commit: format!("{:040x}", self.0.lock().unwrap().commits.len()),
+                    file: d.file.clone(),
+                    date: String::new(),
+                    timestamp: 0,
+                    message: "test".into(),
+                }],
+                queued: false,
+                deleted: s.manifest.deleted(),
+            })
+        }
+        fn open_at(&mut self, d: &Destination, commit: &str) -> Result<Snapshot> {
+            self.test()?;
+            let n = usize::from_str_radix(commit, 16).map_err(|_| offline())?;
+            snapshot(self.0.lock().unwrap().commits.get(n.saturating_sub(1)).ok_or_else(offline)?, d)
+        }
+        fn publish(&mut self, save: &PendingSave, s: Snapshot, parent: Option<&Published>) -> Result<Published> {
+            self.test()?;
+            let mut state = self.0.lock().unwrap();
+            let target = Published::target(save, parent)?;
+            let existing = state.files.get(&format!("{}/manifest.json", target.design_path()?)).cloned();
+            let plan = Publication::prepare_with_parent(save, s, None, existing.as_deref(), parent)?;
+            if !plan.already_published {
+                state.files.extend(plan.files);
+                let files = state.files.clone();
+                state.commits.push(files);
+            }
+            Ok(Published {
+                destination: plan.destination,
+                revision: save.id.clone(),
+                commit: format!("{:040x}", state.commits.len()),
+                conflict: plan.conflict,
+            })
+        }
+    }
+    let fixture = Fixture::new();
+    let connection = Connection { id: "provider".into(), repository: "example/designs".into(), checkout: String::new(), ..Default::default() };
+    let remote = Arc::new(Mutex::new(Remote::default()));
+    let host = fixture.host().with_access(Arc::new(Access(remote.clone())));
+    let executable = "/missing/git-must-never-run".to_owned();
+    assert_eq!(complete(&host.submit(Operation::Setup(connection.clone()), executable.clone()).unwrap()).phase, Phase::Ready);
+    let first = save(&connection, "parts/bracket", "First", None);
+    let revision = first.record.id.clone();
+    let captured = published(
+        &host.submit(Operation::Save { connection: connection.clone(), save: Box::new(first), synchronize: true }, executable.clone()).unwrap(),
+    );
+    assert_eq!(captured.phase, Phase::SavedLocally);
+    assert!(captured.saved_locally);
+    remote.lock().unwrap().online = true;
+    let host = fixture.host().with_access(Arc::new(Access(remote.clone())));
+    for _ in 0..2 {
+        assert_eq!(published(&host.submit(Operation::Synchronize(connection.clone()), executable.clone()).unwrap()).phase, Phase::Synced);
+    }
+    assert_eq!(remote.lock().unwrap().commits.len(), 1);
+    let destination = Destination { connection: connection.id.clone(), project: "Robot".into(), file: "parts/bracket".into() };
+    let renamed = Destination { file: "parts/renamed".into(), ..destination.clone() };
+    let rename = published(
+        &host
+            .submit(
+                Operation::Manage {
+                    connection: connection.clone(),
+                    destination: destination.clone(),
+                    expected_revision: Some(revision),
+                    change: Change::Rename { file: renamed.file.clone() },
+                },
+                executable.clone(),
+            )
+            .unwrap(),
+    );
+    assert_eq!(rename.phase, Phase::Synced, "{rename:?}");
+    assert_eq!(rename.managed.len(), 1);
+    remote.lock().unwrap().online = false;
+    let deleted = published(
+        &host
+            .submit(
+                Operation::Manage {
+                    connection: connection.clone(),
+                    destination: renamed.clone(),
+                    expected_revision: rename.revision,
+                    change: Change::Delete,
+                },
+                executable.clone(),
+            )
+            .unwrap(),
+    );
+    assert_eq!(deleted.phase, Phase::SavedLocally);
+    remote.lock().unwrap().online = true;
+    let host = fixture.host().with_access(Arc::new(Access(remote.clone())));
+    assert_eq!(published(&host.submit(Operation::Synchronize(connection.clone()), executable.clone()).unwrap()).phase, Phase::Synced);
+    let trash = complete(&host.submit(Operation::Trash(connection.clone()), executable.clone()).unwrap());
+    assert_eq!(trash.result, Some(serde_json::json!([renamed.clone()])));
+    let restored = published(
+        &host
+            .submit(
+                Operation::Manage {
+                    connection: connection.clone(),
+                    destination: renamed.clone(),
+                    expected_revision: deleted.revision,
+                    change: Change::Restore { commit: format!("{:040x}", 1), file: destination.file },
+                },
+                executable.clone(),
+            )
+            .unwrap(),
+    );
+    assert_eq!(restored.phase, Phase::Synced, "{restored:?}");
+    let listed = complete(&host.submit(Operation::List(connection.clone()), executable).unwrap());
+    assert_eq!(listed.result, Some(serde_json::json!([renamed])));
+    assert!(fixture.outbox(&connection).pending().unwrap().is_empty());
+    assert!(connection.checkout.is_empty());
+}
+
+#[test]
 fn management_renames_trashes_restores_and_resumes_without_touching_other_work() {
     use solidcraft_cloud::{Destination, management::Change};
     let fixture = Fixture::new();

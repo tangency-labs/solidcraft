@@ -397,6 +397,38 @@ async fn run(operation: Operation, job: &Job) -> Result<()> {
 }
 
 impl Host for BrowserHost {
+    fn check_repository(&self, connection: Connection, input: solidcraft_cloud::jobs::RepositoryCheckInput) -> Result<Job> {
+        connection.validate()?;
+        if connection.provider != "github" {
+            return Err(storage("unsupported setup provider"));
+        }
+        let job = Job::new(connection.id.clone())?;
+        let worker = job.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let result = async {
+                let token = match input.token {
+                    Some(token) => Some(token),
+                    None => {
+                        solidcraft_cloud::jobs::RepositoryCheckInput::new(LocalSettings::open().await?.credential(&connection.credential).await?)?
+                            .token
+                    }
+                };
+                let client = crate::cloud_client::client_for_job(token.as_deref().map(|s| s.as_str()), Some(worker.clone()))
+                    .map_err(|_| storage("GitHub client unavailable"))?;
+                let exists = solidcraft_cloud::github::exists(client, &connection.repository).await?;
+                worker.update(|s| {
+                    s.result = Some(serde_json::json!({"exists":exists}));
+                    s.phase = Phase::Ready;
+                })
+            }
+            .await;
+            if let Err(error) = result {
+                let _ = worker.fail(error);
+            }
+        });
+        Ok(job)
+    }
+
     fn store_credential(&self, id: String, token: String) -> Result<Job> {
         solidcraft_cloud::setup::check_token(&token)?;
         let job = Job::new(String::new())?;

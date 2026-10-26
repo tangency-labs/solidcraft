@@ -90,9 +90,29 @@ pub enum Operation {
 pub trait Host: Send + Sync {
     fn submit(&self, operation: Operation, git_executable: String) -> Result<Job>;
 
+    /// Read-only setup check. Unsaved credentials stay outside JSON commands and storage.
+    fn check_repository(&self, _connection: Connection, _input: RepositoryCheckInput) -> Result<Job> {
+        Err(Error::Storage("repository checking is unavailable in this host".into()))
+    }
+
     /// Secret input is deliberately separate from serializable engine commands and logs.
     fn store_credential(&self, _id: String, _token: String) -> Result<Job> {
         Err(Error::Storage("credential storage is unavailable in this host".into()))
+    }
+}
+
+#[derive(Default)]
+pub struct RepositoryCheckInput {
+    pub token: Option<zeroize::Zeroizing<String>>,
+}
+
+impl RepositoryCheckInput {
+    pub fn new(token: Option<String>) -> Result<Self> {
+        let token = token.map(zeroize::Zeroizing::new);
+        if let Some(token) = &token {
+            crate::setup::check_token(token)?;
+        }
+        Ok(Self { token })
     }
 }
 

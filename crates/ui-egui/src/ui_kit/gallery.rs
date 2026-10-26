@@ -1203,6 +1203,9 @@ const ELEMENTS: &[Element] = &[
     element!("cell_editor", |ui, s| {
         cell_editor(ui, ui.id().with("cell"), &mut s.value, "Expression", true);
     }),
+    element!("checked_cell_editor", |ui, s| {
+        checked_cell_editor(ui, ui.id().with("checked_cell"), &mut s.value, "Repository", 128, Some(InputStatus::Checking("Testing…")));
+    }),
     element!("color_field", |ui, _| {
         color_field(ui, &mut [120, 150, 180]);
     }),
