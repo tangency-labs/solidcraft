@@ -105,7 +105,7 @@ and the web-offline gate still follows a successful native/Wasm/doc run.
 The backend keeps Cargo and binary metadata under `target/xtask-nextest/` and reuses it for the
 native run, freeing Cargo to run the side gates. Nextest prints each test's result and duration
 as it finishes. `SOLIDCRAFT_TEST_RUNNER=libtest` (or leaving it unset) retains the original runner;
-`cargo xtask test` and its Cargo/libtest argument forwarding are unchanged. Unknown runner names
+`cargo xtask test` and its Cargo/libtest argument forwarding do not depend on this setting. Unknown runner names
 fail explicitly.
 
 ## CI sharding and heavy tests

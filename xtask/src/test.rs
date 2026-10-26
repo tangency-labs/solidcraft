@@ -26,7 +26,14 @@ fn nightly_only(pkg: &str, kind: &str, name: &str) -> bool {
 
 /// The nextest filter that leaves out [`NIGHTLY_ONLY`], the one ci.yml uses on pushes to `main`.
 pub fn without_nightly_only() -> String {
-    NIGHTLY_ONLY.iter().map(|(pkg, name)| format!("not (package(solidcraft-{pkg}) & binary({name}))")).collect::<Vec<_>>().join(" & ")
+    filter_without(NIGHTLY_ONLY)
+}
+
+fn filter_without(skip: &[(&str, &str)]) -> String {
+    if skip.is_empty() {
+        return "all()".into();
+    }
+    skip.iter().map(|(pkg, name)| format!("not (package(solidcraft-{pkg}) & binary({name}))")).collect::<Vec<_>>().join(" & ")
 }
 
 /// A test executable from `cargo test --no-run`.
@@ -48,6 +55,9 @@ pub fn run(cargo_args: &[&str], test_args: &[&str], property_tests: bool, side: 
     let (bins, skipped): (Vec<TestBin>, Vec<TestBin>) = build(cargo_args)?.into_iter().partition(|b| property_tests || !b.nightly_only);
     for b in &skipped {
         println!("skip  {:<44}          nightly-only property tests, as in CI; --property-tests runs them", b.label);
+    }
+    if bins.is_empty() {
+        return Err("every selected test binary is a nightly-only property test; add --property-tests to run them".into());
     }
     let start = Instant::now();
     let side_count = side.len();
@@ -199,7 +209,9 @@ pub fn doc_tests(cargo_args: &[&str], test_args: &[&str]) -> (String, Command) {
 
 #[cfg(test)]
 mod tests {
-    use super::{NIGHTLY_ONLY, TestBin, binary_command, budget_env, job_limit, nightly_only, run_bounded, thread_split, without_nightly_only};
+    use super::{
+        NIGHTLY_ONLY, TestBin, binary_command, budget_env, filter_without, job_limit, nightly_only, run_bounded, thread_split, without_nightly_only,
+    };
     use std::ffi::OsStr;
     use std::path::Path;
     use std::sync::Barrier;
@@ -335,6 +347,11 @@ mod tests {
         assert!(!nightly_only("engine", "test", "boolean_props"));
         assert!(!nightly_only("engine", "test", "atomic_commands"));
         assert_eq!(without_nightly_only(), "not (package(solidcraft-kernel) & binary(boolean_props))");
+        assert_eq!(filter_without(&[]), "all()");
+        assert_eq!(
+            filter_without(&[("kernel", "a"), ("engine", "b")]),
+            "not (package(solidcraft-kernel) & binary(a)) & not (package(solidcraft-engine) & binary(b))"
+        );
     }
 
     /// The local gate leaves out exactly what CI leaves out of pull requests and pushes to `main`,
@@ -350,7 +367,7 @@ mod tests {
             assert!(crate::root().join(format!("crates/{pkg}/tests/{name}.rs")).is_file(), "no test target {name} in crates/{pkg}");
             let filter = format!("package(solidcraft-{pkg}) & binary({name})");
             assert!(nextest.contains(&format!("({filter})")), ".config/nextest.toml's default-filter does not skip {filter}");
+            assert!(ci.contains(&format!("not ({filter})")), "ci.yml's push-to-main filter does not skip {filter}");
         }
-        assert!(ci.contains(&format!("base='{}'", without_nightly_only())), "ci.yml's push-to-main filter is not {}", without_nightly_only());
     }
 }

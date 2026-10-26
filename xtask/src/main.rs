@@ -117,9 +117,10 @@ fn main() -> ExitCode {
         Some("lists") => lists::run(&root(), rest.contains(&"--fix")),
         Some("test") => {
             let (cargo_args, test_args) = rest.iter().position(|a| *a == "--").map_or((&rest[..], &[][..]), |i| (&rest[..i], &rest[i + 1..]));
-            let property_tests = cargo_args.contains(&"--property-tests");
+            let property_tests = rest.contains(&"--property-tests");
             let cargo_args: Vec<&str> = cargo_args.iter().copied().filter(|a| *a != "--property-tests").collect();
-            test::run(&cargo_args, test_args, property_tests, vec![test::doc_tests(&cargo_args, test_args)])
+            let test_args: Vec<&str> = test_args.iter().copied().filter(|a| *a != "--property-tests").collect();
+            test::run(&cargo_args, &test_args, property_tests, vec![test::doc_tests(&cargo_args, &test_args)])
         }
         Some("ci") => cmd_ci(),
         Some("wasm") => cmd_wasm(),
