@@ -93,6 +93,7 @@ mod plastic;
 mod print_face;
 mod render;
 mod render_ui;
+mod reverse;
 #[cfg(test)]
 mod script_tests;
 mod sheet;
@@ -369,6 +370,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(diagnostics::COMMANDS.iter());
     v.extend(render::COMMANDS.iter());
     v.extend(render_ui::COMMANDS.iter());
+    v.extend(reverse::COMMANDS.iter());
     v
 }
 
