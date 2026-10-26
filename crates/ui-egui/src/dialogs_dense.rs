@@ -527,7 +527,6 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             if opts.tapped {
                 enter |= crate::dialogs_thread::hole_rows(ui, &app.session.doc, &mut opts.thread, &mut opts.custom_thread);
                 ui_kit::checkbox_grid(ui, &mut [("Full thread depth", &mut opts.thread_full_depth)], 1);
-                crate::dialogs_thread::handedness_row(ui, &mut opts.handedness, "hole_handedness");
             }
             // Through all, the tip lies past the part.
             if !opts.all {

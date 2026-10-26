@@ -880,8 +880,7 @@ fn a_face_place_snaps_to_the_points_of_shown_geometry_only() {
 }
 
 #[test]
-fn combined_recessed_point_presets_keep_left_partial_across_units_and_legacy_defaults() {
-    use solidcraft_engine::doc::ThreadHandedness;
+fn combined_recessed_point_presets_keep_partial_depth_across_units_and_legacy_defaults() {
     for recessed in [1, 2] {
         let mut h = personal_preset_harness();
         if let Kind::Hole { diameter, kind, opts, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
@@ -891,14 +890,12 @@ fn combined_recessed_point_presets_keep_left_partial_across_units_and_legacy_def
             opts.tip_angle = "118 deg".into();
             opts.tapped = true;
             opts.thread = "M8x1.2".into();
-            opts.handedness = ThreadHandedness::Left;
             opts.thread_full_depth = false;
             opts.thread_depth = "5".into();
         }
         save_preset(&mut h, "Combined point");
         let stored = serde_json::to_value(&h.app.preferences.hole_presets).unwrap();
         assert_eq!(stored[0]["angled_bottom"], true);
-        assert_eq!(stored[0]["thread_options"]["handedness"], "left");
         assert_eq!(stored[0]["thread_options"]["depth"], "5 mm");
         h.app.preferences.hole_presets = serde_json::from_value(stored.clone()).unwrap();
         h.app.session.doc_mut().units = "in".into();
@@ -906,18 +903,17 @@ fn combined_recessed_point_presets_keep_left_partial_across_units_and_legacy_def
         if let Kind::Hole { kind, opts, .. } = &mut h.app.dialog.as_mut().unwrap().kind {
             *kind = 0;
             opts.angled = false;
-            opts.handedness = ThreadHandedness::Right;
             opts.thread_full_depth = true;
         }
         let before = h.app.session.doc.to_json();
         choose_preset(&mut h, "Combined point");
         assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Hole {kind,opts,..}
-            if *kind==recessed && opts.angled && opts.tip_angle=="118 deg" && opts.handedness==ThreadHandedness::Left
+            if *kind==recessed && opts.angled && opts.tip_angle=="118 deg"
             && !opts.thread_full_depth && opts.thread_depth=="5 mm" && opts.thread=="M8x1.2"
             && opts.custom_thread.as_ref().is_none_or(|draft| draft.error.is_none())));
         assert_eq!(h.app.session.doc.to_json(), before, "automatic recall only changes the form");
         assert!((h.app.session.doc.eval("5 mm", solidcraft_engine::doc::expr::Kind::Length).unwrap() - 5.0).abs() < 1e-9);
-        // Old recessed presets omit the additive fields: flat, Right and Full remain their defaults.
+        // Old recessed presets omit the additive fields: flat and Full remain their defaults.
         choose_preset(&mut h, "Select a preset");
         let mut legacy = stored.clone();
         legacy[0].as_object_mut().unwrap().remove("angled_bottom");
@@ -925,7 +921,7 @@ fn combined_recessed_point_presets_keep_left_partial_across_units_and_legacy_def
         h.app.preferences.hole_presets = serde_json::from_value(legacy).unwrap();
         choose_preset(&mut h, "Combined point");
         assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Hole {kind,opts,..}
-            if *kind==recessed && !opts.angled && opts.handedness==ThreadHandedness::Right && opts.thread_full_depth));
+            if *kind==recessed && !opts.angled && opts.thread_full_depth));
         choose_preset(&mut h, "Select a preset");
         let mut future = stored;
         future[0]["thread_options"]["starts"] = json!(2);
@@ -998,7 +994,6 @@ fn hole_presets_dirty_overwrite_keeps_name_and_all_pointed_left_partial_paramete
         opts.angled = true;
         opts.tapped = true;
         opts.thread = "M8".into();
-        opts.handedness = solidcraft_engine::doc::ThreadHandedness::Left;
         opts.thread_full_depth = false;
         opts.thread_depth = "5 mm".into();
     }
@@ -1011,7 +1006,6 @@ fn hole_presets_dirty_overwrite_keeps_name_and_all_pointed_left_partial_paramete
     assert_eq!(saved[0]["name"], "Workshop");
     assert_eq!(saved[0]["depth"], "13 mm");
     assert_eq!(saved[0]["angled_bottom"], true);
-    assert_eq!(saved[0]["thread_options"]["handedness"], "left");
     assert_eq!(saved[0]["thread_options"]["depth"], "5 mm");
     assert!(!preset_dirty_save_enabled(&h));
     h.step(&json!({"expect":{"hidden_handles":["dialog:hole_presets.name"],"not_shown":"* Workshop"}})).unwrap();

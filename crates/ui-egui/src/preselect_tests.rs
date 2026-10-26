@@ -1310,58 +1310,6 @@ fn thread_size_suggestion_can_be_cleared_and_edited_in_the_dialog() {
 }
 
 #[test]
-fn thread_handedness_choices_create_edit_and_restore_the_saved_direction() {
-    use solidcraft_engine::doc::{FeatureKind, ThreadHandedness};
-    let mut h = crate::scenario::Harness::new();
-    h.app.run("solid.cylinder", json!({"radius":3,"height":6})).unwrap();
-    h.app.session.selection = vec![thread_face(&h.app, "Body1")];
-    h.step(&json!({"start":"solid.thread"})).unwrap();
-    h.frames(2);
-    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, crate::dialogs::Kind::Thread { handedness: ThreadHandedness::Right, .. }));
-    h.step(&json!({"click":{"handle":"dialog:thread.direction"}})).unwrap();
-    h.step(&json!({"click":{"handle":"dialog:thread.direction:thread.left_hand"}})).unwrap();
-    let command = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
-    assert_eq!(command[0].1["handedness"], "left");
-    h.step(&json!({"widget":"OK"})).unwrap();
-    let id = h.app.session.doc.features.last().unwrap().id;
-    h.call("ui.editFeature", json!({"feature":id}));
-    h.frames(2);
-    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, crate::dialogs::Kind::Thread { handedness: ThreadHandedness::Left, .. }));
-    h.step(&json!({"click":{"handle":"dialog:thread.direction"}})).unwrap();
-    h.step(&json!({"click":{"handle":"dialog:thread.direction:thread.right_hand"}})).unwrap();
-    h.step(&json!({"widget":"OK"})).unwrap();
-    assert!(matches!(&h.app.session.doc.feature(id).unwrap().kind, FeatureKind::Thread { handedness: ThreadHandedness::Right, .. }));
-    assert_eq!(h.app.session.model.state().threads[0].handedness, ThreadHandedness::Right);
-}
-
-#[test]
-fn thread_handedness_tapped_hole_edit_retains_and_changes_direction() {
-    use solidcraft_engine::doc::{FeatureKind, ThreadHandedness};
-    let mut h = crate::scenario::Harness::new();
-    h.app.run("solid.box", json!({"length":20,"width":20,"height":10})).unwrap();
-    let id =
-        h.app.run("solid.hole", json!({"position":[10,10,10],"thread":"M6","depth":6,"thread_depth":"3 mm","handedness":"left"})).unwrap()["feature"]
-            .as_u64()
-            .unwrap();
-    h.call("ui.editFeature", json!({"feature":id}));
-    h.frames(2);
-    assert!(
-        matches!(&h.app.dialog.as_ref().unwrap().kind, crate::dialogs::Kind::Hole { opts, .. } if opts.handedness == ThreadHandedness::Left && !opts.thread_full_depth && opts.thread_depth == "3 mm")
-    );
-    h.step(&json!({"click":{"handle":"dialog:thread.direction"}})).unwrap();
-    h.step(&json!({"click":{"handle":"dialog:thread.direction:thread.right_hand"}})).unwrap();
-    let command = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
-    assert_eq!(command[0].0, "timeline.redefine");
-    assert_eq!(command[0].1["command"], "solid.hole");
-    assert_eq!(command[0].1["params"]["thread_depth"], "3 mm", "editing direction must retain the independent thread depth");
-    h.step(&json!({"widget":"OK"})).unwrap();
-    assert!(matches!(&h.app.session.doc.feature(id).unwrap().kind, FeatureKind::Hole { handedness: ThreadHandedness::Right, .. }));
-    let state = h.app.session.model.state();
-    assert_eq!(state.threads[0].handedness, ThreadHandedness::Right);
-    assert!((state.threads[0].end - state.threads[0].start - 3.0).abs() < 1e-8);
-}
-
-#[test]
 fn modeled_thread_survives_timeline_double_click_and_ok() {
     for (analytic_pick, change_length) in [(false, false), (false, true), (true, false), (true, true)] {
         let mut h = crate::scenario::Harness::new();
