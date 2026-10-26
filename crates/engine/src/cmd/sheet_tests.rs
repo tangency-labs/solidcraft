@@ -1640,6 +1640,46 @@ fn plate_with_a_cut(s: &mut Session, cut: [[f64; 2]; 2]) {
     run(s, "solid.extrude", json!({"sketch": "Cut", "through_all": true, "direction": "symmetric", "operation": "cut"}));
 }
 
+/// A flange picked on the edge inside a notch is on that edge (#5306): the notch's bottom (y 30,
+/// x 80 … 120) bends 90° up, inside (setback 3), its outer face on the edge (y 30 … 32), the base
+/// set back under it; the plate's outer edge beside the notch keeps no flange. An edge of a hole
+/// (a cut-out inside the plate) is refused, not taken for the outline's nearest edge.
+#[test]
+fn an_edge_flange_picked_inside_a_notch_is_on_the_notchs_edge() {
+    let mut s = Session::default();
+    plate_with_a_cut(&mut s, [[80.0, -10.0], [120.0, 30.0]]);
+    run(&mut s, "sheet.flange", json!({"edges": [[100, 30, 2]], "height": 40, "angle": 90, "position": "inside"}));
+    let f = flat(&mut s);
+    let bends = f["bends"].as_array().cloned().unwrap_or_default();
+    let span = |b: &Value| {
+        let (x0, x1) = (b["start"][0].as_f64().unwrap_or(f64::NAN), b["end"][0].as_f64().unwrap_or(f64::NAN));
+        (x0.min(x1), x0.max(x1), b["start"][1].as_f64().unwrap_or(f64::NAN))
+    };
+    assert_eq!(bends.len(), 1, "{f}");
+    let (lo, hi, y) = span(&bends[0]);
+    assert!((lo - 80.0).abs() < 1e-9 && (hi - 120.0).abs() < 1e-9 && y > 30.0, "{f}");
+    assert_eq!(f["outline"].as_array().map(Vec::len), Some(1), "{f}");
+    for (p, inside) in [
+        ([100.0, 31.0, 20.0], true),
+        ([100.0, 30.5, 0.5], false),
+        ([100.0, 34.0, 1.0], true),
+        ([40.0, 1.0, 20.0], false),
+        ([160.0, 1.0, 20.0], false),
+        ([40.0, 0.2, 0.2], true),
+    ] {
+        assert_eq!(contains(&s, p), inside, "{p:?}");
+    }
+    let state = s.model.state();
+    let body = &state.bodies[0].body;
+    assert!(body.validity().is_empty() && body.shell_count() == 1);
+    drop(state);
+
+    let mut s = Session::default();
+    plate_with_a_cut(&mut s, [[80.0, 30.0], [120.0, 60.0]]);
+    let error = s.execute("sheet.flange", &json!({"edges": [[100, 30, 2]], "height": 40, "angle": 90})).unwrap_err().to_string();
+    assert!(error.contains("not supported yet: a flange on the edge of a hole"), "{error}");
+}
+
 #[test]
 fn edge_flanges_on_either_side_of_a_notch_span_the_side_they_were_picked_on() {
     // A notch 40 wide and 30 deep in the middle of the bottom edge leaves x 0 … 80 and 120 … 200 of
