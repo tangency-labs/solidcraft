@@ -424,6 +424,17 @@ pub(super) enum OpIn {
     CloseLoop {
         v: Hin,
     },
+    /// A marker, dropped by the resolver: later `FaceFace` ops (with no input
+    /// vertices) may follow a `VertexFace` or `EdgeFace` op, taking only face handles
+    /// (faces keep their handles through those edits; edges and vertices do not).
+    /// Existing cases never carry it, so their resolution is unchanged.
+    ChainFaces,
+    /// `pBrep->m_bEditingEnabled = enable` on the intersector's B-rep `which` (0 or 1),
+    /// which `IntersectTopology` sets around its stages and the edits need (shim op 34).
+    SetEditing {
+        which: u8,
+        enable: bool,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1056,6 +1067,7 @@ impl ClassGeometry<H> for Two {
             K_FACE => EntityRef::Face(fid(o)),
             K_LOOP => EntityRef::Loop(LoopId::from_index(o.i)),
             K_EDGEUSE => EntityRef::Edgeuse(EdgeuseId::from_index(o.i)),
+            K_VERTEXUSE => EntityRef::Vertexuse(VertexuseId::from_index(o.i)),
             _ => return None,
         };
         Some((b, e))
@@ -2558,6 +2570,8 @@ fn resolve(
     let mut curves = 0usize;
     let mut has_mgr = false;
     let mut mutated = false;
+    let mut chain = false;
+    let mut soft = false;
     // the intersector's B-reps (the FFI's `have_breps`)
     let mut have_breps = [true, c.breps[1].is_some()];
     let mut closed = false;
@@ -2594,13 +2608,19 @@ fn resolve(
                 | OpIn::ShellVerts { .. }
                 | OpIn::WireLamina { .. }
                 | OpIn::MgrNew { .. }
+                | OpIn::SetEditing { .. }
                 | OpIn::CommonEdges
                 | OpIn::CommonVertices
                 | OpIn::IntersectTopo
                 | OpIn::SetRels
                 | OpIn::Iir
         );
-        if mutated && takes_handles {
+        if matches!(op, OpIn::ChainFaces) {
+            chain = true;
+            continue;
+        }
+        let face_only = matches!(op, OpIn::FaceFace { verts, .. } if verts.is_empty());
+        if (mutated || (soft && !face_only)) && takes_handles {
             return Err(fail("after_mutation"));
         }
         // part 2: what the FFI refuses
@@ -2869,6 +2889,12 @@ fn resolve(
                 }
                 op.clone()
             }
+            OpIn::SetEditing { which, .. } => {
+                if *which > 1 || (*which == 1 && c.breps[1].is_none()) {
+                    return Err(fail("brep"));
+                }
+                op.clone()
+            }
             OpIn::MgrNew { .. } => {
                 if has_mgr || c.breps[1].is_none() {
                     return Err(fail("manager"));
@@ -2940,6 +2966,8 @@ fn resolve(
             OpIn::CloseLoop { v } => OpIn::CloseLoop {
                 v: hk(*v, &[K_VERTEX], true)?,
             },
+            // handled above (never reaches here)
+            OpIn::ChainFaces => continue,
         };
         if matches!(
             r,
@@ -2958,7 +2986,11 @@ fn resolve(
                 | OpIn::EdgeFaceCoin { .. }
                 | OpIn::CloseLoop { .. }
         ) {
-            mutated = true;
+            if chain && !mutated && matches!(r, OpIn::VertexFace { .. } | OpIn::EdgeFace { .. }) {
+                soft = true;
+            } else {
+                mutated = true;
+            }
         }
         out.push(ROp { op: r });
     }
@@ -3247,6 +3279,9 @@ fn encode(i: &Inputs, ops: &[ROp]) -> Result<Vec<f64>, HarnessError> {
                 capture,
                 override_tol,
             } => v.extend([33.0, *capture, *override_tol]),
+            OpIn::SetEditing { which, enable } => {
+                v.extend([34.0, f64::from(*which), flag(*enable)]);
+            }
             OpIn::RemoveRel { a, b } => {
                 v.push(41.0);
                 push_h(&mut v, *a);
@@ -3307,6 +3342,8 @@ fn encode(i: &Inputs, ops: &[ROp]) -> Result<Vec<f64>, HarnessError> {
                 v.push(52.0);
                 push_h(&mut v, *bv);
             }
+            // dropped by the resolver
+            OpIn::ChainFaces => {}
         }
     }
     Ok(v)
@@ -3925,6 +3962,10 @@ fn run_rust_script(i: &Inputs, p: Prepared) -> Result<(Vec<f64>, Vec<usize>), Fa
                 put_hs(&mut o, &r.deleted_faces);
                 o.push(r.max_gap);
                 o.push(r.min_unstitched);
+            }
+            OpIn::SetEditing { which, enable } => {
+                o.push(34.0);
+                two.set_editing_enabled(brep_h(i8::try_from(*which).unwrap_or(0)), *enable)?;
             }
             OpIn::MgrNew {
                 capture,
@@ -5536,6 +5577,92 @@ fn edge_cases() -> Vec<(String, Value)> {
             },
         );
     }
+    // Crossing faces: the intersection edge is inserted inside each face
+    // (`SmBrep::MakeEdgeInFace`), appended after the cases above.
+    let plane = |o: [f64; 3], n: [f64; 3], dom: [f64; 4]| BrepIn::Face {
+        surface: SrfIn::Plane { o, n },
+        dom,
+    };
+    let cross = |name: &str,
+                 a: BrepIn,
+                 b: BrepIn,
+                 approx: f64,
+                 tail: Vec<OpIn>,
+                 add: &mut dyn FnMut(&str, Inputs)| {
+        let mut ops = vec![OpIn::FaceFace {
+            verts: vec![],
+            faces1: vec![f(0, 0)],
+            faces2: vec![f(1, 0)],
+            ignore: false,
+            nesting: false,
+        }];
+        ops.extend(tail);
+        add(
+            name,
+            Inputs {
+                brep_a: a,
+                brep_b: Some(b),
+                ctor: 0,
+                approx,
+                ang: 0.1,
+                ops,
+            },
+        );
+    };
+    let xy = [-1.0, -1.0, 1.0, 1.0];
+    for (name, na, nb, da, db) in [
+        (
+            "cross_planes_perpendicular",
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0],
+            xy,
+            xy,
+        ),
+        (
+            "cross_planes_tilted",
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 1.0],
+            xy,
+            xy,
+        ),
+        (
+            "cross_planes_partial_overlap",
+            [0.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0],
+            [-1.0, -1.0, 1.0, 1.0],
+            [-3.0, -1.0, 0.5, 1.0],
+        ),
+        (
+            "cross_planes_one_wide",
+            [0.0, 0.0, 1.0],
+            [1.0, 1.0, 0.0],
+            [-3.0, -3.0, 3.0, 3.0],
+            [-0.5, -1.0, 0.5, 1.0],
+        ),
+    ] {
+        for (suffix, tail) in [
+            ("", vec![]),
+            ("_resolve", vec![OpIn::Resolve, OpIn::Imprint]),
+        ] {
+            cross(
+                &format!("{name}{suffix}"),
+                plane([0.0, 0.0, 0.0], na, da),
+                plane([0.0, 0.0, 0.0], nb, db),
+                1e-5,
+                tail,
+                &mut add,
+            );
+        }
+    }
+    // A plane through a B-spline surface and a file face.
+    cross(
+        "cross_plane_file_sphere",
+        plane([0.0, 0.0, 0.0], [0.0, 0.0, 1.0], [-3.0, -3.0, 3.0, 3.0]),
+        file("sphere.smb"),
+        1e-5,
+        vec![],
+        &mut add,
+    );
     out
 }
 
