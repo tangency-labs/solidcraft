@@ -1,6 +1,6 @@
 //! Parameter expressions: `2 * width + 5 mm`, `angle / 2`, `sqrt(a^2 + b^2)`, `atan2(h; w)`.
 //!
-//! Values carry a simple dimension (powers of length and angle). Lengths are millimetres and
+//! Values carry a simple dimension (powers of length, angle and mass). Lengths are millimetres and
 //! angles radians internally. A unit-less number added to a dimensioned value takes that value's
 //! unit: the parameter's own unit when it has one (`width + 5` adds 5 in for an inch
 //! parameter), else millimetres and degrees. A unit-less final result takes the expected unit
@@ -113,6 +113,9 @@ pub enum Kind {
 }
 
 impl Kind {
+    /// Every kind there is.
+    const ALL: [Kind; 3] = [Kind::Length, Kind::Angle, Kind::Unitless];
+
     pub fn from_unit(u: &str) -> Kind {
         unit_info(u).map(|(k, _)| k).unwrap_or(Kind::Length)
     }
@@ -123,6 +126,18 @@ impl Kind {
             Kind::Angle => "deg",
             Kind::Unitless => "",
         }
+    }
+    /// The powers of length, angle and mass of a value of this kind.
+    fn dims(self) -> Dims {
+        match self {
+            Kind::Length => [1, 0, 0],
+            Kind::Angle => [0, 1, 0],
+            Kind::Unitless => [0, 0, 0],
+        }
+    }
+    /// The kind of a value with these powers, if it is of one (a length times an angle is not).
+    fn of_dims(dims: Dims) -> Option<Kind> {
+        Kind::ALL.into_iter().find(|k| k.dims() == dims)
     }
 }
 
@@ -218,35 +233,52 @@ impl Defaults {
     }
 }
 
+/// A value's powers of length, angle and mass, in that order (`[-3, 0, 1]` is a density).
+type Dims = [i8; 3];
+
+/// The names of the powers, in [`Dims`] order.
+const POWERS: [&str; 3] = ["length", "angle", "mass"];
+
 /// A dimensioned value.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Value {
     pub v: f64,
     pub len: i8,
     pub ang: i8,
+    pub mass: i8,
 }
 
 impl Value {
     pub fn num(v: f64) -> Value {
-        Value { v, len: 0, ang: 0 }
+        Value { v, len: 0, ang: 0, mass: 0 }
     }
     pub fn length(mm: f64) -> Value {
-        Value { v: mm, len: 1, ang: 0 }
+        Value { v: mm, len: 1, ang: 0, mass: 0 }
     }
     pub fn angle(rad: f64) -> Value {
-        Value { v: rad, len: 0, ang: 1 }
+        Value { v: rad, len: 0, ang: 1, mass: 0 }
+    }
+    pub fn mass(g: f64) -> Value {
+        Value { v: g, len: 0, ang: 0, mass: 1 }
+    }
+    /// The value's powers. Units are compared through these alone, so a later power is one more
+    /// field here.
+    fn dims(&self) -> Dims {
+        [self.len, self.ang, self.mass]
+    }
+    fn same_dims(&self, other: &Value) -> bool {
+        self.dims() == other.dims()
+    }
+    /// A number with these powers.
+    fn with_dims(v: f64, [len, ang, mass]: Dims) -> Value {
+        Value { v, len, ang, mass }
     }
     pub fn unitless(&self) -> bool {
-        self.len == 0 && self.ang == 0
+        self.dims() == [0; 3]
     }
     /// The value's kind, if it is a plain length, angle or number.
     pub fn kind(&self) -> Option<Kind> {
-        match (self.len, self.ang) {
-            (0, 0) => Some(Kind::Unitless),
-            (1, 0) => Some(Kind::Length),
-            (0, 1) => Some(Kind::Angle),
-            _ => None,
-        }
+        Kind::of_dims(self.dims())
     }
     /// Convert to the expected kind (mm or radians); unit-less numbers are mm / degrees.
     pub fn to_kind(self, k: Kind) -> Result<f64, DocError> {
@@ -255,11 +287,9 @@ impl Value {
     /// Convert to the expected kind, reading a unit-less result in the given defaults.
     pub fn to_kind_in(self, k: Kind, d: Defaults) -> Result<f64, DocError> {
         let out = match k {
-            Kind::Length if self.len == 1 && self.ang == 0 => self.v,
+            _ if self.kind() == Some(k) => self.v,
             Kind::Length if self.unitless() => self.v * d.len,
-            Kind::Angle if self.ang == 1 && self.len == 0 => self.v,
             Kind::Angle if self.unitless() => self.v * d.ang,
-            Kind::Unitless if self.unitless() => self.v,
             _ => {
                 let hint = if k == Kind::Unitless && self.len == 1 && self.ang == 0 {
                     " (a count needs a unit-less value: divide by a length, e.g. `floor(L / (210 mm))`)"
@@ -271,7 +301,7 @@ impl Value {
         };
         if out.is_finite() { Ok(out) } else { Err(DocError::Expr("result is not a finite number".into())) }
     }
-    /// "a length", "an angle", "length²"…
+    /// "a length", "an angle", "a value in length^-3·mass"…
     pub fn describe(&self) -> String {
         match self.kind() {
             Some(k) => kind_word(k).to_string(),
@@ -281,7 +311,7 @@ impl Value {
                     1 => name.to_string(),
                     _ => format!("{name}^{n}"),
                 };
-                let parts: Vec<String> = [pow("length", self.len), pow("angle", self.ang)].into_iter().filter(|s| !s.is_empty()).collect();
+                let parts: Vec<String> = POWERS.into_iter().zip(self.dims()).map(|(name, n)| pow(name, n)).filter(|s| !s.is_empty()).collect();
                 format!("a value in {}", parts.join("·"))
             }
         }
@@ -825,57 +855,55 @@ impl Parser<'_> {
     }
 }
 
-/// A unit-less number next to a dimensioned value, in that value's default unit.
-fn scale_bare(x: Value, len: i8, ang: i8, d: Defaults) -> f64 {
-    if !x.unitless() {
-        x.v
-    } else if len == 1 && ang == 0 {
-        x.v * d.len
-    } else if ang == 1 && len == 0 {
-        x.v * d.ang
-    } else {
-        x.v
+/// A unit-less number next to a value with these powers, in that value's default unit.
+fn scale_bare(x: Value, dims: Dims, d: Defaults) -> f64 {
+    match Kind::of_dims(dims) {
+        Some(Kind::Length) if x.unitless() => x.v * d.len,
+        Some(Kind::Angle) if x.unitless() => x.v * d.ang,
+        _ => x.v,
     }
 }
 
 fn add(a: Value, b: Value, sub: bool, d: Defaults) -> Result<Value, DocError> {
-    let (len, ang) = if a.unitless() {
-        (b.len, b.ang)
-    } else if b.unitless() || (a.len == b.len && a.ang == b.ang) {
-        (a.len, a.ang)
+    let dims = if a.unitless() {
+        b.dims()
+    } else if b.unitless() || a.same_dims(&b) {
+        a.dims()
     } else {
         return Err(DocError::Expr(format!("cannot {} {} and {}", if sub { "subtract" } else { "add" }, a.describe(), b.describe())));
     };
-    let (x, y) = (scale_bare(a, len, ang, d), scale_bare(b, len, ang, d));
-    Ok(Value { v: if sub { x - y } else { x + y }, len, ang })
+    let (x, y) = (scale_bare(a, dims, d), scale_bare(b, dims, d));
+    Ok(Value::with_dims(if sub { x - y } else { x + y }, dims))
 }
 
-fn dims(a: i8, b: i8, sub: bool) -> Result<i8, DocError> {
-    let r = if sub { a.checked_sub(b) } else { a.checked_add(b) };
-    r.filter(|x| x.abs() <= 16).ok_or_else(|| DocError::Expr("unit powers too large".into()))
+/// Unit powers combined power by power with `f`, each within ±16 (checked as a range: `abs` of
+/// -128, which 16 × -8 makes, overflows).
+fn combine(a: Dims, b: Dims, f: impl Fn(i8, i8) -> Option<i8>) -> Result<Dims, DocError> {
+    let mut out = [0; 3];
+    for (o, (x, y)) in out.iter_mut().zip(a.into_iter().zip(b)) {
+        *o = f(x, y).filter(|p| (-16..=16).contains(p)).ok_or_else(|| DocError::Expr("unit powers too large".into()))?;
+    }
+    Ok(out)
 }
 
 fn mul(a: Value, b: Value, div: bool) -> Result<Value, DocError> {
-    if div {
-        if b.v == 0.0 {
-            return Err(DocError::Expr("division by zero".into()));
-        }
-        Ok(Value { v: a.v / b.v, len: dims(a.len, b.len, true)?, ang: dims(a.ang, b.ang, true)? })
-    } else {
-        Ok(Value { v: a.v * b.v, len: dims(a.len, b.len, false)?, ang: dims(a.ang, b.ang, false)? })
+    if div && b.v == 0.0 {
+        return Err(DocError::Expr("division by zero".into()));
     }
+    let dims = combine(a.dims(), b.dims(), |x, y| if div { x.checked_sub(y) } else { x.checked_add(y) })?;
+    Ok(Value::with_dims(if div { a.v / b.v } else { a.v * b.v }, dims))
 }
 
 fn modulo(a: Value, b: Value, d: Defaults) -> Result<Value, DocError> {
-    let (len, ang) = if a.unitless() { (b.len, b.ang) } else { (a.len, a.ang) };
-    if !(a.unitless() || b.unitless() || (a.len == b.len && a.ang == b.ang)) {
+    let dims = if a.unitless() { b.dims() } else { a.dims() };
+    if !(a.unitless() || b.unitless() || a.same_dims(&b)) {
         return Err(DocError::Expr(format!("cannot take {} modulo {}", a.describe(), b.describe())));
     }
-    let (x, y) = (scale_bare(a, len, ang, d), scale_bare(b, len, ang, d));
+    let (x, y) = (scale_bare(a, dims, d), scale_bare(b, dims, d));
     if y == 0.0 {
         return Err(DocError::Expr("modulo by zero".into()));
     }
-    Ok(Value { v: x.rem_euclid(y), len, ang })
+    Ok(Value::with_dims(x.rem_euclid(y), dims))
 }
 
 fn pow(base: Value, e: Value) -> Result<Value, DocError> {
@@ -887,7 +915,7 @@ fn pow(base: Value, e: Value) -> Result<Value, DocError> {
     if !base.unitless() && k == 0 {
         return Err(DocError::Expr("a value with units needs a small whole-number exponent".into()));
     }
-    Ok(Value { v: base.v.powf(n), len: dims(0, base.len.saturating_mul(k), false)?, ang: dims(0, base.ang.saturating_mul(k), false)? })
+    Ok(Value::with_dims(base.v.powf(n), combine(base.dims(), [k; 3], i8::checked_mul)?))
 }
 
 fn call(f: &str, args: &[Value], d: Defaults) -> Result<Value, DocError> {
@@ -899,14 +927,10 @@ fn call(f: &str, args: &[Value], d: Defaults) -> Result<Value, DocError> {
         [a, b] => Ok((*a, *b)),
         _ => Err(DocError::Expr(format!("`{f}` takes two arguments"))),
     };
-    let rad = |a: Value| {
-        if a.ang == 1 && a.len == 0 {
-            Ok(a.v)
-        } else if a.unitless() {
-            Ok(a.v * d.ang)
-        } else {
-            Err(DocError::Expr(format!("`{f}` needs an angle, not {}", a.describe())))
-        }
+    let rad = |a: Value| match a.kind() {
+        Some(Kind::Angle) => Ok(a.v),
+        Some(Kind::Unitless) => Ok(a.v * d.ang),
+        _ => Err(DocError::Expr(format!("`{f}` needs an angle, not {}", a.describe()))),
     };
     let num = |a: Value| if a.unitless() { Ok(a.v) } else { Err(DocError::Expr(format!("`{f}` needs a unit-less number, not {}", a.describe()))) };
     let same = |a: Value, b: Value| -> Result<(Value, Value), DocError> {
@@ -931,20 +955,20 @@ fn call(f: &str, args: &[Value], d: Defaults) -> Result<Value, DocError> {
         "atan2" => {
             let (y, x) = two()?;
             let (y, x) = same(y, x)?;
-            if y.len != x.len || y.ang != x.ang {
+            if !y.same_dims(&x) {
                 return Err(DocError::Expr("`atan2` needs two values with the same units".into()));
             }
             Value::angle(y.v.atan2(x.v))
         }
         "sqrt" => {
             let a = one()?;
-            if a.len % 2 != 0 || a.ang % 2 != 0 {
+            if a.dims().iter().any(|p| p % 2 != 0) {
                 return Err(DocError::Expr("sqrt of an odd power of a unit".into()));
             }
             if a.v < 0.0 {
                 return Err(DocError::Expr("sqrt of a negative number".into()));
             }
-            Value { v: a.v.sqrt(), len: a.len / 2, ang: a.ang / 2 }
+            Value::with_dims(a.v.sqrt(), a.dims().map(|p| p / 2))
         }
         "abs" => {
             let a = one()?;
@@ -954,7 +978,7 @@ fn call(f: &str, args: &[Value], d: Defaults) -> Result<Value, DocError> {
         "floor" | "ceil" | "round" | "trunc" => {
             let a = one()?;
             // Round in the value's own default unit (round(2.4 in) = 2 in for an inch parameter).
-            let scale = scale_bare(Value::num(1.0), a.len, a.ang, d);
+            let scale = scale_bare(Value::num(1.0), a.dims(), d);
             let x = if scale != 0.0 { a.v / scale } else { a.v };
             let r = match f {
                 "floor" => x.floor(),
@@ -993,7 +1017,7 @@ fn call(f: &str, args: &[Value], d: Defaults) -> Result<Value, DocError> {
         "hypot" => {
             let (a, b) = two()?;
             let (a, b) = same(a, b)?;
-            if a.len != b.len || a.ang != b.ang {
+            if !a.same_dims(&b) {
                 return Err(DocError::Expr("`hypot` needs two values with the same units".into()));
             }
             unit_fn(a.v.hypot(b.v), a)
@@ -1011,7 +1035,7 @@ fn call(f: &str, args: &[Value], d: Defaults) -> Result<Value, DocError> {
             let mut acc = first;
             for a in args.iter().skip(1) {
                 let (x, y) = same(*a, acc)?;
-                if x.len != y.len || x.ang != y.ang {
+                if !x.same_dims(&y) {
                     return Err(DocError::Expr(format!("`{f}` needs values with the same units")));
                 }
                 acc = if (f == "min" && x.v < y.v) || (f == "max" && x.v > y.v) { x } else { y };
@@ -1242,6 +1266,20 @@ mod tests {
         ParamDef { name: n.into(), expr: e.into(), unit: u.into() }
     }
 
+    /// `Kind::ALL` lists every kind once: a new kind fails to build in this match, which counts
+    /// them, so it can't be left out of `ALL` (where `of_dims` would never find it).
+    #[test]
+    fn every_kind_is_listed_once() {
+        let kinds = |k: Kind| match k {
+            Kind::Length | Kind::Angle | Kind::Unitless => 3,
+        };
+        assert_eq!(Kind::ALL.len(), kinds(Kind::Length));
+        for k in Kind::ALL {
+            assert_eq!(Kind::ALL.iter().filter(|x| **x == k).count(), 1, "{k:?}");
+            assert_eq!(Kind::of_dims(k.dims()), Some(k), "{k:?}");
+        }
+    }
+
     #[test]
     fn a_decimal_comma_outside_parentheses() {
         // #1347: a comma between digits is a decimal comma where it cannot separate arguments.
@@ -1444,6 +1482,67 @@ mod tests {
         assert!(ev(&"+".repeat(500), Kind::Length).is_err());
         assert!(ev(&"width*".repeat(100), Kind::Length).is_err());
         assert!(ev(&("2^".repeat(200) + "2"), Kind::Unitless).is_err());
+        // A power of 16 times -8 is -128, whose `abs` overflows: refused, not a panic.
+        assert!(ev("((1 mm)^15 * 1 mm) ^ -8", Kind::Unitless).is_err());
+        assert!(ev("((1 mm)^15 * 1 mm) ^ 8", Kind::Unitless).is_err());
+    }
+
+    /// A value's mass power (#4811) is carried through arithmetic and checked like the others: a
+    /// mass beside a length is refused wherever two values must have the same units.
+    #[test]
+    fn a_mass_power_is_carried_and_checked() {
+        let look = |n: &str| match n {
+            "m" => Ok(Value::mass(50.0)),
+            "w" => Ok(Value::length(10.0)),
+            _ => Err(DocError::Expr(format!("unknown {n}"))),
+        };
+        // (Bare numbers beside a mass are read in its kind's unit, which the kinds bring.)
+        let ev = |s: &str| eval_with(s, &look);
+        assert_eq!(ev("m * 2 + m").unwrap(), Value::mass(150.0));
+        assert_eq!(ev("max(m, 2 * m)").unwrap(), Value::mass(100.0));
+        assert_eq!(ev("abs(-m)").unwrap(), Value::mass(50.0));
+        assert_eq!(ev("(m + m / 5) % m").unwrap(), Value::mass(10.0));
+        assert_eq!(ev("sqrt(m * m)").unwrap(), Value::mass(50.0));
+        assert_eq!(ev("m / m").unwrap(), Value::num(1.0));
+        assert_eq!(ev("m / w^3").unwrap(), Value { v: 0.05, len: -3, ang: 0, mass: 1 });
+        assert_eq!(ev("m / w^3").unwrap().describe(), "a value in length^-3·mass");
+        assert_eq!(ev("m * w").unwrap().describe(), "a value in length·mass");
+        // Every operation that needs matching units refuses a mass beside a length.
+        for bad in [
+            "m + w",
+            "w - m",
+            "m % w",
+            "mod(w, m)",
+            "atan2(m, w)",
+            "hypot(w, m)",
+            "min(m, w)",
+            "max(w, m)",
+            "sin(m)",
+            "cos(m)",
+            "tan(m)",
+            "asin(m)",
+            "acos(m)",
+            "atan(m)",
+            "exp(m)",
+            "ln(m)",
+            "log(m)",
+            "log10(m)",
+            "sqrt(m)",
+            "sqrt(m * w * w)",
+            "m ^ 0.5",
+            "2 ^ m",
+            "pow(w, m)",
+        ] {
+            assert!(ev(bad).is_err(), "{bad}");
+        }
+        for k in [Kind::Length, Kind::Angle, Kind::Unitless] {
+            let e = ev("m").unwrap().to_kind(k).unwrap_err().to_string();
+            assert!(e.contains(&format!("expected {}", kind_word(k))), "{e}");
+        }
+        // A mass's power stays within ±16, as the others do.
+        assert_eq!(ev("m ^ 15 / m ^ 15").unwrap(), Value::num(1.0));
+        assert!(ev("m ^ 15 * m * m").is_err());
+        assert!(ev("1 / m ^ 15 / m / m").is_err());
     }
 
     /// Hostile input never panics: random strings over the expression alphabet.
