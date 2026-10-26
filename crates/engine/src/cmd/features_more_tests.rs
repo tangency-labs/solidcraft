@@ -1012,6 +1012,11 @@ fn align_by_frames_follows_its_target() {
         p["bodies"] = json!(["B"]);
         assert!(s.execute("solid.align", &p).is_err(), "{bad}");
     }
+    // One frame does not move bodies of two components.
+    run(&mut s, "component.create", json!({"name": "Part"}));
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [80, 0, 0], "body_name": "P"}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    assert!(s.execute("solid.align", &json!({"bodies": ["B", "P"], "from_frame": bottom, "to_frame": ring})).is_err());
     assert!(!s.doc.features.iter().any(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Align { .. })), "nothing refused was added");
     // A design file whose frame no longer resolves (here a degenerate one) fails the feature
     // with a message; it never panics.

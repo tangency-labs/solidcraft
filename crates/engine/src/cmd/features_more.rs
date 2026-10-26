@@ -444,7 +444,7 @@ fn align(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let (from_plane, to_plane) = (plane(s, "from_plane")?, plane(s, "to_plane")?);
     // Or a frame (#6257), found again when the feature is evaluated.
-    let (from_frame, to_frame) = (align_frame(s, p, "from", &bodies[0])?, align_frame(s, p, "to", &bodies[0])?);
+    let (from_frame, to_frame) = (align_frame(s, p, "from", &bodies)?, align_frame(s, p, "to", &bodies)?);
     // A target on the bodies that move would move away with them: it must be found the same
     // without them.
     if let Some(fr @ AlignFrame::Origin { .. }) = &to_frame {
@@ -549,9 +549,9 @@ const MAX_SKETCH_ID: usize = 256;
 
 /// An Align side's frame (#6257), `<key>_frame`: a joint origin as `joint.create` takes one, or a
 /// sketch point or the centre of a sketch circle, arc or ellipse (`{sketch, point|curve}`), on the
-/// moved bodies' component. It takes the place of `<key>`, `<key>_face` and `<key>_plane`, and is
-/// checked to resolve now.
-fn align_frame(s: &Session, p: &Value, key: &str, body: &str) -> Result<Option<AlignFrame>> {
+/// moved bodies' component (all of them on one, placed once). It takes the place of `<key>`,
+/// `<key>_face` and `<key>_plane`, and is checked to resolve now.
+fn align_frame(s: &Session, p: &Value, key: &str, bodies: &[String]) -> Result<Option<AlignFrame>> {
     let cmd = "solid.align";
     let fk = format!("{key}_frame");
     let Some(v) = p.get(&fk).filter(|v| !v.is_null()) else { return Ok(None) };
@@ -559,7 +559,6 @@ fn align_frame(s: &Session, p: &Value, key: &str, body: &str) -> Result<Option<A
         return Err(bad(cmd, format!("give `{fk}` or `{other}`, not both")));
     }
     let st = s.model.state();
-    let component = st.body(body).map_or(0, |b| s.doc.model_body_component(b));
     let (frame, on) = match v.get("sketch") {
         Some(sk) => {
             let sketch = super::features::sketch_id(s, Some(sk), cmd, &fk)?;
@@ -577,8 +576,13 @@ fn align_frame(s: &Session, p: &Value, key: &str, body: &str) -> Result<Option<A
             (AlignFrame::Origin { origin: Box::new(origin) }, on)
         }
     };
-    if on != component {
+    // The move is worked out in that component's coordinates: every body must be in it, and a
+    // component placed twice would not say which placement the picks were made in.
+    if bodies.iter().any(|b| st.body(b).map_or(0, |b| s.doc.model_body_component(b)) != on) {
         return Err(bad(cmd, format!("not supported yet: `{fk}` on another component than the bodies")));
+    }
+    if on != 0 && s.doc.occurrences.iter().filter(|o| o.component == on).count() != 1 {
+        return Err(bad(cmd, format!("not supported yet: `{fk}` on a component placed more than once")));
     }
     frame.resolve(&s.doc, &st).map_err(|e| bad(cmd, format!("`{fk}`: {e}")))?;
     Ok(Some(frame))
