@@ -1264,4 +1264,172 @@ mod issue_891_tests {
         fix_reversed_on(&k, &mut on_surface, Some(&plane)).unwrap();
         assert_eq!(middle_control_point(&mut on_surface), before);
     }
+
+    fn key(e: EntityRef) -> crate::geom::object::ObjectRef {
+        let (type_code, kind, i) = match e {
+            EntityRef::Brep(x) => (16011, 0, x.index()),
+            EntityRef::Region(x) => (16012, 1, x.index()),
+            EntityRef::Shell(x) => (16013, 2, x.index()),
+            EntityRef::Faceuse(x) => (16022, 3, x.index()),
+            EntityRef::Face(x) => (16002, 4, x.index()),
+            EntityRef::Loopuse(x) => (16004, 5, x.index()),
+            EntityRef::Loop(x) => (16003, 6, x.index()),
+            EntityRef::Edgeuse(x) => (16005, 7, x.index()),
+            EntityRef::Edge(x) => (16016, 8, x.index()),
+            EntityRef::Vertexuse(x) => (16006, 9, x.index()),
+            EntityRef::Vertex(x) => (16021, 10, x.index()),
+        };
+        crate::geom::object::ObjectRef {
+            type_code,
+            key: crate::geom::attribute::ObjectKey(1 + (kind << 32) + u64::from(i)),
+        }
+    }
+
+    /// A one-face B-rep on the 60 x 4 plane over [0,1]^2 bounded by the exact
+    /// half circle trim of [`trim`] and the chord closing it, made through
+    /// `MakeFaceWithCurves` from its UV curves.
+    fn half_disc(k: &mut Kernel) -> Brep {
+        use crate::geom::attribute::AttributeStore;
+        use crate::topology::brep::p7::{make_face_with_curves, FaceCurvesInput};
+        use crate::topology::edge as ed;
+        use crate::topology::Region;
+        let plane = Surface::from(
+            BSplineSurface::create_bilinear_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(60.0, 0.0, 0.0),
+                Vec3::new(0.0, 4.0, 0.0),
+                Vec3::new(60.0, 4.0, 0.0),
+            )
+            .unwrap(),
+        );
+        let arc = trim();
+        let ends = arc.ends(k).unwrap();
+        let chord = Curve::from(
+            BSplineCurve::create_canonical(&CanonicalData {
+                dim: 2,
+                degree: 1,
+                control_points: &[ends.end, ends.start],
+                form: BSplineCurveForm::Unspecified,
+                knot_multiplicities: &[2, 2],
+                knots: &[0.0, 1.0],
+                knot_type: KnotType::Unspecified,
+                weights: None,
+                trim: None,
+            })
+            .unwrap(),
+        );
+        let mut b = Brep::new();
+        let region = b
+            .add_region_record(Region {
+                in_brep: true,
+                ..Region::default()
+            })
+            .unwrap();
+        let mut records = BTreeMap::new();
+        let mut attributes = AttributeStore::default();
+        let mut env = ed::NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of: &key,
+        };
+        let face_key = |f: crate::topology::FaceId| key(EntityRef::Face(f));
+        b.set_infinite_region(Some(region));
+        let made = make_face_with_curves(
+            k,
+            &mut b,
+            None,
+            FaceCurvesInput {
+                loops: vec![2],
+                uv_curves: Some(vec![arc.clone(), chord]),
+                orientations: vec![OrientType::Same, OrientType::Same],
+                ..Default::default()
+            },
+            plane,
+            &crate::geom::extent2d::Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+            OrientType::Same,
+            None,
+            &face_key,
+            &mut env,
+        )
+        .unwrap();
+        assert!(made.face.is_some());
+        // MakeFaceWithCurves leaves the trims unset: give the arc's face edge uses
+        // the exact trim (the edge whose middle is 1 from the circle's centre)
+        for e in b.edge_list().to_vec() {
+            let ivl = b.edge(e).unwrap().interval;
+            let mid = b.edge(e).unwrap().curve.as_ref().unwrap();
+            let mid = mid
+                .evaluate_point(k, 0.5 * (ivl.min() + ivl.max()))
+                .unwrap();
+            if (mid.distance(Vec3::new(30.0, 2.0, 0.0)) - 1.0).abs() > 1e-9 {
+                continue;
+            }
+            for eu in b.edge(e).unwrap().edgeuses.clone() {
+                if eu1::face(&b, eu).unwrap().is_some() {
+                    b.edgeuse_mut(eu).unwrap().uv_trim_curve = Some(arc.clone());
+                }
+            }
+        }
+        b
+    }
+
+    /// The middle control points of the B-rep's rational UV trims.
+    fn rational_trim_middles(b: &mut Brep) -> Vec<Vec3> {
+        let mut out = Vec::new();
+        for e in b.edge_list().to_vec() {
+            for eu in b.edge(e).unwrap().edgeuses.clone() {
+                if let Some(t) = b.edgeuse_mut(eu).unwrap().uv_trim_curve.as_mut() {
+                    let CurveKind::BSpline(base) = t.kind_mut() else {
+                        continue;
+                    };
+                    let nurb = base.get_or_create_gw_nurb().unwrap();
+                    if nurb.cpts().len() == 5 {
+                        out.push(nurb.cpts()[1].to_euclid());
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// `ValidatePointers` on [`half_disc`] with `fixes.uv_trim_reversal_on_surface`
+    /// as given: its status and the arc trims' middle control points before and
+    /// after.
+    fn validate_half_disc(on_surface: bool) -> (i32, Vec<Vec3>, Vec<Vec3>) {
+        let mut k = Kernel::default();
+        k.fixes.uv_trim_reversal_on_surface = on_surface;
+        let mut b = half_disc(&mut k);
+        let before = rational_trim_middles(&mut b);
+        let mut reports = AssertArray::new();
+        let status = validate_pointers(&k, &mut b, Some(&mut reports), 2, true, &key).unwrap();
+        assert!(reports.is_empty(), "{:?}", reports.reports());
+        (status, before, rational_trim_middles(&mut b))
+    }
+
+    /// WR-406 (tangency-labs/solidcore#891) through the Kernel: with
+    /// `fixes.uv_trim_reversal_on_surface`, `ValidatePointers` judges the exact
+    /// half circle trim's end turns on the face's 60 x 4 plane and leaves it exact.
+    #[test]
+    fn issue_891_kernel_fix_keeps_the_exact_trim() {
+        let (status, before, after) = validate_half_disc(true);
+        assert_eq!(status, SUCCESS);
+        assert_eq!(before.len(), 2);
+        assert_eq!(after, before);
+        assert_eq!(after[0], middle_control_point(&mut trim()));
+    }
+
+    /// The default (upstream) judges the turn in raw (u, v), takes the exact trim
+    /// for a reversal and moves its second control point onto the chord.
+    #[test]
+    fn validate_pointers_straightens_the_exact_trim_by_default() {
+        assert!(!Kernel::default().fixes.uv_trim_reversal_on_surface);
+        let (status, before, after) = validate_half_disc(false);
+        assert_eq!(status, SUCCESS);
+        assert_eq!(before.len(), 2);
+        assert_eq!(after.len(), 2);
+        for (a, b) in after.iter().zip(&before) {
+            assert_ne!(a, b);
+        }
+    }
 }

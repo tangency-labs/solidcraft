@@ -2354,6 +2354,7 @@ impl<C1: CurveEvaluate + ?Sized, C2: CurveEvaluate + ?Sized> FindCcNormalEnfo<'_
 mod tests {
     use super::*;
     use crate::curve::hermite_curve::HermiteCurve;
+    use crate::geom::local_solve1d::{EvalFunction, FunctionValue};
     use crate::geom::local_solve_nd::EvalNFunctions;
     use crate::nurbs::b_spline_curve::NurbCircleParam;
     use crate::nurbs::nurbs_crv::allocate_nurb_curve;
@@ -2681,5 +2682,137 @@ mod tests {
         // a Hermite curve is a pure value and memoised
         let h = hermite([0.0; 3], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]);
         assert!(CurveMemoKey::of(&k, &h).is_some());
+    }
+
+    /// A planar degree-4 B-spline `C(t) = (x(s(t)), s(t), 0)` over `[-1, 12]` with
+    /// `x(s) = (1-s)^3 - 2(1-s) + 2` integrated, so `C'(t) . (1, 0, 0) =
+    /// (1-s)^3 - 2(1-s) + 2` where `s(t) = t`: from 0, Newton on it cycles between
+    /// 0 and 1 (`F = 1, F' = -1` at 0; `F = 2, F' = 2` at 1; the mirror of the
+    /// `t^3 - 2t + 2` cycle) without a root nearby (`F > 0.9` on `[0, 1]`). `s` is
+    /// piecewise linear with C0 joints: it stalls (`C' = 0`, so the perpendicular
+    /// property cannot be evaluated) on `[stall, 0.992]`, catches up on
+    /// `[0.992, 0.996]`, and is `s = t` elsewhere. The pieces holding 0 and 1 do not
+    /// depend on `stall`, so neither do the Newton iterates.
+    fn stalled_quartic(stall: f64) -> Curve {
+        let (a, b, c) = (stall, 0.992, 0.996);
+        // (s0, s1) per Bezier piece; the knots are -1, 0.5, a, b, c, 12
+        let pieces = [(-1.0, 0.5), (0.5, a), (a, a), (a, c), (c, 12.0)];
+        // x(s) = -(1-s)^4/4 + (1-s)^2 + 2s and its derivatives
+        let x = |s: f64| {
+            (-((1.0 - s) * (1.0 - s) * (1.0 - s) * (1.0 - s)) / 4.0 + (1.0 - s) * (1.0 - s))
+                + 2.0 * s
+        };
+        let dx = |s: f64| ((1.0 - s) * (1.0 - s) * (1.0 - s) - 2.0 * (1.0 - s)) + 2.0;
+        let d2x = |s: f64| -3.0 * (1.0 - s) * (1.0 - s) + 2.0;
+        let d3x = |s: f64| 6.0 * (1.0 - s);
+        let binom = |n: usize, k: usize| -> f64 {
+            (0..k).fold(1.0, |acc, j| acc * (n - j) as f64 / (j + 1) as f64)
+        };
+        let mut cps = Vec::new();
+        for (i, &(s0, s1)) in pieces.iter().enumerate() {
+            // Bezier points of q(u) = P(s0 + d u) from its Taylor coefficients
+            let d = s1 - s0;
+            let cx = [
+                x(s0),
+                dx(s0) * d,
+                d2x(s0) / 2.0 * d * d,
+                d3x(s0) / 6.0 * d * d * d,
+                -(d * d * d * d) / 4.0,
+            ];
+            let cy = [s0, d, 0.0, 0.0, 0.0];
+            for j in usize::from(i > 0)..=4 {
+                let bx: f64 = (0..=j).map(|k| binom(j, k) / binom(4, k) * cx[k]).sum();
+                let by: f64 = (0..=j).map(|k| binom(j, k) / binom(4, k) * cy[k]).sum();
+                cps.push([bx, by]);
+            }
+        }
+        let mut cur = allocate_nurb_curve(20, 4, 25).unwrap();
+        for (dst, src) in cur.cpts_mut().iter_mut().zip(&cps) {
+            dst.x = src[0];
+            dst.y = src[1];
+            dst.z = 0.0;
+            dst.w = -f64::MAX;
+        }
+        let mut knots = vec![-1.0; 5];
+        for t in [0.5, a, b, c] {
+            knots.extend([t; 4]);
+        }
+        knots.extend([12.0; 5]);
+        cur.knots_mut().copy_from_slice(&knots);
+        Curve::from(BSplineCurve::from_nurb(cur, 3, false))
+    }
+
+    /// `PerpendicularToVector` to `(1, 0, 0)` on [`stalled_quartic`] from 0.
+    fn perpendicular_on_stalled_quartic(k: &Kernel, stall: f64) -> Result<(bool, f64, f64)> {
+        let curve = stalled_quartic(stall);
+        let mut sol: Solution<()> = Solution::new();
+        let found = local_property_analysis(
+            k,
+            &curve,
+            &Extent1d::from_min_max(-1.0, 12.0),
+            CurvePropertyType::PerpendicularToVector,
+            0.0,
+            None,
+            &[Vec3::new(1.0, 0.0, 0.0)],
+            &mut sol,
+        )?;
+        Ok((found, sol.start.param(0).unwrap(), sol.start.solution_value))
+    }
+
+    /// Where the Newton cycle of [`stalled_quartic`] puts `SolveOscillating`'s last
+    /// interior guess (0.99 of the way from 0 to 1, as the iterates round): the
+    /// stall starts exactly there, so that guess alone cannot be evaluated, and
+    /// every point the bisection tries below it can.
+    const STALL_AT_LAST_GUESS: f64 = 0.989_999_999_999_999_2;
+
+    /// WR-253 (tangency-labs/solidcore#481) through the Kernel: with
+    /// `fixes.oscillating_skips_failed_guesses` the failed last guess is no sign
+    /// change, so the perpendicular solve on a curve whose `F` stays above 0.9
+    /// finds nothing.
+    #[test]
+    fn issue_481_kernel_fix_skips_the_failed_last_guess() {
+        let mut k = Kernel::default();
+        k.fixes.oscillating_skips_failed_guesses = true;
+        let (found, _, _) = perpendicular_on_stalled_quartic(&k, STALL_AT_LAST_GUESS).unwrap();
+        assert!(!found);
+    }
+
+    /// The default (upstream) reads the failed guess's zeroed `F` as a sign
+    /// change, brackets it, and reports a root exactly at the unevaluable point,
+    /// with value 0, although `F` is near 1.98 on both sides of it.
+    #[test]
+    fn oscillating_failed_guess_is_a_root_by_default() {
+        let k = Kernel::default();
+        assert!(!k.fixes.oscillating_skips_failed_guesses);
+        let (found, t, value) = perpendicular_on_stalled_quartic(&k, STALL_AT_LAST_GUESS).unwrap();
+        assert!(found);
+        assert_eq!(t.to_bits(), STALL_AT_LAST_GUESS.to_bits());
+        assert_eq!(value, 0.0);
+        // the point really cannot be evaluated, and its neighbour below is far from 0
+        let curve = stalled_quartic(STALL_AT_LAST_GUESS);
+        let v = [Vec3::new(1.0, 0.0, 0.0)];
+        let mut efo = CurvePropertyEfo::new(
+            &k,
+            &curve,
+            CurvePropertyType::PerpendicularToVector,
+            None,
+            Some(&v),
+            EFF_ZERO_SQ,
+        );
+        let mut out = FunctionValue::default();
+        assert!(efo.evaluate(STALL_AT_LAST_GUESS, &mut out, true).is_err());
+        efo.evaluate(
+            f64::from_bits(STALL_AT_LAST_GUESS.to_bits() - 1),
+            &mut out,
+            true,
+        )
+        .unwrap();
+        assert!(out.f > 1.9, "{out:?}");
+        // a stall that misses the guess changes nothing: both settings find no root
+        let mut fixed = Kernel::default();
+        fixed.fixes.oscillating_skips_failed_guesses = true;
+        for k in [&Kernel::default(), &fixed] {
+            assert!(!perpendicular_on_stalled_quartic(k, 0.991).unwrap().0);
+        }
     }
 }
