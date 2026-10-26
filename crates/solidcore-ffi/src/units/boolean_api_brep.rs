@@ -7,8 +7,10 @@
 //! `SmApiBooleanTrees`).
 //!
 //! A [`Call`] is encoded as `op args...`. An operand block ([`BrepSpec`]) is `kind`
-//! then its data: `1 O[3] length width height` (`SmApiCreateBox`) or `2 C[3] radius`
-//! (`SmApiCreateSphere`).
+//! then its data: `1 O[3] length width height` (`SmApiCreateBox`), `2 C[3] radius`
+//! (`SmApiCreateSphere`), `3 O[3] x y` (`SmApiCreatePlane`, the `SmBrep*&` overload)
+//! or `4 operation brep brep` (the `SmApiBoolean` result of two operand blocks). Nested
+//! blocks are at most [`MAX_DEPTH`] deep.
 //!
 //! | [`Call`]        | op | args                                   | output after the status (on success)            |
 //! |-----------------|----|----------------------------------------|-------------------------------------------------|
@@ -27,8 +29,9 @@
 //! rejected `MergeBreps` (`SM_ERR_INVALID_INPUT`) is followed by `cleared list_len`.
 //!
 //! [`run`] accepts only what upstream handles without undefined behaviour: finite
-//! operand data with positive box dimensions and a nonzero sphere radius (a failing
-//! constructor is `SC_ERR_ARG`); operation codes of `SmBooleanOperationType` (0 to 10);
+//! operand data with positive box and plane dimensions and a nonzero sphere radius (a
+//! failing constructor or operand Boolean is `SC_ERR_ARG`); operand Booleans that are union, intersection, difference
+//! or slice (upstream deletes their second operand); operation codes of `SmBooleanOperationType` (0 to 10);
 //! at most [`MAX_LIST`] B-reps per list and [`MAX_TREE`] tree nodes in -64..=64; tree
 //! executed B-rep nodes in range and binary operands non-null (`SmMerge::BooleanTrees`
 //! indexes unchecked and clears each leaf slot). Safe repeated leaves remain accepted.
@@ -40,6 +43,8 @@ use crate::{call_with_buffer, FfiError};
 pub const MAX_LIST: usize = 8;
 /// Largest postfix tree accepted by [`run`].
 pub const MAX_TREE: usize = 64;
+/// Deepest operand block accepted by [`run`] (a plain primitive is depth 1).
+pub const MAX_DEPTH: usize = 4;
 
 mod sys {
     extern "C" {
@@ -54,7 +59,7 @@ mod sys {
 }
 
 /// How an operand B-rep is built on the C++ side.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum BrepSpec {
     /// `SmApiCreateBox(origin, length, width, height)`.
     Box {
@@ -69,6 +74,22 @@ pub enum BrepSpec {
         center: [f64; 3],
         /// Radius (nonzero; negative is accepted upstream).
         radius: f64,
+    },
+    /// `SmApiCreatePlane(origin, x, y)`: a rectangular sheet in the XY plane.
+    Plane {
+        /// Lower-left corner.
+        origin: [f64; 3],
+        /// Extents along x and y.
+        size: [f64; 2],
+    },
+    /// `SmApiBoolean(a, b, operation)`'s result.
+    Boolean {
+        /// `SmBooleanOperationType` value: union, intersection, difference or slice.
+        operation: i32,
+        /// First operand (modified into the result).
+        a: Box<BrepSpec>,
+        /// Second operand (deleted by upstream).
+        b: Box<BrepSpec>,
     },
 }
 
@@ -164,7 +185,10 @@ pub enum Call {
     },
 }
 
-fn check_spec(s: &BrepSpec) -> Result<(), FfiError> {
+fn check_spec(s: &BrepSpec, depth: usize) -> Result<(), FfiError> {
+    if depth >= MAX_DEPTH {
+        return Err(bad("operand nested too deep"));
+    }
     match s {
         BrepSpec::Box { origin, size } => {
             if !origin.iter().chain(size).all(|x| x.is_finite()) {
@@ -182,6 +206,23 @@ fn check_spec(s: &BrepSpec) -> Result<(), FfiError> {
                 return Err(bad("sphere: zero radius"));
             }
         }
+        BrepSpec::Plane { origin, size } => {
+            if !origin.iter().chain(size).all(|x| x.is_finite()) {
+                return Err(bad("plane: non-finite value"));
+            }
+            if size.iter().any(|&x| x <= 0.0) {
+                return Err(bad("plane: dimensions must be positive"));
+            }
+        }
+        BrepSpec::Boolean { operation, a, b } => {
+            if ![1, 2, 3, 10].contains(operation) {
+                return Err(bad(
+                    "operand boolean: not union, intersection, difference or slice",
+                ));
+            }
+            check_spec(a, depth + 1)?;
+            check_spec(b, depth + 1)?;
+        }
     }
     Ok(())
 }
@@ -195,7 +236,12 @@ fn check_op(op: i32) -> Result<(), FfiError> {
 }
 
 fn push_spec(o: &mut Vec<f64>, s: &BrepSpec) -> Result<(), FfiError> {
-    check_spec(s)?;
+    check_spec(s, 0)?;
+    push_checked(o, s);
+    Ok(())
+}
+
+fn push_checked(o: &mut Vec<f64>, s: &BrepSpec) {
     match s {
         BrepSpec::Box { origin, size } => {
             o.push(1.0);
@@ -207,8 +253,18 @@ fn push_spec(o: &mut Vec<f64>, s: &BrepSpec) -> Result<(), FfiError> {
             o.extend_from_slice(center);
             o.push(*radius);
         }
+        BrepSpec::Plane { origin, size } => {
+            o.push(3.0);
+            o.extend_from_slice(origin);
+            o.extend_from_slice(size);
+        }
+        BrepSpec::Boolean { operation, a, b } => {
+            o.push(4.0);
+            o.push(f64::from(*operation));
+            push_checked(o, a);
+            push_checked(o, b);
+        }
     }
-    Ok(())
 }
 
 fn push_list(o: &mut Vec<f64>, l: &[BrepSpec], max: usize) -> Result<(), FfiError> {
@@ -339,11 +395,45 @@ mod tests {
             size: [1.0; 3],
         };
         let program = |tree| Call::Trees {
-            breps: vec![shape, shape],
+            breps: vec![shape.clone(), shape.clone()],
             tree,
         };
         assert!(encode(&program(vec![0, 0])).is_ok());
         assert!(encode(&program(vec![0, 0, -1])).is_err());
         assert!(encode(&program(vec![-1, 64])).is_ok());
+    }
+
+    #[test]
+    fn operand_blocks_nest_only_to_max_depth() {
+        let mut spec = BrepSpec::Box {
+            origin: [0.0; 3],
+            size: [1.0; 3],
+        };
+        let call = |a: &BrepSpec| Call::Union {
+            a: a.clone(),
+            b: a.clone(),
+        };
+        for depth in 1..=MAX_DEPTH {
+            assert!(encode(&call(&spec)).is_ok(), "depth {depth}");
+            spec = BrepSpec::Boolean {
+                operation: 1,
+                a: Box::new(spec.clone()),
+                b: Box::new(spec),
+            };
+        }
+        assert!(encode(&call(&spec)).is_err());
+        let slice = |operation| BrepSpec::Boolean {
+            operation,
+            a: Box::new(BrepSpec::Sphere {
+                center: [0.0; 3],
+                radius: 1.0,
+            }),
+            b: Box::new(BrepSpec::Plane {
+                origin: [0.0; 3],
+                size: [1.0, 1.0],
+            }),
+        };
+        assert!(encode(&call(&slice(10))).is_ok());
+        assert!(encode(&call(&slice(6))).is_err());
     }
 }

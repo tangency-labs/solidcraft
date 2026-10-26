@@ -8,8 +8,9 @@
 // `op args...`; layouts are documented in crates/solidcore-ffi/src/units/boolean_api_brep.rs,
 // which validates every input so upstream only touches valid memory. Every read is bounds
 // checked here as well (a malformed program is SC_ERR_ARG). The whole program is parsed before
-// any upstream object is built. Operand B-reps are boxes (SmApiCreateBox) or spheres
-// (SmApiCreateSphere); a failing constructor is SC_ERR_ARG. `out` receives the API status
+// any upstream object is built. Operand B-reps are boxes (SmApiCreateBox), spheres
+// (SmApiCreateSphere), sheets (SmApiCreatePlane) or the SmApiBoolean result of two
+// operands; a failing constructor or operand Boolean is SC_ERR_ARG. `out` receives the API status
 // (0 = SM_SUCCESS, else the SmStatus) and, on success, the op's outputs.
 //
 // Ownership follows source/SM_API/inc/SmApiBrep.h: a rejected or failed two-B-rep call leaves
@@ -56,9 +57,14 @@ enum : int32_t
 // Operand kinds.
 enum : int32_t
 {
-    BK_BOX = 1,    // SmApiCreateBox(origin, length, width, height)
-    BK_SPHERE = 2, // SmApiCreateSphere(center, radius)
+    BK_BOX = 1,      // SmApiCreateBox(origin, length, width, height)
+    BK_SPHERE = 2,   // SmApiCreateSphere(center, radius)
+    BK_PLANE = 3,    // SmApiCreatePlane(origin, x, y)
+    BK_BOOLEAN = 4,  // SmApiBoolean(a, b, operation)'s result
 };
+
+// Deepest operand block (MAX_DEPTH in the Rust module).
+const int MAX_DEPTH = 4;
 
 struct Bad : std::runtime_error
 {
@@ -90,15 +96,37 @@ struct BrepSpec
 {
     int32_t kind = BK_BOX;
     double d[6] = {0, 0, 0, 0, 0, 0};
+    std::vector<BrepSpec> sub; // BK_BOOLEAN: a, b
 };
 
-BrepSpec read_spec(Rd& rd)
+BrepSpec read_spec(Rd& rd, int depth = 0)
 {
+    if (depth >= MAX_DEPTH)
+        throw Bad();
     BrepSpec s;
-    s.kind = (int32_t)rd.idx(1, 2);
-    int k = s.kind == BK_BOX ? 6 : 4;
+    s.kind = (int32_t)rd.idx(1, 4);
+    int k = 0;
+    switch (s.kind)
+    {
+    case BK_BOX: k = 6; break;
+    case BK_SPHERE: k = 4; break;
+    case BK_PLANE: k = 5; break;
+    case BK_BOOLEAN: k = 0; break;
+    default: throw Bad();
+    }
+    if (s.kind == BK_BOOLEAN)
+    {
+        s.d[0] = (double)rd.idx(1, 10);
+        if (s.d[0] > 3 && s.d[0] < 10)
+            throw Bad();
+    }
     for (int i = 0; i < k; i++)
         s.d[i] = rd.num();
+    if (s.kind == BK_BOOLEAN)
+    {
+        s.sub.push_back(read_spec(rd, depth + 1));
+        s.sub.push_back(read_spec(rd, depth + 1));
+    }
     return s;
 }
 
@@ -115,8 +143,39 @@ SmBrep* build(const BrepSpec& s)
 {
     SmVector3d o(s.d[0], s.d[1], s.d[2]);
     SmBrep* r = NULL;
-    SmApiStatus stat = s.kind == BK_BOX ? SmApiCreateBox(o, s.d[3], s.d[4], s.d[5], r)
-                                        : SmApiCreateSphere(o, s.d[3], r);
+    SmApiStatus stat = SM_ERR;
+    switch (s.kind)
+    {
+    case BK_BOX: stat = SmApiCreateBox(o, s.d[3], s.d[4], s.d[5], r); break;
+    case BK_SPHERE: stat = SmApiCreateSphere(o, s.d[3], r); break;
+    case BK_PLANE: stat = SmApiCreatePlane(o, s.d[3], s.d[4], r); break;
+    case BK_BOOLEAN:
+    {
+        SmBrep* a = build(s.sub[0]);
+        SmBrep* b = NULL;
+        try
+        {
+            b = build(s.sub[1]);
+        }
+        catch (...)
+        {
+            delete a;
+            throw;
+        }
+        // Union, intersection, difference and slice delete `b` on success
+        // (source/SM_API/inc/SmApiBrep.h); both remain allocated on failure.
+        stat = SmApiBoolean(a, b, (SmBooleanOperationType)(int32_t)s.d[0], r);
+        if (stat != SM_SUCCESS || r != a)
+        {
+            if (r != NULL && r != a && r != b)
+                delete r;
+            delete a;
+            delete b;
+            throw Bad();
+        }
+        break;
+    }
+    }
     if (stat != SM_SUCCESS || r == NULL)
     {
         delete r;

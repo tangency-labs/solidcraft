@@ -4,11 +4,12 @@
 //! `source/SM_API/src/SmApiBrep.cpp`). Rust: `solidcore::boolean::api_brep`.
 //!
 //! A case is one API call (`api` plus its arguments). Operands are boxes
-//! (`SmApiCreateBox`) or spheres (`SmApiCreateSphere`), built on both sides by the same
-//! constructors (`primitive::api_primitives::create_box` / `create_sphere` on the Rust
-//! side) in the case's one kernel / context. A constructor that fails is a harness error
-//! on both sides (the shim's `SC_ERR_ARG`); one that stops at an unported callee defers
-//! the case. Both sides produce `status` (`0` = `SM_SUCCESS`, else the `SmStatus`:
+//! (`SmApiCreateBox`) or spheres (`SmApiCreateSphere`); fixture cases also use sheets
+//! (`SmApiCreatePlane`) and the result of an `SmApiBoolean` of two operands. Both sides
+//! build them with the same constructors (`primitive::api_primitives` and
+//! `boolean::api_brep::boolean` on the Rust side) in the case's one kernel / context, at the default `Kernel::fixes` (SMLib behaviour). A
+//! constructor that fails is a harness error on both sides (the shim's `SC_ERR_ARG`);
+//! one that stops at an unported callee defers the case. Both sides produce `status` (`0` = `SM_SUCCESS`, else the `SmStatus`:
 //! `1007` `SM_ERR_INVALID_INPUT`; `-1` on the Rust side for an error upstream cannot
 //! produce) and `record` (the op's outputs after the status, see the FFI module): on
 //! success the result B-reps' face, edge, vertex and region counts and
@@ -56,13 +57,21 @@ fn harness(msg: impl Into<String>) -> HarnessError {
 type P3 = [f64; 3];
 
 /// An operand.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum BrepIn {
     /// `SmApiCreateBox`.
     Box { origin: P3, size: P3 },
     /// `SmApiCreateSphere`.
     Sphere { center: P3, radius: f64 },
+    /// `SmApiCreatePlane` (`SmBrep*&` overload).
+    Plane { origin: P3, size: [f64; 2] },
+    /// `SmApiBoolean(a, b, operation)`'s result.
+    Boolean {
+        operation: i32,
+        a: Box<BrepIn>,
+        b: Box<BrepIn>,
+    },
 }
 
 /// `SmApiBooleanWithOptions` flags; missing ones take the `SmMergeOptions` defaults.
@@ -132,9 +141,15 @@ enum Inputs {
 }
 
 fn spec(b: &BrepIn) -> BrepSpec {
-    match *b {
-        BrepIn::Box { origin, size } => BrepSpec::Box { origin, size },
-        BrepIn::Sphere { center, radius } => BrepSpec::Sphere { center, radius },
+    match b {
+        &BrepIn::Box { origin, size } => BrepSpec::Box { origin, size },
+        &BrepIn::Sphere { center, radius } => BrepSpec::Sphere { center, radius },
+        &BrepIn::Plane { origin, size } => BrepSpec::Plane { origin, size },
+        BrepIn::Boolean { operation, a, b } => BrepSpec::Boolean {
+            operation: *operation,
+            a: Box::new(spec(a)),
+            b: Box::new(spec(b)),
+        },
     }
 }
 
@@ -291,18 +306,32 @@ fn stop(what: &str, e: &SolidError) -> Stop {
     }
 }
 
-/// Builds an operand exactly as the shim does (`SmApiCreateBox` / `SmApiCreateSphere`).
+fn p3(p: P3) -> Point3 {
+    Point3::new(p[0], p[1], p[2])
+}
+
+/// Builds an operand exactly as the shim does (`SmApiCreateBox`, `SmApiCreateSphere`,
+/// `SmApiCreatePlane`, `SmApiBoolean`). Nested
+/// operands are at most `ffi::MAX_DEPTH` deep (the FFI rejects deeper ones first).
 fn build(k: &mut Kernel, b: &BrepIn) -> Result<Brep, Stop> {
-    let r = match *b {
-        BrepIn::Box { origin, size } => primitives::create_box(
-            k,
-            Point3::new(origin[0], origin[1], origin[2]),
-            size[0],
-            size[1],
-            size[2],
-        ),
-        BrepIn::Sphere { center, radius } => {
-            primitives::create_sphere(k, Point3::new(center[0], center[1], center[2]), radius)
+    build_at(k, b, 0)
+}
+
+fn build_at(k: &mut Kernel, b: &BrepIn, depth: usize) -> Result<Brep, Stop> {
+    if depth >= ffi::MAX_DEPTH {
+        return Err(Stop::Harness(harness("operand nested too deep")));
+    }
+    let r = match b {
+        &BrepIn::Box { origin, size } => {
+            primitives::create_box(k, p3(origin), size[0], size[1], size[2])
+        }
+        &BrepIn::Sphere { center, radius } => primitives::create_sphere(k, p3(center), radius),
+        &BrepIn::Plane { origin, size } => {
+            primitives::create_plane(k, p3(origin), size[0], size[1])
+        }
+        BrepIn::Boolean { operation, a, b } => {
+            let (a, b) = (build_at(k, a, depth + 1)?, build_at(k, b, depth + 1)?);
+            api::boolean(k, a, b, op(*operation)?).map(|out| out.result)
         }
     };
     r.map_err(|e| stop("operand constructor", &e))

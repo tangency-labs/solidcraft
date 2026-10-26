@@ -1960,8 +1960,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     }
 
     /// Sets [`ProtoTopologyManager::split_self_loops_on_vertices`]; the Boolean's
-    /// topology intersector sets it to `false` (tangency-labs/solidcore#480). Not
-    /// upstream.
+    /// topology intersector sets it to `false` when
+    /// `Kernel::fixes.proto_edge_self_loop_on_vertex_degenerate` is on
+    /// (tangency-labs/solidcore#480, WR-214). Not upstream.
     pub fn set_split_self_loops_on_vertices(&mut self, split: bool) {
         self.split_self_loops_on_vertices = split;
     }

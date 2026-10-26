@@ -73,7 +73,9 @@
 //!   fails in `MakeFaceuse` (a union whose coplanar faces' rims cross 4e-5 to 2e-4 mm
 //!   from a vertex, `SM_ERR`). With
 //!   [`ProtoTopologyManager::set_split_self_loops_on_vertices`]`(false)`, which the
-//!   Boolean's topology intersector sets, [`ProtoTopologyManager::resolve_proto_edge`]
+//!   Boolean's topology intersector sets only with the opt-in
+//!   `Kernel::fixes.proto_edge_self_loop_on_vertex_degenerate`,
+//!   [`ProtoTopologyManager::resolve_proto_edge`]
 //!   treats such a proto edge as degenerate instead, as upstream does for one shorter
 //!   than `2 * m_dTol`. The default keeps upstream's split, so this unit's difftest
 //!   still compares the faithful port (7 generated cases reach the branch).

@@ -1186,9 +1186,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             capture_distance,
             0.0,
         )?;
-        // Not upstream (tangency-labs/solidcore#480, plan/upstream-issues.md WR-214):
-        // a self-loop proto edge on a vertex is dropped, not split onto that vertex.
-        mgr.set_split_self_loops_on_vertices(false);
+        // Not upstream unless opted in (`Kernel::fixes.proto_edge_self_loop_on_vertex_degenerate`,
+        // WR-214, tangency-labs/solidcore#480): a self-loop proto edge on a vertex is
+        // dropped, not split onto that vertex. Off (the default), upstream's split.
+        mgr.set_split_self_loops_on_vertices(!k.fixes.proto_edge_self_loop_on_vertex_degenerate);
         self.proto_topo_mgr = Some(mgr);
 
         // Intersect Topology; if that didn't work, quit before we mess up the Breps.
