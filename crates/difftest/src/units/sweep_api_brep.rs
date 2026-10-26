@@ -20,6 +20,13 @@
 //! empty inputs, a missing path, a non-positive pipe radius, a cap selector out of
 //! range) and the sweep results are covered. Every run has at least [`MIN_GENERATED`]
 //! generated cases.
+//!
+//! Linear fixtures may opt into `observe_geometry` (default false). The additive
+//! record contains actual reachable vertices, edge intervals and samples at
+//! 0.17/0.37/0.83, followed by manifold and volume queries (accuracy 1e-6).
+//! Evaluation/query statuses are retained; no healing or extra stitching is done.
+//! Observation decoding rejects truncated records without unchecked indexing.
+//! Legacy records and generated inputs remain unchanged.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -100,6 +107,8 @@ fn null() -> CrvIn {
 #[serde(tag = "op", rename_all = "snake_case")]
 enum Inputs {
     Linear {
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        observe_geometry: bool,
         curves: Vec<CrvIn>,
         dir: P3,
         dist: f64,
@@ -226,6 +235,7 @@ fn call_of(i: &Inputs) -> Call {
             dir,
             dist,
             cap,
+            ..
         } => Call::Linear {
             curves: specs(curves),
             dir: *dir,
@@ -331,7 +341,13 @@ fn call_of(i: &Inputs) -> Call {
 }
 
 fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
-    let flat = ffi::run(&call_of(i)).map_err(|e| harness(e.to_string()))?;
+    let call = call_of(i);
+    let flat = if observes(i) {
+        ffi::observe_linear(&call)
+    } else {
+        ffi::run(&call)
+    }
+    .map_err(|e| harness(e.to_string()))?;
     to_output(i, &flat)
 }
 
@@ -363,6 +379,26 @@ fn to_output(i: &Inputs, flat: &[f64]) -> Result<Output, HarnessError> {
         ) {
             out = out.values("faces", take(flat, &mut at, 3)?.to_vec());
         }
+    }
+    if observes(i) && out.values.get("has").and_then(|v| v.first()) == Some(&1.0) {
+        let counts = out
+            .values
+            .get("counts")
+            .ok_or_else(|| harness("missing counts"))?;
+        let count = |index: usize| -> Result<usize, HarnessError> {
+            let value = *counts.get(index).ok_or_else(|| harness("missing count"))?;
+            if value.is_finite() && (0.0..=4096.0).contains(&value) && value.fract() == 0.0 {
+                Ok(value as usize)
+            } else {
+                Err(harness("invalid observation count"))
+            }
+        };
+        let (nv, ne) = (count(2)?, count(1)?);
+        let observation = flat
+            .get(at..)
+            .ok_or_else(|| harness("missing observation record"))?;
+        out = decode_observation(out, observation, nv, ne)?;
+        at = flat.len();
     }
     if at != flat.len() {
         return Err(harness(format!(
@@ -522,6 +558,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             dir,
             dist,
             cap,
+            ..
         } => {
             let cs = curves(&k, cs)?;
             api::create_linear_sweep(&mut k, &refs(&cs), v(dir), *dist, *cap).map(Swept::Brep)
@@ -674,12 +711,137 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         }
     };
     match res {
-        Ok(s) => Ok(success(&s)),
+        Ok(mut s) => {
+            let out = success(&s);
+            if !observes(i) {
+                return Ok(out);
+            }
+            let body = match &mut s {
+                Swept::Brep(b) => b,
+                Swept::CurveSweep(c) => &mut c.brep,
+            };
+            let nv = solidcore::topology::brep::p1::vertices(body, None)
+                .map_err(|e| harness(e.to_string()))?
+                .len();
+            let ne = solidcore::topology::brep::p1::edges(body, None)
+                .map_err(|e| harness(e.to_string()))?
+                .len();
+            match rust_observation(&k, body) {
+                Ok(flat) => decode_observation(out, &flat, nv, ne),
+                Err(e) => Ok(Output::unported(&e).unwrap_or_else(|| Output::err(e.to_string()))),
+            }
+        }
         Err(e) => match Output::unported(&e) {
             Some(out) => Ok(out),
             None => to_output(i, &[status(&e)]),
         },
     }
+}
+
+fn observes(i: &Inputs) -> bool {
+    matches!(
+        i,
+        Inputs::Linear {
+            observe_geometry: true,
+            ..
+        }
+    )
+}
+
+fn decode_observation(
+    mut out: Output,
+    flat: &[f64],
+    nv: usize,
+    ne: usize,
+) -> Result<Output, HarnessError> {
+    if nv > 4096 || ne > 4096 {
+        return Err(harness("observation too large"));
+    }
+    let mut at = 0;
+    out = out
+        .values("linear_vertices", take(flat, &mut at, 3 * nv)?.to_vec())
+        .values(
+            "linear_edge_intervals",
+            take(flat, &mut at, 2 * ne)?.to_vec(),
+        );
+    let mut statuses = Vec::new();
+    let mut samples = Vec::new();
+    for _ in 0..3 * ne {
+        let [evaluation_status] = take(flat, &mut at, 1)? else {
+            return Err(harness("missing evaluation status"));
+        };
+        statuses.push(*evaluation_status as i64);
+        samples.extend_from_slice(take(flat, &mut at, 3)?);
+    }
+    let [manifold_status, manifold, volume_status, volume] = take(flat, &mut at, 4)? else {
+        return Err(harness("missing query record"));
+    };
+    out = out
+        .ints("linear_evaluation_status", statuses)
+        .values("linear_edge_samples", samples)
+        .ints(
+            "linear_manifold",
+            vec![*manifold_status as i64, *manifold as i64],
+        )
+        .int("linear_volume_status", *volume_status as i64)
+        .scalar("linear_volume", *volume);
+    if at != flat.len() {
+        return Err(harness("trailing observation values"));
+    }
+    Ok(out)
+}
+
+fn rust_observation(k: &Kernel, body: &mut Brep) -> solidcore::Result<Vec<f64>> {
+    use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+    use solidcore::mass::integrator::properties::{brep_volume, PropertyAttributes};
+    use solidcore::topology::brep::p1;
+    let vertices = p1::vertices(body, None)?;
+    let edges = p1::edges(body, None)?;
+    if vertices.len() > 4096 || edges.len() > 4096 {
+        return Err(SolidError::invalid_input(
+            "harness::linear_observation",
+            "observation too large",
+        ));
+    }
+    let mut flat = Vec::new();
+    for id in vertices {
+        let p = body.vertex(id)?.point;
+        flat.extend([p.x, p.y, p.z]);
+    }
+    for &id in &edges {
+        let e = body.edge(id)?;
+        flat.extend([e.interval.min(), e.interval.max()]);
+    }
+    for id in edges {
+        let e = body.edge(id)?;
+        for fraction in [0.17, 0.37, 0.83] {
+            let result = match &e.curve {
+                Some(c) => c.evaluate_point(k, e.interval.evaluate(fraction)),
+                None => Err(SolidError::sm_err("harness::linear_observation")),
+            };
+            match result {
+                Ok(p) => flat.extend([0.0, p.x, p.y, p.z]),
+                Err(e) if e.is_unported() => return Err(e),
+                Err(e) => flat.extend([status(&e), 0.0, 0.0, 0.0]),
+            }
+        }
+    }
+    match solidcore::query::api_queries::brep_is_manifold_solid(body) {
+        Ok(m) => flat.extend([0.0, f64::from(m)]),
+        Err(e) if e.is_unported() => return Err(e),
+        Err(e) => flat.extend([status(&e), 0.0]),
+    }
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    match brep_volume(k, body, 1e-6, &attrs) {
+        Ok(v) => flat.extend([0.0, v]),
+        Err(e) if e.is_unported() => return Err(e),
+        Err(e) => flat.extend([status(&e), 0.0]),
+    }
+    Ok(flat)
 }
 
 // ---- generators ---------------------------------------------------------------------
@@ -890,6 +1052,7 @@ fn gen_case_at(rng: &mut Rng, s: f64) -> Inputs {
             let curves = gen_consumed(rng, s, off, false);
             let dist = s * rng.uniform(-5.0, 10.0);
             Inputs::Linear {
+                observe_geometry: false,
                 dist: if has_full_circle(&curves) {
                     dist.abs()
                 } else {
@@ -1045,6 +1208,23 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
+    /// Golden stream executed against the pre-observer runner at 11595407bedc.
+    /// Includes each next RNG draw, not only serialized case identities.
+    #[test]
+    fn legacy_generator_serialization_and_rng_stream() {
+        let mut hash = 0xcbf29ce484222325_u64;
+        for seed in 0..400_u64 {
+            let mut rng = Rng::new(0x5eed_0000 + seed);
+            let serialized = serde_json::to_string(&gen_case(&mut rng)).expect("serialize");
+            assert!(!serialized.contains("observe_geometry"));
+            let record = format!("{serialized}\t{}", rng.next_u64());
+            for byte in record.bytes() {
+                hash = (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3);
+            }
+        }
+        assert_eq!(hash, 0xa1d1_fd86_67ec_73fa);
+    }
+
     /// The generators reach every op, and most cases are compared, not deferred.
     #[test]
     fn generated_cases_cover_every_op() {
@@ -1114,5 +1294,127 @@ mod tests {
             compared * 2 >= MIN_GENERATED,
             "only {compared} compared cases"
         );
+    }
+
+    #[test]
+    fn linear_geometry_native_and_analytic_controls() {
+        let data: Value = serde_json::from_str(include_str!(
+            "../../../../fixtures/sweep.api_brep/linear_geometry.json"
+        ))
+        .expect("fixture");
+        let mut observations = Vec::new();
+        for case in data["cases"].as_array().expect("cases") {
+            let i: Inputs = serde_json::from_value(case["inputs"].clone()).expect("input");
+            let distance = case["inputs"]["dist"].as_f64().expect("distance");
+            let native = cpp(&i).expect("native");
+            let observed = rust(&i).expect("rust");
+            assert!(crate::compare::compare(&native, &observed, &[]).pass());
+            assert_eq!(observed.values["status"], vec![0.0]);
+            assert_eq!(observed.values["has"], vec![1.0]);
+            assert_eq!(observed.values["counts"], vec![6.0, 12.0, 8.0]);
+            assert_eq!(observed.ints["linear_manifold"], vec![0, 1]);
+            assert_eq!(observed.ints["linear_volume_status"], vec![0]);
+            assert_eq!(observed.ints["linear_evaluation_status"], vec![0; 36]);
+            assert!(
+                (observed.values["linear_volume"][0] - 6.0 * distance).abs()
+                    <= 1e-9 * 6.0 * distance
+            );
+            let mut expected = Vec::new();
+            for x in [2.0, 4.0] {
+                for y in [3.0, 6.0] {
+                    for z in [5.0, 5.0 + distance] {
+                        expected.push([x, y, z]);
+                    }
+                }
+            }
+            let mut actual = observed.values["linear_vertices"]
+                .as_chunks::<3>()
+                .0
+                .to_vec();
+            actual.sort_by(|a, b| a.partial_cmp(b).expect("finite"));
+            assert_eq!(actual, expected);
+            // Closed-form prism edges, independent of either kernel's graph/order.
+            let mut expected_edges = Vec::new();
+            for (index, a) in expected.iter().enumerate() {
+                for b in expected.iter().skip(index + 1) {
+                    if a.iter().zip(b).filter(|(a, b)| a != b).count() == 1 {
+                        expected_edges.push((*a, *b));
+                    }
+                }
+            }
+            assert_eq!(expected_edges.len(), 12);
+            for output in [&native, &observed] {
+                let mut seen = vec![false; 12];
+                for samples in output.values["linear_edge_samples"].as_chunks::<9>().0 {
+                    let index = expected_edges
+                        .iter()
+                        .position(|&(a, b)| {
+                            [(a, b), (b, a)].iter().any(|(a, b)| {
+                                [0.17, 0.37, 0.83].iter().enumerate().all(|(j, &t)| {
+                                    (0..3).all(|axis| {
+                                        let value = a[axis] + t * (b[axis] - a[axis]);
+                                        let actual = samples[3 * j + axis];
+                                        (actual - value).abs()
+                                            <= 1e-9 * actual.abs().max(value.abs())
+                                    })
+                                })
+                            })
+                        })
+                        .expect("samples lie on a true prism edge at the requested fractions");
+                    assert!(!seen[index], "duplicate edge");
+                    seen[index] = true;
+                }
+                assert!(seen.into_iter().all(|seen| seen));
+            }
+            for key in ["linear_vertices", "linear_edge_samples", "linear_volume"] {
+                let mut changed = observed.clone();
+                changed.values.get_mut(key).expect("key")[0] *= 1.0 + 1e-8;
+                assert!(
+                    !crate::compare::compare(&native, &changed, &[]).pass(),
+                    "{key}"
+                );
+            }
+            let mut changed = observed.clone();
+            changed.ints.get_mut("linear_manifold").expect("manifold")[1] ^= 1;
+            assert!(!crate::compare::compare(&native, &changed, &[]).pass());
+            let mut legacy_input = i.clone();
+            if let Inputs::Linear {
+                observe_geometry, ..
+            } = &mut legacy_input
+            {
+                *observe_geometry = false;
+            }
+            let legacy = rust(&legacy_input).expect("legacy");
+            let legacy_native = cpp(&legacy_input).expect("legacy native");
+            assert!(crate::compare::compare(&legacy_native, &legacy, &[]).pass());
+            let legacy_flat = ffi::run(&call_of(&legacy_input)).expect("legacy record");
+            let observed_flat = ffi::observe_linear(&call_of(&i)).expect("observed record");
+            assert_eq!(
+                legacy_flat.iter().map(|v| v.to_bits()).collect::<Vec<_>>(),
+                observed_flat[..legacy_flat.len()]
+                    .iter()
+                    .map(|v| v.to_bits())
+                    .collect::<Vec<_>>()
+            );
+            for (key, value) in &legacy.values {
+                assert_eq!(observed.values.get(key), Some(value));
+                assert_eq!(native.values.get(key), legacy_native.values.get(key));
+            }
+            eprintln!(
+                "linear distance={distance}: native counts={:?} manifold={:?} volume={:?}; 36 edge evaluations; four mutations detected; legacy prefix bit-identical",
+                native.values["counts"],
+                native.ints["linear_manifold"],
+                native.values["linear_volume"]
+            );
+            observations.push(observed);
+        }
+        assert_eq!(observations.len(), 2);
+        assert_eq!(
+            observations[0].values["counts"],
+            observations[1].values["counts"]
+        );
+        for key in ["linear_vertices", "linear_edge_samples", "linear_volume"] {
+            assert_ne!(observations[0].values[key], observations[1].values[key]);
+        }
     }
 }

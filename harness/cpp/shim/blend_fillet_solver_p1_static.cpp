@@ -569,7 +569,7 @@ struct SplitOwnerEvent {
     SmObject* data2;
     SmObject* data3;
     SmObject* observed_owner;
-    ULONG type;
+    SM_TYPE type;
 };
 struct SplitOwnerRecorder : SmNotifyCallback {
     bool system;

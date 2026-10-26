@@ -19,6 +19,8 @@
 #include <SmApiCurves.h>
 #include <SmApiGeneral.h>
 #include <SmApiPrimitives.h>
+#include <SmApiQueries.h>
+#include <SmVertex.h>
 #include <SmBSplineCurve.h>
 #include <SmBrep.h>
 #include <SmCircle.h>
@@ -33,6 +35,7 @@
 #include <SmVector3d.h>
 
 #include <stdexcept>
+#include <memory>
 #include <vector>
 
 #include "sc_sm.h"
@@ -251,8 +254,43 @@ struct Owned
     }
 };
 
+// Opt-in only: read the actual result before put_brep destroys it. No mutation,
+// healing or additional stitching; geometry precedes manifold and volume queries.
+void observe_linear(std::vector<double>& o, SmBrep* result)
+{
+    SmTArray<SmVertex*> vertices; result->GetVertices(vertices);
+    SmTArray<SmEdge*> edges; result->GetEdges(edges);
+    if (vertices.GetSize() > 4096 || edges.GetSize() > 4096) throw Bad();
+    for (ULONG i = 0; i < vertices.GetSize(); ++i) {
+        const auto p = vertices[i]->GetPoint(); o.insert(o.end(), {p.x,p.y,p.z});
+    }
+    for (ULONG i = 0; i < edges.GetSize(); ++i) {
+        const auto interval = edges[i]->GetInterval();
+        o.insert(o.end(), {interval.GetMin(), interval.GetMax()});
+    }
+    for (ULONG i = 0; i < edges.GetSize(); ++i) {
+        const auto interval = edges[i]->GetInterval();
+        SmCurve* curve = edges[i]->GetCurve();
+        for (double fraction : {0.17,0.37,0.83}) {
+            SmPoint3d p(0,0,0);
+            const SmStatus status = curve ? curve->EvaluatePoint(interval.Evaluate(fraction),p) : SM_ERR;
+            o.push_back(st(status));
+            if (status == SM_SUCCESS) o.insert(o.end(), {p.x,p.y,p.z});
+            else o.insert(o.end(), {0.0,0.0,0.0});
+        }
+    }
+    SmBoolean manifold = FALSE;
+    const SmStatus manifold_status = SmApiBrepIsManifoldSolid(result, manifold);
+    o.push_back(st(manifold_status));
+    o.push_back(manifold_status == SM_SUCCESS && manifold ? 1.0 : 0.0);
+    double volume = 0.0;
+    const SmStatus volume_status = SmApiBrepComputeVolume(result, 1e-6, volume);
+    o.push_back(st(volume_status));
+    o.push_back(volume_status == SM_SUCCESS ? volume : 0.0);
+}
+
 // The status then, on success, `has [faces edges vertices]`.
-void put_brep(std::vector<double>& o, SmApiStatus stat, SmBrep* res)
+void put_brep(std::vector<double>& o, SmApiStatus stat, SmBrep* res, bool observe = false)
 {
     o.push_back(st(stat));
     if (stat == SM_SUCCESS)
@@ -265,7 +303,9 @@ void put_brep(std::vector<double>& o, SmApiStatus stat, SmBrep* res)
             o.push_back((double)res->GetNumVertices());
         }
     }
-    delete res;
+    // Retain owning cleanup even if observing throws.
+    std::unique_ptr<SmBrep> cleanup(res);
+    if (observe && stat == SM_SUCCESS && res) observe_linear(o, res);
 }
 
 // put_brep, then on success the start, side and end face counts.
@@ -312,9 +352,10 @@ SmSweepOptions options_of(const SweepArgs& a)
     return o;
 }
 
-void run(Rd& rd, std::vector<double>& o)
+void run(Rd& rd, std::vector<double>& o, bool observe = false)
 {
     int32_t op = (int32_t)rd.idx(1, 11);
+    if (observe && op != OP_LINEAR) throw Bad();
     switch (op)
     {
     case OP_LINEAR:
@@ -334,7 +375,7 @@ void run(Rd& rd, std::vector<double>& o)
                 ? SmApiCreateLinearSweep(curves, v3(dir.data()), dir[3], cap ? TRUE : FALSE, res)
                 : SmApiCreateLinearSweepWithRepetitions(curves, v3(dir.data()), dir[3], reps,
                                                         cap ? TRUE : FALSE, res);
-        put_brep(o, stat, res);
+        put_brep(o, stat, res, observe);
         break;
     }
     case OP_ROTATIONAL:
@@ -483,6 +524,20 @@ SC_EXPORT int32_t sc_sweep_api_brep_run(const double* in, int64_t n_in, double* 
     {
         return SC_ERR_ARG;
     }
+    return sc_copy_out(o.data(), (int64_t)o.size(), out, cap, out_len);
+    SC_CATCH
+}
+
+// Additive entry: the legacy entry and its wire format remain unchanged.
+SC_EXPORT int32_t sc_sweep_api_brep_observe_linear(const double* in, int64_t n_in,
+    double* out, int64_t cap, int64_t* out_len)
+{
+    SC_TRY
+    SmApiGetOrCreateContext();
+    Rd rd{in, n_in, 0};
+    std::vector<double> o;
+    try { run(rd, o, true); }
+    catch (const Bad&) { return SC_ERR_ARG; }
     return sc_copy_out(o.data(), (int64_t)o.size(), out, cap, out_len);
     SC_CATCH
 }
