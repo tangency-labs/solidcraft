@@ -1,0 +1,14 @@
+[package]
+name = "step-brep"
+description = "Build solidcore B-rep bodies from the neutral step-import model"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+publish = false
+
+[dependencies]
+solidcore = { path = "../solidcore" }
+step-import = { path = "../step-import" }
+
+[lints]
+workspace = true
