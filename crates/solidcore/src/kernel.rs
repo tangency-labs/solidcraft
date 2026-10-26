@@ -155,6 +155,8 @@ pub struct UpstreamFixes {
     pub fillet_refuse_face_consuming_blends: bool,
     /// `DoFillet` refuses a filleted target that is not a closed manifold solid (an edge that is not `SmEdge::IsManifold`) with `SM_FILERR_BAD_MERGE`, where upstream returns success (WR-212, #422).
     pub fillet_refuse_non_manifold_result: bool,
+    /// The fillet executive refuses two rounds on edges of one face whose rails cross on it (no room between them), before the target is edited, where upstream builds an open body (WR-460, #1073).
+    pub fillet_refuse_crossing_rails: bool,
     /// The fillet solver tries the corner ball's patch after the torus when a round's centre line collapses to a point (WR-420, #416).
     pub fillet_corner_ball_patch: bool,
     /// `CalcTorusFilletGeom` revolves a linear section into a cone (WR-421, #420).

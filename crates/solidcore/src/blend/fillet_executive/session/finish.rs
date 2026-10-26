@@ -472,6 +472,9 @@ impl FilletSession<'_> {
             if faces < 1 {
                 return Err(failure());
             }
+            if k.fixes.fillet_refuse_crossing_rails {
+                session.refuse_crossing_rails(k)?;
+            }
             session.shrink_fillet_faces(k)?;
             let editing = session.objects.target.editing_enabled();
             session.objects.target.set_editing_enabled(true);
