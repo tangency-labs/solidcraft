@@ -47,10 +47,12 @@ impl Configuration {
                 if let Some(old) = previous.get("connections").and_then(Value::as_array).and_then(|entries| {
                     entries.iter().find(|old| old.get("id").and_then(Value::as_str) == connection.get("id").and_then(Value::as_str))
                 }) {
-                    let unpinned = connection.get("git_remote").is_none();
+                    let removed: Vec<_> = ["git_remote", "https_username"].into_iter().filter(|key| connection.get(key).is_none()).collect();
                     merge_optional(connection, old);
-                    if unpinned && let Some(fields) = connection.as_object_mut() {
-                        fields.remove("git_remote");
+                    if let Some(fields) = connection.as_object_mut() {
+                        for key in removed {
+                            fields.remove(key);
+                        }
                     }
                 }
             }
@@ -99,6 +101,16 @@ mod tests {
             Configuration::read(br#"{"format":"solidcraft-connections/1","settings":{"connections":[{"authentication":"future"}]}}"#),
             Err(Error::UpgradeRequired(_))
         ));
+    }
+
+    #[test]
+    fn clearing_https_username_survives_an_update_without_losing_optional_metadata() {
+        let mut config = Configuration::read(br#"{"format":"solidcraft-connections/1","settings":{"connections":[{"id":"git","provider":"","https_username":"old-user","future_note":42}]}}"#).unwrap();
+        let mut settings = config.settings().unwrap();
+        settings.connections[0].https_username.clear();
+        let bytes = config.update(&settings).unwrap();
+        assert!(Configuration::read(&bytes).unwrap().settings().unwrap().connections[0].https_username.is_empty());
+        assert_eq!(serde_json::from_slice::<Value>(&bytes).unwrap()["settings"]["connections"][0]["future_note"], 42);
     }
 
     #[test]

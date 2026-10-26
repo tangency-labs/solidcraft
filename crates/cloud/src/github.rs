@@ -343,7 +343,17 @@ impl GitHub {
             if let Some(document) = self.read(&tree, &format!("{prefix}/document.json"), crate::MAX_MANIFEST_BYTES).await? {
                 check_document(&document)?;
             }
-            let publication = Publication::prepare_with_parent(save, snapshot, marker.as_deref(), existing.as_deref(), parent)?;
+            let resolution_target = if let Some(destination) = crate::conflicts::target(save)? {
+                let prefix = destination.design_path()?;
+                if let Some(document) = self.read(&tree, &format!("{prefix}/document.json"), crate::MAX_MANIFEST_BYTES).await? {
+                    check_document(&document)?;
+                }
+                self.read(&tree, &format!("{prefix}/manifest.json"), crate::MAX_MANIFEST_BYTES).await?
+            } else {
+                None
+            };
+            let publication =
+                Publication::prepare_with_target(save, snapshot, marker.as_deref(), existing.as_deref(), parent, resolution_target.as_deref())?;
             if publication.already_published {
                 return Ok(Published {
                     destination: publication.destination,
