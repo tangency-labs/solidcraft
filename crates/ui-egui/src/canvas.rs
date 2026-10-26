@@ -1838,10 +1838,7 @@ mod tests {
         assert!(!handles.is_empty(), "the triad drew no handles");
         for (name, p) in &handles {
             // A press takes a handle a few px off its line (the ball's is the widest).
-            assert!(
-                !box_rect.expand(crate::gizmo::HIT_TOLERANCE).contains(*p),
-                "the value box {box_rect:?} covers the handle {name} at {p:?}"
-            );
+            assert!(!box_rect.expand(crate::gizmo::HIT_TOLERANCE).contains(*p), "the value box {box_rect:?} covers the handle {name} at {p:?}");
         }
     }
 
