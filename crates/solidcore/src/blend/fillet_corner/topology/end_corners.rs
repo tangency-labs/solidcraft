@@ -584,7 +584,7 @@ impl FilletCorner {
                 .surface
                 .base_surface();
             // Point testing off: GlobalPointSolve keeps every point solution.
-            let solutions = base.global_point_solve::<ObjectHandle>(
+            let solutions = base.global_point_solve_point_test_off::<ObjectHandle>(
                 k,
                 None,
                 &base.natural_uv_domain(),

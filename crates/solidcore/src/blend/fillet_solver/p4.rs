@@ -1695,6 +1695,18 @@ fn c3_try_analytic(
 
     // try making a torus fillet to store in m_vFilletGeoms[0]; quit when this succeeds
     match calc_torus_fillet_geom(ops, cx, &mut st.store, &st.tsect_pnts) {
+        Ok(()) => return Ok(true),
+        Err(e) if e.is_unported() => return Err(e),
+        Err(_) => {}
+    }
+
+    // WR-420 (fork addition, opt-in): where the centre line collapses to a point, the
+    // corner ball's patch
+    if !cx.k.fixes.fillet_corner_ball_patch {
+        return Ok(false);
+    }
+    let tsects = st.store.snapshot(cx.fillets, &st.tsect_pnts)?;
+    match FilletSolver::calc_sphere_fillet_geom(ops, cx.k, cx.target, cx.fillets, &tsects, None) {
         Ok(()) => Ok(true),
         Err(e) if e.is_unported() => Err(e),
         Err(_) => Ok(false),
