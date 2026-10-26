@@ -205,9 +205,14 @@ pub(crate) fn plan(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result
 /// its loop would wind round the surface). Each loop then starts at a node off every pole whose
 /// predecessor is off them too, so the step from its last node to its first, which
 /// [`seam::drift`] takes as the nearest copy, never crosses a pole. A vertex loop (a pole)
-/// bounds no area and has no nodes of its own. A pcurve that does not cover its edge's interval, or puts a
-/// node farther off the edge than the tolerances allow, is an error naming the face and edge:
-/// the record is wrong there.
+/// bounds no area and has no nodes of its own. Where the face's loops pass a vertex more than once
+/// (two holes touching at a point, a loop through another's corner), the pcurves of the edges from
+/// it give its parameters apart by their rounding, and two nodes 1e-14 apart put crossing
+/// constraints into the triangulation: a pass whose parameters agree with the first pass's to
+/// that rounding (1e-9 relative) takes the first's. Farther apart they are two places of the
+/// surface (a seam's two sides, a closed spline's ends). A pcurve that does not cover its edge's
+/// interval, or puts a node farther off the edge than the tolerances allow, is an error naming
+/// the face and edge: the record is wrong there.
 fn boundary(
     b: &brep::Brep,
     fi: usize,
@@ -220,6 +225,8 @@ fn boundary(
     let dom = uv::domain(s);
     let fail = |e: u32, why: String| unsupported(format!("face {fi} ({}): edge {e}: {why}", kind(&face.surface)));
     let mut out = Boundary { loops: Vec::with_capacity(face.loops.len()), segments: Vec::with_capacity(face.loops.len()) };
+    // Each vertex's parameters, from the first edge use of the face to start there.
+    let mut at_vertex: std::collections::HashMap<u32, [f64; 2]> = std::collections::HashMap::new();
     for l in &face.loops {
         let Loop::Edges { edges } = l else { continue };
         let (mut pts, mut uvs): (Vec<Vec3>, Vec<[f64; 2]>) = (Vec::new(), Vec::new());
@@ -264,6 +271,18 @@ fn boundary(
             for q in &mut eq {
                 q[0] += shift[0];
                 q[1] += shift[1];
+            }
+            if let (Some(&v), Some(q)) = (edge.vertices.get(usize::from(!oe.forward)), eq.first_mut()) {
+                match at_vertex.get(&v) {
+                    Some(first) => {
+                        if (0..2).all(|d| (first[d] - q[d]).abs() <= 1e-9 * first[d].abs().max(q[d].abs()).max(1.0)) {
+                            *q = *first;
+                        }
+                    }
+                    None => {
+                        at_vertex.insert(v, *q);
+                    }
+                }
             }
             end = eq.last().copied();
             ep.pop();

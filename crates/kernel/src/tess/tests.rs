@@ -128,6 +128,19 @@ fn holes_and_trimmed_faces_are_watertight() {
     assert!((a - b).abs() < 0.01 * b, "cross hole volume {a} vs {b}");
 }
 
+/// Through holes in pairs whose circles touch at one point (rig booleans/307): the plate's faces
+/// have one loop round each pair, through their common vertex twice. Both passes are one point of
+/// the face's (u, v), not two nodes the pcurves put 1e-14 apart, whose constraints crossed
+/// ("boundary crosses itself").
+#[test]
+fn holes_touching_at_a_point_are_watertight() {
+    let mut body = ok(crate::box_solid(Vec3::new(-50.0, -50.0, 0.0), Vec3::new(50.0, 50.0, 5.0)));
+    for (x, y) in [(25.0, 0.0), (-25.0, 0.0), (0.0, 25.0), (0.0, -25.0), (15.0, 0.0), (-15.0, 0.0), (0.0, 15.0), (0.0, -15.0)] {
+        body = cut(&body, &ok(crate::cylinder(Vec3::new(x, y, -1.0), Vec3::Z, 5.0, 7.0)));
+    }
+    check("holes touching at a point", &body, 0.01, 10000.0 * 5.0 - 8.0 * PI * 25.0 * 5.0);
+}
+
 #[test]
 fn faces_and_edges_keep_the_body_order() {
     let body = ok(crate::cylinder(Vec3::ZERO, Vec3::Z, 2.0, 5.0));
