@@ -167,6 +167,11 @@
   },
   {
    "name": "round_4_over_hole",
+   "refused_by": {
+    "issue": "tangency-labs/solidcore#422",
+    "step": "result",
+    "error": "fillet_executive::session::finish: upstream status 1001"
+   },
    "note": "#324's own request: an R4 round that runs into the hole and contours it, i.e. the block less the hole and the round's corner. Not fixed on truck, which refuses it; SMLib returns a body that is not a closed manifold solid (tangency-labs/solidcore#422).",
    "steps": [
     {

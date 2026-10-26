@@ -93,10 +93,26 @@ pub struct Case {
     /// (none: pinned SMLib behaviour).
     #[serde(default)]
     pub fixes: Vec<String>,
+    /// A known kernel refusal: only that step failing with that error defers the case;
+    /// any other error stays an ERROR, and a run that completes is checked as usual.
+    #[serde(default)]
+    pub refused_by: Option<Refusal>,
     /// Run in order; each writes the body `id`.
     pub steps: Vec<Step>,
     /// Checked on the body `result`.
     pub expect: Expect,
+}
+
+/// The one failure a case expects from the kernel, and the issue that tracks it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Refusal {
+    /// The issue (`owner/repo#n`) the case is deferred on.
+    pub issue: String,
+    /// The `id` of the step that fails.
+    pub step: String,
+    /// Text the step's error contains (the failing call and its status).
+    pub error: String,
 }
 
 /// One operation (an `SM_API` call, or a deferred higher-level recipe). `id` is the
@@ -1331,7 +1347,18 @@ pub fn run_rust(case: &Case) -> Run {
             Ok(()) => {}
             // Name the failing step (1-based) and the body it writes.
             Err(Run::Error(msg)) => {
-                return Run::Error(format!("step {} (`{}`): {msg}", n + 1, step.id()))
+                let refused = case
+                    .refused_by
+                    .as_ref()
+                    .filter(|r| r.step == step.id() && msg.contains(&r.error));
+                let msg = format!("step {} (`{}`): {msg}", n + 1, step.id());
+                return match refused {
+                    Some(r) => Run::Deferred(Deferral {
+                        blocked_by: r.issue.clone(),
+                        symbol: msg,
+                    }),
+                    None => Run::Error(msg),
+                };
             }
             Err(stop) => return stop,
         }
@@ -1668,6 +1695,26 @@ mod tests {
     }
 
     #[test]
+    fn a_refusal_defers_only_its_own_step_and_error() {
+        let refused = all()
+            .into_iter()
+            .find(|l| l.id.ends_with("/round_4_over_hole"))
+            .expect("the #422 case")
+            .case;
+        assert!(matches!(run_rust(&refused), Run::Deferred(_)));
+        let mut other_step = refused.clone();
+        if let Some(r) = other_step.refused_by.as_mut() {
+            r.step = "block".into();
+        }
+        assert!(matches!(run_rust(&other_step), Run::Error(_)));
+        let mut other_error = refused;
+        if let Some(r) = other_error.refused_by.as_mut() {
+            r.error = "upstream status 1002".into();
+        }
+        assert!(matches!(run_rust(&other_error), Run::Error(_)));
+    }
+
+    #[test]
     fn deferrals_name_a_plan_unit() {
         let units: Vec<String> = crate::plan::load(&crate::case::repo_root())
             .unwrap()
@@ -1677,7 +1724,9 @@ mod tests {
         for l in all() {
             if let Run::Deferred(d) = run_rust(&l.case) {
                 assert!(
-                    d.blocked_by == "no SM_API entry point" || units.contains(&d.blocked_by),
+                    d.blocked_by == "no SM_API entry point"
+                        || units.contains(&d.blocked_by)
+                        || l.case.refused_by.as_ref().map(|r| &r.issue) == Some(&d.blocked_by),
                     "{}: {d:?}",
                     l.id
                 );
@@ -1859,6 +1908,7 @@ mod tests {
             name: "c".into(),
             note: None,
             fixes: Vec::new(),
+            refused_by: None,
             steps,
             expect: Expect::default(),
         };
