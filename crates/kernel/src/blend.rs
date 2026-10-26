@@ -230,15 +230,17 @@ fn radius_step(radius: f64) -> f64 {
 }
 
 /// The largest radius below `radius` (to three significant digits) at which the fillet of
-/// these edges works, with its result; `None` when none does. Each candidate is a real fillet
+/// these edges works, with its result; `Ok(None)` when none does. Each candidate is a real fillet
 /// of the edges, so the radius returned is one that was built; the search runs up to 16 of
-/// them, so it is for an explicit request, not every refusal.
-pub fn fillet_max(body: &Body, edges: &[Vec3], radius: f64) -> Option<(f64, Body)> {
+/// them, so it is for an explicit request, not every refusal. Only a refusal as too large
+/// ([`KernelError::TooLarge`]) narrows the search: any other failure of a candidate is the
+/// search's error, since a smaller radius would not be the largest that fits.
+pub fn fillet_max(body: &Body, edges: &[Vec3], radius: f64) -> Result<Option<(f64, Body)>> {
     if !(radius.is_finite() && radius > 1e-6) {
-        return None;
+        return Ok(None);
     }
     let q = radius_step(radius);
-    // Radii n·q for n in [0, hi): hi fails (it is the request, or above it), lo works.
+    // Radii n·q for n in [0, hi): hi is too large (it is the request, or above it), lo works.
     let mut hi = (radius / q).ceil() as u64;
     let mut lo = 0u64;
     let mut best: Option<Body> = None;
@@ -253,22 +255,24 @@ pub fn fillet_max(body: &Body, edges: &[Vec3], radius: f64) -> Option<(f64, Body
                 lo = mid;
                 best = Some(b);
             }
-            Err(_) => hi = mid,
+            Err(KernelError::TooLarge(_)) => hi = mid,
+            Err(e) => return Err(e),
         }
     }
-    best.map(|b| (lo as f64 * q, b))
+    Ok(best.map(|b| (lo as f64 * q, b)))
 }
 
 /// [`fillet_max`] for each group of the edges that may limit each other's radius (sharing a
 /// face or a vertex, directly or through other edges in the group), so a round that fits isn't
-/// reduced for a tight edge elsewhere. The radius per edge (in `edges`' order) and the result;
-/// one radius for all (as [`fillet_max`]) when a group is refused for another reason than its
-/// size, the groups don't build together, or there are too many to search (each search is up
-/// to 16 fillets, and this runs in the live preview).
-pub fn fillet_max_each(body: &Body, edges: &[Vec3], radius: f64) -> Option<(Vec<f64>, Body)> {
+/// reduced for a tight edge elsewhere. The radius per edge (in `edges`' order) and the result,
+/// `Ok(None)` when no radius fits. One radius for all (as [`fillet_max`]) when the groups,
+/// each reduced to fit, are too large together, or there are too many to search (each search is
+/// up to 16 fillets, and this runs in the live preview). Any failure other than a refusal as too
+/// large is the error.
+pub fn fillet_max_each(body: &Body, edges: &[Vec3], radius: f64) -> Result<Option<(Vec<f64>, Body)>> {
     const MAX_GROUPS: usize = 8;
     const MAX_SEARCHES: usize = 2;
-    let one = || fillet_max(body, edges, radius).map(|(r, b)| (vec![r; edges.len()], b));
+    let one = || -> Result<Option<(Vec<f64>, Body)>> { Ok(fillet_max(body, edges, radius)?.map(|(r, b)| (vec![r; edges.len()], b))) };
     let Some(groups) = interacting_groups(body, edges).filter(|g| g.len() > 1 && g.len() <= MAX_GROUPS) else { return one() };
     let mut radii = vec![radius; edges.len()];
     let mut searches = 0;
@@ -278,12 +282,13 @@ pub fn fillet_max_each(body: &Body, edges: &[Vec3], radius: f64) -> Option<(Vec<
             Ok(_) => continue,
             Err(KernelError::TooLarge(_)) if searches < MAX_SEARCHES => {
                 searches += 1;
-                match fillet_max(body, &pts, radius) {
+                match fillet_max(body, &pts, radius)? {
                     Some((r, _)) => r,
                     None => return one(),
                 }
             }
-            Err(_) => return one(),
+            Err(KernelError::TooLarge(_)) => return one(),
+            Err(e) => return Err(e),
         };
         for i in g {
             if let Some(x) = radii.get_mut(*i) {
@@ -292,8 +297,9 @@ pub fn fillet_max_each(body: &Body, edges: &[Vec3], radius: f64) -> Option<(Vec<
         }
     }
     match fillet_each(body, edges, &radii) {
-        Ok(b) => Some((radii, b)),
-        Err(_) => one(),
+        Ok(b) => Ok(Some((radii, b))),
+        Err(KernelError::TooLarge(_)) => one(),
+        Err(e) => Err(e),
     }
 }
 
