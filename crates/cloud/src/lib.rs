@@ -5,6 +5,7 @@
 
 mod catalog;
 mod configuration;
+pub mod conflicts;
 pub mod credentials;
 mod download;
 #[cfg(feature = "github")]

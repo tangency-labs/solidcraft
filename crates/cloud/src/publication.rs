@@ -88,6 +88,18 @@ impl Publication {
         existing: Option<&[u8]>,
         parent: Option<&Published>,
     ) -> Result<Self> {
+        Self::prepare_with_target(save, snapshot, project_marker, existing, parent, None)
+    }
+
+    /// Resolution compares both design heads in the same repository tree before publishing.
+    pub fn prepare_with_target(
+        save: &PendingSave,
+        snapshot: Snapshot,
+        project_marker: Option<&[u8]>,
+        existing: Option<&[u8]>,
+        parent: Option<&Published>,
+        resolution_target: Option<&[u8]>,
+    ) -> Result<Self> {
         PendingSave::read(&serde_json::to_vec(save).map_err(|e| Error::Invalid(e.to_string()))?)?;
         if snapshot.manifest.write()? != save.manifest.write()? {
             return Err(Error::Invalid("snapshot does not match queued save".into()));
@@ -105,6 +117,9 @@ impl Publication {
         let conflict = conflict || (!already_published && previous.is_some() && actual.is_none());
         if change.is_some() && (conflict || redirected || previous.is_none()) {
             return Err(Error::Conflict);
+        }
+        if matches!(change, Some(crate::management::Change::Resolve { .. })) {
+            return crate::conflicts::prepare(save, snapshot, resolution_target, already_published);
         }
         if conflict {
             destination = conflict_destination(&destination, &save.id)?;
@@ -175,6 +190,79 @@ impl Publication {
 mod tests {
     use super::*;
     use crate::Connection;
+
+    #[test]
+    fn conflict_resolution_checks_both_heads_is_atomic_and_retries_without_replacing_newer_edits() {
+        use crate::{
+            conflicts::{CAPABILITY, Keep},
+            management::Change,
+        };
+        let connection = Connection::default();
+        let first = PendingSave::stage(
+            &connection,
+            "Project",
+            "parts/design",
+            None,
+            Snapshot::prepare(b"{\"remote\":true}".to_vec(), BTreeMap::new()).unwrap(),
+        )
+        .unwrap();
+        let remote = Publication::prepare(&first.record, first.record.recover(|p| Ok(first.objects[p].clone())).unwrap(), None, None).unwrap();
+        let marker = &remote.files["Project/solidcraft-project.json"];
+        let original = &remote.files["Project/parts/design/manifest.json"];
+        let local = PendingSave::stage(
+            &connection,
+            "Project",
+            "parts/design",
+            None,
+            Snapshot::prepare(b"{\"local\":true}".to_vec(), BTreeMap::new()).unwrap(),
+        )
+        .unwrap();
+        let copy = Publication::prepare(&local.record, local.record.recover(|p| Ok(local.objects[p].clone())).unwrap(), Some(marker), Some(original))
+            .unwrap();
+        assert_eq!(crate::conflicts::original(&copy.destination).unwrap().unwrap(), first.record.destination);
+        let source_path = format!("{}/manifest.json", copy.destination.design_path().unwrap());
+        let source = &copy.files[&source_path];
+        for keep in [Keep::Local, Keep::Remote] {
+            let mut snapshot = local.record.recover(|p| Ok(local.objects[p].clone())).unwrap();
+            snapshot
+                .manifest
+                .set_change(&Change::Resolve { file: first.record.destination.file.clone(), revision: Some(first.record.id.clone()), keep })
+                .unwrap();
+            let save = PendingSave::stage(&connection, "Project", &copy.destination.file, Some(local.record.id.clone()), snapshot).unwrap();
+            let recover = || save.record.recover(|p| Ok(save.objects[p].clone())).unwrap();
+            let plan = Publication::prepare_with_target(&save.record, recover(), Some(marker), Some(source), None, Some(original)).unwrap();
+            assert!(Manifest::read(&plan.files[&source_path]).unwrap().deleted());
+            assert!(!plan.conflict);
+            assert!(plan.files.values().all(|bytes| !String::from_utf8_lossy(bytes).contains(CAPABILITY)));
+            assert_eq!(plan.files.contains_key("Project/parts/design/document.json"), keep == Keep::Local);
+            if keep == Keep::Local {
+                assert_eq!(plan.files["Project/parts/design/document.json"], b"{\"local\":true}");
+            }
+            let mut newer = Manifest::read(original).unwrap();
+            newer.extra.insert("revision".into(), "f".repeat(64).into());
+            assert!(matches!(
+                Publication::prepare_with_target(&save.record, recover(), Some(marker), Some(source), None, Some(&newer.write().unwrap())),
+                Err(Error::Conflict)
+            ));
+            let retry = Publication::prepare_with_target(
+                &save.record,
+                recover(),
+                Some(marker),
+                Some(&plan.files[&source_path]),
+                None,
+                Some(&newer.write().unwrap()),
+            )
+            .unwrap();
+            assert!(retry.already_published && retry.files.is_empty());
+            let published = Published { destination: plan.destination, revision: save.record.id.clone(), commit: "a".repeat(40), conflict: false };
+            let cached = crate::conflicts::confirmed(&save.record, &published).unwrap().unwrap();
+            assert!(cached[0].save.manifest.deleted());
+            assert_eq!(cached.len(), if keep == Keep::Local { 2 } else { 1 });
+            let mut future: Value = serde_json::from_slice(&save.record.manifest.write().unwrap()).unwrap();
+            future["required"].as_array_mut().unwrap().push("conflict-resolution/2".into());
+            assert!(matches!(Manifest::read(&serde_json::to_vec(&future).unwrap()), Err(Error::UpgradeRequired(_))));
+        }
+    }
 
     #[test]
     fn management_is_atomic_idempotent_and_refuses_a_stale_parent() {

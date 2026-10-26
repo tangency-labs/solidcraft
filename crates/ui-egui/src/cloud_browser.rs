@@ -13,6 +13,7 @@ use solidcraft_cloud::{
 use solidcraft_engine::doc::Document;
 
 use crate::{SolveApp, i18n::tr, ui_kit};
+mod conflicts;
 pub(crate) mod management;
 mod previews;
 mod status;
@@ -33,6 +34,7 @@ pub(crate) struct Browser {
     completed_syncs: std::collections::BTreeSet<String>,
     receiving: std::collections::BTreeSet<String>,
     management: management::State,
+    conflicts: conflicts::State,
     pending_since: BTreeMap<tabs::PendingKey, web_time::Instant>,
 }
 
@@ -201,6 +203,7 @@ fn entries(status: &JobStatus, connection: &str) -> Result<(Vec<Destination>, Ve
 pub(crate) fn tick(app: &mut SolveApp, statuses: &[JobStatus]) {
     poll(app, statuses);
     management::tick(app, statuses);
+    conflicts::tick(app, statuses);
 }
 
 fn poll(app: &mut SolveApp, statuses: &[JobStatus]) {
@@ -224,12 +227,25 @@ fn poll(app: &mut SolveApp, statuses: &[JobStatus]) {
             }
         }
     }
+    let mut new_conflict = None;
     for status in statuses.iter().filter(|s| !s.publications.is_empty()) {
         let seen = app.cloud.browser.publications.entry(status.operation.clone()).or_default();
         if *seen < status.publications.len() {
+            if status.change.is_none() && !app.home.open {
+                new_conflict = status
+                    .publications
+                    .iter()
+                    .skip(*seen)
+                    .find(|p| p.conflict && app.session.cloud_binding().is_some_and(|b| b.destination == p.destination))
+                    .map(|p| p.destination.clone())
+                    .or(new_conflict);
+            }
             refresh.insert(status.connection.clone());
             *seen = status.publications.len();
         }
+    }
+    if let Some(destination) = new_conflict {
+        conflicts::open(app, destination);
     }
     app.cloud.browser.statuses = statuses
         .iter()
@@ -493,6 +509,8 @@ pub(crate) fn home(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let statuses = &app.cloud.browser.statuses;
                 let mut wanted = None;
                 let mut manage = None;
+                let mut resolve = None;
+                let has_conflicts = designs.iter().any(|d| solidcraft_cloud::conflicts::original(d).ok().flatten().is_some());
                 ui_kit::FileView::recent_list(ui, |ui| {
                     egui::ScrollArea::vertical().id_salt(("cloud_designs", &c.id)).max_height(t.file_recent_height * 6.0).show_rows(
                         ui,
@@ -507,23 +525,28 @@ pub(crate) fn home(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 let path = format!("{} / {}", destination.project, destination.file);
                                 let state = status::presentation(status, app.cloud.browser.receiving.contains(&c.id));
                                 let outdated = status.is_some_and(|s| s.outdated);
-                                let response = ui
-                                    .add_enabled_ui(!app.file_load.busy() && !outdated, |ui| {
-                                        ui_kit::FileView::recent_row_with_status(
-                                            ui,
-                                            &format!("cloud:design:{index}"),
-                                            ui_kit::RecentRow {
-                                                title: destination.file.rsplit('/').next().unwrap_or(&destination.file),
-                                                path: &path,
-                                                when: "",
-                                                workspace: tr("home.design_workspace"),
-                                                thumbnail: previews::image(app, destination),
-                                                thumbnail_failed: previews::failed(app, destination),
-                                            },
-                                            state,
-                                        )
-                                    })
-                                    .inner;
+                                let conflict = solidcraft_cloud::conflicts::original(destination).ok().flatten().is_some();
+                                let (response, action) = ui_kit::FileView::recent_row_with_action(
+                                    ui,
+                                    &format!("cloud:design:{index}"),
+                                    ui_kit::RecentRow {
+                                        title: destination.file.rsplit('/').next().unwrap_or(&destination.file),
+                                        path: &path,
+                                        when: "",
+                                        workspace: tr("home.design_workspace"),
+                                        thumbnail: previews::image(app, destination),
+                                        thumbnail_failed: previews::failed(app, destination),
+                                    },
+                                    state,
+                                    !app.file_load.busy() && !outdated,
+                                    has_conflicts.then_some((tr("cmd.cloud.resolve"), conflict)),
+                                );
+                                if let Some(action) = action {
+                                    crate::scenario::publish_target(&format!("cloud:resolve:{index}"), action.rect);
+                                    if action.clicked() {
+                                        resolve = Some(destination.clone());
+                                    }
+                                }
                                 let response = if outdated { response.on_disabled_hover_text(tr("cmd.cloud.sync")) } else { response };
                                 crate::scenario::publish_target(&format!("cloud:design:{index}"), response.rect);
                                 ui_kit::Menu::context(&response, |ui| {
@@ -541,6 +564,9 @@ pub(crate) fn home(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
                 if let Some(destination) = wanted {
                     open(app, &destination);
+                }
+                if let Some(destination) = resolve {
+                    conflicts::open(app, destination);
                 }
                 if let Some(destination) = manage {
                     management::open(app, destination, false);
@@ -580,6 +606,7 @@ fn busy_button(ui: &mut egui::Ui, id: &str, label: &str, enabled: bool, busy: bo
 
 pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
     management::show(app, ctx);
+    conflicts::show(app, ctx);
     versions::show(app, ctx);
     let Some(mut picker) = app.cloud.browser.picker.take() else { return };
     if picker.tab != app.docs.active || !Arc::ptr_eq(&picker.owner, &app.session.doc) {

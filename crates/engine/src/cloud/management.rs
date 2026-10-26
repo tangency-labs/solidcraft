@@ -28,7 +28,10 @@ impl Session {
                     Arc::make_mut(&mut self.saved).name = name.into();
                     self.cloud.binding = Some(Binding { destination: managed.destination.clone(), revision: Some(managed.revision.clone()) });
                 }
-                Change::Delete => {
+                Change::Resolve { keep: solidcraft_cloud::conflicts::Keep::Local, .. } => {
+                    self.cloud.binding = Some(Binding { destination: managed.destination.clone(), revision: Some(managed.revision.clone()) });
+                }
+                Change::Delete | Change::Resolve { keep: solidcraft_cloud::conflicts::Keep::Remote, .. } => {
                     self.cloud.binding = None;
                     self.mark_unsaved();
                 }

@@ -13,7 +13,7 @@ pub const MAX_ASSET_BYTES: usize = 512 << 20;
 pub const MAX_MANIFEST_BYTES: usize = 16 << 20;
 const MAX_TOTAL_BYTES: usize = 768 << 20;
 const MAX_ENTRIES: usize = 10_000;
-const REQUIRED: &[&str] = &["sha256", "chunks/1", crate::management::LIFECYCLE];
+const REQUIRED: &[&str] = &["sha256", "chunks/1", crate::management::LIFECYCLE, crate::conflicts::CAPABILITY];
 
 pub fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
@@ -127,6 +127,11 @@ impl Manifest {
         let manifest: Self = serde_json::from_value(value).map_err(|e| invalid(e.to_string()))?;
         if manifest.change()?.is_some() && !manifest.required.iter().any(|c| c == crate::management::LIFECYCLE) {
             return Err(invalid("lifecycle metadata requires its capability"));
+        }
+        if matches!(manifest.change()?, Some(crate::management::Change::Resolve { .. }))
+            && !manifest.required.iter().any(|c| c == crate::conflicts::CAPABILITY)
+        {
+            return Err(invalid("conflict resolution requires its capability"));
         }
         check_hash(&manifest.document_hash)?;
         let mut total = 0usize;
