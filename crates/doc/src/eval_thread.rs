@@ -429,8 +429,8 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         ease_in,
         ease_out,
         tip,
-        chamfer_angle: _,
-        chamfer_depth: _,
+        chamfer_angle,
+        chamfer_depth,
         steep_flank,
     } = &f.kind
     else {
@@ -439,8 +439,8 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
     if ease_in.is_some() || ease_out.is_some() {
         return Err(DocError::Invalid("a thread runout (ease in, ease out) is not built yet".into()));
     }
-    if *tip != ThreadTip::None {
-        return Err(DocError::Invalid("a chamfered thread tip is not built yet".into()));
+    if *tip != ThreadTip::None && !*modeled {
+        return Err(DocError::Invalid("a chamfered tip is cut only on a modelled thread".into()));
     }
     let extent = match (length, up_to) {
         (Some(e), _) => Extent::Length(val(vals, e, Kind::Length)?),
@@ -482,9 +482,64 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
     // The groove's faces have no role to name them by.
     let groove = crate::lineage::Lineage::unnamed_faces(groove_faces);
     let lineage = mb.traced().lineage.and_then(|l| crate::lineage::Lineage::step(&nb, &[&l, &groove]));
-    let nb = Traced { body: nb, lineage };
+    let mut nb = Traced { body: nb, lineage };
+    if *tip == ThreadTip::Chamfer {
+        let angle = chamfer_angle.as_deref().map(|e| val(vals, e, Kind::Angle)).transpose()?;
+        let depth = chamfer_depth.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?;
+        for cone in tip_cones(&t, cyl.radius, ends, angle, depth)? {
+            let faces = cone.face_count();
+            let cut = kernel::boolean(&nb.body, &cone, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("the chamfer removed everything".into()))?;
+            let unnamed = crate::lineage::Lineage::unnamed_faces(faces);
+            let lineage = nb.lineage.and_then(|l| crate::lineage::Lineage::step(&cut, &[&l, &unnamed]));
+            nb = Traced { body: cut, lineage };
+        }
+    }
     if let Some(slot) = st.bodies.get_mut(i) {
         *slot = ModelBody::traced_new(mb.name, nb, mb.feature);
     }
     Ok(())
+}
+
+/// The chamfered tip of an external thread (ISO 4753, chamfered end CH) at each of its free ends:
+/// the material outside a cone `angle` to the axis (default 45°) that reaches the diameter
+/// d_f = d - 2 `depth` at the face's end (default: the external thread's minor diameter, the
+/// largest ISO 4753 allows), as a ring to cut after the groove, so the last teeth taper into it.
+fn tip_cones(t: &ThreadInfo, radius: f64, ends: [End; 2], angle: Option<f64>, depth: Option<f64>) -> Result<Vec<Body>> {
+    if t.internal {
+        return Err(DocError::Invalid("a chamfered tip is for an external thread (ISO 4753); countersink the hole's entry instead".into()));
+    }
+    let g = t.form.groove(t.major_diameter, t.pitch, false);
+    let a = angle.unwrap_or(std::f64::consts::FRAC_PI_4);
+    if !(a > 1f64.to_radians() && a < 89f64.to_radians()) {
+        return Err(DocError::Invalid("the chamfer's angle to the axis must be between 1° and 89°".into()));
+    }
+    let r_top = radius.max(t.major_diameter / 2.0);
+    let depth = depth.unwrap_or(t.major_diameter / 2.0 - g.root_r);
+    let r_f = t.major_diameter / 2.0 - depth;
+    if !(depth > 0.0 && r_f > 1e-3) {
+        return Err(DocError::Invalid(format!("the chamfer's depth must be between 0 and {} mm", show_mm(t.major_diameter / 2.0))));
+    }
+    let k = *t.axis;
+    let u = k.cross(if k.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) });
+    let u = u.normalized().ok_or_else(|| DocError::Invalid("thread axis".into()))?;
+    let (r_out, slope) = (r_top + 0.1 * t.pitch, a.tan());
+    // Past the end only the radii the groove's overrun already reaches (r >= d_f / 2), so
+    // nothing past a free end beyond the thread is touched.
+    let e = 0.5 * t.pitch;
+    let mut out = Vec::new();
+    for (side, at, out_dir) in [(0usize, t.start, -k), (1, t.end, k)] {
+        if ends.get(side) != Some(&End::Free) {
+            continue;
+        }
+        // In the plane: x radial, y outward along the axis from the end.
+        let plane = Plane { origin: t.axis_point + k * at, x: u, y: out_dir };
+        let pts = [Vec2::new(r_f, 0.0), Vec2::new(r_f, e), Vec2::new(r_out, e), Vec2::new(r_out, -(r_out - r_f) / slope)];
+        let region = Region2 { outer: solidcraft_geom::Loop2::polygon(&pts), holes: Vec::new() };
+        let mut ring = kernel::revolve(&plane, &[region], Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0), std::f64::consts::TAU)?;
+        out.push(ring.pop().ok_or_else(|| DocError::Invalid("chamfer".into()))?);
+    }
+    if out.is_empty() {
+        return Err(DocError::Invalid("a chamfered tip needs a free end of the thread (one with no material past it)".into()));
+    }
+    Ok(out)
 }

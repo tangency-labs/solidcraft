@@ -924,3 +924,58 @@ fn a_multi_start_thread_takes_the_volume_of_one_start() {
     let e = s.execute("solid.thread", &json!({"face": [20, 0, 20], "designation": "Tr40x14(P7)", "starts": 3})).err().map(|e| e.to_string());
     assert!(e.unwrap_or_default().contains("has 2 start(s), not 3"));
 }
+
+/// The stock's volume after a modelled M10 thread, over sections z0..z1 whose outer radius is
+/// `rmax(z)`: 2π∫∫ r m(r) dr dz, m the material fraction per pitch (1 under the root, 1 - w/P
+/// in the groove's band). The groove's screw motion holds every meridian half-plane alike, and
+/// an axisymmetric cut after it (a chamfer) only lowers rmax.
+fn m10_stock(z0: f64, z1: f64, rmax: impl Fn(f64) -> f64) -> f64 {
+    let (d, p) = (10.0, 1.5);
+    let root = d / 2.0 - 5.0 * p * 3f64.sqrt() / 16.0;
+    let t = (PI / 6.0).tan();
+    // ∫_0^R r m(r) dr in closed form: R²/2 to the root, then m = a + b r (1 - (P/4 + 2 (r - root)
+    // tan 30°)/P) beyond it.
+    let ring = |rr: f64| {
+        let inner = rr.min(root);
+        let mut v = inner * inner / 2.0;
+        if rr > root {
+            let (a, b) = (1.0 - 0.25 + 2.0 * root * t / p, -2.0 * t / p);
+            let f = |r: f64| a * r * r / 2.0 + b * r * r * r / 3.0;
+            v += f(rr) - f(root);
+        }
+        v
+    };
+    let n = 20000;
+    (0..n).map(|i| z0 + (z1 - z0) * (i as f64 + 0.5) / n as f64).map(|z| 2.0 * PI * ring(rmax(z)) * (z1 - z0) / n as f64).sum()
+}
+
+/// ISO 4753's chamfered end on both free ends of an M10 stud: a 45° cone down to the minor
+/// diameter, cut after the groove; the volume as the stock's chamfered section with the thread's
+/// material fraction (as ladder 06/006).
+#[test]
+fn a_chamfered_tip_tapers_the_last_teeth() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 30, "body_name": "Stud"}));
+    run(&mut s, "solid.thread", json!({"face": [5, 0, 15], "designation": "M10", "tip": "chamfer", "modeled": true}));
+    let st = s.model.state();
+    assert!(st.body("Stud").unwrap().body.validity().is_empty());
+    let rf = 5.0 - 5.0 * 1.5 * 3f64.sqrt() / 16.0;
+    let want = m10_stock(0.0, 30.0, |z| 5f64.min(rf + z).min(rf + 30.0 - z));
+    let got = exact_volume(&s, "Stud");
+    assert!((got - want).abs() < want * 1e-4, "{got} vs {want}");
+    // 30° to the axis and 0.5 mm deep, at the one free end of a shaft on a collar.
+    let mut s = shaft_on_collar();
+    run(&mut s, "solid.thread", json!({"face": [5, 0, 25], "designation": "M10", "tip": "chamfer", "chamfer_angle": "30 deg", "chamfer_depth": 0.5, "modeled": true}));
+    let w = ext_half_width(10.0, 1.5);
+    let rf = 4.5;
+    let slope = 30f64.to_radians().tan();
+    let want = PI * 64.0 * 10.0 + PI * 25.0 * w + m10_stock(10.0 + w, 35.0, |z| 5f64.min(rf + (35.0 - z) * slope));
+    let got = exact_volume(&s, "Part");
+    assert!((got - want).abs() < want * 1e-4, "{got} vs {want}");
+    // Internal threads take a countersink instead.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [-10, -10, 0], "length": 20, "width": 20, "height": 10, "body_name": "Nut"}));
+    run(&mut s, "solid.hole", json!({"position": [0, 0, 10], "diameter": 8.5}));
+    let e = s.execute("solid.thread", &json!({"face": [4.25, 0, 5], "designation": "M10", "tip": "chamfer", "modeled": true})).err().map(|e| e.to_string());
+    assert!(e.unwrap_or_default().contains("countersink"));
+}
