@@ -70,6 +70,29 @@ keep their existing thumbnail encoding.
 
 ## Publication and evolution
 
+### Recoverable design management
+
+The required `lifecycle/1` capability permits a `lifecycle` manifest field. Queue
+captures encode `{"kind":"rename","file":"parts/new-name"}`,
+`{"kind":"delete"}`, or
+`{"kind":"restore","commit":"<full Git SHA>","file":"parts/old-name"}`.
+Readers check the capability before interpreting these intents. Evolving their
+semantics requires a new required capability.
+
+A Trash revision keeps the document and immutable assets and writes a delete
+tombstone into its manifest. Ordinary listing and opening skip these designs;
+the Trash browser lists them for restoration. A rename atomically publishes an
+active design at the new path and a source tombstone with `moved_to`; source
+tombstones from renames are excluded from Trash. Occupied targets and changed
+expected parents stop the action before publication.
+
+Active renamed and restored manifests omit the transient intent. Rename records
+up to 16 previous project-relative paths in `previous_paths`; restore records its
+source commit and path in `restored_from`. Historical contents are captured and
+published as a new child of the current revision, retaining earlier Git history.
+Management uses the same durable outbox, asset validation, publication receipts
+and restart recovery as an ordinary save. Opening never changes these records.
+
 Upload immutable objects first, then publish the document and manifest together in one Git commit. Update the branch without forcing. A changed parent requires checking the target design again; unrelated changes may be retried, while competing design edits must be preserved.
 
 Local and browser queues must retain the requested snapshot until publication is confirmed. A pending record includes its full destination, original connection endpoint (without credentials), and expected prior revision; offline children depend on their captured parent revisions and are published in that order. After a parent is published as a conflict copy, its queued children follow that confirmed destination without changing their captured identities or touching the competing original. A later competing edit at that destination produces another recoverable conflict copy. Credential renewal is allowed, but changing a connection's repository or branch cannot redirect previously queued designs. Queues are isolated by repository connection. Interrupted publication must not be reported as synchronized. A migration creates a new recoverable revision rather than rewriting history. Upgrade recognition begins with the first cloud-capable release.

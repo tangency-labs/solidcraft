@@ -64,6 +64,18 @@ pub fn run(site: &str) -> Result<(), String> {
     cdp.eval(OFFLINE)?;
     phase(&mut cdp, "lineage-read", "lineage_restart")?;
 
+    phase(&mut cdp, "lineage-management-write", "management_restart")?;
+    let (browser, mut cdp) = restart(browser, cdp, &executable, &profile, &url)?;
+    cdp.eval(OFFLINE)?;
+    phase(&mut cdp, "lineage-management-read", "management_restart")?;
+    let (browser, mut cdp) = restart(browser, cdp, &executable, &profile, &url)?;
+    cdp.eval(OFFLINE)?;
+    phase(&mut cdp, "lineage-management-confirm", "management_restart")?;
+    let (browser, mut cdp) = restart(browser, cdp, &executable, &profile, &url)?;
+    cdp.eval(OFFLINE)?;
+    phase(&mut cdp, "lineage-management-confirmed-read", "management_restart")?;
+    println!("cloud-storage-test: rename, Trash, discard and publication receipts survive browser restarts without duplicate revisions");
+
     phase(&mut cdp, "worker-competing-write", "competing_restart")?;
     let (browser, mut cdp) = restart(browser, cdp, &executable, &profile, &url)?;
     cdp.eval(OFFLINE)?;

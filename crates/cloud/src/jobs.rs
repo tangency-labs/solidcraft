@@ -54,6 +54,22 @@ pub enum Operation {
     Setup(Connection),
     Test(Connection),
     List(Connection),
+    Trash(Connection),
+    Discard {
+        connection: Connection,
+        destination: Destination,
+        revision: String,
+    },
+    History {
+        connection: Connection,
+        destination: Destination,
+    },
+    Manage {
+        connection: Connection,
+        destination: Destination,
+        expected_revision: Option<String>,
+        change: crate::management::Change,
+    },
     Thumbnail {
         connection: Connection,
         destination: Destination,
@@ -106,6 +122,10 @@ pub struct JobStatus {
     /// A connection synchronization job can publish several independent Save operations.
     #[serde(default)]
     pub publications: Vec<Published>,
+    #[serde(default)]
+    pub managed: Vec<crate::management::Managed>,
+    #[serde(default)]
+    pub change: Option<crate::management::Change>,
     /// Browser storage persistence was granted (false is a recoverability warning).
     #[serde(default)]
     pub storage_persistent: Option<bool>,
@@ -145,6 +165,8 @@ impl Job {
                 message: None,
                 result: None,
                 publications: Vec::new(),
+                managed: Vec::new(),
+                change: None,
                 storage_persistent: None,
                 catalog: Vec::new(),
             },

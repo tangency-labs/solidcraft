@@ -126,6 +126,7 @@ pub(crate) use file::import::realign_imports;
 pub(crate) use file::mesh_crease_angle;
 pub(crate) use file::names_form;
 pub use file::open_steps::OpenSteps;
+pub(crate) use file::rename_design;
 pub use file::runs_plugin_exporter;
 pub use file::runs_plugin_importer;
 pub(crate) use file::up_form;
@@ -659,6 +660,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(board_import::COMMANDS.iter());
     v.extend(print_face::COMMANDS.iter());
     v.extend(cloud::COMMANDS.iter());
+    v.extend(cloud::management::COMMANDS.iter());
     v.extend(metadata::COMMANDS.iter());
     v.extend(inspect::COMMANDS.iter());
     v.extend(compare::COMMANDS.iter());

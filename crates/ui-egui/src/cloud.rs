@@ -91,6 +91,13 @@ fn poll(app: &mut SolveApp) -> Result<Vec<JobStatus>, String> {
         statuses.extend(slot.session.cloud_operations().map_err(|e| e.to_string())?);
     }
     let publications: Vec<_> = statuses.iter().flat_map(|status| status.publications.iter().cloned()).collect();
+    let managed: Vec<_> = statuses.iter().flat_map(|status| status.managed.iter().cloned()).collect();
+    if !managed.is_empty() {
+        app.session.poll_cloud_management(&managed).map_err(|e| e.to_string())?;
+        for slot in app.docs.background_mut() {
+            slot.session.poll_cloud_management(&managed).map_err(|e| e.to_string())?;
+        }
+    }
     if !publications.is_empty() {
         app.session.poll_cloud_with_publications(&publications).map_err(|e| e.to_string())?;
         for slot in app.docs.background_mut() {

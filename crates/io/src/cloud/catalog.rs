@@ -72,6 +72,27 @@ fn cache_path(destination: &Destination) -> Result<String> {
 }
 
 impl LocalOutbox {
+    pub(super) fn discard_management(&self, save: &PendingSave) -> Result<()> {
+        if save.manifest.change()?.is_none() {
+            return Err(storage("ordinary saved edits cannot be discarded as management"));
+        }
+        let _lock = self.process_lock("catalog.lock", "this connection's catalog is being updated")?;
+        if self.receipt(save)?.is_some() {
+            return Err(storage("this action is confirmed; synchronize before managing it again"));
+        }
+        let pending = format!("pending/{}.json", save.id);
+        let current = PendingSave::read(&self.read(&pending)?)?;
+        if serde_json::to_vec(&current).map_err(storage)? != serde_json::to_vec(save).map_err(storage)? {
+            return Err(Error::Conflict);
+        }
+        if let Some(entry) = self.cached(&save.connection, &save.destination)? {
+            self.check_captured_document(&entry.save)?;
+            if entry.save.id == save.id {
+                fs::remove_file(self.path(&cache_path(&save.destination)?)?).map_err(storage)?;
+            }
+        }
+        self.remove_pending(save)
+    }
     fn publication(&self, path: &str) -> Result<Option<CachedPublication>> {
         if !self.path(path)?.exists() {
             return Ok(None);
@@ -167,6 +188,18 @@ impl LocalOutbox {
         .map_err(storage)?;
         CachedPublication::read(&bytes)?;
         let _lock = self.process_lock("catalog.lock", "this connection's catalog is being updated; saved copies are retained")?;
+        let moved_source = if matches!(save.manifest.change()?, Some(solidcraft_cloud::management::Change::Rename { .. })) {
+            let source = self.cached(&save.connection, &save.destination)?;
+            if let Some(entry) = &source {
+                self.check_captured_document(&entry.save)?;
+            }
+            source
+                .filter(|entry| entry.revision == save.expected_revision || entry.save.id == save.id)
+                .map(|_| cache_path(&save.destination))
+                .transpose()?
+        } else {
+            None
+        };
         let receipt = self.receipt(save)?;
         if let Some(receipt) = &receipt
             && serde_json::to_value(receipt).map_err(storage)? != serde_json::to_value(published).map_err(storage)?
@@ -199,6 +232,12 @@ impl LocalOutbox {
         }
         if receipt.is_none() {
             self.store(&format!("receipts/{}.json", save.id), &bytes)?;
+        }
+        if let Some(path) = moved_source {
+            let path = self.path(&path)?;
+            if path.exists() {
+                fs::remove_file(path).map_err(storage)?;
+            }
         }
         self.remove_pending(save)
     }
