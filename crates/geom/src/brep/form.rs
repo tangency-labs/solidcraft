@@ -317,6 +317,32 @@ pub fn edge<'a>(
 /// Points per edge along a loop taken for a face's extent.
 const EXTENT_POINTS: usize = 32;
 
+/// The largest value of `f` on `[a, b]`, where it rises to one peak and falls (golden section, to
+/// rounding; the ends count).
+fn golden_max(f: &dyn Fn(f64) -> f64, a: f64, b: f64) -> f64 {
+    const R: f64 = 0.618_033_988_749_894_8;
+    let (mut a, mut b) = (a, b);
+    let best = f(a).max(f(b));
+    let (mut c, mut d) = (b - R * (b - a), a + R * (b - a));
+    let (mut fc, mut fd) = (f(c), f(d));
+    while b - a > 1e-15 * (1.0 + a.abs().max(b.abs())) {
+        if fc >= fd {
+            b = d;
+            d = c;
+            fd = fc;
+            c = b - R * (b - a);
+            fc = f(c);
+        } else {
+            a = c;
+            c = d;
+            fc = fd;
+            d = a + R * (b - a);
+            fd = f(d);
+        }
+    }
+    best.max(fc).max(fd)
+}
+
 /// The parameter box of a face on `label` over its boundary: each loop's points (`loops`, in
 /// order along each loop) projected onto the label, a periodic parameter unwrapped from one point
 /// to the next, and each loop after the first a whole number of periods along where that keeps
@@ -334,17 +360,23 @@ pub fn extent(label: &Surface, loops: &[Vec<(&Curve, [f64; 2], bool)>]) -> Optio
         let mut prev: Option<[f64; 2]> = None;
         for (c, [t0, t1], forward) in l {
             let curve = super::eval::CurveEval::new(c).ok()?;
-            for k in 0..=EXTENT_POINTS {
-                let f = k as f64 / EXTENT_POINTS as f64;
-                let t = if *forward { t0 * (1.0 - f) + t1 * f } else { t1 * (1.0 - f) + t0 * f };
-                let mut q = eval.project(curve.point(t)?, prev, f64::INFINITY)?;
-                if let Some(p) = prev {
+            // The point at `t` on the label, a periodic parameter unwrapped next to `near`.
+            let at = |t: f64, near: Option<[f64; 2]>| -> Option<[f64; 2]> {
+                let mut q = eval.project(curve.point(t)?, near, f64::INFINITY)?;
+                if let Some(p) = near {
                     for d in 0..2 {
                         if let Some(Some(per)) = period.get(d) {
                             q[d] += ((p[d] - q[d]) / per).round() * per;
                         }
                     }
                 }
+                Some(q)
+            };
+            let mut samples: Vec<(f64, [f64; 2], [bool; 2])> = Vec::with_capacity(EXTENT_POINTS + 1);
+            for k in 0..=EXTENT_POINTS {
+                let f = k as f64 / EXTENT_POINTS as f64;
+                let t = if *forward { t0 * (1.0 - f) + t1 * f } else { t1 * (1.0 - f) + t0 * f };
+                let q = at(t, prev)?;
                 // At a pole the collapsed parameter is anything: it bounds nothing.
                 let pole = eval.pole(q);
                 for d in 0..2 {
@@ -355,6 +387,36 @@ pub fn extent(label: &Surface, loops: &[Vec<(&Curve, [f64; 2], bool)>]) -> Optio
                 }
                 if !pole.iter().any(|p| *p) {
                     prev = Some(q);
+                }
+                samples.push((t, q, pole));
+            }
+            // A sample is a point of the boundary, not its extreme: each sample higher (or lower)
+            // than its neighbours brackets an extreme of the edge, which is found there.
+            for k in 0..samples.len() {
+                let (_, q, pole) = samples[k];
+                let (a, b) = (samples[k.saturating_sub(1)].0, samples[(k + 1).min(samples.len() - 1)].0);
+                for d in 0..2 {
+                    // Next to a pole the parameter it collapses is no function of the point: a
+                    // meridian's angle there is rounding, not an extreme.
+                    let near_pole = |j: Option<usize>| j.and_then(|j| samples.get(j)).is_some_and(|s| s.2[d]);
+                    if pole[d] || near_pole(k.checked_sub(1)) || near_pole(Some(k + 1)) {
+                        continue;
+                    }
+                    let side = |j: usize| samples.get(j).map(|s| s.1[d]);
+                    let (before, after) = (if k > 0 { side(k - 1) } else { None }, side(k + 1));
+                    for sign in [1.0, -1.0] {
+                        // Not lower than either neighbour and higher than one (a level run, a
+                        // seam's constant angle, has no extreme between its samples).
+                        let higher = |x: Option<f64>| x.is_none_or(|x| sign * q[d] >= sign * x);
+                        let above = |x: Option<f64>| x.is_some_and(|x| sign * q[d] > sign * x);
+                        if !(higher(before) && higher(after) && (above(before) || above(after))) {
+                            continue;
+                        }
+                        let f = |t: f64| at(t, Some(q)).map_or(f64::NEG_INFINITY, |p| sign * p[d]);
+                        let x = sign * golden_max(&f, a.min(b), a.max(b));
+                        l_lo[d] = l_lo[d].min(x);
+                        l_hi[d] = l_hi[d].max(x);
+                    }
                 }
             }
         }

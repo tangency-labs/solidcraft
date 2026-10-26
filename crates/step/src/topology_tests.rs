@@ -445,6 +445,35 @@ fn a_cone_reaches_its_apex_through_a_vertex_loop() {
     faces_away(&s.brep, 0, |p| [0.0, 0.0, p[2].clamp(1.0, 2.0)]);
 }
 
+/// The same cone written with its seam: the base circle, then the seam out to the apex and back.
+/// The loop turns once round the axis and closes at the apex, so it has its seam; reading it as
+/// a loop without one gave the face a second seam, a sliver out and back the face's boundary
+/// crossed (#5193: a turned pin's drill point after a STEP round trip did not tessellate).
+#[test]
+fn a_cone_with_its_seam_to_the_apex_gets_no_other() {
+    let mut w = W::default();
+    let (p, top) = ([5.0, 0.0, 0.0], [0.0, 0.0, 10.0]);
+    let (v, apex) = (w.vertex(p), w.vertex(top));
+    let k = w.circle([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], 5.0);
+    let e = w.add(format!("EDGE_CURVE('',#{v},#{v},#{k},.T.)"));
+    let seam = w.line_edge((v, p), (apex, top), true, len3(sub3(top, p)));
+    let a = w.axis([0.0; 3], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]);
+    let cone = w.add(format!("CONICAL_SURFACE('',#{a},5.,{})", real(0.5f64.atan())));
+    let uses = [w.oe(e, true), w.oe(seam, true), w.oe(seam, false)];
+    let outer = w.bound(&uses, true, true);
+    let side = w.face(&[outer], cone, true);
+    let o = w.oe(e, false);
+    let base_bound = w.bound(&[o], true, true);
+    let plane = w.plane([0.0; 3], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0]);
+    let base = w.face(&[base_bound], plane, false);
+    let shell = closed_shell(&mut w, &[side, base]);
+    let solid = w.add(format!("MANIFOLD_SOLID_BREP('cone',#{shell})"));
+    let s = one_solid(&w.file(&[solid]));
+    assert_eq!(counts(&s.brep), [2, 1, 2, 2, 2]);
+    assert!(!s.notes.iter().any(|n| n.contains("seam edges added")), "{:?}", s.notes);
+    faces_away(&s.brep, 0, |p| [0.0, 0.0, p[2].clamp(1.0, 2.0)]);
+}
+
 /// A tube (radius 5 outside, 3 inside, from z = 0 to 4) whose cylinders carry no seam edges:
 /// each side is bounded by two circles whose vertices sit at different angles.
 #[test]

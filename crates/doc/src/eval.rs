@@ -697,7 +697,7 @@ fn fillet_fitted(
     fit: crate::FilletFit,
 ) -> std::result::Result<(kernel::Body, Option<Vec<f64>>), kernel::KernelError> {
     match kernel::fillet(body, edges, r) {
-        Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Reduce => match kernel::fillet_max_each(body, edges, r) {
+        Err(kernel::KernelError::TooLarge(why)) if fit == crate::FilletFit::Reduce => match kernel::fillet_max_each(body, edges, r)? {
             // Built at the radius asked for after all (the groups apart): nothing reduced.
             Some((used, b)) => Ok((b, used.iter().any(|u| *u < r).then_some(used))),
             None => Err(kernel::KernelError::TooLarge(why)),
