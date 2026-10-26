@@ -34,7 +34,15 @@
 //! make upstream dereference null or free the harness's objects. To tell a default patch
 //! that reaches `MakeFaceBrep` from one that returns a status before it, the shim runs
 //! `MakeAnalyticCornerSurface`'s fits and the Coons patch's `CreateCornerBlend` on
-//! copies first. The model's fillet geometries have a solver (a base solver with the
+//! copies first. Its `SER` / `NER` exits (read as `TRUE`) add no surface, so the
+//! `MakeFaceBrep` after them copies the edges' curves only when the corner already had one
+//! surface (a planar corner's exit leaves the edge it was recomputing without a curve).
+//! Every refused case was checked by running the C++ natively with the pre-check bypassed,
+//! one process per case: each crashed in upstream (`SIGSEGV` in `SmFilletCorner::Create`,
+//! `MakeAnalyticCornerSurface`, `AdjustTopology`, `AdjustConcaveCornerTopology`,
+//! `AdjustTangentCorner`) except the tangent split's call through a solver-less geometry
+//! (`GetFilletSolver()->SplitFilletGeomAtSideEdge`: a member call on a null pointer,
+//! undefined, though the non-virtual callee returns a status before it reads `this`). The model's fillet geometries have a solver (a base solver with the
 //! generator of a cross-section kind, `geom_solvers`) only in generated patch and geometry
 //! cases; elsewhere none, and the paths that ask a geometry for its solver (the `NxN`
 //! candidate search past its first cross section, the closed Nx1 and Nx2 tangent splits,

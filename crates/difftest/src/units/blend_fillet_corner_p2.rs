@@ -11,10 +11,16 @@
 //! - `adjust_concave`: the virtual `AdjustTopology` of an Nx2 corner, which with three
 //!   corner edges is `AdjustConcaveCornerTopology` (also other kinds and edge counts,
 //!   which take the other branches: the `NxN` kinds `SmFilletConvexNxNCorner::
-//!   AdjustTopology`). It runs to the end; the shim's pre-check refuses where upstream
-//!   dereferences null (a side face or surface missing for the extension, an edge use
-//!   without edge or mate in the mates loop). The vertices an op makes are appended to
-//!   the model's export in creation order on both sides;
+//!   AdjustTopology`). It runs to the end; the shim's pre-check refuses (a `rejected`
+//!   case, "upstream would dereference null") where upstream dereferences null (a side
+//!   face or surface missing for the extension, an edge use without edge or mate in the
+//!   mates loop, a corner without filleted vertex, an Nx2 corner without `m_pAllEUs`) or
+//!   hangs (rail points that coincide with a zero tolerance: `CreateExtendedSurface`
+//!   halves a zero extension forever, HANG-9). Bypassing the pre-check and running the C++
+//!   natively, one process per case, crashed (`SIGSEGV` in `AdjustConcaveCornerTopology` /
+//!   `AdjustTopology`) or hung (in `CreateExtendedSurface`) on every refused case. The
+//!   vertices an op makes are appended to the model's export in creation order on both
+//!   sides;
 //! - `analytic`: `MakeAnalyticCornerSurface` (its `SmBoolean`, a `SER` / `NER` status
 //!   read as `1`), on corners built for it (`gen_analytic`): a sphere octant of exact
 //!   rational quarter arcs (one arc may be its chord), chamfers of lines (a plane or a
@@ -67,9 +73,10 @@
 //! The shim refuses (`-2`) when a pair the loop reaches has an edge use upstream would
 //! dereference null; the Rust side returns [`SolidError::InvalidInput`] there (whatever
 //! its reason: a missing radial, or a missing edge as unit `topology.edgeuse_p1` reports
-//! it) and both report `refused`. No B-rep the harness builds reaches it (every edge use
-//! has a radial and an edge); the Rust half is covered by a unit test in
-//! `fillet_corner::p2`. A case whose evaluated geometry the import holds only as its
+//! it) and both report `refused` (a compared error, not a `rejected` case). No B-rep the
+//! harness builds reaches it (every edge use has a radial and an edge); the Rust half is
+//! covered by a unit test in `fillet_corner::p2`. This unit's `rejected` cases are all
+//! `corner` cases (above). A case whose evaluated geometry the import holds only as its
 //! B-spline part is deferred as unit `blend.fillet_corner_p1`'s runner defers it.
 
 use serde::{Deserialize, Serialize};

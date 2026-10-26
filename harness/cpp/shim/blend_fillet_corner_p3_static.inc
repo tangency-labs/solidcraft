@@ -200,8 +200,9 @@ int64_t p3_index_of_vertex(Model& M, SmFilletVertex* v) { return index_of(M.vert
 // What SmFilletCorner::MakeAnalyticCornerSurface (blend.fillet_corner_p2) does on the corner's
 // edges E, without changing anything (P3_ANALYTIC runs it, the default corner patch calls it
 // first): P3A_REFUSE where it dereferences NULL, P3A_TRUE / P3A_FALSE for its return (its SER /
-// NER exits return a non-zero status, which its callers read as TRUE; a failed
-// SmFilletCorner::MakeConstantRadiusFillet makes it FALSE, p3_const_rad).
+// NER exits return a non-zero status, which its callers read as TRUE: P3A_TRUE_STATUS, TRUE
+// without the surface added to m_vSurfaces; a failed SmFilletCorner::MakeConstantRadiusFillet
+// makes it FALSE, p3_const_rad).
 // The surface fits are run (the file-static sm_CreatePlanarSurface / sm_CreateSrfOfRevolution
 // through blend_fillet_corner_p2_static.inc, CreateSphereFromArcs, the chamfer edges'
 // sm_SrfSrfIntersection) and their results deleted. The model's fillet geometries have no
@@ -212,7 +213,8 @@ int64_t p3_index_of_vertex(Model& M, SmFilletVertex* v) { return index_of(M.vert
 enum P3Analytic
 {
     P3A_REFUSE,
-    P3A_TRUE,
+    P3A_TRUE,        // a surface was made and added to m_vSurfaces
+    P3A_TRUE_STATUS, // a SER / NER exit (read as TRUE): no surface added
     P3A_FALSE,
 };
 
@@ -332,8 +334,10 @@ P3Analytic p3_const_rad(SmFilletCorner* c, const std::vector<SmFilletEdge*>& E, 
     return P3A_REFUSE;
 }
 
+// `nulled` (optional) receives the planar corner's edge whose curve upstream deleted
+// (`SetCurve(NULL, TRUE)`) before the status exit it then takes (P3A_TRUE_STATUS).
 P3Analytic p3_analytic(SmFilletCorner* c, const std::vector<SmFilletEdge*>& E, Model& M,
-                       const P3Override& ov = P3Override())
+                       const P3Override& ov = P3Override(), SmFilletEdge** nulled = NULL)
 {
     ULONG n = (ULONG)E.size();
     if (n < 3 || n > 4)
@@ -389,7 +393,7 @@ P3Analytic p3_analytic(SmFilletCorner* c, const std::vector<SmFilletEdge*>& E, M
         }
         SmBSplineCurve* b = p3_curve_of(e, ov);
         if (b == NULL)
-            return P3A_TRUE; // SER(SM_ERR)
+            return P3A_TRUE_STATUS; // SER(SM_ERR)
         curves.Add(b);
     }
     if (chamfer)
@@ -408,13 +412,19 @@ P3Analytic p3_analytic(SmFilletCorner* c, const std::vector<SmFilletEdge*>& E, M
             SmVector3d lv;
             if (curves[i]->IsLine(10, tol, lp, lv))
                 continue;
-            // (the edge's curve is deleted here upstream; the intersection does not read it)
+            // (the edge's curve is deleted here upstream, SetCurve(NULL, TRUE); the
+            // intersection does not read it, but the status exits below leave it NULL)
             SmSurface* fs = NULL;
             double atol = 0.0, ang = 0.0;
             if (e->GetFilletEdgeType() == SM_FE_RAIL_RAIL_INTERPOLATION)
             {
                 if (e->GetOriginalFace() == NULL)
-                    break; // NER: TRUE
+                {
+                    r = P3A_TRUE_STATUS; // NER
+                    if (nulled)
+                        *nulled = e;
+                    break;
+                }
                 fs = e->GetOriginalFace()->GetSurface();
                 atol = e->GetOriginalFace()->GetTolerance();
                 ang = 30.0 * SM_PI / 180.0;
@@ -435,7 +445,12 @@ P3Analytic p3_analytic(SmFilletCorner* c, const std::vector<SmFilletEdge*>& E, M
                 ang = pfg->GetFilletSolver()->GetThisAngTolRad();
             }
             if (fs == NULL)
-                break; // NER: TRUE
+            {
+                r = P3A_TRUE_STATUS; // NER
+                if (nulled)
+                    *nulled = e;
+                break;
+            }
             SmVertex* sv = e->GetStartVertex();
             SmVertex* ev = e->GetOtherVertex(sv);
             if (ev == NULL)
@@ -451,7 +466,12 @@ P3Analytic p3_analytic(SmFilletCorner* c, const std::vector<SmFilletEdge*>& E, M
             delete u1;
             delete u2;
             if (is != SM_SUCCESS)
-                break; // SER: TRUE
+            {
+                r = P3A_TRUE_STATUS; // SER
+                if (nulled)
+                    *nulled = e;
+                break;
+            }
             if (c3 == NULL)
             {
                 r = P3A_REFUSE; // pNew3DCurve->SetOwner()
@@ -525,10 +545,17 @@ double p3_check_default_patch(SmFilletCorner* c, const std::vector<SmFilletEdge*
                               const std::vector<SmFilletVertex*>& V, Model& M,
                               const P3Override& ov = P3Override())
 {
-    switch (p3_analytic(c, E, M, ov))
+    SmFilletEdge* nulled = NULL;
+    switch (p3_analytic(c, E, M, ov, &nulled))
     {
     case P3A_REFUSE: return P3C_REFUSE;
     case P3A_TRUE: return p3_check_make_face(c, E, ov, 1);
+    // a status exit adds no surface: MakeFaceBrep sees m_vSurfaces as it was (with one
+    // surface it copies every edge's curve, the deleted one included)
+    case P3A_TRUE_STATUS:
+        if (nulled != NULL)
+            return (c->*P3CornerPeek::surfs()).GetSize() == 1 ? P3C_REFUSE : 0.0;
+        return p3_check_make_face(c, E, ov, 0);
     case P3A_FALSE: break;
     }
     ULONG n = (ULONG)E.size();
