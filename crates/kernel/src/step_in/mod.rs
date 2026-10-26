@@ -141,21 +141,35 @@ fn mat_mul(a: &M4, b: &M4) -> M4 {
     out
 }
 
-/// The inverse of a rigid placement (an orthonormal rotation and a translation): the rotation
-/// transposed, and the translation taken back through it.
-fn rigid_inverse(m: &M4) -> M4 {
+/// The determinant of a placement's linear part (its first three columns).
+fn linear_det(m: &M4) -> f64 {
+    let [a, b, c] = [m[0], m[1], m[2]];
+    a[0] * (b[1] * c[2] - b[2] * c[1]) - b[0] * (a[1] * c[2] - a[2] * c[1]) + c[0] * (a[1] * b[2] - a[2] * b[1])
+}
+
+/// The inverse of a placement: a rotation, scaled (a transformation operator may scale), and a
+/// translation. Its linear part is inverted by its adjugate, and the translation taken back
+/// through that. Placements are checked non-singular where they are read
+/// ([`Reader::placement_matrix`]; a frame's axes are orthonormal).
+fn placement_inverse(m: &M4) -> M4 {
+    let det = linear_det(m);
+    let [a, b, c] = [m[0], m[1], m[2]];
+    // The rows of the inverse are the cross products of the columns, over the determinant.
+    let cross = |u: [f64; 4], v: [f64; 4]| [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+    let rows = [cross(b, c), cross(c, a), cross(a, b)];
     let mut out = IDENTITY;
-    for (i, col) in out.iter_mut().take(3).enumerate() {
-        for (j, cell) in col.iter_mut().take(3).enumerate() {
-            *cell = m[j][i];
+    for (i, row) in rows.iter().enumerate() {
+        for (j, col) in out.iter_mut().take(3).enumerate() {
+            col[i] = row[j] / det;
         }
     }
     for i in 0..3 {
-        out[3][i] = -(0..3).map(|k| m[i][k] * m[3][k]).sum::<f64>();
+        out[3][i] = -(0..3).map(|k| out[k][i] * m[3][k]).sum::<f64>();
     }
     out
 }
 
+#[cfg(test)]
 fn translation(t: [f64; 3]) -> M4 {
     let mut m = IDENTITY;
     m[3] = [t[0], t[1], t[2], 1.0];
@@ -487,13 +501,41 @@ impl Reader {
     }
 
     /// The placement an item states: an AXIS2_PLACEMENT's frame, or a
-    /// CARTESIAN_TRANSFORMATION_OPERATOR_3D's origin.
+    /// CARTESIAN_TRANSFORMATION_OPERATOR_3D, uniform or not: its axes, scales and origin (an
+    /// omitted axis is the global one, an omitted scale 1, an omitted second or third scale the
+    /// first).
     fn placement_matrix(&mut self, item: u64, u: Units) -> R<M4> {
         let reader = solidcraft_step::read::Reader::new(&self.ex, u.units);
         let e = self.ex.get(item).ok_or_else(|| format!("missing entity #{item}"))?;
-        if e.name() == "CARTESIAN_TRANSFORMATION_OPERATOR_3D" {
-            let o = reader.point(e.params().get(4).and_then(Param::as_ref_id).ok_or("transformation without origin")?)?;
-            return Ok(translation(o));
+        if matches!(e.name(), "CARTESIAN_TRANSFORMATION_OPERATOR_3D" | "CARTESIAN_TRANSFORMATION_OPERATOR_3D_NON_UNIFORM") {
+            let p = e.params();
+            let o = reader.point(p.get(4).and_then(Param::as_ref_id).ok_or("transformation without origin")?)?;
+            let direction = |i: usize, global: [f64; 3]| -> R<[f64; 3]> {
+                match p.get(i) {
+                    None | Some(Param::Null) => Ok(global),
+                    Some(Param::Ref(id)) => reader.direction(*id),
+                    _ => Err("invalid transformation direction".into()),
+                }
+            };
+            let scale = |i: usize, default: f64| -> R<f64> {
+                match p.get(i) {
+                    None | Some(Param::Null) => Ok(default),
+                    Some(v) => v.as_f64().filter(|x| x.is_finite() && *x != 0.0).ok_or_else(|| "invalid transformation scale".into()),
+                }
+            };
+            let sx = scale(5, 1.0)?;
+            let (sy, sz) = (scale(7, sx)?, scale(8, sx)?);
+            let (x, y, z) = (direction(2, [1.0, 0.0, 0.0])?, direction(3, [0.0, 1.0, 0.0])?, direction(6, [0.0, 0.0, 1.0])?);
+            let col = |d: [f64; 3], s: f64| [d[0] * s, d[1] * s, d[2] * s, 0.0];
+            let m = [col(x, sx), col(y, sy), col(z, sz), [o[0], o[1], o[2], 1.0]];
+            if !m.iter().flatten().all(|x| x.is_finite()) {
+                return Err("invalid transformation scale".into());
+            }
+            let det = linear_det(&m);
+            if !det.is_finite() || det == 0.0 {
+                return Err("singular transformation".into());
+            }
+            return Ok(m);
         }
         Ok(frame_matrix(&reader.frame(item)?))
     }
@@ -596,7 +638,7 @@ impl Reader {
                     let mu = self.units_of(mapped);
                     match (self.placement_matrix(target, u), self.placement_matrix(origin, mu)) {
                         (Ok(t), Ok(o)) => {
-                            let mm = mat_mul(m, &mat_mul(&t, &rigid_inverse(&o)));
+                            let mm = mat_mul(m, &mat_mul(&t, &placement_inverse(&o)));
                             for r in self.rep_closure(&[mapped]) {
                                 self.rep_bodies(r, &mm, path, product, instance, out, depth + 1);
                             }
@@ -713,7 +755,7 @@ impl Reader {
                     // Every instance of a part placed more than once shows its first instance's
                     // mesh, placed (the first one too: meshing its own would mesh the part twice).
                     let body = match self.shown.get(&item) {
-                        Some((shared, first)) => body.with_display_of(shared.clone(), mat_mul(&m, &rigid_inverse(first))),
+                        Some((shared, first)) => body.with_display_of(shared.clone(), mat_mul(&m, &placement_inverse(first))),
                         None if self.uses.get(&item).is_some_and(|n| *n > 1) => {
                             let shared = Arc::new(crate::body::SharedDisplay::new(body.clone()));
                             self.shown.insert(item, (shared.clone(), m));
@@ -803,7 +845,7 @@ impl Reader {
                 let m2 = self.placement_matrix(i2, u2)?;
                 // rep_1 is normally the component: map its item onto the assembly's item.
                 let child_is_1 = child_reps.contains(&r1) || !child_reps.contains(&r2);
-                Ok(if child_is_1 { mat_mul(&m2, &rigid_inverse(&m1)) } else { mat_mul(&m1, &rigid_inverse(&m2)) })
+                Ok(if child_is_1 { mat_mul(&m2, &placement_inverse(&m1)) } else { mat_mul(&m1, &placement_inverse(&m2)) })
             } else {
                 self.placement_matrix(op, u2)
             }
