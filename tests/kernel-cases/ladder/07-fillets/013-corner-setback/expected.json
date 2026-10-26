@@ -1,7 +1,26 @@
 {
  "sources": [],
- "what": "three r5 rounds at a corner with setbacks of 8 mm along each edge",
+ "what": "three r5 rounds at the corner (60,40,20) with setbacks of 8 mm along each edge",
  "source": "invariants",
- "method": "the setback corner patch would be graded by invariants",
- "missing": "solid.fillet has no corner setback distances"
+ "method": "outside the corner cube C = [52,60]x[32,40]x[12,20] the body is the sphere corner's (009: V0 = 47377.120025868, of which 512 - 225 (1-pi/4) - 125 (1-pi/6) lies in C); the body is convex, so in C it holds the hull of its points on C's faces (the rounds' sections at the setback planes x=52, y=32, z=12 and the cube's corners outside the patch: 299.0201 by a hull of the sections sampled, below the true hull) and lies within the planes tangent to it along those sections, the three rounds' prisms (512 - 225 (1-pi/4) - 125 (sqrt2-1): the corner cube of r keeps the cylinders' common octant (2-sqrt2) r^3). The volume is the middle of [47271.9757, 47384.8935] with that half width as its tolerance. The box is unchanged. SMLib's setback patch is two quadrilaterals per side meeting at its centre: 6 box faces, 3 rounds, 6 patch pieces; vertices: 4 untouched box corners, 2 at each round's far end, the 6 section ends (where the patch starts, 8 from the vertex along each edge), the 6 side middles and the centre (23); edges by Euler, 23 + 15 - 2",
+ "body_count": 1,
+ "volume_mm3": 47328.434587888,
+ "faces": 15,
+ "edges": 36,
+ "vertices": 23,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   20
+  ]
+ },
+ "tolerance": {
+  "rel": 0.001192
+ }
 }
