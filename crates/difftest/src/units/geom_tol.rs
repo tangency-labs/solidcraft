@@ -36,7 +36,10 @@ use solidcore::geom::tol::{self, Cardinality, Relation, ScaledZero, SmallTopoTyp
 use solidcore::geom::vector2d::Vec2;
 use solidcore::kernel::{Kernel, KernelOptions};
 use solidcore::math::{Vec3, EFF_ZERO, PI};
-use solidcore::nurbs::math::NOW;
+use solidcore::nurbs::math::{CPoint, NOW};
+use solidcore::nurbs::spiral::allocate_nurb_volume;
+use solidcore::surface::b_spline_volume::BSplineVolume;
+use solidcore::surface::volume::{Volume, VolumeKind};
 use solidcore::SolidError;
 use solidcore_ffi::units::geom_tol::{self as ffi, Op, OpArgs, RelationStep};
 
@@ -90,6 +93,10 @@ const RELATION: &str = "relation";
 /// `a = [param, tol, ivl0, ivl1, xsect]` (`flag`: pass `xsect`).
 const CURVE: &str = "curve";
 
+/// Name of the volume pseudo-op: `GetScaledZero(const SmVolume&)` on the supplied
+/// eight Cartesian poles, k index fastest, with degree 1, knots 0011 and unit weights.
+const VOLUME: &str = "volume";
+
 fn use_default() -> f64 {
     tol::USE_DEFAULT
 }
@@ -137,6 +144,8 @@ struct Inputs {
     steps: Vec<Step>,
     #[serde(default)]
     curve: Option<CurveIn>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    poles: Option<[[f64; 3]; 8]>,
 }
 
 fn lookup(name: &str) -> Result<Op, HarnessError> {
@@ -220,6 +229,13 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
     if i.op == CURVE {
         return cpp_curve(i);
     }
+    if i.op == VOLUME {
+        let p = volume_ffi_poles(i)?;
+        return match ffi::volume_scaled_zero(&p) {
+            Ok(v) => Ok(Output::new().values("scaled_zero_of_volume", v)),
+            Err(e) => Err(HarnessError::new(e.to_string())),
+        };
+    }
     cpp_tol(i)
 }
 
@@ -241,6 +257,47 @@ fn cpp_curve(i: &Inputs) -> Result<Output, HarnessError> {
     match ffi::curve_tols(&ffi_curve(c), a[0], a[1], [a[2], a[3]], xsect) {
         Ok(v) => Ok(Output::new().values("r", v)),
         Err(e) => Err(HarnessError::new(e.to_string())),
+    }
+}
+
+fn volume_operands(i: &Inputs) -> Result<&[[f64; 3]; 8], HarnessError> {
+    i.poles
+        .as_ref()
+        .ok_or_else(|| HarnessError::new("volume case without poles"))
+}
+
+fn volume_ffi_poles(i: &Inputs) -> Result<[f64; 24], HarnessError> {
+    let mut flat = [0.0; 24];
+    for (dst, src) in flat.iter_mut().zip(volume_operands(i)?.iter().flatten()) {
+        *dst = *src;
+    }
+    Ok(flat)
+}
+
+fn rust_volume(i: &Inputs) -> Result<Volume, HarnessError> {
+    let poles = volume_operands(i)?;
+    let mut nurb = allocate_nurb_volume([1; 3], [1; 3], [3; 3])
+        .map_err(|e| HarnessError::new(e.to_string()))?;
+    for dir in 0..3 {
+        nurb.knots_mut(dir).copy_from_slice(&[0.0, 0.0, 1.0, 1.0]);
+    }
+    for (index, &[x, y, z]) in poles.iter().enumerate() {
+        let dst = nurb
+            .cpt_mut(index / 4, (index / 2) % 2, index % 2)
+            .ok_or_else(|| HarnessError::new("volume control point missing"))?;
+        *dst = CPoint::new(x, y, z, 1.0);
+    }
+    Ok(Volume::new(VolumeKind::BSpline(BSplineVolume::new(nurb))))
+}
+
+fn rust_volume_case(i: &Inputs) -> Result<Output, HarnessError> {
+    let volume = rust_volume(i)?;
+    let k = kernel(i.model, i.ratio);
+    match tol::scaled_zero_of_volume(&k, &volume) {
+        Ok(v) => Ok(Output::new().values("scaled_zero_of_volume", vec![v])),
+        Err(e) => {
+            Ok(Output::unported(&e).unwrap_or_else(|| Output::err(format!("rust_error: {e}"))))
+        }
     }
 }
 
@@ -490,6 +547,9 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     if i.op == CURVE {
         return rust_curve_case(i);
     }
+    if i.op == VOLUME {
+        return rust_volume_case(i);
+    }
     let op = lookup(&i.op)?;
     match rust_values(op, i)? {
         Ok(v) => Ok(Output::new().values("r", v)),
@@ -626,6 +686,7 @@ fn relation_case(rng: &mut Rng) -> Inputs {
         n2,
         steps,
         curve: None,
+        poles: None,
     }
 }
 
@@ -729,6 +790,7 @@ fn curve_case(rng: &mut Rng) -> Inputs {
         n2: 0,
         steps: Vec::new(),
         curve: Some(curve),
+        poles: None,
     }
 }
 
@@ -847,6 +909,7 @@ fn gen_case(rng: &mut Rng) -> Inputs {
         n2: 0,
         steps: Vec::new(),
         curve: None,
+        poles: None,
     }
 }
 
@@ -873,5 +936,152 @@ impl UnitDiff for Runner {
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         rust(&case.parse()?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::case::CaseSource;
+
+    fn volume_fixtures() -> Vec<Case> {
+        let file: Value = serde_json::from_str(include_str!(
+            "../../../../fixtures/geom.tol/bspline-volume-scaled-zero.json"
+        ))
+        .unwrap();
+        file["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|entry| Case {
+                unit: "geom.tol".into(),
+                name: entry["name"].as_str().unwrap().into(),
+                source: CaseSource::Inline,
+                inputs: entry["inputs"].clone(),
+            })
+            .collect()
+    }
+
+    fn volume_scalar(case: &Case) -> f64 {
+        let out = Runner.run_rust(case).unwrap();
+        assert!(out.error.is_none(), "{}: {:?}", case.name, out.error);
+        assert!(out.deferred.is_none(), "{}: {:?}", case.name, out.deferred);
+        assert!(out.rejected.is_none());
+        assert!(out.ints.is_empty());
+        assert_eq!(out.values.len(), 1);
+        let values = &out.values["scaled_zero_of_volume"];
+        assert_eq!(values.len(), 1);
+        assert!(values[0].is_finite() && values[0] > 0.0);
+        values[0]
+    }
+
+    #[test]
+    fn volume_fixtures_return_positive_geometric_scaled_zeros() {
+        let cases = volume_fixtures();
+        let expected_factors = [2.0, 32.0, 9.0, 13.0, 3.0, 10.0];
+        assert_eq!(cases.len(), expected_factors.len());
+        for (case, factor) in cases.iter().zip(expected_factors) {
+            let input: Inputs = case.parse().unwrap();
+            let max_abs = volume_operands(&input)
+                .unwrap()
+                .iter()
+                .flatten()
+                .fold(0.0_f64, |max, x| max.max(x.abs()));
+            assert_eq!(1.0 + max_abs, factor, "{}", case.name);
+            let expected = EFF_ZERO * (1.0 + max_abs);
+            let actual = volume_scalar(case);
+            assert!(
+                (actual - expected).abs() <= 1e-12 * expected.abs(),
+                "{}: {actual} != {expected}",
+                case.name
+            );
+        }
+    }
+
+    #[test]
+    fn changing_only_max_corner_changes_volume_scaled_zero() {
+        let cases = volume_fixtures();
+        let before = cases
+            .iter()
+            .find(|c| c.name == "volume_max_corner_before")
+            .unwrap();
+        let after = cases
+            .iter()
+            .find(|c| c.name == "volume_max_corner_after")
+            .unwrap();
+        let a: Inputs = before.parse().unwrap();
+        let b: Inputs = after.parse().unwrap();
+        let a = volume_operands(&a).unwrap();
+        let b = volume_operands(&b).unwrap();
+        let changes = a
+            .iter()
+            .flatten()
+            .zip(b.iter().flatten())
+            .filter(|(a, b)| a != b)
+            .count();
+        assert_eq!(changes, 1);
+        assert_eq!(a[7][2], 2.0);
+        assert_eq!(b[7][2], 9.0);
+        assert!(volume_scalar(after) > volume_scalar(before));
+    }
+
+    #[test]
+    fn parsed_poles_reach_both_backends_in_k_fastest_order() {
+        // Distinct coordinates expose swapped axes, omitted poles and constant cubes.
+        let poles: [[f64; 3]; 8] = std::array::from_fn(|n| {
+            [n as f64 + 0.25, -(n as f64) - 10.5, n as f64 + 100.75]
+        });
+        let case = Case {
+            unit: "geom.tol".into(),
+            name: "forward_all_poles".into(),
+            source: CaseSource::Inline,
+            inputs: serde_json::json!({"op": "volume", "poles": poles}),
+        };
+        let input: Inputs = case.parse().unwrap();
+        let flat = volume_ffi_poles(&input).unwrap();
+        assert_eq!(
+            flat.to_vec(),
+            poles.into_iter().flatten().collect::<Vec<_>>()
+        );
+        let volume = rust_volume(&input).unwrap();
+        let VolumeKind::BSpline(bspline) = volume.kind() else {
+            panic!("expected B-spline volume");
+        };
+        let nurb = bspline.nurb();
+        assert_eq!(nurb.cp_hi(), [1; 3]);
+        assert_eq!(nurb.degrees(), [1; 3]);
+        for dir in 0..3 {
+            assert_eq!(nurb.knots(dir), &[0.0, 0.0, 1.0, 1.0]);
+        }
+        for (index, [x, y, z]) in poles.into_iter().enumerate() {
+            let point = nurb.cpt(index / 4, (index / 2) % 2, index % 2).unwrap();
+            assert_eq!([point.x, point.y, point.z, point.w], [x, y, z, 1.0]);
+        }
+    }
+
+    #[test]
+    fn volume_requires_explicit_poles() {
+        let input: Inputs = serde_json::from_value(serde_json::json!({"op": "volume"})).unwrap();
+        assert!(volume_ffi_poles(&input).is_err());
+        assert!(rust(&input).is_err());
+        assert!(cpp(&input).is_err());
+    }
+
+    #[test]
+    fn legacy_generated_cases_omit_optional_poles_without_consuming_rng() {
+        for seed in [0, 1, 42, u64::MAX, CaseContext::seed_for("geom.tol", 0)] {
+            let mut direct_rng = Rng::new(seed);
+            let mut runner_rng = Rng::new(seed);
+            for _ in 0..32 {
+                let input = gen_case(&mut direct_rng);
+                assert!(input.poles.is_none());
+                let value = serde_json::to_value(&input).unwrap();
+                assert!(value.get("poles").is_none());
+                assert_eq!(Runner.generate(&mut runner_rng).unwrap(), value);
+                let parsed: Inputs = serde_json::from_value(value.clone()).unwrap();
+                assert_eq!(serde_json::to_value(parsed).unwrap(), value);
+            }
+            assert_eq!(direct_rng.next_u64(), runner_rng.next_u64());
+        }
     }
 }

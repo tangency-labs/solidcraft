@@ -6,10 +6,14 @@
 
 #include "StdAfx.h"
 #include <SmBSplineCurve.h>
+#include <SmBSplineVolume.h>
 #include <SmCircle.h>
 #include <SmCurve.h>
 #include <SmLine.h>
+#include <SmMemory.h>
 #include <SmNurbsCrv.h>
+#include <SmNurbsVol.h>
+#include <SmVolume.h>
 #include <nurbs.h>
 
 #include <SmContext.h>
@@ -22,6 +26,8 @@
 #include <SmVector3d.h>
 
 #include <algorithm>
+#include <cmath>
+#include <memory>
 #include <stdexcept>
 #include <vector>
 
@@ -489,6 +495,47 @@ SmCurve* sc_read_curve(ScRd& rd, const SmContext& ctx)
 }
 } // namespace
 
+// Fixed B-spline volume (degree 1, 2x2x2 control points, unit weights, knots 0/0/1/1)
+// followed by SmTol::GetScaledZero(*volume). 24 doubles = 8 poles x 3 coords.
+SC_EXPORT int32_t sc_geom_tol_volume(const double* in, int64_t n_in, double* out, int64_t cap, int64_t* out_len)
+{
+    if (in == nullptr || n_in != 24 || out_len == nullptr || (out == nullptr && cap > 0))
+        return SC_ERR_ARG;
+    for (int64_t i = 0; i < 24; ++i)
+        if (!std::isfinite(in[i]))
+            return SC_ERR_ARG;
+    SC_TRY
+    SmContext ctx;
+    gw_VOLUME* rec = sm_AllocateNurbVolume(1, 1, 1, 1, 1, 1, 3, 3, 3);
+    if (rec == NULL)
+        return SC_ERR_ARG;
+    SmMemDelete cleanup(rec);
+    for (int i = 0; i <= 3; ++i)
+    {
+        rec->knu->U[i] = (i < 2) ? 0.0 : 1.0;
+        rec->knv->U[i] = (i < 2) ? 0.0 : 1.0;
+        rec->knw->U[i] = (i < 2) ? 0.0 : 1.0;
+    }
+    for (int i = 0; i <= 1; ++i)
+        for (int j = 0; j <= 1; ++j)
+            for (int k = 0; k <= 1; ++k)
+            {
+                NL_CPOINT& c = rec->mesh->Pw[i][j][k];
+                const int base = (i * 4 + j * 2 + k) * 3;
+                c.x = in[base];
+                c.y = in[base + 1];
+                c.z = in[base + 2];
+                c.w = 1.0;
+            }
+    // This constructor copies the record, as in surface_b_spline_volume.cpp.
+    // Both allocations are guarded through native exceptions, before ctx dies.
+    std::unique_ptr<SmVolume> v(new (ctx) SmBSplineVolume(&ctx, rec));
+    smos_Free(rec);
+    cleanup.Clear();
+    const double scaled_zero = (double)SmTol::GetScaledZero(*v);
+    return sc_copy_out(&scaled_zero, 1, out, cap, out_len);
+    SC_CATCH
+}
 SC_EXPORT int32_t sc_geom_tol_curve(const double* in, int64_t n_in, double* out, int64_t cap, int64_t* out_len)
 {
     if (in == nullptr || n_in < 1 || out_len == nullptr || (out == nullptr && cap > 0))

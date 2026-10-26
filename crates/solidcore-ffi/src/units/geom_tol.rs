@@ -9,6 +9,7 @@
 //! | [`op`]       | `sc_geom_tol_op`       | one `SmTol` call per [`Op`]      |
 //! | [`relation`] | `sc_geom_tol_relation` | a script of `SmRelation<int, int>` calls |
 //! | [`curve_tols`] | `sc_geom_tol_curve`  | the `SmCurve` overloads of `GetScaledZero`, `MapTo1d`, `IsDegenerate` |
+//! | [`volume_scaled_zero`] | `sc_geom_tol_volume` | `SmTol::GetScaledZero(const SmVolume&)` |
 
 use crate::{call_with_buffer, check, FfiError};
 
@@ -30,6 +31,13 @@ mod sys {
             out_n: *mut i32,
         ) -> i32;
         pub fn sc_geom_tol_curve(
+            input: *const f64,
+            n_in: i64,
+            out: *mut f64,
+            cap: i64,
+            out_len: *mut i64,
+        ) -> i32;
+        pub fn sc_geom_tol_volume(
             input: *const f64,
             n_in: i64,
             out: *mut f64,
@@ -305,4 +313,84 @@ pub fn curve_tols(
             )
         }
     })
+}
+
+fn validate_volume_poles(poles: &[f64; 24]) -> Result<(), FfiError> {
+    if poles.iter().any(|x| !x.is_finite()) {
+        return Err(FfiError::InvalidArgument("value not finite".into()));
+    }
+    Ok(())
+}
+
+/// Returns one scaled-zero value for a real degree-1, unit-weight B-spline volume.
+///
+/// The eight poles are XYZ triples in a 2x2x2 mesh, with the last mesh index fastest.
+/// Each knot vector is `[0, 0, 1, 1]`. All finite coordinates are accepted.
+///
+/// # Errors
+///
+/// Returns [`FfiError::InvalidArgument`] for nonfinite coordinates or an unexpected
+/// output count, or the native shim's error.
+pub fn volume_scaled_zero(poles: &[f64; 24]) -> Result<Vec<f64>, FfiError> {
+    validate_volume_poles(poles)?;
+    let mut out = [0.0; 1];
+    let mut n = 0i64;
+    // SAFETY: `poles` is valid for 24 reads; `out` for one write; `n` is a valid
+    // i64. All coordinates are finite, counts are fixed, and nothing is retained.
+    let st =
+        unsafe { sys::sc_geom_tol_volume(poles.as_ptr(), 24, out.as_mut_ptr(), 1, &raw mut n) };
+    check(st)?;
+    if n != 1 {
+        return Err(FfiError::InvalidArgument(format!(
+            "shim returned {n} values, expected 1"
+        )));
+    }
+    Ok(out.to_vec())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_volume_poles;
+    use crate::FfiError;
+
+    #[test]
+    fn volume_poles_reject_nonfinite_at_every_position() {
+        for index in 0..24 {
+            for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+                let mut poles = [0.0; 24];
+                poles[index] = value;
+                assert!(matches!(
+                    validate_volume_poles(&poles),
+                    Err(FfiError::InvalidArgument(_))
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn volume_poles_accept_finite_meshes_without_shape_constraints() {
+        let ordinary = [
+            [0.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 1.0, 1.0],
+            [1.0, 0.0, 0.0],
+            [1.0, 0.0, 1.0],
+            [1.0, 1.0, 0.0],
+            [1.0, 1.0, 1.0],
+        ];
+        let mut skew = ordinary;
+        for pole in &mut skew {
+            pole[0] += 0.5 * pole[1] - 0.25 * pole[2];
+            pole[1] += 0.75 * pole[2];
+        }
+        let mut reversed = ordinary;
+        for pole in &mut reversed {
+            pole[0] = -pole[0];
+        }
+        for corners in [[[0.0; 3]; 8], ordinary, skew, reversed, [[f64::MAX; 3]; 8]] {
+            let poles = std::array::from_fn(|index| corners[index / 3][index % 3]);
+            assert!(validate_volume_poles(&poles).is_ok());
+        }
+    }
 }

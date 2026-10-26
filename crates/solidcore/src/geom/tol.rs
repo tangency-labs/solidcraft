@@ -761,8 +761,9 @@ pub fn scaled_zero_of_equations<E: EvalNFunctions + ?Sized>(equations: &E) -> f6
 /// of the domain (`EvaluateBoundingBox`, status ignored: on a failure the box holds
 /// whatever was written before it, possibly nothing, as upstream).
 ///
-/// No caller and no difftest coverage of the bounded branch yet: `geom.tol` has no
-/// B-spline volume fixture.
+/// The bounded branch is compared on unit-weight trilinear B-spline volumes in
+/// the `geom.tol` difftest unit. Those fixtures do not cover higher-degree or
+/// rational volumes.
 /// # Errors
 ///
 /// [`SolidError::Unported`] from the volume; the undefined cases of
