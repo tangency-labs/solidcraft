@@ -996,7 +996,7 @@ struct Rows<'a> {
     /// Find in Timeline: the feature to scroll into view this frame (#5850).
     reveal: Option<u64>,
     /// The feature whose body is under the pointer in the 3D view.
-    from_view: Option<u64>,
+    from_view: [Option<u64>; 2],
     /// A sketch that has a reference row and one of whose rows was hovered last frame: all its
     /// rows light up.
     linked_hover: Option<u64>,
@@ -1041,12 +1041,7 @@ fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
         .iter()
         .map(|group| (group.id, group_last_feature(&groups, &features, group.id).map_or(features.len(), |index| index.saturating_add(1))))
         .collect();
-    let from_view = match &app.viewport.hover {
-        Some(crate::viewport::Hit::Face { body, .. } | crate::viewport::Hit::Edge { body, .. } | crate::viewport::Hit::Vertex { body, .. }) => {
-            app.session.world_state().body(body).map(|body| body.feature)
-        }
-        _ => None,
-    };
+    let from_view = [crate::timeline::hovered_feature(app), crate::timeline::picked_feature(app)];
     let drag_id = ui.id().with("tl_vertical_drag");
     let mut rows = Rows {
         names,
@@ -1289,7 +1284,7 @@ fn feature_row(app: &mut SolveApp, ui: &mut egui::Ui, rows: &mut Rows, index: us
         name,
         kind: ty,
         selected,
-        hovered: response.hovered() || rows.from_view == Some(id) || rows.linked_hover == Some(id),
+        hovered: response.hovered() || rows.from_view.contains(&Some(id)) || rows.linked_hover == Some(id),
         dim: rolled,
         suppressed: *suppressed,
         error: error.is_some(),

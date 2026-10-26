@@ -2171,6 +2171,7 @@ impl SolveApp {
             }
         }
         let floating = ui_kit::Container::new(ui.ctx(), ui_kit::Surface::Panel).floating();
+        timeline::follow_view_pick(self);
         let show_timeline = self.ui.show_timeline && !render_workspace::active(self);
         let left_timeline = show_timeline && self.preferences.timeline_left;
         timeline_left::animate_folds(self, ui.ctx());

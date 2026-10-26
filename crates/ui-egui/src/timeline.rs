@@ -26,6 +26,46 @@ pub(crate) fn run_transport(app: &mut SolveApp, control: crate::ui_kit::HistoryT
     let _ = app.run_heavy("timeline.roll_to", params);
 }
 
+/// The feature that made a face, edge or vertex of `body` (its world name): a face's own creator,
+/// as Edit Feature on a face finds it (the hole, not the plate it was cut into), else the feature
+/// that made the body.
+fn geometry_feature(app: &SolveApp, body: &str, face: Option<usize>) -> Option<u64> {
+    face.and_then(|index| crate::context_menu::face_feature(app, body, index))
+        .or_else(|| app.session.world_state().body(body).map(|b| b.feature))
+        .filter(|id| app.session.doc.feature(*id).is_some())
+}
+
+/// The feature of the face, edge or vertex under the pointer in the view.
+pub(crate) fn hovered_feature(app: &SolveApp) -> Option<u64> {
+    match &app.viewport.hover {
+        Some(crate::viewport::Hit::Face { body, index, .. }) => geometry_feature(app, body, Some(*index)),
+        Some(crate::viewport::Hit::Edge { body, .. } | crate::viewport::Hit::Vertex { body, .. }) => geometry_feature(app, body, None),
+        _ => None,
+    }
+}
+
+/// The feature of the first face or edge picked in the view.
+pub(crate) fn picked_feature(app: &SolveApp) -> Option<u64> {
+    app.session.selection.iter().find_map(|selection| match selection {
+        solidcraft_engine::Sel::Face { body, index, .. } => geometry_feature(app, body, Some(*index)),
+        solidcraft_engine::Sel::Edge { body, .. } => geometry_feature(app, body, None),
+        _ => None,
+    })
+}
+
+/// A new face or edge picked in the view scrolls the history shown to the feature that made it,
+/// once per pick; the history stays where it is while the pick does not change.
+pub(crate) fn follow_view_pick(app: &mut SolveApp) {
+    let picked = picked_feature(app);
+    if picked == app.tree.view_pick {
+        return;
+    }
+    app.tree.view_pick = picked;
+    if picked.is_some() && app.ui.show_timeline {
+        app.tree.timeline_reveal = picked;
+    }
+}
+
 // Snapshot only the data used by timeline interactions. Cloning FeatureKind here would
 // also copy imported mesh vertices and triangles on every frame.
 #[derive(Clone, Copy)]
@@ -497,14 +537,8 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
             let order: Vec<u64> = feats.iter().map(|f| f.0).collect();
             // Find in Timeline: scroll the found feature into the strip on this frame (#5850).
             let reveal = app.tree.timeline_reveal.take();
-            // The feature whose body is under the cursor in the viewport.
-            let st = app.session.world_state();
-            let from_view = match &app.viewport.hover {
-                Some(
-                    crate::viewport::Hit::Face { body, .. } | crate::viewport::Hit::Edge { body, .. } | crate::viewport::Hit::Vertex { body, .. },
-                ) => st.body(body).map(|b| b.feature),
-                _ => None,
-            };
+            // The feature that made what is under the cursor or picked in the viewport.
+            let from_view = [hovered_feature(app), picked_feature(app)];
             let drag_id = ui.id().with("tl_drag");
             let mut drag: Option<Drag> = ui.data(|d| d.get_temp(drag_id));
             let pointer = ui.input(|i| i.pointer.hover_pos());
@@ -538,7 +572,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                     name,
                     kind: ty,
                     selected: sel,
-                    hovered: resp.hovered() || from_view == Some(*id),
+                    hovered: resp.hovered() || from_view.contains(&Some(*id)),
                     dim: rolled,
                     suppressed: *suppressed,
                     error: err.is_some(),
@@ -913,6 +947,52 @@ mod tests {
             assert_eq!(h.app.session.selection, [solidcraft_engine::Sel::Feature { id: last }], "left={left}");
             assert!(shown(&h), "left={left}: Find in Timeline scrolled the found feature into the timeline");
             assert!(h.app.tree.timeline_reveal.is_none(), "left={left}: the request is done once drawn");
+        }
+    }
+
+    /// A face picked in the view lights the feature that made it, the hole rather than the block
+    /// it was cut into, and scrolls both timelines to it once; hovering finds the same feature.
+    #[test]
+    fn a_face_picked_in_the_view_scrolls_both_timelines_to_the_feature_that_made_it() {
+        for left in [false, true] {
+            let mut h = Harness::new();
+            h.app.preferences.timeline_left = left;
+            let block =
+                h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 10, "name": "Block", "body_name": "Plate"})).unwrap()["feature"]
+                    .as_u64()
+                    .unwrap();
+            for i in 0..80 {
+                h.app.run("sketch.create", json!({"plane": "XY", "name": format!("S{i}")})).unwrap();
+                h.app.run("sketch.finish", json!({})).unwrap();
+            }
+            let hole = h
+                .app
+                .run("solid.cylinder", json!({"base": [10, 10, -1], "radius": 3, "height": 12, "operation": "cut", "name": "Hole"}))
+                .unwrap()["feature"]
+                .as_u64()
+                .unwrap();
+            h.app.run("select.clear", json!({})).unwrap();
+            h.frames(4);
+            let shown = |h: &Harness| h.app.shell.history.unwrap().contains(crate::scenario::handle_at("timeline:Hole").unwrap());
+            assert!(!shown(&h), "left={left}: the hole starts outside the timeline");
+
+            let state = h.app.session.world_state();
+            let body = state.bodies.first().unwrap();
+            let names = solidcraft_engine::doc::naming::face_names(body);
+            let index = names.iter().position(|name| solidcraft_engine::doc::persistent_name::made_by(name) == Some(hole)).unwrap();
+            let plate = body.name.clone();
+            h.app.viewport.hover = Some(crate::viewport::Hit::Face { body: plate.clone(), index, point: solidcraft_engine::geom::Vec3::ZERO });
+            assert_eq!(crate::timeline::hovered_feature(&h.app), Some(hole), "left={left}: hovering the hole's face finds the hole");
+            h.app.viewport.hover = Some(crate::viewport::Hit::Vertex { body: plate.clone(), point: solidcraft_engine::geom::Vec3::ZERO });
+            assert_eq!(crate::timeline::hovered_feature(&h.app), Some(block), "left={left}: a vertex finds the feature that made its body");
+            h.app.viewport.hover = None;
+
+            h.app.run("select.set", json!({"items": [{"type": "face", "body": plate, "index": index, "point": [0, 0, 0]}]})).unwrap();
+            h.frames(30);
+            assert_eq!(crate::timeline::picked_feature(&h.app), Some(hole), "left={left}");
+            assert_eq!(h.app.tree.view_pick, Some(hole), "left={left}");
+            assert!(shown(&h), "left={left}: the pick scrolled the hole into the timeline");
+            assert!(h.app.tree.timeline_reveal.is_none(), "left={left}: once, not on every frame");
         }
     }
 

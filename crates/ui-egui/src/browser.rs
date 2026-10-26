@@ -128,6 +128,9 @@ pub struct TreeState {
     /// Find in Timeline: the feature the history scrolls to the next time it draws its items, in
     /// the bottom strip or in the history on the left (#5850).
     pub timeline_reveal: Option<u64>,
+    /// The feature of the face or edge last picked in the view, so a new pick scrolls the
+    /// history to it once.
+    pub view_pick: Option<u64>,
     /// The Edit Canvas / Calibrate panel.
     pub canvas_panel: Option<CanvasPanel>,
     /// The bodies a row at the top of the history lights this frame (`history_rows`), for the

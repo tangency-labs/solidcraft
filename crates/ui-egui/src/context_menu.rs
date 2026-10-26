@@ -449,6 +449,11 @@ fn picked_face_feature(app: &SolveApp) -> Option<u64> {
         Sel::Face { body, index, .. } => Some((body, *index)),
         _ => None,
     })?;
+    face_feature(app, body, index)
+}
+
+/// The feature that made face `index` of `body` (by its world name).
+pub(crate) fn face_feature(app: &SolveApp, body: &str, index: usize) -> Option<u64> {
     let state = app.session.world_state();
     let body = state.body(body)?;
     let names = solidcraft_engine::doc::naming::face_names(body);
