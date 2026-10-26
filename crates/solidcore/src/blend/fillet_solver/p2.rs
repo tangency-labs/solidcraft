@@ -53,6 +53,8 @@
 //!   returns [`SolidError::InvalidInput`]. Writes of the solver intervals past the
 //!   Jacobian size (upstream: `SM_ASSERT`, then into the fixed `SmExtentNd` storage)
 //!   are dropped; the solve then rejects intervals not sized like the guess.
+//! - **Callback sizes.** The Jacobian-size additions in the rail/edge-use and rail/rail
+//!   intersections are checked and return [`SolidError::InvalidInput`] on overflow.
 //! - **Iteration.** `sm_FindRolloverSideEdge`'s `while (TRUE)` advances its interval
 //!   index on every pass that does not return, so it runs at most `pCC.len()` times;
 //!   there is no recursion.
@@ -1230,7 +1232,8 @@ impl FilletSolver {
     /// `SM_ERR` without both offset surfaces or for more than [`MAX_USER_DOUBLES`]
     /// further values; those of `GetOrCreateUVTrimCurve`, the evaluations,
     /// `GetJacobianSize`, `LoadInitialValues` and the solve;
-    /// [`SolidError::InvalidInput`] where upstream dereferences `NULL` (no UV trim
+    /// [`SolidError::InvalidInput`] for a Jacobian size that overflows when the edge-use
+    /// parameter is added, where upstream dereferences `NULL` (no UV trim
     /// curve, no side edge), for a UV trim curve that is not a B-spline, a rail index
     /// above 1, or no second surface index from `LoadInitialValues`.
     pub fn rail_edgeuse_intersect(
@@ -1263,7 +1266,10 @@ impl FilletSolver {
         let uv_guess = Point2::new(p2d.x, p2d.y);
 
         // Now Set up Solver
-        let jacobian_size = ops.jacobian_size()? + 1;
+        let jacobian_size = ops
+            .jacobian_size()?
+            .checked_add(1)
+            .ok_or_else(|| invalid("Jacobian size overflows with edge-use parameter"))?;
         let mut intervals = ExtentNd::new(jacobian_size);
         set_interval(&mut intervals, 0, uv_trim.natural_interval());
 
@@ -1383,8 +1389,9 @@ impl FilletSolver {
     /// `SetupOffsetExtension`, `LoadInitialValues` and the solve;
     /// [`SolidError::Unported`] for the temporary radius change
     /// (`SmTemporaryRadiusChange`, unit `blend.fillet_executive_p2`);
-    /// [`SolidError::InvalidInput`] for Jacobian sizes summing below 2, a rail index
-    /// above 1 or no second surface index from `LoadInitialValues`.
+    /// [`SolidError::InvalidInput`] when Jacobian sizes overflow while being summed,
+    /// sum below 2, the rail index is above 1, or `LoadInitialValues` sets no second
+    /// surface index.
     pub fn rail_rail_intersect(
         ops: &mut dyn FilletSolverOps,
         other: &mut dyn FilletSolverOps,
@@ -1408,7 +1415,9 @@ impl FilletSolver {
         // Set up Solver Size
         let jacobian_size = ops.jacobian_size()?;
         let other_jacobian_size = other.jacobian_size()?;
-        let jacobian_size = (jacobian_size + other_jacobian_size)
+        let jacobian_size = jacobian_size
+            .checked_add(other_jacobian_size)
+            .ok_or_else(|| invalid("Jacobian sizes sum overflows"))?
             .checked_sub(2)
             .ok_or_else(|| invalid("Jacobian sizes sum below 2"))?;
 
@@ -2322,9 +2331,13 @@ pub fn find_rollover_side_edge<O: ClassObject>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::blend::fillet_custom_solver::SurfaceId;
     use crate::blend::fillet_geom::p1::{FilletEdgeuse, FilletVertexuse};
-    use crate::blend::fillet_solver::p1::FilletExecutiveRef;
+    use crate::blend::fillet_solver::p1::{FilletExecutiveRef, OffsetSurfaceSlot};
     use crate::intersect::point_class::ClassObjectKind;
+    use crate::nurbs::b_spline_surface::BSplineSurface;
+    use crate::nurbs::math::{CPoint, NOW};
+    use crate::surface::offset_surface::SS_UNKNOWN;
     use crate::topology::Edgeuse;
     use crate::topology::Vertexuse;
     use crate::topology::VertexuseOwner;
@@ -2336,6 +2349,245 @@ mod tests {
         fn class_kind(&self) -> ClassObjectKind {
             ClassObjectKind::Edge
         }
+    }
+
+    struct JacobianSizeOps {
+        solver: FilletSolver,
+        size: usize,
+        extension_calls: std::cell::Cell<usize>,
+        loaded_dimension: std::cell::Cell<Option<usize>>,
+    }
+
+    impl FilletSolverOps for JacobianSizeOps {
+        fn solver(&self) -> &FilletSolver {
+            &self.solver
+        }
+
+        fn solver_mut(&mut self) -> &mut FilletSolver {
+            &mut self.solver
+        }
+
+        fn jacobian_size(&self) -> Result<usize> {
+            Ok(self.size)
+        }
+
+        fn setup_offset_extension(
+            &self,
+            _k: &Kernel,
+            _surface: &Surface,
+            _domain: &mut Extent2d,
+        ) -> Result<()> {
+            self.extension_calls.set(self.extension_calls.get() + 1);
+            Ok(())
+        }
+
+        fn load_initial_values(
+            &mut self,
+            _k: &Kernel,
+            _brep: Option<&Brep>,
+            _do_surf2_calcs: bool,
+            _rail_index: usize,
+            _surface1: &mut OffsetSurface,
+            _surface1_index: usize,
+            intervals: &mut ExtentNd,
+            _periodicities: &mut Vec<bool>,
+            _guess_t: &mut Vec<f64>,
+        ) -> Result<Option<crate::blend::fillet_custom_solver::InitialValues>> {
+            self.loaded_dimension.set(Some(intervals.dimension()));
+            Err(sm_err())
+        }
+    }
+
+    fn jacobian_size_ops(k: &Kernel, size: usize) -> JacobianSizeOps {
+        let net = vec![
+            vec![
+                CPoint::new(0.0, 0.0, 0.0, NOW),
+                CPoint::new(0.0, 1.0, 0.0, NOW),
+            ],
+            vec![
+                CPoint::new(1.0, 0.0, 0.0, NOW),
+                CPoint::new(1.0, 1.0, 0.0, NOW),
+            ],
+        ];
+        let base = Surface::from(BSplineSurface::from_nurb(
+            crate::nurbs::srf_basic::Surface::new(
+                net,
+                1,
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+                vec![0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            false,
+        ));
+        let mut solver = FilletSolver::new(1e-6, 0.1, 0.01);
+        for rail in 0..2 {
+            let offset = OffsetSurface::new(
+                k,
+                0.1,
+                base.clone(),
+                SurfaceId::Free(rail as u32),
+                SS_UNKNOWN,
+            )
+            .unwrap();
+            solver
+                .set_surface(
+                    rail,
+                    Some(OffsetSurfaceSlot {
+                        key: rail as u64,
+                        surface: offset,
+                    }),
+                )
+                .unwrap();
+        }
+        JacobianSizeOps {
+            solver,
+            size,
+            extension_calls: std::cell::Cell::new(0),
+            loaded_dimension: std::cell::Cell::new(None),
+        }
+    }
+
+    fn edgeuse_with_uv_trim() -> (Brep, EdgeuseId) {
+        let mut b = Brep::new();
+        let v0 = b.add_vertex(Point3::new(0.0, 0.0, 0.0)).unwrap();
+        let v1 = b.add_vertex(Point3::new(1.0, 0.0, 0.0)).unwrap();
+        let edge = b.add_edge(v0, v1).unwrap();
+        b.edge_mut(edge).unwrap().interval = Extent1d::from_min_max(0.0, 1.0);
+        let uv = Curve::from(BSplineCurve::from_nurb(
+            crate::nurbs::crv_basic::Curve::new(
+                vec![
+                    CPoint::new(0.0, 0.0, 0.0, NOW),
+                    CPoint::new(1.0, 0.0, 0.0, NOW),
+                ],
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            2,
+            false,
+        ));
+        let edgeuse = b
+            .add_edgeuse_record(Edgeuse {
+                edge: Some(edge),
+                orientation: OrientType::Same,
+                uv_trim_curve: Some(uv),
+                ..Edgeuse::default()
+            })
+            .unwrap();
+        b.edge_mut(edge).unwrap().edgeuses.push(edgeuse);
+        (b, edgeuse)
+    }
+
+    #[test]
+    fn rail_edgeuse_jacobian_size_overflow_returns_invalid_input_before_outputs_change() {
+        let k = Kernel::default();
+        let mut ops = jacobian_size_ops(&k, usize::MAX);
+        let (mut b, side_eu) = edgeuse_with_uv_trim();
+        let mut tsect = TsectPnt {
+            curve_parameter: 0.375,
+            ..TsectPnt::default()
+        };
+        let before = tsect.clone();
+        let result =
+            FilletSolver::rail_edgeuse_intersect(&mut ops, &k, &mut b, 0, side_eu, 0.5, &mut tsect);
+        assert_eq!(
+            result,
+            Err(invalid("Jacobian size overflows with edge-use parameter"))
+        );
+        assert_eq!(tsect, before);
+        assert_eq!(ops.extension_calls.get(), 0);
+        assert_eq!(ops.loaded_dimension.get(), None);
+    }
+
+    #[test]
+    fn rail_edgeuse_normal_jacobian_size_reaches_load_initial_values_with_added_dimension() {
+        let k = Kernel::default();
+        let mut ops = jacobian_size_ops(&k, 4);
+        let (mut b, side_eu) = edgeuse_with_uv_trim();
+        let result = FilletSolver::rail_edgeuse_intersect(
+            &mut ops,
+            &k,
+            &mut b,
+            0,
+            side_eu,
+            0.5,
+            &mut TsectPnt::default(),
+        );
+        assert_eq!(result, Err(sm_err()));
+        assert_eq!(ops.extension_calls.get(), 1);
+        assert_eq!(ops.loaded_dimension.get(), Some(5));
+    }
+
+    #[test]
+    fn rail_rail_jacobian_sum_overflow_and_below_two_are_invalid_input_before_callbacks() {
+        let k = Kernel::default();
+        for (left_size, right_size, reason) in [
+            (usize::MAX, 1, "Jacobian sizes sum overflows"),
+            (usize::MAX, 2, "Jacobian sizes sum overflows"),
+            (usize::MAX, 3, "Jacobian sizes sum overflows"),
+            (1, usize::MAX, "Jacobian sizes sum overflows"),
+            (2, usize::MAX, "Jacobian sizes sum overflows"),
+            (3, usize::MAX, "Jacobian sizes sum overflows"),
+            (0, 0, "Jacobian sizes sum below 2"),
+            (0, 1, "Jacobian sizes sum below 2"),
+            (1, 0, "Jacobian sizes sum below 2"),
+        ] {
+            let mut ops = jacobian_size_ops(&k, left_size);
+            let mut other = jacobian_size_ops(&k, right_size);
+            let mut tsect = TsectPnt {
+                curve_parameter: 0.25,
+                ..TsectPnt::default()
+            };
+            let mut other_tsect = TsectPnt {
+                curve_parameter: 0.75,
+                ..TsectPnt::default()
+            };
+            let tsect_before = tsect.clone();
+            let other_tsect_before = other_tsect.clone();
+            let result = FilletSolver::rail_rail_intersect(
+                &mut ops,
+                &mut other,
+                &k,
+                None,
+                Point2::new(0.5, 0.5),
+                0,
+                0,
+                &mut tsect,
+                &mut other_tsect,
+            );
+            assert_eq!(result, Err(invalid(reason)));
+            assert_eq!(ops.extension_calls.get(), 0);
+            assert_eq!(other.extension_calls.get(), 0);
+            assert_eq!(ops.loaded_dimension.get(), None);
+            assert_eq!(other.loaded_dimension.get(), None);
+            assert_eq!(tsect, tsect_before);
+            assert_eq!(other_tsect, other_tsect_before);
+        }
+    }
+
+    #[test]
+    fn rail_rail_normal_jacobian_sizes_reach_load_initial_values_with_combined_dimension() {
+        let k = Kernel::default();
+        let mut ops = jacobian_size_ops(&k, 4);
+        let mut other = jacobian_size_ops(&k, 5);
+        let mut tsect = TsectPnt::default();
+        let mut other_tsect = TsectPnt::default();
+        let result = FilletSolver::rail_rail_intersect(
+            &mut ops,
+            &mut other,
+            &k,
+            None,
+            Point2::new(0.5, 0.5),
+            0,
+            0,
+            &mut tsect,
+            &mut other_tsect,
+        );
+        assert_eq!(result, Err(sm_err()));
+        assert_eq!(ops.extension_calls.get(), 1);
+        assert_eq!(other.extension_calls.get(), 0);
+        assert_eq!(ops.loaded_dimension.get(), Some(7));
     }
 
     /// A pseudo B-rep with one rail edge (two fillet vertices with edge and vertex uses)
