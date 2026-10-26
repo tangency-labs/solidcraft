@@ -738,17 +738,23 @@ double p3_check_patch(int64_t kind, SmFilletCorner* c, Model& M)
             delete k1;
             return 0.0; // SER(SM_ERR) before any deletion
         }
+        // From here upstream has deleted pFEOnEdge (~SmTopology unlinks it from the pseudo
+        // B-rep's edge list) and pCornerV (its uses moved to the surviving vertex, its mates
+        // cleared) before any later return, exactly as on success: the op runs, and the
+        // Model drops the corner vertex from its own list so neither the export nor ~Model
+        // touches it (p3_deleted_vertex, as for the success path below).
         if (onExt->GetOriginalFace() == NULL)
         {
             delete k1;
-            return P3C_REFUSE; // deletes Model objects, then NER
+            p3_deleted_vertex = cornerV;
+            return 0.0; // NER(pOrigFace) after the deletions
         }
         // pSurface->DropCurve(.., *pCurve1 (the joined curve), ..) dereferences the original
         // face's surface; the mate of the primary edge use is dereferenced after it. Run the
         // DropCurve here (a pure function of the surface and the joined copy; the model's
         // faces are unit bilinear patches, so UB-182 / HANG-38 do not arise): when it (or the
-        // one-curve check) fails, upstream returns having deleted the Model's objects (refused,
-        // like a missing original face above); else the default patch over the rest follows.
+        // one-curve check) fails, upstream returns its status after the deletions (run, as
+        // a missing original face above); else the default patch over the rest follows.
         SmSurface* srf = onExt->GetOriginalFace()->GetSurface();
         if (srf == NULL)
         {
@@ -763,7 +769,7 @@ double p3_check_patch(int64_t kind, SmFilletCorner* c, Model& M)
         SmEdgeuse* primary = onExt->GetPrimaryEdgeuse();
         double pre = 0.0;
         if (ds != SM_SUCCESS || !one)
-            pre = P3C_REFUSE; // pFEOnEdge and pCornerV are already deleted: the Model's export would walk freed objects
+            p3_deleted_vertex = cornerV; // SER(DropCurve) / SER(SM_ERR) after the deletions
         else if (primary == NULL || primary->GetMate() == NULL)
             pre = P3C_REFUSE;
         else
