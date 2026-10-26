@@ -178,6 +178,8 @@ struct Pending {
     deadline: f64,
     window: egui::Rect,
     pixels_per_point: f32,
+    /// The longest side a texture can have here: the screenshot's preview is one.
+    max_side: usize,
 }
 
 /// A bounded formatting sink also avoids allocating a full hostile Debug/JSON value first.
@@ -526,6 +528,7 @@ fn capture(app: &mut SolveApp, ctx: &egui::Context, dialog: Option<&dialogs::Dia
         deadline: now + 8000.0,
         window: ctx.content_rect(),
         pixels_per_point: ctx.pixels_per_point(),
+        max_side: ctx.input(|i| i.max_texture_side),
     });
     app.queued_shots.push((token, now + 150.0, 0));
     ctx.request_repaint();
@@ -557,9 +560,9 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 pub(crate) fn receive(app: &mut SolveApp, token: u64, image: Arc<ColorImage>) {
-    if !app.issue_report.pending.as_ref().is_some_and(|p| p.token == token) {
+    let Some(max_side) = app.issue_report.pending.as_ref().filter(|p| p.token == token).map(|p| p.max_side) else {
         return;
-    }
+    };
     let stale = app.issue_report.pending.as_ref().is_some_and(|p| p.signature != signature(app, app.dialog.as_ref()));
     app.issue_report.pending = None;
     if let Some(draft) = app.issue_report.draft.as_mut() {
@@ -567,14 +570,55 @@ pub(crate) fn receive(app: &mut SolveApp, token: u64, image: Arc<ColorImage>) {
             draft.note = "The model, inputs or view changed during capture. Retake the current view.".into();
             return;
         }
-        let pixels = image.width().checked_mul(image.height());
-        if !pixels.is_some_and(|n| n > 0 && n <= MAX_IMAGE_PIXELS && n == image.pixels.len()) {
-            draft.note = "Screenshot dimensions are unsupported. The text draft is still available.".into();
-        } else {
-            draft.image = Some(image);
-            draft.note = "Screenshot captured locally. Review it before attaching it on GitHub.".into();
+        match fitted(image, MAX_IMAGE_PIXELS, max_side) {
+            Some(image) => {
+                draft.image = Some(image);
+                draft.note = "Screenshot captured locally. Review it before attaching it on GitHub.".into();
+            }
+            None => draft.note = "Screenshot dimensions are unsupported. The text draft is still available.".into(),
         }
     }
+}
+
+/// `image` with at most `max` pixels and no side longer than `max_side`: a larger frame (a 6K
+/// display, a window across several screens, #7091) is averaged down by the smallest whole
+/// factor that fits. A preview texture over the GPU's limit fails its upload, and the window's
+/// device panics on that. `None` only for a frame whose size doesn't match its pixels.
+fn fitted(image: Arc<ColorImage>, max: usize, max_side: usize) -> Option<Arc<ColorImage>> {
+    let [w, h] = image.size;
+    let n = w.checked_mul(h)?;
+    if n == 0 || n != image.pixels.len() || max == 0 || max_side == 0 {
+        return None;
+    }
+    let fits = |k: usize| w.div_ceil(k) <= max_side && h.div_ceil(k) <= max_side && w.div_ceil(k).saturating_mul(h.div_ceil(k)) <= max;
+    if fits(1) {
+        return Some(image);
+    }
+    // Ends: at a factor of the longer side the frame is one pixel.
+    let mut k = 2;
+    while !fits(k) {
+        k += 1;
+    }
+    let [ow, oh] = [w.div_ceil(k), h.div_ceil(k)];
+    let mut pixels = Vec::with_capacity(ow * oh);
+    for oy in 0..oh {
+        let rows = oy * k..((oy + 1) * k).min(h);
+        for ox in 0..ow {
+            let cols = ox * k..((ox + 1) * k).min(w);
+            let (mut sum, mut count) = ([0_u64; 4], 0_u64);
+            for y in rows.clone() {
+                for p in image.pixels.get(y * w + cols.start..y * w + cols.end).unwrap_or_default() {
+                    for (s, c) in sum.iter_mut().zip(p.to_array()) {
+                        *s += u64::from(c);
+                    }
+                    count += 1;
+                }
+            }
+            let [r, g, b, a] = sum.map(|s| u8::try_from(s / count.max(1)).unwrap_or(u8::MAX));
+            pixels.push(egui::Color32::from_rgba_premultiplied(r, g, b, a));
+        }
+    }
+    Some(Arc::new(ColorImage::new([ow, oh], pixels)))
 }
 
 /// The report card is hidden only while a frame is captured, so it cannot cover the evidence.
@@ -1279,6 +1323,74 @@ mod tests {
         receive(&mut app, token, image);
         let draft = app.issue_report.draft.as_ref().unwrap();
         assert!(draft.image.is_none() && draft.note.contains("changed"));
+    }
+
+    /// A 6K display's frame, 20.4 million pixels, is over the limit: the report keeps it at half
+    /// size instead of refusing it (#7091).
+    #[test]
+    fn issue_report_capture_keeps_a_frame_over_the_limit_scaled_down() {
+        let mut app = app();
+        let ctx = crate::fonts::test_context();
+        begin(&mut app, &ctx, None, None);
+        // As the app's window device has it (vendor/egui-wgpu asks for at least 8192).
+        app.issue_report.pending.as_mut().unwrap().max_side = 8192;
+        let token = app.issue_report.pending.as_ref().unwrap().token;
+        let [w, h] = [6016, 3384];
+        let pixels = (0..w * h).map(|i| if i % w < w / 2 { egui::Color32::RED } else { egui::Color32::BLUE }).collect();
+        receive(&mut app, token, Arc::new(ColorImage::new([w, h], pixels)));
+        let draft = app.issue_report.draft.as_ref().unwrap();
+        assert!(draft.note.contains("captured"), "{}", draft.note);
+        let image = draft.image.as_ref().expect("the report keeps a screenshot");
+        assert_eq!(image.size, [3008, 1692]);
+        // The halves still meet in the middle.
+        assert_eq!(
+            [image.pixels[0], image.pixels[1503], image.pixels[1504], image.pixels[3007]],
+            [egui::Color32::RED, egui::Color32::RED, egui::Color32::BLUE, egui::Color32::BLUE]
+        );
+    }
+
+    /// Three ultrawide screens side by side, 10320 × 1440: under the pixel limit, but wider than
+    /// the GPU can make a texture. The preview's upload would fail and the window's device panic
+    /// on it; here, where the limit is egui's default 2048, egui's own check panicked.
+    #[test]
+    fn issue_report_preview_of_a_frame_wider_than_a_texture_fits_the_gpu() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let ctx = h.ctx.clone();
+        begin(&mut h.app, &ctx, None, None);
+        let token = h.app.shot_token;
+        receive(&mut h.app, token, Arc::new(ColorImage::new([10_320, 1440], vec![egui::Color32::GREEN; 10_320 * 1440])));
+        h.frames(4);
+        let max_side = h.ctx.input(|i| i.max_texture_side);
+        let draft = h.app.issue_report.draft.as_ref().unwrap();
+        let size = draft.image.as_ref().expect("the report keeps a screenshot").size;
+        assert!(size[0] <= max_side && size[1] <= max_side, "{size:?} over {max_side}");
+        assert!(draft.texture.is_some(), "the preview is drawn");
+    }
+
+    #[test]
+    fn a_frame_over_the_limit_is_averaged_down_by_a_whole_factor() {
+        let frame = |[w, h]: [usize; 2], colour: &dyn Fn(usize, usize) -> egui::Color32| {
+            Arc::new(ColorImage::new([w, h], (0..w * h).map(|i| colour(i % w, i / w)).collect()))
+        };
+        let small = frame([4, 3], &|_, _| egui::Color32::GREEN);
+        assert!(Arc::ptr_eq(&fitted(small.clone(), 12, 4).unwrap(), &small), "a frame within the limits is kept as it is");
+        // 15 pixels over a limit of 6: by 2, into 3 × 2; the last column and row average the
+        // pixels they cover.
+        let grey = egui::Color32::from_gray;
+        let checks = frame([5, 3], &|x, y| grey(if (x + y) % 2 == 0 { 0 } else { 200 }));
+        let image = fitted(checks, 6, 16).unwrap();
+        assert_eq!(image.size, [3, 2]);
+        assert_eq!(image.pixels, [grey(100), grey(100), grey(100), grey(100), grey(100), grey(0)]);
+        // A long strip goes down by the factor its area or its length needs: 1000 × 2 into 4
+        // pixels is by 250, and into a side of 300 by 4.
+        let strip = frame([1000, 2], &|_, _| egui::Color32::GREEN);
+        assert_eq!(fitted(strip.clone(), 4, 16).unwrap().size, [4, 1]);
+        assert_eq!(fitted(strip, 10_000, 300).unwrap().size, [250, 1]);
+        let mut short = ColorImage::new([2, 2], vec![egui::Color32::GREEN; 4]);
+        short.pixels.pop();
+        assert!(fitted(Arc::new(short), 16, 16).is_none(), "a frame with fewer pixels than its size is refused");
+        assert!(fitted(Arc::new(ColorImage::new([0, 0], vec![])), 16, 16).is_none());
     }
 
     #[test]
