@@ -424,14 +424,35 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
     match method {
         "ui.workspace" => {
             if let Some(workspace) = s("workspace") {
-                if !matches!(workspace, "design" | "render") {
-                    return err("workspace must be design or render");
+                if !matches!(workspace, "design" | "render" | "manufacture") {
+                    return err("workspace must be design, render, or manufacture");
                 }
-                if let Err(e) = crate::render_workspace::enter(app, workspace == "render") {
-                    return err(e);
+                match workspace {
+                    "render" => {
+                        if let Err(e) = crate::render_workspace::enter(app, true) {
+                            return err(e);
+                        }
+                    }
+                    "manufacture" => crate::manufacture_workspace::enter(app),
+                    _ => {
+                        if crate::render_workspace::active(app) {
+                            if let Err(e) = crate::render_workspace::enter(app, false) {
+                                return err(e);
+                            }
+                        } else if crate::manufacture_workspace::active(app) {
+                            crate::manufacture_workspace::exit(app);
+                        }
+                    }
                 }
             }
-            ok(json!({"workspace":if crate::render_workspace::active(app) {"render"} else {"design"}}))
+            let current = if crate::render_workspace::active(app) {
+                "render"
+            } else if crate::manufacture_workspace::active(app) {
+                "manufacture"
+            } else {
+                "design"
+            };
+            ok(json!({"workspace": current}))
         }
         "engine.execute" | "command" => {
             let Some(id) = s("command").or(s("id")) else { return err("missing `command`") };
@@ -582,6 +603,11 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
                         && let Err(e) = crate::render_workspace::enter(app, u.tab == "RENDER")
                     {
                         return err(e);
+                    }
+                    if crate::manufacture_workspace::is_tab(&u.tab) && !crate::manufacture_workspace::active(app) {
+                        crate::manufacture_workspace::enter(app);
+                    } else if !crate::manufacture_workspace::is_tab(&u.tab) && crate::manufacture_workspace::active(app) {
+                        crate::manufacture_workspace::exit(app);
                     }
                     u.ribbon_context = app.ui.ribbon_context.clone();
                     app.ui = u;

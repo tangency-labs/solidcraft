@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Ws manufacture</title>
+  <path d="M12.95 21L32 32L32 54L12.95 43Z" fill="#b8c3cf"/>
+  <path d="M51.05 21L32 32L32 54L51.05 43Z" fill="#8e9faf"/>
+  <path d="M32 10L51.05 21L32 32L12.95 21Z" fill="#e2e8ef"/>
+  <path d="M32 10L51.05 21L51.05 43L32 54L12.95 43L12.95 21Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12.95 21L32 32L51.05 21" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 32L32 54" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M28.4 6.33L28.4 21A3.6 2.08 0 0 0 35.6 21L35.6 6.33Z" fill="#236ead"/>
+  <path d="M33.26 6.33L33.26 22.95A3.6 2.08 0 0 0 35.6 21L35.6 6.33Z" fill="#236ead"/>
+  <path d="M28.4 6.33L28.4 21A3.6 2.08 0 0 0 35.6 21L35.6 6.33Z" fill="none" stroke="#34465b" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M28.4 6.33A3.6 2.08 0 1 0 35.6 6.33A3.6 2.08 0 1 0 28.4 6.33Z" fill="#b9ddf8" stroke="#34465b" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

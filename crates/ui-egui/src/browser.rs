@@ -1242,6 +1242,7 @@ fn component_rows_inner(
     }
     let d = depth + 1;
     if id == 0 {
+        setup_rows(app, ui, d);
         doc_settings(app, ui, d);
         named_view_rows(app, ui, d, acts);
         origin_rows(app, ui, d, acts);
@@ -1434,6 +1435,46 @@ fn doc_settings(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
             app.design_properties = None;
         } else {
             app.start("document.metadata");
+        }
+    }
+}
+
+/// Setups live in the left browser when Manufacture is active (#1782).
+fn setup_rows(app: &mut SolveApp, ui: &mut egui::Ui, depth: usize) {
+    if !crate::manufacture_workspace::active(app) {
+        return;
+    }
+    let key = "cam_setups";
+    let open = is_open(app, key, true);
+    let r = draw_row(ui, ui.id().with(key), &Row { depth, fold: Some(open), icon: "settings", label: "Setups", ..Default::default() });
+    if r.fold || r.clicked {
+        toggle(app, key, true);
+    }
+    if !open {
+        return;
+    }
+    let names: Vec<String> = app.session.doc.cam.setups.iter().map(|s| s.name.clone()).collect();
+    if names.is_empty() {
+        draw_row(
+            ui,
+            ui.id().with("cam_setups_empty"),
+            &Row { depth: depth + 1, icon: "settings", label: "No setups yet", dim: true, ..Default::default() },
+        );
+        return;
+    }
+    for name in names {
+        let selected = app.manufacture_workspace.active_setup == name;
+        let r = draw_row(
+            ui,
+            ui.id().with(("cam_setup", &name)),
+            &Row { depth: depth + 1, icon: "settings", label: &name, name: true, selected, ..Default::default() },
+        );
+        if r.clicked {
+            app.manufacture_workspace.active_setup = name.clone();
+        }
+        if r.double {
+            app.manufacture_workspace.active_setup = name.clone();
+            crate::manufacture_setup::open_edit(app, &name);
         }
     }
 }
