@@ -150,6 +150,31 @@ impl Brep {
         ffi::ops::blend(kind, &self.0, edges, sizes, tolerance).map(Brep).map_err(pick_error)
     }
 
+    /// [`Brep::blend`] with corner setbacks: each of `corners` picks the vertex nearest it
+    /// (within `tolerance`), a corner where every edge is blended, and that corner's patch starts
+    /// `setbacks[j]` along each of its edges from the vertex (one distance per corner, as SMLib
+    /// keeps it). A corner SMLib builds no setback on (some edge there not blended, a chamfer) is
+    /// [`Error::Unsupported`]; a setback as long as an edge there, [`Error::NoRoom`].
+    pub fn blend_setback(&self, kind: Blend, edges: &[[f64; 3]], sizes: &[f64], corners: &[[f64; 3]], setbacks: &[f64], tolerance: f64) -> Result<Brep> {
+        init()?;
+        if edges.len() > MAX_POINTS
+            || edges.is_empty()
+            || sizes.len() != edges.len()
+            || corners.is_empty()
+            || corners.len() > MAX_POINTS
+            || setbacks.len() != corners.len()
+        {
+            return Err(Error::Argument);
+        }
+        let kind = match kind {
+            Blend::Round => ffi::ops::BLEND_ROUND,
+            Blend::Curvature => ffi::ops::BLEND_CURVATURE,
+            Blend::Chord => ffi::ops::BLEND_CHORD,
+            Blend::Chamfer => ffi::ops::BLEND_CHAMFER,
+        };
+        ffi::ops::blend_setback(kind, &self.0, edges, sizes, corners, setbacks, tolerance).map(Brep).map_err(pick_error)
+    }
+
     /// The one edge nearest to `edge` (within `tolerance`) rounded with a radius
     /// that varies along it: a clamped B-spline of `degree` (1 to 3) with `knots` and control
     /// `radii` over the position along the edge, 0 at its end nearest `start` and 1 at the other

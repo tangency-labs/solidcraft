@@ -262,6 +262,7 @@ fn box_fillet_cut_timeline() {
             style: Default::default(),
             fit: Default::default(),
             corner: Default::default(),
+            setbacks: Vec::new(),
             tangent_chain: true,
         },
         None,
@@ -335,6 +336,7 @@ fn errors_are_reported_not_fatal() {
             style: Default::default(),
             fit: Default::default(),
             corner: Default::default(),
+            setbacks: Vec::new(),
             tangent_chain: true,
         },
         None,
@@ -746,4 +748,27 @@ fn a_join_splits_off_only_what_touches_along_an_edge() {
     let other = bodies.iter().find(|(n, _, _)| n != "Body1").cloned().unwrap_or_else(|| panic!("{bodies:?}"));
     assert!(rel(other.1, arm) < 1e-6 && other.2 == 1, "the arm: {bodies:?}");
     assert_eq!(kept, Some(KeptSeparate::AlongEdge));
+}
+
+/// A fillet saved before corner setbacks reads with none and writes no `setbacks`; one with a
+/// setback keeps it through a save, its distance an expression.
+#[test]
+fn fillet_setbacks_default_to_none_and_round_trip() {
+    let old = serde_json::json!({"type": "fillet", "edges": [[30.0, 40.0, 20.0]], "radius": "5"});
+    let kind: FeatureKind = serde_json::from_value(old).unwrap();
+    let FeatureKind::Fillet { setbacks, .. } = &kind else { panic!("{kind:?}") };
+    assert!(setbacks.is_empty());
+    assert!(serde_json::to_value(&kind).unwrap().get("setbacks").is_none());
+    let set = FeatureKind::Fillet {
+        edges: vec![Position(Vec3::new(30.0, 40.0, 20.0))],
+        radius: "5".into(),
+        body: None,
+        style: Default::default(),
+        fit: Default::default(),
+        corner: Default::default(),
+        setbacks: vec![CornerSetback { vertex: Position(Vec3::new(60.0, 40.0, 20.0)), distance: "8 mm".into() }],
+        tangent_chain: true,
+    };
+    let back: FeatureKind = serde_json::from_value(serde_json::to_value(&set).unwrap()).unwrap();
+    assert_eq!(back, set);
 }

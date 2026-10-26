@@ -1,3 +1,38 @@
 {
- "commands": []
+ "base": "../../01-primitives/001-box",
+ "commands": [
+  {
+   "command": "solid.fillet",
+   "params": {
+    "edges": [
+     [
+      30,
+      40,
+      20
+     ],
+     [
+      60,
+      20,
+      20
+     ],
+     [
+      60,
+      40,
+      10
+     ]
+    ],
+    "radius": 5,
+    "setbacks": [
+     {
+      "vertex": [
+       60,
+       40,
+       20
+      ],
+      "distance": 8
+     }
+    ]
+   }
+  }
+ ]
 }

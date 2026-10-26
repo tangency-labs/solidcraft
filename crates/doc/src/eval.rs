@@ -3498,6 +3498,13 @@ fn blend_body(
     // The blended body, and the lineage of what the last blend started from.
     let (nb, from) = match &f.kind {
         FeatureKind::Fillet { corner: crate::FilletCorner::G2, .. } => (kernel::fillet_g2_corners(&mb.body, edges, r)?, input),
+        FeatureKind::Fillet { setbacks, .. } if !setbacks.is_empty() => {
+            let mut corners = Vec::with_capacity(setbacks.len());
+            for c in setbacks {
+                corners.push((c.vertex.0, val(vals, &c.distance, Kind::Length)?));
+            }
+            (kernel::fillet_setback(&mb.body, edges, r, &corners)?, input)
+        }
         FeatureKind::Fillet { style: crate::FilletStyle::Curvature, .. } => (kernel::fillet_g2(&mb.body, edges, r)?, input),
         FeatureKind::Fillet { style: crate::FilletStyle::Chord, .. } => (kernel::fillet_chord(&mb.body, edges, r)?, input),
         FeatureKind::Fillet { style: crate::FilletStyle::Variable { radius2, start, mid, smooth }, .. } => {
@@ -6732,6 +6739,15 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             }
             // Each edge is found on its own body (picked over several bodies, the edges of each
             // are blended on it), all against the bodies as they were before this feature.
+            // Corner setbacks likewise: SMLib sets back the corners of constant-radius rounds.
+            if let FeatureKind::Fillet { setbacks, corner, style, fit, .. } = &f.kind
+                && !setbacks.is_empty()
+                && (!corner.is_rolling() || !matches!(style, crate::FilletStyle::Constant) || !matches!(fit, crate::FilletFit::Exact))
+            {
+                return Err(DocError::Invalid(
+                    "corner setbacks are built for a constant-radius fillet (type: constant, fit: exact, corner: rolling) only".into(),
+                ));
+            }
             let on = blend_bodies(st, f, body, &crate::plain(edges))?;
             let mut groups: Vec<(usize, Vec<usize>)> = Vec::new();
             for (i, ti) in on.iter().enumerate() {
@@ -7770,6 +7786,7 @@ mod chain_tests {
                 style: crate::FilletStyle::Constant,
                 fit: Default::default(),
                 corner: Default::default(),
+                setbacks: Vec::new(),
                 tangent_chain: true,
             },
             None,
