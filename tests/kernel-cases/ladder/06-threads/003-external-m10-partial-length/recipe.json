@@ -23,7 +23,12 @@
     ],
     "modeled": true,
     "designation": "M10",
-    "length": 15
+    "length": 15,
+    "from": [
+     0,
+     0,
+     30
+    ]
    }
   }
  ]

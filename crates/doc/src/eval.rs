@@ -6410,7 +6410,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             }
             Ok(())
         }
-        FeatureKind::Thread { .. } => thread::eval(vals, f, st),
+        FeatureKind::Thread { .. } => thread::eval(doc, vals, f, st),
         FeatureKind::Shell { faces, thickness, body, direction, tangent_chain } => {
             let t = val(vals, thickness, Kind::Length)?;
             // No face opened (a closed hollow body) picks no body: the one there is, or the named one.

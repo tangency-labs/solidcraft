@@ -353,6 +353,28 @@ impl CylinderFace {
     }
 }
 
+/// Whether any of `b`'s material lies in the ring between radii `r_in` and `r_out` about the
+/// face's axis, over `along` (an interval of the axis coordinate the face's `start` and `end`
+/// are in): the exact intersection of the body with that ring, by an SMLib boolean.
+///
+/// A thread asks this past a face's end: a free end has nothing there (a cap, a chamfer the
+/// groove runs out through), a shoulder, a head or a blind hole's bottom has.
+pub fn material_in_ring(b: &Body, c: &CylinderFace, r_in: f64, r_out: f64, along: (f64, f64)) -> Result<bool> {
+    use solidcraft_geom::{Loop2, Plane, Region2, Vec2};
+    let (a0, a1) = along;
+    if !(r_in >= 0.0 && r_out > r_in && a1 > a0 && r_out.is_finite() && a0.is_finite() && a1.is_finite()) {
+        return Err(crate::KernelError::Invalid(format!("ring r {r_in}..{r_out} over {a0}..{a1}")));
+    }
+    let plane =
+        Plane::from_normal(c.axis_point + c.axis * a0, *c.axis).ok_or_else(|| crate::KernelError::Invalid("ring axis".into()))?;
+    // Circles started at the primitives' odd seam angle, off the frame's axes (as `cylinder`).
+    let seam = crate::build::SEAM_ANGLE;
+    let holes = if r_in > 0.0 { vec![Loop2::circle_from(Vec2::ZERO, r_in, seam).reversed()] } else { Vec::new() };
+    let region = Region2 { outer: Loop2::circle_from(Vec2::ZERO, r_out, seam), holes };
+    let ring = crate::extrude(&plane, &[region], 0.0, a1 - a0)?.pop().ok_or_else(|| crate::KernelError::Failed("ring".into()))?;
+    Ok(crate::boolean(b, &ring, crate::BoolOp::Intersect)?.is_some())
+}
+
 /// The cylindrical face one of whose end circles is centred at `p` (a circle given by its
 /// centre, where no face lies), the nearest when several are.
 pub fn cylinder_end_at(b: &Body, p: Vec3) -> Option<CylinderFace> {

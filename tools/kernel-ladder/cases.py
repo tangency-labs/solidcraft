@@ -341,13 +341,39 @@ case(T6, "001-external-m10-full", "a modelled M10 thread over the whole of a d10
 case(T6, "002-external-m10x1-fine", "a modelled fine M10x1 thread over a d10 x 30 cylinder", cylT + [thr([5, 0, 15], designation="M10x1")],
      {"body_count": 1, "volume_mm3": ext_volume(10, 1.0, [(0, 30, lambda z: 5)]), "tolerance": TOL_T},
      TMETH + "; P = 1, L = 30")
-case(T6, "003-external-m10-partial-length", "a modelled M10 thread over 15 of the 30 mm: it stops square in the middle of the face", cylT + [thr([5, 0, 15], designation="M10", length=15)],
-     {"body_count": 1, "bbox": {"min": [-5, -5, 0], "max": [5, 5, 30]}},
-     "the square stop has no closed form; one valid body inside the stock's box", source="invariants")
+# A square stop inside the material takes exactly length/P turns: the groove's section is symmetric
+# about its centre line, so what the sweep's last section leaves uncut ahead of the stop it cuts
+# behind it, in mirror image. Its first moment does not cancel, by under 0.002 mm of the centre here.
+v3 = PI * 25 * 15 + ext_volume(10, 1.5, [(15, 30, lambda z: 5)])
+z3 = (PI * 25 * 15 * 7.5 + ext_volume(10, 1.5, [(15, 30, lambda z: 5)]) * 22.5) / v3
+case(T6, "003-external-m10-partial-length", "a modelled M10 thread over 15 of the 30 mm from the top end (`from`): it stops square in the middle of the face",
+     cylT + [thr([5, 0, 15], designation="M10", length=15, **{"from": [0, 0, 30]})],
+     {"body_count": 1, "volume_mm3": v3, "center_of_mass": [0, 0, z3], "bbox": {"min": [-5, -5, 0], "max": [5, 5, 30]}, "tolerance": {"rel": 5e-4}},
+     TMETH.replace("Tolerance 0.5%: solid.thread cuts faceted by design (chords within P/200 on the body, P/100 on the tool)", "") +
+     "; the thread runs from the top end (z=30, out past it into the air) down to z=15, where it stops square: there the groove's section is symmetric about its centre line, "
+     "so the sweep's last section cuts behind the stop what it leaves ahead of it, and the stop removes exactly as if the groove ended at z=15: "
+     "V = pi 5^2 15 + 2 pi int_15^30 int r m(r) dr dz. The centre of mass is on the axis (ten whole turns; the stop's pieces are under 0.02 mm off it) at "
+     "z = (pi 25 15 x 7.5 + V_threaded x 22.5) / V; the stop's first moment, O(w^2), moves it under 0.002 mm. A pick at z=15 alone would be refused: both ends are free. "
+     "Tolerance 0.05%: the groove is SMLib's exact screw sweep")
 shaft = [cyl([0, 0, 0], 8, 10, body_name="Part"), cyl([0, 0, 10], 5, 25, operation="join", targets=["Part"])]
-case(T6, "004-external-m10-to-shoulder", "a modelled M10 thread on a d10 shaft running down to a d16 shoulder", shaft + [thr([5, 0, 25], designation="M10")],
-     {"body_count": 1, "bbox": {"min": [-8, -8, 0], "max": [8, 8, 35]}},
-     "the thread must end at the shoulder, leaving the d16 collar whole; no closed form for the end; one valid body", source="invariants")
+# At a shoulder the groove stops with its widest part clear of it: its centre a half groove width w short
+# of the shoulder, w taken at the tool's outer edge 0.05 P past the crest (the section reaches past the
+# surface so the cut leaves no skin). The collar is whole.
+def ext_half_width(d, P):
+    H = math.sqrt(3) / 2 * P
+    return (P / 4 + 2 * (d / 2 + 0.05 * P - (d / 2 - 5 * H / 8)) * math.tan(PI / 6)) / 2
+w10 = ext_half_width(10, 1.5)
+SHOULDER = ("the shaft's lower end is a shoulder (the d16 collar lies past it, in the groove's way), so the groove stops there with its widest part clear of it: "
+            "its centre w = (P/4 + 2 (d/2 + 0.05P - r_root) tan30)/2 = %.6f mm above the shoulder (its half width at the tool's outer edge, 0.05 P past the crest), "
+            "and the square stop inside material removes exactly as if the groove ended at its centre (see 003); the top end is free, the groove runs out into the air. " % w10)
+vt4 = ext_volume(10, 1.5, [(10 + w10, 35, lambda z: 5)])
+v4 = PI * 64 * 10 + PI * 25 * w10 + vt4
+z4 = (PI * 64 * 10 * 5 + PI * 25 * w10 * (10 + w10 / 2) + vt4 * (10 + w10 + 35) / 2) / v4
+case(T6, "004-external-m10-to-shoulder", "a modelled M10 thread on a d10 shaft running down to a d16 shoulder: it stops clear of it, the collar whole", shaft + [thr([5, 0, 25], designation="M10")],
+     {"body_count": 1, "volume_mm3": v4, "center_of_mass": [0, 0, z4], "bbox": {"min": [-8, -8, 0], "max": [8, 8, 35]}, "tolerance": {"rel": 5e-4}},
+     SHOULDER + "V = pi 8^2 10 (the collar) + pi 5^2 w + 2 pi int_{10+w}^35 int r m(r) dr dz (m as in 001); the centre of mass from the three parts' moments (the threaded part's at its "
+     "middle, the screw averaging every meridian alike; its stop moves it under 0.002 mm). Tolerance 0.05%: the groove is SMLib's exact screw sweep; a groove running a pitch into the collar "
+     "(the old free-end overrun) removes 0.9% more")
 dI, PI_ = 10, 1.5
 g = iso_groove_fraction_int(dI, PI_)
 vg = 20 * 2 * PI * quad(lambda r: r * g(r), 4.25, 5)
@@ -359,14 +385,23 @@ case(T6, "006-external-m10-into-chamfer", "a d10 x 30 cylinder with a 1 mm chamf
      cylT + [C("solid.chamfer", edges=[[5, 0, 30]], distance=1), thr([5, 0, 15], designation="M10")],
      {"body_count": 1, "volume_mm3": ext_volume(10, 1.5, [(0, 29, lambda z: 5), (29, 30, lambda z: 5 - (z - 29))]), "tolerance": TOL_T},
      TMETH + "; the stock's section is r <= 5 below z=29 and r <= 5 - (z-29) in the chamfer; the groove runs one pitch past z=29, which covers the chamfer down to r=4.2 (above the root r=4.188 only for 0.01 mm)")
-case(T6, "007-external-m10-at-filleted-shoulder", "a modelled M10 thread on a d10 shaft whose root at the d16 shoulder has an r1 fillet",
+# The r1 fillet at the shoulder adds the ring of the corner square [5,6]x[10,11] less the quarter disc about
+# (6, 11): 2 pi (1 x 5.5 - pi/4 (6 - 4/(3 pi))). The cylinder face then starts at z=11.
+vf7 = 2 * PI * (5.5 - PI / 4 * (6 - 4 / (3 * PI)))
+zf7 = 2 * PI * (5.5 * 10.5 - PI / 4 * (6 - 4 / (3 * PI)) * (11 - 4 / (3 * PI))) / vf7
+vt7 = ext_volume(10, 1.5, [(11 + w10, 35, lambda z: 5)])
+v7 = PI * 64 * 10 + vf7 + PI * 25 * (1 + w10) + vt7
+z7 = (PI * 64 * 10 * 5 + vf7 * zf7 + PI * 25 * (1 + w10) * (10 + (1 + w10) / 2) + vt7 * (11 + w10 + 35) / 2) / v7
+case(T6, "007-external-m10-at-filleted-shoulder", "a modelled M10 thread on a d10 shaft whose root at the d16 shoulder has an r1 fillet: it stops clear of the fillet",
      shaft + [C("solid.fillet", edges=[[5, 0, 10]], radius=1), thr([5, 0, 25], designation="M10")],
-     {"body_count": 1, "bbox": {"min": [-8, -8, 0], "max": [8, 8, 35]}},
-     "thread meeting a concave fillet; one valid body", source="invariants")
+     {"body_count": 1, "volume_mm3": v7, "center_of_mass": [0, 0, z7], "bbox": {"min": [-8, -8, 0], "max": [8, 8, 35]}, "tolerance": {"rel": 5e-4}},
+     "the fillet's ring: the corner square [5,6]x[10,11] less the quarter disc about (6,11), V_f = 2 pi (5.5 - pi/4 (6 - 4/(3 pi))), its centroid z from the same moments; "
+     "the cylinder face starts at z=11, where the fillet meets it. " + SHOULDER.replace("lower end is a shoulder (the d16 collar", "lower end (z=11) is a shoulder (the fillet and the collar") +
+     "V = pi 8^2 10 + V_f + pi 5^2 (1 + w) + 2 pi int_{11+w}^35 int r m(r) dr dz. Tolerance 0.05%: SMLib's exact screw sweep")
 missing(T6, "008-multi-start-thread", "a two-start M10 thread (lead 3, pitch 1.5)", "solid.thread has no start count: multi-start threads",
         "would be graded as 001 with the material fraction of two grooves per lead")
 missing(T6, "009-thread-runout-length", "an M10 thread that vanishes over a 2-pitch runout before a shoulder", "solid.thread has no runout (vanishing thread) length",
-        "a runout would let 004 end without cutting the shoulder")
+        "a runout would let 004's thread vanish before the shoulder instead of stopping square")
 case(T6, "010-part-threaded-boss", "the running part with a modelled M16 thread on its d16 boss",
      [thr([23, 15, 25], designation="M16")], {"body_count": 1},
      "the boss stands on the base (thread to a shoulder) and has an M5 hole in its top; modelled threads are faceted, so later tiers build on the part before this step and 11-cumulative-parts adds it last", base=C5, source="invariants")

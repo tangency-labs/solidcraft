@@ -858,7 +858,7 @@ pub enum FeatureKind {
         face: FacePick,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         designation: Option<String>,
-        /// Thread length from the face's end nearest `face`; `None` = full length.
+        /// Thread length from the end it starts at; `None` = full length (or `up_to`).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[walk(length = "Length")]
         length: Option<Expr>,
@@ -866,6 +866,13 @@ pub enum FeatureKind {
         modeled: bool,
         #[serde(default, skip_serializing_if = "ThreadHandedness::is_right")]
         handedness: ThreadHandedness,
+        /// A point near the end of the face the thread starts at; `None`: the face's only free
+        /// end (no material past it), or the end the pick at `face` lies near.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<Position>,
+        /// Where the thread runs up to from the end it starts at, instead of a length.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        up_to: Option<ThreadLimit>,
     },
     /// Ruled loft through profiles of several sketches, in order.
     Loft {
@@ -1843,6 +1850,16 @@ impl ExtendMode {
     pub fn is_natural(&self) -> bool {
         *self == ExtendMode::Natural
     }
+}
+
+/// Where a thread runs up to instead of a length.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+#[serde(rename_all = "snake_case")]
+pub enum ThreadLimit {
+    /// Where this point lies along the thread's axis (a point on a face, such as a shoulder).
+    Face(FacePick),
+    /// Where this plane crosses the thread's axis.
+    Plane(PlaneRef),
 }
 
 /// What Extend extends up to instead of a distance.

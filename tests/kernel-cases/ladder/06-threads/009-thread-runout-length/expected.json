@@ -2,6 +2,6 @@
  "sources": [],
  "what": "an M10 thread that vanishes over a 2-pitch runout before a shoulder",
  "source": "invariants",
- "method": "a runout would let 004 end without cutting the shoulder",
+ "method": "a runout would let 004's thread vanish before the shoulder instead of stopping square",
  "missing": "solid.thread has no runout (vanishing thread) length"
 }

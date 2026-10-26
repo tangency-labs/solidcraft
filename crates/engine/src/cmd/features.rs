@@ -93,7 +93,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.thread", "Thread", thread)
         .at("SOLID", "CREATE")
         .icon("thread")
-        .params("face: [x,y,z] on a cylindrical face; designation?: ISO metric (\"M8\", \"M8x1\"; default: the size that fits); length?: expr (default: the whole face); handedness?: right|left (default right); modeled?: bool (default false). Cosmetic: the model is unchanged, model.threads lists it. Modeled: cuts the thread profile into the body; a shaft thicker than the thread is first turned down to its major diameter over the threaded length"),
+        .params("face: [x,y,z] on a cylindrical face; designation?: ISO metric (\"M8\", \"M8x1\"; default: the size that fits); extent?: full|length|up_to (default: length when `length` is given, up_to when `up_to` is, else full: the whole face); length?: expr (from the end the thread starts at); up_to?: [x,y,z] (a point, such as on a shoulder face: the thread runs to its place along the axis) | plane name or {origin, normal} (to where the plane crosses the axis); from?: [x,y,z] near the end of the face the thread starts at (default: the face's only free end, the one with no material past it; else the end the `face` point lies within a third of the face of; a pick in the middle of a face whose ends are alike is refused); modeled?: bool (default false). Cosmetic: the model is unchanged, model.threads lists it. Modeled: cuts the thread profile into the body: past a free end the groove runs out a pitch into the air (or through a chamfer); at a shoulder, a head or a blind hole's bottom it stops with its section clear of it, never cutting into it; a shaft thicker than the thread is first turned down to its major diameter over the threaded length"),
     CommandSpec::new("solid.shell", "Shell", shell)
         .at("SOLID", "MODIFY")
         .icon("shell")
@@ -2906,6 +2906,25 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(l) = &length {
         check_expr(s, l, Kind::Length, cmd, "length")?;
     }
+    let up_to = match p.get("up_to") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(match vec3(v) {
+            Some(q) => solidcraft_doc::ThreadLimit::Face(FacePick(q)),
+            None => solidcraft_doc::ThreadLimit::Plane(plane_param(s, Some(v), cmd)?),
+        }),
+    };
+    match (str_(p, "extent"), &length, &up_to) {
+        (None, Some(_), Some(_)) => return Err(bad(cmd, "give `length` or `up_to`, not both")),
+        (None, ..) | (Some("full"), None, None) | (Some("length"), Some(_), None) | (Some("up_to"), None, Some(_)) => {}
+        (Some("full"), ..) => return Err(bad(cmd, "`extent: full` runs the whole face: it takes no `length` or `up_to`")),
+        (Some("length"), ..) => return Err(bad(cmd, "`extent: length` needs `length` (and no `up_to`)")),
+        (Some("up_to"), ..) => return Err(bad(cmd, "`extent: up_to` needs `up_to` (and no `length`)")),
+        (Some(e), ..) => return Err(bad(cmd, format!("unknown extent `{e}` (full, length or up_to)"))),
+    }
+    let from = match p.get("from") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(Position(vec3(v).ok_or_else(|| bad(cmd, "`from` must be a point [x, y, z] near the end the thread starts at"))?)),
+    };
     let modeled = p.get("modeled").and_then(Value::as_bool).unwrap_or(false);
     if designation.is_none()
         && let Some(msg) = beyond_coarse_range(&s.model.state(), face)
@@ -2913,7 +2932,7 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, msg));
     }
     let handedness = thread_handedness(p, cmd)?;
-    let v = add_feature(s, p, FeatureKind::Thread { face: FacePick(face), designation, length, modeled, handedness })?;
+    let v = add_feature(s, p, FeatureKind::Thread { face: FacePick(face), designation, length, modeled, handedness, from, up_to })?;
     let st = s.model.state();
     let t = v.get("feature").and_then(Value::as_u64).and_then(|id| st.threads.iter().find(|t| t.feature == id).cloned());
     Ok(json!({"feature": v.get("feature"), "name": v.get("name"), "thread": t}))

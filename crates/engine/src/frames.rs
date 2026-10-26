@@ -59,7 +59,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         "solid.hole" => &[("position", Pick), ("direction", Dir), ("body", Body)],
         "solid.scale" => &[("origin", Make), ("bodies", Body)],
         "solid.offset_face" | "solid.shell" => &[("faces", Picks), ("body", Body)],
-        "solid.thread" => &[("face", Pick)],
+        "solid.thread" => &[("face", Pick), ("from", Pick), ("up_to", Plane)],
         "solid.emboss" => &[("face", Make)],
         "solid.draft" => &[("faces", Picks), ("neutral", Plane), ("pull", Dir), ("body", Body)],
         "solid.press_pull" => &[("face", Pick), ("edges", Picks)],
@@ -274,6 +274,10 @@ impl Mapper<'_> {
     }
 
     fn plane(&mut self, v: &Value) -> Option<Value> {
+        // A point where a plane may be given (a thread's `up_to`): a pick.
+        if v.is_array() {
+            return self.pick(v, None);
+        }
         let o = v.as_object()?;
         let mut m = o.clone();
         if let Some(x) = o.get("face").and_then(|x| self.pick(x, None)) {
