@@ -19,7 +19,8 @@ const SNAPSHOT_SIZE: (&str, &str) = ("960", "600");
 
 pub fn run(root: &Path, build: bool) -> Result<(), String> {
     let book = root.join("docs/book");
-    std::fs::copy(root.join("assets/branding/web/source/og.png"), book.join("src/og.png")).map_err(|e| format!("book preview card: {e}"))?;
+    let source = book.join("src");
+    std::fs::copy(root.join("assets/branding/web/source/og.png"), source.join("og.png")).map_err(|e| format!("book preview card: {e}"))?;
     let mut c = cargo();
     c.args(["build", "-q", "--release", "-p", "solidcraft-cli"]);
     crate::run(c, "cargo build -p solidcraft-cli")?;
@@ -30,9 +31,9 @@ pub fn run(root: &Path, build: bool) -> Result<(), String> {
     }
     let cmds: Value = serde_json::from_slice(&out.stdout).map_err(|e| format!("commands JSON: {e}"))?;
     let md = reference(cmds.as_array().map(Vec::as_slice).unwrap_or_default());
-    write(&book.join("src/reference/commands.md"), &md)?;
+    write(&source.join("reference/commands.md"), &md)?;
 
-    let gen_dir = book.join("src/generated");
+    let gen_dir = source.join("generated");
     std::fs::create_dir_all(&gen_dir).map_err(|e| format!("{}: {e}", gen_dir.display()))?;
     let mut scripts = vec![root.join("examples/bracket.json")];
     scripts.extend(json_files(&book.join("scripts"))?);
@@ -51,9 +52,9 @@ pub fn run(root: &Path, build: bool) -> Result<(), String> {
     std::fs::copy(root.join("docs/screenshots").join(shot), gen_dir.join(shot)).map_err(|e| format!("{shot}: {e}"))?;
 
     if build {
-        let mut c = std::process::Command::new("mdbook");
-        c.arg("build").arg(&book);
-        crate::run(c, "mdbook build docs/book").map_err(|e| format!("{e}\n(install mdbook with `cargo install mdbook`)"))?;
+        let mut c = std::process::Command::new(if cfg!(windows) { "python" } else { "python3" });
+        c.arg(root.join("scripts/docs/build.py")).current_dir(root);
+        crate::run(c, "build documentation languages").map_err(|e| format!("{e}\n(install mdbook with `cargo install mdbook`)"))?;
         println!("book: built into target/book");
     }
     Ok(())

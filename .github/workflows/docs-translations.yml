@@ -1,0 +1,68 @@
+name: Documentation translation reminders
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'scripts/docs/**'
+      - '.github/workflows/docs-translations.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: docs-translations
+  cancel-in-progress: false
+
+jobs:
+  translations:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Test translation tracking
+        run: python3 -m unittest discover -s scripts/docs -p 'test_*.py'
+      - name: Synchronize copies and update reminder issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/docs/sync.py --notify
+      - name: Propose synchronized copies and status
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          git add docs
+          if git diff --cached --quiet; then exit 0; fi
+          existing=$(gh pr list --state open --base main --search 'in:title "docs: synchronize translation copies"' --json number,headRefName,author --jq '[.[] | select(.author.login == "app/github-actions" or .author.login == "github-actions[bot]")] | first')
+          branch=$(printf '%s' "$existing" | jq -r '.headRefName // empty')
+          expected=''
+          if [ -n "$branch" ]; then
+            case "$branch" in
+              automation/docs-translations-*) ;;
+              *) echo 'Refusing to update a branch outside the documentation automation.' >&2; exit 1 ;;
+            esac
+            expected=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${branch}" --jq '.object.sha')
+            author=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${expected}" --jq '.author.login')
+            if [ "$author" != 'github-actions[bot]' ]; then
+              echo 'The sync branch has human changes. Review it manually before automatic updates.' >&2
+              exit 1
+            fi
+          else
+            branch="automation/docs-translations-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          fi
+          git checkout -b "$branch"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'docs: synchronize translation copies and status'
+          if [ -n "$expected" ]; then
+            git push --force-with-lease="refs/heads/${branch}:${expected}" origin "HEAD:refs/heads/${branch}"
+          else
+            git push origin "$branch"
+            gh pr create --base main --head "$branch" --title 'docs: synchronize translation copies' --body 'Update English copies, add new pages and append new or changed English sections to translated pages for review. Preserve existing translations and refresh language status. This PR requires the normal review and merge queue.'
+          fi
