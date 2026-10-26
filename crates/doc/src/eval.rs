@@ -4300,8 +4300,8 @@ fn hole_tools(
 }
 
 /// The scale a hole's tools are sized by: the largest body the hole's axis meets (#2904), so a
-/// large body elsewhere in the model changes neither the tool's reach above the face (and so
-/// the countersink's outline) nor its depth. A hole whose axis meets no body is sized by the
+/// large body elsewhere in the model changes neither the tool's reach above the face nor its
+/// depth. A hole whose axis meets no body is sized by the
 /// largest body of the model, as before.
 fn hole_axis_size(st: &ModelState, position: &Vec3, dir: Vec3) -> f64 {
     let along = |b: &ModelBody| {
@@ -4417,13 +4417,21 @@ fn hole_tools_and_prisms(
             if !(rc > r && half > 1e-3 && half < std::f64::consts::FRAC_PI_2) {
                 return Err(DocError::Invalid("the countersink must be wider than the hole".into()));
             }
-            // Cone from above the face to just inside the hole radius, then the hole.
-            let r_top = rc + top * half.tan();
+            // One revolved tool: the cone from its rim on the face to just inside the hole
+            // radius, and above the face the rim's cylinder, as the bore's own cylinder runs on
+            // above it. The cone widening on above the face would cut what stands beside the rim
+            // (#5041). The cone is the profile's first segment (`csink:side:0`).
             let r_end = r * 0.9;
-            let len = (r_top - r_end) / half.tan();
-            let top_plane = plane.offset(top);
-            let csink = kernel::extrude_tapered(&top_plane, &disc(r_top), len, -1.0, -half, kernel::DraftCorner::default())?;
-            tools.push((crate::lineage::part_tool(csink, "csink"), None));
+            let len = (rc - r_end) / half.tan();
+            let up = -dir;
+            let rp = Plane::new(*position, up.any_perp(), up).ok_or_else(|| DocError::Invalid("hole axis".into()))?;
+            let pts = [Vec2::new(rc, 0.0), Vec2::new(r_end, -len), Vec2::new(0.0, -len), Vec2::new(0.0, top), Vec2::new(rc, top)];
+            let region = Region2 { outer: solidcraft_geom::Loop2::polygon(&pts), holes: vec![] };
+            tools.extend(
+                kernel::revolve(&rp, &[region], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU)?
+                    .into_iter()
+                    .map(|tool| (crate::lineage::part_tool(tool, "csink"), None)),
+            );
             tools.extend(bore(tip_angle.as_ref())?);
         }
     }
