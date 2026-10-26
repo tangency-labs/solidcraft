@@ -205,7 +205,9 @@ int64_t p3_index_of_vertex(Model& M, SmFilletVertex* v) { return index_of(M.vert
 // The surface fits are run (the file-static sm_CreatePlanarSurface / sm_CreateSrfOfRevolution
 // through blend_fillet_corner_p2_static.inc, CreateSphereFromArcs, the chamfer edges'
 // sm_SrfSrfIntersection) and their results deleted. The model's fillet geometries have no
-// solver: a geometry the function asks for its solver is refused. `ov` overrides one edge's 3D
+// solver unless the case gives it one (p3_run): a geometry without a solver that the function
+// asks for its solver is refused; circular or blend curve generators of two equal fillets
+// are refused where the constant radius solver is built. `ov` overrides one edge's 3D
 // curve (the 3x2 patch joins one before).
 enum P3Analytic
 {
@@ -229,8 +231,9 @@ SmBSplineCurve* p3_curve_of(SmFilletEdge* e, const P3Override& ov)
 // What SmFilletCorner::MakeConstantRadiusFillet (blend.fillet_corner_p1) does on the corner's
 // edges E up to where it reads its fillet geometries' solvers: P3A_REFUSE where it dereferences
 // NULL or reads m_vEdges[9999], P3A_FALSE for a status (MakeAnalyticCornerSurface then returns
-// FALSE). The model's fillet geometries have no solver, so a corner that gets past both
-// projections is refused (GetFilletSolver()->GetFilletSurfaceGenerator()).
+// FALSE). A corner that gets past both projections is refused at the solvers' generators
+// when a geometry has none, and past equal circular / blend curve generators (the constant
+// radius solver is built there).
 P3Analytic p3_const_rad(SmFilletCorner* c, const std::vector<SmFilletEdge*>& E, Model& M, const P3Override& ov)
 {
     ULONG n = (ULONG)E.size();
@@ -268,6 +271,7 @@ P3Analytic p3_const_rad(SmFilletCorner* c, const std::vector<SmFilletEdge*>& E, 
     SmFilletEdge* e0 = E[(found + n - 1) % n];
     SmFilletEdge* e1 = E[(found + 1) % n];
     SmSurface* srf[2] = {NULL, NULL};
+    SmFilletGeom* fgs[2] = {NULL, NULL};
     SmFilletEdge* es[2] = {e0, e1};
     for (int i = 0; i < 2; ++i)
     {
@@ -278,6 +282,7 @@ P3Analytic p3_const_rad(SmFilletCorner* c, const std::vector<SmFilletEdge*>& E, 
         if (fg == NULL || fg->GetFilletSurface() == NULL)
             return P3A_FALSE; // NER
         srf[i] = fg->GetFilletSurface();
+        fgs[i] = fg;
     }
     SmPoint3d opp = e0->GetVertex()->GetPoint();
     double t = 0.0;
@@ -300,7 +305,31 @@ P3Analytic p3_const_rad(SmFilletCorner* c, const std::vector<SmFilletEdge*>& E, 
             sols.GetSize() != 1)
             return P3A_FALSE;
     }
-    return P3A_REFUSE; // pFG0->GetFilletSolver()->GetFilletSurfaceGenerator()
+    // the generators of the two fillets' solvers (a NULL solver or generator is dereferenced)
+    SmFilletSurfaceGenerator* fsg[2] = {NULL, NULL};
+    for (int i = 0; i < 2; ++i)
+    {
+        if (fgs[i]->GetFilletSolver() == NULL)
+            return P3A_REFUSE;
+        fsg[i] = fgs[i]->GetFilletSolver()->GetFilletSurfaceGenerator();
+        if (fsg[i] == NULL)
+            return P3A_REFUSE;
+    }
+    SmFilletSurfaceGeneratorType eType = fsg[0]->GetFilletSurfaceGeneratorType();
+    if (eType != fsg[1]->GetFilletSurfaceGeneratorType())
+        return P3A_FALSE; // SM_ERR
+    if (eType == SM_FSG_BLEND_CURVE)
+    {
+        double s0 = ((SmBlendCurveCrossSectionFSG*)fsg[0])->GetBlendScale();
+        double s1 = ((SmBlendCurveCrossSectionFSG*)fsg[1])->GetBlendScale();
+        if (smos_Fabs(s0 - s1) > SM_EFF_ZERO)
+            return P3A_FALSE; // SM_ERR (unable to convert)
+    }
+    if (eType == SM_FSG_LINEAR)
+        return P3A_FALSE; // SM_ERR
+    // SM_FSG_UNKNOWN: pNewFS stays NULL and is dereferenced. Circular or blend curve: the
+    // constant radius solver is built and the fillet recomputed (not pre-checked).
+    return P3A_REFUSE;
 }
 
 P3Analytic p3_analytic(SmFilletCorner* c, const std::vector<SmFilletEdge*>& E, Model& M,
@@ -392,10 +421,18 @@ P3Analytic p3_analytic(SmFilletCorner* c, const std::vector<SmFilletEdge*>& E, M
             }
             else
             {
-                // pFilletGeom->GetFilletSolver()->GetThisApproxTol3d(): the model's
-                // geometries have no solver (or there is no geometry)
-                r = P3A_REFUSE;
-                break;
+                // pPrimEU->GetFilletGeom() (no mate fallback), its solver's tolerances and
+                // its fillet surface: NULL geometry or solver is dereferenced
+                SmFilletEdgeuse* pe = (SmFilletEdgeuse*)e->GetPrimaryEdgeuse();
+                SmFilletGeom* pfg = pe != NULL ? pe->GetFilletGeom() : NULL;
+                if (pfg == NULL || pfg->GetFilletSolver() == NULL)
+                {
+                    r = P3A_REFUSE;
+                    break;
+                }
+                fs = pfg->GetFilletSurface();
+                atol = pfg->GetFilletSolver()->GetThisApproxTol3d();
+                ang = pfg->GetFilletSolver()->GetThisAngTolRad();
             }
             if (fs == NULL)
                 break; // NER: TRUE
@@ -1915,10 +1952,25 @@ int32_t p3_big_rad(Rd& rd, std::vector<double>& o)
     return SC_OK;
 }
 
+// The solvers (and their surface generators) a corner case puts on the model's geometries.
+struct P3GeomSolvers
+{
+    std::vector<P4Solver*> solvers;
+    std::vector<SmFilletSurfaceGenerator*> fsgs;
+    ~P3GeomSolvers()
+    {
+        for (size_t i = 0; i < solvers.size(); ++i)
+            delete solvers[i];
+        for (size_t i = 0; i < fsgs.size(); ++i)
+            delete fsgs[i];
+    }
+};
+
 int32_t p3_run(int32_t op, Rd& rd, std::vector<double>& o)
 {
     const SmContext& ctx = the_context();
     P3PlaneGuard planes; // outlives M, whose intersection points point at the planes
+    P3GeomSolvers GS;    // outlives M, whose geometries point at the solvers
     Model M(ctx);
     if (!M.build(rd))
         return SC_ERR_ARG;
@@ -2012,6 +2064,47 @@ int32_t p3_run(int32_t op, Rd& rd, std::vector<double>& o)
                                            SmExtent1d(d0, d1), r, 3, &M.ctx);
         c->GetOrCreateGwNurbPointer();
         e->SetCurve(c, TRUE);
+    }
+    // solvers on the model's geometries: `n (approx tang fsg)..` and, when n > 0, per
+    // geometry its solver index (-1 none); a base solver (angle tolerance SM_EFF_ZERO_RAD)
+    // carrying the cross-section kind's generator (GS, declared before M).
+    {
+        int64_t ngs = rd.idx();
+        if (ngs < 0 || ngs > 8)
+            rd.bad = true;
+        for (int64_t i = 0; i < ngs && !rd.bad; ++i)
+        {
+            double atol = rd.num();
+            double tang = rd.num();
+            int64_t fsg = rd.idx();
+            if (fsg < 0 || fsg > 3)
+            {
+                rd.bad = true;
+                break;
+            }
+            P4Solver* s = new (ctx) P4Solver(ctx, atol, SM_EFF_ZERO_RAD, tang);
+            SmFilletSurfaceGenerator* f = NULL;
+            switch (fsg)
+            {
+            case 1: f = new (ctx) SmLinearCrossSectionFSG(); break;
+            case 2: f = new (ctx) SmCircularCrossSectionFSG(); break;
+            case 3: f = new (ctx) SmBlendCurveCrossSectionFSG(); break;
+            default: f = new (ctx) SmFilletSurfaceGenerator(); break;
+            }
+            s->SetFilletSurfaceGenerator(f);
+            GS.solvers.push_back(s);
+            GS.fsgs.push_back(f);
+        }
+        for (size_t g = 0; g < M.geoms.size() && ngs > 0 && !rd.bad; ++g)
+        {
+            int64_t si = rd.idx();
+            if (si >= (int64_t)GS.solvers.size())
+            {
+                rd.bad = true;
+                break;
+            }
+            M.geoms[g]->*P4GeomPeek::solver() = si < 0 ? NULL : GS.solvers[(size_t)si];
+        }
     }
     SmFace* splitFaces[2] = {NULL, NULL};
     if (op == P3_UPDATE_SPLIT)

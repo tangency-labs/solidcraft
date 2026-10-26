@@ -35,7 +35,10 @@
 //!   edge's curve becomes a real `SmLine` through its end points) and arc edges (`n (edge cx
 //!   cy cz r d0 d1)..`: the curve becomes a real `SmCircle` centred at `c` with axes X, Y,
 //!   radius `r` > `SM_EFF_ZERO` and degree domain `[d0, d1]` within `[-360, 360]`, of
-//!   length in `(SM_EFF_ZERO, 360 + SM_EFF_ZERO]`); [`Op::UpdateSplitFace`] (unit
+//!   length in `(SM_EFF_ZERO, 360 + SM_EFF_ZERO]`), then the geometries' solvers (`n (approx
+//!   tang fsg)..` and, when `n > 0`, per model geometry its solver index, `-1` none: a base
+//!   solver whose surface generator is `fsg` 0 base, 1 linear, 2 circular, 3 blend curve; `n`
+//!   0: no geometry has one); [`Op::UpdateSplitFace`] (unit
 //!   `blend.fillet_corner_p2`) takes two more, `orig split` (target faces); it classifies
 //!   points on the target faces (surface caches), so the shim returns `SC_ERR_ARG` for a
 //!   model surface whose constructed v knots crash the cache (UB-166, as
@@ -58,6 +61,9 @@ use super::topology_edgeuse_p1::{self as eu1, brep_block, Reader};
 
 /// The largest number of filleted edge uses of a [`create`] call.
 pub const MAX_SOLVER_EUS: usize = 16;
+
+/// The most solvers a corner case puts on the model's geometries.
+pub const MAX_GEOM_SOLVERS: usize = 8;
 
 /// The corner operation run by [`corner`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -306,6 +312,18 @@ pub fn validate_corner_op(op: Op, input: &[f64]) -> Result<(), FfiError> {
             {
                 return Err(bad("arc edge: domain"));
             }
+        }
+    }
+    // solvers on the model's geometries: `ns (approx tang fsg)..`, and when ns > 0 per
+    // geometry its solver index (-1 none)
+    let ns = rd.index(MAX_GEOM_SOLVERS)?;
+    for _ in 0..ns {
+        rd.finites(2)?;
+        rd.index(3)?;
+    }
+    if ns > 0 {
+        for _ in 0..b.ng() {
+            rd.opt_index(ns)?;
         }
     }
     if op == Op::UpdateSplitFace {

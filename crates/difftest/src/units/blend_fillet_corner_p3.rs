@@ -34,9 +34,11 @@
 //! make upstream dereference null or free the harness's objects. To tell a default patch
 //! that reaches `MakeFaceBrep` from one that returns a status before it, the shim runs
 //! `MakeAnalyticCornerSurface`'s fits and the Coons patch's `CreateCornerBlend` on
-//! copies first. The model's fillet geometries have no solver, so the paths that ask a
-//! geometry for its solver (the `NxN` candidate search past its first cross section,
-//! the closed Nx1 and Nx2 tangent splits) are refused. A `create` case whose sector convexity test runs on geometry
+//! copies first. The model's fillet geometries have a solver (a base solver with the
+//! generator of a cross-section kind, `geom_solvers`) only in generated patch and geometry
+//! cases; elsewhere none, and the paths that ask a geometry for its solver (the `NxN`
+//! candidate search past its first cross section, the closed Nx1 and Nx2 tangent splits,
+//! the analytic corner's fits on a solver-less geometry) are refused. A `create` case whose sector convexity test runs on geometry
 //! the import holds only approximately (analytic surfaces and curves) is deferred like
 //! `topology.edgeuse_p2`'s (`inexact_geometry`).
 
@@ -258,6 +260,10 @@ enum Inputs {
         op: CornerOp,
         model: Model,
         corner: CornerIn,
+        /// A solver (and its cross-section kind) per model geometry, `None` for a
+        /// geometry without one; empty: no geometry has a solver.
+        #[serde(default)]
+        geom_solvers: Vec<Option<SolverIn>>,
     },
     BigRad(BigRadIn),
 }
@@ -620,7 +626,33 @@ fn push_eus(o: &mut Vec<f64>, l: Option<&Vec<EuSel>>) {
     }
 }
 
-fn corner_input(model: &Model, c: &CornerIn) -> Result<Vec<f64>, HarnessError> {
+/// The solver block of a corner input: the distinct solvers (`approx tang fsg`), then, when
+/// there are any, per model geometry its solver index (`-1` none).
+fn push_geom_solvers(o: &mut Vec<f64>, model: &Model, gs: &[Option<SolverIn>]) {
+    let used: Vec<&SolverIn> = gs.iter().take(model.geoms.len()).flatten().collect();
+    o.push(used.len() as f64);
+    if used.is_empty() {
+        return;
+    }
+    for sv in &used {
+        o.extend([sv.approx, sv.tang, f64::from(sv.fsg)]);
+    }
+    let mut next = 0.0;
+    for g in 0..model.geoms.len() {
+        if matches!(gs.get(g), Some(Some(_))) {
+            o.push(next);
+            next += 1.0;
+        } else {
+            o.push(-1.0);
+        }
+    }
+}
+
+fn corner_input_with(
+    model: &Model,
+    c: &CornerIn,
+    gs: &[Option<SolverIn>],
+) -> Result<Vec<f64>, HarnessError> {
     let mut o = Vec::new();
     push_model(&mut o, model)?;
     o.extend([c.kind as f64, c.v_edge as f64, c.v_sub as f64]);
@@ -656,6 +688,7 @@ fn corner_input(model: &Model, c: &CornerIn) -> Result<Vec<f64>, HarnessError> {
     for a in &c.arc_edges {
         o.extend(a);
     }
+    push_geom_solvers(&mut o, model, gs);
     Ok(o)
 }
 
@@ -702,8 +735,13 @@ fn corner_output(rec: &[f64]) -> Result<Output, HarnessError> {
         .values("model", model))
 }
 
-fn corner_cpp(op: CornerOp, model: &Model, c: &CornerIn) -> Result<Output, HarnessError> {
-    corner_cpp_op(op.ffi(), &[], model, c)
+fn corner_cpp(
+    op: CornerOp,
+    model: &Model,
+    c: &CornerIn,
+    gs: &[Option<SolverIn>],
+) -> Result<Output, HarnessError> {
+    corner_cpp_gs(op.ffi(), &[], model, c, gs)
 }
 
 /// The C++ side of a corner case running `op`, whose input is the corner's followed by
@@ -714,7 +752,18 @@ pub(super) fn corner_cpp_op(
     model: &Model,
     c: &CornerIn,
 ) -> Result<Output, HarnessError> {
-    let mut input = corner_input(model, c)?;
+    corner_cpp_gs(op, tail, model, c, &[])
+}
+
+/// [`corner_cpp_op`] with solvers on the model's geometries.
+fn corner_cpp_gs(
+    op: Op,
+    tail: &[f64],
+    model: &Model,
+    c: &CornerIn,
+    gs: &[Option<SolverIn>],
+) -> Result<Output, HarnessError> {
+    let mut input = corner_input_with(model, c, gs)?;
     input.extend_from_slice(tail);
     let flat = match ffi::corner(op, &input) {
         Ok(flat) => flat,
@@ -730,36 +779,57 @@ pub(super) fn corner_cpp_op(
     corner_output(&flat)
 }
 
-fn corner_rust(k: &Kernel, op: CornerOp, model: &Model, ci: &CornerIn) -> Result<Output, HarnessError> {
-    corner_rust_with(k, model, ci, |c, env, _| match op {
-        CornerOp::CalcGeom => c.calc_corner_geom(env),
-        CornerOp::Patch => c.create_corner_patch(env),
-        CornerOp::AdjustTopology => c.adjust_topology(env),
-        CornerOp::AdjustTangent => c.adjust_tangent_corner(env),
+fn corner_rust(
+    k: &Kernel,
+    op: CornerOp,
+    model: &Model,
+    ci: &CornerIn,
+    gs: &[Option<SolverIn>],
+) -> Result<Output, HarnessError> {
+    corner_rust_status_gs(k, model, ci, gs, |c, env, _| {
+        match op {
+            CornerOp::CalcGeom => c.calc_corner_geom(env),
+            CornerOp::Patch => c.create_corner_patch(env),
+            CornerOp::AdjustTopology => c.adjust_topology(env),
+            CornerOp::AdjustTangent => c.adjust_tangent_corner(env),
+        }
+        .map(|()| 0.0)
     })
 }
 
 /// The Rust side of a corner case running `run` on the corner (with the model's target
-/// faces, by index).
-pub(super) fn corner_rust_with(
-    k: &Kernel,
-    model: &Model,
-    ci: &CornerIn,
-    run: impl FnOnce(&mut FilletCorner, &mut CornerEnv<'_>, &[FaceId]) -> solidcore::Result<()>,
-) -> Result<Output, HarnessError> {
-    corner_rust_status(k, model, ci, |c, env, faces| run(c, env, faces).map(|()| 0.0))
-}
-
-/// [`corner_rust_with`] for an operation whose own result is the record's status (`run`
-/// returns it on success).
+/// faces, by index); `run` returns the record's status on success.
 pub(super) fn corner_rust_status(
     k: &Kernel,
     model: &Model,
     ci: &CornerIn,
     run: impl FnOnce(&mut FilletCorner, &mut CornerEnv<'_>, &[FaceId]) -> solidcore::Result<f64>,
 ) -> Result<Output, HarnessError> {
+    corner_rust_status_gs(k, model, ci, &[], run)
+}
+
+/// [`corner_rust_status`] with solvers on the model's geometries (as the shim's).
+fn corner_rust_status_gs(
+    k: &Kernel,
+    model: &Model,
+    ci: &CornerIn,
+    gs: &[Option<SolverIn>],
+    run: impl FnOnce(&mut FilletCorner, &mut CornerEnv<'_>, &[FaceId]) -> solidcore::Result<f64>,
+) -> Result<Output, HarnessError> {
     let h = |e: SolidError| harness(e.to_string());
     let mut rm = RustModel::build(model)?;
+    // a solver per geometry that has one (the shim's P4Solver with the cross-section
+    // kind's generator), numbered in geometry order
+    let mut solvers: Vec<FilletSolver> = Vec::new();
+    for (g, sv) in gs.iter().enumerate().take(model.geoms.len()) {
+        let Some(sv) = sv else { continue };
+        let mut fs = FilletSolver::new(sv.approx, EFF_ZERO_RAD, sv.tang);
+        fs.fsg = Some(fsg_of(sv.fsg));
+        let gid = rm.geom(g)?;
+        rm.fb.geom_mut(gid).map_err(h)?.solver =
+            Some(FilletSolverId(u32::try_from(solvers.len()).map_err(|_| harness("index"))?));
+        solvers.push(fs);
+    }
     let kind = *KINDS.get(ci.kind).ok_or_else(|| harness("kind"))?;
     let target_eu = |rm: &RustModel, [e, w]: EuSel| -> Result<EdgeuseId, HarnessError> {
         let edge = *rm
@@ -913,8 +983,8 @@ pub(super) fn corner_rust_status(
             // the shim exports `this` as this id
             corner: Some(FilletCornerId(THIS_CORNER)),
             tsect_surfaces: &surfaces,
-            // the model's geometries have no solver (as the shim's)
-            solvers: &mut [],
+            // the model's geometries have a solver only where the case gives one
+            solvers: &mut solvers,
             fillet: Some(fillet_env(&mut fillet_brep, &mut records, &mut attributes)),
         };
         run(&mut c, &mut env, &faces)
@@ -1959,7 +2029,46 @@ fn gen_join_curve(rng: &mut Rng, a: [f64; 3], b: [f64; 3]) -> Crv {
     }
 }
 
+/// Solvers for the generated corner models' geometries: none for most cases (the
+/// solver-less guards stay covered), else one per geometry (a few geometries without).
+fn gen_geom_solvers(rng: &mut Rng, op: CornerOp, n: usize) -> Vec<Option<SolverIn>> {
+    // the patch and the geometry (the operations that read the geometries' solvers
+    // through MakeAnalyticCornerSurface); the adjustments' solver uses stay refused
+    if !matches!(op, CornerOp::Patch | CornerOp::CalcGeom) || !rng.chance(0.8) {
+        return Vec::new();
+    }
+    let linear = rng.chance(0.3);
+    (0..n)
+        .map(|_| {
+            let sv = gen_solver(rng, linear);
+            if rng.chance(0.1) {
+                None
+            } else {
+                Some(sv)
+            }
+        })
+        .collect()
+}
+
+/// A corner case. Its geometries' solvers come from a generator of their own, seeded from
+/// the case's tolerances, so that the shared stream (and every other case) is the one
+/// generated without them.
 fn gen_corner(rng: &mut Rng) -> Inputs {
+    let mut i = gen_corner_model(rng);
+    if let Inputs::Corner {
+        op,
+        model,
+        corner,
+        geom_solvers,
+    } = &mut i
+    {
+        let mut own = Rng::new(corner.tol.to_bits() ^ corner.tan.to_bits().rotate_left(17));
+        *geom_solvers = gen_geom_solvers(&mut own, *op, model.geoms.len());
+    }
+    i
+}
+
+fn gen_corner_model(rng: &mut Rng) -> Inputs {
     let scale = *rng
         .choose(&[1.0, 1e-3, 1e3, 10.0, 0.1, 1e-6, 1e5])
         .unwrap_or(&1.0);
@@ -2037,6 +2146,7 @@ fn gen_corner(rng: &mut Rng) -> Inputs {
                     line_edges: Vec::new(),
                     arc_edges: Vec::new(),
                 },
+                geom_solvers: Vec::new(),
             }
         }
         // 3x2 shaped: its patch
@@ -2088,6 +2198,7 @@ fn gen_corner(rng: &mut Rng) -> Inputs {
                     line_edges: Vec::new(),
                     arc_edges: Vec::new(),
                 },
+                geom_solvers: Vec::new(),
             }
         }
         // p1's random model: early outs and state checks of every kind
@@ -2155,6 +2266,7 @@ fn gen_corner(rng: &mut Rng) -> Inputs {
                     arc_edges: Vec::new(),
                 },
                 model,
+                geom_solvers: Vec::new(),
             }
         }
     }
@@ -2172,7 +2284,12 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
             more,
             solvers,
         } => create_cpp(brep, *validate_only, *init_gaps, *eu, more, solvers),
-        Inputs::Corner { op, model, corner } => corner_cpp(*op, model, corner),
+        Inputs::Corner {
+            op,
+            model,
+            corner,
+            geom_solvers,
+        } => corner_cpp(*op, model, corner, geom_solvers),
         Inputs::BigRad(b) => big_rad_cpp(b),
     }
 }
@@ -2187,9 +2304,15 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
             more,
             solvers,
         } => create_rust(brep, *validate_only, *init_gaps, *eu, more, solvers),
-        Inputs::Corner { op, model, corner } => {
-            ffi::validate_corner(&corner_input(model, corner)?).map_err(|e| harness(e.to_string()))?;
-            corner_rust(k, *op, model, corner)
+        Inputs::Corner {
+            op,
+            model,
+            corner,
+            geom_solvers,
+        } => {
+            ffi::validate_corner(&corner_input_with(model, corner, geom_solvers)?)
+                .map_err(|e| harness(e.to_string()))?;
+            corner_rust(k, *op, model, corner, geom_solvers)
         }
         Inputs::BigRad(b) => big_rad_rust(k, b),
     }
@@ -2220,9 +2343,13 @@ impl UnitDiff for Runner {
             // keep corner inputs the shim builds (its model block rejects some tiny
             // geometry, as blend.fillet_geom_p1's does)
             let ok = match &inputs {
-                Inputs::Corner { op, model, corner } => {
-                    corner_input(model, corner).is_ok_and(|v| ffi::corner(op.ffi(), &v).is_ok())
-                }
+                Inputs::Corner {
+                    op,
+                    model,
+                    corner,
+                    geom_solvers,
+                } => corner_input_with(model, corner, geom_solvers)
+                    .is_ok_and(|v| ffi::corner(op.ffi(), &v).is_ok()),
                 Inputs::Create { .. } | Inputs::BigRad(_) => true,
             };
             if ok {
