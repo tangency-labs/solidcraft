@@ -72,6 +72,12 @@ fn a_copy_is_projected_by_its_body_name() {
 #[test]
 fn a_face_brings_every_boundary_loop_and_an_edge_only_itself() {
     let (mut s, _, a2, sketch) = holed_parts();
+    // The edge first: projected after the face, it would already be in the sketch and be refused.
+    let edge = run(&mut s, "sketch.project", json!({"refs":[{"edge":[110,0,10],"body":"Plate","path":[a2]}]}))["links"][0]["link"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(shape(&s, sketch, &edge), (1, 0), "an edge brings only itself");
     let face = top_face_of_second(&mut s, a2);
     let (lines, rounds) = shape(&s, sketch, &face);
     assert_eq!(lines, 4, "the outer boundary's four edges");
@@ -79,11 +85,8 @@ fn a_face_brings_every_boundary_loop_and_an_edge_only_itself() {
     assert!((hole_centre(&s, sketch, &face) - Vec2::new(120.0, 20.0)).len() < 1e-6);
     // The plate's inner face and outer loop make a profile with the hole as an island.
     assert!(profiles(&s, sketch) >= 2, "the plate ring and the hole");
-    let edge = run(&mut s, "sketch.project", json!({"refs":[{"edge":[110,0,10],"body":"Plate","path":[a2]}]}))["links"][0]["link"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    assert_eq!(shape(&s, sketch, &edge), (1, 0), "an edge brings only itself");
+    let e = s.execute("sketch.project", &json!({"refs":[{"edge":[110,0,10],"body":"Plate","path":[a2]}]})).unwrap_err().to_string();
+    assert!(e.contains("already projected"), "a placed edge already shown is refused, as any other: {e}");
     // Both follow A:2; the face keeps its hole where A:2 puts it.
     run(&mut s, "occurrence.move", json!({"occurrence":a2,"translate":[0,7,0]}));
     assert!((hole_centre(&s, sketch, &face) - Vec2::new(120.0, 27.0)).len() < 1e-6);
@@ -156,11 +159,11 @@ fn deleted_members_stay_deleted_and_shared_points_stay() {
 #[test]
 fn removing_a_link_removes_its_geometry_and_constraints_but_break_keeps_it() {
     let (mut s, _, a2, sketch) = holed_parts();
-    let face = top_face_of_second(&mut s, a2);
     let edge = run(&mut s, "sketch.project", json!({"refs":[{"edge":[110,40,10],"body":"Plate","path":[a2]}]}))["links"][0]["link"]
         .as_str()
         .unwrap()
         .to_string();
+    let face = top_face_of_second(&mut s, a2);
     let line = run(&mut s, "sketch.line", json!({"points":[[0,0],[30,0]]}))["curves"][0].as_str().unwrap().to_string();
     let projected = {
         let sk = s.doc.sketch(sketch).unwrap();
@@ -375,11 +378,11 @@ fn a_turned_source_keeps_its_face_projection_and_ids() {
 #[test]
 fn a_tilted_source_changes_shape_visibly_and_never_panics() {
     let (mut s, _, a2, sketch) = holed_parts();
-    let face = top_face_of_second(&mut s, a2);
     let edge = run(&mut s, "sketch.project", json!({"refs":[{"edge":[110,0,10],"body":"Plate","path":[a2]}]}))["links"][0]["link"]
         .as_str()
         .unwrap()
         .to_string();
+    let face = top_face_of_second(&mut s, a2);
     run(&mut s, "sketch.finish", json!({}));
     for angle in ["20 deg", "70 deg", "90 deg"] {
         run(&mut s, "occurrence.move", json!({"occurrence":a2,"space":"world","axis":[1,0,0],"angle":angle,"origin":[100,0,0]}));
@@ -539,7 +542,9 @@ fn a_deleted_member_whose_source_edge_is_gone_makes_the_projection_lost_not_shor
 
 #[test]
 fn part_of_a_projection_without_source_edges_is_refused() {
-    let (mut s, a2, sketch, _) = parametric_plate(false);
+    let (mut s, a2, sketch, face) = parametric_plate(false);
+    // Seen from above, the plate's silhouette is its top face, already shown: that goes first.
+    run(&mut s, "sketch.remove_link", json!({"link":face}));
     // A body silhouette: no source edge per curve, so it is kept whole.
     let r = run(&mut s, "sketch.project", json!({"refs":[{"body":"Plate","path":[a2]}]}));
     let silhouette = r["links"][0]["curves"].as_array().unwrap().clone();
@@ -550,7 +555,7 @@ fn part_of_a_projection_without_source_edges_is_refused() {
     assert_eq!(s.doc.to_json(), before);
     // Removing the whole projection, or all its curves, is fine.
     run(&mut s, "sketch.delete", json!({"entities":silhouette}));
-    assert_eq!(s.doc.sketch(sketch).unwrap().links.len(), 1);
+    assert!(s.doc.sketch(sketch).unwrap().links.is_empty());
 }
 
 /// Part A: a 40 × 40 × 10 plate with a D-shaped pocket 1 mm into its top face (a line and a

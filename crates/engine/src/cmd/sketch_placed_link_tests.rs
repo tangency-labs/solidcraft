@@ -14,12 +14,12 @@ fn near(a: Vec2, b: Vec2) -> bool {
     a.dist(b) < 1e-6
 }
 
-/// Part A (a 10 mm cube "Plate") placed twice: A:1 at the origin, A:2 at x = 50. Part B empty,
+/// Part A (a 10 mm cube "Plate", not grounded) placed twice: A:1 at the origin, A:2 at x = 50. Part B empty,
 /// placed once at the origin, with a sketch on its XY plane. Returns (session, A, a1, a2, B, b1,
 /// sketch).
 fn assembly() -> (Session, u64, u64, u64, u64, u64, u64) {
     let mut s = Session::default();
-    let a = run(&mut s, "component.create", json!({"name":"A"}));
+    let a = run(&mut s, "component.create", json!({"name":"A","grounded":false}));
     let (comp_a, a1) = (a["component"].as_u64().unwrap(), a["occurrence"].as_u64().unwrap());
     run(&mut s, "solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Plate"}));
     let a2 = run(&mut s, "occurrence.copy", json!({"occurrence":a1}))["occurrence"].as_u64().unwrap();
@@ -153,7 +153,7 @@ fn dependent_profile_and_extrude_follow_the_placement() {
 #[test]
 fn nested_parent_moves_are_followed() {
     let mut s = Session::default();
-    let outer = run(&mut s, "component.create", json!({"name":"Frame"}));
+    let outer = run(&mut s, "component.create", json!({"name":"Frame","grounded":false}));
     let (frame, f1) = (outer["component"].as_u64().unwrap(), outer["occurrence"].as_u64().unwrap());
     let inner = run(&mut s, "component.create", json!({"name":"A","parent":frame}));
     let a1 = inner["occurrence"].as_u64().unwrap();
