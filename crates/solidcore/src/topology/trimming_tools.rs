@@ -252,8 +252,7 @@ fn brep_set_tolerance(k: &Kernel, b: &mut Brep, tol: f64) -> Result<()> {
 }
 
 /// `SmBrep::MakeFaceWithCurves(region, loops, 3d curves, NULL, ...)` (unit
-/// `topology.brep_p7`). The new face owns the surface under the face identity
-/// `(SmFace_TYPE, 1 + index)`.
+/// `topology.brep_p7`). The new face owns the surface under the caller's face identity.
 fn make_face_with_curves(
     k: &mut Kernel,
     b: &mut Brep,
@@ -277,10 +276,8 @@ fn make_face_with_curves(
         orientations,
         loop_points,
     };
-    let face_ref = |f: FaceId| crate::geom::object::ObjectRef {
-        type_code: fp2::TYPE,
-        key: crate::geom::attribute::ObjectKey(1 + u64::from(f.index())),
-    };
+    let key_of = env.key_of;
+    let face_ref = |f: FaceId| key_of(EntityRef::Face(f));
     let made = crate::topology::brep::p7::make_face_with_curves(
         k,
         b,
@@ -299,8 +296,8 @@ fn make_face_with_curves(
 }
 
 /// `SmBrep::MakeFacesWithCurves(region, loops, 3d curves, NULL, ...)` (unit
-/// `topology.brep_p8`). The new faces own their surfaces under the face identities
-/// `(SmFace_TYPE, 1 + index)`, as [`make_face_with_curves`].
+/// `topology.brep_p8`). Each new face owns its surface under the caller's face identity,
+/// as [`make_face_with_curves`].
 fn make_faces_with_curves(
     k: &mut Kernel,
     b: &mut Brep,
@@ -324,10 +321,8 @@ fn make_faces_with_curves(
         orientations,
         loop_points,
     };
-    let face_ref = |f: FaceId| crate::geom::object::ObjectRef {
-        type_code: fp2::TYPE,
-        key: crate::geom::attribute::ObjectKey(1 + u64::from(f.index())),
-    };
+    let key_of = env.key_of;
+    let face_ref = |f: FaceId| key_of(EntityRef::Face(f));
     let mut marks = crate::topology::topology_traverser::Marks::default();
     let mut fenv = crate::topology::brep::p8::FaceBuildEnv {
         env,
@@ -2415,6 +2410,81 @@ mod tests {
     use super::*;
     use crate::nurbs::crv_basic::Curve as NlCurve;
     use crate::nurbs::math::{CPoint, NOW, NOZ};
+
+    #[test]
+    fn original_g1_trim_retains_surface_identity_and_issued_face_owner() {
+        use crate::curve::line::Line;
+        use crate::geom::attribute::AttributeStore;
+        use crate::surface::plane::Plane;
+        use crate::topology::brep::{p1, p3};
+        use crate::topology::edge::NotifyEnv;
+
+        let mut k = Kernel::default();
+        let mut b = p3::new_brep(&mut k, tol::USE_DEFAULT, tol::USE_DEFAULT).unwrap();
+        let serial = p3::notify_serial(&mut k.context, &mut b).unwrap();
+        let key_of = |entity| p3::topology_ref(serial, entity);
+        let mut records = std::collections::BTreeMap::new();
+        p3::seed_records(&mut records, &b, &key_of);
+        let mut attributes = AttributeStore::default();
+        let mut surface = Surface::new(SurfaceKind::Plane(Plane::from_normal(
+            Vec3::ZERO,
+            Vec3::new(0.0, 0.0, 1.0),
+        )));
+        let original_key = k
+            .context
+            .geometry_key(surface.notify_identity_slot())
+            .unwrap();
+        let uv = [
+            Point2::new(0.0, 0.0),
+            Point2::new(1.0, 0.0),
+            Point2::new(1.0, 1.0),
+            Point2::new(0.0, 1.0),
+        ];
+        let points = uv.map(|p| surface.evaluate_point(&k, p).unwrap());
+        let interval = Extent1d::from_min_max(0.0, 1.0);
+        let curves = (0..4)
+            .map(|i| {
+                Curve::from(
+                    Line::create_line_segment(3, points[i], points[(i + 1) % 4], Some(&interval))
+                        .unwrap(),
+                )
+            })
+            .collect();
+        let input = TrimInput {
+            loop_counts: vec![4],
+            curves,
+            orientations: vec![OrientType::Same; 4],
+            loop_points: Vec::new(),
+            surface,
+            uv_domain: Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+            surface_orientation: OrientType::Same,
+        };
+        let region = b.infinite_region();
+        // This is the original public trim entry, not a constructor control. No
+        // callbacks are requested; keys still come from the actual kernel context.
+        let mut env = NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of: &key_of,
+        };
+        let made = trim_surface_with_model_space_curves(
+            &mut k, &mut b, region, 1.0e-5, input, true, false, false, &mut env,
+        )
+        .unwrap();
+        assert_eq!(made.len(), 1);
+        assert_eq!(p1::vertices(&b, None).unwrap().len(), 4);
+        assert_eq!(p1::edges(&b, None).unwrap().len(), 4);
+        assert_eq!(p1::faces(&b, None).unwrap(), made);
+        assert_eq!(b.tolerance(), 1.0e-5);
+        let face = made[0];
+        let installed = b.face(face).unwrap().surface.as_ref().unwrap();
+        assert_eq!(
+            (installed.notify_key(), installed.owner()),
+            (Some(original_key), Some(key_of(EntityRef::Face(face)))),
+            "the original surface must remain the face's surface under the caller's issued owner"
+        );
+    }
 
     fn uv_line(a: [f64; 2], b: [f64; 2]) -> Curve {
         let pw = vec![
