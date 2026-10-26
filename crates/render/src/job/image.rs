@@ -576,6 +576,7 @@ impl Projection {
                 Ok(View {
                     vp: camera.view_proj(sw as f64 / sh as f64, radius),
                     back: camera.back(),
+                    light: solidcraft_viewport::Light::new(camera.back()),
                     eye: (camera.fov > 0.0).then(|| camera.eye()),
                     reference: camera.target,
                     sw,
@@ -617,7 +618,7 @@ impl Projection {
                 if vp.0.iter().flatten().any(|v| !v.is_finite()) {
                     return Err(request("an orthographic frame too large for its pixel grid"));
                 }
-                Ok(View { vp, back: n, eye: None, reference: o, sw, sh })
+                Ok(View { vp, back: n, light: solidcraft_viewport::Light::new(n), eye: None, reference: o, sw, sh })
             }
         }
     }
@@ -701,6 +702,7 @@ struct View {
     vp: Mat4,
     /// Toward the eye (an orthographic view's direction).
     back: Vec3,
+    light: solidcraft_viewport::Light,
     /// A perspective view's eye.
     eye: Option<Vec3>,
     /// A point the glass's back-to-front depth is measured from.
@@ -1431,7 +1433,7 @@ fn raster_pixel(
         let mapped = crate::studio::tone_map(radiance).map_err(|e| invalid(&e.to_string()))?;
         [mapped.x, mapped.y, mapped.z]
     } else {
-        solidcraft_viewport::shade(n, view.back, t.colour)
+        view.light.shade(n, t.colour)
     };
     if colour.iter().any(|v| !v.is_finite()) {
         return Err(invalid("non-finite shaded colour"));

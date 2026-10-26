@@ -20,7 +20,7 @@ the app.
 | `nearest_drawn_point`, `DrawnPoint` | Picking drawn lines: of the host's polylines, the point drawn nearest the pointer, with its line id, segment, parameter on the segment and gap in pixels |
 | `Scene`, `SceneMesh`, `SceneLine`, `Rgb`, `MIN_ALPHA`, `SEE_THROUGH`, `SECTION_CAP`, `SECTION_HATCH`, `png` | A picture as data: shaded meshes, lines, section cap and hatch colours, and PNG encoding |
 | `AnalysisMode`, `SceneAnalysis` | Surface analysis shading (zebra, draft, curvature, environment, access) and its palette |
-| `render`, `render_png`, `render_transparent`, `Canvas`, `shade` | The CPU rasterizer (z-buffer, shaded triangles, depth-tested lines) for pictures without a GPU, and its shading |
+| `render`, `render_png`, `render_transparent`, `Canvas`, `Light`, `shade` | The CPU rasterizer (z-buffer, shaded triangles, depth-tested lines) for pictures without a GPU, and its shading, worked out once per view |
 | `surface::OpaqueSurface`, `clear_coat::ClearCoat` | The opaque metallic-roughness shading model and its clear coat |
 | `hatch::Hatch`, `hatch::HATCH_COLOURS` | Section hatches by part |
 | `vec::Bounds`, `vec::Vec3Ops`, `vec::Vec2Ops` | The renderer's box and vector maths on solidcore-record's vectors |

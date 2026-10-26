@@ -73,20 +73,20 @@ impl Pass {
 /// The light of a view looking along `-view_dir`: a key light above and beside the eye, a fill
 /// from the eye and a highlight. Its directions are worked out once, not for every pixel.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct Light {
+pub struct Light {
     view_dir: Vec3,
     key: Vec3,
     half: Vec3,
 }
 
 impl Light {
-    pub(crate) fn new(view_dir: Vec3) -> Self {
+    pub fn new(view_dir: Vec3) -> Self {
         let key = (view_dir * 0.8 + Vec3::new(-0.3, 0.2, 0.6)).normalized().unwrap_or(view_dir);
         let half = (key + view_dir).normalized().unwrap_or(view_dir);
         Self { view_dir, key, half }
     }
 
-    pub(crate) fn shade(&self, n: Vec3, base: [f64; 3]) -> [f64; 3] {
+    pub fn shade(&self, n: Vec3, base: [f64; 3]) -> [f64; 3] {
         let n = if n.dot(self.view_dir) < 0.0 { -n } else { n };
         let diff = n.dot(self.key).max(0.0);
         let fill = n.dot(self.view_dir).max(0.0);
