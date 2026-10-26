@@ -1805,7 +1805,7 @@ fn holes_at_sketch_points_threads_and_components() {
     assert_eq!(threads[0]["internal"], true);
     // A cosmetic thread on a shaft; designation from its size.
     run(&mut s, "solid.cylinder", json!({"base": [100, 0, 0], "radius": 4, "height": 20, "name": "Shaft", "body_name": "Shaft"}));
-    let th = run(&mut s, "solid.thread", json!({"face": [104, 0, 10], "length": 12}));
+    let th = run(&mut s, "solid.thread", json!({"face": [104, 0, 10], "length": 12, "from": [100, 0, 0]}));
     assert_eq!(th["thread"]["designation"], "M8", "{th}");
     assert!((th["thread"]["end"].as_f64().unwrap() - th["thread"]["start"].as_f64().unwrap() - 12.0).abs() < 1e-6, "{th}");
     assert!(s.execute("solid.thread", &json!({"face": [104, 0, 10], "designation": "M20"})).is_err());

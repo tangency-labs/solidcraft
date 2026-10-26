@@ -625,9 +625,8 @@ fn hex_nut(hole: f64) -> Session {
 /// Issue 602: rounding the edges of a hex boss on a threaded shaft froze the app. The thread's
 /// thousands of facets were healed pair by pair, once per feature after it, and the fillet's
 /// preview then compared each of them with the whole old body. With SMLib the thread is exact (a
-/// few dozen faces), and the hex's corners clip a corner of the groove's flank into a three-edge
-/// face whose base is an iso-line: meshing the body to pick the edges refused it, because sag
-/// refinement split that face's boundary at a sliver's centroid.
+/// few dozen faces). The 4 mm thread starts at the shaft's free bottom end: the hex's corners
+/// (2.31 mm out, past the M5 root at 2.07 mm) stand in the groove's way at the top end.
 #[test]
 fn fillet_beside_a_modelled_thread_finishes() {
     let mut s = Session::default();
@@ -656,4 +655,130 @@ fn fillet_beside_a_modelled_thread_finishes() {
     assert!(started.elapsed().as_secs() < 30, "the fillet took {:?}", started.elapsed());
     let volume_after = volume(&mut s, "Screw");
     assert!(volume_after < volume_before && volume_after > volume_before * 0.99, "{volume_before} -> {volume_after}");
+}
+
+/// The SMLib volume of a body (exact surfaces), for closed-form checks.
+fn exact_volume(s: &Session, b: &str) -> f64 {
+    let st = s.model.state();
+    st.body(b).map(|mb| solidcraft_kernel::measure(&mb.body).unwrap().volume).unwrap_or(0.0)
+}
+
+/// One turn of the ISO 68-1 external groove inside a shaft of radius `rs` (its section clipped at
+/// the surface): 2π∫ r g(r) dr from the root, g = P/4 + 2 (r - root) tan 30°.
+fn ext_turn(d: f64, p: f64, rs: f64) -> f64 {
+    let root = d / 2.0 - 5.0 * p * 3f64.sqrt() / 16.0;
+    let (a, b) = (p / 4.0 - 2.0 * root * (PI / 6.0).tan(), 2.0 * (PI / 6.0).tan());
+    let f = |r: f64| a * r * r / 2.0 + b * r * r * r / 3.0;
+    2.0 * PI * (f(rs) - f(root))
+}
+
+/// The groove's half width at its widest: for an external thread at the tool's outer edge,
+/// 0.05 P past the crest (the section reaches past the surface so the cut leaves no skin).
+fn ext_half_width(d: f64, p: f64) -> f64 {
+    let root = d / 2.0 - 5.0 * p * 3f64.sqrt() / 16.0;
+    (p / 4.0 + 2.0 * (d / 2.0 + 0.05 * p - root) * (PI / 6.0).tan()) / 2.0
+}
+
+/// A d10 shaft (z 10..35) on a d16 collar (z 0..10), as ladder 06/004.
+fn shaft_on_collar() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 8, "height": 10, "body_name": "Part"}));
+    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 10], "radius": 5, "height": 25, "operation": "join", "targets": ["Part"]}));
+    s
+}
+
+/// Rig 602, ladder 06/004: a thread on a shaft ran a pitch past both ends of its face, into the
+/// collar below as into the air above. At a shoulder it stops with its widest part clear of it:
+/// the collar keeps its whole π 8² 10, and the groove takes (25 - w)/P turns, w its half width
+/// (a square stop inside material takes exactly its length over P, the section being symmetric).
+#[test]
+fn a_thread_stops_clear_of_a_shoulder() {
+    let mut s = shaft_on_collar();
+    run(&mut s, "solid.thread", json!({"face": [5, 0, 25], "designation": "M10", "modeled": true}));
+    let (p, w) = (1.5, ext_half_width(10.0, 1.5));
+    let want = PI * 64.0 * 10.0 + PI * 25.0 * 25.0 - (25.0 - w) / p * ext_turn(10.0, p, 5.0);
+    let got = exact_volume(&s, "Part");
+    assert!((got - want).abs() < want * 2e-4, "{got} vs {want}");
+}
+
+/// Rig 602: "from the end nearest the pick" took the head end for a pick a little above the
+/// middle. A thread of limited length starts at the face's only free end, wherever it is picked.
+#[test]
+fn a_thread_of_some_length_starts_at_the_only_free_end() {
+    let mut s = shaft_on_collar();
+    let th = run(&mut s, "solid.thread", json!({"face": [5, 0, 15], "designation": "M10", "length": 6}));
+    let (a, b) = (th["thread"]["start"].as_f64().unwrap(), th["thread"]["end"].as_f64().unwrap());
+    // The axis points up (+z) from the shaft's own axis point; the free end is the top, z = 35.
+    let k = th["thread"]["axis"][2].as_f64().unwrap();
+    let z = |t: f64| th["thread"]["axis_point"][2].as_f64().unwrap() + k * t;
+    let (z0, z1) = (z(a).min(z(b)), z(a).max(z(b)));
+    assert!((z0 - 29.0).abs() < 1e-6 && (z1 - 35.0).abs() < 1e-6, "{th}");
+}
+
+/// Ladder 06/003: a pick in the middle of a face whose two ends are both free was a coin toss
+/// (it fell to whichever end rounding favoured). It is refused, naming `from`; with `from` it runs
+/// from that end, and a square stop inside the face takes exactly length / P turns.
+#[test]
+fn a_mid_face_pick_between_two_free_ends_needs_from() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 30, "body_name": "Part"}));
+    let e = s.execute("solid.thread", &json!({"face": [5, 0, 15], "designation": "M10", "length": 15, "modeled": true}));
+    let e = e.err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("both ends of the face are free") && e.contains("`from`"), "{e}");
+    run(&mut s, "solid.thread", json!({"face": [5, 0, 15], "designation": "M10", "length": 15, "from": [0, 0, 30], "modeled": true}));
+    let want = PI * 25.0 * 30.0 - 10.0 * ext_turn(10.0, 1.5, 5.0);
+    let got = exact_volume(&s, "Part");
+    assert!((got - want).abs() < want * 2e-4, "{got} vs {want}");
+    // The groove is all in the top half: just under the surface, the bottom 15 mm (less the
+    // stop's half width) is whole and the top has the groove's turns.
+    let st = s.model.state();
+    let body = &st.body("Part").unwrap().body;
+    let ring = |z: f64| (0..36).map(|i| (i as f64 * 10.0).to_radians()).map(move |a| Vec3::new(4.9 * a.cos(), 4.9 * a.sin(), z));
+    let rings = |z0: f64, z1: f64| (0..=40).map(move |i| z0 + (z1 - z0) * i as f64 / 40.0).flat_map(ring);
+    assert!(rings(0.5, 14.0).all(|q| body.contains(q)), "the bottom half is cut");
+    assert!(rings(16.0, 29.5).filter(|q| !body.contains(*q)).count() > 100, "the top half is not threaded");
+}
+
+/// Up to a plane, or to a point's place along the axis, from the end given.
+#[test]
+fn a_thread_runs_up_to_a_plane_or_a_point() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 4, "height": 20, "body_name": "Shaft"}));
+    let z = |th: &Value| {
+        let t = &th["thread"];
+        let at = |u: &str| t["axis_point"][2].as_f64().unwrap() + t["axis"][2].as_f64().unwrap() * t[u].as_f64().unwrap();
+        let (a, b) = (at("start"), at("end"));
+        (a.min(b), a.max(b))
+    };
+    let th = run(&mut s, "solid.thread", json!({"face": [4, 0, 10], "up_to": {"origin": [0, 0, 12], "normal": [0, 0, 1]}, "from": [0, 0, 0]}));
+    let (z0, z1) = z(&th);
+    assert!(z0.abs() < 1e-6 && (z1 - 12.0).abs() < 1e-6, "{th}");
+    let th = run(&mut s, "solid.thread", json!({"face": [4, 0, 10], "extent": "up_to", "up_to": [4, 0, 5], "from": [0, 0, 20]}));
+    let (z0, z1) = z(&th);
+    assert!((z0 - 5.0).abs() < 1e-6 && (z1 - 20.0).abs() < 1e-6, "{th}");
+    // An extent that contradicts the values given is refused.
+    let e = s.execute("solid.thread", &json!({"face": [4, 0, 10], "extent": "full", "length": 5})).err().map(|e| e.to_string());
+    assert!(e.unwrap_or_default().contains("extent: full"));
+}
+
+/// A blind tapped hole: the thread runs out of the entry and stops clear of the bottom, the
+/// groove taking (depth - w)/P turns of 2π∫ r g(r) dr over the wall, w its widest half width (at
+/// the tool's inner edge, 0.1 P inside the minor diameter).
+#[test]
+fn a_blind_tapped_hole_stops_clear_of_its_bottom() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [-10, -10, 0], "length": 20, "width": 20, "height": 20, "body_name": "Block"}));
+    run(&mut s, "solid.hole", json!({"position": [0, 0, 20], "diameter": 8.5, "depth": 12}));
+    let before = exact_volume(&s, "Block");
+    run(&mut s, "solid.thread", json!({"face": [4.25, 0, 14], "designation": "M10", "modeled": true}));
+    let (d, p, rh) = (10.0, 1.5, 4.25);
+    let t = (PI / 6.0).tan();
+    let minor = d / 2.0 - 5.0 * p * 3f64.sqrt() / 16.0;
+    let w = (p / 8.0 + 2.0 * (d / 2.0 - (minor - 0.1 * p)) * t) / 2.0;
+    // g(r) = P/8 + 2 (d/2 - r) tan 30°, over the wall r 4.25..5.
+    let f = |r: f64| (p / 8.0 + d * t) * r * r / 2.0 - 2.0 * t * r * r * r / 3.0;
+    let turn = 2.0 * PI * (f(d / 2.0) - f(rh));
+    let want = before - (12.0 - w) / p * turn;
+    let got = exact_volume(&s, "Block");
+    assert!((got - want).abs() < before * 1e-4, "{got} vs {want}");
 }

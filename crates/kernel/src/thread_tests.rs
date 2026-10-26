@@ -62,3 +62,23 @@ fn a_long_thread_cuts_without_a_deep_tree() {
     let v0 = PI * r * r * len;
     assert!(v < v0 * 0.95 && v > v0 * 0.6, "{v} of {v0}");
 }
+
+/// What lies past each end of a shaft's face: the d16 collar under it, the air over its cap.
+#[test]
+fn material_past_the_ends_of_a_shaft_face() {
+    let k = Vec3::new(0.0, 0.0, 1.0);
+    let collar = cylinder(Vec3::ZERO, k, 8.0, 10.0).unwrap();
+    let shaft = cylinder(Vec3::new(0.0, 0.0, 10.0), k, 5.0, 25.0).unwrap();
+    let part = crate::boolean(&collar, &shaft, BoolOp::Union).unwrap().unwrap();
+    let c = crate::cylinder_face_at(&part, Vec3::new(5.0, 0.0, 20.0)).unwrap();
+    assert!((c.radius - 5.0).abs() < 1e-9 && c.start < c.end, "{c:?}");
+    let at = |z: f64| (z - c.axis_point.z) / c.axis.z;
+    let (lo, hi) = (at(10.0).min(at(35.0)), at(10.0).max(at(35.0)));
+    assert!((lo - c.start).abs() < 1e-6 && (hi - c.end).abs() < 1e-6, "{c:?}");
+    let below = if c.axis.z > 0.0 { (c.start - 2.25, c.start - 1.5) } else { (c.end + 1.5, c.end + 2.25) };
+    let above = if c.axis.z > 0.0 { (c.end + 1.5, c.end + 2.25) } else { (c.start - 2.25, c.start - 1.5) };
+    assert!(crate::material_in_ring(&part, &c, 4.19, 5.0, below).unwrap(), "the collar is past the shaft's bottom end");
+    assert!(!crate::material_in_ring(&part, &c, 4.19, 5.0, above).unwrap(), "nothing is past its top end");
+    // Along the face itself the ring is the shaft's own material.
+    assert!(crate::material_in_ring(&part, &c, 4.19, 4.99, (lo + 5.0, lo + 6.0)).unwrap());
+}
