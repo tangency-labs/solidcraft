@@ -70,7 +70,7 @@ Four guards come from isolated native probes (one process per input, 20-25 s lim
 | --- | --- | --- |
 | A taper whose chaining deletes a curve | UB-50: `FixChainCurvesList` (`2 * SM_ZONE_TOL_3D`, deleting duplicates) deletes a curve whose ends and mid point match the chain built so far, then reads it again (segfault) | the wrapper repeats the chaining on the curves' end and mid points: two identical lines or arcs, a line and its reverse, a line from a chain's end back to its start through its last link's mid point (a repeat of no curve). With a supplied normal upstream reverses the curves and chains them again when their computed normal (`ComputeCrvsNormal`) is antiparallel to it; the wrapper repeats that pass unless its own sum of the same sampled cross products surely points along the normal (a half circle and both its chords segfault under -Z and run under +Z). The end cap at the offset end (caps 2 and 3) chains the trimmed offset curves through a copy of their list, so one deleted there is freed again at cleanup (`double free or corruption`, or a segfault); where upstream may reverse the curves, the wrapper refuses a closed chain whose short curve meets one over 100 times longer at a corner sharper than `3e-5` radians. Natively (7,236 probes over widths, lengths, sizes 1 to 1,000, heights 1 to 100, drafts -45 to 45 degrees, every normal and cap): such slivers crash up to a 1e-6 corner and run from 3e-6, links up to 5e-4 of the long side crash and 1e-3 run, and none crashed where upstream does not reverse |
 | A taper with the start cap (caps 1 and 3) whose curves close a loop while an end meets no other end or more than one | UB-247: `CreatePlanarFaceWith3DCurves` needs each curve end to meet exactly one other; when it fails, the taper deletes input curves that edges of the result still use (a segfault in `SmEdgeuse::~SmEdgeuse` as the B-rep is deleted, or inside `CreateTaperExtrude`) | the wrapper joins the curve ends within `2 * SM_ZONE_TOL_3D` (a repeat of another curve, the same ends either way and the same mid point, left out) and refuses the curves when an end meets no other end or more than one and a curve closes a loop: a line into a unit square ending at its corner (`difftest --fuzz` case `fuzz00880`), the same line stopping `1e-3` short, two squares at a corner, a line from a corner into the square, a half circle across a side (the side's ends, another mid point: no repeat). Natively (about 400 probes over tails, squares, spikes and arcs, every cap and normal) each crashes under one normal or another with the start cap and runs without it; curves that close no loop fail first and harmlessly, and clean loops ran in every probe |
-| A swept profile edge shorter than the zone tolerance (`1e-5`) | UB-215: `SweepEdgeHigh` uses the edge's curve after `MakeFaceWithCurves` freed it (segfault) | partial cones (turn below `359.99999`) that build a profile line below `1e-5`, mirroring the cone's own early failures; partial tori whose minor circle is below `1e-5` |
+| A swept profile edge shorter than the zone tolerance (`1e-5`) | UB-215: `SweepEdgeHigh` uses the edge's curve after `MakeFaceWithCurves` freed it (segfault) | partial cones (turn below `359.99999`) that build a side, base or top line from `0.9999e-6` up to `1e-5`, mirroring the cone's own early failures (a shorter line's face fails `IsDegenerateCurve` first, `SM_ERR_INVALID_INPUT`; the axis line sweeps to no face); partial tori whose minor circle is below `1e-5` |
 | A closed shell from half the zone tolerance to `1.5e-4` across | HANG-35: the ray fire that places the shell in its region takes minutes | spheres, tori and cones of that size at any turn (analytic faces from `359.99999`, stitched sweeps below) |
 
 Early failures stay compared: a cone without height or turn, a zero side, a radius
@@ -90,7 +90,25 @@ a square with a diagonal and two squares at a corner listed in another order run
 the corner rule count a chain without area as reversible under either normal (a line
 back from `1` along the same span runs under +Z), the corner rule keeps a tenfold
 margin, and the offsets' chaining before the caps (`SmPrimitiveCreation.cpp:3884`) is not
-checked. Partial spheres are not guarded: their
+checked. The cone guard follows `SweepEdgeHigh`: a line of length `L` sweeps to a face with
+`|Su| = L` at every sample, and `IsDegenerateCurve` (tolerance `1e-6`, or the scaled zero
+when larger) refuses it before the face build up to `L = 1e-6`. Native probes (one
+process each): `1007` up to `1e-6` and a segfault just above it at unit size, `1007` up
+to `1.0005e-6` and a segfault at `1.002e-6` a distance of 1,000 away, and a segfault at
+exactly `1e-6` in the frame of `ub215_partial_cone_apex_top_line_1e-6` (rounding decides
+there, so the guard starts at `0.9999e-6`); a short axis line alone returns `1025`. 300
+random cones the narrowed guard accepts and the earlier one refused (lines from `1e-9`,
+origins up to `1e4`, turns from `1e-9` to 359 degrees) ran without a crash
+(`ub215_degenerate_faces.json` keeps 16 of them). The cone guard still refuses some
+inputs that run: lines in the band at larger distances (the scaled zero passes `1e-6`
+from about 1,000 away; at `1e5` a `2e-6` line returns `1007`) and at small turns where
+the far end of the line moves at most about `1e-6` (`2 L sin(turn / 2)`, `1007` from
+`0.01` degrees, while a turn of `1e-9` degrees segfaults). The torus guard is unchanged:
+its native boundary depends on the major radius and the position (a minor radius of
+`1.5e-7` returns `1007` and `2e-7` segfaults at a major radius of `0.01`, while at major
+radius `0` up to `5e-7` returns `1007`, and `1.59e-6` returns `1001`), so it refuses
+more than crashes. The generator keeps the earlier cone guard for its redraws
+(`generator_refuses`), so the generated cases are the same draws. Partial spheres are not guarded: their
 axis line sweeps to no face and their arc's face fails the degenerate-surface test
 first, so no probe crashed. Every rejected case that reaches the native sweep defers in
 Rust today (`topology.brep_p8`), so the guards remove no compared value. The generator

@@ -29,7 +29,9 @@
 //! curves that close a loop while an end meets no other end or more than one (UB-247,
 //! use after free), a planar path without path curves (`rPathCurves[0]`), skin
 //! profile counts past the curves (`r3DCurves[lCount]`), a partial cone or torus that
-//! sweeps a profile edge shorter than the zone tolerance (UB-215, use after free), and
+//! sweeps a profile edge shorter than the zone tolerance (UB-215, use after free; for a
+//! cone only lines from `0.9999e-6`, as shorter ones fail the degenerate-face test
+//! first), and
 //! a sphere, torus or cone a few zone tolerances across, at any turn (HANG-35).
 //! Values are finite with magnitude at most `1e6`, frames nondegenerate, lists at
 //! most 32 curves.
@@ -108,6 +110,10 @@ fn frame(f: &[f64]) -> bool {
 const EFF_ZERO: f64 = 1e-12;
 /// `SM_ZONE_TOL_3D`, the zone tolerance of the fresh native B-rep.
 const ZONE_TOL: f64 = 1e-5;
+/// Swept faces of a line shorter than this fail `IsDegenerateCurve` (its `1e-6`
+/// tolerance with a relative margin of `1e-4`, so rounding of the line length cannot
+/// decide: a `1e-6` line runs at unit size and segfaults at a distance of 360).
+const DEGENERATE_FACE: f64 = 1e-6 * (1.0 - 1e-4);
 /// From this turn (degrees) up, p3's `CreateRotationalSweep` builds analytic faces
 /// instead of sweeping the profile edges; p2's full turns are among them.
 const ANALYTIC_TURN: f64 = 359.99999;
@@ -141,9 +147,10 @@ fn max_dim(a: V3) -> f64 {
 }
 
 /// The partial cone's profile lines as upstream builds them (side, base radius,
-/// axis, top radius; a radius within the scaled zero is left out), or `None` when
-/// the cone fails before sweeping them. The frame is checked nondegenerate first.
-fn cone_lines(d: &[f64]) -> Option<Vec<f64>> {
+/// axis, top radius; a radius within the scaled zero is left out), each with its
+/// length and whether it is the axis line, or `None` when the cone fails before
+/// sweeping them. The frame is checked nondegenerate first.
+fn cone_lines(d: &[f64]) -> Option<Vec<(f64, bool)>> {
     let (h, base, top, start, f) = (d[1], d[2], d[3], d[4], &d[6..15]);
     if h < EFF_ZERO || (d[5] - start).abs() < EFF_ZERO {
         return None;
@@ -162,14 +169,14 @@ fn cone_lines(d: &[f64]) -> Option<Vec<f64>> {
     if side <= tol || axis <= tol {
         return None;
     }
-    let lines: Vec<f64> = [
-        side,
-        norm(sub(start_pt, origin)),
-        axis,
-        norm(sub(top_base, end_pt)),
+    let lines: Vec<(f64, bool)> = [
+        (side, false),
+        (norm(sub(start_pt, origin)), false),
+        (axis, true),
+        (norm(sub(top_base, end_pt)), false),
     ]
     .into_iter()
-    .filter(|l| *l > tol)
+    .filter(|(l, _)| *l > tol)
     .collect();
     (lines.len() >= 3).then_some(lines)
 }
@@ -178,15 +185,46 @@ fn cone_lines(d: &[f64]) -> Option<Vec<f64>> {
 /// `SweepEdgeHigh` uses an edge's curve after the face build freed it for being
 /// shorter than the zone tolerance. A sphere's line lies on the axis and its arc's
 /// face fails the degenerate-surface test first, so spheres never reach it.
+///
+/// A cone's axis line sweeps to no face. Any other line `L` long sweeps to a face
+/// whose surface has `|Su| = L` at every sample (the revolution is a rotation of the
+/// line), so `SmSurface::IsDegenerateCurve` (3D tolerance `SM_ZONE_TOL_3D / 10`, or a
+/// scaled zero when larger) fails the face with `SM_ERR_INVALID_INPUT` before the
+/// face build for `L` up to `1e-6`. The guard refuses a line from [`DEGENERATE_FACE`]
+/// up to the zone tolerance; below it the face is refused first (native probes:
+/// `1007` up to `1e-6` and a segfault just above it at unit size, `1007` up to
+/// `1.0005e-6` and a segfault at `1.002e-6` a distance of 1,000 away, where the
+/// scaled zero takes over).
 fn sweeps_a_short_edge(op: i32, d: &[f64]) -> bool {
     match op {
         1 => {
             d[5] - d[4] < ANALYTIC_TURN
-                && cone_lines(d).is_some_and(|l| l.iter().any(|l| *l < ZONE_TOL))
+                && cone_lines(d).is_some_and(|l| {
+                    l.iter()
+                        .any(|&(l, axis)| !axis && (DEGENERATE_FACE..ZONE_TOL).contains(&l))
+                })
         }
         3 => d[4] - d[3] < ANALYTIC_TURN && d[2] > 0.0 && std::f64::consts::TAU * d[2] < ZONE_TOL,
         _ => false,
     }
+}
+
+/// The UB-215 cone guard before it was narrowed to the lines that can reach the freed
+/// curve: any profile line, the axis line included, shorter than the zone tolerance.
+/// [`generator_refuses`] keeps it so the generated cases stay the same draws.
+fn short_cone_line_v1(op: i32, d: &[f64]) -> bool {
+    op == 1
+        && d[5] - d[4] < ANALYTIC_TURN
+        && cone_lines(d).is_some_and(|l| l.iter().any(|&(l, _)| l < ZONE_TOL))
+}
+
+/// Whether the difftest generator draws again for this input: [`validate`] refuses
+/// it, or the UB-215 guard as it was before it was narrowed refused it (the
+/// generated cases must stay the same draws; the narrowed range is covered by
+/// fixtures).
+#[must_use]
+pub fn generator_refuses(op: i32, data: &[f64]) -> bool {
+    validate(op, data).is_err() || short_cone_line_v1(op, data)
 }
 
 /// HANG-35: a closed shell a few zone tolerances across takes minutes to place in
@@ -994,6 +1032,19 @@ mod tests {
         assert!(primitive(1, &[1., 1., 9e-6], 0., 90.).is_err());
         assert!(primitive(1, &[2e-6, 1., 1.], 0., 90.).is_err());
         assert!(primitive(1, &[1., 1., 1e-5], 0., 90.).is_ok());
+        // below 1e-6 the swept face is degenerate and refused first (1007 natively):
+        // top, base and side lines, at 90 and 359 degrees
+        assert!(primitive(1, &[1., 1., 9.9e-7], 0., 90.).is_ok());
+        assert!(primitive(1, &[1., 1., 1e-9], 0., 90.).is_ok());
+        assert!(primitive(1, &[1., 5e-7, 1.], -45., 314.).is_ok());
+        assert!(primitive(1, &[9.9e-7, 1., 1.], 0., 90.).is_ok());
+        // at 1e-6 rounding decides (it runs at unit size): refused, as just above
+        assert!(primitive(1, &[1., 1., 1e-6], 0., 90.).is_err());
+        assert!(primitive(1, &[1., 1., 1.01e-6], 0., 90.).is_err());
+        assert!(primitive(1, &[1.01e-6, 1., 1.], 0., 90.).is_err());
+        // the axis line sweeps to no face: a short axis alone runs (1025 natively)
+        assert!(primitive(1, &[2e-6, 1., 2.], 0., 90.).is_ok());
+        assert!(primitive(1, &[9e-6, 1., 2.], 0., 90.).is_ok());
         // a minor circle of 2 pi 1e-6 segfaults, 2 pi 2e-6 does not
         assert!(primitive(3, &[0., 1e-6], 0., 90.).is_err());
         assert!(primitive(3, &[1., 2e-6], 0., 90.).is_ok());
@@ -1007,6 +1058,22 @@ mod tests {
         // analytic faces sweep no edges; spheres never reach the freed curve
         assert!(primitive(1, &[1., 1., 1e-6], 0., 360.).is_ok());
         assert!(primitive(2, &[1e-6], 0., 90.).is_ok());
+    }
+
+    #[test]
+    fn the_generator_keeps_the_earlier_ub215_guard() {
+        let cone = |sizes: [f64; 3]| {
+            let mut d = vec![0.];
+            d.extend(sizes);
+            d.extend([0., 90., 0., 0., 0., 1., 0., 0., 0., 1., 0.]);
+            d
+        };
+        for sizes in [[1., 1., 9.9e-7], [2e-6, 1., 2.]] {
+            assert!(validate(1, &cone(sizes)).is_ok());
+            assert!(generator_refuses(1, &cone(sizes)));
+        }
+        assert!(!generator_refuses(1, &cone([1., 1., 0.5])));
+        assert!(generator_refuses(1, &cone([1., 1., 9e-6])));
     }
 
     #[test]

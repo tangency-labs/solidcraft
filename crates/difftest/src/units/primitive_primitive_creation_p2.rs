@@ -485,7 +485,7 @@ impl UnitDiff for Runner {
         // as curve.curve_p1: draw again when the native guard refuses the input
         for _ in 0..64 {
             let (op, data) = generated(rng);
-            if ffi::validate(op, &data).is_err() {
+            if ffi::generator_refuses(op, &data) {
                 continue;
             }
             return serde_json::to_value(Inputs {
