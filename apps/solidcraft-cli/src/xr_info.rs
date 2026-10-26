@@ -21,7 +21,7 @@ fn probe() -> Result<Value, String> {
     let entry = openxr::Entry::linked(&()).map_err(|e| format!("OpenXR loader not available: {e}"))?;
     let mut report = json!({
         "openxr": {
-            "runtime": null as Option<Value>,
+            "runtime": Value::Null,
             "api_layers": [],
             "instance_extensions": [],
         }
@@ -46,8 +46,10 @@ fn probe() -> Result<Value, String> {
     let ext_names = extensions.names();
     let mut ext_list: Vec<Value> = Vec::new();
     for name in &ext_names {
+        // `names()` gives nul-terminated byte strings.
+        let text = String::from_utf8_lossy(name);
         ext_list.push(json!({
-            "name": name,
+            "name": text.trim_end_matches('\0'),
         }));
     }
     report["openxr"]["instance_extensions"] = Value::Array(ext_list);
@@ -106,7 +108,7 @@ fn probe() -> Result<Value, String> {
     };
     report["openxr"]["systems"] = json!([
         {
-            "system_id": system_props.system_id,
+            "system_id": format!("{:?}", system_props.system_id),
             "vendor_id": system_props.vendor_id,
             "system_name": system_props.system_name,
             "graphics_properties": {
@@ -159,7 +161,7 @@ fn probe() -> Result<Value, String> {
     // -----------------------------------------------------------------------
     // 6. Check Vulkan instance/device extension availability.
     // -----------------------------------------------------------------------
-    let vulkan_ext_present = ext_names.iter().any(|n| n == "XR_KHR_vulkan_enable2" || n == "XR_KHR_vulkan_enable");
+    let vulkan_ext_present = extensions.khr_vulkan_enable2 || extensions.khr_vulkan_enable;
     report["openxr"]["graphics"] = json!({
         "vulkan_supported": vulkan_ext_present,
         "note": if vulkan_ext_present {
