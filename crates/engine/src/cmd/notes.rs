@@ -9,8 +9,8 @@ use serde_json::{Value, json};
 use solidcraft_doc::Note;
 
 use super::CommandSpec;
-use crate::params::{bad, bool_, str_, req_vec3};
-use crate::schema::notes::{NoteAddParams, NoteDeleteParams, NoteDeleted, NoteId, NoteItem, NoteListParams, NotesList, NoteUpdateParams};
+use crate::params::{bad, bool_, req_vec3, str_};
+use crate::schema::notes::{NoteAddParams, NoteDeleteParams, NoteDeleted, NoteId, NoteItem, NoteListParams, NoteUpdateParams, NotesList};
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
@@ -74,7 +74,9 @@ fn note_update(s: &mut Session, p: &Value) -> Result<Value> {
     let i = note_index(s, p, CMD)?;
     let text = match str_(p, "text") {
         Some(t) if Note::text_is_valid(t) => Some(t.to_string()),
-        Some(_) => return Err(bad(CMD, &format!("`text` must not be empty and must be at most {} characters", solidcraft_doc::notes::MAX_NOTE_CHARS))),
+        Some(_) => {
+            return Err(bad(CMD, &format!("`text` must not be empty and must be at most {} characters", solidcraft_doc::notes::MAX_NOTE_CHARS)));
+        }
         None => None,
     };
     let anchor = match p.get("anchor") {
@@ -108,8 +110,12 @@ fn note_delete(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn note_list(s: &mut Session, _p: &Value) -> Result<Value> {
-    let notes: Vec<NoteItem> =
-        s.doc.notes.iter().map(|n| NoteItem { id: n.id, anchor: [n.anchor.x, n.anchor.y, n.anchor.z], text: n.text.clone(), hidden: n.hidden }).collect();
+    let notes: Vec<NoteItem> = s
+        .doc
+        .notes
+        .iter()
+        .map(|n| NoteItem { id: n.id, anchor: [n.anchor.x, n.anchor.y, n.anchor.z], text: n.text.clone(), hidden: n.hidden })
+        .collect();
     Ok(json!({ "notes": notes }))
 }
 
