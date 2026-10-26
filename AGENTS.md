@@ -52,7 +52,9 @@ anywhere (including dependencies; `deny.toml` bans copyleft crates).
 `1e-9` relative (`|a-b| <= 1e-9 * max(|a|,|b|)`; an absolute floor only where a unit
 documents one per key in `abs_floors()`, recorded in its report). Never loosen a tolerance to get green. A disagreement you cannot fix
 goes in a new `plan/findings/<slug>.md` (unit, inputs, both values, suspected cause) and the unit
-stays `blocked`.
+stays `blocked`. Sole exception: a case where the C++ reference is verified wrong (a confirmed
+`plan/upstream-issues/` entry) is listed with `cpp_defect = "<id>"` in its known-mismatch entry
+and counts as passing (`crates/difftest/README.md`); never use it for a Rust divergence.
 
 **Git.** Work happens through pull requests to github.com/tangency-labs/solidcore. Never
 push to `main` directly, never force-push shared branches, never rewrite `main`'s

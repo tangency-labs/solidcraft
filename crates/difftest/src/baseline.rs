@@ -4,7 +4,9 @@
 //!   from the exact base revision's validated CI artifact. Every case that
 //!   passed there must still exist and pass, and must still compare values if it did;
 //!   no deferred or failing case may disappear either. A deferred case may turn into a
-//!   pass (progress); a rejected fixture may go away. Different `--seeds` are a gate failure, so generated cases cannot be hidden.
+//!   pass (progress); a rejected fixture may go away. A known mismatch or confirmed C++
+//!   defect (`cpp_defect`) must stay one of those two or become a pass; a case that
+//!   passed may not become either (marking a passing case is never a silent waiver). Different `--seeds` are a gate failure, so generated cases cannot be hidden.
 //! * **Value share**: at least [`MIN_VALUE_SHARE`] of a unit's passing cases, and at
 //!   least one, must compare a value (a float, integer or topology entry) rather than
 //!   only an error string both sides agreed on.
@@ -72,7 +74,7 @@ pub struct Violation {
 pub struct BaselineCase {
     /// Case name (unique within the unit).
     pub name: String,
-    /// `pass`, `fail`, `deferred`, `known_mismatch` or `rejected`.
+    /// `pass`, `fail`, `deferred`, `known_mismatch`, `cpp_defect` or `rejected`.
     pub outcome: String,
     /// The case came from the generator (its inputs depend on `--seeds`).
     pub generated: bool,
@@ -160,7 +162,7 @@ pub fn parse_baseline(text: &str) -> Result<Baseline, String> {
             .ok_or("missing case outcome")?;
         if !matches!(
             outcome,
-            "pass" | "fail" | "deferred" | "rejected" | "known_mismatch"
+            "pass" | "fail" | "deferred" | "rejected" | "known_mismatch" | "cpp_defect"
         ) {
             return Err(format!("unknown case outcome `{outcome}`"));
         }
@@ -227,6 +229,7 @@ pub fn parse_baseline(text: &str) -> Result<Baseline, String> {
         ("deferred", "cases_deferred", true),
         ("rejected", "cases_rejected", false),
         ("known_mismatch", "cases_known_mismatch", false),
+        ("cpp_defect", "cases_cpp_defect", false),
     ] {
         if count(&v, field, required)? != counts.get(outcome).copied().unwrap_or(0) {
             return Err(format!("{field} disagrees with case outcomes"));
@@ -424,12 +427,20 @@ pub fn ratchet(base: &Baseline, res: &UnitResult) -> Vec<Violation> {
             continue;
         };
         let o = c.outcome();
-        if b.outcome == "known_mismatch"
-            && !matches!(o, CaseOutcome::KnownMismatch | CaseOutcome::Pass)
+        if is_listed(&b.outcome)
+            && !matches!(
+                o,
+                CaseOutcome::KnownMismatch | CaseOutcome::CppDefect | CaseOutcome::Pass
+            )
         {
             push(
                 &b.name,
-                format!("case `{}` was a known mismatch, now {}", b.name, o.as_str()),
+                format!(
+                    "case `{}` was a {}, now {}",
+                    b.name,
+                    listed_kind(&b.outcome),
+                    o.as_str()
+                ),
             );
             continue;
         }
@@ -465,6 +476,21 @@ pub fn ratchet(base: &Baseline, res: &UnitResult) -> Vec<Violation> {
     out
 }
 
+/// A case listed in `known_mismatches/<unit>.toml` that still mismatches: a known
+/// mismatch or a confirmed C++ defect. Either may turn into the other (the marker was
+/// added or dropped) or into a pass; anything else loses the tracked comparison.
+fn is_listed(outcome: &str) -> bool {
+    matches!(outcome, "known_mismatch" | "cpp_defect")
+}
+
+fn listed_kind(outcome: &str) -> &'static str {
+    if outcome == "cpp_defect" {
+        "confirmed C++ defect"
+    } else {
+        "known mismatch"
+    }
+}
+
 /// Ratchet violations of a completed report `now` against the earlier report `base`
 /// (`--compare-reports`). The same rules as [`ratchet`], applied to two parsed reports
 /// instead of a live [`UnitResult`]: the sweep ran elsewhere and only its reports remain.
@@ -497,11 +523,15 @@ pub fn ratchet_reports(base: &Baseline, now: &Baseline) -> Vec<Violation> {
             );
             continue;
         };
-        if b.outcome == "known_mismatch" && !matches!(c.outcome.as_str(), "known_mismatch" | "pass")
-        {
+        if is_listed(&b.outcome) && !is_listed(&c.outcome) && c.outcome != "pass" {
             push(
                 &b.name,
-                format!("case `{}` was a known mismatch, now {}", b.name, c.outcome),
+                format!(
+                    "case `{}` was a {}, now {}",
+                    b.name,
+                    listed_kind(&b.outcome),
+                    c.outcome
+                ),
             );
             continue;
         }
@@ -735,6 +765,7 @@ mod tests {
             perturbed: None,
             diagnostics: BTreeMap::new(),
             known_mismatch: None,
+            cpp_defect: None,
         };
         match outcome {
             "pass" => {}
@@ -750,6 +781,11 @@ mod tests {
             "known_mismatch" => {
                 c.diff.mismatch_count = 1;
                 c.known_mismatch = Some("tracked mismatch".into());
+            }
+            "cpp_defect" => {
+                c.diff.mismatch_count = 1;
+                c.known_mismatch = Some("tracked mismatch".into());
+                c.cpp_defect = Some("UB-1".into());
             }
             other => panic!("{other}"),
         }
@@ -859,6 +895,74 @@ mod tests {
             let violations = ratchet(&b, &unit(vec![case("known", outcome, 0)]));
             assert_eq!(violations.len(), 1, "{outcome}");
             assert!(violations[0].detail.contains("was a known mismatch"));
+        }
+    }
+
+    #[test]
+    fn cpp_defects_ratchet_like_known_mismatches_and_never_waive_a_pass() {
+        // A pass may not be marked as a C++ defect (no silent waiver).
+        let b = base(&[("p", "pass", false, true)]);
+        let v = ratchet(&b, &unit(vec![case("p", "cpp_defect", 1)]));
+        assert_eq!(v.len(), 1);
+        assert!(v[0]
+            .detail
+            .contains("passed in the baseline, now cpp_defect"));
+        let now = report(16, vec![bcase("p", "cpp_defect", true)]);
+        assert_eq!(
+            ratchet_reports(&report(16, vec![bcase("p", "pass", true)]), &now).len(),
+            1
+        );
+        // Known mismatch <-> C++ defect and C++ defect -> pass are allowed.
+        for (before, after) in [
+            ("known_mismatch", "cpp_defect"),
+            ("cpp_defect", "known_mismatch"),
+            ("cpp_defect", "cpp_defect"),
+            ("cpp_defect", "pass"),
+        ] {
+            let b = base(&[("k", before, false, true)]);
+            assert!(
+                ratchet(&b, &unit(vec![case("k", after, 1)])).is_empty(),
+                "{before}->{after}"
+            );
+            let rb = report(16, vec![bcase("k", before, true)]);
+            let rn = report(16, vec![bcase("k", after, true)]);
+            assert!(ratchet_reports(&rb, &rn).is_empty(), "{before}->{after}");
+        }
+        // It may not disappear, defer, be rejected or fail.
+        let b = base(&[("k", "cpp_defect", false, true)]);
+        assert_eq!(ratchet(&b, &unit(Vec::new())).len(), 1);
+        for outcome in ["deferred", "rejected", "fail"] {
+            let v = ratchet(&b, &unit(vec![case("k", outcome, 0)]));
+            assert_eq!(v.len(), 1, "{outcome}");
+            assert!(
+                v[0].detail.contains("was a confirmed C++ defect"),
+                "{}",
+                v[0].detail
+            );
+            let rb = report(16, vec![bcase("k", "cpp_defect", true)]);
+            let rn = report(16, vec![bcase("k", outcome, false)]);
+            assert_eq!(ratchet_reports(&rb, &rn).len(), 1, "{outcome}");
+        }
+    }
+
+    #[test]
+    fn parsed_cpp_defect_reports_are_green_and_counted() {
+        let r = serde_json::json!({"unit":"a.b","status":"green","pass":true,"seeds":16,
+            "schema_version":1,"cases_total":2,"cases_passed":1,"cases_failed":0,
+            "cases_deferred":0,"cases_cpp_defect":1,"cases_vacuous":0,
+            "cases":[
+              {"name":"p","pass":true,"outcome":"pass","values_compared":1,"exact_compared":0},
+              {"name":"d","pass":false,"outcome":"cpp_defect","values_compared":0,"exact_compared":3}]});
+        let b = parse_baseline(&r.to_string()).unwrap();
+        assert_eq!(b.cases[1].outcome, "cpp_defect");
+        assert!(b.cases[1].compared_values);
+        for (field, value) in [
+            ("status", serde_json::json!("partial")),
+            ("cases_cpp_defect", serde_json::json!(0)),
+        ] {
+            let mut bad = r.clone();
+            bad[field] = value;
+            assert!(parse_baseline(&bad.to_string()).is_err(), "{field}");
         }
     }
 

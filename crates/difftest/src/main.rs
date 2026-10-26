@@ -484,6 +484,20 @@ fn main() -> ExitCode {
                 c.source.describe()
             );
         }
+        for c in res.cases.iter().filter(|c| c.is_cpp_defect()) {
+            let first = c
+                .diff
+                .mismatches
+                .first()
+                .map(|m| format!("{}: cpp={} rust={}", m.field, m.cpp, m.rust))
+                .unwrap_or_default();
+            println!(
+                "  cpp-defect {} ({}) [{}]: {first}",
+                c.name,
+                c.cpp_defect.as_deref().unwrap_or_default(),
+                c.source.describe()
+            );
+        }
         let plan_status = plan_units
             .iter()
             .find(|p| p.id == id.as_str())

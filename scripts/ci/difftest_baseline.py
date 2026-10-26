@@ -127,7 +127,7 @@ def validate_report(report, filename_unit):
     names = [c.get("name") for c in cases]
     if any(not isinstance(n, str) or not n for n in names) or len(set(names)) != len(names):
         raise BaselineError("case names must be nonempty and unique")
-    allowed = {"pass", "fail", "deferred", "rejected", "known_mismatch"}
+    allowed = {"pass", "fail", "deferred", "rejected", "known_mismatch", "cpp_defect"}
     counts = Counter(c.get("outcome") for c in cases)
     if set(counts) - allowed:
         raise BaselineError("unknown/missing case outcome")
@@ -135,7 +135,7 @@ def validate_report(report, filename_unit):
         raise BaselineError("partial report: case total disagrees")
     for outcome, field in [("pass", "cases_passed"), ("fail", "cases_failed"),
                            ("deferred", "cases_deferred"), ("rejected", "cases_rejected"),
-                           ("known_mismatch", "cases_known_mismatch")]:
+                           ("known_mismatch", "cases_known_mismatch"), ("cpp_defect", "cases_cpp_defect")]:
         if uint(report.get(field) if outcome in {"pass", "fail", "deferred"} else report.get(field, 0), field) != counts[outcome]:
             raise BaselineError("case outcome count disagrees: " + field)
     for c in cases:
@@ -172,6 +172,11 @@ def validate_set(reports, expected_base_units):
     return {u: validate_report(d, u) for u, d in reports.items()}
 
 
+# Cases listed in known_mismatches/<unit>.toml that still mismatch: either kind may turn
+# into the other or into a pass; a pass may not turn into either (no silent waiver).
+LISTED = {"known_mismatch", "cpp_defect"}
+
+
 def ratchet_reports(baseline, current):
     """Coverage checks only; value-share floor stays a separate audit/check."""
     violations = []
@@ -191,7 +196,7 @@ def ratchet_reports(baseline, current):
                 violations.append((unit, old["name"], "baseline case dropped"))
             elif old["outcome"] == "pass" and new["outcome"] != "pass":
                 violations.append((unit, old["name"], "passing case no longer passes"))
-            elif old["outcome"] == "known_mismatch" and new["outcome"] not in {"known_mismatch", "pass"}:
+            elif old["outcome"] in LISTED and new["outcome"] not in LISTED | {"pass"}:
                 violations.append((unit, old["name"], "known mismatch no longer exercised"))
             elif case_has_values(before, old) and not case_has_values(after, new):
                 violations.append((unit, old["name"], "value coverage lost"))

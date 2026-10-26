@@ -19,6 +19,16 @@
 //! in `libc`. On any other C library the entry does not apply: the case runs as an
 //! ordinary case and must pass.
 //!
+//! An entry whose disagreement is verified to be a defect of the C++ reference (the
+//! Rust result is the correct one) names that defect in `cpp_defect`: the id of a
+//! confirmed upstream issue, `plan/upstream-issues/<id>--<slug>.md` with a
+//! `- **Confirmed:** yes` line (checked when the list is loaded). Such a case that still
+//! mismatches is classified
+//! [`CaseOutcome::CppDefect`](crate::runner::CaseOutcome::CppDefect) instead: reported
+//! separately, and counted as a success, so it does not keep the unit from being green.
+//! Every other entry (a Rust divergence, an unexplained disagreement) stays a
+//! `KnownMismatch`.
+//!
 //! ```toml
 //! # crates/difftest/known_mismatches/curve.curve_p1.toml
 //! [[mismatch]]
@@ -26,6 +36,7 @@
 //! case = "gen0042"
 //! why = "C++ succeeds with 0 points, Rust returns status_3 (plan/findings/...)"
 //! # libc = "glibc"   # optional: only where the C++ reference runs on glibc
+//! # cpp_defect = "UB-255"   # optional: the C++ is verified wrong (confirmed upstream issue)
 //! ```
 
 use std::path::Path;
@@ -58,6 +69,10 @@ pub struct KnownMismatch {
     /// The C library the disagreement depends on; `None` applies everywhere.
     #[serde(default)]
     pub libc: Option<Libc>,
+    /// The confirmed upstream issue (`UB-255`, `WR-12`, ...) showing the C++ result is
+    /// wrong; `None` for an ordinary known mismatch.
+    #[serde(default)]
+    pub cpp_defect: Option<String>,
 }
 
 impl KnownMismatch {
@@ -106,8 +121,69 @@ pub fn parse(text: &str, unit: &str) -> Result<Vec<KnownMismatch>, HarnessError>
     Ok(f.mismatch)
 }
 
+/// Directory of the upstream issue records, relative to the repository root.
+pub const UPSTREAM_ISSUES_DIR: &str = "plan/upstream-issues";
+
+/// Checks that `id` names exactly one confirmed upstream issue under
+/// `<root>/plan/upstream-issues/`: a file `<id>--<slug>.md` (not an addendum) whose
+/// heading is `#### <id>.` and that has a `- **Confirmed:** yes` line.
+pub fn check_cpp_defect(root: &Path, id: &str) -> Result<(), String> {
+    let well_formed = id.split_once('-').is_some_and(|(series, num)| {
+        ["UB", "WR", "ND", "HANG"].contains(&series)
+            && !num.is_empty()
+            && num.bytes().all(|b| b.is_ascii_digit())
+    });
+    if !well_formed {
+        return Err(format!(
+            "cpp_defect `{id}` is not an upstream issue id (UB-/WR-/ND-/HANG-<n>)"
+        ));
+    }
+    let dir = root.join(UPSTREAM_ISSUES_DIR);
+    let entries = std::fs::read_dir(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let prefix = format!("{id}--");
+    let mut found = Vec::new();
+    for e in entries {
+        let name = e
+            .map_err(|e| format!("{}: {e}", dir.display()))?
+            .file_name()
+            .to_string_lossy()
+            .into_owned();
+        let markdown = Path::new(&name)
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("md"));
+        if name.starts_with(&prefix) && markdown && !name.contains("--addendum-") {
+            found.push(name);
+        }
+    }
+    found.sort();
+    let [name] = found.as_slice() else {
+        return Err(format!(
+            "cpp_defect `{id}`: expected one {UPSTREAM_ISSUES_DIR}/{id}--<slug>.md, found {}",
+            found.len()
+        ));
+    };
+    let path = dir.join(name);
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    if !text.starts_with(&format!("#### {id}. ")) {
+        return Err(format!(
+            "cpp_defect `{id}`: {UPSTREAM_ISSUES_DIR}/{name} does not start with `#### {id}. `"
+        ));
+    }
+    let confirmed = text.lines().any(|l| {
+        l.strip_prefix("- **Confirmed:**")
+            .is_some_and(|v| v.trim_start().to_ascii_lowercase().starts_with("yes"))
+    });
+    if !confirmed {
+        return Err(format!(
+            "cpp_defect `{id}`: {UPSTREAM_ISSUES_DIR}/{name} is not confirmed (`- **Confirmed:** yes`)"
+        ));
+    }
+    Ok(())
+}
+
 /// The entries of `unit` from `<root>/crates/difftest/known_mismatches/<unit>.toml`
-/// (empty if the file does not exist).
+/// (empty if the file does not exist). Every `cpp_defect` must name a confirmed upstream
+/// issue ([`check_cpp_defect`]).
 pub fn for_unit(root: &Path, unit: &str) -> Result<Vec<KnownMismatch>, HarnessError> {
     if unit.is_empty() || unit.contains(['/', '\\']) || unit.starts_with('.') {
         return Err(HarnessError::new(format!(
@@ -120,7 +196,15 @@ pub fn for_unit(root: &Path, unit: &str) -> Result<Vec<KnownMismatch>, HarnessEr
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(HarnessError::new(format!("{}: {e}", path.display()))),
     };
-    parse(&text, unit)
+    let entries = parse(&text, unit)?;
+    for m in &entries {
+        if let Some(id) = &m.cpp_defect {
+            check_cpp_defect(root, id).map_err(|e| {
+                HarnessError::new(format!("{}: case `{}`: {e}", path_for(unit), m.case))
+            })?;
+        }
+    }
+    Ok(entries)
 }
 
 #[cfg(test)]
@@ -169,6 +253,64 @@ mod tests {
             cfg!(all(target_os = "linux", target_env = "gnu"))
         );
         assert!(entry("libc = \"musl\"\n").is_err());
+    }
+
+    #[test]
+    fn cpp_defect_must_name_a_confirmed_upstream_issue() {
+        let dir = std::env::temp_dir().join(format!("difftest-known-{}", std::process::id()));
+        let issues = dir.join(UPSTREAM_ISSUES_DIR);
+        let lists = dir.join(KNOWN_MISMATCHES_DIR);
+        std::fs::create_dir_all(&issues).unwrap();
+        std::fs::create_dir_all(&lists).unwrap();
+        std::fs::write(
+            issues.join("UB-7--yes.md"),
+            "#### UB-7. t\n- **Confirmed:** yes, case c\n",
+        )
+        .unwrap();
+        std::fs::write(
+            issues.join("UB-7--addendum-2026-01-01-x.md"),
+            "Updates: UB-7\n",
+        )
+        .unwrap();
+        std::fs::write(
+            issues.join("WR-8--no.md"),
+            "#### WR-8. t\n- **Confirmed:** no\n",
+        )
+        .unwrap();
+        std::fs::write(
+            issues.join("WR-9--a.md"),
+            "#### WR-9. a\n- **Confirmed:** yes\n",
+        )
+        .unwrap();
+        std::fs::write(
+            issues.join("WR-9--b.md"),
+            "#### WR-9. b\n- **Confirmed:** yes\n",
+        )
+        .unwrap();
+        std::fs::write(
+            issues.join("ND-3--x.md"),
+            "#### ND-4. x\n- **Confirmed:** yes\n",
+        )
+        .unwrap();
+        assert_eq!(check_cpp_defect(&dir, "UB-7"), Ok(()));
+        for bad in [
+            "WR-8", "WR-9", "ND-3", "UB-70", "UB-", "XX-7", "UB-7x", "../UB-7",
+        ] {
+            assert!(check_cpp_defect(&dir, bad).is_err(), "{bad}");
+        }
+        let list = |id: &str| {
+            std::fs::write(
+                lists.join("a.b.toml"),
+                format!(
+                    "[[mismatch]]\nunit = \"a.b\"\ncase = \"c\"\nwhy = \"w\"\ncpp_defect = \"{id}\"\n"
+                ),
+            )
+            .unwrap();
+            for_unit(&dir, "a.b")
+        };
+        assert_eq!(list("UB-7").unwrap()[0].cpp_defect.as_deref(), Some("UB-7"));
+        assert!(list("WR-8").unwrap_err().0.contains("not confirmed"));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

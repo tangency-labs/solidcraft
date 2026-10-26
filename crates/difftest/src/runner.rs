@@ -124,6 +124,8 @@ pub struct CaseResult {
     pub diagnostics: BTreeMap<String, i64>,
     /// The case is listed in `known_mismatches/<unit>.toml` (the entry's `why`).
     pub known_mismatch: Option<String>,
+    /// The listing names a confirmed C++ reference defect (the entry's `cpp_defect`).
+    pub cpp_defect: Option<String>,
 }
 
 /// Classification of one case.
@@ -143,10 +145,15 @@ pub enum CaseOutcome {
     /// A mismatch listed in `known_mismatches/<unit>.toml` ([`crate::known`]): not a pass,
     /// keeps the unit from being green, reported like a failure.
     KnownMismatch,
+    /// A listed mismatch whose entry names a confirmed defect of the C++ reference
+    /// (`cpp_defect`, [`crate::known`]): the Rust result is the correct one. Not a pass
+    /// (the C++ still disagrees), but a success: it does not keep the unit from being
+    /// green. Reported separately, with its mismatches.
+    CppDefect,
 }
 
 impl CaseOutcome {
-    /// `pass`, `fail`, `deferred`, `rejected` or `known_mismatch`.
+    /// `pass`, `fail`, `deferred`, `rejected`, `known_mismatch` or `cpp_defect`.
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Pass => "pass",
@@ -155,6 +162,7 @@ impl CaseOutcome {
             Self::Deferred => "deferred",
             Self::SkippedPlatform => "skipped(platform)",
             Self::KnownMismatch => "known_mismatch",
+            Self::CppDefect => "cpp_defect",
         }
     }
 }
@@ -173,6 +181,8 @@ impl CaseResult {
             CaseOutcome::SkippedPlatform
         } else if self.diff.pass() {
             CaseOutcome::Pass
+        } else if self.known_mismatch.is_some() && self.cpp_defect.is_some() {
+            CaseOutcome::CppDefect
         } else if self.known_mismatch.is_some() {
             CaseOutcome::KnownMismatch
         } else {
@@ -183,6 +193,11 @@ impl CaseResult {
     /// Case is a listed known mismatch that still mismatches.
     pub fn is_known_mismatch(&self) -> bool {
         self.outcome() == CaseOutcome::KnownMismatch
+    }
+
+    /// Case is a listed confirmed C++ reference defect that still mismatches.
+    pub fn is_cpp_defect(&self) -> bool {
+        self.outcome() == CaseOutcome::CppDefect
     }
 
     /// Case passes (not deferred, no harness error, no mismatch).
@@ -224,7 +239,8 @@ impl CaseResult {
 /// Status of a unit run (AGENTS.md section 4a).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnitStatus {
-    /// No failures, deferrals or known mismatches (platform skips excluded).
+    /// No failures, deferrals or known mismatches (platform skips excluded). Confirmed
+    /// C++ reference defects ([`CaseOutcome::CppDefect`]) count as successes.
     /// An entirely platform-skipped run retains this canonical verdict but has no parity passes.
     Green,
     /// No failing case and at least one deferred case or known mismatch.
@@ -377,6 +393,11 @@ impl UnitResult {
     /// Number of listed known mismatches that still mismatch.
     pub fn known_mismatches(&self) -> usize {
         self.cases.iter().filter(|c| c.is_known_mismatch()).count()
+    }
+
+    /// Number of listed confirmed C++ reference defects that still mismatch.
+    pub fn cpp_defects(&self) -> usize {
+        self.cases.iter().filter(|c| c.is_cpp_defect()).count()
     }
 
     /// Number of deferred cases.
@@ -557,6 +578,7 @@ pub fn run_unit(unit: &dyn UnitDiff, ctx: &CaseContext, opts: &RunOptions) -> Un
                 continue;
             }
         }
+        let entry = known.iter().find(|k| k.case == case.name);
         // Platform-dependent cases (libstdc++-only C++ reference behaviour): on a
         // non-libstdc++ build report them as skipped(platform) without running.
         if !solidcore_ffi::cpp_stdlib_is_libstdcxx() {
@@ -573,10 +595,8 @@ pub fn run_unit(unit: &dyn UnitDiff, ctx: &CaseContext, opts: &RunOptions) -> Un
                     skipped_platform: Some(reason),
                     perturbed: None,
                     diagnostics: BTreeMap::new(),
-                    known_mismatch: known
-                        .iter()
-                        .find(|k| k.case == case.name)
-                        .map(|k| k.why.clone()),
+                    known_mismatch: entry.map(|k| k.why.clone()),
+                    cpp_defect: entry.and_then(|k| k.cpp_defect.clone()),
                 };
                 res.cases.push(cr);
                 continue;
@@ -606,10 +626,8 @@ pub fn run_unit(unit: &dyn UnitDiff, ctx: &CaseContext, opts: &RunOptions) -> Un
             skipped_platform: None,
             perturbed: None,
             diagnostics: BTreeMap::new(),
-            known_mismatch: known
-                .iter()
-                .find(|k| k.case == case.name)
-                .map(|k| k.why.clone()),
+            known_mismatch: entry.map(|k| k.why.clone()),
+            cpp_defect: entry.and_then(|k| k.cpp_defect.clone()),
         };
         if let Ok(c) = &cpp {
             if let Some(reason) = &c.rejected {
@@ -662,6 +680,7 @@ pub fn run_unit(unit: &dyn UnitDiff, ctx: &CaseContext, opts: &RunOptions) -> Un
                     if cr.perturbed.is_some() {
                         // The known-result waiver does not cover an injected error.
                         cr.known_mismatch = None;
+                        cr.cpp_defect = None;
                     }
                 }
                 cr.both_errored = c.error.is_some() && r.error.is_some();
@@ -676,7 +695,10 @@ pub fn run_unit(unit: &dyn UnitDiff, ctx: &CaseContext, opts: &RunOptions) -> Un
         if cr.known_mismatch.is_some()
             && !opts.perturb
             && cr.harness_error.is_none()
-            && cr.outcome() != CaseOutcome::KnownMismatch
+            && !matches!(
+                cr.outcome(),
+                CaseOutcome::KnownMismatch | CaseOutcome::CppDefect
+            )
         {
             cr.harness_error = Some(format!(
                 "listed in {} but the case is now {}: remove the entry",
@@ -813,6 +835,7 @@ mod tests {
             perturbed: None,
             diagnostics: BTreeMap::new(),
             known_mismatch: None,
+            cpp_defect: None,
         };
         let d = || {
             Some(Deferred {
@@ -851,6 +874,33 @@ mod tests {
         assert_eq!(r.status(), UnitStatus::Fail);
         r.cases.truncate(1);
         assert_eq!(r.status(), UnitStatus::Green);
+        let mut known = case(None, false);
+        known.known_mismatch = Some("rust diverges".into());
+        assert_eq!(known.outcome(), CaseOutcome::KnownMismatch);
+        let mut defect = known.clone();
+        defect.cpp_defect = Some("UB-1".into());
+        assert_eq!(defect.outcome(), CaseOutcome::CppDefect);
+        assert!(!defect.pass() && !defect.fail());
+        r.cases.push(defect.clone());
+        assert_eq!(
+            r.status(),
+            UnitStatus::Green,
+            "a confirmed C++ defect is a success"
+        );
+        assert_eq!(
+            (r.passed(), r.cpp_defects(), r.known_mismatches()),
+            (1, 1, 0)
+        );
+        r.cases.push(known);
+        assert_eq!(r.status(), UnitStatus::Partial);
+        r.cases.truncate(1);
+        let mut agrees = defect;
+        agrees.diff = CaseDiff::default();
+        assert_eq!(
+            agrees.outcome(),
+            CaseOutcome::Pass,
+            "a listed case that agrees passes"
+        );
         let mut skipped = case(None, true);
         skipped.skipped_platform = Some("platform-specific C++ reference behaviour".into());
         assert_eq!(skipped.outcome(), CaseOutcome::SkippedPlatform);
