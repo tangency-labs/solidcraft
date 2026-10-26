@@ -13,18 +13,27 @@
 //!   root; fills black, even-odd. One `<path>` per item, so each stays one object in an editor.
 //! - **Groups** are `<g data-object="…" data-kind="…">`: object ids repeat and start with a digit,
 //!   so they can't be XML ids. No background: the page stays transparent, as cutters want.
+//! - **Pictures** (#5624 S5) are `<image>`s holding a PNG as a data URI, on their own pixel grid
+//!   ([`Picture::grid`]) at the picture resolution the caller gives, cropped to the pixels on the
+//!   sheet. Their edges are the grid's, on the same nanometre grid as the lines, so they register.
 
 use std::fmt::Write;
 
-use solidcraft_geom::paper::{Grid, GridItem, GridPath, GridPoint, GridReport, Piece, Prepared};
+use solidcraft_geom::paper::{Grid, GridItem, GridPath, GridPoint, GridReport, Picture, Pictures, Piece, Prepared};
+use solidcraft_geom::{Aabb2, Vec2};
 
+use super::png::{PICTURE_DPI, picture_png};
 use crate::{IoError, MAX_DRAWING_BYTES, Result};
 
 /// What writing a scene did that the scene didn't say: the grid's report.
 pub type SvgReport = GridReport;
 
-/// A scene's SVG document, and what writing it did.
-pub fn paper_svg(scene: &Prepared) -> Result<(Vec<u8>, SvgReport)> {
+/// A scene's SVG document, its pictures' pixels from `pictures` at `picture_dpi`, and what
+/// writing it did.
+pub fn paper_svg(scene: &Prepared, pictures: &dyn Pictures, picture_dpi: f64) -> Result<(Vec<u8>, SvgReport)> {
+    if !PICTURE_DPI.contains(&picture_dpi) {
+        return Err(IoError::Invalid(format!("an SVG's pictures are 25 to 1200 dpi, not {picture_dpi}")));
+    }
     let on = scene.on_grid(Grid::NANOMETRE).map_err(|e| IoError::Invalid(e.to_string()))?;
     let mut w = Writer { out: String::new(), height: on.size.y };
     let (width, height) = (number(on.size.x), number(on.size.y));
@@ -49,7 +58,12 @@ pub fn paper_svg(scene: &Prepared) -> Result<(Vec<u8>, SvgReport)> {
                     w.out.push_str("<path fill=\"#000\" stroke=\"none\" fill-rule=\"evenodd\" d=\"");
                     loops.iter().for_each(|l| w.path(l));
                 }
-                GridItem::Picture(_) => return Err(IoError::Invalid("not supported yet: pictures (A9)".into())),
+                GridItem::Picture(picture) => {
+                    let sheet = Aabb2 { min: Vec2::new(0.0, 0.0), max: scene.size_mm() };
+                    if !w.picture(picture, sheet, picture_dpi, pictures)? {
+                        continue;
+                    }
+                }
             }
             w.out.push_str("\"/>\n");
             if w.out.len() > MAX_DRAWING_BYTES {
@@ -90,6 +104,41 @@ struct Writer {
 }
 
 impl Writer {
+    /// Picture `picture`'s `<image>` up to its `href`'s closing quote: the pixels of its grid at
+    /// `dpi` that meet `sheet`. False, with nothing written, when none do.
+    fn picture(&mut self, picture: &Picture, sheet: Aabb2, dpi: f64, pictures: &dyn Pictures) -> Result<bool> {
+        let source = picture.source;
+        let grid = picture.grid(dpi).map_err(|e| IoError::Invalid(format!("picture {source}: {e}")))?;
+        let Some(window) = grid.window(sheet) else {
+            return Ok(false);
+        };
+        // The window's outer pixel edges, on the lines' grid: x0 + i·p across, y0 + j·p up.
+        let corner = |x: f64, y: f64| Grid::NANOMETRE.point(Vec2::new(x, y)).map_err(|e| IoError::Invalid(e.to_string()));
+        let low = corner(grid.column(window.x0).0, grid.row(window.y1 - 1).0)?;
+        let high = corner(grid.column(window.x1 - 1).1, grid.row(window.y0).1)?;
+        // Base64 is 4 bytes for every 3.
+        let room = MAX_DRAWING_BYTES.saturating_sub(self.out.len()) / 4 * 3;
+        let png = picture_png(source, &grid, window, pictures, room)?;
+        self.out.push_str("<image x=\"");
+        push_number(&mut self.out, low.x);
+        self.out.push_str("\" y=\"");
+        push_number(&mut self.out, self.height - high.y);
+        self.out.push_str("\" width=\"");
+        push_number(&mut self.out, high.x - low.x);
+        self.out.push_str("\" height=\"");
+        push_number(&mut self.out, high.y - low.y);
+        self.out.push_str("\" preserveAspectRatio=\"none\"");
+        if picture.opacity < 1.0 {
+            // Written as millionths, as lengths are.
+            self.out.push_str(" opacity=\"");
+            push_number(&mut self.out, (picture.opacity * 1e6).round() as i64);
+            self.out.push('"');
+        }
+        self.out.push_str(" href=\"data:image/png;base64,");
+        self.out.push_str(&solidcraft_doc::canvas::base64_encode(&png));
+        Ok(true)
+    }
+
     fn point(&mut self, p: GridPoint) {
         push_number(&mut self.out, p.x);
         self.out.push(' ');

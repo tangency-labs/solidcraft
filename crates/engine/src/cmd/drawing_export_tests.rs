@@ -19,7 +19,7 @@ fn refused(s: &mut Session, p: Value) -> String {
 fn scene_svg(s: &Session, sheet: u64) -> Vec<u8> {
     let d = s.drawing("test").unwrap().clone();
     let built = crate::drawing_scene::build(s, &d, sheet).unwrap();
-    solidcraft_io::paper::paper_svg(&built.scene.prepare().unwrap()).unwrap().0
+    solidcraft_io::paper::paper_svg(&built.scene.prepare().unwrap(), &NoPictures, DEFAULT_DPI).unwrap().0
 }
 
 /// A sheet exports as its scene's SVG, byte for byte, by id or by name: the reply holds it, with

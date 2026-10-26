@@ -551,25 +551,40 @@ outer
         survives("design JSON with drawings", &mutations(&json, true, 0xd4c), MAX_DRAWINGS, |b| crate::read_design(b).ok().map(|d| d.drawings.len()));
     }
 
-    /// A paper scene's JSON, mutated, read, prepared and written as SVG: an error or a document,
-    /// never a panic.
+    /// Mid grey at half alpha, the size asked for: the paper fuzz cases' pictures.
+    struct Grey;
+
+    impl solidcraft_geom::paper::Pictures for Grey {
+        fn rows(
+            &self,
+            _: u64,
+            _: &solidcraft_geom::pixel_grid::PixelGrid,
+            w: solidcraft_geom::pixel_grid::GridWindow,
+        ) -> std::result::Result<Vec<u8>, String> {
+            Ok([128, 128, 128, 128].repeat(w.x1.saturating_sub(w.x0) as usize * w.y1.saturating_sub(w.y0) as usize))
+        }
+    }
+
+    /// A paper scene's JSON with a picture, mutated, read, prepared and written as SVG with its
+    /// pictures at 25 dpi: an error or a document, never a panic.
     #[test]
     fn paper_scenes_survive_mutation_into_svg() {
-        use solidcraft_geom::paper::{Group, Item, ObjectKind, Scene};
-        use solidcraft_geom::{Loop2, Region2, Seg2, Vec2};
+        use solidcraft_geom::paper::{Group, Item, ObjectKind, Picture, Scene};
+        use solidcraft_geom::{Aabb2, Loop2, Region2, Seg2, Vec2};
         let p = Vec2::new;
         let border = Loop2::polygon(&[p(20.0, 10.0), p(410.0, 10.0), p(410.0, 287.0), p(20.0, 287.0)]);
         let items = vec![
             Item::Stroke { path: border.segs.clone(), closed: true, width_mm: 0.7 },
             Item::Stroke { path: vec![Seg2::Arc { center: p(50.0, 50.0), radius: 10.0, start: 0.0, sweep: 4.0 }], closed: false, width_mm: 0.35 },
             Item::Fill { region: Region2 { outer: border, holes: vec![] } },
+            Item::Picture(Picture { source: 3, rect: Aabb2 { min: p(150.0, 100.0), max: p(250.0, 150.0) }, opacity: 0.8 }),
         ];
         let scene = Scene::new(p(420.0, 297.0), vec![Group { object: 7, kind: ObjectKind::DrawingBorder, items }]);
         let json = serde_json::to_vec(&scene).unwrap();
         let write = |b: &[u8]| -> Option<usize> {
             let scene: Scene = serde_json::from_slice(b).ok()?;
             let prepared = scene.prepare().ok()?;
-            crate::paper::paper_svg(&prepared).ok().map(|(bytes, _)| bytes.len())
+            crate::paper::paper_svg(&prepared, &Grey, 25.0).ok().map(|(bytes, _)| bytes.len())
         };
         assert!(write(&json).is_some());
         survives("paper scene to SVG", &mutations(&json, true, 0x5a3), usize::MAX, write);
@@ -579,16 +594,8 @@ outer
     /// PNG: an error or an image, never a panic.
     #[test]
     fn paper_scenes_survive_mutation_into_png() {
-        use solidcraft_geom::paper::{Group, Item, ObjectKind, Picture, Pictures, Scene};
-        use solidcraft_geom::pixel_grid::{GridWindow, PixelGrid};
+        use solidcraft_geom::paper::{Group, Item, ObjectKind, Picture, Scene};
         use solidcraft_geom::{Aabb2, Loop2, Region2, Seg2, Vec2};
-        /// Mid grey at half alpha, the size asked for.
-        struct Grey;
-        impl Pictures for Grey {
-            fn rows(&self, _: u64, _: &PixelGrid, w: GridWindow) -> std::result::Result<Vec<u8>, String> {
-                Ok([128, 128, 128, 128].repeat(w.x1.saturating_sub(w.x0) as usize * w.y1.saturating_sub(w.y0) as usize))
-            }
-        }
         let p = Vec2::new;
         let border = Loop2::polygon(&[p(20.0, 10.0), p(410.0, 10.0), p(410.0, 287.0), p(20.0, 287.0)]);
         let items = vec![

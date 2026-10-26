@@ -35,10 +35,10 @@ fn small() -> Scene {
     )
 }
 
-struct Image {
-    info: png::Info<'static>,
+pub(in crate::paper) struct Image {
+    pub(in crate::paper) info: png::Info<'static>,
     /// One byte a sample, rows top down: 1-bit images unpacked to 0 or 255.
-    samples: Vec<u8>,
+    pub(in crate::paper) samples: Vec<u8>,
 }
 
 impl Image {
@@ -47,7 +47,7 @@ impl Image {
     }
 
     /// The samples of the pixel at column `x`, row `y` from the top.
-    fn at(&self, x: usize, y: usize) -> &[u8] {
+    pub(in crate::paper) fn at(&self, x: usize, y: usize) -> &[u8] {
         let c = self.channels();
         let i = (y * self.info.width as usize + x) * c;
         &self.samples[i..i + c]
@@ -60,7 +60,7 @@ fn bytes(scene: &Scene, options: PngOptions) -> (Vec<u8>, PngReport) {
     (out, report)
 }
 
-fn read(bytes: &[u8]) -> Image {
+pub(in crate::paper) fn read(bytes: &[u8]) -> Image {
     let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes.to_vec()));
     decoder.set_transformations(png::Transformations::EXPAND);
     let mut reader = decoder.read_info().unwrap();
@@ -272,11 +272,12 @@ fn what_cannot_be_drawn_is_refused() {
 }
 
 /// Pictures by source: 0 a checkerboard of the asked grid's own pixels, 1 red, 2 blue at half
-/// alpha, 3 mid grey, 666 an error; every request is kept, and `short` drops a byte.
+/// alpha, 3 mid grey, 4 noise that doesn't compress, 666 an error; every request is kept, and
+/// `short` drops a byte. The SVG tests use it too.
 #[derive(Default)]
-struct Provider {
-    asked: RefCell<Vec<(u64, PixelGrid, GridWindow)>>,
-    short: bool,
+pub(in crate::paper) struct Provider {
+    pub(in crate::paper) asked: RefCell<Vec<(u64, PixelGrid, GridWindow)>>,
+    pub(in crate::paper) short: bool,
 }
 
 impl Pictures for Provider {
@@ -293,6 +294,7 @@ impl Pictures for Provider {
                     0 => [255, 255, 255, 255],
                     1 => [255, 0, 0, 255],
                     2 => [0, 0, 255, 128],
+                    4 => (x.wrapping_mul(2_654_435_761) ^ y.wrapping_mul(40_503)).wrapping_mul(2_246_822_519).to_le_bytes(),
                     _ => [128, 128, 128, 255],
                 });
             }

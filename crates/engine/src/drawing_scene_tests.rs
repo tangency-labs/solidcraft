@@ -2,10 +2,11 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 use solidcraft_doc::MAX_PLACEMENT_DEPTH;
+use solidcraft_doc::drawing::DEFAULT_DPI;
 use solidcraft_doc::drawing::view::{View, ViewKind, ViewPlace};
 use solidcraft_doc::drawing_view::{ViewDirection, ViewOverrides};
 use solidcraft_geom::drawing_view::{NamedView, ProjectedSide};
-use solidcraft_geom::paper::ObjectKind;
+use solidcraft_geom::paper::{NoPictures, ObjectKind};
 
 use super::*;
 use crate::schema::drawing_scene::SheetSceneResult;
@@ -137,7 +138,7 @@ fn a_sheet_is_its_border_then_its_views_by_id() {
     let replied: Vec<(Value, Value)> = reply["views"].as_array().unwrap().iter().map(|v| (v["view"].clone(), v["status"].clone())).collect();
     assert_eq!(replied, order.map(|id| (json!(ids::encode(id)), json!("drawn"))));
 
-    let (svg, _) = solidcraft_io::paper::paper_svg(&scene.prepare().unwrap()).unwrap();
+    let (svg, _) = solidcraft_io::paper::paper_svg(&scene.prepare().unwrap(), &NoPictures, DEFAULT_DPI).unwrap();
     let svg = String::from_utf8(svg).unwrap();
     let borders: Vec<usize> = svg.match_indices("data-kind=\"drawing_border\"").map(|(at, _)| at).collect();
     let first_view = svg.find("data-kind=\"view\"").unwrap();

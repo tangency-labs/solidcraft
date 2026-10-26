@@ -6,7 +6,9 @@
 use std::path::Path;
 
 use serde_json::Value;
+use solidcraft_doc::drawing::DEFAULT_DPI;
 use solidcraft_doc::ids;
+use solidcraft_geom::paper::NoPictures;
 
 use super::CommandSpec;
 use crate::drawing_scene::{Status, sheet_id};
@@ -58,7 +60,8 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(CMD, format!("not written: views on the sheet failed: {}", failed.join(", "))));
     }
     let prepared = built.scene.prepare().map_err(|e| bad(CMD, e.to_string()))?;
-    let (svg, written) = solidcraft_io::paper::paper_svg(&prepared).map_err(|e| bad(CMD, e.to_string()))?;
+    // A drawing's scene holds no pictures yet, so their resolution goes unused until shaded views bring the sheet's own.
+    let (svg, written) = solidcraft_io::paper::paper_svg(&prepared, &NoPictures, DEFAULT_DPI).map_err(|e| bad(CMD, e.to_string()))?;
     let bytes = svg.len();
     let (path, svg) = match request.path {
         Some(path) => {
