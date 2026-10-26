@@ -6785,7 +6785,12 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
         }
         FeatureKind::Shell { faces, thickness, body, direction, tangent_chain } => {
             let t = val(vals, thickness, Kind::Length)?;
-            let i = body_at(st, body, &crate::plain(faces))?;
+            // No face opened (a closed hollow body) picks no body: the one there is, or the named one.
+            let i = match (faces.is_empty(), body, st.bodies.len()) {
+                (true, None, 1) => 0,
+                (true, None, _) => return Err(DocError::Invalid("a shell that opens no face needs the body named".into())),
+                _ => body_at(st, body, &crate::plain(faces))?,
+            };
             let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
             let picks = crate::plain(faces);
             let open = if *tangent_chain {
@@ -6823,7 +6828,9 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                     // The cavity's faces are the shell's inner walls, named after the faces they offset.
                     let inner = mb.before_as(crate::lineage::Operand::Inner(mb.name.clone()));
                     let cavity = if inn > 0.0 { Traced::step(kernel::offset_faces(&mb.body, &walls, -inn)?, &[&inner]) } else { inner };
-                    let cavity = Traced::step(kernel::offset_faces(&cavity.body, &open, 2.0 * t + 1.0)?, &[&cavity]);
+                    // The open faces pushed out of the way (none: the cavity stays sealed inside).
+                    let cavity =
+                        if open.is_empty() { cavity } else { Traced::step(kernel::offset_faces(&cavity.body, &open, 2.0 * t + 1.0)?, &[&cavity]) };
                     let cut = kernel::boolean(&outer.body, &cavity.body, BoolOp::Cut)?
                         .ok_or_else(|| DocError::Invalid("the shell removed everything".into()))?;
                     (cut, vec![outer, cavity])
