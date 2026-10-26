@@ -24,10 +24,11 @@ with persistent settings, Performance/Quality graphics presets (Quality combines
 Git-backed Cloud Saves (#4838) is in progress: portable project snapshots, durable offline
 queues, desktop/browser workers and guided GitHub setup with scoped HTTPS credentials are
 implemented on the feature branch, along with Start-page repository browsing and initial
-save destination selection, Cloud Saves settings and verified native Git connections
+save destination selection, a repository table in Cloud Saves settings and verified native Git connections
 with system, chosen or generated SSH keys. Home restores durable sync status, and
 opened checkout snapshots and optional model previews remain available offline. Competing
-offline captures have an explicit version chooser. Authenticated desktop/browser round
+offline captures have an explicit version chooser. Design management adds rename, recoverable
+Trash, revision history and restore, with durable queued actions. Authenticated desktop/browser round
 trips, offline restart recovery and shared-kit UI interactions are validated. See the
 [implementation guide](cloud-saves.md).
 ## Scope (owner decision, 2026-10-07)

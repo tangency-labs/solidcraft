@@ -22,8 +22,12 @@ impl Host for MockHost {
             Operation::Setup(connection)
             | Operation::Test(connection)
             | Operation::List(connection)
+            | Operation::Trash(connection)
             | Operation::Synchronize(connection)
             | Operation::Thumbnail { connection, .. }
+            | Operation::History { connection, .. }
+            | Operation::Manage { connection, .. }
+            | Operation::Discard { connection, .. }
             | Operation::Open { connection, .. }
             | Operation::Save { connection, .. } => connection.id.clone(),
         };
@@ -66,6 +70,77 @@ fn configured() -> (Session, Arc<MockHost>, Destination) {
         .unwrap();
     let destination = Destination { connection: "github".into(), project: "Robot".into(), file: "parts/bracket".into() };
     (session, host, destination)
+}
+
+#[test]
+fn confirmed_management_updates_only_matching_bindings_and_preserves_edits() {
+    use solidcraft_cloud::management::{Change, Managed};
+    for (dirty, custom_title) in [(false, false), (true, false), (false, true), (true, true)] {
+        let (mut session, host, destination) = configured();
+        if custom_title {
+            session.doc_mut().name = "Custom design title".into();
+        }
+        session.execute("cloud.save", &json!({"destination":destination})).unwrap();
+        host.saved(0);
+        session.poll_cloud().unwrap();
+        let parent = session.cloud_binding().unwrap().revision.clone();
+        session.execute("cloud.rename", &json!({"destination":destination,"revision":parent,"file":"parts/Renamed"})).unwrap();
+        if dirty {
+            session.doc_mut().name = "Keep my unsaved edits".into();
+        }
+        let target = Destination { file: "parts/Renamed".into(), ..destination.clone() };
+        let change = Managed {
+            source: destination.clone(),
+            previous: parent,
+            revision: "a".repeat(64),
+            change: Change::Rename { file: target.file.clone() },
+            destination: target.clone(),
+        };
+        let mut other = Session::default();
+        other.inherit_cloud_services(&session);
+        other.poll_cloud_management(std::slice::from_ref(&change)).unwrap();
+        assert!(other.cloud_binding().is_none());
+        host.job(1)
+            .update(|s| {
+                s.managed.push(change.clone());
+                s.phase = Phase::Synced;
+            })
+            .unwrap();
+        session.poll_cloud().unwrap();
+        assert_eq!(session.cloud_binding().unwrap().destination, target);
+        assert_eq!(session.is_dirty(), dirty);
+        assert_eq!(session.doc.name, if dirty { "Keep my unsaved edits" } else { "Renamed" });
+        let before = session.doc.clone();
+        let deleted =
+            Managed { source: target.clone(), previous: Some("a".repeat(64)), revision: "b".repeat(64), change: Change::Delete, destination: target };
+        session.poll_cloud_management(&[deleted]).unwrap();
+        assert!(session.cloud_binding().is_none());
+        assert!(session.is_dirty(), "an open deleted copy remains recoverable as an unsaved document");
+        assert!(Arc::ptr_eq(&before, &session.doc));
+    }
+}
+
+#[test]
+fn management_commands_validate_paths_revisions_and_repository_websites() {
+    let (mut session, host, destination) = configured();
+    let mut settings = session.cloud_settings().clone();
+    settings.connections[0].repository = "owner/designs".into();
+    session.execute("cloud.configure", &json!({"settings":settings})).unwrap();
+    for (command, params) in [
+        ("cloud.rename", json!({"destination":destination,"revision":null,"file":"../bad"})),
+        ("cloud.restore", json!({"destination":destination,"revision":null,"file":"parts/bracket","commit":"--all"})),
+        ("cloud.discard", json!({"destination":destination,"revision":"not-an-exact-revision"})),
+    ] {
+        assert!(session.execute(command, &params).is_err());
+    }
+    assert!(host.0.lock().unwrap().is_empty());
+    let url = session.execute("cloud.website", &json!({"connection":"github"})).unwrap();
+    assert!(url["url"].as_str().unwrap().starts_with("https://github.com/"));
+    session.execute("cloud.delete", &json!({"destination":destination,"revision":"a".repeat(64)})).unwrap();
+    let jobs = host.0.lock().unwrap();
+    let Operation::Manage { expected_revision, change, .. } = &jobs[0].1 else { panic!("management command") };
+    assert_eq!(expected_revision.as_deref(), Some("a".repeat(64).as_str()));
+    assert!(matches!(change, solidcraft_cloud::management::Change::Delete));
 }
 
 #[test]

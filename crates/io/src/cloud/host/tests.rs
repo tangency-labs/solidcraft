@@ -94,6 +94,213 @@ fn published(job: &Job) -> solidcraft_cloud::jobs::JobStatus {
 }
 
 #[test]
+fn management_renames_trashes_restores_and_resumes_without_touching_other_work() {
+    use solidcraft_cloud::{Destination, management::Change};
+    let fixture = Fixture::new();
+    let connection = fixture.checkout("managed");
+    let host = fixture.host();
+    let destination = Destination { connection: connection.id.clone(), project: "Robot".into(), file: "parts/bracket".into() };
+    let initial = published(
+        &host
+            .submit(
+                Operation::Save {
+                    connection: connection.clone(),
+                    save: Box::new(save(&connection, &destination.file, "Bracket", None)),
+                    synchronize: true,
+                },
+                String::new(),
+            )
+            .unwrap(),
+    );
+    assert_eq!(initial.phase, Phase::Synced);
+    let checkout = Path::new(&connection.checkout);
+    let first_commit = String::from_utf8(Fixture::git(checkout, &["rev-parse", "HEAD"])).unwrap().trim().to_owned();
+    fs::write(checkout.join("staged.txt"), "unrelated staged bytes").unwrap();
+    Fixture::git(checkout, &["add", "staged.txt"]);
+    fs::write(checkout.join("untracked.txt"), "unrelated working bytes").unwrap();
+    let stage = Fixture::git(checkout, &["show", ":staged.txt"]);
+    let mut edited = super::super::prepare_document(&solidcraft_doc::Document::new("Edited bracket")).unwrap();
+    let png = include_bytes!("../../../../../assets/samples/exports/0.png").to_vec();
+    solidcraft_cloud::attach_thumbnail(&mut edited, png.clone()).unwrap();
+    let edited = PendingSave::stage(&connection, "Robot", &destination.file, initial.revision.clone(), edited).unwrap();
+    let second = published(
+        &host.submit(Operation::Save { connection: connection.clone(), save: Box::new(edited), synchronize: true }, String::new()).unwrap(),
+    );
+    assert_eq!(second.phase, Phase::Synced);
+    let renamed = Destination { file: "parts/Renamed bracket".into(), ..destination.clone() };
+    let action = Operation::Manage {
+        connection: connection.clone(),
+        destination: destination.clone(),
+        expected_revision: second.revision.clone(),
+        change: Change::Rename { file: renamed.file.clone() },
+    };
+    let rename = published(&host.submit(action, String::new()).unwrap());
+    assert_eq!(rename.phase, Phase::Synced, "{rename:?}");
+    assert_eq!(rename.managed.len(), 1);
+    let repository = GitRepository::open(connection.clone(), "").unwrap();
+    assert_eq!(repository.list().unwrap(), vec![renamed.clone()]);
+    assert!(repository.list_deleted().unwrap().is_empty(), "a rename is not a deleted design in Trash");
+    assert_eq!(repository.open_design(&renamed).unwrap().0.name, "Renamed bracket");
+    assert_eq!(repository.thumbnail(&renamed).unwrap(), Some(png), "renaming preserves the preview against the new document hash");
+    assert!(fixture.outbox(&connection).cached(&connection, &destination).unwrap().is_none());
+    assert_eq!(Fixture::git(checkout, &["show", ":staged.txt"]), stage);
+    assert_eq!(fs::read_to_string(checkout.join("untracked.txt")).unwrap(), "unrelated working bytes");
+    let stale = complete(
+        &host
+            .submit(
+                Operation::Manage {
+                    connection: connection.clone(),
+                    destination: renamed.clone(),
+                    expected_revision: second.revision,
+                    change: Change::Delete,
+                },
+                String::new(),
+            )
+            .unwrap(),
+    );
+    assert_eq!(stale.phase, Phase::Failed);
+    assert!(fixture.outbox(&connection).pending().unwrap().is_empty());
+    let deleted = published(
+        &host
+            .submit(
+                Operation::Manage {
+                    connection: connection.clone(),
+                    destination: renamed.clone(),
+                    expected_revision: rename.revision,
+                    change: Change::Delete,
+                },
+                String::new(),
+            )
+            .unwrap(),
+    );
+    assert_eq!(deleted.phase, Phase::Synced, "{deleted:?}");
+    assert!(repository.list().unwrap().is_empty());
+    assert_eq!(repository.list_deleted().unwrap(), vec![renamed.clone()]);
+    assert!(repository.open_design(&renamed).is_err());
+    drop(host);
+    let reopened = fixture.host();
+    let trash = complete(&reopened.submit(Operation::Trash(connection.clone()), String::new()).unwrap());
+    assert_eq!(trash.result, Some(serde_json::json!([renamed])));
+    let history =
+        complete(&reopened.submit(Operation::History { connection: connection.clone(), destination: renamed.clone() }, String::new()).unwrap());
+    assert_eq!(history.phase, Phase::Ready);
+    assert!(
+        history.result.as_ref().unwrap()["revisions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["commit"] == first_commit && r["file"] == destination.file)
+    );
+    let restored = published(
+        &reopened
+            .submit(
+                Operation::Manage {
+                    connection: connection.clone(),
+                    destination: renamed.clone(),
+                    expected_revision: deleted.revision,
+                    change: Change::Restore { commit: first_commit, file: destination.file },
+                },
+                String::new(),
+            )
+            .unwrap(),
+    );
+    assert_eq!(restored.phase, Phase::Synced, "{restored:?}");
+    assert_eq!(repository.open_design(&renamed).unwrap().0.name, "Bracket");
+    assert!(repository.list_deleted().unwrap().is_empty());
+    assert_eq!(repository.list().unwrap(), vec![renamed.clone()]);
+    let offline = fixture.0.join("unplugged checkout");
+    fs::rename(checkout, &offline).unwrap();
+    let queued = published(
+        &reopened
+            .submit(
+                Operation::Manage {
+                    connection: connection.clone(),
+                    destination: renamed.clone(),
+                    expected_revision: restored.revision,
+                    change: Change::Delete,
+                },
+                String::new(),
+            )
+            .unwrap(),
+    );
+    assert!(queued.saved_locally);
+    assert_eq!(queued.phase, Phase::SavedLocally);
+    assert_eq!(fixture.outbox(&connection).pending().unwrap().len(), 1);
+    let local_list = complete(&reopened.submit(Operation::List(connection.clone()), String::new()).unwrap());
+    assert_eq!(local_list.result, Some(serde_json::json!([])));
+    drop(reopened);
+    fs::rename(offline, checkout).unwrap();
+    let resumed = published(&fixture.host().submit(Operation::Synchronize(connection.clone()), String::new()).unwrap());
+    assert_eq!(resumed.phase, Phase::Synced, "{resumed:?}");
+    assert!(fixture.outbox(&connection).pending().unwrap().is_empty());
+    assert_eq!(repository.list_deleted().unwrap(), vec![renamed]);
+    assert_eq!(Fixture::git(checkout, &["show", ":staged.txt"]), stage);
+    assert_eq!(fs::read_to_string(checkout.join("untracked.txt")).unwrap(), "unrelated working bytes");
+}
+
+#[test]
+fn queued_management_can_be_discarded_without_losing_the_saved_design() {
+    use solidcraft_cloud::management::Change;
+    let fixture = Fixture::new();
+    let connection = fixture.checkout("discard");
+    let host = fixture.host();
+    let capture = save(&connection, "parts/bracket", "Keep this design", None);
+    let destination = capture.record.destination.clone();
+    let saved = published(
+        &host.submit(Operation::Save { connection: connection.clone(), save: Box::new(capture), synchronize: true }, String::new()).unwrap(),
+    );
+    assert_eq!(saved.phase, Phase::Synced);
+    let checkout = Path::new(&connection.checkout);
+    let occupied = checkout.join("Robot/parts/occupied/document.json");
+    fs::create_dir_all(occupied.parent().unwrap()).unwrap();
+    fs::write(&occupied, super::super::prepare_document(&solidcraft_doc::Document::new("Other document")).unwrap().document).unwrap();
+    Fixture::git(checkout, &["add", "Robot/parts/occupied/document.json"]);
+    Fixture::git(checkout, &["commit", "-m", "Keep an existing document at the target"]);
+    let original = fs::read(&occupied).unwrap();
+    let rename = published(
+        &host
+            .submit(
+                Operation::Manage {
+                    connection: connection.clone(),
+                    destination: destination.clone(),
+                    expected_revision: saved.revision,
+                    change: Change::Rename { file: "parts/occupied".into() },
+                },
+                String::new(),
+            )
+            .unwrap(),
+    );
+    assert_eq!(rename.phase, Phase::SavedLocally, "{rename:?}");
+    assert!(rename.saved_locally && rename.message.is_some());
+    assert_eq!(fs::read(&occupied).unwrap(), original);
+    let revision = rename.revision.unwrap();
+    let discarded = published(
+        &fixture
+            .host()
+            .submit(Operation::Discard { connection: connection.clone(), destination: destination.clone(), revision }, String::new())
+            .unwrap(),
+    );
+    assert_eq!(discarded.phase, Phase::Synced, "{discarded:?}");
+    assert!(fixture.outbox(&connection).pending().unwrap().is_empty());
+    let repo = GitRepository::open(connection.clone(), "").unwrap();
+    assert_eq!(repo.open_design(&destination).unwrap().0.name, "Keep this design");
+    assert_eq!(fs::read(&occupied).unwrap(), original);
+
+    let snapshot = repo.snapshot(&destination).unwrap();
+    let parent = solidcraft_cloud::revision(&snapshot.manifest).map(str::to_owned);
+    let snapshot = super::super::prepare_change(snapshot, &destination, &Change::Delete).unwrap();
+    let staged = PendingSave::stage(&connection, "Robot", &destination.file, parent, snapshot).unwrap();
+    let revision = staged.record.id.clone();
+    fixture.outbox(&connection).stage(&staged).unwrap();
+    repo.publish(&staged.record, fixture.outbox(&connection).recover(&staged.record).unwrap()).unwrap();
+    let rejected = published(&host.submit(Operation::Discard { connection: connection.clone(), destination, revision }, String::new()).unwrap());
+    assert_eq!(rejected.phase, Phase::Failed, "an already published action must be acknowledged, not discarded");
+    assert_eq!(fixture.outbox(&connection).pending().unwrap().len(), 1);
+    assert_eq!(published(&host.submit(Operation::Synchronize(connection.clone()), String::new()).unwrap()).phase, Phase::Synced);
+    assert!(fixture.outbox(&connection).pending().unwrap().is_empty());
+}
+
+#[test]
 fn saving_during_another_synchronization_waits_and_publishes_the_durable_capture() {
     let fixture = Fixture::new();
     let connection = fixture.checkout("overlapping-save");

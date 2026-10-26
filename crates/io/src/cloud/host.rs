@@ -9,6 +9,7 @@ use solidcraft_cloud::{
 };
 
 use super::{GitRepository, LocalOutbox};
+mod management;
 
 pub struct NativeHost {
     root: PathBuf,
@@ -43,6 +44,49 @@ impl NativeHost {
     ) -> Result<()> {
         check_cancelled(job)?;
         match operation {
+            Operation::Discard { connection, destination, revision } => {
+                management::discard(outbox, &connection, &destination, &revision, executable, job, access)?;
+                job.update(|s| {
+                    s.result = Some(serde_json::json!({"discarded":revision}));
+                    s.phase = Phase::Synced;
+                })?;
+            }
+            Operation::Manage { connection, destination, expected_revision, change } => {
+                let save = management::stage(outbox, &connection, &destination, expected_revision, &change, executable, job)?;
+                Self::run(Operation::Save { connection, save: Box::new(save), synchronize: true }, executable, outbox, job, access, root)?;
+            }
+            Operation::Trash(connection) => {
+                let entries = management::trash(outbox, &connection, executable, job)?;
+                job.update(|s| {
+                    s.result = Some(serde_json::json!(entries));
+                    s.phase = Phase::Ready;
+                })?;
+            }
+            Operation::History { connection, destination } => {
+                let mut history =
+                    match GitRepository::open_cancellable(connection.clone(), executable, job.clone()).and_then(|r| r.history(&destination)) {
+                        Ok(result) => result,
+                        Err(error @ Error::Storage(_)) => {
+                            let Some(cached) = outbox.cached(&connection, &destination)? else { return Err(error) };
+                            job.update(|s| s.message = Some(error.to_string()))?;
+                            solidcraft_cloud::management::History {
+                                revision: cached.revision,
+                                revisions: Vec::new(),
+                                queued: false,
+                                deleted: cached.save.manifest.deleted(),
+                            }
+                        }
+                        Err(error) => return Err(error),
+                    };
+                if let Some(pending) = pending_tip(outbox, &connection, &destination)? {
+                    history.queued = pending.manifest.change()?.is_some();
+                    history.revision = Some(pending.id);
+                }
+                job.update(|s| {
+                    s.result = Some(serde_json::json!(history));
+                    s.phase = Phase::Ready;
+                })?;
+            }
             Operation::Thumbnail { connection, destination } => {
                 let png = super::previews::read(connection, destination, executable, outbox, job)?;
                 check_cancelled(job)?;
@@ -100,8 +144,15 @@ impl NativeHost {
                     .get(&format!("documents/{}", save.record.manifest.document_hash))
                     .ok_or_else(|| storage("captured document is missing"))?;
                 super::check_document(document)?;
+                let change = save.record.manifest.change()?;
+                job.update(|status| {
+                    status.destination = Some(save.record.destination.clone());
+                    status.revision = Some(save.record.id.clone());
+                    status.change = change.clone();
+                })?;
                 outbox.stage(&save)?;
                 job.update(|status| {
+                    status.change = change;
                     status.saved_locally = true;
                     status.phase = if synchronize { Phase::Syncing } else { Phase::SavedLocally };
                     status.destination = Some(save.record.destination.clone());
@@ -128,6 +179,8 @@ impl NativeHost {
                         pending.push(save);
                     }
                 }
+                let has_local = !cached.is_empty() || !pending.is_empty();
+                let hidden: Vec<_> = pending.iter().filter(|s| s.manifest.deleted()).map(|s| s.destination.clone()).collect();
                 let mut catalog = solidcraft_cloud::stored_designs(cached, pending)?;
                 let mut destinations = BTreeMap::new();
                 for entry in &catalog {
@@ -149,10 +202,13 @@ impl NativeHost {
                             destinations.insert(destination.design_path()?, destination);
                         }
                     }
-                    Err(error @ Error::Storage(_)) if !destinations.is_empty() => job.update(|status| status.message = Some(error.to_string()))?,
+                    Err(error @ Error::Storage(_)) if has_local => job.update(|status| status.message = Some(error.to_string()))?,
                     Err(error) => return Err(error),
                 }
                 check_cancelled(job)?;
+                for destination in hidden {
+                    destinations.remove(&destination.design_path()?);
+                }
                 let result = serde_json::to_value(destinations.into_values().collect::<Vec<_>>()).map_err(storage)?;
                 job.update(|status| {
                     status.result = Some(result);
@@ -270,8 +326,12 @@ impl NativeHost {
                 });
             match result {
                 Ok(published) => {
+                    let managed = solidcraft_cloud::management::Managed::confirmed(&save, &published)?;
                     let result = serde_json::to_value(&published).map_err(storage)?;
-                    job.update(|status| status.publications.push(published.clone()))?;
+                    job.update(|status| {
+                        status.publications.push(published.clone());
+                        status.managed.extend(managed);
+                    })?;
                     if target.as_ref().is_some_and(|target| target.id == save.id) {
                         // A Save job belongs to this capture alone, never whichever other
                         // queued design happened to finish last during synchronization.
@@ -374,8 +434,12 @@ impl Host for NativeHost {
             Operation::Setup(connection)
             | Operation::Test(connection)
             | Operation::List(connection)
+            | Operation::Trash(connection)
             | Operation::Synchronize(connection)
             | Operation::Thumbnail { connection, .. }
+            | Operation::History { connection, .. }
+            | Operation::Manage { connection, .. }
+            | Operation::Discard { connection, .. }
             | Operation::Open { connection, .. }
             | Operation::Save { connection, .. } => Some(connection),
         };

@@ -6,6 +6,9 @@ use std::collections::BTreeMap;
 use solidcraft_cloud::{Error, Manifest, Result, Snapshot, digest};
 use solidcraft_doc::Document;
 
+mod management;
+pub use management::prepare_change;
+
 #[cfg(not(target_arch = "wasm32"))]
 mod auth;
 #[cfg(not(target_arch = "wasm32"))]
@@ -108,6 +111,9 @@ impl crate::design::package::BlobReader for Assets {
 pub fn open_document(manifest: &Manifest, document: &[u8], read: impl FnMut(&str) -> Result<Vec<u8>>) -> Result<Document> {
     // The envelope takes priority over schema parsing, including on resumed uploads.
     manifest.write()?;
+    if manifest.deleted() {
+        return Err(invalid("this cloud design is in Trash; restore a revision before opening it"));
+    }
     check_document(document)?;
     let mut assets = Assets { blobs: Snapshot::hydrate(manifest, document, read)?, resolved: 0 };
     crate::design::package::decode(document, &mut assets).map_err(invalid)

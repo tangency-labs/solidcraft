@@ -8,6 +8,7 @@ mod configuration;
 #[cfg(feature = "github")]
 pub mod github;
 pub mod jobs;
+pub mod management;
 mod outbox;
 mod project;
 mod publication;

@@ -93,6 +93,14 @@ impl Repository {
         if method == "GET" && path.contains("/git/commits/") {
             return (200, self.commit(&self.commit));
         }
+        if method == "GET" && path.ends_with("/commits") {
+            let mut commit = self.commit(&self.commit);
+            commit["comment_count"] = json!(0);
+            return (
+                200,
+                json!([{"sha":self.commit,"node_id":"commit","url":URL,"html_url":URL,"comments_url":URL,"commit":commit,"author":null,"committer":null,"parents":[]} ]),
+            );
+        }
         if method == "GET" && path.contains("/git/trees/") {
             let mut entries = Vec::new();
             for (path, bytes) in &self.files {
@@ -206,6 +214,65 @@ fn recover(save: &crate::StagedSave) -> Result<Snapshot> {
 fn run_test(future: impl std::future::Future<Output = ()>) {
     let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
     tokio::task::LocalSet::new().block_on(&runtime, future);
+}
+
+#[test]
+fn management_publication_history_and_retry_use_atomic_non_forced_commits() {
+    use crate::management::Change;
+    run_test(async {
+        let repository = repository();
+        let (api, connection) = adapter(repository.clone());
+        let first = stage(&connection, b"{}", None);
+        let source = first.record.destination.clone();
+        let saved = api.publish(&first.record, || recover(&first), |_| Ok(())).await.unwrap();
+        let original = api.open_at(&source, &saved.commit, |_| Ok(())).await.unwrap();
+        let history = api.history(&source, |_| Ok(())).await.unwrap();
+        assert_eq!(history.revisions.len(), 1);
+        assert_eq!(history.revisions[0].commit, saved.commit);
+        let change = Change::Rename { file: "parts/renamed bracket".into() };
+        let mut snapshot = api.open(&source, |_| Ok(())).await.unwrap();
+        snapshot.manifest.set_change(&change).unwrap();
+        let rename = PendingSave::stage(&connection, &source.project, &source.file, Some(saved.revision), snapshot).unwrap();
+        let renamed = api.publish(&rename.record, || recover(&rename), |_| Ok(())).await.unwrap();
+        assert!(!renamed.conflict);
+        assert_eq!(api.list().await.unwrap(), vec![renamed.destination.clone()]);
+        assert!(api.list_deleted().await.unwrap().is_empty());
+        let commits = repository.lock().unwrap().commits;
+        let retry = api.publish(&rename.record, || recover(&rename), |_| Ok(())).await.unwrap();
+        assert_eq!(retry.revision, renamed.revision);
+        assert_eq!(repository.lock().unwrap().commits, commits);
+        let mut snapshot = api.open(&renamed.destination, |_| Ok(())).await.unwrap();
+        snapshot.manifest.set_change(&Change::Delete).unwrap();
+        let delete = PendingSave::stage(&connection, &source.project, &renamed.destination.file, Some(renamed.revision), snapshot).unwrap();
+        let deleted = api.publish(&delete.record, || recover(&delete), |_| Ok(())).await.unwrap();
+        assert!(api.list().await.unwrap().is_empty());
+        assert_eq!(api.list_deleted().await.unwrap(), vec![renamed.destination.clone()]);
+        let mut snapshot = original;
+        snapshot.manifest.set_change(&Change::Restore { commit: saved.commit, file: source.file.clone() }).unwrap();
+        let restore = PendingSave::stage(&connection, &source.project, &renamed.destination.file, Some(deleted.revision), snapshot).unwrap();
+        api.publish(&restore.record, || recover(&restore), |_| Ok(())).await.unwrap();
+        assert!(api.list_deleted().await.unwrap().is_empty());
+        assert_eq!(api.list().await.unwrap(), vec![renamed.destination]);
+    });
+}
+
+#[test]
+fn rename_never_overwrites_an_existing_document_without_a_manifest() {
+    use crate::management::Change;
+    run_test(async {
+        let repository = repository();
+        let (api, connection) = adapter(repository.clone());
+        let first = stage(&connection, b"{}", None);
+        let source = first.record.destination.clone();
+        let saved = api.publish(&first.record, || recover(&first), |_| Ok(())).await.unwrap();
+        repository.lock().unwrap().files.insert("Robot/parts/occupied/document.json".into(), b"{}".to_vec());
+        let mut snapshot = api.open(&source, |_| Ok(())).await.unwrap();
+        snapshot.manifest.set_change(&Change::Rename { file: "parts/occupied".into() }).unwrap();
+        let rename = PendingSave::stage(&connection, &source.project, &source.file, Some(saved.revision), snapshot).unwrap();
+        let commits = repository.lock().unwrap().commits;
+        assert!(matches!(api.publish(&rename.record, || recover(&rename), |_| Ok(())).await, Err(Error::Conflict)));
+        assert_eq!(repository.lock().unwrap().commits, commits);
+    });
 }
 
 #[test]
