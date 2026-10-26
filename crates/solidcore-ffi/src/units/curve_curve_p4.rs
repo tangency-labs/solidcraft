@@ -6,7 +6,8 @@
 //! A curve block is `0 dim oob n p m cpts(x y z w) knots` (an `SmBSplineCurve` built
 //! with `SmBSplineCurve(gw_CURVE*, dim, FALSE)` and `SetOutOfBoundsEnabled(oob)`),
 //! `1 dim P1[3] D1[3] P2[3] D2[3]` (an `SmHermiteCurve`) or `2 3 P[3] V[3] d0 d1 scale io`
-//! (a bounded `SmLine(P, V, [d0, d1], scale, 3, ctx, NULL, io)`). An analytic operand is
+//! (a bounded `SmLine(P, V, [d0, d1], scale, 3, ctx, NULL, io)`), or
+//! `3 3 C[3] X[3] Y[3] d0 d1 rx ry io` (a genuine ownerless `SmEllipse`). An analytic operand is
 //! `0 P V d0 d1 scale io` (a line), `1 C[3] X[3] Y[3] d0 d1 rx ry dim io` (an `SmEllipse` without
 //! source NURB) or `2` and a curve block. Every output starts with the status (`0` =
 //! `SM_SUCCESS`, else the `SmStatus`); the rest:
@@ -205,7 +206,7 @@ fn line(rd: &mut Reader<'_>) -> Result<(f64, f64), FfiError> {
 
 /// A curve block (see the module docs).
 fn curve_block(rd: &mut Reader<'_>) -> Result<CurveInfo, FfiError> {
-    let kind = rd.index(2)?;
+    let kind = rd.index(3)?;
     let dim = rd.index(3)?;
     if dim < 2 {
         return Err(bad("curve block: dimension must be 2 or 3"));
@@ -222,7 +223,7 @@ fn curve_block(rd: &mut Reader<'_>) -> Result<CurveInfo, FfiError> {
             }
             Ok(CurveInfo { a: 0.0, b: 1.0 })
         }
-        _ => {
+        2 => {
             if dim != 3 {
                 return Err(bad("line block: dimension must be 3"));
             }
@@ -232,6 +233,41 @@ fn curve_block(rd: &mut Reader<'_>) -> Result<CurveInfo, FfiError> {
                 a: -MAX_COORD / 8.0,
                 b: MAX_COORD / 8.0,
             })
+        }
+        _ => {
+            if dim != 3 {
+                return Err(bad("ellipse: dimension must be 3"));
+            }
+            // Same geometry predicates and order as the dedicated operand below;
+            // only the ordinary block's dimension precedes its geometry.
+            rd.vec3()?;
+            let x = rd.nonzero3()?;
+            let y = rd.nonzero3()?;
+            let cross = [
+                x[1] * y[2] - x[2] * y[1],
+                x[2] * y[0] - x[0] * y[2],
+                x[0] * y[1] - x[1] * y[0],
+            ];
+            if cross.iter().map(|c| c * c).sum::<f64>() < 1e-12 {
+                return Err(bad("ellipse: parallel axes"));
+            }
+            let d0 = rd.finite()?;
+            let d1 = rd.finite()?;
+            if d0.abs() > 720.0 || d1.abs() > 720.0 {
+                return Err(bad("ellipse: domain end beyond 720 degrees"));
+            }
+            if !(1e-4..=360.0).contains(&(d1 - d0).abs()) {
+                return Err(bad("ellipse: domain length outside [1e-4, 360]"));
+            }
+            for _ in 0..2 {
+                if rd.finite()? <= 1e-6 {
+                    return Err(bad("ellipse: radius not positive"));
+                }
+            }
+            rd.flag()?;
+            // N_CreateEllipticalArcTol constructs normalized [0,1] knots;
+            // the ownerless constructor does not reparameterize them.
+            Ok(CurveInfo { a: 0.0, b: 1.0 })
         }
     }
 }
@@ -483,4 +519,130 @@ pub fn eval(op: Op, input: &[f64]) -> Result<Vec<f64>, FfiError> {
             )
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ellipse_distance_block() -> Vec<f64> {
+        vec![3., 3., 0., 0., 0., 1., 0., 0., 0., 1., 0., 0., 180., 2., 1., 0.]
+    }
+
+    fn ellipse_distance_input(block: &[f64]) -> Vec<f64> {
+        let mut v = block.to_vec();
+        v.extend([0.25, -0.5, 0.25, 1., 0., 0.5, 0.1, 0.2, 0.3, 1.]);
+        v
+    }
+
+    #[test]
+    fn ellipse_distance_generic_positions_and_normalized_range() {
+        let block = ellipse_distance_block();
+        let info = curve_block(&mut Reader::new(&block)).unwrap();
+        assert_eq!((info.a, info.b), (0., 1.));
+        validate(Op::CpDistAt, &ellipse_distance_input(&block)).unwrap();
+        for (op, tail) in [
+            (Op::IsClosed, vec![1., 0., 1., 1e-6]),
+            (Op::IsDegenerate, vec![1., 1e-6, 1., 0., 1.]),
+            (Op::PolarBox, vec![0., 1., 10.]),
+            (Op::Snap, vec![0.5, 1e-6]),
+            (Op::Assert, vec![0., 0.]),
+            (Op::ProjDist, vec![0.5, 0., 0., 0., 0., 0., 1., 0., 1., 0., 0., 0.]),
+            (Op::Property, vec![0., 0., 0., 1., 1., 0., 0., 0., 0.5, 0.]),
+            (Op::Planes, vec![0.]),
+        ] {
+            let mut input = block.clone();
+            input.extend(tail);
+            validate(op, &input).unwrap();
+        }
+        let mut chain = vec![2., 1.];
+        chain.extend_from_slice(&block);
+        chain.push(1.);
+        chain.extend_from_slice(&block);
+        chain.extend([1e-6, 0.]);
+        validate(Op::FixChain, &chain).unwrap();
+        for (op, tail) in [
+            (Op::CcTangent, vec![0.5, 0.5, 1.]),
+            (Op::DistExtrema, vec![0., 1., 1e-6, 0.5]),
+        ] {
+            let mut input = block.clone();
+            input.extend_from_slice(&block);
+            input.extend(tail);
+            validate(op, &input).unwrap();
+        }
+        let mut filter = block.clone();
+        filter.extend([0., 1.]);
+        filter.extend_from_slice(&block);
+        filter.extend([0., 1., 0., 0., 0., 0., 0., 0.5, 0.5, 0.]);
+        validate(Op::Filter, &filter).unwrap();
+        let mut analytic = Vec::new();
+        for _ in 0..2 {
+            analytic.push(2.);
+            analytic.extend_from_slice(&block);
+            analytic.extend([0., 1.]);
+        }
+        analytic.push(1e-6);
+        validate(Op::Analytic, &analytic).unwrap();
+        let mut far = ellipse_distance_input(&block);
+        far[21] = 6.;
+        assert_eq!(validate(Op::CpDistAt, &far).unwrap_err().to_string(),
+            bad("parameter too far outside the curve").to_string());
+    }
+
+    #[test]
+    fn ellipse_distance_rejects_bad_geometry_without_native_execution() {
+        let block = ellipse_distance_block();
+        let full = ellipse_distance_input(&block);
+        for len in 0..full.len() {
+            assert!(validate(Op::CpDistAt, &full[..len]).is_err());
+        }
+        let mut trailing = full;
+        trailing.push(0.);
+        assert!(validate(Op::CpDistAt, &trailing).is_err());
+        for (index, value) in [
+            (0, 4.), (0, -1.), (1, 2.), (1, 4.), (15, 2.),
+            (2, f64::NAN), (3, f64::INFINITY), (4, MAX_COORD * 2.),
+            (5, 0.), (5, MAX_COORD * 2.), (9, 0.),
+            (11, -721.), (12, 721.), (12, 0.00001), (12, 361.),
+            (13, 0.), (14, -1.), (13, 1e-6), (14, f64::NAN), (13, MAX_COORD * 2.),
+        ] {
+            let mut bad_block = block.clone();
+            bad_block[index] = value;
+            assert!(validate(Op::CpDistAt, &ellipse_distance_input(&bad_block)).is_err(),
+                "index {index}, value {value}");
+        }
+        let mut parallel = block;
+        parallel[8..11].copy_from_slice(&[2., 0., 0.]);
+        assert!(validate(Op::CpDistAt, &ellipse_distance_input(&parallel)).is_err());
+    }
+
+    #[test]
+    fn ellipse_distance_old_protocol_and_first_error_controls() {
+        let line = vec![2., 3., 0., 0., 0., 1., 0., 0., 0., 1., 1., 0.];
+        let hermite = vec![1., 3., 0., 0., 0., 1., 0., 0., 1., 0., 0., 1., 0., 0.];
+        let bspline = vec![0., 3., 0., 1., 1., 3., 0., 0., 0., NOW,
+            1., 0., 0., NOW, 0., 0., 1., 1.];
+        for block in [&line, &hermite, &bspline] {
+            validate(Op::CpDistAt, &ellipse_distance_input(block)).unwrap();
+        }
+        for (input, message) in [
+            (vec![2., 1., f64::NAN], "curve block: dimension must be 2 or 3"),
+            (vec![2., 2., f64::NAN], "line block: dimension must be 3"),
+            (vec![0., 3., 0., 0., 0., 0.], "curve: need 1 <= p <= n and m = n + p + 1"),
+        ] {
+            assert_eq!(validate(Op::CpDistAt, &input).unwrap_err().to_string(), bad(message).to_string());
+        }
+        // The dedicated operand still has dimension AFTER the radii.
+        let mut old = vec![1.];
+        old.extend_from_slice(&ellipse_distance_block()[2..15]);
+        old.extend([3., 0., 0., 1.]);
+        let mut rd = Reader::new(&old);
+        operand(&mut rd).unwrap();
+        rd.done().unwrap();
+        old[12] = 0.; // radius error wins over the later invalid dimension/flag
+        old[14] = 2.;
+        old[15] = 2.;
+        assert_eq!(operand(&mut Reader::new(&old)).unwrap_err().to_string(),
+            bad("ellipse: radius not positive").to_string());
+    }
 }

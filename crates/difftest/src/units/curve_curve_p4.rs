@@ -125,6 +125,7 @@ enum CurveIn {
     Hermite(HermiteIn),
     Circle(CircleIn),
     Line(LineIn),
+    Ellipse(EllipseIn),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -304,6 +305,13 @@ fn curve_block(v: &mut Vec<f64>, c: &CurveIn) -> Result<(), HarnessError> {
             push_line(v, l);
         }
         CurveIn::Circle(_) => return Err(harness("unresolved circle")),
+        CurveIn::Ellipse(e) => {
+            v.extend([3.0, 3.0]);
+            v.extend_from_slice(&e.c);
+            v.extend_from_slice(&e.x);
+            v.extend_from_slice(&e.y);
+            v.extend([e.domain[0], e.domain[1], e.radii[0], e.radii[1], b(e.inside_out)]);
+        }
     }
     Ok(())
 }
@@ -571,6 +579,9 @@ fn build(c: &CurveIn) -> Result<Curve, HarnessError> {
         ))),
         CurveIn::Line(l) => Ok(Curve::from(build_line(l))),
         CurveIn::Circle(_) => Err(harness("unresolved circle")),
+        CurveIn::Ellipse(e) => build_ellipse(&Kernel::default(), e)
+            .map(Curve::from)
+            .map_err(|e| harness(format!("ellipse: {e}"))),
     }
 }
 
@@ -1215,7 +1226,9 @@ fn range_of(c: &CurveIn) -> (f64, f64) {
             bs.u.first().copied().unwrap_or(0.0),
             bs.u.last().copied().unwrap_or(1.0),
         ),
-        CurveIn::Hermite(_) => (0.0, 1.0),
+        // Like Hermite curves, ownerless quadratic ellipses use a normalized interval,
+        // not their angular domain (NL_CrvCommon.cpp circle construction).
+        CurveIn::Hermite(_) | CurveIn::Ellipse(_) => (0.0, 1.0),
         CurveIn::Line(l) => {
             let nat = build_line(l).natural_interval();
             (nat.min(), nat.max())
@@ -1692,6 +1705,100 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    fn ellipse_distance_fixture() -> Case {
+        let ctx = CaseContext {
+            root: std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."),
+            seeds: 0,
+        };
+        let cases = ctx.fixture_cases("curve.curve_p4").unwrap();
+        let matching: Vec<_> = cases.into_iter().filter(|c| {
+            matches!(&c.source, crate::case::CaseSource::Fixture { path, .. }
+                if path == "fixtures/curve.curve_p4/analytic-distance.json")
+        }).collect();
+        assert_eq!(matching.len(), 1);
+        assert_eq!(matching[0].name, "ellipse_cp_dist_at_interior_full_jacobian");
+        matching.into_iter().next().unwrap()
+    }
+
+    fn ellipse_distance_relative(a: f64, b: f64) {
+        assert!(a.is_finite() && b.is_finite());
+        assert!((a - b).abs() <= 1e-9 * a.abs().max(b.abs()), "{a:?} != {b:?}");
+    }
+
+    #[test]
+    fn ellipse_distance_fixture_encoding_and_source_controls() {
+        use solidcore::curve::curve::p2::CurveKind;
+        let case = ellipse_distance_fixture();
+        let op: OpIn = case.parse().unwrap();
+        assert_eq!(serde_json::to_value(&op).unwrap(), case.inputs);
+        let (code, input) = cpp_input(&op).unwrap();
+        assert_eq!(code, Op::CpDistAt);
+        assert_eq!(input, vec![3.,3.,0.,0.,0.,1.,0.,0.,0.,1.,0.,0.,180.,2.,1.,0.,
+            0.25,-0.5,0.25,1.,0.,0.5,0.1,0.2,0.3,1.]);
+        ffi::validate(code, &input).unwrap();
+        let OpIn::CpDistAt { curve, p, dsq, sqtol, x, jac } = &op else { panic!("wrong op") };
+        assert!(*jac);
+        let CurveIn::Ellipse(e) = curve else { panic!("not ellipse") };
+        assert_eq!(e.domain, [0.,180.]);
+        assert_eq!(range_of(curve), (0.,1.));
+        let k = Kernel::default();
+        let c = build(curve).unwrap();
+        let CurveKind::Ellipse(actual) = c.kind() else { panic!("lost analytic kind") };
+        assert!(!actual.is_circle());
+        let ivl = c.natural_interval();
+        assert_eq!((ivl.min(),ivl.max()), (0.,1.));
+        assert!(ivl.min() < x[0] && x[0] < ivl.max());
+        let pv = c.evaluate(&k, x[0], 1, true, true).unwrap();
+        let pos = [pv[0].x,pv[0].y,pv[0].z];
+        let tangent = [pv[1].x,pv[1].y,pv[1].z];
+        assert!(pos.iter().chain(&tangent).all(|v| v.is_finite()));
+        assert!(pv[1].length_squared() > 0.);
+        let gap = [pos[0]-p[0],pos[1]-p[1],pos[2]-p[2]];
+        let expected_f = [gap[0]*gap[0]-x[1],gap[1]*gap[1]-x[2],gap[2]*gap[2]-x[3],x[1]+x[2]+x[3]-dsq];
+        let expected_j = [2.*tangent[0]*gap[0],-1.,0.,0.,
+            2.*tangent[1]*gap[1],0.,-1.,0.,2.*tangent[2]*gap[2],0.,0.,-1.,0.,1.,1.,1.];
+        assert_ne!(expected_j[0], 0.);
+        let mut f = [f64::NAN;4];
+        let mut j = Matrix::new(4,4);
+        let found = CpDistAtEnfo::new(&k,&c,v3(*p),*dsq,*sqtol)
+            .evaluate(x,&mut f,Some(&mut j)).unwrap();
+        assert!(!found);
+        for (a,b) in f.into_iter().zip(expected_f) { ellipse_distance_relative(a,b); }
+        for (i,b) in expected_j.into_iter().enumerate() {
+            ellipse_distance_relative(j.at(i/4,i%4).unwrap(),b);
+        }
+        let out = rust(&k,&op).unwrap();
+        assert!(out.deferred.is_none());
+        assert_eq!(out.ints["status"], vec![0]);
+        assert_eq!(out.values["out"].len(),21);
+        for (a,b) in out.values["out"].iter().copied().zip(
+            expected_f.into_iter().chain(expected_j).chain([0.])) {
+            ellipse_distance_relative(a,b);
+        }
+    }
+
+    #[cfg(feature = "cpp")]
+    #[test]
+    fn ellipse_distance_cpp_full_record_and_geometric_perturbation() {
+        let case = ellipse_distance_fixture();
+        let op: OpIn = case.parse().unwrap();
+        let native = cpp(&op).unwrap();
+        let actual = rust(&Kernel::default(),&op).unwrap();
+        for out in [&native,&actual] {
+            assert!(out.deferred.is_none());
+            assert_eq!(out.ints["status"], vec![0]);
+            assert_eq!(out.values["out"].len(),21);
+            assert!(out.values["out"].iter().all(|v| v.is_finite()));
+            assert_ne!(out.values["out"][4],0.);
+            assert_eq!(out.values["out"][20],0.);
+        }
+        assert!(crate::compare::compare(&native,&actual,&[]).pass());
+        let mut changed = native.clone();
+        changed.values.get_mut("out").unwrap()[4] *= 1.01;
+        assert!(!crate::compare::compare(&changed,&actual,&[]).pass());
+        eprintln!("ellipse_distance_native={native:?}; ellipse_distance_rust={actual:?}");
+    }
 
     /// Generated cases cover every op with both successful and failing statuses.
     #[test]

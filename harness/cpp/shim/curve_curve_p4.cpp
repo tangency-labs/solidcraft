@@ -2037,6 +2037,19 @@ SmCurve* read_curve(Rd& rd, const SmContext& ctx)
         bool io = rd.flag();
         return new (ctx) SmLine(p, v, SmExtent1d(d0, d1), scale, 3, &ctx, NULL, io ? TRUE : FALSE);
     }
+    if (kind == 3)
+    {
+        SmPoint3d c = rd.vec();
+        SmVector3d x = rd.vec();
+        SmVector3d y = rd.vec();
+        double d0 = rd.num();
+        double d1 = rd.num();
+        double rx = rd.num();
+        double ry = rd.num();
+        bool io = rd.flag();
+        return new (ctx) SmEllipse(c, x, y, SmExtent1d(d0, d1), rx, ry, dim, &ctx, NULL,
+                                   io ? TRUE : FALSE);
+    }
     SmVector3d p1 = rd.vec();
     SmVector3d d1 = rd.vec();
     SmVector3d p2 = rd.vec();
