@@ -1359,6 +1359,43 @@ pub fn bounded_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: 
     cell_editor_frame(ui, id, value, hint, invalid, limit, EditorSurface::Form, 0.0)
 }
 
+/// Inline validation occupies a reserved slot inside an input; text and row geometry
+/// stay fixed through idle, checking and terminal states. The tooltip is also accessible text.
+pub enum InputStatus<'a> {
+    Checking(&'a str),
+    Valid(&'a str),
+    Warning(&'a str),
+    Invalid(&'a str),
+}
+
+pub fn checked_cell_editor(ui: &mut Ui, id: egui::Id, value: &mut String, hint: &str, limit: usize, status: Option<InputStatus<'_>>) -> Response {
+    let t = Tokens::get();
+    let response = cell_editor_frame(ui, id, value, hint, false, limit, EditorSurface::Form, t.space_16 + t.space_4);
+    let rect = egui::Rect::from_center_size(
+        egui::pos2(response.rect.right() - t.form_inset - t.space_16 / 2.0, response.rect.center().y),
+        vec2(t.space_16, t.space_16),
+    );
+    if let Some(status) = status {
+        let (text, color) = match status {
+            InputStatus::Checking(text) => {
+                egui::Spinner::new().color(t.form_dim).paint_at(ui, rect);
+                (text, None)
+            }
+            InputStatus::Valid(text) => (text, Some(t.form_success)),
+            InputStatus::Warning(text) => (text, Some(t.warning)),
+            InputStatus::Invalid(text) => (text, Some(t.form_error)),
+        };
+        if let Some(color) = color {
+            ui.painter().circle_filled(rect.center(), t.space_3, color);
+        }
+        ui.interact(rect, id.with("status"), egui::Sense::hover())
+            .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, ui.is_enabled(), text));
+        solidcraft_ui_registry::publish_target("dialog:input_status", rect);
+        return response.backing_on_hover_text(text);
+    }
+    response
+}
+
 enum EditorSurface {
     Form,
     Frameless,

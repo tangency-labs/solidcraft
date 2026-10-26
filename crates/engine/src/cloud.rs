@@ -35,6 +35,7 @@ pub(crate) struct State {
     pub configuration: Option<String>,
     pub settings_changed: bool,
     pub ssh_key_input: Option<solidcraft_cloud::jobs::SshKeyInput>,
+    pub repository_check_input: Option<solidcraft_cloud::jobs::RepositoryCheckInput>,
 }
 
 impl State {
@@ -48,6 +49,13 @@ pub(crate) fn error(error: solidcraft_cloud::Error) -> EngineError {
 }
 
 impl Session {
+    /// One-shot setup credential, outside recorded/serializable command parameters.
+    pub fn set_cloud_repository_check_token(&mut self, token: Option<String>) -> Result<()> {
+        self.cloud.repository_check_input = None;
+        self.cloud.repository_check_input = Some(solidcraft_cloud::jobs::RepositoryCheckInput::new(token).map_err(error)?);
+        Ok(())
+    }
+
     /// Supply a passphrase directly, outside the command recorder. The next
     /// cloud.ssh.generate consumes it, including when submission fails.
     pub fn set_cloud_ssh_key_input(&mut self, input: solidcraft_cloud::jobs::SshKeyInput) -> Result<()> {

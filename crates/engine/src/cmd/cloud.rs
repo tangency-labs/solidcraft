@@ -35,7 +35,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("inspect")
         .noundo()
         .doc_only()
-        .params("connection?: saved connection id, or proposed?: connection to verify before configuring; git_executable?: override for this test; returns operation id and verified host metadata"),
+        .params("connection?: saved connection id, or proposed?: connection to verify before configuring; git_executable?: override for this test; metadata_only?: read-only GitHub existence check returning exists, optional unsaved token through Session::set_cloud_repository_check_token; otherwise returns operation id and verified host metadata"),
     CommandSpec::new("cloud.thumbnail", "Load Design Preview", thumbnail)
         .icon("inspect")
         .noundo()
@@ -153,6 +153,13 @@ fn submit(session: &mut Session, operation: Operation) -> Result<Value> {
 }
 
 fn submit_using(session: &mut Session, operation: Operation, executable: String) -> Result<Value> {
+    prune_jobs(session)?;
+    let host = session.cloud.host.as_ref().ok_or_else(|| bad("cloud", "cloud storage is unavailable in this host"))?;
+    let job = host.submit(operation, executable).map_err(error)?;
+    record_job(session, job)
+}
+
+fn prune_jobs(session: &mut Session) -> Result<()> {
     // Retain active saves; bound terminal history to avoid unbounded state on long sessions.
     if session.cloud.jobs.len() >= 128 {
         let removable = session.cloud.jobs.iter().find_map(|(id, job)| {
@@ -179,8 +186,10 @@ fn submit_using(session: &mut Session, operation: Operation, executable: String)
             return Err(bad("cloud", "too many cloud operations; finish or cancel a pending operation"));
         }
     }
-    let host = session.cloud.host.as_ref().ok_or_else(|| bad("cloud", "cloud storage is unavailable in this host"))?;
-    let job = host.submit(operation, executable).map_err(error)?;
+    Ok(())
+}
+
+fn record_job(session: &mut Session, job: solidcraft_cloud::jobs::Job) -> Result<Value> {
     let status = job.status().map_err(error)?;
     session.cloud.jobs.insert(status.operation.clone(), job);
     Ok(json!(status))
@@ -206,9 +215,11 @@ struct Test {
     connection: Option<String>,
     proposed: Option<solidcraft_cloud::Connection>,
     git_executable: Option<String>,
+    metadata_only: bool,
 }
 
 fn test(session: &mut Session, params: &Value) -> Result<Value> {
+    let secret = session.cloud.repository_check_input.take().unwrap_or_default();
     session.poll_cloud()?;
     if session.cloud_configuring() {
         return Err(bad("cloud.test", "connection settings are still being stored or loaded"));
@@ -224,6 +235,16 @@ fn test(session: &mut Session, params: &Value) -> Result<Value> {
         }
         None => session.cloud.settings.destination(input.connection.as_deref()).cloned().map_err(error)?,
     };
+    if input.metadata_only {
+        if candidate.provider != "github" {
+            return Err(bad("cloud.test", "unsupported setup provider"));
+        }
+        solidcraft_cloud::setup::github_repository(&candidate.repository).map_err(error)?;
+        prune_jobs(session)?;
+        let host = session.cloud.host.as_ref().ok_or_else(|| bad("cloud.test", "cloud storage is unavailable"))?;
+        let job = host.check_repository(candidate, secret).map_err(error)?;
+        return record_job(session, job);
+    }
     let executable = input.git_executable.unwrap_or_else(|| session.cloud.settings.git_executable.clone());
     let settings = Settings { git_executable: executable.clone(), ..Default::default() };
     settings.validate().map_err(error)?;

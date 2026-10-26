@@ -100,7 +100,7 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui, wizard: &mut Wizard, e
     ui_kit::text(ui, tr("cloud.ssh_generate_hint"), ui_kit::Text::Hint("cloud_ssh_generate_hint"));
     ui.add_enabled_ui(enabled, |ui| {
         ui_kit::row(ui, tr("cloud.ssh_passphrase"), |ui| {
-            let r = ui_kit::bounded_password_field(ui, egui::Id::new("cloud_ssh_passphrase"), &mut editor.passphrase, "", 1024);
+            let r = ui_kit::bounded_password_field(ui, egui::Id::unique("cloud_ssh_passphrase"), &mut editor.passphrase, "", 1024);
             crate::scenario::publish_target("cloud_git:passphrase", r.rect);
         });
         let r = ui.add_enabled_ui(!editor.passphrase.is_empty(), |ui| ui_kit::checkbox(ui, tr("cloud.ssh_remember"), &mut editor.remember)).inner;

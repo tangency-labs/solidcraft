@@ -203,6 +203,30 @@ fn show_listing(h: &mut Harness, worker: &Worker, destination: &Destination) {
 }
 
 #[test]
+fn home_repository_menu_opens_only_the_selected_setup() {
+    for dark in [false, true] {
+        let (mut h, worker, destination) = setup(dark);
+        show_listing(&mut h, &worker, &destination);
+        h.step(&json!({"click":{"handle":"cloud:add_storage"}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"dialog:list:cloud_provider_git"}})).unwrap();
+        h.frames(2);
+        assert!(h.app.cloud.git_setup.is_some());
+        assert!(!h.app.prefs_window.open);
+        assert!(h.app.cloud.setup.is_none());
+        h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"cloud:add_storage"}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"dialog:list:cloud_provider_github"}})).unwrap();
+        h.frames(2);
+        assert!(h.app.cloud.setup.is_some());
+        assert!(h.app.cloud.git_setup.is_none());
+        assert!(!h.app.prefs_window.open);
+    }
+}
+
+#[test]
 fn home_controls_have_consistent_heights_and_left_alignment() {
     for dark in [false, true] {
         let (mut h, worker, destination) = setup(dark);

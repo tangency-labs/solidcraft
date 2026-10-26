@@ -6881,6 +6881,7 @@ dependencies = [
  "gltf",
  "log",
  "pdf-writer",
+ "percent-encoding",
  "pgp",
  "png",
  "process-wrap",
@@ -6915,6 +6916,7 @@ dependencies = [
  "tiny-skia",
  "trash",
  "unicode-normalization",
+ "url",
  "zeroize",
  "zip",
 ]
@@ -7236,6 +7238,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+ "zeroize",
 ]
 
 [[package]]

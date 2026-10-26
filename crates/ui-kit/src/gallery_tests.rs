@@ -1588,7 +1588,7 @@ pub const ELEMENTS: &[Element] = &[
         password_field(ui, ui.scope_id().with("secret"), &mut s.value, "API key");
     }),
     element!("bounded_password_field", |ui, s| {
-        bounded_password_field(ui, ui.id().with("bounded_secret"), &mut s.value, "Access token", 8192);
+        bounded_password_field(ui, ui.scope_id().with("bounded_secret"), &mut s.value, "Access token", 8192);
     }),
     element!("number_field", |ui, _| {
         number_field(ui, &mut 3_u32, 1..=200, 1.0, "");
@@ -1713,6 +1713,9 @@ pub const ELEMENTS: &[Element] = &[
     }),
     element!("expandable_cell_editor", "gallery:comment", Some("gallery:comment:expand"), |ui, s| {
         expandable_cell_editor(ui, ui.scope_id().with("comment"), &mut s.value, "Comment", "gallery:comment");
+    }),
+    element!("checked_cell_editor", |ui, s| {
+        checked_cell_editor(ui, ui.scope_id().with("checked_cell"), &mut s.value, "Repository", 128, Some(InputStatus::Checking("Testing…")));
     }),
     element!("color_field", |ui, _| {
         color_field(ui, &mut [120, 150, 180]);
