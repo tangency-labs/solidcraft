@@ -996,6 +996,38 @@ mod tests {
         assert!(native_cache::source_trusted("0123abc", false));
     }
 
+    /// The model cache is keyed by the source of the crates a model is computed from (#7168):
+    /// each one `doc` is built from must be in it, or an update that changed one would open
+    /// designs with the model the code before it computed.
+    #[test]
+    fn the_cache_key_covers_every_crate_the_model_is_computed_from() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let read = |p: std::path::PathBuf| std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+        let workspace = read(root.join("Cargo.toml"));
+        // `solidcraft-geom = { path = "crates/geom" }`: a workspace crate's folder.
+        let folder = |name: &str| {
+            let prefix = format!("{name} = {{ path = \"crates/");
+            workspace.lines().find_map(|l| l.strip_prefix(prefix.as_str())?.split('"').next().map(str::to_string))
+        };
+        let keyed: Vec<&str> = env!("SOLIDCRAFT_EVALUATION_CRATES").split(',').collect();
+        let (mut todo, mut seen) = (vec!["doc".to_string()], BTreeSet::new());
+        while let Some(krate) = todo.pop() {
+            if !seen.insert(krate.clone()) {
+                continue;
+            }
+            assert!(keyed.contains(&krate.as_str()), "crates/{krate} computes models: add it to EVALUATION_CRATES in crates/io/build.rs");
+            let mut built_with = false;
+            for line in read(root.join("crates").join(&krate).join("Cargo.toml")).lines() {
+                if line.starts_with('[') {
+                    built_with = line.ends_with("dependencies]") && !line.contains("dev-dependencies");
+                } else if built_with && let Some(dir) = line.split(" = ").next().filter(|n| n.starts_with("solidcraft-")).and_then(folder) {
+                    todo.push(dir);
+                }
+            }
+        }
+        assert_eq!(seen.len(), keyed.len(), "{seen:?} computed from, {keyed:?} keyed");
+    }
+
     #[test]
     fn native_cache_round_trip_and_preview_defer_original_sources() {
         let mut doc = Document::new("Native cache");
@@ -1201,7 +1233,7 @@ mod tests {
         let doc = document();
         let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&native_geometry())).unwrap();
         let original = parts(&bytes);
-        for key in ["format", "producer", "app", "build", "document", "payload"] {
+        for key in ["format", "producer", "evaluation", "document", "payload"] {
             let mut entries = original.clone();
             let mut manifest: Value = serde_json::from_slice(&entries["cache/model.json"]).unwrap();
             manifest[key] = json!("unsupported-or-stale");
@@ -1216,6 +1248,47 @@ mod tests {
         let bytes = package(&entries);
         assert!(read_design_geometry(&bytes).is_none());
         assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
+    }
+
+    /// #7168: a design saved by another version of SolidCraft (another version number and commit)
+    /// whose model was computed by the same evaluation source opens from its model cache, so an
+    /// update that changed only the interface or the commands does not evaluate every design again.
+    /// One computed by other evaluation source (a kernel or codec change) is evaluated again.
+    #[test]
+    fn a_cache_of_another_version_with_the_same_evaluation_source_is_read() {
+        let doc = document();
+        let geometry = native_geometry();
+        let bytes = write_design_container_with_cache(&doc, DesignCompression::Fast, None, Some(&geometry)).unwrap();
+        let written = |entries: &BTreeMap<String, Vec<u8>>| serde_json::from_slice::<Value>(&entries["cache/model.json"]).unwrap();
+        let original = parts(&bytes);
+        let evaluation = written(&original)["evaluation"].as_str().unwrap().to_string();
+        assert!(evaluation.ends_with(&format!("/{}-{}", std::env::consts::ARCH, std::env::consts::OS)), "{evaluation}");
+        let with = |changes: &[(&str, &str)]| {
+            let mut entries = original.clone();
+            let mut manifest = written(&entries);
+            for (key, value) in changes {
+                manifest[*key] = json!(value);
+            }
+            entries.insert("cache/model.json".into(), serde_json::to_vec(&manifest).unwrap());
+            package(&entries)
+        };
+        let older = with(&[("app", "0.0.1"), ("build", "0123456789abcdef0123456789abcdef01234567/other-platform")]);
+        let state = read_design_geometry(&older).expect("another version's cache of the same evaluation source");
+        assert_eq!(state.bodies[0].body.face_count(), geometry.bodies[0].face_count());
+        assert_eq!(crate::read_design(&older).unwrap().to_json(), doc.to_json());
+        // The same version with other evaluation source, or on another platform, evaluates again.
+        let other_source = format!("{}/{}", "0".repeat(64), evaluation.rsplit('/').next().unwrap());
+        for changed in [other_source.as_str(), &format!("{}/other-platform", evaluation.rsplit_once('/').unwrap().0)] {
+            let bytes = with(&[("evaluation", changed)]);
+            assert!(read_design_geometry(&bytes).is_none(), "{changed}");
+            assert_eq!(crate::read_design(&bytes).unwrap().to_json(), doc.to_json());
+        }
+        // An older build's cache (no evaluation source recorded) is evaluated again.
+        let mut entries = original.clone();
+        let mut manifest = written(&entries);
+        manifest.as_object_mut().unwrap().remove("evaluation");
+        entries.insert("cache/model.json".into(), serde_json::to_vec(&manifest).unwrap());
+        assert!(read_design_geometry(&package(&entries)).is_none());
     }
 
     #[test]

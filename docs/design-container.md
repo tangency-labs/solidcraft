@@ -149,12 +149,25 @@ again instead of being meshed on its own.
 
 `cache/model.json` records `solidcraft-model-cache/4`, the producer revision
 `solidcraft-truck-adapter/3`, the application version, the build (source commit,
-CPU architecture and OS), the SHA-256 of the exact `document.json` (whose blob
-references pin every STEP, mesh and image payload) and of `cache/bodies.bin`, the
-slices, each kernel body's slice and display share, and the model's records. A
-cache is read back only when every one of these matches: the same source compiled
-for the same platform computes the same numbers, so another build's cache is a
-miss. A build of unknown source (a tarball without git) never reads a cache.
+CPU architecture and OS), the evaluation source (below, with the CPU architecture
+and OS), the SHA-256 of the exact `document.json` (whose blob references pin every
+STEP, mesh and image payload) and of `cache/bodies.bin`, the slices, each kernel
+body's slice and display share, and the model's records. A cache is read back only
+when the format, the producer, the evaluation source, the platform and both
+digests match: the same source compiled for the same platform computes the same
+numbers. The application version and the commit are recorded, not compared.
+
+The evaluation source (`SOLIDCRAFT_EVALUATION_SOURCE`, `crates/io/build.rs`) is a
+digest of the committed source a model is computed from: the `doc` crate and every
+workspace crate it is built from (a test checks the list against their manifests),
+the patched dependencies in `vendor/` (not the interface's renderer), the locked
+versions of every other dependency, the workspace `Cargo.toml` without the
+application's version, `.cargo/config.toml`, and the cache's own reader. An update
+that changed none of it (the interface, the commands, other file formats, a new
+version number) opens designs from the caches the build before it wrote (#7168);
+one that changed any of it (a kernel fix, the codec, a dependency) evaluates them
+again, once, and the next save writes a cache of its own. A build of unknown source
+(a tarball without git) never reads a cache.
 
 The fixed budgets of earlier caches (4,096 bodies, 100,000 faces, 64 MiB) scale
 with the design now: up to 200,000 body records, 100,000 distinct bodies, a 32 MiB
@@ -203,9 +216,9 @@ only that.
 
 This replaces the earlier rule that a cache never supplies evaluated session
 state. It is safe because the cache is the result of evaluating exactly this
-document with exactly this build: the hashes tie it to the document (and through
-it to every source blob) and to its own payload, the build key to the code that
-computed it, the fingerprints to every feature's inputs, and the exact encoding
+document with exactly this evaluation source: the hashes tie it to the document (and
+through it to every source blob) and to its own payload, the evaluation key to the
+code that computed it, the fingerprints to every feature's inputs, and the exact encoding
 gives back the bodies number for number. Hashes are not trust: a crafted file can
 carry a cache whose geometry disagrees with its timeline, as a crafted STEP file
 can carry any geometry. Every decoded body passes the same structural and resource
