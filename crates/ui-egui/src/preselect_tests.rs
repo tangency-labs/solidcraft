@@ -1585,19 +1585,7 @@ fn modelled_thread_preview_updates_reports_errors_and_cancels_without_changes() 
     designation(&mut h, "M8x1.3");
     wait_feature_preview(&mut h);
     assert_ne!(h.app.preview.key, first_key, "changing pitch updates the preview before OK");
-    // An 8 mm shaft is turned down for an M6.
-    let m8_key = h.app.preview.key;
     designation(&mut h, "M6x1.3");
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
-    while h.app.preview.key == m8_key && std::time::Instant::now() < deadline {
-        h.frames(2);
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    wait_feature_preview(&mut h);
-    assert!(h.app.preview.error.is_none(), "{:?}", h.app.preview.error);
-    assert_eq!(h.app.preview.replaced, ["Body1"]);
-    // A shaft thinner than the thread is still refused.
-    designation(&mut h, "M10x1.5");
     for _ in 0..500 {
         h.frames(2);
         if !h.app.preview.busy && h.app.preview.error.is_some() {
@@ -1607,7 +1595,7 @@ fn modelled_thread_preview_updates_reports_errors_and_cancels_without_changes() 
     }
     assert!(h.app.preview.error.as_deref().is_some_and(|e| e.contains("does not fit")), "{:?}", h.app.preview.error);
     designation(&mut h, "M8x1.3");
-    // The M10 error stays until the new preview starts; wait for it to go, or
+    // The M6 error stays until the new preview starts; wait for it to go, or
     // `wait_feature_preview` would stop at the stale error on a host that schedules the
     // preview a few frames later.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);

@@ -362,66 +362,25 @@ fn modelled_full_length_fine_threads_on_large_shafts() {
     }
 }
 
-/// A modelled thread on a shaft thicker than it turns the shaft down to the major diameter
-/// over the threaded length, then cuts the thread: an M6 over the top 8 mm of an 8 mm shaft
-/// leaves a 6 mm threaded section on an 8 mm stub, its turned face named for later features.
-/// A shaft of the thread's own size is cut as it is.
+/// Issue 2705: an M14 over the top 10 mm of a 14.6 mm boss on a plate. A modelled thread never
+/// changes the size of the shaft it is on (#1018, #2853): it is refused with the size to make
+/// the shaft, and the part is unchanged (tests/kernel-cases/threads/2705).
 #[test]
-fn a_shaft_thicker_than_a_modelled_thread_is_turned_down_to_it() {
-    let (p, len) = (1.0, 8.0);
-    let root = 3.0 - 5.0 * p * 3f64.sqrt() / 16.0;
-    let groove = per_turn(root, 3.0, |r| p / 4.0 + 2.0 * (r - root) * (PI / 6.0).tan()) * len / p;
-    for (shaft, turned) in [(8.0, true), (6.0, false)] {
-        let mut s = Session::default();
-        run(&mut s, "solid.cylinder", json!({"radius": shaft / 2.0, "height": 12, "body_name": "Shaft"}));
-        run(&mut s, "solid.thread", json!({"face": [shaft / 2.0, 0, 11], "designation": "M6", "length": len, "modeled": true}));
-        let ring = PI * (shaft * shaft / 4.0 - 9.0) * len;
-        let want = PI * shaft * shaft / 4.0 * 12.0 - ring - groove;
-        let got = volume(&mut s, "Shaft");
-        assert!((got - want).abs() < groove * 0.03, "M6 on {shaft} mm: {got} mm³, want {want}");
-        let st = s.model.state();
-        let Some(b) = st.body("Shaft") else { panic!("no shaft") };
-        assert!(b.body.validity().is_empty(), "{shaft} mm: {:?}", b.body.validity());
-        // Nothing past the major diameter over the threaded length; the stub keeps its size.
-        let round = |z: f64, r: f64| {
-            (0..24).filter(|i| b.body.contains(Vec3::new(r * (PI * *i as f64 / 12.0).cos(), r * (PI * *i as f64 / 12.0).sin(), z))).count()
-        };
-        assert_eq!(round(8.0, 3.05), 0, "{shaft} mm: the threaded part is turned to 6 mm");
-        assert_eq!(round(2.0, shaft / 2.0 - 0.05), 24, "{shaft} mm: the stub is whole");
-        let names = solidcraft_doc::naming::face_names(b);
-        let fid = s.doc.features.last().map(|f| f.id).unwrap_or(0);
-        let named = |role: &str| names.iter().any(|n| n.starts_with(&format!("F{fid}:{role}")));
-        assert_eq!(named("turned"), turned, "{shaft} mm: {names:?}");
-        assert_eq!(named("shoulder:"), turned, "{shaft} mm: {names:?}");
-    }
-
-    // A 9 mm shaft is close enough to M8 to be offered it; it was refused as too thick (#2688).
-    let mut s = Session::default();
-    run(&mut s, "solid.cylinder", json!({"radius": 4.5, "height": 10, "body_name": "Shaft"}));
-    run(&mut s, "solid.thread", json!({"face": [4.5, 0, 5], "designation": "M8", "modeled": true}));
-    let root = 4.0 - 5.0 * 1.25 * 3f64.sqrt() / 16.0;
-    let groove = per_turn(root, 4.0, |r| 1.25 / 4.0 + 2.0 * (r - root) * (PI / 6.0).tan()) * 10.0 / 1.25;
-    let (want, got) = (PI * 16.0 * 10.0 - groove, volume(&mut s, "Shaft"));
-    assert!((got - want).abs() < groove * 0.03, "M8 on 9 mm: {got} mm³, want {want}");
-}
-
-/// Issue 2705: an M14 over the top 10 mm of a 14.6 mm boss on a plate. Turned to 14 mm first:
-/// 1600 + π 7.3² 15 − π (7.3² − 7²) 10 − 5 turns of 50.189 mm³ (tests/kernel-cases/threads/2705).
-#[test]
-fn an_m14_thread_on_a_14_6_mm_boss_turns_it_to_14_mm() {
+fn an_m14_thread_on_a_14_6_mm_boss_is_refused_with_the_size_to_make_it() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"corner": [-10, -10, 0], "length": 20, "width": 20, "height": 4, "body_name": "Part"}));
     run(&mut s, "solid.cylinder", json!({"radius": 7.3, "height": 15, "base": [0, 0, 4], "operation": "join", "targets": ["Part"]}));
-    run(&mut s, "solid.thread", json!({"face": [7.3, 0, 17], "designation": "M14", "length": 10, "modeled": true}));
-    let got = volume(&mut s, "Part");
-    assert!((got - 3725.5127).abs() < 3725.5127 * 0.01, "{got} mm³");
+    let before = volume(&mut s, "Part");
+    let thread = json!({"face": [7.3, 0, 17], "designation": "M14", "length": 10, "modeled": true});
+    let e = s.execute("solid.thread", &thread).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("this 14.6 mm shaft is too thick for a modelled M14 thread; make the shaft 14 mm for M14"), "{e}");
+    assert!((volume(&mut s, "Part") - before).abs() < 1e-9);
 }
 
-/// A shaft thinner than the thread's minor diameter is still refused, and so is a cosmetic
-/// thread on a shaft thicker than it (a note changes nothing to turn). A shaft the part goes on
-/// round (standing against a wall) is not turned into the wall.
+/// A shaft thinner than the thread's minor diameter is refused, and so is a thread on a shaft
+/// far thicker than it.
 #[test]
-fn a_thin_shaft_or_one_the_part_surrounds_is_refused() {
+fn a_shaft_far_off_the_threads_size_is_refused() {
     let refused = |s: &mut Session, body: &str, p: Value| {
         let before = volume(s, body);
         let e = s.execute("solid.thread", &p).err().map(|e| e.to_string()).unwrap_or_default();
@@ -438,11 +397,8 @@ fn a_thin_shaft_or_one_the_part_surrounds_is_refused() {
     let e = refused(&mut s, "Shaft", json!({"face": [4, 0, 5], "designation": "M6"}));
     assert!(e.contains("an M6 thread does not fit a 8.00 mm shaft"), "{e}");
 
-    let mut s = Session::default();
-    run(&mut s, "solid.box", json!({"corner": [2, -10, 0], "length": 10, "width": 20, "height": 10, "body_name": "Part"}));
-    run(&mut s, "solid.cylinder", json!({"radius": 4, "height": 10, "operation": "join", "targets": ["Part"]}));
-    let e = refused(&mut s, "Part", json!({"face": [-4, 0, 5], "designation": "M6", "modeled": true}));
-    assert!(e.contains("this 8 mm shaft is too thick for a modelled M6 thread") && e.contains("part around it"), "{e}");
+    let e = refused(&mut s, "Shaft", json!({"face": [4, 0, 5], "designation": "M6", "modeled": true}));
+    assert!(e.contains("an M6 thread does not fit a 8.00 mm shaft"), "{e}");
 }
 
 #[test]
@@ -566,9 +522,9 @@ fn a_modelled_thread_that_would_cut_nothing_is_refused() {
 
 /// Issue 2688: an M8 modelled thread in a 6 mm hole (narrower than its 6.65 mm minor diameter)
 /// was refused as "the face is too far from the thread's diameter". It says what is wrong and
-/// what to drill, as a hole that is too wide does. (A shaft too thick is turned down.)
+/// what to drill, as a hole that is too wide does; and the same for a shaft that is too thick.
 #[test]
-fn a_hole_too_narrow_says_so_and_what_fits() {
+fn a_hole_too_narrow_or_a_shaft_too_thick_says_which_and_what_fits() {
     let mut s = hex_nut(6.0);
     let before = volume(&mut s, "Nut");
     let e = s.execute("solid.thread", &json!({"face": [3.0, 0, 2], "designation": "M8", "modeled": true})).err().map(|e| e.to_string());
@@ -576,6 +532,13 @@ fn a_hole_too_narrow_says_so_and_what_fits() {
     assert!(e.contains("this 6 mm hole is too narrow for a modelled M8 thread") && e.contains("drill 6.75 mm for M8"), "{e}");
     assert!(!e.contains("too far"), "{e}");
     assert!((volume(&mut s, "Nut") - before).abs() < 1e-9);
+
+    let mut s = Session::default();
+    // 9 mm is close enough to M8 to be offered it, too thick to cut it.
+    run(&mut s, "solid.cylinder", json!({"radius": 4.5, "height": 10, "body_name": "Shaft"}));
+    let e = s.execute("solid.thread", &json!({"face": [4.5, 0, 5], "designation": "M8", "modeled": true})).err().map(|e| e.to_string());
+    let e = e.unwrap_or_default();
+    assert!(e.contains("this 9 mm shaft is too thick for a modelled M8 thread") && e.contains("make the shaft 8 mm for M8"), "{e}");
 }
 
 /// The limit is a quarter of the basic depth 5H/8: a hole up to 4.78 mm for M5 (4.86 mm for
