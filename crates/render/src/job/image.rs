@@ -426,6 +426,7 @@ impl Projection {
                 Ok(View {
                     vp: camera.view_proj(sw as f64 / sh as f64, radius),
                     back: camera.back(),
+                    light: crate::raster::Light::new(camera.back()),
                     eye: (camera.fov > 0.0).then(|| camera.eye()),
                     reference: camera.target,
                     sw,
@@ -467,7 +468,7 @@ impl Projection {
                 if vp.0.iter().flatten().any(|v| !v.is_finite()) {
                     return Err(request("an orthographic frame too large for its pixel grid"));
                 }
-                Ok(View { vp, back: n, eye: None, reference: o, sw, sh })
+                Ok(View { vp, back: n, light: crate::raster::Light::new(n), eye: None, reference: o, sw, sh })
             }
         }
     }
@@ -552,6 +553,7 @@ struct View {
     vp: Mat4,
     /// Toward the eye (an orthographic view's direction).
     back: Vec3,
+    light: crate::raster::Light,
     /// A perspective view's eye.
     eye: Option<Vec3>,
     /// A point the glass's back-to-front depth is measured from.
@@ -1041,7 +1043,7 @@ impl Raster {
         let clear = self.clear();
         let triangle = self.triangle.as_mut().ok_or_else(|| invalid("missing raster triangle"))?;
         let tile = (cx0, cy0, cx1 - cx0 + 1);
-        raster_pixel(triangle, tile, self.view.back, self.view.eye, self.studio_weights, clear, &mut self.pixels, &mut self.depth)?;
+        raster_pixel(triangle, tile, &self.view, self.studio_weights, clear, &mut self.pixels, &mut self.depth)?;
         triangle.x += 1;
         if triangle.x > triangle.bounds[1] {
             triangle.x = triangle.bounds[0];
@@ -1201,12 +1203,10 @@ impl ImageTask {
 /// Shades and stores one sample: the triangle's at its cursor `(t.x, t.y)`, in a tile whose
 /// canvas starts at whole-canvas sample `(x0, y0)` and is `width` samples wide. A depth-only
 /// triangle in front puts back `clear`, so it hides what was drawn behind it in either order.
-#[allow(clippy::too_many_arguments)]
 fn raster_pixel(
     t: &Triangle,
     (x0, y0, width): (usize, usize, usize),
-    back: Vec3,
-    eye: Option<Vec3>,
+    view: &View,
     studio_weights: Option<[f64; 3]>,
     clear: [u8; 4],
     pixels: &mut [[u8; 4]],
@@ -1253,18 +1253,18 @@ fn raster_pixel(
     let n = t.normals.iter().zip(weights).fold(Vec3::ZERO, |v, (n, w)| v + *n * (w / sum)).normalized().unwrap_or(Vec3::Z);
     let colour = if let Some(surface) = t.surface {
         let world = t.world.iter().zip(weights).fold(Vec3::ZERO, |p, (v, w)| p + *v * (w / sum));
-        let view = eye.map_or(back, |eye| eye - world);
-        let radiance = crate::studio::shade_weighted(surface, n, view, studio_weights.unwrap_or([1.0; 3])).map_err(|e| invalid(&e.to_string()))?;
+        let to_eye = view.eye.map_or(view.back, |eye| eye - world);
+        let radiance = crate::studio::shade_weighted(surface, n, to_eye, studio_weights.unwrap_or([1.0; 3])).map_err(|e| invalid(&e.to_string()))?;
         let mapped = crate::studio::tone_map(radiance).map_err(|e| invalid(&e.to_string()))?;
         [mapped.x, mapped.y, mapped.z]
     } else if let Some(weights) = studio_weights {
         let [r, g, b] = t.colour;
         let surface = crate::surface::OpaqueSurface::new(Vec3::new(r, g, b), 0.0, 1.0, 1.5).map_err(|e| invalid(&e.to_string()))?;
-        let radiance = crate::studio::shade_weighted(surface, n, back, weights).map_err(|e| invalid(&e.to_string()))?;
+        let radiance = crate::studio::shade_weighted(surface, n, view.back, weights).map_err(|e| invalid(&e.to_string()))?;
         let mapped = crate::studio::tone_map(radiance).map_err(|e| invalid(&e.to_string()))?;
         [mapped.x, mapped.y, mapped.z]
     } else {
-        crate::raster::shade(n, back, t.colour)
+        view.light.shade(n, t.colour)
     };
     if colour.iter().any(|v| !v.is_finite()) {
         return Err(invalid("non-finite shaded colour"));
