@@ -3491,10 +3491,10 @@ mod tests {
         use serde_json::json;
         let mut app = crate::SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
         let mut row = hole_preset_row("Fixture");
-        row["thread_options"] = json!({"handedness":"left","full_length":false,"depth":"4 mm"});
+        row["thread_options"] = json!({"full_length":false,"depth":"4 mm"});
         super::set(&mut app, &json!({"hole_presets":[row]})).unwrap();
         let expected = serde_json::to_value(&app.preferences.hole_presets).unwrap();
-        assert_eq!(expected[0]["thread_options"]["handedness"], "left");
+        assert_eq!(expected[0]["thread_options"]["depth"], "4 mm");
         for page in 0..super::PAGES.len() {
             super::reset_preferences(&mut app.preferences, page);
         }

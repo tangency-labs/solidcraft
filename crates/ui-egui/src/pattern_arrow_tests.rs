@@ -173,7 +173,7 @@ fn a_solid_pattern_spacing_arrow_dragged_past_zero_goes_negative() {
     // Applied, the copies sit on the negative side, as a typed negative spacing puts them.
     h.step(&json!({"widget": "OK"})).unwrap();
     assert!(h.app.dialog.is_none(), "{:?}", h.app.status);
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     for (copy, k) in [("Body1 (2)", 1.0), ("Body1 (3)", 2.0)] {
         let x = st.body(copy).unwrap_or_else(|| panic!("no {copy}: {:?}", h.app.status)).mesh().bounds().center().x;
         assert!((x - (5.0 + k * v)).abs() < 1e-6, "{copy} centred at x = {x} for Spacing {spacing}");

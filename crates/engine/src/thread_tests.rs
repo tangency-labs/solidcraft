@@ -150,149 +150,6 @@ fn tapped_thread_depth_rejects_invalid_or_excessive_values_atomically() {
     assert_eq!(s.doc.to_json(), before);
 }
 
-#[test]
-fn thread_handedness_cosmetic_defaults_and_save_reopen_keep_axis_and_extent() {
-    use solidcraft_doc::{Document, FeatureKind, ThreadHandedness};
-    for (hole, designation) in [(false, "M6"), (true, "M6"), (true, "G 1/4"), (true, "1/4-20 UNC")] {
-        let mut reference = None;
-        for hand in [None, Some("right"), Some("left")] {
-            let mut s = Session::default();
-            let (command, mut params) = if hole {
-                run(&mut s, "solid.box", json!({"length":20,"width":20,"height":10}));
-                (
-                    "solid.hole",
-                    json!({"position":[10,10,10],"thread":designation,"depth":6,"thread_depth":3,
-                        "references":[{"edge":[0,10,10],"distance":"7 mm"},{"edge":[10,0,10],"distance":"8 mm"}]}),
-                )
-            } else {
-                run(&mut s, "solid.cylinder", json!({"radius":3,"height":6}));
-                ("solid.thread", json!({"face":[3,0,2],"designation":"M6","length":4}))
-            };
-            if let Some(hand) = hand {
-                params["handedness"] = json!(hand);
-            }
-            run(&mut s, command, params);
-            let expected = if hand == Some("left") { ThreadHandedness::Left } else { ThreadHandedness::Right };
-            let info = s.model.state().threads[0].clone();
-            assert_eq!(info.handedness, expected);
-            if hole {
-                assert!((info.end - info.start - 3.0).abs() < 1e-8, "direction must retain the independent thread depth");
-            }
-            let dimensions = (info.axis_point, info.axis, info.start, info.end, info.major_diameter, info.pitch);
-            assert_eq!(*reference.get_or_insert(dimensions), dimensions, "direction must not change axis, length or size");
-            let mut kind = serde_json::to_value(&s.doc.features.last().unwrap().kind).unwrap();
-            assert_eq!(kind.get("handedness"), (expected == ThreadHandedness::Left).then(|| json!("left")).as_ref());
-            // An old feature with no field still deserializes to Right, for both feature types.
-            kind.as_object_mut().unwrap().remove("handedness");
-            let old: FeatureKind = serde_json::from_value(kind).unwrap();
-            assert!(matches!(
-                old,
-                FeatureKind::Hole { handedness: ThreadHandedness::Right, .. } | FeatureKind::Thread { handedness: ThreadHandedness::Right, .. }
-            ));
-            let reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
-            assert_eq!(reopened.model.state().threads[0], info);
-        }
-    }
-}
-
-#[test]
-fn thread_handedness_invalid_values_fail_without_changing_the_document() {
-    for hole in [false, true] {
-        let mut s = Session::default();
-        run(&mut s, "solid.cylinder", json!({"radius":3,"height":6}));
-        let saved = s.doc.to_json();
-        for hand in [json!("clockwise"), json!("LEFT"), json!(null), json!(true), json!(1)] {
-            let (command, params) = if hole {
-                ("solid.hole", json!({"position":[0,0,6],"thread":"M6","handedness":hand}))
-            } else {
-                ("solid.thread", json!({"face":[3,0,2],"designation":"M6","handedness":hand}))
-            };
-            assert!(s.execute(command, &params).unwrap_err().to_string().contains("handedness"));
-            assert_eq!(s.doc.to_json(), saved);
-        }
-        if hole {
-            assert!(s.execute("solid.hole", &json!({"position":[0,0,6],"diameter":2,"handedness":"left"})).is_err());
-            assert_eq!(s.doc.to_json(), saved);
-        }
-    }
-}
-
-#[test]
-fn thread_handedness_modelled_internal_and_external_keep_chirality_and_bounded_volume() {
-    use solidcraft_doc::Document;
-    for internal in [false, true] {
-        let mut bodies = Vec::new();
-        for hand in ["right", "left"] {
-            let mut s = Session::default();
-            run(&mut s, "solid.cylinder", json!({"radius":if internal {6.0} else {3.0},"height":4,"body_name":"Stock"}));
-            if internal {
-                run(&mut s, "solid.hole", json!({"position":[0,0,4],"diameter":5}));
-            }
-            let face = json!([if internal { 2.5 } else { 3.0 }, 0, 3.5]);
-            run(&mut s, "solid.thread", json!({"face":face,"designation":"M6x1","length":3,"modeled":true,"handedness":hand}));
-            let state = s.model.state();
-            let body = state.body("Stock").unwrap().body.clone();
-            assert!(body.validity().is_empty(), "{internal}/{hand}: {:?}", body.validity());
-            let before = volume(&mut s, "Stock");
-            let mut reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
-            assert!((volume(&mut reopened, "Stock") - before).abs() < 1e-8);
-            let brep_volume = crate::kernel::measure(&body).unwrap().volume;
-            bodies.push((body, before, brep_volume));
-        }
-        let [(right, vr, br), (left, vl, bl)] = bodies.as_slice() else { panic!("two directions") };
-        eprintln!("handedness internal={internal}: mesh_mm3={vr}/{vl}, brep_mm3={br}/{bl}");
-        for body in [right, left] {
-            let mesh = body.tessellate(0.001).unwrap();
-            let low = mesh.positions.iter().map(|p| p.z).fold(f64::INFINITY, f64::min);
-            let high = mesh.positions.iter().map(|p| p.z).fold(f64::NEG_INFINITY, f64::max);
-            assert!(low.abs() < 1e-8 && (high - 4.0).abs() < 1e-8, "physical axial bounds: {low}/{high}");
-            for z in [0.25, 1.5, 2.5, 3.75] {
-                assert_eq!(body.contains(Vec3::new(0.0, 0.0, z)), !internal, "axis stays solid in a shaft and open in a bore");
-                if internal {
-                    for i in 0..24 {
-                        let a = 2.0 * PI * i as f64 / 24.0;
-                        assert!(body.contains(Vec3::new(4.5 * a.cos(), 4.5 * a.sin(), z)), "the outer wall remains whole");
-                    }
-                }
-            }
-        }
-        let radius = if internal { 2.75 } else { 2.65 };
-        let mut different = 0;
-        for z in [0.4, 1.1, 1.4, 1.8, 2.2, 2.6, 3.1, 3.5] {
-            for i in 0..24 {
-                let angle = 2.0 * PI * (i as f64 + 0.17) / 24.0;
-                let p = Vec3::new(radius * angle.cos(), radius * angle.sin(), z);
-                let reflected = Vec3::new(-p.x, p.y, p.z);
-                assert_eq!(right.contains(p), left.contains(reflected), "actual mirrored helix: {internal} at {p:?}");
-                different += usize::from(right.contains(p) != left.contains(p));
-                if z < 1.0 {
-                    assert!(right.contains(p), "the 3 mm thread must leave the lower stub unchanged");
-                }
-            }
-        }
-        assert!(different > 20, "Left must change real geometry, not just metadata: {internal}: {different}");
-        // The sweep itself is an exact reflection (doc test). The existing Boolean first
-        // facets the curved stock within pitch * .005 mm. A nominal stock-faceting
-        // regression envelope uses radial annuli [r-d, r+d], with flat caps unchanged:
-        // pi*h*((r+d)^2-(r-d)^2) = 4*pi*h*r*d, summed over the outer and bore cylinders.
-        // Exact-set cutting would not enlarge the stock's symmetric difference. The BSP
-        // and rebuild also use numerical epsilons, so this conservative secondary ceiling
-        // is not a rigorous bound on every Boolean error, nor a precision/equal-volume proof.
-        let delta = 1.0 * 0.005;
-        let radii = if internal { 6.0 + 2.5 } else { 3.0 };
-        let budget = 4.0 * PI * 4.0 * radii * delta;
-        eprintln!(
-            "handedness internal={internal}: post_boolean_delta_mm3={}, stock_faceting_budget_mm3={budget}, relative_delta={}",
-            (br - bl).abs(),
-            (br - bl).abs() / br
-        );
-        assert!(
-            (br - bl).abs() <= budget,
-            "post-Boolean volume exceeds the configured stock faceting envelope: {internal}: {br}/{bl}, budget {budget}"
-        );
-    }
-}
-
 /// Keep the original 48-station reproduction of the shell error even though new fine
 /// threads now use more stations. The same cut polygons must rebuild as a closed solid.
 #[test]
@@ -362,66 +219,25 @@ fn modelled_full_length_fine_threads_on_large_shafts() {
     }
 }
 
-/// A modelled thread on a shaft thicker than it turns the shaft down to the major diameter
-/// over the threaded length, then cuts the thread: an M6 over the top 8 mm of an 8 mm shaft
-/// leaves a 6 mm threaded section on an 8 mm stub, its turned face named for later features.
-/// A shaft of the thread's own size is cut as it is.
+/// Issue 2705: an M14 over the top 10 mm of a 14.6 mm boss on a plate. A modelled thread never
+/// changes the size of the shaft it is on (#1018, #2853): it is refused with the size to make
+/// the shaft, and the part is unchanged (tests/kernel-cases/threads/2705).
 #[test]
-fn a_shaft_thicker_than_a_modelled_thread_is_turned_down_to_it() {
-    let (p, len) = (1.0, 8.0);
-    let root = 3.0 - 5.0 * p * 3f64.sqrt() / 16.0;
-    let groove = per_turn(root, 3.0, |r| p / 4.0 + 2.0 * (r - root) * (PI / 6.0).tan()) * len / p;
-    for (shaft, turned) in [(8.0, true), (6.0, false)] {
-        let mut s = Session::default();
-        run(&mut s, "solid.cylinder", json!({"radius": shaft / 2.0, "height": 12, "body_name": "Shaft"}));
-        run(&mut s, "solid.thread", json!({"face": [shaft / 2.0, 0, 11], "designation": "M6", "length": len, "modeled": true}));
-        let ring = PI * (shaft * shaft / 4.0 - 9.0) * len;
-        let want = PI * shaft * shaft / 4.0 * 12.0 - ring - groove;
-        let got = volume(&mut s, "Shaft");
-        assert!((got - want).abs() < groove * 0.03, "M6 on {shaft} mm: {got} mm³, want {want}");
-        let st = s.model.state();
-        let Some(b) = st.body("Shaft") else { panic!("no shaft") };
-        assert!(b.body.validity().is_empty(), "{shaft} mm: {:?}", b.body.validity());
-        // Nothing past the major diameter over the threaded length; the stub keeps its size.
-        let round = |z: f64, r: f64| {
-            (0..24).filter(|i| b.body.contains(Vec3::new(r * (PI * *i as f64 / 12.0).cos(), r * (PI * *i as f64 / 12.0).sin(), z))).count()
-        };
-        assert_eq!(round(8.0, 3.05), 0, "{shaft} mm: the threaded part is turned to 6 mm");
-        assert_eq!(round(2.0, shaft / 2.0 - 0.05), 24, "{shaft} mm: the stub is whole");
-        let names = solidcraft_doc::naming::face_names(b);
-        let fid = s.doc.features.last().map(|f| f.id).unwrap_or(0);
-        let named = |role: &str| names.iter().any(|n| n.starts_with(&format!("F{fid}:{role}")));
-        assert_eq!(named("turned"), turned, "{shaft} mm: {names:?}");
-        assert_eq!(named("shoulder:"), turned, "{shaft} mm: {names:?}");
-    }
-
-    // A 9 mm shaft is close enough to M8 to be offered it; it was refused as too thick (#2688).
-    let mut s = Session::default();
-    run(&mut s, "solid.cylinder", json!({"radius": 4.5, "height": 10, "body_name": "Shaft"}));
-    run(&mut s, "solid.thread", json!({"face": [4.5, 0, 5], "designation": "M8", "modeled": true}));
-    let root = 4.0 - 5.0 * 1.25 * 3f64.sqrt() / 16.0;
-    let groove = per_turn(root, 4.0, |r| 1.25 / 4.0 + 2.0 * (r - root) * (PI / 6.0).tan()) * 10.0 / 1.25;
-    let (want, got) = (PI * 16.0 * 10.0 - groove, volume(&mut s, "Shaft"));
-    assert!((got - want).abs() < groove * 0.03, "M8 on 9 mm: {got} mm³, want {want}");
-}
-
-/// Issue 2705: an M14 over the top 10 mm of a 14.6 mm boss on a plate. Turned to 14 mm first:
-/// 1600 + π 7.3² 15 − π (7.3² − 7²) 10 − 5 turns of 50.189 mm³ (tests/kernel-cases/threads/2705).
-#[test]
-fn an_m14_thread_on_a_14_6_mm_boss_turns_it_to_14_mm() {
+fn an_m14_thread_on_a_14_6_mm_boss_is_refused_with_the_size_to_make_it() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"corner": [-10, -10, 0], "length": 20, "width": 20, "height": 4, "body_name": "Part"}));
     run(&mut s, "solid.cylinder", json!({"radius": 7.3, "height": 15, "base": [0, 0, 4], "operation": "join", "targets": ["Part"]}));
-    run(&mut s, "solid.thread", json!({"face": [7.3, 0, 17], "designation": "M14", "length": 10, "modeled": true}));
-    let got = volume(&mut s, "Part");
-    assert!((got - 3725.5127).abs() < 3725.5127 * 0.01, "{got} mm³");
+    let before = volume(&mut s, "Part");
+    let thread = json!({"face": [7.3, 0, 17], "designation": "M14", "length": 10, "modeled": true});
+    let e = s.execute("solid.thread", &thread).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(e.contains("this 14.6 mm shaft is too thick for a modelled M14 thread; make the shaft 14 mm for M14"), "{e}");
+    assert!((volume(&mut s, "Part") - before).abs() < 1e-9);
 }
 
-/// A shaft thinner than the thread's minor diameter is still refused, and so is a cosmetic
-/// thread on a shaft thicker than it (a note changes nothing to turn). A shaft the part goes on
-/// round (standing against a wall) is not turned into the wall.
+/// A shaft thinner than the thread's minor diameter is refused, and so is a thread on a shaft
+/// far thicker than it.
 #[test]
-fn a_thin_shaft_or_one_the_part_surrounds_is_refused() {
+fn a_shaft_far_off_the_threads_size_is_refused() {
     let refused = |s: &mut Session, body: &str, p: Value| {
         let before = volume(s, body);
         let e = s.execute("solid.thread", &p).err().map(|e| e.to_string()).unwrap_or_default();
@@ -438,11 +254,8 @@ fn a_thin_shaft_or_one_the_part_surrounds_is_refused() {
     let e = refused(&mut s, "Shaft", json!({"face": [4, 0, 5], "designation": "M6"}));
     assert!(e.contains("an M6 thread does not fit a 8.00 mm shaft"), "{e}");
 
-    let mut s = Session::default();
-    run(&mut s, "solid.box", json!({"corner": [2, -10, 0], "length": 10, "width": 20, "height": 10, "body_name": "Part"}));
-    run(&mut s, "solid.cylinder", json!({"radius": 4, "height": 10, "operation": "join", "targets": ["Part"]}));
-    let e = refused(&mut s, "Part", json!({"face": [-4, 0, 5], "designation": "M6", "modeled": true}));
-    assert!(e.contains("this 8 mm shaft is too thick for a modelled M6 thread") && e.contains("part around it"), "{e}");
+    let e = refused(&mut s, "Shaft", json!({"face": [4, 0, 5], "designation": "M6", "modeled": true}));
+    assert!(e.contains("an M6 thread does not fit a 8.00 mm shaft"), "{e}");
 }
 
 #[test]
@@ -566,9 +379,9 @@ fn a_modelled_thread_that_would_cut_nothing_is_refused() {
 
 /// Issue 2688: an M8 modelled thread in a 6 mm hole (narrower than its 6.65 mm minor diameter)
 /// was refused as "the face is too far from the thread's diameter". It says what is wrong and
-/// what to drill, as a hole that is too wide does. (A shaft too thick is turned down.)
+/// what to drill, as a hole that is too wide does; and the same for a shaft that is too thick.
 #[test]
-fn a_hole_too_narrow_says_so_and_what_fits() {
+fn a_hole_too_narrow_or_a_shaft_too_thick_says_which_and_what_fits() {
     let mut s = hex_nut(6.0);
     let before = volume(&mut s, "Nut");
     let e = s.execute("solid.thread", &json!({"face": [3.0, 0, 2], "designation": "M8", "modeled": true})).err().map(|e| e.to_string());
@@ -576,6 +389,13 @@ fn a_hole_too_narrow_says_so_and_what_fits() {
     assert!(e.contains("this 6 mm hole is too narrow for a modelled M8 thread") && e.contains("drill 6.75 mm for M8"), "{e}");
     assert!(!e.contains("too far"), "{e}");
     assert!((volume(&mut s, "Nut") - before).abs() < 1e-9);
+
+    let mut s = Session::default();
+    // 9 mm is close enough to M8 to be offered it, too thick to cut it.
+    run(&mut s, "solid.cylinder", json!({"radius": 4.5, "height": 10, "body_name": "Shaft"}));
+    let e = s.execute("solid.thread", &json!({"face": [4.5, 0, 5], "designation": "M8", "modeled": true})).err().map(|e| e.to_string());
+    let e = e.unwrap_or_default();
+    assert!(e.contains("this 9 mm shaft is too thick for a modelled M8 thread") && e.contains("make the shaft 8 mm for M8"), "{e}");
 }
 
 /// The limit is a quarter of the basic depth 5H/8: a hole up to 4.78 mm for M5 (4.86 mm for

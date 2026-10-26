@@ -7,8 +7,8 @@
 use serde_json::{Value, json};
 use solidcraft_engine::doc::thread_forms::{SteepFlank, ThreadForm, ThreadHand, ThreadTip};
 use solidcraft_engine::doc::{
-    Document, Expr, FeatureKind, TappedThreadFamily, ThreadHandedness, ThreadLimit, ThreadRunout, metric_thread_sizes, parse_metric_thread,
-    parse_tapped_thread, tapped_thread_sizes,
+    Document, Expr, FeatureKind, TappedThreadFamily, ThreadLimit, ThreadRunout, metric_thread_sizes, parse_metric_thread, parse_tapped_thread,
+    tapped_thread_sizes,
 };
 use solidcraft_engine::{Sel, Session};
 
@@ -154,14 +154,6 @@ pub(crate) fn hole_rows(ui: &mut egui::Ui, doc: &Document, designation: &mut Str
         }
     });
     enter || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
-}
-
-pub(crate) fn handedness_row(ui: &mut egui::Ui, handedness: &mut ThreadHandedness, id: &str) {
-    let mut selected = usize::from(*handedness == ThreadHandedness::Left);
-    form_row(ui, "thread.direction", |ui| {
-        combo(ui, id, &["thread.right_hand", "thread.left_hand"], &mut selected);
-    });
-    *handedness = if selected == 1 { ThreadHandedness::Left } else { ThreadHandedness::Right };
 }
 
 /// The forms offered. The square thread is left out: no standard defines it, and the command

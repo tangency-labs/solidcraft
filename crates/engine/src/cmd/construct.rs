@@ -97,7 +97,7 @@ pub(super) fn model_axis_param(s: &Session, v: Option<&Value>, cmd: &str) -> Res
     let saved = |v: &Value| matches!(v.get("type").and_then(Value::as_str), Some("edge" | "face"));
     let Some(v) = v.filter(|v| v.get("edge").is_some() || v.get("face").is_some() || saved(v)) else { return Ok(None) };
     let g = geo(s, Some(v), cmd, "axis")?;
-    let (o, d) = solidcraft_doc::construct::model_axis(&s.world_state(), &g).map_err(|e| bad(cmd, format!("`axis`: {e}")))?;
+    let (o, d) = solidcraft_doc::construct::model_axis(&*s.world_state()?, &g).map_err(|e| bad(cmd, format!("`axis`: {e}")))?;
     Ok(Some((g, o, d)))
 }
 

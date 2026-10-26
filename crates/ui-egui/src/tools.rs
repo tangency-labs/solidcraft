@@ -268,7 +268,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                 let params = match first {
                     None => Some(json!({"line": id})),
                     Some(point) => {
-                        let state = app.session.world_state();
+                        let state = crate::open_meshing::session_world(&app.session);
                         app.session.active_sketch.and_then(|sid| state.sketch(sid)).and_then(|ss| point_line_alignment(&ss.sketch, &point, id))
                     }
                 };

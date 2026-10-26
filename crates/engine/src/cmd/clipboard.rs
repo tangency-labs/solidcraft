@@ -263,7 +263,7 @@ mod tests {
         let r = run(&mut s, "timeline.paste", json!({"component": a, "component_path": [at]}));
         assert_eq!(r["errors"].as_array().map(Vec::len), Some(0), "{r}");
         assert_eq!(r["pasted"][0]["name"], "S (2)");
-        let world = s.world_state();
+        let world = s.world_state().unwrap();
         let (original, copy) = (world.body("Block").unwrap().mesh().bounds(), world.body("Block (2)").unwrap().mesh().bounds());
         assert!(copy.min.dist(original.min) < 1e-6 && copy.max.dist(original.max) < 1e-6, "{original:?} vs {copy:?}");
         let state = s.model.state();

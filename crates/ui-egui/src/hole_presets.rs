@@ -35,7 +35,6 @@ enum Extent {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 struct ThreadOptions {
-    handedness: String,
     full_length: bool,
     depth: Option<String>,
     #[serde(flatten)]
@@ -44,7 +43,7 @@ struct ThreadOptions {
 
 impl Default for ThreadOptions {
     fn default() -> Self {
-        Self { handedness: "right".into(), full_length: true, depth: None, unknown: BTreeMap::new() }
+        Self { full_length: true, depth: None, unknown: BTreeMap::new() }
     }
 }
 
@@ -106,7 +105,6 @@ impl Preset {
             }
         }
         if required.into_iter().any(|text| text.trim().is_empty())
-            || !["right", "left"].contains(&self.thread_options.handedness.as_str())
             || self.thread_options.depth.as_ref().is_some_and(|text| !valid_text(text, MAX_EXPRESSION))
             || self.thread_options.unknown.len() > 8
             || self.thread_options.unknown.iter().any(|(key, value)| {
@@ -185,7 +183,6 @@ impl Preset {
             thread: opts.thread.clone(),
             thread_options: if opts.tapped {
                 ThreadOptions {
-                    handedness: if opts.handedness.is_right() { "right".into() } else { "left".into() },
                     full_length: opts.thread_full_depth,
                     depth: if opts.thread_full_depth { None } else { Some(portable_length(&opts.thread_depth, true)?) },
                     unknown: BTreeMap::new(),
@@ -264,11 +261,6 @@ impl Preset {
         opts.tapped = self.tapped;
         opts.thread.clone_from(&self.thread);
         opts.custom_thread = None;
-        opts.handedness = if self.thread_options.handedness == "left" {
-            solidcraft_engine::doc::ThreadHandedness::Left
-        } else {
-            solidcraft_engine::doc::ThreadHandedness::Right
-        };
         opts.thread_full_depth = self.thread_options.full_length;
         opts.thread_depth = self.thread_options.depth.clone().unwrap_or_else(|| crate::dialogs::HoleOpts::default().thread_depth);
         // Existing placement picks stay with this dialog. To Object stores its mode only:

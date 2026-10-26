@@ -1310,58 +1310,6 @@ fn thread_size_suggestion_can_be_cleared_and_edited_in_the_dialog() {
 }
 
 #[test]
-fn thread_handedness_choices_create_edit_and_restore_the_saved_direction() {
-    use solidcraft_engine::doc::{FeatureKind, ThreadHandedness};
-    let mut h = crate::scenario::Harness::new();
-    h.app.run("solid.cylinder", json!({"radius":3,"height":6})).unwrap();
-    h.app.session.selection = vec![thread_face(&h.app, "Body1")];
-    h.step(&json!({"start":"solid.thread"})).unwrap();
-    h.frames(2);
-    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, crate::dialogs::Kind::Thread { handedness: ThreadHandedness::Right, .. }));
-    h.step(&json!({"click":{"handle":"dialog:thread.direction"}})).unwrap();
-    h.step(&json!({"click":{"handle":"dialog:thread.direction:thread.left_hand"}})).unwrap();
-    let command = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
-    assert_eq!(command[0].1["handedness"], "left");
-    h.step(&json!({"widget":"OK"})).unwrap();
-    let id = h.app.session.doc.features.last().unwrap().id;
-    h.call("ui.editFeature", json!({"feature":id}));
-    h.frames(2);
-    assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, crate::dialogs::Kind::Thread { handedness: ThreadHandedness::Left, .. }));
-    h.step(&json!({"click":{"handle":"dialog:thread.direction"}})).unwrap();
-    h.step(&json!({"click":{"handle":"dialog:thread.direction:thread.right_hand"}})).unwrap();
-    h.step(&json!({"widget":"OK"})).unwrap();
-    assert!(matches!(&h.app.session.doc.feature(id).unwrap().kind, FeatureKind::Thread { handedness: ThreadHandedness::Right, .. }));
-    assert_eq!(h.app.session.model.state().threads[0].handedness, ThreadHandedness::Right);
-}
-
-#[test]
-fn thread_handedness_tapped_hole_edit_retains_and_changes_direction() {
-    use solidcraft_engine::doc::{FeatureKind, ThreadHandedness};
-    let mut h = crate::scenario::Harness::new();
-    h.app.run("solid.box", json!({"length":20,"width":20,"height":10})).unwrap();
-    let id =
-        h.app.run("solid.hole", json!({"position":[10,10,10],"thread":"M6","depth":6,"thread_depth":"3 mm","handedness":"left"})).unwrap()["feature"]
-            .as_u64()
-            .unwrap();
-    h.call("ui.editFeature", json!({"feature":id}));
-    h.frames(2);
-    assert!(
-        matches!(&h.app.dialog.as_ref().unwrap().kind, crate::dialogs::Kind::Hole { opts, .. } if opts.handedness == ThreadHandedness::Left && !opts.thread_full_depth && opts.thread_depth == "3 mm")
-    );
-    h.step(&json!({"click":{"handle":"dialog:thread.direction"}})).unwrap();
-    h.step(&json!({"click":{"handle":"dialog:thread.direction:thread.right_hand"}})).unwrap();
-    let command = crate::dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
-    assert_eq!(command[0].0, "timeline.redefine");
-    assert_eq!(command[0].1["command"], "solid.hole");
-    assert_eq!(command[0].1["params"]["thread_depth"], "3 mm", "editing direction must retain the independent thread depth");
-    h.step(&json!({"widget":"OK"})).unwrap();
-    assert!(matches!(&h.app.session.doc.feature(id).unwrap().kind, FeatureKind::Hole { handedness: ThreadHandedness::Right, .. }));
-    let state = h.app.session.model.state();
-    assert_eq!(state.threads[0].handedness, ThreadHandedness::Right);
-    assert!((state.threads[0].end - state.threads[0].start - 3.0).abs() < 1e-8);
-}
-
-#[test]
 fn modeled_thread_survives_timeline_double_click_and_ok() {
     for (analytic_pick, change_length) in [(false, false), (false, true), (true, false), (true, true)] {
         let mut h = crate::scenario::Harness::new();
@@ -1585,19 +1533,7 @@ fn modelled_thread_preview_updates_reports_errors_and_cancels_without_changes() 
     designation(&mut h, "M8x1.3");
     wait_feature_preview(&mut h);
     assert_ne!(h.app.preview.key, first_key, "changing pitch updates the preview before OK");
-    // An 8 mm shaft is turned down for an M6.
-    let m8_key = h.app.preview.key;
     designation(&mut h, "M6x1.3");
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
-    while h.app.preview.key == m8_key && std::time::Instant::now() < deadline {
-        h.frames(2);
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    wait_feature_preview(&mut h);
-    assert!(h.app.preview.error.is_none(), "{:?}", h.app.preview.error);
-    assert_eq!(h.app.preview.replaced, ["Body1"]);
-    // A shaft thinner than the thread is still refused.
-    designation(&mut h, "M10x1.5");
     for _ in 0..500 {
         h.frames(2);
         if !h.app.preview.busy && h.app.preview.error.is_some() {
@@ -1607,7 +1543,7 @@ fn modelled_thread_preview_updates_reports_errors_and_cancels_without_changes() 
     }
     assert!(h.app.preview.error.as_deref().is_some_and(|e| e.contains("does not fit")), "{:?}", h.app.preview.error);
     designation(&mut h, "M8x1.3");
-    // The M10 error stays until the new preview starts; wait for it to go, or
+    // The M6 error stays until the new preview starts; wait for it to go, or
     // `wait_feature_preview` would stop at the stale error on a host that schedules the
     // preview a few frames later.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);

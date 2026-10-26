@@ -10,9 +10,7 @@ use serde_json::{Value, json};
 use solidcraft_engine::Sel;
 use solidcraft_engine::Session;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
-use solidcraft_engine::doc::{
-    AxisRef, Direction, FeatureKind, FilletStyle, HoleKind, Operation, PatternKind, PlaneRef, ProfileSel, ThinSide, ThreadHandedness,
-};
+use solidcraft_engine::doc::{AxisRef, Direction, FeatureKind, FilletStyle, HoleKind, Operation, PatternKind, PlaneRef, ProfileSel, ThinSide};
 use solidcraft_engine::geom::{Aabb3, Vec3};
 
 use crate::SolveApp;
@@ -240,7 +238,6 @@ crate::dialog_descriptor::dialog_descriptors! {
             Thread {
                 designation: String,
                 length: String,
-                handedness: ThreadHandedness,
                 /// The last automatic size; a different value is a manual override. Keep automatic
                 /// features automatic when applying, even though their resolved size is visible.
                 suggested: Option<String>,
@@ -418,7 +415,6 @@ pub struct HoleOpts {
     /// Use the full useful cylindrical wall, independently of the drill extents.
     pub thread_full_depth: bool,
     pub thread_depth: String,
-    pub handedness: ThreadHandedness,
 }
 
 impl Default for HoleOpts {
@@ -434,7 +430,6 @@ impl Default for HoleOpts {
             refs: Default::default(),
             thread_full_depth: true,
             thread_depth: "10 mm".into(),
-            handedness: ThreadHandedness::Right,
         }
     }
 }
@@ -621,7 +616,7 @@ fn start_applying(
             if watching.is_cancelled() {
                 return Err("feature computation cancelled".into());
             }
-            prepared.warm_display(quality, || !watching.is_cancelled());
+            prepared.warm_display(quality, || !watching.is_cancelled()).map_err(|e| e.to_string())?;
             if watching.is_cancelled() {
                 return Err("feature computation cancelled".into());
             }
@@ -1960,7 +1955,7 @@ pub fn planar_face(s: &Session, body: &str, face: usize) -> Option<(Vec3, Vec3)>
 /// The fillet or chamfer feature whose blend a body face is (a piece or copy of one too).
 pub fn blend_feature(s: &Session, body: &str, face: usize) -> Option<u64> {
     use solidcraft_engine::doc::persistent_name;
-    let st = s.world_state();
+    let st = crate::open_meshing::session_world(s);
     let b = st.body(body)?;
     let names = solidcraft_engine::doc::naming::face_names(b);
     let name = names.get(face).filter(|n| persistent_name::is_blend(n))?;
@@ -4408,9 +4403,6 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     if !opts.thread_full_depth {
                         params["thread_depth"] = json!(opts.thread_depth.trim());
                     }
-                    if !opts.handedness.is_right() {
-                        params["handedness"] = json!(opts.handedness);
-                    }
                 }
                 match *kind {
                     1 => {
@@ -4680,7 +4672,7 @@ pub fn axis_of(app: &SolveApp, sel: &Sel) -> Option<(Vec3, Vec3)> {
 /// (centre, unit normal, radius). A round edge stands for its circle wherever a 3D pick wants
 /// an axis (through the centre, along the normal) or a point (the centre).
 pub(crate) fn edge_circle(s: &Session, body: &str, index: usize) -> Option<(Vec3, Vec3, f64)> {
-    edge_circle_in(&s.world_state(), body, index)
+    edge_circle_in(&crate::open_meshing::session_world(s), body, index)
 }
 
 /// [`edge_circle`] in a given model state (a dialog editing a feature looks at the model before it).
@@ -4700,7 +4692,7 @@ pub(crate) fn round_axis(s: &Session, sel: &Sel) -> Option<(Vec3, Vec3)> {
     let (o, d) = match sel {
         Sel::Edge { body, index, .. } => edge_circle(s, body, *index).map(|(c, n, _)| (c, n))?,
         Sel::Face { body, index, .. } => {
-            let st = s.world_state();
+            let st = crate::open_meshing::session_world(s);
             let b = st.body(body)?;
             match kernel::guard("axis of a face", || Ok(kernel::face_surface(&b.body, *index))).ok().flatten()? {
                 FaceSurface::Cylinder { origin, axis, .. } => (origin, *axis),
@@ -4728,7 +4720,7 @@ fn round_axis_ref(app: &SolveApp, sel: &Sel) -> Option<Value> {
 
 fn is_straight_edge(s: &Session, sel: &Sel) -> bool {
     let Sel::Edge { body, index, .. } = sel else { return false };
-    let Some(b) = s.world_state().body(body).cloned() else { return false };
+    let Some(b) = crate::open_meshing::session_world(s).body(body).cloned() else { return false };
     let m = b.mesh();
     let Some(e) = m.edges.get(*index) else { return false };
     let (Some(a), Some(z)) = (e.first().copied(), e.last().copied()) else { return false };
@@ -5035,7 +5027,7 @@ fn point_sel(s: &Session, g: &solidcraft_engine::doc::construct::GeoRef) -> Opti
 /// face where it is now.
 pub(crate) fn model_axis_sel(s: &Session, g: &solidcraft_engine::doc::construct::GeoRef) -> Option<Sel> {
     use solidcraft_engine::doc::construct::GeoRef;
-    let at = g.picked_point(&s.world_state())?;
+    let at = g.picked_point(&crate::open_meshing::session_world(s))?;
     match g {
         GeoRef::Edge { .. } => edge_sel(s, at),
         GeoRef::Face { .. } => face_sel(s, at),
@@ -5315,7 +5307,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d.extra.insert("pull".into(), pt3(pull.0));
             d
         }
-        FeatureKind::Hole { position, at, direction, diameter, depth, hole, points, thread, thread_depth, handedness, to, references } => {
+        FeatureKind::Hole { position, at, direction, diameter, depth, hole, points, thread, thread_depth, to, references } => {
             let mut d = start("solid.hole")?;
             let mut k = hole_defaults(s);
             if let Kind::Hole { diameter: dia, depth: dep, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } = &mut k {
@@ -5323,7 +5315,6 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 opts.all = depth.is_none();
                 opts.angled = matches!(hole, HoleKind::Drilled { .. });
                 opts.multiple = points.as_ref().is_some_and(|sp| !sp.single);
-                opts.handedness = *handedness;
                 if let Some(th) = thread {
                     opts.tapped = true;
                     opts.thread = th.clone();

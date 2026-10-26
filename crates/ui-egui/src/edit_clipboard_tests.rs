@@ -641,7 +641,7 @@ fn a_second_placements_body_copies_but_is_not_cut() {
     select(&mut app, json!({"type": "body", "name": seen}));
     assert!(super::copy(&mut app));
     assert!(super::paste(&mut app, None), "{:?}", app.status);
-    let world = app.session.world_state();
+    let world = app.session.world_state().unwrap();
     let (there, copy) = (world.body(&seen).unwrap().mesh().bounds(), world.body("Cube (2)").expect("the copy").mesh().bounds());
     assert!(there.min.dist(copy.min) < 1e-6 && there.max.dist(copy.max) < 1e-6, "{there:?} vs {copy:?}");
 }
