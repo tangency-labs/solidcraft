@@ -32,6 +32,68 @@ pub struct ShortcutBox {
     design: Option<(u64, Vec<DesignRow>)>,
     /// Retained paint content while closing; the public query still clears immediately.
     closing_text: String,
+    /// The pointer moved while the box was open: only then does a hovered result reveal its
+    /// place, not when the results appear under a resting pointer.
+    moved: bool,
+    /// The command whose place the ribbon shows (#7287).
+    pub reveal: Option<Reveal>,
+}
+
+/// A command the ribbon points out: its button pulses, or its section's drop-down opens on its
+/// row with its tooltip, or (once started) its section label pulses.
+#[derive(Clone, Debug)]
+pub struct Reveal {
+    pub id: &'static str,
+    /// When it started (egui input time, seconds).
+    pub since: f64,
+    /// Shown while a search result is hovered; then the drop-down and tooltip stay open, and
+    /// the ribbon goes back to `back` when the pointer leaves the results.
+    pub preview: bool,
+    /// The tab to return to after a preview.
+    pub back: String,
+}
+
+/// How long a reveal pulses, in seconds: two blinks.
+pub const REVEAL_PULSE: f64 = 1.2;
+
+impl Reveal {
+    /// The pulse's strength at `now`: 0 to 1 and back twice over `REVEAL_PULSE`, then 1 for a
+    /// preview (it stays marked while hovered) and 0 for a started command. Without animations
+    /// a preview is marked steadily and a start isn't pulsed.
+    pub fn strength(&self, now: f64, animate: bool) -> f32 {
+        let t = now - self.since;
+        if !animate || !(0.0..REVEAL_PULSE).contains(&t) {
+            return if self.preview { 1.0 } else { 0.0 };
+        }
+        (0.5 - 0.5 * (t / REVEAL_PULSE * 4.0 * std::f64::consts::PI).cos()) as f32
+    }
+}
+
+/// Shows the hovered result's place in the ribbon (#7287): its tab, then its button or its
+/// section drop-down row. `None` ends a preview and goes back to the tab the user was on.
+fn preview(app: &mut SolveApp, now: f64, id: Option<&'static str>) {
+    let Some(id) = id else {
+        end_preview(app);
+        return;
+    };
+    if app.sbox.reveal.as_ref().is_some_and(|r| r.preview && r.id == id) {
+        return;
+    }
+    let back = match app.sbox.reveal.take() {
+        Some(r) if r.preview => r.back,
+        _ => app.ui.tab.clone(),
+    };
+    app.ui.tab = back.clone();
+    if let Some(tab) = crate::workspace::command_tab(app, id) {
+        app.ui.tab = tab.into();
+    }
+    app.sbox.reveal = Some(Reveal { id, since: now, preview: true, back });
+}
+
+fn end_preview(app: &mut SolveApp) {
+    if let Some(r) = app.sbox.reveal.take_if(|r| r.preview) {
+        app.ui.tab = r.back;
+    }
 }
 
 impl ShortcutBox {
@@ -278,6 +340,7 @@ pub fn open(app: &mut SolveApp, at: Option<Pos2>) {
     app.sbox.text.clear();
     app.sbox.focus = true;
     app.sbox.design = None;
+    app.sbox.moved = false;
 }
 
 /// A line typed as `command.id {"param": value}`: the command runs at once with those parameters
@@ -296,6 +359,7 @@ fn run_typed(app: &mut SolveApp, line: &str) {
 }
 
 fn close(app: &mut SolveApp) {
+    end_preview(app);
     app.ui.palette_open = false;
     app.sbox.at = None;
     app.sbox.text.clear();
@@ -356,6 +420,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     });
     let mut picked = None;
     let mut menu = None;
+    // The command result under the pointer, when it has a place on the ribbon to show.
+    let mut hovered = None;
+    let now = ctx.input(|i| i.time);
+    if open && ctx.input(|i| i.pointer.delta() != egui::Vec2::ZERO) {
+        app.sbox.moved = true;
+    }
     let mut rows = Vec::new();
     let mut design = Vec::new();
     let mut mode = None;
@@ -492,11 +562,15 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                         item.shortcut = &shortcut;
                                         let path = place.map_or_else(|| id.to_string(), |(tab, panel)| format!("{tab} › {panel}"));
                                         let response = item.search_row(ui, &query, &path, None);
+                                        crate::scenario::publish_target(&format!("search:command:{id}"), response.rect);
                                         if item.highlighted && (up || down) {
                                             ui.scroll_to_rect(response.rect, None);
                                         }
                                         if response.clicked() {
                                             picked = Some(index);
+                                        }
+                                        if response.hovered() && place.is_some() {
+                                            hovered = Some(*id);
                                         }
                                         if response.secondary_clicked() {
                                             menu = Some((response.rect.left_bottom(), (*id).to_owned()));
@@ -557,6 +631,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if !open {
         return;
     }
+    preview(app, now, hovered.filter(|_| app.sbox.moved && menu.is_none()));
+    if app.sbox.reveal.is_some() {
+        ctx.request_repaint();
+    }
     app.sbox.text = query;
     app.sbox.closing_text = app.sbox.text.clone();
     if let Some((at, id)) = menu {
@@ -595,6 +673,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 app.sbox.used(id);
                 close(app);
                 app.start(id);
+                // The ribbon shows where it was started from: its button or section label pulses.
+                app.sbox.reveal = Some(Reveal { id, since: now, preview: false, back: String::new() });
             } else if let Some(row) = design.get(index.saturating_sub(rows.len())).filter(|_| index >= rows.len()) {
                 let target = row.target.clone();
                 close(app);
@@ -658,6 +738,92 @@ mod tests {
         frame(&mut app, &ctx);
         frame(&mut app, &ctx);
         assert!(ctx.memory(|m| m.has_focus(field)), "reopening the box focuses the field again");
+    }
+
+    #[test]
+    fn a_reveal_pulses_twice_then_stays_for_a_preview_and_ends_for_a_start() {
+        let preview = Reveal { id: "surface.stitch", since: 10.0, preview: true, back: "MODEL".into() };
+        let start = Reveal { preview: false, ..preview.clone() };
+        for r in [&preview, &start] {
+            assert_eq!(r.strength(10.0, true), 0.0);
+            assert!((r.strength(10.0 + REVEAL_PULSE / 4.0, true) - 1.0).abs() < 1e-6, "the first blink");
+            assert!(r.strength(10.0 + REVEAL_PULSE / 2.0, true) < 1e-6, "dark between the blinks");
+        }
+        assert_eq!(preview.strength(12.0, true), 1.0, "a hovered result stays marked");
+        assert_eq!(start.strength(12.0, true), 0.0, "a started command's pulse ends");
+        // Without animations: marked steadily while hovered, no pulse after a start.
+        assert_eq!(preview.strength(10.2, false), 1.0);
+        assert_eq!(start.strength(10.2, false), 0.0);
+    }
+
+    /// Hovering a result shows where its command lives (#7287): the ribbon switches to its tab
+    /// and marks its button with its tooltip, or opens the section drop-down that holds it on
+    /// its row; leaving the results goes back to the tab the user was on. Starting a command
+    /// that lives only in a drop-down marks that section's label while it runs.
+    #[test]
+    fn hovering_a_result_reveals_its_place_in_the_ribbon() {
+        use crate::scenario::rect_of;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.frames(3);
+        assert_eq!(h.app.ui.tab, "MODEL");
+        let away = rect_of("toolbar").unwrap().center_bottom() + vec2(0.0, 300.0);
+        h.call("ui.move", json!({"x": away.x, "y": away.y}));
+        h.call("ui.palette", json!({}));
+        h.frames(10);
+        let hover = |h: &mut crate::scenario::Harness, id: &str| {
+            let row = rect_of(&format!("search:command:{id}")).unwrap_or_else(|| panic!("no result row for {id}"));
+            h.call("ui.move", json!({"x": row.center().x, "y": row.center().y + 1.0}));
+            h.call("ui.move", json!({"x": row.center().x, "y": row.center().y}));
+            h.frames(3);
+        };
+
+        // Results appearing under a resting pointer reveal nothing: the box opens again with
+        // the pointer already where the row will be.
+        h.app.sbox.text = "stitch".into();
+        h.frames(2);
+        let row = rect_of("search:command:surface.stitch").unwrap();
+        h.call("ui.key", json!({"key": "Escape"}));
+        h.frames(10);
+        h.call("ui.move", json!({"x": row.center().x, "y": row.center().y}));
+        h.frames(2);
+        h.call("ui.palette", json!({}));
+        h.app.sbox.text = "stitch".into();
+        h.frames(10);
+        assert!(h.app.sbox.reveal.is_none() && h.app.ui.tab == "MODEL", "{:?}", h.app.sbox.reveal);
+
+        // A visible button: its tab, the button marked, its tooltip open.
+        hover(&mut h, "surface.stitch");
+        assert_eq!(h.app.ui.tab, "SURFACE");
+        assert_eq!(rect_of("ribbon:reveal"), rect_of("button:surface.stitch"));
+        assert!(rect_of("ribbon:reveal_tooltip").is_some());
+        h.call("ui.move", json!({"x": away.x, "y": away.y}));
+        h.frames(2);
+        assert_eq!(h.app.ui.tab, "MODEL", "leaving the results goes back");
+        assert!(rect_of("ribbon:reveal").is_none());
+
+        // Only in its section's drop-down: the drop-down opens on its row.
+        h.app.sbox.text = "circular".into();
+        h.frames(2);
+        hover(&mut h, "solid.pattern.circular");
+        assert_eq!(h.app.ui.tab, "MODEL");
+        assert!(rect_of("button:solid.pattern.circular").is_none(), "the command has no button on the default ribbon");
+        let row = rect_of("ribbon:reveal").expect("the revealed row");
+        assert!(rect_of("toolbar_dropdown").unwrap().contains_rect(row), "{row:?}");
+        assert!(rect_of("ribbon:reveal_tooltip").is_some_and(|tip| tip.left() >= row.right()), "the row's tooltip beside it");
+        assert_eq!(h.ctx.data(|d| d.get_temp::<egui::Id>(egui::Id::new("sc_panel_open"))), None, "the preview doesn't open it for good");
+
+        // Starting it from the box: the section label pulses, then stays marked while it runs.
+        h.call("ui.key", json!({"key": "Enter"}));
+        h.frames(2);
+        assert!(!h.app.ui.palette_open);
+        assert!(rect_of("toolbar_dropdown").is_none(), "the preview's drop-down closes");
+        let label = rect_of("ribbon:section:MODEL:ARRANGE").unwrap();
+        assert_eq!(rect_of("ribbon:reveal"), Some(label));
+        assert_eq!(rect_of("ribbon:running_section:MODEL:ARRANGE"), Some(label));
+        h.frames((REVEAL_PULSE * 60.0) as usize + 2);
+        assert!(rect_of("ribbon:reveal").is_none(), "the pulse ends");
+        assert_eq!(rect_of("ribbon:running_section:MODEL:ARRANGE"), Some(label), "marked while it runs");
     }
 
     #[test]

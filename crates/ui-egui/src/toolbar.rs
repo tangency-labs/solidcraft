@@ -1339,6 +1339,14 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             (None, Some(_)) => app.last_command.as_ref().map(|(id, _)| id.clone()),
             _ => None,
         };
+        // The command the search points out (#7287): a preview while a result is hovered, or the
+        // short pulse after starting one.
+        let now = ui.input(|i| i.time);
+        let reveal = app.sbox.reveal.clone().filter(|r| r.preview || now - r.since < crate::shortcut_box::REVEAL_PULSE);
+        let pulse = reveal.as_ref().map_or(0.0, |r| r.strength(now, ui.ctx().global_style().animation_time > 0.0));
+        if reveal.is_some() {
+            ui.ctx().request_repaint();
+        }
         let mut px = ribbon_left;
         let top = r.top() + TAB_ROW_HEIGHT;
         let mut drop: Option<(&'static str, &'static str, Option<&'static str>)> = None;
@@ -1529,6 +1537,16 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 } else if resp.hovered() && info.enabled {
                     painter.rect_filled(whole, t.radius_sm, t.hover);
                 }
+                let revealed = reveal.as_ref().filter(|r| r.id == c.id || r.id == selected.id || family.is_some_and(|f| f.commands.contains(&r.id)));
+                if revealed.is_some() {
+                    paint_reveal(&painter, whole, &accent, pulse, true);
+                    crate::scenario::publish_rect("ribbon:reveal", whole);
+                }
+                if let Some(r) = revealed.filter(|r| r.preview)
+                    && let Some(command) = solidcraft_engine::find_command(r.id)
+                {
+                    reveal_tooltip(app, ui, whole, command, egui::RectAlign::BOTTOM_START);
+                }
                 let icon = if selected.id == "sketch.finish" { "finish" } else { info.icon };
                 let side = if finish { 30.0 } else { 26.0 };
                 let icon_rect =
@@ -1610,6 +1628,13 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                         ),
                         egui::StrokeKind::Inside,
                     );
+                    if let Some(r) = reveal.as_ref().filter(|r| r.id == c.id) {
+                        paint_reveal(&painter, cell, &accent, pulse, true);
+                        crate::scenario::publish_rect("ribbon:reveal", cell);
+                        if r.preview {
+                            reveal_tooltip(app, ui, cell, c, egui::RectAlign::BOTTOM_START);
+                        }
+                    }
                     icons::paint_icon(
                         &painter,
                         Rect::from_center_size(cell.center(), vec2(15.0, 15.0)),
@@ -1647,13 +1672,32 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
             let lresp = ui.interact(lr, ui.id().with(("panel", panel)), Sense::click());
             crate::scenario::publish_handle(&format!("panel:{tab}:{panel}"), lr.center());
             crate::scenario::publish_target(&format!("ribbon:section:{tab}:{panel}"), lr);
+            // Commands this panel has only in its drop-down (not drawn as a button or cell).
+            let drawn_ids: Vec<&str> = large
+                .iter()
+                .take(drawn)
+                .flat_map(|c| crate::sketch_families::family(c.id).filter(|_| sketch_create).map_or_else(|| vec![c.id], |f| f.commands.to_vec()))
+                .chain(gallery.iter().filter(|_| !collapsed && drawn > large.len()).map(|c| c.id))
+                .collect();
+            let hidden = |id: &str| cmds.iter().any(|c| c.id == id) && !drawn_ids.contains(&id);
+            let hidden_running = running.as_deref().is_some_and(hidden);
+            let hidden_reveal = reveal.as_ref().filter(|r| hidden(r.id));
             let panel_open = ui.ctx().data(|d| d.get_temp::<egui::Id>(egui::Id::new("sc_panel_open"))) == Some(popup_id);
             let accent = crate::theme::TabAccent::for_tab(&t, &tab);
             let hot = lresp.hovered() && enabled_panel;
-            if panel_open || hot {
+            if hidden_running && !panel_open {
+                // Its command is running from the drop-down: the label shows it like a pressed button.
+                painter.rect(lr, t.radius_sm, accent.soft, Stroke::new(1.0, accent.color), egui::StrokeKind::Inside);
+                crate::scenario::publish_rect(&format!("ribbon:running_section:{tab}:{panel}"), lr);
+            } else if panel_open || hot {
                 painter.rect_filled(lr, t.radius_sm, if panel_open { accent.soft } else { t.hover });
             }
+            if hidden_reveal.is_some_and(|r| !r.preview) {
+                paint_reveal(&painter, lr, &accent, pulse, true);
+                crate::scenario::publish_rect("ribbon:reveal", lr);
+            }
             let label = if finish { app.tr("ui.ribbon_exit").to_string() } else { ribbon_label(app, panel) };
+            let panel_open = panel_open || hidden_running;
             let font = if panel_open || hot {
                 crate::fonts::semibold(crate::theme::Tokens::get().font_caption)
             } else {
@@ -1696,11 +1740,15 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
             let open = ui.ctx().data(|d| d.get_temp::<egui::Id>(egui::Id::new("sc_panel_open"))) == Some(popup_id);
-            if open {
+            // A hovered search result in this drop-down opens it on its row, under the search sheet.
+            let previewed = hidden_reveal.is_some_and(|r| r.preview && !open);
+            if open || previewed {
                 let cmds = if collapsed || trimmed { menu_commands(&cmds, &shown) } else { cmds.clone() };
-                let area = Container::new(ui.ctx(), Surface::Popup).area(popup_id).fixed_pos(lr.left_bottom()).order(egui::Order::Foreground).show(
-                    ui.ctx(),
-                    |ui| {
+                let area = Container::new(ui.ctx(), Surface::Popup)
+                    .area(popup_id)
+                    .fixed_pos(lr.left_bottom())
+                    .order(if open { egui::Order::Foreground } else { egui::Order::Middle })
+                    .show(ui.ctx(), |ui| {
                         crate::ui_kit::Menu::show_frame(ui, crate::ui_kit::Menu::frame(), |ui| {
                             ui.spacing_mut().item_spacing.y = 0.0;
                             ui.set_min_width(200.0);
@@ -1752,7 +1800,8 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                                         section_heading(ui, heading, row_w);
                                     }
                                     let pinned = crate::toolbar_custom::pinned_on(app, &tab, c.id).is_some();
-                                    match dropdown_row(app, ui, c, row_w, pinned) {
+                                    let revealed = reveal.as_ref().is_some_and(|r| r.id == c.id);
+                                    match dropdown_row(app, ui, c, row_w, pinned, revealed.then_some(pulse)) {
                                         RowAction::None => {}
                                         RowAction::Menu(at) => menu = Some((at, c.id)),
                                         RowAction::TogglePin => toggle = Some(c.id),
@@ -1765,13 +1814,15 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                             });
                             section_footer(ui);
                         });
-                    },
-                );
+                    });
                 popup_rect = Some(area.response.rect);
                 crate::scenario::publish_rect("toolbar_dropdown", area.response.rect);
                 // A drag out of the drop-down ends with a release elsewhere: not a click elsewhere.
                 let dragging = egui::DragAndDrop::has_payload_of_type::<ToolbarDrag>(ui.ctx());
-                if (area.response.clicked_elsewhere() && !lresp.clicked() && !opened && !dragging) || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                if open
+                    && ((area.response.clicked_elsewhere() && !lresp.clicked() && !opened && !dragging)
+                        || ui.input(|i| i.key_pressed(egui::Key::Escape)))
+                {
                     ui.ctx().data_mut(|d| d.remove::<egui::Id>(egui::Id::new("sc_panel_open")));
                 }
             }
@@ -1952,6 +2003,47 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
     })
 }
 
+/// The pulse around a command the search points out (#7287); `strength` 0 draws nothing.
+/// `fill` tints the inside too, for a button painted before its icon and label.
+fn paint_reveal(painter: &egui::Painter, rect: Rect, accent: &crate::theme::TabAccent, strength: f32, fill: bool) {
+    if strength <= 0.0 {
+        return;
+    }
+    let t = Tokens::get();
+    painter.rect(
+        rect,
+        t.radius_sm,
+        if fill { accent.soft.gamma_multiply(strength) } else { Color32::TRANSPARENT },
+        Stroke::new(2.0, accent.color.gamma_multiply(strength)),
+        egui::StrokeKind::Inside,
+    );
+}
+
+/// A revealed command's tooltip, open without the pointer on it (#7287).
+fn reveal_tooltip(app: &SolveApp, ui: &egui::Ui, rect: Rect, command: &solidcraft_engine::CommandSpec, align: egui::RectAlign) {
+    let mut tip = egui::Tooltip::always_open(ui.ctx().clone(), ui.layer_id(), egui::Id::new(("ribbon_reveal", command.id)), rect);
+    tip.popup = tip.popup.align(align);
+    // The same text as a drop-down row's own tooltip: name and shortcut, its help, and why it is
+    // disabled when it is.
+    let info = crate::render_workspace::interactive_command_info(app, command);
+    let label = app.tr_label(info.label);
+    let shortcut = crate::keymap::display_for(app, command.id).map(|k| format!("  ({k})")).unwrap_or_default();
+    let help = crate::command_help::help(command.id);
+    if let Some(shown) = tip.show(|ui| {
+        ui.set_max_width(300.0);
+        ui.label(egui::RichText::new(format!("{label}{shortcut}")).strong());
+        if let Some(help) = help {
+            ui.add_space(2.0);
+            ui.label(egui::RichText::new(help).weak());
+        }
+        if let Some(reason) = info.disabled_reason.as_deref() {
+            ui.label(egui::RichText::new(reason).weak());
+        }
+    }) {
+        crate::scenario::publish_rect("ribbon:reveal_tooltip", shown.response.rect);
+    }
+}
+
 fn section_heading(ui: &mut egui::Ui, label: &str, width: f32) {
     let t = Tokens::get();
     let (rect, _) = ui.allocate_exact_size(vec2(width, 24.0), Sense::hover());
@@ -1998,7 +2090,15 @@ fn dropdown_width(app: &SolveApp, ui: &egui::Ui, cmds: &[&'static solidcraft_eng
 
 /// One command row of a panel drop-down: icon, label and shortcut, with the hover background
 /// under the pointer or keyboard focus (like every menu).
-fn dropdown_row(app: &SolveApp, ui: &mut egui::Ui, c: &'static solidcraft_engine::CommandSpec, width: f32, pinned: bool) -> RowAction {
+/// `revealed` is the pulse strength when the command search points this row out (#7287).
+fn dropdown_row(
+    app: &SolveApp,
+    ui: &mut egui::Ui,
+    c: &'static solidcraft_engine::CommandSpec,
+    width: f32,
+    pinned: bool,
+    revealed: Option<f32>,
+) -> RowAction {
     let t = Tokens::get();
     let info = crate::render_workspace::interactive_command_info(app, c);
     let (rect, _) = ui.allocate_exact_size(vec2(width, ROW_H), Sense::hover());
@@ -2027,10 +2127,18 @@ fn dropdown_row(app: &SolveApp, ui: &mut egui::Ui, c: &'static solidcraft_engine
     if c.id == "view.shots_strip" {
         row.checked = Some(app.preferences.render_shots_strip);
     }
-    row.highlighted = hot;
+    row.highlighted = hot || revealed.is_some();
     let shortcut = crate::keymap::display_for(app, c.id).unwrap_or_default();
     row.shortcut = &shortcut;
     row.paint(ui, rect, &resp, 26.0);
+    if let Some(strength) = revealed {
+        paint_reveal(ui.painter(), rect, &crate::theme::TabAccent::for_tab(&t, &app.ui.tab), strength, false);
+        crate::scenario::publish_rect("ribbon:reveal", rect);
+        if !ui.clip_rect().contains_rect(rect) {
+            ui.scroll_to_rect(rect, None);
+        }
+        reveal_tooltip(app, ui, rect, c, egui::RectAlign::RIGHT_START);
+    }
     if hot {
         crate::scenario::publish_handle(&format!("dropdown_hot:{}", c.id), rect.center());
     }
@@ -2139,7 +2247,9 @@ fn sketch_menu_rows(
 ) {
     for c in cmds {
         let pinned = crate::toolbar_custom::pinned_on(app, "SKETCH", c.id).is_some();
-        match dropdown_row(app, ui, c, width, pinned) {
+        // A hovered search result in a sketch creation menu is marked steadily (#7287).
+        let revealed = app.sbox.reveal.as_ref().is_some_and(|r| r.preview && r.id == c.id);
+        match dropdown_row(app, ui, c, width, pinned, revealed.then_some(1.0)) {
             RowAction::None => {}
             RowAction::Menu(at) => *menu = Some((at, c.id)),
             RowAction::TogglePin => *toggle = Some(c.id),
