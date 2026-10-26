@@ -2,11 +2,22 @@
 //! Upstream: `source/SMLib/src/SmSurface.cpp` (`SmSurface::LocalSurfaceIntersect`).
 //!
 //! Each surface is a non-rational biquadratic Bezier patch (kind 0, a 3x3 net over
-//! `[0,1]^2`) or an analytic `SmPlane` (kind 1: origin `net[0]`, x axis `net[1]`, y axis
-//! `net[2]`, unit scales). Every value must be finite; plane axes must be non-zero and
-//! not parallel (`SmAxis2Placement::SetCanonical` fails on them and leaves the axes
-//! undefined); domains must not be inverted. No counts cross the FFI except the
-//! control point count of [`lift_curve`]'s inline UV curve, checked against its arrays.
+//! `[0,1]^2`), an analytic `SmPlane` (kind 1: origin `net[0]`, x axis `net[1]`, y axis
+//! `net[2]`, unit scales) or a canonical analytic `SmTorus` (kind 2: centre `net[0]`,
+//! sweep start `net[1]`, 90 degree direction `net[2]`, `(major, minor)` radii
+//! `net[3][0..2]` over the full analytic STEP domain `[0, 360]^2` degrees, its NURB
+//! domain being the case's own `[0, 1]^2`; `net[3][2]` and the remaining net values are
+//! unused). Every value must be finite; plane axes must be non-zero and not parallel
+//! (`SmAxis2Placement::SetCanonical` fails on them and leaves the axes undefined); a
+//! torus needs both radii above `SM_EFF_ZERO` (`SmTorus::CreateCanonical` refuses
+//! others). Torus placement axes are left to `SetCanonical`'s defined handling:
+//! non-unit and non-perpendicular (including parallel) axes are normalized by
+//! `Unitize` and `MakeUnitOrthoVectors`, and an axis whose squared length is below
+//! `SM_EFF_ZERO_SQ` is stored as `(0,0,1)` by `Unitize` rather than left undefined, so
+//! the placement constructor still builds a frame. The torus guard therefore applies
+//! no axis length or parallelism threshold, unlike the plane guard. Domains must not be
+//! inverted. No counts cross the FFI except the control point count of [`lift_curve`]'s
+//! inline UV curve, checked against its arrays.
 use std::ffi::CString;
 
 use crate::{call_with_buffer, FfiError};
@@ -104,26 +115,30 @@ pub fn intersect_surface_boundaries(
 }
 
 fn check_surface(s: &SurfaceInput) -> Result<(), FfiError> {
-    if !(0..=1).contains(&s.kind)
+    if !(0..=2).contains(&s.kind)
         || s.net.iter().flatten().any(|v| !v.is_finite())
         || s.domain.iter().any(|v| !v.is_finite())
         || s.domain[0] > s.domain[2]
         || s.domain[1] > s.domain[3]
         || (s.kind == 1 && !plane_ok(&s.net))
+        || (s.kind == 2 && !torus_ok(&s.net))
     {
         return Err(FfiError::InvalidArgument("unsafe surface p11 input".into()));
     }
     Ok(())
 }
 
-/// One surface of a case: kind 0 (Bezier patch) or 1 (plane), and its 3x3 net.
+/// One surface of a case: kind 0 (Bezier patch), 1 (plane) or 2 (canonical torus), and
+/// its 3x3 net.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SurfaceInput {
-    /// 0: biquadratic Bezier patch; 1: plane (origin, x axis, y axis in `net[0..3]`).
+    /// 0: biquadratic Bezier patch; 1: plane (origin, x axis, y axis in `net[0..3]`);
+    /// 2: canonical torus (centre, sweep start, 90 degree direction in `net[0..3]`,
+    /// `(major, minor)` radii in `net[3][0..2]`).
     pub kind: i32,
     /// The control net (row major, `u` rows).
     pub net: [[f64; 3]; 9],
-    /// `[umin, vmin, umax, vmax]`: the intersection domain.
+    /// `[umin, vmin, umax, vmax]`: the intersection domain (the torus's NURB domain).
     pub domain: [f64; 4],
 }
 
@@ -137,6 +152,22 @@ fn plane_ok(net: &[[f64; 3]; 9]) -> bool {
     let len = |v: [f64; 3]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
     let (lx, ly, lc) = (len(x), len(y), len(cross));
     lx > 1e-9 && ly > 1e-9 && lc > 1e-6 * lx * ly && lx.is_finite() && ly.is_finite()
+}
+
+/// `SM_EFF_ZERO` (`crates/solidcore/src/math.rs`; this crate does not depend on the
+/// kernel). `SmTorus::CreateCanonical` refuses a radius that is not above it.
+const EFF_ZERO: f64 = 1.0e-12;
+
+/// A canonical-torus payload: both radii strictly above `SM_EFF_ZERO`, the bound below
+/// which `SmTorus::CreateCanonical` refuses a radius. The placement axes are not
+/// constrained:
+/// `SmAxis2Placement::SetCanonical` normalizes non-unit and non-perpendicular axes and
+/// `Unitize` stores `(0,0,1)` for a zero-length axis, so a short or parallel axis still
+/// yields a defined frame and rejecting it would reject an input the native constructor
+/// defines. In particular the plane guard's length and parallelism thresholds do not
+/// apply here.
+fn torus_ok(net: &[[f64; 3]; 9]) -> bool {
+    net[3][0] > EFF_ZERO && net[3][1] > EFF_ZERO
 }
 
 /// `a.LocalSurfaceIntersect(a.domain, b, b.domain, tol, guess_a, guess_b, normal,
@@ -206,8 +237,8 @@ pub enum LiftSurface {
     /// `SmBSplineSurface::ReadFromFile(path)` (an upstream test file; its contents are
     /// trusted, not validated).
     File(String),
-    /// A patch or plane as for [`local_surface_intersect`] (its `domain` is not used:
-    /// [`lift_curve`] takes the domain separately).
+    /// A patch, plane or canonical torus as for [`local_surface_intersect`] (its
+    /// `domain` is not used: [`lift_curve`] takes the domain separately).
     Inline(Box<SurfaceInput>),
 }
 
@@ -368,4 +399,109 @@ pub fn lift_curve(
             )
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A canonical torus (kind 2): centre and unit placement axes in `net[0..3]`,
+    /// `(major, minor)` radii in `net[3][0..2]`.
+    fn canonical_torus(major: f64, minor: f64) -> SurfaceInput {
+        SurfaceInput {
+            kind: 2,
+            net: [
+                [1.0, 2.0, 3.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [major, minor, 0.0],
+                [0.0; 3],
+                [0.0; 3],
+                [0.0; 3],
+                [0.0; 3],
+                [0.0; 3],
+            ],
+            domain: [0.0, 0.0, 1.0, 1.0],
+        }
+    }
+
+    fn accepted(s: &SurfaceInput) -> bool {
+        check_surface(s).is_ok()
+    }
+
+    #[test]
+    fn canonical_torus_guard_zero_x_axis_with_unit_y_axis_accepted() {
+        let mut s = canonical_torus(2.0, 0.5);
+        s.net[1] = [0.0; 3];
+        assert!(accepted(&s));
+    }
+
+    #[test]
+    fn canonical_torus_guard_tiny_x_axis_with_unit_y_axis_accepted() {
+        let mut s = canonical_torus(2.0, 0.5);
+        s.net[1] = [1e-13, 0.0, 0.0];
+        assert!(accepted(&s));
+    }
+
+    #[test]
+    fn canonical_torus_guard_non_perpendicular_unit_axes_accepted() {
+        let mut s = canonical_torus(2.0, 0.5);
+        s.net[1] = [1.0, 0.0, 0.0];
+        s.net[2] = [0.6, 0.8, 0.0];
+        assert!(accepted(&s));
+    }
+
+    #[test]
+    fn canonical_torus_guard_parallel_unit_axes_accepted() {
+        let mut s = canonical_torus(2.0, 0.5);
+        s.net[1] = [1.0, 0.0, 0.0];
+        s.net[2] = [1.0, 0.0, 0.0];
+        assert!(accepted(&s));
+    }
+
+    #[test]
+    fn canonical_torus_guard_non_positive_radii_rejected() {
+        for (major, minor) in [(0.0, 0.5), (-1.0, 0.5), (2.0, 0.0), (2.0, -0.5), (-1.0, -1.0)] {
+            assert!(!accepted(&canonical_torus(major, minor)));
+        }
+    }
+
+    #[test]
+    fn canonical_torus_guard_equal_eff_zero_radii_rejected() {
+        for (major, minor) in [(EFF_ZERO, 2.0), (2.0, EFF_ZERO), (EFF_ZERO, EFF_ZERO)] {
+            assert!(!accepted(&canonical_torus(major, minor)));
+        }
+    }
+
+    #[test]
+    fn canonical_torus_guard_nan_radius_rejected() {
+        let mut s = canonical_torus(2.0, 0.5);
+        s.net[3][1] = f64::NAN;
+        assert!(!accepted(&s));
+    }
+
+    #[test]
+    fn canonical_torus_guard_plane_zero_axis_rejected() {
+        let mut s = canonical_torus(2.0, 0.5);
+        s.kind = 1;
+        s.net[1] = [0.0; 3];
+        assert!(!accepted(&s));
+    }
+
+    #[test]
+    fn canonical_torus_guard_plane_parallel_axes_rejected() {
+        let mut s = canonical_torus(2.0, 0.5);
+        s.kind = 1;
+        s.net[1] = [1.0, 0.0, 0.0];
+        s.net[2] = [1.0, 0.0, 0.0];
+        assert!(!accepted(&s));
+    }
+
+    #[test]
+    fn canonical_torus_guard_finite_bezier_patch_accepted() {
+        let mut s = canonical_torus(2.0, 0.5);
+        s.kind = 0;
+        s.net = [[0.5; 3]; 9];
+        assert!(accepted(&s));
+    }
 }

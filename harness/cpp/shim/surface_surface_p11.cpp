@@ -3,15 +3,18 @@
 // (source/SMLib/src/SmSurface.cpp:27439).
 //
 // Each of the two surfaces is either a non-rational biquadratic Bezier patch (3x3 net over
-// [0,1]^2, kind 0) or an analytic SmPlane (kind 1: origin net[0], x axis net[1], y axis net[2],
-// unit scales, domain [0,1]^2). The layout is documented and validated in
-// crates/solidcore-ffi/src/units/surface_surface_p11.rs.
+// [0,1]^2, kind 0), an analytic SmPlane (kind 1: origin net[0], x axis net[1], y axis net[2],
+// unit scales, domain [0,1]^2) or a canonical analytic SmTorus (kind 2: centre net[0], sweep
+// start net[1], 90 degree direction net[2], (major, minor) radii net[3][0..1], full analytic
+// STEP domain [0,360]x[0,360] degrees, its NURB domain the case's own [0,1]^2). The layout is
+// documented and validated in crates/solidcore-ffi/src/units/surface_surface_p11.rs.
 //
 // One entry point, sc_surface_surface_p11_lsi. Output: [status, found, u, v, u2, v2, deviation]
 // (the solution values only when found).
 #include "sc_shim.h"
 
 #include "StdAfx.h"
+#include <SmAxis2Placement.h>
 #include <SmBSplineCurve.h>
 #include <SmBSplineSurface.h>
 #include <SmContext.h>
@@ -25,6 +28,7 @@
 #include <SmSurfTypes.h>
 #include <SmTArray.h>
 #include <SmTol.h>
+#include <SmTorus.h>
 #include <SmVector2d.h>
 #include <SmVector3d.h>
 #include <nurbs.h>
@@ -38,6 +42,24 @@ static SmSurface* sc_p11_surface(SmContext& context, int32_t kind, const double*
         return new (context) SmPlane(SmPoint3d(xyz[0], xyz[1], xyz[2]), SmVector3d(xyz[3], xyz[4], xyz[5]),
                                      SmVector3d(xyz[6], xyz[7], xyz[8]), SmVector2d(1, 1),
                                      SmExtent2d(0, 0, 1, 1), &context);
+    }
+    if (kind == 2)
+    {
+        // Canonical torus (SmTorus::CreateCanonical): centre, sweep start and 90 degree
+        // direction from net[0..3], (major, minor) radii from net[3][0..1], the full analytic
+        // STEP domain [0,360]x[0,360] degrees (the NURB is built by CreateCanonical over the
+        // caller's [0,1]^2 NURB domain). Radii and axes are validated in the FFI wrapper;
+        // a construction failure is reported as an invalid fixture, not as an operation
+        // status.
+        SmAxis2Placement frame(SmPoint3d(xyz[0], xyz[1], xyz[2]),
+                               SmVector3d(xyz[3], xyz[4], xyz[5]),
+                               SmVector3d(xyz[6], xyz[7], xyz[8]));
+        SmExtent2d analytic(0, 0, 360, 360);
+        SmTorus* torus = NULL;
+        if (SmTorus::CreateCanonical(context, frame, xyz[9], xyz[10], torus, FALSE, FALSE, NULL,
+                                     &analytic) != SM_SUCCESS)
+            return NULL;
+        return torus;
     }
     gw_CPOINT points[3][3];
     gw_CPOINT* rows[3] = {points[0], points[1], points[2]};

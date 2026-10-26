@@ -1,20 +1,21 @@
 //! Differential runner for `surface.surface_p11`: `SmSurface::LocalSurfaceIntersect`
 //! (`SmSurface.cpp:27439`). Each case intersects two surfaces, each a biquadratic
-//! Bezier patch or an analytic plane, from a pair of guess points, with or without a
-//! plane normal, a previous point and boundary testing. Cases whose C++ path reaches
-//! `sm_IntersectSrfBndryCrv` (`surface.surface_p8`) or `LocalSurfaceSolve`
-//! (`surface.surface_p3`) are deferred.
+//! Bezier patch, an analytic plane or a canonical analytic torus, from a pair of guess
+//! points, with or without a plane normal, a previous point and boundary testing.
+//! Cases whose C++ path reaches `sm_IntersectSrfBndryCrv` (`surface.surface_p8`) or
+//! `LocalSurfaceSolve` (`surface.surface_p3`) are deferred.
 //!
 //! Op 2 is `SmSurface::LiftCurve` (`SmSurface.cpp:24054`): a UV curve (an upstream
 //! `.dat` file read as `SmBSplineCurve::ReadFromFile` does, or an inline 2D B-spline)
 //! lifted onto a surface (a file read as `SmBSplineSurface::ReadFromFile` does, or a
-//! patch / plane as above) over its natural or a given domain and interval; the
+//! patch / plane / torus as above) over its natural or a given domain and interval; the
 //! status, `rdMaxDistToSurf` and the whole lifted curve are compared.
 use crate::{Case, CaseContext, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use solidcore::curve::curve::p2::BSPLINE_CURVE_TYPE;
 use solidcore::curve::curve::{Curve, CurveKind};
+use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::vector2d::{Point2, Vec2};
@@ -29,6 +30,7 @@ use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::p11::LocalSurfaceIntersectOptions;
 use solidcore::surface::surface::p2::B_SPLINE_SURFACE_TYPE;
 use solidcore::surface::surface::Surface;
+use solidcore::surface::torus::{Torus, TorusOptions};
 use solidcore::topology::database_io::{DatabaseReader, FileType};
 use solidcore_ffi::units::surface_surface_p11 as ffi;
 
@@ -41,7 +43,10 @@ pub const LIFT_CASES: usize = 200;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SurfaceIn {
-    /// 0: biquadratic Bezier patch; 1: plane (origin, x axis, y axis in `net[0..3]`).
+    /// 0: biquadratic Bezier patch; 1: plane (origin, x axis, y axis in `net[0..3]`);
+    /// 2: canonical analytic torus (centre `net[0]`, sweep start `net[1]`, 90 degree
+    /// direction `net[2]`, `(major, minor)` radii `net[3][0..2]`; the remaining net
+    /// values are unused payload and are written as zeros).
     kind: i32,
     net: [[f64; 3]; 9],
     domain: [f64; 4],
@@ -122,7 +127,14 @@ fn v3(p: [f64; 3]) -> Vec3 {
     Vec3::new(p[0], p[1], p[2])
 }
 
-fn surface(s: &SurfaceIn) -> Result<Surface, HarnessError> {
+/// The full analytic STEP domain of a fixture torus (`[0, 360]` degrees each way), as
+/// `SmTorus::CreateCanonical`'s default. The torus's NURB domain (and the intersection
+/// domain a case passes) is its own `domain`, `[0, 1]^2` for the fixtures.
+fn torus_analytic_domain() -> Extent2d {
+    Extent2d::from_bounds(0.0, 0.0, 360.0, 360.0)
+}
+
+fn surface(k: &Kernel, s: &SurfaceIn) -> Result<Surface, HarnessError> {
     if s.kind == 1 {
         return Ok(Surface::from(Plane::new(
             v3(s.net[0]),
@@ -131,6 +143,24 @@ fn surface(s: &SurfaceIn) -> Result<Surface, HarnessError> {
             Vec2::new(1.0, 1.0),
             &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
         )));
+    }
+    if s.kind == 2 {
+        // A real analytic torus, not a B-spline stand-in: `SmTorus::CreateCanonical`
+        // (centre, sweep start, 90 degree direction, the two radii, the full analytic
+        // STEP domain), which also makes the NURB. Its iso boundaries are the typed
+        // circles the boundary-curve override builds.
+        let frame = Axis2Placement::new(v3(s.net[0]), v3(s.net[1]), v3(s.net[2]));
+        let analytic = torus_analytic_domain();
+        return Torus::create_canonical(
+            k,
+            &frame,
+            s.net[3][0],
+            s.net[3][1],
+            TorusOptions::default(),
+            Some(&analytic),
+        )
+        .map(Surface::from)
+        .map_err(harness);
     }
     let net = s
         .net
@@ -188,9 +218,9 @@ fn isb_output(flat: &[f64]) -> Output {
 }
 
 fn run_rust_isb(i: &Inputs) -> Result<Output, HarnessError> {
-    let a = surface(&i.a)?;
-    let b = surface(&i.b)?;
     let k = Kernel::default();
+    let a = surface(&k, &i.a)?;
+    let b = surface(&k, &i.b)?;
     let r = a.intersect_surface_boundaries(
         &k,
         &domain(i.a.domain),
@@ -294,7 +324,7 @@ fn run_rust_lift(i: &LiftInputs) -> Result<Output, HarnessError> {
             let d = domain.map_or_else(|| s.natural_uv_domain(), domain_of);
             (s, d)
         }
-        LiftSurfaceIn::Inline(si) => (surface(si)?, domain(si.domain)),
+        LiftSurfaceIn::Inline(si) => (surface(&k, si)?, domain(si.domain)),
     };
     let c = match &i.curve {
         LiftCurveIn::File { file } => {
@@ -366,8 +396,8 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     if i.op == 1 {
         return run_rust_isb(i);
     }
-    let a = surface(&i.a)?;
-    let b = surface(&i.b)?;
+    let a = surface(&k, &i.a)?;
+    let b = surface(&k, &i.b)?;
     let opts = LocalSurfaceIntersectOptions {
         plane_normal: i.plane_normal.map(v3),
         previous_uv: i.previous_uv.map(|p| Point2::new(p[0], p[1])),
@@ -803,4 +833,80 @@ fn generate_lift(rng: &mut Rng) -> Option<Value> {
         skip_continuity_checks: rng.chance(0.2),
     })
     .ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solidcore::nurbs::b_spline_surface::SurfParamType;
+    use solidcore::surface::surface::p2::SurfaceKind;
+
+    /// The torus payload of
+    /// `fixtures/surface.surface_p11/analytic-torus-iso-boundary.json`.
+    fn torus_payload() -> SurfaceIn {
+        let mut net = [[0.0; 3]; 9];
+        net[0] = [0.2, 0.5, 0.5];
+        net[1] = [1.0, 0.0, 0.0];
+        net[2] = [0.0, 1.0, 0.0];
+        net[3] = [0.3, 0.2, 0.0];
+        SurfaceIn {
+            kind: 2,
+            net,
+            domain: [0.0, 0.0, 1.0, 1.0],
+        }
+    }
+
+    fn close(a: f64, b: f64, tol: f64) -> bool {
+        (a - b).abs() <= tol
+    }
+
+    /// Kind 2 builds the canonical analytic torus (not a B-spline stand-in) over the
+    /// full analytic STEP domain, whose NURB — the domain `IntersectSurfaceBoundaries`
+    /// is given for it — stays `[0, 1]^2`. A Rust-only diagnostic of the shared
+    /// builder; it proves no native parity.
+    #[test]
+    fn kind2_builds_a_canonical_analytic_torus() {
+        let k = Kernel::default();
+        let s = surface(&k, &torus_payload()).expect("canonical torus");
+        let SurfaceKind::Torus(t) = s.kind() else {
+            panic!("kind 2 must build the analytic torus, not a B-spline stand-in");
+        };
+        assert!(close(t.major_radius(), 0.3, 1e-12));
+        assert!(close(t.minor_radius(), 0.2, 1e-12));
+        assert!(!t.inside_out());
+        let nurb = s.natural_uv_domain();
+        assert!(close(nurb.min().x, 0.0, 1e-12) && close(nurb.max().x, 1.0, 1e-12));
+        assert!(close(nurb.min().y, 0.0, 1e-12) && close(nurb.max().y, 1.0, 1e-12));
+        let step = s.step_uv_domain();
+        assert!(close(step.min().x, 0.0, 1e-12) && close(step.max().x, 360.0, 1e-12));
+        assert!(close(step.min().y, 0.0, 1e-12) && close(step.max().y, 360.0, 1e-12));
+    }
+
+    /// The torus's u-min iso boundary (what `CreateIsoBoundaries` hands
+    /// `IntersectSurfaceBoundaries` as the other surface's first boundary curve) is the
+    /// typed minor circle of the source prediction: centre `(0.5, 0.5, 0.5)`, radius
+    /// `0.2`, in the plane `y = 0.5`. This checks the constructed geometry only; the
+    /// number of boundary curves the native operation keeps is deliberately not
+    /// asserted here.
+    #[test]
+    fn kind2_u_min_iso_boundary_is_the_predicted_minor_circle() {
+        let k = Kernel::default();
+        let s = surface(&k, &torus_payload()).expect("canonical torus");
+        let (min, _) = s
+            .create_iso_boundaries(&k, SurfParamType::U, 1e-6)
+            .expect("iso boundaries")
+            .expect("both U boundaries");
+        let CurveKind::Ellipse(_) = min.kind() else {
+            panic!("the torus iso boundary must stay the typed circle");
+        };
+        let centre = Vec3::new(0.5, 0.5, 0.5);
+        let ivl = min.natural_interval();
+        for j in 0..=4 {
+            let t = ivl.evaluate(f64::from(j) / 4.0);
+            let p = min.evaluate_point(&k, t).expect("iso boundary point");
+            let radius = (p - centre).length();
+            assert!(close(radius, 0.2, 1e-9), "t={t}: radius {radius}");
+            assert!(close(p.y, 0.5, 1e-12), "t={t}: point {p:?} off y=0.5");
+        }
+    }
 }
