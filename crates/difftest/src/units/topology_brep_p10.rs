@@ -258,8 +258,6 @@ fn changes_indices(k: &Kernel, bytes: &[u8], patches: &[PatchIn]) -> bool {
 /// record indexing keeps from upstream (`-2`, UB-164), so upstream never runs.
 fn builds(i: &Inputs, data: &BrepData) -> bool {
     let mut k = Kernel::default();
-    // Compare against pinned C++ c9c5979 (pre-tangency-labs/smlib@5af7070, WR-255 / #570).
-    k.context.set_trim_uv_curves_at_corner_drops(true);
     let mut data = data.clone();
     let Ok(mut b) = Brep::new_with_infinite_region() else {
         return true;
@@ -540,8 +538,6 @@ fn rust(i: &Inputs) -> Result<Dump, HarnessError> {
     let path = path_of(i)?;
     let bytes = std::fs::read(&path).map_err(|e| harness(format!("{path}: {e}")))?;
     let mut k = Kernel::default();
-    // Compare against pinned C++ c9c5979 (pre-tangency-labs/smlib@5af7070, WR-255 / #570).
-    k.context.set_trim_uv_curves_at_corner_drops(true);
     let mut data = match BrepData::read_from_file(&k, bytes, FileType::Ascii) {
         Ok(d) => d,
         Err(e @ SolidError::Unported { .. }) => return Ok(Err(e)),

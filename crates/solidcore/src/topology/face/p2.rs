@@ -58,17 +58,14 @@
 //!   leaves the caller's default point ([`Point2::UNDEF`]); a failed `DropPoint` is
 //!   no drop point; a failed evaluation keeps the previous value (initially
 //!   [`Vec3::UNDEF`]).
-//! - **`sm_FixUVTrimCurves` does not trim and re-stretch the UV trim curves by default**
-//!   (tangency-labs/solidcore#570, the fix of tangency-labs/smlib@5af7070). Upstream
-//!   drops the vertex's UV point onto each of the two curves, `Trim`s the curve there
-//!   and `EditParameterization`s it back over its old interval before moving the end
-//!   point. The stretch moves every interior parameter of the trim off its edge's by
-//!   the trimmed length (a 1e-6 corner gap left a thread edge's trim 5e-5 off its
-//!   edge, tolerance 1e-5), and any point classification builds the trim cache that
-//!   runs it. By default only the end control points move here, by the UV gap
-//!   (`plan/upstream-issues.md` WR-255); [`crate::geom::context::Context::set_trim_uv_curves_at_corner_drops`]
-//!   re-enables the pinned-`c9c5979` `DropPoint` + `Trim` + `EditParameterization`
-//!   stretch where a difftest compares against the unmodified C++ reference.
+//! - **`sm_FixUVTrimCurves` opt-in fix** (WR-255, tangency-labs/solidcore#959/#570, the
+//!   fork's tangency-labs/smlib@5af7070). Upstream drops the vertex's UV point onto
+//!   each of the two curves, `Trim`s the curve there and `EditParameterization`s it back
+//!   over its old interval before moving the end point. The stretch moves every interior
+//!   parameter of the trim off its edge's by the trimmed length (a 1e-6 corner gap left a
+//!   thread edge's trim 5e-5 off its edge, tolerance 1e-5). That is the default here, as
+//!   upstream; with [`UpstreamFixes::uv_trim_corner_end_points_only`](crate::kernel::UpstreamFixes::uv_trim_corner_end_points_only)
+//!   only the end control points move, by the UV gap.
 //! - **Edit notifications.** [`fix_uv_trim_curves_notified`] notifies its two
 //!   `EditEndPoint`s (`SM_NO_PRE_EDIT` / `SM_NO_POST_EDIT`, caller and first data
 //!   object the UV trim curve under its kernel-issued identity) through the caller's
@@ -2564,15 +2561,28 @@ fn notified_end_point_edit(
     edit_start: bool,
     weight: Option<f64>,
 ) -> Result<()> {
-    let Some(env) = env.filter(|e| e.context.is_some()) else {
-        return edit_end_point(held_curve_mut(b, holder)?, point, edit_start, weight);
-    };
+    let edit = |c: &mut Curve| edit_end_point(c, point, edit_start, weight);
+    match env.filter(|e| e.context.is_some()) {
+        Some(env) => notify_around_edit(b, env, holder, edit),
+        None => edit(held_curve_mut(b, holder)?),
+    }
+}
+
+/// `edit` of the UV trim curve `holder` holds, between `SM_NO_PRE_EDIT` and
+/// `SM_NO_POST_EDIT` with the curve as caller and first data object, after reporting
+/// the curve's and the edge use's owner links.
+fn notify_around_edit(
+    b: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+    holder: EdgeuseId,
+    edit: impl Fn(&mut Curve) -> Result<()>,
+) -> Result<()> {
     let holder_ref = (env.key_of)(EntityRef::Edgeuse(holder));
     let edge_ref = eu1::edge(b, holder)?.map(|e| (env.key_of)(EntityRef::Edge(e)));
     let this = {
         let curve = held_curve_mut(b, holder)?;
         let Some(ctx) = env.context.as_deref_mut() else {
-            return Err(null("EditEndPoint: no context"));
+            return Err(null("FixUVTrimCurves: no context"));
         };
         ObjectRef {
             type_code: curve.type_code(),
@@ -2594,8 +2604,34 @@ fn notified_end_point_edit(
         )
     };
     notify(env, NotifyOperation::PreEdit)?;
-    edit_end_point(held_curve_mut(b, holder)?, point, edit_start, weight)?;
+    edit(held_curve_mut(b, holder)?)?;
     notify(env, NotifyOperation::PostEdit)
+}
+
+/// A `Trim` or `EditParameterization` of the UV trim curve `holder` holds, as
+/// `sm_FixUVTrimCurves` makes them: when the edit does work (it changes the curve's
+/// natural interval; both return before notifying otherwise), it notifies as
+/// [`notified_end_point_edit`] does. Whether the edit works is found by running it on
+/// a copy first.
+fn notified_curve_edit(
+    b: &mut Brep,
+    env: Option<&mut NotifyEnv<'_>>,
+    holder: EdgeuseId,
+    edit: impl Fn(&mut Curve) -> Result<()>,
+) -> Result<()> {
+    let Some(env) = env.filter(|e| e.context.is_some()) else {
+        return edit(held_curve_mut(b, holder)?);
+    };
+    let before = held_curve(b, holder)?.natural_interval();
+    let mut probe = held_curve(b, holder)?.clone();
+    edit(&mut probe)?;
+    let after = probe.natural_interval();
+    if before.min().to_bits() == after.min().to_bits()
+        && before.max().to_bits() == after.max().to_bits()
+    {
+        return edit(held_curve_mut(b, holder)?);
+    }
+    notify_around_edit(b, env, holder, edit)
 }
 
 /// `SmBSplineCurve::EditEndPoint(point, bEditStart, pdWeight)` of a UV trim curve.
@@ -2659,9 +2695,10 @@ pub fn fix_uv_trim_curves(
     )
 }
 
-/// [`fix_uv_trim_curves`] whose end point edits notify through `env`: each
+/// [`fix_uv_trim_curves`] whose curve edits notify through `env`: each
 /// `EditEndPoint` sends `SM_NO_PRE_EDIT` and `SM_NO_POST_EDIT` with the edited UV trim
-/// curve as caller and first data object ([`notified_end_point_edit`]). Without `env`
+/// curve as caller and first data object ([`notified_end_point_edit`]), and so does each
+/// `Trim` and `EditParameterization` that does work ([`notified_curve_edit`]). Without `env`
 /// (or without its context) the edits notify nobody.
 ///
 /// # Errors
@@ -2752,12 +2789,9 @@ pub fn fix_uv_trim_curves_notified(
     let _prev_edge_gap = surf_vertex.distance(prev_edge_point);
     let _ = tol_3d;
 
-    // Move the UVTrimCurve end points to the vertex's UV point (#570 / WR-255).
-    // By default (`!k.context.trim_uv_curves_at_corner_drops()`), only the end control
-    // points move (`tangency-labs/smlib@5af7070`), keeping interior parameters aligned
-    // with the 3D edge. Pinned-`c9c5979` difftest callers may opt into upstream's
-    // DropPoint + Trim + EditParameterization stretch.
-    if k.context.trim_uv_curves_at_corner_drops() {
+    // drop sUVVertex to each UVTrimCurve, trim there and stretch back (upstream). The
+    // opt-in WR-255 fix (#959/#570) skips this and only moves the end points below.
+    if !k.fixes.uv_trim_corner_end_points_only {
         let curr_drop = ignored(held_curve(b, curr_holder)?.drop_point(
             k,
             &curr_ivl,
@@ -2786,9 +2820,13 @@ pub fn fix_uv_trim_curves_notified(
                     let _ = trim_ivl.set_min_max(curr_ivl.min(), t_curr_new);
                 }
                 if !are_same(trim_ivl.min(), trim_ivl.max()) {
-                    let c = held_curve_mut(b, curr_holder)?;
-                    c.trim(k, &mut trim_ivl, TrimMode::Notify)?;
-                    c.edit_parameterization(k, &curr_ivl)?;
+                    notified_curve_edit(b, env.as_deref_mut(), curr_holder, |c| {
+                        let mut ivl = trim_ivl;
+                        c.trim(k, &mut ivl, TrimMode::Notify)
+                    })?;
+                    notified_curve_edit(b, env.as_deref_mut(), curr_holder, |c| {
+                        c.edit_parameterization(k, &curr_ivl)
+                    })?;
                 }
             }
         }
@@ -2802,9 +2840,13 @@ pub fn fix_uv_trim_curves_notified(
                     let _ = trim_ivl.set_min_max(t_prev_new, prev_ivl.max());
                 }
                 if !are_same(trim_ivl.min(), trim_ivl.max()) {
-                    let c = held_curve_mut(b, prev_holder)?;
-                    c.trim(k, &mut trim_ivl, TrimMode::Notify)?;
-                    c.edit_parameterization(k, &prev_ivl)?;
+                    notified_curve_edit(b, env.as_deref_mut(), prev_holder, |c| {
+                        let mut ivl = trim_ivl;
+                        c.trim(k, &mut ivl, TrimMode::Notify)
+                    })?;
+                    notified_curve_edit(b, env.as_deref_mut(), prev_holder, |c| {
+                        c.edit_parameterization(k, &prev_ivl)
+                    })?;
                 }
             }
         }
@@ -3385,14 +3427,14 @@ mod tests {
         }
     }
 
-    /// #570: closing a corner's UV gap moves only the trim's end control point. Upstream
-    /// trims the curve at the vertex's drop point and stretches it back over its
-    /// interval, which slides every interior knot (and so every interior point at a
-    /// given parameter) off the edge's.
-    #[test]
-    fn fix_uv_trim_curves_keeps_interior_parameters() {
+    /// A box whose first self-holding UV trim is replaced by a three-span line that
+    /// overshoots its vertex by 1e-3, after `fix_uv_trim_curves` with the WR-255 fix
+    /// `end_points_only`: the trim before and after, whether its edge use runs `Same`,
+    /// and the vertex's UV point.
+    fn fix_overshooting_trim(end_points_only: bool) -> (Curve, Curve, bool, Point3) {
         use crate::nurbs::math::CPoint;
         let k = &mut Kernel::default();
+        k.fixes.uv_trim_corner_end_points_only = end_points_only;
         let mut b = crate::primitive::api_primitives::create_box(k, Point3::ZERO, 10.0, 10.0, 10.0)
             .unwrap();
         // the first edge use holding its own UV trim curve, with its loop neighbour
@@ -3438,7 +3480,15 @@ mod tests {
         let before = held_curve(&b, eu).unwrap().clone();
         let fixed = fix_uv_trim_curves(k, &mut b, eu, prev, v, 1e-5, gap, &dom).unwrap();
         assert!(fixed);
-        let after = held_curve(&b, eu).unwrap();
+        let after = held_curve(&b, eu).unwrap().clone();
+        (before, after, same, at_vertex)
+    }
+
+    /// #959/#570 (WR-255): with the fix, closing a corner's UV gap moves only the trim's
+    /// end control point: same knots, interior control points untouched.
+    #[test]
+    fn issue_959_fix_uv_trim_curves_keeps_interior_parameters() {
+        let (before, after, same, at_vertex) = fix_overshooting_trim(true);
         let (CurveKind::BSpline(c0), CurveKind::BSpline(c1)) = (before.kind(), after.kind()) else {
             panic!("UV trim curve is no longer a B-spline");
         };
@@ -3453,6 +3503,17 @@ mod tests {
             moved.distance(at_vertex) < 1e-12,
             "{moved:?} vs {at_vertex:?}"
         );
+    }
+
+    /// WR-255 without the fix (upstream): the trim is cut at the vertex's drop point and
+    /// stretched back over its interval, so its interior knots slide.
+    #[test]
+    fn fix_uv_trim_curves_stretches_the_trim_by_default() {
+        let (before, after, _, _) = fix_overshooting_trim(false);
+        let (CurveKind::BSpline(c0), CurveKind::BSpline(c1)) = (before.kind(), after.kind()) else {
+            panic!("UV trim curve is no longer a B-spline");
+        };
+        assert_ne!(c0.knots(None).unwrap(), c1.knots(None).unwrap());
     }
 
     #[test]

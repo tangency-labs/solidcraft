@@ -306,14 +306,15 @@ pub fn make_curve_cache<O: Copy + PartialEq>(
 }
 
 /// The kernel and curve state [`make_curve_cache`]'s build reads besides the curve's
-/// geometry (not upstream): the tolerances and the context's scalar state. A memo
+/// geometry (not upstream): the tolerances, the context's scalar state and the upstream fixes. A memo
 /// entry is valid for a later build only when its key is equal (the context scalars
 /// bit for bit).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct CurveMemoKey {
     tolerances: crate::kernel::Tolerances,
     context_bits: [u64; 3],
-    context_flags: [bool; 2],
+    context_flags: [bool; 1],
+    fixes: crate::kernel::UpstreamFixes,
 }
 
 impl CurveMemoKey {
@@ -342,7 +343,8 @@ impl CurveMemoKey {
                 c.stored_model_size_estimate().to_bits(),
                 c.stored_large_small_size_ratio().to_bits(),
             ],
-            context_flags: [c.doing_boolean(), c.trim_uv_curves_at_corner_drops()],
+            context_flags: [c.doing_boolean()],
+            fixes: k.fixes,
         })
     }
 }

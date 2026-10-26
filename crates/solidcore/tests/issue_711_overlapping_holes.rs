@@ -2,8 +2,8 @@
 //! (usd-brep 1.0.1) sends cylinder/cylinder to `SmCone::IntersectWithCone`, whose
 //! parallel-cylinder branch tests each crossing line at the tool's bottom (v = 0), below
 //! the first hole's wall trimmed to the disc, so both lines are dropped and the cut
-//! fails in `SmBrep::MakeFace` (`SM_ERR`). The Boolean's
-//! `Kernel::cone_parallel_midpoint_test` (WR-259) tests the line's middle instead.
+//! fails in `SmBrep::MakeFace` (`SM_ERR`). With the opt-in
+//! `Kernel::fixes.cone_parallel_line_midpoint` (WR-259), the line is tested at its middle.
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -29,6 +29,7 @@ fn volume(k: &Kernel, b: &mut Brep) -> solidcore::Result<f64> {
 #[test]
 fn issue_711_second_overlapping_hole_cuts() {
     let mut k = Kernel::default();
+    k.fixes.cone_parallel_line_midpoint = true;
     // a disc r 20, 10 thick
     let mut disc = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 10.0).unwrap();
     // two r 5 holes through it, 6 apart, the tools 12 high from z = -1
@@ -45,4 +46,23 @@ fn issue_711_second_overlapping_hole_cuts() {
     let want = (core::f64::consts::PI * 400.0 - holes) * 10.0;
     let got = volume(&k, &mut disc).unwrap();
     assert!((got - want).abs() <= 1e-5 * want, "{got} vs {want}");
+}
+
+/// Without the fix (the default, as SMLib): the parallel-cylinder lines are tested at
+/// the tool's bottom, outside the first hole's trimmed wall, so the second cut fails.
+#[test]
+fn issue_711_second_overlapping_hole_fails_by_default() {
+    let mut k = Kernel::default();
+    let mut disc = create_cylinder(&mut k, Point3::new(0.0, 0.0, 0.0), 20.0, 10.0).unwrap();
+    let first = create_cylinder(&mut k, Point3::new(6.0, 0.0, -1.0), 5.0, 12.0).unwrap();
+    disc = boolean_difference(&mut k, disc, first).unwrap();
+    let second = create_cylinder(
+        &mut k,
+        Point3::new(3.0, 3.0 * 3.0_f64.sqrt(), -1.0),
+        5.0,
+        12.0,
+    )
+    .unwrap();
+    let r = boolean_difference(&mut k, disc, second);
+    assert!(r.is_err(), "{:?}", r.map(|_| ()));
 }
