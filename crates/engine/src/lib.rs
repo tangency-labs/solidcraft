@@ -729,7 +729,21 @@ impl Session {
         self.prune_occurrence_state();
         // Joints follow the geometry their origins snap to.
         if !self.doc.assembly.joints.is_empty() {
-            self.solve_joints();
+            // A solve that moves parts changes what features reading where a part is placed
+            // (a mirror of a placed body) make: the model is evaluated again for the placements
+            // the design now holds, and the joints solved for that model, a few times at most.
+            for _ in 0..3 {
+                let before = self.doc.clone();
+                self.solve_joints();
+                if Arc::ptr_eq(&before, &self.doc) || before.occurrences == self.doc.occurrences {
+                    break;
+                }
+                self.model.evaluate(&self.doc);
+                #[cfg(test)]
+                {
+                    self.evaluations += 1;
+                }
+            }
         }
         cmd::motion::associative::refresh(self);
         if let Some(id) = self.active_sketch
