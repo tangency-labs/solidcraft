@@ -333,11 +333,12 @@ fn run(s: &Session, mut geometry: ContactGeometry, sw: Sweep, cmd: &str) -> Resu
     let touching_names: Vec<[String; 2]> = start.iter().map(|g| [g.a.1.clone(), g.b.1.clone()]).collect();
     let resting = geometry.take_pairs(|x, y| touching.contains(&key(x, y)));
     let rest_depth: Vec<f64> = if resting.has_pairs() { resting.depths(&t, &mut work, budget)? } else { Vec::new() };
-    let margin = touch.max(2.0 * resting.chord());
+    // A pair of bodies' own margin: flat faces against flat faces are exact.
+    let margin = |i: usize| touch.max(2.0 * resting.pair_chord(i));
     // Parts already passing into each other, deeper than a touch: the deepest of their bodies.
     let mut overlapping: BTreeMap<(u64, u64), (String, String, f64)> = BTreeMap::new();
     for (i, depth) in rest_depth.iter().enumerate() {
-        if *depth > margin
+        if *depth > margin(i)
             && let Some((a, b)) = resting.members(i)
         {
             let entry = overlapping.entry(key(a.0, b.0)).or_insert((a.1, b.1, 0.0));
@@ -400,7 +401,7 @@ fn run(s: &Session, mut geometry: ContactGeometry, sw: Sweep, cmd: &str) -> Resu
             return Ok(None);
         }
         let depths = resting.depths(t, work, budget)?;
-        let deeper = depths.iter().enumerate().find(|(i, d)| **d > rest_depth.get(*i).copied().unwrap_or(0.0) + margin).map(|(i, _)| i);
+        let deeper = depths.iter().enumerate().find(|(i, d)| **d > rest_depth.get(*i).copied().unwrap_or(0.0) + margin(*i)).map(|(i, _)| i);
         let Some((i, (a, b))) = deeper.and_then(|i| resting.members(i).map(|m| (i, m))) else { return Ok(None) };
         // Where: the nearest points of those bodies (passing into each other, at no gap).
         let at = resting.only(i).gaps(t, touch, work, budget)?.into_iter().next().map_or((Vec3::ZERO, Vec3::ZERO), |g| g.at);

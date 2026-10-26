@@ -351,6 +351,12 @@ impl ContactGeometry {
         self.pairs.get(i).map(|(_, _, a, b)| (a.clone(), b.clone()))
     }
 
+    /// How far the meshes of pair `i` may stray from their faces (see [`ContactGeometry::chord`]).
+    pub(super) fn pair_chord(&self, i: usize) -> f64 {
+        let chord = |b: usize| self.bodies.get(b).map_or(0.0, |b| b.chord);
+        self.pairs.get(i).map_or(0.0, |(a, b, _, _)| chord(*a).max(chord(*b)))
+    }
+
     /// Pair `i` alone (with the same bodies).
     pub(super) fn only(&self, i: usize) -> ContactGeometry {
         ContactGeometry { bodies: self.bodies.clone(), pairs: self.pairs.get(i).cloned().into_iter().collect(), step: self.step }
