@@ -864,7 +864,7 @@ fn nurbs_uv_status_ignored(cone: &Cone, k: &Kernel, step_uv: Point2) -> Result<P
         Ok(uv) => Ok(uv),
         Err(e) if e.is_unported() => Err(e),
         Err(e) => {
-            let circle = cone.rev().polar_curve.as_ref().ok_or(e)?;
+            let circle = cone.rev().polar_curve().ok_or(e)?;
             let x = cone
                 .rev()
                 .polar

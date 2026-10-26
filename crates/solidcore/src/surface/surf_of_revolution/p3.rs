@@ -495,8 +495,7 @@ impl SurfOfRevolution {
 
         // arrive here when polar conversions are possible
         let circle = self
-            .polar_curve
-            .as_ref()
+            .polar_curve()
             .ok_or(SolidError::null_pointer(OP_TO_NURBS))?;
         let (mut x, exact_conversion) = self
             .polar
@@ -720,8 +719,7 @@ impl SurfOfRevolution {
         sol.num_variables = 2;
 
         let circle = self
-            .polar_curve
-            .as_ref()
+            .polar_curve()
             .ok_or(SolidError::null_pointer(OP_DROP))?;
         let num_gen = gen_solutions.len();
 
@@ -1183,7 +1181,7 @@ impl SurfOfRevolution {
         if is_ascii {
             db.go_to_next_line();
         }
-        let (polar, polar_curve) = PolarConversion::read_from_db_with_curve(k, db, version)?;
+        let (polar, polar_curve) = PolarConversion::read_from_db_with_curve_object(k, db, version)?;
         surf.polar = polar;
         surf.polar_curve = polar_curve;
 

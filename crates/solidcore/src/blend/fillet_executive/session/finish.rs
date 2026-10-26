@@ -152,24 +152,24 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
             attributes,
             ..
         } = &mut *self.0;
-        p3::seed_records(notification_records, target, &key_of);
-        let result = p3::with_lent_context(k, |k, context| {
+        if k.context.issued_brep_serial(target.notify_identity_slot()) != Some(serial) {
+            return Err(invalid(
+                "stitch body belongs to another notification context",
+            ));
+        }
+        let result = crate::geom::context::Context::with_notification_context(k, |k, context| {
+            p3::seed_records(notification_records, target, &key_of);
             let mut env = crate::topology::edge::NotifyEnv {
                 records: notification_records,
                 attributes,
                 context: Some(context),
                 key_of: &key_of,
             };
-            let curve_ref = |_, _| {
-                // UNPORTED(blend.fillet_executive_p3): identity of a newly copied stitch curve.
-                Err(SolidError::unported(
-                    "fillet stitch copied-curve identity",
-                    "blend.fillet_executive_p3",
-                ))
-            };
             let mut edits = crate::heal::stitch::p1::BorrowedStitchEdits {
                 env: &mut env,
-                curve_ref: &curve_ref,
+                curve_identity: crate::topology::brep::p9::CurveIdentity::Actual(
+                    &crate::topology::brep::p9::issue_curve_identity,
+                ),
             };
             // SmStitch sStitch(sCallBack, dStitchTol3d): base callback, default flags.
             let mut callback = crate::heal::stitch::p1::DefaultStitchCallback::new();
@@ -515,5 +515,55 @@ impl FilletSession<'_> {
         );
         let cleanup = super::original_merge::destroy_tags(&mut self.objects, &tags);
         result.and(cleanup)
+    }
+}
+
+#[cfg(test)]
+mod stitch_identity_tests {
+    use super::*;
+    use crate::blend::fillet_executive::p3::{FaceConstructionAccess, FaceStitchAccess};
+    use crate::math::Point3;
+
+    #[test]
+    fn both_stitch_sites_reject_a_foreign_notification_domain() {
+        let mut owner = Kernel::default();
+        let mut target = crate::primitive::api_primitives::create_box(
+            &mut owner,
+            Point3::ZERO,
+            10.0,
+            20.0,
+            30.0,
+        )
+        .unwrap();
+        let mut session = FilletSession::new(&mut owner, &mut target).unwrap();
+        session.objects.faces_new_brep(&mut owner).unwrap();
+        let before_records = session.objects.notification_records.len();
+        let before_key = session.objects.target.key();
+        let mut foreign = Kernel::default();
+        let other =
+            crate::primitive::api_primitives::create_box(&mut foreign, Point3::ZERO, 1.0, 2.0, 3.0)
+                .unwrap();
+        assert_eq!(
+            other.notify_serial(),
+            session.objects.target.notify_serial()
+        );
+        let tolerance = session.objects.target.tolerance();
+        let target = FilletObject::Body(FilletBody::Target);
+        assert!(FinishAccess(&mut session.objects)
+            .finish_do_stitching(&mut foreign, target, tolerance, StitchSettings::default(),)
+            .is_err());
+        assert!(session
+            .objects
+            .stitch_body(&mut foreign, FilletObject::IntermediateBrep, tolerance,)
+            .is_err());
+        assert_eq!(session.objects.notification_records.len(), before_records);
+        assert_eq!(session.objects.target.key(), before_key);
+        assert!(session.objects.intermediate.is_some());
+        assert_eq!(
+            owner
+                .context
+                .issued_brep_serial(session.objects.target.notify_identity_slot()),
+            Some(session.objects.target_serial)
+        );
     }
 }

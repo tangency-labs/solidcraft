@@ -1861,24 +1861,24 @@ impl FaceStitchAccess<FilletObject> for SessionObjects<'_> {
             keys: &keys,
             owner_of: &owner_of,
         };
-        crate::topology::brep::p3::seed_records(&mut self.notification_records, body, &key_of);
-        crate::topology::brep::p3::with_lent_context(k, |k, context| {
+        if k.context.issued_brep_serial(body.notify_identity_slot()) != Some(serial) {
+            return Err(invalid(
+                "stitch body belongs to another notification context",
+            ));
+        }
+        crate::geom::context::Context::with_notification_context(k, |k, context| {
+            crate::topology::brep::p3::seed_records(&mut self.notification_records, body, &key_of);
             let mut env = crate::topology::edge::NotifyEnv {
                 records: &mut self.notification_records,
                 attributes: &mut self.attributes,
                 context: Some(context),
                 key_of: &key_of,
             };
-            let curve_ref = |_, _| {
-                // UNPORTED(blend.fillet_executive_p3): identity of a newly copied stitch curve.
-                Err(SolidError::unported(
-                    "fillet stitch copied-curve identity",
-                    "blend.fillet_executive_p3",
-                ))
-            };
             let mut edits = crate::heal::stitch::p1::BorrowedStitchEdits {
                 env: &mut env,
-                curve_ref: &curve_ref,
+                curve_identity: crate::topology::brep::p9::CurveIdentity::Actual(
+                    &crate::topology::brep::p9::issue_curve_identity,
+                ),
             };
             StitchAttempt::from_stitch(crate::topology::brep::p4::stitch_faces_with_context(
                 k,

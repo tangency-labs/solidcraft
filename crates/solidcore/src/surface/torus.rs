@@ -667,14 +667,10 @@ impl Torus {
     /// generator that is not a circle; those of the conversions.
     pub fn convert_uv_from_step_to_nurbs(&self, k: &Kernel, step_uv: Point2) -> Result<Point2> {
         // convert sweep coordinate
-        let polar_curve = self
-            .base
-            .polar_curve
-            .as_ref()
-            .ok_or(SolidError::invalid_input(
-                OP_CONVERT,
-                "polar converter has no curve",
-            ))?;
+        let polar_curve = self.base.polar_curve().ok_or(SolidError::invalid_input(
+            OP_CONVERT,
+            "polar converter has no curve",
+        ))?;
         let (mut nurbs_x, _exact) =
             self.base
                 .polar
@@ -1332,7 +1328,7 @@ fn convert_uv_from_nurbs_to_step(
     };
 
     // convert sweep coordinate
-    let polar_curve = base.polar_curve.as_ref().ok_or(SolidError::invalid_input(
+    let polar_curve = base.polar_curve().ok_or(SolidError::invalid_input(
         OP_CONVERT,
         "polar converter has no curve",
     ))?;

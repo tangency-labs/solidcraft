@@ -706,7 +706,7 @@ pub(crate) trait StitchEditContext {
 /// New split-curve identities must be registered by the owner or refused explicitly.
 pub(crate) struct BorrowedStitchEdits<'a, 'e> {
     pub env: &'a mut edge::NotifyEnv<'e>,
-    pub curve_ref: &'a dyn Fn(EdgeId, i64) -> Result<ObjectRef>,
+    pub curve_identity: crate::topology::brep::p9::CurveIdentity<'a>,
 }
 
 impl StitchEditContext for BorrowedStitchEdits<'_, '_> {
@@ -790,13 +790,13 @@ impl StitchEditContext for BorrowedStitchEdits<'_, '_> {
         e: EdgeId,
         t: f64,
     ) -> Result<(Option<EdgeId>, Option<EdgeId>, Option<VertexId>)> {
-        let out = crate::topology::brep::p9::make_vertex_split_edge_with_identity(
+        let out = crate::topology::brep::p9::make_vertex_split_edge_with_curve_identity(
             k,
             b,
             e,
             t,
-            &mut edge::NotifyState::from_env(self.env),
-            self.curve_ref,
+            self.env,
+            self.curve_identity,
         )?;
         if !out.split {
             return Err(SolidError::sm_err(OP));
@@ -2774,6 +2774,112 @@ mod tests {
     use crate::topology::EdgeuseOwner;
 
     #[test]
+    fn actual_stitch_split_keeps_curve_identity_and_refusal_prefix() {
+        use crate::curve::curve::Curve;
+        use crate::geom::attribute::{ids, Attribute, Behavior};
+        use crate::topology::brep::{p3, p9};
+        use crate::topology::edge::notification_test_support as callbacks;
+        use std::cell::RefCell;
+        for refuse_copy in [false, true] {
+            let mut k = Kernel::default();
+            let mut b = crate::primitive::api_primitives::create_box(
+                &mut k,
+                Point3::ZERO,
+                10.0,
+                20.0,
+                30.0,
+            )
+            .unwrap();
+            b.set_editing_enabled(true);
+            let edge = b.edge_list()[0];
+            let serial = b.notify_serial().unwrap();
+            let key_of = |entity| p3::topology_ref(serial, entity);
+            let interval = b.edge(edge).unwrap().interval;
+            let parameter = interval.evaluate(0.5);
+            let original = b.edge_mut(edge).unwrap().curve.as_mut().unwrap();
+            let original_key = k
+                .context
+                .geometry_key(original.notify_identity_slot())
+                .unwrap();
+            let before = (b.edge_list().len(), b.vertex_list().len());
+            let mut records = BTreeMap::new();
+            p3::seed_records(&mut records, &b, &key_of);
+            let mut attributes = AttributeStore::default();
+            let marker = attributes
+                .insert(Attribute::long(ids::USER_1, 73, Behavior::Copy))
+                .unwrap();
+            attributes.add_attribute(original_key, marker).unwrap();
+            let events = callbacks::install(&mut k.context);
+            let issued = RefCell::new(Vec::new());
+            let issuer = |id: EdgeId, curve: &mut Curve, env: &mut edge::NotifyEnv<'_>| {
+                assert!(env.context.as_deref().unwrap().doing_boolean());
+                if refuse_copy && id != edge {
+                    assert_eq!(curve.notify_key(), None);
+                    return Err(SolidError::invalid_input(
+                        "test stitch issuer",
+                        "refused actual copy",
+                    ));
+                }
+                let identity = p9::issue_curve_identity(id, curve, env)?;
+                issued.borrow_mut().push((id, identity));
+                Ok(identity)
+            };
+            k.context.set_doing_boolean(true);
+            let result = Context::with_notification_context(&mut k, |k, context| {
+                let mut env = edge::NotifyEnv {
+                    records: &mut records,
+                    attributes: &mut attributes,
+                    context: Some(context),
+                    key_of: &key_of,
+                };
+                let mut edits = BorrowedStitchEdits {
+                    env: &mut env,
+                    curve_identity: p9::CurveIdentity::Actual(&issuer),
+                };
+                edits.split_edge(k, &mut b, edge, parameter)
+            })
+            .unwrap();
+            assert!(k.context.doing_boolean());
+            callbacks::assert_installed(&k.context, &events);
+            assert_eq!(
+                (b.edge_list().len(), b.vertex_list().len()),
+                (before.0 + 1, before.1 + 1)
+            );
+            assert_eq!(issued.borrow()[0].1.key, original_key);
+            let new_edge = *b.edge_list().last().unwrap();
+            if refuse_copy {
+                assert!(result.is_err());
+                assert_eq!(issued.borrow().len(), 1);
+                assert!(b.edge(new_edge).unwrap().curve.is_none());
+                assert!(!events
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|event| event.operation == NotifyOperation::Split));
+            } else {
+                let (_, Some(created), Some(_)) = result.unwrap() else {
+                    panic!("missing real split outputs")
+                };
+                assert_eq!(created, new_edge);
+                let key = issued.borrow()[1].1.key;
+                assert_ne!(key, original_key);
+                assert_ne!(key, key_of(EntityRef::Edge(created)).key);
+                let curve = b.edge(created).unwrap().curve.as_ref().unwrap();
+                assert_eq!(curve.notify_key(), Some(key));
+                assert_eq!(curve.owner(), Some(key_of(EntityRef::Edge(created))));
+                let copied = attributes.find_attribute(key, ids::USER_1).unwrap();
+                assert_ne!(copied, marker);
+                assert_eq!(attributes.get(copied).unwrap().long_value(), Some(73));
+                assert!(events
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|event| event.operation == NotifyOperation::Split));
+            }
+        }
+    }
+
+    #[test]
     fn sort_by_param_matches_insertion_order() {
         let p = [3.0, 1.0, 2.0, 1.0, 5.0];
         let s = sort_by_param(5, |_| false, &p).unwrap();
@@ -2833,7 +2939,7 @@ mod tests {
             };
             let mut edits = BorrowedStitchEdits {
                 env: &mut env,
-                curve_ref: &reject_curve,
+                curve_identity: crate::topology::brep::p9::CurveIdentity::Checked(&reject_curve),
             };
             let mut callback = DefaultStitchCallback::new();
             let mut stitch = Stitch::new(&mut callback, 0.01, true, true);

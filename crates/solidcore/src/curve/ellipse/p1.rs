@@ -513,6 +513,26 @@ impl PolarConversion {
         db: &mut DatabaseReader,
         version: u64,
     ) -> Result<(Self, Option<Ellipse>)> {
+        let (polar, curve) = Self::read_from_db_with_curve_object(k, db, version)?;
+        let ellipse = match curve.map(Curve::into_kind) {
+            Some(CurveKind::Ellipse(ellipse)) => Some(ellipse),
+            None => None,
+            Some(_) => {
+                return Err(SolidError::invalid_input(
+                    OP_READ_POLAR,
+                    "the stored polar curve is not an ellipse",
+                ))
+            }
+        };
+        Ok((polar, ellipse))
+    }
+
+    /// Same reader retaining the original owned curve wrapper and its identity.
+    pub(crate) fn read_from_db_with_curve_object(
+        k: &Kernel,
+        db: &mut DatabaseReader,
+        version: u64,
+    ) -> Result<(Self, Option<Curve>)> {
         let (mut pc, has_curve) = Self::read_tables(db)?;
         if !has_curve {
             // m_cpCurve is the (null) back pointer passed in
@@ -532,18 +552,17 @@ impl PolarConversion {
             },
             None => None,
         };
-        let ellipse = match curve.map(Curve::into_kind) {
-            None => None,
-            Some(CurveKind::Ellipse(e)) => Some(e),
-            Some(_) => {
-                return Err(SolidError::invalid_input(
-                    OP_READ_POLAR,
-                    "the stored polar curve is not an ellipse",
-                ))
-            }
-        };
-        pc.has_curve = ellipse.is_some();
-        Ok((pc, ellipse))
+        if curve
+            .as_ref()
+            .is_some_and(|curve| !matches!(curve.kind(), CurveKind::Ellipse(_)))
+        {
+            return Err(SolidError::invalid_input(
+                OP_READ_POLAR,
+                "the stored polar curve is not an ellipse",
+            ));
+        }
+        pc.has_curve = curve.is_some();
+        Ok((pc, curve))
     }
 
     /// The end of a read whose table has no stored curve: the back pointer

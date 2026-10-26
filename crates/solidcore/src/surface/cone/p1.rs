@@ -262,8 +262,7 @@ pub(crate) fn cone_convert_uv_from_nurbs_to_step(
 
     // convert sweep coordinate
     let circle = rev
-        .polar_curve
-        .as_ref()
+        .polar_curve()
         .ok_or(SolidError::null_pointer(OP_TO_STEP))?;
     let (x, _exact) = rev.polar.convert_to_polar_parameter(k, circle, nurb_uv.x)?;
 
@@ -1310,14 +1309,10 @@ impl Cone {
     /// polar conversion.
     pub fn convert_uv_from_step_to_nurbs(&self, k: &Kernel, step_uv: Point2) -> Result<Point2> {
         // convert sweep coordinate
-        let circle = self
-            .rev
-            .polar_curve
-            .as_ref()
-            .ok_or(SolidError::invalid_input(
-                OP_TO_NURBS,
-                "polar converter has no curve",
-            ))?;
+        let circle = self.rev.polar_curve().ok_or(SolidError::invalid_input(
+            OP_TO_NURBS,
+            "polar converter has no curve",
+        ))?;
         let (x, _exact) = self
             .rev
             .polar
@@ -1364,14 +1359,10 @@ impl Cone {
     ///
     /// `InvalidInput` without polar curve; [`SolidError::Unported`].
     fn sweep_nurbs_param_written(&self, k: &Kernel, step_u: f64) -> Result<Option<f64>> {
-        let circle = self
-            .rev
-            .polar_curve
-            .as_ref()
-            .ok_or(SolidError::invalid_input(
-                OP_TO_NURBS,
-                "polar converter has no curve",
-            ))?;
+        let circle = self.rev.polar_curve().ok_or(SolidError::invalid_input(
+            OP_TO_NURBS,
+            "polar converter has no curve",
+        ))?;
         self.rev
             .polar
             .convert_to_nurbs_parameter_or_written(k, circle, step_u, 0.0)
