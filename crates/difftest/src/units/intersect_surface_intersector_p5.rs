@@ -136,6 +136,15 @@ struct Inputs {
     ang: Option<f64>,
     /// Tree of A and (unless B is A) of B; `None`: the caches build their own.
     trees: Option<(Vec<NodeIn>, Option<Vec<NodeIn>>)>,
+    /// Per surface (A, B): keep the B-spline knots exactly as given (see
+    /// [`ffi::Case::raw_knots`]); Rust builds that surface over a borrowed NURB, whose
+    /// knots `SmBSplineSurface(gw_SURFACE*, TRUE, ..)` leaves as they are.
+    #[serde(default, skip_serializing_if = "no_raw_knots")]
+    raw_knots: [bool; 2],
+}
+
+fn no_raw_knots(r: &[bool; 2]) -> bool {
+    !r[0] && !r[1]
 }
 
 fn cpt4(c: &[Option<f64>; 4]) -> [f64; 4] {
@@ -197,6 +206,7 @@ fn ffi_case(i: &Inputs) -> ffi::Case {
         edges: i.edges,
         tol: i.tol,
         ang: i.ang,
+        raw_knots: i.raw_knots,
         trees: i.trees.as_ref().map(|(ta, tb)| {
             (
                 ta.iter().map(ffi_node).collect(),
@@ -234,6 +244,10 @@ fn ext(d: [f64; 4]) -> Extent2d {
 }
 
 fn rust_surface(s: &SurfaceIn) -> Result<Surface, HarnessError> {
+    rust_surface_with(s, false)
+}
+
+fn rust_surface_with(s: &SurfaceIn, raw_knots: bool) -> Result<Surface, HarnessError> {
     match s {
         SurfaceIn::Plane {
             o,
@@ -262,10 +276,10 @@ fn rust_surface(s: &SurfaceIn) -> Result<Surface, HarnessError> {
                 .collect();
             let sur = NurbSurface::new(net, *p, *q, u.clone(), v.clone())
                 .map_err(|e| harness(format!("surface: {e}")))?;
-            Ok(Surface::from(BSplineSurface::from_nurb(sur, false)))
+            Ok(Surface::from(BSplineSurface::from_nurb(sur, raw_knots)))
         }
         SurfaceIn::CurveBounded { basis } => Ok(Surface::from(CurveBoundedSurface::new(
-            rust_surface(basis)?,
+            rust_surface_with(basis, raw_knots)?,
             Vec::new(),
             Vec::new(),
             true,
@@ -451,9 +465,9 @@ fn record(
 }
 
 fn rust(i: &Inputs) -> Result<Output, HarnessError> {
-    let a = rust_surface(&i.a)?;
+    let a = rust_surface_with(&i.a, i.raw_knots[0])?;
     let b_owned = match &i.b {
-        Some(b) => Some(rust_surface(b)?),
+        Some(b) => Some(rust_surface_with(b, i.raw_knots[1])?),
         None => None,
     };
     let b = b_owned.as_ref().unwrap_or(&a);
@@ -995,6 +1009,7 @@ fn gen_case(rng: &mut Rng) -> Option<Inputs> {
         tol,
         ang,
         trees,
+        raw_knots: [false; 2],
     })
 }
 
@@ -1053,6 +1068,7 @@ fn edge_cases() -> Vec<(String, Value)> {
                     tol: None,
                     ang: None,
                     trees: trees.then_some((ta, Some(tb))),
+                    raw_knots: [false; 2],
                 };
                 if let Ok(v) = serde_json::to_value(&i) {
                     out.push((format!("edge_{name}_{form}_{tag}"), v));
@@ -1077,6 +1093,7 @@ fn edge_cases() -> Vec<(String, Value)> {
         tol: Some(1e-3),
         ang: Some(0.2),
         trees: Some((ta, None)),
+        raw_knots: [false; 2],
     };
     if let Ok(v) = serde_json::to_value(&i) {
         out.push(("edge_self_plane".into(), v));

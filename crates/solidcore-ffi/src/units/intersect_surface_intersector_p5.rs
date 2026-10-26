@@ -73,6 +73,11 @@ pub struct Case {
     pub ang: Option<f64>,
     /// Hand-built trees of A and (unless B is A) B, replacing the cache trees.
     pub trees: Option<(Vec<NodeIn>, Option<Vec<NodeIn>>)>,
+    /// Per surface (A, B): a B-spline (or a curve-bounded surface's B-spline basis)
+    /// keeps its knots exactly as given: the shim writes them back over the NURB after
+    /// `SmBSplineSurface(gw_SURFACE*, FALSE, ctx)` has fixed them up
+    /// (`sm_FixupKnotVector`), so near-coincident knots reach the intersector.
+    pub raw_knots: [bool; 2],
 }
 
 fn finite(x: f64) -> Result<f64, FfiError> {
@@ -222,7 +227,7 @@ impl Enc {
         Ok(())
     }
 
-    fn surface(&mut self, s: &SurfaceIn) -> Result<(), FfiError> {
+    fn surface(&mut self, s: &SurfaceIn, raw_knots: bool) -> Result<(), FfiError> {
         match s {
             SurfaceIn::Plane {
                 o,
@@ -259,7 +264,7 @@ impl Enc {
                 check_knots(u, nu, *p)?;
                 check_knots(v, nv, *q)?;
                 check_weights(net.iter().flatten())?;
-                self.int(1);
+                self.int(if raw_knots { 4 } else { 1 });
                 self.int(*p);
                 self.int(*q);
                 self.int(nu);
@@ -275,7 +280,7 @@ impl Enc {
                     return Err(bad("nested curve-bounded surface"));
                 }
                 self.int(3);
-                self.surface(basis)
+                self.surface(basis, raw_knots)
             }
         }
     }
@@ -314,10 +319,10 @@ impl Enc {
 /// [`FfiError::InvalidArgument`] for a rejected case.
 pub fn encode(case: &Case) -> Result<Vec<f64>, FfiError> {
     let mut e = Enc { v: Vec::new() };
-    e.surface(&case.a)?;
+    e.surface(&case.a, case.raw_knots[0])?;
     match &case.b {
         None => e.int(2),
-        Some(b) => e.surface(b)?,
+        Some(b) => e.surface(b, case.raw_knots[1])?,
     }
     e.nums(&case.dom1)?;
     e.nums(&case.dom2)?;

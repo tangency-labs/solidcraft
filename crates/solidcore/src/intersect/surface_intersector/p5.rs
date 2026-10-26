@@ -650,9 +650,13 @@ impl<'t, O: SolutionObject + Copy + PartialEq + 't> AdvSurfaceIntersector<'_, 't
         }
 
         // get StartPoints = Surf1->NaturalBoundaryCurve/Surf2 Intersections and
-        // Surf1/Surf2->NaturalBoundaryCurve Intersections (on copies of the caches)
+        // Surf1/Surf2->NaturalBoundaryCurve Intersections (on copies of the caches:
+        // exact ones, since upstream searches its own caches)
         if !self.base.doing_self_intersection {
-            let mut boundary_caches = caches.to_vec();
+            let mut boundary_caches = caches
+                .iter()
+                .map(SurfaceCache::clone_for_evaluation)
+                .collect::<Result<Vec<_>>>()?;
             self.base.find_boundary_start_points_with_queries(
                 k,
                 &mut boundary_caches,

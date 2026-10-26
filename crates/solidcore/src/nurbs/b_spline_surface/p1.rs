@@ -528,8 +528,9 @@ fn owner_zone_tolerance(req: &BoundingBoxRequest<'_>) -> f64 {
         .unwrap_or(crate::geom::tol::ZONE_TOL_3D)
 }
 
-/// `SmSurface::IsDegenerateCurve` (the base body, on a copy of the B-spline as an
-/// [`SmSurface`](crate::surface::surface::Surface)).
+/// `SmSurface::IsDegenerateCurve` (the base body, on an exact copy of the B-spline as
+/// an [`SmSurface`](crate::surface::surface::Surface): upstream passes the call along
+/// on the object itself, and [`BSplineSurface::copy`] would fix the knots up).
 fn surface_is_degenerate_curve(
     k: &Kernel,
     srf: &BSplineSurface,
@@ -537,7 +538,7 @@ fn surface_is_degenerate_curve(
     uv_domain: Option<&Extent2d>,
     tol_3d: f64,
 ) -> Result<bool> {
-    let s = crate::surface::surface::Surface::from(srf.clone());
+    let s = crate::surface::surface::Surface::from(srf.clone_exact());
     crate::surface::surface::p1::base_is_degenerate_curve(k, &s, angle_tol_deg, uv_domain, tol_3d)
 }
 

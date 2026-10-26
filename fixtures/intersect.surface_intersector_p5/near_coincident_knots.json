@@ -1,0 +1,904 @@
+{
+ "cases": [
+  {
+   "name": "near_coincident_knots_x0.3_eps1e-10",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:6423 (FindBoundaryStartPoints searches the intersector's own surface caches)",
+   "inputs": {
+    "a": {
+     "kind": "b_spline",
+     "p": 2,
+     "q": 1,
+     "net": [
+      [
+       [
+        0,
+        0.0,
+        0,
+        null
+       ],
+       [
+        0,
+        1.0,
+        0.1,
+        null
+       ]
+      ],
+      [
+       [
+        0.25,
+        0.0,
+        0.3,
+        null
+       ],
+       [
+        0.25,
+        1.0,
+        0.4,
+        null
+       ]
+      ],
+      [
+       [
+        0.5,
+        0.0,
+        0.0,
+        null
+       ],
+       [
+        0.5,
+        1.0,
+        0.1,
+        null
+       ]
+      ],
+      [
+       [
+        0.75,
+        0.0,
+        0.3,
+        null
+       ],
+       [
+        0.75,
+        1.0,
+        0.4,
+        null
+       ]
+      ],
+      [
+       [
+        1.0,
+        0.0,
+        0.0,
+        null
+       ],
+       [
+        1.0,
+        1.0,
+        0.1,
+        null
+       ]
+      ]
+     ],
+     "u": [
+      0,
+      0,
+      0,
+      0.5,
+      0.5000000001,
+      1,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "o": [
+      0.3,
+      -1.0,
+      -1.0
+     ],
+     "x": [
+      0,
+      1.0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1.0
+     ],
+     "scale": [
+      1.0,
+      1.0
+     ],
+     "domain": [
+      0.0,
+      0.0,
+      3.0,
+      3.0
+     ]
+    },
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     3.0,
+     3.0
+    ],
+    "edges": [
+     true,
+     true
+    ],
+    "tol": null,
+    "ang": null,
+    "trees": null,
+    "raw_knots": [
+     true,
+     false
+    ]
+   }
+  },
+  {
+   "name": "near_coincident_knots_x0.55_eps1e-10",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:6423 (FindBoundaryStartPoints searches the intersector's own surface caches)",
+   "inputs": {
+    "a": {
+     "kind": "b_spline",
+     "p": 2,
+     "q": 1,
+     "net": [
+      [
+       [
+        0,
+        0.0,
+        0,
+        null
+       ],
+       [
+        0,
+        1.0,
+        0.1,
+        null
+       ]
+      ],
+      [
+       [
+        0.25,
+        0.0,
+        0.3,
+        null
+       ],
+       [
+        0.25,
+        1.0,
+        0.4,
+        null
+       ]
+      ],
+      [
+       [
+        0.5,
+        0.0,
+        0.0,
+        null
+       ],
+       [
+        0.5,
+        1.0,
+        0.1,
+        null
+       ]
+      ],
+      [
+       [
+        0.75,
+        0.0,
+        0.3,
+        null
+       ],
+       [
+        0.75,
+        1.0,
+        0.4,
+        null
+       ]
+      ],
+      [
+       [
+        1.0,
+        0.0,
+        0.0,
+        null
+       ],
+       [
+        1.0,
+        1.0,
+        0.1,
+        null
+       ]
+      ]
+     ],
+     "u": [
+      0,
+      0,
+      0,
+      0.5,
+      0.5000000001,
+      1,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "o": [
+      0.55,
+      -1.0,
+      -1.0
+     ],
+     "x": [
+      0,
+      1.0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1.0
+     ],
+     "scale": [
+      1.0,
+      1.0
+     ],
+     "domain": [
+      0.0,
+      0.0,
+      3.0,
+      3.0
+     ]
+    },
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     3.0,
+     3.0
+    ],
+    "edges": [
+     true,
+     true
+    ],
+    "tol": null,
+    "ang": null,
+    "trees": null,
+    "raw_knots": [
+     true,
+     false
+    ]
+   }
+  },
+  {
+   "name": "near_coincident_knots_x0.8_eps1e-10",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:6423 (FindBoundaryStartPoints searches the intersector's own surface caches)",
+   "inputs": {
+    "a": {
+     "kind": "b_spline",
+     "p": 2,
+     "q": 1,
+     "net": [
+      [
+       [
+        0,
+        0.0,
+        0,
+        null
+       ],
+       [
+        0,
+        1.0,
+        0.1,
+        null
+       ]
+      ],
+      [
+       [
+        0.25,
+        0.0,
+        0.3,
+        null
+       ],
+       [
+        0.25,
+        1.0,
+        0.4,
+        null
+       ]
+      ],
+      [
+       [
+        0.5,
+        0.0,
+        0.0,
+        null
+       ],
+       [
+        0.5,
+        1.0,
+        0.1,
+        null
+       ]
+      ],
+      [
+       [
+        0.75,
+        0.0,
+        0.3,
+        null
+       ],
+       [
+        0.75,
+        1.0,
+        0.4,
+        null
+       ]
+      ],
+      [
+       [
+        1.0,
+        0.0,
+        0.0,
+        null
+       ],
+       [
+        1.0,
+        1.0,
+        0.1,
+        null
+       ]
+      ]
+     ],
+     "u": [
+      0,
+      0,
+      0,
+      0.5,
+      0.5000000001,
+      1,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "o": [
+      0.8,
+      -1.0,
+      -1.0
+     ],
+     "x": [
+      0,
+      1.0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1.0
+     ],
+     "scale": [
+      1.0,
+      1.0
+     ],
+     "domain": [
+      0.0,
+      0.0,
+      3.0,
+      3.0
+     ]
+    },
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     3.0,
+     3.0
+    ],
+    "edges": [
+     true,
+     true
+    ],
+    "tol": null,
+    "ang": null,
+    "trees": null,
+    "raw_knots": [
+     true,
+     false
+    ]
+   }
+  },
+  {
+   "name": "near_coincident_knots_x0.3_eps3e-09",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:6423 (FindBoundaryStartPoints searches the intersector's own surface caches)",
+   "inputs": {
+    "a": {
+     "kind": "b_spline",
+     "p": 2,
+     "q": 1,
+     "net": [
+      [
+       [
+        0,
+        0.0,
+        0,
+        null
+       ],
+       [
+        0,
+        1.0,
+        0.1,
+        null
+       ]
+      ],
+      [
+       [
+        0.25,
+        0.0,
+        0.3,
+        null
+       ],
+       [
+        0.25,
+        1.0,
+        0.4,
+        null
+       ]
+      ],
+      [
+       [
+        0.5,
+        0.0,
+        0.0,
+        null
+       ],
+       [
+        0.5,
+        1.0,
+        0.1,
+        null
+       ]
+      ],
+      [
+       [
+        0.75,
+        0.0,
+        0.3,
+        null
+       ],
+       [
+        0.75,
+        1.0,
+        0.4,
+        null
+       ]
+      ],
+      [
+       [
+        1.0,
+        0.0,
+        0.0,
+        null
+       ],
+       [
+        1.0,
+        1.0,
+        0.1,
+        null
+       ]
+      ]
+     ],
+     "u": [
+      0,
+      0,
+      0,
+      0.5,
+      0.500000003,
+      1,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "o": [
+      0.3,
+      -1.0,
+      -1.0
+     ],
+     "x": [
+      0,
+      1.0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1.0
+     ],
+     "scale": [
+      1.0,
+      1.0
+     ],
+     "domain": [
+      0.0,
+      0.0,
+      3.0,
+      3.0
+     ]
+    },
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     3.0,
+     3.0
+    ],
+    "edges": [
+     true,
+     true
+    ],
+    "tol": null,
+    "ang": null,
+    "trees": null,
+    "raw_knots": [
+     true,
+     false
+    ]
+   }
+  },
+  {
+   "name": "near_coincident_knots_x0.55_eps3e-09",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:6423 (FindBoundaryStartPoints searches the intersector's own surface caches)",
+   "inputs": {
+    "a": {
+     "kind": "b_spline",
+     "p": 2,
+     "q": 1,
+     "net": [
+      [
+       [
+        0,
+        0.0,
+        0,
+        null
+       ],
+       [
+        0,
+        1.0,
+        0.1,
+        null
+       ]
+      ],
+      [
+       [
+        0.25,
+        0.0,
+        0.3,
+        null
+       ],
+       [
+        0.25,
+        1.0,
+        0.4,
+        null
+       ]
+      ],
+      [
+       [
+        0.5,
+        0.0,
+        0.0,
+        null
+       ],
+       [
+        0.5,
+        1.0,
+        0.1,
+        null
+       ]
+      ],
+      [
+       [
+        0.75,
+        0.0,
+        0.3,
+        null
+       ],
+       [
+        0.75,
+        1.0,
+        0.4,
+        null
+       ]
+      ],
+      [
+       [
+        1.0,
+        0.0,
+        0.0,
+        null
+       ],
+       [
+        1.0,
+        1.0,
+        0.1,
+        null
+       ]
+      ]
+     ],
+     "u": [
+      0,
+      0,
+      0,
+      0.5,
+      0.500000003,
+      1,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "o": [
+      0.55,
+      -1.0,
+      -1.0
+     ],
+     "x": [
+      0,
+      1.0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1.0
+     ],
+     "scale": [
+      1.0,
+      1.0
+     ],
+     "domain": [
+      0.0,
+      0.0,
+      3.0,
+      3.0
+     ]
+    },
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     3.0,
+     3.0
+    ],
+    "edges": [
+     true,
+     true
+    ],
+    "tol": null,
+    "ang": null,
+    "trees": null,
+    "raw_knots": [
+     true,
+     false
+    ]
+   }
+  },
+  {
+   "name": "near_coincident_knots_x0.8_eps3e-09",
+   "upstream_ref": "source/SMLib/src/SmSurfaceIntersector.cpp:6423 (FindBoundaryStartPoints searches the intersector's own surface caches)",
+   "inputs": {
+    "a": {
+     "kind": "b_spline",
+     "p": 2,
+     "q": 1,
+     "net": [
+      [
+       [
+        0,
+        0.0,
+        0,
+        null
+       ],
+       [
+        0,
+        1.0,
+        0.1,
+        null
+       ]
+      ],
+      [
+       [
+        0.25,
+        0.0,
+        0.3,
+        null
+       ],
+       [
+        0.25,
+        1.0,
+        0.4,
+        null
+       ]
+      ],
+      [
+       [
+        0.5,
+        0.0,
+        0.0,
+        null
+       ],
+       [
+        0.5,
+        1.0,
+        0.1,
+        null
+       ]
+      ],
+      [
+       [
+        0.75,
+        0.0,
+        0.3,
+        null
+       ],
+       [
+        0.75,
+        1.0,
+        0.4,
+        null
+       ]
+      ],
+      [
+       [
+        1.0,
+        0.0,
+        0.0,
+        null
+       ],
+       [
+        1.0,
+        1.0,
+        0.1,
+        null
+       ]
+      ]
+     ],
+     "u": [
+      0,
+      0,
+      0,
+      0.5,
+      0.500000003,
+      1,
+      1,
+      1
+     ],
+     "v": [
+      0,
+      0,
+      1,
+      1
+     ]
+    },
+    "b": {
+     "kind": "plane",
+     "o": [
+      0.8,
+      -1.0,
+      -1.0
+     ],
+     "x": [
+      0,
+      1.0,
+      0
+     ],
+     "y": [
+      0,
+      0,
+      1.0
+     ],
+     "scale": [
+      1.0,
+      1.0
+     ],
+     "domain": [
+      0.0,
+      0.0,
+      3.0,
+      3.0
+     ]
+    },
+    "dom1": [
+     0.0,
+     0.0,
+     1.0,
+     1.0
+    ],
+    "dom2": [
+     0.0,
+     0.0,
+     3.0,
+     3.0
+    ],
+    "edges": [
+     true,
+     true
+    ],
+    "tol": null,
+    "ang": null,
+    "trees": null,
+    "raw_knots": [
+     true,
+     false
+    ]
+   }
+  }
+ ]
+}

@@ -92,10 +92,15 @@ struct Rd
     }
 };
 
-// `0 o x y scale dom` (SmPlane) or `1 p q nu nv net(x y z w) u v` (SmBSplineSurface).
+// `0 o x y scale dom` (SmPlane) or `1 p q nu nv net(x y z w) u v` (SmBSplineSurface);
+// `4 ..` is `1 ..` with the given knots written back over the NURB after the constructor
+// has fixed them up (sm_FixupKnotVector), so near-coincident knots stay as given.
 SmSurface* read_basic_surface(Rd& rd, const SmContext& ctx)
 {
-    int64_t kind = rd.idx(0, 1);
+    int64_t kind = rd.idx(0, 4);
+    if (kind == 2 || kind == 3)
+        throw Bad();
+    bool raw_knots = kind == 4;
     if (kind == 0)
     {
         SmPoint3d o = rd.vec();
@@ -132,7 +137,17 @@ SmSurface* read_basic_surface(Rd& rd, const SmContext& ctx)
         sur->knu->U[i] = v[k++];
     for (gw_INDEX i = 0; i <= s; i++)
         sur->knv->U[i] = v[k++];
-    return new (ctx) SmBSplineSurface(sur, FALSE, &ctx);
+    SmBSplineSurface* bs = new (ctx) SmBSplineSurface(sur, FALSE, &ctx);
+    if (raw_knots)
+    {
+        gw_SURFACE* own = bs->GetGwNurbPointer();
+        size_t kk = 4 * (size_t)nu * nv;
+        for (gw_INDEX i = 0; i <= r; i++)
+            own->knu->U[i] = v[kk++];
+        for (gw_INDEX i = 0; i <= s; i++)
+            own->knv->U[i] = v[kk++];
+    }
+    return bs;
 }
 
 // A basic surface (`0 ..` / `1 ..`) or `3 basic`: an SmCurveBoundedSurface (implicit outer, no

@@ -1669,6 +1669,37 @@ impl<O: Clone> Clone for SurfaceCache<O> {
     }
 }
 
+impl<O: Clone> SurfaceCache<O> {
+    /// A copy standing for this same cache where upstream keeps using it (the
+    /// boundary start-point search of `SmSurfaceIntersector::DoIntersection` runs on
+    /// the intersector's own caches): the surfaces and iso boundary curves are exact
+    /// evaluation copies, since [`Clone`] runs the copy constructor's knot fix-up,
+    /// which moves near-coincident knots of a fillet surface.
+    ///
+    /// # Errors
+    ///
+    /// An owned geometry chain deeper than the evaluation-copy bound.
+    pub(crate) fn clone_for_evaluation(&self) -> Result<Self> {
+        let mut c = self.clone();
+        c.surface = self.surface.clone_for_evaluation()?;
+        let mut subdivision_surfaces = Vec::new();
+        for (o, s) in &self.subdivision_surfaces {
+            subdivision_surfaces.push((o.clone(), s.clone_for_evaluation()?));
+        }
+        c.subdivision_surfaces = subdivision_surfaces;
+        c.iso_boundary_curves = match &self.iso_boundary_curves {
+            Some([a, b, cc, d]) => Some([
+                a.clone_for_evaluation()?,
+                b.clone_for_evaluation()?,
+                cc.clone_for_evaluation()?,
+                d.clone_for_evaluation()?,
+            ]),
+            None => None,
+        };
+        Ok(c)
+    }
+}
+
 impl<O: Copy + PartialEq> SurfaceCache<O> {
     /// A cache of `surface` over `uv_domain` with the tessellation controls `opts`,
     /// without tree (the field initialisation of `SmSurfaceCache::SmSurfaceCache`).
