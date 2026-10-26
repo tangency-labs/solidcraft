@@ -41,6 +41,8 @@
 //! Opt-in `Kernel::fixes.boolean_cleanup_removes_slits` (WR-304, #1120): after each
 //! edge removal `boolean_post_process` also checks the merged face's edges that have
 //! it on both sides (slits), skipping any a later removal deleted.
+//! Opt-in `Kernel::fixes.fillet_cleanup_keeps_target_faces` (WR-459, #423): the edges in
+//! `CleanupRelations::kept_edges`, and those whose faces are all in `kept_faces`, stay.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -445,6 +447,12 @@ pub struct CleanupRelations {
     pub vertices: Vec<VertexId>,
     /// Shared live mates; deleted entities must be removed by the intersector.
     pub mates: Relations,
+    /// WR-459 (`Kernel::fixes.fillet_cleanup_keeps_target_faces`): the edges and faces
+    /// the clean-up leaves alone (the fork's `m_sPostProcessKeptEdges`/`Faces`: a
+    /// fillet's target), and any edge between two kept faces. Empty otherwise.
+    pub kept_edges: BTreeSet<EdgeId>,
+    /// See [`CleanupRelations::kept_edges`].
+    pub kept_faces: BTreeSet<FaceId>,
 }
 
 fn brep_edges(brep: &Brep) -> Result<Vec<EdgeId>> {
@@ -502,6 +510,15 @@ pub fn boolean_post_process(
             }
         } else if !check_all_edges && relations.mates.edges.other(e).is_none() {
             continue;
+        }
+        if relations.kept_edges.contains(&e) {
+            continue;
+        }
+        if !relations.kept_faces.is_empty() {
+            let faces = edge::faces(brep, e, None)?;
+            if !faces.is_empty() && faces.iter().all(|f| relations.kept_faces.contains(f)) {
+                continue;
+            }
         }
         let topological = edge::is_topological(k, brep, e, 10.0)?;
         if !topological.is_topological {

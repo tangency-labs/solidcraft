@@ -302,6 +302,10 @@ impl FilletFinishAccess<FilletObject> for FinishAccess<'_, '_> {
                 relations.mates.vertices.record(vertex, other)?;
             }
         }
+        if let Some((edges, faces)) = &self.0.cleanup_kept {
+            relations.kept_edges.clone_from(edges);
+            relations.kept_faces.clone_from(faces);
+        }
         let before = p1::edges(self.0.target, None)?;
         let result = crate::boolean::merge::p1::boolean_post_process(
             k,
@@ -458,6 +462,15 @@ impl FilletSession<'_> {
         mut error_out: Option<&mut ErrorInfo<FilletObject>>,
     ) -> Result<()> {
         self.sync_self_intersection_handler();
+        // WR-459: the clean-up after filleting leaves the target's own edges and faces.
+        self.objects.cleanup_kept = if k.fixes.fillet_cleanup_keeps_target_faces {
+            Some((
+                p1::edges(self.objects.target, None)?.into_iter().collect(),
+                p1::faces(self.objects.target, None)?.into_iter().collect(),
+            ))
+        } else {
+            None
+        };
         self.with_filleting_context(k, |session, k| {
             if ignore(session.create_fillet_brep(k, error_out.as_deref_mut()))?.is_none() {
                 return Err(failure());

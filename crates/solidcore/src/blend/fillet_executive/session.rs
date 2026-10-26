@@ -43,7 +43,7 @@
 
 pub mod insertion;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::p1::{ExecutiveObjects, SolverLoadingAccess};
 use super::p2::{EdgeMapAccess, FilletParameters, FilletParametersAccess, SolverSpec};
@@ -262,6 +262,8 @@ struct SessionObjects<'target> {
     laws: Vec<FilletLaw>,
     attributes: AttributeStore,
     merge_attributes: Option<Vec<AttributeHandle>>,
+    /// WR-459: the target's edges and faces before filleting, kept by the clean-up.
+    cleanup_kept: Option<(BTreeSet<EdgeId>, BTreeSet<FaceId>)>,
     extended_surfaces: BTreeMap<FaceId, Surface>,
     edge_caches: BTreeMap<EdgeId, CurveCache<FilletObject>>,
     target_serial: u64,
@@ -1162,6 +1164,7 @@ impl<'target> FilletSession<'target> {
                 laws: Vec::new(),
                 attributes,
                 merge_attributes: None,
+                cleanup_kept: None,
                 extended_surfaces: BTreeMap::new(),
                 edge_caches: BTreeMap::new(),
                 target_serial,

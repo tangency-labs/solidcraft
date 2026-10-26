@@ -1403,6 +1403,7 @@ impl ManifoldIntersector for ManifoldKernelAdapter<'_> {
             edges: state.intersection_edges.clone(),
             vertices: state.intersection_vertices.clone(),
             mates: std::mem::take(&mut self.merge.intersector),
+            ..p1::CleanupRelations::default()
         };
         let result = p1::boolean_post_process(kernels.primary, primary, &cleanup, check_all_edges);
         self.merge.intersector = cleanup.mates;
