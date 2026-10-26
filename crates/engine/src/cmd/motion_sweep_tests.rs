@@ -342,21 +342,26 @@ fn find_limits_meets_the_block_both_ways_round() {
 }
 
 /// A door that meets nothing on a whole turn either way gets a turn, half each way from where
-/// it is.
+/// it is: alone (nothing to meet, nothing swept) and with a lamp above it.
 #[test]
 fn find_limits_of_a_door_that_meets_nothing_spans_a_turn() {
     let mut s = Session::default();
     block(&mut s, "Door", [0.0, 0.0, 0.0], [100.0, 4.0, 50.0]);
-    block(&mut s, "Lamp", [0.0, 0.0, 80.0], [20.0, 20.0, 20.0]);
     run(
         &mut s,
         "joint.create",
         json!({"type": "revolute", "a": {"occurrence": 0, "point": [0, 0, 0]}, "b": {"occurrence": "Door", "point": [0, 0, 0]}, "flip": true, "name": "Hinge"}),
     );
     run(&mut s, "joint.drive", json!({"joint": "Hinge", "value": 30}));
-    let (lo, hi, lo_by, hi_by) = limits(&run(&mut s, "joint.find_limits", json!({"joint": "Hinge"})));
-    assert!((lo + 150.0).abs() < 1e-6 && (hi - 210.0).abs() < 1e-6, "{lo}° … {hi}°");
-    assert_eq!((lo_by, hi_by), (json!("turn"), json!("turn")));
+    for lamp in [false, true] {
+        if lamp {
+            block(&mut s, "Lamp", [0.0, 0.0, 80.0], [20.0, 20.0, 20.0]);
+        }
+        let r = run(&mut s, "joint.find_limits", json!({"joint": "Hinge"}));
+        let (lo, hi, lo_by, hi_by) = limits(&r);
+        assert!((lo + 150.0).abs() < 1e-6 && (hi - 210.0).abs() < 1e-6, "{lo}° … {hi}°");
+        assert_eq!((lo_by, hi_by, num(&r["pairs"])), (json!("turn"), json!("turn"), if lamp { 1.0 } else { 0.0 }), "{r}");
+    }
 }
 
 /// A slider pushed into a wall stops where they meet; the other way it meets nothing within the

@@ -130,11 +130,13 @@ pub enum Asm {
 /// The snap under the cursor, remembered for the selection it was found for.
 pub type Hover = Option<(Sel, Option<SnapPt>)>;
 
-/// A search off the window thread: where it leaves its reply, and the design it searched.
+/// A search off the window thread: where it leaves its reply, and the design and the joint (as
+/// the dialog had it) it searched.
 #[derive(Clone, Debug)]
 pub struct Search {
     reply: std::sync::Arc<std::sync::Mutex<Option<Result<Value, String>>>>,
     design: std::sync::Weak<solidcraft_engine::doc::Document>,
+    joint: Vec<(String, Value)>,
 }
 
 /// The Joint and As-built Joint dialogs.
@@ -945,16 +947,18 @@ fn find_limits_row(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut JointForm, id:
     if let Some(search) = &f.search {
         // A poisoned lock: the search's thread panicked.
         let reply = search.reply.lock().map(|mut r| r.take()).unwrap_or_else(|_| Some(Err(crate::i18n::tr("joint.find_limits_failed").to_string())));
-        let same = search.design.upgrade().is_some_and(|d| std::sync::Arc::ptr_eq(&d, &app.session.doc));
         match reply {
-            // Found for a design changed since (by a script, the control channel, undo).
-            Some(_) if !same => {
-                f.search = None;
-                f.found_note = Some(crate::i18n::tr("joint.find_limits_stale").to_string());
-            }
             Some(reply) => {
+                // Found for a design changed since (by a script, the control channel, undo), or
+                // a joint the dialog has changed since (its flip, angle or offset): dropped.
+                let same = search.design.upgrade().is_some_and(|d| std::sync::Arc::ptr_eq(&d, &app.session.doc))
+                    && edit_commands(app, f).is_ok_and(|now| now == search.joint);
                 f.search = None;
-                fill_limits(&app.session.doc, f, reply);
+                if same {
+                    fill_limits(&app.session.doc, f, reply);
+                } else {
+                    f.found_note = Some(crate::i18n::tr("joint.find_limits_stale").to_string());
+                }
             }
             None => ui.ctx().request_repaint_after(std::time::Duration::from_millis(100)),
         }
@@ -983,21 +987,27 @@ fn find_limits_row(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut JointForm, id:
     }
 }
 
+/// The commands OK would run for the joint as the dialog has it, but its limits (what Find
+/// Limits fills in).
+fn edit_commands(app: &SolveApp, f: &JointForm) -> Result<Vec<(String, Value)>, String> {
+    let edit = Dialog::new(Kind::Assembly(Asm::Joint(Box::new(f.clone()))), Vec::new());
+    Ok(crate::dialogs::apply_commands(app, &edit)?.into_iter().filter(|(id, _)| id != "joint.limits").collect())
+}
+
 /// Find Limits: on a copy of the design, the joint as the dialog has it now (its type and
 /// alignment, as OK would leave them), then `joint.find_limits` on it. Off the window thread
 /// when the app runs commands there, else at once.
 fn find_limits(app: &SolveApp, f: &mut JointForm, id: u64) {
     (f.found_note, f.search) = (None, None);
     f.found.clear();
-    let edit = Dialog::new(Kind::Assembly(Asm::Joint(Box::new(f.clone()))), Vec::new());
-    let mut commands: Vec<(String, Value)> = match crate::dialogs::apply_commands(app, &edit) {
-        // The limits are what the search fills in.
-        Ok(c) => c.into_iter().filter(|(id, _)| id != "joint.limits").collect(),
+    let joint = match edit_commands(app, f) {
+        Ok(c) => c,
         Err(e) => {
             f.found_note = Some(e);
             return;
         }
     };
+    let mut commands = joint.clone();
     commands.push(("joint.find_limits".into(), json!({ "joint": id })));
     // The search's reply, or the first command that failed.
     fn reply<E: std::fmt::Display>(replies: Vec<Result<Value, E>>) -> Result<Value, String> {
@@ -1009,7 +1019,7 @@ fn find_limits(app: &SolveApp, f: &mut JointForm, id: u64) {
     }
     #[cfg(not(target_arch = "wasm32"))]
     if app.apply_off_thread.is_some() {
-        let search = Search { reply: Default::default(), design: std::sync::Arc::downgrade(&app.session.doc) };
+        let search = Search { reply: Default::default(), design: std::sync::Arc::downgrade(&app.session.doc), joint };
         let (ahead, out, list) = (app.session.ahead(), search.reply.clone(), commands.clone());
         let spawned = std::thread::Builder::new().name("find limits".into()).spawn(move || {
             let r = reply(ahead.replies(&list));
@@ -1045,14 +1055,16 @@ fn fill_limits(doc: &solidcraft_engine::doc::Document, f: &mut JointForm, reply:
         let Some(i) = v["index"].as_u64().and_then(|i| usize::try_from(i).ok()) else { continue };
         let (Some(row), Some(note)) = (f.limits.get_mut(i), f.found.get_mut(i)) else { continue };
         let angle = kind.is_angle(i);
-        // A side as the dialog shows it: rounded toward the joint's value, so it stays clear.
-        let side = |key: &str, up: bool| {
-            let x = v[key].as_f64().filter(|x| x.is_finite())?;
-            let (x, step) = if angle { (x, 0.1) } else { (x / scale, 0.01) };
-            let x = if up { (x / step - 1e-6).ceil() * step } else { (x / step + 1e-6).floor() * step };
-            Some(if angle { (num(x, "deg"), format!("{}°", crate::dialogs_coupling::trim(x))) } else { (num(x, &unit), num(x, &unit)) })
+        // A side as the dialog shows it: rounded toward the joint's value, so it stays clear (as
+        // found when the two would cross: a range narrower than the rounding).
+        let (min, max) = (v["min"].as_f64().filter(|x| x.is_finite()), v["max"].as_f64().filter(|x| x.is_finite()));
+        let step = if angle { 0.1 } else { 0.01 * scale };
+        let (lo, hi) = (min.map(|x| (x / step - 1e-6).ceil() * step), max.map(|x| (x / step + 1e-6).floor() * step));
+        let (lo, hi) = if lo.zip(hi).is_some_and(|(lo, hi)| lo > hi) { (min, max) } else { (lo, hi) };
+        let shown = |x: f64| {
+            if angle { (num(x, "deg"), format!("{}°", crate::dialogs_coupling::trim(x))) } else { (num(x / scale, &unit), num(x / scale, &unit)) }
         };
-        let (min, max) = (side("min", true), side("max", false));
+        let (min, max) = (lo.map(shown), hi.map(shown));
         let mut lines = Vec::new();
         for (label, found, by) in [("Minimum", &min, &v["min_by"]), ("Maximum", &max, &v["max_by"])] {
             let which = crate::i18n::tr_label(label);
@@ -1062,8 +1074,9 @@ fn fill_limits(doc: &solidcraft_engine::doc::Document, f: &mut JointForm, reply:
                 Some("limit") => crate::i18n::format("joint.limit_limit", &[("side", which), ("value", value)]),
                 Some("turn") => crate::i18n::format("joint.limit_turn", &[("side", which), ("value", value)]),
                 Some(_) => {
-                    let range = v["range"].as_f64().filter(|x| x.is_finite()).unwrap_or(0.0) / scale;
-                    crate::i18n::format("joint.limit_range", &[("side", which), ("range", &num(range.round(), &unit))])
+                    // Down to a tenth, so it never claims more than was searched.
+                    let range = (v["range"].as_f64().filter(|x| x.is_finite()).unwrap_or(0.0) / scale * 10.0).floor() / 10.0;
+                    crate::i18n::format("joint.limit_range", &[("side", which), ("range", &num(range, &unit))])
                 }
                 None => {
                     let (a, b) = (by["a"].as_str().unwrap_or_default(), by["b"].as_str().unwrap_or_default());
