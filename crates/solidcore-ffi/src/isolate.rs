@@ -61,8 +61,10 @@ fn decode(b: &[u8]) -> Option<Result<Vec<f64>, FfiError>> {
                 return None;
             }
             Some(Ok(body
-                .chunks_exact(8)
-                .map(|c| f64::from_bits(word(c).unwrap_or(0)))
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .map(|c| f64::from_le_bytes(*c))
                 .collect()))
         }
         TAG_STATUS => {
