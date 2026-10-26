@@ -1980,6 +1980,28 @@ fn an_offset_slot_still_moves_with_the_dimension_that_places_it() {
 }
 
 #[test]
+fn an_offset_round_a_rounded_rectangle_leaves_its_width_and_height_apart() {
+    // #6569, as kaievns found it in a Gridfinity base: the offset's corner arcs share the
+    // outline's corner centres, and their held ends put each centre on a 45° line, which tied
+    // the height to the width. Every change of the width was refused as conflicting.
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "W", "expression": "294 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "H", "expression": "252 mm"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    run(&mut s, "sketch.rectangle.center", json!({"center": [0, 0], "corner": [147, 126]}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["p4", "l2"], "value": "W"}));
+    run(&mut s, "sketch.dimension", json!({"entities": ["p1", "l3"], "value": "H"}));
+    run(&mut s, "sketch.fillet", json!({"points": ["p1", "p2", "p3", "p4"], "radius": "4"}));
+    run(&mut s, "sketch.offset", json!({"curves": ["l1"], "distance": "10", "side": [0, -200]}));
+    run(&mut s, "parameters.change", json!({"name": "W", "expression": "252 mm"}));
+    let sk = sketch(&s);
+    let xs = sk.points.iter().map(|p| p.pos.x).fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), x| (lo.min(x), hi.max(x)));
+    let ys = sk.points.iter().map(|p| p.pos.y).fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), y| (lo.min(y), hi.max(y)));
+    // The offset loop is 10 mm out all round: 252 + 20 wide, the height still 252 + 20.
+    assert!(close(xs.1 - xs.0, 272.0) && close(ys.1 - ys.0, 272.0), "{xs:?} {ys:?}");
+}
+
+#[test]
 fn offset_driver_covers_disconnected_selections_and_refuses_bad_values_atomically() {
     let mut s = new_sketch();
     run(&mut s, "sketch.line", json!({"points":[[0,0],[10,0]]}));
