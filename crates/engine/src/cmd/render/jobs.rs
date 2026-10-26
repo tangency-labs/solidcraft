@@ -708,15 +708,17 @@ fn result_source(s: &mut Session, job: Option<JobId>, command: &str) -> Result<J
     job.or_else(|| s.render_selected_result()).ok_or_else(|| bad(command, "no completed result is selected"))
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Job {
-    job: JobId,
-}
-
 pub(super) fn status(s: &mut Session, params: &Value) -> Result<Value> {
-    let input: Job = serde_json::from_value(params.clone()).map_err(|e| bad("render.status", e.to_string()))?;
-    Ok(json!(s.render_jobs.status(input.job).map_err(job_error)?))
+    let input: ResultJob = serde_json::from_value(params.clone()).map_err(|e| bad("render.status", e.to_string()))?;
+    s.advance_render_batch()?;
+    let Some(job) = input.job else {
+        return Ok(json!({"queue":s.render_queue_state()}));
+    };
+    let mut reply = json!(s.render_jobs.status(job).map_err(job_error)?);
+    if let Some(object) = reply.as_object_mut() {
+        object.insert("queue".into(), json!(s.render_queue_state()));
+    }
+    Ok(reply)
 }
 
 #[derive(Deserialize)]
@@ -754,12 +756,14 @@ pub(super) fn copy(s: &mut Session, params: &Value) -> Result<Value> {
 }
 
 pub(super) fn cancel(s: &mut Session, params: &Value) -> Result<Value> {
-    let input: Job = serde_json::from_value(params.clone()).map_err(|e| bad("render.cancel", e.to_string()))?;
-    let status = s.render_jobs.status(input.job).map_err(job_error)?;
+    let input: ResultJob = serde_json::from_value(params.clone()).map_err(|e| bad("render.cancel", e.to_string()))?;
+    let job = input.job.or(s.render_queue_state().job).ok_or_else(|| bad("render.cancel", "job is required without an active shot queue"))?;
+    let status = s.render_jobs.status(job).map_err(job_error)?;
+    s.cancel_render_batch(job);
     if status.progress.phase.terminal() {
         return Ok(json!(status));
     }
-    Ok(json!(s.render_jobs.handle(input.job).map_err(job_error)?.cancel().map_err(job_error)?))
+    Ok(json!(s.render_jobs.handle(job).map_err(job_error)?.cancel().map_err(job_error)?))
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Deserialize)]

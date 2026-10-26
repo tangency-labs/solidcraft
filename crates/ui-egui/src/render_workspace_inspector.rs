@@ -279,6 +279,29 @@ pub(super) fn panel(app: &mut SolveApp, ui: &mut egui::Ui) {
             }
         },
         |ui| {
+            if output {
+                ui_kit::Panel::pinned_footer(ui, "render_output_footer", 1, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        for (id, label, target) in [
+                            ("render.start", app.tr("cmd.render_start").to_owned(), "render:output:render"),
+                            (
+                                "render.batch",
+                                crate::i18n::format("render.batch_all_shots", &[("count", &app.session.doc.render.setups.len().to_string())]),
+                                "render:output:all-shots",
+                            ),
+                        ] {
+                            let ready = super::ribbon::action_ready(app, id);
+                            let response = ui_kit::icon_label_action(ui, &label, Some("play"), ready.is_ok(), id == "render.start");
+                            let response = if let Err(reason) = ready { response.on_disabled_hover_text(reason) } else { response };
+                            crate::scenario::publish_target(target, response.rect);
+                            if response.clicked() {
+                                app.start(id);
+                            }
+                        }
+                    });
+                    crate::scenario::publish_rect("render:output-footer", ui.min_rect());
+                });
+            }
             if !appearance_editor && !output && !standalone {
                 header(app, ui);
                 ui_kit::Panel::pinned_footer(ui, "render_job_footer", 4, |ui| {

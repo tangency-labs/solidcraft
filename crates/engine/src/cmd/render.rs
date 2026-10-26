@@ -128,9 +128,9 @@ CommandSpec::new("render.preflight", "Check Render Request", jobs::preflight).ic
 CommandSpec::new("render.start", "Render Image", jobs::start).key("R").noundo().doc_only().at("RENDER", "IMAGE").icon("render_image")
     .params("Same request as render.preflight. Captures an immutable product scene and queues a bounded image job. Returns its session-scoped job identity, captured scene_generation and progress. Does not change the design. See docs/render-jobs.md"),
 CommandSpec::new("render.status", "Render Progress", jobs::status).icon("list").noundo().doc_only()
-    .params("job: {session, serial, generation}. Non-blocking progress, error, optional CPU preview metadata {frame_sequence,samples_per_pixel,frame}, and completed frame metadata, optional sampling allocation/work counts and retained-master presentation provenance; no image bytes and no rendering in this call. Preview is separate from the exportable final image."),
+    .params("job?: {session, serial, generation}. Non-blocking progress, errors and captured frame metadata with queue:{running,waiting,job,shot,error}. Without job returns queue only. Advances an explicitly started render.batch through render.start as jobs finish; never pumps render work. Preview is separate from the exportable final image."),
 CommandSpec::new("render.cancel", "Cancel Render", jobs::cancel).icon("delete").noundo().doc_only()
-    .params("job: {session, serial, generation}. Requests cooperative cancellation; completed jobs remain completed. Late cancelled frames cannot be published."),
+    .params("job?: {session, serial, generation}, default the active render.batch job. Requests cooperative cancellation and drops its waiting shots; completed jobs remain completed. Late cancelled frames cannot be published."),
 CommandSpec::new("render.result.copy", "Copy Render Image", jobs::copy).icon("copy").noundo().doc_only()
     .params("job?: completed JobId (default selected result). Validates the retained PNG for app clipboard copying (max 4096 per side, 4194304 pixels); headless returns frame metadata only. Never copies a provisional image or starts a job."),
 CommandSpec::new("render.export", "Export Render Image", jobs::export).icon("export").noundo().doc_only()

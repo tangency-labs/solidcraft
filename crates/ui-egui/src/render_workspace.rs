@@ -25,6 +25,9 @@ const MAX_GEOMETRY_BYTES: usize =
 #[path = "render_workspace_ribbon.rs"]
 mod ribbon;
 
+#[path = "render_workspace_compare.rs"]
+mod compare;
+
 #[path = "render_workspace_cpu.rs"]
 mod cpu;
 
@@ -145,6 +148,7 @@ pub struct State {
     preview_image: Option<PreviewImage>,
     clipboard_image: Option<egui::ColorImage>,
     clipboard_text: Option<String>,
+    comparison_images: Vec<(solidcraft_engine::render::job::JobId, Result<egui::TextureHandle, String>)>,
 }
 
 /// Provisional pixels are never an export source and never replace the retained final image.
@@ -363,6 +367,7 @@ pub struct ViewState {
     completed: Option<solidcraft_engine::render::job::JobId>,
     retained: Vec<solidcraft_engine::render_jobs::RetainedResult>,
     follow_job: bool,
+    compare: Option<compare::View>,
     transparent: bool,
     method: ImageMethod,
     raytrace: RaytraceOptions,
@@ -430,6 +435,7 @@ impl Default for ViewState {
             completed: None,
             retained: Vec::new(),
             follow_job: true,
+            compare: None,
             transparent: false,
             method: ImageMethod::Raster,
             raytrace: RaytraceOptions::default(),
@@ -478,6 +484,7 @@ impl Default for State {
             preview_image: None,
             clipboard_image: None,
             clipboard_text: None,
+            comparison_images: Vec::new(),
         }
     }
 }
@@ -513,6 +520,10 @@ pub(crate) fn result_active(app: &SolveApp) -> bool {
     active(app) && app.render_workspace.view.result
 }
 
+pub(crate) fn comparison_drag_captured(app: &SolveApp) -> bool {
+    active(app) && app.render_workspace.view.compare.as_ref().is_some_and(|view| view.dragging)
+}
+
 pub(crate) fn fit_result(app: &mut SolveApp) {
     app.render_workspace.view.result_scale = ResultScale::Fit;
 }
@@ -531,6 +542,8 @@ pub(crate) fn inspect_state(app: &SolveApp) -> serde_json::Value {
         "active": active(app), "stage": view.stage.key(), "setup": view.name, "draft_dirty": view.dirty,
         "method": method, "job": view.job, "completed": view.completed,
         "results": view.retained,
+        "comparison": view.compare,
+        "queue": app.session.render_queue_state(),
         "showing_result": view.result, "export_format": if view.studio.export_exr {"exr"} else {"png"},
     })
 }
@@ -619,6 +632,15 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
             Err(e) => app.set_status(e.to_string(), true),
         }
     }
+    crate::documents::advance_render_batches(app, ctx);
+    if let Err(error) = app.session.advance_render_batch() {
+        app.set_status(error.to_string(), true);
+    }
+    follow_batch(app);
+    let queue = app.session.render_queue_state();
+    if queue.running != 0 || queue.waiting != 0 {
+        ctx.request_repaint_after(std::time::Duration::from_millis(100));
+    }
     if app.render_workspace.view.job.is_some() {
         cache_render_images(app, ctx);
     }
@@ -645,6 +667,7 @@ pub(crate) fn invalidate_images(app: &mut SolveApp) {
     app.render_workspace.image = None;
     app.render_workspace.image_info = None;
     app.render_workspace.preview_image = None;
+    app.render_workspace.comparison_images.clear();
 }
 
 pub fn invalidate_scene(app: &mut SolveApp) {
@@ -1280,6 +1303,11 @@ fn cache_completed_image(app: &mut SolveApp, ctx: &egui::Context) {
         let result = (|| -> Result<egui::TextureHandle, String> {
             let handle = app.session.render_job_handle(job).map_err(|e| e.to_string())?;
             let frame = handle.frame().map_err(|e| e.to_string())?.ok_or(crate::i18n::tr("render.error_no_completed_image"))?;
+            if let Some((_, cached)) = app.render_workspace.comparison_images.iter().find(|(id, _)| *id == job) {
+                let texture = cached.clone()?;
+                app.render_workspace.image_info = Some(frame.info.clone());
+                return Ok(texture);
+            }
             let captured = handle.status().map_err(|e| e.to_string())?;
             let budget = if frame.info.executor.as_str() == "gpu-path" {
                 solidcraft_engine::render::job::GPU_PATH_LIMITS
@@ -1394,6 +1422,23 @@ fn sync_results(app: &mut SolveApp) {
     }
     view.retained = results;
     view.completed = app.session.render_selected_result();
+    if view.compare.as_ref().is_some_and(|comparison| {
+        [comparison.left, comparison.right].into_iter().flatten().any(|job| !view.retained.iter().any(|result| result.frame.job == job))
+    }) {
+        view.compare = None;
+        app.render_workspace.comparison_images.clear();
+    }
+}
+
+fn follow_batch(app: &mut SolveApp) {
+    let queue = app.session.render_queue_state();
+    if let Some(job) = queue.job {
+        if app.render_workspace.view.job != Some(job) {
+            app.render_workspace.view.follow_job = app.render_workspace.view.compare.is_none();
+        }
+        app.render_workspace.view.job = Some(job);
+        app.render_workspace.view.job_shot = queue.shot;
+    }
 }
 
 fn captured_image_limits(request: &solidcraft_engine::render::job::ImageRequest) -> RenderLimits {
@@ -1507,6 +1552,7 @@ fn result_rect(camera: Camera, size: [u32; 2], canvas: egui::Rect) -> egui::Rect
 }
 
 fn result_actions(app: &mut SolveApp, ui: &mut egui::Ui) {
+    compare::controls(app, ui);
     let results = app.render_workspace.view.retained.clone();
     if !results.is_empty() {
         let selected = results.iter().position(|result| Some(result.frame.job) == app.render_workspace.view.completed);
@@ -2021,6 +2067,12 @@ fn preview_background(app: &SolveApp) -> Tokens {
 }
 
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
+    if app.render_workspace.view.compare.is_some() {
+        app.render_workspace.view.environment_ring = environment::RingView::default();
+        assign::stop(app);
+        compare::show(app, ui);
+        return;
+    }
     if app.render_workspace.view.result {
         app.render_workspace.view.environment_ring = environment::RingView::default();
         assign::stop(app);
@@ -2074,8 +2126,26 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     } else {
         app.viewport.hover = None;
     }
+    crate::gpu::paint_background(ui.painter(), viewport, &preview_background(app));
+    paint_product(app, ui, rect, app.cam, None);
+    shot::overlay(app, ui, viewport);
+    crate::viewport::axis_view(app, ui, viewport);
+    crate::navigation_bar_view::show(app, ui, viewport);
+}
+
+fn product_projection(camera: Camera, radius: f64, canvas: egui::Rect, image: Option<egui::Rect>) -> solidcraft_engine::render::Mat4 {
+    let image = image.unwrap_or(canvas);
+    let projection = camera.view_proj(f64::from(image.width() / image.height().max(1.0)), radius);
+    let sx = f64::from(image.width() / canvas.width().max(1.0));
+    let sy = f64::from(image.height() / canvas.height().max(1.0));
+    let tx = f64::from(2.0 * (image.center().x - canvas.center().x) / canvas.width().max(1.0));
+    let ty = f64::from(2.0 * (canvas.center().y - image.center().y) / canvas.height().max(1.0));
+    solidcraft_engine::render::Mat4([[sx, 0.0, 0.0, 0.0], [0.0, sy, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [tx, ty, 0.0, 1.0]]).mul(&projection)
+}
+
+fn paint_product(app: &mut SolveApp, ui: &mut egui::Ui, rect: egui::Rect, camera: Camera, image: Option<egui::Rect>) {
     let background = preview_background(app);
-    crate::gpu::paint_background(ui.painter(), viewport, &background);
+    crate::gpu::paint_background(ui.painter(), rect, &background);
     let result = (|| -> Result<(), String> {
         if app.viewport.gpu.is_none() {
             return Err(crate::i18n::tr("render.error_gpu_preview").into());
@@ -2132,7 +2202,6 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         if scene.bounds.is_empty() {
             return Err(crate::i18n::tr("render.error_visible_solid").into());
         }
-        let camera = app.cam;
         let radius = scene.bounds.diagonal().max(10.0) + scene.bounds.center().dist(camera.target);
         let eye = camera.eye();
         let highlight_key = crate::viewport::highlight_key(app);
@@ -2157,7 +2226,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             pv_key: 0,
             pv_slot: slot,
             pv_hide: false,
-            view_proj: camera.view_proj(f64::from(rect.width() / rect.height().max(1.0)), radius).to_f32(),
+            view_proj: product_projection(camera, radius, rect, image).to_f32(),
             back: camera.back().to_f32(),
             size_px: [rect.width() * ppp, rect.height() * ppp],
             clip: [0.0; 4],
@@ -2180,15 +2249,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 [f32::from(c.r()) / 255.0, f32::from(c.g()) / 255.0, f32::from(c.b()) / 255.0]
             },
         });
-        crate::blur::viewport(ui.painter(), rect, callback, viewport, [background.viewport_top, background.viewport_bottom]);
+        crate::blur::viewport(ui.painter(), rect, callback, rect, [background.viewport_top, background.viewport_bottom]);
         Ok(())
     })();
     if let Err(error) = result {
         preview_error(app, ui, rect, &error);
     }
-    shot::overlay(app, ui, viewport);
-    crate::viewport::axis_view(app, ui, viewport);
-    crate::navigation_bar_view::show(app, ui, viewport);
 }
 
 /// Apply validated UI requests after the same registry call used by automation.
@@ -2197,6 +2263,14 @@ pub(crate) fn apply_command(app: &mut SolveApp, id: &str, reply: &serde_json::Va
         "render.preflight.copy" => {
             app.render_workspace.clipboard_text = Some(reply["text"].as_str().ok_or("invalid check report")?.to_string());
         }
+        "render.compare" => compare::apply(app, reply)?,
+        "render.compare.divider" => {
+            let position = reply["position"].as_f64().ok_or("invalid comparison divider position")?;
+            if let Some(view) = &mut app.render_workspace.view.compare {
+                view.position = crate::ui_kit::comparison_position(position as f32);
+            }
+        }
+        "render.batch" => follow_batch(app),
         "render.start" | "render.result.regrade" => {
             let job = serde_json::from_value(reply["job"].clone()).map_err(|e| format!("invalid render job identity: {e}"))?;
             let shot = if id == "render.result.regrade" {
@@ -2214,12 +2288,16 @@ pub(crate) fn apply_command(app: &mut SolveApp, id: &str, reply: &serde_json::Va
             }
             app.render_workspace.view.job = Some(job);
             app.render_workspace.view.job_shot = shot;
-            app.render_workspace.view.follow_job = true;
+            app.render_workspace.view.follow_job = app.render_workspace.view.compare.is_none();
         }
         "render.result.select" | "render.result.discard" | "render.result.pin" => {
             sync_results(app);
             app.render_workspace.preview_image = None;
             app.render_workspace.view.follow_job = false;
+            if matches!(id, "render.result.select" | "render.result.pin") {
+                app.render_workspace.view.compare = None;
+                app.render_workspace.comparison_images.clear();
+            }
             if id == "render.result.select" {
                 app.render_workspace.view.result = true;
             }
@@ -2241,6 +2319,10 @@ pub(crate) fn apply_command(app: &mut SolveApp, id: &str, reply: &serde_json::Va
                 return Err(app.tr("render.result_reduced_display").into());
             }
             app.render_workspace.view.result = view != "model";
+            if matches!(view, "model") || id == "render.result.close" {
+                app.render_workspace.view.compare = None;
+                app.render_workspace.comparison_images.clear();
+            }
             match view {
                 "fit" => fit_result(app),
                 "actual" => app.render_workspace.view.result_scale = ResultScale::Actual,
@@ -2305,6 +2387,9 @@ pub(crate) fn interactive_command_info(app: &SolveApp, command: &solidcraft_engi
         info.disabled_reason = None;
     }
     info
+}
+pub(crate) fn comparison_controls(app: &mut SolveApp, ui: &mut egui::Ui) {
+    compare::controls(app, ui);
 }
 pub(crate) fn start_interactive(app: &mut SolveApp, id: &str) -> bool {
     let handled = assign::start(app, id) || ribbon::start(app, id);
