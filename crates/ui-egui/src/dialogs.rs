@@ -102,6 +102,9 @@ const PROJECT_GEOMETRY: Accept =
 /// What Intersect cuts with the sketch plane, picked one by one: faces, model edges and the
 /// curves of other sketches (#10484); an edge or a sketch line gives the points where it crosses.
 const INTERSECT_GEOMETRY: Accept = EDGES | FACES | selection::SKETCH_LINES;
+/// What Align's From and To pick: model geometry, planes and the origin, and sketch points and
+/// circles (a frame the bodies follow, #6257).
+const ALIGN_PICKS: Accept = FACES | EDGES | selection::VERTICES | PLANES | selection::ORIGIN | selection::POINTS | CURVES;
 const HOLE_TYPES: [&str; 3] = ["simple", "counterbore", "countersink"];
 const HOLE_LABELS: [&str; 3] = ["Simple", "Counterbore", "Countersink"];
 
@@ -279,6 +282,8 @@ crate::dialog_descriptor::dialog_descriptors! {
                 components: bool,
                 /// Point-to-point: which of the world X, Y and Z axes take the offset.
                 axes: [bool; 3],
+                /// A turn about the target's direction after the move (blank: none).
+                angle: String,
             },
             /// Remove bodies from here on in the timeline.
             Remove,
@@ -882,12 +887,14 @@ impl Dialog {
             }
             "solid.align" => {
                 let components = s.selection.iter().any(|x| matches!(x, Sel::Occurrence { .. }));
+                // Bodies also take sketch points and circles: a frame the bodies follow (#6257).
+                let picks = if components { FACES | EDGES | selection::VERTICES | PLANES | selection::ORIGIN } else { ALIGN_PICKS };
                 Dialog::new(
-                    Kind::Align { flip: false, components, axes: [true; 3] },
+                    Kind::Align { flip: false, components, axes: [true; 3], angle: String::new() },
                     vec![
                         SelInput::new(if components { "Components" } else { "Bodies" }, BODIES, true),
-                        SelInput::new("From", FACES | EDGES | selection::VERTICES | PLANES | selection::ORIGIN, false),
-                        SelInput::new("To", FACES | EDGES | selection::VERTICES | PLANES | selection::ORIGIN, false),
+                        SelInput::new("From", picks, false),
+                        SelInput::new("To", picks, false),
                     ],
                 )
             }
@@ -4793,7 +4800,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             need(0, "faces")?;
             ("face.delete", json!({"faces": face_points(0)}))
         }
-        Kind::Align { flip, components, axes } => {
+        Kind::Align { flip, components, axes, angle } => {
             need(0, if *components { "components" } else { "bodies" })?;
             need(1, "what to move from")?;
             need(2, "where to move it to")?;
@@ -4813,6 +4820,17 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             for (i, key) in [(1, "from"), (2, "to")] {
                 let snap = d.extra.get(&format!("{key}_snap")).and_then(Value::as_str).unwrap_or("picked");
                 match (sels(d, i).first(), snap) {
+                    // A sketch point or circle is a frame whatever the snap: the bodies follow it
+                    // when it moves (#6257).
+                    (Some(sel @ (Sel::SketchPoint { .. } | Sel::SketchCurve { .. })), _) if !*components => {
+                        p[format!("{key}_frame")] = construct_ref(app, sel)?
+                    }
+                    // The joint origin the Joint dialog makes of the pick, found again by name.
+                    (Some(sel @ (Sel::Face { .. } | Sel::Edge { .. } | Sel::Vertex { .. })), "origin")
+                        if !*components && !matches!(sel, Sel::Vertex { body, .. } if body.is_empty()) =>
+                    {
+                        p[format!("{key}_frame")] = crate::dialogs_assembly::snap_of(s, sel).ok_or("this pick has no joint origin")?.param;
+                    }
                     (Some(Sel::Face { point, .. }), "center") => p[key] = json!({"snap": "face_center", "at": pt(*point)}),
                     (Some(Sel::Face { point, .. } | Sel::Edge { point, .. }), "circle") => {
                         p[key] = json!({"snap": "circle_center", "at": pt(*point)})
@@ -4824,8 +4842,12 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                     (Some(Sel::Vertex { point, .. }), _) => p[key] = pt(*point),
                     // A plane stays a plane, so the bodies follow it when it moves.
                     (Some(Sel::Plane { name }), _) => p[format!("{key}_plane")] = json!(name),
-                    _ => return Err("pick faces, edges, vertices or planes".into()),
+                    _ => return Err("pick faces, edges, vertices, planes or sketch points".into()),
                 }
+            }
+            // Frames and a turn are the bodies' (#6257); components align without them.
+            if !*components && !angle.trim().is_empty() {
+                p["angle"] = json!(angle.trim());
             }
             (if *components { "occurrence.align" } else { "solid.align" }, p)
         }

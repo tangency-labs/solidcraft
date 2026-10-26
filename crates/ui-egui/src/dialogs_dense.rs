@@ -769,17 +769,25 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
             });
             ui.add(egui::Label::new(crate::i18n::tr("ui.emboss_wrap_note")).wrap());
         }
-        Kind::Align { flip, components, axes: [ax, ay, az] } => {
+        Kind::Align { flip, components, axes: [ax, ay, az], angle } => {
             // Where on the picked face or edge to snap: as picked (a face turns to meet
-            // the other, an edge at its middle), its centre, or a round one's centre.
+            // the other, an edge at its middle), its center, a round one's center, or, for bodies,
+            // the joint origin the Joint dialog makes of it (found again as the part changes, #6257).
+            let snaps: &[(&str, &str)] = if *components {
+                &[("As Picked", "picked"), ("Center", "center"), ("Circle Center", "circle")]
+            } else {
+                &[("As Picked", "picked"), ("Center", "center"), ("Circle Center", "circle"), ("Joint Origin", "origin")]
+            };
             for (label, key) in [("From Snap", "from_snap"), ("To Snap", "to_snap")] {
                 form_row(ui, label, |ui| {
-                    extra_choice(ui, &mut d.extra, key, key, &[("As Picked", "picked"), ("Center", "center"), ("Circle Center", "circle")]);
+                    extra_choice(ui, &mut d.extra, key, key, snaps);
                 });
             }
             if *components {
                 ui_kit::options(ui, "feature_options", &mut [("Flip", flip)]);
             } else {
+                // A turn about the target's direction after the move (#6257).
+                enter |= hint_row(ui, "Angle", angle, tr("none"));
                 ui_kit::options(ui, "feature_options", &mut [("Flip", flip), ("X", ax), ("Y", ay), ("Z", az)]);
             }
             // A part inside a subassembly placed more than once sits where that shared

@@ -928,6 +928,115 @@ fn align_takes_planes_and_the_origin() {
     assert!(s.execute("solid.align", &json!({"bodies": ["C"], "from": [0, 0, 0], "to_plane": "Nowhere"})).is_err());
 }
 
+/// The bounding box of body `name`: min and max.
+fn bounds(s: &mut Session, name: &str) -> ([f64; 3], [f64; 3]) {
+    let m = measure(s);
+    let b = m["bodies"].as_array().and_then(|bs| bs.iter().find(|b| b["name"] == name)).cloned().unwrap_or_else(|| panic!("no body {name}: {m}"));
+    let g = |k: &str, i: usize| b["bbox"][k][i].as_f64().unwrap_or(f64::NAN);
+    ([g("min", 0), g("min", 1), g("min", 2)], [g("max", 0), g("max", 1), g("max", 2)])
+}
+
+fn assert_bounds(s: &mut Session, name: &str, lo: [f64; 3], hi: [f64; 3]) {
+    let (a, b) = bounds(s, name);
+    let near = |x: [f64; 3], y: [f64; 3]| x.iter().zip(y).all(|(p, q)| (p - q).abs() < 1e-6);
+    assert!(near(a, lo) && near(b, hi), "{name}: {a:?}..{b:?}, want {lo:?}..{hi:?}");
+}
+
+/// Align by frames (#6257): a body's face centre lands on a sketch circle's centre and follows it
+/// when the parameter that places the circle changes; a turn about the target's z, a sketch point
+/// as the target with a flip, and a frame on the body that follows the body's own edits.
+#[test]
+fn align_by_frames_follows_its_target() {
+    // B is 10 x 20 x 10 at (50, 0, 20); sketch S on XY has a circle at (X, 5) and a point at (20, X).
+    let target = || {
+        let mut s = Session::default();
+        run(&mut s, "parameters.add", json!({"name": "X", "expression": "0 mm"}));
+        run(&mut s, "parameters.add", json!({"name": "H", "expression": "10 mm"}));
+        run(&mut s, "solid.box", json!({"length": 10, "width": 20, "height": "H", "corner": [50, 0, 20], "body_name": "B"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+        run(&mut s, "sketch.circle.center", json!({"center": ["X", 5], "radius": 3, "id": "ring"}));
+        run(&mut s, "sketch.point", json!({"point": [20, "X"], "id": "p"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 30], [10, 30]], "ids": ["edge"]}));
+        run(&mut s, "sketch.finish", json!({}));
+        s
+    };
+    let bottom = json!({"face": [55, 10, 20]});
+    let ring = json!({"sketch": "S", "curve": "ring"});
+    // The bottom face (z down) onto the circle (z up): no turn, B sits on XY centred on it.
+    let mut s = target();
+    run(&mut s, "solid.align", json!({"bodies": ["B"], "from_frame": bottom, "to_frame": ring}));
+    assert_bounds(&mut s, "B", [-5., -5., 0.], [5., 15., 10.]);
+    // The circle moves: B follows it, and still does in the saved design.
+    run(&mut s, "parameters.change", json!({"name": "X", "expression": "30 mm"}));
+    assert_bounds(&mut s, "B", [25., -5., 0.], [35., 15., 10.]);
+    let mut r = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert_bounds(&mut r, "B", [25., -5., 0.], [35., 15., 10.]);
+    // A quarter turn about the circle's z through its centre.
+    let mut s = target();
+    run(&mut s, "solid.align", json!({"bodies": ["B"], "from_frame": bottom, "to_frame": ring, "angle": 90}));
+    assert_bounds(&mut s, "B", [-10., 0., 0.], [10., 10., 10.]);
+    // The top face onto the sketch point, flipped (z along z): B hangs under XY. The frame on B
+    // follows B's own height.
+    let mut s = target();
+    run(
+        &mut s,
+        "solid.align",
+        json!({"bodies": ["B"], "from_frame": {"face": [55, 10, 30]}, "to_frame": {"sketch": "S", "point": "p"}, "flip": true}),
+    );
+    assert_bounds(&mut s, "B", [15., -10., -10.], [25., 10., 0.]);
+    run(&mut s, "parameters.change", json!({"name": "H", "expression": "15 mm"}));
+    assert_bounds(&mut s, "B", [15., -10., -15.], [25., 10., 0.]);
+    // A face pick with an angle about the target face's normal; a sketch frame onto a fixed point.
+    let mut s = target();
+    run(&mut s, "solid.align", json!({"bodies": ["B"], "from": [50, 0, 20], "to_face": [55, 10, 30], "angle": 0}));
+    run(&mut s, "solid.align", json!({"bodies": ["B"], "from_frame": {"sketch": "S", "point": "p"}, "to": [20, 0, 5]}));
+    // Refused: a side given twice, an angle with no target direction, a frame on the bodies that
+    // move, unknown or wrong sketch geometry, ids out of range, a degenerate frame.
+    let mut s = target();
+    for bad in [
+        json!({"from": [0, 0, 0], "from_frame": bottom, "to_frame": ring}),
+        json!({"from_frame": bottom, "to_frame": ring, "to_plane": "XY"}),
+        json!({"from_frame": bottom, "to": [0, 0, 0], "angle": 30}),
+        json!({"from_frame": bottom, "to_frame": ring, "angle": "3 mm"}),
+        json!({"from_frame": bottom, "to_frame": {"face": [55, 10, 30]}}),
+        json!({"from_frame": bottom, "to_frame": {"sketch": "Nope", "point": "p"}}),
+        json!({"from_frame": bottom, "to_frame": {"sketch": "S", "point": "zz"}}),
+        json!({"from_frame": bottom, "to_frame": {"sketch": "S", "curve": "edge"}}),
+        json!({"from_frame": bottom, "to_frame": {"sketch": "S", "point": "p", "curve": "ring"}}),
+        json!({"from_frame": bottom, "to_frame": {"sketch": "S", "point": ""}}),
+        json!({"from_frame": bottom, "to_frame": {"sketch": "S", "point": "q".repeat(300)}}),
+        json!({"from_frame": bottom, "to_frame": {"frame": {"origin": [0, 0, 0], "z": [0, 0, 0]}}}),
+        json!({"from_frame": {"face": "no such face"}, "to_frame": ring}),
+    ] {
+        let mut p = bad.clone();
+        p["bodies"] = json!(["B"]);
+        assert!(s.execute("solid.align", &p).is_err(), "{bad}");
+    }
+    assert!(!s.doc.features.iter().any(|f| matches!(f.kind, solidcraft_doc::FeatureKind::Align { .. })), "nothing refused was added");
+    // A design file whose frame no longer resolves (here a degenerate one) fails the feature
+    // with a message; it never panics.
+    let mut s = target();
+    run(&mut s, "solid.align", json!({"bodies": ["B"], "from_frame": bottom, "to_frame": ring}));
+    let mut v: Value = serde_json::from_str(&s.doc.to_json()).unwrap();
+    fn spoil(v: &mut Value) {
+        match v {
+            Value::Object(o) if o.get("type").and_then(Value::as_str) == Some("align") => {
+                o.insert(
+                    "to_frame".into(),
+                    json!({"type": "origin", "origin": {"occurrence": 0, "snap": {"type": "frame", "origin": [0, 0, 0], "z": [0, 0, 0]}}}),
+                );
+            }
+            Value::Object(o) => o.values_mut().for_each(spoil),
+            Value::Array(a) => a.iter_mut().for_each(spoil),
+            _ => {}
+        }
+    }
+    spoil(&mut v);
+    let mut r = Session::new(solidcraft_doc::Document::from_json(&v.to_string()).unwrap());
+    measure(&mut r);
+    assert!(r.model.results.iter().any(|x| x.error.as_deref().is_some_and(|e| e.contains("degenerate"))), "the Align reports its frame");
+}
+
 #[test]
 fn coil_and_loft_to_a_point() {
     use std::f64::consts::{PI, TAU};
