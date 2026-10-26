@@ -312,6 +312,14 @@ rebuilds it; `run` then exits with status 1, lists the failing features and writ
 its `--out` and `--save` files, because the bodies lack what those features should have made.
 `--allow-errors` writes them anyway.
 
+`--param-check warn|strict` checks each step against its command's parameter contract, for the
+commands that have one (`describe_command` in the MCP server shows them); the default, `off`,
+checks nothing. A misspelt optional key, such as `operaton` for `solid.box`'s `operation`, is
+otherwise ignored, and the step builds without it. `warn` runs the step and prints
+``script.json: step 1: unknown key `operaton`; did you mean `operation`?`` on stderr; `strict`
+stops the run at that step, and nothing is written.
+`run` refuses an option it doesn't take, so a mistyped option fails instead of being ignored.
+
 `run` prints each command's result with `--results` (otherwise the measurement), and `eval`
 prints the measurement, as JSON on stdout. `--json-out FILE` writes that JSON to a file
 instead. The file is plain UTF-8, which is not what a redirect gives you everywhere: Windows

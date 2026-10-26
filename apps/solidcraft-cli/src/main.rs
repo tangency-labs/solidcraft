@@ -2,6 +2,7 @@
 //!
 //! ```text
 //! solidcraft-cli run <script.json|design.sc|part.step|mesh.3mf> [--in design|part.step|mesh.3mf] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--json-out FILE] [--allow-errors]
+//!                    [--param-check off|warn|strict]
 //! solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE] (alias: inspect) measurements as JSON
 //! solidcraft-cli script <design.sc> [--out script.json]     the design's history as a command script
 //! solidcraft-cli bench-open <design.sc | part.step> [--parse-only] [--save OUT.sc] [--display LEVEL [--edit NAME EXPR]] [--ops script.json] loading timings as JSON lines
@@ -57,7 +58,7 @@ struct Command {
 }
 
 /// `run`'s lines in the usage.
-const USAGE_RUN: &str = "  solidcraft-cli run <script.json|design.sc|part.step> [--in design.sc|part.step] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--json-out FILE] [--allow-errors]\n  solidcraft-cli run --in <design.sc|part.step> [--out FILE]...\n      (a timeline feature that fails fails the run and nothing is written; --allow-errors writes anyway)\n      (--timings prints {timings: [{index, command, ms}], total_ms} for a script, with --results its results too;\n       --profile adds each command's profile: {boolean_ms, tessellate_ms, other_ms}, the kernel's share)\n";
+const USAGE_RUN: &str = "  solidcraft-cli run <script.json|design.sc|part.step> [--in design.sc|part.step] [--out FILE]... [--save FILE] [--quiet] [--results] [--timings] [--profile] [--json-out FILE] [--allow-errors]\n                     [--param-check off|warn|strict]\n  solidcraft-cli run --in <design.sc|part.step> [--out FILE]...\n      (a timeline feature that fails fails the run and nothing is written; --allow-errors writes anyway)\n      (--param-check checks each step against its command's contract: warn reports on stderr, strict stops the run)\n      (--timings prints {timings: [{index, command, ms}], total_ms} for a script, with --results its results too;\n       --profile adds each command's profile: {boolean_ms, tessellate_ms, other_ms}, the kernel's share)\n";
 /// `eval`'s lines in the usage.
 const USAGE_EVAL: &str = "  solidcraft-cli eval <script.json|design.sc|part.step> [--in design.sc|part.step] [--json-out FILE]     (alias: inspect)\n  solidcraft-cli eval --in <script.json|design.sc|part.step> [--json-out FILE]\n      (with both inputs, runs the positional script on --in before measuring; does not automatically save the modified design)\n      (--json-out FILE writes the JSON that run (with --results, else the measurement) and eval print to FILE instead of stdout,\n       as plain UTF-8: a shell's > can re-encode it, e.g. Windows PowerShell adds a byte-order mark)\n";
 /// `script`'s lines in the usage.
@@ -299,16 +300,34 @@ fn load_checked(path: &str, check: solidcraft_engine::schema::ParamCheck) -> Res
         s.execute("doc.open", &json!({"path": path})).map_err(|e| e.to_string())?;
     } else {
         let script = if v.get("features").is_some() && v.get("commands").is_none() { recipe::to_script(&v)? } else { v };
-        // Warn level: each step's `param_warnings` as it completes, even when a later step fails
-        // (stderr, so stdout stays the caller's).
-        let mut warn = |step: usize, r: &Value| {
-            for w in r.get("param_warnings").and_then(Value::as_array).into_iter().flatten() {
-                eprintln!("{path}: step {}: {}", step + 1, w.as_str().unwrap_or_default());
-            }
-        };
-        s.run_script_each(&script, &mut warn).map_err(|e| e.to_string())?;
+        run_script_warning(&mut s, path, &script)?;
     }
     Ok(s)
+}
+
+/// Run `script`, read from `path`, on `s`. At the warn level each step's `param_warnings` go to
+/// stderr as the step completes, even when a later step fails (stdout stays the caller's).
+fn run_script_warning(s: &mut Session, path: &str, script: &Value) -> Result<Vec<Value>, String> {
+    s.run_script_each(script, &mut |step, r| print_param_warnings(path, step, r)).map_err(|e| e.to_string())
+}
+
+/// Step `step`'s `param_warnings` on stderr, one per line, named after the script at `path`.
+fn print_param_warnings(path: &str, step: usize, r: &Value) {
+    for w in r.get("param_warnings").and_then(Value::as_array).into_iter().flatten() {
+        eprintln!("{path}: step {}: {}", step + 1, w.as_str().unwrap_or_default());
+    }
+}
+
+/// `--param-check off|warn|strict`: how calls that break a command's parameter contract are
+/// treated (docs/mcp.md); off when the option isn't given.
+fn parse_param_check(cmd: &str, args: &[String]) -> Result<solidcraft_engine::schema::ParamCheck, String> {
+    match flag(args, "--param-check") {
+        None if args.iter().any(|a| a == "--param-check") => Err(format!("{cmd}: --param-check wants off, warn or strict")),
+        None => Ok(solidcraft_engine::schema::ParamCheck::Off),
+        Some(v) => {
+            solidcraft_engine::schema::ParamCheck::parse(v).ok_or_else(|| format!("{cmd}: --param-check wants off, warn or strict, not `{v}`"))
+        }
+    }
 }
 
 fn flag<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
@@ -367,7 +386,15 @@ fn print_json(v: &Value, file: Option<&str>) -> Result<(), String> {
 fn cmd_run(args: &[String]) -> Result<(), String> {
     install_renderer();
     let json_out = json_out(args)?;
-    known_args("run", args, &["--in", "--out", "--save", "--json-out"], &["--quiet", "--results", "--timings", "--profile", "--allow-errors"], true)?;
+    // Before the option check, so a bare `--param-check` gets the words `mcp` uses.
+    let check = parse_param_check("run", args)?;
+    known_args(
+        "run",
+        args,
+        &["--in", "--out", "--save", "--json-out", "--param-check"],
+        &["--quiet", "--results", "--timings", "--profile", "--allow-errors"],
+        true,
+    )?;
     let base = flag(args, "--in");
     let path = positional(args);
     if path.is_none() && base.is_none() {
@@ -380,23 +407,29 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
     let (mut s, results) = if want_results || timings {
         // Collect every command's result or time (scripts only), then process requested files too.
         let mut s = match base {
-            Some(b) => load(b)?,
+            Some(b) => load_checked(b, check)?,
             None => Session::default(),
         };
+        s.param_check = check;
         let needs = if want_results { "--results needs a script" } else { "--timings needs a script" };
-        let v = read_json(path.ok_or(needs)?)?;
+        let script = path.ok_or(needs)?;
+        let v = read_json(script)?;
         let out = if timings {
             let (r, mut t) = s.run_script_timed(&v, profile).map_err(|e| e.to_string())?;
+            // The timed runner reports no step as it completes: the warnings follow the script.
+            for (step, r) in r.iter().enumerate() {
+                print_param_warnings(script, step, r);
+            }
             if want_results && let Some(o) = t.as_object_mut() {
                 o.insert("results".into(), Value::Array(r));
             }
             t
         } else {
-            Value::Array(s.run_script(&v).map_err(|e| e.to_string())?)
+            Value::Array(run_script_warning(&mut s, script, &v)?)
         };
         (s, Some(out))
     } else {
-        (open(base, path)?, None)
+        (open(base, path, check)?, None)
     };
     // A feature that fails leaves the bodies as they were before it (a parameter change can
     // break a feature without failing the command that made it): writing them would hand out
@@ -421,16 +454,16 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
 }
 
 /// The session `run`, `eval` and `snapshot` start from: `--in` (a design or STEP file) with the
-/// positional script run on top of it, or either one alone.
-fn open(base: Option<&str>, path: Option<&String>) -> Result<Session, String> {
+/// positional script run on top of it, or either one alone, with scripts run at `check`.
+fn open(base: Option<&str>, path: Option<&String>, check: solidcraft_engine::schema::ParamCheck) -> Result<Session, String> {
     match (base, path) {
         (Some(b), Some(p)) => {
-            let mut s = load(b)?;
-            s.run_script(&read_json(p)?).map_err(|e| e.to_string())?;
+            let mut s = load_checked(b, check)?;
+            run_script_warning(&mut s, p, &read_json(p)?)?;
             Ok(s)
         }
-        (Some(b), None) => load(b),
-        (None, Some(p)) => load(p),
+        (Some(b), None) => load_checked(b, check),
+        (None, Some(p)) => load_checked(p, check),
         (None, None) => Err(usage()),
     }
 }
@@ -473,7 +506,7 @@ fn timeline_ok(s: &Session) -> Result<(), String> {
 fn cmd_eval(args: &[String]) -> Result<(), String> {
     let json_out = json_out(args)?;
     known_args("eval", args, &["--in", "--json-out"], &[], true)?;
-    let mut s = open(flag(args, "--in"), positional(args))?;
+    let mut s = open(flag(args, "--in"), positional(args), solidcraft_engine::schema::ParamCheck::Off)?;
     let m = s.execute("inspect.measure", &json!({})).map_err(|e| e.to_string())?;
     let d = s.execute("document.inspect", &json!({})).map_err(|e| e.to_string())?;
     let out = json!({
@@ -567,7 +600,7 @@ fn cmd_snapshot(args: &[String]) -> Result<(), String> {
         Some(x) => x.parse().ok().filter(|n| (16..=8192).contains(n)).ok_or_else(|| format!("{name} must be 16 to 8192 pixels, not `{x}`")),
     };
     let (w, h) = (size("--width", 1280)?, size("--height", 800)?);
-    let mut s = open(flag(args, "--in"), positional(args))?;
+    let mut s = open(flag(args, "--in"), positional(args), solidcraft_engine::schema::ParamCheck::Off)?;
     // How the bodies are drawn and where the model is cut, through the commands the app's
     // Appearance dialog and Section Analysis run (`preview`).
     preview::apply(&mut s, &flags(args, "--body"), &flags(args, "--tool"), flag(args, "--section"))?;
@@ -691,14 +724,8 @@ fn cmd_mcp(args: &[String]) -> Result<(), String> {
             eprintln!("solidcraft mcp: the design's folder is left out because {why}; add it with --allow-path if you mean it");
         }
     }
-    // How a headless session treats calls that break a command's parameter contract (docs/mcp.md).
-    let param_check = match flag(args, "--param-check") {
-        None if args.iter().any(|a| a == "--param-check") => return Err("mcp: --param-check wants off, warn or strict".into()),
-        None => solidcraft_engine::schema::ParamCheck::Off,
-        Some(v) => {
-            solidcraft_engine::schema::ParamCheck::parse(v).ok_or_else(|| format!("mcp: --param-check wants off, warn or strict, not `{v}`"))?
-        }
-    };
+    // How a headless session treats calls that break a command's parameter contract.
+    let param_check = parse_param_check("mcp", args)?;
     if param_check != solidcraft_engine::schema::ParamCheck::Off && flag(args, "--connect").is_some() {
         eprintln!("solidcraft mcp: --param-check applies to headless sessions; calls to the app are not checked yet");
     }
