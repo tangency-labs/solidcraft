@@ -3087,6 +3087,20 @@ fn stored_length(s: &Session, e: &str) -> String {
     if s.doc.with_design_unit(e, ValueKind::Length) == e { e.to_string() } else { format!("{} mm", e.trim()) }
 }
 
+/// A Cylinder's or Sphere's size as its edit field shows it (#6609): a radius worked out from a
+/// diameter, `(D) / 2`, shows as the diameter it was made with, so OK sends that diameter and
+/// keeps the radius. A bare number in `D` (kept before #779) is in the design's units, as any
+/// bare number inside an expression is, so it shows with that unit written out. Any other radius
+/// shows as stored, on Radius.
+fn round_size(s: &Session, radius: &str) -> (&'static str, String) {
+    use solidcraft_engine::doc::expr::is_bare_number;
+    match crate::length_input::diameter_of(radius) {
+        Some(diameter) if is_bare_number(diameter) => ("diameter", crate::length_input::default(&s.doc, diameter)),
+        Some(diameter) => ("diameter", diameter.to_string()),
+        None => ("radius", stored_length(s, radius)),
+    }
+}
+
 /// A stored value as its edit field shows it (#1936): a bare number is written with the unit the
 /// engine reads it in, "2" as "2 mm" for a length and "5" as "5 deg" for an angle, so the field
 /// and the on-canvas tag name the unit as the other dialogs do. The number keeps its stored text.
@@ -4983,7 +4997,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             let mut d = start("solid.cylinder")?;
             d.kind = Kind::Primitive {
                 cmd: "solid.cylinder",
-                fields: vec![("radius", stored_length(s, radius)), ("height", stored_length(s, height))],
+                fields: vec![round_size(s, radius), ("height", stored_length(s, height))],
                 operation: op_index(operation),
                 at: None,
             };
@@ -4993,8 +5007,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
         }
         FeatureKind::Sphere { center, radius, operation } => {
             let mut d = start("solid.sphere")?;
-            d.kind =
-                Kind::Primitive { cmd: "solid.sphere", fields: vec![("radius", stored_length(s, radius))], operation: op_index(operation), at: None };
+            d.kind = Kind::Primitive { cmd: "solid.sphere", fields: vec![round_size(s, radius)], operation: op_index(operation), at: None };
             d.extra.insert("center".into(), pt_expr(center));
             d
         }

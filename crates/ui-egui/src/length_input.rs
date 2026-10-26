@@ -80,6 +80,51 @@ pub(crate) fn model(doc: &Document, mm: f64) -> String {
     format!("{} {unit}", mm / scale)
 }
 
+/// The diameter in a radius worked out from one, `(D) / 2`: what a diameter typed into Cylinder
+/// or Sphere is kept as (#6609). `None` for any other radius, such as `(a) / (b) / 2`.
+pub(crate) fn diameter_of(radius: &str) -> Option<&str> {
+    inside(radius, "(", ") / 2")
+}
+
+/// A diameter switched to the radius (`twice` false) or a radius to the diameter, so the size
+/// stays: a number keeps its unit (`20 mm` and `10 mm`), a size switched before goes back to its
+/// text, and any other expression is wrapped (`(d) / 2`, `2 * (r)`).
+pub(crate) fn scaled(text: &str, twice: bool) -> String {
+    let text = text.trim();
+    let back = if twice { diameter_of(text) } else { inside(text, "2 * (", ")") };
+    if let Some(back) = back {
+        return back.to_string();
+    }
+    if text.is_empty() {
+        return String::new();
+    }
+    if solidcraft_engine::doc::expr::is_literal(text) {
+        // The unit is the word at the end (`1e3 mm` is a thousand millimetres).
+        let number = text.trim_end_matches(char::is_alphabetic);
+        let unit = text.get(number.len()..).unwrap_or_default();
+        if let Ok(x) = number.replace(char::is_whitespace, "").replace(',', ".").parse::<f64>() {
+            let x = if twice { x * 2.0 } else { x / 2.0 };
+            return if unit.is_empty() { format!("{x}") } else { format!("{x} {unit}") };
+        }
+    }
+    if twice { format!("2 * ({text})") } else { format!("({text}) / 2") }
+}
+
+/// The text between `open` and `close` when they wrap all of `text`: the parenthesis `open` ends
+/// with is the one `close` starts with.
+fn inside<'a>(text: &'a str, open: &str, close: &str) -> Option<&'a str> {
+    let inner = text.trim().strip_prefix(open)?.strip_suffix(close)?;
+    let mut depth = 0usize;
+    for c in inner.chars() {
+        match c {
+            '(' => depth = depth.saturating_add(1),
+            ')' => depth = depth.checked_sub(1)?,
+            _ => {}
+        }
+    }
+    (depth == 0 && !inner.trim().is_empty()).then_some(inner.trim())
+}
+
 /// The editable length expressions in a dialog. Counts, angles, ratios, selectors and standard
 /// part designations never go through length conversion. Keep this list shared by submission
 /// and feature refill, so a bare stored millimetre cannot become inches just by pressing OK.
