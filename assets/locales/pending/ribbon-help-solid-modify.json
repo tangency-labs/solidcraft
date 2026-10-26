@@ -18,9 +18,9 @@
     "help.timeline.delete": "Deletes the selected features from the timeline; deleting a sketch also deletes the features built from it. Use it to remove a step that is no longer wanted."
   },
   "fr": {
-    "help.appearance.assign": "Donne aux corps, faces ou composants sélectionnés une couleur ou l'aspect d'un matériau, sans changer leur poids. À utiliser pour distinguer des pièces ou prévisualiser une finition.",
-    "help.face.delete": "Supprime les faces sélectionnées et laisse les faces voisines refermer le vide, ou laisse le vide ouvert en surface. À utiliser pour retirer un arrondi, un trou ou un bossage qui gêne.",
-    "help.material.assign": "Indique la matière des corps sélectionnés, par exemple acier, aluminium ou ABS. À utiliser pour que la masse et le poids correspondent à la pièce réelle.",
+    "help.appearance.assign": "Donne aux corps, faces ou composants sélectionnés une couleur ou l'apparence d'un matériau, sans changer leur poids. À utiliser pour distinguer des pièces ou prévisualiser une finition.",
+    "help.face.delete": "Supprime les faces sélectionnées et laisse les faces voisines refermer le vide, ou laisse le trou ouvert. À utiliser pour retirer un arrondi, un trou ou un bossage qui gêne.",
+    "help.material.assign": "Applique le matériau choisi aux corps sélectionnés, par exemple acier, aluminium ou ABS. À utiliser pour que la masse et le poids correspondent à la pièce réelle.",
     "help.parameters.change": "Ouvre le tableau des valeurs nommées et des expressions qui pilotent les cotes de la conception. À utiliser pour changer une dimension à un seul endroit et faire suivre toutes les fonctions qui l'utilisent.",
     "help.solid.align": "Déplace les corps sélectionnés pour qu'un de leurs points, faces ou plans rejoigne un point, une face ou un plan ailleurs. À utiliser pour poser une pièce contre une autre sans mesurer le décalage.",
     "help.solid.draft": "Incline les faces sélectionnées de l'angle indiqué, mesuré depuis un plan neutre. À utiliser sur les pièces moulées ou coulées pour qu'elles sortent du moule.",
@@ -30,8 +30,8 @@
     "help.solid.remove": "Retire les corps sélectionnés de la conception à partir de ce point de la chronologie ; les étapes précédentes les gardent. À utiliser pour écarter un corps d'aide, comme un outil de découpe devenu inutile.",
     "help.solid.replace_face": "Amène les faces planes sélectionnées sur un plan ou une face parallèle, et le corps s'allonge ou se raccourcit pour la rejoindre. À utiliser pour mettre une face au ras d'une autre pièce ou d'un plan de construction.",
     "help.solid.scale": "Agrandit ou réduit les corps sélectionnés d'un facteur, identique dans toutes les directions ou propre à chaque axe. À utiliser pour redimensionner une forme importée ou compenser un retrait.",
-    "help.solid.split_body": "Coupe un corps en corps séparés avec un plan, la face d'un autre corps ou une ligne d'esquisse. À utiliser pour obtenir des pièces imprimées, usinées ou colorées séparément.",
-    "help.solid.split_face": "Divise les faces sélectionnées le long d'un plan, de la face d'un autre corps ou de courbes d'esquisse, sans couper le corps. À utiliser pour donner à une partie de face sa propre dépouille, couleur ou décalage.",
+    "help.solid.split_body": "Scinde un corps en corps séparés avec un plan, la face d'un autre corps ou une ligne d'esquisse. À utiliser pour obtenir des pièces imprimées, usinées ou colorées séparément.",
+    "help.solid.split_face": "Scinde les faces sélectionnées le long d'un plan, de la face d'un autre corps ou de courbes d'esquisse, sans scinder le corps. À utiliser pour donner à une partie de face sa propre dépouille, couleur ou décalage.",
     "help.timeline.compute_all": "Recalcule toutes les fonctions de la chronologie depuis le début. À utiliser pour rafraîchir le modèle et voir quelles fonctions échouent.",
     "help.timeline.delete": "Supprime les fonctions sélectionnées de la chronologie ; supprimer une esquisse supprime aussi les fonctions construites à partir d'elle. À utiliser pour retirer une étape devenue inutile."
   },
