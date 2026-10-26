@@ -11,7 +11,7 @@
 //! - Circular arcs come in pieces of at most a quarter turn ([`arc_pieces`]). Ellipses, hyperbolas
 //!   and Béziers above degree 3 aren't walked yet (A3b): a scene with one is refused.
 
-use super::{Invalid, Item, ObjectKind, Prepared, Result, arc_pieces};
+use super::{Invalid, Item, ObjectKind, Picture, Prepared, Result, arc_pieces};
 use crate::{Seg2, Vec2};
 
 /// The largest number put on a grid, in millimetres either way: far past any scene's 2e5.
@@ -100,16 +100,18 @@ pub struct GridPath {
 }
 
 /// An item on the grid.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum GridItem {
     /// A stroke `width` steps wide, at least one.
     Stroke { width: i64, path: GridPath },
     /// A fill's loops, each closed.
     Fill { loops: Vec<GridPath> },
+    /// A picture as the scene has it: its pixels are placed by [`crate::pixel_grid`], not this grid.
+    Picture(Picture),
 }
 
 /// A group's items on the grid, in paint order.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct GridGroup {
     pub object: u64,
     pub kind: ObjectKind,
@@ -126,7 +128,7 @@ pub struct GridReport {
 }
 
 /// A scene on a grid: the sheet's size, its groups in paint order, and the report.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct OnGrid {
     pub size: GridPoint,
     pub groups: Vec<GridGroup>,
@@ -158,6 +160,7 @@ impl Prepared<'_> {
                         }
                         items.push(GridItem::Fill { loops });
                     }
+                    Item::Picture(picture) => items.push(GridItem::Picture(*picture)),
                 }
             }
             groups.push(GridGroup { object: group.object, kind: group.kind, items });

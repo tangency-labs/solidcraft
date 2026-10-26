@@ -351,6 +351,15 @@ fn a_move_and_its_undo_project_nothing() {
     assert_eq!(bytes(&undone.scene), bytes(&before.scene));
 }
 
+/// A view's picture moves with its lines: its rectangle by exactly the offset, its pixels and
+/// opacity as they were.
+#[test]
+fn a_moved_group_moves_its_picture() {
+    let picture = |min: Vec2, max: Vec2| Item::Picture(Picture { source: 3, rect: Aabb2 { min, max }, opacity: 0.5 });
+    let group = Group { object: 7, kind: ObjectKind::View, items: vec![picture(Vec2::new(1.0, 2.0), Vec2::new(11.0, 7.0))] };
+    assert_eq!(moved(&group, Vec2::new(50.0, -2.0)).items, [picture(Vec2::new(51.0, 0.0), Vec2::new(61.0, 5.0))]);
+}
+
 /// After a model change (going back to a checkpoint taken before a tower was added) both views are
 /// out of date and the last scene still shows. Each step draws one view from the model as it is
 /// now, and a view listed as up to date always draws as the built scene does.

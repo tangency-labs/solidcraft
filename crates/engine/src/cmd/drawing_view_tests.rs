@@ -855,7 +855,7 @@ fn strokes(v: &Value) -> Vec<(Vec<solidcraft_geom::Seg2>, bool, f64)> {
     items
         .filter_map(|item| match item {
             Item::Stroke { path, closed, width_mm } => Some((path, closed, width_mm)),
-            Item::Fill { .. } => None,
+            Item::Fill { .. } | Item::Picture(_) => None,
         })
         .collect()
 }

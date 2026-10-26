@@ -49,6 +49,7 @@ pub fn paper_svg(scene: &Prepared) -> Result<(Vec<u8>, SvgReport)> {
                     w.out.push_str("<path fill=\"#000\" stroke=\"none\" fill-rule=\"evenodd\" d=\"");
                     loops.iter().for_each(|l| w.path(l));
                 }
+                GridItem::Picture(_) => return Err(IoError::Invalid("not supported yet: pictures (A9)".into())),
             }
             w.out.push_str("\"/>\n");
             if w.out.len() > MAX_DRAWING_BYTES {

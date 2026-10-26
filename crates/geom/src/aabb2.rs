@@ -1,9 +1,12 @@
 //! A box in the plane, the 2D [`crate::Aabb3`].
 
+use serde::{Deserialize, Serialize};
+
 use crate::Vec2;
 
 /// Axis-aligned box in the plane; [`Aabb2::EMPTY`] (low +∞, high −∞) holds nothing.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Aabb2 {
     pub min: Vec2,
     pub max: Vec2,

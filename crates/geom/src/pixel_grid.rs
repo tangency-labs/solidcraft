@@ -12,6 +12,11 @@
 //!   row `r` covers `[y0 + (H − r − 1)·p, y0 + (H − r)·p)`.
 //! - A pixel is sampled at its centre, or at a quarter and three quarters of the way across it
 //!   in each direction when it is sampled 2 × 2.
+//! - A whole sheet's grid ([`PixelGrid::sheet`]) is anchored at its top-left corner instead, as an
+//!   image of the sheet is drawn, and a picture on the sheet is drawn into its window of that grid
+//!   ([`PixelGrid::window`]), so placing it is a copy of whole pixels.
+
+use crate::{Aabb2, Vec2};
 
 /// The longest side a grid may have, in pixels.
 pub const MAX_SIDE_PX: u32 = 65_536;
@@ -27,6 +32,15 @@ pub struct PixelGrid {
     /// Columns and rows.
     pub width: u32,
     pub height: u32,
+}
+
+/// Columns `x0..x1` and rows `y0..y1` of a grid, row 0 at the top.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GridWindow {
+    pub x0: u32,
+    pub y0: u32,
+    pub x1: u32,
+    pub y1: u32,
 }
 
 /// Why a rectangle has no grid.
@@ -62,6 +76,30 @@ impl PixelGrid {
             if pixels.is_finite() && pixels <= f64::from(MAX_SIDE_PX) { Ok(pixels as u32) } else { Err(PixelGridError::TooLarge { pixels }) }
         };
         Ok(PixelGrid { x0, y0, pitch, width: side(width_mm)?, height: side(height_mm)? })
+    }
+
+    /// The grid of a whole `size_mm` sheet at `dpi`, anchored at its top-left corner: row 0's top
+    /// is the sheet's top edge, and any overhang is at the bottom and the right.
+    pub fn sheet(size_mm: Vec2, dpi: f64) -> Result<PixelGrid, PixelGridError> {
+        let grid = PixelGrid::new(0.0, 0.0, size_mm.x, size_mm.y, dpi)?;
+        Ok(PixelGrid { y0: size_mm.y - f64::from(grid.height) * grid.pitch, ..grid })
+    }
+
+    /// The columns and rows of this grid that meet `rect` (paper millimetres) over more than
+    /// 1e-9 of a pixel, so a side on a pixel edge takes no sliver of the pixel beyond it; `None`
+    /// when they share no pixel or `rect` isn't finite.
+    pub fn window(&self, rect: Aabb2) -> Option<GridWindow> {
+        if rect.is_empty() || !rect.min.is_finite() || !rect.max.is_finite() {
+            return None;
+        }
+        // Pixel coordinates: columns from the left edge, rows down from the top edge.
+        let top = self.y0 + f64::from(self.height) * self.pitch;
+        let (columns, rows) = (f64::from(self.width), f64::from(self.height));
+        let x0 = ((rect.min.x - self.x0) / self.pitch + 1e-9).floor().max(0.0);
+        let x1 = ((rect.max.x - self.x0) / self.pitch - 1e-9).ceil().min(columns);
+        let y0 = ((top - rect.max.y) / self.pitch + 1e-9).floor().max(0.0);
+        let y1 = ((top - rect.min.y) / self.pitch - 1e-9).ceil().min(rows);
+        (x0 < x1 && y0 < y1).then_some(GridWindow { x0: x0 as u32, y0: y0 as u32, x1: x1 as u32, y1: y1 as u32 })
     }
 
     /// Columns times rows.
@@ -136,5 +174,45 @@ mod tests {
         assert_eq!(PixelGrid::new(0.0, 0.0, 1189.0, 841.0, 1200.0).unwrap().width, 56_174);
         assert!(matches!(PixelGrid::new(0.0, 0.0, 1189.0, 841.0, 1500.0), Err(PixelGridError::TooLarge { .. })));
         assert!(matches!(PixelGrid::new(0.0, 0.0, 1e300, 1.0, 300.0), Err(PixelGridError::TooLarge { .. })));
+    }
+
+    /// A sheet's grid starts at its top edge: an A3 landscape sheet at 300 dpi is 4961 × 3508
+    /// pixels, its top row's top at 297 mm and its overhang below the sheet's bottom edge.
+    #[test]
+    fn a_sheets_grid_is_anchored_at_its_top_left_corner() {
+        let g = PixelGrid::sheet(Vec2::new(420.0, 297.0), 300.0).unwrap();
+        assert_eq!((g.width, g.height), (4961, 3508));
+        assert_eq!(g.x0, 0.0);
+        assert!((g.row(0).1 - 297.0).abs() < 1e-9, "{:?}", g.row(0));
+        let (bottom, _) = g.row(g.height - 1);
+        assert!(bottom < 0.0 && bottom > -g.pitch, "the overhang is at the bottom: {bottom}");
+        assert_eq!(PixelGrid::sheet(Vec2::new(420.0, f64::NAN), 300.0), Err(PixelGridError::Invalid));
+    }
+
+    /// A window takes the pixels a rectangle meets: exactly its own on pixel edges, the partly
+    /// covered ones too a little inside them, and none outside the grid.
+    #[test]
+    fn a_window_takes_the_pixels_a_rectangle_meets() {
+        // 1 mm pixels on a 100 × 50 mm sheet, so row r spans y 49 − r to 50 − r.
+        let g = PixelGrid::sheet(Vec2::new(100.0, 50.0), 25.4).unwrap();
+        let rect = |x0: f64, y0: f64, x1: f64, y1: f64| Aabb2 { min: Vec2::new(x0, y0), max: Vec2::new(x1, y1) };
+        let window = |x0, y0, x1, y1| Some(GridWindow { x0, y0, x1, y1 });
+        assert_eq!(g.window(rect(40.0, 20.0, 60.0, 30.0)), window(40, 20, 60, 30));
+        assert_eq!(g.window(rect(39.6, 20.0, 60.0, 30.4)), window(39, 19, 60, 30));
+        // A side a hair past a pixel edge (floating-point noise) takes no sliver.
+        assert_eq!(g.window(rect(40.0 - 1e-12, 20.0, 60.0 + 1e-12, 30.0)), window(40, 20, 60, 30));
+        // Clipped to the grid; outside it, or with no area, nothing.
+        assert_eq!(g.window(rect(-10.0, -10.0, 5.0, 5.0)), window(0, 45, 5, 50));
+        assert_eq!(g.window(rect(100.0, 0.0, 120.0, 10.0)), None);
+        assert_eq!(g.window(rect(10.0, 10.0, 10.0, 20.0)), None);
+        assert_eq!(g.window(Aabb2::EMPTY), None);
+        assert_eq!(g.window(rect(f64::NAN, 0.0, 10.0, 10.0)), None);
+        assert_eq!(g.window(rect(0.0, 0.0, f64::INFINITY, 10.0)), None);
+        // On a 300 dpi grid, a picture's rectangle on whole pixels is exactly its own grid's size.
+        let g = PixelGrid::sheet(Vec2::new(420.0, 297.0), 300.0).unwrap();
+        let p = g.pitch;
+        let (left, top) = (100.0 * p, g.row(200).1);
+        let w = g.window(rect(left, top - 591.0 * p, left + 1182.0 * p, top)).unwrap();
+        assert_eq!((w.x0, w.x1 - w.x0, w.y0, w.y1 - w.y0), (100, 1182, 200, 591));
     }
 }

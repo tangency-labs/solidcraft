@@ -106,6 +106,7 @@ fn write(scene: &Prepared, options: PngOptions, out: impl Write, band_bytes: usi
                 }
                 shapes.extend(builder.finish().map(Shape::EvenOdd));
             }
+            GridItem::Picture(_) => return Err(IoError::Invalid("not supported yet: pictures (A9)".into())),
         }
     }
     let png_error = |e: png::EncodingError| IoError::Invalid(format!("the sheet PNG: {e}"));
