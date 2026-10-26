@@ -38,6 +38,8 @@ use std::f64::consts::FRAC_PI_2;
 
 use crate::{EPS, Region2, Seg2, Vec2};
 
+pub mod annotate;
+
 /// The widest line a scene may draw, in millimetres.
 pub const MAX_LINE_MM: f64 = 10.0;
 /// The longest side a sheet may have, in millimetres.
