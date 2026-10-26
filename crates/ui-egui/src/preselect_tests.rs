@@ -1179,7 +1179,7 @@ fn variable_fillet_mid_radii_round_trip() {
 
 /// Use an actual mesh point, as a viewport pick does; analytic cylinder points need not lie
 /// on the display mesh's facets.
-fn thread_face(app: &SolveApp, body: &str) -> Sel {
+pub(crate) fn thread_face(app: &SolveApp, body: &str) -> Sel {
     let state = app.session.world_state().unwrap();
     let body_state = state.body(body).unwrap();
     let index = solidcraft_engine::doc::naming::face_spots(body_state)
@@ -1381,8 +1381,9 @@ fn modeled_thread_survives_timeline_double_click_and_ok() {
         assert_eq!(h.app.dialog.as_ref().unwrap().editing, Some((id, None)));
         assert_eq!(h.app.dialog.as_ref().unwrap().inputs[0].items.len(), 1, "the cylinder stays selected");
         if change_length {
-            h.step(&json!({"click":{"handle":"dialog:Full Length"}})).unwrap();
-            h.step(&json!({"click":{"handle":"dialog:Length"}})).unwrap();
+            for handle in ["dialog:Extent", "dialog:Extent:Length", "dialog:Length"] {
+                h.step(&json!({"click":{"handle":handle}})).unwrap();
+            }
             h.step(&json!({"key":"A","cmd":true})).unwrap();
             h.step(&json!({"text":"2 mm"})).unwrap();
         }
@@ -1459,7 +1460,7 @@ fn thread_choices_apply_a_fine_pitch_and_partial_modelled_thread() {
     h.app.session.selection = vec![thread_face(&h.app, "Body1")];
     h.step(&json!({"start":"solid.thread"})).unwrap();
     let saved = h.app.session.doc.to_json();
-    for handle in ["dialog:Pitch", "dialog:Pitch:1 mm", "dialog:Full Length", "dialog:Length"] {
+    for handle in ["dialog:Pitch", "dialog:Pitch:1 mm", "dialog:Extent", "dialog:Extent:Length", "dialog:Length"] {
         h.step(&json!({"click":{"handle":handle}})).unwrap();
     }
     h.step(&json!({"key":"A","cmd":true})).unwrap();

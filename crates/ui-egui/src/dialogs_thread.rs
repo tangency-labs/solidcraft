@@ -1,15 +1,20 @@
-//! Tapped-hole catalogues and metric Thread choices share document sizing data.
-//! Browsing choices does not edit the model or freeze an automatic Thread feature.
+//! The thread dialog: form, size, hand, starts, extent, runouts, tip and the modelled option of
+//! `solid.thread`. Choices only build the command's parameters: the command checks the geometry
+//! and its error text is what the dialog shows. Browsing choices does not edit the model or
+//! freeze an automatic feature.
 
+use serde_json::{Value, json};
+use solidcraft_engine::Sel;
 use solidcraft_engine::doc::{
     Document, TappedThreadFamily, ThreadHandedness, metric_thread_sizes, parse_metric_thread, parse_tapped_thread, tapped_thread_sizes,
 };
 
-use crate::dialogs::{combo, form_row};
+use crate::dialogs::{combo, form_row, object_point, put, set_object_accepting};
 use crate::i18n::tr;
-use crate::ui_kit::text_row;
+use crate::selection::{Accept, EDGES, FACES, PLANES, SelInput};
+use crate::ui_kit::{choice_row, expr_row, hint_row, text_row};
 
-/// Common pitch presets, not an exhaustive catalogue of standard diameter/pitch pairs.
+/// Common metric pitch presets, not an exhaustive catalogue of standard diameter/pitch pairs.
 /// The coarse and current pitches are included separately; custom pairs remain editable.
 const PITCHES: &[f64] = &[0.2, 0.25, 0.35, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0];
 
@@ -156,19 +161,243 @@ pub(crate) fn handedness_row(ui: &mut egui::Ui, handedness: &mut ThreadHandednes
     *handedness = if selected == 1 { ThreadHandedness::Left } else { ThreadHandedness::Right };
 }
 
-/// Returns (Enter pressed, automatic sizing requested).
-pub(crate) fn rows(ui: &mut egui::Ui, designation: &mut String, suggested: &mut Option<String>, modeled: &mut bool, full: &mut bool) -> (bool, bool) {
-    form_row(ui, "Profile", |ui| {
-        ui.label(tr("thread.iso_metric"));
-    });
+/// ISO 2904 (DIN 103-2) trapezoidal diameter/pitch combinations, the preferred (medium) pitch
+/// first. ISO 3030 buttress threads use the same combinations from 10 mm up.
+const TRAPEZOIDAL: &[(f64, &[f64])] = &[
+    (8.0, &[1.5]),
+    (9.0, &[2.0, 1.5]),
+    (10.0, &[2.0, 1.5]),
+    (11.0, &[3.0, 2.0]),
+    (12.0, &[3.0, 2.0]),
+    (14.0, &[3.0, 2.0]),
+    (16.0, &[4.0, 2.0]),
+    (18.0, &[4.0, 2.0]),
+    (20.0, &[4.0, 2.0]),
+    (22.0, &[5.0, 3.0, 8.0]),
+    (24.0, &[5.0, 3.0, 8.0]),
+    (26.0, &[5.0, 3.0, 8.0]),
+    (28.0, &[5.0, 3.0, 8.0]),
+    (30.0, &[6.0, 3.0, 10.0]),
+    (32.0, &[6.0, 3.0, 10.0]),
+    (36.0, &[6.0, 3.0, 10.0]),
+    (40.0, &[7.0, 3.0, 10.0]),
+    (44.0, &[7.0, 3.0, 12.0]),
+    (48.0, &[8.0, 3.0, 12.0]),
+    (50.0, &[8.0, 3.0, 12.0]),
+    (52.0, &[8.0, 3.0, 12.0]),
+    (60.0, &[9.0, 3.0, 14.0]),
+    (70.0, &[10.0, 4.0, 16.0]),
+    (80.0, &[10.0, 4.0, 16.0]),
+    (90.0, &[12.0, 4.0, 18.0]),
+    (100.0, &[12.0, 4.0, 20.0]),
+];
+
+/// A thread form: the command's `form` value, the dialog's label, and the designation prefix of
+/// the forms whose sizes the dialog lists (the others take a typed designation, or the size
+/// that fits the face).
+pub(crate) struct Form {
+    pub value: &'static str,
+    pub label: &'static str,
+    prefix: Option<&'static str>,
+    buttress: bool,
+}
+
+pub(crate) const FORMS: &[Form] = &[
+    Form { value: "metric", label: "ISO metric", prefix: Some("M"), buttress: false },
+    Form { value: "trapezoidal", label: "Trapezoidal (ISO 2904)", prefix: Some("Tr"), buttress: false },
+    Form { value: "acme", label: "Acme (ASME B1.5)", prefix: None, buttress: false },
+    Form { value: "buttress", label: "Buttress (ISO 3030)", prefix: Some("S"), buttress: true },
+    Form { value: "buttress_asme", label: "Buttress (ASME B1.9)", prefix: None, buttress: true },
+    Form { value: "square", label: "Square", prefix: None, buttress: false },
+];
+
+const HANDS: &[(&str, &str)] = &[("Right", "right"), ("Left", "left"), ("Both", "both")];
+const STARTS: &[&str] = &["1", "2", "3", "4", "5", "6", "7", "8"];
+const FULL: usize = 0;
+const LENGTH: usize = 1;
+const UP_TO_EXTENT: usize = 2;
+const EXTENTS: &[(&str, &str)] = &[("Full", "full"), ("Length", "length"), ("Up to", "up_to")];
+/// Runout choices (ISO 3508); the last one is a typed length.
+const EASES: &[(&str, &str)] = &[("None", ""), ("Standard (2.5 P)", "standard"), ("Short (1.25 P)", "short"), ("Length", "")];
+const EASE_LENGTH: usize = 3;
+const TIPS: &[(&str, &str)] = &[("None", "none"), ("Chamfer", "chamfer")];
+const FLANKS: &[(&str, &str)] = &[("End", "end"), ("Start", "start")];
+
+/// The pick of the end the thread is measured from (`from`).
+const START_END: &str = "Start end (optional)";
+/// The face or plane an Up To extent runs to (`up_to`).
+const UP_TO: &str = "Up to";
+/// What the Up To pick accepts.
+const UP_TO_ACCEPT: Accept = FACES | PLANES;
+
+/// The selection inputs of a new thread dialog.
+pub(crate) fn inputs() -> Vec<SelInput> {
+    vec![SelInput::new("Cylindrical face", FACES, false)]
+}
+
+/// Add the picks the options use, and take away the others: the end to start from (optional,
+/// so it does not take the next click), and the Up To place (which does).
+pub(crate) fn sync_inputs(inputs: &mut Vec<SelInput>, active: &mut usize, o: &Options) {
+    let was = *active;
+    set_object_accepting(inputs, active, START_END, EDGES, o.starts_at_an_end());
+    *active = was.min(inputs.len().saturating_sub(1));
+    set_object_accepting(inputs, active, UP_TO, UP_TO_ACCEPT, o.extent == UP_TO_EXTENT);
+}
+
+/// A runout at one end: a choice from the runout list and the typed length.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Ease {
+    pub choice: usize,
+    pub length: String,
+}
+
+/// The thread options beyond the size and length (indices into this module's choice lists).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Options {
+    pub form: usize,
+    pub hand: usize,
+    /// The number of starts less one.
+    pub starts: usize,
+    pub extent: usize,
+    pub ease_in: Ease,
+    pub ease_out: Ease,
+    pub tip: usize,
+    pub chamfer_angle: String,
+    pub chamfer_depth: String,
+    pub steep_flank: usize,
+}
+
+impl Options {
+    /// The options of a saved thread: the form its designation names (M, Tr or S), and a
+    /// Length extent when it has a length.
+    pub fn for_saved(designation: &str, length: &str) -> Options {
+        Options { form: form_of(designation), extent: if length.trim().is_empty() { FULL } else { LENGTH }, ..Options::default() }
+    }
+
+    /// Does the thread start at one end of the face (a length or an Up To extent, a runout or a
+    /// tip)? Then the end to start from can be picked.
+    pub fn starts_at_an_end(&self) -> bool {
+        self.extent != FULL || self.ease_in.choice != 0 || self.ease_out.choice != 0 || self.tip != 0
+    }
+
+    /// Does the dialog suggest a size from the face? The face's suggestion is an ISO metric size.
+    pub fn suggests(&self) -> bool {
+        self.form == 0
+    }
+}
+
+/// The form a designation's prefix names: Tr is trapezoidal, S buttress, anything else metric.
+fn form_of(designation: &str) -> usize {
+    let t = designation.trim();
+    let index = |value: &str| FORMS.iter().position(|f| f.value == value).unwrap_or(0);
+    if t.starts_with("Tr") {
+        index("trapezoidal")
+    } else if t.strip_prefix('S').is_some_and(|r| r.starts_with(|c: char| c.is_ascii_digit())) {
+        index("buttress")
+    } else {
+        0
+    }
+}
+
+/// The sizes a form lists: each diameter with its pitches, the standard pitch first.
+fn sizes(form: &Form) -> Vec<(f64, Vec<f64>)> {
+    match form.value {
+        "metric" => metric_thread_sizes().iter().map(|(d, coarse)| (*d, vec![*coarse])).collect(),
+        "trapezoidal" => TRAPEZOIDAL.iter().map(|(d, p)| (*d, p.to_vec())).collect(),
+        "buttress" => TRAPEZOIDAL.iter().filter(|(d, _)| *d >= 10.0).map(|(d, p)| (*d, p.to_vec())).collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// The diameter and pitch a designation of this form names. A multi-start designation
+/// (`Tr40x14(P7)`) names the lead and, in brackets, the pitch.
+fn parse(form: &Form, designation: &str) -> Option<(f64, f64)> {
+    let prefix = form.prefix?;
+    if prefix == "M" {
+        return parse_metric_thread(designation);
+    }
+    let rest = designation.trim().strip_prefix(prefix)?;
+    let (d, rest) = rest.split_once(['x', 'X', '×'])?;
+    let pitch = match rest.split_once('(') {
+        Some((_, p)) => p.trim().strip_suffix(')')?.trim().strip_prefix(['P', 'p'])?,
+        None => rest,
+    };
+    let (d, p) = (d.trim().parse::<f64>().ok()?, pitch.trim().parse::<f64>().ok()?);
+    (d > 0.0 && p > 0.0).then_some((d, p))
+}
+
+fn designation_of(form: &Form, d: f64, p: f64) -> String {
+    format!("{}{d}x{p}", form.prefix.unwrap_or_default())
+}
+
+/// The pitches the Pitch choice offers for diameter `d` (largest first), with the current one.
+fn pitches(form: &Form, d: f64, current: f64) -> Vec<f64> {
+    let listed = sizes(form).into_iter().find(|(n, _)| *n == d).map(|(_, p)| p);
+    let mut pitches = Vec::new();
+    if form.value == "metric" {
+        let coarse = listed.as_ref().and_then(|p| p.first().copied());
+        pitches.extend(PITCHES.iter().copied().filter(|p| *p < d && *p <= coarse.unwrap_or(d)));
+        pitches.extend(coarse);
+    } else {
+        pitches.extend(listed.unwrap_or_default());
+    }
+    pitches.push(current);
+    pitches.sort_by(|a, b| b.total_cmp(a));
+    pitches.dedup();
+    pitches
+}
+
+/// A new form keeps a manual size's diameter when the form lists it (with the form's standard
+/// pitch); any other size goes back to the size that fits the face. True when the size went
+/// back to automatic.
+fn change_form(designation: &mut String, suggested: &mut Option<String>, from: usize, to: usize) -> bool {
+    let automatic = designation.trim().is_empty() || suggested.as_deref() == Some(designation.as_str());
+    let kept = (!automatic)
+        .then(|| parse(&FORMS[from], designation))
+        .flatten()
+        .and_then(|(d, _)| sizes(&FORMS[to]).into_iter().find(|(n, _)| *n == d))
+        .and_then(|(d, p)| p.first().map(|p| designation_of(&FORMS[to], d, *p)));
+    *suggested = None;
+    match kept {
+        Some(kept) => {
+            *designation = kept;
+            false
+        }
+        None => {
+            designation.clear();
+            true
+        }
+    }
+}
+
+/// The thread's rows. Returns (Enter pressed, automatic sizing requested). The picks are the
+/// caller's: [`sync_inputs`] adds or removes them by the options.
+pub(crate) fn rows(
+    ui: &mut egui::Ui,
+    designation: &mut String,
+    suggested: &mut Option<String>,
+    length: &mut String,
+    o: &mut Options,
+    modeled: &mut bool,
+) -> (bool, bool) {
+    let mut enter = false;
+    let mut reset = false;
+    let form_labels: Vec<&str> = FORMS.iter().map(|f| f.label).collect();
+    let mut form = o.form;
+    choice_row(ui, "Form", "thread_form", &mut form, &form_labels);
+    if form != o.form {
+        reset |= change_form(designation, suggested, o.form, form);
+        o.form = form;
+    }
+    let f = &FORMS[o.form];
 
     let before = designation.trim().is_empty() || suggested.as_deref() == Some(designation.as_str());
     let mut automatic = before;
     crate::ui_kit::section(ui, "thread_options", "Options", true, |ui| {
-        crate::ui_kit::checkbox_grid(ui, &mut [("Modeled", modeled), ("Full Length", full)], 2);
+        crate::ui_kit::checkbox_grid(ui, &mut [("Modeled", modeled)], 2);
         ui.add_enabled_ui(!designation.trim().is_empty(), |ui| crate::ui_kit::checkbox_grid(ui, &mut [("Automatic size", &mut automatic)], 2));
     });
-    let reset = automatic && !before;
+    reset |= automatic && !before;
     if automatic != before {
         *suggested = None;
         if automatic {
@@ -176,8 +405,72 @@ pub(crate) fn rows(ui: &mut egui::Ui, designation: &mut String, suggested: &mut 
         }
     }
 
-    let current = parse_metric_thread(designation);
-    let mut diameters: Vec<f64> = metric_thread_sizes().iter().map(|(d, _)| *d).collect();
+    if f.prefix.is_some() {
+        size_rows(ui, f, designation, suggested);
+    }
+    let hint = match f.prefix {
+        Some(prefix) => format!("{}{}", tr("fits the face, e.g. "), designation_of(f, 20.0, if prefix == "M" { 2.5 } else { 4.0 })),
+        None => tr("fits the face").to_string(),
+    };
+    let (submitted, changed) = text_row(ui, "Designation", designation, &hint);
+    enter |= submitted;
+    if let Some(at) = crate::scenario::handle_at("dialog:Designation") {
+        crate::scenario::publish_handle("dialog:thread_size", at);
+    }
+    if changed {
+        *suggested = None;
+    }
+
+    let hands: Vec<&str> = HANDS.iter().map(|h| h.0).collect();
+    choice_row(ui, "Hand", "thread_hand", &mut o.hand, &hands);
+    choice_row(ui, "Starts", "thread_starts", &mut o.starts, STARTS);
+    if f.buttress {
+        let flanks: Vec<&str> = FLANKS.iter().map(|x| x.0).collect();
+        choice_row(ui, "Steep Flank", "thread_flank", &mut o.steep_flank, &flanks);
+    }
+
+    let extents: Vec<&str> = EXTENTS.iter().map(|x| x.0).collect();
+    let extent = o.extent;
+    choice_row(ui, "Extent", "thread_extent", &mut o.extent, &extents);
+    if o.extent == LENGTH {
+        if extent != LENGTH && length.trim().is_empty() {
+            *length = "10 mm".into();
+        }
+        enter |= expr_row(ui, "Length", length);
+    }
+
+    crate::ui_kit::section(ui, "thread_ends", "Ends", true, |ui| {
+        enter |= ease_rows(ui, "Ease In", "thread_ease_in", &mut o.ease_in);
+        enter |= ease_rows(ui, "Ease Out", "thread_ease_out", &mut o.ease_out);
+        let tips: Vec<&str> = TIPS.iter().map(|x| x.0).collect();
+        choice_row(ui, "Tip", "thread_tip", &mut o.tip, &tips);
+        if o.tip == 1 {
+            enter |= hint_row(ui, "Chamfer Angle", &mut o.chamfer_angle, tr("ISO 4753"));
+            enter |= hint_row(ui, "Chamfer Depth", &mut o.chamfer_depth, tr("ISO 4753"));
+        }
+    });
+    (enter, reset)
+}
+
+/// A runout choice, with its length when typed.
+fn ease_rows(ui: &mut egui::Ui, label: &'static str, id: &str, e: &mut Ease) -> bool {
+    let labels: Vec<&str> = EASES.iter().map(|x| x.0).collect();
+    let before = e.choice;
+    choice_row(ui, label, id, &mut e.choice, &labels);
+    if e.choice != EASE_LENGTH {
+        return false;
+    }
+    if before != EASE_LENGTH && e.length.trim().is_empty() {
+        e.length = "1 mm".into();
+    }
+    expr_row(ui, if label == "Ease In" { "Ease In Length" } else { "Ease Out Length" }, &mut e.length)
+}
+
+/// The Size and Pitch choices of a form with a size list.
+fn size_rows(ui: &mut egui::Ui, f: &Form, designation: &mut String, suggested: &mut Option<String>) {
+    let table = sizes(f);
+    let current = parse(f, designation);
+    let mut diameters: Vec<f64> = table.iter().map(|(d, _)| *d).collect();
     if let Some((d, _)) = current
         && !diameters.contains(&d)
     {
@@ -193,29 +486,21 @@ pub(crate) fn rows(ui: &mut egui::Ui, designation: &mut String, suggested: &mut 
             labels.push("Select size");
         }
         combo(ui, "thread_diameter", &labels, &mut selected);
-        // A new diameter starts with its coarse pitch. The current custom diameter, if any,
+        // A new diameter starts with its standard pitch. The current custom diameter, if any,
         // is already selected and retains its explicit pitch.
         if selected != before
             && let Some(d) = diameters.get(selected)
-            && let Some((_, coarse)) = metric_thread_sizes().iter().find(|(n, _)| n == d)
+            && let Some(p) = table.iter().find(|(n, _)| n == d).and_then(|(_, p)| p.first())
         {
-            *designation = self::designation(*d, *coarse);
+            *designation = designation_of(f, *d, *p);
             *suggested = None;
         }
     });
 
-    let current = parse_metric_thread(designation);
+    let current = parse(f, designation);
     form_row(ui, "Pitch", |ui| {
         ui.add_enabled_ui(current.is_some(), |ui| {
-            let mut pitches = Vec::new();
-            if let Some((d, p)) = current {
-                let coarse = metric_thread_sizes().iter().find(|(n, _)| *n == d).map(|(_, p)| *p);
-                pitches.extend(PITCHES.iter().copied().filter(|p| *p < d && *p <= coarse.unwrap_or(d)));
-                pitches.extend(coarse);
-                pitches.push(p);
-            }
-            pitches.sort_by(|a, b| b.total_cmp(a));
-            pitches.dedup();
+            let pitches = current.map(|(d, p)| pitches(f, d, p)).unwrap_or_default();
             let labels: Vec<String> = pitches.iter().map(|p| format!("{p} mm")).collect();
             let labels: Vec<&str> = labels.iter().map(String::as_str).collect();
             let mut selected = current.and_then(|(_, p)| pitches.iter().position(|n| *n == p)).unwrap_or(0);
@@ -224,21 +509,69 @@ pub(crate) fn rows(ui: &mut egui::Ui, designation: &mut String, suggested: &mut 
             if selected != before
                 && let (Some((d, _)), Some(p)) = (current, pitches.get(selected))
             {
-                *designation = self::designation(d, *p);
+                *designation = designation_of(f, d, *p);
                 *suggested = None;
             }
         });
     });
-
-    let (enter, changed) = text_row(ui, "Designation", designation, tr("fits the face, e.g. M8"));
-    if let Some(at) = crate::scenario::handle_at("dialog:Designation") {
-        crate::scenario::publish_handle("dialog:thread_size", at);
-    }
-    if changed {
-        *suggested = None;
-    }
-    (enter, reset)
 }
+
+/// Put the options into the command's parameters. Defaults are left out, so a thread without
+/// them means what it always did.
+pub(crate) fn put_params(p: &mut Value, length: &str, o: &Options, inputs: &[SelInput]) {
+    let f = &FORMS[o.form];
+    if o.form != 0 {
+        p["form"] = json!(f.value);
+    }
+    if o.hand != 0 {
+        p["hand"] = json!(HANDS[o.hand].1);
+    }
+    if o.starts != 0 {
+        p["starts"] = json!(o.starts + 1);
+    }
+    match o.extent {
+        LENGTH => {
+            p["extent"] = json!(EXTENTS[LENGTH].1);
+            put(p, &[("length", length)]);
+        }
+        UP_TO_EXTENT => {
+            p["extent"] = json!(EXTENTS[UP_TO_EXTENT].1);
+            if let Some(to) = up_to(inputs) {
+                p["up_to"] = to;
+            }
+        }
+        _ => {}
+    }
+    if let Some(from) = object_point(inputs, START_END) {
+        p["from"] = from;
+    }
+    for (key, e) in [("ease_in", &o.ease_in), ("ease_out", &o.ease_out)] {
+        match e.choice {
+            EASE_LENGTH => put(p, &[(key, e.length.as_str())]),
+            0 => {}
+            c => p[key] = json!(EASES[c].1),
+        }
+    }
+    if o.tip != 0 {
+        p["tip"] = json!(TIPS[o.tip].1);
+        put(p, &[("chamfer_angle", o.chamfer_angle.as_str()), ("chamfer_depth", o.chamfer_depth.as_str())]);
+    }
+    if f.buttress && o.steep_flank != 0 {
+        p["steep_flank"] = json!(FLANKS[o.steep_flank].1);
+    }
+}
+
+/// The picked Up To place: a plane's name, or a point on a face.
+fn up_to(inputs: &[SelInput]) -> Option<Value> {
+    match inputs.iter().find(|i| i.label == UP_TO)?.items.first()? {
+        Sel::Plane { name } => Some(json!(name)),
+        _ => object_point(inputs, UP_TO),
+    }
+}
+
+#[cfg(test)]
+#[path = "dialogs_thread_tests.rs"]
+mod tests;
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]

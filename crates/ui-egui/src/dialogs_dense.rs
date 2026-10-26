@@ -758,26 +758,18 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         Kind::OffsetFaces { distance } => {
             enter |= expr_row(ui, "Distance", distance);
         }
-        Kind::Thread { designation, length, suggested, of, handedness } => {
-            let mut full = length.trim().is_empty();
-            let was_full = full;
+        Kind::Thread { designation, length, suggested, of, options } => {
             let mut modeled = d.extra.get("modeled").and_then(Value::as_bool).unwrap_or(false);
             let before = modeled;
-            let (submitted, reset) = crate::dialogs_thread::rows(ui, designation, suggested, &mut modeled, &mut full);
-            crate::dialogs_thread::handedness_row(ui, handedness, "thread_handedness");
+            let (submitted, reset) = crate::dialogs_thread::rows(ui, designation, suggested, length, options, &mut modeled);
             if modeled != before {
                 d.extra.insert("modeled".into(), json!(modeled));
-            }
-            if full != was_full {
-                *length = if full { String::new() } else { length_default(&app.session, "10") };
             }
             enter |= submitted;
             if reset {
                 of.clear();
             }
-            if !full {
-                enter |= expr_row(ui, "Length", length);
-            }
+            crate::dialogs_thread::sync_inputs(&mut d.inputs, &mut d.active, options);
         }
         Kind::Loft { operation, rail_fit } => {
             choice_row(ui, "Operation", "lf_op", operation, &OP_LABELS);
