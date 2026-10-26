@@ -13,8 +13,8 @@ The **frontier** is the first case of a tier, in ladder order, that fails (fail,
 | 03-analytic-profiles | extrudes and revolves of line-and-arc profiles | 10 | 10 pass | – |
 | 04-spline-profiles | spline profiles, sweeps and lofts | 12 | 12 pass | – |
 | 05-holes-and-taps | holes and tapped holes | 13 | 13 pass | – |
-| 06-threads | modelled threads | 17 | 17 pass | – |
-| 07-fillets | constant, variable and corner fillets | 17 | 1 fail, 14 pass, 2 unsupported | 016-corner-three-sequential-r5-r3-r7 |
+| 06-threads | modelled threads | 19 | 19 pass | – |
+| 07-fillets | constant, variable and corner fillets | 18 | 17 pass, 1 unsupported | – |
 | 08-chamfers | chamfers | 8 | 8 pass | – |
 | 09-shells-and-offsets | shells and offsets | 15 | 15 pass | – |
 | 10-patterns-and-mirrors | patterns and mirrors | 8 | 8 pass | – |
@@ -28,138 +28,141 @@ Times are the commands' own, in seconds, from the case's process; **golden** is 
 
 | Case | What | Answer | Result | s | golden s | changes |
 |---|---|---|---|---|---|---|
-| ladder/01-primitives/001-box | a 60x40x20 box: the stock every later tier starts from | analytic | pass | 0.003 | 0.003 |  |
 | ladder/01-primitives/005-sphere | a sphere r10 | analytic | pass | 0.003 | 0.003 |  |
-| ladder/01-primitives/004-frustum | a cone frustum r10 -> r5, h20 (revolved trapezoid) | analytic | pass | 0.016 | 0.016 |  |
-| ladder/01-primitives/002-cylinder | a cylinder r10 h30 | analytic | pass | 0.017 | 0.017 |  |
+| ladder/01-primitives/001-box | a 60x40x20 box: the stock every later tier starts from | analytic | pass | 0.004 | 0.004 |  |
+| ladder/01-primitives/004-frustum | a cone frustum r10 -> r5, h20 (revolved trapezoid) | analytic | pass | 0.017 | 0.017 |  |
 | ladder/01-primitives/003-cone | a cone r10 h30 (no cone primitive: a revolved right triangle, its axis a sketch line) | analytic | pass | 0.025 | 0.025 |  |
-| ladder/01-primitives/006-torus | a torus R20 r5 | analytic | pass | 0.496 | 0.496 |  |
-| ladder/02-booleans/004-edge-on-edge-no-overlap | a cut tool that shares only the top front edge of the stock | analytic | pass | 0.006 | 0.006 |  |
-| ladder/02-booleans/015-knife-edge-wedge-cut | a triangular prism cut whose slope meets the bottom face along one line (a knife edge), its other faces on the stock's | analytic | pass | 0.006 | 0.006 |  |
-| ladder/02-booleans/020-part-back-wall | the running part: a 60x10x15 back wall joined on the stock's top, flush with its back and ends | analytic | pass | 0.007 | 0.007 |  |
-| ladder/02-booleans/001-coincident-face-join | a 60x40x10 box joined exactly on the stock's top face: one 60x40x30 box | analytic | pass | 0.012 | 0.012 |  |
+| ladder/01-primitives/002-cylinder | a cylinder r10 h30 | analytic | pass | 0.032 | 0.032 |  |
+| ladder/01-primitives/006-torus | a torus R20 r5 | analytic | pass | 0.575 | 0.575 |  |
+| ladder/02-booleans/001-coincident-face-join | a 60x40x10 box joined exactly on the stock's top face: one 60x40x30 box | analytic | pass | 0.006 | 0.006 |  |
+| ladder/02-booleans/019-notch-flush-with-end-face | a notch 40x20 through the height, its end flush with the stock's end face: a U | analytic | pass | 0.007 | 0.007 |  |
+| ladder/02-booleans/004-edge-on-edge-no-overlap | a cut tool that shares only the top front edge of the stock | analytic | pass | 0.010 | 0.010 |  |
+| ladder/02-booleans/015-knife-edge-wedge-cut | a triangular prism cut whose slope meets the bottom face along one line (a knife edge), its other faces on the stock's | analytic | pass | 0.011 | 0.011 |  |
 | ladder/02-booleans/014-cut-through-sphere-pole | a 4x4 square post cut off the top of a sphere r10 through its pole | analytic | pass | 0.012 | 0.012 |  |
-| ladder/02-booleans/016-v-groove-pinches-bottom-to-line | a V groove whose apex touches the bottom face along a line, cut through: two pieces | analytic | pass | 0.013 | 0.013 |  |
+| ladder/02-booleans/016-v-groove-pinches-bottom-to-line | a V groove whose apex touches the bottom face along a line, cut through: two pieces | analytic | pass | 0.012 | 0.012 |  |
+| ladder/02-booleans/020-part-back-wall | the running part: a 60x10x15 back wall joined on the stock's top, flush with its back and ends | analytic | pass | 0.013 | 0.013 |  |
 | ladder/02-booleans/003-pocket-flush-with-top | a 20x20x10 pocket whose tool's top is the stock's top face | analytic | pass | 0.013 | 0.013 |  |
-| ladder/02-booleans/019-notch-flush-with-end-face | a notch 40x20 through the height, its end flush with the stock's end face: a U | analytic | pass | 0.013 | 0.013 |  |
-| ladder/02-booleans/002-coplanar-overlap-join | two 60x40x20 boxes overlapping 30x20 in plan, tops and bottoms coplanar | analytic | pass | 0.014 | 0.014 |  |
-| ladder/02-booleans/006-tangent-along-line-no-overlap | a cylinder r10 along X lying on the top face (tangent along a line), cut | analytic | pass | 0.015 | 0.015 |  |
-| ladder/02-booleans/007-near-tangent-gap-1e-3 | a cylinder r10 along X 1e-3 mm above the top face, cut | analytic | pass | 0.015 | 0.015 |  |
-| ladder/02-booleans/010-near-tangent-overlap-1e-6 | a cylinder r10 along X dipping 1e-6 mm into the top face, cut | invariants | pass | 0.016 | 0.016 |  |
-| ladder/02-booleans/009-near-tangent-overlap-1e-3 | a cylinder r10 along X dipping 1e-3 mm into the top face, cut: a groove 1e-3 deep | analytic | pass | 0.018 | 0.018 |  |
+| ladder/02-booleans/002-coplanar-overlap-join | two 60x40x20 boxes overlapping 30x20 in plan, tops and bottoms coplanar | analytic | pass | 0.013 | 0.013 |  |
+| ladder/02-booleans/006-tangent-along-line-no-overlap | a cylinder r10 along X lying on the top face (tangent along a line), cut | analytic | pass | 0.016 | 0.016 |  |
 | ladder/02-booleans/017-cylinder-tangent-top-and-bottom | a cylinder r10 along X tangent to both the top and bottom faces, cut: two pieces with zero-angle cusps | analytic | pass | 0.023 | 0.023 |  |
-| ladder/02-booleans/005-vertex-on-face-no-overlap | an inverted cone whose apex touches the middle of the top face, cut | analytic | pass | 0.023 | 0.023 |  |
-| ladder/02-booleans/018-hole-tangent-to-side-face | a through hole r10 tangent to the front face: the front face pinched to a line | analytic | pass | 0.027 | 0.027 |  |
-| ladder/02-booleans/013-cut-across-cylinder-seam | a 10x4 notch through a cylinder r10 across its +X side (where the seam lies) | analytic | pass | 0.027 | 0.027 |  |
+| ladder/02-booleans/018-hole-tangent-to-side-face | a through hole r10 tangent to the front face: the front face pinched to a line | analytic | pass | 0.026 | 0.026 |  |
 | ladder/02-booleans/008-near-tangent-gap-1e-6 | a cylinder r10 along X 1e-6 mm above the top face, cut | analytic | pass | 0.028 | 0.028 |  |
+| ladder/02-booleans/010-near-tangent-overlap-1e-6 | a cylinder r10 along X dipping 1e-6 mm into the top face, cut | invariants | pass | 0.029 | 0.029 |  |
 | ladder/02-booleans/011-tangent-along-circle-through-hole | a sphere r10 sitting in a through hole r10 at the top edge (tangent along the hole's top circle), cut | analytic | pass | 0.035 | 0.035 |  |
-| ladder/02-booleans/012-tangent-along-circle-bowl | a blind hole r10 10 deep, then a sphere r10 centred on its floor: the floor disk vanishes exactly | analytic | pass | 0.042 | 0.042 |  |
-| ladder/02-booleans/022-cylinder-grazing-a-hole-edge | a corner piece (square column minus a quarter disc r1.5, 0.0003 off the axis) cut out of a part with a blind r1.6 hole on the same axis: the tool's r1.5 face sits 0.1 mm inside the hole wall; 'no result' | analytic | pass | 0.060 | 0.060 |  |
-| ladder/02-booleans/021-holes-touching-at-a-point | two through holes r5 whose circles touch at one point (30, 20) | analytic | pass | 0.067 | 0.067 |  |
-| ladder/02-booleans/023-lips-1e-4-off-the-walls-joined | two half-annulus lips (r 4..5, from z=2 to 20) joined onto a stadium-ring base (z 0..2, r 3..5 arcs, centres 20 apart) with their cylinder walls 0.0001 mm off the base's: the lip cap touches the base top, leaving a 0.0001 mm crescent overhang. Layout is a hand-built variant of the PR's public reproduction | analytic | pass | 0.111 | 0.111 |  |
-| ladder/02-booleans/024-wall-halves-merged-into-a-flange | the flange top annulus of a freshly revolved hub (z = 6, r 18..30) picked by a point and extruded 5 mm (the pick found a third of the face: "the selected planar face no longer exists") | analytic | pass | 0.185 | 0.185 |  |
-| ladder/02-booleans/025-flush-chord-layers-joined | a join of flush layers: a disc r37 (z -1.2..0) carrying 15 of the 19 regions of a sketch of 18 chords (z -3.6..-1.2; four bands left out), on an annulus r35..37 (z -5.6..-3.6) joined to a disc of all the chord regions (z -8..-5.6): SMLib's result came back with 'loop encloses no (u, v) area' though both operands are valid | analytic | pass | 1.053 | 1.053 |  |
-| ladder/03-analytic-profiles/001-extrude-rect-with-arc-end | a 60x40 profile with a semicircular end r20, extruded 20 | analytic | pass | 0.007 | 0.007 |  |
-| ladder/03-analytic-profiles/007-revolve-180-touching-axis | a 15x20 rectangle on the axis revolved 180 deg: a half cylinder | analytic | pass | 0.009 | 0.009 |  |
-| ladder/03-analytic-profiles/006-revolve-partial-90 | a 10x10 rectangle 10 mm off the axis revolved 90 deg | analytic | pass | 0.009 | 0.009 |  |
-| ladder/03-analytic-profiles/008-extrude-slot | a slot (centres 40 apart, width 20) extruded 10 | analytic | pass | 0.016 | 0.016 |  |
-| ladder/03-analytic-profiles/003-extrude-tapered-circle | a circle r10 extruded 20 with a -5 deg taper (inward): a cone frustum | analytic | pass | 0.028 | 0.028 |  |
-| ladder/03-analytic-profiles/002-extrude-annulus | an annulus r20/r10 extruded 15 | analytic | pass | 0.033 | 0.033 |  |
-| ladder/03-analytic-profiles/004-revolve-full-off-axis | a 10x30 rectangle 10 mm off the Z axis revolved 360 deg: a tube | analytic | pass | 0.034 | 0.034 |  |
-| ladder/03-analytic-profiles/005-revolve-touching-axis-hemisphere | a quarter disk r20 with an edge on the Z axis revolved 360 deg: a hemisphere | analytic | pass | 0.060 | 0.060 |  |
-| ladder/03-analytic-profiles/009-part-boss-and-slot | the running part: a revolved boss r8 h10 joined on the top, a slot 15x8 cut through the base | analytic | pass | 0.066 | 0.066 |  |
-| ladder/03-analytic-profiles/010-revolve-horn-torus-270 | the half disc of radius 14 on the far side of a diameter 14 mm from the axis (the full circle would touch the axis: a horn torus) revolved 270 degrees | analytic | pass | 0.079 | 0.079 |  |
-| ladder/04-spline-profiles/005-loft-square-frustum | a loft between a 40 square at z=0 and a 20 square at z=30 | analytic | pass | 0.010 | 0.010 |  |
+| ladder/02-booleans/005-vertex-on-face-no-overlap | an inverted cone whose apex touches the middle of the top face, cut | analytic | pass | 0.043 | 0.043 |  |
+| ladder/02-booleans/007-near-tangent-gap-1e-3 | a cylinder r10 along X 1e-3 mm above the top face, cut | analytic | pass | 0.044 | 0.044 |  |
+| ladder/02-booleans/009-near-tangent-overlap-1e-3 | a cylinder r10 along X dipping 1e-3 mm into the top face, cut: a groove 1e-3 deep | analytic | pass | 0.048 | 0.048 |  |
+| ladder/02-booleans/013-cut-across-cylinder-seam | a 10x4 notch through a cylinder r10 across its +X side (where the seam lies) | analytic | pass | 0.050 | 0.050 |  |
+| ladder/02-booleans/021-holes-touching-at-a-point | two through holes r5 whose circles touch at one point (30, 20) | analytic | pass | 0.055 | 0.055 |  |
+| ladder/02-booleans/012-tangent-along-circle-bowl | a blind hole r10 10 deep, then a sphere r10 centred on its floor: the floor disk vanishes exactly | analytic | pass | 0.060 | 0.060 |  |
+| ladder/02-booleans/022-cylinder-grazing-a-hole-edge | a corner piece (square column minus a quarter disc r1.5, 0.0003 off the axis) cut out of a part with a blind r1.6 hole on the same axis: the tool's r1.5 face sits 0.1 mm inside the hole wall; 'no result' | analytic | pass | 0.061 | 0.061 |  |
+| ladder/02-booleans/023-lips-1e-4-off-the-walls-joined | two half-annulus lips (r 4..5, from z=2 to 20) joined onto a stadium-ring base (z 0..2, r 3..5 arcs, centres 20 apart) with their cylinder walls 0.0001 mm off the base's: the lip cap touches the base top, leaving a 0.0001 mm crescent overhang. Layout is a hand-built variant of the PR's public reproduction | analytic | pass | 0.132 | 0.132 |  |
+| ladder/02-booleans/024-wall-halves-merged-into-a-flange | the flange top annulus of a freshly revolved hub (z = 6, r 18..30) picked by a point and extruded 5 mm (the pick found a third of the face: "the selected planar face no longer exists") | analytic | pass | 0.237 | 0.237 |  |
+| ladder/02-booleans/025-flush-chord-layers-joined | a join of flush layers: a disc r37 (z -1.2..0) carrying 15 of the 19 regions of a sketch of 18 chords (z -3.6..-1.2; four bands left out), on an annulus r35..37 (z -5.6..-3.6) joined to a disc of all the chord regions (z -8..-5.6): SMLib's result came back with 'loop encloses no (u, v) area' though both operands are valid | analytic | pass | 1.355 | 1.355 |  |
+| ladder/03-analytic-profiles/001-extrude-rect-with-arc-end | a 60x40 profile with a semicircular end r20, extruded 20 | analytic | pass | 0.013 | 0.013 |  |
+| ladder/03-analytic-profiles/007-revolve-180-touching-axis | a 15x20 rectangle on the axis revolved 180 deg: a half cylinder | analytic | pass | 0.014 | 0.014 |  |
+| ladder/03-analytic-profiles/006-revolve-partial-90 | a 10x10 rectangle 10 mm off the axis revolved 90 deg | analytic | pass | 0.016 | 0.016 |  |
+| ladder/03-analytic-profiles/008-extrude-slot | a slot (centres 40 apart, width 20) extruded 10 | analytic | pass | 0.023 | 0.023 |  |
+| ladder/03-analytic-profiles/003-extrude-tapered-circle | a circle r10 extruded 20 with a -5 deg taper (inward): a cone frustum | analytic | pass | 0.050 | 0.050 |  |
+| ladder/03-analytic-profiles/002-extrude-annulus | an annulus r20/r10 extruded 15 | analytic | pass | 0.059 | 0.059 |  |
+| ladder/03-analytic-profiles/004-revolve-full-off-axis | a 10x30 rectangle 10 mm off the Z axis revolved 360 deg: a tube | analytic | pass | 0.065 | 0.065 |  |
+| ladder/03-analytic-profiles/005-revolve-touching-axis-hemisphere | a quarter disk r20 with an edge on the Z axis revolved 360 deg: a hemisphere | analytic | pass | 0.070 | 0.070 |  |
+| ladder/03-analytic-profiles/009-part-boss-and-slot | the running part: a revolved boss r8 h10 joined on the top, a slot 15x8 cut through the base | analytic | pass | 0.124 | 0.124 |  |
+| ladder/03-analytic-profiles/010-revolve-horn-torus-270 | the half disc of radius 14 on the far side of a diameter 14 mm from the axis (the full circle would touch the axis: a horn torus) revolved 270 degrees | analytic | pass | 0.136 | 0.136 |  |
+| ladder/04-spline-profiles/005-loft-square-frustum | a loft between a 40 square at z=0 and a 20 square at z=30 | analytic | pass | 0.011 | 0.011 |  |
 | ladder/04-spline-profiles/001-extrude-bezier-arch | a profile closed by a cubic Bezier arch (control-point spline, 4 points), extruded 10 | analytic | pass | 0.015 | 0.015 |  |
-| ladder/04-spline-profiles/008-loft-square-to-circle | a loft from a 40 square at z=0 to a circle r10 at z=30 | invariants | pass | 0.021 | 0.021 |  |
-| ladder/04-spline-profiles/009-extrude-periodic-fit-spline | a closed periodic fit-point spline through 6 points, extruded 10 | invariants | pass | 0.029 | 0.029 |  |
-| ladder/04-spline-profiles/004-sweep-square-along-bezier | a 4x4 square swept along the same Bezier path | analytic | pass | 0.035 | 0.035 |  |
-| ladder/04-spline-profiles/007-loft-three-circles | a smooth loft through circles r20, r10, r20 at z = 0, 20, 40 | invariants | pass | 0.039 | 0.039 |  |
-| ladder/04-spline-profiles/006-loft-circle-frustum | a loft between circles r20 at z=0 and r10 at z=30 | analytic | pass | 0.043 | 0.043 |  |
-| ladder/04-spline-profiles/003-pipe-along-bezier | a pipe d4 along a planar Bezier path | analytic | pass | 0.081 | 0.081 |  |
-| ladder/04-spline-profiles/002-revolve-bezier-profile | a profile with a Bezier side (r from 20 to 15 over z 0..30) revolved 360 deg about Z | analytic | pass | 0.086 | 0.086 |  |
-| ladder/04-spline-profiles/010-part-bezier-window | the running part: a Bezier-arched window cut through the back wall | analytic | pass | 0.106 | 0.106 |  |
-| ladder/04-spline-profiles/012-loft-ribs-joined-to-a-rounded-pad | the same without the top flange: the join fails with 'boolean Union: no result' | invariants | pass | 0.475 | 0.475 |  |
-| ladder/04-spline-profiles/011-crossing-pleated-loft-skins-joined | a join of two pleated skins (lofts between 24-pleat star outlines, less the same loft moved in 1.1 mm) that cross along a ring near their bottoms: truck panicked ('tolerance must be no less than 1e-6') or gave no result | invariants | pass | 1.126 | 1.126 |  |
-| ladder/05-holes-and-taps/006-tapped-m6-through | an M6 tapped hole through: the tap drill d5 (major - pitch), cosmetic thread | analytic | pass | 0.018 | 0.018 |  |
-| ladder/05-holes-and-taps/001-simple-through | a d10 through hole in the stock's top | analytic | pass | 0.018 | 0.018 |  |
-| ladder/05-holes-and-taps/009-hole-0.5-from-edge | a d10 through hole whose wall is 0.5 mm from the end face | analytic | pass | 0.019 | 0.019 |  |
-| ladder/05-holes-and-taps/010-hole-tangent-to-end-face | a d10 through hole tangent to the end face x=0 | analytic | pass | 0.019 | 0.019 |  |
-| ladder/05-holes-and-taps/003-drilled-blind-118 | a d10 drilled hole 10 deep to the shoulder with a 118 deg point | analytic | pass | 0.023 | 0.023 |  |
-| ladder/05-holes-and-taps/007-tapped-m8-blind | an M8 tapped blind hole 12 deep with a 118 deg drill point | analytic | pass | 0.023 | 0.023 |  |
-| ladder/05-holes-and-taps/002-simple-blind-flat | a d10 blind hole 10 deep, flat bottom | analytic | pass | 0.025 | 0.025 |  |
-| ladder/05-holes-and-taps/004-counterbore | a counterbored hole: d6.6 through, d11 x 6.4 counterbore | analytic | pass | 0.049 | 0.049 |  |
-| ladder/05-holes-and-taps/011-crossing-holes-steinmetz | two d10 through holes whose axes cross: vertical and along Y at z=10 | analytic | pass | 0.053 | 0.053 |  |
-| ladder/05-holes-and-taps/012-crossing-tapped-holes-offset | two M6 tapped holes (d5) crossing with axes 2 mm apart | analytic | pass | 0.061 | 0.061 |  |
-| ladder/05-holes-and-taps/005-countersink | a countersunk hole: d6.6 through, d12 x 90 deg countersink | analytic | pass | 0.061 | 0.061 |  |
-| ladder/05-holes-and-taps/008-tapped-m5-into-curved-face | an M5 tapped hole drilled radially through a cylinder r20 lying along X | analytic | pass | 0.082 | 0.082 |  |
-| ladder/05-holes-and-taps/013-part-holes | the running part: an M6 tapped through hole, an M5 tapped blind hole in the boss, a d3.3 hole down through wall and base | analytic | pass | 0.222 | 0.222 |  |
-| ladder/06-threads/012-external-acme-3-4-6 | a modelled 3/4-6 ACME thread (ASME B1.5, general purpose) on a 3/4 in shaft, six turns | analytic | pass | 0.579 | 0.579 |  |
-| ladder/06-threads/013-external-s20x4 | a modelled metric buttress S20x4 thread (DIN 513, 3/30 deg) on a d20 shaft, six turns | analytic | pass | 0.597 | 0.597 |  |
-| ladder/06-threads/011-external-tr20x4 | a modelled trapezoidal Tr20x4 thread (ISO 2904) on a d20 shaft, six turns | analytic | pass | 0.612 | 0.612 |  |
-| ladder/06-threads/015-internal-tr20x4-nut | a modelled internal Tr20x4 thread in a d16 (D1 = d - P) bore through a 40x40x24 block | analytic | pass | 0.615 | 0.615 |  |
-| ladder/06-threads/014-external-buttress-asme-1.5-8 | a modelled 1.5-8 buttress thread (ASME B1.9 basic profile, 7/45 deg) on a 1.5 in shaft, six turns | analytic | pass | 0.673 | 0.673 |  |
-| ladder/06-threads/010-part-threaded-boss | the running part with a modelled M16 thread on its d16 boss | invariants | pass | 0.701 | 0.701 |  |
-| ladder/06-threads/003-external-m10-partial-length | a modelled M10 thread over 15 of the 30 mm from the top end (`from`): it stops square in the middle of the face | analytic | pass | 0.827 | 0.827 |  |
-| ladder/06-threads/005-internal-m10-through | a modelled internal M10 thread in a d8.5 (tap drill) hole through a 30x30x20 block | analytic | pass | 1.107 | 1.107 |  |
-| ladder/06-threads/007-external-m10-at-filleted-shoulder | a modelled M10 thread on a d10 shaft whose root at the d16 shoulder has an r1 fillet: it stops clear of the fillet | analytic | pass | 1.364 | 1.364 |  |
-| ladder/06-threads/004-external-m10-to-shoulder | a modelled M10 thread on a d10 shaft running down to a d16 shoulder: it stops clear of it, the collar whole | analytic | pass | 1.367 | 1.367 |  |
-| ladder/06-threads/009-thread-runout-length | 004's M10 thread run from the free top end, vanishing over a 3 mm (2 P) runout before the d16 shoulder | analytic | pass | 1.432 | 1.432 |  |
-| ladder/06-threads/016-external-m10-left-hand | 001's modelled M10 thread, left-handed: the same volume, turning the other way | analytic | pass | 1.564 | 1.564 |  |
-| ladder/06-threads/001-external-m10-full | a modelled M10 thread over the whole of a d10 x 30 cylinder | analytic | pass | 1.637 | 1.637 |  |
-| ladder/06-threads/006-external-m10-into-chamfer | a d10 x 30 cylinder with a 1 mm chamfer on top, then a modelled M10 thread over its cylinder face, running out through the chamfer | analytic | pass | 1.652 | 1.652 |  |
-| ladder/06-threads/002-external-m10x1-fine | a modelled fine M10x1 thread over a d10 x 30 cylinder | analytic | pass | 2.412 | 2.412 |  |
-| ladder/06-threads/008-multi-start-thread | a two-start M10 thread (lead 3, pitch 1.5) over a d10 x 30 cylinder | analytic | pass | 3.155 | 3.155 |  |
-| ladder/06-threads/017-external-m10-chamfered-tip | 001's modelled M10 thread with ISO 4753's chamfered end at both free ends: a 45 deg cone down to the minor diameter, cut after the groove | analytic | pass | 3.245 | 3.245 |  |
-| ladder/07-fillets/015-corner-g2-patch | three r5 rounds at a corner with the g2 corner patch | invariants | not supported yet: step 2 (solid.fillet): invalid input: not supported yet: a fillet with G2 corner patches with the SMLib kernel | 0.005 | 0.005 |  |
-| ladder/07-fillets/008-constant-r1e-3 | a constant 1e-3 mm round on the top front edge | analytic | pass | 0.007 | 0.007 |  |
-| ladder/07-fillets/001-single-edge-r5 | an r5 round on the stock's top front edge | analytic | pass | 0.007 | 0.007 |  |
+| ladder/04-spline-profiles/008-loft-square-to-circle | a loft from a 40 square at z=0 to a circle r10 at z=30 | analytic | pass | 0.027 | 0.027 |  |
+| ladder/04-spline-profiles/009-extrude-periodic-fit-spline | a closed periodic fit-point spline through 6 points, extruded 10 | analytic | pass | 0.035 | 0.035 |  |
+| ladder/04-spline-profiles/004-sweep-square-along-bezier | a 4x4 square swept along the same Bezier path | analytic | pass | 0.042 | 0.042 |  |
+| ladder/04-spline-profiles/006-loft-circle-frustum | a loft between circles r20 at z=0 and r10 at z=30 | analytic | pass | 0.059 | 0.059 |  |
+| ladder/04-spline-profiles/007-loft-three-circles | a smooth loft through circles r20, r10, r20 at z = 0, 20, 40 | analytic | pass | 0.072 | 0.072 |  |
+| ladder/04-spline-profiles/002-revolve-bezier-profile | a profile with a Bezier side (r from 20 to 15 over z 0..30) revolved 360 deg about Z | analytic | pass | 0.084 | 0.084 |  |
+| ladder/04-spline-profiles/010-part-bezier-window | the running part: a Bezier-arched window cut through the back wall | analytic | pass | 0.131 | 0.131 |  |
+| ladder/04-spline-profiles/003-pipe-along-bezier | a pipe d4 along a planar Bezier path | analytic | pass | 0.141 | 0.141 |  |
+| ladder/04-spline-profiles/012-loft-ribs-joined-to-a-rounded-pad | the same without the top flange: the join fails with 'boolean Union: no result' | analytic | pass | 0.681 | 0.681 |  |
+| ladder/04-spline-profiles/011-crossing-pleated-loft-skins-joined | a join of two pleated skins (lofts between 24-pleat star outlines, less the same loft moved in 1.1 mm) that cross along a ring near their bottoms: truck panicked ('tolerance must be no less than 1e-6') or gave no result | analytic | pass | 1.376 | 1.376 |  |
+| ladder/05-holes-and-taps/006-tapped-m6-through | an M6 tapped hole through: the tap drill d5 (major - pitch), cosmetic thread | analytic | pass | 0.017 | 0.017 |  |
+| ladder/05-holes-and-taps/001-simple-through | a d10 through hole in the stock's top | analytic | pass | 0.033 | 0.033 |  |
+| ladder/05-holes-and-taps/009-hole-0.5-from-edge | a d10 through hole whose wall is 0.5 mm from the end face | analytic | pass | 0.034 | 0.034 |  |
+| ladder/05-holes-and-taps/010-hole-tangent-to-end-face | a d10 through hole tangent to the end face x=0 | analytic | pass | 0.036 | 0.036 |  |
+| ladder/05-holes-and-taps/003-drilled-blind-118 | a d10 drilled hole 10 deep to the shoulder with a 118 deg point | analytic | pass | 0.044 | 0.044 |  |
+| ladder/05-holes-and-taps/007-tapped-m8-blind | an M8 tapped blind hole 12 deep with a 118 deg drill point | analytic | pass | 0.045 | 0.045 |  |
+| ladder/05-holes-and-taps/002-simple-blind-flat | a d10 blind hole 10 deep, flat bottom | analytic | pass | 0.046 | 0.046 |  |
+| ladder/05-holes-and-taps/004-counterbore | a counterbored hole: d6.6 through, d11 x 6.4 counterbore | analytic | pass | 0.051 | 0.051 |  |
+| ladder/05-holes-and-taps/005-countersink | a countersunk hole: d6.6 through, d12 x 90 deg countersink | analytic | pass | 0.089 | 0.089 |  |
+| ladder/05-holes-and-taps/011-crossing-holes-steinmetz | two d10 through holes whose axes cross: vertical and along Y at z=10 | analytic | pass | 0.102 | 0.102 |  |
+| ladder/05-holes-and-taps/012-crossing-tapped-holes-offset | two M6 tapped holes (d5) crossing with axes 2 mm apart | analytic | pass | 0.113 | 0.113 |  |
+| ladder/05-holes-and-taps/008-tapped-m5-into-curved-face | an M5 tapped hole drilled radially through a cylinder r20 lying along X | analytic | pass | 0.130 | 0.130 |  |
+| ladder/05-holes-and-taps/013-part-holes | the running part: an M6 tapped through hole, an M5 tapped blind hole in the boss, a d3.3 hole down through wall and base | analytic | pass | 0.280 | 0.280 |  |
+| ladder/06-threads/012-external-acme-3-4-6 | a modelled 3/4-6 ACME thread (ASME B1.5, general purpose) on a 3/4 in shaft, six turns | analytic | pass | 0.839 | 0.839 |  |
+| ladder/06-threads/013-external-s20x4 | a modelled metric buttress S20x4 thread (DIN 513, 3/30 deg) on a d20 shaft, six turns | analytic | pass | 0.945 | 0.945 |  |
+| ladder/06-threads/011-external-tr20x4 | a modelled trapezoidal Tr20x4 thread (ISO 2904) on a d20 shaft, six turns | analytic | pass | 0.956 | 0.956 |  |
+| ladder/06-threads/003-external-m10-partial-length | a modelled M10 thread over 15 of the 30 mm from the top end (`from`): it stops square in the middle of the face | analytic | pass | 1.088 | 1.088 |  |
+| ladder/06-threads/015-internal-tr20x4-nut | a modelled internal Tr20x4 thread in a d16 (D1 = d - P) bore through a 40x40x24 block | analytic | pass | 1.200 | 1.200 |  |
+| ladder/06-threads/014-external-buttress-asme-1.5-8 | a modelled 1.5-8 buttress thread (ASME B1.9 basic profile, 7/45 deg) on a 1.5 in shaft, six turns | analytic | pass | 1.347 | 1.347 |  |
+| ladder/06-threads/010-part-threaded-boss | the running part with a modelled M16 thread on its d16 boss | analytic | pass | 1.462 | 1.462 |  |
+| ladder/06-threads/016-external-m10-left-hand | 001's modelled M10 thread, left-handed: the same volume, turning the other way | analytic | pass | 1.690 | 1.690 |  |
+| ladder/06-threads/019-external-tr40x14-p7-two-start | a modelled two-start trapezoidal Tr40x14(P7) thread (ISO 2904, ISO 2903) on a d40 shaft, three leads long | analytic | pass | 1.831 | 1.831 |  |
+| ladder/06-threads/005-internal-m10-through | a modelled internal M10 thread in a d8.5 (tap drill) hole through a 30x30x20 block | analytic | pass | 1.872 | 1.872 |  |
+| ladder/06-threads/006-external-m10-into-chamfer | a d10 x 30 cylinder with a 1 mm chamfer on top, then a modelled M10 thread over its cylinder face, running out through the chamfer | analytic | pass | 1.920 | 1.920 |  |
+| ladder/06-threads/007-external-m10-at-filleted-shoulder | a modelled M10 thread on a d10 shaft whose root at the d16 shoulder has an r1 fillet: it stops clear of the fillet | analytic | pass | 1.964 | 1.964 |  |
+| ladder/06-threads/001-external-m10-full | a modelled M10 thread over the whole of a d10 x 30 cylinder | analytic | pass | 2.128 | 2.128 |  |
+| ladder/06-threads/004-external-m10-to-shoulder | a modelled M10 thread on a d10 shaft running down to a d16 shoulder: it stops clear of it, the collar whole | analytic | pass | 2.144 | 2.144 |  |
+| ladder/06-threads/009-thread-runout-length | 004's M10 thread run from the free top end, vanishing over a 3 mm (2 P) runout before the d16 shoulder | analytic | pass | 2.203 | 2.203 |  |
+| ladder/06-threads/002-external-m10x1-fine | a modelled fine M10x1 thread over a d10 x 30 cylinder | analytic | pass | 2.626 | 2.626 |  |
+| ladder/06-threads/017-external-m10-chamfered-tip | 001's modelled M10 thread with ISO 4753's chamfered end at both free ends: a 45 deg cone down to the minor diameter, cut after the groove | analytic | pass | 3.485 | 3.485 |  |
+| ladder/06-threads/008-multi-start-thread | a two-start M10 thread (lead 3, pitch 1.5) over a d10 x 30 cylinder | analytic | pass | 3.706 | 3.706 |  |
+| ladder/06-threads/018-external-m10-both-hands | 001's modelled M10 thread cut both ways: a right- and a left-handed groove crossing on a d10 x 30 cylinder | analytic | pass | 7.756 | 7.756 |  |
+| ladder/07-fillets/015-corner-g2-patch | three r5 rounds at a corner with the g2 corner patch | invariants | not supported yet: step 2 (solid.fillet): invalid input: not supported yet: a fillet with G2 corner patches with the SMLib kernel | 0.003 | 0.003 |  |
 | ladder/07-fillets/006-variable-r5-to-zero | a variable round on the top front edge, r5 at x=0 down to 0 at the x=60 vertex | analytic | pass | 0.009 | 0.009 |  |
-| ladder/07-fillets/011-chain-ending-at-corner | r5 rounds on two top edges meeting at a corner whose vertical edge stays sharp | invariants | pass | 0.010 | 0.010 |  |
-| ladder/07-fillets/005-variable-r5-to-r1 | a variable round on the top front edge, r5 at x=0 to r1 at x=60 | analytic | pass | 0.011 | 0.011 |  |
-| ladder/07-fillets/004-convex-and-concave-r5 | an L block: r5 on its inner (concave) vertical edge and on an outer (convex) one | analytic | pass | 0.011 | 0.011 |  |
-| ladder/07-fillets/009-corner-three-equal-r5 | r5 rounds on the three edges meeting at the corner (60,40,20): a sphere corner | analytic | pass | 0.012 | 0.012 |  |
-| ladder/07-fillets/002-four-vertical-edges-r5 | r5 rounds on the four vertical edges | analytic | pass | 0.014 | 0.014 |  |
-| ladder/07-fillets/007-variable-r5-to-1e-3 | a variable round on the top front edge, r5 down to 1e-3 mm | analytic | pass | 0.019 | 0.019 |  |
-| ladder/07-fillets/016-corner-three-sequential-r5-r3-r7 | rounds r5 and r3 on the two top edges at a corner, then r7 on the vertical edge under them | invariants | **FAIL**: step 4 (solid.fillet): SMLib fillet: operation: SMLib failed (status 1001) | 0.026 | 0.026 |  |
-| ladder/07-fillets/012-variable-into-rounded-corner | a vertical r5 round, then a variable round r1 -> r5 along the top back edge into it | invariants | pass | 0.029 | 0.029 |  |
-| ladder/07-fillets/010-corner-unequal-r7-r3 | an r7 vertical round at a corner, then r3 along a top edge, which runs on round the r7 arc to the other top edge | invariants | pass | 0.031 | 0.031 |  |
-| ladder/07-fillets/014-curved-edge-r2 | an r2 round on the top edge of a cylinder r10 h20 | analytic | pass | 0.039 | 0.039 |  |
-| ladder/07-fillets/003-tangent-chain-r3 | an r3 round all round the top of the box with r5 vertical rounds: a tangent chain of lines and arcs | analytic | pass | 0.044 | 0.044 |  |
-| ladder/07-fillets/017-part-rounds | the running part: r5 on the front vertical edges, r3 on the back wall's top front edge, r1 where the boss meets the top | analytic | pass | 0.405 | 0.405 |  |
-| ladder/07-fillets/013-corner-setback | three r5 rounds at a corner with setbacks of 8 mm along each edge | invariants | not supported yet: solid.fillet has no corner setback distances | – | – |  |
-| ladder/08-chamfers/002-two-distances-5-3 | a 5 x 3 chamfer on the top front edge | analytic | pass | 0.006 | 0.006 |  |
-| ladder/08-chamfers/003-distance-angle-5-30 | a chamfer 5 mm at 30 deg on the top front edge | analytic | pass | 0.006 | 0.006 |  |
+| ladder/07-fillets/001-single-edge-r5 | an r5 round on the stock's top front edge | analytic | pass | 0.016 | 0.016 |  |
+| ladder/07-fillets/007-variable-r5-to-1e-3 | a variable round on the top front edge, r5 down to 1e-3 mm | analytic | pass | 0.018 | 0.018 |  |
+| ladder/07-fillets/011-chain-ending-at-corner | r5 rounds on two top edges meeting at a corner whose vertical edge stays sharp | analytic | pass | 0.019 | 0.019 |  |
+| ladder/07-fillets/005-variable-r5-to-r1 | a variable round on the top front edge, r5 at x=0 to r1 at x=60 | analytic | pass | 0.020 | 0.020 |  |
+| ladder/07-fillets/004-convex-and-concave-r5 | an L block: r5 on its inner (concave) vertical edge and on an outer (convex) one | analytic | pass | 0.021 | 0.021 |  |
+| ladder/07-fillets/009-corner-three-equal-r5 | r5 rounds on the three edges meeting at the corner (60,40,20): a sphere corner | analytic | pass | 0.023 | 0.023 |  |
+| ladder/07-fillets/008-constant-r1e-3 | a constant 1e-3 mm round on the top front edge | analytic | pass | 0.024 | 0.024 |  |
+| ladder/07-fillets/002-four-vertical-edges-r5 | r5 rounds on the four vertical edges | analytic | pass | 0.027 | 0.027 |  |
+| ladder/07-fillets/010-corner-unequal-r7-r3 | an r7 vertical round at a corner, then r3 along a top edge, which runs on round the r7 arc to the other top edge | analytic | pass | 0.037 | 0.037 |  |
+| ladder/07-fillets/016-corner-three-sequential-r5-r3-r7 | rounds r5 and r3 on the two top edges at a corner, then r7 on the vertical edge under them: refused, the r7 cannot exist | invariants | pass | 0.046 | 0.046 |  |
+| ladder/07-fillets/012-variable-into-rounded-corner | a vertical r5 round, then a variable round r1 -> r5 along the top back edge into it | analytic | pass | 0.060 | 0.060 |  |
+| ladder/07-fillets/014-curved-edge-r2 | an r2 round on the top edge of a cylinder r10 h20 | analytic | pass | 0.078 | 0.078 |  |
+| ladder/07-fillets/018-corner-three-sequential-r5-r3-r2 | rounds r5 and r3 on the two top edges at a corner, then r2 on the vertical edge under them, run on up into the corner | invariants | pass | 0.080 | 0.080 |  |
+| ladder/07-fillets/003-tangent-chain-r3 | an r3 round all round the top of the box with r5 vertical rounds: a tangent chain of lines and arcs | analytic | pass | 0.080 | 0.080 |  |
+| ladder/07-fillets/013-corner-setback | three r5 rounds at the corner (60,40,20) with setbacks of 8 mm along each edge | invariants | pass | 0.117 | 0.117 |  |
+| ladder/07-fillets/017-part-rounds | the running part: r5 on the front vertical edges, r3 on the back wall's top front edge, r1 where the boss meets the top | analytic | pass | 0.690 | 0.690 |  |
 | ladder/08-chamfers/005-corner-two-mitred-3 | 3 mm chamfers on two top edges meeting at a corner (mitred) | analytic | pass | 0.008 | 0.008 |  |
+| ladder/08-chamfers/004-corner-three-equal-3 | 3 mm chamfers on the three edges meeting at a corner | analytic | pass | 0.009 | 0.009 |  |
+| ladder/08-chamfers/003-distance-angle-5-30 | a chamfer 5 mm at 30 deg on the top front edge | analytic | pass | 0.012 | 0.012 |  |
 | ladder/08-chamfers/001-equal-5 | a 5 mm chamfer on the top front edge | analytic | pass | 0.012 | 0.012 |  |
-| ladder/08-chamfers/004-corner-three-equal-3 | 3 mm chamfers on the three edges meeting at a corner | analytic | pass | 0.018 | 0.018 |  |
-| ladder/08-chamfers/007-chamfer-then-fillets | a 3 mm chamfer on the top front edge, then r2 rounds on the front vertical edges that meet it | invariants | pass | 0.027 | 0.027 |  |
-| ladder/08-chamfers/006-curved-edge-2 | a 2 mm chamfer on the top edge of a cylinder r10 h20 | analytic | pass | 0.039 | 0.039 |  |
-| ladder/08-chamfers/008-part-chamfers | the running part: 1 mm on the boss top edge, 2 mm on the back wall's top back edge | analytic | pass | 0.514 | 0.514 |  |
+| ladder/08-chamfers/002-two-distances-5-3 | a 5 x 3 chamfer on the top front edge | analytic | pass | 0.024 | 0.024 |  |
+| ladder/08-chamfers/007-chamfer-then-fillets | a 3 mm chamfer on the top front edge, then r2 rounds on the front vertical edges that meet it | analytic | pass | 0.029 | 0.029 |  |
+| ladder/08-chamfers/006-curved-edge-2 | a 2 mm chamfer on the top edge of a cylinder r10 h20 | analytic | pass | 0.070 | 0.070 |  |
+| ladder/08-chamfers/008-part-chamfers | the running part: 1 mm on the boss top edge, 2 mm on the back wall's top back edge | analytic | pass | 0.749 | 0.749 |  |
 | ladder/09-shells-and-offsets/007-offset-top-face-5 | the stock's top face offset 5 mm | analytic | pass | 0.016 | 0.016 |  |
-| ladder/09-shells-and-offsets/012-closed-shell-sealed-void | the stock shelled 2 mm with no face open: a closed body with a sealed void | analytic | pass | 0.017 | 0.017 |  |
-| ladder/09-shells-and-offsets/003-tube-two-open-faces | the stock shelled 2 mm, open top and bottom | analytic | pass | 0.017 | 0.017 |  |
-| ladder/09-shells-and-offsets/004-thin-wall-0.2 | the stock shelled 0.2 mm, open at the top | analytic | pass | 0.017 | 0.017 |  |
 | ladder/09-shells-and-offsets/001-box-open-top-t2 | the stock shelled 2 mm, open at the top | analytic | pass | 0.017 | 0.017 |  |
-| ladder/09-shells-and-offsets/009-shell-outside-t2 | the stock shelled 2 mm outward, open at the top | analytic | pass | 0.031 | 0.031 |  |
-| ladder/09-shells-and-offsets/008-offset-cylinder-wall-2 | a cylinder r10 h20 with its side face offset 2 mm | analytic | pass | 0.040 | 0.040 |  |
-| ladder/09-shells-and-offsets/006-shell-rounds-r1-thinner-than-t2 | the box with r1 vertical rounds shelled 2 mm: the inner corners close sharp | analytic | pass | 0.043 | 0.043 |  |
-| ladder/09-shells-and-offsets/002-cylinder-open-top-t1 | a cylinder r10 h30 shelled 1 mm, open at the top | analytic | pass | 0.066 | 0.066 |  |
-| ladder/09-shells-and-offsets/005-shell-rounds-r5-t2 | the box with r5 vertical rounds shelled 2 mm open at the top: the inner corners r3 | analytic | pass | 0.094 | 0.094 |  |
-| ladder/09-shells-and-offsets/014-drafted-box-with-rounds-shelled | a 120x80x40 box drafted 5 degrees with 4 mm rounds on the sloping corners, shelled 2 mm open at the top: the inner rounds' edges must lie on their faces (#3573 reports the same design) | invariants | pass | 0.095 | 0.095 |  |
-| ladder/09-shells-and-offsets/010-shell-under-rounded-top | the stock with r3 rounds on its four top edges, shelled 2 mm open at the bottom | invariants | pass | 0.101 | 0.101 |  |
-| ladder/09-shells-and-offsets/013-dome-shelled-from-base | a dome r20 shelled 2 mm, open at its flat base: the rim is the circle r18 where the inner sphere meets the base plane | analytic | pass | 0.132 | 0.132 |  |
-| ladder/09-shells-and-offsets/015-shelled-dome-ring-joined-back | a dome (a quarter disc r20 revolved) shelled 2 mm from its flat base, then the base ring (r 18..20) face-extruded 10 mm back into the dome as a join: ~120 s, then 'boolean Union: no result' | analytic | pass | 0.685 | 0.685 |  |
-| ladder/09-shells-and-offsets/011-part-shell | the running part shelled 1.5 mm open at the bottom | invariants | pass | 0.853 | 0.853 |  |
-| ladder/10-patterns-and-mirrors/007-pattern-bodies | a pin r3 h10 patterned 4 times at 10 mm as bodies | analytic | pass | 0.017 | 0.017 |  |
-| ladder/10-patterns-and-mirrors/004-mirror-body-joined | a 30x40x20 half with a d10 hole mirrored about x=30 and joined: the faces at x=30 coincide | analytic | pass | 0.035 | 0.035 |  |
-| ladder/10-patterns-and-mirrors/005-mirror-feature | a d10 hole in the stock mirrored about x=30 as a feature | analytic | pass | 0.050 | 0.050 |  |
-| ladder/10-patterns-and-mirrors/001-rect-pattern-holes | a d5 hole patterned 3 x 2 at 20 mm in a 60x40x10 plate | analytic | pass | 0.153 | 0.153 |  |
-| ladder/10-patterns-and-mirrors/003-overlapping-pattern-leaves-core | six r5 cuts patterned round a circle r6 in a disk r20: they overlap and cut a core free | analytic | pass | 0.236 | 0.236 |  |
-| ladder/10-patterns-and-mirrors/002-circular-pattern-holes | a d6 hole patterned 8 times round a disk r30 h10 | analytic | pass | 0.346 | 0.346 |  |
-| ladder/10-patterns-and-mirrors/006-circular-pattern-counterbores | a counterbored hole (d5, d9 x 3) patterned 6 times round a disk r30 h10 | analytic | pass | 0.678 | 0.678 |  |
-| ladder/10-patterns-and-mirrors/008-part-vents | the running part with a d3 vent hole in its top patterned 4 times at 5 mm | invariants | pass | 1.482 | 1.482 |  |
-| ladder/11-cumulative-parts/001-bracket | an L bracket: concave r5 round, 5 mm outer chamfer, a hole in each leg | analytic | pass | 0.059 | 0.059 |  |
-| ladder/11-cumulative-parts/002-flange | a revolved flange and hub with a bore, six bolt holes, a hub chamfer and a hub-root round | analytic | pass | 0.536 | 0.536 |  |
-| ladder/11-cumulative-parts/003-threaded-flange | the flange with a modelled M30 thread on its hub, between the round and the chamfer, and M8 tapped holes in the disk | invariants | pass | 1.665 | 1.665 |  |
-| ladder/11-cumulative-parts/004-housing | the running part with every tier: back wall, boss, slot, spline window, tapped holes, rounds, chamfers, shell, vents, and a modelled M16 thread on the boss | invariants | pass | 2.150 | 2.150 |  |
+| ladder/09-shells-and-offsets/004-thin-wall-0.2 | the stock shelled 0.2 mm, open at the top | analytic | pass | 0.017 | 0.017 |  |
+| ladder/09-shells-and-offsets/003-tube-two-open-faces | the stock shelled 2 mm, open top and bottom | analytic | pass | 0.018 | 0.018 |  |
+| ladder/09-shells-and-offsets/012-closed-shell-sealed-void | the stock shelled 2 mm with no face open: a closed body with a sealed void | analytic | pass | 0.018 | 0.018 |  |
+| ladder/09-shells-and-offsets/009-shell-outside-t2 | the stock shelled 2 mm outward, open at the top | analytic | pass | 0.038 | 0.038 |  |
+| ladder/09-shells-and-offsets/006-shell-rounds-r1-thinner-than-t2 | the box with r1 vertical rounds shelled 2 mm: the inner corners close sharp | analytic | pass | 0.060 | 0.060 |  |
+| ladder/09-shells-and-offsets/008-offset-cylinder-wall-2 | a cylinder r10 h20 with its side face offset 2 mm | analytic | pass | 0.075 | 0.075 |  |
+| ladder/09-shells-and-offsets/002-cylinder-open-top-t1 | a cylinder r10 h30 shelled 1 mm, open at the top | analytic | pass | 0.102 | 0.102 |  |
+| ladder/09-shells-and-offsets/010-shell-under-rounded-top | the stock with r3 rounds on its four top edges, shelled 2 mm open at the bottom | analytic | pass | 0.105 | 0.105 |  |
+| ladder/09-shells-and-offsets/014-drafted-box-with-rounds-shelled | a 120x80x40 box drafted 5 degrees with 4 mm rounds on the sloping corners, shelled 2 mm open at the top: the inner rounds' edges must lie on their faces (#3573 reports the same design) | analytic | pass | 0.124 | 0.124 |  |
+| ladder/09-shells-and-offsets/005-shell-rounds-r5-t2 | the box with r5 vertical rounds shelled 2 mm open at the top: the inner corners r3 | analytic | pass | 0.174 | 0.174 |  |
+| ladder/09-shells-and-offsets/013-dome-shelled-from-base | a dome r20 shelled 2 mm, open at its flat base: the rim is the circle r18 where the inner sphere meets the base plane | analytic | pass | 0.236 | 0.236 |  |
+| ladder/09-shells-and-offsets/015-shelled-dome-ring-joined-back | a dome (a quarter disc r20 revolved) shelled 2 mm from its flat base, then the base ring (r 18..20) face-extruded 10 mm back into the dome as a join: ~120 s, then 'boolean Union: no result' | analytic | pass | 0.922 | 0.922 |  |
+| ladder/09-shells-and-offsets/011-part-shell | the running part shelled 1.5 mm open at the bottom | analytic | pass | 1.078 | 1.078 |  |
+| ladder/10-patterns-and-mirrors/007-pattern-bodies | a pin r3 h10 patterned 4 times at 10 mm as bodies | analytic | pass | 0.031 | 0.031 |  |
+| ladder/10-patterns-and-mirrors/004-mirror-body-joined | a 30x40x20 half with a d10 hole mirrored about x=30 and joined: the faces at x=30 coincide | analytic | pass | 0.067 | 0.067 |  |
+| ladder/10-patterns-and-mirrors/005-mirror-feature | a d10 hole in the stock mirrored about x=30 as a feature | analytic | pass | 0.074 | 0.074 |  |
+| ladder/10-patterns-and-mirrors/001-rect-pattern-holes | a d5 hole patterned 3 x 2 at 20 mm in a 60x40x10 plate | analytic | pass | 0.175 | 0.175 |  |
+| ladder/10-patterns-and-mirrors/003-overlapping-pattern-leaves-core | six r5 cuts patterned round a circle r6 in a disk r20: they overlap and cut a core free | analytic | pass | 0.315 | 0.315 |  |
+| ladder/10-patterns-and-mirrors/002-circular-pattern-holes | a d6 hole patterned 8 times round a disk r30 h10 | analytic | pass | 0.351 | 0.351 |  |
+| ladder/10-patterns-and-mirrors/006-circular-pattern-counterbores | a counterbored hole (d5, d9 x 3) patterned 6 times round a disk r30 h10 | analytic | pass | 0.855 | 0.855 |  |
+| ladder/10-patterns-and-mirrors/008-part-vents | the running part with a d3 vent hole in its top patterned 4 times at 5 mm | analytic | pass | 1.765 | 1.765 |  |
+| ladder/11-cumulative-parts/001-bracket | an L bracket: concave r5 round, 5 mm outer chamfer, a hole in each leg | analytic | pass | 0.088 | 0.088 |  |
+| ladder/11-cumulative-parts/002-flange | a revolved flange and hub with a bore, six bolt holes, a hub chamfer and a hub-root round | analytic | pass | 0.618 | 0.618 |  |
+| ladder/11-cumulative-parts/003-threaded-flange | the flange with a modelled M30 thread on its hub, between the round and the chamfer, and M8 tapped holes in the disk | analytic | pass | 1.821 | 1.821 |  |
+| ladder/11-cumulative-parts/004-housing | the running part with every tier: back wall, boss, slot, spline window, tapped holes, rounds, chamfers, shell, vents, and a modelled M16 thread on the boss | analytic | pass | 2.307 | 2.307 |  |
