@@ -31,7 +31,7 @@ impl SolveApp {
     /// Keep the target design and editors unchanged until the picker answers.
     /// (A save being written keeps it unchanged too, see [`crate::save_job`].)
     pub fn file_picker_busy(&self) -> bool {
-        self.file_picker.is_some() || self.saving.is_some() || self.disk_prompt
+        self.file_picker.is_some() || self.saving.is_some() || self.host_save.is_some() || self.disk_prompt
     }
 
     pub(crate) fn pick_open(&mut self, complete: impl FnOnce(&mut SolveApp, Option<String>) + 'static) {
