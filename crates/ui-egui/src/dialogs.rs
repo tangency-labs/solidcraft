@@ -733,8 +733,8 @@ impl Dialog {
                 Kind::Align { flip: false },
                 vec![
                     SelInput::new("Bodies", BODIES, true),
-                    SelInput::new("From", FACES | EDGES | selection::VERTICES | PLANES | selection::ORIGIN, false),
-                    SelInput::new("To", FACES | EDGES | selection::VERTICES | PLANES | selection::ORIGIN, false),
+                    SelInput::new("From", FACES | EDGES | selection::VERTICES | PLANES | selection::ORIGIN | selection::SNAP_POINTS, false),
+                    SelInput::new("To", FACES | EDGES | selection::VERTICES | PLANES | selection::ORIGIN | selection::SNAP_POINTS, false),
                 ],
             ),
             "solid.remove" => Dialog::new(Kind::Remove, vec![SelInput::new("Bodies", BODIES, true)]),
@@ -784,7 +784,8 @@ impl Dialog {
                         | selection::POINTS
                         | PROFILES
                         | selection::SKETCH_LINES
-                        | selection::EXTERNAL_POINTS,
+                        | selection::EXTERNAL_POINTS
+                        | selection::SNAP_POINTS,
                     true,
                 )],
             ),
@@ -2064,7 +2065,7 @@ fn selection_label(s: &Session, item: &Sel) -> String {
             let p = s.active_sketch.and_then(|id| state.sketch(id)).map(|sk| sk.plane.to_local(*point)).unwrap_or_default();
             format!("({:.2}, {:.2}) mm", p.x, p.y)
         }
-        Sel::Vertex { body, .. } => format!("{body} · vertex"),
+        Sel::Vertex { point, .. } => crate::snap_wake::label(*point),
         _ => format!("{item:?}"),
     }
 }
@@ -2077,7 +2078,7 @@ fn input_rows(d: &mut Dialog, ui: &mut egui::Ui, s: &Session) {
 
 /// Saved vectors/axes are real inputs even when they have no origin-axis selection chip.
 fn feature_pattern_reference_key(d: &Dialog, index: usize) -> Option<&'static str> {
-    if !d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES) {
+    if d.inputs.first().is_none_or(|i| i.accept != selection::FEATURES) {
         return None;
     }
     match (&d.kind, index) {

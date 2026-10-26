@@ -239,6 +239,7 @@ pub mod sketch_tools;
 pub mod smart_extrude;
 #[cfg(test)]
 mod smart_extrude_ui_tests;
+pub mod snap_wake;
 pub mod space_mouse;
 pub mod space_mouse_calibration;
 pub mod space_mouse_model;

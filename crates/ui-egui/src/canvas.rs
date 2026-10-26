@@ -1045,20 +1045,53 @@ fn measure_line(app: &SolveApp, painter: &egui::Painter, proj: &Proj, r: &serde_
     let galley = painter.layout_no_wrap(crate::prefs::show_mm(app, d, 1), egui::FontId::proportional(crate::theme::Tokens::get().font_label), t.text);
     let rect = egui::Rect::from_min_size(mid, galley.size() + vec2(10.0, 6.0));
     crate::scenario::publish_target("measure:label", rect);
+    let mut occupied = vec![rect];
     if app.preferences.measure_axis_distances {
-        measure_components(app, painter, proj, a, b, rect);
+        measure_components(app, painter, proj, a, b, rect, &mut occupied);
     }
     painter.rect(rect, t.radius_sm.saturating_sub(1), t.overlay, t.control_border_stroke(t.border), egui::StrokeKind::Inside);
     painter.galley(rect.min + vec2(5.0, 3.0), galley, t.text);
+    pick_numbers(painter, sa, sb, proj.rect, &mut occupied);
+}
+
+/// "1" and "2" beside the measured line's ends (#6020), as the panel lists the picks: each just
+/// past its end, away from the line and its length in the middle.
+fn pick_numbers(painter: &egui::Painter, sa: Pos2, sb: Pos2, bounds: egui::Rect, occupied: &mut Vec<egui::Rect>) {
+    let t = Tokens::get();
+    let along = (sb - sa).normalized();
+    // Ends on one spot (or one behind the other): side by side above it.
+    let (out_a, out_b) = if along.is_finite() && along.length_sq() > 0.5 { (-along, along) } else { (vec2(-0.7, -0.7), vec2(0.7, -0.7)) };
+    for (n, at, out) in [("1", sa, out_a), ("2", sb, out_b)] {
+        let galley = painter.layout_no_wrap(n.to_string(), egui::FontId::proportional(t.font_label), t.text);
+        let size = galley.size() + vec2(8.0, 4.0);
+        let side = size.x.max(size.y);
+        let perpendicular = vec2(-out.y, out.x);
+        let directions = [out, (out + perpendicular).normalized(), (out - perpendicular).normalized(), perpendicular, -perpendicular];
+        let mut rect = egui::Rect::from_center_size(at + out * (side * 0.5 + 8.0), vec2(side, size.y));
+        // Keep each number near its own endpoint, clear of the total, axis labels and
+        // the other number. Searching outward also handles coincident projected ends.
+        'place: for ring in 0..8 {
+            for direction in directions {
+                let candidate = egui::Rect::from_center_size(at + direction * (side * 0.5 + 8.0 + ring as f32 * 10.0), vec2(side, size.y));
+                if bounds.shrink(3.0).contains_rect(candidate) && occupied.iter().all(|other| !other.expand(3.0).intersects(candidate)) {
+                    rect = candidate;
+                    break 'place;
+                }
+            }
+        }
+        painter.rect(rect, t.radius_sm.saturating_sub(1), t.overlay, Stroke::new(1.0, t.manipulator), egui::StrokeKind::Inside);
+        painter.galley(rect.center() - galley.size() * 0.5, galley, t.text);
+        crate::scenario::publish_target(&format!("measure:item:{n}"), rect);
+        occupied.push(rect);
+    }
 }
 
 /// A world-axis-aligned chain between the same two measured points. Zero-length and
 /// view-aligned legs still get a label; labels move apart when their projections coincide.
-fn measure_components(app: &SolveApp, painter: &egui::Painter, proj: &Proj, a: Vec3, b: Vec3, total: egui::Rect) {
+fn measure_components(app: &SolveApp, painter: &egui::Painter, proj: &Proj, a: Vec3, b: Vec3, total: egui::Rect, occupied: &mut Vec<egui::Rect>) {
     let t = Tokens::get();
     let x = Vec3::new(b.x, a.y, a.z);
     let y = Vec3::new(b.x, b.y, a.z);
-    let mut occupied = vec![total];
     for (axis, start, end, color) in [("x", a, x, t.axis_x), ("y", x, y, t.axis_y), ("z", y, b, t.axis_z)] {
         let color = color.lerp_to_gamma(t.text, 0.25);
         let distance = start.dist(end);

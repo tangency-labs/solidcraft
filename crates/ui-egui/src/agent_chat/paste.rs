@@ -119,7 +119,7 @@ pub fn handle(app: &mut SolveApp, ui: &egui::Ui) {
         (text, released)
     });
     let after_text = app.agent_chat.text_pasted_at.is_some_and(|at| (0.0..SAME_PASTE_SECS).contains(&(now - at)));
-    if text.is_none() && !(released && !after_text) {
+    if text.is_none() && (!released || after_text) {
         if released {
             app.agent_chat.text_pasted_at = None;
         }

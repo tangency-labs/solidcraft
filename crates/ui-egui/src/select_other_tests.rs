@@ -201,7 +201,7 @@ fn overlapping_bodies_list_both_and_the_hidden_one_can_be_picked() {
     let rows = labels(&h);
     assert!(rows.iter().any(|r| r == "Body · Outer") && rows.iter().any(|r| r == "Body · Inner"), "{rows:?}");
     let faces = rows.iter().filter(|r| r.starts_with("Face ")).count();
-    assert_eq!(faces, 2, "the nearest face of each body: {rows:?}");
+    assert_eq!(faces, 4, "the front and back faces of each body: {rows:?}");
     let i = rows.iter().position(|r| r == "Body · Inner").unwrap();
     h.call("ui.selectOther", json!({"pick": i}));
     assert_eq!(h.app.session.selection, [Sel::Body { name: "Inner".into() }]);
@@ -219,10 +219,15 @@ fn long_names_stay_inside_the_popup_and_remain_available_on_hover() {
     h.step(&json!({"hold": {"world": [5, 5, 10]}})).unwrap();
     let label = format!("Body · {name}");
     let row = labels(&h).iter().position(|r| r == &label).unwrap();
-    let mut output = h.ctx.run_ui(egui::RawInput { screen_rect: Some(h.ctx.content_rect()), focused: true, ..Default::default() }, |ui| {
-        h.app.logic(ui.ctx());
-        h.app.ui(ui);
-    });
+    // This extra paint pass must stay on the harness clock; egui's wall clock can
+    // otherwise run a fraction ahead of the next synthetic pointer event.
+    let mut output = h.ctx.run_ui(
+        egui::RawInput { screen_rect: Some(h.ctx.content_rect()), time: Some(h.ctx.input(|i| i.time)), focused: true, ..Default::default() },
+        |ui| {
+            h.app.logic(ui.ctx());
+            h.app.ui(ui);
+        },
+    );
     output.textures_delta.clear();
     let text = output
         .shapes
@@ -373,4 +378,92 @@ fn a_click_picks_the_sketchs_own_curve_over_a_projected_one_under_it() {
     assert!(row_of(&h, &a) < row_of(&h, &projected), "{:?}", labels(&h));
     h.step(&json!({"click": {"handle": format!("select_other:{}", row_of(&h, &projected))}})).unwrap();
     assert_eq!(curves(&h), [projected]);
+}
+
+/// Three plates stacked along Z (made bottom, top, middle, so model order isn't depth order),
+/// the top one smallest, held over the top plate's edge from above.
+fn stacked_plates() -> Harness {
+    let mut h = Harness::new();
+    h.app.set_origin_shown(false);
+    h.app.run("solid.box", json!({"length":30,"width":30,"height":2,"corner":[-15,-15,0],"body_name":"Bottom"})).unwrap();
+    h.app.run("solid.box", json!({"length":10,"width":10,"height":2,"corner":[-5,-5,20],"body_name":"Top"})).unwrap();
+    h.app.run("solid.box", json!({"length":20,"width":20,"height":2,"corner":[-10,-10,10],"body_name":"Middle"})).unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h
+}
+
+#[test]
+fn stacked_bodies_list_front_to_back_one_body_at_a_time() {
+    let mut h = stacked_plates();
+    h.step(&json!({"hold": {"world": [4.9, 0, 22]}})).unwrap();
+    let rows = labels(&h);
+    // Each row's body, in list order: one body at a time, the nearest first (#5345).
+    let bodies: Vec<&str> = rows.iter().filter_map(|r| r.rsplit(" · ").next()).collect();
+    let mut runs = bodies.clone();
+    runs.dedup();
+    assert_eq!(runs, ["Top", "Middle", "Bottom"], "front to back, each body's rows together: {rows:?}");
+    // Within a body: the edge under the pointer, then its face, then the body itself.
+    assert!(rows[0].starts_with("Edge ") && rows[0].ends_with("· Top"), "{rows:?}");
+    for body in ["Top", "Middle", "Bottom"] {
+        let mine: Vec<&String> = rows.iter().filter(|r| r.ends_with(&format!("· {body}"))).collect();
+        assert!(mine.iter().any(|r| r.starts_with("Face ")), "{body}: {rows:?}");
+        assert_eq!(mine.last().map(|r| r.as_str()), Some(format!("Body · {body}").as_str()), "{rows:?}");
+    }
+}
+
+#[test]
+fn select_other_offers_obscured_edges_while_a_normal_click_keeps_the_front() {
+    let mut h = stacked_plates();
+    let at = h.call("ui.at", json!({"world":[4.9,0,22]}))["result"].clone();
+    let pos = egui::pos2(at[0].as_f64().unwrap() as f32, at[1].as_f64().unwrap() as f32);
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let lower_edge =
+        |hit: &crate::viewport::Hit| matches!(hit, crate::viewport::Hit::Edge { body, mid, .. } if body == "Top" && (mid.z - 20.0).abs() < 1e-6);
+    assert!(!crate::viewport::pick(&h.app, &proj, pos).iter().any(lower_edge), "a normal click cannot see through the top face");
+    assert!(crate::select_other::rows(&h.app, &proj, pos).iter().any(|row| lower_edge(&row.hit)), "Select Other offers the obscured edge");
+}
+
+#[test]
+fn hidden_geometry_preference_preserves_the_nearest_face_list() {
+    let mut h = stacked_plates();
+    let at = h.call("ui.at", json!({"world":[2,1,22]}))["result"].clone();
+    let pos = egui::pos2(at[0].as_f64().unwrap() as f32, at[1].as_f64().unwrap() as f32);
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    assert!(serde_json::from_value::<crate::prefs::Prefs>(json!({})).unwrap().select_other_hidden_geometry);
+    for measure in [false, true] {
+        if measure {
+            h.app.start("inspect.measure");
+        }
+        for enabled in [true, false] {
+            h.call("ui.prefs", json!({"select_other_hidden_geometry":enabled}));
+            let restored: crate::prefs::Prefs = serde_json::from_value(serde_json::to_value(&h.app.preferences).unwrap()).unwrap();
+            assert_eq!(restored.select_other_hidden_geometry, enabled);
+            let rows = crate::select_other::rows(&h.app, &proj, pos);
+            let faces = rows.iter().filter(|r| matches!(&r.sel, Sel::Face { body, .. } if body == "Top")).count();
+            assert_eq!(faces, if enabled { 2 } else { 1 }, "measure={measure}, enabled={enabled}: {rows:?}");
+        }
+    }
+}
+
+#[test]
+fn an_edge_is_as_deep_as_its_point_under_the_pointer_not_its_middle() {
+    let mut h = stacked_plates();
+    h.call("ui.view", json!({"view":"iso"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.settle();
+    // On the bottom plate's near top edge along Y (x = 15, y from -15 to 15), well off its middle.
+    let under = solidcraft_engine::geom::Vec3::new(15.0, 9.0, 2.0);
+    let at = h.call("ui.at", json!({"world": [under.x, under.y, under.z]}))["result"].clone();
+    let pos = egui::pos2(at[0].as_f64().unwrap() as f32, at[1].as_f64().unwrap() as f32);
+    let proj = crate::viewport::projection(&h.app, h.app.viewport.rect.unwrap());
+    let hits = crate::viewport::pick_all(&h.app, &proj, pos);
+    let edge = hits.iter().find(|x| matches!(x, crate::viewport::Hit::Edge { body, .. } if body == "Bottom")).expect("the edge");
+    let (o, d) = proj.ray(pos);
+    let st = crate::open_meshing::shown_world(&h.app);
+    let index = st.bodies.iter().enumerate().map(|(i, b)| (b.name.as_str(), i)).collect();
+    let t = super::hit_depth(&st, &index, o, d, edge).expect("a depth");
+    let want = (under - o).dot(d);
+    let mid = solidcraft_engine::geom::Vec3::new(15.0, 0.0, 2.0);
+    assert!((t - want).abs() < 0.5, "depth {t}, the point under the pointer {want}, its middle {}", (mid - o).dot(d));
 }

@@ -547,7 +547,7 @@ fn whole_sphere(cx: &Ctx, file_face: u64, face: &mt::Face) -> Option<Vec<mt::Fac
         let (t0, t1) = c.range_tuple();
         (0..=8).map(move |i| c.subs(t0 + (t1 - t0) * i as f64 / 8.0))
     };
-    if !(radius.is_finite() && radius > tol) || !edges.iter().flat_map(samples).all(|p| (p.distance(center) - radius).abs() <= tol) {
+    if !(radius.is_finite() && radius > tol && edges.iter().flat_map(samples).all(|p| (p.distance(center) - radius).abs() <= tol)) {
         return None;
     }
     // Ball or void: the face's normal at the middle of the seam, against the way out of the centre.

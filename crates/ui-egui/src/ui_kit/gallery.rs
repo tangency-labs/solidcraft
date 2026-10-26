@@ -1502,13 +1502,18 @@ fn history_board_in_both_themes_and_widths() {
                         );
                         textures_update(&mut textures, &output.textures_delta);
                         output.textures_delta.clear();
-                        image = Some(raster(&ctx, output.shapes, output.pixels_per_point, bounds, &textures));
+                        // Earlier passes settle layout and exercise hover/drag. Only the
+                        // final frame is inspected or saved; keep its actual CPU capture.
+                        if pass == 8 {
+                            image = Some(raster(&ctx, output.shapes, output.pixels_per_point, bounds, &textures));
+                        }
                     }
                     if state == HistoryHandleState::Drag {
                         assert_eq!(app.shell.history_drag_width, Some(112.0));
                         assert_eq!(app.shell.history.unwrap().width(), 112.0);
                     }
                     assert!(app.shell.history.unwrap().right() < app.shell.browser.unwrap().left());
+                    assert!(image.as_ref().unwrap().pixels().any(|p| p.0[3] != 0), "the final history board must render");
                     if let Ok(dir) = std::env::var("SOLIDCRAFT_HISTORY_EVIDENCE") {
                         std::fs::create_dir_all(&dir).unwrap();
                         image

@@ -62,6 +62,8 @@ pub const FEATURES: Accept = 1024;
 pub const SKETCH_POINTS: Accept = 2048;
 /// The origin point, picked as a vertex of no body (in the viewport or the browser's Origin).
 pub const ORIGIN: Accept = 4096;
+/// Hover pick points: an edge or face hovered wakes its centre, middle and ends (`snap_wake`).
+pub const SNAP_POINTS: Accept = 32768;
 /// Curves of any sketch, picked with their sketch (`ExternalSketchCurve`): curve ids are a
 /// sketch's own, so two sketches can both have a `w2` (frame member lines).
 pub const SKETCH_LINES: Accept = 8192;
@@ -111,7 +113,10 @@ impl SelInput {
             Hit::SketchPoint { sketch, id, .. } if a & EXTERNAL_POINTS != 0 => Some(Sel::ExternalSketchPoint { sketch: *sketch, id: id.clone() }),
             Hit::SketchPoint { id, .. } if a & SKETCH_POINTS != 0 => Some(Sel::SketchPoint { id: id.clone() }),
             Hit::SketchPoint { sketch, id, .. } if a & POINTS != 0 => Some(Sel::SketchPoint { id: format!("{sketch}:{id}") }),
-            Hit::Vertex { body, point } if body.is_empty() && a & ORIGIN != 0 => Some(Sel::Vertex { body: String::new(), point: *point }),
+            // The origin, or a hover pick point of a sketch curve (a line's middle).
+            Hit::Vertex { body, point } if body.is_empty() && a & (ORIGIN | SNAP_POINTS) != 0 => {
+                Some(Sel::Vertex { body: String::new(), point: *point })
+            }
             Hit::Vertex { body, point } if !body.is_empty() && a & VERTICES != 0 => Some(Sel::Vertex { body: body.clone(), point: *point }),
             _ => None,
         }
@@ -293,6 +298,16 @@ mod tests {
     use super::*;
     use egui::pos2;
     use solidcraft_engine::render::{Camera, StandardView};
+
+    #[test]
+    fn hover_points_do_not_enable_external_sketch_lines() {
+        let curve = Hit::SketchCurve { sketch: 42, id: "l1".into(), straight: true };
+        let points = SelInput::new("Point", VERTICES | SNAP_POINTS, false);
+        assert!(points.accepts(&curve, None, |_, _| true).is_none());
+        let lines = SelInput::new("Line", SKETCH_LINES, false);
+        assert_eq!(lines.accepts(&curve, None, |_, _| true), Some(Sel::ExternalSketchCurve { sketch: 42, id: "l1".into() }));
+        assert_eq!(lines.accept & SNAP_POINTS, 0, "external lines must not wake point targets");
+    }
 
     #[test]
     fn origin_widget_keeps_its_screen_size() {

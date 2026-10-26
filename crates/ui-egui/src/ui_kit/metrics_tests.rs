@@ -99,7 +99,7 @@ fn file_grid_cells_use_vertical_layout_even_inside_a_horizontal_parent() {
 fn sample_grid_stretches_each_row_without_clipping_long_descriptions() {
     let ctx = crate::fonts::test_context();
     let mut cards = Vec::new();
-    let output = ctx.run_ui(
+    let mut output = ctx.run_ui(
         egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(680.0, 600.0))), ..Default::default() },
         |ui| {
             ui.set_width(680.0);
@@ -109,6 +109,7 @@ fn sample_grid_stretches_each_row_without_clipping_long_descriptions() {
             ]);
         },
     );
+    output.textures_delta.clear();
     assert_eq!(cards.len(), 2);
     assert!((cards[0].rect.top() - cards[1].rect.top()).abs() < 0.1);
     assert!((cards[0].rect.bottom() - cards[1].rect.bottom()).abs() < 0.1);

@@ -1266,7 +1266,7 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
     // radius it is not read, but the sections take their parameter from it all the same.
     let tables: Vec<Vec<f64>> = chain.iter().map(|e| edge_lengths(e).unwrap_or_else(|| vec![0.0; LENGTH_STEPS + 1])).collect();
     let total: f64 = tables.iter().filter_map(|t| t.last().copied()).sum();
-    if !matches!(size_law, Size::Constant(_)) && !(total.is_finite() && total > 1e-12) {
+    if !(matches!(size_law, Size::Constant(_)) || total.is_finite() && total > 1e-12) {
         return Err(unsupported("a zero-length edge of the chain"));
     }
     let total = if total > 1e-12 { total } else { 1.0 };

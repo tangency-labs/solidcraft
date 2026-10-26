@@ -557,7 +557,7 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
 }
 
 pub(crate) fn receive(app: &mut SolveApp, token: u64, image: Arc<ColorImage>) {
-    if !app.issue_report.pending.as_ref().is_some_and(|p| p.token == token) {
+    if app.issue_report.pending.as_ref().is_none_or(|p| p.token != token) {
         return;
     }
     let stale = app.issue_report.pending.as_ref().is_some_and(|p| p.signature != signature(app, app.dialog.as_ref()));

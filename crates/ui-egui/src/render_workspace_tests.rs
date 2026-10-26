@@ -2711,11 +2711,11 @@ fn product_preview_error_uses_shared_wrapped_surface_and_explicit_retry_target()
     h.frames(3);
     let rect = egui::Rect::from_min_size(egui::pos2(260.0, 200.0), egui::vec2(550.0, 360.0));
     let message = "The original captured product geometry exceeds its bounded preview admission. The renderer must preserve all exact body identities and cannot silently simplify or drop geometry to paint this view.";
-    let output = h.ctx.run_ui(
+    let mut output = h.ctx.run_ui(
         egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1280.0, 800.0))), ..Default::default() },
         |ui| preview_error(&mut h.app, ui, rect, message),
     );
-    let _ = output;
+    output.textures_delta.clear();
     let note = crate::scenario::rect_of("dialog:report:render.preview_failure").unwrap();
     let retry = crate::scenario::rect_of("render:preview-retry").unwrap();
     assert!(rect.contains_rect(note) && rect.contains_rect(retry));

@@ -2831,9 +2831,10 @@ mod dropdown_tests {
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
         let cmds: Vec<_> = solidcraft_engine::command_specs().into_iter().filter(|c| c.tab == "SKETCH" && c.panel == "CREATE").collect();
         crate::icon_svg::audit::start();
-        let _ = h.ctx.run_ui(egui::RawInput::default(), |ui| {
+        let mut output = h.ctx.run_ui(egui::RawInput::default(), |ui| {
             sketch_create_menu(&mut h.app, ui, &cmds, &mut None, &mut None);
         });
+        output.textures_delta.clear();
         let requested = crate::icon_svg::audit::take();
         crate::icon_svg::audit::stop();
         for family in crate::sketch_families::FAMILIES {
