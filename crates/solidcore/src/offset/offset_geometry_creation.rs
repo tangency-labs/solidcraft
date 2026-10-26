@@ -150,6 +150,7 @@ use crate::topology::proto_topology::ProtoGeometry;
 
 const OP_LOCAL: &str =
     "offset::offset_geometry_creation::LocalOperationGeometryCreation::faceuse_offset";
+const OP_FACEUSE: &str = "offset::offset_geometry_creation::faceuse_offset";
 const OP_VERTEX: &str = "offset::offset_geometry_creation::vertex_offset";
 const OP_UPDATE: &str = "offset::offset_geometry_creation::update_face_surface_domain";
 const OP_EXTEND: &str = "offset::offset_geometry_creation::extend_trim_edges";
@@ -1135,6 +1136,17 @@ impl OffsetGeometryCreation {
             self.this_approx_tol_3d / 10.0,
         )?
         else {
+            // `Kernel::fixes.offset_missing_surface_fails` (WR-464, #1072): only a collapse
+            // is no surface (`Surface::offset_collapses`); any other miss has failed.
+            if k.fixes.offset_missing_surface_fails
+                && !brep.surface(sur)?.offset_collapses(
+                    k,
+                    sign * self.offset_distance,
+                    self.this_approx_tol_3d / 10.0,
+                )?
+            {
+                return Err(sm_err(OP_FACEUSE));
+            }
             return Ok((None, self_intersections));
         };
         let offset_h = brep.insert_surface(offset)?;

@@ -526,6 +526,15 @@ impl Sphere {
 
     // ---- offset ---------------------------------------------------------------------
 
+    /// Not upstream (`SmSurface::OffsetCollapses`, WR-464): whether the offset radius is
+    /// below `tol`, where [`Self::create_offset_surface`] gives no surface.
+    #[must_use]
+    pub fn offset_collapses(&self, signed_offset_distance: f64, tol: f64) -> bool {
+        let sign =
+            if self.base.swap_uv { -1.0 } else { 1.0 } * if self.inside_out { -1.0 } else { 1.0 };
+        self.radius + sign * signed_offset_distance < tol
+    }
+
     /// The sphere offset by `signed_offset_distance` along the NURB normal
     /// (`CreateOffsetSurface`): a copy with the radius changed by the distance
     /// (negated with [`SurfOfRevolution::swap_uv`] and with [`Self::inside_out`]), the

@@ -2268,6 +2268,28 @@ impl Surface {
         }
     }
 
+    /// Not upstream (`SmSurface::OffsetCollapses`, WR-464): whether the offset by
+    /// `signed_offset_distance` shrinks a cone, cylinder, sphere or torus onto its spine
+    /// (radius below `tol`), the only case where [`Self::create_offset_surface`] gives no
+    /// surface. `false` for every other surface.
+    ///
+    /// # Errors
+    ///
+    /// Those of the NURB conversion of the kind.
+    pub fn offset_collapses(
+        &self,
+        k: &Kernel,
+        signed_offset_distance: f64,
+        tol: f64,
+    ) -> Result<bool> {
+        Ok(match self.kind_with_nurb(k)? {
+            SurfaceKind::Cone(s) => s.offset_collapses(k, signed_offset_distance, tol),
+            SurfaceKind::Sphere(s) => s.offset_collapses(signed_offset_distance, tol),
+            SurfaceKind::Torus(s) => s.offset_collapses(signed_offset_distance, tol),
+            _ => false,
+        })
+    }
+
     /// The silhouette curves of the surface over `uv_domain` for a parallel
     /// (`eye_point_or_view_vector` the view vector) or perspective projection
     /// (`CreateSilhouetteCurves`), with the walk tolerances `pOptApproxTol3d` and

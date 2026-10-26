@@ -262,6 +262,18 @@ impl Cone {
 
     // ---- CreateOffsetSurface -----------------------------------------------------
 
+    /// Not upstream (`SmSurface::OffsetCollapses`, WR-464): whether the offset by
+    /// `signed_offset_distance` has both radii below the tolerance, i.e. shrinks the cone
+    /// (or cylinder) onto its axis, where [`Self::create_offset_surface`] gives no surface.
+    #[must_use]
+    pub fn offset_collapses(&self, k: &Kernel, signed_offset_distance: f64, tol: f64) -> bool {
+        let tol = approx_tol3d(k, tol);
+        let sign =
+            if self.rev.swap_uv { -1.0 } else { 1.0 } * if self.inside_out { -1.0 } else { 1.0 };
+        let d = (self.semi_angle_deg * PI / 180.0).cos() * sign * signed_offset_distance;
+        self.bot_radius() + d < tol && self.top_radius() + d < tol
+    }
+
     /// The cone offset by `signed_offset_distance` along the NURB normal (negated with
     /// [`crate::surface::surf_of_revolution::SurfOfRevolution::swap_uv`] and with
     /// [`Self::inside_out`]) (`CreateOffsetSurface`). The radii change by
@@ -318,6 +330,7 @@ impl Cone {
         let mut new_top_radius = old_top_radius + off_rad_dist;
 
         // If both top and bottom are negative then don't create result
+        // (`Self::offset_collapses`: the test of `SmSurface::OffsetCollapses`)
         if new_bot_radius < approx_tol_3d && new_top_radius < approx_tol_3d {
             return Ok(None);
         }

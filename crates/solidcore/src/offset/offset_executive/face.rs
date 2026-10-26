@@ -393,4 +393,61 @@ mod tests {
             .unwrap();
         assert!(surface.is_none() && ssi.curves_3d.is_empty());
     }
+
+    /// tangency-labs/solidcore#1072 (WR-464): the collapse threshold of the cylinder,
+    /// cone, sphere and torus. Past it the offset has no surface and the flag does not
+    /// turn that into a failure; short of it the offset is a surface.
+    #[test]
+    fn collapse_thresholds_of_the_analytic_surfaces() {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::surface::cone::Cone;
+        use crate::surface::sphere::Sphere;
+        use crate::surface::torus::{Torus, TorusOptions};
+
+        let k0 = Kernel::default();
+        let frame = Axis2Placement::IDENTITY;
+        let cone = Cone::create_canonical(&k0, &frame, 2.0, 1.0, 3.0, false, false).unwrap();
+        let cone_cos = (cone.semi_angle_deg() * std::f64::consts::PI / 180.0).cos();
+        let cylinder = Cone::create_canonical_cylinder(&k0, &frame, 1.5).unwrap();
+        let sphere = Sphere::create_canonical(&k0, &frame, 2.0).unwrap();
+        let torus =
+            Torus::create_canonical(&k0, &frame, 4.0, 0.5, TorusOptions::default(), None).unwrap();
+        // (surface, distance just short of the collapse, distance past it)
+        let cases = [
+            (Surface::from(cylinder), -1.4, -1.6),
+            (Surface::from(cone), -0.9 / cone_cos, -2.1 / cone_cos),
+            (Surface::from(sphere), -1.9, -2.1),
+            (Surface::from(torus), -0.4, -0.6),
+        ];
+        for fixes in [false, true] {
+            let mut kernel = Kernel::default();
+            kernel.fixes.offset_missing_surface_fails = fixes;
+            for (surface, short, past) in &cases {
+                let (original, _, faceuse) = source(surface.clone(), OrientType::Same);
+                for (d, collapses) in [(*short, false), (*past, true)] {
+                    assert_eq!(
+                        surface.offset_collapses(&kernel, d, 1e-7).unwrap(),
+                        collapses
+                    );
+                    let mut backend = backend(&original);
+                    let made = OffsetGeometryCreation::new(d, 1e-6)
+                        .faceuse_offset_with_backend(
+                            &kernel,
+                            &mut backend,
+                            Handle::SourceFaceuse(faceuse),
+                            true,
+                        )
+                        .unwrap();
+                    assert_eq!(made.0.is_none(), collapses, "{d}");
+                }
+            }
+        }
+    }
+
+    /// A surface whose offset is always one never collapses.
+    #[test]
+    fn offset_collapses_is_false_for_a_plane() {
+        let kernel = Kernel::default();
+        assert!(!plane(0.0).offset_collapses(&kernel, -1e9, 1e-7).unwrap());
+    }
 }
