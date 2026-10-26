@@ -4,6 +4,11 @@
 //! body's faces, surfaces, curves and loops are turned into a `Brep`, then stitched
 //! into a solid. Unsupported geometry returns an [`BuildError`]; the caller decides
 //! whether to reject the whole file or skip a body.
+//!
+//! [`build`] leaves the healer off: it is fast and sufficient for simple planar bodies.
+//! [`build_healed`] runs `SmApiHealBrep`, creating the UV trims and seam topology that
+//! curved display tessellation needs. Callers that can retry should use
+//! [`build_with_options`] and heal only when the fast build cannot tessellate.
 
 use std::fmt;
 
@@ -13,6 +18,7 @@ use solidcore::curve::line::{BoundedLineOptions, Line};
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::vector3d::{Point3, Vec3};
+use solidcore::heal::heal_data::p1::api_heal_brep;
 use solidcore::heal::stitch::p1::api_stitch_into_solid;
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_curve::{BSplineCurve, BSplineCurveForm, CanonicalData, KnotType};
@@ -31,6 +37,7 @@ use solidcore::topology::brep::p2::ArenaNotifyState;
 use solidcore::topology::brep::p3;
 use solidcore::topology::brep::p8::{create_faces_with_curves, FaceBuildEnv};
 use solidcore::topology::topology_traverser::Marks;
+use solidcore::topology::trimming_tools;
 use solidcore::topology::{Brep, FaceId};
 use solidcore::{EntityRef, SolidError};
 use step_import::model::{self as sm, Body, Bound};
@@ -287,8 +294,26 @@ fn face_input(kernel: &Kernel, body: &Body, face: &sm::Face) -> Result<FaceInput
     Ok(out)
 }
 
+/// Options for [`build_with_options`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct BuildOptions {
+    /// Run the upstream healer after stitching. It creates UV trim curves and seam
+    /// topology, but is expensive on large real-world bodies.
+    pub heal: bool,
+}
+
 /// Builds one neutral body into a solidcore B-rep and stitches it.
 pub fn build(body: &Body) -> Result<Brep, BuildError> {
+    build_with_options(body, BuildOptions::default())
+}
+
+/// Like [`build`], but runs the healer after stitching.
+pub fn build_healed(body: &Body) -> Result<Brep, BuildError> {
+    build_with_options(body, BuildOptions { heal: true })
+}
+
+/// Builds one neutral body into a solidcore B-rep with explicit options.
+pub fn build_with_options(body: &Body, options: BuildOptions) -> Result<Brep, BuildError> {
     let mut kernel = Kernel::default();
     let mut brep = p3::new_brep(
         &mut kernel,
@@ -321,7 +346,37 @@ pub fn build(body: &Body) -> Result<Brep, BuildError> {
     }
     drop(state);
     api_stitch_into_solid(&mut kernel, Some(&mut brep))?;
+    if options.heal {
+        api_heal_brep(&mut kernel, Some(&mut brep))?;
+    }
     Ok(brep)
+}
+
+/// Whether every face has a UV trim curve (its own or its mate's).
+pub fn has_uv_trims(brep: &Brep) -> Result<bool, BuildError> {
+    for &face in brep.face_list() {
+        if !trimming_tools::face_uv_curves_present(brep, face)? {
+            return Ok(false);
+        }
+    }
+    Ok(!brep.face_list().is_empty())
+}
+
+/// Rejects a B-rep that is not display-ready: missing UV trims would make the
+/// tessellator fill the face's whole parameter domain and produce overlapping
+/// "flat rectangle" geometry.
+pub fn validate_for_display(brep: &Brep) -> Result<(), BuildError> {
+    if brep.face_list().is_empty() {
+        return Err(BuildError {
+            message: "B-rep has no faces".into(),
+        });
+    }
+    if !has_uv_trims(brep)? {
+        return Err(BuildError {
+            message: "B-rep has faces without UV trim curves".into(),
+        });
+    }
+    Ok(())
 }
 
 /// Parses STEP bytes and builds every body.
@@ -438,5 +493,9 @@ mod tests {
     fn builds_a_triangle_body() {
         let brep = build(&triangle()).expect("build");
         assert!(!brep.face_list().is_empty());
+        assert!(!build_healed(&triangle())
+            .expect("healed build")
+            .face_list()
+            .is_empty());
     }
 }
