@@ -45,7 +45,8 @@
 //! | [`find_next_good_interval`]                            | `sm_FindNextGoodInterval`                             |
 //! | [`trim_rail`]                                          | `sm_TrimRail` (a rail edge of a [`Brep`])             |
 //! | [`split_rail`], [`compute_support_edge`]               | `sm_SplitRail`, `sm_ComputeSupportEdge`               |
-//! | (`Drop`)                                               | `~SmSelfIntersectionHandler`, `~SmMakeCurveBlendSIH`, `SmMakeSurfaceBlendSIH` constructor and destructor (no data) |
+//! | (`Drop`)                                               | `~SmSelfIntersectionHandler`, `~SmMakeCurveBlendSIH`, `~SmMakeSurfaceBlendSIH` (no data) |
+//! | [`MakeSurfaceBlendSih`]                                | `SmMakeSurfaceBlendSIH` (constructor, `GetAlgorithmType`) |
 //!
 //! Deviations:
 //! - **Object model.** Virtual methods of the solver are the [`FilletSolverOps`] trait;
@@ -116,6 +117,7 @@ use crate::blend::fillet_custom_solver::{InitialValues, JacobianLoad, OffsetSurf
 use crate::blend::fillet_geom::p1::{
     FilletBrep, FilletGeom, FilletGeomId, FilletGeomType, FilletSolverId, FilletVertexType,
 };
+use crate::blend::fillet_intersector::HandlingAlgorithmType;
 use crate::blend::fillet_standard_solver::p1::{
     BlendCurveCrossSectionFsg, CircularCrossSectionFsg, LinearCrossSectionFsg,
 };
@@ -369,6 +371,32 @@ impl FilletSurfaceGenerator {
     }
 }
 
+/// The fillet surface self-intersection handler that steps back and makes a blending
+/// surface in the area of a self intersection (`SmMakeSurfaceBlendSIH`). Its
+/// `SmoothOutIntersection` is a no-op and `CreateBlends` has no caller upstream.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MakeSurfaceBlendSih {
+    /// `m_dStepBackDistFactor`: factor of the fillet radius to step back from an
+    /// intersection before making blends between fillet surfaces.
+    pub step_back_dist_factor: f64,
+}
+
+impl MakeSurfaceBlendSih {
+    /// `SmMakeSurfaceBlendSIH(dStepBackDistFactor)`.
+    #[must_use]
+    pub const fn new(step_back_dist_factor: f64) -> Self {
+        Self {
+            step_back_dist_factor,
+        }
+    }
+
+    /// `GetAlgorithmType`: `SM_HA_BLENDING`.
+    #[must_use]
+    pub const fn algorithm_type(&self) -> HandlingAlgorithmType {
+        HandlingAlgorithmType::Blending
+    }
+}
+
 /// Whether the solver's native executive back pointer is set.
 /// The operation passes its one executive explicitly as context.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -412,6 +440,10 @@ pub struct FilletSolver {
     pub edgeuses: [Option<EdgeuseId>; 2],
     /// `m_pExecutive`.
     pub executive: Option<FilletExecutiveRef>,
+    /// `m_pExecutive->m_pSelfIntersectionHandler`, as its `GetAlgorithmType()` (the
+    /// only part of the handler a solver reads). The owning executive keeps it equal
+    /// to its own handler while this solver is loaded (`None` here).
+    pub executive_self_intersection_handler: Option<HandlingAlgorithmType>,
     /// `m_dThisApproxTol3d`.
     pub approx_tol_3d: f64,
     /// `m_dThisAngTolRad`.
@@ -471,6 +503,7 @@ impl FilletSolver {
         Self {
             edgeuses: [None, None],
             executive: None,
+            executive_self_intersection_handler: None,
             approx_tol_3d,
             ang_tol_rad,
             tangency_tolerance,
@@ -713,22 +746,18 @@ impl FilletSolver {
         self.surface_extension_factor = factor;
     }
 
-    /// `GetSelfIntersectionHandler`: the executive's handler.
+    /// `GetSelfIntersectionHandler`: the executive's handler, as its algorithm type
+    /// (`None` for a `NULL` handler).
     ///
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] without an executive (upstream dereferences
-    /// `NULL`); [`SolidError::Unported`] otherwise (the executive's data, unit
-    /// `blend.fillet_executive_p1`).
-    pub fn self_intersection_handler(&self) -> Result<()> {
+    /// `NULL`).
+    pub fn self_intersection_handler(&self) -> Result<Option<HandlingAlgorithmType>> {
         if self.executive.is_none() {
             return Err(invalid("no fillet executive"));
         }
-        // UNPORTED(blend.fillet_executive_p1): SmFilletExecutive::m_pSelfIntersectionHandler (member read)
-        Err(SolidError::unported(
-            "SmFilletExecutive::m_pSelfIntersectionHandler",
-            "blend.fillet_executive_p1",
-        ))
+        Ok(self.executive_self_intersection_handler)
     }
 
     /// `GetSurface(lRailIndex)`: the fillet geometry's surface when one is set for the

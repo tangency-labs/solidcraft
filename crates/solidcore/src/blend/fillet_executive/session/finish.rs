@@ -425,6 +425,7 @@ impl FilletSession<'_> {
         k: &mut Kernel,
         mut error_out: Option<&mut ErrorInfo<FilletObject>>,
     ) -> Result<()> {
+        self.sync_self_intersection_handler();
         self.with_filleting_context(k, |session, k| {
             if ignore(session.create_fillet_brep(k, error_out.as_deref_mut()))?.is_none() {
                 return Err(failure());

@@ -406,14 +406,17 @@ pub trait FilletEdgeContext {
     fn extended_surface(&self, corner: &FilletCorner, face: FaceId) -> Result<Option<&Surface>>;
 }
 
-struct IndexedEdgeContext<'s, 'c> {
-    solvers: &'s [FilletSolver],
-    corners: CornerLookup<'c>,
+/// A caller's indexed solver table as a [`FilletEdgeContext`]; `op` names the
+/// calculator in a missing-solver error.
+pub(super) struct IndexedEdgeContext<'s, 'c> {
+    pub(super) solvers: &'s [FilletSolver],
+    pub(super) corners: CornerLookup<'c>,
+    pub(super) op: &'static str,
 }
 
 impl FilletEdgeContext for IndexedEdgeContext<'_, '_> {
     fn solver(&self, id: FilletSolverId) -> Result<&FilletSolver> {
-        solver_of(self.solvers, id, OP_SIDE)
+        solver_of(self.solvers, id, self.op)
     }
 
     fn extended_surface(&self, corner: &FilletCorner, face: FaceId) -> Result<Option<&Surface>> {
@@ -479,13 +482,39 @@ impl FilletBrep {
     /// intersection fails (vertex and edge get `SM_FIL_SURF_INT_FAILURE`); those of the
     /// evaluations and reversals; those of [`CornerLookup::corner`] (`corners` resolves the corner);
     /// [`SolidError::Unported`] for the intersection (`sm_SrfSrfIntersection`).
-    #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn calc_fillet_int_fillet(
         &mut self,
         k: &Kernel,
         v: VertexId,
         corners: CornerLookup<'_>,
         solvers: &[FilletSolver],
+        target: &Brep,
+    ) -> Result<()> {
+        self.calc_fillet_int_fillet_with_context(
+            k,
+            v,
+            corners,
+            &IndexedEdgeContext {
+                solvers,
+                corners,
+                op: OP_INT_FILLET,
+            },
+            target,
+        )
+    }
+
+    /// [`Self::calc_fillet_int_fillet`] resolving the geometries' solvers through
+    /// `context` (a live executive's retained solvers).
+    ///
+    /// # Errors
+    /// As [`Self::calc_fillet_int_fillet`], with `context`'s resolution failures.
+    #[allow(clippy::too_many_lines)] // one upstream routine
+    pub fn calc_fillet_int_fillet_with_context(
+        &mut self,
+        k: &Kernel,
+        v: VertexId,
+        corners: CornerLookup<'_>,
+        context: &impl FilletEdgeContext,
         target: &Brep,
     ) -> Result<()> {
         // check state
@@ -497,7 +526,7 @@ impl FilletBrep {
         // First, check if we have an adjusted Nx2 Concave corner
         let the_corner = corners.corner(corner)?;
         if the_corner.corner_type() == FilletCornerType::NByTwo && !the_corner.is_bevel_corner() {
-            self.calc_nx2_vert_fillet_x_fillet(k, v, solvers)?;
+            self.calc_nx2_vert_fillet_x_fillet_with_context(k, v, context)?;
             return Ok(());
         }
 
@@ -544,16 +573,10 @@ impl FilletBrep {
             ) else {
                 return Ok(()); // Fillet surfaces have not yet been computed
             };
-            let fs1 = solver_of(
-                solvers,
-                sid1.ok_or_else(|| SolidError::null_pointer(OP_INT_FILLET))?,
-                OP_INT_FILLET,
-            )?;
-            let fs2 = solver_of(
-                solvers,
-                sid2.ok_or_else(|| SolidError::null_pointer(OP_INT_FILLET))?,
-                OP_INT_FILLET,
-            )?;
+            let fs1 =
+                context.solver(sid1.ok_or_else(|| SolidError::null_pointer(OP_INT_FILLET))?)?;
+            let fs2 =
+                context.solver(sid2.ok_or_else(|| SolidError::null_pointer(OP_INT_FILLET))?)?;
 
             // pick appoxTol and angTol as tightest filletSolver tolerances
             let approx_tol = smin(fs1.approx_tol_3d, fs2.approx_tol_3d);
@@ -930,7 +953,11 @@ impl FilletBrep {
             e,
             corner,
             corners,
-            &IndexedEdgeContext { solvers, corners },
+            &IndexedEdgeContext {
+                solvers,
+                corners,
+                op: OP_SIDE,
+            },
             target,
             error_info,
         )

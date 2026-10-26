@@ -1124,6 +1124,23 @@ fn curve_ends(k: &Kernel, curve: &Curve) -> Result<(Extent1d, Point3, Point3)> {
 impl FilletBrep {
     /// The fillet surface and solver tolerances of the fillet geometry of edge use
     /// `eu`.
+    fn eu_geom_solver_with<'s>(
+        &self,
+        eu: EdgeuseId,
+        context: &'s impl super::p5::FilletEdgeContext,
+        op: &'static str,
+    ) -> Result<(FilletGeomId, &'s FilletSolver)> {
+        let g = self
+            .fillet_edgeuse(eu)?
+            .fillet_geom()
+            .ok_or_else(|| SolidError::null_pointer(op))?;
+        let sid = self
+            .geom(g)?
+            .fillet_solver()
+            .ok_or_else(|| SolidError::null_pointer(op))?;
+        Ok((g, context.solver(sid)?))
+    }
+
     fn eu_geom_solver<'s>(
         &self,
         eu: EdgeuseId,
@@ -1196,6 +1213,27 @@ impl FilletBrep {
         fv: VertexId,
         solvers: &[FilletSolver],
     ) -> Result<()> {
+        self.calc_nx2_vert_fillet_x_fillet_with_context(
+            k,
+            fv,
+            &super::p5::IndexedEdgeContext {
+                solvers,
+                corners: CornerLookup::default(),
+                op: OP_NX2,
+            },
+        )
+    }
+
+    /// [`Self::calc_nx2_vert_fillet_x_fillet`] resolving the solvers through `context`.
+    ///
+    /// # Errors
+    /// As [`Self::calc_nx2_vert_fillet_x_fillet`], with `context`'s resolution failures.
+    pub fn calc_nx2_vert_fillet_x_fillet_with_context(
+        &mut self,
+        k: &Kernel,
+        fv: VertexId,
+        context: &impl super::p5::FilletEdgeContext,
+    ) -> Result<()> {
         let mut ref_pnt = Point3::UNDEF;
         let mut approx_tol = BIG_DOUBLE;
         let mut ang_tol = BIG_DOUBLE;
@@ -1207,7 +1245,7 @@ impl FilletBrep {
                 FilletEdgeType::CrossSection => {
                     let prim = primary_edgeuse(self.brep(), e)?
                         .ok_or_else(|| SolidError::null_pointer(OP_NX2))?;
-                    let (g, fs) = self.eu_geom_solver(prim, solvers, OP_NX2)?;
+                    let (g, fs) = self.eu_geom_solver_with(prim, context, OP_NX2)?;
                     approx_tol = smin(approx_tol, fs.approx_tol_3d);
                     ang_tol = smin(ang_tol, fs.ang_tol_rad);
                     if fillet_surface1.is_none() {

@@ -342,32 +342,55 @@ fn apply(k: &mut Kernel, body: &mut Brep, edges: &[EdgeId], input: &RealSolid) -
         input.thumbweight,
     )
 }
-/// `TestSmFillets.cpp` examples 2 and 3 on the 10x10x10 box with its first four
-/// edges in `GetEdges` order: `SmApiFilletEdges(r=1, circular)` and
-/// `SmApiFilletEdgesPerEdge(r = 0.5 + 0.25 i, circular)`. Returns the shim's
-/// `[status, faces, edges, vertices]` record, or `None` for the other examples.
+/// The `TestSmFillets.cpp` examples 0-6, as the shim runs them (examples 2-4 on the
+/// 10x10x10 box with its first four edges in `GetEdges` order: `SmApiFilletEdges(r=1,
+/// circular)`, `SmApiFilletEdgesPerEdge(r = 0.5 + 0.25 i, circular)` and
+/// `SmApiVariableRadiusFillet(0.5 -> 2.0, circular, G1)`). Returns the shim's
+/// `[status, faces, edges, vertices]` record, or `None` for an unknown example.
 pub(super) fn upstream_example(example: usize) -> Result<Option<Output>, HarnessError> {
-    if !matches!(example, 2 | 3) {
+    if !matches!(example, 0..=6) {
         return Ok(None);
     }
     let run = || -> SolidResult<Vec<f64>> {
         let mut k = Kernel::default();
-        let mut body =
-            solidcore::primitive::api_primitives::create_box(&mut k, Vec3::ZERO, 10.0, 10.0, 10.0)?;
-        let selected: Vec<EdgeId> = p1::edges(&body, None)?.into_iter().take(4).collect();
-        let result = if example == 2 {
-            solidcore::blend::fillet_executive::api::fillet_edges(
-                &mut k, &mut body, &selected, 1.0, 1, 1, 1.0,
-            )
+        let (dx, dy, dz) = if example < 2 {
+            (5.0, 10.0, 15.0)
         } else {
-            let radii: Vec<f64> = (0..selected.len()).map(|i| 0.5 + 0.25 * i as f64).collect();
-            let types = vec![
-                solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType::Circular;
-                selected.len()
-            ];
-            solidcore::blend::fillet_executive::api::fillet_edges_per_edge(
-                &mut k, &mut body, &selected, &radii, &types, 1, 1.0,
-            )
+            (10.0, 10.0, 10.0)
+        };
+        let mut body = solidcore::primitive::api_primitives::create_box(&mut k, Vec3::ZERO, dx, dy, dz)?;
+        let edges = p1::edges(&body, None)?;
+        let selected: Vec<EdgeId> = edges.iter().copied().take(4).collect();
+        let result = match example {
+            0 => solidcore::blend::fillet_executive::api::circular_fillet(&mut k, &mut body, 0.5),
+            1 => solidcore::blend::fillet_executive::api::chamfer_fillet(&mut k, &mut body, 0.5),
+            2 => solidcore::blend::fillet_executive::api::fillet_edges(
+                &mut k, &mut body, &selected, 1.0, 1, 1, 1.0,
+            ),
+            3 => {
+                let radii: Vec<f64> =
+                    (0..selected.len()).map(|i| 0.5 + 0.25 * i as f64).collect();
+                let types = vec![
+                    solidcore::blend::fillet_solver::p1::FilletSurfaceGeneratorType::Circular;
+                    selected.len()
+                ];
+                solidcore::blend::fillet_executive::api::fillet_edges_per_edge(
+                    &mut k, &mut body, &selected, &radii, &types, 1, 1.0,
+                )
+            }
+            4 => solidcore::blend::fillet_executive::api::variable_radius_fillet(
+                &mut k, &mut body, &selected, 0.5, 2.0, 1, 1,
+            ),
+            _ => {
+                let bevel: Vec<_> = if example == 6 {
+                    p1::vertices(&body, None)?.into_iter().take(1).collect()
+                } else {
+                    Vec::new()
+                };
+                solidcore::blend::fillet_executive::api::set_bevel_corners(
+                    &mut k, &mut body, &edges, 1.0, &bevel,
+                )
+            }
         };
         let result_status = match result {
             Ok(()) => 0.0,

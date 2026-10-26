@@ -537,8 +537,8 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
 
     fn self_intersection_handler(&self) -> Result<Option<HandlingAlgorithmType>> {
         // the handler is the executive's member: the base reports the missing
-        // executive (a NULL dereference upstream) or the unported executive data
-        self.solver.self_intersection_handler().map(|()| None)
+        // executive (a NULL dereference upstream)
+        self.solver.self_intersection_handler()
     }
 
     fn smooth_out_intersection(
@@ -548,10 +548,10 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
         _uv_curves1: &mut Vec<BSplineCurve>,
         _uv_curves2: &mut Vec<BSplineCurve>,
     ) -> Result<()> {
-        // No handler can be held until the executive is ported
-        // (`self_intersection_handler` above fails first), and the handler's
-        // override `SmMakeCurveBlendSIH::SmoothOutIntersection` has no owning
-        // unit (plan/findings.md "fillet_solver_p1: SmoothOutIntersection").
+        // FlushCurve calls this only for a smoothing handler. The only handler an
+        // executive can hold here is `SmMakeSurfaceBlendSIH` (blending), and the
+        // smoothing override `SmMakeCurveBlendSIH::SmoothOutIntersection` has no
+        // owning unit (plan/findings.md "fillet_solver_p1: SmoothOutIntersection").
         // UNPORTED(blend.fillet_executive_p1): SmSelfIntersectionHandler::SmoothOutIntersection (justified: findings.md "fillet_solver_p1: SmoothOutIntersection")
         Err(SolidError::unported(
             "SmSelfIntersectionHandler::SmoothOutIntersection",
@@ -2617,13 +2617,13 @@ mod tests {
             SolidError::InvalidInput { .. }
         ));
         s.solver.set_fillet_executive(Some(FilletExecutiveRef));
-        assert!(matches!(
-            s.self_intersection_handler().unwrap_err(),
-            SolidError::Unported {
-                unit: "blend.fillet_executive_p1",
-                ..
-            }
-        ));
+        assert_eq!(s.self_intersection_handler().unwrap(), None);
+        s.solver.executive_self_intersection_handler =
+            Some(crate::blend::fillet_solver::p1::MakeSurfaceBlendSih::new(1.0).algorithm_type());
+        assert_eq!(
+            s.self_intersection_handler().unwrap(),
+            Some(HandlingAlgorithmType::Blending)
+        );
 
         // ComputeSurfaceValues runs the SmConstantRadiusFS::SetupOffsetValues override
         // (blend.fillet_standard_solver_p1): radius times orientation on both rails

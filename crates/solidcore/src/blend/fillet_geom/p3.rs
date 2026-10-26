@@ -558,9 +558,18 @@ impl FilletBrep {
                 context,
                 target,
             ),
+            FilletEdgeType::FilletXFillet => self
+                .calc_edge_fillet_int_fillet_with_context_and_error_info(
+                    k,
+                    e,
+                    Some(corner),
+                    corners,
+                    context,
+                    target,
+                    None,
+                ),
             FilletEdgeType::OnEdge => self.calc_edge_on_edge(k, e, target),
-            FilletEdgeType::FilletXFillet
-            | FilletEdgeType::RailRailInterpolation
+            FilletEdgeType::RailRailInterpolation
             | FilletEdgeType::OnExtendEdge
             | FilletEdgeType::FilletEnd
             | FilletEdgeType::SetbackRail
@@ -626,6 +635,37 @@ impl FilletBrep {
         target: &Brep,
         error_info: Option<&mut ErrorInfo<ExecutiveErrorObject>>,
     ) -> Result<()> {
+        self.calc_edge_fillet_int_fillet_with_context_and_error_info(
+            k,
+            e,
+            corner,
+            corners,
+            &super::p5::IndexedEdgeContext {
+                solvers,
+                corners,
+                op: OP_FIF,
+            },
+            target,
+            error_info,
+        )
+    }
+
+    /// [`Self::calc_edge_fillet_int_fillet_with_error_info`] resolving the
+    /// geometries' solvers through `context` (a live executive's retained solvers).
+    ///
+    /// # Errors
+    /// As [`Self::calc_edge_fillet_int_fillet`], with `context`'s resolution failures.
+    #[allow(clippy::too_many_arguments, clippy::too_many_lines)] // one upstream routine
+    pub fn calc_edge_fillet_int_fillet_with_context_and_error_info(
+        &mut self,
+        k: &Kernel,
+        e: EdgeId,
+        corner: Option<FilletCornerId>,
+        corners: CornerLookup<'_>,
+        context: &impl super::p5::FilletEdgeContext,
+        target: &Brep,
+        error_info: Option<&mut ErrorInfo<ExecutiveErrorObject>>,
+    ) -> Result<()> {
         let nul = || SolidError::null_pointer(OP_FIF);
 
         // locals: get filletSurface FilletGeoms
@@ -656,17 +696,17 @@ impl FilletBrep {
         // when either vertex is not processed pass the call to
         // SmFilletVertex::CalcFilletIntFillet
         if !start_processed {
-            return self.calc_fillet_int_fillet(k, start_fv, corners, solvers, target);
+            return self.calc_fillet_int_fillet_with_context(k, start_fv, corners, context, target);
         }
         if !end_processed {
-            return self.calc_fillet_int_fillet(k, end_fv, corners, solvers, target);
+            return self.calc_fillet_int_fillet_with_context(k, end_fv, corners, context, target);
         }
 
         // get intersecting filletSurfaces and FilletSolvers
         let g1 = self.geom(fillet_geom1)?;
         let g2 = self.geom(fillet_geom2)?;
-        let fil_solver1 = solver_of(solvers, g1.fillet_solver().ok_or_else(nul)?, OP_FIF)?;
-        let fil_solver2 = solver_of(solvers, g2.fillet_solver().ok_or_else(nul)?, OP_FIF)?;
+        let fil_solver1 = context.solver(g1.fillet_solver().ok_or_else(nul)?)?;
+        let fil_solver2 = context.solver(g2.fillet_solver().ok_or_else(nul)?)?;
         let fillet_surface1 = g1.fillet_surface()?.ok_or_else(nul)?;
         let fillet_surface2 = g2.fillet_surface()?.ok_or_else(nul)?;
 

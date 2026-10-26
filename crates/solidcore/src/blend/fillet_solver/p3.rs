@@ -100,11 +100,6 @@ fn invalid(reason: &'static str) -> SolidError {
     SolidError::invalid_input(OP, reason)
 }
 
-/// A call into a unit that is not ported yet (see `blend.fillet_solver_p1`).
-fn unported_on<A, T>(_args: A, upstream: &'static str, unit: &'static str) -> Result<T> {
-    Err(SolidError::unported(upstream, unit))
-}
-
 const fn srf(i: usize) -> SrfIndex {
     if i == 0 {
         SrfIndex::First
@@ -299,9 +294,10 @@ impl FilletSolver {
     /// the evaluations and the solvers; `SM_ERR` for a failed
     /// variable-radius drop, a failed constant-radius-assisted plane solve, or more
     /// extra unknowns than `SM_MAX_USER_DOUBLES`; [`SolidError::InvalidInput`] for a
-    /// missing offset surface or a Jacobian size below 4 (upstream indexes past
-    /// `sIntervals`); [`SolidError::Unported`] for the variable-radius branch
-    /// (`SmVariableRadiusFS`) and a constant-distance solver's distance; those of the
+    /// missing offset surface, a variable-radius type without its solver or a Jacobian
+    /// size below 4 (upstream indexes past `sIntervals`); `SM_ERR_NULL_POINTER` for a
+    /// variable-radius solver without original curve; [`SolidError::Unported`] for a
+    /// constant-distance solver's distance; those of the
     /// constant-radius-assisted plane solve (the solver's `PointOnPlaneSolve`).
     #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
     pub fn step_solve(
@@ -446,12 +442,38 @@ impl FilletSolver {
                         .surface(si)?
                         .ok_or_else(|| invalid("no offset surface"))?;
                     let srf_pt = surface.surface.surface.evaluate_point(k, get2(&uv, si))?;
-                    // UNPORTED(blend.fillet_standard_solver_p1): SmVariableRadiusFS::GetOriginalCurve (justified: findings.md "blend.fillet_solver_p3 (`SmFilletSolver.cpp` part 3")
-                    return unported_on(
-                        (srf_pt, &*next),
-                        "SmVariableRadiusFS::GetOriginalCurve",
-                        "blend.fillet_standard_solver_p1",
-                    );
+                    let approx_tol = ops.solver().approx_tol_3d;
+                    // `(SmVariableRadiusFS*) this`: only that class reports the type.
+                    let var_rad = ops
+                        .variable_radius_mut()
+                        .ok_or_else(|| invalid("variable-radius type without its solver"))?;
+                    let curve = var_rad
+                        .curve_based
+                        .original_curve()
+                        .ok_or_else(|| SolidError::null_pointer(OP))?;
+                    let mut ivl = var_rad.fillet_law_interval();
+                    // This will usually be outside of this domain, so:
+                    ivl.expand_relative(2.0);
+                    let solutions = curve.global_point_solve::<NoObject>(
+                        k,
+                        &ivl,
+                        SolverOperation::Minimize,
+                        srf_pt,
+                        approx_tol,
+                        SolutionRequested::Single,
+                        &GlobalPointSolveOptions::default(),
+                    )?;
+                    if solutions.len() != 1 {
+                        return Err(SolidError::sm_err(OP));
+                    }
+                    // Parameter gets stored in here:
+                    next.user_doubles[0] = solutions
+                        .get(0)
+                        .ok_or_else(|| SolidError::sm_err(OP))?
+                        .start
+                        .param(0)?;
+                    // Status ignored upstream; reported as for the call above (UB-252).
+                    ops.setup_offset_values(next, Some(&mut radius))?;
                 }
 
                 // Create iso-curve (the iso parameter is not clamped to the natural
@@ -1863,18 +1885,11 @@ mod tests {
     }
 
     #[test]
-    fn step_solve_defers_where_upstream_casts_and_runs_the_plane_solve() {
+    fn step_solve_casts_to_the_variable_radius_solver_and_runs_the_plane_solve() {
+        // a solver reporting SM_FS_VARIABLE_RADIUS without being one: upstream's
+        // `(SmVariableRadiusFS*) this` cast is undefined, an input error here
         let (r, _, _) = step(FilletSolverType::VariableRadius, 1.8, 0.5);
-        assert!(
-            matches!(
-                r,
-                Err(SolidError::Unported {
-                    unit: "blend.fillet_standard_solver_p1",
-                    ..
-                })
-            ),
-            "{r:?}"
-        );
+        assert!(matches!(r, Err(SolidError::InvalidInput { .. })), "{r:?}");
         // the assisted kind's step ends in the (base) PointOnPlaneSolve, which the test
         // solver's equations satisfy on the clipped step
         let (r, _, _) = step(FilletSolverType::ConstRadiusAssisted, 1.8, 0.5);

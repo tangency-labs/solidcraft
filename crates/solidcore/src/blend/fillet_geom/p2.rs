@@ -240,10 +240,94 @@ fn solver_at<'s>(
 
 // Preserve real solver ids when a caller owns one solver rather than an indexed
 // executive table. Missing adjacent solvers are resolver errors, never defaults.
+/// The solvers `SmFilletVertex::CalcRailIntRail` reaches through its two geometries:
+/// the caller's indexed table, or the live session's retained concrete solvers.
+enum RailRailSolvers<'a> {
+    Indexed(&'a mut [FilletSolver]),
+    Live(Vec<(FilletSolverId, &'a mut dyn FilletSolverOps)>),
+}
+
+impl RailRailSolvers<'_> {
+    /// The position of solver `id` (table index or live entry).
+    fn index(&self, id: FilletSolverId, op: &'static str) -> Result<usize> {
+        match self {
+            Self::Indexed(solvers) => solver_index(solvers, id, op),
+            Self::Live(solvers) => solvers
+                .iter()
+                .position(|(key, _)| *key == id)
+                .ok_or_else(|| SolidError::invalid_input(op, "unresolved fillet solver")),
+        }
+    }
+
+    fn at(&self, i: usize, op: &'static str) -> Result<&FilletSolver> {
+        match self {
+            Self::Indexed(solvers) => solver_at(solvers, i, op),
+            Self::Live(solvers) => solvers
+                .get(i)
+                .map(|(_, ops)| ops.solver())
+                .ok_or_else(|| SolidError::invalid_input(op, "unresolved fillet solver")),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn rail_rail_intersect(
+        &mut self,
+        k: &Kernel,
+        target: &Brep,
+        i: usize,
+        uv_guess: Point2,
+        rail_index1: usize,
+        j: usize,
+        rail_index2: usize,
+        tsect1: &mut TsectPnt,
+        tsect2: &mut TsectPnt,
+        op: &'static str,
+    ) -> Result<bool> {
+        match self {
+            Self::Indexed(solvers) => rail_rail_intersect(
+                k,
+                target,
+                solvers,
+                i,
+                uv_guess,
+                rail_index1,
+                j,
+                rail_index2,
+                tsect1,
+                tsect2,
+                op,
+            ),
+            Self::Live(solvers) => {
+                let missing = || SolidError::invalid_input(op, "unresolved fillet solver pair");
+                if i == j {
+                    return Err(missing());
+                }
+                let (lo, hi) = if i < j { (i, j) } else { (j, i) };
+                let (head, tail) = solvers.split_at_mut(hi);
+                let a = &mut *head.get_mut(lo).ok_or_else(missing)?.1;
+                let b = &mut *tail.first_mut().ok_or_else(missing)?.1;
+                let (s1, s2) = if i < j { (a, b) } else { (b, a) };
+                FilletSolver::rail_rail_intersect(
+                    s1,
+                    s2,
+                    k,
+                    Some(target),
+                    uv_guess,
+                    rail_index1,
+                    rail_index2,
+                    tsect1,
+                    tsect2,
+                )
+            }
+        }
+    }
+}
+
 enum RailSolvers<'a> {
     Indexed(&'a mut [FilletSolver]),
     Single(FilletSolverId, &'a mut FilletSolver),
     Live(FilletSolverId, &'a mut dyn FilletSolverOps),
+    LiveSet(Vec<(FilletSolverId, &'a mut dyn FilletSolverOps)>),
 }
 
 impl RailSolvers<'_> {
@@ -254,6 +338,13 @@ impl RailSolvers<'_> {
             }
             Self::Single(key, solver) if *key == id => Ok(solver),
             Self::Live(key, solver) if *key == id => Ok(solver.solver()),
+            Self::LiveSet(solvers) => solvers
+                .iter()
+                .find(|(key, _)| *key == id)
+                .map(|(_, solver)| solver.solver())
+                .ok_or_else(|| {
+                    SolidError::invalid_input(OP_RAIL_EU, "unresolved adjacent fillet solver")
+                }),
             Self::Single(..) | Self::Live(..) => Err(SolidError::invalid_input(
                 OP_RAIL_EU,
                 "unresolved adjacent fillet solver",
@@ -279,6 +370,13 @@ impl RailSolvers<'_> {
             }
             Self::Single(key, solver) if *key == id => Ok(&mut **solver),
             Self::Live(key, solver) if *key == id => Ok(&mut **solver),
+            Self::LiveSet(solvers) => solvers
+                .iter_mut()
+                .find(|(key, _)| *key == id)
+                .map(|(_, solver)| -> &mut dyn FilletSolverOps { &mut **solver })
+                .ok_or_else(|| {
+                    SolidError::invalid_input(OP_RAIL_EU, "unresolved adjacent fillet solver")
+                }),
             Self::Single(..) | Self::Live(..) => Err(SolidError::invalid_input(
                 OP_RAIL_EU,
                 "unresolved adjacent fillet solver",
@@ -967,6 +1065,12 @@ fn face_surface<'b>(
 
 impl FilletBrep {
     /// The solver index of fillet geometry `g` (`GetFilletSolver()`, dereferenced).
+    fn geom_solver_id(&self, g: FilletGeomId, op: &'static str) -> Result<FilletSolverId> {
+        self.geom(g)?
+            .fillet_solver()
+            .ok_or_else(|| SolidError::null_pointer(op))
+    }
+
     fn geom_solver_index(
         &self,
         g: FilletGeomId,
@@ -1018,13 +1122,54 @@ impl FilletBrep {
     /// evaluations; those of [`CornerLookup::corner`] (`corners` resolves the vertex's corner) and those
     /// of `RailRailIntersect` (its `SmTemporaryRadiusChange`,
     /// `blend.fillet_executive_p2`).
-    #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn calc_rail_int_rail(
         &mut self,
         k: &Kernel,
         v: VertexId,
         corners: CornerLookup<'_>,
         solvers: &mut [FilletSolver],
+        target: &mut Brep,
+    ) -> Result<()> {
+        self.calc_rail_int_rail_with_solvers(
+            k,
+            v,
+            corners,
+            &mut RailRailSolvers::Indexed(solvers),
+            target,
+        )
+    }
+
+    /// [`Self::calc_rail_int_rail`] with the retained concrete solvers of the vertex's
+    /// two fillet geometries, each with its actual identity (live executive sessions,
+    /// whose solvers are not one indexed table).
+    ///
+    /// # Errors
+    /// As [`Self::calc_rail_int_rail`]; a geometry whose solver is not one of `solvers`
+    /// (or both geometries on one solver) is [`SolidError::InvalidInput`].
+    pub fn calc_rail_int_rail_with_solver_ops(
+        &mut self,
+        k: &Kernel,
+        v: VertexId,
+        corners: CornerLookup<'_>,
+        solvers: Vec<(FilletSolverId, &mut dyn FilletSolverOps)>,
+        target: &mut Brep,
+    ) -> Result<()> {
+        self.calc_rail_int_rail_with_solvers(
+            k,
+            v,
+            corners,
+            &mut RailRailSolvers::Live(solvers),
+            target,
+        )
+    }
+
+    #[allow(clippy::too_many_lines)] // one upstream routine
+    fn calc_rail_int_rail_with_solvers(
+        &mut self,
+        k: &Kernel,
+        v: VertexId,
+        corners: CornerLookup<'_>,
+        solvers: &mut RailRailSolvers<'_>,
         target: &mut Brep,
     ) -> Result<()> {
         const OP: &str = OP_RAIL_RAIL;
@@ -1043,10 +1188,10 @@ impl FilletBrep {
         };
 
         let cp_vertex = corners.corner(corner)?.filleted_vertex();
-        let s1 = self.geom_solver_index(fillet_geom1, solvers, OP)?;
-        let s2 = self.geom_solver_index(fillet_geom2, solvers, OP)?;
-        let fs1 = solver_at(solvers, s1, OP)?;
-        let fs2 = solver_at(solvers, s2, OP)?;
+        let s1 = solvers.index(self.geom_solver_id(fillet_geom1, OP)?, OP)?;
+        let s2 = solvers.index(self.geom_solver_id(fillet_geom2, OP)?, OP)?;
+        let fs1 = solvers.at(s1, OP)?;
+        let fs2 = solvers.at(s2, OP)?;
 
         // Get the common face, and the indices of the rail curves.
         let face = as_face(self.fillet_vertex(v)?.point_class_object(), OP)?;
@@ -1091,10 +1236,9 @@ impl FilletBrep {
         // Get the TsectPnts and call the solver.
         let (vu1, mut tsect1) = self.rail_end_tsect(v, Some(fillet_geom1), None, OP)?;
         let (vu2, mut tsect2) = self.rail_end_tsect(v, Some(fillet_geom2), None, OP)?;
-        let found = rail_rail_intersect(
+        let found = solvers.rail_rail_intersect(
             k,
             target,
-            solvers,
             s1,
             uv_guess,
             rail_index1,
@@ -1217,6 +1361,32 @@ impl FilletBrep {
             opt_fg,
             corners,
             &mut RailSolvers::Live(solver_id, solver),
+            target,
+        )
+    }
+
+    /// Calculate a rail/side-edge vertex using the retained concrete solvers of all
+    /// its fillet geometries (an Nx2 corner's side vertex lies on two), each with its
+    /// actual identity.
+    ///
+    /// # Errors
+    /// As [`Self::calc_rail_int_edgeuse`]; a geometry whose solver is not one of
+    /// `solvers` is [`SolidError::InvalidInput`].
+    pub fn calc_rail_int_edgeuse_with_live_solvers(
+        &mut self,
+        k: &Kernel,
+        v: VertexId,
+        opt_fg: Option<FilletGeomId>,
+        corners: CornerLookup<'_>,
+        solvers: Vec<(FilletSolverId, &mut dyn FilletSolverOps)>,
+        target: &mut Brep,
+    ) -> Result<()> {
+        self.calc_rail_int_edgeuse_with_solvers(
+            k,
+            v,
+            opt_fg,
+            corners,
+            &mut RailSolvers::LiveSet(solvers),
             target,
         )
     }

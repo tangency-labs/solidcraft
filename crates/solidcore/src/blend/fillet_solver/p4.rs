@@ -4046,8 +4046,8 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         &self,
     ) -> Result<Option<crate::blend::fillet_intersector::HandlingAlgorithmType>> {
         // the handler is the executive's member: the base reports the missing
-        // executive (a NULL dereference upstream) or the unported executive data
-        self.ops.solver().self_intersection_handler().map(|()| None)
+        // executive (a NULL dereference upstream)
+        self.ops.solver().self_intersection_handler()
     }
 
     fn smooth_out_intersection(
@@ -4057,8 +4057,9 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         _uv_curves1: &mut Vec<BSplineCurve>,
         _uv_curves2: &mut Vec<BSplineCurve>,
     ) -> Result<()> {
-        // as blend::fillet_intersector's ConstantRadiusAssistedFs: no handler can be
-        // held until the executive is ported (`self_intersection_handler` fails first)
+        // as blend::fillet_intersector's ConstantRadiusAssistedFs: FlushCurve calls
+        // this only for a smoothing handler, and the only handler an executive can
+        // hold here (`SmMakeSurfaceBlendSIH`) is blending
         // UNPORTED(blend.fillet_executive_p1): SmSelfIntersectionHandler::SmoothOutIntersection (justified: findings.md "fillet_solver_p1: SmoothOutIntersection")
         Err(SolidError::unported(
             "SmSelfIntersectionHandler::SmoothOutIntersection",
