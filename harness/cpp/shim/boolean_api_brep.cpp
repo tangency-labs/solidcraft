@@ -25,7 +25,9 @@
 #include <SmApiPrimitives.h>
 #include <SmBrep.h>
 #include <SmContext.h>
+#include <SmFaceuse.h>
 #include <SmRegion.h>
+#include <SmShell.h>
 #include <SmSurface.h>
 #include <SmTArray.h>
 #include <SmVector3d.h>
@@ -202,7 +204,10 @@ std::vector<SmBrep*> build_all(const std::vector<BrepSpec>& specs)
     return v;
 }
 
-// `faces edges vertices regions manifold_solid` of a B-rep.
+// `faces edges vertices regions manifold_solid` of a B-rep, then per region (GetRegions
+// order) `is_void is_infinite shells` and per shell (GetShells order) `faceuses mate_region`:
+// the index in GetRegions of the region on the other side of the shell's first faceuse
+// (-1 for a shell without faceuses), so the order of the outer and void shells is compared.
 void put_brep(std::vector<double>& o, const SmBrep* b)
 {
     SmTArray<SmRegion*> regions;
@@ -212,6 +217,30 @@ void put_brep(std::vector<double>& o, const SmBrep* b)
     o.push_back((double)b->GetNumVertices());
     o.push_back((double)regions.GetSize());
     o.push_back(flg(b->IsManifoldSolid() != FALSE));
+    for (ULONG r = 0; r < regions.GetSize(); r++)
+    {
+        SmTArray<SmShell*> shells;
+        regions[r]->GetShells(shells);
+        o.push_back((double)regions[r]->IsVoid());
+        o.push_back(flg(regions[r]->IsInfiniteRegion() != FALSE));
+        o.push_back((double)shells.GetSize());
+        for (ULONG s = 0; s < shells.GetSize(); s++)
+        {
+            SmTArray<SmFaceuse*> fus;
+            shells[s]->GetFaceuses(fus);
+            o.push_back((double)fus.GetSize());
+            double mate = -1;
+            SmFaceuse* fu = shells[s]->GetFirstFaceuse();
+            if (fu != NULL && fu->GetMate() != NULL)
+            {
+                SmRegion* mr = fu->GetMate()->GetShell()->GetRegion();
+                for (ULONG k = 0; k < regions.GetSize(); k++)
+                    if (regions[k] == mr)
+                        mate = (double)k;
+            }
+            o.push_back(mate);
+        }
+    }
 }
 
 // Whether upstream keeps the second operand of a successful two-B-rep boolean

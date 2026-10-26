@@ -53,8 +53,9 @@
 //!   typed ids and `None` is `NULL`. Where upstream dereferences a null pointer the
 //!   port returns [`SolidError::InvalidInput`]; `SM_ERR` returns are
 //!   [`SolidError::Upstream`] with that code.
-//! - The region list of the B-rep (`SmOwningTopology::m_pList`) is the region arena in
-//!   traversal order rotated to [`Brep::region_list_head`]; `ResetInfiniteRegion`
+//! - The region list of the B-rep (`SmOwningTopology::m_pList`) is its recorded link
+//!   order (taken whenever the head moves), then the regions appended since in arena
+//!   order (`PostInsert`), rotated to [`Brep::region_list_head`]; `ResetInfiniteRegion`
 //!   only moves the head. Regions not on the list (`Region::in_brep` false) are not
 //!   reported by [`regions`].
 //! - [`surfaces`] / [`curves`]: upstream's `GetOwner() == pFace` / `pEdge` test compares
@@ -324,9 +325,45 @@ impl Brep {
         self.region_list_head
     }
 
-    /// Sets the head of the B-rep's region list (the friend write `m_pList = ..`).
+    /// Sets the head of the B-rep's region list (the friend write `m_pList = ..`). The
+    /// circular link order is kept: later appends go before the new head.
     pub fn set_region_list_head(&mut self, region: Option<RegionId>) {
+        let mut order = self.region_links();
+        if let Some(pos) = region.and_then(|r| order.iter().position(|&x| x == r)) {
+            order.rotate_left(pos);
+        }
+        self.region_order = order;
         self.region_list_head = region;
+    }
+
+    /// The regions on the list in link order from `Brep::region_order`'s start
+    /// (not rotated to the head): the recorded order, then the appended regions.
+    pub(crate) fn region_links(&self) -> Vec<RegionId> {
+        let on = |r: RegionId| self.regions.get(r).is_some_and(|x| x.in_brep);
+        let mut order: Vec<RegionId> = self
+            .region_order
+            .iter()
+            .copied()
+            .filter(|&r| on(r))
+            .collect();
+        for (id, r) in self.regions.iter() {
+            if r.in_brep && !order.contains(&id) {
+                order.push(id);
+            }
+        }
+        order
+    }
+
+    /// Records the current link order (rotated to the head) as `Brep::region_order`.
+    pub(crate) fn fix_region_order(&mut self) {
+        let mut order = self.region_links();
+        if let Some(pos) = self
+            .region_list_head
+            .and_then(|r| order.iter().position(|&x| x == r))
+        {
+            order.rotate_left(pos);
+        }
+        self.region_order = order;
     }
 
     /// `AddDeletedSurface`: keeps a surface removed from the B-rep until the operation
@@ -400,12 +437,7 @@ fn filtered<I: Copy>(
 ///
 /// [`SolidError::NotFound`] when the list head is a dangling id.
 pub fn regions(b: &Brep, attribute: Option<&AttributeFilter<'_>>) -> Result<Vec<RegionId>> {
-    let on_list: Vec<RegionId> = b
-        .regions()
-        .iter()
-        .filter(|(_, r)| r.in_brep)
-        .map(|(id, _)| id)
-        .collect();
+    let on_list = b.region_links();
     let start = match b.region_list_head() {
         None => 0,
         Some(head) => {

@@ -690,9 +690,14 @@ pub struct Brep {
     /// The identity the B-rep is attributed and notified under (`SmBrep*`).
     key: ObjectKey,
     /// `SmOwningTopology::m_pList` of the B-rep (unit `topology.brep_p1`): the head of
-    /// its circular region list, `None` for the first region record (the region arena
-    /// holds the list in traversal order; the head only rotates it).
+    /// its circular region list, `None` for the first region record.
     region_list_head: Option<RegionId>,
+    /// The circular region list's link order (unit `topology.brep_p1`), from
+    /// [`Brep::region_list_head`] when it was last moved. Regions on the list
+    /// (`Region::in_brep`) that are not in it follow in arena order: that is upstream's
+    /// `PostInsert` (append at the tail, before the head). Empty while the list is still
+    /// in arena order (the head never moved past an append).
+    region_order: Vec<RegionId>,
     /// `m_pFaceListHead` (unit `topology.brep_p1`): the face list in its list order
     /// (every face record, once; an importer may reorder it). Upstream appends on
     /// `PostInsert` and unlinks on `Remove`: `remove_*_record` takes the id off this
@@ -764,6 +769,7 @@ impl Brep {
             tolerance: self.tolerance,
             key: self.key,
             region_list_head: self.region_list_head,
+            region_order: self.region_order.clone(),
             face_list: self.face_list.clone(),
             edge_list: self.edge_list.clone(),
             vertex_list: self.vertex_list.clone(),
@@ -798,6 +804,7 @@ impl Default for Brep {
             tolerance: ZONE_TOL_3D,
             key: ObjectKey(0),
             region_list_head: None,
+            region_order: Vec::new(),
             face_list: Vec::new(),
             edge_list: Vec::new(),
             vertex_list: Vec::new(),
@@ -1421,9 +1428,12 @@ impl Brep {
     /// Deletes a region record (upstream `delete`; no unlinking: the caller resets the
     /// region list head and the infinite region when they named it).
     pub fn remove_region_record(&mut self, id: RegionId) -> Result<Region> {
-        self.regions
+        let region = self
+            .regions
             .remove(id)
-            .ok_or_else(|| not_found("topology::Brep::remove_region_record", id))
+            .ok_or_else(|| not_found("topology::Brep::remove_region_record", id))?;
+        self.region_order.retain(|&x| x != id);
+        Ok(region)
     }
 
     /// Deletes a face record (upstream `m_pFaceListHead->Remove` and `delete`): the

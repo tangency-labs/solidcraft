@@ -25,7 +25,10 @@
 //! | `Trees`         | 9  | `n`, breps, `t`, `t` nodes             | `nb`, `nb` x `has [brep]`                       |
 //!
 //! The two-B-rep record is `has [is_first kept brep [brep]]` (the second B-rep when
-//! upstream keeps it); a B-rep is `faces edges vertices regions manifold_solid`. A
+//! upstream keeps it); a B-rep is `faces edges vertices regions manifold_solid`, then per
+//! region (`GetRegions` order) `is_void is_infinite shells` and per shell (`GetShells` order)
+//! `faceuses mate_region`, the `GetRegions` index of the region behind the shell's first
+//! faceuse's mate (`-1` without one). A
 //! rejected `MergeBreps` (`SM_ERR_INVALID_INPUT`) is followed by `cleared list_len`.
 //!
 //! [`run`] accepts only what upstream handles without undefined behaviour: finite

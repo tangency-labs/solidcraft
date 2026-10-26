@@ -195,6 +195,9 @@ impl Brep {
     /// `PreInsert(pRegion)` on the B-rep's region list: the region joins the list as
     /// its new head.
     pub(crate) fn pre_insert_region(&mut self, r: RegionId) -> Result<()> {
+        self.fix_region_order();
+        self.region_order.retain(|&x| x != r);
+        self.region_order.insert(0, r);
         self.region_mut(r)?.in_brep = true;
         self.region_list_head = Some(r);
         Ok(())
@@ -204,6 +207,9 @@ impl Brep {
     /// its end (it becomes the head of an empty list).
     pub(crate) fn post_insert_region(&mut self, r: RegionId) -> Result<()> {
         let empty = !self.regions.iter().any(|(_, x)| x.in_brep);
+        self.fix_region_order();
+        self.region_order.retain(|&x| x != r);
+        self.region_order.push(r);
         self.region_mut(r)?.in_brep = true;
         if empty {
             self.region_list_head = Some(r);
@@ -223,6 +229,8 @@ impl Brep {
                 .filter(|&x| x != r);
             self.region_list_head = next;
         }
+        self.fix_region_order();
+        self.region_order.retain(|&x| x != r);
         self.region_mut(r)?.in_brep = false;
         Ok(())
     }
@@ -4851,6 +4859,38 @@ mod tests {
         b.remove_region_from_list(r1).unwrap();
         assert_eq!(b.region_list_head(), None);
         assert!(p1::regions(&b, None).unwrap().is_empty());
+    }
+
+    /// `PostInsert` appends at the circular list's tail (before the head), also after
+    /// the head moved to a later region; `PreInsert` makes the region the head.
+    #[test]
+    fn region_list_appends_before_a_moved_head() {
+        let mut b = Brep::new();
+        let r0 = b.add_region_record(Region::default()).unwrap();
+        let r1 = b.add_region_record(Region::default()).unwrap();
+        b.post_insert_region(r0).unwrap();
+        b.post_insert_region(r1).unwrap();
+        b.set_region_list_head(Some(r1));
+        assert_eq!(p1::regions(&b, None).unwrap(), vec![r1, r0]);
+        // a record created on the list is appended as PostInsert
+        let r2 = b
+            .add_region_record(Region {
+                in_brep: true,
+                ..Region::default()
+            })
+            .unwrap();
+        let r3 = b.add_region_record(Region::default()).unwrap();
+        b.post_insert_region(r3).unwrap();
+        assert_eq!(p1::regions(&b, None).unwrap(), vec![r1, r0, r2, r3]);
+        b.remove_region_from_list(r0).unwrap();
+        b.post_insert_region(r0).unwrap();
+        assert_eq!(p1::regions(&b, None).unwrap(), vec![r1, r2, r3, r0]);
+        b.remove_region_from_list(r1).unwrap();
+        assert_eq!(b.region_list_head(), Some(r2));
+        b.pre_insert_region(r1).unwrap();
+        assert_eq!(p1::regions(&b, None).unwrap(), vec![r1, r2, r3, r0]);
+        b.remove_region_from_list(r3).unwrap();
+        assert_eq!(p1::regions(&b, None).unwrap(), vec![r1, r2, r0]);
     }
 
     /// Review of 255d52b7, 1: an object an edit creates cannot take a reserved key
