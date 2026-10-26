@@ -86,6 +86,10 @@
 //!   the proto vertex's containment radius (`ContainsPoint`'s), not twice its own
 //!   tolerance, and marks the proto vertex as having absorbed it; the Boolean's
 //!   `ImprintIntersections` then fits that vertex to its edges (the SMLib fork's fix).
+//! - **Opt-in fixes (WR-452, WR-453, #435, #410).** With `Kernel::fixes.imprint_trims_edge_to_proto_vertex` and
+//!   `Kernel::fixes.imprint_extends_edge_to_proto_vertex`, [`ProtoTopologyManager::imprint_edge_definition`]
+//!   first fits each end of the definition's interval to its proto vertex (`imprint_ends`: the SMLib
+//!   fork's thread-groove fixes, tangency-labs/smlib b43876f, a8caccd).
 //! - `UpdateEdges` trims a definition at the split point; its alternative of splitting
 //!   the proto edge (`SmProtoEdge::Split`) sits behind `static constexpr SmBoolean
 //!   cbiDoSplit = FALSE` and is not ported.
@@ -121,6 +125,8 @@ use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::face::p2::proto_vertex_containment_radius;
 use crate::topology::brep::p5::{make_edge_in_face_in, EdgeInFace};
 use crate::topology::VertexId;
+
+mod imprint_ends;
 
 use super::p1::proto::{are_connected, can_imprint, find_position_from_pcs, topo_dimension};
 use super::p1::{
@@ -801,6 +807,13 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             .ok_or_else(null)?;
         let brep1 = self.which_brep(1);
         let brep2 = self.which_brep(2);
+
+        // not upstream (WR-452, WR-453, #435, #410; opt-in): fit the ends to the proto vertices
+        if k.fixes.imprint_trims_edge_to_proto_vertex
+            || k.fixes.imprint_extends_edge_to_proto_vertex
+        {
+            self.fit_edge_def_ends_to_proto_vertices(k, brep, ed, start_pv, end_pv)?;
+        }
 
         let d = self.ed_ref(ed)?;
         let type1 = d.src_topo_type(1);
