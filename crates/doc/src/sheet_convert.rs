@@ -1071,6 +1071,8 @@ pub fn convert_body(
                 zone_shape: None,
                 tag: String::new(),
                 tear: (false, false),
+                tear_curved: (false, false),
+                tear_ease: (0.0, 0.0),
             });
             queue.push((g, Some(sh.flanges.len() - 1)));
         }
