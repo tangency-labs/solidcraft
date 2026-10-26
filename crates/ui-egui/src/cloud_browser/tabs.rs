@@ -1,6 +1,7 @@
 //! Read-only document-tab presentation; the durable catalog and captures own sync state.
 use super::*;
 use crate::ui_kit::{FileStatus, FileStatusTone};
+use solidcraft_engine::Session;
 
 pub(crate) struct Indicator {
     pub status: FileStatus<'static>,

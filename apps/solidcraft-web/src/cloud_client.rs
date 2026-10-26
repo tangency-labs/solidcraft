@@ -24,11 +24,12 @@ async fn fetch(request: Request<OctoBody>) -> Result<Response<Full<Bytes>>, BoxE
     if body.len() > RESPONSE_LIMIT {
         return Err("GitHub request exceeds the safety limit".into());
     }
+    let timeout = if parts.uri.path().contains("/git/blobs") { 300 } else { 10 };
     let response = reqwest::Client::new()
         .request(parts.method, parts.uri.to_string())
         .headers(parts.headers)
         .body(body.to_vec())
-        .timeout(std::time::Duration::from_secs(300))
+        .timeout(std::time::Duration::from_secs(timeout))
         .send()
         .await?;
     let mut result = Response::builder().status(response.status());

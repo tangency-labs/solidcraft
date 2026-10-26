@@ -78,6 +78,9 @@ pub(super) fn textures(app: &mut SolveApp, ctx: &egui::Context) {
         }
     }
 }
+pub(super) fn texture(app: &SolveApp, destination: &Destination) -> Option<egui::TextureHandle> {
+    app.cloud.browser.previews.entries.get(&key(destination)?)?.texture.clone()
+}
 pub(super) fn image(app: &SolveApp, destination: &Destination) -> Option<(egui::TextureId, egui::Vec2)> {
     let texture = app.cloud.browser.previews.entries.get(&key(destination)?)?.texture.as_ref()?;
     Some((texture.id(), texture.size_vec2()))

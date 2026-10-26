@@ -91,6 +91,22 @@ impl GitRepository {
         Ok(connection)
     }
 
+    /// ls-remote patterns also match ref tails. Confirm only the requested full ref.
+    pub(super) fn remote_branch(&self, url: &str) -> Result<Option<String>> {
+        let reference = format!("refs/heads/{}", self.connection.branch);
+        let output = self.text(&["ls-remote", "--heads", "--", url, &reference])?;
+        for line in output.lines() {
+            let mut fields = line.split_whitespace();
+            if let (Some(commit), Some(name), None) = (fields.next(), fields.next(), fields.next())
+                && name == reference
+            {
+                solidcraft_cloud::management::check_commit(commit)?;
+                return Ok(Some(commit.into()));
+            }
+        }
+        Ok(None)
+    }
+
     pub(super) fn fetch_destinations(&self, remote: &GitRemote) -> Result<()> {
         let mut seen = std::collections::BTreeSet::new();
         for url in std::iter::once(&remote.fetch).chain(&remote.push) {
@@ -98,11 +114,10 @@ impl GitRepository {
                 continue;
             }
             // An empty destination can receive the first publication from this checkout.
-            let branch = self.text(&["ls-remote", "--heads", "--", url, &self.connection.branch])?;
-            if branch.is_empty() {
+            if self.remote_branch(url)?.is_none() {
                 continue;
             }
-            self.run(&["fetch", "--no-tags", "--", url, &self.connection.branch], None)?;
+            self.run(&["fetch", "--no-tags", "--", url, &format!("refs/heads/{}", self.connection.branch)], None)?;
             self.run(&["merge", "--ff-only", "FETCH_HEAD"], None)?;
         }
         Ok(())
@@ -137,8 +152,7 @@ impl GitRepository {
                 ],
                 None,
             )?;
-            let confirmed = self.text(&["ls-remote", "--heads", "--", url, &self.connection.branch])?;
-            if confirmed.split_whitespace().next() != Some(commit) {
+            if self.remote_branch(url)?.as_deref() != Some(commit) {
                 return Err(storage("remote publication could not be confirmed; queued copy retained"));
             }
         }

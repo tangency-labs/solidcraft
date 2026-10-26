@@ -28,11 +28,15 @@ use crate::SolveApp;
 use crate::control::ControlResponse;
 use crate::ui_kit;
 
+mod cloud;
+
 /// What a file operation does with its file.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Kind {
     /// Open the design (or a CAD, mesh or drawing file as a new design) in a tab of its own.
     Open,
+    /// Open a locally recovered cloud snapshot after its repository check completes.
+    CloudOpen { operation: String, destination: solidcraft_cloud::Destination },
     /// Insert CAD bodies, meshes or sketch drawing geometry into the active design.
     Insert,
     /// Open a design an earlier run autosaved before it closed.
@@ -103,6 +107,7 @@ impl Request {
     fn command(&self) -> (&'static str, Value) {
         match &self.kind {
             Kind::Open => ("doc.open", self.params()),
+            Kind::CloudOpen { operation, .. } => ("cloud.open.finish", json!({"operation":operation})),
             Kind::Insert if self.mesh || solidcraft_engine::io::is_mesh_path(&self.path) => ("file.insert_mesh", self.params()),
             Kind::Insert if solidcraft_engine::io::is_point_cloud_path(&self.path) => ("pointcloud.insert", self.params()),
             Kind::Insert => (insert_command(&self.path), self.params()),
@@ -166,8 +171,15 @@ struct Running {
 
 impl Drop for Running {
     fn drop(&mut self) {
-        if self.request.kind == Kind::ExportDxf {
+        if self.request.kind == Kind::ExportDxf || matches!(self.request.kind, Kind::CloudOpen { .. }) {
             self.progress.cancel();
+        }
+        #[cfg(target_arch = "wasm32")]
+        if let Some(staged) = self.staged.as_mut()
+            && staged.command == "cloud.open.finish"
+            && let Some(session) = staged.session.as_mut()
+        {
+            let _ = session.execute("cloud.cancel", &staged.params);
         }
     }
 }
@@ -214,7 +226,7 @@ fn staged_kind(request: &Request) -> bool {
         && solidcraft_engine::io::is_step_path(p)
         && !solidcraft_engine::io::is_iges_path(p)
         && !solidcraft_engine::io::is_native_cad_path(p);
-    step || (request.kind == Kind::Open && solidcraft_engine::io::is_design_path(p))
+    matches!(request.kind, Kind::CloudOpen { .. }) || step || (request.kind == Kind::Open && solidcraft_engine::io::is_design_path(p))
 }
 
 impl Running {
@@ -328,6 +340,7 @@ pub fn begin_request(app: &mut SolveApp, mut request: Request) -> Result<(), Str
                 app.insert_path_with(&request.path, &request.options, request.mesh);
                 Ok(Value::Null)
             }
+            Kind::CloudOpen { .. } => Err("cloud opening must use the staged loader".into()),
             Kind::Open => {
                 app.open_path_with(&request.path, &request.options);
                 // Opened in place of the blank tab it made, with no switch to it.
@@ -525,7 +538,7 @@ fn start(app: &mut SolveApp) {
         request.answer(Err("the design it was for is no longer shown".into()));
         return;
     }
-    if matches!(request.kind, Kind::Open | Kind::Recover { .. })
+    if matches!(request.kind, Kind::Open | Kind::CloudOpen { .. } | Kind::Recover { .. })
         && app.docs.count() >= crate::documents::MAX_OPEN
         && !crate::documents::active_is_blank(app)
     {
@@ -540,7 +553,21 @@ fn start(app: &mut SolveApp) {
     let insert = request.insert();
     let before = if insert { crate::open_meshing::session_world(&app.session).bodies.iter().map(|b| b.name.clone()).collect() } else { Vec::new() };
     let update = request.reads_again();
-    let mut scratch = if insert || update || request.kind == Kind::ExportDxf { app.session.scratch() } else { Session::default() };
+    let mut scratch = match cloud::target(app, &request) {
+        Ok(Some(session)) => session,
+        Ok(None) => {
+            if insert || update || request.kind == Kind::ExportDxf {
+                app.session.scratch()
+            } else {
+                Session::default()
+            }
+        }
+        Err(error) => {
+            request.answer(Err(error.clone()));
+            crate::cloud_browser::error(app, error);
+            return;
+        }
+    };
     // A design opened or recovered here is run through the host's pre-command check too, and
     // evaluated under the user's validation mode.
     scratch.set_command_check(app.session.command_check());
@@ -570,7 +597,7 @@ fn start(app: &mut SolveApp) {
     let thumbnail = request.kind == Kind::Open;
     // While a design rebuilds, a picture of what is built so far (a large design takes a while).
     let finished = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let partial_rx = (command == "doc.open" || command == "doc.recover").then(|| {
+    let partial_rx = matches!(command, "doc.open" | "doc.recover" | "cloud.open.finish").then(|| {
         progress.want_partial();
         let (partial_tx, partial_rx) = std::sync::mpsc::channel();
         let (watch, finished) = (progress.clone(), finished.clone());
@@ -597,6 +624,7 @@ fn start(app: &mut SolveApp) {
         });
         partial_rx
     });
+    let preview = cloud::preview(app, &request);
     let worker_finished = finished;
     #[cfg(test)]
     let worker_gate = app.file_load.worker_gate.take();
@@ -629,6 +657,7 @@ fn start(app: &mut SolveApp) {
         // Servers allowed once hold for this request only, on this worker thread.
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             solidcraft_engine::io::vfs::allowing_hosts(&allow_hosts, || {
+                cloud::wait(&mut scratch, command, &params, &worker_progress)?;
                 compute(scratch, command, &params, scope, thumbnail, &worker_phase, &worker_progress)
             })
         }))
@@ -647,7 +676,7 @@ fn start(app: &mut SolveApp) {
                 phase,
                 progress,
                 preview_rx: Some(preview_rx),
-                preview: None,
+                preview,
                 partial_rx,
                 built: None,
                 staged: None,
@@ -670,7 +699,21 @@ fn start_staged(app: &mut SolveApp) {
     let Some(request) = app.file_load.queued.pop_front() else { return };
     let insert = request.insert();
     let before = if insert { crate::open_meshing::session_world(&app.session).bodies.iter().map(|b| b.name.clone()).collect() } else { Vec::new() };
-    let mut session = if insert { app.session.scratch() } else { Session::default() };
+    let mut session = match cloud::target(app, &request) {
+        Ok(Some(session)) => session,
+        Ok(None) => {
+            if insert {
+                app.session.scratch()
+            } else {
+                Session::default()
+            }
+        }
+        Err(error) => {
+            request.answer(Err(error.clone()));
+            crate::cloud_browser::error(app, error);
+            return;
+        }
+    };
     session.set_command_check(app.session.command_check());
     session.set_validation(app.preferences.validation);
     if insert {
@@ -683,6 +726,7 @@ fn start_staged(app: &mut SolveApp) {
     if let Some(i) = app.file_load.hold_at.take() {
         progress.hold_at(i);
     }
+    let preview = cloud::preview(app, &request);
     app.file_load.running = Some(Running {
         base: app.session.doc.clone(),
         base_revision: app.session.revision,
@@ -691,7 +735,7 @@ fn start_staged(app: &mut SolveApp) {
         phase: Arc::new(AtomicU8::new(0)),
         progress,
         preview_rx: None,
-        preview: None,
+        preview,
         partial_rx: None,
         built: None,
         staged: Some(Staged {
@@ -731,11 +775,36 @@ fn step_staged(running: &mut Running) {
         return;
     }
     if progress.is_cancelled() {
+        if staged.command == "cloud.open.finish"
+            && let Some(session) = staged.session.as_mut()
+        {
+            let _ = session.execute("cloud.cancel", &staged.params);
+        }
         send(staged, Err("file operation cancelled".into()));
         return;
     }
     if !staged.shown {
         staged.shown = true;
+        return;
+    }
+    if staged.command == "cloud.open.finish" && staged.ran.is_none() {
+        let Some(session) = staged.session.as_mut() else { return };
+        match cloud::ready(session, &staged.params, progress.is_cancelled()) {
+            Ok(false) => return,
+            Err(error) => {
+                send(staged, Err(error));
+                return;
+            }
+            Ok(true) => {}
+        }
+        let result = solidcraft_engine::doc::progress::watch(progress.clone(), || session.execute(staged.command, &staged.params));
+        match result {
+            Ok(result) => {
+                staged.ran = Some(result);
+                running.phase.store(1, Ordering::Relaxed);
+            }
+            Err(error) => send(staged, Err(error.to_string())),
+        }
         return;
     }
     let began = web_time::Instant::now();
@@ -1150,7 +1219,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                 request.answer(r);
             }
             Ok(_) if reuse_open(app, request) => {}
-            Ok(made) if running.matches(&app.session) => 'open: {
+            Ok(made) if running.matches(&app.session) || matches!(request.kind, Kind::CloudOpen { .. }) => 'open: {
                 // Not meshed yet: framing it while it goes in must not mesh it here.
                 app.open_meshing_next = true;
                 crate::frame_watch::step(app, "before the open");
@@ -1241,6 +1310,8 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                 } else if let Kind::Recover { id, dir } = &request.kind {
                     reoffer(app, id, dir.as_deref());
                     app.set_status(format!("could not recover {}: {e}. Discard it or choose Later", request.path), true);
+                } else if matches!(request.kind, Kind::CloudOpen { .. }) {
+                    crate::cloud_browser::error(app, e);
                 } else {
                     app.set_status(e, true);
                 }
@@ -1366,7 +1437,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     } else {
         crate::i18n::tr(match r.request.kind {
             Kind::Insert => "file_load.inserting",
-            Kind::Open => "file_load.opening",
+            Kind::Open | Kind::CloudOpen { .. } => "file_load.opening",
             Kind::Recover { .. } => "file_load.recovering",
             Kind::ExportDxf => "dxf.exporting",
             Kind::UpdateLinks => "file_load.updating_links",
@@ -1375,7 +1446,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     };
     let icon = match r.request.kind {
         Kind::Insert => "import",
-        Kind::Open => "open",
+        Kind::Open | Kind::CloudOpen { .. } => "open",
         Kind::Recover { .. } => "restore",
         Kind::ExportDxf => "export",
         Kind::UpdateLinks => "update",
@@ -1398,7 +1469,10 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             }
             // An open or an import goes through three steps the card lists; the other operations
             // (and a cancelled one) say what they are doing in a line.
-            let stepped = !cancelled && matches!(r.request.kind, Kind::Open | Kind::Insert | Kind::Recover { .. });
+            let cloud_status = cloud::status(app, &r.request);
+            let stepped = !cancelled
+                && cloud_status.is_none()
+                && matches!(r.request.kind, Kind::Open | Kind::CloudOpen { .. } | Kind::Insert | Kind::Recover { .. });
             if stepped {
                 let cad = matches!(r.request.kind, Kind::Open | Kind::Insert)
                     && (solidcraft_engine::io::is_step_path(&r.request.path) || solidcraft_engine::io::is_iges_path(&r.request.path));
@@ -1425,7 +1499,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                             "file_load.rebuilding",
                             &[("done", &(done + 1).min(total).to_string()), ("total", &total.to_string())],
                         ),
-                        _ => crate::i18n::tr("file_load.reading").to_string(),
+                        _ => cloud_status.unwrap_or_else(|| crate::i18n::tr("file_load.reading").to_string()),
                     }
                 };
                 ui_kit::steps(ui, "file_load", &[status.as_str()], 0, None);

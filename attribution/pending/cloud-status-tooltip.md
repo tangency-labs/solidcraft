@@ -1,0 +1,1 @@
+| docs/book/src/guide/images/cloud-saves-connection-status.png | SolidCraft contributors | actual SolidCraft 0.23 desktop screenshot of a connection error indicator and tooltip; isolated profile and example repository | MIT OR Apache-2.0 |
