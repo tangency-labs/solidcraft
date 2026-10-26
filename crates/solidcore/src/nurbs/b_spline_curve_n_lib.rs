@@ -72,13 +72,13 @@
 //!   `InsertAt(.., lMultiplicityOfNewKnots)` growth fails softly upstream (ignored);
 //!   the port reserves it fallibly and returns `InvalidInput` when the caller's
 //!   multiplicity makes the new knots too large for memory.
-//! - **Tolerances of `Trim`.** `SmTol::GetZoneTol3d(this)` of a curve without edge is
-//!   the system zone tolerance and `SmTol::MapTo1d(tol, t, curve)` maps with the first
-//!   derivative of `Evaluate(t, 1, TRUE, .., bNonZeroTangents = TRUE)` (the `SmCurve.h`
-//!   default); a curve here has no edge, so the port computes both from the [`Kernel`]
-//!   and [`BSplineCurve::evaluate`]. `sm_CrvTrim` returns the non-`NL_YES` flag
-//!   `NL_INP_ERR` for `ur <= ul` and upstream then dereferences its `NULL` result; the
-//!   port returns `InvalidInput`.
+//! - **Tolerances of `Trim`.** The public ownerless trim uses the system zone
+//!   tolerance; `trim_with_zone_tol` accepts the caller-resolved owning edge's
+//!   tolerance (`SmTol::GetZoneTol3d(this)`). `SmTol::MapTo1d(tol, t, curve)` maps
+//!   with the first derivative of `Evaluate(t, 1, TRUE, .., bNonZeroTangents = TRUE)`
+//!   (the `SmCurve.h` default), computed by [`BSplineCurve::evaluate`].
+//!   `sm_CrvTrim` returns the non-`NL_YES` flag `NL_INP_ERR` for `ur <= ul` and
+//!   upstream then dereferences its `NULL` result; the port returns `InvalidInput`.
 //! - **Opt-in UV trimming (#1114).** With
 //!   [`crate::kernel::UpstreamFixes::bspline_trim_preserves_uv_spans`], degenerate
 //!   end-span removal applies only to dimension-3 model curves. UV spans are in
@@ -2048,6 +2048,28 @@ impl BSplineCurve {
     /// `SM_ERR` for an end clearly outside the natural interval, without a NURB, or
     /// when the trim fails; `InvalidInput` for ends closer than `SM_EFF_ZERO`.
     pub fn trim(&mut self, k: &Kernel, trim_interval: &mut Extent1d, mode: TrimMode) -> Result<()> {
+        self.trim_with_zone_tol(
+            k,
+            trim_interval,
+            mode,
+            zone_tol_3d(k, SmallTopoType::NormalSize),
+        )
+    }
+
+    /// Trims with the caller-resolved `SmTol::GetZoneTol3d(this)` ownership context.
+    /// The supplied 3D tolerance controls parameter-space end-span detection and
+    /// degenerate-segment removal; snapping, modes and UV-span policy are unchanged.
+    ///
+    /// # Errors
+    ///
+    /// The same errors as [`Self::trim`].
+    pub(crate) fn trim_with_zone_tol(
+        &mut self,
+        k: &Kernel,
+        trim_interval: &mut Extent1d,
+        mode: TrimMode,
+        zone_tol_3d: f64,
+    ) -> Result<()> {
         const OP: &str = OP_TRIM;
 
         // no work - the natural interval is contained by the new interval
@@ -2061,8 +2083,6 @@ impl BSplineCurve {
         let mut d_max = trim_interval.max();
         let scaled_zero_min = 100.0 * d_min.scaled_zero();
         let scaled_zero_max = 100.0 * d_max.scaled_zero();
-        // SmTol::GetZoneTol3d(this): a curve without edge has the system zone tolerance
-        let zone_tol_3d = zone_tol_3d(k, SmallTopoType::NormalSize);
         let zone_tol_1d_min = self.map_tol_to_1d(zone_tol_3d, d_min);
         let zone_tol_1d_max = self.map_tol_to_1d(zone_tol_3d, d_max);
         let degree = self.degree().map_err(SolidError::nl_ser(OP))?;
@@ -2350,6 +2370,33 @@ mod tests {
                 gap
             })
             .fold(0.0, f64::max)
+    }
+
+    #[test]
+    fn trim_uses_caller_zone_tolerance_for_short_end_span() {
+        let k = Kernel::default();
+        let original = short_span_arc(3);
+        let interval = Extent1d::from_min_max(0.5 - 3.5e-6, 0.9);
+        let mut standalone = original.clone();
+        let mut standalone_interval = interval;
+        standalone
+            .trim(&k, &mut standalone_interval, TrimMode::Silent)
+            .unwrap();
+
+        let mut owned = original.clone();
+        let mut owned_interval = interval;
+        owned
+            .trim_with_zone_tol(&k, &mut owned_interval, TrimMode::Silent, 1e-9)
+            .unwrap();
+        assert_eq!(owned_interval, interval);
+        assert_eq!(owned.natural_interval(), interval);
+        assert_eq!(
+            owned.knots(None).unwrap().0,
+            vec![interval.min(), 0.5, interval.max()]
+        );
+        assert_ne!(owned.nurb, standalone.nurb);
+        assert!(lifted_trim_gap(&original, &owned, interval) < 1e-12);
+        assert!(lifted_trim_gap(&original, &standalone, interval) > k.tolerances.zone_tol_3d);
     }
 
     #[test]

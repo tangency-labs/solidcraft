@@ -5,25 +5,26 @@
 //! `SmBrep` per call: read from an upstream `.smb` test file (optionally rebuilding its
 //! UV trim curves), a wire edge from a B-spline curve (`CreateWireEdgeFromCurve`), a face
 //! from a B-spline surface or a real `SmPlane` (`CreateFaceFromSurface`), or the wire
-//! network of `prog_test` `my_test_topology`. There is no Rust B-rep reader or builder
-//! yet (units `topology.brep_*`), so the Rust side imports the graph the shim exports in
-//! traversal order (raw members, including each face's face use, UV domain,
-//! rectangular-trim flag, tolerance and surface owner, `SmPlane`s as planes, and each
-//! vertex use's cached vertex/face gap) into a [`Brep`] and runs the ported functions on
+//! network of `prog_test` `my_test_topology`. The Rust side imports the graph the shim
+//! exports in traversal order (raw members, including each face's face use, UV domain,
+//! rectangular-trim flag, tolerance and surface owner, and each vertex use's cached
+//! vertex/face gap) into a [`Brep`] and runs the ported functions on
 //! it; results are compared as traversal indices, flags, statuses, values and curve
 //! blocks (the shim's `put_curve` layout). Selectors are taken modulo the entity count
 //! (`-1` selecting null where allowed).
 //!
-//! **Inexact geometry.** The export carries plain B-spline surfaces, `SmPlane`s,
-//! B-spline curves and `SmLine`s exactly; another `SmBSplineSurface` subclass (the
-//! revolution, extrusion, cone, sphere and torus surfaces of several upstream files) or
-//! `SmBSplineCurve` subclass (an edge's ellipse) arrives as its B-spline part only. Ops
-//! that evaluate such a face surface (`Points`, `FixUv`, `BestUv`, `Connected`) or, for
-//! `BestUv`, such an edge curve are not compared: both sides report `inexact_geometry`.
-//! The importer also reads the exact heads other shims of this layout may put before a
-//! face surface (`2 ...`, `harness/cpp/shim/sc_analytic_export.h`) or an edge curve
-//! (`-3 ...`, `sc_exact_curve_export.h`); unit `query.face_p4`'s shim does, this unit's
-//! does not.
+//! **Exact geometry.** Plain B-spline surfaces, `SmPlane`s, B-spline curves and
+//! `SmLine`s retain their regular blocks. Eligible revolution, cone/cylinder, sphere,
+//! torus and extrusion surfaces additionally carry an exact database head
+//! (`2 ...`, `harness/cpp/shim/sc_analytic_export.h`); eligible 3D edge ellipses and
+//! circles carry an exact curve head (`-3 ...`, `sc_exact_curve_export.h`). The importer
+//! reconstructs the concrete analytic kind and checks its B-spline part. The shared
+//! exporters require existing NURBs and lossless native database round trips; surface
+//! generator/polar state must also survive. Unsupported subclasses and representations
+//! rejected by those checks still arrive as their B-spline part only. Ops evaluating
+//! such a face surface (`Points`, `FixUv`, `BestUv`, `Connected`) or, for `BestUv`, such
+//! an edge curve still report `inexact_geometry` on both sides. UV trim curves and
+//! operation-result curve blocks retain the regular layout.
 //!
 //! **`GetPointsInFace` with more than one point** draws its V dither from
 //! `srand(time(NULL))` / `rand()` upstream and from `kernel.rng` in the port
@@ -440,7 +441,7 @@ fn orient_of(code: i64) -> Result<OrientType, HarnessError> {
 
 /// An exported curve block (`None` for `-1`). A B-spline or line is rebuilt exactly;
 /// another `SmBSplineCurve` kind is an error for a UV trim curve (`uv`) and its B-spline
-/// part for an edge curve (edge curves are only evaluated on deferred paths).
+/// part for an edge curve (an exact head, when present, is read by `read_edge_curve`).
 fn read_curve(rd: &mut Rd<'_>, uv: bool) -> Result<Option<SmCurve>, HarnessError> {
     let ty = rd.num()?;
     if ty == -1.0 {
@@ -1545,6 +1546,7 @@ fn put_curve(o: &mut Vec<f64>, c: Option<&SmCurve>) -> Result<(), Fail> {
     let (base, line) = match c.kind() {
         CurveKind::BSpline(b) => (std::borrow::Cow::Borrowed(b), None),
         CurveKind::Line(l) => (l.base_with_nurb()?, Some(l)),
+        CurveKind::Ellipse(e) => (std::borrow::Cow::Borrowed(e.base()), None),
         _ => {
             o.push(-2.0);
             return Ok(());

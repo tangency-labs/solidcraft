@@ -1720,20 +1720,42 @@ impl Curve {
     ///
     /// `SM_ERR` for kinds without the edit; those of [`BSplineCurve::trim`].
     pub fn trim(&mut self, k: &Kernel, trim_interval: &mut Extent1d, mode: TrimMode) -> Result<()> {
+        self.trim_with_zone_tol(
+            k,
+            trim_interval,
+            mode,
+            crate::geom::tol::zone_tol_3d(k, crate::geom::tol::SmallTopoType::NormalSize),
+        )
+    }
+
+    /// `Trim` with the caller-resolved owning object's 3D zone tolerance.
+    pub(crate) fn trim_with_zone_tol(
+        &mut self,
+        k: &Kernel,
+        trim_interval: &mut Extent1d,
+        mode: TrimMode,
+        zone_tol_3d: f64,
+    ) -> Result<()> {
         self.memo = CurveMemo::new();
         match &mut self.kind {
-            CurveKind::BSpline(c) => c.trim(k, trim_interval, mode),
-            CurveKind::Hyperbola(c) => c.base.trim(k, trim_interval, mode),
-            CurveKind::Ellipse(c) => c.trim(k, trim_interval, mode),
-            CurveKind::Parabola(c) => c.base_mut().trim(k, trim_interval, mode),
+            CurveKind::BSpline(c) => c.trim_with_zone_tol(k, trim_interval, mode, zone_tol_3d),
+            CurveKind::Hyperbola(c) => {
+                c.base
+                    .trim_with_zone_tol(k, trim_interval, mode, zone_tol_3d)
+            }
+            CurveKind::Ellipse(c) => c.trim_with_zone_tol(k, trim_interval, mode, zone_tol_3d),
+            CurveKind::Parabola(c) => {
+                c.base_mut()
+                    .trim_with_zone_tol(k, trim_interval, mode, zone_tol_3d)
+            }
             CurveKind::Hermite(_)
             | CurveKind::Conic(_)
             | CurveKind::Iso(_)
             | CurveKind::Composite(_) => Err(base_err()),
-            CurveKind::Projected(c) => c.trim(k, trim_interval, mode),
+            CurveKind::Projected(c) => c.trim_with_zone_tol(k, trim_interval, mode, zone_tol_3d),
             CurveKind::Offset(c) => c.trim(trim_interval, mode == TrimMode::IntervalOnly),
-            CurveKind::CrvInVolume(c) => c.trim(k, trim_interval, mode),
-            CurveKind::CrvOnSurf(c) => c.trim(k, trim_interval, mode),
+            CurveKind::CrvInVolume(c) => c.trim_with_zone_tol(k, trim_interval, mode, zone_tol_3d),
+            CurveKind::CrvOnSurf(c) => c.trim_with_zone_tol(k, trim_interval, mode, zone_tol_3d),
             CurveKind::Line(c) => c.trim_owned(self.owner, trim_interval, mode),
         }
     }

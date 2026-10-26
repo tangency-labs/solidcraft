@@ -16,13 +16,16 @@
 // validates every input. The B-rep construction, traversal and export are those of the
 // `topology.vertexuse` shim (harness/cpp/shim/topology_vertexuse.cpp), with each face's
 // raw members (face use, UV domain, rectangular-trim flag, tolerance, whether its surface
-// is owned by it) and SmPlane surfaces as planes added to the export. Every B-rep op
+// is owned by it), SmPlane surfaces as planes, and lossless analytic surface and edge
+// ellipse/circle heads from the shared exporters added to the export. Every B-rep op
 // starts with a B-rep block:
 //   `0 rebuild validate_only init_gaps`         SmBrep::ReadFromFile(path) (ASCII .smb)
 //   `1 curve t0 t1 validate_only init_gaps`     CreateWireEdgeFromCurve(curve, [t0, t1])
 //   `2 surface u0 v0 u1 v1 validate_only init_gaps` CreateFaceFromSurface(surface, dom)
 //   `3 validate_only init_gaps`                 the wire network of prog_test my_test_topology
 // Ops whose upstream path would dereference null output -2 instead of calling it.
+#include "sc_analytic_export.h"
+#include "sc_exact_curve_export.h"
 #include "sc_shim.h"
 #include "support/topology_fixture.h"
 
@@ -600,6 +603,7 @@ void export_graph(SmBrep* brep, Graph& g, std::vector<double>& o)
     for (SmFace* p : g.faces)
     {
         SmSurface* s = p->*FPeek::srf();
+        sc_analytic_export::put_exact_head(o, s, the_context());
         put_surface(o, s);
         o.push_back((double)g.find(2, p->*FPeek::fu()));
         SmExtent2d d = p->*FPeek::dom();
@@ -655,7 +659,7 @@ void export_graph(SmBrep* brep, Graph& g, std::vector<double>& o)
         for (SmTopology* t : list_of(p->GetList()))
             v.push_back(g.find(6, t));
         put_list(o, v);
-        put_curve(o, p->GetCurve());
+        sc_exact_curve_export::put_export_curve(o, p->GetCurve(), the_context(), put_curve);
     }
     for (SmVertexuse* p : g.vertexuses)
     {

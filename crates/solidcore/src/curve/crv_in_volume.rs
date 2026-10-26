@@ -1096,13 +1096,30 @@ impl CrvInVolume {
     ///
     /// `SM_ERR` when the curve is not owned; those of the base curve's trim.
     pub fn trim(&mut self, k: &Kernel, trim_interval: &mut Extent1d, mode: TrimMode) -> Result<()> {
+        self.trim_with_zone_tol(
+            k,
+            trim_interval,
+            mode,
+            crate::geom::tol::zone_tol_3d(k, crate::geom::tol::SmallTopoType::NormalSize),
+        )
+    }
+
+    /// Trims the owned curve with the caller-resolved owning object's tolerance.
+    pub(crate) fn trim_with_zone_tol(
+        &mut self,
+        k: &Kernel,
+        trim_interval: &mut Extent1d,
+        mode: TrimMode,
+        zone_tol_3d: f64,
+    ) -> Result<()> {
         // Don't own curve can not trim the curve
         if !self.owns_curve() {
             return Err(SolidError::sm_err(OP));
         }
 
         // pass the call along to the Curve
-        self.curve.trim(k, trim_interval, mode)?;
+        self.curve
+            .trim_with_zone_tol(k, trim_interval, mode, zone_tol_3d)?;
 
         // clear the knots
         if !self.need_breaks {

@@ -66,6 +66,9 @@
 //!   thread edge's trim 5e-5 off its edge, tolerance 1e-5). That is the default here, as
 //!   upstream; with [`UpstreamFixes::uv_trim_corner_end_points_only`](crate::kernel::UpstreamFixes::uv_trim_corner_end_points_only)
 //!   only the end control points move, by the UV gap.
+//!   Each `Trim` uses the tolerance of the edge reached through the UV curve's actual
+//!   holding edge use, matching `SmTol::GetZoneTol3d(curve)`; an owner path without an
+//!   edge uses the system tolerance. Notification probes use that same tolerance.
 //! - **Edit notifications.** [`fix_uv_trim_curves_notified`] notifies its two
 //!   `EditEndPoint`s (`SM_NO_PRE_EDIT` / `SM_NO_POST_EDIT`, caller and first data
 //!   object the UV trim curve under its kernel-issued identity) through the caller's
@@ -2659,9 +2662,9 @@ fn edit_end_point(
 
 /// `sm_FixUVTrimCurves`: closes the UV gap between the start of `eu_current`'s UV trim
 /// curve and the end of `eu_previous`'s (its clockwise neighbour in the loop) by
-/// moving their end control points onto the vertex's UV point. Unlike upstream, the
-/// curves are not first trimmed at their drop points and stretched back over their
-/// intervals (module docs, #570). Gaps below `SM_EFF_ZERO / 10` or above a twentieth of the
+/// moving their end control points onto the vertex's UV point after trimming at their
+/// drop points and stretching back over their intervals (unless the opt-in fix skips
+/// those edits; module docs, #570). Gaps below `SM_EFF_ZERO / 10` or above a twentieth of the
 /// smaller side of `uv_domain` are left alone. `vertex` is the vertex between the two
 /// edge uses; `tol_3d` and `uv_dist_between` (the current UV gap) as upstream.
 /// Returns whether the curves were modified.
@@ -2820,9 +2823,17 @@ pub fn fix_uv_trim_curves_notified(
                     let _ = trim_ivl.set_min_max(curr_ivl.min(), t_curr_new);
                 }
                 if !are_same(trim_ivl.min(), trim_ivl.max()) {
+                    // SmTol::GetZoneTol3d(curve) follows its actual holder's edge.
+                    let zone_tol_3d = match eu1::edge(b, curr_holder)? {
+                        Some(edge) => b.edge(edge)?.tolerance,
+                        None => crate::geom::tol::zone_tol_3d(
+                            k,
+                            crate::geom::tol::SmallTopoType::NormalSize,
+                        ),
+                    };
                     notified_curve_edit(b, env.as_deref_mut(), curr_holder, |c| {
                         let mut ivl = trim_ivl;
-                        c.trim(k, &mut ivl, TrimMode::Notify)
+                        c.trim_with_zone_tol(k, &mut ivl, TrimMode::Notify, zone_tol_3d)
                     })?;
                     notified_curve_edit(b, env.as_deref_mut(), curr_holder, |c| {
                         c.edit_parameterization(k, &curr_ivl)
@@ -2840,9 +2851,17 @@ pub fn fix_uv_trim_curves_notified(
                     let _ = trim_ivl.set_min_max(t_prev_new, prev_ivl.max());
                 }
                 if !are_same(trim_ivl.min(), trim_ivl.max()) {
+                    // The previous curve can likewise be held by another edge use.
+                    let zone_tol_3d = match eu1::edge(b, prev_holder)? {
+                        Some(edge) => b.edge(edge)?.tolerance,
+                        None => crate::geom::tol::zone_tol_3d(
+                            k,
+                            crate::geom::tol::SmallTopoType::NormalSize,
+                        ),
+                    };
                     notified_curve_edit(b, env.as_deref_mut(), prev_holder, |c| {
                         let mut ivl = trim_ivl;
-                        c.trim(k, &mut ivl, TrimMode::Notify)
+                        c.trim_with_zone_tol(k, &mut ivl, TrimMode::Notify, zone_tol_3d)
                     })?;
                     notified_curve_edit(b, env.as_deref_mut(), prev_holder, |c| {
                         c.edit_parameterization(k, &prev_ivl)

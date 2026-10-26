@@ -5,8 +5,3 @@
 unit = "blend.fillet_executive_p3"
 case = "sweep4-bottle-e29-r0.1"
 why = "one result vertex tolerance differs (C++ 1.07e-2, Rust 1.60e-4); topology and every other value agree (plan/findings/blend.fillet_executive_p3--bottle-e29-r0.1-vertex-tolerance.md)"
-
-[[mismatch]]
-unit = "blend.fillet_executive_p3"
-case = "sweep4-sphere_diff_3cylinders-all-r0.1"
-why = "mass properties differ (area 38235.606 vs 38235.005): cone face 7's lazily made UV trim curve (CreateUVTrimCurve/DropCurve at mass time, identical inputs) is one cubic span in C++ and 15 spans in Rust, upstream issue WR-449 (plan/findings/blend.fillet_executive_p3--sweep4-sphere-diff-3cylinders-and-brepforfillet2-all-edges--addendum-2026-10-26-sphere-diff-localized.md)"
