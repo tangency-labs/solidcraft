@@ -859,21 +859,23 @@ impl Raster {
 
     /// At most `units` simple units, or up to the end of a tile.
     fn step(&mut self, units: usize) -> Result<RasterPoll> {
-        for _ in 0..units.clamp(1, MAX_STEP) {
+        let mut budget = units.clamp(1, MAX_STEP);
+        while budget > 0 {
             self.cancel.check()?;
-            match self.stage {
-                Stage::Looks => self.look_step()?,
-                Stage::Prepare => self.prepare_step()?,
-                Stage::Sort => self.sort_step()?,
-                Stage::Clear => self.clear_step()?,
-                Stage::Opaque | Stage::Glass => self.draw_step()?,
-                Stage::Downsample => {
-                    if let Some(tile) = self.downsample_step()? {
-                        return Ok(tile);
-                    }
-                }
+            // Preparation takes one unit a call; a tile's passes loop on their own, up to the budget.
+            let used = match self.stage {
+                Stage::Looks => self.look_step().map(|()| 1)?,
+                Stage::Prepare => self.prepare_step().map(|()| 1)?,
+                Stage::Sort => self.sort_step().map(|()| 1)?,
+                Stage::Clear => self.clear_run(budget)?,
+                Stage::Opaque | Stage::Glass => self.draw_run(budget)?,
+                Stage::Downsample => match self.downsample_run(budget)? {
+                    Some(tile) => return Ok(tile),
+                    None => budget,
+                },
                 Stage::Encode | Stage::Done => return Err(JobError::new(ErrorCode::NotCompleted, "render result already consumed")),
-            }
+            };
+            budget = budget.saturating_sub(used);
         }
         Ok(RasterPoll::Pending)
     }
@@ -999,69 +1001,85 @@ impl Raster {
         Ok(())
     }
 
-    fn clear_step(&mut self) -> Result<()> {
+    /// Up to `budget` samples of the tile's canvas cleared, a unit each; the units used.
+    fn clear_run(&mut self, budget: usize) -> Result<usize> {
         let window = self.window()?;
-        if self.pixels.len() >= window.width() * window.height() * self.ss * self.ss {
+        let left = (window.width() * window.height() * self.ss * self.ss).saturating_sub(self.pixels.len()).min(budget);
+        if left == 0 {
             self.stage = Stage::Opaque;
             self.draw = 0;
-            return Ok(());
+            return Ok(1);
         }
-        self.pixels.push(self.clear());
-        self.depth.push(f32::INFINITY);
-        self.pixel_done += 1;
-        Ok(())
+        let clear = self.clear();
+        self.pixels.resize(self.pixels.len() + left, clear);
+        self.depth.resize(self.depth.len() + left, f32::INFINITY);
+        self.pixel_done += left as u64;
+        Ok(left)
     }
 
-    fn draw_step(&mut self) -> Result<()> {
+    /// Up to `budget` units of the tile's opaque or glass pass, each placing a triangle or testing
+    /// one of its samples; the units used.
+    fn draw_run(&mut self, budget: usize) -> Result<usize> {
         let window = self.window()?;
         // The tile's canvas samples, in whole-canvas coordinates.
         let (cx0, cx1) = (window.x0 as usize * self.ss, window.x1 as usize * self.ss - 1);
         let (cy0, cy1) = (window.y0 as usize * self.ss, window.y1 as usize * self.ss - 1);
-        if self.triangle.is_none() {
-            let list = if self.stage == Stage::Opaque { &self.opaque } else { &self.glass };
-            let Some(draw) = list.get(self.draw).copied() else {
-                self.stage = if self.stage == Stage::Opaque { Stage::Glass } else { Stage::Downsample };
-                self.draw = 0;
-                return Ok(());
+        let (clear, tile) = (self.clear(), (cx0, cy0, cx1 - cx0 + 1));
+        for used in 1..=budget {
+            let Some(triangle) = self.triangle.as_mut() else {
+                let list = if self.stage == Stage::Opaque { &self.opaque } else { &self.glass };
+                let Some(draw) = list.get(self.draw).copied() else {
+                    self.stage = if self.stage == Stage::Opaque { Stage::Glass } else { Stage::Downsample };
+                    self.draw = 0;
+                    return Ok(used);
+                };
+                // Only the part of the triangle's bounds inside this tile; one outside it is passed
+                // over before it is painted.
+                let (world, normals) = self.corners(draw)?;
+                let inside = self.view.place(world)?.and_then(|mut placed| {
+                    let [x0, x1, y0, y1] = placed.bounds;
+                    placed.bounds = [x0.max(cx0), x1.min(cx1), y0.max(cy0), y1.min(cy1)];
+                    (placed.bounds[0] <= placed.bounds[1] && placed.bounds[2] <= placed.bounds[3]).then_some(placed)
+                });
+                self.triangle = match inside {
+                    Some(placed) => self.look(draw, normals)?.map(|look| Triangle::new(world, look, placed)),
+                    None => None,
+                };
+                if self.triangle.is_none() {
+                    self.draw += 1;
+                }
+                continue;
             };
-            // Only the part of the triangle's bounds inside this tile; one outside it is passed
-            // over before it is painted.
-            let (world, normals) = self.corners(draw)?;
-            let inside = self.view.place(world)?.and_then(|mut placed| {
-                let [x0, x1, y0, y1] = placed.bounds;
-                placed.bounds = [x0.max(cx0), x1.min(cx1), y0.max(cy0), y1.min(cy1)];
-                (placed.bounds[0] <= placed.bounds[1] && placed.bounds[2] <= placed.bounds[3]).then_some(placed)
-            });
-            self.triangle = match inside {
-                Some(placed) => self.look(draw, normals)?.map(|look| Triangle::new(world, look, placed)),
-                None => None,
-            };
-            if self.triangle.is_none() {
+            raster_pixel(triangle, tile, &self.view, self.studio_weights, clear, &mut self.pixels, &mut self.depth)?;
+            triangle.x += 1;
+            if triangle.x > triangle.bounds[1] {
+                triangle.x = triangle.bounds[0];
+                triangle.y += 1;
+            }
+            if triangle.y > triangle.bounds[3] {
+                self.triangle = None;
                 self.draw += 1;
             }
-            return Ok(());
+            self.pixel_done += 1;
         }
-        let clear = self.clear();
-        let triangle = self.triangle.as_mut().ok_or_else(|| invalid("missing raster triangle"))?;
-        let tile = (cx0, cy0, cx1 - cx0 + 1);
-        raster_pixel(triangle, tile, &self.view, self.studio_weights, clear, &mut self.pixels, &mut self.depth)?;
-        triangle.x += 1;
-        if triangle.x > triangle.bounds[1] {
-            triangle.x = triangle.bounds[0];
-            triangle.y += 1;
+        Ok(budget)
+    }
+
+    /// Up to `budget` output pixels of the tile, a unit each; the tile's rows once its last pixel
+    /// is in.
+    fn downsample_run(&mut self, budget: usize) -> Result<Option<RasterPoll>> {
+        let window = self.window()?;
+        let (width, ss) = (window.width(), self.ss);
+        for _ in 0..budget {
+            if let Some(rows) = self.downsample_pixel(window, width, ss)? {
+                return Ok(Some(RasterPoll::Tile(window, rows)));
+            }
         }
-        if triangle.y > triangle.bounds[3] {
-            self.triangle = None;
-            self.draw += 1;
-        }
-        self.pixel_done += 1;
-        Ok(())
+        Ok(None)
     }
 
     /// One output pixel of the tile; the tile's rows once its last pixel is in.
-    fn downsample_step(&mut self) -> Result<Option<RasterPoll>> {
-        let window = self.window()?;
-        let (width, ss) = (window.width(), self.ss);
+    fn downsample_pixel(&mut self, window: PixelWindow, width: usize, ss: usize) -> Result<Option<Vec<u8>>> {
         let index = self.output.len() / 4;
         if index >= width * window.height() {
             let rows = std::mem::take(&mut self.output);
@@ -1082,7 +1100,7 @@ impl Raster {
                 self.scene.meshes.clear();
                 self.stage = Stage::Done;
             }
-            return Ok(Some(RasterPoll::Tile(window, rows)));
+            return Ok(Some(rows));
         }
         let (x, y) = (index % width, index / width);
         let (mut colour, mut alpha) = ([0.0; 3], 0.0);
