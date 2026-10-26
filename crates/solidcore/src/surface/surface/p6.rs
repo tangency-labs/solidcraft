@@ -2021,9 +2021,11 @@ pub(super) fn create_iso_parametric_curve(
             )?;
             Ok((Curve::from(iso.curve), iso.max_gap_3d))
         }
-        // (SmSurfOfExtrusion inherits the B-spline override)
+        // (SmSurfOfExtrusion inherits the B-spline override, whose
+        // `GetOrCreateGwNurbPointer` makes a missing NURB: a recognised extrusion has
+        // none until then)
         SurfaceKind::SurfOfExtrusion(s) => {
-            let iso = s.base().create_iso_parametric_curve(
+            let iso = s.base_with_nurb(k)?.create_iso_parametric_curve(
                 k,
                 dir,
                 value,

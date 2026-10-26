@@ -29,8 +29,8 @@
 //! curves that close a loop while an end meets no other end or more than one (UB-247,
 //! use after free), a planar path without path curves (`rPathCurves[0]`), skin
 //! profile counts past the curves (`r3DCurves[lCount]`), a partial cone or torus that
-//! sweeps a profile edge shorter than the zone tolerance (UB-215, use after free; for a
-//! cone only lines from `0.9999e-6`, as shorter ones fail the degenerate-face test
+//! sweeps a profile edge shorter than the zone tolerance (UB-215, use after free;
+//! only where the swept face's degenerate-surface test does not certainly refuse it
 //! first), and
 //! a sphere, torus or cone a few zone tolerances across, at any turn (HANG-35).
 //! Values are finite with magnitude at most `1e6`, frames nondegenerate, lists at
@@ -110,10 +110,16 @@ fn frame(f: &[f64]) -> bool {
 const EFF_ZERO: f64 = 1e-12;
 /// `SM_ZONE_TOL_3D`, the zone tolerance of the fresh native B-rep.
 const ZONE_TOL: f64 = 1e-5;
-/// Swept faces of a line shorter than this fail `IsDegenerateCurve` (its `1e-6`
-/// tolerance with a relative margin of `1e-4`, so rounding of the line length cannot
-/// decide: a `1e-6` line runs at unit size and segfaults at a distance of 360).
-const DEGENERATE_FACE: f64 = 1e-6 * (1.0 - 1e-4);
+/// `SM_ZONE_TOL_3D / 10`, the default 3D tolerance of `SmSurface::IsDegenerateCurve`
+/// and `SmBSplineSurface::IsDegeneratePoint`.
+const DEGENERATE_TOL: f64 = 1e-6;
+/// Rounding margin of the degenerate-face predicate: a face counts as refused only
+/// when its largest sampled value is below the tolerance by this share of it plus
+/// [`REFUSAL_ABS_MARGIN`] times the size of its coordinates (native values are
+/// evaluated from control points at that size, so their rounding grows with it).
+const REFUSAL_REL_MARGIN: f64 = 1e-6;
+/// See [`REFUSAL_REL_MARGIN`].
+const REFUSAL_ABS_MARGIN: f64 = 1e-13;
 /// From this turn (degrees) up, p3's `CreateRotationalSweep` builds analytic faces
 /// instead of sweeping the profile edges; p2's full turns are among them.
 const ANALYTIC_TURN: f64 = 359.99999;
@@ -146,11 +152,15 @@ fn max_dim(a: V3) -> f64 {
     a[0].abs().max(a[1].abs()).max(a[2].abs())
 }
 
+/// A cone profile line: its length, whether it is the axis line, and its ends as
+/// (signed distance from the axis along the start x axis, height).
+type ConeLine = (f64, bool, [(f64, f64); 2]);
+
 /// The partial cone's profile lines as upstream builds them (side, base radius,
 /// axis, top radius; a radius within the scaled zero is left out), each with its
 /// length and whether it is the axis line, or `None` when the cone fails before
 /// sweeping them. The frame is checked nondegenerate first.
-fn cone_lines(d: &[f64]) -> Option<Vec<(f64, bool)>> {
+fn cone_lines(d: &[f64]) -> Option<Vec<ConeLine>> {
     let (h, base, top, start, f) = (d[1], d[2], d[3], d[4], &d[6..15]);
     if h < EFF_ZERO || (d[5] - start).abs() < EFF_ZERO {
         return None;
@@ -169,44 +179,238 @@ fn cone_lines(d: &[f64]) -> Option<Vec<(f64, bool)>> {
     if side <= tol || axis <= tol {
         return None;
     }
-    let lines: Vec<(f64, bool)> = [
-        (side, false),
-        (norm(sub(start_pt, origin)), false),
-        (axis, true),
-        (norm(sub(top_base, end_pt)), false),
+    // ends as (signed distance along the start x axis, height)
+    let lines: Vec<ConeLine> = [
+        (side, false, [(base, 0.0), (top, h)]),
+        (norm(sub(start_pt, origin)), false, [(0.0, 0.0), (base, 0.0)]),
+        (axis, true, [(0.0, 0.0), (0.0, h)]),
+        (norm(sub(top_base, end_pt)), false, [(top, h), (0.0, h)]),
     ]
     .into_iter()
-    .filter(|(l, _)| *l > tol)
+    .filter(|(l, _, _)| *l > tol)
     .collect();
     (lines.len() >= 3).then_some(lines)
 }
 
-/// UB-215: a turn below [`ANALYTIC_TURN`] sweeps the profile edges, and
-/// `SweepEdgeHigh` uses an edge's curve after the face build freed it for being
-/// shorter than the zone tolerance. A sphere's line lies on the axis and its arc's
-/// face fails the degenerate-surface test first, so spheres never reach it.
+/// The `(u, v)` fractions of the domain `SmSurface::IsDegenerateCurve` evaluates the
+/// first derivatives at: corners, edge midlines, diagonals and centre (`u` is the
+/// sweep, `v` the profile curve).
+const DEGENERATE_SAMPLES: [(f64, f64); 13] = [
+    (0.0, 0.0),
+    (1.0, 1.0),
+    (0.0, 1.0),
+    (1.0, 0.0),
+    (0.5, 0.333),
+    (0.5, 0.666),
+    (0.333, 0.5),
+    (0.666, 0.5),
+    (0.333, 0.333),
+    (0.666, 0.666),
+    (0.333, 0.666),
+    (0.666, 0.333),
+    (0.5, 0.5),
+];
+
+/// The sweep circle `SmBSplineSurface::CreateSurfOfRevolution` builds for a turn
+/// (`CreateCircleSegment(r, 0, turn, SM_CO_QUADRATIC)`, i.e. `N_CreateCircArc`):
+/// the angle in degrees after `N_ConicData` normalises it (a turn below `1e-6`
+/// degrees, or a negative one, wraps round to a nearly or fully closed circle) and
+/// its span count. `None` for an angle the circle constructor refuses.
+fn sweep_circle(turn: f64) -> Option<(f64, usize)> {
+    if !(-360.0..=360.0).contains(&turn) {
+        return None;
+    }
+    let tol = 1.0e-6;
+    let mut ae = turn;
+    while ae < tol {
+        ae += 360.0;
+    }
+    while ae > 360.0 - tol {
+        ae -= 360.0;
+    }
+    if ae < tol {
+        ae = 360.0;
+    }
+    let spans = if ae < 91.0 {
+        1
+    } else if ae < 181.0 {
+        2
+    } else if ae < 271.0 {
+        3
+    } else {
+        4
+    };
+    Some((ae, spans))
+}
+
+/// The unit quadratic circle of `theta` degrees in `spans` equal double-knotted spans
+/// on `[0, 1]` at `u`: the angle of the point (radians) and the speed `|C'(u)|`.
+fn circle_at(u: f64, theta: f64, spans: usize) -> (f64, f64) {
+    let n = spans as f64;
+    let phi = (theta / n).to_radians();
+    let k = (u * n).floor().clamp(0.0, n - 1.0);
+    let t = u * n - k;
+    let w = (phi / 2.0).cos();
+    let p = [[1.0, 0.0], [1.0, (phi / 2.0).tan()], [phi.cos(), phi.sin()]];
+    let b = [(1.0 - t) * (1.0 - t), 2.0 * t * (1.0 - t) * w, t * t];
+    let db = [-2.0 * (1.0 - t), 2.0 * (1.0 - 2.0 * t) * w, 2.0 * t];
+    let weight = b[0] + b[1] + b[2];
+    let dweight = db[0] + db[1] + db[2];
+    let mut c = [0.0; 2];
+    let mut dc = [0.0; 2];
+    for (i, (ci, dci)) in c.iter_mut().zip(dc.iter_mut()).enumerate() {
+        let num = b[0] * p[0][i] + b[1] * p[1][i] + b[2] * p[2][i];
+        let dnum = db[0] * p[0][i] + db[1] * p[1][i] + db[2] * p[2][i];
+        *ci = num / weight;
+        *dci = (dnum * weight - num * dweight) / (weight * weight);
+    }
+    (c[1].atan2(c[0]) + k * phi, n * (dc[0] * dc[0] + dc[1] * dc[1]).sqrt())
+}
+
+/// A profile curve revolved by `CreateSurfOfRevolution` about the frame's z axis
+/// from its start x axis.
+struct Revolution {
+    origin: V3,
+    x: V3,
+    y: V3,
+    z: V3,
+    theta: f64,
+    spans: usize,
+}
+
+impl Revolution {
+    /// The revolution of a frame `f` (nine values) turned to `start` degrees, over
+    /// `turn` degrees; `None` when the sweep circle is refused.
+    fn new(f: &[f64], start: f64, turn: f64) -> Option<Self> {
+        let (theta, spans) = sweep_circle(turn)?;
+        let x = unit([f[3], f[4], f[5]]);
+        let z = unit(cross(x, [f[6], f[7], f[8]]));
+        let (sin, cos) = start.to_radians().sin_cos();
+        let x = along(along([0.0; 3], cos, x), sin, cross(z, x));
+        Some(Self { origin: [f[0], f[1], f[2]], x, y: cross(z, x), z, theta, spans })
+    }
+
+    /// The point `rho` from the axis at height `h`, turned by `angle` radians.
+    fn point(&self, rho: f64, h: f64, angle: f64) -> V3 {
+        let (sin, cos) = angle.sin_cos();
+        along(along(along(self.origin, h, self.z), rho * cos, self.x), rho * sin, self.y)
+    }
+
+    /// Whether `SweepEdgeHigh`'s degenerate-surface test certainly refuses the
+    /// revolved face (`SM_ERR_INVALID_INPUT` before `MakeFaceWithCurves`). `net` is
+    /// the profile's control points and `at(v)` its point and speed `(rho, h, |C'|)`
+    /// on its `[0, 1]` domain, both as (distance from the axis, height).
+    ///
+    /// The surface is the profile turned rigidly, so at `(u, v)` `|Sv| = |C'(v)|` and
+    /// `|Su| = |rho(v)| * s(u)`, `s` the sweep circle's speed. `IsDegenerateCurve`
+    /// refuses it when `|Su|` or `|Sv|` is at most `tol` at all thirteen samples,
+    /// `tol = max(1e-6, SM_EFF_ZERO * (1 + max dimension of the profile ends))`
+    /// (its Su-parallel-to-Sv branch cannot apply: `Su` is around the axis, `Sv` in a
+    /// plane through it). `IsDegeneratePoint` (`sm_IsNSrfDegenerate`) refuses it when
+    /// the control net's box is at most `max(1e-6, 1000 * SM_EFF_ZERO * (1 + its max
+    /// dimension))` along each axis; the net is each profile control point's sweep
+    /// circle (a point within the scaled zero of the axis stays put).
+    fn refuses(&self, net: &[(f64, f64)], at: impl Fn(f64) -> (f64, f64, f64)) -> bool {
+        let ((r0, h0, _), (r1, h1, _)) = (at(0.0), at(1.0));
+        let ends = max_dim(self.point(r0, h0, 0.0)).max(max_dim(self.point(r1, h1, 0.0)));
+        let tol = DEGENERATE_TOL.max(EFF_ZERO * (1.0 + ends));
+        let (mut su, mut sv) = (0.0f64, 0.0f64);
+        for &(u, v) in &DEGENERATE_SAMPLES {
+            let (rho, _, speed) = at(v);
+            sv = sv.max(speed);
+            su = su.max(rho.abs() * circle_at(u, self.theta, self.spans).1);
+        }
+        let phi = (self.theta / self.spans as f64).to_radians();
+        let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
+        let mut add = |p: V3| {
+            for i in 0..3 {
+                lo[i] = lo[i].min(p[i]);
+                hi[i] = hi[i].max(p[i]);
+            }
+        };
+        for &(rho, h) in net {
+            let on_axis = self.point(rho, h, 0.0);
+            if rho.abs() < EFF_ZERO * (1.0 + max_dim(on_axis)) {
+                add(on_axis);
+                continue;
+            }
+            for k in 0..=2 * self.spans {
+                let f = if k % 2 == 0 { 1.0 } else { 1.0 / (phi / 2.0).cos() };
+                add(self.point(rho * f, h, k as f64 * phi / 2.0));
+            }
+        }
+        let size = max_dim(lo).max(max_dim(hi));
+        let point_tol = DEGENERATE_TOL.max(1000.0 * EFF_ZERO * (1.0 + size));
+        let extent = (0..3).map(|i| hi[i] - lo[i]).fold(0.0, f64::max);
+        let margin = |t: f64| t * (1.0 - REFUSAL_REL_MARGIN) - REFUSAL_ABS_MARGIN * (1.0 + size);
+        su <= margin(tol) || sv <= margin(tol) || extent <= margin(point_tol)
+    }
+}
+
+/// UB-215: a turn below [`ANALYTIC_TURN`] sweeps the profile edges one face at a
+/// time (`SmTopologySweep::SweepEdgeHigh`). When the degenerate-surface test lets a
+/// face through, `MakeFaceWithCurves` deletes every trimming curve whose
+/// `ApproximateLength` is below the zone tolerance, the profile curve's swept copy
+/// among them, and on success `pOrigEdgeCurve->GetOwner()` reads it after the free.
+/// A sphere's line lies on the axis and its arc's face fails the degenerate test
+/// first, so spheres never reach it; a cone's axis line sweeps to no face.
 ///
-/// A cone's axis line sweeps to no face. Any other line `L` long sweeps to a face
-/// whose surface has `|Su| = L` at every sample (the revolution is a rotation of the
-/// line), so `SmSurface::IsDegenerateCurve` (3D tolerance `SM_ZONE_TOL_3D / 10`, or a
-/// scaled zero when larger) fails the face with `SM_ERR_INVALID_INPUT` before the
-/// face build for `L` up to `1e-6`. The guard refuses a line from [`DEGENERATE_FACE`]
-/// up to the zone tolerance; below it the face is refused first (native probes:
-/// `1007` up to `1e-6` and a segfault just above it at unit size, `1007` up to
-/// `1.0005e-6` and a segfault at `1.002e-6` a distance of 1,000 away, where the
-/// scaled zero takes over).
+/// The guard refuses a cone with a non-axis line, or a torus with a minor circle,
+/// shorter than the zone tolerance (`2 pi minor` for the circle, as before) whose
+/// face [`Revolution::refuses`] does not certainly refuse. Its remaining
+/// over-rejections: faces within the rounding margin of the degenerate test, a
+/// short line behind a face refused earlier in the sweep, and tori whose face build
+/// fails before the read (`SM_ERR`, native probes: most minor radii from about
+/// `6.3e-7`).
 fn sweeps_a_short_edge(op: i32, d: &[f64]) -> bool {
     match op {
         1 => {
             d[5] - d[4] < ANALYTIC_TURN
-                && cone_lines(d).is_some_and(|l| {
-                    l.iter()
-                        .any(|&(l, axis)| !axis && (DEGENERATE_FACE..ZONE_TOL).contains(&l))
+                && cone_lines(d).is_some_and(|lines| {
+                    let sweep = Revolution::new(&d[6..15], d[4], d[5] - d[4]);
+                    lines.iter().any(|&(l, axis, [(ra, ha), (rb, hb)])| {
+                        !axis
+                            && l < ZONE_TOL
+                            && !sweep.as_ref().is_some_and(|s| {
+                                s.refuses(&[(ra, ha), (rb, hb)], |v| {
+                                    ((1.0 - v) * ra + v * rb, (1.0 - v) * ha + v * hb, l)
+                                })
+                            })
+                    })
                 })
         }
-        3 => d[4] - d[3] < ANALYTIC_TURN && d[2] > 0.0 && std::f64::consts::TAU * d[2] < ZONE_TOL,
+        3 => {
+            let (major, minor) = (d[1], d[2]);
+            d[4] - d[3] < ANALYTIC_TURN
+                && minor > 0.0
+                && std::f64::consts::TAU * minor < ZONE_TOL
+                && !Revolution::new(&d[5..14], d[3], d[4] - d[3]).is_some_and(|s| {
+                    // the minor circle: frame x -z, y -(start x), from -180 degrees
+                    // when the radii are equal; a full circle in four spans
+                    let b0 = if minor == major { -std::f64::consts::PI } else { 0.0 };
+                    let net: Vec<(f64, f64)> = (0..9)
+                        .map(|k| {
+                            let f = if k % 2 == 0 { 1.0 } else { std::f64::consts::SQRT_2 };
+                            let (sin, cos) = (b0 + f64::from(k) * std::f64::consts::FRAC_PI_4).sin_cos();
+                            (major - minor * f * sin, -minor * f * cos)
+                        })
+                        .collect();
+                    s.refuses(&net, |v| {
+                        let (angle, speed) = circle_at(v, 360.0, 4);
+                        let (sin, cos) = (b0 + angle).sin_cos();
+                        (major - minor * sin, -minor * cos, minor * speed)
+                    })
+                })
+        }
         _ => false,
     }
+}
+
+/// The UB-215 torus guard before it was narrowed to faces the degenerate test lets
+/// through: any minor circle shorter than the zone tolerance. [`generator_refuses`]
+/// keeps it so the generated cases stay the same draws.
+fn short_torus_circle_v1(op: i32, d: &[f64]) -> bool {
+    op == 3 && d[4] - d[3] < ANALYTIC_TURN && d[2] > 0.0 && std::f64::consts::TAU * d[2] < ZONE_TOL
 }
 
 /// The UB-215 cone guard before it was narrowed to the lines that can reach the freed
@@ -215,7 +419,7 @@ fn sweeps_a_short_edge(op: i32, d: &[f64]) -> bool {
 fn short_cone_line_v1(op: i32, d: &[f64]) -> bool {
     op == 1
         && d[5] - d[4] < ANALYTIC_TURN
-        && cone_lines(d).is_some_and(|l| l.iter().any(|&(l, _)| l < ZONE_TOL))
+        && cone_lines(d).is_some_and(|l| l.iter().any(|&(l, _, _)| l < ZONE_TOL))
 }
 
 /// Whether the difftest generator draws again for this input: [`validate`] refuses
@@ -224,7 +428,7 @@ fn short_cone_line_v1(op: i32, d: &[f64]) -> bool {
 /// fixtures).
 #[must_use]
 pub fn generator_refuses(op: i32, data: &[f64]) -> bool {
-    validate(op, data).is_err() || short_cone_line_v1(op, data)
+    validate(op, data).is_err() || short_cone_line_v1(op, data) || short_torus_circle_v1(op, data)
 }
 
 /// HANG-35: a closed shell a few zone tolerances across takes minutes to place in
@@ -1060,6 +1264,57 @@ mod tests {
         assert!(primitive(2, &[1e-6], 0., 90.).is_ok());
     }
 
+    fn placed(op: i32, sizes: &[f64], start: f64, end: f64, origin: [f64; 3]) -> bool {
+        let mut d = vec![0.];
+        d.extend(sizes);
+        d.extend([start, end]);
+        d.extend(origin);
+        d.extend([1., 0., 0., 0., 1., 0.]);
+        validate(op, &d).is_ok()
+    }
+
+    #[test]
+    fn the_ub215_guard_follows_the_native_degenerate_face_test() {
+        // native boundaries (refused below, a freed-curve read above), bisected to 12
+        // digits: the line's own |Sv| = L against 1e-6 ...
+        let o = [0., 0., 0.];
+        assert!(placed(1, &[1., 1., 0.999_998e-6], 0., 90., o));
+        assert!(!placed(1, &[1., 1., 1.000_001e-6], 0., 90., o));
+        // ... the sweep's |Su| at small turns (5.73685662283e-6 at 10 degrees,
+        // 1.93185165258e-6 at 30) ...
+        assert!(placed(1, &[1., 1., 5.736_8e-6], 0., 10., o));
+        assert!(!placed(1, &[1., 1., 5.736_87e-6], 0., 10., o));
+        assert!(placed(1, &[1., 1., 1.931_8e-6], 0., 30., o));
+        assert!(!placed(1, &[1., 1., 1.931_86e-6], 0., 30., o));
+        assert!(placed(1, &[1., 1., 9e-6], 0., 0.01, o));
+        // ... where a turn below 1e-6 degrees (or a negative one) sweeps a nearly
+        // closed circle (`N_ConicData`): a 1e-9 degree turn segfaults
+        assert!(!placed(1, &[1., 1., 2e-6], 0., 1e-9, o));
+        assert!(!placed(1, &[1., 1., 2e-6], 0., -30., o));
+        assert!(placed(1, &[1., 1., 9.9e-7], 0., -30., o));
+        // ... the control net's point-sized box (1000 * SM_EFF_ZERO * (1 + size)): 1,000
+        // away it decides at 1.00100004374e-6 natively ...
+        let far = [1000., -700., 300.];
+        assert!(placed(1, &[1., 1., 1.0008e-6], 0., 90., far));
+        assert!(!placed(1, &[1., 1., 1.0012e-6], 0., 90., far));
+        // ... and refuses every line in the band from about 1e4 away
+        assert!(placed(1, &[1., 1., 2e-6], 0., 90., [1e5, 0., 0.]));
+        assert!(placed(1, &[1., 1., 9e-6], 0., 270., [9e5, -9e5, 9e5]));
+        assert!(!placed(1, &[1., 1., 9e-6], 0., 270., [1e3, 0., 0.]));
+        // the torus' minor circle: max |Sv| = 6.5073 minor (1.53673519e-7 natively at
+        // major radii 0.01 and 1), at major radius 0 its |Su| decides with the turn
+        assert!(placed(3, &[0.01, 1.536_7e-7], 0., 90., o));
+        assert!(!placed(3, &[0.01, 1.536_8e-7], 0., 90., o));
+        assert!(placed(3, &[1., 1.536_7e-7], 0., 1e-7, o));
+        assert!(!placed(3, &[1., 1.536_8e-7], 0., 1e-7, o));
+        assert!(placed(3, &[0., 3.969e-7], 0., -30., o));
+        assert!(!placed(3, &[0., 3.971e-7], 0., -30., o));
+        assert!(placed(3, &[0., 4.936e-7], 0., 359., o));
+        assert!(!placed(3, &[0., 4.937e-7], 0., 359., o));
+        // a point-sized torus far out is refused natively
+        assert!(placed(3, &[2e-4, 1e-6], 0., 90., [1e6, 0., 0.]));
+    }
+
     #[test]
     fn the_generator_keeps_the_earlier_ub215_guard() {
         let cone = |sizes: [f64; 3]| {
@@ -1074,6 +1329,9 @@ mod tests {
         }
         assert!(!generator_refuses(1, &cone([1., 1., 0.5])));
         assert!(generator_refuses(1, &cone([1., 1., 9e-6])));
+        let torus = [0., 0.01, 1.5e-7, 0., 90., 0., 0., 0., 1., 0., 0., 0., 1., 0.];
+        assert!(validate(3, &torus).is_ok());
+        assert!(generator_refuses(3, &torus));
     }
 
     #[test]

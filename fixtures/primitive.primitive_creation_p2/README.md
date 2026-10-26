@@ -90,24 +90,28 @@ a square with a diagonal and two squares at a corner listed in another order run
 the corner rule count a chain without area as reversible under either normal (a line
 back from `1` along the same span runs under +Z), the corner rule keeps a tenfold
 margin, and the offsets' chaining before the caps (`SmPrimitiveCreation.cpp:3884`) is not
-checked. The cone guard follows `SweepEdgeHigh`: a line of length `L` sweeps to a face with
-`|Su| = L` at every sample, and `IsDegenerateCurve` (tolerance `1e-6`, or the scaled zero
-when larger) refuses it before the face build up to `L = 1e-6`. Native probes (one
-process each): `1007` up to `1e-6` and a segfault just above it at unit size, `1007` up
-to `1.0005e-6` and a segfault at `1.002e-6` a distance of 1,000 away, and a segfault at
-exactly `1e-6` in the frame of `ub215_partial_cone_apex_top_line_1e-6` (rounding decides
-there, so the guard starts at `0.9999e-6`); a short axis line alone returns `1025`. 300
-random cones the narrowed guard accepts and the earlier one refused (lines from `1e-9`,
-origins up to `1e4`, turns from `1e-9` to 359 degrees) ran without a crash
-(`ub215_degenerate_faces.json` keeps 16 of them). The cone guard still refuses some
-inputs that run: lines in the band at larger distances (the scaled zero passes `1e-6`
-from about 1,000 away; at `1e5` a `2e-6` line returns `1007`) and at small turns where
-the far end of the line moves at most about `1e-6` (`2 L sin(turn / 2)`, `1007` from
-`0.01` degrees, while a turn of `1e-9` degrees segfaults). The torus guard is unchanged:
-its native boundary depends on the major radius and the position (a minor radius of
-`1.5e-7` returns `1007` and `2e-7` segfaults at a major radius of `0.01`, while at major
-radius `0` up to `5e-7` returns `1007`, and `1.59e-6` returns `1001`), so it refuses
-more than crashes. The generator keeps the earlier cone guard for its redraws
+checked. The cone and torus guards follow `SweepEdgeHigh`: a profile curve's swept face is refused
+(`1007`) by `IsDegenerateCurve` when `|Sv|` (the profile curve's speed, `L` for a line) or
+`|Su|` (its distance from the axis times the sweep circle's speed) is at most
+`max(1e-6, SM_EFF_ZERO * (1 + size of the curve's ends))` at all thirteen samples, or by
+`IsDegeneratePoint` when the control net's box is at most `max(1e-6, 1000 * SM_EFF_ZERO *
+(1 + its size))` along each axis; otherwise a curve shorter than the zone tolerance is
+freed by `MakeFaceWithCurves` and read after it. The sweep circle is `N_CreateCircArc`'s:
+a turn below `1e-6` degrees, or a negative one, wraps round to a (nearly) full circle,
+which is why a `1e-9` degree turn segfaults while `0.01` degrees is refused. The guard
+evaluates that predicate (`Revolution::refuses`) with a rounding margin of `1e-6`
+relative plus `1e-13` times the coordinates' size. Native probes (an instrumented
+`SmTopologySweep.cpp` reporting refusal or the freed read per face) bisected 27
+boundaries to 12 digits (cone top, base and side lines at unit size, 1,000 away and in
+`|Su|`-limited small turns; tori at major radii `0`, `0.01` and `1` over four turns);
+the predicate matched each within `2e-7` relative. Over 1,500 random cones and tori
+(origins up to `1e6`, turns from `1e-10` to 359 degrees and negative ones) every freed
+read was rejected, and the guard accepts 195 cones and 250 tori the earlier guards
+rejected (`ub215_exact_guard_accepted.json` compares 30 of them and hand-picked edges).
+It still refuses some inputs that run: faces within the margin, a short line behind a
+face refused earlier in the sweep, and tori whose face build fails (`SM_ERR`) before the
+read, which is most minor radii from about `6.3e-7` up to the zone tolerance (not
+modelled). The generator keeps the earlier cone and torus guards for its redraws
 (`generator_refuses`), so the generated cases are the same draws. Partial spheres are not guarded: their
 axis line sweeps to no face and their arc's face fails the degenerate-surface test
 first, so no probe crashed. Every rejected case that reaches the native sweep defers in

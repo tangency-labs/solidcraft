@@ -19,6 +19,9 @@
 //! collection must mark its starting face or return an error, avoiding an infinite
 //! retry on a failed traversal. Owned wire B-reps are released on every return;
 //! a successful consuming union clears the wire handle before the next repetition.
+//! `SweepEdgeHigh` makes a swept face's missing extrusion NURB (a recognised tiny-turn
+//! revolution) before its degenerate test, where upstream's lazy
+//! `GetOrCreateGwNurbPointer` in `EdgeSweepHigher` already made it in place.
 
 use super::access::{
     EdgeRef, EdgeuseRef, FaceBuild, FaceInput, FaceRef, RegionRef, SweepAccess, VertexRef,
@@ -31,6 +34,7 @@ use crate::geom::attribute::{tag_ids, TagData};
 use crate::geom::tol::ZONE_TOL_3D;
 use crate::math::Point3;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+use crate::surface::surface::SurfaceKind;
 use crate::topology::{
     edge, edgeuse::p1 as eu, face::p2 as face, loopuse, vertex, vertexuse, LoopuseStart,
 };
@@ -397,7 +401,7 @@ impl TopologySweep {
         a.brep(region.0)?.region(region.1)?;
         let (start, end) = endpoints(a, original)?;
         let swept = g.edge_sweep_higher(a.kernel(region.0)?, a.brep(original.0)?, original.1)?;
-        let Some(surface) = swept.surface else {
+        let Some(mut surface) = swept.surface else {
             self.set_same(Some(e(original)), Some(e(original)));
             self.set_same(Some(v(start)), Some(v(start)));
             self.set_same(Some(v(end)), Some(v(end)));
@@ -405,6 +409,13 @@ impl TopologySweep {
         };
         if swept.trim_curves.is_empty() {
             return Err(SolidError::sm_err(OP));
+        }
+        // `EdgeSweepHigher`'s `CreateNaturalUVTrimCurves` made the NURB of a recognised
+        // extrusion in place (`GetOrCreateGwNurbPointer`); here it is still lazy
+        if let SurfaceKind::SurfOfExtrusion(s) = surface.kind_mut() {
+            if s.base().gw_nurb().is_none() {
+                ignore_status(s.make_nurb(a.kernel(region.0)?))?;
+            }
         }
         if surface.is_degenerate_curve(a.kernel(region.0)?, 1.0e-4, None, ZONE_TOL_3D / 10.0)?
             || surface.is_degenerate_point(a.kernel(region.0)?, ZONE_TOL_3D / 10.0, None)?
