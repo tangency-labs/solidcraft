@@ -751,11 +751,14 @@ fn reseed_records(
     b: &Brep,
     key_of: &dyn Fn(EntityRef) -> ObjectRef,
 ) {
-    let mut keys: Vec<ObjectKey> = entities(b)
-        .map(|e| key_of(e).key)
-        .chain([p2::brep_ref(b).key])
+    // The B-rep first: kernel keys (kind 0) and `entities` (by kind, then slot) come
+    // out ascending, so the sort is skipped, as it gives the same vector either way.
+    let mut keys: Vec<ObjectKey> = std::iter::once(p2::brep_ref(b).key)
+        .chain(entities(b).map(|e| key_of(e).key))
         .collect();
-    keys.sort_unstable();
+    if !keys.is_sorted() {
+        keys.sort_unstable();
+    }
     keys.dedup();
     // (both ascending: `retain` visits the records in key order)
     let mut next = 0;
