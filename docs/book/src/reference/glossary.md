@@ -204,6 +204,7 @@ features are computed.
 
 - **In SolidCraft:** `browser.group`, `browser.ungroup`, `browser.rename_group`; `timeline.group`,
   `timeline.ungroup`, `timeline.rename_group`, `timeline.move_to_group`; the `group` parameter key;
+  the `groups` parameter of `timeline.delete` and `timeline.suppress` (a group with all its features);
   the `browser_groups` and `timeline_groups` design-file keys.
 - **Don't use:** feature folder, folder (for a group).
 - **Elsewhere:** folder, group.

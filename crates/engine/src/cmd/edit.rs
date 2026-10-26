@@ -25,7 +25,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "MODIFY")
         .icon("delete")
         .key("Delete")
-        .params("feature: id|name | features: [id|name] (one undo step; a sketch takes its dependent features with it) → deleted: [ids]; failing?: [{feature, error}] (later features that worked and now fail)"),
+        .params("feature: id|name | features: [id|name] | groups: [timeline folder ids] (a folder goes with all its features and nested folders; one undo step; a sketch takes its dependent features with it) → deleted: [ids]; groups?: [folder ids deleted]; failing?: [{feature, error}] (later features that worked and now fail)"),
     CommandSpec::new("timeline.rename", "Rename", rename).icon("rename").params("feature: id|name, name (references to it follow)"),
     CommandSpec::new("timeline.group", "New Feature Folder", group)
         .icon("folder")
@@ -55,8 +55,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .params("feature: id|name → features deleted with it, and features that would fail without it"),
     CommandSpec::new("timeline.suppress", "Suppress Feature", suppress).icon("suppress").params(
-        "feature: id|name | features: [id|name] (one undo step), suppressed?: bool (default toggles: several features are all \
-         suppressed unless all of them already are, then all are unsuppressed) → feature: id (or features: [ids]), suppressed",
+        "feature: id|name | features: [id|name] | groups: [timeline folder ids] (every feature in those folders and their nested \
+         folders; one undo step), suppressed?: bool (default toggles: several features are all \
+         suppressed unless all of them already are, then all are unsuppressed) → feature: id (or features: [ids]; groups: [ids] when given), suppressed",
     ),
     CommandSpec::new("timeline.edit", "Edit Feature", edit_feature).icon("edit").params(
         "feature: id|name, set: {fields to change, merged into the feature's definition as timeline.inspect returns it, \
@@ -162,9 +163,13 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
             _ => String::new(),
         });
     }
-    if keys.is_empty() {
-        return Err(bad(cmd, "`features` must list features"));
+    let groups = group_ids(s, p, false, cmd)?;
+    if keys.is_empty() && groups.is_empty() {
+        return Err(bad(cmd, "`features` must list features, or `groups` timeline folders"));
     }
+    // A folder goes with its features and nested folders, its features in timeline order.
+    let (folders, contents) = group_tree(&s.doc, &groups);
+    keys.extend(s.doc.features.iter().filter(|f| contents.contains(&f.id)).map(|f| f.id.to_string()));
     // Features that work now; any of them failing after the delete is reported (a later
     // feature that names a deleted body, #267).
     let worked: std::collections::BTreeSet<u64> = s.model.results.iter().filter(|r| r.error.is_none() && !r.skipped).map(|r| r.id).collect();
@@ -177,6 +182,9 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
             continue;
         };
         gone.extend(s.doc_mut().delete_feature(id)?);
+    }
+    if !folders.is_empty() {
+        s.doc_mut().timeline_groups.retain(|group| !folders.contains(&group.id));
     }
     if s.active_sketch.is_some_and(|a| gone.contains(&a)) {
         s.active_sketch = None;
@@ -194,10 +202,14 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
         .filter(|r| worked.contains(&r.id))
         .filter_map(|r| r.error.as_ref().map(|e| json!({"feature": r.name, "error": e})))
         .collect();
-    if failing.is_empty() {
-        return Ok(json!({"deleted": gone}));
+    let mut out = json!({"deleted": gone});
+    if !folders.is_empty() {
+        out["groups"] = json!(folders);
     }
-    Ok(json!({"deleted": gone, "failing": failing}))
+    if !failing.is_empty() {
+        out["failing"] = json!(failing);
+    }
+    Ok(out)
 }
 
 fn rename(s: &mut Session, p: &Value) -> Result<Value> {
@@ -312,6 +324,11 @@ fn group_move_would_cycle(s: &Session, target: u64, sources: &[u64]) -> bool {
 }
 
 fn group_feature_ids(doc: &solidcraft_doc::Document, roots: &[u64]) -> std::collections::BTreeSet<u64> {
+    group_tree(doc, roots).1
+}
+
+/// The timeline folders `roots` and every folder nested in them, and the features they hold.
+fn group_tree(doc: &solidcraft_doc::Document, roots: &[u64]) -> (std::collections::BTreeSet<u64>, std::collections::BTreeSet<u64>) {
     let by_id: std::collections::BTreeMap<u64, &solidcraft_doc::TimelineGroup> = doc.timeline_groups.iter().map(|group| (group.id, group)).collect();
     let mut children = std::collections::BTreeMap::<u64, Vec<u64>>::new();
     for group in &doc.timeline_groups {
@@ -331,7 +348,7 @@ fn group_feature_ids(doc: &solidcraft_doc::Document, roots: &[u64]) -> std::coll
             pending.extend(children.get(&id).into_iter().flatten().copied());
         }
     }
-    features
+    (visited, features)
 }
 
 fn sort_group_features(doc: &mut solidcraft_doc::Document) {
@@ -620,7 +637,15 @@ fn counted_names_from(s: &Session, ids: &[u64]) -> Vec<(u64, Vec<String>)> {
 
 fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.suppress";
-    let ids = feature_ids(s, p, cmd)?;
+    let groups = group_ids(s, p, false, cmd)?;
+    let named = |key: &str| p.get(key).is_some_and(|v| !v.is_null());
+    let mut ids = if groups.is_empty() || named("feature") || named("features") { feature_ids(s, p, cmd)? } else { Vec::new() };
+    let contents = group_feature_ids(&s.doc, &groups);
+    let more: Vec<u64> = s.doc.features.iter().map(|f| f.id).filter(|id| contents.contains(id) && !ids.contains(id)).collect();
+    ids.extend(more);
+    if ids.is_empty() {
+        return Err(bad(cmd, "the timeline folders hold no features"));
+    }
     let want = match bool_(p, "suppressed") {
         Some(b) => b,
         None if p.get("suppressed").is_some_and(|v| !v.is_null()) => return Err(bad(cmd, "`suppressed` must be true or false")),
@@ -640,8 +665,9 @@ fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
         f.suppressed = want;
     }
     match ids.as_slice() {
-        [id] if p.get("features").is_none_or(Value::is_null) => Ok(json!({"feature": id, "suppressed": want})),
-        _ => Ok(json!({"features": ids, "suppressed": want})),
+        [id] if groups.is_empty() && p.get("features").is_none_or(Value::is_null) => Ok(json!({"feature": id, "suppressed": want})),
+        _ if groups.is_empty() => Ok(json!({"features": ids, "suppressed": want})),
+        _ => Ok(json!({"features": ids, "groups": groups, "suppressed": want})),
     }
 }
 

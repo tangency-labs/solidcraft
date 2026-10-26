@@ -345,6 +345,8 @@ crate::dialog_descriptor::dialog_descriptors! {
             /// Delete a feature that others depend on.
             ConfirmDelete {
                 features: Vec<u64>,
+                /// Timeline folders deleted with the features.
+                groups: Vec<u64>,
                 with: Vec<String>,
                 fail: Vec<String>,
             },
@@ -1132,11 +1134,11 @@ impl Dialog {
 
     #[cfg(test)]
     pub fn confirm_delete(feature: u64, with: Vec<String>, fail: Vec<String>) -> Dialog {
-        Dialog::confirm_delete_many(vec![feature], with, fail)
+        Dialog::confirm_delete_many(vec![feature], Vec::new(), with, fail)
     }
 
-    pub fn confirm_delete_many(features: Vec<u64>, with: Vec<String>, fail: Vec<String>) -> Dialog {
-        Dialog::new(Kind::ConfirmDelete { features, with, fail }, vec![])
+    pub fn confirm_delete_many(features: Vec<u64>, groups: Vec<u64>, with: Vec<String>, fail: Vec<String>) -> Dialog {
+        Dialog::new(Kind::ConfirmDelete { features, groups, with, fail }, vec![])
     }
 
     pub fn edit_param(s: &Session, name: &str) -> Dialog {
@@ -4486,7 +4488,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
         }
         Kind::EditParam { name, expr } => ("parameters.change", json!({"name": name, "expression": expr})),
         Kind::Rename { feature, name } => ("timeline.rename", json!({"feature": feature, "name": name})),
-        Kind::ConfirmDelete { features, .. } => ("timeline.delete", json!({ "features": features })),
+        Kind::ConfirmDelete { features, groups, .. } => ("timeline.delete", crate::timeline::delete_params(features, groups)),
         Kind::Sketch | Kind::Measure { .. } => return Ok(Vec::new()),
         Kind::Assembly(k) => return crate::dialogs_assembly::commands(app, k, &d.inputs),
         Kind::Sheet(k) => return crate::dialogs_sheet::commands(app, k, &d.inputs, &d.extra),

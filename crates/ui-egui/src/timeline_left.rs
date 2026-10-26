@@ -652,6 +652,26 @@ fn selection_actions(app: &mut SolveApp, ui: &mut egui::Ui, groups: &[solidcraft
             app.tree.picked_timeline_groups.clear();
             ui.close();
         }
+        // The folders' own features and those of nested folders, as `timeline.suppress` and
+        // `timeline.delete` take them with `groups` (#7219).
+        let contents = folder_features(app, &selected_groups);
+        let all_suppressed = !contents.is_empty() && contents.iter().all(|id| app.session.doc.feature(*id).is_some_and(|f| f.suppressed));
+        let label = if all_suppressed { "Unsuppress Selected Folders" } else { "Suppress Selected Folders" };
+        if crate::context_menu::button_enabled(ui, label, "suppress", !contents.is_empty())
+            .on_hover_text(crate::i18n::tr("timeline.suppress_folders_tip"))
+            .clicked()
+        {
+            let _ = app.run_heavy("timeline.suppress", json!({"groups": selected_groups, "suppressed": !all_suppressed}));
+            ui.close();
+        }
+        if crate::context_menu::button(ui, "Delete Folders and Features…", "delete")
+            .on_hover_text(crate::i18n::tr("timeline.delete_folders_with_features_tip"))
+            .clicked()
+        {
+            crate::timeline::delete_folders(app, selected_groups.clone(), contents);
+            app.tree.picked_timeline_groups.clear();
+            ui.close();
+        }
     }
     if !features.is_empty() {
         ui.separator();
@@ -691,6 +711,15 @@ pub fn reveal_feature(app: &mut SolveApp, feature: u64) {
         }
         current = groups.iter().find(|group| group.id == id).and_then(|group| group.parent);
     }
+}
+
+/// The features of these folders and of the folders nested in them, in timeline order.
+fn folder_features(app: &SolveApp, roots: &[u64]) -> Vec<u64> {
+    let groups = &app.session.doc.timeline_groups;
+    let inside = |feature: u64| {
+        group_for(groups, feature).is_some_and(|group| roots.contains(&group) || roots.iter().any(|root| group_is_descendant(groups, group, *root)))
+    };
+    app.session.doc.features.iter().map(|feature| feature.id).filter(|feature| inside(*feature)).collect()
 }
 
 fn group_is_descendant(groups: &[solidcraft_engine::doc::TimelineGroup], group: u64, ancestor: u64) -> bool {
@@ -843,6 +872,7 @@ fn timeline_group_name(
     rect: Rect,
     offset: f32,
     names: bool,
+    faint: bool,
     t: &Tokens,
 ) -> bool {
     let editing =
@@ -856,7 +886,7 @@ fn timeline_group_name(
             egui::Align2::LEFT_CENTER,
             &group.name,
             egui::FontId::proportional(crate::theme::Tokens::get().font_body),
-            t.text,
+            if faint { t.text.gamma_multiply(0.42) } else { t.text },
         );
         return false;
     }
@@ -926,9 +956,19 @@ fn vertical_group_row(
     let offset = if names { depth as f32 * 14.0 } else { 0.0 };
     let centre = pos2(rect.left() + 9.0 + offset, rect.center().y);
     crate::ui_kit::disclosure(ui.painter(), centre, open, t.text_dim);
+    // A folder whose features are all suppressed looks like a suppressed feature.
+    let contents = folder_features(app, &[group.id]);
+    let suppressed = !contents.is_empty() && contents.iter().all(|id| app.session.doc.feature(*id).is_some_and(|f| f.suppressed));
+    let mut painter = ui.painter().clone();
+    if suppressed {
+        painter.multiply_opacity(0.42);
+    }
     let icon = Rect::from_center_size(pos2(rect.left() + 27.5 + offset, rect.center().y), vec2(17.0, 17.0));
-    icons::paint_icon(ui.painter(), icon, "folder", f32::from(t.icon.a()) / 255.0);
-    let renaming = timeline_group_name(app, ui, group, rect, offset, names, &t);
+    icons::paint_icon(&painter, icon, "folder", f32::from(t.icon.a()) / 255.0);
+    if suppressed {
+        painter.line_segment([icon.left_bottom(), icon.right_top()], Stroke::new(1.5, t.text_dim));
+    }
+    let renaming = timeline_group_name(app, ui, group, rect, offset, names, suppressed, &t);
     crate::scenario::publish_handle(&format!("timeline-folder:{}", group.name), rect.center());
     let fold_rect = Rect::from_min_max(pos2(rect.left() + offset, rect.top()), pos2(rect.left() + offset + 18.0, rect.bottom()));
     crate::scenario::publish_handle(&format!("timeline-folder-fold:{}", group.name), fold_rect.center());
@@ -2211,6 +2251,67 @@ mod tests {
         assert!(harness.app.session.doc.timeline_groups.iter().all(|group| group.id != child));
         assert!(harness.app.session.doc.timeline_groups.iter().any(|group| group.id == root));
         assert!(harness.app.session.doc.find_feature("Feature").is_some());
+    }
+
+    /// Right-click a folder and pick a menu entry.
+    fn folder_menu(harness: &mut Harness, folder: &str, entry: &str) {
+        harness.step(&json!({"click": {"handle": format!("timeline-folder:{folder}")}, "button": "right"})).unwrap();
+        let [x, y] = harness.widget(entry).unwrap_or_else(|| panic!("`{entry}` is in the folder's menu"));
+        harness.step(&json!({"click": [x, y]})).unwrap();
+        harness.frames(4);
+    }
+
+    /// A folder's menu suppresses and unsuppresses every feature in it and in its nested folders,
+    /// and deletes the folders with their features in one undo step (#7219).
+    #[test]
+    fn folder_menu_suppresses_and_deletes_the_folder_with_its_features() {
+        let mut harness = Harness::new();
+        harness.app.preferences.timeline_left = true;
+        for (name, x) in [("Outside", 0), ("Inside", 20), ("Nested", 40)] {
+            let params = json!({"length": 10, "width": 10, "height": 10, "corner": [x, 0, 0], "operation": "new_body", "name": name});
+            harness.app.run("solid.box", params).unwrap();
+        }
+        let outer = harness.app.run("timeline.group", json!({"name": "Outer", "features": ["Inside"]})).unwrap()["group"].as_u64().unwrap();
+        harness.app.run("timeline.group", json!({"name": "Inner", "features": ["Nested"], "parent": outer})).unwrap();
+        harness.frames(4);
+        let suppressed = |harness: &Harness| {
+            harness.app.session.doc.features.iter().filter(|feature| feature.suppressed).map(|feature| feature.name.clone()).collect::<Vec<_>>()
+        };
+
+        folder_menu(&mut harness, "Outer", "Suppress Selected Folders");
+        assert_eq!(suppressed(&harness), ["Inside", "Nested"]);
+        folder_menu(&mut harness, "Outer", "Unsuppress Selected Folders");
+        assert!(suppressed(&harness).is_empty(), "the menu offers to unsuppress a folder whose features all are");
+
+        folder_menu(&mut harness, "Outer", "Delete Folders and Features…");
+        let names: Vec<_> = harness.app.session.doc.features.iter().map(|feature| feature.name.as_str()).collect();
+        assert_eq!(names, ["Outside"]);
+        assert!(harness.app.session.doc.timeline_groups.is_empty(), "the nested folder goes too");
+        assert!(harness.app.dialog.is_none(), "nothing outside the folder needed them: no question");
+        harness.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(harness.app.session.doc.features.len(), 3);
+        assert_eq!(harness.app.session.doc.timeline_groups.len(), 2, "one undo step");
+    }
+
+    /// When a feature outside the folder needs one inside, the delete asks first, and its Delete
+    /// takes the folder as well (#7219).
+    #[test]
+    fn deleting_a_folder_others_depend_on_asks_and_then_takes_the_folder() {
+        let mut harness = Harness::new();
+        harness.app.preferences.timeline_left = true;
+        harness.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Base"})).unwrap();
+        harness.app.run("solid.fillet", json!({"edges": [[10, 5, 10]], "radius": 1, "name": "Round"})).unwrap();
+        harness.app.run("timeline.group", json!({"name": "Stock", "features": ["Base"]})).unwrap();
+        harness.frames(4);
+
+        folder_menu(&mut harness, "Stock", "Delete Folders and Features…");
+        assert!(harness.app.dialog.is_some(), "Round needs Base: the delete asks first");
+        assert!(harness.app.session.doc.find_feature("Base").is_some());
+        let [x, y] = harness.widget("Delete").expect("the confirmation's Delete button");
+        harness.step(&json!({"click": [x, y]})).unwrap();
+        harness.frames(4);
+        assert!(harness.app.session.doc.find_feature("Base").is_none());
+        assert!(harness.app.session.doc.timeline_groups.is_empty(), "the confirmed delete takes the folder too");
     }
 
     #[test]

@@ -662,6 +662,108 @@ fn timeline_folders_can_nest_and_reject_cycles() {
     assert_eq!(s.doc.timeline_groups.iter().find(|group| group.id == child).unwrap().parent, None, "deleting a folder promotes its children");
 }
 
+/// Four separate boxes, `First`…`Fourth`, for the timeline folder tests.
+fn four_boxes() -> Session {
+    let mut s = Session::default();
+    for (i, name) in ["First", "Second", "Third", "Fourth"].into_iter().enumerate() {
+        let corner = [20 * i, 0, 0];
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": corner, "operation": "new_body", "name": name}));
+    }
+    s
+}
+
+fn feature_names(s: &Session) -> Vec<String> {
+    s.doc.features.iter().map(|feature| feature.name.clone()).collect()
+}
+
+/// `timeline.delete {groups}` deletes a folder with its features and nested folders in one undo
+/// step; other folders and features stay, and `timeline.ungroup` still keeps the features (#7219).
+#[test]
+fn timeline_delete_takes_a_folder_with_its_features_and_nested_folders() {
+    let mut s = four_boxes();
+    let outer = run(&mut s, "timeline.group", json!({"name": "Outer", "features": ["Second"]}))["group"].as_u64().unwrap();
+    let inner = run(&mut s, "timeline.group", json!({"name": "Inner", "features": ["Third"], "parent": outer}))["group"].as_u64().unwrap();
+    let keep = run(&mut s, "timeline.group", json!({"name": "Keep", "features": ["Fourth"]}))["group"].as_u64().unwrap();
+    let before = s.doc.clone();
+
+    let out = run(&mut s, "timeline.delete", json!({"groups": [outer]}));
+    assert_eq!(feature_names(&s), ["First", "Fourth"]);
+    assert_eq!(out["groups"], json!([outer, inner]), "{out}");
+    assert_eq!(s.doc.timeline_groups.iter().map(|group| group.id).collect::<Vec<_>>(), [keep], "the nested folder goes too");
+    assert_eq!(s.model.state().bodies.len(), 2);
+    let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    assert_eq!(reopened.timeline_groups, s.doc.timeline_groups);
+
+    run(&mut s, "edit.undo", json!({}));
+    assert_eq!(s.doc.features, before.features, "one undo step brings the features back");
+    assert_eq!(s.doc.timeline_groups, before.timeline_groups, "and the folders, nested as they were");
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(feature_names(&s), ["First", "Fourth"]);
+    run(&mut s, "edit.undo", json!({}));
+
+    // A folder and a feature outside it in one delete; an empty folder goes on its own.
+    run(&mut s, "timeline.delete", json!({"groups": [inner], "features": ["First"]}));
+    assert_eq!(feature_names(&s), ["Second", "Fourth"]);
+    assert_eq!(s.doc.timeline_groups.iter().map(|group| group.name.as_str()).collect::<Vec<_>>(), ["Outer", "Keep"]);
+    let empty = run(&mut s, "timeline.group", json!({"name": "Empty"}))["group"].as_u64().unwrap();
+    assert_eq!(run(&mut s, "timeline.delete", json!({"groups": [empty]}))["deleted"], json!([]));
+    assert!(!s.doc.timeline_groups.iter().any(|group| group.id == empty));
+
+    let before = s.doc.clone();
+    for bad in [json!({"groups": [999_999]}), json!({"groups": ["Outer"]}), json!({"groups": 3}), json!({"groups": []})] {
+        assert!(s.execute("timeline.delete", &bad).is_err(), "{bad}");
+        assert_eq!(s.doc, before, "{bad}: a refused delete changes nothing");
+    }
+}
+
+/// `timeline.suppress {groups}` suppresses every feature of a folder and its nested folders in
+/// one undo step, toggles like several features do, and works with the marker inside the
+/// folder (#7219).
+#[test]
+fn timeline_suppress_takes_a_folder_with_its_nested_folders() {
+    let mut s = four_boxes();
+    let outer = run(&mut s, "timeline.group", json!({"name": "Outer", "features": ["Second"]}))["group"].as_u64().unwrap();
+    run(&mut s, "timeline.group", json!({"name": "Inner", "features": ["Third"], "parent": outer}));
+    let suppressed = |s: &Session| s.doc.features.iter().filter(|feature| feature.suppressed).map(|feature| feature.name.clone()).collect::<Vec<_>>();
+
+    let out = run(&mut s, "timeline.suppress", json!({"groups": [outer]}));
+    assert_eq!(out["suppressed"], true);
+    assert_eq!(out["groups"], json!([outer]));
+    assert_eq!(suppressed(&s), ["Second", "Third"]);
+    assert_eq!(s.model.state().bodies.len(), 2);
+    let reopened = solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap();
+    assert_eq!(reopened.features, s.doc.features);
+    run(&mut s, "edit.undo", json!({}));
+    assert!(suppressed(&s).is_empty(), "one undo step");
+    run(&mut s, "edit.redo", json!({}));
+    assert_eq!(suppressed(&s), ["Second", "Third"]);
+
+    // Toggle: all suppressed, so all come back; with one of them active, all are suppressed.
+    run(&mut s, "timeline.suppress", json!({"groups": [outer]}));
+    assert!(suppressed(&s).is_empty());
+    run(&mut s, "timeline.suppress", json!({"feature": "Third"}));
+    run(&mut s, "timeline.suppress", json!({"groups": [outer]}));
+    assert_eq!(suppressed(&s), ["Second", "Third"]);
+    run(&mut s, "timeline.suppress", json!({"groups": [outer], "suppressed": false, "features": ["Fourth"]}));
+    assert!(suppressed(&s).is_empty(), "an explicit state, with a feature outside the folder as well");
+
+    // The marker between the folder's features: the folder is suppressed all the same, and the
+    // marker stays where it was.
+    run(&mut s, "timeline.roll_to", json!({"feature": "Second"}));
+    assert_eq!(s.doc.marker, Some(2));
+    run(&mut s, "timeline.suppress", json!({"groups": [outer], "suppressed": true}));
+    assert_eq!(suppressed(&s), ["Second", "Third"]);
+    assert_eq!(s.doc.marker, Some(2));
+    assert_eq!(s.model.state().bodies.len(), 1, "only First is before the marker and not suppressed");
+
+    let empty = run(&mut s, "timeline.group", json!({"name": "Empty"}))["group"].as_u64().unwrap();
+    let before = s.doc.clone();
+    for bad in [json!({"groups": [empty]}), json!({"groups": [999_999]}), json!({"groups": [outer], "suppressed": "yes"})] {
+        assert!(s.execute("timeline.suppress", &bad).is_err(), "{bad}");
+        assert_eq!(s.doc, before, "{bad}: a refused suppress changes nothing");
+    }
+}
+
 /// A field the feature's definition doesn't have is refused with the fields it does have,
 /// instead of reporting success and changing nothing (#1491).
 #[test]

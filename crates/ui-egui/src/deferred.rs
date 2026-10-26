@@ -73,8 +73,9 @@ pub struct DeleteCheck {
 /// What a delete does once its check is in.
 #[derive(Clone, Debug)]
 pub(crate) enum AfterCheck {
-    /// The timeline's Delete of these features (a `timeline.dependents` report for each).
-    Timeline(Vec<u64>),
+    /// The timeline's Delete of these features (a `timeline.dependents` report for each), and
+    /// of the timeline folders that go with them.
+    Timeline { features: Vec<u64>, groups: Vec<u64> },
     /// Delete with these `selection.delete` parameters (the report of its dry run).
     Selection(Value),
 }
@@ -83,9 +84,12 @@ impl AfterCheck {
     /// Check again, for the design as it is now.
     fn restart(self, app: &mut SolveApp) {
         match self {
-            AfterCheck::Timeline(ids) => {
-                let ids: Vec<u64> = ids.into_iter().filter(|id| app.session.doc.feature(*id).is_some()).collect();
-                if !ids.is_empty() {
+            AfterCheck::Timeline { features, groups } => {
+                let ids: Vec<u64> = features.into_iter().filter(|id| app.session.doc.feature(*id).is_some()).collect();
+                let groups: Vec<u64> = groups.into_iter().filter(|id| app.session.doc.timeline_groups.iter().any(|g| g.id == *id)).collect();
+                if !groups.is_empty() {
+                    crate::timeline::delete_folders(app, groups, ids);
+                } else if !ids.is_empty() {
                     crate::timeline::delete_features(app, ids);
                 }
             }
@@ -96,9 +100,9 @@ impl AfterCheck {
     /// Carry on with the check's replies.
     fn finish(self, app: &mut SolveApp, replies: Vec<Result<Value, String>>) {
         match self {
-            AfterCheck::Timeline(ids) => {
+            AfterCheck::Timeline { features, groups } => {
                 let reports: Vec<Value> = replies.into_iter().map(Result::unwrap_or_default).collect();
-                crate::timeline::delete_checked_features(app, ids, &reports);
+                crate::timeline::delete_checked_features(app, features, groups, &reports);
             }
             AfterCheck::Selection(params) => {
                 let report = replies.into_iter().next().unwrap_or_else(|| Err("the delete was not checked".into()));

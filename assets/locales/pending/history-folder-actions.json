@@ -1,0 +1,30 @@
+{
+  "en": {
+    "Delete Folders and Features…": "Delete Folders and Features…",
+    "Suppress Selected Folders": "Suppress Selected Folders",
+    "Unsuppress Selected Folders": "Unsuppress Selected Folders",
+    "timeline.delete_folders_with_features_tip": "Delete the folders with every feature in them and their nested folders",
+    "timeline.suppress_folders_tip": "Suppress or unsuppress every feature in the folders and their nested folders"
+  },
+  "de": {
+    "Delete Folders and Features…": "Ordner mit Features löschen…",
+    "Suppress Selected Folders": "Ausgewählte Ordner unterdrücken",
+    "Unsuppress Selected Folders": "Unterdrückung der ausgewählten Ordner aufheben",
+    "timeline.delete_folders_with_features_tip": "Löscht die Ordner mit allen Features darin und ihren Unterordnern",
+    "timeline.suppress_folders_tip": "Unterdrückt alle Features in den Ordnern und ihren Unterordnern oder hebt die Unterdrückung auf"
+  },
+  "ja": {
+    "Delete Folders and Features…": "フォルダーとフィーチャーを削除…",
+    "Suppress Selected Folders": "選択したフォルダーを抑制",
+    "Unsuppress Selected Folders": "選択したフォルダーの抑制を解除",
+    "timeline.delete_folders_with_features_tip": "フォルダーを、中のすべてのフィーチャーと入れ子のフォルダーごと削除します",
+    "timeline.suppress_folders_tip": "フォルダーと入れ子のフォルダー内のすべてのフィーチャーを抑制、または抑制を解除します"
+  },
+  "zh": {
+    "Delete Folders and Features…": "删除文件夹及其特征…",
+    "Suppress Selected Folders": "抑制所选文件夹",
+    "Unsuppress Selected Folders": "取消抑制所选文件夹",
+    "timeline.delete_folders_with_features_tip": "删除文件夹及其中的所有特征和嵌套文件夹",
+    "timeline.suppress_folders_tip": "抑制或取消抑制文件夹及其嵌套文件夹中的所有特征"
+  }
+}
