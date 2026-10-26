@@ -752,7 +752,14 @@ fn shim_id(x: Option<Obj>) -> f64 {
 }
 
 fn rust(op: &OpIn) -> Result<Output, HarnessError> {
-    let k = Kernel::default();
+    rust_with_fixes(op, solidcore::kernel::UpstreamFixes::default())
+}
+
+fn rust_with_fixes(
+    op: &OpIn,
+    fixes: solidcore::kernel::UpstreamFixes,
+) -> Result<Output, HarnessError> {
+    let k = Kernel { fixes, ..Kernel::default() };
     let mut o: Vec<f64> = Vec::new();
     match op {
         OpIn::Gci {
@@ -981,6 +988,50 @@ mod tests {
         assert_eq!(out.ints["status"], vec![1007], "{out:?}");
     }
 
+
+    #[test]
+    fn range_end_refinement_keeps_the_noncollapsed_tail() {
+        let fixtures: Value = serde_json::from_str(include_str!(
+            "../../../../fixtures/curve.curve_p8/edge.json"
+        ))
+        .unwrap();
+        let case = fixtures["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|c| c["name"] == "range_end_preserves_noncollapsed_tail")
+            .unwrap();
+        let op: OpIn = serde_json::from_value(case["inputs"].clone()).unwrap();
+        let original = rust(&op).unwrap();
+        assert_eq!(original.values["out"][0], 2.0);
+        let mut fixes = solidcore::kernel::UpstreamFixes::default();
+        fixes.refine_cc_range_ends = true;
+        let out = rust_with_fixes(&op, fixes).unwrap();
+        assert_eq!(out.ints["status"], vec![0]);
+        let values = &out.values["out"];
+        assert_eq!(values[0], 3.0);
+        let tail = &values[20..];
+        assert_eq!(tail.len(), 11);
+        assert_eq!(tail[0], f64::from(SolutionType::RangeOfValues as i32));
+        assert!(tail[9] - tail[6] > 0.2);
+        assert!(tail[10] - tail[7] > 0.07);
+        let OpIn::Gci { c1, c2, tol, .. } = &op;
+        let a = build(c1).unwrap();
+        let b = build(c2.as_ref().unwrap()).unwrap();
+        let k = Kernel::default();
+        // This tail is a legitimate approximate range at the requested tolerance.
+        // The faulty end check collapsed it onto its start and discarded it.
+        for i in 0..=10 {
+            let fraction = f64::from(i) / 10.0;
+            let t = tail[6] + fraction * (tail[9] - tail[6]);
+            let u = tail[7] + fraction * (tail[10] - tail[7]);
+            let deviation = a
+                .evaluate_point(&k, t)
+                .unwrap()
+                .distance(b.evaluate_point(&k, u).unwrap());
+            assert!(deviation <= *tol, "{deviation}");
+        }
+    }
 
     /// Generated cases mostly run (pass or defer), not harness errors.
     #[test]
