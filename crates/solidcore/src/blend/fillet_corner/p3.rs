@@ -233,6 +233,11 @@ pub struct FilletExecutiveData {
     /// Fillet geometries deleted by `~SmFilletSolver` during
     /// [`FilletExecutiveData::test_and_convert_big_rad_fillet`].
     pub deleted_geoms: Vec<FilletGeomId>,
+    /// `m_pAttributeE->GetUsers()`: the fillet-B-rep edges carrying the executive's
+    /// edge attribute (`SM_AI_ALL_FILLET_EDGES`), in the order they were added. The
+    /// executive's constructor creates the attribute with no users; `CreateFilletBrep`
+    /// adds it to every edge of the fillet B-rep.
+    pub attribute_e_users: Vec<EdgeId>,
 }
 
 impl FilletExecutiveData {

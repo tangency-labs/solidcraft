@@ -117,12 +117,15 @@
 //!   type (no solver is made, `pNewFS->SetFilletExecutive` on `NULL`) and the
 //!   `m_vEdges[9999]` read of a corner without a measurable edge are
 //!   [`SolidError::InvalidInput`]; the `FIX_LINEAR_CASE` block is not compiled upstream.
-//! - **`InsertIntersectionTopology`** runs on the fillet executive's topology intersector
-//!   and edge attribute (`m_pAttributeE`), neither of which the port has yet: as in
-//!   `blend.fillet_geom_p4`, `RegisterExistingSSI`, `MergeCurveOnSurfaces`,
-//!   `UpdateTopologyChanges` and the attribute's user list are
+//! - **`InsertIntersectionTopology`** (indexed form) reads the edge attribute's
+//!   (`m_pAttributeE`) users from [`FilletExecutiveData::attribute_e_users`]. It runs
+//!   on the fillet executive's topology intersector, which the indexed form does not
+//!   carry: as in `blend.fillet_geom_p4`, `RegisterExistingSSI`,
+//!   `MergeCurveOnSurfaces` and `UpdateTopologyChanges` are
 //!   `UNPORTED(blend.fillet_executive_p1)` stubs; the code around them is ported (the
-//!   780 marker attribute travels with the `UpdateTopologyChanges` stub).
+//!   780 marker attribute travels with the `UpdateTopologyChanges` stub). The live
+//!   session supplies all four through
+//!   [`FilletCorner::insert_intersection_topology_with_context`].
 //!
 //! No loops depend on input size beyond the given arrays; there is no recursion.
 
@@ -2257,11 +2260,12 @@ impl FilletCorner {
     /// Those of the merge and registrations; [`SolidError::InvalidInput`] where
     /// upstream dereferences `NULL` (a blending corner without vertex, a face without
     /// surface, fillet-B-rep edges without the fillet B-rep); [`SolidError::Unported`]
-    /// for the executive's topology intersector and edge attribute
-    /// (`blend.fillet_executive_p1`).
+    /// for the executive's topology intersector (`blend.fillet_executive_p1`), reached
+    /// only for an edge among [`FilletExecutiveData::attribute_e_users`].
     pub fn insert_intersection_topology(&self, env: &mut CornerEnv<'_>) -> Result<()> {
         let mut context = IndexedCornerInsertion {
             fillet: env.fillet.as_ref().map(|fillet| &*fillet.brep),
+            attribute_e_users: &env.exec.attribute_e_users,
         };
         self.insert_intersection_topology_with_context(env.pseudo, env.target, &mut context)
     }
@@ -2404,6 +2408,8 @@ pub trait CornerInsertionContext {
 
 struct IndexedCornerInsertion<'a> {
     fillet: Option<&'a Brep>,
+    /// `pFilletExec->m_pAttributeE->GetUsers()`.
+    attribute_e_users: &'a [EdgeId],
 }
 impl CornerInsertionContext for IndexedCornerInsertion<'_> {
     type CurveBinding = Curve;
@@ -2428,7 +2434,7 @@ impl CornerInsertionContext for IndexedCornerInsertion<'_> {
         Ok(pseudo.brep().edge(edge)?.curve.clone())
     }
     fn attribute_edges(&self) -> Result<Vec<EdgeId>> {
-        attribute_e_users(TopologyIntersectorRef)
+        Ok(self.attribute_e_users.to_vec())
     }
     fn managed_edge_faces(&self, edge: EdgeId) -> Result<Vec<FaceId>> {
         edge::faces(
@@ -2516,16 +2522,6 @@ impl CornerInsertionContext for IndexedCornerInsertion<'_> {
 /// executive's topology intersector the calls below run on.
 #[derive(Debug, Clone, Copy)]
 struct TopologyIntersectorRef;
-
-/// `pFilletExec->m_pAttributeE->GetUsers(sAllEdges)` (unit `blend.fillet_executive_p1`).
-fn attribute_e_users(ti: TopologyIntersectorRef) -> Result<Vec<EdgeId>> {
-    let _ = ti;
-    // UNPORTED(blend.fillet_executive_p1): SmFilletExecutive::m_pAttributeE->GetUsers
-    Err(SolidError::unported(
-        "SmFilletExecutive::m_pAttributeE",
-        "blend.fillet_executive_p1",
-    ))
-}
 
 /// `rTI.MergeCurveOnSurfaces(pFace->GetSurface(), NULL, pEdge->GetTolerance(),
 /// p3DCurve, NULL, NULL, NULL, pEdge, ..)`. The routine is ported

@@ -737,11 +737,12 @@ void c1_make_face(C1Corner& C, Rd& rd, std::vector<double>& o)
 }
 
 // `ns surface..` -> `status` corner Model: InsertIntersectionTopology on those m_vSurfaces,
-// with the Model's fillet B-rep as m_pFilletBrep. Not run where it reaches the executive's
-// topology intersector (RegisterExistingSSI: a blending corner with faces at its vertex and
-// surfaces) or edge attribute (m_pAttributeE, NULL here: a corner edge on an original face
-// with fillet-B-rep edges): Rust stubs of unit blend.fillet_executive_p1. A blending corner
-// without vertex is refused (m_cpVertex->GetFaces).
+// with the Model's fillet B-rep as m_pFilletBrep. The executive's constructor makes its edge
+// attribute (m_pAttributeE) with no users and CreateFilletBrep is not run, so every
+// fillet-B-rep edge is skipped before the topology intersector's merge. Not run where it
+// reaches the executive's topology intersector (RegisterExistingSSI: a blending corner with
+// faces at its vertex and surfaces): a Rust stub of unit blend.fillet_executive_p1. A
+// blending corner without vertex is refused (m_cpVertex->GetFaces).
 void c1_insert(C1Corner& C, Rd& rd, std::vector<double>& o)
 {
     SmFilletCorner* c = C.c;
@@ -757,19 +758,6 @@ void c1_insert(C1Corner& C, Rd& rd, std::vector<double>& o)
         SmTArray<SmFace*> vf;
         C.vertex->GetFaces(vf);
         if (vf.GetSize() > 0 && (c->*P3CornerPeek::surfs()).GetSize() > 0)
-        {
-            o.push_back(C1_NOT_RUN);
-            return;
-        }
-    }
-    SmTArray<SmFilletEdge*>& E = c->*P3CornerPeek::edges();
-    for (ULONG i = 0; i < E.GetSize(); ++i)
-    {
-        if (E[i] == NULL || E[i]->GetOriginalFace() == NULL)
-            continue;
-        SmTArray<SmEdge*> es;
-        E[i]->GetFilletBrepEdges(es);
-        if (es.GetSize() > 0)
         {
             o.push_back(C1_NOT_RUN);
             return;
