@@ -2,7 +2,7 @@
 use super::{GitRepository, LocalOutbox};
 use solidcraft_cloud::{Connection, Destination, Error, PendingSave, Result, jobs::Job};
 
-fn captured(outbox: &LocalOutbox, save: &PendingSave) -> Result<Option<Vec<u8>>> {
+pub(super) fn captured(outbox: &LocalOutbox, save: &PendingSave) -> Result<Option<Vec<u8>>> {
     let document = outbox.read(&format!("documents/{}", save.manifest.document_hash))?;
     super::check_document(&document)?;
     if solidcraft_cloud::digest(&document) != save.manifest.document_hash {

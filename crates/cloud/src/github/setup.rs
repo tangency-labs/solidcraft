@@ -1,6 +1,18 @@
 //! Guided GitHub setup, shared by desktop and browser. Octocrab owns API encoding/models.
 use super::*;
 
+/// One read-only metadata request. GitHub deliberately uses 404 for both missing
+/// repositories and private repositories the supplied credential cannot access.
+pub async fn exists(client: Octocrab, repository: &str) -> Result<bool> {
+    let repository = repository_name(repository)?;
+    let (owner, name) = repository.split_once('/').ok_or_else(|| invalid("invalid repository"))?;
+    match client.repos(owner, name).get().await {
+        Ok(info) => Ok(info.full_name.as_deref().is_some_and(|name| name.eq_ignore_ascii_case(&repository))),
+        Err(octocrab::Error::GitHub { source, .. }) if source.status_code.as_u16() == 404 => Ok(false),
+        Err(error) => Err(api_error(error)),
+    }
+}
+
 /// Inspect the chosen repository and initialize only an empty repository. A failed/repeated
 /// request never overwrites an existing README or branch. Setup is explicit, never an Open.
 pub async fn prepare(client: Octocrab, mut connection: Connection) -> Result<Connection> {

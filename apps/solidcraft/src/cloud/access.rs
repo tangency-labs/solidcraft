@@ -12,6 +12,7 @@ use std::{io::Read, sync::Arc};
 use tower::{BoxError, service_fn};
 
 pub struct Access;
+mod repository;
 
 fn storage() -> Error {
     Error::Storage("system credential store unavailable; unlock it and reconnect".into())
@@ -25,6 +26,31 @@ pub(super) fn entry(id: &str) -> Result<keyring::Entry> {
 }
 
 impl NativeAccess for Access {
+    fn check_repository(&self, connection: &Connection, input: solidcraft_cloud::jobs::RepositoryCheckInput, job: &Job) -> Result<bool> {
+        if !self.uses_provider_api(connection) {
+            return Err(Error::Invalid("unsupported setup provider".into()));
+        }
+        let token = match input.token {
+            Some(token) => token,
+            None => zeroize::Zeroizing::new(self.credential(&connection.credential)?.ok_or_else(storage)?),
+        };
+        let runtime = tokio::runtime::Builder::new_current_thread().build().map_err(|_| Error::Storage("GitHub worker unavailable".into()))?;
+        tokio::task::LocalSet::new().block_on(&runtime, async {
+            let client = client(&token, job.clone()).map_err(|_| Error::Storage("GitHub client unavailable".into()))?;
+            solidcraft_cloud::github::exists(client, &connection.repository).await
+        })
+    }
+
+    fn uses_provider_api(&self, connection: &Connection) -> bool {
+        connection.provider == "github" && connection.authentication == solidcraft_cloud::Authentication::Https
+    }
+    fn provider_repository(&self, connection: &Connection, job: &Job) -> Result<Box<dyn solidcraft_engine::io::cloud::ProviderRepository>> {
+        if !self.uses_provider_api(connection) {
+            return Err(Error::Invalid("unsupported provider API".into()));
+        }
+        let token = zeroize::Zeroizing::new(self.credential(&connection.credential)?.ok_or_else(storage)?);
+        Ok(Box::new(repository::Repository { connection: connection.clone(), job: job.clone(), token }))
+    }
     fn credential(&self, id: &str) -> Result<Option<String>> {
         match entry(id)?.get_password() {
             Ok(token) => Ok(Some(token)),
@@ -61,6 +87,7 @@ impl NativeAccess for Access {
 }
 
 fn client(token: &str, job: Job) -> std::result::Result<octocrab::Octocrab, BoxError> {
+    const API_BYTES: usize = solidcraft_cloud::MAX_MANIFEST_BYTES * 2 + solidcraft_cloud::CHUNK_BYTES;
     solidcraft_cloud::setup::check_token(token)?;
     let tls = ureq::tls::TlsConfig::builder()
         .root_certs(ureq::tls::RootCerts::PlatformVerifier)
@@ -87,7 +114,7 @@ fn client(token: &str, job: Job) -> std::result::Result<octocrab::Octocrab, BoxE
                 return Err(BoxError::from("unsupported API destination"));
             }
             let bytes = body.collect().await?.to_bytes();
-            if bytes.len() > solidcraft_cloud::MAX_MANIFEST_BYTES {
+            if bytes.len() > API_BYTES {
                 return Err("request too large".into());
             }
             let mut builder = http::Request::builder().method(parts.method).uri(parts.uri);
@@ -95,20 +122,11 @@ fn client(token: &str, job: Job) -> std::result::Result<octocrab::Octocrab, BoxE
                 *headers = parts.headers;
                 headers.entry(http::header::ACCEPT).or_insert(http::HeaderValue::from_static("application/vnd.github+json"));
             }
-            let mut response = agent.run(builder.body(bytes.to_vec())?)?;
-            let mut result = Response::builder().status(response.status());
-            if let Some(headers) = result.headers_mut() {
-                *headers = response.headers().clone();
-            }
-            let mut output = Vec::new();
-            response.body_mut().as_reader().take(1024 * 1024 + 1).read_to_end(&mut output)?;
-            if output.len() > 1024 * 1024 {
-                return Err("response too large".into());
-            }
+            let response = send_request(agent, builder.body(bytes.to_vec())?, API_BYTES).await?;
             if job.cancelled()? {
                 return Err(BoxError::from("setup cancelled"));
             }
-            Ok::<_, BoxError>(result.body(Full::new(Bytes::from(output)))?)
+            Ok::<_, BoxError>(response)
         }
     });
     let api = "https://api.github.com".parse()?;
@@ -126,9 +144,59 @@ fn client(token: &str, job: Job) -> std::result::Result<octocrab::Octocrab, BoxE
         .map_err(Into::into)
 }
 
+/// Keep blocking request execution and bounded body consumption off the local executor.
+async fn send_request(agent: Arc<ureq::Agent>, request: Request<Vec<u8>>, limit: usize) -> std::result::Result<Response<Full<Bytes>>, BoxError> {
+    tokio::task::spawn_blocking(move || -> std::result::Result<_, BoxError> {
+        let mut response = agent.run(request)?;
+        let mut result = Response::builder().status(response.status());
+        if let Some(headers) = result.headers_mut() {
+            *headers = response.headers().clone();
+        }
+        let mut output = Vec::new();
+        response.body_mut().as_reader().take(limit as u64 + 1).read_to_end(&mut output)?;
+        if output.len() > limit {
+            return Err("response too large".into());
+        }
+        Ok(result.body(Full::new(Bytes::from(output)))?)
+    })
+    .await?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_http_requests_overlap_on_a_local_executor_and_keep_bounded_responses() {
+        use std::{io::Write, net::TcpListener, time::Duration};
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            // Neither response is sent until both requests have connected. A blocking
+            // local executor would time out the first request before starting the second.
+            let mut streams = [listener.accept().unwrap().0, listener.accept().unwrap().0];
+            for stream in &mut streams {
+                stream.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+                let mut buffer = [0; 4096];
+                stream.read(&mut buffer).unwrap();
+                let _ = stream.write_all(b"HTTP/1.1 201 Created\r\nContent-Length: 5\r\nX-Test: kept\r\nConnection: close\r\n\r\nhello");
+            }
+        });
+        let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let (oversized, response) = tokio::task::LocalSet::new().block_on(&runtime, async {
+            let agent: Arc<ureq::Agent> = Arc::new(ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(5))).build().into());
+            let request = || Request::builder().uri(format!("http://{address}/test")).body(vec![]).unwrap();
+            let first = tokio::task::spawn_local(send_request(agent.clone(), request(), 4));
+            let second = tokio::task::spawn_local(send_request(agent, request(), 5));
+            (first.await.unwrap(), second.await.unwrap())
+        });
+        server.join().unwrap();
+        assert_eq!(oversized.unwrap_err().to_string(), "response too large");
+        let response = response.unwrap();
+        assert_eq!(response.status(), 201);
+        assert_eq!(response.headers()["x-test"], "kept");
+        assert_eq!(runtime.block_on(response.into_body().collect()).unwrap().to_bytes(), "hello");
+    }
+
     #[test]
     fn native_octocrab_client_uses_its_local_executor_without_a_global_runtime() {
         let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();

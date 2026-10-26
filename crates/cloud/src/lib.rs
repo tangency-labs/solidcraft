@@ -5,6 +5,7 @@
 
 mod catalog;
 mod configuration;
+pub mod credentials;
 #[cfg(feature = "github")]
 pub mod github;
 pub mod jobs;

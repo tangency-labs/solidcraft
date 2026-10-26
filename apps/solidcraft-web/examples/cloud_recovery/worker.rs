@@ -139,8 +139,14 @@ pub async fn phase(name: &str, identity: String) -> Result<Value> {
                 credential: format!("cloud:{identity}_other"),
                 ..Default::default()
             };
-            LocalSettings::open().await?.store_credential(connection.credential.clone(), Some("fixture-primary-token".into())).await?;
-            LocalSettings::open().await?.store_credential(other.credential.clone(), Some("fixture-secondary-token".into())).await?;
+            LocalSettings::open()
+                .await?
+                .store_credential(connection.credential.clone(), Some(zeroize::Zeroizing::new("fixture-primary-token".into())))
+                .await?;
+            LocalSettings::open()
+                .await?
+                .store_credential(other.credential.clone(), Some(zeroize::Zeroizing::new("fixture-secondary-token".into())))
+                .await?;
             let settings = Settings {
                 connections: vec![connection.clone(), other],
                 default_connection: Some(identity),

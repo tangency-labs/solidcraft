@@ -22,6 +22,10 @@ mod previews;
 #[cfg(not(target_arch = "wasm32"))]
 mod process;
 #[cfg(not(target_arch = "wasm32"))]
+mod provider;
+#[cfg(not(target_arch = "wasm32"))]
+pub use provider::ProviderRepository;
+#[cfg(not(target_arch = "wasm32"))]
 mod provision;
 #[cfg(not(target_arch = "wasm32"))]
 mod receive;

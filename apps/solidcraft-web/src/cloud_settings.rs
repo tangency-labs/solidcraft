@@ -5,6 +5,7 @@ use indexed_db_futures::{
     transaction::{TransactionDurability, TransactionMode, TransactionOptions},
 };
 use solidcraft_cloud::{Configuration, Error, Result, Settings};
+use zeroize::Zeroizing;
 
 use crate::cloud_storage::with_lock;
 
@@ -86,7 +87,7 @@ impl LocalSettings {
 
     /// Setup calls this directly, keeping token bytes out of engine command parameters/logs.
     /// Disconnecting a connection does not automatically discard queued designs or secrets.
-    pub async fn store_credential(self, id: String, token: Option<String>) -> Result<()> {
+    pub async fn store_credential(self, id: String, token: Option<Zeroizing<String>>) -> Result<()> {
         credential_id(&id)?;
         if let Some(token) = &token {
             credential_value(token)?;
@@ -103,8 +104,13 @@ impl LocalSettings {
                 .map_err(storage)?;
             let store = transaction.object_store("credentials").map_err(storage)?;
             if let Some(token) = token {
-                let record = serde_json::json!({"format":"solidcraft-credential/1","value":token}).to_string();
-                store.put(record).with_key(id.as_str()).await.map_err(storage)?;
+                #[derive(serde::Serialize)]
+                struct Record<'a> {
+                    format: &'static str,
+                    value: &'a str,
+                }
+                let record = Zeroizing::new(serde_json::to_string(&Record { format: "solidcraft-credential/1", value: &token }).map_err(storage)?);
+                store.put(record.as_str()).with_key(id.as_str()).await.map_err(storage)?;
             } else {
                 store.delete(id.as_str()).await.map_err(storage)?;
             }
