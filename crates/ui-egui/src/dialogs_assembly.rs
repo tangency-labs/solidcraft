@@ -981,6 +981,8 @@ fn find_limits_row(app: &mut SolveApp, ui: &mut egui::Ui, f: &mut JointForm, id:
                 } else {
                     f.found_note = Some(crate::i18n::tr("joint.find_limits_stale").to_string());
                 }
+                // The rows above were drawn before this: once more, with what was found.
+                ui.ctx().request_repaint();
             }
             None => ui.ctx().request_repaint_after(std::time::Duration::from_millis(100)),
         }
@@ -1039,6 +1041,12 @@ fn find_limits(app: &SolveApp, f: &mut JointForm, id: u64) {
             return;
         }
     };
+    // A joint OK would refuse (an expression that doesn't read) says so at once, before any search.
+    let mut probe = app.session.scratch();
+    if let Some(e) = searched.joint.iter().find_map(|(id, p)| probe.execute(id, p).err()) {
+        f.found_note = Some(e.to_string());
+        return;
+    }
     let mut commands = searched.joint.clone();
     commands.push(("joint.find_limits".into(), json!({ "joint": id })));
     // The search's reply, or the first command that failed.

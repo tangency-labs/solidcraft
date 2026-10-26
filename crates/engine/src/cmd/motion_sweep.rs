@@ -51,10 +51,13 @@ const MAX_SAMPLES: usize = 4096;
 const MAX_BISECTIONS: usize = 64;
 /// Most gap work over a whole sweep (see `ContactGeometry::gaps`).
 const MAX_WORK: usize = 500_000_000;
-/// Most gap work each side of a limit search takes: a whole turn, where curved pins resting in
-/// each other cost about 20 M a sample (the hinge sample's pins, some 500 samples a turn; a few
-/// seconds). (A 32-bit build, the web, stops at what its `usize` holds.)
-const FIND_WORK: usize = MAX_WORK.saturating_mul(40);
+/// Most gap work each side of a limit search takes: a whole turn of curved pins passing into each
+/// other costs about 20 M a sample, some 500 samples a turn (a few seconds). A 32-bit build, the
+/// web, takes half what its `usize` holds, so the work it adds up can still pass it.
+const FIND_WORK: usize = {
+    let most = MAX_WORK.saturating_mul(40);
+    if most > usize::MAX / 2 { usize::MAX / 2 } else { most }
+};
 
 /// The nearest a part came to another along the sweep.
 struct Nearest {
