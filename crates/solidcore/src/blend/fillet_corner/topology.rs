@@ -47,7 +47,7 @@ use crate::kernel::Kernel;
 use crate::math::Point3;
 use crate::surface::surface::Surface;
 use crate::topology::edge;
-use crate::topology::edgeuse::{p1 as eu1, p2 as eu2};
+use crate::topology::edgeuse::{p1 as eu1, p2 as eu2, p3 as eu3};
 use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, Vertex, VertexId};
 use std::collections::BTreeMap;
 
@@ -215,6 +215,90 @@ fn same_convexity_edges(
     )?)
 }
 
+/// A failed callee makes the fork's `FALSE`-returning helpers answer `FALSE`; an
+/// `Unported` one still propagates.
+fn or_false(r: Result<bool>) -> Result<bool> {
+    match r {
+        Err(e) if e.is_unported() => Err(e),
+        Err(_) => Ok(false),
+        Ok(v) => Ok(v),
+    }
+}
+
+/// `sm_CheckTangentialEdgeuseAtVertex` (the fork's tangency-labs/smlib@d5ebcb3): whether
+/// the two faces of `eu`'s edge meet tangentially (the same way round) at `vertex`.
+fn check_tangential_edgeuse_at_vertex(
+    k: &Kernel,
+    target: &mut Brep,
+    eu: EdgeuseId,
+    vertex: VertexId,
+    ang_tol_deg: f64,
+) -> Result<bool> {
+    or_false((|| {
+        let e = edge_of(target, eu)?;
+        if edge::is_closed(target, e)? || !edge::is_manifold(target, e)? {
+            return Ok(false);
+        }
+        let Some(curve) = edge::curve(target, e)? else {
+            return Ok(false);
+        };
+        let ivl = edge::interval(target, e)?;
+        let (lo, hi) = (
+            curve.evaluate_point(k, ivl.min())?,
+            curve.evaluate_point(k, ivl.max())?,
+        );
+        let at = target.vertex(vertex)?.point;
+        let t = if lo.distance_squared(at) <= hi.distance_squared(at) {
+            ivl.min()
+        } else {
+            ivl.max()
+        };
+        let opts = eu3::BinormalOptions::default();
+        let n1 = eu3::evaluate_binormal(k, target, eu, t, false, &opts)?.face_normal;
+        let rad = radial(target, eu)?;
+        let n2 = eu3::evaluate_binormal(k, target, rad, t, false, &opts)?.face_normal;
+        Ok(n1.dot(n2) > 0.0 && n1.is_parallel_to(n2, ang_tol_deg))
+    })())
+}
+
+/// `same_convexity_edges_round_vertex` (the fork's tangency-labs/smlib@d5ebcb3): whether
+/// `edge2`, anywhere round the vertex, has the convexity of `first`'s edge.
+fn same_convexity_edges_round_vertex(
+    k: &Kernel,
+    target: &mut Brep,
+    first: EdgeuseId,
+    edge2: EdgeId,
+) -> Result<bool> {
+    let concave = if eu2::is_convex_radial_sector(k, target, first, 5, false, 0.0)? {
+        if edge::is_manifold(target, edge_of(target, first)?)? {
+            let mate = need(eu1::mate(target, first)?, "filleted edge use without mate")?;
+            Some(radial(target, mate)?)
+        } else {
+            None
+        }
+    } else {
+        Some(first)
+    };
+    // Native SE(SM_ERR) returns FALSE.
+    let Some(concave) = concave else {
+        return Ok(false);
+    };
+    let Some(region) = eu1::shell(target, concave)?
+        .map(|s| eu1::shell_region(target, s))
+        .transpose()?
+    else {
+        return Ok(false);
+    };
+    for eu in edge::edgeuses(target, edge2, None, None)? {
+        if let Some(shell) = eu1::shell(target, eu)? {
+            if eu1::shell_region(target, shell)? == region {
+                return Ok(!eu2::is_convex_radial_sector(k, target, eu, 5, false, 0.0)?);
+            }
+        }
+    }
+    Ok(false)
+}
+
 fn is_fillet_side_face(target: &Brep, filleted: EdgeuseId, face: Option<FaceId>) -> Result<bool> {
     if face == eu1::face(target, filleted)? {
         return Ok(true);
@@ -294,6 +378,62 @@ impl FilletCorner {
             same_convexity_edges(k, target, filleted, side0, vertex)?,
             same_convexity_edges(k, target, filleted, side1, vertex)?,
         ];
+        let mut same = same;
+        // A side edge whose faces meet tangentially at the vertex (a flat top running
+        // smoothly onto a round) is no edge of the corner: the corner's side edge is
+        // the one reached past it round the vertex (tangency-labs/smlib@d5ebcb3, WR-457).
+        let mut corner_sides = sides;
+        let mut corner_total = total;
+        if k.fixes.fillet_nx1_tangent_side_edge && !closed_side && total > 3 {
+            let tol_deg = crate::math::rad_to_deg(self.tangency_tol_radians);
+            for kk in 0..2 {
+                let other = 1 - kk;
+                if *need(same.get(other), "convexity index")?
+                    || check_tangential_edgeuse_at_vertex(
+                        k,
+                        target,
+                        *need(sides.get(other), "side index")?,
+                        vertex,
+                        tol_deg,
+                    )?
+                {
+                    continue;
+                }
+                let behind = (index + total - 1) % total;
+                let ahead = (index + 1) % total;
+                let (mut idx, other_idx) = if kk == 0 {
+                    (behind, ahead)
+                } else {
+                    (ahead, behind)
+                };
+                let mut skipped = 0;
+                let mut next = *need(sides.get(kk), "side index")?;
+                while total - skipped > 3
+                    && check_tangential_edgeuse_at_vertex(k, target, next, vertex, tol_deg)?
+                {
+                    idx = if kk == 0 {
+                        (idx + total - 1) % total
+                    } else {
+                        (idx + 1) % total
+                    };
+                    if idx == index || idx == other_idx {
+                        skipped = 0;
+                        break;
+                    }
+                    next = *need(all.get(idx), "side edge use")?;
+                    skipped += 1;
+                }
+                if skipped > 0 {
+                    let next_edge = edge_of(target, next)?;
+                    if same_convexity_edges_round_vertex(k, target, filleted, next_edge)? {
+                        *need(corner_sides.get_mut(kk), "side index")? = next;
+                        *need(same.get_mut(kk), "convexity index")? = true;
+                        corner_total -= skipped;
+                        break;
+                    }
+                }
+            }
+        }
         let [same0, same1] = same;
         let mixed = !same0 || !same1;
         let mut end_face = None;
@@ -337,9 +477,11 @@ impl FilletCorner {
                 pseudo
                     .fillet_vertex_mut(fv)?
                     .set_fillet_vertex_type(FilletVertexType::RailXExtendedEdgeuse);
-                let other = *need(sides.get(1 - rail), "other side index")?;
-                end_face = face_by_two_edgeuses(target, Some(side), Some(other), None)?;
-                extend_edge = eu1::edge(target, side)?;
+                // (Past a tangent side edge, the corner's side edge.)
+                let extend = *need(corner_sides.get(rail), "side index")?;
+                let other = *need(corner_sides.get(1 - rail), "other side index")?;
+                end_face = face_by_two_edgeuses(target, Some(extend), Some(other), None)?;
+                extend_edge = eu1::edge(target, extend)?;
                 if !is_fillet_side_face(target, filleted, face)? {
                     *need(sides.get_mut(rail), "side index")? = radial(target, side)?;
                 }
@@ -352,7 +494,7 @@ impl FilletCorner {
                 }
             }
         }
-        if !mixed && total > 3 {
+        if !mixed && corner_total > 3 {
             *do_global_merge = true;
             return Ok(None);
         }
@@ -367,7 +509,7 @@ impl FilletCorner {
             geometry,
             filleted,
             vertex,
-            total,
+            total: corner_total,
             mixed,
             same,
             sides,
