@@ -37,13 +37,14 @@ enum ScLs1dKind : int32_t
 
 namespace
 {
-const int64_t N_FN_PARAMS = 14; // kind, p[8], found_tol, fail_lo, fail_hi, fail_first, partial
+const int64_t N_FN_PARAMS = 14; // kind, p[8], found_tol, fail_lo, fail_hi, fail_first, failure_write
 
 // Test function.
-//   fn_params: [kind, p0..p7, found_tol, fail_lo, fail_hi, fail_first, partial]
+//   fn_params: [kind, p0..p7, found_tol, fail_lo, fail_hi, fail_first, failure_write]
 // Fails (SM_ERR_INVALID_INPUT) on the first `fail_first` calls and for
-// fail_lo <= t <= fail_hi; on failure writes F first when `partial`, and always
-// sets the found flag FALSE. Records every call (t, ok, signal).
+// fail_lo <= t <= fail_hi. Failure writes: 0 keeps outputs, 1 writes F,
+// 2 zeroes F and F'. Always sets the found flag FALSE on failure.
+// Records every call (t, ok, signal).
 class ScTestFn : public SmEvalFunctionObject
 {
 public:
@@ -144,7 +145,12 @@ public:
         bool fail = (double)m_calls <= fail_first || (fail_lo <= dT && dT <= fail_hi);
         if (fail)
         {
-            if (partial)
+            if (m_fp[13] == 2.0)
+            {
+                rdF = 0.0;
+                rdFp = 0.0;
+            }
+            else if (partial)
                 rdF = f;
             rbFound = FALSE;
             m_flags.push_back(0.0 + (bSignalErrors ? 2.0 : 0.0));

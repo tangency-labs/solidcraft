@@ -2983,6 +2983,7 @@ fn singular_param_solve(
         EFF_ZERO,
     );
     let mut ls = crate::geom::local_solve1d::LocalSolve1d::with_interval(*ivl, false);
+    ls.set_failed_guess_no_sign_change(k.fixes.oscillating_skips_failed_guesses);
     let r = ls.solve_it(&mut efo, start, tol)?;
     Ok((r.found, r.t))
 }

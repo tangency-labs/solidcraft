@@ -416,6 +416,7 @@ impl FilletSolver {
                 )?;
                 let interval = Extent1d::from_min_max(0.0, efo.target_distance * 10.0);
                 let mut ls = LocalSolve1d::with_interval(interval, false);
+                ls.set_failed_guess_no_sign_change(k.fixes.oscillating_skips_failed_guesses);
                 let mut radius_found = 0.0;
 
                 // NewtonRaphson iteration for the radius whose boundary crossing has

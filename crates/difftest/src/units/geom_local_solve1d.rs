@@ -11,7 +11,8 @@
 //! (Horner), signed square root (exact Newton oscillation), trig, atan (Newton
 //! overshoot), cube root (Newton divergence), `|t|` kink, Gaussian bump, and the
 //! upstream base class evaluator (always `SM_ERR`). Failures can be injected (first
-//! N calls, a parameter window, optionally writing `F` before failing).
+//! N calls, a parameter window, optionally writing `F` or zeroing `F`/`F'`
+//! before failing).
 //!
 //! Outputs per `SolveIt`: `status` (0 or `SmStatus`), `found`, `t` (0 on error),
 //! and the solver state afterwards (`state_i`: termination reason, bound hits,
@@ -68,6 +69,9 @@ struct Func {
     /// Write `F` before failing.
     #[serde(default)]
     partial: bool,
+    /// Zero F and F' before failing, as the curvature evaluator does.
+    #[serde(default)]
+    zero_on_failure: bool,
 }
 
 fn one() -> f64 {
@@ -85,7 +89,13 @@ impl Func {
         a[10] = self.fail_lo;
         a[11] = self.fail_hi;
         a[12] = f64::from(self.fail_first);
-        a[13] = if self.partial { 1.0 } else { 0.0 };
+        a[13] = if self.zero_on_failure {
+            2.0
+        } else if self.partial {
+            1.0
+        } else {
+            0.0
+        };
         a
     }
 }
@@ -227,7 +237,10 @@ impl EvalFunction for TestFn {
         let partial = self.p[13] != 0.0;
         let fail = (self.calls as f64) <= fail_first || (fail_lo <= t && t <= fail_hi);
         if fail {
-            if partial {
+            if self.p[13] == 2.0 {
+                out.f = 0.0;
+                out.f_prime = 0.0;
+            } else if partial {
                 out.f = f;
             }
             out.found_answer = false;
@@ -616,6 +629,7 @@ fn gen_func(rng: &mut Rng) -> Func {
             0
         },
         partial: rng.chance(0.5),
+        zero_on_failure: false,
     }
 }
 
@@ -641,6 +655,7 @@ fn gen_cycle_func(rng: &mut Rng) -> Func {
         fail_hi: 0.0,
         fail_first: 0,
         partial: false,
+        zero_on_failure: false,
     }
 }
 

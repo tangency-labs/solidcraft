@@ -31,7 +31,8 @@ mod sys {
 pub const N_FN_PARAMS: usize = 14;
 
 /// Test-function parameters `[kind, p0..p7, found_tol, fail_lo, fail_hi, fail_first,
-/// partial]` (see the shim's `ScTestFn`).
+/// failure_write]` (`0`: keep outputs, `1`: write F, `2`: zero F and F'; see the
+/// shim's `ScTestFn`).
 pub type FnParams = [f64; N_FN_PARAMS];
 
 /// Valid function kinds.
