@@ -50,7 +50,7 @@ use crate::geom::solution_array::{ObjectKind, SolutionObject};
 use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::Point3;
 use crate::kernel::Kernel;
-use crate::math::{EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQRT};
+use crate::math::{BIG_DOUBLE, EFF_ZERO, EFF_ZERO_PARAM, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve::BoundingBoxRequest;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::nurbs::b_spline_surface::p1::LocationType;
@@ -541,18 +541,30 @@ impl SurfOfRevolution {
             },
             true,
         ))?;
-        let height = boxes
-            .and_then(|b| b.normal)
-            .unwrap_or_default()
-            .max_dimension()
-            * 1.5; // multiply max dimension by some factor to be sure
+        let bbox = boxes.and_then(|b| b.normal).unwrap_or_default();
+        let height = bbox.max_dimension() * 1.5; // multiply max dimension by some factor to be sure
         let origin = self.position.origin();
-        let axis_line = Curve::from(Line::create_line_segment(
-            3,
-            origin,
-            origin + height * z_axis,
-            None,
-        )?);
+        // Not upstream (WR-343, tangency-labs/solidcore#973), opt-in
+        // `Kernel::fixes.revolution_offset_axis_both_sides`: the axis segment spans the offset
+        // curve's whole extent along the axis, on both sides of the frame's origin (it ran
+        // from the origin along +z only and missed an offset crossing the axis below it),
+        // and the part kept is the one on the generatrix's side (positive radius).
+        let both_sides = k.fixes.revolution_offset_axis_both_sides;
+        let (axis_start, axis_end) = if both_sides {
+            let (mut axial_min, mut axial_max) = (BIG_DOUBLE, -BIG_DOUBLE);
+            for corner in bbox.corners() {
+                let axial = (corner - origin).dot(z_axis);
+                axial_min = axial_min.min(axial);
+                axial_max = axial_max.max(axial);
+            }
+            (
+                origin + (axial_min - height) * z_axis,
+                origin + (axial_max + height) * z_axis,
+            )
+        } else {
+            (origin, origin + height * z_axis)
+        };
+        let axis_line = Curve::from(Line::create_line_segment(3, axis_start, axis_end, None)?);
         let axis_ivl = axis_line.natural_interval();
         let opts = CurveIntersectOptions {
             handles: [Some(CurveHandle(domain)), Some(CurveHandle(axis_ivl))],
@@ -573,10 +585,25 @@ impl SurfOfRevolution {
                     .as_slice()
                     .first()
                     .map_or(Ok(0.0), |s| s.start.param(0))?;
-                if domain.min() != param || domain.max() != param {
-                    // Take the largest portion for now
-                    // Eventually use a better algorithm
-                    if param < domain.mid() {
+                let trim = if both_sides {
+                    domain.min() != param && domain.max() != param
+                } else {
+                    domain.min() != param || domain.max() != param
+                };
+                if trim {
+                    let keep_high = if both_sides {
+                        // (WR-343) keep the part on the generatrix's side of the axis
+                        // (positive radius along the frame's x axis), not the longer part
+                        let low_mid = off_curve.evaluate_point(k, 0.5 * (domain.min() + param))?;
+                        let high_mid = off_curve.evaluate_point(k, 0.5 * (param + domain.max()))?;
+                        let x_axis = self.position.x_axis();
+                        (high_mid - origin).dot(x_axis) > (low_mid - origin).dot(x_axis)
+                    } else {
+                        // Take the largest portion for now
+                        // Eventually use a better algorithm
+                        param < domain.mid()
+                    };
+                    if keep_high {
                         let _ = domain.set_min(param);
                     } else {
                         let _ = domain.set_max(param);
@@ -912,5 +939,69 @@ impl SurfOfRevolution {
         // InputSurface->NurbDomain (status ignored)
         ignore_status(surf.reparameterize(k, &tgt.natural_uv_domain()))?;
         Ok(Some(surf))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geom::vector3d::Vec3;
+    use crate::nurbs::b_spline_curve::BSplineCurve;
+    use crate::nurbs::crv_basic::Curve as NurbCurve;
+    use crate::nurbs::math::{CPoint, NOW};
+
+    /// The generator's radius (along the frame's x axis) at both ends of the offset
+    /// surface's generator.
+    fn end_radii(k: &Kernel, offset: &SurfOfRevolution) -> [f64; 2] {
+        let gen = offset.gen().unwrap();
+        let ivl = gen.natural_interval();
+        [ivl.min(), ivl.max()].map(|t| gen.evaluate_point(k, t).unwrap().x)
+    }
+
+    /// tangency-labs/solidcore#973: a surface of revolution about +z through the origin
+    /// whose generator (in the x-z plane, from the axis at z = -1 out to (4, 0, -5)) lies
+    /// below the frame's origin. Offset to one side, the generator crosses the axis below
+    /// the origin too: the axis segment, which ran from the origin along +z only, missed
+    /// the crossing, and the offset generator was left reaching past the axis (a negative
+    /// radius). With the opt-in it is cut at the axis.
+    #[test]
+    fn issue_973_offset_cut_at_axis_below_origin() {
+        let gen = Curve::from(BSplineCurve::from_nurb(
+            NurbCurve::new(
+                vec![
+                    CPoint::new(0.0, 0.0, -1.0, NOW),
+                    CPoint::new(4.0, 0.0, -5.0, NOW),
+                ],
+                1,
+                vec![0.0, 0.0, 1.0, 1.0],
+            )
+            .unwrap(),
+            3,
+            false,
+        ));
+        let k = Kernel::default();
+        let mut surface = SurfOfRevolution::new(
+            &k,
+            gen,
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(0.0, 1.0, 0.0),
+            Extent2d::from_bounds(0.0, 0.0, 360.0, 1.0),
+            false,
+        )
+        .unwrap();
+        surface.make_nurb(&k).unwrap();
+        let min_radius = |both_sides: bool| -> f64 {
+            let mut k = Kernel::default();
+            k.fixes.revolution_offset_axis_both_sides = both_sides;
+            [1.0, -1.0]
+                .into_iter()
+                .flat_map(|d| end_radii(&k, &surface.create_offset_surface(&k, d, 1e-6).unwrap()))
+                .fold(f64::INFINITY, f64::min)
+        };
+        // upstream: one of the two offsets keeps a stretch past the axis
+        assert!(min_radius(false) < -0.1);
+        // the opt-in cuts it at the axis
+        assert!(min_radius(true) > -1e-6);
     }
 }

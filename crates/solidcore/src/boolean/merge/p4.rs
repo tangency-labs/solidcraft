@@ -1666,6 +1666,37 @@ fn manifold_boolean_translated(
             *primary = None;
         }
     }
+    // Not upstream (tangency-labs/solidcore#746; opt-in,
+    // `Kernel::fixes.remove_slit_loops_where_solids_touch`): a volumetric Boolean's result
+    // loses the zero-area inner loops a contact curve inside a face left, and the shells
+    // joined only through them are split (the fork's `RemoveSlitLoopsWhereSolidsTouch`
+    // before `rpResult = m_vTI.m_pBrep`). The destroyed edge uses notify on call-local
+    // records under their type code and arena index.
+    if kernels.primary.fixes.remove_slit_loops_where_solids_touch
+        && matches!(
+            operation,
+            BooleanOperation::Union | BooleanOperation::Intersection | BooleanOperation::Difference
+        )
+    {
+        if let Some(a) = primary.as_mut() {
+            let editing = a.editing_enabled();
+            a.set_editing_enabled(true);
+            let mut records = std::collections::BTreeMap::new();
+            let mut env = edge::NotifyEnv {
+                records: &mut records,
+                attributes: &mut *attributes,
+                context: None,
+                key_of: &crate::topology::loopuse::notify_ref,
+            };
+            let removed = crate::topology::brep::p3::remove_slit_loops_where_solids_touch(
+                &mut *kernels.primary,
+                a,
+                &mut env,
+            );
+            a.set_editing_enabled(editing);
+            removed?;
+        }
+    }
     finish_boolean(
         kernels,
         primary,

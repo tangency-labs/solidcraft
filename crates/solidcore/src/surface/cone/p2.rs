@@ -751,7 +751,7 @@ impl Cone {
         };
 
         // classify the top and bottom isoParameter curves (SmBSplineSurface's)
-        let Some((mut top, bot)) = end_circles(
+        let Some((mut top, mut bot)) = end_circles(
             k,
             &self.rev.base,
             sweep_iso_param,
@@ -793,6 +793,19 @@ impl Cone {
 
         // (upstream also computes the STEP Y axis from the top frame's X axis here;
         // it is unused)
+
+        // Not upstream (WR-385, tangency-labs/solidcore#713): with the opt-in, an
+        // SmCylinder's radii within SM_EFF_ZERO_SQRT * (1 + r) are its one radius (their
+        // mean); further apart, the NURB is no longer a cylinder
+        if self.cylinder && k.fixes.cylinder_rebuild_mean_radius {
+            if (bot.radius - top.radius).abs() < EFF_ZERO_SQRT * (1.0 + bot.radius) {
+                let mean = 0.5 * (bot.radius + top.radius);
+                bot.radius = mean;
+                top.radius = mean;
+            } else {
+                return Err(SolidError::sm_err(OP_REBUILD));
+            }
+        }
 
         // when top and bot radius values are nearly equal - make them exactly equal
         if (bot.radius - top.radius).abs() < EFF_ZERO * (1.0 + bot.radius) {
@@ -1201,6 +1214,39 @@ mod tests {
         cone.rebuild_step_from_nurb_parameters(&k).unwrap();
         assert!((cone.base_radius() - before.base_radius()).abs() < 1e-9);
         assert!((cone.semi_angle_deg() - before.semi_angle_deg()).abs() < 1e-7);
+    }
+
+    /// tangency-labs/solidcore#713 (WR-385): a cylinder whose NURB radii differ by
+    /// 2.25e-11 (rounding, as after `SwapUV`) gets a semi-angle upstream, which its own
+    /// check forbids; with the opt-in the radii are its one radius.
+    #[test]
+    fn issue_713_cylinder_rebuild_keeps_zero_semi_angle() {
+        let mut k = kernel();
+        let make = |k: &Kernel| {
+            let mut c = Cone::create_canonical_cylinder(k, &Axis2Placement::IDENTITY, 9.0).unwrap();
+            let linear_u = c.rev.base.degree(SurfParamType::U) == 1;
+            let nurb = c.rev.base.nurb.as_mut().unwrap();
+            let (n, m) = (nurb.n(), nurb.m());
+            for i in 0..=n {
+                for j in 0..=m {
+                    if (linear_u && i == n) || (!linear_u && j == m) {
+                        let p = nurb.cpt_mut(i, j).unwrap();
+                        p.x *= 1.0 + 2.5e-12;
+                        p.y *= 1.0 + 2.5e-12;
+                    }
+                }
+            }
+            c
+        };
+        let mut up = make(&k);
+        up.rebuild_step_from_nurb_parameters(&k).unwrap();
+        assert!(up.semi_angle_deg() != 0.0);
+
+        k.fixes.cylinder_rebuild_mean_radius = true;
+        let mut fixed = make(&k);
+        fixed.rebuild_step_from_nurb_parameters(&k).unwrap();
+        assert_eq!(fixed.semi_angle_deg(), 0.0);
+        assert!((fixed.base_radius() - 9.0).abs() < 1e-9);
     }
 
     #[test]

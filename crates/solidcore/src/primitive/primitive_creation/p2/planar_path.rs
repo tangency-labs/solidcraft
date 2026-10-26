@@ -13,7 +13,9 @@
 //! ignores keep the previous values of their outputs, as its reused locals do; a
 //! cutting curve that was never built (a null dereference upstream) is an error.
 //! `CreateExtendedCurve`'s end flag 1 is the start and 0 or 2 the end, as in NLib.
-//! B-reps of a failed sweep stay with the access, as upstream leaves them. No recursion.
+//! B-reps of a failed sweep stay with the access, as upstream leaves them. Not upstream
+//! (WR-400, tangency-labs/solidcore#837, opt-in `Kernel::fixes.planar_path_uncapped_open_profiles`):
+//! `SweepProfilesAlongPath` asks for caps only for a profile that closes. No recursion.
 
 use super::{as_bspline, PrimitiveCreationAccess};
 use crate::curve::curve::p9::CurveSolveOptions;
@@ -90,9 +92,38 @@ fn line_into(start: Vec3, end: Vec3, out: &mut Option<BSplineCurve>) -> Result<(
     Ok(())
 }
 
+/// Not upstream (WR-400, tangency-labs/solidcore#837): whether the profile curves
+/// close, every curve end meeting another curve end (a closed curve's own other end)
+/// within `tol`.
+fn profile_closes(k: &Kernel, profiles: &[Curve], tol: f64) -> Result<bool> {
+    let mut ends = Vec::new();
+    for curve in profiles {
+        let domain = curve.natural_interval();
+        ends.push(curve.evaluate_point(k, domain.min())?);
+        ends.push(curve.evaluate_point(k, domain.max())?);
+    }
+    Ok(ends.iter().enumerate().all(|(i, end)| {
+        ends.iter()
+            .enumerate()
+            .any(|(j, other)| j != i && end.distance(*other) < tol)
+    }))
+}
+
+/// Whether `SweepProfilesAlongPath` asks `CreateCurveSweep` for caps: always upstream.
+/// With `Kernel::fixes.planar_path_uncapped_open_profiles` (not upstream, WR-400,
+/// tangency-labs/solidcore#837) only for a profile that closes: an open profile bounds
+/// no planar region, its cap fails and `CreateCurveSweep` returns before stitching its
+/// walls (a failure upstream ignores).
+fn cap_profile_ends(k: &Kernel, profiles: &[Curve], tol: f64) -> Result<bool> {
+    if !k.fixes.planar_path_uncapped_open_profiles {
+        return Ok(true);
+    }
+    profile_closes(k, profiles, tol)
+}
+
 /// `SweepProfilesAlongPath`: sweep the positioned profiles along one path segment,
-/// always capped, then remove the unwanted caps. The sweep's and removals'
-/// statuses are ignored, as upstream (only `Unported` passes).
+/// always capped (see [`cap_profile_ends`]), then remove the unwanted caps. The
+/// sweep's and removals' statuses are ignored, as upstream (only `Unported` passes).
 fn sweep_profiles_along_path(
     a: &mut impl PrimitiveCreationAccess,
     profiles: &[Curve],
@@ -103,6 +134,8 @@ fn sweep_profiles_along_path(
     move_profile_center_to_path: bool,
     brep: BrepId,
 ) -> Result<()> {
+    let cap_ends = cap_profile_ends(a.kernel(brep)?, profiles, tol)?;
+
     // CreateCurveSweep somehow mangles the path curve
     let path = path.copy();
 
@@ -110,7 +143,7 @@ fn sweep_profiles_along_path(
     let mut side_faces = Vec::new();
     let mut end_faces = Vec::new();
     let options = SweepOptions {
-        cap_ends: true,
+        cap_ends,
         translational_sweep: false,
         move_profile_center_to_path,
         orient_profile_perpendicular_to_path: false,
@@ -598,5 +631,55 @@ impl PrimitiveCreation {
             return Err(SolidError::sm_err(OP));
         }
         Ok(sweep)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::math::Point3;
+    use crate::primitive::api_curves;
+
+    fn segment(a: [f64; 3], b: [f64; 3]) -> Curve {
+        let [ax, ay, az] = a;
+        let [bx, by, bz] = b;
+        Curve::from(
+            api_curves::create_line_segment(Point3::new(ax, ay, az), Point3::new(bx, by, bz))
+                .expect("segment"),
+        )
+    }
+
+    /// An open profile wire asks for no caps with the opt-in (upstream always asks, and
+    /// its cap fails); a closed one still does, and the open profile sweeps to a sheet.
+    #[test]
+    fn issue_837_open_profile_sweeps_without_caps() {
+        let open = [
+            segment([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+            segment([1.0, 0.0, 0.0], [1.0, 1.0, 0.0]),
+        ];
+        let closed = [
+            segment([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]),
+            segment([1.0, 0.0, 0.0], [1.0, 1.0, 0.0]),
+            segment([1.0, 1.0, 0.0], [0.0, 0.0, 0.0]),
+        ];
+        let mut k = Kernel::default();
+        assert!(cap_profile_ends(&k, &open, 1e-6).unwrap());
+        k.fixes.planar_path_uncapped_open_profiles = true;
+        assert!(!profile_closes(&k, &open, 1e-6).unwrap());
+        assert!(profile_closes(&k, &closed, 1e-6).unwrap());
+        assert!(!cap_profile_ends(&k, &open, 1e-6).unwrap());
+        assert!(cap_profile_ends(&k, &closed, 1e-6).unwrap());
+
+        let path = segment([0.0, 0.0, 0.0], [0.0, 0.0, 5.0]);
+        let sheet = crate::sweep::api_brep::create_sweep_along_planar_path(
+            &mut k,
+            &[&open[0], &open[1]],
+            &[&path],
+            false,
+            3,
+        )
+        .unwrap();
+        assert_eq!(sheet.face_list().len(), 2);
+        assert!(!crate::topology::brep::p2::is_manifold_solid(&sheet).unwrap());
     }
 }

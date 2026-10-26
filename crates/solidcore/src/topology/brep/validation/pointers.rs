@@ -8,10 +8,15 @@
 //! |------|----------|
 //! | [`validate_pointers`] | `SmBrep::ValidatePointers` |
 //! | `fix_reversed` | `N_CrvIsNotReversed(Fixit=TRUE)` |
+//! | `fix_reversed_on`, `end_turns_back`, `first_fundamental_form` | the SolidCraft fork's `PassesReverseDirectionCheckOn`, `nl_EndTurnsBack`, `sm_FirstFundamentalForm` (WR-406) |
 //!
 //! Deviations: no recursion; CCW walks are bounded at the native 100000 steps.
 //! Native const geometry repairs use mutable curve access. Warning-only checks
 //! retain their evaluations and repairs; diagnostic log strings are omitted.
+//! Not upstream (WR-406, tangency-labs/solidcore#891, opt-in
+//! `Kernel::fixes.uv_trim_reversal_on_surface`): a UV trim's turn at its
+//! ends is judged on its face's surface, so the check no longer straightens a
+//! circle's exact trim on a face whose parameters run at different speeds.
 use super::{invalid, required, Object, Reports, ERROR, SUCCESS};
 use crate::error::{EntityRef, Result};
 use crate::geom::assert_array::AssertArray;
@@ -962,6 +967,61 @@ fn check_edgeuse_geometry(k: &Kernel, b: &mut Brep, eu: EdgeuseId) -> Result<()>
 }
 
 fn fix_reversed(k: &Kernel, c: &mut crate::curve::curve::Curve) -> Result<()> {
+    fix_reversed_on(k, c, None)
+}
+
+/// Not upstream (WR-406, tangency-labs/solidcore#891; the SolidCraft fork's
+/// `nl_EndTurnsBack`): whether the control polygon `p0, p1, p2` at one end of a
+/// curve turns back on itself. Without `metric` this is `N_CrvIsNotReversed`'s test;
+/// with the first fundamental form `[E, F, G]` of a surface at that end the legs are
+/// a UV curve's `(x, y)` steps and their lengths and angle are the surface's. A leg of
+/// length 0 there turns back from nothing.
+fn end_turns_back(p0: Vec3, p1: Vec3, p2: Vec3, metric: Option<[f64; 3]>) -> bool {
+    let d1 = p1 - p0;
+    let d2 = p2 - p1;
+    let Some([e, f, g]) = metric else {
+        let (d1, _) = crate::nurbs::geom::normalize(d1).unwrap_or((Vec3::new(0.0, 0.0, 0.0), 0.0));
+        let (d2, mag) =
+            crate::nurbs::geom::normalize(d2).unwrap_or((Vec3::new(0.0, 0.0, 0.0), 0.0));
+        return d1.dot(d2) < -0.95 && mag > crate::nurbs::math::MODEL_TOL;
+    };
+    let aa = e * d1.x * d1.x + 2.0 * f * d1.x * d1.y + g * d1.y * d1.y;
+    let bb = e * d2.x * d2.x + 2.0 * f * d2.x * d2.y + g * d2.y * d2.y;
+    let ab = e * d1.x * d2.x + f * (d1.x * d2.y + d1.y * d2.x) + g * d1.y * d2.y;
+    if aa.is_nan() || aa <= 0.0 || bb.is_nan() || bb <= 0.0 {
+        return false;
+    }
+    let mag = bb.sqrt();
+    let dot = ab / (aa.sqrt() * mag);
+    dot < -0.95 && mag > crate::nurbs::math::MODEL_TOL
+}
+
+/// The first fundamental form `[E, F, G]` of `surface` at `uv`, its derivatives taken
+/// on the given sides (the fork's `sm_FirstFundamentalForm`); `None` where the
+/// surface cannot be evaluated.
+fn first_fundamental_form(
+    k: &Kernel,
+    surface: &crate::surface::surface::Surface,
+    uv: Point2,
+    u_from_left: bool,
+    v_from_left: bool,
+) -> Result<Option<[f64; 3]>> {
+    match surface.evaluate_1st_derivatives(k, uv, u_from_left, v_from_left) {
+        Ok((_, du, dv)) => Ok(Some([du.dot(du), du.dot(dv), dv.dot(dv)])),
+        Err(e) if e.is_unported() => Err(e),
+        Err(_) => Ok(None),
+    }
+}
+
+/// `N_CrvIsNotReversed(Fixit=TRUE)`; with `surface` (WR-406, opt-in) a UV curve's turn
+/// at each end is judged on the surface, from its first fundamental form there (the
+/// fork's `PassesReverseDirectionCheckOn`): a trim whose end the surface cannot
+/// evaluate is left unfixed, and a 3D curve takes the plain test.
+fn fix_reversed_on(
+    k: &Kernel,
+    c: &mut crate::curve::curve::Curve,
+    surface: Option<&crate::surface::surface::Surface>,
+) -> Result<()> {
     use crate::curve::curve::CurveKind;
     let owner = c.owner();
     let base = match c.kind_mut() {
@@ -992,12 +1052,35 @@ fn fix_reversed(k: &Kernel, c: &mut crate::curve::curve::Curve) -> Result<()> {
         }
         _ => return Ok(()),
     };
+    let surface = surface.filter(|_| base.dim == 2);
     let points = base.get_or_create_gw_nurb()?.cpts_mut();
     let n = points.len();
     if n < 5 {
         return Ok(());
     }
-    for (a, m, z) in [(0, 1, 2), (n - 1, n - 2, n - 3)] {
+    // each end's form, on the side its first leg runs into
+    let mut metrics = [None, None];
+    if let Some(surface) = surface {
+        for (slot, (a, m)) in metrics.iter_mut().zip([(0, 1), (n - 1, n - 2)]) {
+            let end = points
+                .get(a)
+                .copied()
+                .ok_or_else(|| invalid("control point"))?;
+            let next = points
+                .get(m)
+                .copied()
+                .ok_or_else(|| invalid("control point"))?;
+            let (end, next) = (end.to_euclid(), next.to_euclid());
+            let uv = Point2::new(end.x, end.y);
+            let Some(form) =
+                first_fundamental_form(k, surface, uv, next.x >= end.x, next.y >= end.y)?
+            else {
+                return Ok(());
+            };
+            *slot = Some(form);
+        }
+    }
+    for ((a, m, z), metric) in [(0, 1, 2), (n - 1, n - 2, n - 3)].into_iter().zip(metrics) {
         let p0 = points
             .get(a)
             .copied()
@@ -1013,12 +1096,7 @@ fn fix_reversed(k: &Kernel, c: &mut crate::curve::curve::Curve) -> Result<()> {
             .copied()
             .ok_or_else(|| invalid("control point"))?
             .to_euclid();
-        let d1 = p1 - p0;
-        let d2 = p2 - p1;
-        let (d1, _) = crate::nurbs::geom::normalize(d1).unwrap_or((Vec3::new(0.0, 0.0, 0.0), 0.0));
-        let (d2, mag) =
-            crate::nurbs::geom::normalize(d2).unwrap_or((Vec3::new(0.0, 0.0, 0.0), 0.0));
-        if d1.dot(d2) < -0.95 && mag > crate::nurbs::math::MODEL_TOL {
+        if end_turns_back(p0, p1, p2, metric) {
             let p = points.get_mut(m).ok_or_else(|| invalid("control point"))?;
             p.x = (p0.x + p2.x) / 2.0;
             p.y = (p0.y + p2.y) / 2.0;
@@ -1092,8 +1170,98 @@ fn check_edge_geometry(
                     return Err(err);
                 }
             }
-            fix_reversed(k, required(b.edgeuse_mut(eu)?.uv_trim_curve.as_mut())?)?;
+            // not upstream (WR-406, #891, opt-in): the turn judged on the face's surface
+            let surface = if k.fixes.uv_trim_reversal_on_surface {
+                Some(required(b.face(f)?.surface.as_ref())?.clone_for_evaluation()?)
+            } else {
+                None
+            };
+            fix_reversed_on(
+                k,
+                required(b.edgeuse_mut(eu)?.uv_trim_curve.as_mut())?,
+                surface.as_ref(),
+            )?;
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod issue_891_tests {
+    use super::*;
+    use crate::curve::curve::{Curve, CurveKind};
+    use crate::nurbs::b_spline_curve::p1::{
+        BSplineCurve, BSplineCurveForm, CanonicalData, KnotType,
+    };
+    use crate::nurbs::b_spline_surface::BSplineSurface;
+    use crate::surface::surface::Surface;
+
+    /// A half circle of radius 1 about (30, 2) on a plane spanning 60 x 4 over
+    /// [0,1]^2, starting at 35 degrees, as the exact rational trim: its polygon is
+    /// square on the plane but folds back by about 170 degrees in (u, v).
+    fn trim() -> Curve {
+        let (cx, cy, r) = (30.0_f64, 2.0_f64, 1.0_f64);
+        let point = |deg: f64, scale: f64| {
+            let t = deg.to_radians();
+            Vec3::new(
+                (cx + scale * r * t.cos()) / 60.0,
+                (cy + scale * r * t.sin()) / 4.0,
+                0.0,
+            )
+        };
+        let s = 2.0_f64.sqrt();
+        let control = [
+            point(35.0, 1.0),
+            point(80.0, s),
+            point(125.0, 1.0),
+            point(170.0, s),
+            point(215.0, 1.0),
+        ];
+        let w = 0.5_f64.sqrt();
+        let curve = BSplineCurve::create_canonical(&CanonicalData {
+            dim: 2,
+            degree: 2,
+            control_points: &control,
+            form: BSplineCurveForm::Unspecified,
+            knot_multiplicities: &[3, 2, 3],
+            knots: &[0.0, 0.5, 1.0],
+            knot_type: KnotType::Unspecified,
+            weights: Some(&[1.0, w, 1.0, w, 1.0]),
+            trim: None,
+        })
+        .unwrap();
+        Curve::from(curve)
+    }
+
+    fn middle_control_point(c: &mut Curve) -> Vec3 {
+        let CurveKind::BSpline(base) = c.kind_mut() else {
+            panic!("a B-spline trim");
+        };
+        base.get_or_create_gw_nurb().unwrap().cpts_mut()[1].to_euclid()
+    }
+
+    /// The plain check takes the exact trim for a reversal and moves its second
+    /// control point onto the chord; judged on the surface it is left as it is.
+    #[test]
+    fn issue_891_exact_trim_is_not_straightened() {
+        let k = Kernel::default();
+        let plane = Surface::from(
+            BSplineSurface::create_bilinear_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(60.0, 0.0, 0.0),
+                Vec3::new(0.0, 4.0, 0.0),
+                Vec3::new(60.0, 4.0, 0.0),
+            )
+            .unwrap(),
+        );
+
+        let mut plain = trim();
+        let before = middle_control_point(&mut plain);
+        fix_reversed(&k, &mut plain).unwrap();
+        assert_ne!(middle_control_point(&mut plain), before);
+
+        let mut on_surface = trim();
+        fix_reversed_on(&k, &mut on_surface, Some(&plane)).unwrap();
+        assert_eq!(middle_control_point(&mut on_surface), before);
+    }
 }

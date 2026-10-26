@@ -1,0 +1,12 @@
+#### WR-406. The pointer check's UV trim reversal test is judged in raw (u, v) and straightens exact trims
+- **Severity:** Wrong result (a check modifies the body it checks: an exact trim becomes kinked)
+- **Area:** Topology / B-rep validation
+- **Location:** `source/SMLib/src/SmEdge.cpp`, `SmEdge::ValidateGeometry` (from `SmBrep::ValidatePointers`): `m_pUVTrimCurve->PassesValidityCheck(SM_VC_REVERSE_DIRECTION, ...)`, i.e. `N_CrvIsNotReversed(cur, TRUE)` (`NL_CrvBasic.cpp`), which takes a polygon whose first legs meet at a cosine under -0.95 for a reversal and moves P1 to the midpoint of P0 and P2 with weight 1.
+- **What happens:** on a face whose parameters run at different speeds (an extrusion's side `SmPlane` spread 60 x 4 over [0,1]^2) the exact trim of a circle is a thin ellipse in (u, v); a quarter circle's polygon, square on the face, folds back about 171 degrees there. The check straightens that quarter, and `AssertValid` then reports `SmBSplineCurve` test 7 (a kink) on the body it has just changed.
+- **Trigger:** `SmApiBrepCheck` / `ValidatePointers` on a body with circular trims on such faces.
+- **How found:** reported by jyviko (tangency-labs/solidcore#891, item 1), confirmed there with gdb watchpoints; fixed in the SolidCraft fork (`N_CrvIsNotReversedInMetric`, `SmBSplineCurve::PassesReverseDirectionCheckOn`).
+- **Confirmed:** by reading `ValidateGeometry` and `N_CrvIsNotReversed`; the port reproduces it (test below).
+- **Fix:** measure each end's legs with the surface's first fundamental form (E, F, G) there, the derivatives taken on the side the first leg runs into; a trim whose end the surface cannot evaluate is left unfixed. The repair of a real reversal is unchanged.
+- **Not covered:** item 2 of the issue (test 13's radius of curvature in raw (u, v)) and item 3 (a check that writes). The port's `AssertValid` radius test is left as it is.
+- **Rust port:** `crates/solidcore/src/topology/brep/validation/pointers.rs` (`fix_reversed_on`, `end_turns_back`, `first_fundamental_form`), opt-in `Kernel::fixes.uv_trim_reversal_on_surface` (off by default: upstream's raw (u, v) test). Test: `issue_891_exact_trim_is_not_straightened` in the same file.
+- Fixes tangency-labs/solidcore#891 (item 1).

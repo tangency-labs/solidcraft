@@ -1373,9 +1373,15 @@ impl BSplineCurve {
                 min_sep,
             )?;
 
-            // (upstream compares before setting the minimum radius)
+            // (upstream compares before setting the minimum radius, so the test never
+            // fires; the opt-in `Kernel::fixes.bspline_check_min_radius` reads it first:
+            // WR-382, tangency-labs/solidcore#475)
+            let first_radius = solutions.first().map_or(BIG_DOUBLE, |s| s.solution_value);
+            if k.fixes.bspline_check_min_radius {
+                min_radius = first_radius;
+            }
             if min_radius < tol {
-                min_radius = solutions.first().map_or(BIG_DOUBLE, |s| s.solution_value);
+                min_radius = first_radius;
                 let min_radius_param = match solutions.first() {
                     Some(s) => s.param(0)?,
                     None => 0.0,
@@ -1579,6 +1585,36 @@ mod tests {
         assert_eq!(list.get(0).map(|r| r.test_index), Some(0));
         // the base checks pass (no owner); test 0 still fails
         assert!(!e.assert_valid(&k, None, false, ObjectKey(1)).unwrap());
+    }
+
+    /// tangency-labs/solidcore#475 (WR-382): tests 13/14 (an extremely small radius of
+    /// curvature) compare the minimum radius before it is read, so they never fire; the
+    /// opt-in reads it first. A quadratic with a sharp bend: radius 1/h = 1e-3 at its
+    /// middle against a tolerance of about h / 20000 = 0.05.
+    #[test]
+    fn issue_475_min_radius_of_curvature_test() {
+        let mut k = Kernel::default();
+        let h = 1000.0;
+        let c = curve(
+            2,
+            &[[-1.0, 0.0, 0.0], [0.0, h, 0.0], [1.0, 0.0, 0.0]],
+            &[0.0, 0.0, 0.0, 1.0, 1.0, 1.0],
+        );
+        let tests = |k: &Kernel| {
+            let mut list = AssertArray::new();
+            let ok = c
+                .assert_valid(k, Some(&mut list), true, ObjectKey(3))
+                .unwrap();
+            let idx: Vec<_> = (0..list.len())
+                .filter_map(|i| list.get(i).map(|r| r.test_index))
+                .collect();
+            (ok, idx)
+        };
+        let (_, idx) = tests(&k);
+        assert!(!idx.contains(&14), "{idx:?}");
+        k.fixes.bspline_check_min_radius = true;
+        let (ok, idx) = tests(&k);
+        assert!(!ok && idx.contains(&14), "{idx:?}");
     }
 
     #[test]

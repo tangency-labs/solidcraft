@@ -168,7 +168,9 @@
 //! - **Manager destructor** leaves the objects it does not list in the store (upstream
 //!   allocates them from the context).
 //! - `RemoveCoincidentNoEdgeProtoVertex` keeps upstream's `return SM_SUCCESS` (read as
-//!   `TRUE`) when the point solve finds nothing (plan/upstream-issues.md WR-73).
+//!   `TRUE`) when the point solve finds nothing (plan/upstream-issues.md WR-73); the
+//!   opt-in `Kernel::fixes.proto_vertex_miss_is_false` returns `FALSE` there
+//!   (tangency-labs/solidcore#848).
 //! - `Dump`, `Draw` and the `SM_DEBUG_CODE` blocks are not ported.
 //! - **Recursion.** None.
 
@@ -625,6 +627,64 @@ mod tests {
             .remove_coincident_no_edge_proto_vertex(&k, &geo, pe, v3)
             .unwrap());
         assert_eq!(m.proto_vertices(), &[v3]);
+    }
+
+    /// tangency-labs/solidcore#848 (WR-73): with the opt-in, a proto vertex the proto
+    /// edge does not reach is reported as not removed, so the caller goes on testing it
+    /// against the remaining proto edges.
+    #[test]
+    fn issue_848_no_hit_is_false() {
+        let mut k = Kernel::default();
+        k.fixes.proto_vertex_miss_is_false = true;
+        let geo = Geo(vec![line([0.0, 0.0, 0.0], [2.0, 0.0, 0.0])]);
+        let mut m = manager();
+        let ivl = geo.0[0].natural_interval();
+        let v0 = m
+            .new_proto_vertex(Point3::new(0.0, 0.0, 0.0), 1e-5)
+            .unwrap();
+        let v1 = m
+            .new_proto_vertex(Point3::new(2.0, 0.0, 0.0), 1e-5)
+            .unwrap();
+        let pe = m.new_proto_edge(&k, Some(v0), Some(v1), ivl).unwrap();
+        let ed = m
+            .insert_edge_definition(EdgeDefinition::new(
+                Some(C0),
+                ivl,
+                R0,
+                L0,
+                1e-5,
+                None,
+                None,
+                Some(pe),
+            ))
+            .unwrap();
+        m.proto_edge_mut(pe)
+            .unwrap()
+            .edge_definitions_mut()
+            .push(ed);
+        // off the curve: not removed, and reported so
+        let off = m
+            .new_proto_vertex(Point3::new(1.0, 5.0, 0.0), 1e-5)
+            .unwrap();
+        m.add_proto_vertex(off);
+        assert!(!m
+            .remove_coincident_no_edge_proto_vertex(&k, &geo, pe, off)
+            .unwrap());
+        assert_eq!(m.proto_vertices(), &[off]);
+        // on the curve: still removed
+        let on = m
+            .new_proto_vertex(Point3::new(1.0, 0.0, 0.0), 1e-5)
+            .unwrap();
+        m.add_proto_vertex(on);
+        assert!(m
+            .remove_coincident_no_edge_proto_vertex(&k, &geo, pe, on)
+            .unwrap());
+        assert_eq!(m.proto_vertices(), &[off]);
+        // the default keeps upstream's TRUE
+        k.fixes.proto_vertex_miss_is_false = false;
+        assert!(m
+            .remove_coincident_no_edge_proto_vertex(&k, &geo, pe, off)
+            .unwrap());
     }
 
     #[test]

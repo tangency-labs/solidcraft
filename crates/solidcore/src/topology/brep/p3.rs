@@ -13,6 +13,8 @@
 //! | [`api_brep_copy`]               | `SmApiBrepCopy`                                  |
 //! | [`copy_vertices`], [`copy_vertices_with_context`], [`CopySource`] | `SmBrep::CopyVertices`                           |
 //! | [`delete_face`], [`DeleteFaceOptions`] | `SmBrep::DeleteFace`                      |
+//! | [`remove_slit_loops_where_solids_touch`] | not upstream: the fork's `SmBrep::RemoveSlitLoopsWhereSolidsTouch` (issue #746) |
+//! | [`split_disconnected_shells`]  | not upstream: the fork's `SmBrep::SplitDisconnectedShells` (issue #746) |
 //! | [`make_wire_edge`]              | `SmBrep::MakeWireEdge`                           |
 //! | [`make_wire_edge_vertex`]       | `SmBrep::MakeWireEdgeVertex`                     |
 //! | [`merge_brep`], [`merge_brep_with_context`] | `SmBrep::MergeBrep`                              |
@@ -2485,6 +2487,171 @@ fn delete_faceuses(b: &mut Brep, faceuses: [FaceuseId; 2]) -> Result<()> {
     for x in faceuses {
         if let Some(owner) = eu1::faceuse_shell(b, x)? {
             ignore_soft(shell::shell_remove_faceuse(b, owner, x))?;
+        }
+    }
+    Ok(())
+}
+
+// ---- slit loops where solids touch (not upstream; issue #746) --------------------------------
+
+/// The bound on [`split_disconnected_shells`]' splits of one shell (the fork's 1024 passes).
+const MAX_SHELL_SPLITS: usize = 1024;
+
+/// Not upstream (tangency-labs/solidcore#746, the fork's
+/// `SmBrep::RemoveSlitLoopsWhereSolidsTouch`): removes the inner loops of no area a
+/// volumetric Boolean leaves where solids touch along a curve inside a face (a cylinder
+/// resting on the top of a box, united), then splits the shells joined only through
+/// them ([`split_disconnected_shells`]). An inner loop is removed only when each of its
+/// edges is used exactly twice by the loop and also bounds another face, which keeps
+/// it; its uses go as [`delete_face`] removes a face's (edge uses destroyed through
+/// `env`, vertex uses taken off their vertices, the loop uses off their face uses).
+/// `SmTrimmingTools::CheckFace` rejects such a loop (bad orientation, zero area), and it
+/// bounds nothing: the regularized result is the solids touching there, each whole.
+/// Returns whether a loop was removed.
+///
+/// # Errors
+///
+/// `SM_ERR_NULL_POINTER` for a loop without both loop uses, an edge use without mate,
+/// edge or vertex use, a vertex use without vertex (`NER`); those of the edge use
+/// destruction, the topology reads and the shell split.
+pub fn remove_slit_loops_where_solids_touch(
+    k: &mut Kernel,
+    b: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+) -> Result<bool> {
+    let mut removed = false;
+    for f in p1::faces(b, None)? {
+        // inner loops only
+        let loops = face2::loops(b, f, false, None)?;
+        for &l in loops.iter().skip(1) {
+            let lu = b.loop_(l)?.loopuse.ok_or_else(ner)?;
+            let uses = lu1::edgeuses(b, lu, None, None)?;
+            if uses.len() < 2 {
+                continue;
+            }
+            // every edge used twice by the loop, and bounding another face too
+            let mut slit = true;
+            for &eu in &uses {
+                let e = eu1::edge(b, eu)?.ok_or_else(ner)?;
+                let mut in_loop = 0usize;
+                for &other in &uses {
+                    if eu1::edge(b, other)? == Some(e) {
+                        in_loop += 1;
+                    }
+                }
+                let other_face = edge::faces(b, e, None)?.iter().any(|&g| g != f);
+                slit = in_loop == 2 && other_face;
+                if !slit {
+                    break;
+                }
+            }
+            if !slit {
+                continue;
+            }
+
+            // take the loop off its face, then its edge uses and vertex uses off their
+            // edges and vertices
+            let other_lu = lu1::other_loopuse(b, lu)?.ok_or_else(ner)?;
+            b.face_mut(f)?.loops.retain(|&x| x != l);
+            for x in [lu, other_lu] {
+                let fu = lu1::faceuse(b, x)?.ok_or_else(ner)?;
+                faceuse_remove_loopuse(b, fu, x)?;
+            }
+            for eu in uses {
+                let mate = eu1::mate(b, eu)?.ok_or_else(ner)?;
+                let e = eu1::edge(b, eu)?.ok_or_else(ner)?;
+                edge_remove_edgeuse(b, e, eu)?;
+                edge_remove_edgeuse(b, e, mate)?;
+                let (vu1, v1) = eu_vertex(b, eu)?;
+                vertex_remove_vertexuse(b, v1, vu1)?;
+                let (vu2, v2) = eu_vertex(b, mate)?;
+                vertex_remove_vertexuse(b, v2, vu2)?;
+                crate::topology::edgeuse::p2::destroy(k, b, eu, env)?;
+                crate::topology::edgeuse::p2::destroy(k, b, mate, env)?;
+            }
+            removed = true;
+        }
+    }
+    if removed {
+        split_disconnected_shells(k, b)?;
+    }
+    Ok(removed)
+}
+
+/// Not upstream (tangency-labs/solidcore#746, the fork's
+/// `SmBrep::SplitDisconnectedShells`): splits each shell into its connected parts, as
+/// [`delete_face`] splits a shell a removed face leaves in pieces. The face uses
+/// reached through the shell from the first face use's face's first vertex stay; the
+/// rest move to a new face-use shell, in the infinite region or in a region of its
+/// own (with the old region's void flag), which is split in its turn. At most
+/// [`MAX_SHELL_SPLITS`] splits of each shell.
+///
+/// # Errors
+///
+/// Those of the shell traversal, the mark lock and the list edits.
+pub fn split_disconnected_shells(k: &mut Kernel, b: &mut Brep) -> Result<()> {
+    for r in p1::regions(b, None)? {
+        let mut shells = region_shells(b, r)?;
+        let mut jj = 0;
+        while let Some(&s) = shells.get(jj) {
+            jj += 1;
+            for _ in 0..MAX_SHELL_SPLITS {
+                let all = match &b.shell(s)?.members {
+                    ShellMembers::Faceuses(list) => list.clone(),
+                    _ => Vec::new(),
+                };
+                let Some(&first) = all.first() else {
+                    break;
+                };
+                if all.len() < 2 {
+                    break;
+                }
+                let face = eu1::faceuse_face(b, first)?.ok_or_else(ner)?;
+                let Some(&start) = face_vertices(b, face)?.first() else {
+                    break;
+                };
+                let mut reached = Vec::new();
+                let mut marks = Marks::default();
+                let mut lock = MarkLock::new(core::slice::from_mut(&mut k.context), 0, ALL_MARKS)?;
+                let traversed = tt::shell_traversal(
+                    k,
+                    b,
+                    &mut marks,
+                    start,
+                    s,
+                    None,
+                    Some(&mut reached),
+                    &lock,
+                );
+                lock.release(core::slice::from_mut(&mut k.context))?;
+                traversed?;
+                if reached.len() >= all.len() {
+                    break;
+                }
+
+                // the face uses not reached go to a new shell, in the infinite region or
+                // a region of its own
+                let new_s = b.add_shell_record(crate::topology::Shell::default())?;
+                set_shell_type(b, new_s, ShellType::Faceuse)?;
+                if Some(r) == b.infinite_region() {
+                    shell::region_post_insert_shell(b, r, new_s)?;
+                } else {
+                    let new_r = b.add_region_record(Region::new())?;
+                    let is_void = b.region(r)?.is_void();
+                    region_set_is_void(b, new_r, is_void)?;
+                    shell::region_post_insert_shell(b, new_r, new_s)?;
+                    b.post_insert_region(new_r)?;
+                }
+                for fu in all {
+                    if reached.contains(&fu) {
+                        continue;
+                    }
+                    shell::shell_remove_faceuse(b, s, fu)?;
+                    shell::shell_post_insert_faceuse(b, new_s, fu)?;
+                }
+                // the new shell may have parts of its own: it is split in its turn
+                shells.push(new_s);
+            }
         }
     }
     Ok(())

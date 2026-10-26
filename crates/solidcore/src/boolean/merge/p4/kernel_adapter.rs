@@ -65,6 +65,7 @@ fn cache_kernel(k: &Kernel, context: &Context) -> Kernel {
         upstream_ub_passed: Vec::new(),
         cone_parallel_midpoint_test: core::cell::Cell::new(k.cone_parallel_midpoint_test.get()),
         memoize_curve_caches: k.memoize_curve_caches,
+        fixes: k.fixes,
     }
 }
 

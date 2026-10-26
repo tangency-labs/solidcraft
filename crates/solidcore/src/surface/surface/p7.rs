@@ -66,7 +66,8 @@
 //!   is `FindDegenParamForDirection`'s angle bookkeeping (`dBestRad`,
 //!   `dNearBestRad`: computed in release builds but never read).
 //! - **Upstream quirks kept:** `GetFlatCorners` masks its return value with `&=` while
-//!   filling the corner points; `SmSSGlobalSolver::BranchMayContainAnswers` returns
+//!   filling the corner points (the opt-in `Kernel::fixes.flat_corners_test_bits` tests each
+//!   bit instead, WR-384); `SmSSGlobalSolver::BranchMayContainAnswers` returns
 //!   `SM_SUCCESS` (that is, `FALSE`) for a node outside its face and `NER`'s status
 //!   (non-zero: `TRUE`) for a missing patch; `sm_GoodDropResult` compares the guess and
 //!   result distances with swapped names; `FindDegenParamForDirection` compares a
@@ -93,7 +94,8 @@ use crate::geom::extent1d::Extent1d;
 use crate::geom::extent1d::ExtentNd;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p2::{
-    evaluate_curve_continuity, frenet_from_derivatives, ContinuityType, CurveEval,
+    evaluate_curve_continuity_with, frenet_from_derivatives, ContinuityOptions, ContinuityType,
+    CurveEval,
 };
 use crate::geom::global_solver::{
     Branch, GlobalSolve, GlobalSolver, PreferredSolution, SolutionPairType, SolutionRequested,
@@ -514,7 +516,8 @@ pub fn base_evaluate_normal<S: SurfaceEvaluate + ?Sized>(
 /// # Errors
 ///
 /// [`SolidError::Unported`] from the surface's evaluation; those of
-/// `smgu_EvaluateCurveContinuity` (see the module docs).
+/// `smgu_EvaluateCurveContinuity` (see the module docs; WR-380's opt-in G2 test from
+/// `Kernel::fixes.geometric_g2_continuity`).
 pub fn base_is_closed<S: SurfaceEvaluate + ?Sized>(
     k: &Kernel,
     surface: &S,
@@ -633,7 +636,7 @@ pub fn base_is_closed<S: SurfaceEvaluate + ?Sized>(
                     } else {
                         (d2_min.dv, d2_min.dvv, d2_max.dv, d2_max.dvv)
                     };
-                let curve_continuity = evaluate_curve_continuity(
+                let curve_continuity = evaluate_curve_continuity_with(
                     &CurveEval {
                         position: p_min,
                         first: first_min,
@@ -647,6 +650,9 @@ pub fn base_is_closed<S: SurfaceEvaluate + ?Sized>(
                         third: None,
                     },
                     CONTINUITY_ANGLE,
+                    &ContinuityOptions {
+                        geometric_g2: k.fixes.geometric_g2_continuity,
+                    },
                 )?;
 
                 // save lowest found continuity
@@ -961,11 +967,18 @@ impl Surface {
             }
         }
 
-        // optional output (upstream masks the return value while testing)
+        // optional output (upstream masks the return value while testing: `if (lRtn &=
+        // bit)`; the opt-in `Kernel::fixes.flat_corners_test_bits` tests each bit, WR-384)
+        let test_bits = k.fixes.flat_corners_test_bits;
         if let Some(pts) = points.as_mut() {
             for ((c, bit), p) in corners.iter().zip(FLAT_CORNER_BITS).zip(pts.iter_mut()) {
-                rtn &= bit;
-                if rtn != 0 {
+                let flat = if test_bits {
+                    rtn & bit
+                } else {
+                    rtn &= bit;
+                    rtn
+                };
+                if flat != 0 {
                     if let Some(v) = ignored(self.evaluate_point(k, *c))? {
                         *p = v;
                     }
@@ -2988,6 +3001,31 @@ fn cs_normalize_local_solve(
 mod tests {
     use super::*;
     use crate::surface::plane::Plane;
+
+    /// tangency-labs/solidcore#525 (WR-384): with the corner points wanted, upstream's
+    /// `if (lRtn &= bit)` clears the other corners' bits (4 flat corners come back as
+    /// none, with only the first point); the opt-in tests each bit.
+    #[test]
+    fn issue_525_flat_corners_keep_their_bits() {
+        let mut k = Kernel::default();
+        // a degenerate bilinear patch: every corner's derivatives are parallel
+        let s = Surface::from(
+            BSplineSurface::create_bilinear_surface(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(2.0, 0.0, 0.0),
+                Vec3::new(3.0, 0.0, 0.0),
+            )
+            .unwrap(),
+        );
+        assert_eq!(s.flat_corners(&k, 1.0, false).unwrap().flags, 15);
+        let up = s.flat_corners(&k, 1.0, true).unwrap();
+        assert_eq!(up.flags, 0);
+        k.fixes.flat_corners_test_bits = true;
+        let fixed = s.flat_corners(&k, 1.0, true).unwrap();
+        assert_eq!(fixed.flags, 15);
+        assert!(fixed.points.unwrap().iter().all(|p| *p != Vec3::UNDEF));
+    }
 
     fn plane() -> Surface {
         Surface::from(Plane::from_normal(

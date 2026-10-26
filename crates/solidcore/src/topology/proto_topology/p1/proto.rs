@@ -3256,7 +3256,8 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
     /// twice the proto edge's tolerance) (`RemoveCoincidentNoEdgeProtoVertex`; the
     /// proto vertex is unlisted, not deleted). As upstream, `true` is also returned,
     /// with nothing removed, when the point solve fails or finds nothing (upstream
-    /// returns `SM_SUCCESS` from its `SmBoolean` function there).
+    /// returns `SM_SUCCESS` from its `SmBoolean` function there), unless
+    /// `Kernel::fixes.proto_vertex_miss_is_false` is set (WR-73, then `false`).
     ///
     /// # Errors
     ///
@@ -3305,12 +3306,14 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
             &opts,
         ))?;
         // upstream returns SM_SUCCESS here, which reads as TRUE (the proto vertex is
-        // not removed): plan/upstream-issues.md WR-73
+        // not removed): plan/upstream-issues.md WR-73; FALSE with the opt-in
+        // `Kernel::fixes.proto_vertex_miss_is_false` (tangency-labs/solidcore#848)
+        let missed = !k.fixes.proto_vertex_miss_is_false;
         let Some(sols) = sols else {
-            return Ok(true);
+            return Ok(missed);
         };
         if sols.is_empty() {
-            return Ok(true);
+            return Ok(missed);
         }
 
         // When the ProtoVertex is Edgeless and XSects a ProtoEdge - remove it

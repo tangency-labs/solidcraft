@@ -338,6 +338,10 @@ pub struct LocalSolve1d {
     pub upper_bound_hits: u64,
     /// Why the last solve stopped.
     pub termination_reason: TerminationReason,
+    /// Not upstream (WR-253, tangency-labs/solidcore#481): `SolveOscillating` takes a
+    /// sign change only from an interior guess that evaluated (`false`, the default:
+    /// upstream also reads a failed guess's leftover `F`).
+    failed_guess_no_sign_change: bool,
 }
 
 impl Default for LocalSolve1d {
@@ -373,6 +377,7 @@ impl LocalSolve1d {
             lower_bound_hits: UNDEF_ULONG,
             upper_bound_hits: UNDEF_ULONG,
             termination_reason: TerminationReason::Undefined,
+            failed_guess_no_sign_change: false,
         }
     }
 
@@ -422,6 +427,14 @@ impl LocalSolve1d {
     /// (`SetSolutionInterval`).
     pub fn set_solution_interval(&mut self, interval: Extent1d) {
         self.interval = interval;
+    }
+
+    /// Not upstream (WR-253, tangency-labs/solidcore#481): whether `SolveOscillating`
+    /// ignores an interior guess whose evaluation failed when it looks for a sign change
+    /// (`true`), instead of reading the `F` the failed evaluation left behind (`false`,
+    /// upstream and the default).
+    pub fn set_failed_guess_no_sign_change(&mut self, on: bool) {
+        self.failed_guess_no_sign_change = on;
     }
 
     /// Selects the algorithm (`SetSolverAlgorithm`).
@@ -731,6 +744,7 @@ impl LocalSolve1d {
             let prev_t = self.prev1.t;
             let curr_f = self.curr.f;
 
+            let mut evaluated_sign_change = false;
             for g in GUESSES {
                 let mid_t = prev_t + g * (curr_t - prev_t);
                 temp.t = mid_t;
@@ -743,11 +757,18 @@ impl LocalSolve1d {
                     best_interior_t = mid_t;
                 }
                 if temp.f * curr_f <= 0.0 {
+                    evaluated_sign_change = true;
                     break; // opposite sign
                 }
             }
 
-            if temp.f * curr_f <= 0.0 {
+            // (upstream tests the last guess's `F`, failed or not: WR-253)
+            let sign_change = if self.failed_guess_no_sign_change {
+                evaluated_sign_change
+            } else {
+                temp.f * curr_f <= 0.0
+            };
+            if sign_change {
                 // Curr and prev have the same sign, opposite to mid: pick the end on
                 // the side of the given guess.
                 let pick_curr = if guess_t < temp.t {
@@ -1239,6 +1260,18 @@ mod tests {
         let mut out = FunctionValue::default();
         Cycle.evaluate(LAST_GUESS, &mut out, true).unwrap();
         assert!(out.f > 0.9);
+    }
+
+    /// tangency-labs/solidcore#481 (WR-253): with the opt-in, the failed last guess is
+    /// no sign change, and the solve finds nothing, as on the clean function.
+    #[test]
+    fn issue_481_failed_guess_is_no_sign_change() {
+        let mut s = LocalSolve1d::with_interval(Extent1d::from_min_max(-3.0, 3.0), false);
+        s.set_failed_guess_no_sign_change(true);
+        let r = s.solve_it(&mut CycleFailingAtLastGuess, 0.0, 1e-9).unwrap();
+        assert!(!r.found, "{r:?}");
+        assert_ne!(r.t.to_bits(), LAST_GUESS.to_bits());
+        assert_ne!(s.lower_bracket_t.to_bits(), LAST_GUESS.to_bits());
     }
 
     #[test]

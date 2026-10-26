@@ -1,0 +1,11 @@
+#### WR-384. `SmSurface::GetFlatCorners` clears the other corners' bits while collecting the corner points
+- **Severity:** Wrong result (flat corners reported as none when their points are asked for)
+- **Area:** Surfaces
+- **Location:** `source/SMLib/src/SmSurface.cpp`, `SmSurface::GetFlatCorners`: with the optional points, `if (lRtn &= SM_FC_...)` for each corner in turn.
+- **What happens:** `&=` assigns: the first test keeps only the first corner's bit, the next clears it, so after the loop the return value is 0 (or only the first corner) and only the first flat corner's point is filled. Without the points the flags are right.
+- **Trigger:** a surface with two or more flat corners, asked for their points; e.g. a degenerate bilinear patch whose four corners are collinear: flags 15 without points, 0 with them.
+- **How found:** tangency-labs/solidcore#525 (SolidCraft regression rig on SMLib).
+- **Confirmed:** source; the port reproduces upstream with the default.
+- **Fix:** test each bit (`lRtn & SM_FC_...`) without changing `lRtn`.
+- **Not ported (same issue):** the issue's second item, `SmGlobalSolver::BranchMayContainAnswers`'s perspective cull sizing sphere 2 with sphere 1's radius and centre. In the port (`GlobalSolver::projected_may_contain_answers`) the radius loops also project `centre + offset` (a position) as an offset vector, so the cull never culls in practice: it costs time, not answers. A correct cull needs the projection of the sphere's silhouette cone; the four-offset bound the code takes can under-estimate it and drop real answers, so no opt-in is offered.
+- **Rust port:** opt-in `Kernel::fixes.flat_corners_test_bits` (default `false`, upstream's `&=`) in `Surface::flat_corners`, `crates/solidcore/src/surface/surface/p7.rs`. Test `issue_525_flat_corners_keep_their_bits`. With the default, `surface.surface_p7` compares as before. Fixes the `GetFlatCorners` half of tangency-labs/solidcore#525.

@@ -10,6 +10,9 @@
 //! Mutated offset/generator curves and marriage flags survive errors. The returned
 //! map is the surface attribute; callers attach it using their attribute store.
 //! No recursion. Invalid indices return errors instead of upstream undefined reads.
+//! Opt-in `Kernel::fixes.taper_pivot_nearest_corner` (WR-402): when the two links of a
+//! corner meet at both ends (a two-curve loop), the pivot is the joint nearest the
+//! corner's offset curve, not `sm_FindPivotPoint`'s first coincident pair.
 
 use crate::curve::composite_curve::OffsetMapAttribute;
 use crate::curve::curve::Curve;
@@ -79,7 +82,11 @@ pub fn ruled_surface_from_offset(
         let other = generators
             .get(other)
             .ok_or_else(|| SolidError::sm_err(OP))?;
-        let pivot = find_pivot_point(source, other, options.same_point_tolerance)?;
+        let pivot = if k.fixes.taper_pivot_nearest_corner {
+            pivot_nearest_corner(source, other, options.same_point_tolerance, &first)?
+        } else {
+            find_pivot_point(source, other, options.same_point_tolerance)?
+        };
         second = BSplineCurve::create_point_curve(pivot)?;
         second_is_generator = false;
         ignore_status(first.transform(&options.movement, None))?;
@@ -166,6 +173,53 @@ pub fn ruled_surface_from_offset(
     Ok((surface, options.surface_intersection.then_some(map)))
 }
 
+/// The joint of `first` and `second` nearest the ends of the untransformed
+/// `corner` curve (WR-402). Two links closing a loop meet at both ends, and
+/// `find_pivot_point` gives both corners the same joint; with one joint this is
+/// `find_pivot_point`. Coincidence uses its squared-distance test.
+fn pivot_nearest_corner(
+    first: &BSplineCurve,
+    second: &BSplineCurve,
+    tol: f64,
+    corner: &BSplineCurve,
+) -> Result<Vec3> {
+    let point = |c: &BSplineCurve, t: f64| -> Result<Vec3> {
+        Ok(ignored(c.evaluate_point(t))?.unwrap_or(Vec3::UNDEF))
+    };
+    let (a, b, c) = (
+        first.natural_interval(),
+        second.natural_interval(),
+        corner.natural_interval(),
+    );
+    let (start1, end1) = (point(first, a.min())?, point(first, a.max())?);
+    let (start2, end2) = (point(second, b.min())?, point(second, b.max())?);
+    let joints: Vec<Vec3> = [
+        (start1, start2),
+        (end1, start2),
+        (start1, end2),
+        (end1, end2),
+    ]
+    .into_iter()
+    .filter(|(p, q)| (*p - *q).length_squared() < tol)
+    .map(|(_, q)| q)
+    .collect();
+    if joints.len() < 2 {
+        return find_pivot_point(first, second, tol);
+    }
+    let (corner_start, corner_end) = (point(corner, c.min())?, point(corner, c.max())?);
+    let mut best: Option<(f64, Vec3)> = None;
+    for joint in joints {
+        let score = joint.distance_squared(corner_start) + joint.distance_squared(corner_end);
+        if best.is_none_or(|(least, _)| score < least) {
+            best = Some((score, joint));
+        }
+    }
+    match best {
+        Some((_, joint)) => Ok(joint),
+        None => find_pivot_point(first, second, tol),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,5 +260,37 @@ mod tests {
         assert_eq!(unmarried, [false, true]);
         assert_eq!(offset.evaluate_point(0.0)?, Vec3::Y + 2.0 * Vec3::Z);
         Ok(())
+    }
+
+    /// An outward draft of a half disc (a line and an arc closing the loop) with
+    /// linear-extension corners and both caps is a closed solid with the opt-in:
+    /// each corner rules to its own joint (WR-402).
+    #[test]
+    fn issue_479_two_curve_loop_taper_is_closed() {
+        use crate::geom::attribute::{AttributeStore, ObjectKey};
+        use crate::mass::integrator::properties::{brep_volume, PropertyAttributes};
+        use crate::primitive::api_curves::{create_arc, create_line_segment};
+        use crate::sweep::api_brep::create_taper_extrude;
+        use crate::topology::brep::p2::is_manifold_solid;
+
+        let line = Curve::from(
+            create_line_segment(Vec3::new(-20.0, 0.0, 0.0), Vec3::new(20.0, 0.0, 0.0)).unwrap(),
+        );
+        let arc = Curve::from(create_arc(Vec3::ZERO, 20.0, 0.0, 180.0).unwrap());
+        let curves = [Some(&line), Some(&arc)];
+
+        let mut k = Kernel::default();
+        k.fixes.taper_pivot_nearest_corner = true;
+        let mut solid = create_taper_extrude(&mut k, &curves, 10.0, -3.0, 3, false).unwrap();
+        assert!(is_manifold_solid(&solid).unwrap());
+        let store = AttributeStore::default();
+        let key_of = |_| ObjectKey(0);
+        let attributes = PropertyAttributes {
+            store: &store,
+            key_of: &key_of,
+        };
+        let volume = brep_volume(&k, &mut solid, 1e-6, &attributes).unwrap();
+        // pi (20 + t)^2 / 2 + 2 (20 + t) t integrated over the draft
+        assert!((volume - 6555.9139).abs() < 1e-2, "volume {volume}");
     }
 }

@@ -162,7 +162,10 @@ fn status_value(e: &SolidError) -> f64 {
 /// `sm_RefineCCSolutions`: polishes the ends of the curve/curve range solutions by a
 /// local intersection from each end (when the end deviates by more than `1e-6`),
 /// keeping a result that deviates less and moves both parameters by less than
-/// `0.002` of the range. `curve_of` resolves a solution object to its curve.
+/// `0.002` of the range (as upstream, the end's move is measured from the range's start,
+/// so a forward range's end is never refined, unless
+/// `Kernel::fixes.refine_cc_range_ends` is set: WR-383). `curve_of` resolves a solution
+/// object to its curve.
 ///
 /// # Errors
 ///
@@ -250,6 +253,13 @@ where
                         frac2 = 1.0 - frac2;
                     }
 
+                    // Not upstream (WR-383, tangency-labs/solidcore#527): with the
+                    // opt-in, an end is judged by its distance from 1 (the fraction is
+                    // measured from the solution's start); upstream tests |frac| at both
+                    if at_end && k.fixes.refine_cc_range_ends {
+                        frac1 = 1.0 - frac1;
+                        frac2 = 1.0 - frac2;
+                    }
                     if frac1.abs() < shift_limit && frac2.abs() < shift_limit {
                         let dst = if at_end { &mut sol.end } else { &mut sol.start };
                         dst.solution_value = x.deviation;
@@ -2134,6 +2144,58 @@ impl Curve {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// tangency-labs/solidcore#527 (WR-383): a forward range whose end sits 0.001 off
+    /// the crossing; the local intersection moves the end by 0.001 of the range, which
+    /// upstream's test (|frac| near 0) refuses and the opt-in (|1 - frac|) accepts.
+    #[test]
+    fn issue_527_refine_cc_range_end() {
+        use crate::geom::attribute::ObjectKey;
+        use crate::geom::solution_array::{ObjectKind, Solution, SolutionType};
+        use crate::topology::ObjectHandle;
+        let line = |a: [f64; 3], b: [f64; 3]| {
+            let p = |c: [f64; 3]| Vec3::new(c[0], c[1], c[2]);
+            Curve::from(BSplineCurve::create_line_segment(3, p(a), p(b)).unwrap())
+        };
+        // crv1 along x; crv2 crosses it at x = 0.999, at t2 = 1 / 1.001
+        let crv1 = line([0.0, 0.0, 0.0], [1.0, 0.0, 0.0]);
+        let crv2 = line([0.999, 1.0, 0.0], [0.999, -0.001, 0.0]);
+        let h = |key| ObjectHandle {
+            kind: ObjectKind::Curve,
+            key: ObjectKey(key),
+        };
+        let run = |k: &Kernel| {
+            let mut sol = Solution::<ObjectHandle>::new();
+            sol.solution_type = SolutionType::RangeOfValues;
+            sol.num_variables = 2;
+            sol.num_objects = 2;
+            sol.objects[0] = Some(h(1));
+            sol.objects[1] = Some(h(2));
+            sol.start.parameters[0] = 0.0;
+            sol.start.parameters[1] = 0.0;
+            sol.start.solution_value = 0.0;
+            sol.end.parameters[0] = 1.0;
+            sol.end.parameters[1] = 1.0;
+            sol.end.solution_value = 0.001;
+            let mut sols = SolutionArray::with_capacity(1);
+            sols.try_set_size(1).unwrap();
+            sols.set_at(0, &sol).unwrap();
+            refine_cc_solutions(k, &mut sols, |o| match o.map(|o| o.key) {
+                Some(ObjectKey(1)) => Some(&crv1),
+                Some(ObjectKey(2)) => Some(&crv2),
+                _ => None,
+            })
+            .unwrap();
+            sols.get(0).unwrap().end
+        };
+        let mut k = Kernel::default();
+        let end = run(&k);
+        assert_eq!((end.parameters[0], end.solution_value), (1.0, 0.001));
+        k.fixes.refine_cc_range_ends = true;
+        let end = run(&k);
+        assert!((end.parameters[0] - 0.999).abs() < 1e-9, "{end:?}");
+        assert!(end.solution_value < 1e-9, "{end:?}");
+    }
 
     fn cubic() -> Curve {
         Curve::from(HermiteCurve::new(

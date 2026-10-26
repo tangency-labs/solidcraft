@@ -29,6 +29,7 @@
 //! | [`inverse_4x4`]                          | `smgu_4x4Inverse`                          |
 //! | [`frenet_from_derivatives`]              | `smgu_FrenetFromDerivatives`               |
 //! | [`evaluate_curve_continuity`]            | `smgu_EvaluateCurveContinuity`             |
+//! | [`evaluate_curve_continuity_with`], [`ContinuityOptions`] | not upstream: opt-in geometric G2 (WR-380) |
 //!
 //! Deviations:
 //! - Out-params and `SmStatus` become return values. `SM_ERR` is
@@ -51,7 +52,8 @@
 //! - [`frenet_from_derivatives`] returns only the requested `n + 1` vectors; on error
 //!   the partially written frame upstream leaves behind is not returned.
 //! - [`evaluate_curve_continuity`] skips the two `smgu_FrenetFromDerivatives` calls
-//!   whose outputs and statuses upstream never reads, and the debug-only (and unused)
+//!   whose outputs and statuses upstream never reads (the opt-in
+//!   [`ContinuityOptions::geometric_g2`] makes and uses them, WR-380), and the debug-only (and unused)
 //!   `sDist` / projected-line computations of other functions are omitted.
 //! - Calls into `geom.geom_utility_p1` use [`p1`] directly, through small private
 //!   adapters where the output shapes differ (`sm_AddClosestPoint` on a
@@ -1137,6 +1139,39 @@ pub fn evaluate_curve_continuity(
     eval2: &CurveEval,
     continuity_angle_deg: f64,
 ) -> Result<ContinuityType> {
+    evaluate_curve_continuity_with(
+        eval1,
+        eval2,
+        continuity_angle_deg,
+        &ContinuityOptions::default(),
+    )
+}
+
+/// Options of [`evaluate_curve_continuity_with`]; the default is upstream's test.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ContinuityOptions {
+    /// Not upstream (WR-380, tangency-labs/solidcore#933, #838): judge G2 by the
+    /// geometry. Upstream takes the curvatures as the lengths of the raw second
+    /// derivatives (which depend on the parameter speed), compares them with an
+    /// absolute `SM_EFF_ZERO_SQRT / 10`, and measures the angle of the first normal
+    /// with itself (always 0). With this on, the curvature vectors are the Frenet ones
+    /// (`smgu_FrenetFromDerivatives`, `|P' x P''| / |P'|^3` along the normal), their
+    /// lengths are compared relative to the larger (`SM_EFF_ZERO_SQRT / 10 * (1 +
+    /// max)`), and the angle is between the two normals.
+    pub geometric_g2: bool,
+}
+
+/// [`evaluate_curve_continuity`] with [`ContinuityOptions`].
+///
+/// # Errors
+///
+/// Only propagates errors of its callees.
+pub fn evaluate_curve_continuity_with(
+    eval1: &CurveEval,
+    eval2: &CurveEval,
+    continuity_angle_deg: f64,
+    options: &ContinuityOptions,
+) -> Result<ContinuityType> {
     let CurveEval {
         position: pos1,
         first: vec1,
@@ -1199,18 +1234,43 @@ pub fn evaluate_curve_continuity(
     }
 
     // G2 (upstream measures the angle of normal 1 with itself)
-    let curvature1 = second1.length();
-    let curvature2 = second2.length();
-    let curvature_gap = curvature1 - curvature2;
-    let mut ang_rad = 0.0;
-    if !is_zero(curvature1) && !is_zero(curvature2) {
-        let mut normal1 = second1;
-        normal1 /= curvature1;
-        ang_rad = normal1.angle_between(normal1).unwrap_or(0.0);
-    }
-    if !in_tol(curvature_gap, tol3d(EFF_ZERO_SQRT / 10.0))
-        || rad_to_deg(ang_rad) > continuity_angle_deg
-    {
+    let not_g2 = if options.geometric_g2 {
+        // the Frenet curvature vectors (both tangents are non-zero here)
+        let k1 = frenet_from_derivatives(&[pos1, vec1, second1], 2)?
+            .get(2)
+            .copied()
+            .unwrap_or(Vec3::ZERO);
+        let k2 = frenet_from_derivatives(&[pos2, vec2, second2], 2)?
+            .get(2)
+            .copied()
+            .unwrap_or(Vec3::ZERO);
+        let curvature1 = k1.length();
+        let curvature2 = k2.length();
+        let gap_tol = EFF_ZERO_SQRT / 10.0 * (1.0 + max2(curvature1, curvature2));
+        let mut ang_rad = 0.0;
+        if !is_zero(curvature1) && !is_zero(curvature2) {
+            let mut normal1 = k1;
+            normal1 /= curvature1;
+            let mut normal2 = k2;
+            normal2 /= curvature2;
+            ang_rad = normal1.angle_between(normal2).unwrap_or(0.0);
+        }
+        !in_tol(curvature1 - curvature2, gap_tol) || rad_to_deg(ang_rad) > continuity_angle_deg
+    } else {
+        let curvature1 = second1.length();
+        let curvature2 = second2.length();
+        let curvature_gap = curvature1 - curvature2;
+        let mut ang_rad = 0.0;
+        if !is_zero(curvature1) && !is_zero(curvature2) {
+            let mut normal1 = second1;
+            normal1 /= curvature1;
+            ang_rad = normal1.angle_between(normal1).unwrap_or(0.0);
+        }
+        // (as upstream's condition, NaN included)
+        !in_tol(curvature_gap, tol3d(EFF_ZERO_SQRT / 10.0))
+            || rad_to_deg(ang_rad) > continuity_angle_deg
+    };
+    if not_g2 {
         return Ok(kind);
     }
     kind = if kind == ContinuityType::G1 {
@@ -1434,5 +1494,42 @@ mod tests {
         assert_eq!(fit.set_type, PointSetType::Planar);
         let zero = mult_4x4(&[[1.0; 4]; 4], &[[0.0; 4]; 4]);
         assert!(inverse_4x4(&zero).is_err());
+    }
+
+    /// tangency-labs/solidcore#933, #838 (WR-380): upstream's G2 test compares the first
+    /// normal with itself and the raw second-derivative lengths; the opt-in compares the
+    /// Frenet curvatures and the two normals.
+    #[test]
+    fn issue_933_geometric_g2_continuity() {
+        let ev = |first, second| CurveEval {
+            position: v(1.0, 1.0, 0.0),
+            first,
+            second,
+            third: None,
+        };
+        let on = ContinuityOptions { geometric_g2: true };
+        let off = ContinuityOptions::default();
+        let c = |a: &CurveEval, b: &CurveEval, o: &ContinuityOptions| {
+            evaluate_curve_continuity_with(a, b, 1.0, o).unwrap()
+        };
+
+        // #933: equal tangents and curvatures, opposite normals: not G2
+        let up = ev(v(1.0, 0.0, 0.0), v(0.0, 1.0, 0.0));
+        let down = ev(v(1.0, 0.0, 0.0), v(0.0, -1.0, 0.0));
+        assert_eq!(c(&up, &down, &off), ContinuityType::C1G2);
+        assert_eq!(c(&up, &down, &on), ContinuityType::C1);
+        assert_eq!(
+            evaluate_curve_continuity(&up, &down, 1.0).unwrap(),
+            ContinuityType::C1G2
+        );
+
+        // #838: the same circle of radius 1 at twice the parameter speed (|P''| = 4):
+        // geometrically G2
+        let fast = ev(v(2.0, 0.0, 0.0), v(0.0, 4.0, 0.0));
+        assert_eq!(c(&up, &fast, &off), ContinuityType::G1);
+        assert_eq!(c(&up, &fast, &on), ContinuityType::G1G2);
+
+        // the same curve: G2 either way
+        assert_eq!(c(&up, &up, &on), c(&up, &up, &off));
     }
 }

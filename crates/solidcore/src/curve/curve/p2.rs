@@ -188,7 +188,8 @@ use crate::geom::geom_utility::p1::{
     line_line_closest_point, point_project_to_plane, segment_point_angle_deg_to_perp,
 };
 use crate::geom::geom_utility::p2::{
-    evaluate_curve_continuity, frenet_from_derivatives, ContinuityType, CurveEval,
+    evaluate_curve_continuity_with, frenet_from_derivatives, ContinuityOptions, ContinuityType,
+    CurveEval,
 };
 use crate::geom::global_solver::{
     resolve_object_zone_tol_3d, Branch, GlobalSolve, GlobalSolver, ObjectZoneTol,
@@ -2176,7 +2177,7 @@ pub struct CurveContinuity {
 ///
 /// # Errors
 ///
-/// Those of the evaluators and of [`evaluate_curve_continuity`].
+/// Those of the evaluators and of [`evaluate_curve_continuity_with`].
 pub fn evaluate_continuity<A, B>(
     k: &Kernel,
     this: &A,
@@ -2207,7 +2208,14 @@ where
         second: at(&right, 2),
         third: Some(at(&right, 3)),
     };
-    let continuity = evaluate_curve_continuity(&eval_left, &eval_right, continuity_angle_tol)?;
+    let continuity = evaluate_curve_continuity_with(
+        &eval_left,
+        &eval_right,
+        continuity_angle_tol,
+        &ContinuityOptions {
+            geometric_g2: k.fixes.geometric_g2_continuity,
+        },
+    )?;
 
     // set outputs
     Ok(CurveContinuity {
