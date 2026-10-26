@@ -1,15 +1,790 @@
 {
   "cases": [
     {
+      "id": "1510-split-in-groove-ceiling-plane/plate_groove_4",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/1510",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/1897",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 1844.1060074564248 +- 0.01, got 1844.1060087016267 (off by 0.0000012452019291231409)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 1,
+          "edges": 27,
+          "faces": 10,
+          "lumps": 1,
+          "vertices": 18,
+          "volume": 1844.1060087016267
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/issue_1510_tests.rs: a_split_in_the_plane_of_a_face_keeps_all_of_the_body"
+    },
+    {
+      "id": "1510-split-in-groove-ceiling-plane/above_groove_4",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/1510",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/1897",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 780.3650459150638 +- 0.01, got 780.3650464737086 (off by 0.0000005586448423855472)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 1,
+          "edges": 17,
+          "faces": 7,
+          "lumps": 1,
+          "vertices": 12,
+          "volume": 780.3650464737086
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/issue_1510_tests.rs: a_split_in_the_plane_of_a_face_keeps_all_of_the_body"
+    },
+    {
+      "id": "1510-split-in-groove-ceiling-plane/below_groove_4",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/1510",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/1897",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 1063.7409615413608 +- 0.01, got 1063.7409614893913 (off by 0.00000005196943675400689)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 1,
+          "edges": 24,
+          "faces": 10,
+          "lumps": 1,
+          "vertices": 16,
+          "volume": 1063.7409614893913
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/issue_1510_tests.rs: a_split_in_the_plane_of_a_face_keeps_all_of_the_body"
+    },
+    {
+      "id": "1510-split-in-groove-ceiling-plane/plate_groove_5",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/1510",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/1897",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 1815.6388303513618 +- 0.01, got 1815.6388317120866 (off by 0.000001360724809273961)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 1,
+          "edges": 27,
+          "faces": 10,
+          "lumps": 1,
+          "vertices": 18,
+          "volume": 1815.6388317120866
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/issue_1510_tests.rs: a_split_in_the_plane_of_a_face_keeps_all_of_the_body"
+    },
+    {
+      "id": "1510-split-in-groove-ceiling-plane/above_groove_5",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/1510",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/1897",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 780.3650459150638 +- 0.01, got 780.3650464472084 (off by 0.000000532144667886314)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 1,
+          "edges": 17,
+          "faces": 7,
+          "lumps": 1,
+          "vertices": 12,
+          "volume": 780.3650464472084
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/issue_1510_tests.rs: a_split_in_the_plane_of_a_face_keeps_all_of_the_body"
+    },
+    {
+      "id": "1510-split-in-groove-ceiling-plane/below_groove_5",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/1510",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/1897",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 1035.2737844362978 +- 0.01, got 1035.2737847338117 (off by 0.0000002975139068439603)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 1,
+          "edges": 24,
+          "faces": 10,
+          "lumps": 1,
+          "vertices": 16,
+          "volume": 1035.2737847338117
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/issue_1510_tests.rs: a_split_in_the_plane_of_a_face_keeps_all_of_the_body"
+    },
+    {
+      "id": "1648-sphere-touching-box-edge/sphere_clear_of_edge",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/1648",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/1850",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 8121.456190007691 +- 0.01, got 8121.456335058681 (off by 0.0001450509907954256)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 16,
+          "faces": 7,
+          "lumps": 1,
+          "vertices": 12,
+          "volume": 8121.456335058681
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/thin_face_tests.rs: sphere_touching_a_box_edge_unites_soundly"
+    },
+    {
+      "id": "1648-sphere-touching-box-edge/sphere_touching_edge",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/1648",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/1850",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 8313.109083371473 +- 0.01, got 8313.109193777174 (off by 0.00011040570097975433)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 18,
+          "faces": 8,
+          "lumps": 1,
+          "vertices": 13,
+          "volume": 8313.109193777174
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/thin_face_tests.rs: sphere_touching_a_box_edge_unites_soundly"
+    },
+    {
+      "id": "1648-sphere-touching-box-edge/sphere_across_edge",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/1648",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/1850",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 8507.835027885498 +- 0.01, got 8507.83520004723 (off by 0.00017216173182532657)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 19,
+          "faces": 8,
+          "lumps": 1,
+          "vertices": 14,
+          "volume": 8507.83520004723
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/thin_face_tests.rs: sphere_touching_a_box_edge_unites_soundly"
+    },
+    {
+      "id": "1668-round-both-sides-of-wall/shelled_block",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/1668",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/1720",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 39552 +- 0.01, got 39551.99999999997 (off by 0.000000000029103830456733704)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 24,
+          "faces": 11,
+          "lumps": 1,
+          "vertices": 16,
+          "volume": 39551.99999999997
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/issue_1080_tests.rs: rounds_on_both_sides_of_a_wall_build_as_one_fillet"
+    },
+    {
+      "id": "1668-round-both-sides-of-wall/round_5_outer_edge_alone",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/1668",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/1720",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 38994.035224833366 +- 0.5579647751666345, got 38994.03521709843 (off by 0.00000773493229644373)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 1,
+          "edges": 27,
+          "faces": 12,
+          "lumps": 1,
+          "vertices": 18,
+          "volume": 38994.03521709843
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/issue_1080_tests.rs: rounds_on_both_sides_of_a_wall_build_as_one_fillet"
+    },
+    {
+      "id": "1668-round-both-sides-of-wall/round_5_both_sides_of_wall",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/1668",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/1720",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 39530.53981633975 +- 0.5579647751666345, got 39530.539788105045 (off by 0.000028234702767804265)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 2,
+          "edges": 30,
+          "faces": 13,
+          "lumps": 1,
+          "vertices": 20,
+          "volume": 39530.539788105045
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/issue_1080_tests.rs: rounds_on_both_sides_of_a_wall_build_as_one_fillet"
+    },
+    {
+      "id": "1717-overlapping-sphere-cuts/one_sphere_cut",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/1717",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/2158",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 2280.051683552339 +- 0.01, got 2280.0516807421373 (off by 0.0000028102017495257314)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 18,
+          "faces": 8,
+          "lumps": 1,
+          "vertices": 12,
+          "volume": 2280.0516807421373
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/issue_1717_tests.rs: overlapping_sphere_cuts_on_a_box_edge"
+    },
+    {
+      "id": "1717-overlapping-sphere-cuts/two_overlapping_sphere_cuts",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/1717",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/2158",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 2043.65480604582 +- 0.01, got 2043.6548209920522 (off by 0.000014946232340662391)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 21,
+          "faces": 9,
+          "lumps": 1,
+          "vertices": 14,
+          "volume": 2043.6548209920522
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/issue_1717_tests.rs: overlapping_sphere_cuts_on_a_box_edge"
+    },
+    {
+      "id": "1717-overlapping-sphere-cuts/patterned_sphere_cut",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/1717",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/2158",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 2043.65480604582 +- 0.01, got 2043.6548214151794 (off by 0.00001536935951662599)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 21,
+          "faces": 9,
+          "lumps": 1,
+          "vertices": 14,
+          "volume": 2043.6548214151794
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/issue_1717_tests.rs: overlapping_sphere_cuts_on_a_box_edge"
+    },
+    {
+      "id": "232-overlapping-equal-spheres/overlapping_equal_spheres_d12",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/232",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/838",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 7506.312046977212 +- 0.01, got 7506.312106580814 (off by 0.00005960360158496769)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 6,
+          "faces": 2,
+          "lumps": 1,
+          "vertices": 7,
+          "volume": 7506.312106580814
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/tests.rs: similar_spheres_meet (PR #838, the fix); crates/engine/src/tests.rs: join_of_two_overlapping_equal_spheres_is_not_refused (PR #836, on top of it)"
+    },
+    {
+      "id": "232-overlapping-equal-spheres/overlapping_equal_spheres_d4",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/232",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/838",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 5428.672105403162 +- 0.01, got 5428.671276097131 (off by 0.0008293060309370048)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 6,
+          "faces": 2,
+          "lumps": 1,
+          "vertices": 7,
+          "volume": 5428.671276097131
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/tests.rs: similar_spheres_meet (PR #838, the fix); crates/engine/src/tests.rs: join_of_two_overlapping_equal_spheres_is_not_refused (PR #836, on top of it)"
+    },
+    {
+      "id": "232-overlapping-equal-spheres/separate_equal_spheres_d20_5",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/232",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/838",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 2, got 2",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 8377.580409572782 +- 0.01, got 8377.58058229409 (off by 0.00017272130753553938)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 2,
+          "faces": 2,
+          "lumps": 2,
+          "vertices": 4,
+          "volume": 8377.58058229409
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/tests.rs: similar_spheres_meet (PR #838, the fix); crates/engine/src/tests.rs: join_of_two_overlapping_equal_spheres_is_not_refused (PR #836, on top of it)"
+    },
+    {
+      "id": "2707-small-round-on-large-plate/plate_100",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/2707",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 100000 +- 0.021460183660255174, got 100000 (off by 0)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 12,
+          "faces": 6,
+          "lumps": 1,
+          "vertices": 8,
+          "volume": 100000.0
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: not fixed on truck (paused under tangency-labs/solidcraft#3992); on the kernel-smlib branch (#4012), SMLib's fillet and boolean build these plates and its integration measures them within 1e-10 of the body's volume (local run, see the PR)"
+    },
+    {
+      "id": "2707-small-round-on-large-plate/plate_1000",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/2707",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 1000000 +- 0.021460183660255174, got 999999.9999999994 (off by 0.0000000005820766091346741)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 12,
+          "faces": 6,
+          "lumps": 1,
+          "vertices": 8,
+          "volume": 999999.9999999994
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: not fixed on truck (paused under tangency-labs/solidcraft#3992); on the kernel-smlib branch (#4012), SMLib's fillet and boolean build these plates and its integration measures them within 1e-10 of the body's volume (local run, see the PR)"
+    },
+    {
+      "id": "2707-small-round-on-large-plate/round_on_plate_100",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/2707",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 99978.53981633975 +- 0.021460183660255174, got 99978.53981608203 (off by 0.00000025771441869437695)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 1,
+          "edges": 15,
+          "faces": 7,
+          "lumps": 1,
+          "vertices": 10,
+          "volume": 99978.53981608203
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: not fixed on truck (paused under tangency-labs/solidcraft#3992); on the kernel-smlib branch (#4012), SMLib's fillet and boolean build these plates and its integration measures them within 1e-10 of the body's volume (local run, see the PR)"
+    },
+    {
+      "id": "2707-small-round-on-large-plate/round_on_plate_300",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/2707",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 299978.53981633973 +- 0.021460183660255174, got 299978.53981550626 (off by 0.0000008334754966199398)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 1,
+          "edges": 15,
+          "faces": 7,
+          "lumps": 1,
+          "vertices": 10,
+          "volume": 299978.53981550626
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: not fixed on truck (paused under tangency-labs/solidcraft#3992); on the kernel-smlib branch (#4012), SMLib's fillet and boolean build these plates and its integration measures them within 1e-10 of the body's volume (local run, see the PR)"
+    },
+    {
+      "id": "2707-small-round-on-large-plate/round_on_plate_500",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/2707",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 499978.53981633973 +- 0.021460183660255174, got 499978.53981493297 (off by 0.0000014067627489566803)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 1,
+          "edges": 15,
+          "faces": 7,
+          "lumps": 1,
+          "vertices": 10,
+          "volume": 499978.53981493297
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: not fixed on truck (paused under tangency-labs/solidcraft#3992); on the kernel-smlib branch (#4012), SMLib's fillet and boolean build these plates and its integration measures them within 1e-10 of the body's volume (local run, see the PR)"
+    },
+    {
+      "id": "2707-small-round-on-large-plate/round_on_plate_1000",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/2707",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 999978.5398163397 +- 0.021460183660255174, got 999978.5398055128 (off by 0.000010826974175870419)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 1,
+          "edges": 15,
+          "faces": 7,
+          "lumps": 1,
+          "vertices": 10,
+          "volume": 999978.5398055128
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: not fixed on truck (paused under tangency-labs/solidcraft#3992); on the kernel-smlib branch (#4012), SMLib's fillet and boolean build these plates and its integration measures them within 1e-10 of the body's volume (local run, see the PR)"
+    },
+    {
+      "id": "2707-small-round-on-large-plate/hole_in_plate_100",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/2707",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 99929.31416529423 +- 0.07068583470577035, got 99929.31417294973 (off by 0.00000765550066716969)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 1,
+          "edges": 15,
+          "faces": 7,
+          "lumps": 1,
+          "vertices": 10,
+          "volume": 99929.31417294973
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: not fixed on truck (paused under tangency-labs/solidcraft#3992); on the kernel-smlib branch (#4012), SMLib's fillet and boolean build these plates and its integration measures them within 1e-10 of the body's volume (local run, see the PR)"
+    },
+    {
+      "id": "2707-small-round-on-large-plate/hole_in_plate_1000",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/2707",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 999929.3141652943 +- 0.07068583470577035, got 999929.3139726216 (off by 0.00019267271272838116)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 1,
+          "edges": 15,
+          "faces": 7,
+          "lumps": 1,
+          "vertices": 10,
+          "volume": 999929.3139726216
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: not fixed on truck (paused under tangency-labs/solidcraft#3992); on the kernel-smlib branch (#4012), SMLib's fillet and boolean build these plates and its integration measures them within 1e-10 of the body's volume (local run, see the PR)"
+    },
+    {
       "id": "2844-ring-on-perforated-plate/plain_plate_ring_sunk",
       "issue": "https://github.com/tangency-labs/solidcraft/issues/2844",
       "pr": "https://github.com/tangency-labs/solidcraft/pull/3887",
       "rust": {
-        "deferred": {
-          "blocked_by": "primitive.primitive_creation_p1",
-          "symbol": "SmPrimitiveCreation::CreateBox"
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 10726.088236920661 +- 1.0726088236920661, got 10726.088166331916 (off by 0.00007058874507492874)",
+            "name": "volume",
+            "status": "pass"
+          },
+          {
+            "detail": "at most 4, got 2",
+            "name": "cylinder_faces_max",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 2,
+          "edges": 18,
+          "faces": 10,
+          "lumps": 1,
+          "vertices": 12,
+          "volume": 10726.088166331916
         },
-        "verdict": "DEFERRED"
+        "verdict": "PASS"
       },
       "test": "crates/kernel/src/prism_fast_path_tests.rs: a_ring_on_a_perforated_plate_keeps_whole_walls"
     },
@@ -18,11 +793,32 @@
       "issue": "https://github.com/tangency-labs/solidcraft/issues/2844",
       "pr": "https://github.com/tangency-labs/solidcraft/pull/3887",
       "rust": {
-        "deferred": {
-          "blocked_by": "primitive.primitive_creation_p1",
-          "symbol": "SmPrimitiveCreation::CreateBox"
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 6744.776236920661 +- 0.6744776236920661, got 6744.776068449349 (off by 0.00016847131246322533)",
+            "name": "volume",
+            "status": "pass"
+          },
+          {
+            "detail": "at most 4, got 2",
+            "name": "cylinder_faces_max",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 2,
+          "edges": 1118,
+          "faces": 353,
+          "lumps": 1,
+          "vertices": 724,
+          "volume": 6744.776068449349
         },
-        "verdict": "DEFERRED"
+        "verdict": "PASS"
       },
       "test": "crates/kernel/src/prism_fast_path_tests.rs: a_ring_on_a_perforated_plate_keeps_whole_walls"
     },
@@ -31,24 +827,751 @@
       "issue": "https://github.com/tangency-labs/solidcraft/issues/2844",
       "pr": "https://github.com/tangency-labs/solidcraft/pull/3887",
       "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 6797.830478078864 +- 0.6797830478078865, got 6797.830309670583 (off by 0.00016840828084241366)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 2,
+          "edges": 1182,
+          "faces": 353,
+          "lumps": 1,
+          "vertices": 788,
+          "volume": 6797.830309670583
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/prism_fast_path_tests.rs: a_ring_on_a_perforated_plate_keeps_whole_walls"
+    },
+    {
+      "id": "3156-revolve-ends-flush-with-face/rectangle_join_axis_raised",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3156",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3224",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 8607.87847834816 +- 0.01, got 8607.878435310802 (off by 0.0000430373584094923)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 6,
+          "edges": 48,
+          "faces": 20,
+          "lumps": 1,
+          "vertices": 32,
+          "volume": 8607.878435310802
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/coplanar_tests.rs: a_revolve_joined_flush_with_the_face_its_axis_lies_in_is_exact, a_revolve_cut_flush_with_the_face_its_axis_lies_in_is_exact; crates/engine/src/tests/boolean_diagnostics.rs: a_revolve_ended_flush_with_the_face_its_axis_lies_in_needs_no_retry (draft PR, kernel-paused under tangency-labs/solidcraft#3992)"
+    },
+    {
+      "id": "3156-revolve-ends-flush-with-face/rectangle_join_flush",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3156",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3224",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 8608.970248730224 +- 0.01, got 8608.970376313328 (off by 0.000127583103676443)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 2,
+          "edges": 24,
+          "faces": 10,
+          "lumps": 1,
+          "vertices": 16,
+          "volume": 8608.970376313328
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/coplanar_tests.rs: a_revolve_joined_flush_with_the_face_its_axis_lies_in_is_exact, a_revolve_cut_flush_with_the_face_its_axis_lies_in_is_exact; crates/engine/src/tests/boolean_diagnostics.rs: a_revolve_ended_flush_with_the_face_its_axis_lies_in_needs_no_retry (draft PR, kernel-paused under tangency-labs/solidcraft#3992)"
+    },
+    {
+      "id": "3156-revolve-ends-flush-with-face/trapezoid_join_flush",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3156",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3224",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 7931.038689844514 +- 0.01, got 7931.038773822284 (off by 0.000083977770373167)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 2,
+          "edges": 24,
+          "faces": 10,
+          "lumps": 1,
+          "vertices": 16,
+          "volume": 7931.038773822284
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/coplanar_tests.rs: a_revolve_joined_flush_with_the_face_its_axis_lies_in_is_exact, a_revolve_cut_flush_with_the_face_its_axis_lies_in_is_exact; crates/engine/src/tests/boolean_diagnostics.rs: a_revolve_ended_flush_with_the_face_its_axis_lies_in_needs_no_retry (draft PR, kernel-paused under tangency-labs/solidcraft#3992)"
+    },
+    {
+      "id": "3156-revolve-ends-flush-with-face/rectangle_cut_flush",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3156",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3224",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 5662.156339662997 +- 0.01, got 5662.156336396751 (off by 0.0000032662464946042746)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 4,
+          "edges": 36,
+          "faces": 14,
+          "lumps": 1,
+          "vertices": 24,
+          "volume": 5662.156336396751
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/coplanar_tests.rs: a_revolve_joined_flush_with_the_face_its_axis_lies_in_is_exact, a_revolve_cut_flush_with_the_face_its_axis_lies_in_is_exact; crates/engine/src/tests/boolean_diagnostics.rs: a_revolve_ended_flush_with_the_face_its_axis_lies_in_needs_no_retry (draft PR, kernel-paused under tangency-labs/solidcraft#3992)"
+    },
+    {
+      "id": "3156-revolve-ends-flush-with-face/rectangle_join_flush_large_plate",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3156",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3224",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 67504.97024873021 +- 0.01, got 67504.97037631336 (off by 0.00012758314551319927)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 2,
+          "edges": 24,
+          "faces": 10,
+          "lumps": 1,
+          "vertices": 16,
+          "volume": 67504.97037631336
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/coplanar_tests.rs: a_revolve_joined_flush_with_the_face_its_axis_lies_in_is_exact, a_revolve_cut_flush_with_the_face_its_axis_lies_in_is_exact; crates/engine/src/tests/boolean_diagnostics.rs: a_revolve_ended_flush_with_the_face_its_axis_lies_in_needs_no_retry (draft PR, kernel-paused under tangency-labs/solidcraft#3992)"
+    },
+    {
+      "id": "3156-revolve-ends-flush-with-face/rectangle_cut_flush_large_plate",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3156",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3224",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 64558.156339663 +- 0.01, got 64558.15633639675 (off by 0.0000032662501325830817)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 4,
+          "edges": 36,
+          "faces": 14,
+          "lumps": 1,
+          "vertices": 24,
+          "volume": 64558.15633639675
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/coplanar_tests.rs: a_revolve_joined_flush_with_the_face_its_axis_lies_in_is_exact, a_revolve_cut_flush_with_the_face_its_axis_lies_in_is_exact; crates/engine/src/tests/boolean_diagnostics.rs: a_revolve_ended_flush_with_the_face_its_axis_lies_in_needs_no_retry (draft PR, kernel-paused under tangency-labs/solidcraft#3992)"
+    },
+    {
+      "id": "3170-sheet-corner-overlap/positive_90_partial_front_covers",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3170",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3472",
+      "rust": {
         "deferred": {
-          "blocked_by": "primitive.primitive_creation_p1",
-          "symbol": "SmPrimitiveCreation::CreateBox"
+          "blocked_by": "no SM_API entry point",
+          "symbol": "sheet flange corner joining and flat pattern (SolidCraft #3170)"
         },
         "verdict": "DEFERRED"
       },
-      "test": "crates/kernel/src/prism_fast_path_tests.rs: a_ring_on_a_perforated_plate_keeps_whole_walls"
+      "test": "crates/doc/src/sheet.rs: overlapping_corners_keep_surface_clearance_and_flat_material"
+    },
+    {
+      "id": "3170-sheet-corner-overlap/positive_90_partial_left_covers",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3170",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3472",
+      "rust": {
+        "deferred": {
+          "blocked_by": "no SM_API entry point",
+          "symbol": "sheet flange corner joining and flat pattern (SolidCraft #3170)"
+        },
+        "verdict": "DEFERRED"
+      },
+      "test": "crates/doc/src/sheet.rs: overlapping_corners_keep_surface_clearance_and_flat_material"
+    },
+    {
+      "id": "3170-sheet-corner-overlap/positive_90_full_front_covers",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3170",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3472",
+      "rust": {
+        "deferred": {
+          "blocked_by": "no SM_API entry point",
+          "symbol": "sheet flange corner joining and flat pattern (SolidCraft #3170)"
+        },
+        "verdict": "DEFERRED"
+      },
+      "test": "crates/doc/src/sheet.rs: overlapping_corners_keep_surface_clearance_and_flat_material"
+    },
+    {
+      "id": "3170-sheet-corner-overlap/positive_90_full_left_covers",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3170",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3472",
+      "rust": {
+        "deferred": {
+          "blocked_by": "no SM_API entry point",
+          "symbol": "sheet flange corner joining and flat pattern (SolidCraft #3170)"
+        },
+        "verdict": "DEFERRED"
+      },
+      "test": "crates/doc/src/sheet.rs: overlapping_corners_keep_surface_clearance_and_flat_material"
+    },
+    {
+      "id": "3170-sheet-corner-overlap/positive_72_partial_front_covers",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3170",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3472",
+      "rust": {
+        "deferred": {
+          "blocked_by": "no SM_API entry point",
+          "symbol": "sheet flange corner joining and flat pattern (SolidCraft #3170)"
+        },
+        "verdict": "DEFERRED"
+      },
+      "test": "crates/doc/src/sheet.rs: overlapping_corners_keep_surface_clearance_and_flat_material"
+    },
+    {
+      "id": "3170-sheet-corner-overlap/positive_72_partial_left_covers",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3170",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3472",
+      "rust": {
+        "deferred": {
+          "blocked_by": "no SM_API entry point",
+          "symbol": "sheet flange corner joining and flat pattern (SolidCraft #3170)"
+        },
+        "verdict": "DEFERRED"
+      },
+      "test": "crates/doc/src/sheet.rs: overlapping_corners_keep_surface_clearance_and_flat_material"
+    },
+    {
+      "id": "3170-sheet-corner-overlap/positive_72_full_front_covers",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3170",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3472",
+      "rust": {
+        "deferred": {
+          "blocked_by": "no SM_API entry point",
+          "symbol": "sheet flange corner joining and flat pattern (SolidCraft #3170)"
+        },
+        "verdict": "DEFERRED"
+      },
+      "test": "crates/doc/src/sheet.rs: overlapping_corners_keep_surface_clearance_and_flat_material"
+    },
+    {
+      "id": "3170-sheet-corner-overlap/positive_72_full_left_covers",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3170",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3472",
+      "rust": {
+        "deferred": {
+          "blocked_by": "no SM_API entry point",
+          "symbol": "sheet flange corner joining and flat pattern (SolidCraft #3170)"
+        },
+        "verdict": "DEFERRED"
+      },
+      "test": "crates/doc/src/sheet.rs: overlapping_corners_keep_surface_clearance_and_flat_material"
+    },
+    {
+      "id": "3170-sheet-corner-overlap/negative_90_partial_front_covers",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3170",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3472",
+      "rust": {
+        "deferred": {
+          "blocked_by": "no SM_API entry point",
+          "symbol": "sheet flange corner joining and flat pattern (SolidCraft #3170)"
+        },
+        "verdict": "DEFERRED"
+      },
+      "test": "crates/doc/src/sheet.rs: overlapping_corners_keep_surface_clearance_and_flat_material"
+    },
+    {
+      "id": "3170-sheet-corner-overlap/negative_90_partial_left_covers",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3170",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3472",
+      "rust": {
+        "deferred": {
+          "blocked_by": "no SM_API entry point",
+          "symbol": "sheet flange corner joining and flat pattern (SolidCraft #3170)"
+        },
+        "verdict": "DEFERRED"
+      },
+      "test": "crates/doc/src/sheet.rs: overlapping_corners_keep_surface_clearance_and_flat_material"
+    },
+    {
+      "id": "3170-sheet-corner-overlap/negative_90_full_front_covers",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3170",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3472",
+      "rust": {
+        "deferred": {
+          "blocked_by": "no SM_API entry point",
+          "symbol": "sheet flange corner joining and flat pattern (SolidCraft #3170)"
+        },
+        "verdict": "DEFERRED"
+      },
+      "test": "crates/doc/src/sheet.rs: overlapping_corners_keep_surface_clearance_and_flat_material"
+    },
+    {
+      "id": "3170-sheet-corner-overlap/negative_90_full_left_covers",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3170",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3472",
+      "rust": {
+        "deferred": {
+          "blocked_by": "no SM_API entry point",
+          "symbol": "sheet flange corner joining and flat pattern (SolidCraft #3170)"
+        },
+        "verdict": "DEFERRED"
+      },
+      "test": "crates/doc/src/sheet.rs: overlapping_corners_keep_surface_clearance_and_flat_material"
+    },
+    {
+      "id": "3170-sheet-corner-overlap/negative_72_partial_front_covers",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3170",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3472",
+      "rust": {
+        "deferred": {
+          "blocked_by": "no SM_API entry point",
+          "symbol": "sheet flange corner joining and flat pattern (SolidCraft #3170)"
+        },
+        "verdict": "DEFERRED"
+      },
+      "test": "crates/doc/src/sheet.rs: overlapping_corners_keep_surface_clearance_and_flat_material"
+    },
+    {
+      "id": "3170-sheet-corner-overlap/negative_72_partial_left_covers",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3170",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3472",
+      "rust": {
+        "deferred": {
+          "blocked_by": "no SM_API entry point",
+          "symbol": "sheet flange corner joining and flat pattern (SolidCraft #3170)"
+        },
+        "verdict": "DEFERRED"
+      },
+      "test": "crates/doc/src/sheet.rs: overlapping_corners_keep_surface_clearance_and_flat_material"
+    },
+    {
+      "id": "3170-sheet-corner-overlap/negative_72_full_front_covers",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3170",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3472",
+      "rust": {
+        "deferred": {
+          "blocked_by": "no SM_API entry point",
+          "symbol": "sheet flange corner joining and flat pattern (SolidCraft #3170)"
+        },
+        "verdict": "DEFERRED"
+      },
+      "test": "crates/doc/src/sheet.rs: overlapping_corners_keep_surface_clearance_and_flat_material"
+    },
+    {
+      "id": "3170-sheet-corner-overlap/negative_72_full_left_covers",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3170",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3472",
+      "rust": {
+        "deferred": {
+          "blocked_by": "no SM_API entry point",
+          "symbol": "sheet flange corner joining and flat pattern (SolidCraft #3170)"
+        },
+        "verdict": "DEFERRED"
+      },
+      "test": "crates/doc/src/sheet.rs: overlapping_corners_keep_surface_clearance_and_flat_material"
+    },
+    {
+      "id": "3204-cam-groove-collar/groove_on_the_wall_below_the_collar",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3204",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3594",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 5818.2295944483 +- 0.01, got 5818.229566134382 (off by 0.000028313917937339284)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 4,
+          "edges": 12,
+          "faces": 9,
+          "lumps": 1,
+          "vertices": 8,
+          "volume": 5818.229566134382
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/engine/src/cmd/features_more_tests.rs: a_cam_groove_is_cut_on_a_wall_a_collar_interrupts"
+    },
+    {
+      "id": "3204-cam-groove-collar/groove_beside_the_shoulder",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3204",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3594",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 5937.6101152847 +- 0.01, got 5937.610106765954 (off by 0.000008518746653862763)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 3,
+          "edges": 9,
+          "faces": 7,
+          "lumps": 1,
+          "vertices": 6,
+          "volume": 5937.610106765954
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/engine/src/cmd/features_more_tests.rs: a_cam_groove_is_cut_on_a_wall_a_collar_interrupts"
+    },
+    {
+      "id": "3204-cam-groove-collar/groove_on_the_collar_span",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3204",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3594",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 5962.7428565134 +- 0.01, got 5962.74286422733 (off by 0.00000771393024479039)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 2,
+          "edges": 6,
+          "faces": 5,
+          "lumps": 1,
+          "vertices": 4,
+          "volume": 5962.74286422733
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/engine/src/cmd/features_more_tests.rs: a_cam_groove_is_cut_on_a_wall_a_collar_interrupts"
+    },
+    {
+      "id": "324-round-beside-through-hole/block_with_hole",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/324",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/1885",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 7717.256661176919 +- 0.034336293856408275, got 7717.256664066019 (off by 0.000002889099960157182)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 1,
+          "edges": 15,
+          "faces": 7,
+          "lumps": 1,
+          "vertices": 10,
+          "volume": 7717.256664066019
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/issue_324_tests.rs: the_radius_offered_beside_a_hole_fits (the round offered for R4, at most 2.5 mm, builds and measures the block less the hole and the round's corner; the PR also built R2.5 at 7663.611 against 7663.606). The R4 case that contours the hole is not fixed on truck, which refuses that round"
+    },
+    {
+      "id": "324-round-beside-through-hole/round_2_clear_of_hole",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/324",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/1885",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 7682.92036732051 +- 0.034336293856408275, got 7682.920366829892 (off by 0.0000004906178219243884)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 2,
+          "edges": 18,
+          "faces": 8,
+          "lumps": 1,
+          "vertices": 12,
+          "volume": 7682.920366829892
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/issue_324_tests.rs: the_radius_offered_beside_a_hole_fits (the round offered for R4, at most 2.5 mm, builds and measures the block less the hole and the round's corner; the PR also built R2.5 at 7663.611 against 7663.606). The R4 case that contours the hole is not fixed on truck, which refuses that round"
+    },
+    {
+      "id": "324-round-beside-through-hole/round_2_5_tangent_to_hole",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/324",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/1885",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 7663.606202026281 +- 0.05365045915063793, got 7663.60620112963 (off by 0.0000008966508175944909)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 2,
+          "edges": 18,
+          "faces": 8,
+          "lumps": 1,
+          "vertices": 12,
+          "volume": 7663.60620112963
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/issue_324_tests.rs: the_radius_offered_beside_a_hole_fits (the round offered for R4, at most 2.5 mm, builds and measures the block less the hole and the round's corner; the PR also built R2.5 at 7663.611 against 7663.606). The R4 case that contours the hole is not fixed on truck, which refuses that round"
+    },
+    {
+      "id": "324-round-beside-through-hole/round_4_over_hole",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/324",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/1885",
+      "rust": {
+        "deferred": {
+          "blocked_by": "tangency-labs/solidcore#422",
+          "symbol": "step 4 (`result`): blend::fillet_executive::session::finish: upstream status 1001 at edge 26"
+        },
+        "verdict": "DEFERRED"
+      },
+      "test": "crates/kernel/src/issue_324_tests.rs: the_radius_offered_beside_a_hole_fits (the round offered for R4, at most 2.5 mm, builds and measures the block less the hole and the round's corner; the PR also built R2.5 at 7663.611 against 7663.606). The R4 case that contours the hole is not fixed on truck, which refuses that round"
+    },
+    {
+      "id": "3303-inward-cut-on-cone/cut_to_depth_touching_rim",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3303",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3309",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 86.42580033088386 +- 0.01, got 86.42580091035705 (off by 0.0000005794731947617038)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 3,
+          "faces": 3,
+          "lumps": 1,
+          "vertices": 2,
+          "volume": 86.42580091035705
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/frustum_cut_tests.rs: inward_face_cut_trims_the_cone_at_its_exact_depth (PR is a draft, kernel-paused, not merged)"
+    },
+    {
+      "id": "3303-inward-cut-on-cone/cut_past_top_touching_rim",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3303",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3309",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 86.42580033088386 +- 0.01, got 86.42580091035705 (off by 0.0000005794731947617038)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 3,
+          "faces": 3,
+          "lumps": 1,
+          "vertices": 2,
+          "volume": 86.42580091035705
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/frustum_cut_tests.rs: inward_face_cut_trims_the_cone_at_its_exact_depth (PR is a draft, kernel-paused, not merged)"
+    },
+    {
+      "id": "3303-inward-cut-on-cone/interior_band_cut",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3303",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3309",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 2, got 2",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 145.93745073475785 +- 0.01, got 145.93745693222598 (off by 0.000006197468138680051)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 6,
+          "faces": 6,
+          "lumps": 2,
+          "vertices": 4,
+          "volume": 145.93745693222598
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/frustum_cut_tests.rs: inward_face_cut_trims_the_cone_at_its_exact_depth (PR is a draft, kernel-paused, not merged)"
+    },
+    {
+      "id": "3303-inward-cut-on-cone/control_clear_of_rim",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3303",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3309",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 86.42580033088386 +- 0.01, got 86.42580100413907 (off by 0.0000006732552151333948)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 3,
+          "faces": 3,
+          "lumps": 1,
+          "vertices": 2,
+          "volume": 86.42580100413907
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/frustum_cut_tests.rs: inward_face_cut_trims_the_cone_at_its_exact_depth (PR is a draft, kernel-paused, not merged)"
+    },
+    {
+      "id": "3303-inward-cut-on-cone/control_across_rim",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3303",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3309",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 2, got 2",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 86.81326342482659 +- 0.01, got 86.81326227139175 (off by 0.000001153434837419809)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 1,
+          "edges": 8,
+          "faces": 6,
+          "lumps": 2,
+          "vertices": 5,
+          "volume": 86.81326227139175
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/frustum_cut_tests.rs: inward_face_cut_trims_the_cone_at_its_exact_depth (PR is a draft, kernel-paused, not merged)"
     },
     {
       "id": "3369-fillet-edge-on-tangent-seam/edge_ends_on_seam",
       "issue": "https://github.com/tangency-labs/solidcraft/issues/3369",
       "pr": "https://github.com/tangency-labs/solidcraft/pull/3922",
       "rust": {
-        "deferred": {
-          "blocked_by": "primitive.primitive_creation_p1",
-          "symbol": "SmPrimitiveCreation::CreateBox"
-        },
-        "verdict": "DEFERRED"
+        "error": "step 8 (`result`): blend::fillet_executive::session::finish: upstream status 1001",
+        "verdict": "ERROR"
       },
       "test": "crates/kernel/src/blend.rs: a_blend_ends_on_a_slot_wall_where_its_face_runs_on_into_a_round (draft PR)"
     },
@@ -57,13 +1580,203 @@
       "issue": "https://github.com/tangency-labs/solidcraft/issues/3369",
       "pr": "https://github.com/tangency-labs/solidcraft/pull/3922",
       "rust": {
-        "deferred": {
-          "blocked_by": "primitive.primitive_creation_p1",
-          "symbol": "SmPrimitiveCreation::CreateBox"
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 9706.665662772806 +- 0.0051504440784612415, got 9706.665669700646 (off by 0.00000692783942213282)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 4,
+          "edges": 27,
+          "faces": 11,
+          "lumps": 1,
+          "vertices": 18,
+          "volume": 9706.665669700646
         },
-        "verdict": "DEFERRED"
+        "verdict": "PASS"
       },
       "test": "crates/kernel/src/blend.rs: a_blend_ends_on_a_slot_wall_where_its_face_runs_on_into_a_round (draft PR)"
+    },
+    {
+      "id": "3396-flush-stacked-layers/pair_b1_b2",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3396",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 14018.918981442299 +- 0.01, got 14018.919215136191 (off by 0.0002336938923690468)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 2,
+          "edges": 86,
+          "faces": 29,
+          "lumps": 1,
+          "vertices": 52,
+          "volume": 14018.919215136191
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: not fixed on truck (paused under #3992); geometry from the user's design attached to #3396"
+    },
+    {
+      "id": "3396-flush-stacked-layers/pair_b2_b3",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3396",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 8505.460741186722 +- 0.01, got 8505.460692880186 (off by 0.0000483065359730972)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 28,
+          "edges": 153,
+          "faces": 54,
+          "lumps": 1,
+          "vertices": 102,
+          "volume": 8505.460692880186
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: not fixed on truck (paused under #3992); geometry from the user's design attached to #3396"
+    },
+    {
+      "id": "3396-flush-stacked-layers/chain_b1_b2_b3",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3396",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 21619.60103839516 +- 0.01, got 21619.60103312001 (off by 0.000005275152943795547)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 28,
+          "edges": 233,
+          "faces": 79,
+          "lumps": 1,
+          "vertices": 150,
+          "volume": 21619.60103312001
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: not fixed on truck (paused under #3992); geometry from the user's design attached to #3396"
+    },
+    {
+      "id": "3396-flush-stacked-layers/chain_b1_to_b4",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3396",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 23554.822113006474 +- 0.01, got 23554.821997123578 (off by 0.00011588289635255933)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 20,
+          "edges": 233,
+          "faces": 72,
+          "lumps": 1,
+          "vertices": 150,
+          "volume": 23554.821997123578
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: not fixed on truck (paused under #3992); geometry from the user's design attached to #3396"
+    },
+    {
+      "id": "3396-flush-stacked-layers/stack_top_down",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3396",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 30603.04806318825 +- 0.01, got 30603.048873757092 (off by 0.0008105688430077862)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 6,
+          "edges": 236,
+          "faces": 71,
+          "lumps": 1,
+          "vertices": 152,
+          "volume": 30603.048873757092
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: not fixed on truck (paused under #3992); geometry from the user's design attached to #3396"
+    },
+    {
+      "id": "3396-flush-stacked-layers/stack_tree_order",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3396",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 30603.04806318825 +- 0.01, got 30603.048873757125 (off by 0.0008105688757495955)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 6,
+          "edges": 236,
+          "faces": 71,
+          "lumps": 1,
+          "vertices": 152,
+          "volume": 30603.048873757125
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: not fixed on truck (paused under #3992); geometry from the user's design attached to #3396"
     },
     {
       "id": "3468-offset-face-next-to-fillet/boss_wall_out_1",
@@ -71,8 +1784,8 @@
       "pr": "https://github.com/tangency-labs/solidcraft/pull/3898",
       "rust": {
         "deferred": {
-          "blocked_by": "primitive.primitive_creation_p1",
-          "symbol": "SmPrimitiveCreation::CreateBox"
+          "blocked_by": "no SM_API entry point",
+          "symbol": "offset of selected faces (SmApiOffsetBrepFull moves every face)"
         },
         "verdict": "DEFERRED"
       },
@@ -84,8 +1797,8 @@
       "pr": "https://github.com/tangency-labs/solidcraft/pull/3898",
       "rust": {
         "deferred": {
-          "blocked_by": "primitive.primitive_creation_p1",
-          "symbol": "SmPrimitiveCreation::CreateBox"
+          "blocked_by": "no SM_API entry point",
+          "symbol": "offset of selected faces (SmApiOffsetBrepFull moves every face)"
         },
         "verdict": "DEFERRED"
       },
@@ -97,8 +1810,8 @@
       "pr": "https://github.com/tangency-labs/solidcraft/pull/3898",
       "rust": {
         "deferred": {
-          "blocked_by": "primitive.primitive_creation_p1",
-          "symbol": "SmPrimitiveCreation::CreateBox"
+          "blocked_by": "no SM_API entry point",
+          "symbol": "offset of selected faces (SmApiOffsetBrepFull moves every face)"
         },
         "verdict": "DEFERRED"
       },
@@ -110,8 +1823,8 @@
       "pr": "https://github.com/tangency-labs/solidcraft/pull/3898",
       "rust": {
         "deferred": {
-          "blocked_by": "primitive.primitive_creation_p1",
-          "symbol": "SmPrimitiveCreation::CreateBox"
+          "blocked_by": "no SM_API entry point",
+          "symbol": "offset of selected faces (SmApiOffsetBrepFull moves every face)"
         },
         "verdict": "DEFERRED"
       },
@@ -122,11 +1835,27 @@
       "issue": "https://github.com/tangency-labs/solidcraft/issues/3526",
       "pr": "https://github.com/tangency-labs/solidcraft/pull/3888",
       "rust": {
-        "deferred": {
-          "blocked_by": "primitive.primitive_creation_p2",
-          "symbol": "SmPrimitiveCreation::CreateSphere"
+        "checks": [
+          {
+            "detail": "expected 2, got 2",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 268.082573106329 +- 0.268082573106329, got 268.0825574574511 (off by 0.000015648877877083578)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 4,
+          "faces": 4,
+          "lumps": 2,
+          "vertices": 4,
+          "volume": 268.0825574574511
         },
-        "verdict": "DEFERRED"
+        "verdict": "PASS"
       },
       "test": "crates/engine/src/boolean_regression_tests.rs: intersect_keeps_every_lump_of_a_target"
     },
@@ -135,28 +1864,1399 @@
       "issue": "https://github.com/tangency-labs/solidcraft/issues/3526",
       "pr": "https://github.com/tangency-labs/solidcraft/pull/3888",
       "rust": {
+        "checks": [
+          {
+            "detail": "expected 0, got 0",
+            "name": "lumps",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 0,
+          "faces": 0,
+          "lumps": 0,
+          "vertices": 0,
+          "volume": 0.0
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/engine/src/boolean_regression_tests.rs: intersect_keeps_every_lump_of_a_target"
+    },
+    {
+      "id": "3665-column-in-channel/column_in_channel",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3665",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3666",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 18738.925943688737 +- 0.01, got 18738.92613447908 (off by 0.00019079034245805815)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 9,
+          "edges": 28,
+          "faces": 13,
+          "lumps": 1,
+          "vertices": 18,
+          "volume": 18738.92613447908
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/engine/src/boolean_regression_tests.rs: column_standing_in_a_channel_joins_as_drawn"
+    },
+    {
+      "id": "3665-column-in-channel/column_beside_tangent_opening",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3665",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3666",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 18657.632584219973 +- 0.01, got 18657.632714683692 (off by 0.00013046371896052733)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 8,
+          "edges": 30,
+          "faces": 13,
+          "lumps": 1,
+          "vertices": 19,
+          "volume": 18657.632714683692
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/engine/src/boolean_regression_tests.rs: column_standing_in_a_channel_joins_as_drawn"
+    },
+    {
+      "id": "3665-column-in-channel/control_column_clear",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3665",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3666",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 2, got 2",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 18657.545801142827 +- 0.01, got 18657.545823709297 (off by 0.000022566469851881266)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 9,
+          "edges": 33,
+          "faces": 16,
+          "lumps": 2,
+          "vertices": 21,
+          "volume": 18657.545823709297
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/engine/src/boolean_regression_tests.rs: column_standing_in_a_channel_joins_as_drawn"
+    },
+    {
+      "id": "3665-column-in-channel/control_column_overlapping",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/3665",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/3666",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 18657.633512613003 +- 0.01, got 18657.633622726422 (off by 0.00011011341848643497)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 8,
+          "edges": 32,
+          "faces": 13,
+          "lumps": 1,
+          "vertices": 21,
+          "volume": 18657.633622726422
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/engine/src/boolean_regression_tests.rs: column_standing_in_a_channel_joins_as_drawn"
+    },
+    {
+      "id": "434-two-overlapping-swept-arc-walls/two_overlapping_swept_arc_walls_joined",
+      "issue": "https://github.com/tangency-labs/solidcore/issues/434",
+      "pr": "https://github.com/tangency-labs/solidcore/pull/1069 (carries tangency-labs/smlib 1b6f5fa)",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 223932.7168 +- 1, got 223932.68376262725 (off by 0.03303737274836749)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 30,
+          "faces": 12,
+          "lumps": 1,
+          "vertices": 20,
+          "volume": 223932.68376262725
+        },
+        "verdict": "PASS"
+      },
+      "test": "SolidCraft tests/kernel-cases/sweeps/844-join-two-overlapping-swept-arc-walls (solidcraft#844)"
+    },
+    {
+      "id": "434-two-overlapping-swept-arc-walls/two_overlapping_swept_arc_walls_outside_the_arcs",
+      "issue": "https://github.com/tangency-labs/solidcore/issues/434",
+      "pr": "https://github.com/tangency-labs/solidcore/pull/1069 (carries tangency-labs/smlib 1b6f5fa)",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 248814.1382 +- 1, got 248814.09598517342 (off by 0.04221482656430453)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 24,
+          "faces": 10,
+          "lumps": 1,
+          "vertices": 16,
+          "volume": 248814.09598517342
+        },
+        "verdict": "PASS"
+      },
+      "test": "SolidCraft tests/kernel-cases/sweeps/844-join-two-overlapping-swept-arc-walls (solidcraft#844)"
+    },
+    {
+      "id": "451-hollow-shell-cut/block_inside_hollow_cut",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/451",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/4182",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 0",
+            "name": "lumps",
+            "status": "fail"
+          },
+          {
+            "detail": "expected 512 +- 0.01, got 0 (off by 512)",
+            "name": "volume",
+            "status": "fail"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 0,
+          "faces": 0,
+          "lumps": 0,
+          "vertices": 0,
+          "volume": 0.0
+        },
+        "verdict": "FAIL"
+      },
+      "test": "crates/engine/src/boolean_regression_tests.rs: spherical_shell_cuts_and_joins_a_block_crossing_its_hollow"
+    },
+    {
+      "id": "451-hollow-shell-cut/block_crossing_inner_sphere_cut",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/451",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/4182",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 653.3429089562032 +- 0.01, got 114.65709033325655 (off by 538.6858186229467)",
+            "name": "volume",
+            "status": "fail"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 14,
+          "faces": 6,
+          "lumps": 1,
+          "vertices": 10,
+          "volume": 114.65709033325655
+        },
+        "verdict": "FAIL"
+      },
+      "test": "crates/engine/src/boolean_regression_tests.rs: spherical_shell_cuts_and_joins_a_block_crossing_its_hollow"
+    },
+    {
+      "id": "451-hollow-shell-cut/block_crossing_both_spheres_cut",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/451",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/4182",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 2, got 1",
+            "name": "lumps",
+            "status": "fail"
+          },
+          {
+            "detail": "expected 1301.896263966058 +- 0.01, got 648.553352732934 (off by 653.3429112331241)",
+            "name": "volume",
+            "status": "fail"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 20,
+          "faces": 7,
+          "lumps": 1,
+          "vertices": 16,
+          "volume": 648.553352732934
+        },
+        "verdict": "FAIL"
+      },
+      "test": "crates/engine/src/boolean_regression_tests.rs: spherical_shell_cuts_and_joins_a_block_crossing_its_hollow"
+    },
+    {
+      "id": "451-hollow-shell-cut/block_crossing_inner_sphere_join",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/451",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/4182",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 242214.06723490456 +- 0.01, got 268082.572675075 (off by 25868.50544017041)",
+            "name": "volume",
+            "status": "fail"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 15,
+          "faces": 7,
+          "lumps": 2,
+          "vertices": 12,
+          "volume": 268082.572675075
+        },
+        "verdict": "FAIL"
+      },
+      "test": "crates/engine/src/boolean_regression_tests.rs: spherical_shell_cuts_and_joins_a_block_crossing_its_hollow"
+    },
+    {
+      "id": "451-hollow-shell-cut/block_crossing_inner_sphere_cut_by_sphere_difference",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/451",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/4182",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 653.3429089562032 +- 0.01, got 653.3429080270938 (off by 0.0000009291094329455518)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 16,
+          "faces": 7,
+          "lumps": 1,
+          "vertices": 11,
+          "volume": 653.3429080270938
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/engine/src/boolean_regression_tests.rs: spherical_shell_cuts_and_joins_a_block_crossing_its_hollow"
+    },
+    {
+      "id": "5562-revolve-cut-pole-on-box-edge/pole_inside_box",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/5562",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/5812",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 2235.407984082408 +- 0.01, got 2235.407972613862 (off by 0.00001146854583566892)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 14,
+          "faces": 7,
+          "lumps": 1,
+          "vertices": 10,
+          "volume": 2235.407972613862
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/engine/src/boolean_regression_tests.rs: revolve_cut_round_a_box_corner_does_not_panic"
+    },
+    {
+      "id": "5562-revolve-cut-pole-on-box-edge/pole_on_side_face",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/5562",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/5812",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 2341.703992041204 +- 0.01, got 2341.7039864081917 (off by 0.000005633012278849492)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 16,
+          "faces": 7,
+          "lumps": 1,
+          "vertices": 11,
+          "volume": 2341.7039864081917
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/engine/src/boolean_regression_tests.rs: revolve_cut_round_a_box_corner_does_not_panic"
+    },
+    {
+      "id": "5562-revolve-cut-pole-on-box-edge/pole_on_box_edge",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/5562",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/5812",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 2394.851996020602 +- 0.01, got 2394.851995992576 (off by 0.000000028026079235132784)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 15,
+          "faces": 7,
+          "lumps": 1,
+          "vertices": 10,
+          "volume": 2394.851995992576
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/engine/src/boolean_regression_tests.rs: revolve_cut_round_a_box_corner_does_not_panic"
+    },
+    {
+      "id": "5797-disc-flush-under-lofted-tube/dia_52",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/5797",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/6595",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 18664.20195497696 +- 18.66420195497696, got 18664.21881812207 (off by 0.01686314510880038)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 1,
+          "edges": 8,
+          "faces": 6,
+          "lumps": 1,
+          "vertices": 5,
+          "volume": 18664.21881812207
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/engine/src/tests/flush_join_loft.rs: a_disc_joined_flush_under_a_lofted_tube_follows_its_diameter (draft: not merged, kernel work is paused under tangency-labs/solidcraft#3992)"
+    },
+    {
+      "id": "5797-disc-flush-under-lofted-tube/dia_45",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/5797",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/6595",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 17141.31491614931 +- 17.14131491614931, got 17141.33312099926 (off by 0.018204849951871438)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 1,
+          "edges": 8,
+          "faces": 6,
+          "lumps": 1,
+          "vertices": 5,
+          "volume": 17141.33312099926
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/engine/src/tests/flush_join_loft.rs: a_disc_joined_flush_under_a_lofted_tube_follows_its_diameter (draft: not merged, kernel work is paused under tangency-labs/solidcraft#3992)"
+    },
+    {
+      "id": "5797-disc-flush-under-lofted-tube/dia_30",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/5797",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/6595",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 14137.16694115407 +- 14.13716694115407, got 14137.179321411299 (off by 0.012380257228869596)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 1,
+          "edges": 8,
+          "faces": 6,
+          "lumps": 1,
+          "vertices": 5,
+          "volume": 14137.179321411299
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/engine/src/tests/flush_join_loft.rs: a_disc_joined_flush_under_a_lofted_tube_follows_its_diameter (draft: not merged, kernel work is paused under tangency-labs/solidcraft#3992)"
+    },
+    {
+      "id": "6386-join-into-two-touching-bodies/straight_edge",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/6386",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 11500 +- 0.01, got 11500 (off by 0)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 18,
+          "faces": 8,
+          "lumps": 1,
+          "vertices": 12,
+          "volume": 11500.0
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: not fixed on truck (kernel work paused under tangency-labs/solidcraft#3992); geometry is the issue's script, reproduced on 0.22.1 in its triage comment"
+    },
+    {
+      "id": "6386-join-into-two-touching-bodies/curved_edge_two_arcs",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/6386",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 11500 +- 0.01, got 11499.999998883806 (off by 0.000001116193743655458)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 21,
+          "faces": 9,
+          "lumps": 1,
+          "vertices": 14,
+          "volume": 11499.999998883806
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: not fixed on truck (kernel work paused under tangency-labs/solidcraft#3992); geometry is the issue's script, reproduced on 0.22.1 in its triage comment"
+    },
+    {
+      "id": "674-partial-face-contact/partial_face_contact_back_to_back",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/674",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/704",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 44727.59954084936 +- 0.01, got 44727.599552335945 (off by 0.000011486583389341831)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 1,
+          "edges": 19,
+          "faces": 9,
+          "lumps": 1,
+          "vertices": 12,
+          "volume": 44727.599552335945
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/engine/src/tests/robustness.rs: fixed_seeds_run_clean (seed 16, PR #704); contact case as crates/kernel/src/issue_674_tests.rs: partial_circular_contact_preserves_material_and_history (added in PR #782)"
+    },
+    {
+      "id": "674-partial-face-contact/half_embedded_end_control",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/674",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/704",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 44629.42477042468 +- 0.01, got 44629.42477078707 (off by 0.0000003623863449320197)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 2,
+          "edges": 21,
+          "faces": 9,
+          "lumps": 1,
+          "vertices": 14,
+          "volume": 44629.42477078707
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/engine/src/tests/robustness.rs: fixed_seeds_run_clean (seed 16, PR #704); contact case as crates/kernel/src/issue_674_tests.rs: partial_circular_contact_preserves_material_and_history (added in PR #782)"
+    },
+    {
+      "id": "674-partial-face-contact/seed_16_pattern",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/674",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/704",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 3, got 3",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 45218.473392972766 +- 0.01, got 45218.47339989205 (off by 0.00000691928289597854)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 5,
+          "edges": 33,
+          "faces": 18,
+          "lumps": 3,
+          "vertices": 21,
+          "volume": 45218.47339989205
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/engine/src/tests/robustness.rs: fixed_seeds_run_clean (seed 16, PR #704); contact case as crates/kernel/src/issue_674_tests.rs: partial_circular_contact_preserves_material_and_history (added in PR #782)"
+    },
+    {
+      "id": "788-equal-bores-crossing/equal_bores_crossing_r10",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/788",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/1179",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 68183.99945102519 +- 0.01, got 68183.99747215217 (off by 0.00197887301328592)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 4,
+          "edges": 24,
+          "faces": 10,
+          "lumps": 1,
+          "vertices": 14,
+          "volume": 68183.99747215217
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/issue_788_tests.rs: equal_bores_crossing_at_right_angles"
+    },
+    {
+      "id": "788-equal-bores-crossing/equal_bores_crossing_r17_5",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/788",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/1179",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 33118.18581876466 +- 0.01, got 33118.18299574981 (off by 0.0028230148454895243)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 4,
+          "edges": 24,
+          "faces": 10,
+          "lumps": 1,
+          "vertices": 14,
+          "volume": 33118.18299574981
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/issue_788_tests.rs: equal_bores_crossing_at_right_angles"
+    },
+    {
+      "id": "788-equal-bores-crossing/equal_bores_crossing_r4",
+      "issue": "https://github.com/tangency-labs/solidcraft/issues/788",
+      "pr": "https://github.com/tangency-labs/solidcraft/pull/1179",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 86942.43991216403 +- 0.01, got 86942.4397735442 (off by 0.00013861982733942568)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 4,
+          "edges": 24,
+          "faces": 10,
+          "lumps": 1,
+          "vertices": 14,
+          "volume": 86942.4397735442
+        },
+        "verdict": "PASS"
+      },
+      "test": "crates/kernel/src/issue_788_tests.rs: equal_bores_crossing_at_right_angles"
+    },
+    {
+      "id": "a52-battery-more/insert_countersink_hole",
+      "issue": "none: user's design (a52.solidcraft)",
+      "pr": "none: user's design (a52.solidcraft)",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 313.34467656 +- 0.01, got 313.3446764945981 (off by 0.00000006540187769132899)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 1,
+          "edges": 8,
+          "faces": 6,
+          "lumps": 1,
+          "vertices": 5,
+          "volume": 313.3446764945981
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: user's design (a52.solidcraft)"
+    },
+    {
+      "id": "a52-battery-more/socket_counterbore_grid",
+      "issue": "none: user's design (a52.solidcraft)",
+      "pr": "none: user's design (a52.solidcraft)",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 5922.16312288 +- 0.01, got 5922.1633974490005 (off by 0.0002745690007941448)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 12,
+          "edges": 48,
+          "faces": 24,
+          "lumps": 1,
+          "vertices": 32,
+          "volume": 5922.1633974490005
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: user's design (a52.solidcraft)"
+    },
+    {
+      "id": "a52-battery-more/strip_bridging_holes",
+      "issue": "none: user's design (a52.solidcraft)",
+      "pr": "none: user's design (a52.solidcraft)",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 7113.7869208 +- 0.01, got 7113.786921014809 (off by 0.00000021480900613823906)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 6,
+          "edges": 66,
+          "faces": 19,
+          "lumps": 1,
+          "vertices": 40,
+          "volume": 7113.786921014809
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: user's design (a52.solidcraft)"
+    },
+    {
+      "id": "a52-battery-more/tray_pegs_tangent",
+      "issue": "none: user's design (a52.solidcraft)",
+      "pr": "none: user's design (a52.solidcraft)",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 36068.04689688 +- 0.01, got 36068.04690770403 (off by 0.000010824034688994288)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 4,
+          "edges": 28,
+          "faces": 14,
+          "lumps": 1,
+          "vertices": 18,
+          "volume": 36068.04690770403
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: user's design (a52.solidcraft)"
+    },
+    {
+      "id": "a52-battery-more/cell_seat_half_cylinder",
+      "issue": "none: user's design (a52.solidcraft)",
+      "pr": "none: user's design (a52.solidcraft)",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 57825.22957532 +- 0.02, got 57825.2296172296 (off by 0.00004190959589323029)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 2,
+          "edges": 21,
+          "faces": 9,
+          "lumps": 1,
+          "vertices": 14,
+          "volume": 57825.2296172296
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: user's design (a52.solidcraft)"
+    },
+    {
+      "id": "a52-battery-more/panel_rib_sawtooth",
+      "issue": "none: user's design (a52.solidcraft)",
+      "pr": "none: user's design (a52.solidcraft)",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 3422.6379973 +- 0.01, got 3422.6379973049534 (off by 0.000000004953562893206254)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 63,
+          "faces": 23,
+          "lumps": 1,
+          "vertices": 42,
+          "volume": 3422.6379973049534
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: user's design (a52.solidcraft)"
+    },
+    {
+      "id": "a52-battery-more/grommet_in_bore",
+      "issue": "none: user's design (a52.solidcraft)",
+      "pr": "none: user's design (a52.solidcraft)",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 8059.54561868 +- 0.01, got 8059.545626215035 (off by 0.000007535034455941059)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 18,
+          "faces": 9,
+          "lumps": 1,
+          "vertices": 12,
+          "volume": 8059.545626215035
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: user's design (a52.solidcraft)"
+    },
+    {
+      "id": "a52-battery-shapes/grommet_pocket",
+      "issue": "none: user's design (a52.solidcraft)",
+      "pr": "none: user's design (a52.solidcraft)",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 8977.51416228 +- 0.01, got 8977.514162264448 (off by 0.000000015552359400317073)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 36,
+          "faces": 15,
+          "lumps": 1,
+          "vertices": 24,
+          "volume": 8977.514162264448
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: user's design (a52.solidcraft)"
+    },
+    {
+      "id": "a52-battery-shapes/grommet_pocket_and_bores",
+      "issue": "none: user's design (a52.solidcraft)",
+      "pr": "none: user's design (a52.solidcraft)",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 8611.75737918 +- 0.01, got 8611.757375192943 (off by 0.000003987057425547391)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 2,
+          "edges": 42,
+          "faces": 17,
+          "lumps": 1,
+          "vertices": 28,
+          "volume": 8611.757375192943
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: user's design (a52.solidcraft)"
+    },
+    {
+      "id": "a52-battery-shapes/rail_tunnels",
+      "issue": "none: user's design (a52.solidcraft)",
+      "pr": "none: user's design (a52.solidcraft)",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 167241.56928 +- 0.2, got 167241.56928 (off by 0)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 60,
+          "faces": 22,
+          "lumps": 1,
+          "vertices": 40,
+          "volume": 167241.56928
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: user's design (a52.solidcraft)"
+    },
+    {
+      "id": "a52-battery-shapes/rail_clipped_ends",
+      "issue": "none: user's design (a52.solidcraft)",
+      "pr": "none: user's design (a52.solidcraft)",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 164024.61159763 +- 0.2, got 164024.61159763316 (off by 0.0000000031723175197839737)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 18,
+          "faces": 8,
+          "lumps": 1,
+          "vertices": 12,
+          "volume": 164024.61159763316
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: user's design (a52.solidcraft)"
+    },
+    {
+      "id": "a52-battery-shapes/rail_clipped_with_tunnels",
+      "issue": "none: user's design (a52.solidcraft)",
+      "pr": "none: user's design (a52.solidcraft)",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 159666.18087763 +- 0.2, got 159666.18087763316 (off by 0.0000000031723175197839737)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 66,
+          "faces": 24,
+          "lumps": 1,
+          "vertices": 44,
+          "volume": 159666.18087763316
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: user's design (a52.solidcraft)"
+    },
+    {
+      "id": "a52-battery-shapes/boss_pair_mirror_union",
+      "issue": "none: user's design (a52.solidcraft)",
+      "pr": "none: user's design (a52.solidcraft)",
+      "rust": {
         "deferred": {
-          "blocked_by": "primitive.primitive_creation_p2",
-          "symbol": "SmPrimitiveCreation::CreateSphere"
+          "blocked_by": "no SM_API entry point",
+          "symbol": "mirror of a body (SmBrep::Mirror is not in SM_API; SmApiScaleByPt with a reflecting scale fails or inverts boolean results)"
         },
         "verdict": "DEFERRED"
       },
-      "test": "crates/engine/src/boolean_regression_tests.rs: intersect_keeps_every_lump_of_a_target"
+      "test": "none: user's design (a52.solidcraft)"
+    },
+    {
+      "id": "a52-battery-shapes/rail_mirror_stack",
+      "issue": "none: user's design (a52.solidcraft)",
+      "pr": "none: user's design (a52.solidcraft)",
+      "rust": {
+        "deferred": {
+          "blocked_by": "no SM_API entry point",
+          "symbol": "mirror of a body (SmBrep::Mirror is not in SM_API; SmApiScaleByPt with a reflecting scale fails or inverts boolean results)"
+        },
+        "verdict": "DEFERRED"
+      },
+      "test": "none: user's design (a52.solidcraft)"
+    },
+    {
+      "id": "a52-battery-shapes/grommet_revolve_full",
+      "issue": "none: user's design (a52.solidcraft)",
+      "pr": "none: user's design (a52.solidcraft)",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 322.42401023 +- 0.01, got 322.424005555245 (off by 0.000004674755018641008)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 9,
+          "faces": 6,
+          "lumps": 1,
+          "vertices": 6,
+          "volume": 322.424005555245
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: user's design (a52.solidcraft)"
+    },
+    {
+      "id": "a52-battery-shapes/grommet_revolve_270",
+      "issue": "none: user's design (a52.solidcraft)",
+      "pr": "none: user's design (a52.solidcraft)",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 241.81800767 +- 0.01, got 241.8180091479575 (off by 0.0000014779575110424048)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 3,
+          "edges": 18,
+          "faces": 8,
+          "lumps": 1,
+          "vertices": 12,
+          "volume": 241.8180091479575
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: user's design (a52.solidcraft)"
+    },
+    {
+      "id": "a52-battery-shapes/socket_pattern",
+      "issue": "none: user's design (a52.solidcraft)",
+      "pr": "none: user's design (a52.solidcraft)",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 8938.09207032 +- 0.01, got 8938.092304547697 (off by 0.00023422769663739018)",
+            "name": "volume",
+            "status": "pass"
+          },
+          {
+            "detail": "at most 6, got 6",
+            "name": "cylinder_faces_max",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 6,
+          "edges": 30,
+          "faces": 18,
+          "lumps": 1,
+          "vertices": 20,
+          "volume": 8938.092304547697
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: user's design (a52.solidcraft)"
+    },
+    {
+      "id": "a52-battery-shapes/plate_edge_fillet",
+      "issue": "none: user's design (a52.solidcraft)",
+      "pr": "none: user's design (a52.solidcraft)",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 9587.1238898 +- 0.01, got 9587.123890164252 (off by 0.00000036425262806005776)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 1,
+          "edges": 15,
+          "faces": 7,
+          "lumps": 1,
+          "vertices": 10,
+          "volume": 9587.123890164252
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: user's design (a52.solidcraft)"
+    },
+    {
+      "id": "a52-wire-harness/harness_bplus_planar_run",
+      "issue": "none: user's design (a52.solidcraft)",
+      "pr": "none: user's design (a52.solidcraft)",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 989.2758217705 +- 0.01, got 989.2761214954583 (off by 0.00029972495826768863)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 2,
+          "edges": 12,
+          "faces": 7,
+          "lumps": 1,
+          "vertices": 7,
+          "volume": 989.2761214954583
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: user's design (a52.solidcraft)"
+    },
+    {
+      "id": "a52-wire-harness/exit_wire_straight_run",
+      "issue": "none: user's design (a52.solidcraft)",
+      "pr": "none: user's design (a52.solidcraft)",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 509.0939781395 +- 0.01, got 509.0939249690074 (off by 0.00005317049260611384)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 0,
+          "edges": 3,
+          "faces": 3,
+          "lumps": 1,
+          "vertices": 2,
+          "volume": 509.0939249690074
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: user's design (a52.solidcraft)"
+    },
+    {
+      "id": "a52-wire-harness/exit_wire_through_grommet_bore",
+      "issue": "none: user's design (a52.solidcraft)",
+      "pr": "none: user's design (a52.solidcraft)",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 2, got 2",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 9710.9453445615 +- 0.01, got 9710.945343744106 (off by 0.0000008173938113031909)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 2,
+          "edges": 18,
+          "faces": 10,
+          "lumps": 2,
+          "vertices": 12,
+          "volume": 9710.945343744106
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: user's design (a52.solidcraft)"
+    },
+    {
+      "id": "a52-wire-harness/bent_wire_channel_cut",
+      "issue": "none: user's design (a52.solidcraft)",
+      "pr": "none: user's design (a52.solidcraft)",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 8032.8482225145 +- 0.01, got 8032.848238230611 (off by 0.000015716111192887183)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 2,
+          "edges": 19,
+          "faces": 9,
+          "lumps": 1,
+          "vertices": 12,
+          "volume": 8032.848238230611
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: user's design (a52.solidcraft)"
+    },
+    {
+      "id": "catics-3d18-h01/catics_3d18_h01",
+      "issue": "none: public CAD exercise drawing (Catics 3D18-H01), not a SolidCraft issue",
+      "pr": "none: public CAD exercise drawing (Catics 3D18-H01), not a SolidCraft issue",
+      "rust": {
+        "checks": [
+          {
+            "detail": "expected 1, got 1",
+            "name": "lumps",
+            "status": "pass"
+          },
+          {
+            "detail": "expected 52011.64 +- 52, got 52000.83475475167 (off by 10.80524524833163)",
+            "name": "volume",
+            "status": "pass"
+          }
+        ],
+        "measured": {
+          "cylinder_faces": 15,
+          "edges": 231,
+          "faces": 91,
+          "lumps": 1,
+          "vertices": 133,
+          "volume": 52000.83475475167
+        },
+        "verdict": "PASS"
+      },
+      "test": "none: public CAD exercise drawing (Catics 3D18-H01), not a SolidCraft issue"
     }
   ],
   "glob": null,
   "summary": {
     "blocked_by": {
-      "primitive.primitive_creation_p1": 9,
-      "primitive.primitive_creation_p2": 2
+      "no SM_API entry point": 22,
+      "tangency-labs/solidcore#422": 1
     },
     "rust": {
-      "DEFERRED": 11,
-      "ERROR": 0,
-      "FAIL": 0,
-      "PASS": 0,
+      "DEFERRED": 23,
+      "ERROR": 1,
+      "FAIL": 4,
+      "PASS": 97,
       "UNCHECKED": 0
     }
   },
-  "volume_accuracy": 1e-6
+  "volume_accuracy": 1e-8
 }
