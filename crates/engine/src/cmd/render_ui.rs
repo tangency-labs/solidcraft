@@ -1,7 +1,10 @@
-//! Planned Render interactions, with explicit non-mutating refusals.
+//! Transient Render view requests and explicit refusals for planned interactions.
 use super::CommandSpec;
 use crate::schema::render_lights::{MuteParams, SoloParams};
-use crate::schema::{TypedContract, output_schema_for, render_ui::CheckReport};
+use crate::schema::{
+    TypedContract, output_schema_for,
+    render_ui::{CheckReport, ResultIndex},
+};
 use crate::{Result, Session, params::bad};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -33,6 +36,7 @@ fn mute(_: &mut crate::Session, params: &serde_json::Value) -> crate::Result<ser
     crate::render_lights::parse_id(&input.id).map_err(|e| crate::params::bad(command, e))?;
     serde_json::to_value(input).map_err(|e| crate::params::bad(command, e.to_string()))
 }
+const RESULT_INDEX: TypedContract<ResultIndex> = TypedContract::new();
 
 macro_rules! waiting {
     ($id:literal, $label:literal, $tab:literal, $panel:literal, $icon:literal, $reason:literal) => {
@@ -57,6 +61,16 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .doc_only()
         .params("text: nonempty report, at most 65536 bytes. Validated clipboard request; headless echo only, never renders or edits a design."),
+    CommandSpec::new("render.result.select", "Select Render Result", crate::checked!("render.result.select", select_result))
+        .icon("render_image").noundo().doc_only()
+        .enabled(results_ready)
+        .contract(&RESULT_INDEX).output(output_schema_for::<ResultIndex>)
+        .params("index: integer 0..7, oldest first; must be retained. Selects a completed result as transient per-document view state; echoes index."),
+    CommandSpec::new("render.result.discard", "Discard Render Result", crate::checked!("render.result.discard", discard_result))
+        .icon("delete").noundo().doc_only()
+        .enabled(results_ready)
+        .contract(&RESULT_INDEX).output(output_schema_for::<ResultIndex>)
+        .params("index: integer 0..7, oldest first; must be retained. Drops only that transient result, selecting the newest remaining result if necessary; echoes index."),
     CommandSpec::new("render.output.size", "Set Render Output Size", output_size)
         .icon("settings")
         .noundo()
@@ -98,6 +112,27 @@ fn copy_check(_: &mut Session, params: &Value) -> Result<Value> {
         return Err(bad("render.preflight.copy", "report must contain 1..65536 bytes"));
     }
     Ok(json!({"text":report.text}))
+}
+
+fn results_ready(s: &Session) -> std::result::Result<(), String> {
+    if s.render_jobs.has_results() { Ok(()) } else { Err("no completed render results are retained".into()) }
+}
+
+fn indexed_result(s: &mut Session, params: &Value, command: &str, discard: bool) -> Result<Value> {
+    let input: ResultIndex = serde_json::from_value(params.clone()).map_err(|e| bad(command, e.to_string()))?;
+    if input.index > 7 {
+        return Err(bad(command, "index must be in 0..7"));
+    }
+    s.render_jobs.result_index(input.index as usize, discard).map_err(crate::render_jobs::job_error)?;
+    Ok(json!({"index":input.index}))
+}
+
+fn select_result(s: &mut Session, params: &Value) -> Result<Value> {
+    indexed_result(s, params, "render.result.select", false)
+}
+
+fn discard_result(s: &mut Session, params: &Value) -> Result<Value> {
+    indexed_result(s, params, "render.result.discard", true)
 }
 
 #[cfg(test)]
@@ -209,4 +244,112 @@ fn output_sections_copy_report_validates_without_design_history_or_job_changes()
     }
     assert!(std::sync::Arc::ptr_eq(&doc, &s.doc));
     assert_eq!(before, (s.revision, s.undo.len(), s.redo.len(), s.evaluations, s.is_dirty()));
+}
+
+#[cfg(test)]
+fn complete_result(s: &mut Session, shot: &str) -> solidcraft_render::job::JobId {
+    let reply = s.execute("render.start", &json!({"setup":shot})).unwrap();
+    let job = serde_json::from_value(reply["job"].clone()).unwrap();
+    let host = s.render_job_host().unwrap().clone();
+    for _ in 0..1000 {
+        host.pump(4096).unwrap();
+        if s.execute("render.status", &json!({"job":job})).unwrap()["progress"]["phase"] == "completed" {
+            return job;
+        }
+    }
+    panic!("bounded result fixture did not complete");
+}
+
+#[cfg(test)]
+#[test]
+fn retained_results_cap_order_metadata_and_selection_never_edit_a_design() {
+    let mut s = Session::default();
+    s.set_render_job_host(Some(solidcraft_render::job::CpuHost::cooperative())).unwrap();
+    s.execute("render.settings.set", &json!({"name":"Hero","set":{"width":16,"height":8}})).unwrap();
+    s.execute("render.settings.set", &json!({"name":"Hero","set":{"width":32}})).unwrap();
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.redo.len(), 1, "view commands must preserve an available redo step");
+    let document = s.doc.clone();
+    let before = (s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty());
+    let jobs: Vec<_> = (0..10).map(|_| complete_result(&mut s, "Hero")).collect();
+    let results = s.render_retained_results().unwrap();
+    assert_eq!(results.len(), 8);
+    assert_eq!(results.iter().map(|result| result.frame.job).collect::<Vec<_>>(), jobs[2..]);
+    for result in &results {
+        assert_eq!(result.shot.as_deref(), Some("Hero"));
+        assert_eq!((result.frame.width, result.frame.height), (16, 8));
+        assert!(result.seconds.is_finite() && result.seconds >= 0.0);
+        assert_eq!(result.frame.scene_generation, s.revision);
+        assert!(!result.stale);
+    }
+    assert!(s.render_job_handle(jobs[0]).is_err());
+    assert!(s.render_job_handle(jobs[1]).is_err());
+    assert_eq!(s.render_selected_result(), Some(jobs[9]));
+    assert_eq!(s.execute("render.result.select", &json!({"index":0})).unwrap(), json!({"index":0}));
+    assert_eq!(s.render_selected_result(), Some(jobs[2]));
+    assert_eq!(s.execute("render.result.copy", &json!({})).unwrap()["frame"]["job"], json!(jobs[2]));
+    assert_eq!(s.execute("render.result.pin", &json!({})).unwrap()["frame"]["job"], json!(jobs[2]));
+    s.execute("render.result.discard", &json!({"index":0})).unwrap();
+    assert_eq!(s.render_selected_result(), Some(jobs[9]));
+    assert!(s.render_job_handle(jobs[2]).is_err());
+    s.execute("render.result.select", &json!({"index":2})).unwrap();
+    s.execute("render.result.discard", &json!({"index":0})).unwrap();
+    assert_eq!(s.render_selected_result(), Some(jobs[5]), "discarding an earlier row preserves the selected identity");
+    while !s.render_retained_results().unwrap().is_empty() {
+        s.execute("render.result.discard", &json!({"index":0})).unwrap();
+    }
+    assert!(s.render_selected_result().is_none());
+    assert!(s.execute("render.result.copy", &json!({})).is_err());
+    assert!(std::sync::Arc::ptr_eq(&document, &s.doc));
+    assert_eq!(before, (s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty()));
+}
+
+#[cfg(test)]
+#[test]
+fn retained_result_requests_refuse_hostile_and_missing_indices_atomically() {
+    let mut s = Session::default();
+    s.set_render_job_host(Some(solidcraft_render::job::CpuHost::cooperative())).unwrap();
+    s.execute("render.settings.set", &json!({"name":"Front","set":{"width":8,"height":8}})).unwrap();
+    let job = complete_result(&mut s, "Front");
+    let document = s.doc.clone();
+    let before = (s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty());
+    let retained = s.render_job_host().unwrap().admitted_bytes();
+    for mode in [crate::schema::ParamCheck::Off, crate::schema::ParamCheck::Strict] {
+        s.param_check = mode;
+        for command in ["render.result.select", "render.result.discard"] {
+            let spec = super::find_command(command).unwrap();
+            assert!(spec.contract.is_some() && spec.output.is_some());
+            for request in [
+                json!(null),
+                json!([]),
+                json!({}),
+                json!({"index":-1}),
+                json!({"index":0.5}),
+                json!({"index":1e300}),
+                json!({"index":u64::MAX}),
+                json!({"index":"0"}),
+                json!({"index":null}),
+                json!({"index":true}),
+                json!({"index":1}),
+                json!({"index":8}),
+                json!({"index":0,"extra":true}),
+            ] {
+                assert!(s.execute(command, &request).is_err(), "{command}: {request}");
+                assert_eq!(s.render_retained_results().unwrap().len(), 1);
+                assert_eq!(s.render_selected_result(), Some(job));
+                assert_eq!(s.render_job_host().unwrap().admitted_bytes(), retained);
+                assert!(std::sync::Arc::ptr_eq(&document, &s.doc));
+                assert_eq!(before, (s.undo.len(), s.redo.len(), s.revision, s.evaluations, s.is_dirty()));
+            }
+        }
+    }
+    s.execute("render.settings.set", &json!({"name":"Front","set":{"width":16}})).unwrap();
+    assert!(s.render_retained_results().unwrap()[0].stale);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert!(s.render_retained_results().unwrap()[0].stale, "undo does not recapture pixels");
+    assert_eq!(s.render_retained_results().unwrap()[0].frame.scene_generation, before.2);
+    let mut other = Session::default();
+    assert!(other.render_retained_results().unwrap().is_empty());
+    assert!(other.execute("render.result.select", &json!({"index":0})).is_err());
+    assert!(other.render_job_handle(job).is_err());
 }

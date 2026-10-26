@@ -2353,6 +2353,7 @@ fn delayed_image_export_never_substitutes_a_newer_retained_image() {
     use crate::picker_test_support::{Slot, save};
     let (mut h, job) = async_export_fixture();
     let path = h.dir.join("old-image.png");
+    let bytes = h.app.session.render_job_handle(job).unwrap().frame().unwrap().unwrap().png().to_vec();
     let ctx = crate::fonts::test_context();
     let slot: Slot = Default::default();
     save(&mut h.app, &slot);
@@ -2362,9 +2363,18 @@ fn delayed_image_export_never_substitutes_a_newer_retained_image() {
     h.app.render_workspace.view.completed = Some(newer);
     *slot.borrow_mut() = Some(Some(path.to_string_lossy().into_owned()));
     crate::file_picker::tick(&mut h.app, &ctx);
-    assert!(!path.exists(), "the evicted requested image must fail instead of exporting the newer image");
-    assert!(matches!(&h.app.status, Some((_, _, true))));
+    assert_eq!(std::fs::read(&path).unwrap(), bytes, "an older retained image remains the exact pending export source");
     assert_eq!(h.app.render_workspace.view.completed, Some(newer));
+    let evicted = h.dir.join("evicted.png");
+    export_image(&mut h.app, job, false);
+    crate::file_picker::tick(&mut h.app, &ctx);
+    for _ in 0..7 {
+        completed_preview(&mut h, [50, 60, 70]);
+    }
+    *slot.borrow_mut() = Some(Some(evicted.to_string_lossy().into_owned()));
+    crate::file_picker::tick(&mut h.app, &ctx);
+    assert!(!evicted.exists(), "an evicted requested image fails without substituting a newer image");
+    assert!(matches!(&h.app.status, Some((_, _, true))));
     let newer_path = h.dir.join("new-image.png");
     h.app.run("render.export", json!({"job":newer,"path":newer_path})).unwrap();
     assert!(newer_path.is_file());
@@ -5836,6 +5846,117 @@ fn output_viewer_r_starts_active_setup_and_escape_returns_to_model_without_cance
     assert!(h.app.viewport.nav.is_none(), "closing the image releases its navigation capture");
     enter(&mut h.app, false).unwrap();
     assert_ne!(crate::keymap::command_for(&h.app, "R"), Some("render.start"));
+}
+
+#[test]
+fn retained_results_picker_and_discard_dispatch_the_selected_index() {
+    let mut h = output_viewer_fixture();
+    let first = completed_preview(&mut h, [20, 40, 60]);
+    let second = completed_preview(&mut h, [80, 100, 120]);
+    let document = h.app.session.doc.clone();
+    let before = (h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision);
+    h.app.run("render.result.select", json!({"index":1})).unwrap();
+    h.frames(3);
+    h.step(&json!({"click":{"handle":"render:results"}})).unwrap();
+    h.frames(2);
+    h.step(&json!({"click":{"handle":"render:result:select:0"}})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.render_workspace.view.completed, Some(first));
+    h.step(&json!({"click":{"handle":"render:result-discard"}})).unwrap();
+    h.frames(2);
+    assert_eq!(h.app.render_workspace.view.completed, Some(second));
+    assert_eq!(h.app.render_workspace.view.retained.len(), 1);
+    assert!(Arc::ptr_eq(&document, &h.app.session.doc));
+    assert_eq!(before, (h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision));
+}
+
+#[test]
+fn retained_results_select_discard_copy_export_and_repaint_keep_exact_selected_pixels() {
+    let mut h = output_viewer_fixture();
+    let ctx = crate::fonts::test_context();
+    let document = h.app.session.doc.clone();
+    let before = (h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision);
+    let mut jobs = Vec::new();
+    for shade in 0..10 {
+        let job = completed_preview(&mut h, [shade * 20, 40, 60]);
+        h.app.render_workspace.view.job = Some(job);
+        h.app.render_workspace.view.job_shot = Some(format!("Shot {shade}"));
+        cache_render_images(&mut h.app, &ctx);
+        jobs.push(job);
+    }
+    assert_eq!(h.app.render_workspace.view.retained.len(), 8);
+    assert_eq!(h.app.render_workspace.view.retained.iter().map(|result| result.frame.job).collect::<Vec<_>>(), jobs[2..]);
+    assert_eq!(h.app.render_workspace.view.retained[0].shot.as_deref(), Some("Shot 2"));
+    h.app.run("render.result.select", json!({"index":0})).unwrap();
+    assert!(h.app.render_workspace.view.result);
+    for _ in 0..3 {
+        cache_render_images(&mut h.app, &ctx);
+        assert_eq!(h.app.render_workspace.view.completed, Some(jobs[2]));
+        assert_eq!(h.app.render_workspace.image_info.as_ref().unwrap().job, jobs[2]);
+    }
+    h.app.run("render.result.copy", json!({})).unwrap();
+    assert!(h.app.render_workspace.clipboard_image.as_ref().unwrap().pixels.iter().all(|pixel| *pixel == Color32::from_rgb(40, 40, 60)));
+    let frame = h.app.session.render_job_handle(jobs[2]).unwrap().frame().unwrap().unwrap();
+    let path = h.dir.join("selected-result.png");
+    h.app.run("render.export", json!({"path":path})).unwrap();
+    assert_eq!(std::fs::read(path).unwrap(), frame.png());
+    h.app.run("render.result.discard", json!({"index":0})).unwrap();
+    cache_render_images(&mut h.app, &ctx);
+    assert_eq!(h.app.render_workspace.view.completed, Some(jobs[9]));
+    assert!(h.app.session.render_job_handle(jobs[2]).is_err());
+    assert!(h.app.run("render.result.select", json!({"index":7})).is_err());
+    assert!(Arc::ptr_eq(&document, &h.app.session.doc));
+    assert_eq!(before, (h.app.session.undo.len(), h.app.session.redo.len(), h.app.session.revision));
+    ctx.run_ui(Default::default(), |_| {}).textures_delta.clear();
+}
+
+#[test]
+fn retained_results_and_selection_stay_with_the_document_tab_and_clear_on_reset() {
+    let mut h = output_viewer_fixture();
+    let first = completed_preview(&mut h, [20, 40, 60]);
+    let second = completed_preview(&mut h, [80, 100, 120]);
+    h.app.render_workspace.view.job = Some(second);
+    cache_render_images(&mut h.app, &h.ctx);
+    h.app.run("render.result.select", json!({"index":0})).unwrap();
+    h.app.run("solid.box", json!({"length":1,"width":1,"height":1})).unwrap();
+    cache_render_images(&mut h.app, &h.ctx);
+    assert!(h.app.render_workspace.view.retained.iter().all(|result| result.stale));
+    crate::documents::open_tab(&mut h.app, Session::default()).unwrap();
+    assert!(h.app.render_workspace.view.retained.is_empty());
+    assert!(h.app.run("render.result.select", json!({"index":0})).is_err());
+    crate::documents::switch(&mut h.app, 0);
+    cache_render_images(&mut h.app, &h.ctx);
+    assert_eq!(h.app.render_workspace.view.completed, Some(first));
+    assert_eq!(h.app.render_workspace.view.retained.len(), 2);
+    h.app.run("render.result.discard", json!({"index":0})).unwrap();
+    h.app.run("render.result.discard", json!({"index":0})).unwrap();
+    cache_render_images(&mut h.app, &h.ctx);
+    assert!(h.app.render_workspace.view.completed.is_none());
+    assert!(displayed_image(&h.app).is_none(), "polling the discarded active job cannot resurrect its image");
+    reset_document(&mut h.app);
+    assert!(h.app.render_workspace.view.retained.is_empty());
+}
+
+#[test]
+fn retained_results_capture_the_draft_shot_name_before_the_user_switches_shots() {
+    let mut h = output_viewer_fixture();
+    h.app.render_workspace.view.name = "Hero".into();
+    let reply = h.app.run("render.start", json!({"settings":{"width":8,"height":8}})).unwrap();
+    let job = serde_json::from_value(reply["job"].clone()).unwrap();
+    let host = h.app.session.render_job_host().unwrap().clone();
+    for _ in 0..100 {
+        if !host.pump(16384).unwrap() {
+            break;
+        }
+    }
+    let duration = h.app.session.render_job_handle(job).unwrap().completed_duration().unwrap().unwrap().as_secs_f64();
+    h.app.render_workspace.view.name = "Front".into();
+    h.app.run("render.start", json!({"settings":{"width":8,"height":8}})).unwrap();
+    sync_results(&mut h.app);
+    assert_eq!(h.app.render_workspace.view.retained[0].shot.as_deref(), Some("Hero"));
+    assert_eq!(h.app.render_workspace.view.retained[0].seconds, duration);
+    assert_eq!(h.app.render_workspace.view.completed, Some(job));
+    assert!(h.app.dialog.is_none());
 }
 
 /// Actual app controls and retained pixels, rasterized from egui without a window.

@@ -1,0 +1,42 @@
+{
+  "en": {
+    "cmd.render.result.discard": "Discard Render Result",
+    "cmd.render.result.select": "Select Render Result",
+    "render.results_choose": "Retained results",
+    "render.results_label": "Render {number} · {shot} · {seconds} s",
+    "render.results_stale_label": "{result} [stale]",
+    "render.results_unnamed": "Image"
+  },
+  "de": {
+    "cmd.render.result.discard": "Renderergebnis verwerfen",
+    "cmd.render.result.select": "Renderergebnis auswählen",
+    "render.results_choose": "Behaltene Ergebnisse",
+    "render.results_label": "Render {number} · {shot} · {seconds} s",
+    "render.results_stale_label": "{result} [veraltet]",
+    "render.results_unnamed": "Bild"
+  },
+  "ja": {
+    "cmd.render.result.discard": "レンダリング結果を破棄",
+    "cmd.render.result.select": "レンダリング結果を選択",
+    "render.results_choose": "保持した結果",
+    "render.results_label": "レンダー {number} · {shot} · {seconds} 秒",
+    "render.results_stale_label": "{result} [更新前]",
+    "render.results_unnamed": "画像"
+  },
+  "ko": {
+    "cmd.render.result.discard": "렌더 결과 버리기",
+    "cmd.render.result.select": "렌더 결과 선택",
+    "render.results_choose": "보관된 결과",
+    "render.results_label": "렌더 {number} · {shot} · {seconds}초",
+    "render.results_stale_label": "{result} [이전 버전]",
+    "render.results_unnamed": "이미지"
+  },
+  "zh": {
+    "cmd.render.result.discard": "丢弃渲染结果",
+    "cmd.render.result.select": "选择渲染结果",
+    "render.results_choose": "保留的结果",
+    "render.results_label": "渲染 {number} · {shot} · {seconds} 秒",
+    "render.results_stale_label": "{result} [已过期]",
+    "render.results_unnamed": "图像"
+  }
+}

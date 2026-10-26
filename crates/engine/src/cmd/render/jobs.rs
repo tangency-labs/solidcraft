@@ -675,7 +675,12 @@ pub(super) fn start(s: &mut Session, params: &Value) -> Result<Value> {
             p.scene,
             p.request,
             p.replace,
-            crate::render_jobs::Execution { executor: p.executor, options: p.options, environment: p.environment },
+            crate::render_jobs::Execution {
+                executor: p.executor,
+                options: p.options,
+                environment: p.environment,
+                shot: params.get("setup").and_then(Value::as_str).map(str::to_owned),
+            },
         )
         .map_err(job_error)?;
     let mut status = json!(status);
@@ -688,13 +693,19 @@ pub(super) fn start(s: &mut Session, params: &Value) -> Result<Value> {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Regrade {
-    job: JobId,
+    job: Option<JobId>,
     presentation: solidcraft_render::job::presentation::Presentation,
 }
 pub(super) fn regrade(s: &mut Session, params: &Value) -> Result<Value> {
     let input: Regrade = serde_json::from_value(params.clone()).map_err(|e| bad("render.result.regrade", e.to_string()))?;
     input.presentation.validate().map_err(job_error)?;
-    Ok(json!(s.render_jobs.regrade(input.job, input.presentation).map_err(job_error)?))
+    let job = result_source(s, input.job, "render.result.regrade")?;
+    Ok(json!(s.render_jobs.regrade(job, input.presentation).map_err(job_error)?))
+}
+
+fn result_source(s: &mut Session, job: Option<JobId>, command: &str) -> Result<JobId> {
+    s.render_jobs.collect().map_err(job_error)?;
+    job.or_else(|| s.render_selected_result()).ok_or_else(|| bad(command, "no completed result is selected"))
 }
 
 #[derive(Deserialize)]
@@ -714,18 +725,23 @@ struct Pin {
     job: Option<JobId>,
 }
 pub(super) fn pin(s: &mut Session, params: &Value) -> Result<Value> {
-    if params.get("job").is_none() {
-        return Err(bad("render.result.pin", "job or explicit null is required"));
-    }
     let input: Pin = serde_json::from_value(params.clone()).map_err(|e| bad("render.result.pin", e.to_string()))?;
-    Ok(json!({"frame":s.render_jobs.pin(input.job).map_err(job_error)?}))
+    let job = if params.get("job").is_some_and(Value::is_null) { None } else { Some(result_source(s, input.job, "render.result.pin")?) };
+    Ok(json!({"frame":s.render_jobs.pin(job).map_err(job_error)?}))
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResultJob {
+    job: Option<JobId>,
 }
 
 pub(super) fn copy(s: &mut Session, params: &Value) -> Result<Value> {
-    let input: Job = serde_json::from_value(params.clone()).map_err(|e| bad("render.result.copy", e.to_string()))?;
+    let input: ResultJob = serde_json::from_value(params.clone()).map_err(|e| bad("render.result.copy", e.to_string()))?;
+    let job = result_source(s, input.job, "render.result.copy")?;
     let frame = s
         .render_jobs
-        .handle(input.job)
+        .handle(job)
         .map_err(job_error)?
         .frame()
         .map_err(job_error)?
@@ -766,7 +782,7 @@ impl ExportFormat {
 struct Export {
     #[serde(default)]
     format: ExportFormat,
-    job: JobId,
+    job: Option<JobId>,
     path: String,
     #[serde(default)]
     overwrite: bool,
@@ -784,7 +800,8 @@ pub(super) fn export(s: &mut Session, params: &Value) -> Result<Value> {
     // Atomic native writers are also used for the app's own files and do not
     // apply a request's path scope. Check the caller's destination explicitly.
     solidcraft_io::vfs::check(&input.path).map_err(|e| bad("render.export", e.to_string()))?;
-    let frame = s.render_jobs.frame(input.job).map_err(job_error)?;
+    let job = result_source(s, input.job, "render.export")?;
+    let frame = s.render_jobs.frame(job).map_err(job_error)?;
     let bytes = match input.format {
         ExportFormat::Png => frame.png(),
         ExportFormat::Exr => frame
@@ -797,7 +814,7 @@ pub(super) fn export(s: &mut Session, params: &Value) -> Result<Value> {
         if input.overwrite { solidcraft_io::write_atomic(path, bytes, false) } else { solidcraft_io::safe_write::create_atomic(path, bytes) };
     result.map_err(|e| bad("render.export", format!("could not export completed {}: {e}", input.format.extension())))?;
     Ok(
-        json!({"job":input.job,"path":input.path,"bytes":bytes.len(),"format":input.format.extension(),"encoding":if input.format==ExportFormat::Exr {"scene_linear_srgb_d65"} else {"srgb"},"alpha":if input.format==ExportFormat::Exr {"coverage_premultiplied"} else {"straight"},"frame":frame.info,"linear_master":frame.linear_master_info(),"presentation":frame.presentation()}),
+        json!({"job":job,"path":input.path,"bytes":bytes.len(),"format":input.format.extension(),"encoding":if input.format==ExportFormat::Exr {"scene_linear_srgb_d65"} else {"srgb"},"alpha":if input.format==ExportFormat::Exr {"coverage_premultiplied"} else {"straight"},"frame":frame.info,"linear_master":frame.linear_master_info(),"presentation":frame.presentation()}),
     )
 }
 

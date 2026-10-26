@@ -361,6 +361,8 @@ pub struct ViewState {
     clean_setup: Option<RenderSetup>,
     job: Option<solidcraft_engine::render::job::JobId>,
     completed: Option<solidcraft_engine::render::job::JobId>,
+    retained: Vec<solidcraft_engine::render_jobs::RetainedResult>,
+    follow_job: bool,
     transparent: bool,
     method: ImageMethod,
     raytrace: RaytraceOptions,
@@ -426,6 +428,8 @@ impl Default for ViewState {
             clean_setup: None,
             job: None,
             completed: None,
+            retained: Vec::new(),
+            follow_job: true,
             transparent: false,
             method: ImageMethod::Raster,
             raytrace: RaytraceOptions::default(),
@@ -526,6 +530,7 @@ pub(crate) fn inspect_state(app: &SolveApp) -> serde_json::Value {
     json!({
         "active": active(app), "stage": view.stage.key(), "setup": view.name, "draft_dirty": view.dirty,
         "method": method, "job": view.job, "completed": view.completed,
+        "results": view.retained,
         "showing_result": view.result, "export_format": if view.studio.export_exr {"exr"} else {"png"},
     })
 }
@@ -1136,9 +1141,6 @@ fn job_controls(app: &mut SolveApp, ui: &mut egui::Ui, compact: bool) {
             Ok(status) => {
                 let phase = status["progress"]["phase"].as_str().unwrap_or(crate::i18n::tr("render.property_unknown"));
                 busy = matches!(phase, "queued" | "preparing" | "running" | "encoding" | "cancelling");
-                if phase == "completed" {
-                    app.render_workspace.view.completed = Some(job);
-                }
                 state = Some(status);
             }
             Err(error) => {
@@ -1285,7 +1287,6 @@ fn cache_completed_image(app: &mut SolveApp, ctx: &egui::Context) {
                 captured_image_limits(&captured.request)
             };
             let image = decode_render_image(frame.png(), frame.info.width, frame.info.height, budget, ctx.input(|i| i.max_texture_side))?;
-            app.session.execute("render.result.pin", &json!({"job":job})).map_err(|e| e.to_string())?;
             app.render_workspace.image_info = Some(frame.info.clone());
             Ok(ctx.load_texture("sc_render_image", image, egui::TextureOptions::LINEAR))
         })();
@@ -1341,16 +1342,17 @@ fn cache_preview_frame(app: &mut SolveApp, ctx: &egui::Context, info: &PreviewIn
 }
 
 fn cache_preview_image(app: &mut SolveApp, ctx: &egui::Context) {
-    if let Some(job) = app.render_workspace.view.job
+    if app.render_workspace.view.follow_job
+        && let Some(job) = app.render_workspace.view.job
         && let Ok(handle) = app.session.render_job_handle(job)
     {
         let preview = handle.preview().ok().flatten();
         // Read the final after the checkpoint: completion may occur after the panel's
         // earlier status query. Promote the real final before dropping its preview,
         // rather than briefly falling back to an older job and losing result framing.
-        if handle.frame().ok().flatten().is_some() {
-            app.render_workspace.view.completed = Some(job);
-        } else if let Some(preview) = preview {
+        if handle.frame().ok().flatten().is_none()
+            && let Some(preview) = preview
+        {
             cache_preview_frame(app, ctx, &preview.info, preview.png());
             return;
         }
@@ -1373,9 +1375,25 @@ fn cache_render_images(app: &mut SolveApp, ctx: &egui::Context) {
         app.render_workspace.view.result_job == Some(preview.info.frame.job) && app.render_workspace.view.job == Some(preview.info.frame.job)
     });
     cache_preview_image(app, ctx);
+    sync_results(app);
     cache_completed_image(app, ctx);
     // Checkpoint updates and preview→final/cancel transitions preserve shared pan/zoom.
     remember_displayed_job(app, preserve_view);
+}
+
+fn sync_results(app: &mut SolveApp) {
+    let Ok(mut results) = app.session.render_retained_results() else { return };
+    let view = &mut app.render_workspace.view;
+    for result in &mut results {
+        if result.shot.is_none() {
+            result.shot = view.retained.iter().find(|old| old.frame.job == result.frame.job).and_then(|old| old.shot.clone());
+            if result.shot.is_none() && view.job == Some(result.frame.job) {
+                result.shot = view.job_shot.clone();
+            }
+        }
+    }
+    view.retained = results;
+    view.completed = app.session.render_selected_result();
 }
 
 fn captured_image_limits(request: &solidcraft_engine::render::job::ImageRequest) -> RenderLimits {
@@ -1489,6 +1507,34 @@ fn result_rect(camera: Camera, size: [u32; 2], canvas: egui::Rect) -> egui::Rect
 }
 
 fn result_actions(app: &mut SolveApp, ui: &mut egui::Ui) {
+    let results = app.render_workspace.view.retained.clone();
+    if !results.is_empty() {
+        let selected = results.iter().position(|result| Some(result.frame.job) == app.render_workspace.view.completed);
+        let label = selected.and_then(|index| results.get(index)).map(result_label).unwrap_or_else(|| app.tr("render.results_choose").to_string());
+        let mut chosen = None;
+        let picker = crate::ui_kit::compact_dropdown_menu(ui, "render_results", &label, |ui| {
+            for (index, result) in results.iter().enumerate().rev() {
+                let response = crate::ui_kit::list_picker(ui, &format!("result:{index}"), &result_label(result), selected == Some(index));
+                crate::scenario::publish_target(&format!("render:result:select:{index}"), response.rect);
+                if response.clicked() {
+                    chosen = Some(index);
+                    ui.close();
+                }
+            }
+        });
+        crate::scenario::publish_target("render:results", picker.rect);
+        if let Some(index) = chosen {
+            let _ = app.run("render.result.select", json!({"index":index}));
+        }
+        let discard =
+            ui.add_enabled_ui(selected.is_some(), |ui| crate::ui_kit::StageBar::icon_action(ui, "delete", app.tr("cmd.render.result.discard"))).inner;
+        crate::scenario::publish_target("render:result-discard", discard.rect);
+        if discard.clicked()
+            && let Some(index) = selected
+        {
+            let _ = app.run("render.result.discard", json!({"index":index}));
+        }
+    }
     for (view, key) in [("model", "render.state_model"), ("fit", "render.output_fit"), ("actual", "render.result_actual")] {
         let enabled = view != "actual" || !reduced_display(app);
         if crate::ui_kit::button(ui, app.tr(key), crate::ui_kit::Button::Enabled(enabled)).clicked() {
@@ -1515,6 +1561,15 @@ fn result_actions(app: &mut SolveApp, ui: &mut egui::Ui) {
     if close.clicked() {
         app.start("render.result.close");
     }
+}
+
+fn result_label(result: &solidcraft_engine::render_jobs::RetainedResult) -> String {
+    let name = result.shot.as_deref().unwrap_or_else(|| crate::i18n::tr("render.results_unnamed"));
+    let label = crate::i18n::format(
+        "render.results_label",
+        &[("number", &result.frame.job.serial.to_string()), ("shot", name), ("seconds", &format!("{:.0}", result.seconds))],
+    );
+    if result.stale { crate::i18n::format("render.results_stale_label", &[("result", &label)]) } else { label }
 }
 
 fn show_result(app: &mut SolveApp, ui: &mut egui::Ui) {
@@ -2141,6 +2196,33 @@ pub(crate) fn apply_command(app: &mut SolveApp, id: &str, reply: &serde_json::Va
     match id {
         "render.preflight.copy" => {
             app.render_workspace.clipboard_text = Some(reply["text"].as_str().ok_or("invalid check report")?.to_string());
+        }
+        "render.start" | "render.result.regrade" => {
+            let job = serde_json::from_value(reply["job"].clone()).map_err(|e| format!("invalid render job identity: {e}"))?;
+            let shot = if id == "render.result.regrade" {
+                app.render_workspace
+                    .view
+                    .retained
+                    .iter()
+                    .find(|result| Some(result.frame.job) == app.render_workspace.view.completed)
+                    .and_then(|result| result.shot.clone())
+            } else {
+                Some(app.render_workspace.view.name.clone())
+            };
+            if let Some(shot) = &shot {
+                let _ = app.session.label_render_job(job, shot);
+            }
+            app.render_workspace.view.job = Some(job);
+            app.render_workspace.view.job_shot = shot;
+            app.render_workspace.view.follow_job = true;
+        }
+        "render.result.select" | "render.result.discard" | "render.result.pin" => {
+            sync_results(app);
+            app.render_workspace.preview_image = None;
+            app.render_workspace.view.follow_job = false;
+            if id == "render.result.select" {
+                app.render_workspace.view.result = true;
+            }
         }
         "render.output.size" => {
             let width = reply["width"].as_u64().and_then(|v| u32::try_from(v).ok()).ok_or("invalid output width")?;
