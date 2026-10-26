@@ -71,8 +71,8 @@ pub(crate) struct Draft {
 }
 
 pub(crate) use imp::{
-    body_from_record, curve, extrude, face_section, loft, loft_rails, loft_to_point, path_curve, project_onto_face, revolve, screw, screw_radial, sphere, sweep,
-    sweep_controlled,
+    body_from_record, curve, extrude, face_section, loft, loft_rails, loft_to_point, path_curve, project_onto_face, revolve, screw, screw_radial,
+    sphere, sweep, sweep_controlled,
 };
 
 /// Refuses what no SMLib sweep does, before any work.
@@ -1267,7 +1267,15 @@ mod imp {
 
     /// [`screw`] with the profile moved `offset(t)` mm off the axis at turn t (negative: towards
     /// it), piecewise linear through `law`'s (turn, offset) pairs: a groove fading over a runout.
-    pub(crate) fn screw_radial(plane: &Plane, pieces: &[Piece], origin: Vec3, axis: Vec3, pitch: f64, turns: f64, law: &[(f64, f64)]) -> Result<Body> {
+    pub(crate) fn screw_radial(
+        plane: &Plane,
+        pieces: &[Piece],
+        origin: Vec3,
+        axis: Vec3,
+        pitch: f64,
+        turns: f64,
+        law: &[(f64, f64)],
+    ) -> Result<Body> {
         let c = curves(plane, pieces)?;
         let tolerance = (pitch.abs() * 1e-4).clamp(1e-6, 1e-2);
         let brep =

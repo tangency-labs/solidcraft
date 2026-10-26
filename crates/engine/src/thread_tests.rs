@@ -805,9 +805,25 @@ fn every_form_cuts_its_standard_profile() {
     let t7 = 7f64.to_radians().tan() + 1.0;
     let cases = [
         ("trapezoidal", "Tr20x4", 20.0, 4.0, 2.0 * (1.0 - 15f64.to_radians().tan()), (15.0, 15.0), 10.0 - 2.0 - tr_ac),
-        ("acme", "3/4-6 ACME", 0.75 * inch, inch / 6.0, inch / 12.0 * (1.0 - 14.5f64.to_radians().tan()), (14.5, 14.5), 0.375 * inch - inch / 12.0 - acme_a / 2.0),
+        (
+            "acme",
+            "3/4-6 ACME",
+            0.75 * inch,
+            inch / 6.0,
+            inch / 12.0 * (1.0 - 14.5f64.to_radians().tan()),
+            (14.5, 14.5),
+            0.375 * inch - inch / 12.0 - acme_a / 2.0,
+        ),
         ("buttress", "S20x4", 20.0, 4.0, (4.0 - 3.0 * t3) / 2.0, (3.0, 30.0), 10.0 - 0.86777 * 4.0),
-        ("buttress_asme", "1.5-8 BUTT", 1.5 * inch, inch / 8.0, (inch / 8.0 - 0.6 * inch / 8.0 * t7) / 2.0, (7.0, 45.0), 0.75 * inch - 0.6 * inch / 8.0),
+        (
+            "buttress_asme",
+            "1.5-8 BUTT",
+            1.5 * inch,
+            inch / 8.0,
+            (inch / 8.0 - 0.6 * inch / 8.0 * t7) / 2.0,
+            (7.0, 45.0),
+            0.75 * inch - 0.6 * inch / 8.0,
+        ),
     ];
     for (form, designation, d, p, flat, (a, b), r3) in cases {
         let mut volumes = Vec::new();
@@ -816,7 +832,11 @@ fn every_form_cuts_its_standard_profile() {
             let len = 6.0 * p;
             run(&mut s, "solid.cylinder", json!({"radius": d / 2.0, "height": len, "body_name": "Shaft"}));
             let before = exact_volume(&s, "Shaft");
-            let th = run(&mut s, "solid.thread", json!({"face": [d / 2.0, 0, len / 2.0], "form": form, "designation": designation, "hand": hand, "modeled": true}));
+            let th = run(
+                &mut s,
+                "solid.thread",
+                json!({"face": [d / 2.0, 0, len / 2.0], "form": form, "designation": designation, "hand": hand, "modeled": true}),
+            );
             assert!(th["thread"].is_null(), "{th}");
             let st = s.model.state();
             assert!(st.body("Shaft").unwrap().body.validity().is_empty(), "{designation} {hand}");
@@ -965,7 +985,11 @@ fn a_chamfered_tip_tapers_the_last_teeth() {
     assert!((got - want).abs() < want * 1e-4, "{got} vs {want}");
     // 30° to the axis and 0.5 mm deep, at the one free end of a shaft on a collar.
     let mut s = shaft_on_collar();
-    run(&mut s, "solid.thread", json!({"face": [5, 0, 25], "designation": "M10", "tip": "chamfer", "chamfer_angle": "30 deg", "chamfer_depth": 0.5, "modeled": true}));
+    run(
+        &mut s,
+        "solid.thread",
+        json!({"face": [5, 0, 25], "designation": "M10", "tip": "chamfer", "chamfer_angle": "30 deg", "chamfer_depth": 0.5, "modeled": true}),
+    );
     let w = ext_half_width(10.0, 1.5);
     let rf = 4.5;
     let slope = 30f64.to_radians().tan();
@@ -976,7 +1000,10 @@ fn a_chamfered_tip_tapers_the_last_teeth() {
     let mut s = Session::default();
     run(&mut s, "solid.box", json!({"corner": [-10, -10, 0], "length": 20, "width": 20, "height": 10, "body_name": "Nut"}));
     run(&mut s, "solid.hole", json!({"position": [0, 0, 10], "diameter": 8.5}));
-    let e = s.execute("solid.thread", &json!({"face": [4.25, 0, 5], "designation": "M10", "tip": "chamfer", "modeled": true})).err().map(|e| e.to_string());
+    let e = s
+        .execute("solid.thread", &json!({"face": [4.25, 0, 5], "designation": "M10", "tip": "chamfer", "modeled": true}))
+        .err()
+        .map(|e| e.to_string());
     assert!(e.unwrap_or_default().contains("countersink"));
 }
 
@@ -1022,7 +1049,11 @@ fn a_runout_fades_the_groove_out_before_each_shoulder() {
     let mut s = shaft_on_collar();
     run(&mut s, "solid.cylinder", json!({"base": [0, 0, 35], "radius": 8, "height": 10, "operation": "join", "targets": ["Part"]}));
     let before = exact_volume(&s, "Part");
-    run(&mut s, "solid.thread", json!({"face": [5, 0, 20], "designation": "M10", "ease_in": "standard", "ease_out": "short", "from": [0, 0, 10], "modeled": true}));
+    run(
+        &mut s,
+        "solid.thread",
+        json!({"face": [5, 0, 20], "designation": "M10", "ease_in": "standard", "ease_out": "short", "from": [0, 0, 10], "modeled": true}),
+    );
     let st = s.model.state();
     assert!(st.body("Part").unwrap().body.validity().is_empty());
     let (p, w) = (1.5, ext_half_width(10.0, 1.5));

@@ -596,10 +596,11 @@ mod tests {
         for f in [ThreadForm::Metric, ThreadForm::Trapezoidal, ThreadForm::Acme] {
             let (d, p) = (20.0, 2.5);
             let g = f.groove(d, p, false);
-            let r = d / 2.0 - match f {
-                ThreadForm::Metric => 3.0 * p * 3f64.sqrt() / 16.0,
-                _ => p / 4.0,
-            };
+            let r = d / 2.0
+                - match f {
+                    ThreadForm::Metric => 3.0 * p * 3f64.sqrt() / 16.0,
+                    _ => p / 4.0,
+                };
             assert!((g.width(p, r) - p / 2.0).abs() < 1e-9, "{f:?}");
         }
     }

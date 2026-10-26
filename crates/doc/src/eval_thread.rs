@@ -339,7 +339,10 @@ fn thread_grooves(t: &ThreadInfo, radius: f64, face: (f64, f64), ends: [End; 2],
         return Err(DocError::Invalid("thread too short".into()));
     }
     if len / lead > 190.0 {
-        return Err(DocError::Invalid(format!("a modelled thread is limited to 190 turns ({:.0} mm at this lead); use a cosmetic one", 190.0 * lead)));
+        return Err(DocError::Invalid(format!(
+            "a modelled thread is limited to 190 turns ({:.0} mm at this lead); use a cosmetic one",
+            190.0 * lead
+        )));
     }
     let mut g = form.groove(d, p, t.internal);
     if steep == SteepFlank::Start {
@@ -453,7 +456,15 @@ fn thread_grooves(t: &ThreadInfo, radius: f64, face: (f64, f64), ends: [End; 2],
             // A left-handed groove: turning the same way about the reversed axis while rising
             // along it (the screw motion about −k rising −lead per turn).
             let (axis, pitch) = if h > 0.0 { (k, lead) } else { (-k, -lead) };
-            grooves.push(GrooveShape { plane: Plane { origin: base, x, y: k }, section: section.clone(), base, axis, pitch, turns, law: law.clone() });
+            grooves.push(GrooveShape {
+                plane: Plane { origin: base, x, y: k },
+                section: section.clone(),
+                base,
+                axis,
+                pitch,
+                turns,
+                law: law.clone(),
+            });
         }
     }
     Ok(grooves)
