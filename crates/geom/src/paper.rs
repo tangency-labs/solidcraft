@@ -41,8 +41,10 @@ use std::f64::consts::FRAC_PI_2;
 use crate::{EPS, Region2, Seg2, Vec2};
 
 pub mod annotate;
+pub mod flatten;
 pub mod grid;
 
+pub use flatten::flatten;
 pub use grid::{Grid, GridGroup, GridItem, GridPath, GridPoint, GridReport, OnGrid, Piece};
 
 /// The widest line a scene may draw, in millimetres.
