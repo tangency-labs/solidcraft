@@ -398,10 +398,38 @@ case(T6, "007-external-m10-at-filleted-shoulder", "a modelled M10 thread on a d1
      "the fillet's ring: the corner square [5,6]x[10,11] less the quarter disc about (6,11), V_f = 2 pi (5.5 - pi/4 (6 - 4/(3 pi))), its centroid z from the same moments; "
      "the cylinder face starts at z=11, where the fillet meets it. " + SHOULDER.replace("lower end is a shoulder (the d16 collar", "lower end (z=11) is a shoulder (the fillet and the collar") +
      "V = pi 8^2 10 + V_f + pi 5^2 (1 + w) + 2 pi int_{11+w}^35 int r m(r) dr dz. Tolerance 0.05%: SMLib's exact screw sweep")
-missing(T6, "008-multi-start-thread", "a two-start M10 thread (lead 3, pitch 1.5)", "solid.thread has no start count: multi-start threads",
-        "would be graded as 001 with the material fraction of two grooves per lead")
-missing(T6, "009-thread-runout-length", "an M10 thread that vanishes over a 2-pitch runout before a shoulder", "solid.thread has no runout (vanishing thread) length",
-        "a runout would let 004's thread vanish before the shoulder instead of stopping square")
+case(T6, "008-multi-start-thread", "a two-start M10 thread (lead 3, pitch 1.5) over a d10 x 30 cylinder", cylT + [thr([5, 0, 15], designation="M10", starts=2)],
+     {"body_count": 1, "volume_mm3": ext_volume(10, 1.5, [(0, 30, lambda z: 5)]), "tolerance": {"rel": 1e-4}},
+     TMETH.replace("Tolerance 0.5%: solid.thread cuts faceted by design (chords within P/200 on the body, P/100 on the tool)", "Tolerance 0.01%: SMLib's exact screw sweep") +
+     "; two grooves of lead 2P, the second a half turn round from the first: every meridian half-plane holds the same sections a pitch apart as 001's one groove, "
+     "so the material fraction and the volume are 001's")
+# The runout: the section moves out of the shaft as it turns, h = d/2 - root + 0.05 P at the shoulder
+# end to 0 three mm (2 P) on; the cut per radian of turn is f(o) = int r w(r - o) dr from the moved root
+# out to d/2, a cubic in the offset o until the root reaches the surface (Simpson exact).
+def m10_f(o, P=1.5, d=10):
+    root = d / 2 - 5 * math.sqrt(3) / 16 * P
+    q1 = 2 * math.tan(PI / 6)
+    q0 = P / 4 - q1 * root - q1 * o
+    a = root + o
+    if a >= d / 2:
+        return 0.0
+    F = lambda r: q0 * r * r / 2 + q1 * r ** 3 / 3
+    return F(d / 2) - F(a)
+P10 = 1.5
+root10 = 5 - 5 * math.sqrt(3) / 16 * P10
+h10 = 5 - root10 + 0.05 * P10
+top10 = 5 - root10
+mean10 = sum((m10_f(a) + 4 * m10_f((a + b) / 2) + m10_f(b)) * (b - a) / 6 for a, b in [(top10 * i / 64, top10 * (i + 1) / 64) for i in range(64)]) / h10
+s_lo = 10 + w10
+v9 = PI * 64 * 10 + PI * 25 * 25 - 2 * PI * (m10_f(0) * (35 - (s_lo + 3)) / P10 + 3 / P10 * mean10)
+case(T6, "009-thread-runout-length", "004's M10 thread run from the free top end, vanishing over a 3 mm (2 P) runout before the d16 shoulder",
+     shaft + [thr([5, 0, 25], designation="M10", ease_out=3, **{"from": [0, 0, 35]})],
+     {"body_count": 1, "volume_mm3": v9, "bbox": {"min": [-8, -8, 0], "max": [8, 8, 35]}, "tolerance": {"rel": 1e-4}},
+     SHOULDER.replace("so the groove stops there with its widest part clear of it", "so the groove (its runout included) stops with its widest part clear of it") +
+     "The runout (ease_out, at the end away from `from`) moves the groove's section out of the shaft as it turns, linearly from h = d/2 - root + 0.05P at s = 10 + w to 0 at s + 3: "
+     "the cut per radian is f(o) = int r w(r - o) dr from root + o to 5 (w the section's width at its own radius), the runout removes 2 pi (3/P) mean(f) (Simpson, exact on the cubic), "
+     "the full-depth groove from s + 3 to the free top end 2 pi f(0) (35 - s - 3)/P (the overrun past the free end as in 001). "
+     "V = pi 8^2 10 + pi 5^2 25 - both. Tolerance 0.01%: SMLib's exact radial screw sweep")
 case(T6, "010-part-threaded-boss", "the running part with a modelled M16 thread on its d16 boss",
      [thr([23, 15, 25], designation="M16")], {"body_count": 1},
      "the boss stands on the base (thread to a shoulder) and has an M5 hole in its top; modelled threads are faceted, so later tiers build on the part before this step and 11-cumulative-parts adds it last", base=C5, source="invariants")
@@ -450,6 +478,15 @@ case(T6, "016-external-m10-left-hand", "001's modelled M10 thread, left-handed: 
      {"body_count": 1, "volume_mm3": ext_volume(10, 1.5, [(0, 30, lambda z: 5)]), "tolerance": {"rel": 1e-4}},
      TMETH.replace("Tolerance 0.5%: solid.thread cuts faceted by design (chords within P/200 on the body, P/100 on the tool)", "Tolerance 0.01%: SMLib's exact screw sweep") +
      "; a mirror image of 001's groove, so the same volume")
+
+rf10 = 5 - 5 * math.sqrt(3) / 2 * 1.5 / 8
+case(T6, "017-external-m10-chamfered-tip", "001's modelled M10 thread with ISO 4753's chamfered end at both free ends: a 45 deg cone down to the minor diameter, cut after the groove",
+     cylT + [thr([5, 0, 15], designation="M10", tip="chamfer")],
+     {"body_count": 1, "volume_mm3": ext_volume(10, 1.5, [(0, 5 - rf10, lambda z: rf10 + z), (5 - rf10, 25 + rf10, lambda z: 5), (25 + rf10, 30, lambda z: rf10 + 30 - z)]),
+      "tolerance": {"rel": 1e-4}},
+     TMETH.replace("Tolerance 0.5%: solid.thread cuts faceted by design (chords within P/200 on the body, P/100 on the tool)", "Tolerance 0.01%: SMLib's exact screw sweep") +
+     "; the chamfer is axisymmetric and cut after the groove, so it only lowers the stock's outer radius: r <= d_f/2 + distance from the end (45 deg), d_f the minor diameter d - 5H/4 = 8.376 "
+     "(ISO 4753 chamfered end: the end's diameter at most the minor diameter)")
 
 # ---------------------------------------------------------------- 07 fillets
 F = lambda edges, r, **p: C("solid.fillet", edges=edges, radius=r, **p)

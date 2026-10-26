@@ -317,6 +317,27 @@ impl Brep {
         let l = List::of(profile)?;
         ffi::sweeps::screw_sweep(&l.raw(), &origin, &direction, pitch, turns, tolerance).map(Brep).map_err(error)
     }
+
+    /// [`screw_sweep`](Self::screw_sweep) with the profile moved off the axis as it turns: at turn
+    /// t every point of it first moves `offset(t)` mm away from the axis (negative: towards it)
+    /// in its half-plane, `offset` piecewise linear through the `(turn, offset)` pairs of `law`
+    /// (turns strictly ascending within [0, `turns`], held before the first and after the last).
+    /// A thread's groove fading in or out over a runout, or a taper. The profile must lie in a
+    /// half-plane bounded by the axis.
+    pub fn screw_sweep_radial(
+        profile: &[Curve],
+        origin: [f64; 3],
+        direction: [f64; 3],
+        pitch: f64,
+        turns: f64,
+        law: &[(f64, f64)],
+        tolerance: f64,
+    ) -> Result<Brep> {
+        init()?;
+        let l = List::of(profile)?;
+        let flat: Vec<f64> = law.iter().flat_map(|(t, o)| [*t, *o]).collect();
+        ffi::sweeps::screw_sweep_radial(&l.raw(), &origin, &direction, pitch, turns, &flat, tolerance).map(Brep).map_err(error)
+    }
 }
 
 /// The error of a call that picks faces by points.

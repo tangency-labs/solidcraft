@@ -174,7 +174,7 @@ pub use fair::{
     fair_faces, fair_net, fair_nurbs_curve, fair_nurbs_surface, fair_surface,
 };
 pub use fill::{PATCH_ANGLE_TOL_DEG, PatchReport, PatchSpec, patch_edges_crowned, patch_edges_report, patch_edges_with};
-pub use helix::{loft_to_point, sweep_helix, sweep_helix_mesh};
+pub use helix::{loft_to_point, sweep_helix, sweep_helix_mesh, sweep_helix_radial};
 pub use iges_in::{MAX_IGES_BYTES, iges_import, iges_to_step};
 pub use iges_out::iges_export_bodies;
 pub use intersection::{MeetingEdge, meeting_edges};

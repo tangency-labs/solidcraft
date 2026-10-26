@@ -365,8 +365,7 @@ pub fn material_in_ring(b: &Body, c: &CylinderFace, r_in: f64, r_out: f64, along
     if !(r_in >= 0.0 && r_out > r_in && a1 > a0 && r_out.is_finite() && a0.is_finite() && a1.is_finite()) {
         return Err(crate::KernelError::Invalid(format!("ring r {r_in}..{r_out} over {a0}..{a1}")));
     }
-    let plane =
-        Plane::from_normal(c.axis_point + c.axis * a0, *c.axis).ok_or_else(|| crate::KernelError::Invalid("ring axis".into()))?;
+    let plane = Plane::from_normal(c.axis_point + c.axis * a0, *c.axis).ok_or_else(|| crate::KernelError::Invalid("ring axis".into()))?;
     // Circles started at the primitives' odd seam angle, off the frame's axes (as `cylinder`).
     let seam = crate::build::SEAM_ANGLE;
     let holes = if r_in > 0.0 { vec![Loop2::circle_from(Vec2::ZERO, r_in, seam).reversed()] } else { Vec::new() };

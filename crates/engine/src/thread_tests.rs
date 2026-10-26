@@ -805,9 +805,25 @@ fn every_form_cuts_its_standard_profile() {
     let t7 = 7f64.to_radians().tan() + 1.0;
     let cases = [
         ("trapezoidal", "Tr20x4", 20.0, 4.0, 2.0 * (1.0 - 15f64.to_radians().tan()), (15.0, 15.0), 10.0 - 2.0 - tr_ac),
-        ("acme", "3/4-6 ACME", 0.75 * inch, inch / 6.0, inch / 12.0 * (1.0 - 14.5f64.to_radians().tan()), (14.5, 14.5), 0.375 * inch - inch / 12.0 - acme_a / 2.0),
+        (
+            "acme",
+            "3/4-6 ACME",
+            0.75 * inch,
+            inch / 6.0,
+            inch / 12.0 * (1.0 - 14.5f64.to_radians().tan()),
+            (14.5, 14.5),
+            0.375 * inch - inch / 12.0 - acme_a / 2.0,
+        ),
         ("buttress", "S20x4", 20.0, 4.0, (4.0 - 3.0 * t3) / 2.0, (3.0, 30.0), 10.0 - 0.86777 * 4.0),
-        ("buttress_asme", "1.5-8 BUTT", 1.5 * inch, inch / 8.0, (inch / 8.0 - 0.6 * inch / 8.0 * t7) / 2.0, (7.0, 45.0), 0.75 * inch - 0.6 * inch / 8.0),
+        (
+            "buttress_asme",
+            "1.5-8 BUTT",
+            1.5 * inch,
+            inch / 8.0,
+            (inch / 8.0 - 0.6 * inch / 8.0 * t7) / 2.0,
+            (7.0, 45.0),
+            0.75 * inch - 0.6 * inch / 8.0,
+        ),
     ];
     for (form, designation, d, p, flat, (a, b), r3) in cases {
         let mut volumes = Vec::new();
@@ -816,7 +832,11 @@ fn every_form_cuts_its_standard_profile() {
             let len = 6.0 * p;
             run(&mut s, "solid.cylinder", json!({"radius": d / 2.0, "height": len, "body_name": "Shaft"}));
             let before = exact_volume(&s, "Shaft");
-            let th = run(&mut s, "solid.thread", json!({"face": [d / 2.0, 0, len / 2.0], "form": form, "designation": designation, "hand": hand, "modeled": true}));
+            let th = run(
+                &mut s,
+                "solid.thread",
+                json!({"face": [d / 2.0, 0, len / 2.0], "form": form, "designation": designation, "hand": hand, "modeled": true}),
+            );
             assert!(th["thread"].is_null(), "{th}");
             let st = s.model.state();
             assert!(st.body("Shaft").unwrap().body.validity().is_empty(), "{designation} {hand}");
@@ -896,4 +916,160 @@ fn a_square_thread_is_refused() {
     run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 20}));
     let e = s.execute("solid.thread", &json!({"face": [10, 0, 10], "form": "square", "designation": "20x4"})).err().map(|e| e.to_string());
     assert!(e.unwrap_or_default().contains("no current standard defines a square thread"));
+}
+
+/// Ladder 06/008: n starts are n grooves of lead n P, each a turn's n-th further round: over the
+/// same length they take n x L/(nP) turns, the volume of one start of that pitch, and do not
+/// meet. A designation that gives the lead gives the starts.
+#[test]
+fn a_multi_start_thread_takes_the_volume_of_one_start() {
+    let (d, p, len) = (10.0, 1.5, 30.0);
+    let want = len / p * ext_turn(d, p, d / 2.0);
+    for (starts, designation) in [(2, "M10"), (3, "M10"), (1, "M10xPh3P1.5")] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 5, "height": len, "body_name": "Shaft"}));
+        let before = exact_volume(&s, "Shaft");
+        run(&mut s, "solid.thread", json!({"face": [5, 0, 15], "designation": designation, "starts": starts, "modeled": true}));
+        let st = s.model.state();
+        assert!(st.body("Shaft").unwrap().body.validity().is_empty(), "{designation} x{starts}");
+        let got = before - exact_volume(&s, "Shaft");
+        assert!((got - want).abs() < want * 1e-4, "{designation} x{starts}: removed {got}, one start {want}");
+    }
+    // The cosmetic thread says it: two starts, lead 3.
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 40}));
+    let th = run(&mut s, "solid.thread", json!({"face": [20, 0, 20], "designation": "Tr40x14(P7)"}));
+    assert_eq!(th["thread"]["designation"], "Tr40x14(P7)", "{th}");
+    assert_eq!(th["thread"]["starts"], 2, "{th}");
+    let e = s.execute("solid.thread", &json!({"face": [20, 0, 20], "designation": "Tr40x14(P7)", "starts": 3})).err().map(|e| e.to_string());
+    assert!(e.unwrap_or_default().contains("has 2 start(s), not 3"));
+}
+
+/// The stock's volume after a modelled M10 thread, over sections z0..z1 whose outer radius is
+/// `rmax(z)`: 2π∫∫ r m(r) dr dz, m the material fraction per pitch (1 under the root, 1 - w/P
+/// in the groove's band). The groove's screw motion holds every meridian half-plane alike, and
+/// an axisymmetric cut after it (a chamfer) only lowers rmax.
+fn m10_stock(z0: f64, z1: f64, rmax: impl Fn(f64) -> f64) -> f64 {
+    let (d, p) = (10.0, 1.5);
+    let root = d / 2.0 - 5.0 * p * 3f64.sqrt() / 16.0;
+    let t = (PI / 6.0).tan();
+    // ∫_0^R r m(r) dr in closed form: R²/2 to the root, then m = a + b r (1 - (P/4 + 2 (r - root)
+    // tan 30°)/P) beyond it.
+    let ring = |rr: f64| {
+        let inner = rr.min(root);
+        let mut v = inner * inner / 2.0;
+        if rr > root {
+            let (a, b) = (1.0 - 0.25 + 2.0 * root * t / p, -2.0 * t / p);
+            let f = |r: f64| a * r * r / 2.0 + b * r * r * r / 3.0;
+            v += f(rr) - f(root);
+        }
+        v
+    };
+    let n = 20000;
+    (0..n).map(|i| z0 + (z1 - z0) * (i as f64 + 0.5) / n as f64).map(|z| 2.0 * PI * ring(rmax(z)) * (z1 - z0) / n as f64).sum()
+}
+
+/// ISO 4753's chamfered end on both free ends of an M10 stud: a 45° cone down to the minor
+/// diameter, cut after the groove; the volume as the stock's chamfered section with the thread's
+/// material fraction (as ladder 06/006).
+#[test]
+fn a_chamfered_tip_tapers_the_last_teeth() {
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 30, "body_name": "Stud"}));
+    run(&mut s, "solid.thread", json!({"face": [5, 0, 15], "designation": "M10", "tip": "chamfer", "modeled": true}));
+    let st = s.model.state();
+    assert!(st.body("Stud").unwrap().body.validity().is_empty());
+    let rf = 5.0 - 5.0 * 1.5 * 3f64.sqrt() / 16.0;
+    let want = m10_stock(0.0, 30.0, |z| 5f64.min(rf + z).min(rf + 30.0 - z));
+    let got = exact_volume(&s, "Stud");
+    assert!((got - want).abs() < want * 1e-4, "{got} vs {want}");
+    // 30° to the axis and 0.5 mm deep, at the one free end of a shaft on a collar.
+    let mut s = shaft_on_collar();
+    run(
+        &mut s,
+        "solid.thread",
+        json!({"face": [5, 0, 25], "designation": "M10", "tip": "chamfer", "chamfer_angle": "30 deg", "chamfer_depth": 0.5, "modeled": true}),
+    );
+    let w = ext_half_width(10.0, 1.5);
+    let rf = 4.5;
+    let slope = 30f64.to_radians().tan();
+    let want = PI * 64.0 * 10.0 + PI * 25.0 * w + m10_stock(10.0 + w, 35.0, |z| 5f64.min(rf + (35.0 - z) * slope));
+    let got = exact_volume(&s, "Part");
+    assert!((got - want).abs() < want * 1e-4, "{got} vs {want}");
+    // Internal threads take a countersink instead.
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"corner": [-10, -10, 0], "length": 20, "width": 20, "height": 10, "body_name": "Nut"}));
+    run(&mut s, "solid.hole", json!({"position": [0, 0, 10], "diameter": 8.5}));
+    let e = s
+        .execute("solid.thread", &json!({"face": [4.25, 0, 5], "designation": "M10", "tip": "chamfer", "modeled": true}))
+        .err()
+        .map(|e| e.to_string());
+    assert!(e.unwrap_or_default().contains("countersink"));
+}
+
+/// M10's groove section moved `d` out from the axis, clipped at the shaft's radius 5: the cut per
+/// radian of turn, ∫ r w(r - d) dr from its moved root out to 5 (w the section's own width at
+/// its radius, P/4 + 2 (ρ - root) tan 30°). A cubic in d until the root reaches the surface.
+fn m10_cut_per_radian(d: f64) -> f64 {
+    let p = 1.5;
+    let root = 5.0 - 5.0 * p * 3f64.sqrt() / 16.0;
+    let q1 = 2.0 * (PI / 6.0).tan();
+    let q0 = p / 4.0 - q1 * root - q1 * d;
+    let a = root + d;
+    if a >= 5.0 {
+        return 0.0;
+    }
+    let f = |r: f64| q0 * r * r / 2.0 + q1 * r * r * r / 3.0;
+    f(5.0) - f(a)
+}
+
+/// The mean cut per radian over a runout whose offset runs linearly 0..h: Simpson on the cubic up
+/// to where the root leaves the shaft (exact), nothing beyond.
+fn m10_runout_mean(h: f64) -> f64 {
+    let p = 1.5;
+    let top = 5.0 * p * 3f64.sqrt() / 16.0;
+    let n = 64;
+    let step = top / n as f64;
+    let simpson: f64 = (0..n)
+        .map(|i| {
+            let (a, b) = (i as f64 * step, (i + 1) as f64 * step);
+            (m10_cut_per_radian(a) + 4.0 * m10_cut_per_radian((a + b) / 2.0) + m10_cut_per_radian(b)) * step / 6.0
+        })
+        .sum();
+    simpson / h
+}
+
+/// ISO 3508 runouts on a shaft between two collars: the groove fades out over 2.5 P (standard) at
+/// the end it starts from and 1.25 P (short) at the other, its section moving out past the surface
+/// as it turns, each reaching nothing where its section clears the collar. The cut is the
+/// integral over the turn of the clipped section's 2π∫ r dA (Pappus with the section moving):
+/// full turns at f(0), the runouts at the mean of f over the offsets they pass.
+#[test]
+fn a_runout_fades_the_groove_out_before_each_shoulder() {
+    let mut s = shaft_on_collar();
+    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 35], "radius": 8, "height": 10, "operation": "join", "targets": ["Part"]}));
+    let before = exact_volume(&s, "Part");
+    run(
+        &mut s,
+        "solid.thread",
+        json!({"face": [5, 0, 20], "designation": "M10", "ease_in": "standard", "ease_out": "short", "from": [0, 0, 10], "modeled": true}),
+    );
+    let st = s.model.state();
+    assert!(st.body("Part").unwrap().body.validity().is_empty());
+    let (p, w) = (1.5, ext_half_width(10.0, 1.5));
+    let root = 5.0 - 5.0 * p * 3f64.sqrt() / 16.0;
+    let h = 5.0 - root + 0.05 * p;
+    let turns = (35.0 - 10.0 - 2.0 * w) / p;
+    let (r_in, r_out) = (2.5, 1.25);
+    let want = 2.0 * PI * (m10_cut_per_radian(0.0) * (turns - r_in - r_out) + (r_in + r_out) * m10_runout_mean(h));
+    let got = before - exact_volume(&s, "Part");
+    // Where the section moves, the sweep's walls lie within its tolerance (1e-4 P) of the true
+    // surfaces, not on them: up to that times the runouts' walls (about 64 mm² a turn, 3.75 turns),
+    // 0.036 mm³. Full-depth turns are exact radially (6e-4 mm³ here).
+    let bound = 1e-4 * p * 64.0 * (r_in + r_out);
+    assert!((got - want).abs() < bound, "{got} vs {want}");
+    // Longer runouts than the thread are refused.
+    let mut s = shaft_on_collar();
+    let e = s.execute("solid.thread", &json!({"face": [5, 0, 20], "designation": "M10", "ease_in": 14, "ease_out": 14, "modeled": true}));
+    assert!(e.err().map(|e| e.to_string()).unwrap_or_default().contains("longer than the thread"));
 }

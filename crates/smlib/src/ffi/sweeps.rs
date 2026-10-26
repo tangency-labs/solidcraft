@@ -1,5 +1,5 @@
 //! The sweeps block of `capi/include/smlib.h` (`smlib_extrude`, `smlib_revolve`, `smlib_sweep`,
-//! `smlib_sweep_placed`, `smlib_project_curves`, `smlib_face_section` (with `smlib_curves_*`), `smlib_loft`, `smlib_loft_to_point`, `smlib_screw_sweep`,
+//! `smlib_sweep_placed`, `smlib_project_curves`, `smlib_face_section` (with `smlib_curves_*`), `smlib_loft`, `smlib_loft_to_point`, `smlib_screw_sweep`, `smlib_screw_sweep_radial`,
 //! `smlib_sweep_stations`, `smlib_planar_faces`; the fork's
 //! `capi/src/smlib_sweeps.cpp`), declared by hand.
 //! Part of the FFI boundary, like its parent: called only through [`crate::sweeps`], which builds
@@ -172,6 +172,20 @@ unsafe extern "C" {
         tolerance: f64,
         out: *mut *mut RawBrep,
     ) -> i32;
+    fn smlib_screw_sweep_radial(
+        kinds: *const i64,
+        n_kinds: i64,
+        reals: *const f64,
+        n_reals: i64,
+        origin: *const f64,
+        direction: *const f64,
+        pitch: f64,
+        turns: f64,
+        law: *const f64,
+        n_law: i64,
+        tolerance: f64,
+        out: *mut *mut RawBrep,
+    ) -> i32;
     fn smlib_sweep_stations(
         kinds: *const i64,
         n_kinds: i64,
@@ -324,6 +338,27 @@ pub fn screw_sweep(profile: &List, origin: &[f64; 3], direction: &[f64; 3], pitc
     new_brep(|out| unsafe { smlib_screw_sweep(k, nk, r, nr, origin.as_ptr(), direction.as_ptr(), pitch, turns, tolerance, out) })
 }
 
+/// `law` holds (turn, offset) pairs.
+#[cfg(feature = "native")]
+pub fn screw_sweep_radial(
+    profile: &List,
+    origin: &[f64; 3],
+    direction: &[f64; 3],
+    pitch: f64,
+    turns: f64,
+    law: &[f64],
+    tolerance: f64,
+) -> Result<Handle, i32> {
+    let (k, nk, r, nr) = raw(profile)?;
+    if !law.len().is_multiple_of(2) {
+        return Err(ERR_ARG);
+    }
+    let n = i64::try_from(law.len() / 2).map_err(|_| ERR_ARG)?;
+    new_brep(|out| unsafe {
+        smlib_screw_sweep_radial(k, nk, r, nr, origin.as_ptr(), direction.as_ptr(), pitch, turns, law.as_ptr(), n, tolerance, out)
+    })
+}
+
 /// `maps` holds 12 numbers per station (a matrix by columns, then a translation).
 #[cfg(feature = "native")]
 pub fn sweep_stations(profile: &List, maps: &[f64], ends: i32) -> Result<Handle, i32> {
@@ -382,6 +417,11 @@ pub fn loft_to_point(_: &List, _: &[f64; 3]) -> Result<Handle, i32> {
 
 #[cfg(not(feature = "native"))]
 pub fn screw_sweep(_: &List, _: &[f64; 3], _: &[f64; 3], _: f64, _: f64, _: f64) -> Result<Handle, i32> {
+    Err(NOT_BUILT)
+}
+
+#[cfg(not(feature = "native"))]
+pub fn screw_sweep_radial(_: &List, _: &[f64; 3], _: &[f64; 3], _: f64, _: f64, _: &[f64], _: f64) -> Result<Handle, i32> {
     Err(NOT_BUILT)
 }
 
