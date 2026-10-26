@@ -190,6 +190,15 @@ impl BasisDerivs {
             .ok_or_else(|| oob(op))
     }
 
+    /// The contiguous `j` row, with all outer indices and the whole slice checked.
+    #[inline]
+    fn row_u(&self, k: usize, l: usize, i: usize, op: &'static str) -> Result<&[f64]> {
+        let start = self.index_u(k, l, i, 0).ok_or_else(|| oob(op))?;
+        let len = self.q.checked_add(1).ok_or_else(|| oob(op))?;
+        let end = start.checked_add(len).ok_or_else(|| oob(op))?;
+        self.values.get(start..end).ok_or_else(|| oob(op))
+    }
+
     /// `BD[k][l][i][j] = v` with unsigned indices; `oob` outside `[udr][vdr][p][q]`.
     #[inline]
     fn put_u(
@@ -506,11 +515,11 @@ fn to_euclid_spec(noz: bool, now: bool, pw: CPoint) -> Vec3 {
 
 /// `N_ComputeDerivativeMatrix` / `N_ComputeDerivativeMatrixSpec` into the caller's
 /// matrix `sd` (rows `0..=udr` of at least `vdr + 1` points, zeroed); `N` is the
-/// scratch width (above both degrees). `alpha(k, l, i, j)` is the basis derivative
-/// `BD[k][l][i][j]`.
+/// scratch width (above both degrees). `alpha_row(k, l, i)` supplies the checked
+/// scalar accessor for the basis derivative `BD[k][l][i][j]`.
 #[allow(clippy::range_plus_one)] // exclusive ranges: `RangeInclusive` is measurably slower here
 #[allow(clippy::too_many_arguments)] // upstream's arguments plus the output matrix
-fn derivative_matrix<const N: usize, R: AsMut<[Vec3]>>(
+fn derivative_matrix<const N: usize, R: AsMut<[Vec3]>, A: Fn(usize) -> Result<f64>>(
     sur: &Surface,
     no_w: bool,
     no_z: bool,
@@ -521,7 +530,7 @@ fn derivative_matrix<const N: usize, R: AsMut<[Vec3]>>(
     vdr: isize,
     l2: isize,
     l3: isize,
-    alpha: impl Fn(usize, usize, usize, usize) -> Result<f64>,
+    alpha_row: impl Fn(usize, usize, usize) -> Result<A>,
     sd: &mut [R],
     op: &'static str,
 ) -> Result<()> {
@@ -543,9 +552,10 @@ fn derivative_matrix<const N: usize, R: AsMut<[Vec3]>>(
             let mut s = Vec3::ZERO;
             for i in 0..pu + 1 {
                 let row = pwl.get(i).ok_or_else(|| oob(op))?;
+                let alpha = alpha_row(ku, lu, i)?;
                 for j in 0..qu + 1 {
                     let pt = row.get(j).copied().ok_or_else(|| oob(op))?;
-                    let alpha = alpha(ku, lu, i, j)?;
+                    let alpha = alpha(j)?;
                     s.x += alpha * pt.x; // upstream: alpha * P.x + sd.x
                     s.y += alpha * pt.y; // upstream: alpha * P.y + sd.y
                     if !no_z {
@@ -804,18 +814,21 @@ impl Surface {
         let no_w = p00.w == NOW;
         let no_z = p00.z == NOZ;
         let mut sd = vec![vec![Vec3::ZERO; vdr + 1]; udr + 1];
-        let alpha = |k, l, i, j| bd.at_u(k, l, i, j, OP);
+        let alpha = |k, l, i| {
+            let row = bd.row_u(k, l, i, OP)?;
+            Ok(move |j| row.get(j).copied().ok_or_else(|| oob(OP)))
+        };
         let (upper, udr, vdr) = (upper && udr == vdr, sx(udr, OP)?, sx(vdr, OP)?);
         if pu < TINY_NP && qu < TINY_NP {
-            derivative_matrix::<TINY_NP, _>(
+            derivative_matrix::<TINY_NP, _, _>(
                 self, no_w, no_z, upper, p, q, udr, vdr, l2, l3, alpha, &mut sd, OP,
             )?;
         } else if pu < SMALL_NP && qu < SMALL_NP {
-            derivative_matrix::<SMALL_NP, _>(
+            derivative_matrix::<SMALL_NP, _, _>(
                 self, no_w, no_z, upper, p, q, udr, vdr, l2, l3, alpha, &mut sd, OP,
             )?;
         } else {
-            derivative_matrix::<NP, _>(
+            derivative_matrix::<NP, _, _>(
                 self, no_w, no_z, upper, p, q, udr, vdr, l2, l3, alpha, &mut sd, OP,
             )?;
         }
@@ -888,11 +901,14 @@ impl Surface {
                 .copied()
                 .ok_or_else(|| oob(bd_op))
         };
-        let alpha = |k: usize, l: usize, i: usize, j: usize| -> Result<f64> {
-            if i > pu || j > qu {
-                return Err(oob(op));
-            }
-            Ok(at2u(&du, k, i)? * at2u(&dv, l, j)?)
+        let (du, dv, at2u) = (&du, &dv, &at2u);
+        let alpha = |k: usize, l: usize, i: usize| {
+            Ok(move |j: usize| -> Result<f64> {
+                if i > pu || j > qu {
+                    return Err(oob(op));
+                }
+                Ok(at2u(du, k, i)? * at2u(dv, l, j)?)
+            })
         };
 
         let (p, q) = (sx(pu, op)?, sx(qu, op)?);
@@ -901,7 +917,7 @@ impl Surface {
         let p00 = self.cpt(0, 0)?;
         let no_w = p00.w == NOW;
         let no_z = p00.z == NOZ;
-        derivative_matrix::<N, _>(self, no_w, no_z, upper, p, q, 1, 1, l2, l3, alpha, sd, op)
+        derivative_matrix::<N, _, _>(self, no_w, no_z, upper, p, q, 1, 1, l2, l3, alpha, sd, op)
     }
 
     /// Min-max box of the Euclidean control net (`N_SrfGetBBox`).
