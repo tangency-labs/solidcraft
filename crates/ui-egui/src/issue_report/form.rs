@@ -45,12 +45,11 @@ fn screenshot_actions(app: &mut SolveApp, draft: &mut Draft, ui: &mut Ui) -> boo
             {
                 app.pick_save(&format!("solidcraft-issue-{}.png", app.shot_token), &["png"], move |app, path| {
                     let Some(path) = path else { return };
-                    let result = crate::control::save_screenshot(&image, Some(&path));
+                    let result = crate::control::write_screenshot(&image, &path);
                     if let Some(draft) = app.issue_report.draft.as_mut() {
-                        draft.note = if result.get("ok").and_then(serde_json::Value::as_bool) == Some(true) {
-                            "Screenshot saved. Attach the PNG in the GitHub draft.".into()
-                        } else {
-                            format!("Could not save screenshot: {}", super::debug(&result.get("error"), 1000))
+                        draft.note = match result {
+                            Ok(()) => "Screenshot saved. Attach the PNG in the GitHub draft.".into(),
+                            Err(e) => format!("Could not save screenshot: {}", super::limited(&e, 1000)),
                         };
                     }
                 });

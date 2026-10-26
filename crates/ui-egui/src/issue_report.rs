@@ -987,6 +987,32 @@ mod tests {
         }
     }
 
+    /// Save screenshot… writes the PNG where the picker says, the way the web app's other saves
+    /// write (#7192), and a failure reads as plain words, not a Rust value.
+    #[test]
+    fn issue_report_save_screenshot_writes_the_png_and_explains_a_failure() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        let mut draft = draft_for(&h.app, None, None);
+        draft.image = Some(Arc::new(ColorImage::new([4, 3], vec![egui::Color32::GREEN; 12])));
+        h.app.issue_report.draft = Some(draft);
+        h.frames(4);
+        for (path, saved) in [(h.dir.join("report.png"), true), (h.dir.join("missing").join("report.png"), false)] {
+            let answer = path.to_string_lossy().to_string();
+            h.app.services.pick_save = Some(Box::new(move |_, _| Box::pin(std::future::ready(Some(answer.clone())))));
+            click_commands(&mut h, "Save screenshot…");
+            let note = h.app.issue_report.draft.as_ref().unwrap().note.clone();
+            if saved {
+                let png = image::load_from_memory_with_format(&std::fs::read(&path).unwrap(), image::ImageFormat::Png).unwrap();
+                assert_eq!(png.into_rgba8().dimensions(), (4, 3));
+                assert_eq!(note, "Screenshot saved. Attach the PNG in the GitHub draft.");
+            } else {
+                let why = std::fs::write(&path, b"").unwrap_err();
+                assert_eq!(note, format!("Could not save screenshot: {why}"));
+            }
+        }
+    }
+
     #[test]
     fn issue_report_editing_enter_and_cad_shortcuts_leave_the_live_boolean_unchanged() {
         let mut h = crate::scenario::Harness::new();

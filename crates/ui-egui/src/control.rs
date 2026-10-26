@@ -1155,16 +1155,27 @@ fn occurrence(s: &solidcraft_engine::Session, v: &Value) -> Result<u64, String> 
 /// Save a screenshot PNG.
 pub fn save_screenshot(image: &egui::ColorImage, path: Option<&str>) -> Value {
     let [w, h] = image.size;
+    let path = path.map(str::to_string).unwrap_or_else(|| std::env::temp_dir().join("solidcraft-shot.png").to_string_lossy().to_string());
+    match write_screenshot(image, &path) {
+        Ok(()) => json!({"ok": true, "result": {"path": path, "width": w, "height": h}}),
+        Err(e) => json!({"ok": false, "error": e}),
+    }
+}
+
+/// Write `image` to `path` in the format its extension names (a PNG for `.png`), through
+/// [`vfs`] like every other save: the disk natively, a download or browser storage in the web
+/// app (#7192).
+pub(crate) fn write_screenshot(image: &egui::ColorImage, path: &str) -> Result<(), String> {
+    let [w, h] = image.size;
     let mut buf = Vec::with_capacity(w * h * 4);
     for c in &image.pixels {
         buf.extend_from_slice(&c.to_array());
     }
-    let Some(img) = image::RgbaImage::from_raw(w as u32, h as u32, buf) else { return json!({"ok": false, "error": "bad image"}) };
-    let path = path.map(str::to_string).unwrap_or_else(|| std::env::temp_dir().join("solidcraft-shot.png").to_string_lossy().to_string());
-    match img.save(&path) {
-        Ok(()) => json!({"ok": true, "result": {"path": path, "width": w, "height": h}}),
-        Err(e) => json!({"ok": false, "error": e.to_string()}),
-    }
+    let img = image::RgbaImage::from_raw(w as u32, h as u32, buf).ok_or("bad image")?;
+    let format = image::ImageFormat::from_path(path).map_err(|e| e.to_string())?;
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut bytes, format).map_err(|e| e.to_string())?;
+    vfs::write(path, bytes.get_ref()).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -1837,6 +1848,27 @@ mod tests {
         assert_eq!(call("engine.execute", export(at(&out, "a.step")), false)["ok"], true, "without allow_paths: unconfined");
         let bad = call("engine.execute", json!({"command": "file.new", "allow_paths": "/"}), false);
         assert!(bad["error"].as_str().is_some_and(|e| e.contains("allow_paths")), "{bad}");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A screenshot is written through `vfs`, as other saves are, so the web app can hand it out
+    /// as a download (#7192). On the disk it is the same PNG with the same reply, and an agent's
+    /// folders hold for it as they do for any other write.
+    #[test]
+    fn screenshots_are_written_through_vfs_with_the_same_reply() {
+        let base = vfs::temp_dir().join(format!("solidcraft-shot-scope-{}", std::process::id()));
+        let (root, out) = (base.join("root"), base.join("out"));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&out).unwrap();
+        let image = egui::ColorImage::new([4, 3], vec![egui::Color32::GREEN; 12]);
+        let path = root.join("shot.png").to_string_lossy().to_string();
+        assert_eq!(save_screenshot(&image, Some(&path)), json!({"ok": true, "result": {"path": path, "width": 4, "height": 3}}));
+        let png = image::load_from_memory_with_format(&std::fs::read(&path).unwrap(), image::ImageFormat::Png).unwrap().into_rgba8();
+        assert_eq!((png.dimensions(), png.get_pixel(0, 0).0), ((4, 3), [0, 255, 0, 255]));
+        let outside = out.join("shot.png").to_string_lossy().to_string();
+        let v = vfs::scoped(Some(vfs::PathScope::new([root.clone()])), || save_screenshot(&image, Some(&outside)));
+        assert!(v["ok"] == false && v["error"].as_str().is_some_and(|e| e.contains("outside the folders this agent may use")), "{v}");
+        assert_eq!(std::fs::read_dir(&out).unwrap().count(), 0, "nothing written outside");
         let _ = std::fs::remove_dir_all(&base);
     }
 
