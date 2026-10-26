@@ -69,15 +69,30 @@ impl Pass {
     }
 }
 
-pub(crate) fn shade(n: Vec3, view_dir: Vec3, base: [f64; 3]) -> [f64; 3] {
-    let n = if n.dot(view_dir) < 0.0 { -n } else { n };
-    let key = (view_dir * 0.8 + Vec3::new(-0.3, 0.2, 0.6)).normalized().unwrap_or(view_dir);
-    let diff = n.dot(key).max(0.0);
-    let fill = n.dot(view_dir).max(0.0);
-    let h = (key + view_dir).normalized().unwrap_or(view_dir);
-    let spec = n.dot(h).max(0.0).powi(40) * 0.25;
-    let k = 0.42 + 0.38 * diff + 0.25 * fill;
-    [(base[0] * k + spec).min(1.0), (base[1] * k + spec).min(1.0), (base[2] * k + spec).min(1.0)]
+/// The light of a view looking along `-view_dir`: a key light above and beside the eye, a fill
+/// from the eye and a highlight. Its directions are worked out once, not for every pixel.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Light {
+    view_dir: Vec3,
+    key: Vec3,
+    half: Vec3,
+}
+
+impl Light {
+    pub(crate) fn new(view_dir: Vec3) -> Self {
+        let key = (view_dir * 0.8 + Vec3::new(-0.3, 0.2, 0.6)).normalized().unwrap_or(view_dir);
+        let half = (key + view_dir).normalized().unwrap_or(view_dir);
+        Self { view_dir, key, half }
+    }
+
+    pub(crate) fn shade(&self, n: Vec3, base: [f64; 3]) -> [f64; 3] {
+        let n = if n.dot(self.view_dir) < 0.0 { -n } else { n };
+        let diff = n.dot(self.key).max(0.0);
+        let fill = n.dot(self.view_dir).max(0.0);
+        let spec = n.dot(self.half).max(0.0).powi(40) * 0.25;
+        let k = 0.42 + 0.38 * diff + 0.25 * fill;
+        [(base[0] * k + spec).min(1.0), (base[1] * k + spec).min(1.0), (base[2] * k + spec).min(1.0)]
+    }
 }
 
 /// Render a scene with the camera into an RGBA canvas of `w × h` pixels.
@@ -103,6 +118,7 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
         Some([(q[0] / q[3] + 1.0) * 0.5 * sw as f64, (1.0 - q[1] / q[3]) * 0.5 * sh as f64, q[2] / q[3]])
     };
     let view_dir = cam.back();
+    let light = Light::new(view_dir);
     // Where the section cap is the visible surface: the depth of the section plane on that
     // pixel's view ray. Written into the depth buffer once the solids are drawn, so the cut face
     // hides edges inside the body (holes, far corners) instead of showing them like a pane of
@@ -206,7 +222,7 @@ pub fn render(scene: &Scene, cam: &Camera, w: usize, h: usize) -> Canvas {
                                 c.put(x, y, tinted.map(|v| v * k), 1.0);
                                 continue;
                             }
-                            let mut col = shade(n, view_dir, base);
+                            let mut col = light.shade(n, base);
                             let ndv = n.dot(view_dir).abs();
                             if curved && ndv < 0.14 {
                                 let a = 1.0 - ndv / 0.14;
