@@ -70,7 +70,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SKETCH", "MODIFY")
         .icon("extend")
         .enabled(in_sketch)
-        .params("curve: id, at: [x,y] near the end to extend (to the nearest curve)"),
+        .params("curve: id, at: [x,y] near the end to extend (a line runs on to the nearest curve, or the previewed reach when nothing is in the way; an arc grows along its circle and closes into a whole circle when nothing stops it)"),
     CommandSpec::new("sketch.break", "Break", break_cmd)
         .at("SKETCH", "MODIFY")
         .icon("sketch_break")
@@ -603,184 +603,99 @@ fn break_cmd(s: &mut Session, p: &Value) -> Result<Value> {
 /// of nothing.
 const EXTEND_REACH: f64 = 50.0;
 
-/// Preview the extend operation without modifying the sketch.
-/// Returns the hit point that would be reached if the user extends the curve,
-/// or None if extension is not possible (blocked by collinear curves).
-pub fn extend_preview(sk: &solidcraft_sketch::Sketch, ci: usize, hover_pos: Vec2) -> Option<Vec2> {
-    use solidcraft_sketch::{CurveKind, Shape};
+/// One end of a line growing along its own support, and what stops it.
+///
+/// A line extends past either of its ends, running on along its own straight support until the
+/// first geometry in the way. `sketch.extend` and its preview both take this aim, so the preview
+/// draws the line the click adds, never one the command refuses.
+#[derive(Clone, Copy, Debug)]
+struct LineAim {
+    /// The end that grows.
+    end: usize,
+    /// The point the extension stops at: the first geometry on the way, or the reach past the end
+    /// when nothing is in the way.
+    hit: Vec2,
+    /// The curve that stops it there, and the stop as the sketch's own point when the sketch
+    /// already has one there.
+    cutter: Option<usize>,
+    stop: Option<usize>,
+}
 
-    let curve = sk.curves.get(ci).filter(|c| !c.infinite)?;
-    let (a, b) = match &curve.kind {
-        CurveKind::Line { a: pa, b: pb } => (*pa, *pb),
-        CurveKind::Arc { a: pa, b: pb, .. } => (*pa, *pb),
-        _ => return None,
-    };
-    let pa = sk.point(a)?;
-    let pb = sk.point(b)?;
-    let at_b = hover_pos.dist(pb) <= hover_pos.dist(pa);
-    let end = if at_b { b } else { a };
-    let end_pt = sk.point(end)?;
-    let other = if at_b { pa } else { pb };
+/// The first geometry a line meets when it grows past the end of `ci` nearest `at`, or the reach
+/// past that end when nothing is in the way. Two curves stopping it equally far are one stop: the
+/// first of them is taken.
+fn line_aim(sk: &Sketch, ci: usize, at: Vec2) -> Result<Option<LineAim>> {
+    let cmd = "sketch.extend";
+    // An infinite line has no end to grow: moving either of its points moves the whole line.
+    let Some(curve) = sk.curves.get(ci).filter(|c| !c.infinite) else { return Ok(None) };
+    let CurveKind::Line { a: pa, b: pb } = curve.kind else { return Ok(None) };
+    let sh = sk.shape(ci).ok_or_else(|| bad(cmd, "curve"))?;
+    let (qa, qb) = (sk.point(pa).unwrap_or_default(), sk.point(pb).unwrap_or_default());
+    let at_b = at.dist(qb) <= at.dist(qa);
+    let (end, end_pt) = if at_b { (pb, qb) } else { (pa, qa) };
+    let dir = (end_pt - if at_b { qa } else { qb }).normalized().ok_or_else(|| bad(cmd, "cannot determine extension direction"))?;
 
-    // Get the shape (line or arc) of the curve to extend
-    let sh = sk.shape(ci)?;
-    let unbounded = match sh {
-        Shape::Line { .. } => sh,
-        Shape::Round { c, r, start, .. } => Shape::Round { c, r, start, sweep: std::f64::consts::TAU },
-    };
-
-    // Quick check for collinearity blocking by neighbors
-    for other_curve in sk.curves.iter() {
-        if let CurveKind::Line { a: na, b: nb } = &other_curve.kind
-            && (*na == end || *nb == end)
-        {
-            let other_idx = if *na == end { *nb } else { *na };
-            if let Some(other_pos) = sk.point(other_idx) {
-                let dir = (end_pt - other).normalized()?;
-                let v = other_pos - end_pt;
-                // Collinear and in the same direction: this blocks extension.
-                if v.cross(dir).abs() < 1e-6 && v.dot(dir) > 1e-6 {
-                    return None;
-                }
+    // A neighbour running on the same way as the extension has it nowhere to go.
+    for (oi, c) in sk.curves.iter().enumerate() {
+        if oi == ci || !uses(c, end) {
+            continue;
+        }
+        // Arcs do not block a line: the line runs past the point they share.
+        if let CurveKind::Line { a: na, b: nb } = c.kind {
+            let other_idx = if na == end { nb } else { na };
+            let v = sk.point(other_idx).unwrap_or_default() - end_pt;
+            if v.cross(dir).abs() < 1e-6 && v.dot(dir) > 1e-6 {
+                return Err(bad(cmd, "that end is connected to other geometry"));
             }
         }
     }
 
-    // Now search for actual hit points using the same algorithm as extend
-    let mut best_gap = f64::MAX;
-    let mut best_hit: Option<Vec2> = None;
-    let mut budget = 500_000usize; // Reduced budget for preview
-    let tol_preview = 1e-7;
-
-    // Get the extension direction
-    let dir = (end_pt - other).normalized().unwrap_or_default();
-
-    for (oi, other_curve) in sk.curves.iter().enumerate() {
+    // Candidate stops on the line's unbounded support beyond the chosen end.
+    let length = qa.dist(qb);
+    let mut best: Option<(f64, Vec2, usize)> = None;
+    let mut budget = 1_000_000usize;
+    let mut segment_count = 0usize;
+    for (oi, other) in sk.curves.iter().enumerate() {
         if oi == ci {
             continue;
         }
-
-        // Skip curves that share the endpoint we're extending from
-        let shares_endpoint = match &other_curve.kind {
-            CurveKind::Line { a, b } => *a == end || *b == end,
-            CurveKind::Arc { a, b, .. } => *a == end || *b == end,
-            _ => false,
-        };
-        if shares_endpoint {
-            // Check for collinearity blocking (already checked above, but re-check here)
-            if let CurveKind::Line { a: na, b: nb } = &other_curve.kind {
-                let other_idx = if *na == end { *nb } else { *na };
-                if let Some(other_pos) = sk.point(other_idx) {
-                    let v = other_pos - end_pt;
-                    let cross = v.cross(dir);
-                    let dot = v.dot(dir);
-                    if cross.abs() < 1e-6 && dot > 1e-6 {
-                        // Collinear and in same direction - blocks extension
-                        continue; // Skip this curve for hit finding
-                    }
-                }
-            }
+        let mut pieces = sk.exact_segs(oi).unwrap_or_else(|| sk.segs(oi));
+        // An infinite line (#1359) is a boundary along its whole line.
+        if other.infinite {
+            pieces = pieces.iter().map(|s| support::endless(s, sh.point(sh.param(at)))).collect();
         }
-
-        let pieces = sk.exact_segs(oi).unwrap_or_else(|| sk.segs(oi));
-
-        // For infinite lines, extend segments
-        let pieces_to_check: Vec<_> =
-            if other_curve.infinite { pieces.iter().map(|s| support::endless(s, end_pt)).collect() } else { pieces.to_vec() };
-
-        for piece in pieces_to_check {
-            // Try to get hits - hits() will return empty vec or error for unsupported types
-            if let Ok(hits) = support::hits(&unbounded, &piece, &mut budget) {
-                for q in hits {
-                    // Check if hit is beyond the current end
-                    let t = sh.param(q);
-                    let gap = match sh {
-                        Shape::Line { a, b } => {
-                            let l = a.dist(b);
-                            if at_b { (t - 1.0) * l } else { -t * l }
-                        }
-                        Shape::Round { r, .. } => {
-                            let (_, t1) = sh.range();
-                            if t <= t1 + tol_preview / r.max(1e-12) || t >= TAU - tol_preview / r.max(1e-12) {
-                                continue;
-                            }
-                            if at_b { (t - t1) * r } else { (TAU - t) * r }
-                        }
-                    };
-                    // Only consider hits that are further than tolerance
-                    if gap > tol_preview * 10.0 && gap < best_gap {
-                        // CRITICAL CHECK: Verify no other curve lies between end_pt and q along the extension direction
-                        let mut blocked = false;
-                        for (oi2, _check_curve) in sk.curves.iter().enumerate() {
-                            if oi2 == ci {
-                                continue;
-                            }
-                            if oi2 == oi {
-                                continue;
-                            } // Skip the curve we just found hit on
-
-                            // Check if any segment of this curve lies between end_pt and q
-                            let segs = sk.exact_segs(oi2).unwrap_or_else(|| sk.segs(oi2));
-                            for seg in segs {
-                                // Get the endpoints of this segment
-                                let (sa, sb) = match seg {
-                                    solidcraft_geom::Seg2::Line { a: sa, b: sb } => (sa, sb),
-                                    solidcraft_geom::Seg2::Arc { center, radius, start, sweep } => {
-                                        // For arcs, check the start and end points
-                                        let angle = start + sweep;
-                                        (
-                                            center + Vec2::new(radius * start.cos(), radius * start.sin()),
-                                            center + Vec2::new(radius * angle.cos(), radius * angle.sin()),
-                                        )
-                                    }
-                                    _ => continue,
-                                };
-
-                                // Check if either endpoint lies between end_pt and q along the extension direction
-                                let vec_to_sa = sa - end_pt;
-                                let proj_sa = vec_to_sa.dot(dir);
-                                if proj_sa > tol_preview && proj_sa < gap - tol_preview {
-                                    // Point sa projects onto the extension path between start and hit
-                                    // Check if it's close to the line (within tolerance)
-                                    let perp_dist = (sa - end_pt).cross(dir).abs();
-                                    if perp_dist < tol_preview * 10.0 {
-                                        blocked = true;
-                                        break;
-                                    }
-                                }
-
-                                let vec_to_sb = sb - end_pt;
-                                let proj_sb = vec_to_sb.dot(dir);
-                                if proj_sb > tol_preview && proj_sb < gap - tol_preview {
-                                    let perp_dist = (sb - end_pt).cross(dir).abs();
-                                    if perp_dist < tol_preview * 10.0 {
-                                        blocked = true;
-                                        break;
-                                    }
-                                }
-
-                                if blocked {
-                                    break;
-                                }
-                            }
-                            if blocked {
-                                break;
-                            }
-                        }
-
-                        if !blocked {
-                            best_gap = gap;
-                            best_hit = Some(q);
-                        }
-                    }
+        segment_count += pieces.len();
+        if segment_count > 16_384 {
+            return Err(bad(cmd, "too many exact curve pieces to extend safely"));
+        }
+        for piece in &pieces {
+            for q in support::hits(&sh, piece, &mut budget)? {
+                let t = sh.param(q);
+                let travel = if at_b { (t - 1.0) * length } else { -t * length };
+                if travel <= TOL * 10.0 {
+                    continue;
+                }
+                // Equally far stops are both on the way: the first one found is the stop.
+                if best.is_none_or(|x| travel < x.0 - TOL) {
+                    best = Some((travel, q, oi));
                 }
             }
         }
     }
 
-    // A hit that is already another curve's end is joined by the extension, so it is a stop like
-    // any other: the preview shows the line running to it.
-    best_hit.or(Some(end_pt + dir * EXTEND_REACH))
+    let (hit, cutter, stop) = match best {
+        Some((_, q, oi)) => (q, Some(oi), stop_point(sk, ci, q)),
+        None => (end_pt + dir * EXTEND_REACH, None, None),
+    };
+    Ok(Some(LineAim { end, hit, cutter, stop }))
+}
+
+/// Preview the extend operation without modifying the sketch: the point the line past the end
+/// nearest `hover_pos` reaches, from the same search `sketch.extend` makes. `None` when the curve
+/// is not a line to extend, when it is an infinite line, or when the extension has nowhere to go
+/// (the end is connected to a line running on from it).
+pub fn extend_preview(sk: &solidcraft_sketch::Sketch, ci: usize, hover_pos: Vec2) -> Option<Vec2> {
+    line_aim(sk, ci, hover_pos).ok().flatten().map(|aim| aim.hit)
 }
 
 /// One end of an arc growing along the arc's own circle, as a new arc, and what stops it.
@@ -816,10 +731,11 @@ impl ArcAim {
     }
 }
 
-/// The first geometry an arc meets when it grows from the end of `ci` nearest `at`, or `None`
-/// when nothing is in the way. Both ends grow: past `b` counter-clockwise, past `a` clockwise,
-/// and only as far as the nearest curve on that path stops them. Two curves stopping it at the
-/// same distance is an error, not a guess.
+/// The first geometry an arc meets when it grows from the end of `ci` nearest `at`. Both ends
+/// grow: past `b` counter-clockwise, past `a` clockwise, and only as far as the nearest curve on
+/// that path stops them. With nothing in the way the extension runs on to the arc's own far end,
+/// closing the arc into a full circle. Two curves stopping it equally far are one stop: the first
+/// is taken.
 fn arc_aim(sk: &Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<Option<ArcAim>> {
     let Some(CurveKind::Arc { a, b, .. }) = sk.curves.get(ci).map(|c| c.kind.clone()) else { return Ok(None) };
     let Some(Shape::Round { c: centre, r, start, sweep }) = sk.shape(ci) else { return Ok(None) };
@@ -840,7 +756,6 @@ fn arc_aim(sk: &Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<Option<ArcAim>
     let far_tol = TOL * 10.0 / r;
     let circle = Shape::Round { c: centre, r, start: 0.0, sweep: TAU };
     let mut best: Option<(f64, Vec2, usize)> = None;
-    let mut ambiguous = false;
     let mut budget = 1_000_000usize;
     let mut segment_count = 0usize;
     for (oi, curve) in sk.curves.iter().enumerate() {
@@ -868,7 +783,7 @@ fn arc_aim(sk: &Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<Option<ArcAim>
                 continue;
             }
             let entry = centre + Vec2::from_angle(entry) * r;
-            keep_stop(&mut best, &mut ambiguous, travel, entry, oi, angle_tol);
+            keep_stop(&mut best, travel, entry, oi, angle_tol);
             continue;
         }
         let mut pieces = sk.exact_segs(oi).unwrap_or_else(|| sk.segs(oi));
@@ -888,24 +803,22 @@ fn arc_aim(sk: &Sketch, ci: usize, at: Vec2, cmd: &str) -> Result<Option<ArcAim>
                 if travel <= angle_tol || travel > reach + far_tol {
                     continue;
                 }
-                keep_stop(&mut best, &mut ambiguous, travel, q, oi, angle_tol);
+                keep_stop(&mut best, travel, q, oi, angle_tol);
             }
         }
     }
-    if ambiguous {
-        return Err(bad(cmd, "multiple curves stop the extension at the same distance"));
-    }
-    Ok(best.map(|(travel, hit, cutter)| ArcAim { end, far, at_b, centre, radius: r, end_angle, travel, hit, cutter }))
+    // Nothing stops the arc on its way round: it grows all the way to its own far end, closing
+    // the gap between its ends into a full circle.
+    let far_pt = if at_b { qa } else { qb };
+    let (travel, hit, cutter) = best.unwrap_or((reach, far_pt, ci));
+    Ok(Some(ArcAim { end, far, at_b, centre, radius: r, end_angle, travel, hit, cutter }))
 }
 
-/// Keep the stop the nearest of the candidates, and remember it when another curve stops the
-/// extension at the same distance somewhere else; the same point from several curves is one stop.
-fn keep_stop(best: &mut Option<(f64, Vec2, usize)>, ambiguous: &mut bool, travel: f64, q: Vec2, oi: usize, angle_tol: f64) {
+/// Keep the stop the nearest of the candidates. Two curves stopping the extension equally far are
+/// both on the way, so the first one found is taken instead of refusing to choose.
+fn keep_stop(best: &mut Option<(f64, Vec2, usize)>, travel: f64, q: Vec2, oi: usize, angle_tol: f64) {
     if best.is_none_or(|x| travel < x.0 - angle_tol) {
         *best = Some((travel, q, oi));
-        *ambiguous = false;
-    } else if best.is_some_and(|x| (travel - x.0).abs() <= angle_tol && x.1.dist(q) > TOL) {
-        *ambiguous = true;
     }
 }
 
@@ -990,7 +903,7 @@ fn arc_end_held(sk: &Sketch, ci: usize, end: usize) -> bool {
 fn extend_arc(sk: &mut Sketch, ci: usize, at: Vec2) -> Result<String> {
     let cmd = "sketch.extend";
     let Some(aim) = arc_aim(sk, ci, at, cmd)? else {
-        return Err(bad(cmd, "nothing to extend to"));
+        return Err(bad(cmd, "an arc that is already a whole circle has no end to extend"));
     };
     let stop = arc_stop(sk, ci, &aim);
     // The arc's own far end is where the arc begins again: moving the end onto it would leave a
@@ -1028,8 +941,8 @@ fn extend_arc(sk: &mut Sketch, ci: usize, at: Vec2) -> Result<String> {
 }
 
 /// The arc `sketch.extend` would add from the end of `ci` nearest `hover_pos`, for the viewport to
-/// show before the click: the new arc as points, the growing end first. `None` when extending
-/// there is not possible (nothing on the way stops it, or stopping it is ambiguous).
+/// show before the click: the new arc as points, the growing end first. `None` when the arc cannot
+/// grow (it is already a whole circle).
 pub fn extend_arc_preview(sk: &solidcraft_sketch::Sketch, ci: usize, hover_pos: Vec2) -> Option<Vec<Vec2>> {
     let aim = arc_aim(sk, ci, hover_pos, "sketch.extend").ok().flatten()?;
     Some(aim.points())
@@ -1055,89 +968,15 @@ fn extend(s: &mut Session, p: &Value) -> Result<Value> {
         if matches!(sk.curves.get(ci).map(|c| &c.kind), Some(CurveKind::Arc { .. })) {
             return extend_arc(sk, ci, at);
         }
-        let sh = sk.shape(ci).ok_or_else(|| bad(cmd, "curve"))?;
-        let Some(CurveKind::Line { a: pa, b: pb }) = sk.curves.get(ci).map(|c| c.kind.clone()) else {
+        // The line grows past one end, out to the first geometry on the way, or the reach the
+        // preview draws when nothing is in the way. A stop where the sketch already has a point
+        // (another curve's end) joins that point instead of doubling it.
+        let Some(aim) = line_aim(sk, ci, at)? else {
             return Err(bad(cmd, "only lines and arcs can be extended"));
         };
-        let (qa, qb) = (sk.point(pa).unwrap_or_default(), sk.point(pb).unwrap_or_default());
-        let at_b = at.dist(qb) <= at.dist(qa);
-        let end = if at_b { pb } else { pa };
+        let end = aim.end;
+        let (q, cutter, stop) = (aim.hit, aim.cutter, aim.stop);
         let neighbors: Vec<_> = sk.curves.iter().enumerate().filter(|(i, c)| *i != ci && uses(c, end)).collect();
-
-        // Fixed ends are allowed: an extension that cannot move an end adds a new line from it,
-        // so the fixed point itself never moves (a diagonal ending at the origin can be
-        // continued through it).
-        let extension_direction = {
-            let p_end = sk.point(end).unwrap_or_default();
-            let p_other = if at_b { qa } else { qb };
-            (p_end - p_other).normalized()
-        }
-        .ok_or_else(|| bad(cmd, "cannot determine extension direction"))?;
-
-        // A neighbour running on the same way as the extension has it nowhere to go.
-        for (_, c) in &neighbors {
-            // Arcs do not block a line: the line runs past the point they share.
-            if matches!(c.kind, CurveKind::Arc { .. }) {
-                continue;
-            }
-            if let CurveKind::Line { a: na, b: nb } = c.kind {
-                let other_idx = if na == end { nb } else { na };
-                let other_pos = sk.point(other_idx).unwrap_or_default();
-                // From the shared point to the neighbour's other end.
-                let v = other_pos - sk.point(end).unwrap_or_default();
-                if v.cross(extension_direction).abs() < 1e-6 && v.dot(extension_direction) > 1e-6 {
-                    return Err(bad(cmd, "that end is connected to other geometry"));
-                }
-            }
-        }
-
-        // Candidate stops on the line's unbounded support beyond the chosen end.
-        let length = qa.dist(qb);
-        let mut best: Option<(f64, Vec2, usize)> = None;
-        let mut ambiguous = false;
-        let mut budget = 1_000_000usize;
-        let mut segment_count = 0usize;
-        for (oi, curve) in sk.curves.iter().enumerate() {
-            if oi == ci {
-                continue;
-            }
-            let mut pieces = sk.exact_segs(oi).unwrap_or_else(|| sk.segs(oi));
-            // An infinite line (#1359) is a boundary along its whole line.
-            if curve.infinite {
-                pieces = pieces.iter().map(|s| support::endless(s, sh.point(sh.param(at)))).collect();
-            }
-            segment_count += pieces.len();
-            if segment_count > 16_384 {
-                return Err(bad(cmd, "too many exact curve pieces to extend safely"));
-            }
-            for piece in &pieces {
-                for q in support::hits(&sh, piece, &mut budget)? {
-                    let t = sh.param(q);
-                    let gap = if at_b { (t - 1.0) * length } else { -t * length };
-                    if gap <= TOL * 10.0 {
-                        continue;
-                    }
-                    if best.is_none_or(|x| gap < x.0 - TOL) {
-                        best = Some((gap, q, oi));
-                        ambiguous = false;
-                    } else if best.is_some_and(|x| (gap - x.0).abs() <= TOL && (x.2 != oi || x.1.dist(q) > TOL)) {
-                        ambiguous = true;
-                    }
-                }
-            }
-        }
-
-        if ambiguous {
-            return Err(bad(cmd, "multiple curves stop the extension at the same distance"));
-        }
-
-        // Nothing in the way stops the extension: it runs as far as the preview draws, so the
-        // click adds the line the user saw rather than reporting that there is nothing to reach.
-        // A stop that is already another curve's end joins that point instead of doubling it.
-        let (q, cutter, stop) = match best {
-            Some((_, q, oi)) => (q, Some(oi), stop_point(sk, ci, q)),
-            None => (sk.point(end).unwrap_or_default() + extension_direction * EXTEND_REACH, None, None),
-        };
 
         // The end joined to other geometry stays where it is: add a line from it.
         if !neighbors.is_empty() {
