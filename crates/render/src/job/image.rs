@@ -294,8 +294,9 @@ fn admit_raster(source: Source) -> Result<Admission> {
     Ok(a)
 }
 
-fn add_pixel_tests(sum: &mut u64, triangle: &Triangle, max: u64) -> Result<()> {
-    let [x0, x1, y0, y1] = triangle.bounds;
+/// Adds the samples a triangle's whole-canvas `[x0, x1, y0, y1]` bounds test to `sum`, refused
+/// over `max`.
+fn add_pixel_tests(sum: &mut u64, [x0, x1, y0, y1]: [usize; 4], max: u64) -> Result<()> {
     let tests = ((x1 - x0 + 1) as u64).checked_mul((y1 - y0 + 1) as u64).ok_or_else(|| limit("pixel work overflow"))?;
     *sum = sum.checked_add(tests).ok_or_else(|| limit("pixel work overflow"))?;
     if *sum > max {
@@ -311,6 +312,7 @@ fn validate_face(face: &FaceAppearance) -> Result<()> {
     Ok(())
 }
 
+/// A request's pixel tests, counted before a job starts as its raster will count them.
 fn projected_pixel_tests(scene: &ProductScene, view: &View, roles: &[BodyRole], max: u64) -> Result<u64> {
     let mut tests = 0;
     for (role, body) in scene.meshes.iter().enumerate() {
@@ -321,9 +323,12 @@ fn projected_pixel_tests(scene: &ProductScene, view: &View, roles: &[BodyRole], 
             looks.insert(face.face, face);
         }
         for index in 0..body.mesh.triangles.len() {
-            let look = body.mesh.tri_face.get(index).and_then(|face| looks.get(face)).copied();
-            if let Some(triangle) = view.project(body, index, look, paints(roles, role))? {
-                add_pixel_tests(&mut tests, &triangle, max)?;
+            let (world, normals) = corners(body, index)?;
+            let face = body.mesh.tri_face.get(index).and_then(|face| looks.get(face)).copied();
+            if look(body, face, paints(roles, role), normals)?.is_some()
+                && let Some(placed) = view.place(world)?
+            {
+                add_pixel_tests(&mut tests, placed.bounds, max)?;
             }
         }
     }
@@ -556,45 +561,57 @@ struct View {
     sh: usize,
 }
 
+/// Triangle `triangle` of `body`: its corners and their normals, checked.
+fn corners(body: &crate::ProductMesh, triangle: usize) -> Result<([Vec3; 3], [Vec3; 3])> {
+    let mesh = &body.mesh;
+    let indices = mesh.triangles.get(triangle).ok_or_else(|| invalid("missing product triangle"))?;
+    let vertices = indices.map(|i| mesh.positions.get(i as usize).copied());
+    let normals = indices.map(|i| mesh.normals.get(i as usize).copied());
+    let ([Some(a), Some(b), Some(c)], [Some(na), Some(nb), Some(nc)]) = (vertices, normals) else {
+        return Err(invalid("invalid triangle index or missing normal"));
+    };
+    let (world, normals) = ([a, b, c], [na, nb, nc]);
+    if world.iter().chain(normals.iter()).any(|v| !v.is_finite()) {
+        return Err(invalid("non-finite product triangle"));
+    }
+    Ok((world, normals))
+}
+
+/// How a triangle of `body` is painted, in `look` where its face has one (`paint` off: depth only);
+/// `None` for one that is wholly transparent.
+fn look(body: &crate::ProductMesh, look: Option<&FaceAppearance>, paint: bool, [na, nb, nc]: [Vec3; 3]) -> Result<Option<Look>> {
+    // Transmission is physical optical data, never a request to change CPU preview.
+    // Keep the existing scalar sorted-alpha shading for glass previews.
+    let (colour, opacity, surface) = if !paint {
+        // A depth-only body is solid, whatever it is made of, and is never shaded.
+        (body.color, 1.0, None)
+    } else {
+        look.map_or((body.color, body.opacity, body.surface.filter(|_| body.transmission.is_none())), |look| {
+            (look.color, look.opacity, look.surface.filter(|_| look.transmission.is_none()))
+        })
+    };
+    if surface.is_some() && opacity != 1.0 {
+        return Err(invalid("opaque PBR requires opacity 1"));
+    }
+    let normals = if surface.is_some() {
+        [crate::surface::unit_direction(na), crate::surface::unit_direction(nb), crate::surface::unit_direction(nc)]
+            .map(|n| n.map_err(|e| invalid(&e.to_string())))
+    } else {
+        [Ok(na), Ok(nb), Ok(nc)]
+    };
+    let [na, nb, nc] = normals;
+    let normals = [na?, nb?, nc?];
+    if opacity <= 0.0 {
+        return Ok(None);
+    }
+    Ok(Some(Look { colour, opacity, surface, paint, normals }))
+}
+
 /// The same clipping, supersampling and bounds govern admission and raster work.
 impl View {
-    fn project(&self, body: &crate::ProductMesh, triangle: usize, look: Option<&FaceAppearance>, paint: bool) -> Result<Option<Triangle>> {
-        let mesh = &body.mesh;
-        let indices = mesh.triangles.get(triangle).ok_or_else(|| invalid("missing product triangle"))?;
-        let vertices = indices.map(|i| mesh.positions.get(i as usize).copied());
-        let normals = indices.map(|i| mesh.normals.get(i as usize).copied());
-        let ([Some(a), Some(b), Some(c)], [Some(na), Some(nb), Some(nc)]) = (vertices, normals) else {
-            return Err(invalid("invalid triangle index or missing normal"));
-        };
-        let world = [a, b, c];
-        let normals = [na, nb, nc];
-        if world.iter().chain(normals.iter()).any(|v| !v.is_finite()) {
-            return Err(invalid("non-finite product triangle"));
-        }
-        // Transmission is physical optical data, never a request to change CPU preview.
-        // Keep the existing scalar sorted-alpha shading for glass previews.
-        let (colour, opacity, surface) = if !paint {
-            // A depth-only body is solid, whatever it is made of, and is never shaded.
-            (body.color, 1.0, None)
-        } else {
-            look.map_or((body.color, body.opacity, body.surface.filter(|_| body.transmission.is_none())), |look| {
-                (look.color, look.opacity, look.surface.filter(|_| look.transmission.is_none()))
-            })
-        };
-        if surface.is_some() && opacity != 1.0 {
-            return Err(invalid("opaque PBR requires opacity 1"));
-        }
-        let normals = if surface.is_some() {
-            [crate::surface::unit_direction(na), crate::surface::unit_direction(nb), crate::surface::unit_direction(nc)]
-                .map(|n| n.map_err(|e| invalid(&e.to_string())))
-        } else {
-            [Ok(normals[0]), Ok(normals[1]), Ok(normals[2])]
-        };
-        let [na, nb, nc] = normals;
-        let normals = [na?, nb?, nc?];
-        if opacity <= 0.0 {
-            return Ok(None);
-        }
+    /// Where a triangle lands on the whole canvas; `None` when it misses it, reaches behind the
+    /// eye or has no area.
+    fn place(&self, world: [Vec3; 3]) -> Result<Option<Placed>> {
         let clip = world.map(|p| self.vp.apply(p));
         if clip.iter().flatten().any(|v| !v.is_finite()) {
             return Err(invalid("non-finite product projection"));
@@ -617,25 +634,7 @@ impl View {
         if !area.is_finite() {
             return Err(invalid("invalid projected area"));
         }
-        let centre_depth = (world[0] / 3.0 + world[1] / 3.0 + world[2] / 3.0 - self.reference).dot(self.back);
-        if !centre_depth.is_finite() {
-            return Err(invalid("invalid triangle depth"));
-        }
-        Ok(Some(Triangle {
-            points,
-            world,
-            normals,
-            inv_w,
-            colour: colour.map(decode),
-            opacity,
-            surface,
-            paint,
-            centre_depth,
-            area,
-            bounds: [x0 as usize, x1 as usize, y0 as usize, y1 as usize],
-            x: x0 as usize,
-            y: y0 as usize,
-        }))
+        Ok(Some(Placed { points, inv_w, area, bounds: [x0 as usize, x1 as usize, y0 as usize, y1 as usize] }))
     }
 }
 
@@ -667,12 +666,38 @@ struct Triangle {
     surface: Option<crate::surface::OpaqueSurface>,
     /// Off for a depth-only body.
     paint: bool,
-    centre_depth: f64,
     area: f64,
     /// Whole-canvas sample bounds `[x0, x1, y0, y1]` (inclusive), narrowed to the tile drawn.
     bounds: [usize; 4],
     x: usize,
     y: usize,
+}
+
+impl Triangle {
+    /// Its cursor at the first sample of its bounds.
+    fn new(world: [Vec3; 3], look: Look, placed: Placed) -> Self {
+        let Look { colour, opacity, surface, paint, normals } = look;
+        let Placed { points, inv_w, area, bounds } = placed;
+        Self { points, world, normals, inv_w, colour: colour.map(decode), opacity, surface, paint, area, bounds, x: bounds[0], y: bounds[2] }
+    }
+}
+
+/// How a triangle is painted.
+struct Look {
+    colour: [u8; 3],
+    opacity: f64,
+    surface: Option<crate::surface::OpaqueSurface>,
+    paint: bool,
+    normals: [Vec3; 3],
+}
+
+/// Where a triangle lands on the whole canvas.
+struct Placed {
+    points: [[f64; 3]; 3],
+    inv_w: [f64; 3],
+    area: f64,
+    /// Sample bounds `[x0, x1, y0, y1]` (inclusive).
+    bounds: [usize; 4],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -874,11 +899,21 @@ impl Raster {
         Ok(())
     }
 
-    fn project(&self, draw: Draw) -> Result<Option<Triangle>> {
-        let body = self.scene.meshes.get(draw.body as usize).ok_or_else(|| invalid("missing product body"))?;
-        let look =
+    fn body(&self, draw: Draw) -> Result<&crate::ProductMesh> {
+        self.scene.meshes.get(draw.body as usize).ok_or_else(|| invalid("missing product body"))
+    }
+
+    fn corners(&self, draw: Draw) -> Result<([Vec3; 3], [Vec3; 3])> {
+        corners(self.body(draw)?, draw.triangle as usize)
+    }
+
+    /// How a triangle is painted, in its body's role and its face's appearance.
+    fn look(&self, draw: Draw, normals: [Vec3; 3]) -> Result<Option<Look>> {
+        let body = self.body(draw)?;
+        let paint = paints(&self.roles, draw.body as usize);
+        let face =
             self.looks.get(draw.body as usize).and_then(|looks| body.mesh.tri_face.get(draw.triangle as usize).and_then(|face| looks.get(face)));
-        self.view.project(body, draw.triangle as usize, look, paints(&self.roles, draw.body as usize))
+        look(body, face, paint, normals)
     }
 
     fn prepare_step(&mut self) -> Result<()> {
@@ -894,10 +929,16 @@ impl Raster {
             return Ok(());
         }
         let mut draw = Draw { body: self.body as u32, triangle: self.item as u32, depth: 0.0 };
-        if let Some(triangle) = self.project(draw)? {
-            add_pixel_tests(&mut self.pixel_tests, &triangle, self.max_pixel_tests)?;
-            draw.depth = triangle.centre_depth;
-            if triangle.opacity >= 1.0 {
+        let (world, normals) = self.corners(draw)?;
+        if let Some(look) = self.look(draw, normals)?
+            && let Some(placed) = self.view.place(world)?
+        {
+            add_pixel_tests(&mut self.pixel_tests, placed.bounds, self.max_pixel_tests)?;
+            draw.depth = (world[0] / 3.0 + world[1] / 3.0 + world[2] / 3.0 - self.view.reference).dot(self.view.back);
+            if !draw.depth.is_finite() {
+                return Err(invalid("invalid triangle depth"));
+            }
+            if look.opacity >= 1.0 {
                 self.opaque.push(draw);
             } else {
                 self.glass.push(draw);
@@ -980,15 +1021,18 @@ impl Raster {
                 self.draw = 0;
                 return Ok(());
             };
-            // Only the part of the triangle's bounds inside this tile.
-            self.triangle = self.project(draw)?.and_then(|mut t| {
-                let [x0, x1, y0, y1] = t.bounds;
-                let bounds = [x0.max(cx0), x1.min(cx1), y0.max(cy0), y1.min(cy1)];
-                (bounds[0] <= bounds[1] && bounds[2] <= bounds[3]).then(|| {
-                    (t.bounds, t.x, t.y) = (bounds, bounds[0], bounds[2]);
-                    t
-                })
+            // Only the part of the triangle's bounds inside this tile; one outside it is passed
+            // over before it is painted.
+            let (world, normals) = self.corners(draw)?;
+            let inside = self.view.place(world)?.and_then(|mut placed| {
+                let [x0, x1, y0, y1] = placed.bounds;
+                placed.bounds = [x0.max(cx0), x1.min(cx1), y0.max(cy0), y1.min(cy1)];
+                (placed.bounds[0] <= placed.bounds[1] && placed.bounds[2] <= placed.bounds[3]).then_some(placed)
             });
+            self.triangle = match inside {
+                Some(placed) => self.look(draw, normals)?.map(|look| Triangle::new(world, look, placed)),
+                None => None,
+            };
             if self.triangle.is_none() {
                 self.draw += 1;
             }
