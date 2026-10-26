@@ -560,6 +560,36 @@ fn gen_find_concave(rng: &mut Rng) -> Inputs {
     }
 }
 
+/// Seed of the face choice of the `corner_adjust_concave_face_*` cases (a generator of
+/// its own, so the cases of [`CORNER_SEED`] stay as they were).
+const SIDE_FACE_SEED: u64 = 0x5de_f4ce;
+/// The loop edge use of a natural plane face along the z axis (the side edge).
+const SIDE_FACE_EU: i64 = 3;
+
+/// `i` with its side edge use on a target face's loop (the face's edge along the z axis,
+/// as the wire side edge), so the extension finds a side face; `None` for other cases.
+fn with_side_face(i: Inputs, rng: &mut Rng) -> Option<Inputs> {
+    let Inputs::Corner {
+        method: CornerMethod::AdjustConcave,
+        mut model,
+        corner,
+        split,
+    } = i
+    else {
+        return None;
+    };
+    let v0 = model.vertices.first_mut()?;
+    v0.pc_kind = 5;
+    v0.pc_index = rng.below(2) as i64;
+    v0.pc_sub = SIDE_FACE_EU;
+    Some(Inputs::Corner {
+        method: CornerMethod::AdjustConcave,
+        model,
+        corner,
+        split,
+    })
+}
+
 /// A corner case on an Nx2-shaped model (`gen_nx2_model` of unit
 /// `blend.fillet_corner_p3`): its target faces are `0` (plane x-z) and `1` (plane y-z),
 /// its corner edges `4 5` (plus `2`, a rail, for the three-edge concave case), its
@@ -996,6 +1026,17 @@ impl UnitDiff for Runner {
             let name = format!("corner_analytic_{n:02}");
             let src = "SmFilletCorner.cpp:3379 (MakeAnalyticCornerSurface on arc/line corners)";
             push(&mut v, name, src, gen_analytic(&mut rng))?;
+        }
+        // the `corner` cases again (same stream) with the side edge use on a face
+        let mut rng = Rng::new(CORNER_SEED);
+        for n in 0..CORNER_CASES {
+            let i = gen_corner(&mut rng);
+            let mut face_rng = Rng::new(SIDE_FACE_SEED.wrapping_add(n as u64));
+            if let Some(i) = with_side_face(i, &mut face_rng) {
+                let name = format!("corner_adjust_concave_face_{n:02}");
+                let src = "SmFilletCorner.cpp:7140 (Nx2 corner, side edge use on a face)";
+                push(&mut v, name, src, i)?;
+            }
         }
         let (drawn, base) = tangent_cases();
         for (n, inner) in drawn.into_iter().enumerate() {

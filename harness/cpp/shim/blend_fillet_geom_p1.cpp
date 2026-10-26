@@ -498,6 +498,17 @@ struct Model
             return targetEdges[(size_t)index]->GetPrimaryEdgeuse();
         if (kind == 3 && index >= 0 && (size_t)index < targetFaces.size())
             return targetFaces[(size_t)index];
+        if (kind == 5 && index >= 0 && (size_t)index < targetFaces.size())
+        {
+            // edge use `sub` of the first loop of target face `index`: an edge use with a face
+            SmTArray<SmLoop*> loops;
+            targetFaces[(size_t)index]->GetLoops(loops);
+            SmTArray<SmEdgeuse*> eus;
+            if (loops.GetSize() > 0)
+                loops[0]->GetEdgeuses(eus);
+            if (sub >= 0 && (ULONG)sub < eus.GetSize())
+                return eus[(ULONG)sub];
+        }
         return NULL;
     }
 
