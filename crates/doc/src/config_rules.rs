@@ -175,7 +175,7 @@ fn operands(
         &|name| values.get(name).copied().ok_or_else(|| invalid(&format!("unknown parameter `{name}`"))),
         defaults,
     )?;
-    let kind = lhs.kind().ok_or_else(|| invalid("comparison requires length, angle or unitless values"))?;
+    let kind = lhs.kind().ok_or_else(|| invalid("comparison requires a length, angle, mass, volume, area or unit-less value"))?;
     let right = rhs.to_kind_in(kind, defaults)?;
     if !lhs.v.is_finite() || !right.is_finite() {
         return Err(invalid("comparison requires finite values"));
