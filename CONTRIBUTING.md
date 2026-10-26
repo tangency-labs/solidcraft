@@ -188,15 +188,16 @@ no LTO, and debug assertions off (truck has debug-only assertions that reject va
 builds several times faster than `--release`. If a test fails only in a plain debug build, say so
 in the PR. `cargo xtask test` builds the tests with it and then runs every test binary, a pool of
 them at a time (`cargo test` runs them one after another); the pool holds a quarter of the cores
-(at least two), or what `SOLIDCRAFT_TEST_JOBS` says, and each binary gets `RUST_TEST_THREADS`
-so the threads in flight add up to about one per core; arguments after `--` go to each binary,
-e.g. `cargo xtask test -- shell`. The bound is shared with the top-level test/side commands for
-`cargo xtask test` and `cargo xtask ci`: for example, `SOLIDCRAFT_TEST_JOBS=2` allows two commands
-at once; the sequential wasm/doc worker consumes one of those slots. Every binary and side check
-still runs after failures. `ACTION_MATRIX_JOBS` and Cargo's build-job setting remain independent
-caller overrides; this limit does not choose their values or change test filters, timeouts or
-baselines. Tests run beside each other on a busy machine, so a test must not depend on wall-clock
-timing.
+(at least two), or what `SOLIDCRAFT_TEST_JOBS` says, and it gives each binary a share of the
+cores so the threads in flight add up to about one per core; arguments after `--` go to each
+binary, e.g. `cargo xtask test -- shell`. An explicit `RUST_TEST_THREADS` from the caller wins:
+the pool leaves it alone and the binaries inherit it. The bound is shared with the top-level
+test/side commands for `cargo xtask test` and `cargo xtask ci`: for example,
+`SOLIDCRAFT_TEST_JOBS=2` allows two commands at once; the sequential wasm/doc worker consumes one
+of those slots. Every binary and side check still runs after failures. `RUST_TEST_THREADS`,
+`ACTION_MATRIX_JOBS` and Cargo's build-job setting remain independent caller overrides; this
+limit does not choose their values or change test filters, timeouts or baselines. Tests run beside
+each other on a busy machine, so a test must not depend on wall-clock timing.
 
 **Ready pull requests test what they touch.** CI maps changed files to workspace packages and
 runs Clippy, the test build and tests for those and their dependents. The

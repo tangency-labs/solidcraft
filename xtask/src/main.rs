@@ -64,8 +64,9 @@ commands:
   test [CARGO ARGS] [-- TEST ARGS]
                   build the tests with the ci profile, then run every test binary, a pool of
                   them at a time (a quarter of the cores, or what SOLIDCRAFT_TEST_JOBS says),
-                  each with RUST_TEST_THREADS, with the doc tests alongside; the bound covers
-                  the concurrent test and side commands for test/ci; other per-test/worker
+                  each with a share of the cores as RUST_TEST_THREADS, with the doc tests
+                  alongside; an explicit RUST_TEST_THREADS wins and is left alone; the bound
+                  covers the concurrent test and side commands for test/ci; other per-test/worker
                   overrides are unchanged
   wasm            cargo check every library crate and the web app for wasm32-unknown-unknown
   web-offline [DIR]

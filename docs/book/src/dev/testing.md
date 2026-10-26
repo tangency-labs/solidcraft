@@ -65,10 +65,11 @@ so in the PR.
 
 Run `cargo xtask test` to build with this profile and run the test binaries concurrently,
 with doc tests alongside. The binaries run a pool at a time (a quarter of the cores, or what
-`SOLIDCRAFT_TEST_JOBS` says), each with `RUST_TEST_THREADS` set, so the suite keeps the machine
-busy without oversubscribing it. Arguments after `--` go to each test binary, for example
-`cargo xtask test -- shell`. To run the test binaries sequentially instead, use
-`cargo test --workspace --profile ci`.
+`SOLIDCRAFT_TEST_JOBS` says), each with a share of the cores as `RUST_TEST_THREADS`, so the
+suite keeps the machine busy without oversubscribing it. A `RUST_TEST_THREADS` you set yourself
+wins: the pool leaves it alone and the binaries inherit it. Arguments after `--` go to each test
+binary, for example `cargo xtask test -- shell`. To run the test binaries sequentially instead,
+use `cargo test --workspace --profile ci`.
 
 ## Test-level scheduling for full local CI
 

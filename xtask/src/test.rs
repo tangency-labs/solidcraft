@@ -1,7 +1,9 @@
 //! `cargo xtask test`: build the workspace's tests once, then run every test binary.
 //! The binaries run in a pool of `jobs` at a time (a quarter of the cores, or what
-//! `SOLIDCRAFT_TEST_JOBS` says), and each one gets `RUST_TEST_THREADS`, so the suite keeps about
-//! one running thread per core. The sequential doc/wasm `side` jobs share the same bound.
+//! `SOLIDCRAFT_TEST_JOBS` says), and the pool gives each binary a share of the cores, so the
+//! suite keeps about one running thread per core. A caller who sets `RUST_TEST_THREADS` keeps
+//! that value: the pool never overwrites it. The sequential doc/wasm `side` jobs share the same
+//! bound.
 
 use std::ffi::OsStr;
 use std::process::{Command, Stdio};
@@ -12,6 +14,9 @@ use crate::{cargo, root};
 
 /// The environment variable that says how many commands may run at the same time.
 const JOBS_ENV: &str = "SOLIDCRAFT_TEST_JOBS";
+
+/// The environment variable that says how many threads each test binary may use.
+const THREADS_ENV: &str = "RUST_TEST_THREADS";
 
 /// The most jobs a caller may ask for.
 const MAX_JOBS: usize = 1024;
@@ -32,10 +37,10 @@ pub fn run(cargo_args: &[&str], test_args: &[&str], side: Vec<(String, Command)>
     let bins = build(cargo_args)?;
     let start = Instant::now();
     let side_count = side.len();
-    let threads = test_threads(nproc, limit).to_string();
-    let batches = test_batches(&bins, test_args, side, &threads);
+    let threads = thread_budget(nproc, limit, std::env::var_os(THREADS_ENV).as_deref());
+    let batches = test_batches(&bins, test_args, side, threads.as_deref());
     let jobs = limit.min(batches.len());
-    eprintln!("test: {} binaries, {side_count} side jobs; at most {jobs} concurrent top-level commands", bins.len());
+    eprintln!("test: {} binaries, {side_count} side jobs; at most {jobs} concurrent top-level commands{}", bins.len(), threads_note(&threads));
     let mut failed = Vec::new();
     run_bounded(
         batches,
@@ -58,9 +63,19 @@ pub fn run(cargo_args: &[&str], test_args: &[&str], side: Vec<(String, Command)>
     if failed.is_empty() { Ok(()) } else { Err(format!("failed: {}", failed.join(", "))) }
 }
 
+/// What the pool did with the thread count, for the log line: its own split, or the caller's
+/// value left alone.
+fn threads_note(threads: &Option<String>) -> String {
+    match threads {
+        Some(count) => format!("; {count} test threads per binary"),
+        None => format!("; the caller's {THREADS_ENV} is left alone"),
+    }
+}
+
 /// The batches the pool runs: the `side` jobs first, in order, then one batch per test binary.
-/// Every binary gets `RUST_TEST_THREADS`, so the threads in flight add up to about one per core.
-fn test_batches(bins: &[TestBin], test_args: &[&str], side: Vec<(String, Command)>, threads: &str) -> Vec<Vec<(String, Command)>> {
+/// `threads` is the thread count the pool gives each binary, or `None` when the caller set
+/// `RUST_TEST_THREADS` itself: then each binary inherits the caller's value.
+fn test_batches(bins: &[TestBin], test_args: &[&str], side: Vec<(String, Command)>, threads: Option<&str>) -> Vec<Vec<(String, Command)>> {
     let mut batches = Vec::with_capacity(bins.len() + 1);
     if !side.is_empty() {
         batches.push(side);
@@ -68,7 +83,9 @@ fn test_batches(bins: &[TestBin], test_args: &[&str], side: Vec<(String, Command
     for b in bins {
         let mut c = Command::new(&b.exe);
         c.args(test_args).current_dir(&b.dir).env("CARGO_MANIFEST_DIR", &b.dir);
-        c.env("RUST_TEST_THREADS", threads);
+        if let Some(count) = threads {
+            c.env(THREADS_ENV, count);
+        }
         batches.push(vec![(b.label.clone(), c)]);
     }
     batches
@@ -86,8 +103,24 @@ fn job_limit(value: Option<&OsStr>, nproc: usize) -> Result<usize, String> {
         .ok_or_else(|| format!("{JOBS_ENV} must be a positive integer"))
 }
 
-/// The threads each test binary may use: the cores shared between the binaries in flight.
-fn test_threads(nproc: usize, jobs: usize) -> usize {
+/// The thread count the pool gives each test binary, or `None` to leave `RUST_TEST_THREADS` to
+/// the caller.
+///
+/// A caller that sets `RUST_TEST_THREADS` has chosen the thread count: the test binaries inherit
+/// that value and the pool never overwrites it. Otherwise the pool shares the cores between the
+/// binaries in flight, so that the threads in flight add up to about one per core.
+fn thread_budget(nproc: usize, jobs: usize, caller: Option<&OsStr>) -> Option<String> {
+    match caller {
+        // The caller chose the thread count: the binaries keep it.
+        Some(_) => None,
+        // Nobody chose: share the cores between the binaries in flight.
+        None => Some(shared_threads(nproc, jobs).to_string()),
+    }
+}
+
+/// The threads one binary gets when the caller chose none: the cores shared between the binaries
+/// in flight, never below one.
+fn shared_threads(nproc: usize, jobs: usize) -> usize {
     (nproc / jobs.max(1)).max(1)
 }
 
@@ -173,8 +206,9 @@ pub fn doc_tests(cargo_args: &[&str], test_args: &[&str]) -> (String, Command) {
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_JOBS, TestBin, finish, job_limit, run_bounded, test_batches, test_threads};
+    use super::{MAX_JOBS, THREADS_ENV, TestBin, finish, job_limit, run_bounded, shared_threads, test_batches, thread_budget};
     use std::ffi::OsStr;
+    use std::process::Command;
     use std::sync::Barrier;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Instant;
@@ -202,13 +236,26 @@ mod tests {
         }
     }
 
-    /// The threads each binary may use: the cores shared between the binaries in flight.
+    /// The threads one binary gets when the caller chose none: the cores shared between the
+    /// binaries in flight.
     #[test]
-    fn test_threads_share_the_cores_between_the_binaries_in_flight() {
-        assert_eq!(test_threads(16, 4), 4);
-        assert_eq!(test_threads(16, 2), 8);
-        assert_eq!(test_threads(16, 100), 1, "a binary always gets a thread");
-        assert_eq!(test_threads(3, 4), 1, "a binary always gets a thread");
+    fn shared_threads_divide_the_cores_between_the_binaries_in_flight() {
+        assert_eq!(shared_threads(16, 4), 4);
+        assert_eq!(shared_threads(16, 2), 8);
+        assert_eq!(shared_threads(16, 100), 1, "a binary always gets a thread");
+        assert_eq!(shared_threads(3, 4), 1, "a binary always gets a thread");
+    }
+
+    /// An explicit `RUST_TEST_THREADS` from the caller wins: the pool sets nothing, so the test
+    /// binaries inherit the caller's value. Only when the caller chose nothing does the pool
+    /// split the cores.
+    #[test]
+    fn an_explicit_caller_thread_count_wins_over_the_pool_split() {
+        assert_eq!(thread_budget(16, 4, Some(OsStr::new("3"))), None, "the caller's value is never overwritten");
+        assert_eq!(thread_budget(16, 4, Some(OsStr::new(""))), None, "an empty value is the caller's too");
+        assert_eq!(thread_budget(16, 4, None).as_deref(), Some("4"), "the pool splits the cores");
+        assert_eq!(thread_budget(16, 1, None).as_deref(), Some("16"));
+        assert_eq!(thread_budget(1, 4, None).as_deref(), Some("1"), "a binary always gets a thread");
     }
 
     /// The pool keeps the number of binaries running at the same time under its limit, and every
@@ -217,32 +264,12 @@ mod tests {
     fn pool_runs_at_most_jobs_binaries_at_once() {
         let jobs = 2;
         let count = 6;
-        let dir = std::env::temp_dir().join(format!("xtask-pool-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join(FAKE_MARKER), b"").unwrap();
-        let exe = std::env::current_exe().unwrap().to_string_lossy().into_owned();
-        let dir = dir.to_string_lossy().into_owned();
-        let bins: Vec<TestBin> = (0..count).map(|i| TestBin { label: format!("fake {i}"), exe: exe.clone(), dir: dir.clone() }).collect();
-        let threads = test_threads(16, jobs).to_string();
-        let batches = test_batches(&bins, &["fake_test_binary"], vec![], &threads);
-        let mut failed = Vec::new();
-        run_bounded(
-            batches,
-            jobs,
-            |batch, tx| {
-                for (label, c) in batch {
-                    let t0 = Instant::now();
-                    let _ = tx.send((label, finish(c), t0.elapsed().as_secs_f64()));
-                }
-            },
-            |(label, result, _)| {
-                if let Err(output) = result {
-                    failed.push((label, output));
-                }
-            },
-        );
-        assert!(failed.is_empty(), "the fake binaries failed: {failed:?}");
+        let dir = fake_dir("pool");
+        let bins = fake_bins(count, &dir);
+        let threads = shared_threads(16, jobs).to_string();
+        let batches = test_batches(&bins, &["fake_test_binary"], vec![], Some(&threads));
+        let results = run_batches(batches, jobs);
+        assert!(results.iter().all(|(_, result, _)| result.is_ok()), "the fake binaries failed: {results:?}");
         let log = std::fs::read_to_string(std::path::Path::new(&dir).join(FAKE_LOG)).unwrap();
         let mut running = 0;
         let mut peak = 0;
@@ -262,6 +289,116 @@ mod tests {
         assert_eq!(log.lines().filter(|l| *l == "start").count(), count, "every binary ran");
         assert!(peak <= jobs, "{peak} binaries ran at once, the pool allows {jobs}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The thread count the test binary really receives: the caller's value when the caller set
+    /// one, the pool's split when nobody did.
+    #[test]
+    fn the_test_binary_keeps_the_callers_thread_count_and_otherwise_gets_the_pool_split() {
+        // The caller set RUST_TEST_THREADS: the pool must not overwrite it.
+        let caller_dir = fake_dir("caller-threads");
+        run_fake_pool(&caller_dir, Some("3"));
+        assert_eq!(logged_threads(&caller_dir), ["3", "3"], "the binary kept the caller's thread count");
+        let _ = std::fs::remove_dir_all(&caller_dir);
+
+        // Nobody set RUST_TEST_THREADS: the pool's split applies.
+        let pool_dir = fake_dir("pool-threads");
+        run_fake_pool(&pool_dir, None);
+        assert_eq!(logged_threads(&pool_dir), ["8", "8"], "the binary got the pool's split");
+        let _ = std::fs::remove_dir_all(&pool_dir);
+    }
+
+    /// The pool adds no `RUST_TEST_THREADS` of its own when the caller chose one, so the test
+    /// binary inherits the caller's value.
+    #[test]
+    fn the_pool_leaves_the_callers_thread_count_out_of_the_binaries_environment() {
+        let bin = TestBin { label: "pkg test t".into(), exe: "true".into(), dir: ".".into() };
+        let caller = thread_budget(16, 4, Some(OsStr::new("3")));
+        let batches = test_batches(std::slice::from_ref(&bin), &["--exact", "x"], vec![], caller.as_deref());
+        let overrides: Vec<String> = batches[0][0].1.get_envs().map(|(k, _)| k.to_string_lossy().into_owned()).collect();
+        assert!(!overrides.contains(&THREADS_ENV.to_string()), "the pool must not set {THREADS_ENV}: {overrides:?}");
+        let pool = thread_budget(16, 4, None);
+        let batches = test_batches(std::slice::from_ref(&bin), &["--exact", "x"], vec![], pool.as_deref());
+        let set =
+            batches[0][0].1.get_envs().find(|(k, _)| *k == OsStr::new(THREADS_ENV)).and_then(|(_, v)| v).map(|v| v.to_string_lossy().into_owned());
+        assert_eq!(set.as_deref(), Some("4"), "the pool sets its own split when nobody chose");
+    }
+
+    /// Run the fake pool in a subprocess whose environment is the caller's: `caller` is the
+    /// `RUST_TEST_THREADS` the caller set, or `None` when nobody set it.
+    fn run_fake_pool(dir: &str, caller: Option<&str>) {
+        let mut c = Command::new(std::env::current_exe().unwrap());
+        c.arg("fake_pool_driver").env("XTASK_FAKE_POOL", "1").env("XTASK_FAKE_POOL_DIR", dir).env("XTASK_FAKE_POOL_CORES", "16");
+        match caller {
+            Some(value) => {
+                c.env(THREADS_ENV, value);
+            }
+            None => {
+                c.env_remove(THREADS_ENV);
+            }
+        }
+        let out = c.output().unwrap();
+        assert!(out.status.success(), "the fake pool failed: {}", String::from_utf8_lossy(&out.stdout));
+    }
+
+    /// A stand-in for the pool: it builds the test commands the way `run` does, with the
+    /// caller's `RUST_TEST_THREADS` taken from its own environment, and runs the fake binaries.
+    /// The test above starts it with the caller's environment, so the fake binaries inherit it.
+    #[test]
+    fn fake_pool_driver() {
+        if std::env::var_os("XTASK_FAKE_POOL").is_none() {
+            return;
+        }
+        let cores: usize = std::env::var("XTASK_FAKE_POOL_CORES").ok().and_then(|v| v.parse().ok()).unwrap_or(16);
+        let caller = std::env::var_os(THREADS_ENV);
+        let budget = thread_budget(cores, 2, caller.as_deref());
+        let dir = std::env::var("XTASK_FAKE_POOL_DIR").unwrap_or_default();
+        let exe = std::env::current_exe().unwrap().to_string_lossy().into_owned();
+        let bins: Vec<TestBin> = (0..2).map(|i| TestBin { label: format!("fake {i}"), exe: exe.clone(), dir: dir.clone() }).collect();
+        let batches = test_batches(&bins, &["fake_test_binary"], vec![], budget.as_deref());
+        for batch in batches {
+            for (_, c) in batch {
+                let _ = finish(c);
+            }
+        }
+    }
+
+    /// A directory with the fake-binary marker: the fake binaries look for it and log beside it.
+    fn fake_dir(name: &str) -> String {
+        let dir = std::env::temp_dir().join(format!("xtask-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(FAKE_MARKER), b"").unwrap();
+        dir.to_string_lossy().into_owned()
+    }
+
+    /// The fake test binaries: the test binary itself, run as a test binary.
+    fn fake_bins(count: usize, dir: &str) -> Vec<TestBin> {
+        let exe = std::env::current_exe().unwrap().to_string_lossy().into_owned();
+        (0..count).map(|i| TestBin { label: format!("fake {i}"), exe: exe.clone(), dir: dir.to_string() }).collect()
+    }
+
+    /// Run the batches in the pool and collect what each of them reported.
+    fn run_batches(batches: Vec<Vec<(String, Command)>>, jobs: usize) -> Vec<(String, Result<String, String>, f64)> {
+        let mut results = Vec::new();
+        run_bounded(
+            batches,
+            jobs,
+            |batch, tx| {
+                for (label, c) in batch {
+                    let t0 = Instant::now();
+                    let _ = tx.send((label, finish(c), t0.elapsed().as_secs_f64()));
+                }
+            },
+            |result| results.push(result),
+        );
+        results
+    }
+
+    /// The thread counts the fake binaries were given, one per binary.
+    fn logged_threads(dir: &str) -> Vec<String> {
+        let log = std::fs::read_to_string(std::path::Path::new(dir).join(FAKE_LOG)).unwrap();
+        log.lines().filter_map(|l| l.strip_prefix("threads ")).map(str::to_string).collect()
     }
 
     /// A stand-in for a test binary: it says when it starts and when it ends, so that the test
