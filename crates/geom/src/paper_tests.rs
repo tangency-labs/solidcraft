@@ -263,6 +263,8 @@ fn at_most_100_000_records_are_counted_before_any_geometry() {
     scene(vec![group(vec![fill(polygon(5), holes.clone())])]).validate().unwrap();
     assert_eq!(group(vec![fill(polygon(5), holes.clone())]).records(), MAX_RECORDS);
     assert_eq!(scene(vec![group(vec![fill(polygon(6), holes)])]).validate(), Err(REFUSED));
+    // A picture is one record, as an item: with its group, 2.
+    assert_eq!(group(vec![picture(0.0, 0.0, 10.0, 10.0, 1.0)]).records(), 2);
     // Counted first: an over-budget scene with a non-finite piece reports the count.
     let mut bad = steps(MAX_RECORDS - 1);
     bad[0] = line(p(f64::NAN, 0.0), p(1.0, 0.0));
@@ -378,4 +380,65 @@ fn slivers_and_radii_are_in_the_grids_own_steps() {
     let ellipse = open(vec![Seg2::Conic { a: p(0.0, 0.0), apex: p(10.0, 10.0), b: p(20.0, 0.0), w: 0.5 }]);
     let refused = ellipse.prepare().unwrap().on_grid(Grid::NANOMETRE).unwrap_err();
     assert!(refused.0.contains("not supported yet"), "{refused}");
+}
+
+fn picture(x0: f64, y0: f64, x1: f64, y1: f64, opacity: f64) -> Item {
+    Item::Picture(Picture { source: 9, rect: Aabb2 { min: p(x0, y0), max: p(x1, y1) }, opacity })
+}
+
+/// A picture is its rectangle, the name of its pixels and its opacity, read and written as such.
+#[test]
+fn a_picture_round_trips_and_its_grid_is_its_rectangles() {
+    let scene = sheet(vec![picture(20.0, 30.0, 120.0, 80.0, 1.0)]);
+    scene.validate().unwrap();
+    let value = serde_json::to_value(&scene).unwrap();
+    assert_eq!(
+        value["groups"][0]["items"][0],
+        json!({"kind": "picture", "source": 9, "rect": {"min": [20.0, 30.0], "max": [120.0, 80.0]}, "opacity": 1.0})
+    );
+    let restored: Scene = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(restored, scene);
+    let Item::Picture(picture) = &scene.groups[0].items[0] else { panic!("a picture") };
+    let grid = picture.grid(300.0).unwrap();
+    assert_eq!((grid.x0, grid.y0, grid.width, grid.height), (20.0, 30.0, 1182, 591));
+    for (at, key) in [("/groups/0/items/0", "pixels"), ("/groups/0/items/0/rect", "z")] {
+        let mut v = value.clone();
+        v.pointer_mut(at).unwrap()[key] = json!(1);
+        assert!(serde_json::from_value::<Scene>(v).is_err(), "an unknown field at {at:?}");
+    }
+    let mut v = value;
+    v["groups"][0]["items"][0].as_object_mut().unwrap().remove("source");
+    assert!(serde_json::from_value::<Scene>(v).is_err());
+}
+
+#[test]
+fn a_pictures_rectangle_has_area_within_the_bound_and_its_opacity_is_above_0_and_at_most_1() {
+    const RECTANGLE: Invalid = Invalid("a picture's rectangle is within 1e5 mm and above 0 on each side");
+    const OPACITY: Invalid = Invalid("a picture's opacity is above 0 and at most 1");
+    for item in [picture(-1e5, -1e5, 1e5, 1e5, 1.0), picture(0.0, 0.0, 1e-9, 1e-9, 1e-9), picture(10.0, 10.0, 11.0, 11.0, 0.5)] {
+        sheet(vec![item]).validate().unwrap();
+    }
+    for (x0, y0, x1, y1) in [
+        (10.0, 10.0, 10.0, 20.0),
+        (10.0, 10.0, 20.0, 10.0),
+        (20.0, 10.0, 10.0, 20.0),
+        (10.0, 20.0, 20.0, 10.0),
+        (0.0, 0.0, 1e5f64.next_up(), 1.0),
+        (-1e5 - 1e-6, 0.0, 1.0, 1.0),
+        (f64::NAN, 0.0, 1.0, 1.0),
+        (0.0, 0.0, 1.0, f64::INFINITY),
+        (f64::NEG_INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::INFINITY),
+    ] {
+        assert_eq!(sheet(vec![picture(x0, y0, x1, y1, 1.0)]).validate(), Err(RECTANGLE), "{x0} {y0} {x1} {y1}");
+    }
+    assert_eq!(sheet(vec![Item::Picture(Picture { source: 1, rect: Aabb2::EMPTY, opacity: 1.0 })]).validate(), Err(RECTANGLE));
+    for opacity in [0.0, -0.0, -0.5, 1f64.next_up(), 2.0, f64::NAN, f64::INFINITY] {
+        assert_eq!(sheet(vec![picture(10.0, 10.0, 20.0, 20.0, opacity)]).validate(), Err(OPACITY), "{opacity}");
+    }
+    // A picture is one record.
+    let group = Group { object: 1, kind: ObjectKind::DrawingBorder, items: vec![picture(10.0, 10.0, 20.0, 20.0, 1.0); MAX_RECORDS - 1] };
+    Scene::new(p(420.0, 297.0), vec![group.clone()]).validate().unwrap();
+    let mut over = group;
+    over.items.push(picture(10.0, 10.0, 20.0, 20.0, 1.0));
+    assert_eq!(Scene::new(p(420.0, 297.0), vec![over]).validate(), Err(Invalid("more than 100,000 groups, items, loops and pieces")));
 }

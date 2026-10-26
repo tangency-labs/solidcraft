@@ -3,6 +3,11 @@
 //! [`Scene::validate`]. Text is runs of placed glyphs with the table of the fonts they use
 //! ([`text`]). Clips, line patterns and styles are later additions.
 //!
+//! A picture (a shaded view, a logo) is a rectangle and the name of its pixels, never the pixels:
+//! a writer asks a [`Pictures`] provider for them on the pixel grid it draws on
+//! ([`crate::pixel_grid`]), so a PNG at 1200 dpi gets a picture drawn at 1200 dpi rather than one
+//! stretched.
+//!
 //! - Coordinates are millimetres from the sheet's lower-left corner, x to the right and y up;
 //!   angles are radians, anticlockwise. A line's width is its width on paper, centred on its path.
 //! - Paint goes on in order: the groups in turn, then the items of each group in turn, each over
@@ -25,6 +30,8 @@
 //!   every loop of a fill closed the same way;
 //! - a line width above 0 and at most [`MAX_LINE_MM`];
 //! - the text and its fonts by [`text`]'s rules.
+//! - a picture's rectangle within the coordinate bound and above 0 on each side, and its opacity
+//!   above 0 and at most 1.
 //!
 //! It does not certify simple loops, holes inside their outer loop or a path that never doubles
 //! back. Validation after parsing cannot bound parsing allocations: an encoded-input boundary must
@@ -39,7 +46,8 @@ use serde::{Deserialize, Serialize};
 
 use std::f64::consts::FRAC_PI_2;
 
-use crate::{EPS, Region2, Seg2, Vec2};
+use crate::pixel_grid::{GridWindow, PixelGrid, PixelGridError};
+use crate::{Aabb2, EPS, Region2, Seg2, Vec2};
 
 pub mod annotate;
 pub mod flatten;
@@ -90,6 +98,7 @@ impl Group {
             Item::Stroke { path, .. } => path.len(),
             Item::Fill { region } => region.loops().fold(0usize, |n, l| n.saturating_add(1).saturating_add(l.segs.len())),
             Item::Text(run) => run.records(),
+            Item::Picture(_) => 0,
         };
         self.items.iter().fold(1usize, |n, i| n.saturating_add(1).saturating_add(item(i)))
     }
@@ -140,6 +149,38 @@ pub enum Item {
     Fill { region: Region2 },
     /// A run of text, filled with its glyphs' outlines.
     Text(TextRun),
+    /// Pixels drawn into a rectangle.
+    Picture(Picture),
+}
+
+/// A picture on the sheet: its pixels, named by `source`, drawn into `rect` over what is already
+/// there, `opacity` times as strongly as their own alpha says.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Picture {
+    /// Which pixels, opaque here: a writer asks [`Pictures`] for them.
+    pub source: u64,
+    /// Where it sits, millimetres.
+    pub rect: Aabb2,
+    /// Above 0, up to 1 (as its pixels are).
+    pub opacity: f64,
+}
+
+impl Picture {
+    /// Its own pixel grid at `dpi`, anchored at its rectangle's lower-left corner: what SVG and PDF
+    /// embed.
+    pub fn grid(&self, dpi: f64) -> std::result::Result<PixelGrid, PixelGridError> {
+        let size = self.rect.size();
+        PixelGrid::new(self.rect.min.x, self.rect.min.y, size.x, size.y, dpi)
+    }
+}
+
+/// Where a writer gets a picture's pixels.
+pub trait Pictures {
+    /// The pixels of picture `source` on `grid`, for the columns and rows of `window`: straight
+    /// (not premultiplied) alpha, sRGB, 8 bits a channel, RGBA, top row first, exactly `window`'s
+    /// size.
+    fn rows(&self, source: u64, grid: &PixelGrid, window: GridWindow) -> std::result::Result<Vec<u8>, String>;
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -245,6 +286,15 @@ impl Scene {
                     }
                 }
                 Item::Text(_) => {}
+                Item::Picture(Picture { rect, opacity, .. }) => {
+                    let within = |v: f64| v.abs() <= MAX_COORDINATE_MM;
+                    let corners = [rect.min.x, rect.min.y, rect.max.x, rect.max.y];
+                    require(
+                        corners.into_iter().all(within) && rect.min.x < rect.max.x && rect.min.y < rect.max.y,
+                        "a picture's rectangle is within 1e5 mm and above 0 on each side",
+                    )?;
+                    require(*opacity > 0.0 && *opacity <= 1.0, "a picture's opacity is above 0 and at most 1")?;
+                }
             }
         }
         let runs = self.groups.iter().flat_map(|g| &g.items).filter_map(|item| match item {

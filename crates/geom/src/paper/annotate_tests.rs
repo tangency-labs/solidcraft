@@ -23,6 +23,7 @@ fn drawn(item: &Item) -> (Vec<[i64; 4]>, bool, Option<f64>) {
         Item::Stroke { path, closed, width_mm } => (ends(path), *closed, Some(*width_mm)),
         Item::Fill { region } => (ends(&region.outer.segs), true, None),
         Item::Text(_) => panic!("an annotation draws no text"),
+        Item::Picture(picture) => panic!("an annotation draws no picture: {picture:?}"),
     }
 }
 

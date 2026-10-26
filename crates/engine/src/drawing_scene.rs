@@ -27,8 +27,8 @@ use solidcraft_doc::drawing::{Drawing, Sheet};
 use solidcraft_doc::drawing_view::TangentEdges;
 use solidcraft_doc::{DocError, ModelState, ids};
 use solidcraft_geom::paper::text::TextRun;
-use solidcraft_geom::paper::{Group, Item, MAX_RECORDS, Scene};
-use solidcraft_geom::{Loop2, Region2, Seg2, Vec2};
+use solidcraft_geom::paper::{Group, Item, MAX_RECORDS, Picture, Scene};
+use solidcraft_geom::{Aabb2, Loop2, Region2, Seg2, Vec2};
 
 use crate::drawing_view::{CHORD_MM, LineRequest, MIN_MODEL_CHORD_MM, ShownSet, Stats, Unmeasured, paper_group};
 use crate::params::bad;
@@ -220,6 +220,7 @@ fn moved(group: &Group, by: Vec2) -> Group {
         Item::Stroke { path, closed, width_mm } => Item::Stroke { path: segs(path), closed: *closed, width_mm: *width_mm },
         Item::Fill { region } => Item::Fill { region: Region2 { outer: ring(&region.outer), holes: region.holes.iter().map(ring).collect() } },
         Item::Text(run) => Item::Text(TextRun { origin: run.origin + by, ..run.clone() }),
+        Item::Picture(picture) => Item::Picture(Picture { rect: Aabb2 { min: picture.rect.min + by, max: picture.rect.max + by }, ..*picture }),
     });
     Group { object: group.object, kind: group.kind, items: items.collect() }
 }
