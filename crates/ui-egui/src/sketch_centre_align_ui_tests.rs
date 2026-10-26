@@ -4,8 +4,8 @@
 //! silently did nothing.
 
 use serde_json::json;
-use solidcraft_engine::geom::Vec2;
 use solidcraft_engine::Sel::{SketchCurve, SketchPoint};
+use solidcraft_engine::geom::Vec2;
 
 use crate::context_menu::{self, Target};
 use crate::scenario::Harness;

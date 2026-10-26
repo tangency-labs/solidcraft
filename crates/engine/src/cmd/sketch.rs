@@ -3118,11 +3118,11 @@ mod ux_tests;
 #[path = "sketch_axis_ref_tests.rs"]
 mod axis_ref_tests;
 #[cfg(test)]
-#[path = "sketch_circle_edge_tests.rs"]
-mod circle_edge_tests;
-#[cfg(test)]
 #[path = "sketch_centre_align_tests.rs"]
 mod centre_align_tests;
+#[cfg(test)]
+#[path = "sketch_circle_edge_tests.rs"]
+mod circle_edge_tests;
 #[cfg(test)]
 #[path = "sketch_drag_live_tests.rs"]
 mod drag_live_tests;

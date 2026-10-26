@@ -154,7 +154,9 @@ pub fn hint(id: &str) -> String {
         "sketch.dimension" => {
             "Dimension: pick one or two entities and type the value (or click to place it first); click a dimension to edit it; Enter applies".into()
         }
-        "sketch.constraint.horizontal_vertical" => "Horizontal/Vertical: pick a line, two points, or a point and a line; hold Shift to pick a line midpoint".into(),
+        "sketch.constraint.horizontal_vertical" => {
+            "Horizontal/Vertical: pick a line, two points, or a point and a line; hold Shift to pick a line midpoint".into()
+        }
         "sketch.slot.center_to_center" | "sketch.slot.overall" => "Slot: click both ends, then the width".into(),
         "sketch.constraint.midpoint" => "MidPoint: pick a point and a line, or two lines to centre the second on the first".into(),
         _ if id.starts_with("sketch.constraint.") => "Constraint: pick the sketch entities".into(),
@@ -256,9 +258,7 @@ pub fn on_click(app: &mut SolveApp, proj: &Proj, pos: Pos2, shift: bool) {
                 } else {
                     tool.point_picks.push(point);
                 }
-            } else if !shift
-                && let Some(Hit::SketchCurve { id, straight: true, .. }) = hit
-            {
+            } else if !shift && let Some(Hit::SketchCurve { id, straight: true, .. }) = hit {
                 // A line picked on its own is made horizontal/vertical; a line picked after a
                 // point aligns that point with the line (a circle's centre with a square's
                 // edge, #617).
@@ -603,8 +603,12 @@ pub(crate) fn constraint_preselection(
         ("sketch.constraint.horizontal_vertical", [SketchCurve { id, .. }]) => Some(json!({"line":id})),
         // A point and a straight line (a circle's centre and a square's edge, #617): align the
         // point with the line, in the mode the line's own axis suggests.
-        ("sketch.constraint.horizontal_vertical", [SketchPoint { id }, SketchCurve { id: line, .. }]) => point_line_alignment(sketch?, &json!(id), line),
-        ("sketch.constraint.horizontal_vertical", [SketchCurve { id: line, .. }, SketchPoint { id }]) => point_line_alignment(sketch?, &json!(id), line),
+        ("sketch.constraint.horizontal_vertical", [SketchPoint { id }, SketchCurve { id: line, .. }]) => {
+            point_line_alignment(sketch?, &json!(id), line)
+        }
+        ("sketch.constraint.horizontal_vertical", [SketchCurve { id: line, .. }, SketchPoint { id }]) => {
+            point_line_alignment(sketch?, &json!(id), line)
+        }
         ("sketch.constraint.horizontal_vertical", _) => crate::selection::alignment_points(selection).map(|points| json!({"points": points})),
         ("sketch.constraint.coincident", [a, b]) => {
             let entity = |s: &solidcraft_engine::Sel| match s {

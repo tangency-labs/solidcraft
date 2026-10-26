@@ -1018,8 +1018,14 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
             c.push(cmd(app, "sketch.constraint.midpoint", "MidPoint").with(json!({ "point": points[0], "line": lines[0] })));
             // #617: the point can also be aligned with the line (a circle's centre with a square's edge).
             if let Some(align) = crate::tools::point_line_points(&ss.sketch, &json!(points[0]), &lines[0]) {
-                c.push(act("ui.horizontalConstraint", "Horizontal Constraint", "c_hv").with(json!({"points": align, "mode": "horizontal", "if_redundant": "refuse"})));
-                c.push(act("ui.verticalConstraint", "Vertical Constraint", "c_hv").with(json!({"points": align, "mode": "vertical", "if_redundant": "refuse"})));
+                c.push(
+                    act("ui.horizontalConstraint", "Horizontal Constraint", "c_hv")
+                        .with(json!({"points": align, "mode": "horizontal", "if_redundant": "refuse"})),
+                );
+                c.push(
+                    act("ui.verticalConstraint", "Vertical Constraint", "c_hv")
+                        .with(json!({"points": align, "mode": "vertical", "if_redundant": "refuse"})),
+                );
             }
         }
     }
