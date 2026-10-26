@@ -1,8 +1,32 @@
 {
  "sources": [],
  "what": "a smooth loft through circles r20, r10, r20 at z = 0, 20, 40",
- "source": "invariants",
- "method": "the interpolation between sections is the loft's own: no closed-form volume; one valid body bounded by two disks and one lofted face",
+ "source": "analytic",
+ "method": "three sections loft smooth at degree 2 (crates/kernel/src/smlib_sweeps.rs, loft: ruled from two, quadratic from three), through equally spaced, concentric circles: every row of control points is interpolated by the same quadratic in the loft parameter, so each section of the loft is a circle, r(z) = 10 + (z - 20)^2 / 40 (the quadratic through r 20, 10, 20 at z 0, 20, 40; z is linear in the parameter). V = pi int r^2 dz = 22400 pi / 3; A = 2 pi 20^2 + 2 pi int r sqrt(1 + r'^2) dz (Gauss, exact on the polynomial volume). Faces: two disks and the lofted face; edges: the two circles and the seam; vertices: one on each circle. Centre of mass (0, 0, 20) by symmetry; bbox: r <= 20 (the quadratic's maximum is at the ends)",
  "body_count": 1,
- "faces": 3
+ "tolerance": {
+  "rel": 1e-05
+ },
+ "volume_mm3": 23457.225146804,
+ "area_mm2": 6453.967215397,
+ "faces": 3,
+ "edges": 3,
+ "vertices": 2,
+ "center_of_mass": [
+  0,
+  0,
+  20
+ ],
+ "bbox": {
+  "min": [
+   -20,
+   -20,
+   0
+  ],
+  "max": [
+   20,
+   20,
+   40
+  ]
+ }
 }

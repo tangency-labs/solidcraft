@@ -5,7 +5,24 @@
   "tangency-labs/solidcraft#4881"
  ],
  "what": "a join of two pleated skins (lofts between 24-pleat star outlines, less the same loft moved in 1.1 mm) that cross along a ring near their bottoms: truck panicked ('tolerance must be no less than 1e-6') or gave no result",
- "source": "invariants",
- "method": "the narrowing cone skin and the flaring lip skin cross at z = -0.3, so their union is one connected solid: one valid closed body, no panic. The reporter's own script (pleated_union.py, 24 pleats)",
- "body_count": 1
+ "source": "analytic",
+ "method": "the reporter's own script (pleated_union.py, 24 pleats). Every outline has its 48 vertices on the rays k 7.5 deg, so each ruled loft's section at height z is the star polygon with the radii interpolated linearly along those rays (its faces are bilinear between straight edges), of area 1/2 sin7.5 sum r_k r_k+1, quadratic in z (Simpson exact). Each skin is its loft less the inner loft, which lies inside it on every ray over the skin's height and runs a mm past both ends: cone skin 39321.316290, lip skin 5571.952291. They cross between z = -0.88 and 0.28; their common part, per wedge between two rays the region between the larger inner and the smaller outer straight edge (cut where edges cross, exact triangles), integrated over z by Gauss: 449.775981. V = cone + lip - common. Faces: the four sets of 48 sides each cut in two by the crossing, + the four end annuli (the two bottoms at z = -1 apart: r 114.69..115.79 and 113.35..114.44). Bbox: the lip's top outline reaches r 120 on the axes, the cone runs z -1..88.3",
+ "body_count": 1,
+ "volume_mm3": 44443.492600859,
+ "faces": 388,
+ "bbox": {
+  "min": [
+   -120,
+   -120,
+   -1
+  ],
+  "max": [
+   120,
+   120,
+   88.3
+  ]
+ },
+ "tolerance": {
+  "rel": 1e-05
+ }
 }

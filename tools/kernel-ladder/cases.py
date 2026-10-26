@@ -309,23 +309,58 @@ case(T4, "006-loft-circle-frustum", "a loft between circles r20 at z=0 and r10 a
      + [C("solid.loft", sections=[{"sketch": "S0"}, {"sketch": "S1"}])],
      {"body_count": 1, "volume_mm3": PI * 30 / 3 * 700, "faces": 3},
      "a ruled loft between coaxial circles is a cone frustum: V = pi h/3 (R^2 + R r + r^2)")
+r3c = lambda z: 10 + (z - 20) ** 2 / 40
 case(T4, "007-loft-three-circles", "a smooth loft through circles r20, r10, r20 at z = 0, 20, 40",
      sketch("XY", C("sketch.circle.center", center=[0, 0], radius=20), name="S0")
      + sketch(plane([0, 0, 20], [1, 0, 0], [0, 1, 0]), C("sketch.circle.center", center=[0, 0], radius=10), name="S1")
      + sketch(plane([0, 0, 40], [1, 0, 0], [0, 1, 0]), C("sketch.circle.center", center=[0, 0], radius=20), name="S2")
      + [C("solid.loft", sections=[{"sketch": "S0"}, {"sketch": "S1"}, {"sketch": "S2"}])],
-     {"body_count": 1, "faces": 3},
-     "the interpolation between sections is the loft's own: no closed-form volume; one valid body bounded by two disks and one lofted face", source="invariants")
+     {"body_count": 1, "tolerance": {"rel": 1e-5}, "volume_mm3": PI * quad(lambda z: r3c(z) ** 2, 0, 40), "area_mm2": 800 * PI + 2 * PI * quad(lambda z: r3c(z) * math.sqrt(1 + ((z - 20) / 20) ** 2), 0, 40),
+      "faces": 3, "edges": 3, "vertices": 2, "center_of_mass": [0, 0, 20], "bbox": {"min": [-20, -20, 0], "max": [20, 20, 40]}},
+     "three sections loft smooth at degree 2 (crates/kernel/src/smlib_sweeps.rs, loft: ruled from two, quadratic from three), through equally spaced, "
+     "concentric circles: every row of control points is interpolated by the same quadratic in the loft parameter, so each section of the loft is a circle, "
+     "r(z) = 10 + (z - 20)^2 / 40 (the quadratic through r 20, 10, 20 at z 0, 20, 40; z is linear in the parameter). V = pi int r^2 dz = 22400 pi / 3; "
+     "A = 2 pi 20^2 + 2 pi int r sqrt(1 + r'^2) dz (Gauss, exact on the polynomial volume). Faces: two disks and the lofted face; edges: the two circles and the seam; "
+     "vertices: one on each circle. Centre of mass (0, 0, 20) by symmetry; bbox: r <= 20 (the quadratic's maximum is at the ends)")
+# 008: one side x = 20 (y -20..20, linear) ruled to the arc -45..45 deg of r10 (rational quadratic); four alike.
+def quarter_arc(t, w=math.cos(PI / 4)):
+    c, s = 10 * math.cos(PI / 4), 10 * math.sin(PI / 4)
+    D = (1 - t) ** 2 + 2 * w * t * (1 - t) + t * t
+    N = ((1 - t) ** 2 * c + 2 * w * t * (1 - t) * 10 / math.cos(PI / 4) + t * t * c, ((1 - t) ** 2 * -s + t * t * s))
+    dD = -2 * (1 - t) + 2 * w * (1 - 2 * t) + 2 * t
+    dN = (-2 * (1 - t) * c + 2 * w * (1 - 2 * t) * 10 / math.cos(PI / 4) + 2 * t * c, 2 * (1 - t) * s + 2 * t * s)
+    return [N[k] / D for k in range(2)], [(dN[k] * D - N[k] * dD) / D ** 2 for k in range(2)]
+def mixed(t):
+    (x1, y1), (dx1, dy1) = quarter_arc(t)
+    x0, y0, dx0, dy0 = 20, -20 + 40 * t, 0, 40
+    return (x0 * dy1 - y0 * dx1 + x1 * dy0 - y1 * dx0) / 4
+Msq = 4 * quad_split(mixed, 0, 1, 20, 32)
 case(T4, "008-loft-square-to-circle", "a loft from a 40 square at z=0 to a circle r10 at z=30",
      sketch("XY", C("sketch.rectangle.center", center=[0, 0], corner=[20, 20]), name="S0")
      + sketch(plane([0, 0, 30], [1, 0, 0], [0, 1, 0]), C("sketch.circle.center", center=[0, 0], radius=10), name="S1")
      + [C("solid.loft", sections=[{"sketch": "S0"}, {"sketch": "S1"}])],
-     {"body_count": 1},
-     "sections with different edge counts: the matching is the loft's own; one valid body", source="invariants")
+     {"body_count": 1, "tolerance": {"rel": 1e-5}, "volume_mm3": 10 * (1600 + 100 * PI + Msq), "center_of_mass": [0, 0, 30 * (1600 / 12 + Msq / 6 + 100 * PI / 4) / ((1600 + Msq + 100 * PI) / 3)],
+      "faces": 6, "edges": 12, "vertices": 8, "bbox": {"min": [-20, -20, 0], "max": [20, 20, 30]}},
+     "two sections loft ruled; the circle is split at the square's corner directions (45 deg + k 90 deg) into four quarter arcs, and each side is ruled to its arc "
+     "at equal parameter (the side's linear one, the arc's standard rational quadratic, weights 1, cos45, 1). A section at height s h is the curve (1-s) C0 + s C1, "
+     "whose area is (1-s)^2 A0 + 2 s (1-s) M + s^2 A1 (M = 1/4 loop int (C0 x dC1 + C1 x dC0), Gauss) = %.9f: V = h (A0 + M + A1)/3, z_c = h (A0/12 + M/6 + A1/4) / ((A0 + M + A1)/3), "
+     "A0 = 1600, A1 = 100 pi. (Pairing the side with the arc by its angle instead gives M = 720.2, V 0.13%% more; by the arc's weights 727.1, 0.39%% more.) "
+     "Faces: the two caps and four ruled sides; edges 4 + 4 + the four rulings from the corners; vertices 4 + 4; on the axis by the four-fold symmetry" % Msq)
+FIT = [[20, 0], [10, 17], [-10, 17], [-20, 0], [-10, -17], [10, -17]]
+spans = cyclic_spline(FIT)
+Afit = sum(quad(lambda s: 0.5 * (f(s)[0][0] * f(s)[1][1] - f(s)[1][0] * f(s)[0][1]), 0, hh, 16) for hh, f in spans)
+Lfit = sum(quad_split(lambda s: math.hypot(f(s)[0][1], f(s)[1][1]), 0, hh, 20, 16) for hh, f in spans)
+hh1, f1 = spans[1]  # the span (10, 17) -> (-10, 17): y' = 0 at its middle by symmetry
+Yfit = f1(hh1 / 2)[1][0]
+assert abs(f1(hh1 / 2)[1][1]) < 1e-12
 case(T4, "009-extrude-periodic-fit-spline", "a closed periodic fit-point spline through 6 points, extruded 10",
      sketch("XY", C("sketch.spline.fit_point", points=[[20, 0], [10, 17], [-10, 17], [-20, 0], [-10, -17], [10, -17]], periodic=True)) + [C("solid.extrude", distance=10)],
-     {"body_count": 1},
-     "the fit's parametrisation is the spline's own: no closed-form area, and how many side faces a periodic spline makes is the kernel's own; one valid body", source="invariants")
+     {"body_count": 1, "tolerance": {"rel": 1e-5}, "volume_mm3": 10 * Afit, "area_mm2": 2 * Afit + 10 * Lfit, "center_of_mass": [0, 0, 5], "faces": 8, "edges": 18, "vertices": 12,
+      "bbox": {"min": [-20, -Yfit, 0], "max": [20, Yfit, 10]}},
+     "a periodic fit spline is the cyclic C2 cubic through its points with chord-length knots (crates/sketch/src/periodic.rs); A = 1/2 loop int (x y' - y x') over its six spans "
+     "(Gauss, exact on the polynomials) = %.9f, its length L by Gauss = %.9f; V = 10 A, area 2 A + 10 L. Faces: one side face per span + the caps; edges 6 + 6 + 6 vertical; "
+     "vertices 12. The points are symmetric about both axes, so the curve is: x reaches 20 at (+-20, 0) (vertical tangent there), y reaches %.9f between (10, 17) and (-10, 17); "
+     "centre of mass (0, 0, 5)" % (Afit, Lfit, Yfit))
 Pw = [[40, 22], [37, 34], [23, 34], [20, 22]]
 Awin = bez_area_under(Pw, 22)
 case(T4, "010-part-bezier-window", "the running part: a Bezier-arched window cut through the back wall",
@@ -334,16 +369,141 @@ case(T4, "010-part-bezier-window", "the running part: a Bezier-arched window cut
      "the arch over z=22 from x=20 to 40 rises to z = 22 + 0.75*12 = 31, under the wall top (35): removed 10 * %.9f; + window floor and arch faces" % Awin, base=C3)
 C4 = up(T4, "010-part-bezier-window")
 V4 = V3 - 10 * Awin
+# 011: every outline of the reporter's script has its 48 vertices on the rays k 7.5 deg.
+secs = {}
+for c in PLEATED_SKINS:
+    if c["command"] == "sketch.create":
+        name, z = c["params"]["name"], float(c["params"]["offset"])
+    if c["command"] == "sketch.line":
+        pts = c["params"]["points"]
+        for k, p in enumerate(pts):
+            ang = math.atan2(p[1], p[0]) % (2 * PI)
+            assert abs(ang - k * PI / 24) < 1e-4 or abs(ang - k * PI / 24 + 2 * PI) < 1e-4, (name, k, ang)
+        secs[name] = (z, [math.hypot(*p) for p in pts])
+NP, AL = 48, PI / 24
+def loft(lo, hi):
+    (z0, r0), (z1, r1) = secs[lo], secs[hi]
+    return lambda z: [a + (b - a) * (z - z0) / (z1 - z0) for a, b in zip(r0, r1)]
+co, ci, lo_, li = loft("ConeLo", "ConeHi"), loft("ConeInLo", "ConeInHi"), loft("LipLo", "LipHi"), loft("LipInLo", "LipInHi")
+def star_area(r):
+    return 0.5 * math.sin(AL) * sum(r[k] * r[(k + 1) % NP] for k in range(NP))
+def simpson(f, a, b):
+    return (b - a) / 6 * (f(a) + 4 * f((a + b) / 2) + f(b))
+Vc = simpson(lambda z: star_area(co(z)) - star_area(ci(z)), -1, 88.3)
+Vl = simpson(lambda z: star_area(lo_(z)) - star_area(li(z)), -1, 6)
+for z in [-1 + 0.01 * i for i in range(731)]:
+    assert all(a < b for a, b in zip(ci(z), co(z))) and all(a < b for a, b in zip(li(z), lo_(z)))
+def inv(ra, rb):  # 1/r(phi) = A sin(phi) + B sin(AL - phi), with r(0) = ra, r(AL) = rb
+    return (1 / (rb * math.sin(AL)), 1 / (ra * math.sin(AL)))
+def rad(L, ph):
+    return 1 / (L[0] * math.sin(ph) + L[1] * math.sin(AL - ph))
+def tri(L, a, b):
+    return 0.5 * rad(L, a) * rad(L, b) * math.sin(b - a)
+def overlap_area(z):
+    R = [co(z), ci(z), lo_(z), li(z)]
+    tot = 0.0
+    for k in range(NP):
+        Ls = [inv(r[k], r[(k + 1) % NP]) for r in R]
+        cuts = [0.0, AL]
+        for i in range(4):
+            for j in range(i + 1, 4):
+                dA, dB = Ls[i][0] - Ls[j][0], Ls[i][1] - Ls[j][1]
+                # dA sin(ph) + dB sin(AL - ph) = 0
+                den = dA - dB * math.cos(AL)
+                ph = math.atan2(-dB * math.sin(AL), den) % PI
+                if 0 < ph < AL:
+                    cuts.append(ph)
+        cuts.sort()
+        for a, b in zip(cuts, cuts[1:]):
+            m = (a + b) / 2
+            out = min((0, 2), key=lambda i: rad(Ls[i], m))
+            inn = max((1, 3), key=lambda i: rad(Ls[i], m))
+            if rad(Ls[out], m) > rad(Ls[inn], m):
+                tot += tri(Ls[out], a, b) - tri(Ls[inn], a, b)
+    return tot
+Vov = sum(quad(overlap_area, -1 + 7 * i / 400, -1 + 7 * (i + 1) / 400, 8) for i in range(400))
 case(T4, "011-crossing-pleated-loft-skins-joined",
      "a join of two pleated skins (lofts between 24-pleat star outlines, less the same loft moved in 1.1 mm) that cross along a ring near their bottoms: "
      "truck panicked ('tolerance must be no less than 1e-6') or gave no result",
-     PLEATED_SKINS, {"body_count": 1},
-     "the narrowing cone skin and the flaring lip skin cross at z = -0.3, so their union is one connected solid: one valid closed body, no panic. The reporter's own script (pleated_union.py, 24 pleats)",
-     source="invariants", sources=["tangency-labs/solidcraft#4623", "tangency-labs/solidcraft#4180", "tangency-labs/solidcraft#4881"])
+     PLEATED_SKINS, {"body_count": 1, "volume_mm3": Vc + Vl - Vov, "faces": 388, "bbox": {"min": [-120, -120, -1], "max": [120, 120, 88.3]}, "tolerance": {"rel": 1e-5}},
+     "the reporter's own script (pleated_union.py, 24 pleats). Every outline has its 48 vertices on the rays k 7.5 deg, so each ruled loft's section at height z is the star polygon "
+     "with the radii interpolated linearly along those rays (its faces are bilinear between straight edges), of area 1/2 sin7.5 sum r_k r_k+1, quadratic in z (Simpson exact). "
+     "Each skin is its loft less the inner loft, which lies inside it on every ray over the skin's height and runs a mm past both ends: cone skin %.6f, lip skin %.6f. "
+     "They cross between z = -0.88 and 0.28; their common part, per wedge between two rays the region between the larger inner and the smaller outer straight edge "
+     "(cut where edges cross, exact triangles), integrated over z by Gauss: %.6f. V = cone + lip - common. Faces: the four sets of 48 sides each cut in two by the crossing, + the "
+     "four end annuli (the two bottoms at z = -1 apart: r 114.69..115.79 and 113.35..114.44). Bbox: the lip's top outline reaches r 120 on the axes, the cone runs z -1..88.3"
+     % (Vc, Vl, Vov),
+     source="analytic", sources=["tangency-labs/solidcraft#4623", "tangency-labs/solidcraft#4180", "tangency-labs/solidcraft#4881"])
+# 012: the union's length along y at each (x, z), integrated over x and z (Gauss on panels split at the pieces' bounds).
+# rib outline in (y, z): corners rounded r1.5; pieces: ('l', p, q) or ('a', centre)
+RIB = [((18.0, 37.5), (19.5, 36.0), (19.5, 37.5)), ((19.5, 36.0), (24.4516191451179, 36.0), None),
+       ((24.4516191451179, 36.0), (25.20742568340403, 38.79566835134765), (24.4516191451179, 37.5)),
+       ((25.20742568340403, 38.79566835134765), (20.25580653828613, 41.68411285266642), None),
+       ((20.25580653828613, 41.68411285266642), (18.0, 40.38844450131877), (19.5, 40.38844450131877)), ((18.0, 40.38844450131877), (18.0, 37.5), None)]
+def rib_span(z):
+    ys = []
+    for p, q, c in RIB:
+        if c is None:
+            if (p[1] - z) * (q[1] - z) <= 0 and p[1] != q[1]:
+                ys.append(p[0] + (q[0] - p[0]) * (z - p[1]) / (q[1] - p[1]))
+            elif p[1] == q[1] == z:
+                ys += [p[0], q[0]]
+        else:
+            r = math.dist(p, c); dz = z - c[1]
+            if abs(dz) <= r:
+                for s in (-1, 1):
+                    y = c[0] + s * math.sqrt(r * r - dz * dz)
+                    # on the arc: within the angular range between p and q (quarter-ish arcs, < 180 deg)
+                    a0, a1, a = (math.atan2(v[1] - c[1], v[0] - c[0]) for v in (p, q, (y, z)))
+                    span = (a1 - a0) % (2 * PI); off = (a - a0) % (2 * PI)
+                    if span > PI: span, off = 2 * PI - span, (a0 - a) % (2 * PI)
+                    if off <= span + 1e-12:
+                        ys.append(y)
+    return (min(ys), max(ys)) if ys else None
+def body(x, z):
+    if z < 21: a, b = 18, 18
+    elif z < 38: s = (z - 21) / 17; a, b = 18 + 12 * s, 18 + 2 * s
+    else: a, b = 30, 20
+    return b * math.sqrt(1 - x * x / (a * a)) if abs(x) < a else None
+def in_pad(x, z):
+    if abs(x) > 8 or z < 36 or z > 59: return False
+    cx, cz = min(max(abs(x), 0), 5), min(max(z, 39), 56)
+    return math.hypot(abs(x) - cx, z - cz) <= 3 if (abs(x) > 5 and (z < 39 or z > 56)) else True
+def length(x, z):
+    iv = []
+    yb = body(x, z)
+    if yb is not None: iv.append((-yb, yb))
+    if abs(x) <= 5 and abs(z - 47) < 12:
+        h = math.sqrt(144 - (z - 47) ** 2); iv.append((30 - h, 30 + h))
+    if 4 <= abs(x) <= 8:
+        s = rib_span(z)
+        if s: iv.append(s)
+    if in_pad(x, z): iv.append((18, 25))
+    iv.sort(); tot, cur = 0.0, None
+    for a, b in iv:
+        if cur is None or a > cur[1]:
+            if cur: tot += cur[1] - cur[0]
+            cur = [a, b]
+        else: cur[1] = max(cur[1], b)
+    return tot + (cur[1] - cur[0] if cur else 0)
+XB = [0, 4, 5, 8, 18, 30]; ZB = [0, 21, 35, 36, 36.0 + 1e-9, 38, 39, 41.68411285266642, 56, 59, 64]
+def vol(nx, nz):
+    tot = 0.0
+    for x0, x1 in zip(XB, XB[1:]):
+        for z0, z1 in zip(ZB, ZB[1:]):
+            # body edge x = a(z) is curved for 21 < z < 38 beyond x 18: split x finely there
+            fx = lambda x: sum(quad(lambda z: length(x, z), z0 + (z1 - z0) * j / nz, z0 + (z1 - z0) * (j + 1) / nz, 6) for j in range(nz))
+            tot += sum(quad(fx, x0 + (x1 - x0) * i / nx, x0 + (x1 - x0) * (i + 1) / nx, 6) for i in range(nx))
+    return 2 * tot
+Vcap = vol(48, 48)
 case(T4, "012-loft-ribs-joined-to-a-rounded-pad", "the same without the top flange: the join fails with 'boolean Union: no result'",
-     LOFT_RIBS_PAD, {"body_count": 1},
-     "the pad (X -8..8, Y 18..25, Z 36..59) overlaps the body, ribs and ring, so the join is one connected solid; the join must succeed with one valid closed solid and no panic",
-     source="invariants", sources=["tangency-labs/solidcraft#4092"])
+     LOFT_RIBS_PAD, {"body_count": 1, "volume_mm3": Vcap, "bbox": {"min": [-30, -20, 0], "max": [30, 42, 64]}, "tolerance": {"rel": 1e-4}},
+     "the pad (X -8..8, Y 18..25, Z 36..59) overlaps the body, ribs and ring, so the join is one connected solid. Pieces, each an interval in y at given (x, z): the neck r18 (z 0..21); "
+     "the ruled loft from the circle r18 to the ellipse 30 x 20 (an affine image of the circle, so each section is the ellipse of semi-axes 18 + 12 s, 18 + 2 s, s = (z-21)/17); "
+     "the chamber (ellipse 30 x 20, z 38..64); the ring (disc r12 about y 30, z 47, x -5..5); the two ribs (x -8..-4 and 4..8; their outline of three lines and three r1.5 corner arcs is convex); "
+     "the pad (y 18..25, x -8..8, z 36..59, r3 corners). V = 2 int_0^30 int_0^64 |union of the intervals| dz dx (Gauss on panels split at x 4, 5, 8, 18 and the z bounds; "
+     "it converges to 1e-6) = %.6f. Bbox: the chamber's ellipse (x +-30, y -20), the ring's top y 42, z 0..64" % Vcap,
+     source="analytic", sources=["tangency-labs/solidcraft#4092"])
 
 # ---------------------------------------------------------------- 05 holes and taps
 def H(**p):
