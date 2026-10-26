@@ -91,7 +91,7 @@ fn representative(h: &Harness, command: &str) -> Dialog {
         } else if input.accept & PLANES != 0 {
             vec![Sel::Plane { name: if index == 1 { "XZ" } else { "XY" }.into() }]
         } else if input.accept & crate::selection::SKETCH_LINES != 0 {
-            vec![Sel::ExternalSketchCurve { sketch: s.world_state().sketches.last().unwrap().feature, id: path.clone() }]
+            vec![Sel::ExternalSketchCurve { sketch: crate::open_meshing::session_world(s).sketches.last().unwrap().feature, id: path.clone() }]
         } else if input.accept & CURVES != 0 || command == "sheet.fold" && index == 0 {
             vec![Sel::SketchCurve { id: path.clone(), sketch: None }]
         } else if input.accept & AXES != 0 {
@@ -286,7 +286,7 @@ fn mirror_object_type_switch_back_restores_preselected_feature() {
     for (command, params) in commands {
         h.app.run(&command, params).unwrap();
     }
-    assert_eq!(h.app.session.world_state().bodies.len(), 2);
+    assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.len(), 2);
 }
 
 #[test]
@@ -573,12 +573,12 @@ fn view_corner_ok_and_cancel_answer_the_dialog_like_its_own_buttons() {
         h.settle();
         assert_eq!(scenario::count_of("view:confirm:ok:enabled"), scenario::count_of("dialog:ok:enabled"));
         assert_eq!(scenario::count_of("view:confirm:ok:enabled"), Some(1.0));
-        let (design, bodies) = (h.app.session.doc.to_json(), h.app.session.world_state().bodies.len());
+        let (design, bodies) = (h.app.session.doc.to_json(), crate::open_meshing::session_world(&h.app.session).bodies.len());
         h.step(&json!({"click":{"handle":format!("view:confirm:{how}")}})).unwrap();
         h.settle();
         assert!(h.app.dialog.is_none(), "{how}: the dialog closes");
         if how == "ok" {
-            assert_eq!(h.app.session.world_state().bodies.len(), bodies + 1, "the check made the revolve");
+            assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.len(), bodies + 1, "the check made the revolve");
         } else {
             assert_eq!(h.app.session.doc.to_json(), design, "the cross leaves the design as it was");
         }
@@ -714,7 +714,7 @@ fn face_editor_refills_named_faces_after_sketch_resize() {
 fn draft_uses_the_picked_solid_beside_a_hidden_overlapping_mesh() {
     use solidcraft_engine::doc::{Document, MeshData, naming};
 
-    let mesh = solidcraft_engine::kernel::box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 10.0)).unwrap().tessellate(0.01).unwrap();
+    let mesh = solidcraft_engine::kernel::box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 10.0)).unwrap().mesh(&solidcraft_engine::kernel::MeshTolerance::chord(0.01)).unwrap();
     let mut doc = Document::default();
     doc.add_feature(
         FeatureKind::MeshImport {
@@ -733,7 +733,7 @@ fn draft_uses_the_picked_solid_beside_a_hidden_overlapping_mesh() {
     h.app.session = Session::new(doc);
     h.app.run("solid.box", json!({"length":20,"width":20,"height":10})).unwrap();
     h.app.run("browser.visibility", json!({"items":["Hidden mesh"],"visible":false})).unwrap();
-    let state = h.app.session.world_state();
+    let state = crate::open_meshing::session_world(&h.app.session);
     let hidden_mesh = state.body("Hidden mesh").unwrap().mesh();
     let body = state.bodies.iter().find(|body| !body.body.is_mesh()).unwrap();
     let target = body.name.clone();
@@ -821,7 +821,7 @@ fn solid_pattern_quantity_arrows_step_the_count_the_command_receives() {
 fn coil_from_a_profile_hides_the_primitive_section() {
     let h = fixture();
     let mut d = Dialog::for_command(&h.app, "solid.coil").unwrap();
-    let sketch = h.app.session.world_state().sketches[0].feature;
+    let sketch = crate::open_meshing::session_world(&h.app.session).sketches[0].feature;
     d.inputs[0].items = vec![Sel::Profile { sketch, index: 0 }];
     let commands = apply_commands(&h.app, &d).unwrap();
     let (id, p) = &commands[0];
@@ -859,7 +859,7 @@ fn viewport_profile_click_returns_extrude_value_focus() {
     h.step(&json!({"key":"Enter"})).unwrap();
     h.settle();
     assert!(h.app.dialog.is_none());
-    let bounds = h.app.session.world_state().bodies.first().unwrap().mesh().bounds();
+    let bounds = crate::open_meshing::session_world(&h.app.session).bodies.first().unwrap().mesh().bounds();
     assert!((bounds.max.z - bounds.min.z - 30.0).abs() < 1e-7);
 }
 

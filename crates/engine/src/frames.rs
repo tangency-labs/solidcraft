@@ -143,7 +143,7 @@ fn pt(p: Vec3) -> Value {
 }
 
 /// The frame of the body a world point lies on (the nearest), or of the named body.
-fn frame_at(world: &solidcraft_doc::ModelState, f: &Frames, p: Vec3, body: Option<&str>) -> Option<Mat> {
+fn frame_at(s: &Session, world: &solidcraft_doc::ModelState, f: &Frames, p: Vec3, body: Option<&str>) -> Option<Mat> {
     if let Some(b) = body
         && let Some((_, _, m)) = f.bodies(s).iter().find(|(w, _, _)| w == b)
     {
@@ -182,6 +182,8 @@ fn tri_dist(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> f64 {
 }
 
 struct Mapper<'a> {
+    /// The session the body frames are read from (only when a pick needs them).
+    s: &'a Session,
     /// The placed model the picks are on.
     world: &'a solidcraft_doc::ModelState,
     f: Frames,
@@ -195,7 +197,7 @@ struct Mapper<'a> {
 impl Mapper<'_> {
     fn pick(&mut self, v: &Value, body: Option<&str>) -> Option<Value> {
         let p = vec3(v)?;
-        let m = if self.here { self.f.sketch } else { frame_at(self.world, &self.f, p, body).unwrap_or(self.f.active) };
+        let m = if self.here { self.f.sketch } else { frame_at(self.s, self.world, &self.f, p, body).unwrap_or(self.f.active) };
         self.first.get_or_insert(m);
         self.local_point(&m, p)
     }
@@ -382,7 +384,7 @@ fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: 
         // Library targets are the same world selections as appearance.assign,
         // nested one level down. Convert at the outer boundary exactly once;
         // run_nested subsequently receives the component-local picks and names.
-        let targets = to_local(s, "appearance.assign", params.get("targets")?)?;
+        let targets = map_local(s, world, "appearance.assign", params.get("targets")?)?;
         let mut out = params.clone();
         out["targets"] = targets;
         return Some(out);
@@ -473,7 +475,7 @@ fn map_local(s: &Session, world: &solidcraft_doc::ModelState, id: &str, params: 
         obj.insert("origin".into(), serde_json::json!([0.0, 0.0, 0.0]));
     }
     let obj = &obj;
-    let mut m = Mapper { world, f: command_frames, first, changed: false, here: false };
+    let mut m = Mapper { s, world, f: command_frames, first, changed: false, here: false };
     let body = obj.get("body").or_else(|| obj.get("face_body")).and_then(Value::as_str).map(str::to_string);
     let mut out: Map<String, Value> = obj.clone();
     // Picks first: their frame turns the directions.

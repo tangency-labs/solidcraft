@@ -222,19 +222,19 @@ fn colored_components_override_appearances_and_restore_them() {
     }
     s.selection.clear();
     let cam = Camera::default();
-    let original = scene(&s, &cam);
+    let original = scene(&s, &cam).unwrap();
     s.execute("inspect.colored_components", &json!({"enabled": true})).unwrap();
     s.colored_components = Some(());
-    let colored = scene(&s, &cam);
+    let colored = scene(&s, &cam).unwrap();
     assert_eq!(colored.meshes.len(), 2);
     assert_ne!(colored.meshes[0].color, colored.meshes[1].color);
-    for (body, mesh) in s.world_state().bodies.iter().zip(&colored.meshes) {
+    for (body, mesh) in s.world_state().unwrap().bodies.iter().zip(&colored.meshes) {
         let [r, g, b] = component_color(&s, body.component).unwrap();
         assert_eq!(mesh.color, Rgb(r, g, b));
         assert!(mesh.face_colors.is_empty());
     }
     s.execute("inspect.colored_components", &json!({"enabled": false})).unwrap();
-    let restored = scene(&s, &cam);
+    let restored = scene(&s, &cam).unwrap();
     for (a, b) in original.meshes.iter().zip(restored.meshes) {
         assert_eq!(a.color, b.color);
         assert_eq!(a.face_colors, b.face_colors);
@@ -260,7 +260,7 @@ fn cycling_component_color_is_saved_undoable_and_shared_by_instances() {
     assert_eq!(s.doc.appearances, appearances);
     let loaded = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
     assert_eq!(loaded.doc.component_identification_color(component), custom);
-    let copies: Vec<_> = s.world_state().bodies.iter().map(|b| b.component).collect();
+    let copies: Vec<_> = s.world_state().unwrap().bodies.iter().map(|b| b.component).collect();
     assert_eq!(copies, [component, component]);
     s.execute("edit.undo", &json!({})).unwrap();
     assert_eq!(component_color(&s, component), Some(automatic));

@@ -93,7 +93,10 @@ fn turn_to(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     let view = standard_view(cmd).ok_or_else(|| bad(cmd, "not a standard view"))?;
     let mut cam: Camera = match p.get("camera") {
         Some(value) => serde_json::from_value(value.clone()).map_err(|_| bad(cmd, "invalid camera"))?,
-        None => s.camera.unwrap_or_else(|| crate::view::home_camera(s)),
+        None => match s.camera {
+            Some(c) => c,
+            None => crate::view::home_camera(s)?,
+        },
     };
     if !cam.is_valid() || !cam.fov.is_finite() || !(0.0..std::f64::consts::PI).contains(&cam.fov) {
         return Err(bad(cmd, "invalid camera"));
@@ -104,7 +107,7 @@ fn turn_to(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
 }
 
 fn normal_target(s: &Session) -> Option<(solidcraft_geom::Vec3, solidcraft_geom::Vec3)> {
-    let state = s.world_state();
+    let state = s.world_state().ok()?;
     s.selection.iter().find_map(|selection| match selection {
         Sel::Face { body, index, point } if point.is_finite() => {
             let plane = state.body(body)?.body.planar_face(*index)?;
@@ -120,7 +123,10 @@ fn normal_to(s: &mut Session, p: &Value) -> Result<Value> {
     let (point, normal) = normal_target(s).ok_or_else(|| bad(cmd, "select a planar face or plane"))?;
     let cam: Camera = match p.get("camera") {
         Some(value) => serde_json::from_value(value.clone()).map_err(|_| bad(cmd, "invalid camera"))?,
-        None => s.camera.unwrap_or_else(|| crate::view::home_camera(s)),
+        None => match s.camera {
+            Some(c) => c,
+            None => crate::view::home_camera(s)?,
+        },
     };
     if !cam.is_valid()
         || !cam.fov.is_finite()
@@ -435,7 +441,7 @@ mod tests {
     fn normal_to_selection_faces_each_planar_surface_without_editing_the_design() {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length":40,"width":30,"height":20})).unwrap();
-        let state = s.world_state();
+        let state = s.world_state().unwrap();
         let body = state.bodies.first().unwrap();
         let faces = body.body.faces(0.01).unwrap();
         let document = s.doc.to_json();
@@ -490,7 +496,7 @@ mod tests {
     fn normal_to_selection_rejects_curved_missing_and_invalid_inputs() {
         let mut s = Session::default();
         s.execute("solid.cylinder", &json!({"diameter":20,"height":30})).unwrap();
-        let state = s.world_state();
+        let state = s.world_state().unwrap();
         let body = state.bodies.first().unwrap();
         let faces = body.body.faces(0.1).unwrap();
         let flat = faces.iter().find(|f| f.plane_normal.is_some()).unwrap();
@@ -521,7 +527,7 @@ mod tests {
         s.execute("component.create", &json!({"name":"Part","grounded":false})).unwrap();
         s.execute("solid.box", &json!({"length":40,"width":30,"height":20})).unwrap();
         s.execute("occurrence.move", &json!({"occurrence":"Part:1","translate":[50,20,10],"axis":[1,2,3],"angle":"37 deg"})).unwrap();
-        let state = s.world_state();
+        let state = s.world_state().unwrap();
         let body = state.bodies.first().unwrap();
         let faces = body.body.faces(0.01).unwrap();
         let cam = Camera { roll: 1.4, ..Default::default() };

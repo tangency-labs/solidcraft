@@ -448,7 +448,7 @@ fn a_control_import_passes_its_matrix_and_name_on() {
     assert_eq!(reply["ok"], true, "{reply}");
     let mut sync = Session::default();
     assert_eq!(reply["result"], sync.execute("file.insert_step", &params).unwrap(), "the window's reply is the session's");
-    let b = solidcraft_engine::view::bounds(&w.app.session);
+    let b = solidcraft_engine::view::bounds(&w.app.session).unwrap();
     assert!((b.min.x - 100.0).abs() < 1e-6 && (b.max.x - 160.0).abs() < 1e-6, "moved by the matrix: {b:?}");
     assert!(w.app.session.doc.components.iter().any(|c| c.name == "Bracket"), "named as asked");
     let _ = std::fs::remove_dir_all(&dir);

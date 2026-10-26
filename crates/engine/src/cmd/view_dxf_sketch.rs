@@ -31,7 +31,7 @@ fn has_profile(sk: &Sketch) -> bool {
 /// Does the current view have anything `file.export_view_dxf` draws: a visible body or a shown
 /// sketch with a profile curve? The export dialog asks this before choosing a file.
 pub fn exportable(s: &Session) -> bool {
-    let world = s.world_state();
+    let Ok(world) = s.world_state() else { return false };
     world.bodies.iter().any(|b| s.body_visible(&b.name)) || world.sketches.iter().any(|ss| sketch_shown(s, ss.feature) && has_profile(&ss.sketch))
 }
 
@@ -51,7 +51,7 @@ fn curve_parts(sk: &Sketch, i: usize, plane: &Plane, tolerance: f64) -> Vec<Vec<
 
 /// The shown sketches' profile curves, sampled at the export's chord `tolerance`.
 pub(super) fn parts(s: &Session, tolerance: f64) -> Result<Vec<Part>, &'static str> {
-    let world = s.world_state();
+    let world = s.world_state().map_err(|_| "the model cannot be placed")?;
     let shown: Vec<_> = world.sketches.iter().filter(|ss| sketch_shown(s, ss.feature)).collect();
     let progress = Stage::new("dxf_projection", shown.len());
     let mut result = Vec::new();

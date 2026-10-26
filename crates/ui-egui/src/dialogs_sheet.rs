@@ -539,7 +539,7 @@ fn rule_value(app: &SolveApp, rule: usize) -> Option<String> {
 fn path_chain(app: &SolveApp, inputs: &mut [SelInput]) {
     let edge = inputs.first().and_then(|i| i.items.edge_points().first().copied());
     let Some(input) = inputs.get_mut(1) else { return };
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     // The path is in the sketch its picks name (#3726).
     let Some(ss) = crate::dialogs::picks_sketch(app, &input.items, None).and_then(|k| st.sketch(k)) else { return };
     let mut ids: Vec<String> = Vec::new();
@@ -577,7 +577,7 @@ fn path_chain(app: &SolveApp, inputs: &mut [SelInput]) {
 
 /// The lengths of the path's lines, in the order picked (mm).
 fn path_lengths(app: &SolveApp, inputs: &[SelInput]) -> Vec<f64> {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let picks = items(inputs, 1);
     let Some(ss) = crate::dialogs::picks_sketch(app, picks, None).and_then(|k| st.sketch(k)) else { return Vec::new() };
     picks
@@ -1175,7 +1175,7 @@ impl Default for FlatView {
 
 impl FlatView {
     fn cache_perforations(&mut self, session: &solidcraft_engine::Session, body: &str) {
-        let state = session.world_state();
+        let state = crate::open_meshing::session_world(session);
         let state_key = std::sync::Arc::downgrade(&state);
         if self.perforation_key.as_ref().is_some_and(|(cached, name)| cached.ptr_eq(&state_key) && name == body) {
             return;

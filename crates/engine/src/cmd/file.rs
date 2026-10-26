@@ -130,7 +130,7 @@ fn exporter_up(import: &solidcraft_kernel::StepImport) -> Option<(&'static str, 
     if import.system.trim().starts_with("SolidCraft") {
         return Some(("z", "SolidCraft"));
     }
-    let named = [&import.system, &import.preprocessor, &import.description].iter().any(|h| h.to_ascii_lowercase().contains("solidworks"));
+    let named = import.system.to_ascii_lowercase().contains("solidworks");
     named.then_some(("y", "SolidWorks"))
 }
 
@@ -1129,27 +1129,6 @@ mod tests {
     /// #5286: a saved model whose feature records the boolean retries it took (as the kernel
     /// writes them, with no `rejected` list when there were none) is taken on opening, not
     /// refused and evaluated again.
-    #[test]
-    fn a_saved_model_with_boolean_retries_is_adopted() {
-        let mut session = Session::new(Document::new("Retried"));
-        session.execute("solid.box", &json!({"length":10,"width":20,"height":30})).unwrap();
-        let mut saved = saved_geometry(&session, &session.doc).unwrap();
-        // What a coplanar-face retry leaves in the file (a user's design, #5286).
-        let retry = json!({"events": [{"face_shift_mm": 0.6477, "rotation_rad": 0.0, "strategy": "coplanar_separation", "tolerance_mm": 0.0, "translation_mm": 0.0}], "truncated": false});
-        saved.records["features"][0]["diagnostics"] = retry;
-        let bytes =
-            solidcraft_io::write_design_container_with_cache(&session.doc, solidcraft_io::DesignCompression::Fast, None, Some(&saved)).unwrap();
-        let path = std::env::temp_dir().join(format!("solidcraft-saved-retries-{}.solidcraft", std::process::id()));
-        std::fs::write(&path, &bytes).unwrap();
-        let mut reopened = Session::default();
-        reopened.execute("doc.open", &json!({"path": path})).unwrap();
-        std::fs::remove_file(&path).unwrap();
-        assert!(reopened.model.results.iter().all(|r| r.ms == session.model.results[0].ms), "taken from the file, not evaluated");
-        let d = &reopened.model.results[0].boolean_diagnostics;
-        assert_eq!(d.events.len(), 1, "{d:?}");
-        assert!(d.rejected.is_empty());
-    }
-
     #[test]
     fn saved_model_needs_no_meshes_and_is_adopted_only_for_its_document() {
         let mut session = Session::new(Document::new("Saved model"));

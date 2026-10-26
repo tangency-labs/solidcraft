@@ -1434,17 +1434,17 @@ fn extrude_auto_operation_counts_from_the_start() {
     run(&mut s, "sketch.rectangle.two_point", json!({"p0": [5, 5], "p1": [15, 15]}));
     run(&mut s, "sketch.finish", json!({}));
     let down = json!({"profiles": [{"point": [10, 10]}], "distance": -5});
-    assert_eq!(auto_operation(&s, &down), Some("cut"));
+    assert_eq!(auto_operation(&s, &down).unwrap(), Some("cut"));
     let mut from = down.clone();
     from["from"] = json!([20, 15, 0]);
-    assert_eq!(auto_operation(&s, &from), Some("join"));
+    assert_eq!(auto_operation(&s, &from).unwrap(), Some("join"));
     let mut offset = down.clone();
     offset["start_offset"] = json!("-15 mm");
-    assert_eq!(auto_operation(&s, &offset), Some("join"));
+    assert_eq!(auto_operation(&s, &offset).unwrap(), Some("join"));
     // Up from the bottom face into the plate it cuts again.
     let mut up = from.clone();
     up["distance"] = json!(5);
-    assert_eq!(auto_operation(&s, &up), Some("cut"));
+    assert_eq!(auto_operation(&s, &up).unwrap(), Some("cut"));
 }
 
 /// #1666: a loft between two 18-point polylines has twisted (bilinear) side faces. Each was
@@ -3565,7 +3565,7 @@ fn default_extrude_profiles_keep_even_depth_islands_and_separate_outlines() {
 
 /// The face of `body` whose normal points along +x, as a plane pick.
 fn side_face_pick(s: &Session, body: &str) -> Value {
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let b = world.body(body).unwrap();
     let face = b
         .body
@@ -3592,7 +3592,7 @@ fn extruding_a_sketch_on_a_side_face_takes_the_whole_drawn_profile() {
         run(&mut s2, "solid.extrude", json!({"sketch": id, "distance": 5, "operation": "new", "body_name": "Rib", "profiles": selection.clone()}));
         let state = s2.model.state();
         let rib = state.bodies.iter().find(|b| b.name == "Rib").unwrap();
-        let v = rib.body.tessellate(1e-2).unwrap().measure().volume;
+        let v = rib.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-2)).unwrap().measure().volume;
         assert!(rel(v, 500.0) < 1e-6, "{selection}: {v}");
     }
 }
@@ -3614,7 +3614,7 @@ fn a_pick_bounded_by_a_projected_rim_takes_only_that_region() {
     run(&mut s2, "solid.extrude", json!({"sketch": id, "distance": 5, "operation": "new", "body_name": "Pad", "profiles": [{"point": [12, 7]}]}));
     let state = s2.model.state();
     let pad = state.bodies.iter().find(|b| b.name == "Pad").unwrap();
-    let v = pad.body.tessellate(1e-2).unwrap().measure().volume;
+    let v = pad.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-2)).unwrap().measure().volume;
     // The square with the hole's rim cut out of it, not the whole square. The mesh measures the
     // round rim as a polygon, so the volume is a little under the analytic one.
     let want = (400.0 - PI * 25.0) * 5.0;
@@ -4472,7 +4472,7 @@ fn parallel_pipe_large_nominals_support_shallow_and_thin_cylindrical_holes() {
             assert!(result.is_ok(), "{designation}, height={height}, depth={depth:?}: {result:?}");
             let reopened = crate::Session::new(crate::doc::Document::from_json(&s.doc.to_json()).unwrap());
             assert!(reopened.model.results.iter().all(|r| r.error.is_none()));
-            let state = reopened.world_state();
+            let state = reopened.world_state().unwrap();
             assert_eq!(state.threads.len(), 1);
             assert_eq!(state.threads[0].designation, designation);
             assert!((state.threads[0].end - state.threads[0].start - depth.unwrap_or(height)).abs() < 1e-6);

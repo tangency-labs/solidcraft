@@ -698,7 +698,7 @@ fn rectangular_pattern_expressions_follow_parameters_and_survive_reopening() {
     s.refresh();
     run(&mut s, "parameters.change", json!({"name":"pitch","expression":"40"}));
     run(&mut s, "parameters.change", json!({"name":"copies","expression":"4"}));
-    let state = s.world_state();
+    let state = s.world_state().unwrap();
     let sk = &state.sketch(1).unwrap().sketch;
     assert_eq!(sk.patterns[0].instances.len(), 7);
     assert_eq!(sk.patterns[0].instances[0].curves[0], first);
@@ -706,7 +706,7 @@ fn rectangular_pattern_expressions_follow_parameters_and_survive_reopening() {
     let last = &sk.patterns[0].instances.last().unwrap().curves[0];
     assert!(point(sk, &format!("{last}.center")).dist(Vec2::new(125., 25.)) < 1e-6);
     run(&mut s, "parameters.change", json!({"name":"copies","expression":"2"}));
-    assert_eq!(s.world_state().sketch(1).unwrap().sketch.patterns[0].instances.len(), 3);
+    assert_eq!(s.world_state().unwrap().sketch(1).unwrap().sketch.patterns[0].instances.len(), 3);
     run(&mut s, "parameters.change", json!({"name":"pitch","new_name":"step"}));
     assert_eq!(serde_json::to_value(&s.doc.sketch(1).unwrap().patterns[0]).unwrap()["expressions"]["spacing"], "step");
     assert!(s.execute("parameters.change", &json!({"delete":"step"})).is_err());
@@ -749,7 +749,7 @@ fn circular_pattern_expressions_validate_inputs_and_keep_numeric_compatibility()
     let before = sketch(&s);
     let mut s = Session { doc: reopened.into(), ..Default::default() };
     s.refresh();
-    let state = s.world_state();
+    let state = s.world_state().unwrap();
     let after = &state.sketch(1).unwrap().sketch;
     for (a, b) in before.points.iter().zip(&after.points) {
         assert!(a.id == b.id && a.pos.dist(b.pos) < 1e-9, "{} moved", a.id);

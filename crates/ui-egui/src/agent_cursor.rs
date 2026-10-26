@@ -628,7 +628,7 @@ mod tests {
         assert!(h.app.dialog.is_none(), "programmatic commands do not open interactive tools");
         h.frames(120);
         assert_eq!(rx.try_recv().unwrap()["ok"], true);
-        assert_eq!(h.app.session.world_state().bodies.len(), 1);
+        assert_eq!(crate::open_meshing::session_world(&h.app.session).bodies.len(), 1);
         assert!(!h.app.agent.busy());
         assert!(h.widget("Box").is_none(), "the command label ends with the animation");
     }

@@ -309,7 +309,7 @@ fn a_large_sketch_drawn_first_leaves_a_later_sketch_its_curves() {
     h.app.run("sketch.line", json!({"points":[[-30,-30],[-10,-20]],"ids":["new"]})).unwrap();
     h.settle();
     let proj = projection(&h.app, h.app.viewport.rect.unwrap());
-    let state = h.app.session.world_state();
+    let state = crate::open_meshing::session_world(&h.app.session);
     let drawing = state.sketches.iter().find(|s| s.name == "Drawing").unwrap().clone();
     let after = state.sketches.iter().find(|s| s.name == "After").unwrap().clone();
     drop(state);

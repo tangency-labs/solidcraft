@@ -564,7 +564,7 @@ pub fn scene_with_thread_markings(
     p: &Palette,
     guides: Guides,
     cosmetic_threads: bool,
-) -> Scene {
+) -> crate::Result<Scene> {
     build_scene(s, cam, section, guides, sampler, p, cosmetic_threads)
 }
 
@@ -1087,11 +1087,11 @@ mod tests {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 40, "width": 30, "height": 20})).unwrap();
         s.execute("appearance.assign", &json!({"bodies": ["Body1"], "color": [40, 160, 90]})).unwrap();
-        let cam = home_camera(&s);
+        let cam = home_camera(&s).unwrap();
         let mut picture = |hatch: bool| {
             let plane = json!({"origin": [0, 15, 0], "normal": [0, -1, 0]});
             s.execute("inspect.section", &json!({"plane": plane, "hatch": hatch})).unwrap();
-            solidcraft_render::render(&scene(&s, &cam), &cam, 300, 220).rgba
+            solidcraft_render::render(&scene(&s, &cam).unwrap(), &cam, 300, 220).rgba
         };
         // Pixels in the body's exact colour: only a plain cut has them (lit faces are shaded).
         let solid = |img: &[u8]| img.chunks(4).filter(|p| p[..3] == [40, 160, 90]).count();

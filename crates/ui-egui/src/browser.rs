@@ -36,7 +36,7 @@ pub(crate) fn reveal_body(app: &mut SolveApp, body: &str) {
     app.tree.reveal_feature = None;
     app.tree.reveal = Some(body.to_string());
     let state = app.session.model.state();
-    let Some(source) = app.session.world_state().body(body).map(|selected| selected.definition_name().to_string()) else { return };
+    let Some(source) = crate::open_meshing::session_world(&app.session).body(body).map(|selected| selected.definition_name().to_string()) else { return };
     let Some(component) = state.body(&source).map(|definition| definition.component) else { return };
     // Every component's first placement keeps the definition's name, so the owner must match too.
     let Some((_, path, _)) = app

@@ -158,7 +158,7 @@ pub(crate) fn snap_hits(app: &SolveApp, proj: &Proj, pos: Pos2, hits: &mut Vec<H
     if !snapping(app) || crate::drag_snap::suppressed() {
         return;
     }
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let face = hits.iter().position(|h| matches!(h, Hit::Face { .. }));
     let at_face = face.and_then(|i| match hits.get(i) {
         Some(Hit::Face { body, index, .. }) => {
@@ -192,7 +192,7 @@ pub(crate) fn snap_hits(app: &SolveApp, proj: &Proj, pos: Pos2, hits: &mut Vec<H
 
 /// The snap a face place sits on, if any.
 fn snap_under(app: &SolveApp, body: &str, index: usize, point: Vec3) -> (Arc<Vec<Snap>>, Option<Snap>) {
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let Some(b) = st.body(body) else { return (Arc::new(Vec::new()), None) };
     let snaps = face_snaps(&b.mesh(), index);
     let on = snaps.iter().find(|s| s.at.dist(point) <= 1e-9 * (1.0 + s.at.len())).cloned();

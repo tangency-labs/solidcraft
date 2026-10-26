@@ -109,7 +109,7 @@ fn inside_hull(sorted: &[(f64, f64)], q: (f64, f64)) -> bool {
 /// The outward normal of the planar face at the world point `p`: on the model as the view
 /// places it (moved components where they are shown).
 pub(super) fn face_normal_world(s: &Session, p: Vec3) -> Option<Vec3> {
-    let (m, f, d, _) = face_at_state(&s.world_state(), p, None).ok().flatten()?;
+    let (m, f, d, _) = face_at_state(&*s.world_state().ok()?, p, None).ok().flatten()?;
     let tol = (m.bounds().diagonal() * 1e-3).max(1e-3);
     if d > tol * 10.0 {
         return None;
@@ -149,7 +149,7 @@ pub(super) fn face_ref(s: &Session, v: &Value, body: Option<&str>, cmd: &str) ->
     match face_ref_form(v).map_err(|why| bad(cmd, why))? {
         FaceRefForm::Point(p) => Ok(p),
         FaceRefForm::Name(name) => {
-            let st = if crate::frames::mapped() { s.model.state() } else { s.world_state() };
+            let st = if crate::frames::mapped() { s.model.state() } else { s.world_state()? };
             solidcraft_doc::naming::named_face_point(&st, body, name).map_err(|why| bad(cmd, why))
         }
     }

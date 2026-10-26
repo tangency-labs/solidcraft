@@ -31,11 +31,11 @@ fn the_grid_fades_out_before_its_edge_and_before_the_far_plane() {
 #[test]
 fn the_headless_grid_fades_out_with_the_distance() {
     let s = Session::default();
-    let mut cam = home_camera(&s);
+    let mut cam = home_camera(&s).unwrap();
     // A top view: the ground is the XY plane and the grid is centred on the target.
     cam.pitch = std::f64::consts::FRAC_PI_2;
     cam.target = Vec3::ZERO;
-    let scene = scene(&s, &cam);
+    let scene = scene(&s, &cam).unwrap();
     assert!(!scene.grid.is_empty(), "the grid is drawn");
     // How far each piece of the grid is from the middle of the view, and the alpha it is drawn
     // with.

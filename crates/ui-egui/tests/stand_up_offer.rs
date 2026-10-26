@@ -163,15 +163,15 @@ fn sketched_and_extruded(start: impl FnOnce(&mut Harness)) -> (V3, V3, solidcraf
     }
     assert!((height(&h) - 40.0).abs() < 1e-6, "stood up: {}", height(&h));
     assert_ne!(h.app.session.active_component, 0, "the import's component is the one worked in");
-    let before: Vec<String> = h.app.session.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+    let before: Vec<String> = h.app.session.world_state().unwrap().bodies.iter().map(|b| b.name.clone()).collect();
     start(&mut h);
     h.frames(2);
     let sketch = h.app.session.active_sketch.expect("a sketch is open");
-    let normal = h.app.session.world_state().sketch(sketch).unwrap().plane.normal();
+    let normal = h.app.session.world_state().unwrap().sketch(sketch).unwrap().plane.normal();
     let back = h.app.cam.back();
     h.app.run("sketch.rectangle.two_point", json!({"p0": [200, 0], "p1": [220, 10]})).unwrap();
     h.app.run("solid.extrude", json!({"distance": 15})).unwrap();
-    let world = h.app.session.world_state();
+    let world = h.app.session.world_state().unwrap();
     let made: Vec<_> = world.bodies.iter().filter(|b| !before.contains(&b.name)).collect();
     assert_eq!(made.len(), 1);
     (normal, back, made[0].mesh().bounds())

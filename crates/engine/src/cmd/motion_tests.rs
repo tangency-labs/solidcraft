@@ -107,7 +107,7 @@ fn assert_joint_only_moves(s: &mut Session, joint: &str) {
     use std::sync::Arc;
     let definitions = s.model.state();
     let meshes: Vec<_> = definitions.bodies.iter().map(|b| b.mesh()).collect();
-    for body in &s.world_state().bodies {
+    for body in &s.world_state().unwrap().bodies {
         std::hint::black_box(body.mesh());
         std::hint::black_box(body.display_plan());
     }
@@ -127,7 +127,7 @@ fn assert_joint_only_moves(s: &mut Session, joint: &str) {
         for (b, mesh) in current.bodies.iter().zip(&meshes) {
             assert!(Arc::ptr_eq(&b.mesh(), mesh), "{}: canonical mesh replaced", b.name);
         }
-        let world = s.world_state();
+        let world = s.world_state().unwrap();
         let (_, work) = crate::kernel::profile::capture(|| {
             for b in &world.bodies {
                 let local = definitions.body(b.definition_name()).unwrap().mesh();
@@ -200,7 +200,7 @@ fn joint_pose_second_occurrence_shares_the_definition() {
     let mut s = joined_motion_part(PartAuthoring::InComponent, JoinSelection::Named);
     let second = run(&mut s, "occurrence.copy", json!({"component":"Rotor","translate":[40,0,0]}))["occurrence"].as_u64().unwrap();
     run(&mut s, "joint.as_built", json!({"type":"revolute","name":"Copy turn","a":0,"b":second,"at":{"occurrence":0,"point":[40,0,0],"z":[0,0,1]}}));
-    assert_eq!(s.world_state().bodies.len(), 2);
+    assert_eq!(s.world_state().unwrap().bodies.len(), 2);
     assert_joint_only_moves(&mut s, "Copy turn");
     assert_motion_matches_full_rebuild(&s);
 }

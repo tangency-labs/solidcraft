@@ -1196,7 +1196,7 @@ fn native_cpu_controls_check_and_start_the_same_capture_and_keep_it_exportable()
     let numeric_check = h.app.tr("cmd.render_preflight").to_string();
     h.step(&json!({"widget":numeric_check})).unwrap();
     assert_eq!(h.app.render_workspace.view.cpu.checked.as_ref().unwrap().request, numeric);
-    let reflected = h.app.session.world_state().bodies.first().unwrap().name.clone();
+    let reflected = crate::open_meshing::session_world(&h.app.session).bodies.first().unwrap().name.clone();
     let reflection_section = format!("dialog:section:{}", h.app.tr("render.cpu_reflections"));
     h.step(&json!({"click":{"handle":reflection_section}})).unwrap();
     h.step(&json!({"click":{"handle":"render:cpu-reflection-body"}})).unwrap();

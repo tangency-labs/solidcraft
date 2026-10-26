@@ -7,6 +7,7 @@
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use super::types::{
     AngleExpr, ConventionParam, DirectionParam, ExtentKeyword, ExtrudeOperation, FacesParam, FromPoint, IdOrName, LengthExpr, OperationParam, Point3,

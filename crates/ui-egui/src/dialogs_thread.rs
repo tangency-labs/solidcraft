@@ -6,7 +6,10 @@
 
 use serde_json::{Value, json};
 use solidcraft_engine::doc::thread_forms::{SteepFlank, ThreadForm, ThreadHand, ThreadTip};
-use solidcraft_engine::doc::{Expr, FeatureKind, ThreadHandedness, ThreadLimit, ThreadRunout};
+use solidcraft_engine::doc::{
+    Document, Expr, FeatureKind, TappedThreadFamily, ThreadHandedness, ThreadLimit, ThreadRunout, metric_thread_sizes, parse_metric_thread,
+    parse_tapped_thread, tapped_thread_sizes,
+};
 use solidcraft_engine::{Sel, Session};
 
 use crate::dialogs::{Dialog, Kind, combo, edge_sel, face_sel, form_row, object_point, plane_sel, put, set_object_accepting};
@@ -707,7 +710,7 @@ mod contribution_tests {
         );
         let saved = h.app.session.doc.to_json();
         let reopened = Session::new(Document::from_json(&saved).unwrap());
-        let world = reopened.world_state();
+        let world = crate::open_meshing::session_world(&reopened);
         assert_eq!(world.threads.len(), 1);
         assert_eq!(world.threads[0].designation, "M8.5x1");
         assert!((world.threads[0].pitch - 1.).abs() < 1e-9);
@@ -879,7 +882,7 @@ mod contribution_tests {
             let id = out["feature"].as_u64().unwrap();
             let saved = app.session.doc.to_json();
             let reopened = Session::new(Document::from_json(&saved).unwrap());
-            let world = reopened.world_state();
+            let world = crate::open_meshing::session_world(&reopened);
             let t = &world.threads[0];
             assert_eq!(t.designation, name);
             assert!((t.major_diameter - major).abs() < 1e-9 && (t.pitch - pitch).abs() < 1e-9);
@@ -887,7 +890,7 @@ mod contribution_tests {
             assert!(body.validity().is_empty());
             let face = solidcraft_engine::kernel::cylinder_face_at(body, Vec3::new(10.0 + drill / 2.0, 10.0, 5.0)).unwrap();
             assert!(face.internal && (2.0 * face.radius - drill).abs() < 1e-8);
-            let actual = body.tessellate(0.001).unwrap().measure().volume;
+            let actual = body.mesh(&solidcraft_engine::kernel::MeshTolerance::chord(0.001)).unwrap().measure().volume;
             let expected = 4000.0 - std::f64::consts::PI * (drill / 2.0).powi(2) * 10.0;
             assert!((actual - expected).abs() < 0.5, "{name}: {actual} versus {expected}");
             // A saved explicit drill remains authoritative, including a legacy metric bore.
@@ -895,7 +898,7 @@ mod contribution_tests {
             let solidcraft_engine::doc::FeatureKind::Hole { diameter, .. } = &mut doc.feature_mut(id).unwrap().kind else { panic!("not Hole") };
             *diameter = format!("{} mm", drill + 0.05).as_str().into();
             let reopened = Session::new(Document::from_json(&doc.to_json()).unwrap());
-            let world = reopened.world_state();
+            let world = crate::open_meshing::session_world(&reopened);
             let face = solidcraft_engine::kernel::cylinder_face_at(&world.bodies[0].body, Vec3::new(10.0 + (drill + 0.05) / 2.0, 10.0, 5.0)).unwrap();
             assert!((2.0 * face.radius - drill - 0.05).abs() < 1e-8);
         }
@@ -964,26 +967,19 @@ mod contribution_tests {
 
     #[test]
     fn contribution_metric_designation_rendering_preserves_authored_legacy_and_custom_text() {
+        // The tapped hole's rows; the thread dialog's own tests cover its designations.
         let context = egui::Context::default();
         crate::fonts::setup_bundled_fonts(&context);
         for original in ["M8x1.25", "M8x1", "M33x1", "M5×0.5", " m8x1.25 ", "invalid"] {
             let mut hole = original.to_string();
-            let mut thread = original.to_string();
-            let mut suggested = None;
-            let mut modeled = false;
-            let mut full = true;
             let mut custom = None;
             let doc = Document::default();
             let _ = context.run_ui(Default::default(), |ui| {
                 egui::Grid::new("authored_hole").show(ui, |ui| {
                     hole_rows(ui, &doc, &mut hole, &mut custom);
                 });
-                egui::Grid::new("authored_thread").show(ui, |ui| {
-                    rows(ui, &mut thread, &mut suggested, &mut modeled, &mut full);
-                });
             });
             assert_eq!(hole, original);
-            assert_eq!(thread, original);
         }
     }
 
@@ -1004,7 +1000,7 @@ mod contribution_tests {
             assert!((app.session.doc.eval(diameter, solidcraft_engine::doc::expr::Kind::Length).unwrap() - drill).abs() < 1e-9);
             let saved = app.session.doc.to_json();
             let reopened = Session::new(solidcraft_engine::doc::Document::from_json(&saved).unwrap());
-            let state = reopened.world_state();
+            let state = crate::open_meshing::session_world(&reopened);
             assert_eq!(state.threads.len(), 1);
             assert!((state.threads[0].pitch - pitch).abs() < 1e-9);
         }
@@ -1040,7 +1036,7 @@ mod contribution_tests {
                 let result = app.run("solid.hole", json!({"position":[40,40,15],"thread":size.designation,"depth":10})).unwrap();
                 let saved = app.session.doc.to_json();
                 let reopened = Session::new(Document::from_json(&saved).unwrap());
-                let state = reopened.world_state();
+                let state = crate::open_meshing::session_world(&reopened);
                 assert_eq!(state.threads.len(), 1);
                 let t = &state.threads[0];
                 assert_eq!(t.designation, size.designation);
@@ -1052,7 +1048,7 @@ mod contribution_tests {
                     let c = solidcraft_engine::kernel::cylinder_face_at(body, Vec3::new(40.0 + size.tap_drill / 2.0, 40.0, z)).unwrap();
                     assert!(c.internal && (2.0 * c.radius - size.tap_drill).abs() < 1e-8);
                 }
-                let actual = body.tessellate(0.001).unwrap().measure().volume;
+                let actual = body.mesh(&solidcraft_engine::kernel::MeshTolerance::chord(0.001)).unwrap().measure().volume;
                 let removed = std::f64::consts::PI * (size.tap_drill / 2.0).powi(2) * 10.0;
                 assert!((actual - (96000.0 - removed)).abs() / removed < 0.002, "{}: {actual}", size.designation);
                 assert_eq!(reopened.doc.to_json(), saved);
@@ -1065,7 +1061,7 @@ mod contribution_tests {
                     };
                     *diameter = format!("{} mm", size.tap_drill + 0.03).as_str().into();
                     let reopened = Session::new(Document::from_json(&doc.to_json()).unwrap());
-                    let state = reopened.world_state();
+                    let state = crate::open_meshing::session_world(&reopened);
                     let c = solidcraft_engine::kernel::cylinder_face_at(
                         &state.bodies[0].body,
                         Vec3::new(40.0 + (size.tap_drill + 0.03) / 2.0, 40.0, 10.0),

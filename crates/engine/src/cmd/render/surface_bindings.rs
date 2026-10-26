@@ -79,7 +79,7 @@ pub(super) fn resolve(s: &Session, scene: &ProductScene, bindings: &SurfaceBindi
         return Ok(Vec::new());
     }
     let identities = targets(s, command)?;
-    let world = s.world_state();
+    let world = s.world_state()?;
     let world_by_name: BTreeMap<_, _> = world.bodies.iter().map(|body| (body.name.as_str(), body)).collect();
     let visible: BTreeMap<_, _> = scene.meshes.iter().enumerate().map(|(i, body)| (body.name.as_str(), i)).collect();
     let mut result = Vec::new();
@@ -147,7 +147,7 @@ pub(super) fn bind(s: &mut Session, params: &Value) -> Result<Value> {
     if matches.next().is_some() {
         return Err(bad(command, "surface target is ambiguous"));
     }
-    let world = s.world_state();
+    let world = s.world_state()?;
     let body = world.body(name).ok_or_else(|| bad(command, "surface target disappeared"))?;
     let inverse = solidcraft_doc::mat_inverse(&body.source_transform).ok_or_else(|| bad(command, "surface mapping transform is singular"))?;
     let frame: PlanarFrame = serde_json::from_value(prepared["texture"]["frame"].clone()).map_err(|e| bad(command, e.to_string()))?;

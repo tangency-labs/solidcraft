@@ -141,7 +141,7 @@ fn portable_job_save_is_host_independent_atomic_and_undoable_without_geometry_ch
     assert!(s.render_job_host().is_none());
     let original = s.doc.clone();
     let model = s.model.state();
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let undo = s.undo.len();
     s.evaluations = 0;
     let setup: RenderSetup = serde_json::from_value(json!({
@@ -187,7 +187,7 @@ fn portable_job_save_is_host_independent_atomic_and_undoable_without_geometry_ch
     );
     assert_eq!(s.doc.render.setups["Studio"].exposure_ev, 2.5);
     assert!(Arc::ptr_eq(&model, &s.model.state()));
-    assert!(Arc::ptr_eq(&world, &s.world_state()));
+    assert!(Arc::ptr_eq(&world, &s.world_state().unwrap()));
     assert_eq!(s.evaluations, 0);
 }
 

@@ -1121,7 +1121,7 @@ fn create_sketch_from_empty_space_sketches_on_the_plane_clicked_next() {
     let p = h.at(&json!({"plane": "XY"})).unwrap();
     h.call("ui.click", json!({"x": p[0], "y": p[1]}));
     h.frames(3);
-    let normal = h.app.session.active_sketch.and_then(|s| h.app.session.world_state().sketch(s).map(|s| s.plane.normal()));
+    let normal = h.app.session.active_sketch.and_then(|s| crate::open_meshing::session_world(&h.app.session).sketch(s).map(|s| s.plane.normal()));
     assert!(normal.is_some_and(|n| n.dot(Vec3::Z).abs() > 0.999), "sketching on XY: {normal:?}");
 }
 

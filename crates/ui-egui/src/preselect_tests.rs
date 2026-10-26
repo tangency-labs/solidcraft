@@ -2654,7 +2654,7 @@ fn face_then_revolve_turns_the_face() {
     for (cmd, p) in cmds {
         app.run(&cmd, p).unwrap();
     }
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let made = st.bodies.iter().find(|b| b.name != "Body1").expect("the revolve makes a new body");
     let v = solidcraft_engine::doc::kernel::measure(&made.body).unwrap().volume;
     let want = std::f64::consts::PI * 40.0 * 40.0 * 20.0;
@@ -2685,7 +2685,7 @@ fn a_loft_from_a_profile_to_a_sketch_point_is_a_pyramid() {
     for (cmd, p) in cmds {
         app.run(&cmd, p).unwrap();
     }
-    let st = app.session.world_state();
+    let st = crate::open_meshing::session_world(&app.session);
     let v = solidcraft_engine::doc::kernel::measure(&st.bodies[0].body).unwrap().volume;
     assert!((v - 4000.0).abs() < 4.0, "{v}");
 }
@@ -2707,7 +2707,7 @@ fn a_pipe_cuts_from_its_window_and_keeps_the_cut_when_edited() {
     let cmds = apply_commands(&app, &d).unwrap();
     assert_eq!(cmds[0].1["operation"], "cut", "{:?}", cmds[0].1);
     let volume = |app: &SolveApp| {
-        let st = app.session.world_state();
+        let st = crate::open_meshing::session_world(&app.session);
         assert_eq!(st.bodies.len(), 1, "one body: {:?}", st.bodies.iter().map(|b| &b.name).collect::<Vec<_>>());
         solidcraft_engine::doc::kernel::measure(&st.bodies[0].body).unwrap().volume
     };

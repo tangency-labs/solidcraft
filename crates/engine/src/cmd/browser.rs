@@ -342,7 +342,7 @@ fn visibility(s: &mut Session, p: &Value) -> Result<Value> {
         // Everything at once, for a single "show all" step: every body, sketch, construction
         // item, origin item and joint.
         (Some("all"), None) => {
-            let mut all: Vec<Shown> = s.world_state().bodies.iter().map(|b| Shown::Body(b.name.clone())).collect();
+            let mut all: Vec<Shown> = s.world_state()?.bodies.iter().map(|b| Shown::Body(b.name.clone())).collect();
             all.extend(s.model.state().sketches.iter().map(|x| Shown::Sketch(x.feature)));
             all.extend(s.doc.features.iter().filter(|f| is_construction(&f.kind)).map(|f| Shown::Origin(f.name.clone())));
             all.extend(ORIGIN.iter().map(|o| Shown::Origin(o.to_string())));
@@ -1664,7 +1664,7 @@ mod tests {
         run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Box"}));
         s.mark_saved();
         let cam = solidcraft_render::Camera::default();
-        let drawn = |s: &Session| crate::view::scene(s, &cam).meshes.len();
+        let drawn = |s: &Session| crate::view::scene(s, &cam).unwrap().meshes.len();
         assert!(drawn(&s) > 0, "the box is drawn");
         assert!(!s.is_dirty());
         let steps = s.undo.len();

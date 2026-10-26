@@ -37,7 +37,7 @@ fn frame_lines(app: &SolveApp) -> Vec<String> {
 }
 
 fn body_names(app: &SolveApp) -> Vec<String> {
-    app.session.world_state().bodies.iter().map(|b| b.name.clone()).collect()
+    crate::open_meshing::session_world(&app.session).bodies.iter().map(|b| b.name.clone()).collect()
 }
 
 /// The dialog started with the given lines picked.
@@ -98,7 +98,7 @@ fn a_picked_section_and_the_placement() {
     let ring = sketch_id(&app, "Ring");
     let mut d = dialog_on(&mut app, &lines[..1]);
     // The ring between the circles: the region whose interior point lies between radii 17 and 20.
-    let ss = app.session.world_state().sketch(ring).unwrap().clone();
+    let ss = crate::open_meshing::session_world(&app.session).sketch(ring).unwrap().clone();
     let index = ss.profiles.iter().position(|p| (p.region.interior_point().len() - 18.5).abs() < 1.5).unwrap();
     d.inputs[1].items = vec![Sel::Profile { sketch: ring, index }];
     let m = member(&mut d);

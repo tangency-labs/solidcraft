@@ -2300,7 +2300,7 @@ fn a_rim_clicked_once_is_one_item_not_its_pieces() {
     let (mut app, script, ctx) = app_with_script();
     app.run("solid.cylinder", json!({"radius": 10, "height": 20})).expect("a cylinder");
     let (name, top, bottom, mid_top, mid_bottom) = {
-        let st = app.session.world_state();
+        let st = crate::open_meshing::session_world(&app.session);
         let body = &st.bodies[0];
         let mesh = body.mesh();
         let rim_at = |z: f64| mesh.edges.iter().position(|e| e.len() > 3 && e.iter().all(|p| (p.z - z).abs() < 1e-6)).expect("a rim");

@@ -278,11 +278,11 @@ fn theme_switches_refresh_cached_viewport_colours_without_remeshing() {
     h.app.run("solid.box", json!({"length": 20, "width": 15, "height": 10})).unwrap();
     h.app.viewport.gpu =
         Some(super::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
-    let body = h.app.session.world_state().bodies[0].name.clone();
+    let body = crate::open_meshing::session_world(&h.app.session).bodies[0].name.clone();
     h.app.session.selection = vec![solidcraft_engine::Sel::Body { name: body.clone() }];
     h.frame();
     let revision = h.app.session.revision;
-    let mesh = h.app.session.world_state().bodies[0].cached_mesh().unwrap();
+    let mesh = crate::open_meshing::session_world(&h.app.session).bodies[0].cached_mesh().unwrap();
     let mut previous: Option<(u64, u64, u64)> = None;
     for theme in ["dark", "gruvbox-dark", "blueprint", "dark", "light", "solidcraft-95", "cupertino", "light"] {
         let result = h.call("ui.prefs", json!({"theme": theme}));
@@ -301,7 +301,7 @@ fn theme_switches_refresh_cached_viewport_colours_without_remeshing() {
         let colour = super::c4(crate::theme::Tokens::get().body);
         assert!(vertices.iter().all(|v| vertex_color(&scene, v) == colour), "{theme}: stale body colour");
         assert_eq!(h.app.session.revision, revision, "theme changes must not edit the design");
-        assert!(std::sync::Arc::ptr_eq(&mesh, &h.app.session.world_state().bodies[0].cached_mesh().unwrap()));
+        assert!(std::sync::Arc::ptr_eq(&mesh, &crate::open_meshing::session_world(&h.app.session).bodies[0].cached_mesh().unwrap()));
         h.frame();
         assert_eq!((h.app.viewport.key, h.app.viewport.sketch_key, h.app.viewport.hl_key), keys);
         assert!(h.app.viewport.slot.lock().unwrap().is_none(), "an unchanged theme reuses its scene");

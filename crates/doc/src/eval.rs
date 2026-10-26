@@ -4538,9 +4538,6 @@ fn feature_tools_with_constructor(
                 revolve_axis(&ss, axis, &axis_state(doc, st, f.component, axis), &|name| construction_axis_in(Some(doc), st, name, f.component))?;
             // To Object is in this feature's component frame: the model as seen from there.
             let tst = if to.is_some() { state_in_frame(doc, st, f.component)? } else { std::borrow::Cow::Borrowed(st) };
-            // Where the tool meets its targets is measured where they are shown (#3383).
-            let shown = targets_as_shown(st, f, &feature_op(f).1)?;
-            let st: &ModelState = &shown;
             let angles = if to.is_some() {
                 (0.0, None)
             } else {
@@ -6313,7 +6310,10 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                     } else {
                         parallel_tapped_wall(st, p, dir, r).unwrap_or(p + dir.any_perp() * r + dir * (r * 0.5))
                     };
-                    let mut t = thread_on_impl(st, f.id, wall, Some(d), None, true, false, *handedness)?;
+                    // A tapped hole's screw direction, as the thread's hand.
+                    let hand = if handedness.is_right() { ThreadHand::Right } else { ThreadHand::Left };
+                    let ask = thread::ThreadAsk { designation: Some(d), tapped: true, hand, ..Default::default() };
+                    let mut t = thread_on(st, f.id, wall, &ask)?.info;
                     if let Some(depth) = thread_depth {
                         let available = t.end - t.start;
                         if depth > available {

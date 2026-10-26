@@ -896,5 +896,5 @@ fn circular_quantity_keeps_its_expression_when_reopened_and_follows_parameter_ch
     assert!(crate::sketch_modify_ui::edit_pattern(&mut h.app, out["pattern"].as_str().unwrap()));
     assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::SketchModify(Mod::PatternCirc { count, .. }) if count=="HoleAmount"));
     let sid = h.app.session.active_sketch.unwrap();
-    assert_eq!(h.app.session.world_state().sketch(sid).unwrap().sketch.curves.len(), 7);
+    assert_eq!(crate::open_meshing::session_world(&h.app.session).sketch(sid).unwrap().sketch.curves.len(), 7);
 }

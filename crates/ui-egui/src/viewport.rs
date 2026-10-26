@@ -375,10 +375,11 @@ pub(crate) fn visible_sketches(app: &SolveApp) -> Vec<u64> {
 /// now (see [`solidcraft_engine::view::bounds`]).
 pub fn view_bounds(app: &SolveApp) -> solidcraft_engine::geom::Aabb3 {
     // Bodies still being meshed after an open frame the view by their outlines.
+    // A model that cannot be placed shows no placed bodies (see `open_meshing::session_world`).
     if crate::open_meshing::framing(app) {
-        return solidcraft_engine::view::unmeshed_bounds(&app.session);
+        return solidcraft_engine::view::unmeshed_bounds(&app.session).unwrap_or(solidcraft_engine::geom::Aabb3::EMPTY);
     }
-    solidcraft_engine::view::bounds(&app.session)
+    solidcraft_engine::view::bounds(&app.session).unwrap_or(solidcraft_engine::geom::Aabb3::EMPTY)
 }
 
 /// The middle of the shown bodies the view shows part of: what a cursor orbit begun over empty
@@ -390,7 +391,7 @@ pub(crate) fn in_view_centre(app: &SolveApp, proj: &Proj) -> Option<Vec3> {
     let b = body_bounds(app, &st)
         .iter()
         .filter(|(name, b)| !b.is_empty() && app.session.body_visible(name) && in_view(proj, b))
-        .fold(solidcraft_engine::geom::Aabb3::EMPTY, |a, (_, b)| a.union(b)).unwrap_or(solidcraft_engine::geom::Aabb3::EMPTY);
+        .fold(solidcraft_engine::geom::Aabb3::EMPTY, |a, (_, b)| a.union(b));
     (!b.is_empty()).then(|| b.center())
 }
 
@@ -5687,7 +5688,7 @@ mod tests {
         session.execute("solid.box", &json!({"length": 30, "width": 30, "height": 10}))?;
         let app = SolveApp::new(session, crate::Services::default());
         let mut scene = GpuScene::default();
-        ground_shadow(&mut scene, &app, &app.session.world_state());
+        ground_shadow(&mut scene, &app, &crate::open_meshing::session_world(&app.session));
         assert!(scene.trans.is_empty(), "the ground shadow must not trigger order-independent transparency");
         assert_eq!(scene.shadow.len(), 48 * 5 * 3 * crate::gpu::TRI_SIZE, "all shadow rings are retained");
         let shadow_alpha = |v: &[u8]| {
@@ -5712,7 +5713,7 @@ mod tests {
             s.execute("sketch.finish", &json!({})).unwrap();
             let mut app = SolveApp::new(s, crate::Services::default());
             app.fit_view();
-            let st = app.session.world_state();
+            let st = crate::open_meshing::session_world(&app.session);
             let wire = &st.sketches[0].sketch.wires[0];
             let at = (wire.pts[0] + wire.pts[1]) * 0.5;
             let proj = projection(&app, Rect::from_min_size(Pos2::ZERO, vec2(800., 600.)));
@@ -6760,7 +6761,7 @@ mod tests {
 
     fn placed_three_times_is_drawn_from_one_copy(part: (&str, &str), flat: bool) {
         let app = three_placed_parts(part);
-        let st = app.session.world_state();
+        let st = crate::open_meshing::session_world(&app.session);
         assert_eq!(st.bodies.len(), 3);
         eprintln!("DBG before {}", st.bodies.iter().filter(|b| b.cached_mesh().is_some()).count());
         let scene = build_scene(&app);
@@ -6829,7 +6830,7 @@ mod tests {
             assert_eq!(scene.tris.is_empty(), style == 2, "wireframe draws only the edges");
         }
         let proj = projection(&app, Rect::from_min_size(Pos2::ZERO, vec2(800., 600.)));
-        for body in &app.session.world_state().bodies {
+        for body in &crate::open_meshing::session_world(&app.session).bodies {
             let mesh = body.mesh();
             assert_eq!(mesh.edges.len(), 12, "the placed mesh keeps its outlines");
             for (i, edge) in mesh.edges.iter().enumerate() {
@@ -6870,7 +6871,7 @@ mod tests {
         app.dialog = None;
         let hits = pick_cached(&mut app, &proj, pos);
         assert!(!hits.iter().any(|h| matches!(h, Hit::Edge { .. } | Hit::Vertex { .. })));
-        assert!(app.session.world_state().bodies[0].mesh().display_only_edges);
+        assert!(crate::open_meshing::session_world(&app.session).bodies[0].mesh().display_only_edges);
     }
 
     /// Manual GPU benchmark: 25 placements of the mesh `SOLIDCRAFT_BENCH_MESH` (an STL, OBJ or
@@ -6888,7 +6889,7 @@ mod tests {
         app.set_origin_shown(false);
         let component = app.run("file.insert_mesh", json!({"path": path.to_string_lossy()})).unwrap()["component"].clone();
         app.run("component.activate", json!({"component":"root"})).unwrap();
-        let size = app.session.world_state().bodies[0].mesh_bounds().size();
+        let size = crate::open_meshing::session_world(&app.session).bodies[0].mesh_bounds().size();
         let step = size.x.max(size.y) * 1.3;
         for k in 1..25 {
             app.run("occurrence.copy", json!({"component":component,"translate":[f64::from(k % 5) * step, f64::from(k / 5) * step, 0.0]})).unwrap();
@@ -6929,7 +6930,7 @@ mod tests {
         drop(build_scene(&app));
         eprintln!("scene built in {:.0} ms, again in {:.0} ms", (t1 - t0).as_secs_f64() * 1e3, t1.elapsed().as_secs_f64() * 1e3);
         let proj = projection(&app, rect);
-        let st = app.session.world_state();
+        let st = crate::open_meshing::session_world(&app.session);
         let seen = st.bodies.iter().filter(|b| proj.to_screen(b.mesh_bounds().center()).is_some_and(|p| rect.contains(p))).count();
         eprintln!("{w} x {h} px: {seen} of {} placements in view", st.bodies.len());
         // `SOLIDCRAFT_BENCH_CLOSE=1`: close up on the middle placement, most of the others out of view.
@@ -7085,7 +7086,7 @@ mod tests {
         doc.add_feature(FeatureKind::MeshImport { file: "grid.stl".into(), meshes }, Some("Grid")).unwrap();
         let mut app = SolveApp::new(solidcraft_engine::Session::new(doc), crate::Services::default());
         app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
-        let (mesh, _) = app.session.world_state().bodies[0].mesh_in_place();
+        let (mesh, _) = crate::open_meshing::session_world(&app.session).bodies[0].mesh_in_place();
         assert!(mesh.triangles.len() >= INSTANCE_ALONE);
         warm_shared_tris(&mesh);
         let warmed = WARMED.lock().unwrap().iter().find(|(m, _)| std::sync::Arc::ptr_eq(m, &mesh)).map(|(_, t)| t.clone()).unwrap();
@@ -7132,7 +7133,7 @@ mod tests {
     #[test]
     fn a_large_mesh_seen_small_is_drawn_from_its_levels_of_detail() {
         let mut app = large_scan();
-        let (mesh, _) = app.session.world_state().bodies[0].mesh_in_place();
+        let (mesh, _) = crate::open_meshing::session_world(&app.session).bodies[0].mesh_in_place();
         assert!(mesh.triangles.len() >= INSTANCE_ALONE);
         let key = scene_key(&app);
         let first = build_scene(&app);
@@ -7257,7 +7258,7 @@ mod tests {
         app.fit_view();
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0));
         let proj = projection(&app, rect);
-        let st = app.session.world_state();
+        let st = crate::open_meshing::session_world(&app.session);
         // The top face's centre of each placement, from its moved box corners.
         let tops: Vec<(String, Vec3)> = st
             .bodies
@@ -7337,7 +7338,7 @@ mod tests {
         let differ = instanced.chunks(4).zip(one_by_one.chunks(4)).filter(|(a, b)| a.iter().zip(b.iter()).any(|(x, y)| x.abs_diff(*y) > 24)).count();
         assert!(differ * 200 < drawn, "{part:?}: {differ} of {drawn} pixels differ");
         // Close up on the turned placement, the others out of view: what is in view is all drawn.
-        let turned = app.session.world_state().bodies[2].mesh_bounds();
+        let turned = crate::open_meshing::session_world(&app.session).bodies[2].mesh_bounds();
         app.cam.target = turned.center();
         app.cam.distance = turned.diagonal() * 0.75;
         let proj = projection(&app, rect);
@@ -8222,7 +8223,7 @@ mod tests {
     fn whole_body_highlights_reuse_the_models_own_triangles() {
         let mut app = cylinder_app();
         app.viewport.gpu = Some(GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: true, oit: false });
-        let body = app.session.world_state().bodies[0].clone();
+        let body = crate::open_meshing::session_world(&app.session).bodies[0].clone();
         let plan = body.display_plan().expect("the test body is drawn from a plan");
         app.viewport.hover_bodies = vec![body.name.clone()];
         let hovered = build_highlight(&app);
@@ -8257,7 +8258,7 @@ mod tests {
         s.execute("occurrence.copy", &json!({"component": part, "translate": [40, 0, 0]})).unwrap();
         let mut assembly = SolveApp::new(s, crate::Services::default());
         assembly.set_origin_shown(false);
-        let names: Vec<String> = assembly.session.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+        let names: Vec<String> = crate::open_meshing::session_world(&assembly.session).bodies.iter().map(|b| b.name.clone()).collect();
         assert_eq!(names.len(), 2, "two placements of the part");
         build_scene(&assembly);
         assembly.viewport.hover_bodies = names;
@@ -9305,10 +9306,10 @@ mod tests {
         app.preferences.cosmetic_threads = true;
         assert_ne!(scene_key(&app), off_key, "toggling invalidates the scene without a camera move");
         assert!(count(build_scene(&app)) > 20);
-        assert!(crate::control::view_scene(&app, Default::default()).lines.iter().any(|l| l.width == 0.85));
+        assert!(crate::control::view_scene(&app, Default::default()).unwrap().lines.iter().any(|l| l.width == 0.85));
         app.preferences.cosmetic_threads = false;
         assert_eq!(count(build_scene(&app)), 0);
-        assert!(!crate::control::view_scene(&app, Default::default()).lines.iter().any(|l| l.width == 0.85));
+        assert!(!crate::control::view_scene(&app, Default::default()).unwrap().lines.iter().any(|l| l.width == 0.85));
         app.preferences.cosmetic_threads = true;
         app.session.selection = vec![Sel::Face { body: "Body1".into(), index: 0, point: Vec3::new(3., 0., 5.) }];
         let selection = app.session.selection.clone();
@@ -9359,7 +9360,7 @@ mod tests {
             crate::prefs::set(&mut app, &json!({"cosmetic_threads":true})).unwrap();
             assert_ne!(scene_key(&app), key);
             assert!(count(&app) > 20, "internal={internal}");
-            assert!(crate::control::view_scene(&app, Default::default()).lines.iter().any(|l| l.width == 0.85));
+            assert!(crate::control::view_scene(&app, Default::default()).unwrap().lines.iter().any(|l| l.width == 0.85));
             crate::prefs::set(&mut app, &json!({"cosmetic_threads":false})).unwrap();
             assert_eq!(scene_key(&app), key);
             assert_eq!(count(&app), 0);
@@ -10133,11 +10134,11 @@ mod grid_plane_tests {
         app.cam.target = Vec3::ZERO;
         app.cam.distance = 100.0;
         // The grid's centre, as both draw it: the sketch plane's, round the view's target.
-        let plane = solidcraft_engine::view::open_sketch_plane(&app.session).unwrap();
+        let plane = solidcraft_engine::view::open_sketch_plane(&app.session).unwrap().unwrap();
         let (_, major) = grid_step(app.cam.half_height());
         let (centre, _, _) = solidcraft_engine::view::sketch_grid_frame(&plane, app.cam.target, major);
         // How far the picture's grid reaches from that centre.
-        let scene = solidcraft_engine::view::scene(&app.session, &app.cam);
+        let scene = solidcraft_engine::view::scene(&app.session, &app.cam).unwrap();
         let picture = scene.grid.iter().flat_map(|l| l.points.iter()).map(|p| (*p - centre).len()).fold(0.0_f64, f64::max);
         // How far the window's grid reaches: the same points, as bytes.
         let under = build_sketch_scene(&app, &projection(&app, rect)).under;
@@ -10287,7 +10288,7 @@ mod grid_plane_tests {
         app.fit_view();
         app.cancel_view_animation();
         app.cam.distance = 10_002.0;
-        assert_eq!(app.session.world_state().bodies.len(), 2);
+        assert_eq!(crate::open_meshing::session_world(&app.session).bodies.len(), 2);
         let camera = app.cam;
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(1280.0, 720.0));
         let original = projection(&app, rect).vp;
@@ -10296,7 +10297,7 @@ mod grid_plane_tests {
             for perspective in [false, true, false] {
                 app.ui.perspective = perspective;
                 let proj = projection(&app, rect);
-                for body in &app.session.world_state().bodies {
+                for body in &crate::open_meshing::session_world(&app.session).bodies {
                     let (mesh, _) = body.mesh_in_place();
                     assert_eq!(mesh.positions.len(), 3);
                     for p in &mesh.positions {

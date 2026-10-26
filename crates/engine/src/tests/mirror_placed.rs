@@ -230,5 +230,5 @@ fn a_placement_leading_to_another_component_is_reported_lost() {
     s.refresh();
     let e = s.model.result(mirror).and_then(|r| r.error.clone()).unwrap_or_else(|| panic!("mirrored at the wrong placement"));
     assert!(e.contains("no longer exists"), "{e}");
-    assert!(s.world_state().body(&copy).is_none());
+    assert!(s.world_state().unwrap().body(&copy).is_none());
 }
