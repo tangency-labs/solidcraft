@@ -25,17 +25,6 @@ const MAX_ITEMS: usize = 1_000_000;
 /// Bodies, sketches and sheet bodies all the states hold together, at most (a state is a list of clones).
 const MAX_HELD: usize = 50_000_000;
 
-/// A feature's boolean retries as saved. The kernel leaves `rejected` out when it is empty, and
-/// the field has no default when read, so a saved model whose booleans retried was refused and
-/// the design evaluated on every open (#5286): an absent list is an empty one.
-fn saved_diagnostics(d: &Json) -> Result<kernel::BooleanDiagnostics> {
-    let mut d = d.clone();
-    if let Some(fields) = d.as_object_mut() {
-        fields.entry("rejected").or_insert_with(|| json!([]));
-    }
-    serde_json::from_value(d).map_err(|_| bad("saved model: diagnostics"))
-}
-
 fn hex(v: u64) -> String {
     format!("{v:016x}")
 }
@@ -637,7 +626,6 @@ impl Model {
                     CachedEval {
                         error: None,
                         warning: r.warning.clone(),
-                        boolean_diagnostics: r.boolean_diagnostics.clone(),
                         ms: r.ms,
                         bytes: r.state.retained_bytes(),
                         state: r.state.clone(),

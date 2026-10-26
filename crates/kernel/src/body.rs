@@ -749,14 +749,6 @@ impl Body {
         self.color
     }
 
-    /// The same body, with how far its boundaries may lie off their surfaces (mm) as the file it
-    /// was read from declares (see [`Body::boundary_tol`]). A value that is not finite and above
-    /// zero clears the declaration, which puts the body back on the kernel's own bound.
-    pub(crate) fn with_boundary_tol(mut self, tol: Option<f64>) -> Body {
-        self.boundary_tol = tol.filter(|t| t.is_finite() && *t > 0.0);
-        self
-    }
-
     /// The same body with a display colour.
     pub fn with_color(mut self, c: Option<[f32; 3]>) -> Body {
         self.color = c.filter(|c| c.iter().all(|x| x.is_finite())).map(|c| c.map(|x| x.clamp(0.0, 1.0)));
@@ -1050,14 +1042,12 @@ impl Body {
         }
         let Ok(m) = self.mesh(&MeshTolerance::chord(coarse_tolerance(self.size()))) else { return self.face_count() };
         let mut has = vec![false; self.face_count()];
-        for f in &plan.faces {
-            if !f.triangles.is_empty()
-                && let Some(h) = has.get_mut(f.face as usize)
-            {
+        for f in &m.tri_face {
+            if let Some(h) = has.get_mut(*f as usize) {
                 *h = true;
             }
         }
-        Some(has.iter().filter(|h| !**h).count())
+        has.iter().filter(|h| !**h).count()
     }
 
     /// A mesh with its edges flagged for display (seams, tangent joins, protected creases).

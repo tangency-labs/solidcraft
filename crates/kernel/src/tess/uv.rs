@@ -135,37 +135,15 @@ mod tests {
     #[test]
     fn divides_the_turn_but_not_the_straight_direction() {
         let s = cylinder();
-        let turn = divide(
-            &s,
-            1,
-            (0.0, std::f64::consts::TAU),
-            (0.0, 1.0),
-            &Rules { tol: 0.01, max_len: f64::INFINITY, extent: 0.0, turn: None, boundary_tol: None },
-            f64::INFINITY,
-            10_000,
-        );
-        let along = divide(
-            &s,
-            0,
-            (0.0, 1.0),
-            (0.0, std::f64::consts::TAU),
-            &Rules { tol: 0.01, max_len: f64::INFINITY, extent: 0.0, turn: None, boundary_tol: None },
-            f64::INFINITY,
-            10_000,
-        );
+        let turn =
+            divide(&s, 1, (0.0, std::f64::consts::TAU), (0.0, 1.0), &Rules { tol: 0.01, max_len: f64::INFINITY, turn: None }, f64::INFINITY, 10_000);
+        let along =
+            divide(&s, 0, (0.0, 1.0), (0.0, std::f64::consts::TAU), &Rules { tol: 0.01, max_len: f64::INFINITY, turn: None }, f64::INFINITY, 10_000);
         assert_eq!(along, vec![0.0, 1.0]);
         // Chord sag r(1 − cos(θ/2)) ≤ 0.01 with r = 3 needs θ ≤ 0.163: at least 39 segments.
         assert!(turn.len() >= 40 && turn.len() < 80, "{}", turn.len());
         // With a longest side the straight direction is divided too: 4 mm in sides ≤ 0.5.
-        let along = divide(
-            &s,
-            0,
-            (0.0, 1.0),
-            (0.0, std::f64::consts::TAU),
-            &Rules { tol: 0.01, max_len: f64::INFINITY, extent: 0.0, turn: None, boundary_tol: None },
-            0.5,
-            10_000,
-        );
+        let along = divide(&s, 0, (0.0, 1.0), (0.0, std::f64::consts::TAU), &Rules { tol: 0.01, max_len: f64::INFINITY, turn: None }, 0.5, 10_000);
         assert_eq!(along.len(), 9);
     }
 
@@ -175,15 +153,7 @@ mod tests {
     #[test]
     fn divides_with_the_ends_exactly() {
         let (a0, a1) = (-1.010485317689877, 1.083909784703316);
-        let lines = divide(
-            &cylinder(),
-            1,
-            (a0, a1),
-            (0.0, 1.0),
-            &Rules { tol: 0.01, max_len: f64::INFINITY, extent: 0.0, turn: None, boundary_tol: None },
-            f64::INFINITY,
-            10_000,
-        );
+        let lines = divide(&cylinder(), 1, (a0, a1), (0.0, 1.0), &Rules { tol: 0.01, max_len: f64::INFINITY, turn: None }, f64::INFINITY, 10_000);
         assert_eq!(lines.first().copied(), Some(a0));
         assert_eq!(lines.last().copied(), Some(a1));
     }

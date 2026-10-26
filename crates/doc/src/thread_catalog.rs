@@ -97,7 +97,7 @@ const UNIFIED: &[(&str, TappedThreadFamily, f64, u32, f64)] = &[
 fn metric_size(major_diameter: f64, pitch: f64) -> TappedThread {
     TappedThread {
         family: TappedThreadFamily::Metric,
-        designation: crate::eval::format_thread(major_diameter, pitch),
+        designation: crate::thread_forms::ThreadForm::Metric.format(major_diameter, pitch, pitch),
         major_diameter,
         pitch,
         // Preserve the existing metric estimate and rounding used by solid.hole.

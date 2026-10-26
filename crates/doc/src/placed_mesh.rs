@@ -393,12 +393,12 @@ mod tests {
         let mut state = crate::ModelState::default();
         state.bodies.push(ModelBody::new("Pin".into(), kernel::cylinder(Vec3::ZERO, Vec3::Z, 2., 8.).unwrap(), 1));
         let mut cache = super::super::PlacedBodies::default();
-        let before = super::super::world_state_reusing(&doc, &state, &mut cache);
+        let before = super::super::world_state_reusing(&doc, &state, &mut cache).unwrap();
         let meshes: Vec<_> = before.bodies.iter().map(|b| b.mesh()).collect();
         // The middle placement moves: the other two are taken as they were, it is placed again.
         doc.occurrences.iter_mut().find(|o| o.id == second).unwrap().transform = crate::rigid(Vec3::new(0., 40., 0.), Vec3::ZERO, Vec3::X, 0.2);
-        let after = super::super::world_state_reusing(&doc, &state, &mut cache);
-        let fresh = super::super::world_state_reusing(&doc, &state, &mut super::super::PlacedBodies::default());
+        let after = super::super::world_state_reusing(&doc, &state, &mut cache).unwrap();
+        let fresh = super::super::world_state_reusing(&doc, &state, &mut super::super::PlacedBodies::default()).unwrap();
         let names = |st: &crate::ModelState| st.bodies.iter().map(|b| b.name.clone()).collect::<Vec<_>>();
         assert_eq!(names(&after), names(&fresh));
         assert_eq!(names(&after), names(&before));

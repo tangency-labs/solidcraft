@@ -148,9 +148,6 @@ impl TessPlan {
                             [q.x, q.y, q.z, c[3]]
                         })
                         .collect(),
-                    // Which directions the surface joins itself along is a property of its
-                    // parameters: moving the surface does not change it.
-                    closed: *closed,
                 },
                 EvalSurface::Revolved { profile, origin, axis, transform, swap } => {
                     // `m` (as rows) after the surface's own affine map.
