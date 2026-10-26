@@ -381,6 +381,9 @@ fn hostile_definitions_are_refused() {
         with(&|b| b.cells[0].kind = text(5.0, HAlign::Left, Fit::default(), control.clone())),
         "a cell's text has no control character but a line break",
     ));
+    // A sheet table's row source, which a title block doesn't have, even beside other parts.
+    let row = vec![field(Source::Component, "name"), Part::Text(" ".into()), field(Source::Row, "item")];
+    cases.push((with(&|b| b.cells[0].kind = text(5.0, HAlign::Left, Fit::default(), row.clone())), "a title block's cells have no row to read"));
     let many = |n: usize| {
         let cell = |i: usize| Cell {
             name: format!("c{i}"),

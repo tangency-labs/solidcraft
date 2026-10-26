@@ -18,7 +18,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::cell::{self, Content, Fit, HAlign};
+use crate::cell::{self, Content, Fit, HAlign, Part, Source, is_snake_case};
 use crate::drawing_sheet::SheetLayout;
 use crate::paper::MAX_LINE_MM;
 use crate::{Aabb2, Vec2};
@@ -27,7 +27,6 @@ use crate::{Aabb2, Vec2};
 pub const MAX_CELLS: usize = 64;
 const MIN_BLOCK_SIDE_MM: f64 = 1.0;
 const MAX_BLOCK_SIDE_MM: f64 = 1000.0;
-const MAX_NAME_BYTES: usize = 64;
 
 /// A title block's definition.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -115,14 +114,6 @@ fn require(condition: bool, message: &'static str) -> Result<()> {
     if condition { Ok(()) } else { Err(Invalid(message)) }
 }
 
-/// A lowercase letter, then lowercase letters, digits and underscores: at most 64 in all.
-fn is_snake_case(name: &str) -> bool {
-    let mut bytes = name.bytes();
-    name.len() <= MAX_NAME_BYTES
-        && bytes.next().is_some_and(|b| b.is_ascii_lowercase())
-        && bytes.all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
-}
-
 /// Whether two rectangles share more than an edge.
 fn overlap(a: Aabb2, b: Aabb2) -> bool {
     a.min.x < b.max.x && b.min.x < a.max.x && a.min.y < b.max.y && b.min.y < a.max.y
@@ -197,6 +188,8 @@ impl TitleBlock {
             }
             if let CellKind::Text(text) = &cell.kind {
                 text.content.validate().map_err(|cell::Invalid(message)| Invalid(message))?;
+                let row = text.content.0.iter().any(|part| matches!(part, Part::Field { source: Source::Row, .. }));
+                require(!row, "a title block's cells have no row to read")?;
             }
         }
         self.place_cells(Vec2::ZERO, None)?;

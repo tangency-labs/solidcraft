@@ -1,14 +1,15 @@
 //! Cell content: what a cell shows, as text and fields, how it should fit, and the cell text rule
 //! that places a label and a value in a cell. These are the rules every table of cells shares:
-//! title blocks now, parts lists later. Plain data in sheet millimetres, like
+//! title blocks and sheet tables such as parts lists, whose cells and columns are named alike
+//! ([`is_snake_case`]). Plain data in sheet millimetres, like
 //! [`crate::drawing_sheet`]: nothing here reads a field's value, measures text or draws.
 //!
 //! - [`Content`] is a list of [`Part`]s: text as written, or a field naming a value by its
 //!   [`Source`] and key, with a [`Format`]. Keys, units and decimals are kept as written; the
 //!   resolver checks them against each source. [`Content::validate`] bounds its size, and
 //!   [`check_label`] a label's.
-//! - A value is never cut: when it has more than its [`Fit`] allows, it is shown whole with a
-//!   [`Warning`].
+//! - A value is never cut: when it has more than its [`Fit`] allows, or a word is wider than its
+//!   box, it is shown whole with a [`Warning`].
 //!
 //! The cell text rule (x to the right, y up), in the cell inside its lines, so the padding is
 //! measured from a line's inner edge whatever the line's width:
@@ -35,6 +36,8 @@ use crate::{Aabb2, EPS, Vec2};
 pub const MAX_PARTS: usize = 64;
 /// The most bytes of text a cell's content may hold in all, and a label.
 pub const MAX_TEXT_BYTES: usize = 4096;
+/// The longest name a cell or a column may have.
+const MAX_NAME_BYTES: usize = 64;
 /// The space between the inner edge of a cell's lines and its text, in millimetres.
 pub const PADDING_MM: f64 = 1.0;
 /// How far a line's descenders reach below its baseline, as a share of its cap height: ISO 3098's
@@ -56,6 +59,9 @@ pub enum Source {
     Revision,
     /// An answer given when the block was placed.
     Prompt,
+    /// The row of a sheet table the cell is on: a parts list's bill of materials row. A title
+    /// block has no rows.
+    Row,
 }
 
 /// One part of a cell's content. Externally tagged: `{"text": "Sheet "}`,
@@ -128,6 +134,8 @@ pub enum Warning {
     Chars { count: usize, max: u32 },
     /// More lines than the value box holds.
     Height,
+    /// A word wider than the value box.
+    Width,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
@@ -140,9 +148,18 @@ fn require(condition: bool, message: &'static str) -> Result<()> {
     if condition { Ok(()) } else { Err(Invalid(message)) }
 }
 
+/// A lowercase letter, then lowercase letters, digits and underscores: at most 64 in all. Cells and
+/// columns are named by it.
+pub(crate) fn is_snake_case(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    name.len() <= MAX_NAME_BYTES
+        && bytes.next().is_some_and(|b| b.is_ascii_lowercase())
+        && bytes.all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
+
 /// Checks text by the module's rule: at most [`MAX_TEXT_BYTES`] in all, and no control character
 /// but a line break.
-fn check_text<'a>(texts: impl IntoIterator<Item = &'a str>) -> Result<()> {
+pub(crate) fn check_text<'a>(texts: impl IntoIterator<Item = &'a str>) -> Result<()> {
     let mut bytes = 0usize;
     for text in texts {
         bytes = bytes.saturating_add(text.len());
