@@ -665,7 +665,7 @@ fn additional_rows(app: &mut SolveApp, d: &mut Dialog, ui: &mut egui::Ui) -> boo
         }
         Kind::Mirror => {
             // Feature replay retains the source operation; Join is for body copies.
-            if !d.inputs.first().is_some_and(|i| i.accept == selection::FEATURES) {
+            if d.inputs.first().is_none_or(|i| i.accept != selection::FEATURES) {
                 form_row(ui, "Operation", |ui| {
                     let mut op = usize::from(d.extra.get("combine").and_then(Value::as_bool).unwrap_or(false));
                     ui_kit::segmented(ui, &mut op, &["New Body", "Join"], Default::default());

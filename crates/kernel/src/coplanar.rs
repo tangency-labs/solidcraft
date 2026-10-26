@@ -1635,7 +1635,7 @@ pub(crate) fn bore_union(a: &Body, b: &Body, accept: &dyn Fn(&Body) -> bool) -> 
                 }
                 continue;
             }
-            if !(inside.contains(on + radial * e) && !inside.contains(on - radial * e)) {
+            if !inside.contains(on + radial * e) || inside.contains(on - radial * e) {
                 continue;
             }
             // The cylinder over the tool's length holds no material of either body.

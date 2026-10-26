@@ -1,0 +1,18 @@
+{
+  "en": {
+    "settings.select_other_hidden_geometry": "Include hidden geometry in Select Other",
+    "settings.select_other_hidden_geometry_help": "Offer opposite faces and obscured edges while measuring or selecting. Turn this off to keep the nearest-face list."
+  },
+  "ja": {
+    "settings.select_other_hidden_geometry": "「その他を選択」に非表示のジオメトリを含める",
+    "settings.select_other_hidden_geometry_help": "測定時や選択時に、反対側の面や隠れたエッジも候補に表示します。無効にすると、最も近い面だけを表示する一覧に戻ります。"
+  },
+  "pt-BR": {
+    "settings.select_other_hidden_geometry": "Incluir geometria oculta em Selecionar outro",
+    "settings.select_other_hidden_geometry_help": "Oferecer faces opostas e arestas encobertas ao medir ou selecionar. Desative para manter a lista com a face mais próxima."
+  },
+  "zh": {
+    "settings.select_other_hidden_geometry": "在“选择其他”中包含隐藏几何体",
+    "settings.select_other_hidden_geometry_help": "测量或选择时显示另一侧的面和被遮挡的边。关闭此选项可恢复仅显示最近面的列表。"
+  }
+}

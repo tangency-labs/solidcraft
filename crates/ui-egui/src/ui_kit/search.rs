@@ -400,9 +400,10 @@ mod tests {
                 let radius = CommandSearch::field_radius(progress, floating);
                 let ctx = crate::fonts::test_context();
                 let mut query = String::new();
-                let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
                     CommandSearch::field(ui, &mut query, false, true, true, SearchFieldGeometry { height: 40.0, radius, progress }, 4096);
                 });
+                output.textures_delta.clear();
                 for shape in output.shapes {
                     if let egui::Shape::Rect(rect) = shape.shape
                         && (rect.fill == tokens.control_fill || rect.fill == tokens.accent_soft)

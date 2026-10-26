@@ -713,7 +713,7 @@ pub(crate) fn corner_curves(sk: &solidcraft_engine::sketch::Sketch, pi: usize, a
     if curves.len() > 2 {
         curves = candidates.filter(|(_, c)| !c.construction).take(3).collect();
     }
-    if curves.iter().any(|(_, c)| !matches!(c.kind, CurveKind::Line { .. }) && !(arcs_ok && matches!(c.kind, CurveKind::Arc { .. }))) {
+    if curves.iter().any(|(_, c)| !(matches!(c.kind, CurveKind::Line { .. }) || arcs_ok && matches!(c.kind, CurveKind::Arc { .. }))) {
         return None;
     }
     match curves[..] {

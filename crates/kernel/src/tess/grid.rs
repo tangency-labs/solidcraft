@@ -57,7 +57,7 @@ pub(crate) fn quad(boundary: &[[f64; 2]]) -> Option<Quad> {
         }
     }
     let ext = [bbox[0].1 - bbox[0].0, bbox[1].1 - bbox[1].0];
-    if !(ext[0] > 0.0 && ext[1] > 0.0) || !(ext[0].is_finite() && ext[1].is_finite()) {
+    if !(ext[0] > 0.0 && ext[1] > 0.0 && ext[0].is_finite() && ext[1].is_finite()) {
         return None;
     }
     let eps = [ext[0] * 1e-7, ext[1] * 1e-7];

@@ -541,6 +541,8 @@ preference_settings! {
     sketch_halo: bool = false, PAGE_GRAPHICS => check("Halo under sketch curves");
     /// Show world X/Y/Z component dimensions beside the total distance in Measure.
     measure_axis_distances: bool = true, PAGE_GRAPHICS => check_id("settings.measure_axis_distances");
+    /// Offer obscured faces, edges and vertices in Select Other during inspection.
+    select_other_hidden_geometry: bool = true, PAGE_GRAPHICS => check_id("settings.select_other_hidden_geometry");
     /// Decimals shown for lengths and angles.
     length_decimals: u8 = 2, PAGE_DESIGN;
     angle_decimals: u8 = 1, PAGE_DESIGN;
@@ -3296,6 +3298,7 @@ mod tests {
             ("selection_shift_add_only", json!(true), PAGE_SKETCH),
             ("suppress_sketch_snap", json!(ModifierCombo::NONE), PAGE_SKETCH),
             ("msaa", json!(8), PAGE_GRAPHICS),
+            ("select_other_hidden_geometry", json!(false), PAGE_GRAPHICS),
         ];
         let defaults = serde_json::to_value(Prefs::default()).unwrap();
         for (field, value, owner) in fields {

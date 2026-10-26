@@ -171,6 +171,9 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let response = setting::measure_axis_distances(app, right);
                 crate::scenario::publish_rect("prefs:measure_axis_distances", response.rect);
                 response.on_hover_text(app.tr("settings.measure_axis_distances_help"));
+                let response = setting::select_other_hidden_geometry(app, right);
+                crate::scenario::publish_rect("prefs:select_other_hidden_geometry", response.rect);
+                response.on_hover_text(app.tr("settings.select_other_hidden_geometry_help"));
             }
         });
         ui_kit::settings_form(ui, t.space_24 * 6.0 + t.space_6, |ui| {
