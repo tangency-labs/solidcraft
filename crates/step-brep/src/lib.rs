@@ -387,6 +387,34 @@ pub fn import(bytes: &[u8], limits: &step_import::Limits) -> Result<Vec<Brep>, B
     model.bodies.iter().map(build).collect()
 }
 
+/// Built bodies and the mapper's ordered, owned import findings.
+pub struct ImportReport {
+    /// Successfully built bodies, in mapper order.
+    pub bodies: Vec<Brep>,
+    /// Bodies skipped by the mapper, with their original reasons.
+    pub skipped: Vec<step_import::model::Skipped>,
+    /// Mapper diagnostics in their original order.
+    pub diagnostics: Vec<step_import::model::Diagnostic>,
+}
+
+/// Parses STEP bytes and builds every mapped body, preserving mapper findings.
+///
+/// Any parse or build failure returns an error, never a partial report.
+pub fn import_with_report(
+    bytes: &[u8],
+    limits: &step_import::Limits,
+) -> Result<ImportReport, BuildError> {
+    let model = step_import::import(bytes, limits).map_err(|error| BuildError {
+        message: error.to_string(),
+    })?;
+    let bodies = model.bodies.iter().map(build).collect::<Result<_, _>>()?;
+    Ok(ImportReport {
+        bodies,
+        skipped: model.skipped,
+        diagnostics: model.diagnostics,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
