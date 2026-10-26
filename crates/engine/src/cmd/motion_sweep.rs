@@ -14,7 +14,7 @@ use solidcraft_doc::joints::JointKind;
 use solidcraft_geom::Vec3;
 
 use super::analysis::checked_pairs;
-use super::contact_sweep::{ContactGeometry, Gap, Member};
+use super::contact_sweep::{ContactGeometry, Gap};
 use super::{drive_with_contact, joint_id, value};
 use crate::params::{bad, bool_};
 use crate::schema::motion::{FindLimitsResult, FoundLimits, Overlap, Stop, Why};
@@ -196,18 +196,17 @@ pub(super) fn find_limits(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let refine = positive(p, "refine", 1e3, cmd)?.unwrap_or(0.01);
     let step = positive(p, "step", 1e9, cmd)?;
-    // No two parts to check (the joint turns the only part there is): nothing can be met. Parts
-    // the call names that make no pair are refused, as `joint.sweep` refuses them.
+    // No two parts to check (the joint turns the only part with bodies): nothing can be met, but
+    // a closed loop or a limit can still stop an angle, swept a degree at a time; a distance has
+    // nothing to search over. Parts the call names that make no pair are refused, as
+    // `joint.sweep` refuses them.
     let named = p.get("occurrences").is_some_and(|v| !v.is_null()) || bool_(p, "contact_sets").unwrap_or(false);
     let geometry = if named { pairs_to_check(s, p, cmd)? } else { checked_pairs(s, p, cmd)? };
-    let geometry = geometry.has_pairs().then_some(geometry);
+    let paired = geometry.has_pairs();
     let now = s.doc.assembly.joints.iter().find(|j| j.id == id).map(|j| j.values.clone()).unwrap_or_default();
     // A distance is searched as far as the parts reach: past it, a straight move meets nothing new.
-    let reach = match &geometry {
-        Some(g) => g.reach(s)?,
-        None => 0.0,
-    };
-    if geometry.is_some() && (!reach.is_finite() || reach <= 0.0) {
+    let reach = if paired { geometry.reach(s)? } else { 0.0 };
+    if paired && (!reach.is_finite() || reach <= 0.0) {
         return Err(bad(cmd, "the parts have no size to search over"));
     }
     let turn = std::f64::consts::TAU;
@@ -221,13 +220,17 @@ pub(super) fn find_limits(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, "the joint's value is not a number"));
         }
         let range = if angle { turn } else { reach };
-        let step = step.map(|x| if angle { x.to_radians() } else { x });
-        let side = |to: f64| match &geometry {
-            Some(g) => {
-                let sweep = Sweep { id, index, from: c, to, step, refine, report_gaps: false, budget: FIND_WORK, free: true };
-                Ok(Some(run(s, g.clone(), sweep, cmd)?))
+        let step = match step {
+            Some(x) => Some(if angle { x.to_radians() } else { x }),
+            None if !paired => Some(1f64.to_radians()),
+            None => None,
+        };
+        let side = |to: f64| {
+            if !angle && !paired {
+                return Ok(None);
             }
-            None => Ok::<_, EngineError>(None),
+            let sweep = Sweep { id, index, from: c, to, step, refine, report_gaps: false, budget: FIND_WORK, free: true };
+            Ok::<_, EngineError>(Some(run(s, geometry.clone(), sweep, cmd)?))
         };
         // (value, what stopped it) for each side; `None` value: no limit that side. An angle is
         // searched a turn up, then down to a turn below where that stopped: a span of at most a
@@ -319,17 +322,25 @@ fn run(s: &Session, mut geometry: ContactGeometry, sw: Sweep, cmd: &str) -> Resu
     let key = |x: u64, y: u64| (x.min(y), x.max(y));
     // Pairs touching where the sweep starts (parts joined face to face, a door on its frame)
     // stop it only when they pass into each other, deeper than they start (by more than their
-    // meshes can be off): a door resting on its frame cannot sweep through it.
+    // meshes can be off): a door resting on its frame cannot sweep through it. Each pair of their
+    // bodies is held to its own depth: pins already in each other don't hide arms of the same
+    // parts meeting later, and plates that only come flush (parts end to end) never stop it.
     let start: Vec<Gap> = geometry.gaps(&t, touch, &mut work, budget)?;
     let touching: BTreeSet<(u64, u64)> = start.iter().map(|g| key(g.a.0, g.b.0)).collect();
     let touching_names: Vec<[String; 2]> = start.iter().map(|g| [g.a.1.clone(), g.b.1.clone()]).collect();
     let resting = geometry.take_pairs(|x, y| touching.contains(&key(x, y)));
-    let rest: Vec<(Member, Member, f64)> = if resting.has_pairs() { resting.hits(&t, &mut work, budget, true)? } else { Vec::new() };
+    let rest_depth: Vec<f64> = if resting.has_pairs() { resting.depths(&t, &mut work, budget)? } else { Vec::new() };
     let margin = touch.max(2.0 * resting.chord());
-    // Those already passing into each other, deeper than a touch.
-    let overlapping: Vec<(String, String, f64)> =
-        rest.iter().filter(|(_, _, d)| *d > margin).map(|(a, b, d)| (a.1.clone(), b.1.clone(), *d)).collect();
-    let rest_depth: BTreeMap<(u64, u64), f64> = rest.into_iter().map(|(a, b, d)| (key(a.0, b.0), d)).collect();
+    // Parts already passing into each other, deeper than a touch: the deepest of their bodies.
+    let mut overlapping: BTreeMap<(u64, u64), (String, String, f64)> = BTreeMap::new();
+    for (i, depth) in rest_depth.iter().enumerate() {
+        if *depth > margin
+            && let Some((a, b)) = resting.members(i)
+        {
+            let entry = overlapping.entry(key(a.0, b.0)).or_insert((a.1, b.1, 0.0));
+            entry.2 = entry.2.max(*depth);
+        }
+    }
 
     // The samples run to where the joint gets: a limit or a loop can stop it short of `to`, and
     // the default count is for the motion up to there. One more drive toward `to` then finds
@@ -385,12 +396,11 @@ fn run(s: &Session, mut geometry: ContactGeometry, sw: Sweep, cmd: &str) -> Resu
         if !resting.has_pairs() {
             return Ok(None);
         }
-        let deeper =
-            resting.hits(t, work, budget, true)?.into_iter().find(|(a, b, d)| *d > rest_depth.get(&key(a.0, b.0)).copied().unwrap_or(0.0) + margin);
-        let Some((a, b, _)) = deeper else { return Ok(None) };
-        // Where: the nearest points of that pair (passing into each other, at no gap).
-        let k = key(a.0, b.0);
-        let at = resting.gaps(t, touch, work, budget)?.into_iter().find(|g| key(g.a.0, g.b.0) == k).map_or((Vec3::ZERO, Vec3::ZERO), |g| g.at);
+        let depths = resting.depths(t, work, budget)?;
+        let deeper = depths.iter().enumerate().find(|(i, d)| **d > rest_depth.get(*i).copied().unwrap_or(0.0) + margin).map(|(i, _)| i);
+        let Some((i, (a, b))) = deeper.and_then(|i| resting.members(i).map(|m| (i, m))) else { return Ok(None) };
+        // Where: the nearest points of those bodies (passing into each other, at no gap).
+        let at = resting.only(i).gaps(t, touch, work, budget)?.into_iter().next().map_or((Vec3::ZERO, Vec3::ZERO), |g| g.at);
         Ok(Some(Gap { a, b, mm: 0.0, at }))
     };
 
@@ -436,5 +446,14 @@ fn run(s: &Session, mut geometry: ContactGeometry, sw: Sweep, cmd: &str) -> Resu
         (lo_doc, lo_v) = (t.doc.clone(), v);
     }
     let pairs = geometry.pair_count() + resting.pair_count();
-    Ok(Swept { stop, samples, nearest, touching: touching_names, overlapping, pairs, chord: geometry.chord(), doc: t.doc })
+    Ok(Swept {
+        stop,
+        samples,
+        nearest,
+        touching: touching_names,
+        overlapping: overlapping.into_values().collect(),
+        pairs,
+        chord: geometry.chord(),
+        doc: t.doc,
+    })
 }
