@@ -318,7 +318,6 @@ checks nothing. A misspelt optional key, such as `operaton` for `solid.box`'s `o
 otherwise ignored, and the step builds without it. `warn` runs the step and prints
 ``script.json: step 1: unknown key `operaton`; did you mean `operation`?`` on stderr; `strict`
 stops the run at that step, and nothing is written.
-`run` refuses an option it doesn't take, so a mistyped option fails instead of being ignored.
 
 `run` prints each command's result with `--results` (otherwise the measurement), and `eval`
 prints the measurement, as JSON on stdout. `--json-out FILE` writes that JSON to a file

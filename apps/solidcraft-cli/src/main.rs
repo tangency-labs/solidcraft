@@ -415,11 +415,7 @@ fn cmd_run(args: &[String]) -> Result<(), String> {
         let script = path.ok_or(needs)?;
         let v = read_json(script)?;
         let out = if timings {
-            let (r, mut t) = s.run_script_timed(&v, profile).map_err(|e| e.to_string())?;
-            // The timed runner reports no step as it completes: the warnings follow the script.
-            for (step, r) in r.iter().enumerate() {
-                print_param_warnings(script, step, r);
-            }
+            let (r, mut t) = s.run_script_timed(&v, profile, &mut |step, r| print_param_warnings(script, step, r)).map_err(|e| e.to_string())?;
             if want_results && let Some(o) = t.as_object_mut() {
                 o.insert("results".into(), Value::Array(r));
             }

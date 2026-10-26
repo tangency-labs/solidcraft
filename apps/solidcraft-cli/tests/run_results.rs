@@ -497,18 +497,20 @@ fn timings_and_profile_report_each_command() {
 }
 
 /// #6921: `--param-check` checks a script's steps against their contracts on every path `run`
-/// takes (a script alone, on an `--in` design, with `--results` or `--timings`), and `run` refuses
-/// an option it doesn't take instead of ignoring it.
+/// takes (a script alone, on an `--in` design or script, with `--results`, `--timings` or
+/// `--profile`), and a warning reaches stderr even when a later step fails.
 #[test]
 fn param_check_reaches_every_script_run_takes() {
     let dir = Scratch::new();
     let typo = dir.0.join("typo.json");
     let step = json!({"command": "solid.box", "params": {"length": 2, "width": 3, "height": 4, "operaton": "new"}});
-    std::fs::write(&typo, json!({"commands": [step]}).to_string()).unwrap();
+    std::fs::write(&typo, json!({"commands": [step.clone()]}).to_string()).unwrap();
     let base = dir.0.join("base.solidcraft");
     json_output(cli().arg("run").arg(dir.script()).arg("--save").arg(&base).output().unwrap());
     let saved = dir.0.join("saved.solidcraft");
-    let (typo, base, saved_arg) = (typo.to_str().unwrap(), base.to_str().unwrap(), saved.to_str().unwrap());
+    let start = dir.script();
+    let (typo, base, saved_arg, start) = (typo.to_str().unwrap(), base.to_str().unwrap(), saved.to_str().unwrap(), start.to_str().unwrap());
+    let paths = [&[][..], &["--in", base], &["--in", start], &["--results"], &["--timings"], &["--timings", "--profile"]];
     let run = |level: Option<&str>, extra: &[&str]| {
         std::fs::remove_file(&saved).ok();
         let check = level.map(|l| ["--param-check", l]).into_iter().flatten();
@@ -521,7 +523,7 @@ fn param_check_reaches_every_script_run_takes() {
     assert_eq!(body_count(&saved), 1);
 
     // Warn: each path runs the step, saves, and reports it on stderr; `--results` keeps it too.
-    for extra in [&[][..], &["--in", base], &["--results"], &["--timings"]] {
+    for extra in paths {
         let output = run(Some("warn"), extra);
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(output.status.success(), "{extra:?}: {stderr}");
@@ -534,7 +536,7 @@ fn param_check_reaches_every_script_run_takes() {
     }
 
     // Strict: on each path the run stops at the step, and nothing is written.
-    for extra in [&[][..], &["--in", base], &["--results"], &["--timings"]] {
+    for extra in paths {
         let output = run(Some("strict"), extra);
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert_eq!(output.status.code(), Some(1), "{extra:?}: {stderr}");
@@ -542,10 +544,21 @@ fn param_check_reaches_every_script_run_takes() {
         assert!(!saved.exists(), "{extra:?}");
     }
 
-    // An option `run` doesn't take, a level it doesn't know and a missing value fail.
+    // Warn, with a later step that fails: the run fails, and the first step's warning is still
+    // reported, timed or not.
+    let failing = dir.0.join("failing.json");
+    let fail = json!({"command": "solid.extrude", "params": {"sketch": "Nope"}});
+    std::fs::write(&failing, json!({"commands": [step, fail]}).to_string()).unwrap();
+    for extra in [&[][..], &["--timings"]] {
+        let output = cli().arg("run").arg(&failing).args(["--param-check", "warn"]).args(extra).output().unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(1), "{extra:?}: {stderr}");
+        assert!(stderr.contains("step 1: unknown key `operaton`") && stderr.contains("no sketch `Nope`"), "{extra:?}: {stderr}");
+    }
+
+    // A level it doesn't know and a missing value fail.
     for (bad, says) in [
-        (&["--sav", "x.solidcraft"][..], "run doesn't take --sav"),
-        (&["--param-check", "loud"], "--param-check wants off, warn or strict, not `loud`"),
+        (&["--param-check", "loud"][..], "--param-check wants off, warn or strict, not `loud`"),
         (&["--param-check"], "run: --param-check wants off, warn or strict"),
     ] {
         let output = cli().args(["run", typo]).args(bad).output().unwrap();

@@ -1810,9 +1810,10 @@ impl Session {
 
     /// [`Session::run_script`], timing each command (#1833): the results and
     /// `{"timings": [{"index", "command", "ms", "profile"?}], "total_ms"}`, with `profile` the
-    /// kernel's share of each command ([`timing`]).
-    pub fn run_script_timed(&mut self, script: &Value, profile: bool) -> Result<(Vec<Value>, Value)> {
-        let (results, timings) = self.run_script_with(script, Some(profile), &mut |_, _| {})?;
+    /// kernel's share of each command ([`timing`]). `each` is called as in
+    /// [`Session::run_script_each`].
+    pub fn run_script_timed(&mut self, script: &Value, profile: bool, each: &mut dyn FnMut(usize, &Value)) -> Result<(Vec<Value>, Value)> {
+        let (results, timings) = self.run_script_with(script, Some(profile), each)?;
         Ok((results, timings.unwrap_or(Value::Null)))
     }
 
