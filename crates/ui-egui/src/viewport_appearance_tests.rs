@@ -161,7 +161,7 @@ fn selection_does_not_rebuild_the_model_scene() {
     let highlight = h.app.viewport.hl_key;
     // Clear the scene the first frame uploaded; an untouched model must not upload another.
     let _ = h.app.viewport.slot.lock().unwrap().take();
-    let name = h.app.session.world_state().bodies[0].name.clone();
+    let name = h.app.session.world_state().unwrap().bodies[0].name.clone();
     h.app.session.selection = vec![solidcraft_engine::Sel::Body { name }];
     h.frame();
     assert_eq!(h.app.viewport.key, key, "a selection does not change the model scene key");
@@ -190,7 +190,7 @@ fn a_colour_edit_reuses_every_block_vertex() {
     app.ui.ground_shadow = false;
     app.set_origin_shown(false);
     app.run("solid.box", json!({"length": 20, "width": 15, "height": 10})).unwrap();
-    let name = app.session.world_state().bodies[0].name.clone();
+    let name = app.session.world_state().unwrap().bodies[0].name.clone();
     let first = build_scene(&app);
     let block = first.blocks.iter().find(|b| !b.bytes.vertices.is_empty()).expect("the box has a block");
     let (key, vertices) = (block.key, block.bytes.vertices.clone());
@@ -207,7 +207,7 @@ fn an_opacity_class_change_keeps_vertices_and_rewrites_only_the_runs() {
     app.ui.ground_shadow = false;
     app.set_origin_shown(false);
     app.run("solid.box", json!({"length": 20, "width": 15, "height": 10})).unwrap();
-    let name = app.session.world_state().bodies[0].name.clone();
+    let name = app.session.world_state().unwrap().bodies[0].name.clone();
     let first = build_scene(&app);
     let block = first.blocks.iter().find(|b| !b.bytes.vertices.is_empty()).expect("the box has a block");
     let (key, bytes) = (block.key, block.bytes.clone());
@@ -243,7 +243,7 @@ fn appearance_edits_upload_palette_rows_only() {
         Some(crate::gpu::GpuTarget { format: egui_wgpu::wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false });
     app.run("solid.box", json!({"length": 20, "width": 15, "height": 10})).unwrap();
     app.fit_view();
-    let name = app.session.world_state().bodies[0].name.clone();
+    let name = app.session.world_state().unwrap().bodies[0].name.clone();
     let highlight: crate::gpu::SceneSlot = std::sync::Arc::new(std::sync::Mutex::new(None));
     let mut key = 0;
     let mut draw = |app: &SolveApp| {

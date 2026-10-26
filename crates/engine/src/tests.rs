@@ -1980,7 +1980,7 @@ fn components_occurrences_and_world_placement() {
     assert_eq!(s.pending_moves, pending);
     // Placed by the first placement, the body stays where it is in the world there.
     run(&mut s, "component.move_bodies", json!({"bodies": ["Base"], "component": "Arm", "component_path": [occ]}));
-    assert_eq!(s.world_state().body("Base").unwrap().component, cid);
+    assert_eq!(s.world_state().unwrap().body("Base").unwrap().component, cid);
     assert_eq!(bbox(&mut s, "Base")["min"], json!([0.0, 0.0, 0.0]));
     run(&mut s, "edit.undo", json!({}));
     assert_eq!(s.doc.to_json(), document);
@@ -3657,7 +3657,7 @@ fn an_exact_pick_of_a_region_cut_by_the_face_outline_takes_only_that_region() {
         let state = s2.model.state();
         let Some(solidcraft_doc::FeatureKind::Extrude { profiles, .. }) = s2.doc.features.last().map(|f| &f.kind) else { panic!("an extrude") };
         let count = solidcraft_doc::profile_selection_indices(state.sketch(id).unwrap(), profiles).unwrap().len();
-        let v = state.bodies.iter().filter(|b| b.name.starts_with("Pad")).map(|b| b.body.tessellate(1e-2).unwrap().measure().volume).sum();
+        let v = state.bodies.iter().filter(|b| b.name.starts_with("Pad")).map(|b| b.body.mesh(&solidcraft_kernel::MeshTolerance::chord(1e-2)).unwrap().measure().volume).sum();
         (v, count)
     };
     for (profiles, want, n) in [
@@ -4498,7 +4498,7 @@ fn a_cut_leaves_hidden_bodies_alone() {
         run(&mut s, "solid.extrude", json!({"distance": 30, "direction": "negative", "operation": "cut"}));
         s
     };
-    let vol = |s: &Session, name: &str| solidcraft_kernel::measure(&s.world_state().body(name).unwrap().body).unwrap().volume;
+    let vol = |s: &Session, name: &str| solidcraft_kernel::measure(&s.world_state().unwrap().body(name).unwrap().body).unwrap().volume;
     let full = 20.0 * 20.0 * 10.0;
     let mut hidden = setup(true);
     assert!((vol(&hidden, "Below") - full).abs() < 1e-6, "the hidden body is not cut");

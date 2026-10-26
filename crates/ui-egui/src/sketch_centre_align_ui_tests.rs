@@ -30,7 +30,7 @@ fn point(h: &Harness, id: &str) -> Vec2 {
 #[test]
 fn selecting_the_centre_and_an_edge_preselects_the_alignment() {
     let h = square_with_circle();
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     let edge = || SketchCurve { id: "l2".into(), sketch: None };
     let centre = || SketchPoint { id: "c1.center".into() };

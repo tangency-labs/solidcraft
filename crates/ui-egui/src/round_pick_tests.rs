@@ -27,7 +27,7 @@ fn shaft() -> Harness {
 /// The shaft's wall, top rim and top cap, as picks.
 fn picks(h: &Harness) -> (Sel, Sel, Sel) {
     use solidcraft_engine::kernel::{FaceSurface, face_surface};
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let b = st.body("Shaft").unwrap();
     let face = |want: fn(&FaceSurface) -> bool, point: Vec3| {
         let index = (0..b.body.face_count()).find(|i| face_surface(&b.body, *i).is_some_and(|f| want(&f))).unwrap();

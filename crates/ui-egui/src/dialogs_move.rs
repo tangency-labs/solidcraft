@@ -98,9 +98,12 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Kind) -> bool {
 fn sel_point(app: &SolveApp, d: &Dialog, s: Option<&Sel>) -> Option<Vec3> {
     match s? {
         Sel::Edge { body, index, point } => {
+            // As every pick reads the placed model: one that cannot be placed has no bodies here.
             let st = match d.editing {
-                Some((id, _)) => std::sync::Arc::new(solidcraft_engine::doc::world_state(&app.session.doc, &app.session.model.state_before(id))),
-                None => app.session.world_state(),
+                Some((id, _)) => std::sync::Arc::new(
+                    solidcraft_engine::doc::world_state(&app.session.doc, &app.session.model.state_before(id)).unwrap_or_default(),
+                ),
+                None => crate::open_meshing::session_world(&app.session),
             };
             Some(crate::dialogs::edge_circle_in(&st, body, *index).map_or(*point, |(c, ..)| c))
         }

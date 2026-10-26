@@ -404,9 +404,9 @@ fn a_cut_hides_the_edges_behind_it() {
     let (w, h) = (400, 300);
     for (mode, c) in capturers() {
         for fov in [0.0, 0.6] {
-            let mut cam = view::home_camera(&plain);
+            let mut cam = view::home_camera(&plain).unwrap();
             cam.fov = fov;
-            let radius = view::scene(&plain, &cam).radius;
+            let radius = view::scene(&plain, &cam).unwrap().radius;
             // The cap on screen: the cut's rectangle, its outline left out (2 px in).
             let corner = |x: f64, z: f64| cam.to_screen(Vec3::new(x, -16.0, z), f64::from(w), f64::from(h), radius).map(|(x, y, _)| (x, y));
             let cap: Vec<(f64, f64)> = [(-20.0, 0.0), (20.0, 0.0), (20.0, 30.0), (-20.0, 30.0)].iter().filter_map(|(x, z)| corner(*x, *z)).collect();
@@ -422,7 +422,7 @@ fn a_cut_hides_the_edges_behind_it() {
             };
             let inside = |x: f64, y: f64| inside_by(x, y, 2.0);
             // Without the ground grid, whose extent follows the design.
-            let shot = |s: &Session| c.rgba(&Scene { grid: Vec::new(), ..view::scene(s, &cam) }, &cam, w, h).unwrap();
+            let shot = |s: &Session| c.rgba(&Scene { grid: Vec::new(), ..view::scene(s, &cam).unwrap() }, &cam, w, h).unwrap();
             let (a, b) = (shot(&plain), shot(&cut_through));
             let (mut shown, mut all) = (0, 0);
             for (i, (p, q)) in pixels(&a).zip(pixels(&b)).enumerate() {

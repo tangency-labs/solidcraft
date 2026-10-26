@@ -217,7 +217,7 @@ fn arc_tool_draws_an_exact_3d_arc_off_the_plane() {
         h.step(&json!({"click": {"world": p}})).unwrap();
     }
     h.step(&json!({"key": "Escape"})).unwrap();
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let wires = &state.sketch(sketch).unwrap().sketch.wires;
     assert_eq!(wires.len(), 1, "three off-plane clicks draw one 3D arc");
     let w = &wires[0];
@@ -245,7 +245,7 @@ fn arc3d_button_starts_its_own_tool() {
     for p in [[10.0, 0.0, 10.0], [10.0, 10.0, 10.0], [20.0, 10.0, 10.0]] {
         h.step(&json!({"click": {"world": p}})).unwrap();
     }
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let wires = &state.sketch(sketch).unwrap().sketch.wires;
     assert_eq!(wires.len(), 1, "three clicks draw one exact 3D arc");
     let arc = wires[0].arc.expect("the drawn arc is stored exactly");

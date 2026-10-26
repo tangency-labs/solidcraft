@@ -365,14 +365,14 @@ fn arc3d_follows_the_sketch_owner_placement() {
     near(arc.center, Vec3::new(0.0, 0.0, 5.0));
     assert!((arc.radius - 10.0).abs() < 1e-7, "radius {}", arc.radius);
     let _ = sk;
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let ws = &world.sketch(sketch).unwrap().sketch;
     let arc = ws.wires[ws.wire_index(&id).unwrap()].arc.unwrap();
     near(arc.center, Vec3::new(20.0, 30.0, 45.0));
     near(ws.wires[ws.wire_index(&id).unwrap()].fit[0], Vec3::new(20.0, 40.0, 45.0));
     drop(world);
     run(&mut s, "occurrence.move", json!({"occurrence":second,"translate":[5,0,0]}));
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let ws = &world.sketch(sketch).unwrap().sketch;
     let arc = ws.wires[ws.wire_index(&id).unwrap()].arc.unwrap();
     near(arc.center, Vec3::new(25.0, 30.0, 45.0));
@@ -411,7 +411,7 @@ fn arc3d_pipes_along_the_arc() {
     let wire = run(&mut s, "sketch.arc3d", json!({"start":[20,0,0],"through":[d,d,0],"end":[0,20,0]}))["curves"][0].as_str().unwrap().to_string();
     run(&mut s, "sketch.finish", json!({}));
     run(&mut s, "solid.pipe", json!({"path_sketch":sketch,"path":[wire],"diameter":4}));
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let body = world.bodies.last().unwrap();
     let measure = solidcraft_kernel::measure(&body.body).unwrap();
     let quarter = 20.0 * std::f64::consts::FRAC_PI_2;

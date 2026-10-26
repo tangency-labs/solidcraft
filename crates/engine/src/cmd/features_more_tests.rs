@@ -228,7 +228,7 @@ fn a_sketch_on_a_turned_sub_components_face_cuts_and_joins_it_from_the_top_level
             run(s, "sketch.circle.center", json!({"center": [c.x, c.y], "radius": 2}));
         });
         for (distance, expected) in [(-3.0, "cut"), (3.0, "join")] {
-            assert_eq!(crate::auto_operation(&s, &json!({"distance": distance})), Some(expected), "base {base}, {distance}");
+            assert_eq!(crate::auto_operation(&s, &json!({"distance": distance})).unwrap(), Some(expected), "base {base}, {distance}");
             for operation in ["auto", expected] {
                 let mut t = s.scratch();
                 run(&mut t, "solid.extrude", json!({"distance": distance, "operation": operation}));
@@ -313,7 +313,7 @@ fn a_cut_from_the_top_level_shows_in_every_placement_and_a_later_placement_is_re
         run(s, "sketch.circle.center", json!({"center": [c.x, c.y], "radius": 2}));
     });
     run(&mut first, "solid.extrude", json!({"distance": -3, "operation": "cut"}));
-    let world = first.world_state();
+    let world = first.world_state().unwrap();
     let placements: Vec<f64> =
         world.bodies.iter().filter(|b| b.definition_name() == "Stock").map(|b| solidcraft_kernel::measure(&b.body).unwrap().volume).collect();
     let want = 1000.0 - std::f64::consts::PI * 4.0 * 3.0;
@@ -342,8 +342,8 @@ fn a_sketch_on_a_top_level_body_beside_a_turned_part_cuts_only_that_body() {
     sketch_on_face(&mut s, solidcraft_geom::Vec3::new(-30.0, -30.0, 5.0), |s, c, _| {
         run(s, "sketch.circle.center", json!({"center": [c.x, c.y], "radius": 2}));
     });
-    assert_eq!(crate::auto_operation(&s, &json!({"distance": -2})), Some("cut"));
-    assert_eq!(crate::auto_operation(&s, &json!({"distance": 2})), Some("join"));
+    assert_eq!(crate::auto_operation(&s, &json!({"distance": -2})).unwrap(), Some("cut"));
+    assert_eq!(crate::auto_operation(&s, &json!({"distance": 2})).unwrap(), Some("join"));
     let made = run(&mut s, "solid.extrude", json!({"distance": -2, "operation": "auto"}));
     let feature = s.doc.feature(made["feature"].as_u64().unwrap()).unwrap();
     assert!(feature.participants.is_empty(), "{:?}", feature.participants);

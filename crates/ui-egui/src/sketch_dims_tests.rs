@@ -397,7 +397,7 @@ fn a_midpoint_line_takes_a_typed_length_and_angle() {
     tab(&mut h, false);
     type_value(&mut h, "45 deg");
     h.step(&json!({"key": "Enter"})).unwrap();
-    let state = h.app.session.world_state();
+    let state = h.app.session.world_state().unwrap();
     let sk = &state.sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch;
     assert_eq!(sk.curves.len(), 1, "{:?}", h.app.status);
     assert!(

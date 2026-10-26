@@ -80,9 +80,9 @@ fn appearance_and_selection_rebuild_cost() {
     let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
     for n in [200usize, 1000, 5000] {
         let mut h = grid(n);
-        h.app.session.world_state().warm_meshes(|| true);
+        h.app.session.world_state().unwrap().warm_meshes(|| true);
         h.frames(2);
-        let body = h.app.session.world_state().bodies[0].name.clone();
+        let body = h.app.session.world_state().unwrap().bodies[0].name.clone();
         let cold = ms(|| drop(crate::viewport::build_scene(&h.app)));
         let again = ms(|| drop(crate::viewport::build_scene(&h.app)));
         let proj = crate::viewport::projection(&h.app, rect);
@@ -123,11 +123,11 @@ fn large_body_scene_rebuild_cost() {
                 .run("solid.torus", json!({"major": 100, "minor": 10, "center": [k as f64 * 220.0, 0.0, 0.0], "body_name": format!("T{k}")}))
                 .unwrap();
         }
-        h.app.session.world_state().warm_meshes(|| true);
+        h.app.session.world_state().unwrap().warm_meshes(|| true);
         h.frames(2);
-        let bodies = h.app.session.world_state().bodies.len();
-        let triangles: usize = h.app.session.world_state().bodies.iter().map(|b| b.mesh().triangles.len()).sum();
-        let body = h.app.session.world_state().bodies[0].name.clone();
+        let bodies = h.app.session.world_state().unwrap().bodies.len();
+        let triangles: usize = h.app.session.world_state().unwrap().bodies.iter().map(|b| b.mesh().triangles.len()).sum();
+        let body = h.app.session.world_state().unwrap().bodies[0].name.clone();
         let cold = ms(|| drop(crate::viewport::build_scene(&h.app)));
         h.app.run("appearance.assign", json!({"bodies":[body.clone()],"color":"#336699"})).unwrap();
         let colour = ms(|| drop(crate::viewport::build_scene(&h.app)));
@@ -164,7 +164,7 @@ fn assembly(unique: usize, placed: usize) -> Harness {
             json!({"components": ["Wheel"], "dir1": [1, 0, 0], "count1": p1, "spacing1": 100, "dir2": [0, 1, 0], "count2": p2, "spacing2": 100}),
         )
         .unwrap();
-    h.app.session.world_state().warm_meshes(|| true);
+    h.app.session.world_state().unwrap().warm_meshes(|| true);
     h.frames(3);
     h
 }
@@ -178,7 +178,7 @@ fn assembly_scene_rebuild_cost() {
     let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0));
     for (unique, placed) in [(100, 100), (300, 500)] {
         let mut h = assembly(unique, placed);
-        let st = h.app.session.world_state();
+        let st = h.app.session.world_state().unwrap();
         let bodies = st.bodies.len();
         let triangles: usize = st.bodies.iter().map(|b| b.mesh().triangles.len()).sum();
         let part = st.bodies.iter().find(|b| b.component == 0).map(|b| b.name.clone()).unwrap();
@@ -224,7 +224,7 @@ fn assembly_tree_hover_highlight_cost() {
     for (unique, placed) in [(100, 100), (300, 500)] {
         let mut h = assembly(unique, placed);
         let _ = crate::viewport::build_scene(&h.app);
-        let st = h.app.session.world_state();
+        let st = h.app.session.world_state().unwrap();
         let part = st.bodies.iter().find(|b| b.component == 0).map(|b| b.name.clone()).unwrap();
         let wheels: Vec<String> = st.bodies.iter().filter(|b| b.component != 0).map(|b| b.name.clone()).collect();
         let everything: Vec<String> = st.bodies.iter().map(|b| b.name.clone()).collect();
@@ -297,7 +297,7 @@ pub(crate) fn view_frame(
 /// component, the whole design), each hover change building, uploading and drawing the highlight.
 #[cfg(not(target_arch = "wasm32"))]
 fn hover_rows(h: &mut Harness, frames: &mut crate::gpu::OffscreenFrames, size: u32, model_key: u64, label: &str) -> String {
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let part = st.bodies.iter().find(|b| b.component == 0).map(|b| b.name.clone()).unwrap();
     let wheels: Vec<String> = st.bodies.iter().filter(|b| b.component != 0).map(|b| b.name.clone()).collect();
     let everything: Vec<String> = st.bodies.iter().map(|b| b.name.clone()).collect();
@@ -362,7 +362,7 @@ fn assembly_tree_hover_frame_cost() {
         h.app.run("component.activate", json!({"component": "Wheel"})).unwrap();
         println!("{}", hover_rows(&mut h, &mut frames, SIZE, base + 1_000_000, &format!("{label} mode=component_active")));
         h.app.run("component.activate", json!({"component": 0})).unwrap();
-        let parts: Vec<String> = h.app.session.world_state().bodies.iter().filter(|b| b.component == 0).map(|b| b.name.clone()).collect();
+        let parts: Vec<String> = h.app.session.world_state().unwrap().bodies.iter().filter(|b| b.component == 0).map(|b| b.name.clone()).collect();
         h.app.run("appearance.assign", json!({"bodies": parts, "color": "#88aacc", "opacity": 0.5})).unwrap();
         println!("{}", hover_rows(&mut h, &mut frames, SIZE, base + 2_000_000, &format!("{label} mode=glass_parts")));
     }
@@ -448,11 +448,11 @@ fn step_file_cost() {
     };
     let import = ms(|| drop(h.app.run("file.insert_step", json!({"path": path.to_string_lossy()})).unwrap()));
     phase(&mut line, "import", import);
-    let world = ms(|| drop(h.app.session.world_state()));
+    let world = ms(|| drop(h.app.session.world_state().unwrap()));
     phase(&mut line, "world", world);
-    let mesh = ms(|| h.app.session.world_state().warm_meshes(|| true));
+    let mesh = ms(|| h.app.session.world_state().unwrap().warm_meshes(|| true));
     phase(&mut line, "mesh", mesh);
-    let st = h.app.session.world_state();
+    let st = h.app.session.world_state().unwrap();
     let bodies: Vec<String> = st.bodies.iter().map(|b| b.name.clone()).collect();
     let triangles: usize = st.bodies.iter().map(|b| b.mesh().triangles.len()).sum();
     let components = h.app.session.doc.components.len();

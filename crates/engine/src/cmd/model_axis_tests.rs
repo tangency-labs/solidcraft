@@ -82,7 +82,7 @@ fn surface_revolve_about_a_circular_edge() {
     ring_profile(&mut s);
     run(&mut s, "surface.revolve", json!({"sketch": "Profile", "axis": {"edge": [45, 0, 0]}, "angle": "180 deg"}));
     run(&mut s, "parameters.change", json!({"name": "cx", "expression": "41 mm"}));
-    let st = s.world_state();
+    let st = s.world_state().unwrap();
     // A half turn about x = 41: the far side of the profile ends up at x = 41 − 7 ± 1.
     let b = st.bodies.last().map(|b| b.mesh().bounds()).unwrap();
     assert!((b.min.x - (41.0 - 7.0)).abs() < 1e-3, "{b:?}");
@@ -98,14 +98,14 @@ fn circular_pattern_about_a_boss_wall_follows_the_boss() {
     run(&mut s, "solid.hole", json!({"position": [130, 100, 5], "diameter": 2, "name": "Hole"}));
     run(&mut s, "solid.pattern.circular", json!({"features": ["Hole"], "axis": {"face": [110, 100, 10]}, "count": 4, "name": "Ring"}));
     let holes = |s: &Session, cx: f64, r: f64| {
-        let st = s.world_state();
+        let st = s.world_state().unwrap();
         let body = &st.bodies[0].body;
         [(r, 0.0), (0.0, r), (-r, 0.0), (0.0, -r)].iter().all(|(dx, dy)| !body.contains(Vec3::new(cx + dx, 100.0 + dy, 2.5)))
     };
     assert!(holes(&s, 100.0, 30.0), "four holes round the boss");
     run(&mut s, "parameters.change", json!({"name": "cx", "expression": "90 mm"}));
     assert!(holes(&s, 90.0, 40.0), "the copies turn about the boss where it is now");
-    let st = s.world_state();
+    let st = s.world_state().unwrap();
     assert!(st.bodies[0].body.contains(Vec3::new(100.0, 130.0, 2.5)), "not where the boss was");
 }
 
@@ -158,7 +158,7 @@ fn the_axis_keeps_its_turn_whichever_way_the_edge_runs() {
         let mut s = shaft();
         ring_profile(&mut s);
         run(&mut s, "solid.revolve", json!({"sketch": "Profile", "axis": {"edge": edge}, "angle": "90 deg", "operation": "new"}));
-        let st = s.world_state();
+        let st = s.world_state().unwrap();
         st.bodies.last().map(|b| b.mesh().bounds()).unwrap()
     };
     let (top, bottom) = (quarter([45.0, 0.0, 10.0]), quarter([45.0, 0.0, 0.0]));

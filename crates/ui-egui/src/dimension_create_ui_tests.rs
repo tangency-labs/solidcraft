@@ -1160,7 +1160,7 @@ fn model_text(h: &Harness, param: &str) -> [f32; 2] {
     let sk = h
         .app
         .session
-        .world_state()
+        .world_state().unwrap()
         .sketch(h.app.session.doc.features.iter().find(|f| f.name.starts_with("Sketch")).unwrap().id)
         .unwrap()
         .sketch
@@ -1172,7 +1172,7 @@ fn model_text(h: &Harness, param: &str) -> [f32; 2] {
 
 /// The extruded plate's width and depth (x, y), rounded to 0.001 mm.
 fn plate_max(h: &Harness) -> [f64; 2] {
-    let b = h.app.session.world_state().body("Plate").unwrap().mesh().bounds();
+    let b = h.app.session.world_state().unwrap().body("Plate").unwrap().mesh().bounds();
     [((b.max.x - b.min.x) * 1000.0).round() / 1000.0, ((b.max.y - b.min.y) * 1000.0).round() / 1000.0]
 }
 
@@ -1238,7 +1238,7 @@ fn a_driven_shown_dimension_is_read_only() {
     h.app.run("sketch.dimension", json!({"entities":["l3"],"driven":true,"text_at":[10,14]})).unwrap();
     h.app.run("sketch.finish", json!({})).unwrap();
     h.settle();
-    let id = h.app.session.world_state().sketch(sketch).unwrap().sketch.constraints.iter().find(|c| c.driven).unwrap().id.clone();
+    let id = h.app.session.world_state().unwrap().sketch(sketch).unwrap().sketch.constraints.iter().find(|c| c.driven).unwrap().id.clone();
     let (_, _, p) = crate::dim_view::model_drawn().into_iter().find(|(_, d, _)| *d == id).unwrap();
     let doc = h.app.session.doc.to_json();
     h.step(&json!({"click":[p.x, p.y],"double":true})).unwrap();

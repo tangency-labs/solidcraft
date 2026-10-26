@@ -3598,11 +3598,12 @@ pub(crate) fn revolve_axis(
 }
 
 /// The model a revolve axis is found in: what construction geometry of component `comp` is built
-/// on when the axis is an edge or face of it (only then is it worth placing).
-pub(super) fn axis_state<'a>(doc: &Document, st: &'a ModelState, comp: u64, axis: &AxisRef) -> std::borrow::Cow<'a, ModelState> {
+/// on when the axis is an edge or face of it (only then is it worth placing); a model that cannot
+/// be placed is the error.
+pub(super) fn axis_state<'a>(doc: &Document, st: &'a ModelState, comp: u64, axis: &AxisRef) -> Result<std::borrow::Cow<'a, ModelState>> {
     match axis {
         AxisRef::Model { .. } => construction_state(doc, st, comp),
-        _ => std::borrow::Cow::Borrowed(st),
+        _ => Ok(std::borrow::Cow::Borrowed(st)),
     }
 }
 
@@ -4535,7 +4536,7 @@ fn feature_tools_with_constructor(
             )?;
             let regions = solidcraft_sketch::merge_regions(&select_profiles(&ss, profiles)?);
             let (o, d) =
-                revolve_axis(&ss, axis, &axis_state(doc, st, f.component, axis), &|name| construction_axis_in(Some(doc), st, name, f.component))?;
+                revolve_axis(&ss, axis, &*axis_state(doc, st, f.component, axis)?, &|name| construction_axis_in(Some(doc), st, name, f.component))?;
             // To Object is in this feature's component frame: the model as seen from there.
             let tst = if to.is_some() { state_in_frame(doc, st, f.component)? } else { std::borrow::Cow::Borrowed(st) };
             let angles = if to.is_some() {
@@ -5371,7 +5372,7 @@ fn pattern_transforms(doc: &Document, vals: &BTreeMap<String, Value>, st: &Model
         crate::PatternKind::Circular { origin, axis, count: c, angle, alignment, reversed, axis_ref, axis_feature } => {
             // On an edge or round face: about it as it is now; on a construction axis: where it is.
             let (origin, axis) = match (axis_ref, axis_feature) {
-                (Some(g), _) => crate::construct::model_axis(&construction_state(doc, st, component), g)?,
+                (Some(g), _) => crate::construct::model_axis(&*construction_state(doc, st, component)?, g)?,
                 (None, Some(name)) => construction_axis_in(Some(doc), st, name, component)?,
                 (None, None) => (origin.0, axis.0),
             };

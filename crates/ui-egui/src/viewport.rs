@@ -6175,7 +6175,7 @@ mod tests {
         let built: usize = planned.blocks.iter().map(|b| b.bytes.vertices.len()).sum();
         assert_eq!(built, 0, "and none is built on the CPU");
         // Hovered, a faded body drawn from its plan lights through the plan's triangles.
-        let faded = app.session.world_state().bodies.iter().find(|b| b.name.starts_with("Faded")).map(|b| b.name.clone()).unwrap();
+        let faded = app.session.world_state().unwrap().bodies.iter().find(|b| b.name.starts_with("Faded")).map(|b| b.name.clone()).unwrap();
         app.viewport.hover_bodies = vec![faded];
         assert_eq!(build_highlight(&app).hover_planned.len(), 1, "the faded body's plan is lit");
         app.viewport.hover_bodies.clear();
@@ -6317,7 +6317,7 @@ mod tests {
         app.fit_view();
         const SIZE: u32 = 128;
         let rect = Rect::from_min_size(Pos2::ZERO, vec2(SIZE as f32, SIZE as f32));
-        let body = app.session.world_state().bodies[0].clone();
+        let body = app.session.world_state().unwrap().bodies[0].clone();
         let proj = projection(&app, rect);
         let e = proj.cam.eye().to_f32();
         let eye = [e[0], e[1], e[2], if proj.cam.fov > 0.0 { 1.0 } else { 0.0 }];
@@ -8350,7 +8350,7 @@ mod tests {
     }
 
     fn app_body(app: &SolveApp, name: &str) -> solidcraft_engine::doc::ModelBody {
-        app.session.world_state().body(name).cloned().unwrap()
+        app.session.world_state().unwrap().body(name).cloned().unwrap()
     }
 
     #[test]

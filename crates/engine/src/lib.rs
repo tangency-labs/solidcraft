@@ -310,15 +310,17 @@ impl ComputedCommands {
         session.same_document_context(source) && session.selection == source.selection
     }
 
-    /// Prepare display tessellation before returning the transaction to the window.
-    pub fn warm_meshes(&self, keep_going: impl Fn() -> bool + Sync) {
-        self.warm_display(solidcraft_doc::display_quality::DisplayQuality::Normal, keep_going);
+    /// Prepare display tessellation before returning the transaction to the window; a model that
+    /// cannot be placed is the error.
+    pub fn warm_meshes(&self, keep_going: impl Fn() -> bool + Sync) -> Result<()> {
+        self.warm_display(solidcraft_doc::display_quality::DisplayQuality::Normal, keep_going)
     }
 
     /// Prepare both the reference picking mesh and the GPU plan/highlight mesh at the
     /// selected quality. Warming only the reference mesh leaves cold planning on the UI.
-    pub fn warm_display(&self, quality: solidcraft_doc::display_quality::DisplayQuality, keep_going: impl Fn() -> bool + Sync) {
-        self.computed.world_state().warm_display_at(quality, keep_going);
+    pub fn warm_display(&self, quality: solidcraft_doc::display_quality::DisplayQuality, keep_going: impl Fn() -> bool + Sync) -> Result<()> {
+        self.computed.world_state()?.warm_display_at(quality, keep_going);
+        Ok(())
     }
 }
 

@@ -76,7 +76,7 @@ fn pointer_on_sketch(plane: &Plane, proj: &Proj, at: Pos2) -> Option<Vec2> {
 /// The picked curves (as polylines on the sketch) and the box around them and the picked points:
 /// its middle and its size. None when nothing usable is picked or the box has no extent.
 fn picked_box(app: &SolveApp, d: &crate::dialogs::Dialog) -> Option<(Vec<Vec<Vec2>>, [f64; 2], [f64; 2])> {
-    let state = app.session.world_state();
+    let state = crate::open_meshing::session_world(&app.session);
     let sk = &state.sketch(app.session.active_sketch?)?.sketch;
     let mut lines: Vec<Vec<Vec2>> = Vec::new();
     let mut points: Vec<Vec2> = Vec::new();

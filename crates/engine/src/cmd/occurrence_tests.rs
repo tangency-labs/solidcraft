@@ -1351,10 +1351,10 @@ fn pasted_and_moved_things_survive_reopening() {
     run(&mut s, "solid.box", json!({"length": 1, "width": 1, "height": 1, "corner": [50, 0, 0], "body_name": "Pin"}));
     run(&mut s, "component.activate", json!({"component": 0}));
     run(&mut s, "occurrence.reparent", json!({"occurrence": b_at, "parent": a}));
-    let before = s.world_state();
+    let before = s.world_state().unwrap();
     let mut reopened = Session { doc: solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap().into(), ..Session::default() };
     reopened.refresh();
-    let after = reopened.world_state();
+    let after = reopened.world_state().unwrap();
     for name in ["Cube", "Cube (2)", "Pin"] {
         let (was, is) = (before.body(name).unwrap().mesh().bounds(), after.body(name).unwrap().mesh().bounds());
         assert!(was.min.dist(is.min) < 1e-6 && was.max.dist(is.max) < 1e-6, "{name}: {was:?} → {is:?}");
@@ -1377,7 +1377,7 @@ fn a_body_seen_in_another_placement_copies_from_there() {
     assert_ne!(shown, "Cube");
     let out = run(&mut s, "component.copy_bodies", json!({"bodies": [shown.clone()], "component": 0}));
     assert_eq!(out["bodies"], json!(["Cube (2)"]));
-    let world = s.world_state();
+    let world = s.world_state().unwrap();
     let (seen, copy) = (world.body(&shown).unwrap().mesh().bounds(), world.body("Cube (2)").unwrap().mesh().bounds());
     assert!(seen.min.dist(copy.min) < 1e-6 && seen.max.dist(copy.max) < 1e-6, "{seen:?} vs {copy:?}");
     let state = s.model.state();
