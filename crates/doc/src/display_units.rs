@@ -147,10 +147,14 @@ fn format_display(x: f64, scale: f64, decimals: u8, f: &NumberFormat, step: Opti
     Ok(Shown { text, value })
 }
 
+/// The most decimals a number is written with: the one cap for the formatter and for what names
+/// decimals to it (a drafting profile).
+pub const MAX_DECIMALS: u8 = 8;
+
 /// Validate and prepare the magnitude once, identically for both rounding paths.
 fn prepare_decimal(x: f64, decimals: u8, resolution: usize) -> Result<String> {
-    if decimals > 8 {
-        return Err(DocError::Invalid("number precision must be at most 8 decimal places".into()));
+    if decimals > MAX_DECIMALS {
+        return Err(DocError::Invalid(format!("number precision must be at most {MAX_DECIMALS} decimal places")));
     }
     if !x.is_finite() || x.abs() > 1e12 {
         return Err(DocError::Invalid("display value must be finite with magnitude at most 1e12".into()));
