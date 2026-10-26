@@ -107,7 +107,13 @@
         "ladder/06-threads/006-external-m10-into-chamfer",
         "ladder/06-threads/002-external-m10x1-fine",
         "ladder/06-threads/008-multi-start-thread",
-        "ladder/06-threads/009-thread-runout-length"
+        "ladder/06-threads/009-thread-runout-length",
+        "ladder/06-threads/011-external-tr20x4",
+        "ladder/06-threads/012-external-acme-3-4-6",
+        "ladder/06-threads/013-external-s20x4",
+        "ladder/06-threads/014-external-buttress-asme-1.5-8",
+        "ladder/06-threads/015-internal-tr20x4-nut",
+        "ladder/06-threads/016-external-m10-left-hand"
       ],
       "tier": "06-threads",
       "what": "modelled threads"

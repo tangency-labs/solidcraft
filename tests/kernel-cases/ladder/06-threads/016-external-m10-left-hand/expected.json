@@ -1,0 +1,11 @@
+{
+ "sources": [],
+ "what": "001's modelled M10 thread, left-handed: the same volume, turning the other way",
+ "source": "analytic",
+ "method": "ISO 68-1 basic profile (60 deg, root flat P/4 at d - 5H/4 ... minor d1 = d - 1.0825 P, crest flat P/8): a helical groove of fixed section is a screw motion, so averaged over the turn every meridian half-plane holds the same section and V = 2 pi int int r m(r) dr dz over the stock's section, m the material fraction per pitch; the groove runs out past free ends. Tolerance 0.01%: SMLib's exact screw sweep; a mirror image of 001's groove, so the same volume",
+ "body_count": 1,
+ "volume_mm3": 1954.24591725,
+ "tolerance": {
+  "rel": 0.0001
+ }
+}

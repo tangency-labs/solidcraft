@@ -406,6 +406,51 @@ case(T6, "010-part-threaded-boss", "the running part with a modelled M16 thread 
      [thr([23, 15, 25], designation="M16")], {"body_count": 1},
      "the boss stands on the base (thread to a shoulder) and has an M5 hole in its top; modelled threads are faceted, so later tiers build on the part before this step and 11-cumulative-parts adds it last", base=C5, source="invariants")
 
+# The other standard forms (crates/doc/src/thread_forms.rs, docs/threads.md): a groove of a fixed
+# straight-flanked section, its tooth `flat` wide at the crest radius and widening by tan a + tan b
+# per unit of depth, removes 2 pi int r w(r) dr per turn (Pappus, the screw motion).
+def form_turn(P, flat, crest, a, b, r0, r1, internal=False):
+    t = math.tan(math.radians(a)) + math.tan(math.radians(b))
+    w = lambda r: P - flat - ((r - crest) if internal else (crest - r)) * t
+    return 2 * PI * quad(lambda r: r * w(r), r0, r1, 16)
+INCH = 25.4
+TOL_F = {"rel": 1e-4}
+FMETH = ("groove volume per turn 2 pi int r w(r) dr over the material it cuts (Pappus on the axial section; a screw motion), w(r) = P - flat - depth (tan a + tan b); "
+         "six whole turns between free ends, so V = stock - 6 x that. Tolerance 0.01%: SMLib's exact screw sweep. ")
+def shaft_form(name, what, form, desig, d, P, flat, a, b, r3, extra="", **p):
+    L = 6 * P
+    v = PI * (d / 2) ** 2 * L - 6 * form_turn(P, flat, d / 2, a, b, r3, d / 2)
+    case(T6, name, what, [cyl([0, 0, 0], d / 2, L, body_name="Part"), thr([d / 2, 0, L / 2], form=form, designation=desig, **p)],
+         {"body_count": 1, "volume_mm3": v, "tolerance": TOL_F}, FMETH + extra)
+t15, t145 = math.tan(math.radians(15)), math.tan(math.radians(14.5))
+shaft_form("011-external-tr20x4", "a modelled trapezoidal Tr20x4 thread (ISO 2904) on a d20 shaft, six turns", "trapezoidal", "Tr20x4", 20, 4,
+           2 * (1 - t15), 15, 15, 10 - 2 - 0.25,
+           "ISO 2904: 30 deg, H1 = P/2, crest flat P/2 (1 - tan15) = 0.366 P, external minor d3 = d - 2 (H1 + ac) = 15.5 (ac = 0.25 for P 2..5)")
+shaft_form("012-external-acme-3-4-6", "a modelled 3/4-6 ACME thread (ASME B1.5, general purpose) on a 3/4 in shaft, six turns", "acme", "3/4-6 ACME", 0.75 * INCH, INCH / 6,
+           INCH / 12 * (1 - t145), 14.5, 14.5, 0.375 * INCH - INCH / 12 - 0.010 * INCH,
+           "ASME B1.5: 29 deg, h = P/2, crest flat 0.3707 P, external minor d - P - 0.020 in (10 threads per inch or coarser)")
+t3 = math.tan(math.radians(3)) + math.tan(math.radians(30))
+shaft_form("013-external-s20x4", "a modelled metric buttress S20x4 thread (DIN 513, 3/30 deg) on a d20 shaft, six turns", "buttress", "S20x4", 20, 4,
+           (4 - 3 * t3) / 2, 3, 30, 10 - 0.86777 * 4,
+           "DIN 513-1: 3 deg load flank, 30 deg clearance flank, H1 = 0.75 P, flats (P - 0.75 P (tan3 + tan30))/2 = 0.26384 P, external minor d3 = d - 2 x 0.86777 P = 13.058 (IS 4696-3 table)")
+t7 = math.tan(math.radians(7)) + 1
+P8 = INCH / 8
+shaft_form("014-external-buttress-asme-1.5-8", "a modelled 1.5-8 buttress thread (ASME B1.9 basic profile, 7/45 deg) on a 1.5 in shaft, six turns", "buttress_asme", "1.5-8 BUTT",
+           1.5 * INCH, P8, (P8 - 0.6 * P8 * t7) / 2, 7, 45, 0.75 * INCH - 0.6 * P8,
+           "ASME B1.9 basic profile: 7 deg load flank, 45 deg clearance flank, h = 0.6 P, flats (P - 0.6 P (tan7 + tan45))/2 = 0.16316 P; the root radius and allowances are not modelled")
+dT, PT = 20, 4
+vnut = 6 * form_turn(PT, 2 * (1 - t15), (dT - PT) / 2, 15, 15, (dT - PT) / 2, dT / 2 + 0.25, internal=True)
+case(T6, "015-internal-tr20x4-nut", "a modelled internal Tr20x4 thread in a d16 (D1 = d - P) bore through a 40x40x24 block",
+     [box([-20, -20, 0], 40, 40, 24, body_name="Part"), cyl([0, 0, -1], 8, 26, body_name="Bore"), C("solid.combine", target="Part", tools=["Bore"], operation="cut"),
+      thr([8, 0, 12], designation="Tr20x4")],
+     {"body_count": 1, "volume_mm3": 40 * 40 * 24 - PI * 64 * 24 - vnut, "tolerance": TOL_F},
+     FMETH.replace("between free ends", "through the block, both ends free") + "ISO 2904 internal: the nut's crest flat 0.366 P at D1 = d - P = 16, its root at D4 = d + 2 ac = 20.5; "
+     "the groove from the bore wall r 8 out to r 10.25, w(r) = P - 0.366 P - (r - 8) 2 tan15")
+case(T6, "016-external-m10-left-hand", "001's modelled M10 thread, left-handed: the same volume, turning the other way", cylT + [thr([5, 0, 15], designation="M10", hand="left")],
+     {"body_count": 1, "volume_mm3": ext_volume(10, 1.5, [(0, 30, lambda z: 5)]), "tolerance": {"rel": 1e-4}},
+     TMETH.replace("Tolerance 0.5%: solid.thread cuts faceted by design (chords within P/200 on the body, P/100 on the tool)", "Tolerance 0.01%: SMLib's exact screw sweep") +
+     "; a mirror image of 001's groove, so the same volume")
+
 # ---------------------------------------------------------------- 07 fillets
 F = lambda edges, r, **p: C("solid.fillet", edges=edges, radius=r, **p)
 case(T7, "001-single-edge-r5", "an r5 round on the stock's top front edge", [F([[30, 0, 20]], 5)],

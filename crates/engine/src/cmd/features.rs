@@ -93,7 +93,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("solid.thread", "Thread", thread)
         .at("SOLID", "CREATE")
         .icon("thread")
-        .params("face: [x,y,z] on a cylindrical face; designation?: ISO metric (\"M8\", \"M8x1\"; default: the size that fits); extent?: full|length|up_to (default: length when `length` is given, up_to when `up_to` is, else full: the whole face); length?: expr (from the end the thread starts at); up_to?: [x,y,z] (a point, such as on a shoulder face: the thread runs to its place along the axis) | plane name or {origin, normal} (to where the plane crosses the axis); from?: [x,y,z] near the end of the face the thread starts at (default: the face's only free end, the one with no material past it; else the end the `face` point lies within a third of the face of; a pick in the middle of a face whose ends are alike is refused); modeled?: bool (default false). Cosmetic: the model is unchanged, model.threads lists it. Modeled: cuts the thread profile into the body: past a free end the groove runs out a pitch into the air (or through a chamfer); at a shoulder, a head or a blind hole's bottom it stops with its section clear of it, never cutting into it; a shaft thicker than the thread is first turned down to its major diameter over the threaded length"),
+        .params("face: [x,y,z] on a cylindrical face; form?: metric|trapezoidal|acme|buttress|buttress_asme (default: the one `designation` names, else metric; square is refused: no current standard defines it); designation?: the size, as its standard writes it: metric \"M8\", \"M8x1\", \"M16xPh3P1.5\" (ISO 68-1, ISO 261, ISO 965-1); trapezoidal \"Tr20x4\", \"Tr40x14(P7)\" (ISO 2904, ISO 2903); buttress \"S20x4\", \"S40x14(P7)\" (DIN 513, 3°/30°); acme \"1/2-10 ACME\" (ASME B1.5); buttress_asme \"2.5-8 BUTT\" (ASME B1.9, 7°/45°, basic profile; no size table) (default: the standard size that fits the face, a shaft its major diameter, a hole its drill); hand?: right|left|both (default right; both: a right- and a left-handed groove crossing); steep_flank?: start|end (buttress only, default end: the steep flank of the screw's teeth faces the thread's end, the way its axis points); starts?: 1..8 (lead = starts x pitch; not built yet); ease_in?, ease_out?: expr|standard|short (runout, not built yet); tip?: none|chamfer (with chamfer_angle?, chamfer_depth?; not built yet); extent?: full|length|up_to (default: length when `length` is given, up_to when `up_to` is, else full: the whole face); length?: expr (from the end the thread starts at); up_to?: [x,y,z] (a point, such as on a shoulder face: the thread runs to its place along the axis) | plane name or {origin, normal} (to where the plane crosses the axis); from?: [x,y,z] near the end of the face the thread starts at (default: the face's only free end, the one with no material past it; else the end the `face` point lies within a third of the face of; a pick in the middle of a face whose ends are alike is refused); modeled?: bool (default false). Cosmetic: the model is unchanged, model.threads lists it. Modeled: cuts the thread profile into the body: past a free end the groove runs out a pitch into the air (or through a chamfer); at a shoulder, a head or a blind hole's bottom it stops with its section clear of it, never cutting into it; a shaft thicker than the thread is first turned down to its major diameter over the threaded length"),
     CommandSpec::new("solid.shell", "Shell", shell)
         .at("SOLID", "MODIFY")
         .icon("shell")
@@ -2896,12 +2896,68 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
         .get("face")
         .and_then(|v| vec3(v).or_else(|| v.get("point").and_then(vec3)))
         .ok_or_else(|| bad(cmd, "`face` must be a point [x, y, z] on a cylindrical face"))?;
+    use solidcraft_doc::thread_forms::{SteepFlank, ThreadForm, ThreadHand, ThreadTip};
     let designation = str_(p, "designation").map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
-    if let Some(t) = &designation
-        && solidcraft_doc::parse_metric_thread(t).is_none()
-    {
-        return Err(bad(cmd, unknown_metric_thread(t, "M8 or M8x1")));
+    let form = match str_(p, "form") {
+        Some(f) => ThreadForm::from_name(f)
+            .ok_or_else(|| bad(cmd, format!("unknown thread form `{f}` (metric, trapezoidal, acme, buttress, buttress_asme or square)")))?,
+        None => designation.as_deref().and_then(ThreadForm::of_designation).unwrap_or_default(),
+    };
+    if let Some(why) = form.refused() {
+        return Err(bad(cmd, why));
     }
+    let starts = match p.get("starts") {
+        None | Some(Value::Null) => 1,
+        Some(v) => v.as_u64().filter(|n| (1..=8).contains(n)).ok_or_else(|| bad(cmd, "`starts` must be a whole number from 1 to 8"))? as u32,
+    };
+    if let Some(t) = &designation {
+        form.parse(t, starts).map_err(|e| bad(cmd, e))?;
+    }
+    let hand = match str_(p, "hand") {
+        None | Some("right") => ThreadHand::Right,
+        Some("left") => ThreadHand::Left,
+        Some("both") => ThreadHand::Both,
+        Some(h) => return Err(bad(cmd, format!("unknown hand `{h}` (right, left or both)"))),
+    };
+    let steep_flank = match str_(p, "steep_flank") {
+        None | Some("end") => SteepFlank::End,
+        Some("start") => SteepFlank::Start,
+        Some(h) => return Err(bad(cmd, format!("unknown steep_flank `{h}` (start or end)"))),
+    };
+    if p.get("steep_flank").is_some() && !matches!(form, ThreadForm::Buttress | ThreadForm::ButtressAsme) {
+        return Err(bad(cmd, "`steep_flank` is for the buttress forms"));
+    }
+    let tip = match str_(p, "tip") {
+        None | Some("none") => ThreadTip::None,
+        Some("chamfer") => ThreadTip::Chamfer,
+        Some(t) => return Err(bad(cmd, format!("unknown tip `{t}` (none or chamfer)"))),
+    };
+    let angled = |key: &str, kind: Kind| -> Result<Option<solidcraft_doc::Expr>> {
+        let e = expr(p, key);
+        if let Some(e) = &e {
+            check_expr(s, e, kind, cmd, key)?;
+        }
+        Ok(e)
+    };
+    let chamfer_angle = angled("chamfer_angle", Kind::Angle)?;
+    let chamfer_depth = angled("chamfer_depth", Kind::Length)?;
+    if tip == ThreadTip::None && (chamfer_angle.is_some() || chamfer_depth.is_some()) {
+        return Err(bad(cmd, "`chamfer_angle` and `chamfer_depth` go with `tip: chamfer`"));
+    }
+    let ease = |key: &str| -> Result<Option<solidcraft_doc::ThreadRunout>> {
+        Ok(match p.get(key) {
+            None | Some(Value::Null) => None,
+            Some(Value::String(t)) if t == "standard" => Some(solidcraft_doc::ThreadRunout::Standard),
+            Some(Value::String(t)) if t == "short" => Some(solidcraft_doc::ThreadRunout::Short),
+            Some(Value::Number(n)) if n.as_f64() == Some(0.0) => None,
+            Some(_) => {
+                let e = expr(p, key).ok_or_else(|| bad(cmd, format!("`{key}` must be a length, \"standard\" or \"short\"")))?;
+                check_expr(s, &e, Kind::Length, cmd, key)?;
+                Some(solidcraft_doc::ThreadRunout::Length { length: e })
+            }
+        })
+    };
+    let (ease_in, ease_out) = (ease("ease_in")?, ease("ease_out")?);
     let length = expr(p, "length");
     if let Some(l) = &length {
         check_expr(s, l, Kind::Length, cmd, "length")?;
@@ -2926,13 +2982,33 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
         Some(v) => Some(Position(vec3(v).ok_or_else(|| bad(cmd, "`from` must be a point [x, y, z] near the end the thread starts at"))?)),
     };
     let modeled = p.get("modeled").and_then(Value::as_bool).unwrap_or(false);
+    // The coarse metric range bounds only a metric thread with no designation given.
     if designation.is_none()
+        && form == ThreadForm::Metric
         && let Some(msg) = beyond_coarse_range(&s.model.state(), face)
     {
         return Err(bad(cmd, msg));
     }
     let handedness = thread_handedness(p, cmd)?;
-    let v = add_feature(s, p, FeatureKind::Thread { face: FacePick(face), designation, length, modeled, handedness, from, up_to })?;
+    let kind = FeatureKind::Thread {
+        face: FacePick(face),
+        designation,
+        length,
+        modeled,
+        handedness,
+        from,
+        up_to,
+        form,
+        hand,
+        starts,
+        ease_in,
+        ease_out,
+        tip,
+        chamfer_angle,
+        chamfer_depth,
+        steep_flank,
+    };
+    let v = add_feature(s, p, kind)?;
     let st = s.model.state();
     let t = v.get("feature").and_then(Value::as_u64).and_then(|id| st.threads.iter().find(|t| t.feature == id).cloned());
     Ok(json!({"feature": v.get("feature"), "name": v.get("name"), "thread": t}))
