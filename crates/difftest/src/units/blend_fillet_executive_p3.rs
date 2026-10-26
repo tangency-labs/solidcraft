@@ -195,6 +195,15 @@ impl ExecutiveAccess<Handle> for Access {
     ) -> SolidResult<()> {
         executive.create_fillet_corners(k, |_, _, _, _| missing(), error)
     }
+    /// `SmFilletExecutive::DoPiecewiseMerge`: this empty-B-rep fixture never builds a
+    /// fillet B-rep, so there is nothing to merge piecewise.
+    fn piecewise_merge(
+        &mut self,
+        _: &mut Kernel,
+        _: &mut FilletExecutive<Handle>,
+    ) -> SolidResult<()> {
+        missing()
+    }
     // This empty-B-rep fixture has no face handles or intersector world. These
     // required adapters reject nonexistent objects; they are not UNPORTED calls
     // to the now-ported face p3, topology intersector p2, stitch p2, fillet geom p4
@@ -698,6 +707,13 @@ impl ExecutiveAccess<Handle> for Access {
     fn set_surface_generator(&mut self, _: Handle, _: Handle) -> SolidResult<()> {
         missing()
     }
+    fn new_fillet_solver(
+        &mut self,
+        _: &mut Kernel,
+        _: &solidcore::blend::fillet_executive::p2::SolverSpec<'_, Handle>,
+    ) -> SolidResult<Handle> {
+        missing()
+    }
 }
 
 fn flag(value: bool) -> f64 {
@@ -770,7 +786,7 @@ fn rust(input: &Inputs) -> Result<Output, HarnessError> {
     else {
         return Err(HarnessError::new("short executive record"));
     };
-    let mut k = Kernel::default();
+    let mut k = seeded_kernel()?;
     k.context.set_doing_boolean(*prior_boolean != 0.0);
     let mut b = solidcore::topology::Brep::new();
     // Apply SmZoneTol3d's default-sentinel/fabs conversion, then write the member.
@@ -979,4 +995,24 @@ impl UnitDiff for Runner {
             flag(rng.chance(0.5)), flag(rng.chance(0.5)), flag(rng.chance(0.5)),
             flag(rng.chance(0.5)), flag(rng.chance(0.5))]}))
     }
+}
+
+/// The C++ library's `sdStaticStep` (ND-3: `SmFilletSolver::ComputePointValues`'
+/// function static, fixed by the first call in the process), probed after the case's
+/// C++ run, for the Rust side's [`Kernel::fillet_point_step`] latch. Earlier cases in
+/// the same process (a tangent-point fillet latches `1e-3`) change later C++ results;
+/// the Rust kernel of every case starts from the same value. The probe latches `1e-5`
+/// when nothing has, as the case's own first call would have if the C++ run never
+/// reached the finite-difference step (the Rust run then never reads it either).
+pub(super) fn point_step() -> Result<Option<f64>, HarnessError> {
+    solidcore_ffi::units::blend_fillet_solver_p4::static_step()
+        .map(Some)
+        .map_err(|e| HarnessError::new(format!("sdStaticStep probe: {e}")))
+}
+
+/// A fresh kernel whose `sdStaticStep` latch holds the C++ library's (see [`point_step`]).
+pub(super) fn seeded_kernel() -> Result<Kernel, HarnessError> {
+    let k = Kernel::default();
+    k.fillet_point_step.set(point_step()?);
+    Ok(k)
 }

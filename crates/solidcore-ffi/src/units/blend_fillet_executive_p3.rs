@@ -396,6 +396,80 @@ pub fn piecewise_source(input: &[f64], path: Option<&str>) -> Result<Vec<f64>, F
     })
 }
 
+extern "C" {
+    fn sc_blend_fillet_executive_p3_curve_sih_solid(
+        input: *const f64,
+        n: i64,
+        out: *mut f64,
+        cap: i64,
+        len: *mut i64,
+    ) -> i32;
+    fn sc_blend_fillet_executive_p3_curve_sih_source(
+        path: *const std::ffi::c_char,
+        input: *const f64,
+        n: i64,
+        out: *mut f64,
+        cap: i64,
+        len: *mut i64,
+    ) -> i32;
+}
+
+/// Validate an `SmMakeCurveBlendSIH` step-back factor (finite and positive).
+fn validate_step_back(step_back: f64) -> Result<(), FfiError> {
+    if !step_back.is_finite() || step_back <= 0.0 {
+        return Err(FfiError::InvalidArgument("invalid step-back factor".into()));
+    }
+    Ok(())
+}
+
+/// [`real_solid`] with an `SmMakeCurveBlendSIH(step_back)` self-intersection handler
+/// installed on `SmApiFilletEdges`' executive (`SetSelfIntersectionHandler`), so
+/// every `FlushCurve` runs `SmMakeCurveBlendSIH::SmoothOutIntersection`. Same wire
+/// and record.
+pub fn curve_sih_solid(step_back: f64, input: &[f64]) -> Result<Vec<f64>, FfiError> {
+    validate_step_back(step_back)?;
+    validate_real_solid(input)?;
+    let mut wire = vec![step_back];
+    wire.extend_from_slice(input);
+    call_with_buffer(65536, |out, len| unsafe {
+        sc_blend_fillet_executive_p3_curve_sih_solid(
+            wire.as_ptr(),
+            wire.len() as i64,
+            out.as_mut_ptr(),
+            out.len() as i64,
+            len,
+        )
+    })
+}
+
+/// [`real_source`] with an `SmMakeCurveBlendSIH(step_back)` handler installed (see
+/// [`curve_sih_solid`]). Same wire and record.
+pub fn curve_sih_source(
+    step_back: f64,
+    input: &[f64],
+    path: Option<&str>,
+) -> Result<Vec<f64>, FfiError> {
+    validate_step_back(step_back)?;
+    validate_real_source(input, path.is_some())?;
+    let mut wire = vec![step_back];
+    wire.extend_from_slice(input);
+    let cpath = path
+        .map(std::ffi::CString::new)
+        .transpose()
+        .map_err(|_| FfiError::InvalidArgument("path has a NUL byte".into()))?;
+    let ptr = cpath.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+    call_with_buffer(65536, |out, len| unsafe {
+        sc_blend_fillet_executive_p3_curve_sih_source(
+            ptr,
+            wire.as_ptr(),
+            wire.len() as i64,
+            out.as_mut_ptr(),
+            out.len() as i64,
+            len,
+        )
+    })
+}
+
 /// Validate the surface-surface wire: two surfaces' four corner points (24 values),
 /// radius1, radius2, tolerance, cross-section (native ULONG), mirror and complement
 /// (0/1).
@@ -484,6 +558,13 @@ mod source_tests {
         v.resize(1 + SOURCE_PARAMS, 0.0);
         v.extend([0.5, 1.0, 1.0, 1.0, 0.0]);
         v
+    }
+    #[test]
+    fn curve_sih_rejects_invalid_step_back() {
+        for step_back in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            assert!(super::curve_sih_source(step_back, &cylinder(), None).is_err());
+            assert!(super::curve_sih_solid(step_back, &[10.0, 10.0, 10.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0]).is_err());
+        }
     }
     #[test]
     fn sources_and_paths_are_paired() {

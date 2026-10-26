@@ -1072,6 +1072,15 @@ impl ExecutiveAccess<Handle> for Access {
             error,
         )
     }
+    /// `SmFilletExecutive::DoPiecewiseMerge`: this runner drives the executive's set-up
+    /// stages only and never builds a fillet B-rep to merge piecewise.
+    fn piecewise_merge(
+        &mut self,
+        _: &mut Kernel,
+        _: &mut FilletExecutive<Handle>,
+    ) -> SolidResult<()> {
+        missing()
+    }
     fn corner_setback_distance(&self, _: Handle) -> SolidResult<f64> {
         missing()
     }

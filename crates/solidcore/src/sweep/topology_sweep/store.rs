@@ -131,6 +131,12 @@ pub trait SweepIdentities {
     fn new_curve(&self, _brep: BrepId, _edge: EdgeId, _type_code: i64) -> Result<ObjectRef> {
         Err(invalid("new split curve needs its caller identity"))
     }
+    /// Whether a curve the merge allocates at an edge split takes its actual Curve
+    /// identity from the edit's notification context when it is constructed
+    /// (`p9::CurveIdentity::Actual`), instead of [`Self::new_curve`].
+    fn actual_curve_identities(&self) -> bool {
+        false
+    }
     /// Reserve two distinct non-object handles for each primary region's merge
     /// source lists. They must not collide with topology, geometry or other lists.
     fn source_lists(
@@ -152,6 +158,10 @@ impl core::fmt::Debug for Identities<'_> {
     }
 }
 impl Identities<'_> {
+    fn actual_curve_identities(self) -> bool {
+        self.0.is_some_and(SweepIdentities::actual_curve_identities)
+    }
+
     fn source_lists(
         self,
         namespace: u32,

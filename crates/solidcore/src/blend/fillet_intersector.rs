@@ -324,13 +324,16 @@ pub trait FilletSolverOps {
     fn self_intersection_handler(&self) -> Result<Option<HandlingAlgorithmType>>;
 
     /// The handler's `SmoothOutIntersection(pFilletGeom, r3DCurves, rUVCurves1,
-    /// rUVCurves2)`: joins the new curves to the fillet geometry's previous section.
+    /// rUVCurves2)`: joins the new curves to the fillet geometry's previous section
+    /// (stored in `pseudo`).
     ///
     /// # Errors
     ///
-    /// The handler's failure; [`SolidError::Unported`] until ported.
+    /// The handler's failure.
     fn smooth_out_intersection(
         &mut self,
+        k: &Kernel,
+        pseudo: &mut FilletBrep,
         geom: &Self::FilletGeom,
         curves_3d: &mut Vec<BSplineCurve>,
         uv_curves1: &mut Vec<BSplineCurve>,
@@ -543,20 +546,21 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
 
     fn smooth_out_intersection(
         &mut self,
-        _geom: &FilletGeomId,
-        _curves_3d: &mut Vec<BSplineCurve>,
-        _uv_curves1: &mut Vec<BSplineCurve>,
-        _uv_curves2: &mut Vec<BSplineCurve>,
+        k: &Kernel,
+        pseudo: &mut FilletBrep,
+        geom: &FilletGeomId,
+        curves_3d: &mut Vec<BSplineCurve>,
+        uv_curves1: &mut Vec<BSplineCurve>,
+        uv_curves2: &mut Vec<BSplineCurve>,
     ) -> Result<()> {
-        // FlushCurve calls this only for a smoothing handler. The only handler an
-        // executive can hold here is `SmMakeSurfaceBlendSIH` (blending), and the
-        // smoothing override `SmMakeCurveBlendSIH::SmoothOutIntersection` has no
-        // owning unit (plan/findings.md "fillet_solver_p1: SmoothOutIntersection").
-        // UNPORTED(blend.fillet_executive_p1): SmSelfIntersectionHandler::SmoothOutIntersection (justified: findings.md "fillet_solver_p1: SmoothOutIntersection")
-        Err(SolidError::unported(
-            "SmSelfIntersectionHandler::SmoothOutIntersection",
-            "blend.fillet_executive_p1",
-        ))
+        // FlushCurve calls this only after `self_intersection_handler` found the
+        // executive's smoothing handler (without an executive that read has already
+        // failed: a NULL dereference upstream), and the only smoothing handler is
+        // SmMakeCurveBlendSIH: run its SmoothOutIntersection on this solver
+        let handler = self.solver.executive_curve_blend_sih.ok_or_else(|| {
+            SolidError::invalid_input(OP_FLUSH, "no smoothing self-intersection handler")
+        })?;
+        handler.smooth_out_intersection(self, k, pseudo, *geom, curves_3d, uv_curves1, uv_curves2)
     }
 
     fn has_surface_generator(&self) -> Result<bool> {
@@ -669,6 +673,55 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
             .ok_or_else(|| SolidError::invalid_input(OP_FLUSH, "rail edge use without mate"))?;
         pseudo.set_edgeuse_uv_curve(mate, Some(Curve::from(uv_curve)), true, true)
     }
+}
+
+/// The solver members `SmMakeCurveBlendSIH::SmoothOutIntersection` reaches when this
+/// solver is the intersector's own (no target B-rep: the rail faces' surfaces cannot
+/// be read, [`SolidError::InvalidInput`] where upstream reads them).
+impl crate::blend::fillet_solver::curve_blend_sih::SmoothingSolver for ConstantRadiusAssistedFs {
+    fn original_face_has_surface(&self, _face: crate::topology::FaceId) -> Result<bool> {
+        Err(SolidError::invalid_input(
+            OP_FLUSH,
+            "no target B-rep for the rail faces",
+        ))
+    }
+
+    fn setup_offset_radius(&mut self, tsect: &TsectPnt) -> Result<f64> {
+        let mut radius = 0.0;
+        crate::blend::fillet_solver::p1::FilletSolverOps::setup_offset_values(
+            self,
+            tsect,
+            Some(&mut radius),
+        )?;
+        Ok(radius)
+    }
+
+    fn base_natural_uv_domain(&self, rail: usize) -> Result<Extent2d> {
+        Ok(own_offset_surface(&self.solver, rail)?
+            .base_surface()
+            .natural_uv_domain())
+    }
+
+    fn rail_surface(&self, rail: usize) -> Result<Surface> {
+        Ok(Surface::from(
+            own_offset_surface(&self.solver, rail)?.surface.clone(),
+        ))
+    }
+
+    fn this_approx_tol_3d(&self) -> f64 {
+        self.solver.approx_tol_3d
+    }
+}
+
+/// `GetSurface(rail)` (an `SmOffsetSurface*`; upstream dereferences it unchecked).
+fn own_offset_surface(
+    solver: &FilletSolver,
+    rail: usize,
+) -> Result<&crate::blend::fillet_custom_solver::OffsetSurface> {
+    solver
+        .surface(rail)?
+        .map(|slot| &slot.surface)
+        .ok_or_else(|| SolidError::invalid_input(OP_FLUSH, "no offset surface"))
 }
 
 /// `pFilletGeom->GetRail(rail)`, dereferenced (`NULL` is [`SolidError::InvalidInput`]).
@@ -1763,6 +1816,8 @@ impl<'s, 't, O: SolutionObject + 't, G: Clone> FilletIntersector<'s, 't, O, G> {
         if let Some(algorithm) = solver.self_intersection_handler()? {
             if algorithm == HandlingAlgorithmType::Smoothing {
                 let smoothed = solver.smooth_out_intersection(
+                    k,
+                    pseudo,
                     &fillet_geom,
                     &mut curves_3d,
                     &mut surface1_uv_curves,
@@ -2373,6 +2428,8 @@ mod tests {
 
         fn smooth_out_intersection(
             &mut self,
+            _k: &Kernel,
+            _pseudo: &mut FilletBrep,
             _geom: &(),
             _curves_3d: &mut Vec<BSplineCurve>,
             _uv_curves1: &mut Vec<BSplineCurve>,

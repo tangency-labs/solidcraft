@@ -5,7 +5,7 @@
 //!
 //! | Rust | Upstream |
 //! |------|----------|
-//! | `FilletSession::do_piecewise_merge` (crate) | `SmFilletExecutive::DoPiecewiseMerge` up to `delete m_pFilletBrep` |
+//! | `FilletSession::do_piecewise_merge` (crate) | `SmFilletExecutive::DoPiecewiseMerge` |
 //! | `PiecewiseIdentities` (private) | the addresses of the target, the intermediate body and the merge's stand-alone face B-reps |
 //!
 //! Deviations: `PiecewiseMerge`'s leading `m_vTI.IntersectInsertRelate()` runs on the
@@ -19,20 +19,34 @@
 //! the first face's `PartialMerge` into an empty B-rep has no common vertices, the
 //! only place the flag is read, and every later Boolean sets it `FALSE`). The target
 //! and intermediate bodies move into the store for the merge and back afterwards,
-//! also on an error. A failed `IntersectInsertRelate` ends the merge, as the shared
-//! `piecewise_merge` port does. Surfaces are named by their face's identity, as the
-//! store's merge names them; a fillet geometry whose surface is not installed in the
-//! intermediate body has no face there, so relating it or attributing it has no
-//! effect and is skipped. The mark-and-lock of the void-flag pass is a local set
-//! of visited regions (the mark value is not observable). A null region attribute
+//! also on an error. The bodies are adopted as they are: no existing Curve or
+//! Surface owner is rewritten (native operands keep their owners); every existing
+//! curve is named by its actual Curve identity, issued before adoption, and a curve
+//! the merge allocates at an edge split takes its actual identity at construction
+//! (`SweepIdentities::actual_curve_identities`); only geometry the store's Boolean
+//! bound under a target session identity returns to the target's naming afterwards
+//! (the same owner entity). The store-allocated stand-alone face B-reps' unissued
+//! curve copies keep their namespace identities. A failed `IntersectInsertRelate`
+//! ends the merge, as the shared `piecewise_merge` port does. Target surfaces are
+//! named by their face's session identity, as the store's merge names them; a
+//! fillet geometry whose surface is not installed in the intermediate body has no
+//! face there, so relating it or attributing it has no effect and is skipped. The
+//! void-flag pass claims a real `SmNewMarkAndLock` on the context and marks the
+//! regions' notification records (`Region::Mark`); the lock is held through
+//! `MakeManifold`, `RemoveTopologicalEdgesAndVertices` and the deletion of the
+//! intermediate body (moved here from the caller, as upstream deletes it inside
+//! `DoPiecewiseMerge`), and released on every return. A null region attribute
 //! (a native null dereference) is an input error. No recursion.
 
+use super::finish::FinishAccess;
 use super::{invalid, FilletObject, FilletSession};
+use crate::blend::fillet_executive::p3::FilletFinishAccess;
 use crate::blend::fillet_geom::p1::{FilletGeomType, FilletSurfaceStorage};
 use crate::boolean::merge::p4::{notification_key, KernelManifoldIntersector};
 use crate::curve::curve::Curve;
 use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::attribute::{ids, Attribute, AttributeValue, Behavior, ObjectKey};
+use crate::geom::context::{MarkLock, MarkType, ALL_MARKS};
 use crate::geom::object::ObjectRef;
 use crate::geom::tol::Relation;
 use crate::kernel::Kernel;
@@ -40,14 +54,13 @@ use crate::math::{Point2, Vec3, EFF_ZERO};
 use crate::nurbs::knots::Side;
 use crate::sweep::topology_sweep::access::SweepAccess;
 use crate::sweep::topology_sweep::store::{SweepIdentities, SweepStore};
-use crate::topology::brep::p3::topology_ref;
+use crate::topology::brep::p3::{seed_records, topology_ref};
 use crate::topology::brep::{p1, p2, p5};
 use crate::topology::brep_cache::{arena_identity, CacheObject};
 use crate::topology::loopuse::notify_ref;
 use crate::topology::{
     edgeuse, face, vertex, Brep, BrepId, EdgeId, FaceId, NamingScheme, RegionId,
 };
-use std::collections::BTreeSet;
 
 const OP: &str = "blend::fillet_executive::session::piecewise";
 
@@ -73,8 +86,10 @@ impl PiecewiseIdentities {
             _ => None,
         }
     }
-    /// A call-local identity for a curve of `brep`'s `edge` without an issued key.
-    fn edge_curve(brep: BrepId, edge: EdgeId, type_code: i64) -> ObjectRef {
+    /// The namespace identity of an unissued curve of a stand-alone face B-rep the
+    /// store allocated (the target's and intermediate body's curves all carry their
+    /// actual identities before adoption).
+    fn face_brep_curve(brep: BrepId, edge: EdgeId, type_code: i64) -> ObjectRef {
         ObjectRef {
             type_code,
             key: notification_key(brep.index().saturating_add(1), true, EntityRef::Edge(edge)).key,
@@ -117,16 +132,24 @@ impl SweepIdentities for PiecewiseIdentities {
         keys
     }
     fn curve(&self, brep: BrepId, edge: EdgeId, curve: &Curve) -> ObjectRef {
+        // the actual Curve identity (issued before adoption, or at construction)
         curve.notify_key().map_or_else(
-            || Self::edge_curve(brep, edge, curve.type_code()),
+            || Self::face_brep_curve(brep, edge, curve.type_code()),
             |key| ObjectRef {
                 key,
                 type_code: curve.type_code(),
             },
         )
     }
-    fn new_curve(&self, brep: BrepId, edge: EdgeId, type_code: i64) -> Result<ObjectRef> {
-        Ok(Self::edge_curve(brep, edge, type_code))
+    fn new_curve(&self, _brep: BrepId, _edge: EdgeId, _type_code: i64) -> Result<ObjectRef> {
+        // A split curve takes its actual identity when it is constructed
+        // (`actual_curve_identities`); no edge slot names a curve object.
+        Err(invalid(
+            "a new piecewise merge curve takes its actual identity at construction",
+        ))
+    }
+    fn actual_curve_identities(&self) -> bool {
+        true
     }
     fn source_lists(&self, brep: BrepId, region: RegionId) -> Result<[ObjectRef; 2]> {
         let namespace = u64::from(brep.index().saturating_add(1));
@@ -137,24 +160,38 @@ impl SweepIdentities for PiecewiseIdentities {
     }
 }
 
-/// Rebinds the geometry `b`'s edges and faces own under one of their own identities
-/// (`own`; an empty list means [`own_identities`]) to `to`'s identity for that edge
-/// or face; shared geometry is left alone.
-fn rebind_owners(
+/// Issues the actual Curve identity of every edge curve of `b` through `context`
+/// (the slot each curve object already carries; an issued one is kept), before `b`
+/// is adopted by the merge's store. Owners, geometry and naming are untouched: the
+/// native operands enter `PiecewiseMerge` as they are, and the store names each
+/// existing curve by this identity ([`PiecewiseIdentities::curve`]).
+fn issue_actual_curve_identities(
+    context: &mut crate::geom::context::Context,
     b: &mut Brep,
-    own: impl Fn(EntityRef) -> Vec<ObjectRef>,
+) -> Result<()> {
+    let edges: Vec<EdgeId> = b.edges().ids().collect();
+    for edge in edges {
+        crate::topology::brep::p3::edge_curve_identity(context, b, edge)?;
+    }
+    Ok(())
+}
+
+/// After the merge, the geometry the store's Boolean bound to `b`'s edges and
+/// faces under their session identity (`session`) is rebound to the same entity's
+/// identity in `b`'s naming (`to`): the owner is the same edge or face, only its
+/// key's namespace changes. Geometry owned under any other identity is untouched.
+fn normalize_session_owners(
+    b: &mut Brep,
+    session: impl Fn(EntityRef) -> ObjectRef,
     to: impl Fn(EntityRef) -> ObjectRef,
 ) -> Result<()> {
     let edges: Vec<EdgeId> = b.edges().ids().collect();
     for edge in edges {
         let e = EntityRef::Edge(edge);
-        let mut from = own(e);
-        if from.is_empty() {
-            from = own_identities(b, e);
-        }
+        let from = session(e);
         let new_owner = to(e);
         let rebound = b.edge_mut(edge)?.curve.as_mut().is_some_and(|curve| {
-            let matched = curve.owner().is_some_and(|o| from.contains(&o));
+            let matched = curve.owner() == Some(from);
             if matched {
                 curve.set_owner(Some(new_owner), None);
             }
@@ -167,13 +204,10 @@ fn rebind_owners(
     let faces: Vec<FaceId> = b.faces().ids().collect();
     for face in faces {
         let e = EntityRef::Face(face);
-        let mut from = own(e);
-        if from.is_empty() {
-            from = own_identities(b, e);
-        }
+        let from = session(e);
         let new_owner = to(e);
         let rebound = b.face_mut(face)?.surface.as_mut().is_some_and(|surface| {
-            let matched = surface.owner().is_some_and(|o| from.contains(&o));
+            let matched = surface.owner() == Some(from);
             if matched {
                 surface.set_owner(Some(new_owner));
             }
@@ -221,15 +255,12 @@ fn surface_of(brep: &Brep, face: FaceId) -> Result<Option<ObjectRef>> {
     KernelManifoldIntersector::surface_identity(brep, face).map(Some)
 }
 
-/// The identities a B-rep's own edge or face geometry may be owned under, before
-/// the merge rebinds it: the Euler operators', the arena's and the recorded one.
+/// The identities a B-rep's own edge or face geometry is owned under: the one of
+/// its naming scheme ([`naming_owner`]) and the recorded one. Another scheme's
+/// identity with an equal raw key names a different owner and is not accepted.
 fn own_identities(b: &Brep, e: EntityRef) -> Vec<ObjectRef> {
-    let mut ids = vec![notify_ref(e)];
-    match e {
-        EntityRef::Edge(x) => ids.push(arena_identity(CacheObject::Edge(x))),
-        EntityRef::Face(x) => ids.push(arena_identity(CacheObject::Face(x))),
-        _ => {}
-    }
+    let mut ids = Vec::new();
+    ids.extend(naming_owner(b.naming(), e));
     ids.extend(b.geometry_owner_key(e));
     ids
 }
@@ -252,16 +283,16 @@ fn target_surface(b: &Brep, serial: u64, face: FaceId) -> Result<Option<ObjectRe
 }
 
 impl FilletSession<'_> {
-    /// `SmFilletExecutive::DoPiecewiseMerge` up to deleting the intermediate body
-    /// (its caller does that, as for the trimmed merge): relate each fillet surface
+    /// `SmFilletExecutive::DoPiecewiseMerge`: relate each fillet surface
     /// with the original surfaces it meets, insert the corners' intersection
     /// topology, merge the intermediate body into the target one face at a time,
     /// then set the void flags of the regions the fillet faces bound and make the
-    /// target manifold on its solid regions.
+    /// target manifold on its solid regions and delete the intermediate body, under
+    /// one claimed mark.
     ///
     /// # Errors
-    /// Missing executive objects, the corners' insertion, the merge, and the
-    /// manifold and topology-removal edits.
+    /// Missing executive objects, the corners' insertion, the merge, the mark lock,
+    /// and the manifold, topology-removal and deletion edits.
     pub(super) fn do_piecewise_merge(&mut self, k: &mut Kernel) -> Result<()> {
         let manifold_solid = p2::is_manifold_solid(self.objects.target)?;
         // the current topological edges and vertices remain after the fillets
@@ -410,27 +441,38 @@ impl FilletSession<'_> {
             .intersector
             .set_this_approx_tol_3d(other_tolerance);
         self.piecewise_merge(k, &no_ssi)?;
-        self.set_fillet_region_void_flags(k, region_key)?;
 
-        // Find solid regions and make manifold using them
-        let target = &mut *self.objects.target;
-        let mut keep = Vec::new();
-        for region in p1::regions(target, None)? {
-            if target.region(region)?.is_void() == 0 && target.infinite_region() != Some(region) {
-                keep.push(region);
+        // increment and lock an unlocked mark, held until the function returns
+        let mut lock = MarkLock::new(std::slice::from_mut(&mut k.context), 0, ALL_MARKS)?;
+        let mark = lock.mark_type();
+        let result = (|| {
+            self.set_fillet_region_void_flags(k, mark, region_key)?;
+
+            // Find solid regions and make manifold using them
+            let target = &mut *self.objects.target;
+            let mut keep = Vec::new();
+            for region in p1::regions(target, None)? {
+                if target.region(region)?.is_void() == 0 && target.infinite_region() != Some(region)
+                {
+                    keep.push(region);
+                }
             }
-        }
-        if !keep.is_empty() || !manifold_solid {
-            p5::make_manifold(k, target, Some(&keep), false)?;
-            // remove any new topological edges and vertices
-            p5::remove_topological_edges_and_vertices(
-                k,
-                target,
-                Some(&original_edges),
-                Some(&original_vertices),
-            )?;
-        }
-        Ok(())
+            if !keep.is_empty() || !manifold_solid {
+                p5::make_manifold(k, target, Some(&keep), false)?;
+                // remove any new topological edges and vertices
+                p5::remove_topological_edges_and_vertices(
+                    k,
+                    target,
+                    Some(&original_edges),
+                    Some(&original_vertices),
+                )?;
+            }
+            // clean up: delete m_pFilletBrep
+            FinishAccess(&mut self.objects).finish_delete_brep(k, FilletObject::IntermediateBrep)
+        })();
+        // ~SmNewMarkAndLock, on every return
+        let released = lock.release(std::slice::from_mut(&mut k.context));
+        result.and(released)
     }
 
     /// The surface identity of an intermediate face.
@@ -459,26 +501,30 @@ impl FilletSession<'_> {
         let angle = self.executive.intersector.this_ang_tol_rad();
         let ignore_tangency = self.executive.intersector.ignore_tangency;
         let doing_fillets = self.executive.intersector.doing_fillets;
+        let intermediate_serial = self
+            .objects
+            .intermediate
+            .as_ref()
+            .ok_or_else(|| invalid("intermediate body is not allocated"))?
+            .notify_serial()
+            .ok_or_else(|| invalid("intermediate body has no kernel identity"))?;
         let mut intermediate = self
             .objects
             .intermediate
             .take()
             .ok_or_else(|| invalid("intermediate body is not allocated"))?;
         let mut target = std::mem::take(&mut *self.objects.target);
-        // The store's merge names a surface by its face's identity: the target's own
-        // geometry takes its session identity for the merge and its naming afterwards.
+        // Both operands enter the store as they are, with their actual curve
+        // identities issued; the store's Boolean binds the geometry it creates to
+        // the target's session identities, which return to its naming afterwards.
         let target_serial = self.objects.target_serial;
         let naming = target.naming();
         let session_owner = |e| topology_ref(target_serial, e);
-        let rebound = rebind_owners(&mut target, |_| Vec::new(), session_owner);
+        let issued = issue_actual_curve_identities(&mut k.context, &mut target)
+            .and_then(|()| issue_actual_curve_identities(&mut k.context, &mut intermediate));
         let identities = PiecewiseIdentities {
             target: (self.objects.target_serial, target.key()),
-            intermediate: (
-                intermediate
-                    .notify_serial()
-                    .ok_or_else(|| invalid("intermediate body has no kernel identity"))?,
-                intermediate.key(),
-            ),
+            intermediate: (intermediate_serial, intermediate.key()),
         };
         let mut next_handle = 0;
         let mut store = SweepStore::new(
@@ -490,7 +536,7 @@ impl FilletSession<'_> {
         let mut bodies = (Some(target), Some(std::mem::take(&mut intermediate)));
         let context = store.register_kernel(k);
         let result = (|| {
-            rebound?;
+            issued?;
             let context = context?;
             let target = bodies
                 .0
@@ -527,11 +573,9 @@ impl FilletSession<'_> {
         let other = store.take_brep(INTERMEDIATE).ok().or(bodies.1);
         drop(store);
         let mut target = target.ok_or_else(|| invalid("target lost in the merge"))?;
-        let restored = rebind_owners(
-            &mut target,
-            |e| vec![session_owner(e)],
-            |e| naming_owner(naming, e).unwrap_or_else(|| session_owner(e)),
-        );
+        let restored = normalize_session_owners(&mut target, session_owner, |e| {
+            naming_owner(naming, e).unwrap_or_else(|| session_owner(e))
+        });
         target.set_naming(naming);
         *self.objects.target = target;
         restored?;
@@ -547,14 +591,17 @@ impl FilletSession<'_> {
     /// the removal of the fillet map attributes from the target's surfaces.
     fn set_fillet_region_void_flags(
         &mut self,
-        k: &mut Kernel,
+        k: &Kernel,
+        mark: MarkType,
         region_key: impl Fn(RegionId) -> ObjectKey,
     ) -> Result<()> {
         let serial = self.objects.target_serial;
         let target = &mut *self.objects.target;
         let attributes = &mut self.objects.attributes;
+        // the regions' notification records carry their marks
+        let records = &mut self.objects.notification_records;
+        seed_records(records, target, &|entity| topology_ref(serial, entity));
         let faces = p1::faces(target, None)?;
-        let mut marked = BTreeSet::new();
         for &f in &faces {
             let Some(surface_key) = target_surface(target, serial, f)?.map(|s| s.key) else {
                 return Err(SolidError::null_pointer(OP));
@@ -602,7 +649,10 @@ impl FilletSession<'_> {
                 continue;
             }
             let region = region.ok_or_else(|| invalid("fillet faceuse shell has no region"))?;
-            if marked.contains(&region) {
+            if records
+                .get(&region_key(region))
+                .is_some_and(|record| record.is_marked(&k.context, mark))
+            {
                 continue;
             }
             let h = attributes
@@ -613,7 +663,10 @@ impl FilletSession<'_> {
                 _ => return Err(invalid("region-map attribute is not a long")),
             };
             let inside_fillet = is_void == 0;
-            marked.insert(region);
+            records
+                .entry(region_key(region))
+                .or_default()
+                .mark(Some(&k.context), mark);
             target
                 .region_mut(region)?
                 .set_is_void(i32::from(inside_fillet));
@@ -662,8 +715,34 @@ mod tests {
         assert_eq!(p1::faces(&target, None).unwrap().len(), 7);
     }
 
+    /// The void-flag pass holds a real `SmNewMarkAndLock` (2809-2856): one unlocked
+    /// mark is advanced and stays locked through manifold construction, topology
+    /// removal and the intermediate body's deletion, then is released.
+    #[test]
+    fn piecewise_void_flags_claim_and_release_a_real_mark() {
+        let mut k = Kernel::default();
+        let mut target =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 10.0, 20.0, 30.0)
+                .unwrap();
+        let edges = p1::edges(&target, None).unwrap();
+        let before = k.context.current_mark(MarkType::Mark);
+        {
+            let mut session = FilletSession::new(&mut k, &mut target).unwrap();
+            session
+                .prepare_constant_radius_edges(&mut k, &edges[..1], 0.5, 1, 1, 1.0)
+                .unwrap();
+            session.set_do_piecewise_merge(true);
+            session.do_fillet(&mut k).unwrap();
+            assert!(session.objects.intermediate.is_none());
+        }
+        assert!(k.context.current_mark(MarkType::Mark) > before);
+        for mark in [MarkType::Mark, MarkType::Mark2, MarkType::Mark3] {
+            assert!(!k.context.is_mark_locked(mark));
+        }
+    }
+
     /// Private regression for the adapter's registration step, before its Boolean.
-    /// Native DoPiecewiseMerge never changes an existing geometry's owner merely
+    /// Native `DoPiecewiseMerge` never changes an existing geometry's owner merely
     /// to name it for the merge (SmFilletExecutive.cpp2676-2800).
     #[test]
     fn piecewise_registration_preserves_original_issued_curve_owner() {
@@ -711,12 +790,7 @@ mod tests {
         let original_naming = session.objects.target.naming();
 
         // Exact production call at piecewise_merge's pre-adoption boundary.
-        rebind_owners(
-            session.objects.target,
-            |_| Vec::new(),
-            |entity| topology_ref(serial, entity),
-        )
-        .unwrap();
+        issue_actual_curve_identities(&mut k.context, session.objects.target).unwrap();
 
         let current_curve = session
             .objects

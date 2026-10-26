@@ -34,6 +34,10 @@ pub struct ManifoldNotificationKeys<'a> {
     pub other_curve: &'a dyn Fn(EdgeId, i64) -> crate::Result<ObjectRef>,
     /// Reserved primary-region source-list handles, in primary/other order.
     pub source_lists: &'a dyn Fn(RegionId) -> crate::Result<[ObjectRef; 2]>,
+    /// Whether a curve the merge allocates at an edge split takes its actual
+    /// Curve identity from the edit's notification context at construction
+    /// (`p9::CurveIdentity::Actual`) instead of the curve callbacks.
+    pub actual_curve_identities: bool,
 }
 
 impl core::fmt::Debug for ManifoldNotificationKeys<'_> {
@@ -56,6 +60,14 @@ impl NotificationKeys<'_> {
                 super::kernel_adapter::notification_key(namespace, other, entity)
             }
             Self::Caller(keys) => (if other { keys.other } else { keys.primary })(entity),
+        }
+    }
+
+    /// Whether new split curves take their actual identity at construction.
+    pub(super) const fn actual_curve_identities(self) -> bool {
+        match self {
+            Self::Namespace(_) => false,
+            Self::Caller(keys) => keys.actual_curve_identities,
         }
     }
 

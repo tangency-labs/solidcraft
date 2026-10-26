@@ -13,7 +13,10 @@
 //! code as the radius, as upstream's `SER` inside the `double`
 //! `SmVariableRadiusFS::GetFilletRadius` does (an `Unported` callee still
 //! propagates). The gap checks of a multi-neighbour end face (vertex and side-edge
-//! geometry, extended-surface coincidence) are `Unported`. There is no recursion.
+//! geometry, extended-surface coincidence), the last statements of
+//! `MakeCornerTopology`, are returned as an [`Nx1GapCheck`] for the caller, which
+//! holds the corner table and solver store they need, to run before anything else.
+//! There is no recursion.
 
 use std::collections::BTreeMap;
 
@@ -139,6 +142,26 @@ pub(crate) struct Nx1End<'a> {
     pub extend_edge: Option<EdgeId>,
 }
 
+/// The gap checks `SmFilletNx1Corner::MakeCornerTopology` ends with when the end face
+/// of a mixed-convexity corner connects to more than the fillet surface and one other
+/// face: `CalcCornerVertGeom`, `CalcCornerEdgeGeom` of the two new side edges (statuses
+/// ignored) and, when the end face's extended surface was kept, its
+/// `SimpleCoincidenceChecker` against the other side edge, clearing
+/// `m_bExtendedSurfacePatch` when they are not coincident. The caller runs them right
+/// after the topology returns, before anything else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Nx1GapCheck {
+    /// `pNewFilletEdge1` (rail-1 vertex side, along `pEU[0]`).
+    pub edge1: EdgeId,
+    /// `pNewFilletEdge2` (rail-2 vertex side, along `pEU[1]`).
+    pub edge2: EdgeId,
+    /// The end face whose new extended surface stayed in the extended-surface map
+    /// (`pNewExtendSurface` not NULL), if any.
+    pub extended_face: Option<FaceId>,
+    /// `pOtherSideEdgeuse`.
+    pub other_side_edgeuse: Option<EdgeuseId>,
+}
+
 fn pseudo_edge(edge: EdgeId) -> FilletObject {
     FilletObject::Topology(FilletBody::Pseudo, EntityRef::Edge(edge))
 }
@@ -146,9 +169,10 @@ fn pseudo_edge(edge: EdgeId) -> FilletObject {
 impl FilletCorner {
     /// From the extension distance on: the end rib, its end face, the extended end
     /// surface and, at a mixed-convexity corner, the vertex on the original vertex and
-    /// the two side edges joining it to the rail vertices.
+    /// the two side edges joining it to the rail vertices; the gap checks of a
+    /// multi-neighbour end face are returned for the caller.
     #[allow(clippy::too_many_lines)] // one upstream routine
-    pub(crate) fn finish_nx1_end(&mut self, env: Nx1End<'_>) -> Result<()> {
+    pub(crate) fn finish_nx1_end(&mut self, env: Nx1End<'_>) -> Result<Option<Nx1GapCheck>> {
         let Nx1End {
             k,
             target,
@@ -227,7 +251,7 @@ impl FilletCorner {
 
         // When a surface extension is needed to define the endFace shape,
         // build and save it.
-        let mut new_extend_surface_kept = false;
+        let mut new_extend_face = None;
         if do_extend {
             let face = need(end_face, "extended end face is null")?;
             let surface = need(
@@ -238,11 +262,16 @@ impl FilletCorner {
             let new_surface = surface.create_extended_surface(k, ext_dist, ContinuityType::G1)?;
             // Copy pNewSurface, when possible as an analytic surface
             let new_extend_surface = new_surface.copy_and_add_analytics(k)?;
-            new_extend_surface_kept = Self::add_extended_original_surface_with_map(
+            // If AddExtendedOriginalSurface() deleted pNewExtendSurface, then
+            // pEndFace already had an extended surface, and we don't have to
+            // deal with it anymore.
+            if Self::add_extended_original_surface_with_map(
                 extended_surfaces,
                 face,
                 new_extend_surface,
-            );
+            ) {
+                new_extend_face = Some(face);
+            }
         }
 
         // When adding an endSurface to fill the 'hole',
@@ -317,16 +346,14 @@ impl FilletCorner {
             // When endFace connects to more than the filletSurface and 1 other Face,
             // check for gaps
             if multi_neighbor_end_face {
-                let _ = (new_extend_surface_kept, other_side_edgeuse);
-                // UNPORTED(blend.fillet_corner_p1): SmFilletNx1Corner::MakeCornerTopology
-                // multi-neighbour end-face gap checks (CalcCornerVertGeom,
-                // SmFilletEdge::CalcCornerEdgeGeom, SimpleCoincidenceChecker)
-                return Err(SolidError::unported(
-                    "SmFilletNx1Corner::MakeCornerTopology (multi-neighbour end face)",
-                    "blend.fillet_corner_p1",
-                ));
+                return Ok(Some(Nx1GapCheck {
+                    edge1,
+                    edge2,
+                    extended_face: new_extend_face,
+                    other_side_edgeuse,
+                }));
             }
         }
-        Ok(())
+        Ok(None)
     }
 }

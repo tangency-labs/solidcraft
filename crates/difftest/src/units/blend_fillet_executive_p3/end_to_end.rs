@@ -194,6 +194,12 @@ pub(super) struct RealSolid {
     /// checkpoint only).
     #[serde(default)]
     piecewise_merge: bool,
+    /// Fillet with an `SmMakeCurveBlendSIH(step back factor)` self-intersection
+    /// handler installed on `SmApiFilletEdges`' executive, so every `FlushCurve`
+    /// runs `SmoothOutIntersection` (full checkpoint only; not with
+    /// `piecewise_merge`).
+    #[serde(default)]
+    curve_blend_sih: Option<f64>,
 }
 impl RealSolid {
     fn fillet_wire(&self) -> Vec<f64> {
@@ -224,8 +230,25 @@ impl RealSolid {
     /// Rejects mixed or incomplete forms (a box needs `dimensions`; a source no
     /// `dimensions`, the full checkpoint, and exactly one of `edges` / `all_edges`).
     fn check_form(&self) -> Result<(), HarnessError> {
+        if self.radius_end.is_some()
+            && (self.checkpoint != Checkpoint::Full
+                || self.source.is_some()
+                || self.piecewise_merge
+                || self.curve_blend_sih.is_some())
+        {
+            return Err(HarnessError::new(
+                "radius_end requires the full checkpoint on a box without merge options",
+            ));
+        }
         if self.piecewise_merge && self.checkpoint != Checkpoint::Full {
             return Err(HarnessError::new("piecewise merge needs the full checkpoint"));
+        }
+        if self.curve_blend_sih.is_some()
+            && (self.piecewise_merge || self.checkpoint != Checkpoint::Full)
+        {
+            return Err(HarnessError::new(
+                "curve-blend handler needs the full checkpoint without piecewise merge",
+            ));
         }
         match (&self.source, self.dimensions) {
             (None, Some(_)) if !self.all_edges => Ok(()),
@@ -237,6 +260,18 @@ impl RealSolid {
             }
             _ => Err(HarnessError::new("invalid real-solid form")),
         }
+    }
+    /// [`Self::check_form`], then the shim's wire validation for the chosen form.
+    fn validate(&self) -> Result<(), HarnessError> {
+        self.check_form()?;
+        match (&self.source, self.radius_end) {
+            (Some(source), _) => {
+                ffi::validate_real_source(&self.source_wire(source), source.path().is_some())
+            }
+            (None, Some(end)) => ffi::validate_real_variable_solid(&self.wire(), end),
+            (None, None) => ffi::validate_real_solid(&self.wire()),
+        }
+        .map_err(|e| HarnessError::new(e.to_string()))
     }
 }
 
@@ -330,6 +365,16 @@ fn output(mut values: &[f64]) -> Result<Output, HarnessError> {
 
 pub(super) fn cpp(input: &RealSolid) -> Result<Output, HarnessError> {
     input.check_form()?;
+    if let (Some(step_back), Some(source)) = (input.curve_blend_sih, &input.source) {
+        let values = ffi::curve_sih_source(step_back, &input.source_wire(source), source.path())
+            .map_err(|e| HarnessError::new(e.to_string()))?;
+        return output(&values);
+    }
+    if let Some(step_back) = input.curve_blend_sih {
+        let values = ffi::curve_sih_solid(step_back, &input.wire())
+            .map_err(|e| HarnessError::new(e.to_string()))?;
+        return output(&values);
+    }
     if let Some(source) = &input.source {
         let run = if input.piecewise_merge {
             ffi::piecewise_source
@@ -342,6 +387,11 @@ pub(super) fn cpp(input: &RealSolid) -> Result<Output, HarnessError> {
     }
     if input.checkpoint != Checkpoint::Full {
         return prefix::cpp(input);
+    }
+    if let Some(end) = input.radius_end {
+        let values = ffi::real_variable_solid(&input.wire(), end)
+            .map_err(|e| HarnessError::new(e.to_string()))?;
+        return output(&values);
     }
     let run = if input.piecewise_merge {
         ffi::piecewise_solid
@@ -544,8 +594,22 @@ fn run_rust(mut k: Kernel, body: SolidResult<Brep>, input: &RealSolid) -> SolidR
     Ok(values)
 }
 fn apply(k: &mut Kernel, body: &mut Brep, edges: &[EdgeId], input: &RealSolid) -> SolidResult<()> {
+    if let Some(end) = input.radius_end {
+        return solidcore::blend::fillet_executive::api::variable_radius_fillet(
+            k,
+            body,
+            edges,
+            input.radius,
+            end,
+            input.xsect,
+            input.continuity,
+        );
+    }
     if input.piecewise_merge {
         return piecewise_fillet_edges(k, body, edges, input);
+    }
+    if let Some(step_back) = input.curve_blend_sih {
+        return curve_sih_fillet_edges(k, body, edges, input, step_back);
     }
     solidcore::blend::fillet_executive::api::fillet_edges(
         k,
@@ -588,6 +652,41 @@ fn piecewise_fillet_edges(
     }
     stitch_and_orient(k, body, &StitchAndOrientOptions::default())
 }
+/// The shim's `curve_sih_fillet_edges`: `SmApiFilletEdges` with an
+/// `SmMakeCurveBlendSIH(step_back)` installed on the executive before
+/// `SetDoGlobalMerge(TRUE)`, `SetFilletParameters`, `DoFillet` and
+/// `StitchAndOrient` with its defaults.
+fn curve_sih_fillet_edges(
+    k: &mut Kernel,
+    body: &mut Brep,
+    edges: &[EdgeId],
+    input: &RealSolid,
+    step_back: f64,
+) -> SolidResult<()> {
+    use solidcore::blend::fillet_solver::curve_blend_sih::MakeCurveBlendSih;
+    use solidcore::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
+    if edges.is_empty() {
+        return Err(SolidError::invalid_input(
+            "harness::curve_sih_fillet",
+            "no edges",
+        ));
+    }
+    {
+        let mut session = solidcore::blend::fillet_executive::session::FilletSession::new(k, body)?;
+        session.set_curve_blend_self_intersection_handler(Some(MakeCurveBlendSih::new(step_back)));
+        session.set_do_global_merge(true);
+        session.prepare_constant_radius_edges(
+            k,
+            edges,
+            input.radius,
+            input.xsect,
+            input.continuity,
+            input.thumbweight,
+        )?;
+        session.do_fillet(k)?;
+    }
+    stitch_and_orient(k, body, &StitchAndOrientOptions::default())
+}
 /// The `TestSmFillets.cpp` examples 0-6, as the shim runs them (examples 2-4 on the
 /// 10x10x10 box with its first four edges in `GetEdges` order: `SmApiFilletEdges(r=1,
 /// circular)`, `SmApiFilletEdgesPerEdge(r = 0.5 + 0.25 i, circular)` and
@@ -597,8 +696,10 @@ pub(super) fn upstream_example(example: usize) -> Result<Option<Output>, Harness
     if !matches!(example, 0..=6) {
         return Ok(None);
     }
+    let step = super::point_step()?;
     let run = || -> SolidResult<Vec<f64>> {
         let mut k = Kernel::default();
+        k.fillet_point_step.set(step);
         let (dx, dy, dz) = if example < 2 {
             (5.0, 10.0, 15.0)
         } else {
@@ -665,13 +766,8 @@ pub(super) fn upstream_example(example: usize) -> Result<Option<Output>, Harness
     }
 }
 pub(super) fn rust(input: &RealSolid) -> Result<Output, HarnessError> {
-    input.check_form()?;
-    match &input.source {
-        Some(source) => ffi::validate_real_source(&input.source_wire(source), source.path().is_some()),
-        None => ffi::validate_real_solid(&input.wire()),
-    }
-    .map_err(|e| HarnessError::new(e.to_string()))?;
-    let mut k = Kernel::default();
+    input.validate()?;
+    let mut k = super::seeded_kernel()?;
     let body = build(&mut k, input)?;
     match run_rust(k, body, input) {
         Ok(values) => {
@@ -733,8 +829,10 @@ fn surface_surface_output(values: &[f64]) -> Result<Output, HarnessError> {
 /// result B-rep is recorded as the shim records it.
 pub(super) fn surface_surface_rust(input: &SurfaceSurface) -> Result<Output, HarnessError> {
     ffi::validate_surface_surface(&input.wire()).map_err(|e| HarnessError::new(e.to_string()))?;
+    let step = super::point_step()?;
     let run = || -> SolidResult<Vec<f64>> {
         let mut k = Kernel::default();
+        k.fillet_point_step.set(step);
         let surface = |c: &[[f64; 3]; 4]| {
             solidcore::nurbs::b_spline_surface::BSplineSurface::create_bilinear_surface(
                 Vec3::from(c[0]),

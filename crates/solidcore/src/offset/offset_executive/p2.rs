@@ -1447,6 +1447,7 @@ fn shell_difference_with(
             })(e, kind))
         },
         source_lists: &|region| Ok(source_lists(region)),
+        actual_curve_identities: false,
     };
     let mut shell = Some(shell);
     let (primary, other) = if inset {

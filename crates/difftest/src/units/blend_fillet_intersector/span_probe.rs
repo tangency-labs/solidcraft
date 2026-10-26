@@ -72,15 +72,15 @@ impl SolverOps for Observed {
     delegate_mut! { SolverOps;
         fn solver_mut() -> &mut FilletSolver;
         fn setup_offset_values(point: &TsectPnt, radius: Option<&mut f64>) -> KernelResult<()>;
-        fn set_extension_flags(brep: &Brep) -> KernelResult<()>;
+        fn set_extension_flags(k: &Kernel, brep: &Brep, corners: &dyn solidcore::blend::fillet_solver::p1::ExtensionCorners) -> KernelResult<()>;
         fn load_jacobian(k: &Kernel, equations: &mut usize, parameters: &mut usize, load: &mut JacobianLoad<'_>, f: &mut [f64], jacobian: Option<&mut Matrix>) -> KernelResult<bool>;
-        fn load_initial_values(k: &Kernel, brep: Option<&Brep>, do_surf2_calcs: bool, rail_index: usize, surface1: &mut OffsetSurface, surface1_index: usize, intervals: &mut ExtentNd, periodicities: &mut Vec<bool>, guess_t: &mut Vec<f64>) -> KernelResult<Option<InitialValues>>;
+        fn load_initial_values(k: &Kernel, brep: Option<&mut Brep>, do_surf2_calcs: bool, rail_index: usize, surface1: &mut OffsetSurface, surface1_index: usize, intervals: &mut ExtentNd, periodicities: &mut Vec<bool>, guess_t: &mut Vec<f64>) -> KernelResult<Option<InitialValues>>;
     }
 
     fn point_on_plane_solve(
         &mut self,
         k: &Kernel,
-        brep: Option<&Brep>,
+        brep: Option<&mut Brep>,
         origin: Vec3,
         normal: Vec3,
         d0: &Extent2d,
@@ -145,7 +145,7 @@ impl IntersectorOps for Observed {
         fn reload_surface_offsets() -> KernelResult<()>;
         fn rail_surface_evaluate_1st_derivatives(k: &Kernel, rail: usize, uv: Vec2) -> KernelResult<(Vec3, Vec3, Vec3)>;
         fn set_status(value: FilStatus) -> KernelResult<()>;
-        fn smooth_out_intersection(geom: &FilletGeomId, curves: &mut Vec<BSplineCurve>, uv0: &mut Vec<BSplineCurve>, uv1: &mut Vec<BSplineCurve>) -> KernelResult<()>;
+        fn smooth_out_intersection(k: &Kernel, pseudo: &mut FilletBrep, geom: &FilletGeomId, curves: &mut Vec<BSplineCurve>, uv0: &mut Vec<BSplineCurve>, uv1: &mut Vec<BSplineCurve>) -> KernelResult<()>;
         fn create_fillet_surface(k: &Kernel, center: &mut BSplineCurve, curve0: &mut BSplineCurve, curve1: &mut BSplineCurve, points: &[TsectPnt], uv0: &mut BSplineCurve, uv1: &mut BSplineCurve) -> KernelResult<Option<BSplineSurface>>;
         fn set_fillet_surface(pseudo: &mut FilletBrep, geom: &FilletGeomId, surface: Option<BSplineSurface>) -> KernelResult<()>;
         fn set_center_line_curve(pseudo: &mut FilletBrep, geom: &FilletGeomId, curve: BSplineCurve) -> KernelResult<()>;

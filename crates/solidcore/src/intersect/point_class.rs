@@ -2069,6 +2069,44 @@ fn live_surface_global_point_solve(
     face_tested_point_solve(k, &surface, uv_domain, point, zone_tol_3d, &mut classify)
 }
 
+/// `GlobalPointSolve(domain, op, point, tol, NULL, requested, sols)` of `surface`, the
+/// surface of face `f` of `b` (or a copy standing for it), with the fast drop's trim
+/// test on the B-rep ([`live_face_fast_drop_test`]: the face's trimmed surface cache
+/// is made when it has none): the solutions' start ends.
+///
+/// # Errors
+///
+/// Those of the point solve, the cache lookup and the classification.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn live_owned_surface_global_point_solve(
+    k: &Kernel,
+    surface: &Surface,
+    b: &mut Brep,
+    f: FaceId,
+    uv_domain: &Extent2d,
+    op: SolverOperation,
+    point: Point3,
+    zone_tol_3d: f64,
+    requested: SolutionRequested,
+) -> Result<Vec<SolutionEnd>> {
+    let mut test_on: Option<bool> = None;
+    let mut classify = |k: &Kernel, uv: Point2, src_tol: f64| -> Result<bool> {
+        live_face_fast_drop_test(k, b, f, &mut test_on, uv, src_tol)
+    };
+    let solutions = surface.global_point_solve_face_tested::<NoObject>(
+        k,
+        Some(NoObject),
+        uv_domain,
+        op,
+        point,
+        zone_tol_3d,
+        None,
+        requested,
+        Some(&mut classify),
+    )?;
+    Ok(solutions.as_slice().iter().map(|s| s.start).collect())
+}
+
 /// `GlobalPointSolve(domain, SM_SO_INTERSECT, point, tol, NULL, SM_SR_SINGLE, sols)`
 /// of a face's surface whose fast-drop trim test is `classify`: the solutions' start
 /// ends.

@@ -1,0 +1,1771 @@
+{
+  "cases": [
+    {
+      "name": "stubs3-plate-100x100x10-edge0-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            100,
+            100,
+            10
+          ],
+          "radius": 1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            0
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-plate-100x100x10-edge1-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            100,
+            100,
+            10
+          ],
+          "radius": 1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-plate-100x100x10-edge2-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            100,
+            100,
+            10
+          ],
+          "radius": 1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            2
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-plate-100x100x10-edge3-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            100,
+            100,
+            10
+          ],
+          "radius": 1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            3
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-plate-100x100x10-edge4-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            100,
+            100,
+            10
+          ],
+          "radius": 1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            4
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-plate-100x100x10-edge5-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            100,
+            100,
+            10
+          ],
+          "radius": 1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            5
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-plate-100x100x10-edge6-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            100,
+            100,
+            10
+          ],
+          "radius": 1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            6
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-plate-100x100x10-edge7-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            100,
+            100,
+            10
+          ],
+          "radius": 1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            7
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-plate-100x100x10-edge8-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            100,
+            100,
+            10
+          ],
+          "radius": 1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            8
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-plate-100x100x10-edge9-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            100,
+            100,
+            10
+          ],
+          "radius": 1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            9
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-plate-100x100x10-edge10-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            100,
+            100,
+            10
+          ],
+          "radius": 1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            10
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-plate-100x100x10-edge11-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "dimensions": [
+            100,
+            100,
+            10
+          ],
+          "radius": 1,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            11
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-overhang-union-nx1-multi-neighbour-end-face-edge9-r1.0",
+      "upstream_ref": "source/SMLib/src/SmFilletCorner.cpp:6396",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            9
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-overhang-union-nx1-multi-neighbour-end-face-edge12-r1.0",
+      "upstream_ref": "source/SMLib/src/SmFilletCorner.cpp:6396",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            12
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-overhang-union-nx1-multi-neighbour-end-face-edge13-r1.0",
+      "upstream_ref": "source/SMLib/src/SmFilletCorner.cpp:6396",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            13
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-overhang-union-nx1-multi-neighbour-end-face-edge14-r1.0",
+      "upstream_ref": "source/SMLib/src/SmFilletCorner.cpp:6396",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            14
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-overhang-union-nx1-multi-neighbour-end-face-edge16-r1.0",
+      "upstream_ref": "source/SMLib/src/SmFilletCorner.cpp:6396",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            16
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-overhang-union-nx1-multi-neighbour-end-face-edge17-r1.0",
+      "upstream_ref": "source/SMLib/src/SmFilletCorner.cpp:6396",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            17
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-overhang-union-nx1-multi-neighbour-end-face-edge19-r1.0",
+      "upstream_ref": "source/SMLib/src/SmFilletCorner.cpp:6396",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            19
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-overhang-union-nx1-multi-neighbour-end-face-edge9-r0.5",
+      "upstream_ref": "source/SMLib/src/SmFilletCorner.cpp:6396",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            9
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-overhang-union-nx1-multi-neighbour-end-face-edge12-r0.5",
+      "upstream_ref": "source/SMLib/src/SmFilletCorner.cpp:6396",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            12
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-overhang-union-nx1-multi-neighbour-end-face-edge13-r0.5",
+      "upstream_ref": "source/SMLib/src/SmFilletCorner.cpp:6396",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            13
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-overhang-union-nx1-multi-neighbour-end-face-edge14-r0.5",
+      "upstream_ref": "source/SMLib/src/SmFilletCorner.cpp:6396",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            14
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-overhang-union-nx1-multi-neighbour-end-face-edge16-r0.5",
+      "upstream_ref": "source/SMLib/src/SmFilletCorner.cpp:6396",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            16
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-overhang-union-nx1-multi-neighbour-end-face-edge17-r0.5",
+      "upstream_ref": "source/SMLib/src/SmFilletCorner.cpp:6396",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            17
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-overhang-union-nx1-multi-neighbour-end-face-edge19-r0.5",
+      "upstream_ref": "source/SMLib/src/SmFilletCorner.cpp:6396",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 0.5,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            19
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-overhang-union-nx1-multi-neighbour-end-face-edge9-r2.0",
+      "upstream_ref": "source/SMLib/src/SmFilletCorner.cpp:6396",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 2.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            9
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-overhang-union-nx1-multi-neighbour-end-face-edge12-r2.0",
+      "upstream_ref": "source/SMLib/src/SmFilletCorner.cpp:6396",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 2.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            12
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-overhang-union-nx1-multi-neighbour-end-face-edge13-r2.0",
+      "upstream_ref": "source/SMLib/src/SmFilletCorner.cpp:6396",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 2.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            13
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-overhang-union-nx1-multi-neighbour-end-face-edge14-r2.0",
+      "upstream_ref": "source/SMLib/src/SmFilletCorner.cpp:6396",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 2.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            14
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-overhang-union-nx1-multi-neighbour-end-face-edge16-r2.0",
+      "upstream_ref": "source/SMLib/src/SmFilletCorner.cpp:6396",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 2.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            16
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-overhang-union-nx1-multi-neighbour-end-face-edge17-r2.0",
+      "upstream_ref": "source/SMLib/src/SmFilletCorner.cpp:6396",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 2.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            17
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-overhang-union-nx1-multi-neighbour-end-face-edge19-r2.0",
+      "upstream_ref": "source/SMLib/src/SmFilletCorner.cpp:6396",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 2.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            19
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-union-overhang-front-edges14-15-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            14,
+            15
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-union-overhang-front-edges14-22-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            14,
+            22
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-union-overhang-front-edges15-16-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            15,
+            16
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-union-overhang-corner-edges12-13-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                -2,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            12,
+            13
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-union-overhang-corner-edges14-15-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                -2,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            14,
+            15
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-union-overhang-corner-edges14-22-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                -2,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            14,
+            22
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-union-overhang-corner-edges15-22-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                -2,
+                -2,
+                10
+              ],
+              "size": [
+                10,
+                6,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            15,
+            22
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-union-inset-side-step-edges13-15-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                2,
+                5
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            13,
+            15
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-union-inset-side-step-edges13-17-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                2,
+                5
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            13,
+            17
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-union-inset-side-step-edges14-15-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                2,
+                5
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            14,
+            15
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-union-inset-side-step-edges14-18-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                2,
+                5
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            14,
+            18
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-union-inset-side-step-edges16-17-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                2,
+                5
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            16,
+            17
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-union-inset-side-step-edges16-18-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                2,
+                5
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            16,
+            18
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-union-inset-side-step-edges16-22-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                2,
+                5
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            16,
+            22
+          ]
+        }
+      }
+    },
+    {
+      "name": "stubs3-union-inset-side-step-edges17-22-r1",
+      "upstream_ref": "source/SM_API/src/SmApiBrep.cpp:2049",
+      "inputs": {
+        "real_solid": {
+          "source": {
+            "kind": "box_union",
+            "a": {
+              "origin": [
+                0,
+                0,
+                0
+              ],
+              "size": [
+                20,
+                10,
+                10
+              ]
+            },
+            "b": {
+              "origin": [
+                5,
+                2,
+                5
+              ],
+              "size": [
+                10,
+                10,
+                10
+              ]
+            }
+          },
+          "radius": 1.0,
+          "xsect": 1,
+          "continuity": 1,
+          "thumbweight": 1,
+          "edges": [
+            17,
+            22
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -11,12 +11,14 @@
 //! | `find_side_edgeuse`, `find_closed_side_edgeuse` | `sm_FindSideEdgeuse`, `sm_FindClosedSideEdgeuse` |
 //! | `same_convexity_edges` | `same_convexity_edges` |
 //! | [`FilletCorner::make_nx1_closed_corner_topology`] ([`closed_nx1`]) | `SmFilletNx1ClosedCorner::MakeCornerTopology` |
+//! | [`FilletCorner::make_3x2_mixed_corner_topology`] ([`mixed_3x2`]) | `SmFillet3x2MixedConvexityCorner::MakeCornerTopology` |
+//! | `make_4x2_concave_corner_topology` (crate, `concave_4x2`) | `SmFilletNx2Corner::Make4x2ConcaveCornerTopology` |
+//! | 1x1, 2x2, 4x3, open and degenerate corners ([`end_corners`]) | `SmFillet1x1Corner`, `SmFillet2x2Corner`, `SmFillet4x3Corner`, `SmFilletOpenCorner`, `SmFilletDegenerateCorner` `::MakeCornerTopology` |
 //!
 //! Deviations: the caller lends the actual target, pseudo-B-rep and solver.
 //! Missing topology that native dereferences is an input error. The Nx1 end rib,
-//! surface extension and cap topology are in [`nx1_end`]. The mixed-convexity 4x2
-//! corner stops at the unported
-//! `Make4x2ConcaveCornerTopology`. The Nx2 corner's two solvers are resolved by the
+//! surface extension and cap topology are in [`nx1_end`]; the mixed-convexity 4x2
+//! corner's `Make4x2ConcaveCornerTopology` is in `concave_4x2`. The Nx2 corner's two solvers are resolved by the
 //! caller (upstream looks them up after the 4x2 checks; the lookup has no effects).
 //! An unset `sm_TestG1Continuity` angle (upstream reads it uninitialised) is an input
 //! error where the mixed-convexity tests read it. The convex `NxN` corner's solvers are
@@ -25,7 +27,10 @@
 //! omitted. There is no recursion.
 
 pub mod closed_nx1;
+mod concave_4x2;
 pub mod concave_nxn;
+pub mod end_corners;
+pub mod mixed_3x2;
 
 use crate::blend::fillet_corner::p1::{
     check_face_complimentary_corner_concavity, face_by_two_edgeuses, test_g1_continuity,
@@ -236,13 +241,17 @@ impl FilletCorner {
     /// mixed-convexity corner, the extended end surface and the cap topology.
     ///
     /// Allocations and corner-list insertions occur in native order and remain
-    /// visible if a later operation fails. Vertex geometry is computed later.
+    /// visible if a later operation fails. Vertex geometry is computed later, except
+    /// for the gap checks of a mixed-convexity end face spanning several faces: they
+    /// end upstream's routine and are returned for the caller to run at once.
     ///
     /// # Errors
     /// Invalid topology or a different corner kind; those of the actual solver,
-    /// convexity, surface-extension and pseudo-topology operations. The gap checks of
-    /// a mixed-convexity end face spanning several faces are `Unported`.
-    pub fn make_nx1_corner_topology(&mut self, env: Nx1TopologyEnv<'_>) -> Result<()> {
+    /// convexity, surface-extension and pseudo-topology operations.
+    pub fn make_nx1_corner_topology(
+        &mut self,
+        env: Nx1TopologyEnv<'_>,
+    ) -> Result<Option<nx1_end::Nx1GapCheck>> {
         let Nx1TopologyEnv {
             k,
             target,
@@ -345,7 +354,7 @@ impl FilletCorner {
         }
         if !mixed && total > 3 {
             *do_global_merge = true;
-            return Ok(());
+            return Ok(None);
         }
         self.finish_nx1_end(nx1_end::Nx1End {
             k,
@@ -382,7 +391,7 @@ impl FilletCorner {
     /// among them or adjacent in a 4x2 corner, or other than two vertices before the
     /// cross edge; [`SolidError::InvalidInput`] for a different corner kind or missing
     /// topology upstream dereferences; those of the convexity, continuity, solver and
-    /// pseudo-topology operations. A mixed-convexity 4x2 corner is `Unported`.
+    /// pseudo-topology operations.
     #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn make_nx2_corner_topology(&mut self, env: Nx2TopologyEnv<'_>) -> Result<()> {
         fn lookup(corner: FilletCornerId, this: &FilletCorner) -> CornerLookup<'_> {
@@ -448,11 +457,20 @@ impl FilletCorner {
                     base_eu2,
                     Some(side),
                 )? {
-                    // UNPORTED(blend.fillet_executive_p1): SmFilletNx2Corner::Make4x2ConcaveCornerTopology
-                    return Err(SolidError::unported(
-                        "SmFilletNx2Corner::Make4x2ConcaveCornerTopology",
-                        "blend.fillet_executive_p1",
-                    ));
+                    return self.make_4x2_concave_corner_topology(concave_4x2::Concave4x2 {
+                        k,
+                        target,
+                        pseudo,
+                        corner,
+                        solvers: [fil_solver1, fil_solver2],
+                        geoms: [
+                            fil_solver1.first_fillet_geom()?,
+                            fil_solver2.first_fillet_geom()?,
+                        ],
+                        vertex,
+                        base_eus: [base_eu1, base_eu2],
+                        all_eus: &all,
+                    });
                 }
             }
             self.bevel = true;

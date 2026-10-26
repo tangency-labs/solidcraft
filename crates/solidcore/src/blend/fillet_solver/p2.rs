@@ -66,6 +66,7 @@ use crate::blend::fillet_geom::p1::{
     FilletGeomType, FilletSolverId, FilletVertex, FilletVertexType, FilletVertexuse,
 };
 use crate::blend::fillet_geom::p2::{srf_srf_intersection, SrfSrfOptions};
+use crate::blend::fillet_geom::p3::SplitCorners;
 use crate::blend::fillet_geom::p4::{set_edge_curve, set_vertex_point};
 use crate::blend::fillet_solver::p1::{
     check_edge_curve_domains, test_manifold_tangent_rollover, test_side_edge_convexity, FilStatus,
@@ -123,7 +124,7 @@ fn geom_rail(pseudo: &FilletBrep, g: FilletGeomId, i: usize) -> Result<EdgeId> {
 
 /// An object referenced by [`FilletSolver::record_fillet_error_in`] in an executive
 /// [`ErrorInfo`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SolverErrorObject {
     /// The filleted target edge (`pFilletedEdge`).
     FilletedEdge(EdgeId),
@@ -425,9 +426,14 @@ impl FilletSolver {
     /// # Errors
     ///
     /// Those of [`FilletSolver::vertex`]; [`SolidError::InvalidInput`] without an
-    /// executive (upstream dereferences `NULL`); [`SolidError::Unported`] for the corner
-    /// lookup (`SmFilletExecutive::GetFilletCornerOfVertex`).
-    pub fn fillet_corner(&self, b: &Brep, index: usize) -> Result<Option<FilletCornerId>> {
+    /// executive (upstream dereferences `NULL`). `corners` is the executive's
+    /// `GetFilletCornerOfVertex` (a vertex without corner, or none, is `NULL`).
+    pub fn fillet_corner(
+        &self,
+        b: &Brep,
+        index: usize,
+        corners: &dyn SplitCorners,
+    ) -> Result<Option<FilletCornerId>> {
         if index > 1 {
             return Ok(None);
         }
@@ -435,12 +441,7 @@ impl FilletSolver {
         if self.executive.is_none() {
             return Err(invalid("no fillet executive"));
         }
-        let _ = vtx;
-        // UNPORTED(blend.fillet_executive_p1): SmFilletExecutive::GetFilletCornerOfVertex
-        Err(SolidError::unported(
-            "SmFilletExecutive::GetFilletCornerOfVertex",
-            "blend.fillet_executive_p1",
-        ))
+        Ok(vtx.and_then(|v| corners.corner_of_vertex(v)))
     }
 
     /// `CalcCylinderFilletGeom(rTsectPnts, pFilletGeom)`: builds the cylinder of a
@@ -1119,7 +1120,7 @@ impl FilletSolver {
     pub fn point_on_plane_solve(
         ops: &mut dyn FilletSolverOps,
         k: &Kernel,
-        brep: Option<&Brep>,
+        brep: Option<&mut Brep>,
         plane_orig: Point3,
         plane_normal: Vec3,
         uv_domain1: &Extent2d,
@@ -1396,7 +1397,7 @@ impl FilletSolver {
         ops: &mut dyn FilletSolverOps,
         other: &mut dyn FilletSolverOps,
         k: &Kernel,
-        brep: Option<&Brep>,
+        mut brep: Option<&mut Brep>,
         uv_guess: Point2,
         rail_index: usize,
         other_rail_index: usize,
@@ -1455,7 +1456,7 @@ impl FilletSolver {
         let this_side_eu = ops.solver().edgeuse(rail_index)?;
         let temp_this = match (ops.variable_radius_mut(), other_side_eu) {
             (Some(vrfs), Some(side)) => {
-                let target = brep.ok_or_else(|| {
+                let target = brep.as_deref().ok_or_else(|| {
                     invalid("variable-radius RailRailIntersect requires target B-rep")
                 })?;
                 crate::blend::fillet_executive::p2::DirectTemporaryRadiusChange::new(
@@ -1469,7 +1470,7 @@ impl FilletSolver {
         };
         let temp_other = match (other.variable_radius_mut(), this_side_eu) {
             (Some(vrfs), Some(side)) => {
-                let Some(target) = brep else {
+                let Some(target) = brep.as_deref() else {
                     temp_this.revert(ops.variable_radius_mut());
                     return Err(invalid(
                         "variable-radius RailRailIntersect requires target B-rep",
@@ -1498,7 +1499,7 @@ impl FilletSolver {
             let mut surface1 = take_surface(ops.solver(), rail_index)?;
             let loaded = ops.load_initial_values(
                 k,
-                brep,
+                brep.as_deref_mut(),
                 do_surf2_calcs,
                 rail_index,
                 &mut surface1,
@@ -1514,7 +1515,7 @@ impl FilletSolver {
             let mut other_surface1 = take_surface(other.solver(), other_rail_index)?;
             let other_loaded = other.load_initial_values(
                 k,
-                brep,
+                brep.as_deref_mut(),
                 do_surf2_calcs,
                 other_rail_index,
                 &mut other_surface1,
@@ -1923,15 +1924,13 @@ impl FilletSolver {
 
     /// `RecordFilletError(eType, rapTSPs, cComment)`: passes the error, with the
     /// filleted edge, the fillet surfaces, centre lines and rails built so far and the
-    /// first tsect point's curve position, to the executive (`NoteFilletError`) when
-    /// the caller holds no [`ErrorInfo`].
+    /// first tsect point's curve position, to the executive (`NoteFilletError`); a
+    /// caller holding no executive [`ErrorInfo`] notes into a scratch record.
     ///
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] for an unknown `error_type` or where upstream
-    /// dereferences `NULL` (no edge use, geometry or rail, or no executive);
-    /// [`SolidError::Unported`] for the report (`SmFilletExecutive::NoteFilletError`,
-    /// unit `blend.fillet_executive_p1`).
+    /// dereferences `NULL` (no edge use, geometry or rail, or no executive).
     pub fn record_fillet_error(
         &self,
         b: &Brep,
@@ -1945,14 +1944,13 @@ impl FilletSolver {
     }
 
     /// `RecordFilletError(eType, rapTSPs, cComment)` into the executive's
-    /// [`ErrorInfo`] (`None` when the caller has no executive error record yet).
+    /// [`ErrorInfo`] (`None` when the caller has no executive error record: the note
+    /// goes to a scratch record).
     ///
     /// # Errors
     ///
     /// [`SolidError::InvalidInput`] where upstream dereferences `NULL` (no edge use,
-    /// geometry or rail, or no executive); [`SolidError::Unported`] when `error_info`
-    /// is `None` (`SmFilletExecutive::NoteFilletError`, unit
-    /// `blend.fillet_executive_p1`).
+    /// geometry or rail, or no executive).
     pub fn record_fillet_error_in(
         &self,
         b: &Brep,
@@ -2001,12 +1999,12 @@ impl FilletSolver {
         if self.executive.is_none() {
             return Err(invalid("no fillet executive"));
         }
-        let Some(error_info) = error_info else {
-            // UNPORTED(blend.fillet_executive_p1): SmFilletExecutive::NoteFilletError (caller holds no ErrorInfo)
-            return Err(SolidError::unported(
-                "SmFilletExecutive::NoteFilletError",
-                "blend.fillet_executive_p1",
-            ));
+        // m_pExecutive->NoteFilletError: a caller without an executive record (a
+        // standalone entry point) notes into a scratch record it does not keep.
+        let mut scratch = ErrorInfo::default();
+        let error_info = match error_info {
+            Some(error_info) => error_info,
+            None => &mut scratch,
         };
         let surfaces: Vec<Option<SolverErrorObject>> = fil_surfs
             .into_iter()
@@ -2966,11 +2964,9 @@ mod tests {
         assert!(matches!(err, SolidError::InvalidInput { .. }));
 
         s.executive = Some(FilletExecutiveRef);
-        // Without ErrorInfo, record_fillet_error returns Unported(blend.fillet_executive_p1).
-        let err = s
-            .record_fillet_error(&target, &pseudo, 5, &[t.clone()], "bad int")
-            .unwrap_err();
-        assert!(err.is_unported());
+        // Without ErrorInfo, record_fillet_error notes into a scratch record.
+        s.record_fillet_error(&target, &pseudo, 5, &[t.clone()], "bad int")
+            .unwrap();
 
         s.record_fillet_error_in(
             &target,

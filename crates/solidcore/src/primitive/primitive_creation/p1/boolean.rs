@@ -76,6 +76,7 @@ pub(super) fn finish(
         primary_curve: &curve,
         other_curve: &curve,
         source_lists: &no_sources,
+        actual_curve_identities: false,
     };
     let attributes = &mut *notifications.attributes;
     let context = &mut notifications.context;

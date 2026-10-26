@@ -1,6 +1,8 @@
 //! Regression tests for caller continuations behind unavailable rollover calls.
 use super::*;
+use crate::blend::fillet_geom::p1::CornerLookup;
 use crate::blend::fillet_geom::p1::{FilletEdge, FilletEdgeuse, FilletGeom};
+use crate::blend::fillet_geom::p3::SplitCorners;
 use crate::blend::fillet_solver::p1::FilletSolver;
 use crate::curve::curve::p2::OwnerChange;
 use crate::curve::line::Line;
@@ -99,7 +101,30 @@ struct Fixture {
     geom: FilletGeomId,
     side: EdgeId,
     owners: Owners,
+    corners: TestCorners,
 }
+
+/// The corner store of the fixture: every corner has type `.0` (`None`: never asked).
+struct TestCorners(Option<FilletCornerType>);
+
+impl SplitCorners for TestCorners {
+    fn corner_of_vertex(&self, _: VertexId) -> Option<FilletCornerId> {
+        None
+    }
+    fn lookup(&self) -> CornerLookup<'_> {
+        CornerLookup::default()
+    }
+    fn corner_mut(
+        &mut self,
+        _: FilletCornerId,
+    ) -> Result<&mut crate::blend::fillet_corner::p3::FilletCorner> {
+        Err(SolidError::sm_err("no corner"))
+    }
+    fn corner_type(&self, _: FilletCornerId) -> Result<FilletCornerType> {
+        Ok(self.0.expect("the corner type is not asked"))
+    }
+}
+
 impl Fixture {
     fn new(ends: [&[f64]; 2], unknown: bool) -> Self {
         let k = Kernel::default();
@@ -164,6 +189,7 @@ impl Fixture {
             geom,
             side,
             owners: Owners::default(),
+            corners: TestCorners(None),
         }
     }
     fn context(&mut self) -> Recovery<'_> {
@@ -172,6 +198,7 @@ impl Fixture {
             k: &self.k,
             target: &mut self.target,
             fillets: &mut self.fb,
+            corners: &mut self.corners,
             ownership: &mut self.owners,
         }
     }
@@ -394,15 +421,8 @@ fn both_full_rollovers_execute_in_order_and_preserve_first_mutation_on_error() {
         ..Script::default()
     };
     let mut adjusted = vec![FilletCornerId(9)];
-    assert!(f
-        .context()
-        .process(
-            id,
-            &|_| Ok(FilletCornerType::OneByOne),
-            &mut adjusted,
-            &mut script
-        )
-        .is_err());
+    f.corners = TestCorners(Some(FilletCornerType::OneByOne));
+    assert!(f.context().process(id, &mut adjusted, &mut script).is_err());
     assert_eq!(script.calls, ["full0", "full1"]);
     assert!(f.fb.geom(id).unwrap().need_split);
     assert_eq!(adjusted, [FilletCornerId(9)]);
@@ -418,13 +438,9 @@ fn failed_first_full_rollover_stops_before_second() {
     }
     let mut f = Fixture::new([&[1.0], &[1.0]], true);
     let id = f.geom;
+    f.corners = TestCorners(Some(FilletCornerType::OneByOne));
     assert_eq!(
-        f.context().process(
-            id,
-            &|_| Ok(FilletCornerType::OneByOne),
-            &mut vec![],
-            &mut Failing
-        ),
+        f.context().process(id, &mut vec![], &mut Failing),
         Err(SolidError::sm_err("first"))
     );
 }
@@ -439,9 +455,7 @@ fn tangent_split_rebuilds_both_segments_and_restores_offset_identity_and_orienta
         ..Script::default()
     };
     let mut adjusted = vec![FilletCornerId(41), FilletCornerId(41)];
-    f.context()
-        .process(id, &|_| unreachable!(), &mut adjusted, &mut script)
-        .unwrap();
+    f.context().process(id, &mut adjusted, &mut script).unwrap();
     assert_eq!(
         script.calls,
         [
@@ -484,10 +498,7 @@ fn failure_before_trim_keeps_partial_surface_removal_corner_and_changed_offsets(
         ..Script::default()
     };
     let mut adjusted = Vec::new();
-    assert!(f
-        .context()
-        .process(id, &|_| unreachable!(), &mut adjusted, &mut script)
-        .is_err());
+    assert!(f.context().process(id, &mut adjusted, &mut script).is_err());
     assert_eq!(script.calls.last().unwrap(), "recalc");
     assert!(!script.calls.iter().any(|s| s == "trim"));
     assert_eq!(adjusted, [FilletCornerId(41)]);
@@ -504,9 +515,7 @@ fn cliff_corner_support_is_accumulated_then_computed_before_final_trim() {
         corner: true,
         ..Script::default()
     };
-    f.context()
-        .process(id, &|_| unreachable!(), &mut vec![], &mut script)
-        .unwrap();
+    f.context().process(id, &mut vec![], &mut script).unwrap();
     assert_eq!(
         script.calls,
         [
@@ -535,9 +544,7 @@ fn a_broken_corner_callee_cannot_spin_the_segment_walk_forever() {
         stalled: true,
         ..Script::default()
     };
-    let result = f
-        .context()
-        .process(id, &|_| unreachable!(), &mut vec![], &mut script);
+    let result = f.context().process(id, &mut vec![], &mut script);
     assert!(matches!(result, Err(SolidError::InvalidInput { .. })));
     assert_eq!(script.find_count, 44);
 }
@@ -546,9 +553,7 @@ fn empty_class_copies_geometry_but_never_calls_the_side_search() {
     let mut f = Fixture::new([&[], &[1.0]], false);
     let id = f.geom;
     let mut script = Script::default();
-    f.context()
-        .process(id, &|_| unreachable!(), &mut vec![], &mut script)
-        .unwrap();
+    f.context().process(id, &mut vec![], &mut script).unwrap();
     assert_eq!(script.calls, ["convex"]);
 }
 
@@ -631,9 +636,7 @@ fn ignored_copy_status_does_not_discard_its_completed_output() {
         fail: Some("copy_offset"),
         ..Script::default()
     };
-    f.context()
-        .process(id, &|_| unreachable!(), &mut vec![], &mut script)
-        .unwrap();
+    f.context().process(id, &mut vec![], &mut script).unwrap();
     assert_eq!(
         f.fb.geom(FilletGeomId(1)).unwrap().off_surfs[0]
             .as_ref()
@@ -1052,11 +1055,11 @@ fn rollover_corner_vertex_delegates_to_the_available_geom_port() {
     let rail = f.fb.geom(id).unwrap().rail(0).unwrap();
     let start = f.context().start(rail).unwrap();
     let r = Missing.corner_vertex(&mut f.context(), start, id);
-    // the recovery holds no corner table to resolve the vertex's corner in
+    // the fixture's corner table is empty: the vertex's corner is not in it
     assert!(matches!(
         r,
-        Err(SolidError::Unported {
-            unit: "blend.fillet_executive_p1",
+        Err(SolidError::Upstream {
+            code: crate::error::SM_ERR_NULL_POINTER,
             ..
         })
     ));

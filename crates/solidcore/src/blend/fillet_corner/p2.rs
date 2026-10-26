@@ -90,14 +90,14 @@ use crate::blend::fillet_corner::p1::{
 };
 use crate::blend::fillet_corner::p3::{
     move_vertexuse, primary_eu, rail_tangent_unchecked, recalc_split_geoms, set_vertex_point,
-    unchecked_point, CornerEnv, CornerPatchEnv, FilletCorner, FilletExecutiveData,
+    unchecked_point, CornerEnv, CornerPatchEnv, FilletCorner, FilletExecutiveData, TangentSplitEnv,
 };
 use crate::blend::fillet_custom_solver::{OffsetSurface, SurfaceId};
 use crate::blend::fillet_executive::p3::{ErrorInfo, FilletExecutive};
 use crate::blend::fillet_geom::p1::FilletErrorType;
 use crate::blend::fillet_geom::p1::{
-    check_seam_out, set_surface_closure, FilStatus, FilletBrep, FilletCornerType, FilletEdgeType,
-    FilletGeomId, FilletGeomType, FilletSolverId, FilletVertex, FilletVertexType,
+    check_seam_out, set_surface_closure, FilStatus, FilletBrep, FilletCornerId, FilletCornerType,
+    FilletEdgeType, FilletGeomId, FilletGeomType, FilletSolverId, FilletVertex, FilletVertexType,
 };
 use crate::blend::fillet_geom::p2::{srf_srf_intersection, SrfSrfOptions};
 use crate::blend::fillet_geom::p4::set_edge_curve;
@@ -126,6 +126,7 @@ use crate::topology::edgeuse::{p1 as eu1, p3 as eu3};
 use crate::topology::face::p2 as face_p2;
 use crate::topology::ObjectHandle;
 use crate::topology::{edge, vertex, Brep, EdgeId, EdgeuseId, FaceId, VertexId, VertexuseId};
+use std::collections::BTreeMap;
 
 const OP_CONCAVE: &str = "blend::fillet_corner::p2::find_concave_edgeuses";
 const OP_CONVEX_TOPO: &str = "blend::fillet_corner::p2::adjust_topology_convex_nxn";
@@ -360,14 +361,39 @@ impl FilletCorner {
     /// classification object that is not an edge use; [`SolidError::Unported`] (module
     /// docs).
     pub fn adjust_concave_corner_topology(&mut self, env: &mut CornerEnv<'_>) -> Result<()> {
+        self.adjust_concave_corner_topology_with(
+            env.k,
+            env.target,
+            env.pseudo,
+            env.corner,
+            &mut env.exec.extended_surfaces_map,
+        )
+    }
+
+    /// [`FilletCorner::adjust_concave_corner_topology`] against explicit objects: the
+    /// executive's kernel, target and pseudo-B-rep, this corner's identity and the
+    /// executive's extended-surface map (the legacy [`CornerEnv`] or a live session).
+    ///
+    /// # Errors
+    ///
+    /// As [`FilletCorner::adjust_concave_corner_topology`].
+    #[allow(clippy::too_many_lines)] // one upstream routine
+    pub fn adjust_concave_corner_topology_with(
+        &mut self,
+        k: &Kernel,
+        target: &Brep,
+        pseudo: &mut FilletBrep,
+        corner: Option<FilletCornerId>,
+        extended_surfaces: &mut BTreeMap<FaceId, Surface>,
+    ) -> Result<()> {
         // Find the fillet vertex to be adjusted, pAdjustVert.
         // It's the only SM_FV_RAIL_X_EDGEUSE.
         let mut found = None;
         for &v in &self.vertices {
-            if env.pseudo.fillet_vertex(v)?.fillet_vertex_type() != FilletVertexType::RailXEdgeuse {
+            if pseudo.fillet_vertex(v)?.fillet_vertex_type() != FilletVertexType::RailXEdgeuse {
                 continue;
             }
-            if let [g1, g2] = env.pseudo.vertex_fillet_geoms(v)?[..] {
+            if let [g1, g2] = pseudo.vertex_fillet_geoms(v)?[..] {
                 found = Some((v, g1, g2));
                 break;
             }
@@ -376,38 +402,27 @@ impl FilletCorner {
             found.ok_or_else(|| SolidError::null_pointer(OP_CONCAVE_TOPO))?;
 
         let Some(EntityRef::Edgeuse(side_eu1)) =
-            env.pseudo.fillet_vertex(adjust_vert)?.point_class_object()
+            pseudo.fillet_vertex(adjust_vert)?.point_class_object()
         else {
             return Err(null_deref("classification object is not an edge use"));
         };
-        let vu1 = env
-            .pseudo
+        let vu1 = pseudo
             .vu_at_rail_end(adjust_vert, Some(fillet_geom1), None, None)?
             .ok_or_else(|| null_deref("no rail vertex use"))?;
-        let vu2 = env
-            .pseudo
+        let vu2 = pseudo
             .vu_at_rail_end(adjust_vert, Some(fillet_geom2), Some(vu1), None)?
             .ok_or_else(|| null_deref("no rail vertex use"))?;
-        let edge_param1 = env
-            .pseudo
-            .fillet_vertexuse(vu1)?
-            .tsect_pnt()
-            .curve_parameter;
-        let edge_param2 = env
-            .pseudo
-            .fillet_vertexuse(vu2)?
-            .tsect_pnt()
-            .curve_parameter;
-        let side_edge = eu1::edge(env.target, side_eu1)?
-            .ok_or_else(|| null_deref("side edge use without edge"))?;
-        let side_edge_curve = env
-            .target
+        let edge_param1 = pseudo.fillet_vertexuse(vu1)?.tsect_pnt().curve_parameter;
+        let edge_param2 = pseudo.fillet_vertexuse(vu2)?.tsect_pnt().curve_parameter;
+        let side_edge =
+            eu1::edge(target, side_eu1)?.ok_or_else(|| null_deref("side edge use without edge"))?;
+        let side_edge_curve = target
             .edge(side_edge)?
             .curve
             .as_ref()
             .ok_or_else(|| null_deref("side edge without curve"))?;
-        let pnt1 = unchecked_point(side_edge_curve.evaluate_point(env.k, edge_param1))?;
-        let pnt2 = unchecked_point(side_edge_curve.evaluate_point(env.k, edge_param2))?;
+        let pnt1 = unchecked_point(side_edge_curve.evaluate_point(k, edge_param1))?;
+        let pnt2 = unchecked_point(side_edge_curve.evaluate_point(k, edge_param2))?;
 
         // See if we have coincident geometry, i.e. two rails intersect at this vertex.
         let gap_dist = pnt1.distance(pnt2);
@@ -419,8 +434,7 @@ impl FilletCorner {
         // See which of the two rail-side edge intersections is closer to the filleted
         // vertex, to decide Large/Small (read before the new vertices are made: nothing
         // here depends on them).
-        let vert_pnt = env
-            .target
+        let vert_pnt = target
             .vertex(
                 self.vertex
                     .ok_or_else(|| null_deref("m_cpVertex is NULL"))?,
@@ -438,62 +452,63 @@ impl FilletCorner {
             (fillet_geom1, fillet_geom2, vu1, vu2)
         };
         let side_face = if near1 {
-            eu1::face(env.target, side_eu1)?
+            eu1::face(target, side_eu1)?
         } else {
-            let radial = eu1::radial(env.target, side_eu1)?
+            let radial = eu1::radial(target, side_eu1)?
                 .ok_or_else(|| null_deref("side edge use without radial partner"))?;
-            eu1::face(env.target, radial)?
+            eu1::face(target, radial)?
         };
 
         // Create two new FilletVertices where each rail hits the side edge.
-        let new_vert_l = new_rail_x_edgeuse_vertex(env, pnt_l, t_l)?; // "Large"
-        let new_vert_s = new_rail_x_edgeuse_vertex(env, pnt_s, t_s)?; // "Small"
+        let new_vert_l = new_rail_x_edgeuse_vertex_in(k, pseudo, corner, pnt_l, t_l)?; // "Large"
+        let new_vert_s = new_rail_x_edgeuse_vertex_in(k, pseudo, corner, pnt_s, t_s)?; // "Small"
         self.vertices.push(new_vert_l);
         self.vertices.push(new_vert_s);
 
-        let fv = env.pseudo.fillet_vertex_mut(adjust_vert)?;
+        let fv = pseudo.fillet_vertex_mut(adjust_vert)?;
         fv.set_fillet_vertex_type(FilletVertexType::FilletXFillet);
         fv.set_status(FilStatus::Unprocessed);
 
-        move_vertexuse(env.pseudo, vu_on_large_fg, adjust_vert, new_vert_l)?;
-        move_vertexuse(env.pseudo, vu_on_small_fg, adjust_vert, new_vert_s)?;
+        move_vertexuse(pseudo, vu_on_large_fg, adjust_vert, new_vert_l)?;
+        move_vertexuse(pseudo, vu_on_small_fg, adjust_vert, new_vert_s)?;
 
-        let new_edge = make_fillet_edge(env, adjust_vert, new_vert_l)?;
-        let fe = env.pseudo.fillet_edge_mut(new_edge)?;
+        let new_edge = pseudo.make_fillet_edge(Some(adjust_vert), Some(new_vert_l), corner)?;
+        let fe = pseudo.fillet_edge_mut(new_edge)?;
         fe.set_fillet_edge_type(FilletEdgeType::FilletXSideFace);
         fe.set_original_face(side_face);
-        let prim_eu = primary_eu(env.pseudo, new_edge, OP_CONCAVE_TOPO)?;
-        env.pseudo
-            .set_edgeuse_fillet_geom(prim_eu, Some(large_fg))?;
+        let prim_eu = primary_eu(pseudo, new_edge, OP_CONCAVE_TOPO)?;
+        pseudo.set_edgeuse_fillet_geom(prim_eu, Some(large_fg))?;
 
         // Need to extend the side surface
         let side_face_id = side_face.ok_or_else(|| null_deref("no side face"))?;
-        let side_surface = env
-            .target
+        let side_surface = target
             .face(side_face_id)?
             .surface
             .as_ref()
             .ok_or_else(|| null_deref("side face without surface"))?;
         let new_surface =
-            side_surface.create_extended_surface(env.k, 10.0 * gap_dist, ContinuityType::G1)?;
+            side_surface.create_extended_surface(k, 10.0 * gap_dist, ContinuityType::G1)?;
 
         // Copy pNewSurface, when possible as an analytic surface.
-        let new_analytic_surface = new_surface.copy_and_add_analytics(env.k)?;
-        self.add_extended_original_surface(env.exec, side_face_id, new_analytic_surface);
+        let new_analytic_surface = new_surface.copy_and_add_analytics(k)?;
+        Self::add_extended_original_surface_with_map(
+            extended_surfaces,
+            side_face_id,
+            new_analytic_surface,
+        );
 
-        let new_edge1 = make_fillet_edge(env, new_vert_l, new_vert_s)?;
-        let fe1 = env.pseudo.fillet_edge_mut(new_edge1)?;
+        let new_edge1 = pseudo.make_fillet_edge(Some(new_vert_l), Some(new_vert_s), corner)?;
+        let fe1 = pseudo.fillet_edge_mut(new_edge1)?;
         fe1.set_fillet_edge_type(FilletEdgeType::OnEdge);
         fe1.set_original_edge(Some(side_edge));
         fe1.set_original_face(side_face);
 
-        let new_edge2 = make_fillet_edge(env, new_vert_s, adjust_vert)?;
-        let fe2 = env.pseudo.fillet_edge_mut(new_edge2)?;
+        let new_edge2 = pseudo.make_fillet_edge(Some(new_vert_s), Some(adjust_vert), corner)?;
+        let fe2 = pseudo.fillet_edge_mut(new_edge2)?;
         fe2.set_fillet_edge_type(FilletEdgeType::RailExtension);
         fe2.set_original_face(side_face);
-        let prim_eu2 = primary_eu(env.pseudo, new_edge2, OP_CONCAVE_TOPO)?;
-        env.pseudo
-            .set_edgeuse_fillet_geom(prim_eu2, Some(small_fg))?;
+        let prim_eu2 = primary_eu(pseudo, new_edge2, OP_CONCAVE_TOPO)?;
+        pseudo.set_edgeuse_fillet_geom(prim_eu2, Some(small_fg))?;
 
         self.edges.push(new_edge);
         self.edges.push(new_edge1);
@@ -503,28 +518,26 @@ impl FilletCorner {
         // Find them -- they are at the other end of the two FilletEdges
         // of type SM_FE_CROSS_SECTION -- and reset them as mates of
         // the two FilletVertices we just created.
-        let vus = env.pseudo.brep().vertex(adjust_vert)?.vertexuses.clone();
+        let vus = pseudo.brep().vertex(adjust_vert)?.vertexuses.clone();
         for vu in vus {
-            let eu = eu1::vertexuse_edgeuse(env.pseudo.brep(), vu)?
+            let eu = eu1::vertexuse_edgeuse(pseudo.brep(), vu)?
                 .ok_or_else(|| null_deref("vertex use without edge use"))?;
-            let fillet_e = env
-                .pseudo
+            let fillet_e = pseudo
                 .brep()
                 .edgeuse(eu)?
                 .edge
                 .ok_or_else(|| null_deref("edge use without edge"))?;
-            if env.pseudo.fillet_edge(fillet_e)?.fillet_edge_type() != FilletEdgeType::CrossSection
-            {
+            if pseudo.fillet_edge(fillet_e)?.fillet_edge_type() != FilletEdgeType::CrossSection {
                 continue;
             }
 
             // FilletEdge of type SM_FE_CROSS_SECTION:
-            let other_vert = edge::other_vertex(env.pseudo.brep(), fillet_e, Some(adjust_vert))?;
-            let mut fg = env.pseudo.fillet_edgeuse(eu)?.fillet_geom();
+            let other_vert = edge::other_vertex(pseudo.brep(), fillet_e, Some(adjust_vert))?;
+            let mut fg = pseudo.fillet_edgeuse(eu)?.fillet_geom();
             if fg.is_none() {
-                let mate = eu1::mate(env.pseudo.brep(), eu)?
+                let mate = eu1::mate(pseudo.brep(), eu)?
                     .ok_or_else(|| null_deref("edge use without mate"))?;
-                fg = env.pseudo.fillet_edgeuse(mate)?.fillet_geom();
+                fg = pseudo.fillet_edgeuse(mate)?.fillet_geom();
                 if fg.is_none() {
                     return Err(SolidError::null_pointer(OP_CONCAVE_TOPO));
                 }
@@ -535,23 +548,19 @@ impl FilletCorner {
                     other_vert.ok_or_else(|| null_deref("cross section without other vertex"))?;
                 Ok(pseudo.fillet_vertex(other)?.mate(0).is_some())
             };
-            let new_v = if fg == Some(small_fg) && has_mate(env.pseudo)? {
+            let new_v = if fg == Some(small_fg) && has_mate(pseudo)? {
                 Some(new_vert_s)
-            } else if fg == Some(large_fg) && has_mate(env.pseudo)? {
+            } else if fg == Some(large_fg) && has_mate(pseudo)? {
                 Some(new_vert_l)
             } else {
                 None
             };
             if let (Some(new_v), Some(other)) = (new_v, other_vert) {
-                env.pseudo
-                    .fillet_vertex_mut(new_v)?
-                    .set_mate(0, Some(other));
-                env.pseudo
-                    .fillet_vertex_mut(other)?
-                    .set_mate(0, Some(new_v));
+                pseudo.fillet_vertex_mut(new_v)?.set_mate(0, Some(other));
+                pseudo.fillet_vertex_mut(other)?.set_mate(0, Some(new_v));
             }
         }
-        let fv = env.pseudo.fillet_vertex_mut(adjust_vert)?;
+        let fv = pseudo.fillet_vertex_mut(adjust_vert)?;
         fv.set_mate(0, None);
         fv.set_mate(1, None);
 
@@ -612,7 +621,7 @@ impl FilletCorner {
         k: &Kernel,
         target: &Brep,
         pseudo: &mut FilletBrep,
-        corner: Option<crate::blend::fillet_geom::p1::FilletCornerId>,
+        corner: Option<FilletCornerId>,
         solver: &dyn Fn(FilletSolverId) -> Result<&'s FilletSolver>,
     ) -> Result<()> {
         const OP: &str = OP_CONVEX_TOPO;
@@ -1041,7 +1050,10 @@ impl FilletCorner {
     /// geometry, fillet surface, rail, rail vertex use or vertex);
     /// [`SolidError::Unported`] (`blend.fillet_corner_p3` module docs).
     #[allow(clippy::too_many_lines)]
-    pub fn adjust_tangent_corner_nx1_closed(&mut self, env: &mut CornerEnv<'_>) -> Result<()> {
+    pub fn adjust_tangent_corner_nx1_closed(
+        &mut self,
+        env: &mut TangentSplitEnv<'_>,
+    ) -> Result<()> {
         const OP: &str = OP_NX1_TANGENT;
         let Some((orig_fg, this_fv_use)) =
             self.nx1_closed_tangent_split(env.k, env.target, env.pseudo)?
@@ -1065,14 +1077,12 @@ impl FilletCorner {
             .geom(orig_fg)?
             .fillet_solver()
             .ok_or_else(|| SolidError::null_pointer(OP))?;
-        let fs = usize::try_from(si.0)
-            .ok()
-            .and_then(|i| env.solvers.get_mut(i))
-            .ok_or_else(|| invalid(OP, "fillet solver id not in the solver table"))?;
-        let split = fs.split_fillet_geom_at_side_edge(
+        let split = env.ops.split_fillet_geom_at_side_edge(
             env.k,
             env.target,
             env.pseudo,
+            self,
+            si,
             orig_fg,
             this_fv_use,
             which_end,
@@ -1180,10 +1190,7 @@ impl FilletCorner {
 
         // Adjust the uv positions in the TsectPnts in the Fillet Vertexuses for the seams.
         // SM_ASSERT(pNewFG->GetFilletSolver() == pFS);
-        let fs = usize::try_from(si.0)
-            .ok()
-            .and_then(|i| env.solvers.get(i))
-            .ok_or_else(|| invalid(OP, "fillet solver id not in the solver table"))?;
+        let fs = env.ops.solver(si)?;
         let off = |i: usize| -> Result<OffsetSurface> {
             fs.surface(i)?
                 .map(|slot| slot.surface.clone())
@@ -1929,6 +1936,10 @@ impl FilletCorner {
             .curve_based
             .solver
             .set_fillet_executive(Some(FilletExecutiveRef));
+        crate::blend::fillet_solver::curve_blend_sih::inherit_executive_handler(
+            &mut new_fs.curve_based.solver,
+            env.solvers,
+        );
         let fsg = match fsg_type {
             FilletSurfaceGeneratorType::Circular => Some(FilletSurfaceGenerator::circular(
                 approx_arcs,
@@ -2316,25 +2327,20 @@ fn null_deref(reason: &'static str) -> SolidError {
 
 /// `new (m_pPseudoBrep) SmFilletVertex(this)` of type `SM_FV_RAIL_X_EDGEUSE` with its
 /// point, original curve parameter and `SM_FIL_PROCESSED` status.
-fn new_rail_x_edgeuse_vertex(env: &mut CornerEnv<'_>, point: Point3, t: f64) -> Result<VertexId> {
-    let v = env.pseudo.brep_mut().add_vertex(point)?;
-    let mut fv = FilletVertex::new(env.k, env.corner);
+fn new_rail_x_edgeuse_vertex_in(
+    k: &Kernel,
+    pseudo: &mut FilletBrep,
+    corner: Option<FilletCornerId>,
+    point: Point3,
+    t: f64,
+) -> Result<VertexId> {
+    let v = pseudo.brep_mut().add_vertex(point)?;
+    let mut fv = FilletVertex::new(k, corner);
     fv.set_fillet_vertex_type(FilletVertexType::RailXEdgeuse);
     fv.set_original_t_param(t);
     fv.set_status(FilStatus::Processed);
-    env.pseudo.insert_fillet_vertex(v, fv);
+    pseudo.insert_fillet_vertex(v, fv);
     Ok(v)
-}
-
-/// `SmFilletEdge::MakeFilletEdge(m_pPseudoBrep, start, end, rpNewEdge, this)` (unit
-/// `blend.fillet_geom_p5`).
-pub(super) fn make_fillet_edge(
-    env: &mut CornerEnv<'_>,
-    start: VertexId,
-    end: VertexId,
-) -> Result<EdgeId> {
-    env.pseudo
-        .make_fillet_edge(Some(start), Some(end), env.corner)
 }
 
 #[cfg(test)]
@@ -2374,7 +2380,6 @@ mod tests {
     fn with_env<T>(pseudo: &mut FilletBrep, run: impl FnOnce(&mut CornerEnv<'_>) -> T) -> T {
         let mut k = Kernel::default();
         let mut target = Brep::new();
-        let surfaces = std::collections::BTreeMap::new();
         let mut exec = FilletExecutiveData::default();
         let mut env = CornerEnv {
             k: &mut k,
@@ -2382,7 +2387,6 @@ mod tests {
             pseudo,
             exec: &mut exec,
             corner: None,
-            tsect_surfaces: &surfaces,
             solvers: &mut [],
             fillet: None,
         };
@@ -2467,7 +2471,7 @@ mod tests {
     #[test]
     fn nx1_closed_tangent_corner_needs_one_filleted_edge_use() {
         let (mut pseudo, mut c) = loop_corner(FilletCornerKind::NByOneClosed, 2);
-        with_env(&mut pseudo, |env| c.adjust_tangent_corner_nx1_closed(env)).unwrap();
+        with_env(&mut pseudo, |env| c.adjust_tangent_corner(env)).unwrap();
         assert_eq!(c.edges.len(), 2);
     }
 

@@ -68,7 +68,7 @@ use solidcore::kernel::Kernel;
 use solidcore::math::EFF_ZERO_RAD;
 use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::topology::edgeuse::p1 as eu1;
-use solidcore::topology::{Brep, EdgeuseId, FaceId, VertexId, VertexuseId};
+use solidcore::topology::{Brep, EdgeuseId, FaceId, VertexId};
 use solidcore::SolidError;
 use solidcore_ffi::units::blend_fillet_corner_p3::{self as ffi, Op};
 use solidcore_ffi::units::topology_edgeuse_p1 as ffi1;
@@ -888,7 +888,6 @@ fn corner_rust_status_gs(
     c.topology_adjusted = ci.adjusted;
     c.set_back_dist = ci.setback;
 
-    let mut surfaces: BTreeMap<VertexuseId, [Option<Surface>; 2]> = BTreeMap::new();
     for t in &ci.tsects {
         let eu = rm.edgeuse(t.e, t.which)?;
         let vu = rm
@@ -932,7 +931,17 @@ fn corner_rust_status_gs(
                 _ => Ok(None),
             }
         };
-        surfaces.insert(vu, [srf(&rm, t.s0)?, srf(&rm, t.s1)?]);
+        let user = |s: Option<Surface>| {
+            s.map(|s| {
+                solidcore::intersect::surface_intersector::p1::UserSurface(std::sync::Arc::new(s))
+            })
+        };
+        let user_pointer = [user(srf(&rm, t.s0)?), user(srf(&rm, t.s1)?)];
+        rm.fb
+            .fillet_vertexuse_mut(vu)
+            .map_err(h)?
+            .tsect_pnt_mut()
+            .user_pointer = user_pointer;
     }
 
     for &[e, f] in &ci.orig_faces {
@@ -990,7 +999,6 @@ fn corner_rust_status_gs(
             exec: &mut exec,
             // the shim exports `this` as this id
             corner: Some(FilletCornerId(THIS_CORNER)),
-            tsect_surfaces: &surfaces,
             // the model's geometries have a solver only where the case gives one
             solvers: &mut solvers,
             fillet: Some(fillet_env(&mut fillet_brep, &mut records, &mut attributes)),

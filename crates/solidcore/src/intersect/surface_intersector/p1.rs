@@ -225,6 +225,22 @@ pub struct TsectPnt {
     pub deviation: f64,
     /// `m_adUserDoubles`: per-algorithm scratch values.
     pub user_doubles: [f64; MAX_USER_DOUBLES],
+    /// `m_apUserPointer[0..2]` (`None`: `NULL`). SMLib's only writer
+    /// (`SmFilletGeom::MakeRailEdgeuse`) stores surfaces in them and its only reader
+    /// (`SmFilletNx2Corner::AdjustTangentCorner`) reads them back as surfaces.
+    pub user_pointer: [Option<UserSurface>; 2],
+}
+
+/// A surface held by an intersection point's user pointer (`(void*)pSrf`). Copies of
+/// the point share it; two user pointers are equal when they hold the same surface
+/// (pointer identity, as upstream compares `void*`).
+#[derive(Debug, Clone)]
+pub struct UserSurface(pub std::sync::Arc<Surface>);
+
+impl PartialEq for UserSurface {
+    fn eq(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.0, &other.0)
+    }
 }
 
 impl Default for TsectPnt {
@@ -256,6 +272,7 @@ impl TsectPnt {
             tangent_plane_angle_rad: 0.0,
             deviation: 0.0,
             user_doubles: [0.0; MAX_USER_DOUBLES],
+            user_pointer: [None, None],
         }
     }
 
@@ -280,6 +297,7 @@ impl TsectPnt {
         self.tangent_plane_angle_rad = other.tangent_plane_angle_rad;
         self.deviation = other.deviation;
         self.user_doubles = other.user_doubles;
+        self.user_pointer.clone_from(&other.user_pointer);
     }
 
     /// True when either UV point is classified on a natural domain boundary or
@@ -1989,6 +2007,26 @@ mod tests {
             Vec2::new(1.0, 1.0),
             &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
         ))
+    }
+
+    /// `m_apUserPointer` follows copies and assignment, and compares by identity.
+    #[test]
+    fn user_pointers_follow_copies() {
+        let held = UserSurface(std::sync::Arc::new(plane(
+            [0.0; 3],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+        )));
+        let mut a = TsectPnt::new();
+        assert_eq!(a.user_pointer, [None, None]);
+        a.user_pointer = [Some(held.clone()), None];
+        let copied = a.clone();
+        assert_eq!(copied.user_pointer, a.user_pointer);
+        let mut assigned = TsectPnt::zeroed();
+        assigned.assign(&a);
+        assert_eq!(assigned.user_pointer, a.user_pointer);
+        let other = UserSurface(std::sync::Arc::new((*held.0).clone()));
+        assert_ne!(Some(other), a.user_pointer[0]);
     }
 
     #[test]

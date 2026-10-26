@@ -122,7 +122,7 @@ use crate::blend::fillet_custom_solver::{
 };
 use crate::blend::fillet_geom::p1::{FilletBrep, FilletSolverId};
 use crate::blend::fillet_solver::p1::{
-    FilletSolverOps, FilletSphereSolveEnfo, FilletSurfaceGenerator,
+    ExtensionCorners, FilletSolverOps, FilletSphereSolveEnfo, FilletSurfaceGenerator,
 };
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::p4::is_closed_base;
@@ -1458,6 +1458,7 @@ impl ConstantDistanceFs {
             let sols = surface_global_point_solve(
                 k,
                 &Surface::from(surface2.surface.clone()),
+                None,
                 &domain2,
                 pnt,
                 EFF_ZERO_SQ,
@@ -1881,8 +1882,13 @@ impl VariableRadiusFs {
     /// Those of `SmFilletSolver::SetExtensionFlags` ([`FilletSolver::set_extension_flags`]
     /// on `b`, the B-rep of the edge uses); [`SolidError::InvalidInput`] without original
     /// curve or when the first extension fails (upstream then dereferences `NULL`).
-    pub fn set_extension_flags(&mut self, k: &Kernel, b: &Brep) -> Result<()> {
-        self.curve_based.solver.set_extension_flags(b)?;
+    pub fn set_extension_flags(
+        &mut self,
+        k: &Kernel,
+        b: &Brep,
+        corners: &dyn ExtensionCorners,
+    ) -> Result<()> {
+        self.curve_based.solver.set_extension_flags(b, corners)?;
         self.extend_edge_curve(k)
     }
 
@@ -3552,7 +3558,11 @@ mod tests {
         assert!(fs.offset_radii_can_change().is_err());
         // the base SetExtensionFlags dereferences the missing edge uses
         assert!(matches!(
-            fs.set_extension_flags(k, &Brep::new()),
+            fs.set_extension_flags(
+                k,
+                &Brep::new(),
+                &crate::blend::fillet_solver::p1::NoExtensionCorners
+            ),
             Err(SolidError::InvalidInput { .. })
         ));
         // the law evaluates (1.25); the solver has no offset surfaces to set

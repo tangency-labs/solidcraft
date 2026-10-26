@@ -214,6 +214,9 @@ impl crate::blend::fillet_solver::p5::RailClassificationContext for Context<'_> 
             .map(crate::blend::fillet_corner::p3::FilletCorner::corner_type)
             .ok_or_else(|| super::invalid("rollover corner is not live in this session"))
     }
+    fn corners(&self) -> crate::blend::fillet_geom::p1::CornerLookup<'_> {
+        crate::blend::fillet_geom::p1::CornerLookup::table(self.corners)
+    }
 }
 
 #[cfg(test)]
@@ -376,7 +379,7 @@ mod tests {
             .unwrap()
             .set_status(FilStatus::Unprocessed);
         calc_rail_x_edge_with_ops(
-            live_solver_ops(solver).unwrap(),
+            live_solver_ops(solver),
             &k,
             objects.target,
             &mut objects.pseudo,

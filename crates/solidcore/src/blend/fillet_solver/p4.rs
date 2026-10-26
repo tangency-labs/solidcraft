@@ -72,11 +72,15 @@
 //!   drop tolerances.
 
 use super::p1::{FilletSolver, FilletSolverOps};
+use super::p2::SolverErrorObject;
 use crate::blend::fillet_custom_solver::OffsetSurface;
+use crate::blend::fillet_executive::p3::ErrorInfo;
 use crate::blend::fillet_geom::p1::{
     CornerLookup, FilletBrep, FilletErrorType, FilletGeomId, FilletGeomType, FilletSolverId,
 };
+use crate::blend::fillet_geom::p3::{NoCorners, SplitCorners};
 use crate::blend::fillet_intersector::{FilletIntersector, StepSolve as StepSolveFlags};
+use crate::blend::fillet_solver::p1::NoExtensionCorners;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{Result, SolidError};
 use crate::geom::extent1d::Extent1d;
@@ -190,7 +194,12 @@ pub trait FilletGeometryContext {
     ///
     /// # Errors
     /// Actual corner resolution or preparation failures.
-    fn set_extension_flags(&self, solver: &mut dyn FilletSolverOps, target: &Brep) -> Result<()>;
+    fn set_extension_flags(
+        &self,
+        solver: &mut dyn FilletSolverOps,
+        k: &Kernel,
+        target: &Brep,
+    ) -> Result<()>;
 
     /// Resolve an actual solver ID; borrow `current` only for this lookup's use.
     ///
@@ -201,11 +210,18 @@ pub trait FilletGeometryContext {
         id: FilletSolverId,
         current: &'s FilletSolver,
     ) -> Result<&'s FilletSolver>;
+
+    /// The executive's corner table (`m_vFilletCorners`), which the pseudo-B-rep
+    /// edge calculations read.
+    fn corners(&self) -> CornerLookup<'_>;
+
+    /// The executive's corners as `TopologySplit` reaches and changes them.
+    fn split_corners(&mut self) -> &mut dyn SplitCorners;
 }
 
 enum GeometrySolvers<'a> {
     Indexed(&'a [FilletSolver]),
-    Live(&'a dyn FilletGeometryContext),
+    Live(&'a mut dyn FilletGeometryContext),
 }
 
 /// The objects `CalcFilletGeom` reaches besides the solver.
@@ -219,6 +235,10 @@ struct Cx<'a> {
     /// The executive's solver table (`GetFilletSolver()` of the pseudo B-rep's
     /// geometries, read by `SmFilletEdge::CalcCrossSection`).
     solvers: GeometrySolvers<'a>,
+    /// The executive's error record `RecordFilletError` notes into
+    /// (`m_pExecutive->NoteFilletError`); `None` for a standalone entry point, which
+    /// notes into a scratch record.
+    error_info: Option<&'a mut ErrorInfo<SolverErrorObject>>,
 }
 
 /// The locals of `CalcFilletGeom` that live across the chunks.
@@ -361,35 +381,53 @@ impl FilletSolver {
         fillets: &mut FilletBrep,
         solvers: &[FilletSolver],
     ) -> Result<()> {
-        Self::calc_fillet_geom_resolved(ops, k, target, fillets, GeometrySolvers::Indexed(solvers))
+        Self::calc_fillet_geom_resolved(
+            ops,
+            k,
+            target,
+            fillets,
+            GeometrySolvers::Indexed(solvers),
+            None,
+        )
     }
 
     /// Calculate geometry using the executive's actual corner and solver context.
     ///
     /// # Errors
     /// As [`Self::calc_fillet_geom`], including actual context resolution failures.
+    /// `error_info` is the executive's record its `RecordFilletError` calls note into.
     pub fn calc_fillet_geom_with_context(
         ops: &mut dyn FilletSolverOps,
         k: &Kernel,
         target: &mut Brep,
         fillets: &mut FilletBrep,
-        context: &impl FilletGeometryContext,
+        context: &mut impl FilletGeometryContext,
+        error_info: &mut ErrorInfo<SolverErrorObject>,
     ) -> Result<()> {
-        Self::calc_fillet_geom_resolved(ops, k, target, fillets, GeometrySolvers::Live(context))
+        Self::calc_fillet_geom_resolved(
+            ops,
+            k,
+            target,
+            fillets,
+            GeometrySolvers::Live(context),
+            Some(error_info),
+        )
     }
 
-    fn calc_fillet_geom_resolved(
+    fn calc_fillet_geom_resolved<'a>(
         ops: &mut dyn FilletSolverOps,
-        k: &Kernel,
-        target: &mut Brep,
-        fillets: &mut FilletBrep,
-        solvers: GeometrySolvers<'_>,
+        k: &'a Kernel,
+        target: &'a mut Brep,
+        fillets: &'a mut FilletBrep,
+        solvers: GeometrySolvers<'a>,
+        error_info: Option<&'a mut ErrorInfo<SolverErrorObject>>,
     ) -> Result<()> {
         let mut cx = Cx {
             k,
             target,
             fillets,
             solvers,
+            error_info,
         };
 
         // :1495-1553 SetExtensionFlags, edge, curve end points, surfaces, geometry 0
@@ -613,8 +651,10 @@ fn c1_setup(ops: &mut dyn FilletSolverOps, cx: &mut Cx<'_>) -> Result<CalcState>
     // Set the extension flags for two ends of fillets
     // extend ends when vertices are not blended and not degenerate
     match &cx.solvers {
-        GeometrySolvers::Indexed(_) => ops.set_extension_flags(cx.target)?,
-        GeometrySolvers::Live(context) => context.set_extension_flags(ops, cx.target)?,
+        GeometrySolvers::Indexed(_) => {
+            ops.set_extension_flags(cx.k, cx.target, &NoExtensionCorners)?;
+        }
+        GeometrySolvers::Live(context) => context.set_extension_flags(ops, cx.k, cx.target)?,
     }
 
     // local to-be-filleted edge data
@@ -860,7 +900,12 @@ mod tests_c1 {
         fn solver_mut(&mut self) -> &mut FilletSolver {
             &mut self.0
         }
-        fn set_extension_flags(&mut self, _b: &Brep) -> Result<()> {
+        fn set_extension_flags(
+            &mut self,
+            _k: &Kernel,
+            _b: &Brep,
+            _corners: &dyn crate::blend::fillet_solver::p1::ExtensionCorners,
+        ) -> Result<()> {
             Ok(())
         }
     }
@@ -1005,6 +1050,7 @@ mod tests_c1 {
             target: &mut tb,
             fillets: &mut fb,
             solvers: GeometrySolvers::Indexed(&[]),
+            error_info: None,
         };
         let st = c1_setup(&mut ops, &mut cx).unwrap();
         assert_eq!(st.ivl.min(), 0.0);
@@ -1030,6 +1076,7 @@ mod tests_c1 {
             target: &mut tb,
             fillets: &mut fb,
             solvers: GeometrySolvers::Indexed(&[]),
+            error_info: None,
         };
         let e = c1_setup(&mut ops, &mut cx).unwrap_err();
         assert_eq!(e, SolidError::null_pointer(OP));
@@ -1055,6 +1102,7 @@ mod tests_c1 {
             target: &mut tb,
             fillets: &mut fb,
             solvers: GeometrySolvers::Indexed(&[]),
+            error_info: None,
         };
         let mut st = c1_setup(&mut ops, &mut cx).unwrap();
         let pass = c1_collect_points(&mut ops, &mut cx, &mut st, 0)
@@ -1098,6 +1146,7 @@ mod tests_c1 {
             target: &mut tb,
             fillets: &mut fb,
             solvers: GeometrySolvers::Indexed(&[]),
+            error_info: None,
         };
         let mut st = c1_setup(&mut ops, &mut cx).unwrap();
         let pass = c1_collect_points(&mut ops, &mut cx, &mut st, 1)
@@ -1120,6 +1169,7 @@ mod tests_c1 {
             target: &mut tb,
             fillets: &mut fb,
             solvers: GeometrySolvers::Indexed(&[]),
+            error_info: None,
         };
         let mut st = c1_setup(&mut ops, &mut cx).unwrap();
         let e = c1_collect_points(&mut ops, &mut cx, &mut st, 0).unwrap_err();
@@ -1138,6 +1188,7 @@ mod tests_c1 {
             target: &mut tb,
             fillets: &mut fb,
             solvers: GeometrySolvers::Indexed(&[]),
+            error_info: None,
         };
         let mut st = c1_setup(&mut ops, &mut cx).unwrap();
         assert!(st.split_original_fillet);
@@ -1184,6 +1235,7 @@ mod tests_c1 {
             target: &mut tb,
             fillets: &mut fb,
             solvers: GeometrySolvers::Indexed(&[]),
+            error_info: None,
         };
         let mut st = c1_setup(&mut ops, &mut cx).unwrap();
         // pass 0 closed: continue (nothing collected, nothing cleaned)
@@ -1215,6 +1267,7 @@ mod tests_c1 {
             target: &mut tb,
             fillets: &mut fb,
             solvers: GeometrySolvers::Indexed(&[]),
+            error_info: None,
         };
         let mut st = c1_setup(&mut ops, &mut cx).unwrap();
         // GetOrCreateUVTrimCurve builds the missing curve; CreateUVTrimCurve's failing
@@ -1523,6 +1576,7 @@ mod tests_c2 {
             target: &mut target,
             fillets: &mut fillets,
             solvers: GeometrySolvers::Indexed(&[]),
+            error_info: None,
         };
         let (mut st, refs) = state(&[
             (0.7, 0.4),
@@ -1556,6 +1610,7 @@ mod tests_c2 {
             target: &mut target,
             fillets: &mut fillets,
             solvers: GeometrySolvers::Indexed(&[]),
+            error_info: None,
         };
 
         // no points
@@ -1869,6 +1924,7 @@ mod tests_c3 {
             target: &mut target,
             fillets: &mut fillets,
             solvers: GeometrySolvers::Indexed(&[]),
+            error_info: None,
         };
         f(&mut cx)
     }
@@ -2447,6 +2503,7 @@ mod tests_c4 {
             target: &mut target,
             fillets: &mut fillets,
             solvers: GeometrySolvers::Indexed(&[]),
+            error_info: None,
         };
         let mut st = state(&[0.0, -1.0, 1.0]);
         st.trace.reverse_tracing = true;
@@ -2987,6 +3044,7 @@ mod tests_c5 {
                 target: &mut self.target,
                 fillets: &mut self.fb,
                 solvers: GeometrySolvers::Indexed(&[]),
+                error_info: None,
             };
             c5_post_process(&mut self.solver, &mut cx, &mut self.st)
         }
@@ -3232,7 +3290,7 @@ mod tests_c5 {
 fn c6_compute_point_values(
     ops: &mut dyn FilletSolverOps,
     k: &Kernel,
-    brep: Option<&Brep>,
+    mut brep: Option<&mut Brep>,
     uv_values: [Point2; 2],
     uv_domain1: &Extent2d,
     uv_domain2: &Extent2d,
@@ -3287,7 +3345,7 @@ fn c6_compute_point_values(
         step_solve(
             ops,
             k,
-            brep,
+            brep.as_deref_mut(),
             point,
             &mut step,
             uv_domain1,
@@ -3304,7 +3362,7 @@ fn c6_compute_point_values(
             step_solve(
                 ops,
                 k,
-                brep,
+                brep.as_deref_mut(),
                 point,
                 &mut step,
                 uv_domain1,
@@ -3644,8 +3702,14 @@ fn record_fillet_error(
     message: &'static str,
 ) -> Result<()> {
     let tsects = store.snapshot(cx.fillets, points)?;
-    ops.solver()
-        .record_fillet_error(cx.target, cx.fillets, error_type as i64, &tsects, message)
+    ops.solver().record_fillet_error_in(
+        cx.target,
+        cx.fillets,
+        error_type,
+        &tsects,
+        Some(message),
+        cx.error_info.as_deref_mut(),
+    )
 }
 
 /// `sm_FindFilletTsectPnt(this, pBaseSrf1, pBaseSrf2, rPnt, rTangent, rTsectPnt)`:
@@ -3654,7 +3718,7 @@ fn record_fillet_error(
 fn find_fillet_tsect_pnt(
     ops: &mut dyn FilletSolverOps,
     k: &Kernel,
-    brep: &Brep,
+    brep: &mut Brep,
     base1: &Surface,
     base2: &Surface,
     point: Point3,
@@ -3673,7 +3737,7 @@ fn find_fillet_tsect_pnt(
 fn step_solve(
     ops: &mut dyn FilletSolverOps,
     k: &Kernel,
-    brep: Option<&Brep>,
+    brep: Option<&mut Brep>,
     point: &TsectPnt,
     step: &mut f64,
     uv_domain1: &Extent2d,
@@ -3707,8 +3771,20 @@ fn topology_split(
         .geom(geom)?
         .fillet_solver()
         .ok_or_else(|| SolidError::null_pointer(OP))?;
-    cx.fillets
-        .topology_split(cx.k, geom, geom_type, solver_id, ops.solver(), cx.target)
+    // a standalone entry point holds no executive: no corner of any vertex
+    let corners: &mut dyn SplitCorners = match &mut cx.solvers {
+        GeometrySolvers::Indexed(_) => &mut NoCorners,
+        GeometrySolvers::Live(context) => context.split_corners(),
+    };
+    cx.fillets.topology_split(
+        cx.k,
+        geom,
+        geom_type,
+        solver_id,
+        ops.solver(),
+        cx.target,
+        corners,
+    )
 }
 
 /// `pFilletGeom->CalcBlendingGeom()` ([`FilletBrep::calc_blending_geom_of_solver`],
@@ -3738,7 +3814,7 @@ fn calc_cross_section(ops: &dyn FilletSolverOps, cx: &mut Cx<'_>, edge: EdgeId) 
             cx.k,
             edge,
             None,
-            CornerLookup::default(),
+            context.corners(),
             &|id| context.solver(id, ops.solver()),
             cx.target,
         ),
@@ -3835,7 +3911,7 @@ fn do_point_intersection(
     let mut solver = IntersectorSolver {
         ops,
         trace,
-        brep: Some(&*cx.target),
+        brep: Some(&mut *cx.target),
     };
     let r = fi.do_point_intersection(&mut solver, &mut *cx.fillets, k, &ids, &opts);
     for (p, &id) in points.iter_mut().zip(&ids) {
@@ -3875,6 +3951,7 @@ pub(crate) fn point_intersection_on_surfaces(
         target,
         fillets,
         solvers: GeometrySolvers::Indexed(&[]),
+        error_info: None,
     };
     let [extend_before, extend_after] = extend;
     let args = PointIntersectionArgs {
@@ -3900,8 +3977,9 @@ pub(crate) struct IntersectorSolver<'b> {
     trace: [&'b Surface; 2],
     /// The target B-rep holding the solver's edge uses (upstream's `GetEdgeuse`
     /// pointers reach it directly), passed to `LoadInitialValues` under
-    /// `ComputePointValues` and `StepSolve`; `None` where the caller has none.
-    brep: Option<&'b Brep>,
+    /// `ComputePointValues` and `StepSolve`, and read for the rails' original faces
+    /// by `SmoothOutIntersection`; `None` where the caller has none.
+    brep: Option<&'b mut Brep>,
 }
 
 /// Upstream's intersector evaluates the solver's own `SmOffsetSurface`s, so every
@@ -3994,7 +4072,7 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         let r = c6_compute_point_values(
             &mut *self.ops,
             k,
-            self.brep,
+            self.brep.as_deref_mut(),
             uv_values,
             uv_domain1,
             uv_domain2,
@@ -4039,7 +4117,7 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         let r = step_solve(
             &mut *self.ops,
             k,
-            self.brep,
+            self.brep.as_deref_mut(),
             point,
             step_size,
             uv_domain1,
@@ -4097,7 +4175,7 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
         self.pre()?;
         let r = self.ops.point_on_plane_solve(
             k,
-            self.brep,
+            self.brep.as_deref_mut(),
             plane_origin,
             plane_normal,
             uv_domain1,
@@ -4128,19 +4206,21 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
 
     fn smooth_out_intersection(
         &mut self,
-        _geom: &FilletGeomId,
-        _curves_3d: &mut Vec<BSplineCurve>,
-        _uv_curves1: &mut Vec<BSplineCurve>,
-        _uv_curves2: &mut Vec<BSplineCurve>,
+        k: &Kernel,
+        pseudo: &mut FilletBrep,
+        geom: &FilletGeomId,
+        curves_3d: &mut Vec<BSplineCurve>,
+        uv_curves1: &mut Vec<BSplineCurve>,
+        uv_curves2: &mut Vec<BSplineCurve>,
     ) -> Result<()> {
-        // as blend::fillet_intersector's ConstantRadiusAssistedFs: FlushCurve calls
-        // this only for a smoothing handler, and the only handler an executive can
-        // hold here (`SmMakeSurfaceBlendSIH`) is blending
-        // UNPORTED(blend.fillet_executive_p1): SmSelfIntersectionHandler::SmoothOutIntersection (justified: findings.md "fillet_solver_p1: SmoothOutIntersection")
-        Err(SolidError::unported(
-            "SmSelfIntersectionHandler::SmoothOutIntersection",
-            "blend.fillet_executive_p1",
-        ))
+        // the executive's handler (FlushCurve calls this for a smoothing one, which
+        // only SmMakeCurveBlendSIH is)
+        let handler = self
+            .ops
+            .solver()
+            .executive_curve_blend_sih
+            .ok_or_else(|| invalid("no smoothing self-intersection handler"))?;
+        handler.smooth_out_intersection(self, k, pseudo, *geom, curves_3d, uv_curves1, uv_curves2)
     }
 
     fn has_surface_generator(&self) -> Result<bool> {
@@ -4248,6 +4328,40 @@ impl crate::blend::fillet_intersector::FilletSolverOps for IntersectorSolver<'_>
     }
 }
 
+/// The solver members `SmMakeCurveBlendSIH::SmoothOutIntersection` reaches.
+impl crate::blend::fillet_solver::curve_blend_sih::SmoothingSolver for IntersectorSolver<'_> {
+    fn original_face_has_surface(&self, face: crate::topology::FaceId) -> Result<bool> {
+        let target = self
+            .brep
+            .as_deref()
+            .ok_or_else(|| invalid("no target B-rep for the rail faces"))?;
+        Ok(target.face(face)?.surface.is_some())
+    }
+
+    fn setup_offset_radius(&mut self, tsect: &TsectPnt) -> Result<f64> {
+        self.pre()?;
+        let mut radius = 0.0;
+        let r = self.ops.setup_offset_values(tsect, Some(&mut radius));
+        self.synced(r).map(|()| radius)
+    }
+
+    fn base_natural_uv_domain(&self, rail: usize) -> Result<Extent2d> {
+        Ok(offset_surface(&*self.ops, rail)?
+            .base_surface()
+            .natural_uv_domain())
+    }
+
+    fn rail_surface(&self, rail: usize) -> Result<Surface> {
+        Ok(Surface::from(
+            offset_surface(&*self.ops, rail)?.surface.clone(),
+        ))
+    }
+
+    fn this_approx_tol_3d(&self) -> f64 {
+        self.ops.solver().approx_tol_3d
+    }
+}
+
 #[cfg(test)]
 mod c7_tests {
     use super::*;
@@ -4287,6 +4401,7 @@ mod c7_tests {
             target: &mut target,
             fillets: &mut fillets,
             solvers: GeometrySolvers::Indexed(&[]),
+            error_info: None,
         };
         let mut points = vec![TsectPnt::new(), TsectPnt::new()];
         points[0].curve_parameter = 5.0;

@@ -27,8 +27,9 @@ use super::{
 use crate::blend::fillet_classification::FilletClassObject;
 use crate::blend::fillet_custom_solver::{OffsetSurface, SurfaceId};
 use crate::blend::fillet_geom::p1::{
-    CliffHandle, CornerLookup, FilStatus, FilletEdgeType, FilletVertex, FilletVertexType,
+    CliffHandle, FilStatus, FilletEdgeType, FilletVertex, FilletVertexType,
 };
+use crate::blend::fillet_geom::p3::SplitCorners;
 use crate::blend::fillet_solver::p1::{FilletSolverOffsetsData, OffsetSurfaceSlot};
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::Curve;
@@ -42,6 +43,8 @@ pub(super) struct Recovery<'a> {
     pub k: &'a Kernel,
     pub target: &'a mut Brep,
     pub fillets: &'a mut FilletBrep,
+    /// The executive's corners (`m_vFilletCorners`, `GetFilletCornerOfVertex`).
+    pub corners: &'a mut dyn SplitCorners,
     pub ownership: &'a mut dyn RolloverOwnership,
 }
 
@@ -171,6 +174,7 @@ pub(super) trait RecoveryOps {
             solver_id,
             c.solver.solver_mut(),
             c.target,
+            c.corners,
         )
     }
     fn rail_x_edge(
@@ -236,14 +240,12 @@ pub(super) trait RecoveryOps {
         // ProcessRollOver visits this solver's own geometries, so c.solver
         // is the solver identified by geom.fillet_solver().
         let solver_id = required(c.fillets.geom(geom)?.fillet_solver())?;
-        // UNPORTED(blend.fillet_executive_p1): SmFilletExecutive::m_vFilletCorners (the
-        // rollover recovery holds no corner table; CalcRailIntEdgeuse reads the vertex's
-        // corner)
+        // CalcRailIntEdgeuse reads the vertex's corner in the executive's table
         c.fillets.calc_rail_int_edgeuse_with_solver_ops(
             c.k,
             vertex,
             Some(geom),
-            CornerLookup::default(),
+            c.corners.lookup(),
             solver_id,
             &mut *c.solver,
             c.target,
@@ -398,7 +400,6 @@ impl Recovery<'_> {
     pub(super) fn process(
         &mut self,
         id: FilletGeomId,
-        corner_type: &impl Fn(FilletCornerId) -> Result<FilletCornerType>,
         adjusted: &mut Vec<FilletCornerId>,
         ops: &mut impl RecoveryOps,
     ) -> Result<()> {
@@ -419,7 +420,7 @@ impl Recovery<'_> {
             }
             let corner = required(self.fillets.fillet_vertex(self.start(r0)?)?.fillet_corner())?;
             if !matches!(
-                corner_type(corner)?,
+                self.corners.corner_type(corner)?,
                 FilletCornerType::NByOneClosed | FilletCornerType::OneByOne
             ) {
                 return Err(SolidError::sm_err(OP));

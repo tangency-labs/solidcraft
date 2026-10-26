@@ -316,6 +316,42 @@ impl FilletSession<'_> {
         )
     }
 
+    /// `DoSurfaceFilleting`'s trimming (`SmFilletExecutive.cpp` 3875-3960): under the
+    /// same common-mate marks, each geometry's `TrimOriginalSurfaces`, then
+    /// `GetTopologyIntersector().DeleteFaces(sDelFaces)` of the selected original faces
+    /// only (unlike `DoFilleting`, unkept fillet faces are not added).
+    ///
+    /// # Errors
+    /// The first selection or deletion error; locks are released on every result.
+    pub(super) fn trim_original_surfaces_for_surface_filleting(
+        &mut self,
+        k: &mut Kernel,
+    ) -> Result<()> {
+        self.with_original_trim_marks(k, |session, k, locks, serial| {
+            let mut kept = Vec::new();
+            let mut deleted = Vec::new();
+            session.executive.select_original_surfaces(
+                k,
+                &mut TrimAccess {
+                    objects: &mut session.objects,
+                    locks,
+                    fillet_serial: serial,
+                },
+                &mut kept,
+                &mut deleted,
+            )?;
+            let deleted: Vec<_> = deleted
+                .into_iter()
+                .map(|face| FilletObject::Topology(FilletBody::Target, EntityRef::Face(face)))
+                .collect();
+            DeleteAccess(&mut session.objects).original_delete_faces(
+                k,
+                &mut session.executive.intersector,
+                &deleted,
+            )
+        })
+    }
+
     // The lock scope can also enclose later native trim continuation without
     // advancing marks or copying the authoritative record map between components.
     pub(super) fn with_original_trim_marks<T>(

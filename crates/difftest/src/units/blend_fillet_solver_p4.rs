@@ -608,7 +608,7 @@ impl FilletSolverOps for ShimSolver {
     fn load_initial_values(
         &mut self,
         k: &Kernel,
-        brep: Option<&Brep>,
+        brep: Option<&mut Brep>,
         do_surf2_calcs: bool,
         rail_index: usize,
         surface1: &mut OffsetSurface,
@@ -631,7 +631,12 @@ impl FilletSolverOps for ShimSolver {
         )
     }
 
-    fn set_extension_flags(&mut self, b: &Brep) -> solidcore::Result<()> {
+    fn set_extension_flags(
+        &mut self,
+        k: &Kernel,
+        b: &Brep,
+        corners: &dyn solidcore::blend::fillet_solver::p1::ExtensionCorners,
+    ) -> solidcore::Result<()> {
         match self.extend {
             Some([before, after]) => {
                 let s = self.inner.solver_mut();
@@ -639,7 +644,7 @@ impl FilletSolverOps for ShimSolver {
                 s.extend_after = after;
                 Ok(())
             }
-            None => self.inner.set_extension_flags(b),
+            None => self.inner.set_extension_flags(k, b, corners),
         }
     }
 }

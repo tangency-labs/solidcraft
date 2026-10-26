@@ -17,11 +17,13 @@ use crate::kernel::Kernel;
 use crate::surface::surface::Surface;
 use crate::topology::{Brep, EdgeuseId};
 
-use super::p1::{FilletSolver, FilletSolverOps, OffsetSurfaceSlot};
+use super::p1::{FilletSolver, FilletSolverOps, OffsetSurfaceSlot, RolloverGuesses};
+use crate::math::Point2;
 
 struct GeometrySolver<'a> {
     actual: &'a mut ConstantRadiusAssistedFs,
     geometry: &'a mut FilletGeom,
+    rollover: RolloverGuesses,
 }
 
 impl ConstantRadiusOps for GeometrySolver<'_> {
@@ -55,15 +57,15 @@ impl ConstantRadiusOps for GeometrySolver<'_> {
         Ok(())
     }
 
-    fn check_tangent_rollover_guess_context(&self) -> Result<()> {
-        if self.geometry.fillet_geom_type() == FilletGeomType::TangentRollover {
-            // UNPORTED(blend.fillet_standard_solver_p2): SmConstantRadiusFS::LoadInitialValues tangent-rollover vertex-use context
-            return Err(SolidError::unported(
-                "SmConstantRadiusFS::LoadInitialValues tangent-rollover vertex-use context",
-                "blend.fillet_standard_solver_p2",
-            ));
+    fn tangent_rollover_guess(&self, rail: usize) -> Result<Option<Point2>> {
+        if self.geometry.fillet_geom_type() != FilletGeomType::TangentRollover {
+            return Ok(None);
         }
-        Ok(())
+        match self.rollover.rails.get(rail).copied().flatten() {
+            Some(guess) => Ok(guess),
+            // pFG->GetRail(lRailIndex) is NULL: upstream dereferences it
+            None => Err(SolidError::null_pointer("blend::fillet_solver::surfaces")),
+        }
     }
 
     fn setup_offset_extension(
@@ -108,7 +110,7 @@ impl FilletSolverOps for GeometrySolver<'_> {
     fn load_initial_values(
         &mut self,
         k: &Kernel,
-        brep: Option<&Brep>,
+        brep: Option<&mut Brep>,
         do_surf2_calcs: bool,
         rail_index: usize,
         surface1: &mut OffsetSurface,
@@ -164,6 +166,7 @@ pub(crate) fn rail_edgeuse_intersect(
     actual: &mut ConstantRadiusAssistedFs,
     k: &Kernel,
     geometry: &mut FilletGeom,
+    rollover: RolloverGuesses,
     target: &mut Brep,
     rail_index: usize,
     edgeuse: EdgeuseId,
@@ -171,7 +174,11 @@ pub(crate) fn rail_edgeuse_intersect(
     tsect: &mut TsectPnt,
 ) -> Result<Option<f64>> {
     FilletSolver::rail_edgeuse_intersect(
-        &mut GeometrySolver { actual, geometry },
+        &mut GeometrySolver {
+            actual,
+            geometry,
+            rollover,
+        },
         k,
         target,
         rail_index,
@@ -308,6 +315,59 @@ pub(crate) fn slot_rail_edgeuse_intersect<S: FilletSolverOps>(
     result
 }
 
+/// Run `f` with `geometry` of `pseudo` as `ops`'s geometry for the surfaces
+/// (`SetFilletGeomForSurfaces(pFG)` around a call): every `GetSurface(rail)` /
+/// `SetSurface(rail, ..)` of the call then reads or writes the geometry's offset
+/// surface. The geometry's offset surfaces are moved into the solver's slots for the
+/// call and back afterwards (also on error), with the solver's own surfaces and
+/// geometry for the surfaces restored. A rail the geometry has no offset surface for
+/// has none during the call (upstream's `GetOffsetSurface` falls back to
+/// `GetSurface`, which asks the same geometry again without end: UB-204).
+///
+/// # Errors
+/// [`SolidError::NotFound`] for a geometry not in `pseudo`; those of `f`.
+pub(crate) fn with_geometry_surfaces<T>(
+    ops: &mut dyn FilletSolverOps,
+    pseudo: &mut crate::blend::fillet_geom::p1::FilletBrep,
+    geometry: crate::blend::fillet_geom::p1::FilletGeomId,
+    f: impl FnOnce(
+        &mut dyn FilletSolverOps,
+        &mut crate::blend::fillet_geom::p1::FilletBrep,
+    ) -> Result<T>,
+) -> Result<T> {
+    let mut selected = std::mem::take(&mut pseudo.geom_mut(geometry)?.off_surfs);
+    let saved_geom = ops.solver().fillet_geom_for_surfaces();
+    let mut own: [Option<OffsetSurfaceSlot>; 2] = [None, None];
+    for ((slot, kept), (chosen, key)) in ops
+        .solver_mut()
+        .surfaces
+        .iter_mut()
+        .zip(own.iter_mut())
+        .zip(selected.iter_mut().zip(SELECTED_KEYS))
+    {
+        let chosen = chosen
+            .take()
+            .map(|surface| OffsetSurfaceSlot { key, surface });
+        *kept = std::mem::replace(slot, chosen);
+    }
+    ops.solver_mut().set_fillet_geom_for_surfaces(None);
+    let result = f(&mut *ops, &mut *pseudo);
+    ops.solver_mut().set_fillet_geom_for_surfaces(saved_geom);
+    for ((slot, kept), chosen) in ops
+        .solver_mut()
+        .surfaces
+        .iter_mut()
+        .zip(own.iter_mut())
+        .zip(selected.iter_mut())
+    {
+        *chosen = std::mem::replace(slot, kept.take()).map(|slot| slot.surface);
+    }
+    let back = pseudo.geom_mut(geometry).map(|g| g.off_surfs = selected);
+    let value = result?;
+    back?;
+    Ok(value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -378,6 +438,7 @@ mod tests {
         let mut view = GeometrySolver {
             actual: &mut actual,
             geometry: &mut geometry,
+            rollover: RolloverGuesses::default(),
         };
         assert!(std::ptr::eq(
             view.solver_surface(0).unwrap().unwrap(),
@@ -481,7 +542,7 @@ mod tests {
                 .as_mut()
                 .unwrap()
                 .surface
-                .evaluate_point_extending(&k, crate::geom::vector2d::Point2::new(0.25, 0.75))
+                .evaluate_point_extending(&k, Point2::new(0.25, 0.75))
                 .unwrap(),
             Point3::new(0.25, 0.75, 7.0)
         );

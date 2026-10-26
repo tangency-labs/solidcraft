@@ -1992,7 +1992,6 @@ fn corner_rust(i: &Inputs) -> Result<Output, HarnessError> {
         }
         CornerMethod::VertGeom | CornerMethod::EdgeGeom => {
             let mut exec = FilletExecutiveData::default();
-            let surfaces = BTreeMap::new();
             let r = {
                 let mut env = CornerEnv {
                     k: &mut rm.k,
@@ -2000,7 +1999,6 @@ fn corner_rust(i: &Inputs) -> Result<Output, HarnessError> {
                     pseudo: &mut rm.fb,
                     exec: &mut exec,
                     corner: None,
-                    tsect_surfaces: &surfaces,
                     solvers: &mut [],
                     fillet: None,
                 };
@@ -2025,7 +2023,6 @@ fn corner_rust(i: &Inputs) -> Result<Output, HarnessError> {
                 fc.surfaces.push(super::blend_fillet_geom_p1::surface_of(srf)?);
             }
             let mut exec = FilletExecutiveData::default();
-            let surfaces = BTreeMap::new();
             // m_pFilletBrep: a new SmBrep for the face makers, the Model's fillet B-rep
             // (holding the corner edges' fillet-B-rep edges) for the insertion
             let mut new_brep = Brep::new_with_infinite_region().map_err(h)?;
@@ -2040,7 +2037,6 @@ fn corner_rust(i: &Inputs) -> Result<Output, HarnessError> {
                     pseudo: &mut rm.fb,
                     exec: &mut exec,
                     corner: None,
-                    tsect_surfaces: &surfaces,
                     solvers: &mut [],
                     fillet: Some(super::blend_fillet_corner_p3::fillet_env(
                         fillet_brep,
@@ -2094,7 +2090,6 @@ fn corner_rust(i: &Inputs) -> Result<Output, HarnessError> {
                 solvers.push(fs);
             }
             let mut exec = FilletExecutiveData::default();
-            let surfaces = BTreeMap::new();
             let r = {
                 let mut env = CornerEnv {
                     k: &mut rm.k,
@@ -2102,7 +2097,6 @@ fn corner_rust(i: &Inputs) -> Result<Output, HarnessError> {
                     pseudo: &mut rm.fb,
                     exec: &mut exec,
                     corner: None,
-                    tsect_surfaces: &surfaces,
                     solvers: &mut solvers,
                     fillet: None,
                 };
@@ -2127,7 +2121,6 @@ fn corner_rust(i: &Inputs) -> Result<Output, HarnessError> {
             for &e in c.topo {
                 exec.topo_edges.push(Some(rm.edge(e)?));
             }
-            let surfaces = BTreeMap::new();
             let r = {
                 let mut env = CornerEnv {
                     k: &mut rm.k,
@@ -2135,7 +2128,6 @@ fn corner_rust(i: &Inputs) -> Result<Output, HarnessError> {
                     pseudo: &mut rm.fb,
                     exec: &mut exec,
                     corner: None,
-                    tsect_surfaces: &surfaces,
                     solvers: &mut [],
                     fillet: None,
                 };

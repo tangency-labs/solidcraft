@@ -150,6 +150,7 @@ impl TsectPnt {
             tangent_plane_angle_rad: 0.0,
             deviation: 0.0,
             user_doubles: [0.0; MAX_USER_DOUBLES],
+            user_pointer: [None, None],
         }
     }
 }
@@ -1182,6 +1183,7 @@ pub fn update_tsect_point_with<'s, V: super::p4::IntersectorVirtuals<'s> + ?Size
 
     // copy rNextTSP user values from pNewTSP
     next_tsp.user_doubles = new_tsp.user_doubles;
+    next_tsp.user_pointer.clone_from(&new_tsp.user_pointer);
 
     // ComputePointValues with pNewTSP UV values and store results in rNextTSP
     let r = v.compute_point_values(k, uvs, &mut next_tsp, Some(&prev_tsp), None);

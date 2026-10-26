@@ -27,7 +27,9 @@
 //! (upstream a fresh `SmFilletExecutive` on the stack), which owns the cross-section
 //! generator (on the stack upstream). The fillet B-rep is the session's intermediate
 //! body. The trimming of the original surfaces (only with `lBaseTrimType != 0`, which
-//! `SmApiSurfaceSurfaceFillet` never passes) is not ported. As upstream, the topology
+//! `SmApiSurfaceSurfaceFillet` never passes) runs under the session's original-trim
+//! mark scope (one context: both bodies' identities are this kernel's) and deletes the
+//! selected faces as target faces. As upstream, the topology
 //! insertion leaves the intersector's primary and other B-reps unset and inserts only
 //! geometries with a fillet surface. No recursion.
 
@@ -116,6 +118,9 @@ impl RailClassificationContext for SurfaceSurfaceSession<'_> {
         }
         .corner_type(corner)
     }
+    fn corners(&self) -> crate::blend::fillet_geom::p1::CornerLookup<'_> {
+        crate::blend::fillet_geom::p1::CornerLookup::table(self.corners)
+    }
 }
 
 impl SurfaceSurfaceContext for SurfaceSurfaceSession<'_> {
@@ -160,13 +165,6 @@ impl SurfaceSurfaceContext for SurfaceSurfaceSession<'_> {
         fillet_geom_index: usize,
         trim_type: BoundaryTrimmingType,
     ) -> Result<()> {
-        if bases.second.is_some() && trim_type == BoundaryTrimmingType::Blend {
-            // UNPORTED(blend.fillet_executive_p1): SmFilletGeom::CreateEndCurve (SM_BT_BLEND edge tangents on a second base B-rep)
-            return Err(SolidError::unported(
-                "SmFilletGeom::CreateEndCurve (SM_BT_BLEND on a second base B-rep)",
-                "blend.fillet_executive_p1",
-            ));
-        }
         // The classifications only read the rails' curves and the base topology,
         // which the split leaves as they are: resolve them in a copy of the pseudo body.
         let snapshot = pseudo.brep().clone();
@@ -182,7 +180,12 @@ impl SurfaceSurfaceContext for SurfaceSurfaceSession<'_> {
             &objects,
             fillet_geom_index,
             trim_type,
-            bases.target,
+            // CreateEndCurve's SM_BT_BLEND tangents read the edge each rail's end
+            // vertex is classified on: the second rail's lies in the second base
+            [
+                bases.target,
+                bases.second.as_deref().unwrap_or(bases.target),
+            ],
         )
     }
 }
@@ -431,8 +434,8 @@ impl FilletSession<'_> {
     ///
     /// # Errors
     ///
-    /// Those of the face construction, stitching, edge map and insertion;
-    /// [`SolidError::Unported`] for the trimming of the original surfaces.
+    /// Those of the face construction, stitching, edge map and insertion,
+    /// and those of the original-surface trimming.
     pub fn do_surface_filleting(
         &mut self,
         k: &mut Kernel,
@@ -481,7 +484,10 @@ impl FilletSession<'_> {
             let FilletObject::Solver(id) = solver else {
                 return Err(invalid("object is not a solver"));
             };
-            match self.objects.calc_solver_geometry(k, id, &self.executive) {
+            match self
+                .objects
+                .calc_solver_geometry(k, id, &mut self.executive)
+            {
                 Err(error) if error.is_unported() => return Err(error),
                 Err(_) => continue,
                 Ok(()) => {}
@@ -549,12 +555,9 @@ impl FilletSession<'_> {
             body.set_editing_enabled(false);
         }
 
+        // when asked for Trimming of the original surfaces
         if self.executive.options.trimming {
-            // UNPORTED(blend.fillet_executive_p1): SmFilletExecutive::DoSurfaceFilleting (trimming of the original surfaces)
-            return Err(SolidError::unported(
-                "SmFilletExecutive::DoSurfaceFilleting (original surface trimming)",
-                "blend.fillet_executive_p1",
-            ));
+            self.trim_original_surfaces_for_surface_filleting(k)?;
         }
 
         if let Some(output) = error_out {

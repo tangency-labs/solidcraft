@@ -593,6 +593,7 @@ impl<'keys> ManifoldKernelAdapter<'keys> {
                 primary_curve: &no_curve,
                 other_curve: &no_curve,
                 source_lists: &no_sources,
+                actual_curve_identities: false,
             }),
         )
     }
@@ -2018,6 +2019,7 @@ mod tests {
             primary_curve: &|edge, kind| Ok(primary_curve(edge, kind)),
             other_curve: &|edge, kind| Ok(other_curve(edge, kind)),
             source_lists: &|region| Ok(source_lists(region)),
+            actual_curve_identities: false,
         };
         for fail in [false, true] {
             let mut a = Brep::new();
@@ -2138,6 +2140,7 @@ mod tests {
             primary_curve: &|edge, kind| Ok(curve(edge, kind)),
             other_curve: &|edge, kind| Ok(curve(edge, kind)),
             source_lists: &|region| Ok(source_lists(region)),
+            actual_curve_identities: false,
         };
         let old = primary(EntityRef::Vertex(VertexId::from_index(0))).key;
         let added = primary(EntityRef::Vertex(VertexId::from_index(1))).key;

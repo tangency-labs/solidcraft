@@ -85,9 +85,37 @@ SmStatus piecewise_fillet_edges(SmBrep* pBrep,SmTArray<SmEdge*>& rEdges,double d
     return SM_SUCCESS;
 }
 
+// SmApiFilletEdges with an SmMakeCurveBlendSIH(dStepBackFactor) self-intersection
+// handler installed on the executive (SetSelfIntersectionHandler, as prog_test's
+// smFilletTest.cpp:4739 declares one), so every FlushCurve smooths the new curves
+// into the previous section through SmMakeCurveBlendSIH::SmoothOutIntersection.
+SmStatus curve_sih_fillet_edges(SmBrep* pBrep,SmTArray<SmEdge*>& rEdges,double dRadius,
+    ULONG lXSectType,ULONG lContinuity,double dThumbweight,double dStepBackFactor) {
+    if (!pBrep || rEdges.GetSize() < 1) return SM_ERR_INVALID_INPUT;
+    const SmContext* pContext=SmApiGetOrCreateContext();
+    SmFilletSurfaceGeneratorType eFSGType=SM_FSG_CIRCULAR;
+    if (lXSectType == 0) eFSGType=SM_FSG_LINEAR;
+    else if (lXSectType == 2) eFSGType=SM_FSG_BLEND_CURVE;
+    SmMakeCurveBlendSIH sSIH(dStepBackFactor);
+    SmFilletExecutive sFilExec(*pContext,pBrep);
+    sFilExec.SetSelfIntersectionHandler(&sSIH);
+    sFilExec.SetDoGlobalMerge(TRUE);
+    SmStatus eStat=sFilExec.SetFilletParameters(pBrep,rEdges,eFSGType,SM_FS_CONST_RADIUS,
+        dRadius,NULL,-1.0,-1.0,-1.0,-1.0,lContinuity,dThumbweight);
+    if (eStat != SM_SUCCESS) return eStat;
+    eStat=sFilExec.DoFillet();
+    if (eStat != SM_SUCCESS) return eStat;
+    pBrep->StitchAndOrient();
+    return SM_SUCCESS;
+}
+
+// `curve_sih` > 0 fillets with curve_sih_fillet_edges at that step-back factor; a
+// non-null `end_radius` runs SmApiVariableRadiusFillet from fillet[0] to *end_radius
+// (thumbweight fillet[3] must be 1.0, the variable-radius API takes none).
 int32_t fillet_and_record(SmBrep* body,const double* fillet,int64_t n,std::vector<double>& values,
-    bool piecewise=false) {
+    bool piecewise=false,double curve_sih=0.0,const double* end_radius=nullptr) {
     if (n < 5) return SC_ERR_ARG;
+    if (end_radius && (!std::isfinite(*end_radius) || fillet[3] != 1.0)) return SC_ERR_ARG;
     const double ulong_limit=std::ldexp(1.0,std::numeric_limits<ULONG>::digits);
     for (int i : {1,2}) if (fillet[i] < 0 || std::floor(fillet[i]) != fillet[i]
         || fillet[i] >= ulong_limit) return SC_ERR_ARG;
@@ -110,7 +138,11 @@ int32_t fillet_and_record(SmBrep* body,const double* fillet,int64_t n,std::vecto
             }
         }
     }
-    const auto result=piecewise
+    const auto result=end_radius
+        ? SmApiVariableRadiusFillet(body,selected,fillet[0],*end_radius,ULONG(fillet[1]),ULONG(fillet[2]))
+        : curve_sih > 0.0
+        ? curve_sih_fillet_edges(body,selected,fillet[0],ULONG(fillet[1]),ULONG(fillet[2]),fillet[3],curve_sih)
+        : piecewise
         ? piecewise_fillet_edges(body,selected,fillet[0],ULONG(fillet[1]),ULONG(fillet[2]),fillet[3])
         : SmApiFilletEdges(body,selected,fillet[0],ULONG(fillet[1]),ULONG(fillet[2]),fillet[3]);
     // Selected pointers may no longer be live; all result traversals are fresh.
@@ -138,7 +170,7 @@ int32_t fillet_and_record(SmBrep* body,const double* fillet,int64_t n,std::vecto
 // then owning-list edge indices. This initial fixture constructor is a box.
 namespace fillet_real_solid {
 int32_t real_solid(const double* input, int64_t n, double* out, int64_t cap, int64_t* out_len,
-    bool piecewise) {
+    bool piecewise, double curve_sih=0.0, const double* end_radius=nullptr) {
     if (!input || n < 9) return SC_ERR_ARG;
     for (int64_t i=0; i<n; ++i) if (!std::isfinite(input[i])) return SC_ERR_ARG;
     for (int i=0; i<3; ++i) if (input[i] <= SM_EFF_ZERO) return SC_ERR_ARG;
@@ -149,7 +181,7 @@ int32_t real_solid(const double* input, int64_t n, double* out, int64_t cap, int
     if (setup != SM_SUCCESS || !raw) return SC_ERR_ARG;
     std::unique_ptr<SmBrep> body(raw);
     std::vector<double> values;
-    const auto rc=fillet_real_solid::fillet_and_record(body.get(),input+3,n-3,values,piecewise);
+    const auto rc=fillet_real_solid::fillet_and_record(body.get(),input+3,n-3,values,piecewise,curve_sih,end_radius);
     if (rc != SC_OK) return rc;
     return sc_copy_out(values.data(),int64_t(values.size()),out,cap,out_len);
     SC_CATCH
@@ -159,6 +191,11 @@ int32_t real_solid(const double* input, int64_t n, double* out, int64_t cap, int
 SC_EXPORT int32_t sc_blend_fillet_executive_p3_real_solid(
     const double* input, int64_t n, double* out, int64_t cap, int64_t* out_len) {
     return fillet_real_solid::real_solid(input,n,out,cap,out_len,false);
+}
+SC_EXPORT int32_t sc_blend_fillet_executive_p3_real_variable_solid(
+    const double* input, int64_t n, double end_radius,
+    double* out, int64_t cap, int64_t* out_len) {
+    return fillet_real_solid::real_solid(input,n,out,cap,out_len,false,0.0,&end_radius);
 }
 
 // The box wire of sc_blend_fillet_executive_p3_real_solid, filleted with the
@@ -215,7 +252,7 @@ SmBrep* build_source(int kind,const char* path,const double* p) {
 // the .smb file of kind 1 (null otherwise).
 namespace fillet_real_solid {
 int32_t real_source(const char* path, const double* input, int64_t n, double* out, int64_t cap,
-    int64_t* out_len, bool piecewise) {
+    int64_t* out_len, bool piecewise, double curve_sih=0.0) {
     const int64_t head=1+fillet_real_solid::SOURCE_PARAMS;
     if (!input || n < head+5) return SC_ERR_ARG;
     for (int64_t i=0; i<n; ++i) if (!std::isfinite(input[i])) return SC_ERR_ARG;
@@ -229,7 +266,7 @@ int32_t real_source(const char* path, const double* input, int64_t n, double* ou
     std::unique_ptr<SmBrep> body(fillet_real_solid::build_source(int(kind),path,p));
     if (!body) return SC_ERR_ARG;
     std::vector<double> values;
-    const auto rc=fillet_real_solid::fillet_and_record(body.get(),input+head,n-head,values,piecewise);
+    const auto rc=fillet_real_solid::fillet_and_record(body.get(),input+head,n-head,values,piecewise,curve_sih);
     if (rc != SC_OK) return rc;
     return sc_copy_out(values.data(),int64_t(values.size()),out,cap,out_len);
     SC_CATCH
@@ -246,6 +283,24 @@ SC_EXPORT int32_t sc_blend_fillet_executive_p3_real_source(
 SC_EXPORT int32_t sc_blend_fillet_executive_p3_piecewise_source(
     const char* path, const double* input, int64_t n, double* out, int64_t cap, int64_t* out_len) {
     return fillet_real_solid::real_source(path,input,n,out,cap,out_len,true);
+}
+
+// Wire: the SmMakeCurveBlendSIH step-back factor (> 0), then the box wire of
+// sc_blend_fillet_executive_p3_real_solid, filleted with
+// fillet_real_solid::curve_sih_fillet_edges.
+SC_EXPORT int32_t sc_blend_fillet_executive_p3_curve_sih_solid(
+    const double* input, int64_t n, double* out, int64_t cap, int64_t* out_len) {
+    if (!input || n < 1 || !std::isfinite(input[0]) || input[0] <= 0.0) return SC_ERR_ARG;
+    return fillet_real_solid::real_solid(input+1,n-1,out,cap,out_len,false,input[0]);
+}
+
+// Wire: the SmMakeCurveBlendSIH step-back factor (> 0), then the source wire of
+// sc_blend_fillet_executive_p3_real_source, filleted with
+// fillet_real_solid::curve_sih_fillet_edges.
+SC_EXPORT int32_t sc_blend_fillet_executive_p3_curve_sih_source(
+    const char* path, const double* input, int64_t n, double* out, int64_t cap, int64_t* out_len) {
+    if (!input || n < 1 || !std::isfinite(input[0]) || input[0] <= 0.0) return SC_ERR_ARG;
+    return fillet_real_solid::real_source(path,input+1,n-1,out,cap,out_len,false,input[0]);
 }
 
 // Wire: the four corner points (u0v0, u1v0, u0v1, u1v1) of each of two
@@ -357,16 +412,6 @@ SC_EXPORT int32_t sc_blend_fillet_executive_p3_surface_surface_bodies(
     if (body2) fillet_real_solid::body_record(values,body2.get());
     return sc_copy_out(values.data(),int64_t(values.size()),out,cap,out_len);
     SC_CATCH
-}
-
-SC_EXPORT int32_t sc_blend_fillet_executive_p3_real_solid(
-    const double* input, int64_t n, double* out, int64_t cap, int64_t* out_len) {
-    return fillet_real_solid_run(input,n,nullptr,out,cap,out_len);
-}
-SC_EXPORT int32_t sc_blend_fillet_executive_p3_real_variable_solid(
-    const double* input, int64_t n, double end_radius,
-    double* out, int64_t cap, int64_t* out_len) {
-    return fillet_real_solid_run(input,n,&end_radius,out,cap,out_len);
 }
 
 #include <SmFilletCorner.h>

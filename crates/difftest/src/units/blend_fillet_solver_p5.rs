@@ -437,7 +437,8 @@ fn run(i: &Inputs) -> Result<Output, HarnessError> {
             &mut snapshot,
             &mut fb,
             id,
-            &|_| Ok(corner_type(i.corner)),
+            // the fixture names a corner type, not corner objects: an empty table
+            &mut FixedCornerType(corner_type(i.corner)),
             &mut adjusted,
             &mut Ownership,
         )
@@ -541,5 +542,30 @@ impl UnitDiff for Runner {
             rails,
         })
         .ok()
+    }
+}
+
+/// The fixture's corners: every corner has the case's type, no vertex has a corner
+/// and the corner table is empty.
+struct FixedCornerType(FilletCornerType);
+
+impl solidcore::blend::fillet_geom::p3::SplitCorners for FixedCornerType {
+    fn corner_of_vertex(
+        &self,
+        _: VertexId,
+    ) -> Option<FilletCornerId> {
+        None
+    }
+    fn lookup(&self) -> solidcore::blend::fillet_geom::p1::CornerLookup<'_> {
+        solidcore::blend::fillet_geom::p1::CornerLookup::default()
+    }
+    fn corner_mut(
+        &mut self,
+        _: FilletCornerId,
+    ) -> solidcore::Result<&mut solidcore::blend::fillet_corner::p3::FilletCorner> {
+        Err(SolidError::null_pointer("difftest::blend_fillet_solver_p5"))
+    }
+    fn corner_type(&self, _: FilletCornerId) -> solidcore::Result<FilletCornerType> {
+        Ok(self.0)
     }
 }

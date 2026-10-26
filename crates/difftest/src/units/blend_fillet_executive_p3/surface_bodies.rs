@@ -167,8 +167,10 @@ fn sheet(k: &mut Kernel, surfaces: &[&Surface]) -> SolidResult<(Brep, Vec<FaceId
 pub(super) fn rust(input: &SurfaceSurfaceBodies) -> Result<Output, HarnessError> {
     ffi::validate_surface_surface_bodies(&input.wire())
         .map_err(|e| HarnessError::new(e.to_string()))?;
+    let step = super::point_step()?;
     let run = || -> SolidResult<Vec<f64>> {
         let mut k = Kernel::default();
+        k.fillet_point_step.set(step);
         let surface = |c: &[[f64; 3]; 4]| {
             solidcore::nurbs::b_spline_surface::BSplineSurface::create_bilinear_surface(
                 Vec3::from(c[0]),
@@ -190,30 +192,35 @@ pub(super) fn rust(input: &SurfaceSurfaceBodies) -> Result<Output, HarnessError>
             1 => Some(sheet(&mut k, &[&second])?),
             _ => None,
         };
+        let face_at = |faces: &[FaceId], i: usize| {
+            faces.get(i).copied().ok_or_else(|| {
+                solidcore::SolidError::invalid_input("harness::surface_bodies", "sheet without face")
+            })
+        };
         let result = {
             let (arg1, arg2) = match (body1.as_mut(), body2.as_mut()) {
                 (Some((b1, f1)), None) if owner2 == 2 => {
-                    let faces = [f1[0], f1[1]];
+                    let faces = [face_at(f1, 0)?, face_at(f1, 1)?];
                     (
                         FilletSurfaceArg::Face { body: b1, face: faces[0] },
                         FilletSurfaceArg::FirstBodyFace(faces[1]),
                     )
                 }
                 (Some((b1, f1)), None) if owner2 == 3 => (
-                    FilletSurfaceArg::Face { body: b1, face: f1[0] },
-                    FilletSurfaceArg::FirstBodyFace(f1[0]),
+                    FilletSurfaceArg::Face { body: b1, face: face_at(f1, 0)? },
+                    FilletSurfaceArg::FirstBodyFace(face_at(f1, 0)?),
                 ),
                 (Some((b1, f1)), Some((b2, f2))) => (
-                    FilletSurfaceArg::Face { body: b1, face: f1[0] },
-                    FilletSurfaceArg::Face { body: b2, face: f2[0] },
+                    FilletSurfaceArg::Face { body: b1, face: face_at(f1, 0)? },
+                    FilletSurfaceArg::Face { body: b2, face: face_at(f2, 0)? },
                 ),
                 (Some((b1, f1)), None) => (
-                    FilletSurfaceArg::Face { body: b1, face: f1[0] },
+                    FilletSurfaceArg::Face { body: b1, face: face_at(f1, 0)? },
                     FilletSurfaceArg::Free(&second),
                 ),
                 (None, Some((b2, f2))) => (
                     FilletSurfaceArg::Free(&first),
-                    FilletSurfaceArg::Face { body: b2, face: f2[0] },
+                    FilletSurfaceArg::Face { body: b2, face: face_at(f2, 0)? },
                 ),
                 (None, None) if owner2 == 3 => {
                     (FilletSurfaceArg::Free(&first), FilletSurfaceArg::Free(&first))

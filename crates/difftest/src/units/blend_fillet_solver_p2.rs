@@ -521,7 +521,7 @@ impl FilletSolverOps for TestSolver {
     fn load_initial_values(
         &mut self,
         _k: &Kernel,
-        _brep: Option<&Brep>,
+        _brep: Option<&mut Brep>,
         do_surf2_calcs: bool,
         rail_index: usize,
         _surface1: &mut OffsetSurface,
@@ -1178,7 +1178,7 @@ fn rust_run(i: &Inputs, o: &mut Vec<f64>) -> Result<Result<(), SolidError>, Harn
             )?;
             let empty = Brep::new();
             let index = usize::try_from(*index).map_err(|_| harness("index"))?;
-            match fs.base.fillet_corner(&empty, index) {
+            match fs.base.fillet_corner(&empty, index, &solidcore::blend::fillet_geom::p3::NoCorners) {
                 Ok(c) => {
                     o.push(b(c.is_none()));
                     o.push(fs.jacobian_size().unwrap_or(0) as f64);

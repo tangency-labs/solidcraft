@@ -189,7 +189,7 @@ use std::collections::BTreeMap;
 use crate::blend::fillet_classification::FilletClassObject;
 use crate::blend::fillet_corner::p3::{FilletCorner, FilletExecutiveData};
 use crate::blend::fillet_custom_solver::{ConstantRadiusAssistedFs, OffsetSurface};
-use crate::blend::fillet_solver::p1::FilletSolver;
+use crate::blend::fillet_solver::p1::{FilletSolver, FilletSolverOps};
 use crate::curve::curve::p1::GlobalPointSolveOptions;
 use crate::curve::curve::Curve;
 use crate::curve::hermite_curve::HermiteCurve;
@@ -572,8 +572,8 @@ const OP_CORNER: &str = "blend::fillet_geom::p1::CornerLookup::corner";
 /// names (upstream's `GetFilletCorner()` pointer, dereferenced) and the executive
 /// members a corner reads (`GetExtendedSurface`).
 ///
-/// [`CornerLookup::default`] is a caller without a corner store: every lookup is
-/// [`SolidError::Unported`] (`blend.fillet_executive_p1`, which owns the corners).
+/// [`CornerLookup::default`] is a caller without an executive (a standalone entry
+/// point): an empty corner table and an empty extended-surface map.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CornerLookup<'c> {
     /// The executive's corner table (`m_vFilletCorners`), indexed by the id (`id.0`);
@@ -599,8 +599,8 @@ impl<'c> CornerLookup<'c> {
     }
 
     /// Only the running corner `corner` (with its id `id`) and the executive data it
-    /// reads: another corner's id is [`SolidError::InvalidInput`] (upstream's corner
-    /// methods only reach their own vertices and edges).
+    /// reads: another corner's id is `SM_ERR_NULL_POINTER` (upstream's corner methods
+    /// only reach their own vertices and edges).
     #[must_use]
     pub const fn of_corner(
         id: Option<FilletCornerId>,
@@ -628,8 +628,8 @@ impl<'c> CornerLookup<'c> {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] without a corner store; [`SolidError::InvalidInput`]
-    /// for an id neither the running corner nor in the table.
+    /// `SM_ERR_NULL_POINTER` for an id neither the running corner nor in the table (a
+    /// caller without a corner store holds an empty table).
     pub fn corner(&self, id: FilletCornerId) -> Result<&'c FilletCorner> {
         if let Some((this_id, this)) = self.this {
             if this_id == Some(id) {
@@ -641,24 +641,11 @@ impl<'c> CornerLookup<'c> {
                 return Ok(c);
             }
         }
-        match self.table {
-            Some(table) => usize::try_from(id.0)
-                .ok()
-                .and_then(|i| table.get(i))
-                .ok_or_else(|| {
-                    SolidError::invalid_input(OP_CORNER, "fillet corner id not in the corner table")
-                }),
-            None if self.this.is_some() || self.exec.is_some() => Err(SolidError::invalid_input(
-                OP_CORNER,
-                "fillet vertex or edge of another corner",
-            )),
-            // UNPORTED(blend.fillet_executive_p1): SmFilletExecutive::m_vFilletCorners (the
-            // caller holds no corner store)
-            None => Err(SolidError::unported(
-                "SmFilletExecutive::m_vFilletCorners",
-                "blend.fillet_executive_p1",
-            )),
-        }
+        // upstream dereferences the corner pointer; one this caller cannot resolve is
+        // the NULL its NER would return for
+        self.table
+            .and_then(|table| usize::try_from(id.0).ok().and_then(|i| table.get(i)))
+            .ok_or_else(|| SolidError::null_pointer(OP_CORNER))
     }
 
     /// `pCorner->GetExtendedSurface(pOriginalFace)`
@@ -667,7 +654,8 @@ impl<'c> CornerLookup<'c> {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] without executive data.
+    /// None: a caller without executive data holds an empty map (`None` for every
+    /// face).
     pub fn extended_surface(
         &self,
         corner: &FilletCorner,
@@ -675,12 +663,8 @@ impl<'c> CornerLookup<'c> {
     ) -> Result<Option<&'c Surface>> {
         match self.exec {
             Some(exec) => Ok(corner.extended_surface(exec, face)),
-            // UNPORTED(blend.fillet_executive_p1): SmFilletExecutive::m_vExtendedSurfacesMap
-            // (the caller holds no executive)
-            None => Err(SolidError::unported(
-                "SmFilletExecutive::m_vExtendedSurfacesMap",
-                "blend.fillet_executive_p1",
-            )),
+            // a caller without an executive holds an empty m_vExtendedSurfacesMap
+            None => Ok(None),
         }
     }
 }
@@ -2138,6 +2122,50 @@ impl FilletBrep {
         Ok(())
     }
 
+    /// `pFilletEdge->GetBrep()->DeleteEdge(pFilletEdge)` on this pseudo-B-rep: the wire
+    /// edge is deleted by `SmBrep::DeleteEdge` ([`crate::topology::brep::p4::delete_edge`],
+    /// which unlinks its edge uses and vertex uses, keeps a vertex use as a shell
+    /// vertex use where its vertex would be left without any, and splits the shell as
+    /// needed); `~SmFilletEdge` then finds no edge uses left. The fillet records of the
+    /// edge, of its edge uses and of the vertex uses `DeleteEdge` deleted go with them.
+    ///
+    /// # Errors
+    /// `SM_ERR` when editing is disabled or the edge is not a wire edge
+    /// (`SmBrep::DeleteEdge`'s checks); those of the deletion.
+    pub fn delete_wire_fillet_edge(&mut self, k: &mut Kernel, e: EdgeId) -> Result<()> {
+        // check state - m_bEditingEnabled must be on
+        if !self.editing_enabled {
+            return Err(SolidError::sm_err(OP_EDGE));
+        }
+        self.fillet_edge(e)?;
+        let uses = edge_unit::edgeuses(&self.brep, e, None, None)?;
+        let mut vus = Vec::new();
+        for &eu in &uses {
+            if let Some(vu) = self.brep.edgeuse(eu)?.vertexuse {
+                vus.push(vu);
+            }
+        }
+        // The pseudo-B-rep's m_bEditingEnabled is this record's flag (checked above).
+        let inner_editing = self.brep.editing_enabled();
+        self.brep.set_editing_enabled(true);
+        let deleted = crate::topology::brep::p4::with_local_env(|d| {
+            crate::topology::brep::p4::delete_edge(k, &mut self.brep, d, e, None)
+        });
+        self.brep.set_editing_enabled(inner_editing);
+        deleted?;
+        for eu in uses {
+            self.edgeuses.remove(&eu);
+        }
+        for vu in vus {
+            if self.brep.vertexuse(vu).is_err() {
+                self.vertexuses.remove(&vu);
+            }
+        }
+        self.edge_list.retain(|&x| x != e);
+        self.edges.remove(&e);
+        Ok(())
+    }
+
     /// `SmFilletEdge::GetOriginalUVCurve`: the UV trim curve of the primary edge use's
     /// mate.
     ///
@@ -3202,8 +3230,8 @@ pub fn adjust_uv_on_seam(
 pub fn create_cubic_rail_rail_interpolant(
     k: &Kernel,
     brep: &mut Brep,
-    fil_solver1: &mut FilletSolver,
-    fil_solver2: &mut FilletSolver,
+    fil_solver1: &mut dyn FilletSolverOps,
+    fil_solver2: &mut dyn FilletSolverOps,
     face: FaceId,
     corner_vert: VertexId,
     start_pnt: Point3,
@@ -3221,16 +3249,20 @@ pub fn create_cubic_rail_rail_interpolant(
             .ok_or_else(|| SolidError::null_pointer(OP))
     };
     // First, calculate the intersection of two rails
-    let rail_index = fil_solver1.find_index_of_rail_on_face(brep, Some(face))?;
-    let other_rail_index = fil_solver2.find_index_of_rail_on_face(brep, Some(face))?;
+    let rail_index = fil_solver1
+        .solver()
+        .find_index_of_rail_on_face(brep, Some(face))?;
+    let other_rail_index = fil_solver2
+        .solver()
+        .find_index_of_rail_on_face(brep, Some(face))?;
     // Derive guess uv point here
-    let mut eu = solver_edgeuse(&*fil_solver1, rail_index)?;
+    let mut eu = solver_edgeuse(fil_solver1.solver(), rail_index)?;
     let eu_vertex = |brep: &Brep, eu: EdgeuseId| -> Result<(VertexuseId, Option<VertexId>)> {
         let vu = eu1::vertexuse(brep, eu)?.ok_or_else(|| SolidError::null_pointer(OP))?;
         Ok((vu, vertexuse_unit::vertex(brep, vu)?))
     };
     if eu_vertex(brep, eu)?.1 != Some(corner_vert) {
-        eu = solver_edgeuse(&*fil_solver2, other_rail_index)?;
+        eu = solver_edgeuse(fil_solver2.solver(), other_rail_index)?;
     }
     let (vu, _) = eu_vertex(brep, eu)?;
     // ComputeUVPoint(sUVGuess) with its default bOKToMakeUVTrimCurve = TRUE; its status
@@ -3247,7 +3279,7 @@ pub fn create_cubic_rail_rail_interpolant(
         fil_solver1,
         fil_solver2,
         k,
-        Some(&*brep),
+        Some(&mut *brep),
         uv_guess,
         rail_index,
         other_rail_index,

@@ -800,7 +800,7 @@ fn rust_cr_eu_body(
     // extension the copy would have to hand back)
     let res = fs.load_initial_values(
         &k,
-        Some(&*b),
+        Some(&mut *b),
         true,
         rail,
         &mut s1,
