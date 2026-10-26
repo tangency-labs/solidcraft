@@ -189,3 +189,17 @@ The 11 tests cover:
 - **Shared edges.** Two faces that share a wavy edge weld with no open edge.
 - **Projection and bad input.** Points project back onto the surface, and bad input is refused
   with a named error.
+
+## Planar faces with holes
+
+`triangulate_planar(points, outer, holes)` turns one planar B-rep face into triangles by
+bridging its holes into the outer loop and ear-clipping the result. Unlike a centroid fan
+it never fills a hole. The function takes shared 3D points and loop indices, so it is
+independent of a kernel or a STEP `PlanarBody`.
+
+```rust
+let triangles = nurbs_grid_mesh::triangulate_planar(&points, &outer, &holes)?;
+```
+
+The tests cover a square with a central hole and a U-shaped face whose reflex corners sit
+on lines a naive ear clip would cut across.

@@ -26,6 +26,8 @@ pub enum MeshError {
     },
     /// More vertices than a `u32` index can name.
     TooLarge,
+    /// A planar face could not be triangulated. The message names the failing loop.
+    BadPlanar(String),
     /// An index fell outside an array. A bug in this crate, reported instead of panicking.
     Internal,
 }
@@ -39,6 +41,7 @@ impl fmt::Display for MeshError {
             Self::LoopInsideCell => write!(f, "a boundary loop encloses no area in (u, v)"),
             Self::OpenCell { i, j } => write!(f, "boundary pieces in cell ({i}, {j}) do not close"),
             Self::TooLarge => write!(f, "more vertices than a u32 index can name"),
+            Self::BadPlanar(message) => write!(f, "planar triangulation: {message}"),
             Self::Internal => write!(f, "internal index error"),
         }
     }
