@@ -325,6 +325,10 @@ impl InstallKind {
     }
 }
 
+/// The macOS image with both architectures. Older installed versions ask for it by name, so
+/// releases keep it beside the per-architecture images.
+const MAC_UNIVERSAL_DMG: &str = "solidcraft-macos-universal.dmg";
+
 /// The release asset that installs or replaces this installation, by its fixed name
 /// (docs/releasing.md: `solidcraft-windows-x64.msi`, `solidcraft-linux-x86_64.AppImage`, …), or
 /// the versioned name for the packages without one. `arch` is `std::env::consts::ARCH`.
@@ -352,7 +356,10 @@ pub fn asset_name(kind: &InstallKind, arch: &str, version: &str) -> Option<Strin
         // Only x64 has the lone .exe; elsewhere the portable zip is the same thing.
         InstallKind::WindowsExe if windows == Some("x64") => format!("SolidCraft-{version}-windows-x64.exe"),
         InstallKind::WindowsExe => format!("solidcraft-windows-{}-portable.zip", windows?),
-        InstallKind::MacApp(_) => "solidcraft-macos-universal.dmg".into(),
+        InstallKind::MacApp(_) => match arch {
+            "x86_64" | "aarch64" => format!("solidcraft-macos-{arch}.dmg"),
+            _ => MAC_UNIVERSAL_DMG.into(),
+        },
         InstallKind::Dev | InstallKind::Web | InstallKind::Other => return None,
     })
 }
@@ -427,10 +434,15 @@ impl Release {
         self.tag.trim_start_matches('v')
     }
 
-    /// The asset that fits `kind` on `arch`, if this release has it.
+    /// The asset that fits `kind` on `arch`, if this release has it. A Mac falls back to the
+    /// universal image, the only one older releases have.
     pub fn asset_for(&self, kind: &InstallKind, arch: &str) -> Option<&Asset> {
         let name = asset_name(kind, arch, self.version())?;
-        self.assets.iter().find(|a| a.name == name)
+        let found = self.assets.iter().find(|a| a.name == name);
+        match kind {
+            InstallKind::MacApp(_) => found.or_else(|| self.assets.iter().find(|a| a.name == MAC_UNIVERSAL_DMG)),
+            _ => found,
+        }
     }
 
     /// What Download opens: the fitting file, else the release page. Package-managed

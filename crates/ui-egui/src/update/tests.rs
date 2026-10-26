@@ -172,7 +172,9 @@ fn each_installation_gets_its_own_file() {
     assert_eq!(name(InstallKind::WindowsPortable, "x86_64").as_deref(), Some("solidcraft-windows-x64-portable.zip"));
     assert_eq!(name(InstallKind::WindowsExe, "x86_64").as_deref(), Some("SolidCraft-0.10.0-windows-x64.exe"));
     assert_eq!(name(InstallKind::WindowsExe, "aarch64").as_deref(), Some("solidcraft-windows-arm64-portable.zip"));
+    // v0.10.0 has only the universal image, so a Mac of either kind gets it.
     assert_eq!(name(InstallKind::MacApp("/A.app".into()), "aarch64").as_deref(), Some("solidcraft-macos-universal.dmg"));
+    assert_eq!(name(InstallKind::MacApp("/A.app".into()), "x86_64").as_deref(), Some("solidcraft-macos-universal.dmg"));
     assert_eq!(name(InstallKind::Other, "x86_64"), None);
     assert_eq!(name(InstallKind::Deb, "riscv64"), None);
     // Download: the file, or the page when there is none or a package manager updates it.
@@ -197,6 +199,20 @@ fn each_installation_gets_its_own_file() {
         Some("sudo apt install ./solidcraft-linux-x86_64.deb")
     );
     assert_eq!(InstallKind::WindowsMsi.update_command(None), None);
+}
+
+#[test]
+fn a_mac_gets_the_image_for_its_architecture() {
+    let assets: Vec<Value> = ["solidcraft-macos-universal.dmg", "solidcraft-macos-aarch64.dmg", "solidcraft-macos-x86_64.dmg"]
+        .iter()
+        .map(|n| json!({"name": n, "size": 10, "browser_download_url": format!("https://github.com/bherbruck/solidcraft/releases/download/v1.0.0/{n}")}))
+        .collect();
+    let r = Release::parse(json!({"tag_name": "v1.0.0", "assets": assets}).to_string().as_bytes()).unwrap();
+    let mac = InstallKind::MacApp("/A.app".into());
+    let name = |arch| r.asset_for(&mac, arch).map(|a| a.name.as_str());
+    assert_eq!(name("aarch64"), Some("solidcraft-macos-aarch64.dmg"));
+    assert_eq!(name("x86_64"), Some("solidcraft-macos-x86_64.dmg"));
+    assert_eq!(name("powerpc"), Some("solidcraft-macos-universal.dmg"));
 }
 
 #[test]

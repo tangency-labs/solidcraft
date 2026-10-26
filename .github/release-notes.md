@@ -25,8 +25,9 @@ Documentation, the browser app and the Flatpak feed use the SolidCraft project P
 **Which file?**
 - **Windows:** `SolidCraft-{version}-windows-x64.exe` runs as is. Or install the `.msi`, or unzip the
   `-portable.zip` (x64, x86 and arm64).
-- **macOS 11+** (Apple silicon and Intel): open the `.dmg` and drag `SolidCraft.app` onto Applications.
-  The CLI is in `solidcraft-cli-{version}-macos-universal.zip`.
+- **macOS 11+**: open the `.dmg` and drag `SolidCraft.app` onto Applications. `-macos-universal.dmg`
+  runs on Apple silicon and Intel; `-macos-aarch64.dmg` (Apple silicon) and `-macos-x86_64.dmg` (Intel)
+  are half the size. The CLI is in `solidcraft-cli-{version}-macos-universal.zip` (or `-aarch64`, `-x86_64`).
 - **Linux** (x86_64 and aarch64, glibc 2.35+): the `.AppImage` (`chmod +x`, then run it), the
   `.deb` or `.rpm`, the `.flatpak` (`flatpak install --user <file>`), the `.snap`
   (`sudo snap install --dangerous <file>`, or `sudo snap install solidcraft` from the Snap Store), or the `.tar.gz`.

@@ -53,7 +53,8 @@
 ## Download
 
 - **Windows:** the [installer][windows-msi].
-- **macOS:** the [disk image][macos-dmg] (Apple silicon and Intel).
+- **macOS:** the [disk image][macos-dmg] (Apple silicon and Intel), or a smaller one for
+  [Apple silicon][macos-arm64-dmg] or [Intel][macos-intel-dmg] only.
 - **Linux:** the [AppImage][linux-appimage], or `sudo snap install solidcraft` ([Snap Store][snap-store]).
 - **Web:** [try it in your browser][web-app], no install.
 
@@ -141,6 +142,8 @@ Tinkercad are trademarks of their respective owners, named only to describe comp
 [badge-web]: https://img.shields.io/badge/Web-Try_in_browser-2EA44F?style=for-the-badge&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSJ3aGl0ZSIgc3Ryb2tlLXdpZHRoPSIyIj48Y2lyY2xlIGN4PSIxMiIgY3k9IjEyIiByPSIxMCIvPjxwYXRoIGQ9Ik0yIDEyaDIwTTEyIDJhMTUgMTUgMCAwIDEgMCAyME0xMiAyYTE1IDE1IDAgMCAwIDAgMjAiLz48L3N2Zz4%3D
 [windows-msi]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-windows-x64.msi
 [macos-dmg]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-macos-universal.dmg
+[macos-arm64-dmg]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-macos-aarch64.dmg
+[macos-intel-dmg]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-macos-x86_64.dmg
 [linux-appimage]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-linux-x86_64.AppImage
 [snap-store]: https://snapcraft.io/solidcraft
 [web-app]: https://solidcraft.io/app

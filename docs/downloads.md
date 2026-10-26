@@ -6,7 +6,8 @@ Every platform and package. The links point at the latest release.
   Also for [ARM64][windows-arm64-msi] and [32-bit][windows-x86-msi] PCs, or as a
   [portable zip][windows-portable] that runs without installing.
 - **macOS:** open the [disk image][macos-dmg] and drag SolidCraft into Applications
-  (Apple silicon and Intel).
+  (Apple silicon and Intel). The images for [Apple silicon][macos-arm64-dmg] or
+  [Intel][macos-intel-dmg] only are half the size.
 - **Linux:** download the [AppImage][linux-appimage], allow it to run as a program and open it.
   Or install the [.deb][linux-deb] (Ubuntu, Debian, Mint) or [.rpm][linux-rpm] (Fedora,
   openSUSE), or use [Flatpak](https://docs.solidcraft.io/guide/getting-started.html#linux-flatpak).
@@ -39,6 +40,8 @@ Install details, upgrading from earlier builds and building from source are in
 [windows-x86-msi]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-windows-x86.msi
 [windows-portable]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-windows-x64-portable.zip
 [macos-dmg]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-macos-universal.dmg
+[macos-arm64-dmg]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-macos-aarch64.dmg
+[macos-intel-dmg]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-macos-x86_64.dmg
 [linux-appimage]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-linux-x86_64.AppImage
 [linux-deb]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-linux-x86_64.deb
 [linux-rpm]: https://github.com/tangency-labs/solidcraft/releases/latest/download/solidcraft-linux-x86_64.rpm
