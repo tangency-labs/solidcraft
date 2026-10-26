@@ -71,7 +71,7 @@ fn progressive_coverage_keeps_backplate_outside_exposure_and_tone_mapping() {
         let (_, half, _) = progressive_complete(progressive_fixture(64, 9, Some(true), exposure), 4);
         let covered = (0..64).filter(|ordinal| progressive::variates(9, 0, *ordinal, 0)[0] < 0.5).count();
         assert!(covered > 0 && covered < 64);
-        let expected = encode(1.0 - covered as f64 / 64.0);
+        let expected = encode8(1.0 - covered as f64 / 64.0);
         assert_eq!(::image::load_from_memory(&half).unwrap().to_rgba8().get_pixel(0, 0).0, [expected, expected, expected, 255]);
     }
     let (previews, _, _) = progressive_complete(progressive_fixture(5, 9, Some(true), 0.0), 1);
@@ -102,12 +102,12 @@ fn progressive_resolves_the_mean_radiance_once_instead_of_averaging_display_pixe
     let mean = (left_count as f64 + (64 - left_count) as f64 * 9.0) / 64.0;
     let expected = [1.0, 0.5, 0.25].map(|color| {
         let exposed = mean * color * 2.0;
-        encode(exposed / (1.0 + exposed))
+        encode8(exposed / (1.0 + exposed))
     });
     let actual = ::image::load_from_memory(&png).unwrap().to_rgba8().get_pixel(0, 0).0;
     assert_eq!(actual, [expected[0], expected[1], expected[2], 255]);
     let fraction = left_count as f64 / 64.0;
-    let prematurely_mapped = encode(fraction * (2.0 / 3.0) + (1.0 - fraction) * (18.0 / 19.0));
+    let prematurely_mapped = encode8(fraction * (2.0 / 3.0) + (1.0 - fraction) * (18.0 / 19.0));
     assert_ne!(actual[0], prematurely_mapped, "each sample must remain linear until the whole pass resolves");
 }
 
@@ -281,15 +281,15 @@ fn fixed_grids_have_independent_analytic_halfplane_and_triangle_coverage() {
 #[test]
 fn compositor_keeps_conditional_scene_mean_then_display_linear_coverage() {
     // White L=1, Reinhard=1/2; half coverage over black gives1/4 display-linear.
-    assert_eq!(composite_spatial(Vec3::new(0.5, 0.5, 0.5), 2, 4, [0; 3], 0.0).unwrap(), [encode(0.25), encode(0.25), encode(0.25), 255]);
-    assert_ne!(encode(0.25), encode(1.0 / 3.0));
+    assert_eq!(composite_spatial(Vec3::new(0.5, 0.5, 0.5), 2, 4, [0; 3], 0.0).unwrap(), [encode8(0.25), encode8(0.25), encode8(0.25), 255]);
+    assert_ne!(encode8(0.25), encode8(1.0 / 3.0));
     // Full coverage of L=0 and L=2 usesT(mean)=1/2, not mean(T)=1/3.
-    assert_eq!(composite_spatial(Vec3::new(1.0, 1.0, 1.0), 4, 4, [255; 3], 0.0).unwrap(), [encode(0.5), encode(0.5), encode(0.5), 255]);
+    assert_eq!(composite_spatial(Vec3::new(1.0, 1.0, 1.0), 4, 4, [255; 3], 0.0).unwrap(), [encode8(0.5), encode8(0.5), encode8(0.5), 255]);
     for ev in [-16.0, 0.0, 16.0] {
         assert_eq!(composite_spatial(Vec3::ZERO, 0, 16, [13, 27, 41], ev).unwrap(), [13, 27, 41, 255]);
     }
     let gray = srgb8_to_linear(128);
-    assert_eq!(composite_spatial(Vec3::ZERO, 2, 4, [128; 3], 0.0).unwrap(), [encode(gray * 0.5), encode(gray * 0.5), encode(gray * 0.5), 255]);
+    assert_eq!(composite_spatial(Vec3::ZERO, 2, 4, [128; 3], 0.0).unwrap(), [encode8(gray * 0.5), encode8(gray * 0.5), encode8(gray * 0.5), 255]);
     assert!(composite_spatial(Vec3::ZERO, 5, 4, [0; 3], 0.0).is_err());
     assert!(composite_spatial(Vec3::X, 0, 4, [0; 3], 0.0).is_err());
 }
@@ -306,7 +306,7 @@ fn real_hit_first_and_miss_first_silhouettes_keep_all_attempts_and_null_coverage
                 let before = task.work.used();
                 task.step(1).unwrap();
                 assert_eq!(task.work.used(), before + 1);
-                assert_eq!(task.pixels, [encode(0.5), encode(0.5), encode(0.5), 255]);
+                assert_eq!(task.pixels, [encode8(0.5), encode8(0.5), encode8(0.5), 255]);
                 assert_eq!(task.pixel, 1);
             }
         }
@@ -439,7 +439,7 @@ fn actual_colored_lit_partial_coverage_wires_positive_radiance_exposure_and_back
             let expected: [u8; 3] = std::array::from_fn(|i| {
                 let exposed = linear[i] * 2.0;
                 let display = 0.5 * exposed / (1.0 + exposed) + 0.5 * srgb8_to_linear([13, 73, 139][i]);
-                encode(display)
+                encode8(display)
             });
             task.step(1).unwrap();
             assert_eq!(task.pixels, [expected[0], expected[1], expected[2], 255]);

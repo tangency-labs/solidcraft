@@ -76,7 +76,7 @@ fn actual_consumer_matches_analytic_rgb_and_finite_source_occlusion() {
     let cosine = 1.0 / 5.0_f64.sqrt();
     let l = 0.2 * cosine / (2.0 * std::f64::consts::PI * (1.0 + cosine));
     for (actual, factor) in lit.into_iter().take(3).zip([1.0, 0.5, 0.25]) {
-        let expected = encode(l * factor / (1.0 + l * factor));
+        let expected = encode8(l * factor / (1.0 + l * factor));
         assert!(actual.abs_diff(expected) <= 1, "actual={actual}, expected={expected}");
     }
     assert_eq!(render(task(Some((10.0, 5.0)), true)), [0, 0, 0, 255]);
@@ -239,7 +239,7 @@ fn mixed_normal_incidence_radiance_is_summed_before_single_display_transform() {
     // White rough conductor at normal incidence: f*cos=1/(4*pi).
     // Eight unit directionals + eight unit point sources + four Le*A/r²=.08 rectangles.
     let linear = (8.0 + 8.0 + 4.0 * 0.08) / (4.0 * std::f64::consts::PI);
-    let expected = encode(linear / (1.0 + linear));
+    let expected = encode8(linear / (1.0 + linear));
     assert_eq!(render(task), [expected, expected, expected, 255]);
 }
 

@@ -115,7 +115,7 @@ fn nonselected_fixed_primary_matches_analytic_color_and_legacy_r_with_less_work(
             if !shadows {
                 // White roughness-one conductor, constant RGB(1,.5,.25), fixed
                 // 2x2 solid-angle strata: two z=.5 contributions average to1/3.
-                let expected = [1.0 / 3.0, 1.0 / 6.0, 1.0 / 12.0].map(|v| encode(v / (1.0 + v)));
+                let expected = [1.0 / 3.0, 1.0 / 6.0, 1.0 / 12.0].map(|v| encode8(v / (1.0 + v)));
                 let image = ::image::load_from_memory(&fast).unwrap().to_rgba8();
                 assert_eq!(image.get_pixel(0, 0).0, [expected[0], expected[1], expected[2], 255]);
             }

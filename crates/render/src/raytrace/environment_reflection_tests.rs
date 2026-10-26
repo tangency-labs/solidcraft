@@ -69,7 +69,7 @@ fn centre(bytes: &[u8]) -> [u8; 4] {
     ::image::load_from_memory(bytes).unwrap().to_rgba8().get_pixel(4, 4).0
 }
 fn expected(radiance: [f64; 3]) -> [u8; 4] {
-    let c = radiance.map(|v| encode(v / (1.0 + v)));
+    let c = radiance.map(|v| encode8(v / (1.0 + v)));
     [c[0], c[1], c[2], 255]
 }
 

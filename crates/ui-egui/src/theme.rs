@@ -267,10 +267,7 @@ pub(crate) fn icon_accent_for_tab(tab: &str) -> Option<&'static str> {
 /// WCAG contrast of two opaque sRGB colours.
 pub(crate) fn contrast_ratio(a: Color32, b: Color32) -> f64 {
     let luminance = |c: Color32| {
-        let linear = |v: u8| {
-            let v = f64::from(v) / 255.0;
-            if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
-        };
+        let linear = solidcraft_engine::geom::srgb::decode8;
         0.2126 * linear(c.r()) + 0.7152 * linear(c.g()) + 0.0722 * linear(c.b())
     };
     let (a, b) = (luminance(a), luminance(b));
