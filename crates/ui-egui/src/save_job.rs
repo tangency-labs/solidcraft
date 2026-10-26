@@ -14,6 +14,7 @@ pub type PersistFuture = std::pin::Pin<Box<dyn std::future::Future<Output = Resu
 pub(crate) struct HostSave {
     command: &'static str,
     future: PersistFuture,
+    pub(crate) reply: Option<(std::sync::mpsc::Sender<Value>, Value)>,
 }
 
 /// A save being written on a worker thread.
@@ -56,12 +57,25 @@ pub fn start(app: &mut SolveApp, command: &'static str, params: Value) -> bool {
     false
 }
 
+pub(crate) fn begin_programmatic(app: &mut SolveApp, command: &'static str) {
+    if crate::webdav::managed(app) {
+        app.webdav.interactive.set(false);
+        begin_host_save_inner(app, command);
+    }
+}
+
 fn begin_host_save(app: &mut SolveApp, command: &'static str) -> bool {
-    if let Some(path) = app.session.path.as_deref()
-        && let Some(future) = app.services.persist_save.as_ref().and_then(|persist| persist(path))
+    app.webdav.interactive.set(true);
+    app.host_save.is_some() || begin_host_save_inner(app, command)
+}
+
+fn begin_host_save_inner(app: &mut SolveApp, command: &'static str) -> bool {
+    let _language = crate::webdav::managed(app).then(|| crate::i18n::scope(&app.preferences.language));
+    if let Some(path) = app.session.path.clone()
+        && let Some(future) = crate::webdav::persist(app, &path).or_else(|| app.services.persist_save.as_ref().and_then(|persist| persist(&path)))
     {
         app.session.mark_unsaved();
-        app.host_save = Some(HostSave { command, future });
+        app.host_save = Some(HostSave { command, future, reply: None });
         return true;
     }
     false
@@ -69,13 +83,22 @@ fn begin_host_save(app: &mut SolveApp, command: &'static str) -> bool {
 
 /// Take up a finished save (`wait`: wait for a running one).
 pub fn tick(app: &mut SolveApp, wait: bool) {
+    let _language = crate::webdav::managed(app).then(|| crate::i18n::scope(&app.preferences.language));
     if let Some(pending) = app.host_save.as_mut() {
         let mut context = std::task::Context::from_waker(std::task::Waker::noop());
         let std::task::Poll::Ready(result) = pending.future.as_mut().poll(&mut context) else { return };
         let command = pending.command;
+        let reply = pending.reply.take();
         app.host_save = None;
         if result.is_ok() {
             app.session.mark_saved();
+        }
+        if let Some((reply, success)) = reply {
+            let answer = match &result {
+                Ok(()) => success,
+                Err(error) => serde_json::json!({"ok": false, "error": error}),
+            };
+            let _ = reply.send(answer);
         }
         app.finish_command(command, &result.map(|()| serde_json::json!({})));
         crate::documents::saved_for_close(app);
@@ -109,6 +132,99 @@ pub fn tick(app: &mut SolveApp, wait: bool) {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
+
+    #[test]
+    fn webdav_save_uses_preconditions_and_keeps_conflicts_unsaved() {
+        use crate::webdav::{Config, Response, Target, condition, connection};
+        let mut h = crate::scenario::Harness::new();
+        assert!(!h.app.preferences.webdav_enabled);
+        h.app.webdav.password = "original-secret".into();
+        h.app.prefs_window.open = true;
+        h.frames(2);
+        h.app.webdav.password = "changed-secret".into();
+        crate::prefs::close(&mut h.app, true);
+        assert_eq!(h.app.webdav.password, "original-secret");
+        assert!(!serde_json::to_string(&h.app.preferences).unwrap().contains("original-secret"));
+        assert_eq!(condition(None, false), vec![("If-None-Match".into(), "*".into())]);
+        assert_eq!(condition(Some("\"old\""), true), Vec::<(String, String)>::new());
+        let url = connection("https://solidcraft.io/dav/").unwrap();
+        let path = h.dir.join("remote.solidcraft").to_string_lossy().into_owned();
+        h.app.run("solid.box", json!({"length": 2, "width": 2, "height": 2})).unwrap();
+        h.app.run("file.save_as", json!({"path": path})).unwrap();
+        h.app.webdav.targets.borrow_mut().insert(
+            path.clone(),
+            Target { config: Config { base: url.clone(), user: "test".into(), password: String::new() }, url, etag: Some("\"old\"".into()) },
+        );
+        h.app.services.webdav_http = Some(std::rc::Rc::new(|request| {
+            assert_eq!(request.method, "PUT");
+            assert_eq!(request.headers, vec![("If-Match".into(), "\"old\"".into())]);
+            assert!(!request.body.is_empty());
+            Box::pin(async { Ok(Response { status: 412, etag: None, body: Vec::new() }) })
+        }));
+        assert!(super::begin_host_save(&mut h.app, "file.save"));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while h.app.host_save.is_some() {
+            assert!(std::time::Instant::now() < deadline);
+            super::tick(&mut h.app, false);
+            std::thread::yield_now();
+        }
+        assert!(h.app.session.is_dirty());
+        assert!(*h.app.webdav.conflict.borrow());
+        assert_eq!(h.app.webdav.targets.borrow().get(&path).unwrap().etag.as_deref(), Some("\"old\""));
+        assert!(crate::webdav::strong_etag(Some("W/\"weak\"".into())).is_err());
+        *h.app.webdav.conflict.borrow_mut() = false;
+        let (request, response) = crate::control::ControlRequest::new("engine.execute", json!({"command": "file.save", "params": {}}));
+        h.app.preferences.language = "ja".into();
+        h.app.run_control(&h.ctx, request);
+        assert!(response.try_recv().is_err(), "the reply waits for the remote write");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while h.app.host_save.is_some() {
+            assert!(std::time::Instant::now() < deadline);
+            super::tick(&mut h.app, false);
+            std::thread::yield_now();
+        }
+        let reply = response.recv().unwrap();
+        assert_eq!(reply["ok"], false);
+        assert_eq!(reply["error"], crate::i18n::Locale::for_language("ja").text("webdav.error.conflict"));
+        h.app.preferences.language = "en".into();
+        assert!(h.app.session.is_dirty());
+        assert!(!*h.app.webdav.conflict.borrow(), "programmatic failures never open a dialog");
+        let calls = std::rc::Rc::new(std::cell::Cell::new(0));
+        let seen = calls.clone();
+        h.app.services.webdav_http = Some(std::rc::Rc::new(move |request| {
+            let call = seen.get();
+            seen.set(call + 1);
+            if call == 0 {
+                assert!(request.headers.is_empty(), "explicit overwrite skips the condition once");
+            } else {
+                assert_eq!(request.headers, vec![("If-Match".into(), "\"new\"".into())]);
+            }
+            Box::pin(async { Ok(Response { status: 204, etag: Some("\"new\"".into()), body: Vec::new() }) })
+        }));
+        h.app.webdav.overwrite = true;
+        for _ in 0..2 {
+            assert!(super::begin_host_save(&mut h.app, "file.save"));
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while h.app.host_save.is_some() {
+                assert!(std::time::Instant::now() < deadline);
+                super::tick(&mut h.app, false);
+                std::thread::yield_now();
+            }
+            assert!(!h.app.session.is_dirty());
+        }
+        assert_eq!(calls.get(), 2);
+        assert!(!h.app.webdav.overwrite);
+
+        h.app.preferences.webdav_enabled = false;
+        let reached = std::rc::Rc::new(std::cell::Cell::new(false));
+        let called = reached.clone();
+        h.app.services.pick_open = Some(Box::new(move |_| {
+            called.set(true);
+            Box::pin(async { None })
+        }));
+        h.app.pick_open(|_, _| {});
+        assert!(reached.get(), "the disabled value preserves the host picker");
+    }
 
     #[test]
     fn a_pending_save_blocks_feature_computation_and_completed_transaction_adoption() {
