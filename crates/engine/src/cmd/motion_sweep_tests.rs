@@ -401,28 +401,22 @@ fn find_limits_of_a_four_bar_rocker_stops_at_its_toggles() {
     assert!(lo < toggle(70.0) + 1.0 && lo >= toggle(70.0) - 1e-6, "min {lo}°, the loop closes down to {}°", toggle(70.0));
 }
 
-/// The Hinge Assembly sample: each leaf is a 3 mm plate below a pin of radius 4 whose axis is
-/// 1 mm above the plate and 3 mm past its edge, and the leaves' pins coincide. The pins (and each
-/// plate's edge inside the other leaf's pin) are already in each other where it starts; the
-/// plates meet where a plate's outer corner, 5 mm from the axis at atan2(4, 3) below the plate,
-/// reaches the other plate's face 1 mm from the axis: a turn of atan2(4, 3) − asin(1/5) between
-/// them, or a whole turn less that the other way round.
+/// The Hinge Assembly sample (#5968): its leaves sit end to end along the pin, mated face to face
+/// at the pin's end, so they touch across that end and meet nothing else on a whole turn either
+/// way. A whole turn each way is what `joint.sweep` ran out of work on (from 60° to 360°); the
+/// search has the room for it.
 #[test]
-fn find_limits_of_the_hinge_sample_is_where_its_plates_meet() {
+fn find_limits_of_the_hinge_sample_spans_a_turn() {
     let sample = crate::sample::samples().into_iter().find(|x| x.name == "Hinge Assembly").expect("the hinge sample");
     let mut s = Session::default();
     s.run_script(&(sample.script)()).unwrap_or_else(|e| panic!("{e}"));
-    let meet = (4f64.atan2(3.0) - 0.2f64.asin()).to_degrees();
-    let r = run(&mut s, "joint.find_limits", json!({"joint": "Hinge", "refine": 0.001}));
+    let r = run(&mut s, "joint.find_limits", json!({"joint": "Hinge"}));
     let (lo, hi, lo_by, hi_by) = limits(&r);
-    assert!((lo - meet).abs() < 0.01 && lo >= meet - 1e-9, "min {lo}°, the plates meet at {meet}°: {r}");
-    assert!((hi - (360.0 - meet)).abs() < 0.01 && hi <= 360.0 - meet + 1e-9, "max {hi}°, the plates meet at {}°: {r}", 360.0 - meet);
-    assert!(by_parts(&lo_by, "Leaf A:1", "Leaf B:1") && by_parts(&hi_by, "Leaf A:1", "Leaf B:1"), "{r}");
-    let overlapping = r["overlapping_at_start"].as_array().cloned().unwrap_or_default();
-    assert!(overlapping.len() == 1 && by_parts(&overlapping[0], "Leaf A:1", "Leaf B:1") && num(&overlapping[0]["depth_mm"]) > 0.1, "{r}");
-    // Swept on its own, the hinge stops there too (its plates used to pass through each other).
-    let r = run(&mut s, "joint.sweep", json!({"joint": "Hinge", "from": 60, "to": 0, "refine": 0.001}));
-    assert!((num(&r["stopped_at"]) - meet).abs() < 0.01, "{r}");
+    assert!((lo + 120.0).abs() < 1e-6 && (hi - 240.0).abs() < 1e-6, "{lo}° … {hi}°: {r}");
+    assert_eq!((lo_by, hi_by), (json!("turn"), json!("turn")), "{r}");
+    let touching = r["touching_at_start"].as_array().cloned().unwrap_or_default();
+    assert!(touching.len() == 1 && touching[0].as_array().is_some_and(|p| p.contains(&json!("Leaf A:1")) && p.contains(&json!("Leaf B:1"))), "{r}");
+    assert!(r["overlapping_at_start"].as_array().is_some_and(Vec::is_empty), "{r}");
 }
 
 #[test]

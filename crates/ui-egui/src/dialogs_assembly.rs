@@ -745,8 +745,10 @@ pub fn rows(app: &mut SolveApp, ui: &mut egui::Ui, k: &mut Asm, inputs: &mut [Se
                             enter |= expr_row(ui, "  Maximum", hi);
                         }
                         if let Some(note) = found.get(i).filter(|n| !n.is_empty()) {
-                            form_row(ui, "", |ui| {
-                                ui.add(egui::Label::new(RichText::new(note).size(t.font_small).color(t.text_dim)).wrap());
+                            ui.vertical(|ui| {
+                                for line in note.lines() {
+                                    ui.add(egui::Label::new(RichText::new(line).size(t.font_small).color(t.text_dim)).wrap());
+                                }
                             });
                         }
                     }

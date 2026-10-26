@@ -204,30 +204,12 @@ impl ContactGeometry {
         self.pairs.retain(|(_, _, a, b)| keep(a.0, b.0));
     }
 
-    /// Move the pairs of bodies within `cutoff` of each other in `s` (touching, or passing into
-    /// each other) into a geometry of their own (with the same bodies), leaving the rest here:
-    /// two parts can touch at one of their bodies (a leaf on the other's pin) and not at the
-    /// others (the leaves' plates). `work` adds up the cost, refused past `budget`.
-    pub(super) fn take_touching(&mut self, s: &Session, cutoff: f64, work: &mut usize, budget: usize) -> Result<ContactGeometry> {
-        let mut placed = Placed::new(&self.placed(s)?);
-        let mut touching = Vec::with_capacity(self.pairs.len());
-        for (a, b, _, _) in &self.pairs {
-            touching.push(placed.gap(*a, *b, cutoff, work, budget)?.is_some());
-        }
-        let mut touching = touching.into_iter();
-        let (taken, kept) = std::mem::take(&mut self.pairs).into_iter().partition(|_| touching.next().unwrap_or(false));
+    /// Move the pairs of set members `take` picks into a geometry of their own (with the same
+    /// bodies), leaving the rest here.
+    pub(super) fn take_pairs(&mut self, take: impl Fn(u64, u64) -> bool) -> ContactGeometry {
+        let (taken, kept) = std::mem::take(&mut self.pairs).into_iter().partition(|(_, _, a, b)| take(a.0, b.0));
         self.pairs = kept;
-        Ok(ContactGeometry { bodies: self.bodies.clone(), pairs: taken, step: self.step })
-    }
-
-    /// Pair `i` alone (with the same bodies).
-    pub(super) fn only(&self, i: usize) -> ContactGeometry {
-        ContactGeometry { bodies: self.bodies.clone(), pairs: self.pairs.get(i).cloned().into_iter().collect(), step: self.step }
-    }
-
-    /// The set members pair `i` is between.
-    pub(super) fn members(&self, i: usize) -> Option<(Member, Member)> {
-        self.pairs.get(i).map(|(_, _, a, b)| (a.clone(), b.clone()))
+        ContactGeometry { bodies: self.bodies.clone(), pairs: taken, step: self.step }
     }
 
     /// The diagonal of the box the bodies fill in `s`: past it, a part moving in a straight
@@ -340,12 +322,38 @@ impl ContactGeometry {
         let meshes = self.placed(s)?;
         // Each mesh's box once, not once per pair it is in.
         let boxes: Vec<Aabb3> = meshes.iter().map(Mesh::bounds).collect();
-        for (i, (_, _, oa, ob)) in self.pairs.iter().enumerate() {
+        for (a, b, oa, ob) in &self.pairs {
             // Members already found colliding need no more of their bodies tested.
             if found.contains(&(oa.0.min(ob.0), oa.0.max(ob.0))) {
                 continue;
             }
-            if let Some(depth) = self.depth(i, &meshes, &boxes, work, budget)? {
+            let (Some(ma), Some(mb), Some(ba), Some(bb)) = (meshes.get(*a), meshes.get(*b), self.bodies.get(*a), self.bodies.get(*b)) else {
+                return Err(limit("invalid contact geometry pair"));
+            };
+            let (Some(aabb), Some(bbb)) = (boxes.get(*a), boxes.get(*b)) else {
+                return Err(limit("invalid contact geometry pair"));
+            };
+            if aabb.max.x < bbb.min.x
+                || bbb.max.x < aabb.min.x
+                || aabb.max.y < bbb.min.y
+                || bbb.max.y < aabb.min.y
+                || aabb.max.z < bbb.min.z
+                || bbb.max.z < aabb.min.z
+            {
+                continue;
+            }
+            let cost = ma
+                .positions
+                .len()
+                // 4 sample points and 3 edges to probe per triangle of `a` against each triangle of `b` (#3323), and the other way round.
+                .saturating_add(ma.triangles.len().saturating_mul(7))
+                .saturating_mul(mb.triangles.len())
+                .saturating_add(mb.positions.len().saturating_add(mb.triangles.len().saturating_mul(7)).saturating_mul(ma.triangles.len()));
+            *work = work.saturating_add(cost);
+            if *work > budget {
+                return Err(limit("motion exceeds contact sweep collision budget; simplify the contact set or use smaller increments"));
+            }
+            if let Some(depth) = super::mesh_overlap(ma, mb, 1e-4 * ba.size.max(bb.size).max(1.0)) {
                 found.insert((oa.0.min(ob.0), oa.0.max(ob.0)));
                 out.push((oa.clone(), ob.clone(), depth));
                 if !all {
@@ -354,47 +362,6 @@ impl ContactGeometry {
             }
         }
         Ok(out)
-    }
-
-    /// How deep the bodies of each pair pass into each other in `s` (0 where they don't), in
-    /// the order of the pairs. `work` adds up the cost, refused past `budget`.
-    pub(super) fn depths(&self, s: &Session, work: &mut usize, budget: usize) -> Result<Vec<f64>> {
-        let meshes = self.placed(s)?;
-        let boxes: Vec<Aabb3> = meshes.iter().map(Mesh::bounds).collect();
-        (0..self.pairs.len()).map(|i| Ok(self.depth(i, &meshes, &boxes, work, budget)?.unwrap_or(0.0))).collect()
-    }
-
-    /// How deep the bodies of pair `i` (placed as `meshes`, in `boxes`) pass into each other,
-    /// when more than a touch.
-    fn depth(&self, i: usize, meshes: &[Mesh], boxes: &[Aabb3], work: &mut usize, budget: usize) -> Result<Option<f64>> {
-        let Some((a, b, _, _)) = self.pairs.get(i) else { return Err(limit("invalid contact geometry pair")) };
-        let (Some(ma), Some(mb), Some(ba), Some(bb)) = (meshes.get(*a), meshes.get(*b), self.bodies.get(*a), self.bodies.get(*b)) else {
-            return Err(limit("invalid contact geometry pair"));
-        };
-        let (Some(aabb), Some(bbb)) = (boxes.get(*a), boxes.get(*b)) else {
-            return Err(limit("invalid contact geometry pair"));
-        };
-        if aabb.max.x < bbb.min.x
-            || bbb.max.x < aabb.min.x
-            || aabb.max.y < bbb.min.y
-            || bbb.max.y < aabb.min.y
-            || aabb.max.z < bbb.min.z
-            || bbb.max.z < aabb.min.z
-        {
-            return Ok(None);
-        }
-        let cost = ma
-            .positions
-            .len()
-            // 4 sample points and 3 edges to probe per triangle of `a` against each triangle of `b` (#3323), and the other way round.
-            .saturating_add(ma.triangles.len().saturating_mul(7))
-            .saturating_mul(mb.triangles.len())
-            .saturating_add(mb.positions.len().saturating_add(mb.triangles.len().saturating_mul(7)).saturating_mul(ma.triangles.len()));
-        *work = work.saturating_add(cost);
-        if *work > budget {
-            return Err(limit("motion exceeds contact sweep collision budget; simplify the contact set or use smaller increments"));
-        }
-        Ok(super::mesh_overlap(ma, mb, 1e-4 * ba.size.max(bb.size).max(1.0)))
     }
 }
 
@@ -414,12 +381,28 @@ impl ContactGeometry {
     /// for flat faces, within [`ContactGeometry::chord`] for curved ones. `work` adds up the
     /// cost, refused past `budget`.
     pub(super) fn gaps(&self, s: &Session, cutoff: f64, work: &mut usize, budget: usize) -> Result<Vec<Gap>> {
-        let mut placed = Placed::new(&self.placed(s)?);
+        let meshes = self.placed(s)?;
+        let tris: Vec<Vec<[Vec3; 3]>> = meshes.iter().map(|m| m.triangles.iter().filter_map(|t| m.tri(t)).collect()).collect();
+        let boxes: Vec<Aabb3> = meshes.iter().map(Mesh::bounds).collect();
+        let mut trees: Vec<Option<Bvh>> = vec![None; meshes.len()];
         let mut nearest: BTreeMap<(u64, u64), Gap> = BTreeMap::new();
         for (a, b, oa, ob) in &self.pairs {
             let key = (oa.0.min(ob.0), oa.0.max(ob.0));
             let limit = nearest.get(&key).map_or(cutoff, |g| g.mm.min(cutoff));
-            let Some((mm, pa, pb)) = placed.gap(*a, *b, limit, work, budget)? else { continue };
+            let (Some(ta), Some(tb), Some(ba), Some(bb)) = (tris.get(*a), tris.get(*b), boxes.get(*a), boxes.get(*b)) else {
+                return Err(limit_error("invalid contact geometry pair"));
+            };
+            if box_distance(ba, bb) > limit {
+                continue;
+            }
+            if trees.get(*b).is_some_and(Option::is_none)
+                && let Some(slot) = trees.get_mut(*b)
+            {
+                *work = work.saturating_add(tb.len());
+                *slot = Some(Bvh::new(&tb.iter().map(tri_box).collect::<Vec<_>>()));
+            }
+            let Some(Some(tree)) = trees.get(*b) else { return Err(limit_error("invalid contact geometry pair")) };
+            let Some((mm, pa, pb)) = mesh_gap(ta, tb, tree, ba, bb, limit, work, budget)? else { continue };
             nearest.insert(key, Gap { a: oa.clone(), b: ob.clone(), mm, at: (pa, pb) });
         }
         let mut out: Vec<Gap> = nearest.into_values().collect();
@@ -457,42 +440,6 @@ impl ContactGeometry {
 
 fn limit_error(message: &str) -> crate::EngineError {
     limit(message)
-}
-
-/// The placed bodies' triangles and boxes, with a tree over each body's triangles made the
-/// first time a gap to it is asked for.
-struct Placed {
-    tris: Vec<Vec<[Vec3; 3]>>,
-    boxes: Vec<Aabb3>,
-    trees: Vec<Option<Bvh>>,
-}
-
-impl Placed {
-    fn new(meshes: &[Mesh]) -> Placed {
-        Placed {
-            tris: meshes.iter().map(|m| m.triangles.iter().filter_map(|t| m.tri(t)).collect()).collect(),
-            boxes: meshes.iter().map(Mesh::bounds).collect(),
-            trees: vec![None; meshes.len()],
-        }
-    }
-
-    /// The gap between bodies `a` and `b` and their nearest points, when within `limit`.
-    fn gap(&mut self, a: usize, b: usize, limit: f64, work: &mut usize, budget: usize) -> Result<Option<(f64, Vec3, Vec3)>> {
-        let (Some(ta), Some(tb), Some(ba), Some(bb)) = (self.tris.get(a), self.tris.get(b), self.boxes.get(a), self.boxes.get(b)) else {
-            return Err(limit_error("invalid contact geometry pair"));
-        };
-        if box_distance(ba, bb) > limit {
-            return Ok(None);
-        }
-        if self.trees.get(b).is_some_and(Option::is_none)
-            && let Some(slot) = self.trees.get_mut(b)
-        {
-            *work = work.saturating_add(tb.len());
-            *slot = Some(Bvh::new(&tb.iter().map(tri_box).collect::<Vec<_>>()));
-        }
-        let Some(Some(tree)) = self.trees.get(b) else { return Err(limit_error("invalid contact geometry pair")) };
-        mesh_gap(ta, tb, tree, ba, bb, limit, work, budget)
-    }
 }
 
 fn tri_box(t: &[Vec3; 3]) -> Aabb3 {

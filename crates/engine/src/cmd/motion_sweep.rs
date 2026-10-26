@@ -14,7 +14,7 @@ use solidcraft_doc::joints::JointKind;
 use solidcraft_geom::Vec3;
 
 use super::analysis::checked_pairs;
-use super::contact_sweep::{ContactGeometry, Gap};
+use super::contact_sweep::{ContactGeometry, Gap, Member};
 use super::{drive_with_contact, joint_id, value};
 use crate::params::{bad, bool_};
 use crate::schema::motion::{FindLimitsResult, FoundLimits, Overlap, Stop, Why};
@@ -31,9 +31,8 @@ pub const SWEEP_DOC: &str = "joint: id|name; from, to: its value the sweep runs 
      stopped_by: {a, b, at: [x,y,z] (where they touch, world)} | \"loop\" | \"limit\" | null, samples: [{value, min_gap_mm?, \
      pair?}], min_gap? (report_gaps: {part: {mm, at_value, to}}, the nearest each part came to another), unit, gap_method \
      (\"mesh\": distances between the tessellations), gap_tolerance_mm (how far those can be off: 0 when every face is flat), \
-     pairs (checked), touching_at_start: [[a, b]] (pairs of parts with bodies already touching at `from`, such as parts joined \
-     face to face or a door on its frame: those bodies stop it only once they pass into each other deeper than they start; \
-     the parts' other bodies stop it as they touch), applied. The parts are tested at the samples and through the bisection; the motion is on a copy (closed loops \
+     pairs (checked), touching_at_start: [[a, b]] (pairs already touching at `from`, such as parts joined face to face or a door \
+     on its frame: these stop it only once they pass into each other deeper than they start), applied. The parts are tested at the samples and through the bisection; the motion is on a copy (closed loops \
      follow, contact sets do not stop it)";
 
 pub const FIND_LIMITS_DOC: &str = "joint: id|name; index? (one value; default every value); refine?, step?, occurrences?, \
@@ -316,26 +315,19 @@ fn run(s: &Session, mut geometry: ContactGeometry, sw: Sweep, cmd: &str) -> Resu
     let touch = 1e-6 * scale;
     let mut work = 0usize;
     let key = |x: u64, y: u64| (x.min(y), x.max(y));
-    // Bodies touching where the sweep starts (parts joined face to face, a door on its frame, a
-    // leaf on its pin) stop it only when they pass into each other, deeper than they start (by
-    // more than their meshes can be off): a door resting on its frame cannot sweep through it.
-    // The parts' other bodies stop it as they touch.
+    // Pairs touching where the sweep starts (parts joined face to face, a door on its frame)
+    // stop it only when they pass into each other, deeper than they start (by more than their
+    // meshes can be off): a door resting on its frame cannot sweep through it.
     let start: Vec<Gap> = geometry.gaps(&t, touch, &mut work, budget)?;
-    let touching: Vec<[String; 2]> = start.iter().map(|g| [g.a.1.clone(), g.b.1.clone()]).collect();
-    let pairs = geometry.pair_count();
-    let resting = geometry.take_touching(&t, touch, &mut work, budget)?;
-    let rest_depth: Vec<f64> = if resting.has_pairs() { resting.depths(&t, &mut work, budget)? } else { Vec::new() };
+    let touching: BTreeSet<(u64, u64)> = start.iter().map(|g| key(g.a.0, g.b.0)).collect();
+    let touching_names: Vec<[String; 2]> = start.iter().map(|g| [g.a.1.clone(), g.b.1.clone()]).collect();
+    let resting = geometry.take_pairs(|x, y| touching.contains(&key(x, y)));
+    let rest: Vec<(Member, Member, f64)> = if resting.has_pairs() { resting.hits(&t, &mut work, budget, true)? } else { Vec::new() };
     let margin = touch.max(2.0 * resting.chord());
-    // Parts already passing into each other, deeper than a touch: the deepest of their bodies.
-    let mut overlapping: BTreeMap<(u64, u64), (String, String, f64)> = BTreeMap::new();
-    for (i, depth) in rest_depth.iter().enumerate() {
-        if *depth > margin
-            && let Some((a, b)) = resting.members(i)
-        {
-            let entry = overlapping.entry(key(a.0, b.0)).or_insert((a.1, b.1, 0.0));
-            entry.2 = entry.2.max(*depth);
-        }
-    }
+    // Those already passing into each other, deeper than a touch.
+    let overlapping: Vec<(String, String, f64)> =
+        rest.iter().filter(|(_, _, d)| *d > margin).map(|(a, b, d)| (a.1.clone(), b.1.clone(), *d)).collect();
+    let rest_depth: BTreeMap<(u64, u64), f64> = rest.into_iter().map(|(a, b, d)| (key(a.0, b.0), d)).collect();
 
     // The samples run to where the joint gets: a limit or a loop can stop it short of `to`, and
     // the default count is for the motion up to there. One more drive toward `to` then finds
@@ -391,11 +383,12 @@ fn run(s: &Session, mut geometry: ContactGeometry, sw: Sweep, cmd: &str) -> Resu
         if !resting.has_pairs() {
             return Ok(None);
         }
-        let depths = resting.depths(t, work, budget)?;
-        let deeper = depths.iter().enumerate().find(|(i, d)| **d > rest_depth.get(*i).copied().unwrap_or(0.0) + margin).map(|(i, _)| i);
-        let Some((i, (a, b))) = deeper.and_then(|i| resting.members(i).map(|m| (i, m))) else { return Ok(None) };
-        // Where: the nearest points of those bodies (passing into each other, at no gap).
-        let at = resting.only(i).gaps(t, touch, work, budget)?.into_iter().next().map_or((Vec3::ZERO, Vec3::ZERO), |g| g.at);
+        let deeper =
+            resting.hits(t, work, budget, true)?.into_iter().find(|(a, b, d)| *d > rest_depth.get(&key(a.0, b.0)).copied().unwrap_or(0.0) + margin);
+        let Some((a, b, _)) = deeper else { return Ok(None) };
+        // Where: the nearest points of that pair (passing into each other, at no gap).
+        let k = key(a.0, b.0);
+        let at = resting.gaps(t, touch, work, budget)?.into_iter().find(|g| key(g.a.0, g.b.0) == k).map_or((Vec3::ZERO, Vec3::ZERO), |g| g.at);
         Ok(Some(Gap { a, b, mm: 0.0, at }))
     };
 
@@ -440,5 +433,6 @@ fn run(s: &Session, mut geometry: ContactGeometry, sw: Sweep, cmd: &str) -> Resu
         }
         (lo_doc, lo_v) = (t.doc.clone(), v);
     }
-    Ok(Swept { stop, samples, nearest, touching, overlapping: overlapping.into_values().collect(), pairs, chord: geometry.chord(), doc: t.doc })
+    let pairs = geometry.pair_count() + resting.pair_count();
+    Ok(Swept { stop, samples, nearest, touching: touching_names, overlapping, pairs, chord: geometry.chord(), doc: t.doc })
 }

@@ -369,11 +369,9 @@ two (or `step` apart), and the first contact is bisected until no part moves mor
 (0.01 mm by default) across it. Gaps are distances between the parts' tessellations
 (`gap_method: "mesh"`): exact for flat faces, within `gap_tolerance_mm` for curved ones. Pairs
 already touching at `from`, such as parts joined face to face or a door resting on its frame, are
-listed in `touching_at_start`; the bodies that touch stop the sweep only once they pass into each
-other, deeper than they start, while the parts' other bodies stop it as soon as they touch (a
-hinge leaf resting on its pin still stops where its plate meets the other leaf). The sweep runs
-on a copy (closed loops follow, contact sets don't stop it) and leaves the design as it was
-unless `apply` is true.
+listed in `touching_at_start` and stop the sweep only once they pass into each other, deeper than
+they start. The sweep runs on a copy (closed loops follow, contact sets don't stop it) and
+leaves the design as it was unless `apply` is true.
 
 **Find Limits.** In **Edit Joint**, the **Limits** section's **Find Limits** button fills in each
 value's Minimum and Maximum from where the parts the joint moves first touch another part,
