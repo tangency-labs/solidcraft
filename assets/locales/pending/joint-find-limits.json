@@ -1,0 +1,44 @@
+{
+  "en": {
+    "cmd.joint_find_limits": "Find Joint Limits",
+    "joint.find_limits": "Find Limits",
+    "joint.find_limits_failed": "The search for the limits stopped with an error",
+    "joint.find_limits_hint": "Fill in the limits from where the parts this joint moves first touch another part, turning or sliding each way from where it is now. It runs on a copy: nothing changes until OK.",
+    "joint.find_limits_stale": "The design changed during the search: find the limits again",
+    "joint.finding_limits": "Finding limits…",
+    "joint.limit_contact": "{side} {value}: {a} touches {b}",
+    "joint.limit_limit": "{side} {value}: another joint's limit",
+    "joint.limit_loop": "{side} {value}: a closed loop cannot close past it",
+    "joint.limit_range": "{side}: no contact within {range}, left as it was",
+    "joint.limit_turn": "{side} {value}: no contact within one turn",
+    "joint.limits_overlapping": "Already in each other here: {pairs}. They stop the search only if they go deeper."
+  },
+  "ja": {
+    "cmd.joint_find_limits": "ジョイントの制限を検出",
+    "joint.find_limits": "制限を検出",
+    "joint.find_limits_failed": "制限の検出がエラーで停止しました",
+    "joint.find_limits_hint": "このジョイントが動かす部品が他の部品に最初に触れる位置から制限を入力します。現在の位置から両方向に回転またはスライドして調べます。コピー上で行うため、OK を押すまで何も変わりません。",
+    "joint.find_limits_stale": "検出中に設計が変更されました。もう一度制限を検出してください",
+    "joint.finding_limits": "制限を検出中…",
+    "joint.limit_contact": "{side} {value}: {a} が {b} に接触",
+    "joint.limit_limit": "{side} {value}: 別のジョイントの制限",
+    "joint.limit_loop": "{side} {value}: これを超えると閉ループが閉じません",
+    "joint.limit_range": "{side}: {range} 以内に接触なし、そのままにしました",
+    "joint.limit_turn": "{side} {value}: 1 回転以内に接触なし",
+    "joint.limits_overlapping": "この位置ですでに重なっています: {pairs}。さらに深く入り込んだ場合にのみ検出が止まります。"
+  },
+  "zh": {
+    "cmd.joint_find_limits": "查找接头限制",
+    "joint.find_limits": "查找限制",
+    "joint.find_limits_failed": "查找限制时出错停止",
+    "joint.find_limits_hint": "根据此接头移动的零件首次接触其他零件的位置填写限制，从当前位置向两个方向旋转或滑动。在副本上进行：按“确定”前不会更改任何内容。",
+    "joint.find_limits_stale": "查找期间设计已更改：请重新查找限制",
+    "joint.finding_limits": "正在查找限制…",
+    "joint.limit_contact": "{side} {value}：{a} 接触 {b}",
+    "joint.limit_limit": "{side} {value}：另一个接头的限制",
+    "joint.limit_loop": "{side} {value}：超过此处闭环无法闭合",
+    "joint.limit_range": "{side}：{range} 内无接触，保持不变",
+    "joint.limit_turn": "{side} {value}：一圈内无接触",
+    "joint.limits_overlapping": "此处已相互重叠：{pairs}。只有更深入时才会停止查找。"
+  }
+}
