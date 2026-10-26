@@ -2557,6 +2557,9 @@ pub struct Document {
     /// Plastic rules.
     #[serde(default, skip_serializing_if = "crate::plastic::PlasticSettings::is_empty")]
     pub plastic: crate::plastic::PlasticSettings,
+    /// CAM setups: tools and 2D milling operations (toolpaths are not stored).
+    #[serde(default, skip_serializing_if = "crate::cam::CamSettings::is_empty")]
+    pub cam: crate::cam::CamSettings,
     /// Components that are standard parts (by component id): what to rebuild them from.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub parts: std::collections::BTreeMap<u64, StandardPart>,
@@ -2814,6 +2817,7 @@ impl Document {
             assembly: Default::default(),
             sheet: Default::default(),
             plastic: Default::default(),
+            cam: Default::default(),
             configs: Default::default(),
             parts: Default::default(),
             links: Default::default(),

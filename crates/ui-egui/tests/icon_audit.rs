@@ -190,6 +190,11 @@ fn requested_menu_icons_have_artwork_and_match_manifest() {
     ribbon(&mut h, &mut requested);
     solidcraft_ui_egui::render_workspace::enter(&mut h.app, false).unwrap();
     h.frames(3);
+    solidcraft_ui_egui::manufacture_workspace::enter(&mut h.app);
+    h.frames(3);
+    ribbon(&mut h, &mut requested);
+    solidcraft_ui_egui::manufacture_workspace::exit(&mut h.app);
+    h.frames(3);
 
     let body = h.app.session.model.state().bodies.first().unwrap().name.clone();
     let sketch = h.app.session.world_state().sketches.first().unwrap().feature;

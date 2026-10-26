@@ -330,6 +330,18 @@ pub fn radial_items(app: &SolveApp) -> Vec<Item> {
         None => act("ui.repeat", "Repeat", "redo").key(crate::keymap::REPEAT_KEY).on(false),
     };
     let delete = act("ui.delete", "Delete", "delete").key("Del").on(!app.session.selection.is_empty());
+    if crate::manufacture_workspace::active(app) {
+        return vec![
+            repeat,
+            delete,
+            cmd(app, "manufacture.setup.new", "New Setup"),
+            cmd(app, "manufacture.2d.contour", "Contour"),
+            cmd(app, "manufacture.2d.pocket", "Pocket"),
+            cmd(app, "manufacture.drill", "Drill"),
+            cmd(app, "manufacture.post.process", "Post Process"),
+            cmd(app, "inspect.measure", "Measure"),
+        ];
+    }
     if app.session.active_sketch.is_some() {
         return vec![
             repeat,
@@ -386,14 +398,23 @@ pub fn items(app: &SolveApp, target: &Target) -> Vec<Item> {
         Target::Toolbar => crate::toolbar_custom::toolbar_items(app),
         Target::Workspace => {
             let rendering = crate::render_workspace::active(app);
+            let manufacturing = crate::manufacture_workspace::active(app);
+            let idle = app.session.active_sketch.is_none() && app.tool.is_none() && app.dialog.is_none() && !app.file_load.busy();
             let mut v = vec![
-                act("ui.workspace.design", "Design", "ws_design").with(json!({"workspace":"design"})).key(if rendering { "" } else { "current" }),
+                act("ui.workspace.design", "Design", "ws_design")
+                    .with(json!({"workspace":"design"}))
+                    .key(if !rendering && !manufacturing { "current" } else { "" })
+                    .on(idle),
                 act("ui.workspace.render", "Render", "ws_render")
                     .with(json!({"workspace":"render"}))
                     .key(if rendering { "current" } else { "" })
-                    .on(app.session.active_sketch.is_none() && app.tool.is_none() && app.dialog.is_none() && !app.file_load.busy()),
+                    .on(idle),
+                act("ui.workspace.manufacture", "Manufacture", "ws_manufacture")
+                    .with(json!({"workspace":"manufacture"}))
+                    .key(if manufacturing { "current" } else { "" })
+                    .on(idle),
             ];
-            for (w, icon) in [("Animation", "ws_animate"), ("Simulation", ""), ("Manufacture", ""), ("Drawing", "ws_drawing")] {
+            for (w, icon) in [("Animation", "ws_animate"), ("Simulation", ""), ("Drawing", "ws_drawing")] {
                 v.push(act("ui.workspace", w, icon).key("coming later").on(false));
             }
             v
@@ -484,7 +505,183 @@ fn feature_and_sketch(app: &SolveApp, f: Option<u64>) -> (Option<u64>, Option<u6
 
 /// The canvas menus put Repeat on
 /// top, then what fits the selection, our extras after a separator.
+/// The canvas menus put Repeat on
+/// top, then what fits the selection, our extras after a separator.
+fn flyout(id: &str, label: &str, icon: &str, children: Vec<Item>) -> Item {
+    let enabled = children.iter().any(|c| c.enabled && !c.is_sep() && !c.is_heading());
+    Item {
+        id: id.into(),
+        label: label.into(),
+        shortcut: String::new(),
+        enabled,
+        icon: icon.into(),
+        params: None,
+        children,
+        swatch: None,
+    }
+}
+
+fn cmds(app: &SolveApp, ids: &[&str]) -> Vec<Item> {
+    ids.iter()
+        .map(|id| {
+            let label = solidcraft_engine::find_command(id).map(|c| c.label).unwrap_or(*id);
+            cmd(app, id, label)
+        })
+        .collect()
+}
+
+fn manufacture_ops(app: &SolveApp) -> Vec<Item> {
+    use crate::manufacture_workspace::CamMode;
+    match app.manufacture_workspace.cam_mode {
+        CamMode::Milling => vec![
+            flyout(
+                "ui.newOp.2d",
+                "2D",
+                "cut",
+                cmds(
+                    app,
+                    &[
+                        "manufacture.2d.contour",
+                        "manufacture.2d.face",
+                        "manufacture.2d.adaptive",
+                        "manufacture.2d.pocket",
+                        "manufacture.2d.slot",
+                        "manufacture.2d.trace",
+                        "manufacture.2d.thread",
+                        "manufacture.2d.bore",
+                        "manufacture.2d.circular",
+                        "manufacture.2d.engrave",
+                        "manufacture.2d.chamfer",
+                    ],
+                ),
+            ),
+            flyout("ui.newOp.drill", "Drilling", "hole", cmds(app, &["manufacture.drill", "manufacture.hole_recognition"])),
+            flyout(
+                "ui.newOp.3d",
+                "3D",
+                "surface",
+                cmds(
+                    app,
+                    &[
+                        "manufacture.3d.adaptive",
+                        "manufacture.3d.parallel",
+                        "manufacture.3d.scallop",
+                        "manufacture.3d.steep",
+                        "manufacture.3d.contour",
+                        "manufacture.3d.flat",
+                    ],
+                ),
+            ),
+            flyout(
+                "ui.newOp.multi",
+                "Multi-Axis",
+                "sweep",
+                cmds(
+                    app,
+                    &[
+                        "manufacture.multiaxis.swarf",
+                        "manufacture.multiaxis.rough",
+                        "manufacture.multiaxis.rotary",
+                        "manufacture.multiaxis.finish",
+                        "manufacture.multiaxis.contour",
+                        "manufacture.multiaxis.adv_swarf",
+                    ],
+                ),
+            ),
+        ],
+        CamMode::Turning => cmds(
+            app,
+            &[
+                "manufacture.turning.face",
+                "manufacture.turning.profile",
+                "manufacture.turning.groove",
+                "manufacture.turning.thread",
+                "manufacture.turning.chamfer",
+                "manufacture.turning.part",
+                "manufacture.part_handling.grab",
+                "manufacture.part_handling.bar_pull",
+            ],
+        ),
+        CamMode::Additive => cmds(app, &["manufacture.additive.toolpath", "manufacture.additive.from_gcode", "manufacture.additive.simulate"]),
+        CamMode::Inspection => cmds(
+            app,
+            &[
+                "manufacture.inspection.wcs",
+                "manufacture.inspection.geometry",
+                "manufacture.inspection.surface",
+                "manufacture.inspection.align",
+                "manufacture.inspection.manual",
+                "manufacture.inspection.record",
+            ],
+        ),
+        CamMode::Fabrication => cmds(app, &["manufacture.fabrication.nest", "manufacture.fabrication.profile"]),
+    }
+}
+
+/// Work-area menu while Manufacture is active: CAM commands, not Design's Extrude/Fillet.
+fn manufacture_viewport_items(app: &SolveApp) -> Vec<Item> {
+    let setup_open = false;
+    let has_setup = !app.manufacture_workspace.active_setup.is_empty() || !app.session.doc.cam.setups.is_empty();
+    let anything_hidden = !app.session.visibility.hidden_bodies.is_empty()
+        || !app.session.visibility.hidden_sketches.is_empty()
+        || !app.session.visibility.hidden_folders.is_empty();
+    let has_bodies = !app.session.world_state().bodies.is_empty();
+    let sel_body = sel_bodies(app).into_iter().next();
+    let has_sel = !app.session.selection.is_empty();
+    let repeat = match &app.last_command {
+        Some((_, label)) => act("ui.repeat", &format!("Repeat {label}"), "redo").key(crate::keymap::REPEAT_KEY),
+        None => act("ui.repeat", "Repeat", "redo").key(crate::keymap::REPEAT_KEY).on(false),
+    };
+    vec![
+        act("ui.ok", "OK", "finish").key("Return").on(setup_open),
+        act("ui.cancel", "Cancel", "close").key("Esc").on(setup_open || app.dialog.is_some()),
+        repeat,
+        Item::sep(),
+        act("ui.editSetup", "Edit", "settings").on(has_setup),
+        act("ui.compareEdit", "Compare and Edit", "inspect").on(false),
+        flyout("ui.newOperation", "New Operation", "new", manufacture_ops(app)),
+        cmd(app, "manufacture.manage.template_library", "Create From Template"),
+        cmd(app, "manufacture.post.process", "Create NC Program"),
+        act("ui.newGroup", "New Folder", "folder").with(json!({"component": 0})),
+        act("ui.generateToolpath", "Generate", "update").key("Ctrl+G").on(false),
+        cmd(app, "manufacture.additive.simulate", "Simulate"),
+        cmd(app, "manufacture.post.process", "Post Process"),
+        cmd(app, "manufacture.post.sheet", "Setup Sheet"),
+        act("ui.clearToolpath", "Clear Toolpath", "delete").on(false),
+        cmd(app, "manufacture.post.time", "Machining Time"),
+        Item::sep(),
+        act("ui.showAll", "Show All", "eye").on(anything_hidden),
+        act("ui.hideAll", "Hide All", "eye").on(has_bodies),
+        Item::sep(),
+        act("ui.saveDefaults", "Save Parameters as Defaults", "settings").on(false),
+        act("ui.suppress", "Suppress", "eye").on(false),
+        act("ui.protect", "Protect", "settings").on(false),
+        act("ui.optional", "Optional", "select").on(false),
+        act("ui.editNotes", "Edit Notes", "params").on(false),
+        Item::sep(),
+        act("ui.duplicate", "Duplicate", "copy").key("Ctrl+D").on(false),
+        act("ui.cut", "Cut", "cut").on(has_sel),
+        act("ui.copy", "Copy", "copy").on(has_sel),
+        act("ui.delete", "Delete", "delete").key("Del").on(has_sel),
+        Item::sep(),
+        flyout(
+            "ui.namedView",
+            "Associate Named View",
+            "perspective",
+            vec![act("ui.newView", "New Named View", "perspective"), act("ui.home", "Home View", "home"), act("ui.fit", "Fit", "fit")],
+        ),
+        act("ui.showLog", "Show Log", "list").key("Ctrl+L"),
+        cmd(app, "browser.expand_all", "Expand All Children"),
+        act("ui.findBrowser", "Find in Browser", "list")
+            .with(json!({"body": sel_body.clone().unwrap_or_default()}))
+            .on(sel_body.is_some()),
+    ]
+}
+
 fn viewport_items(app: &SolveApp) -> Vec<Item> {
+    if crate::manufacture_workspace::active(app) {
+        return manufacture_viewport_items(app);
+    }
     let sel = &app.session.selection;
     let has = |f: fn(&Sel) -> bool| sel.iter().any(f);
     let mut v = Vec::new();
@@ -1085,6 +1282,16 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.repeat" => {
             app.repeat_last();
         }
+        "ui.ok" => {}
+        "ui.cancel" => crate::dialogs::cancel(app),
+        "ui.editSetup" => {}
+        "ui.hideAll" => {
+            let items: Vec<String> = app.session.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+            if !items.is_empty() {
+                let _ = app.run("browser.visibility", json!({ "items": items, "visible": false }));
+            }
+        }
+        "ui.showLog" => app.messages.open = true,
         "ui.selectOther" => {
             // The list picks instead of the right-click.
             if let Some((opened, before, made)) = app.menu.picked.take()
@@ -1324,11 +1531,23 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.toolbarPin" | "ui.toolbarRemove" | "ui.toolbarReset" | "ui.toolbarCustomize" | "ui.shortcutPin" => {
             crate::toolbar_custom::run(app, &item.id, &p)
         }
-        "ui.workspace" | "ui.workspace.design" | "ui.workspace.render" => {
-            if let Some(workspace) = p.get("workspace").and_then(Value::as_str)
-                && let Err(e) = crate::render_workspace::enter(app, workspace == "render")
-            {
-                app.set_status(e, true);
+        "ui.workspace" | "ui.workspace.design" | "ui.workspace.render" | "ui.workspace.manufacture" => {
+            if let Some(workspace) = p.get("workspace").and_then(Value::as_str) {
+                match workspace {
+                    "manufacture" => crate::manufacture_workspace::enter(app),
+                    "render" => {
+                        if let Err(e) = crate::render_workspace::enter(app, true) {
+                            app.set_status(e, true);
+                        }
+                    }
+                    _ => {
+                        if crate::manufacture_workspace::active(app) {
+                            crate::manufacture_workspace::exit(app);
+                        } else if let Err(e) = crate::render_workspace::enter(app, false) {
+                            app.set_status(e, true);
+                        }
+                    }
+                }
             }
         }
         "ui.findJoint" => {
@@ -2097,7 +2316,7 @@ fn kit_item(item: &Item, lit: bool) -> crate::ui_kit::MenuItem<'_> {
         shortcut: if item.shortcut == "current" { "" } else { &item.shortcut },
         enabled: item.enabled,
         highlighted: lit,
-        danger: item.icon == "delete",
+        danger: item.icon == "delete" || item.id == "ui.cancel",
         checked: (item.shortcut == "current").then_some(true),
         swatch: item.swatch.map(|c| Color32::from_rgb(c[0], c[1], c[2])),
         submenu: !item.children.is_empty(),
@@ -2472,5 +2691,66 @@ mod workspace_menu_tests {
         h.step(&json!({"click":{"handle":"workspace:menu:render"}})).unwrap();
         assert!(!crate::render_workspace::active(&h.app));
         assert!(h.app.viewport.context_menu.is_some());
+    }
+
+    #[test]
+    fn manufacture_work_area_menu_lists_cam_commands_not_design() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        crate::manufacture_workspace::enter(&mut h.app);
+        let menu = items(&h.app, &Target::Viewport);
+        let ids: Vec<&str> = menu.iter().map(|i| i.id.as_str()).collect();
+        let labels: Vec<&str> = menu.iter().filter(|i| !i.is_sep()).map(|i| i.label.as_str()).collect();
+        fn has_id(items: &[Item], id: &str) -> bool {
+            items.iter().any(|i| i.id == id || has_id(&i.children, id))
+        }
+        for want in [
+            "OK",
+            "Cancel",
+            "Repeat",
+            "Edit",
+            "Compare and Edit",
+            "New Operation",
+            "Create From Template",
+            "Create NC Program",
+            "New Folder",
+            "Generate",
+            "Simulate",
+            "Post Process",
+            "Setup Sheet",
+            "Clear Toolpath",
+            "Machining Time",
+            "Show All",
+            "Hide All",
+            "Save Parameters as Defaults",
+            "Suppress",
+            "Protect",
+            "Optional",
+            "Edit Notes",
+            "Duplicate",
+            "Cut",
+            "Copy",
+            "Delete",
+            "Associate Named View",
+            "Show Log",
+            "Expand All Children",
+            "Find in Browser",
+        ] {
+            assert!(labels.contains(&want), "missing {want} in {labels:?}");
+        }
+        assert!(ids.contains(&"ui.ok"), "{ids:?}");
+        assert!(ids.contains(&"ui.cancel"));
+        assert!(ids.contains(&"manufacture.post.process"));
+        assert!(ids.contains(&"manufacture.post.sheet"));
+        assert!(ids.contains(&"manufacture.post.time"));
+        assert!(menu.iter().any(|i| i.id == "ui.newOperation" && !i.children.is_empty()));
+        assert!(has_id(&menu, "manufacture.2d.contour"), "New Operation must offer Contour");
+        assert!(!ids.contains(&"solid.extrude"), "Design Extrude must not appear in Manufacture");
+        assert!(!ids.contains(&"solid.fillet"));
+        assert!(!ids.contains(&"sketch.create"));
+        assert!(!ids.contains(&"solid.press_pull"));
+        assert!(!radial_items(&h.app).iter().any(|i| i.id == "solid.extrude"));
+        assert!(radial_items(&h.app).iter().any(|i| i.id == "manufacture.setup.new"));
+        assert!(!menu.iter().find(|i| i.id == "ui.ok").unwrap().enabled, "OK waits for the SETUP window");
     }
 }

@@ -45,3 +45,4 @@ sketch_chamfer_equal = { master = "sketch_chamfer", accent = "sketch" }
 sketch_chamfer_two = { master = "sketch_chamfer_two_distances", accent = "sketch" }
 offset_one_side = { master = "offset", accent = "sketch" }
 bom = "list"
+manufacture = "ws_manufacture"
