@@ -29,6 +29,13 @@ runs:
         # The difftest run is idle for sccache for minutes; without this the server
         # exits after 10 idle minutes and the stats printed at the end read zero.
         echo "SCCACHE_IDLE_TIMEOUT=0" >> "$GITHUB_ENV"
+        # Start the server now, so a cache-storage outage (the Actions cache answering
+        # 503 ServerBusy at startup) costs a cold build instead of failing the job.
+        if ! SCCACHE_GHA_ENABLED=true SCCACHE_IDLE_TIMEOUT=0 sccache --start-server; then
+          echo "::warning::sccache could not start (cache storage unavailable); building without it"
+          echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=false" >> "$GITHUB_ENV"
+        fi
 
     # The C++ reference (bin/cpp/lib) comes prebuilt from the GitHub Release that
     # .github/workflows/cpp-reference.yml publishes for scripts/cpp-ref-key.sh's key.
