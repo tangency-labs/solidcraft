@@ -114,6 +114,24 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
                 None => faces.push((body.clone(), vec![*point])),
             },
             Sel::Edge { .. } | Sel::Vertex { .. } => skip("edges and vertices are deleted with their body or face".into()),
+            // In the sketch being edited, a profile stands for the curves around it (#7107);
+            // its holes are shapes of their own and stay.
+            Sel::Profile { sketch, index } if s.active_sketch == Some(*sketch) => {
+                let st = s.model.state();
+                let own = s.doc.sketch(*sketch).ok();
+                let ids: Vec<String> = st
+                    .sketch(*sketch)
+                    .and_then(|ss| ss.profiles.get(*index))
+                    .map(|pr| solidcraft_sketch::distinct_curves(&pr.outer_curves))
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter(|id| own.is_some_and(|sk| sk.curve_index(id).is_some() || sk.wire_index(id).is_some()))
+                    .collect();
+                if ids.is_empty() {
+                    skip("nothing around that profile can be deleted".into());
+                }
+                entities.extend(ids);
+            }
             Sel::Profile { .. } => skip("a profile goes with its sketch".into()),
             Sel::ExternalSketchCurve { .. } | Sel::ExternalSketchPoint { .. } => skip("edit the source sketch to delete its geometry".into()),
         }
@@ -493,5 +511,35 @@ mod tests {
         let id = s.model.state().sketch(sk).unwrap().sketch.curves[0].id.clone();
         run(&mut s, "selection.delete", json!({"items": [{"type": "sketch_curve", "id": id}]}));
         assert!(s.model.state().sketch(sk).unwrap().sketch.curves.is_empty());
+    }
+
+    /// A rectangle picked by clicking inside it (a profile) goes with Delete while sketching
+    /// (#7107): its four lines go, the circle inside it (its hole) stays, and undo brings them
+    /// back. Outside the sketch a profile still goes only with its sketch.
+    #[test]
+    fn a_profile_deletes_the_curves_around_it_while_sketching() {
+        let mut s = Session::default();
+        let sk = run(&mut s, "sketch.create", json!({"plane": "XY"}))["sketch"].as_u64().unwrap();
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [40, 20]}));
+        run(&mut s, "sketch.circle.center", json!({"center": [10, 10], "radius": 3, "id": "hole"}));
+        let index = {
+            let st = s.model.state();
+            solidcraft_sketch::profile_at_point(&st.sketch(sk).unwrap().profiles, solidcraft_geom::Vec2::new(30.0, 10.0)).unwrap()
+        };
+        let before = curves(&s, sk);
+        assert_eq!(before.len(), 5, "four lines and a circle: {before:?}");
+        let item = json!({"items": [{"type": "profile", "sketch": sk, "index": index}]});
+        run(&mut s, "selection.delete", item.clone());
+        assert_eq!(curves(&s, sk), vec!["hole".to_string()], "only the rectangle goes");
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(curves(&s, sk), before);
+        run(&mut s, "sketch.finish", json!({}));
+        let err = s.execute("selection.delete", &item).unwrap_err().to_string();
+        assert!(err.contains("a profile goes with its sketch"), "{err}");
+        assert_eq!(curves(&s, sk), before);
+    }
+
+    fn curves(s: &Session, sk: u64) -> Vec<String> {
+        s.model.state().sketch(sk).unwrap().sketch.curves.iter().map(|c| c.id.clone()).collect()
     }
 }
