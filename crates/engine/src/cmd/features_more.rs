@@ -562,7 +562,7 @@ fn align_frame(s: &Session, p: &Value, key: &str, bodies: &[String]) -> Result<O
     let (frame, on) = match v.get("sketch") {
         Some(sk) => {
             let sketch = super::features::sketch_id(s, Some(sk), cmd, &fk)?;
-            let id = |k: &str| str_(v, k).filter(|n| !n.is_empty() && n.len() <= MAX_SKETCH_ID).map(str::to_string);
+            let id = |k: &str| str_(v, k).filter(|n| !n.is_empty() && n.chars().count() <= MAX_SKETCH_ID).map(str::to_string);
             let frame = match (id("point"), id("curve")) {
                 (Some(point), None) => AlignFrame::SketchPoint { sketch: SketchId(sketch), point },
                 (None, Some(curve)) => AlignFrame::SketchCurve { sketch: SketchId(sketch), curve },
