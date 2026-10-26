@@ -829,11 +829,16 @@ fn solid(e: &SolidError) -> Run {
     }
 }
 
+/// The operand `id` for the next step. A plain [`Clone`] resets every geometry owner, and
+/// a B-rep cache made from the clone then holds no edge or face, so the boolean's ray
+/// fires found nothing and classified a nested operand's faces as outside (a void was
+/// lost). `clone_standing_for_self` keeps the owners, as upstream's move does.
 fn take(bodies: &BTreeMap<String, Brep>, id: &str) -> Result<Brep, Run> {
     bodies
         .get(id)
-        .cloned()
-        .ok_or_else(|| Run::Error(format!("no body `{id}`")))
+        .ok_or_else(|| Run::Error(format!("no body `{id}`")))?
+        .clone_standing_for_self()
+        .map_err(|e| solid(&e))
 }
 
 /// `SmApiBrepCopy(b)`: a copy that owns its geometry, so a later `SmApiTranslate`

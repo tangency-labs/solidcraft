@@ -6,7 +6,7 @@
  "cases": [
   {
    "name": "block_inside_hollow_cut",
-   "note": "#451 case 1: an 8 mm block centred on the origin (its corners at r 6.93, well inside r 18.5) cut by the revolved shell. The block never meets the shell, so it stays as it is; SolidCraft removed it entirely.",
+   "note": "#451 case 1: an 8 mm block centred on the origin (its corners at r 6.93, well inside r 18.5) cut by the revolved shell. The block never meets the shell, so it stays as it is; SolidCraft removed it entirely. Known upstream behaviour (WR-442): SMLib revolves this two-loop profile into two solid shells, not a solid with a void, so the Rust result matches the C++ one and not the expected values below.",
    "steps": [
     {
      "op": "box",
@@ -99,7 +99,7 @@
   },
   {
    "name": "block_crossing_inner_sphere_cut",
-   "note": "#451 case 2: a 12 x 8 x 8 block from x = 8 to 20 crossing the inner sphere through its pole (18.5, 0, 0) on the revolve axis, cut by the revolved shell. What remains is the block inside r 18.5, ending in a piece of the inner sphere; SolidCraft could not cut it.",
+   "note": "#451 case 2: a 12 x 8 x 8 block from x = 8 to 20 crossing the inner sphere through its pole (18.5, 0, 0) on the revolve axis, cut by the revolved shell. What remains is the block inside r 18.5, ending in a piece of the inner sphere; SolidCraft could not cut it. Known upstream behaviour (WR-442): SMLib revolves this two-loop profile into two solid shells, not a solid with a void, so the Rust result matches the C++ one and not the expected values below.",
    "steps": [
     {
      "op": "box",
@@ -192,7 +192,7 @@
   },
   {
    "name": "block_crossing_both_spheres_cut",
-   "note": "The PR test's third cut: the block from x = 8 to 50 crosses both spheres through their poles (18.5, 0, 0) and (40, 0, 0). Two pieces remain, one in the hollow and one beyond r 40.",
+   "note": "The PR test's third cut: the block from x = 8 to 50 crosses both spheres through their poles (18.5, 0, 0) and (40, 0, 0). Two pieces remain, one in the hollow and one beyond r 40. Known upstream behaviour (WR-442): SMLib revolves this two-loop profile into two solid shells, not a solid with a void, so the Rust result matches the C++ one and not the expected values below.",
    "steps": [
     {
      "op": "box",
@@ -285,7 +285,7 @@
   },
   {
    "name": "block_crossing_inner_sphere_join",
-   "note": "The PR test's join: the block from x = 8 to 20 joined with the revolved shell. The result is the shell with its hollow partly filled (still a void, so lumps are not checked).",
+   "note": "The PR test's join: the block from x = 8 to 20 joined with the revolved shell. The result is the shell with its hollow partly filled (still a void, so lumps are not checked). Known upstream behaviour (WR-442): SMLib revolves this two-loop profile into two solid shells, not a solid with a void, so the Rust result matches the C++ one and not the expected values below.",
    "steps": [
     {
      "op": "box",
