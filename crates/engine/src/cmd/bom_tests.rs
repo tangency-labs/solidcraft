@@ -134,9 +134,9 @@ fn csv_quotes_every_field_and_json_writes_the_rows() {
     let text = std::fs::read_to_string(&csv).unwrap();
     assert_eq!(
         text,
-        "\"item\",\"part_number\",\"description\",\"revision\",\"count\",\"definition\",\"material\"\n\
-         \"1\",\"PL-100\",\"Plate, 3 mm\",\"B\",\"3\",\"Plate\",\"Default\"\n\
-         \"2\",\"PN-040\",\"Pin \"\"short\"\", 4 mm\",\"\",\"2\",\"Pin\",\"Default\"\n"
+        "\"item\",\"part_number\",\"description\",\"revision\",\"count\",\"definition\",\"material\",\"quantity\"\n\
+         \"1\",\"PL-100\",\"Plate, 3 mm\",\"B\",\"3\",\"Plate\",\"Default\",\"\"\n\
+         \"2\",\"PN-040\",\"Pin \"\"short\"\", 4 mm\",\"\",\"2\",\"Pin\",\"Default\",\"\"\n"
     );
     let json_path = dir.join("bom.json");
     run(&mut s, "assembly.bom", json!({"path": json_path, "levels": "top"}));
@@ -935,7 +935,8 @@ fn a_static_material_is_what_every_list_says_until_it_is_cleared() {
     let path = dir.join("bom.csv");
     run(&mut s, "assembly.bom", json!({"levels": "all", "path": path}));
     let csv = std::fs::read_to_string(&path).unwrap();
-    let column: Vec<&str> = csv.lines().skip(1).filter_map(|l| l.rsplit(",\"").next()).map(|m| m.trim_end_matches('"')).collect();
+    // The material column, the seventh.
+    let column: Vec<&str> = csv.lines().skip(1).filter_map(|l| l.split("\",\"").nth(6)).collect();
     assert_eq!(column, ["Welded frame", "S355 flat bar", "Aluminum; Steel", "Aluminum; Steel", "", "Default"], "{csv}");
     // Saved with the component and read back.
     let path = dir.join("frame.solidcraft");
@@ -1818,4 +1819,147 @@ fn hostile_numbering_is_refused_without_a_change() {
     }
     assert_eq!(s.undo.len(), undo);
     assert!(s.doc.assembly.item_numbers.is_empty());
+}
+
+/// The assembly with a cable: a virtual component of length `2 * span` (span 1 m), placed twice.
+fn cabled() -> Session {
+    let mut s = assembly();
+    run(&mut s, "parameters.add", json!({"name": "span", "expression": "1", "unit": "m"}));
+    let r = run(&mut s, "component.create", json!({"name": "Cable", "virtual": true, "bom_quantity": "2 * span"}));
+    assert_eq!(s.active_component, 0, "a virtual component isn't activated");
+    run(&mut s, "occurrence.copy", json!({"component": r["component"], "translate": [0, 0, 10]}));
+    s
+}
+
+fn cable_row(r: &Value) -> Value {
+    r["rows"].as_array().unwrap().iter().find(|r| r["definition"] == "Cable").cloned().unwrap()
+}
+
+#[test]
+fn a_virtual_component_is_listed_with_its_quantity_and_weighs_nothing() {
+    let mut s = cabled();
+    for levels in ["flat", "top", "all"] {
+        let cable = cable_row(&run(&mut s, "assembly.bom", json!({"levels": levels})));
+        assert_eq!((&cable["count"], &cable["quantity"], &cable["quantity_unit"]), (&json!(2), &json!(4000.0), &json!("mm")), "{levels}");
+    }
+    let r = run(&mut s, "assembly.bom", json!({"mass": true}));
+    let mut plain = assembly();
+    let before = run(&mut plain, "assembly.bom", json!({"mass": true}));
+    assert_eq!(cable_row(&r)["mass_g"], Value::Null, "nothing to weigh");
+    assert_eq!(r["total_mass_g"], before["total_mass_g"], "the assembly's mass stays known");
+    assert!(r["rows"].as_array().unwrap().iter().filter(|r| r["definition"] != "Cable").all(|r| r.get("quantity").is_none()), "{r}");
+    let csv = scratch("quantity").join("bom.csv");
+    run(&mut s, "assembly.bom", json!({"path": csv}));
+    let text = std::fs::read_to_string(&csv).unwrap();
+    assert!(text.lines().next().unwrap().ends_with(",\"quantity\""), "{text}");
+    assert!(text.lines().any(|l| l.contains("\"Cable\"") && l.ends_with(",\"4000 mm\"")), "{text}");
+    // A parameter edit changes the quantity; renaming it keeps it working.
+    run(&mut s, "parameters.change", json!({"name": "span", "expression": "1.5"}));
+    assert_eq!(cable_row(&run(&mut s, "assembly.bom", json!({})))["quantity"], 6000.0);
+    run(&mut s, "parameters.rename", json!({"name": "span", "new_name": "reach"}));
+    assert_eq!(cable_row(&run(&mut s, "assembly.bom", json!({})))["quantity"], 6000.0);
+    assert!(s.execute("parameters.delete", &json!({"name": "reach"})).is_err(), "the quantity uses it");
+    // Pieces beside a length can't be added.
+    run(&mut s, "component.metadata.set", json!({"component": "Plate", "part_number": "C-1"}));
+    run(&mut s, "component.metadata.set", json!({"component": "Cable", "part_number": "C-1"}));
+    let rows = run(&mut s, "assembly.bom", json!({}));
+    let row = rows["rows"].as_array().unwrap().iter().find(|r| r["part_number"] == "C-1").unwrap();
+    assert_eq!((&row["quantity"], &row["quantity_unknown"]), (&Value::Null, &json!("mixed")));
+}
+
+#[test]
+fn a_virtual_component_survives_save_open_and_undo() {
+    let dir = scratch("virtual");
+    let mut s = cabled();
+    let cable = run(&mut s, "component.metadata", json!({"component": "Cable"}));
+    assert_eq!((&cable["virtual"], &cable["bom_quantity"]), (&json!(true), &json!("2 * span")));
+    for (file, format) in [("cable.json", "json"), ("cable.solidcraft", "container")] {
+        let path = dir.join(file);
+        run(&mut s, "file.save_as", json!({"path": path, "format": format}));
+        let mut back = Session::default();
+        run(&mut back, "doc.open", json!({"path": path}));
+        assert_eq!(cable_row(&run(&mut back, "assembly.bom", json!({}))), cable_row(&run(&mut s, "assembly.bom", json!({}))), "{format}");
+        assert!(back.execute("component.activate", &json!({"component": "Cable"})).is_err(), "{format}");
+    }
+    run(&mut s, "edit.undo", json!({}));
+    run(&mut s, "edit.undo", json!({}));
+    assert!(s.doc.find_component("Cable").is_none(), "making it is one undo step");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn nothing_can_be_put_into_a_virtual_component() {
+    let mut s = cabled();
+    run(&mut s, "solid.box", json!({"length": 5, "width": 5, "height": 5, "corner": [0, -30, 0], "body_name": "Loose"}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S9"}));
+    run(&mut s, "sketch.finish", json!({}));
+    // Placed once, so moving bodies into it is refused for being virtual, not for its placements.
+    run(&mut s, "component.create", json!({"name": "Tape", "virtual": true}));
+    let design = s.doc.to_json();
+    let undo = s.undo.len();
+    for (id, p) in [
+        ("component.activate", json!({"component": "Cable"})),
+        ("component.create", json!({"name": "Inner", "parent": "Cable"})),
+        ("component.create", json!({"name": "Glue", "virtual": true, "activate": true})),
+        ("component.move_bodies", json!({"bodies": ["Loose"], "component": "Tape"})),
+        ("component.move_sketches", json!({"sketches": ["S9"], "component": "Cable"})),
+        ("component.metadata.set", json!({"component": "Plate", "virtual": true})),
+        ("component.metadata.set", json!({"component": "Hinge", "virtual": true})),
+    ] {
+        let e = s.execute(id, &p).unwrap_err().to_string();
+        assert!(e.contains("virtual"), "{id} {p}: {e}");
+        assert_eq!(s.doc.to_json(), design, "{id} {p}");
+    }
+    assert_eq!(s.undo.len(), undo);
+    // The active component can't be made virtual; an empty one can, and back.
+    run(&mut s, "component.create", json!({"name": "Paint"}));
+    assert!(s.execute("component.metadata.set", &json!({"component": "Paint", "virtual": true})).is_err());
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "component.metadata.set", json!({"component": "Paint", "virtual": true, "bom_quantity": "3"}));
+    let rows = run(&mut s, "assembly.bom", json!({}));
+    assert_eq!(rows["rows"].as_array().unwrap().iter().find(|r| r["definition"] == "Paint").unwrap()["quantity"], 3.0);
+    run(&mut s, "component.metadata.set", json!({"component": "Paint", "virtual": false}));
+    run(&mut s, "component.activate", json!({"component": "Paint"}));
+    // A virtual component a damaged file already filled stays as it is, and other changes go on.
+    run(&mut s, "component.activate", json!({"component": 0}));
+    let hinge = s.doc.find_component("Hinge").unwrap();
+    s.doc_mut().components.iter_mut().find(|c| c.id == hinge).unwrap().metadata.0.insert("virtual".into(), json!(true));
+    run(&mut s, "component.metadata.set", json!({"component": "Pin", "description": "Pin"}));
+    assert!(s.execute("component.create", &json!({"name": "More", "parent": "Cable"})).is_err(), "a new one is still refused");
+    // Such a file opens, and changes to it go on.
+    let dir = scratch("damaged");
+    let path = dir.join("damaged.json");
+    run(&mut s, "file.save_as", json!({"path": path, "format": "json"}));
+    let mut back = Session::default();
+    run(&mut back, "doc.open", json!({"path": path}));
+    run(&mut back, "component.metadata.set", json!({"component": "Pin", "description": "Pin 2"}));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn hostile_quantities_are_refused_without_a_change() {
+    let mut s = cabled();
+    let design = s.doc.to_json();
+    let undo = s.undo.len();
+    for p in [
+        json!({"component": "Pin", "bom_quantity": 2.5}),
+        json!({"component": "Pin", "bom_quantity": "90 deg"}),
+        json!({"component": "Pin", "bom_quantity": "0"}),
+        json!({"component": "Pin", "bom_quantity": "-1 m"}),
+        json!({"component": "Pin", "bom_quantity": "1e300"}),
+        json!({"component": "Pin", "bom_quantity": "nope"}),
+        json!({"component": "Pin", "bom_quantity": "50 g"}),
+        json!({"component": "Pin", "bom_quantity": "span * span"}),
+        json!({"component": "Pin", "bom_quantity": "(".repeat(5000)}),
+        json!({"component": "Pin", "virtual": "yes"}),
+        json!({"component": "Pin", "virtual": 1}),
+        json!({"component": "Pin", "values": {"virtual": [true]}}),
+    ] {
+        assert!(s.execute("component.metadata.set", &p).is_err(), "{p}");
+    }
+    for p in [json!({"bom_quantity": 5}), json!({"bom_quantity": "x"}), json!({"virtual": true, "bom_quantity": "0"})] {
+        assert!(s.execute("component.create", &p).is_err(), "{p}");
+    }
+    assert_eq!(s.doc.to_json(), design);
+    assert_eq!(s.undo.len(), undo);
 }

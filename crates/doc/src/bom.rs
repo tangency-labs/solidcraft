@@ -24,6 +24,9 @@
 //! its rows say instead, in every view and at every level ([`Row::statics`]), and what it stands
 //! for in the one material an assembly around it shares: the bill of materials says one thing
 //! about the part everywhere. It only names: mass still comes from the bodies.
+//!
+//! A row's [`Quantity`] adds up what each of its placements means ([`quantity`]): each definition's
+//! quantity is evaluated once for every list made from the [`Tree`].
 
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap};
@@ -33,8 +36,10 @@ use serde::{Deserialize, Serialize};
 use crate::{BomType, Component, DocError, Document, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, ModelBody, ModelState, Result};
 
 mod numbers;
+mod quantity;
 
 pub use numbers::{ItemNumber, ItemNumbers, MAX_ITEM, Numbering, Order, number, record};
+pub use quantity::{Amount, Quantity, Uncounted, amount};
 
 /// A bill of materials view, saved by the word commands use for it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -222,6 +227,8 @@ pub struct Row {
     /// top).
     pub count: u64,
     pub each: u64,
+    /// What its placements add up to, when its definitions have quantities.
+    pub quantity: Quantity,
     /// The placements it counts, by occurrence path from the assembly listed, in path order;
     /// empty unless the list was made with them (`list_with`).
     pub(crate) members: Vec<Vec<u64>>,
@@ -356,6 +363,9 @@ pub struct Tree<'a> {
     weighed: BTreeMap<(u64, Holds), Weighed>,
     /// The materials of what one of each definition stands for, each once, in body order.
     made_of: BTreeMap<(u64, Holds), Vec<String>>,
+    /// What one placement of each definition with a quantity counts: `None` when it doesn't
+    /// evaluate.
+    amounts: HashMap<u64, Option<Amount>>,
 }
 
 /// One occurrence: its id, and the component it places with the type it counts as there.
@@ -384,7 +394,9 @@ impl<'a> Tree<'a> {
         for (body, owner) in state.bodies.iter().zip(doc.body_owners(state)) {
             bodies.entry(owner).or_default().push(body);
         }
-        Tree { doc, children, components, bodies, weighed: BTreeMap::new(), made_of: BTreeMap::new() }
+        let values = std::cell::OnceCell::new();
+        let amounts = components.values().filter_map(|c| Some((c.id, quantity::amount_in(doc, &values, c.metadata.bom_quantity()?).ok()))).collect();
+        Tree { doc, children, components, bodies, weighed: BTreeMap::new(), made_of: BTreeMap::new(), amounts }
     }
 
     /// What a component places.
@@ -502,6 +514,7 @@ impl<'a> Tree<'a> {
             // Rows with different kits are different rows, to any depth, so every part of the parent
             // row holds as many.
             each: count / per.max(1),
+            quantity: quantity::add_up(listed.iter().map(|e| self.amounts.get(&e.member.component))),
             members: taken,
             mass: Mass::NotAsked,
             children: self.level(listing, paths, &inside, under, under, &chain, count),

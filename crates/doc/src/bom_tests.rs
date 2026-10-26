@@ -786,3 +786,108 @@ fn item_numbers_are_saved_and_are_part_properties() {
     assert_eq!(Document::from_json(&doc.to_json()).unwrap().assembly, doc.assembly);
     assert!(serde_json::to_value(&before.assembly).unwrap().get("item_numbers").is_none(), "a design never numbered saves nothing new");
 }
+
+#[test]
+fn a_quantity_is_pieces_or_a_length_with_the_designs_parameters() {
+    let mut doc = Document::default();
+    doc.set_param("span", "100", Some("mm"), None).unwrap();
+    doc.set_param("packs", "3", Some(""), None).unwrap();
+    let amount = |text: &str| super::amount(&doc, text);
+    assert_eq!(amount("4").unwrap(), Amount::Pieces(4.0));
+    assert_eq!(amount("packs * 4").unwrap(), Amount::Pieces(12.0));
+    assert_eq!(amount("2.5 m").unwrap(), Amount::Length(2500.0));
+    assert_eq!(amount("10 in").unwrap(), Amount::Length(254.0));
+    assert_eq!(amount("2 * span + 50").unwrap(), Amount::Length(250.0), "a bare number beside a length is mm");
+    let refused = |text: &str| amount(text).unwrap_err().to_string();
+    assert!(refused("90 deg").contains("a number of pieces or a length"), "{}", refused("90 deg"));
+    assert!(refused("span * span").contains("not supported yet: area"));
+    for mass_or_volume in ["span^3", "50 g", "0.5 kg", "2 lb", "500 ml"] {
+        assert!(refused(mass_or_volume).contains("not supported yet: mass and volume"), "{mass_or_volume}: {}", refused(mass_or_volume));
+    }
+    for out_of_range in ["0", "-1", "-2 m", "1e9 + 1", "1001 km"] {
+        assert!(refused(out_of_range).contains("above 0"), "{out_of_range}: {}", refused(out_of_range));
+    }
+    assert_eq!(amount("1e9").unwrap(), Amount::Pieces(1e9), "the cap itself");
+    assert!(refused("cable_length").contains("unknown parameter `cable_length`"));
+    assert!(amount("").is_err() && amount("2 *").is_err());
+}
+
+#[test]
+fn a_rows_quantity_adds_up_its_placements() {
+    let mut doc = Document::default();
+    doc.set_param("cable_length", "2.5", Some("m"), None).unwrap();
+    let (cable, _) = add(&mut doc, "Cable", 0);
+    set(&mut doc, cable, "bom_quantity", "cable_length");
+    place(&mut doc, cable, 0);
+    place(&mut doc, cable, 0);
+    let (pack, _) = add(&mut doc, "Pack", 0);
+    set(&mut doc, pack, "bom_quantity", "4");
+    place(&mut doc, pack, 0);
+    add(&mut doc, "Plate", 0);
+    // Two definitions of one part number: one with a length, one a piece.
+    let (hose, _) = add(&mut doc, "Hose", 0);
+    let (hose_b, _) = add(&mut doc, "Hose B", 0);
+    number(&mut doc, hose, "H-1");
+    number(&mut doc, hose_b, "H-1");
+    set(&mut doc, hose, "bom_quantity", "500 mm");
+    // A subassembly placed twice holding the pack once.
+    let (kit, _) = add(&mut doc, "Kit", 0);
+    place(&mut doc, kit, 0);
+    place(&mut doc, pack, kit);
+    let quantities = |doc: &Document, request: Request| -> Vec<(String, Quantity)> {
+        listed(doc, request).unwrap().rows_deep().into_iter().map(|(_, r)| (r.names.join("; "), r.quantity)).collect()
+    };
+    let q = quantities(&doc, view(View::PartsOnly));
+    let of = |q: &[(String, Quantity)], name: &str| q.iter().find(|(n, _)| n == name).map(|(_, q)| *q);
+    assert_eq!(of(&q, "Cable"), Some(Quantity::Length(7500.0)), "{q:?}");
+    assert_eq!(of(&q, "Pack"), Some(Quantity::Pieces(16.0)), "two of its own and one in each kit: {q:?}");
+    assert_eq!(of(&q, "Plate"), Some(Quantity::Count));
+    assert_eq!(of(&q, "Hose; Hose B"), Some(Quantity::Unknown(Uncounted::Mixed)));
+    // The kit's row in the top level; its own pack listed under it in all levels.
+    let q = quantities(&doc, view(View::AllLevels));
+    assert_eq!(q.iter().filter(|(n, _)| n == "Pack").map(|(_, q)| *q).collect::<Vec<_>>(), [Quantity::Pieces(8.0), Quantity::Pieces(8.0)], "{q:?}");
+    // A placement without a quantity beside packs counts one piece: a box of 4 and a loose one.
+    let (boxed, _) = add(&mut doc, "Box", 0);
+    let (loose, _) = add(&mut doc, "Loose", 0);
+    number(&mut doc, boxed, "K-1");
+    number(&mut doc, loose, "K-1");
+    set(&mut doc, boxed, "bom_quantity", "4");
+    assert_eq!(of(&quantities(&doc, view(View::PartsOnly)), "Box; Loose"), Some(Quantity::Pieces(5.0)));
+    // A parameter deleted (a damaged file): that row is unknown, the list still works.
+    doc.params.retain(|p| p.name != "cable_length");
+    let q = quantities(&doc, view(View::PartsOnly));
+    assert_eq!(of(&q, "Cable"), Some(Quantity::Unknown(Uncounted::Invalid)));
+    assert_eq!(of(&q, "Pack"), Some(Quantity::Pieces(16.0)));
+}
+
+#[test]
+fn a_virtual_component_holding_something_is_named() {
+    let mut doc = Document::default();
+    let (grease, _) = add(&mut doc, "Grease", 0);
+    let (frame, _) = add(&mut doc, "Frame", 0);
+    let (bolt, _) = add(&mut doc, "Bolt", frame);
+    assert!(doc.virtual_holding().is_empty());
+    set_virtual(&mut doc, grease);
+    assert!(doc.virtual_holding().is_empty(), "an empty virtual component holds nothing");
+    place(&mut doc, bolt, grease);
+    assert_eq!(doc.virtual_holding(), [grease]);
+    set_virtual(&mut doc, frame);
+    assert_eq!(doc.virtual_holding(), [grease, frame]);
+}
+
+fn set_virtual(doc: &mut Document, component: u64) {
+    doc.components.iter_mut().find(|c| c.id == component).unwrap().metadata.0.insert("virtual".into(), json!(true));
+}
+
+#[test]
+fn a_quantity_uses_its_parameters_as_any_expression_does() {
+    let mut doc = Document::default();
+    doc.set_param("span", "100", Some("mm"), None).unwrap();
+    let (cable, _) = add(&mut doc, "Cable", 0);
+    set(&mut doc, cable, "bom_quantity", "2 * span");
+    assert_eq!(doc.param_users("span"), [crate::ParamUser::Quantity { component: cable, name: "Cable".into() }]);
+    assert!(doc.remove_param("span").unwrap_err().to_string().contains("component Cable (quantity)"));
+    assert_eq!(doc.rename_param("span", "width").unwrap(), 1);
+    assert_eq!(doc.components[0].metadata.bom_quantity(), Some("2 * width"));
+    assert_eq!(amount(&doc, "2 * width").unwrap(), Amount::Length(200.0));
+}

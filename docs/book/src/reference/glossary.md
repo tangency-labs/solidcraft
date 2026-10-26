@@ -315,6 +315,20 @@ The first instance is the original.
 - **Elsewhere:** instance, element, occurrence.
 - **For translators:** not an occurrence of a component.
 
+### quantity
+
+What one placement of a component means in a bill of materials: a number of pieces or a length.
+
+Without one, a placement is one piece and its row's count says it all. With one, a row adds up its
+placements: a 2.5 m cable placed three times is 7.5 m. It is an expression, so it can follow the
+design's parameters.
+
+- **In SolidCraft:** the `bom_quantity` part property, which `component.metadata.set` and
+  `component.create` set; each `assembly.bom` row's `quantity` and `quantity_unit`.
+- **Don't use:** amount, count (for a quantity).
+- **Elsewhere:** quantity, BOM quantity, base quantity.
+- **For translators:** not a count of placements (`count`).
+
 ### rollback marker
 
 The marker in the timeline after which no feature is computed.
@@ -369,6 +383,18 @@ The ordered list of a design's features, which SolidCraft computes from first to
 - **Don't use:** feature history, history (for the timeline).
 - **Elsewhere:** timeline, history, feature tree.
 - **For translators:** not the undo history.
+
+### virtual component
+
+A component with no geometry, listed in bills of materials with its quantity: grease, paint, a
+label, packaging.
+
+It holds no bodies, sketches or components and can't be the active component.
+
+- **In SolidCraft:** the `virtual` part property; `component.create {virtual: true}`.
+- **Don't use:** phantom (a phantom has no row), reference, empty component.
+- **Elsewhere:** virtual component, virtual part, non-geometric part.
+- **For translators:** not a *bill of materials type*.
 
 ### web browser
 

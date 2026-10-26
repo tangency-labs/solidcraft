@@ -877,6 +877,14 @@ impl Session {
                 Err(EngineError::Internal(spec.id.to_string(), msg))
             }
         };
+        // A virtual component holds nothing, whichever change tries to put something in it (opening
+        // a design, which no undo step follows, reads it as it is).
+        let r = match r {
+            Ok(v) if spec.undoable && outermost && !Arc::ptr_eq(&self.doc, &before.doc) => {
+                cmd::refuse_filled_virtual(&before.doc, &self.doc).map(|()| v)
+            }
+            r => r,
+        };
         // New/open/recover can replace the Session. Device ownership belongs to the host,
         // so its capability metadata survives those document lifecycle commands.
         self.render_viewport = host_viewport;

@@ -567,6 +567,8 @@ pub enum ParamUser {
     /// A joint's offset, angle or value, or a motion link's gear, rack or screw length (`input`
     /// says which; a link is named by the joint it drives).
     Joint { joint: u64, name: String, input: String },
+    /// A component's quantity in bills of materials ([`crate::metadata::BOM_QUANTITY`]).
+    Quantity { component: u64, name: String },
 }
 
 impl ParamUser {
@@ -580,6 +582,7 @@ impl ParamUser {
                 None => format!("configuration column {column}"),
             },
             ParamUser::Joint { name, input, .. } => format!("joint {name} ({input})"),
+            ParamUser::Quantity { name, .. } => format!("component {name} (quantity)"),
         }
     }
 }
@@ -707,6 +710,11 @@ impl Document {
                 out.push(ParamUser::Joint { joint, name: jname, input });
             }
         }
+        for c in &self.components {
+            if c.metadata.bom_quantity().is_some_and(|e| expr::references(e).iter().any(|r| r == name)) {
+                out.push(ParamUser::Quantity { component: c.id, name: c.name.clone() });
+            }
+        }
         out
     }
 
@@ -815,6 +823,13 @@ impl Document {
             let r = expr::rename_reference(e, old, new);
             if r != *e {
                 *e = r;
+                n += 1;
+            }
+        }
+        for c in &mut self.components {
+            let Some(e) = c.metadata.bom_quantity() else { continue };
+            let r = expr::rename_reference(e, old, new);
+            if r != e && c.metadata.set(crate::metadata::BOM_QUANTITY, r.into()).is_ok() {
                 n += 1;
             }
         }

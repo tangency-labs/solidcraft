@@ -481,6 +481,21 @@ impl Document {
         false
     }
 
+    /// The virtual components that hold something, by id: a feature (a sketch, a body's, a moved
+    /// body's) or a placed component. A virtual component holds nothing ([`crate::metadata::VIRTUAL`]):
+    /// the engine refuses any change that puts something in one.
+    pub fn virtual_holding(&self) -> Vec<u64> {
+        let virtuals: std::collections::HashSet<u64> = self.components.iter().filter(|c| c.metadata.is_virtual()).map(|c| c.id).collect();
+        if virtuals.is_empty() {
+            return Vec::new();
+        }
+        let mut held: Vec<u64> =
+            self.features.iter().map(|f| f.component).chain(self.occurrences.iter().map(|o| o.parent)).filter(|id| virtuals.contains(id)).collect();
+        held.sort_unstable();
+        held.dedup();
+        held
+    }
+
     /// Add an occurrence of an existing component into `parent`.
     pub fn add_occurrence(&mut self, component: u64, parent: u64, transform: Mat) -> Result<u64> {
         if component == 0 || !self.components.iter().any(|c| c.id == component) {

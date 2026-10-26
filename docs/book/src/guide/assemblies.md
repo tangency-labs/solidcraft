@@ -331,7 +331,7 @@ revision, other tools' data under a reverse-DNS key (the same rules as the desig
 properties), and free text properties such as a material grade or a finish. Every occurrence of
 the component shares them, Paste New copies them, and they are saved with the component.
 `component.metadata {component}` reads them and
-`component.metadata.set {component, part_number?, description?, revision?, bom_type?, material?, values?, properties?}`
+`component.metadata.set {component, part_number?, description?, revision?, bom_type?, material?, bom_quantity?, virtual?, values?, properties?}`
 changes them in one undo step (an empty value removes a field). The root component is the
 design itself: its properties are `document.metadata`'s. Standard parts (`parts.insert`) get a
 part number from their standard and size (`ISO 4762 M6x20`, or a bearing's designation) and a
@@ -409,7 +409,7 @@ one (all it holds) and an inseparable one (all but its purchased parts). A refer
 nothing. Every part is measured for it, once per definition, so it takes longer. It is `null` when nothing
 in the part has a body, a body can't be measured, or the definitions sharing the row's part number weigh
 differently (by more than the measurement can tell apart: one part modelled two ways weighs the same). `path` writes them to a `.csv` file
-(the columns item, part_number, description, revision, count, definition and material, every field
+(the columns item, part_number, description, revision, count, definition, material and quantity, every field
 quoted; children follow their row) or a `.json` file. The window lists the same rows, switches
 between the levels and groupings and shows children under their part, edits a picked row's part
 number, description and revision, and exports them. Changing part properties or a bill of
@@ -437,3 +437,21 @@ level by item number, and `assembly.bom` says `numbered: true`; a row says `prov
 number isn't saved yet (a list made with other options), and `locked` and `duplicate` when they
 apply. Saved numbers are plain numbers: how they are padded (007) is up to the table that shows
 them. Numbering changes no geometry, so it doesn't evaluate the model.
+
+**Quantities.** A component's **quantity** (`bom_quantity`, a part property) says what one
+placement of it means: a number of pieces (`4`, a pack of four) or a length (`2.5 m`). It is an
+expression evaluated with the design's parameters, so `cable_length` or `2 * span + 50 mm` follows
+the design. A row of such components gives `quantity`, what its placements add up to, with
+`quantity_unit` `pieces` or `mm` (lengths are given in millimetres, as masses are in grams): a
+2.5 m cable placed three times reads 7500 mm. A placement without a quantity counts one piece.
+Pieces and a length in one row can't be added, so its `quantity` is `null` with
+`quantity_unknown: "mixed"`; a quantity that doesn't evaluate (a parameter it names is in error)
+gives `"invalid"`, and the rest of the list still works. A quantity uses its parameters as any
+expression does: renaming one renames it in the quantity, and one in use can't be deleted. Rows without quantities read as before.
+Masses and volumes (50 g of grease) and areas are not supported yet: they need expression units.
+
+**Virtual components.** `component.create {virtual: true, bom_quantity?}` makes a component with
+no geometry, such as grease, paint, a label or packaging: it is listed in every view with its
+quantity and weighs nothing. It holds nothing: it can't be the active component, and any command
+that would put a body, a sketch or a component into it is refused. An empty component can be
+made virtual with `component.metadata.set {component, virtual: true}`.
