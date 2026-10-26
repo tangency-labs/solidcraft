@@ -582,7 +582,7 @@ impl<'de> Deserialize<'de> for FlangeEdge {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AlignFrame {
     /// A joint origin on the model (its component's coordinates): its origin and z.
-    Origin { origin: crate::joints::JointOrigin },
+    Origin { origin: Box<crate::joints::JointOrigin> },
     /// A sketch point; z along the sketch's normal.
     SketchPoint { sketch: SketchId, point: String },
     /// The centre of a sketch circle, arc or ellipse; z along the sketch's normal.

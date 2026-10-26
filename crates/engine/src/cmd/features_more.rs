@@ -574,7 +574,7 @@ fn align_frame(s: &Session, p: &Value, key: &str, body: &str) -> Result<Option<A
         None => {
             let origin = super::joints::origin_param(s, Some(v), cmd)?;
             let on = super::joints::component_of(s, origin.occurrence);
-            (AlignFrame::Origin { origin }, on)
+            (AlignFrame::Origin { origin: Box::new(origin) }, on)
         }
     };
     if on != component {
