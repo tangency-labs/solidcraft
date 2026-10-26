@@ -876,6 +876,61 @@ fn copy(k: &mut Kernel, b: &Brep, n: u64) -> Result<Brep, Run> {
     p3::api_brep_copy(k, &mut env, Some(b), &|entity| named(entity, 0)).map_err(|e| solid(&e))
 }
 
+/// A fixture point must name exactly one nearby edge between distinct faces.
+/// The distance bound validates the selector only; it does not change fillet tolerances.
+fn fillet_edge_at_point(
+    k: &Kernel,
+    body: &Brep,
+    point: Point3,
+) -> Result<solidcore::topology::EdgeId, Run> {
+    use solidcore::geom::global_solver::SolverOperation;
+    use solidcore::topology::edge;
+
+    if !point.x.is_finite() || !point.y.is_finite() || !point.z.is_finite() {
+        return Err(Run::Error("fillet edge point is not finite".into()));
+    }
+    let tolerance = 1.0e-6 * (1.0 + point.length());
+    if !tolerance.is_finite() {
+        return Err(Run::Error("fillet edge point is too large".into()));
+    }
+    let mut selected = None;
+    for id in solidcore::query::api_queries::get_edges(body).map_err(|e| solid(&e))? {
+        // GetFaces deduplicates actual FaceIds: a closed surface's seam has one.
+        if edge::faces(body, id, None).map_err(|e| solid(&e))?.len() < 2 {
+            continue;
+        }
+        let Some(curve) = edge::curve(body, id).map_err(|e| solid(&e))? else {
+            continue;
+        };
+        let interval = edge::interval(body, id).map_err(|e| solid(&e))?;
+        let dropped = curve
+            .drop_point(
+                k,
+                &interval,
+                point,
+                None,
+                tolerance,
+                None,
+                SolverOperation::Minimize,
+            )
+            .map_err(|e| solid(&e))?;
+        if !dropped.success
+            || !dropped.parameter.is_finite()
+            || !dropped.distance.is_finite()
+            || dropped.distance < 0.0
+            || dropped.distance > tolerance
+        {
+            continue;
+        }
+        if selected.replace(id).is_some() {
+            return Err(Run::Error(
+                "fillet edge point matches multiple eligible edges".into(),
+            ));
+        }
+    }
+    selected.ok_or_else(|| Run::Error("fillet edge point matches no eligible edge".into()))
+}
+
 /// A cylinder along Z turned onto `axis` about `origin`.
 fn cylinder(k: &mut Kernel, origin: P3, axis: P3, radius: f64, height: f64) -> Result<Brep, Run> {
     let mut b =
@@ -1203,18 +1258,9 @@ fn step_rust(k: &mut Kernel, bodies: &mut BTreeMap<String, Brep>, step: &Step) -
                 .get(body)
                 .ok_or_else(|| Run::Error(format!("no body `{body}`")))?;
             let mut target = copy(k, source, 1)?;
-            let body_edges =
-                solidcore::query::api_queries::get_edges(&target).map_err(|e| solid(&e))?;
             let selected = edges
                 .iter()
-                .map(|point| {
-                    let pick = solidcore::query::api_queries::find_edge(k, &target, p3(*point))
-                        .map_err(|e| solid(&e))?;
-                    body_edges
-                        .get(pick.index)
-                        .copied()
-                        .ok_or_else(|| Run::Error("fillet edge index is outside the body".into()))
-                })
+                .map(|point| fillet_edge_at_point(k, &target, p3(*point)))
                 .collect::<Result<Vec<_>, Run>>()?;
             solidcore::blend::fillet_executive::api::fillet_edges(
                 k,
@@ -1655,6 +1701,58 @@ mod tests {
             let (v, _) = verdict(&l.case.expect, &run);
             assert!(VERDICTS.contains(&v), "{}", l.id);
         }
+    }
+
+    #[test]
+    fn fillet_picker_rejects_off_edge_points() {
+        let mut k = Kernel::default();
+        let body = primitives::create_box(&mut k, Vec3::ZERO, 10.0, 20.0, 30.0).unwrap();
+        assert!(matches!(
+            fillet_edge_at_point(&k, &body, Vec3::new(5.0, 10.0, 15.0)),
+            Err(Run::Error(message)) if message.contains("no eligible edge")
+        ));
+        assert!(matches!(
+            fillet_edge_at_point(&k, &body, Vec3::new(f64::NAN, 0.0, 0.0)),
+            Err(Run::Error(message)) if message.contains("not finite")
+        ));
+    }
+
+    #[test]
+    fn fillet_picker_rejects_ambiguous_box_vertices() {
+        let mut k = Kernel::default();
+        let body = primitives::create_box(&mut k, Vec3::ZERO, 10.0, 20.0, 30.0).unwrap();
+        assert!(matches!(
+            fillet_edge_at_point(&k, &body, Vec3::ZERO),
+            Err(Run::Error(message)) if message.contains("multiple eligible edges")
+        ));
+    }
+
+    #[test]
+    fn fillet_picker_selects_closed_cylinder_rim_at_its_seam_vertex() {
+        use solidcore::topology::{edge, vertex};
+
+        let mut k = Kernel::default();
+        let body = primitives::create_cylinder(&mut k, Vec3::ZERO, 5.0, 12.0).unwrap();
+        let edges = solidcore::query::api_queries::get_edges(&body).unwrap();
+        let rim = edges
+            .iter()
+            .copied()
+            .find(|id| {
+                edge::is_closed(&body, *id).unwrap()
+                    && edge::faces(&body, *id, None).unwrap().len() == 2
+            })
+            .unwrap();
+        let start = edge::vertex(&body, rim).unwrap().unwrap();
+        let point = vertex::point(&body, start).unwrap();
+        // Derive the shared seam endpoint from real topology, not a guessed
+        // cylinder parameter basis; the seam is excluded by distinct-face count.
+        assert!(edges.iter().any(|id| {
+            edge::faces(&body, *id, None).unwrap().len() == 1
+                && (edge::vertex(&body, *id).unwrap() == Some(start)
+                    || edge::other_vertex(&body, *id, edge::vertex(&body, *id).unwrap()).unwrap()
+                        == Some(start))
+        }));
+        assert_eq!(fillet_edge_at_point(&k, &body, point).unwrap(), rim);
     }
 
     #[test]
