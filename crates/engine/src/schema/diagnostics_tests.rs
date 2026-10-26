@@ -45,13 +45,18 @@ fn diagnostics_profile_reports_commands_features_and_the_kernel() {
     let dir = std::env::temp_dir().join(format!("solidcraft-profile-trace-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("trace.json").to_string_lossy().to_string();
+    let since_trace = std::time::Instant::now();
     let t = s.execute("diagnostics.profile", &json!({"trace": path, "enabled": false, "reset": true})).unwrap();
     assert_eq!((t["trace"].as_str(), t["enabled"].as_bool()), (Some(path.as_str()), Some(false)));
     let trace: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
     assert!(trace["traceEvents"].as_array().unwrap().iter().any(|e| e["ph"] == "X" && e["name"] == "solid.box"), "{trace}");
-    // Only the call that reset it (its own span ends after the reset).
+    // Other tests run commands (this one among them) while it records, so the rows after the
+    // reset can hold theirs too. The wall time shows the reset: it starts again at the call that
+    // reset it, whose own span ends after the reset and is the one row certain to be there.
     let after = s.execute("diagnostics.profile", &json!({})).unwrap();
-    let names: Vec<&str> = after["rows"].as_array().unwrap().iter().filter_map(|r| r["name"].as_str()).collect();
-    assert_eq!(names, ["diagnostics.profile"], "{after}");
+    assert!(after["wall_ms"].as_f64().unwrap() <= since_trace.elapsed().as_secs_f64() * 1000.0 + 0.001, "{after}");
+    let rows = after["rows"].as_array().unwrap();
+    assert!(rows.iter().any(|x| x["category"] == "command" && x["name"] == "diagnostics.profile"), "{after}");
+    assert_eq!(after["enabled"], json!(false), "{after}");
     let _ = std::fs::remove_dir_all(&dir);
 }

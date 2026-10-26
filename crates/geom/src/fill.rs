@@ -166,10 +166,25 @@ enum Fit {
     Exhausted(f64),
 }
 
-/// One round of [`fill_loop`]: fit the points `fit`, check every point of `all` (the loop in
-/// order, `fit` among them).
-fn fit_once(fit: &[Vec3], all: &[Vec3], tol: f64, crown: f64) -> SplineResult<Fit> {
+/// The plane a loop's height field stands on (see [`fill_loop`]): through the fitted points'
+/// centroid `o`, normal `n` by Newell's method turned so that its largest component is positive,
+/// first axis `x` towards the fitted point farthest from the centroid in the plane, `y = n × x`;
+/// and whether the points run counter-clockwise about `n`.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct LoopFrame {
+    pub(crate) o: Vec3,
+    pub(crate) x: Vec3,
+    pub(crate) y: Vec3,
+    pub(crate) n: Vec3,
+    pub(crate) counter_clockwise: bool,
+}
+
+/// The [`LoopFrame`] of the loop of points `fit`.
+pub(crate) fn loop_frame(fit: &[Vec3]) -> SplineResult<LoopFrame> {
     let m = fit.len();
+    if m < 3 {
+        return invalid("a loop needs three points");
+    }
     let o = fit.iter().fold(Vec3::ZERO, |a, p| a + *p) / m as f64;
     let at = |k: usize| fit.get(k % m).copied().unwrap_or(Vec3::ZERO);
     let area = (0..m).fold(Vec3::ZERO, |a, k| a + (at(k) - o).cross(at(k + 1) - o));
@@ -206,6 +221,14 @@ fn fit_once(fit: &[Vec3], all: &[Vec3], tol: f64, crown: f64) -> SplineResult<Fi
     let far = far.map(flat).unwrap_or(Vec3::ZERO);
     let x = far.normalized().ok_or_else(|| SplineError::Invalid("the loop has no extent in its plane".into()))?;
     let y = n.cross(x);
+    Ok(LoopFrame { o, x, y, n, counter_clockwise })
+}
+
+/// One round of [`fill_loop`]: fit the points `fit`, check every point of `all` (the loop in
+/// order, `fit` among them).
+fn fit_once(fit: &[Vec3], all: &[Vec3], tol: f64, crown: f64) -> SplineResult<Fit> {
+    let m = fit.len();
+    let LoopFrame { o, x, y, n, counter_clockwise } = loop_frame(fit)?;
     let project = |pts: &[Vec3]| -> (Vec<[f64; 2]>, Vec<f64>) {
         (pts.iter().map(|p| [(*p - o).dot(x), (*p - o).dot(y)]).collect(), pts.iter().map(|p| (*p - o).dot(n)).collect())
     };
@@ -495,7 +518,7 @@ fn segment_meets_rect(p: [f64; 2], q: [f64; 2], lo: [f64; 2], hi: [f64; 2]) -> b
 }
 
 /// Refuse a loop that does not bound a height field over its plane (see [`fill_loop`]).
-fn check_projectable(points: &[Vec3], uv: &[[f64; 2]]) -> SplineResult<()> {
+pub(crate) fn check_projectable(points: &[Vec3], uv: &[[f64; 2]]) -> SplineResult<()> {
     let m = uv.len();
     let q = |k: usize| uv.get(k % m).copied().unwrap_or([0.0; 2]);
     let p = |k: usize| points.get(k % m).copied().unwrap_or(Vec3::ZERO);
@@ -707,7 +730,7 @@ impl Grid {
 
     /// The surface of the net `heights` over the plane `o`, `x`, `y`, `n`: control point `(i, j)`
     /// at the knot averages `(ξᵢ, ηⱼ)` in the plane, `heights[j·count[0] + i]` along `n`.
-    fn surface(&self, heights: &[f64], o: Vec3, x: Vec3, y: Vec3, n: Vec3) -> SplineResult<NurbsSurface> {
+    pub(crate) fn surface(&self, heights: &[f64], o: Vec3, x: Vec3, y: Vec3, n: Vec3) -> SplineResult<NurbsSurface> {
         let [cu, cv] = self.count;
         let mut ctrl = Vec::with_capacity(cu * cv);
         for j in 0..cv {
@@ -755,7 +778,7 @@ impl Band {
     }
     /// Solve `A·x = b` by banded Cholesky factorisation `A = Uᵀ·U`; an error when `A` is not
     /// positive definite.
-    fn solve(self, b: Vec<f64>) -> SplineResult<Vec<f64>> {
+    pub(crate) fn solve(self, b: Vec<f64>) -> SplineResult<Vec<f64>> {
         self.factor()?.substitute(b)
     }
 

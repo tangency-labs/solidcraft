@@ -1,3 +1,37 @@
+# Where the time goes: the profiler
+
+Every app is built with the profiler (`crates/profile`, the apps' default `profile` feature).
+It records nothing until switched on: `SOLIDCRAFT_PROFILE=1`, the CLI's `--profile`, the
+**Profile operations** preference (Graphics page) or `diagnostics.profile {"enabled": true}`.
+Off, a span is one relaxed atomic load.
+
+What it records, as nested spans on each thread:
+
+| Category | Spans |
+|---|---|
+| `smlib` | every SMLib C API call, timed by the C API itself (`steady_clock`) |
+| `kernel` | booleans, blends, sweeps, lofts, shell/draft/offset, healing, sewing, conversions, meshing, measuring |
+| `import` | the stages of a STEP or IGES import: parse, index, each solid, placement, mesh check, convert batches |
+| `feature` | each feature computed, by its type; `doc evaluate` around them |
+| `command` | each `Session::execute`, by command id |
+| `io` | import, export, design read and write |
+
+Self time is a span's time less the spans inside it; its total counts only its outermost run
+on a thread, so a command run by a command is not counted twice. Work handed to other threads
+shows under their own spans. The report is a table (the most self time first, with self time
+per category) and the individual spans as a Chrome trace-event file for chrome://tracing or
+ui.perfetto.dev (at most 200,000 spans; later ones still count in the table).
+
+```sh
+solidcraft-cli run part.step --profile --profile-out trace.json   # table on stderr
+solidcraft-cli run part.solidcraft --profile --quiet
+solidcraft-cli bench-open part.step --profile
+```
+
+Over the control channel or MCP: `diagnostics.profile {"reset": true, "enabled": true}`, do the
+work, then `diagnostics.profile {"top": 30, "trace": "trace.json"}`. A STEP or IGES import's
+reply carries its own profile while recording.
+
 # Design loading
 
 ## Edges made by booleans: each point evaluated once (2026-10-16)
