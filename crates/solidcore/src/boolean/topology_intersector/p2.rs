@@ -1157,7 +1157,10 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     /// that edited nothing only warns, as upstream;
     /// [`SolidError::InvalidInput`] without both B-reps. Where the manager's
     /// destructor would read a freed proto edge upstream (UB-175) the port's defined
-    /// teardown goes on and [`Kernel::note_upstream_ub`] records `"UB-175"`.
+    /// teardown goes on and [`Kernel::note_upstream_ub`] records `"UB-175"`, also when
+    /// `SetRelationships` or an editing imprint failed (upstream still runs that
+    /// teardown); not after a failed `IntersectTopology` or `ResolveIntersections`,
+    /// where upstream returns without deleting the manager.
     pub fn intersect_insert_relate(
         &mut self,
         k: &mut Kernel,
@@ -1219,10 +1222,15 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         match outcome {
             Ok(d) => deleted.extend(d),
             Err(e) => {
+                // upstream goes on here with the half-imprinted B-reps (UB-242) to
+                // `SetRelationships` (which only reads the proto topology) and the same
+                // manager teardown, so UB-175 is decided here as below
                 if let Some(mut mgr) = self.proto_topo_mgr.take() {
+                    if teardown_reads_freed(&mgr) {
+                        k.note_upstream_ub("UB-175");
+                    }
                     let _ = mgr.destroy();
                 }
-                // upstream goes on here with the half-imprinted B-reps (UB-242)
                 k.note_upstream_ub("UB-242");
                 return Err(e);
             }
@@ -1237,12 +1245,13 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
             reads_freed = teardown_reads_freed(&mgr);
             deleted.extend(mgr.destroy());
         }
-        status?;
         if reads_freed {
-            // Upstream reads a freed proto edge here (UB-175); the arena teardown above
-            // is defined, so the port goes on with its result and records the condition.
+            // Upstream reads a freed proto edge here (UB-175), whatever `SetRelationships`
+            // returned (the delete precedes the return); the arena teardown above is
+            // defined, so the port goes on with its result and records the condition.
             k.note_upstream_ub("UB-175");
         }
+        status?;
         Ok(deleted)
     }
 

@@ -241,8 +241,8 @@ fn to_output(o: &[f64]) -> Result<Output, HarnessError> {
 fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
     if ub_175(i)? {
         return Ok(Output::rejected(
-            "UB-175: ~SmProtoTopologyManager reads a freed proto edge (proto vertices \
-             collapsed below the 0.01 capture distance); not run",
+            "UB-175: ~SmProtoTopologyManager frees a proto edge that a proto vertex \
+             still lists, then ~SmProtoVertex reads it; not run",
         ));
     }
     match ffi::run(&to_call(i)) {

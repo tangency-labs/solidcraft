@@ -4172,7 +4172,7 @@ fn run_part2_op(
             k.upstream_ub_passed.clear();
             let r = ti.intersect_insert_relate(k, two, TI_HANDLE);
             if k.upstream_ub_passed.contains(&"UB-242")
-                || (r.is_ok() && k.upstream_ub_passed.contains(&"UB-175"))
+                || k.upstream_ub_passed.contains(&"UB-175")
             {
                 o.push(NULL_DEREF);
                 return Ok(());
