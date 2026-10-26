@@ -62,6 +62,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: scripts/ci/test-difftest-baseline.sh
+      - run: python3 -I scripts/ci/check_record_ids.py
 
   fmt:
     runs-on: blacksmith-4vcpu-ubuntu-2404
