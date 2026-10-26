@@ -529,10 +529,13 @@ pub enum FileAction {
 }
 
 impl FileAction {
-    /// Whether this action is available in the current document and picker state.
+    /// Whether this action is available in the current document, picker and report state.
     pub fn enabled(&self, app: &SolveApp) -> bool {
         let needs_design = matches!(self, Self::Save | Self::SaveAs | Self::Undo | Self::Redo | Self::ExportMesh(_) | Self::Command(_))
             || matches!(self, Self::Export(extension) if *extension != "json");
+        // An open bug report describes the designs as they are, and a window opened behind it
+        // covers it: only Quit, which asks about unsaved designs first, stays (#7188).
+        let behind_report = app.issue_report.draft.is_some() && !matches!(self, Self::Quit);
         let available = match self {
             Self::Undo => !app.session.undo.is_empty(),
             Self::Redo => !app.session.redo.is_empty(),
@@ -540,7 +543,13 @@ impl FileAction {
             Self::AgentChat => crate::agent_chat::app_bar_button_shown(app),
             _ => true,
         };
-        !app.file_picker_busy() && !app.file_load.busy() && (!needs_design || design_shown(app)) && available
+        !app.file_picker_busy() && !app.file_load.busy() && !behind_report && (!needs_design || design_shown(app)) && available
+    }
+
+    /// Whether the native menu offers this action: while a widget has keyboard focus (a report's
+    /// text field too), its Undo and Redo go to that widget instead of the design.
+    pub fn menu_enabled(&self, app: &SolveApp, keyboard_focus: bool) -> bool {
+        self.enabled(app) || (matches!(self, Self::Undo | Self::Redo) && keyboard_focus && !app.file_picker_busy() && !app.file_load.busy())
     }
 
     /// Execute through the same document, save-job and preferences paths as the toolbar.
@@ -2274,6 +2283,45 @@ mod header_report_tests {
         h.app.home.open = false;
         assert!(FileAction::Save.enabled(&h.app));
         assert!(FileAction::Export("step").enabled(&h.app));
+    }
+
+    #[test]
+    fn native_menu_actions_are_disabled_behind_an_open_issue_report() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":2,"width":3,"height":4})).unwrap();
+        h.app.home.recent = vec!["elsewhere.solidcraft".into()];
+        h.app.issue_report.draft = Some(crate::issue_report::draft_for(&h.app, None, None));
+        let before = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.docs.count(), h.app.home.recent.clone());
+        for action in [
+            FileAction::Undo,
+            FileAction::New,
+            FileAction::Open,
+            FileAction::OpenRecent("elsewhere.solidcraft".into()),
+            FileAction::ClearRecent,
+            FileAction::Command("file.insert_step"),
+            FileAction::Save,
+            FileAction::SaveAs,
+            FileAction::SaveJson,
+            FileAction::ExportMesh("stl"),
+            FileAction::Export("step"),
+            FileAction::Export("json"),
+            FileAction::Command("document.metadata"),
+            FileAction::Settings,
+            FileAction::Shortcuts,
+            FileAction::AgentChat,
+        ] {
+            assert!(!action.enabled(&h.app), "{action:?} behind the report");
+            action.run(&mut h.app);
+        }
+        assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.docs.count(), h.app.home.recent.clone()));
+        assert!(h.app.dialog.is_none() && h.app.file_picker.is_none() && !h.app.prefs_window.open && !h.app.keymap.open && !h.app.agent_chat.open);
+        // A focused report field still gets the menu's Undo and Redo; Quit still asks about unsaved designs.
+        assert!(FileAction::Undo.menu_enabled(&h.app, true) && !FileAction::Undo.menu_enabled(&h.app, false));
+        assert!(!FileAction::Save.menu_enabled(&h.app, true));
+        assert!(FileAction::Quit.enabled(&h.app));
+        h.app.issue_report.draft = None;
+        assert!(FileAction::Undo.enabled(&h.app) && FileAction::Settings.enabled(&h.app));
     }
 
     #[test]

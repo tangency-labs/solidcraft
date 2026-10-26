@@ -146,8 +146,7 @@ impl NativeMenu {
     }
 
     fn action_enabled(action: &FileAction, app: &SolveApp, ctx: &egui::Context) -> bool {
-        action.enabled(app)
-            || (matches!(action, FileAction::Undo | FileAction::Redo) && ctx.egui_wants_keyboard_input() && FileAction::Settings.enabled(app))
+        action.menu_enabled(app, ctx.egui_wants_keyboard_input())
     }
 
     pub fn tick(&mut self, app: &mut SolveApp, ctx: &egui::Context) {
