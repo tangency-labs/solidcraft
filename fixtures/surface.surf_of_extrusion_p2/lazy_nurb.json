@@ -1,0 +1,7695 @@
+{
+ "cases": [
+  {
+   "name": "lazy_cubic_eval_simple",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "eval_simple",
+     "uv": [
+      0.3,
+      0.6
+     ],
+     "hu": 2,
+     "hv": 2
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_eval_simple_corner",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "eval_simple",
+     "uv": [
+      1,
+      1
+     ],
+     "hu": 1,
+     "hv": 1,
+     "u_left": true,
+     "v_left": true
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_eval_simple_outside",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "eval_simple",
+     "uv": [
+      -0.1,
+      0
+     ],
+     "hu": 3,
+     "hv": 1
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_eval_first",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "eval_first",
+     "uv": [
+      0.7,
+      0.25
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_eval_first_left",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "eval_first",
+     "uv": [
+      0.5,
+      0.5
+     ],
+     "u_left": true
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_bbox",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "b_box",
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "expand": true
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_bbox_noexpand",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "b_box",
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_degen_point",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "degen_point",
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_degen_point_sub",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "degen_point",
+     "tol": 1e-06,
+     "dom": [
+      0.2,
+      0.2,
+      0.6,
+      0.7
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_degen_point_huge_tol",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "degen_point",
+     "tol": 10000.0
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_degen_curve",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "degen_curve",
+     "ang": 0.0001,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_degen_curve_sub",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "degen_curve",
+     "ang": 0.0001,
+     "tol": 1e-06,
+     "dom": [
+      0.1,
+      0.3,
+      0.9,
+      0.4
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_extend_g1",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "extend",
+     "dist": 0.1,
+     "cont": 3
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_extend_cinf",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "extend",
+     "dist": 0.25,
+     "cont": 13
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_extend_dir_v",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "extend",
+     "dir": 1,
+     "dist": 0.2,
+     "cont": 3
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_extend_dir_umax",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "extend",
+     "dir": 7,
+     "dist": 0.05,
+     "cont": 13
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_planar",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "planar",
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_planar_eff_zero",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "planar",
+     "tol": 1e-11
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_eval_simple",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "eval_simple",
+     "uv": [
+      0.3,
+      1.2
+     ],
+     "hu": 2,
+     "hv": 2
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_eval_simple_corner",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "eval_simple",
+     "uv": [
+      1,
+      2
+     ],
+     "hu": 1,
+     "hv": 1,
+     "u_left": true,
+     "v_left": true
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_eval_simple_outside",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "eval_simple",
+     "uv": [
+      -0.1,
+      0
+     ],
+     "hu": 3,
+     "hv": 1
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_eval_first",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "eval_first",
+     "uv": [
+      0.7,
+      0.5
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_eval_first_left",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "eval_first",
+     "uv": [
+      0.5,
+      1.0
+     ],
+     "u_left": true
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_bbox",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "b_box",
+     "dom": [
+      0,
+      0,
+      1,
+      2
+     ],
+     "expand": true
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_bbox_noexpand",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "b_box",
+     "dom": [
+      0,
+      0,
+      1,
+      2
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_degen_point",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "degen_point",
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_degen_point_sub",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "degen_point",
+     "tol": 1e-06,
+     "dom": [
+      0.2,
+      0.4,
+      0.6,
+      1.4
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_degen_point_huge_tol",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "degen_point",
+     "tol": 10000.0
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_degen_curve",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "degen_curve",
+     "ang": 0.0001,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_degen_curve_sub",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "degen_curve",
+     "ang": 0.0001,
+     "tol": 1e-06,
+     "dom": [
+      0.1,
+      0.6,
+      0.9,
+      0.8
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_extend_g1",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "extend",
+     "dist": 0.1,
+     "cont": 3
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_extend_cinf",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "extend",
+     "dist": 0.25,
+     "cont": 13
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_extend_dir_v",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "extend",
+     "dir": 1,
+     "dist": 0.2,
+     "cont": 3
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_extend_dir_umax",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "extend",
+     "dir": 7,
+     "dist": 0.05,
+     "cont": 13
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_planar",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "planar",
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "lazy_arc_planar_eff_zero",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1,
+         0,
+         0,
+         1
+        ],
+        [
+         1.3,
+         0.2,
+         1.5,
+         1
+        ],
+        [
+         0.7071067811865476,
+         0.7071067811865476,
+         0.0,
+         0.7071067811865476
+        ],
+        [
+         0.9192388155425119,
+         0.848528137423857,
+         1.0606601717798214,
+         0.7071067811865476
+        ],
+        [
+         0,
+         1,
+         0,
+         1
+        ],
+        [
+         0.3,
+         1.2,
+         1.5,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        2,
+        2
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "planar",
+     "tol": 1e-11
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_eval_simple",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "eval_simple",
+     "uv": [
+      0.3,
+      0.6
+     ],
+     "hu": 2,
+     "hv": 2
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_eval_simple_corner",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "eval_simple",
+     "uv": [
+      1,
+      1
+     ],
+     "hu": 1,
+     "hv": 1,
+     "u_left": true,
+     "v_left": true
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_eval_simple_outside",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "eval_simple",
+     "uv": [
+      -0.1,
+      0
+     ],
+     "hu": 3,
+     "hv": 1
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_eval_first",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "eval_first",
+     "uv": [
+      0.7,
+      0.25
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_eval_first_left",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "eval_first",
+     "uv": [
+      0.5,
+      0.5
+     ],
+     "u_left": true
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_bbox",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "b_box",
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "expand": true
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_bbox_noexpand",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "b_box",
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_degen_point",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "degen_point",
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_degen_point_sub",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "degen_point",
+     "tol": 1e-06,
+     "dom": [
+      0.2,
+      0.2,
+      0.6,
+      0.7
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_degen_point_huge_tol",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "degen_point",
+     "tol": 10000.0
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_degen_curve",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "degen_curve",
+     "ang": 0.0001,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_degen_curve_sub",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "degen_curve",
+     "ang": 0.0001,
+     "tol": 1e-06,
+     "dom": [
+      0.1,
+      0.3,
+      0.9,
+      0.4
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_extend_g1",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "extend",
+     "dist": 0.1,
+     "cont": 3
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_extend_cinf",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "extend",
+     "dist": 0.25,
+     "cont": 13
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_extend_dir_v",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "extend",
+     "dir": 1,
+     "dist": 0.2,
+     "cont": 3
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_extend_dir_umax",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "extend",
+     "dir": 7,
+     "dist": 0.05,
+     "cont": 13
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_planar",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "planar",
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "lazy_cubic_t_planar_eff_zero",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 3,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0,
+         0,
+         2,
+         1
+        ],
+        [
+         1,
+         2,
+         0,
+         1
+        ],
+        [
+         1,
+         2,
+         2,
+         1
+        ],
+        [
+         2,
+         -1,
+         0.5,
+         1
+        ],
+        [
+         2,
+         -1,
+         2.5,
+         1
+        ],
+        [
+         3,
+         0.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0.5,
+         2,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     },
+     "transpose": true
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "planar",
+     "tol": 1e-11
+    }
+   }
+  },
+  {
+   "name": "lazy_big_eval_simple",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "eval_simple",
+     "uv": [
+      2.9,
+      1.4
+     ],
+     "hu": 2,
+     "hv": 2
+    }
+   }
+  },
+  {
+   "name": "lazy_big_eval_simple_corner",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "eval_simple",
+     "uv": [
+      5,
+      3
+     ],
+     "hu": 1,
+     "hv": 1,
+     "u_left": true,
+     "v_left": true
+    }
+   }
+  },
+  {
+   "name": "lazy_big_eval_simple_outside",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "eval_simple",
+     "uv": [
+      1.7,
+      -1
+     ],
+     "hu": 3,
+     "hv": 1
+    }
+   }
+  },
+  {
+   "name": "lazy_big_eval_first",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "eval_first",
+     "uv": [
+      4.1,
+      0.0
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_big_eval_first_left",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "eval_first",
+     "uv": [
+      3.5,
+      1.0
+     ],
+     "u_left": true
+    }
+   }
+  },
+  {
+   "name": "lazy_big_bbox",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "b_box",
+     "dom": [
+      2,
+      -1,
+      5,
+      3
+     ],
+     "expand": true
+    }
+   }
+  },
+  {
+   "name": "lazy_big_bbox_noexpand",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "b_box",
+     "dom": [
+      2,
+      -1,
+      5,
+      3
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_big_degen_point",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "degen_point",
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "lazy_big_degen_point_sub",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "degen_point",
+     "tol": 1e-06,
+     "dom": [
+      2.6,
+      -0.19999999999999996,
+      3.8,
+      1.7999999999999998
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_big_degen_point_huge_tol",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "degen_point",
+     "tol": 10000.0
+    }
+   }
+  },
+  {
+   "name": "lazy_big_degen_curve",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "degen_curve",
+     "ang": 0.0001,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "lazy_big_degen_curve_sub",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "degen_curve",
+     "ang": 0.0001,
+     "tol": 1e-06,
+     "dom": [
+      2.3,
+      0.19999999999999996,
+      4.7,
+      0.6000000000000001
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_big_extend_g1",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "extend",
+     "dist": 0.1,
+     "cont": 3
+    }
+   }
+  },
+  {
+   "name": "lazy_big_extend_cinf",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "extend",
+     "dist": 0.25,
+     "cont": 13
+    }
+   }
+  },
+  {
+   "name": "lazy_big_extend_dir_v",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "extend",
+     "dir": 1,
+     "dist": 0.2,
+     "cont": 3
+    }
+   }
+  },
+  {
+   "name": "lazy_big_extend_dir_umax",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "extend",
+     "dir": 7,
+     "dist": 0.05,
+     "cont": 13
+    }
+   }
+  },
+  {
+   "name": "lazy_big_planar",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "planar",
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "lazy_big_planar_eff_zero",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 3,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         1000,
+         0,
+         0,
+         1
+        ],
+        [
+         1005,
+         7,
+         900,
+         1
+        ],
+        [
+         1200,
+         300,
+         10,
+         1
+        ],
+        [
+         1205,
+         307,
+         910,
+         1
+        ],
+        [
+         1500,
+         -200,
+         0,
+         1
+        ],
+        [
+         1505,
+         -193,
+         900,
+         1
+        ],
+        [
+         1800,
+         100,
+         40,
+         1
+        ],
+        [
+         1805,
+         107,
+         940,
+         1
+        ]
+       ],
+       "u": [
+        2,
+        2,
+        2,
+        3,
+        5,
+        5,
+        5
+       ],
+       "v": [
+        -1,
+        -1,
+        3,
+        3
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "planar",
+     "tol": 1e-11
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_eval_simple",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "eval_simple",
+     "uv": [
+      0.3,
+      0.6
+     ],
+     "hu": 2,
+     "hv": 2
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_eval_simple_corner",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "eval_simple",
+     "uv": [
+      1,
+      1
+     ],
+     "hu": 1,
+     "hv": 1,
+     "u_left": true,
+     "v_left": true
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_eval_simple_outside",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "eval_simple",
+     "uv": [
+      -0.1,
+      0
+     ],
+     "hu": 3,
+     "hv": 1
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_eval_first",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "eval_first",
+     "uv": [
+      0.7,
+      0.25
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_eval_first_left",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "eval_first",
+     "uv": [
+      0.5,
+      0.5
+     ],
+     "u_left": true
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_bbox",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "b_box",
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "expand": true
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_bbox_noexpand",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "b_box",
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_degen_point",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "degen_point",
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_degen_point_sub",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "degen_point",
+     "tol": 1e-06,
+     "dom": [
+      0.2,
+      0.2,
+      0.6,
+      0.7
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_degen_point_huge_tol",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "degen_point",
+     "tol": 10000.0
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_degen_curve",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "degen_curve",
+     "ang": 0.0001,
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_degen_curve_sub",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "degen_curve",
+     "ang": 0.0001,
+     "tol": 1e-06,
+     "dom": [
+      0.1,
+      0.3,
+      0.9,
+      0.4
+     ]
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_extend_g1",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "extend",
+     "dist": 0.1,
+     "cont": 3
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_extend_cinf",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "extend",
+     "dist": 0.25,
+     "cont": 13
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_extend_dir_v",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "extend",
+     "dir": 1,
+     "dist": 0.2,
+     "cont": 3
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_extend_dir_umax",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "extend",
+     "dir": 7,
+     "dist": 0.05,
+     "cont": 13
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_planar",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "planar",
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "lazy_flat_planar_eff_zero",
+   "upstream_ref": "SmBSplineSurface members through SmSurface* on an IsNurbSurfaceSurfOfExtrusion result before GetOrCreateGwNurbPointer made its NURB",
+   "inputs": {
+    "is_nurb": {
+     "source": {
+      "test": "raw",
+      "nurb": {
+       "n": 2,
+       "m": 1,
+       "p": 2,
+       "q": 1,
+       "cpts": [
+        [
+         0,
+         0,
+         0,
+         1
+        ],
+        [
+         0.5,
+         0.5,
+         0,
+         1
+        ],
+        [
+         1,
+         1,
+         0,
+         1
+        ],
+        [
+         1.5,
+         1.5,
+         0,
+         1
+        ],
+        [
+         3,
+         0,
+         0,
+         1
+        ],
+        [
+         3.5,
+         0.5,
+         0,
+         1
+        ]
+       ],
+       "u": [
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+       ],
+       "v": [
+        0,
+        0,
+        1,
+        1
+       ]
+      }
+     }
+    },
+    "scale": 1.0,
+    "query": {
+     "q": "planar",
+     "tol": 1e-11
+    }
+   }
+  }
+ ]
+}

@@ -2,7 +2,8 @@
 // difftest shim for unit `surface.surf_of_extrusion_p2`.
 // Wraps the SmSurfOfExtrusion members owned by the unit (source/SMLib/src/SmSurfOfExtrusion.cpp):
 // GlobalSurfaceIntersect, IntersectWithPlane, IntersectWithCylinder,
-// IntersectWithSurfOfExtrusion, IsNurbSurfaceSurfOfExtrusion, TrimWithDomain and ReadFromDB.
+// IntersectWithSurfOfExtrusion, IsNurbSurfaceSurfOfExtrusion, TrimWithDomain and ReadFromDB; and
+// (OP_LAZY) SmSurface queries on a recognised surface before its lazy NURB exists.
 //
 // One entry point, sc_surface_surf_of_extrusion_p2_eval(op, in, n_in, bytes, n_bytes, out, cap,
 // out_len). Layouts are documented in crates/solidcore-ffi/src/units/surface_surf_of_extrusion_p2.rs,
@@ -26,6 +27,7 @@
 #include <SmEllipse.h>
 #include <SmExtent1d.h>
 #include <SmExtent2d.h>
+#include <SmExtent3d.h>
 #include <SmGeomUtility.h>
 #include <SmHyperbola.h>
 #include <SmLine.h>
@@ -33,6 +35,7 @@
 #include <SmNurbsSrf.h>
 #include <SmParabola.h>
 #include <SmPlane.h>
+#include <SmPseudoBox.h>
 #include <SmSurfOfExtrusion.h>
 #include <SmSurface.h>
 #include <SmTArray.h>
@@ -64,6 +67,20 @@ enum : int32_t
     OP_GLOBAL = 4,
     OP_IS_NURB = 5,
     OP_TRIM = 6,
+    OP_LAZY = 7,
+};
+
+// Queries of OP_LAZY, run through SmSurface* on the recognised surface (no NURB yet).
+enum : int32_t
+{
+    Q_EVAL_SIMPLE = 0,
+    Q_EVAL_FIRST = 1,
+    Q_BBOX = 2,
+    Q_DEGEN_POINT = 3,
+    Q_DEGEN_CURVE = 4,
+    Q_EXTEND = 5,
+    Q_EXTEND_DIR = 6,
+    Q_PLANAR = 7,
 };
 
 // Generator kinds.
@@ -632,6 +649,126 @@ SmBSplineSurface* read_test_surface(Rd& rd, const SmContext& ctx, const uint8_t*
     return t;
 }
 
+// A NURB `p q n+1 m+1 cpts(x y z w, v fastest) nu U nv V`.
+void put_nurb(std::vector<double>& o, const gw_SURFACE* sur)
+{
+    o.push_back((double)sur->p);
+    o.push_back((double)sur->q);
+    o.push_back((double)(sur->net->n + 1));
+    o.push_back((double)(sur->net->m + 1));
+    for (gw_INDEX i = 0; i <= sur->net->n; i++)
+        for (gw_INDEX j = 0; j <= sur->net->m; j++)
+        {
+            o.push_back(sur->net->Pw[i][j].x);
+            o.push_back(sur->net->Pw[i][j].y);
+            o.push_back(sur->net->Pw[i][j].z);
+            o.push_back(sur->net->Pw[i][j].w);
+        }
+    o.push_back((double)(sur->knu->m + 1));
+    for (gw_INDEX i = 0; i <= sur->knu->m; i++)
+        o.push_back(sur->knu->U[i]);
+    o.push_back((double)(sur->knv->m + 1));
+    for (gw_INDEX i = 0; i <= sur->knv->m; i++)
+        o.push_back(sur->knv->U[i]);
+}
+
+// An OP_LAZY query `q ...` on `s` through the SmSurface virtuals (layouts in the FFI docs).
+void lazy_query(Rd& rd, const SmContext& ctx, SmSurface* s, std::vector<double>& o)
+{
+    int64_t q = rd.idx();
+    switch (q)
+    {
+    case Q_EVAL_SIMPLE:
+    case Q_EVAL_FIRST:
+    {
+        double u = rd.num();
+        double v = rd.num();
+        ULONG hu = (ULONG)rd.idx();
+        ULONG hv = (ULONG)rd.idx();
+        bool ul = rd.flag();
+        bool vl = rd.flag();
+        if (q == Q_EVAL_FIRST)
+            hu = hv = 1;
+        std::vector<SmVector3d> d((hu + 1) * (hv + 1), SmVector3d(0.0, 0.0, 0.0));
+        SmStatus stt = s->EvaluateSimple(SmPoint2d(u, v), hu, hv, ul ? TRUE : FALSE,
+                                         vl ? TRUE : FALSE, FALSE, d.data());
+        o.push_back(st(stt));
+        if (stt == SM_SUCCESS)
+            for (const SmVector3d& x : d)
+                put_vec(o, x);
+        break;
+    }
+    case Q_BBOX:
+    {
+        SmExtent2d d = rd.domain();
+        bool expand = rd.flag();
+        SmExtent3d box;
+        SmStatus stt =
+            s->CalculateBoundingBox(d, &box, NULL, NULL, NULL, NULL, expand ? TRUE : FALSE);
+        o.push_back(st(stt));
+        if (stt == SM_SUCCESS)
+        {
+            put_vec(o, box.GetMin());
+            put_vec(o, box.GetMax());
+        }
+        break;
+    }
+    case Q_DEGEN_POINT:
+    {
+        double tol = rd.num();
+        bool has = rd.flag();
+        SmExtent2d d = rd.domain();
+        o.push_back(flg(s->IsDegeneratePoint(tol, has ? &d : NULL)));
+        break;
+    }
+    case Q_DEGEN_CURVE:
+    {
+        double ang = rd.num();
+        bool has = rd.flag();
+        SmExtent2d d = rd.domain();
+        double tol = rd.num();
+        o.push_back(flg(s->IsDegenerateCurve(ang, has ? &d : NULL, tol)));
+        break;
+    }
+    case Q_EXTEND:
+    case Q_EXTEND_DIR:
+    {
+        SmSurfParamType dir = (SmSurfParamType)rd.idx();
+        double dist = rd.num();
+        SmContinuityType cont = (SmContinuityType)rd.idx();
+        SmSurface* e = NULL;
+        SmStatus stt = q == Q_EXTEND ? s->CreateExtendedSurface(ctx, dist, cont, e)
+                                     : s->CreateExtendedSurface(ctx, dir, dist, cont, e);
+        o.push_back(st(stt));
+        if (stt == SM_SUCCESS)
+        {
+            const gw_SURFACE* sur = e && e->IsKindOf(SmBSplineSurface_TYPE)
+                                        ? ((SmBSplineSurface*)e)->GetGwNurbPointer()
+                                        : NULL;
+            o.push_back(e ? (double)e->GetType() : 0.0);
+            o.push_back(flg(sur != NULL));
+            if (sur)
+                put_nurb(o, sur);
+        }
+        delete e;
+        break;
+    }
+    case Q_PLANAR:
+    {
+        double tol = rd.num();
+        SmPoint3d pt(0.0, 0.0, 0.0);
+        SmVector3d n(0.0, 0.0, 0.0);
+        double dev = 0.0;
+        o.push_back(flg(s->IsPlanar(tol, &pt, &n, &dev)));
+        put_vec(o, pt);
+        put_vec(o, n);
+        o.push_back(dev);
+        break;
+    }
+    default: break;
+    }
+}
+
 // Runs the op; SC_ERR_ARG when upstream would read undefined values (no output then).
 int32_t surface_op(int32_t op, Rd& rd, const SmContext& ctx, const uint8_t* bytes,
                    SmSurfOfExtrusion* s, std::vector<double>& o)
@@ -835,7 +972,7 @@ SC_EXPORT int32_t sc_surface_surf_of_extrusion_p2_eval(int32_t op, const double*
     SmContext ctx;
     std::vector<double> o;
     Rd rd{in, 0};
-    if (op == OP_IS_NURB)
+    if (op == OP_IS_NURB || op == OP_LAZY)
     {
         bool guard = false;
         SmBSplineSurface* t = read_test_surface(rd, ctx, bytes, o, &guard);
@@ -854,6 +991,13 @@ SC_EXPORT int32_t sc_surface_surf_of_extrusion_p2_eval(int32_t op, const double*
                 o.push_back(0.0);
                 o.push_back(1.0);
                 o.push_back(flg(r->GetGwNurbPointer() != NULL));
+                if (op == OP_LAZY)
+                {
+                    lazy_query(rd, ctx, r, o);
+                    delete r;
+                    delete t;
+                    return sc_copy_out(o.data(), (int64_t)o.size(), out, cap, out_len);
+                }
                 SmStatus mst = r->GetGwNurbPointer() ? SM_SUCCESS : r->MakeNurb();
                 o.push_back(st(mst));
                 if (mst == SM_SUCCESS)

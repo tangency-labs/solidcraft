@@ -911,10 +911,13 @@ impl Surface {
                 )
             }
             // (and SmSurfOfExtrusion)
+            // (`CalculateBoundingBox`'s `GetOrCreateGwNurbPointer` makes a recognised
+            // extrusion's NURB)
             SurfaceKind::SurfOfExtrusion(s) => {
                 let face_tol = self.face_zone_tol_3d()?;
+                let base = s.base_with_nurb(k)?;
                 Ok(
-                    planar_of(k, s.base(), &self.natural_uv_domain_with_nurb(k)?, face_tol)?
+                    planar_of(k, &base, &self.natural_uv_domain_with_nurb(k)?, face_tol)?
                         .is_planar(tol_3d),
                 )
             }

@@ -10,7 +10,9 @@
 //! A case is a surface source `src` (a surface built as in the
 //! `surface.surf_of_extrusion_p1` runner, a database record written from data, or the
 //! record of a surface of extrusion in an upstream test file) plus `op` and its
-//! parameters; `is_nurb` cases have a test surface instead. Both sides produce the same
+//! parameters; `is_nurb` cases have a test surface instead (with a `query`, an
+//! `SmSurface` query runs on the recognised surface while its NURB is still lazy, through
+//! the common `Surface` dispatch on the Rust side). Both sides produce the same
 //! flat record (layout in the FFI module docs), split into `build` (the source status)
 //! and `out` (the rest). Statuses are `0` (`SM_SUCCESS`) or the `SmStatus`; `-1` on the
 //! Rust side for an error upstream cannot produce.
@@ -28,17 +30,20 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use solidcore::geom::axis2_placement::Axis2Placement;
+use solidcore::geom::geom_utility::p2::ContinuityType;
 use solidcore::geom::vector2d::{Point2, Vec2};
 use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
-use solidcore::nurbs::b_spline_surface::BSplineSurface;
+use solidcore::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
+use solidcore::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
+use solidcore::nurbs::knots::Side;
 use solidcore::nurbs::math::{CPoint, NOW};
 use solidcore::nurbs::srf_basic::Surface as NurbSurface;
 use solidcore::surface::cone::Cone;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::surf_of_extrusion::p2::{ExtrusionIntersection, IntersectTarget};
 use solidcore::surface::surf_of_extrusion::SurfOfExtrusion;
-use solidcore::surface::surface::Surface;
+use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::topology::database_io::{DatabaseReader, FileType};
 use solidcore_ffi::units::surface_surf_of_extrusion_p2 as ffi;
 
@@ -264,10 +269,64 @@ enum OpIn {
     },
 }
 
+/// An `SmSurface` query on a recognised surface whose NURB is still lazy (`OP_LAZY`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "q", rename_all = "snake_case")]
+enum QueryIn {
+    EvalSimple {
+        uv: [f64; 2],
+        hu: usize,
+        hv: usize,
+        #[serde(default)]
+        u_left: bool,
+        #[serde(default)]
+        v_left: bool,
+    },
+    EvalFirst {
+        uv: [f64; 2],
+        #[serde(default)]
+        u_left: bool,
+        #[serde(default)]
+        v_left: bool,
+    },
+    BBox {
+        dom: [f64; 4],
+        #[serde(default)]
+        expand: bool,
+    },
+    DegenPoint {
+        tol: f64,
+        #[serde(default)]
+        dom: Option<[f64; 4]>,
+    },
+    DegenCurve {
+        ang: f64,
+        #[serde(default)]
+        dom: Option<[f64; 4]>,
+        tol: f64,
+    },
+    Extend {
+        #[serde(default)]
+        dir: Option<u8>,
+        dist: f64,
+        cont: u8,
+    },
+    Planar {
+        tol: f64,
+    },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(untagged)]
 enum Inputs {
-    IsNurb { is_nurb: TestIn, scale: f64 },
+    IsNurb {
+        is_nurb: TestIn,
+        scale: f64,
+        /// Run this query on the recognised surface (its NURB not made) instead of
+        /// making the NURB and reporting the state.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        query: Option<QueryIn>,
+    },
     Op {
         #[serde(flatten)]
         src: SrcIn,
@@ -531,7 +590,11 @@ fn ffi_cone(c: &ConeIn) -> ffi::ConeIn {
 
 fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
     let flat = match i {
-        Inputs::IsNurb { is_nurb, scale } => {
+        Inputs::IsNurb {
+            is_nurb,
+            scale,
+            query,
+        } => {
             let t = ffi::TestSurf {
                 source: match &is_nurb.source {
                     TestSourceIn::Raw { nurb } => ffi::TestSource::Raw(ffi::NurbIn {
@@ -549,7 +612,10 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
                 reparam: is_nurb.reparam,
                 perturb: is_nurb.perturb,
             };
-            ffi::is_nurb(&t, *scale)
+            match query {
+                None => ffi::is_nurb(&t, *scale),
+                Some(q) => ffi::lazy(&t, *scale, &ffi_query(q)),
+            }
         }
         Inputs::Op { src, op } => {
             let op = match &**op {
@@ -601,6 +667,30 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
 }
 
 /// Splits a record into `build` and `out`.
+fn ffi_query(q: &QueryIn) -> ffi::Query {
+    match *q {
+        QueryIn::EvalSimple {
+            uv,
+            hu,
+            hv,
+            u_left,
+            v_left,
+        } => ffi::Query::EvalSimple {
+            uv,
+            hu,
+            hv,
+            u_left,
+            v_left,
+        },
+        QueryIn::EvalFirst { uv, u_left, v_left } => ffi::Query::EvalFirst { uv, u_left, v_left },
+        QueryIn::BBox { dom, expand } => ffi::Query::BBox { dom, expand },
+        QueryIn::DegenPoint { tol, dom } => ffi::Query::DegenPoint { tol, dom },
+        QueryIn::DegenCurve { ang, dom, tol } => ffi::Query::DegenCurve { ang, dom, tol },
+        QueryIn::Extend { dir, dist, cont } => ffi::Query::Extend { dir, dist, cont },
+        QueryIn::Planar { tol } => ffi::Query::Planar { tol },
+    }
+}
+
 fn to_output(flat: &[f64]) -> Result<Output, HarnessError> {
     let (b, rest) = flat
         .split_first()
@@ -944,7 +1034,11 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let k = Kernel::default();
     let mut o = Vec::new();
     match i {
-        Inputs::IsNurb { is_nurb, scale } => match rust_test(&k, is_nurb, &mut o)? {
+        Inputs::IsNurb {
+            is_nurb,
+            scale,
+            query,
+        } => match rust_test(&k, is_nurb, &mut o)? {
             Err(Stop::Deferred(d)) => return Ok(*d),
             Err(Stop::Status(_)) => return Err(harness("unexpected status stop")),
             Ok(None) => {}
@@ -954,6 +1048,12 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                         // whether the NURB was made, then the state with it made
                         let had = s.base().gw_nurb().is_some();
                         o.extend([0.0, 1.0, flag(had)]);
+                        if let Some(q) = query {
+                            if let Err(d) = rust_query(&k, &Surface::from(s), q, &mut o) {
+                                return Ok(*d);
+                            }
+                            return to_output(&o);
+                        }
                         let made = if had { Ok(()) } else { s.make_nurb(&k) };
                         match made {
                             Ok(()) => {
@@ -993,6 +1093,161 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         },
     }
     to_output(&o)
+}
+
+/// A query's status and outputs (layouts in the FFI docs); `Err` with the (boxed) deferred output
+/// for an unported callee.
+fn rust_query(k: &Kernel, s: &Surface, q: &QueryIn, o: &mut Vec<f64>) -> Result<(), Box<Output>> {
+    fn st<T>(o: &mut Vec<f64>, r: solidcore::Result<T>) -> Result<Option<T>, Box<Output>> {
+        match r {
+            Ok(v) => {
+                o.push(0.0);
+                Ok(Some(v))
+            }
+            Err(e) => {
+                if let Some(d) = Output::unported(&e) {
+                    return Err(Box::new(d));
+                }
+                o.push(status(&e));
+                Ok(None)
+            }
+        }
+    }
+    fn truth(o: &mut Vec<f64>, r: solidcore::Result<bool>) -> Result<(), Box<Output>> {
+        match r {
+            Ok(b) => o.push(flag(b)),
+            Err(e) => {
+                if let Some(d) = Output::unported(&e) {
+                    return Err(Box::new(d));
+                }
+                o.push(-1.0);
+            }
+        }
+        Ok(())
+    }
+    let flags = |u_left: bool, v_left: bool| EvaluateFlags {
+        u_side: if u_left { Side::Left } else { Side::Right },
+        v_side: if v_left { Side::Left } else { Side::Right },
+        only_upper_half: false,
+        non_zero_tangents: true,
+    };
+    let opt = |d: Option<[f64; 4]>| d.map(dom4);
+    match *q {
+        QueryIn::EvalSimple {
+            uv,
+            hu,
+            hv,
+            u_left,
+            v_left,
+        } => {
+            let r = s.evaluate_simple(k, Point2::new(uv[0], uv[1]), hu, hv, flags(u_left, v_left));
+            if let Some(m) = st(o, r)? {
+                for row in m {
+                    for v in row {
+                        o.extend([v.x, v.y, v.z]);
+                    }
+                }
+            }
+        }
+        QueryIn::EvalFirst { uv, u_left, v_left } => {
+            let mut d = [[Vec3::new(0.0, 0.0, 0.0); 2]; 2];
+            let r = s.evaluate_simple_first_into(
+                k,
+                Point2::new(uv[0], uv[1]),
+                flags(u_left, v_left),
+                &mut d,
+            );
+            if st(o, r)?.is_some() {
+                for v in d.iter().flatten() {
+                    o.extend([v.x, v.y, v.z]);
+                }
+            }
+        }
+        QueryIn::BBox { dom, expand } => {
+            let r = s.calculate_bounding_box(k, &dom4(dom), [true, false, false], expand);
+            if let Some(b) = st(o, r)? {
+                let b = b.normal_box.unwrap_or_default();
+                for p in [b.min(), b.max()] {
+                    o.extend([p.x, p.y, p.z]);
+                }
+            }
+        }
+        QueryIn::DegenPoint { tol, dom } => {
+            truth(o, s.is_degenerate_point(k, tol, opt(dom).as_ref()))?;
+        }
+        QueryIn::DegenCurve { ang, dom, tol } => {
+            truth(o, s.is_degenerate_curve(k, ang, opt(dom).as_ref(), tol))?;
+        }
+        QueryIn::Extend { dir, dist, cont } => {
+            let cont = continuity_of(cont);
+            let r = match dir {
+                None => s.create_extended_surface(k, dist, cont),
+                Some(d) => match SurfParamType::from_code(u64::from(d)) {
+                    Some(d) => s.create_extended_surface_dir(k, d, dist, cont),
+                    None => Err(solidcore::SolidError::invalid_input(
+                        "difftest",
+                        "parameter type",
+                    )),
+                },
+            };
+            if let Some(e) = st(o, r)? {
+                o.push(e.type_code() as f64);
+                let sur = match e.kind() {
+                    SurfaceKind::BSpline(b) => b.gw_nurb(),
+                    _ => None,
+                };
+                o.push(flag(sur.is_some()));
+                if let Some(sur) = sur {
+                    let ix = sur.indices();
+                    o.extend([ix.p, ix.q, ix.n + 1, ix.m + 1].map(|x| x as f64));
+                    for row in sur.rows() {
+                        for p in row {
+                            o.extend([p.x, p.y, p.z, p.w]);
+                        }
+                    }
+                    o.push(sur.u_knots().len() as f64);
+                    o.extend_from_slice(sur.u_knots());
+                    o.push(sur.v_knots().len() as f64);
+                    o.extend_from_slice(sur.v_knots());
+                }
+            }
+        }
+        QueryIn::Planar { tol } => match s.is_planar(k, tol) {
+            Ok(p) => {
+                o.push(flag(p.is_planar));
+                o.extend([p.point.x, p.point.y, p.point.z]);
+                o.extend([p.normal.x, p.normal.y, p.normal.z, p.deviation]);
+            }
+            Err(e) => {
+                if let Some(d) = Output::unported(&e) {
+                    return Err(Box::new(d));
+                }
+                o.push(-1.0);
+            }
+        },
+    }
+    Ok(())
+}
+
+/// `SmContinuityType` by code (as the `surface.surface_p2` runner).
+fn continuity_of(v: u8) -> ContinuityType {
+    use ContinuityType as C;
+    match v {
+        0 => C::Undefined,
+        1 => C::Discontinuous,
+        2 => C::C0,
+        3 => C::G1,
+        4 => C::G1R,
+        5 => C::G1G2,
+        6 => C::G1G2G3,
+        7 => C::C1,
+        8 => C::C1G2,
+        9 => C::C1G2G3,
+        10 => C::C1C2,
+        11 => C::C1C2G3,
+        12 => C::C1C2C3,
+        _ => C::CInfinity,
+    }
 }
 
 // ---- generation -----------------------------------------------------------------------
@@ -1412,6 +1667,7 @@ fn gen_case(rng: &mut Rng) -> Option<Inputs> {
                 perturb,
             },
             scale: scale_t,
+            query: None,
         });
     }
     let (s, b) = gen_built(rng, &k)?;

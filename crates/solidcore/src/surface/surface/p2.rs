@@ -2661,11 +2661,11 @@ impl Surface {
                 dist,
                 extension_continuity,
             )?)),
-            SurfaceKind::SurfOfExtrusion(s) => Ok(Self::from(s.base().create_extended_surface(
-                k,
-                dist,
-                extension_continuity,
-            )?)),
+            // (`GetOrCreateGwNurbPointer` makes a recognised extrusion's NURB)
+            SurfaceKind::SurfOfExtrusion(s) => Ok(Self::from(
+                s.base_with_nurb(k)?
+                    .create_extended_surface(k, dist, extension_continuity)?,
+            )),
         }
     }
 
@@ -2744,14 +2744,15 @@ impl Surface {
                     extension_continuity,
                 )?))
             }
-            SurfaceKind::SurfOfExtrusion(s) => {
-                Ok(Self::from(s.base().create_extended_surface_dir(
+            // (`GetOrCreateGwNurbPointer` makes a recognised extrusion's NURB)
+            SurfaceKind::SurfOfExtrusion(s) => Ok(Self::from(
+                s.base_with_nurb(k)?.create_extended_surface_dir(
                     k,
                     ext_direction,
                     dist,
                     extension_continuity,
-                )?))
-            }
+                )?,
+            )),
         }
     }
 

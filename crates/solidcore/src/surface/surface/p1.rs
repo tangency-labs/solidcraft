@@ -2520,7 +2520,11 @@ impl Surface {
                 }
             }
             SurfaceKind::SurfOfRevolution(s) => s.base().is_degenerate_point(k, tol_3d, uv_domain),
-            SurfaceKind::SurfOfExtrusion(s) => s.base().is_degenerate_point(k, tol_3d, uv_domain),
+            // (`GetNaturalUVDomain` or the explicit `MakeNurb` make a recognised
+            // extrusion's NURB first)
+            SurfaceKind::SurfOfExtrusion(s) => s
+                .base_with_nurb(k)?
+                .is_degenerate_point(k, tol_3d, uv_domain),
             SurfaceKind::Sphere(s) => s.base().base().is_degenerate_point(k, tol_3d, uv_domain),
             SurfaceKind::Torus(s) => s.base().base().is_degenerate_point(k, tol_3d, uv_domain),
             SurfaceKind::Plane(p) => p.base_for_query().is_degenerate_point(k, tol_3d, uv_domain),
@@ -2554,8 +2558,10 @@ impl Surface {
                 s.base()
                     .is_degenerate_curve(k, angle_tol_deg, uv_domain, opt_3d_tol)
             }
+            // (the base body's `GetNaturalUVDomain` and evaluations make a recognised
+            // extrusion's NURB)
             SurfaceKind::SurfOfExtrusion(s) => {
-                s.base()
+                s.base_with_nurb(k)?
                     .is_degenerate_curve(k, angle_tol_deg, uv_domain, opt_3d_tol)
             }
             SurfaceKind::Sphere(s) => {
