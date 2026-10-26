@@ -187,6 +187,8 @@ pub(super) fn sweep(s: &mut Session, p: &Value) -> Result<Value> {
 
 pub(super) fn find_limits(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "joint.find_limits";
+    // Every search is on a copy: the design is only read.
+    let s: &Session = s;
     let (id, name, kind) = swept_joint(s, p, cmd)?;
     let indices: Vec<usize> = match value_index(p, kind.dofs().len(), cmd)? {
         Some(i) => vec![i],
