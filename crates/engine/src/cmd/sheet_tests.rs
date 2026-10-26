@@ -5373,6 +5373,63 @@ fn flat_exports(s: &mut Session) -> Vec<std::result::Result<Value, String>> {
     calls.iter().map(|(id, p)| s.execute(id, p).map_err(|e| e.to_string())).collect()
 }
 
+/// A sheet metal body mirrored, or patterned, into new bodies makes sheet metal bodies (#3353):
+/// each copy has a flat pattern and a bend table, and a sheet metal feature on a copy rebuilds it
+/// from its moved model where it is. A mirrored copy's model is its source's turned over: the
+/// same blank, bent the other way, its pocket on the other face.
+#[test]
+fn a_mirrored_or_patterned_sheet_body_is_sheet_metal_with_its_flat_pattern() {
+    use solidcraft_geom::Vec3;
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "S", "thickness": "2 mm", "active": true, "bend_radius": "2 mm", "k_factor": 0.4}));
+    base(&mut s, 100.0, 60.0);
+    run(&mut s, "sheet.flange", json!({"edges": [[50, 0, 2]], "height": 20}));
+    rectangle_tool(&mut s, "Pocket", [20.0, 20.0], [30.0, 30.0]);
+    run(&mut s, "solid.extrude", json!({"sketch": "Pocket", "distance": 1, "operation": "cut"}));
+    let source = s.model.state().sheets[0].body.clone();
+    let before = volume(&mut s);
+    let blank = run(&mut s, "sheet.flat_pattern", json!({"body": source}));
+
+    run(&mut s, "solid.mirror", json!({"bodies": [source], "plane": "YZ"}));
+    let copy = s.model.state().bodies[1].name.clone();
+    assert!(rel(volume(&mut s), 2.0 * before) < 1e-9);
+    let mirrored = run(&mut s, "sheet.flat_pattern", json!({"body": copy}));
+    assert_eq!(mirrored["outline"], blank["outline"], "the same blank");
+    assert_eq!(blank["pockets"][0]["side"], "bottom");
+    assert_eq!(mirrored["pockets"][0]["side"], "top", "{mirrored}");
+    assert_eq!((&blank["bends"][0]["direction"], &mirrored["bends"][0]["direction"]), (&json!("up"), &json!("down")), "{mirrored}");
+    run(&mut s, "sheet.export_bend_table", json!({"body": copy}));
+
+    // The copy's model is where its body is: a flange on the copy rebuilds it in place, its
+    // first flange still up on the y = 0 edge and its pocket still from below.
+    run(&mut s, "sheet.flange", json!({"body": copy, "edges": [[-100, 30, 2]], "height": 10}));
+    let state = s.model.state();
+    let body = &state.body(&copy).expect("the copy").body;
+    for (p, inside) in [
+        (Vec3::new(-50.0, 1.0, 15.0), true),
+        (Vec3::new(-50.0, 1.0, -15.0), false),
+        (Vec3::new(-25.0, 25.0, 0.5), false),
+        (Vec3::new(-25.0, 25.0, 1.5), true),
+        (Vec3::new(-99.0, 30.0, 8.0), true),
+        (Vec3::new(-99.0, 30.0, -8.0), false),
+    ] {
+        assert_eq!(body.contains(p), inside, "{p:?}");
+    }
+    drop(state);
+
+    let mut s = Session::default();
+    base(&mut s, 100.0, 60.0);
+    let source = s.model.state().sheets[0].body.clone();
+    run(&mut s, "solid.pattern.rectangular", json!({"bodies": [source], "dir1": [1, 0, 0], "count1": 2, "spacing1": 150}));
+    let state = s.model.state();
+    assert_eq!(state.sheets.len(), state.bodies.len(), "every copy is sheet metal");
+    let names: Vec<String> = state.bodies.iter().map(|b| b.name.clone()).collect();
+    drop(state);
+    for n in names {
+        run(&mut s, "sheet.flat_pattern", json!({"body": n}));
+    }
+}
+
 /// A mirror combined into a sheet, or a tab extruded onto it and joined, makes a part its
 /// flat pattern does not have (the mirrored half, the tab): the flat pattern, the DXF and the
 /// bend table are refused with the feature's name instead of writing the sheet without it.

@@ -579,10 +579,7 @@ pub(super) fn sheet_eval(
             }
             let rr = match radius {
                 Some(e) => val(vals, e, Kind::Length)?,
-                None => {
-                    let rule = st.sheets.get(i).map(|s| s.rule.clone()).unwrap_or_default();
-                    doc.rule_values(vals, &doc.sheet_rule(Some(&rule)))?.bend_radius
-                }
+                None => sheet_rule_values(doc, vals, st, i)?.bend_radius,
             };
             // The corner relief these flanges ask for in place of the rule's.
             let relief = sheet::ReliefOverride {
@@ -693,10 +690,7 @@ pub(super) fn sheet_eval(
             let l = val(vals, length, Kind::Length)?;
             let g = match gap {
                 Some(e) => val(vals, e, Kind::Length)?,
-                None => {
-                    let rule = st.sheets.get(i).map(|s| s.rule.clone()).unwrap_or_default();
-                    doc.rule_values(vals, &doc.sheet_rule(Some(&rule)))?.hem_gap
-                }
+                None => sheet_rule_values(doc, vals, st, i)?.hem_gap,
             };
             let sh = st.sheets.get_mut(i).ok_or_else(|| DocError::Invalid("sheet".into()))?;
             let picks = sheet_picks(sh, f, &crate::plain(edges), warning);
@@ -724,10 +718,7 @@ pub(super) fn sheet_eval(
             let ang = val(vals, angle, Kind::Angle)?;
             let rr = match radius {
                 Some(e) => val(vals, e, Kind::Length)?,
-                None => {
-                    let rule = st.sheets.get(i).map(|s| s.rule.clone()).unwrap_or_default();
-                    doc.rule_values(vals, &doc.sheet_rule(Some(&rule)))?.bend_radius
-                }
+                None => sheet_rule_values(doc, vals, st, i)?.bend_radius,
             };
             // A fixed point that touches no material at all (e.g. far above the sheet) still picks
             // the side it lies on, so a stored fold keeps recomputing; it says so (#371).
@@ -767,7 +758,7 @@ pub(super) fn sheet_eval(
         FeatureKind::SheetConvert { body, face, rule, bends } if !bends.is_empty() => {
             let mb = st.body(body).cloned().ok_or_else(|| DocError::Unknown(format!("body `{body}`")))?;
             let r = doc.sheet_rule(rule.as_deref());
-            let rv = doc.rule_values(vals, &r)?;
+            let values = |t: Option<f64>| doc.rule_values_at(vals, &r, t);
             // The bend edges by name first; a name that is gone keeps its point, with a warning.
             let mut picks = Vec::with_capacity(bends.len());
             for (i, p) in bends.iter().enumerate() {
@@ -788,7 +779,7 @@ pub(super) fn sheet_eval(
             }
             let placement = doc.component_transform(doc.model_body_component(&mb));
             let body_to_world = doc.model_body_offset(&mb).map(|offset| crate::mat_mul(&placement, offset)).unwrap_or(placement);
-            let (mut sh, notes) = sheet::convert_body(&mb, &r.name, &rv, face.0, &picks, &body_to_world)?;
+            let (mut sh, notes) = sheet::convert_body(&mb, &r.name, &values, face.0, &picks, &body_to_world)?;
             for note in notes {
                 append_warning(warning, note);
             }
@@ -839,8 +830,7 @@ pub(super) fn sheet_eval(
                 ));
             }
             let r = doc.sheet_rule(rule.as_deref());
-            let mut rv = doc.rule_values(vals, &r)?;
-            rv.thickness = t;
+            let rv = doc.rule_values_at(vals, &r, Some(t))?;
             let mut sh = sheet::base_flange(body, &r.name, &rv, plane, Region2 { outer: region.outer.clone(), holes: Vec::new() });
             sh.holes = region.holes.iter().map(|h| Region2 { outer: h.ccw(), holes: Vec::new() }).collect();
             let mut work = sheet::FlatWork::new();
@@ -2178,6 +2168,13 @@ fn sheet_picks(sh: &crate::sheet::SheetBody, f: &Feature, edges: &[Vec3], warnin
         *warning = Some(format!("sheet edge(s) {} no longer exist; using the edges at the picked points", gone.join(", ")));
     }
     out
+}
+
+/// The values of sheet `i`'s rule for that sheet: `Thickness` in them is the sheet's own
+/// thickness, which a converted body takes from its walls.
+fn sheet_rule_values(doc: &Document, vals: &BTreeMap<String, Value>, st: &ModelState, i: usize) -> Result<sheet::RuleValues> {
+    let sh = st.sheets.get(i).ok_or_else(|| DocError::Invalid("sheet".into()))?;
+    doc.rule_values_at(vals, &doc.sheet_rule(Some(&sh.rule)), Some(sh.t))
 }
 
 /// Tag the flanges a feature just added (`F<feature>.<k>`).
