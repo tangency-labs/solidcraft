@@ -34,8 +34,10 @@
 //!   `ClassifyLoops` path, the `intersect::topology_solver` (its face silhouettes'
 //!   `CreateCurvesByTrimming`, through `topology::face::p2`'s snapshot entry) and
 //!   `blend::fillet_solver` classifications, `sm_CountContainedSamples`'
-//!   `CalculateAnInternalPoint` in `query::api_queries`, and the boolean, proto-topology,
-//!   `topology::face::p3` and fillet session classifiers.
+//!   `CalculateAnInternalPoint` in `query::api_queries`, the `&self`
+//!   `ProtoBrep::face_curve_on_classify` (proto-topology's coincident-curve
+//!   classifications), `topology::face::p3`'s `FaceBreps::Shared` callers, and the fillet
+//!   session classifiers.
 //! - **Object model.** The face is a record of a [`Brep`]; the functions take the
 //!   B-rep and the face's id. Classification objects are [`EntityRef`]s (the face, edge
 //!   or vertex). `SmFace::PointClassify`'s status is the result: `Ok(())` for

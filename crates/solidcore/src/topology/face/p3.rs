@@ -42,6 +42,11 @@
 //!   `sm_FixUVTrimCurves` of `CreateUVTrimCurves`; [`SolidError::Unported`] always
 //!   propagates. `CreateUVTrimCurves` reads the face domain, the surface poles and the
 //!   natural domain before clearing the surface owner, as upstream.
+//! - **`FaceIntersect`'s classifications.** With lent B-reps ([`FaceBreps::One`] /
+//!   [`FaceBreps::Two`]) both `CurveOnClassify` calls run on the faces' own B-reps
+//!   ([`crate::query::face::p2::curve_on_classify_mut`]), so their lazy edits stay on
+//!   them in upstream order; as queries they keep the kept face caches. A caller that
+//!   shares the B-reps ([`FaceBreps::Shared`]) classifies on a private copy.
 //! - **`ComputeLoopOrientation`** walks with a copy of the face surface; its last-to-first
 //!   span reads `sVeryFirstUV`, which stays at the `SmVector2d` default
 //!   (`SM_UNDEF_DOUBLE`, `SM_UNDEF_DOUBLE`) when no sample point dropped with a guess;
@@ -1819,6 +1824,56 @@ impl ClassGeometryMut<IntersectObject> for IntersectObjectsMut<'_> {
     }
 }
 
+impl qf2::CurveOnClassifyObjects<IntersectObject> for IntersectObjectsMut<'_> {
+    fn face(&self, f: FaceId) -> IntersectObject {
+        self.view().face(f)
+    }
+    fn vertex(&self, v: VertexId) -> IntersectObject {
+        self.view().vertex(v)
+    }
+    fn edge(&self, e: EdgeId) -> IntersectObject {
+        self.view().edge(e)
+    }
+    fn vertexuse(&self, vu: VertexuseId) -> IntersectObject {
+        self.view().vertexuse(vu)
+    }
+    fn edgeuse(&self, eu: EdgeuseId) -> IntersectObject {
+        self.view().edgeuse(eu)
+    }
+    fn edge_curve(&self, e: EdgeId) -> IntersectObject {
+        self.view().edge_curve(e)
+    }
+    fn trim_curve(&self, eu: EdgeuseId) -> IntersectObject {
+        self.view().trim_curve(eu)
+    }
+    fn face_surface(&self, f: FaceId) -> Option<IntersectObject> {
+        self.view().face_surface(f)
+    }
+    fn loop_id(&self, tgt_loop: IntersectObject) -> Option<LoopId> {
+        self.view().loop_id(tgt_loop)
+    }
+}
+
+/// The classified face's B-rep: the other face's for side `true` when it is a
+/// different one, else this face's.
+impl qf2::FaceBrep for IntersectObjectsMut<'_> {
+    fn brep(&self) -> &Brep {
+        match (self.side, self.other.as_deref()) {
+            (true, Some(other)) => other,
+            _ => self.b,
+        }
+    }
+}
+
+impl qf2::CurveOnClassifyBrep<IntersectObject> for IntersectObjectsMut<'_> {
+    fn brep_mut(&mut self) -> &mut Brep {
+        match (self.side, self.other.as_deref_mut()) {
+            (true, Some(other)) => other,
+            _ => &mut *self.b,
+        }
+    }
+}
+
 /// `FaceIntersect`: the curves (and, when asked, points) where face `f` meets
 /// `other`. Coincident surfaces (by `options.coincidence`, else
 /// `SmSurface::CoincidenceCheck` within `approx_tol_3d`) give copies of both faces'
@@ -2094,7 +2149,6 @@ pub fn face_intersect_breps_cached(
         }
     }
     for (ii, curve) in curves_3d.iter().enumerate() {
-        let (b, ob) = shared_breps(this_brep.as_deref(), other_brep.as_deref(), shared)?;
         let curve_type = curve_types
             .get(ii)
             .copied()
@@ -2121,30 +2175,49 @@ pub fn face_intersect_breps_cached(
         let mut cc1 = curve_classification(k, IntersectObject::Curve(ii), &ivl, uv1, zone_tol)?;
         let mut cc2 = curve_classification(k, IntersectObject::Curve(ii), &ivl, uv2, zone_tol)?;
 
-        let objects = IntersectObjects {
-            b,
-            other: ob,
-            side: false,
-            curves_3d: &curves_3d,
-            uv1: &uv_curves1,
-            uv2: &uv_curves2,
-        };
-        let other_objects = IntersectObjects {
-            side: other_side,
-            ..objects
-        };
-        qf2::curve_on_classify(k, b, f, &objects, true, &mut cc1, false, false, true)?;
-        qf2::curve_on_classify(
-            k,
-            ob,
-            other,
-            &other_objects,
-            true,
-            &mut cc2,
-            false,
-            false,
-            true,
-        )?;
+        if let Some(this) = this_brep.as_deref_mut() {
+            // the classifications' lazy face queries (UV trim curves, gap caches,
+            // tolerance growth) edit the faces' own B-reps, as upstream's; they are
+            // queries, so the kept face caches stay
+            let mut objects = IntersectObjectsMut {
+                b: this,
+                other: other_brep.as_deref_mut(),
+                side: false,
+                curves_3d: &curves_3d,
+                uv1: &uv_curves1,
+                uv2: &uv_curves2,
+                edited: false,
+            };
+            qf2::curve_on_classify_mut(k, f, &mut objects, true, &mut cc1, false, false, true)?;
+            objects.side = other_side;
+            qf2::curve_on_classify_mut(k, other, &mut objects, true, &mut cc2, false, false, true)?;
+        } else {
+            let (b, ob) = shared_breps(None, None, shared)?;
+            let objects = IntersectObjects {
+                b,
+                other: ob,
+                side: false,
+                curves_3d: &curves_3d,
+                uv1: &uv_curves1,
+                uv2: &uv_curves2,
+            };
+            let other_objects = IntersectObjects {
+                side: other_side,
+                ..objects
+            };
+            qf2::curve_on_classify(k, b, f, &objects, true, &mut cc1, false, false, true)?;
+            qf2::curve_on_classify(
+                k,
+                ob,
+                other,
+                &other_objects,
+                true,
+                &mut cc2,
+                false,
+                false,
+                true,
+            )?;
+        }
 
         let extract = ExtractOptions {
             uv_curves1: true,
@@ -2176,6 +2249,15 @@ pub fn face_intersect_breps_cached(
             }
             ex?
         } else {
+            let (b, ob) = shared_breps(None, None, shared)?;
+            let objects = IntersectObjects {
+                b,
+                other: ob,
+                side: false,
+                curves_3d: &curves_3d,
+                uv1: &uv_curves1,
+                uv2: &uv_curves2,
+            };
             cc1.extract_geometry(k, &objects, &mut cc2, extract)?
         };
         let found = !ex.curves_3d.is_empty();

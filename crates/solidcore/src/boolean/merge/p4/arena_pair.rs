@@ -12,6 +12,9 @@
 //! face intersections, as upstream keeps them on the surfaces; upstream drops one when
 //! its face is edited, the pair drops a B-rep's caches at any mutable lend of it but
 //! a face intersection or a classification query.
+//! `ProtoBrep::face_curve_on_classify_mut` classifies on the face's B-rep in the pair
+//! (`curve_on_classify_mut`), keeping its lazy edits there; the `&self`
+//! `face_curve_on_classify` still classifies on a private copy for its remaining callers.
 //! No input-dependent recursion is introduced.
 
 use super::notification_keys::NotificationKeys;
@@ -42,7 +45,8 @@ use crate::nurbs::b_spline_curve::p2::BoundingBoxRequest;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::brep::{BrepQuery, FaceCaches};
 use crate::query::face::p2::{
-    curve_on_classify, point_classify, CurveOnClassifyObjects, PointClassifyOptions,
+    curve_on_classify, curve_on_classify_mut, point_classify, CurveOnClassifyBrep,
+    CurveOnClassifyObjects, FaceBrep, PointClassifyOptions,
 };
 use crate::surface::surface::Surface;
 use crate::surface::volume::Volume;
@@ -655,80 +659,141 @@ impl ProtoGeometry<H> for ArenaPair<'_> {
     }
 }
 
-/// The face-side objects of `curve_on_classify` for one B-rep.
-struct Objs<'a, 'b> {
-    two: &'a ArenaPair<'b>,
+/// The face-side objects of `curve_on_classify` for one B-rep: `two` is the pair, shared
+/// (`&ArenaPair`) or lent mutably (`&mut ArenaPair`, for [`curve_on_classify_mut`] on the
+/// face's own B-rep).
+struct Objs<P> {
+    two: P,
     b: i8,
+    /// [`FaceBrep::brep`] / [`CurveOnClassifyBrep::brep_mut`] for a face whose B-rep is
+    /// absent: an empty B-rep, in which the face lookup fails as a dangling id.
+    absent: Brep,
 }
 
-impl ClassGeometry<H> for Objs<'_, '_> {
-    fn curve(&self, o: H) -> Option<&SmCurve> {
-        ClassGeometry::curve(self.two, o)
+impl<'b, P: core::ops::Deref<Target = ArenaPair<'b>>> Objs<P> {
+    fn new(two: P, b: i8) -> Self {
+        Self {
+            two,
+            b,
+            absent: Brep::new(),
+        }
     }
-    fn surface(&self, o: H) -> Option<&Surface> {
-        ClassGeometry::surface(self.two, o)
-    }
-    fn volume(&self, o: H) -> Option<&Volume> {
-        ClassGeometry::volume(self.two, o)
-    }
-    fn point(&self, o: H) -> Option<Point3> {
-        ClassGeometry::point(self.two, o)
-    }
-    // the topology handles are those of the pair, so the classification's topology
-    // members (`SmVertex::GetTolerance`, `SmEdge::GetTolerance`, ...) reach the same
-    // entities through either adapter
-    fn classification_vertex_point(&self, o: H) -> Option<Point3> {
-        self.two.classification_vertex_point(o)
-    }
-    fn topology_zone_tol_3d(&self, o: H) -> Option<f64> {
-        self.two.topology_zone_tol_3d(o)
-    }
-    fn topology_entity(&self, o: H) -> Option<(&Brep, EntityRef)> {
-        self.two.topology_entity(o)
-    }
-    fn topology_handle_in(&self, brep: &Brep, entity: EntityRef) -> Option<H> {
-        self.two.topology_handle_in(brep, entity)
-    }
-    fn brep_id(&self, brep: &Brep) -> Option<BrepId> {
-        self.two.brep_id(brep)
-    }
-    fn owner_entity(&self, owner: ObjectRef) -> Option<(&Brep, EntityRef)> {
-        self.two.owner_entity(owner)
-    }
-    fn owner_of(&self, owner: ObjectRef) -> Option<ObjectRef> {
-        self.two.owner_of(owner)
+    fn slot(&self) -> Option<usize> {
+        usize::try_from(self.b).ok()
     }
 }
 
-impl CurveOnClassifyObjects<H> for Objs<'_, '_> {
-    fn face(&self, f: FaceId) -> H {
-        hd(self.b, K_FACE, f.index())
+/// The shared and the mutably lent form of [`Objs`] read the pair the same way.
+macro_rules! objs_reads {
+    ($t:ty) => {
+        impl ClassGeometry<H> for $t {
+            fn curve(&self, o: H) -> Option<&SmCurve> {
+                ClassGeometry::curve(&*self.two, o)
+            }
+            fn surface(&self, o: H) -> Option<&Surface> {
+                ClassGeometry::surface(&*self.two, o)
+            }
+            fn volume(&self, o: H) -> Option<&Volume> {
+                ClassGeometry::volume(&*self.two, o)
+            }
+            fn point(&self, o: H) -> Option<Point3> {
+                ClassGeometry::point(&*self.two, o)
+            }
+            // the topology handles are those of the pair, so the classification's topology
+            // members (`SmVertex::GetTolerance`, `SmEdge::GetTolerance`, ...) reach the same
+            // entities through either adapter
+            fn classification_vertex_point(&self, o: H) -> Option<Point3> {
+                self.two.classification_vertex_point(o)
+            }
+            fn topology_zone_tol_3d(&self, o: H) -> Option<f64> {
+                self.two.topology_zone_tol_3d(o)
+            }
+            fn topology_entity(&self, o: H) -> Option<(&Brep, EntityRef)> {
+                self.two.topology_entity(o)
+            }
+            fn topology_handle_in(&self, brep: &Brep, entity: EntityRef) -> Option<H> {
+                self.two.topology_handle_in(brep, entity)
+            }
+            fn brep_id(&self, brep: &Brep) -> Option<BrepId> {
+                self.two.brep_id(brep)
+            }
+            fn owner_entity(&self, owner: ObjectRef) -> Option<(&Brep, EntityRef)> {
+                self.two.owner_entity(owner)
+            }
+            fn owner_of(&self, owner: ObjectRef) -> Option<ObjectRef> {
+                self.two.owner_of(owner)
+            }
+        }
+
+        impl CurveOnClassifyObjects<H> for $t {
+            fn face(&self, f: FaceId) -> H {
+                hd(self.b, K_FACE, f.index())
+            }
+            fn vertex(&self, v: VertexId) -> H {
+                hd(self.b, K_VERTEX, v.index())
+            }
+            fn edge(&self, e: EdgeId) -> H {
+                hd(self.b, K_EDGE, e.index())
+            }
+            fn vertexuse(&self, vu: VertexuseId) -> H {
+                hd(self.b, K_VERTEXUSE, vu.index())
+            }
+            fn edgeuse(&self, eu: EdgeuseId) -> H {
+                hd(self.b, K_EDGEUSE, eu.index())
+            }
+            fn edge_curve(&self, e: EdgeId) -> H {
+                hd(self.b, K_EDGE_CURVE, e.index())
+            }
+            fn trim_curve(&self, eu: EdgeuseId) -> H {
+                hd(self.b, K_TRIM_CURVE, eu.index())
+            }
+            fn face_surface(&self, f: FaceId) -> Option<H> {
+                self.two
+                    .face_surface_h(hd(self.b, K_FACE, f.index()))
+                    .flatten()
+            }
+            fn loop_id(&self, tgt_loop: H) -> Option<LoopId> {
+                (tgt_loop.kind == K_LOOP && tgt_loop.b == self.b)
+                    .then(|| LoopId::from_index(tgt_loop.i))
+            }
+        }
+    };
+}
+
+objs_reads!(Objs<&ArenaPair<'_>>);
+objs_reads!(Objs<&mut ArenaPair<'_>>);
+
+/// The classification's lazy face queries edit the face's B-rep in the pair, as a query
+/// (the faces' caches are kept, see `face_caches`).
+impl ClassGeometryMut<H> for Objs<&mut ArenaPair<'_>> {
+    fn curve_mut(&mut self, o: H) -> Option<&mut SmCurve> {
+        ProtoGeometry::curve_mut(&mut *self.two, o)
     }
-    fn vertex(&self, v: VertexId) -> H {
-        hd(self.b, K_VERTEX, v.index())
+    fn topology_entity_mut(&mut self, o: H) -> Option<(&mut Brep, EntityRef)> {
+        self.two.topology_entity_for_query(o)
     }
-    fn edge(&self, e: EdgeId) -> H {
-        hd(self.b, K_EDGE, e.index())
+    fn topology_entity_for_query(&mut self, o: H) -> Option<(&mut Brep, EntityRef)> {
+        self.two.topology_entity_for_query(o)
     }
-    fn vertexuse(&self, vu: VertexuseId) -> H {
-        hd(self.b, K_VERTEXUSE, vu.index())
+}
+
+impl FaceBrep for Objs<&mut ArenaPair<'_>> {
+    fn brep(&self) -> &Brep {
+        match self.slot().and_then(|s| self.two.breps.get(s)?.as_deref()) {
+            Some(b) => b,
+            None => &self.absent,
+        }
     }
-    fn edgeuse(&self, eu: EdgeuseId) -> H {
-        hd(self.b, K_EDGEUSE, eu.index())
-    }
-    fn edge_curve(&self, e: EdgeId) -> H {
-        hd(self.b, K_EDGE_CURVE, e.index())
-    }
-    fn trim_curve(&self, eu: EdgeuseId) -> H {
-        hd(self.b, K_TRIM_CURVE, eu.index())
-    }
-    fn face_surface(&self, f: FaceId) -> Option<H> {
-        self.two
-            .face_surface_h(hd(self.b, K_FACE, f.index()))
-            .flatten()
-    }
-    fn loop_id(&self, tgt_loop: H) -> Option<LoopId> {
-        (tgt_loop.kind == K_LOOP && tgt_loop.b == self.b).then(|| LoopId::from_index(tgt_loop.i))
+}
+
+impl CurveOnClassifyBrep<H> for Objs<&mut ArenaPair<'_>> {
+    fn brep_mut(&mut self) -> &mut Brep {
+        // a query: the faces' caches are kept (see `face_caches`)
+        let slot = usize::try_from(self.b).ok();
+        match slot.and_then(|s| self.two.breps.get_mut(s)?.as_deref_mut()) {
+            Some(b) => b,
+            None => &mut self.absent,
+        }
     }
 }
 
@@ -880,15 +945,36 @@ impl ProtoBrep<H> for ArenaPair<'_> {
         cc: &mut CurveClassification<H>,
     ) -> crate::Result<bool> {
         let b = self.brep_r(face)?;
-        let objs = Objs {
-            two: self,
-            b: face.b,
-        };
+        let objs = Objs::new(self, face.b);
         curve_on_classify(
             k,
             b,
             fid(face),
             &objs,
+            do_point_classify,
+            cc,
+            false,
+            false,
+            true,
+        )
+    }
+
+    /// `SmFace::CurveOnClassify(bDoPointClassify, cc)` on the face's own B-rep in the
+    /// pair: its lazy edits (UV trim curves, gap caches, tolerance growth) stay on it, as
+    /// upstream's on the face's B-rep.
+    fn face_curve_on_classify_mut(
+        &mut self,
+        k: &Kernel,
+        face: H,
+        do_point_classify: bool,
+        cc: &mut CurveClassification<H>,
+    ) -> crate::Result<bool> {
+        self.brep_r(face)?;
+        let mut objs = Objs::new(self, face.b);
+        curve_on_classify_mut(
+            k,
+            fid(face),
+            &mut objs,
             do_point_classify,
             cc,
             false,
