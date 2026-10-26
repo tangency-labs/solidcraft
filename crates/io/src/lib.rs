@@ -441,57 +441,171 @@ pub fn stl_ascii(meshes: &[Mesh], name: &str) -> String {
     s
 }
 
-/// Wavefront OBJ, one object per body. Positions and normals are each written once per
-/// distinct value, so a face's vertices are shared while the normals keep edges between
-/// faces sharp. Names are written as they are (OBJ takes the rest of the line).
+/// A body in an OBJ export: the name it is written with, its mesh and the colour it is shown
+/// in.
+pub struct ObjBody<'a> {
+    /// The body's name, written in the `o` line.
+    pub name: &'a str,
+    /// The body's mesh.
+    pub mesh: &'a Mesh,
+    /// The colour of the body, when the design gives it one. The colours of its faces and its
+    /// transparency are not carried.
+    pub color: Option<[f32; 3]>,
+}
+
+/// The files of an OBJ export: the mesh file and the material library that goes with it.
+pub struct ObjFiles {
+    /// The mesh file.
+    pub obj: String,
+    /// The material library; empty when no body has a colour.
+    pub mtl: String,
+}
+
+/// Wavefront OBJ, one object per body, without materials.
 pub fn obj(meshes: &[(String, Mesh)]) -> String {
-    use std::collections::HashMap;
-    let mut s = String::from("# SolidCraft OBJ export (mm)\n");
-    let (mut vbase, mut nbase) = (1usize, 1usize);
-    for (name, m) in meshes {
-        let name: String = name.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
-        s += &format!("o {name}\n");
-        // `+ 0.0` turns -0 into 0, so both merge.
-        let key = |x: f64, y: f64, z: f64| [x + 0.0, y + 0.0, z + 0.0].map(f64::to_bits);
-        let mut vmap: HashMap<[u64; 3], usize> = HashMap::new();
-        let mut nmap: HashMap<[u64; 3], usize> = HashMap::new();
-        let vi: Vec<usize> = m
-            .positions
-            .iter()
-            .map(|p| {
-                let next = vmap.len();
-                *vmap.entry(key(p.x, p.y, p.z)).or_insert_with(|| {
-                    s += &format!("v {} {} {}\n", p.x, p.y, p.z);
-                    next
-                })
-            })
-            .collect();
-        let ni: Vec<usize> = m
-            .normals
-            .iter()
-            .map(|n| {
-                let next = nmap.len();
-                *nmap.entry(key(n.x, n.y, n.z)).or_insert_with(|| {
-                    s += &format!("vn {} {} {}\n", n.x, n.y, n.z);
-                    next
-                })
-            })
-            .collect();
-        for t in &m.triangles {
-            let (Some(a), Some(b), Some(c)) = (vi.get(t[0] as usize), vi.get(t[1] as usize), vi.get(t[2] as usize)) else { continue };
-            let (a, b, c) = (a + vbase, b + vbase, c + vbase);
-            match (ni.get(t[0] as usize), ni.get(t[1] as usize), ni.get(t[2] as usize)) {
-                (Some(na), Some(nb), Some(nc)) => {
-                    let (na, nb, nc) = (na + nbase, nb + nbase, nc + nbase);
-                    s += &format!("f {a}//{na} {b}//{nb} {c}//{nc}\n");
-                }
-                _ => s += &format!("f {a} {b} {c}\n"),
-            }
-        }
-        vbase += vmap.len();
-        nbase += nmap.len();
+    let bodies: Vec<ObjBody<'_>> = meshes.iter().map(|(name, mesh)| ObjBody { name: name.as_str(), mesh, color: None }).collect();
+    obj_files(&bodies, "").obj
+}
+
+/// Wavefront OBJ with the colours of the bodies: the mesh file and the material library that
+/// goes with it. `mtl_name` is the name the `mtllib` line writes (the library's file name
+/// beside the mesh file); an empty name writes no materials at all, as there is no library to
+/// name.
+///
+/// Only the colour of the body travels: the colours of single faces and the transparency of a
+/// body are left out, as a face colour needs material groups inside one object.
+///
+/// Positions and normals are each written once per distinct value, so a face's vertices are
+/// shared while the normals keep edges between faces sharp. Names are written as they are (OBJ
+/// takes the rest of the line); the material of a body takes its name with the characters a
+/// material name cannot hold replaced by an underscore.
+pub fn obj_files(bodies: &[ObjBody<'_>], mtl_name: &str) -> ObjFiles {
+    let materials = material_names(bodies);
+    let mut obj = String::from("# SolidCraft OBJ export (mm)\n");
+    let mut mtl = String::new();
+    if materials.iter().any(|m| m.is_some()) {
+        obj += &format!("mtllib {mtl_name}\n");
+        mtl = String::from("# SolidCraft material library\n");
     }
-    s
+    let (mut vbase, mut nbase) = (1usize, 1usize);
+    for (i, b) in bodies.iter().enumerate() {
+        let name: String = b.name.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
+        obj += &format!("o {name}\n");
+        if let (Some(material), Some(color)) = (materials.get(i).and_then(|m| m.as_deref()), b.color) {
+            obj += &format!("usemtl {material}\n");
+            mtl += &format!("newmtl {material}\nKd {}\n", kd(color));
+        }
+        let (text, vb, nb) = mesh_text(b.mesh, vbase, nbase);
+        obj += &text;
+        vbase = vb;
+        nbase = nb;
+    }
+    ObjFiles { obj, mtl }
+}
+
+/// The mesh of a body: its vertices and normals, each written once per distinct value, and the
+/// faces that use them. Returns the text and the bases the next body carries on from.
+fn mesh_text(mesh: &Mesh, vbase: usize, nbase: usize) -> (String, usize, usize) {
+    use std::collections::HashMap;
+    let mut s = String::new();
+    // `+ 0.0` turns -0 into 0, so both merge.
+    let key = |x: f64, y: f64, z: f64| [x + 0.0, y + 0.0, z + 0.0].map(f64::to_bits);
+    let mut vmap: HashMap<[u64; 3], usize> = HashMap::new();
+    let mut nmap: HashMap<[u64; 3], usize> = HashMap::new();
+    let vi: Vec<usize> = mesh
+        .positions
+        .iter()
+        .map(|p| {
+            let next = vmap.len();
+            *vmap.entry(key(p.x, p.y, p.z)).or_insert_with(|| {
+                s += &format!("v {} {} {}\n", p.x, p.y, p.z);
+                next
+            })
+        })
+        .collect();
+    let ni: Vec<usize> = mesh
+        .normals
+        .iter()
+        .map(|n| {
+            let next = nmap.len();
+            *nmap.entry(key(n.x, n.y, n.z)).or_insert_with(|| {
+                s += &format!("vn {} {} {}\n", n.x, n.y, n.z);
+                next
+            })
+        })
+        .collect();
+    for t in &mesh.triangles {
+        let (Some(a), Some(b), Some(c)) = (vi.get(t[0] as usize), vi.get(t[1] as usize), vi.get(t[2] as usize)) else { continue };
+        let (a, b, c) = (a + vbase, b + vbase, c + vbase);
+        match (ni.get(t[0] as usize), ni.get(t[1] as usize), ni.get(t[2] as usize)) {
+            (Some(na), Some(nb), Some(nc)) => {
+                let (na, nb, nc) = (na + nbase, nb + nbase, nc + nbase);
+                s += &format!("f {a}//{na} {b}//{nb} {c}//{nc}\n");
+            }
+            _ => s += &format!("f {a} {b} {c}\n"),
+        }
+    }
+    (s, vbase + vmap.len(), nbase + nmap.len())
+}
+
+/// The material of each body: its name, safe to write in a material library and unique among
+/// the bodies. A body without a colour has no material.
+fn material_names(bodies: &[ObjBody<'_>]) -> Vec<Option<String>> {
+    let mut taken: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut out: Vec<Option<String>> = Vec::with_capacity(bodies.len());
+    for b in bodies {
+        if b.color.is_none() {
+            out.push(None);
+            continue;
+        }
+        let base = safe_name(b.name);
+        let base = if base.is_empty() { String::from("body") } else { base };
+        let mut name = base.clone();
+        let mut n = 2;
+        while !taken.insert(name.clone()) {
+            name = format!("{base}_{n}");
+            n += 1;
+        }
+        out.push(Some(name));
+    }
+    out
+}
+
+/// A name a material library can hold: the body's name with every character that is not a
+/// letter, a digit or an underscore replaced by one, and the name cut short when it is longer
+/// than a material name needs to be.
+fn safe_name(name: &str) -> String {
+    name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).take(64).collect()
+}
+
+/// The diffuse colour of a material: three fractions between 0 and 1, as the OBJ convention
+/// writes them.
+fn kd(color: [f32; 3]) -> String {
+    let [r, g, b] = color.map(|v| if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 });
+    format!("{r:.3} {g:.3} {b:.3}")
+}
+
+/// The bodies of a model an export takes (all when `bodies` is empty).
+fn selected<'a>(state: &'a ModelState, bodies: &[String]) -> Result<Vec<&'a solidcraft_doc::ModelBody>> {
+    let sel: Vec<&solidcraft_doc::ModelBody> = state.bodies.iter().filter(|b| bodies.is_empty() || bodies.contains(&b.name)).collect();
+    if sel.is_empty() {
+        return Err(IoError::Empty);
+    }
+    Ok(sel)
+}
+
+/// The OBJ export of the given bodies of a model (all when `bodies` is empty): the mesh file
+/// and the material library beside it, with the colour of each body. `mtl_name` is the name
+/// the `mtllib` line writes (the library's file name beside the mesh file).
+pub fn export_obj(state: &ModelState, bodies: &[String], mtl_name: &str, quality: MeshQuality) -> Result<ObjFiles> {
+    obj_export(&selected(state, bodies)?, mtl_name, quality)
+}
+
+/// The OBJ export of the given bodies: the mesh file and the material library beside it.
+fn obj_export(sel: &[&solidcraft_doc::ModelBody], mtl_name: &str, quality: MeshQuality) -> Result<ObjFiles> {
+    let meshes: Vec<Mesh> = sel.iter().map(|b| export_mesh_at(&b.body, quality)).collect::<Result<_>>()?;
+    let bodies: Vec<ObjBody<'_>> = sel.iter().zip(&meshes).map(|(b, mesh)| ObjBody { name: b.name.as_str(), mesh, color: b.body.color() }).collect();
+    Ok(obj_files(&bodies, mtl_name))
 }
 
 /// Export the given bodies of a model (all when `bodies` is empty) in a format.
@@ -533,6 +647,10 @@ pub fn export_with_metadata(state: &ModelState, bodies: &[String], format: Forma
 }
 
 /// [`export_with_metadata`], meshing STL, OBJ and 3MF at `quality`.
+///
+/// The OBJ export of this function carries no materials: it writes one file, so it names no
+/// material library it could not write. [`export_obj`] returns the mesh file and the material
+/// library with the colours of the bodies.
 pub fn export_with_quality(
     state: &ModelState,
     bodies: &[String],
@@ -541,10 +659,7 @@ pub fn export_with_quality(
     meta: &Metadata,
     quality: MeshQuality,
 ) -> Result<Vec<u8>> {
-    let sel: Vec<&solidcraft_doc::ModelBody> = state.bodies.iter().filter(|b| bodies.is_empty() || bodies.contains(&b.name)).collect();
-    if sel.is_empty() {
-        return Err(IoError::Empty);
-    }
+    let sel = selected(state, bodies)?;
     Ok(match format {
         Format::StlBinary | Format::StlAscii => {
             // Each body welded on its own (as for 3MF), so shared vertices are written identically
@@ -560,6 +675,8 @@ pub fn export_with_quality(
             if format == Format::StlBinary { stl_binary(&meshes, name) } else { stl_ascii(&meshes, name).into_bytes() }
         }
         Format::Obj => {
+            // One file, so no material library: a mesh file that names a library nobody wrote
+            // would come out in the reader's default grey.
             let meshes: Vec<(String, Mesh)> = sel.iter().map(|b| Ok((b.name.clone(), export_mesh_at(&b.body, quality)?))).collect::<Result<_>>()?;
             obj(&meshes).into_bytes()
         }
@@ -849,6 +966,23 @@ mod tests {
         let ids: Vec<usize> =
             o.lines().filter(|l| l.starts_with("f ")).flat_map(|l| l.split([' ', '/']).skip(1)).filter_map(|x| x.parse().ok()).collect();
         assert!(ids.iter().all(|i| (1..=8).contains(i) || (1..=6).contains(i)));
+    }
+
+    /// The OBJ export carries the colours of the bodies: the mesh file names the material
+    /// library beside it and every body with a colour gets a material in it.
+    #[test]
+    fn obj_export_writes_the_colours_of_the_bodies() {
+        let (_, m) = model();
+        let mut st = (*m.state()).clone();
+        st.bodies[0].body = st.bodies[0].body.clone().with_color(Some([208.0 / 255.0, 48.0 / 255.0, 48.0 / 255.0]));
+        let files = export_obj(&st, &[], "part.mtl", MeshQuality::default()).unwrap();
+        assert!(files.obj.contains("\nmtllib part.mtl\n"), "{}", files.obj);
+        assert!(files.obj.contains("\nusemtl Body1\n"), "{}", files.obj);
+        assert!(files.mtl.contains("\nnewmtl Body1\n"), "{}", files.mtl);
+        assert!(files.mtl.contains("Kd 0.816 0.188 0.188"), "{}", files.mtl);
+        // The export that writes one file names no material library it cannot write.
+        let o = String::from_utf8(export(&st, &[], Format::Obj, "part").unwrap()).unwrap();
+        assert!(!o.contains("mtllib"), "{o}");
     }
 
     /// The design properties land in each format's own metadata (#1015): STEP and IGES headers,

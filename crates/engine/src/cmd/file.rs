@@ -48,7 +48,7 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("file.export", "Export", export)
         .icon("export")
         .noundo()
-        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|urdf|json (default from extension; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10); quality?: standard|fine|finest (STL, OBJ and 3MF: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard)"),
+        .params("path; format?: stl|stla|obj|step|3mf|3mf-tagged|urdf|json (default from extension; 3mf-tagged: 3MF whose triangles carry their B-rep face, at full precision, for meshing and analysis tools; docs/formats/3mf-face-tags.md; obj: the colours of the bodies go in a material library (`.mtl`) written next to the mesh file; urdf: the whole assembly as a robot, with STL meshes written next to it; docs/urdf.md); bodies?: [names] (JSON and URDF export the complete design); urdf only: mesh_prefix? (before each mesh file name, e.g. package://robot/meshes/), effort? (default 1000), velocity? (default 10); quality?: standard|fine|finest (STL, OBJ and 3MF: how closely the mesh follows curved faces, a chord tolerance of 2e-4, 5e-5 or 1e-5 of each body's size; default standard)"),
     CommandSpec::new("file.save_mesh", "Save As Mesh", save_mesh)
         .at("INSERT", "FILES")
         .icon("mesh_export")
@@ -559,6 +559,10 @@ fn mesh_quality(p: &Value, cmd: &str) -> Result<solidcraft_io::MeshQuality> {
 }
 
 fn export_to(s: &Session, path: &str, format: Format, bodies: &[String], quality: solidcraft_io::MeshQuality) -> Result<Value> {
+    if format == Format::Obj {
+        // The colours of the bodies go in a material library beside the mesh file.
+        return export_obj(s, path, bodies, quality);
+    }
     let name = std::path::Path::new(path).file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| s.doc.name.clone());
     // A design with components exports as a STEP assembly; otherwise bodies as placed.
     let bytes = if format == Format::Design {
@@ -585,6 +589,32 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let quality = mesh_quality(p, "file.export")?;
     export_to(s, path, format, &string_list(p, "bodies"), quality)
+}
+
+/// The OBJ export: the mesh file and the material library beside it, with the colours of the
+/// bodies. Every path is checked before anything is written; the library goes first and the
+/// mesh file last, so a mesh file never names a library that is not there.
+fn export_obj(s: &Session, path: &str, bodies: &[String], quality: solidcraft_io::MeshQuality) -> Result<Value> {
+    let mtl_path = std::path::Path::new(path).with_extension("mtl");
+    let mtl_name = mtl_path.file_name().map(|x| x.to_string_lossy().to_string()).unwrap_or_else(|| String::from("model.mtl"));
+    let files = solidcraft_io::export_obj(&s.doc.painted(&s.world_state()), bodies, &mtl_name, quality)?;
+    let mut targets: Vec<(String, &[u8])> = Vec::new();
+    if !files.mtl.is_empty() {
+        targets.push((mtl_path.to_string_lossy().to_string(), files.mtl.as_bytes()));
+    }
+    targets.push((path.to_string(), files.obj.as_bytes()));
+    for (t, _) in &targets {
+        solidcraft_io::vfs::check(t).map_err(|e| EngineError::Other(format!("{t}: {e}")))?;
+    }
+    let mut written: Vec<String> = Vec::new();
+    for (t, bytes) in &targets {
+        if let Err(e) = solidcraft_io::vfs::write(t, bytes) {
+            let before = if written.is_empty() { "none".to_string() } else { written.join(", ") };
+            return Err(EngineError::Other(format!("{t}: {e} (this file may be incomplete; written before it: {before})")));
+        }
+        written.push(t.clone());
+    }
+    Ok(json!({"path": path, "bytes": files.obj.len(), "format": format!("{:?}", Format::Obj), "files": written}))
 }
 
 /// The assembly as a URDF and its meshes next to it (docs/urdf.md). Every path is checked before
