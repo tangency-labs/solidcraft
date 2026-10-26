@@ -62,25 +62,31 @@ pub(crate) struct HistoryGroupChip<'a> {
 }
 
 impl HistoryGroupChip<'_> {
-    fn name_width(&self, p: &Painter) -> f32 {
-        if self.name.is_empty() {
+    fn name_width(name: &str, p: &Painter) -> f32 {
+        if name.is_empty() {
             return 0.0;
         }
         let t = Tokens::get();
-        let galley = p.layout_no_wrap(self.name.to_owned(), egui::FontId::proportional(t.font_small), t.text);
+        let galley = p.layout_no_wrap(name.to_owned(), egui::FontId::proportional(t.font_small), t.text);
         galley.size().x.min(NAME_MAX) + t.space_4
     }
 
-    fn count_text(&self, p: &Painter) -> std::sync::Arc<egui::Galley> {
+    fn count_text(name: &str, count: usize, p: &Painter) -> std::sync::Arc<egui::Galley> {
         let t = Tokens::get();
-        let ink = if self.name.is_empty() { t.text } else { t.text_dim };
-        p.layout_no_wrap(self.count.to_string(), egui::FontId::proportional(t.font_small), ink)
+        let ink = if name.is_empty() { t.text } else { t.text_dim };
+        p.layout_no_wrap(count.to_string(), egui::FontId::proportional(t.font_small), ink)
     }
 
     /// The chip's width; its height is that of a feature chip.
     pub fn width(&self, p: &Painter) -> f32 {
+        Self::width_of(p, self.name, self.count)
+    }
+
+    /// The width of a chip showing `name` and `count`.
+    pub fn width_of(p: &Painter, name: &str, count: usize) -> f32 {
         let t = Tokens::get();
-        CHIP_SIDE + t.space_3 + self.name_width(p) + self.count_text(p).size().x + t.space_6 + 1.0 + t.space_3 + GROUP_ARROW_WELL + t.space_4
+        let count = Self::count_text(name, count, p).size().x;
+        CHIP_SIDE + t.space_3 + Self::name_width(name, p) + count + t.space_6 + 1.0 + t.space_3 + GROUP_ARROW_WELL + t.space_4
     }
 
     pub fn size(&self, p: &Painter) -> egui::Vec2 {
@@ -125,9 +131,9 @@ impl HistoryGroupChip<'_> {
             let galley = p.layout_no_wrap(self.name.to_owned(), egui::FontId::proportional(t.font_small), t.text);
             let clip = Rect::from_min_max(pos2(x, rect.top()), pos2(x + NAME_MAX, rect.bottom()));
             p.with_clip_rect(clip.intersect(p.clip_rect())).galley(pos2(x, rect.center().y - galley.size().y / 2.0), galley, t.text);
-            x += self.name_width(&p);
+            x += Self::name_width(self.name, &p);
         }
-        let count = self.count_text(&p);
+        let count = Self::count_text(self.name, self.count, &p);
         p.galley(pos2(x, rect.center().y - count.size().y / 2.0), count, t.text);
         let well = Self::well(rect);
         let rule = well.left() - t.space_3;
