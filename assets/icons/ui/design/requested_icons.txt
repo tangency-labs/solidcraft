@@ -284,3 +284,4 @@ ws_drawing	false
 ws_render	false
 zebra	false
 zoom	false
+ws_manufacture	false

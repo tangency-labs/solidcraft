@@ -65,6 +65,77 @@ pub struct Section {
 /// canonical home.
 const CONFIGURE: &[&str] = &["parameters.change", "config.table", "config.configure"];
 
+const MFG_SETUP: &[&str] = &["manufacture.setup.new"];
+const MFG_MANAGE: &[&str] = &[
+    "manufacture.tools.library",
+    "manufacture.manage.machine_library",
+    "manufacture.manage.post_library",
+    "manufacture.manage.template_library",
+];
+const MFG_2D: &[&str] = &[
+    "manufacture.2d.contour",
+    "manufacture.2d.face",
+    "manufacture.2d.adaptive",
+    "manufacture.2d.pocket",
+    "manufacture.2d.slot",
+    "manufacture.2d.trace",
+    "manufacture.2d.thread",
+    "manufacture.2d.bore",
+    "manufacture.2d.circular",
+    "manufacture.2d.engrave",
+    "manufacture.2d.chamfer",
+];
+const MFG_DRILLING: &[&str] = &["manufacture.drill", "manufacture.hole_recognition"];
+const MFG_3D: &[&str] = &[
+    "manufacture.3d.adaptive",
+    "manufacture.3d.parallel",
+    "manufacture.3d.scallop",
+    "manufacture.3d.steep",
+    "manufacture.3d.contour",
+    "manufacture.3d.flat",
+];
+const MFG_MULTIAXIS: &[&str] = &[
+    "manufacture.multiaxis.swarf",
+    "manufacture.multiaxis.rough",
+    "manufacture.multiaxis.rotary",
+    "manufacture.multiaxis.finish",
+    "manufacture.multiaxis.contour",
+    "manufacture.multiaxis.adv_swarf",
+];
+const MFG_TURNING: &[&str] = &[
+    "manufacture.turning.face",
+    "manufacture.turning.profile",
+    "manufacture.turning.groove",
+    "manufacture.turning.thread",
+    "manufacture.turning.chamfer",
+    "manufacture.turning.part",
+];
+const MFG_PART: &[&str] = &[
+    "manufacture.part_handling.grab",
+    "manufacture.part_handling.bar_pull",
+    "manufacture.part_handling.return",
+    "manufacture.part_handling.tool_call",
+];
+const MFG_PROBE: &[&str] = &[
+    "manufacture.inspection.wcs",
+    "manufacture.inspection.geometry",
+    "manufacture.inspection.surface",
+    "manufacture.inspection.align",
+    "manufacture.inspection.manual",
+    "manufacture.inspection.record",
+];
+const MFG_CUTTING: &[&str] = &["manufacture.fabrication.nest", "manufacture.fabrication.profile"];
+const MFG_ADDITIVE: &[&str] = &["manufacture.additive.toolpath", "manufacture.additive.from_gcode", "manufacture.additive.simulate"];
+const MFG_MODIFY: &[&str] = &[
+    "manufacture.modify.trim",
+    "manufacture.modify.delete_passes",
+    "manufacture.modify.leads_links",
+    "manufacture.modify.replace_tool",
+    "manufacture.modify.move_entry",
+];
+const MFG_POST: &[&str] = &["manufacture.post.process", "manufacture.post.time", "manufacture.post.sheet"];
+
+
 /// Commands that stay for agents, MCP and scripts but are not offered to people: the sketch solves
 /// itself after every edit, so a Solve button (and the search hit for it) only confuses.
 pub const AGENT_ONLY: &[&str] = &["sketch.solve"];
@@ -320,6 +391,38 @@ pub const SECTIONS: &[Section] = &[
             "render.backends",
         ],
     },
+    // Manufacture workspace: process tabs at the top (not Design's MODEL/SURFACE/…).
+    Section { tab: "MILLING", panel: "SETUP", promoted: 1, ids: MFG_SETUP },
+    Section { tab: "MILLING", panel: "MANAGE", promoted: 4, ids: MFG_MANAGE },
+    Section { tab: "MILLING", panel: "2D", promoted: 4, ids: MFG_2D },
+    Section { tab: "MILLING", panel: "DRILLING", promoted: 2, ids: MFG_DRILLING },
+    Section { tab: "MILLING", panel: "3D", promoted: 4, ids: MFG_3D },
+    Section { tab: "MILLING", panel: "MULTI-AXIS", promoted: 4, ids: MFG_MULTIAXIS },
+    Section { tab: "MILLING", panel: "MODIFY", promoted: 4, ids: MFG_MODIFY },
+    Section { tab: "MILLING", panel: "POST", promoted: 3, ids: MFG_POST },
+    Section { tab: "MILLING", panel: "SELECT", promoted: 0, ids: &[] },
+    Section { tab: "TURNING", panel: "SETUP", promoted: 1, ids: MFG_SETUP },
+    Section { tab: "TURNING", panel: "MANAGE", promoted: 4, ids: MFG_MANAGE },
+    Section { tab: "TURNING", panel: "TURNING", promoted: 4, ids: MFG_TURNING },
+    Section { tab: "TURNING", panel: "PART", promoted: 4, ids: MFG_PART },
+    Section { tab: "TURNING", panel: "MODIFY", promoted: 4, ids: MFG_MODIFY },
+    Section { tab: "TURNING", panel: "POST", promoted: 3, ids: MFG_POST },
+    Section { tab: "TURNING", panel: "SELECT", promoted: 0, ids: &[] },
+    Section { tab: "ADDITIVE", panel: "SETUP", promoted: 1, ids: MFG_SETUP },
+    Section { tab: "ADDITIVE", panel: "MANAGE", promoted: 4, ids: MFG_MANAGE },
+    Section { tab: "ADDITIVE", panel: "ADDITIVE", promoted: 3, ids: MFG_ADDITIVE },
+    Section { tab: "ADDITIVE", panel: "POST", promoted: 3, ids: MFG_POST },
+    Section { tab: "ADDITIVE", panel: "SELECT", promoted: 0, ids: &[] },
+    Section { tab: "INSPECTION", panel: "SETUP", promoted: 1, ids: MFG_SETUP },
+    Section { tab: "INSPECTION", panel: "MANAGE", promoted: 4, ids: MFG_MANAGE },
+    Section { tab: "INSPECTION", panel: "PROBE", promoted: 4, ids: MFG_PROBE },
+    Section { tab: "INSPECTION", panel: "POST", promoted: 3, ids: MFG_POST },
+    Section { tab: "INSPECTION", panel: "SELECT", promoted: 0, ids: &[] },
+    Section { tab: "FABRICATION", panel: "SETUP", promoted: 1, ids: MFG_SETUP },
+    Section { tab: "FABRICATION", panel: "MANAGE", promoted: 4, ids: MFG_MANAGE },
+    Section { tab: "FABRICATION", panel: "CUTTING", promoted: 2, ids: MFG_CUTTING },
+    Section { tab: "FABRICATION", panel: "POST", promoted: 3, ids: MFG_POST },
+    Section { tab: "FABRICATION", panel: "SELECT", promoted: 0, ids: &[] },
 ];
 
 /// Compact source labels for painted big buttons only. Menus, search and tooltips
@@ -362,6 +465,65 @@ pub const RIBBON_LABELS: &[(&str, &str)] = &[
     ("inspect.zebra", "Zebra"),
     ("joint.as_built", "As-Built"),
     ("material.assign", "Material"),
+    ("manufacture.2d.adaptive", "Adaptive"),
+    ("manufacture.2d.bore", "Bore"),
+    ("manufacture.2d.chamfer", "Chamfer"),
+    ("manufacture.2d.circular", "Circular"),
+    ("manufacture.2d.contour", "Contour"),
+    ("manufacture.2d.engrave", "Engrave"),
+    ("manufacture.2d.face", "Face"),
+    ("manufacture.2d.pocket", "Pocket"),
+    ("manufacture.2d.slot", "Slot"),
+    ("manufacture.2d.thread", "Thread"),
+    ("manufacture.2d.trace", "Trace"),
+    ("manufacture.3d.adaptive", "Adaptive"),
+    ("manufacture.3d.contour", "3D Contour"),
+    ("manufacture.3d.flat", "Flat"),
+    ("manufacture.3d.parallel", "Parallel"),
+    ("manufacture.3d.scallop", "Scallop"),
+    ("manufacture.3d.steep", "Steep"),
+    ("manufacture.additive.from_gcode", "From G-code"),
+    ("manufacture.additive.simulate", "Simulate"),
+    ("manufacture.additive.toolpath", "Additive"),
+    ("manufacture.drill", "Drill"),
+    ("manufacture.fabrication.nest", "Nest"),
+    ("manufacture.fabrication.profile", "2D Profile"),
+    ("manufacture.hole_recognition", "Hole Rec."),
+    ("manufacture.inspection.align", "Align"),
+    ("manufacture.inspection.geometry", "Probe Geom"),
+    ("manufacture.inspection.manual", "Manual"),
+    ("manufacture.inspection.record", "Record"),
+    ("manufacture.inspection.surface", "Surface"),
+    ("manufacture.inspection.wcs", "Probe WCS"),
+    ("manufacture.manage.machine_library", "Machines"),
+    ("manufacture.manage.post_library", "Posts"),
+    ("manufacture.manage.template_library", "Templates"),
+    ("manufacture.modify.delete_passes", "Del Passes"),
+    ("manufacture.modify.leads_links", "Leads/Links"),
+    ("manufacture.modify.move_entry", "Move Entry"),
+    ("manufacture.modify.replace_tool", "Replace Tool"),
+    ("manufacture.modify.trim", "Trim"),
+    ("manufacture.multiaxis.adv_swarf", "Adv. Swarf"),
+    ("manufacture.multiaxis.contour", "MA Contour"),
+    ("manufacture.multiaxis.finish", "MA Finish"),
+    ("manufacture.multiaxis.rotary", "Rotary"),
+    ("manufacture.multiaxis.rough", "MA Rough"),
+    ("manufacture.multiaxis.swarf", "Swarf"),
+    ("manufacture.part_handling.bar_pull", "Bar Pull"),
+    ("manufacture.part_handling.grab", "Grab"),
+    ("manufacture.part_handling.return", "Return"),
+    ("manufacture.part_handling.tool_call", "Tool Call"),
+    ("manufacture.post.process", "Post"),
+    ("manufacture.post.sheet", "Setup Sheet"),
+    ("manufacture.post.time", "Cycle Time"),
+    ("manufacture.setup.new", "New Setup"),
+    ("manufacture.tools.library", "Tool Library"),
+    ("manufacture.turning.chamfer", "Chamfer"),
+    ("manufacture.turning.face", "Face"),
+    ("manufacture.turning.groove", "Groove"),
+    ("manufacture.turning.part", "Part"),
+    ("manufacture.turning.profile", "Profile"),
+    ("manufacture.turning.thread", "Thread"),
     ("parameters.change", "Parameters"),
     ("parameters.graph", "Param. Graph"),
     ("parts.fastener", "Fastener"),
@@ -523,6 +685,9 @@ pub fn visible_tabs(app: &crate::SolveApp) -> Vec<&'static str> {
     if crate::render_workspace::active(app) {
         return vec!["RENDER"];
     }
+    if crate::manufacture_workspace::active(app) {
+        return crate::manufacture_workspace::TABS.to_vec();
+    }
     let mut tabs = TABS.to_vec();
     if app.session.active_sketch.is_some() {
         tabs.push("SKETCH");
@@ -537,6 +702,10 @@ pub fn visible_tabs(app: &crate::SolveApp) -> Vec<&'static str> {
 /// remain usable for the rest of that context. Sketch takes precedence over sheet metal.
 pub fn sync_context(app: &mut crate::SolveApp) {
     if crate::render_workspace::active(app) {
+        return;
+    }
+    if crate::manufacture_workspace::active(app) {
+        crate::manufacture_workspace::sync_tab(app);
         return;
     }
     let context = app.session.active_sketch.map(|id| format!("sketch:{id}")).or_else(|| sheet_body(app).map(|body| format!("sheet:{body}")));
@@ -582,6 +751,11 @@ pub fn select_command_tab(app: &mut crate::SolveApp, id: &str) {
         if tab == "RENDER" {
             return;
         } // The Render workspace owns its entry/exit lifecycle.
+        if crate::manufacture_workspace::is_tab(tab) {
+            crate::manufacture_workspace::enter(app);
+            crate::manufacture_workspace::show_tab(app, tab);
+            return;
+        }
         if visible_tabs(app).contains(&tab) {
             app.ui.tab = tab.into();
         }
