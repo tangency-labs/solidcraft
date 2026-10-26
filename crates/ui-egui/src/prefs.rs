@@ -9,7 +9,7 @@ use egui::{Modifiers, Pos2};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use solidcore_record::Vec3;
-pub use solidcraft_engine::doc::display_units::{format_length, length_number, length_precision, unit_scale};
+pub use solidcraft_engine::doc::display_units::{format_length, format_mass, length_number, length_precision, unit_scale};
 use solidcraft_viewport::Camera;
 
 /// The key the apps keep the preferences under in eframe's storage.
@@ -1134,6 +1134,10 @@ preference_settings! {
     /// The most parameters Down arrow lists in an empty expression box (#9246): fewer keeps the
     /// list light in a large design.
     parameter_list_rows: u16 = 50, PAGE_DESIGN;
+    /// The unit masses are shown in (`g`, `kg` or `lb`, #4866) and its decimals, a minimum
+    /// (`display_units::mass_number`).
+    mass_unit: String = "kg".into(), PAGE_DESIGN;
+    mass_decimals: u8 = 2, PAGE_DESIGN;
     /// Up/Down and the wheel over a focused value field step its plain number (`value_step`,
     /// #2320). Off by default: the keys move the text cursor and the wheel scrolls, as before.
     step_values: bool = false, PAGE_DESIGN => check_id("ui.step_values");
@@ -2568,6 +2572,13 @@ pub fn graphics_backend_label(backend: &str) -> String {
         "metal" => "Metal".into(),
         other => other.to_string(),
     }
+}
+
+/// A mass given in grams, in the preferences' mass unit and decimals. A saved unit that isn't a mass unit (or more
+/// than 8 decimals) reads as kilograms at 2 decimals, and a mass that isn't a number as a dash.
+pub fn show_mass(app: &SolveApp, grams: f64) -> String {
+    let p = &app.preferences;
+    format_mass(grams, &p.mass_unit, p.mass_decimals).or_else(|_| format_mass(grams, "kg", 2)).unwrap_or_else(|_| "—".into())
 }
 
 /// The window system choices (`Prefs::window_system`, #3083).
@@ -6640,6 +6651,8 @@ mod tests {
             ("nav_bridge_enabled", json!(true), PAGE_MOUSE3D),
             ("nav_bridge_port", json!(9876), PAGE_MOUSE3D),
             ("space_mouse_speed", json!(2.0), PAGE_MOUSE3D),
+            ("mass_unit", json!("lb"), PAGE_DESIGN),
+            ("mass_decimals", json!(3), PAGE_DESIGN),
             ("nav", json!("blender"), PAGE_NAVIGATION),
             ("look_at_anim", json!(false), PAGE_NAVIGATION),
             ("keep_hover_while_navigating", json!(false), PAGE_NAVIGATION),

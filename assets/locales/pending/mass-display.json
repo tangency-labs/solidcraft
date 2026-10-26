@@ -1,0 +1,9 @@
+{
+  "en": { "ui.mass_unit": "Mass unit", "ui.mass_decimals": "Mass decimals" },
+  "ar": { "ui.mass_unit": "وحدة الكتلة", "ui.mass_decimals": "المنازل العشرية للكتلة" },
+  "de": { "ui.mass_unit": "Masseneinheit", "ui.mass_decimals": "Massen-Dezimalstellen" },
+  "he": { "ui.mass_unit": "יחידת מסה", "ui.mass_decimals": "ספרות עשרוניות במסה" },
+  "ja": { "ui.mass_unit": "質量の単位", "ui.mass_decimals": "質量の小数点以下の桁数" },
+  "vi": { "ui.mass_unit": "Đơn vị khối lượng", "ui.mass_decimals": "Số chữ số thập phân cho khối lượng" },
+  "zh": { "ui.mass_unit": "质量单位", "ui.mass_decimals": "质量小数位" }
+}
