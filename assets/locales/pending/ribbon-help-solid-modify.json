@@ -2,7 +2,7 @@
   "en": {
     "help.appearance.assign": "Gives the selected bodies, faces or components a colour or a material look, without changing their weight. Use it to tell parts apart or to preview a finish.",
     "help.face.delete": "Removes the selected faces and lets the neighbouring faces close the gap, or leaves the gap open as a surface. Use it to take off a rounded edge, a hole or a boss that is in the way.",
-    "help.material.assign": "Sets what the selected bodies are made of, such as steel, aluminium or ABS. Use it so that the mass, weight and centre of mass match the real part.",
+    "help.material.assign": "Sets what the selected bodies are made of, such as steel, aluminium or ABS. Use it so that the mass and weight match the real part.",
     "help.parameters.change": "Opens the table of named values and expressions that drive the dimensions of the design. Use it to change a size in one place and let every feature that uses it follow.",
     "help.solid.align": "Moves the selected bodies so that a point, face or plane on them meets a point, face or plane elsewhere. Use it to place a part against another one without measuring the offset.",
     "help.solid.draft": "Tilts the selected faces by the angle you set, measured from a neutral plane. Use it on moulded or cast parts so that they slide out of the mould.",
@@ -20,7 +20,7 @@
   "fr": {
     "help.appearance.assign": "Donne aux corps, faces ou composants sélectionnés une couleur ou l'aspect d'un matériau, sans changer leur poids. À utiliser pour distinguer des pièces ou prévisualiser une finition.",
     "help.face.delete": "Supprime les faces sélectionnées et laisse les faces voisines refermer le vide, ou laisse le vide ouvert en surface. À utiliser pour retirer un arrondi, un trou ou un bossage qui gêne.",
-    "help.material.assign": "Indique la matière des corps sélectionnés, par exemple acier, aluminium ou ABS. À utiliser pour que la masse, le poids et le centre de gravité correspondent à la pièce réelle.",
+    "help.material.assign": "Indique la matière des corps sélectionnés, par exemple acier, aluminium ou ABS. À utiliser pour que la masse et le poids correspondent à la pièce réelle.",
     "help.parameters.change": "Ouvre le tableau des valeurs nommées et des expressions qui pilotent les cotes de la conception. À utiliser pour changer une dimension à un seul endroit et faire suivre toutes les fonctions qui l'utilisent.",
     "help.solid.align": "Déplace les corps sélectionnés pour qu'un de leurs points, faces ou plans rejoigne un point, une face ou un plan ailleurs. À utiliser pour poser une pièce contre une autre sans mesurer le décalage.",
     "help.solid.draft": "Incline les faces sélectionnées de l'angle indiqué, mesuré depuis un plan neutre. À utiliser sur les pièces moulées ou coulées pour qu'elles sortent du moule.",
@@ -38,7 +38,7 @@
   "ja": {
     "help.appearance.assign": "選択した立体、面、コンポーネントに、重さを変えずに色や材質の見た目を付けます。部品を見分けるときや仕上げを確認するときに使います。",
     "help.face.delete": "選択した面を削除し、隣の面でその穴をふさぎます。穴を開いたまま面として残すこともできます。じゃまな丸み、穴、突起を取り除くときに使います。",
-    "help.material.assign": "選択した立体の材料を、鋼、アルミニウム、ABS などに設定します。質量、重さ、重心を実際の部品に合わせるときに使います。",
+    "help.material.assign": "選択した立体の材料を、鋼、アルミニウム、ABS などに設定します。質量と重さを実際の部品に合わせるときに使います。",
     "help.parameters.change": "デザインの寸法を決める名前付きの値と式の表を開きます。1か所で寸法を変え、それを使うすべてのフィーチャに反映させるときに使います。",
     "help.solid.align": "選択した立体を動かし、その点、面、平面を別の場所の点、面、平面に合わせます。距離を測らずに部品を別の部品に当てて配置するときに使います。",
     "help.solid.draft": "選択した面を、中立面から測った指定の角度だけ傾けます。成形品や鋳物の部品を型から抜けるようにするときに使います。",
@@ -56,7 +56,7 @@
   "zh": {
     "help.appearance.assign": "为所选的实体、面或组件设置颜色或材质外观，不改变其重量。用于区分零件或预览表面效果。",
     "help.face.delete": "删除所选的面，并由相邻的面封闭留下的缺口，也可以让缺口保持开放、成为曲面。用于去掉碍事的圆角、孔或凸台。",
-    "help.material.assign": "设置所选实体的材料，例如钢、铝或 ABS。用于让质量、重量和重心与实际零件一致。",
+    "help.material.assign": "设置所选实体的材料，例如钢、铝或 ABS。用于让质量和重量与实际零件一致。",
     "help.parameters.change": "打开驱动设计尺寸的命名数值和表达式表。用于在一处修改尺寸，让所有引用它的特征随之更新。",
     "help.solid.align": "移动所选实体，使其上的点、面或平面与别处的点、面或平面对齐。用于把一个零件贴靠到另一个零件上，而无需测量距离。",
     "help.solid.draft": "将所选的面按指定角度倾斜，角度从中性面量起。用于注塑件或铸件，使零件能够脱模。",

@@ -95,11 +95,17 @@ mod tests {
         "canvas.decal",
         "canvas.edit",
         "canvas.insert",
+        "component.break_link",
         "component.capture_position",
         "component.create",
+        "component.from_bodies",
         "component.insert_design",
+        "component.properties",
         "component.revert_position",
+        "component.update_links",
         "config.configure",
+        "config.preview",
+        "config.rules",
         "config.table",
         "construct.axis.edge",
         "construct.axis.normal_to_face",
@@ -120,10 +126,17 @@ mod tests {
         "construct.point.three_planes",
         "construct.point.two_edges",
         "construct.point.vertex",
+        "contact.check",
         "contact.create",
         "contact.disable_all",
+        "contact.edit",
         "contact.enable_all",
         "contact.enable_sets",
+        "contact.list",
+        "document.inspect",
+        "document.units",
+        "edit.checkpoint",
+        "edit.restore_checkpoint",
         "explode.create",
         "file.insert_mesh",
         "file.insert_step",
@@ -132,6 +145,7 @@ mod tests {
         "inspect.accessibility",
         "inspect.center_of_mass",
         "inspect.colored_components",
+        "inspect.compare",
         "inspect.continuity",
         "inspect.curvature_comb",
         "inspect.curvature_map",
@@ -148,23 +162,72 @@ mod tests {
         "joint.create",
         "joint.drive",
         "joint.gear",
+        "joint.limits",
         "joint.motion_link",
         "joint.origin",
         "joint.rack_pinion",
+        "joint.reach",
         "joint.rigid_group",
         "joint.screw",
+        "library.apply",
+        "library.export",
+        "library.inspect",
+        "material.properties.validate",
+        "mesh.convert",
         "motion.study",
         "motion.trace",
+        "occurrence.ground",
+        "parameters.export",
+        "parameters.graph",
+        "parameters.import",
+        "parameters.move",
         "parts.fastener",
+        "parts.insert",
+        "parts.library",
+        "parts.resize",
         "plastic.assign_rule",
         "plastic.boss",
         "plastic.lip",
         "plastic.manage_rules",
         "plastic.rest",
         "plastic.snap_fit",
+        "render.aging.describe",
+        "render.backends",
+        "render.camera.fit",
+        "render.camera.get",
+        "render.cancel",
+        "render.effects.describe",
+        "render.export",
+        "render.hdr.inspect",
+        "render.library.appearance.apply",
+        "render.library.environment.apply",
+        "render.library.physical.prepare",
+        "render.library.studio.apply",
+        "render.library.studio.prepare",
+        "render.library.surface.bind",
+        "render.library.surface.prepare",
+        "render.library.surface.unbind",
+        "render.preflight",
+        "render.preset.apply",
+        "render.preset.resolve",
+        "render.quality.prepare",
+        "render.result.regrade",
         "render.scene",
+        "render.settings.apply",
+        "render.settings.capture_hdr",
+        "render.settings.get",
+        "render.settings.set",
+        "render.shot.duplicate",
+        "render.shot.remove",
+        "render.shot.rename",
+        "render.stage.backdrop",
+        "render.stage.clear",
+        "render.stage.ground",
         "render.start",
+        "render.status",
         "sheet.convert",
+        "sheet.export_bend_table",
+        "sheet.export_dxf",
         "sheet.flange",
         "sheet.flat_pattern",
         "sheet.fold",
@@ -207,8 +270,11 @@ mod tests {
         "sketch.constraint.symmetry",
         "sketch.constraint.tangent",
         "sketch.construction",
+        "sketch.copy",
         "sketch.create",
+        "sketch.cut",
         "sketch.dimension",
+        "sketch.edit",
         "sketch.ellipse",
         "sketch.extend",
         "sketch.fillet",
@@ -216,6 +282,7 @@ mod tests {
         "sketch.finish_auto_constrain",
         "sketch.fit_curves_to_section",
         "sketch.include_3d",
+        "sketch.infinite",
         "sketch.insert_dxf",
         "sketch.insert_svg",
         "sketch.intersect",
@@ -223,12 +290,16 @@ mod tests {
         "sketch.isoparametric_curve",
         "sketch.line",
         "sketch.line.midpoint",
+        "sketch.line3d",
         "sketch.mirror",
         "sketch.move",
+        "sketch.move3d",
         "sketch.offset",
+        "sketch.paste",
         "sketch.pattern.circular",
         "sketch.pattern.rectangular",
         "sketch.point",
+        "sketch.point3d",
         "sketch.polygon.circumscribed",
         "sketch.polygon.edge",
         "sketch.polygon.inscribed",
@@ -247,6 +318,7 @@ mod tests {
         "sketch.spline.control_point",
         "sketch.spline.control_point_5",
         "sketch.spline.fit_point",
+        "sketch.spline3d",
         "sketch.spun_profile",
         "sketch.text",
         "sketch.trim",
@@ -281,29 +353,40 @@ mod tests {
         "surface.trim",
         "surface.unstitch",
         "surface.untrim",
+        "timeline.dependents",
+        "view.apply",
+        "view.delete",
+        "view.list",
+        "view.navigate",
+        "view.rename",
+        "view.save",
     ];
+
+    /// Every command the ribbon offers people, gathered the way the toolbar lays out its panels. A
+    /// planned command only says "not supported yet"; it gets its help when it is built.
+    fn toolbar_commands() -> BTreeSet<&'static str> {
+        let specs = solidcraft_engine::command_specs();
+        let mut ids = BTreeSet::new();
+        for section in crate::workspace::SECTIONS {
+            if let Some((commands, _)) = crate::workspace::layout(section.tab, section.panel, &specs) {
+                ids.extend(commands.iter().filter(|c| c.planned.is_none() && !crate::workspace::AGENT_ONLY.contains(&c.id)).map(|c| c.id));
+            }
+        }
+        ids
+    }
 
     #[test]
     fn every_toolbar_command_has_help_or_is_on_the_backlog() {
-        let mut missing = Vec::new();
-        for c in solidcraft_engine::command_specs() {
-            // A planned command only says "not supported yet"; it gets its help when it is built.
-            if c.tab.is_empty() || c.planned.is_some() || DOCUMENTED.contains(&c.id) || BACKLOG.contains(&c.id) {
-                continue;
-            }
-            missing.push(c.id);
-        }
+        let toolbar = toolbar_commands();
+        let missing: Vec<_> = toolbar.iter().filter(|id| !DOCUMENTED.contains(id) && !BACKLOG.contains(id)).collect();
+        let stale: Vec<_> = BACKLOG.iter().filter(|id| !toolbar.contains(*id) || DOCUMENTED.contains(id)).collect();
         assert!(
-            missing.is_empty(),
+            missing.is_empty() && stale.is_empty(),
             "toolbar commands without help: {missing:?}. Add `help.<id>` (two short sentences: what the tool does, \
-             then when to use it) to a file in assets/locales/pending/ and the id to DOCUMENTED"
+             then when to use it) to a file in assets/locales/pending/ and the id to DOCUMENTED. Take these off the backlog \
+             (documented now, or not on the toolbar): {stale:?}"
         );
         assert!(BACKLOG.is_sorted());
-        for id in BACKLOG {
-            let c = solidcraft_engine::find_command(id).unwrap_or_else(|| panic!("{id} is not a command"));
-            assert!(c.id == *id && !c.tab.is_empty(), "{id} is not on the toolbar: take it off the backlog");
-            assert!(!DOCUMENTED.contains(id), "{id} has help now: take it off the backlog");
-        }
     }
 
     #[test]
