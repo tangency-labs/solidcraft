@@ -1,6 +1,6 @@
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
-use solidcraft_geom::paper::{Group, Item, ObjectKind, Scene};
+use solidcraft_geom::paper::{Dashes, Group, Item, ObjectKind, Scene};
 use solidcraft_geom::{Loop2, Region2, Seg2, Vec2};
 
 use super::*;
@@ -15,7 +15,7 @@ fn line(a: Vec2, b: Vec2) -> Seg2 {
 }
 
 fn stroke(path: Vec<Seg2>, closed: bool, width_mm: f64) -> Item {
-    Item::Stroke { path, closed, width_mm }
+    Item::Stroke { path, closed, width_mm, pattern: None }
 }
 
 /// Anticlockwise from `min`.
@@ -160,4 +160,17 @@ fn the_svg_reader_reads_it_back() {
     assert_eq!(arcs.len(), 1, "{read:?}");
     let (c, a, b) = arcs[0];
     assert!(c.dist(p(50.0, 50.0)) < 3e-6 && a.dist(p(60.0, 50.0)) < 3e-6 && b.dist(p(50.0, 60.0)) < 3e-6, "{:?}", arcs[0]);
+}
+
+/// A dashed stroke carries its pattern in millimetres, its offset only when its phase isn't 0.
+#[test]
+fn a_dashed_stroke_has_its_dasharray_and_offset() {
+    let path = |phase_mm| {
+        let pattern = Some(Dashes { lengths_mm: vec![4.2, 1.05], phase_mm });
+        let scene = sheet(vec![Item::Stroke { path: vec![line(p(5.0, 10.0), p(105.0, 10.0))], closed: false, width_mm: 1.0, pattern }]);
+        let (text, _) = svg(&scene);
+        text.lines().find(|l| l.starts_with("<path")).unwrap().to_string()
+    };
+    assert_eq!(path(0.0), "<path stroke-width=\"1\" stroke-dasharray=\"4.2 1.05\" d=\"M5 287L105 287\"/>");
+    assert_eq!(path(0.5), "<path stroke-width=\"1\" stroke-dasharray=\"4.2 1.05\" stroke-dashoffset=\"0.5\" d=\"M5 287L105 287\"/>");
 }

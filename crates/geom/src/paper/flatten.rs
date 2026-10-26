@@ -78,7 +78,7 @@ mod tests {
             groups: vec![Group {
                 object: 1,
                 kind: ObjectKind::DrawingBorder,
-                items: vec![Item::Stroke { path: vec![seg], closed: false, width_mm: 0.35 }],
+                items: vec![Item::Stroke { path: vec![seg], closed: false, width_mm: 0.35, pattern: None }],
             }],
         };
         let on = scene.prepare().unwrap().on_grid(Grid::NANOMETRE).unwrap();

@@ -7,7 +7,8 @@
 //!   (SVG's `Z`, PDF's `h`).
 //! - A piece ending within [`SLIVER_STEPS`] of where the path is merges into the next, and is
 //!   counted. A path's last piece has no next, so it is kept unless it has no length.
-//! - A width under half a step is one step, and is counted.
+//! - A width, dash or gap under half a step is one step, and is counted. A dash pattern's phase is
+//!   taken within the pattern's length on the grid.
 //! - Circular arcs come in pieces of at most a quarter turn ([`arc_pieces`]). Ellipses, hyperbolas
 //!   and Béziers above degree 3 aren't walked yet (A3b): a scene with one is refused.
 
@@ -102,10 +103,18 @@ pub struct GridPath {
 /// An item on the grid.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GridItem {
-    /// A stroke `width` steps wide, at least one.
-    Stroke { width: i64, path: GridPath },
+    /// A stroke `width` steps wide, at least one, dashed when it has `dashes`.
+    Stroke { width: i64, path: GridPath, dashes: Option<GridDashes> },
     /// A fill's loops, each closed.
     Fill { loops: Vec<GridPath> },
+}
+
+/// A dash pattern on the grid: dash and gap lengths in turn, each at least one step, and the
+/// phase, from 0 up to the pattern's length.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GridDashes {
+    pub lengths: Vec<i64>,
+    pub phase: i64,
 }
 
 /// A group's items on the grid, in paint order.
@@ -123,6 +132,8 @@ pub struct GridReport {
     pub widths_snapped: usize,
     /// Pieces too short for the grid, merged into the next.
     pub pieces_merged: usize,
+    /// Dashes and gaps under half a step, made one step.
+    pub dashes_snapped: usize,
 }
 
 /// A scene on a grid: the sheet's size, its groups in paint order, and the report.
@@ -142,14 +153,22 @@ impl Prepared<'_> {
             let mut items = Vec::with_capacity(group.items.len());
             for item in &group.items {
                 match item {
-                    Item::Stroke { path, closed, width_mm } => {
+                    Item::Stroke { path, closed, width_mm, pattern } => {
                         let Some(path) = walk(grid, path, *closed, &mut report)? else { continue };
-                        let mut width = grid.steps(*width_mm)?;
-                        if width == 0 {
-                            width = 1;
-                            report.widths_snapped += 1;
-                        }
-                        items.push(GridItem::Stroke { width, path });
+                        let width = at_least_one(grid.steps(*width_mm)?, &mut report.widths_snapped);
+                        let dashes = match pattern {
+                            Some(d) => {
+                                let mut lengths = Vec::with_capacity(d.lengths_mm.len());
+                                for l in &d.lengths_mm {
+                                    lengths.push(at_least_one(grid.steps(*l)?, &mut report.dashes_snapped));
+                                }
+                                // Rounded on its own, the phase can reach the rounded pattern's length.
+                                let phase = grid.steps(d.phase_mm)? % lengths.iter().sum::<i64>();
+                                Some(GridDashes { lengths, phase })
+                            }
+                            None => None,
+                        };
+                        items.push(GridItem::Stroke { width, path, dashes });
                     }
                     Item::Fill { region } => {
                         let mut loops = Vec::new();
@@ -164,6 +183,15 @@ impl Prepared<'_> {
         }
         Ok(OnGrid { size: grid.point(self.size_mm())?, groups, report })
     }
+}
+
+/// `steps`, or one step when it rounds to none, counted in `snapped`.
+fn at_least_one(steps: i64, snapped: &mut usize) -> i64 {
+    if steps == 0 {
+        *snapped += 1;
+        return 1;
+    }
+    steps
 }
 
 /// `segs` on the grid (`None` when it has no pieces).

@@ -7,6 +7,9 @@
 //! - **Paint** as the scene says: black, strokes with butt caps and miter joins (limit 4), fills
 //!   even-odd. Each line is stroked once, then filled band by band; a line under a pixel wide is
 //!   drawn as tiny-skia's hairline instead, its coverage scaled by its width, so it never vanishes.
+//! - **Dashes:** a dashed line is cut into its dashes along the flattened line (tiny-skia's
+//!   dashing, the pattern scaled to pixels), then stroked like any line; the dashes' points count
+//!   against [`MAX_POINTS`] too.
 //! - **Bands:** the sheet is drawn [`BAND_BYTES`] of pixels at a time, with a row above and below
 //!   that isn't written, and streamed into the file, so an A0 sheet at 2400 dpi (8.9 billion
 //!   pixels) needs no more memory than an A4 one, and the bytes are the same whatever the band.
@@ -15,8 +18,8 @@
 use std::io::Write;
 use std::ops::RangeInclusive;
 
-use solidcraft_geom::paper::{self, Grid, GridItem, GridPath, GridReport, Prepared};
-use tiny_skia::{Color, FillRule, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, Stroke, Transform};
+use solidcraft_geom::paper::{self, Grid, GridDashes, GridItem, GridPath, GridReport, Prepared};
+use tiny_skia::{Color, FillRule, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, Stroke, StrokeDash, Transform};
 
 use crate::{IoError, Result};
 
@@ -81,9 +84,14 @@ fn write(scene: &Prepared, options: PngOptions, out: impl Write, band_bytes: usi
     let mut shapes = Vec::new();
     for item in on.groups.iter().flat_map(|g| &g.items) {
         match item {
-            GridItem::Stroke { width, path } => {
+            GridItem::Stroke { width, path, dashes } => {
                 let mut builder = PathBuilder::new();
                 sheet.trace(&mut builder, path)?;
+                let Some(mut line) = builder.finish() else { continue };
+                if let Some(dashes) = dashes {
+                    let Some(dashed) = sheet.dash(&line, dashes)? else { continue };
+                    line = dashed;
+                }
                 let width = (*width as f64 * px) as f32;
                 let stroke = Stroke {
                     width: if colour == PngColour::BlackWhite { width.max(1.0) } else { width },
@@ -95,9 +103,7 @@ fn write(scene: &Prepared, options: PngOptions, out: impl Write, band_bytes: usi
                 // A line under a pixel wide is drawn as tiny-skia's hairline, its coverage scaled by its
                 // width: its outline would fall between the rows the rasteriser samples and vanish.
                 let thin = colour != PngColour::BlackWhite && width < 1.0;
-                shapes.extend(
-                    builder.finish().and_then(|line| if thin { Some(Shape::Thin(line, stroke)) } else { line.stroke(&stroke, 1.0).map(Shape::Fill) }),
-                );
+                shapes.extend(if thin { Some(Shape::Thin(line, stroke)) } else { line.stroke(&stroke, 1.0).map(Shape::Fill) });
             }
             GridItem::Fill { loops } => {
                 let mut builder = PathBuilder::new();
@@ -200,13 +206,19 @@ struct Sheet {
 }
 
 impl Sheet {
-    /// `path` onto `builder` in pixels, closed when it is.
-    fn trace(&mut self, builder: &mut PathBuilder, path: &GridPath) -> Result<()> {
-        let points = paper::flatten(path, self.tolerance).map_err(|e| IoError::Invalid(e.to_string()))?;
-        self.points += points.len();
+    /// `n` more points, refused past [`MAX_POINTS`] in all.
+    fn count(&mut self, n: usize) -> Result<()> {
+        self.points += n;
         if self.points > MAX_POINTS {
             return Err(IoError::Invalid(format!("the sheet needs over {MAX_POINTS} points at this resolution")));
         }
+        Ok(())
+    }
+
+    /// `path` onto `builder` in pixels, closed when it is.
+    fn trace(&mut self, builder: &mut PathBuilder, path: &GridPath) -> Result<()> {
+        let points = paper::flatten(path, self.tolerance).map_err(|e| IoError::Invalid(e.to_string()))?;
+        self.count(points.len())?;
         let at = |p: solidcraft_geom::Vec2| ((p.x * self.px) as f32, ((self.height - p.y) * self.px) as f32);
         for (i, p) in points.into_iter().enumerate() {
             let (x, y) = at(p);
@@ -216,6 +228,24 @@ impl Sheet {
             builder.close();
         }
         Ok(())
+    }
+
+    /// `line` cut into its dashes, the pattern scaled to pixels, or `None` when all of it falls in
+    /// a gap, which only a line no longer than the pattern can. tiny-skia gives the same answer
+    /// when it gives up past a million dashes, so a longer line without dashes is refused.
+    fn dash(&mut self, line: &Path, dashes: &GridDashes) -> Result<Option<Path>> {
+        let px = |steps: i64| (steps as f64 * self.px) as f32;
+        let pattern = StrokeDash::new(dashes.lengths.iter().map(|l| px(*l)).collect(), px(dashes.phase));
+        if let Some(dashed) = pattern.and_then(|pattern| line.dash(&pattern, 1.0)) {
+            self.count(dashed.len())?;
+            return Ok(Some(dashed));
+        }
+        let points = line.points();
+        let length: f64 = points.iter().zip(points.iter().skip(1)).map(|(a, b)| f64::from(a.distance(*b))).sum();
+        if length <= dashes.lengths.iter().sum::<i64>() as f64 * self.px {
+            return Ok(None);
+        }
+        Err(IoError::Invalid("a dashed line has too many dashes to draw".into()))
     }
 }
 

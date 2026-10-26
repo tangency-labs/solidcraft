@@ -1,6 +1,6 @@
 use std::f64::consts::{FRAC_PI_2, TAU};
 
-use solidcraft_geom::paper::{Group, Item, ObjectKind, Scene};
+use solidcraft_geom::paper::{Dashes, Group, Item, ObjectKind, Scene};
 use solidcraft_geom::{Loop2, Region2, Seg2, Vec2};
 
 use super::*;
@@ -28,7 +28,7 @@ fn small() -> Scene {
     scene(
         p(20.0, 10.0),
         vec![
-            Item::Stroke { path: vec![line(p(2.0, 5.0), p(18.0, 5.0))], closed: false, width_mm: 1.0 },
+            Item::Stroke { path: vec![line(p(2.0, 5.0), p(18.0, 5.0))], closed: false, width_mm: 1.0, pattern: None },
             Item::Fill { region: Region2 { outer: rectangle(p(2.0, 1.0), p(8.0, 4.0)), holes: vec![rectangle(p(4.0, 2.0), p(6.0, 3.0))] } },
         ],
     )
@@ -145,7 +145,8 @@ fn each_colour_has_its_type_ink_and_paper() {
 #[test]
 fn a_hairline_stays_a_pixel_wide_in_black_and_white() {
     // 50.25 rows from the top: between the centres of rows 49 and 50.
-    let hair = scene(p(20.0, 10.0), vec![Item::Stroke { path: vec![line(p(2.0, 4.975), p(18.0, 4.975))], closed: false, width_mm: 0.01 }]);
+    let hair =
+        scene(p(20.0, 10.0), vec![Item::Stroke { path: vec![line(p(2.0, 4.975), p(18.0, 4.975))], closed: false, width_mm: 0.01, pattern: None }]);
     let column = |colour| {
         let image = image(&hair, PngOptions { dpi: 254.0, colour });
         (40..60).map(|y| image.at(100, y)[0]).collect::<Vec<u8>>()
@@ -167,7 +168,7 @@ fn a_hairline_stays_a_pixel_wide_in_black_and_white() {
 #[test]
 fn a_closed_outline_joins_at_its_start() {
     let square = rectangle(p(2.0, 2.0), p(8.0, 8.0)).segs;
-    let outline = scene(p(10.0, 10.0), vec![Item::Stroke { path: square, closed: true, width_mm: 1.0 }]);
+    let outline = scene(p(10.0, 10.0), vec![Item::Stroke { path: square, closed: true, width_mm: 1.0, pattern: None }]);
     let image = image(&outline, AT_254);
     // A quarter of a millimetre outside each corner, inside the 1 mm line's mitred corner.
     for (x, y, what) in [(17, 82, "the start"), (82, 82, "the second corner"), (82, 17, "the third"), (17, 17, "the fourth")] {
@@ -182,7 +183,7 @@ fn a_large_circle_is_round_to_the_pixel() {
     let c = p(50.0, 50.0);
     let circle = scene(
         p(100.0, 100.0),
-        vec![Item::Stroke { path: vec![Seg2::Arc { center: c, radius: 40.0, start: 0.0, sweep: TAU }], closed: true, width_mm: 0.5 }],
+        vec![Item::Stroke { path: vec![Seg2::Arc { center: c, radius: 40.0, start: 0.0, sweep: TAU }], closed: true, width_mm: 0.5, pattern: None }],
     );
     let image = image(&circle, PngOptions { dpi: 600.0, colour: PngColour::Grey });
     let per_mm = 600.0 / 25.4;
@@ -204,6 +205,7 @@ fn bands_change_nothing_and_the_bytes_repeat() {
         path: vec![Seg2::Arc { center: p(14.0, 3.0), radius: 2.5, start: 0.3, sweep: 1.5 * FRAC_PI_2 }],
         closed: false,
         width_mm: 0.35,
+        pattern: None,
     });
     let sheet = scene(p(20.0, 10.0), items);
     let prepared = sheet.prepare().unwrap();
@@ -236,7 +238,12 @@ fn what_cannot_be_drawn_is_refused() {
     }
     let ellipse = scene(
         p(20.0, 10.0),
-        vec![Item::Stroke { path: vec![Seg2::Conic { a: p(0.0, 0.0), apex: p(5.0, 5.0), b: p(10.0, 0.0), w: 0.5 }], closed: false, width_mm: 0.35 }],
+        vec![Item::Stroke {
+            path: vec![Seg2::Conic { a: p(0.0, 0.0), apex: p(5.0, 5.0), b: p(10.0, 0.0), w: 0.5 }],
+            closed: false,
+            width_mm: 0.35,
+            pattern: None,
+        }],
     );
     let e = paper_png(&ellipse.prepare().unwrap(), PngOptions::default(), Vec::new()).unwrap_err();
     assert!(e.to_string().contains("not supported yet"), "{e}");
@@ -247,4 +254,103 @@ fn what_cannot_be_drawn_is_refused() {
     let e =
         paper_png(&scene(p(20.0, 10.0), circles).prepare().unwrap(), PngOptions { dpi: 2400.0, colour: PngColour::Grey }, Vec::new()).unwrap_err();
     assert!(e.to_string().contains("16777216 points"), "{e}");
+}
+
+/// The dark runs along row `y`, as pixel ranges.
+fn runs(image: &Image, y: usize) -> Vec<(usize, usize)> {
+    let mut runs = Vec::new();
+    let mut start = None;
+    for x in 0..=image.info.width as usize {
+        let dark = x < image.info.width as usize && image.at(x, y)[0] < 128;
+        match (dark, start) {
+            (true, None) => start = Some(x),
+            (false, Some(s)) => {
+                runs.push((s, x));
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    runs
+}
+
+/// The dashes, as millimetre ranges along a line of `length`, that SVG draws from a dasharray of
+/// one dash and gap and an offset: what a reader of the SVG's numbers expects.
+fn svg_dashes(dash: f64, gap: f64, offset: f64, length: f64) -> Vec<(f64, f64)> {
+    let mut at = -offset;
+    let mut dashes = Vec::new();
+    while at < length {
+        if at + dash > 0.0 {
+            dashes.push((at.max(0.0), (at + dash).min(length)));
+        }
+        at += dash + gap;
+    }
+    dashes
+}
+
+/// A 100 mm stroke dashed 4.2 and 1.05 mm (ISO 128-2's dashed line at d = 0.35 mm) has 20
+/// dashes, 19 whole and the first 0.25 mm of the 20th, at the SVG's positions to the pixel; the
+/// phase moves them, and one inside a gap starts the line in it. At 508 dpi a millimetre is 20
+/// pixels, and these ends fall between pixels.
+#[test]
+fn a_dashed_line_has_the_svgs_dashes_to_the_pixel() {
+    for (phase_mm, count) in [(0.0, 20), (0.5, 20), (4.5, 19)] {
+        let pattern = Some(Dashes { lengths_mm: vec![4.2, 1.05], phase_mm });
+        let sheet =
+            scene(p(110.0, 20.0), vec![Item::Stroke { path: vec![line(p(5.0, 10.0), p(105.0, 10.0))], closed: false, width_mm: 1.0, pattern }]);
+        let (text, _) = crate::paper::paper_svg(&sheet.prepare().unwrap()).unwrap();
+        let text = String::from_utf8(text).unwrap();
+        let number = |name: &str| text.split(&format!("{name}=\"")).nth(1).map(|t| t.split('"').next().unwrap().to_string());
+        let array: Vec<f64> = number("stroke-dasharray").unwrap().split(' ').map(|n| n.parse().unwrap()).collect();
+        let offset: f64 = number("stroke-dashoffset").map_or(0.0, |n| n.parse().unwrap());
+        let expected: Vec<(usize, usize)> = svg_dashes(array[0], array[1], offset, 100.0)
+            .iter()
+            .map(|(a, b)| (((5.0 + a) * 20.0).round() as usize, ((5.0 + b) * 20.0).round() as usize))
+            .collect();
+        assert_eq!(expected.len(), count, "{phase_mm}");
+        let image = image(&sheet, PngOptions { dpi: 508.0, colour: PngColour::Grey });
+        assert_eq!(runs(&image, 200), expected, "phase {phase_mm}");
+    }
+    let last = svg_dashes(4.2, 1.05, 0.0, 100.0).last().copied().unwrap();
+    assert!((last.1 - last.0 - 0.25).abs() < 1e-9, "{last:?}");
+}
+
+/// A closed square's pattern runs round its corners and joins at its start: 6 mm dashes and 2 mm
+/// gaps round a 10 mm square from its lower-left corner, anticlockwise.
+#[test]
+fn a_closed_strokes_dashes_run_round_its_corners() {
+    let pattern = Some(Dashes { lengths_mm: vec![6.0, 2.0], phase_mm: 0.0 });
+    let square = rectangle(p(5.0, 5.0), p(15.0, 15.0)).segs;
+    let sheet = scene(p(20.0, 20.0), vec![Item::Stroke { path: square, closed: true, width_mm: 0.5, pattern }]);
+    let image = image(&sheet, AT_254);
+    // Pixel centres at (x, y) mm from the lower-left corner.
+    let dark = |x: f64, y: f64| image.at((x * 10.0) as usize, ((20.0 - y) * 10.0) as usize)[0] < 128;
+    // Along the bottom: dash 0-6, gap 6-8, dash 8-14 round the corner to 4 mm up the right side.
+    assert!(dark(8.0, 5.0) && !dark(12.0, 5.0) && dark(14.0, 5.0) && dark(15.0, 7.0));
+    // Gap 14-16 (4-6 mm up), dash 16-22 (6 mm up, round the top corner, 2 mm left).
+    assert!(!dark(15.0, 10.0) && dark(15.0, 13.0) && dark(13.5, 15.0) && !dark(12.0, 15.0));
+    // The last dash, 32-38, ends 2 mm above the start; the gap 38-40 reaches it.
+    assert!(dark(5.0, 12.0) && !dark(5.0, 6.0));
+}
+
+/// A line that falls in a gap draws nothing; one past tiny-skia's million dashes is refused, not
+/// drawn solid or left out; the dashes' points count against the sheet's.
+#[test]
+fn a_line_in_a_gap_draws_nothing_and_too_many_dashes_are_refused() {
+    let mut sheet = Sheet { px: 1.0, height: 0.0, tolerance: 0.125, points: 0 };
+    let line = |length: f32| {
+        let mut builder = PathBuilder::new();
+        builder.move_to(0.0, 0.0);
+        builder.line_to(length, 0.0);
+        builder.finish().unwrap()
+    };
+    let pattern = |lengths: &[i64], phase| GridDashes { lengths: lengths.to_vec(), phase };
+    assert!(sheet.dash(&line(1.0), &pattern(&[1, 10], 2)).unwrap().is_none());
+    assert_eq!(sheet.points, 0);
+    assert!(sheet.dash(&line(1.0), &pattern(&[1, 10], 0)).unwrap().is_some());
+    assert!(sheet.points > 0);
+    let refused = sheet.dash(&line(3e6), &pattern(&[1, 1], 0)).unwrap_err();
+    assert!(refused.to_string().contains("too many dashes"), "{refused}");
+    sheet.points = MAX_POINTS - 3;
+    assert!(sheet.dash(&line(100.0), &pattern(&[1, 1], 0)).unwrap_err().to_string().contains("points"));
 }
