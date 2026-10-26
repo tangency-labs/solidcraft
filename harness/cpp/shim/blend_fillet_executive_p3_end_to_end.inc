@@ -57,9 +57,11 @@ inline void counts(std::vector<double>& out, SmBrep* b) {
 
 // Wire: dimensions XYZ, radius, xsect, continuity, thumbweight, edge count,
 // then owning-list edge indices. This initial fixture constructor is a box.
-SC_EXPORT int32_t sc_blend_fillet_executive_p3_real_solid(
-    const double* input, int64_t n, double* out, int64_t cap, int64_t* out_len) {
+static int32_t fillet_real_solid_run(
+    const double* input, int64_t n, const double* end_radius,
+    double* out, int64_t cap, int64_t* out_len) {
     if (!input || n < 9) return SC_ERR_ARG;
+    if (end_radius && (!std::isfinite(*end_radius) || input[6] != 1.0)) return SC_ERR_ARG;
     for (int64_t i=0; i<n; ++i) if (!std::isfinite(input[i])) return SC_ERR_ARG;
     for (int i=0; i<3; ++i) if (input[i] <= SM_EFF_ZERO) return SC_ERR_ARG;
     // The exclusive power-of-two bound is exact even when ULONG_MAX or
@@ -89,7 +91,9 @@ SC_EXPORT int32_t sc_blend_fillet_executive_p3_real_solid(
             }
         }
     }
-    const auto result=SmApiFilletEdges(body.get(),selected,input[3],ULONG(input[4]),ULONG(input[5]),input[6]);
+    const auto result=end_radius
+        ? SmApiVariableRadiusFillet(body.get(),selected,input[3],*end_radius,ULONG(input[4]),ULONG(input[5]))
+        : SmApiFilletEdges(body.get(),selected,input[3],ULONG(input[4]),ULONG(input[5]),input[6]);
     // Selected pointers may no longer be live; all result traversals are fresh.
     std::vector<double> values; fillet_real_solid::section(values,before);
     values.push_back(fillet_real_solid::status(result));
@@ -109,6 +113,16 @@ SC_EXPORT int32_t sc_blend_fillet_executive_p3_real_solid(
     }
     return sc_copy_out(values.data(),int64_t(values.size()),out,cap,out_len);
     SC_CATCH
+}
+
+SC_EXPORT int32_t sc_blend_fillet_executive_p3_real_solid(
+    const double* input, int64_t n, double* out, int64_t cap, int64_t* out_len) {
+    return fillet_real_solid_run(input,n,nullptr,out,cap,out_len);
+}
+SC_EXPORT int32_t sc_blend_fillet_executive_p3_real_variable_solid(
+    const double* input, int64_t n, double end_radius,
+    double* out, int64_t cap, int64_t* out_len) {
+    return fillet_real_solid_run(input,n,&end_radius,out,cap,out_len);
 }
 
 #include <SmFilletCorner.h>

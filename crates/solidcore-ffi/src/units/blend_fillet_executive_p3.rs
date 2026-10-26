@@ -104,6 +104,15 @@ extern "C" {
         cap: i64,
         len: *mut i64,
     ) -> i32;
+    fn sc_blend_fillet_executive_p3_real_variable_solid(
+        input: *const f64,
+        n: i64,
+        end_radius: f64,
+        out: *mut f64,
+        cap: i64,
+        len: *mut i64,
+    ) -> i32;
+
 }
 
 /// Validate the real-box fixture wire: XYZ dimensions, radius, cross-section,
@@ -152,6 +161,34 @@ pub fn real_solid(input: &[f64]) -> Result<Vec<f64>, FfiError> {
         sc_blend_fillet_executive_p3_real_solid(
             input.as_ptr(),
             input.len() as i64,
+            out.as_mut_ptr(),
+            out.len() as i64,
+            len,
+        )
+    })
+}
+
+/// Validate the unchanged real-box wire and a finite linear-law endpoint.
+/// The variable-radius public API has no thumbweight argument.
+pub fn validate_real_variable_solid(input: &[f64], end_radius: f64) -> Result<(), FfiError> {
+    validate_real_solid(input)?;
+    if !end_radius.is_finite() || input.get(6) != Some(&1.0) {
+        return Err(FfiError::InvalidArgument(
+            "variable radius requires a finite endpoint and default thumbweight".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// Execute the actual public variable-radius API with a linear radius law.
+/// Uses the same complete result record as [`real_solid`].
+pub fn real_variable_solid(input: &[f64], end_radius: f64) -> Result<Vec<f64>, FfiError> {
+    validate_real_variable_solid(input, end_radius)?;
+    call_with_buffer(65536, |out, len| unsafe {
+        sc_blend_fillet_executive_p3_real_variable_solid(
+            input.as_ptr(),
+            input.len() as i64,
+            end_radius,
             out.as_mut_ptr(),
             out.len() as i64,
             len,
@@ -282,6 +319,21 @@ mod real_solid_tests {
     use super::validate_real_solid;
     fn record() -> Vec<f64> {
         vec![10.0, 20.0, 30.0, 0.5, 1.0, 1.0, 1.0, 1.0, 0.0]
+    }
+    #[test]
+    fn variable_endpoint_is_separate_and_complete_wire_still_checked() {
+        let mut value = record();
+        for end in [-2.0, 0.0, 2.0] {
+            assert!(super::validate_real_variable_solid(&value, end).is_ok());
+        }
+        for end in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(super::validate_real_variable_solid(&value, end).is_err());
+        }
+        value[6] = 0.5;
+        assert!(super::validate_real_variable_solid(&value, 2.0).is_err());
+        value[6] = 1.0;
+        value[7] = 2.0;
+        assert!(super::validate_real_variable_solid(&value, 2.0).is_err());
     }
     #[test]
     fn native_cross_section_defaults_and_g3_are_not_guarded_out() {
