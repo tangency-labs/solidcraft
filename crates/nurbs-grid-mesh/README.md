@@ -94,7 +94,10 @@ over u contracted into one row of poles, then a short dot product per point.
      crossings, and becomes two triangles.
    - A cell a loop does touch is cut along it. The loop pieces inside the cell, joined by the
      cell's corners going anticlockwise, are the face's polygons in that cell, and those are
-     ear-clipped.
+     ear-clipped. A point on an ear's edge blocks it, as one inside does. Where an ear would
+     face more than 60 degrees off the surface (a sliver along a boundary curving in space, or a
+     fold against a crossing on its edge's chord), the cell's polygon is triangulated afresh: of
+     all its triangulations, the one whose worst triangle faces best.
    - A hole smaller than one cell gets a grid line put through it.
 4. **The points.** Interior points are the surface's own. Boundary points are the loops' own 3D
    points, with crossings interpolated along each loop's 3D segment. The face ends exactly where
@@ -143,6 +146,14 @@ let d = deviation(&s, &m, 0.05)?;   // measured, not assumed: d.max, d.mean, d.o
   face of the 14.
 - **Boundary chords are the caller's:** boundary vertices lie on the edge polylines, not on the
   surface. Edge polylines need to be within tolerance themselves.
+- **Folds at curved boundaries:** a crossing lies on its edge's 3D chord, off the surface by up
+  to the chord's sag, and where the boundary curves sideways within the surface (a torus's
+  circles, a hole in a cone) that sag points across the boundary. A grid corner closer to the
+  boundary than that leaves the cell's polygon folded in 3D, and no triangulation of it faces
+  out everywhere. Deviation still holds; normals don't. On the 55 STEP Tools AP203 samples
+  (OCCT's B-reps, edges at half the tolerance, 1e-3 of each part's size) 350 of 13,347 faces
+  kept a triangle facing against the surface, from 614 before the cut cells were triangulated
+  in 3D.
 - **Neighbors:** a neighbor meshed with a different grid meets along the same 3D polyline but
   with T-junctions. That's geometrically closed, not topologically.
 - **Seams:** the caller hands in loops already split at a periodic seam, within one parameter

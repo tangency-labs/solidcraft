@@ -437,3 +437,99 @@ fn refuses_bad_input_by_name() {
         Err(MeshError::NoLoops)
     );
 }
+
+/// A quarter torus (major radius 5, minor 2), exact: rational quadratic both ways.
+fn quarter_torus() -> NurbsSurface {
+    let w = 0.5_f64.sqrt();
+    let ring = [([1.0, 0.0], 1.0), ([1.0, 1.0], w), ([0.0, 1.0], 1.0)];
+    let tube = [([7.0, 0.0], 1.0), ([7.0, 2.0], w), ([5.0, 2.0], 1.0)];
+    let mut poles = Vec::new();
+    let mut weights = Vec::new();
+    for &([cx, cy], wu) in &ring {
+        for &([r, z], wv) in &tube {
+            poles.push([cx * r, cy * r, z]);
+            weights.push(wu * wv);
+        }
+    }
+    NurbsSurface::new(2, 2, knots(3, 2), knots(3, 2), 3, 3, poles, Some(&weights)).unwrap()
+}
+
+/// Triangles whose normal points against the surface normal at their (u, v) centroid.
+fn facing_against(s: &NurbsSurface, m: &TrimmedMesh) -> usize {
+    let cross = |a: [f64; 3], b: [f64; 3]| {
+        [
+            a[1] * b[2] - a[2] * b[1],
+            a[2] * b[0] - a[0] * b[2],
+            a[0] * b[1] - a[1] * b[0],
+        ]
+    };
+    let sub = |a: [f64; 3], b: [f64; 3]| [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+    m.triangles
+        .iter()
+        .filter(|t| {
+            let [a, b, c] = t.map(|i| i as usize);
+            let n = cross(
+                sub(m.positions[b], m.positions[a]),
+                sub(m.positions[c], m.positions[a]),
+            );
+            let u = (m.uvs[a][0] + m.uvs[b][0] + m.uvs[c][0]) / 3.0;
+            let v = (m.uvs[a][1] + m.uvs[b][1] + m.uvs[c][1]) / 3.0;
+            let sp = s.evaluate(u, v).unwrap();
+            let ns = cross(sp.du, sp.dv);
+            n[0] * ns[0] + n[1] * ns[1] + n[2] * ns[2] < 0.0
+        })
+        .count()
+}
+
+#[test]
+fn a_reflex_corner_on_an_ears_edge_is_not_cut_across() {
+    // An L whose reflex corner sits straight above a vertex of the bottom edge, so in the cell
+    // around the corner the corner lies on the edge of a candidate ear. Found on a STEP part's
+    // planar face, where that ear covered a corner of the notch and the triangle left over faced
+    // down.
+    let s = flat_patch();
+    let l = [vec![
+        on(&s, 0.0, 1.0),
+        on(&s, 0.0, 0.0),
+        on(&s, 0.1, 0.0),
+        on(&s, 1.0, 0.0),
+        on(&s, 1.0, 0.09),
+        on(&s, 0.1, 0.09),
+        on(&s, 0.1, 1.0),
+    ]];
+    let m = mesh_trimmed(&s, &l, false, &MeshOptions::new(0.01)).unwrap();
+    let (area, down, over_shared) = facts(&m);
+    let l_area = 100.0 * (0.1 + 0.9 * 0.09);
+    assert!((area - l_area).abs() < 1e-9, "area {area} against {l_area}");
+    assert_eq!(down, 0, "every triangle faces up");
+    assert_eq!(over_shared, 0, "no edge belongs to more than two triangles");
+}
+
+#[test]
+fn a_cut_cell_is_triangulated_facing_the_surface() {
+    // A hole in a torus whose edge polyline stays within half the tolerance of the surface. Its
+    // crossings sit on the polyline's chords, off the surface; clipping the first ear found in
+    // (u, v) left two triangles here facing into the torus, while another triangulation of the
+    // same cells faces out everywhere.
+    let s = quarter_torus();
+    let tol = 0.05;
+    let (cu, cv, r, n) = (0.47, 0.41, 0.35, 24);
+    let hole: Vec<LoopPoint> = (0..n)
+        .map(|k| {
+            let a = -2.0 * PI * f64::from(k) / f64::from(n);
+            on(&s, cu + r * a.cos(), cv + r * a.sin())
+        })
+        .collect();
+    // The domain's edges, 32 chords a side.
+    let side = |k: u32| f64::from(k) / 32.0;
+    let outer: Vec<LoopPoint> = (0..32)
+        .map(|k| on(&s, side(k), 0.0))
+        .chain((0..32).map(|k| on(&s, 1.0, side(k))))
+        .chain((0..32).map(|k| on(&s, 1.0 - side(k), 1.0)))
+        .chain((0..32).map(|k| on(&s, 0.0, 1.0 - side(k))))
+        .collect();
+    let m = mesh_trimmed(&s, &[outer, hole], false, &MeshOptions::new(tol)).unwrap();
+    assert_eq!(facing_against(&s, &m), 0, "every triangle faces out");
+    let d = deviation(&s, &m, tol).unwrap();
+    assert!(d.max <= tol, "max {} against {tol}", d.max);
+}

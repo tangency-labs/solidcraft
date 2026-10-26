@@ -19,7 +19,9 @@
 //!    a grid line. A cell they do not touch is wholly in or wholly out, decided once per row by
 //!    crossings, and becomes two triangles. A cell they do touch is cut along them: the pieces of
 //!    loop inside the cell, joined by the cell's own corners going anticlockwise, are the face's
-//!    polygons in that cell, and those are ear-clipped ([`mesh_trimmed`]).
+//!    polygons in that cell. Those are ear-clipped, and where an ear would face more than 60
+//!    degrees off the surface, triangulated afresh with the best-facing worst triangle
+//!    ([`mesh_trimmed`]).
 //! 4. **Points**: inside, the surface's, evaluated a grid row at a time (basis functions once per
 //!    line, the sum over u contracted into one row of poles, then a short dot product per point);
 //!    on the boundary, the loop's own 3D points, with crossings interpolated along the loop's 3D

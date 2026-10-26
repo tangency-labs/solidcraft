@@ -389,8 +389,10 @@ pub fn mesh_trimmed(
         }
     }
 
-    // Cut cells: chains joined anticlockwise round the cell by its corners, then ear-clipped.
+    // Cut cells: chains joined anticlockwise round the cell by its corners into polygons, which
+    // are triangulated once their corners' points are known.
     let mut poly: Vec<Bp> = Vec::new();
+    let mut cell_polys: Vec<(usize, usize, Vec<Bp>)> = Vec::new();
     for (&key, chains) in &mut cut_cells {
         let (i, j) = (key / n_v, key % n_v);
         let (u0, u1, v0, v1) = (
@@ -477,24 +479,65 @@ pub fn mesh_trimmed(
             if !closed {
                 return Err(MeshError::OpenCell { i, j });
             }
-            ear_clip(&poly, &mut tri);
+            cell_polys.push((i, j, poly.clone()));
         }
     }
 
-    // Grid points are evaluated last, only those used, a row's basis at a time.
-    let grid_id = &verts.grid_id;
-    let pos = &mut verts.pos;
-    eval_rows(
-        s,
-        &u_lines,
-        &v_lines,
-        |i, j| grid_id.get(i * n_v + j).is_some_and(|&id| id != NONE),
-        |i, j, p| {
-            let id = *grid_id.get(i * n_v + j).ok_or(MeshError::Internal)?;
-            *pos.get_mut(id as usize).ok_or(MeshError::Internal)? = p;
-            Ok(())
-        },
-    )?;
+    // Grid points are evaluated once all are known, only those used, a row's basis at a time;
+    // with them the corners of every cut cell, whose diagonals give the cell's normal.
+    let cut_corner = |i: usize, j: usize| {
+        let cut = |a: Option<usize>, b: Option<usize>| match (a, b) {
+            (Some(a), Some(b)) if a + 1 < n_u && b + 1 < n_v => {
+                is_cut.get(a * n_v + b).copied().unwrap_or(false)
+            }
+            _ => false,
+        };
+        cut(Some(i), Some(j))
+            || cut(i.checked_sub(1), Some(j))
+            || cut(Some(i), j.checked_sub(1))
+            || cut(i.checked_sub(1), j.checked_sub(1))
+    };
+    let mut corner_pos: BTreeMap<usize, [f64; 3]> = BTreeMap::new();
+    {
+        let grid_id = &verts.grid_id;
+        let pos = &mut verts.pos;
+        eval_rows(
+            s,
+            &u_lines,
+            &v_lines,
+            |i, j| grid_id.get(i * n_v + j).is_some_and(|&id| id != NONE) || cut_corner(i, j),
+            |i, j, p| {
+                let id = *grid_id.get(i * n_v + j).ok_or(MeshError::Internal)?;
+                if id != NONE {
+                    *pos.get_mut(id as usize).ok_or(MeshError::Internal)? = p;
+                }
+                if cut_corner(i, j) {
+                    corner_pos.insert(i * n_v + j, p);
+                }
+                Ok(())
+            },
+        )?;
+    }
+
+    // Cut cells are triangulated in 3D (see `triangulate_cell`).
+    for (i, j, poly) in &cell_polys {
+        let corner = |a: usize, b: usize| corner_pos.get(&(a * n_v + b)).copied();
+        let normal = match (
+            corner(*i, *j),
+            corner(i + 1, *j),
+            corner(i + 1, j + 1),
+            corner(*i, j + 1),
+        ) {
+            (Some(p00), Some(p10), Some(p11), Some(p01)) => cross3(sub(p11, p00), sub(p01, p10)),
+            _ => return Err(MeshError::Internal),
+        };
+        let ring = poly
+            .iter()
+            .map(|p| verts.pos.get(p.id as usize).map(|q| (*p, *q)))
+            .collect::<Option<Vec<_>>>()
+            .ok_or(MeshError::Internal)?;
+        triangulate_cell(&ring, normal, &mut tri);
+    }
 
     // A cell on a collapsed edge (a pole) has two corners at one point, so one of its triangles
     // has no area; so does a fan over a straight run of boundary. Neither covers anything.
@@ -703,25 +746,203 @@ fn cross(a: &Bp, b: &Bp, c: &Bp) -> f64 {
     (b.u - a.u) * (c.v - a.v) - (b.v - a.v) * (c.u - a.u)
 }
 
-/// Triangulate one simple polygon, anticlockwise in (u, v), by ear clipping.
-fn ear_clip(poly: &[Bp], tri: &mut impl FnMut(u32, u32, u32)) {
+fn cross3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+/// Cells with at most this many polygon points are triangulated by [`best_triangulation`]
+/// (cubic in the count); larger ones by ear clipping alone.
+const BEST_TRIANGULATION_MAX: usize = 40;
+
+/// Triangulate one cell's polygon, anticlockwise in (u, v). Each point carries its 3D
+/// position; `normal` is the surface normal (du x dv) at the cell.
+///
+/// The triangulation is chosen in 3D: the first ear found in (u, v) can be a sliver along a
+/// boundary that curves in space (three boundary points nearly in line in (u, v), whose triangle
+/// lies in the curve's own plane) or a fold against a crossing that sits on its edge's chord, off
+/// the surface. Both face sideways or backwards while another triangulation of the same polygon
+/// faces the way the surface does.
+fn triangulate_cell(
+    poly: &[(Bp, [f64; 3])],
+    normal: [f64; 3],
+    tri: &mut impl FnMut(u32, u32, u32),
+) {
     let Some(last) = poly.len().checked_sub(1) else {
         return;
     };
     // Drop consecutive duplicates; they make zero-area ears that block the scan.
-    let mut ring: Vec<Bp> = poly
+    let ring: Vec<(Bp, [f64; 3])> = poly
         .iter()
         .zip(poly.iter().cycle().skip(last))
-        .filter(|(p, q)| p.id != q.id && (p.u != q.u || p.v != q.v))
+        .filter(|((p, _), (q, _))| p.id != q.id && (p.u != q.u || p.v != q.v))
         .map(|(p, _)| *p)
         .collect();
+    // Ear clipping is kept wherever every triangle it makes faces within 60 degrees of the
+    // surface; the search runs only on the cells where one does not.
+    let mut ears: Vec<[u32; 3]> = Vec::with_capacity(ring.len());
+    let mut worst = f64::INFINITY;
+    let small = ring.len() <= BEST_TRIANGULATION_MAX;
+    ear_clip(ring.clone(), &mut |a, b, c| {
+        ears.push([a.0.id, b.0.id, c.0.id]);
+        worst = worst.min(facing(a.1, b.1, c.1, normal));
+    });
+    if small && worst <= 0.5 {
+        if let Some(tris) = best_triangulation(&ring, normal) {
+            for [a, b, c] in tris {
+                tri(a, b, c);
+            }
+            return;
+        }
+    }
+    for [a, b, c] in ears {
+        tri(a, b, c);
+    }
+}
+
+/// How nearly the 3D triangle `a b c` faces along `normal`: the cosine between them, 0 for a
+/// triangle or normal of no length.
+fn facing(a: [f64; 3], b: [f64; 3], c: [f64; 3], normal: [f64; 3]) -> f64 {
+    let t = cross3(sub(b, a), sub(c, a));
+    let len = norm(t) * norm(normal);
+    if len > 0.0 {
+        (t[0] * normal[0] + t[1] * normal[1] + t[2] * normal[2]) / len
+    } else {
+        0.0
+    }
+}
+
+/// Whether the chord from point `i` to point `j` of the simple anticlockwise polygon `ring` is a
+/// diagonal: it leaves `i` and `j` into the polygon and meets no other point or edge, touching
+/// included.
+fn is_diagonal(ring: &[(Bp, [f64; 3])], i: usize, j: usize) -> Option<bool> {
+    let n = ring.len();
+    let p = |k: usize| ring.get(k % n).map(|(b, _)| *b);
+    let (pi, pj) = (p(i)?, p(j)?);
+    // Into the polygon at both ends (O'Rourke's in-cone test, strict).
+    let in_cone = |k: usize, other: &Bp| -> Option<bool> {
+        let (prev, here, next) = (p(k + n - 1)?, p(k)?, p(k + 1)?);
+        Some(if cross(&prev, &here, &next) >= 0.0 {
+            cross(&here, other, &prev) > 0.0 && cross(other, &here, &next) > 0.0
+        } else {
+            !(cross(&here, other, &next) >= 0.0 && cross(other, &here, &prev) >= 0.0)
+        })
+    };
+    if !(in_cone(i, &pj)? && in_cone(j, &pi)?) {
+        return Some(false);
+    }
+    // No point on the chord and no edge across or touching it.
+    for k in 0..n {
+        let (a, b) = (p(k)?, p(k + 1)?);
+        if k != i && k != j && on_segment(&a, &pi, &pj) {
+            return Some(false);
+        }
+        let ends = [k, (k + 1) % n];
+        if ends.contains(&i) || ends.contains(&j) {
+            continue;
+        }
+        let (d1, d2) = (cross(&pi, &pj, &a), cross(&pi, &pj, &b));
+        let (d3, d4) = (cross(&a, &b, &pi), cross(&a, &b, &pj));
+        let apart = |x: f64, y: f64| (x > 0.0 && y < 0.0) || (x < 0.0 && y > 0.0);
+        if (apart(d1, d2) && apart(d3, d4)) || on_segment(&pi, &a, &b) || on_segment(&pj, &a, &b) {
+            return Some(false);
+        }
+    }
+    Some(true)
+}
+
+/// `p` on the closed segment `a b` (collinear and within its box).
+fn on_segment(p: &Bp, a: &Bp, b: &Bp) -> bool {
+    cross(a, b, p) == 0.0
+        && p.u >= a.u.min(b.u)
+        && p.u <= a.u.max(b.u)
+        && p.v >= a.v.min(b.v)
+        && p.v <= a.v.max(b.v)
+}
+
+/// Of all triangulations of the simple anticlockwise polygon `ring` whose triangles are
+/// positive in (u, v), the one whose worst triangle faces most nearly along `normal` (ties: the
+/// larger total). Cubic in the point count. `None` when there is no such triangulation, or when
+/// `normal` has no length (a pole: nothing to choose by).
+fn best_triangulation(ring: &[(Bp, [f64; 3])], normal: [f64; 3]) -> Option<Vec<[u32; 3]>> {
+    let n = ring.len();
+    if n < 3 || norm(normal) == 0.0 {
+        return None;
+    }
+    // chord[i * n + j], i < j: a polygon edge or a diagonal.
+    let mut chord = vec![false; n * n];
+    for i in 0..n {
+        for j in i + 1..n {
+            let ok = j == i + 1 || (i == 0 && j == n - 1) || is_diagonal(ring, i, j)?;
+            *chord.get_mut(i * n + j)? = ok;
+        }
+    }
+    // best[i * n + j]: (worst facing, total facing, apex) over the polygon i..=j closed by the
+    // chord j-i; an edge (j = i + 1) holds no triangles.
+    let mut best: Vec<Option<(f64, f64, usize)>> = vec![None; n * n];
+    for i in 0..n - 1 {
+        *best.get_mut(i * n + i + 1)? = Some((f64::INFINITY, 0.0, 0));
+    }
+    for gap in 2..n {
+        for i in 0..n - gap {
+            let j = i + gap;
+            if !*chord.get(i * n + j)? {
+                continue;
+            }
+            let (bi, pi) = ring.get(i)?;
+            let (bj, pj) = ring.get(j)?;
+            let mut pick: Option<(f64, f64, usize)> = None;
+            for k in i + 1..j {
+                if !(*chord.get(i * n + k)? && *chord.get(k * n + j)?) {
+                    continue;
+                }
+                let (Some(left), Some(right)) = (*best.get(i * n + k)?, *best.get(k * n + j)?)
+                else {
+                    continue;
+                };
+                let (bk, pk) = ring.get(k)?;
+                if cross(bi, bk, bj) <= 0.0 {
+                    continue;
+                }
+                let f = facing(*pi, *pk, *pj, normal);
+                let worst = left.0.min(right.0).min(f);
+                let total = left.1 + right.1 + f;
+                if pick.is_none_or(|(w, t, _)| worst > w || (worst == w && total > t)) {
+                    pick = Some((worst, total, k));
+                }
+            }
+            *best.get_mut(i * n + j)? = pick;
+        }
+    }
+    // Read the triangles back from the apexes.
+    let mut tris = Vec::with_capacity(n - 2);
+    let mut stack = vec![(0, n - 1)];
+    while let Some((i, j)) = stack.pop() {
+        if j <= i + 1 {
+            continue;
+        }
+        let (_, _, k) = (*best.get(i * n + j)?)?;
+        tris.push([ring.get(i)?.0.id, ring.get(k)?.0.id, ring.get(j)?.0.id]);
+        stack.push((i, k));
+        stack.push((k, j));
+    }
+    (tris.len() == n - 2).then_some(tris)
+}
+
+type Pt = (Bp, [f64; 3]);
+
+/// Ear clipping: the first ear open in (u, v) at each step.
+fn ear_clip(mut ring: Vec<Pt>, tri: &mut impl FnMut(&Pt, &Pt, &Pt)) {
     let mut guard = 0;
     while ring.len() > 3 && guard < 10_000 {
         guard += 1;
         let m = ring.len();
         let mut ear = None;
         for k in 0..m {
-            let (Some(a), Some(b), Some(c)) = (
+            let (Some((a, _)), Some((b, _)), Some((c, _))) = (
                 ring.get((k + m - 1) % m),
                 ring.get(k),
                 ring.get((k + 1) % m),
@@ -731,28 +952,40 @@ fn ear_clip(poly: &[Bp], tri: &mut impl FnMut(u32, u32, u32)) {
             if cross(a, b, c) <= 0.0 {
                 continue;
             }
-            let blocked = ring.iter().enumerate().any(|(n, p)| {
+            // A point on the ear's edges blocks it as well as one inside: a reflex corner lying
+            // on the closing diagonal would otherwise let the ear cut across the outside.
+            let same = |p: &Bp, q: &Bp| p.u == q.u && p.v == q.v;
+            let blocked = ring.iter().enumerate().any(|(n, (p, _))| {
                 n != (k + m - 1) % m
                     && n != k
                     && n != (k + 1) % m
-                    && cross(a, b, p) > 0.0
-                    && cross(b, c, p) > 0.0
-                    && cross(c, a, p) > 0.0
+                    && !same(p, a)
+                    && !same(p, b)
+                    && !same(p, c)
+                    && cross(a, b, p) >= 0.0
+                    && cross(b, c, p) >= 0.0
+                    && cross(c, a, p) >= 0.0
             });
             if !blocked {
-                ear = Some((k, [a.id, b.id, c.id]));
+                ear = Some(k);
                 break;
             }
         }
-        let Some((k, [a, b, c])) = ear else { break };
-        tri(a, b, c);
+        let Some(k) = ear else { break };
+        if let (Some(a), Some(b), Some(c)) = (
+            ring.get((k + m - 1) % m),
+            ring.get(k),
+            ring.get((k + 1) % m),
+        ) {
+            tri(a, b, c);
+        }
         ring.remove(k);
     }
     // What ear clipping could not settle (collinear runs along the cell border) is fanned.
     if let Some((first, rest)) = ring.split_first() {
         for w in rest.windows(2) {
             if let [b, c] = w {
-                tri(first.id, b.id, c.id);
+                tri(first, b, c);
             }
         }
     }
