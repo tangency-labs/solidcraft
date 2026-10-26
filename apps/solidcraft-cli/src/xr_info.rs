@@ -2,31 +2,174 @@
 //!
 //! Phase 0 of the OpenXR integration (#2172): a diagnostic probe that enumerates
 //! the OpenXR runtime, the HMD and its view configuration, and checks Vulkan
-//! instance/device compatibility. Reports graceful errors when nothing is found.
+//! instance/device compatibility. Reports graceful results when nothing is found.
 
 use serde_json::{json, Value};
 
 /// Run `xr-info` and print the diagnostic report as JSON.
-pub fn cmd(args: &[String]) -> Result<(), String> {
-    let _ = args;
-    // Phase 0: skeleton. The probe will call through `openxr` to:
-    //   1. Load the runtime (Entry::linked or Entry::load).
-    //   2. Enumerate API layers and extensions.
-    //   3. Enumerate instances and systems (HMDs).
-    //   4. Query view configuration and swapchain formats.
-    //   5. Check Vulkan instance/device compatibility (get_vulkan_instance/device_extensions
-    //      + get_vulkan_graphics_requirements).
-    //   6. Report each step or a clear, actionable error.
-    println!(
-        "{}",
-        pretty(&json!({
-            "openxr": {
-                "runtime": null,
-                "error": "not implemented yet — Phase 0 of #2172",
-            },
-        }))
-    );
+pub fn cmd(_args: &[String]) -> Result<(), String> {
+    let report = probe()?;
+    println!("{}", pretty(&report));
     Ok(())
+}
+
+/// Probe the OpenXR runtime and build a JSON diagnostic report.
+fn probe() -> Result<Value, String> {
+    // -----------------------------------------------------------------------
+    // 1. Load the OpenXR entry point (bundled Khronos loader).
+    // -----------------------------------------------------------------------
+    let entry = openxr::Entry::linked(&()).map_err(|e| format!("OpenXR loader not available: {e}"))?;
+    let mut report = json!({
+        "openxr": {
+            "runtime": null as Option<Value>,
+            "api_layers": [],
+            "instance_extensions": [],
+        }
+    });
+
+    // -----------------------------------------------------------------------
+    // 2. Enumerate API layers and instance extensions.
+    // -----------------------------------------------------------------------
+    let layers = entry.enumerate_layers().unwrap_or_default();
+    let mut layer_list: Vec<Value> = Vec::new();
+    for l in &layers {
+        layer_list.push(json!({
+            "name": l.layer_name,
+            "description": l.description,
+            "spec_version": format!("{}", l.spec_version),
+            "layer_version": l.layer_version,
+        }));
+    }
+    report["openxr"]["api_layers"] = Value::Array(layer_list);
+
+    let extensions = entry.enumerate_extensions().unwrap_or_default();
+    let ext_names = extensions.names();
+    let mut ext_list: Vec<Value> = Vec::new();
+    for name in &ext_names {
+        ext_list.push(json!({
+            "name": name,
+        }));
+    }
+    report["openxr"]["instance_extensions"] = Value::Array(ext_list);
+
+    // -----------------------------------------------------------------------
+    // 3. Create an instance with a minimal extension set (no graphics API yet).
+    // -----------------------------------------------------------------------
+    let app_info = openxr::ApplicationInfo {
+        application_name: "SolidCraft xr-info",
+        application_version: 1,
+        engine_name: "SolidCraft",
+        engine_version: 1,
+        api_version: openxr::Version::new(1, 0, 0),
+    };
+    let instance = match entry.create_instance(&app_info, &openxr::ExtensionSet::default(), &[], &()) {
+        Ok(inst) => inst,
+        Err(e) => {
+            report["openxr"]["error"] = json!(format!("failed to create instance: {e}"));
+            return Ok(report);
+        }
+    };
+
+    let instance_props = match instance.properties() {
+        Ok(p) => p,
+        Err(e) => {
+            report["openxr"]["error"] = json!(format!("failed to query instance properties: {e}"));
+            return Ok(report);
+        }
+    };
+    report["openxr"]["runtime"] = json!({
+        "runtime_name": instance_props.runtime_name,
+        "runtime_version": format!("{}", instance_props.runtime_version),
+    });
+
+    // -----------------------------------------------------------------------
+    // 4. Enumerate systems (HMDs / VR headsets).
+    // -----------------------------------------------------------------------
+    let system = match instance.system(openxr::FormFactor::HEAD_MOUNTED_DISPLAY) {
+        Ok(sys) => sys,
+        Err(e) => {
+            report["openxr"]["systems"] = json!([
+                {"form_factor": "head_mounted_display", "error": format!("{e}")}
+            ]);
+            return Ok(report);
+        }
+    };
+
+    let system_props = match instance.system_properties(system) {
+        Ok(p) => p,
+        Err(e) => {
+            report["openxr"]["systems"] = json!([
+                {"form_factor": "head_mounted_display", "error": format!("system_properties failed: {e}")}
+            ]);
+            return Ok(report);
+        }
+    };
+    report["openxr"]["systems"] = json!([
+        {
+            "system_id": system_props.system_id,
+            "vendor_id": system_props.vendor_id,
+            "system_name": system_props.system_name,
+            "graphics_properties": {
+                "max_swapchain_image_width": system_props.graphics_properties.max_swapchain_image_width,
+                "max_swapchain_image_height": system_props.graphics_properties.max_swapchain_image_height,
+                "max_layer_count": system_props.graphics_properties.max_layer_count,
+            },
+            "tracking_properties": {
+                "orientation_tracking": system_props.tracking_properties.orientation_tracking,
+                "position_tracking": system_props.tracking_properties.position_tracking,
+            },
+        }
+    ]);
+
+    // -----------------------------------------------------------------------
+    // 5. Query view configurations.
+    // -----------------------------------------------------------------------
+    let view_configs = instance.enumerate_view_configurations(system).unwrap_or_default();
+    let mut vc_list: Vec<Value> = Vec::new();
+    for vc in &view_configs {
+        let vci = match instance.enumerate_view_configuration_views(system, *vc) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let config_name = match *vc {
+            openxr::ViewConfigurationType::PRIMARY_MONO => "primary_mono",
+            openxr::ViewConfigurationType::PRIMARY_STEREO => "primary_stereo",
+            openxr::ViewConfigurationType::PRIMARY_QUAD_VARJO => "primary_quad_varjo",
+            openxr::ViewConfigurationType::SECONDARY_MONO_FIRST_PERSON_OBSERVER_MSFT => "secondary_mono_first_person_observer_msft",
+            _ => "unknown",
+        };
+        let mut views: Vec<Value> = Vec::new();
+        for view in &vci {
+            views.push(json!({
+                "recommended_width": view.recommended_image_rect_width,
+                "recommended_height": view.recommended_image_rect_height,
+                "max_width": view.max_image_rect_width,
+                "max_height": view.max_image_rect_height,
+                "recommended_swapchain_count": view.recommended_swapchain_sample_count,
+                "max_swapchain_count": view.max_swapchain_sample_count,
+            }));
+        }
+        vc_list.push(json!({
+            "type": config_name,
+            "views": views,
+        }));
+    }
+    report["openxr"]["view_configurations"] = Value::Array(vc_list);
+
+    // -----------------------------------------------------------------------
+    // 6. Check Vulkan instance/device extension availability.
+    // -----------------------------------------------------------------------
+    let vulkan_ext_present = ext_names.iter().any(|n| n == "XR_KHR_vulkan_enable2" || n == "XR_KHR_vulkan_enable");
+    report["openxr"]["graphics"] = json!({
+        "vulkan_supported": vulkan_ext_present,
+        "note": if vulkan_ext_present {
+            "XR_KHR_vulkan_enable2 available — wgpu can adopt the OpenXR instance via wgpu-hal"
+        } else {
+            "no XR_KHR_vulkan_enable(2) extension — wgpu cannot adopt the OpenXR instance"
+        },
+    });
+
+    Ok(report)
 }
 
 fn pretty(v: &Value) -> String {
