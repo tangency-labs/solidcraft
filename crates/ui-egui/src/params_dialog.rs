@@ -16,6 +16,7 @@
 use std::sync::Arc;
 
 use serde_json::{Value, json};
+use solidcraft_engine::doc::expr;
 
 use crate::SolveApp;
 use crate::ui_kit::{self, Column};
@@ -24,7 +25,30 @@ use crate::ui_kit::{self, Column};
 /// can't be picked (#3216).
 pub(crate) const IMPORT_TYPES: &[&str] = &["csv", "json"];
 
-const UNITS: [&str; 10] = ["mm", "cm", "m", "in", "ft", "deg", "rad", "", "um", "text"];
+/// The units a user parameter's dropdown offers: every unit expressions know, in their table's
+/// order (lengths, angles, masses, volumes, areas: `expr::UNITS`, so the first is mm), then none
+/// and text. A parameter in a spelling the table doesn't have (`degrees`, set by a command) lists
+/// its own.
+const UNITS: [&str; expr::UNITS.len() + 2] = {
+    let mut names = [""; expr::UNITS.len() + 2];
+    let mut i = 0;
+    while i < expr::UNITS.len() {
+        names[i] = expr::UNITS[i].0;
+        i += 1;
+    }
+    names[i + 1] = "text";
+    names
+};
+
+/// The units a row's dropdown lists: [`UNITS`], and the row's own unit when it is another, so
+/// the dropdown shows it instead of the first in the list.
+fn unit_options(unit: &str) -> Vec<&str> {
+    let mut options = UNITS.to_vec();
+    if !options.contains(&unit) {
+        options.push(unit);
+    }
+    options
+}
 
 /// Dialog state (what is being typed; the parameters themselves live in the document).
 #[derive(Default)]
@@ -538,11 +562,13 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
                 });
                 row.cell(|ui| {
                     if r.source == "user" {
-                        let mut selected = UNITS.iter().position(|u| *u == r.unit).unwrap_or(0);
+                        let options = unit_options(&r.unit);
+                        let labels: Vec<_> = options.iter().map(|u| unit_label(u)).collect();
+                        let mut selected = options.iter().position(|u| *u == r.unit).unwrap_or(0);
                         let before = selected;
-                        ui_kit::dropdown(ui, &format!("punit:{salt}:{}", r.name), &mut selected, &units);
+                        ui_kit::dropdown(ui, &format!("punit:{salt}:{}", r.name), &mut selected, &labels);
                         if selected != before
-                            && let Some(unit) = UNITS.get(selected)
+                            && let Some(unit) = options.get(selected)
                         {
                             d.error = app.run("parameters.change", json!({"name":r.name,"expression":r.expression,"unit":unit})).err();
                         }
@@ -867,8 +893,16 @@ pub fn publish(app: &mut SolveApp, ctx: &egui::Context) {
         return;
     }
     let mut all: Vec<Suggestion> = Vec::new();
-    // Every name (no prefix), then the units (offered only after a letter is typed).
-    for prefix in ["", "m", "c", "i", "f", "d", "r", "u", "y", "k", "n"] {
+    // Every name (no prefix), then the units, which are offered only after a letter is typed:
+    // once for each letter a unit starts with.
+    let mut prefixes = vec![String::new()];
+    for (unit, _, _) in expr::UNITS {
+        let first: String = unit.chars().take(1).collect();
+        if !prefixes.contains(&first) {
+            prefixes.push(first);
+        }
+    }
+    for prefix in prefixes {
         if let Ok(v) = app.session.execute("parameters.complete", &json!({ "prefix": prefix })) {
             for s in v["suggestions"].as_array().into_iter().flatten() {
                 let text = s["text"].as_str().unwrap_or_default().to_string();
@@ -1330,6 +1364,33 @@ mod tests {
         assert!(r.iter().any(|x| x.name == "width" && x.source == "user"));
         assert!(check(&mut app, "width / 2", "mm").is_ok());
         assert!(check(&mut app, "width + 1 deg", "mm").is_err());
+    }
+
+    /// #4811: a mass parameter's row shows its value in its unit, a check reads the unit picked,
+    /// every unit is offered once its first letter is typed (`µm` too), the dropdown lists every
+    /// unit there is, then none, and a row in a spelling it doesn't list lists its own.
+    #[test]
+    fn mass_volume_and_area_units_in_the_dialog() {
+        let ctx = crate::fonts::test_context();
+        let mut app = SolveApp::new(solidcraft_engine::Session::default(), Default::default());
+        app.run("parameters.add", json!({"name": "grease", "expression": "50 g"})).unwrap();
+        app.run("parameters.add", json!({"name": "span", "expression": "90", "unit": "degrees"})).unwrap();
+        let names: Vec<&str> = expr::UNITS.iter().map(|(name, _, _)| *name).chain(["", "text"]).collect();
+        assert_eq!((UNITS.to_vec(), UNITS.first().copied()), (names, Some("mm")));
+        let r = rows(&mut app);
+        let row = |n: &str| r.iter().find(|x| x.name == n).cloned().unwrap_or_default();
+        assert_eq!(show_value(&row("grease")), "0.0500 kg");
+        assert_eq!(check(&mut app, "grease * 4", "kg"), Ok("0.2000 kg".to_string()));
+        assert_eq!(check(&mut app, "500 ml", "cm³"), Ok("500.0000 cm³".to_string()));
+        assert!(check(&mut app, "grease", "mm").is_err());
+        publish(&mut app, &ctx);
+        for (typed, unit) in [("k", "kg"), ("l", "lb"), ("c", "cm²"), ("µ", "µm")] {
+            assert!(suggestions(&ctx, typed).iter().any(|s| s.text == unit && s.kind == "unit"), "{typed} offers {unit}");
+        }
+        assert_eq!(unit_options(&row("grease").unit), UNITS);
+        let span = row("span");
+        let own = unit_options(&span.unit);
+        assert_eq!((own.len(), own.last().copied()), (UNITS.len() + 1, Some("degrees")));
     }
 
     /// #2757: typing part of a parameter's name offers it, not only its start; names that start
