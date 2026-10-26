@@ -92,6 +92,19 @@ fn a_bulging_rail_makes_the_solid_of_revolution_of_the_rail() {
     assert!(close(v, want, 1e-4), "reversed: volume {v} vs {want}");
 }
 
+/// The end on the first section wins even when the other rail end is closer to its centroid.
+#[test]
+fn a_rail_is_oriented_by_its_first_section_not_its_centroid() {
+    let sections = [
+        (Plane { origin: Vec3::new(100.0, 0.0, 0.0), x: Vec3::X, y: Vec3::Z }, circle(100.0)),
+        (Plane { origin: Vec3::new(100.0, 27.0, 0.0), x: Vec3::X, y: Vec3::Z }, circle(75.0)),
+    ];
+    let r = [Vec3::ZERO, Vec3::new(25.0, 27.0, 0.0)];
+    let b = loft_with_rails(&sections, &[r.to_vec()], RailFit::Scale).unwrap();
+    let worst = r.iter().map(|p| off(&b, *p)).fold(0.0, f64::max);
+    assert!(worst < 1e-2, "the rail is {worst} mm off the loft");
+}
+
 /// A rail from the middle of a square's side bulging out by 5: stretching widens the squares
 /// only across to the rail (sections 2w × 10 with w = 5 + 5 sin, volume 4000 + 8000/π); scaling
 /// grows them both ways (sections (2w)², volume 6000 + 16000/π).
