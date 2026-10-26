@@ -1090,12 +1090,21 @@ FL = sketch(vplane([0, 0, 0]), line([[8, 0], [40, 0], [40, 10], [15, 10], [15, 3
 case(T11, "002-flange", "a revolved flange and hub with a bore, six bolt holes, a hub chamfer and a hub-root round", FL,
      {"body_count": 1, "volume_mm3": Vf, "faces": 14},
      "pi((40^2-8^2)10 + (15^2-8^2)20) - 6 pi 4^2 10 - 1.125 * 2 pi 14.5 (chamfer, Pappus) + (1-pi/4) 9 * 2 pi (15 + 3(10-3pi)/(12-3pi)) (concave round)")
+w30 = ext_half_width(30, 3.5)
 case(T11, "003-threaded-flange", "the flange with a modelled M30 thread on its hub, between the round and the chamfer, and M8 tapped holes in the disk",
      [thr([15, 0, 20], designation="M30"), H(position=[0, 28, 10], thread="M8", name="Tap"), C("solid.pattern.circular", features=["Tap"], axis="Z", count=3)],
-     {"body_count": 1}, "a thread meeting a round and a chamfer, tapped holes; one valid body", base=up(T11, "002-flange"), source="invariants")
+     {"body_count": 1, "volume_mm3": Vf - groove(30, 3.5, [(13 + w30, 28.5, lambda z: 15), (28.5, 30, lambda z: 15 - (z - 28.5))]) - 3 * PI * 3.375 ** 2 * 10,
+      "bbox": {"min": [-40, -40, 0], "max": [40, 40, 30]}, "tolerance": {"rel": 1e-4}},
+     "the hub's cylinder (r15) runs from the r3 round at its root (z 13) to the 1.5 chamfer at its top (z 28.5): the M30 groove (P 3.5) stops w = %.6f clear of the round, "
+     "a shoulder (06/007's rule), and runs out through the chamfer, a free end (06/006's): it removes the stock less 2 pi int int r m(r) dr dz over z 13 + w..28.5 at r 15 and the chamfer "
+     "(r 15 - (z - 28.5)); the bore r8 is inside the root r 13.1. The M8 tap drills (6.75) go through the 10 mm disk at r 28, 90 deg + k 120, clear of the bolt holes (30 deg apart): "
+     "3 pi 3.375^2 10. Bbox: the flange's" % w30, base=up(T11, "002-flange"))
 case(T11, "004-housing", "the running part with every tier: back wall, boss, slot, spline window, tapped holes, rounds, chamfers, shell, vents, and a modelled M16 thread on the boss",
-     [thr([23, 15, 25], designation="M16")], {"body_count": 1},
-     "the last case carries every tier; one valid body", base=C10, source="invariants")
+     [thr([23, 15, 25], designation="M16")],
+     {"body_count": 1, "volume_mm3": V9 - 4 * PI * 1.5 ** 2 * 1.5 - groove(16, 2, [(21 + w16, 29, lambda z: 8), (29, 30, lambda z: 8 - (z - 29))]),
+      "bbox": {"min": [0, 0, 0], "max": [60, 40, 35]}, "tolerance": {"rel": 1e-4}},
+     "10/008 less the M16 groove on the boss: its cylinder runs from the r1 root round (z 21, a shoulder: the groove stops w = %.6f clear of it) to the 1 mm top chamfer "
+     "(z 29, run out through it, a free end); the groove's root r 6.917 stays outside the boss's 1.5 wall's inside (r 6.5), so it cuts the wall only. Bbox: the part's" % w16, base=C10)
 
 # manifest: tiers in order, cases in authoring order until --record sorts them by time
 WHAT = {
