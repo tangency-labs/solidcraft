@@ -2090,6 +2090,62 @@ fn a_failed_batch_reports_what_really_happened() {
     assert_eq!(methods(&b), ["engine.batch"]);
 }
 
+/// #5957: `batch` runs the steps of a script file (`path`), as an array or `{commands}`, as it
+/// runs them sent inline: tool steps, rollback and reply. The file is read within the agent's
+/// folders; one outside them, missing, not JSON or without steps, or `path` with `commands`,
+/// fails before anything runs.
+#[test]
+fn batch_runs_a_script_file() {
+    use solidcraft_engine::io::vfs::PathScope;
+    let base = solidcraft_engine::io::vfs::temp_dir().join(format!("solidcraft-mcp-script-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let (root, out) = (base.join("root"), base.join("out"));
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&out).unwrap();
+    let file = |d: &std::path::Path, name: &str, text: &str| {
+        let p = d.join(name);
+        std::fs::write(&p, text).unwrap();
+        p.to_string_lossy().to_string()
+    };
+    let steps = json!([
+        {"command": "set_parameter", "params": {"name": "w", "value": 20}},
+        {"command": "solid.box", "params": {"length": "w", "width": 10, "height": 10}},
+    ]);
+    let mut s = Server::new(Box::new(Headless::default())).with_path_scope(Some(PathScope::new([root.clone()])));
+    let array = file(&root, "steps.json", &steps.to_string());
+    let r = tool(&mut s, "batch", json!({"path": array}));
+    assert_eq!((&r["completed"], &r["results"][0]["value"]), (&json!(2), &json!(20.0)), "{r}");
+    let bodies = tool(&mut s, "inspect_design", json!({"measure": false}))["bodies"].as_array().map(Vec::len);
+    assert_eq!(bodies, Some(1));
+
+    // `{commands}`, as `solidcraft-cli script` writes it; a failing step rolls the batch back.
+    let script = json!({"commands": [{"command": "solid.box", "params": {"length": 5, "width": 5, "height": 5}}, {"command": "solid.nope"}]});
+    let r = raw_tool(&mut s, "batch", json!({"path": file(&root, "script.json", &script.to_string())}));
+    assert_eq!(r["result"]["isError"], true, "{r}");
+    let body: Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!((&body["failed"]["index"], &body["rolled_back"]), (&json!(1), &json!(true)), "{body}");
+    assert_eq!(tool(&mut s, "inspect_design", json!({"measure": false}))["bodies"].as_array().map(Vec::len), Some(1));
+
+    let outside = file(&out, "steps.json", &steps.to_string());
+    for (args, says) in [
+        (json!({"path": outside}), "outside"),
+        (json!({"path": root.join("missing.json").to_string_lossy()}), "missing.json"),
+        (json!({"path": file(&root, "bad.json", "[{")}), "not JSON"),
+        (json!({"path": file(&root, "empty.json", "[]")}), "no steps"),
+        (json!({"path": file(&root, "odd.json", "{\"steps\": []}")}), "no `commands`"),
+        (json!({"path": array, "commands": steps}), "not both"),
+        (json!({"path": ""}), "must name"),
+        (json!({}), "`commands` must be"),
+    ] {
+        let r = raw_tool(&mut s, "batch", args.clone());
+        assert_eq!(r["result"]["isError"], true, "{args}: {r}");
+        let text = r["result"]["content"][0]["text"].as_str().unwrap_or_default();
+        assert!(text.contains(says), "{args}: {text}");
+    }
+    assert_eq!(tool(&mut s, "inspect_design", json!({"measure": false}))["bodies"].as_array().map(Vec::len), Some(1), "nothing ran");
+    let _ = std::fs::remove_dir_all(&base);
+}
+
 /// Batch steps may name the tools an agent knows: `list_commands` and `set_parameter` run as
 /// engine.commands (filtered as the tool filters) and parameters.change; tools that can't be
 /// steps fail the batch before anything is sent.
