@@ -153,7 +153,7 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
                             draft.opened_github = false;
                         }
                         crate::scenario::publish_rect("report:description", response.rect);
-                        if !draft.focus_requested || draft.missing_description {
+                        if !draft.focus_requested {
                             response.scroll_to_me(Some(egui::Align::Center));
                             response.request_focus();
                             draft.focus_requested = true;
@@ -216,6 +216,11 @@ pub(super) fn show(app: &mut SolveApp, draft: &mut Draft, ctx: &egui::Context) -
             draft.note = "Report copied. Paste it into the GitHub draft if needed.".into();
         }
         _ => {}
+    }
+    // Found empty, the description takes the focus once more, not every frame: the other
+    // fields stay free to type in (#7190).
+    if action == ui_kit::Action::Ok && draft.missing_description {
+        draft.focus_requested = false;
     }
     (retake, closed || action == ui_kit::Action::Cancel)
 }

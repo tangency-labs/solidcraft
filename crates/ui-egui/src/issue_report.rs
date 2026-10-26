@@ -119,6 +119,8 @@ pub struct Draft {
     texture: Option<TextureHandle>,
     pub note: String,
     source_signature: u64,
+    /// The description has taken the focus it gets on opening; Continue finding it empty clears
+    /// this, so it takes the focus once more (#7190).
     focus_requested: bool,
     missing_description: bool,
     opened_github: bool,
@@ -717,6 +719,32 @@ mod tests {
             assert!(h.app.issue_report.draft.as_ref().unwrap().description.contains("The preview disappeared"));
             assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.revision, h.app.session.undo.len()));
         }
+    }
+
+    /// Continue with an empty description gives it the focus once (#7190). It used to take the
+    /// focus back every frame, so what was typed in Summary went into the description.
+    #[test]
+    fn issue_report_empty_description_takes_the_focus_once() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
+        h.frames(16);
+        let description = Some(egui::Id::new("issue_report_body"));
+        click_commands(&mut h, "Continue on GitHub");
+        assert_eq!(h.ctx.memory(|m| m.focused()), description);
+        // Click the Summary field (found by its id: it has no label of its own) and type.
+        let title = egui::Id::new("issue_report_title").accesskit_id();
+        let tree = h.output.accesskit_update.as_ref().unwrap();
+        let b = tree.nodes.iter().find(|(id, _)| *id == title).and_then(|(_, n)| n.bounds()).unwrap();
+        h.step(&json!({"click":[(b.x0 + b.x1) / 2.0, (b.y0 + b.y1) / 2.0]})).unwrap();
+        h.step(&json!({"text":"My title"})).unwrap();
+        h.frames(4);
+        let draft = h.app.issue_report.draft.as_ref().unwrap();
+        assert_eq!((draft.title.as_str(), draft.description.as_str()), ("My title", ""));
+        assert!(draft.missing_description && h.widget("Describe what happened before continuing.").is_some());
+        // Still empty: the next Continue gives it the focus again.
+        click_commands(&mut h, "Continue on GitHub");
+        assert_eq!(h.ctx.memory(|m| m.focused()), description);
     }
 
     #[test]
