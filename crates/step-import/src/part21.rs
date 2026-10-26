@@ -471,6 +471,9 @@ impl<'a> Parser<'a> {
     }
 
     fn param(&mut self, depth: usize) -> Result<Param, ParseError> {
+        if depth > self.limits.max_list_depth {
+            return self.lx.err("parameter lists nested too deeply");
+        }
         Ok(match self.tok.clone() {
             Tok::LParen => Param::List(self.list(depth + 1)?),
             Tok::Keyword(k) => {
@@ -744,5 +747,146 @@ mod tests {
         };
         let v: Vec<f64> = r.params.iter().map(|p| p.as_f64().unwrap()).collect();
         assert_eq!(v, vec![1.0, 100.0, -0.5, 3.0, 1.5e-3]);
+    }
+
+    #[test]
+    fn typed_nesting_refusal_at_small_configured_limit() {
+        // Every entry route reaches the same parameter parser. Keep these inputs small:
+        // this tests the documented refusal, not an actual stack overflow.
+        let cases = [
+            ("simple", 2, "DATA;#1=X(T(T(1)));ENDSEC;"),
+            ("complex", 2, "DATA;#1=(X(T(T(1)))Y());ENDSEC;"),
+            ("header", 2, "HEADER;X(T(T(1)));ENDSEC;DATA;ENDSEC;"),
+            ("data parameters", 3, "DATA('name',(T(T(1))));ENDSEC;"),
+        ];
+        let mut accepted = Vec::new();
+        for (name, max_list_depth, section) in cases {
+            let lim = Limits {
+                max_list_depth,
+                ..Limits::default()
+            };
+            let input = format!("ISO-10303-21;{section}END-ISO-10303-21;");
+            match parse(input.as_bytes(), &lim) {
+                Ok(_) => accepted.push(name),
+                Err(error) => {
+                    assert_eq!(error.message, "parameter lists nested too deeply", "{name}");
+                }
+            }
+        }
+        assert!(
+            accepted.is_empty(),
+            "over-limit typed parameters accepted: {accepted:?}"
+        );
+    }
+
+    #[test]
+    fn typed_nesting_accepted_boundary() {
+        let lim = Limits {
+            max_list_depth: 2,
+            ..Limits::default()
+        };
+        let expected = Param::Typed("T".into(), Box::new(Param::Int(1)));
+        for body in ["#1=X(T(1));", "#1=(X(T(1))Y());"] {
+            let input = format!("ISO-10303-21;DATA;{body}ENDSEC;END-ISO-10303-21;");
+            let f = parse(input.as_bytes(), &lim).unwrap();
+            let r = f.entities[&1].record("X").unwrap();
+            assert_eq!(r.params, vec![expected.clone()]);
+            assert_eq!(r.params[0].as_f64(), Some(1.0));
+        }
+        let f = parse(
+            b"ISO-10303-21;DATA;#1=X((1));ENDSEC;END-ISO-10303-21;",
+            &lim,
+        )
+        .unwrap();
+        assert_eq!(
+            f.entities[&1].record("X").unwrap().params,
+            vec![Param::List(vec![Param::Int(1)])]
+        );
+        for (max_list_depth, section) in [
+            (2, "HEADER;X(T(1));ENDSEC;DATA;ENDSEC;"),
+            (3, "DATA('name',(T(1)));ENDSEC;"),
+        ] {
+            let lim = Limits {
+                max_list_depth,
+                ..lim
+            };
+            let input = format!("ISO-10303-21;{section}END-ISO-10303-21;");
+            assert!(parse(input.as_bytes(), &lim).is_ok());
+        }
+    }
+
+    #[test]
+    fn typed_nesting_mixed_bypass() {
+        let lim = Limits {
+            max_list_depth: 3,
+            ..Limits::default()
+        };
+        // Outer list 1, nested list 2, typed leaf 3: exactly at the bound.
+        let ok = parse(
+            b"ISO-10303-21;DATA;#1=X((T(1)));ENDSEC;END-ISO-10303-21;",
+            &lim,
+        )
+        .unwrap();
+        assert_eq!(
+            ok.entities[&1].record("X").unwrap().params,
+            vec![Param::List(vec![Param::Typed(
+                "T".into(),
+                Box::new(Param::Int(1))
+            )])]
+        );
+        // One more typed wrapper must not bypass the bound after entering a list.
+        let deep = parse(
+            b"ISO-10303-21;DATA;#1=X((T(T(1))));ENDSEC;END-ISO-10303-21;",
+            &lim,
+        );
+        assert_eq!(
+            deep.unwrap_err().message,
+            "parameter lists nested too deeply"
+        );
+    }
+
+    #[test]
+    fn typed_nesting_preserves_existing_list_boundary() {
+        let lim = Limits {
+            max_list_depth: 2,
+            ..Limits::default()
+        };
+        assert!(parse(
+            b"ISO-10303-21;DATA;#1=X((1));ENDSEC;END-ISO-10303-21;",
+            &lim
+        )
+        .is_ok());
+        let error = parse(
+            b"ISO-10303-21;DATA;#1=X(((1)));ENDSEC;END-ISO-10303-21;",
+            &lim,
+        )
+        .unwrap_err();
+        assert_eq!(error.message, "parameter lists nested too deeply");
+    }
+
+    #[test]
+    fn typed_nesting_default_32_wrappers() {
+        let lim = Limits::default();
+        // 31 typed wrappers accepted, 32 rejected
+        let mut s = String::from("ISO-10303-21;DATA;#1=X(");
+        for _ in 0..31 {
+            s.push_str("T(");
+        }
+        s.push('1');
+        for _ in 0..31 {
+            s.push(')');
+        }
+        s.push_str(");ENDSEC;END-ISO-10303-21;");
+        assert!(parse(s.as_bytes(), &lim).is_ok());
+        let mut s2 = String::from("ISO-10303-21;DATA;#1=X(");
+        for _ in 0..32 {
+            s2.push_str("T(");
+        }
+        s2.push('1');
+        for _ in 0..32 {
+            s2.push(')');
+        }
+        s2.push_str(");ENDSEC;END-ISO-10303-21;");
+        assert!(parse(s2.as_bytes(), &lim).is_err());
     }
 }
