@@ -95,6 +95,8 @@ pub fn drawn_occurrences() -> Vec<(Vec<u64>, String, Rect, bool)> {
 pub struct TreeState {
     /// The floating browser card is folded to its header.
     pub panel_collapsed: bool,
+    /// The feature the browser lit last frame (see `finish_browser`).
+    hover_feature: Option<u64>,
     /// Geometry and assembly queries, independent of the camera, selection and row visibility.
     model: Option<model::Model>,
     /// Folders closed by the user (keys like `c0/bodies`).
@@ -626,6 +628,9 @@ pub fn apply_fold(app: &mut SolveApp, open: bool, open_by_default: &[String], cl
 struct Actions {
     menu: Option<(Pos2, Target)>,
     hover_bodies: Vec<String>,
+    /// The feature row under the pointer: lit as hovering its timeline item lights it.
+    hover_feature: Option<u64>,
+    hover_joint: Option<u64>,
     drop: Option<DropAction>,
     /// What the selection and the 3D view's pointer light in the tree.
     lit: Lit,
@@ -1039,6 +1044,13 @@ fn rows_scrolling(app: &mut SolveApp, ui: &mut egui::Ui, acts: &mut Actions, shr
 
 fn finish_browser(app: &mut SolveApp, ui: &mut egui::Ui, acts: Actions) {
     app.viewport.hover_bodies = acts.hover_bodies;
+    // The timeline sets `hover_feature` earlier in the frame: a hovered row takes it over, and
+    // leaving the row clears only what the browser set.
+    if acts.hover_feature.is_some() || app.viewport.hover_feature == app.tree.hover_feature {
+        app.viewport.hover_feature = acts.hover_feature;
+    }
+    app.tree.hover_feature = acts.hover_feature;
+    app.viewport.hover_joint = acts.hover_joint;
     if let Some(d) = acts.drop {
         apply_drop(app, d);
     }
@@ -1158,7 +1170,7 @@ fn component_rows(app: &mut SolveApp, ui: &mut egui::Ui, id: u64, depth: usize, 
     }
     features::rows(app, ui, id, &[], d, acts);
     if id == 0 {
-        crate::dialogs_assembly::browser_joints(app, ui, d);
+        acts.hover_joint = crate::dialogs_assembly::browser_joints(app, ui, d);
     }
     let children = model_children(app, id);
     for occurrence in children {

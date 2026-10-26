@@ -87,6 +87,28 @@ fn a_hidden_joint_still_drives_and_shows_while_picked() {
 }
 
 #[test]
+fn hovering_a_joint_row_lights_its_glyph_until_the_pointer_leaves() {
+    let mut h = harness();
+    let hinge = id(&h, "Hinge");
+    let row = crate::scenario::handle_at("row:Hinge").unwrap();
+    h.step(&json!({"move": [row.x, row.y]})).unwrap();
+    assert_eq!(h.app.viewport.hover_joint, Some(hinge));
+    assert!(h.app.tree.picked_joints.is_empty(), "hovering doesn't pick");
+    // Lit as a hovered body's edges are: the dark core over the light halo.
+    let t = crate::theme::Tokens::get();
+    let strokes = |h: &Harness, picked| crate::dialogs_assembly::glyph_strokes(&h.app, hinge, picked, false);
+    let (core, rim) = strokes(&h, false);
+    assert_eq!((core.color, rim.map(|r| r.color)), (t.hover_edge, Some(t.hover_edge_halo)));
+    assert!(rim.unwrap().width > core.width);
+    // Picked, it takes the selection's core and rim, hovered or not.
+    let (core, rim) = strokes(&h, true);
+    assert_eq!((core.color, rim.map(|r| r.color)), (t.sel_edge, Some(t.sel_edge_rim)));
+    h.step(&json!({"move": [5, 5]})).unwrap();
+    assert_eq!(h.app.viewport.hover_joint, None);
+    assert_eq!(strokes(&h, false), (egui::Stroke::new(1.5, t.accent), None), "an unlit glyph has no rim");
+}
+
+#[test]
 fn the_menu_and_the_v_key_hide_and_show_picked_joints() {
     let mut h = harness();
     let (hinge, glue) = (id(&h, "Hinge"), id(&h, "Glue"));

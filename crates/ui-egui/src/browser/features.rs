@@ -92,6 +92,9 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
         } else if r.clicked {
             click_select(app, ui, format!("f:{id}"), Some(Sel::Feature { id }));
         }
+        if r.hovered {
+            acts.hover_feature = Some(id);
+        }
         if let Some(at) = r.secondary {
             acts.menu = Some((at, Target::Feature { id }));
         }
@@ -191,6 +194,35 @@ mod tests {
         h.step(&json!({"click": row(ids[4]), "shift": true})).unwrap();
         h.frames(2);
         assert_eq!(sorted(&h.app.session.selection), sorted(&all), "Shift+click below the anchor");
+    }
+
+    #[test]
+    fn browser_feature_hover_lights_what_its_timeline_item_lights() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.ui.show_browser = true;
+        h.app.run("solid.box", json!({"length":20,"width":20,"height":20})).unwrap();
+        let round = h.app.run("solid.fillet", json!({"edges":[[0,0,10]],"radius":2,"name":"Round"})).unwrap()["feature"].as_u64().unwrap();
+        h.app.tree.expanded.insert("c0/features".into());
+        h.frames(2);
+        let row = crate::scenario::handle_at(&format!("row:browser-feature:c0:{round}")).unwrap();
+        h.step(&json!({"move":[row.x,row.y]})).unwrap();
+        assert_eq!(h.app.viewport.hover_feature, Some(round));
+        assert!(h.app.session.selection.is_empty(), "hovering doesn't select");
+        h.step(&json!({"move":[5,5]})).unwrap();
+        assert_eq!(h.app.viewport.hover_feature, None);
+        // The timeline's own hover still lights it: the browser clears only what it set.
+        let item = crate::scenario::handle_at("timeline:Round").unwrap();
+        h.step(&json!({"move":[item.x,item.y]})).unwrap();
+        assert_eq!(h.app.viewport.hover_feature, Some(round));
+        // With the timeline hidden, leaving the row still clears the browser's hover.
+        h.app.ui.show_timeline = false;
+        h.frames(2);
+        let row = crate::scenario::handle_at(&format!("row:browser-feature:c0:{round}")).unwrap();
+        h.step(&json!({"move":[row.x,row.y]})).unwrap();
+        assert_eq!(h.app.viewport.hover_feature, Some(round));
+        h.step(&json!({"move":[5,5]})).unwrap();
+        assert_eq!(h.app.viewport.hover_feature, None);
     }
 
     fn find_in_timeline(app: &mut SolveApp, feature: u64, body: &str) {
