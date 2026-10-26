@@ -39,6 +39,7 @@ mod open_documents;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 mod space_mouse;
 mod startup;
+mod webdav;
 #[cfg(any(target_os = "windows", test))]
 mod window_fit;
 
@@ -474,6 +475,7 @@ fn services(cc: &eframe::CreationContext<'_>, folder: &DialogFolder) -> Services
     let file_parent = parent.clone();
     let (open_folder, file_folder, save_folder) = (folder.clone(), folder.clone(), folder.clone());
     Services {
+        webdav_http: Some(webdav::service()),
         pick_open: Some(Box::new(move |first: &[&str]| {
             // The file type the command reads comes first, so the picker opens on it (#1801).
             let mut dialog = open_folder.start(open_parent.clone());
@@ -1399,6 +1401,84 @@ fn prefer_x11(display: bool, wayland_display: bool, desktop: Option<&str>, wayla
 
 #[cfg(all(test, unix, not(target_os = "macos")))]
 mod backend_tests {
+    #[test]
+    fn webdav_loopback_lists_opens_and_conditionally_saves() {
+        use solidcraft_ui_egui::webdav::{MAX_LIST_BYTES, PROPFIND, Request, condition, connection, listing};
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}/dav/", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let mut saved = b"synthetic design".to_vec();
+            for (method, expected, status, body) in [
+                (
+                    "PROPFIND",
+                    "depth: 1",
+                    "207 Multi-Status",
+                    "<multistatus xmlns='DAV:'><response><href>/dav/a.solidcraft</href><propstat><prop><resourcetype/></prop><status>HTTP/1.1 200 OK</status></propstat></response></multistatus>",
+                ),
+                ("GET", "authorization: basic dxnlcjpwyxnz", "200 OK", "synthetic design"),
+                ("PUT", "if-match: \"one\"", "204 No Content", ""),
+                ("PUT", "if-match: \"stale\"", "412 Precondition Failed", ""),
+                ("PUT", "if-none-match: *", "201 Created", ""),
+                ("GET", "authorization: basic dxnlcjpwyxnz", "200 OK", ""),
+            ] {
+                let (mut socket, _) = listener.accept().unwrap();
+                socket.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+                let mut data = Vec::new();
+                let mut byte = [0];
+                while !data.ends_with(b"\r\n\r\n") {
+                    socket.read_exact(&mut byte).unwrap();
+                    data.push(byte[0]);
+                    assert!(data.len() < 16_384);
+                }
+                let headers = String::from_utf8(data).unwrap().to_lowercase();
+                assert!(headers.starts_with(&method.to_lowercase()));
+                assert!(headers.contains(expected), "{headers}");
+                if expected == "if-none-match: *" {
+                    assert!(headers.starts_with("put /dav/b.solidcraft "));
+                }
+                let size: usize = headers.lines().find_map(|l| l.strip_prefix("content-length: ")).map(|s| s.trim().parse().unwrap()).unwrap_or(0);
+                assert!(size < 1024);
+                let mut bytes = vec![0; size];
+                socket.read_exact(&mut bytes).unwrap();
+                if method == "PUT" && status.starts_with("204") {
+                    saved = bytes.clone();
+                }
+                if method == "PROPFIND" {
+                    assert_eq!(bytes, PROPFIND);
+                }
+                let body = if method == "GET" { std::str::from_utf8(&saved).unwrap() } else { body };
+                write!(socket, "HTTP/1.1 {status}\r\nContent-Length: {}\r\nETag: \"one\"\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            }
+        });
+        let request = |method, headers: Vec<(String, String)>, body| Request {
+            method,
+            url: if method == "PROPFIND" {
+                base.clone()
+            } else if headers.iter().any(|(key, _)| key == "If-None-Match") {
+                format!("{base}b.solidcraft")
+            } else {
+                format!("{base}a.solidcraft")
+            },
+            user: "user".into(),
+            password: "pass".into(),
+            headers,
+            body,
+            cap: MAX_LIST_BYTES,
+        };
+        let response = super::webdav::send(request("PROPFIND", vec![("Depth".into(), "1".into())], PROPFIND.to_vec())).unwrap();
+        assert_eq!(response.status, 207);
+        assert_eq!(listing(&response.body, &connection(&base).unwrap()).unwrap()[0].name, "a.solidcraft");
+        let response = super::webdav::send(request("GET", vec![], vec![])).unwrap();
+        assert_eq!(response.body, b"synthetic design");
+        assert_eq!(response.etag.as_deref(), Some("\"one\""));
+        assert_eq!(super::webdav::send(request("PUT", condition(response.etag.as_deref(), false), b"new".to_vec())).unwrap().status, 204);
+        assert_eq!(super::webdav::send(request("PUT", condition(Some("\"stale\""), false), b"stale".to_vec())).unwrap().status, 412);
+        assert_eq!(super::webdav::send(request("PUT", condition(None, false), b"new".to_vec())).unwrap().status, 201);
+        assert_eq!(super::webdav::send(request("GET", vec![], vec![])).unwrap().body, b"new");
+        server.join().unwrap();
+    }
+
     use super::prefer_x11;
 
     #[test]

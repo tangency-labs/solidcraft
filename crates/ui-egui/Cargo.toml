@@ -29,6 +29,9 @@ unicode-bidi = "0.3"
 # 1Password): the OS locale on desktop and, with `js`, `navigator.languages` in the browser (#10138).
 sys-locale = { version = "0.3.2", features = ["js"] }
 semver = { workspace = true }
+quick-xml = { workspace = true }
+url = "2"
+percent-encoding = "2"
 # Updates: the downloaded package's SHA-256 (against the release's SHA256SUMS.txt), its optional
 # minisign signature (MIT), and the portable .zip's executables.
 sha2 = { workspace = true }

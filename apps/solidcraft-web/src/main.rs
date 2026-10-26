@@ -22,6 +22,8 @@ mod linked;
 mod server;
 #[cfg(any(target_arch = "wasm32", test))]
 mod space_mouse;
+#[cfg(target_arch = "wasm32")]
+mod webdav;
 
 /// The browser switches tabs with Ctrl+Tab and Ctrl+Shift+Tab, so the page leaves those keys to
 /// it (#5227); plain Tab and Shift+Tab still move between the app's fields. (Ctrl+PageUp and
@@ -987,6 +989,7 @@ mod web {
                             restore_file: Some(Box::new(move |path: &str| {
                                 if crate::server::parse(path).is_some() { crate::server::restore(&restorer, path); } else { disk::restore(&restorer, path); }
                             })),
+                            webdav_http: Some(crate::webdav::service()),
                             persist_save: Some(Box::new(move |path| crate::server::persist(&persisted, path))),
                             save_conflict_answer: Some(Box::new(move |answer| crate::server::answer_conflict(&conflict, answer))),
                             download_design: Some(Box::new(files::download)),
