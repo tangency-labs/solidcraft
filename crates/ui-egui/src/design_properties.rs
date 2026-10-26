@@ -379,7 +379,7 @@ pub fn show_object(app: &mut SolveApp, ctx: &egui::Context) {
     if !bodies.is_empty() && skipped == bodies.len() as u64 {
         rows.push(("", crate::i18n::tr_label("Open surface — no volume").to_string()));
     } else {
-        rows.push(("Mass", format!("{:.3} g", number(total, "mass_g"))));
+        rows.push(("Mass", crate::prefs::show_mass(app, number(total, "mass_g"))));
         rows.push(("Volume", crate::prefs::show_mm(app, number(total, "volume_mm3"), 3)));
     }
     if skipped > 0 && skipped < bodies.len() as u64 {
@@ -495,6 +495,29 @@ mod tests {
         for label in ["Volume", "Mass", "Open bodies (no volume)"] {
             assert!(h.widget(label).is_some(), "{label} is shown for a solid with an open surface");
         }
+    }
+
+    #[test]
+    fn the_mass_follows_the_mass_unit_and_decimals() {
+        let defaults = crate::prefs::Prefs::default();
+        assert_eq!((defaults.mass_unit.as_str(), defaults.mass_decimals), ("kg", 2), "kilograms at 2 decimals by default");
+        let mut h = Harness::new();
+        let measured = |grams: f64| json!({"bodies": [], "total": {"mass_g": grams, "volume_mm3": 1.0, "area_mm2": 1.0}});
+        for (grams, unit, decimals, shown) in [
+            (9420.0, "kg", 2, "9.42 kg"),
+            (9420.0, "g", 1, "9420.0 g"),
+            (9420.0, "lb", 2, "20.77 lb"),
+            (1.29, "kg", 2, "0.0013 kg"),
+            // A saved unit that isn't a mass unit, or too many decimals: kilograms at 2 decimals.
+            (9420.0, "mm", 3, "9.42 kg"),
+            (9420.0, "kg", 40, "9.42 kg"),
+        ] {
+            (h.app.preferences.mass_unit, h.app.preferences.mass_decimals) = (unit.into(), decimals);
+            h.app.menu.props = Some(("Plate".into(), measured(grams)));
+            h.frames(2);
+            assert!(h.widget(shown).is_some(), "{grams} g in {unit} at {decimals} places reads {shown}");
+        }
+        assert_eq!(crate::prefs::show_mass(&h.app, f64::NAN), "—", "a mass that isn't a number");
     }
 
     #[test]
