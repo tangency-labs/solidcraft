@@ -1452,7 +1452,7 @@ fn chain_fingerprint(
         let mut h = std::collections::hash_map::DefaultHasher::new();
         fp.hash(&mut h);
         for g in replayed_sources(doc, features) {
-            fingerprint(0, g, vals, false, steps).hash(&mut h);
+            fingerprint(doc, 0, g, vals, false, steps).hash(&mut h);
         }
         fp = h.finish();
     }
