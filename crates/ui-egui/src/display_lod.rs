@@ -17,6 +17,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 use solidcraft_engine::doc::ModelBody;
 use solidcraft_engine::doc::display_quality::{DisplayQuality, MAX_REFINE, refinement_for};
@@ -52,6 +53,11 @@ pub(crate) type Holder = Arc<dyn std::any::Any + Send + Sync>;
 /// moved copies.
 pub(crate) fn body_id(b: &ModelBody) -> (usize, Holder) {
     let holder = b.display_identity();
+    (Arc::as_ptr(&holder) as *const () as usize, holder)
+}
+
+fn source_id(b: &ModelBody) -> (usize, Holder) {
+    let holder = b.display_source_identity();
     (Arc::as_ptr(&holder) as *const () as usize, holder)
 }
 
@@ -105,11 +111,11 @@ impl Lens {
     }
 }
 
-/// The screen-space error (physical pixels) of drawing a body of `size` at `q` and its box's
+/// The screen-space error (physical pixels) of drawing a body at `chord` and its box's
 /// projected extent (`screen_px`, physical pixels; `None` when the box is not on screen).
-pub(crate) fn error_px(q: DisplayQuality, size: f64, bounds: &Aabb3, screen_px: Option<f64>, lens: &Lens) -> f64 {
+pub(crate) fn error_px(chord: f64, bounds: &Aabb3, screen_px: Option<f64>, lens: &Lens) -> f64 {
     match screen_px {
-        Some(px) if px >= MIN_PX => q.chord(size) * lens.px_per_mm(bounds),
+        Some(px) if px >= MIN_PX => chord * lens.px_per_mm(bounds),
         _ => 0.0,
     }
 }
@@ -129,6 +135,15 @@ struct Entry {
     refined: Refined,
     bytes: usize,
     used: u64,
+}
+
+struct Shown {
+    _holder: Holder,
+    source: usize,
+    quality: DisplayQuality,
+    level: u8,
+    /// World coordinates are needed only for individual face/edge feedback and CPU fallbacks.
+    mesh: OnceLock<Arc<Mesh>>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -161,8 +176,9 @@ pub(crate) struct Stats {
 #[derive(Default)]
 pub(crate) struct Lod {
     /// The step each body is drawn at, by [`body_id`] (absent: 0, the chosen level).
-    shown: HashMap<usize, u8>,
+    shown: HashMap<usize, Shown>,
     cache: HashMap<(usize, DisplayQuality, u8), Entry>,
+    live_sources: std::collections::HashSet<usize>,
     #[cfg(not(target_arch = "wasm32"))]
     jobs: Vec<Job>,
     /// The web plans one refinement per frame: more are waiting.
@@ -178,14 +194,20 @@ impl Lod {
     /// The refined plan and mesh `b` is drawn from, when it is drawn finer than the chosen level.
     pub fn refined(&self, b: &ModelBody, q: DisplayQuality) -> Refined {
         let (id, _) = body_id(b);
-        let k = *self.shown.get(&id)?;
-        self.cache.get(&(id, q, k))?.refined.clone()
+        let shown = self.shown.get(&id).filter(|s| s.quality == q)?;
+        self.cache.get(&(shown.source, q, shown.level))?.refined.clone()
+    }
+
+    pub fn mesh(&self, b: &ModelBody, q: DisplayQuality) -> Option<Arc<Mesh>> {
+        let shown = self.shown.get(&body_id(b).0).filter(|s| s.quality == q)?;
+        let (_, mesh) = self.cache.get(&(shown.source, q, shown.level))?.refined.as_ref()?;
+        Some(shown.mesh.get_or_init(|| b.place_display_mesh(mesh)).clone())
     }
 
     /// The step `b` is drawn at.
     #[cfg(test)]
     pub fn step(&self, b: &ModelBody) -> u8 {
-        self.shown.get(&body_id(b).0).copied().unwrap_or(0)
+        self.shown.get(&body_id(b).0).map_or(0, |s| s.level)
     }
 
     /// Choose each candidate's step, start planning the steps not made yet, and swap in those
@@ -194,6 +216,8 @@ impl Lod {
     pub fn update(&mut self, q: DisplayQuality, candidates: Vec<Candidate<'_>>, live: &std::collections::HashSet<usize>) -> bool {
         self.clock += 1;
         self.collect();
+        self.live_sources.clear();
+        self.live_sources.extend(candidates.iter().map(|c| source_id(c.body).0));
         let mut changed = false;
         // The bodies that need it most first, within the triangle budget.
         let mut order: Vec<usize> = (0..candidates.len()).collect();
@@ -208,9 +232,11 @@ impl Lod {
             if !seen.insert(id) {
                 continue;
             }
-            let current = self.shown.get(&id).copied().unwrap_or(0);
+            let current = self.shown.get(&id).map_or(0, |s| s.level);
+            let source = source_id(c.body).0;
             let mut k = refinement_for(c.err_px, current, MAX_REFINE);
-            let estimate = |k: u8| self.cache.get(&(id, q, k)).and_then(|e| e.refined.as_ref()).map_or(c.triangles << k, |(_, m)| m.triangles.len());
+            let estimate =
+                |k: u8| self.cache.get(&(source, q, k)).and_then(|e| e.refined.as_ref()).map_or(c.triangles << k, |(_, m)| m.triangles.len());
             while k > 0 && estimate(k) > remaining {
                 k -= 1;
             }
@@ -221,8 +247,9 @@ impl Lod {
         }
         for (i, k) in wanted {
             let (id, holder) = body_id(candidates[i].body);
-            let current = self.shown.get(&id).copied().unwrap_or(0);
-            if k == current {
+            let source = source_id(candidates[i].body).0;
+            let current = self.shown.get(&id).map_or(0, |s| s.level);
+            if k == current && (k == 0 || (self.shown.get(&id).is_some_and(|s| s.quality == q) && self.cache.contains_key(&(source, q, k)))) {
                 continue;
             }
             if k == 0 {
@@ -230,28 +257,27 @@ impl Lod {
                 changed = true;
                 continue;
             }
-            match self.cache.get(&(id, q, k)) {
+            match self.cache.get(&(source, q, k)) {
                 Some(e) if e.refined.is_some() => {
-                    self.shown.insert(id, k);
+                    self.shown.insert(id, Shown { _holder: holder, source, quality: q, level: k, mesh: OnceLock::new() });
                     changed = true;
                 }
                 // The planner refused this step: keep what is drawn.
                 Some(_) => {}
                 None => {
-                    let _ = holder;
                     requests.push((i, k));
                 }
             }
         }
         self.start(q, &candidates, requests);
         // Keep the steps drawn now from being evicted.
-        for (id, k) in &self.shown {
-            if let Some(e) = self.cache.get_mut(&(*id, q, *k)) {
+        for shown in self.shown.values() {
+            if let Some(e) = self.cache.get_mut(&(shown.source, shown.quality, shown.level)) {
                 e.used = self.clock;
             }
         }
         self.shown.retain(|id, _| live.contains(id));
-        self.evict(live);
+        self.evict();
         self.refresh_stats(q);
         if changed {
             self.generation += 1;
@@ -313,16 +339,17 @@ impl Lod {
             if self.jobs.len() >= MAX_JOBS {
                 break;
             }
-            let body = candidates[i].body.clone();
-            let (id, holder) = body_id(&body);
+            let body = candidates[i].body;
+            let (id, holder) = source_id(body);
             let key = (id, q, k);
-            if self.jobs.iter().any(|j| j.key.0 == id) {
+            if self.jobs.iter().any(|j| j.key == key) {
                 continue;
             }
+            let body = body.clone();
             let (tx, rx) = std::sync::mpsc::channel();
             let spawned = std::thread::Builder::new().name("display-refine".into()).spawn(move || {
                 let t0 = std::time::Instant::now();
-                let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| body.refined_display(q, k))).ok().flatten();
+                let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| body.refined_display_in_place(q, k))).ok().flatten();
                 log::debug!("refined {} {k} steps in {:.1} ms", body.name, t0.elapsed().as_secs_f64() * 1e3);
                 PLANNING_US.fetch_add(t0.elapsed().as_micros() as u64, std::sync::atomic::Ordering::Relaxed);
                 let _ = tx.send(r);
@@ -342,16 +369,16 @@ impl Lod {
         #[cfg(target_arch = "wasm32")]
         if let Some((i, k)) = requests.into_iter().next() {
             let body = candidates[i].body;
-            let (id, holder) = body_id(body);
-            let r = body.refined_display(q, k);
+            let (id, holder) = source_id(body);
+            let r = body.refined_display_in_place(q, k);
             self.insert((id, q, k), holder, r);
         }
     }
 
     /// Drop what belongs to bodies no longer in the model, then the least recently drawn steps
     /// until the cache fits its budget.
-    fn evict(&mut self, live: &std::collections::HashSet<usize>) {
-        self.cache.retain(|(id, _, _), _| live.contains(id));
+    fn evict(&mut self) {
+        self.cache.retain(|(id, _, _), _| self.live_sources.contains(id));
         let mut total: usize = self.cache.values().map(|e| e.bytes).sum();
         if total <= CACHE_BYTES {
             return;
@@ -368,7 +395,7 @@ impl Lod {
     }
 
     fn refresh_stats(&mut self, q: DisplayQuality) {
-        let drawn: Vec<&Entry> = self.shown.iter().filter_map(|(id, k)| self.cache.get(&(*id, q, *k))).collect();
+        let drawn: Vec<&Entry> = self.shown.values().filter_map(|s| self.cache.get(&(s.source, q, s.level))).collect();
         self.stats.refined_bodies = drawn.len();
         self.stats.refined_triangles = drawn.iter().filter_map(|e| e.refined.as_ref()).map(|(_, m)| m.triangles.len()).sum();
         self.stats.cached = self.cache.len();
@@ -384,12 +411,15 @@ impl Lod {
     /// Plan a step right away and draw `b` at it (tests).
     #[cfg(test)]
     pub fn force(&mut self, b: &ModelBody, q: DisplayQuality, k: u8) -> bool {
-        let (id, holder) = body_id(b);
-        let r = b.refined_display(q, k);
-        let ok = r.is_some();
-        self.insert((id, q, k), holder, r);
+        let (id, placed) = body_id(b);
+        let (source, holder) = source_id(b);
+        if !self.cache.contains_key(&(source, q, k)) {
+            let r = b.refined_display_in_place(q, k);
+            self.insert((source, q, k), holder, r);
+        }
+        let ok = self.cache.get(&(source, q, k)).is_some_and(|e| e.refined.is_some());
         if ok {
-            self.shown.insert(id, k);
+            self.shown.insert(id, Shown { _holder: placed, source, quality: q, level: k, mesh: OnceLock::new() });
             self.generation += 1;
         }
         ok
@@ -417,6 +447,47 @@ mod tests {
         ModelBody::new("Body1".into(), body, 1)
     }
 
+    #[test]
+    fn placements_join_one_refinement_and_choose_their_levels_independently() {
+        use serde_json::json;
+        let mut s = solidcraft_engine::Session::default();
+        s.execute("component.create", &json!({"name":"Part"})).unwrap();
+        s.execute("solid.cylinder", &json!({"radius":10,"height":20})).unwrap();
+        s.execute("occurrence.copy", &json!({"component":"Part","translate":[40,0,0]})).unwrap();
+        s.execute("component.activate", &json!({"component":"root"})).unwrap();
+        let world = s.world_state();
+        let (a, b) = (&world.bodies[0], &world.bodies[1]);
+        assert_ne!(body_id(a).0, body_id(b).0);
+        assert_eq!(source_id(a).0, source_id(b).0);
+        let q = DisplayQuality::Normal;
+        let live = [body_id(a).0, body_id(b).0].into();
+        let base = a.mesh_in_place().0.triangles.len();
+        let candidates = |second| vec![Candidate { body: a, err_px: 6., triangles: base }, Candidate { body: b, err_px: second, triangles: base }];
+        let mut lod = Lod::default();
+        lod.update(q, candidates(6.), &live);
+        #[cfg(not(target_arch = "wasm32"))]
+        assert_eq!(lod.jobs.len(), 1, "placements join the same pending work");
+        for _ in 0..2000 {
+            lod.update(q, candidates(6.), &live);
+            if lod.step(a) == 3 && lod.step(b) == 3 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!((lod.step(a), lod.step(b)), (3, 3));
+        assert_eq!(lod.cache.len(), 1);
+        let ma = lod.refined(a, q).unwrap().1;
+        let mb = lod.refined(b, q).unwrap().1;
+        assert!(Arc::ptr_eq(&ma, &mb));
+        let moved = lod.mesh(b, q).unwrap();
+        let expected = solidcraft_engine::doc::apply_point(&b.display_transform(), mb.positions[0]);
+        assert!(moved.positions[0].dist(expected) < 1e-9);
+        assert!(Arc::ptr_eq(&moved, &lod.mesh(b, q).unwrap()));
+        lod.update(q, candidates(0.), &live);
+        assert_eq!((lod.step(a), lod.step(b)), (3, 0));
+        assert!(Arc::ptr_eq(&ma, &lod.refined(a, q).unwrap().1));
+    }
+
     /// Zooming in raises the error with the pixels per millimetre, perspective or not, and a
     /// box nearer the eye counts more.
     #[test]
@@ -425,16 +496,16 @@ mod tests {
         let q = DisplayQuality::Normal;
         for fov in [0.0, 0.6] {
             let mut cam = Camera { distance: 200.0, fov, ..Camera::default() };
-            let far = error_px(q, 30.0, &b, Some(300.0), &Lens::new(&cam, 1000.0));
+            let far = error_px(q.chord(30.0), &b, Some(300.0), &Lens::new(&cam, 1000.0));
             cam.distance = 50.0;
-            let near = error_px(q, 30.0, &b, Some(1200.0), &Lens::new(&cam, 1000.0));
+            let near = error_px(q.chord(30.0), &b, Some(1200.0), &Lens::new(&cam, 1000.0));
             assert!(near > far * 3.0, "fov {fov}: {far} -> {near}");
-            assert_eq!(error_px(q, 30.0, &b, None, &Lens::new(&cam, 1000.0)), 0.0, "off screen");
-            assert_eq!(error_px(q, 30.0, &b, Some(MIN_PX / 2.0), &Lens::new(&cam, 1000.0)), 0.0, "too small");
+            assert_eq!(error_px(q.chord(30.0), &b, None, &Lens::new(&cam, 1000.0)), 0.0, "off screen");
+            assert_eq!(error_px(q.chord(30.0), &b, Some(MIN_PX / 2.0), &Lens::new(&cam, 1000.0)), 0.0, "too small");
         }
         // Orthographic: chord × pixels per mm.
         let cam = Camera { distance: 100.0, fov: 0.0, ..Camera::default() };
-        let e = error_px(q, 30.0, &b, Some(500.0), &Lens::new(&cam, 800.0));
+        let e = error_px(q.chord(30.0), &b, Some(500.0), &Lens::new(&cam, 800.0));
         assert!((e - q.chord(30.0) * 800.0 / (2.0 * cam.half_height())).abs() < 1e-12);
     }
 

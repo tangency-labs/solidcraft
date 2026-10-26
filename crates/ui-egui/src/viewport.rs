@@ -737,8 +737,8 @@ fn drawn_plan(
     opaque: bool,
 ) -> Option<std::sync::Arc<solidcraft_engine::geom::tess::TessPlan>> {
     let shaded = app.ui.visual_style != 2;
-    (shaded && opaque && app.viewport.gpu.is_some_and(|g| g.tess))
-        .then(|| refined(app, b).map(|(plan, _)| plan).or_else(|| b.display_plan()))
+    (shaded && opaque && app.viewport.gpu.is_some_and(|g| g.tess) && refined(app, b).is_none())
+        .then(|| b.display_plan())
         .flatten()
         .filter(|plan| plan.vertex_count() <= solidcraft_gpu::MAX_BATCH)
 }
@@ -763,8 +763,7 @@ fn shown_mesh(
     b: &solidcraft_engine::doc::ModelBody,
     active_bodies: &Option<Vec<String>>,
 ) -> std::sync::Arc<solidcraft_engine::geom::Mesh> {
-    if let Some((_, mesh)) = refined(app, b) {
-        // Refined: faces drawn from the refined plan on the GPU or built from its mesh here.
+    if let Some(mesh) = app.viewport.lod.lock().ok().and_then(|l| l.mesh(b, solidcraft_engine::doc::display_quality::current())) {
         return mesh;
     }
     (app.viewport.gpu.is_some_and(|g| g.tess) && model_plan_class(app, b, active_bodies).is_some())
@@ -779,15 +778,25 @@ fn shown_mesh(
 /// The mesh the model scene builds `b` from on the CPU (its edges always, its faces when they
 /// are not drawn from the plan on the GPU): a refined plan's mesh when the view has one for it
 /// (#1320), the reference mesh at Normal display quality, else the plan's mesh at the chosen
-/// quality (finer or coarser faces and edges alike), falling back to the reference mesh when the
-/// body has no plan.
+/// quality (finer or coarser faces and edges alike). Instanced bodies use their plan's mesh on
+/// tessellating devices; a body without a plan falls back to its reference mesh.
 fn drawn_mesh(app: &SolveApp, b: &solidcraft_engine::doc::ModelBody) -> std::sync::Arc<solidcraft_engine::geom::Mesh> {
     if crate::render_workspace::active(app) {
         return b.mesh();
     }
     use solidcraft_engine::doc::display_quality::{DisplayQuality, current};
-    if let Some((_, mesh)) = refined(app, b) {
+    if let Some(mesh) = app.viewport.lod.lock().ok().and_then(|l| l.mesh(b, current())) {
         return mesh;
+    }
+    // Instanced faces use the plan mesh even when the body is faded or see-through. Their
+    // feedback must use those same triangles, rather than the Normal-quality reference mesh.
+    if current() == DisplayQuality::Normal
+        && app.ui.visual_style != 2
+        && app.viewport.gpu.is_some_and(|g| g.tess)
+        && let Some((mesh, _)) = shared_mesh(app, b)
+        && app.viewport.instanced_tris.lock().is_ok_and(|c| c.contains_key(&(std::sync::Arc::as_ptr(&mesh) as usize)))
+    {
+        return b.plan_mesh().unwrap_or_else(|| b.mesh());
     }
     if current() == DisplayQuality::Normal { b.mesh() } else { b.plan_mesh().unwrap_or_else(|| b.mesh()) }
 }
@@ -887,7 +896,7 @@ fn update_refinement(app: &mut SolveApp, ctx: &egui::Context, proj: &Proj) {
             // A corner behind the eye: the view is inside or right by the box.
             None => (shown && proj.cam.fov > 0.0 && lens.in_front(bx)).then_some(f64::INFINITY),
         };
-        let err_px = crate::display_lod::error_px(q, b.body.size(), bx, on_screen, &lens);
+        let err_px = crate::display_lod::error_px(b.display_chord(q), bx, on_screen, &lens);
         candidates.push(crate::display_lod::Candidate { body: b, err_px, triangles: b.mesh_in_place().0.triangles.len() });
     }
     let busy = match app.viewport.lod.lock() {
@@ -1349,13 +1358,18 @@ impl Instances {
         let mut candidates = std::collections::HashMap::new();
         if shaded {
             let mut uses: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
-            let placed: Vec<_> = shown.iter().filter_map(|b| Some((b.name.clone(), shared_mesh(app, b)?))).collect();
+            let placed: Vec<_> = shown.iter().filter_map(|b| Some((*b, shared_mesh(app, b)?))).collect();
             for (_, (mesh, _)) in &placed {
                 *uses.entry(std::sync::Arc::as_ptr(mesh) as usize).or_default() += 1;
             }
             candidates = placed
                 .into_iter()
-                .filter(|(_, (m, _))| m.triangles.len() >= INSTANCE_ALONE || uses.get(&(std::sync::Arc::as_ptr(m) as usize)).is_some_and(|n| *n > 1))
+                .filter(|(body, (m, _))| {
+                    m.triangles.len() >= INSTANCE_ALONE
+                        || uses.get(&(std::sync::Arc::as_ptr(m) as usize)).is_some_and(|n| *n > 1)
+                        || refined(app, body).is_some()
+                })
+                .map(|(body, mesh)| (body.name.clone(), mesh))
                 .collect();
         }
         Instances { candidates, meshes: Vec::new(), by_mesh: std::collections::HashMap::new(), kept, lods: app.viewport.mesh_lods.clone() }
@@ -1453,14 +1467,14 @@ impl Instances {
 }
 
 /// The shared mesh `b`'s faces are drawn from and the move that places it ([`drawn_mesh`]
-/// without making the moved copy); `None` for a body drawn finer than its display quality.
+/// without making the moved copy), including view-dependent refinement.
 fn shared_mesh(
     app: &SolveApp,
     b: &solidcraft_engine::doc::ModelBody,
 ) -> Option<(std::sync::Arc<solidcraft_engine::geom::Mesh>, solidcraft_engine::doc::Mat)> {
     use solidcraft_engine::doc::display_quality::{DisplayQuality, current};
-    if refined(app, b).is_some() {
-        return None;
+    if let Some((_, mesh)) = refined(app, b) {
+        return Some((mesh, b.display_transform()));
     }
     let q = current();
     Some(if q == DisplayQuality::Normal && !app.viewport.gpu.is_some_and(|g| g.tess) {
@@ -3629,7 +3643,9 @@ impl HighlightInstances {
         if app.preview.effective_replaced().contains(&b.name) || !app.session.doc.face_colors(b).is_empty() {
             return false;
         }
-        let Some((mesh, m)) = shared_mesh(app, b) else { return false };
+        // Render uses the reference mesh even when Design has refined it.
+        let placed = if crate::render_workspace::active(app) { Some(b.mesh_in_place()) } else { shared_mesh(app, b) };
+        let Some((mesh, m)) = placed else { return false };
         let key = std::sync::Arc::as_ptr(&mesh) as usize;
         let at = match self.by_mesh.get(&key) {
             Some(i) => *i,
@@ -7962,6 +7978,28 @@ mod tests {
         }
     }
 
+    #[test]
+    fn refined_placements_still_draw_one_shared_mesh() {
+        let app = three_placed_parts(PARTS[1]);
+        let world = app.session.world_state();
+        let q = solidcraft_engine::doc::display_quality::current();
+        let chord = world.bodies[0].display_chord(q);
+        for body in &world.bodies {
+            assert_eq!(body.display_chord(q), chord, "turning a placement retains the source tolerance");
+            assert!(app.viewport.lod.lock().unwrap().force(body, q, 2));
+        }
+        let mesh = refined(&app, &world.bodies[0]).unwrap().1;
+        for body in &world.bodies {
+            assert!(std::sync::Arc::ptr_eq(&mesh, &refined(&app, body).unwrap().1));
+        }
+        let scene = build_scene(&app);
+        assert_eq!(scene.instanced.len(), 1);
+        assert_eq!(scene.instanced[0].count(), 3);
+        assert!(scene.planned.is_empty());
+        assert!(scene.blocks.iter().all(|b| b.bytes.vertices.is_empty()));
+        assert_eq!(scene.merged().tris.len(), mesh.triangles.len() * 3 * 3 * crate::gpu::TRI_SIZE);
+    }
+
     fn placed_three_times_is_drawn_from_one_copy(part: (&str, &str), flat: bool) {
         let app = three_placed_parts(part);
         let st = app.session.world_state();
@@ -9321,11 +9359,11 @@ mod tests {
         assert!(app.viewport.hover.is_some());
     }
 
-    /// After a close-up refines a body (#1320), the model draws it from the refined plan (on the
-    /// GPU) or its mesh (on the CPU), its edges come from that mesh too, and a hovered face lights
+    /// After a close-up refines a body (#1320), the model instances its refined mesh,
+    /// its edges come from that mesh too, and a hovered face lights
     /// exactly triangles the model draws, never another triangulation (#1064).
     #[test]
-    fn a_refined_body_highlights_on_its_drawn_triangles() {
+    fn body_highlights_use_the_refined_or_instanced_triangles() {
         use solidcraft_engine::doc::display_quality::current;
         let tris_of = |bytes: &[u8]| -> Vec<[u32; 9]> {
             bytes
@@ -9355,13 +9393,14 @@ mod tests {
             let key = scene_key(&app);
             assert!(app.viewport.lod.lock().unwrap().force(&body, current(), 2));
             assert_ne!(scene_key(&app), key, "a refinement rebuilds the scene");
-            let (plan, mesh) = refined(&app, &body).unwrap();
+            let (_, mesh) = refined(&app, &body).unwrap();
             assert!(mesh.triangles.len() > body.plan_mesh().unwrap().triangles.len() * 2);
-            let scene = build_scene(&app).merged();
-            if tess {
-                assert!(std::sync::Arc::ptr_eq(&scene.planned[0].plan, &plan), "faces drawn from the refined plan");
-            } else {
-                assert_eq!(scene.tris.len(), mesh.triangles.len() * 3 * crate::gpu::TRI_SIZE, "faces built from the refined mesh");
+            let scene = build_scene(&app);
+            assert_eq!(scene.instanced.len(), 1, "refinement retains the instancing path");
+            assert!(scene.planned.is_empty());
+            let scene = scene.merged();
+            assert_eq!(scene.tris.len(), mesh.triangles.len() * 3 * crate::gpu::TRI_SIZE);
+            if !tess {
                 assert!(scene.tris.len() > before.tris.len());
             }
             // Edges (lines) from the refined mesh: finer polylines.
@@ -9376,6 +9415,27 @@ mod tests {
                 lit_faces += 1;
             }
             assert!(lit_faces >= 3, "{lit_faces} faces");
+        }
+        for faded in [false, true] {
+            let mut app = three_placed_parts(PARTS[1]);
+            app.viewport.gpu.as_mut().unwrap().tess = true;
+            if faded {
+                app.run("component.create", json!({"name":"Editing another part"})).unwrap();
+            } else {
+                app.run("appearance.assign", json!({"bodies":["Body1"],"color":"#ff0000","opacity":0.4})).unwrap();
+            }
+            let body = app.session.world_state().bodies[0].clone();
+            let scene = build_scene(&app);
+            assert!(!scene.instanced.is_empty());
+            let scene = scene.merged();
+            let drawn: std::collections::HashSet<_> = tris_of(if faded { &scene.trans } else { &scene.glass }).into_iter().collect();
+            assert!(!drawn.is_empty());
+            for index in 0..body.body.face_count() {
+                app.viewport.hover = Some(Hit::Face { body: body.name.clone(), index, point: Vec3::ZERO });
+                let lit = tris_of(&build_highlight(&app).merged().tris);
+                assert!(!lit.is_empty());
+                assert!(lit.iter().all(|t| drawn.contains(t)), "faded {faded}, face {index}: feedback must use the instanced triangles");
+            }
         }
     }
 

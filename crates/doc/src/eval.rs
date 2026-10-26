@@ -224,6 +224,38 @@ impl ModelBody {
         self.mesh.clone()
     }
 
+    /// Immutable display geometry before a proper rigid placement. Different placements keep
+    /// their own display identities, but can plan and draw this source once.
+    pub fn display_source_identity(&self) -> Arc<dyn std::any::Any + Send + Sync> {
+        self.mesh_placement.as_deref().map_or_else(|| self.display_identity(), placed_mesh::PlacedMesh::identity)
+    }
+
+    /// The proper rigid move from the shared display source to this body.
+    pub fn display_transform(&self) -> crate::Mat {
+        self.mesh_placement.as_deref().map_or(crate::IDENTITY, placed_mesh::PlacedMesh::transform)
+    }
+
+    /// The display source's chord tolerance. Turning a placement's bounding box must not
+    /// change the error used to choose a detail level for the shared source.
+    pub fn display_chord(&self, q: crate::display_quality::DisplayQuality) -> f64 {
+        self.mesh_placement.as_deref().map_or_else(|| q.chord(self.body.size()), |placed| placed.chord(q))
+    }
+
+    /// A shared source's display mesh where this body stands. Only callers that require world
+    /// coordinates need this copy; the viewport draws the source mesh with its placement.
+    pub fn place_display_mesh(&self, mesh: &Arc<Mesh>) -> Arc<Mesh> {
+        self.mesh_placement.as_deref().map_or_else(|| mesh.clone(), |placed| placed.place_mesh(mesh))
+    }
+
+    /// Refine in the definition's frame, placed by [`Self::display_transform`]. The caller
+    /// owns the refinement's lifetime; no view-dependent data is retained by the document.
+    pub fn refined_display_in_place(&self, q: crate::display_quality::DisplayQuality, k: u8) -> Option<(Arc<TessPlan>, Arc<Mesh>)> {
+        match self.mesh_placement.as_deref() {
+            Some(placed) => placed.refinement(q, k),
+            None => self.refined_display(q, k),
+        }
+    }
+
     /// [`ModelBody::mesh`] as a shared mesh and the move that places it: for a rigid placement
     /// of a definition, the definition's own mesh (the same one for every placement of it) and
     /// the placement; for any other body its own mesh, unmoved. The mesh moved by the matrix is
@@ -303,15 +335,7 @@ impl ModelBody {
         if k == 0 {
             return Some((self.display_plan_at(q)?, self.plan_mesh_at(q)?));
         }
-        let plan = match self.body.display_plan_angular(q.refined_chord(self.body.size(), k), q.refined_angle(k)) {
-            Ok(plan) => plan,
-            Err(e) => {
-                log::debug!("{}: no display plan refined {k} steps ({e})", self.name);
-                return None;
-            }
-        };
-        let mesh = self.body.display_mesh_of(&plan).ok()?;
-        Some((Arc::new(plan), Arc::new(mesh)))
+        placed_mesh::refined(&self.body, q, k)
     }
 
     /// The chord tolerance of [`ModelBody::mesh`] (mm): 1/1000 of the definition's size, at least

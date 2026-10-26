@@ -34,6 +34,31 @@ enum SourceKey {
 static IMPORTED: OnceLock<Mutex<HashMap<SourceKey, Weak<PlacedMesh>>>> = OnceLock::new();
 
 impl PlacedMesh {
+    pub(super) fn identity(&self) -> Arc<dyn std::any::Any + Send + Sync> {
+        self.mesh.clone()
+    }
+
+    pub(super) fn transform(&self) -> crate::Mat {
+        self.transform
+    }
+
+    pub(super) fn chord(&self, q: crate::display_quality::DisplayQuality) -> f64 {
+        q.chord(self.body.size())
+    }
+
+    pub(super) fn refinement(&self, q: crate::display_quality::DisplayQuality, k: u8) -> Option<(Arc<TessPlan>, Arc<Mesh>)> {
+        let (plan, mesh) = if k == 0 {
+            (definition_plan(&self.body, self.plans.get(q.index())?, q, "display")?, self.source_plan_mesh(q, "display")?.0)
+        } else {
+            refined(&self.body, q, k)?
+        };
+        Some((plan, mesh))
+    }
+
+    pub(super) fn place_mesh(&self, mesh: &Arc<Mesh>) -> Arc<Mesh> {
+        if crate::is_identity(&self.transform) { mesh.clone() } else { Arc::new(self.moved(mesh)) }
+    }
+
     /// Share the original definition, never a chain of previously placed meshes. A source's
     /// OnceLock lives with its immutable geometry, so edits get a new source automatically.
     pub(super) fn new(source: &ModelBody, transform: &crate::Mat) -> Option<Self> {
@@ -179,6 +204,18 @@ impl PlacedMesh {
             sharp_edges: source.sharp_edges.clone(),
         }
     }
+}
+
+pub(super) fn refined(body: &Body, q: crate::display_quality::DisplayQuality, k: u8) -> Option<(Arc<TessPlan>, Arc<Mesh>)> {
+    let plan = match body.display_plan_angular(q.refined_chord(body.size(), k), q.refined_angle(k)) {
+        Ok(plan) => plan,
+        Err(e) => {
+            log::debug!("display: no plan refined {k} steps ({e})");
+            return None;
+        }
+    };
+    let mesh = body.display_mesh_of(&plan).ok()?;
+    Some((Arc::new(plan), Arc::new(mesh)))
 }
 
 /// The display plan of a definition `body` at quality `q`, made once in `cell`.
