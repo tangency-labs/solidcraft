@@ -21,6 +21,10 @@ impl Host for Worker {
             | Operation::Synchronize(c)
             | Operation::Thumbnail { connection: c, .. }
             | Operation::Open { connection: c, .. }
+            | Operation::Trash(c)
+            | Operation::History { connection: c, .. }
+            | Operation::Manage { connection: c, .. }
+            | Operation::Discard { connection: c, .. }
             | Operation::Save { connection: c, .. } => c.id.clone(),
         };
         let job = Job::new(connection)?;
@@ -68,10 +72,122 @@ fn latest(worker: &Worker, kind: &str) -> Job {
         .unwrap()
         .iter()
         .rev()
-        .find(|(_, op)| matches!((kind, op), ("list", Operation::List(_)) | ("open", Operation::Open { .. }) | ("save", Operation::Save { .. })))
+        .find(|(_, op)| {
+            matches!(
+                (kind, op),
+                ("list", Operation::List(_))
+                    | ("open", Operation::Open { .. })
+                    | ("save", Operation::Save { .. })
+                    | ("history", Operation::History { .. })
+                    | ("manage", Operation::Manage { .. })
+                    | ("discard", Operation::Discard { .. })
+                    | ("trash", Operation::Trash(_))
+            )
+        })
         .unwrap()
         .0
         .clone()
+}
+
+#[test]
+fn management_waits_for_history_preserves_observed_revision_and_recovers_a_queued_action() {
+    for dark in [false, true] {
+        let (mut h, worker, destination) = setup(dark);
+        show_listing(&mut h, &worker, &destination);
+        h.app.start("cloud.rename");
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"cloud:manage:delete"}})).unwrap();
+        assert!(!worker.jobs.lock().unwrap().iter().any(|(_, op)| matches!(op, Operation::Manage { .. })));
+        let history = json!({"revision":"a".repeat(64),"revisions":[{"commit":"b".repeat(40),"file":destination.file,"date":"2026-10-26T00:00:00Z","message":"Save bracket"}]});
+        latest(&worker, "history")
+            .update(|s| {
+                s.phase = Phase::Ready;
+                s.result = Some(history.clone());
+            })
+            .unwrap();
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"cloud:manage:name"}})).unwrap();
+        h.call("ui.key", json!({"key":"A","ctrl":true}));
+        h.call("ui.text", json!({"text":"Renamed bracket"}));
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"cloud:manage:rename"}})).unwrap();
+        {
+            let jobs = worker.jobs.lock().unwrap();
+            let (_, Operation::Manage { destination: actual, expected_revision, change, .. }) =
+                jobs.iter().rev().find(|(_, op)| matches!(op, Operation::Manage { .. })).unwrap()
+            else {
+                panic!("management")
+            };
+            assert_eq!(actual, &destination);
+            assert_eq!(expected_revision.as_deref(), Some("a".repeat(64).as_str()));
+            assert_eq!(change, &solidcraft_cloud::management::Change::Rename { file: "parts/Renamed bracket".into() });
+        }
+        let job = latest(&worker, "manage");
+        let count = worker.jobs.lock().unwrap().len();
+        h.step(&json!({"click":{"handle":"cloud:manage:rename"}})).unwrap();
+        assert_eq!(worker.jobs.lock().unwrap().len(), count, "busy actions do not submit twice");
+        job.update(|s| {
+            s.phase = Phase::SavedLocally;
+            s.saved_locally = true;
+            s.revision = Some("c".repeat(64));
+            s.message = Some("offline".into());
+        })
+        .unwrap();
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"cloud:manage:discard"}})).unwrap();
+        let discard = latest(&worker, "discard");
+        discard.fail(solidcraft_cloud::Error::Storage("repository unavailable".into())).unwrap();
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"cloud:manage:discard"}})).unwrap();
+        latest(&worker, "discard").update(|s| s.phase = Phase::Synced).unwrap();
+        h.frames(2);
+        latest(&worker, "history")
+            .update(|s| {
+                s.phase = Phase::Ready;
+                s.result = Some(history);
+            })
+            .unwrap();
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"cloud:manage:delete"}})).unwrap();
+        h.step(&json!({"click":{"handle":"cloud:manage:delete:confirm"}})).unwrap();
+        latest(&worker, "manage").update(|s| s.phase = Phase::Synced).unwrap();
+        h.frames(2);
+        latest(&worker, "trash")
+            .update(|s| {
+                s.phase = Phase::Ready;
+                s.result = Some(json!([destination]));
+            })
+            .unwrap();
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"cloud:trash:0"}})).unwrap();
+        latest(&worker,"history").update(|s|{s.phase=Phase::Ready;s.result=Some(json!({"revision":"d".repeat(64),"deleted":true,"revisions":[{"commit":"b".repeat(40),"file":destination.file,"date":"2026-10-26T00:00:00Z","message":"Saved before deletion"}]}));}).unwrap();
+        h.frames(2);
+        h.step(&json!({"click":{"handle":"cloud:manage:revision:0"}})).unwrap();
+        h.step(&json!({"click":{"handle":"cloud:manage:restore"}})).unwrap();
+        let jobs = worker.jobs.lock().unwrap();
+        let (_, Operation::Manage { change, .. }) = jobs.iter().rev().find(|(_, op)| matches!(op, Operation::Manage { .. })).unwrap() else {
+            panic!("restore")
+        };
+        assert!(matches!(change,solidcraft_cloud::management::Change::Restore {commit,file} if commit==&"b".repeat(40) && file==&destination.file));
+        drop(jobs);
+        h.app.session.doc_mut().name = "Keep my open design".into();
+        latest(&worker, "manage").update(|s| s.phase = Phase::Synced).unwrap();
+        h.frames(2);
+        assert!(h.app.cloud.browser.opening.is_some(), "restoration starts an Open after this frame's status poll");
+        assert_eq!(h.app.session.doc.name, "Keep my open design");
+        let opening = latest(&worker, "open");
+        opening
+            .update(|s| {
+                s.destination = Some(destination.clone());
+                s.revision = Some("e".repeat(64));
+            })
+            .unwrap();
+        opening.opened(solidcraft_engine::io::cloud::prepare_document(&Document::new("Restored bracket")).unwrap()).unwrap();
+        h.frames(3);
+        assert_eq!(h.app.session.doc.name, "Restored bracket");
+        assert_eq!(h.app.docs.count(), 2, "restoring keeps the existing edited design in its tab");
+        assert_eq!(h.app.session.cloud_binding().unwrap().destination, destination);
+    }
 }
 
 fn show_listing(h: &mut Harness, worker: &Worker, destination: &Destination) {

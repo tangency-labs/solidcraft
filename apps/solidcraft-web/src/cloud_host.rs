@@ -12,6 +12,8 @@ use crate::{
     cloud_storage::{Store, with_lock},
 };
 
+#[path = "cloud_host/management.rs"]
+mod management;
 #[path = "cloud_host/receive.rs"]
 mod receive;
 
@@ -97,6 +99,11 @@ async fn synchronize(connection: Connection, store: Store, job: Job, target: Opt
                     status.destination = Some(published.destination.clone());
                     status.result = Some(serde_json::json!(published));
                     status.publications.push(published);
+                    if let Some(published) = status.publications.last()
+                        && let Ok(Some(change)) = solidcraft_cloud::management::Managed::confirmed(target, published)
+                    {
+                        status.managed.push(change);
+                    }
                     status.phase = Phase::Synced;
                 })?;
                 return Ok(());
@@ -155,8 +162,12 @@ async fn synchronize(connection: Connection, store: Store, job: Job, target: Opt
             .await;
             match result {
                 Ok(published) => {
+                    let managed = solidcraft_cloud::management::Managed::confirmed(&save, &published)?;
                     let value = serde_json::json!(published);
-                    job.update(|status| status.publications.push(published.clone()))?;
+                    job.update(|status| {
+                        status.publications.push(published.clone());
+                        status.managed.extend(managed);
+                    })?;
                     if target.as_ref().is_some_and(|target| target.id == save.id) {
                         job.update(|status| {
                             status.destination = Some(published.destination);
@@ -227,8 +238,12 @@ async fn run(operation: Operation, job: &Job) -> Result<()> {
     let connection = match &operation {
         Operation::Test(connection)
         | Operation::List(connection)
+        | Operation::Trash(connection)
         | Operation::Synchronize(connection)
         | Operation::Thumbnail { connection, .. }
+        | Operation::History { connection, .. }
+        | Operation::Manage { connection, .. }
+        | Operation::Discard { connection, .. }
         | Operation::Open { connection, .. }
         | Operation::Save { connection, .. } => connection.clone(),
         _ => return Err(storage("invalid repository operation")),
@@ -237,13 +252,76 @@ async fn run(operation: Operation, job: &Job) -> Result<()> {
     job.update(|status| status.storage_persistent = Some(store.persistent))?;
     check_cancelled(job)?;
     match operation {
+        Operation::Discard { connection, destination, revision } => {
+            management::discard(store, connection, destination, revision.clone(), job.clone()).await?;
+            job.update(|s| {
+                s.result = Some(serde_json::json!({"discarded":revision}));
+                s.phase = Phase::Synced;
+            })?;
+        }
+        Operation::Manage { connection, destination, expected_revision, change } => {
+            let save = management::stage(&store, &connection, &destination, expected_revision, &change, job).await?;
+            job.update(|status| {
+                status.destination = Some(save.record.destination.clone());
+                status.revision = Some(save.record.id.clone());
+                status.change = Some(change);
+            })?;
+            let record = store.stage(save).await?;
+            let change = record.manifest.change()?;
+            job.update(|status| {
+                status.change = change;
+                status.saved_locally = true;
+                status.phase = Phase::Syncing;
+                status.destination = Some(record.destination.clone());
+                status.revision = Some(record.id.clone());
+            })?;
+            synchronize(connection, store, job.clone(), Some(record)).await?;
+        }
+        Operation::Trash(connection) => {
+            let entries = management::trash(&store, &connection, job).await?;
+            job.update(|s| {
+                s.result = Some(serde_json::json!(entries));
+                s.phase = Phase::Ready;
+            })?;
+        }
+        Operation::History { connection, destination } => {
+            let mut history =
+                match async { repository(&connection, job).await?.history(&destination, solidcraft_engine::io::cloud::check_document).await }.await {
+                    Ok(result) => result,
+                    Err(error @ Error::Storage(_)) => {
+                        let Some(cached) = store.cached(&destination).await? else { return Err(error) };
+                        job.update(|s| s.message = Some(error.to_string()))?;
+                        solidcraft_cloud::management::History {
+                            revision: cached.revision,
+                            revisions: Vec::new(),
+                            queued: false,
+                            deleted: cached.save.manifest.deleted(),
+                        }
+                    }
+                    Err(error) => return Err(error),
+                };
+            if let Some(pending) = pending_tip(&store, &destination).await? {
+                history.queued = pending.manifest.change()?.is_some();
+                history.revision = Some(pending.id);
+            }
+            job.update(|s| {
+                s.result = Some(serde_json::json!(history));
+                s.phase = Phase::Ready;
+            })?;
+        }
         Operation::Save { connection, save, synchronize: publish } => {
             save.record.check_connection(&connection)?;
             let document =
                 save.objects.get(&format!("documents/{}", save.record.manifest.document_hash)).ok_or_else(|| storage("captured document missing"))?;
             solidcraft_engine::io::cloud::check_document(document)?;
-            let record = store.stage(*save).await?;
             job.update(|status| {
+                status.destination = Some(save.record.destination.clone());
+                status.revision = Some(save.record.id.clone());
+            })?;
+            let record = store.stage(*save).await?;
+            let change = record.manifest.change()?;
+            job.update(|status| {
+                status.change = change;
                 status.saved_locally = true;
                 status.phase = if publish { Phase::Syncing } else { Phase::SavedLocally };
                 status.destination = Some(record.destination.clone());
@@ -267,6 +345,8 @@ async fn run(operation: Operation, job: &Job) -> Result<()> {
                     pending.push(save);
                 }
             }
+            let has_local = !cached.is_empty() || !pending.is_empty();
+            let hidden: Vec<_> = pending.iter().filter(|s| s.manifest.deleted()).map(|s| s.destination.clone()).collect();
             let mut catalog = solidcraft_cloud::stored_designs(cached, pending)?;
             let mut destinations = BTreeMap::new();
             for entry in &catalog {
@@ -278,13 +358,16 @@ async fn run(operation: Operation, job: &Job) -> Result<()> {
                         destinations.insert(destination.design_path()?, destination);
                     }
                 }
-                Err(error @ Error::Storage(_)) if !destinations.is_empty() => job.update(|status| status.message = Some(error.to_string()))?,
+                Err(error @ Error::Storage(_)) if has_local => job.update(|status| status.message = Some(error.to_string()))?,
                 Err(error) => return Err(error),
             }
             for entry in catalog.iter().filter(|entry| entry.outdated) {
                 store.mark_outdated(entry).await?;
             }
             check_cancelled(job)?;
+            for destination in hidden {
+                destinations.remove(&destination.design_path()?);
+            }
             job.update(|status| {
                 status.result = Some(serde_json::json!(destinations.into_values().collect::<Vec<_>>()));
                 status.catalog = catalog;
@@ -336,8 +419,12 @@ impl Host for BrowserHost {
             Operation::Setup(connection)
             | Operation::Test(connection)
             | Operation::List(connection)
+            | Operation::Trash(connection)
             | Operation::Synchronize(connection)
             | Operation::Thumbnail { connection, .. }
+            | Operation::History { connection, .. }
+            | Operation::Manage { connection, .. }
+            | Operation::Discard { connection, .. }
             | Operation::Open { connection, .. }
             | Operation::Save { connection, .. } => Some(connection),
         };

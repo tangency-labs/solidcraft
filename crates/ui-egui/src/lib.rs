@@ -1607,6 +1607,10 @@ impl SolveApp {
             cloud_browser::start(self, id);
             return;
         }
+        if matches!(id, "cloud.history" | "cloud.trash" | "cloud.rename" | "cloud.delete" | "cloud.restore" | "cloud.discard") {
+            cloud_browser::management::start(self, id);
+            return;
+        }
         if id == "ui.palette" {
             shortcut_box::open(self, None);
             return;

@@ -1,6 +1,6 @@
 # Cloud saves implementation
 
-Git-backed cloud saves are implemented on the feature branch for #4838 and draft PR #4839. The feature is unreleased.
+Git-backed cloud saves are implemented on the feature branch for #4838 and PR #4839. The feature is unreleased.
 
 ## Modules
 
@@ -47,6 +47,30 @@ the default cloud destination picker for normal Save; existing disk files contin
 using their disk destination. Repository selection never changes the saved default.
 
 ## Integration contract
+
+### Design management
+
+`solidcraft_cloud::management` defines rename, Trash and restore intents, bounded
+history entries and matching confirmed-management notifications. The intents use
+the required `lifecycle/1` manifest capability, so they travel through the existing
+durable save queue and immutable revision identities. `Publication` produces one
+atomic write batch; native Git and Octocrab publish it using their normal receipts,
+non-forced refs and retry machinery. Concurrent design changes stop management
+before it can replace another revision.
+
+`solidcraft_io::cloud::prepare_change` edits lightweight metadata while preserving
+immutable asset references. Native and browser management workers select a
+verified current or locally queued head, check the expected revision, and stage
+the intent before publication. Historical reads use ordinary Git objects or
+Octocrab's typed Git Database and commit-list APIs. Versions are bounded to 50
+entries across at most 16 previous project-relative paths; commit dates are sorted
+by their timestamps while preserving history order for equal timestamps.
+
+The UI client lives in `cloud_browser/management.rs`. Confirmed rename and Trash
+notifications propagate to matching active/background bindings. Later edits stay
+dirty; an open deleted design becomes an unsaved local copy. Restore opens its
+confirmed head separately. Pending management and its assets remain local until
+publication, and immutable receipts make restarts idempotent.
 
 Host setup and repository access are separate adapters. A host setup adapter supplies guided authentication, repository discovery/creation, and host settings links. The native repository adapter uses standard Git; a browser adapter uses a CORS-compatible provider interface. Adding GitLab or Gitea setup must not change the snapshot format.
 
@@ -145,7 +169,7 @@ wasm-bindgen --target web --out-dir /tmp/solidcraft-cloud-browser-site \
 cargo xtask cloud-storage-test --site /tmp/solidcraft-cloud-browser-site
 ```
 
-Set `CC_wasm32_unknown_unknown` to a WASM-capable Clang when required by Zstd. The test reuses the repository's Chrome/DevTools harness (`CHROME` overrides the browser path), creates an isolated profile and origin, and terminates/restarts Chrome with the same profile. It covers queued and confirmed recovery, simultaneous tabs, failed closes, uncertain/aborted commits, future formats, corrupt chunks, and a 101 MiB asset with deduplication. It verifies normal engine Save captures a model PNG through the browser app’s CPU renderer, then reopens the preview and editable design offline after restart. It also runs the actual browser worker through durable settings, independent credentials, offline CAD opening/listing, failed synchronization, cancellation of a stalled Fetch, and confirmed cached opening after another restart. A future-schema capture with a missing asset must request an upgrade before asset access or any repository request. Publication acknowledgements in this fixture are stubs; Fetch is intercepted for failure/cancellation checks, and no real token or authenticated upload is used. Authenticated publication is covered separately by the opt-in interoperability fixture below. Home and Settings interactions have also been exercised in actual desktop runs in both themes.
+Set `CC_wasm32_unknown_unknown` to a WASM-capable Clang when required by Zstd. The test reuses the repository's Chrome/DevTools harness (`CHROME` overrides the browser path), creates an isolated profile and origin, and terminates/restarts Chrome with the same profile. It covers queued and confirmed recovery, rename and Trash intents across restarts, discarding queued management without deleting recovery data, simultaneous tabs, failed closes, uncertain/aborted commits, future formats, corrupt chunks, and a 101 MiB asset with deduplication. It verifies normal engine Save captures a model PNG through the browser app’s CPU renderer, then reopens the preview and editable design offline after restart. It also runs the actual browser worker through durable settings, independent credentials, offline CAD opening/listing, failed synchronization, cancellation of a stalled Fetch, and confirmed cached opening after another restart. A future-schema capture with a missing asset must request an upgrade before asset access or any repository request. Publication acknowledgements in this fixture are stubs; Fetch is intercepted for failure/cancellation checks, and no real token or authenticated upload is used. Authenticated publication is covered separately by the opt-in interoperability fixture below. Home and Settings interactions have also been exercised in actual desktop runs in both themes.
 
 ## Engine command interface
 
@@ -165,6 +189,13 @@ the durable host store, independently of the engine's bounded status history.
 | `cloud.thumbnail`, `cloud.thumbnail.finish` | Fetch a bounded optional preview for a destination, then consume its transient image result once. |
 | `cloud.open.finish` | Validate and adopt the completed snapshot, preserving the host and connection settings. |
 | `cloud.save` | Capture the current document and visibility, submit its durable save, and retain its expected parent revision. An unchanged design at its bound destination returns `unchanged: true` without an operation, snapshot, or revision; a different destination creates a copy. |
+| `cloud.website` | Return the selected GitHub repository's canonical website URL. |
+| `cloud.history` | Read the observed revision and up to 50 historical versions across the design's previous project-relative paths. |
+| `cloud.trash` | List recoverable deleted designs for one repository. |
+| `cloud.rename` | Queue a rename against its observed revision, preserving the source and checking the target at publication. |
+| `cloud.delete` | Queue a recoverable Trash revision against its observed revision. |
+| `cloud.restore` | Capture a selected historical commit and path, then publish it against the observed current revision. |
+| `cloud.discard` | Remove one queued management intent after checking it has not reached the repository and no later saves depend on it; retain saved design data. |
 | `cloud.status`, `cloud.cancel` | Poll operations or cancel work while retaining already durable snapshots. |
 
 Run cloud commands on the live session. Scratch sessions intentionally do not
@@ -264,7 +295,7 @@ unavailable keychain does not prevent local checkout opens. Commits use the conf
 identity; missing identity fields get per-command fallbacks without editing Git config.
 
 The Start page opens this wizard and browses connected repositories. The Cloud
-Saves preference editor manages pending connection edits. All setup labels cover the 25
+Saves preference editor manages pending connection edits. All setup labels cover all
 supported locale catalogs, including en-GB.
 
 ## Cloud Saves preferences

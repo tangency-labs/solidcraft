@@ -83,6 +83,39 @@ async fn directory(parent: &FileSystemDirectoryHandle, name: &str, create: bool)
 }
 
 impl Store {
+    pub async fn discard_management(&self, save: PendingSave) -> Result<()> {
+        if save.manifest.change()?.is_none() {
+            return Err(storage("ordinary saved edits cannot be discarded as management"));
+        }
+        let store = self.clone();
+        with_lock(&self.lock, async move {
+            let current = store.record(&save.id).await?.ok_or_else(|| storage("this action is no longer queued; refresh"))?;
+            if serde_json::to_vec(&current).map_err(storage)? != serde_json::to_vec(&save).map_err(storage)? {
+                return Err(Error::Conflict);
+            }
+            if store.receipt(&save.id).await?.is_some() {
+                return Err(storage("this action is confirmed; synchronize before managing it again"));
+            }
+            let cached = store.cached(&save.destination).await?;
+            if let Some(entry) = &cached {
+                store.check_cached_document(entry).await?;
+            }
+            let key = cache_key(&save.destination)?;
+            let transaction = store
+                .database
+                .transaction(["pending", "cached"])
+                .with_mode(TransactionMode::Readwrite)
+                .with_options(TransactionOptions::new().with_durability(TransactionDurability::Strict))
+                .build()
+                .map_err(storage)?;
+            if cached.is_some_and(|e| e.save.id == save.id) {
+                transaction.object_store("cached").map_err(storage)?.delete(key.as_str()).await.map_err(storage)?;
+            }
+            transaction.object_store("pending").map_err(storage)?.delete(save.id.as_str()).await.map_err(storage)?;
+            transaction.commit().await.map_err(storage)
+        })
+        .await
+    }
     pub async fn open(connection: Connection) -> Result<Self> {
         connection.validate()?;
         let identity = solidcraft_cloud::digest(connection.id.as_bytes());

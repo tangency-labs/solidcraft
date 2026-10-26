@@ -1,7 +1,7 @@
 //! Confirmed parent destinations survive browser restarts without rewriting captures.
 use crate::cloud_storage::Store;
 use serde_json::{Value, json};
-use solidcraft_cloud::{Connection, Destination, Error, PendingSave, Published, Result, Snapshot};
+use solidcraft_cloud::{Connection, Destination, Error, PendingSave, Published, Result, Snapshot, management::Change};
 use std::collections::BTreeMap;
 
 fn require(condition: bool, message: &str) -> Result<()> {
@@ -20,6 +20,73 @@ pub(super) async fn phase(name: &str, identity: String) -> Result<Value> {
     let connection = Connection { id: identity, repository: "fixture/lineage".into(), ..Default::default() };
     let store = Store::open(connection.clone()).await?;
     match name {
+        "lineage-management-write" => {
+            let first = store.stage(staged(&connection, "Custom title", None)?).await?;
+            store
+                .confirm(
+                    first.clone(),
+                    Published { destination: first.destination.clone(), revision: first.id.clone(), commit: "a".repeat(40), conflict: false },
+                )
+                .await?;
+            let snapshot = solidcraft_engine::io::cloud::prepare_change(
+                store.recover(&first).await?,
+                &first.destination,
+                &Change::Rename { file: "parts/renamed bracket".into() },
+            )?;
+            store.stage(PendingSave::stage(&connection, "Robot", "parts/bracket", Some(first.id), snapshot)?).await?;
+        }
+        "lineage-management-read" => {
+            let pending = store.pending().await?;
+            require(pending.len() == 1, "one rename survives browser restart")?;
+            let rename = pending.first().ok_or_else(|| Error::Storage("queued rename missing".into()))?;
+            let change = rename.manifest.change()?.ok_or_else(|| Error::Storage("rename intent missing".into()))?;
+            require(matches!(change, Change::Rename { .. }), "queued rename intent retained")?;
+            let destination = change.destination(&rename.destination);
+            let published = Published { destination: destination.clone(), revision: rename.id.clone(), commit: "b".repeat(40), conflict: false };
+            store.confirm(rename.clone(), published.clone()).await?;
+            store.confirm(rename.clone(), published).await?;
+            require(store.cached(&rename.destination).await?.is_none(), "rename removes the old cached path")?;
+            let cached = store.cached(&destination).await?.ok_or_else(|| Error::Storage("renamed cache missing".into()))?;
+            let snapshot = store.recover(&cached.save).await?;
+            let metadata: Value = serde_json::from_slice(&snapshot.document).map_err(|e| Error::Storage(e.to_string()))?;
+            require(metadata["name"] == "renamed bracket", "renamed document title retained")?;
+            let snapshot = solidcraft_engine::io::cloud::prepare_change(snapshot, &destination, &Change::Delete)?;
+            let deletion = store.stage(PendingSave::stage(&connection, "Robot", &destination.file, Some(rename.id.clone()), snapshot)?).await?;
+            require(
+                solidcraft_cloud::stored_designs(store.cached_entries().await?, store.pending().await?)?.is_empty(),
+                "queued Trash hides the active design",
+            )?;
+            store.discard_management(deletion.clone()).await?;
+            require(store.pending().await?.is_empty(), "discard removes only the queued intent")?;
+            require(!store.recover(&deletion).await?.document.is_empty(), "discard preserves recovery objects")?;
+            let retry =
+                PendingSave::stage(&connection, "Robot", &destination.file, deletion.expected_revision.clone(), store.recover(&deletion).await?)?;
+            require(retry.record.id == deletion.id, "retried Trash retains its immutable revision")?;
+            store.stage(retry).await?;
+        }
+        "lineage-management-confirm" => {
+            let pending = store.pending().await?;
+            require(pending.len() == 1, "retried Trash survives browser restart without duplicates")?;
+            let deletion = pending.first().ok_or_else(|| Error::Storage("queued Trash missing".into()))?;
+            require(deletion.manifest.deleted(), "Trash intent retained")?;
+            store
+                .confirm(
+                    deletion.clone(),
+                    Published { destination: deletion.destination.clone(), revision: deletion.id.clone(), commit: "c".repeat(40), conflict: false },
+                )
+                .await?;
+        }
+        "lineage-management-confirmed-read" => {
+            require(store.pending().await?.is_empty(), "confirmed Trash remains acknowledged after restart")?;
+            require(
+                solidcraft_cloud::stored_designs(store.cached_entries().await?, store.pending().await?)?.is_empty(),
+                "confirmed Trash stays out of active designs",
+            )?;
+            let destination = Destination { connection: connection.id.clone(), project: "Robot".into(), file: "parts/renamed bracket".into() };
+            let cached = store.cached(&destination).await?.ok_or_else(|| Error::Storage("recoverable Trash missing".into()))?;
+            require(cached.save.manifest.deleted() && store.receipt(&cached.save.id).await?.is_some(), "Trash and receipt retained")?;
+            store.recover(&cached.save).await?;
+        }
         "lineage-write" => {
             let first = store.stage(staged(&connection, "Offline first", None)?).await?;
             let child = store.stage(staged(&connection, "Offline child", Some(first.id.clone()))?).await?;

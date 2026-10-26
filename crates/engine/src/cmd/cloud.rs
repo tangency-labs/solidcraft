@@ -8,6 +8,7 @@ use crate::{
     cloud::{Binding, Capture, error},
     params::bad,
 };
+pub(super) mod management;
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("cloud.ssh.generate", "Generate SSH Key", generate_key)
@@ -64,7 +65,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("save")
         .noundo()
         .doc_only()
-        .params("destination?: {connection,project,file}, otherwise current binding; returns durable-save operation id"),
+        .params("destination?: {connection,project,file}, otherwise current binding; returns durable-save operation id, or unchanged: true for an unchanged bound design"),
     CommandSpec::new("cloud.sync", "Synchronize Repository", sync)
         .icon("send")
         .noundo()

@@ -13,6 +13,7 @@ use sha2::Digest as _;
 
 use crate::{Connection, Destination, Error, Manifest, PROJECT_MARKER, PendingSave, Project, Publication, Published, Result, Snapshot};
 
+mod management;
 #[cfg(test)]
 mod tests;
 
@@ -129,8 +130,16 @@ impl GitHub {
         let Object::Commit { sha: commit, .. } = reference.object else {
             return Err(invalid("branch does not refer to a commit"));
         };
-        check_sha(&commit)?;
-        let commit_value = git.get_commit(&commit).await.map_err(api_error)?;
+        self.tree_at(&commit).await
+    }
+
+    async fn tree_at(&self, commit: &str) -> Result<Tree> {
+        let git = self.client.git(&self.owner, &self.repository);
+        check_sha(commit)?;
+        let commit_value = git.get_commit(commit).await.map_err(api_error)?;
+        if commit_value.sha != commit {
+            return Err(invalid("repository returned a different commit"));
+        }
         let tree_sha = commit_value.tree.sha;
         check_sha(&tree_sha)?;
         let tree = git.get_tree(&tree_sha).recursive(true).send().await.map_err(api_error)?;
@@ -147,7 +156,7 @@ impl GitHub {
                 blocked.insert(entry.path);
             }
         }
-        Ok(Tree { commit, sha: tree_sha, files, blocked })
+        Ok(Tree { commit: commit.into(), sha: tree_sha, files, blocked })
     }
 
     async fn read(&self, tree: &Tree, path: &str, max: usize) -> Result<Option<Vec<u8>>> {
@@ -179,6 +188,14 @@ impl GitHub {
     }
 
     pub async fn list_with_status(&self, stored: &mut [crate::StoredDesign]) -> Result<Vec<Destination>> {
+        self.list_visibility(stored, false).await
+    }
+
+    pub async fn list_deleted(&self) -> Result<Vec<Destination>> {
+        self.list_visibility(&mut [], true).await
+    }
+
+    async fn list_visibility(&self, stored: &mut [crate::StoredDesign], deleted: bool) -> Result<Vec<Destination>> {
         if stored.len() > 10_000 {
             return Err(invalid("stored catalog is too large"));
         }
@@ -202,7 +219,12 @@ impl GitHub {
                 let file = prefix.strip_prefix(&format!("{project}/")).ok_or_else(|| invalid("invalid design path"))?;
                 let destination = Destination { connection: self.connection.clone(), project: project.clone(), file: file.into() };
                 destination.validate()?;
-                designs.push(destination);
+                let manifest = self.read(&tree, path, crate::MAX_MANIFEST_BYTES).await?.and_then(|bytes| Manifest::read(&bytes).ok());
+                let in_trash = manifest.as_ref().is_some_and(|m| m.deleted() && !m.moved());
+                let moved = manifest.as_ref().is_some_and(Manifest::moved);
+                if !moved && in_trash == deleted {
+                    designs.push(destination);
+                }
             }
         }
         for entry in
@@ -224,6 +246,19 @@ impl GitHub {
             return Err(invalid("repository connection mismatch"));
         }
         let tree = self.tree().await?;
+        self.head_in_tree(destination, check_document, tree).await
+    }
+
+    async fn head_in_tree(
+        &self,
+        destination: &Destination,
+        check_document: impl Fn(&[u8]) -> Result<()>,
+        tree: Tree,
+    ) -> Result<(Tree, Manifest, Vec<u8>)> {
+        destination.validate()?;
+        if destination.connection != self.connection {
+            return Err(invalid("repository connection mismatch"));
+        }
         let marker = self
             .read(&tree, &format!("{}/{PROJECT_MARKER}", destination.project), crate::MAX_MANIFEST_BYTES)
             .await?
@@ -264,6 +299,10 @@ impl GitHub {
 
     pub async fn open(&self, destination: &Destination, check_document: impl Fn(&[u8]) -> Result<()>) -> Result<Snapshot> {
         let (tree, manifest, document) = self.head(destination, check_document).await?;
+        self.open_head(destination, tree, manifest, document).await
+    }
+
+    async fn open_head(&self, destination: &Destination, tree: Tree, manifest: Manifest, document: Vec<u8>) -> Result<Snapshot> {
         let mut objects = BTreeMap::new();
         for asset in manifest.assets.values() {
             for chunk in &asset.chunks {
@@ -336,7 +375,21 @@ impl GitHub {
                     conflict: publication.conflict,
                 });
             }
-            if publication.destination != target {
+            if matches!(save.manifest.change()?, Some(crate::management::Change::Rename { .. })) {
+                let target = publication.destination.design_path()?;
+                let manifest = self.read(&tree, &format!("{target}/manifest.json"), crate::MAX_MANIFEST_BYTES).await?;
+                if let Some(bytes) = &manifest {
+                    Manifest::read(bytes)?;
+                }
+                let document = self.read(&tree, &format!("{target}/document.json"), crate::MAX_MANIFEST_BYTES).await?;
+                if let Some(bytes) = &document {
+                    check_document(bytes)?;
+                }
+                if manifest.is_some() || document.is_some() {
+                    return Err(Error::Conflict);
+                }
+            }
+            if publication.conflict && publication.destination != target {
                 let path = format!("{}/manifest.json", publication.destination.design_path()?);
                 if let Some(bytes) = self.read(&tree, &path, crate::MAX_MANIFEST_BYTES).await? {
                     let previous = Manifest::read(&bytes)?;
@@ -377,8 +430,9 @@ impl GitHub {
             }
             let git = self.client.git(&self.owner, &self.repository);
             let new_tree = git.create_tree(changes).base_tree(tree.sha).send().await.map_err(api_error)?;
+            let action = save.manifest.change()?.map(|c| c.message()).unwrap_or("Save");
             let commit = git
-                .create_commit(format!("Save {} ({})", save.destination.file, save.id), new_tree.sha)
+                .create_commit(format!("{action} {} ({})", save.destination.file, save.id), new_tree.sha)
                 .parents(vec![tree.commit])
                 .send()
                 .await

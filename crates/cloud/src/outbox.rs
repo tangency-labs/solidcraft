@@ -165,6 +165,9 @@ impl PendingSave {
         if record.connection.id != record.destination.connection {
             return Err(Error::Invalid("pending save connection mismatch".into()));
         }
+        if let Some(change) = record.manifest.change()? {
+            change.validate(&record.destination)?;
+        }
         if record.expected_revision.as_ref().is_some_and(|revision| revision.len() > 128 || revision.chars().any(char::is_control)) {
             return Err(Error::Invalid("invalid parent revision".into()));
         }

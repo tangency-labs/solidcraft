@@ -8,6 +8,7 @@ use std::process::Command;
 pub use solidcraft_cloud::Published;
 use solidcraft_cloud::{Connection, Destination, Error, Manifest, PROJECT_MARKER, PendingSave, Publication, Result, Snapshot, SshIdentity};
 
+mod management;
 mod receive;
 mod remotes;
 
@@ -246,6 +247,14 @@ impl GitRepository {
     }
 
     pub fn list(&self) -> Result<Vec<Destination>> {
+        self.list_visibility(false)
+    }
+
+    pub fn list_deleted(&self) -> Result<Vec<Destination>> {
+        self.list_visibility(true)
+    }
+
+    fn list_visibility(&self, deleted: bool) -> Result<Vec<Destination>> {
         let files = self.run(&["ls-files", "-z"], None)?;
         let files: Vec<&str> = files
             .split(|b| *b == 0)
@@ -276,7 +285,12 @@ impl GitRepository {
                 let file = prefix.strip_prefix(&format!("{project}/")).ok_or_else(|| storage("invalid design path"))?;
                 let destination = Destination { connection: self.connection.id.clone(), project: (*project).into(), file: file.into() };
                 destination.validate()?;
-                designs.push(destination);
+                let manifest = self.read(path)?.and_then(|bytes| Manifest::read(&bytes).ok());
+                let in_trash = manifest.as_ref().is_some_and(|m| m.deleted() && !m.moved());
+                let moved = manifest.as_ref().is_some_and(Manifest::moved);
+                if !moved && in_trash == deleted {
+                    designs.push(destination);
+                }
             }
         }
         Ok(designs)
@@ -320,8 +334,22 @@ impl GitRepository {
         }
         let existing = self.committed(&base, &manifest_path)?;
         let publication = Publication::prepare_with_parent(save, snapshot, marker.as_deref(), existing.as_deref(), parent)?;
+        if matches!(save.manifest.change()?, Some(solidcraft_cloud::management::Change::Rename { .. })) && !publication.already_published {
+            let target = publication.destination.design_path()?;
+            let manifest = self.committed(&base, &format!("{target}/manifest.json"))?;
+            if let Some(bytes) = &manifest {
+                Manifest::read(bytes)?;
+            }
+            let document = self.committed(&base, &format!("{target}/document.json"))?;
+            if let Some(bytes) = &document {
+                super::check_document(bytes)?;
+            }
+            if manifest.is_some() || document.is_some() {
+                return Err(Error::Conflict);
+            }
+        }
         let published_path = format!("{}/manifest.json", publication.destination.design_path()?);
-        let existing_conflict = if publication.destination != target {
+        let existing_conflict = if publication.conflict && publication.destination != target {
             self.committed(&base, &published_path)?.map(|bytes| Manifest::read(&bytes)).transpose()?
         } else {
             None
@@ -390,7 +418,8 @@ impl GitRepository {
             if !self.text(&["config", "--get", "user.email"]).is_ok_and(|value| !value.is_empty()) {
                 identity.extend(["-c", "user.email=cloud@solidcraft.invalid"]);
             }
-            let message = format!("Save {} ({})", save.destination.file, save.id);
+            let action = save.manifest.change()?.map(|c| c.message()).unwrap_or("Save");
+            let message = format!("{action} {} ({})", save.destination.file, save.id);
             let commit_args = ["commit", "--only", "--pathspec-from-file=-", "--pathspec-file-nul", "-m", &message];
             identity.extend(commit_args);
             self.run(&identity, Some(&paths))?;

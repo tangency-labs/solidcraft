@@ -45,7 +45,9 @@ impl Published {
     pub fn validate(&self, save: &PendingSave, parent: Option<&Self>) -> Result<()> {
         let target = Self::target(save, parent)?;
         let redirected = target != save.destination;
-        let valid_destination = if self.conflict {
+        let valid_destination = if let Some(change) = save.manifest.change()? {
+            !self.conflict && !redirected && self.destination == change.destination(&target)
+        } else if self.conflict {
             (redirected && self.destination == target) || self.destination == conflict_destination(&target, &save.id)?
         } else {
             !redirected && self.destination == target
@@ -89,14 +91,22 @@ impl Publication {
         let project = project_marker.map(Project::read).transpose()?;
         let previous = existing.map(Manifest::read).transpose()?;
         let mut destination = Published::target(save, parent)?;
+        let source = destination.clone();
+        let change = save.manifest.change()?;
         let redirected = destination != save.destination;
         let already_published = previous.as_ref().is_some_and(|manifest| revision(manifest) == Some(save.id.as_str()));
         let actual = previous.as_ref().and_then(revision);
         let conflict = !already_published && actual != save.expected_revision.as_deref();
         // An existing pre-revision snapshot is also a competing design, never an empty slot.
         let conflict = conflict || (!already_published && previous.is_some() && actual.is_none());
+        if change.is_some() && (conflict || redirected || previous.is_none()) {
+            return Err(Error::Conflict);
+        }
         if conflict {
             destination = conflict_destination(&destination, &save.id)?;
+        }
+        if let Some(change) = &change {
+            destination = change.destination(&destination);
         }
         let mut files = BTreeMap::new();
         if !already_published {
@@ -104,7 +114,9 @@ impl Publication {
             // Compatible optional data belongs to the design and must survive an ordinary save.
             if !conflict && let Some(previous) = previous {
                 for (key, value) in previous.extra {
-                    manifest.extra.entry(key).or_insert(value);
+                    if !matches!(key.as_str(), "lifecycle" | "moved_to") {
+                        manifest.extra.entry(key).or_insert(value);
+                    }
                 }
                 for (name, asset) in &mut manifest.assets {
                     if let Some(old) = previous.assets.get(name) {
@@ -123,6 +135,18 @@ impl Publication {
             }
             manifest.extra.insert("revision".into(), Value::String(save.id.clone()));
             manifest.extra.insert("parent_revision".into(), save.expected_revision.clone().map(Value::String).unwrap_or(Value::Null));
+            if matches!(change, Some(crate::management::Change::Rename { .. })) {
+                let mut tombstone = manifest.clone();
+                tombstone.set_change(&crate::management::Change::Delete)?;
+                tombstone.extra.insert("moved_to".into(), Value::String(destination.file.clone()));
+                let old = source.design_path()?;
+                files.insert(format!("{old}/manifest.json"), tombstone.write()?);
+                files.insert(format!("{old}/document.json"), snapshot.document.clone());
+            }
+            if matches!(change, Some(crate::management::Change::Rename { .. } | crate::management::Change::Restore { .. })) {
+                manifest.extra.remove("lifecycle");
+                manifest.extra.remove("moved_to");
+            }
             let prefix = destination.design_path()?;
             files.insert(format!("{prefix}/document.json"), snapshot.document);
             files.insert(format!("{prefix}/manifest.json"), manifest.write()?);
@@ -146,6 +170,52 @@ impl Publication {
 mod tests {
     use super::*;
     use crate::Connection;
+
+    #[test]
+    fn management_is_atomic_idempotent_and_refuses_a_stale_parent() {
+        use crate::management::Change;
+        let connection = Connection::default();
+        let initial =
+            PendingSave::stage(&connection, "Project", "parts/old", None, Snapshot::prepare(b"{}".to_vec(), BTreeMap::new()).unwrap()).unwrap();
+        let first = Publication::prepare(&initial.record, initial.record.recover(|p| Ok(initial.objects[p].clone())).unwrap(), None, None).unwrap();
+        let source = &first.files["Project/parts/old/manifest.json"];
+        let marker = &first.files["Project/solidcraft-project.json"];
+        for change in
+            [Change::Rename { file: "parts/new".into() }, Change::Delete, Change::Restore { commit: "a".repeat(40), file: "parts/old".into() }]
+        {
+            let mut snapshot = Snapshot::prepare(b"{}".to_vec(), BTreeMap::new()).unwrap();
+            snapshot.manifest.set_change(&change).unwrap();
+            let save = PendingSave::stage(&connection, "Project", "parts/old", Some(initial.record.id.clone()), snapshot).unwrap();
+            let plan = Publication::prepare(&save.record, save.record.recover(|p| Ok(save.objects[p].clone())).unwrap(), Some(marker), Some(source))
+                .unwrap();
+            assert!(!plan.conflict);
+            let source_after = plan.files.get("Project/parts/old/manifest.json").unwrap();
+            let published =
+                Published { destination: plan.destination.clone(), revision: save.record.id.clone(), commit: "a".repeat(40), conflict: false };
+            published.validate(&save.record, None).unwrap();
+            if matches!(change, Change::Rename { .. }) {
+                assert!(Manifest::read(source_after).unwrap().moved());
+                assert!(!Manifest::read(&plan.files["Project/parts/new/manifest.json"]).unwrap().deleted());
+            }
+            let retry =
+                Publication::prepare(&save.record, save.record.recover(|p| Ok(save.objects[p].clone())).unwrap(), Some(marker), Some(source_after))
+                    .unwrap();
+            assert!(retry.already_published);
+            assert!(retry.files.is_empty());
+            assert_eq!(retry.destination, plan.destination);
+            let mut competitor = Manifest::read(source).unwrap();
+            competitor.extra.insert("revision".into(), Value::String("b".repeat(64)));
+            assert!(matches!(
+                Publication::prepare(
+                    &save.record,
+                    save.record.recover(|p| Ok(save.objects[p].clone())).unwrap(),
+                    Some(marker),
+                    Some(&competitor.write().unwrap())
+                ),
+                Err(Error::Conflict)
+            ));
+        }
+    }
 
     #[test]
     fn publication_is_idempotent_and_competing_designs_get_separate_files() {

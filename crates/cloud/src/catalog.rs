@@ -139,6 +139,9 @@ pub fn stored_designs(cached: Vec<CachedEntry>, pending: Vec<PendingSave>) -> Re
     let key = |d: &Destination| (d.connection.clone(), d.project.clone(), d.file.clone());
     let mut entries = BTreeMap::new();
     for entry in cached {
+        if entry.save.manifest.deleted() {
+            continue;
+        }
         let manifest_hash = manifest_digest(&entry.save.manifest)?;
         entries.insert(
             key(&entry.destination),
@@ -158,6 +161,10 @@ pub fn stored_designs(cached: Vec<CachedEntry>, pending: Vec<PendingSave>) -> Re
     let parents: BTreeSet<_> = pending.iter().filter_map(|p| p.expected_revision.as_ref()).collect();
     let mut counts = BTreeMap::new();
     for save in pending.iter().filter(|p| !parents.contains(&p.id)) {
+        if save.manifest.deleted() {
+            entries.remove(&key(&save.destination));
+            continue;
+        }
         let key = key(&save.destination);
         let count = counts.entry(key.clone()).or_insert(0usize);
         *count += 1;

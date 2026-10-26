@@ -68,7 +68,8 @@ offline depends on the designs retained by local storage. **Add new repository**
 another GitHub repository or desktop Git checkout. Additional GitHub setup shows
 the repository field and suggests an unused name; you can enter an existing
 repository instead. The repository selector switches between all connected
-repositories, each with independent credentials and queues.
+repositories, each with independent credentials and queues. **Open on GitHub**, next
+to **Synchronize Repository**, opens the selected repository in your browser.
 
 The picker refuses names already shown in that project. If another device creates
 the same name after listing, synchronization preserves a conflict copy. Further
@@ -81,6 +82,7 @@ preview use the design icon. Open and save an older cloud design once to attach 
 preview if its earlier save did not include one.
 
 Saving first records the captured design on this device, then synchronizes it.
+Saving an unchanged design does nothing: it creates neither an upload nor a revision.
 If that repository is already synchronizing, your new save is stored locally
 immediately and uploads when the current synchronization finishes.
 The Start list shows a colored dot and a short status. Pushing and Outdated dots
@@ -106,6 +108,34 @@ have no dot, just like saved local files. Hover over a status dot for the reposi
 project and status.
 Local file tabs retain their usual white unsaved marker.
 Edits made while an upload runs remain unsaved until you save again.
+
+### Rename, Trash, and version history
+
+Choose **Manage cloud designs** on Start, or right-click a cloud design and choose
+the same action. Select a design in the window, edit its name, and choose **Rename
+design**. Names are checked again during publication so another design is preserved
+if its name was taken in the meantime. Renaming also updates matching open tabs.
+
+**Move to Trash** asks for confirmation and retains the design and its history.
+Open **Trash** on Start and choose the design to see its versions. An already open
+copy remains available with unsaved changes so it can be saved elsewhere.
+
+Select a version and choose **Restore revision** to publish its contents as a new
+revision. Earlier versions remain in Git. The restored design opens separately,
+preserving existing tabs and edits. History shows up to 50 revisions and follows
+the design's previous names within its project.
+For a design in Trash, choose a revision from before it was deleted.
+
+[![Manage a cloud design and choose a historical revision in SolidCraft.](images/cloud-saves-management.png)](images/cloud-saves-management.png)
+
+Rename and Trash actions are recorded locally before attempting synchronization.
+Queued actions survive restarts; use **Synchronize Repository** when connectivity
+returns. Loading a historical version requires access to its Git history. A
+competing edit pauses the action and keeps the captured data for recovery.
+Use **Discard queued action** to abandon that management change and keep the saved
+design. This requires a connection to the repository so SolidCraft can check
+whether publication already succeeded. Later saves depending on the change must
+be synchronized first.
 
 [![Start lists designs in a project with previews and colored synchronization statuses.](images/cloud-saves-home.png)](images/cloud-saves-home.png)
 

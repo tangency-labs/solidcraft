@@ -412,7 +412,7 @@ fn saved_name(name: &str, old_path: Option<&str>, path: &str, user_named: bool) 
 
 /// Rename the design, and the undo and redo states that still carry the old name, so undo
 /// does not bring the default name back and leave the design looking changed.
-pub(super) fn rename_design(s: &mut Session, from: &str, to: &str) {
+pub(crate) fn rename_design(s: &mut Session, from: &str, to: &str) {
     // A prepared world is keyed by the document's Arc. Changing only its name
     // must not make an opted-in save lose warm geometry and display caches.
     // Retag only a cache that already matches: cold or stale placements stay so.

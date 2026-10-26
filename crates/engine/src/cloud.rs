@@ -9,6 +9,7 @@ use solidcraft_cloud::{
 
 use crate::{Document, EngineError, Result, Session, Visibility};
 
+mod management;
 #[cfg(test)]
 mod tests;
 
@@ -200,6 +201,6 @@ impl Session {
                 binding.destination = destination;
             }
         }
-        Ok(())
+        self.poll_cloud_management(&[])
     }
 }
