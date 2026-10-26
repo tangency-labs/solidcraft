@@ -1094,7 +1094,7 @@ impl Surface {
                 }
 
                 // Here we check seams/poles.
-                if crossed_seam_or_pole(self, guess_uv, drop_uv, &big_domain) {
+                if crossed_seam_or_pole(k, self, guess_uv, drop_uv, &big_domain)? {
                     return Ok(failure);
                 }
 

@@ -403,7 +403,7 @@ impl SurfOfExtrusion {
         ang_tol_rad: Option<f64>,
         context: Option<SurfaceIntersectContext<'_, O>>,
     ) -> Result<SurfaceIntersection> {
-        let special = match other.kind() {
+        let special = match other.kind_with_nurb(k)? {
             SurfaceKind::Plane(p) => Some(self.intersect_with_plane_on(
                 k,
                 this,

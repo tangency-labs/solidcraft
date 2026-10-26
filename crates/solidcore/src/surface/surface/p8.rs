@@ -473,7 +473,7 @@ impl Surface {
             .zip(found.iter_mut())
         {
             let (_, continuities) = self.calculate_continuities(k, dir)?;
-            let (knots, _) = self.knots(dir, None)?;
+            let (knots, _) = self.knots_with_nurb(k, dir, None)?;
             // note: can't say knots.len() - 1
             let mut i = 1;
             while i + 1 < knots.len() {

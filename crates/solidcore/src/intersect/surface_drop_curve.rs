@@ -290,7 +290,7 @@ fn create_iso_parametric_curve(
     value: f64,
     approx_tol: f64,
 ) -> Result<Curve> {
-    match surface.kind() {
+    match surface.kind_with_nurb(k)? {
         SurfaceKind::BSpline(b) => Ok(Curve::from(
             b.create_iso_parametric_curve(k, param, value, IsoCurveOptions::default())?
                 .curve,
@@ -722,7 +722,7 @@ impl<'s> SurfaceDropCurve<'s> {
             pnt.curve_uv[1] = p.curve_uv[1];
         } else {
             // get isoParam vector pointing into surf from singular boundary
-            let domain = surface.natural_uv_domain();
+            let domain = surface.natural_uv_domain_with_nurb(k)?;
             let (on_boundary, uv_tang) = domain.is_point_on_boundary(uv, EFF_ZERO_SQRT);
             if !on_boundary {
                 // error - singular surface point not on boundary
@@ -1052,7 +1052,7 @@ impl<'s> SurfaceDropCurve<'s> {
 
         // add every Surface U internal continuity boundary to sIsoCurves array
         let u_conts: Vec<ContinuityType> = cache.u_continuities().to_vec();
-        let (u_knots, _) = surface.knots(SurfParamType::U, None)?;
+        let (u_knots, _) = surface.knots_with_nurb(k, SurfParamType::U, None)?;
         for ii in 1..u_conts.len().saturating_sub(1) {
             if is_c0(&u_conts, ii)? {
                 let value = index(&u_knots, ii)?;
@@ -1067,7 +1067,7 @@ impl<'s> SurfaceDropCurve<'s> {
         }
 
         // add every surface V internal continuity boundary to sIsoCurves array
-        let (v_knots, _) = surface.knots(SurfParamType::V, None)?;
+        let (v_knots, _) = surface.knots_with_nurb(k, SurfParamType::V, None)?;
         let v_conts: Vec<ContinuityType> = cache.v_continuities().to_vec();
         for ii in 1..v_conts.len().saturating_sub(1) {
             if is_c0(&v_conts, ii)? {

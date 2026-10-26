@@ -1110,12 +1110,12 @@ impl FilletSolver {
         let linear_extension_factor = 50.0;
         if bool_status(surface.is_periodic(k, domain, SurfParamType::U))? {
             size.x *= periodic_extension_factor;
-        } else if CBI_LINEAR > 0 && surface.degree(SurfParamType::U) == 1 {
+        } else if CBI_LINEAR > 0 && surface.degree_with_nurb(k, SurfParamType::U)? == 1 {
             size.x *= linear_extension_factor;
         }
         if bool_status(surface.is_periodic(k, domain, SurfParamType::V))? {
             size.y *= periodic_extension_factor;
-        } else if CBI_LINEAR > 0 && surface.degree(SurfParamType::V) == 1 {
+        } else if CBI_LINEAR > 0 && surface.degree_with_nurb(k, SurfParamType::V)? == 1 {
             size.y *= linear_extension_factor;
         }
 
@@ -2850,7 +2850,7 @@ pub fn test_analytic_surface(k: &Kernel, surface: AnalyticTestSurface<'_>) -> Re
     // test NurbSurface to see if its a canonical cone (the SmBSplineSurface part of the
     // surface, default dToleranceScale = 1)
     let bss = match surface {
-        AnalyticTestSurface::Surface(s) => match s.kind() {
+        AnalyticTestSurface::Surface(s) => match s.kind_with_nurb(k)? {
             SurfaceKind::BSpline(b) => b,
             SurfaceKind::Plane(p) => p.base(),
             SurfaceKind::SurfOfRevolution(r) => r.base(),

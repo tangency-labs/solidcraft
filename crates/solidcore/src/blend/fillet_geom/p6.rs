@@ -673,7 +673,9 @@ impl FilletBrep {
         let uv_tangent2 = uv_tangent2 / len2;
 
         let (start_pnt, mut start_vec, end_pnt, mut end_vec, curve_dim) =
-            if surf.degree(SurfParamType::U) == 1 && surf.degree(SurfParamType::V) == 1 {
+            if surf.degree_with_nurb(k, SurfParamType::U)? == 1
+                && surf.degree_with_nurb(k, SurfParamType::V)? == 1
+            {
                 (
                     self.vertex_point(start_fv)?,
                     tangent1,

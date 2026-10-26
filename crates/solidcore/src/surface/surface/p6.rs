@@ -225,7 +225,7 @@ impl Surface {
         surf_param: SurfParamType,
     ) -> Result<(ContinuityType, Vec<ContinuityType>)> {
         // Get unique knot values for eSurfParam direction
-        let (other_knots, _) = self.knots(surf_param, None)?;
+        let (other_knots, _) = self.knots_with_nurb(k, surf_param, None)?;
 
         // check state
         if other_knots.len() <= 1 {
@@ -249,7 +249,7 @@ impl Surface {
         } else {
             SurfParamType::U
         };
-        let (mut knots, _) = self.knots(get_sp, None)?;
+        let (mut knots, _) = self.knots_with_nurb(k, get_sp, None)?;
 
         // single span surfaces get checked in the middle in case the iso curves at both
         // end knots are degenerate.
@@ -571,7 +571,7 @@ impl Surface {
         if singular {
             // If one end of the subdomain coincides with an end of the whole domain,
             // use that.
-            let all_domain = self.natural_uv_domain();
+            let all_domain = self.natural_uv_domain_with_nurb(k)?;
 
             if sing_dir == SurfParamType::U || sing_dir == SurfParamType::Both {
                 uv.x = singular_end(&uv_domain.u_interval(), &all_domain.u_interval(), uv.x);
@@ -974,7 +974,7 @@ impl Surface {
 
         // locals to run from best solution end to other end
         let ivl = curve.natural_interval();
-        let reg = self.natural_uv_domain();
+        let reg = self.natural_uv_domain_with_nurb(k)?;
         let (start_dev, start_par, delta_par) = if sol.start.solution_value < sol.end.solution_value
         {
             let s = sol.start.parameters;
@@ -1292,8 +1292,13 @@ impl DerivSurfDefinition<'_> {
 
                 // project CurvePoint to Surface
                 let guess = (ii != 0).then_some(uv_guess);
-                let (success, surface_uv0) =
-                    drop_point(k, surface, crv_pos, &surface.natural_uv_domain(), guess)?;
+                let (success, surface_uv0) = drop_point(
+                    k,
+                    surface,
+                    crv_pos,
+                    &surface.natural_uv_domain_with_nurb(k)?,
+                    guess,
+                )?;
                 if !success {
                     return Err(SolidError::sm_err(OP_SAMPLE));
                 }
@@ -2008,7 +2013,7 @@ pub(super) fn create_iso_parametric_curve(
     value: f64,
     domain: Option<&Extent2d>,
 ) -> Result<(Curve, f64)> {
-    match surface.kind() {
+    match surface.kind_with_nurb(k)? {
         SurfaceKind::BSpline(b) => {
             let iso = b.create_iso_parametric_curve(
                 k,

@@ -736,10 +736,8 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
         }
         OpIn::Seam { prev, curr, dom } => {
             let s = run()?;
-            Ok(vec![
-                0.0,
-                flag(crossed_seam_or_pole(&s, p2(*prev), p2(*curr), &dom_of(*dom))),
-            ])
+            crossed_seam_or_pole(&k, &s, p2(*prev), p2(*curr), &dom_of(*dom))
+                .map(|crossed| vec![0.0, flag(crossed)])
         }
         OpIn::IsoLen { u, t } => {
             let s = run()?;

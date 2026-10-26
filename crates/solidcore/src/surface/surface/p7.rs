@@ -782,7 +782,7 @@ impl Surface {
         u_side: Side,
         v_side: Side,
     ) -> Result<Vec3> {
-        match self.kind() {
+        match self.kind_with_nurb(k)? {
             // SmSphere::EvaluateNormal (the side flags are not used)
             SurfaceKind::Sphere(s) => s.evaluate_normal(uv),
             SurfaceKind::Cone(_)
@@ -849,7 +849,7 @@ impl Surface {
     /// of an offset surface's bounding box (its other failures are ignored, as
     /// upstream).
     pub fn is_planar(&self, k: &Kernel, tol_3d: f64) -> Result<Planar> {
-        match self.kind() {
+        match self.kind_with_nurb(k)? {
             SurfaceKind::Plane(p) => {
                 let (point, normal, deviation) = p.is_planar();
                 Ok(Planar {
@@ -864,7 +864,10 @@ impl Surface {
                 // surface by its B-rep (UNPORTED(topology.face_p2): SmFace::GetTolerance
                 // for a bare face handle without it)
                 let face_tol = self.face_zone_tol_3d()?;
-                Ok(planar_of(k, s, &self.natural_uv_domain(), face_tol)?.is_planar(tol_3d))
+                Ok(
+                    planar_of(k, s, &self.natural_uv_domain_with_nurb(k)?, face_tol)?
+                        .is_planar(tol_3d),
+                )
             }
             // SmSurfOfRevolution (and SmCone, SmSphere, SmTorus) inherit
             // SmBSplineSurface::CalculateBoundingBox:
@@ -872,33 +875,48 @@ impl Surface {
             // SmFace::GetTolerance for a bare face handle without it)
             SurfaceKind::Cone(s) => {
                 let face_tol = self.face_zone_tol_3d()?;
-                Ok(
-                    planar_of(k, s.rev().base(), &self.natural_uv_domain(), face_tol)?
-                        .is_planar(tol_3d),
-                )
+                Ok(planar_of(
+                    k,
+                    s.rev().base(),
+                    &self.natural_uv_domain_with_nurb(k)?,
+                    face_tol,
+                )?
+                .is_planar(tol_3d))
             }
             SurfaceKind::Sphere(s) => {
                 let face_tol = self.face_zone_tol_3d()?;
-                Ok(
-                    planar_of(k, s.base().base(), &self.natural_uv_domain(), face_tol)?
-                        .is_planar(tol_3d),
-                )
+                Ok(planar_of(
+                    k,
+                    s.base().base(),
+                    &self.natural_uv_domain_with_nurb(k)?,
+                    face_tol,
+                )?
+                .is_planar(tol_3d))
             }
             SurfaceKind::Torus(s) => {
                 let face_tol = self.face_zone_tol_3d()?;
-                Ok(
-                    planar_of(k, s.base().base(), &self.natural_uv_domain(), face_tol)?
-                        .is_planar(tol_3d),
-                )
+                Ok(planar_of(
+                    k,
+                    s.base().base(),
+                    &self.natural_uv_domain_with_nurb(k)?,
+                    face_tol,
+                )?
+                .is_planar(tol_3d))
             }
             SurfaceKind::SurfOfRevolution(s) => {
                 let face_tol = self.face_zone_tol_3d()?;
-                Ok(planar_of(k, s.base(), &self.natural_uv_domain(), face_tol)?.is_planar(tol_3d))
+                Ok(
+                    planar_of(k, s.base(), &self.natural_uv_domain_with_nurb(k)?, face_tol)?
+                        .is_planar(tol_3d),
+                )
             }
             // (and SmSurfOfExtrusion)
             SurfaceKind::SurfOfExtrusion(s) => {
                 let face_tol = self.face_zone_tol_3d()?;
-                Ok(planar_of(k, s.base(), &self.natural_uv_domain(), face_tol)?.is_planar(tol_3d))
+                Ok(
+                    planar_of(k, s.base(), &self.natural_uv_domain_with_nurb(k)?, face_tol)?
+                        .is_planar(tol_3d),
+                )
             }
             // SmSurface body: use the virtual box and ignore ordinary failures,
             // which leave the default pseudo box. The kernel is available here.
@@ -908,7 +926,7 @@ impl Surface {
             | SurfaceKind::SrfInVolume(_) => {
                 let pseudo = ignored(self.calculate_bounding_box(
                     k,
-                    &self.natural_uv_domain(),
+                    &self.natural_uv_domain_with_nurb(k)?,
                     [false, true, false],
                     true,
                 ))?
@@ -951,7 +969,7 @@ impl Surface {
         let mut points = want_points.then_some([Vec3::UNDEF; 4]);
 
         // locals
-        let d = self.natural_uv_domain();
+        let d = self.natural_uv_domain_with_nurb(k)?;
         let corners = [
             Point2::new(d.u_min(), d.v_min()),
             Point2::new(d.u_min(), d.v_max()),
@@ -1012,7 +1030,7 @@ impl Surface {
         let mut s_dir = dir.unitize()?;
 
         // locals
-        let domain = self.natural_uv_domain();
+        let domain = self.natural_uv_domain_with_nurb(k)?;
         let uv_min = domain.min();
         let uv_max = domain.max();
         let mut s_ivl = Extent1d::new();
@@ -1843,7 +1861,7 @@ impl Surface {
         }
 
         // intersection
-        let projection_domain = projection_surface.natural_uv_domain();
+        let projection_domain = projection_surface.natural_uv_domain_with_nurb(k)?;
         let x = match context {
             Some((context, handle)) => {
                 crate::intersect::surface_intersector::p5::do_intersection_with_context(

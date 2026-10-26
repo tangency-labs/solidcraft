@@ -2527,11 +2527,11 @@ pub fn evaluate_mate(k: &Kernel, brep: &Brep, face: FaceId, uv: Point2) -> Resul
     ) {
         return Err(SolidError::null_pointer(OP_EVALUATE_MATE));
     }
-    let natural_uv_domain = surface.natural_uv_domain();
+    let natural_uv_domain = surface.natural_uv_domain_with_nurb(k)?;
     if natural_uv_domain.contains_point(uv, 0.0) {
         surface.evaluate_point(k, uv)
     } else {
-        match surface.kind() {
+        match surface.kind_with_nurb(k)? {
             SurfaceKind::BSpline(s) => s.evaluate_point_on_extended_surface(uv),
             SurfaceKind::Plane(p) => p.base_for_query().evaluate_point_on_extended_surface(uv),
             SurfaceKind::SurfOfRevolution(s) => s.base().evaluate_point_on_extended_surface(uv),
@@ -2571,7 +2571,7 @@ pub fn surface_drop_point<O: SolutionObject>(
             SolidError::null_pointer(OP_SURFACE_DROP_POINT)
         });
     }
-    let domain = surface.natural_uv_domain();
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
 
     // for a sequence of intersection tolerance distances
     let mut dropping_tol = approx_tol / 100.0;
@@ -3389,8 +3389,8 @@ pub fn examine_n_fix_fillet_geoms(
             .geom(geom2)?
             .fillet_surface()?
             .ok_or_else(|| SolidError::null_pointer(OP_EXAMINE))?;
-        if surface1.degree(SurfParamType::U) < 3
-            || surface2.degree(SurfParamType::U) < 3
+        if surface1.degree_with_nurb(k, SurfParamType::U)? < 3
+            || surface2.degree_with_nurb(k, SurfParamType::U)? < 3
             || !surface1.is_kind_of(BSplineSurface::TYPE)?
             || !surface2.is_kind_of(BSplineSurface::TYPE)?
         {

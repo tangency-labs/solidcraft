@@ -924,7 +924,7 @@ pub fn fix_backwards_outer_loop_on_seam(k: &Kernel, b: &mut Brep, f: FaceId) -> 
         .surface
         .clone()
         .ok_or_else(|| null("face without surface"))?;
-    let bounds = surface.natural_uv_domain();
+    let bounds = surface.natural_uv_domain_with_nurb(k)?;
     let closed = [
         surface
             .is_closed(k, &bounds, SurfParamType::U, None, false)?
@@ -1896,7 +1896,7 @@ pub fn is_loop_uv_gap_within_tolerance(
 ) -> Result<bool> {
     // the extractions run on GetOrCreateGwNurbPointer: a plane makes its NURB (a failure
     // is their NER, which certifies nothing)
-    let bss: Cow<'_, BSplineSurface> = match surface.kind() {
+    let bss: Cow<'_, BSplineSurface> = match surface.kind_with_nurb(k)? {
         SurfaceKind::BSpline(b) => Cow::Borrowed(b),
         SurfaceKind::Plane(p) => match p.base_with_nurb() {
             Ok(b) => b,
@@ -1920,7 +1920,7 @@ pub fn is_loop_uv_gap_within_tolerance(
     gap.add_point(end_uv);
 
     // Only certify gaps inside the surface's natural domain.
-    let nat = surface.natural_uv_domain();
+    let nat = surface.natural_uv_domain_with_nurb(k)?;
     if gap.min().x < nat.min().x
         || gap.min().y < nat.min().y
         || gap.max().x > nat.max().x
@@ -2140,7 +2140,7 @@ pub fn check_loop(
                 closure = 3; // SE_MSG: signalled, processing continues
             }
 
-            let dom = surface.natural_uv_domain();
+            let dom = surface.natural_uv_domain_with_nurb(k)?;
             let mut gap_start = current_start;
             let mut gap_end = previous_end;
             // WR-440 (#530), opt-in: upstream compares the raw representatives.
@@ -2387,7 +2387,7 @@ pub fn is_iso_curve_on_seam(k: &Kernel, surface: &Surface, curve: &Curve) -> Res
     let Some((side, param)) = is_iso_curve(k, curve)? else {
         return Ok(false);
     };
-    let bounds = surface.natural_uv_domain();
+    let bounds = surface.natural_uv_domain_with_nurb(k)?;
     let closed = surface.is_closed(k, &bounds, side, None, false)?.0;
     let (lo, hi) = if side == SurfParamType::U {
         (bounds.min().x, bounds.max().x)

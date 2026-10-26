@@ -1449,7 +1449,7 @@ pub(crate) fn global_surface_intersect_in<O: SolutionObject + Copy + PartialEq>(
     let mut out = SurfaceIntersection::default();
 
     // switch on OtherSurface Type looking for cheap special intersection case
-    match other.kind() {
+    match other.kind_with_nurb(k)? {
         // plane/plane special case intersection
         SurfaceKind::Plane(other_plane) => {
             // (whether each plane has a face: SmSurface::GetFace, and its tolerance)

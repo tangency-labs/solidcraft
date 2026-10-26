@@ -2207,8 +2207,8 @@ impl<'a> GapFunction<'a> {
         let (mut knots_u, mut knots_v) = match (this_curve, this_surface) {
             (Some(c), _) => (unique_knots(c.knots(k, None))?, vec![0.0]),
             (None, Some(s)) => (
-                unique_knots(s.knots(SurfParamType::U, None))?,
-                unique_knots(s.knots(SurfParamType::V, None))?,
+                unique_knots(s.knots_with_nurb(k, SurfParamType::U, None))?,
+                unique_knots(s.knots_with_nurb(k, SurfParamType::V, None))?,
             ),
             (None, None) => return Err(SolidError::invalid_input(OP_GF, "no this geometry")),
         };

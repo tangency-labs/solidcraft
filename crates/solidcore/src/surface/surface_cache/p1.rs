@@ -307,7 +307,7 @@ pub(super) fn calculate_bounding_box(
     domain: &Extent2d,
     req: &BoundingBoxRequest<'_>,
 ) -> Result<BoundingBoxes> {
-    match surface.kind() {
+    match surface.kind_with_nurb(k)? {
         SurfaceKind::BSpline(b) => b.calculate_bounding_box(k, domain, req),
         // inherited from SmBSplineSurface, run for the derived surface (its IsKindOf
         // and virtual EvaluateNormal)

@@ -907,7 +907,7 @@ impl Sphere {
         // check for special cases
         let mut need_nurb_intersection = true;
         let mut out = SurfaceIntersection::default();
-        match other.kind() {
+        match other.kind_with_nurb(k)? {
             SurfaceKind::Plane(p) => {
                 let (more, found) =
                     self.intersect_with_plane(k, uv_domain, p, other_uv_domain, approx_tol_3d)?;

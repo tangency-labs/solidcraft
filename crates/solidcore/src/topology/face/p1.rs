@@ -1911,7 +1911,7 @@ pub fn move_seam_notified<O: LoopObject>(
             let mut dist = BIG_DOUBLE;
             let mut this_ivl = periodic;
             this_ivl.set_full_period(false);
-            let knots = ignored(surface.knots(surf_param, None))?
+            let knots = ignored(surface.knots_with_nurb(k, surf_param, None))?
                 .map(|(k, _)| k)
                 .unwrap_or_default();
             let k0 = knots.first().copied().unwrap_or(0.0);

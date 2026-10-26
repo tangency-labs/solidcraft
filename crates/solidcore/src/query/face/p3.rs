@@ -277,7 +277,7 @@ fn owning_face_tolerance(b: &Brep, f: FaceId, s: &Surface) -> Result<Option<f64>
 
 /// `pSurface->IsPlanar(dTol3d)` of face `f`'s surface.
 fn surface_is_planar(k: &Kernel, b: &Brep, f: FaceId, s: &Surface, tol_3d: f64) -> Result<bool> {
-    let base = match s.kind() {
+    let base = match s.kind_with_nurb(k)? {
         SurfaceKind::BSpline(bs) => Some(bs),
         SurfaceKind::SurfOfRevolution(r) => Some(r.base()),
         SurfaceKind::SurfOfExtrusion(r) => Some(r.base()),
@@ -961,7 +961,7 @@ pub(crate) fn find_and_classify_loop_bisector_cached<O: LoopObject + PartialEq>(
 
     // check state - FaceDomain within SurfaceDomain
     let face_uv_domain = b.face(f)?.uv_domain;
-    let surf_uv_domain = surface.natural_uv_domain();
+    let surf_uv_domain = surface.natural_uv_domain_with_nurb(k)?;
     if !face_uv_domain.is_contained_by(&surf_uv_domain, 0.0) {
         return Err(null(
             OP_BISECTOR,

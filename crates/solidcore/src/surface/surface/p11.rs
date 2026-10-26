@@ -2012,7 +2012,7 @@ impl Surface {
                 let lift_handle = BoundaryCurveHandle(0, uv_curve.natural_interval());
 
                 // for every U knot (SER: checked)
-                let (knots, _) = self.knots(SurfParamType::U, None)?;
+                let (knots, _) = self.knots_with_nurb(k, SurfParamType::U, None)?;
                 let u_conts = cache.u_continuities();
                 let size = u_conts.len().saturating_sub(1);
                 for iu in 1..size {
@@ -2035,7 +2035,7 @@ impl Surface {
                 }
 
                 // for every V knot (SER: checked)
-                let (knots, _) = self.knots(SurfParamType::V, None)?;
+                let (knots, _) = self.knots_with_nurb(k, SurfParamType::V, None)?;
                 let v_conts = cache.v_continuities();
                 let size = v_conts.len().saturating_sub(1);
                 for iv in 1..size {

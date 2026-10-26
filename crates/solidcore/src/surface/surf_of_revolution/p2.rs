@@ -686,7 +686,7 @@ impl SurfOfRevolution {
     ) -> Result<SurfaceIntersection> {
         let mut need_nurb_intersection = true;
         let mut out = SurfaceIntersection::default();
-        match other.kind() {
+        match other.kind_with_nurb(k)? {
             SurfaceKind::Plane(p) => {
                 let (more, found) =
                     self.intersect_with_plane(k, p, other_uv_domain, approx_tol_3d)?;
@@ -792,7 +792,7 @@ impl SurfOfRevolution {
             return Ok(None);
         }
         let plane_base;
-        let tgt: &BSplineSurface = match test_surface.kind() {
+        let tgt: &BSplineSurface = match test_surface.kind_with_nurb(k)? {
             SurfaceKind::BSpline(s) => s,
             // (an SmSurfOfExtrusion is an SmBSplineSurface: its NURB is tested)
             SurfaceKind::SurfOfExtrusion(s) => s.base(),

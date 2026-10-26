@@ -593,10 +593,10 @@ impl<O: ClassObject> CurveClassification<O> {
             xsect_tol_3d_from_zones(k, surf_tol, self.src_zone_tol_3d())
         };
         // Native ignores the status; absent output leads to invalid indexing below.
-        let u = ignored(surface.knots(SurfParamType::U, None))?
+        let u = ignored(surface.knots_with_nurb(k, SurfParamType::U, None))?
             .map(|r| r.0)
             .unwrap_or_default();
-        let v = ignored(surface.knots(SurfParamType::V, None))?
+        let v = ignored(surface.knots_with_nurb(k, SurfParamType::V, None))?
             .map(|r| r.0)
             .unwrap_or_default();
         let (umin, umax) = ends(&u)?;

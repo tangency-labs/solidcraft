@@ -267,12 +267,12 @@ pub fn create_approximate_bezier_patch_block(
     surface: &Surface,
 ) -> Result<ApproximateBezierPatchBlock> {
     // Note we are creating approximate cubic beziers
-    let (mut u_splits, _) = surface.knots(SurfParamType::U, None)?;
+    let (mut u_splits, _) = surface.knots_with_nurb(k, SurfParamType::U, None)?;
     // limit initial U knot count to 6
     limit_splits(&mut u_splits);
 
     // limit initial V knot count to 6
-    let (mut v_splits, _) = surface.knots(SurfParamType::V, None)?;
+    let (mut v_splits, _) = surface.knots_with_nurb(k, SurfParamType::V, None)?;
     limit_splits(&mut v_splits);
 
     // get non-zero span count
@@ -833,14 +833,14 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         };
         let handle = fields.surface.ok_or(SolidError::null_pointer(OP_BLOCK))?;
         let surface = self.node_surface(Some(handle))?.clone();
-        let uv_domain = surface.natural_uv_domain();
+        let uv_domain = surface.natural_uv_domain_with_nurb(k)?;
         let opts = *self.options();
 
         // remember need to check diagonal when all natural isoParam Curves are linear
         let mut check_diagonals = false;
         // (SmBSplineSurface_TYPE or SmSurfOfExtrusion_TYPE: the extrusion's iso curves
         // evaluate its inherited B-spline evaluation)
-        let diagonal_candidate = match surface.kind() {
+        let diagonal_candidate = match surface.kind_with_nurb(k)? {
             SurfaceKind::BSpline(bss) => Some(bss),
             SurfaceKind::SurfOfExtrusion(s) => Some(s.base()),
             _ => None,
@@ -966,7 +966,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
                 });
 
                 // for the node's bounding box
-                let patch = match surface.kind() {
+                let patch = match surface.kind_with_nurb(k)? {
                     SurfaceKind::BSpline(b) => b.copy_sub_patch(&node_uv),
                     SurfaceKind::Plane(p) => p.base().copy_sub_patch(&node_uv),
                     SurfaceKind::Cone(s) => s.rev().base().copy_sub_patch(&node_uv),

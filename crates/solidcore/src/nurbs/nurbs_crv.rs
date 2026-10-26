@@ -1058,15 +1058,34 @@ fn crv_derivs_n<const N: usize>(
 /// (upstream fills `N` with `[1, 0, .., 0]` / `[0, .., 0, 1]` there but returns its
 /// error flag) and with [`SolidError::Degenerate`] when a knot difference is below
 /// `SM_EFF_ZERO_SQ`.
-#[allow(clippy::range_plus_one)] // exclusive ranges: `RangeInclusive` is measurably slower here
 pub fn basis_eval(knt: &KnotVector<'_>, p: usize, u: f64, side: Side) -> Result<Basis> {
+    check_degree(p, OP_BEVAL)?;
+    let mut n = vec![0.0_f64; p + 1];
+    let span = basis_eval_into(knt, p, u, side, &mut n)?;
+    Ok(Basis { span, values: n })
+}
+
+/// [`basis_eval`] into the caller's buffer `n` (at least `p + 1` long; the evaluation
+/// hot paths pass a stack array of [`MAX_DEGREE`]): fills `n[..=p]` and returns the
+/// knot span. The same operations in the same order, so the values are bit-identical.
+///
+/// # Errors
+///
+/// Those of [`basis_eval`]; an index error when `n` is shorter than `p + 1`.
+#[allow(clippy::range_plus_one)] // exclusive ranges: `RangeInclusive` is measurably slower here
+pub fn basis_eval_into(
+    knt: &KnotVector<'_>,
+    p: usize,
+    u: f64,
+    side: Side,
+    n: &mut [f64],
+) -> Result<usize> {
     const OP: &str = OP_BEVAL;
     check_degree(p, OP)?;
     let knot_tol = EFF_ZERO_SQ;
     let uk = knt.knots();
     let pi = sx(p, OP)?;
     let m = sx(knt.last_index(), OP)?;
-    let mut n = vec![0.0_f64; p + 1];
 
     // Special cases for end values: upstream fills N there but returns its error flag
     // (initialised to NL_YES for early exits).
@@ -1081,7 +1100,7 @@ pub fn basis_eval(knt: &KnotVector<'_>, p: usize, u: f64, side: Side) -> Result<
     // Compute the non-vanishing B-splines.
     let mut left = [0.0_f64; MAX_DEGREE];
     let mut right = [0.0_f64; MAX_DEGREE];
-    set(&mut n, 0, 1.0, OP)?;
+    set(n, 0, 1.0, OP)?;
     for k in 1..pi + 1 {
         set(&mut left, k, u - get(uk, i + 1 - k, OP)?, OP)?;
         set(&mut right, k, get(uk, i + k, OP)? - u, OP)?;
@@ -1093,13 +1112,13 @@ pub fn basis_eval(knt: &KnotVector<'_>, p: usize, u: f64, side: Side) -> Result<
             if delta < knot_tol {
                 return Err(degenerate(OP));
             }
-            let temp = get(&n, l, OP)?;
-            set(&mut n, l, saved + temp * (rr / delta), OP)?;
+            let temp = get(n, l, OP)?;
+            set(n, l, saved + temp * (rr / delta), OP)?;
             saved = temp * (ll / delta);
         }
-        set(&mut n, k, saved, OP)?;
+        set(n, k, saved, OP)?;
     }
-    Ok(Basis { span, values: n })
+    Ok(span)
 }
 
 /// `TO_EUCLID`: homogeneous to Euclidean by dividing by `w` (no reciprocal, unlike
@@ -1126,13 +1145,16 @@ pub fn crv_eval(cur: &Curve, u: f64, side: Side) -> Result<Vec3> {
     let p = cur.degree();
     let knt = cur.knot_vector()?;
 
-    // Non-zero basis values of the span containing u.
-    let basis = basis_eval(&knt, p, u, side)?;
+    // Non-zero basis values of the span containing u (into a stack array: `p` is
+    // below MAX_DEGREE, which basis_eval_into checks first).
+    let mut values = [0.0_f64; MAX_DEGREE];
+    let span = basis_eval_into(&knt, p, u, side, &mut values)?;
+    let values = values.get(..=p).ok_or_else(|| oob(OP))?;
 
     // Compute the point on the curve.
     let mut cw = CPoint::new(0.0, 0.0, 0.0, 0.0);
-    let spn_p = basis.span.checked_sub(p).ok_or_else(|| oob(OP))?;
-    for (i, &alpha) in basis.values.iter().enumerate().take(p + 1) {
+    let spn_p = span.checked_sub(p).ok_or_else(|| oob(OP))?;
+    for (i, &alpha) in values.iter().enumerate().take(p + 1) {
         let aw = pw.get(spn_p + i).copied().ok_or_else(|| oob(OP))?;
         // MAC_A_updcpt: skip zero weights, add without multiplying for one.
         if alpha == 1.0 {
@@ -2157,6 +2179,160 @@ mod tests {
         assert!(!flag);
         assert_eq!(c.m(), 5);
         assert_eq!(c.n(), 2);
+    }
+
+    /// The heap-allocating `basis_eval` / `crv_eval` as they were before
+    /// `basis_eval_into` (the reference for the bit-identity test).
+    fn old_basis_eval(knt: &KnotVector<'_>, p: usize, u: f64, side: Side) -> Result<Basis> {
+        const OP: &str = OP_BEVAL;
+        check_degree(p, OP)?;
+        let knot_tol = EFF_ZERO_SQ;
+        let uk = knt.knots();
+        let pi = sx(p, OP)?;
+        let m = sx(knt.last_index(), OP)?;
+        let mut n = vec![0.0_f64; p + 1];
+        if u == get(uk, pi, OP)? || u == get(uk, m - pi, OP)? {
+            return Err(at_domain_end(OP));
+        }
+        let span = knt.find_span(p, u, side)?;
+        let i = sx(span, OP)?;
+        let mut left = [0.0_f64; MAX_DEGREE];
+        let mut right = [0.0_f64; MAX_DEGREE];
+        set(&mut n, 0, 1.0, OP)?;
+        for k in 1..=pi {
+            set(&mut left, k, u - get(uk, i + 1 - k, OP)?, OP)?;
+            set(&mut right, k, get(uk, i + k, OP)? - u, OP)?;
+            let mut saved = 0.0;
+            for l in 0..k {
+                let rr = get(&right, l + 1, OP)?;
+                let ll = get(&left, k - l, OP)?;
+                let delta = rr + ll;
+                if delta < knot_tol {
+                    return Err(degenerate(OP));
+                }
+                let temp = get(&n, l, OP)?;
+                set(&mut n, l, saved + temp * (rr / delta), OP)?;
+                saved = temp * (ll / delta);
+            }
+            set(&mut n, k, saved, OP)?;
+        }
+        Ok(Basis { span, values: n })
+    }
+
+    fn old_crv_eval(cur: &Curve, u: f64, side: Side) -> Result<Vec3> {
+        let pw = cur.cpts();
+        let p = cur.degree();
+        let knt = cur.knot_vector()?;
+        let basis = old_basis_eval(&knt, p, u, side)?;
+        let mut cw = CPoint::new(0.0, 0.0, 0.0, 0.0);
+        let spn_p = basis.span - p;
+        for (i, &alpha) in basis.values.iter().enumerate().take(p + 1) {
+            let aw = pw[spn_p + i];
+            if alpha == 1.0 {
+                cw.x += aw.x;
+                cw.y += aw.y;
+                if aw.z != NOZ {
+                    cw.z += aw.z;
+                } else {
+                    cw.z = NOZ;
+                }
+                if aw.w != NOW {
+                    cw.w += aw.w;
+                } else {
+                    cw.w = NOW;
+                }
+            } else if alpha != 0.0 {
+                cw.x += alpha * aw.x;
+                cw.y += alpha * aw.y;
+                if aw.z != NOZ {
+                    cw.z += alpha * aw.z;
+                } else {
+                    cw.z = NOZ;
+                }
+                if aw.w != NOW {
+                    cw.w += alpha * aw.w;
+                } else {
+                    cw.w = NOW;
+                }
+            }
+        }
+        Ok(to_euclid(cw))
+    }
+
+    #[test]
+    fn stack_basis_eval_is_bit_identical_to_the_heap_path() {
+        // a fixed-seed LCG: deterministic control points, weights and knots
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        let mut rnd = move || {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            (state >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let mut compared = 0;
+        for p in 1..=7usize {
+            for rational in [false, true] {
+                let n_cpts = p + 1 + 4;
+                let pw: Vec<CPoint> = (0..n_cpts)
+                    .map(|_| {
+                        let w = if rational { 0.25 + 2.0 * rnd() } else { NOW };
+                        let (x, y, z) = (rnd() * 10.0 - 5.0, rnd() * 10.0 - 5.0, rnd() * 3.0);
+                        if rational {
+                            CPoint::new(x * w, y * w, z * w, w)
+                        } else {
+                            CPoint::new(x, y, z, w)
+                        }
+                    })
+                    .collect();
+                // clamped knots with non-uniform interior knots (a double knot from
+                // degree 2 on)
+                let mut u = vec![0.0; p + 1];
+                let mut t = 0.0;
+                for k in 0..n_cpts - p - 1 {
+                    if k != 2 || p < 2 {
+                        t += 0.1 + rnd();
+                    }
+                    u.push(t);
+                }
+                let end = t + 0.1 + rnd();
+                u.extend(vec![end; p + 1]);
+                let c = Curve::new(pw, p, u.clone()).unwrap();
+                let knt = c.knot_vector().unwrap();
+                let mut params: Vec<f64> = (1..64).map(|j| end * f64::from(j) / 64.0).collect();
+                params.extend(u.iter().copied()); // knots themselves, domain ends included
+                for &x in &params {
+                    for side in [Side::Left, Side::Right] {
+                        let old = old_basis_eval(&knt, p, x, side);
+                        let new = basis_eval(&knt, p, x, side);
+                        match (&old, &new) {
+                            (Ok(a), Ok(b)) => {
+                                assert_eq!(a.span, b.span);
+                                let ab: Vec<u64> = a.values.iter().map(|v| v.to_bits()).collect();
+                                let bb: Vec<u64> = b.values.iter().map(|v| v.to_bits()).collect();
+                                assert_eq!(ab, bb, "p {p} u {x}");
+                            }
+                            (Err(a), Err(b)) => assert_eq!(format!("{a:?}"), format!("{b:?}")),
+                            _ => panic!("p {p} u {x}: {old:?} vs {new:?}"),
+                        }
+                        let old = old_crv_eval(&c, x, side);
+                        let new = crv_eval(&c, x, side);
+                        match (&old, &new) {
+                            (Ok(a), Ok(b)) => {
+                                assert_eq!(
+                                    [a.x.to_bits(), a.y.to_bits(), a.z.to_bits()],
+                                    [b.x.to_bits(), b.y.to_bits(), b.z.to_bits()],
+                                    "p {p} rational {rational} u {x}"
+                                );
+                                compared += 1;
+                            }
+                            (Err(a), Err(b)) => assert_eq!(format!("{a:?}"), format!("{b:?}")),
+                            _ => panic!("p {p} u {x}: {old:?} vs {new:?}"),
+                        }
+                    }
+                }
+            }
+        }
+        assert!(compared > 1000, "{compared}");
     }
 
     #[test]

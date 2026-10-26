@@ -253,7 +253,7 @@ impl Surface {
                 // when TangentU is nearly zero
                 let mut mag_sv = crate::geom::vector3d::sqrt(mag_sq_sv);
                 let mut mag_su = crate::geom::vector3d::sqrt(mag_sq_su);
-                let dom_size = self.natural_uv_domain().size();
+                let dom_size = self.natural_uv_domain_with_nurb(k)?.size();
                 mag_su *= dom_size.x;
                 mag_sv *= dom_size.y;
 
@@ -274,7 +274,7 @@ impl Surface {
 
                     // At the low end of the domain (the v domain), Su would be
                     // increasing, at the top it's decreasing.
-                    let mid_param = self.natural_uv_domain().v_interval().mid();
+                    let mid_param = self.natural_uv_domain_with_nurb(k)?.v_interval().mid();
                     if (uv.y < mid_param && mag_su_v > mag_su)
                         || (uv.y > mid_param && mag_su_v < -mag_su)
                     {
@@ -292,7 +292,7 @@ impl Surface {
             } else {
                 let mut mag_sv = crate::geom::vector3d::sqrt(mag_sq_sv);
                 let mut mag_su = crate::geom::vector3d::sqrt(mag_sq_su);
-                let dom_size = self.natural_uv_domain().size();
+                let dom_size = self.natural_uv_domain_with_nurb(k)?.size();
                 mag_su *= dom_size.x;
                 mag_sv *= dom_size.y;
 
@@ -311,7 +311,7 @@ impl Surface {
 
                     // At the low end of the domain (the u domain), Sv would be
                     // increasing, at the top it's decreasing.
-                    let mid_param = self.natural_uv_domain().u_interval().mid();
+                    let mid_param = self.natural_uv_domain_with_nurb(k)?.u_interval().mid();
                     if (uv.x < mid_param && mag_sv_u > mag_sv)
                         || (uv.x > mid_param && mag_sv_u < -mag_sv)
                     {
@@ -398,7 +398,7 @@ impl Surface {
         let sing = self.is_singularity(k, uv, d3d_tol, false)?;
         if !sing.singular {
             // This point is not a singularity (a warning upstream).
-            let dom = self.natural_uv_domain();
+            let dom = self.natural_uv_domain_with_nurb(k)?;
             let low_u = uv.x < dom.u_interval().mid();
             let low_v = uv.y < dom.v_interval().mid();
             let side = |low: bool| if low { Side::Left } else { Side::Right };
@@ -406,7 +406,7 @@ impl Surface {
         }
 
         // locals
-        let uv_domain = self.natural_uv_domain();
+        let uv_domain = self.natural_uv_domain_with_nurb(k)?;
         let mut norm_sum = Vec3::ZERO;
 
         if sing.direction == SurfParamType::V {
@@ -500,19 +500,16 @@ impl Surface {
         domain: Option<&Extent2d>,
         want_uv_iso_curve: bool,
     ) -> Result<IsoParametricCurve> {
-        match self.kind() {
+        match self.kind_with_nurb(k)? {
             // (SmSurfOfExtrusion inherits the B-spline override)
-            SurfaceKind::SurfOfExtrusion(s) => {
+            SurfaceKind::SurfOfExtrusion(_) => {
                 let opts = crate::nurbs::b_spline_surface::p2::IsoCurveOptions {
                     domain: domain.copied(),
                     uv_iso_curve: want_uv_iso_curve,
                 };
-                let r = s.base_with_nurb(k)?.create_iso_parametric_curve(
-                    k,
-                    param,
-                    iso_parameter,
-                    opts,
-                )?;
+                let r = self
+                    .extrusion_base_with_nurb(k)?
+                    .create_iso_parametric_curve(k, param, iso_parameter, opts)?;
                 return Ok(IsoParametricCurve {
                     curve: Curve::from(r.curve),
                     max_gap_3d: r.max_gap_3d,
@@ -609,7 +606,7 @@ impl Surface {
         };
 
         // get isoParameter curve mid UVPoint
-        let mut uv = self.natural_uv_domain().evaluate(0.5, 0.5);
+        let mut uv = self.natural_uv_domain_with_nurb(k)?.evaluate(0.5, 0.5);
         if param == SurfParamType::U {
             uv.x = iso_parameter;
         } else {
@@ -622,7 +619,7 @@ impl Surface {
             let mut curve = BSplineCurve::create_point_curve(pnt)?;
 
             // adjust param range to match the surface Natural UVDomain or a given domain
-            let mut uv_domain = self.natural_uv_domain();
+            let mut uv_domain = self.natural_uv_domain_with_nurb(k)?;
             if let Some(d) = domain {
                 // upstream ignores the status: a disjoint domain leaves Init()
                 uv_domain = uv_domain.intersect(d).unwrap_or_else(|_| Extent2d::new());
@@ -653,9 +650,9 @@ impl Surface {
 
         // get unique knots crossing the isoParameter curve
         let (mut knots, _) = if param == SurfParamType::U {
-            self.knots(SurfParamType::V, None)?
+            self.knots_with_nurb(k, SurfParamType::V, None)?
         } else {
-            self.knots(SurfParamType::U, None)?
+            self.knots_with_nurb(k, SurfParamType::U, None)?
         };
 
         // when given an optional domain
@@ -1223,7 +1220,7 @@ impl Surface {
             }
 
             // Search array for best solution
-            let nat_domain = self.natural_uv_domain();
+            let nat_domain = self.natural_uv_domain_with_nurb(k)?;
             let mut best_sol = BIG_DOUBLE;
             let mut best_dot = -BIG_DOUBLE;
             let mut best_uv_dist = BIG_DOUBLE;
@@ -1746,12 +1743,14 @@ impl Surface {
         mut context: Option<CoverSolveContext<'_, O>>,
     ) -> Result<CoverOtherCoincident> {
         let mut st = CoverState {
-            domain0: this_domain
-                .copied()
-                .unwrap_or_else(|| self.natural_uv_domain()),
-            domain1: other_domain
-                .copied()
-                .unwrap_or_else(|| other.natural_uv_domain()),
+            domain0: match this_domain {
+                Some(d) => *d,
+                None => self.natural_uv_domain_with_nurb(k)?,
+            },
+            domain1: match other_domain {
+                Some(d) => *d,
+                None => other.natural_uv_domain_with_nurb(k)?,
+            },
             max_dist: BIG_DOUBLE,
             merged: None,
             trims: Vec::new(),
@@ -2272,7 +2271,7 @@ pub fn filter_solution<O: SolutionObject>(
         keep = curve_save || surf_u_save || surf_v_save;
     }
     // Can't use passed-in interval, it's just a cache subset.
-    let srf_domain = surface.natural_uv_domain();
+    let srf_domain = surface.natural_uv_domain_with_nurb(k)?;
     if keep && surf_u_save {
         if surface
             .is_closed(k, &srf_domain, SurfParamType::U, None, false)?
