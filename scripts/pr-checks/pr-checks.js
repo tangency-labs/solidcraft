@@ -129,6 +129,12 @@ async function checkDefaults({ github, context, core }) {
 // Separate job (it needs write access, which fork PRs don't get): best effort.
 async function syncDefaultLabel({ github, context, core }) {
   const pull = context.payload.pull_request;
+  const headRepo = pull.head?.repo?.full_name;
+  const baseRepo = `${context.repo.owner}/${context.repo.repo}`;
+  if (headRepo && headRepo.toLowerCase() !== baseRepo.toLowerCase()) {
+    core.notice('Skipping default label: pull_request tokens from forks are read-only; a maintainer can apply the label.');
+    return { skipped: 'read-only fork token' };
+  }
   const { status } = parseDefaults(pull.body);
   const has = hasLabel(pull, DEFAULT_LABEL);
   const args = { ...context.repo, issue_number: pull.number };
