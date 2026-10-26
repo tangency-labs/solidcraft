@@ -1,10 +1,19 @@
 //! `xr-info`: detect the OpenXR runtime and the VR hardware.
 //!
-//! Phase 0 of the OpenXR integration (#2172): a diagnostic probe that enumerates
-//! the OpenXR runtime, the HMD and its view configuration, and checks Vulkan
-//! instance/device compatibility. Reports graceful results when nothing is found.
+//! Phase 0 of the OpenXR integration (#2172): a diagnostic probe that reads the
+//! OpenXR runtime, the HMD and its view configuration, and reports what a Phase 1
+//! stereo renderer would have to work with. Reports stored results when nothing
+//! is found: no runtime, no headset and no Vulkan support are answers, not errors.
+//!
+//! The loader is opened at run time ([`load_entry`]) rather than compiled in. The
+//! `static` feature would build the Khronos C++ loader through CMake on every
+//! build, including the macOS release build in .github/workflows/release.yml,
+//! for no benefit here: the OpenXR runtime on a VR machine already installs a
+//! loader. `crates/threedx-client/src/macos.rs` makes the same trade for the same
+//! reason -- the 3Dconnexion driver ships its own library -- and keeps its
+//! `unsafe` to the declarations and the lookups, as this module does.
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// Run `xr-info` and print the diagnostic report as JSON.
 pub fn cmd(_args: &[String]) -> Result<(), String> {
@@ -13,12 +22,28 @@ pub fn cmd(_args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// Open the OpenXR loader the runtime installs, at run time.
+///
+/// Split out so the `unsafe` allowance is one function with one call, rather than
+/// the whole module.
+#[allow(unsafe_code)]
+fn load_entry() -> Result<openxr::Entry, String> {
+    // SAFETY: `Entry::load` loads the platform's OpenXR loader library
+    // (`openxr_loader.dll` on Windows, `libopenxr_loader.so.1`/`.dylib` elsewhere)
+    // from the dynamic loader's search path. The OpenXR specification requires
+    // that library to implement the core entry points this program calls through,
+    // and the runtime installer puts it there; a machine with no OpenXR runtime
+    // simply fails the load, which the caller reports as "no runtime" instead of
+    // trusting it. Nothing below this call assumes a loader is present.
+    unsafe { openxr::Entry::load(&()) }.map_err(|e| format!("no OpenXR loader: {e}"))
+}
+
 /// Probe the OpenXR runtime and build a JSON diagnostic report.
 fn probe() -> Result<Value, String> {
     // -----------------------------------------------------------------------
-    // 1. Load the OpenXR entry point (bundled Khronos loader).
+    // 1. Open the OpenXR entry point.
     // -----------------------------------------------------------------------
-    let entry = openxr::Entry::linked(&()).map_err(|e| format!("OpenXR loader not available: {e}"))?;
+    let entry = load_entry()?;
     let mut report = json!({
         "openxr": {
             "runtime": Value::Null,

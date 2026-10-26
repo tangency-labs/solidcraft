@@ -34,7 +34,10 @@
 //! --max-file-size SIZE (with any command)                     read STEP and design files up to SIZE (2GB, 1500MB; at most 16GB)
 //! ```
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
-#![forbid(unsafe_code)]
+// `deny`, not `forbid`: `xr_info::load_entry` needs one targeted `allow(unsafe_code)` to open the
+// OpenXR loader the runtime installs, and `forbid` cannot be relaxed anywhere in the crate. The
+// app crate (`apps/solidcraft`) has the same shape for the macOS open-document handler.
+#![deny(unsafe_code)]
 
 mod bench_agent;
 mod bench_assistant;
@@ -128,7 +131,8 @@ const USAGE_LICENCES: &str = "  solidcraft-cli licences\n";
 /// `gpu`'s lines in the usage.
 const USAGE_GPU: &str = "  solidcraft-cli gpu [--policy auto|hardware|software|cpu]\n      (the GPU adapters a headless render can open, best first, the one the policy picks and the tier it\n       lands on: gpu, gpu-software, or the CPU rasterizer (auto with no adapter, or cpu); the policy defaults\n       to SOLIDCRAFT_GPU, else auto; exits with an error when hardware or software finds no such adapter)\n";
 /// `xr-info`'s lines in the usage.
-const USAGE_XR_INFO: &str = "  solidcraft-cli xr-info\n      (probe the OpenXR runtime, head-mounted display and Vulkan compatibility; Phase 0 of #2172)\n";
+const USAGE_XR_INFO: &str =
+    "  solidcraft-cli xr-info\n      (probe the OpenXR runtime, head-mounted display and Vulkan compatibility; Phase 0 of #2172)\n";
 /// `icon`'s lines in the usage.
 const USAGE_ICON: &str = "  solidcraft-cli icon --out icon.png [--size 256] | --out icon.ico\n";
 /// `fuzz-one`'s lines in the usage: a seed and the flags of one fuzz run.
