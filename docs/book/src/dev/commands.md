@@ -49,3 +49,9 @@ ending in the same word (`file.open`: did you mean `doc.open`?).
    your command automatically with every documented parameter set to junk. It must return
    errors, never panic.
 5. For UI work, add a scenario (see [Test harnesses](testing.md)).
+6. A command on the toolbar (a tab in `.at(…)`) ships with its help tooltip: two short
+   sentences, what the tool does and then when to use it, in your own words. Add the message
+   `help.<id>` to a new file in `assets/locales/pending/` (English, plus the languages you can
+   write; a test requires Japanese and Chinese) and the id to `DOCUMENTED` in
+   `crates/ui-egui/src/command_help.rs`. The test `every_toolbar_command_has_help_or_is_on_the_backlog`
+   fails for a toolbar command without help; the older ones on its `BACKLOG` only shrink (#2758).

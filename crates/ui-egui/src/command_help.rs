@@ -1,24 +1,41 @@
 //! Written help for the ribbon tooltips (#2758): two short sentences per command, shown under the
 //! tool name when the pointer rests on its button. The names stay as they are; the help is a
 //! separate message `help.<command id>` in the catalogs, so a tool without help keeps its plain
-//! tooltip. Text only for now; pictures and animations are a later step.
+//! tooltip. Text only for now; pictures and animations are a later step. A new toolbar command
+//! ships with its help: `every_toolbar_command_has_help_or_is_on_the_backlog` fails otherwise.
 
 use crate::i18n;
 
 /// The commands that have help text. Each one needs a `help.<id>` message in the catalogs.
 pub const DOCUMENTED: &[&str] = &[
+    "appearance.assign",
+    "face.delete",
+    "material.assign",
+    "parameters.change",
+    "solid.align",
     "solid.chamfer",
     "solid.combine",
+    "solid.draft",
     "solid.extrude",
     "solid.fillet",
     "solid.hole",
     "solid.loft",
     "solid.mirror",
+    "solid.move",
+    "solid.offset_face",
     "solid.pattern.circular",
     "solid.pattern.rectangular",
+    "solid.press_pull",
+    "solid.remove",
+    "solid.replace_face",
     "solid.revolve",
+    "solid.scale",
     "solid.shell",
+    "solid.split_body",
+    "solid.split_face",
     "solid.sweep",
+    "timeline.compute_all",
+    "timeline.delete",
 ];
 
 /// The help for `command` in the current language, when it has any.
@@ -71,6 +88,224 @@ mod tests {
             .collect()
     }
 
+    /// Toolbar commands written before every tool needed help (#2758). The list only shrinks: write
+    /// the help for one of these and take it off; a new toolbar command never goes on it.
+    const BACKLOG: &[&str] = &[
+        "assembly.bom",
+        "canvas.decal",
+        "canvas.edit",
+        "canvas.insert",
+        "component.capture_position",
+        "component.create",
+        "component.insert_design",
+        "component.revert_position",
+        "config.configure",
+        "config.table",
+        "construct.axis.edge",
+        "construct.axis.normal_to_face",
+        "construct.axis.through_cylinder",
+        "construct.axis.two_planes",
+        "construct.axis.two_points",
+        "construct.plane.along_path",
+        "construct.plane.at_angle",
+        "construct.plane.midplane",
+        "construct.plane.offset",
+        "construct.plane.perpendicular",
+        "construct.plane.tangent",
+        "construct.plane.three_points",
+        "construct.plane.two_edges",
+        "construct.point.along_path",
+        "construct.point.center",
+        "construct.point.edge_plane",
+        "construct.point.three_planes",
+        "construct.point.two_edges",
+        "construct.point.vertex",
+        "contact.create",
+        "contact.disable_all",
+        "contact.enable_all",
+        "contact.enable_sets",
+        "explode.create",
+        "file.insert_mesh",
+        "file.insert_step",
+        "file.save_mesh",
+        "frame.member",
+        "inspect.accessibility",
+        "inspect.center_of_mass",
+        "inspect.colored_components",
+        "inspect.continuity",
+        "inspect.curvature_comb",
+        "inspect.curvature_map",
+        "inspect.draft",
+        "inspect.environment_map",
+        "inspect.interference",
+        "inspect.isocurve",
+        "inspect.measure",
+        "inspect.minimum_radius",
+        "inspect.section",
+        "inspect.zebra",
+        "joint.as_built",
+        "joint.cam",
+        "joint.create",
+        "joint.drive",
+        "joint.gear",
+        "joint.motion_link",
+        "joint.origin",
+        "joint.rack_pinion",
+        "joint.rigid_group",
+        "joint.screw",
+        "motion.study",
+        "motion.trace",
+        "parts.fastener",
+        "plastic.assign_rule",
+        "plastic.boss",
+        "plastic.lip",
+        "plastic.manage_rules",
+        "plastic.rest",
+        "plastic.snap_fit",
+        "render.scene",
+        "render.start",
+        "sheet.convert",
+        "sheet.flange",
+        "sheet.flat_pattern",
+        "sheet.fold",
+        "sheet.hem",
+        "sheet.manage_rules",
+        "sheet.path_flange",
+        "sheet.perforate",
+        "sheet.refold",
+        "sheet.unfold",
+        "sketch.arc.center_point",
+        "sketch.arc.tangent",
+        "sketch.arc.three_point",
+        "sketch.auto_constrain",
+        "sketch.auto_constrain_from_datum",
+        "sketch.blend_curve",
+        "sketch.break",
+        "sketch.cancel",
+        "sketch.centerline",
+        "sketch.chamfer.distance_angle",
+        "sketch.chamfer.equal_distance",
+        "sketch.chamfer.two_distance",
+        "sketch.circle.center",
+        "sketch.circle.three_point",
+        "sketch.circle.three_tangent",
+        "sketch.circle.two_point",
+        "sketch.circle.two_tangent",
+        "sketch.conic",
+        "sketch.constrainer",
+        "sketch.constraint.coincident",
+        "sketch.constraint.collinear",
+        "sketch.constraint.concentric",
+        "sketch.constraint.curvature",
+        "sketch.constraint.equal",
+        "sketch.constraint.fix",
+        "sketch.constraint.horizontal_vertical",
+        "sketch.constraint.midpoint",
+        "sketch.constraint.parallel",
+        "sketch.constraint.perpendicular",
+        "sketch.constraint.polygon",
+        "sketch.constraint.symmetry",
+        "sketch.constraint.tangent",
+        "sketch.construction",
+        "sketch.create",
+        "sketch.dimension",
+        "sketch.ellipse",
+        "sketch.extend",
+        "sketch.fillet",
+        "sketch.finish",
+        "sketch.finish_auto_constrain",
+        "sketch.fit_curves_to_section",
+        "sketch.include_3d",
+        "sketch.insert_dxf",
+        "sketch.insert_svg",
+        "sketch.intersect",
+        "sketch.intersection_curve",
+        "sketch.isoparametric_curve",
+        "sketch.line",
+        "sketch.line.midpoint",
+        "sketch.mirror",
+        "sketch.move",
+        "sketch.offset",
+        "sketch.pattern.circular",
+        "sketch.pattern.rectangular",
+        "sketch.point",
+        "sketch.polygon.circumscribed",
+        "sketch.polygon.edge",
+        "sketch.polygon.inscribed",
+        "sketch.project",
+        "sketch.project_to_surface",
+        "sketch.rectangle.center",
+        "sketch.rectangle.rounded",
+        "sketch.rectangle.three_point",
+        "sketch.rectangle.two_point",
+        "sketch.scale",
+        "sketch.slot.arc_center",
+        "sketch.slot.arc_three_point",
+        "sketch.slot.center_point",
+        "sketch.slot.center_to_center",
+        "sketch.slot.overall",
+        "sketch.spline.control_point",
+        "sketch.spline.control_point_5",
+        "sketch.spline.fit_point",
+        "sketch.spun_profile",
+        "sketch.text",
+        "sketch.trim",
+        "solid.boundary_fill",
+        "solid.bounding_solid",
+        "solid.box",
+        "solid.coil",
+        "solid.cylinder",
+        "solid.emboss",
+        "solid.pattern.path",
+        "solid.pipe",
+        "solid.rib",
+        "solid.sphere",
+        "solid.thread",
+        "solid.torus",
+        "solid.web",
+        "surface.blend",
+        "surface.boundary",
+        "surface.extend",
+        "surface.extrude",
+        "surface.fair",
+        "surface.loft",
+        "surface.match",
+        "surface.offset",
+        "surface.patch",
+        "surface.reverse_normal",
+        "surface.revolve",
+        "surface.ruled",
+        "surface.stitch",
+        "surface.sweep",
+        "surface.thicken",
+        "surface.trim",
+        "surface.unstitch",
+        "surface.untrim",
+    ];
+
+    #[test]
+    fn every_toolbar_command_has_help_or_is_on_the_backlog() {
+        let mut missing = Vec::new();
+        for c in solidcraft_engine::command_specs() {
+            // A planned command only says "not supported yet"; it gets its help when it is built.
+            if c.tab.is_empty() || c.planned.is_some() || DOCUMENTED.contains(&c.id) || BACKLOG.contains(&c.id) {
+                continue;
+            }
+            missing.push(c.id);
+        }
+        assert!(
+            missing.is_empty(),
+            "toolbar commands without help: {missing:?}. Add `help.<id>` (two short sentences: what the tool does, \
+             then when to use it) to a file in assets/locales/pending/ and the id to DOCUMENTED"
+        );
+        assert!(BACKLOG.is_sorted());
+        for id in BACKLOG {
+            let c = solidcraft_engine::find_command(id).unwrap_or_else(|| panic!("{id} is not a command"));
+            assert!(c.id == *id && !c.tab.is_empty(), "{id} is not on the toolbar: take it off the backlog");
+            assert!(!DOCUMENTED.contains(id), "{id} has help now: take it off the backlog");
+        }
+    }
+
     #[test]
     fn every_documented_id_is_a_real_command() {
         for id in DOCUMENTED {
@@ -109,7 +344,7 @@ mod tests {
         for id in DOCUMENTED {
             assert!(help(id).is_some_and(|text| !text.is_empty()), "{id}");
         }
-        assert!(help("solid.draft").is_none());
+        assert!(help("solid.rib").is_none());
     }
 
     #[test]
@@ -117,7 +352,7 @@ mod tests {
         assert_eq!(row_tip("solid.shell", "Shell", Some("S"), None).as_deref(), Some("Shell  (S)"));
         assert_eq!(row_tip("solid.hole", "Hole", None, None).as_deref(), Some("Hole"));
         assert_eq!(row_tip("solid.hole", "Hole", None, Some("Select a face")).as_deref(), Some("Select a face"));
-        assert_eq!(row_tip("solid.draft", "Draft", None, None), None);
-        assert_eq!(row_tip("solid.draft", "Draft", None, Some("No body")).as_deref(), Some("No body"));
+        assert_eq!(row_tip("solid.rib", "Rib", None, None), None);
+        assert_eq!(row_tip("solid.rib", "Rib", None, Some("No body")).as_deref(), Some("No body"));
     }
 }
