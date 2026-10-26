@@ -358,11 +358,27 @@ pub(super) fn calculate_bounding_box(
                 "surface.surface_p1",
             ))
         }
-        // DISPATCH GAP: OffsetSurface::calculate_bounding_box is ported, but this
-        // cache callback has no Kernel (the offset's constructor-time queries and its
-        // base box need one), and upstream forwards the basis guesses to the base, which
+        // SmOffsetSurface::CalculateBoundingBox (OffsetSurface::calculate_bounding_box)
+        // when there are no basis guesses to forward to the base.
+        SurfaceKind::OffsetSurface(o)
+            if req.pseudo_guess.is_none() && req.polar_guess.is_none() =>
+        {
+            let boxes = o.calculate_bounding_box(
+                k,
+                surface,
+                domain,
+                [req.normal, req.pseudo, req.polar],
+                req.expand_by_zone_tol,
+            )?;
+            Ok(BoundingBoxes {
+                normal: boxes.normal_box,
+                pseudo: boxes.pseudo_box,
+                polar: boxes.polar_box,
+            })
+        }
+        // DISPATCH GAP: upstream forwards the basis guesses to the base, which
         // Surface::calculate_bounding_box does not take. No UNPORTED marker: the callees
-        // are ported; the error names this callback's unit. No difftest reaches it.
+        // are ported; the error names this callback's unit.
         SurfaceKind::OffsetSurface(_) => Err(SolidError::unported(
             "SmOffsetSurface::CalculateBoundingBox from a surface cache",
             "surface.surface_cache_p1",

@@ -25,6 +25,11 @@ fn object(
     let brep = match body {
         FilletBody::Target => target,
         FilletBody::Pseudo => pseudo,
+        // No second base B-rep in an edge fillet.
+        FilletBody::SecondBase => {
+            out.extend([-1.0, -1.0, -2.0]);
+            return Ok(());
+        }
     };
     let (kind, label) = match entity {
         EntityRef::Vertex(id) => (
@@ -46,6 +51,7 @@ fn object(
         match body {
             FilletBody::Target => 1.0,
             FilletBody::Pseudo => 2.0,
+            FilletBody::SecondBase => 3.0,
         },
         kind,
         label,
@@ -134,10 +140,12 @@ pub(super) fn snapshot(
                     Some(FilletClassObject::Curve(body, id)) => match body {
                         FilletBody::Target => target.edge(id)?.curve.as_ref(),
                         FilletBody::Pseudo => pseudo.brep().edge(id)?.curve.as_ref(),
+                        FilletBody::SecondBase => None,
                     },
                     Some(FilletClassObject::TrimCurve(body, id)) => match body {
                         FilletBody::Target => target.edgeuse(id)?.uv_trim_curve.as_ref(),
                         FilletBody::Pseudo => pseudo.brep().edgeuse(id)?.uv_trim_curve.as_ref(),
+                        FilletBody::SecondBase => None,
                     },
                     _ => None,
                 };

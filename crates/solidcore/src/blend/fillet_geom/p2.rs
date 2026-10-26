@@ -176,6 +176,7 @@ fn as_assisted(fs: &FilletSolver) -> ConstantRadiusAssistedFs {
     ConstantRadiusAssistedFs {
         solver: fs.clone(),
         fillet_radii: [0.0; 2],
+        plain: false,
     }
 }
 
@@ -318,6 +319,45 @@ impl RailRailSolvers<'_> {
                     tsect1,
                     tsect2,
                 )
+            }
+        }
+    }
+}
+
+/// The solvers `SmFilletEdge::CalcRailRailInterpolation` reaches: the caller's
+/// indexed table, or a live session's retained solvers.
+enum InterpolationSolvers<'a> {
+    Indexed(&'a mut [FilletSolver]),
+    Context(&'a dyn super::p5::FilletEdgeContext),
+}
+
+impl InterpolationSolvers<'_> {
+    fn solver(&self, id: FilletSolverId, op: &'static str) -> Result<&FilletSolver> {
+        match self {
+            Self::Indexed(solvers) => solver_at(solvers, solver_index(solvers, id, op)?, op),
+            Self::Context(context) => context.solver(id),
+        }
+    }
+
+    fn cubic<R>(
+        &mut self,
+        id1: FilletSolverId,
+        id2: FilletSolverId,
+        op: &'static str,
+        f: impl FnOnce(&mut FilletSolver, &mut FilletSolver) -> Result<R>,
+    ) -> Result<R> {
+        match self {
+            Self::Indexed(solvers) => {
+                let i = solver_index(solvers, id1, op)?;
+                let j = solver_index(solvers, id2, op)?;
+                with_solver_pair(solvers, i, j, op, f)
+            }
+            Self::Context(_) => {
+                // UNPORTED(blend.fillet_executive_p3): live concrete solvers for the cubic rail/rail interpolant.
+                Err(SolidError::unported(
+                    "sm_CreateCubicRailRailInterpolant (live concrete solvers)",
+                    "blend.fillet_executive_p3",
+                ))
             }
         }
     }
@@ -639,6 +679,7 @@ fn point_on_plane_solve(
     let found = FilletSolverOps::point_on_plane_solve(
         fs,
         k,
+        None,
         plane_orig,
         plane_normal,
         domain1,
@@ -2139,7 +2180,6 @@ impl FilletBrep {
     /// tolerance or a drop gives other than one UV curve; those of the evaluations,
     /// constructions, lifts and `SmSurface::DropCurve`; those of [`CornerLookup::corner`] (`corners`
     /// resolves `opt_corner`) and of the corner's `TestRailRailInterpolationCurve`.
-    #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn calc_rail_rail_interpolation(
         &mut self,
         k: &Kernel,
@@ -2147,6 +2187,52 @@ impl FilletBrep {
         opt_corner: Option<FilletCornerId>,
         corners: CornerLookup<'_>,
         solvers: &mut [FilletSolver],
+        target: &mut Brep,
+    ) -> Result<()> {
+        self.calc_rail_rail_interpolation_with_solvers(
+            k,
+            e,
+            opt_corner,
+            corners,
+            &mut InterpolationSolvers::Indexed(solvers),
+            target,
+        )
+    }
+
+    /// [`Self::calc_rail_rail_interpolation`] with the retained solvers of a live
+    /// executive session ([`super::p5::FilletEdgeContext`]).
+    ///
+    /// # Errors
+    /// As [`Self::calc_rail_rail_interpolation`]; [`SolidError::Unported`] where a
+    /// concave `NxN` corner's curve crosses the corner (the cubic interpolant's
+    /// rail/rail solve needs the live concrete solvers mutably).
+    pub fn calc_rail_rail_interpolation_with_context(
+        &mut self,
+        k: &Kernel,
+        e: EdgeId,
+        opt_corner: Option<FilletCornerId>,
+        corners: CornerLookup<'_>,
+        context: &dyn super::p5::FilletEdgeContext,
+        target: &mut Brep,
+    ) -> Result<()> {
+        self.calc_rail_rail_interpolation_with_solvers(
+            k,
+            e,
+            opt_corner,
+            corners,
+            &mut InterpolationSolvers::Context(context),
+            target,
+        )
+    }
+
+    #[allow(clippy::too_many_lines)] // one upstream routine
+    fn calc_rail_rail_interpolation_with_solvers(
+        &mut self,
+        k: &Kernel,
+        e: EdgeId,
+        opt_corner: Option<FilletCornerId>,
+        corners: CornerLookup<'_>,
+        solvers: &mut InterpolationSolvers<'_>,
         target: &mut Brep,
     ) -> Result<()> {
         const OP: &str = OP_INTERP;
@@ -2175,8 +2261,9 @@ impl FilletBrep {
                     .fillet_edgeuse(prim_eu)?
                     .fillet_geom()
                     .ok_or_else(|| SolidError::null_pointer(OP))?;
-                let si = self.geom_solver_index(fillet_geom, solvers, OP)?;
-                let fsg = solver_at(solvers, si, OP)?
+                let id = self.geom_solver_id(fillet_geom, OP)?;
+                let fsg = solvers
+                    .solver(id, OP)?
                     .fillet_surface_generator()
                     .ok_or_else(|| SolidError::null_pointer(OP))?;
                 fsg_type = fsg.fillet_surface_generator_type();
@@ -2401,14 +2488,17 @@ impl FilletBrep {
                 // Test and see if this edge intersects with the original corner
                 if the_corner.test_rail_rail_interpolation_curve(k, target, c3)? {
                     // Corner vertex is on the opposite side of the curve
-                    let solver_of_single_geom = |fb: &Self, fv: VertexId| -> Result<usize> {
-                        let geoms = fb.vertex_fillet_geoms(fv)?;
-                        if geoms.len() != 1 {
-                            return Err(SolidError::sm_err(OP));
-                        }
-                        let g = *geoms.first().ok_or_else(|| SolidError::sm_err(OP))?;
-                        fb.geom_solver_index(g, solvers, OP)
-                    };
+                    let solver_of_single_geom =
+                        |fb: &Self, fv: VertexId| -> Result<FilletSolverId> {
+                            let geoms = fb.vertex_fillet_geoms(fv)?;
+                            if geoms.len() != 1 {
+                                return Err(SolidError::sm_err(OP));
+                            }
+                            let g = *geoms.first().ok_or_else(|| SolidError::sm_err(OP))?;
+                            let id = fb.geom_solver_id(g, OP)?;
+                            solvers.solver(id, OP)?;
+                            Ok(id)
+                        };
                     let si1 = solver_of_single_geom(self, start_fv)?;
                     let si2 = solver_of_single_geom(self, end_fv)?;
 
@@ -2427,7 +2517,7 @@ impl FilletBrep {
                         .corner(corner)?
                         .filleted_vertex()
                         .ok_or_else(|| SolidError::null_pointer(OP))?;
-                    let new_uv = with_solver_pair(solvers, si1, si2, OP, |s1, s2| {
+                    let new_uv = solvers.cubic(si1, si2, OP, |s1, s2| {
                         create_cubic_rail_rail_interpolant(
                             k,
                             target,

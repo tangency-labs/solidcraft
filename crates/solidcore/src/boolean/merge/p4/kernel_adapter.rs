@@ -450,6 +450,16 @@ impl<'keys> ManifoldKernelAdapter<'keys> {
         self.intersector.intersect_wire_edges = enabled;
     }
 
+    /// `m_vTI.m_bIgnoreTangency`.
+    pub fn set_ignore_tangency(&mut self, enabled: bool) {
+        self.intersector.ignore_tangency = enabled;
+    }
+
+    /// `m_vTI.m_bDoingFillets`.
+    pub fn set_doing_fillets(&mut self, enabled: bool) {
+        self.intersector.doing_fillets = enabled;
+    }
+
     /// The empty-array `RegisterExistingSSI` call used by `PiecewiseMerge`.
     pub fn register_empty_ssi(&mut self, primary: FaceId, other: FaceId) {
         self.intersector.register_empty_ssi(

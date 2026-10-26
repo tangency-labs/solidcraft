@@ -80,6 +80,7 @@ impl SolverOps for Observed {
     fn point_on_plane_solve(
         &mut self,
         k: &Kernel,
+        brep: Option<&Brep>,
         origin: Vec3,
         normal: Vec3,
         d0: &Extent2d,
@@ -108,6 +109,7 @@ impl SolverOps for Observed {
         let result = SolverOps::point_on_plane_solve(
             &mut self.inner,
             k,
+            brep,
             origin,
             normal,
             d0,

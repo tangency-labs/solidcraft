@@ -316,6 +316,12 @@ pub struct ConstantRadiusAssistedFs {
     pub solver: FilletSolver,
     /// `m_dFilletRadii`: the offset radius of each surface.
     pub fillet_radii: [f64; 2],
+    /// The object is an `SmConstantRadiusFS` itself, not an
+    /// `SmConstantRadiusAssistedFS`: `GetType`, `IsKindOf`, `GetSolverType` and
+    /// `PointOnPlaneSolve` are then `SmConstantRadiusFS`'s (the last the base
+    /// `SmFilletSolver::PointOnPlaneSolve`). Set by the constructors that build a plain
+    /// `SmConstantRadiusFS` (`SetFilletParameters`); `false` from [`Self::from_parts`].
+    pub plain: bool,
 }
 
 impl ConstantRadiusAssistedFs {
@@ -364,6 +370,7 @@ impl ConstantRadiusAssistedFs {
         Self {
             solver,
             fillet_radii,
+            plain: false,
         }
     }
 
@@ -1747,6 +1754,7 @@ macro_rules! fillet_solver_ops {
             fn point_on_plane_solve(
                 &mut self,
                 k: &Kernel,
+                brep: Option<&Brep>,
                 plane_origin: Point3,
                 plane_normal: Vec3,
                 uv_domain1: &Extent2d,
@@ -1758,7 +1766,7 @@ macro_rules! fillet_solver_ops {
                 crate::blend::fillet_standard_solver::p2::point_on_plane_solve(
                     self,
                     k,
-                    None,
+                    brep,
                     plane_origin,
                     plane_normal,
                     uv_domain1,
@@ -2054,8 +2062,12 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
         Ok(ConstantRadiusAssistedFs::offset_radii_can_change(self))
     }
 
-    /// `SmConstantRadiusAssistedFS::GetType` (`SM_COMMON`).
+    /// `SmConstantRadiusAssistedFS::GetType` (`SM_COMMON`); `SmConstantRadiusFS`'s for a
+    /// [`plain`](Self::plain) solver.
     fn type_code(&self) -> Result<i64> {
+        if self.plain {
+            return Ok(crate::blend::fillet_standard_solver::p1::CONSTANT_RADIUS_FS_TYPE);
+        }
         Ok(CONSTANT_RADIUS_ASSISTED_FS_TYPE)
     }
 
@@ -2066,12 +2078,20 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
     /// `blend.fillet_solver_p4`'s `ShimSolver` does). It returned `SM_FS_CONST_RADIUS`
     /// until `blend.fillet_solver_p4` wired `ComputePointValues`, which made the
     /// intersector's `ComputeNextPoint` cases reach `StepSolve` and showed the gap.
+    /// A [`plain`](Self::plain) solver is `SmConstantRadiusFS`: `SM_FS_CONST_RADIUS`.
     fn solver_type(&self) -> Result<FilletSolverType> {
+        if self.plain {
+            return Ok(FilletSolverType::ConstRadius);
+        }
         Ok(FilletSolverType::ConstRadiusAssisted)
     }
 
-    /// `SmConstantRadiusAssistedFS::IsKindOf` (unit `blend.fillet_standard_solver_p2`).
+    /// `SmConstantRadiusAssistedFS::IsKindOf` (unit `blend.fillet_standard_solver_p2`);
+    /// `SmConstantRadiusFS::IsKindOf` for a [`plain`](Self::plain) solver.
     fn is_kind_of(&self, t: i64) -> Result<bool> {
+        if self.plain {
+            return Ok(crate::blend::fillet_standard_solver::p1::constant_radius_is_kind_of(t));
+        }
         Ok(crate::blend::fillet_standard_solver::p2::constant_radius_assisted_is_kind_of(t))
     }
 
@@ -2134,10 +2154,11 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
     /// `SmConstantRadiusAssistedFS::PointOnPlaneSolve` (unit
     /// `blend.fillet_standard_solver_p2`): the override `StepSolve` and the other
     /// callers of the virtual dispatch to (the base `SmFilletSolver` version solves
-    /// a different system).
+    /// a different system, and is the one a [`plain`](Self::plain) solver inherits).
     fn point_on_plane_solve(
         &mut self,
         k: &Kernel,
+        brep: Option<&Brep>,
         plane_origin: Point3,
         plane_normal: Vec3,
         uv_domain1: &Extent2d,
@@ -2146,10 +2167,24 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
         uv2: Point2,
         point: &mut TsectPnt,
     ) -> Result<bool> {
+        if self.plain {
+            return FilletSolver::point_on_plane_solve(
+                self,
+                k,
+                brep,
+                plane_origin,
+                plane_normal,
+                uv_domain1,
+                uv_domain2,
+                uv1,
+                uv2,
+                point,
+            );
+        }
         crate::blend::fillet_standard_solver::p2::point_on_plane_solve(
             self,
             k,
-            None,
+            brep,
             plane_origin,
             plane_normal,
             uv_domain1,

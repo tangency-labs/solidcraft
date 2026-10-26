@@ -28,7 +28,7 @@
 //! | [`CircularCrossSectionFsg::create_surface`]              | `SmCircularCrossSectionFSG::CreateSurface`            |
 //! | [`BlendCurveCrossSectionFsg::create_surface`]            | `SmBlendCurveCrossSectionFSG::CreateSurface`          |
 //! | [`SurfaceSurfaceFs::new`]                                | `SmSurfaceSurfaceFS::SmSurfaceSurfaceFS`              |
-//! | [`SurfaceSurfaceFs::calc_fillet_geom`]                   | `SmSurfaceSurfaceFS::CalcFilletGeom`                  |
+//! | [`SurfaceSurfaceFs::calc_fillet_geom`], [`SurfaceSurfaceFs::calc_fillet_start`], [`SurfaceSurfaceStart`] | `SmSurfaceSurfaceFS::CalcFilletGeom` (up to `GetPseudoBrep`; the rest is `surface_surface`'s) |
 //! | [`SurfaceSurfaceFs::is_kind_of`]                         | `SmSurfaceSurfaceFS::IsKindOf`                        |
 //!
 //! Deviations:
@@ -82,9 +82,11 @@
 //!   of the solver's law (`SmFilletIntersector::EvaluateLawPoint` does not read it).
 //!   `SetExtensionFlags` through the `FilletSolverOps` hook (which has no kernel) is
 //!   [`SolidError::InvalidInput`]; call [`VariableRadiusFs::set_extension_flags`].
-//! - **Unported callees.** `SmFilletSolver::StepSolve` (`blend.fillet_solver_p3`)
-//!   returns [`SolidError::Unported`] at the call site: `CalcFilletGeom` stops at
-//!   `StepSolve` (the rest of it is ported but unreachable).
+//! - **Surface/surface geometry.** `CalcFilletGeom` steps with the ported
+//!   `SmFilletSolver::StepSolve` (without a B-rep: the executive of a surface/surface
+//!   fillet has none). Its part from `GetPseudoBrep` on needs the live executive's
+//!   pseudo-B-rep and original faces (`surface_surface`); without them
+//!   [`SurfaceSurfaceFs::calc_fillet_geom`] returns [`SolidError::Unported`] there.
 //! - **Arguments.** Out-params become return values (`rbFoundSolution` /
 //!   `rTsectPnt`: `Some` point when found). `SmContext` arguments are dropped or become
 //!   the [`Kernel`]. The generators' `CreateSurface` take the solver's tolerance and
@@ -107,6 +109,7 @@ use crate::blend::fillet_intersector::FilletIntersector;
 use crate::blend::fillet_solver::p1::{
     FilletSolver, FilletSolverOps, FilletSphereSolveEnfo, OffsetSurfaceSlot,
 };
+use crate::blend::fillet_solver::p3::StepSolveOutcome;
 use crate::blend::fillet_solver::p4::IntersectorSolver;
 use crate::blend::fillet_standard_solver::p1::SolverRails;
 use crate::blend::fillet_standard_solver::p1::{
@@ -2521,10 +2524,31 @@ impl SurfaceSurfaceFs {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` for parallel normals at the guesses; those of the evaluations;
-    /// [`SolidError::Unported`] at the step (`SmFilletSolver::StepSolve`, unit
-    /// `blend.fillet_solver_p3`).
+    /// `SM_ERR` for parallel normals at the guesses; those of the evaluations and of
+    /// `StepSolve`; [`SolidError::Unported`] (`SmFilletExecutive::GetPseudoBrep`) once
+    /// the geometry is to be built: a solver in a live fillet session calls
+    /// [`SurfaceSurfaceFs::calc_fillet_geom_with_context`] instead.
     pub fn calc_fillet_geom(&mut self, k: &Kernel) -> Result<()> {
+        if self.calc_fillet_start(k)?.is_none() {
+            return Ok(());
+        }
+        // UNPORTED(blend.fillet_executive_p1): SmFilletExecutive::GetPseudoBrep (context-free caller; the live session passes its pseudo-B-rep)
+        Err(SolidError::unported(
+            "SmFilletExecutive::GetPseudoBrep",
+            "blend.fillet_executive_p1",
+        ))
+    }
+
+    /// `SmSurfaceSurfaceFS::CalcFilletGeom` up to `m_pExecutive->GetPseudoBrep()`: the
+    /// start point from the UV guesses, the step along the offset intersection
+    /// (`StepSolve`, retried after three alternating point solves), the extended
+    /// domains. `None` where upstream returns `SM_SUCCESS` before that (no good step,
+    /// or no fillet geometry).
+    ///
+    /// # Errors
+    ///
+    /// As [`SurfaceSurfaceFs::calc_fillet_geom`] before the pseudo-B-rep.
+    pub fn calc_fillet_start(&mut self, k: &Kernel) -> Result<Option<SurfaceSurfaceStart>> {
         const OP: &str = OP_SS_CALC;
         let domain1 = self.base.surface(0)?.surface.natural_uv_domain();
         let domain2 = self.base.surface(1)?.surface.natural_uv_domain();
@@ -2547,10 +2571,20 @@ impl SurfaceSurfaceFs {
         }
 
         let mut step = 0.0001;
-        // (StepSolve is unported: everything below is unreachable until it lands; it
-        // is kept as the faithful port of the rest of the function)
-        let mut stepped = step_solve(self, &curr, &mut step, &domain1, &domain2)?;
-        if !stepped.found_good_point {
+        let mut stepped = TsectPnt::new();
+        let mut outcome = StepSolveOutcome::default();
+        FilletSolver::step_solve(
+            self,
+            k,
+            None,
+            &curr,
+            &mut step,
+            &domain1,
+            &domain2,
+            &mut stepped,
+            &mut outcome,
+        )?;
+        if !outcome.found_good_point {
             for _ii in 0..3 {
                 let p4 = offset_evaluate_point(
                     k,
@@ -2581,13 +2615,23 @@ impl SurfaceSurfaceFs {
                     *curr.uv_pos_mut(SrfIndex::Second) = uv;
                 }
             }
-            stepped = step_solve(self, &curr, &mut step, &domain1, &domain2)?;
-            if !stepped.found_good_point {
-                return Ok(());
+            FilletSolver::step_solve(
+                self,
+                k,
+                None,
+                &curr,
+                &mut step,
+                &domain1,
+                &domain2,
+                &mut stepped,
+                &mut outcome,
+            )?;
+            if !outcome.found_good_point {
+                return Ok(None);
             }
         }
 
-        let tsect_pnts = [stepped.next];
+        let tsect_pnts = vec![stepped];
         let mut domain1 = domain1;
         let mut domain2 = domain2;
         let base1 = Surface::from(self.base.surface(0)?.surface.clone());
@@ -2596,58 +2640,24 @@ impl SurfaceSurfaceFs {
         ConstantRadiusOps::setup_offset_extension(self, k, &base2, &mut domain2)?;
 
         if self.base.solver.fillet_geoms.is_empty() {
-            return Ok(());
+            return Ok(None);
         }
-        fillet_geom_from_points(self, &tsect_pnts, &domain1, &domain2)
+        Ok(Some(SurfaceSurfaceStart {
+            tsect_pnts,
+            domains: [domain1, domain2],
+        }))
     }
 }
 
-/// The rest of `CalcFilletGeom` from `pBrep = m_pExecutive->GetPseudoBrep()`: the rail
-/// edges of the fillet geometry, the fillet intersection through `crTsectPnts` inside the
-/// two domains, the rails' curve classification and UV curves and
-/// `SplitAndTrimFilletSurface`.
-///
-/// # Errors
-///
-/// [`SolidError::Unported`] (`SmFilletExecutive::GetPseudoBrep`, unit
-/// `blend.fillet_executive_p1`).
-fn fillet_geom_from_points(
-    _solver: &mut SurfaceSurfaceFs,
-    _tsect_pnts: &[TsectPnt],
-    _domain1: &Extent2d,
-    _domain2: &Extent2d,
-) -> Result<()> {
-    // UNPORTED(blend.fillet_executive_p1): SmFilletExecutive::GetPseudoBrep
-    Err(SolidError::unported(
-        "SmFilletExecutive::GetPseudoBrep",
-        "blend.fillet_executive_p1",
-    ))
-}
-
-/// The outputs of `StepSolve` `CalcFilletGeom` reads.
-struct StepResult {
-    found_good_point: bool,
-    next: TsectPnt,
-}
-
-/// `StepSolve(sCurrPnt, dStep, sDomain1, sDomain2, bFoundGoodPoint, bClipped,
-/// bHitBoundary, sNextPnt)` (`dStep` in/out: `double& rdStep`).
-///
-/// # Errors
-///
-/// [`SolidError::Unported`] (`SmFilletSolver::StepSolve`, unit `blend.fillet_solver_p3`).
-fn step_solve(
-    _solver: &mut SurfaceSurfaceFs,
-    _curr: &TsectPnt,
-    _step: &mut f64,
-    _domain1: &Extent2d,
-    _domain2: &Extent2d,
-) -> Result<StepResult> {
-    // UNPORTED(blend.fillet_solver_p3): SmFilletSolver::StepSolve -- justified: plan/findings.md blend.fillet_standard_solver_p2 (StepSolve)
-    Err(SolidError::unported(
-        "SmFilletSolver::StepSolve",
-        "blend.fillet_solver_p3",
-    ))
+/// The state `SmSurfaceSurfaceFS::CalcFilletGeom` reaches at
+/// `pBrep = m_pExecutive->GetPseudoBrep()`: the stepped start point and the extended
+/// domains of the two offset surfaces.
+#[derive(Debug, Clone)]
+pub struct SurfaceSurfaceStart {
+    /// `sTsectPnts` (the one point `StepSolve` found).
+    pub tsect_pnts: Vec<TsectPnt>,
+    /// `sDomain1`, `sDomain2` after `SetupOffsetExtension`.
+    pub domains: [Extent2d; 2],
 }
 
 #[cfg(test)]
@@ -2806,6 +2816,7 @@ mod tests {
         let found3 = ops
             .point_on_plane_solve(
                 &k,
+                None,
                 p(0.4, 0.0, 0.0),
                 Vec3::new(1.0, 0.0, 0.0),
                 &d,

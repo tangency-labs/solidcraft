@@ -938,21 +938,24 @@ impl FilletCorner {
 
     /// Register an actual extended surface in the executive's owned face map.
     /// The same native domain-containment rule is used by both executive adapters.
+    /// Returns whether `ext_surface` was kept (upstream callers compare
+    /// `GetExtendedSurface` with the pointer they added).
     pub fn add_extended_original_surface_with_map(
         map: &mut BTreeMap<FaceId, Surface>,
         original_face: FaceId,
         ext_surface: Surface,
-    ) {
+    ) -> bool {
         if let Some(old_surface) = map.get(&original_face) {
             let new_domain = ext_surface.natural_uv_domain();
             let old_domain = old_surface.natural_uv_domain();
             if new_domain.is_contained_by(&old_domain, EFF_ZERO) {
                 // Old domain was bigger, delete the new ext surface.
-                return;
+                return false;
             }
             // else: the old surface is deleted (replaced below)
         }
         map.insert(original_face, ext_surface);
+        true
     }
 
     /// `ReInitializeCornerEdges`: `SetCurve(NULL, TRUE)` on every corner fillet edge
@@ -1807,6 +1810,66 @@ impl FilletCorner {
         } // end iter every filletEdge searching for one attached to face to extend
 
         // all done
+        Ok(())
+    }
+
+    /// [`FilletCorner::create_end_patch`] against any [`CornerPatchEnv`]:
+    /// `extended_surface` resolves the executive's extended surface of an original
+    /// face, and the environment's face-error note is the caller's
+    /// `FILEXEC_CORNER_ERR(this, "Corner End Face Creation Error")`.
+    ///
+    /// # Errors
+    /// As [`FilletCorner::create_end_patch`].
+    pub fn create_end_patch_with(
+        &mut self,
+        env: &mut CornerPatchEnv<'_, '_>,
+        extended_surface: impl Fn(FaceId) -> Option<Surface>,
+    ) -> Result<()> {
+        // for every filletCorner->FilletEdge
+        for curr_edge in self.edges.clone() {
+            // skip non SM_FE_FILLET_X_SIDE_FACE FilletEdges
+            let fe = env.pseudo.fillet_edge(curr_edge)?;
+            if fe.edge_type != FilletEdgeType::FilletXSideFace {
+                continue;
+            }
+
+            // Get FilletEdge->OriginalFace->ExtendedSurface or Surface when needed
+            let face = fe
+                .orig_face
+                .ok_or_else(|| SolidError::null_pointer(OP_END_PATCH))?;
+            let surface = match extended_surface(face) {
+                Some(s) => s,
+                None => env
+                    .target
+                    .face(face)?
+                    .surface
+                    .clone()
+                    .ok_or_else(|| SolidError::invalid_input(OP_END_PATCH, NULL_DEREF))?,
+            };
+
+            // Copy pSurface, when possible as an analytic surface
+            let new_surface = surface.copy_and_add_analytics(env.k)?;
+            self.surfaces.push(new_surface);
+
+            // Create Face (and Edges and Verts) in m_pFilletBrep from m_vSurfaces
+            match self.make_face_brep_with(env) {
+                Ok(()) => {}
+                Err(e) if e.is_unported() => return Err(e),
+                Err(
+                    e @ SolidError::InvalidInput {
+                        reason: NULL_DEREF, ..
+                    },
+                ) => return Err(e),
+                Err(_) => {
+                    // when MakeFaceBrep() failed - Note FilletError
+                    (env.note_face_error)(self);
+                    return Err(SolidError::sm_err(OP_END_PATCH));
+                }
+            }
+
+            break;
+        } // end iter every filletEdge searching for one attached to face to extend
+
         Ok(())
     }
 

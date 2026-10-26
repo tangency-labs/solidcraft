@@ -9,7 +9,7 @@
 //! | [`find_concave_edgeuses`]                         | `sm_FindConcaveEdgeuses`                         |
 //! | [`FilletCorner::adjust_concave_corner_topology`]  | `SmFilletNx2Corner::AdjustConcaveCornerTopology` |
 //! | [`FilletCorner::adjust_topology_convex_nxn`], [`FilletCorner::adjust_topology_convex_nxn_with`] | `SmFilletConvexNxNCorner::AdjustTopology` |
-//! | [`FilletCorner::adjust_tangent_corner_nx1_closed`] | `SmFilletNx1ClosedCorner::AdjustTangentCorner`  |
+//! | [`FilletCorner::adjust_tangent_corner_nx1_closed`], [`FilletCorner::nx1_closed_tangent_split`] | `SmFilletNx1ClosedCorner::AdjustTangentCorner`  |
 //! | [`FilletCorner::make_analytic_corner_surface`], [`FilletCorner::make_analytic_corner_surface_with`] | `SmFilletCorner::MakeAnalyticCornerSurface` |
 //! | [`FilletCorner::make_variable_radius_fillet`], [`FilletCorner::make_variable_radius_fillet_with`] | `SmFilletCorner::MakeVariableRadiusFillet` |
 //! | [`FilletCorner::record_fillet_error`]             | `SmFilletCorner::RecordFilletError`              |
@@ -882,50 +882,48 @@ impl FilletCorner {
 }
 
 impl FilletCorner {
-    /// `SmFilletNx1ClosedCorner::AdjustTangentCorner`: for a 3x1 closed corner whose
-    /// filleted edge is tangent to itself at the vertex (within 2 degrees), checks that
-    /// the fillet surface meets itself at the corner; where it overlaps, the fillet
-    /// geometry is split at the second rail end (sorted by intersection curve parameter)
-    /// into a short tangent roll-over part and the rest, the corner takes over the new
-    /// edge, the rail ends' UV points are moved across the base surfaces' seams and both
-    /// parts are recalculated. A failed split leaves the corner as it is.
+    /// The opening of `SmFilletNx1ClosedCorner::AdjustTangentCorner`, up to its
+    /// split: `None` when the corner needs no adjustment (not a 3x1 closed corner, its
+    /// filleted edge not tangent to itself within 2 degrees, or the fillet surface
+    /// meeting itself or leaving a gap); else the fillet geometry and the rail-end
+    /// vertex use (second by intersection curve parameter) to split it at.
     ///
     /// # Errors
     ///
-    /// `SM_ERR` when neither corner vertex is `SM_FV_RAIL_X_EDGEUSE` or a rail end has a
-    /// negative intersection curve parameter; `SM_ERR_NULL_POINTER` for a geometry
-    /// without solver or a rail without curve; [`SolidError::InvalidInput`] where
-    /// upstream indexes past an array or dereferences `NULL` (no corner vertex, fillet
-    /// geometry, fillet surface, rail, rail vertex use or vertex);
-    /// [`SolidError::Unported`] (`blend.fillet_corner_p3` module docs).
+    /// As [`FilletCorner::adjust_tangent_corner_nx1_closed`] before its split.
     #[allow(clippy::too_many_lines)]
-    pub fn adjust_tangent_corner_nx1_closed(&mut self, env: &mut CornerEnv<'_>) -> Result<()> {
+    pub fn nx1_closed_tangent_split(
+        &self,
+        k: &Kernel,
+        target: &mut Brep,
+        pseudo: &FilletBrep,
+    ) -> Result<Option<(FilletGeomId, VertexuseId)>> {
         const OP: &str = OP_NX1_TANGENT;
         // First check that this is the appropriate type.
         // Must be Nx1 tangent corner, and currently N must be 3.
         let Some(&[solver_eu]) = self.solver_eus.as_deref() else {
-            return Ok(());
+            return Ok(None);
         };
         if self.all_eus.as_ref().is_none_or(|v| v.len() != 3) {
-            return Ok(());
+            return Ok(None);
         }
 
         // Check that the two filleted edges are tangent at this vertex.
         // (the statuses are ignored upstream: a failed evaluation leaves the derivative
         // default-constructed)
-        let deriv = |env: &mut CornerEnv<'_>, t: f64| -> Result<Vec3> {
-            match eu3::normalized_evaluate(env.k, env.target, solver_eu, t, false, true, true) {
+        let mut deriv = |t: f64| -> Result<Vec3> {
+            match eu3::normalized_evaluate(k, target, solver_eu, t, false, true, true) {
                 Ok(ev) => Ok(ev.first_deriv.unwrap_or(Vec3::UNDEF)),
                 Err(e) if e.is_unported() => Err(e),
                 Err(_) => Ok(Vec3::UNDEF),
             }
         };
-        let first_deriv1 = deriv(env, 0.0)?;
-        let first_deriv2 = deriv(env, 1.0)?;
+        let first_deriv1 = deriv(0.0)?;
+        let first_deriv2 = deriv(1.0)?;
 
         let ang_tol_deg = 2.0; // cbi: some places use 5 degrees; sort that all out.
         if !first_deriv1.is_parallel_to(first_deriv2, ang_tol_deg) {
-            return Ok(());
+            return Ok(None);
         }
 
         // Ok, we are an Nx1-closed tangent corner.
@@ -933,13 +931,12 @@ impl FilletCorner {
         // Check whether the fillet surface meets itself smoothly: corner points will
         // match. There will be two FilletGeoms, but they are the same.
         let v0 = vertex_at(&self.vertices, 0, OP)?;
-        let fillet_geoms = env.pseudo.vertex_fillet_geoms(v0)?;
+        let fillet_geoms = pseudo.vertex_fillet_geoms(v0)?;
         // SM_ASSERT(sFilletGeoms.GetSize() == 2); (upstream reads [0] unchecked)
         let orig_fg = *fillet_geoms
             .first()
             .ok_or_else(|| invalid(OP, "corner vertex without fillet geometry"))?;
-        let fillet_srf = env
-            .pseudo
+        let fillet_srf = pseudo
             .geom(orig_fg)?
             .fillet_surface()?
             .ok_or_else(|| invalid(OP, "fillet geometry without fillet surface"))?;
@@ -947,19 +944,19 @@ impl FilletCorner {
         let srf_domain = fillet_srf.natural_uv_domain();
         // u runs the long way, v goes across the fillet. (statuses ignored)
         let srf_pt00 =
-            unchecked_point(fillet_srf.evaluate_point(env.k, srf_domain.evaluate(0.0, 0.0)))?;
+            unchecked_point(fillet_srf.evaluate_point(k, srf_domain.evaluate(0.0, 0.0)))?;
         let srf_pt10 =
-            unchecked_point(fillet_srf.evaluate_point(env.k, srf_domain.evaluate(1.0, 0.0)))?;
+            unchecked_point(fillet_srf.evaluate_point(k, srf_domain.evaluate(1.0, 0.0)))?;
         let srf_pt01 =
-            unchecked_point(fillet_srf.evaluate_point(env.k, srf_domain.evaluate(0.0, 1.0)))?;
+            unchecked_point(fillet_srf.evaluate_point(k, srf_domain.evaluate(0.0, 1.0)))?;
         let srf_pt11 =
-            unchecked_point(fillet_srf.evaluate_point(env.k, srf_domain.evaluate(1.0, 1.0)))?;
+            unchecked_point(fillet_srf.evaluate_point(k, srf_domain.evaluate(1.0, 1.0)))?;
 
         let dist0 = srf_pt00.distance(srf_pt10);
         let dist1 = srf_pt01.distance(srf_pt11);
 
         if dist0 < self.approx_tol_3d && dist1 < self.approx_tol_3d {
-            return Ok(());
+            return Ok(None);
         }
 
         // Ok, the fillet surface does not meet itself smoothly, we have to do something.
@@ -967,7 +964,7 @@ impl FilletCorner {
         // start point plus its u-derivative. (The status is ignored: a failure keeps the
         // point and leaves the derivative default-constructed.)
         let (srf_pt00, su00) = match ignored(fillet_srf.evaluate_1st_derivatives(
-            env.k,
+            k,
             srf_domain.evaluate(0.0, 0.0),
             true,
             true,
@@ -978,17 +975,16 @@ impl FilletCorner {
         let t = line_closest_point(srf_pt00, su00, srf_pt10);
 
         if t <= 0.0 {
-            return Ok(());
+            return Ok(None);
         }
 
         // Overlap: we have to split.
         // SM_ASSERT(m_vVertices.GetSize() == 2);
         let mut fv = v0;
         // Looking for a vertex where a rail hits a side edge:
-        if env.pseudo.fillet_vertex(fv)?.fillet_vertex_type() != FilletVertexType::RailXEdgeuse {
+        if pseudo.fillet_vertex(fv)?.fillet_vertex_type() != FilletVertexType::RailXEdgeuse {
             fv = vertex_at(&self.vertices, 1, OP)?;
-            if env.pseudo.fillet_vertex(fv)?.fillet_vertex_type() != FilletVertexType::RailXEdgeuse
-            {
+            if pseudo.fillet_vertex(fv)?.fillet_vertex_type() != FilletVertexType::RailXEdgeuse {
                 return Err(SolidError::sm_err(OP));
             }
         }
@@ -996,7 +992,7 @@ impl FilletCorner {
         // The FG has four FVUs:
         let mut fvus = [None; 4];
         for (slot, (r, e)) in fvus.iter_mut().zip([(0, 0), (0, 1), (1, 0), (1, 1)]) {
-            *slot = env.pseudo.rail_vertexuse(orig_fg, r, e)?;
+            *slot = pseudo.rail_vertexuse(orig_fg, r, e)?;
         }
 
         // Sort these: their int-curve parameters should be set.
@@ -1004,11 +1000,7 @@ impl FilletCorner {
         let mut sort_indices: Vec<u64> = Vec::with_capacity(4);
         for (ii, fvu) in (0u64..).zip(fvus) {
             let fvu = fvu.ok_or_else(|| invalid(OP, "fillet geometry without rail vertex use"))?;
-            let int_param = env
-                .pseudo
-                .fillet_vertexuse(fvu)?
-                .tsect_pnt()
-                .curve_parameter;
+            let int_param = pseudo.fillet_vertexuse(fvu)?.tsect_pnt().curve_parameter;
             if int_param < -EFF_ZERO {
                 // If this happens, we'll have to figure out something else.
                 return Err(SolidError::sm_err(OP));
@@ -1029,6 +1021,33 @@ impl FilletCorner {
             .and_then(|&i| usize::try_from(i).ok())
             .and_then(|i| fvus.get(i).copied().flatten())
             .ok_or_else(|| invalid(OP, "rail vertex use index"))?;
+        Ok(Some((orig_fg, this_fv_use)))
+    }
+
+    /// `SmFilletNx1ClosedCorner::AdjustTangentCorner`: for a 3x1 closed corner whose
+    /// filleted edge is tangent to itself at the vertex (within 2 degrees), checks that
+    /// the fillet surface meets itself at the corner; where it overlaps, the fillet
+    /// geometry is split at the second rail end (sorted by intersection curve parameter)
+    /// into a short tangent roll-over part and the rest, the corner takes over the new
+    /// edge, the rail ends' UV points are moved across the base surfaces' seams and both
+    /// parts are recalculated. A failed split leaves the corner as it is.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when neither corner vertex is `SM_FV_RAIL_X_EDGEUSE` or a rail end has a
+    /// negative intersection curve parameter; `SM_ERR_NULL_POINTER` for a geometry
+    /// without solver or a rail without curve; [`SolidError::InvalidInput`] where
+    /// upstream indexes past an array or dereferences `NULL` (no corner vertex, fillet
+    /// geometry, fillet surface, rail, rail vertex use or vertex);
+    /// [`SolidError::Unported`] (`blend.fillet_corner_p3` module docs).
+    #[allow(clippy::too_many_lines)]
+    pub fn adjust_tangent_corner_nx1_closed(&mut self, env: &mut CornerEnv<'_>) -> Result<()> {
+        const OP: &str = OP_NX1_TANGENT;
+        let Some((orig_fg, this_fv_use)) =
+            self.nx1_closed_tangent_split(env.k, env.target, env.pseudo)?
+        else {
+            return Ok(());
+        };
 
         // Which end of the FilletGeom are we at? 0 for start, 1 for end.
         let which_end = 0usize;

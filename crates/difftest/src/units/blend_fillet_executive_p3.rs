@@ -24,6 +24,8 @@ use std::collections::BTreeMap;
 
 #[path = "blend_fillet_executive_p3/end_to_end.rs"]
 mod end_to_end;
+#[path = "blend_fillet_executive_p3/surface_bodies.rs"]
+mod surface_bodies;
 
 /// Parity runner for the three executive orchestration methods.
 pub struct Runner;
@@ -36,6 +38,10 @@ struct Inputs {
     upstream_case: Option<usize>,
     #[serde(default)]
     real_solid: Option<end_to_end::RealSolid>,
+    #[serde(default)]
+    surface_surface: Option<end_to_end::SurfaceSurface>,
+    #[serde(default)]
+    surface_surface_bodies: Option<surface_bodies::SurfaceSurfaceBodies>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -902,6 +908,22 @@ impl UnitDiff for Runner {
     }
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
         let input = case.parse::<Inputs>()?;
+        if let Some(pair) = &input.surface_surface_bodies {
+            if input.surface_surface.is_some()
+                || input.real_solid.is_some()
+                || input.upstream_case.is_some()
+                || !input.record.is_empty()
+            {
+                return Err(HarnessError::new("mixed fixture forms"));
+            }
+            return surface_bodies::cpp(pair);
+        }
+        if let Some(pair) = &input.surface_surface {
+            if input.real_solid.is_some() || input.upstream_case.is_some() || !input.record.is_empty() {
+                return Err(HarnessError::new("mixed fixture forms"));
+            }
+            return end_to_end::surface_surface_cpp(pair);
+        }
         if let Some(real) = &input.real_solid {
             if input.upstream_case.is_some() || !input.record.is_empty() {
                 return Err(HarnessError::new("mixed fixture forms"));
@@ -925,6 +947,22 @@ impl UnitDiff for Runner {
     }
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let input = case.parse::<Inputs>()?;
+        if let Some(pair) = &input.surface_surface_bodies {
+            if input.surface_surface.is_some()
+                || input.real_solid.is_some()
+                || input.upstream_case.is_some()
+                || !input.record.is_empty()
+            {
+                return Err(HarnessError::new("mixed fixture forms"));
+            }
+            return surface_bodies::rust(pair);
+        }
+        if let Some(pair) = &input.surface_surface {
+            if input.real_solid.is_some() || input.upstream_case.is_some() || !input.record.is_empty() {
+                return Err(HarnessError::new("mixed fixture forms"));
+            }
+            return end_to_end::surface_surface_rust(pair);
+        }
         if let Some(real) = &input.real_solid {
             if input.upstream_case.is_some() || !input.record.is_empty() {
                 return Err(HarnessError::new("mixed fixture forms"));

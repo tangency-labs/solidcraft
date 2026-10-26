@@ -2,7 +2,9 @@
 // Real public fillet API, preserving the selected pre-operation edge and the
 // freshly traversed post-operation solid. No executive fixture owns fake objects.
 #include "support/primitive_record.h"
+#include <SmApiGeneral.h>
 #include <SmApiQueries.h>
+#include <SmApiSurfaces.h>
 #include <SmLoop.h>
 #include <cmath>
 #include <limits>
@@ -55,34 +57,51 @@ inline void counts(std::vector<double>& out, SmBrep* b) {
 }
 }
 
-// Wire: dimensions XYZ, radius, xsect, continuity, thumbweight, edge count,
-// then owning-list edge indices. This initial fixture constructor is a box.
-static int32_t fillet_real_solid_run(
-    const double* input, int64_t n, const double* end_radius,
-    double* out, int64_t cap, int64_t* out_len) {
-    if (!input || n < 9) return SC_ERR_ARG;
-    if (end_radius && (!std::isfinite(*end_radius) || input[6] != 1.0)) return SC_ERR_ARG;
-    for (int64_t i=0; i<n; ++i) if (!std::isfinite(input[i])) return SC_ERR_ARG;
-    for (int i=0; i<3; ++i) if (input[i] <= SM_EFF_ZERO) return SC_ERR_ARG;
-    // The exclusive power-of-two bound is exact even when ULONG_MAX or
-    // long double would round to 2^64. Check before the integer conversion.
+namespace fillet_real_solid {
+// Fillet wire: radius, xsect, continuity, thumbweight, edge count, then owning-list
+// edge indices; a count of 0 (source entry only) selects every edge in GetEdges
+// order. Validates the indices, runs SmApiFilletEdges on `body` and appends the
+// record. Returns SC_ERR_ARG for an invalid wire, else SC_OK.
+// SmApiFilletEdges with the executive's piecewise merge selected: the same
+// executive set-up, then SetDoPiecewiseMerge(TRUE) after SetFilletParameters
+// (which resets the merge flags; its header says they may be overridden after
+// it), as prog_test's topology-based filleting selects it (smFilletTest.cpp:4521).
+SmStatus piecewise_fillet_edges(SmBrep* pBrep,SmTArray<SmEdge*>& rEdges,double dRadius,
+    ULONG lXSectType,ULONG lContinuity,double dThumbweight) {
+    if (!pBrep || rEdges.GetSize() < 1) return SM_ERR_INVALID_INPUT;
+    const SmContext* pContext=SmApiGetOrCreateContext();
+    SmFilletSurfaceGeneratorType eFSGType=SM_FSG_CIRCULAR;
+    if (lXSectType == 0) eFSGType=SM_FSG_LINEAR;
+    else if (lXSectType == 2) eFSGType=SM_FSG_BLEND_CURVE;
+    SmFilletExecutive sFilExec(*pContext,pBrep);
+    sFilExec.SetDoGlobalMerge(TRUE);
+    SmStatus eStat=sFilExec.SetFilletParameters(pBrep,rEdges,eFSGType,SM_FS_CONST_RADIUS,
+        dRadius,NULL,-1.0,-1.0,-1.0,-1.0,lContinuity,dThumbweight);
+    if (eStat != SM_SUCCESS) return eStat;
+    sFilExec.SetDoPiecewiseMerge(TRUE);
+    eStat=sFilExec.DoFillet();
+    if (eStat != SM_SUCCESS) return eStat;
+    pBrep->StitchAndOrient();
+    return SM_SUCCESS;
+}
+
+int32_t fillet_and_record(SmBrep* body,const double* fillet,int64_t n,std::vector<double>& values,
+    bool piecewise=false) {
+    if (n < 5) return SC_ERR_ARG;
     const double ulong_limit=std::ldexp(1.0,std::numeric_limits<ULONG>::digits);
-    for (int i : {4,5}) if (input[i] < 0 || std::floor(input[i]) != input[i]
-        || input[i] >= ulong_limit) return SC_ERR_ARG;
-    if (input[7] < 1 || std::floor(input[7]) != input[7]
-        || input[7] != double(n-8)) return SC_ERR_ARG;
-    SC_TRY
-    SmBrep* raw=nullptr;
-    const auto setup=SmApiCreateBox(SmVector3d(0,0,0),input[0],input[1],input[2],raw);
-    if (setup != SM_SUCCESS || !raw) return SC_ERR_ARG;
-    std::unique_ptr<SmBrep> body(raw);
+    for (int i : {1,2}) if (fillet[i] < 0 || std::floor(fillet[i]) != fillet[i]
+        || fillet[i] >= ulong_limit) return SC_ERR_ARG;
+    if (fillet[4] < 0 || std::floor(fillet[4]) != fillet[4]
+        || fillet[4] != double(n-5)) return SC_ERR_ARG;
     SmTArray<SmEdge*> edges, selected; body->GetEdges(edges);
+    std::vector<double> indices(fillet+5, fillet+n);
+    if (indices.empty()) for (ULONG i=0; i<edges.GetSize(); ++i) indices.push_back(double(i));
     std::vector<double> before;
-    for (int64_t i=8; i<n; ++i) {
-        if (input[i] < 0 || input[i] >= edges.GetSize() || std::floor(input[i]) != input[i]) return SC_ERR_ARG;
-        auto* edge=edges[ULONG(input[i])]; selected.Add(edge);
+    for (double index : indices) {
+        if (index < 0 || index >= edges.GetSize() || std::floor(index) != index) return SC_ERR_ARG;
+        auto* edge=edges[ULONG(index)]; selected.Add(edge);
         const auto interval=edge->GetInterval();
-        before.insert(before.end(), {input[i],interval.GetMin(),interval.GetMax(),double(edge->GetCurve()!=nullptr)});
+        before.insert(before.end(), {index,interval.GetMin(),interval.GetMax(),double(edge->GetCurve()!=nullptr)});
         if (auto* curve=edge->GetCurve()) {
             before.push_back(double(curve->GetType()));
             for (double fraction : {0.17,0.37,0.83}) {
@@ -91,26 +110,251 @@ static int32_t fillet_real_solid_run(
             }
         }
     }
-    const auto result=end_radius
-        ? SmApiVariableRadiusFillet(body.get(),selected,input[3],*end_radius,ULONG(input[4]),ULONG(input[5]))
-        : SmApiFilletEdges(body.get(),selected,input[3],ULONG(input[4]),ULONG(input[5]),input[6]);
+    const auto result=piecewise
+        ? piecewise_fillet_edges(body,selected,fillet[0],ULONG(fillet[1]),ULONG(fillet[2]),fillet[3])
+        : SmApiFilletEdges(body,selected,fillet[0],ULONG(fillet[1]),ULONG(fillet[2]),fillet[3]);
     // Selected pointers may no longer be live; all result traversals are fresh.
-    std::vector<double> values; fillet_real_solid::section(values,before);
-    values.push_back(fillet_real_solid::status(result));
-    fillet_real_solid::counts(values,body.get());
-    std::vector<double> topology; fillet_real_solid::topology(topology,body.get());
-    fillet_real_solid::section(values,topology);
-    std::vector<double> geometry; primitive_record::append(geometry,body.get());
-    fillet_real_solid::section(values,geometry);
+    section(values,before);
+    values.push_back(status(result));
+    counts(values,body);
+    std::vector<double> topology_record; topology(topology_record,body);
+    section(values,topology_record);
+    std::vector<double> geometry; primitive_record::append(geometry,body);
+    section(values,geometry);
     double area,volume,mass; SmPoint3d centroid; SmVector3d inertia,products;
-    const auto mass_status=SmApiBrepComputeMassProperties(body.get(),1e-4,1.0,SmPoint3d(0,0,0),area,volume,mass,centroid,inertia,products);
-    values.push_back(fillet_real_solid::status(mass_status));
+    const auto mass_status=SmApiBrepComputeMassProperties(body,1e-4,1.0,SmPoint3d(0,0,0),area,volume,mass,centroid,inertia,products);
+    values.push_back(status(mass_status));
     if (mass_status == SM_SUCCESS) {
         values.insert(values.end(), {area,volume,mass});
         primitive_record::point(values,centroid);
         primitive_record::point(values,inertia);
         primitive_record::point(values,products);
     }
+    return SC_OK;
+}
+}
+
+// Wire: dimensions XYZ, radius, xsect, continuity, thumbweight, edge count,
+// then owning-list edge indices. This initial fixture constructor is a box.
+namespace fillet_real_solid {
+int32_t real_solid(const double* input, int64_t n, double* out, int64_t cap, int64_t* out_len,
+    bool piecewise) {
+    if (!input || n < 9) return SC_ERR_ARG;
+    for (int64_t i=0; i<n; ++i) if (!std::isfinite(input[i])) return SC_ERR_ARG;
+    for (int i=0; i<3; ++i) if (input[i] <= SM_EFF_ZERO) return SC_ERR_ARG;
+    if (input[7] < 1) return SC_ERR_ARG;
+    SC_TRY
+    SmBrep* raw=nullptr;
+    const auto setup=SmApiCreateBox(SmVector3d(0,0,0),input[0],input[1],input[2],raw);
+    if (setup != SM_SUCCESS || !raw) return SC_ERR_ARG;
+    std::unique_ptr<SmBrep> body(raw);
+    std::vector<double> values;
+    const auto rc=fillet_real_solid::fillet_and_record(body.get(),input+3,n-3,values,piecewise);
+    if (rc != SC_OK) return rc;
+    return sc_copy_out(values.data(),int64_t(values.size()),out,cap,out_len);
+    SC_CATCH
+}
+}
+
+SC_EXPORT int32_t sc_blend_fillet_executive_p3_real_solid(
+    const double* input, int64_t n, double* out, int64_t cap, int64_t* out_len) {
+    return fillet_real_solid::real_solid(input,n,out,cap,out_len,false);
+}
+
+// The box wire of sc_blend_fillet_executive_p3_real_solid, filleted with the
+// executive's piecewise merge (fillet_real_solid::piecewise_fillet_edges).
+SC_EXPORT int32_t sc_blend_fillet_executive_p3_piecewise_solid(
+    const double* input, int64_t n, double* out, int64_t cap, int64_t* out_len) {
+    return fillet_real_solid::real_solid(input,n,out,cap,out_len,true);
+}
+
+namespace fillet_real_solid {
+// Number of source parameters on the source wire (the largest source's count).
+constexpr int64_t SOURCE_PARAMS=12;
+// Builds the body of a source: 1 = `path` read by SmBrep::ReadFromFile (ASCII .smb,
+// no UV-trim rebuild), 2 = SmApiCreateCylinder(origin p0..p2, radius p3, height p4),
+// 3/4 = SmApiBooleanUnion/SmApiBooleanDifference of SmApiCreateBox(origin p0..p2,
+// size p3..p5) with SmApiCreateBox(origin p6..p8, size p9..p11). Null on failure.
+SmBrep* build_source(int kind,const char* path,const double* p) {
+    SmContext& ctx=*SmApiGetOrCreateContext();
+    if (kind == 1) {
+        if (!path) return nullptr;
+        std::unique_ptr<SmBrep> brep(new (ctx) SmBrep());
+        if (brep->ReadFromFile(ctx,path,SM_ASCII,FALSE) != SM_SUCCESS) return nullptr;
+        return brep.release();
+    }
+    if (kind == 2) {
+        SmBrep* raw=nullptr;
+        if (SmApiCreateCylinder(SmVector3d(p[0],p[1],p[2]),p[3],p[4],raw) != SM_SUCCESS) {
+            delete raw; return nullptr;
+        }
+        return raw;
+    }
+    SmBrep* a=nullptr; SmBrep* b=nullptr;
+    if (SmApiCreateBox(SmVector3d(p[0],p[1],p[2]),p[3],p[4],p[5],a) != SM_SUCCESS || !a) {
+        delete a; return nullptr;
+    }
+    if (SmApiCreateBox(SmVector3d(p[6],p[7],p[8]),p[9],p[10],p[11],b) != SM_SUCCESS || !b) {
+        delete a; delete b; return nullptr;
+    }
+    SmBrep* res=nullptr;
+    const auto stat=kind == 3 ? SmApiBooleanUnion(a,b,res) : SmApiBooleanDifference(a,b,res);
+    if (stat != SM_SUCCESS || !res) {
+        // Both operands remain allocated on failure.
+        if (res && res != a && res != b) delete res;
+        delete a; delete b; return nullptr;
+    }
+    // On success pBrep1 is the result and pBrep2 is consumed.
+    if (res != a) delete a;
+    return res;
+}
+}
+
+// Wire: source kind (1 file, 2 cylinder, 3 box union, 4 box difference), 12 source
+// parameters (unused ones 0), then the fillet wire of `fillet_and_record`. `path` is
+// the .smb file of kind 1 (null otherwise).
+namespace fillet_real_solid {
+int32_t real_source(const char* path, const double* input, int64_t n, double* out, int64_t cap,
+    int64_t* out_len, bool piecewise) {
+    const int64_t head=1+fillet_real_solid::SOURCE_PARAMS;
+    if (!input || n < head+5) return SC_ERR_ARG;
+    for (int64_t i=0; i<n; ++i) if (!std::isfinite(input[i])) return SC_ERR_ARG;
+    const double kind=input[0];
+    if (kind != 1 && kind != 2 && kind != 3 && kind != 4) return SC_ERR_ARG;
+    if ((kind == 1) != (path != nullptr)) return SC_ERR_ARG;
+    const double* p=input+1;
+    if (kind == 2 && (p[3] <= SM_EFF_ZERO || p[4] <= SM_EFF_ZERO)) return SC_ERR_ARG;
+    if (kind >= 3) for (int i : {3,4,5,9,10,11}) if (p[i] <= SM_EFF_ZERO) return SC_ERR_ARG;
+    SC_TRY
+    std::unique_ptr<SmBrep> body(fillet_real_solid::build_source(int(kind),path,p));
+    if (!body) return SC_ERR_ARG;
+    std::vector<double> values;
+    const auto rc=fillet_real_solid::fillet_and_record(body.get(),input+head,n-head,values,piecewise);
+    if (rc != SC_OK) return rc;
+    return sc_copy_out(values.data(),int64_t(values.size()),out,cap,out_len);
+    SC_CATCH
+}
+}
+
+SC_EXPORT int32_t sc_blend_fillet_executive_p3_real_source(
+    const char* path, const double* input, int64_t n, double* out, int64_t cap, int64_t* out_len) {
+    return fillet_real_solid::real_source(path,input,n,out,cap,out_len,false);
+}
+
+// The source wire of sc_blend_fillet_executive_p3_real_source, filleted with the
+// executive's piecewise merge (fillet_real_solid::piecewise_fillet_edges).
+SC_EXPORT int32_t sc_blend_fillet_executive_p3_piecewise_source(
+    const char* path, const double* input, int64_t n, double* out, int64_t cap, int64_t* out_len) {
+    return fillet_real_solid::real_source(path,input,n,out,cap,out_len,true);
+}
+
+// Wire: the four corner points (u0v0, u1v0, u0v1, u1v1) of each of two
+// SmApiCreateSurfaceFromCornerPoints surfaces (24 values), radius1, radius2,
+// tolerance, xsect, mirror, complement. Runs SmApiSurfaceSurfaceFillet as
+// TestSmSurfaceSurfaceFillet does and records [status, then for a result B-rep its
+// counts, topology and geometry].
+SC_EXPORT int32_t sc_blend_fillet_executive_p3_surface_surface(
+    const double* input, int64_t n, double* out, int64_t cap, int64_t* out_len) {
+    if (!input || n != 30) return SC_ERR_ARG;
+    for (int64_t i=0; i<n; ++i) if (!std::isfinite(input[i])) return SC_ERR_ARG;
+    const double ulong_limit=std::ldexp(1.0,std::numeric_limits<ULONG>::digits);
+    if (input[27] < 0 || std::floor(input[27]) != input[27] || input[27] >= ulong_limit) return SC_ERR_ARG;
+    for (int i : {28,29}) if (input[i] != 0 && input[i] != 1) return SC_ERR_ARG;
+    SC_TRY
+    SmSurface* surfaces[2]={nullptr,nullptr};
+    for (int s=0; s<2; ++s) {
+        const double* c=input+12*s;
+        SmApiCreateSurfaceFromCornerPoints(SmPoint3d(c[0],c[1],c[2]),SmPoint3d(c[3],c[4],c[5]),
+            SmPoint3d(c[6],c[7],c[8]),SmPoint3d(c[9],c[10],c[11]),surfaces[s]);
+        if (!surfaces[s]) { delete surfaces[0]; return SC_ERR_ARG; }
+    }
+    std::unique_ptr<SmSurface> first(surfaces[0]), second(surfaces[1]);
+    SmBrep* raw=nullptr;
+    const auto stat=SmApiSurfaceSurfaceFillet(first.get(),second.get(),input[24],input[25],input[26],
+        raw,ULONG(input[27]),input[28] != 0 ? TRUE : FALSE,input[29] != 0 ? TRUE : FALSE);
+    std::unique_ptr<SmBrep> result(raw);
+    std::vector<double> values{fillet_real_solid::status(stat)};
+    if (stat == SM_SUCCESS && result) {
+        fillet_real_solid::counts(values,result.get());
+        std::vector<double> topology_record; fillet_real_solid::topology(topology_record,result.get());
+        fillet_real_solid::section(values,topology_record);
+        std::vector<double> geometry; primitive_record::append(geometry,result.get());
+        fillet_real_solid::section(values,geometry);
+    }
+    return sc_copy_out(values.data(),int64_t(values.size()),out,cap,out_len);
+    SC_CATCH
+}
+
+namespace fillet_real_solid {
+inline void body_record(std::vector<double>& values, SmBrep* body) {
+    counts(values,body);
+    std::vector<double> topology_record; topology(topology_record,body);
+    section(values,topology_record);
+    std::vector<double> geometry; primitive_record::append(geometry,body);
+    section(values,geometry);
+}
+}
+
+// SmApiSurfaceSurfaceFillet where a surface may already belong to a face (the
+// GetFace() branch). Input: the two corner-point surfaces (24 values), owner1, owner2,
+// radius1, radius2, tolerance, cross-section (native ULONG), mirror, complement.
+// owner1: 0 free, 1 the face of its own sheet body (CreateFaceFromSurface over the
+// natural domain). owner2: 0 free, 1 its own sheet body, 2 a second face of surface 1's
+// body (owner1 1), 3 surface 1 itself (its corners are ignored). Output: [status,
+// has_result, result counts/topology/geometry when present, body count, then for each
+// sheet body (surface 1's first) its counts, topology and geometry after the call].
+SC_EXPORT int32_t sc_blend_fillet_executive_p3_surface_surface_bodies(
+    const double* input, int64_t n, double* out, int64_t cap, int64_t* out_len) {
+    if (!input || n != 32) return SC_ERR_ARG;
+    for (int64_t i=0; i<n; ++i) if (!std::isfinite(input[i])) return SC_ERR_ARG;
+    const double owner1=input[24], owner2=input[25];
+    if (owner1 != 0 && owner1 != 1) return SC_ERR_ARG;
+    if (owner2 != 0 && owner2 != 1 && owner2 != 2 && owner2 != 3) return SC_ERR_ARG;
+    if (owner2 == 2 && owner1 != 1) return SC_ERR_ARG;
+    const double ulong_limit=std::ldexp(1.0,std::numeric_limits<ULONG>::digits);
+    if (input[29] < 0 || std::floor(input[29]) != input[29] || input[29] >= ulong_limit) return SC_ERR_ARG;
+    for (int i : {30,31}) if (input[i] != 0 && input[i] != 1) return SC_ERR_ARG;
+    SC_TRY
+    const SmContext* context=SmApiGetOrCreateContext();
+    SmSurface* surfaces[2]={nullptr,nullptr};
+    const int built=owner2 == 3 ? 1 : 2;
+    for (int s=0; s<built; ++s) {
+        const double* c=input+12*s;
+        SmApiCreateSurfaceFromCornerPoints(SmPoint3d(c[0],c[1],c[2]),SmPoint3d(c[3],c[4],c[5]),
+            SmPoint3d(c[6],c[7],c[8]),SmPoint3d(c[9],c[10],c[11]),surfaces[s]);
+        if (!surfaces[s]) { delete surfaces[0]; return SC_ERR_ARG; }
+    }
+    if (owner2 == 3) surfaces[1]=surfaces[0];
+    // Free surfaces stay the caller's; owned ones belong to their sheet body's face.
+    std::unique_ptr<SmSurface> free1(owner1 == 0 ? surfaces[0] : nullptr);
+    std::unique_ptr<SmSurface> free2(owner2 == 0 ? surfaces[1] : nullptr);
+    std::unique_ptr<SmBrep> body1, body2;
+    auto own=[&](std::unique_ptr<SmBrep>& body, SmSurface* surface) {
+        if (!body) body.reset(new(*context) SmBrep());
+        SmFace* face=nullptr;
+        const SmStatus stat=body->CreateFaceFromSurface(surface,surface->GetNaturalUVDomain(),face);
+        return stat == SM_SUCCESS && face != nullptr;
+    };
+    if (owner1 == 1 && !own(body1,surfaces[0])) {
+        if (owner2 != 3 && owner2 != 0) delete surfaces[1];
+        return SC_ERR_ARG;
+    }
+    if (owner2 == 1 && !own(body2,surfaces[1])) return SC_ERR_ARG;
+    if (owner2 == 2 && !own(body1,surfaces[1])) return SC_ERR_ARG;
+    SmBrep* raw=nullptr;
+    const auto stat=SmApiSurfaceSurfaceFillet(surfaces[0],surfaces[1],input[26],input[27],input[28],
+        raw,ULONG(input[29]),input[30] != 0 ? TRUE : FALSE,input[31] != 0 ? TRUE : FALSE);
+    std::unique_ptr<SmBrep> result(raw);
+    std::vector<double> values{fillet_real_solid::status(stat)};
+    if (stat == SM_SUCCESS && result) {
+        values.push_back(1.0);
+        fillet_real_solid::body_record(values,result.get());
+    } else {
+        values.push_back(0.0);
+    }
+    values.push_back(double(int(bool(body1))+int(bool(body2))));
+    if (body1) fillet_real_solid::body_record(values,body1.get());
+    if (body2) fillet_real_solid::body_record(values,body2.get());
     return sc_copy_out(values.data(),int64_t(values.size()),out,cap,out_len);
     SC_CATCH
 }

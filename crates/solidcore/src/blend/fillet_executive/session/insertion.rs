@@ -239,8 +239,47 @@ pub struct TargetTopologyChanges<'a> {
     attributes: &'a AttributeStore,
     solvers: &'a [Option<SolverObject>],
     corners: &'a [FilletCorner],
+    base_side: Option<usize>,
 }
 impl<'a> TargetTopologyChanges<'a> {
+    /// In a surface/surface fillet with a second base B-rep, the rail side whose base
+    /// B-rep is this target (`target` is the second base B-rep for side 1). The other
+    /// side's rails lie on faces of the other B-rep, which a split of this target's
+    /// face never reaches (upstream compares face pointers; typed face ids of the two
+    /// arenas may coincide).
+    #[must_use]
+    pub fn with_base_side(mut self, side: Option<usize>) -> Self {
+        self.base_side = side;
+        self
+    }
+    /// The rails of a surface/surface geometry's other side (see
+    /// [`Self::with_base_side`]).
+    fn foreign_rails(
+        &self,
+        geometry: crate::blend::fillet_geom::p1::FilletGeomId,
+    ) -> Result<Vec<EdgeId>> {
+        let Some(side) = self.base_side else {
+            return Ok(Vec::new());
+        };
+        let geom = self.pseudo.geom(geometry)?;
+        let surface_solver = geom.fillet_solver().is_some_and(|id| {
+            matches!(
+                self.solvers.get(id.0 as usize),
+                Some(Some(SolverObject::SurfaceSurface(_)))
+            )
+        });
+        if !surface_solver {
+            return Ok(Vec::new());
+        }
+        let other = 1 - side.min(1);
+        let mut rails: Vec<EdgeId> = geom.rail(other).into_iter().collect();
+        rails.extend_from_slice(if other == 0 {
+            &geom.other_rails1
+        } else {
+            &geom.other_rails2
+        });
+        Ok(rails)
+    }
     /// Borrow the actual records; no geometry or solver state is copied.
     /// # Errors
     /// The supplied identity domain does not belong to the actual target.
@@ -262,6 +301,7 @@ impl<'a> TargetTopologyChanges<'a> {
             attributes,
             solvers,
             corners,
+            base_side: None,
         })
     }
     fn target_face(&self, face: FilletObject) -> Result<FaceId> {
@@ -334,14 +374,26 @@ impl TopologyChangesAccess<FilletObject> for TargetTopologyChanges<'_> {
         };
         let old = self.target_face(old)?;
         let new = self.target_face(new)?;
-        self.pseudo.update_geom_split_face(
+        // The other base B-rep's rails are not on the split face: withhold their
+        // original faces from the update.
+        let mut withheld = Vec::new();
+        for rail in self.foreign_rails(geometry)? {
+            let edge = self.pseudo.fillet_edge_mut(rail)?;
+            withheld.push((rail, edge.original_face()));
+            edge.set_original_face(None);
+        }
+        let result = self.pseudo.update_geom_split_face(
             k,
             geometry,
             Some(old),
             Some(new),
             self.target,
             self.corners,
-        )
+        );
+        for (rail, face) in withheld {
+            self.pseudo.fillet_edge_mut(rail)?.set_original_face(face);
+        }
+        result
     }
     fn change_corner(
         &mut self,

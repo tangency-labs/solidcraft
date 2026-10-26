@@ -19,7 +19,7 @@
 //! | [`FilletBrep::copy_fillet_geom`]                  | `SmFilletGeom(SmFilletGeom*)`                    |
 //! | [`FilletBrep::make_rail_edge`]                    | `SmFilletGeom::MakeRailEdge`                     |
 //! | [`FilletBrep::make_rail_edgeuse`]                 | `SmFilletGeom::MakeRailEdgeuse`                  |
-//! | [`FilletBrep::create_end_curve`]                  | `SmFilletGeom::CreateEndCurve`                   |
+//! | [`FilletBrep::create_end_curve`], [`FilletBrep::create_end_curve_with_solver`] | `SmFilletGeom::CreateEndCurve`                   |
 //! | [`FilletBrep::trim_rail_curves`], [`FilletBrep::trim_rail_curves_with_solver`] | `SmFilletGeom::TrimRailCurves`                   |
 //! | [`FilletBrep::trim_cliff_rails`]                  | `SmFilletGeom::TrimCliffRails`                   |
 //! | [`FilletBrep::update_geom_split_face`]            | `SmFilletGeom::UpdateSplitFace`                  |
@@ -781,25 +781,24 @@ impl FilletBrep {
                     }
 
                     if check_connectivity {
-                        // UNPORTED(blend.fillet_geom_p1): sm_ExamineNFixFilletGeoms (justified: findings.md "blend.fillet_geom_p5: examine solvers")
-                        // The status is ignored upstream (SmFilletGeom.cpp:5706-5709, no
-                        // `SER`): when wired this must be `ignore_non_unported(..)`, not
-                        // `?`. The p1 port still takes `ConstantRadiusAssistedFs` solvers
-                        // (re-checked after #168: the `FilletSolver` base of
-                        // blend.fillet_solver_p1 is not what it takes).
-                        unported_on::<_, ()>(
-                            (
-                                g1,
-                                at_start_of_geom1,
-                                g2,
-                                at_start_of_geom2,
-                                start_fv,
-                                end_fv,
-                                tol,
-                            ),
-                            "sm_ExamineNFixFilletGeoms",
-                            "blend.fillet_geom_p1",
-                        )?;
+                        // The status is ignored upstream (no `SER`). Each geometry's
+                        // `GetFilletSolver()` is resolved here for the adjusting path.
+                        let solver_of = |g: FilletGeomId| -> Result<Option<&FilletSolver>> {
+                            self.geom(g)?.fillet_solver().map(resolve).transpose()
+                        };
+                        let solvers = [solver_of(g1)?, solver_of(g2)?];
+                        ignore_non_unported(super::p1::examine_n_fix_fillet_geoms_with_solvers(
+                            k,
+                            self,
+                            g1,
+                            at_start_of_geom1,
+                            g2,
+                            at_start_of_geom2,
+                            start_fv,
+                            end_fv,
+                            tol,
+                            solvers,
+                        ))?;
                     }
                 }
             }
@@ -1165,6 +1164,39 @@ impl FilletBrep {
         corners: CornerLookup<'_>,
         target: &Brep,
     ) -> Result<()> {
+        self.calc_edge_on_extended_edge_with_surfaces(k, e, corner, corners, target, |c, f| {
+            Ok(corners.extended_surface(c, f)?.cloned())
+        })
+    }
+
+    /// [`Self::calc_edge_on_extended_edge`] resolving the extended surfaces through the
+    /// caller's live executive objects.
+    ///
+    /// # Errors
+    /// As [`Self::calc_edge_on_extended_edge`]; those of `context`.
+    pub fn calc_edge_on_extended_edge_with_context(
+        &mut self,
+        k: &Kernel,
+        e: EdgeId,
+        corner: Option<FilletCornerId>,
+        corners: CornerLookup<'_>,
+        context: &impl FilletEdgeContext,
+        target: &Brep,
+    ) -> Result<()> {
+        self.calc_edge_on_extended_edge_with_surfaces(k, e, corner, corners, target, |c, f| {
+            Ok(context.extended_surface(c, f)?.cloned())
+        })
+    }
+
+    fn calc_edge_on_extended_edge_with_surfaces(
+        &mut self,
+        k: &Kernel,
+        e: EdgeId,
+        corner: Option<FilletCornerId>,
+        corners: CornerLookup<'_>,
+        target: &Brep,
+        extended_surface: impl Fn(&FilletCorner, FaceId) -> Result<Option<Surface>>,
+    ) -> Result<()> {
         let corner = corner.ok_or_else(|| SolidError::null_pointer(OP_EXT_EDGE))?;
         let (start_fv, end_fv) = self.edge_ends(e, OP_EXT_EDGE)?;
         if !self.fillet_vertex(start_fv)?.is_processed()
@@ -1185,8 +1217,8 @@ impl FilletBrep {
         let the_corner = corners.corner(corner)?;
         let mut surfaces: Vec<Option<Surface>> = Vec::with_capacity(2);
         for &f in faces.iter().take(2) {
-            let surf = match corners.extended_surface(the_corner, f)? {
-                Some(s) => Some(s.clone()),
+            let surf = match extended_surface(the_corner, f)? {
+                Some(s) => Some(s),
                 None => target.face(f)?.surface.clone(),
             };
             // SM_CAST_PTR(SmBSplineSurface, pSurf)
@@ -1526,7 +1558,6 @@ impl FilletBrep {
     /// curve creations, the lift, [`FilletBrep::make_fillet_edge`] and (for
     /// `SM_BT_BLEND`) `FindEdgeTangentAtPoint`, which reads the rail end vertices'
     /// classification edges in `target`.
-    #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn create_end_curve(
         &mut self,
         k: &Kernel,
@@ -1534,6 +1565,59 @@ impl FilletBrep {
         end_index: usize,
         trim_type: BoundaryTrimmingType,
         solvers: &[FilletSolver],
+        target: &Brep,
+    ) -> Result<EdgeId> {
+        self.create_end_curve_resolved(
+            k,
+            g,
+            end_index,
+            trim_type,
+            &|id, op| solver_of(solvers, id, op),
+            target,
+        )
+    }
+
+    /// `CreateEndCurve` using the actual live solver of geometry `g` (its
+    /// `SplitFilletGeom` caller is that solver).
+    ///
+    /// # Errors
+    /// The errors of [`Self::create_end_curve`]; [`SolidError::InvalidInput`] if the
+    /// geometry names a solver other than `solver_id`.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_end_curve_with_solver(
+        &mut self,
+        k: &Kernel,
+        g: FilletGeomId,
+        end_index: usize,
+        trim_type: BoundaryTrimmingType,
+        solver_id: FilletSolverId,
+        solver: &FilletSolver,
+        target: &Brep,
+    ) -> Result<EdgeId> {
+        self.create_end_curve_resolved(
+            k,
+            g,
+            end_index,
+            trim_type,
+            &|id, op| {
+                if id == solver_id {
+                    Ok(solver)
+                } else {
+                    Err(SolidError::invalid_input(op, "unresolved geometry solver"))
+                }
+            },
+            target,
+        )
+    }
+
+    #[allow(clippy::too_many_lines)] // one upstream routine
+    fn create_end_curve_resolved<'s>(
+        &mut self,
+        k: &Kernel,
+        g: FilletGeomId,
+        end_index: usize,
+        trim_type: BoundaryTrimmingType,
+        resolve: &impl Fn(FilletSolverId, &'static str) -> Result<&'s FilletSolver>,
         target: &Brep,
     ) -> Result<EdgeId> {
         // Create a line between the two UV points and lift the curve.
@@ -1580,7 +1664,11 @@ impl FilletBrep {
             .ok_or_else(|| SolidError::null_pointer(OP_END))?;
         let p_start = self.fillet_vertexuse(vu0)?.uv_point();
         let p_end = self.fillet_vertexuse(vu1)?.uv_point();
-        let solver = self.geom_solver(g, solvers, OP_END)?;
+        let sid = self
+            .geom(g)?
+            .fillet_solver()
+            .ok_or_else(|| SolidError::null_pointer(OP_END))?;
+        let solver = resolve(sid, OP_END)?;
 
         let uv_curve: Curve = if trim_type == BoundaryTrimmingType::Blend {
             let mut uv_tan1 = Vec2::new(0.0, 1.0);

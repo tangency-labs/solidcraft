@@ -554,6 +554,49 @@ impl<'a> SweepStore<'a> {
         })
     }
 
+    /// [`Self::piecewise_merge_skipping`] after its leading `IntersectInsertRelate`
+    /// ([`crate::boolean::merge::p3::piecewise_merge_related`]): the caller has
+    /// already related the operands on its own intersector.
+    ///
+    /// # Errors
+    /// As [`Self::piecewise_merge_skipping`].
+    pub fn piecewise_merge_related_skipping(
+        &mut self,
+        id: SweepMergeId,
+        skip_pairs: Option<&Relation<ObjectRef, ObjectRef>>,
+        use_existing_topology: bool,
+        create_new_breps_for_faces: bool,
+    ) -> Result<BrepId> {
+        self.run_merge(id, |k, driver| {
+            crate::boolean::merge::p3::piecewise_merge_related(
+                k,
+                driver,
+                skip_pairs,
+                use_existing_topology,
+                create_new_breps_for_faces,
+            )?
+            .ok_or_else(|| SolidError::null_pointer(OP))
+        })
+    }
+
+    /// The `m_vTI` of a live merge session, for a caller that configures it as its
+    /// own `SmMerge` base does (`SmFilletExecutive` sets `m_bIgnoreTangency` and
+    /// `m_bDoingFillets`).
+    ///
+    /// # Errors
+    /// An unknown or released merge.
+    pub fn merge_intersector_mut(
+        &mut self,
+        id: SweepMergeId,
+    ) -> Result<&mut KernelManifoldIntersector> {
+        Ok(&mut self
+            .merges
+            .get_mut(id.0 as usize)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| invalid("unknown or released merge"))?
+            .intersector)
+    }
+
     fn insert_body(&mut self, context: ContextId, mut body: Body<'a>) -> Result<BrepId> {
         self.kernels
             .get(context.0 as usize)

@@ -18,9 +18,10 @@
 //! afterwards the attributes of target edges they deleted are cleared from the
 //! session store. `do_fillet` ends with the closed-manifold check of the generic
 //! `FilletExecutive::do_fillet` (not upstream, tangency-labs/solidcore#422).
-//! `DoPiecewiseMerge` and a live-session `IntersectInsertRelate` (global merge) are not
-//! wired: no public API entry point reaches them (`SetFilletParameters` resets both
-//! flags), so they return `Unported`. No recursion.
+//! No public API entry point reaches `DoPiecewiseMerge` or a live-session
+//! `IntersectInsertRelate` (global merge): `SetFilletParameters` resets both flags;
+//! [`FilletSession::set_do_piecewise_merge`] selects the piecewise merge after it.
+//! No recursion.
 
 use super::original_trim::OriginalSurfaceDeletion;
 use super::{invalid, FilletBody, FilletObject, FilletSession, SessionObjects};
@@ -461,11 +462,10 @@ impl FilletSession<'_> {
             .intersector
             .set_other_brep(Some(FilletObject::IntermediateBrep));
         if self.executive.options.piecewise_merge {
-            // UNPORTED(blend.fillet_executive_p1): SmFilletExecutive::DoPiecewiseMerge
-            return Err(SolidError::unported(
-                "SmFilletExecutive::DoPiecewiseMerge",
-                "blend.fillet_executive_p1",
-            ));
+            self.do_piecewise_merge(k)?;
+            // clean up: delete m_pFilletBrep
+            return FinishAccess(&mut self.objects)
+                .finish_delete_brep(k, FilletObject::IntermediateBrep);
         }
         // SetFilletBrepEdgeMap, then the geometry and corner insertion.
         self.insert_fillet_intersection_topology(k)?;

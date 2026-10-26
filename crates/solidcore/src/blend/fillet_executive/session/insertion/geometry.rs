@@ -52,6 +52,11 @@ pub struct SurfaceBinding {
     geometry: ObjectRef,
 }
 impl SurfaceBinding {
+    /// The face-surface handle the intersector's face loops name this surface by
+    /// ([`InsertionGeometry::face_surface`] of its face).
+    pub(super) const fn face_surface(&self) -> FilletObject {
+        FilletObject::FaceSurface(self.role, self.face)
+    }
     pub(super) fn capture_in_body(
         context: &mut Context,
         body: &mut Brep,
@@ -708,15 +713,22 @@ impl<'a> InsertionGeometry<'a> {
     }
 }
 
+/// The insertion role of a body-qualified geometry handle. A second base B-rep is
+/// never one of an insertion view's bodies (its rails merge with it as the target).
+fn insertion_role(body: FilletBody) -> Option<InsertionBody> {
+    match body {
+        FilletBody::Target => Some(InsertionBody::Target),
+        FilletBody::Pseudo => Some(InsertionBody::Pseudo),
+        FilletBody::SecondBase => None,
+    }
+}
+
 impl ClassGeometry<FilletObject> for InsertionGeometry<'_> {
     fn curve(&self, object: FilletObject) -> Option<&Curve> {
         match object {
             FilletObject::InsertionCurve(binding) => self.curves.as_ref()?.get(binding),
             FilletObject::Curve(body, edge) => self
-                .body(match body {
-                    FilletBody::Target => InsertionBody::Target,
-                    FilletBody::Pseudo => InsertionBody::Pseudo,
-                })
+                .body(insertion_role(body)?)
                 .edge(edge)
                 .ok()?
                 .curve
@@ -725,10 +737,7 @@ impl ClassGeometry<FilletObject> for InsertionGeometry<'_> {
                 self.intermediate.edge(edge).ok()?.curve.as_ref()
             }
             FilletObject::UvCurve(body, eu) => self
-                .body(match body {
-                    FilletBody::Target => InsertionBody::Target,
-                    FilletBody::Pseudo => InsertionBody::Pseudo,
-                })
+                .body(insertion_role(body)?)
                 .edgeuse(eu)
                 .ok()?
                 .uv_trim_curve
@@ -797,10 +806,7 @@ impl ClassGeometryMut<FilletObject> for InsertionGeometry<'_> {
         match object {
             FilletObject::InsertionCurve(binding) => self.curves.as_mut()?.get_mut(binding),
             FilletObject::Curve(body, edge) => self
-                .body_mut(match body {
-                    FilletBody::Target => InsertionBody::Target,
-                    FilletBody::Pseudo => InsertionBody::Pseudo,
-                })
+                .body_mut(insertion_role(body)?)
                 .edge_mut(edge)
                 .ok()?
                 .curve
@@ -809,10 +815,7 @@ impl ClassGeometryMut<FilletObject> for InsertionGeometry<'_> {
                 self.intermediate.edge_mut(edge).ok()?.curve.as_mut()
             }
             FilletObject::UvCurve(body, eu) => self
-                .body_mut(match body {
-                    FilletBody::Target => InsertionBody::Target,
-                    FilletBody::Pseudo => InsertionBody::Pseudo,
-                })
+                .body_mut(insertion_role(body)?)
                 .edgeuse_mut(eu)
                 .ok()?
                 .uv_trim_curve

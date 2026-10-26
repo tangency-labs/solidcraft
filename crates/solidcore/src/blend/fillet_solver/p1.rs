@@ -26,7 +26,7 @@
 //! | [`FilletSolver::compute_surface_values`]               | `ComputeSurfaceValues`                                |
 //! | [`compute_uv_vectors`]                                 | `SmFilletSolver::ComputeUVVectors`                    |
 //! | [`FilletSolver::split_fillet_geom_at_side_edge`]       | `SplitFilletGeomAtSideEdge`                           |
-//! | [`FilletSolver::split_fillet_geom`]                    | `SplitFilletGeom`                                     |
+//! | [`FilletSolver::split_fillet_geom`], [`FilletSolver::split_fillet_geom_scoped`], [`FilletSolver::split_fillet_geom_with_target`] | `SplitFilletGeom`                                     |
 //! | [`FilletSolver::trim_rails`]                           | `TrimRails`                                           |
 //! | [`FilletSolver::TYPE`], [`FilletSolver::type_string`], [`FilletSolver::is_kind_of`] | `GetType`, `GetTypeString` (`SM_COMMON`), `IsKindOf` |
 //! | [`FilletSolverOps`] (trait, base methods)              | the virtuals `GetJacobianSize`, `SetupOffsetValues`, `CanMakeAnalytic`, `OffsetRadiiCanChange`, `LoadJacobian`, `LoadInitialValues`; `GetSolverType`, `PointOnPlaneSolve` and the `SmConstantDistanceFS::GetDistance` read of `SmFindClippedRadiusEFO` (added by `blend.fillet_solver_p3`) |
@@ -115,7 +115,8 @@ use crate::blend::fillet_classification::{FilletClassObject, LegacyClassificatio
 use crate::blend::fillet_corner::p3::FilletCorner;
 use crate::blend::fillet_custom_solver::{InitialValues, JacobianLoad, OffsetSurface, SurfaceId};
 use crate::blend::fillet_geom::p1::{
-    FilletBrep, FilletGeom, FilletGeomId, FilletGeomType, FilletSolverId, FilletVertexType,
+    BoundaryTrimmingType, FilletBrep, FilletGeom, FilletGeomId, FilletGeomType, FilletSolverId,
+    FilletVertexType,
 };
 use crate::blend::fillet_intersector::HandlingAlgorithmType;
 use crate::blend::fillet_standard_solver::p1::{
@@ -1425,7 +1426,8 @@ impl FilletSolver {
     /// fewer second intervals than first ones (upstream only asserts equal sizes, then
     /// reads `crIvls2[i]` for every `i` of `crIvls1`); [`SolidError::Unported`] for the
     /// geometry copies (`SmFilletGeom::SmFilletGeom`) and the end curves
-    /// (`CreateEndCurve`); [`SolidError::NotFound`] for a vertex without its fillet
+    /// (`CreateEndCurve` without the target B-rep:
+    /// [`FilletSolver::split_fillet_geom_with_target`] makes them); [`SolidError::NotFound`] for a vertex without its fillet
     /// record; those of [`FilletBrep::rail_vertex`], `FindPointClass`,
     /// [`FilletBrep::set_up_rail_point`] and [`trim_rail`].
     pub fn split_fillet_geom(
@@ -1471,6 +1473,69 @@ impl FilletSolver {
         ivls2: &[Extent1d],
         cc1: &CurveClassification<FilletClassObject>,
         cc2: &CurveClassification<FilletClassObject>,
+    ) -> Result<()> {
+        self.split_fillet_geom_in(
+            k,
+            pseudo,
+            geometry,
+            fillet_geom_index,
+            trim_type,
+            ivls1,
+            ivls2,
+            cc1,
+            cc2,
+            None,
+        )
+    }
+
+    /// [`Self::split_fillet_geom_scoped`] with the target B-rep the end curves read
+    /// (`CreateEndCurve`, which for `SM_BT_BLEND` reads the rail end vertices'
+    /// classification edges there).
+    ///
+    /// # Errors
+    /// As [`Self::split_fillet_geom_scoped`], with the errors of
+    /// [`FilletBrep::create_end_curve_with_solver`] for the end curves.
+    #[allow(clippy::too_many_arguments)]
+    pub fn split_fillet_geom_with_target(
+        &mut self,
+        k: &Kernel,
+        pseudo: &mut FilletBrep,
+        geometry: &impl ClassGeometry<FilletClassObject>,
+        fillet_geom_index: usize,
+        trim_type: i32,
+        ivls1: &[Extent1d],
+        ivls2: &[Extent1d],
+        cc1: &CurveClassification<FilletClassObject>,
+        cc2: &CurveClassification<FilletClassObject>,
+        target: &Brep,
+    ) -> Result<()> {
+        self.split_fillet_geom_in(
+            k,
+            pseudo,
+            geometry,
+            fillet_geom_index,
+            trim_type,
+            ivls1,
+            ivls2,
+            cc1,
+            cc2,
+            Some(target),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn split_fillet_geom_in(
+        &mut self,
+        k: &Kernel,
+        pseudo: &mut FilletBrep,
+        geometry: &impl ClassGeometry<FilletClassObject>,
+        fillet_geom_index: usize,
+        trim_type: i32,
+        ivls1: &[Extent1d],
+        ivls2: &[Extent1d],
+        cc1: &CurveClassification<FilletClassObject>,
+        cc2: &CurveClassification<FilletClassObject>,
+        target: Option<&Brep>,
     ) -> Result<()> {
         // SM_ASSERT(sizes equal) is a no-op; a shorter crIvls2 is read past its end.
         if ivls2.len() < ivls1.len() {
@@ -1546,11 +1611,34 @@ impl FilletSolver {
 
             // Create the ending curve on the fillet
             for end in 0..2usize {
-                // UNPORTED(blend.fillet_geom_p5): SmFilletGeom::CreateEndCurve (justified: findings.md "blend.fillet_geom_p5: solver and corner callers")
-                unported_on::<_, ()>(
-                    (new_fillet_geom, end, trim_type),
-                    "SmFilletGeom::CreateEndCurve",
-                    "blend.fillet_geom_p5",
+                let Some(target) = target else {
+                    // UNPORTED(blend.fillet_geom_p5): SmFilletGeom::CreateEndCurve (caller holds no target B-rep; justified: findings.md "blend.fillet_geom_p5: solver and corner callers")
+                    return unported_on(
+                        (new_fillet_geom, end, trim_type),
+                        "SmFilletGeom::CreateEndCurve",
+                        "blend.fillet_geom_p5",
+                    );
+                };
+                // (SmBoundaryTrimmingType)lTrimType: only SM_BT_BLEND is tested
+                let end_trim = match trim_type {
+                    1 => BoundaryTrimmingType::Minimal,
+                    2 => BoundaryTrimmingType::Maximal,
+                    3 => BoundaryTrimmingType::Bevel,
+                    4 => BoundaryTrimmingType::Blend,
+                    _ => BoundaryTrimmingType::None,
+                };
+                let solver_id = pseudo
+                    .geom(new_fillet_geom)?
+                    .fillet_solver()
+                    .ok_or_else(|| SolidError::null_pointer(OP))?;
+                pseudo.create_end_curve_with_solver(
+                    k,
+                    new_fillet_geom,
+                    end,
+                    end_trim,
+                    solver_id,
+                    self,
+                    target,
                 )?;
             }
 
@@ -1865,12 +1953,15 @@ pub trait FilletSolverOps: AsFilletSolverOps {
     /// # Errors
     ///
     /// Those of the base `SmFilletSolver::PointOnPlaneSolve`
-    /// ([`FilletSolver::point_on_plane_solve`], unit `blend.fillet_solver_p2`, without
-    /// a B-rep: none of the virtual's callers holds one).
+    /// ([`FilletSolver::point_on_plane_solve`], unit `blend.fillet_solver_p2`). `brep`
+    /// is the target B-rep holding the solver's edge uses (upstream reaches them through
+    /// its `GetEdgeuse` pointers), for `LoadInitialValues`; `None` when the caller has
+    /// none.
     #[allow(clippy::too_many_arguments)]
     fn point_on_plane_solve(
         &mut self,
         k: &Kernel,
+        brep: Option<&Brep>,
         plane_origin: Point3,
         plane_normal: Vec3,
         uv_domain1: &Extent2d,
@@ -1882,7 +1973,7 @@ pub trait FilletSolverOps: AsFilletSolverOps {
         FilletSolver::point_on_plane_solve(
             self.as_solver_ops(),
             k,
-            None,
+            brep,
             plane_origin,
             plane_normal,
             uv_domain1,

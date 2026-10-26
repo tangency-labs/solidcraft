@@ -13,16 +13,33 @@ use crate::topology::{Brep, BrepId, EdgeId, EdgeuseId, FaceId, LoopId, VertexId,
 
 /// Each body is borrowed from the same live session during the classification loan.
 /// No indexed/legacy handles are accepted by this production provider.
+/// `second` is a surface/surface fillet's second base B-rep when it is not the
+/// target; `classified` names the body whose face is being classified (the target
+/// outside a second rail's classification).
 pub(super) struct Objects<'a> {
     pub target: &'a Brep,
     pub pseudo: &'a Brep,
+    pub second: Option<&'a Brep>,
+    pub classified: FilletBody,
 }
 
-impl Objects<'_> {
+impl<'a> Objects<'a> {
+    /// The target and pseudo bodies, classifying a target face.
+    pub(super) fn new(target: &'a Brep, pseudo: &'a Brep) -> Self {
+        Self {
+            target,
+            pseudo,
+            second: None,
+            classified: FilletBody::Target,
+        }
+    }
+
     fn body(&self, body: FilletBody) -> &Brep {
         match body {
             FilletBody::Target => self.target,
             FilletBody::Pseudo => self.pseudo,
+            // Second-base handles are only issued with a second base present.
+            FilletBody::SecondBase => self.second.unwrap_or(self.target),
         }
     }
 
@@ -31,6 +48,8 @@ impl Objects<'_> {
             Some(FilletBody::Target)
         } else if std::ptr::eq(brep, self.pseudo) {
             Some(FilletBody::Pseudo)
+        } else if self.second.is_some_and(|second| std::ptr::eq(brep, second)) {
+            Some(FilletBody::SecondBase)
         } else {
             None
         }
@@ -85,7 +104,7 @@ impl ClassGeometry<FilletClassObject> for Objects<'_> {
         Some((self.body(body), entity))
     }
     fn topology_handle(&self, entity: EntityRef) -> Option<FilletClassObject> {
-        Some(FilletClassObject::Topology(FilletBody::Target, entity))
+        Some(FilletClassObject::Topology(self.classified, entity))
     }
     fn topology_handle_in(&self, brep: &Brep, entity: EntityRef) -> Option<FilletClassObject> {
         Some(FilletClassObject::Topology(self.body_of(brep)?, entity))
@@ -99,7 +118,10 @@ impl ClassGeometry<FilletClassObject> for Objects<'_> {
         ))
     }
     fn owner_entity(&self, owner: ObjectRef) -> Option<(&Brep, EntityRef)> {
-        for brep in [self.target, self.pseudo] {
+        for brep in [Some(self.target), Some(self.pseudo), self.second]
+            .into_iter()
+            .flatten()
+        {
             let Some(serial) = brep.notify_serial() else {
                 continue;
             };
@@ -116,33 +138,35 @@ impl ClassGeometry<FilletClassObject> for Objects<'_> {
 
 impl CurveOnClassifyObjects<FilletClassObject> for Objects<'_> {
     fn face(&self, id: FaceId) -> FilletClassObject {
-        FilletClassObject::Topology(FilletBody::Target, EntityRef::Face(id))
+        FilletClassObject::Topology(self.classified, EntityRef::Face(id))
     }
     fn vertex(&self, id: VertexId) -> FilletClassObject {
-        FilletClassObject::Topology(FilletBody::Target, EntityRef::Vertex(id))
+        FilletClassObject::Topology(self.classified, EntityRef::Vertex(id))
     }
     fn edge(&self, id: EdgeId) -> FilletClassObject {
-        FilletClassObject::Topology(FilletBody::Target, EntityRef::Edge(id))
+        FilletClassObject::Topology(self.classified, EntityRef::Edge(id))
     }
     fn vertexuse(&self, id: VertexuseId) -> FilletClassObject {
-        FilletClassObject::Topology(FilletBody::Target, EntityRef::Vertexuse(id))
+        FilletClassObject::Topology(self.classified, EntityRef::Vertexuse(id))
     }
     fn edgeuse(&self, id: EdgeuseId) -> FilletClassObject {
-        FilletClassObject::Topology(FilletBody::Target, EntityRef::Edgeuse(id))
+        FilletClassObject::Topology(self.classified, EntityRef::Edgeuse(id))
     }
     fn edge_curve(&self, id: EdgeId) -> FilletClassObject {
-        FilletClassObject::Curve(FilletBody::Target, id)
+        FilletClassObject::Curve(self.classified, id)
     }
     fn trim_curve(&self, id: EdgeuseId) -> FilletClassObject {
-        FilletClassObject::TrimCurve(FilletBody::Target, id)
+        FilletClassObject::TrimCurve(self.classified, id)
     }
     fn face_surface(&self, id: FaceId) -> Option<FilletClassObject> {
-        self.target.face(id).ok()?.surface.as_ref()?;
-        Some(FilletClassObject::Surface(FilletBody::Target, id))
+        self.body(self.classified).face(id).ok()?.surface.as_ref()?;
+        Some(FilletClassObject::Surface(self.classified, id))
     }
     fn loop_id(&self, object: FilletClassObject) -> Option<LoopId> {
         match object {
-            FilletClassObject::Topology(FilletBody::Target, EntityRef::Loop(id)) => Some(id),
+            FilletClassObject::Topology(body, EntityRef::Loop(id)) if body == self.classified => {
+                Some(id)
+            }
             _ => None,
         }
     }
@@ -171,7 +195,7 @@ impl crate::blend::fillet_solver::p5::RailClassificationContext for Context<'_> 
     ) -> crate::error::Result<()> {
         let mut cache = crate::query::face::p2::CurveOnClassifyCache::default();
         let result = {
-            let objects = Objects { target, pseudo };
+            let objects = Objects::new(target, pseudo);
             crate::query::face::p2::curve_on_classify_cached(
                 k, target, face, &objects, true, cc, true, false, true, &mut cache,
             )
@@ -206,10 +230,7 @@ mod tests {
         let target_edge = target.edges().ids().next().unwrap();
         let pseudo_edge = pseudo.edges().ids().next().unwrap();
         assert_eq!(target_edge, pseudo_edge);
-        let objects = Objects {
-            target: &target,
-            pseudo: &pseudo,
-        };
+        let objects = Objects::new(&target, &pseudo);
         let source = FilletClassObject::Curve(FilletBody::Pseudo, pseudo_edge);
         let boundary = objects.edge_curve(target_edge);
         assert_ne!(source, boundary);

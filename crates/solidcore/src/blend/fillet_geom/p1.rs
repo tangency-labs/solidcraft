@@ -55,7 +55,7 @@
 //! | [`adjust_uv_on_seam`]                           | `sm_AdjustUVOnSeam`                        |
 //! | [`create_cubic_rail_rail_interpolant`]          | `sm_CreateCubicRailRailInterpolant`        |
 //! | [`cleanup_noise`], [`clean_up_noise`]           | `sm_CleanupNoise`, `smos_CleanUpNoise` (`SmMath.cpp`, no owning unit) |
-//! | [`examine_n_fix_fillet_geoms`]                  | `sm_ExamineNFixFilletGeoms`                |
+//! | [`examine_n_fix_fillet_geoms`], [`examine_n_fix_fillet_geoms_with_solvers`] | `sm_ExamineNFixFilletGeoms` |
 //! | [`join_verts_by_capping`]                       | `JoinVertsByCapping`                       |
 //! | [`check_seam_out`], [`check_seam_on`]           | `sm_CheckSeamOut`, `sm_CheckSeamOn`        |
 //! | [`is_order_correct`]                            | `sm_IsOrderCorrect`                        |
@@ -3373,6 +3373,43 @@ pub fn examine_n_fix_fillet_geoms(
     dist_tol: f64,
     solvers: [Option<&mut ConstantRadiusAssistedFs>; 2],
 ) -> Result<()> {
+    let [solver1, solver2] = solvers;
+    examine_n_fix_fillet_geoms_with_solvers(
+        k,
+        fb,
+        geom1,
+        at_start_of_geom1,
+        geom2,
+        at_start_of_geom2,
+        start_fv,
+        end_fv,
+        dist_tol,
+        [solver1.map(|s| &s.solver), solver2.map(|s| &s.solver)],
+    )
+}
+
+/// [`examine_n_fix_fillet_geoms`] with the geometries' `SmFilletSolver` bases
+/// (`GetFilletSolver()`, resolved by the caller; the same solver may be passed twice).
+/// The rebuilt rail is dropped onto a copy of the solver's offset surface with its
+/// offset distance set to `0` (upstream sets it on the solver's surface and restores it
+/// after the drop, which itself runs on a copy here).
+///
+/// # Errors
+///
+/// As [`examine_n_fix_fillet_geoms`].
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+pub fn examine_n_fix_fillet_geoms_with_solvers(
+    k: &Kernel,
+    fb: &mut FilletBrep,
+    geom1: FilletGeomId,
+    at_start_of_geom1: bool,
+    geom2: FilletGeomId,
+    at_start_of_geom2: bool,
+    start_fv: VertexId,
+    end_fv: VertexId,
+    dist_tol: f64,
+    solvers: [Option<&FilletSolver>; 2],
+) -> Result<()> {
     let start_pnt = fb.vertex_point(start_fv)?;
     let end_pnt = fb.vertex_point(end_fv)?;
 
@@ -3513,7 +3550,7 @@ pub fn examine_n_fix_fillet_geoms(
     let adjust_fg = to_geom;
     // pAdjustFG->GetFilletSolver()
     let [solver1, solver2] = solvers;
-    let mut adjust_solver = if adjust0 { solver1 } else { solver2 };
+    let adjust_solver = if adjust0 { solver1 } else { solver2 };
     let (surf_domain, rails) = {
         let g = fb.geom(adjust_fg)?;
         let surface = g
@@ -3550,7 +3587,7 @@ pub fn examine_n_fix_fillet_geoms(
         set_rail_curve(fb.brep_mut(), rail, iso.curve)?;
 
         // Project the new curve onto the surface of the original brep
-        drop_rail_onto_offset_surface(k, fb, adjust_solver.as_deref_mut(), kk, rail, dist_tol)?;
+        drop_rail_onto_offset_surface(k, fb, adjust_solver, kk, rail, dist_tol)?;
     }
 
     Ok(())
@@ -3604,19 +3641,20 @@ pub(crate) fn set_rail_curve(brep: &mut Brep, rail: EdgeId, curve: Curve) -> Res
 fn drop_rail_onto_offset_surface(
     k: &Kernel,
     fb: &mut FilletBrep,
-    adjust_solver: Option<&mut ConstantRadiusAssistedFs>,
+    adjust_solver: Option<&FilletSolver>,
     rail_index: usize,
     rail: EdgeId,
     dist_tol: f64,
 ) -> Result<()> {
     let solver = adjust_solver.ok_or_else(|| SolidError::null_pointer(OP_EXAMINE))?;
-    // SmFilletSolver::GetSurface(k); NER(pOffsetSurf)
-    let offset_surf = &mut solver
-        .solver
-        .surface_mut(rail_index)?
+    // SmFilletSolver::GetSurface(k); NER(pOffsetSurf). The offset distance is set to
+    // 0 on a copy (upstream sets it on the solver's surface and restores it below).
+    let mut offset_surf = solver
+        .surface(rail_index)?
         .ok_or_else(|| SolidError::null_pointer(OP_EXAMINE))?
-        .surface;
-    let orig_offset_dist = offset_surf.offset_distance();
+        .surface
+        .clone();
+    let offset_surf = &mut offset_surf;
     offset_surf.set_offset_distance(0.0);
 
     // Drop the 3d curve onto the surface
@@ -3636,7 +3674,6 @@ fn drop_rail_onto_offset_surface(
         // the double converts to DropCurve's SmApproxTol3d parameter
         approx_tol3d(k, dist_tol),
     );
-    offset_surf.set_offset_distance(orig_offset_dist);
     let uv_curves = match drop {
         // the sampled max distance and the deviation are not used
         Ok((_max_dist_to_surf, _deviation, uv_curves)) => uv_curves,

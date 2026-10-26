@@ -10,11 +10,12 @@
 //! | [`FilletCorner::make_convex_nxn_corner_topology`] | `SmFilletConvexNxNCorner::MakeCornerTopology` |
 //! | `find_side_edgeuse`, `find_closed_side_edgeuse` | `sm_FindSideEdgeuse`, `sm_FindClosedSideEdgeuse` |
 //! | `same_convexity_edges` | `same_convexity_edges` |
+//! | [`FilletCorner::make_nx1_closed_corner_topology`] ([`closed_nx1`]) | `SmFilletNx1ClosedCorner::MakeCornerTopology` |
 //!
 //! Deviations: the caller lends the actual target, pseudo-B-rep and solver.
-//! Missing topology that native dereferences is an input error. Mixed-convexity
-//! topology stops at the unported surface-extension-distance helper, after its
-//! native vertex/rail prefix. The mixed-convexity 4x2 corner stops at the unported
+//! Missing topology that native dereferences is an input error. The Nx1 end rib,
+//! surface extension and cap topology are in [`nx1_end`]. The mixed-convexity 4x2
+//! corner stops at the unported
 //! `Make4x2ConcaveCornerTopology`. The Nx2 corner's two solvers are resolved by the
 //! caller (upstream looks them up after the 4x2 checks; the lookup has no effects).
 //! An unset `sm_TestG1Continuity` angle (upstream reads it uninitialised) is an input
@@ -23,10 +24,14 @@
 //! vertex loop; the lookups have no effects), and its unused `GetEdges` read is
 //! omitted. There is no recursion.
 
+pub mod closed_nx1;
+pub mod concave_nxn;
+
 use crate::blend::fillet_corner::p1::{
     check_face_complimentary_corner_concavity, face_by_two_edgeuses, test_g1_continuity,
 };
 use crate::blend::fillet_corner::p3::{FilletCorner, FilletCornerKind};
+use crate::blend::fillet_executive::session::{FilletObject, SolverObject};
 use crate::blend::fillet_geom::p1::{
     CornerLookup, FilletBrep, FilletCornerId, FilletEdgeType, FilletVertex, FilletVertexType,
 };
@@ -35,9 +40,13 @@ use crate::error::{EntityRef, Result, SolidError};
 use crate::intersect::point_class::PointClassType;
 use crate::kernel::Kernel;
 use crate::math::Point3;
+use crate::surface::surface::Surface;
 use crate::topology::edge;
 use crate::topology::edgeuse::{p1 as eu1, p2 as eu2};
 use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, Vertex, VertexId};
+use std::collections::BTreeMap;
+
+pub mod nx1_end;
 
 const OP: &str = "blend::fillet_corner::topology::make_nx1_corner_topology";
 const OP_NX2: &str = "blend::fillet_corner::topology::make_nx2_corner_topology";
@@ -86,10 +95,14 @@ pub struct Nx1TopologyEnv<'a> {
     pub pseudo: &'a mut FilletBrep,
     /// This corner's identity in the executive's corner store.
     pub corner: FilletCornerId,
-    /// The loaded solver of the corner's filleted edge use.
-    pub solver: &'a FilletSolver,
+    /// The loaded concrete solver of the corner's filleted edge use.
+    pub solver: &'a mut SolverObject,
     /// The executive's live global-merge switch.
     pub do_global_merge: &'a mut bool,
+    /// The executive's `m_vExtendedSurfacesMap`.
+    pub extended_surfaces: &'a mut BTreeMap<FaceId, Surface>,
+    /// The executive's `m_vTopoEdges`.
+    pub topo_edges: &'a mut Vec<Option<FilletObject>>,
 }
 
 fn invalid(reason: &'static str) -> SolidError {
@@ -219,24 +232,28 @@ fn new_corner_vertex(
 }
 
 impl FilletCorner {
-    /// Construct the rails and end rib of an actual `NByOne` corner.
+    /// Construct the rails and end rib of an actual `NByOne` corner and, at a
+    /// mixed-convexity corner, the extended end surface and the cap topology.
     ///
     /// Allocations and corner-list insertions occur in native order and remain
     /// visible if a later operation fails. Vertex geometry is computed later.
     ///
     /// # Errors
     /// Invalid topology or a different corner kind; those of the actual solver,
-    /// convexity and pseudo-topology operations. Mixed-convexity extension remains
-    /// `Unported` after creating its native rail/vertex prefix.
+    /// convexity, surface-extension and pseudo-topology operations. The gap checks of
+    /// a mixed-convexity end face spanning several faces are `Unported`.
     pub fn make_nx1_corner_topology(&mut self, env: Nx1TopologyEnv<'_>) -> Result<()> {
         let Nx1TopologyEnv {
             k,
             target,
             pseudo,
             corner,
-            solver,
+            solver: solver_object,
             do_global_merge,
+            extended_surfaces,
+            topo_edges,
         } = env;
+        let solver = solver_object.base();
         if self.kind != FilletCornerKind::NByOne {
             return Err(invalid("requires an NByOne corner"));
         }
@@ -271,6 +288,7 @@ impl FilletCorner {
         let [same0, same1] = same;
         let mixed = !same0 || !same1;
         let mut end_face = None;
+        let mut extend_edge = None;
 
         for rail in 0..2 {
             let side = *need(sides.get(rail), "side index")?;
@@ -312,6 +330,7 @@ impl FilletCorner {
                     .set_fillet_vertex_type(FilletVertexType::RailXExtendedEdgeuse);
                 let other = *need(sides.get(1 - rail), "other side index")?;
                 end_face = face_by_two_edgeuses(target, Some(side), Some(other), None)?;
+                extend_edge = eu1::edge(target, side)?;
                 if !is_fillet_side_face(target, filleted, face)? {
                     *need(sides.get_mut(rail), "side index")? = radial(target, side)?;
                 }
@@ -328,35 +347,24 @@ impl FilletCorner {
             *do_global_merge = true;
             return Ok(());
         }
-        if mixed {
-            // UNPORTED(blend.fillet_corner_p1): sm_FindSurfaceExtensionDistAtCorner
-            return Err(SolidError::unported(
-                "sm_FindSurfaceExtensionDistAtCorner",
-                "blend.fillet_corner_p1",
-            ));
-        }
-
-        let start = self.vertices.first().copied();
-        let end = self.vertices.get(1).copied();
-        let rib = pseudo.make_fillet_edge(start, end, Some(corner))?;
-        pseudo
-            .fillet_edge_mut(rib)?
-            .set_fillet_edge_type(FilletEdgeType::FilletXSideFace);
-        let primary = need(
-            eu1::primary_edgeuse(pseudo.brep(), rib)?,
-            "end rib without primary edge use",
-        )?;
-        pseudo.set_edgeuse_fillet_geom(primary, Some(geometry))?;
-        self.edges.push(rib);
-        if end_face.is_none() {
-            let [first, second] = sides;
-            end_face = face_by_two_edgeuses(target, Some(first), Some(second), None)?;
-            if end_face.is_none() {
-                return Err(SolidError::sm_err(OP));
-            }
-        }
-        pseudo.fillet_edge_mut(rib)?.set_original_face(end_face);
-        Ok(())
+        self.finish_nx1_end(nx1_end::Nx1End {
+            k,
+            target,
+            pseudo,
+            corner,
+            solver: solver_object,
+            extended_surfaces,
+            topo_edges,
+            geometry,
+            filleted,
+            vertex,
+            total,
+            mixed,
+            same,
+            sides,
+            end_face,
+            extend_edge,
+        })
     }
 }
 
@@ -735,8 +743,12 @@ impl FilletCorner {
             solvers,
         } = env;
         let invalid = |reason: &'static str| SolidError::invalid_input(OP_NXN, reason);
-        if self.kind != FilletCornerKind::ConvexNByN {
-            return Err(invalid("requires a ConvexNByN corner"));
+        // SmFilletConcaveNxNCorner delegates its setback corners here.
+        if !matches!(
+            self.kind,
+            FilletCornerKind::ConvexNByN | FilletCornerKind::ConcaveNByN
+        ) {
+            return Err(invalid("requires a convex or concave NxN corner"));
         }
         // Determine if this is a setback corner
         let is_set_back = self.set_back_dist > self.approx_tol_3d * 100.0;

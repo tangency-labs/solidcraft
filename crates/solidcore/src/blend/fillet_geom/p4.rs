@@ -472,6 +472,21 @@ pub trait IntersectionTopologyContext {
         role: IntersectionFaceRole,
         body: impl FnOnce(&mut Self, &mut Brep, &Self::FaceMarker) -> Result<T>,
     ) -> Result<T>;
+    /// Run `body` on the B-rep of the original face of solver `solver`'s rail side
+    /// `side` (`pBaseFace->GetBrep()`): `target`, unless the context holds another
+    /// base B-rep for that rail (a surface/surface fillet's second surface).
+    /// # Errors
+    /// Those of `body`, or a base B-rep the context cannot lend.
+    fn with_rail_base<T>(
+        &mut self,
+        target: &mut Brep,
+        solver: FilletSolverId,
+        side: usize,
+        body: impl FnOnce(&mut Self, &mut Brep) -> Result<T>,
+    ) -> Result<T> {
+        let _ = (solver, side);
+        body(self, target)
+    }
     /// Read the current tolerance through a short borrow of the managed edge.
     /// # Errors
     /// The managed edge is no longer live or belongs to another body.
@@ -1530,13 +1545,34 @@ impl FilletBrep {
     /// (`corners` resolves the vertex's corner and holds the executive's extended
     /// surfaces); [`SolidError::Unported`] from the intersection
     /// (`sm_SrfSrfIntersection`).
-    #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn calc_rail_int_extended_edgeuse(
         &mut self,
         k: &Kernel,
         v: VertexId,
         corners: CornerLookup<'_>,
         solvers: &[FilletSolver],
+        target: &Brep,
+    ) -> Result<()> {
+        let context = super::p5::IndexedEdgeContext {
+            solvers,
+            corners,
+            op: OP_EXT,
+        };
+        self.calc_rail_int_extended_edgeuse_with_context(k, v, corners, &context, target)
+    }
+
+    /// [`Self::calc_rail_int_extended_edgeuse`] resolving the geometry's solver and
+    /// the side face's extended surface through the caller's live objects.
+    ///
+    /// # Errors
+    /// As [`Self::calc_rail_int_extended_edgeuse`]; those of `context`.
+    #[allow(clippy::too_many_lines)] // one upstream routine
+    pub fn calc_rail_int_extended_edgeuse_with_context(
+        &mut self,
+        k: &Kernel,
+        v: VertexId,
+        corners: CornerLookup<'_>,
+        context: &impl super::p5::FilletEdgeContext,
         target: &Brep,
     ) -> Result<()> {
         let corner = self.fillet_vertex(v)?.fillet_corner();
@@ -1574,11 +1610,7 @@ impl FilletBrep {
         // pFilletGeom->GetFilletSolver(), dereferenced where upstream does
         let sid = self.geom(fillet_geom)?.fillet_solver();
         let fil_solver = || -> Result<&FilletSolver> {
-            solver_of(
-                solvers,
-                sid.ok_or_else(|| SolidError::null_pointer(OP_EXT))?,
-                OP_EXT,
-            )
+            context.solver(sid.ok_or_else(|| SolidError::null_pointer(OP_EXT))?)
         };
 
         // get OtherFaceSurface
@@ -1629,7 +1661,7 @@ impl FilletBrep {
 
         // get face->extendedSurface
         let corner = corner.ok_or_else(|| SolidError::null_pointer(OP_EXT))?;
-        let surface2 = corners
+        let surface2 = context
             .extended_surface(corners.corner(corner)?, side_face)?
             .filter(|s| b_spline_net(s).is_some())
             .ok_or_else(|| SolidError::null_pointer(OP_EXT))?;
@@ -2320,7 +2352,10 @@ impl FilletBrep {
         context: &mut impl IntersectionTopologyContext,
     ) -> Result<()> {
         let nul = || SolidError::null_pointer(OP_INSERT);
-        if self.geom(g)?.fillet_solver().is_none() || solver.executive.is_none() {
+        let Some(solver_id) = self.geom(g)?.fillet_solver() else {
+            return Err(nul());
+        };
+        if solver.executive.is_none() {
             return Err(nul());
         }
         context.begin_intersection(solver)?;
@@ -2350,44 +2385,46 @@ impl FilletBrep {
                 if !users.contains(&managed_edge) {
                     continue;
                 }
-                context.with_face_scope(
-                    target,
-                    face,
-                    IntersectionFaceRole::Rail,
-                    |context, target, marker| {
-                        let tolerance = context.managed_edge_tolerance(managed_edge)?;
-                        let merged = context.merge_curve(
-                            self,
-                            target,
-                            face,
-                            tolerance,
-                            rail,
-                            managed_edge,
-                            &mut deleted_edges,
-                        );
-                        self.fillet_edge_mut(rail)?
-                            .clear_fillet_brep_edges(&deleted_edges);
-                        context.update_topology(self, target, marker, face)?;
-                        if let Err(error) = merged {
-                            if error.is_unported() {
+                context.with_rail_base(target, solver_id, ii, |context, target| {
+                    context.with_face_scope(
+                        target,
+                        face,
+                        IntersectionFaceRole::Rail,
+                        |context, target, marker| {
+                            let tolerance = context.managed_edge_tolerance(managed_edge)?;
+                            let merged = context.merge_curve(
+                                self,
+                                target,
+                                face,
+                                tolerance,
+                                rail,
+                                managed_edge,
+                                &mut deleted_edges,
+                            );
+                            self.fillet_edge_mut(rail)?
+                                .clear_fillet_brep_edges(&deleted_edges);
+                            context.update_topology(self, target, marker, face)?;
+                            if let Err(error) = merged {
+                                if error.is_unported() {
+                                    return Err(error);
+                                }
+                                if let Some(edgeuse) = solver.edgeuse(0)? {
+                                    context.record_bad_merge(
+                                        self,
+                                        g,
+                                        eu1::edge(target, edgeuse)?,
+                                        target,
+                                        face,
+                                        rail,
+                                        &fillet_surface,
+                                    )?;
+                                }
                                 return Err(error);
                             }
-                            if let Some(edgeuse) = solver.edgeuse(0)? {
-                                context.record_bad_merge(
-                                    self,
-                                    g,
-                                    eu1::edge(target, edgeuse)?,
-                                    target,
-                                    face,
-                                    rail,
-                                    &fillet_surface,
-                                )?;
-                            }
-                            return Err(error);
-                        }
-                        context.register_intersection(self, target, face, &fillet_surface)
-                    },
-                )?;
+                            context.register_intersection(self, target, face, &fillet_surface)
+                        },
+                    )
+                })?;
             }
         }
         let side_eus = self.geom(g)?.side_eus.clone();

@@ -17,6 +17,9 @@ pub enum FilletBody {
     Target,
     /// The executive's pseudo-B-rep.
     Pseudo,
+    /// The B-rep of a surface/surface fillet's second base face when that face is not
+    /// in the target (upstream `pBaseFace->GetBrep()` of the second rail).
+    SecondBase,
 }
 
 /// An actual classification object, or an explicitly indexed legacy handle.
@@ -35,13 +38,15 @@ pub enum FilletClassObject {
 }
 
 impl FilletClassObject {
-    /// Resolve a target topology object without accepting pseudo or geometry handles.
+    /// Resolve a base-face topology object (of the target or of a surface/surface
+    /// fillet's second base B-rep) without accepting pseudo or geometry handles.
     ///
     /// # Errors
     /// A handle outside the target topology domain.
     pub fn target_entity(self) -> Result<EntityRef> {
         match self {
-            Self::Legacy(entity) | Self::Topology(FilletBody::Target, entity) => Ok(entity),
+            Self::Legacy(entity)
+            | Self::Topology(FilletBody::Target | FilletBody::SecondBase, entity) => Ok(entity),
             _ => Err(SolidError::invalid_input(
                 "blend::fillet_classification",
                 "classification object is not target topology",

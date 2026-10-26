@@ -2,7 +2,7 @@
 //!
 //! Upstream: `source/SM_API/src/SmApiBrep.cpp` (`SmApiFilletEdges` 2049-2087,
 //! `SmApiFilletEdgesPerEdge` 2094-2135, `SmApiVariableRadiusFillet` 2142-2178,
-//! `SmApiSetBevelCorners` 2305-2338),
+//! `SmApiSurfaceSurfaceFillet` 2189-2267, `SmApiSetBevelCorners` 2305-2338),
 //! `source/SM_API/src/SmApiFillets.cpp` (`SmApiChamferFillet` 40-113,
 //! `SmApiCircularFillet` 119-185).
 //!
@@ -14,6 +14,7 @@
 //! | [`circular_fillet`] | `SmApiCircularFillet` |
 //! | [`chamfer_fillet`] | `SmApiChamferFillet` |
 //! | [`set_bevel_corners`] | `SmApiSetBevelCorners` |
+//! | [`surface_surface_fillet`] | `SmApiSurfaceSurfaceFillet` |
 //!
 //! Deviations: the kernel argument replaces `SmApiGetOrCreateContext()`. Edges are
 //! typed ids of `brep`. Upstream destroys its executive (and the executive's
@@ -25,20 +26,32 @@
 //! as upstream does, and skip an edge whose solver constructor fails (upstream's
 //! constructor only signals the error and leaves a solver without surfaces, which
 //! `LoadFilletSolver` then refuses); `Unported` still propagates. The stack-held
-//! generator and handler become session-retained values. No recursion.
+//! generator and handler become session-retained values. [`surface_surface_fillet`]
+//! takes each surface as a [`FilletSurfaceArg`]: a free surface (upstream
+//! `GetFace()` null, a temporary B-rep of its own), a face of a caller's B-rep, or a
+//! second face of the first argument's B-rep (two `&mut` borrows of one B-rep are not
+//! expressible); the same free surface reference twice is one surface, as upstream
+//! the second `GetFace()` sees the first temporary face. The faces' surfaces are
+//! copied into the solver (upstream the face's own surface pointer); the first base
+//! B-rep is the session's target, a distinct second one its second base B-rep. The
+//! fillet B-rep is returned (`None` when the offset surfaces do not intersect,
+//! upstream `SM_SUCCESS` with a null result); the temporary B-reps are dropped (upstream
+//! `SetOwner(NULL)` and `delete`). No recursion.
 
 use super::session::FilletSession;
+use crate::blend::fillet_executive::p2::SurfaceFilletOptions;
 use crate::blend::fillet_geom::p1::FilletSolverId;
 use crate::blend::fillet_solver::p1::{
     FilletSurfaceGenerator, FilletSurfaceGeneratorType, MakeSurfaceBlendSih,
 };
-use crate::blend::fillet_standard_solver::p1::FilletLaw;
+use crate::blend::fillet_standard_solver::p1::{BoundaryTrimmingType, FilletLaw};
 use crate::error::{Result, SolidError, SM_ERR_INVALID_INPUT};
 use crate::kernel::Kernel;
 use crate::math::PI;
+use crate::surface::surface::Surface;
 use crate::topology::brep::p1;
 use crate::topology::brep::p5::{stitch_and_orient, StitchAndOrientOptions};
-use crate::topology::{Brep, EdgeId, VertexId};
+use crate::topology::{Brep, EdgeId, FaceId, VertexId};
 
 const OP: &str = "blend::fillet_executive::api";
 
@@ -302,6 +315,176 @@ pub fn set_bevel_corners(
         session.do_filleting(k, None)?;
     }
     stitch_and_orient(k, brep, &StitchAndOrientOptions::default())
+}
+
+/// `SmBrep::CreateFaceFromSurface(pSurface, pSurface->GetNaturalUVDomain(), pFace)`:
+/// a face of `brep` on a copy of `surface` over its natural domain (the temporary
+/// B-reps of [`surface_surface_fillet`]).
+///
+/// # Errors
+/// Those of the face construction.
+pub fn create_face_from_surface(
+    k: &mut Kernel,
+    brep: &mut Brep,
+    surface: &Surface,
+) -> Result<FaceId> {
+    let domain = surface.natural_uv_domain();
+    let mut state = crate::topology::brep::p2::ArenaNotifyState::new(brep);
+    let mut env = state.env(None);
+    let mut marks = crate::topology::topology_traverser::Marks::default();
+    let this_face =
+        |f: FaceId| crate::topology::loopuse::notify_ref(crate::error::EntityRef::Face(f));
+    let mut fenv = crate::topology::brep::p8::FaceBuildEnv {
+        env: &mut env,
+        marks: &mut marks,
+        this_face: &this_face,
+    };
+    crate::topology::brep::p8::create_face_from_surface(
+        k,
+        brep,
+        Some(surface.clone()),
+        &domain,
+        &mut fenv,
+    )
+}
+
+/// One surface argument of [`surface_surface_fillet`] (upstream an `SmSurface*` that
+/// may or may not belong to a face).
+#[derive(Debug)]
+pub enum FilletSurfaceArg<'a> {
+    /// A surface without a face (`GetFace()` null): it gets a face over its natural
+    /// domain in a temporary B-rep of its own. The same reference passed for both
+    /// surfaces is one surface (one temporary face).
+    Free(&'a Surface),
+    /// The surface of `face` of `body`; the fillet's rail on it is merged into `body`.
+    Face {
+        /// The face's B-rep.
+        body: &'a mut Brep,
+        /// The face.
+        face: FaceId,
+    },
+    /// Second argument only, with a [`FilletSurfaceArg::Face`] first: the surface of
+    /// `face` of the first argument's body (the first face itself for the same
+    /// surface twice).
+    FirstBodyFace(FaceId),
+}
+
+/// A base surface's B-rep: the caller's, or a temporary one.
+enum BaseBrep<'a> {
+    Caller(&'a mut Brep),
+    Temporary(Box<Brep>),
+}
+impl BaseBrep<'_> {
+    fn brep(&mut self) -> &mut Brep {
+        match self {
+            Self::Caller(body) => body,
+            Self::Temporary(body) => body,
+        }
+    }
+}
+
+/// `new(*pContext) SmBrep()` and `CreateFaceFromSurface(pSurface,
+/// pSurface->GetNaturalUVDomain(), pFace)`: a temporary B-rep for a free surface.
+fn temporary_face(k: &mut Kernel, surface: &Surface) -> Result<(Brep, FaceId)> {
+    let mut temp = crate::topology::brep::p3::new_brep(
+        k,
+        crate::geom::tol::USE_DEFAULT,
+        crate::geom::tol::USE_DEFAULT,
+    )?;
+    let face = create_face_from_surface(k, &mut temp, surface)?;
+    Ok((temp, face))
+}
+
+/// A face argument's face, which must carry a surface (upstream a surface pointer).
+fn owned_face(body: &Brep, face: FaceId) -> Result<FaceId> {
+    if body.face(face)?.surface.is_none() {
+        return Err(invalid_input());
+    }
+    Ok(face)
+}
+
+/// `SmApiSurfaceSurfaceFillet`: a fillet between two arbitrary surfaces with signed
+/// radii from each (`SmFilletExecutive::SurfaceSurfaceFillet` with cross-section
+/// accuracy 0.1, `SM_BT_MAXIMAL` fillet trimming and no base-surface trimming).
+/// A surface that already belongs to a face is filleted on that face, whose B-rep the
+/// rail is merged into (the two faces may belong to one B-rep or to two); a free
+/// surface gets a face over its natural domain in a temporary B-rep, discarded
+/// afterwards. `tolerance` is the largest distance of the rails from the base
+/// surfaces; `xsect_type` is 0 linear, 1 approximated circular, 2 exact circular;
+/// `mirror` makes an inside-out fillet and `complement` the complementary circular
+/// cross section. The B-rep of the fillet surfaces, `None` when the offset surfaces do
+/// not intersect.
+///
+/// # Errors
+/// `SM_ERR_INVALID_INPUT` for a [`FilletSurfaceArg::FirstBodyFace`] first argument or
+/// after a free first one, or a face without surface; those of the temporary faces
+/// and of `SurfaceSurfaceFillet`.
+#[allow(clippy::too_many_arguments)] // the upstream entry point's parameters
+pub fn surface_surface_fillet(
+    k: &mut Kernel,
+    surface1: FilletSurfaceArg<'_>,
+    surface2: FilletSurfaceArg<'_>,
+    radius1: f64,
+    radius2: f64,
+    tolerance: f64,
+    xsect_type: u32,
+    mirror: bool,
+    complement: bool,
+) -> Result<Option<Brep>> {
+    // if( !pSurface1->GetFace() ): a temporary B-rep with a face on the surface
+    let free1 = match &surface1 {
+        FilletSurfaceArg::Free(surface) => Some(*surface),
+        _ => None,
+    };
+    let (mut base1, face1) = match surface1 {
+        FilletSurfaceArg::Free(surface) => {
+            let (temp, face) = temporary_face(k, surface)?;
+            (BaseBrep::Temporary(Box::new(temp)), face)
+        }
+        FilletSurfaceArg::Face { body, face } => {
+            let face = owned_face(body, face)?;
+            (BaseBrep::Caller(body), face)
+        }
+        FilletSurfaceArg::FirstBodyFace(_) => return Err(invalid_input()),
+    };
+    // if( !pSurface2->GetFace() ): the same surface as the first now has a face
+    let (mut base2, face2) = match surface2 {
+        FilletSurfaceArg::Free(surface) if free1.is_some_and(|s| std::ptr::eq(s, surface)) => {
+            (None, face1)
+        }
+        FilletSurfaceArg::Free(surface) => {
+            let (temp, face) = temporary_face(k, surface)?;
+            (Some(BaseBrep::Temporary(Box::new(temp))), face)
+        }
+        FilletSurfaceArg::Face { body, face } => {
+            let face = owned_face(body, face)?;
+            (Some(BaseBrep::Caller(body)), face)
+        }
+        FilletSurfaceArg::FirstBodyFace(face) => {
+            if free1.is_some() {
+                return Err(invalid_input());
+            }
+            (None, owned_face(base1.brep(), face)?)
+        }
+    };
+    let options = SurfaceFilletOptions {
+        xsect_type,
+        xsect_accuracy: 0.1,
+        trim_type: BoundaryTrimmingType::Maximal,
+        base_trim_type: 0,
+        mirror,
+        complement,
+    };
+    let mut session =
+        FilletSession::with_second_base(k, base1.brep(), base2.as_mut().map(BaseBrep::brep))?;
+    let made =
+        session.surface_surface_fillet(k, [face1, face2], radius1, radius2, tolerance, &options)?;
+    // The temporary B-reps are dropped with their faces; the surfaces stay the caller's.
+    Ok(if made {
+        session.take_fillet_brep()
+    } else {
+        None
+    })
 }
 
 #[cfg(test)]

@@ -239,6 +239,290 @@ pub fn real_prefix(input: &[f64], checkpoint: u32) -> Result<Vec<f64>, FfiError>
     })
 }
 
+extern "C" {
+    fn sc_blend_fillet_executive_p3_real_source(
+        path: *const std::ffi::c_char,
+        input: *const f64,
+        n: i64,
+        out: *mut f64,
+        cap: i64,
+        len: *mut i64,
+    ) -> i32;
+    fn sc_blend_fillet_executive_p3_surface_surface(
+        input: *const f64,
+        n: i64,
+        out: *mut f64,
+        cap: i64,
+        len: *mut i64,
+    ) -> i32;
+    fn sc_blend_fillet_executive_p3_surface_surface_bodies(
+        input: *const f64,
+        n: i64,
+        out: *mut f64,
+        cap: i64,
+        len: *mut i64,
+    ) -> i32;
+}
+
+/// Number of source parameters on the [`real_source`] wire.
+pub const SOURCE_PARAMS: usize = 12;
+
+/// Largest edge index a source wire may name (the shim rejects indices past the
+/// built body's edge list; this only keeps the conversion exact).
+const MAX_SOURCE_EDGE: usize = 1 << 20;
+
+/// Validate the non-box real-solid wire: source kind (1 `.smb` file, 2 cylinder,
+/// 3 box union, 4 box difference), [`SOURCE_PARAMS`] source parameters, then radius,
+/// cross-section, continuity, thumbweight, selected-edge count (0 = every edge) and
+/// owning-list edge indices. `has_path` says whether a file path accompanies it
+/// (exactly kind 1). Cylinder radius/height and box sizes must be positive, as
+/// `SmApiCreateCylinder` / `SmApiCreateBox` require.
+pub fn validate_real_source(input: &[f64], has_path: bool) -> Result<(), FfiError> {
+    if input.iter().any(|v| !v.is_finite()) {
+        return Err(FfiError::InvalidArgument("non-finite source wire".into()));
+    }
+    let mut r = Cursor::new(input);
+    let kind = r.index(4)?;
+    if kind == 0 || (kind == 1) != has_path {
+        return Err(FfiError::InvalidArgument("invalid solid source".into()));
+    }
+    let params = r.slice(SOURCE_PARAMS)?;
+    let positive: &[usize] = match kind {
+        2 => &[3, 4],
+        3 | 4 => &[3, 4, 5, 9, 10, 11],
+        _ => &[],
+    };
+    for &i in positive {
+        if params.get(i).is_none_or(|v| *v <= 1e-12) {
+            return Err(FfiError::InvalidArgument("non-positive source size".into()));
+        }
+    }
+    r.slice(1)?;
+    for _ in 0..2 {
+        let code = r.num()?;
+        if code < 0.0 || code.fract() != 0.0 || code >= 18446744073709551616.0 {
+            return Err(FfiError::InvalidArgument("invalid native ULONG".into()));
+        }
+    }
+    r.slice(1)?;
+    let head = 1 + SOURCE_PARAMS + 5;
+    let remaining = input.len().saturating_sub(head);
+    let count = r.index(remaining)?;
+    if count != remaining {
+        return Err(FfiError::InvalidArgument(
+            "invalid edge selection length".into(),
+        ));
+    }
+    for _ in 0..count {
+        r.index(MAX_SOURCE_EDGE)?;
+    }
+    r.done()
+}
+
+/// Execute the real mutating public fillet API on a non-box source body (see
+/// [`validate_real_source`]); `path` is the `.smb` file of a file source. The record
+/// is that of [`real_solid`].
+pub fn real_source(input: &[f64], path: Option<&str>) -> Result<Vec<f64>, FfiError> {
+    validate_real_source(input, path.is_some())?;
+    let cpath = path
+        .map(std::ffi::CString::new)
+        .transpose()
+        .map_err(|_| FfiError::InvalidArgument("path has a NUL byte".into()))?;
+    let ptr = cpath.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+    call_with_buffer(65536, |out, len| unsafe {
+        sc_blend_fillet_executive_p3_real_source(
+            ptr,
+            input.as_ptr(),
+            input.len() as i64,
+            out.as_mut_ptr(),
+            out.len() as i64,
+            len,
+        )
+    })
+}
+
+extern "C" {
+    fn sc_blend_fillet_executive_p3_piecewise_solid(
+        input: *const f64,
+        n: i64,
+        out: *mut f64,
+        cap: i64,
+        len: *mut i64,
+    ) -> i32;
+    fn sc_blend_fillet_executive_p3_piecewise_source(
+        path: *const std::ffi::c_char,
+        input: *const f64,
+        n: i64,
+        out: *mut f64,
+        cap: i64,
+        len: *mut i64,
+    ) -> i32;
+}
+
+/// [`real_solid`] with the executive's piecewise merge selected: `SmApiFilletEdges`'
+/// executive set-up, then `SetDoPiecewiseMerge(TRUE)` after `SetFilletParameters`,
+/// `DoFillet` and `StitchAndOrient`. Same wire and record.
+pub fn piecewise_solid(input: &[f64]) -> Result<Vec<f64>, FfiError> {
+    validate_real_solid(input)?;
+    call_with_buffer(65536, |out, len| unsafe {
+        sc_blend_fillet_executive_p3_piecewise_solid(
+            input.as_ptr(),
+            input.len() as i64,
+            out.as_mut_ptr(),
+            out.len() as i64,
+            len,
+        )
+    })
+}
+
+/// [`real_source`] with the executive's piecewise merge selected (see
+/// [`piecewise_solid`]). Same wire and record.
+pub fn piecewise_source(input: &[f64], path: Option<&str>) -> Result<Vec<f64>, FfiError> {
+    validate_real_source(input, path.is_some())?;
+    let cpath = path
+        .map(std::ffi::CString::new)
+        .transpose()
+        .map_err(|_| FfiError::InvalidArgument("path has a NUL byte".into()))?;
+    let ptr = cpath.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+    call_with_buffer(65536, |out, len| unsafe {
+        sc_blend_fillet_executive_p3_piecewise_source(
+            ptr,
+            input.as_ptr(),
+            input.len() as i64,
+            out.as_mut_ptr(),
+            out.len() as i64,
+            len,
+        )
+    })
+}
+
+/// Validate the surface-surface wire: two surfaces' four corner points (24 values),
+/// radius1, radius2, tolerance, cross-section (native ULONG), mirror and complement
+/// (0/1).
+pub fn validate_surface_surface(input: &[f64]) -> Result<(), FfiError> {
+    if input.len() != 30 || input.iter().any(|v| !v.is_finite()) {
+        return Err(FfiError::InvalidArgument("invalid surface-surface wire".into()));
+    }
+    let code = input.get(27).copied().unwrap_or(-1.0);
+    if code < 0.0 || code.fract() != 0.0 || code >= 18446744073709551616.0 {
+        return Err(FfiError::InvalidArgument("invalid native ULONG".into()));
+    }
+    if input.get(28..30).is_none_or(|f| f.iter().any(|v| *v != 0.0 && *v != 1.0)) {
+        return Err(FfiError::InvalidArgument("invalid flag".into()));
+    }
+    Ok(())
+}
+
+/// `SmApiSurfaceSurfaceFillet` on two `SmApiCreateSurfaceFromCornerPoints` surfaces,
+/// as `TestSmSurfaceSurfaceFillet` calls it: `[status]`, then for a result B-rep its
+/// vertex/edge/face counts and the topology and geometry sections of [`real_solid`].
+pub fn surface_surface(input: &[f64]) -> Result<Vec<f64>, FfiError> {
+    validate_surface_surface(input)?;
+    call_with_buffer(65536, |out, len| unsafe {
+        sc_blend_fillet_executive_p3_surface_surface(
+            input.as_ptr(),
+            input.len() as i64,
+            out.as_mut_ptr(),
+            out.len() as i64,
+            len,
+        )
+    })
+}
+
+/// Validate the owned-surface surface-surface wire: two surfaces' four corner points
+/// (24 values), owner1 (0 free, 1 own sheet body), owner2 (0 free, 1 own sheet body,
+/// 2 a second face of surface 1's body, only with owner1 1, 3 surface 1 itself),
+/// radius1, radius2, tolerance, cross-section (native ULONG), mirror and complement
+/// (0/1).
+pub fn validate_surface_surface_bodies(input: &[f64]) -> Result<(), FfiError> {
+    if input.len() != 32 || input.iter().any(|v| !v.is_finite()) {
+        return Err(FfiError::InvalidArgument(
+            "invalid surface-surface bodies wire".into(),
+        ));
+    }
+    let owner1 = input.get(24).copied().unwrap_or(-1.0);
+    let owner2 = input.get(25).copied().unwrap_or(-1.0);
+    if (owner1 != 0.0 && owner1 != 1.0)
+        || ![0.0, 1.0, 2.0, 3.0].contains(&owner2)
+        || (owner2 == 2.0 && owner1 != 1.0)
+    {
+        return Err(FfiError::InvalidArgument("invalid surface owner".into()));
+    }
+    let code = input.get(29).copied().unwrap_or(-1.0);
+    if code < 0.0 || code.fract() != 0.0 || code >= 18446744073709551616.0 {
+        return Err(FfiError::InvalidArgument("invalid native ULONG".into()));
+    }
+    if input.get(30..32).is_none_or(|f| f.iter().any(|v| *v != 0.0 && *v != 1.0)) {
+        return Err(FfiError::InvalidArgument("invalid flag".into()));
+    }
+    Ok(())
+}
+
+/// `SmApiSurfaceSurfaceFillet` where either surface may already belong to a face of a
+/// sheet body (see [`validate_surface_surface_bodies`]): `[status, has_result]`, the
+/// result B-rep's counts, topology and geometry sections when present, the sheet body
+/// count, then each sheet body's counts, topology and geometry after the call.
+pub fn surface_surface_bodies(input: &[f64]) -> Result<Vec<f64>, FfiError> {
+    validate_surface_surface_bodies(input)?;
+    call_with_buffer(65536, |out, len| unsafe {
+        sc_blend_fillet_executive_p3_surface_surface_bodies(
+            input.as_ptr(),
+            input.len() as i64,
+            out.as_mut_ptr(),
+            out.len() as i64,
+            len,
+        )
+    })
+}
+
+#[cfg(test)]
+mod source_tests {
+    use super::{validate_real_source, validate_surface_surface, SOURCE_PARAMS};
+    fn cylinder() -> Vec<f64> {
+        let mut v = vec![2.0];
+        v.extend([0.0, 0.0, 0.0, 5.0, 10.0]);
+        v.resize(1 + SOURCE_PARAMS, 0.0);
+        v.extend([0.5, 1.0, 1.0, 1.0, 0.0]);
+        v
+    }
+    #[test]
+    fn sources_and_paths_are_paired() {
+        assert!(validate_real_source(&cylinder(), false).is_ok());
+        assert!(validate_real_source(&cylinder(), true).is_err());
+        let mut file = cylinder();
+        file[0] = 1.0;
+        assert!(validate_real_source(&file, true).is_ok());
+        assert!(validate_real_source(&file, false).is_err());
+        file[0] = 5.0;
+        assert!(validate_real_source(&file, true).is_err());
+    }
+    #[test]
+    fn sizes_and_selection_are_checked() {
+        let mut v = cylinder();
+        v[4] = 0.0;
+        assert!(validate_real_source(&v, false).is_err());
+        let mut v = cylinder();
+        let n = v.len();
+        v[n - 1] = 1.0;
+        assert!(validate_real_source(&v, false).is_err());
+        v.push(2.0);
+        assert!(validate_real_source(&v, false).is_ok());
+        v.push(2.5);
+        assert!(validate_real_source(&v, false).is_err());
+    }
+    #[test]
+    fn surface_surface_wire() {
+        let mut v = vec![0.0; 30];
+        assert!(validate_surface_surface(&v).is_ok());
+        v[28] = 2.0;
+        assert!(validate_surface_surface(&v).is_err());
+        v[28] = 1.0;
+        v[27] = 0.5;
+        assert!(validate_surface_surface(&v).is_err());
+        assert!(validate_surface_surface(&v[..29]).is_err());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::validate;

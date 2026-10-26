@@ -851,7 +851,11 @@ fn clear_corner_vertices(
 }
 
 /// `SM_REVERSE_FILLET_EDGE(e)`.
-fn reverse_fillet_edge(pseudo: &mut FilletBrep, e: EdgeId, op: &'static str) -> Result<()> {
+pub(crate) fn reverse_fillet_edge(
+    pseudo: &mut FilletBrep,
+    e: EdgeId,
+    op: &'static str,
+) -> Result<()> {
     let prim_eu =
         eu1::primary_edgeuse(pseudo.brep(), e)?.ok_or_else(|| invalid(op, p1::NULL_DEREF))?;
     let brep = pseudo.brep_mut();
@@ -862,7 +866,7 @@ fn reverse_fillet_edge(pseudo: &mut FilletBrep, e: EdgeId, op: &'static str) -> 
 }
 
 /// `SM_MODIFY_CORNEREDGE_FILLET_RELATION(e, fg)`.
-fn modify_corneredge_fillet_relation(
+pub(crate) fn modify_corneredge_fillet_relation(
     pseudo: &mut FilletBrep,
     e: EdgeId,
     fg: FilletGeomId,
@@ -893,7 +897,7 @@ pub(super) fn set_vertex_point(pseudo: &mut FilletBrep, v: VertexId, point: Poin
 }
 
 /// `pFrom->Remove(pVU); pTo->PostInsert(pVU)` for a vertex use of the pseudo B-rep.
-pub(super) fn move_vertexuse(
+pub(crate) fn move_vertexuse(
     pseudo: &mut FilletBrep,
     vu: VertexuseId,
     from: VertexId,
@@ -1699,6 +1703,37 @@ impl FilletCorner {
                 self.create_end_patch(env)?;
             } else {
                 self.create_corner_patch_default(env)?;
+            }
+        }
+        // else SM_DBG_WARN: Unexpected SmFilletNx1Corner endFace construction case
+        Ok(())
+    }
+
+    /// [`FilletCorner::create_corner_patch_nx1`] against any [`CornerPatchEnv`];
+    /// `extended_surface` resolves the executive's extended surfaces and
+    /// `note_end_face_error` notes a failed end face (`CreateEndPatch`).
+    ///
+    /// # Errors
+    /// As [`FilletCorner::create_corner_patch_nx1`].
+    pub fn create_corner_patch_nx1_with(
+        &mut self,
+        env: &mut CornerPatchEnv<'_, '_>,
+        extended_surface: impl Fn(FaceId) -> Option<Surface>,
+        note_end_face_error: &mut dyn FnMut(&FilletCorner),
+    ) -> Result<()> {
+        if self.edges.len() == 3 {
+            if self.extended_surface_patch {
+                let mut end_env = CornerPatchEnv {
+                    k: &mut *env.k,
+                    target: env.target,
+                    pseudo: &mut *env.pseudo,
+                    solvers: env.solvers,
+                    fillet: env.fillet.as_deref_mut(),
+                    note_face_error: note_end_face_error,
+                };
+                self.create_end_patch_with(&mut end_env, extended_surface)?;
+            } else {
+                self.create_corner_patch_default_with(env)?;
             }
         }
         // else SM_DBG_WARN: Unexpected SmFilletNx1Corner endFace construction case
