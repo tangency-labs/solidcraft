@@ -67,6 +67,8 @@ impl Walk for crate::thread_forms::ThreadForm {}
 impl Walk for crate::thread_forms::ThreadHand {}
 impl Walk for crate::thread_forms::ThreadTip {}
 impl Walk for crate::thread_forms::SteepFlank {}
+// An Align frame's joint origin: picks in its component's coordinates, found by their names.
+impl Walk for crate::joints::JointOrigin {}
 
 /// A reference walks itself: a sketch, a feature or a body.
 macro_rules! reference {
