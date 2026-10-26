@@ -1108,6 +1108,7 @@ fn trim_other_uv_curves(
         ..crate::kernel::KernelOptions::default()
     });
     tk.rng = k.rng.clone();
+    tk.fixes.bspline_trim_preserves_uv_spans = k.fixes.bspline_trim_preserves_uv_spans;
     for x in crate::topology::edge::edgeuses(b, e, None, None)? {
         if x == this {
             continue;
@@ -2388,6 +2389,67 @@ mod tests {
         if let Ok(r) = r {
             assert!(r.status.is_ok());
             assert_eq!(r.dist_to_surf, -1.0);
+        }
+    }
+
+    #[test]
+    fn uv_trim_fix_survives_edge_zone_kernel() {
+        use crate::nurbs::b_spline_curve::p1::NurbCircleParam;
+        use crate::nurbs::b_spline_curve::BSplineCurve;
+
+        for enabled in [false, true] {
+            let mut k = Kernel::default();
+            k.fixes.bspline_trim_preserves_uv_spans = enabled;
+            let uv = BSplineCurve::create_circle_segment(
+                2,
+                &Axis2Placement::default(),
+                0.14,
+                0.0,
+                180.0,
+                NurbCircleParam::Quadratic,
+            )
+            .unwrap();
+            let domain = uv.natural_interval();
+            let knot = uv.knots(None).unwrap().0[1];
+            let original = Curve::from(uv);
+            let mut b = Brep::new();
+            let v0 = b.add_vertex(Vec3::ZERO).unwrap();
+            let v1 = b.add_vertex(Vec3::X).unwrap();
+            let edge = b.add_edge(v0, v1).unwrap();
+            let this = b
+                .add_edgeuse_record(Edgeuse {
+                    edge: Some(edge),
+                    ..Edgeuse::default()
+                })
+                .unwrap();
+            let other = b
+                .add_edgeuse_record(Edgeuse {
+                    edge: Some(edge),
+                    uv_trim_curve: Some(original.clone()),
+                    ..Edgeuse::default()
+                })
+                .unwrap();
+            b.edge_mut(edge).unwrap().edgeuses = vec![this, other];
+            let mut ivl =
+                Extent1d::from_min_max(knot - 3.5e-6 * domain.length(), domain.evaluate(0.9));
+            trim_other_uv_curves(&k, &mut b, edge, this, &mut ivl).unwrap();
+            let trimmed = b.edgeuse(other).unwrap().uv_trim_curve.as_ref().unwrap();
+            let gap = (0..=64)
+                .map(|i| {
+                    let t = ivl.evaluate(f64::from(i) / 64.0);
+                    let gap = (38.0
+                        * (trimmed.evaluate_point(&k, t).unwrap()
+                            - original.evaluate_point(&k, t).unwrap()))
+                    .length();
+                    assert!(gap.is_finite());
+                    gap
+                })
+                .fold(0.0, f64::max);
+            if enabled {
+                assert!(gap < 1e-12, "enabled fix was lost: gap {gap}");
+            } else {
+                assert!(gap > k.tolerances.zone_tol_3d, "default gap {gap}");
+            }
         }
     }
 }

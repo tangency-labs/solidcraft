@@ -211,6 +211,10 @@ pub struct UpstreamFixes {
     pub fillet_nx1_end_rib_global_merge: bool,
     /// `sm_FixUVTrimCurves` moves only the end control points of the two UV trims meeting at a corner onto the vertex's UV point, without dropping the vertex onto them, trimming there and stretching them back over the edge interval (WR-255, #959/#570; the fork's tangency-labs/smlib@5af7070).
     pub uv_trim_corner_end_points_only: bool,
+    /// `BSplineCurve::trim` removes short end spans only for model-space curves
+    /// (dimension 3), preserving exact UV trims in surface parameter units
+    /// (WR-441, #1114). Off by default for pinned SMLib compatibility.
+    pub bspline_trim_preserves_uv_spans: bool,
     /// `SmCone::IntersectWithCone` tests the line of two parallel cylinders against both face domains at its middle, not its bottom end (WR-259, #711).
     pub cone_parallel_line_midpoint: bool,
     /// The Boolean's topology intersector treats a self-loop proto edge whose ends a vertex definition on a vertex combined (`CanCombineVertexDefinitions`) as degenerate, instead of `SmProtoEdge::Resolve` splitting it onto that one vertex, after which `SmMerge::MakeFaceuse` returns `SM_ERR` (WR-214, #480; `plan/upstream-issues/WR-214--smprotoedge-resolve-splits-a-self-loop-proto-edge-onto-one.md`).

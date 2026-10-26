@@ -79,6 +79,11 @@
 //!   and [`BSplineCurve::evaluate`]. `sm_CrvTrim` returns the non-`NL_YES` flag
 //!   `NL_INP_ERR` for `ur <= ul` and upstream then dereferences its `NULL` result; the
 //!   port returns `InvalidInput`.
+//! - **Opt-in UV trimming (#1114).** With
+//!   [`crate::kernel::UpstreamFixes::bspline_trim_preserves_uv_spans`], degenerate
+//!   end-span removal applies only to dimension-3 model curves. UV spans are in
+//!   surface parameter units and must not be removed using a 3D zone tolerance.
+//!   The default retains pinned SMLib behavior.
 //! - **Back-edges.** `SetIntersectionCurveThroughPoint` starts with
 //!   `IsIntersectorApprox` ([`BSplineCurve::is_intersector_approx`]) and uses
 //!   `SmCurve::ApproximateLength` ([`crate::curve::curve::p2`]), `SmSurface::LocalPointSolve`
@@ -2033,6 +2038,9 @@ impl BSplineCurve {
     /// updated to the snapped values; an interval containing the natural interval
     /// changes nothing. Degenerate end segments created by the trim (shorter than the
     /// zone tolerance mapped to parameter space) are removed. With
+    /// [`crate::kernel::UpstreamFixes::bspline_trim_preserves_uv_spans`] enabled,
+    /// that removal applies only to dimension-3 model curves, preserving UV spans
+    /// exactly. With
     /// [`TrimMode::IntervalOnly`] only the interval is computed.
     ///
     /// # Errors
@@ -2143,8 +2151,9 @@ impl BSplineCurve {
                         .ok_or_else(|| invalid(OP, "short knots"))?,
                     OP,
                 )?;
-            if (head < zone_tol_1d_min && knots.len() > 2)
-                || (tail < zone_tol_1d_max && knots.len() > 2)
+            if (!k.fixes.bspline_trim_preserves_uv_spans || self.dim == 3)
+                && ((head < zone_tol_1d_min && knots.len() > 2)
+                    || (tail < zone_tol_1d_max && knots.len() > 2))
             {
                 let removal = cur1
                     .remove_degen_segs(zone_tol_3d)
@@ -2308,6 +2317,109 @@ mod tests {
         assert_eq!(t.natural_interval(), Extent1d::from_min_max(0.2, 0.8));
         let mut ivl = Extent1d::from_min_max(-5.0, 0.5);
         assert!(cubic().trim(&k, &mut ivl, TrimMode::Notify).is_err());
+    }
+
+    // Two rational quarter circles. A trim just before or after the middle knot
+    // leaves an end span shorter than the 3D zone tolerance in UV units, although
+    // lifting it onto a plane scaled by 38 makes it longer than that tolerance.
+    fn short_span_arc(dim: u64) -> BSplineCurve {
+        let r = 0.14;
+        let w = core::f64::consts::FRAC_1_SQRT_2;
+        let points = [
+            CPoint::new(r, 0.0, 0.0, NOW),
+            CPoint::new(r * w, r * w, 0.0, w),
+            CPoint::new(0.0, r, 0.0, NOW),
+            CPoint::new(-r * w, r * w, 0.0, w),
+            CPoint::new(-r, 0.0, 0.0, NOW),
+        ];
+        let mut nurb = allocate_nurb_curve(4, 2, 7).unwrap();
+        nurb.cpts_mut().copy_from_slice(&points);
+        nurb.knots_mut()
+            .copy_from_slice(&[0.0, 0.0, 0.0, 0.5, 0.5, 1.0, 1.0, 1.0]);
+        BSplineCurve::from_nurb(nurb, dim, false)
+    }
+
+    fn lifted_trim_gap(original: &BSplineCurve, trimmed: &BSplineCurve, ivl: Extent1d) -> f64 {
+        (0..=64)
+            .map(|i| {
+                let t = ivl.evaluate(f64::from(i) / 64.0);
+                let delta =
+                    trimmed.evaluate_point(t).unwrap() - original.evaluate_point(t).unwrap();
+                let gap = (38.0 * delta).length();
+                assert!(gap.is_finite());
+                gap
+            })
+            .fold(0.0, f64::max)
+    }
+
+    #[test]
+    fn uv_trim_keeps_short_head_and_tail_spans() {
+        let mut k = Kernel::default();
+        k.fixes.bspline_trim_preserves_uv_spans = true;
+        for mode in [TrimMode::Notify, TrimMode::Silent] {
+            for (min, max) in [(0.5 - 3.5e-6, 0.9), (0.1, 0.5 + 3.5e-6)] {
+                let original = short_span_arc(2);
+                let mut trimmed = original.clone();
+                let mut ivl = Extent1d::from_min_max(min, max);
+                trimmed.trim(&k, &mut ivl, mode).unwrap();
+                assert_eq!(ivl, Extent1d::from_min_max(min, max));
+                assert_eq!(trimmed.natural_interval(), ivl);
+                let gap = lifted_trim_gap(&original, &trimmed, ivl);
+                assert!(gap < 1e-12, "{mode:?}, {ivl:?}: lifted gap {gap}");
+                // The interior knot and both pieces must survive the trim.
+                assert_eq!(trimmed.knots(None).unwrap().0, vec![min, 0.5, max]);
+            }
+        }
+    }
+
+    #[test]
+    fn uv_trim_fix_preserves_default_and_model_space_cleanup() {
+        let default = Kernel::default();
+        assert!(!default.fixes.bspline_trim_preserves_uv_spans);
+        let mut fixed = Kernel::default();
+        fixed.fixes.bspline_trim_preserves_uv_spans = true;
+        for dim in [2, 3] {
+            for (min, max) in [(0.5 - 3.5e-6, 0.9), (0.1, 0.5 + 3.5e-6)] {
+                let original = short_span_arc(dim);
+                let ivl = Extent1d::from_min_max(min, max);
+                let mut old = original.clone();
+                let mut old_ivl = ivl;
+                old.trim(&default, &mut old_ivl, TrimMode::Notify).unwrap();
+                // This is the defect reproduced by the pinned reference: the
+                // removed UV piece becomes a gap larger than the edge tolerance.
+                let gap = lifted_trim_gap(&original, &old, ivl);
+                assert!(gap > default.tolerances.zone_tol_3d, "gap {gap}");
+                if dim == 3 {
+                    let mut model = original.clone();
+                    let mut model_ivl = ivl;
+                    model
+                        .trim(&fixed, &mut model_ivl, TrimMode::Notify)
+                        .unwrap();
+                    assert_eq!(old.nurb, model.nurb);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn uv_trim_fix_preserves_interval_only_and_curve_dispatch() {
+        let mut k = Kernel::default();
+        k.fixes.bspline_trim_preserves_uv_spans = true;
+        let original = short_span_arc(2);
+        let mut untouched = original.clone();
+        let mut ivl = Extent1d::from_min_max(0.5 - 3.5e-6, 0.9);
+        untouched
+            .trim(&k, &mut ivl, TrimMode::IntervalOnly)
+            .unwrap();
+        assert_eq!(untouched.nurb, original.nurb);
+
+        let mut curve = crate::curve::curve::Curve::from(original.clone());
+        curve.trim(&k, &mut ivl, TrimMode::Silent).unwrap();
+        for i in 0..=64 {
+            let t = ivl.evaluate(f64::from(i) / 64.0);
+            let delta = curve.evaluate_point(&k, t).unwrap() - original.evaluate_point(t).unwrap();
+            assert!((38.0 * delta).length() < 1e-12);
+        }
     }
 
     #[test]
