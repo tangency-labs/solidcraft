@@ -3487,9 +3487,20 @@ mod glass_tests {
         assert!(preview[2] > preview[0] + 60, "the preview shows its own blue square: {preview:?}");
     }
 
+    /// The startup check that picks the viewport's anti-aliasing: it passes where the device
+    /// draws the multisampled view, and a blank 1x resolve is detected. A machine with no
+    /// software adapter has nothing to check, so the check is skipped there instead of failing
+    /// the build (`SOLIDCRAFT_REQUIRE_GPU=1` makes a missing adapter a failure, as in CI).
     #[test]
     fn startup_msaa_check_passes_and_detects_a_blank_resolve() {
-        let (adapter, device, queue) = crate::open_headless().expect("software adapter required for the startup check");
+        let (adapter, device, queue) = match crate::open_headless() {
+            Ok(d) => d,
+            Err(e @ crate::GpuError::NoAdapter(_)) if std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none() => {
+                eprintln!("skipping: {e}");
+                return;
+            }
+            Err(e) => panic!("the startup check needs a GPU: {e}"),
+        };
         let depth = crate::depth_format(&device, true);
         for format in [wgpu::TextureFormat::Rgba8Unorm, wgpu::TextureFormat::Bgra8Unorm, wgpu::TextureFormat::Bgra8UnormSrgb] {
             let window = GpuTarget { format, depth: None, samples: 1, tess: false };

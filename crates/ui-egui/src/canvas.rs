@@ -745,8 +745,13 @@ fn draw(app: &SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj,
     }
     let note = crate::drag_extrude::step_note(app);
     // Also without an arrow (the value does not evaluate yet): the box still keeps off the handles.
+    // Clear of the command window first, then off the placement handles: the handles have the
+    // last word, as a box over a grip takes the press meant for it (#6608).
+    let place = box_place(app, proj);
+    let size = box_size(ui, egui::Id::new("sc_canvas_area"), label, note.as_deref());
+    let box_at = clear_of_dialog(rect_at(box_at, egui::Align2::LEFT_TOP, size), place).min;
     let box_at = crate::place_gizmo::yield_box(ui, anchor, box_at);
-    value_box_noted(ui, label, value, box_at, focus || *value != before, note.as_deref(), box_place(app, proj));
+    value_box_noted(ui, label, value, box_at, focus || *value != before, note.as_deref(), BoxPlace { dialog: None, ..place });
     if *value != before
         && let Kind::Extrude { all, .. } = &mut d.kind
     {
