@@ -134,8 +134,9 @@ mod tests {
         h.app.run("component.activate", json!({"component":0})).unwrap();
         h.app.run("sketch.create", json!({"plane":"XY","offset":20,"name":"Receiver"})).unwrap();
         let sketch = h.app.session.active_sketch.unwrap();
-        let face = h.app.run("sketch.project", json!({"refs":[{"face":[105,5,10],"body":"Plate (A:2)"}]})).unwrap();
+        // The edge first: projected after the face, it would already be in the sketch.
         let edge = h.app.run("sketch.project", json!({"refs":[{"edge":[110,0,10],"body":"Plate (A:2)"}]})).unwrap();
+        let face = h.app.run("sketch.project", json!({"refs":[{"face":[105,5,10],"body":"Plate (A:2)"}]})).unwrap();
         h.app.finish_sketch();
         h.frames(6);
         let link = |v: &serde_json::Value| v["links"][0]["link"].as_str().unwrap().to_string();
