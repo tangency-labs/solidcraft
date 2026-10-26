@@ -55,11 +55,11 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("parameters.import", "Import Parameters", import)
         .icon("import")
         .params("text: CSV (header with name, expression, unit?, comment?) or JSON [{name, expression, unit?, comment?}] | path; all or nothing"),
-    CommandSpec::new("expr.evaluate", "Evaluate Expression", evaluate)
-        .icon("params")
-        .noundo()
-        .doc_only()
-        .params("expression, kind?: length|angle|unitless (or unit?: mm|in|deg…; text: the text a text parameter would hold, as `text`) → ok, value (mm/rad), display_value, references, error"),
+    CommandSpec::new("expr.evaluate", "Evaluate Expression", evaluate).icon("params").noundo().doc_only().params(
+        "expression, kind?: length|angle|mass|volume|area|unitless (or unit?: mm|in|deg|kg…; text: the text a text parameter \
+             would hold, as `text`) → ok, value (mm/rad/g/mm³/mm²), kind, display_value (in the unit, else the kind's: deg, kg…), \
+             references, error",
+    ),
     CommandSpec::new("parameters.complete", "Complete Expression", complete)
         .icon("params")
         .noundo()
@@ -469,11 +469,13 @@ fn evaluate(s: &mut Session, p: &Value) -> Result<Value> {
     {
         return Err(bad(cmd, format!("unknown unit `{u}`")));
     }
+    // A kind by the name `Kind` has for itself (`length`, `mass`…), or `number` for a unit-less one.
     let kind = match (str_(p, "kind"), unit) {
-        (Some("length"), _) => Some(Kind::Length),
-        (Some("angle"), _) => Some(Kind::Angle),
-        (Some("unitless" | "number"), _) => Some(Kind::Unitless),
-        (Some(other), _) => return Err(bad(cmd, format!("unknown kind `{other}` (length, angle or unitless)"))),
+        (Some("number"), _) => Some(Kind::Unitless),
+        (Some(name), _) => Some(serde_json::from_value::<Kind>(json!(name)).map_err(|_| {
+            let names: Vec<String> = Kind::ALL.iter().filter_map(|k| json!(k).as_str().map(str::to_string)).collect();
+            bad(cmd, format!("unknown kind `{name}` ({} or number)", names.join(", ")))
+        })?),
         (None, Some(u)) => Some(Kind::from_unit(u)),
         (None, None) => None,
     };
@@ -491,16 +493,8 @@ fn evaluate(s: &mut Session, p: &Value) -> Result<Value> {
     let defines = expr::definition(&e).map(|(n, _)| n);
     let mut out = match r {
         Ok((v, k)) => {
-            let value = match k {
-                Kind::Length => expr::Value::length(v),
-                Kind::Angle => expr::Value::angle(v),
-                Kind::Unitless => expr::Value::num(v),
-            };
-            let shown = match (unit, k) {
-                (Some(u), _) => expr::value_in_unit(value, u),
-                (None, Kind::Angle) => v.to_degrees(),
-                (None, _) => v,
-            };
+            // Shown in the unit asked for, else in its kind's (degrees, kilograms…).
+            let shown = expr::value_in_unit(expr::Value::of_kind(k, v), unit.unwrap_or(k.default_unit()));
             json!({"ok": true, "value": v, "kind": k, "display_value": shown, "references": refs})
         }
         Err(err) => json!({"ok": false, "error": err.to_string().trim_start_matches("expression: ").to_string(), "references": refs}),

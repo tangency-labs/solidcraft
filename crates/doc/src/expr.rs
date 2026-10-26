@@ -1,11 +1,12 @@
 //! Parameter expressions: `2 * width + 5 mm`, `angle / 2`, `sqrt(a^2 + b^2)`, `atan2(h; w)`.
 //!
-//! Values carry a simple dimension (powers of length, angle and mass). Lengths are millimetres and
-//! angles radians internally. A unit-less number added to a dimensioned value takes that value's
-//! unit: the parameter's own unit when it has one (`width + 5` adds 5 in for an inch
-//! parameter), else millimetres and degrees. A unit-less final result takes the expected unit
-//! (`2` for an inch parameter is 2 in). Trigonometric functions take an angle; a unit-less
-//! argument is read as degrees.
+//! Values carry a simple dimension (powers of length, angle and mass; a volume is a length³ and an
+//! area a length²). Lengths are millimetres, angles radians and masses grams internally. A
+//! unit-less number added to a dimensioned value takes that value's unit: the parameter's own
+//! unit when it has one (`width + 5` adds 5 in for an inch parameter, `load + 1` 1 kg for a
+//! kilogram one), else in its kind's default unit: millimetres, degrees, kilograms, mm³ and mm².
+//! A unit-less final result takes the expected unit (`2` for an inch parameter is 2 in).
+//! Trigonometric functions take an angle; a unit-less argument is read as degrees.
 
 use std::collections::BTreeMap;
 
@@ -110,21 +111,28 @@ pub enum Kind {
     Length,
     Angle,
     Unitless,
+    Mass,
+    Volume,
+    Area,
 }
 
 impl Kind {
     /// Every kind there is.
-    const ALL: [Kind; 3] = [Kind::Length, Kind::Angle, Kind::Unitless];
+    pub const ALL: [Kind; 6] = [Kind::Length, Kind::Angle, Kind::Unitless, Kind::Mass, Kind::Volume, Kind::Area];
 
     pub fn from_unit(u: &str) -> Kind {
         unit_info(u).map(|(k, _)| k).unwrap_or(Kind::Length)
     }
-    /// The unit a new parameter of this kind gets (`mm`, `deg` or none).
+    /// The unit a new parameter of this kind gets (`mm`, `deg`, `kg`, `mm³`, `mm²` or none). A
+    /// mass shows in kilograms, though it is worked out in grams.
     pub fn default_unit(self) -> &'static str {
         match self {
             Kind::Length => "mm",
             Kind::Angle => "deg",
             Kind::Unitless => "",
+            Kind::Mass => "kg",
+            Kind::Volume => "mm³",
+            Kind::Area => "mm²",
         }
     }
     /// The powers of length, angle and mass of a value of this kind.
@@ -133,6 +141,9 @@ impl Kind {
             Kind::Length => [1, 0, 0],
             Kind::Angle => [0, 1, 0],
             Kind::Unitless => [0, 0, 0],
+            Kind::Mass => [0, 0, 1],
+            Kind::Volume => [3, 0, 0],
+            Kind::Area => [2, 0, 0],
         }
     }
     /// The kind of a value with these powers, if it is of one (a length times an angle is not).
@@ -195,7 +206,8 @@ pub const FUNCTIONS: &[(&str, &str)] = &[
 /// Constants an expression may use.
 pub const CONSTANTS: &[&str] = &["pi", "PI"];
 
-/// Kind and size (mm or radians per unit) of a parameter's unit; empty means unit-less.
+/// Kind and size (mm, radians, grams, mm³ or mm² per unit) of a parameter's unit; empty means
+/// unit-less.
 pub fn unit_info(u: &str) -> Option<(Kind, f64)> {
     match u.trim() {
         "" | "none" | "unitless" => Some((Kind::Unitless, 1.0)),
@@ -204,32 +216,53 @@ pub fn unit_info(u: &str) -> Option<(Kind, f64)> {
     }
 }
 
-/// How unit-less numbers are read: millimetres / degrees by default.
+/// How unit-less numbers are read: by default in each kind's default unit (`Kind::default_unit`:
+/// millimetres, degrees, kilograms, mm³ and mm²), so a bare number means what it shows as.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Defaults {
     /// Millimetres per unit-less length number.
     pub len: f64,
     /// Radians per unit-less angle number.
     pub ang: f64,
+    /// Grams per unit-less mass number (1000 by default: kilograms).
+    pub mass: f64,
+    /// Cubic millimetres per unit-less volume number.
+    pub vol: f64,
+    /// Square millimetres per unit-less area number.
+    pub area: f64,
 }
 
 impl Default for Defaults {
     fn default() -> Self {
-        Defaults { len: 1.0, ang: std::f64::consts::PI / 180.0 }
+        Defaults { len: 1.0, ang: std::f64::consts::PI / 180.0, mass: 1000.0, vol: 1.0, area: 1.0 }
     }
 }
 
 impl Defaults {
-    /// Defaults for a parameter with this unit (`in` reads bare numbers as inches); the
-    /// document's length unit covers the other kind.
+    /// Defaults for a parameter with this unit (`in` reads bare numbers as inches, `kg` as
+    /// kilograms); the document's length unit covers lengths for the other kinds.
     pub fn for_unit(unit: &str, doc_len: f64) -> Defaults {
         let mut d = Defaults { len: doc_len, ..Defaults::default() };
         match unit_info(unit) {
             Some((Kind::Length, s)) => d.len = s,
             Some((Kind::Angle, s)) => d.ang = s,
+            Some((Kind::Mass, s)) => d.mass = s,
+            Some((Kind::Volume, s)) => d.vol = s,
+            Some((Kind::Area, s)) => d.area = s,
             _ => {}
         }
         d
+    }
+    /// The size of a unit-less number read as a value of kind `k`.
+    fn scale(self, k: Kind) -> f64 {
+        match k {
+            Kind::Length => self.len,
+            Kind::Angle => self.ang,
+            Kind::Unitless => 1.0,
+            Kind::Mass => self.mass,
+            Kind::Volume => self.vol,
+            Kind::Area => self.area,
+        }
     }
 }
 
@@ -249,17 +282,21 @@ pub struct Value {
 }
 
 impl Value {
+    /// `x` (in mm, radians, grams, mm³ or mm²) as a value of kind `k`.
+    pub fn of_kind(k: Kind, x: f64) -> Value {
+        Value::with_dims(x, k.dims())
+    }
     pub fn num(v: f64) -> Value {
-        Value { v, len: 0, ang: 0, mass: 0 }
+        Value::of_kind(Kind::Unitless, v)
     }
     pub fn length(mm: f64) -> Value {
-        Value { v: mm, len: 1, ang: 0, mass: 0 }
+        Value::of_kind(Kind::Length, mm)
     }
     pub fn angle(rad: f64) -> Value {
-        Value { v: rad, len: 0, ang: 1, mass: 0 }
+        Value::of_kind(Kind::Angle, rad)
     }
     pub fn mass(g: f64) -> Value {
-        Value { v: g, len: 0, ang: 0, mass: 1 }
+        Value::of_kind(Kind::Mass, g)
     }
     /// The value's powers. Units are compared through these alone, so a later power is one more
     /// field here.
@@ -276,28 +313,29 @@ impl Value {
     pub fn unitless(&self) -> bool {
         self.dims() == [0; 3]
     }
-    /// The value's kind, if it is a plain length, angle or number.
+    /// The value's kind, if it is a plain length, angle, mass, volume, area or number (a density
+    /// is none of them).
     pub fn kind(&self) -> Option<Kind> {
         Kind::of_dims(self.dims())
     }
-    /// Convert to the expected kind (mm or radians); unit-less numbers are mm / degrees.
+    /// Convert to the expected kind (mm, radians, grams, mm³ or mm²); unit-less numbers are read
+    /// in the default units.
     pub fn to_kind(self, k: Kind) -> Result<f64, DocError> {
         self.to_kind_in(k, Defaults::default())
     }
     /// Convert to the expected kind, reading a unit-less result in the given defaults.
     pub fn to_kind_in(self, k: Kind, d: Defaults) -> Result<f64, DocError> {
-        let out = match k {
-            _ if self.kind() == Some(k) => self.v,
-            Kind::Length if self.unitless() => self.v * d.len,
-            Kind::Angle if self.unitless() => self.v * d.ang,
-            _ => {
-                let hint = if k == Kind::Unitless && self.len == 1 && self.ang == 0 {
-                    " (a count needs a unit-less value: divide by a length, e.g. `floor(L / (210 mm))`)"
-                } else {
-                    ""
-                };
-                return Err(DocError::Expr(format!("expected {}, got {}{hint}", kind_word(k), self.describe())));
-            }
+        let out = if self.kind() == Some(k) {
+            self.v
+        } else if self.unitless() {
+            self.v * d.scale(k)
+        } else {
+            let hint = if k == Kind::Unitless && self.dims() == Kind::Length.dims() {
+                " (a count needs a unit-less value: divide by a length, e.g. `floor(L / (210 mm))`)"
+            } else {
+                ""
+            };
+            return Err(DocError::Expr(format!("expected {}, got {}{hint}", kind_word(k), self.describe())));
         };
         if out.is_finite() { Ok(out) } else { Err(DocError::Expr("result is not a finite number".into())) }
     }
@@ -323,22 +361,23 @@ fn kind_word(k: Kind) -> &'static str {
         Kind::Length => "a length",
         Kind::Angle => "an angle",
         Kind::Unitless => "a unit-less number",
+        Kind::Mass => "a mass",
+        Kind::Volume => "a volume",
+        Kind::Area => "an area",
     }
 }
 
-/// A number in the given unit (e.g. 50.8 mm in `in` is 2); unknown units leave it as is.
+/// A number in the given unit (e.g. 50.8 mm in `in` is 2, 500 g in `kg` 0.5); a unit of another
+/// kind than the value's, or an unknown one, leaves it as is.
 pub fn value_in_unit(v: Value, unit: &str) -> f64 {
-    match (unit_info(unit), v.kind()) {
-        (Some((Kind::Length, s)), Some(Kind::Length)) | (Some((Kind::Angle, s)), Some(Kind::Angle)) if s != 0.0 => v.v / s,
+    match unit_info(unit) {
+        Some((k, s)) if v.kind() == Some(k) && s != 0.0 => v.v / s,
         _ => v.v,
     }
 }
 
 fn unit(name: &str) -> Option<Value> {
-    UNITS.iter().find(|(n, _, _)| *n == name).map(|(_, k, s)| match k {
-        Kind::Angle => Value::angle(*s),
-        _ => Value::length(*s),
-    })
+    UNITS.iter().find(|(n, _, _)| *n == name).map(|(_, k, s)| Value::of_kind(*k, *s))
 }
 
 fn is_constant(id: &str) -> bool {
@@ -858,8 +897,7 @@ impl Parser<'_> {
 /// A unit-less number next to a value with these powers, in that value's default unit.
 fn scale_bare(x: Value, dims: Dims, d: Defaults) -> f64 {
     match Kind::of_dims(dims) {
-        Some(Kind::Length) if x.unitless() => x.v * d.len,
-        Some(Kind::Angle) if x.unitless() => x.v * d.ang,
+        Some(k) if x.unitless() => x.v * d.scale(k),
         _ => x.v,
     }
 }
@@ -1046,12 +1084,12 @@ fn call(f: &str, args: &[Value], d: Defaults) -> Result<Value, DocError> {
     })
 }
 
-/// Evaluate a count: a unit-less whole number. A length or angle says how to fix it, and a
+/// Evaluate a count: a unit-less whole number. A value with a unit says how to fix it, and a
 /// fraction is refused rather than rounded to a different number of copies.
 pub fn eval_count(s: &str, vals: &BTreeMap<String, Value>) -> Result<f64, DocError> {
     let e = s.trim();
     let value = eval_with(e, &|n| vals.get(n).copied().ok_or_else(|| DocError::Expr(format!("unknown parameter `{n}`"))))?;
-    if let Some(kind @ (Kind::Length | Kind::Angle)) = value.kind() {
+    if let Some(kind) = value.kind().filter(|kind| *kind != Kind::Unitless) {
         let subject = if vals.contains_key(e) { format!("`{e}`") } else { "this expression".into() };
         let remedy = if vals.contains_key(e) { "set its Unit to none to use it as a count" } else { "use a unit-less expression as a count" };
         return Err(DocError::Expr(format!("{subject} is {} ({}); {remedy}", value.describe(), kind.default_unit())));
@@ -1064,7 +1102,8 @@ pub fn eval_count(s: &str, vals: &BTreeMap<String, Value>) -> Result<f64, DocErr
     Ok(n.round())
 }
 
-/// Evaluate an expression; `lookup` resolves parameter names. Bare numbers are mm / degrees.
+/// Evaluate an expression; `lookup` resolves parameter names. Bare numbers are in the default
+/// units (mm, degrees, grams…).
 pub fn eval_with(s: &str, lookup: &dyn Fn(&str) -> Result<Value, DocError>) -> Result<Value, DocError> {
     eval_with_defaults(s, lookup, Defaults::default())
 }
@@ -1097,7 +1136,7 @@ pub struct ParamDef {
     pub unit: String,
 }
 
-/// Evaluate all parameters in dependency order: values (mm / rad / unit-less) and errors by
+/// Evaluate all parameters in dependency order: values (mm, rad, g, unit-less…) and errors by
 /// name. Circular references are reported with their path (`a → b → a`). `doc_len` is the
 /// document's length unit in mm (bare numbers of unit-less-unit parameters next to lengths).
 pub fn eval_params(params: &[ParamDef], doc_len: f64) -> (BTreeMap<String, Value>, BTreeMap<String, String>) {
@@ -1208,11 +1247,7 @@ pub fn eval_def(p: &ParamDef, lookup: &dyn Fn(&str) -> Result<Value, DocError>, 
     let (kind, _) = unit_info(&p.unit).unwrap_or((Kind::Length, 1.0));
     let defaults = Defaults::for_unit(&p.unit, doc_len);
     let x = eval_with_defaults(&p.expr, lookup, defaults)?.to_kind_in(kind, defaults)?;
-    Ok(match kind {
-        Kind::Length => Value::length(x),
-        Kind::Angle => Value::angle(x),
-        Kind::Unitless => Value::num(x),
-    })
+    Ok(Value::of_kind(kind, x))
 }
 
 /// [`eval_def`] of a parameter whose expression names no other parameter, remembered by its
@@ -1271,7 +1306,7 @@ mod tests {
     #[test]
     fn every_kind_is_listed_once() {
         let kinds = |k: Kind| match k {
-            Kind::Length | Kind::Angle | Kind::Unitless => 3,
+            Kind::Length | Kind::Angle | Kind::Unitless | Kind::Mass | Kind::Volume | Kind::Area => 6,
         };
         assert_eq!(Kind::ALL.len(), kinds(Kind::Length));
         for k in Kind::ALL {
@@ -1543,6 +1578,60 @@ mod tests {
         assert_eq!(ev("m ^ 15 / m ^ 15").unwrap(), Value::num(1.0));
         assert!(ev("m ^ 15 * m * m").is_err());
         assert!(ev("1 / m ^ 15 / m / m").is_err());
+    }
+
+    /// Mass, volume and area are kinds (#4811): a length³ is a volume and a length² an area. A
+    /// value converts only to its own kind, and a bare number beside one of them, or as one, is
+    /// read in the parameter's unit for that kind (grams, mm³ and mm² when it has none).
+    #[test]
+    fn mass_volume_and_area_are_kinds() {
+        let look = |n: &str| match n {
+            "m" => Ok(Value::mass(50.0)),
+            "w" => Ok(Value::length(10.0)),
+            _ => Err(DocError::Expr(format!("unknown {n}"))),
+        };
+        let ev = |s: &str, k: Kind| eval_with(s, &look).and_then(|v| v.to_kind(k));
+        assert_eq!(ev("m", Kind::Mass).unwrap(), 50.0);
+        assert_eq!(ev("w^3", Kind::Volume).unwrap(), 1000.0);
+        assert_eq!(ev("w * w * 2", Kind::Area).unwrap(), 200.0);
+        assert_eq!(ev("w^3 / w", Kind::Area).unwrap(), 100.0);
+        assert_eq!(ev("sqrt(w^2 * 4)", Kind::Length).unwrap(), 20.0);
+        assert_eq!(ev("(2 mm)^3 + 5", Kind::Volume).unwrap(), 13.0, "a bare number beside a volume is mm³");
+        assert_eq!(ev("w^2 + 5", Kind::Area).unwrap(), 105.0);
+        // A bare mass is in kilograms, the unit a mass shows in.
+        assert_eq!(ev("3", Kind::Mass).unwrap(), 3000.0);
+        assert_eq!(ev("m + 1", Kind::Mass).unwrap(), 1050.0);
+        assert_eq!(ev("m % 0.03125", Kind::Mass).unwrap(), 18.75);
+        assert_eq!(ev("round(m * 30)", Kind::Mass).unwrap(), 2000.0, "rounded in kilograms: 1.5 kg to 2 kg");
+        // Each converts only to its own kind, and the error says what it got.
+        for (s, k, got) in [
+            ("m", Kind::Length, "a mass"),
+            ("w^3", Kind::Length, "a volume"),
+            ("w^2", Kind::Volume, "an area"),
+            ("w", Kind::Area, "a length"),
+            ("w^3", Kind::Unitless, "a volume"),
+            ("m * w", Kind::Mass, "a value in length·mass"),
+        ] {
+            let e = ev(s, k).unwrap_err().to_string();
+            assert!(e.contains(&format!("expected {}, got {got}", kind_word(k))), "{s}: {e}");
+        }
+        for k in Kind::ALL {
+            assert_eq!(Value::of_kind(k, 1.5).kind(), Some(k), "{k:?}");
+            assert_eq!(Value::of_kind(k, 1.5).to_kind(k).unwrap(), 1.5, "{k:?}");
+        }
+        // In a gram parameter (and cm³, cm²), bare numbers are in its unit.
+        let d = Defaults { mass: 1.0, vol: 1000.0, area: 100.0, ..Defaults::default() };
+        let in_d = |s: &str, k: Kind| eval_with_defaults(s, &look, d).and_then(|v| v.to_kind_in(k, d));
+        assert_eq!(in_d("2", Kind::Mass).unwrap(), 2.0);
+        assert_eq!(in_d("m + 1", Kind::Mass).unwrap(), 51.0);
+        assert_eq!(in_d("max(m, 60)", Kind::Mass).unwrap(), 60.0);
+        assert_eq!(in_d("round(m / 3)", Kind::Mass).unwrap(), 17.0, "rounded in grams");
+        assert_eq!(in_d("w^3 + 2", Kind::Volume).unwrap(), 3000.0);
+        assert_eq!(in_d("w^2 + 2", Kind::Area).unwrap(), 300.0);
+        assert_eq!(in_d("w + 1", Kind::Length).unwrap(), 11.0, "a length keeps its own");
+        // A value is shown in a unit of its own kind only.
+        assert_eq!(value_in_unit(Value::mass(500.0), "deg"), 500.0);
+        assert_eq!(value_in_unit(Value::length(500.0), "cm"), 50.0);
     }
 
     /// Hostile input never panics: random strings over the expression alphabet.

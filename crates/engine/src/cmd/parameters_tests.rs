@@ -142,6 +142,26 @@ fn unit_errors_and_cycles_are_refused() {
     assert!((r["value"].as_f64().unwrap_or(0.0) - 50.8).abs() < 1e-9, "{r}");
 }
 
+/// A product of lengths evaluates as the volume or area it is (#4811), shown in mm³ or mm², and
+/// `kind` can ask for a mass, a volume or an area.
+#[test]
+fn products_of_lengths_evaluate_as_volumes_and_areas() {
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "a", "expression": "10 mm"}));
+    let r = run(&mut s, "expr.evaluate", json!({"expression": "a^3"}));
+    assert_eq!((r["kind"].as_str(), r["display_value"].as_f64()), (Some("volume"), Some(1000.0)), "{r}");
+    let r = run(&mut s, "expr.evaluate", json!({"expression": "a * 2 mm", "kind": "area"}));
+    assert_eq!((r["kind"].as_str(), r["value"].as_f64()), (Some("area"), Some(20.0)), "{r}");
+    let r = run(&mut s, "expr.evaluate", json!({"expression": "a^2", "kind": "volume"}));
+    assert!(r["error"].as_str().unwrap_or("").contains("expected a volume, got an area"), "{r}");
+    let r = run(&mut s, "expr.evaluate", json!({"expression": "2", "kind": "mass"}));
+    assert_eq!((r["kind"].as_str(), r["value"].as_f64()), (Some("mass"), Some(2000.0)), "a bare mass is kilograms (in grams): {r}");
+    let r = run(&mut s, "expr.evaluate", json!({"expression": "4", "kind": "number"}));
+    assert_eq!((r["kind"].as_str(), r["value"].as_f64()), (Some("unitless"), Some(4.0)), "{r}");
+    let e = err(&mut s, "expr.evaluate", json!({"expression": "1", "kind": "weight"}));
+    assert!(e.contains("(length, angle, unitless, mass, volume, area or number)"), "{e}");
+}
+
 #[test]
 fn rename_updates_every_reference() {
     let mut s = Session::default();

@@ -351,6 +351,8 @@ fn fmt(app: &SolveApp, label: &str, kind: ValueKind, v: f64) -> String {
         }
         ValueKind::Unitless => format!("{}", v.round()),
         ValueKind::Length => crate::prefs::show_mm_bare(app, v),
+        // Sketch tools size lengths, angles and counts; anything else shows as the number it is.
+        ValueKind::Mass | ValueKind::Volume | ValueKind::Area => format!("{v}"),
     }
 }
 
