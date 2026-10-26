@@ -18,10 +18,6 @@ const MAX_BODY: usize = 24_000;
 const MAX_REPORT: usize = 32_000;
 const MAX_IMAGE_PIXELS: usize = 16_000_000;
 const ISSUE_URL: &str = "https://github.com/tangency-labs/solidcraft/issues/new";
-/// How long a screenshot waits for a preview being computed before it shows it unfinished.
-const PREVIEW_WAIT_MS: f64 = 10_000.0;
-/// Keystrokes kept while a capture hides the report.
-const MAX_HELD: usize = 4096;
 
 thread_local! {
     static CAD_INPUT_BLOCKED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -116,6 +112,11 @@ pub struct ReportState {
     refocus: Option<egui::Id>,
     cad_focus: Option<egui::Id>,
 }
+
+/// How long a screenshot waits for a preview being computed before it shows it unfinished.
+const PREVIEW_WAIT_MS: f64 = 10_000.0;
+/// Keystrokes kept while a capture hides the report.
+const MAX_HELD: usize = 4096;
 
 struct Waiting {
     deadline: f64,
@@ -593,6 +594,35 @@ pub(crate) fn pending(app: &SolveApp) -> bool {
     app.issue_report.pending.is_some()
 }
 
+/// While a capture hides the report, what is typed waits for the form to come back, which gets
+/// its focused field back: a screenshot taken once the preview is done can hide the form while
+/// its user types (#7171).
+pub(crate) fn hold_input(app: &mut SolveApp, raw: &mut egui::RawInput) {
+    let state = &mut app.issue_report;
+    if state.draft.is_none() {
+        state.held.clear();
+    } else if state.pending.is_some() {
+        let mut kept = Vec::with_capacity(raw.events.len());
+        for event in raw.events.drain(..) {
+            if matches!(
+                event,
+                egui::Event::Text(_) | egui::Event::Key { .. } | egui::Event::Paste(_) | egui::Event::Copy | egui::Event::Cut | egui::Event::Ime(_)
+            ) {
+                if state.held.len() < MAX_HELD {
+                    state.held.push(event);
+                }
+            } else {
+                kept.push(event);
+            }
+        }
+        raw.events = kept;
+    } else if !state.held.is_empty() {
+        let mut events = std::mem::take(&mut state.held);
+        events.append(&mut raw.events);
+        raw.events = events;
+    }
+}
+
 pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     if let Some(waiting) = &app.issue_report.waiting {
         let settled = !app.preview.busy && app.queued_shots.len() < 16;
@@ -650,35 +680,6 @@ pub(crate) fn receive(app: &mut SolveApp, token: u64, image: Arc<ColorImage>) {
             draft.image = Some(image);
             draft.note = "Screenshot captured locally. Review it before attaching it on GitHub.".into();
         }
-    }
-}
-
-/// While a capture hides the report, what is typed waits for the form to come back, which gets
-/// its focused field back: a screenshot taken once the preview is done can hide the form while
-/// its user types (#7171).
-pub(crate) fn hold_input(app: &mut SolveApp, raw: &mut egui::RawInput) {
-    let state = &mut app.issue_report;
-    if state.draft.is_none() {
-        state.held.clear();
-    } else if state.pending.is_some() {
-        let mut kept = Vec::with_capacity(raw.events.len());
-        for event in raw.events.drain(..) {
-            if matches!(
-                event,
-                egui::Event::Text(_) | egui::Event::Key { .. } | egui::Event::Paste(_) | egui::Event::Copy | egui::Event::Cut | egui::Event::Ime(_)
-            ) {
-                if state.held.len() < MAX_HELD {
-                    state.held.push(event);
-                }
-            } else {
-                kept.push(event);
-            }
-        }
-        raw.events = kept;
-    } else if !state.held.is_empty() {
-        let mut events = std::mem::take(&mut state.held);
-        events.append(&mut raw.events);
-        raw.events = events;
     }
 }
 
