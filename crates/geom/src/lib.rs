@@ -32,6 +32,7 @@ pub mod network;
 pub mod paper;
 mod plane;
 mod profile;
+pub mod revision;
 pub mod section;
 pub mod simplify;
 pub mod spline_space;
