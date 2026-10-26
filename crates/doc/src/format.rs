@@ -1796,10 +1796,10 @@ mod tests {
         });
         // Sheet metal and plastic rules and a canvas's plane hold expressions too (#4420).
         let mut steel = crate::sheet::SheetRule::steel();
-        (steel.thickness, steel.gap) = ("qqlb / 5".into(), "qqg / 8 mm".into());
+        (steel.thickness, steel.gap) = ("qqlb / 5".into(), "qqg mm / 8".into());
         doc.sheet.rules.push(steel);
         let mut housing = crate::plastic::PlasticRule::library().remove(0);
-        (housing.clearance, housing.draft) = ("qqg / 40 mm".into(), "qqg deg".into());
+        (housing.clearance, housing.draft) = ("qqg mm / 40".into(), "qqg deg".into());
         doc.plastic.rules.push(housing);
         let mut png = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR".to_vec();
         png.extend([0, 0, 0, 4, 0, 0, 0, 2, 8, 6, 0, 0, 0, 0, 0, 0, 0]);
@@ -1864,9 +1864,9 @@ mod tests {
         assert!(rule_uses.iter().all(|n| n == "g_param" || n == "lb_param") && rule_uses.len() == 3, "{rule_uses:?}");
         assert!(opened.favorites.contains("g_param"));
         let steel = &opened.sheet.rules[0];
-        assert_eq!((steel.thickness.as_str(), steel.gap.as_str()), ("lb_param / 5", "g_param / 8 mm"));
+        assert_eq!((steel.thickness.as_str(), steel.gap.as_str()), ("lb_param / 5", "g_param mm / 8"));
         let housing = &opened.plastic.rules[0];
-        assert_eq!((housing.clearance.as_str(), housing.draft.as_str()), ("g_param / 40 mm", "g_param deg"));
+        assert_eq!((housing.clearance.as_str(), housing.draft.as_str()), ("g_param mm / 40", "g_param deg"));
         let crate::PlaneRef::Offset { distance, .. } = &opened.canvases[0].plane else { panic!("an offset plane") };
         assert_eq!(distance.as_ref(), "lb_param * 2");
         assert_eq!(rule_and_plane_values(&opened), rules_before);

@@ -1567,57 +1567,57 @@ mod tests {
     #[test]
     fn a_mass_power_is_carried_and_checked() {
         let look = |n: &str| match n {
-            "m" => Ok(Value::mass(50.0)),
+            "mass" => Ok(Value::mass(50.0)),
             "w" => Ok(Value::length(10.0)),
             _ => Err(DocError::Expr(format!("unknown {n}"))),
         };
         // (Bare numbers beside a mass are read in its kind's unit, which the kinds bring.)
         let ev = |s: &str| eval_with(s, &look);
-        assert_eq!(ev("m * 2 + m").unwrap(), Value::mass(150.0));
-        assert_eq!(ev("max(m, 2 * m)").unwrap(), Value::mass(100.0));
-        assert_eq!(ev("abs(-m)").unwrap(), Value::mass(50.0));
-        assert_eq!(ev("(m + m / 5) % m").unwrap(), Value::mass(10.0));
-        assert_eq!(ev("sqrt(m * m)").unwrap(), Value::mass(50.0));
-        assert_eq!(ev("m / m").unwrap(), Value::num(1.0));
-        assert_eq!(ev("m / w^3").unwrap(), Value { v: 0.05, len: -3, ang: 0, mass: 1 });
-        assert_eq!(ev("m / w^3").unwrap().describe(), "a value in length^-3·mass");
-        assert_eq!(ev("m * w").unwrap().describe(), "a value in length·mass");
+        assert_eq!(ev("mass * 2 + mass").unwrap(), Value::mass(150.0));
+        assert_eq!(ev("max(mass, 2 * mass)").unwrap(), Value::mass(100.0));
+        assert_eq!(ev("abs(-mass)").unwrap(), Value::mass(50.0));
+        assert_eq!(ev("(mass + mass / 5) % mass").unwrap(), Value::mass(10.0));
+        assert_eq!(ev("sqrt(mass * mass)").unwrap(), Value::mass(50.0));
+        assert_eq!(ev("mass / mass").unwrap(), Value::num(1.0));
+        assert_eq!(ev("mass / w^3").unwrap(), Value { v: 0.05, len: -3, ang: 0, mass: 1 });
+        assert_eq!(ev("mass / w^3").unwrap().describe(), "a value in length^-3·mass");
+        assert_eq!(ev("mass * w").unwrap().describe(), "a value in length·mass");
         // Every operation that needs matching units refuses a mass beside a length.
         for bad in [
-            "m + w",
-            "w - m",
-            "m % w",
-            "mod(w, m)",
-            "atan2(m, w)",
-            "hypot(w, m)",
-            "min(m, w)",
-            "max(w, m)",
-            "sin(m)",
-            "cos(m)",
-            "tan(m)",
-            "asin(m)",
-            "acos(m)",
-            "atan(m)",
-            "exp(m)",
-            "ln(m)",
-            "log(m)",
-            "log10(m)",
-            "sqrt(m)",
-            "sqrt(m * w * w)",
-            "m ^ 0.5",
-            "2 ^ m",
-            "pow(w, m)",
+            "mass + w",
+            "w - mass",
+            "mass % w",
+            "mod(w, mass)",
+            "atan2(mass, w)",
+            "hypot(w, mass)",
+            "min(mass, w)",
+            "max(w, mass)",
+            "sin(mass)",
+            "cos(mass)",
+            "tan(mass)",
+            "asin(mass)",
+            "acos(mass)",
+            "atan(mass)",
+            "exp(mass)",
+            "ln(mass)",
+            "log(mass)",
+            "log10(mass)",
+            "sqrt(mass)",
+            "sqrt(mass * w * w)",
+            "mass ^ 0.5",
+            "2 ^ mass",
+            "pow(w, mass)",
         ] {
             assert!(ev(bad).is_err(), "{bad}");
         }
         for k in [Kind::Length, Kind::Angle, Kind::Unitless] {
-            let e = ev("m").unwrap().to_kind(k).unwrap_err().to_string();
+            let e = ev("mass").unwrap().to_kind(k).unwrap_err().to_string();
             assert!(e.contains(&format!("expected {}", kind_word(k))), "{e}");
         }
         // A mass's power stays within ±16, as the others do.
-        assert_eq!(ev("m ^ 15 / m ^ 15").unwrap(), Value::num(1.0));
-        assert!(ev("m ^ 15 * m * m").is_err());
-        assert!(ev("1 / m ^ 15 / m / m").is_err());
+        assert_eq!(ev("mass ^ 15 / mass ^ 15").unwrap(), Value::num(1.0));
+        assert!(ev("mass ^ 15 * mass * mass").is_err());
+        assert!(ev("1 / mass ^ 15 / mass / mass").is_err());
     }
 
     /// Mass, volume and area are kinds (#4811): a length³ is a volume and a length² an area. A
@@ -1626,12 +1626,12 @@ mod tests {
     #[test]
     fn mass_volume_and_area_are_kinds() {
         let look = |n: &str| match n {
-            "m" => Ok(Value::mass(50.0)),
+            "mass" => Ok(Value::mass(50.0)),
             "w" => Ok(Value::length(10.0)),
             _ => Err(DocError::Expr(format!("unknown {n}"))),
         };
         let ev = |s: &str, k: Kind| eval_with(s, &look).and_then(|v| v.to_kind(k));
-        assert_eq!(ev("m", Kind::Mass).unwrap(), 50.0);
+        assert_eq!(ev("mass", Kind::Mass).unwrap(), 50.0);
         assert_eq!(ev("w^3", Kind::Volume).unwrap(), 1000.0);
         assert_eq!(ev("w * w * 2", Kind::Area).unwrap(), 200.0);
         assert_eq!(ev("w^3 / w", Kind::Area).unwrap(), 100.0);
@@ -1640,17 +1640,17 @@ mod tests {
         assert_eq!(ev("w^2 + 5", Kind::Area).unwrap(), 105.0);
         // A bare mass is in kilograms, the unit a mass shows in.
         assert_eq!(ev("3", Kind::Mass).unwrap(), 3000.0);
-        assert_eq!(ev("m + 1", Kind::Mass).unwrap(), 1050.0);
-        assert_eq!(ev("m % 0.03125", Kind::Mass).unwrap(), 18.75);
-        assert_eq!(ev("round(m * 30)", Kind::Mass).unwrap(), 2000.0, "rounded in kilograms: 1.5 kg to 2 kg");
+        assert_eq!(ev("mass + 1", Kind::Mass).unwrap(), 1050.0);
+        assert_eq!(ev("mass % 0.03125", Kind::Mass).unwrap(), 18.75);
+        assert_eq!(ev("round(mass * 30)", Kind::Mass).unwrap(), 2000.0, "rounded in kilograms: 1.5 kg to 2 kg");
         // Each converts only to its own kind, and the error says what it got.
         for (s, k, got) in [
-            ("m", Kind::Length, "a mass"),
+            ("mass", Kind::Length, "a mass"),
             ("w^3", Kind::Length, "a volume"),
             ("w^2", Kind::Volume, "an area"),
             ("w", Kind::Area, "a length"),
             ("w^3", Kind::Unitless, "a volume"),
-            ("m * w", Kind::Mass, "a value in length·mass"),
+            ("mass * w", Kind::Mass, "a value in length·mass"),
         ] {
             let e = ev(s, k).unwrap_err().to_string();
             assert!(e.contains(&format!("expected {}, got {got}", kind_word(k))), "{s}: {e}");
@@ -1663,9 +1663,9 @@ mod tests {
         let d = Defaults { mass: 1.0, vol: 1000.0, area: 100.0, ..Defaults::default() };
         let in_d = |s: &str, k: Kind| eval_with_defaults(s, &look, d).and_then(|v| v.to_kind_in(k, d));
         assert_eq!(in_d("2", Kind::Mass).unwrap(), 2.0);
-        assert_eq!(in_d("m + 1", Kind::Mass).unwrap(), 51.0);
-        assert_eq!(in_d("max(m, 60)", Kind::Mass).unwrap(), 60.0);
-        assert_eq!(in_d("round(m / 3)", Kind::Mass).unwrap(), 17.0, "rounded in grams");
+        assert_eq!(in_d("mass + 1", Kind::Mass).unwrap(), 51.0);
+        assert_eq!(in_d("max(mass, 60)", Kind::Mass).unwrap(), 60.0);
+        assert_eq!(in_d("round(mass / 3)", Kind::Mass).unwrap(), 17.0, "rounded in grams");
         assert_eq!(in_d("w^3 + 2", Kind::Volume).unwrap(), 3000.0);
         assert_eq!(in_d("w^2 + 2", Kind::Area).unwrap(), 300.0);
         assert_eq!(in_d("w + 1", Kind::Length).unwrap(), 11.0, "a length keeps its own");
@@ -1780,23 +1780,39 @@ mod tests {
         }
     }
 
+    /// A count takes none of the new kinds, and says which it was given.
+    #[test]
+    fn a_count_refuses_a_mass_a_volume_and_an_area() {
+        let vals = BTreeMap::from([("weight".to_string(), Value::mass(50.0)), ("copies".to_string(), Value::num(3.0))]);
+        assert_eq!(eval_count("copies * 2", &vals).unwrap(), 6.0);
+        for (s, says) in [
+            ("weight", "`weight` is a mass (kg); set its Unit to none"),
+            ("2 kg", "this expression is a mass (kg)"),
+            ("(2 mm)^3", "this expression is a volume (mm³)"),
+            ("2 mm * 2 mm", "this expression is an area (mm²)"),
+        ] {
+            let e = eval_count(s, &vals).unwrap_err().to_string();
+            assert!(e.contains(says), "{s}: {e}");
+        }
+    }
+
     /// In a mass, volume or area parameter, bare numbers are in its unit (#4811).
     #[test]
     fn parameters_in_mass_volume_and_area_units() {
         let p = vec![
-            def("m", "2", "kg"),
-            def("half", "m / 2 + 1", "kg"),
+            def("mass", "2", "kg"),
+            def("half", "mass / 2 + 1", "kg"),
             def("r", "round(2.4 kg)", "kg"),
-            def("grams", "m", "g"),
+            def("grams", "mass", "g"),
             def("v", "5", "cm³"),
             def("box", "(1 cm)^3 + 1", "cm³"),
             def("a", "2", "m²"),
             def("pounds", "1", "lb"),
-            def("bad", "m + 1 mm", "kg"),
+            def("bad", "mass + 1 mm", "kg"),
             def("wrong", "1 kg", "mm"),
         ];
         let (v, e) = eval_params(&p, 1.0);
-        assert_eq!(v["m"], Value::mass(2000.0));
+        assert_eq!(v["mass"], Value::mass(2000.0));
         assert_eq!(v["half"], Value::mass(2000.0), "1 kg + 1 kg");
         assert_eq!(v["r"], Value::mass(2000.0), "rounded in kilograms");
         assert_eq!(v["grams"], Value::mass(2000.0));
