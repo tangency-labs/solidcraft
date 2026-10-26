@@ -91,8 +91,8 @@ pub enum Stop {
         /// Where they touch (world, mm).
         at: [f64; 3],
     },
-    /// `loop`: a closed loop can no longer close; `limit`: another joint's limit (through a
-    /// motion link); `turn`: no contact within one turn, so the side is a turn from the other;
+    /// `loop`: a closed loop can no longer close; `limit`: the limit of another of the joint's
+    /// values, or of another joint through a motion link; `turn`: no contact within one turn, so the side is a turn from the other;
     /// `range`: no contact within the parts' reach (a distance), so the side has no limit.
     Other(Why),
 }

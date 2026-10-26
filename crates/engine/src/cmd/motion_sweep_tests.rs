@@ -436,6 +436,7 @@ fn find_limits_refuses_what_it_cannot_do() {
         json!({"joint": "Hinge", "step": 1e-9}),
         json!({"joint": "Hinge", "occurrences": ["Door"]}),
         json!({"joint": "Hinge", "against": ["Block"]}),
+        json!({"joint": "Hinge", "occurrences": ["Door"], "against": ["Door"]}),
         json!({"joint": "Hinge", "occurrences": ["Door", "Block"], "contact_sets": true}),
     ] {
         assert!(s.execute("joint.find_limits", &p).is_err(), "{p}");

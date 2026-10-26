@@ -333,12 +333,15 @@ impl ContactGeometry {
             let (Some(aabb), Some(bbb)) = (boxes.get(*a), boxes.get(*b)) else {
                 return Err(limit("invalid contact geometry pair"));
             };
-            if aabb.max.x < bbb.min.x
-                || bbb.max.x < aabb.min.x
-                || aabb.max.y < bbb.min.y
-                || bbb.max.y < aabb.min.y
-                || aabb.max.z < bbb.min.z
-                || bbb.max.z < aabb.min.z
+            // Boxes apart, or only touching (parts end to end): `mesh_overlap` finds nothing
+            // there, so it costs nothing (#5968).
+            let tol = 1e-4 * ba.size.max(bb.size).max(1.0);
+            if aabb.max.x < bbb.min.x + tol
+                || bbb.max.x < aabb.min.x + tol
+                || aabb.max.y < bbb.min.y + tol
+                || bbb.max.y < aabb.min.y + tol
+                || aabb.max.z < bbb.min.z + tol
+                || bbb.max.z < aabb.min.z + tol
             {
                 continue;
             }
@@ -353,7 +356,7 @@ impl ContactGeometry {
             if *work > budget {
                 return Err(limit("motion exceeds contact sweep collision budget; simplify the contact set or use smaller increments"));
             }
-            if let Some(depth) = super::mesh_overlap(ma, mb, 1e-4 * ba.size.max(bb.size).max(1.0)) {
+            if let Some(depth) = super::mesh_overlap(ma, mb, tol) {
                 found.insert((oa.0.min(ob.0), oa.0.max(ob.0)));
                 out.push((oa.clone(), ob.clone(), depth));
                 if !all {
