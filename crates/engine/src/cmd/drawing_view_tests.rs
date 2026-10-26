@@ -446,9 +446,64 @@ fn scale_position_and_margin_set_the_boundary_and_the_design_is_untouched() {
     assert_eq!(snap(&mut s, json!({"view": "top"}))["boundary_mm"], first["boundary_mm"], "a hidden body is still drawn");
 }
 
-/// What the snapshot refuses, each with nothing changed: bad settings, the shaded styles until
-/// the drawing renderer, the sheet's resolution out of range, an empty design, a position off
-/// the sheet's limit, and a view that would reach past the paper's coordinates.
+/// A shaded view has a picture: the block's front view at 1:2 is 50 x 10 mm, 591 x 119 px at
+/// 300 dpi (rounded outward) and 2363 x 473 at 1200, and at 1200 too on a 2400 dpi sheet (lines may
+/// export finer, a picture is drawn at most at 1200); a view with nothing shaded in it has none. A
+/// shaded part's own lines are left out, its picture draws it: the block's, a model part's, when
+/// the model is shaded, not when only reference parts are.
+#[test]
+fn a_shaded_view_has_the_picture_of_its_boundary() {
+    let mut s = block();
+    let reply = snap(&mut s, json!({"display_style": "shaded", "scale": "1:2"}));
+    let schema = output_schema_for::<SnapshotResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &reply), "{reply}");
+    assert_eq!(reply["lines"], json!([]), "the block is shaded: its picture draws it");
+    assert_eq!(reply["picture"]["pixels"], json!([591, 119]));
+    assert_eq!(reply["picture"]["dpi"], 300.0);
+    assert_eq!(reply["picture"]["rect_mm"], reply["boundary_mm"]);
+    let fine = snap(&mut s, json!({"display_style": "shaded", "scale": "1:2", "sheet": {"dpi": 1200}}));
+    assert_eq!(fine["picture"]["pixels"], json!([2363, 473]));
+    let finest = snap(&mut s, json!({"display_style": "shaded", "scale": "1:2", "sheet": {"dpi": 2400}}));
+    assert_eq!(
+        (&finest["picture"]["pixels"], &finest["picture"]["dpi"], &finest["sheet"]["dpi"]),
+        (&json!([2363, 473]), &json!(1200.0), &json!(2400.0))
+    );
+    assert!(snap(&mut s, json!({"scale": "1:2"})).get("picture").is_none(), "lines only");
+    let none = snap(&mut s, json!({"reference_style": "shaded", "scale": "1:2"}));
+    assert!(none.get("picture").is_none(), "shaded reference parts, and none in the design: {none}");
+    assert_eq!(none["lines"], snap(&mut s, json!({"scale": "1:2"}))["lines"], "the block's lines, as a model part's");
+}
+
+/// A shaded part's lines are left out and the other style's parts keep theirs: a plate, and a hinge
+/// holding a pin placed twice, the hinge a reference component. A shaded model leaves only the
+/// pins' lines; shaded reference parts leave only the plate's; between them, every body's.
+#[test]
+fn a_shaded_part_leaves_out_only_its_own_lines() {
+    let mut s = Session::default();
+    run(&mut s, "component.create", json!({"name": "Plate"}));
+    run(&mut s, "solid.box", json!({"length": 40, "width": 20, "height": 3}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "component.create", json!({"name": "Hinge", "activate": false}));
+    run(&mut s, "component.create", json!({"name": "Pin", "parent": "Hinge"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 4, "height": 30}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.copy", json!({"component": "Hinge", "translate": [0, 50, 0]}));
+    run(&mut s, "component.metadata.set", json!({"component": "Hinge", "bom_type": "reference"}));
+    let references = |reply: &Value| -> Vec<bool> { reply["lines"].as_array().unwrap().iter().map(|l| l["reference"].as_bool().unwrap()).collect() };
+    let bodies = |reply: &Value| -> std::collections::BTreeSet<String> {
+        reply["lines"].as_array().unwrap().iter().map(|l| l["body"].as_str().unwrap().to_owned()).collect()
+    };
+    let all = snap(&mut s, json!({}));
+    let model_shaded = snap(&mut s, json!({"display_style": "shaded"}));
+    let references_shaded = snap(&mut s, json!({"reference_style": "shaded"}));
+    assert!(!references(&model_shaded).is_empty() && references(&model_shaded).iter().all(|r| *r), "{model_shaded}");
+    assert!(!references(&references_shaded).is_empty() && references(&references_shaded).iter().all(|r| !*r), "{references_shaded}");
+    assert_eq!(bodies(&model_shaded).union(&bodies(&references_shaded)).cloned().collect::<std::collections::BTreeSet<_>>(), bodies(&all));
+}
+
+/// What the snapshot refuses, each with nothing changed: bad settings, the shaded styles with
+/// lines until the view's exact lines, the sheet's resolution out of range, an empty design, a
+/// position off the sheet's limit, and a view that would reach past the paper's coordinates.
 #[test]
 fn hostile_snapshots_are_refused() {
     let mut s = block();
@@ -464,8 +519,9 @@ fn hostile_snapshots_are_refused() {
         (json!({"view": {"direction": [0, 0, 0], "up": [0, 0, 1]}}), "direction"),
         (json!({"view": {"direction": [1e308, 1e308, 0], "up": [0, 0, 1]}}), "direction"),
         (json!({"view": {"direction": [0, 0, 1], "up": [0, 0, 2]}}), "along the view direction"),
-        (json!({"display_style": "shaded"}), "not supported yet"),
-        (json!({"reference_style": "shaded_visible"}), "not supported yet"),
+        (json!({"display_style": "shaded_visible_hidden"}), "not supported yet"),
+        (json!({"reference_style": "shaded_visible"}), "not supported yet: shaded views with lines need the view's exact lines (W06)"),
+        (json!({"display_style": "shaded", "scene": true}), "not supported yet: shaded views need the drawing renderer (#5624)"),
         (json!({"display_style": "Shaded"}), "unknown variant"),
         (json!({"tangent_edges": "thin"}), "thin"),
         (json!({"sheet": {"dpi": 24.9}}), "dpi"),

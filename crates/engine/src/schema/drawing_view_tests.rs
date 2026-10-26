@@ -73,7 +73,7 @@ fn strict_keeps_todays_errors() {
     assert_strict_keeps_todays_errors(&[
         ("drawing.view.snapshot", json!({"scale": "0:1"})),
         ("drawing.view.snapshot", json!({"view": "Front"})),
-        ("drawing.view.snapshot", json!({"display_style": "shaded"})),
+        ("drawing.view.snapshot", json!({"display_style": "shaded_visible"})),
         ("drawing.view.snapshot", json!({"sheet": {"dpi": 1e9}})),
     ]);
 }

@@ -482,6 +482,14 @@ pub struct ExtentsResult {
     pub provenance: &'static str,
 }
 
+/// A view's picture: the pixel grid of its boundary at the sheet's dpi, rounded outward.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PictureResult {
+    pub pixels: [u32; 2],
+    pub dpi: f64,
+    pub rect_mm: BoxResult,
+}
+
 /// A box on the sheet, in paper millimetres.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct BoxResult {
@@ -713,6 +721,9 @@ pub struct SnapshotResult {
     /// With `scene: true`: the lines as a paper scene of the sheet.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scene: Option<SceneResult>,
+    /// The view's picture, when something in it is shaded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub picture: Option<PictureResult>,
     pub source: SourceResult,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
