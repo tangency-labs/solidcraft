@@ -683,6 +683,10 @@ pub enum FeatureKind {
         /// (default) or a G2 patch repeating each blend up to the second order.
         #[serde(default, skip_serializing_if = "FilletCorner::is_rolling")]
         corner: FilletCorner,
+        /// Corners set back: each corner's patch starts its distance along every edge there
+        /// from the vertex instead of where the rounds meet (a constant-radius fillet only).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        setbacks: Vec<CornerSetback>,
         /// Round each picked edge's tangent chain with it (the default: edges continuing it
         /// smoothly at its ends, as far as they go), or only the picked edges.
         #[serde(default = "yes", skip_serializing_if = "is_yes")]
@@ -1839,6 +1843,16 @@ pub enum FeatureKind {
         file: String,
         meshes: Vec<MeshData>,
     },
+}
+
+/// A fillet corner set back: the vertex at `vertex`, where every edge is rounded, has its corner
+/// patch start `distance` along each of its edges from the vertex, the rounds running whole up to
+/// their sections there. One distance for all of a corner's edges.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, solidcraft_derive::Walk)]
+pub struct CornerSetback {
+    pub vertex: Position,
+    #[walk(length = "Setback")]
+    pub distance: Expr,
 }
 
 /// What fills the corner where three blended edges meet.
