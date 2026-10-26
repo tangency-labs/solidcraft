@@ -721,7 +721,7 @@ mod tests {
                     tris: tris.clone(),
                     instances: Vec::new(),
                     look: crate::view::InstanceLook::Opaque,
-                    levels: Vec::new(),
+                    levels: None,
                     closed: true,
                     range: None,
                 };
