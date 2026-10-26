@@ -398,8 +398,11 @@ case(T6, "007-external-m10-at-filleted-shoulder", "a modelled M10 thread on a d1
      "the fillet's ring: the corner square [5,6]x[10,11] less the quarter disc about (6,11), V_f = 2 pi (5.5 - pi/4 (6 - 4/(3 pi))), its centroid z from the same moments; "
      "the cylinder face starts at z=11, where the fillet meets it. " + SHOULDER.replace("lower end is a shoulder (the d16 collar", "lower end (z=11) is a shoulder (the fillet and the collar") +
      "V = pi 8^2 10 + V_f + pi 5^2 (1 + w) + 2 pi int_{11+w}^35 int r m(r) dr dz. Tolerance 0.05%: SMLib's exact screw sweep")
-missing(T6, "008-multi-start-thread", "a two-start M10 thread (lead 3, pitch 1.5)", "solid.thread has no start count: multi-start threads",
-        "would be graded as 001 with the material fraction of two grooves per lead")
+case(T6, "008-multi-start-thread", "a two-start M10 thread (lead 3, pitch 1.5) over a d10 x 30 cylinder", cylT + [thr([5, 0, 15], designation="M10", starts=2)],
+     {"body_count": 1, "volume_mm3": ext_volume(10, 1.5, [(0, 30, lambda z: 5)]), "tolerance": {"rel": 1e-4}},
+     TMETH.replace("Tolerance 0.5%: solid.thread cuts faceted by design (chords within P/200 on the body, P/100 on the tool)", "Tolerance 0.01%: SMLib's exact screw sweep") +
+     "; two grooves of lead 2P, the second a half turn round from the first: every meridian half-plane holds the same sections a pitch apart as 001's one groove, "
+     "so the material fraction and the volume are 001's")
 missing(T6, "009-thread-runout-length", "an M10 thread that vanishes over a 2-pitch runout before a shoulder", "solid.thread has no runout (vanishing thread) length",
         "a runout would let 004's thread vanish before the shoulder instead of stopping square")
 case(T6, "010-part-threaded-boss", "the running part with a modelled M16 thread on its d16 boss",

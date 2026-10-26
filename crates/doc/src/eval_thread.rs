@@ -171,6 +171,12 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
         }
     };
     let (major, pitch) = (size.major, size.pitch);
+    // A designation that gives the lead (M16xPh3P1.5, Tr40x14(P7)) gives the starts.
+    let named = (size.lead / pitch).round() as u32;
+    if ask.starts > 1 && named != starts {
+        return Err(DocError::Invalid(format!("`{}` has {named} start(s), not {starts}", ask.designation.unwrap_or_default())));
+    }
+    let starts = named.max(1);
     let designation = form.format(major, pitch, size.lead);
     let minor = 2.0 * form.groove(major, pitch, true).crest_r;
     let fits = if cyl.internal {
@@ -435,9 +441,6 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
     }
     if *tip != ThreadTip::None {
         return Err(DocError::Invalid("a chamfered thread tip is not built yet".into()));
-    }
-    if *starts > 1 {
-        return Err(DocError::Invalid("a thread with several starts is not built yet".into()));
     }
     let extent = match (length, up_to) {
         (Some(e), _) => Extent::Length(val(vals, e, Kind::Length)?),

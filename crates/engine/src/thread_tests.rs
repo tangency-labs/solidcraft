@@ -897,3 +897,30 @@ fn a_square_thread_is_refused() {
     let e = s.execute("solid.thread", &json!({"face": [10, 0, 10], "form": "square", "designation": "20x4"})).err().map(|e| e.to_string());
     assert!(e.unwrap_or_default().contains("no current standard defines a square thread"));
 }
+
+/// Ladder 06/008: n starts are n grooves of lead n P, each a turn's n-th further round: over the
+/// same length they take n x L/(nP) turns, the volume of one start of that pitch, and do not
+/// meet. A designation that gives the lead gives the starts.
+#[test]
+fn a_multi_start_thread_takes_the_volume_of_one_start() {
+    let (d, p, len) = (10.0, 1.5, 30.0);
+    let want = len / p * ext_turn(d, p, d / 2.0);
+    for (starts, designation) in [(2, "M10"), (3, "M10"), (1, "M10xPh3P1.5")] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 5, "height": len, "body_name": "Shaft"}));
+        let before = exact_volume(&s, "Shaft");
+        run(&mut s, "solid.thread", json!({"face": [5, 0, 15], "designation": designation, "starts": starts, "modeled": true}));
+        let st = s.model.state();
+        assert!(st.body("Shaft").unwrap().body.validity().is_empty(), "{designation} x{starts}");
+        let got = before - exact_volume(&s, "Shaft");
+        assert!((got - want).abs() < want * 1e-4, "{designation} x{starts}: removed {got}, one start {want}");
+    }
+    // The cosmetic thread says it: two starts, lead 3.
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 20, "height": 40}));
+    let th = run(&mut s, "solid.thread", json!({"face": [20, 0, 20], "designation": "Tr40x14(P7)"}));
+    assert_eq!(th["thread"]["designation"], "Tr40x14(P7)", "{th}");
+    assert_eq!(th["thread"]["starts"], 2, "{th}");
+    let e = s.execute("solid.thread", &json!({"face": [20, 0, 20], "designation": "Tr40x14(P7)", "starts": 3})).err().map(|e| e.to_string());
+    assert!(e.unwrap_or_default().contains("has 2 start(s), not 3"));
+}
