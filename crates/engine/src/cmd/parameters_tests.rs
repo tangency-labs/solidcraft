@@ -178,7 +178,7 @@ fn mass_volume_and_area_parameters() {
     run(&mut s, "parameters.add", json!({"name": "sheet", "expression": "2.5 m²"}));
     run(&mut s, "parameters.add", json!({"name": "oil", "expression": "500 ml", "unit": "cm³"}));
     let l = run(&mut s, "parameters.list", json!({}));
-    let shown = |n: &str| (row(&l, n)["unit"].as_str().map(str::to_string), row(&l, n)["value"].as_f64());
+    let shown = |n: &str| (row(&l, n)["unit"].as_str().map(str::to_string), row(&l, n)["display_value"].as_f64());
     assert_eq!(shown("kit"), (Some("kg".into()), Some(2.0)), "{l}");
     assert_eq!(shown("total"), (Some("kg".into()), Some(2.2)), "{l}");
     assert_eq!(shown("sheet"), (Some("mm²".into()), Some(2.5e6)), "{l}");
@@ -192,7 +192,7 @@ fn mass_volume_and_area_parameters() {
     assert_eq!((bare["value"].as_f64(), typed["value"].as_f64()), (Some(3000.0), Some(3000.0)));
     assert_eq!(shown("oil"), (Some("cm³".into()), Some(500.0)), "{l}");
     let r = run(&mut s, "expr.evaluate", json!({"expression": "kit / 2", "unit": "lb"}));
-    assert!((r["display_value"].as_f64().unwrap_or(0.0) - 1000.0 / 453.592_37).abs() < 1e-12, "{r}");
+    assert_eq!(r["display_value"].as_f64(), Some(solidcraft_doc::expr::round_reported(1000.0 / 453.592_37)), "reported to 12 digits: {r}");
     let r = run(&mut s, "expr.evaluate", json!({"expression": "kit"}));
     assert_eq!((r["kind"].as_str(), r["display_value"].as_f64()), (Some("mass"), Some(2.0)), "shown in kg: {r}");
     // A mass is not a length, either way round.
