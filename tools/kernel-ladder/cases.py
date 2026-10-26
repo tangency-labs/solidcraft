@@ -680,9 +680,16 @@ case(T6, "009-thread-runout-length", "004's M10 thread run from the free top end
      "the cut per radian is f(o) = int r w(r - o) dr from root + o to 5 (w the section's width at its own radius), the runout removes 2 pi (3/P) mean(f) (Simpson, exact on the cubic), "
      "the full-depth groove from s + 3 to the free top end 2 pi f(0) (35 - s - 3)/P (the overrun past the free end as in 001). "
      "V = pi 8^2 10 + pi 5^2 25 - both. Tolerance 0.01%: SMLib's exact radial screw sweep")
+def groove(d, P, sections):
+    """What a modelled external groove removes over the stock's meridian section [(z0, z1, rmax(z))]."""
+    return sum(PI * quad(lambda z: f(z) ** 2, z0, z1, 64) for z0, z1, f in sections) - ext_volume(d, P, sections)
+w16 = ext_half_width(16, 2)
 case(T6, "010-part-threaded-boss", "the running part with a modelled M16 thread on its d16 boss",
-     [thr([23, 15, 25], designation="M16")], {"body_count": 1},
-     "the boss stands on the base (thread to a shoulder) and has an M5 hole in its top; modelled threads are faceted, so later tiers build on the part before this step and 11-cumulative-parts adds it last", base=C5, source="invariants")
+     [thr([23, 15, 25], designation="M16")],
+     {"body_count": 1, "volume_mm3": V5 - groove(16, 2, [(20 + w16, 30, lambda z: 8)]), "bbox": {"min": [0, 0, 0], "max": [60, 40, 35]}, "tolerance": {"rel": 1e-4}},
+     "the boss (r8, z 20..30) stands on the base's top face, a shoulder: the groove stops with its centre w = %.6f above it (004's rule, M16 P = 2) and runs out past the free top end; "
+     "its root r = 8 - 5H/8 = 6.917 stays clear of the M5 tap drill (r 2.1) in the boss. V = the tier-05 part - (pi 8^2 (30 - 20 - w) - 2 pi int_{20+w}^30 int r m(r) dr dz), m as in 001; "
+     "the bbox is the part's. Later tiers build on the part before this step and 11-cumulative-parts adds the thread last" % w16, base=C5)
 
 # The other standard forms (crates/doc/src/thread_forms.rs, docs/threads.md): a groove of a fixed
 # straight-flanked section, its tooth `flat` wide at the crest radius and widening by tan a + tan b
@@ -728,6 +735,29 @@ case(T6, "016-external-m10-left-hand", "001's modelled M10 thread, left-handed: 
      {"body_count": 1, "volume_mm3": ext_volume(10, 1.5, [(0, 30, lambda z: 5)]), "tolerance": {"rel": 1e-4}},
      TMETH.replace("Tolerance 0.5%: solid.thread cuts faceted by design (chords within P/200 on the body, P/100 on the tool)", "Tolerance 0.01%: SMLib's exact screw sweep") +
      "; a mirror image of 001's groove, so the same volume")
+
+# Both hands: two grooves of the same section crossing. At radius r, along every line parallel to the axis the
+# right-hand groove takes a fraction g(r) = 1 - m(r) of each pitch and the left-hand one the same, their phases
+# drifting apart by two pitches a turn: over the turn the overlap averages g^2 (the side vectors of the (theta, z)
+# domain, (L, L) and (-P, P) in the two grooves' phases, are periods, L = 20 P), so the material left is m^2.
+r1b, mb = iso_material_fraction_ext(10, 1.5)
+vboth = 2 * PI * 30 * (quad(lambda r: r, 0, r1b) + quad(lambda r: r * mb(r) ** 2, r1b, 5, 64))
+case(T6, "018-external-m10-both-hands", "001's modelled M10 thread cut both ways: a right- and a left-handed groove crossing on a d10 x 30 cylinder",
+     cylT + [thr([5, 0, 15], designation="M10", hand="both")],
+     {"body_count": 1, "volume_mm3": vboth, "tolerance": {"rel": 1e-4}},
+     "each groove alone leaves 001's material fraction m(r) (ISO 68-1 basic profile; 016 is the left hand alone). Along a line parallel to the axis at radius r each groove takes the "
+     "fraction g = 1 - m of every pitch, the two phases drifting apart by two pitches a turn; over a turn the overlap of the two takes g^2 (exact here: in the two grooves' phases the "
+     "(theta, z) domain is spanned by (L, L) and (-P, P), both periods, L = 20 P), so the material left is 1 - 2g + g^2 = m^2: V = 2 pi L int_0^5 r m(r)^2 dr "
+     "(= stock - 2 x groove + crossing). Both grooves run out past the free ends. No bbox: the crest survives only in diamonds, two windows of 45 deg a turn where the two crests meet, "
+     "so how far the part reaches along x and y depends on where the grooves' phases line up round the axis. Tolerance 0.01%: SMLib's exact screw sweeps")
+P7, d40 = 7, 40
+case(T6, "019-external-tr40x14-p7-two-start", "a modelled two-start trapezoidal Tr40x14(P7) thread (ISO 2904, ISO 2903) on a d40 shaft, three leads long",
+     [cyl([0, 0, 0], d40 / 2, 6 * P7, body_name="Part"), thr([d40 / 2, 0, 3 * P7], designation="Tr40x14(P7)")],
+     {"body_count": 1, "volume_mm3": PI * 400 * 6 * P7 - 6 * form_turn(P7, P7 / 2 * (1 - t15), 20, 15, 15, 20 - P7 / 2 - 0.5, 20),
+      "bbox": {"min": [-20, -20, 0], "max": [20, 20, 42]}, "tolerance": TOL_F},
+     FMETH.replace("six whole turns between free ends", "two grooves of lead 14 a half turn apart, so every meridian half-plane holds a groove section every pitch 7, as one "
+                   "groove of pitch 7 would: over 42 mm (three leads, six pitches) between free ends") + "ISO 2904 for P 7: 30 deg, H1 = P/2, crest flat 0.366 P, "
+     "ac = 0.5 (P 6..12), external minor d3 = d - 2 (H1 + ac) = 32")
 
 rf10 = 5 - 5 * math.sqrt(3) / 2 * 1.5 / 8
 case(T6, "017-external-m10-chamfered-tip", "001's modelled M10 thread with ISO 4753's chamfered end at both free ends: a 45 deg cone down to the minor diameter, cut after the groove",

@@ -1,0 +1,23 @@
+{
+ "sources": [],
+ "what": "a modelled two-start trapezoidal Tr40x14(P7) thread (ISO 2904, ISO 2903) on a d40 shaft, three leads long",
+ "source": "analytic",
+ "method": "groove volume per turn 2 pi int r w(r) dr over the material it cuts (Pappus on the axial section; a screw motion), w(r) = P - flat - depth (tan a + tan b); two grooves of lead 14 a half turn apart, so every meridian half-plane holds a groove section every pitch 7, as one groove of pitch 7 would: over 42 mm (three leads, six pitches) between free ends, so V = stock - 6 x that. Tolerance 0.01%: SMLib's exact screw sweep. ISO 2904 for P 7: 30 deg, H1 = P/2, crest flat 0.366 P, ac = 0.5 (P 6..12), external minor d3 = d - 2 (H1 + ac) = 32",
+ "body_count": 1,
+ "volume_mm3": 43534.483709054,
+ "bbox": {
+  "min": [
+   -20,
+   -20,
+   0
+  ],
+  "max": [
+   20,
+   20,
+   42
+  ]
+ },
+ "tolerance": {
+  "rel": 0.0001
+ }
+}

@@ -114,7 +114,9 @@
         "ladder/06-threads/006-external-m10-into-chamfer",
         "ladder/06-threads/002-external-m10x1-fine",
         "ladder/06-threads/008-multi-start-thread",
-        "ladder/06-threads/017-external-m10-chamfered-tip"
+        "ladder/06-threads/017-external-m10-chamfered-tip",
+        "ladder/06-threads/018-external-m10-both-hands",
+        "ladder/06-threads/019-external-tr40x14-p7-two-start"
       ],
       "tier": "06-threads",
       "what": "modelled threads"
