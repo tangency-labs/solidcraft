@@ -159,6 +159,7 @@ pub enum ScriptOp {
     WireLamina = 32,
     MgrNew = 33,
     SetEditing = 34,
+    MergeBreps = 35,
 }
 
 impl ScriptOp {
@@ -175,10 +176,10 @@ impl ScriptOp {
             BrepMate, CanImprint, CheckInterior, CheckSsi, ClearSsi, CommonEdges, CommonVertices,
             EdgeFace, FaceFace, FaceFaceCoin, FixupEnd, FixupMid, Getters, Imprint, ImprintFace,
             IsMated, Lowest, MappedBrep, MgrNew, OtherMate, RegisterSsi, Relate, Resolve, SetBreps,
-            SetEdgeClass, SetEditing, SetSubset, SetTols, ShellVerts, SplitTwo, ThisMate, VertexFace,
+            MergeBreps, SetEdgeClass, SetEditing, SetSubset, SetTols, ShellVerts, SplitTwo, ThisMate, VertexFace,
             WireLamina,
         };
-        const ALL: [ScriptOp; 33] = [
+        const ALL: [ScriptOp; 34] = [
             Relate,
             OtherMate,
             ThisMate,
@@ -212,6 +213,7 @@ impl ScriptOp {
             WireLamina,
             MgrNew,
             SetEditing,
+            MergeBreps,
         ];
         ALL.iter().copied().find(|o| o.code() == code)
     }
@@ -735,8 +737,8 @@ fn script(
         HandleKind::Curve,
         Brep,
     ];
-    for _ in 0..n_ops {
-        let code = rd.int(1, extra.map_or(34, |x| x.max_code().max(34)))?;
+    for op_index in 0..n_ops {
+        let code = rd.int(1, extra.map_or(35, |x| x.max_code().max(35)))?;
         let Some(op) = ScriptOp::from_code(code) else {
             let extra = extra.ok_or_else(|| bad("bad script op"))?;
             let mut st = ScriptState {
@@ -773,6 +775,7 @@ fn script(
                 | ScriptOp::WireLamina
                 | ScriptOp::MgrNew
                 | ScriptOp::SetEditing
+                | ScriptOp::MergeBreps
                 | ScriptOp::CommonEdges
                 | ScriptOp::CommonVertices
         );
@@ -921,6 +924,16 @@ fn script(
                 rd.index(1)?;
                 rd.flag()?;
                 rd.flag()?;
+            }
+            ScriptOp::MergeBreps => {
+                // the first op only; the primary B-rep then holds both operands
+                let (Some(a), Some(b)) = (c.breps[0], c.breps[1]) else {
+                    return Err(bad("no second B-rep"));
+                };
+                if op_index != 0 {
+                    return Err(bad("merge is not the first op"));
+                }
+                c.breps[0] = Some([a[0] + b[0], a[1] + b[1], a[2] + b[2]]);
             }
             ScriptOp::SetEditing => {
                 let which = rd.index(2)?;

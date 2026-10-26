@@ -918,6 +918,7 @@ enum TiScriptOp : int64_t
     S_WIRE_LAMINA = 32,
     S_MGR_NEW = 33,
     S_SET_EDITING = 34,
+    S_MERGE_BREPS = 35,
 };
 
 // Handle kinds (`kind` of a `brep kind index` triple).
@@ -1660,6 +1661,22 @@ void run_script(Rd& rd, Two& t, std::vector<double>& o)
             put_list(o, t, as_objs(df));
             o.push_back(mx);
             o.push_back(mn);
+            break;
+        }
+        case S_MERGE_BREPS:
+        {
+            // the first op only: copies the other B-rep into the primary one, as SmMerge
+            // does before it intersects, so both operands' faces share an owner
+            if (t.brep[1] == nullptr)
+            {
+                o.push_back(ST_NULL_DEREF);
+                break;
+            }
+            SmStatus s = t.brep[0]->MergeBrep(*t.brep[1], NULL, NULL, FALSE);
+            o.push_back(st(s));
+            t.g[0] = Graph();
+            walk(t.brep[0], t.g[0]);
+            t.index_geometry();
             break;
         }
         case S_SET_EDITING:
