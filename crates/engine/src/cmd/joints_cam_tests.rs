@@ -6,7 +6,8 @@
 
 use super::*;
 use solidcraft_doc::joints::Coupling;
-use solidcraft_doc::joints::cam::CamProfile;
+use solidcraft_doc::joints::Size;
+use solidcraft_doc::joints::cam::{CamProfile, Follower};
 
 /// The cam's eccentricity and radius (mm).
 const E: f64 = 10.0;
@@ -432,4 +433,41 @@ fn cams_save_and_open_with_their_table() {
     }
     let old = solidcraft_doc::format::read(&v.to_string()).unwrap_or_else(|e| panic!("{e}"));
     assert!(old.assembly.links.iter().all(|l| l.coupling.is_none() && l.lift.is_empty()));
+}
+
+/// A cam redefined in place keeps what the call leaves out, like the other couplings: an edit
+/// dialog can't re-offer the profile sketch, so the profile, the follower and its radius, the
+/// tip and the side the follower rides from all carry over from the cam being replaced.
+#[test]
+fn an_edited_cam_keeps_the_definition_it_is_not_given() {
+    let mut s = cam_on_base();
+    let tip = knife(0.0, 0.0, R + 5.0);
+    tappet(&mut s, 0.0, tip);
+    run(&mut s, "joint.cam", json!({"a": "Cam", "b": "Tappet", "profile": {"sketch": "CamSketch"}, "follower": "roller", "radius": "5 mm"}));
+    // The cam as defined drives the roller where a knife on the circle of radius R + 5 rides.
+    run(&mut s, "joint.drive", json!({"joint": "Cam", "value": 60}));
+    let want = knife(60.0, 0.0, R + 5.0) - tip;
+    assert!(close(shown(&mut s, "Tappet"), want, 1e-3), "{} vs {want}", shown(&mut s, "Tappet"));
+    let first = s.doc.assembly.links[0].coupling.clone();
+    let rides = |c: &Option<Coupling>| matches!(c, Some(Coupling::Cam(c)) if c.reverse);
+    // Flip the ride side in place: the profile and the roller (with its radius) carry over.
+    let r = run(&mut s, "joint.cam", json!({"a": "Cam", "b": "Tappet", "link": 0, "flip": true}));
+    assert_eq!(r["link"], 0, "{r}");
+    let flipped = s.doc.assembly.links[0].coupling.clone();
+    let kept = match (&first, &flipped) {
+        (Some(Coupling::Cam(a)), Some(Coupling::Cam(b))) => {
+            a.profile == b.profile && matches!(&b.follower, Follower::Roller { radius } if *radius == Size::Expr("5 mm".into()))
+        }
+        _ => false,
+    };
+    assert!(kept, "{first:?} -> {flipped:?}");
+    assert_ne!(rides(&first), rides(&flipped), "{flipped:?}");
+    // And redefining with nothing else now keeps that flipped definition, its side included; the
+    // follower stays on the side it was flipped to at 60 degrees.
+    run(&mut s, "joint.drive", json!({"joint": "Cam", "value": 60}));
+    let rides_this_side = shown(&mut s, "Tappet");
+    run(&mut s, "joint.cam", json!({"a": "Cam", "b": "Tappet", "link": 0}));
+    assert_eq!(s.doc.assembly.links[0].coupling, flipped);
+    run(&mut s, "joint.drive", json!({"joint": "Cam", "value": 60}));
+    assert!(close(shown(&mut s, "Tappet"), rides_this_side, 1e-3), "{} vs {rides_this_side}", shown(&mut s, "Tappet"));
 }

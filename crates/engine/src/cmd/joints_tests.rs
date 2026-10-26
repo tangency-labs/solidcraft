@@ -1277,6 +1277,40 @@ fn a_link_offset_is_in_the_linked_values_units() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `joint.motion_link` with `link` puts the new link in place of that one, like the coupling
+/// commands do: the other links stay put and the offset is the one typed. An index past the last
+/// link is refused.
+#[test]
+fn a_motion_link_can_replace_another_by_index() {
+    let mut s = Session::default();
+    for (name, x) in [("Ground", 0.0), ("Dial", 80.0), ("Gear", 100.0), ("Car", 120.0), ("Cart", 140.0)] {
+        part(&mut s, name, [x, 0.0, -5.0]);
+    }
+    let g = occ(&s, "Ground");
+    run(&mut s, "occurrence.ground", json!({"occurrence": g, "grounded": true}));
+    for (kind, name, x) in [("revolute", "Dial", 80.0), ("revolute", "Gear", 100.0), ("slider", "Car", 120.0), ("slider", "Cart", 140.0)] {
+        pin(&mut s, kind, name, "Ground", name, Vec3::new(x, 0.0, 0.0), Vec3::Z);
+    }
+    run(&mut s, "joint.motion_link", json!({"a": "Dial", "b": "Gear", "ratio": 1, "offset": 10}));
+    run(&mut s, "joint.motion_link", json!({"a": "Car", "b": "Cart", "ratio": 2}));
+    let r = run(&mut s, "joint.motion_link", json!({"a": "Dial", "b": "Gear", "ratio": 2, "offset": 5, "link": 0}));
+    assert_eq!(r["link"], 0, "{r}");
+    assert_eq!(s.doc.assembly.links.len(), 2);
+    assert!(s.doc.assembly.links[0].coupling.is_none() && (s.doc.assembly.links[0].offset - 5f64.to_radians()).abs() < 1e-12);
+    run(&mut s, "joint.drive", json!({"joint": "Dial", "value": 20}));
+    let l = run(&mut s, "joint.list", json!({}));
+    let value = |name: &str| {
+        l["joints"].as_array().into_iter().flatten().find(|j| j["name"] == name).and_then(|j| j["values"][0]["value"].as_f64()).unwrap_or(f64::NAN)
+    };
+    // Gear = 2·Dial + 5.
+    assert!((value("Gear") - 45.0).abs() < 1e-9, "{l}");
+    let bad = json!({"a": "Car", "b": "Cart", "ratio": 1, "link": 5});
+    assert!(s.execute("joint.motion_link", &bad).is_err(), "{bad}");
+    let bad = json!({"a": "Car", "b": "Cart", "ratio": 1, "link": -1});
+    assert!(s.execute("joint.motion_link", &bad).is_err(), "{bad}");
+    assert_eq!(s.doc.assembly.links.len(), 2);
+}
+
 /// A link between an angle and a distance takes its ratio in b's units per a's, like its offset:
 /// a pinion moves its rack 0.5 mm per degree, and a car turns its dial 2 degrees per mm.
 /// `joint.list` answers the ratios the same way; they are stored per radian, as before.

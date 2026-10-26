@@ -115,6 +115,48 @@ fn gears_save_and_open_with_their_definition() {
     assert!(old.assembly.links.iter().all(|l| l.coupling.is_none()) && old.assembly.links.len() == 2);
 }
 
+/// A coupling command put in place of a motion link takes the sizes the call leaves out from the
+/// coupling it replaces: an edit dialog can't re-offer a picked round face, so an edited gear
+/// keeps the radii picked on its discs, a rack and a screw their radius and pitch.
+#[test]
+fn an_edited_coupling_keeps_the_sizes_it_is_not_given() {
+    let mut s = gear_train();
+    run(&mut s, "joint.drive", json!({"joint": "G1", "value": 60})); // G2 at -30°
+    let l = run(&mut s, "joint.list", json!({}));
+    let (ra, rb) = (l["links"][0]["coupling"]["ra"].clone(), l["links"][0]["coupling"]["rb"].clone());
+    assert!(ra.is_object() && rb.is_object(), "{l}"); // the round faces picked on the discs
+    let r = run(&mut s, "joint.gear", json!({"a": "G1", "b": "G2", "link": 0}));
+    assert_eq!(r["link"], 0, "{r}");
+    let l = run(&mut s, "joint.list", json!({}));
+    assert_eq!((l["links"][0]["coupling"]["ra"].clone(), l["links"][0]["coupling"]["rb"].clone()), (ra, rb), "{l}");
+    // The kept radii drive as before: G1 at 90° puts G2 at -45° (r1/r2 = 10/20).
+    run(&mut s, "joint.drive", json!({"joint": "G1", "value": 90}));
+    assert!(close_to(shown(&mut s, "G2"), -45.0), "{}", shown(&mut s, "G2"));
+    // A rack redefined without a radius keeps the radius picked on the pinion's round face, and
+    // the rack stays put: 8 mm turns it 8·π/4 per quarter turn, before and after.
+    let mut s = rack();
+    run(&mut s, "joint.rack_pinion", json!({"a": "Pinion", "b": "Rail", "radius": {"occurrence": "Pinion", "circle": [8, 0, 2]}}));
+    run(&mut s, "joint.drive", json!({"joint": "Pinion", "value": 45}));
+    let before = run(&mut s, "joint.list", json!({}));
+    let radius = before["links"][0]["coupling"]["radius"].clone();
+    assert!(radius.is_object(), "{before}");
+    let r = run(&mut s, "joint.rack_pinion", json!({"a": "Pinion", "b": "Rail", "link": 0}));
+    assert_eq!(r["link"], 0, "{r}");
+    assert_eq!(run(&mut s, "joint.list", json!({}))["links"][0]["coupling"]["radius"], radius);
+    assert!(close_to(shown(&mut s, "Rail"), 8.0 * std::f64::consts::FRAC_PI_4), "{}", shown(&mut s, "Rail"));
+    run(&mut s, "joint.drive", json!({"joint": "Pinion", "value": 90}));
+    assert!(close_to(shown(&mut s, "Rail"), 8.0 * std::f64::consts::FRAC_PI_2), "{}", shown(&mut s, "Rail"));
+    // A screw redefined without a pitch keeps the pitch it was given.
+    let mut s = Session::default();
+    base(&mut s);
+    part(&mut s, "Nut", [-1.0, -1.0, 0.0]);
+    pin(&mut s, "cylindrical", "Thread", "Base", "Nut", Vec3::ZERO, Vec3::Z);
+    run(&mut s, "joint.screw", json!({"joint": "Thread", "pitch": "2 mm"}));
+    let r = run(&mut s, "joint.screw", json!({"joint": "Thread", "link": 0, "reverse": true}));
+    assert_eq!(r["link"], 0, "{r}");
+    assert_eq!(s.doc.assembly.links[0].coupling, Some(Coupling::Screw { pitch: Size::Expr("2 mm".into()), reverse: true }));
+}
+
 /// A pinion of radius 8 about +Z at the origin, a rack under it sliding along +X, and a stop the
 /// rack runs into after 10 mm.
 fn rack() -> Session {
