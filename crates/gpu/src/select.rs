@@ -201,18 +201,24 @@ pub fn survey(policy: Policy) -> Survey {
     Survey { backends: format!("{:?}", native_backends()), adapters: found, chosen, lands_on }
 }
 
-/// The Vulkan adapter `policy` picks among those `keep` accepts, with its report; `None` where
-/// the native backends (or `WGPU_BACKEND`) leave out Vulkan, as on macOS. The GPU path tracer
-/// runs on Vulkan only (#3217): D3D12 was never faster in our measurements and needs minutes to
-/// compile its shader at every start, where Vulkan keeps compiled pipelines between runs.
+/// The backends the GPU path tracer may use among the native ones: Vulkan, and Metal on macOS
+/// (D3D12 is out, #3217: it was never faster in our measurements and needs minutes to compile
+/// its shader at every start, where Vulkan keeps compiled pipelines between runs).
+pub fn path_backends() -> wgpu::Backends {
+    native_backends() & (wgpu::Backends::VULKAN | wgpu::Backends::METAL)
+}
+
+/// The path-tracer adapter `policy` picks among those `keep` accepts, with its report; `None`
+/// where `path_backends` is empty (`WGPU_BACKEND=dx12`) or no adapter qualifies.
 #[cfg(not(target_arch = "wasm32"))]
-pub fn pick_vulkan(policy: Policy, keep: impl Fn(&wgpu::AdapterInfo) -> bool) -> Option<(wgpu::Adapter, AdapterReport)> {
-    if !native_backends().contains(wgpu::Backends::VULKAN) {
+pub fn pick_path(policy: Policy, keep: impl Fn(&wgpu::AdapterInfo) -> bool) -> Option<(wgpu::Adapter, AdapterReport)> {
+    let backends = path_backends();
+    if backends.is_empty() {
         return None;
     }
     let mut desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
-    desc.backends = wgpu::Backends::VULKAN;
-    let mut all = pollster::block_on(wgpu::Instance::new(desc).enumerate_adapters(wgpu::Backends::VULKAN));
+    desc.backends = backends;
+    let mut all = pollster::block_on(wgpu::Instance::new(desc).enumerate_adapters(backends));
     all.sort_by_key(|a| std::cmp::Reverse(rank(a.get_info().device_type)));
     all.into_iter()
         .filter(|a| keep(&a.get_info()))

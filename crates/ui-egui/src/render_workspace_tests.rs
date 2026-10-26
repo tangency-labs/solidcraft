@@ -481,8 +481,7 @@ fn progressive_image_controls_route_to_the_registered_host() {
     let host = match host {
         Ok(host) => host,
         Err(e) => {
-            let vulkan = egui_wgpu::wgpu::Backends::VULKAN;
-            let expected = solidcraft_gpu::select::native_backends().contains(vulkan);
+            let expected = !solidcraft_gpu::select::path_backends().is_empty();
             assert!(!expected || std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "required GPU unavailable: {e}");
             eprintln!("skipping progressive UI device test: {e}");
             return;

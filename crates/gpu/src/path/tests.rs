@@ -6,10 +6,10 @@ fn executor() -> Option<Executor> {
     let (adapter, device, queue) = match open_headless() {
         Ok(device) => device,
         Err(e) => {
-            // The path tracer runs on Vulkan only: where the backends in use leave Vulkan out
-            // (macOS, or `WGPU_BACKEND=dx12`), it is unavailable by design, not missing.
-            let vulkan = crate::select::native_backends().contains(wgpu::Backends::VULKAN);
-            assert!(!vulkan || std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "required GPU unavailable: {e}");
+            // The path tracer runs on Vulkan or Metal only: where the backends in use leave both out
+            // (`WGPU_BACKEND=dx12`), it is unavailable by design, not missing.
+            let available = !crate::select::path_backends().is_empty();
+            assert!(!available || std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "required GPU unavailable: {e}");
             eprintln!("gpu-path device test skipped: {e}");
             return None;
         }
@@ -529,16 +529,14 @@ fn shader_validates_without_a_device() {
     naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty()).validate(&module).unwrap();
 }
 
-/// #3217: the path tracer opens Vulkan adapters only, and none where the platform has no
-/// Vulkan backend (macOS).
+/// #3217: the path tracer opens Vulkan adapters, or Metal on macOS, never D3D12 or GL.
 #[test]
-fn path_devices_are_vulkan_only() {
-    let picked = crate::select::pick_vulkan(crate::select::Policy::Auto, |_| true);
-    if let Some((adapter, report)) = &picked {
-        assert_eq!(adapter.get_info().backend, wgpu::Backend::Vulkan);
-        assert_eq!(report.backend, "Vulkan");
+fn path_devices_are_vulkan_or_metal_only() {
+    let picked = crate::select::pick_path(crate::select::Policy::Auto, |_| true);
+    if let Some((adapter, _)) = &picked {
+        assert!(matches!(adapter.get_info().backend, wgpu::Backend::Vulkan | wgpu::Backend::Metal));
     }
-    if cfg!(target_os = "macos") || !crate::select::native_backends().contains(wgpu::Backends::VULKAN) {
+    if crate::select::path_backends().is_empty() {
         assert!(picked.is_none());
     }
 }
@@ -3213,8 +3211,8 @@ fn display_bloom_slices_refuse_invalid_ranges_without_panicking() {
 fn cancelled_environment_preparation_unwinds_gpu_error_scopes() {
     use solidcraft_render::lighting::environment::EnvironmentSource;
     let Ok((_, device, _queue)) = open_headless() else {
-        let vulkan = crate::select::native_backends().contains(wgpu::Backends::VULKAN);
-        assert!(!vulkan || std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "required Vulkan device unavailable");
+        let available = !crate::select::path_backends().is_empty();
+        assert!(!available || std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "required Vulkan device unavailable");
         return;
     };
     let mut image = request(1);
@@ -3239,8 +3237,8 @@ fn cancelled_environment_preparation_unwinds_gpu_error_scopes() {
 #[test]
 fn failed_resource_creation_unwinds_gpu_error_scopes() {
     let Ok((_, device, _queue)) = open_headless() else {
-        let vulkan = crate::select::native_backends().contains(wgpu::Backends::VULKAN);
-        assert!(!vulkan || std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "required Vulkan device unavailable");
+        let available = !crate::select::path_backends().is_empty();
+        assert!(!available || std::env::var_os("SOLIDCRAFT_REQUIRE_GPU").is_none(), "required Vulkan device unavailable");
         return;
     };
     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

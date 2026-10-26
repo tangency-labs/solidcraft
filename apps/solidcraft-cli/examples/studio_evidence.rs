@@ -87,7 +87,7 @@ fn run() -> Result<(), String> {
         let gpu_host_start = Instant::now();
         let policy = solidcraft_gpu::select::Policy::from_env().map_err(|e| e.to_string())?;
         let (adapter, report) =
-            solidcraft_gpu::select::pick_vulkan(policy, |_| true).ok_or("no Vulkan adapter satisfies the requested GPU policy")?;
+            solidcraft_gpu::select::pick_path(policy, |_| true).ok_or("no Vulkan or Metal adapter satisfies the requested GPU policy")?;
         session.register_render_job_host(solidcraft_gpu::path::host_on_adapter(&adapter).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
         (Some(report), Some(gpu_host_start.elapsed().as_secs_f64()))
     } else {
