@@ -71,6 +71,10 @@ fn conflict_destination(destination: &Destination, revision: &str) -> Result<Des
 }
 
 impl Publication {
+    /// Managed storage bytes must survive ordinary Git checkouts without conversion.
+    /// Ordinary project documents retain the repository's own attributes.
+    pub const GIT_ATTRIBUTES: &[u8] = b".gitattributes -text -filter -ident -working-tree-encoding\nsolidcraft-project.json -text -filter -ident -working-tree-encoding\n**/document.json -text -filter -ident -working-tree-encoding\n**/manifest.json -text -filter -ident -working-tree-encoding\nobjects/** -text -filter -ident -working-tree-encoding\n";
+
     /// `existing` is the manifest at the requested destination. Hosts must additionally check
     /// its document schema before writing. Reading this plan never modifies local storage.
     pub fn prepare(save: &PendingSave, snapshot: Snapshot, project_marker: Option<&[u8]>, existing: Option<&[u8]>) -> Result<Self> {
@@ -110,6 +114,7 @@ impl Publication {
         }
         let mut files = BTreeMap::new();
         if !already_published {
+            files.insert(format!("{}/.gitattributes", destination.project), Self::GIT_ATTRIBUTES.to_vec());
             let mut manifest = snapshot.manifest;
             // Compatible optional data belongs to the design and must survive an ordinary save.
             if !conflict && let Some(previous) = previous {

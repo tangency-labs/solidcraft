@@ -1,0 +1,2 @@
+| assets/locales/pending/cloud-opening.json | SolidCraft contributors | original Cloud Saves update-check and download-progress translations for all supported languages | MIT OR Apache-2.0 |
+| docs/book/src/guide/images/cloud-saves-opening.png | SolidCraft contributors | actual SolidCraft 0.40.0 desktop screenshot of a reopened original Sample Plate with the normal Operations rows and completion notice; isolated profile and public-safe examples | MIT OR Apache-2.0 |

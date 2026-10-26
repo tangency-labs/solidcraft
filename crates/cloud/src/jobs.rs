@@ -137,6 +137,9 @@ pub struct JobStatus {
     pub destination: Option<Destination>,
     pub revision: Option<String>,
     pub message: Option<String>,
+    /// Verified immutable chunks available during an Open (completed, total).
+    #[serde(default)]
+    pub download_progress: Option<(usize, usize)>,
     pub result: Option<Value>,
     /// Confirmed captures, including partial success before a later failure or cancellation.
     /// A connection synchronization job can publish several independent Save operations.
@@ -183,6 +186,7 @@ impl Job {
                 destination: None,
                 revision: None,
                 message: None,
+                download_progress: None,
                 result: None,
                 publications: Vec::new(),
                 managed: Vec::new(),
@@ -198,6 +202,17 @@ impl Job {
 
     pub fn status(&self) -> Result<JobStatus> {
         self.0.lock().map(|state| state.status.clone()).map_err(|_| Error::Storage("cloud operation state unavailable".into()))
+    }
+
+    /// Expose locally stored projects before repository access. The listing remains
+    /// Working until its remote refresh completes, so callers can show both at once.
+    pub fn local_catalog(&self, catalog: Vec<crate::StoredDesign>) -> Result<()> {
+        let destinations: Vec<_> = catalog.iter().map(|entry| &entry.destination).collect();
+        let result = serde_json::to_value(destinations).map_err(|e| Error::Storage(e.to_string()))?;
+        self.update(|status| {
+            status.result = Some(result);
+            status.catalog = catalog;
+        })
     }
 
     pub fn update(&self, change: impl FnOnce(&mut JobStatus)) -> Result<()> {

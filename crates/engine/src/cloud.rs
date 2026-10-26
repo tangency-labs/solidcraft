@@ -105,11 +105,17 @@ impl Session {
     /// Complete a download through the registered command in a separate editor. The UI can
     /// adopt it as a new tab without replacing edits made while the download was running.
     pub fn cloud_open_session(&self, operation: &str) -> Result<Session> {
+        let mut opened = self.cloud_open_target(operation)?;
+        opened.execute("cloud.open.finish", &serde_json::json!({"operation":operation}))?;
+        Ok(opened)
+    }
+
+    /// Prepare an isolated editor without decoding or evaluating on the caller's thread.
+    pub fn cloud_open_target(&self, operation: &str) -> Result<Session> {
         let job = self.cloud.jobs.get(operation).ok_or_else(|| EngineError::Other("unknown cloud opening operation".into()))?;
         let mut opened = Session::default();
         opened.inherit_cloud_services(self);
         opened.cloud.jobs.insert(operation.into(), job.clone());
-        opened.execute("cloud.open.finish", &serde_json::json!({"operation":operation}))?;
         Ok(opened)
     }
 

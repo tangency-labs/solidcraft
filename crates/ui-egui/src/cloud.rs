@@ -1,11 +1,12 @@
 //! Platform workers own storage; sessions own captured saves. The UI only polls and commands.
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use solidcraft_cloud::jobs::{JobStatus, Phase};
 
 use crate::SolveApp;
 pub(crate) mod configuration;
 pub(crate) mod operations;
+mod startup;
 
 #[derive(Default)]
 pub(crate) struct State {
@@ -15,8 +16,9 @@ pub(crate) struct State {
     #[cfg(not(target_arch = "wasm32"))]
     pub git_setup: Option<crate::cloud_settings::git::Wizard>,
     pub operations: operations::Operations,
-    retry_at: f64,
-    messages: BTreeMap<String, String>,
+    startup: startup::State,
+    notices: BTreeMap<String, (u64, Option<String>)>,
+    error: Option<String>,
 }
 
 pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
@@ -26,50 +28,48 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     let statuses = match poll(app) {
         Ok(statuses) => statuses,
         Err(error) => {
-            app.set_status(error, true);
+            app.cloud.error = Some(error);
             return;
         }
     };
+    app.cloud.error = None;
+    app.cloud.notices.retain(|id, _| app.session.cloud_settings().connection(id).is_some());
+    for status in statuses.iter().filter(|s| !matches!(s.phase, Phase::Working | Phase::Syncing)) {
+        // Background preview reads cannot acknowledge a failed push. Catalog and
+        // opening errors have their own presentation caches; tracked actions clear
+        // their notices only when a subsequent test/publication actually succeeds.
+        let action = app.cloud.operations.tracked(&status.operation);
+        if app.session.cloud_settings().connection(&status.connection).is_none()
+            || (status.phase != Phase::Synced && !(action && (status.message.is_some() || status.phase == Phase::Ready)))
+        {
+            continue;
+        }
+        let operation = status.operation.strip_prefix("cloud-").and_then(|id| id.parse::<u64>().ok()).unwrap_or(0);
+        let notice = app.cloud.notices.entry(status.connection.clone()).or_default();
+        if operation >= notice.0 {
+            *notice = (operation, status.message.clone());
+        }
+    }
     app.cloud.operations.update(&statuses);
     crate::cloud_browser::tick(app, &statuses);
     crate::cloud_browser::tabs::request_timeout(app, ctx);
-    let live: BTreeSet<_> = statuses.iter().map(|status| status.operation.as_str()).collect();
-    app.cloud.messages.retain(|id, _| live.contains(id.as_str()));
-    for status in &statuses {
-        if let Some(message) = &status.message
-            && app.cloud.messages.get(&status.operation) != Some(message)
-        {
-            app.cloud.messages.insert(status.operation.clone(), message.clone());
-            app.set_status(message.clone(), true);
-        }
-    }
     if statuses.iter().any(|status| matches!(status.phase, Phase::Working | Phase::Syncing)) {
         ctx.request_repaint_after(std::time::Duration::from_millis(100));
     }
     if !app.session.cloud_save_pending() && !crate::cloud_browser::choosing_destination(app) {
         crate::documents::saved_for_close(app);
     }
-    // Retry after startup and once a minute. Queues and their failures remain independent.
-    let now = ctx.input(|input| input.time);
-    let now = if now.is_finite() { now } else { 0.0 };
-    let settings = app.session.cloud_settings();
-    if settings.retry_pending && !app.session.cloud_configuring() && now >= app.cloud.retry_at {
-        let connections: Vec<_> = settings
-            .connections
-            .iter()
-            .filter(|connection| {
-                !statuses.iter().any(|status| status.connection == connection.id && matches!(status.phase, Phase::Working | Phase::Syncing))
-            })
-            .map(|connection| connection.id.clone())
-            .collect();
-        app.cloud.retry_at = now + 60.0;
-        for connection in connections {
-            let _ = app.run("cloud.sync", serde_json::json!({"connection":connection}));
+    startup::tick(app, ctx, &statuses);
+}
+
+pub(crate) fn notices(app: &SolveApp) -> Vec<String> {
+    let mut messages: Vec<_> = app.cloud.error.iter().cloned().collect();
+    for connection in &app.session.cloud_settings().connections {
+        if let Some((_, Some(message))) = app.cloud.notices.get(&connection.id) {
+            messages.push(format!("{}\n{message}", connection.repository_label()));
         }
     }
-    if app.session.cloud_settings().retry_pending && !app.session.cloud_settings().connections.is_empty() {
-        ctx.request_repaint_after(std::time::Duration::from_secs_f64((app.cloud.retry_at - now).clamp(1.0, 60.0)));
-    }
+    messages
 }
 
 fn poll(app: &mut SolveApp) -> Result<Vec<JobStatus>, String> {
@@ -86,7 +86,6 @@ fn poll(app: &mut SolveApp) -> Result<Vec<JobStatus>, String> {
         for slot in app.docs.background_mut() {
             slot.session.inherit_cloud_services(&app.session);
         }
-        app.cloud.retry_at = 0.0;
     }
     let mut statuses = app.session.cloud_operations().map_err(|e| e.to_string())?;
     for slot in app.docs.background_mut() {

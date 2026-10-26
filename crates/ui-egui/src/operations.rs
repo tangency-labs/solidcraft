@@ -135,7 +135,7 @@ pub fn current(app: &SolveApp) -> Vec<Row> {
     }
     // A file being opened, inserted or exported, and those waiting behind it.
     let mut queued = 0;
-    for file in app.file_load.operations() {
+    for file in app.file_load.operations(app) {
         let key = format!("file:{}", file.serial);
         let label = if file.name.is_empty() { command_name(file.command) } else { format!("{} {}", command_name(file.command), file.name) };
         let cancel = if file.queued {

@@ -171,9 +171,19 @@ impl FileView {
     }
 
     pub fn section<R>(ui: &mut Ui, title: &str, gap: f32, add: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
+        Self::section_with_status(ui, title, gap, None, add)
+    }
+
+    pub fn section_with_status<R>(
+        ui: &mut Ui,
+        title: &str,
+        gap: f32,
+        status: Option<FileStatus<'_>>,
+        add: impl FnOnce(&mut Ui) -> R,
+    ) -> InnerResponse<R> {
         ui.scope(|ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
-            Self::section_title(ui, title);
+            Self::section_title_status(ui, title, status);
             ui.add_space(dimension(gap));
             add(ui)
         })
@@ -231,10 +241,28 @@ impl FileView {
     }
 
     pub fn section_title(ui: &mut Ui, title: &str) {
+        Self::section_title_status(ui, title, None);
+    }
+
+    fn section_title_status(ui: &mut Ui, title: &str, status: Option<FileStatus<'_>>) {
         let t = Tokens::get();
         let galley = ui.painter().layout_no_wrap(title.to_owned(), crate::type_face::semibold(t.font_intro), t.form_ink);
         let (rect, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), galley.size().y), Sense::hover());
+        let title_width = galley.size().x;
         ui.painter().with_clip_rect(ui.clip_rect().intersect(rect)).galley(rect.min, galley, t.form_ink);
+        if let Some(status) = status {
+            let dot = Rect::from_center_size(
+                pos2((rect.left() + title_width + t.space_12).min(rect.right() - t.space_4), rect.center().y),
+                vec2(t.space_6, t.space_6),
+            );
+            status.paint_dot(ui, dot);
+            let response = ui.interact(dot.expand(t.space_6), ui.scope_id().with(("section_status", title)), Sense::hover());
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, status.label));
+            solidcraft_ui_registry::publish_target("dialog:section_status", response.rect);
+            response.backing_on_hover_ui(|ui| {
+                ui.colored_label(status.tone.color(), status.label);
+            });
+        }
     }
 
     pub fn tile_min_width() -> f32 {

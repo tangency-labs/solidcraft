@@ -188,9 +188,54 @@ impl LocalOutbox {
     }
 }
 
+impl solidcraft_cloud::DownloadCache for LocalOutbox {
+    async fn load(&self, path: &str) -> Result<Option<Vec<u8>>> {
+        if !path.starts_with("objects/") && !path.starts_with("checks/") {
+            return Err(storage("invalid download object path"));
+        }
+        if !self.path(path)?.exists() {
+            return Ok(None);
+        }
+        // Download cache entries are reconstructible; a bad or unreadable copy is a miss.
+        Ok(self.read(path).ok())
+    }
+    async fn store(&self, path: &str, bytes: &[u8]) -> Result<()> {
+        if !path.starts_with("objects/") && !path.starts_with("checks/") || bytes.len() > solidcraft_cloud::CHUNK_BYTES {
+            return Err(storage("invalid download object"));
+        }
+        if path.starts_with("objects/") && path.rsplit('/').next() != Some(solidcraft_cloud::digest(bytes).as_str()) {
+            return Err(storage("download object hash mismatch"));
+        }
+        // Only this verified download-cache path repairs corrupt immutable chunks.
+        // Staging queued recovery records still uses the strict store() above.
+        let target = self.path(path)?;
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).map_err(storage)?;
+        }
+        crate::safe_write::write_atomic(&target, bytes, false).map_err(storage)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn verified_downloads_repair_corrupt_chunks_without_relaxing_recovery_writes() {
+        use solidcraft_cloud::DownloadCache;
+        let fixture = Fixture::new();
+        let outbox = fixture.outbox();
+        let bytes = b"verified stored chunk";
+        let hash = solidcraft_cloud::digest(bytes);
+        let path = format!("objects/{}/{hash}", &hash[..2]);
+        let file = outbox.path(&path).unwrap();
+        fs::create_dir_all(file.parent().unwrap()).unwrap();
+        fs::write(&file, b"corrupt").unwrap();
+        assert!(outbox.store(&path, bytes).is_err(), "recovery staging still refuses a collision");
+        assert!(futures_lite::future::block_on(DownloadCache::store(&outbox, &path, b"wrong hash")).is_err());
+        futures_lite::future::block_on(DownloadCache::store(&outbox, &path, bytes)).unwrap();
+        assert_eq!(futures_lite::future::block_on(DownloadCache::load(&outbox, &path)).unwrap().unwrap(), bytes);
+    }
 
     #[test]
     fn publication_wait_is_bounded_and_cancellable() {

@@ -13,6 +13,10 @@ pub(crate) struct Operations {
 }
 
 impl Operations {
+    pub(super) fn tracked(&self, operation: &str) -> bool {
+        self.running.contains_key(operation)
+    }
+
     pub(super) fn update(&mut self, statuses: &[JobStatus]) {
         let active: BTreeSet<_> =
             statuses.iter().filter(|s| matches!(s.phase, Phase::Working | Phase::Syncing)).map(|s| s.operation.as_str()).collect();

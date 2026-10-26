@@ -67,7 +67,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .doc_only()
         .params("destination?: {connection,project,file}, otherwise current binding; returns durable-save operation id, or unchanged: true for an unchanged bound design"),
     CommandSpec::new("cloud.sync", "Synchronize Repository", sync)
-        .icon("send")
+        .icon("sync")
         .noundo()
         .doc_only()
         .params("connection?: connection id; retries durable captured saves; returns operation id"),
