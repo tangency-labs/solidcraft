@@ -176,6 +176,15 @@ pub trait Pictures {
     fn rows(&self, source: u64, grid: &PixelGrid, window: GridWindow) -> std::result::Result<Vec<u8>, String>;
 }
 
+/// No pictures: a writer given it refuses any picture it meets.
+pub struct NoPictures;
+
+impl Pictures for NoPictures {
+    fn rows(&self, source: u64, _: &PixelGrid, _: GridWindow) -> std::result::Result<Vec<u8>, String> {
+        Err(format!("no pixels for picture {source}"))
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 #[error("paper scene: {0}")]
 pub struct Invalid(pub &'static str);

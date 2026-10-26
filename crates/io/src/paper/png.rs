@@ -8,15 +8,24 @@
 //!   even-odd. Each line is stroked once, then filled band by band; a line under a pixel wide is
 //!   drawn as tiny-skia's hairline instead, its coverage scaled by its width, so it never vanishes.
 //! - **Bands:** the sheet is drawn [`BAND_BYTES`] of pixels at a time, with a row above and below
-//!   that isn't written, and streamed into the file, so an A0 sheet at 2400 dpi (8.9 billion
+//!   that isn't written, and streamed into the file, so an A0 sheet at 1200 dpi (1.6 billion
 //!   pixels) needs no more memory than an A4 one, and the bytes are the same whatever the band.
+//! - **Pixels** are the sheet's pixel grid ([`PixelGrid::sheet`]): anchored at its top-left corner
+//!   and rounded outward, so nothing is clipped (210 mm at 300 dpi is 2481 px) and a side over
+//!   [`MAX_SIDE_PX`] is refused.
+//! - **Pictures** (#5624 S5) are drawn where the scene orders them, into their window of that grid,
+//!   from a [`Pictures`] provider asked for just the band's rows at the export's dpi, or at
+//!   [`MAX_PICTURE_DPI`] with each pixel copied when the export is finer. Black and white dithers
+//!   them; lines stay solid.
 //! - **The file** records its dpi (`pHYs`), so it prints at the sheet's size, and is sRGB.
 
 use std::io::Write;
 use std::ops::RangeInclusive;
 
-use solidcraft_geom::paper::{self, Grid, GridItem, GridPath, GridReport, Prepared};
-use tiny_skia::{Color, FillRule, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, Stroke, Transform};
+use solidcraft_geom::Vec2;
+use solidcraft_geom::paper::{self, Grid, GridItem, GridPath, GridReport, Picture, Pictures, Prepared};
+use solidcraft_geom::pixel_grid::{GridWindow, MAX_SIDE_PX, PixelGrid, PixelGridError};
+use tiny_skia::{Color, FillRule, LineCap, LineJoin, Paint, Path, PathBuilder, Pixmap, PremultipliedColorU8, Stroke, Transform};
 
 use crate::{IoError, Result};
 
@@ -24,6 +33,8 @@ use crate::{IoError, Result};
 pub const DPI: RangeInclusive<f64> = 25.0..=2400.0;
 /// The most points a sheet's lines may flatten to in all.
 pub const MAX_POINTS: usize = 1 << 24;
+/// The most dots per inch a picture is asked for: above it, a coarser grid's pixels are copied.
+pub const MAX_PICTURE_DPI: f64 = 1200.0;
 /// The pixels drawn at a time, as RGBA bytes.
 const BAND_BYTES: usize = 16 << 20;
 /// Rows drawn above and below each band and not written: tiny-skia starts an edge a little
@@ -57,26 +68,33 @@ impl Default for PngOptions {
     }
 }
 
-/// What writing a sheet PNG did: the grid's report, and the image's width and height in pixels.
+/// What writing a sheet PNG did: the grid's report, the image's width and height in pixels, and
+/// whether a picture was dithered to black and white.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct PngReport {
     pub grid: GridReport,
     pub pixels: [u32; 2],
+    pub dithered: bool,
 }
 
-/// The scene as a sheet PNG written to `out`.
-pub fn paper_png(scene: &Prepared, options: PngOptions, out: impl Write) -> Result<PngReport> {
-    write(scene, options, out, BAND_BYTES)
+/// The scene as a sheet PNG written to `out`, its pictures' pixels from `pictures`.
+pub fn paper_png(scene: &Prepared, options: PngOptions, pictures: &dyn Pictures, out: impl Write) -> Result<PngReport> {
+    write(scene, options, pictures, out, BAND_BYTES)
 }
 
-fn write(scene: &Prepared, options: PngOptions, out: impl Write, band_bytes: usize) -> Result<PngReport> {
+fn write(scene: &Prepared, options: PngOptions, pictures: &dyn Pictures, out: impl Write, band_bytes: usize) -> Result<PngReport> {
     let PngOptions { dpi, colour } = options;
     if !DPI.contains(&dpi) {
         return Err(IoError::Invalid(format!("a sheet PNG is 25 to 2400 dpi, not {dpi}")));
     }
+    let grid = sheet_grid(scene.size_mm(), dpi)?;
+    // Pictures are asked for at most MAX_PICTURE_DPI: on the grid of dpi / k, whose pixels are each
+    // exactly k × k of the sheet's, since both are anchored at the sheet's top-left corner.
+    let k = (dpi / MAX_PICTURE_DPI).ceil().max(1.0) as u32;
+    let asked = if k == 1 { grid } else { sheet_grid(scene.size_mm(), dpi / f64::from(k))? };
     let on = scene.on_grid(Grid::NANOMETRE).map_err(|e| IoError::Invalid(e.to_string()))?;
     let px = dpi / 25.4e6; // pixels a nanometre
-    let pixels = [on.size.x, on.size.y].map(|n| ((n as f64 * px).round() as u32).max(1));
+    let pixels = [grid.width, grid.height];
     let mut sheet = Sheet { px, height: on.size.y as f64, tolerance: 0.125 / px, points: 0 };
     let mut shapes = Vec::new();
     for item in on.groups.iter().flat_map(|g| &g.items) {
@@ -106,7 +124,7 @@ fn write(scene: &Prepared, options: PngOptions, out: impl Write, band_bytes: usi
                 }
                 shapes.extend(builder.finish().map(Shape::EvenOdd));
             }
-            GridItem::Picture(_) => return Err(IoError::Invalid("not supported yet: pictures (A9)".into())),
+            GridItem::Picture(picture) => shapes.extend(grid.window(picture.rect).map(|window| Shape::Picture(*picture, window))),
         }
     }
     let png_error = |e: png::EncodingError| IoError::Invalid(format!("the sheet PNG: {e}"));
@@ -131,10 +149,14 @@ fn write(scene: &Prepared, options: PngOptions, out: impl Write, band_bytes: usi
     // A hairline reaches at most a pixel past its line: into the margin rows, never a written one.
     let spans: Vec<(f32, f32)> = shapes
         .iter()
-        .map(|(Shape::Fill(path) | Shape::EvenOdd(path) | Shape::Thin(path, _))| (path.bounds().top(), path.bounds().bottom()))
+        .map(|shape| match shape {
+            Shape::Fill(path) | Shape::EvenOdd(path) | Shape::Thin(path, _) => (path.bounds().top(), path.bounds().bottom()),
+            Shape::Picture(_, window) => (window.y0 as f32, window.y1 as f32),
+        })
         .collect();
     let mut paint = Paint { anti_alias: colour != PngColour::BlackWhite, ..Paint::default() };
     paint.set_color(Color::BLACK);
+    let mut dithered = false;
     let mut row = Vec::with_capacity(width * 4);
     let mut top = 0;
     while top < pixels[1] {
@@ -147,6 +169,13 @@ fn write(scene: &Prepared, options: PngOptions, out: impl Write, band_bytes: usi
                     Shape::Fill(path) => band.fill_path(path, &paint, FillRule::Winding, shift, None),
                     Shape::EvenOdd(path) => band.fill_path(path, &paint, FillRule::EvenOdd, shift, None),
                     Shape::Thin(line, stroke) => band.stroke_path(line, &paint, stroke, shift, None),
+                    Shape::Picture(picture, window) => {
+                        let (r0, r1) = (window.y0.max(top), window.y1.min(top + n));
+                        if r0 < r1 {
+                            let cut = GridWindow { y0: r0, y1: r1, ..*window };
+                            dithered |= composite(&mut band, top, picture, cut, pictures, &asked, k, colour)?;
+                        }
+                    }
                 }
             }
         }
@@ -170,7 +199,78 @@ fn write(scene: &Prepared, options: PngOptions, out: impl Write, band_bytes: usi
     }
     stream.finish().map_err(png_error)?;
     header.finish().map_err(png_error)?;
-    Ok(PngReport { grid: on.report, pixels })
+    Ok(PngReport { grid: on.report, pixels, dithered })
+}
+
+/// The whole sheet's pixel grid at `dpi`, its limit named when a side is too long.
+fn sheet_grid(size_mm: Vec2, dpi: f64) -> Result<PixelGrid> {
+    PixelGrid::sheet(size_mm, dpi).map_err(|e| {
+        IoError::Invalid(match e {
+            PixelGridError::TooLarge { pixels } => {
+                format!("a sheet PNG side of {pixels:.0} px at {dpi} dpi is over the limit of {MAX_SIDE_PX} px")
+            }
+            PixelGridError::Invalid => format!("the sheet PNG: {e}"),
+        })
+    })
+}
+
+/// The 8 × 8 ordered-dither thresholds, 0 to 63, by row and column.
+const BAYER: [[u8; 8]; 8] = [
+    [0, 32, 8, 40, 2, 34, 10, 42],
+    [48, 16, 56, 24, 50, 18, 58, 26],
+    [12, 44, 4, 36, 14, 46, 6, 38],
+    [60, 28, 52, 20, 62, 30, 54, 22],
+    [3, 35, 11, 43, 1, 33, 9, 41],
+    [51, 19, 59, 27, 49, 17, 57, 25],
+    [15, 47, 7, 39, 13, 45, 5, 37],
+    [63, 31, 55, 23, 61, 29, 53, 21],
+];
+
+/// Picture `picture`'s pixels in `window` (sheet rows inside the band that starts at row `top`)
+/// over what the band holds: source-over in sRGB, its alpha times its opacity. They are asked for
+/// on `asked`, the sheet's grid or one `k` times coarser, each of whose pixels covers k × k of the
+/// sheet's. In black and white each pixel is dithered at its place on the sheet; true when one was.
+#[allow(clippy::too_many_arguments)]
+fn composite(
+    band: &mut Pixmap,
+    top: u32,
+    picture: &Picture,
+    window: GridWindow,
+    pictures: &dyn Pictures,
+    asked: &PixelGrid,
+    k: u32,
+    colour: PngColour,
+) -> Result<bool> {
+    let source = picture.source;
+    let coarse =
+        GridWindow { x0: window.x0 / k, y0: window.y0 / k, x1: window.x1.div_ceil(k).min(asked.width), y1: window.y1.div_ceil(k).min(asked.height) };
+    let columns = coarse.x1.saturating_sub(coarse.x0) as usize;
+    let rgba = pictures.rows(source, asked, coarse).map_err(|e| IoError::Invalid(format!("picture {source}: {e}")))?;
+    let expected = columns * coarse.y1.saturating_sub(coarse.y0) as usize * 4;
+    if rgba.len() != expected {
+        return Err(IoError::Invalid(format!("picture {source}: {} bytes where {expected} were asked for", rgba.len())));
+    }
+    let width = band.width() as usize;
+    let pixels = band.pixels_mut();
+    for y in window.y0..window.y1 {
+        for x in window.x0..window.x1 {
+            let at = ((y / k - coarse.y0) as usize * columns + (x / k - coarse.x0) as usize) * 4;
+            let (Some(&[r, g, b, a]), Some(under)) = (rgba.get(at..at + 4), pixels.get_mut((y + MARGIN - top) as usize * width + x as usize)) else {
+                continue;
+            };
+            let alpha = f32::from(a) / 255.0 * picture.opacity as f32;
+            let out_a = (255.0 * alpha + f32::from(under.alpha()) * (1.0 - alpha)).round() as u8;
+            let channel = |src: u8, dst: u8| ((f32::from(src) * alpha + f32::from(dst) * (1.0 - alpha)).round() as u8).min(out_a);
+            let mut out = [channel(r, under.red()), channel(g, under.green()), channel(b, under.blue())];
+            if colour == PngColour::BlackWhite {
+                // The paper is white and opaque here, so the premultiplied channels are the colour.
+                let threshold = BAYER[(y % 8) as usize][(x % 8) as usize] * 4 + 2;
+                out = [if luma(out[0], out[1], out[2]) < threshold { 0 } else { 255 }; 3];
+            }
+            *under = PremultipliedColorU8::from_rgba(out[0], out[1], out[2], out_a).unwrap_or(*under);
+        }
+    }
+    Ok(colour == PngColour::BlackWhite)
 }
 
 /// What a band draws for one item.
@@ -181,6 +281,8 @@ enum Shape {
     EvenOdd(Path),
     /// A line under a pixel wide, stroked as a hairline.
     Thin(Path, Stroke),
+    /// A picture, and the pixels of the sheet it covers.
+    Picture(Picture, GridWindow),
 }
 
 /// The luma of an sRGB pixel, Rec. 709's weights in 256ths.
@@ -208,7 +310,7 @@ impl Sheet {
         if self.points > MAX_POINTS {
             return Err(IoError::Invalid(format!("the sheet needs over {MAX_POINTS} points at this resolution")));
         }
-        let at = |p: solidcraft_geom::Vec2| ((p.x * self.px) as f32, ((self.height - p.y) * self.px) as f32);
+        let at = |p: Vec2| ((p.x * self.px) as f32, ((self.height - p.y) * self.px) as f32);
         for (i, p) in points.into_iter().enumerate() {
             let (x, y) = at(p);
             if i == 0 { builder.move_to(x, y) } else { builder.line_to(x, y) }
