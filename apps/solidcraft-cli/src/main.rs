@@ -51,6 +51,7 @@ mod profiling;
 mod recipe;
 mod render;
 mod spatial;
+mod xr_info;
 
 use std::process::ExitCode;
 
@@ -126,6 +127,8 @@ const USAGE_CRASHES: &str = "  solidcraft-cli crashes [list [--json] | show <id>
 const USAGE_LICENCES: &str = "  solidcraft-cli licences\n";
 /// `gpu`'s lines in the usage.
 const USAGE_GPU: &str = "  solidcraft-cli gpu [--policy auto|hardware|software|cpu]\n      (the GPU adapters a headless render can open, best first, the one the policy picks and the tier it\n       lands on: gpu, gpu-software, or the CPU rasterizer (auto with no adapter, or cpu); the policy defaults\n       to SOLIDCRAFT_GPU, else auto; exits with an error when hardware or software finds no such adapter)\n";
+/// `xr-info`'s lines in the usage.
+const USAGE_XR_INFO: &str = "  solidcraft-cli xr-info\n      (probe the OpenXR runtime, head-mounted display and Vulkan compatibility; Phase 0 of #2172)\n";
 /// `icon`'s lines in the usage.
 const USAGE_ICON: &str = "  solidcraft-cli icon --out icon.png [--size 256] | --out icon.ico\n";
 /// `fuzz-one`'s lines in the usage: a seed and the flags of one fuzz run.
@@ -166,6 +169,7 @@ const COMMANDS: &[Command] = &[
     Command { name: "licences", usage: USAGE_LICENCES, listed: true },
     Command { name: "licenses", usage: USAGE_LICENCES, listed: false },
     Command { name: "gpu", usage: USAGE_GPU, listed: true },
+    Command { name: "xr-info", usage: USAGE_XR_INFO, listed: true },
     Command { name: "icon", usage: USAGE_ICON, listed: true },
     Command { name: "bench-edit", usage: USAGE_BENCH_EDIT, listed: false },
     Command { name: "save-stress", usage: USAGE_SAVE_STRESS, listed: false },
@@ -217,6 +221,7 @@ fn main() -> ExitCode {
         Some("render") => render::run(&args[1..]),
         Some("exec") => cmd_exec(&args[1..]),
         Some("gpu") => cmd_gpu(&args[1..]),
+        Some("xr-info") => xr_info::cmd(&args[1..]),
         Some("commands") => {
             use std::io::Write as _;
             let mut s = Session::default();
