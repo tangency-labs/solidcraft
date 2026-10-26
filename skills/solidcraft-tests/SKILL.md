@@ -20,6 +20,7 @@ A failing test without its fix cannot merge: it turns `main` red for everyone. I
 ## Running
 - `cargo xtask test` builds with the `ci` profile and runs every test binary at once; arguments after `--` go to each binary (`cargo xtask test -- shell`). Use the `ci` profile: it builds several times faster than `--release`, and debug assertions are off because truck's reject valid geometry. If a test fails only in a plain debug build, say so in the PR.
 - `SOLIDCRAFT_TEST_JOBS=N` bounds concurrent commands on a shared machine.
+- On a shared machine, run Cargo builds serially; do not start concurrent Cargo builds. Do not run `cargo clean` without the user's explicit authorization.
 - `cargo xtask ci` is the gate before a commit: fmt, assets, icons, licences, lists, layers, ui-containers, clippy `-D warnings`, tests and the wasm check.
 - Every test runs in its own process: do not rely on state left by another test, or on wall-clock timing.
 

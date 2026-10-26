@@ -26,7 +26,7 @@ What the prototype uses:
 | Direction | Message | Use |
 |---|---|---|
 | → agent | `initialize {protocolVersion: 1, clientCapabilities, clientInfo}` | We declare no file system and no terminal (`fs.readTextFile/writeTextFile: false`, `terminal: false`), and terminal login (`auth.terminal: true`, plus the older `_meta["terminal-auth"]`). The reply carries `agentInfo` and `authMethods`. |
-| → agent | `session/new {cwd, mcpServers}` | `mcpServers` holds one stdio server: `solidcraft-cli mcp --connect 127.0.0.1:PORT`. `cwd` is the open design's folder (else SolidCraft's own `agent` folder). The system note goes in the standard `systemPrompt` field when the agent offers `sessionCapabilities.systemPrompt`, in `_meta.antigravity.systemPrompt.append` when Antigravity offers that, and always in `_meta.systemPrompt.append` for the Claude adapter. An agent with none of these doesn't get it. |
+| → agent | `session/new {cwd, mcpServers}` | `mcpServers` holds one stdio server named `solidcraft-app`: `solidcraft-cli mcp --connect 127.0.0.1:PORT`. Its `env` contains ACP `name`/`value` entries for `XDG_DATA_HOME` (when set) and the effective `SOLIDCRAFT_CONTROL_DIR`. No token is sent to the agent. `cwd` is the open design's folder (else SolidCraft's own `agent` folder). The system note goes in the standard `systemPrompt` field when the agent offers `sessionCapabilities.systemPrompt`, in `_meta.antigravity.systemPrompt.append` when Antigravity offers that, and always in `_meta.systemPrompt.append` for the Claude adapter. An agent with none of these doesn't get it. |
 | → agent | `session/set_config_option {sessionId, configId, value}` | Set an advertised select option, including a model, reasoning effort or mode. The complete returned `configOptions` snapshot confirms the state; rejection leaves the previous confirmed snapshot intact. |
 | → agent | `session/prompt {sessionId, prompt: [content]}` | One text block. The reply comes at the end of the turn with `stopReason` (`end_turn`, `cancelled`, `refusal`, …). |
 | → agent | `session/cancel {sessionId}` (notification) | Cancel button. Open permission prompts are answered `cancelled` first, as the spec asks. |
@@ -170,6 +170,36 @@ Requests from that endpoint don't go to the app directly. `pump_tools` passes ea
 
 What runs goes to the same queue as the control channel's held requests, so file loads, the
 agent cursor and the per-request folder scope all apply as for any other client.
+
+### ACP/MCP control-token discovery
+
+The original failure was `unauthorized: send the control token as "token"` when the ACP agent's
+MCP child called the SolidCraft control endpoint. The endpoint creates a random token for its
+port and writes it to `control_auth::token_path(port)`. The CLI's `Remote` parses the port from
+`--connect` and looks up that port's token file for each control request; it does not rely on
+`current.port` when the connection has an explicit port.
+
+The token directory can be overridden by `SOLIDCRAFT_CONTROL_DIR`; otherwise it comes from the
+platform data directory, which uses `XDG_DATA_HOME` on Linux. Forwarding `XDG_DATA_HOME` alone
+does not communicate an explicit `SOLIDCRAFT_CONTROL_DIR` override to an MCP subprocess. The
+bridge now derives the directory from `control_auth::token_path(self.port)` and supplies it as
+`SOLIDCRAFT_CONTROL_DIR`, while retaining `XDG_DATA_HOME` for other data lookups. Both are
+serialized as ACP `env` entries (`{name, value}`). The token itself remains in the private
+per-port file and is not included in ACP session configuration, arguments, or logs. The test ACP
+agent applies the received `env` entries when it starts the MCP child.
+
+This diagnosis is consistent with the path-resolution code and the functional result below. A
+new SolidCraft session authenticated successfully and ran the real `solidcraft-app.inspect_design`
+tool against the open **Sample Plate** project. It returned `dirty: false` and geometry
+information, made no design changes, and did not return `unauthorized`. This validates the tested
+environment; it does not establish behavior for every environment override or for multiple
+simultaneous instances.
+
+The release app was built with `cargo build --release -p solidcraft --bin solidcraft -j 1`
+(`CARGO_BUILD_JOBS=1` and `nice -n 10` were also applied). The build succeeded with exit code 0
+in about 26 minutes and 6 seconds. A previous parallel/heavy build had coincided with a system
+freeze, so keep app builds serialized and avoid concurrent Cargo builds. Do not use `cargo clean`
+without explicit authorization; Cargo can reuse compatible artifacts from `target`.
 
 ### One undo step per message
 
