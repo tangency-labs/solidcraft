@@ -738,6 +738,19 @@ impl SurfOfExtrusion {
         Ok(Cow::Owned(copy.base))
     }
 
+    /// The inherited NURB as `GetOrCreateGwNurbPointer` leaves it for a query whose
+    /// missing NURB reads as a failure (`GetDegree`, `GetNumberControlPoints`,
+    /// `GetKnots`, ...): [`SurfOfExtrusion::base_with_nurb`], or the base itself, still
+    /// without a NURB, when the make fails (upstream ignores `MakeNurb`'s status).
+    /// [`SolidError::Unported`] is passed on.
+    pub(crate) fn base_with_nurb_or_base(&self, k: &Kernel) -> Result<Cow<'_, BSplineSurface>> {
+        match self.base_with_nurb(k) {
+            Ok(b) => Ok(b),
+            Err(e) if e.is_unported() => Err(e),
+            Err(_) => Ok(Cow::Borrowed(&self.base)),
+        }
+    }
+
     /// The recogniser's lazy B-spline generator has the STEP interval as its NURB
     /// interval. Read that domain without making a NURB or choosing a kernel.
     pub(crate) fn natural_uv_domain_for_query(&self) -> Extent2d {

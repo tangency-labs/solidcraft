@@ -785,9 +785,9 @@ fn rust_surface_op(k: &Kernel, op: &OpIn, this: &CbsIn) -> Result<Run, HarnessEr
             push_dom(o, &s.step_uv_domain());
             o.push(s.degree(SurfParamType::U) as f64);
             o.push(s.degree(SurfParamType::V) as f64);
-            o.push(s.number_control_points(SurfParamType::U) as f64);
-            o.push(s.number_control_points(SurfParamType::V) as f64);
-            o.push(flag(s.is_bilinear()));
+            o.push(s.number_control_points(k, SurfParamType::U) as f64);
+            o.push(s.number_control_points(k, SurfParamType::V) as f64);
+            o.push(flag(s.is_bilinear(k)));
             o.push(s.type_code() as f64);
             for &t in types {
                 o.push(flag(s.is_kind_of(t)?));
@@ -801,7 +801,7 @@ fn rust_surface_op(k: &Kernel, op: &OpIn, this: &CbsIn) -> Result<Run, HarnessEr
             let mut o = vec![0.0];
             let r = (|| -> solidcore::Result<()> {
                 o.push(st(s.knots(SurfParamType::U, None))?);
-                o.push(flag(s.is_parallel_to_vector(v)?));
+                o.push(flag(s.is_parallel_to_vector(k, v)?));
                 push_dom(&mut o, &s.max_analytic_domain(k)?);
                 o.push(st(s.copy(k))?);
                 o.push(st(s.copy_and_add_analytics(k))?);

@@ -154,12 +154,12 @@ impl SurfPtGlobalSolver<'_> {
         // Similar for just a few control points.
         let surface = self.base.surface();
         let num_cpts =
-            i32::try_from(surface.number_control_points(SurfParamType::U)).unwrap_or(i32::MAX);
+            i32::try_from(surface.number_control_points(k, SurfParamType::U)).unwrap_or(i32::MAX);
         if num_cpts < grid_size_u && num_cpts > 0 {
             grid_size_u = num_cpts;
         }
         let num_cpts =
-            i32::try_from(surface.number_control_points(SurfParamType::V)).unwrap_or(i32::MAX);
+            i32::try_from(surface.number_control_points(k, SurfParamType::V)).unwrap_or(i32::MAX);
         if num_cpts < grid_size_v && num_cpts > 0 {
             grid_size_v = num_cpts;
         }

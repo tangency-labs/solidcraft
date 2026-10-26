@@ -901,7 +901,7 @@ impl Hcr {
                 .as_ref()
                 .ok_or(undefined("face without surface"))?;
             // skip faces not parallel to viewing direction
-            if !surface.is_parallel_to_vector(z_vector)? {
+            if !surface.is_parallel_to_vector(k, z_vector)? {
                 continue;
             }
             // This face is parallel to the view vector.
@@ -1420,7 +1420,7 @@ impl Hcr {
                     .surface
                     .as_ref()
                     .ok_or(undefined("face without surface"))?
-                    .is_parallel_to_vector(z_vector)?
+                    .is_parallel_to_vector(k, z_vector)?
                 {
                     continue;
                 }

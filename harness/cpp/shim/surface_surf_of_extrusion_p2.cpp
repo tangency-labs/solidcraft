@@ -3,7 +3,8 @@
 // Wraps the SmSurfOfExtrusion members owned by the unit (source/SMLib/src/SmSurfOfExtrusion.cpp):
 // GlobalSurfaceIntersect, IntersectWithPlane, IntersectWithCylinder,
 // IntersectWithSurfOfExtrusion, IsNurbSurfaceSurfOfExtrusion, TrimWithDomain and ReadFromDB; and
-// (OP_LAZY) SmSurface queries on a recognised surface before its lazy NURB exists.
+// (OP_LAZY) SmSurface queries on a recognised surface before its lazy NURB exists, among them
+// a copy of SmSurface.cpp's file-local sm_CrossedSeamOrPole.
 //
 // One entry point, sc_surface_surf_of_extrusion_p2_eval(op, in, n_in, bytes, n_bytes, out, cap,
 // out_len). Layouts are documented in crates/solidcore-ffi/src/units/surface_surf_of_extrusion_p2.rs,
@@ -81,6 +82,12 @@ enum : int32_t
     Q_EXTEND = 5,
     Q_EXTEND_DIR = 6,
     Q_PLANAR = 7,
+    Q_NUM_CPTS = 8,
+    Q_BILINEAR = 9,
+    Q_PARALLEL = 10,
+    Q_KNOTS = 11,
+    Q_SEAM = 12,
+    Q_TESS_SPLITS = 13,
 };
 
 // Generator kinds.
@@ -672,6 +679,46 @@ void put_nurb(std::vector<double>& o, const gw_SURFACE* sur)
         o.push_back(sur->knv->U[i]);
 }
 
+// Copy of the file-local sm_CrossedSeamOrPole of SmSurface.cpp.
+SmBoolean crossed_seam_or_pole(SmSurface* pSurf, const SmPoint2d& crPrevUV, const SmPoint2d& crCurrUV,
+                               const SmExtent2d& crDomain)
+{
+    // First special cases: SmPlane or bilinear.
+    if (pSurf->GetType() == SmPlane_TYPE)
+    {
+        return FALSE;
+    }
+
+    SmBSplineSurface* pBSp = SM_CAST_PTR(SmBSplineSurface, pSurf);
+    if (pBSp != NULL) // The cast will return Null if nto an SmBSplineSurface.
+    {
+        if (pBSp->GetDegree(SM_SP_U) == 1 && pBSp->GetDegree(SM_SP_V) == 1)
+        {
+            return FALSE;
+        }
+    }
+
+    // Just look for a big jump.
+    SmVector2d sStepVec(crCurrUV - crPrevUV);
+    constexpr double sdMaxStepRatio = 0.4;
+
+    // Check u and v separately.
+    double dDomSizeU = crDomain.GetUInterval().GetLength();
+    double dDomSizeV = crDomain.GetVInterval().GetLength();
+
+    if (smos_Fabs(sStepVec.x) > sdMaxStepRatio * dDomSizeU)
+    {
+        return TRUE;
+    }
+
+    if (smos_Fabs(sStepVec.y) > sdMaxStepRatio * dDomSizeV)
+    {
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
 // An OP_LAZY query `q ...` on `s` through the SmSurface virtuals (layouts in the FFI docs).
 void lazy_query(Rd& rd, const SmContext& ctx, SmSurface* s, std::vector<double>& o)
 {
@@ -763,6 +810,71 @@ void lazy_query(Rd& rd, const SmContext& ctx, SmSurface* s, std::vector<double>&
         put_vec(o, pt);
         put_vec(o, n);
         o.push_back(dev);
+        break;
+    }
+    case Q_NUM_CPTS:
+    {
+        SmSurfParamType dir = (SmSurfParamType)rd.idx();
+        o.push_back((double)s->GetNumberControlPoints(dir));
+        break;
+    }
+    case Q_BILINEAR: o.push_back(flg(s->IsBilinear())); break;
+    case Q_PARALLEL:
+    {
+        SmVector3d v = rd.vec();
+        o.push_back(flg(s->IsParallelToVector(v)));
+        break;
+    }
+    case Q_KNOTS:
+    {
+        SmSurfParamType dir = (SmSurfParamType)rd.idx();
+        bool has = rd.flag();
+        double lo = rd.num();
+        double hi = rd.num();
+        SmExtent1d ivl(lo, hi);
+        SmTArray<double> knots;
+        SmTArray<ULONG> mults;
+        SmStatus stt = s->GetKnots(dir, knots, &mults, has ? &ivl : NULL);
+        o.push_back(st(stt));
+        if (stt == SM_SUCCESS)
+        {
+            o.push_back((double)knots.GetSize());
+            for (ULONG i = 0; i < knots.GetSize(); i++)
+                o.push_back(knots[i]);
+            o.push_back((double)mults.GetSize());
+            for (ULONG i = 0; i < mults.GetSize(); i++)
+                o.push_back((double)mults[i]);
+        }
+        break;
+    }
+    case Q_SEAM:
+    {
+        double pu = rd.num();
+        double pv = rd.num();
+        double cu = rd.num();
+        double cv = rd.num();
+        SmExtent2d d = rd.domain();
+        o.push_back(flg(crossed_seam_or_pole(s, SmPoint2d(pu, pv), SmPoint2d(cu, cv), d)));
+        break;
+    }
+    case Q_TESS_SPLITS:
+    {
+        SmSurfParamType dir = (SmSurfParamType)rd.idx();
+        SmExtent2d d = rd.domain();
+        double chord = rd.num();
+        double angle = rd.num();
+        double side = rd.num();
+        bool diagonals = rd.flag();
+        SmTArray<double> splits;
+        SmStatus stt =
+            s->FindTessellationSplits(dir, d, chord, angle, side, splits, diagonals ? TRUE : FALSE);
+        o.push_back(st(stt));
+        if (stt == SM_SUCCESS)
+        {
+            o.push_back((double)splits.GetSize());
+            for (ULONG i = 0; i < splits.GetSize(); i++)
+                o.push_back(splits[i]);
+        }
         break;
     }
     default: break;

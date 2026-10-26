@@ -770,7 +770,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
             (false, 0) => domain.min().y,
             (false, _) => domain.max().y,
         };
-        let iso = implicit_iso(leaf.eval, dir, constant, side == 0)?;
+        let iso = implicit_iso(k, leaf.eval, dir, constant, side == 0)?;
         if iso.is_degenerate(k, EFF_ZERO, None)? {
             return Ok(false);
         }

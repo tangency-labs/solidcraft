@@ -1910,7 +1910,7 @@ impl Plane {
             }
 
             // If the other surface is a plane as well, we're done (bilinear suffices).
-            if other.is_bilinear() {
+            if other.is_bilinear(k) {
                 res.max_distance = sqrt(dist_sq);
                 res.are_coincident = true;
                 return Ok(res);

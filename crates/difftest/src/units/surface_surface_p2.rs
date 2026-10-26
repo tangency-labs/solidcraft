@@ -1386,9 +1386,9 @@ fn rust_surface_op(k: &Kernel, op: &OpIn, t: &This) -> Result<Run, HarnessError>
                     o.extend([
                         x.degree(SurfParamType::U) as f64,
                         x.degree(SurfParamType::V) as f64,
-                        x.number_control_points(SurfParamType::U) as f64,
-                        x.number_control_points(SurfParamType::V) as f64,
-                        flag(x.is_bilinear()),
+                        x.number_control_points(k, SurfParamType::U) as f64,
+                        x.number_control_points(k, SurfParamType::V) as f64,
+                        flag(x.is_bilinear(k)),
                         x.type_code() as f64,
                     ]);
                     push_str(o, x.type_string());
@@ -1435,7 +1435,7 @@ fn rust_surface_op(k: &Kernel, op: &OpIn, t: &This) -> Result<Run, HarnessError>
         }
         OpIn::Parallel { v } => record(|o| {
             let r = match &s {
-                Some(x) => x.is_parallel_to_vector(v3(*v))?,
+                Some(x) => x.is_parallel_to_vector(k, v3(*v))?,
                 None => sp2::base_is_parallel_to_vector(),
             };
             o.push(flag(r));

@@ -925,7 +925,7 @@ impl Surface {
 
         // If both surfaces are bilinear, we're done.  (Four positions uniquely determine
         // a bilinear surface.)
-        if self.is_bilinear() && other.is_bilinear() {
+        if self.is_bilinear(k) && other.is_bilinear(k) {
             // We're done: finish up and return.  Union the projection of Other surface on
             // our domain with our original domain, and update our domain to it.
             let orig_domain = self.step_uv_domain();

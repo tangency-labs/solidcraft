@@ -30,6 +30,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use solidcore::geom::axis2_placement::Axis2Placement;
+use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::geom_utility::p2::ContinuityType;
 use solidcore::geom::vector2d::{Point2, Vec2};
 use solidcore::geom::vector3d::Vec3;
@@ -43,6 +44,7 @@ use solidcore::surface::cone::Cone;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::surf_of_extrusion::p2::{ExtrusionIntersection, IntersectTarget};
 use solidcore::surface::surf_of_extrusion::SurfOfExtrusion;
+use solidcore::surface::surface::p1::crossed_seam_or_pole;
 use solidcore::surface::surface::{Surface, SurfaceKind};
 use solidcore::topology::database_io::{DatabaseReader, FileType};
 use solidcore_ffi::units::surface_surf_of_extrusion_p2 as ffi;
@@ -313,6 +315,32 @@ enum QueryIn {
     },
     Planar {
         tol: f64,
+    },
+    NumCpts {
+        dir: u8,
+    },
+    Bilinear,
+    Parallel {
+        v: [f64; 3],
+    },
+    Knots {
+        dir: u8,
+        #[serde(default)]
+        ivl: Option<[f64; 2]>,
+    },
+    Seam {
+        prev: [f64; 2],
+        curr: [f64; 2],
+        dom: [f64; 4],
+    },
+    TessSplits {
+        dir: u8,
+        dom: [f64; 4],
+        chord: f64,
+        angle: f64,
+        max_side: f64,
+        #[serde(default)]
+        diagonals: bool,
     },
 }
 
@@ -688,6 +716,26 @@ fn ffi_query(q: &QueryIn) -> ffi::Query {
         QueryIn::DegenCurve { ang, dom, tol } => ffi::Query::DegenCurve { ang, dom, tol },
         QueryIn::Extend { dir, dist, cont } => ffi::Query::Extend { dir, dist, cont },
         QueryIn::Planar { tol } => ffi::Query::Planar { tol },
+        QueryIn::NumCpts { dir } => ffi::Query::NumCpts { dir },
+        QueryIn::Bilinear => ffi::Query::Bilinear,
+        QueryIn::Parallel { v } => ffi::Query::Parallel { v },
+        QueryIn::Knots { dir, ivl } => ffi::Query::Knots { dir, ivl },
+        QueryIn::Seam { prev, curr, dom } => ffi::Query::Seam { prev, curr, dom },
+        QueryIn::TessSplits {
+            dir,
+            dom,
+            chord,
+            angle,
+            max_side,
+            diagonals,
+        } => ffi::Query::TessSplits {
+            dir,
+            dom,
+            chord,
+            angle,
+            max_side,
+            diagonals,
+        },
     }
 }
 
@@ -1225,8 +1273,58 @@ fn rust_query(k: &Kernel, s: &Surface, q: &QueryIn, o: &mut Vec<f64>) -> Result<
                 o.push(-1.0);
             }
         },
+        QueryIn::NumCpts { dir } => {
+            let n = param_code(dir).map_or(0, |p| s.number_control_points(k, p));
+            o.push(n as f64);
+        }
+        QueryIn::Bilinear => o.push(flag(s.is_bilinear(k))),
+        QueryIn::Parallel { v } => {
+            truth(o, s.is_parallel_to_vector(k, Vec3::new(v[0], v[1], v[2])))?;
+        }
+        QueryIn::Knots { dir, ivl } => {
+            let ivl = ivl.map(|[a, b]| Extent1d::from_min_max(a, b));
+            let r = param_code(dir).and_then(|p| s.knots_with_nurb(k, p, ivl.as_ref()));
+            if let Some((knots, mults)) = st(o, r)? {
+                o.push(knots.len() as f64);
+                o.extend_from_slice(&knots);
+                o.push(mults.len() as f64);
+                o.extend(mults.iter().map(|&m| m as f64));
+            }
+        }
+        QueryIn::Seam { prev, curr, dom } => {
+            let r = crossed_seam_or_pole(
+                k,
+                s,
+                Point2::new(prev[0], prev[1]),
+                Point2::new(curr[0], curr[1]),
+                &dom4(dom),
+            );
+            truth(o, r)?;
+        }
+        QueryIn::TessSplits {
+            dir,
+            dom,
+            chord,
+            angle,
+            max_side,
+            diagonals,
+        } => {
+            let r = param_code(dir).and_then(|p| {
+                s.find_tessellation_splits(k, p, &dom4(dom), chord, angle, max_side, diagonals)
+            });
+            if let Some(splits) = st(o, r)? {
+                o.push(splits.len() as f64);
+                o.extend_from_slice(&splits);
+            }
+        }
     }
     Ok(())
+}
+
+/// The `SmSurfParamType` of code `c`.
+fn param_code(c: u8) -> solidcore::Result<SurfParamType> {
+    SurfParamType::from_code(u64::from(c))
+        .ok_or_else(|| solidcore::SolidError::invalid_input("difftest", "parameter type"))
 }
 
 /// `SmContinuityType` by code (as the `surface.surface_p2` runner).

@@ -350,6 +350,67 @@ pub enum Query {
         /// `dTol3d`.
         tol: f64,
     },
+    /// `GetNumberControlPoints(dir)`.
+    NumCpts {
+        /// `SmSurfParamType` code (`0..=9`).
+        dir: u8,
+    },
+    /// `IsBilinear()`.
+    Bilinear,
+    /// `IsParallelToVector(v)`.
+    Parallel {
+        /// The vector.
+        v: [f64; 3],
+    },
+    /// `GetKnots(dir, knots, &mults, ivl)`.
+    Knots {
+        /// `SmSurfParamType` code (`0..=9`).
+        dir: u8,
+        /// `pOptIvl` (`[min, max]`, ordered).
+        ivl: Option<[f64; 2]>,
+    },
+    /// `sm_CrossedSeamOrPole(s, prev, curr, domain)` (the shim's copy of the file-local
+    /// helper).
+    Seam {
+        /// `crPrevUV`.
+        prev: [f64; 2],
+        /// `crCurrUV`.
+        curr: [f64; 2],
+        /// `crDomain`.
+        dom: [f64; 4],
+    },
+    /// `FindTessellationSplits(dir, domain, chord, angle, max_side, splits, diagonals)`.
+    TessSplits {
+        /// `SM_SP_U` (0) or `SM_SP_V` (1).
+        dir: u8,
+        /// `crUVDomain`.
+        dom: [f64; 4],
+        /// `dChordHeightTolerance`.
+        chord: f64,
+        /// `dAngleTolDeg` (`0` or `1..=90` in magnitude).
+        angle: f64,
+        /// `dMaximumSideLength` (`<= 0`, or at least `1` and the net's size over it at
+        /// most `1e5`).
+        max_side: f64,
+        /// `bCheckDiagonals`.
+        diagonals: bool,
+    },
+}
+
+/// The largest `|x / w|`, `|y / w|` or `|z / w|` of an inline test NURB with positive
+/// weights (its iso curves stay in that box); `None` otherwise.
+fn test_net_size(test: &TestSurf) -> Option<f64> {
+    let TestSource::Raw(n) = &test.source else {
+        return None;
+    };
+    if test.perturb.is_some() || n.cpts.iter().any(|c| c[3].is_nan() || c[3] <= 0.0) {
+        return None;
+    }
+    Some(n.cpts.iter().fold(0.0_f64, |m, c| {
+        m.max((c[0] / c[3]).abs())
+            .max((c[1] / c[3]).abs())
+            .max((c[2] / c[3]).abs())
+    }))
 }
 
 /// A built surface whose extrusion vector's squared length overflows.
@@ -737,7 +798,9 @@ pub fn is_nurb(test: &TestSurf, scale: f64) -> Result<Vec<f64>, FfiError> {
 /// derivatives `x y z` (U order major). `BBox`: status, then on success the box corners.
 /// `DegenPoint`, `DegenCurve`: the flag. `Extend`: status, then on success the new
 /// surface's type, whether it has a NURB and that NURB (`p q n+1 m+1 cpts(x y z w) nu U nv
-/// V`). `Planar`: the flag, point, normal and deviation.
+/// V`). `Planar`: the flag, point, normal and deviation. `NumCpts`: the count.
+/// `Bilinear`, `Parallel`, `Seam`: the flag. `Knots`: status, then on success `n knots m
+/// mults`. `TessSplits`: status, then on success `n splits`.
 ///
 /// # Errors
 ///
@@ -819,6 +882,70 @@ pub fn lazy(test: &TestSurf, scale: f64, query: &Query) -> Result<Vec<f64>, FfiE
         Query::Planar { tol } => {
             finite(&[*tol], "planar tolerance")?;
             o.extend([7.0, *tol]);
+        }
+        Query::NumCpts { dir } => {
+            if *dir > 9 {
+                return Err(bad("parameter type out of range"));
+            }
+            o.extend([8.0, f64::from(*dir)]);
+        }
+        Query::Bilinear => o.push(9.0),
+        Query::Parallel { v } => {
+            finite(v, "parallel vector")?;
+            o.push(10.0);
+            o.extend_from_slice(v);
+        }
+        Query::Knots { dir, ivl } => {
+            if *dir > 9 {
+                return Err(bad("parameter type out of range"));
+            }
+            if let Some([a, b]) = ivl {
+                finite(&[*a, *b], "knot interval")?;
+                if a > b {
+                    return Err(bad("knot interval not ordered"));
+                }
+            }
+            let [a, b] = ivl.unwrap_or([0.0; 2]);
+            o.extend([11.0, f64::from(*dir), flag(ivl.is_some()), a, b]);
+        }
+        Query::Seam { prev, curr, dom } => {
+            finite(prev, "seam point")?;
+            finite(curr, "seam point")?;
+            domain(*dom, false, "seam domain")?;
+            o.push(12.0);
+            o.extend_from_slice(prev);
+            o.extend_from_slice(curr);
+            o.extend_from_slice(dom);
+        }
+        Query::TessSplits {
+            dir,
+            dom,
+            chord,
+            angle,
+            max_side,
+            diagonals,
+        } => {
+            finite(&[*chord, *angle, *max_side], "tessellation controls")?;
+            domain(*dom, false, "tessellation domain")?;
+            if *dir > 1 {
+                return Err(bad("tessellation direction out of range"));
+            }
+            if *angle != 0.0 && !(1.0..=90.0).contains(&angle.abs()) {
+                return Err(bad("tessellation angle out of range"));
+            }
+            // `FindTessellationSplits` converts `max_length / max_side + 1` to ULONG: for
+            // all-degenerate isos (`max_length = -1`) and `0 < max_side < 1` that is
+            // undefined, and a large count allocates that many splits
+            if *max_side > 0.0 {
+                let size = test_net_size(test)
+                    .ok_or_else(|| bad("tessellation needs an inline positive-weight net"))?;
+                if *max_side < 1.0 || size / *max_side > 1e5 {
+                    return Err(bad("tessellation maximum side out of range"));
+                }
+            }
+            o.extend([13.0, f64::from(*dir)]);
+            o.extend_from_slice(dom);
+            o.extend([*chord, *angle, *max_side, flag(*diagonals)]);
         }
     }
     call(OP_LAZY, &e.o, &e.bytes)

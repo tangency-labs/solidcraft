@@ -1802,7 +1802,7 @@ impl Surface {
         }
 
         // Next look for bilinear.
-        if !tried0 && self.is_bilinear() {
+        if !tried0 && self.is_bilinear(k) {
             tried0 = true;
             if try_cover(
                 k,
@@ -1817,7 +1817,7 @@ impl Surface {
                 return Ok(done(&mut st, false));
             }
         }
-        if !tried1 && other.is_bilinear() {
+        if !tried1 && other.is_bilinear(k) {
             tried1 = true;
             if try_cover(
                 k,
