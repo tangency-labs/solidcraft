@@ -49,7 +49,7 @@ async fn phase(name: &str, config: &str) -> Result<Value> {
         "online" => {
             let token = config.token.take().ok_or_else(|| storage("live-test credential missing"))?;
             // Test-only input, outside engine JSON, command recordings and repository files.
-            LocalSettings::open().await?.store_credential(config.connection.credential.clone(), Some(token)).await?;
+            LocalSettings::open().await?.store_credential(config.connection.credential.clone(), Some(zeroize::Zeroizing::new(token))).await?;
             let settings = Settings {
                 connections: vec![config.connection.clone()],
                 default_connection: Some(config.connection.id.clone()),

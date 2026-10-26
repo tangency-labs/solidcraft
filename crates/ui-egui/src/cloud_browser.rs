@@ -434,38 +434,24 @@ pub(crate) fn home(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     ui_kit::FileView::section(ui, tr("cloud.title"), t.space_10, |ui| {
         ui_kit::FileView::control_row(ui, |ui| {
-            if connection.is_none() {
-                if button(ui, "cloud:connect", tr("cmd.cloud.connect"), app.cloud.setup.is_none()) {
-                    app.start("cloud.connect");
-                }
-            } else {
-                let mut action = None;
-                let label = tr("cloud.add_storage");
-                let width = ui.painter().layout_no_wrap(label.into(), egui::FontId::proportional(t.font_label), t.form_ink).size().x
-                    + t.space_24
-                    + t.space_12 * 2.0;
-                let response = ui
-                    .add_enabled_ui(app.cloud.setup.is_none(), |ui| {
-                        ui_kit::settings_control_width(ui, width, |ui| {
-                            ui_kit::dropdown_menu(ui, "cloud_add_storage", label, |ui| {
-                                if ui_kit::button(ui, tr("cmd.cloud.connect"), ui_kit::Button::Normal).clicked() {
-                                    action = Some("cloud.connect");
-                                    ui.close();
-                                }
-                                #[cfg(not(target_arch = "wasm32"))]
-                                if ui_kit::button(ui, tr("cloud.git_add"), ui_kit::Button::Normal).clicked() {
-                                    action = Some("cloud.configure");
-                                    ui.close();
-                                }
-                            })
+            let mut action = None;
+            let label = tr("cloud.add_storage");
+            let width = ui.painter().layout_no_wrap(label.into(), egui::FontId::proportional(t.font_label), t.form_ink).size().x
+                + t.space_24
+                + t.space_12 * 2.0;
+            let response = ui
+                .add_enabled_ui(app.cloud.setup.is_none(), |ui| {
+                    ui_kit::settings_control_width(ui, width, |ui| {
+                        ui_kit::dropdown_menu(ui, "cloud_add_storage", label, |ui| {
+                            action = crate::cloud_setup::repository_choices(ui);
                         })
                     })
-                    .inner;
-                crate::scenario::publish_target("cloud:connect", response.rect);
-                crate::scenario::publish_target("cloud:add_storage", response.rect);
-                if let Some(command) = action {
-                    app.start(command);
-                }
+                })
+                .inner;
+            crate::scenario::publish_target("cloud:connect", response.rect);
+            crate::scenario::publish_target("cloud:add_storage", response.rect);
+            if let Some(command) = action {
+                app.start(command);
             }
             let saving = app.session.cloud_save_pending()
                 || app
@@ -657,7 +643,7 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let connections = app.session.cloud_settings().connections.clone();
     let previous_connection = picker.connection.clone();
     let (_, exists, valid) = destination(app, &picker);
-    let (closed, action) = ui_kit::Window::new(egui::Id::new("cloud_destination"), "save", tr("cmd.cloud.save"))
+    let (closed, action) = ui_kit::Window::new(egui::Id::unique("cloud_destination"), "save", tr("cmd.cloud.save"))
         .fields()
         .cards(2.0)
         .actions(tr("ui.save"), "Cancel", None)
@@ -705,9 +691,15 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
             });
             if picker.new_project {
                 ui_kit::row(ui, "", |ui| {
-                    let response =
-                        ui_kit::bounded_cell_editor(ui, egui::Id::new("cloud_save_project_name"), &mut picker.project, tr("ui.project"), false, 512);
-                    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), tr("ui.project")));
+                    let response = ui_kit::bounded_cell_editor(
+                        ui,
+                        egui::Id::unique("cloud_save_project_name"),
+                        &mut picker.project,
+                        tr("ui.project"),
+                        false,
+                        512,
+                    );
+                    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), tr("ui.project")));
                     crate::scenario::publish_target("cloud:project", response.rect);
                     if focus_project {
                         response.request_focus();
@@ -715,8 +707,8 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
                 });
             }
             ui_kit::row(ui, tr("cloud.design_name"), |ui| {
-                let response = ui_kit::bounded_cell_editor(ui, egui::Id::new("cloud_save_design_name"), &mut picker.name, "", false, 128);
-                response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::TextEdit, ui.is_enabled(), tr("cloud.design_name")));
+                let response = ui_kit::bounded_cell_editor(ui, egui::Id::unique("cloud_save_design_name"), &mut picker.name, "", false, 128);
+                response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::TextInput, ui.is_enabled(), tr("cloud.design_name")));
                 crate::scenario::publish_target("cloud:name", response.rect);
             });
             ui_kit::text(ui, tr("cloud.destination_hint"), ui_kit::Text::Hint("cloud_destination_hint"));

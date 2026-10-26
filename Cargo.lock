@@ -5258,6 +5258,7 @@ dependencies = [
  "gethostname",
  "gltf",
  "log",
+ "percent-encoding",
  "process-wrap",
  "quick-xml",
  "rand_chacha",
@@ -5276,6 +5277,7 @@ dependencies = [
  "ssh-key",
  "tempfile",
  "thiserror 2.0.21",
+ "url",
  "zeroize",
  "zip",
 ]
@@ -5442,6 +5444,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+ "zeroize",
 ]
 
 [[package]]

@@ -177,6 +177,42 @@ fn explicit_local_revision_opening_is_validated_before_submitting() {
 }
 
 #[test]
+fn repository_metadata_check_consumes_one_shot_credentials_without_saving_preferences() {
+    #[derive(Default)]
+    struct Checker(Mutex<Vec<(Connection, bool)>>);
+    impl Host for Checker {
+        fn submit(&self, _: Operation, _: String) -> solidcraft_cloud::Result<Job> {
+            panic!("metadata check must not run setup or publication");
+        }
+        fn check_repository(&self, connection: Connection, input: solidcraft_cloud::jobs::RepositoryCheckInput) -> solidcraft_cloud::Result<Job> {
+            let job = Job::new(connection.id.clone())?;
+            self.0.lock().unwrap().push((connection, input.token.is_some()));
+            job.update(|s| {
+                s.phase = Phase::Ready;
+                s.result = Some(json!({"exists":true}));
+            })?;
+            Ok(job)
+        }
+    }
+    let host = Arc::new(Checker::default());
+    let mut session = Session::default();
+    session.set_cloud_host(Some(host.clone()));
+    let proposed = solidcraft_cloud::setup::github_connection("work/designs").unwrap();
+    let params = json!({"proposed":proposed,"metadata_only":true});
+    session.set_cloud_repository_check_token(Some("unsaved-test-token".into())).unwrap();
+    let first = session.execute("cloud.test", &params).unwrap();
+    assert_eq!(session.cloud_operations().unwrap()[0].result, Some(json!({"exists":true})));
+    assert!(session.cloud.repository_check_input.is_none());
+    assert!(session.cloud_settings().connections.is_empty());
+    let second = session.execute("cloud.test", &params).unwrap();
+    assert_ne!(first["operation"], second["operation"]);
+    let checks = host.0.lock().unwrap();
+    assert_eq!(checks.as_slice(), &[(proposed.clone(), true), (proposed, false)]);
+    drop(checks);
+    assert!(session.execute("cloud.test", &json!({"proposed":params["proposed"],"metadata_only":true,"token":"must-not-enter-json"})).is_err());
+}
+
+#[test]
 fn a_proposed_connection_can_be_tested_without_changing_saved_preferences() {
     let (mut session, host, _) = configured();
     let before = session.cloud_settings().clone();

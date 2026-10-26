@@ -25,6 +25,7 @@ struct Repository {
     initialized: bool,
     write_denied: bool,
     automatic: bool,
+    not_found: bool,
 }
 
 impl Repository {
@@ -65,6 +66,9 @@ impl Repository {
             return (200, account);
         }
         if method == "GET" && (path == "/repos/owner/designs" || (self.automatic && path == "/repos/owner/solidcraft-designs")) {
+            if self.not_found {
+                return (404, json!({"message":"not found","documentation_url":URL}));
+            }
             if self.denied {
                 return (403, json!({"message":"denied","documentation_url":URL}));
             }
@@ -214,6 +218,33 @@ fn recover(save: &crate::StagedSave) -> Result<Snapshot> {
 fn run_test(future: impl std::future::Future<Output = ()>) {
     let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
     tokio::task::LocalSet::new().block_on(&runtime, future);
+}
+
+#[test]
+fn repository_existence_check_is_one_read_and_handles_private_or_missing_repositories() {
+    run_test(async {
+        for (missing, denied) in [(false, false), (true, false), (false, true)] {
+            let state = repository();
+            {
+                let mut state = state.lock().unwrap();
+                state.empty = true;
+                state.not_found = missing;
+                state.denied = denied;
+            }
+            let (api, _) = adapter(state.clone());
+            let result = super::exists(api.client, "owner/designs").await;
+            if denied {
+                assert!(result.is_err());
+            } else {
+                assert_eq!(result.unwrap(), !missing);
+            }
+            let state = state.lock().unwrap();
+            assert_eq!(state.requests.len(), 1);
+            assert_eq!(state.requests[0].0, "GET");
+            assert_eq!(state.requests[0].1, "/repos/owner/designs");
+            assert!(!state.initialized, "a preview check must not initialize or write the repository");
+        }
+    });
 }
 
 #[test]
