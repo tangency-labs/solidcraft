@@ -193,11 +193,7 @@ pub(super) fn run(s: &mut Session, p: &Value, circular: bool) -> Result<Value> {
         sk.patterns.insert(index.min(sk.patterns.len()), pattern);
         sk.update_pattern(index, kind)?;
         let pattern = sk.patterns.get(index).ok_or_else(|| bad(cmd, "missing sketch pattern"))?;
-        let curves: Vec<_> = pattern
-            .instances
-            .iter()
-            .flat_map(|instance| instance.curves.iter().take(reported_curve_count).cloned())
-            .collect();
+        let curves: Vec<_> = pattern.instances.iter().flat_map(|instance| instance.curves.iter().take(reported_curve_count).cloned()).collect();
         let constraints: Vec<_> = pattern.instances.iter().flat_map(|i| i.constraints.iter().cloned()).collect();
         Ok(json!({"pattern":id,"center":center_id,"curves":curves,"constraints":constraints}))
     })?;

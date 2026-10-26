@@ -233,11 +233,10 @@ impl Sketch {
                     .filter(|curve| matches!(curve.kind, CurveKind::Spline { .. }))
                     .map(|curve| curve.id.clone())
                     .collect();
-                let helpers = self
-                    .curves
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(index, curve)| curve.spline_handle_of.as_ref().is_some_and(|parent| spline_ids.contains(parent)).then_some(index));
+                let helpers =
+                    self.curves.iter().enumerate().filter_map(|(index, curve)| {
+                        curve.spline_handle_of.as_ref().is_some_and(|parent| spline_ids.contains(parent)).then_some(index)
+                    });
                 let mut seen: std::collections::BTreeSet<usize> = cs.iter().copied().collect();
                 cs.extend(helpers.filter(|index| seen.insert(*index)));
                 let ps: Vec<_> = entity_ids.iter().filter(|id| self.curve_index(id).is_none()).filter_map(|id| self.resolve_point(id)).collect();

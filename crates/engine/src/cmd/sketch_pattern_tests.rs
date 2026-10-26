@@ -535,6 +535,16 @@ fn patterned_arc_ellipse_spline_and_conic_follow_seed_geometry_exactly() {
         let mut s = new_sketch();
         let seed = ids(&run(&mut s, cmd, params)["curves"])[0].clone();
         let out = run(&mut s, "sketch.pattern.rectangular", json!({"entities":[seed],"count":3,"spacing":40}));
+        if cmd == "sketch.spline.fit_point" {
+            let sk = sketch(&s);
+            let helper_count = sk.curves.iter().filter(|curve| curve.spline_handle_of.as_deref() == Some(seed.as_str())).count();
+            assert!(helper_count > 0);
+            for copy in ids(&out["curves"]) {
+                let copy_id = &sk.curves[sk.curve_index(&copy).unwrap()].id;
+                assert_eq!(sk.curves.iter().filter(|curve| curve.spline_handle_of.as_deref() == Some(copy_id.as_str())).count(), helper_count);
+            }
+            assert!(sk.validate_spline_handles().is_ok());
+        }
         run(&mut s, "sketch.scale", json!({"entities":[seed],"base":"origin","factor":1.5}));
         let sk = sketch(&s);
         if matches!(sk.curves[sk.curve_index(&seed).unwrap()].kind, CurveKind::Conic { .. }) {
