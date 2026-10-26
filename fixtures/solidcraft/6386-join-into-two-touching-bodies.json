@@ -1,0 +1,358 @@
+{
+ "issue": "https://github.com/tangency-labs/solidcraft/issues/6386",
+ "pr": "https://github.com/tangency-labs/solidcraft/pull/4012",
+ "test": "none: not fixed on truck (kernel work paused under tangency-labs/solidcraft#3992); geometry is the issue's script, reproduced on 0.22.1 in its triage comment",
+ "summary": "solid.extrude joining a disc into two target bodies that touch, one stacked on the other, never finished on SolidCraft's truck kernel (0.21.0 and 0.22.1, 100 % CPU, stopped after 15 min and 180 s) when the bodies' outlines included a fit-point spline. Joining into one target and then combining the second, or a straight edge in place of the spline, finished in 0.5 s and 0.3 s. Not fixed on truck: kernel work is paused (tangency-labs/solidcraft#3992) and the `pr` link is the SMLib kernel move (tangency-labs/solidcraft#4012). Geometry is the issue's script: A, z 0..1, is the region bounded by y = 0, x = 0, x = 100 and the top edge from (0, 60) to (100, 60), less a hole of radius 3 at (50, 30); B, z 1..2, is the same with y = 5 in place of y = 0, so it sits on A's top face; C, z 0..1, is the disc that fills A's hole. SolidCraft's join unites the tool with the first target it meets and then each other target it meets with that (crates/doc/src/eval.rs), so the steps are union(union(A, C), B): C fills the hole flush against its wall and touches B's bottom face, and B's walls run on from A's on the same surfaces along the shared outline. The issue's fast variant (join into A, then Combine with B) is the same two unions at this level, so it is not a separate case. Approximated: this format's profiles have only lines, arcs and circles, so the spline (30 fit points sampling y = 60 + 6*sin(2*pi*x/100)) is two tangent arcs through the sine's extremes and zeros, within 0.43 mm of it. The arcs keep a smooth curved edge with an inflection on the faces A and B share, and solidcore's linear sweep makes an extruded partial arc a SurfOfExtrusion face, the surface an extruded spline gives; only the base curve is an arc instead of a B-spline, so this does not exercise B-spline intersections. Volumes are closed form: the area under the top edge is 6000 for the line and for the arcs (each arc's circular segment is added on one half and removed on the other; the sine over its full period gives 6000 as well), so A u C is 6000 and B is 5500. Each was cross-checked from the JSON segments (shoelace on the sampled loops within 1e-4, point membership of A u C u B on a 1000 x 1000 grid within its 3 mm^3 resolution). Tolerance 0.01 mm^3, as the other analytic cases.",
+ "cases": [
+  {
+   "name": "straight_edge",
+   "note": "Control: the top edge is a straight line from (0, 60) to (100, 60), the issue's straight-edge variant, which joined in 0.3 s on truck.",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "a",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        100,
+        60
+       ],
+       "to": [
+        100,
+        0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        100,
+        0
+       ],
+       "to": [
+        0,
+        0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        0,
+        0
+       ],
+       "to": [
+        0,
+        60
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        0,
+        60
+       ],
+       "to": [
+        100,
+        60
+       ]
+      },
+      {
+       "kind": "circle",
+       "center": [
+        50,
+        30
+       ],
+       "radius": 3
+      }
+     ],
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "distance": 1
+    },
+    {
+     "op": "extrude",
+     "id": "b",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        100,
+        60
+       ],
+       "to": [
+        100,
+        5
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        100,
+        5
+       ],
+       "to": [
+        0,
+        5
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        0,
+        5
+       ],
+       "to": [
+        0,
+        60
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        0,
+        60
+       ],
+       "to": [
+        100,
+        60
+       ]
+      }
+     ],
+     "origin": [
+      0,
+      0,
+      1
+     ],
+     "distance": 1
+    },
+    {
+     "op": "extrude",
+     "id": "c",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        50,
+        30
+       ],
+       "radius": 3
+      }
+     ],
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "distance": 1
+    },
+    {
+     "op": "union",
+     "id": "ac",
+     "a": "a",
+     "b": "c"
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "ac",
+     "b": "b"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 11500.0,
+     "tol": 0.01,
+     "formula": "A u C = 100*60 (z 0..1, C fills A's hole) + B = 100*(60 - 5) (z 1..2)"
+    }
+   }
+  },
+  {
+   "name": "curved_edge_two_arcs",
+   "note": "#6386 with its fit-point spline approximated: the top edge is two tangent arcs of radius 661/12, centres (25, 131/12) and (75, 1309/12), through (0, 60), (25, 66), (50, 60), (75, 54) and (100, 60), the extremes and zeros of the sine the issue's 30 fit points sample (y = 60 + 6*sin(2*pi*x/100)); within 0.43 mm of it. The format has no spline segment. With the spline the join into both targets never finished on truck.",
+   "steps": [
+    {
+     "op": "extrude",
+     "id": "a",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        100,
+        60
+       ],
+       "to": [
+        100,
+        0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        100,
+        0
+       ],
+       "to": [
+        0,
+        0
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        0,
+        0
+       ],
+       "to": [
+        0,
+        60
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        25,
+        10.916666666666666
+       ],
+       "radius": 55.083333333333336,
+       "start_deg": 63.008533438408385,
+       "end_deg": 116.99146656159161
+      },
+      {
+       "kind": "arc",
+       "center": [
+        75,
+        109.08333333333333
+       ],
+       "radius": 55.083333333333336,
+       "start_deg": 243.0085334384084,
+       "end_deg": 296.9914665615916
+      },
+      {
+       "kind": "circle",
+       "center": [
+        50,
+        30
+       ],
+       "radius": 3
+      }
+     ],
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "distance": 1
+    },
+    {
+     "op": "extrude",
+     "id": "b",
+     "profile": [
+      {
+       "kind": "line",
+       "from": [
+        100,
+        60
+       ],
+       "to": [
+        100,
+        5
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        100,
+        5
+       ],
+       "to": [
+        0,
+        5
+       ]
+      },
+      {
+       "kind": "line",
+       "from": [
+        0,
+        5
+       ],
+       "to": [
+        0,
+        60
+       ]
+      },
+      {
+       "kind": "arc",
+       "center": [
+        25,
+        10.916666666666666
+       ],
+       "radius": 55.083333333333336,
+       "start_deg": 63.008533438408385,
+       "end_deg": 116.99146656159161
+      },
+      {
+       "kind": "arc",
+       "center": [
+        75,
+        109.08333333333333
+       ],
+       "radius": 55.083333333333336,
+       "start_deg": 243.0085334384084,
+       "end_deg": 296.9914665615916
+      }
+     ],
+     "origin": [
+      0,
+      0,
+      1
+     ],
+     "distance": 1
+    },
+    {
+     "op": "extrude",
+     "id": "c",
+     "profile": [
+      {
+       "kind": "circle",
+       "center": [
+        50,
+        30
+       ],
+       "radius": 3
+      }
+     ],
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "distance": 1
+    },
+    {
+     "op": "union",
+     "id": "ac",
+     "a": "a",
+     "b": "c"
+    },
+    {
+     "op": "union",
+     "id": "result",
+     "a": "ac",
+     "b": "b"
+    }
+   ],
+   "expect": {
+    "lumps": 1,
+    "volume": {
+     "value": 11500.0,
+     "tol": 0.01,
+     "formula": "A u C = 100*60 + S - S (z 0..1) + B = 100*(60 - 5) + S - S (z 1..2): the arc over 0 <= x <= 50 adds the circular segment S above y = 60, the one over 50 <= x <= 100 removes the same S below it; S = r^2/2*(phi - sin(phi)) = 202.285396, r = 661/12, phi = 53.982933 deg = 2*atan(300/589)"
+    }
+   }
+  }
+ ]
+}
