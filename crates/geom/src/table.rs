@@ -441,7 +441,7 @@ impl TableLayout {
     /// drawn once, centred on its edge, on the layout's own corners. The cells' text isn't here yet.
     pub fn paper(&self, object: u64, kind: ObjectKind) -> Group {
         let Aabb2 { min, max } = self.outline;
-        let stroke = |path, closed, width_mm| Item::Stroke { path, closed, width_mm };
+        let stroke = |path, closed, width_mm| Item::Stroke { path, closed, width_mm, pattern: None };
         let line = |a, b| stroke(vec![Seg2::Line { a, b }], false, self.cell_line_mm);
         let corners = [min, Vec2::new(max.x, min.y), max, Vec2::new(min.x, max.y)];
         let mut items = vec![stroke(Loop2::polygon(&corners).segs, true, self.outline_line_mm)];

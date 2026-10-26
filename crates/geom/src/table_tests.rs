@@ -372,7 +372,7 @@ fn strokes(group: &Group) -> Vec<(Vec<[i64; 4]>, bool, f64)> {
         .items
         .iter()
         .map(|item| match item {
-            Item::Stroke { path, closed, width_mm } => {
+            Item::Stroke { path, closed, width_mm, pattern: None } => {
                 (path.iter().map(|s| [um(s.start().x), um(s.start().y), um(s.end().x), um(s.end().y)]).collect(), *closed, *width_mm)
             }
             other => panic!("{other:?}"),

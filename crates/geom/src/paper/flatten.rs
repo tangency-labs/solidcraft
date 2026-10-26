@@ -75,7 +75,11 @@ mod tests {
     fn on_grid(seg: Seg2) -> GridPath {
         let scene = Scene::new(
             Vec2::new(420.0, 297.0),
-            vec![Group { object: 1, kind: ObjectKind::DrawingBorder, items: vec![Item::Stroke { path: vec![seg], closed: false, width_mm: 0.35 }] }],
+            vec![Group {
+                object: 1,
+                kind: ObjectKind::DrawingBorder,
+                items: vec![Item::Stroke { path: vec![seg], closed: false, width_mm: 0.35, pattern: None }],
+            }],
         );
         let on = scene.prepare().unwrap().on_grid(Grid::NANOMETRE).unwrap();
         let GridItem::Stroke { path, .. } = &on.groups[0].items[0] else { panic!("a stroke") };

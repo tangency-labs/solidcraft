@@ -569,13 +569,19 @@ outer
     /// pictures at 25 dpi: an error or a document, never a panic.
     #[test]
     fn paper_scenes_survive_mutation_into_svg() {
-        use solidcraft_geom::paper::{Group, Item, ObjectKind, Picture, Scene};
+        use solidcraft_geom::paper::{Dashes, Group, Item, ObjectKind, Picture, Scene};
         use solidcraft_geom::{Aabb2, Loop2, Region2, Seg2, Vec2};
         let p = Vec2::new;
         let border = Loop2::polygon(&[p(20.0, 10.0), p(410.0, 10.0), p(410.0, 287.0), p(20.0, 287.0)]);
+        let dashes = || Dashes { lengths_mm: vec![4.2, 1.05, 0.5, 1.05], phase_mm: 0.5 };
         let items = vec![
-            Item::Stroke { path: border.segs.clone(), closed: true, width_mm: 0.7 },
-            Item::Stroke { path: vec![Seg2::Arc { center: p(50.0, 50.0), radius: 10.0, start: 0.0, sweep: 4.0 }], closed: false, width_mm: 0.35 },
+            Item::Stroke { path: border.segs.clone(), closed: true, width_mm: 0.7, pattern: None },
+            Item::Stroke {
+                path: vec![Seg2::Arc { center: p(50.0, 50.0), radius: 10.0, start: 0.0, sweep: 4.0 }],
+                closed: false,
+                width_mm: 0.35,
+                pattern: Some(dashes()),
+            },
             Item::Fill { region: Region2 { outer: border, holes: vec![] } },
             Item::Picture(Picture { source: 3, rect: Aabb2 { min: p(150.0, 100.0), max: p(250.0, 150.0) }, opacity: 0.8 }),
         ];
@@ -594,13 +600,19 @@ outer
     /// PNG: an error or an image, never a panic.
     #[test]
     fn paper_scenes_survive_mutation_into_png() {
-        use solidcraft_geom::paper::{Group, Item, ObjectKind, Picture, Scene};
+        use solidcraft_geom::paper::{Dashes, Group, Item, ObjectKind, Picture, Scene};
         use solidcraft_geom::{Aabb2, Loop2, Region2, Seg2, Vec2};
         let p = Vec2::new;
         let border = Loop2::polygon(&[p(20.0, 10.0), p(410.0, 10.0), p(410.0, 287.0), p(20.0, 287.0)]);
+        let dashes = || Dashes { lengths_mm: vec![4.2, 1.05, 0.5, 1.05], phase_mm: 0.5 };
         let items = vec![
-            Item::Stroke { path: border.segs.clone(), closed: true, width_mm: 0.7 },
-            Item::Stroke { path: vec![Seg2::Arc { center: p(50.0, 50.0), radius: 10.0, start: 0.0, sweep: 4.0 }], closed: false, width_mm: 0.35 },
+            Item::Stroke { path: border.segs.clone(), closed: true, width_mm: 0.7, pattern: None },
+            Item::Stroke {
+                path: vec![Seg2::Arc { center: p(50.0, 50.0), radius: 10.0, start: 0.0, sweep: 4.0 }],
+                closed: false,
+                width_mm: 0.35,
+                pattern: Some(dashes()),
+            },
             Item::Fill { region: Region2 { outer: border, holes: vec![Loop2::circle(p(100.0, 100.0), 20.0)] } },
             Item::Picture(Picture { source: 3, rect: Aabb2 { min: p(150.0, 100.0), max: p(250.0, 150.0) }, opacity: 0.8 }),
         ];

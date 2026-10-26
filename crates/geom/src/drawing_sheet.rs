@@ -445,8 +445,8 @@ impl SheetLayout {
     /// marks in the drawing border's width; the trimming marks, filled. The grid's labels are text,
     /// which the paper scene doesn't have yet.
     pub fn paper(&self, object: u64) -> Vec<Group> {
-        let line = |a, b, width_mm| Item::Stroke { path: vec![Seg2::Line { a, b }], closed: false, width_mm };
-        let outline = |r, width_mm| Item::Stroke { path: rectangle(r).segs, closed: true, width_mm };
+        let line = |a, b, width_mm| Item::Stroke { path: vec![Seg2::Line { a, b }], closed: false, width_mm, pattern: None };
+        let outline = |r, width_mm| Item::Stroke { path: rectangle(r).segs, closed: true, width_mm, pattern: None };
         let (d, g) = (self.drawing_border, self.grid_border);
         let mut grid = Vec::new();
         // No fields, or a grid reference border on the drawing border: no grid to draw.
