@@ -493,6 +493,37 @@ fn measure_imported_stl_edges_and_vertices_from_viewport_clicks() {
     }
 }
 
+#[test]
+fn imported_outline_midpoints_remain_available_away_from_the_edge() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.set_origin_shown(false);
+    h.app.ui.show_browser = false;
+    let path = h.dir.join("midpoint.stl");
+    h.app.run("solid.box", json!({"length":20,"width":30,"height":10})).unwrap();
+    h.app.run("file.save_mesh", json!({"path":path})).unwrap();
+    h.app.run("file.new", json!({})).unwrap();
+    h.app.run("file.insert_mesh", json!({"path":path})).unwrap();
+    h.app.run("component.activate", json!({"component":"root"})).unwrap();
+    h.call("ui.view", json!({"view":"iso"}));
+    h.call("ui.view", json!({"view":"fit"}));
+    h.frames(4);
+    h.app.start("inspect.measure");
+    h.step(&json!({"move":{"world":[20,0,5]}})).unwrap();
+    let middle = solidcraft_engine::geom::Vec3::new(20.0, 0.0, 5.0);
+    assert!(h.app.viewport.woken.points.iter().any(|p| p.at.dist(middle) < 1e-6));
+    let mut at = |z| {
+        let p = h.call("ui.at", json!({"world":[20,0,z]}))["result"].clone();
+        egui::pos2(p[0].as_f64().unwrap() as f32, p[1].as_f64().unwrap() as f32)
+    };
+    let (a, m, b) = (at(0), at(5), at(10));
+    let edge = b - a;
+    let beside = m + egui::vec2(edge.y, -edge.x).normalized() * 10.0;
+    h.step(&json!({"click":[beside.x,beside.y]})).unwrap();
+    let picked = &h.app.dialog.as_ref().unwrap().inputs[0].items;
+    assert!(matches!(picked.as_slice(), [Sel::Vertex { point, .. }] if point.dist(middle) < 1e-6), "{picked:?}");
+}
+
 /// Hover pick points (#5912): hovering each hole's rim wakes its centre, and clicking the
 /// centres measures centre to centre: 30 mm between Ø6 and Ø8 holes at x = 15 and x = 45.
 #[test]

@@ -24,7 +24,7 @@ pub const TRANSLATE: usize = 1;
 pub const ROTATE: usize = 2;
 pub const POINT_TO_POINT: usize = 3;
 pub const POINT_TO_POSITION: usize = 4;
-const POINTS: u16 = VERTICES | FACES | EDGES | ORIGIN | SNAP_POINTS;
+const POINTS: crate::selection::Accept = VERTICES | FACES | EDGES | ORIGIN | SNAP_POINTS;
 
 /// A fresh Move dialog of a type (all values zero).
 pub fn kind(mode: usize, doc: &solidcraft_engine::doc::Document) -> Kind {
