@@ -547,6 +547,10 @@ fn hostile_expressions_never_panic() {
         "in",
         "nan",
         "9999999999999999999999",
+        "g",
+        "kg",
+        "m³",
+        "mm²",
     ];
     let mut state: u64 = 0x9e3779b97f4a7c15;
     let mut next = || {

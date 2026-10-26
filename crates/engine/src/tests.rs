@@ -713,6 +713,7 @@ pub(crate) fn hostile_values() -> Vec<Value> {
         json!("a = = 3"),
         json!("é = 1e308 * 10"),
         json!(format!("{} = 1", "n".repeat(5000))),
+        json!("7.85 g/cm³ * 1 kg^17"),
         json!([]),
         json!([1e308, -1e308]),
         json!([0, 0, 0]),

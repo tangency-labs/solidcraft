@@ -569,10 +569,8 @@ impl Document {
         if expr_s.trim().is_empty() {
             return Err(DocError::Expr("empty expression".into()));
         }
-        if let Some(u) = unit
-            && expr::unit_info(u).is_none()
-        {
-            return Err(DocError::Expr(format!("unknown unit `{u}` (mm, cm, m, in, ft, deg, rad or none)")));
+        if let Some(why) = unit.and_then(expr::unit_problem) {
+            return Err(DocError::Expr(why));
         }
         if comment.is_some_and(|c| c.len() > 4096) {
             return Err(DocError::Invalid("comment too long".into()));

@@ -623,6 +623,27 @@ mod tests {
         assert_eq!(doc, before);
     }
 
+    /// A mass parameter compares with a mass in any unit (#4811), reads a bare number in its own
+    /// unit, and refuses a length.
+    #[test]
+    fn mass_comparisons_keep_their_dimensions() {
+        let mut doc = design();
+        doc.set_param("load", "2 kg", None, None).unwrap();
+        doc.configs.rules.push(rule(
+            "heavy",
+            RuleCondition::Parameter { parameter: "load".into(), operator: RuleOperator::Gt, expression: "1500 g".into() },
+            RuleEffect::DriveParameter { parameter: "width".into(), expression: "20 mm".into() },
+        ));
+        assert!(doc.apply_configuration_with_trace("Default").unwrap()[0].matched);
+        assert_eq!(doc.param_values().0["width"].v, 20.0);
+        doc.configs.rules[0].condition = RuleCondition::Parameter { parameter: "load".into(), operator: RuleOperator::Lt, expression: "3".into() };
+        assert!(doc.apply_configuration_with_trace("Default").unwrap()[0].matched, "3 is 3 kg");
+        doc.configs.rules[0].condition = RuleCondition::Parameter { parameter: "load".into(), operator: RuleOperator::Eq, expression: "2 mm".into() };
+        let before = doc.clone();
+        assert!(doc.apply_configuration("Default").is_err());
+        assert_eq!(doc, before);
+    }
+
     #[test]
     fn saved_rule_budgets_are_checked_before_deserialization() {
         let valid = serde_json::to_value(rule(

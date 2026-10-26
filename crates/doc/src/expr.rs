@@ -152,7 +152,12 @@ impl Kind {
     }
 }
 
-/// Units a parameter or an expression may use: name, kind and size (mm or radians).
+/// Units a parameter or an expression may use: name, kind and size (mm, radians, grams, mm³ or
+/// mm²). A unit's name can't be a parameter's, but an older design can have a parameter called a
+/// new unit word: a change that adds words renames those as the design opens, with a format step
+/// of its own that keeps its words (as `mass-volume-and-area-units.rs` does). Left out on purpose:
+/// `l`, `L` and `t` (common names of a length or a thickness), powers in ASCII such as `m3` (an M3
+/// screw; `cm^3` works) and `oz` (a mass or a volume?).
 pub const UNITS: &[(&str, Kind, f64)] = &[
     ("mm", Kind::Length, 1.0),
     ("cm", Kind::Length, 10.0),
@@ -168,6 +173,16 @@ pub const UNITS: &[(&str, Kind, f64)] = &[
     ("nm", Kind::Length, 1e-6),
     ("deg", Kind::Angle, std::f64::consts::PI / 180.0),
     ("rad", Kind::Angle, 1.0),
+    ("g", Kind::Mass, 1.0),
+    ("kg", Kind::Mass, 1000.0),
+    ("lb", Kind::Mass, 453.592_37),
+    ("ml", Kind::Volume, 1000.0),
+    ("mm³", Kind::Volume, 1.0),
+    ("cm³", Kind::Volume, 1000.0),
+    ("m³", Kind::Volume, 1e9),
+    ("mm²", Kind::Area, 1.0),
+    ("cm²", Kind::Area, 100.0),
+    ("m²", Kind::Area, 1e6),
 ];
 
 /// Functions an expression may call (name, signature) — for autocomplete and help.
@@ -214,6 +229,15 @@ pub fn unit_info(u: &str) -> Option<(Kind, f64)> {
         "°" | "degree" | "degrees" => Some((Kind::Angle, std::f64::consts::PI / 180.0)),
         t => UNITS.iter().find(|(n, _, _)| *n == t).map(|(_, k, s)| (*k, *s)),
     }
+}
+
+/// Why `u` can't be a parameter's unit (None = it is one), naming every unit [`UNITS`] has.
+pub fn unit_problem(u: &str) -> Option<String> {
+    if unit_info(u).is_some() {
+        return None;
+    }
+    let names: Vec<&str> = UNITS.iter().map(|(name, _, _)| *name).collect();
+    Some(format!("unknown unit `{u}` ({} or none)", names.join(", ")))
 }
 
 /// How unit-less numbers are read: by default in each kind's default unit (`Kind::default_unit`:
@@ -1650,11 +1674,149 @@ mod tests {
         assert_eq!(value_in_unit(Value::length(500.0), "cm"), 50.0);
     }
 
+    /// Mass, volume and area units (#4811), with superscripts for the powers (`cm^3` works too).
+    #[test]
+    fn mass_volume_and_area_units() {
+        let near = |s: &str, k: Kind, want: f64| {
+            let got = ev(s, k).unwrap_or(f64::NAN);
+            assert!((got - want).abs() <= 1e-12 * want.abs().max(1.0), "{s}: {got}, not {want}");
+        };
+        near("50 g", Kind::Mass, 50.0);
+        near("0.5 kg", Kind::Mass, 500.0);
+        near("1 lb", Kind::Mass, 453.592_37);
+        near("1 kg + 500 g", Kind::Mass, 1500.0);
+        near("max(1 kg, 900 g)", Kind::Mass, 1000.0);
+        near("min(1 lb, 500 g)", Kind::Mass, 453.592_37);
+        near("2 * 1,5 kg", Kind::Mass, 3000.0);
+        near("500 ml", Kind::Volume, 500_000.0);
+        near("1 ml - 1 cm³", Kind::Volume, 0.0);
+        near("2 cm³", Kind::Volume, 2000.0);
+        near("2 cm^3", Kind::Volume, 2000.0);
+        near("1 m³", Kind::Volume, 1e9);
+        near("3 mm³ + 2", Kind::Volume, 5.0);
+        near("10 cm * 10 cm * 10 cm", Kind::Volume, 1e6);
+        near("1.5 m²", Kind::Area, 1.5e6);
+        near("3 cm²", Kind::Area, 300.0);
+        near("2mm²", Kind::Area, 2.0);
+        near("1 m² / 1 m", Kind::Length, 1000.0);
+        near("sqrt(4 cm²)", Kind::Length, 20.0);
+        near("1 m³ / 1 m²", Kind::Length, 1000.0);
+        // A density times a volume is a mass: steel, 7.85 g/cm³, in a 10 mm cube.
+        near("7.85 g/cm^3 * (10 mm)^3", Kind::Mass, 7.85);
+        near("7.85 g/cm³ * 1 cm³", Kind::Mass, 7.85);
+        assert_eq!(eval_with("7.85 g/cm³", &|_| Err(DocError::Expr("none".into()))).unwrap().describe(), "a value in length^-3·mass");
+        assert!(is_literal("50 g") && is_literal("-2 m²") && !is_bare_number("50 g"));
+        assert_eq!(references("2 g + kg * lb + g2"), ["g2"]);
+        // Shown in a unit of their kind.
+        assert!((value_in_unit(Value::mass(500.0), "kg") - 0.5).abs() < 1e-12);
+        assert!((value_in_unit(Value::mass(453.592_37), "lb") - 1.0).abs() < 1e-12);
+        assert_eq!(value_in_unit(Value::of_kind(Kind::Volume, 2e9), "m³"), 2.0);
+        assert_eq!(value_in_unit(Value::of_kind(Kind::Area, 300.0), "cm²"), 3.0);
+        assert_eq!(value_in_unit(Value::mass(500.0), "mm³"), 500.0);
+        assert_eq!(unit_info("kg"), Some((Kind::Mass, 1000.0)));
+        assert_eq!(Kind::from_unit("m²"), Kind::Area);
+        assert_eq!((Kind::Mass.default_unit(), Kind::Volume.default_unit(), Kind::Area.default_unit()), ("kg", "mm³", "mm²"));
+        // A kind's default unit is one of its own, and a bare number of that kind is read in it:
+        // what a value shows as and what a bare number means agree (`3` for a mass is 3 kg).
+        for k in Kind::ALL {
+            let (unit_kind, size) = unit_info(k.default_unit()).unwrap_or((Kind::Unitless, f64::NAN));
+            assert_eq!((unit_kind, size), (k, Defaults::default().scale(k)), "{k:?}");
+        }
+        // An unknown unit is refused naming every unit there is.
+        assert_eq!((unit_problem("kg"), unit_problem(""), unit_problem("degrees")), (None, None, None));
+        let why = unit_problem("m3").unwrap_or_default();
+        assert!(why.starts_with("unknown unit `m3` (") && why.ends_with(" or none)"), "{why}");
+        assert!(UNITS.iter().all(|(name, _, _)| why.split(['(', ',', ' ', ')']).any(|word| word == *name)), "{why}");
+    }
+
+    /// A mass, volume or area unit is refused wherever its value would meet a value of another
+    /// kind, operation by operation.
+    #[test]
+    fn mass_volume_and_area_units_refuse_other_kinds() {
+        for bad in [
+            "1 g + 1 mm",
+            "1 g - 1 mm",
+            "1 g % 1 mm",
+            "mod(1 g, 1 mm)",
+            "atan2(1 g, 1 mm)",
+            "hypot(1 g, 1 mm)",
+            "min(1 g, 1 mm)",
+            "max(1 mm, 1 kg)",
+            "1 g + 1 deg",
+            "1 ml + 1 mm²",
+            "1 mm² + 1 mm",
+            "1 m³ + 1 kg",
+            "sin(1 g)",
+            "cos(1 ml)",
+            "tan(1 m²)",
+            "asin(1 g)",
+            "acos(1 g)",
+            "atan(1 g)",
+            "exp(1 g)",
+            "ln(1 kg)",
+            "log(1 lb)",
+            "log10(1 g)",
+            "sqrt(1 g)",
+            "sqrt(1 ml)",
+            "1 g ^ 0.5",
+            "2 ^ (1 g)",
+            "pow(2, 1 ml)",
+            "(1 kg)^9 * (1 kg)^8",
+        ] {
+            assert!(eval_with(bad, &|_| Err(DocError::Expr("none".into()))).is_err(), "{bad}");
+        }
+        for (s, k, got) in [
+            ("1 g", Kind::Length, "a mass"),
+            ("1 g * 1 mm", Kind::Length, "a value in length·mass"),
+            ("1 ml", Kind::Length, "a volume"),
+            ("1 mm²", Kind::Volume, "an area"),
+            ("1 m²", Kind::Length, "an area"),
+            ("1 kg", Kind::Angle, "a mass"),
+            ("1 kg", Kind::Unitless, "a mass"),
+            ("1 mm", Kind::Mass, "a length"),
+        ] {
+            let e = ev(s, k).unwrap_err().to_string();
+            assert!(e.contains(&format!("expected {}, got {got}", kind_word(k))), "{s}: {e}");
+        }
+    }
+
+    /// In a mass, volume or area parameter, bare numbers are in its unit (#4811).
+    #[test]
+    fn parameters_in_mass_volume_and_area_units() {
+        let p = vec![
+            def("m", "2", "kg"),
+            def("half", "m / 2 + 1", "kg"),
+            def("r", "round(2.4 kg)", "kg"),
+            def("grams", "m", "g"),
+            def("v", "5", "cm³"),
+            def("box", "(1 cm)^3 + 1", "cm³"),
+            def("a", "2", "m²"),
+            def("pounds", "1", "lb"),
+            def("bad", "m + 1 mm", "kg"),
+            def("wrong", "1 kg", "mm"),
+        ];
+        let (v, e) = eval_params(&p, 1.0);
+        assert_eq!(v["m"], Value::mass(2000.0));
+        assert_eq!(v["half"], Value::mass(2000.0), "1 kg + 1 kg");
+        assert_eq!(v["r"], Value::mass(2000.0), "rounded in kilograms");
+        assert_eq!(v["grams"], Value::mass(2000.0));
+        assert_eq!(v["v"], Value::of_kind(Kind::Volume, 5000.0));
+        assert_eq!(v["box"], Value::of_kind(Kind::Volume, 2000.0));
+        assert_eq!(v["a"], Value::of_kind(Kind::Area, 2e6));
+        assert_eq!(v["pounds"], Value::mass(453.592_37));
+        assert!(e["bad"].contains("cannot add a mass and a length"), "{}", e["bad"]);
+        assert!(e["wrong"].contains("expected a length, got a mass"), "{}", e["wrong"]);
+        assert_eq!(value_in_unit(v["half"], "kg"), 2.0);
+    }
+
     /// Hostile input never panics: random strings over the expression alphabet.
     #[test]
     fn fuzz_never_panics() {
-        let alphabet: Vec<char> = "0123456789.eE+-*/^(),;% abcdmnpitrsgxw_°×÷−µ\u{0}\u{7f}é\"'".chars().collect();
-        let words = ["width", "sin(", "atan2(", "mm", "deg", "pi", "1e308", "1e-400", "(", ")", "^", "max(", "in", "count", ","];
+        let alphabet: Vec<char> = "0123456789.eE+-*/^(),;% abcdmnpitrsgxwkl_°×÷−µ²³\u{0}\u{7f}é\"'".chars().collect();
+        let words = [
+            "width", "sin(", "atan2(", "mm", "deg", "pi", "1e308", "1e-400", "(", ")", "^", "max(", "in", "count", ",", "g", "kg", "lb", "ml", "cm³",
+            "m²", "mm³",
+        ];
         let mut seed: u64 = 0x9e37_79b9_7f4a_7c15;
         let mut rnd = move || {
             seed ^= seed << 13;
@@ -1672,7 +1834,7 @@ mod tests {
                     s.push(alphabet[(rnd() % alphabet.len() as u64) as usize]);
                 }
             }
-            for k in [Kind::Length, Kind::Angle, Kind::Unitless] {
+            for k in Kind::ALL {
                 let _ = ev(&s, k);
             }
             let _ = references(&s);
@@ -1819,6 +1981,16 @@ mod tests {
         assert_eq!(problem("pi"), "`pi` is a constant, so it cannot be a parameter name");
         assert_eq!(crate::Document::param_name_problem("width"), None);
         assert!(problem("2w").contains("not a valid parameter name"));
+        // Every unit is reserved (#4811), its superscripts too; the words left out on purpose
+        // stay free for parameters.
+        for (u, _, _) in UNITS {
+            assert_eq!(reserved_kind(u), Some("unit"), "{u}");
+        }
+        assert_eq!(problem("g"), "`g` is a unit name, so it cannot be a parameter name");
+        assert_eq!(problem("cm³"), "`cm³` is a unit name, so it cannot be a parameter name");
+        for free in ["l", "L", "t", "m2", "m3", "cm3", "oz", "cl", "mg", "cc", "tonne", "G", "KG", "g_param", "mm³_param"] {
+            assert_eq!(crate::Document::param_name_problem(free), None, "{free}");
+        }
     }
 
     /// The kept answers of `references` and `eval_params` never stand for different input: an
