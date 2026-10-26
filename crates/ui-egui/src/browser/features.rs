@@ -33,10 +33,7 @@ pub(crate) fn reveal(app: &mut SolveApp, id: u64, body: &str) {
     app.ui.show_browser = true;
     app.preferences.timeline_left_browser_collapsed = false;
     app.tree.reveal = None;
-    app.tree.collapsed.remove("c0");
-    for depth in 1..=path.len() {
-        app.tree.collapsed.remove(&occurrence_key(&path[..depth]));
-    }
+    super::open_path(app, &path);
     let scope = if path.is_empty() { format!("c{component}") } else { occurrence_key(&path) };
     app.tree.collapsed.remove(&scope);
     app.tree.expanded.insert(format!("{scope}/features"));
@@ -476,14 +473,13 @@ mod tests {
         let saved = h.app.session.doc.to_json();
         h.app.session = solidcraft_engine::Session::new(solidcraft_engine::doc::Document::from_json(&saved).unwrap());
         h.app.tree.collapsed.insert("c0".into());
-        h.app.tree.collapsed.insert(occurrence_key(&path));
         h.app.preferences.timeline_left_browser_collapsed = true;
         let undo = h.app.session.undo.len();
         for id in [base, hole, fillet] {
             find_in_timeline(&mut h.app, id, &world_body);
             assert_eq!(h.app.tree.reveal_feature.as_ref().unwrap().path, path);
             assert!(!h.app.tree.collapsed.contains("c0"));
-            assert!(!h.app.tree.collapsed.contains(&occurrence_key(&path)));
+            assert!((1..=path.len()).all(|depth| h.app.tree.expanded.contains(&occurrence_key(&path[..depth]))));
             assert!(!h.app.preferences.timeline_left_browser_collapsed);
             h.frames(2);
             assert!(h.app.tree.reveal_feature.is_none(), "the actual feature row was drawn and scrolled to");
@@ -573,12 +569,12 @@ mod tests {
             assert_eq!(world_body == "Plate", named_plate);
             h.app.tree.collapsed.insert("c0".into());
             for depth in 1..=path.len() {
-                h.app.tree.collapsed.insert(occurrence_key(&path[..depth]));
+                h.app.tree.expanded.remove(&occurrence_key(&path[..depth]));
             }
             h.app.tree.collapsed.insert(format!("{}/bodies", occurrence_key(&path)));
             find_in_browser(&mut h.app, face(&world_body));
             for depth in 1..=path.len() {
-                assert!(!h.app.tree.collapsed.contains(&occurrence_key(&path[..depth])), "{world_body}: {:?}", &path[..depth]);
+                assert!(h.app.tree.expanded.contains(&occurrence_key(&path[..depth])), "{world_body}: {:?}", &path[..depth]);
             }
             assert!(!h.app.tree.collapsed.contains(&format!("{}/bodies", occurrence_key(&path))), "{world_body}");
             h.frames(2);
