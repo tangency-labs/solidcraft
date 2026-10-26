@@ -219,6 +219,10 @@ pub struct UpstreamFixes {
     pub topology_failed_evaluations_propagate: bool,
     /// `SetProps_Stage3` returns a failed `ClassifyLoops` status before reading its outputs, and a failed stage drops its in-progress marker so a retry reruns it (WR-268, WR-266, #521).
     pub heal_stage3_failures_propagate: bool,
+    /// `CreateCurveSweep` starts a planar path's sweep frame with its z on the plane's normal, not on `MakeUnitOrthoVectors` of the start tangent, so a flat cap stays flat to the rounding (WR-407, #434; SolidCraft change, tangency-labs/smlib 1b6f5fa).
+    pub sweep_frame_on_planar_path_normal: bool,
+    /// `CoverCoincidentSurface` refuses a cover that extends a B-spline-based surface onto a continuation whose normal vanishes or turns back (a fold) over the domain the merge would use (WR-407, #434; SolidCraft change, tangency-labs/smlib 1b6f5fa).
+    pub cover_refuses_folded_continuation: bool,
 }
 
 /// Options for [`Kernel::new`].

@@ -9,7 +9,8 @@
 //! Deviations: owned copies retain the original inputs; matrices and partial
 //! outputs are explicit. Scaling sampling is bounded to 1,000,000 points; no
 //! recursion. Null/non-B-spline profiles are skipped, as the upstream cast does.
-//! **A planar path's frame starts on the plane's normal** (SolidCraft change,
+//! **A planar path's frame starts on the plane's normal** (opt-in
+//! `Kernel::fixes.sweep_frame_on_planar_path_normal`, WR-407; SolidCraft change,
 //! tangency-labs/smlib 1b6f5fa, tangency-labs/solidcore#434; see
 //! [`prepare_curve_sweep`]).
 
@@ -250,8 +251,9 @@ pub fn prepare_curve_sweep(
     // out with its control points spread about its plane (2.8e-5 mm in the #434 case against a
     // 1e-5 zone tolerance), which a boolean with another wall on that plane cannot resolve. So
     // a planar path starts the frame with its z on the plane's normal; the top is then flat to
-    // the rounding.
-    {
+    // the rounding. Opt-in (`Kernel::fixes.sweep_frame_on_planar_path_normal`, WR-407);
+    // upstream keeps the `MakeUnitOrthoVectors` frame.
+    if k.fixes.sweep_frame_on_planar_path_normal {
         let plane = path.is_planar(ZONE_TOL_3D)?;
         // `SmCurve::IsPlanar(SM_ZONE_TOL_3D, NULL, &sPlaneNormal)` with
         // `sPlaneNormal.Unitize()` in place before the test.
@@ -379,16 +381,13 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn planar_path_frame_keeps_the_plane_normal_as_the_frame_z() -> Result<()> {
+    /// The #434 half circle in the XY plane, start tangent +Y, with a 60-high wall profile
+    /// at its start: the largest `|z|` of the prepared path's samples and the prepared
+    /// profile's height vector.
+    fn issue_434_half_circle_frame(k: &Kernel) -> Result<(f64, Vec3)> {
         use crate::geom::axis2_placement::Axis2Placement;
         use crate::nurbs::b_spline_curve::p1::NurbCircleParam;
 
-        let k = Kernel::default();
-        // A half circle in the XY plane. Its start tangent is +Y, where
-        // `MakeUnitOrthoVectors` puts the frame's z in the path's plane (tangency-labs/solidcore
-        // #434): without the planar-path frame rule the path is not turned into the global
-        // XY plane and a wall's height lands on the frame's derived y instead of its fixed z.
         let path = BSplineCurve::create_circle_segment(
             3,
             &Axis2Placement::new(Vec3::ZERO, Vec3::X, Vec3::Y),
@@ -405,7 +404,7 @@ mod tests {
             Vec3::new(44.0, 0.0, 60.0),
         )?);
         let prepared = prepare_curve_sweep(
-            &k,
+            k,
             &[Some(vertical)],
             &path,
             None,
@@ -413,21 +412,12 @@ mod tests {
             SweepOptions::default(),
             false,
         )?;
-
-        // The path is turned into the global plane of the sweep's frame: every point of it
-        // is at canonical z = 0, the frame's fixed direction.
         let domain = prepared.path.natural_interval();
+        let mut max_z = 0.0_f64;
         for step in 0..=8 {
             let t = domain.evaluate(f64::from(step) / 8.0);
-            let point = prepared.path.evaluate_point(t)?;
-            assert!(
-                point.z.abs() < 1e-12,
-                "path point {point:?} is off the frame's plane"
-            );
+            max_z = max_z.max(prepared.path.evaluate_point(t)?.z.abs());
         }
-
-        // The wall's height 0..60 is the frame's fixed z, not its derived y: the profile the
-        // sweep carries keeps z in 0..60 exactly and does not lean into y.
         let profile = prepared
             .profiles
             .first()
@@ -435,13 +425,39 @@ mod tests {
         let profile_domain = profile.natural_interval();
         let start = profile.evaluate_point(profile_domain.min())?;
         let end = profile.evaluate_point(profile_domain.max())?;
-        let height = end - start;
+        Ok((max_z, end - start))
+    }
+
+    /// With `fixes.sweep_frame_on_planar_path_normal` (WR-407, #434) the frame's z is the
+    /// path plane's normal: the path is turned into the global XY plane and the wall's
+    /// height is the frame's fixed z.
+    #[test]
+    fn issue_434_planar_path_frame_keeps_the_plane_normal_as_the_frame_z() -> Result<()> {
+        let mut k = Kernel::default();
+        k.fixes.sweep_frame_on_planar_path_normal = true;
+        let (max_z, height) = issue_434_half_circle_frame(&k)?;
+        assert!(max_z < 1e-12, "path leaves the frame's plane by {max_z}");
         // (the frame's handedness may turn the height down; the sweep frame it is carried
         // on flips with it, so the solid is the same)
         assert!((height.length() - 60.0).abs() < 1e-12, "{height:?}");
         assert!(
             height.x.abs() < 1e-12 && height.y.abs() < 1e-12,
             "{height:?}"
+        );
+        Ok(())
+    }
+
+    /// Default (pinned SMLib `c9c5979`): `MakeUnitOrthoVectors` of the +Y start tangent
+    /// puts the frame's z in the path's plane, so the path is not turned into the global
+    /// XY plane (upstream behaviour, WR-407).
+    #[test]
+    fn issue_434_default_keeps_the_upstream_sweep_frame() -> Result<()> {
+        let k = Kernel::default();
+        assert!(!k.fixes.sweep_frame_on_planar_path_normal);
+        let (max_z, _) = issue_434_half_circle_frame(&k)?;
+        assert!(
+            max_z > 1.0,
+            "upstream's frame keeps the path off z = 0: {max_z}"
         );
         Ok(())
     }

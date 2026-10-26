@@ -7,6 +7,10 @@
   {
    "name": "two_overlapping_swept_arc_walls_joined",
    "note": "wall A over 0..180 degrees, wall B over 90..270: one lump, the two tops and the two bottoms joined by the merge",
+   "fixes": [
+    "sweep_frame_on_planar_path_normal",
+    "cover_refuses_folded_continuation"
+   ],
    "steps": [
     {
      "op": "sweep",
@@ -121,6 +125,10 @@
   {
    "name": "two_overlapping_swept_arc_walls_outside_the_arcs",
    "note": "the same walls with the arcs tangent to their inner faces (the profile 0..12 outward from the path start), so a swept top continued past its domain runs back through the sector's centre: without the fold rule the join keeps a face built on that continuation and runs 240 mm out of the body",
+   "fixes": [
+    "sweep_frame_on_planar_path_normal",
+    "cover_refuses_folded_continuation"
+   ],
    "steps": [
     {
      "op": "sweep",

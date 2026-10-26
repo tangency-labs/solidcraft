@@ -47,8 +47,9 @@
 //!   runs in between, so the order is upstream's).
 //!   [`Surface::cover_coincident_surface`] keeps returning [`SolidError::Unported`]
 //!   (`topology.face_p1`) for a face-owned surface for callers without the B-rep.
-//! - **A folded continuation is not covered.** SolidCraft change,
-//!   tangency-labs/smlib 1b6f5fa (`SmSurface::CoverCoincidentSurface`, before its
+//! - **A folded continuation is not covered** (opt-in
+//!   `Kernel::fixes.cover_refuses_folded_continuation`, WR-407; off by default, which
+//!   merges as upstream does). SolidCraft change, tangency-labs/smlib 1b6f5fa (`SmSurface::CoverCoincidentSurface`, before its
 //!   `AdjustSTEPUVDomain`): when a B-spline-based surface would be extended past its
 //!   natural domain, its normal may neither vanish nor turn back between neighbouring
 //!   samples of a 21 x 21 grid over the domain the merge uses; otherwise the cover fails
@@ -1172,8 +1173,10 @@ impl Surface {
         // its edges (two swept arc walls sharing their top and bottom planes, joined: UV gaps
         // and the wrong volume). The continued surface must not fold over the domain the
         // merge will use: its normal must not vanish or turn back between neighbouring
-        // samples of a grid over that domain.
-        if out_of_bounds_enabled(self).is_some()
+        // samples of a grid over that domain. Opt-in (`Kernel::fixes.cover_refuses_folded_continuation`,
+        // WR-407); upstream merges onto the continuation.
+        if k.fixes.cover_refuses_folded_continuation
+            && out_of_bounds_enabled(self).is_some()
             && !update_domain.is_contained_by(&orig_domain, 0.0)
         {
             let Some((_, reference)) = self.step_normal(k, orig_domain.evaluate(0.5, 0.5))? else {
@@ -1777,15 +1780,13 @@ mod tests {
 
     /// A B-spline surface covers past its natural domain by continuing its end spans, and
     /// that continuation need not be one sheet. This one's u derivative vanishes at
-    /// `u = 1.5` and turns back: it must not cover a coincident plane that needs that
-    /// continuation (SolidCraft change, tangency-labs/smlib 1b6f5fa, #434).
-    #[test]
-    fn cover_refuses_a_continuation_that_folds() -> Result<()> {
+    /// `u = 1.5` and turns back; `other` is a coincident plane that needs that
+    /// continuation. Returns the cover and the surface's u domain end after it.
+    fn issue_434_cover_across_a_fold(k: &Kernel) -> Result<(CoverCoincident, f64)> {
         use crate::nurbs::b_spline_surface::p1::BSplineSurface as Bss;
         use crate::nurbs::math::CPoint;
         use crate::nurbs::srf_basic::Surface as NlSurface;
 
-        let k = Kernel::default();
         // u: the cubic Bezier through x = 0, 1, 2, 23/9 (its x derivative is zero at
         // u = 1.5: 0.25 - 1.5 + 2.25 * 5/9); v: straight in y. The sheet is z = 0 and the
         // natural u domain is [0, 1], so only the continuation past u = 1 folds.
@@ -1829,13 +1830,38 @@ mod tests {
             false,
         ));
 
-        let covered = this.cover_coincident_surface(&k, &other, 1.0e-6, None)?;
+        let covered = this.cover_coincident_surface(k, &other, 1.0e-6, None)?;
+        Ok((covered, this.step_uv_domain().u_interval().max()))
+    }
+
+    /// With `fixes.cover_refuses_folded_continuation` (WR-407, #434; SolidCraft change,
+    /// tangency-labs/smlib 1b6f5fa) the cover across the fold fails and changes nothing.
+    #[test]
+    fn issue_434_cover_refuses_a_continuation_that_folds() -> Result<()> {
+        let mut k = Kernel::default();
+        k.fixes.cover_refuses_folded_continuation = true;
+        let (covered, u_max) = issue_434_cover_across_a_fold(&k)?;
         assert!(
             !covered.success,
             "the fold at u = 1.5 must not be covered: {covered:?}"
         );
         // Nothing was changed by the refused cover.
-        assert_eq!(this.step_uv_domain().u_interval().max(), 1.0);
+        assert_eq!(u_max, 1.0);
+        Ok(())
+    }
+
+    /// Default (pinned SMLib `c9c5979`): the cover succeeds and extends the domain onto
+    /// the fold, as upstream does (WR-407).
+    #[test]
+    fn issue_434_default_covers_across_the_fold() -> Result<()> {
+        let k = Kernel::default();
+        assert!(!k.fixes.cover_refuses_folded_continuation);
+        let (covered, u_max) = issue_434_cover_across_a_fold(&k)?;
+        assert!(
+            covered.success,
+            "upstream covers across the fold: {covered:?}"
+        );
+        assert!(u_max > 1.0, "upstream extends the u domain: {u_max}");
         Ok(())
     }
 }
