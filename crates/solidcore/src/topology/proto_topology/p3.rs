@@ -15,6 +15,18 @@
 //! | [`ProtoTopologyManager::resolve_overlapping_proto_edges`] | `SmProtoTopologyManager::ResolveOverlappingProtoEdges` |
 //!
 //! Deviations:
+//! - **Removed proto edges** (SolidCraft fix, tangency-labs/smlib 93efd6d, UB-239).
+//!   Upstream's `SplitIntersectingProtoEdges` deletes the combined-away proto edge while
+//!   proto faces (coincident lists) and other proto edges (overlap lists) still name
+//!   it, and `GlueCoincidentBrepVertices` reads it after the free. Here the faces it
+//!   bounded get the surviving edge first
+//!   ([`ProtoTopologyManager::hand_over_coincident_proto_edge`]), and every reference
+//!   to it is dropped before the delete ([`ProtoTopologyManager::forget_proto_edge`],
+//!   part 1), here and in `ResolveOverlappingProtoEdges`. The fork does that inside
+//!   `RemoveProtoEdge`; the port does it at these library deletes, so unlisting or
+//!   deleting a proto edge on its own (the difftest's script ops) stays upstream's.
+//!   Without it, the stale id names a deleted slot and the later passes fail with
+//!   `InvalidInput`.
 //! - **Deleted vertex in `GlueCoincidentBrepVertices`** (SolidCraft fix,
 //!   tangency-labs/smlib da8d05e, UB-241). For two coincident vertices joined by
 //!   several common edges, upstream goes on to the next edge after squeezing or
@@ -1686,6 +1698,8 @@ mod tests {
     use crate::curve::line::Line;
     use crate::geom::extent2d::Extent2d;
     use crate::intersect::point_class::PointClassType;
+    use crate::math::{Point2, Point3};
+    use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
     use crate::surface::surface::Surface;
     use crate::surface::volume::Volume;
     use crate::topology::Brep;
@@ -1829,9 +1843,61 @@ mod tests {
         ) -> Result<bool> {
             Ok(false)
         }
+        fn face_trim_uv_domain(&mut self, _k: &Kernel, _face: H) -> Result<Extent2d> {
+            Err(SolidError::invalid_input("test", "unused"))
+        }
+        fn face_point_classify_uv(
+            &mut self,
+            _k: &Kernel,
+            _face: H,
+            _uv: Point2,
+            _source_tolerance: f64,
+        ) -> Result<PointClassType> {
+            Err(SolidError::invalid_input("test", "unused"))
+        }
+        fn brep_squeeze_edge(
+            &mut self,
+            _k: &mut Kernel,
+            _brep: H,
+            _edge: H,
+            _survivor: H,
+        ) -> Result<()> {
+            Err(SolidError::invalid_input("test", "unused"))
+        }
+        fn brep_point_3d_classify(
+            &mut self,
+            _k: &Kernel,
+            _brep: H,
+            _point: Point3,
+            _tolerance: f64,
+            _boundary_intersections: bool,
+        ) -> Result<PointClassification<H>> {
+            Err(SolidError::invalid_input("test", "unused"))
+        }
+        fn brep_make_edge_in_face(
+            &mut self,
+            _k: &Kernel,
+            _brep: H,
+            _face: H,
+            _start: H,
+            _end: H,
+            _curve: Curve,
+            _uv_curve: Option<Curve>,
+            _interval: Extent1d,
+            _orientation: OrientType,
+            _tolerance: f64,
+        ) -> Result<(Option<H>, Option<H>, Option<H>)> {
+            Err(SolidError::invalid_input("test", "unused"))
+        }
+        fn edgeuse_evaluate_binormal(&mut self, _k: &Kernel, _eu: H, _param: f64) -> Result<Vec3> {
+            Err(SolidError::invalid_input("test", "unused"))
+        }
     }
 
     impl BrepGlue<H> for Pool {
+        fn delete_edge(&mut self, _k: &mut Kernel, _brep: H, _edge: H) -> Result<()> {
+            Ok(())
+        }
         fn glue_vertices(
             &mut self,
             _k: &mut Kernel,
