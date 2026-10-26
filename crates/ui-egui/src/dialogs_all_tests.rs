@@ -285,6 +285,7 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
         "Type" if matches!(command, "sheet.flange" | "sheet.hem" | "solid.revolve" | "solid.emboss" | "solid.scale") => return None,
         "Direction" => return None, // segmented buttons, labelled by each choice
         "ui.fair_strength" | "ui.fair_iterations" => return None,
+        "Size" if matches!(command, "solid.cylinder" | "solid.sphere") => return None, // Diameter | Radius
         "Continuity" | "Corners" | "Cells" | "Profile" => return None,
         "Operation" if command == "solid.mirror" => return None,
         "Operation" | "Type" | "Orientation" | "Move Type" | "Object Type" | "Rule" | "Rim Edge" | "Catch Direction" | "Shape" | "Holes" | "Size"
@@ -546,8 +547,8 @@ form_case!(stock, "solid.bounding_solid", ["Margin"]);
 form_case!(frame_member, "frame.member", ["All Lines", "Anchor", "Angle", "Mirror", "Name"]);
 form_case!(thread, "solid.thread", ["Form", "Size", "Pitch", "Designation", "Hand", "Starts", "Extent", "Start", "End"]);
 form_case!(primitive_box, "solid.box", ["ui.length", "ui.width", "ui.height", "Operation"]);
-form_case!(cylinder, "solid.cylinder", ["ui.diameter", "ui.height", "Operation"]);
-form_case!(sphere, "solid.sphere", ["ui.diameter", "Operation"]);
+form_case!(cylinder, "solid.cylinder", ["Size", "ui.diameter", "ui.height", "Operation"]);
+form_case!(sphere, "solid.sphere", ["Size", "ui.diameter", "Operation"]);
 form_case!(torus, "solid.torus", ["ui.major_radius", "ui.minor_radius", "Operation"]);
 form_case!(cone, "solid.cone", ["ui.diameter", "ui.top_diameter", "ui.height", "Operation"]);
 form_case!(coil, "solid.coil", ["ui.diameter", "ui.revolutions", "ui.pitch", "ui.section_size", "Operation"]);
