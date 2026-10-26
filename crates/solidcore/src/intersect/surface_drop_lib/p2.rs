@@ -141,15 +141,20 @@ impl DropOffset {
     }
 
     /// The `SmOffsetSurface` this stands for over `surface` (not owning it, with the
-    /// stored singularities; the copy keeps `surface`'s owner, as upstream's shared base
-    /// does): its constructor's `IsPeriodic` (and, for [`SS_UNKNOWN`],
+    /// stored singularities): its constructor's `IsPeriodic` (and, for [`SS_UNKNOWN`],
     /// `GetSingularities`) depend only on `surface`, so building it per call gives the
     /// object upstream builds once.
+    ///
+    /// Upstream's base is `surface` itself (`m_pSurface(&rSurface)`), so the stand-in is
+    /// an exact evaluation copy that keeps its owner: [`Clone`] runs the copy
+    /// constructor's knot fix-up, which moves near-coincident knots and changes the
+    /// base's derivatives (bottle edge 29 at r=0.1: `DropVectors` at a 7e-10 first knot
+    /// span).
     fn offset_of(&self, k: &Kernel, surface: &Surface) -> Result<Surface> {
         Ok(Surface::from(OffsetSurface::new(
             k,
             self.offset_distance,
-            surface.clone_keeping_owner(),
+            surface.clone_for_evaluation()?,
             false,
             self.singularities,
         )?))
@@ -762,7 +767,10 @@ impl DropPt {
             // if iter 2: try again with GlobalPointSolve DropPoint
             if ii == 1 {
                 // temporarily set owner to null to prevent solver from seeing Face edges.
-                let unowned = surface.clone();
+                // (upstream nulls the owner of the surface itself: an exact evaluation
+                // copy, since `Clone` runs the copy constructor's knot fix-up)
+                let mut unowned = surface.clone_for_evaluation()?;
+                let _ = unowned.set_owner(None);
 
                 // drop sCrvSpanEndPt to surface with GlobalPointSolve
                 let solutions: SolutionArray<NoObject> = unowned.global_point_solve(
