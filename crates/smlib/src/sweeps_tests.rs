@@ -49,6 +49,24 @@ fn revolutions_whole_and_partial() {
     assert_close(solid_volume(&b, "quarter ring"), PI / 2.0 * 7.0 * 4.0, 1e-6, "quarter ring");
 }
 
+/// A half disc of radius 14 centred 14 off the axis, its rim outward, three quarters of a turn
+/// (rig sweeps/4007): a horn torus, which SMLib gives a major radius a rounding below its minor.
+/// The record's torus is a ring torus, so the face comes out as its NURBS form, unlabelled, and
+/// the record validates. Pappus: 3/4 turn · 2π (14 + 4·14 / 3π) · π 14² / 2.
+#[test]
+fn a_horn_torus_comes_out_as_its_nurbs() {
+    let half = vec![
+        Curve::Arc { center: [14.0, 0.0, 0.0], axis: [0.0, -1.0, 0.0], reference: [1.0, 0.0, 0.0], radius: 14.0, start: -PI / 2.0, end: PI / 2.0 },
+        Curve::Line { start: [14.0, 0.0, 14.0], end: [14.0, 0.0, -14.0] },
+    ];
+    let b = Brep::revolve(&half, [0.0; 3], [0.0, 0.0, 1.0], 1.5 * PI, true).unwrap();
+    let want = 1.5 * PI * (14.0 + 56.0 / (3.0 * PI)) * PI * 98.0;
+    assert_close(solid_volume(&b, "horn torus"), want, 1e-6, "horn torus");
+    let record = b.to_native().unwrap();
+    record.validate().unwrap();
+    assert!(record.faces.iter().all(|f| !matches!(f.surface, solidcraft_geom::brep::Surface::Torus { .. })), "a torus label on a horn torus");
+}
+
 #[test]
 fn sweeps_lofts_and_screws() {
     let disc = [circle([5.0, 0.0, 0.0], 2.0)];
