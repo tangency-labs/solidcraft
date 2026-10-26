@@ -1,7 +1,26 @@
 {
  "sources": [],
  "what": "a vertical r5 round, then a variable round r1 -> r5 along the top back edge into it",
- "source": "invariants",
- "method": "a variable round running into a constant one at a corner; one valid body",
- "body_count": 1
+ "source": "analytic",
+ "method": "a variable round takes only its picked edge (no tangent chain: crates/doc/src/eval.rs), y = 40 from x = 0 (r1) to x = 55 (r5), where it meets the vertical r5 round's tangent line: removed (1-pi/4) 55 (1 + 5 + 25)/3 (005) and (1-pi/4) 5^2 20. Past x = 55 the round's end runs on into the vertical round's quarter column, trimmed by its cylinder: as a constant r5 tube that takes int_0^5 sqrt(25 - v^2)(5 - sqrt(25 - v^2)) dv = 125 pi/4 - 250/3 = 14.841437; with its radius still growing at 4/55 per mm, 15.854054 (numerical, the round's section against the cylinder). V lies between: graded as the interval's middle with its half width as the tolerance. Faces 6 + 2; edges 18, vertices 12 (5 round the bottom, 5 vertical, 5 round the top face, the round's line on the back wall, its end arc on x = 0, its trim on the cylinder)",
+ "body_count": 1,
+ "volume_mm3": 47755.385959062,
+ "faces": 8,
+ "edges": 18,
+ "vertices": 12,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   20
+  ]
+ },
+ "tolerance": {
+  "rel": 1.1602121611875055e-05
+ }
 }

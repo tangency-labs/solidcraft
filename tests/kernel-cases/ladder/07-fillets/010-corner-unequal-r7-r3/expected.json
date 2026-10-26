@@ -1,7 +1,26 @@
 {
  "sources": [],
  "what": "an r7 vertical round at a corner, then r3 along a top edge, which runs on round the r7 arc to the other top edge",
- "source": "invariants",
- "method": "two radii meeting at a corner over a tangent chain; one valid body",
- "body_count": 1
+ "source": "analytic",
+ "method": "the r7 vertical round removes (1-pi/4) 7^2 20; the r3 chain runs along x = 60 (y 0..33) and y = 40 (x 0..53), straight, removing (1-pi/4) 3^2 each mm, and round the r7 arc's top edge as a torus quarter: Pappus, the section (1-pi/4) 3^2 with its centroid 3 (10-3pi)/(12-3pi) in from the wall, at radius 7 - that, over pi/2 (as 003). Faces: 6 planes + the r7 cylinder + the r3 chain's cylinder, torus, cylinder; edges: 5 round the bottom, 5 round the top, 5 vertical (two r7 tangent lines, the box's three other verticals), the chain's three on the walls and two end arcs, its two seams; vertices from Euler (V - E + F = 2): 14",
+ "body_count": 1,
+ "volume_mm3": 47604.384347169,
+ "faces": 10,
+ "edges": 22,
+ "vertices": 14,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   20
+  ]
+ },
+ "tolerance": {
+  "rel": 1e-05
+ }
 }

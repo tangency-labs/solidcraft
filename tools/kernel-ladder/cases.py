@@ -806,17 +806,47 @@ case(T7, "009-corner-three-equal-r5", "r5 rounds on the three edges meeting at t
      {"body_count": 1, "volume_mm3": VB - SPANDREL * 25 * (60 + 40 + 20 - 15) - 125 * (1 - PI / 6), "faces": 10},
      "each edge zone outside the corner cube removes (1-pi/4) r^2 (L - r); the corner cube r^3 keeps a sphere octant pi r^3/6", base=B1)
 case(T7, "010-corner-unequal-r7-r3", "an r7 vertical round at a corner, then r3 along a top edge, which runs on round the r7 arc to the other top edge",
-     [F([corner[2]], 7), F([[60, 15, 20]], 3)], {"body_count": 1},
-     "two radii meeting at a corner over a tangent chain; one valid body", base=B1, source="invariants")
+     [F([corner[2]], 7), F([[60, 15, 20]], 3)],
+     {"body_count": 1, "volume_mm3": VB - SPANDREL * 49 * 20 - SPANDREL * 9 * (33 + 53) - SPANDREL * 9 * (PI / 2) * (7 - XBAR * 3),
+      "faces": 10, "edges": 22, "vertices": 14, "bbox": BBOX, "tolerance": {"rel": 1e-5}},
+     "the r7 vertical round removes (1-pi/4) 7^2 20; the r3 chain runs along x = 60 (y 0..33) and y = 40 (x 0..53), straight, removing (1-pi/4) 3^2 each mm, and round the "
+     "r7 arc's top edge as a torus quarter: Pappus, the section (1-pi/4) 3^2 with its centroid 3 (10-3pi)/(12-3pi) in from the wall, at radius 7 - that, over pi/2 (as 003). "
+     "Faces: 6 planes + the r7 cylinder + the r3 chain's cylinder, torus, cylinder; edges: 5 round the bottom, 5 round the top, 5 vertical (two r7 tangent lines, the box's "
+     "three other verticals), the chain's three on the walls and two end arcs, its two seams; vertices from Euler (V - E + F = 2): 14", base=B1)
 case(T7, "016-corner-three-sequential-r5-r3-r7", "rounds r5 and r3 on the two top edges at a corner, then r7 on the vertical edge under them",
      [F([corner[0]], 5), F([corner[1]], 3, tangent_chain=False), F([[60, 40, 8]], 7)], {"body_count": 1},
      "three unequal radii at one corner, one after another; the vertical edge stays sharp below the two top rounds (x=60, y=40, z from 0 to 15), so it can be picked at z=8; one valid body", base=B1, source="invariants")
 case(T7, "011-chain-ending-at-corner", "r5 rounds on two top edges meeting at a corner whose vertical edge stays sharp",
-     [F([corner[0], corner[1]], 5)], {"body_count": 1},
-     "two rounds ending at a sharp vertical edge; one valid body", base=B1, source="invariants")
+     [F([corner[0], corner[1]], 5)],
+     {"body_count": 1, "volume_mm3": VB - SPANDREL * 25 * 100 + 125 * (5 / 3 - PI / 2), "faces": 8, "edges": 17, "vertices": 11, "bbox": BBOX, "tolerance": {"rel": 1e-5}},
+     "the two rounds remove (1-pi/4) 5^2 (60 + 40), less their common part in the corner cube, counted twice: in it (u, v, w from the round axes' corner) both remove where "
+     "u, v > sqrt(25 - w^2), int_0^5 (5 - sqrt(25 - w^2))^2 dw = 5^3 (5/3 - pi/2). They meet in a mitre (an elliptic arc down to the sharp vertical edge). Faces 6 + 2; edges: "
+     "4 bottom, 4 vertical, 4 round the top face, 2 round-wall tangent lines, 2 end arcs, the mitre; vertices 11 (Euler)", base=B1)
+# 012: the variable round's end carried on past x = 55 into the vertical round's column, trimmed by it.
+def corner_extension(rf, n=400):
+    tot = 0.0
+    for i in range(n):
+        x = 55 + 5 * (i + 0.5) / n
+        vmax = math.sqrt(max(25 - (x - 55) ** 2, 0))
+        r = rf(x)
+        c = 5 - r
+        def above(v):
+            dv = v - c
+            return max(0.0, 5 - (c + math.sqrt(max(r * r - dv * dv, 0)))) if dv < r else 5 - c
+        tot += quad_split(above, c, vmax, 40, 16) * 5 / n if vmax > c else 0.0
+    return tot
+ext_const = 125 * PI / 4 - 250 / 3
+ext_grow = corner_extension(lambda x: 1 + 4 * x / 55)
+v12a = VB - SPANDREL * 25 * 20 - SPANDREL * 55 * 31 / 3
+v12lo, v12hi = v12a - ext_grow, v12a - ext_const
 case(T7, "012-variable-into-rounded-corner", "a vertical r5 round, then a variable round r1 -> r5 along the top back edge into it",
-     [F([corner[2]], 5), F([[30, 40, 20]], 1, type="variable", radius2=5, start=[0, 40, 20])], {"body_count": 1},
-     "a variable round running into a constant one at a corner; one valid body", base=B1, source="invariants")
+     [F([corner[2]], 5), F([[30, 40, 20]], 1, type="variable", radius2=5, start=[0, 40, 20])],
+     {"body_count": 1, "volume_mm3": (v12lo + v12hi) / 2, "faces": 8, "edges": 18, "vertices": 12, "bbox": BBOX, "tolerance": {"rel": (v12hi - v12lo) / (v12hi + v12lo) + 1e-6}},
+     "a variable round takes only its picked edge (no tangent chain: crates/doc/src/eval.rs), y = 40 from x = 0 (r1) to x = 55 (r5), where it meets the vertical r5 round's "
+     "tangent line: removed (1-pi/4) 55 (1 + 5 + 25)/3 (005) and (1-pi/4) 5^2 20. Past x = 55 the round's end runs on into the vertical round's quarter column, trimmed by its "
+     "cylinder: as a constant r5 tube that takes int_0^5 sqrt(25 - v^2)(5 - sqrt(25 - v^2)) dv = 125 pi/4 - 250/3 = %.6f; with its radius still growing at 4/55 per mm, %.6f "
+     "(numerical, the round's section against the cylinder). V lies between: graded as the interval's middle with its half width as the tolerance. Faces 6 + 2; edges 18, "
+     "vertices 12 (5 round the bottom, 5 vertical, 5 round the top face, the round's line on the back wall, its end arc on x = 0, its trim on the cylinder)" % (ext_const, ext_grow), base=B1)
 missing(T7, "013-corner-setback", "three r5 rounds at a corner with setbacks of 8 mm along each edge", "solid.fillet has no corner setback distances",
         "the setback corner patch would be graded by invariants")
 case(T7, "014-curved-edge-r2", "an r2 round on the top edge of a cylinder r10 h20",
