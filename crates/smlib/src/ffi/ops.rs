@@ -1,5 +1,5 @@
 //! The operations block of `capi/include/smlib.h` (`smlib_boolean`, `smlib_boolean_union_all`, `smlib_boolean2d`, `smlib_fillet`,
-//! `smlib_chamfer`, `smlib_blend`, `smlib_fillet_variable`, `smlib_chamfer_sides`, `smlib_shell`, `smlib_offset_faces`,
+//! `smlib_chamfer`, `smlib_blend`, `smlib_blend_setback`, `smlib_fillet_variable`, `smlib_chamfer_sides`, `smlib_shell`, `smlib_offset_faces`,
 //! `smlib_thicken`, `smlib_draft`, `smlib_merge_faces`, `smlib_brep_solid_count`, `smlib_imprint`; the fork's `capi/src/smlib_ops.cpp`), declared by
 //! hand. Part of the FFI boundary, like its parent: called only through
 //! [`crate::ops`].
@@ -80,6 +80,20 @@ unsafe extern "C" {
         tolerance: f64,
         out: *mut *mut RawBrep,
         out_failed_point: *mut i64,
+    ) -> i32;
+    fn smlib_blend_setback(
+        brep: *const RawBrep,
+        kind: i32,
+        points: *const f64,
+        sizes: *const f64,
+        n_points: i64,
+        corners: *const f64,
+        setbacks: *const f64,
+        n_corners: i64,
+        tolerance: f64,
+        out: *mut *mut RawBrep,
+        out_failed_point: *mut i64,
+        out_failed_corner: *mut i64,
     ) -> i32;
     fn smlib_fillet_variable(
         brep: *const RawBrep,
@@ -263,6 +277,54 @@ pub fn blend(kind: i32, b: &Handle, points: &[[f64; 3]], sizes: &[f64], toleranc
         let at = (s == ERR_PICK_NONE || s == ERR_PICK_AMBIGUOUS).then(|| usize::try_from(failed).ok()).flatten();
         (s, at)
     })
+}
+
+/// `smlib_blend_setback`: `sizes` holds one size per point and `setbacks` one distance per
+/// corner (the caller checks the lengths match). A failed pick names its point; a corner that
+/// picks no vertex or several comes back with no index.
+#[cfg(feature = "native")]
+pub fn blend_setback(
+    kind: i32,
+    b: &Handle,
+    points: &[[f64; 3]],
+    sizes: &[f64],
+    corners: &[[f64; 3]],
+    setbacks: &[f64],
+    tolerance: f64,
+) -> Result<Handle, PickError> {
+    let n = i64::try_from(points.len()).map_err(|_| (ERR_ARG, None))?;
+    let nc = i64::try_from(corners.len()).map_err(|_| (ERR_ARG, None))?;
+    if sizes.len() != points.len() || setbacks.len() != corners.len() {
+        return Err((ERR_ARG, None));
+    }
+    let flat = points.as_ptr().cast::<f64>();
+    let flat_corners = corners.as_ptr().cast::<f64>();
+    let (mut failed, mut failed_corner) = (-1i64, -1i64);
+    new_brep(|out| unsafe {
+        smlib_blend_setback(
+            b.raw(),
+            kind,
+            flat,
+            sizes.as_ptr(),
+            n,
+            flat_corners,
+            setbacks.as_ptr(),
+            nc,
+            tolerance,
+            out,
+            &mut failed,
+            &mut failed_corner,
+        )
+    })
+    .map_err(|s| {
+        let at = (s == ERR_PICK_NONE || s == ERR_PICK_AMBIGUOUS).then(|| usize::try_from(failed).ok()).flatten();
+        (s, at)
+    })
+}
+
+#[cfg(not(feature = "native"))]
+pub fn blend_setback(_: i32, _: &Handle, _: &[[f64; 3]], _: &[f64], _: &[[f64; 3]], _: &[f64], _: f64) -> Result<Handle, PickError> {
+    Err((NOT_BUILT, None))
 }
 
 /// `smlib_fillet_variable`.
