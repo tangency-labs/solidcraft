@@ -198,8 +198,7 @@ pub(crate) fn railed(sections: &[Section], closed: bool, rails: &[Vec<Vec3>], fi
         let d = d.normalized().ok_or_else(|| KernelError::Invalid("two loft sections sit on top of each other".into()))?;
         Ok((middle_at(v)?, d))
     };
-    let start = centroid(lead).ok_or_else(|| fail("sections"))?;
-    let rails: Vec<Rail> = rails.iter().map(|r| rail(r, start, sections, tol)).collect::<Result<_>>()?;
+    let rails: Vec<Rail> = rails.iter().map(|r| rail(r, sections, tol)).collect::<Result<_>>()?;
     if let [a, b] = &rails[..]
         && a.anchors.iter().zip(&b.anchors).any(|(p, q)| p.on.dist(q.on) <= tol)
     {
@@ -280,52 +279,62 @@ pub(crate) fn section_normals(sections: &[Section], direction: impl Fn(f64) -> O
     normals
 }
 
-/// The rail `pts` from its end nearer `start` (the first section's middle), and where it meets
-/// each section, on the section's curve within `tol`.
+/// Orient the rail toward the first outline, then check that it meets every section in order.
 ///
 /// A rail runs from the first section to the last: it meets the last section at its end. In
 /// between it meets each section where it first crosses the section's plane after the section
 /// before. The end is not a crossing: a rail that lies in the last section's plane (a keel drawn
 /// in the bow's sketch plane) crosses that plane all along, first at the far section, and meets the
 /// section only where it ends.
-fn rail(pts: &[Vec3], start: Vec3, sections: &[Section], tol: f64) -> Result<Rail> {
-    let mut pts =
-        crate::sweep_path::clean(pts).map_err(|_| KernelError::Invalid("a guide rail needs 2…100000 finite points along its length".into()))?;
-    if let (Some(a), Some(b)) = (pts.first(), pts.last())
-        && b.dist(start) < a.dist(start)
-    {
-        pts.reverse();
-    }
-    let not_reached = |i: usize| {
-        KernelError::Invalid(format!(
-            "a guide rail does not reach section {}: a rail has to run from the first section to the last, through every one",
-            i + 1
-        ))
+fn rail(pts: &[Vec3], sections: &[Section], tol: f64) -> Result<Rail> {
+    let pts = crate::sweep_path::clean(pts).map_err(|_| KernelError::Invalid("a guide rail needs 2…100000 finite points along its length".into()))?;
+    let mut reversed = pts.clone();
+    reversed.reverse();
+    let endpoint_distance = |points: &[Vec3]| {
+        points
+            .first()
+            .and_then(|point| sections.first().and_then(|section| nearest_on(&section.curves, *point)))
+            .map_or(f64::INFINITY, |(_, _, distance)| distance)
     };
-    let mut cursor = (0usize, 0.0f64);
-    let mut anchors = Vec::with_capacity(sections.len());
-    for (i, s) in sections.iter().enumerate() {
-        let (plane, curves) = (&s.plane, &s.curves);
-        let (hit, at) = if i + 1 == sections.len() {
-            let end = *pts.last().ok_or_else(|| not_reached(i))?;
-            if plane.height(end).abs() > tol {
-                return Err(not_reached(i));
-            }
-            (end, (pts.len().saturating_sub(2), 1.0))
-        } else {
-            crate::sweep_path::rail_crossing(&pts, plane.origin, plane.normal(), cursor, tol).ok_or_else(|| not_reached(i))?
-        };
-        cursor = at;
-        let (g, on, d) = nearest_on(curves, hit).ok_or_else(|| KernelError::Failed("loft rails: section".into()))?;
-        if d > tol {
-            return Err(KernelError::Invalid(format!(
-                "a guide rail crosses section {}'s plane {d:.3} mm from its curves: a rail has to pass through every section",
+    let (first, second) = if endpoint_distance(&reversed) < endpoint_distance(&pts) { (&reversed, &pts) } else { (&pts, &reversed) };
+    let validate = |points: &[Vec3]| -> Result<Vec<Anchor>> {
+        let mut cursor = (0usize, 0.0f64);
+        let not_reached = |i: usize| {
+            KernelError::Invalid(format!(
+                "a guide rail does not reach section {}: a rail has to run from the first section to the last, through every one",
                 i + 1
-            )));
+            ))
+        };
+        let mut anchors = Vec::with_capacity(sections.len());
+        for (i, section) in sections.iter().enumerate() {
+            let (hit, at) = if i + 1 == sections.len() {
+                let end = *points.last().ok_or_else(|| not_reached(i))?;
+                if section.plane.height(end).abs() > tol {
+                    return Err(not_reached(i));
+                }
+                (end, (points.len().saturating_sub(2), 1.0))
+            } else {
+                crate::sweep_path::rail_crossing(points, section.plane.origin, section.plane.normal(), cursor, tol).ok_or_else(|| not_reached(i))?
+            };
+            cursor = at;
+            let (g, on, d) = nearest_on(&section.curves, hit).ok_or_else(|| KernelError::Failed("loft rails: section".into()))?;
+            if d > tol {
+                return Err(KernelError::Invalid(format!(
+                    "a guide rail crosses section {}'s plane {d:.3} mm from its curves: a rail has to pass through every section",
+                    i + 1
+                )));
+            }
+            anchors.push(Anchor { g, on, nudge: on - hit, at });
         }
-        anchors.push(Anchor { g, on, nudge: on - hit, at });
+        Ok(anchors)
+    };
+    match validate(first) {
+        Ok(anchors) => Ok(Rail { pts: first.to_vec(), anchors }),
+        Err(first_error) => match validate(second) {
+            Ok(anchors) => Ok(Rail { pts: second.to_vec(), anchors }),
+            Err(_) => Err(first_error),
+        },
     }
-    Ok(Rail { pts, anchors })
 }
 
 /// The point of a section (its curves) nearest `p`: as a wire parameter, the point, and how far
