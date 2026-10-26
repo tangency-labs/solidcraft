@@ -1748,6 +1748,8 @@ struct MergeCurvesWorld<'a, 'e> {
     uv: Vec<Option<Curve>>,
     env: &'a mut NotifyEnv<'e>,
     curve_ref: &'a dyn Fn(EdgeId, i64) -> ObjectRef,
+    /// The surfaces behind [`IntersectObject::FreeSurface`] (the intersection surface).
+    free_surfaces: Vec<Surface>,
 }
 
 impl MergeCurvesWorld<'_, '_> {
@@ -1775,7 +1777,10 @@ impl ClassGeometry<IntersectObject> for MergeCurvesWorld<'_, '_> {
         self.view().object_curve(o)
     }
     fn surface(&self, o: IntersectObject) -> Option<&Surface> {
-        self.view().object_surface(o)
+        match o {
+            IntersectObject::FreeSurface(i) => self.free_surfaces.get(i),
+            _ => self.view().object_surface(o),
+        }
     }
     fn volume(&self, _o: IntersectObject) -> Option<&crate::surface::volume::Volume> {
         None
@@ -1934,6 +1939,7 @@ pub fn merge_curves_on_surface(
             .collect(),
         env,
         curve_ref,
+        free_surfaces: Vec::new(),
     };
     let merged = crate::topology::brep::p2::merge_curves_on_surface(
         k,
@@ -1947,6 +1953,72 @@ pub fn merge_curves_on_surface(
             ..crate::topology::brep::p2::MergeCurvesOptions::default()
         },
     )?;
+    Ok((merged.new_faces, merged.edges))
+}
+
+/// `MergeCurvesOnSurface(*pSurf, dTol, s3DCurves, pOptUVCurves, sNewFaces, sCurveEdges,
+/// FALSE, pOptIntersectionSurface)` (`bUVSpaceOkay = TRUE`): as
+/// [`merge_curves_on_surface`], with the optional intersection surface the curves came
+/// from (`SmPlaneCutter::MergeIntersection`'s cutting plane), which every curve
+/// classification gets as its second surface
+/// ([`IntersectObject::FreeSurface`]`(0)`) for `sm_RefineCCIToSurfaces`'s
+/// surface/surface/surface refinement. The curves are edited in place, as upstream's
+/// refinement edits the caller's curves (`sm_SetXSectCurveThroughPoint`). Returns the
+/// new faces and the edges of the curves.
+///
+/// # Errors
+///
+/// Those of [`crate::topology::brep::p2::merge_curves_on_surface`].
+#[allow(clippy::too_many_arguments)]
+pub fn merge_curves_on_surface_through_surface(
+    k: &mut Kernel,
+    b: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+    curve_ref: &dyn Fn(EdgeId, i64) -> ObjectRef,
+    face: FaceId,
+    tol: f64,
+    curves_3d: &mut [Curve],
+    uv_curves: Option<&[Curve]>,
+    intersection_surface: Option<Surface>,
+) -> Result<(Vec<FaceId>, Vec<EdgeId>)> {
+    // curve i is IntersectObject::Curve(i), its UV curve IntersectObject::UvCurve(i, false)
+    let curves: Vec<IntersectObject> = (0..curves_3d.len()).map(IntersectObject::Curve).collect();
+    let uv: Option<Vec<IntersectObject>> = uv_curves.map(|uv| {
+        (0..uv.len())
+            .map(|i| IntersectObject::UvCurve(i, false))
+            .collect()
+    });
+    let has_surface = intersection_surface.is_some();
+    let mut world = MergeCurvesWorld {
+        b,
+        curves_3d: curves_3d.to_vec(),
+        uv: uv_curves
+            .unwrap_or_default()
+            .iter()
+            .cloned()
+            .map(Some)
+            .collect(),
+        env,
+        curve_ref,
+        free_surfaces: intersection_surface.into_iter().collect(),
+    };
+    let merged = crate::topology::brep::p2::merge_curves_on_surface(
+        k,
+        &mut world,
+        face,
+        tol,
+        &curves,
+        uv.as_deref(),
+        crate::topology::brep::p2::MergeCurvesOptions {
+            intersection_surface: has_surface.then_some(IntersectObject::FreeSurface(0)),
+            ..crate::topology::brep::p2::MergeCurvesOptions::default()
+        },
+    );
+    // the refinement's edits of the curves reach the caller's
+    for (c, edited) in curves_3d.iter_mut().zip(world.curves_3d) {
+        *c = edited;
+    }
+    let merged = merged?;
     Ok((merged.new_faces, merged.edges))
 }
 

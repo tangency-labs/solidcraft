@@ -2237,21 +2237,28 @@ fn intersect_edges<O: ClassObject>(
             }
         }
     }
-    restore_surface_owner(objects.brep_mut(), face, rescue)?;
-    let views = views?;
-    let surface = objects
-        .classify_surface(face)?
-        .ok_or(SolidError::null_pointer(OP_CURVE))?;
-    cc.intersect_edges(
+    let views = match views {
+        Ok(v) => v,
+        Err(e) => {
+            restore_surface_owner(objects.brep_mut(), face, rescue)?;
+            return Err(e);
+        }
+    };
+    // the owner stays cleared over the edge loop, as upstream's SmTemporaryChangeValue;
+    // the insertions refine and edit the curves through the mutable adapter
+    // (bUVSpaceOkay is TRUE: the surface lifts no 2D source)
+    let r = cc.intersect_edges_mut(
         k,
-        &*objects,
+        objects,
         &views,
-        surface,
+        None,
         IntersectEdgesOptions {
             has_big_gaps,
             ..IntersectEdgesOptions::default()
         },
-    )
+    );
+    restore_surface_owner(objects.brep_mut(), face, rescue)?;
+    r
 }
 
 #[cfg(test)]

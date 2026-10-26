@@ -5,6 +5,7 @@
 //! | Rust | Upstream |
 //! |------|----------|
 //! | [`CurveClassification::intersect_edges`] | `SmCurveClassification::IntersectEdges` |
+//! | [`CurveClassification::intersect_edges_mut`] | `SmCurveClassification::IntersectEdges` over a mutable adapter |
 //! | [`CurveClassification::intersect_ts_bound`] | `SmCurveClassification::IntersectTSBound` |
 //!
 //! Deviations: topology is supplied as borrowed views resolved from arena ids, and
@@ -14,15 +15,16 @@
 //! the vertex uses and edge uses it marks are a local ordered list of visited
 //! handles. No input-driven recursion is added. Temporary surface-owner
 //! clearing is represented by a private copy for a lifted 2D source. Concrete
-//! curve-on-surface dispatch is preserved; mutable edge insertion retains its dependency
-//! deferral. Ignored native evaluation
+//! curve-on-surface dispatch is preserved; [`CurveClassification::intersect_edges`]
+//! inserts through a read-only adapter (its mutable edits defer) and
+//! [`CurveClassification::intersect_edges_mut`] through a mutable one. Ignored native evaluation
 //! and drop statuses preserve initialized outputs; unported errors propagate. The
 //! native checked-drop guess aliases its output and is reset to zero before solving;
 //! the Rust call explicitly uses that zero guess. A 3D trim-boundary source returns
 //! `InvalidInput` instead of upstream's debug-only assertion.
 
 use super::p1::{cull_or_refine_cci_in_3d, src_zone_tol_3d_of};
-use super::p5::insert_solutions;
+use super::p5::{insert_solutions, insert_solutions_mut, ClassGeometryMut};
 use super::CurveClassification;
 use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::p5::make_curve_cache;
@@ -241,56 +243,15 @@ impl<O: ClassObject> CurveClassification<O> {
         };
         let source_zone = src_zone_tol_3d_of(k, Some(self));
         for edge in edges {
-            let target = curve(geometry, edge.curve)?;
-            let edge_zone = edge.zone_tol_3d;
-            let mut tolerance = xsect_tol_3d_from_zones(k, edge_zone, source_zone);
-            if options.has_big_gaps {
-                if let Some(gap) = edge.face_gap {
-                    if gap > tolerance {
-                        tolerance = gap * 1.1;
-                    }
-                }
-            }
-            let mut solutions = Vec::new();
-            if core::ptr::eq(target, working) {
-                let lo = max2(edge.interval.min(), self.interval().min());
-                let hi = min2(edge.interval.max(), self.interval().max());
-                if lo < hi {
-                    let mut sol = Solution::new();
-                    sol.solution_type = SolutionType::RangeOfValues;
-                    sol.num_variables = 2;
-                    sol.num_objects = 2;
-                    for slot in sol.objects.iter_mut().take(2) {
-                        *slot = Some(edge.curve);
-                    }
-                    for i in 0..2 {
-                        *sol.start.param_mut(i)? = lo;
-                        *sol.end.param_mut(i)? = hi;
-                    }
-                    solutions.push(sol);
-                }
-            } else {
-                let found = working.global_curve_intersect(
-                    k,
-                    &self.interval(),
-                    target,
-                    &edge.interval,
-                    tolerance,
-                    &CurveIntersectOptions {
-                        handles: [
-                            Some(Side::Source(working.natural_interval())),
-                            Some(Side::Target(target.natural_interval())),
-                        ],
-                        ..CurveIntersectOptions::default()
-                    },
-                )?;
-                solutions.extend(
-                    found
-                        .as_slice()
-                        .iter()
-                        .map(|s| named(s, source_handle, edge.curve)),
-                );
-            }
+            let (mut solutions, tolerance) = self.edge_solutions(
+                k,
+                geometry,
+                working,
+                source_handle,
+                source_zone,
+                edge,
+                options,
+            )?;
             if !solutions.is_empty() {
                 insert_solutions(
                     k,
@@ -303,6 +264,135 @@ impl<O: ClassObject> CurveClassification<O> {
             }
         }
         Ok(())
+    }
+
+    /// [`CurveClassification::intersect_edges`] over a mutable adapter: the solutions
+    /// are inserted with [`insert_solutions_mut`], whose surface/surface/surface
+    /// refinement may edit the classification curve and the edges in place; each edge
+    /// is intersected with the curve as it is then (upstream's `m_cpCurve` pointer).
+    /// `surface` (the face's surface) is needed only to lift a 2D source when
+    /// `options.uv_space_okay` is off.
+    ///
+    /// # Errors
+    /// As [`CurveClassification::intersect_edges`]; [`SolidError::InvalidInput`] for a 2D
+    /// source to lift without `surface`.
+    pub fn intersect_edges_mut(
+        &mut self,
+        k: &Kernel,
+        geometry: &mut impl ClassGeometryMut<O>,
+        edges: &[BoundaryEdge<O>],
+        surface: Option<&Surface>,
+        options: IntersectEdgesOptions,
+    ) -> Result<()> {
+        let source_handle = self.curve().ok_or(SolidError::null_pointer(OP))?;
+        let lift = {
+            let source = curve(&*geometry, source_handle)?;
+            if !options.uv_space_okay && source.dim() == 2 {
+                let surface = surface.ok_or(SolidError::invalid_input(
+                    OP,
+                    "a 2D source to lift without the face's surface",
+                ))?;
+                let mut unowned = surface.clone_for_evaluation()?;
+                let _ = unowned.set_owner(None);
+                Some(lifted(k, source, &unowned)?)
+            } else {
+                None
+            }
+        };
+        let source_zone = src_zone_tol_3d_of(k, Some(self));
+        for edge in edges {
+            let (mut solutions, tolerance) = {
+                let working = match &lift {
+                    Some(l) => l,
+                    None => curve(&*geometry, source_handle)?,
+                };
+                self.edge_solutions(
+                    k,
+                    &*geometry,
+                    working,
+                    source_handle,
+                    source_zone,
+                    edge,
+                    options,
+                )?
+            };
+            if !solutions.is_empty() {
+                insert_solutions_mut(
+                    k,
+                    geometry,
+                    self,
+                    &mut solutions,
+                    edge.edge,
+                    Some(tolerance),
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    /// The solutions of one edge of `IntersectEdges` and their intersection tolerance.
+    #[allow(clippy::too_many_arguments)]
+    fn edge_solutions(
+        &self,
+        k: &Kernel,
+        geometry: &impl ClassGeometry<O>,
+        working: &Curve,
+        source_handle: O,
+        source_zone: f64,
+        edge: &BoundaryEdge<O>,
+        options: IntersectEdgesOptions,
+    ) -> Result<(Vec<Solution<O>>, f64)> {
+        let target = curve(geometry, edge.curve)?;
+        let edge_zone = edge.zone_tol_3d;
+        let mut tolerance = xsect_tol_3d_from_zones(k, edge_zone, source_zone);
+        if options.has_big_gaps {
+            if let Some(gap) = edge.face_gap {
+                if gap > tolerance {
+                    tolerance = gap * 1.1;
+                }
+            }
+        }
+        let mut solutions = Vec::new();
+        if core::ptr::eq(target, working) {
+            let lo = max2(edge.interval.min(), self.interval().min());
+            let hi = min2(edge.interval.max(), self.interval().max());
+            if lo < hi {
+                let mut sol = Solution::new();
+                sol.solution_type = SolutionType::RangeOfValues;
+                sol.num_variables = 2;
+                sol.num_objects = 2;
+                for slot in sol.objects.iter_mut().take(2) {
+                    *slot = Some(edge.curve);
+                }
+                for i in 0..2 {
+                    *sol.start.param_mut(i)? = lo;
+                    *sol.end.param_mut(i)? = hi;
+                }
+                solutions.push(sol);
+            }
+        } else {
+            let found = working.global_curve_intersect(
+                k,
+                &self.interval(),
+                target,
+                &edge.interval,
+                tolerance,
+                &CurveIntersectOptions {
+                    handles: [
+                        Some(Side::Source(working.natural_interval())),
+                        Some(Side::Target(target.natural_interval())),
+                    ],
+                    ..CurveIntersectOptions::default()
+                },
+            )?;
+            solutions.extend(
+                found
+                    .as_slice()
+                    .iter()
+                    .map(|s| named(s, source_handle, edge.curve)),
+            );
+        }
+        Ok((solutions, tolerance))
     }
 
     /// Intersects a 2D source with a face's trim vertices and curves. A valid trim

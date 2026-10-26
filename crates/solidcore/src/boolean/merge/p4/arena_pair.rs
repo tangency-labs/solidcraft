@@ -1566,6 +1566,8 @@ impl IntersectorBrep<H> for ArenaPair<'_> {
                     EntityRef::Vertexuse(vu) => Ok(hd(brep_of(side), K_VERTEXUSE, vu.index())),
                     other => Self::entity_h(brep_of(side), other).ok_or_else(bad),
                 },
+                // face intersections name no free surface
+                IntersectObject::FreeSurface(_) => Err(bad()),
             }
         };
         let mut cc1 = Vec::new();

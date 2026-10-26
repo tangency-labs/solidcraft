@@ -1401,6 +1401,12 @@ pub enum IntersectObject {
     Trim(EdgeuseId, bool),
     /// A topology entity (`.1`: the side).
     Topology(EntityRef, bool),
+    /// A surface owned by no face, held by the adapter at this index: the
+    /// `pOptIntersectionSurface` of `SmBrep::MergeCurvesOnSurface`
+    /// ([`crate::topology::brep::p10::merge_curves_on_surface_through_surface`]).
+    /// [`IntersectObjects`] resolves none; the adapter that holds such surfaces
+    /// resolves them.
+    FreeSurface(usize),
 }
 
 impl ClassObject for IntersectObject {
@@ -1409,7 +1415,7 @@ impl ClassObject for IntersectObject {
             Self::Curve(_) | Self::UvCurve(..) | Self::EdgeCurve(..) | Self::Trim(..) => {
                 ClassObjectKind::Curve
             }
-            Self::Surface(..) => ClassObjectKind::Surface,
+            Self::Surface(..) | Self::FreeSurface(_) => ClassObjectKind::Surface,
             Self::Topology(e, _) => e.class_kind(),
         }
     }
@@ -1531,7 +1537,9 @@ impl<'a> IntersectObjects<'a> {
             IntersectObject::UvCurve(i, true) => self.uv2.get(i)?.as_ref(),
             IntersectObject::EdgeCurve(e, side) => self.brep(side).edge(e).ok()?.curve.as_ref(),
             IntersectObject::Trim(eu, side) => eu1::uv_trim_curve(self.brep(side), eu).ok()?.0,
-            IntersectObject::Surface(..) | IntersectObject::Topology(..) => None,
+            IntersectObject::Surface(..)
+            | IntersectObject::Topology(..)
+            | IntersectObject::FreeSurface(_) => None,
         }
     }
 

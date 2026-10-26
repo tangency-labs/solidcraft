@@ -116,6 +116,18 @@ enum OpIn {
         tol: f64,
         curves: Vec<CrvIn>,
     },
+    /// `MergeCurvesOnSurface` with optional UV curves (one per curve) and an optional
+    /// intersection surface (`pOptIntersectionSurface`), which enables
+    /// `sm_RefineCCIToSurfaces`'s surface/surface/surface refinement.
+    MergeSsi {
+        face: i64,
+        tol: f64,
+        curves: Vec<CrvIn>,
+        #[serde(default)]
+        uv_curves: Option<Vec<CrvIn>>,
+        #[serde(default)]
+        surface: Option<SrfIn>,
+    },
     Mate {
         edge: i64,
         surface: SrfIn,
@@ -277,6 +289,35 @@ fn op_args(op: &OpIn, c: &[usize; 10]) -> Result<Option<(Op, Vec<f64>)>, Harness
                 push_curve(&mut v, c)?;
             }
             (Op::Merge, v)
+        }
+        OpIn::MergeSsi {
+            face,
+            tol,
+            curves,
+            uv_curves,
+            surface,
+        } => {
+            let Some(f) = pick(*face, n_f) else {
+                return Ok(None);
+            };
+            let mut v = vec![f as f64, *tol, curves.len() as f64];
+            for c in curves {
+                push_curve(&mut v, c)?;
+            }
+            v.push(flag(uv_curves.is_some()));
+            if let Some(uv) = uv_curves {
+                if uv.len() != curves.len() {
+                    return Err(harness("one UV curve per curve"));
+                }
+                for c in uv {
+                    push_curve(&mut v, c)?;
+                }
+            }
+            v.push(flag(surface.is_some()));
+            if let Some(srf) = surface {
+                push_surface(&mut v, srf)?;
+            }
+            (Op::MergeSsi, v)
         }
         OpIn::Mate {
             edge,
@@ -721,7 +762,9 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: Op, a: &[f64]) -> Result<Vec<f6
             out.push(s);
             out.push(idx(r.flatten(), RegionId::index));
         }
-        Op::Merge => return Err(Fail::Harness(harness("merge runs in merge_rust"))),
+        Op::Merge | Op::MergeSsi => {
+            return Err(Fail::Harness(harness("merge runs in merge_rust")))
+        }
         Op::Mate => {
             let e = EdgeId::from_index(arg(0)? as u32);
             let surf = surface_arg(a, 1)?;
@@ -938,6 +981,25 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
         let face = FaceId::from_index(args.first().copied().unwrap_or(0.0) as u32);
         return merge_rust(&mut k, &mut b, face, curves, *tol);
     }
+    if let OpIn::MergeSsi {
+        curves,
+        tol,
+        uv_curves,
+        surface,
+        ..
+    } = &i.op
+    {
+        let face = FaceId::from_index(args.first().copied().unwrap_or(0.0) as u32);
+        return merge_ssi_rust(
+            &mut k,
+            &mut b,
+            face,
+            curves,
+            uv_curves.as_deref(),
+            surface.as_ref(),
+            *tol,
+        );
+    }
     match run_rust_op(&mut k, &mut b, op, &args) {
         Ok(out) => Ok(Output::new().values("out", out)),
         Err(Fail::Deferred(o)) => Ok(*o),
@@ -983,6 +1045,99 @@ fn merge_rust(
             },
         },
     }
+}
+
+/// `n` points of `c` spread evenly over `[t0, t1]` (the shim's `put_curve_points`).
+fn curve_points(k: &Kernel, c: &SmCurve, t0: f64, t1: f64, n: u32, o: &mut Vec<f64>) {
+    for i in 0..n {
+        let t = t0 + (t1 - t0) * f64::from(i) / f64::from(n - 1);
+        let p = c.evaluate_point(k, t).unwrap_or(Vec3::UNDEF);
+        o.extend([p.x, p.y, p.z]);
+    }
+}
+
+/// `MergeCurvesOnSurface` with UV curves and an intersection surface over the case's
+/// B-rep (`topology::brep::p10::merge_curves_on_surface_through_surface`), then the
+/// shim's read-back: the (refined) curves, every edge (`GetEdges`) and vertex
+/// (`GetVertices`).
+#[allow(clippy::too_many_arguments)]
+fn merge_ssi_rust(
+    k: &mut Kernel,
+    b: &mut Brep,
+    face: FaceId,
+    curves: &[CrvIn],
+    uv_curves: Option<&[CrvIn]>,
+    surface: Option<&SrfIn>,
+    tol: f64,
+) -> Result<Output, HarnessError> {
+    let mut crvs: Vec<SmCurve> = curves
+        .iter()
+        .map(|c| rust_curve(c).map(SmCurve::from))
+        .collect::<Result<_, _>>()?;
+    let uv: Option<Vec<SmCurve>> = uv_curves
+        .map(|uv| {
+            uv.iter()
+                .map(|c| rust_curve(c).map(SmCurve::from))
+                .collect::<Result<_, _>>()
+        })
+        .transpose()?;
+    let srf = surface.map(rust_surface).transpose()?;
+    let mut state = bp2::ArenaNotifyState::new(b);
+    let mut env = state.env(None);
+    let key_of = env.key_of;
+    let curve_ref = |e: EdgeId, _type_code: i64| key_of(EntityRef::Edge(e));
+    let r = solidcore::topology::brep::p10::merge_curves_on_surface_through_surface(
+        k,
+        b,
+        &mut env,
+        &curve_ref,
+        face,
+        tol,
+        &mut crvs,
+        uv.as_deref(),
+        srf,
+    );
+    let (s, nf, ne) = match r {
+        Ok((new_faces, edges)) => (0.0, new_faces.len(), edges.len()),
+        Err(e) => match Output::unported(&e) {
+            Some(o) => return Ok(o),
+            None => match e {
+                SolidError::Upstream { code, .. } => (f64::from(code), 0, 0),
+                other => return Err(harness(format!("rust: {other}"))),
+            },
+        },
+    };
+    let mut out = vec![0.0, s, nf as f64, ne as f64];
+    for c in &crvs {
+        let ivl = c.natural_interval();
+        out.push(
+            c.number_control_points()
+                .map_err(|e| harness(format!("rust: {e}")))? as f64,
+        );
+        curve_points(k, c, ivl.min(), ivl.max(), 9, &mut out);
+    }
+    let h = |e: SolidError| harness(format!("rust: {e}"));
+    let edges = bp1::edges(b, None).map_err(h)?;
+    let vertices = bp1::vertices(b, None).map_err(h)?;
+    out.push(edges.len() as f64);
+    for e in edges {
+        let edge = b.edge(e).map_err(h)?;
+        out.push(solidcore::topology::edge::tolerance(b, e).map_err(h)?);
+        let Some(c) = edge.curve.as_ref() else {
+            out.push(-1.0);
+            continue;
+        };
+        let ivl = solidcore::topology::edge::interval(b, e).map_err(h)?;
+        out.extend([ivl.min(), ivl.max()]);
+        curve_points(k, c, ivl.min(), ivl.max(), 3, &mut out);
+    }
+    out.push(vertices.len() as f64);
+    for v in vertices {
+        let p = b.vertex(v).map_err(h)?.point;
+        let t = solidcore::topology::vertex::tolerance(b, v).map_err(h)?;
+        out.extend([p.x, p.y, p.z, t]);
+    }
+    Ok(Output::new().values("out", out))
 }
 
 // ---- generation ---------------------------------------------------------------------------

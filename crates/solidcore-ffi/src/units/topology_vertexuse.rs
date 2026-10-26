@@ -210,13 +210,18 @@ fn surface(rd: &mut Reader<'_>) -> Result<Domain, FfiError> {
 
 /// A B-spline curve block; returns its parameter range.
 fn curve(rd: &mut Reader<'_>) -> Result<(f64, f64), FfiError> {
+    curve_with(rd, MAX_INDEX)
+}
+
+/// [`curve`] with at most `max_index + 1` control points.
+fn curve_with(rd: &mut Reader<'_>, max_index: usize) -> Result<(f64, f64), FfiError> {
     let dim = rd.index(3)?;
     if dim < 2 {
         return Err(bad("curve: dimension must be 2 or 3"));
     }
-    let n = rd.index(MAX_INDEX)?;
+    let n = rd.index(max_index)?;
     let p = rd.index(MAX_DEGREE)?;
-    let m = rd.index(MAX_INDEX + MAX_DEGREE + 1)?;
+    let m = rd.index(max_index + MAX_DEGREE + 1)?;
     if p == 0 || p > n || m != n + p + 1 {
         return Err(bad("curve: need 1 <= p <= n and m = n + p + 1"));
     }
@@ -240,6 +245,19 @@ pub(crate) fn curve_at(input: &[f64], at: usize) -> Result<((f64, f64), usize), 
     let mut rd = Reader::new(input);
     rd.at = at;
     let r = curve(&mut rd)?;
+    Ok((r, rd.at))
+}
+
+/// [`curve_at`] for a curve of up to `max_index + 1` control points (`topology_brep_p2`'s
+/// `MergeSsi` section curves).
+pub(crate) fn long_curve_at(
+    input: &[f64],
+    at: usize,
+    max_index: usize,
+) -> Result<((f64, f64), usize), FfiError> {
+    let mut rd = Reader::new(input);
+    rd.at = at;
+    let r = curve_with(&mut rd, max_index)?;
     Ok((r, rd.at))
 }
 

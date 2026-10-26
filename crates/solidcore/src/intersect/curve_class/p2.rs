@@ -1,7 +1,7 @@
 //! Curve classification, part 2: assignment and reset of a classification, interval
 //! insertion, merging and editing, boundary queries (zone tolerance, location, dead
-//! topology), the UV ends of an interval and the entry checks of the classification
-//! curve / edge intersection refinement onto surf/surf/surf points.
+//! topology), the UV ends of an interval and the classification curve / edge
+//! intersection refinement onto surf/surf/surf points.
 //!
 //! Upstream: `source/SMLib/src/SmCurveClass.cpp`, `source/SMLib/inc/SmCurveClass.h`.
 //!
@@ -21,6 +21,7 @@
 //! | [`CurveClassification::interval_max_uv`]                    | `SmCurveInterval::GetMaxUV`                           |
 //! | [`refine_cci_to_surfaces`], [`RefineCci`]                   | `sm_RefineCCIToSurfaces`                              |
 //! | [`refine_cci_to_surfaces_in`]                               | `sm_RefineCCIToSurfaces`, through an adapter          |
+//! | [`refine_cci_to_surfaces_mut`]                              | `sm_RefineCCIToSurfaces` (with its large-gap part)    |
 //!
 //! Deviations:
 //! - **Handles.** As in part 1, every object is a caller handle `O` resolved through a
@@ -49,17 +50,30 @@
 //!   index, which is now the stale slot past `m_lSize` (a copy of the last interval, as
 //!   `RemoveAt` leaves it), and its `CollapseInterval` then fails (status ignored). This
 //!   port reads the copy of the last interval the same way.
-//! - **`sm_RefineCCIToSurfaces`** is ported through its no-work gate:
-//!   [`refine_cci_to_surfaces_in`] resolves the edge, its faces, edge uses, UV trim
-//!   curves and Boolean mate through the adapter (`sm_GetCCIGeometry`), measures the
-//!   gaps (`sm_GetCCISurfaceGaps`) and returns unchanged when they are within the edge
-//!   zone tolerance / 2000 or a point fails to drop, as upstream. The large-gap tail
-//!   (the surf/surf/surf, surface/edge and edge/surface refinements, which rewrite the
-//!   classification curve, the edge curve and its UV trim curves and then recurse)
-//!   needs the mutable B-rep and stays `UNPORTED(intersect.curve_class_p2)`; it recurses
-//!   through upstream's own counter (`lRecursionCount`, at most 5 levels), which
-//!   [`RefineCci::recursion_count`] carries. [`refine_cci_to_surfaces`], which has no
-//!   adapter, still defers at the edge.
+//! - **`sm_RefineCCIToSurfaces`**: [`refine_cci_to_surfaces_in`] resolves the edge, its
+//!   faces, edge uses, UV trim curves and Boolean mate through the adapter
+//!   (`sm_GetCCIGeometry`), measures the gaps (`sm_GetCCISurfaceGaps`) and returns
+//!   unchanged when they are within the edge zone tolerance / 2000 or a point fails to
+//!   drop, as upstream; past that gate it needs to edit the B-rep and a read-only
+//!   adapter defers (a dispatch gap). [`refine_cci_to_surfaces_mut`] runs the large-gap
+//!   part over a [`ClassGeometryMut`] adapter: the surfaces and UV trim curves are copied
+//!   first (the part edits the B-rep they live in; upstream's `SmSurface*` comparisons
+//!   become comparisons of each surface's first position in the list), the
+//!   classification curve is edited on a copy written back in place, the edge (and a
+//!   Boolean mate in the same B-rep; one in another B-rep is a dispatch gap) through
+//!   [`apply_point_solution_in`](super::p1::apply_point_solution_in), and the edge uses'
+//!   UV trim curves are dropped through the edge's B-rep. Statuses upstream ignores
+//!   (evaluations, the local and global intersections, `RefinePoint`, whose
+//!   `bFoundAnswer` is already `TRUE` when its local intersection fails, and
+//!   `sm_ApplyPointSolution`, whose failure leaves its out-params as its entry reset
+//!   them) are ignored; the `SER`'d curve/curve intersection's failing status is not
+//!   returned (every caller ignores it), only the refinement stops. Where upstream
+//!   indexes its surface or UV point lists past their end (a failed gap measurement
+//!   leaves the UV point list short) the port returns `InvalidInput`.
+//!   [`refine_cci_to_surfaces`], which has no adapter, still defers at the edge.
+//! - **Recursion.** `sm_RefineCCIToSurfaces` recurses from its last part through
+//!   upstream's own shared counter (`lRecursionCount`, nothing done past 5, so at most
+//!   7 nested calls), which [`RefineCci::recursion_count`] carries.
 //! - **Topology callees** return [`SolidError::Unported`]: `SmEdge::GetCurve`
 //!   (`topology.edge`) and `SmFace::GetSurface` (`topology.face_p2`) are called on
 //!   opaque edge / face handles that carry no B-rep the port can reach (as in part 3
@@ -67,28 +81,37 @@
 //!   for those units); `SmBrep::IsLiveTopologyMember` (`topology.brep_p1`, not ported)
 //!   and the topology zone tolerances of point classifications (through
 //!   `intersect.point_class`).
-//! - **Recursion.** None here (see `sm_RefineCCIToSurfaces` above).
 
-use crate::curve::curve::p2::CurveKind;
+use crate::curve::curve::p2::{Curve, CurveKind};
+use crate::curve::curve::p3::PointSolveOptions;
 use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
+use crate::geom::global_solver::SolverOperation;
 use crate::geom::solution_array::{Solution, SolutionType};
-use crate::geom::tol::{are_same, xsect_tol_3d_from_zones, zone_tol3d, UNINIT_TOL, ZONE_TOL_3D};
+use crate::geom::tol::{
+    ang_tol_rad, are_parallel, are_perpendicular, are_same, eff_zero, scaled_zero_sq_of,
+    xsect_tol_3d_from_zones, zone_tol3d, ScaledZero, UNINIT_TOL, ZONE_TOL_3D,
+};
 use crate::intersect::point_class::{
     ClassGeometry, ClassObject, PointClassType, PointClassification,
 };
+use crate::intersect::surface_intersector::p1::{IntersectionPointType, SurfaceIntersector};
 use crate::kernel::Kernel;
-use crate::math::{Point2, Point3, Vec3};
+use crate::math::{Point2, Point3, Vec3, BIG_DOUBLE, EFF_ZERO, EFF_ZERO_SQ, UNDEF_DOUBLE};
+use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
+use crate::nurbs::knots::Side;
 use crate::surface::surface::p5::DropPointOptions;
+use crate::surface::surface::Surface;
 use crate::topology::brep::p1::is_live_topology_member;
 use crate::topology::face::p2 as face_p2;
-use crate::topology::Brep;
+use crate::topology::{Brep, EdgeuseId};
 use crate::EntityRef;
 
 use super::p1::{
     xsect_tol_2d_or_3d_for_classify_pair, CurveClassification, CurveInterval, IntervalPosition,
 };
 use super::p3::curve_is_degenerate;
+use super::p5::ClassGeometryMut;
 use super::p7::NoObject;
 
 const OP_CC: &str = "intersect::curve_class::p2::CurveClassification";
@@ -97,6 +120,7 @@ const OP_RESET: &str = "intersect::curve_class::p2::reset";
 const OP_CONNECT: &str = "intersect::curve_class::p2::connect_intervals";
 const OP_EDIT: &str = "intersect::curve_class::p2::edit_interval";
 const OP_UV: &str = "intersect::curve_class::p2::interval_uv";
+const OP_REFINE: &str = "intersect::curve_class::p2::refine_cci_to_surfaces";
 
 /// `lMaxRecursion` of `sm_RefineCCIToSurfaces`.
 const MAX_REFINE_RECURSION: u64 = 5;
@@ -905,8 +929,8 @@ pub fn refine_cci_to_surfaces<O: ClassObject, S: Copy>(
 ///
 /// [`SolidError::Unported`] when the gaps are large: upstream then moves the point to a
 /// surf/surf/surf intersection and rewrites the classification curve, the edge curve
-/// and its UV trim curves, which needs the mutable B-rep
-/// (`UNPORTED(intersect.curve_class_p2)`); those of
+/// and its UV trim curves, which a read-only adapter cannot (the mutable adapter's
+/// [`refine_cci_to_surfaces_mut`] does); those of
 /// [`get_cci_geometry_in`](super::p1::get_cci_geometry_in) and
 /// [`get_cci_surface_gaps`](super::p1::get_cci_surface_gaps);
 /// [`SolidError::InvalidInput`] for a classification without a curve or an edge
@@ -920,6 +944,107 @@ pub fn refine_cci_to_surfaces_in<O: ClassObject, S: Copy>(
     sss_point: Point3,
     recursion_count: u64,
 ) -> Result<RefineCci> {
+    let (out, large_gap) = refine_head(
+        k,
+        geometry,
+        classification,
+        solution,
+        edge,
+        sss_point,
+        recursion_count,
+    )?;
+    if large_gap.is_none() {
+        return Ok(out);
+    }
+    // Part 2 - Fix Large Gaps: rewrites the classification curve, the edge curve and its
+    // UV trim curves through the mutable adapter ([`refine_cci_to_surfaces_mut`]).
+    // DISPATCH GAP: SmBrep mutable owning context (read-only adapter without a Brep)
+    Err(SolidError::unported(
+        "SmBrep mutable owning context (sm_RefineCCIToSurfaces)",
+        "topology.brep_p1",
+    ))
+}
+
+/// [`refine_cci_to_surfaces_in`] over a mutable adapter: when the gaps are large the
+/// intersection point moves to a surf/surf/surf intersection (part 2a), a surface/curve
+/// intersection of the edge's other surface (2b) or of the classification curve's
+/// other surface (2c), or is refined on both surface pairs (the last part), and the
+/// classification curve (in place, through [`ClassGeometryMut::curve_mut`]), the edge
+/// curve and the edge's UV trim curves (through
+/// [`ClassGeometryMut::topology_entity_mut`]) are rewritten through it
+/// (`sm_ApplyPointSolution`), the solution's parameters moving with them; the last part
+/// then refines again while the gaps stay large (at most [`MAX_REFINE_RECURSION`]
+/// levels, upstream's `lRecursionCount`).
+///
+/// # Errors
+///
+/// Those of [`refine_cci_to_surfaces_in`] other than its large-gap deferral;
+/// [`SolidError::Unported`] (a dispatch gap) when the adapter cannot lend the
+/// classification curve or the edge mutably, or the edge's Boolean mate lies in another
+/// B-rep; [`SolidError::InvalidInput`] where upstream reads past its surface or UV point
+/// lists (a failed gap measurement leaves a short UV point list).
+pub fn refine_cci_to_surfaces_mut<O: ClassObject, G: ClassGeometryMut<O>, S: Copy>(
+    k: &Kernel,
+    geometry: &mut G,
+    classification: &mut CurveClassification<O>,
+    solution: &mut Solution<S>,
+    edge: O,
+    sss_point: Point3,
+    recursion_count: u64,
+) -> Result<RefineCci> {
+    let (out, large_gap) = refine_head(
+        k,
+        &*geometry,
+        classification,
+        solution,
+        edge,
+        sss_point,
+        recursion_count,
+    )?;
+    let Some(large_gap) = large_gap else {
+        return Ok(out);
+    };
+    refine_large_gap(k, geometry, classification, solution, edge, out, large_gap)
+}
+
+/// The state `sm_RefineCCIToSurfaces` carries into its large-gap part, owned (the
+/// surfaces and UV trim curves are copies, since the part edits the B-rep they live
+/// in; `ids` tells the surfaces apart as upstream's `SmSurface*` comparisons do).
+struct LargeGap<O> {
+    /// `pSrcCurvePt3d`, `sEdgeCurvePoint`.
+    src_curve_pt: Point3,
+    edge_curve_pt: Point3,
+    /// `sXSectTol3d`, `sNoWorkXSectTol3d`.
+    xsect_tol_3d: f64,
+    no_work_xsect_tol_3d: f64,
+    /// `dCurveEdgeGap`, `dCurveSurfaceGap`, `dEdgeSurfaceGap`.
+    curve_edge_gap: f64,
+    curve_surface_gap: f64,
+    edge_surface_gap: f64,
+    /// `sUVPoints`.
+    uv_points: Vec<Point2>,
+    /// `pEMate`.
+    emate: Option<O>,
+    /// `sSurfaces`, with the identity of each (the index of its first occurrence).
+    surfaces: Vec<Surface>,
+    ids: Vec<usize>,
+    /// `sEdgeuses`, `sUVCurves`, `lEdgeSurfaceCount`.
+    edgeuses: Vec<Option<EdgeuseId>>,
+    uv_curves: Vec<Option<Curve>>,
+    edge_surface_count: usize,
+}
+
+/// `sm_RefineCCIToSurfaces` up to its large-gap part: the output with nothing changed,
+/// and the large-gap state when the gaps are large.
+fn refine_head<O: ClassObject, S: Copy>(
+    k: &Kernel,
+    geometry: &impl ClassGeometry<O>,
+    classification: &CurveClassification<O>,
+    solution: &Solution<S>,
+    edge: O,
+    sss_point: Point3,
+    recursion_count: u64,
+) -> Result<(RefineCci, Option<LargeGap<O>>)> {
     // init outputs
     let out = RefineCci {
         sss_point_flag: false,
@@ -929,7 +1054,7 @@ pub fn refine_cci_to_surfaces_in<O: ClassObject, S: Copy>(
     };
 
     if recursion_count > MAX_REFINE_RECURSION {
-        return Ok(out); // just return with no changes.
+        return Ok((out, None)); // just return with no changes.
     }
 
     // no work case - Not an intersection curve point solution
@@ -938,7 +1063,7 @@ pub fn refine_cci_to_surfaces_in<O: ClassObject, S: Copy>(
         || are_same(solution.start.param(1)?, solution.end.param(1)?);
     if !point_solution || classification.surface1().is_none() || classification.surface2().is_none()
     {
-        return Ok(out);
+        return Ok((out, None));
     }
 
     // get ClassCurve and EdgeCurve xsect points
@@ -948,6 +1073,11 @@ pub fn refine_cci_to_surfaces_in<O: ClassObject, S: Copy>(
 
     let edge_zone_tol_3d =
         crate::intersect::point_class::object_zone_tol_3d(k, geometry, Some(edge))?;
+    let xsect_tol_3d = xsect_tol_3d_from_zones(
+        k,
+        edge_zone_tol_3d,
+        super::p1::src_zone_tol_3d_of(k, Some(classification)),
+    );
     let no_work_xsect_tol_3d = edge_zone_tol_3d / 2000.0; // usually about 1e-8 = ApproxTol/1000 (2 gets ApproxTol)
 
     // (the statuses of both evaluations are ignored upstream)
@@ -976,18 +1106,1004 @@ pub fn refine_cci_to_surfaces_in<O: ClassObject, S: Copy>(
             && gaps.curve_surface_gap < no_work_xsect_tol_3d
             && gaps.edge_surface_gap < no_work_xsect_tol_3d)
     {
-        return Ok(out);
+        return Ok((out, None));
     }
 
-    // Part 2 - Fix Large Gaps: moves the point to a surf/surf/surf or surface/edge
-    // intersection and rewrites the classification curve, the edge curve and its UV trim
-    // curves (sm_ApplyPointSolution, SmEdgeuse::SetUVTrimCurve), then recurses.
-    // UNPORTED(intersect.curve_class_p2): sm_RefineCCIToSurfaces (large-gap refinement
-    // of the mutable B-rep's curves)
-    Err(SolidError::unported(
-        "sm_RefineCCIToSurfaces (large-gap refinement)",
-        "intersect.curve_class_p2",
+    // the large-gap part edits the B-rep the surfaces and trim curves live in: copy them
+    let ids = cci
+        .surfaces
+        .iter()
+        .map(|s| {
+            cci.surfaces
+                .iter()
+                .position(|t| core::ptr::eq(*s, *t))
+                .unwrap_or(0)
+        })
+        .collect();
+    let large_gap = LargeGap {
+        src_curve_pt,
+        edge_curve_pt,
+        xsect_tol_3d,
+        no_work_xsect_tol_3d,
+        curve_edge_gap: gaps.curve_edge_gap,
+        curve_surface_gap: gaps.curve_surface_gap,
+        edge_surface_gap: gaps.edge_surface_gap,
+        uv_points: gaps.uv_points,
+        emate: cci.emate,
+        surfaces: cci.surfaces.iter().map(|s| (*s).clone()).collect(),
+        ids,
+        edgeuses: cci.edgeuses,
+        uv_curves: cci.uv_curves.iter().map(|c| c.cloned()).collect(),
+        edge_surface_count: cci.edge_surface_count,
+    };
+    Ok((out, Some(large_gap)))
+}
+
+/// `SM_TOL_LINE double dTripleProdLim` of part 2a.
+const TRIPLE_PROD_LIM: f64 = 0.0043633092847466;
+
+/// The entry of a list upstream indexes unchecked (`InvalidInput` past its end).
+fn entry<T: Copy>(list: &[T], index: usize) -> Result<T> {
+    list.get(index).copied().ok_or(SolidError::invalid_input(
+        OP_REFINE,
+        "index past the surface list",
     ))
+}
+
+/// `SmSurface::Evaluate(uv, 1, 1, FALSE, FALSE, FALSE, aSrfEval)` (status ignored
+/// upstream): upstream's 1d layout `[D, Dv, Du, Duv]`, undefined for a failed
+/// evaluation.
+fn srf_eval_11(k: &Kernel, surface: &Surface, uv: Point2) -> Result<[Vec3; 4]> {
+    let mut vals = [Vec3::UNDEF; 4];
+    let flags = EvaluateFlags {
+        u_side: Side::Right,
+        v_side: Side::Right,
+        only_upper_half: false,
+        non_zero_tangents: true,
+    };
+    if let Some(d) = ignored(surface.evaluate(k, uv, 1, 1, flags))? {
+        let at = |i: usize, j: usize| d.get(i).and_then(|r| r.get(j)).copied();
+        for (slot, (i, j)) in vals.iter_mut().zip([(0, 0), (0, 1), (1, 0), (1, 1)]) {
+            if let Some(v) = at(i, j) {
+                *slot = v;
+            }
+        }
+    }
+    Ok(vals)
+}
+
+/// `SmCurve::Evaluate(t, 1, bFromLeft, pv)` (status ignored upstream): the point and
+/// tangent, undefined for a failed evaluation.
+fn crv_eval_1(k: &Kernel, curve: &Curve, t: f64, from_left: bool) -> Result<[Vec3; 2]> {
+    let mut pv = [Vec3::UNDEF; 2];
+    if let Some(d) = ignored(curve.evaluate(k, t, 1, from_left, true))? {
+        for (slot, v) in pv.iter_mut().zip(d) {
+            *slot = v;
+        }
+    }
+    Ok(pv)
+}
+
+/// `EvaluateNormal(uv, FALSE, FALSE, n)` with its status ignored (an undefined vector
+/// for a failure).
+fn normal_or_undef(k: &Kernel, surface: &Surface, uv: Point2) -> Result<Vec3> {
+    Ok(ignored(surface.evaluate_normal(k, uv, Side::Right, Side::Right))?.unwrap_or(Vec3::UNDEF))
+}
+
+/// `SmSurfaceIntersector(s1, s1->GetNaturalUVDomain(), s2, ..).RefinePoint(uv1, uv2,
+/// SM_IP_CROSSING, &normal, NULL, FALSE, bPtWasRefined, sUVs)` with its status ignored:
+/// `bFoundAnswer` is set `TRUE` before a failing local intersection, and `sUVs` keep
+/// their (undefined) values when nothing is refined.
+fn refine_on_pair(
+    k: &Kernel,
+    s1: &Surface,
+    s2: &Surface,
+    uv1: Point2,
+    uv2: Point2,
+    normal: Vec3,
+) -> Result<(bool, [Point2; 2])> {
+    let ssi = SurfaceIntersector::new(
+        k,
+        s1,
+        &s1.natural_uv_domain(),
+        s2,
+        &s2.natural_uv_domain(),
+        false,
+    )?;
+    let r = ssi.refine_point(
+        k,
+        uv1,
+        uv2,
+        IntersectionPointType::Crossing,
+        Some(normal),
+        None,
+        false,
+    );
+    Ok(match ignored(r)? {
+        Some(Some(uvs)) => (true, uvs),
+        Some(None) => (false, [Point2::UNDEF; 2]),
+        None => (true, [Point2::UNDEF; 2]),
+    })
+}
+
+/// The B-rep edge behind `edge` (`SmEdge::GetInterval` and the like).
+fn tail_edge_interval<O: ClassObject>(
+    geometry: &impl ClassGeometry<O>,
+    edge: O,
+) -> Result<Extent1d> {
+    let (b, e) = super::p7::edge_of(geometry, edge, "SmEdge::GetInterval")?;
+    crate::topology::edge::interval(b, e)
+}
+
+/// `pEdge->GetCurve()`, copied.
+fn tail_edge_curve<O: ClassObject>(geometry: &impl ClassGeometry<O>, edge: O) -> Result<Curve> {
+    Ok(super::p3::edge_curve(geometry, edge)?
+        .ok_or(SolidError::invalid_input(OP_REFINE, "edge without a curve"))?
+        .clone())
+}
+
+/// Whether `surface` is owned by face `f` of `b` (`sFaceList[ii] ==
+/// pCSurfaceUnique->GetOwner()`): the owner reference is the face's (its recorded
+/// geometry owner key, its notify reference, or the default owner of the face's own
+/// surface).
+fn is_owned_by_face(b: &Brep, f: crate::topology::FaceId, surface: &Surface) -> bool {
+    let Some(owner) = surface.owner() else {
+        return false;
+    };
+    let entity = EntityRef::Face(f);
+    b.geometry_owner_key(entity) == Some(owner)
+        || b.notify_serial()
+            .is_some_and(|s| crate::topology::brep::p3::topology_ref(s, entity) == owner)
+        || (b.face(f).ok().and_then(|r| r.surface.as_ref()?.owner()) == Some(owner)
+            && crate::topology::brep::p1::default_face_owner(b, f) == owner)
+}
+
+/// What [`tail_apply`] changed (`bModifiedCurve`, `bModifiedEdgeCurve`,
+/// `bModifiedMateCurve`).
+#[derive(Clone, Copy)]
+#[allow(clippy::struct_excessive_bools)]
+struct Modified {
+    curve: bool,
+    edge_curve: bool,
+    mate_curve: bool,
+}
+
+/// `sm_ApplyPointSolution(with_curve ? pCurveClassification : NULL, edge, emate,
+/// surfaces..., rSolution, vSSSPoint, bSSSPointFlag, .., dDeviation)` over the mutable
+/// adapter: the classification curve is edited on a copy written back in place, the
+/// edge (and its mate, in the same B-rep) through
+/// [`apply_point_solution_in`](super::p1::apply_point_solution_in). The status is
+/// ignored upstream; a failure leaves the out-params as its entry reset them.
+#[allow(clippy::too_many_arguments)]
+fn tail_apply<O: ClassObject, G: ClassGeometryMut<O>, S: Copy>(
+    k: &Kernel,
+    geometry: &mut G,
+    classification: &CurveClassification<O>,
+    with_curve: bool,
+    edge: Option<O>,
+    emate: Option<O>,
+    surfaces: [(&Surface, Point2); 4],
+    solution: &mut Solution<S>,
+    out: &mut RefineCci,
+) -> Result<Modified> {
+    let src_zone_tol_3d = super::p1::src_zone_tol_3d_of(k, with_curve.then_some(classification));
+    let mut src_curve = None;
+    if with_curve {
+        let h = classification.curve().ok_or(SolidError::invalid_input(
+            OP_REFINE,
+            "no classification curve",
+        ))?;
+        if geometry.curve_mut(h).is_none() {
+            return Err(mutable_gap(
+                "SmBrep mutable owning context (sm_SetXSectCurveThroughPoint)",
+            ));
+        }
+        src_curve = Some((h, classification.curve_geometry(&*geometry)?.clone()));
+    }
+    let mate_edge = match (edge, emate) {
+        (Some(_), Some(m)) => Some(super::p7::edge_of(&*geometry, m, "SmEdge::GetCurve")?.1),
+        _ => None,
+    };
+    let [s1, s2, s3, s4] = surfaces;
+    let input = super::p1::ApplyPointSolutionInput::<O> {
+        src_zone_tol_3d,
+        edge: None,
+        emate: None,
+        class_curve_surface1: Some(s1),
+        class_curve_surface2: Some(s2),
+        edge_curve_surface1: Some(s3),
+        edge_curve_surface2: Some(s4),
+    };
+    let edges = match edge {
+        Some(e) => match geometry.topology_entity_mut(e) {
+            Some((brep, EntityRef::Edge(edge))) => Some(super::p1::ApplyPointSolutionEdges {
+                brep,
+                edge,
+                mate: mate_edge.map(|me| (None, me)),
+            }),
+            _ => {
+                return Err(mutable_gap(
+                    "SmBrep mutable owning context (sm_SetXSectEdgeThroughPoint)",
+                ))
+            }
+        },
+        None => None,
+    };
+    let r = ignored(super::p1::apply_point_solution_in(
+        k,
+        src_curve.as_mut().map(|(_, c)| c),
+        &input,
+        edges,
+        solution,
+        out.sss_point,
+    ))?;
+    // the classification curve is edited in place upstream
+    if let Some((h, c)) = src_curve {
+        if let Some(slot) = geometry.curve_mut(h) {
+            *slot = c;
+        }
+    }
+    if let Some(r) = r {
+        out.sss_point = r.sss_point;
+        out.sss_point_flag = r.sss_point_flag;
+        out.deviation = r.deviation;
+        Ok(Modified {
+            curve: r.modified_curve,
+            edge_curve: r.modified_edge_curve,
+            mate_curve: r.modified_mate_curve,
+        })
+    } else {
+        out.sss_point_flag = false;
+        out.deviation = 0.0;
+        Ok(Modified {
+            curve: false,
+            edge_curve: false,
+            mate_curve: false,
+        })
+    }
+}
+
+/// The edits after each `sm_ApplyPointSolution` of the large-gap part: the curves are
+/// read again, the classification curve is marked not current when it changed, and
+/// every edge use's UV trim curve is dropped when an edge curve changed
+/// (`SetUVTrimCurve(NULL, 0.0, TRUE)`; the local list loses every UV curve).
+fn tail_after_apply<O: ClassObject, G: ClassGeometryMut<O>>(
+    geometry: &mut G,
+    classification: &mut CurveClassification<O>,
+    edge: O,
+    modified: Modified,
+    st: &mut LargeGap<O>,
+) -> Result<(Curve, Curve)> {
+    let src_curve = classification.curve_geometry(&*geometry)?.clone();
+    let edge_curve = tail_edge_curve(&*geometry, edge)?;
+    if modified.curve {
+        classification.set_is_curve_current(false);
+    }
+    if modified.edge_curve || modified.mate_curve {
+        for (ii, eu) in st.edgeuses.iter().enumerate() {
+            if let Some(eu) = eu {
+                match geometry.topology_entity_mut(edge) {
+                    Some((b, EntityRef::Edge(_))) => {
+                        crate::topology::edgeuse::p1::delete_uv_trim_curve(b, *eu)?;
+                    }
+                    _ => {
+                        return Err(mutable_gap(
+                            "SmBrep mutable owning context (SmEdgeuse::SetUVTrimCurve)",
+                        ))
+                    }
+                }
+            }
+            if let Some(c) = st.uv_curves.get_mut(ii) {
+                *c = None;
+            }
+        }
+    }
+    Ok((src_curve, edge_curve))
+}
+
+/// `SER(pSrcCurve3d->LocalCurveIntersect(..))` and the solution update after it:
+/// `false` for a failing status (upstream returns it; every caller ignores it).
+#[allow(clippy::too_many_arguments)]
+fn tail_curve_curve<O: ClassObject, S: Copy>(
+    k: &Kernel,
+    geometry: &impl ClassGeometry<O>,
+    classification: &CurveClassification<O>,
+    edge: O,
+    src_curve: &Curve,
+    edge_curve: &Curve,
+    xsect_tol_3d: f64,
+    solution: &mut Solution<S>,
+    out: &mut RefineCci,
+) -> Result<bool> {
+    let edge_interval = tail_edge_interval(geometry, edge)?;
+    let r = ignored(crate::curve::curve::p3::local_curve_intersect(
+        k,
+        src_curve,
+        &classification.interval(),
+        edge_curve,
+        &edge_interval,
+        xsect_tol_3d,
+        solution.start.param(0)?,
+        solution.start.param(1)?,
+    ))?;
+    let Some(r) = r else {
+        return Ok(false);
+    };
+    if let Some(ci) = r {
+        out.deviation = ci.deviation;
+        solution.start.solution_value = ci.deviation;
+        *solution.start.param_mut(0)? = ci.my_param;
+        *solution.start.param_mut(1)? = ci.other_param;
+    }
+    // (else upstream only warns: refined curve/edge intersection failed)
+    Ok(true)
+}
+
+/// The mutable-adapter dispatch gap of the large-gap part: an adapter that cannot lend
+/// what upstream edits (`upstream` names the edit).
+fn mutable_gap(upstream: &'static str) -> SolidError {
+    // DISPATCH GAP: SmBrep mutable owning context (an adapter that cannot lend the
+    // object mutably)
+    SolidError::unported(upstream, "topology.brep_p1")
+}
+
+/// Part 2 of `sm_RefineCCIToSurfaces` (Fix Large Gaps), over the mutable adapter.
+#[allow(clippy::too_many_lines)]
+fn refine_large_gap<O: ClassObject, G: ClassGeometryMut<O>, S: Copy>(
+    k: &Kernel,
+    geometry: &mut G,
+    classification: &mut CurveClassification<O>,
+    solution: &mut Solution<S>,
+    edge: O,
+    mut out: RefineCci,
+    mut st: LargeGap<O>,
+) -> Result<RefineCci> {
+    // a Boolean mate in another B-rep would need both B-reps lent at once
+    if let Some(m) = st.emate {
+        let (eb, _) = super::p7::edge_of(&*geometry, edge, "SmEdge::GetCurve")?;
+        let (mb, _) = super::p7::edge_of(&*geometry, m, "SmEdge::GetCurve")?;
+        if !core::ptr::eq(eb, mb) {
+            return Err(mutable_gap("SmBrep mutable owning context (sm_RefineCCIToSurfaces, Boolean mate in another B-rep)"));
+        }
+    }
+
+    // locals (OLDTOL: dThisAngTolRad = 6 * GetAngTolRad(), sScaledZero = GetEffZero())
+    let this_ang_tol_rad = 6.0 * ang_tol_rad();
+    let scaled_zero = eff_zero();
+    let xsect_tol_3d = st.xsect_tol_3d;
+    let no_work = st.no_work_xsect_tol_3d;
+    let src_curve_pt = st.src_curve_pt;
+    let edge_curve_pt = st.edge_curve_pt;
+    let (curve_edge_gap, curve_surface_gap, edge_surface_gap) =
+        (st.curve_edge_gap, st.curve_surface_gap, st.edge_surface_gap);
+    let mut src_curve = classification.curve_geometry(&*geometry)?.clone();
+    let mut edge_curve = tail_edge_curve(&*geometry, edge)?;
+    let mut new_class_curve_point = Vec3::UNDEF;
+    let mut new_edge_curve_point = Vec3::UNDEF;
+
+    let n_surfaces = st.surfaces.len();
+    let surfaces = core::mem::take(&mut st.surfaces);
+    let srf = |i: usize| -> Result<&Surface> {
+        surfaces.get(i).ok_or(SolidError::invalid_input(
+            OP_REFINE,
+            "index past the surface list",
+        ))
+    };
+    let ids = core::mem::take(&mut st.ids);
+    let id = |i: usize| -> Result<usize> { entry(&ids, i) };
+    let surface1 = srf(0)?;
+    let surface2 = srf(1)?;
+    let e_surface_unique_ix = if st.edge_surface_count > 1 {
+        2
+    } else {
+        n_surfaces.saturating_sub(1)
+    };
+    let e_surface_shared_ix = (2 + st.edge_surface_count).saturating_sub(1);
+    let e_surface_unique = srf(e_surface_unique_ix)?;
+    let e_surface_shared = srf(e_surface_shared_ix)?;
+    let defined = |p: Point2| p.x != UNDEF_DOUBLE;
+    let uv0 = entry(&st.uv_points, 0)?;
+    let uv1 = entry(&st.uv_points, 1)?;
+    let have_srf1_eval = defined(uv0);
+    let have_srf2_eval = defined(uv1);
+    let mut srf1_norm = Vec3::UNDEF;
+    let mut srf2_norm = Vec3::UNDEF;
+    if have_srf1_eval {
+        let eval = srf_eval_11(k, surface1, uv0)?;
+        srf1_norm = entry(&eval, 1)?.cross(entry(&eval, 2)?);
+        match srf1_norm.unitize() {
+            Ok(n) => srf1_norm = n,
+            Err(_) => match ignored(surface1.evaluate_normal(k, uv0, Side::Right, Side::Right))? {
+                Some(n) => srf1_norm = n,
+                None => return Ok(out),
+            },
+        }
+    }
+    if have_srf2_eval {
+        let eval = srf_eval_11(k, surface2, uv1)?;
+        srf2_norm = entry(&eval, 1)?.cross(entry(&eval, 2)?);
+        match srf2_norm.unitize() {
+            Ok(n) => srf2_norm = n,
+            Err(_) => match ignored(surface2.evaluate_normal(k, uv1, Side::Right, Side::Right))? {
+                Some(n) => srf2_norm = n,
+                None => return Ok(out),
+            },
+        }
+    }
+
+    // Part 2a - surf/surf/surf intersection with each edge surface that is not a curve
+    // surface (skipped when the curve surfaces are parallel)
+    let mut ii = 2;
+    if have_srf1_eval
+        && have_srf2_eval
+        && are_parallel(srf1_norm, srf2_norm, Some(this_ang_tol_rad))
+    {
+        ii = n_surfaces + 1;
+    }
+    while ii < n_surfaces {
+        let surf = srf(ii)?;
+        let this = ii;
+        ii += 1;
+        if id(this)? == id(0)? || id(this)? == id(1)? {
+            continue;
+        }
+        let uv_ii = entry(&st.uv_points, this)?;
+        if have_srf1_eval && have_srf2_eval && defined(uv_ii) {
+            let this_norm = normal_or_undef(k, surf, uv_ii)?;
+            if are_parallel(this_norm, srf1_norm, Some(this_ang_tol_rad)) {
+                continue;
+            }
+            if are_parallel(this_norm, srf2_norm, Some(this_ang_tol_rad)) {
+                continue;
+            }
+            let triple_prod = this_norm.dot(srf1_norm.cross(srf2_norm));
+            if triple_prod.abs() < TRIPLE_PROD_LIM {
+                continue;
+            }
+        }
+        let expanded = |s: &Surface| {
+            let mut d = s.natural_uv_domain();
+            d.expand_absolute(0.01);
+            d
+        };
+        let uv_0 = entry(&st.uv_points, 0)?;
+        let uv_1 = entry(&st.uv_points, 1)?;
+        let found: Option<[Point2; 3]> = if defined(uv_0) && defined(uv_1) && defined(uv_ii) {
+            ignored(surface1.local_surface_surface_intersect(
+                k,
+                &expanded(surface1),
+                surface2,
+                &expanded(surface2),
+                surf,
+                &expanded(surf),
+                uv_0,
+                uv_1,
+                uv_ii,
+            ))?
+            .flatten()
+            .map(|s| [s.uv1, s.uv2, s.uv3])
+        } else {
+            match ignored(surface1.local_surface_surface_intersect_xyz::<NoObject>(
+                k,
+                &expanded(surface1),
+                surface2,
+                &expanded(surface2),
+                surf,
+                &expanded(surf),
+                src_curve_pt,
+                Some(edge_curve_pt),
+            ))? {
+                Some((true, sol)) => Some([
+                    Point2::new(sol.start.param(0)?, sol.start.param(1)?),
+                    Point2::new(sol.start.param(2)?, sol.start.param(3)?),
+                    Point2::new(sol.start.param(4)?, sol.start.param(5)?),
+                ]),
+                _ => None,
+            }
+        };
+        if let Some([uv_point1, uv_point2, uv_point3]) = found {
+            let uv_point4 = if id(e_surface_shared_ix)? == id(0)? {
+                uv_point1
+            } else {
+                uv_point2
+            };
+            let modified = tail_apply(
+                k,
+                geometry,
+                classification,
+                true,
+                Some(edge),
+                st.emate,
+                [
+                    (surface1, uv_point1),
+                    (surface2, uv_point2),
+                    (surf, uv_point3),
+                    (e_surface_shared, uv_point4),
+                ],
+                solution,
+                &mut out,
+            )?;
+            tail_after_apply(geometry, classification, edge, modified, &mut st)?;
+            return Ok(out);
+        }
+    }
+
+    // Part 2b - the classification curve is on its surfaces but the edge is not: move
+    // the point to the classification curve / unique edge surface intersection
+    if curve_surface_gap <= no_work
+        && edge_surface_gap > no_work
+        && e_surface_unique_ix != e_surface_shared_ix
+    {
+        let uv_unique = entry(&st.uv_points, e_surface_unique_ix)?;
+        let mut found: Option<(f64, Point2)> = None;
+        if defined(uv_unique) {
+            let crv_pt_tan = crv_eval_1(k, &src_curve, solution.start.param(0)?, false)?;
+            let tan = entry(&crv_pt_tan, 1)?.unitize_or_z();
+            let srf_norm = normal_or_undef(k, e_surface_unique, uv_unique)?;
+            if !are_perpendicular(tan, srf_norm, Some(this_ang_tol_rad)) {
+                found = ignored(e_surface_unique.local_curve_intersect(
+                    k,
+                    &e_surface_unique.natural_uv_domain(),
+                    &src_curve,
+                    &src_curve.natural_interval(),
+                    xsect_tol_3d, /* was 1.0, too big [B254] */
+                    uv_unique,
+                    solution.start.param(0)?,
+                ))?
+                .flatten()
+                .map(|ci| (ci.t, ci.uv));
+            }
+        } else {
+            let sols = ignored(e_surface_unique.global_curve_intersect_in::<NoObject>(
+                k,
+                [None, None],
+                None,
+                &e_surface_unique.natural_uv_domain(),
+                &src_curve,
+                &src_curve.natural_interval(),
+                xsect_tol_3d, /* was 1.0, too big [b254] */
+            ))?;
+            if let Some(sol) = sols.as_ref().and_then(|s| s.get(0)) {
+                found = Some((
+                    sol.start.param(0)?,
+                    Point2::new(sol.start.param(1)?, sol.start.param(2)?),
+                ));
+            }
+        }
+        if let Some((t, uv)) = found {
+            if let Some(p) = ignored(src_curve.evaluate_point(k, t))? {
+                new_class_curve_point = p;
+            }
+            if let Some(p) = ignored(e_surface_unique.evaluate_point(k, uv))? {
+                new_edge_curve_point = p;
+            }
+            let new_edge_curve_gap = new_edge_curve_point.distance_squared(edge_curve_pt);
+            let new_class_curve_gap = new_class_curve_point.distance_squared(src_curve_pt);
+            if new_edge_curve_gap < scaled_zero_sq_of(&new_edge_curve_point)
+                && new_class_curve_gap < scaled_zero_sq_of(&new_class_curve_point)
+            {
+                return Ok(out);
+            }
+            let gaps = new_gaps(
+                k,
+                new_class_curve_point,
+                new_edge_curve_point,
+                solution,
+                &surfaces,
+                &st,
+            )?;
+            st.uv_points = gaps.uv_points;
+            if gaps.success
+                && gaps.curve_edge_gap <= curve_edge_gap + scaled_zero
+                && gaps.curve_surface_gap <= curve_surface_gap + scaled_zero
+                && gaps.edge_surface_gap <= edge_surface_gap + scaled_zero
+            {
+                let mut pt_was_refined = gaps.edge_surface_gap < EFF_ZERO;
+                let mut move_dist = 0.0;
+                if !pt_was_refined && id(e_surface_unique_ix)? != id(e_surface_shared_ix)? {
+                    let pv = crv_eval_1(k, &edge_curve, solution.start.param(1)?, true)?;
+                    let mut degenerate = false;
+                    let crv_tan = entry(&pv, 1)?.unitize_or_z();
+                    let uv_shared = entry(&st.uv_points, e_surface_shared_ix)?;
+                    let unique_normal = normal_or_undef(k, e_surface_unique, uv)?;
+                    let shared_normal = normal_or_undef(k, e_surface_shared, uv_shared)?;
+                    if are_parallel(unique_normal, shared_normal, Some(this_ang_tol_rad)) {
+                        degenerate = true;
+                    }
+                    if !degenerate && are_parallel(crv_tan, unique_normal, Some(this_ang_tol_rad)) {
+                        degenerate = true;
+                    }
+                    if !degenerate && are_parallel(crv_tan, shared_normal, Some(this_ang_tol_rad)) {
+                        degenerate = true;
+                    }
+                    let mut uvs = [Point2::UNDEF; 2];
+                    if degenerate {
+                        pt_was_refined = false;
+                        move_dist = BIG_DOUBLE;
+                    } else {
+                        (pt_was_refined, uvs) = refine_on_pair(
+                            k,
+                            e_surface_unique,
+                            e_surface_shared,
+                            uv,
+                            uv_shared,
+                            entry(&pv, 1)?,
+                        )?;
+                    }
+                    if pt_was_refined {
+                        set_uv(&mut st.uv_points, e_surface_unique_ix, uvs[0])?;
+                        set_uv(&mut st.uv_points, e_surface_shared_ix, uvs[1])?;
+                    }
+                } else if !pt_was_refined {
+                    move_dist = edge_curve_pt.distance(new_edge_curve_point);
+                    if move_dist > 1.5 * edge_surface_gap {
+                        let drop = ignored(edge_curve.local_point_solve::<NoObject>(
+                            k,
+                            &tail_edge_interval(&*geometry, edge)?,
+                            SolverOperation::Minimize,
+                            new_edge_curve_point,
+                            &PointSolveOptions::default(),
+                            solution.start.param(1)?,
+                        ))?;
+                        if let Some((true, sol)) = drop {
+                            move_dist = sol.start.solution_value;
+                        }
+                    }
+                }
+                if pt_was_refined || move_dist < 1.5 * edge_surface_gap {
+                    let uvp = |i: usize| entry(&st.uv_points, i);
+                    let args = [
+                        (surface1, uvp(0)?),
+                        (surface2, uvp(1)?),
+                        (e_surface_unique, uvp(e_surface_unique_ix)?),
+                        (e_surface_shared, uvp(e_surface_shared_ix)?),
+                    ];
+                    let modified = tail_apply(
+                        k,
+                        geometry,
+                        classification,
+                        false,
+                        Some(edge),
+                        st.emate,
+                        args,
+                        solution,
+                        &mut out,
+                    )?;
+                    let (src, edg) =
+                        tail_after_apply(geometry, classification, edge, modified, &mut st)?;
+                    tail_curve_curve(
+                        k,
+                        &*geometry,
+                        classification,
+                        edge,
+                        &src,
+                        &edg,
+                        xsect_tol_3d,
+                        solution,
+                        &mut out,
+                    )?;
+                    return Ok(out);
+                }
+            }
+        }
+    }
+
+    // Part 2c - the edge is on its surfaces but the classification curve is not: move
+    // the point to the edge curve / unique classification-curve surface intersection
+    if edge_surface_gap <= no_work && curve_surface_gap > no_work {
+        let c_surface_unique_ix = usize::from(id(0)? == id(e_surface_shared_ix)?);
+        let c_surface_shared_ix = 1 - c_surface_unique_ix;
+        let c_surface_unique = srf(c_surface_unique_ix)?;
+        let c_surface_shared = srf(c_surface_shared_ix)?;
+        let mut is_edge_of_face = false;
+        {
+            let (eb, e) = super::p7::edge_of(&*geometry, edge, "SmEdge::GetFaces")?;
+            for f in crate::topology::edge::faces(eb, e, None)? {
+                if is_owned_by_face(eb, f, c_surface_unique) {
+                    is_edge_of_face = true;
+                    break;
+                }
+            }
+        }
+        let mut found: Option<(f64, Point2)> = None;
+        if !is_edge_of_face {
+            let uv_unique = entry(&st.uv_points, c_surface_unique_ix)?;
+            if defined(uv_unique) {
+                let crv_pt_tan = crv_eval_1(k, &edge_curve, solution.start.param(1)?, false)?;
+                let tan = entry(&crv_pt_tan, 1)?.unitize_or_z();
+                let srf_norm = normal_or_undef(k, c_surface_unique, uv_unique)?;
+                if !are_perpendicular(tan, srf_norm, Some(this_ang_tol_rad)) {
+                    found = ignored(c_surface_unique.local_curve_intersect(
+                        k,
+                        &c_surface_unique.natural_uv_domain(),
+                        &edge_curve,
+                        &edge_curve.natural_interval(),
+                        xsect_tol_3d, /* was 1.0 , which is too big [B254] */
+                        uv_unique,
+                        solution.start.param(1)?,
+                    ))?
+                    .flatten()
+                    .map(|ci| (ci.t, ci.uv));
+                }
+            } else {
+                let sols = ignored(c_surface_unique.global_curve_intersect_in::<NoObject>(
+                    k,
+                    [None, None],
+                    None,
+                    &c_surface_unique.natural_uv_domain(),
+                    &edge_curve,
+                    &edge_curve.natural_interval(),
+                    xsect_tol_3d, /* was 1.0, too big [B254] */
+                ))?;
+                if let Some(sol) = sols.as_ref().and_then(|s| s.get(0)) {
+                    found = Some((
+                        sol.start.param(0)?,
+                        Point2::new(sol.start.param(1)?, sol.start.param(2)?),
+                    ));
+                }
+            }
+        }
+        if let Some((t, uv)) = found {
+            if let Some(p) = ignored(edge_curve.evaluate_point(k, t))? {
+                new_edge_curve_point = p;
+            }
+            if let Some(p) = ignored(c_surface_unique.evaluate_point(k, uv))? {
+                new_class_curve_point = p;
+            }
+            let new_edge_curve_gap = new_edge_curve_point.distance_squared(edge_curve_pt);
+            let new_class_curve_gap = new_class_curve_point.distance_squared(src_curve_pt);
+            if new_edge_curve_gap < 10000.0 * EFF_ZERO_SQ
+                && new_class_curve_gap < 10000.0 * EFF_ZERO_SQ
+            {
+                return Ok(out);
+            }
+            let gaps = new_gaps(
+                k,
+                new_class_curve_point,
+                new_edge_curve_point,
+                solution,
+                &surfaces,
+                &st,
+            )?;
+            st.uv_points = gaps.uv_points;
+            if gaps.success
+                && gaps.curve_edge_gap <= curve_edge_gap + EFF_ZERO
+                && gaps.curve_surface_gap <= curve_surface_gap + EFF_ZERO
+                && gaps.edge_surface_gap <= edge_surface_gap + EFF_ZERO
+            {
+                let mut pt_was_refined = gaps.curve_surface_gap < EFF_ZERO;
+                if !pt_was_refined {
+                    // (upstream evaluates the classification curve at the edge parameter)
+                    let pv3d = crv_eval_1(k, &src_curve, solution.start.param(1)?, true)?;
+                    let uvs;
+                    (pt_was_refined, uvs) = refine_on_pair(
+                        k,
+                        c_surface_unique,
+                        c_surface_shared,
+                        uv,
+                        entry(&st.uv_points, c_surface_shared_ix)?,
+                        entry(&pv3d, 1)?,
+                    )?;
+                    set_uv(&mut st.uv_points, c_surface_unique_ix, uvs[0])?;
+                    set_uv(&mut st.uv_points, c_surface_shared_ix, uvs[1])?;
+                }
+                if pt_was_refined {
+                    let uvp = |i: usize| entry(&st.uv_points, i);
+                    let args = [
+                        (surface1, uvp(0)?),
+                        (surface2, uvp(1)?),
+                        (e_surface_unique, uvp(e_surface_unique_ix)?),
+                        (e_surface_shared, uvp(e_surface_shared_ix)?),
+                    ];
+                    let modified = tail_apply(
+                        k,
+                        geometry,
+                        classification,
+                        true,
+                        None,
+                        None,
+                        args,
+                        solution,
+                        &mut out,
+                    )?;
+                    let (src, edg) =
+                        tail_after_apply(geometry, classification, edge, modified, &mut st)?;
+                    tail_curve_curve(
+                        k,
+                        &*geometry,
+                        classification,
+                        edge,
+                        &src,
+                        &edg,
+                        xsect_tol_3d,
+                        solution,
+                        &mut out,
+                    )?;
+                    return Ok(out);
+                }
+            }
+        }
+    }
+
+    // Part 2d - refine the point on both surface pairs
+    let pv3d_1 = crv_eval_1(k, &src_curve, solution.start.param(0)?, true)?;
+    let pv3d_2 = crv_eval_1(k, &edge_curve, solution.start.param(1)?, true)?;
+    let mut pt_was_refined1 = false;
+    let mut pt_was_refined2 = false;
+    let mut uv1s = [Point2::UNDEF; 2];
+    let mut uv2s = [Point2::UNDEF; 2];
+    if curve_surface_gap >= no_work {
+        let mut degenerate = false;
+        if are_parallel(srf1_norm, srf2_norm, Some(this_ang_tol_rad)) {
+            degenerate = true;
+        }
+        if !degenerate {
+            let crv_tan = entry(&pv3d_1, 1)?.unitize_or_z();
+            if are_parallel(crv_tan, srf1_norm, Some(this_ang_tol_rad)) {
+                degenerate = true;
+            }
+            if !degenerate && are_parallel(crv_tan, srf2_norm, Some(this_ang_tol_rad)) {
+                degenerate = true;
+            }
+        }
+        if !degenerate {
+            (pt_was_refined1, uv1s) = refine_on_pair(
+                k,
+                surface1,
+                surface2,
+                entry(&st.uv_points, 0)?,
+                entry(&st.uv_points, 1)?,
+                entry(&pv3d_1, 1)?,
+            )?;
+            // (else upstream only warns: the curve/curve point failed to project)
+        }
+        if pt_was_refined1 {
+            set_uv(&mut st.uv_points, 0, uv1s[0])?;
+            set_uv(&mut st.uv_points, 1, uv1s[1])?;
+        }
+    }
+    if edge_surface_gap >= no_work && id(e_surface_unique_ix)? != id(e_surface_shared_ix)? {
+        let mut degenerate = false;
+        let crv_tan = entry(&pv3d_2, 1)?.unitize_or_z();
+        let unique_normal = normal_or_undef(
+            k,
+            e_surface_unique,
+            entry(&st.uv_points, e_surface_unique_ix)?,
+        )?;
+        let shared_normal = normal_or_undef(
+            k,
+            e_surface_shared,
+            entry(&st.uv_points, e_surface_shared_ix)?,
+        )?;
+        if are_parallel(unique_normal, shared_normal, Some(this_ang_tol_rad)) {
+            degenerate = true;
+        }
+        if !degenerate && are_parallel(crv_tan, unique_normal, Some(this_ang_tol_rad)) {
+            degenerate = true;
+        }
+        if !degenerate && are_parallel(crv_tan, shared_normal, Some(this_ang_tol_rad)) {
+            degenerate = true;
+        }
+        if !degenerate {
+            (pt_was_refined2, uv2s) = refine_on_pair(
+                k,
+                e_surface_unique,
+                e_surface_shared,
+                entry(&st.uv_points, e_surface_unique_ix)?,
+                entry(&st.uv_points, e_surface_shared_ix)?,
+                entry(&pv3d_2, 1)?,
+            )?;
+        }
+        if pt_was_refined2 {
+            set_uv(&mut st.uv_points, e_surface_unique_ix, uv2s[0])?;
+            set_uv(&mut st.uv_points, e_surface_shared_ix, uv2s[1])?;
+        }
+    }
+    if pt_was_refined1 || pt_was_refined2 {
+        let modified = tail_apply(
+            k,
+            geometry,
+            classification,
+            pt_was_refined1,
+            pt_was_refined2.then_some(edge),
+            if pt_was_refined2 { st.emate } else { None },
+            [
+                (surface1, uv1s[0]),
+                (surface2, uv1s[1]),
+                (e_surface_unique, uv2s[0]),
+                (e_surface_shared, uv2s[1]),
+            ],
+            solution,
+            &mut out,
+        )?;
+        let (src, edg) = tail_after_apply(geometry, classification, edge, modified, &mut st)?;
+        src_curve = src;
+        edge_curve = edg;
+        if !tail_curve_curve(
+            k,
+            &*geometry,
+            classification,
+            edge,
+            &src_curve,
+            &edge_curve,
+            xsect_tol_3d,
+            solution,
+            &mut out,
+        )? {
+            return Ok(out);
+        }
+        if let Some(p) = ignored(src_curve.evaluate_point(k, solution.start.param(0)?))? {
+            new_class_curve_point = p;
+        }
+        if let Some(p) = ignored(edge_curve.evaluate_point(k, solution.start.param(1)?))? {
+            new_edge_curve_point = p;
+        }
+        let new_edge_curve_gap = new_edge_curve_point.distance_squared(edge_curve_pt);
+        let new_class_curve_gap = new_class_curve_point.distance_squared(src_curve_pt);
+        if new_edge_curve_gap < new_edge_curve_point.scaled_zero()
+            && new_class_curve_gap < new_class_curve_point.scaled_zero()
+        {
+            return Ok(out);
+        }
+        let gaps = new_gaps(
+            k,
+            new_class_curve_point,
+            new_edge_curve_point,
+            solution,
+            &surfaces,
+            &st,
+        )?;
+        if gaps.success
+            && (gaps.curve_edge_gap > no_work
+                || gaps.curve_surface_gap > no_work
+                || gaps.edge_surface_gap > no_work)
+        {
+            // the recursion resets bSSSPointFlag and dDeviation and shares the counter
+            // (input-bounded: at most MAX_REFINE_RECURSION levels)
+            out = refine_cci_to_surfaces_mut(
+                k,
+                geometry,
+                classification,
+                solution,
+                edge,
+                out.sss_point,
+                out.recursion_count,
+            )?;
+        }
+    }
+    Ok(out)
+}
+
+/// `sm_GetCCISurfaceGaps` of the large-gap part over its copied surfaces and its
+/// current UV curve list.
+fn new_gaps<O, S: Copy>(
+    k: &Kernel,
+    class_curve_point: Point3,
+    edge_curve_point: Point3,
+    solution: &Solution<S>,
+    surfaces: &[Surface],
+    st: &LargeGap<O>,
+) -> Result<super::p1::CciSurfaceGaps> {
+    let srfs: Vec<&Surface> = surfaces.iter().collect();
+    let uvs: Vec<Option<&Curve>> = st.uv_curves.iter().map(Option::as_ref).collect();
+    super::p1::get_cci_surface_gaps(
+        k,
+        class_curve_point,
+        edge_curve_point,
+        solution,
+        &srfs,
+        &uvs,
+        st.edge_surface_count,
+    )
+}
+
+/// `sUVPoints[i] = uv` (`InvalidInput` past the list, which upstream writes unchecked).
+fn set_uv(points: &mut [Point2], i: usize, uv: Point2) -> Result<()> {
+    *points.get_mut(i).ok_or(SolidError::invalid_input(
+        OP_REFINE,
+        "index past the UV point list",
+    ))? = uv;
+    Ok(())
 }
 
 #[cfg(test)]

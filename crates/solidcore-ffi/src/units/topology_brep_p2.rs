@@ -27,6 +27,7 @@
 //! | `Swap`     |            | `status` (`SwapUV`) |
 //! | `Replace`  | `face surface keep create` (`keep`: `0` delete, `1` deleted list, `2` keep) | `status modified` (`ReplaceSurface`) |
 //! | `RayFire`  | `P V tol has_limit limit` | `status region class` (`RayFire`) |
+//! | `MergeSsi` | `face tol n curve* has_uv uv_curve{n if has_uv} has_surface surface?` | `status new_faces edges`, per curve (after the merge) `n_ctrl` and 9 points over its natural interval, `n_edges` and per edge (`GetEdges`) `tol t0 t1` and 3 points over its interval (`tol -1` for no curve), `n_vertices` and per vertex (`GetVertices`) `x y z tol` (`MergeCurvesOnSurface` with UV curves and an intersection surface) |
 //! | `MateProbe` | as `Mate` | `status max_dist`: `MateLaminaEdgeToSurface`'s `dMaxDist` (`SmBrep.cpp:22200-22229`) after replaying its early returns (`:22166-22195`, status `SM_ERR` when one is taken), nothing changed |
 //!
 //! [`eval`] accepts only what upstream handles without undefined behaviour: valid
@@ -82,6 +83,10 @@ impl Reader<'_> {
 /// Largest number of curves of a `Merge`.
 pub const MAX_CURVES: usize = 8;
 
+/// Largest control point index of a `MergeSsi` curve (section curves of upstream files
+/// have a hundred or more control points).
+pub const MAX_SECTION_INDEX: usize = 1024;
+
 /// Shim operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(missing_docs)]
@@ -101,6 +106,7 @@ pub enum Op {
     Replace = 12,
     RayFire = 13,
     MateProbe = 14,
+    MergeSsi = 15,
 }
 
 mod sys {
@@ -243,6 +249,31 @@ fn args(op: Op, rd: &mut Reader<'_>, c: &[usize; 10], has_infinite: bool) -> Res
                 }
                 rd.at -= 1;
                 rd.block(vu::curve_at)?;
+            }
+        }
+        Op::MergeSsi => {
+            rd.below(n_f)?;
+            rd.finite()?;
+            let n = rd.index(MAX_CURVES)?;
+            let long = |input: &[f64], at: usize| vu::long_curve_at(input, at, MAX_SECTION_INDEX);
+            for _ in 0..n {
+                if rd.index(3)? != 3 {
+                    return Err(bad("merge curves must be 3D"));
+                }
+                rd.at -= 1;
+                rd.block(long)?;
+            }
+            if rd.flag()? {
+                for _ in 0..n {
+                    if rd.index(3)? != 2 {
+                        return Err(bad("merge UV curves must be 2D"));
+                    }
+                    rd.at -= 1;
+                    rd.block(long)?;
+                }
+            }
+            if rd.flag()? {
+                rd.block(vu::surface_at)?;
             }
         }
         Op::Mate | Op::MateProbe => {

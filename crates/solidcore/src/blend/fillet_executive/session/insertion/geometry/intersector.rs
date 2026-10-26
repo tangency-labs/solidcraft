@@ -432,6 +432,8 @@ impl ti::IntersectorBrep<FilletObject> for InsertionGeometry<'_> {
                 IntersectObject::Topology(entity, side) => {
                     Self::handle(if side { b } else { a }, entity)
                 }
+                // face intersections name no free surface
+                IntersectObject::FreeSurface(_) => return Err(bad()),
             })
         };
         let cc1 = out

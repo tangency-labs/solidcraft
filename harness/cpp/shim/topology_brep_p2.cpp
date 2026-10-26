@@ -41,6 +41,7 @@ enum P2Op : int32_t
     P2_REPLACE = 12,
     P2_RAYFIRE = 13,
     P2_MATE_PROBE = 14,
+    P2_MERGE_SSI = 15,
 };
 
 // The B-rep's topology after a Make op, read through fresh list queries: per region
@@ -171,6 +172,19 @@ void normalise(Graph& g)
         if (c->GetOwner() == (SmObject*)e)
             nc->SetOwner(e);
         e->*EdgePeek::curve() = nc;
+    }
+}
+
+// `n` points of `c` spread evenly over [t0, t1] (EvaluatePoint; an undefined point for a
+// failed evaluation).
+void put_curve_points(std::vector<double>& o, const SmCurve* c, double t0, double t1, int n)
+{
+    for (int i = 0; i < n; i++)
+    {
+        double t = t0 + (t1 - t0) * (double)i / (double)(n - 1);
+        SmPoint3d p(SM_UNDEF_DOUBLE, SM_UNDEF_DOUBLE, SM_UNDEF_DOUBLE);
+        c->EvaluatePoint(t, p);
+        put_vec(o, p);
     }
 }
 
@@ -376,6 +390,77 @@ void run(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         o.push_back((double)nf.GetSize());
         o.push_back((double)ne.GetSize());
         for (SmBSplineCurve* c : own)
+            delete c;
+        break;
+    }
+    case P2_MERGE_SSI:
+    {
+        // MergeCurvesOnSurface with optional UV curves and intersection surface (the
+        // surface/surface/surface refinement of sm_RefineCCIToSurfaces), then the
+        // curves and the B-rep read back through fresh list queries.
+        SmFace* f = at(g.faces, rd.idx());
+        double tol = rd.num();
+        int64_t n = rd.idx();
+        SmTArray<SmCurve*> curves;
+        std::vector<SmBSplineCurve*> own;
+        for (int64_t i = 0; i < n; i++)
+        {
+            own.push_back(read_curve(rd, ctx));
+            curves.Add(own.back());
+        }
+        bool has_uv = rd.flag();
+        SmTArray<SmCurve*> uv;
+        std::vector<SmBSplineCurve*> own_uv;
+        if (has_uv)
+            for (int64_t i = 0; i < n; i++)
+            {
+                own_uv.push_back(read_curve(rd, ctx));
+                uv.Add(own_uv.back());
+            }
+        SmSurface* plane = rd.flag() ? read_surface(rd, ctx) : nullptr;
+        SmTArray<SmFace*> nf;
+        SmTArray<SmEdge*> ne;
+        SmStatus s = brep->MergeCurvesOnSurface(*f->GetSurface(), tol, curves, has_uv ? &uv : NULL, nf, ne,
+                                                FALSE, plane);
+        o.push_back(st(s));
+        o.push_back((double)nf.GetSize());
+        o.push_back((double)ne.GetSize());
+        for (SmBSplineCurve* c : own)
+        {
+            SmExtent1d ivl = c->GetNaturalInterval();
+            o.push_back((double)c->GetNumberControlPoints());
+            put_curve_points(o, c, ivl.GetMin(), ivl.GetMax(), 9);
+        }
+        SmTArray<SmEdge*> es;
+        SmTArray<SmVertex*> vs;
+        brep->GetEdges(es);
+        brep->GetVertices(vs);
+        o.push_back((double)es.GetSize());
+        for (ULONG i = 0; i < es.GetSize(); i++)
+        {
+            SmEdge* e = es[i];
+            o.push_back((double)e->GetTolerance());
+            const SmCurve* c = e->GetCurve();
+            if (c == nullptr)
+            {
+                o.push_back(-1.0);
+                continue;
+            }
+            SmExtent1d ivl = e->GetInterval();
+            o.push_back(ivl.GetMin());
+            o.push_back(ivl.GetMax());
+            put_curve_points(o, c, ivl.GetMin(), ivl.GetMax(), 3);
+        }
+        o.push_back((double)vs.GetSize());
+        for (ULONG i = 0; i < vs.GetSize(); i++)
+        {
+            put_vec(o, vs[i]->GetPoint());
+            o.push_back((double)vs[i]->GetTolerance());
+        }
+        delete plane;
+        for (SmBSplineCurve* c : own)
+            delete c;
+        for (SmBSplineCurve* c : own_uv)
             delete c;
         break;
     }

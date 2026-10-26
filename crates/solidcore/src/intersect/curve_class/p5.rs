@@ -50,7 +50,7 @@
 //! The differential runner's face zone tolerance of zero is not compared against C++.
 
 use super::p1::{out_of_bounds, set_xsect_curve_through_point};
-use super::p2::refine_cci_to_surfaces_in;
+use super::p2::{refine_cci_to_surfaces_in, refine_cci_to_surfaces_mut, RefineCci};
 use super::p6::{
     FilletPeer, Imprint, MergeIntervalBrep, Mutable as MutableImprint, ReadOnly as ReadOnlyImprint,
 };
@@ -117,7 +117,7 @@ pub trait ClassGeometryMut<O>: ClassGeometry<O> {
 }
 
 /// The edits of part 5 over either kind of adapter.
-trait Access<O> {
+trait Access<O: ClassObject> {
     type Geometry: ClassGeometry<O>;
     fn geometry(&self) -> &Self::Geometry;
     /// `pVtx->SetTolerance(tol)` (upstream defaults: only if larger).
@@ -126,12 +126,22 @@ trait Access<O> {
     fn curve_mut(&mut self, curve: O) -> Result<&mut Curve>;
     /// `pEdgeuse->SetUVTrimCurve(NULL, 0.0, TRUE)`.
     fn delete_uv_trim_curve(&mut self, edgeuse: O) -> Result<()>;
+    /// `sm_RefineCCIToSurfaces(pCurveClassification, rSol, pEdge, ..)` with a fresh
+    /// recursion counter and an undefined `vSSSPoint`: the read-only adapter defers its
+    /// large-gap edits, the mutable one makes them.
+    fn refine_cci_to_surfaces(
+        &mut self,
+        k: &Kernel,
+        classification: &mut CurveClassification<O>,
+        solution: &mut Solution<O>,
+        edge: O,
+    ) -> Result<RefineCci>;
 }
 
 /// A read-only adapter: every edit defers.
 struct ReadOnly<'g, G>(&'g G);
 
-impl<O, G: ClassGeometry<O>> Access<O> for ReadOnly<'_, G> {
+impl<O: ClassObject, G: ClassGeometry<O>> Access<O> for ReadOnly<'_, G> {
     type Geometry = G;
     fn geometry(&self) -> &G {
         self.0
@@ -157,12 +167,21 @@ impl<O, G: ClassGeometry<O>> Access<O> for ReadOnly<'_, G> {
             "topology.brep_p1",
         ))
     }
+    fn refine_cci_to_surfaces(
+        &mut self,
+        k: &Kernel,
+        classification: &mut CurveClassification<O>,
+        solution: &mut Solution<O>,
+        edge: O,
+    ) -> Result<RefineCci> {
+        refine_cci_to_surfaces_in(k, self.0, classification, solution, edge, Point3::UNDEF, 0)
+    }
 }
 
 /// A mutable adapter: the edits are made.
 struct Mutable<'g, G>(&'g mut G);
 
-impl<O, G: ClassGeometryMut<O>> Access<O> for Mutable<'_, G> {
+impl<O: ClassObject, G: ClassGeometryMut<O>> Access<O> for Mutable<'_, G> {
     type Geometry = G;
     fn geometry(&self) -> &G {
         self.0
@@ -187,6 +206,15 @@ impl<O, G: ClassGeometryMut<O>> Access<O> for Mutable<'_, G> {
             }
             _ => Err(SolidError::invalid_input(OP, "unresolved mutable edge use")),
         }
+    }
+    fn refine_cci_to_surfaces(
+        &mut self,
+        k: &Kernel,
+        classification: &mut CurveClassification<O>,
+        solution: &mut Solution<O>,
+        edge: O,
+    ) -> Result<RefineCci> {
+        refine_cci_to_surfaces_mut(k, self.0, classification, solution, edge, Point3::UNDEF, 0)
     }
 }
 
@@ -1480,24 +1508,15 @@ fn insert_solutions_in<O: ClassObject>(
                     continue;
                 }
             }
+            // only try SSS for edge solutions: see if vertex should be placed at a
+            // surf/surf/surf intersection (which may edit the curves and the solution)
+            let refine = match edge {
+                Some(e) => Some(access.refine_cci_to_surfaces(k, classification, sol, e)?),
+                None => None,
+            };
             let geometry = access.geometry();
             let source = classification.curve_geometry(geometry)?;
             let target = target_curve(geometry, edge, object)?;
-
-            // only try SSS for edge solutions: see if vertex should be placed at a
-            // surf/surf/surf intersection
-            let refine = match edge {
-                Some(e) => Some(refine_cci_to_surfaces_in(
-                    k,
-                    geometry,
-                    classification,
-                    sol,
-                    e,
-                    Point3::UNDEF,
-                    0,
-                )?),
-                None => None,
-            };
             let sss_point_flag = refine.is_some_and(|r| r.sss_point_flag);
 
             let mut pc = PointClassification::new(source_zone);
