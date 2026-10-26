@@ -335,6 +335,13 @@ pub fn projection(app: &SolveApp, rect: Rect) -> Proj {
     Proj { cam, vp: cam.view_proj_bounds(aspect, &scene_bounds(app)), rect }
 }
 
+/// The far plane the picture's projection uses: the grid's fade ends before that plane cuts the
+/// ground (#4214). The scene's radius is not the radius the picture frames, so the planes of the
+/// projection itself are the ones that count.
+fn picture_far(app: &SolveApp, cam: &Camera) -> f64 {
+    cam.clip_bounds(&scene_bounds(app)).1
+}
+
 /// Sketches drawn in the viewport: the active one, and finished ones not yet used by a feature.
 pub(crate) fn visible_sketches(app: &SolveApp) -> Vec<u64> {
     let st = crate::open_meshing::shown_world(app);
@@ -1117,7 +1124,7 @@ fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
             let n = u.cross(v);
             let slant = app.cam.back().dot(n);
             let ext = grid_ext(app.cam.half_height(), major, slant);
-            let far_reach = solidcraft_engine::view::grid_far_reach(&proj.cam, proj.cam.clip(scene_radius(app)).1, c, n);
+            let far_reach = solidcraft_engine::view::grid_far_reach(&proj.cam, picture_far(app, &proj.cam), c, n);
             (c, u, v, slant, ext, far_reach, Box::new(|p| p.to_f32()))
         } else {
             let tf = app.cam.to_frame(app.cam.target);
@@ -1145,7 +1152,7 @@ fn build_sketch_scene(app: &SolveApp, proj: &Proj) -> GpuScene {
             let c = snap(u) + snap(v);
             // The far plane cuts the ground, and the grid's plane is the camera's frame's.
             let far_reach =
-                solidcraft_engine::view::grid_far_reach(&proj.cam, proj.cam.clip(scene_radius(app)).1, app.cam.from_frame(c), app.cam.from_frame(n));
+                solidcraft_engine::view::grid_far_reach(&proj.cam, picture_far(app, &proj.cam), app.cam.from_frame(c), app.cam.from_frame(n));
             (c, u, v, slant, ext, far_reach, Box::new(|p| app.cam.from_frame(p).to_f32()))
         };
         // The grid fades out with the distance from the middle of the view (#4214): it used to
@@ -9297,7 +9304,8 @@ mod grid_plane_tests {
 
     /// #4214: the grid fades in the picture as well. The same grid drawn at full strength is
     /// much fainter there where the fade has thinned it, and the same in the middle of the view,
-    /// where the fade leaves the grid alone.
+    /// where the fade leaves the grid alone. Where the picture's far plane cuts the ground, the
+    /// faded grid is already gone: it fades out instead of ending in a cut.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn the_grid_fades_out_in_the_picture_instead_of_ending_in_a_cut() {
@@ -9339,26 +9347,38 @@ mod grid_plane_tests {
             eprintln!("skipping: no GPU adapter");
             return;
         };
-        // How far a pixel is from the white the picture was cleared to: the grid's lines show.
-        let ink = |img: &[u8], x: i64, y: i64| -> u32 {
-            if !(0..SIZE as i64).contains(&x) || !(0..SIZE as i64).contains(&y) {
-                return 0;
-            }
-            img[((y * SIZE as i64 + x) * 4) as usize..][..3].iter().map(|c| u32::from(255 - c)).sum()
+        // How far the pixels of each row are from the white the picture was cleared to: the
+        // grid's lines show. The ink of a row, from the top of the picture.
+        let row_ink = |img: &[u8]| -> Vec<u64> {
+            (0..SIZE)
+                .map(|y| {
+                    (0..SIZE)
+                        .map(|x| {
+                            let i = ((y * SIZE + x) * 4) as usize;
+                            img[i..i + 3].iter().map(|c| u64::from(255 - c)).sum::<u64>()
+                        })
+                        .sum::<u64>()
+                })
+                .collect()
         };
-        // The strongest pixel of a small window round a point of the picture.
-        let at = |img: &[u8], p: Vec3| {
-            let s = proj.to_screen(p).expect("the point is in the picture");
-            let (x, y) = (i64::from(s.x as i32), i64::from(s.y as i32));
-            (0..3).flat_map(|dy| (0..3).map(move |dx| (dx, dy))).map(|(dx, dy)| ink(img, x + dx - 1, y + dy - 1)).max().unwrap_or(0)
-        };
+        let (faded_rows, full_rows) = (row_ink(&faded), row_ink(&full));
         // The middle of the view: the grid is drawn there, and the fade leaves it alone.
-        assert!(at(&faded, Vec3::ZERO) > 0, "the grid is drawn in the middle of the view");
-        assert_eq!(at(&faded, Vec3::ZERO), at(&full, Vec3::ZERO), "the fade leaves the middle of the grid alone");
-        // Where the fade has thinned the grid, the picture is fainter than the same grid at full
-        // strength: the fade reaches the picture.
-        let far = Vec3::new(0.0, 132.0, 0.0);
-        assert!(at(&faded, far) < at(&full, far), "the grid is fainter at {} than at full strength", far.y);
+        let middle = SIZE as usize / 2;
+        assert!(faded_rows[middle] > 0, "the grid is drawn in the middle of the view");
+        assert_eq!(faded_rows[middle], full_rows[middle], "the fade leaves the middle of the grid alone");
+        // The first row where the grid at full strength shows: the picture's far plane cuts the
+        // ground there, and the rows above it are the far ground the grid has to fade out in.
+        let first = full_rows.iter().position(|ink| *ink > 0).expect("the grid is drawn");
+        // Where the ground is cut, the faded grid is gone: it fades out instead of ending in a
+        // cut (#4214).
+        let band = first.saturating_sub(10)..=first;
+        let faded_ink: u64 = band.clone().map(|y| faded_rows[y]).sum();
+        let full_ink: u64 = band.map(|y| full_rows[y]).sum();
+        assert!(full_ink > 0, "the grid shows up to the far plane");
+        assert!(
+            faded_ink * 4 < full_ink,
+            "the grid still shows at full strength where the far plane cuts the ground: {faded_ink} against {full_ink}"
+        );
     }
 
     /// An open sketch always has its grid, on its own plane, whatever the Grid switch and the
