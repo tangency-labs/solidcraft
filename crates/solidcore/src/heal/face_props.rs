@@ -67,15 +67,17 @@
 //!   ([`crate::topology::face::p4::BrepSeamObjects`]; otherwise
 //!   [`SolidError::InvalidInput`]). The `SmLoop` queries (`topology.loopuse`),
 //!   `SmCurveClassification::ReSet` (`intersect.curve_class_p2`) and
-//!   `SmFace::ClassifyLoops` ([`crate::query::face::p4::classify_loops`]) are wired.
-//!   `SetProps_Stage3` propagates classification failures (#521) before reading the
-//!   classification records. An error clears its in-progress stage marker, keeping
+//!   `SmFace::ClassifyLoops` ([`crate::query::face::p4::classify_loops`], whose status
+//!   `SetProps_Stage3` ignores as upstream) are wired. With the opt-in
+//!   `Kernel::fixes.heal_stage3_failures_propagate` (WR-268, WR-266, #521)
+//!   `SetProps_Stage3` propagates classification failures before reading the
+//!   classification records, and an error clears its in-progress stage marker, keeping
 //!   partial diagnostics without certifying the properties or skipping a retry.
 //! - **Query caches.** The mutable healer explicitly applies the vertex/face and
 //!   edge/face gap caches produced by seam queries, even on errors. Read-only props
 //!   queries still leave the B-rep unchanged; no geometry or topology is copied back.
 
-use crate::error::{EntityRef, Result, SolidError};
+use crate::error::{ignored, EntityRef, Result, SolidError};
 use crate::geom::tol::{calc_face_zone_tol_3d, xsect_tol_3d_from_zones};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::intersect::curve_class::p1::{
@@ -2083,7 +2085,9 @@ impl<O: LoopObject> FaceProps<O> {
     /// `SetProps_Stage3`: sets the loop values (after `Fix_SplitEdgesAtSeam`): the
     /// per-loop props, the closed loop count, and from `SmFace::ClassifyLoops` the
     /// containment, orientation and the loop problem counts.
-    /// A failed stage remains incomplete and can be retried.
+    /// By default a failed stage keeps its in-progress marker (`SM_PROPSTAGE_3a`), as
+    /// upstream; with the opt-in `Kernel::fixes.heal_stage3_failures_propagate`
+    /// (WR-266) it remains incomplete and can be retried.
     ///
     /// # Errors
     ///
@@ -2091,7 +2095,8 @@ impl<O: LoopObject> FaceProps<O> {
     /// `SM_ERR_NOTYET_HEAL_FACE` ([`SM_ERR_NOTYET_HEAL_FACE`]) for a face
     /// `ClassifyLoops` cannot classify; the errors of [`FaceProps::set_props_stage2`]
     /// and [`LoopProps::set_props`]; [`SolidError::InvalidInput`] where upstream reads
-    /// outside an array; the errors of `SmFace::ClassifyLoops`.
+    /// outside an array; [`SolidError::Unported`] from `SmFace::ClassifyLoops` (with
+    /// the opt-in `Kernel::fixes.heal_stage3_failures_propagate`, all its errors).
     pub fn set_props_stage3(
         &mut self,
         k: &Kernel,
@@ -2117,7 +2122,10 @@ impl<O: LoopObject> FaceProps<O> {
         cache: &mut CurveOnClassifyCache,
     ) -> Result<()> {
         let result = self.set_props_stage3_inner(k, b, face, face_index, exe_heal_op, cache);
-        if result.is_err() && self.prop_stage == PropStage::Stage3A {
+        if k.fixes.heal_stage3_failures_propagate
+            && result.is_err()
+            && self.prop_stage == PropStage::Stage3A
+        {
             // Keep diagnostics, but an unfinished stage is not a cached success.
             self.prop_stage = PropStage::Stage2;
         }
@@ -2179,7 +2187,7 @@ impl<O: LoopObject> FaceProps<O> {
             ..ClassifyLoopsOut::default()
         };
         let mut target_loops = closed_loops;
-        let classify_status = crate::query::face::p4::classify_loops_cached(
+        let classify_result = crate::query::face::p4::classify_loops_cached(
             k,
             b,
             m_face,
@@ -2189,6 +2197,21 @@ impl<O: LoopObject> FaceProps<O> {
             self,
             cache,
         );
+        let fix = k.fixes.heal_stage3_failures_propagate;
+        let classify_status = if fix {
+            classify_result.map(Some)
+        } else {
+            // (the status is only reported upstream; a handle type that cannot name the
+            // loop bisector's objects is a limitation of the caller, not a status)
+            match classify_result {
+                Err(e @ SolidError::InvalidInput { reason, .. })
+                    if reason == crate::query::face::p3::NO_CURVE_HANDLES =>
+                {
+                    return Err(e);
+                }
+                r => Ok(ignored(r)?),
+            }
+        };
         let ClassifyLoopsOut {
             classifiable,
             classify_loop_ios,
@@ -2198,10 +2221,12 @@ impl<O: LoopObject> FaceProps<O> {
             looptree,
         } = classified;
         self.looptree = looptree;
-        self.not_yet_face_type = classifiable;
-        // Preserve the owned tree and problem classification on error, but do not
-        // consume output arrays that the failed classification did not fill.
-        classify_status?;
+        if fix {
+            // WR-268: preserve the owned tree and problem classification on error, but
+            // do not consume output arrays that the failed classification did not fill.
+            self.not_yet_face_type = classifiable;
+            classify_status?;
+        }
 
         // watch out for problem faces that defy ClassifyLoops
         if classifiable != HealNotYetFaceType::NoProbs {
@@ -2231,6 +2256,7 @@ impl<O: LoopObject> FaceProps<O> {
             // guard against NULL m_pLooptreeRoot - can happen when ClassifyLoops cannot
             // process loops (a failed status is checked upstream by SE_MSG only)
             let Some(root) = self.looptree.as_ref().and_then(Looptree::root) else {
+                let _ = classify_status;
                 self.not_yet_face_type = HealNotYetFaceType::NoLoopTreeRoot;
                 return Err(not_yet_heal_face(OP_STAGE3));
             };
@@ -2721,8 +2747,9 @@ mod tests {
     }
 
     #[test]
-    fn stage3_propagates_classification_failure() {
-        let k = Kernel::default();
+    fn issue_521_stage3_propagates_classification_failure() {
+        let mut k = Kernel::default();
+        k.fixes.heal_stage3_failures_propagate = true;
         let (b, f) = plane_without_loops();
         let mut p: FaceProps<H> = FaceProps::for_face(f, 0);
         p.set_props_stage2(&k, &b, f, 0, HealerOpType::All).unwrap();
@@ -2744,9 +2771,10 @@ mod tests {
     }
 
     #[test]
-    fn stage3_failure_does_not_certify_cached_properties() {
+    fn issue_521_stage3_failure_does_not_certify_cached_properties() {
         for cached in [false, true] {
-            let k = Kernel::default();
+            let mut k = Kernel::default();
+            k.fixes.heal_stage3_failures_propagate = true;
             let (mut b, f) = plane_without_loops();
             let mut p: FaceProps<H> = FaceProps::for_face(f, 0);
             p.set_props_stage2(&k, &b, f, 0, HealerOpType::All).unwrap();
@@ -2766,6 +2794,22 @@ mod tests {
             assert_eq!(run(&mut p), Err(first));
             assert_eq!(p.prop_stage, PropStage::Stage2);
         }
+    }
+
+    #[test]
+    fn stage3_failure_keeps_in_progress_marker_by_default() {
+        // WR-266: upstream leaves SM_PROPSTAGE_3a set, so a retry returns at once.
+        let k = Kernel::default();
+        let (mut b, f) = plane_without_loops();
+        let mut p: FaceProps<H> = FaceProps::for_face(f, 0);
+        p.set_props_stage2(&k, &b, f, 0, HealerOpType::All).unwrap();
+        b.faceuse_mut(crate::topology::FaceuseId::from_index(0))
+            .unwrap()
+            .loopuses
+            .push(crate::topology::LoopuseId::from_index(99));
+        assert!(p.set_props_stage3(&k, &b, f, 0, HealerOpType::All).is_err());
+        assert_eq!(p.prop_stage, PropStage::Stage3A);
+        assert_eq!(p.set_props_stage3(&k, &b, f, 0, HealerOpType::All), Ok(()));
     }
 
     fn plane_without_loops() -> (Brep, FaceId) {

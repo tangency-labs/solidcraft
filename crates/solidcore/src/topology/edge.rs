@@ -2120,12 +2120,16 @@ pub fn set_orientation(b: &mut Brep, e: EdgeId, orientation: OrientType) -> Resu
 
 /// `ReverseOrientation`: reverses the curve's parameterisation, then installs the
 /// reversed interval, flips every edge use's orientation and deletes its UV trim.
-/// A failed curve reversal returns before changing the interval or edge uses.
+/// By default a failed curve reversal's status is ignored, as upstream: the edge
+/// gets the default interval and its uses are still flipped. With the opt-in
+/// [`crate::kernel::UpstreamFixes::edge_reversal_keeps_failed_edge`] (WR-260) a
+/// failed reversal returns before changing the interval or edge uses.
 ///
 /// # Errors
 ///
 /// [`SolidError::InvalidInput`] without edge uses (upstream walks a null list) and
-/// those of the curve reversal and [`eu1::set_uv_trim_curve`].
+/// those of [`eu1::set_uv_trim_curve`]; [`SolidError::Unported`] from the curve (with
+/// the opt-in fix, every error of the curve reversal).
 pub fn reverse_orientation(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
     // locals
     let old_ivl = b.edge(e)?.interval;
@@ -2133,7 +2137,11 @@ pub fn reverse_orientation(k: &Kernel, b: &mut Brep, e: EdgeId) -> Result<()> {
 
     // reverse Curve Parameterization
     if let Some(c) = b.edge_mut(e)?.curve.as_mut() {
-        new_ivl = c.reverse_parameterization(k, &old_ivl)?;
+        match c.reverse_parameterization(k, &old_ivl) {
+            Ok(n) => new_ivl = n,
+            Err(err) if k.fixes.edge_reversal_keeps_failed_edge => return Err(err),
+            Err(err) => failed(err)?,
+        }
     }
     b.edge_mut(e)?.interval = new_ivl;
 
@@ -3361,8 +3369,9 @@ mod tests {
     }
 
     #[test]
-    fn failed_reversal_preserves_edge_interval_uses_and_trims() {
-        let k = Kernel::default();
+    fn issue_521_failed_reversal_preserves_edge_interval_uses_and_trims() {
+        let mut k = Kernel::default();
+        k.fixes.edge_reversal_keeps_failed_edge = true;
         let (mut b, e, eus, _) = wire();
         let hermite = crate::curve::hermite_curve::HermiteCurve::new(
             Vec3::ZERO,
@@ -3393,6 +3402,29 @@ mod tests {
         let before = format!("{b:?}");
         assert_eq!(reverse_orientation(&k, &mut b, e), Err(expected));
         assert_eq!(format!("{b:?}"), before);
+    }
+
+    #[test]
+    fn failed_reversal_installs_default_interval_by_default() {
+        // WR-260: upstream ignores the failed reversal's status.
+        let k = Kernel::default();
+        let (mut b, e, eus, _) = wire();
+        b.edge_mut(e).unwrap().curve =
+            Some(C::from(crate::curve::hermite_curve::HermiteCurve::new(
+                Vec3::ZERO,
+                Vec3::X,
+                Vec3::X,
+                Vec3::Y,
+                3,
+            )));
+        for &eu in &eus {
+            b.edgeuse_mut(eu).unwrap().uv_trim_curve = b.edge(e).unwrap().curve.clone();
+        }
+        reverse_orientation(&k, &mut b, e).unwrap();
+        assert_eq!(b.edge(e).unwrap().interval, Extent1d::new());
+        for eu in eus {
+            assert!(b.edgeuse(eu).unwrap().uv_trim_curve.is_none());
+        }
     }
 
     #[test]

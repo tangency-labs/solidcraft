@@ -7,3 +7,5 @@
 - **Confirmed:** no native reproduction; source and the #521 report; Rust regressions with an empty trim fail before the fix at both the first and a later edgeuse. Empty-NURB C++ calls were not executed because their reference behavior is unsafe.
 - **Rust port:** trim acquisition already propagated failure; endpoint evaluation and fallback drop failures now propagate too, with fresh locals per edgeuse. #521 / PR #700; findings: Failed topology evaluations and incomplete healing stages.
 - **Findings:** plan/findings/general--521-topology-evaluation-status.md
+
+**Opt-in (2026-10-26):** the fix above is now the opt-in `Kernel::fixes.topology_failed_evaluations_propagate` (default `false`, upstream behaviour: the status is ignored as SMLib does), following the opt-in `UpstreamFixes` precedent for result-changing fixes. With the default the unit compares as SMLib with no known mismatches; the `issue_521_*` tests run with the fix on, and a default-behaviour test pins the upstream result.
