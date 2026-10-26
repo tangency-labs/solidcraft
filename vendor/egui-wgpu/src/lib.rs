@@ -194,6 +194,67 @@ impl DeviceLost {
     }
 }
 
+/// SolidCraft: a frame acquired from a window's surface, which gives its swapchain image back
+/// however the frame ends: presented, dropped unpresented, or dropped while a panic unwinds
+/// (#7148).
+///
+/// wgpu presents or discards a frame only on a valid device. On a lost one both return early, and
+/// the surface keeps the frame's image, which holds one of the swapchain's acquire semaphores.
+/// Dropping or reconfiguring that surface later (the window closing as the app restarts after the
+/// loss) then panics in wgpu-hal: "Trying to destroy a SwapchainAcquireSemaphore that is still in
+/// use by a SurfaceTexture". So the frame keeps a second handle to its texture, and once the frame
+/// is gone that handle is destroyed ([`FreeSurfaceTexture`]), which takes the image (and its
+/// semaphores) back from the surface, lost device or not. After a present or discard that worked,
+/// the image is already back and the destroy does nothing.
+///
+/// The order is the struct's: Rust drops fields in declaration order, so [`Self::frame`] always
+/// goes before the texture handle is destroyed, and [`Self::present`] presents before it.
+pub struct AcquiredFrame<F, T: FreeSurfaceTexture> {
+    /// The frame; dropped (discarded) before the texture is freed.
+    pub frame: F,
+    texture: FreeOnDrop<T>,
+}
+
+impl<F, T: FreeSurfaceTexture> AcquiredFrame<F, T> {
+    /// `texture` is a second handle to `frame`'s texture.
+    pub fn new(frame: F, texture: T) -> Self {
+        Self {
+            frame,
+            texture: FreeOnDrop(texture),
+        }
+    }
+
+    /// Present the frame with `present`, then free the texture.
+    pub fn present(self, present: impl FnOnce(F)) {
+        let Self { frame, texture } = self;
+        present(frame);
+        drop(texture);
+    }
+}
+
+/// SolidCraft: what [`AcquiredFrame`] does with its texture handle once the frame is gone.
+pub trait FreeSurfaceTexture {
+    /// Give the surface's image back, whatever the device's state; nothing once it is back.
+    fn free(&self);
+}
+
+impl FreeSurfaceTexture for wgpu::Texture {
+    /// wgpu-core's destroy of a surface texture takes its image and drops it without checking the
+    /// device, and does nothing when a present or discard took it already.
+    fn free(&self) {
+        self.destroy();
+    }
+}
+
+/// Frees its texture when dropped, also while a panic unwinds.
+struct FreeOnDrop<T: FreeSurfaceTexture>(T);
+
+impl<T: FreeSurfaceTexture> Drop for FreeOnDrop<T> {
+    fn drop(&mut self) {
+        self.0.free();
+    }
+}
+
 /// Access to the render state for egui.
 #[derive(Clone)]
 pub struct RenderState {
@@ -1031,5 +1092,104 @@ mod device_lost_tests {
         assert!(painter.is_lost());
         assert!(flag.load(std::sync::atomic::Ordering::Acquire));
         assert_eq!(painter.reason().as_deref(), Some("Unknown: Device lost"));
+    }
+
+    /// A window's surface as wgpu-core treats the image of an acquired frame: a present or a
+    /// discard gives it back only on a valid device, a destroy of the texture always (#7148).
+    #[derive(Default)]
+    struct Surface {
+        lost: std::cell::Cell<bool>,
+        image_held: std::cell::Cell<bool>,
+        calls: std::cell::RefCell<Vec<&'static str>>,
+    }
+
+    impl Surface {
+        fn call(&self, name: &'static str, gives_back: bool) {
+            self.calls.borrow_mut().push(name);
+            if gives_back {
+                self.image_held.set(false);
+            }
+        }
+    }
+
+    /// A frame of [`Surface`]: discarded when dropped unpresented.
+    struct Frame<'s> {
+        surface: &'s Surface,
+        presented: bool,
+    }
+
+    impl Drop for Frame<'_> {
+        fn drop(&mut self) {
+            if !self.presented {
+                self.surface.call("discard", !self.surface.lost.get());
+            }
+        }
+    }
+
+    struct Texture<'s>(&'s Surface);
+
+    impl super::FreeSurfaceTexture for Texture<'_> {
+        fn free(&self) {
+            self.0.call("free", true);
+        }
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    enum End {
+        Present,
+        Drop,
+        Panic,
+    }
+
+    /// Acquire a frame from `surface` and end it as `end`.
+    fn run_frame(surface: &Surface, end: End) {
+        surface.image_held.set(true);
+        let frame = super::AcquiredFrame::new(
+            Frame {
+                surface,
+                presented: false,
+            },
+            Texture(surface),
+        );
+        match end {
+            End::Present => frame.present(|mut frame| {
+                frame.presented = true;
+                surface.call("present", !surface.lost.get());
+            }),
+            End::Drop => drop(frame),
+            End::Panic => {
+                let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+                    let _frame = frame;
+                    panic!("a paint callback panics while the frame is held");
+                }));
+                assert!(unwound.is_err());
+            }
+        }
+    }
+
+    /// However a frame ends, on a valid or a lost device, the surface has its image back by the
+    /// time the frame is gone, so dropping or reconfiguring the surface can't meet a semaphore
+    /// still in use (#7148). The texture is freed only after the present or discard: freed first,
+    /// a valid device's present or discard would find it destroyed.
+    #[test]
+    fn a_frame_gives_its_image_back_however_it_ends_even_on_a_lost_device() {
+        for lost in [false, true] {
+            for end in [End::Present, End::Drop, End::Panic] {
+                let surface = Surface::default();
+                surface.lost.set(lost);
+                run_frame(&surface, end);
+                let first = if matches!(end, End::Present) {
+                    "present"
+                } else {
+                    "discard"
+                };
+                assert_eq!(
+                    *surface.calls.borrow(),
+                    [first, "free"],
+                    "lost {lost}, {end:?}"
+                );
+                assert!(!surface.image_held.get(), "lost {lost}, {end:?}");
+            }
+        }
     }
 }

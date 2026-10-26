@@ -735,7 +735,7 @@ impl Painter {
             output_frame
         };
 
-        let output_frame = match output_frame {
+        let frame = match output_frame {
             wgpu::CurrentSurfaceTexture::Success(frame) => frame,
             wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
                 surface_state.needs_reconfigure = true;
@@ -770,6 +770,11 @@ impl Painter {
                 return vsync_sec;
             }
         };
+        // SolidCraft: however this frame ends (presented, dropped by an early return below, or
+        // dropped while a panic unwinds), the surface gets its image back, also on a lost device,
+        // where wgpu's present and discard keep it and the surface's drop then panicked (#7148).
+        let texture = frame.texture.clone();
+        let output_frame = crate::AcquiredFrame::new(frame, texture);
 
         // SolidCraft: before the uploads, an empty submission asks the driver whether the device
         // is still there. The first queue write to meet a lost device panics inside wgpu (#4172);
@@ -831,13 +836,13 @@ impl Painter {
 
             let target_texture = if capture {
                 let capture_state = self.screen_capture_state.get_or_insert_with(|| {
-                    CaptureState::new(&render_state.device, &output_frame.texture)
+                    CaptureState::new(&render_state.device, &output_frame.frame.texture)
                 });
-                capture_state.update(&render_state.device, &output_frame.texture);
+                capture_state.update(&render_state.device, &output_frame.frame.texture);
 
                 &capture_state.texture
             } else {
-                &output_frame.texture
+                &output_frame.frame.texture
             };
             let target_view = target_texture.create_view(&wgpu::TextureViewDescriptor::default());
 
@@ -908,7 +913,7 @@ impl Painter {
             if capture && let Some(capture_state) = &mut self.screen_capture_state {
                 capture_buffer = Some(capture_state.copy_textures(
                     &render_state.device,
-                    &output_frame,
+                    &output_frame.frame,
                     &mut encoder,
                 ));
             }
@@ -962,7 +967,7 @@ impl Painter {
             profiling::scope!("present");
             // wgpu doesn't document where vsync can happen. Maybe here?
             let start = web_time::Instant::now();
-            render_state.queue.present(output_frame);
+            output_frame.present(|frame| render_state.queue.present(frame));
             vsync_sec += start.elapsed().as_secs_f32();
         }
 

@@ -325,6 +325,12 @@ SolidCraft changes:
   default handler panicked (#7007). An unsupported surface is a refused configure too. The
   acquire runs under `capture_errors`, and the `Validation` status it then returns reconfigures
   the surface instead of skipping every later frame.
+- `src/lib.rs`, `src/winit.rs`: the painter holds an acquired frame as `AcquiredFrame`, which
+  destroys a second handle to the frame's texture once the frame is presented or dropped. On a
+  lost device wgpu's present and discard keep the frame's image in the surface, and dropping
+  the surface (the window closing for the restart) then panicked in wgpu-hal ("Trying to
+  destroy a SwapchainAcquireSemaphore that is still in use by a SurfaceTexture", #7148); the
+  destroy takes the image back whatever the device's state.
 - `src/lib.rs`: creation of the egui renderer uses validation, internal and out-of-memory
   error scopes, awaiting every result before returning it. A refused UI pipeline (D3D12
   `egui_pipeline` shader compilation, #6648) returns `WgpuError::CreateRendererError` through
