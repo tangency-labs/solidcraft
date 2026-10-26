@@ -32,6 +32,13 @@
 //! status (1), distinct from its early `SM_SUCCESS` (0). Mutation success paths
 //! remain uncertified while part 2 and face notification dependencies defer;
 //! passing refusal/projection comparisons do not certify those paths.
+//! Opt-in ([`UpstreamFixes::new_edge_vertex_tolerance_covers_gap`](crate::kernel::UpstreamFixes::new_edge_vertex_tolerance_covers_gap),
+//! WR-460): `MakeEdgeInFaceWithVU` follows the SolidCraft fork's fix: after
+//! `RefreshTolerance`, which keeps a vertex's tolerance as it was, each end vertex's
+//! tolerance grows to twice its gap to the new edge's end (only if larger), as
+//! `UpdateVertexEdgeIntervals` sets it. By default it leaves gaps up to the full
+//! tolerance, as the pinned C++ does, which `AssertValid` refuses above half of it.
+//! See `plan/upstream-issues/WR-460--make-edge-in-face-vertex-tolerance-gap.md`.
 
 use crate::curve::curve::Curve;
 use crate::error::{ignore_status, Result, SolidError, SM_ERR};
@@ -1841,6 +1848,19 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
     }
     vertex::refresh_tolerance(b, start_vertex, false)?;
     vertex::refresh_tolerance(b, end_vertex, false)?;
+    // Opt-in (WR-460): each vertex's tolerance grows to twice its gap to the new edge's end.
+    if k.fixes.new_edge_vertex_tolerance_covers_gap {
+        let record = b.edge(edge_id)?;
+        let curve = required(record.curve.as_ref(), "new edge without curve")?;
+        let (curve_start, curve_end) = (
+            curve.evaluate_point(k, t_start)?,
+            curve.evaluate_point(k, t_end)?,
+        );
+        let start_gap = curve_start.distance(vertex::point(b, start_vertex)?);
+        let end_gap = curve_end.distance(vertex::point(b, end_vertex)?);
+        vertex::set_tolerance(b, start_vertex, 2.0 * start_gap, true, true)?;
+        vertex::set_tolerance(b, end_vertex, 2.0 * end_gap, true, true)?;
+    }
     // These skeleton caches are derived from the authoritative use lists.
     sync_face_cache(b, face)?;
     if let Some(face) = output.face {
@@ -3030,6 +3050,122 @@ mod tests {
             Err(SolidError::Upstream { code: 1007, .. })
         ));
         assert_eq!(ray_direction(Vec3::Z).unwrap(), Vec3::Z);
+    }
+
+    /// WR-460: a box face's diagonal, given with its UV trim, overshooting its far corner
+    /// by 0.7 of that corner's tolerance along the face, made with
+    /// `new_edge_vertex_tolerance_covers_gap` set to `fix`. Returns the far corner's
+    /// tolerance before and after and the end gap, or `None` when a dependency the
+    /// success path needs is still unported.
+    fn diagonal_overshooting_its_corner(fix: bool) -> Option<(f64, f64, f64)> {
+        use crate::topology::edgeuse::p1 as eu1;
+        let k = &mut Kernel::default();
+        k.fixes.new_edge_vertex_tolerance_covers_gap = fix;
+        let mut b = crate::primitive::api_primitives::create_box(k, Point3::ZERO, 10.0, 10.0, 10.0)
+            .unwrap();
+        b.set_editing_enabled(true);
+        let eu = b
+            .edgeuses()
+            .ids()
+            .find(|&e| eu1::face(&b, e).is_ok_and(|f| f.is_some()))
+            .unwrap();
+        let face = eu1::face(&b, eu).unwrap().unwrap();
+        let opposite = eu1::cw_edgeuse(&b, eu1::cw_edgeuse(&b, eu).unwrap().unwrap())
+            .unwrap()
+            .unwrap();
+        let (near, far) = (
+            eu1::vertexuse(&b, eu).unwrap().unwrap(),
+            eu1::vertexuse(&b, opposite).unwrap().unwrap(),
+        );
+        let vertex_of = |b: &Brep, vu: VertexuseId| b.vertexuse(vu).unwrap().vertex.unwrap();
+        let (p, q) = (
+            vertex::point(&b, vertex_of(&b, near)).unwrap(),
+            vertex::point(&b, vertex_of(&b, far)).unwrap(),
+        );
+        let tolerance = vertex::tolerance(&b, vertex_of(&b, far)).unwrap();
+        let gap = 0.7 * tolerance;
+        let end = q + (q - p) * (gap / q.distance(p));
+        // The UV trim given, as an intersection gives it: no curve drop, whose edge
+        // tolerance would cover the gap.
+        let crate::surface::surface::SurfaceKind::Plane(plane) =
+            b.face(face).unwrap().surface.as_ref().unwrap().kind()
+        else {
+            panic!("box face is not a plane");
+        };
+        let (uv_p, uv_end) = (
+            plane.project_point_to_uv_domain(p),
+            plane.project_point_to_uv_domain(end),
+        );
+        let uv_trim = Curve::from(crate::curve::line::Line::from_points(
+            Point3::new(uv_p.x, uv_p.y, 0.0),
+            Point3::new(uv_end.x, uv_end.y, 0.0),
+            3,
+        ));
+        let mut records = std::collections::BTreeMap::new();
+        let mut attributes = crate::geom::attribute::AttributeStore::default();
+        let key_of = |e: EntityRef| crate::topology::loopuse::notify_ref(e);
+        let mut env = edge::NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of: &key_of,
+        };
+        let curve_ref = |e: EdgeId, type_code: i64| crate::geom::object::ObjectRef {
+            key: crate::geom::attribute::ObjectKey(1000 + u64::from(e.index())),
+            type_code,
+        };
+        let made = make_edge_in_face_with_vu(
+            k,
+            &mut b,
+            EdgeInFaceInput {
+                face: Some(face),
+                vertices: [Some(near), Some(far)],
+                curve: Some(Curve::from(crate::curve::line::Line::from_points(
+                    p, end, 3,
+                ))),
+                uv_trim: Some(uv_trim),
+                drop_fail: None,
+                interval: Extent1d::from_min_max(0.0, 1.0),
+                orientation: OrientType::Same,
+                curve_zone_tol_3d: crate::geom::tol::zone_tol3d(k, 1e-7),
+            },
+            &mut env,
+            &curve_ref,
+        );
+        if let Err(e) = made {
+            // A dependency the success path needs may still be unported.
+            assert!(matches!(e, SolidError::Unported { .. }), "{e:?}");
+            return None;
+        }
+        Some((
+            tolerance,
+            vertex::tolerance(&b, vertex_of(&b, far)).unwrap(),
+            gap,
+        ))
+    }
+
+    /// WR-460, opt-in: a new edge that ends `gap` from its vertex, above half the
+    /// vertex's tolerance (steel-026: 5.44e-6 against 5.42e-6), leaves the vertex a
+    /// tolerance of at least twice the gap.
+    #[test]
+    fn new_edge_grows_its_vertices_tolerance_to_twice_the_end_gap() {
+        let Some((_, grown, gap)) = diagonal_overshooting_its_corner(true) else {
+            return;
+        };
+        assert!(
+            grown >= 2.0 * gap * (1.0 - 1e-12),
+            "tolerance {grown} for an end gap {gap}"
+        );
+    }
+
+    /// WR-460, default: the vertex keeps its tolerance, as the pinned C++ does.
+    #[test]
+    fn new_edge_keeps_its_vertices_tolerance_by_default() {
+        let Some((before, after, gap)) = diagonal_overshooting_its_corner(false) else {
+            return;
+        };
+        assert_eq!(after, before, "end gap {gap}");
+        assert!(after < 2.0 * gap);
     }
 
     #[test]
