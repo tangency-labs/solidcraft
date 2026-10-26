@@ -258,7 +258,7 @@ pub struct ViewportState {
     pub select_other: crate::select_other::State,
     /// A sketch point or curve being dragged (its id, the undo depth when the drag began: the
     /// whole drag is one undo step, and for a curve where it was last under the cursor).
-    pub point_drag: Option<(String, usize, Option<Vec2>, Vec2)>,
+    pub point_drag: Option<(String, usize, Option<Vec2>, Vec2, bool)>,
     /// Checkpoint and source for a cancellable whole-text drag.
     pub(crate) text_drag: Option<(u64, String)>,
     /// A part that joints place, being dragged.
@@ -2153,8 +2153,13 @@ fn selected_spline_handle_mirrors(sk: &solidcraft_engine::sketch::Sketch, select
     mirrors
 }
 
-fn point_drag_offset(sk: &solidcraft_engine::sketch::Sketch, id: &str, pointer_at: Vec2) -> Vec2 {
-    sk.resolve_point(id).and_then(|index| sk.point(index)).map_or(Vec2::ZERO, |point| point - pointer_at)
+fn point_drag_mapping(sk: &solidcraft_engine::sketch::Sketch, id: &str, hit_at: Vec2, pointer_at: Vec2, selection: &[Sel]) -> (Vec2, bool) {
+    let Some(index) = sk.resolve_point(id) else { return (Vec2::ZERO, false) };
+    let Some(point) = sk.point(index) else { return (Vec2::ZERO, false) };
+    let mirrored = selected_spline_handle_mirrors(sk, selection)
+        .into_iter()
+        .any(|(handle, mirror)| handle == index && mirror.dist(hit_at) <= 1e-9 && mirror.dist(point) > 1e-9);
+    (if mirrored { point + pointer_at } else { point - pointer_at }, mirrored)
 }
 
 #[derive(Clone)]
@@ -5515,15 +5520,21 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                     // was grabbed, rather than going to the cursor.
                     let pointer_at = on_plane(app, a).unwrap_or(at);
                     let grab = (!dragged_with(app, &id).is_empty()).then_some(pointer_at);
-                    let offset = app.session.doc.sketch(sketch).ok().map_or(Vec2::ZERO, |sk| point_drag_offset(sk, &id, pointer_at));
-                    app.viewport.point_drag = Some((id, app.session.undo.len(), grab, offset))
+                    // The mirrored end of a guide moves opposite to its stored handle point.
+                    let (offset, mirrored) = app
+                        .session
+                        .doc
+                        .sketch(sketch)
+                        .ok()
+                        .map_or((Vec2::ZERO, false), |sk| point_drag_mapping(sk, &id, at, pointer_at, &app.session.selection));
+                    app.viewport.point_drag = Some((id, app.session.undo.len(), grab, offset, mirrored))
                 }
                 Some(Hit::SketchCurve { sketch, id, .. } | Hit::SketchMidpoint { sketch, id, .. }) if Some(sketch) == active => {
-                    app.viewport.point_drag = on_plane(app, a).map(|q| (id, app.session.undo.len(), Some(q), Vec2::ZERO));
+                    app.viewport.point_drag = on_plane(app, a).map(|q| (id, app.session.undo.len(), Some(q), Vec2::ZERO, false));
                 }
                 _ => {}
             }
-            if let Some((id, _, _, _)) = &app.viewport.point_drag {
+            if let Some((id, _, _, _, _)) = &app.viewport.point_drag {
                 let link = app.session.active_sketch.and_then(|sid| app.session.doc.sketch(sid).ok()).and_then(|sk| {
                     let link = sk
                         .curve_index(id)
@@ -5535,7 +5546,7 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if let Some(link) = link
                     && let Some(q) = on_plane(app, a)
                 {
-                    if let Some((_, _, grab, _)) = &mut app.viewport.point_drag {
+                    if let Some((_, _, grab, _, _)) = &mut app.viewport.point_drag {
                         *grab = Some(q);
                     }
                     if let Ok(result) = app.session.execute("edit.checkpoint", &json!({}))
@@ -5546,12 +5557,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 }
             }
         }
-        if let Some((id, depth, grab, offset)) = app.viewport.point_drag.clone()
+        if let Some((id, depth, grab, offset, mirrored)) = app.viewport.point_drag.clone()
             && (resp.dragged_by(egui::PointerButton::Primary) || resp.drag_stopped())
             && let Some(mut q) = hover.and_then(|p| on_plane(app, p))
         {
-            q += offset;
-            let from = grab.map_or(q, |point| point + offset);
+            q = if mirrored { offset - q } else { q + offset };
+            let from = grab.map_or(q, |point| if mirrored { offset - point } else { point + offset });
             let with = dragged_with(app, &id);
             // Snap the dragged point (or the line's ends) to other geometry, like drawing.
             let snap = {
@@ -5591,12 +5602,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             // The grab stays on the geometry: what it could not follow this frame it catches up
             // with on the next one instead of lagging the cursor for the rest of the drag.
             if grab.is_some() {
-                app.viewport.point_drag = Some((id, depth, Some(at), offset));
+                app.viewport.point_drag = Some((id, depth, Some(at), offset, mirrored));
             }
         }
         if resp.drag_stopped() {
             crate::sketch_text_handles::drag_end(app);
-            if let Some((_, depth, _, _)) = app.viewport.point_drag.clone() {
+            if let Some((_, depth, _, _, _)) = app.viewport.point_drag.clone() {
                 // Letting go on a point, midpoint or curve adds the matching constraint, then the
                 // whole model follows the drag, all in the drag's undo step.
                 let _ = app.session.execute("sketch.drag_end", &json!({ "constraint": crate::drag_snap::release() }));
@@ -7850,16 +7861,20 @@ mod tests {
         for ((handle_index, mirror), (fit, handle)) in mirrors.iter().zip(pts.iter().zip(handles)) {
             assert_eq!(*handle_index, *handle);
             assert_eq!(*mirror, sketch.point(*fit).unwrap() * 2.0 - sketch.point(*handle).unwrap());
-            let pointer_at = *mirror + Vec2::new(0.25, -0.5);
-            let offset = point_drag_offset(&sketch, &sketch.points[*handle].id, pointer_at);
-            assert_eq!(point_drag_offset(&sketch, &sketch.points[*handle].id, sketch.point(*handle).unwrap()), Vec2::ZERO);
-            assert!((pointer_at + offset).dist(sketch.point(*handle).unwrap()) < 1e-9);
+            let id = &sketch.points[*handle].id;
             let handle_position = sketch.point(*handle).unwrap();
+            let pointer_near_mirror = *mirror + Vec2::new(0.25, -0.5);
+            let (mirror_offset, mirrored) = point_drag_mapping(&sketch, id, *mirror, pointer_near_mirror, &selection);
+            assert!(mirrored);
+            assert!((mirror_offset - pointer_near_mirror).dist(handle_position) < 1e-9);
+
             let pointer_near_handle = handle_position + Vec2::new(-0.25, 0.5);
-            let handle_offset = point_drag_offset(&sketch, &sketch.points[*handle].id, pointer_near_handle);
+            let (handle_offset, mirrored) = point_drag_mapping(&sketch, id, handle_position, pointer_near_handle, &selection);
+            assert!(!mirrored);
             assert!((pointer_near_handle + handle_offset).dist(handle_position) < 1e-9);
             let motion = Vec2::new(2.0, -3.0);
-            assert!((pointer_at + motion + offset).dist(sketch.point(*handle).unwrap() + motion) < 1e-9);
+            assert!((pointer_near_handle + motion + handle_offset).dist(handle_position + motion) < 1e-9);
+            assert!((mirror_offset - (pointer_near_mirror + motion)).dist(handle_position - motion) < 1e-9);
         }
     }
 
