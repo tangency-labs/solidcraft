@@ -452,6 +452,11 @@ pub(crate) fn name(app: &SolveApp, component: u64) -> String {
     app.session.doc.components.iter().find(|c| c.id == component).map_or_else(|| format!("Component {component}"), |c| c.name.clone())
 }
 
+/// The width of a run's chip (`group_chip`).
+pub(crate) fn group_chip_width(app: &SolveApp, p: &egui::Painter, group: &Group) -> f32 {
+    HistoryGroupChip::width_of(p, &name(app, group.component), group.end - group.start)
+}
+
 /// Draws a run's chip with its top left at `at`; a click shows its features one by one or folds
 /// them again (a deep run shows only its component's features), and its menu also selects them
 /// or rolls the marker after them. Returns its width.

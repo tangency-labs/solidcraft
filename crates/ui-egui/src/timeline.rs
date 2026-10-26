@@ -15,6 +15,7 @@ use solidcraft_engine::schema::edit::PlaybackAction;
 use crate::SolveApp;
 use crate::context_menu::Item;
 use crate::theme::Tokens;
+use crate::timeline_fold::Entry;
 
 /// Apply transport actions from the current marker; endpoints stay bounded, including an
 /// empty design. All orientations reach the same rollback command.
@@ -41,7 +42,8 @@ pub(crate) fn run_transport(app: &mut SolveApp, control: crate::ui_kit::HistoryT
 
 /// A click runs a History control; a right-click offers to show or hide the Play button.
 pub(crate) fn transport_response(app: &mut SolveApp, control: crate::ui_kit::HistoryTransport, response: &egui::Response) {
-    if response.clicked() {
+    // While the history changes they take no clicks; playback's own steps don't count.
+    if response.clicked() && (!history_busy(app) || app.timeline_playback.is_some()) {
         run_transport(app, control);
     }
     if response.secondary_clicked() {
@@ -226,10 +228,170 @@ fn construction_plane_icon(plane: &PlaneRef) -> &'static str {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-enum Drag {
+/// A fold the bottom strip shows as one chip: a run of one component's features (its component
+/// and first feature, as `timeline_fold` remembers it) or a feature folder.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum Fold {
+    Run { component: u64, first: u64 },
+    Folder(u64),
+}
+
+/// What the bottom strip lays out in a row: the features, the history marker between them, each
+/// run's or folder's chip, the joints an open folder holds, and the end of an open one's tray.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum StripItem {
     Marker,
     Feature(u64),
+    Chip(Fold),
+    Joints(u64),
+    End(Fold),
+}
+
+/// A drag in the bottom strip: the item lifted, where along it the pointer took it, and the slot
+/// among the other items it drops into.
+#[derive(Clone, Debug, PartialEq)]
+struct Drag {
+    item: StripItem,
+    grab: f32,
+    slot: usize,
+}
+
+/// Where the bottom strip keeps its drag, so Escape can end it before any shortcut sees the key.
+fn drag_id() -> egui::Id {
+    egui::Id::unique("sc_timeline_drag")
+}
+
+/// Escape while a feature or the marker is dragged in the bottom strip: put it back, and take the
+/// key so nothing else acts on it.
+pub(crate) fn cancel_drag(ctx: &egui::Context) -> bool {
+    let held = ctx.data(|d| d.get_temp::<Drag>(drag_id()).is_some());
+    if !held || !ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        return false;
+    }
+    ctx.data_mut(|d| d.remove::<Drag>(drag_id()));
+    true
+}
+
+/// The strip's items for the bar's `entries` (`ids`: the bar's features by slot), each with the
+/// entry it draws, and the marker before slot `marker`: ahead of a run or folder starting there,
+/// after a folded one holding it, else at the end.
+fn strip_tiles(entries: &[Entry], ids: &[u64], marker: usize) -> Vec<(StripItem, Option<Entry>)> {
+    let mut out: Vec<(StripItem, Option<Entry>)> = Vec::with_capacity(entries.len() + 1);
+    let mut placed = false;
+    let mut put_marker = |out: &mut Vec<(StripItem, Option<Entry>)>| {
+        if !placed {
+            out.push((StripItem::Marker, None));
+            placed = true;
+        }
+    };
+    let mut open: Vec<Fold> = Vec::new();
+    for entry in entries.iter().copied() {
+        match entry {
+            Entry::Feature(k) => {
+                if k == marker {
+                    put_marker(&mut out);
+                }
+                if let Some(id) = ids.get(k) {
+                    out.push((StripItem::Feature(*id), Some(entry)));
+                }
+            }
+            Entry::Group(group) => {
+                if group.start == marker {
+                    put_marker(&mut out);
+                }
+                let fold = Fold::Run { component: group.component, first: ids.get(group.start).copied().unwrap_or(0) };
+                out.push((StripItem::Chip(fold), Some(entry)));
+                if group.open {
+                    open.push(fold);
+                } else if group.start < marker && marker < group.end {
+                    put_marker(&mut out);
+                }
+            }
+            Entry::Folder(folder) => {
+                if folder.start < folder.end && folder.start == marker {
+                    put_marker(&mut out);
+                }
+                let fold = Fold::Folder(folder.id);
+                out.push((StripItem::Chip(fold), Some(entry)));
+                if folder.open {
+                    open.push(fold);
+                } else if folder.start < marker && marker < folder.end {
+                    put_marker(&mut out);
+                }
+            }
+            Entry::Joints(folder) => out.push((StripItem::Joints(folder), Some(entry))),
+            Entry::End(_) => {
+                if let Some(fold) = open.pop() {
+                    out.push((StripItem::End(fold), Some(entry)));
+                }
+            }
+        }
+    }
+    put_marker(&mut out);
+    out
+}
+
+/// The bar's slot a feature dropped ahead of `item` goes to: a feature's own, or the first of a
+/// run's or folder's; none for the marker, joints and a tray's end.
+fn item_slot(item: StripItem, entry: Option<&Entry>, index_of: &std::collections::HashMap<u64, usize>) -> Option<usize> {
+    match (item, entry) {
+        (StripItem::Feature(id), _) => index_of.get(&id).copied(),
+        (StripItem::Chip(_), Some(Entry::Group(group))) => Some(group.start),
+        (StripItem::Chip(_), Some(Entry::Folder(folder))) => Some(folder.start),
+        _ => None,
+    }
+}
+
+/// The floating card's last done feature in `row`: the one right before the marker, past joints,
+/// a tray's end and empty folders; none when a folded run or folder ends there (its chip shows it).
+fn last_done(row: &[StripItem], entry_of: &std::collections::HashMap<StripItem, Entry>) -> Option<u64> {
+    let holds_none = |item: &StripItem| match (item, entry_of.get(item)) {
+        (StripItem::Joints(_) | StripItem::End(_), _) => true,
+        (StripItem::Chip(_), Some(Entry::Folder(folder))) => folder.start == folder.end,
+        _ => false,
+    };
+    match row.iter().take_while(|item| **item != StripItem::Marker).filter(|item| !holds_none(item)).last() {
+        Some(StripItem::Feature(id)) => Some(*id),
+        _ => None,
+    }
+}
+
+/// `row`, or while a dropped change computes the row as it was dropped (`pending`).
+fn keep_pending(row: Vec<StripItem>, pending: Option<&[StripItem]>) -> Vec<StripItem> {
+    let Some(pending) = pending else { return row };
+    let mut shown: Vec<StripItem> = pending.iter().copied().filter(|item| row.contains(item)).collect();
+    shown.dedup();
+    shown.extend(row.into_iter().filter(|item| !pending.contains(item)));
+    shown
+}
+
+/// The slot among the other items (`widths`, in order from the row's start) for a dragged item
+/// `width` wide whose centre is at `centre`, starting from `slot`. It passes a neighbour once its
+/// centre crosses that neighbour's, so it doesn't flicker between two slots.
+fn drop_slot(widths: &[f32], width: f32, centre: f32, slot: usize) -> usize {
+    let start = |k: usize| widths.iter().take(k).sum::<f32>();
+    let mut slot = slot.min(widths.len());
+    for _ in 0..=2 * widths.len() {
+        if let Some(w) = widths.get(slot)
+            && start(slot) + width + w / 2.0 < centre
+        {
+            slot += 1;
+        } else if let Some(w) = slot.checked_sub(1).and_then(|k| widths.get(k))
+            && start(slot - 1) + w / 2.0 > centre
+        {
+            slot -= 1;
+        } else {
+            break;
+        }
+    }
+    slot
+}
+
+/// The design's history is changing: a timeline command computing off the window thread or
+/// waiting behind one, a delete being checked, or a dialog's OK being applied. The timeline takes
+/// no new changes meanwhile, so a retry doesn't queue another recompute.
+pub(crate) fn history_busy(app: &SolveApp) -> bool {
+    app.deferred.is_some() || !app.deferred_queue.is_empty() || app.delete_check.is_some() || app.applying.is_some()
 }
 
 /// Scrolls the History bar to `rect` when it `holds` the feature to reveal. The request is done
@@ -241,18 +403,6 @@ fn reveal_once(ui: &egui::Ui, reveal: &mut Option<usize>, holds: bool, rect: Rec
         return true;
     }
     false
-}
-
-/// Slot index (0..=n) nearest to screen x, given the left edges of the feature buttons.
-fn slot_at(xs: &[f32], end: f32, x: f32) -> usize {
-    let mut best = (0usize, f32::INFINITY);
-    for (i, sx) in xs.iter().chain(std::iter::once(&end)).enumerate() {
-        let d = (sx - 2.0 - x).abs();
-        if d < best.1 {
-            best = (i, d);
-        }
-    }
-    best.0
 }
 
 /// Check what deleting `ids` takes with it or makes fail (off the window thread when that takes a
@@ -873,6 +1023,8 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
     let response = ui.interact(drag_rect, egui::Id::unique("sc_history_dock_grip"), Sense::drag());
     crate::scenario::publish_handle("history:grip", drag_rect.center());
     crate::timeline_left::dock_drag(app, ui, &response);
+    let busy = history_busy(app);
+    let controls_left = x;
     let controls = crate::ui_kit::HistoryTransport::shown(app.preferences.history_play_button);
     for &control in controls {
         let br = Rect::from_center_size(pos2(x + t.space_24 / 2.0, r.center().y), vec2(t.space_24, t.space_24));
@@ -893,7 +1045,13 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
     // path, whose click asks for it in what the next frame shows.
     let reveal_at = app.tree.timeline_reveal.and_then(|id| app.session.doc.features.iter().position(|f| f.id == id));
     let mut reveal = reveal_at.and_then(|i| history.view.find(i));
-    let x = crate::timeline_scope::header(app, ui, &p, x, r).min(r.right() - t.space_24);
+    // The path takes no clicks either while the history changes.
+    let mut header_ui = ui.new_child(UiBuilder::new().max_rect(r));
+    if busy {
+        header_ui.visuals_mut().disabled_alpha = 1.0;
+        header_ui.disable();
+    }
+    let x = crate::timeline_scope::header(app, &mut header_ui, &p, x, r).min(r.right() - t.space_24);
     // Below, slots and features count those the bar shows; the marker's slot among them.
     let shown = history.view.len();
     let marker_view = history.view.slot(marker);
@@ -902,11 +1060,19 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
     ui.scope_builder(UiBuilder::new().max_rect(strip_rect), |ui| {
         // A plain mouse wheel scrolls the strip sideways too (#3356).
         ui.style_mut().always_scroll_the_only_direction = true;
+        // A scroll bar as thin as the strip's bottom margin, so it never covers the marker or a
+        // feature where they are grabbed.
+        ui.style_mut().spacing.scroll.bar_width = t.space_4;
         let scroll = egui::ScrollArea::horizontal().id_salt(("history_strip", history.within)).auto_shrink([false, false]);
         scroll.show(ui, |ui| {
+            if busy {
+                // Nothing in the strip takes a click or a drag while the history changes (it still
+                // scrolls); it keeps its colours, and the busy look is painted over it.
+                ui.visuals_mut().disabled_alpha = 1.0;
+                ui.disable();
+            }
             let p = ui.painter().clone();
-            let mut x = ui.max_rect().left();
-            let origin = x;
+            let origin = ui.max_rect().left();
             let feats: Vec<_> = app
                 .session
                 .doc
@@ -917,13 +1083,110 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
             // The bar's features in the order it draws them, folded ones included: a Shift+click
             // range runs over these.
             let order: Vec<u64> = history.view.indices(0, shown).iter().filter_map(|i| feats.get(*i).map(|f| f.0)).collect();
-            let drag_id = ui.scope_id().with("tl_drag");
-            let mut drag: Option<Drag> = ui.data(|d| d.get_temp(drag_id));
+            let drag_id = drag_id();
+            let pending_id = ui.scope_id().with("tl_pending");
+            // A drag ends when a change starts computing; the change shows as dropped until it
+            // lands, and only for as long as the history is busy.
+            let mut drag: Option<Drag> = if busy { None } else { ui.data(|d| d.get_temp(drag_id)) };
+            let pending: Option<Vec<StripItem>> = if busy {
+                ui.data(|d| d.get_temp(pending_id))
+            } else {
+                ui.data_mut(|d| d.remove::<Vec<StripItem>>(pending_id));
+                None
+            };
             let pointer = ui.input(|i| i.pointer.hover_pos());
-            let mut xs: Vec<f32> = Vec::new();
+            // Each shown feature's slot in `order`, found once for the strip.
+            let index_of: std::collections::HashMap<u64, usize> = order.iter().enumerate().map(|(i, id)| (*id, i)).collect();
+            let tiles = strip_tiles(&history.entries, &order, marker_view);
+            let entry_of: std::collections::HashMap<StripItem, Entry> = tiles.iter().filter_map(|(item, entry)| entry.map(|e| (*item, e))).collect();
+            let row = keep_pending(tiles.into_iter().map(|(item, _)| item).collect(), pending.as_deref());
+            if drag.as_ref().is_some_and(|dg| !row.contains(&dg.item)) {
+                drag = None;
+            }
+            let pad = crate::ui_kit::HISTORY_TRAY_PAD;
+            let width_of = |app: &SolveApp, item: StripItem| match (item, entry_of.get(&item)) {
+                (StripItem::Marker, _) => t.space_16,
+                (StripItem::Feature(_), _) => 32.0,
+                (StripItem::Chip(_), Some(Entry::Group(group))) => {
+                    crate::timeline_fold::group_chip_width(app, &p, group) + 4.0 + if group.open { pad } else { 0.0 }
+                }
+                (StripItem::Chip(_), Some(Entry::Folder(folder))) => {
+                    crate::timeline_folders::folder_chip_width(&p, folder, &history) + 4.0 + if folder.open { pad } else { 0.0 }
+                }
+                (StripItem::Joints(folder), _) => {
+                    let joints = history.folders.joints.get(&folder).map_or(&[][..], Vec::as_slice);
+                    crate::dialogs_assembly::joint_chips_width(app, &p, joints, crate::dialogs_assembly::JointRun::Folder { id: folder, name: "" })
+                }
+                (StripItem::End(_), _) => pad,
+                (StripItem::Chip(_), _) => 0.0,
+            };
+            // The row without the dragged item; the dragged item follows the pointer and the
+            // others make room for it at the slot it would drop into.
+            let rest: Vec<StripItem> = row.iter().copied().filter(|item| drag.as_ref().is_none_or(|dg| dg.item != *item)).collect();
+            let widths: Vec<f32> = rest.iter().map(|item| width_of(app, *item)).collect();
+            let row_width: f32 = row.iter().map(|item| width_of(app, *item)).sum();
+            let x0 = origin;
+            let mut lifted: Option<(StripItem, f32)> = None;
+            if let (Some(dg), Some(pp)) = (drag.as_mut(), pointer) {
+                let w = width_of(app, dg.item);
+                // Half of it may pass either end, so its centre can cross a narrow last item.
+                let left = (pp.x - dg.grab).clamp(x0 - w / 2.0, (x0 + row_width - w / 2.0).max(x0));
+                dg.slot = drop_slot(&widths, w, left - x0 + w / 2.0, dg.slot);
+                lifted = Some((dg.item, left));
+            }
+            let mut places: Vec<(StripItem, f32)> = Vec::with_capacity(row.len());
+            let mut cursor = x0;
+            for (k, (item, w)) in rest.iter().zip(&widths).enumerate() {
+                if let Some(dg) = drag.as_ref().filter(|dg| dg.slot == k) {
+                    cursor += width_of(app, dg.item);
+                }
+                places.push((*item, cursor));
+                cursor += w;
+            }
+            let end = x0 + row_width;
+            // The row as it would drop: what is rolled back follows the marker, dragged or not.
+            let mut dropped = rest.clone();
+            if let Some(dg) = &drag {
+                dropped.insert(dg.slot.min(dropped.len()), dg.item);
+            }
+            let rolled_back: std::collections::HashSet<u64> = dropped
+                .iter()
+                .skip_while(|item| **item != StripItem::Marker)
+                .filter_map(|item| if let StripItem::Feature(id) = item { Some(*id) } else { None })
+                .collect();
+            let last_done = last_done(&dropped, &entry_of);
+            // The bar's slot a drop into `slot` among `rest` goes to: ahead of the first feature,
+            // run or folder at or after it, else after the last one shown.
+            let slot_of = |slot: usize| rest.iter().skip(slot).find_map(|item| item_slot(*item, entry_of.get(item), &index_of)).unwrap_or(shown);
+            // The design's position of a slot; at the marker's, on the side of the marker it is
+            // dropped on (features not shown may sit between it and the next one shown).
+            let position = |slot: usize, before: bool| {
+                let at = history.view.index(slot);
+                match (slot == marker_view, before) {
+                    (true, true) => at.min(marker),
+                    (true, false) => at.max(marker),
+                    (false, _) => at,
+                }
+            };
+            // Runs and folders fade as the dragged marker passes them, as features do.
+            let live_marker = match &drag {
+                Some(dg) if dg.item == StripItem::Marker => position(slot_of(dg.slot), true),
+                _ => marker,
+            };
+            let live = crate::timeline_fold::Strip { marker: live_marker, from_view, floating, accent };
+            // While a drag is held, and for a moment after, items glide to their places; the
+            // dragged one is where the pointer holds it.
+            let glide = ui.style().animation_time.clamp(0.0, 0.15);
+            let gliding = ui.ctx().animate_bool_with_time(ui.scope_id().with("tl_gliding"), drag.is_some() || pending.is_some(), glide) > 0.0;
+            let shown_x = |ui: &egui::Ui, item: StripItem, target: f32, held: bool| {
+                let time = if gliding && !held { glide } else { 0.0 };
+                x0 + ui.ctx().animate_value_with_time(ui.scope_id().with(("tl_x", item)), target - x0, time)
+            };
+            let press = ui.input(|i| (i.pointer.press_origin(), i.pointer.primary_down()));
+            let slop = ui.ctx().options(|o| o.input_options.max_click_dist);
             let mut hovered: Option<u64> = None;
             let mut edit: Option<u64> = None;
-            let mut marker_rect: Option<Rect> = None;
+            let mut marker_place: Option<f32> = None;
             // Each sketch's solve state, read once for the strip (#7245).
             let sketch_states = crate::sketch_state::SketchStates::of(app);
             // Each feature's result, found once for the strip: a search per chip made a long
@@ -944,93 +1207,68 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 .collect();
             // Each open run or folder's tray: where it starts, its place under the chips, its depth.
             let mut trays: Vec<(f32, egui::layers::ShapeIdx, usize)> = Vec::new();
-            let pad = crate::ui_kit::HISTORY_TRAY_PAD;
-            let marker_at = |x: f32| Rect::from_min_size(pos2(x, r.top() + 5.0), vec2(t.space_12, r.height() - 10.0));
             let editing = crate::timeline_scope::focus(app).unwrap_or(0);
-            for entry in history.entries.iter().copied() {
-                let i = match entry {
-                    crate::timeline_fold::Entry::Feature(i) => i,
-                    crate::timeline_fold::Entry::Group(group) => {
-                        if group.start == marker_view && marker_rect.is_none() {
-                            marker_rect = Some(marker_at(x));
-                            x += t.space_16;
-                        }
+            for &(item, xt) in &places {
+                let id = match (item, entry_of.get(&item).copied()) {
+                    (StripItem::Feature(id), _) => id,
+                    (StripItem::Marker, _) => {
+                        marker_place = Some(xt);
+                        continue;
+                    }
+                    (StripItem::Chip(_), Some(Entry::Group(group))) => {
+                        let mut at = shown_x(ui, item, xt, false);
+                        let mut target = xt;
                         if group.open {
-                            trays.push((x, p.add(egui::Shape::Noop), group.depth));
-                            x += pad;
+                            trays.push((at, p.add(egui::Shape::Noop), group.depth));
+                            at += pad;
+                            target += pad;
                         }
-                        let at = pos2(x, r.top() + 6.0);
-                        let width = crate::timeline_fold::group_chip(app, ui, &p, at, &group, &history, &strip);
+                        let width = crate::timeline_fold::group_chip(app, ui, &p, pos2(at, r.top() + 6.0), &group, &history, &live);
                         let holds = reveal.is_some_and(|k| group.start <= k && k < group.end && (!group.open || group.component == editing));
-                        if reveal_once(ui, &mut reveal, holds, Rect::from_min_size(at, vec2(width, 28.0)), egui::Align::Min) {
+                        let rect = Rect::from_min_size(pos2(target, r.top() + 6.0), vec2(width, 28.0));
+                        if reveal_once(ui, &mut reveal, holds, rect, egui::Align::Min) {
                             app.tree.timeline_reveal = None;
-                        }
-                        if !group.open {
-                            // Dropping on a folded run puts the feature before it.
-                            xs.extend(std::iter::repeat_n(x, group.end - group.start));
-                        }
-                        x += width + 4.0;
-                        if !group.open && group.start < marker_view && marker_view < group.end && marker_rect.is_none() {
-                            marker_rect = Some(marker_at(x));
-                            x += t.space_16;
                         }
                         continue;
                     }
-                    crate::timeline_fold::Entry::Folder(folder) => {
-                        let holds = folder.start < folder.end;
-                        if holds && folder.start == marker_view && marker_rect.is_none() {
-                            marker_rect = Some(marker_at(x));
-                            x += t.space_16;
-                        }
+                    (StripItem::Chip(_), Some(Entry::Folder(folder))) => {
+                        let mut at = shown_x(ui, item, xt, false);
+                        let mut target = xt;
                         if folder.open {
-                            trays.push((x, p.add(egui::Shape::Noop), folder.depth));
-                            x += pad;
+                            trays.push((at, p.add(egui::Shape::Noop), folder.depth));
+                            at += pad;
+                            target += pad;
                         }
-                        let at = pos2(x, r.top() + 6.0);
-                        let width = crate::timeline_folders::folder_chip(app, ui, &p, at, &folder, &history, &strip);
+                        let width = crate::timeline_folders::folder_chip(app, ui, &p, pos2(at, r.top() + 6.0), &folder, &history, &live);
                         let holds = reveal.is_some_and(|k| folder.start <= k && k < folder.end && !folder.open);
-                        if reveal_once(ui, &mut reveal, holds, Rect::from_min_size(at, vec2(width, 28.0)), egui::Align::Min) {
+                        let rect = Rect::from_min_size(pos2(target, r.top() + 6.0), vec2(width, 28.0));
+                        if reveal_once(ui, &mut reveal, holds, rect, egui::Align::Min) {
                             app.tree.timeline_reveal = None;
-                        }
-                        if !folder.open {
-                            // Dropping on a folded folder puts the feature before it.
-                            xs.extend(std::iter::repeat_n(x, folder.end - folder.start));
-                        }
-                        x += width + 4.0;
-                        if !folder.open && folder.start < marker_view && marker_view < folder.end && marker_rect.is_none() {
-                            marker_rect = Some(marker_at(x));
-                            x += t.space_16;
                         }
                         continue;
                     }
-                    crate::timeline_fold::Entry::Joints(folder) => {
+                    (StripItem::Joints(folder), _) => {
                         let joints = history.folders.joints.get(&folder).cloned().unwrap_or_default();
                         let run = crate::dialogs_assembly::JointRun::Folder { id: folder, name: history.folders.name(folder) };
-                        x = crate::dialogs_assembly::joint_chips(app, ui, &p, x, r, &joints, run);
+                        crate::dialogs_assembly::joint_chips(app, ui, &p, shown_x(ui, item, xt, false), r, &joints, run);
                         continue;
                     }
-                    crate::timeline_fold::Entry::End(_) => {
+                    (StripItem::End(_), _) => {
                         if let Some((left, tray, depth)) = trays.pop() {
-                            let right = x - 4.0 + pad;
+                            let right = shown_x(ui, item, xt, false) - 4.0 + pad;
                             p.set(tray, crate::ui_kit::history_tray(left, right, r.top() + 6.0, depth, accent));
-                            x = right + 4.0;
                         }
                         continue;
                     }
+                    (StripItem::Chip(_), _) => continue,
                 };
+                let Some(&k) = index_of.get(&id) else { continue };
                 // The feature's index in the design.
-                let at = history.view.index(i);
-                let Some((id, name, icon, suppressed, ty, kind)) = feats.get(at) else {
-                    continue;
-                };
+                let at = history.view.index(k);
+                let Some((id, name, icon, suppressed, ty, kind)) = feats.get(at) else { continue };
                 let sketch_state = matches!(kind, TimelineKind::Sketch).then(|| sketch_states.get(*id)).flatten();
-                if i == marker_view && marker_rect.is_none() {
-                    marker_rect = Some(marker_at(x));
-                    x += t.space_16;
-                }
-                xs.push(x);
-                let br = Rect::from_min_size(pos2(x, r.top() + 6.0), vec2(28.0, 28.0));
-                let holds = reveal == Some(i);
+                let br = Rect::from_min_size(pos2(xt, r.top() + 6.0), vec2(28.0, 28.0));
+                let holds = reveal == Some(k);
                 if reveal_once(ui, &mut reveal, holds, br, egui::Align::Center) {
                     app.tree.timeline_reveal = None;
                 }
@@ -1039,12 +1277,12 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                 // history drew every chip each frame. Its slot above still places the marker and drops.
                 // One being dragged or focused, or under an open menu, stays alive until that ends.
                 let chip_id = ui.scope_id().with(("feat", *id));
+                let pr = br.translate(vec2(shown_x(ui, item, xt, false) - xt, 0.0));
                 if !ui.clip_rect().intersects(br)
-                    && drag != Some(Drag::Feature(*id))
+                    && drag.as_ref().is_none_or(|dg| dg.item != item)
                     && !ui.memory(|m| m.has_focus(chip_id))
                     && !egui::Popup::is_any_open(ui.ctx())
                 {
-                    x += 32.0;
                     continue;
                 }
                 let resp = ui.interact(br, chip_id, Sense::click_and_drag());
@@ -1054,33 +1292,37 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                     results.get(id).and_then(|k| app.session.model.results.get(*k).filter(|r| r.id == *id).or_else(|| app.session.model.result(*id)));
                 let err = res.and_then(|r| r.error.clone());
                 let warn = res.and_then(warning_text);
-                let rolled = i >= marker_view;
+                let rolled = rolled_back.contains(id);
                 let sel = picked.contains(id);
-                if resp.hovered() {
+                let hovering = resp.hovered() && drag.is_none();
+                if hovering {
                     hovered = Some(*id);
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                 }
-                crate::ui_kit::HistoryChip {
+                let chip = crate::ui_kit::HistoryChip {
                     icon,
                     name,
                     kind: ty,
                     selected: sel,
-                    hovered: resp.hovered() || from_view.contains(&Some(*id)),
+                    hovered: hovering || from_view.contains(&Some(*id)),
                     dim: rolled,
                     suppressed: *suppressed,
                     error: err.is_some(),
                     warning: warn.is_some(),
                     reference: false,
+                    accent,
                     ink: sketch_state.and_then(|state| state.ink(&t)),
-                    // A dragged feature takes the colour of its drop bar.
-                    accent: if drag == Some(Drag::Feature(*id)) { crate::theme::TabAccent::for_tab(&t, "SKETCH") } else { accent },
-                }
-                .paint(&p, br, crate::ui_kit::HistoryStyle::Bottom);
-                if floating && at + 1 == marker {
-                    p.circle_filled(pos2(br.center().x, br.bottom() + t.space_3), t.space_2, accent.color);
+                };
+                chip.paint(&p, pr, crate::ui_kit::HistoryStyle::Bottom);
+                if floating && last_done == Some(*id) {
+                    p.circle_filled(pos2(pr.center().x, pr.bottom() + t.space_3), t.space_2, accent.color);
                 }
                 let ms = res.map(|r| r.ms);
-                if resp.drag_started() {
-                    drag = Some(Drag::Feature(*id));
+                // A feature lifts as soon as the press can no longer be a click.
+                let moved = press.1 && resp.is_pointer_button_down_on() && press.0.zip(pointer).is_some_and(|(o, pp)| o.distance(pp) > slop);
+                if drag.is_none() && (resp.drag_started() || moved) {
+                    let grab = press.0.map_or(br.width() / 2.0, |o| o.x - br.left());
+                    drag = Some(Drag { item, grab, slot: row.iter().position(|it| *it == item).unwrap_or(0) });
                 }
                 // The tip is written only while it shows (as `on_hover_text` would lay it out).
                 let resp = resp.backing_on_hover_ui(|ui| {
@@ -1122,24 +1364,62 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                     let at = resp.interact_pointer_pos().unwrap_or(br.center());
                     crate::context_menu::open_for(app, at, crate::context_menu::Target::Timeline { feature: *id });
                 }
-                x += 32.0;
             }
-            let end = x;
-            if marker_view >= shown && marker_rect.is_none() {
-                marker_rect = Some(Rect::from_min_size(pos2(x, r.top() + 5.0), vec2(t.space_12, r.height() - 10.0)));
-            }
-            // The history marker: drag it to roll the model back or forward.
-            if let Some(mr) = marker_rect {
+            // The history marker: drag it to roll the model back or forward. It can be taken
+            // anywhere over the strip's height and a little either side of its line.
+            let marker_rect = |left: f32| Rect::from_min_size(pos2(left, r.top() + 5.0), vec2(t.space_12, r.height() - 10.0));
+            if let Some(xt) = marker_place {
+                let mr = marker_rect(xt);
                 crate::scenario::publish_rect("history:marker", mr);
-                let resp = ui.interact(mr.expand2(vec2(3.0, 0.0)), ui.scope_id().with("tl_marker"), Sense::drag());
-                if resp.drag_started() {
-                    drag = Some(Drag::Marker);
+                crate::scenario::publish_handle("timeline:rollback", mr.center());
+                let target = Rect::from_min_max(pos2(mr.left() - t.space_6, r.top()), pos2(mr.right() + t.space_6, r.bottom()));
+                let resp = ui.interact(target, ui.scope_id().with("tl_marker"), Sense::drag());
+                if resp.drag_started() && drag.is_none() {
+                    let grab = press.0.map_or(mr.width() / 2.0, |o| o.x - mr.left());
+                    drag = Some(Drag { item: StripItem::Marker, grab, slot: row.iter().position(|it| *it == StripItem::Marker).unwrap_or(0) });
                 }
                 if resp.hovered() {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                 }
-                crate::ui_kit::history_marker(&p, mr, false, accent);
+                crate::ui_kit::history_marker(&p, marker_rect(shown_x(ui, StripItem::Marker, xt, false)), false, accent);
                 resp.backing_on_hover_text(crate::i18n::tr("ui.history_marker_tip"));
+            }
+            // The dragged item, lifted above the others where the pointer holds it.
+            if let Some((item, left)) = lifted {
+                let left = shown_x(ui, item, left, true);
+                match item {
+                    StripItem::Marker => {
+                        let mr = marker_rect(left);
+                        crate::scenario::publish_rect("history:marker", mr);
+                        crate::ui_kit::history_marker(&p, mr, false, accent);
+                    }
+                    StripItem::Feature(id) => {
+                        if let Some((_, name, icon, suppressed, ty, kind)) = index_of.get(&id).and_then(|k| feats.get(history.view.index(*k))) {
+                            let res = app.session.model.result(id);
+                            let sketch_state = matches!(kind, TimelineKind::Sketch).then(|| sketch_states.get(id)).flatten();
+                            let br = Rect::from_min_size(pos2(left, r.top() + 6.0), vec2(28.0, 28.0));
+                            crate::scenario::publish_handle(&format!("timeline:{name}"), br.center());
+                            p.add(t.shell_shadow().as_shape(br, t.radius_sm));
+                            crate::ui_kit::HistoryChip {
+                                icon,
+                                name,
+                                kind: ty,
+                                selected: true,
+                                hovered: true,
+                                dim: false,
+                                suppressed: *suppressed,
+                                error: res.is_some_and(|r| r.error.is_some()),
+                                warning: res.is_some_and(|r| r.warning.is_some()),
+                                reference: false,
+                                accent,
+                                ink: sketch_state.and_then(|state| state.ink(&t)),
+                            }
+                            .paint(&p, br, crate::ui_kit::HistoryStyle::Bottom);
+                        }
+                    }
+                    // Only features and the marker are taken: a chip is clicked, not dragged.
+                    StripItem::Chip(_) | StripItem::Joints(_) | StripItem::End(_) => {}
+                }
             }
             // The joints at the end belong to the whole design: a bar with its groups that shows one
             // component leaves them out. Without the groups they stay, as they always have.
@@ -1150,63 +1430,48 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
             };
             // The scroll range follows the drawn content (the buttons don't take layout space themselves).
             ui.allocate_exact_size(vec2((content_end - origin).max(0.0), r.height()), Sense::hover());
-            // Drag feedback, and the drop.
             if drag.is_some() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-            }
-            // At the marker's slot, which side of the marker the pointer is on: before it, a
-            // dropped feature stays in the model; after it, the feature is rolled back.
-            let before_marker = |slot: usize, x: f32| slot < marker_view || (slot == marker_view && marker_rect.is_none_or(|mr| x < mr.center().x));
-            // The design's position of a slot; at the marker's, on the side of the marker the
-            // pointer is on (features not shown may sit between it and the next one shown).
-            let position = |slot: usize, before: bool| {
-                let at = history.view.index(slot);
-                match (slot == marker_view, before) {
-                    (true, true) => at.min(marker),
-                    (true, false) => at.max(marker),
-                    (false, _) => at,
+                // Held against either end, the strip scrolls on towards the slots out of sight, the
+                // faster the deeper the pointer goes, whatever the frame rate.
+                if let Some(pp) = pointer {
+                    let clip = ui.clip_rect();
+                    let edge = t.space_12;
+                    let depth = (clip.left() + edge - pp.x).max(0.0) - (pp.x - (clip.right() - edge)).max(0.0);
+                    if depth != 0.0 {
+                        let dt = ui.input(|i| i.stable_dt).min(0.1);
+                        ui.scroll_with_delta(vec2(depth * t.space_24 * dt, 0.0));
+                        ui.ctx().request_repaint();
+                    }
                 }
-            };
-            // The marker dropped where it already is needs no bar: the marker shows the spot.
-            if let (Some(dg), Some(pp)) = (drag.as_ref(), pointer)
-                && let local = slot_at(&xs, end, pp.x)
-                && !(matches!(dg, Drag::Marker) && local == marker_view)
-            {
-                // Centred in the gap between two chips, or beside the marker at its slot.
-                let sx = match marker_rect {
-                    Some(mr) if local == marker_view => {
-                        if before_marker(local, pp.x) {
-                            mr.left() - 2.0
-                        } else {
-                            mr.right() + 2.0
+            }
+            // (Taking the drag ends it even when the pointer has left the window.)
+            let released = ui.input(|i| i.pointer.any_released() && !i.pointer.any_down());
+            if released && let Some(dg) = drag.take() {
+                // Ahead of the marker a dropped feature stays in the model; after it, it is rolled
+                // back, in the same step.
+                let before = !rest.iter().take(dg.slot).any(|item| *item == StripItem::Marker);
+                match dg.item {
+                    // The marker let go where it already is changes nothing.
+                    StripItem::Marker if row.iter().position(|it| *it == StripItem::Marker) != Some(dg.slot) => {
+                        let slot = position(slot_of(dg.slot), true);
+                        if slot.min(n) != marker.min(n) {
+                            let _ = app.run_heavy("timeline.roll_to", if slot >= n { json!({}) } else { json!({ "position": slot }) });
                         }
                     }
-                    _ => xs.get(local).copied().unwrap_or(end) - 2.0,
-                };
-                // Kept inside the strip so the slot before the first feature stays visible.
-                let sx = sx.max(origin + t.space_2);
-                crate::ui_kit::history_drop_bar(
-                    &p,
-                    Rect::from_min_max(pos2(sx, r.top() + 3.0), pos2(sx, r.bottom() - 3.0)),
-                    false,
-                    if matches!(dg, Drag::Marker) { accent.color } else { t.sketch_accent },
-                );
-            }
-            let released = ui.input(|i| i.pointer.any_released());
-            // (Taking the drag ends it even when the pointer has left the window.)
-            if released
-                && let Some(dg) = drag.take()
-                && let Some(pp) = pointer
-            {
-                let local = slot_at(&xs, end, pp.x);
-                let before = before_marker(local, pp.x);
-                let slot = position(local, before);
-                match dg {
-                    Drag::Marker => {
-                        let _ = app.run_heavy("timeline.roll_to", if slot >= n { json!({}) } else { json!({ "position": slot }) });
+                    StripItem::Feature(id) => {
+                        let held = index_of.get(&id).copied().unwrap_or(0);
+                        // Ahead of the feature after it is where it was.
+                        let target = slot_of(dg.slot);
+                        let slot = position(if target == held + 1 { held } else { target }, before);
+                        crate::timeline_folders::drop_feature(app, &history.folders, id, slot, before, marker.min(n));
                     }
-                    // Crossing the marker rolls the feature back or forward, in the same step.
-                    Drag::Feature(id) => crate::timeline_folders::drop_feature(app, &history.folders, id, slot, before, marker.min(n)),
+                    StripItem::Marker | StripItem::Chip(_) | StripItem::Joints(_) | StripItem::End(_) => {}
+                }
+                if history_busy(app) {
+                    let mut row = rest.clone();
+                    row.insert(dg.slot.min(row.len()), dg.item);
+                    ui.data_mut(|d| d.insert_temp(pending_id, row));
                 }
             }
             ui.data_mut(|d| match drag {
@@ -1221,6 +1486,17 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
             }
         });
     });
+    if busy {
+        let area = Rect::from_min_max(pos2(controls_left - t.space_4, r.top() + t.space_3), pos2(r.right() - t.space_3, r.bottom() - t.space_3));
+        crate::ui_kit::history_busy_veil(ui, area, false, accent, &computing_text(app));
+    }
+}
+
+/// "Computing… N s", counted from when the history change started computing.
+pub(crate) fn computing_text(app: &SolveApp) -> String {
+    let since = [app.computing_since(), app.applying.as_ref().map(|job| job.started)].into_iter().flatten().reduce(f64::min);
+    let seconds = since.map_or(0.0, |since| ((crate::now_ms() - since) / 1000.0).max(0.0).floor());
+    crate::i18n::format("dialog.computing", &[("seconds", &format!("{seconds:.0}"))])
 }
 
 /// Select what a feature made, so the browser shows it. While the browser's rows start closed
@@ -2303,6 +2579,41 @@ mod tests {
         }
     }
 
+    /// A feature taken and let go where it was changes nothing, also when the timeline shows one
+    /// part and another part's features lie between this one and the next shown.
+    #[test]
+    fn a_feature_let_go_where_it_was_stays_put_among_hidden_features() {
+        let mut h = Harness::new();
+        let left = h.app.run("component.create", json!({"name": "Left"})).unwrap()["component"].clone();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "LeftA"})).unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        h.app.run("component.create", json!({"name": "Right"})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "name": "RightBox"})).unwrap();
+        h.app.run("component.activate", json!({"component": left})).unwrap();
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [0, 20, 0], "name": "LeftB"})).unwrap();
+        h.settle();
+        let names = |h: &Harness| h.app.session.doc.features.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+        let before = (names(&h), h.app.session.undo.len());
+        let a = crate::scenario::handle_at("timeline:LeftA").unwrap();
+        h.step(&json!({"drag": [[a.x, a.y], [a.x + 8.0, a.y]]})).unwrap();
+        h.settle();
+        assert_eq!((names(&h), h.app.session.undo.len()), before);
+    }
+
+    /// A press that moves a little less than a click allows still selects the feature: it is a
+    /// click, not a drag.
+    #[test]
+    fn a_press_that_barely_moves_selects_the_feature() {
+        let mut h = two_boxes(false);
+        h.settle();
+        let second = crate::scenario::handle_at("timeline:Second").unwrap();
+        h.step(&json!({"drag": [[second.x, second.y], [second.x + 4.0, second.y]], "steps": 1})).unwrap();
+        h.settle();
+        let second_id = h.app.session.doc.features[1].id;
+        assert_eq!(super::selected_feature_ids(&h.app), [second_id]);
+        assert_eq!(h.app.session.doc.features[1].name, "Second", "nothing moved");
+    }
+
     fn copied(h: &Harness) -> Vec<String> {
         h.app.session.clipboard.iter().map(|f| f.name.clone()).collect()
     }
@@ -2709,6 +3020,182 @@ mod tests {
             assert_eq!(h.app.session.doc.marker, None, "left={left}: dropped before the marker, Second is active again");
             let names: Vec<_> = h.app.session.doc.features.iter().map(|feature| feature.name.as_str()).collect();
             assert_eq!(names, ["First", "Second"], "left={left}: crossing the marker keeps the order");
+        }
+    }
+
+    /// A dragged item passes a neighbour once its centre crosses the neighbour's, whichever way
+    /// it goes and however wide each is, and stays put in between.
+    #[test]
+    fn a_dragged_item_takes_the_slot_whose_neighbour_it_has_passed() {
+        let widths = [32.0, 16.0, 32.0];
+        // A feature (32) starting in slot 1, between the first feature and the marker.
+        assert_eq!(super::drop_slot(&widths, 32.0, 48.0, 1), 1, "where it was taken");
+        assert_eq!(super::drop_slot(&widths, 32.0, 71.0, 1), 1, "not yet past the marker's centre (72)");
+        assert_eq!(super::drop_slot(&widths, 32.0, 73.0, 1), 2, "past the marker");
+        assert_eq!(super::drop_slot(&widths, 32.0, 200.0, 1), 3, "past everything, in one frame");
+        assert_eq!(super::drop_slot(&widths, 32.0, 17.0, 1), 1, "not yet past the first feature's centre (16)");
+        assert_eq!(super::drop_slot(&widths, 32.0, 15.0, 1), 0);
+        assert_eq!(super::drop_slot(&widths, 32.0, 15.0, 9), 0, "a slot past the end is brought back first");
+        assert_eq!(super::drop_slot(&[], 16.0, 5.0, 0), 0);
+    }
+
+    /// The strip's row: the marker before its slot's feature, ahead of a folder starting there and
+    /// after a folded one holding it, else at the end; an open folder's joints and its tray's end
+    /// follow what it holds. While a dropped change computes, the strip keeps the row as it was
+    /// dropped, and features it doesn't know (or the design no longer has) don't upset it.
+    #[test]
+    fn the_strip_row_keeps_a_dropped_change_until_it_lands() {
+        use super::StripItem::{self, Chip, End, Feature, Joints, Marker};
+        use crate::timeline_fold::{Entry, Folder};
+        let row = |entries: &[Entry], ids: &[u64], marker: usize, pending: Option<&[StripItem]>| {
+            super::keep_pending(super::strip_tiles(entries, ids, marker).into_iter().map(|(item, _)| item).collect(), pending)
+        };
+        let features = |n: usize| (0..n).map(Entry::Feature).collect::<Vec<_>>();
+        assert_eq!(row(&features(3), &[1, 2, 3], 1, None), [Feature(1), Marker, Feature(2), Feature(3)]);
+        assert_eq!(row(&features(2), &[1, 2], 9, None), [Feature(1), Feature(2), Marker]);
+        let dropped = [Feature(3), Feature(1), Marker, Feature(9), Feature(2)];
+        assert_eq!(row(&features(4), &[1, 2, 3, 4], 4, Some(&dropped)), [Feature(3), Feature(1), Marker, Feature(2), Feature(4)]);
+
+        let folded = Folder { id: 7, start: 1, end: 3, depth: 0, open: false };
+        let fold = super::Fold::Folder(7);
+        let entries = [Entry::Feature(0), Entry::Folder(folded), Entry::Feature(3)];
+        assert_eq!(row(&entries, &[1, 2, 3, 4], 2, None), [Feature(1), Chip(fold), Marker, Feature(4)], "after the folded folder holding it");
+        assert_eq!(row(&entries, &[1, 2, 3, 4], 1, None), [Feature(1), Marker, Chip(fold), Feature(4)], "ahead of the folder starting at it");
+        let open = Folder { open: true, ..folded };
+        let entries =
+            [Entry::Feature(0), Entry::Folder(open), Entry::Feature(1), Entry::Feature(2), Entry::Joints(7), Entry::End(0), Entry::Feature(3)];
+        assert_eq!(row(&entries, &[1, 2, 3, 4], 2, None), [Feature(1), Chip(fold), Feature(2), Marker, Feature(3), Joints(7), End(fold), Feature(4)]);
+    }
+
+    /// The floating card's accent dot marks the feature right before the marker, never one before
+    /// a folded run or folder ending there; joints, a tray's end and empty folders hold no feature.
+    #[test]
+    fn the_last_done_dot_stops_at_a_folded_chip_before_the_marker() {
+        use crate::timeline_fold::{Entry, Folder, Group};
+        let last_done = |entries: &[Entry], marker: usize| {
+            let tiles = super::strip_tiles(entries, &[1, 2, 3, 4], marker);
+            let entry_of = tiles.iter().filter_map(|(item, entry)| entry.map(|e| (*item, e))).collect();
+            let row: Vec<_> = tiles.iter().map(|(item, _)| *item).collect();
+            super::last_done(&row, &entry_of)
+        };
+        let folded = Folder { id: 7, start: 1, end: 3, depth: 0, open: false };
+        let entries = [Entry::Feature(0), Entry::Folder(folded), Entry::Feature(3)];
+        assert_eq!(last_done(&entries, 3), None, "a folded folder ending at the marker");
+        assert_eq!(last_done(&entries, 1), Some(1), "the feature right before the marker");
+        assert_eq!(last_done(&entries, 4), Some(4));
+        let run = Group { component: 5, start: 1, end: 3, depth: 0, open: false, deep: false };
+        assert_eq!(last_done(&[Entry::Feature(0), Entry::Group(run), Entry::Feature(3)], 3), None, "a folded run ending at the marker");
+        let open = Folder { open: true, ..folded };
+        let entries =
+            [Entry::Feature(0), Entry::Folder(open), Entry::Feature(1), Entry::Feature(2), Entry::Joints(7), Entry::End(0), Entry::Feature(3)];
+        assert_eq!(last_done(&entries, 3), Some(3), "past an open folder's joints and its tray's end");
+        let empty = Folder { id: 8, start: 1, end: 1, depth: 0, open: false };
+        assert_eq!(last_done(&[Entry::Feature(0), Entry::Folder(empty), Entry::Feature(1)], 1), Some(1), "past an empty folder");
+    }
+
+    /// A folded folder stands in for its features in a drag, with the History bar's groups off and
+    /// on: the marker it holds waits after its chip and let go there rolls nothing, and a feature
+    /// dropped past the chip lands after everything the folder holds.
+    #[test]
+    fn a_folded_folder_stands_in_for_its_features_in_a_drag() {
+        use crate::scenario::{handle_at, rect_of};
+        for groups in [false, true] {
+            let mut h = Harness::new();
+            h.app.preferences.timeline_left = false;
+            h.app.preferences.history_bar_groups = groups;
+            for (i, name) in ["A", "B", "C"].into_iter().enumerate() {
+                let corner = [20.0 * i as f64, 0.0, 0.0];
+                h.app
+                    .run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": corner, "operation": "new_body", "name": name}))
+                    .unwrap();
+            }
+            let folder = h.app.run("timeline.group", json!({"name": "Pair", "features": ["B", "C"]})).unwrap()["group"].as_u64().unwrap();
+            crate::timeline_folders::set_open(&mut h.app, folder, false);
+            h.app.run("timeline.roll_to", json!({"position": 2})).unwrap();
+            h.settle();
+            let names = |h: &Harness| h.app.session.doc.features.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+            let state = |h: &Harness| (names(h), h.app.session.doc.marker, h.app.session.undo.len());
+            let before = state(&h);
+            let marker = handle_at("timeline:rollback").unwrap();
+            let chip = handle_at("timeline-folder-chip:Pair").unwrap();
+            assert!(marker.x > chip.x, "the marker waits after the folded folder: {marker:?} {chip:?}, groups={groups}");
+            h.step(&json!({"drag": [[marker.x, marker.y], [marker.x + 8.0, marker.y]]})).unwrap();
+            h.settle();
+            assert_eq!(state(&h), before, "the marker let go where it was, groups={groups}");
+            h.app.run("timeline.roll_to", json!({})).unwrap();
+            h.frames(4);
+            let (chip, marker) = (rect_of("timeline-folder-chip:Pair").unwrap(), rect_of("history:marker").unwrap());
+            assert!((marker.left() - (chip.right() + 4.0)).abs() < 0.5, "laid out as wide as drawn: {chip:?} {marker:?}, groups={groups}");
+            let a = handle_at("timeline:A").unwrap();
+            let chip = handle_at("timeline-folder-chip:Pair").unwrap();
+            h.step(&json!({"drag": [[a.x, a.y], [chip.x + 12.0, chip.y]]})).unwrap();
+            h.settle();
+            assert_eq!(names(&h), ["B", "C", "A"], "groups={groups}");
+            assert_eq!(h.app.session.doc.marker, None, "A stays in the model, ahead of the marker, groups={groups}");
+        }
+    }
+
+    /// With the History bar's groups on, a folded run of one component's features is one chip in
+    /// a drag: it glides aside as one to open the slot ahead of it, and a feature dropped there
+    /// goes before the run's first feature.
+    #[test]
+    fn a_folded_run_glides_aside_as_one_chip_in_a_drag() {
+        use crate::scenario::handle_at;
+        let mut h = Harness::new();
+        h.app.preferences.timeline_left = false;
+        h.app.preferences.history_bar_groups = true;
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Root sketch"})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("component.create", json!({"name": "Rig"})).unwrap();
+        for i in 0..crate::timeline_fold::FOLD_FROM {
+            h.app.run("sketch.create", json!({"plane": "XY", "name": format!("S{i}")})).unwrap();
+            h.app.run("sketch.finish", json!({})).unwrap();
+        }
+        h.app.run("component.activate", json!({"component": "root"})).unwrap();
+        h.app.run("sketch.create", json!({"plane": "XY", "name": "Last"})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.settle();
+        let chip = handle_at("timeline-group:Rig").expect("the run folds into one chip");
+        let last = handle_at("timeline:Last").unwrap();
+        assert!(handle_at("timeline:S0").is_none() && last.x > chip.x);
+        h.queue_drag(last, egui::pos2(chip.x - 30.0, last.y), 4, 12);
+        // Through the pointer's steps and the glide after them, with the button still down.
+        h.frames(14);
+        let held = handle_at("timeline:Last").unwrap();
+        assert!((held.x - (chip.x - 30.0)).abs() < 1.0, "Last is drawn under the pointer: {held:?}");
+        let moved = handle_at("timeline-group:Rig").unwrap();
+        assert!((moved.x - (chip.x + 32.0)).abs() < 1.0, "the run's chip made room as one: {moved:?} from {chip:?}");
+        h.settle();
+        let order: Vec<String> = h.app.session.doc.features.iter().take(3).map(|f| f.name.clone()).collect();
+        assert_eq!(order, ["Root sketch", "Last", "S0"]);
+    }
+
+    /// While a feature is dragged it follows the pointer and the other features slide over to
+    /// open the slot it would drop into; nothing changes until it is let go, and Escape puts it
+    /// back.
+    #[test]
+    fn a_dragged_feature_follows_the_pointer_and_the_others_make_room() {
+        use crate::scenario::handle_at;
+        let order = |h: &crate::scenario::Harness| h.app.session.doc.features.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+        for escape in [false, true] {
+            let mut h = two_boxes(false);
+            h.settle();
+            let first = handle_at("timeline:First").unwrap();
+            let second = handle_at("timeline:Second").unwrap();
+            h.queue_drag(second, egui::pos2(first.x - 12.0, first.y), 4, 12);
+            h.frames(10);
+            let held = handle_at("timeline:Second").unwrap();
+            assert!((held.x - (first.x - 12.0)).abs() < 1.0, "Second is drawn under the pointer: {held:?}");
+            assert!(handle_at("timeline:First").unwrap().x > first.x + 20.0, "First made room ahead of it");
+            assert_eq!(order(&h), ["First", "Second"], "nothing moved while it is held");
+            if escape {
+                let key =
+                    egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE };
+                h.app.synthetic.insert(0, key);
+            }
+            h.settle();
+            let expected = if escape { ["First", "Second"] } else { ["Second", "First"] };
+            assert_eq!(order(&h), expected, "escape={escape}");
         }
     }
 
