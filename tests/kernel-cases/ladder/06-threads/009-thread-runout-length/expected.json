@@ -1,7 +1,23 @@
 {
  "sources": [],
- "what": "an M10 thread that vanishes over a 2-pitch runout before a shoulder",
- "source": "invariants",
- "method": "a runout would let 004's thread vanish before the shoulder instead of stopping square",
- "missing": "solid.thread has no runout (vanishing thread) length"
+ "what": "004's M10 thread run from the free top end, vanishing over a 3 mm (2 P) runout before the d16 shoulder",
+ "source": "analytic",
+ "method": "the shaft's lower end is a shoulder (the d16 collar lies past it, in the groove's way), so the groove (its runout included) stops with its widest part clear of it: its centre w = (P/4 + 2 (d/2 + 0.05P - r_root) tan30)/2 = 0.699551 mm above the shoulder (its half width at the tool's outer edge, 0.05 P past the crest), and the square stop inside material removes exactly as if the groove ended at its centre (see 003); the top end is free, the groove runs out into the air. The runout (ease_out, at the end away from `from`) moves the groove's section out of the shaft as it turns, linearly from h = d/2 - root + 0.05P at s = 10 + w to 0 at s + 3: the cut per radian is f(o) = int r w(r - o) dr from root + o to 5 (w the section's width at its own radius), the runout removes 2 pi (3/P) mean(f) (Simpson, exact on the cubic), the full-depth groove from s + 3 to the free top end 2 pi f(0) (35 - s - 3)/P (the overrun past the free end as in 001). V = pi 8^2 10 + pi 5^2 25 - both. Tolerance 0.01%: SMLib's exact radial screw sweep",
+ "body_count": 1,
+ "volume_mm3": 3673.442500807,
+ "bbox": {
+  "min": [
+   -8,
+   -8,
+   0
+  ],
+  "max": [
+   8,
+   8,
+   35
+  ]
+ },
+ "tolerance": {
+  "rel": 0.0001
+ }
 }

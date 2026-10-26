@@ -94,6 +94,10 @@ fn sweeps_lofts_and_screws() {
     let tooth = polygon(&[[4.0, 0.0, 0.0], [4.4, 0.0, 0.0], [4.4, 0.0, 0.4], [4.0, 0.0, 0.4]]);
     let b = Brep::screw_sweep(&tooth, [0.0; 3], [0.0, 0.0, 1.0], 1.0, 3.0, 1e-4).unwrap();
     assert_close(solid_volume(&b, "screw"), 0.16 * TAU * 4.2 * 3.0, 1e-4, "screw sweep");
+    // The tooth moved out 1 mm over its three turns, linearly: A 2 pi (c turns + int offset dt).
+    let b = Brep::screw_sweep_radial(&tooth, [0.0; 3], [0.0, 0.0, 1.0], 1.0, 3.0, &[(0.0, 0.0), (3.0, 1.0)], 1e-4).unwrap();
+    assert_close(solid_volume(&b, "radial screw"), 0.16 * TAU * (4.2 * 3.0 + 1.5), 1e-4, "radial screw sweep");
+    assert_eq!(Brep::screw_sweep_radial(&tooth, [0.0; 3], [0.0, 0.0, 1.0], 1.0, 3.0, &[(2.0, 0.0), (1.0, 1.0)], 1e-4).err(), Some(Error::Argument));
 }
 
 /// `x` turned by `a` about z, then lifted `z`.

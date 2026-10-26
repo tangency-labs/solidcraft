@@ -68,6 +68,25 @@ without one, at the end the `face` point lies within a third of the face of. A p
 of a face whose ends are alike is refused, naming `from`. A length as long as the face runs the
 whole face.
 
+## Runout and tip
+
+**Runout** (`ease_in`, `ease_out`: a length, `standard` = 2.5 P or `short` = 1.25 P, ISO 3508's
+normal and short thread runouts x): the groove fades out over that length, its section moving
+out of the material as it turns (an external thread's away from the axis, past the surface; a
+nut's towards it, into the hole), linearly, by SMLib's radial screw sweep. `ease_in` is at the end
+the thread starts from (`from`, or the start of its extent), `ease_out` at the other. The runout
+lies past the full-form length: beyond a square stop, and before a shoulder up to its clearance
+(the full form then ends a runout short of it); at a free end it lies inside the face, the groove
+reaching nothing at the end. No end gets a runout unless asked. Where the section moves, the
+sweep's walls are within its tolerance (1e-4 P) of the true surfaces; full-depth turns are exact
+radially.
+
+**Tip** (`tip: chamfer`, ISO 4753's chamfered end): at each free end of a modelled external
+thread, after the groove, the material outside a cone `chamfer_angle` to the axis (45°) reaching
+d_f = d − 2 `chamfer_depth` at the end (default the external minor diameter, the largest the
+standard allows) is cut, the last teeth tapering into it. An internal thread takes the hole's
+countersink instead.
+
 ## Sources
 
 - ISO 68-1 (basic profile), ISO 261/262 (sizes), ISO 965-1 (multi-start designation `Ph`).

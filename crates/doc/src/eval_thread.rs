@@ -79,6 +79,9 @@ pub(super) struct ThreadAsk<'a> {
     pub from: Option<Vec3>,
     /// A modelled thread needs to know how each of its ends meets the face's ends.
     pub modeled: bool,
+    /// Runouts at the end the thread starts from and at the other, each as (mm, pitches): its
+    /// length is mm + pitches x the pitch.
+    pub ease: [(f64, f64); 2],
 }
 
 /// How one end of a thread's length meets its face.
@@ -101,6 +104,8 @@ pub(super) struct ThreadOn {
     /// How the thread's start and end meet the face (modelled threads only).
     ends: [End; 2],
     steep: SteepFlank,
+    /// Runout lengths (mm) at the thread's start and end along the axis.
+    ease: [f64; 2],
 }
 
 /// The free-end test of a face's two ends (`side` 0 at its start, 1 at its end), each made
@@ -206,18 +211,20 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
         }
         Ok((a, b))
     };
-    let (a, b) = match ask.extent {
-        Extent::Full => (lo, hi),
+    let from_side = |ends: &mut FaceEnds| start_side(ends, ask.from.map(along), along(p));
+    let (a, b, side) = match ask.extent {
+        Extent::Full => (lo, hi, ask.from.map(|q| usize::from((along(q) - lo).abs() > (hi - along(q)).abs())).unwrap_or(0)),
         Extent::Length(l) => {
             if !(l > 0.0) {
                 return Err(DocError::Invalid("thread length must be positive".into()));
             }
             if l >= hi - lo - pitch * 1e-3 {
                 // As long as the face (or longer): it runs the whole face from either end.
-                (lo, hi)
+                (lo, hi, ask.from.map(|q| usize::from((along(q) - lo).abs() > (hi - along(q)).abs())).unwrap_or(0))
             } else {
-                let side = start_side(&mut ends, ask.from.map(along), along(p))?;
-                span(side, if side == 0 { lo + l } else { hi - l })?
+                let side = from_side(&mut ends)?;
+                let (a, b) = span(side, if side == 0 { lo + l } else { hi - l })?;
+                (a, b, side)
             }
         }
         Extent::UpTo(pl) => {
@@ -227,13 +234,26 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
                 return Err(DocError::Invalid("the plane the thread runs up to is parallel to its axis".into()));
             }
             let to = n.dot(pl.origin - cyl.axis_point) / k;
-            span(start_side(&mut ends, ask.from.map(along), along(p))?, to)?
+            let side = from_side(&mut ends)?;
+            let (a, b) = span(side, to)?;
+            (a, b, side)
         }
-        Extent::UpToPoint(q) => span(start_side(&mut ends, ask.from.map(along), along(p))?, along(q))?,
+        Extent::UpToPoint(q) => {
+            let side = from_side(&mut ends)?;
+            let (a, b) = span(side, along(q))?;
+            (a, b, side)
+        }
     };
-    // How each end of the thread meets the face: at a face end, or within half a pitch of one
-    // (where the groove would reach past it), that end's free-end test decides.
-    let near = |at: f64, side: usize| if side == 0 { at - lo } else { hi - at } < pitch / 2.0;
+    // The runout at each end of the axis: ease in where the thread starts from.
+    let len = |(mm, pitches): (f64, f64)| mm + pitches * pitch;
+    let (e_in, e_out) = (len(ask.ease[0]), len(ask.ease[1]));
+    let ease = if side == 0 { [e_in, e_out] } else { [e_out, e_in] };
+    if ease.iter().any(|e| !(*e >= 0.0 && e.is_finite())) {
+        return Err(DocError::Invalid("a runout length must be positive".into()));
+    }
+    // How each end of the thread meets the face: at a face end, or within half a pitch (and its
+    // runout) of one, where the groove would reach past it, that end's free-end test decides.
+    let near = |at: f64, side: usize| if side == 0 { at - lo } else { hi - at } < pitch / 2.0 + ease.get(side).copied().unwrap_or(0.0);
     let mut kind = |at: f64, side: usize| -> Result<End> {
         Ok(if !ask.modeled || !near(at, side) {
             End::Inside
@@ -261,7 +281,7 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
         hand: ask.hand,
         starts,
     };
-    Ok(ThreadOn { info, cyl, ends, steep: ask.steep })
+    Ok(ThreadOn { info, cyl, ends, steep: ask.steep, ease })
 }
 
 /// The end of the face (0: its start, 1: its end) a thread of limited length starts at: the end
@@ -303,13 +323,15 @@ struct GrooveShape {
     axis: Vec3,
     pitch: f64,
     turns: f64,
+    /// The section's move off the axis (turn, mm), piecewise linear: the runouts. Empty: none.
+    law: Vec<(f64, f64)>,
 }
 
 /// The helical spaces between the teeth of a modelled thread of the form's profile: cut from
 /// the shaft (external) or the hole wall (internal), running from `start` to `end` along the
 /// axis, one groove per start and hand. `radius` is the face's own radius, `face` its extent
 /// along the axis and `ends` how the thread's two ends meet it.
-fn thread_grooves(t: &ThreadInfo, radius: f64, face: (f64, f64), ends: [End; 2], steep: SteepFlank) -> Result<Vec<GrooveShape>> {
+fn thread_grooves(t: &ThreadInfo, radius: f64, face: (f64, f64), ends: [End; 2], steep: SteepFlank, ease: [f64; 2]) -> Result<Vec<GrooveShape>> {
     let (p, d, form) = (t.pitch, t.major_diameter, t.form);
     let lead = p * f64::from(t.starts.max(1));
     let len = t.end - t.start;
@@ -370,22 +392,46 @@ fn thread_grooves(t: &ThreadInfo, radius: f64, face: (f64, f64), ends: [End; 2],
     // a closed one it stops with its section clear of the face's end (its centre as far inside
     // as the section reaches that way), so it never cuts into the shoulder there; inside the
     // face it stops square at the threaded length's end.
+    //
+    // A runout `e` at an end (ISO 3508) fades the groove out over `e`: its section moves out of
+    // the material (an external thread's away from the axis, past the surface; an internal
+    // one's towards it, into the hole) as it turns. It lies past the full-form length, up to the
+    // shoulder's clearance; at a free end, inside the face, the groove reaching nothing there.
     let (w_lo, w_hi) = (lo0.max(lo1), hi0.max(hi1));
-    let s0 = match ends[0] {
-        End::Free => t.start - p,
-        End::Closed => t.start.max(face.0 + w_lo),
-        End::Inside => t.start,
+    let s0 = match (ends[0], ease[0] > 0.0) {
+        (End::Free, false) => t.start - p,
+        (End::Free, true) => t.start,
+        (End::Closed, _) => (t.start - ease[0]).max(face.0 + w_lo),
+        (End::Inside, _) => t.start - ease[0],
     };
-    let s1 = match ends[1] {
-        End::Free => t.end + p,
-        End::Closed => t.end.min(face.1 - w_hi),
-        End::Inside => t.end,
+    let s1 = match (ends[1], ease[1] > 0.0) {
+        (End::Free, false) => t.end + p,
+        (End::Free, true) => t.end,
+        (End::Closed, _) => (t.end + ease[1]).min(face.1 - w_hi),
+        (End::Inside, _) => t.end + ease[1],
     };
     if !(s1 - s0 > p * 1e-3) {
         return Err(DocError::Invalid(format!(
             "the thread is too short to model between the shoulders: its groove needs {} mm clear of each",
             show_mm(w_lo.max(w_hi))
         )));
+    }
+    let turns = (s1 - s0) / lead;
+    // How far the section moves to leave the material, a little past it.
+    let out = if t.internal { -(r1 - radius + 0.05 * p) } else { radius - r0 + 0.05 * p };
+    if t.internal && r0 + out < 0.1 * p {
+        return Err(DocError::Invalid("the hole is too small for this thread's runout".into()));
+    }
+    let (r_in, r_out) = (ease[0] / lead, ease[1] / lead);
+    let mut law = Vec::new();
+    if r_in > 0.0 {
+        law.extend([(0.0, out), (r_in, 0.0)]);
+    }
+    if r_out > 0.0 {
+        law.extend([(turns - r_out, 0.0), (turns, out)]);
+    }
+    if r_in > 0.0 && r_out > 0.0 && !(turns - r_out > r_in + 1e-9) || r_in.max(r_out) > turns {
+        return Err(DocError::Invalid(format!("the runouts ({} and {} mm) are longer than the thread", show_mm(ease[0]), show_mm(ease[1]))));
     }
     let k = *t.axis;
     let u = k.cross(if k.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) });
@@ -397,7 +443,7 @@ fn thread_grooves(t: &ThreadInfo, radius: f64, face: (f64, f64), ends: [End; 2],
         ThreadHand::Both => &[1.0, -1.0],
     };
     let n = t.starts.max(1);
-    let mut out = Vec::new();
+    let mut grooves = Vec::new();
     for &h in hands {
         for j in 0..n {
             // Start j is the first turned a j-th of a turn on: the same helix a j-th of the
@@ -407,10 +453,10 @@ fn thread_grooves(t: &ThreadInfo, radius: f64, face: (f64, f64), ends: [End; 2],
             // A left-handed groove: turning the same way about the reversed axis while rising
             // along it (the screw motion about −k rising −lead per turn).
             let (axis, pitch) = if h > 0.0 { (k, lead) } else { (-k, -lead) };
-            out.push(GrooveShape { plane: Plane { origin: base, x, y: k }, section: section.clone(), base, axis, pitch, turns: (s1 - s0) / lead });
+            grooves.push(GrooveShape { plane: Plane { origin: base, x, y: k }, section: section.clone(), base, axis, pitch, turns, law: law.clone() });
         }
     }
-    Ok(out)
+    Ok(grooves)
 }
 
 /// Evaluate a thread feature: a cosmetic thread is listed in the model's threads, a modelled
@@ -436,9 +482,6 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
     else {
         return Err(DocError::Invalid("not a thread".into()));
     };
-    if ease_in.is_some() || ease_out.is_some() {
-        return Err(DocError::Invalid("a thread runout (ease in, ease out) is not built yet".into()));
-    }
     if *tip != ThreadTip::None && !*modeled {
         return Err(DocError::Invalid("a chamfered tip is cut only on a modelled thread".into()));
     }
@@ -459,8 +502,22 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         extent,
         from: from.map(|q| q.0),
         modeled: *modeled,
+        ease: [(0.0, 0.0); 2],
     };
-    let ThreadOn { info: t, cyl, ends, steep } = thread_on(st, f.id, face.0, &ask)?;
+    // ISO 3508's runouts: standard 2.5 P, short 1.25 P.
+    let runout = |e: &Option<crate::ThreadRunout>| -> Result<(f64, f64)> {
+        Ok(match e {
+            None => (0.0, 0.0),
+            Some(crate::ThreadRunout::Standard) => (0.0, 2.5),
+            Some(crate::ThreadRunout::Short) => (0.0, 1.25),
+            Some(crate::ThreadRunout::Length { length }) => (val(vals, length, Kind::Length)?, 0.0),
+        })
+    };
+    if (ease_in.is_some() || ease_out.is_some()) && !*modeled {
+        return Err(DocError::Invalid("a runout is cut only on a modelled thread".into()));
+    }
+    let ask = ThreadAsk { ease: [runout(ease_in)?, runout(ease_out)?], ..ask };
+    let ThreadOn { info: t, cyl, ends, steep, ease } = thread_on(st, f.id, face.0, &ask)?;
     if !*modeled {
         st.threads.push(t);
         return Ok(());
@@ -469,9 +526,9 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
     let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
     // The exact grooves: SMLib's screw sweeps, cut by one B-rep boolean.
     let mut grooves = Vec::new();
-    for g in thread_grooves(&t, cyl.radius, (cyl.start, cyl.end), ends, steep)? {
+    for g in thread_grooves(&t, cyl.radius, (cyl.start, cyl.end), ends, steep, ease)? {
         let section = Region2 { outer: solidcraft_geom::Loop2::polygon(&g.section), holes: Vec::new() };
-        grooves.push(kernel::sweep_helix(&g.plane, &section, g.base, g.axis, g.pitch, g.turns)?);
+        grooves.push(kernel::sweep_helix_radial(&g.plane, &section, g.base, g.axis, g.pitch, g.turns, &g.law)?);
     }
     let tool = match grooves.as_slice() {
         [one] => one.clone(),

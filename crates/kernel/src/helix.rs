@@ -15,6 +15,28 @@ fn rot(v: Vec3, k: Vec3, ang: f64) -> Vec3 {
 /// its attitude relative to the axis, as a screw motion does: SMLib's screw sweep, one wall per
 /// profile segment.
 pub fn sweep_helix(plane: &Plane, region: &Region2, axis_origin: Vec3, axis: Vec3, pitch: f64, turns: f64) -> Result<Body> {
+    let (k, profile) = helix_profile(plane, region, axis_origin, axis, pitch, turns)?;
+    crate::smlib_sweeps::screw(plane, &crate::smlib_sweeps::pieces([&profile]), axis_origin, k, pitch, turns)
+}
+
+/// [`sweep_helix`] with the profile moved off the axis as it turns: at turn t it first moves
+/// `offset(t)` mm away from the axis (negative: towards it) in its half-plane, `offset` piecewise
+/// linear through `law`'s (turn, offset) pairs, turns ascending within [0, `turns`]. A thread's
+/// groove fading in or out over a runout: SMLib's radial screw sweep.
+pub fn sweep_helix_radial(plane: &Plane, region: &Region2, axis_origin: Vec3, axis: Vec3, pitch: f64, turns: f64, law: &[(f64, f64)]) -> Result<Body> {
+    if law.is_empty() {
+        return sweep_helix(plane, region, axis_origin, axis, pitch, turns);
+    }
+    let (k, profile) = helix_profile(plane, region, axis_origin, axis, pitch, turns)?;
+    if !law.windows(2).all(|w| matches!(w, [a, b] if b.0 > a.0)) || law.iter().any(|(t, o)| !(t.is_finite() && o.is_finite() && *t >= 0.0 && *t <= turns)) {
+        return Err(KernelError::Invalid("helix: the radial law's turns must ascend within the sweep's turns".into()));
+    }
+    crate::smlib_sweeps::screw_radial(plane, &crate::smlib_sweeps::pieces([&profile]), axis_origin, k, pitch, turns, law)
+}
+
+/// A helical sweep's axis and profile (the region's outer loop), checked: finite turns and
+/// pitch, an area, and a profile that clears itself after one turn.
+fn helix_profile(plane: &Plane, region: &Region2, axis_origin: Vec3, axis: Vec3, pitch: f64, turns: f64) -> Result<(Vec3, crate::numbered::NumberedLoop)> {
     let k = axis.normalized().ok_or_else(|| KernelError::Invalid("helix axis".into()))?;
     if !(pitch.is_finite() && turns.is_finite() && turns > 0.0 && turns <= 200.0 && pitch.abs() < 1e7 && axis_origin.is_finite()) {
         return Err(KernelError::Invalid("helix: turns must be in (0, 200] and the pitch finite".into()));
@@ -32,7 +54,7 @@ pub fn sweep_helix(plane: &Plane, region: &Region2, axis_origin: Vec3, axis: Vec
     if turns > 1.0 && pitch.abs() <= extent {
         return Err(KernelError::Invalid(format!("the coil runs into itself: the pitch must exceed the section ({extent:.3} mm)")));
     }
-    crate::smlib_sweeps::screw(plane, &crate::smlib_sweeps::pieces([&profile]), axis_origin, k, pitch, turns)
+    Ok((k, profile))
 }
 
 /// A screw sweep of a convex polygon (in `plane`'s coordinates) as a closed triangle mesh,

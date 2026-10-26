@@ -979,3 +979,66 @@ fn a_chamfered_tip_tapers_the_last_teeth() {
     let e = s.execute("solid.thread", &json!({"face": [4.25, 0, 5], "designation": "M10", "tip": "chamfer", "modeled": true})).err().map(|e| e.to_string());
     assert!(e.unwrap_or_default().contains("countersink"));
 }
+
+/// M10's groove section moved `d` out from the axis, clipped at the shaft's radius 5: the cut per
+/// radian of turn, ∫ r w(r - d) dr from its moved root out to 5 (w the section's own width at
+/// its radius, P/4 + 2 (ρ - root) tan 30°). A cubic in d until the root reaches the surface.
+fn m10_cut_per_radian(d: f64) -> f64 {
+    let p = 1.5;
+    let root = 5.0 - 5.0 * p * 3f64.sqrt() / 16.0;
+    let q1 = 2.0 * (PI / 6.0).tan();
+    let q0 = p / 4.0 - q1 * root - q1 * d;
+    let a = root + d;
+    if a >= 5.0 {
+        return 0.0;
+    }
+    let f = |r: f64| q0 * r * r / 2.0 + q1 * r * r * r / 3.0;
+    f(5.0) - f(a)
+}
+
+/// The mean cut per radian over a runout whose offset runs linearly 0..h: Simpson on the cubic up
+/// to where the root leaves the shaft (exact), nothing beyond.
+fn m10_runout_mean(h: f64) -> f64 {
+    let p = 1.5;
+    let top = 5.0 * p * 3f64.sqrt() / 16.0;
+    let n = 64;
+    let step = top / n as f64;
+    let simpson: f64 = (0..n)
+        .map(|i| {
+            let (a, b) = (i as f64 * step, (i + 1) as f64 * step);
+            (m10_cut_per_radian(a) + 4.0 * m10_cut_per_radian((a + b) / 2.0) + m10_cut_per_radian(b)) * step / 6.0
+        })
+        .sum();
+    simpson / h
+}
+
+/// ISO 3508 runouts on a shaft between two collars: the groove fades out over 2.5 P (standard) at
+/// the end it starts from and 1.25 P (short) at the other, its section moving out past the surface
+/// as it turns, each reaching nothing where its section clears the collar. The cut is the
+/// integral over the turn of the clipped section's 2π∫ r dA (Pappus with the section moving):
+/// full turns at f(0), the runouts at the mean of f over the offsets they pass.
+#[test]
+fn a_runout_fades_the_groove_out_before_each_shoulder() {
+    let mut s = shaft_on_collar();
+    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 35], "radius": 8, "height": 10, "operation": "join", "targets": ["Part"]}));
+    let before = exact_volume(&s, "Part");
+    run(&mut s, "solid.thread", json!({"face": [5, 0, 20], "designation": "M10", "ease_in": "standard", "ease_out": "short", "from": [0, 0, 10], "modeled": true}));
+    let st = s.model.state();
+    assert!(st.body("Part").unwrap().body.validity().is_empty());
+    let (p, w) = (1.5, ext_half_width(10.0, 1.5));
+    let root = 5.0 - 5.0 * p * 3f64.sqrt() / 16.0;
+    let h = 5.0 - root + 0.05 * p;
+    let turns = (35.0 - 10.0 - 2.0 * w) / p;
+    let (r_in, r_out) = (2.5, 1.25);
+    let want = 2.0 * PI * (m10_cut_per_radian(0.0) * (turns - r_in - r_out) + (r_in + r_out) * m10_runout_mean(h));
+    let got = before - exact_volume(&s, "Part");
+    // Where the section moves, the sweep's walls lie within its tolerance (1e-4 P) of the true
+    // surfaces, not on them: up to that times the runouts' walls (about 64 mm² a turn, 3.75 turns),
+    // 0.036 mm³. Full-depth turns are exact radially (6e-4 mm³ here).
+    let bound = 1e-4 * p * 64.0 * (r_in + r_out);
+    assert!((got - want).abs() < bound, "{got} vs {want}");
+    // Longer runouts than the thread are refused.
+    let mut s = shaft_on_collar();
+    let e = s.execute("solid.thread", &json!({"face": [5, 0, 20], "designation": "M10", "ease_in": 14, "ease_out": 14, "modeled": true}));
+    assert!(e.err().map(|e| e.to_string()).unwrap_or_default().contains("longer than the thread"));
+}
