@@ -404,6 +404,13 @@ fn surfaces(flat: View, n_faces: usize) -> Res<Vec<(b::Surface, Option<b::Surfac
         };
         // A NURBS face's own block came first; a form follows the analytic face's canonical entry.
         let form = if kind != SURFACE_NURBS && forms.get(f) == Some(&1) { Some(next_nurbs(&mut nurbs_at)?) } else { None };
+        // The record's torus is a ring torus. SMLib keeps horn and spindle tori too (a half disc
+        // revolved about a line through its rim's end, its tube touching the axis, the major
+        // radius a rounding below the minor): such a face is its NURBS form, unlabelled.
+        let (surface, form) = match (surface, form) {
+            (b::Surface::Torus { major_radius, minor_radius, .. }, Some(n)) if !(major_radius > minor_radius) => (n, None),
+            other => other,
+        };
         out.push((surface, form));
     }
     Ok(out)

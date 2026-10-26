@@ -86,3 +86,22 @@ fn sound(s: &Session) {
         assert!(b.body.validity().is_empty(), "{:?}", b.body.validity());
     }
 }
+
+/// A shell that opens no face (rig shell/4009): a closed hollow body, the void sealed inside. A
+/// 40 × 30 × 12.5 box with a 2.5 wall inside leaves a 35 × 25 × 7.5 void; grown 2.5 outside, the
+/// walls are a 45 × 35 × 17.5 box less the original.
+#[test]
+fn a_shell_that_opens_no_face_seals_its_void() {
+    for (direction, want, shells) in [("inside", 15000.0 - 35.0 * 25.0 * 7.5, 2), ("outside", 45.0 * 35.0 * 17.5 - 15000.0, 2)] {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length": 40.0, "width": 30.0, "height": 12.5}));
+        run(&mut s, "solid.shell", json!({"faces": [], "thickness": 2.5, "direction": direction}));
+        let errors: Vec<_> = s.model.results.iter().filter_map(|r| r.error.clone()).collect();
+        assert!(errors.is_empty(), "{direction}: {errors:?}");
+        let st = s.model.state();
+        assert_eq!(st.bodies.len(), 1, "{direction}: one body");
+        assert_eq!(st.bodies[0].body.shell_count(), shells, "{direction}: an outer and an inner shell");
+        let got = volume(&s);
+        assert!((got - want).abs() < 1e-6 * want, "{direction}: volume {got}, want {want}");
+    }
+}
