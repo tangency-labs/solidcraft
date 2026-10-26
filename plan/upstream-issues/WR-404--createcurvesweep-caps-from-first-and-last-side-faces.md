@@ -1,0 +1,11 @@
+#### WR-404. `CreateCurveSweep` caps from the first and last side faces, which miss the ends when the path has several pieces
+- **Severity:** Failure (`SM_ERR`, 1001) on valid input
+- **Area:** Primitive creation / sweeps
+- **Location:** `source/SMLib/src/SmPrimitiveCreation.cpp`, `SmPrimitiveCreation::CreateCurveSweep`, the `bCapEndsArg` block: the start cap is built from the iso curves at the sweep start of the first `count` side faces (`count` = number of profile curves), the end cap from the last `count`.
+- **What happens:** each swept surface becomes one face per piece of the path (`CreateFacesFromSurface` splits it where the path is not smooth), so with a path of two pieces and a profile of two loops the first two side faces are both pieces of the outer wall. The start "loops" are an outer iso curve at the start and one in the middle of the path; `CreatePlanarFacesWith3DCurves` cannot make a face from them and the sweep fails with 1001. One loop, or a straight path, happens to work.
+- **Trigger:** `SmApiCreateCurveSweep` with `bCapEnds`, an annulus profile (two circles) and a line + tangent arc path.
+- **How found:** reported by jyviko (tangency-labs/solidcore#411); fixed in tangency-labs/smlib a83108d (`capi-solidcraft`).
+- **Confirmed:** no (read at c9c5979 `source/SMLib/src/SmPrimitiveCreation.cpp:5355`; reported and fixed in the SolidCraft fork, not independently reproduced)
+- **Fix:** take, from each profile composite's side faces, those whose surface starts where the sweep starts for the start cap and those ending where it ends for the end cap. When the first and last `count` faces are the end faces (a smooth path), the caps are the same as before.
+- **Rust port:** `crates/solidcore/src/primitive/primitive_creation/p3/construct.rs` (`sweep_end_curves`, used by `PrimitiveCreation::create_curve_sweep`), opt-in `Kernel::fixes.curve_sweep_caps_at_sweep_ends` (off by default: upstream's caps, so the sweep difftest units keep matching the C++). Test: `issue_411_holed_profile_sweeps_along_a_curved_path` in the same file.
+- Fixes tangency-labs/solidcore#411.

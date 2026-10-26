@@ -11,6 +11,12 @@
 //! Deviations: typed services and owned curve slots replace pointers; null curve
 //! dereferences become errors. The existing sweep engine bounds repetitions to
 //! 4096. No additional recursion. Unavailable calls retain their full caller tails.
+//! Not upstream (WR-409, tangency-labs/solidcore#1113, opt-in
+//! `Kernel::fixes.sheet_sweep_joins_profile_wires`): a profile that bounds no planar
+//! face becomes wires joined where its curves meet (`join_profile_wire_ends`).
+//! Not upstream (WR-442, tangency-labs/solidcore#478, opt-in
+//! `Kernel::fixes.revolve_nested_shells_as_cavities`): after a full turn's
+//! stitch, a closed shell inside another becomes that solid's cavity.
 
 use super::{construct::target, geometry::bspline, PrimitiveAccess};
 use crate::curve::curve::Curve;
@@ -120,6 +126,62 @@ fn targets(
         }
     }
 }
+/// Not upstream (WR-409, tangency-labs/solidcore#1113, opt-in
+/// `Kernel::fixes.sheet_sweep_joins_profile_wires`; the SolidCraft fork's
+/// `sm_CreateJoinedWireEdges`): the profile's wire edges `edges`, in the curves' order,
+/// joined where they meet. An end within the B-rep's tolerance of an earlier wire's end
+/// is glued to that earlier vertex (`GlueVertices`), so two curves meeting at a point
+/// share one vertex there. Without it the topology sweep's copies of two coincident
+/// vertices came out coincident, each with a preimage, and its stitch refused them: a
+/// partial revolve or repeated linear sweep of an open profile of more than one curve
+/// failed. Nothing is done without the opt-in.
+///
+/// # Errors
+///
+/// Those of the vertex queries and of [`crate::topology::brep::p5::glue_vertices`].
+fn join_profile_wire_ends(
+    a: &mut impl PrimitiveAccess,
+    brep: BrepId,
+    edges: &[crate::topology::EdgeId],
+) -> Result<()> {
+    use crate::topology::{edge, vertex, VertexId};
+    if !a.kernel(brep)?.fixes.sheet_sweep_joins_profile_wires {
+        return Ok(());
+    }
+    a.with_primitive_brep(brep, |k, b| {
+        let tol = b.tolerance();
+        // the distinct vertices of the wires so far
+        let mut vertices: Vec<VertexId> = Vec::new();
+        for &e in edges {
+            let start = edge::start_vertex(b, e)?;
+            let end = edge::other_vertex(b, e, start)?;
+            for (kk, v) in [start, end].into_iter().enumerate() {
+                let Some(v) = v else {
+                    continue;
+                };
+                if kk == 1 && Some(v) == start {
+                    continue;
+                }
+                let point = vertex::point(b, v)?;
+                let mut found = None;
+                for &w in &vertices {
+                    if vertex::point(b, w)?.distance(point) <= tol {
+                        found = Some(w);
+                        break;
+                    }
+                }
+                match found {
+                    Some(w) => {
+                        crate::topology::brep::p5::glue_vertices(k, b, Some(w), Some(v), None)?;
+                    }
+                    None => vertices.push(v),
+                }
+            }
+        }
+        Ok(())
+    })
+}
+
 impl PrimitiveCreation {
     /// Repeated linear sweep, with the active upstream analytic fast path.
     pub fn create_repeated_linear_sweep(
@@ -167,6 +229,7 @@ impl PrimitiveCreation {
                     };
                     edges.push(edge);
                 }
+                join_profile_wire_ends(a, brep, &edges)?;
                 faces.clear();
             }
             if distance == 0.0 {
@@ -307,6 +370,12 @@ impl PrimitiveCreation {
             }
         }
         ignore_status(a.stitch_and_orient(brep))?;
+        // not upstream (WR-442, #478, opt-in): a closed shell inside another is its cavity
+        if a.kernel(brep)?.fixes.revolve_nested_shells_as_cavities {
+            a.with_brep_mut(brep, |k, b, _, env| {
+                crate::topology::brep::p6::nest_closed_shells_as_cavities(k, b, env)
+            })?;
+        }
         a.set_editing(brep, false)?;
         Ok(())
     }
@@ -348,6 +417,7 @@ impl PrimitiveCreation {
                     };
                     edges.push(edge);
                 }
+                join_profile_wire_ends(a, brep, &edges)?;
                 faces.clear();
             }
             let base = faces.first().copied();
@@ -400,5 +470,154 @@ impl PrimitiveCreation {
         })();
         a.kernel_mut(brep)?.context.set_doing_boolean(previous);
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::curve::curve::Curve;
+    use crate::kernel::Kernel;
+    use crate::math::{Point3, Vec3};
+    use crate::primitive::api_curves;
+    use crate::sweep::api_brep::create_rotational_sweep;
+
+    fn segment(a: [f64; 3], b: [f64; 3]) -> Curve {
+        let [ax, ay, az] = a;
+        let [bx, by, bz] = b;
+        Curve::from(
+            api_curves::create_line_segment(Point3::new(ax, ay, az), Point3::new(bx, by, bz))
+                .expect("segment"),
+        )
+    }
+
+    /// A full turn of a half annulus about its diameter is a hollow ball with the
+    /// opt-in; upstream makes the inner ball a second solid.
+    #[test]
+    fn issue_478_full_turn_nested_shell_is_a_cavity() {
+        use crate::geom::attribute::{AttributeStore, ObjectKey};
+        use crate::mass::integrator::properties::{brep_volume, PropertyAttributes};
+
+        let (o, x) = (Point3::new(0.0, 0.0, 0.0), Vec3::new(1.0, 0.0, 0.0));
+        let arc = |r: f64| Curve::from(api_curves::create_arc(o, r, 0.0, 180.0).unwrap());
+        let profile = [
+            segment([18.5, 0.0, 0.0], [40.0, 0.0, 0.0]),
+            arc(40.0),
+            segment([-40.0, 0.0, 0.0], [-18.5, 0.0, 0.0]),
+            arc(18.5),
+        ];
+        let curves: Vec<Option<&Curve>> = profile.iter().map(Some).collect();
+
+        let mut k = Kernel::default();
+        k.fixes.revolve_nested_shells_as_cavities = true;
+        let mut ball = create_rotational_sweep(&mut k, &curves, o, x, 360.0, true).unwrap();
+        let store = AttributeStore::default();
+        let key_of = |_| ObjectKey(0);
+        let attributes = PropertyAttributes {
+            store: &store,
+            key_of: &key_of,
+        };
+        let volume = brep_volume(&k, &mut ball, 1e-6, &attributes).unwrap();
+        // 4/3 pi (40^3 - 18.5^3)
+        let want = 4.0 / 3.0 * std::f64::consts::PI * (40.0_f64.powi(3) - 18.5_f64.powi(3));
+        assert!(
+            (volume - want).abs() < 1e-3 * want,
+            "volume {volume}, want {want}"
+        );
+        assert!(crate::topology::brep::p2::is_manifold_solid(&ball).unwrap());
+
+        // WR-443: a difference with the hollow ball as the tool keeps what lies in the
+        // hollow. A block wholly inside it keeps its 512; one crossing the inner sphere
+        // loses only its part outside r 18.5 (the reference's sphere-difference control).
+        for (corner, size, want) in [
+            ([-4.0, -4.0, -4.0], 8.0, 512.0),
+            ([8.0, -4.0, -4.0], 12.0, 653.342_908_027_093_8),
+        ] {
+            let [x0, y0, z0] = corner;
+            let block = crate::primitive::api_primitives::create_box(
+                &mut k,
+                Point3::new(x0, y0, z0),
+                size,
+                8.0,
+                8.0,
+            )
+            .unwrap();
+            let mut cut = crate::boolean::api_brep::boolean_difference(
+                &mut k,
+                block,
+                ball.clone_standing_for_self().unwrap(),
+            )
+            .unwrap();
+            let got = brep_volume(&k, &mut cut, 1e-8, &attributes).unwrap();
+            assert!(
+                (got - want).abs() < 1e-6 * want,
+                "block at {corner:?} minus the hollow ball: volume {got}, want {want}"
+            );
+        }
+    }
+
+    /// An open chain of two lines (out from r 6 to 8, then up 2) revolved half a turn into
+    /// a sheet joins at its meeting vertex with the opt-in (WR-409): two faces, the flat
+    /// ring sector and the cylinder, of area (8^2 - 6^2) pi / 2 + 8 pi 2.
+    #[test]
+    fn issue_1113_open_chain_revolves_into_a_joined_sheet() {
+        use crate::mass::integrator::properties::{face_area, face_properties};
+        use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
+        use crate::topology::face::p2::PPF_AREA;
+
+        let chain = [
+            segment([6.0, 0.0, 0.0], [8.0, 0.0, 0.0]),
+            segment([8.0, 0.0, 0.0], [8.0, 0.0, 2.0]),
+        ];
+        let curves: Vec<Option<&Curve>> = chain.iter().map(Some).collect();
+        let (o, z) = (Point3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 1.0));
+
+        let mut k = Kernel::default();
+        k.fixes.sheet_sweep_joins_profile_wires = true;
+        let mut sheet = create_rotational_sweep(&mut k, &curves, o, z, 180.0, false).unwrap();
+        let faces = crate::topology::brep::p1::faces(&sheet, None)
+            .unwrap()
+            .len();
+        assert_eq!(faces, 2);
+        // Joined at (8, 0, 0): the profile's three vertices and their copies at 180
+        // degrees (unjoined, the coincident ends are two vertices and the sweep fails).
+        let vertices = crate::topology::brep::p1::vertices(&sheet, None)
+            .unwrap()
+            .len();
+        assert_eq!(vertices, 6);
+        let edges = crate::topology::brep::p1::edges(&sheet, None)
+            .unwrap()
+            .len();
+        assert_eq!(edges, 7);
+        // The area is 14 pi (the half annulus) plus 16 pi (the half cylinder), per face
+        // through `face_properties` at accuracy 1e-9: `brep_area` / `face_area` clamp the
+        // accuracy to [1e-4, 1e-1] (`SmApiFaceComputeArea`), which allows 7.7e-5 here.
+        // The bound 1e-8 relative is ten times the integration accuracy.
+        let pi = std::f64::consts::PI;
+        let mut areas = Vec::new();
+        for f in crate::topology::brep::p1::faces(&sheet, None).unwrap() {
+            let est = face_area(&k, &mut sheet, f, 1e-4).unwrap();
+            let a = face_properties(
+                &k,
+                &mut sheet,
+                f,
+                OrientType::Same,
+                1e-9,
+                Point3::new(0.0, 0.0, 0.0),
+                est,
+                0.0,
+                PPF_AREA,
+            )
+            .unwrap()
+            .area
+            .abs();
+            areas.push(a);
+        }
+        areas.sort_by(f64::total_cmp);
+        for (got, want) in areas.iter().zip([14.0 * pi, 16.0 * pi]) {
+            assert!(
+                (got - want).abs() <= 1e-8 * want,
+                "face area {got}, want {want}"
+            );
+        }
     }
 }

@@ -15,6 +15,10 @@
 //! Deviations: typed service resolution replaces pointers. Output face lists
 //! preserve partial results; owned geometry handles cleanup. Missing analytic
 //! NURBs are generated on owned copies with caller context/owner. No recursion.
+//! Not upstream (WR-404, tangency-labs/solidcore#411, opt-in
+//! `Kernel::fixes.curve_sweep_caps_at_sweep_ends`): the curve sweep's caps
+//! come from the side faces at the sweep's ends (`sweep_end_curves`), not the first
+//! and last `count` side faces.
 
 use super::{
     geometry::{prepare_curve_sweep, GeometryHandle},
@@ -25,7 +29,7 @@ use crate::curve::curve::p2::CurvePropertyType;
 use crate::curve::curve::p7::PropertyAnalysisOptions;
 use crate::curve::curve::{Curve, CurveKind};
 use crate::error::{ignore_status, Result, SolidError};
-use crate::math::Vec3;
+use crate::math::{Vec3, EFF_ZERO_SQRT};
 use crate::nurbs::b_spline_curve::p1::BSplineCurve;
 use crate::nurbs::b_spline_surface::p1::{BSplineSurface, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::SkinnedSurfaceOptions;
@@ -341,6 +345,8 @@ impl PrimitiveCreation {
                 a.brep(brep)?.tolerance(),
                 0.0,
             )?;
+            // each composite's side faces (WR-404's caps)
+            let mut groups = Vec::new();
             for mut composite in composites.composites {
                 let profile = composite.make_composite_nurb()?;
                 let surface = BSplineSurface::create_sweep_surface(
@@ -354,7 +360,9 @@ impl PrimitiveCreation {
                 let domain = surface.natural_uv_domain();
                 let mut made = Vec::new();
                 ignore_status(a.surface_faces(brep, surface, domain, &mut made))?;
+                let first = side_faces.len();
                 side_faces.extend(made);
+                groups.push(first..side_faces.len());
             }
             ignore_status(a.transform_primitive(brep, &prepared.rotation_back))?;
             let placement = if options.move_to_profile {
@@ -363,7 +371,19 @@ impl PrimitiveCreation {
                 &prepared.path_back
             };
             ignore_status(a.transform_primitive(brep, placement))?;
-            if options.cap_ends {
+            if options.cap_ends && a.kernel(brep)?.fixes.curve_sweep_caps_at_sweep_ends {
+                // not upstream (WR-404, #411, opt-in)
+                let (mut starts, mut ends) = sweep_end_curves(
+                    &*a,
+                    brep,
+                    side_faces,
+                    &groups,
+                    options.translational_sweep,
+                    approx_tol,
+                )?;
+                a.planar_faces(region, &mut starts, approx_tol, start_faces)?;
+                a.planar_faces(region, &mut ends, approx_tol, end_faces)?;
+            } else if options.cap_ends {
                 let mut starts = Vec::new();
                 let mut ends = Vec::new();
                 let mut direction = SurfParamType::U;
@@ -423,6 +443,71 @@ impl PrimitiveCreation {
         a.kernel_mut(brep)?.context.set_doing_boolean(previous);
         result
     }
+}
+
+/// The 3D curves of one cap's loops, as `planar_faces` takes them.
+type CapCurves = Vec<Option<Curve>>;
+
+/// The cap curves of a curve sweep (not upstream, WR-404, #411): the iso curves at the
+/// sweep's start and end of each composite's side faces that reach them. A path that
+/// is not G1 splits every swept surface into one face per piece, so upstream's first
+/// and last `count` side faces are not the faces at the ends.
+fn sweep_end_curves(
+    a: &impl PrimitiveAccess,
+    brep: BrepId,
+    side_faces: &[FaceId],
+    groups: &[core::ops::Range<usize>],
+    translational: bool,
+    approx_tol: f64,
+) -> Result<(CapCurves, CapCurves)> {
+    // the sweep runs along v for a translational sweep, else along u
+    let direction = if translational {
+        SurfParamType::V
+    } else {
+        SurfParamType::U
+    };
+    let mut starts = Vec::new();
+    let mut ends = Vec::new();
+    for group in groups {
+        let mut spans = Vec::new();
+        for &face in side_faces.get(group.clone()).unwrap_or_default() {
+            let domain = face_surface(a, (brep, face))?.natural_uv_domain();
+            let span = if translational {
+                (domain.min().y, domain.max().y)
+            } else {
+                (domain.min().x, domain.max().x)
+            };
+            spans.push((face, span));
+        }
+        let first = spans.iter().map(|(_, s)| s.0).fold(f64::INFINITY, f64::min);
+        let last = spans
+            .iter()
+            .map(|(_, s)| s.1)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let tol = EFF_ZERO_SQRT * (1.0 + first.abs().max(last.abs()));
+        for &(face, (low, high)) in &spans {
+            let surface = face_surface(a, (brep, face))?;
+            for (at, keep, out) in [
+                (low, low - first <= tol, &mut starts),
+                (high, last - high <= tol, &mut ends),
+            ] {
+                if keep {
+                    let curve = surface
+                        .create_iso_parametric_curve(
+                            a.kernel(brep)?,
+                            direction,
+                            at,
+                            approx_tol / 10.0,
+                            None,
+                            false,
+                        )?
+                        .curve;
+                    out.push(Some(curve));
+                }
+            }
+        }
+    }
+    Ok((starts, ends))
 }
 
 #[cfg(test)]
@@ -540,6 +625,75 @@ mod tests {
         assert_ne!(
             swung_curve_scale(&kernel, &sliced, &profile, 1e-5).unwrap(),
             0.5
+        );
+    }
+
+    /// An annulus swept along a line and a tangent quarter arc gets its two caps
+    /// with the opt-in: each wall is two faces, one per path piece (WR-404).
+    #[test]
+    fn issue_411_holed_profile_sweeps_along_a_curved_path() {
+        use crate::geom::attribute::{AttributeStore, ObjectKey};
+        use crate::mass::integrator::properties::{brep_volume, PropertyAttributes};
+        use crate::nurbs::b_spline_curve::p1::NurbCircleParam;
+        use crate::primitive::api_curves::create_circle;
+        use crate::sweep::api_brep::create_curve_sweep;
+
+        let o = Vec3::new(0.0, 0.0, 0.0);
+        let line = BSplineCurve::create_line_segment(3, o, Vec3::new(0.0, 0.0, 10.0)).unwrap();
+        let arc = BSplineCurve::create_arc_from_points(
+            Vec3::new(10.0, 0.0, 10.0),
+            Vec3::new(0.0, 0.0, 10.0),
+            Vec3::new(10.0, 0.0, 20.0),
+            NurbCircleParam::Quadratic,
+        )
+        .unwrap();
+        let k0 = Kernel::default();
+        let mut built = CompositeCurve::build_composites_from_curves(
+            &k0,
+            vec![Curve::from(line), Curve::from(arc)],
+            1e-6,
+            0.0,
+        )
+        .unwrap();
+        let path = Curve::from(built.composites[0].make_composite_nurb().unwrap());
+        let outer = Curve::from(create_circle(o, 2.0).unwrap());
+        let inner = Curve::from(create_circle(o, 1.0).unwrap());
+        let options = SweepOptions {
+            cap_ends: true,
+            ..SweepOptions::default()
+        };
+
+        let store = AttributeStore::default();
+        let key_of = |_| ObjectKey(0);
+        let attributes = PropertyAttributes {
+            store: &store,
+            key_of: &key_of,
+        };
+        let mut k = Kernel::default();
+        let sweep = |k: &mut Kernel, profile: &[Option<&Curve>]| {
+            let swept =
+                create_curve_sweep(k, profile, Some(&path), None, None, Some(&options)).unwrap();
+            assert_eq!(swept.start_faces.len(), 1);
+            assert_eq!(swept.end_faces.len(), 1);
+            assert!(crate::topology::brep::p2::is_manifold_solid(&swept.brep).unwrap());
+            swept
+        };
+        let mut outer_solid = sweep(&mut k, &[Some(&outer)]).brep;
+        let solid_outer = brep_volume(&k, &mut outer_solid, 1e-6, &attributes).unwrap();
+
+        k.fixes.curve_sweep_caps_at_sweep_ends = true;
+        let mut pipe = sweep(&mut k, &[Some(&outer), Some(&inner)]);
+        // each cap is the annulus: the outer loop and the hole
+        for cap in [pipe.start_faces[0], pipe.end_faces[0]] {
+            let loops = crate::topology::face::p2::loops(&pipe.brep, cap, false, None).unwrap();
+            assert_eq!(loops.len(), 2);
+        }
+        // (the precise integration is not trusted to 1e-3 across this path's C1 joint,
+        // tangency-labs/solidcore#384, so only the hole's removal is checked)
+        let volume = brep_volume(&k, &mut pipe.brep, 1e-6, &attributes).unwrap();
+        assert!(
+            volume > 0.0 && volume < 0.9 * solid_outer,
+            "volume {volume}, outer {solid_outer}"
         );
     }
 }

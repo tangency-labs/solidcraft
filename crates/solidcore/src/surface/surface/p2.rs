@@ -63,6 +63,10 @@
 //! | [`IsoCurveLengthIntegrand`]                       | `SmIsoCurveLengthIFEO` (constructor)             |
 //!
 //! Deviations:
+//! - **Touching loops** (not upstream, WR-405, tangency-labs/solidcore#892, opt-in
+//!   `Kernel::fixes.join_touching_loops`): `create_plane_with_3d_curves`
+//!   joins a loop touching another loop of its face at a vertex into that loop
+//!   (`join_touching_loops`, the SolidCraft fork's `JoinTouchingLoops`).
 //! - **Nesting.** [`MAX_GEOMETRY_NESTING`] (32, the database reader's bound; upstream
 //!   fixtures nest at most 3) bounds wrapper geometry across curves, surfaces and
 //!   volumes. Every wrapper constructor and setter checks its inner geometry with the
@@ -2992,7 +2996,7 @@ impl Surface {
             ..
         } = r;
 
-        let outer_loop_counts = trimming_tools::find_outer_loops(
+        let mut outer_loop_counts = trimming_tools::find_outer_loops(
             k,
             curves,
             &mut ordered,
@@ -3001,6 +3005,20 @@ impl Surface {
             &mut plane_normal,
             tol_3d,
         )?;
+
+        // not upstream (WR-405, #892, opt-in): an inner loop touching another loop of
+        // its face at a vertex is part of that loop
+        if k.fixes.join_touching_loops {
+            join_touching_loops(
+                k,
+                curves,
+                &mut ordered,
+                &mut loop_counts,
+                &mut orients,
+                &mut outer_loop_counts,
+                tol_3d,
+            )?;
+        }
 
         // make ortho-normal vector set from PlaneNormal vector
         let [_, plane_x_vect, mut plane_y_vect] = plane_normal.make_unit_ortho_vectors(None)?;
@@ -3043,6 +3061,125 @@ impl Surface {
             outer_loop_counts,
         })
     }
+}
+
+/// Not upstream (WR-405, tangency-labs/solidcore#892; the SolidCraft fork's
+/// `SmTrimmingTools::JoinTouchingLoops`): joins each loop that touches another loop
+/// of its outer loop's set at a vertex into that loop, so the face's boundary passes
+/// the vertex twice in one loop. `ordered`, `loop_counts`, `orients` and
+/// `outer_loop_counts` are `find_outer_loops`' output (indices into `curves`).
+/// Within each set, while a curve of one loop starts (as its loop runs it) where a
+/// curve of a later loop starts, the later loop is spliced into the earlier one there:
+/// the earlier loop's curves up to that vertex, the later loop's from that vertex
+/// round to it again, then the rest of the earlier loop. Each loop keeps its
+/// direction; the outer loop stays first. The outputs change only when a loop joins.
+///
+/// # Errors
+///
+/// `SM_ERR` when the counts do not match the curves; those of the curve evaluations.
+fn join_touching_loops(
+    k: &Kernel,
+    curves: &[Curve],
+    ordered: &mut Vec<usize>,
+    loop_counts: &mut Vec<usize>,
+    orients: &mut Vec<OrientType>,
+    outer_loop_counts: &mut Vec<usize>,
+    tol_3d: f64,
+) -> Result<()> {
+    const OP: &str = "surface::surface::join_touching_loops";
+    let bad = || SolidError::sm_err(OP);
+    // each outer loop's set of loops, each loop its (curve, orientation)s
+    let mut sets: Vec<Vec<Vec<(usize, OrientType)>>> = Vec::new();
+    let (mut curve, mut lp) = (0usize, 0usize);
+    for &loops in outer_loop_counts.iter() {
+        let mut set = Vec::new();
+        for _ in 0..loops {
+            let count = *loop_counts.get(lp).ok_or_else(bad)?;
+            lp += 1;
+            let mut members = Vec::new();
+            for _ in 0..count {
+                let index = *ordered.get(curve).ok_or_else(bad)?;
+                let orient = *orients.get(curve).ok_or_else(bad)?;
+                if curves.get(index).is_none() {
+                    return Err(bad());
+                }
+                members.push((index, orient));
+                curve += 1;
+            }
+            set.push(members);
+        }
+        sets.push(set);
+    }
+    if lp != loop_counts.len() || curve != ordered.len() || curve != orients.len() {
+        return Err(bad());
+    }
+
+    // where a curve starts as its loop runs it
+    let start = |(index, orient): (usize, OrientType)| -> Result<Point3> {
+        let c = curves.get(index).ok_or_else(bad)?;
+        let ivl = c.natural_interval();
+        let t = if orient == OrientType::Same {
+            ivl.min()
+        } else {
+            ivl.max()
+        };
+        c.evaluate_point(k, t)
+    };
+
+    let mut joined = false;
+    // every join removes a loop, so a set joins at most its loop count less one times
+    for set in &mut sets {
+        let mut found = true;
+        while found {
+            found = false;
+            let mut join = None;
+            'search: for (aa, loop_a) in set.iter().enumerate() {
+                for (bb, loop_b) in set.iter().enumerate().skip(aa + 1) {
+                    for (ia, &curve_a) in loop_a.iter().enumerate() {
+                        let a = start(curve_a)?;
+                        for (ib, &curve_b) in loop_b.iter().enumerate() {
+                            if a.distance(start(curve_b)?) >= tol_3d {
+                                continue;
+                            }
+                            join = Some((aa, bb, ia, ib));
+                            break 'search;
+                        }
+                    }
+                }
+            }
+            if let Some((aa, bb, ia, ib)) = join {
+                let loop_b = set.remove(bb);
+                let loop_a = set.get_mut(aa).ok_or_else(bad)?;
+                // loop aa up to the vertex, loop bb round from it, then the rest of aa
+                let rest = loop_a.split_off(ia);
+                loop_a.extend(loop_b.iter().skip(ib).copied());
+                loop_a.extend(loop_b.iter().take(ib).copied());
+                loop_a.extend(rest);
+                found = true;
+                joined = true;
+            }
+        }
+    }
+    if !joined {
+        return Ok(());
+    }
+
+    // set output
+    ordered.clear();
+    orients.clear();
+    loop_counts.clear();
+    outer_loop_counts.clear();
+    for set in &sets {
+        outer_loop_counts.push(set.len());
+        for members in set {
+            loop_counts.push(members.len());
+            for &(index, orient) in members {
+                ordered.push(index);
+                orients.push(orient);
+            }
+        }
+    }
+    Ok(())
 }
 
 // ---- generic evaluation interface --------------------------------------------------------
@@ -6942,5 +7079,62 @@ mod kernel_dispatch_tests {
         for _ in 0..MAX_READ_NESTING {
             reader.leave_nested();
         }
+    }
+}
+
+#[cfg(test)]
+mod issue_892_tests {
+    use crate::curve::curve::Curve;
+    use crate::geom::attribute::{AttributeStore, ObjectKey};
+    use crate::kernel::Kernel;
+    use crate::mass::integrator::properties::{brep_volume, PropertyAttributes};
+    use crate::math::{Point3, Vec3};
+    use crate::primitive::api_curves::create_line_segment;
+    use crate::sweep::api_brep::create_linear_sweep;
+
+    /// A 10 x 6 plate with a triangular hole whose corner touches the outline at
+    /// (0, 3), extruded 2 up, is the plate less the hole with the opt-in (WR-405):
+    /// volume 2 (60 - 1), ten faces.
+    #[test]
+    fn issue_892_hole_touching_outline_is_one_loop() {
+        let points = |p: &[(f64, f64)]| -> Vec<Curve> {
+            p.iter()
+                .zip(p.iter().cycle().skip(1))
+                .map(|(&(ax, ay), &(bx, by))| {
+                    Curve::from(
+                        create_line_segment(Point3::new(ax, ay, 0.0), Point3::new(bx, by, 0.0))
+                            .unwrap(),
+                    )
+                })
+                .collect()
+        };
+        let mut curves = points(&[(0.0, 0.0), (10.0, 0.0), (10.0, 6.0), (0.0, 6.0), (0.0, 3.0)]);
+        curves.extend(points(&[(0.0, 3.0), (2.0, 2.5), (2.0, 3.5)]));
+        let refs: Vec<Option<&Curve>> = curves.iter().map(Some).collect();
+
+        let mut k = Kernel::default();
+        k.fixes.join_touching_loops = true;
+        // the plane's loops: the hole joined into the outline, one loop of 8 curves
+        let plane =
+            crate::surface::surface::Surface::create_plane_with_3d_curves(&k, &curves, 1e-6)
+                .unwrap();
+        assert_eq!(
+            (plane.outer_loop_counts.clone(), plane.loop_counts.clone()),
+            (vec![1], vec![8])
+        );
+        let mut plate =
+            create_linear_sweep(&mut k, &refs, Vec3::new(0.0, 0.0, 1.0), 2.0, true).unwrap();
+        let faces = crate::topology::brep::p1::faces(&plate, None)
+            .unwrap()
+            .len();
+        assert_eq!(faces, 10);
+        let store = AttributeStore::default();
+        let key_of = |_| ObjectKey(0);
+        let attributes = PropertyAttributes {
+            store: &store,
+            key_of: &key_of,
+        };
+        let volume = brep_volume(&k, &mut plate, 1e-6, &attributes).unwrap();
+        assert!((volume - 118.0).abs() < 1e-6, "volume {volume}");
     }
 }

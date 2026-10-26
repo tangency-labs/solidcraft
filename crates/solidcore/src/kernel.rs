@@ -241,6 +241,10 @@ pub struct UpstreamFixes {
     pub classify_edge_interval: bool,
     /// `SmProtoEdge::Resolve` treats a proto edge from a proto vertex back to itself whose ends find one vertex definition as degenerate below twice the proto vertex's containment radius, and `ImprintIntersections` fits that vertex to its edges (WR-306, #1058).
     pub degenerate_proto_edge_in_one_vertex: bool,
+    /// A torus rebuilt from its NURB measures its generating interval signed (WR-408, #1112).
+    pub torus_signed_gen_curve_interval: bool,
+    /// A sheet sweep's open-profile wires are glued where the curves meet (WR-409, #1113).
+    pub sheet_sweep_joins_profile_wires: bool,
 }
 
 /// Options for [`Kernel::new`].
