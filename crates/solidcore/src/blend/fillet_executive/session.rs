@@ -1265,6 +1265,19 @@ impl<'target> FilletSession<'target> {
             .collect()
     }
 
+    /// `SmFilletCorner::SetSetBackDist` on one live corner.
+    ///
+    /// # Errors
+    /// An unresolved corner identity.
+    pub fn set_corner_setback(&mut self, id: FilletCornerId, distance: f64) -> Result<()> {
+        self.objects
+            .corners
+            .get_mut(id.0 as usize)
+            .ok_or_else(|| invalid("corner is not live in this session"))?
+            .set_back_dist = distance;
+        Ok(())
+    }
+
     /// `SmFilletCorner::SetBevel` on one live corner.
     ///
     /// # Errors
