@@ -6,5 +6,5 @@
  "source": "analytic",
  "method": "base area = 2 straight rails (2 x 20) x 2 + full annulus pi(25-9) = 80 + 16 pi, times 2 mm = 160 + 32 pi. Each lip is a half annulus pi(25-16)/2 = 4.5 pi, two lips x 18 mm = 162 pi. The lips sit above z=2, the base is below, so nothing overlaps (the crescent overhang is above z=2 too): V = 160 + 194 pi = 769.469. One body",
  "body_count": 1,
- "volume_mm3": 769.4689747964198
+ "volume_mm3": 769.468974796
 }

@@ -14,6 +14,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ladder_lib import *  # noqa: E402,F403
+from reported import LOFT_RIBS_PAD, PLEATED_SKINS  # noqa: E402
 
 def up(tier, name):
     return f"../../{tier}/{name}"
@@ -144,6 +145,76 @@ case(T2, "020-part-back-wall", "the running part: a 60x10x15 back wall joined on
      "an L section (6 sides) extruded along X: 8 faces; the coplanar back and end faces merge", base=B1)
 C2 = up(T2, "020-part-back-wall")
 V2 = VB + 9000
+case(T2, "021-holes-touching-at-a-point", "two through holes r5 whose circles touch at one point (30, 20)",
+     [cyl([25, 20, -1], 5, 22, operation="cut"), cyl([35, 20, -1], 5, 22, operation="cut")],
+     {"body_count": 1, "volume_mm3": VB - 2 * PI * 25 * 20, "faces": 8},
+     "V = 60 40 20 - 2 pi 5^2 20; faces: 6 of the box + 2 bores (top and bottom each one loop round both holes, through their common vertex twice)", base=B1)
+# The tool's square 1.5 x 1.5 outside r 1.6 (the hole wall): A1 = int_x0^1.5 (1.5 - sqrt(1.6^2 - x^2)) dx, x0 = sqrt(1.6^2 - 1.5^2).
+x0 = math.sqrt(2.56 - 2.25)
+Fc = lambda x: (x * math.sqrt(2.56 - x * x) + 2.56 * math.asin(x / 1.6)) / 2
+A1 = 1.5 * (1.5 - x0) - (Fc(1.5) - Fc(x0))
+case(T2, "022-cylinder-grazing-a-hole-edge",
+     "a corner piece (square column minus a quarter disc r1.5, 0.0003 off the axis) cut out of a part with a blind r1.6 hole on the same axis: the tool's r1.5 face sits 0.1 mm inside the hole wall; 'no result'",
+     [box([-6, -6, -5], 12, 12, 5.1, body_name="Part"), cyl([0, 0, -4], 1.6, 4.1, operation="cut"),
+      box([0, 0, -3.9], 1.5, 1.5, 7.1, operation="new", body_name="Tool"), cyl([0.0003, 0, -4], 1.5, 7.5, operation="cut", targets=["Tool"]),
+      C("solid.combine", target="Part", tools=["Tool"], operation="cut")],
+     {"body_count": 1, "volume_mm3": 734.4 - PI * 1.6 ** 2 * 4.1 - A1 * 4.0},
+     "part 12x12x5.1 = 734.4 minus the hole pi*1.6^2*4.1 = 32.97 (hole z -4..0.1, part top z 0.1). The tool (z -3.9..3.2, the square 1.5x1.5 where r >= 1.5) overlaps solid only where r >= 1.6: "
+     "area A1 = integral_0^1.5 (1.5 - min(1.5, sqrt(2.56-x^2))) dx = 0.31409, over the 4.0 mm of shared z: 1.25638 mm3 (the 0.0003 offset moves this by about 3e-3). "
+     "V = 734.4 - 32.9662 - 1.2564 = 700.1695. Reduced from the report's STEP geometry (no pocket or rotation); the answer is for this geometry",
+     sources=["tangency-labs/solidcraft#1279"])
+def arc_c(center, start, sweep):
+    return C("sketch.arc.center_point", center=center, start=start, sweep=sweep)
+case(T2, "023-lips-1e-4-off-the-walls-joined",
+     "two half-annulus lips (r 4..5, from z=2 to 20) joined onto a stadium-ring base (z 0..2, r 3..5 arcs, centres 20 apart) with their cylinder walls 0.0001 mm off the base's: "
+     "the lip cap touches the base top, leaving a 0.0001 mm crescent overhang. Layout is a hand-built variant of the PR's public reproduction",
+     [C("sketch.create", plane="XY", name="Base"),
+      line([[5, -10], [5, 10]]), arc_c([0, 10], [5, 10], 180), line([[-5, 10], [-5, -10]]), arc_c([0, -10], [-5, -10], 180),
+      line([[3, -10], [3, 10]]), arc_c([0, 10], [3, 10], 180), line([[-3, 10], [-3, -10]]), arc_c([0, -10], [-3, -10], 180),
+      C("sketch.finish"),
+      C("solid.extrude", sketch="Base", profiles=[{"point": [4, 0]}], distance=2, operation="new", body_name="Base"),
+      C("sketch.create", plane="XY", offset=2, name="Lips"),
+      arc_c([0.0001, 10], [5.0001, 10], 180), line([[-4.9999, 10], [-3.9999, 10]]), arc_c([0.0001, 10], [-3.9999, 10], -180), line([[4.0001, 10], [5.0001, 10]]),
+      arc_c([-0.0001, -10], [-5.0001, -10], 180), line([[4.9999, -10], [3.9999, -10]]), arc_c([-0.0001, -10], [3.9999, -10], -180), line([[-4.0001, -10], [-5.0001, -10]]),
+      C("sketch.finish"),
+      C("solid.extrude", sketch="Lips", distance=18, operation="join", profiles="all")],
+     {"body_count": 1, "volume_mm3": 160 + 194 * PI},
+     "base area = 2 straight rails (2 x 20) x 2 + full annulus pi(25-9) = 80 + 16 pi, times 2 mm = 160 + 32 pi. Each lip is a half annulus pi(25-16)/2 = 4.5 pi, two lips x 18 mm = 162 pi. "
+     "The lips sit above z=2, the base is below, so nothing overlaps (the crescent overhang is above z=2 too): V = 160 + 194 pi = 769.469. One body",
+     sources=["tangency-labs/solidcraft#2928"])
+case(T2, "024-wall-halves-merged-into-a-flange",
+     "the flange top annulus of a freshly revolved hub (z = 6, r 18..30) picked by a point and extruded 5 mm (the pick found a third of the face: \"the selected planar face no longer exists\")",
+     sketch(vplane([0.0, 0.0, 0.0]), C("sketch.line", points=[[8, 0], [30, 0], [30, 6], [18, 6], [18, 22], [8, 22]], infer=False, closed=True), name="P")
+     + [C("solid.revolve", axis="Z", angle="360 deg", operation="new", body_name="Hub"),
+        C("solid.extrude", face=[12, 12 * math.sqrt(3), 6], distance=5, operation="join")],
+     {"body_count": 1, "volume_mm3": PI * ((900 - 64) * 6 + (324 - 64) * 16) + PI * (900 - 324) * 5},
+     "hub = revolve of (8,0) (30,0) (30,6) (18,6) (18,22) (8,22) about Z: V = pi [(30^2 - 8^2) 6 + (18^2 - 8^2) 16] = 28826.6. "
+     "Extruding the whole annulus z = 6, r 18..30 outward (upward) 5 mm adds pi (30^2 - 18^2) 5 = 9047.8 (the new ring sits on the flange and touches the hub wall r = 18).",
+     sources=["tangency-labs/solidcraft#726", "tangency-labs/solidcraft#494", "tangency-labs/solidcraft#2114"])
+# 18 chords across a disc r37; the layers' regions between them, four bands left out of the second layer.
+CHORD_Y = [-32, -29, -24, -21, -16, -13, -8, -5, 0, 3, 8, 11, 16, 19, 24, 27, 32, 35]
+BANDS = [(-29, -24), (-13, -8), (8, 11), (24, 27)]
+def chords(name):
+    return sketch("XY", C("sketch.circle.center", center=[0, 0], radius=37),
+                  *[line([[-math.sqrt(1369 - y * y), y], [math.sqrt(1369 - y * y), y]]) for y in CHORD_Y], name=name)
+ys = [-37] + CHORD_Y + [37]
+picks = [{"point": [0, (a + b) / 2]} for a, b in zip(ys, ys[1:]) if (a, b) not in BANDS]
+band_area = sum(quad(lambda y: 2 * math.sqrt(1369 - y * y), a, b) for a, b in BANDS)
+case(T2, "025-flush-chord-layers-joined",
+     "a join of flush layers: a disc r37 (z -1.2..0) carrying 15 of the 19 regions of a sketch of 18 chords (z -3.6..-1.2; four bands left out), on an annulus r35..37 (z -5.6..-3.6) "
+     "joined to a disc of all the chord regions (z -8..-5.6): SMLib's result came back with 'loop encloses no (u, v) area' though both operands are valid",
+     chords("S1") + chords("S3")
+     + sketch("XY", C("sketch.circle.center", center=[0, 0], radius=37), C("sketch.circle.center", center=[0, 0], radius=35), name="Rings")
+     + [C("solid.extrude", sketch="Rings", profiles="all", distance=1.2, direction="negative", body_name="Body1"),
+        C("solid.extrude", sketch="S1", profiles=picks, distance=2.4, direction="negative", **{"from": [0, 0, -1.2]}, operation="join"),
+        C("solid.extrude", sketch="Rings", profiles=[{"point": [36, 0]}], distance=2, direction="negative", **{"from": [36, 0, -3.6]}, operation="new", body_name="Body2"),
+        C("solid.extrude", sketch="S3", profiles="all", distance=2.4, direction="negative", **{"from": [36, 0, -5.6]}, operation="new", body_name="Body3"),
+        C("solid.combine", target="Body2", tools=["Body3"], operation="join"),
+        C("solid.combine", target="Body1", tools=["Body2"], operation="join")],
+     {"body_count": 1, "shells": 1, "volume_mm3": PI * 1369 * 1.2 + (PI * 1369 - band_area) * 2.4 + PI * (1369 - 1225) * 2 + PI * 1369 * 2.4},
+     "the layers only meet face to face, so V is their sum: Body1 = pi 37^2 1.2 + (pi 37^2 - the four bands y -29..-24, -13..-8, 8..11, 24..27 of the disc, Int 2 sqrt(37^2 - y^2) dy) 2.4; "
+     "Body2 = pi (37^2-35^2) 2; Body3 = pi 37^2 2.4. The bands run out to the rim, so the space inside r35 under Body1 opens to the outside: one shell (the reporter's 52-command script, generic dimensions)",
+     sources=["tangency-labs/solidcraft#5197", "tangency-labs/solidcraft#3396"])
 
 # ---------------------------------------------------------------- 03 analytic profiles
 A = 2400 + PI * 400 / 2
@@ -189,6 +260,15 @@ case(T3, "009-part-boss-and-slot", "the running part: a revolved boss r8 h10 joi
      "back-wall part (57000) + pi 8^2 10 - 20 (15*8 + pi 4^2); faces 8 + boss side and top + slot's 2 planes and 2 half cylinders", base=C2)
 C3 = up(T3, "009-part-boss-and-slot")
 V3 = V2 + Vboss - 20 * Aslot
+case(T3, "010-revolve-horn-torus-270",
+     "the half disc of radius 14 on the far side of a diameter 14 mm from the axis (the full circle would touch the axis: a horn torus) revolved 270 degrees",
+     sketch(vplane([0.0, 0.0, 0.0]), C("sketch.arc.center_point", center=[14, 0], start=[14, -14], end=[14, 14]),
+            C("sketch.line", points=[[14, 14], [14, -14]], infer=False), name="P")
+     + [C("solid.revolve", axis="Z", angle="270 deg", operation="new")],
+     {"body_count": 1, "volume_mm3": 270 / 360 * 2 * PI * (14 + 4 * 14 / (3 * PI)) * PI * 196 / 2},
+     "Pappus: the half disc (the side away from the axis) has area pi 14^2 / 2 and centroid at 14 + 4 * 14 / (3 pi) from the axis: "
+     "V = (270/360) 2 pi (14 + 4*14/(3 pi)) pi 14^2 / 2 = 28932.2 (the design measures 28930.7).",
+     sources=["tangency-labs/solidcraft#4007"])
 
 # ---------------------------------------------------------------- 04 spline profiles
 P = [[40, 10], [30, 30], [10, 30], [0, 10]]
@@ -254,6 +334,16 @@ case(T4, "010-part-bezier-window", "the running part: a Bezier-arched window cut
      "the arch over z=22 from x=20 to 40 rises to z = 22 + 0.75*12 = 31, under the wall top (35): removed 10 * %.9f; + window floor and arch faces" % Awin, base=C3)
 C4 = up(T4, "010-part-bezier-window")
 V4 = V3 - 10 * Awin
+case(T4, "011-crossing-pleated-loft-skins-joined",
+     "a join of two pleated skins (lofts between 24-pleat star outlines, less the same loft moved in 1.1 mm) that cross along a ring near their bottoms: "
+     "truck panicked ('tolerance must be no less than 1e-6') or gave no result",
+     PLEATED_SKINS, {"body_count": 1},
+     "the narrowing cone skin and the flaring lip skin cross at z = -0.3, so their union is one connected solid: one valid closed body, no panic. The reporter's own script (pleated_union.py, 24 pleats)",
+     source="invariants", sources=["tangency-labs/solidcraft#4623", "tangency-labs/solidcraft#4180", "tangency-labs/solidcraft#4881"])
+case(T4, "012-loft-ribs-joined-to-a-rounded-pad", "the same without the top flange: the join fails with 'boolean Union: no result'",
+     LOFT_RIBS_PAD, {"body_count": 1},
+     "the pad (X -8..8, Y 18..25, Z 36..59) overlaps the body, ribs and ring, so the join is one connected solid; the join must succeed with one valid closed solid and no panic",
+     source="invariants", sources=["tangency-labs/solidcraft#4092"])
 
 # ---------------------------------------------------------------- 05 holes and taps
 def H(**p):
@@ -529,7 +619,7 @@ case(T7, "010-corner-unequal-r7-r3", "an r7 vertical round at a corner, then r3 
      [F([corner[2]], 7), F([[60, 15, 20]], 3)], {"body_count": 1},
      "two radii meeting at a corner over a tangent chain; one valid body", base=B1, source="invariants")
 case(T7, "016-corner-three-sequential-r5-r3-r7", "rounds r5 and r3 on the two top edges at a corner, then r7 on the vertical edge under them",
-     [F([corner[0]], 5), F([corner[1]], 3), F([[60, 40, 8]], 7)], {"body_count": 1},
+     [F([corner[0]], 5), F([corner[1]], 3, tangent_chain=False), F([[60, 40, 8]], 7)], {"body_count": 1},
      "three unequal radii at one corner, one after another; the vertical edge stays sharp below the two top rounds (x=60, y=40, z from 0 to 15), so it can be picked at z=8; one valid body", base=B1, source="invariants")
 case(T7, "011-chain-ending-at-corner", "r5 rounds on two top edges meeting at a corner whose vertical edge stays sharp",
      [F([corner[0], corner[1]], 5)], {"body_count": 1},
@@ -617,6 +707,33 @@ case(T9, "011-part-shell", "the running part shelled 1.5 mm open at the bottom",
      [S([[30, 20, 0]], 1.5)], {"body_count": 1},
      "a shell around holes, a slot, a window, rounds and chamfers; one valid body", base=C8, source="invariants")
 C9 = up(T9, "011-part-shell")
+case(T9, "012-closed-shell-sealed-void", "the stock shelled 2 mm with no face open: a closed body with a sealed void", [S([], 2)],
+     {"body_count": 1, "shells": 2, "volume_mm3": VB - 56 * 36 * 16, "faces": 12},
+     "void 56x36x16: V = 48000 - 32256; faces 6 outer + 6 inner; one body, an outer and an inner shell", base=B1)
+DOME = sketch(vplane([0, 0, 0]), line([[0, 0], [20, 0]]), C("sketch.arc.center_point", center=[0, 0], start=[20, 0], end=[0, 20]), line([[0, 20], [0, 0]]))
+case(T9, "013-dome-shelled-from-base", "a dome r20 shelled 2 mm, open at its flat base: the rim is the circle r18 where the inner sphere meets the base plane",
+     DOME + [C("solid.revolve", axis="Z", angle="360 deg", operation="new"), S([[10, 0, 0]], 2)],
+     {"body_count": 1, "volume_mm3": 2 / 3 * PI * (20 ** 3 - 18 ** 3), "faces": 3},
+     "V = (2/3) pi (20^3 - 18^3); faces: outer sphere, inner sphere, base ring")
+dr5 = 20 * math.tan(math.radians(5))
+case(T9, "014-drafted-box-with-rounds-shelled",
+     "a 120x80x40 box drafted 5 degrees with 4 mm rounds on the sloping corners, shelled 2 mm open at the top: the inner rounds' edges must lie on their faces (#3573 reports the same design)",
+     sketch("XY", C("sketch.rectangle.center", center=[0, 0], corner=[60, 40]))
+     + [C("solid.extrude", distance=40, taper="-5 deg", operation="new"),
+        F([[sx * (60 - dr5), sy * (40 - dr5), 20] for sx, sy in [(1, 1), (1, -1), (-1, 1), (-1, -1)]], 4), S([[0, 0, 40]], 2)],
+     {"body_count": 1},
+     "no closed-form volume (tilted rounds). Invariants: the shell succeeds, one closed body, and the record's geometry check holds "
+     "(every edge of the four inner rounds lies on its faces; the old offset left them up to 0.02 mm off, which other STEP readers reject)",
+     source="invariants", sources=["tangency-labs/solidcraft#3576", "tangency-labs/solidcraft#3573"])
+case(T9, "015-shelled-dome-ring-joined-back",
+     "a dome (a quarter disc r20 revolved) shelled 2 mm from its flat base, then the base ring (r 18..20) face-extruded 10 mm back into the dome as a join: ~120 s, then 'boolean Union: no result'",
+     sketch(vplane([0, 0, 0]), line([[0, 0], [20, 0]]), C("sketch.arc.three_point", start=[20, 0], through=[14.142136, 14.142136], end=[0, 20]), line([[0, 20], [0, 0]]), name="Quarter")
+     + [C("solid.revolve", sketch="Quarter", axis="y", body_name="Dome"), S([[0, 0, 0]], 2),
+        C("solid.extrude", face=[19, 0, 0], face_body="Dome", distance=10, direction="negative", operation="join")],
+     {"body_count": 1, "volume_mm3": 2 / 3 * PI * (20 ** 3 - 18 ** 3) + 760 * PI - 2 * PI / 3 * 76 ** 1.5},
+     "shell: (2/3) pi (20^3 - 18^3). The ring's prism r 18..20, z 0..10 lies inside the dome's wall where r^2 + z^2 <= 20^2 (r >= 18 keeps it outside the cavity) and pokes out elsewhere: "
+     "it adds 760 pi - Int_18^20 2 pi r sqrt(400 - r^2) dr = 760 pi - (2 pi/3) 76^1.5",
+     sources=["tangency-labs/solidcraft#4847"])
 
 # ---------------------------------------------------------------- 10 patterns and mirrors
 case(T10, "001-rect-pattern-holes", "a d5 hole patterned 3 x 2 at 20 mm in a 60x40x10 plate",
