@@ -43,7 +43,8 @@ pub const FIND_LIMITS_DOC: &str = "joint: id|name; index? (one value; default ev
      \"loop\" | \"limit\" | \"turn\" (an angle with no contact within a turn: a turn from the other side, or ±180° from \
      now when nothing is met at all) | \"range\" (a distance with no contact within the parts' reach: min/max null); \
      touching_at_start, overlapping_at_start: [{a, b, depth_mm}] (already passing into each other: they stop it only going \
-     deeper), refine_mm, gap_method, gap_tolerance_mm, pairs. The design is not changed";
+     deeper), refine_mm, gap_method, gap_tolerance_mm, pairs (0: no two parts to check, so nothing is swept). The design is \
+     not changed";
 
 /// Most samples a sweep takes before its bisection: each is a solve.
 const MAX_SAMPLES: usize = 4096;
@@ -52,9 +53,9 @@ const MAX_BISECTIONS: usize = 64;
 /// Most gap work over a whole sweep (see `ContactGeometry::gaps`).
 const MAX_WORK: usize = 500_000_000;
 /// Most gap work each side of a limit search takes: a whole turn, where curved pins resting in
-/// each other cost about 20 M a sample (the hinge sample's pins). (A 32-bit build, the web,
-/// stops at what its `usize` holds.)
-const FIND_WORK: usize = MAX_WORK.saturating_mul(20);
+/// each other cost about 20 M a sample (the hinge sample's pins, some 500 samples a turn; a few
+/// seconds). (A 32-bit build, the web, stops at what its `usize` holds.)
+const FIND_WORK: usize = MAX_WORK.saturating_mul(40);
 
 /// The nearest a part came to another along the sweep.
 struct Nearest {
@@ -196,11 +197,16 @@ pub(super) fn find_limits(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let refine = positive(p, "refine", 1e3, cmd)?.unwrap_or(0.01);
     let step = positive(p, "step", 1e9, cmd)?;
-    let geometry = pairs_to_check(s, p, cmd)?;
+    // No two parts to check (the joint turns the only part there is): nothing can be met.
+    let geometry = checked_pairs(s, p, cmd)?;
+    let geometry = geometry.has_pairs().then_some(geometry);
     let now = s.doc.assembly.joints.iter().find(|j| j.id == id).map(|j| j.values.clone()).unwrap_or_default();
     // A distance is searched as far as the parts reach: past it, a straight move meets nothing new.
-    let reach = geometry.reach(s)?;
-    if !reach.is_finite() || reach <= 0.0 {
+    let reach = match &geometry {
+        Some(g) => g.reach(s)?,
+        None => 0.0,
+    };
+    if geometry.is_some() && (!reach.is_finite() || reach <= 0.0) {
         return Err(bad(cmd, "the parts have no size to search over"));
     }
     let turn = std::f64::consts::TAU;
@@ -215,17 +221,21 @@ pub(super) fn find_limits(s: &mut Session, p: &Value) -> Result<Value> {
         }
         let range = if angle { turn } else { reach };
         let step = step.map(|x| if angle { x.to_radians() } else { x });
-        let side = |to: f64| {
-            let sweep = Sweep { id, index, from: c, to, step, refine, report_gaps: false, budget: FIND_WORK, free: true };
-            run(s, geometry.clone(), sweep, cmd)
+        let side = |to: f64| match &geometry {
+            Some(g) => {
+                let sweep = Sweep { id, index, from: c, to, step, refine, report_gaps: false, budget: FIND_WORK, free: true };
+                Ok(Some(run(s, g.clone(), sweep, cmd)?))
+            }
+            None => Ok::<_, EngineError>(None),
         };
         // (value, what stopped it) for each side; `None` value: no limit that side. An angle is
         // searched a turn up, then down to a turn below where that stopped: a span of at most a
         // turn, each side checked (a motion link can make the way down differ from the way up).
         let up = side(c + range)?;
-        let down = side(if angle { up.stop.as_ref().map_or(c, |(u, _)| *u) - turn } else { c - range })?.stop;
+        let up_stop = up.as_ref().and_then(|u| u.stop.clone());
+        let down = side(if angle { up_stop.as_ref().map_or(c, |(u, _)| *u) - turn } else { c - range })?.and_then(|d| d.stop);
         let turned = |v: f64| (Some(v), Stop::Other(Why::Turn));
-        let (min, max) = match (angle, up.stop.clone(), down) {
+        let (min, max) = match (angle, up_stop, down) {
             (true, None, None) => (turned(c - turn / 2.0), turned(c + turn / 2.0)),
             (true, None, Some((d, by))) => ((Some(d), by), turned(d + turn)),
             (true, Some((u, by)), None) => (turned(u - turn), (Some(u), by)),
@@ -245,19 +255,25 @@ pub(super) fn find_limits(s: &mut Session, p: &Value) -> Result<Value> {
             max_by: max.1,
             range: shown(range),
         });
-        first.get_or_insert(up);
+        if first.is_none() {
+            first = up;
+        }
     }
-    let Some(start) = first else { return Err(bad(cmd, "the joint has no value to search")) };
     let reply = FindLimitsResult {
         joint: id,
         name,
         values,
         refine_mm: refine,
         gap_method: "mesh".into(),
-        gap_tolerance_mm: start.chord,
-        pairs: start.pairs,
-        touching_at_start: start.touching,
-        overlapping_at_start: start.overlapping.into_iter().map(|(a, b, depth_mm)| Overlap { a, b, depth_mm }).collect(),
+        gap_tolerance_mm: first.as_ref().map_or(0.0, |f| f.chord),
+        pairs: first.as_ref().map_or(0, |f| f.pairs),
+        touching_at_start: first.as_ref().map(|f| f.touching.clone()).unwrap_or_default(),
+        overlapping_at_start: first
+            .map(|f| f.overlapping)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(a, b, depth_mm)| Overlap { a, b, depth_mm })
+            .collect(),
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| EngineError::Other(e.to_string()))
