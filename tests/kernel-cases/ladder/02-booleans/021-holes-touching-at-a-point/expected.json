@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "two through holes r5 whose circles touch at one point (30, 20)",
+ "source": "analytic",
+ "method": "V = 60 40 20 - 2 pi 5^2 20; faces: 6 of the box + 2 bores (top and bottom each one loop round both holes, through their common vertex twice)",
+ "body_count": 1,
+ "volume_mm3": 44858.407346410204,
+ "faces": 8
+}

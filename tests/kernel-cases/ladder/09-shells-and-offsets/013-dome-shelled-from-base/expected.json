@@ -1,0 +1,9 @@
+{
+ "sources": [],
+ "what": "a dome r20 shelled 2 mm, open at its flat base: the rim is the circle r18 where the inner sphere meets the base plane",
+ "source": "analytic",
+ "method": "V = (2/3) pi (20^3 - 18^3); faces: outer sphere, inner sphere, base ring",
+ "body_count": 1,
+ "volume_mm3": 4540.648581988447,
+ "faces": 3
+}

@@ -1,0 +1,113 @@
+{
+ "commands": [
+  {
+   "command": "sketch.create",
+   "params": {
+    "plane": {
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x_dir": [
+      1,
+      0,
+      0
+     ],
+     "y_dir": [
+      0,
+      0,
+      1
+     ]
+    },
+    "name": "Quarter"
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      0
+     ],
+     [
+      20,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.arc.three_point",
+   "params": {
+    "start": [
+     20,
+     0
+    ],
+    "through": [
+     14.142136,
+     14.142136
+    ],
+    "end": [
+     0,
+     20
+    ]
+   }
+  },
+  {
+   "command": "sketch.line",
+   "params": {
+    "points": [
+     [
+      0,
+      20
+     ],
+     [
+      0,
+      0
+     ]
+    ]
+   }
+  },
+  {
+   "command": "sketch.finish",
+   "params": {}
+  },
+  {
+   "command": "solid.revolve",
+   "params": {
+    "sketch": "Quarter",
+    "axis": "y",
+    "body_name": "Dome"
+   }
+  },
+  {
+   "command": "solid.shell",
+   "params": {
+    "faces": [
+     [
+      0,
+      0,
+      0
+     ]
+    ],
+    "thickness": 2
+   }
+  },
+  {
+   "command": "solid.extrude",
+   "params": {
+    "face": [
+     19,
+     0,
+     0
+    ],
+    "face_body": "Dome",
+    "distance": 10,
+    "direction": "negative",
+    "operation": "join"
+   }
+  }
+ ]
+}
