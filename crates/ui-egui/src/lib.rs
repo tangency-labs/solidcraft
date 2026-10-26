@@ -202,6 +202,7 @@ pub mod save_job;
 pub mod scenario;
 pub mod select_other;
 pub mod selection;
+mod selection_length;
 pub mod shell;
 #[cfg(test)]
 mod shell_face_sketch_ui_tests;

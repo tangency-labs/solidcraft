@@ -2196,8 +2196,8 @@ fn analysis_uniform(app: &SolveApp) -> [f32; 8] {
 
 /// While Draft, Accessibility or Curvature Map analysis is on, what each of its colours means and
 /// the values it stands for, at the bottom left of the viewport (#973). The colours alone don't
-/// say, and with colour vision loss they can be hard to tell apart.
-fn analysis_legend(app: &SolveApp, painter: &egui::Painter, rect: Rect) {
+/// say, and with colour vision loss they can be hard to tell apart. Returns where it is drawn.
+fn analysis_legend(app: &SolveApp, painter: &egui::Painter, rect: Rect) -> Option<Rect> {
     use solidcraft_engine::SurfaceAnalysis as A;
     let t = Tokens::get();
     let tr = crate::i18n::tr_label;
@@ -2233,7 +2233,7 @@ fn analysis_legend(app: &SolveApp, painter: &egui::Painter, rect: Rect) {
                 (col(a.curvature[2]), format!("{} ≤ {}", tr("Radius"), crate::prefs::show_mm(app, radius, 1)), false),
             ],
         ),
-        _ => return,
+        _ => return None,
     };
     let (pad, row) = (8.0, 18.0);
     let h = pad * 2.0 + 18.0 + along.as_ref().map_or(0.0, |_| row) + row * rows.len() as f32;
@@ -2262,6 +2262,7 @@ fn analysis_legend(app: &SolveApp, painter: &egui::Painter, rect: Rect) {
         painter.text(pos2(sw.right() + 8.0, y), Align2::LEFT_TOP, text, FontId::proportional(t.font_body), t.text);
         y += row;
     }
+    Some(r)
 }
 
 fn section_clip(app: &SolveApp) -> [f32; 4] {
@@ -3381,7 +3382,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         painter.add(egui_wgpu::Callback::new_paint_callback(rect, cb));
     }
     let overlay_rect = crate::shell::bottom_overlay_rect(app, rect);
-    analysis_legend(app, &painter, overlay_rect);
+    let legend = analysis_legend(app, &painter, overlay_rect);
+    crate::selection_length::paint(app, &painter, overlay_rect, legend);
     crate::frame_rate::paint(app, ui, &painter, overlay_rect);
 
     // ---- interaction ----

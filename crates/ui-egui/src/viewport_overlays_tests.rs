@@ -557,3 +557,90 @@ fn left_history_sidebar_leaves_bottom_readouts_at_the_bottom() {
         assert!((readout.bottom() - (viewport.bottom() - 12.0)).abs() < 0.01, "{name}: {readout:?} in {viewport:?}");
     }
 }
+
+/// The edges of `body` whose ends are `a` and `b`, either way round.
+fn edge_between(h: &Harness, a: Vec3, b: Vec3) -> Sel {
+    let st = h.app.session.world_state();
+    let body = st.bodies.first().unwrap();
+    let m = body.mesh();
+    let index = m
+        .edges
+        .iter()
+        .position(|e| {
+            let (p, q) = (*e.first().unwrap(), *e.last().unwrap());
+            (p.dist(a) < 1e-6 && q.dist(b) < 1e-6) || (p.dist(b) < 1e-6 && q.dist(a) < 1e-6)
+        })
+        .unwrap();
+    Sel::Edge { body: body.name.clone(), index, point: (a + b) * 0.5 }
+}
+
+#[test]
+fn selected_edges_show_their_length_at_the_bottom_left() {
+    // #6560: an edge's length without opening Measure.
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("solid.box", json!({"length":40,"width":30,"height":20})).unwrap();
+    let x = edge_between(&h, Vec3::ZERO, Vec3::new(40.0, 0.0, 0.0));
+    let y = edge_between(&h, Vec3::ZERO, Vec3::new(0.0, 30.0, 0.0));
+    h.app.session.selection = vec![x.clone()];
+    let one = crate::i18n::format("selection.length", &[("length", &crate::prefs::show_mm(&h.app, 40.0, 1))]);
+    assert_eq!(crate::selection_length::text(&h.app), Some(one));
+    h.frame();
+    let viewport = h.app.viewport.layout.as_ref().unwrap().viewport;
+    let readout = crate::scenario::rect_of("viewport:selection_length").unwrap();
+    assert!(viewport.contains_rect(readout), "{readout:?} in {viewport:?}");
+
+    h.app.session.selection = vec![x.clone(), y];
+    let total = crate::i18n::format("selection.length_total", &[("length", &crate::prefs::show_mm(&h.app, 70.0, 1)), ("count", "2")]);
+    assert_eq!(crate::selection_length::text(&h.app), Some(total));
+
+    // Anything that isn't an edge or a curve has no length to show.
+    let body = h.app.session.world_state().bodies.first().unwrap().name.clone();
+    let face = Sel::Face { body, index: 0, point: Vec3::new(20.0, 15.0, 0.0) };
+    h.app.session.selection = vec![x.clone(), face];
+    assert_eq!(crate::selection_length::text(&h.app), None);
+
+    // With an analysis legend up, the readout sits above it.
+    h.app.run("inspect.draft", json!({})).unwrap();
+    h.app.session.selection = vec![x];
+    h.frame();
+    let legend = crate::scenario::rect_of("analysis:legend").unwrap();
+    let readout = crate::scenario::rect_of("viewport:selection_length").unwrap();
+    assert!(readout.bottom() <= legend.top(), "{readout:?} overlaps {legend:?}");
+}
+
+#[test]
+fn a_circle_picked_as_both_rim_halves_is_one_edge() {
+    let mut h = Harness::new();
+    h.app.run("solid.cylinder", json!({"radius": 10, "height": 20})).unwrap();
+    let st = h.app.session.world_state();
+    let body = st.bodies.first().unwrap();
+    let m = body.mesh();
+    let rim: Vec<Sel> = m
+        .edges
+        .iter()
+        .enumerate()
+        .filter(|(_, p)| p.len() > 3 && p.iter().all(|q| (q.z - 20.0).abs() < 1e-6))
+        .map(|(index, p)| Sel::Edge { body: body.name.clone(), index, point: polyline_mid(p) })
+        .collect();
+    assert!(!rim.is_empty());
+    let (length, count) = crate::selection_length::measure(&h.app, &st, &rim).unwrap();
+    assert_eq!(count, 1);
+    assert!((length - 20.0 * std::f64::consts::PI).abs() < 0.2, "{length}");
+}
+
+#[test]
+fn sketch_curves_show_their_length_and_dialogs_hide_it() {
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane": "XY"})).unwrap();
+    h.app.run("sketch.line", json!({"points": [[0, 0], [30, 40]]})).unwrap();
+    h.app.session.selection = vec![Sel::SketchCurve { id: "l1".into(), sketch: None }];
+    let expected = crate::i18n::format("selection.length", &[("length", &crate::prefs::show_mm(&h.app, 50.0, 1))]);
+    assert_eq!(crate::selection_length::text(&h.app), Some(expected));
+    h.frame();
+    assert!(crate::scenario::rect_of("viewport:selection_length").is_some());
+    h.app.start("inspect.measure");
+    h.frame();
+    assert!(crate::scenario::rect_of("viewport:selection_length").is_none(), "Measure shows its own values");
+}

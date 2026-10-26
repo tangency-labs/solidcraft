@@ -1,0 +1,14 @@
+{
+  "en": {
+    "selection.length": "Length {length}",
+    "selection.length_total": "Length {length} ({count} edges)"
+  },
+  "ja": {
+    "selection.length": "長さ {length}",
+    "selection.length_total": "長さ {length}（エッジ {count} 本）"
+  },
+  "zh": {
+    "selection.length": "长度 {length}",
+    "selection.length_total": "长度 {length}（{count} 条边）"
+  }
+}
