@@ -2995,6 +2995,12 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
         app.last_escape = None;
         return;
     }
+    // A feature or the marker dragged in the bottom timeline: Escape puts it back, and only that.
+    if crate::timeline::cancel_drag(ctx) {
+        app.esc_handled = true;
+        app.last_escape = None;
+        return;
+    }
     // The Keyboard Shortcuts window is waiting for a key: it is not a shortcut.
     if crate::keymap::capturing(app) {
         // Parameters is drawn before Preferences; do not let its footer see this Escape.

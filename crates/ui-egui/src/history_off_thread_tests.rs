@@ -237,6 +237,109 @@ fn a_design_changed_while_a_move_computes_is_computed_again() {
     assert_eq!(marker(&h), Some(2));
 }
 
+/// Frames of a queued gesture until a history change starts computing, then that computation
+/// is held: it finishes when the returned sender is dropped, so the frames between see the
+/// history busy for as long as a test needs.
+fn hold_the_change(h: &mut Harness) -> std::sync::mpsc::Sender<Option<solidcraft_engine::Evaluated>> {
+    for _ in 0..100 {
+        if h.app.deferred.is_some() {
+            break;
+        }
+        h.frames(1);
+    }
+    let job = h.app.deferred.as_mut();
+    assert!(job.is_some(), "a history change is computing");
+    job.map(crate::deferred::Deferred::hold).unwrap()
+}
+
+fn names(h: &Harness) -> Vec<String> {
+    h.app.session.doc.features.iter().map(|f| f.name.clone()).collect()
+}
+
+/// While a dropped marker's move computes, the bottom strip shows the marker where it was let
+/// go and looks busy, and neither another drag nor a transport click queues a change; the move
+/// then lands where it was dropped.
+#[test]
+fn the_bottom_strip_shows_a_dropped_move_and_takes_nothing_more_while_it_computes() {
+    use crate::scenario::{handle_at, rect_of};
+    let mut h = block_boss_hole();
+    h.frames(3);
+    let features = names(&h);
+    let at = |name: &str| handle_at(&format!("timeline:{name}")).unwrap();
+    let (first, second) = (at(&features[0]), at(&features[1]));
+    let from = rect_of("history:marker").unwrap().center();
+    h.queue_drag(from, egui::pos2(second.x - 16.0, second.y), 8, 0);
+    let done = hold_the_change(&mut h);
+    h.frames(3);
+    assert_eq!(marker(&h), None, "the design is as it was while the move computes");
+    let shown = rect_of("history:marker").unwrap().center();
+    assert!(at(&features[0]).x < shown.x && shown.x < at(&features[1]).x, "the marker shows where it was dropped: {shown:?}");
+    assert!(rect_of("history:busy").is_some(), "the strip looks busy");
+    h.step(&json!({"drag": [[shown.x, shown.y], [first.x - 16.0, first.y]]})).unwrap();
+    h.step(&json!({"click": {"handle": "history:last"}})).unwrap();
+    assert!(h.app.deferred_queue.is_empty(), "nothing queued behind the move: {:?}", h.app.deferred_queue);
+    drop(done);
+    until_settled(&mut h);
+    assert_eq!(marker(&h), Some(1), "the move landed where it was dropped");
+    // Once it has landed the dropped row is forgotten: while a later change computes, the strip
+    // shows the design as it is, not that drop.
+    h.step(&json!({"click": {"handle": "history:last"}})).unwrap();
+    until_settled(&mut h);
+    let end = rect_of("history:marker").unwrap().center();
+    crate::timeline::run_transport(&mut h.app, crate::ui_kit::HistoryTransport::First);
+    let done = hold_the_change(&mut h);
+    h.frames(2);
+    assert_eq!(rect_of("history:marker").unwrap().center(), end, "the marker as the design has it, at the end");
+    drop(done);
+    until_settled(&mut h);
+}
+
+/// Reordering in the History beside the Browser recomputes off the window thread, as the bottom
+/// strip's does: the window keeps drawing while the design recomputes.
+#[test]
+fn a_reorder_in_the_history_beside_the_browser_computes_off_the_window_thread() {
+    use crate::scenario::handle_at;
+    let mut h = Harness::new();
+    h.app.home.open = false;
+    h.app.preferences.timeline_left = true;
+    for (k, name) in ["A", "B", "C"].into_iter().enumerate() {
+        let corner = [k as f64 * 20.0, 0.0, 0.0];
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": corner, "operation": "new_body", "name": name})).unwrap();
+    }
+    h.app.apply_off_thread = Some(Duration::ZERO);
+    h.frames(3);
+    let (a, c) = (handle_at("timeline:A").unwrap(), handle_at("timeline:C").unwrap());
+    h.queue_drag(c, egui::pos2(a.x, a.y - 8.0), 8, 0);
+    for _ in 0..100 {
+        if h.app.deferred.is_some() || h.app.synthetic.is_empty() {
+            break;
+        }
+        h.frames(1);
+    }
+    assert!(h.app.computing_since().is_some(), "the reorder computes off the window thread");
+    assert_eq!(names(&h), ["A", "B", "C"], "nothing moved yet");
+    until_settled(&mut h);
+    assert_eq!(names(&h), ["C", "A", "B"]);
+}
+
+/// A click on the history marker, without moving it, rolls nothing back or forward: no
+/// recompute is asked for and nothing is added to the undo history, in either layout.
+#[test]
+fn a_click_on_the_history_marker_asks_for_nothing() {
+    use crate::scenario::rect_of;
+    for left in [false, true] {
+        let mut h = block_boss_hole();
+        h.app.preferences.timeline_left = left;
+        h.frames(3);
+        let undo = h.app.session.undo.len();
+        let at = rect_of("history:marker").unwrap().center();
+        h.step(&json!({"click": [at.x, at.y]})).unwrap();
+        h.frames(2);
+        assert!(h.app.deferred.is_none() && h.app.deferred_queue.is_empty(), "left={left}: nothing computing");
+        assert_eq!((h.app.session.undo.len(), marker(&h)), (undo, None), "left={left}");
+    }
+}
+
 fn sketches_with_later_bodies() -> (Harness, Vec<u64>) {
     let mut h = Harness::new();
     h.app.home.open = false;

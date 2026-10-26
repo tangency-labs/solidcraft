@@ -341,6 +341,14 @@ impl Harness {
         out
     }
 
+    /// A `ui.drag` queued without playing it: frames then play it one pointer event at a time, to
+    /// look at a drag while it is held or at what its drop starts.
+    pub fn queue_drag(&mut self, from: egui::Pos2, to: egui::Pos2, steps: usize, hold_end: usize) {
+        let params = json!({"x0": from.x, "y0": from.y, "x1": to.x, "y1": to.y, "steps": steps, "hold_end": hold_end});
+        let (req, _rx) = ControlRequest::new("ui.drag", params);
+        let _ = handle(&mut self.app, &self.ctx, &req);
+    }
+
     /// The centre of the visible widget whose label or value is `text` (the last one drawn wins:
     /// popups are drawn after what opened them).
     pub fn widget(&self, text: &str) -> Option<[f64; 2]> {

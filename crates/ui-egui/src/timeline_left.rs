@@ -328,13 +328,27 @@ pub fn left_timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     t.secondary_hline(ui.painter(), ui.max_rect().x_range(), ui.cursor().top(), t.border);
     ui.add_space(t.space_3);
-    egui::ScrollArea::vertical()
+    let busy = crate::timeline::history_busy(app);
+    let list = egui::ScrollArea::vertical()
         .id_salt("sc_left_timeline_scroll")
         // The animated card owns its height, including the last few closing frames.
         .min_scrolled_height(0.0)
         .auto_shrink([false, false])
         .scroll_source(egui::scroll_area::ScrollSource { scroll_bar: true, mouse_wheel: true, ..egui::scroll_area::ScrollSource::NONE })
-        .show(ui, |ui| vertical_features(app, ui, names));
+        .show(ui, |ui| {
+            if busy {
+                // Nothing in the list takes a click or a drag while the history changes (it still
+                // scrolls); it keeps its colours, and the busy look is painted over it.
+                ui.visuals_mut().disabled_alpha = 1.0;
+                ui.disable();
+            }
+            vertical_features(app, ui, names)
+        })
+        .inner_rect;
+    if busy {
+        let accent = crate::theme::TabAccent::for_tab(&t, &app.ui.tab);
+        crate::ui_kit::history_busy_veil(ui, list, true, accent, &crate::timeline::computing_text(app));
+    }
 }
 
 fn timeline_transport(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
@@ -558,7 +572,9 @@ fn vertical_drop_bar_left(panel_left: f32, target: Option<u64>, groups: &[solidc
 /// into before and after the marker.
 fn vertical_marker(app: &mut SolveApp, ui: &mut egui::Ui, drag: &mut Option<Drag>) -> f32 {
     let t = Tokens::get();
-    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), t.space_12), Sense::drag());
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), t.space_12), Sense::hover());
+    // Taken a little above and below its line too, under a name that stays when rows come and go.
+    let response = ui.interact(rect.expand2(vec2(0.0, t.space_4)), ui.id().with("tl_vertical_marker"), Sense::drag());
     crate::ui_kit::history_marker(ui.painter(), rect, true, crate::theme::TabAccent::for_tab(&t, &app.ui.tab));
     crate::scenario::publish_handle("timeline:rollback", rect.center());
     crate::scenario::publish_rect("history:marker", rect);
@@ -608,7 +624,9 @@ pub(crate) fn drop_items(
     }
     // Crossing the marker rolls the moved features back or forward, in the same step.
     params["active"] = json!(active);
-    let _ = app.run("timeline.move_many", params);
+    // Off the window thread like every other history change, so the window keeps drawing (and
+    // shows the busy look) while the design recomputes.
+    let _ = app.run_heavy("timeline.move_many", params);
     if let Some(group) = group {
         app.tree.collapsed.remove(&format!("timeline_group:{group}"));
     }
@@ -1283,7 +1301,8 @@ fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
         reveal: app.tree.timeline_reveal.take(),
         from_view,
         linked_hover: app.viewport.hover_feature.filter(|id| plan.referenced(*id)),
-        drag: ui.data(|data| data.get_temp(drag_id)),
+        // A drag ends when a change starts computing.
+        drag: if crate::timeline::history_busy(app) { None } else { ui.data(|data| data.get_temp(drag_id)) },
         hovered: None,
         edit: None,
     };
@@ -1418,6 +1437,8 @@ fn vertical_features(app: &mut SolveApp, ui: &mut egui::Ui, names: bool) {
         && let Some(slot) = nearest_vertical_slot(&slots, pointer.y)
     {
         match active {
+            // The marker let go where it already is changes nothing.
+            Drag::Marker if slot.position.min(n) == marker.min(n) => {}
             Drag::Marker => {
                 let _ = app.run_heavy("timeline.roll_to", if slot.position >= n { json!({}) } else { json!({"position": slot.position}) });
             }
@@ -1465,8 +1486,13 @@ fn feature_row(app: &mut SolveApp, ui: &mut egui::Ui, rows: &mut Rows, index: us
     let style = if names { crate::ui_kit::HistoryStyle::Names } else { crate::ui_kit::HistoryStyle::Icons };
     // `allocate_exact_size` in two steps, so a row outside the view takes its place and no more.
     let size = vec2(ui.available_width(), style.height());
-    let (row_id, frame) = ui.allocate_space(size);
+    let (_, frame) = ui.allocate_space(size);
     let row = ui.layout().align_size_within_rect(size, frame);
+    // Named by its feature, so a press survives rows above it coming and going.
+    let row_id = match row_kind {
+        RowKind::Reference { parent } => ui.id().with(("history_reference_row", parent, id)),
+        RowKind::Own | RowKind::Nested => ui.id().with(("history_row", id)),
+    };
     let rect =
         if style == crate::ui_kit::HistoryStyle::Icons { Rect::from_center_size(row.center(), vec2(style.height(), style.height())) } else { row };
     let parent = match row_kind {
