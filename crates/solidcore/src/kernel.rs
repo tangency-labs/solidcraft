@@ -145,24 +145,10 @@ impl Caches {
 #[allow(clippy::struct_excessive_bools)]
 #[non_exhaustive]
 pub struct UpstreamFixes {
-    /// `SmGapFunction::BuildSampleSet` samples the B-spline spans inside the requested
-    /// curve interval or surface domain, normalizing against that interval and keeping
-    /// its exact endpoints. Upstream starts at the first knot and normalizes against
-    /// the whole knot range before mapping into the sample interval, so trimmed
-    /// geometry can miss a gap peak (WR-89). Off by default for pinned C++ parity.
-    pub gap_samples_use_trimmed_spans: bool,
-    /// `SmCurveLoops::GetLoopStartEnd` starts a later loop after the previous loop
-    /// ends, keeping adjacency within that loop (WR-96). Off by default for C++ parity.
-    pub curve_loop_start_after_previous_end: bool,
-    /// The generic temporary-radius constructor reports setup failures before filleting (#458, UB-252 follow-up).
-    pub temporary_radius_setup_errors: bool,
-    /// `SmFilletGeom::Trim` returns the first curve/surface trim or interval-intersection error instead of dropping it and continuing with an unset interval (WR-604, #483). Earlier successful edits remain; off by default for pinned C++ parity.
-    pub fillet_trim_status: bool,
-    /// `SmCurve::ComputeCrvsNormal` uses the sampled polygon's area vector, so a
-    /// concave planar loop's normal follows its orientation and its taper drafts
-    /// in the requested direction (WR-587, #1776). An open chain closes by its chord.
-    pub curve_loop_normal_from_area: bool,
-    /// `CalcRailIntEdgeuse`'s retry rail search holds a variable round's radius only where its first search does (at a corner calculated as constant radius), so the rail misses the arc it would meet only at that radius and the corner cuts the round off against the body; needs `fillet_nx1_end_rib_global_merge` there (WR-300, #1023).
+    /// `SmPlane::IsNurbSurfacePlane` places a recognised surface's origin after
+    /// orthogonalising its axes (WR-441, upstream issue #1056).
+    pub plane_recognition_origin_after_axes: bool,
+    /// `CalcRailIntEdgeuse`'s retry rail search holds a variable round's radius only where its first search does (at a corner calculated as constant radius) (WR-300, #1023).
     pub fillet_retry_radius_as_first: bool,
     /// `TestRollOver` joins a rail's neighbouring intervals on its face or the face's boundary before the rollover, so a rail along its face's rim does not fail "Unable to Process Rollover" (WR-301, #485).
     pub fillet_rail_rim_on_face: bool,

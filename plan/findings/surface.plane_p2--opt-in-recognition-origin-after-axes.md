@@ -1,0 +1,9 @@
+# surface.plane_p2: Opt-in origin correction for plane recognition (2026-10-26)
+
+- **Unit:** `surface.plane_p2`, `Plane::is_nurb_surface_plane`.
+- **Issue:** SolidCore #1056; upstream source defect WR-441 in `plan/upstream-issues/WR-441--plane-recognition-origin-before-axis-correction.md`.
+- **Inputs:** A planar bilinear B-spline with corners `(0,0,0)`, `(2,0,0)`, `(1.28e-6,40,0)`, `(2.00000128,40,0)`, reparameterised to U `[2,3]` and V `[4,5]` or `[-5,-4]`. The upper corner is used when the recogniser calculates its point tolerance, giving about 41e-6 mm so both variants can return planes whose displacement can be checked.
+- **Values:** Source arithmetic predicts lower-corner X errors of `-5.12e-6` and `+6.4e-6` mm respectively in the default path. With `Kernel::fixes.plane_recognition_origin_after_axes = true`, that corner is anchored. The upper corner retains about `-1.28e-6` mm X residual because the orthogonal plane cannot represent the original small parameter shear exactly. These are analytic expectations and local test assertions, not measured Rust/C++ difftest results.
+- **Cause:** SMLib computes the new origin with the pre-correction Y axis but evaluates the plane with the corrected axis. The nonzero V minimum multiplies the axis difference.
+- **Rust choice:** Preserve original arithmetic with the default-false flag; opt in to recomputing the origin after the existing axis correction. This intentionally differs from the pinned C++ behavior only when enabled.
+- **Status:** Local source and regression test prepared against source base `002754f4ea652fb864527029a67ee9dcfeac01c6`. No PR has been opened. Cargo, rustc, rustfmt, sccache and C++ reference libraries are unavailable here, so compilation, test, parity and full groove-Boolean acceptance remain unverified. Next gate is toolchain-backed Rust checks and exact-base C++ difftest/CI before any PR-ready claim.
