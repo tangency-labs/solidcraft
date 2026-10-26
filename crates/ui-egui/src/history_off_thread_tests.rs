@@ -294,6 +294,29 @@ fn the_bottom_strip_shows_a_dropped_move_and_takes_nothing_more_while_it_compute
     until_settled(&mut h);
 }
 
+/// The view's "Computing…" toast is left out while History shows its own busy look, and still
+/// shown when History is folded away.
+#[test]
+fn the_view_says_computing_only_when_history_does_not() {
+    use crate::scenario::rect_of;
+    for folded in [false, true] {
+        let mut h = block_boss_hole();
+        if folded {
+            h.app.preferences.timeline_left = true;
+            h.app.preferences.timeline_under_browser = true;
+            h.app.preferences.timeline_collapsed = true;
+        }
+        h.frames(3);
+        h.app.run_heavy("timeline.roll_to", json!({"position": 1})).unwrap();
+        let done = hold_the_change(&mut h);
+        h.frames(3);
+        assert_eq!(rect_of("history:busy").is_some(), !folded, "folded={folded}: History looks busy");
+        assert_eq!(rect_of("toast:computing").is_some(), folded, "folded={folded}: the view's toast");
+        drop(done);
+        until_settled(&mut h);
+    }
+}
+
 /// Reordering in the History beside the Browser recomputes off the window thread, as the bottom
 /// strip's does: the window keeps drawing while the design recomputes.
 #[test]

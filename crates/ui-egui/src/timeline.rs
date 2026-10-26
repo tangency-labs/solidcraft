@@ -1400,6 +1400,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
     if busy {
         let area = Rect::from_min_max(pos2(controls_left - t.space_4, r.top() + t.space_3), pos2(r.right() - t.space_3, r.bottom() - t.space_3));
         crate::ui_kit::history_busy_veil(ui, area, false, accent, &computing_text(app));
+        app.shell.history_busy_frame = Some(ui.ctx().cumulative_frame_nr());
     }
 }
 

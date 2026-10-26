@@ -348,6 +348,7 @@ pub fn left_timeline(app: &mut SolveApp, ui: &mut egui::Ui) {
     if busy {
         let accent = crate::theme::TabAccent::for_tab(&t, &app.ui.tab);
         crate::ui_kit::history_busy_veil(ui, list, true, accent, &crate::timeline::computing_text(app));
+        app.shell.history_busy_frame = Some(ui.ctx().cumulative_frame_nr());
     }
 }
 
