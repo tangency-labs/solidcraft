@@ -8,8 +8,9 @@
 //!
 //! A [`Call`] is encoded as `op args...`. An operand block ([`BrepSpec`]) is `kind`
 //! then its data: `1 O[3] length width height` (`SmApiCreateBox`), `2 C[3] radius`
-//! (`SmApiCreateSphere`), `3 O[3] x y` (`SmApiCreatePlane`, the `SmBrep*&` overload)
-//! or `4 operation brep brep` (the `SmApiBoolean` result of two operand blocks). Nested
+//! (`SmApiCreateSphere`), `3 O[3] x y` (`SmApiCreatePlane`, the `SmBrep*&` overload),
+//! `4 operation brep brep` (the `SmApiBoolean` result of two operand blocks) or
+//! `5 C[3] major minor` (`SmApiCreateTorus`, the `SmBrep*&` overload). Nested
 //! blocks are at most [`MAX_DEPTH`] deep.
 //!
 //! | [`Call`]        | op | args                                   | output after the status (on success)            |
@@ -23,6 +24,7 @@
 //! | `MergeBreps`    | 7  | `n`, `n` breps, `operation`            | `list_len has [brep]`                           |
 //! | `Lists`         | 8  | `n1`, breps, `n2`, breps, `operation`  | `nb`, `nb` x `has [brep]`, `ns`                 |
 //! | `Trees`         | 9  | `n`, breps, `t`, `t` nodes             | `nb`, `nb` x `has [brep]`                       |
+//! | `Measured`      | 10 | brep brep `operation` `post_process`   | two-B-rep record, then the measures             |
 //!
 //! The two-B-rep record is `has [is_first kept brep [brep]]` (the second B-rep when
 //! upstream keeps it); a B-rep is `faces edges vertices regions manifold_solid`, then per
@@ -30,10 +32,19 @@
 //! `faceuses mate_region`, the `GetRegions` index of the region behind the shell's first
 //! faceuse's mate (`-1` without one). A
 //! rejected `MergeBreps` (`SM_ERR_INVALID_INPUT`) is followed by `cleared list_len`.
+//! A failing `SmApiCreateTorus` operand (in any call) makes the whole record its status
+//! then `2`, so both sides' radius guards are compared.
+//! `Measured` is `SmApiBooleanWithOptions` with only `bBooleanPostProcess` chosen; on
+//! success its record ends with the result's measures `volume_status volume faces areas...`
+//! (`SmApiBrepComputeVolume` at [`VOLUME_ACCURACY`], then each face's `SmApiFaceComputeArea`
+//! at [`AREA_ACCURACY`] in ascending order, a failed face as minus its status) and the
+//! number of those values last ([`split_measures`]).
 //!
 //! [`run`] accepts only what upstream handles without undefined behaviour: finite
-//! operand data with positive box and plane dimensions and a nonzero sphere radius (a
-//! failing constructor or operand Boolean is `SC_ERR_ARG`); operand Booleans that are union, intersection, difference
+//! operand data with positive box and plane dimensions and a nonzero sphere radius (torus
+//! radii are not limited: `SmTorus::CreateCanonical` fails cleanly for a radius
+//! `<= SM_EFF_ZERO` and accepts a spindle torus, `minor >= major`; any other failing
+//! constructor or operand Boolean is `SC_ERR_ARG`); operand Booleans that are union, intersection, difference
 //! or slice (upstream deletes their second operand); operation codes of `SmBooleanOperationType` (0 to 10);
 //! at most [`MAX_LIST`] B-reps per list and [`MAX_TREE`] tree nodes in -64..=64; tree
 //! executed B-rep nodes in range and binary operands non-null (`SmMerge::BooleanTrees`
@@ -48,6 +59,10 @@ pub const MAX_LIST: usize = 8;
 pub const MAX_TREE: usize = 64;
 /// Deepest operand block accepted by [`run`] (a plain primitive is depth 1).
 pub const MAX_DEPTH: usize = 4;
+/// `dRelativeAccuracy` of the [`Call::Measured`] volume (`SmApiBrepComputeVolume`).
+pub const VOLUME_ACCURACY: f64 = 1e-6;
+/// `dRelativeAccuracy` of the [`Call::Measured`] face areas (`SmApiFaceComputeArea`).
+pub const AREA_ACCURACY: f64 = 1e-4;
 
 mod sys {
     extern "C" {
@@ -84,6 +99,15 @@ pub enum BrepSpec {
         origin: [f64; 3],
         /// Extents along x and y.
         size: [f64; 2],
+    },
+    /// `SmApiCreateTorus(center, major, minor)` (axis +Z).
+    Torus {
+        /// Center.
+        center: [f64; 3],
+        /// Major (ring) radius.
+        major: f64,
+        /// Minor (tube) radius.
+        minor: f64,
     },
     /// `SmApiBoolean(a, b, operation)`'s result.
     Boolean {
@@ -186,6 +210,18 @@ pub enum Call {
         /// Postfix nodes: `>= 0` a B-rep index, `< 0` an operation.
         tree: Vec<i64>,
     },
+    /// `SmApiBooleanWithOptions` with only `bBooleanPostProcess` chosen, followed by the
+    /// result's volume and face areas.
+    Measured {
+        /// First operand.
+        a: BrepSpec,
+        /// Second operand.
+        b: BrepSpec,
+        /// `SmBooleanOperationType` value.
+        operation: i32,
+        /// `bBooleanPostProcess`.
+        post_process: bool,
+    },
 }
 
 fn check_spec(s: &BrepSpec, depth: usize) -> Result<(), FfiError> {
@@ -215,6 +251,16 @@ fn check_spec(s: &BrepSpec, depth: usize) -> Result<(), FfiError> {
             }
             if size.iter().any(|&x| x <= 0.0) {
                 return Err(bad("plane: dimensions must be positive"));
+            }
+        }
+        BrepSpec::Torus {
+            center,
+            major,
+            minor,
+        } => {
+            if !center.iter().all(|x| x.is_finite()) || !major.is_finite() || !minor.is_finite()
+            {
+                return Err(bad("torus: non-finite value"));
             }
         }
         BrepSpec::Boolean { operation, a, b } => {
@@ -260,6 +306,16 @@ fn push_checked(o: &mut Vec<f64>, s: &BrepSpec) {
             o.push(3.0);
             o.extend_from_slice(origin);
             o.extend_from_slice(size);
+        }
+        BrepSpec::Torus {
+            center,
+            major,
+            minor,
+        } => {
+            o.push(5.0);
+            o.extend_from_slice(center);
+            o.push(*major);
+            o.push(*minor);
         }
         BrepSpec::Boolean { operation, a, b } => {
             o.push(4.0);
@@ -358,8 +414,35 @@ fn encode(call: &Call) -> Result<Vec<f64>, FfiError> {
             o.push(tree.len() as f64);
             o.extend(tree.iter().map(|&n| n as f64));
         }
+        Call::Measured {
+            a,
+            b,
+            operation,
+            post_process,
+        } => {
+            check_op(*operation)?;
+            o.push(10.0);
+            push_spec(&mut o, a)?;
+            push_spec(&mut o, b)?;
+            o.push(f64::from(*operation));
+            o.push(flag(*post_process));
+        }
     }
     Ok(o)
+}
+
+/// Splits a successful [`Call::Measured`] record into the integer part before the
+/// measures and the measures themselves (`volume_status volume faces areas...`), using the
+/// count the shim appends last. `None` for a record too short for its count.
+#[must_use]
+pub fn split_measures(record: &[f64]) -> Option<(&[f64], &[f64])> {
+    let (&n, rest) = record.split_last()?;
+    if !(n >= 0.0 && n.fract() == 0.0) {
+        return None;
+    }
+    let n = n as usize;
+    let at = rest.len().checked_sub(n)?;
+    Some(rest.split_at(at))
 }
 
 /// Runs one API call on the C++ side. Returns the flat output record (status first,

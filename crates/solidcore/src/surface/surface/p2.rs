@@ -1806,8 +1806,8 @@ impl Surface {
     }
 
     /// `uv` of the STEP parameterisation in the NURBS parameterisation
-    /// (`ConvertUVFromSTEPToNURBS`: the surface of revolution's override, else the
-    /// base default, the identity).
+    /// (`ConvertUVFromSTEPToNURBS`: the cone's, sphere's, torus's or surface of revolution's
+    /// override, else the base default, the identity).
     ///
     /// # Errors
     ///
@@ -1816,6 +1816,7 @@ impl Surface {
         match &self.kind {
             SurfaceKind::Cone(s) => s.convert_uv_from_step_to_nurbs(k, step_uv),
             SurfaceKind::Sphere(s) => s.convert_uv_from_step_to_nurbs(k, step_uv),
+            SurfaceKind::Torus(s) => s.convert_uv_from_step_to_nurbs(k, step_uv),
             SurfaceKind::SurfOfRevolution(s) => s.convert_uv_from_step_to_nurbs(k, step_uv),
             // (GetNaturalUVDomain makes a missing NURB)
             SurfaceKind::SurfOfExtrusion(_) => match self.kind_with_nurb(k)? {
@@ -1827,8 +1828,8 @@ impl Surface {
     }
 
     /// `uv` of the NURBS parameterisation in the STEP parameterisation
-    /// (`ConvertUVFromNURBSToSTEP`: the surface of revolution's override, else the
-    /// base default, the identity).
+    /// (`ConvertUVFromNURBSToSTEP`: the cone's, sphere's, torus's or surface of revolution's
+    /// override, else the base default, the identity).
     ///
     /// # Errors
     ///
@@ -1837,6 +1838,7 @@ impl Surface {
         match &self.kind {
             SurfaceKind::Cone(s) => s.convert_uv_from_nurbs_to_step(k, nurbs_uv),
             SurfaceKind::Sphere(s) => s.convert_uv_from_nurbs_to_step(k, nurbs_uv),
+            SurfaceKind::Torus(s) => s.convert_uv_from_nurbs_to_step(k, nurbs_uv),
             SurfaceKind::SurfOfRevolution(s) => s.convert_uv_from_nurbs_to_step(k, nurbs_uv),
             // (GetNaturalUVDomain makes a missing NURB)
             SurfaceKind::SurfOfExtrusion(_) => match self.kind_with_nurb(k)? {

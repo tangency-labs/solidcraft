@@ -5,7 +5,8 @@
 //!
 //! A case is one API call (`api` plus its arguments). Operands are boxes
 //! (`SmApiCreateBox`) or spheres (`SmApiCreateSphere`); fixture cases also use sheets
-//! (`SmApiCreatePlane`) and the result of an `SmApiBoolean` of two operands. Both sides
+//! (`SmApiCreatePlane`), tori (`SmApiCreateTorus`) and the result of an `SmApiBoolean` of
+//! two operands. Both sides
 //! build them with the same constructors (`primitive::api_primitives` and
 //! `boolean::api_brep::boolean` on the Rust side) in the case's one kernel / context, at the default `Kernel::fixes` (SMLib behaviour). A
 //! constructor that fails is a harness error on both sides (the shim's `SC_ERR_ARG`);
@@ -13,7 +14,10 @@
 //! `1007` `SM_ERR_INVALID_INPUT`; `-1` on the Rust side for an error upstream cannot
 //! produce) and `record` (the op's outputs after the status, see the FFI module): on
 //! success the result B-reps' face, edge, vertex and region counts and
-//! `IsManifoldSolid`.
+//! `IsManifoldSolid`. A `measured` call (`SmApiBooleanWithOptions` with only the
+//! post-process flag chosen; fixtures only) also compares `measures`: the result's volume
+//! (`SmApiBrepComputeVolume`) and its face areas (`SmApiFaceComputeArea`) in ascending
+//! order, so a result with the right topology but a wrongly trimmed face shows.
 //!
 //! Compared: the input validation (`SM_BO_EXTRACT_SEPARATE` for the two-B-rep entry
 //! points, short lists and operations other than union / intersection / difference /
@@ -28,7 +32,9 @@ use solidcore::boolean::api_brep as api;
 use solidcore::boolean::merge::MergeOptions;
 use solidcore::geom::a_object::BooleanOperation;
 use solidcore::geom::vector3d::Point3;
+use solidcore::geom::attribute::{AttributeStore, ObjectKey};
 use solidcore::kernel::Kernel;
+use solidcore::mass::integrator::properties::{brep_volume, face_area, PropertyAttributes};
 use solidcore::primitive::api_primitives as primitives;
 use solidcore::topology::brep::{p1 as brep_p1, p2 as brep_p2};
 use solidcore::topology::edgeuse::p1 as edgeuse_p1;
@@ -68,6 +74,8 @@ enum BrepIn {
     Sphere { center: P3, radius: f64 },
     /// `SmApiCreatePlane` (`SmBrep*&` overload).
     Plane { origin: P3, size: [f64; 2] },
+    /// `SmApiCreateTorus` (`SmBrep*&` overload; axis +Z).
+    Torus { center: P3, major: f64, minor: f64 },
     /// `SmApiBoolean(a, b, operation)`'s result.
     Boolean {
         operation: i32,
@@ -140,6 +148,15 @@ enum Inputs {
         breps: Vec<BrepIn>,
         tree: Vec<i64>,
     },
+    /// `SmApiBooleanWithOptions` with only `bBooleanPostProcess` chosen, then the
+    /// result's volume and face areas.
+    Measured {
+        a: BrepIn,
+        b: BrepIn,
+        operation: i32,
+        #[serde(default = "yes")]
+        post_process: bool,
+    },
 }
 
 fn spec(b: &BrepIn) -> BrepSpec {
@@ -147,6 +164,15 @@ fn spec(b: &BrepIn) -> BrepSpec {
         &BrepIn::Box { origin, size } => BrepSpec::Box { origin, size },
         &BrepIn::Sphere { center, radius } => BrepSpec::Sphere { center, radius },
         &BrepIn::Plane { origin, size } => BrepSpec::Plane { origin, size },
+        &BrepIn::Torus {
+            center,
+            major,
+            minor,
+        } => BrepSpec::Torus {
+            center,
+            major,
+            minor,
+        },
         BrepIn::Boolean { operation, a, b } => BrepSpec::Boolean {
             operation: *operation,
             a: Box::new(spec(a)),
@@ -216,6 +242,17 @@ fn to_call(i: &Inputs) -> Call {
             breps: specs(breps),
             tree: tree.clone(),
         },
+        Inputs::Measured {
+            a,
+            b,
+            operation,
+            post_process,
+        } => Call::Measured {
+            a: spec(a),
+            b: spec(b),
+            operation: *operation,
+            post_process: *post_process,
+        },
     }
 }
 
@@ -246,9 +283,24 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
         ));
     }
     match ffi::run(&to_call(i)) {
-        Ok(o) => to_output(&o),
+        Ok(o) => match i {
+            Inputs::Measured { .. } => measured_output(&o),
+            _ => to_output(&o),
+        },
         Err(e) => Err(harness(format!("cpp: {e}"))),
     }
+}
+
+/// A `measured` record: the integer record, then on success (`status` 0 and a result)
+/// the measures the shim appends ([`ffi::split_measures`]).
+fn measured_output(o: &[f64]) -> Result<Output, HarnessError> {
+    let succeeded = o.first() == Some(&0.0) && o.get(1) == Some(&1.0);
+    if !succeeded {
+        return to_output(o);
+    }
+    let (head, measures) =
+        ffi::split_measures(o).ok_or_else(|| harness("cpp: measured record too short"))?;
+    Ok(to_output(head)?.values("measures", measures.to_vec()))
 }
 
 /// Whether the Boolean reaches UB-175 (`plan/upstream-issues.md`): the teardown of
@@ -260,7 +312,9 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
 fn ub_175(i: &Inputs) -> Result<bool, HarnessError> {
     let mut k = Kernel::default();
     match rust_call_with(&mut k, i, &|_| {}) {
-        Ok(_) | Err(Stop::Deferred(_)) => Ok(k.upstream_ub_passed.contains(&"UB-175")),
+        Ok(_) | Err(Stop::Deferred(_) | Stop::Torus(_)) => {
+            Ok(k.upstream_ub_passed.contains(&"UB-175"))
+        }
         Err(Stop::Harness(e)) => Err(e),
     }
 }
@@ -288,10 +342,12 @@ fn options(f: FlagsIn) -> MergeOptions {
     )
 }
 
-/// Why a Rust run stopped early: `Unported` defers the case; anything else is a
+/// Why a Rust run stopped early: `Unported` defers the case; a failing torus operand is
+/// the call's record (`status 2`, as the shim's `TorusFailed`); anything else is a
 /// harness error, as the shim treats a failing operand constructor (`SC_ERR_ARG`).
 enum Stop {
     Deferred(Box<Output>),
+    Torus(Box<Output>),
     Harness(HarnessError),
 }
 
@@ -330,6 +386,18 @@ fn build_at(k: &mut Kernel, b: &BrepIn, depth: usize) -> Result<Brep, Stop> {
         &BrepIn::Sphere { center, radius } => primitives::create_sphere(k, p3(center), radius),
         &BrepIn::Plane { origin, size } => {
             primitives::create_plane(k, p3(origin), size[0], size[1])
+        }
+        &BrepIn::Torus {
+            center,
+            major,
+            minor,
+        } => {
+            return primitives::create_torus(k, p3(center), major, minor).map_err(|e| {
+                match Output::unported(&e) {
+                    Some(d) => Stop::Deferred(Box::new(d)),
+                    None => Stop::Torus(Box::new(record(status(&e), vec![2]))),
+                }
+            });
         }
         BrepIn::Boolean { operation, a, b } => {
             let (a, b) = (build_at(k, a, depth + 1)?, build_at(k, b, depth + 1)?);
@@ -405,6 +473,38 @@ fn mate_region(b: &Brep, fu: solidcore::Result<Option<FaceuseId>>, regions: &[Re
     .map_err(Stop::from)
 }
 
+/// The shim's `put_measures`: `volume_status volume faces` and the face areas in
+/// ascending order (a failed face as minus its status). An unported callee defers.
+fn measures(k: &Kernel, b: &mut Brep) -> Result<Vec<f64>, Stop> {
+    let store = AttributeStore::default();
+    let attrs = PropertyAttributes {
+        store: &store,
+        key_of: &|_| ObjectKey(0),
+    };
+    let fail = |e: &SolidError| -> Result<f64, Stop> {
+        match Output::unported(e) {
+            Some(d) => Err(Stop::Deferred(Box::new(d))),
+            None => Ok(status(e) as f64),
+        }
+    };
+    let mut o = match brep_volume(k, b, ffi::VOLUME_ACCURACY, &attrs) {
+        Ok(v) => vec![0.0, v],
+        Err(e) => vec![fail(&e)?, 0.0],
+    };
+    let faces = brep_p1::faces(b, None).map_err(|e| stop("GetFaces", &e))?;
+    o.push(faces.len() as f64);
+    let mut areas = Vec::new();
+    for f in faces {
+        areas.push(match face_area(k, b, f, ffi::AREA_ACCURACY) {
+            Ok(a) => a,
+            Err(e) => -fail(&e)?,
+        });
+    }
+    areas.sort_by(f64::total_cmp);
+    o.extend(areas);
+    Ok(o)
+}
+
 /// Whether upstream keeps the second operand of a successful two-B-rep boolean
 /// (`source/SM_API/inc/SmApiBrep.h`; the shim's `keeps_other`).
 fn keeps_other(operation: i32, keep_option: bool) -> bool {
@@ -433,7 +533,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     let mut k = Kernel::default();
     match rust_call(&mut k, i) {
         Ok(o) => Ok(o),
-        Err(Stop::Deferred(o)) => Ok(*o),
+        Err(Stop::Deferred(o) | Stop::Torus(o)) => Ok(*o),
         Err(Stop::Harness(e)) => Err(e),
     }
 }
@@ -532,6 +632,23 @@ fn rust_call_with(k: &mut Kernel, i: &Inputs, seen: &dyn Fn(&SolidError)) -> Res
                     }
                     o.push(count(res.surfaces.len())?);
                     Ok(record(0, o))
+                }
+                Err(e) => Ok(err_output(&e)),
+            }
+        }
+        Inputs::Measured {
+            a,
+            b,
+            operation,
+            post_process,
+        } => {
+            let (a, b) = (build(k, a)?, build(k, b)?);
+            let flags = MergeOptions::new(false, false, *post_process, false, false);
+            match api::boolean_with_options(k, a, b, op(*operation)?, flags) {
+                Ok(mut out) => {
+                    let rec = two_record(&out, keeps_other(*operation, false))?;
+                    let m = measures(k, &mut out.result)?;
+                    Ok(rec.values("measures", m))
                 }
                 Err(e) => Ok(err_output(&e)),
             }
