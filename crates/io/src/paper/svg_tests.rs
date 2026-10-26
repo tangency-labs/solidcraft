@@ -1,7 +1,7 @@
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
 
-use solidcraft_geom::paper::{Group, ObjectKind, Scene};
-use solidcraft_geom::{Loop2, Region2};
+use solidcraft_geom::paper::{Group, Item, ObjectKind, Scene};
+use solidcraft_geom::{Loop2, Region2, Seg2, Vec2};
 
 use super::*;
 use crate::{Geom2, read_svg};
@@ -101,14 +101,12 @@ fn cubics_and_parabolas_are_written_and_other_conics_refused() {
 }
 
 /// Numbers are whole nanometres: no exponent, no "-0", trailing zeros trimmed; a width under half
-/// a nanometre is written as one and reported.
+/// a nanometre is written as one and reported (the grid's own rounding is `geom`'s test).
 #[test]
 fn numbers_are_whole_nanometres() {
     for (n, text) in [(0, "0"), (1, "0.000001"), (-1, "-0.000001"), (1_500_000, "1.5"), (-420_000_000, "-420"), (123_456_789, "123.456789")] {
         assert_eq!(number(n), text);
     }
-    assert_eq!((nano(-0.0).unwrap(), nano(4e-7).unwrap(), nano(6e-7).unwrap()), (0, 0, 1));
-    assert!(nano(f64::NAN).is_err() && nano(1e10).is_err());
     let thin = sheet(vec![stroke(vec![line(p(0.0, 0.0), p(1.0, 0.0))], false, 1e-9)]);
     let (text, report) = svg(&thin);
     assert!(text.contains("stroke-width=\"0.000001\""), "{text}");
