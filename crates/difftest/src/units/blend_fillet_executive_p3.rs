@@ -786,7 +786,7 @@ fn rust(input: &Inputs) -> Result<Output, HarnessError> {
     else {
         return Err(HarnessError::new("short executive record"));
     };
-    let mut k = seeded_kernel()?;
+    let mut k = Kernel::default();
     k.context.set_doing_boolean(*prior_boolean != 0.0);
     let mut b = solidcore::topology::Brep::new();
     // Apply SmZoneTol3d's default-sentinel/fabs conversion, then write the member.
@@ -908,7 +908,7 @@ fn rust(input: &Inputs) -> Result<Output, HarnessError> {
             .chain(error_out.comment.bytes())
             .map(f64::from),
     );
-    output(&values)
+    Ok(with_point_step(output(&values)?, rust_point_step(&k)))
 }
 
 impl UnitDiff for Runner {
@@ -950,16 +950,18 @@ impl UnitDiff for Runner {
             if !input.record.is_empty() {
                 return Err(HarnessError::new("mixed fixture forms"));
             }
-            let values =
-                ffi::upstream_fixture(example).map_err(|e| HarnessError::new(e.to_string()))?;
+            let (values, step) = fresh_cpp(|| ffi::upstream_fixture(example))
+                .map_err(|e| HarnessError::new(e.to_string()))?;
             let mut out = Output::new();
             out.ints.insert(
                 "api_status_counts".into(),
                 values.into_iter().map(|v| v as i64).collect(),
             );
-            return Ok(out);
+            return Ok(with_point_step(out, step));
         }
-        output(&ffi::eval(&input.record).map_err(|e| HarnessError::new(e.to_string()))?)
+        let (values, step) =
+            fresh_cpp(|| ffi::eval(&input.record)).map_err(|e| HarnessError::new(e.to_string()))?;
+        Ok(with_point_step(output(&values)?, step))
     }
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let input = case.parse::<Inputs>()?;
@@ -997,22 +999,32 @@ impl UnitDiff for Runner {
     }
 }
 
-/// The C++ library's `sdStaticStep` (ND-3: `SmFilletSolver::ComputePointValues`'
-/// function static, fixed by the first call in the process), probed after the case's
-/// C++ run, for the Rust side's [`Kernel::fillet_point_step`] latch. Earlier cases in
-/// the same process (a tangent-point fillet latches `1e-3`) change later C++ results;
-/// the Rust kernel of every case starts from the same value. The probe latches `1e-5`
-/// when nothing has, as the case's own first call would have if the C++ run never
-/// reached the finite-difference step (the Rust run then never reads it either).
-pub(super) fn point_step() -> Result<Option<f64>, HarnessError> {
-    solidcore_ffi::units::blend_fillet_solver_p4::static_step()
-        .map(Some)
-        .map_err(|e| HarnessError::new(format!("sdStaticStep probe: {e}")))
+/// Compared key: the `sdStaticStep` latch (ND-3: `SmFilletSolver::ComputePointValues`'
+/// function static, fixed by the first call in a process) after the case.
+pub(super) const POINT_STEP: &str = "fillet_point_step";
+
+/// Runs a case's C++ calls in a fresh child process, so `sdStaticStep` starts unlatched
+/// as on a first call whatever ran before, and returns the record with the step the case
+/// left latched there (`1e-5` when it latched nothing). The step is a compared output
+/// only ([`POINT_STEP`]); the Rust side never sees it.
+pub(super) fn fresh_cpp(
+    case: impl FnOnce() -> Result<Vec<f64>, solidcore_ffi::FfiError>,
+) -> Result<(Vec<f64>, f64), solidcore_ffi::FfiError> {
+    solidcore_ffi::units::blend_fillet_solver_p4::with_fresh_static_step(case)
 }
 
-/// A fresh kernel whose `sdStaticStep` latch holds the C++ library's (see [`point_step`]).
-pub(super) fn seeded_kernel() -> Result<Kernel, HarnessError> {
-    let k = Kernel::default();
-    k.fillet_point_step.set(point_step()?);
-    Ok(k)
+/// The Rust side's [`Kernel::fillet_point_step`] after a case run on a fresh kernel,
+/// read as the C++ probe reads `sdStaticStep`: the probe's finite-difference crossing
+/// point latches `1e-5` when nothing has.
+pub(super) fn rust_point_step(k: &Kernel) -> f64 {
+    k.fillet_point_step.get().unwrap_or(1.0e-5)
+}
+
+/// `out` with the case's latched step ([`POINT_STEP`]); a deferred or rejected output is
+/// returned unchanged.
+pub(super) fn with_point_step(mut out: Output, step: f64) -> Output {
+    if out.deferred.is_none() && out.rejected.is_none() {
+        out.values.insert(POINT_STEP.into(), vec![step]);
+    }
+    out
 }

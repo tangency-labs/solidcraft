@@ -8,15 +8,6 @@
 #include <SmLoop.h>
 #include <cmath>
 #include <limits>
-#ifndef _WIN32
-#include <cerrno>
-#include <cstdio>
-#include <sys/wait.h>
-#include <unistd.h>
-#ifdef __linux__
-#include <sys/prctl.h>
-#endif
-#endif
 
 namespace fillet_real_solid {
 inline double status(SmStatus value) { return value == SM_SUCCESS ? 0.0 : double(value); }
@@ -256,35 +247,6 @@ SmBrep* build_source(int kind,const char* path,const double* p) {
 }
 }
 
-// A file-source case whose native run crashed in the shim's fork crash trap.
-#define SC_P3_CRASHED (-1100)
-namespace fillet_real_solid {
-// Runs `fn` in a forked child; TRUE when the child died on a signal, timed out (600 s)
-// or exited abnormally. Without fork (Windows) or when fork fails, FALSE: the case runs
-// untrapped, as before.
-template <class F> bool crashes_in_child(F fn) {
-#ifdef _WIN32
-    (void)fn; return false;
-#else
-    fflush(stdout); fflush(stderr);
-    const pid_t pid=fork();
-    if (pid < 0) return false;
-    if (pid == 0) {
-#ifdef __linux__
-        // (no core dump of an expected crash)
-        prctl(PR_SET_DUMPABLE,0);
-#endif
-        alarm(600);
-        try { fn(); } catch (...) {}
-        _exit(0);
-    }
-    int ws=0; pid_t w;
-    do w=waitpid(pid,&ws,0); while (w < 0 && errno == EINTR);
-    return !(w == pid && WIFEXITED(ws) && WEXITSTATUS(ws) == 0);
-#endif
-}
-}
-
 // Wire: source kind (1 file, 2 cylinder, 3 box union, 4 box difference), 12 source
 // parameters (unused ones 0), then the fillet wire of `fillet_and_record`. `path` is
 // the .smb file of kind 1 (null otherwise).
@@ -301,19 +263,10 @@ int32_t real_source(const char* path, const double* input, int64_t n, double* ou
     if (kind == 2 && (p[3] <= SM_EFF_ZERO || p[4] <= SM_EFF_ZERO)) return SC_ERR_ARG;
     if (kind >= 3) for (int i : {3,4,5,9,10,11}) if (p[i] <= SM_EFF_ZERO) return SC_ERR_ARG;
     SC_TRY
-    // Native crash trap: the whole case first runs in a forked child, and a child that
-    // dies on a signal (or does not finish) is SC_P3_CRASHED. Upstream crashes on some
-    // file-source fillets (UB-209: extrusion1002 every edge; UB-261: sphere_diff_3cylinders
-    // edge 30), so exactly the inputs that crash this build are refused. A child that
-    // finishes is discarded and the case runs again here, so the process-wide state the
-    // fillet leaves (the ND-3 sdStaticStep latch) is the same as without the trap.
-    if (fillet_real_solid::crashes_in_child([&] {
-            std::unique_ptr<SmBrep> b(fillet_real_solid::build_source(int(kind),path,p));
-            if (!b) return;
-            std::vector<double> v;
-            fillet_real_solid::fillet_and_record(b.get(),input+head,n-head,v,piecewise,curve_sih);
-        }))
-        return SC_P3_CRASHED;
+    // Upstream crashes on some file-source fillets (UB-209: extrusion1002 every edge;
+    // UB-261: sphere_diff_3cylinders edge 30). The Rust wrapper runs every case in a
+    // fresh child (solidcore_ffi::isolate), so such a crash is that child's
+    // SC_ERR_CHILD_CRASHED and refuses exactly the inputs that crash this build.
     std::unique_ptr<SmBrep> body(fillet_real_solid::build_source(int(kind),path,p));
     if (!body) return SC_ERR_ARG;
     std::vector<double> values;

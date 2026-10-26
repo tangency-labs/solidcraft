@@ -51,6 +51,9 @@ pub const SC_ERR_EXCEPTION: i32 = -1000;
 pub const SC_ERR_BUFFER: i32 = -1001;
 /// Shim status: the shim rejected its arguments.
 pub const SC_ERR_ARG: i32 = -1002;
+/// Status of a case whose C++ side ran in a fresh child process ([`isolate`]) that did
+/// not finish normally (a native crash, the 600 s alarm, an abnormal exit).
+pub const SC_ERR_CHILD_CRASHED: i32 = -1100;
 /// Shim status on wasm32: the C++ kernel is not linked (returned by every stub of the
 /// module that `scripts/wasm_stub.py` generates for `difftest --digest-dir`).
 pub const SC_ERR_UNLINKED: i32 = -1009;
@@ -63,6 +66,7 @@ pub fn status_name(s: i32) -> String {
         SC_ERR_BUFFER => "buffer_too_small".into(),
         SC_ERR_ARG => "shim_rejected_args".into(),
         SC_ERR_UNLINKED => "cpp_unlinked".into(),
+        SC_ERR_CHILD_CRASHED => "cpp_child_crashed".into(),
         other => format!("status_{other}"),
     }
 }
@@ -154,6 +158,8 @@ pub fn unlinked_calls() -> u64 {
     }
 }
 
+#[cfg(feature = "cpp")]
+pub mod isolate;
 #[cfg(feature = "cpp")]
 mod reader;
 #[cfg(feature = "cpp")]

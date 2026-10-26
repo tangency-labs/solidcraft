@@ -920,9 +920,10 @@ pub(super) fn output(mut values: &[f64], checkpoint: Checkpoint) -> Result<Outpu
     Ok(out)
 }
 pub(super) fn cpp(input: &RealSolid) -> Result<Output, HarnessError> {
-    let values = ffi::real_prefix(&input.wire(), input.checkpoint.code())
-        .map_err(|e| HarnessError::new(e.to_string()))?;
-    output(&values, input.checkpoint)
+    let (values, step) =
+        super::super::fresh_cpp(|| ffi::real_prefix(&input.wire(), input.checkpoint.code()))
+            .map_err(|e| HarnessError::new(e.to_string()))?;
+    Ok(super::super::with_point_step(output(&values, input.checkpoint)?, step))
 }
 
 fn insertion_output(mut values: &[f64], checkpoint: Checkpoint) -> Result<Output, HarnessError> {

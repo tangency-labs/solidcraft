@@ -50,7 +50,7 @@ anywhere (including dependencies; `deny.toml` bans copyleft crates).
 **Correctness gate.** A unit is **green** only when difftest runs the Rust and the C++
 (via FFI) on the same inputs and topology is identical and every value agrees within
 `1e-9` relative (`|a-b| <= 1e-9 * max(|a|,|b|)`; an absolute floor only where a unit
-documents one per key in `abs_floors()`, recorded in its report). Never loosen a tolerance to get green. A disagreement you cannot fix
+documents one per key in `abs_floors()`, recorded in its report). Never loosen a tolerance to get green. The harness never feeds C++ outputs or C++ process state into the Rust side (`crates/difftest/README.md`, No C++ state reaches the Rust side). A disagreement you cannot fix
 goes in a new `plan/findings/<slug>.md` (unit, inputs, both values, suspected cause) and the unit
 stays `blocked`. Sole exception: a case where the C++ reference is verified wrong (a confirmed
 `plan/upstream-issues/` entry) is listed with `cpp_defect = "<id>"` in its known-mismatch entry

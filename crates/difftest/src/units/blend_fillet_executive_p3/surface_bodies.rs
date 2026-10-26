@@ -126,9 +126,9 @@ fn output(values: &[f64]) -> Result<Output, HarnessError> {
 
 /// The C++ record of [`SurfaceSurfaceBodies`].
 pub(super) fn cpp(input: &SurfaceSurfaceBodies) -> Result<Output, HarnessError> {
-    let values =
-        ffi::surface_surface_bodies(&input.wire()).map_err(|e| HarnessError::new(e.to_string()))?;
-    output(&values)
+    let (values, step) = super::fresh_cpp(|| ffi::surface_surface_bodies(&input.wire()))
+        .map_err(|e| HarnessError::new(e.to_string()))?;
+    Ok(super::with_point_step(output(&values)?, step))
 }
 
 fn body_record(k: &Kernel, body: &Brep, values: &mut Vec<f64>) -> SolidResult<()> {
@@ -167,10 +167,8 @@ fn sheet(k: &mut Kernel, surfaces: &[&Surface]) -> SolidResult<(Brep, Vec<FaceId
 pub(super) fn rust(input: &SurfaceSurfaceBodies) -> Result<Output, HarnessError> {
     ffi::validate_surface_surface_bodies(&input.wire())
         .map_err(|e| HarnessError::new(e.to_string()))?;
-    let step = super::point_step()?;
-    let run = || -> SolidResult<Vec<f64>> {
-        let mut k = Kernel::default();
-        k.fillet_point_step.set(step);
+    let mut k = Kernel::default();
+    let mut run = || -> SolidResult<Vec<f64>> {
         let surface = |c: &[[f64; 3]; 4]| {
             solidcore::nurbs::b_spline_surface::BSplineSurface::create_bilinear_surface(
                 Vec3::from(c[0]),
@@ -255,8 +253,10 @@ pub(super) fn rust(input: &SurfaceSurfaceBodies) -> Result<Output, HarnessError>
         }
         Ok(values)
     };
-    match run() {
-        Ok(values) => output(&values),
+    let result = run();
+    let step = super::rust_point_step(&k);
+    match result {
+        Ok(values) => Ok(super::with_point_step(output(&values)?, step)),
         Err(error) => {
             Output::unported(&error).ok_or_else(|| HarnessError::new(error.to_string()))
         }

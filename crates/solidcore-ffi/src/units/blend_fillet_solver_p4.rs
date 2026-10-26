@@ -29,6 +29,9 @@
 //! finite-difference crossing point (which latches the static with `1e-5` when nothing
 //! has latched it) and replays its finite-difference block with `1e-3` and `1e-5`; the
 //! replay that reproduces the library's curve tangent bit for bit names the value.
+//! [`with_fresh_static_step`] runs a case in a fresh child process
+//! ([`crate::isolate::fresh_process`]) and reads the static there after the case, so
+//! the value is a compared output of that case alone; it is never seeded into Rust.
 //!
 //! # `calc_geom`
 //!
@@ -437,6 +440,29 @@ pub fn static_step() -> Result<f64, FfiError> {
     let status = unsafe { sys::sc_blend_fillet_solver_p4_static_step(&raw mut step) };
     check(status)?;
     Ok(step)
+}
+
+/// Runs `case` (a case's C++ calls) in a fresh child process, where `sdStaticStep`
+/// starts unlatched as on the process's first call, then reads [`static_step`] in the
+/// same child. Returns the case's record and the step it left latched (`1e-5` when the
+/// case latched nothing: the probe's own latch).
+///
+/// # Errors
+///
+/// The case's or the probe's error, or [`crate::SC_ERR_CHILD_CRASHED`] when the child
+/// did not finish normally.
+pub fn with_fresh_static_step(
+    case: impl FnOnce() -> Result<Vec<f64>, FfiError>,
+) -> Result<(Vec<f64>, f64), FfiError> {
+    let mut record = crate::isolate::fresh_process(|| {
+        let mut record = case()?;
+        record.push(static_step()?);
+        Ok(record)
+    })?;
+    let step = record
+        .pop()
+        .ok_or_else(|| FfiError::InvalidArgument("isolated record has no static step".into()))?;
+    Ok((record, step))
 }
 
 fn rect(e: &mut Enc, w: f64, h: f64, tol: f64, uv_curves: bool) -> Result<(), FfiError> {
