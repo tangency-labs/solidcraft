@@ -1051,7 +1051,7 @@ impl Dialog {
     /// document. Clearing the face also clears a suggestion that no longer applies.
     fn sync_thread(&mut self, s: &Session) {
         let Kind::Thread { designation, suggested, of, options, .. } = &mut self.kind else { return };
-        if !options.suggests() || !designation.trim().is_empty() && suggested.as_deref() != Some(designation.as_str()) {
+        if !designation.trim().is_empty() && suggested.as_deref() != Some(designation.as_str()) {
             return;
         }
         let picks = self.inputs.first().map(|i| i.items.as_slice()).unwrap_or_default();
@@ -1059,12 +1059,9 @@ impl Dialog {
             return;
         }
         *of = picks.to_vec();
-        *suggested = picks.first().and_then(|sel| match sel {
-            Sel::Face { point, .. } => solidcraft_engine::doc::suggested_thread(&crate::open_meshing::session_world(s), *point).ok().map(|value| {
+        *suggested = crate::dialogs_thread::suggested(s, picks.map(|value| {
                 solidcraft_engine::doc::parse_metric_thread(&value).map(|(d, p)| crate::dialogs_thread::designation(d, p)).unwrap_or(value)
-            }),
-            _ => None,
-        });
+            }), options);
         *designation = suggested.clone().unwrap_or_default();
     }
 
@@ -5769,18 +5766,9 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             }
             d
         }
-        FeatureKind::Thread { face, designation, length, modeled, .. } => {
+        FeatureKind::Thread { .. } => {
             let mut d = start("solid.thread")?;
-            if *modeled {
-                d.extra.insert("modeled".into(), json!(true));
-            }
-            let designation = designation.clone().unwrap_or_default();
-            let length = length.as_deref().map(str::to_string).unwrap_or_default();
-            let options = crate::dialogs_thread::Options::for_saved(&designation, &length);
-            d.kind = Kind::Thread { designation, length, suggested: None, of: Vec::new(), options };
-            if let Some(inp) = d.inputs.first_mut() {
-                inp.items = face_sel(s, face.0).into_iter().collect();
-            }
+            crate::dialogs_thread::reopen(&mut d, s, &f.kind);
             d.sync_thread(s);
             d
         }

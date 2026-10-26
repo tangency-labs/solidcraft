@@ -1386,6 +1386,10 @@ fn modeled_thread_survives_timeline_double_click_and_ok() {
             }
             h.step(&json!({"key":"A","cmd":true})).unwrap();
             h.step(&json!({"text":"2 mm"})).unwrap();
+            // Both ends of the shaft are free: a length starts from the end picked.
+            let top = crate::dialogs::edge_sel(&h.app.session, Vec3::new(4.0, 0.0, 4.0)).unwrap();
+            let d = h.app.dialog.as_mut().unwrap();
+            d.inputs.iter_mut().find(|i| i.label == "Start end (optional)").unwrap().items = vec![top];
         }
         if h.app.dialog.as_ref().unwrap().previews() {
             wait_feature_preview(&mut h);
@@ -1550,6 +1554,7 @@ fn thread_choices_can_start_without_a_face_and_recover_from_invalid_text() {
     h.call("ui.scroll", json!({"x":first.x,"y":first.y,"delta":-60}));
     h.frames(12);
     h.step(&json!({"click":{"handle":"dialog:Size:8 mm"}})).unwrap();
+    // The coarse pitch is written as ISO 261 writes it: without the pitch.
     assert!(matches!(&h.app.dialog.as_ref().unwrap().kind, Kind::Thread { designation, .. } if designation == "M8"));
     if let Kind::Thread { designation, .. } = &h.app.dialog.as_ref().unwrap().kind {
         assert_eq!(solidcraft_engine::doc::parse_metric_thread(designation), Some((8.0, 1.25)));
