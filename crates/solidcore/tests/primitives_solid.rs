@@ -125,13 +125,12 @@ fn default_sphere_precise_properties_fail_at_tight_accuracy() {
 }
 
 #[test]
-#[ignore = "blocked: partial sphere/torus construction needs SmFace::CurveOnClassify"]
-fn spheres_and_tori_are_closed_solids_with_analytic_properties() {
-    let failures: Vec<String> = checks::curved_specs()
-        .iter()
-        .filter_map(|s| checks::check(s).err().map(|e| format!("{}: {e}", s.name)))
-        .collect();
-    assert!(failures.is_empty(), "{failures:#?}");
+fn partial_spheres_and_tori_have_analytic_properties() {
+    let specs = checks::curved_specs();
+    for name in ["partial sphere r3 0..90", "partial torus R5 r1.5 0..90"] {
+        let spec = specs.iter().find(|spec| spec.name == name).unwrap();
+        checks::check(spec).unwrap_or_else(|e| panic!("{name}: {e}"));
+    }
 }
 
 #[test]
