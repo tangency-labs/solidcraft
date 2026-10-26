@@ -35,6 +35,8 @@ pub const DPI: RangeInclusive<f64> = 25.0..=2400.0;
 pub const MAX_POINTS: usize = 1 << 24;
 /// The most dots per inch a picture is asked for: above it, a coarser grid's pixels are copied.
 pub const MAX_PICTURE_DPI: f64 = 1200.0;
+/// The resolutions a picture may be embedded at (SVG, PDF), in dots per inch.
+pub const PICTURE_DPI: RangeInclusive<f64> = *DPI.start()..=MAX_PICTURE_DPI;
 /// The pixels drawn at a time, as RGBA bytes.
 const BAND_BYTES: usize = 16 << 20;
 /// Rows drawn above and below each band and not written: tiny-skia starts an edge a little
@@ -128,19 +130,13 @@ fn write(scene: &Prepared, options: PngOptions, pictures: &dyn Pictures, out: im
         }
     }
     let png_error = |e: png::EncodingError| IoError::Invalid(format!("the sheet PNG: {e}"));
-    let mut encoder = png::Encoder::new(out, pixels[0], pixels[1]);
-    let (colour_type, depth) = match colour {
+    let format = match colour {
         PngColour::Grey => (png::ColorType::Grayscale, png::BitDepth::Eight),
         PngColour::BlackWhite => (png::ColorType::Grayscale, png::BitDepth::One),
         PngColour::Rgb => (png::ColorType::Rgb, png::BitDepth::Eight),
         PngColour::Transparent => (png::ColorType::Rgba, png::BitDepth::Eight),
     };
-    encoder.set_color(colour_type);
-    encoder.set_depth(depth);
-    encoder.set_source_srgb(png::SrgbRenderingIntent::Perceptual);
-    let per_metre = (dpi / 0.0254).round() as u32;
-    encoder.set_pixel_dims(Some(png::PixelDimensions { xppu: per_metre, yppu: per_metre, unit: png::Unit::Meter }));
-    let mut header = encoder.write_header().map_err(png_error)?;
+    let mut header = encoder(out, pixels, format, dpi).write_header().map_err(png_error)?;
     let mut stream = header.stream_writer().map_err(png_error)?;
 
     let width = pixels[0] as usize;
@@ -214,6 +210,80 @@ fn sheet_grid(size_mm: Vec2, dpi: f64) -> Result<PixelGrid> {
     })
 }
 
+/// A PNG encoder for `pixels` columns and rows of `format` (colour type, bit depth): sRGB, and
+/// `dpi` recorded so it prints at its size.
+fn encoder<W: Write>(out: W, pixels: [u32; 2], format: (png::ColorType, png::BitDepth), dpi: f64) -> png::Encoder<'static, W> {
+    let mut encoder = png::Encoder::new(out, pixels[0], pixels[1]);
+    encoder.set_color(format.0);
+    encoder.set_depth(format.1);
+    encoder.set_source_srgb(png::SrgbRenderingIntent::Perceptual);
+    let per_metre = (dpi / 0.0254).round() as u32;
+    encoder.set_pixel_dims(Some(png::PixelDimensions { xppu: per_metre, yppu: per_metre, unit: png::Unit::Meter }));
+    encoder
+}
+
+/// Picture `source`'s pixels in `window` of `grid`, from `pictures`, refused unless they are
+/// exactly the size asked for.
+fn ask(pictures: &dyn Pictures, source: u64, grid: &PixelGrid, window: GridWindow) -> Result<Vec<u8>> {
+    let rgba = pictures.rows(source, grid, window).map_err(|e| IoError::Invalid(format!("picture {source}: {e}")))?;
+    let expected = window.x1.saturating_sub(window.x0) as usize * window.y1.saturating_sub(window.y0) as usize * 4;
+    if rgba.len() != expected {
+        return Err(IoError::Invalid(format!("picture {source}: {} bytes where {expected} were asked for", rgba.len())));
+    }
+    Ok(rgba)
+}
+
+/// Picture `source`'s pixels in `window` of its own `grid` as a PNG file of their own (RGBA,
+/// straight alpha), for SVG and PDF to embed: asked for [`BAND_BYTES`] of rows at a time, and
+/// refused once the file passes `max_bytes`.
+pub(super) fn picture_png(source: u64, grid: &PixelGrid, window: GridWindow, pictures: &dyn Pictures, max_bytes: usize) -> Result<Vec<u8>> {
+    let png_error = |e: png::EncodingError| IoError::Invalid(format!("picture {source}: {e}"));
+    let io_error = |e: std::io::Error| IoError::Invalid(format!("picture {source}: {e}"));
+    let pixels = [window.x1.saturating_sub(window.x0), window.y1.saturating_sub(window.y0)];
+    let mut out = Capped { bytes: Vec::new(), max: max_bytes, refused: false };
+    let written = (|| {
+        let mut header =
+            encoder(&mut out, pixels, (png::ColorType::Rgba, png::BitDepth::Eight), 25.4 / grid.pitch).write_header().map_err(png_error)?;
+        let mut stream = header.stream_writer().map_err(png_error)?;
+        let rows = (BAND_BYTES / (pixels[0] as usize * 4).max(1)).max(1) as u32;
+        let mut top = window.y0;
+        while top < window.y1 {
+            let band = GridWindow { y0: top, y1: window.y1.min(top.saturating_add(rows)), ..window };
+            stream.write_all(&ask(pictures, source, grid, band)?).map_err(io_error)?;
+            top = band.y1;
+        }
+        stream.finish().map_err(png_error)?;
+        header.finish().map_err(png_error)
+    })();
+    match written {
+        _ if out.refused => Err(IoError::Invalid(format!("picture {source}: its PNG would be over {max_bytes} bytes"))),
+        Ok(()) => Ok(out.bytes),
+        Err(e) => Err(e),
+    }
+}
+
+/// A file in memory that refuses to grow past `max` bytes, and remembers that it did.
+struct Capped {
+    bytes: Vec<u8>,
+    max: usize,
+    refused: bool,
+}
+
+impl Write for Capped {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.bytes.len() + buf.len() > self.max {
+            self.refused = true;
+            return Err(std::io::Error::other("over its limit"));
+        }
+        self.bytes.extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 /// The 8 × 8 ordered-dither thresholds, 0 to 63, by row and column.
 const BAYER: [[u8; 8]; 8] = [
     [0, 32, 8, 40, 2, 34, 10, 42],
@@ -245,11 +315,7 @@ fn composite(
     let coarse =
         GridWindow { x0: window.x0 / k, y0: window.y0 / k, x1: window.x1.div_ceil(k).min(asked.width), y1: window.y1.div_ceil(k).min(asked.height) };
     let columns = coarse.x1.saturating_sub(coarse.x0) as usize;
-    let rgba = pictures.rows(source, asked, coarse).map_err(|e| IoError::Invalid(format!("picture {source}: {e}")))?;
-    let expected = columns * coarse.y1.saturating_sub(coarse.y0) as usize * 4;
-    if rgba.len() != expected {
-        return Err(IoError::Invalid(format!("picture {source}: {} bytes where {expected} were asked for", rgba.len())));
-    }
+    let rgba = ask(pictures, source, asked, coarse)?;
     let width = band.width() as usize;
     let pixels = band.pixels_mut();
     for y in window.y0..window.y1 {
@@ -324,4 +390,4 @@ impl Sheet {
 
 #[cfg(test)]
 #[path = "png_tests.rs"]
-mod tests;
+pub(super) mod tests;
