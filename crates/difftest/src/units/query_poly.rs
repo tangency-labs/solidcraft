@@ -1229,13 +1229,13 @@ mod owner_tests {
                 seeds: 16,
             })
             .unwrap();
-        assert_eq!(cases.len(), 671 + 16);
+        assert_eq!(cases.len(), 939 + 16);
         assert_eq!(
             cases
                 .iter()
                 .filter(|c| !c.name.starts_with("owner_"))
                 .count(),
-            671
+            939
         );
         assert_eq!(
             cases
