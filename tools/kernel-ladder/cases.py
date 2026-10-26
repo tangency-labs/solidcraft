@@ -806,17 +806,47 @@ case(T7, "009-corner-three-equal-r5", "r5 rounds on the three edges meeting at t
      {"body_count": 1, "volume_mm3": VB - SPANDREL * 25 * (60 + 40 + 20 - 15) - 125 * (1 - PI / 6), "faces": 10},
      "each edge zone outside the corner cube removes (1-pi/4) r^2 (L - r); the corner cube r^3 keeps a sphere octant pi r^3/6", base=B1)
 case(T7, "010-corner-unequal-r7-r3", "an r7 vertical round at a corner, then r3 along a top edge, which runs on round the r7 arc to the other top edge",
-     [F([corner[2]], 7), F([[60, 15, 20]], 3)], {"body_count": 1},
-     "two radii meeting at a corner over a tangent chain; one valid body", base=B1, source="invariants")
+     [F([corner[2]], 7), F([[60, 15, 20]], 3)],
+     {"body_count": 1, "volume_mm3": VB - SPANDREL * 49 * 20 - SPANDREL * 9 * (33 + 53) - SPANDREL * 9 * (PI / 2) * (7 - XBAR * 3),
+      "faces": 10, "edges": 22, "vertices": 14, "bbox": BBOX, "tolerance": {"rel": 1e-5}},
+     "the r7 vertical round removes (1-pi/4) 7^2 20; the r3 chain runs along x = 60 (y 0..33) and y = 40 (x 0..53), straight, removing (1-pi/4) 3^2 each mm, and round the "
+     "r7 arc's top edge as a torus quarter: Pappus, the section (1-pi/4) 3^2 with its centroid 3 (10-3pi)/(12-3pi) in from the wall, at radius 7 - that, over pi/2 (as 003). "
+     "Faces: 6 planes + the r7 cylinder + the r3 chain's cylinder, torus, cylinder; edges: 5 round the bottom, 5 round the top, 5 vertical (two r7 tangent lines, the box's "
+     "three other verticals), the chain's three on the walls and two end arcs, its two seams; vertices from Euler (V - E + F = 2): 14", base=B1)
 case(T7, "016-corner-three-sequential-r5-r3-r7", "rounds r5 and r3 on the two top edges at a corner, then r7 on the vertical edge under them",
      [F([corner[0]], 5), F([corner[1]], 3, tangent_chain=False), F([[60, 40, 8]], 7)], {"body_count": 1},
      "three unequal radii at one corner, one after another; the vertical edge stays sharp below the two top rounds (x=60, y=40, z from 0 to 15), so it can be picked at z=8; one valid body", base=B1, source="invariants")
 case(T7, "011-chain-ending-at-corner", "r5 rounds on two top edges meeting at a corner whose vertical edge stays sharp",
-     [F([corner[0], corner[1]], 5)], {"body_count": 1},
-     "two rounds ending at a sharp vertical edge; one valid body", base=B1, source="invariants")
+     [F([corner[0], corner[1]], 5)],
+     {"body_count": 1, "volume_mm3": VB - SPANDREL * 25 * 100 + 125 * (5 / 3 - PI / 2), "faces": 8, "edges": 17, "vertices": 11, "bbox": BBOX, "tolerance": {"rel": 1e-5}},
+     "the two rounds remove (1-pi/4) 5^2 (60 + 40), less their common part in the corner cube, counted twice: in it (u, v, w from the round axes' corner) both remove where "
+     "u, v > sqrt(25 - w^2), int_0^5 (5 - sqrt(25 - w^2))^2 dw = 5^3 (5/3 - pi/2). They meet in a mitre (an elliptic arc down to the sharp vertical edge). Faces 6 + 2; edges: "
+     "4 bottom, 4 vertical, 4 round the top face, 2 round-wall tangent lines, 2 end arcs, the mitre; vertices 11 (Euler)", base=B1)
+# 012: the variable round's end carried on past x = 55 into the vertical round's column, trimmed by it.
+def corner_extension(rf, n=400):
+    tot = 0.0
+    for i in range(n):
+        x = 55 + 5 * (i + 0.5) / n
+        vmax = math.sqrt(max(25 - (x - 55) ** 2, 0))
+        r = rf(x)
+        c = 5 - r
+        def above(v):
+            dv = v - c
+            return max(0.0, 5 - (c + math.sqrt(max(r * r - dv * dv, 0)))) if dv < r else 5 - c
+        tot += quad_split(above, c, vmax, 40, 16) * 5 / n if vmax > c else 0.0
+    return tot
+ext_const = 125 * PI / 4 - 250 / 3
+ext_grow = corner_extension(lambda x: 1 + 4 * x / 55)
+v12a = VB - SPANDREL * 25 * 20 - SPANDREL * 55 * 31 / 3
+v12lo, v12hi = v12a - ext_grow, v12a - ext_const
 case(T7, "012-variable-into-rounded-corner", "a vertical r5 round, then a variable round r1 -> r5 along the top back edge into it",
-     [F([corner[2]], 5), F([[30, 40, 20]], 1, type="variable", radius2=5, start=[0, 40, 20])], {"body_count": 1},
-     "a variable round running into a constant one at a corner; one valid body", base=B1, source="invariants")
+     [F([corner[2]], 5), F([[30, 40, 20]], 1, type="variable", radius2=5, start=[0, 40, 20])],
+     {"body_count": 1, "volume_mm3": (v12lo + v12hi) / 2, "faces": 8, "edges": 18, "vertices": 12, "bbox": BBOX, "tolerance": {"rel": (v12hi - v12lo) / (v12hi + v12lo) + 1e-6}},
+     "a variable round takes only its picked edge (no tangent chain: crates/doc/src/eval.rs), y = 40 from x = 0 (r1) to x = 55 (r5), where it meets the vertical r5 round's "
+     "tangent line: removed (1-pi/4) 55 (1 + 5 + 25)/3 (005) and (1-pi/4) 5^2 20. Past x = 55 the round's end runs on into the vertical round's quarter column, trimmed by its "
+     "cylinder: as a constant r5 tube that takes int_0^5 sqrt(25 - v^2)(5 - sqrt(25 - v^2)) dv = 125 pi/4 - 250/3 = %.6f; with its radius still growing at 4/55 per mm, %.6f "
+     "(numerical, the round's section against the cylinder). V lies between: graded as the interval's middle with its half width as the tolerance. Faces 6 + 2; edges 18, "
+     "vertices 12 (5 round the bottom, 5 vertical, 5 round the top face, the round's line on the back wall, its end arc on x = 0, its trim on the cylinder)" % (ext_const, ext_grow), base=B1)
 missing(T7, "013-corner-setback", "three r5 rounds at a corner with setbacks of 8 mm along each edge", "solid.fillet has no corner setback distances",
         "the setback corner patch would be graded by invariants")
 case(T7, "014-curved-edge-r2", "an r2 round on the top edge of a cylinder r10 h20",
@@ -855,8 +885,11 @@ case(T8, "006-curved-edge-2", "a 2 mm chamfer on the top edge of a cylinder r10 
      {"body_count": 1, "volume_mm3": PI * 100 * 20 - 2 * 2 * PI * (10 - 2 / 3), "faces": 4},
      "a cone chamfer: Pappus on the triangle (area 2) with its centroid at radius 10 - 2/3")
 case(T8, "007-chamfer-then-fillets", "a 3 mm chamfer on the top front edge, then r2 rounds on the front vertical edges that meet it",
-     [K([[30, 0, 20]], 3), F([[0, 0, 5], [60, 0, 5]], 2)], {"body_count": 1},
-     "rounds running into a chamfer face; one valid body", base=B1, source="invariants")
+     [K([[30, 0, 20]], 3), F([[0, 0, 5], [60, 0, 5]], 2)],
+     {"body_count": 1, "volume_mm3": VB - 4.5 * 60 - 2 * SPANDREL * 4 * 17 - 2 * SPANDREL * 4 * 2 * XBAR, "faces": 9, "edges": 21, "vertices": 14, "bbox": BBOX, "tolerance": {"rel": 1e-5}},
+     "the chamfer removes 3^2/2 60. The front vertical edges then run z 0..17; each r2 round removes (1-pi/4) 2^2 17 below and runs on up into the chamfer face z = 17 + y: "
+     "over its section it removes a column y high, int y dA = (1-pi/4) 2^2 x 2 (10-3pi)/(12-3pi) (the section's centroid). Faces 6 + chamfer + 2 rounds; vertices: 6 round the bottom, "
+     "4 of the top face, the front face's 2 top corners, the 2 tops of the rounds' tangent lines on the ends (z = 19): 14; edges 21 (Euler)", base=B1)
 V8 = V7 - 0.5 * 2 * PI * (8 - 1 / 3) - 2 * 60
 case(T8, "008-part-chamfers", "the running part: 1 mm on the boss top edge, 2 mm on the back wall's top back edge",
      [K([[23, 15, 30]], 1), K([[30, 40, 35]], 2)],
@@ -890,12 +923,62 @@ case(T9, "008-offset-cylinder-wall-2", "a cylinder r10 h20 with its side face of
      {"body_count": 1, "volume_mm3": PI * 144 * 20, "faces": 3}, "a cylinder r12 h20")
 case(T9, "009-shell-outside-t2", "the stock shelled 2 mm outward, open at the top", [S([[30, 20, 20]], 2, direction="outside")],
      {"body_count": 1, "volume_mm3": 64 * 44 * 22 - VB, "faces": 11}, "walls grown out of the closed faces: 64 x 44 x 22 less the original box", base=B1)
+MITRE = 5 / 3 - PI / 2  # two equal rounds' common part at a mitred corner, per r^3 (07/011)
 case(T9, "010-shell-under-rounded-top", "the stock with r3 rounds on its four top edges, shelled 2 mm open at the bottom",
-     [F([[30, 0, 20], [60, 20, 20], [30, 40, 20], [0, 20, 20]], 3), S([[30, 20, 0]], 2)], {"body_count": 1},
-     "walls meeting rounds and their corner patches; one valid body", base=B1, source="invariants")
+     [F([[30, 0, 20], [60, 20, 20], [30, 40, 20], [0, 20, 20]], 3), S([[30, 20, 0]], 2)],
+     {"body_count": 1, "volume_mm3": (VB - SPANDREL * 9 * 200 + 4 * 27 * MITRE) - (56 * 36 * 18 - SPANDREL * 1 * 184 + 4 * 1 * MITRE),
+      "faces": 19, "edges": 40, "vertices": 24, "bbox": BBOX, "tolerance": {"rel": 1e-5}},
+     "the vertical edges stay sharp, so each pair of top rounds meets in a mitre at a corner (08/011's identity): outside, (1-pi/4) 3^2 (2 60 + 2 40) removed, "
+     "less 4 x 3^3 (5/3 - pi/2) counted twice; the cavity is the 56 x 36 x 18 box (open at z = 0) with its top edges rounded 3 - 2 = 1, mitred alike. V = outside - cavity. "
+     "Faces: 9 outside (bottom ring aside: top, 4 sides, 4 rounds), 9 inside, the bottom ring; vertices: 8 at the mitres' ends outside, 8 inside, 8 round the ring; "
+     "edges 40 (Euler-Poincare with the ring's two loops)", base=B1)
+# 011: the tier-08 part's cavity at t = 1.5 (offset faces extended to meet at concave edges).
+t9 = 1.5
+SQ9 = t9 * t9
+chord9 = lambda y: 2 * math.sqrt(max(3.15 ** 2 - (y - 35) ** 2, 0))
+ov_ch = quad_split(lambda y: chord9(y) * max(0, 33.5 - (73 - t9 * math.sqrt(2) - y)), 73 - t9 * math.sqrt(2) - 33.5, 38.15, 200, 16)
+ov_rd = quad_split(lambda y: chord9(y) * max(0, 33.5 - (32 + math.sqrt(max(SQ9 - (y - 33) ** 2, 0)))), 31.85, 33, 200, 16)
+def dist_arch(x, z):
+    lo, hi = (0.0, 0.5) if x >= 30 else (0.5, 1.0)
+    f = lambda u: math.dist(bez(Pw, u), (x, z))
+    for _ in range(100):
+        m1, m2 = lo + (hi - lo) * 0.382, lo + (hi - lo) * 0.618
+        if f(m1) < f(m2):
+            hi = m2
+        else:
+            lo = m1
+    return f((lo + hi) / 2)
+def half_len(z):
+    if dist_arch(30, z) > t9:
+        return 0.0
+    a, b = 30.0, 40.0
+    for _ in range(60):
+        m = (a + b) / 2
+        if dist_arch(m, z) <= t9:
+            a = m
+        else:
+            b = m
+    return a - 30
+ov_win = quad_split(lambda z: 2 * half_len(z) * max(0.0, 33 - math.sqrt(max(SQ9 - (z - 32) ** 2, 0)) - 31.5), 32, 31 + t9, 50, 16)
+th9 = PI - math.acos(3 / math.sqrt(153))
+lb9 = 6.5 + 28.5 - (37 - t9 * math.sqrt(2))
+Vcav9 = (57 * (37 * 18.5 + 7 * 15) - 2 * SPANDREL * 3.5 ** 2 * 18.5 - 57 * SPANDREL * SQ9 - 57 * (t9 * math.sqrt(2) - 1) ** 2 / 2
+         + PI * 6.5 ** 2 * 10 - 2 * PI * (6.5 - lb9 / 3) * lb9 * lb9 / 2 + 2 * PI * (6.5 + XBAR * 2.5) * SPANDREL * 6.25
+         - PI * 3.6 ** 2 * 6.5 - PI * 2.1 ** 2 * t9 - 2 * PI * (2.1 + t9 / 2) * SQ9
+         - 18.5 * (15 * 11 + PI * 5.5 ** 2) - PI * 16 * 18.5 - PI * 3.15 ** 2 * 33.5 + ov_ch + ov_rd
+         - 7 * (Awin + (bez_len(Pw) + 20) * t9 + PI * SQ9 + 2 * SQ9 * (math.tan(th9 / 2) - th9 / 2)) + ov_win)
+cav_round_extra = 57 * SQ9 * SPANDREL + 2 * PI * (2.1 + t9 / 2) * SQ9 - 2 * PI * (2.1 + 4 * t9 / (3 * PI)) * PI * SQ9 / 4 + 7 * 2 * SQ9 * (math.tan(th9 / 2) - th9 / 2)
+V9 = V8 - Vcav9
 case(T9, "011-part-shell", "the running part shelled 1.5 mm open at the bottom",
-     [S([[30, 20, 0]], 1.5)], {"body_count": 1},
-     "a shell around holes, a slot, a window, rounds and chamfers; one valid body", base=C8, source="invariants")
+     [S([[30, 20, 0]], 1.5)],
+     {"body_count": 1, "volume_mm3": V9, "bbox": {"min": [0, 0, 0], "max": [60, 40, 35]}, "tolerance": {"rel": 1e-4}},
+     "V = the tier-08 part - its cavity, the part's inside at 1.5 from every face but the open bottom, the offset faces extended to meet at the part's concave edges "
+     "(as every shell in this tier: sharp inner corners). Cavity: the L section (x 1.5..58.5; y 1.5..38.5 under z 18.5, y 31.5..38.5 under z 33.5) less the r5 -> r3.5 front "
+     "rounds, the wall's r3 -> r1.5 round and its 2 mm chamfer -> a (1.5 sqrt2 - 1) chamfer; the boss column r6.5 z 18.5..28.5 with its 1 mm chamfer -> 0.121, the concave r1 "
+     "-> r2.5 at its root (Pappus), less the M5 hole grown 1.5 (r3.6, its floor's edge kept sharp); less the slot grown to width 11, the M6 tap drill to r4, the d3.3 hole to r3.15 "
+     "(its overlaps with the wall's inner round and chamfer, %.4f and %.4f, added back), the window grown 1.5 through the wall's 7 mm inside (Steiner, A + L t + pi t^2, its two "
+     "corners sharp: + 2 t^2 (tan(th/2) - th/2)), and its overlap with the inner round (%.4f) added back = %.6f. A distance-based offset (concave edges rounded r1.5) "
+     "would leave a cavity %.2f larger. Bbox: the part's" % (ov_ch, ov_rd, ov_win, Vcav9, cav_round_extra), base=C8)
 C9 = up(T9, "011-part-shell")
 case(T9, "012-closed-shell-sealed-void", "the stock shelled 2 mm with no face open: a closed body with a sealed void", [S([], 2)],
      {"body_count": 1, "shells": 2, "volume_mm3": VB - 56 * 36 * 16, "faces": 12},
@@ -906,15 +989,30 @@ case(T9, "013-dome-shelled-from-base", "a dome r20 shelled 2 mm, open at its fla
      {"body_count": 1, "volume_mm3": 2 / 3 * PI * (20 ** 3 - 18 ** 3), "faces": 3},
      "V = (2/3) pi (20^3 - 18^3); faces: outer sphere, inner sphere, base ring")
 dr5 = 20 * math.tan(math.radians(5))
+tan5 = math.tan(math.radians(5))
+def drafted_corner(r):
+    a, b = r * math.sqrt(1 + 2 * tan5 * tan5), r
+    p = math.sqrt((a * a + b * b) / 2)
+    return p * p - a * b * math.atan(a / b)
+o14 = 2 * math.sqrt(1 + tan5 * tan5)
+sec_out = lambda z: 4 * (60 - tan5 * z) * (40 - tan5 * z) - 4 * drafted_corner(4)
+sec_in = lambda z: 4 * (60 - tan5 * z - o14) * (40 - tan5 * z - o14) - 4 * drafted_corner(2)
+V14 = quad(sec_out, 0, 40) - quad(sec_in, 2, 40)
+Z14 = (quad(lambda z: z * sec_out(z), 0, 40) - quad(lambda z: z * sec_in(z), 2, 40)) / V14
 case(T9, "014-drafted-box-with-rounds-shelled",
      "a 120x80x40 box drafted 5 degrees with 4 mm rounds on the sloping corners, shelled 2 mm open at the top: the inner rounds' edges must lie on their faces (#3573 reports the same design)",
      sketch("XY", C("sketch.rectangle.center", center=[0, 0], corner=[60, 40]))
      + [C("solid.extrude", distance=40, taper="-5 deg", operation="new"),
         F([[sx * (60 - dr5), sy * (40 - dr5), 20] for sx, sy in [(1, 1), (1, -1), (-1, 1), (-1, -1)]], 4), S([[0, 0, 40]], 2)],
-     {"body_count": 1},
-     "no closed-form volume (tilted rounds). Invariants: the shell succeeds, one closed body, and the record's geometry check holds "
-     "(every edge of the four inner rounds lies on its faces; the old offset left them up to 0.02 mm off, which other STEP readers reject)",
-     source="invariants", sources=["tangency-labs/solidcraft#3576", "tangency-labs/solidcraft#3573"])
+     {"body_count": 1, "volume_mm3": V14, "faces": 19, "edges": 48, "vertices": 32, "center_of_mass": [0, 0, Z14], "bbox": {"min": [-60, -40, 0], "max": [60, 40, 40]},
+      "tolerance": {"rel": 1e-5}},
+     "the record's geometry check must hold too (every edge of the four inner rounds lies on its faces; the old offset left them up to 0.02 mm off, which other STEP readers reject). "
+     "A round of radius r between two faces drafted 5 deg is a cylinder along their slanted common edge; a level plane cuts it in an ellipse of semi-axes r and r sqrt(1 + 2 tan^2 5) "
+     "(the axis leans that much from vertical), tangent to the section's two side lines, and every level section is the same corner moved along: the corner's loss "
+     "c(r) = p^2 - a b atan(a/b), p = sqrt((a^2 + b^2)/2), is constant (r^2 (1 - pi/4) undrafted). Outside: int_0^40 (120 - 2 z tan5)(80 - 2 z tan5) dz - 4 c(4) 40; the cavity "
+     "(sides moved in 2 sqrt(1 + tan^2 5) level, floor z = 2, rounds 4 - 2 = 2): int_2^40 ... - 4 c(2) 38; V = outside - cavity, the centre of mass on the axis at the moments' "
+     "z. Faces 9 outside, 9 inside, the rim; vertices 8 per loop of four; edges 48 (the rim has two loops)",
+     source="analytic", sources=["tangency-labs/solidcraft#3576", "tangency-labs/solidcraft#3573"])
 case(T9, "015-shelled-dome-ring-joined-back",
      "a dome (a quarter disc r20 revolved) shelled 2 mm from its flat base, then the base ring (r 18..20) face-extruded 10 mm back into the dome as a join: ~120 s, then 'boolean Union: no result'",
      sketch(vplane([0, 0, 0]), line([[0, 0], [20, 0]]), C("sketch.arc.three_point", start=[20, 0], through=[14.142136, 14.142136], end=[0, 20]), line([[0, 20], [0, 0]]), name="Quarter")
@@ -973,7 +1071,9 @@ case(T10, "007-pattern-bodies", "a pin r3 h10 patterned 4 times at 10 mm as bodi
      {"body_count": 4, "volume_mm3": 4 * PI * 9 * 10, "faces": 12}, "four separate pins")
 case(T10, "008-part-vents", "the running part with a d3 vent hole in its top patterned 4 times at 5 mm",
      [H(position=[30, 24, 20], diameter=3, name="Vent"), C("solid.pattern.rectangular", features=["Vent"], dir1=[1, 0, 0], count1=4, spacing1=5)],
-     {"body_count": 1}, "holes through the shelled top skin; one valid body", base=C9, source="invariants")
+     {"body_count": 1, "volume_mm3": V9 - 4 * PI * 1.5 ** 2 * 1.5, "bbox": {"min": [0, 0, 0], "max": [60, 40, 35]}, "tolerance": {"rel": 1e-4}},
+     "pattern = 4 x the feature: each d3 vent goes through the shelled top skin (z 18.5..20) into the cavity and meets nothing else (the M6 hole's tube is 7.3 away, "
+     "the wall's 6 past y = 24): V = 09/011 - 4 pi 1.5^2 1.5; the bbox is the part's", base=C9)
 C10 = up(T10, "008-part-vents")
 
 # ---------------------------------------------------------------- 11 cumulative parts

@@ -1,7 +1,23 @@
 {
  "sources": [],
  "what": "the running part with a d3 vent hole in its top patterned 4 times at 5 mm",
- "source": "invariants",
- "method": "holes through the shelled top skin; one valid body",
- "body_count": 1
+ "source": "analytic",
+ "method": "pattern = 4 x the feature: each d3 vent goes through the shelled top skin (z 18.5..20) into the cavity and meets nothing else (the M6 hole's tube is 7.3 away, the wall's 6 past y = 24): V = 09/011 - 4 pi 1.5^2 1.5; the bbox is the part's",
+ "body_count": 1,
+ "volume_mm3": 15355.301474157,
+ "bbox": {
+  "min": [
+   0,
+   0,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   35
+  ]
+ },
+ "tolerance": {
+  "rel": 0.0001
+ }
 }

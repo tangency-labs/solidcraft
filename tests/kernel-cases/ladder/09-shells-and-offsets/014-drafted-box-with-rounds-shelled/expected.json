@@ -4,7 +4,31 @@
   "tangency-labs/solidcraft#3573"
  ],
  "what": "a 120x80x40 box drafted 5 degrees with 4 mm rounds on the sloping corners, shelled 2 mm open at the top: the inner rounds' edges must lie on their faces (#3573 reports the same design)",
- "source": "invariants",
- "method": "no closed-form volume (tilted rounds). Invariants: the shell succeeds, one closed body, and the record's geometry check holds (every edge of the four inner rounds lies on its faces; the old offset left them up to 0.02 mm off, which other STEP readers reject)",
- "body_count": 1
+ "source": "analytic",
+ "method": "the record's geometry check must hold too (every edge of the four inner rounds lies on its faces; the old offset left them up to 0.02 mm off, which other STEP readers reject). A round of radius r between two faces drafted 5 deg is a cylinder along their slanted common edge; a level plane cuts it in an ellipse of semi-axes r and r sqrt(1 + 2 tan^2 5) (the axis leans that much from vertical), tangent to the section's two side lines, and every level section is the same corner moved along: the corner's loss c(r) = p^2 - a b atan(a/b), p = sqrt((a^2 + b^2)/2), is constant (r^2 (1 - pi/4) undrafted). Outside: int_0^40 (120 - 2 z tan5)(80 - 2 z tan5) dz - 4 c(4) 40; the cavity (sides moved in 2 sqrt(1 + tan^2 5) level, floor z = 2, rounds 4 - 2 = 2): int_2^40 ... - 4 c(2) 38; V = outside - cavity, the centre of mass on the axis at the moments' z. Faces 9 outside, 9 inside, the rim; vertices 8 per loop of four; edges 48 (the rim has two loops)",
+ "body_count": 1,
+ "volume_mm3": 47497.554428404,
+ "faces": 19,
+ "edges": 48,
+ "vertices": 32,
+ "center_of_mass": [
+  0,
+  0,
+  12.820492322003297
+ ],
+ "bbox": {
+  "min": [
+   -60,
+   -40,
+   0
+  ],
+  "max": [
+   60,
+   40,
+   40
+  ]
+ },
+ "tolerance": {
+  "rel": 1e-05
+ }
 }
