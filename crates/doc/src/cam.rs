@@ -56,6 +56,17 @@ impl CamSettings {
     pub fn post(&self, name: &str) -> Option<&Post> {
         self.posts.iter().find(|p| p.name == name)
     }
+
+    /// Next unused `Setup 1`, `Setup 2`, … so a ribbon click can create a setup without typing.
+    pub fn unused_setup_name(&self) -> String {
+        for i in 1..=MAX_SETUPS {
+            let name = format!("Setup {i}");
+            if self.setup(&name).is_none() {
+                return name;
+            }
+        }
+        "Setup".into()
+    }
 }
 
 /// One machining setup: ISO 841 work frame, RS-274 work offset, optional stock, and operations.
@@ -77,6 +88,33 @@ pub struct CamSetup {
     pub work_origin: [f64; 3],
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stock: Option<StockBox>,
+    /// Stock definition from the Setup dialog (relative box, cylinder, …).
+    #[serde(default, skip_serializing_if = "is_default_stock")]
+    pub stock_spec: CamStock,
+    /// Right-handed work frame. `work_origin` / `tool_axis` / `x_axis` stay the post-time ISO 841 copy.
+    #[serde(default, skip_serializing_if = "is_default_wcs")]
+    pub wcs: WorkCoordinateSystem,
+    #[serde(default)]
+    pub wcs_orientation: WcsOrientationMode,
+    #[serde(default)]
+    pub wcs_origin_mode: WcsOriginMode,
+    #[serde(default)]
+    pub box_point: BoxPoint,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub flip_z: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub flip_x: bool,
+    /// Bodies that define this setup's work area. Empty is not a valid "machine everything".
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub model_bodies: Vec<String>,
+    #[serde(default)]
+    pub operation_type: SetupOperationType,
+    #[serde(default, skip_serializing_if = "is_default_post_opts")]
+    pub post_opts: SetupPostOpts,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub machine: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub operations: Vec<CamOperation>,
 }
@@ -110,6 +148,18 @@ impl CamSetup {
             x_axis: None,
             work_origin: [0.0, 0.0, 0.0],
             stock: None,
+            stock_spec: CamStock::default(),
+            wcs: WorkCoordinateSystem::default(),
+            wcs_orientation: WcsOrientationMode::default(),
+            wcs_origin_mode: WcsOriginMode::SelectedPoint,
+            box_point: BoxPoint::default(),
+            flip_z: false,
+            flip_x: false,
+            model_bodies: Vec::new(),
+            operation_type: SetupOperationType::Milling,
+            post_opts: SetupPostOpts::default(),
+            machine: None,
+            post: None,
             operations: Vec::new(),
         }
     }
@@ -142,9 +192,14 @@ impl CamSetup {
         if self.operations.len() > MAX_OPS {
             return Err(DocError::Invalid(format!("a CAM setup has at most {MAX_OPS} operations")));
         }
+        if self.model_bodies.len() > 256 {
+            return Err(DocError::Invalid("a CAM setup has at most 256 model bodies".into()));
+        }
         if let Some(stock) = &self.stock {
             stock.validate()?;
         }
+        self.stock_spec.validate()?;
+        self.wcs.validate()?;
         for op in &self.operations {
             op.validate()?;
         }
@@ -165,6 +220,300 @@ impl CamSetup {
 pub struct StockBox {
     pub min: [f64; 3],
     pub max: [f64; 3],
+}
+
+/// How relative-box stock offsets are applied.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StockOffsetMode {
+    #[default]
+    NoAdditional,
+    SidesAndTopBottom,
+    AllSides,
+}
+
+impl StockOffsetMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            StockOffsetMode::NoAdditional => "No additional stock",
+            StockOffsetMode::SidesAndTopBottom => "Add stock to sides and top-bottom",
+            StockOffsetMode::AllSides => "Add stock to all sides",
+        }
+    }
+}
+
+/// The raw material for a setup (Setup → Stock).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CamStock {
+    Box {
+        width: f64,
+        depth: f64,
+        height: f64,
+    },
+    RelativeBox {
+        mode: StockOffsetMode,
+        side_offset: f64,
+        top_offset: f64,
+        bottom_offset: f64,
+        round_up: f64,
+        #[serde(default)]
+        ground_at_model_origin: bool,
+    },
+    Cylinder {
+        diameter: f64,
+        height: f64,
+    },
+    RelativeCylinder {
+        radial_offset: f64,
+        front_offset: f64,
+        back_offset: f64,
+        round_up: f64,
+    },
+    Tube {
+        outer_diameter: f64,
+        inner_diameter: f64,
+        height: f64,
+    },
+    FromPreceding {
+        continue_rest: bool,
+    },
+    FromSolid {
+        body: String,
+    },
+}
+
+impl Default for CamStock {
+    fn default() -> Self {
+        Self::RelativeBox {
+            mode: StockOffsetMode::NoAdditional,
+            side_offset: 0.0,
+            top_offset: 0.0,
+            bottom_offset: 0.0,
+            round_up: 0.0,
+            ground_at_model_origin: false,
+        }
+    }
+}
+
+impl CamStock {
+    pub fn mode_label(&self) -> &'static str {
+        match self {
+            CamStock::Box { .. } => "Fixed size box",
+            CamStock::RelativeBox { .. } => "Relative size box",
+            CamStock::Cylinder { .. } => "Fixed size cylinder",
+            CamStock::RelativeCylinder { .. } => "Relative size cylinder",
+            CamStock::Tube { .. } => "Fixed size tube",
+            CamStock::FromPreceding { .. } => "From preceding setup",
+            CamStock::FromSolid { .. } => "From solid",
+        }
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        let ok = |n: f64| n.is_finite() && n >= 0.0 && n <= 1.0e6;
+        match self {
+            CamStock::Box { width, depth, height } if ok(*width) && *width > 0.0 && ok(*depth) && *depth > 0.0 && ok(*height) && *height > 0.0 => {
+                Ok(())
+            }
+            CamStock::RelativeBox { side_offset, top_offset, bottom_offset, round_up, .. }
+                if ok(*side_offset) && ok(*top_offset) && ok(*bottom_offset) && ok(*round_up) =>
+            {
+                Ok(())
+            }
+            CamStock::Cylinder { diameter, height } if ok(*diameter) && *diameter > 0.0 && ok(*height) && *height > 0.0 => Ok(()),
+            CamStock::RelativeCylinder { radial_offset, front_offset, back_offset, round_up }
+                if ok(*radial_offset) && ok(*front_offset) && ok(*back_offset) && ok(*round_up) =>
+            {
+                Ok(())
+            }
+            CamStock::Tube { outer_diameter, inner_diameter, height }
+                if ok(*outer_diameter)
+                    && *outer_diameter > 0.0
+                    && ok(*inner_diameter)
+                    && *inner_diameter < *outer_diameter
+                    && ok(*height)
+                    && *height > 0.0 =>
+            {
+                Ok(())
+            }
+            CamStock::FromPreceding { .. } => Ok(()),
+            CamStock::FromSolid { body } if body.len() <= 128 => Ok(()),
+            _ => Err(DocError::Invalid("stock sizes must be finite and non-negative".into())),
+        }
+    }
+}
+
+fn is_default_stock(stock: &CamStock) -> bool {
+    *stock == CamStock::default()
+}
+
+/// How the WCS axes are chosen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WcsOrientationMode {
+    #[default]
+    ModelOrientation,
+    ZAndX,
+    ZAndY,
+    XAndY,
+    CoordinateSystem,
+}
+
+impl WcsOrientationMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            WcsOrientationMode::ModelOrientation => "Model orientation",
+            WcsOrientationMode::ZAndX => "Select Z axis/plane & X axis",
+            WcsOrientationMode::ZAndY => "Select Z axis/plane & Y axis",
+            WcsOrientationMode::XAndY => "Select X & Y axes",
+            WcsOrientationMode::CoordinateSystem => "Select coordinate system",
+        }
+    }
+}
+
+/// How part zero is located.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WcsOriginMode {
+    #[default]
+    ModelOrigin,
+    SelectedPoint,
+    StockBoxPoint,
+    ModelBoxPoint,
+}
+
+impl WcsOriginMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            WcsOriginMode::ModelOrigin => "Model origin",
+            WcsOriginMode::SelectedPoint => "Selected point",
+            WcsOriginMode::StockBoxPoint => "Stock box point",
+            WcsOriginMode::ModelBoxPoint => "Model box point",
+        }
+    }
+}
+
+/// Axis reference on a stock/model box.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BoxAxisRef {
+    #[default]
+    Negative,
+    Center,
+    Positive,
+}
+
+impl BoxAxisRef {
+    pub fn label(self) -> &'static str {
+        match self {
+            BoxAxisRef::Negative => "−",
+            BoxAxisRef::Center => "Center",
+            BoxAxisRef::Positive => "+",
+        }
+    }
+}
+
+/// Corner / face-centre pick on a bounding box.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BoxPoint {
+    pub x: BoxAxisRef,
+    pub y: BoxAxisRef,
+    pub z: BoxAxisRef,
+}
+
+impl Default for BoxPoint {
+    fn default() -> Self {
+        Self { x: BoxAxisRef::Negative, y: BoxAxisRef::Positive, z: BoxAxisRef::Positive }
+    }
+}
+
+/// Operation type selected with the machine (Setup).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SetupOperationType {
+    #[default]
+    Milling,
+    Turning,
+    Cutting,
+    Additive,
+}
+
+impl SetupOperationType {
+    pub fn label(self) -> &'static str {
+        match self {
+            SetupOperationType::Milling => "Milling",
+            SetupOperationType::Turning => "Turning / Mill-Turn",
+            SetupOperationType::Cutting => "Cutting (waterjet / laser / plasma)",
+            SetupOperationType::Additive => "Additive",
+        }
+    }
+}
+
+/// Post Process tab on the Setup dialog.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SetupPostOpts {
+    pub program_name: String,
+    pub program_comment: String,
+    pub wcs_offset: u32,
+    pub multiple_wcs_offsets: bool,
+}
+
+impl Default for SetupPostOpts {
+    fn default() -> Self {
+        Self { program_name: "1001".into(), program_comment: String::new(), wcs_offset: 1, multiple_wcs_offsets: false }
+    }
+}
+
+fn is_default_post_opts(opts: &SetupPostOpts) -> bool {
+    *opts == SetupPostOpts::default()
+}
+
+/// A right-handed orthonormal frame in model space (mm).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorkCoordinateSystem {
+    pub origin: [f64; 3],
+    pub x_axis: [f64; 3],
+    pub y_axis: [f64; 3],
+}
+
+impl Default for WorkCoordinateSystem {
+    fn default() -> Self {
+        Self { origin: [0.0; 3], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] }
+    }
+}
+
+impl WorkCoordinateSystem {
+    pub fn validate(&self) -> Result<()> {
+        let norm2 = |v: [f64; 3]| v[0] * v[0] + v[1] * v[1] + v[2] * v[2];
+        let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        for (label, v) in [("x_axis", self.x_axis), ("y_axis", self.y_axis)] {
+            if !v.iter().all(|x| x.is_finite()) || (norm2(v) - 1.0).abs() > 1e-6 {
+                return Err(DocError::Invalid(format!("the WCS {label} must be a finite unit vector")));
+            }
+        }
+        if dot(self.x_axis, self.y_axis).abs() > 1e-6 {
+            return Err(DocError::Invalid("the WCS X and Y axes must be orthogonal".into()));
+        }
+        if !self.origin.iter().all(|x| x.is_finite() && x.abs() <= 1e6) {
+            return Err(DocError::Invalid("the WCS origin must be finite and within 1e6 mm".into()));
+        }
+        Ok(())
+    }
+
+    pub fn z_axis(&self) -> [f64; 3] {
+        [
+            self.x_axis[1] * self.y_axis[2] - self.x_axis[2] * self.y_axis[1],
+            self.x_axis[2] * self.y_axis[0] - self.x_axis[0] * self.y_axis[2],
+            self.x_axis[0] * self.y_axis[1] - self.x_axis[1] * self.y_axis[0],
+        ]
+    }
+}
+
+fn is_default_wcs(wcs: &WorkCoordinateSystem) -> bool {
+    *wcs == WorkCoordinateSystem::default()
 }
 
 impl StockBox {

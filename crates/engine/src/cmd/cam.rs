@@ -5,11 +5,13 @@
 
 use serde_json::{Value, json};
 use solidcraft_cam::{
-    ContourParams, Cut, Feeds, Heights, Operation, PocketParams, Post, Program, Side, Tool, ToolKind, contour, emit, pocket, readback,
+    ContourParams, Cut, Feeds, FocasBackend, Heights, MachineHost, MtConnectBackend, Operation, PocketParams, Post, ProbeCycle, ProbeMacroStyle,
+    ProbeSnippetRequest, Program, Side, ThincBackend, Tool, ToolKind, contour, emit, emit_snippet, pocket, preset_machines, readback,
+    sample_haas_current_xml, style_for_post,
 };
 use solidcraft_doc::cam::{
     CamContourParams, CamCut, CamFaceRef, CamGeometry, CamOperation, CamPocketParams, CamSettings, CamSetup, CamSide, MAX_OPS, MAX_SETUPS, MAX_TOOLS,
-    PolygonRegion, StockBox, default_contour_params, default_cut, default_pocket_params,
+    PolygonRegion, StockBox, WcsOriginMode, default_contour_params, default_cut, default_pocket_params,
 };
 use solidcraft_doc::expr::Kind;
 use solidcraft_doc::project::resolve_face_indices;
@@ -18,8 +20,8 @@ use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use solidcraft_sketch::{LinkGeom, LinkKind};
 
 use super::CommandSpec;
-use crate::params::{bad, bool_, expr, num, req_expr, str_, vec2, vec2_list, vec3};
-use crate::{Result, Session};
+use crate::params::{bad, bool_, expr, num, req_expr, str_, string_list, vec2, vec2_list, vec3};
+use crate::{EngineError, Result, Session};
 
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("cam.tool.define", "Define Tool", tool_cmd).icon("hole").params(
@@ -28,7 +30,8 @@ pub static COMMANDS: &[CommandSpec] = &[
     ),
     CommandSpec::new("cam.tool.remove", "Remove Tool", tool_remove).icon("delete").params("number"),
     CommandSpec::new("cam.setup", "CAM Setup", setup_cmd).icon("settings").params(
-        "name; work_offset?: 1…6 (G54…G59, default 1); tool_axis?: [x,y,z] (programmed +Z, default [0,0,1]); \
+        "name?: Setup 1, Setup 2, … when omitted; work_offset?: 1…6 (G54…G59, default 1); \
+         tool_axis?: [x,y,z] (programmed +Z, default [0,0,1]); \
          x_axis?: [x,y,z] (programmed +X, square to the tool axis; omitted, derived); \
          work_origin?: [x,y,z] mm part zero in the model (default [0,0,0]); \
          stock?: {min:[x,y,z], max:[x,y,z]}; delete?: bool",
@@ -51,6 +54,25 @@ pub static COMMANDS: &[CommandSpec] = &[
          {gcode, extension, post, operations, readback}. G-code is always read back and checked against the toolpaths.",
     ),
     CommandSpec::new("cam.list", "List CAM", list_cmd).icon("list").noundo().params("→ tools, setups (with operations) and saved posts"),
+    CommandSpec::new("cam.machines", "List Machines", machines_cmd).icon("list").noundo().params("→ machines: OEM and hobby presets (id, profile)"),
+    CommandSpec::new("cam.machine.plugins", "Machine Plugins", machine_plugins_cmd)
+        .icon("list")
+        .noundo()
+        .params("→ plugins (none, fake, mtconnect, focas, thinc) and the active descriptor"),
+    CommandSpec::new("cam.machine.use", "Use Machine Plugin", machine_use_cmd).icon("settings").noundo().params(
+        "plugin: none|fake|mtconnect|focas|thinc; endpoint?: http://127.0.0.1:8082/VF-2 (mtconnect) \
+             or 127.0.0.1:8193 (focas) / :5000 (thinc); fixture?: bool (mtconnect, default true in the browser) → descriptor",
+    ),
+    CommandSpec::new("cam.machine.status", "Machine Status", machine_status_cmd)
+        .icon("list")
+        .noundo()
+        .params("→ live status from the active plugin (or unavailable)"),
+    CommandSpec::new("cam.probe.snippet", "Probe Snippet", probe_snippet_cmd).icon("hole").noundo().params(
+        "cycle: protected_move|single_surface|web_pocket|bore_boss|internal_corner|external_corner (or 9810…9816); \
+             style?: haas_inspection_plus|fanuc_inspection_plus (or post?: haas|fanuc); \
+             tool?: ATC pocket (default 25); x?; y?; z?; clearance_z?; protected_feed?; \
+             work_offset_s?: 0…6; overtravel_q?; size_d? → {gcode, cycle, style, tool}",
+    ),
 ];
 
 fn tool_cmd(s: &mut Session, p: &Value) -> Result<Value> {
@@ -112,8 +134,9 @@ fn tool_remove(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn setup_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "cam.setup";
-    let name = str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128).ok_or_else(|| bad(cmd, "`name` is required"))?.to_string();
+    let named = str_(p, "name").map(str::trim).filter(|n| !n.is_empty() && n.len() <= 128).map(str::to_string);
     if bool_(p, "delete").unwrap_or(false) {
+        let name = named.ok_or_else(|| bad(cmd, "`name` is required to delete a setup"))?;
         let doc = s.doc_mut();
         let before = doc.cam.setups.len();
         doc.cam.setups.retain(|x| x.name != name);
@@ -122,6 +145,7 @@ fn setup_cmd(s: &mut Session, p: &Value) -> Result<Value> {
         }
         return Ok(json!({"deleted": name}));
     }
+    let name = named.unwrap_or_else(|| s.doc.cam.unused_setup_name());
     let existing = s.doc.cam.setup(&name).cloned();
     let work_offset = num(p, "work_offset").map_or(existing.as_ref().map(|e| e.work_offset).unwrap_or(1), |n| n as u8);
     let tool_axis = match p.get("tool_axis") {
@@ -147,7 +171,8 @@ fn setup_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let stock = match p.get("stock") {
         None => existing.as_ref().and_then(|e| e.stock),
-        Some(v) => Some(stock_box(cmd, v)?),
+        Some(v) if v.get("min").is_some() => Some(stock_box(cmd, v)?),
+        Some(_) => existing.as_ref().and_then(|e| e.stock),
     };
     let mut setup = CamSetup::new(&name);
     setup.work_offset = work_offset;
@@ -155,6 +180,43 @@ fn setup_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     setup.x_axis = x_axis;
     setup.work_origin = work_origin;
     setup.stock = stock;
+    setup.stock_spec = parse_value(cmd, p, "stock_spec", existing.as_ref().map(|e| e.stock_spec.clone()).unwrap_or_default())?;
+    setup.wcs = parse_value(cmd, p, "wcs", existing.as_ref().map(|e| e.wcs.clone()).unwrap_or_default())?;
+    setup.wcs_orientation = parse_value(cmd, p, "wcs_orientation", existing.as_ref().map(|e| e.wcs_orientation).unwrap_or_default())?;
+    setup.wcs_origin_mode =
+        parse_value(cmd, p, "wcs_origin_mode", existing.as_ref().map(|e| e.wcs_origin_mode).unwrap_or(WcsOriginMode::SelectedPoint))?;
+    setup.box_point = parse_value(cmd, p, "box_point", existing.as_ref().map(|e| e.box_point).unwrap_or_default())?;
+    setup.flip_z = bool_(p, "flip_z").unwrap_or(existing.as_ref().map(|e| e.flip_z).unwrap_or(false));
+    setup.flip_x = bool_(p, "flip_x").unwrap_or(existing.as_ref().map(|e| e.flip_x).unwrap_or(false));
+    setup.model_bodies = if p.get("model_bodies").is_some() {
+        string_list(p, "model_bodies")
+    } else {
+        existing.as_ref().map(|e| e.model_bodies.clone()).unwrap_or_default()
+    };
+    setup.operation_type = parse_value(cmd, p, "operation_type", existing.as_ref().map(|e| e.operation_type).unwrap_or_default())?;
+    setup.post_opts = parse_value(cmd, p, "post_opts", existing.as_ref().map(|e| e.post_opts.clone()).unwrap_or_default())?;
+    setup.machine = match p.get("machine") {
+        Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
+        Some(Value::Null) => None,
+        Some(_) => return Err(bad(cmd, "`machine` must be a name or null")),
+        None => existing.as_ref().and_then(|e| e.machine.clone()),
+    };
+    setup.post = match p.get("post") {
+        Some(Value::String(s)) if !s.is_empty() => Some(s.clone()),
+        Some(Value::Null) => None,
+        Some(_) => return Err(bad(cmd, "`post` must be a name or null")),
+        None => existing.as_ref().and_then(|e| e.post.clone()),
+    };
+    if p.get("wcs").is_some() {
+        setup.work_origin = setup.wcs.origin;
+        setup.tool_axis = setup.wcs.z_axis();
+        setup.x_axis = Some(setup.wcs.x_axis);
+    } else if existing.is_none() {
+        setup.wcs.origin = setup.work_origin;
+    }
+    if (1..=6).contains(&setup.post_opts.wcs_offset) && p.get("post_opts").is_some() && p.get("work_offset").is_none() {
+        setup.work_offset = setup.post_opts.wcs_offset as u8;
+    }
     if let Some(existing) = &existing {
         setup.operations = existing.operations.clone();
     }
@@ -165,15 +227,20 @@ fn setup_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     }
     match doc.cam.setups.iter_mut().find(|x| x.name == name) {
         Some(slot) => {
-            slot.work_offset = setup.work_offset;
-            slot.tool_axis = setup.tool_axis;
-            slot.x_axis = setup.x_axis;
-            slot.work_origin = setup.work_origin;
-            slot.stock = setup.stock;
+            let operations = std::mem::take(&mut slot.operations);
+            *slot = setup.clone();
+            slot.operations = operations;
         }
         None => doc.cam.setups.push(setup.clone()),
     }
     Ok(json!({"setup": setup_json(s.doc.cam.setup(&name).unwrap_or(&setup))}))
+}
+
+fn parse_value<T: serde::de::DeserializeOwned>(cmd: &str, p: &Value, k: &str, fallback: T) -> Result<T> {
+    match p.get(k) {
+        None => Ok(fallback),
+        Some(v) => serde_json::from_value(v.clone()).map_err(|e| bad(cmd, format!("`{k}`: {e}"))),
+    }
 }
 
 fn stock_box(cmd: &str, v: &Value) -> Result<StockBox> {
@@ -700,6 +767,106 @@ fn list_cmd(s: &mut Session, _p: &Value) -> Result<Value> {
     }))
 }
 
+fn machines_cmd(_s: &mut Session, _p: &Value) -> Result<Value> {
+    let machines: Vec<Value> = preset_machines().into_iter().map(|(id, profile)| json!({"id": id, "profile": profile})).collect();
+    Ok(json!({ "machines": machines }))
+}
+
+fn machine_plugins_cmd(s: &mut Session, _p: &Value) -> Result<Value> {
+    Ok(json!({
+        "plugins": [
+            {"id": "none", "protocol": "none", "note": "no shop-floor plugin"},
+            {"id": "fake", "protocol": "fake", "note": "deterministic status for wiring tests"},
+            {"id": "mtconnect", "protocol": "mtconnect", "note": "read-only /current; live HTTP is loopback-only, fixture XML otherwise"},
+            {"id": "focas", "protocol": "focas", "note": "Fanuc FOCAS stub; SDK not linked"},
+            {"id": "thinc", "protocol": "thinc", "note": "Okuma THINC stub; API not linked"},
+        ],
+        "active": s.machine.as_ref().map(|h| h.descriptor()),
+    }))
+}
+
+fn machine_use_cmd(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "cam.machine.use";
+    match str_(p, "plugin").unwrap_or("none") {
+        "none" => {
+            s.machine = None;
+            Ok(json!({"plugin": "none"}))
+        }
+        "fake" => {
+            let host = MachineHost::fake();
+            let descriptor = host.descriptor();
+            s.machine = Some(host);
+            Ok(json!({"plugin": "fake", "descriptor": descriptor}))
+        }
+        "mtconnect" => {
+            let endpoint = str_(p, "endpoint").unwrap_or("http://127.0.0.1:8082/VF-2").to_string();
+            let fixture = bool_(p, "fixture").unwrap_or(cfg!(target_arch = "wasm32"));
+            if !fixture && cfg!(target_arch = "wasm32") {
+                return Err(bad(cmd, "live MTConnect HTTP is not available in the browser; pass fixture: true"));
+            }
+            let host = if fixture {
+                MachineHost::new(MtConnectBackend::with_fixed_xml(endpoint.clone(), sample_haas_current_xml()))
+            } else {
+                MachineHost::new(MtConnectBackend::with_std(endpoint.clone()))
+            };
+            let descriptor = host.descriptor();
+            s.machine = Some(host);
+            Ok(json!({"plugin": "mtconnect", "endpoint": endpoint, "fixture": fixture, "descriptor": descriptor}))
+        }
+        "focas" => {
+            let endpoint = str_(p, "endpoint").unwrap_or("127.0.0.1:8193").to_string();
+            let host = MachineHost::new(FocasBackend::new(endpoint.clone()));
+            let descriptor = host.descriptor();
+            s.machine = Some(host);
+            Ok(json!({"plugin": "focas", "endpoint": endpoint, "descriptor": descriptor}))
+        }
+        "thinc" => {
+            let endpoint = str_(p, "endpoint").unwrap_or("127.0.0.1:5000").to_string();
+            let host = MachineHost::new(ThincBackend::new(endpoint.clone()));
+            let descriptor = host.descriptor();
+            s.machine = Some(host);
+            Ok(json!({"plugin": "thinc", "endpoint": endpoint, "descriptor": descriptor}))
+        }
+        other => Err(bad(cmd, format!("unknown plugin `{other}` (none, fake, mtconnect, focas, thinc)"))),
+    }
+}
+
+fn machine_status_cmd(s: &mut Session, _p: &Value) -> Result<Value> {
+    match &s.machine {
+        Some(host) => host.status().map(|st| json!(st)).map_err(|e| EngineError::Other(e.to_string())),
+        None => Ok(json!(solidcraft_cam::MachineLiveStatus::default())),
+    }
+}
+
+fn probe_snippet_cmd(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "cam.probe.snippet";
+    let cycle = str_(p, "cycle").and_then(ProbeCycle::parse).ok_or_else(|| {
+        bad(cmd, "`cycle` must be protected_move, single_surface, web_pocket, bore_boss, internal_corner, external_corner, or 9810…9816")
+    })?;
+    let style = match str_(p, "style") {
+        Some("haas_inspection_plus" | "haas") => ProbeMacroStyle::HaasInspectionPlus,
+        Some("fanuc_inspection_plus" | "fanuc") => ProbeMacroStyle::FanucInspectionPlus,
+        Some(other) => return Err(bad(cmd, format!("unknown probe style `{other}`"))),
+        None => style_for_post(str_(p, "post").unwrap_or("haas")).unwrap_or(ProbeMacroStyle::HaasInspectionPlus),
+    };
+    let tool = num(p, "tool").filter(|n| *n >= 1.0 && *n <= 9999.0 && n.fract() == 0.0).map(|n| n as u32).unwrap_or(25);
+    let req = ProbeSnippetRequest {
+        cycle,
+        style,
+        probe_tool: tool,
+        x: num(p, "x").unwrap_or(0.0),
+        y: num(p, "y").unwrap_or(0.0),
+        z: num(p, "z").unwrap_or(0.0),
+        clearance_z: num(p, "clearance_z").unwrap_or(25.0),
+        protected_feed: num(p, "protected_feed").unwrap_or(150.0),
+        work_offset_s: num(p, "work_offset_s").filter(|n| *n >= 0.0 && *n <= 6.0 && n.fract() == 0.0).map(|n| n as u8).unwrap_or(1),
+        overtravel_q: num(p, "overtravel_q").unwrap_or(0.0),
+        size_d: num(p, "size_d").unwrap_or(0.0),
+    };
+    let gcode = emit_snippet(&req).map_err(|e| bad(cmd, e))?;
+    Ok(json!({"gcode": gcode, "cycle": cycle.as_str(), "style": style, "tool": tool}))
+}
+
 fn setup_json(setup: &CamSetup) -> Value {
     json!({
         "name": setup.name,
@@ -708,6 +875,9 @@ fn setup_json(setup: &CamSetup) -> Value {
         "x_axis": setup.x_axis,
         "work_origin": setup.work_origin,
         "stock": setup.stock,
+        "stock_spec": setup.stock_spec,
+        "wcs": setup.wcs,
+        "model_bodies": setup.model_bodies,
         "operations": setup.operations.iter().map(|op| match op {
             CamOperation::Contour { name, tool, geometry, params, cut, spindle_rpm, coolant } => json!({
                 "type": "contour", "name": name, "tool": tool, "geometry": geometry,
@@ -777,6 +947,23 @@ mod tests {
 
         let forced = run(&mut Session::new(s.doc.as_ref().clone()), "cam.post", json!({"setup": "Top", "verify": false}));
         assert!(forced["readback"]["within"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn setup_stores_model_bodies_and_wcs() {
+        let mut s = Session::default();
+        run(
+            &mut s,
+            "cam.setup",
+            json!({
+                "name": "Bodies",
+                "model_bodies": ["Part"],
+                "wcs": {"origin": [1.0, 2.0, 3.0], "x_axis": [1.0, 0.0, 0.0], "y_axis": [0.0, 1.0, 0.0]}
+            }),
+        );
+        assert_eq!(s.doc.cam.setups[0].model_bodies, ["Part"]);
+        assert_eq!(s.doc.cam.setups[0].work_origin, [1.0, 2.0, 3.0]);
+        assert_eq!(s.doc.cam.setups[0].wcs.origin, [1.0, 2.0, 3.0]);
     }
 
     #[test]
@@ -856,6 +1043,15 @@ mod tests {
     }
 
     #[test]
+    fn setup_without_name_uses_setup_n() {
+        let mut s = Session::default();
+        assert_eq!(run(&mut s, "cam.setup", json!({}))["setup"]["name"], "Setup 1");
+        assert_eq!(run(&mut s, "cam.setup", json!({}))["setup"]["name"], "Setup 2");
+        assert_eq!(s.doc.cam.setups.len(), 2);
+        assert!(s.execute("cam.setup", &json!({"delete": true})).is_err());
+    }
+
+    #[test]
     fn list_and_delete() {
         let mut s = Session::default();
         run(&mut s, "cam.tool.define", json!({"number": 2, "diameter": 3, "flute_length": 12, "kind": "ball_endmill"}));
@@ -927,5 +1123,80 @@ mod tests {
         let gcode = posted["gcode"].as_str().unwrap();
         assert!(gcode.contains("G2 ") || gcode.contains("G3 "), "{gcode}");
         assert!(posted["readback"]["within"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn machines_list_hobby_and_oem() {
+        let list = run(&mut Session::default(), "cam.machines", json!({}));
+        let machines = list["machines"].as_array().unwrap();
+        assert!(machines.len() >= 15);
+        let ids: Vec<&str> = machines.iter().filter_map(|m| m["id"].as_str()).collect();
+        assert!(ids.contains(&"GRBL Router"));
+        assert!(ids.contains(&"Haas VF-2"));
+        assert!(ids.contains(&"Fanuc 0i-MF"));
+        let haas = machines.iter().find(|m| m["id"] == "Haas VF-2").unwrap();
+        assert_eq!(haas["profile"]["integration"]["kind"], "mt_connect");
+        assert_eq!(haas["profile"]["integration"]["default_port"], 8082);
+        assert_eq!(haas["profile"]["probe"]["style"], "haas_inspection_plus");
+        let fanuc = machines.iter().find(|m| m["id"] == "Fanuc 0i-MF").unwrap();
+        assert_eq!(fanuc["profile"]["integration"]["kind"], "focas");
+        assert_eq!(fanuc["profile"]["integration"]["default_port"], 8193);
+        let okuma = machines.iter().find(|m| m["id"] == "Okuma GENOS M560").unwrap();
+        assert_eq!(okuma["profile"]["integration"]["kind"], "thinc");
+        assert_eq!(okuma["profile"]["integration"]["default_port"], 5000);
+    }
+
+    #[test]
+    fn mtconnect_fixture_plugin_reports_sample_status() {
+        let mut s = Session::default();
+        let used = run(&mut s, "cam.machine.use", json!({"plugin": "mtconnect", "fixture": true}));
+        assert_eq!(used["plugin"], "mtconnect");
+        assert_eq!(used["descriptor"]["protocol"], "mtconnect");
+        let st = run(&mut s, "cam.machine.status", json!({}));
+        assert_eq!(st["execution"], "ACTIVE");
+        assert_eq!(st["tool_number"], 7);
+        assert_eq!(st["source"], "mtconnect");
+        let plugins = run(&mut s, "cam.machine.plugins", json!({}));
+        assert_eq!(plugins["active"]["id"], "mtconnect");
+        run(&mut s, "cam.machine.use", json!({"plugin": "none"}));
+        assert!(run(&mut s, "cam.machine.plugins", json!({}))["active"].is_null());
+    }
+
+    #[test]
+    fn focas_and_thinc_stubs_register_unavailable() {
+        let mut s = Session::default();
+        let plugins = run(&mut s, "cam.machine.plugins", json!({}));
+        let ids: Vec<&str> = plugins["plugins"].as_array().unwrap().iter().filter_map(|p| p["id"].as_str()).collect();
+        assert!(ids.contains(&"focas"));
+        assert!(ids.contains(&"thinc"));
+        assert!(plugins.get("planned").is_none() || plugins["planned"].as_array().map(|a| a.is_empty()).unwrap_or(true));
+
+        let focas = run(&mut s, "cam.machine.use", json!({"plugin": "focas"}));
+        assert_eq!(focas["plugin"], "focas");
+        assert_eq!(focas["descriptor"]["protocol"], "focas");
+        assert_eq!(focas["descriptor"]["availability"], "unavailable");
+        assert_eq!(focas["endpoint"], "127.0.0.1:8193");
+        let st = run(&mut s, "cam.machine.status", json!({}));
+        assert_eq!(st["source"], "focas");
+        assert_eq!(st["execution"], "UNAVAILABLE");
+        assert_eq!(st["available"], false);
+
+        let thinc = run(&mut s, "cam.machine.use", json!({"plugin": "thinc"}));
+        assert_eq!(thinc["plugin"], "thinc");
+        assert_eq!(thinc["descriptor"]["protocol"], "thinc");
+        assert_eq!(thinc["endpoint"], "127.0.0.1:5000");
+        let st = run(&mut s, "cam.machine.status", json!({}));
+        assert_eq!(st["source"], "thinc");
+        assert_eq!(st["available"], false);
+    }
+
+    #[test]
+    fn probe_snippet_emits_inspection_plus() {
+        let posted = run(&mut Session::default(), "cam.probe.snippet", json!({"cycle": "9811", "style": "haas", "tool": 25, "overtravel_q": 0.25}));
+        let g = posted["gcode"].as_str().unwrap();
+        assert!(g.contains("T25 M6\n"), "{g}");
+        assert!(g.contains("G65 P9832\n"), "{g}");
+        assert!(g.contains("G65 P9811 Z0.0000 Q0.2500 S1\n"), "{g}");
+        assert!(g.contains("G65 P9833\n"), "{g}");
     }
 }
