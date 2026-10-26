@@ -39,7 +39,8 @@ pub struct Repo<'a> {
 
 pub fn run(root: &Path) -> Result<(), String> {
     let mut docs = Vec::new();
-    let read = |rel: &str| std::fs::read_to_string(root.join(rel)).map_err(|e| format!("{rel}: {e}"));
+    // A Windows checkout (core.autocrlf) has CRLF line endings: check the text as Git stores it (#7281).
+    let read = |rel: &str| std::fs::read_to_string(root.join(rel)).map(|t| t.replace("\r\n", "\n")).map_err(|e| format!("{rel}: {e}"));
     docs.push(Doc { path: "AGENTS.md".into(), text: read("AGENTS.md")? });
     let mut names = Vec::new();
     let dir = root.join("skills");
@@ -418,6 +419,23 @@ mod tests {
         assert!(p.iter().any(|m| m.starts_with("AGENTS.md is ")), "{p:?}");
         assert!(p.iter().any(|m| m.starts_with("skills/solidcraft-a/SKILL.md: ") && m.contains("split it")), "{p:?}");
         assert!(!p.iter().any(|m| m.contains("solidcraft-modeling/SKILL.md: ") && m.contains("split it")), "{p:?}");
+    }
+
+    /// A SKILL.md filled to the size cap, read from a CRLF checkout: its front matter is found
+    /// and the line endings don't count towards the cap (#7281).
+    #[test]
+    fn a_crlf_checkout_is_checked_as_git_stores_it() {
+        let root = std::env::temp_dir().join(format!("xtask-skills-crlf-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("skills/solidcraft-a")).unwrap();
+        let lines = "x\n".repeat((SKILL_MAX_CHARS - SKILL.len()) / 2);
+        let skill = format!("{SKILL}{lines}{}", "x".repeat(SKILL_MAX_CHARS - SKILL.len() - lines.len()));
+        let crlf = |t: &str| t.replace('\n', "\r\n");
+        std::fs::write(root.join("AGENTS.md"), crlf("# Router\n\n| a | `skills/solidcraft-a/SKILL.md` |\n")).unwrap();
+        std::fs::write(root.join("skills/solidcraft-a/SKILL.md"), crlf(&skill)).unwrap();
+        let result = run(&root);
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(result, Ok(()));
     }
 
     #[test]
