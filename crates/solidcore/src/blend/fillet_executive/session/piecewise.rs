@@ -661,4 +661,80 @@ mod tests {
         // the six box faces and the fillet face
         assert_eq!(p1::faces(&target, None).unwrap().len(), 7);
     }
+
+    /// Private regression for the adapter's registration step, before its Boolean.
+    /// Native DoPiecewiseMerge never changes an existing geometry's owner merely
+    /// to name it for the merge (SmFilletExecutive.cpp2676-2800).
+    #[test]
+    fn piecewise_registration_preserves_original_issued_curve_owner() {
+        let mut k = Kernel::default();
+        let mut target =
+            crate::primitive::api_primitives::create_box(&mut k, Point3::ZERO, 10.0, 20.0, 30.0)
+                .unwrap();
+        let session = FilletSession::new(&mut k, &mut target).unwrap();
+        let serial = session.objects.target_serial;
+        let edge = p1::edges(session.objects.target, None)
+            .unwrap()
+            .into_iter()
+            .find(|&edge| {
+                let owner = session
+                    .objects
+                    .target
+                    .edge(edge)
+                    .unwrap()
+                    .curve
+                    .as_ref()
+                    .unwrap()
+                    .owner();
+                owner.is_some() && owner != Some(topology_ref(serial, EntityRef::Edge(edge)))
+            })
+            .expect("the real primitive retains its producer owner before merge registration");
+        let original_identity = crate::topology::brep::p3::edge_curve_identity(
+            &mut k.context,
+            session.objects.target,
+            edge,
+        )
+        .unwrap()
+        .unwrap();
+        let original_curve = session
+            .objects
+            .target
+            .edge(edge)
+            .unwrap()
+            .curve
+            .as_ref()
+            .unwrap();
+        let original_owner = original_curve.owner();
+        let parameter = original_curve.natural_interval().evaluate(0.5);
+        let original_point = original_curve.evaluate_point(&k, parameter).unwrap();
+        let original_body_key = session.objects.target.key();
+        let original_naming = session.objects.target.naming();
+
+        // Exact production call at piecewise_merge's pre-adoption boundary.
+        rebind_owners(
+            session.objects.target,
+            |_| Vec::new(),
+            |entity| topology_ref(serial, entity),
+        )
+        .unwrap();
+
+        let current_curve = session
+            .objects
+            .target
+            .edge(edge)
+            .unwrap()
+            .curve
+            .as_ref()
+            .unwrap();
+        assert_eq!(current_curve.notify_key(), Some(original_identity.key));
+        assert_eq!(
+            current_curve.evaluate_point(&k, parameter).unwrap(),
+            original_point
+        );
+        assert_eq!(session.objects.target.key(), original_body_key);
+        assert_eq!(session.objects.target.naming(), original_naming);
+        eprintln!("actual_curve={original_identity:?} original_owner={original_owner:?} registration_owner={:?}", current_curve.owner());
+        assert_eq!(current_curve.owner(), original_owner,
+            "registering the existing target must not rewrite the same actual curve's producer owner");
+    }
 }
