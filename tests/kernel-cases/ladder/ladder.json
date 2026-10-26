@@ -139,7 +139,8 @@
         "ladder/07-fillets/014-curved-edge-r2",
         "ladder/07-fillets/003-tangent-chain-r3",
         "ladder/07-fillets/017-part-rounds",
-        "ladder/07-fillets/013-corner-setback"
+        "ladder/07-fillets/013-corner-setback",
+        "ladder/07-fillets/018-corner-three-sequential-r5-r3-r2"
       ],
       "tier": "07-fillets",
       "what": "constant, variable and corner fillets"

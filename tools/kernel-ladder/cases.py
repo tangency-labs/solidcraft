@@ -813,9 +813,12 @@ case(T7, "010-corner-unequal-r7-r3", "an r7 vertical round at a corner, then r3 
      "r7 arc's top edge as a torus quarter: Pappus, the section (1-pi/4) 3^2 with its centroid 3 (10-3pi)/(12-3pi) in from the wall, at radius 7 - that, over pi/2 (as 003). "
      "Faces: 6 planes + the r7 cylinder + the r3 chain's cylinder, torus, cylinder; edges: 5 round the bottom, 5 round the top, 5 vertical (two r7 tangent lines, the box's "
      "three other verticals), the chain's three on the walls and two end arcs, its two seams; vertices from Euler (V - E + F = 2): 14", base=B1)
-case(T7, "016-corner-three-sequential-r5-r3-r7", "rounds r5 and r3 on the two top edges at a corner, then r7 on the vertical edge under them",
-     [F([corner[0]], 5), F([corner[1]], 3, tangent_chain=False), F([[60, 40, 8]], 7)], {"body_count": 1},
-     "three unequal radii at one corner, one after another; the vertical edge stays sharp below the two top rounds (x=60, y=40, z from 0 to 15), so it can be picked at z=8; one valid body", base=B1, source="invariants")
+case(T7, "016-corner-three-sequential-r5-r3-r7", 'rounds r5 and r3 on the two top edges at a corner, then r7 on the vertical edge under them: refused, the r7 cannot exist',
+     [F([corner[0]], 5), F([corner[1]], 3, tangent_chain=False), F([[60, 40, 8]], 7)], {"outcome": "refused"},
+     "the r7 runs on (tangent chain) up the side x=60 along its arc on the r5 round, a circle of radius 5 about the r5 axis: the r7's contact line on that face would be the arc offset 7 towards its centre, radius 5 - 7 < 0, so the blend passes through itself; and along the seam of the r5 and r3 rounds no ball over r3 fits the r3 round. No such round exists, so the right answer is a clean refusal (SMLib: no room for the rolling ball). 018 is the same corner with a radius that fits.", base=B1, source="invariants")
+case(T7, "018-corner-three-sequential-r5-r3-r2", 'rounds r5 and r3 on the two top edges at a corner, then r2 on the vertical edge under them, run on up into the corner',
+     [F([corner[0]], 5), F([corner[1]], 3, tangent_chain=False), F([[60, 40, 8]], 2)], {"body_count": 1, "faces": 11, "bbox": BBOX},
+     "as 016 with a radius that fits (r < 3, the smaller top round): the r2 runs up the vertical edge and on along the side's arc on the r5 round and the seam between the two rounds, tapering to a point where they become tangent. Faces: the box's 6 and the two top rounds, + 3 for the r2 (along the vertical edge, up the arc, along the seam); one valid body inside the box", base=B1, source="invariants")
 case(T7, "011-chain-ending-at-corner", "r5 rounds on two top edges meeting at a corner whose vertical edge stays sharp",
      [F([corner[0], corner[1]], 5)],
      {"body_count": 1, "volume_mm3": VB - SPANDREL * 25 * 100 + 125 * (5 / 3 - PI / 2), "faces": 8, "edges": 17, "vertices": 11, "bbox": BBOX, "tolerance": {"rel": 1e-5}},
@@ -847,8 +850,14 @@ case(T7, "012-variable-into-rounded-corner", "a vertical r5 round, then a variab
      "cylinder: as a constant r5 tube that takes int_0^5 sqrt(25 - v^2)(5 - sqrt(25 - v^2)) dv = 125 pi/4 - 250/3 = %.6f; with its radius still growing at 4/55 per mm, %.6f "
      "(numerical, the round's section against the cylinder). V lies between: graded as the interval's middle with its half width as the tolerance. Faces 6 + 2; edges 18, "
      "vertices 12 (5 round the bottom, 5 vertical, 5 round the top face, the round's line on the back wall, its end arc on x = 0, its trim on the cylinder)" % (ext_const, ext_grow), base=B1)
-missing(T7, "013-corner-setback", "three r5 rounds at a corner with setbacks of 8 mm along each edge", "solid.fillet has no corner setback distances",
-        "the setback corner patch would be graded by invariants")
+# 013: convex, so in the corner cube C (side 8) it lies between the hull of its sections on C's faces and the rounds' prisms.
+v13out = VB - SPANDREL * 25 * (60 + 40 + 20 - 15) - 125 * (1 - PI / 6) - (512 - 225 * SPANDREL - 125 * (1 - PI / 6))
+v13lo, v13hi = v13out + 299.0201, v13out + 512 - 225 * SPANDREL - 125 * (math.sqrt(2) - 1)
+case(T7, "013-corner-setback", 'three r5 rounds at the corner (60,40,20) with setbacks of 8 mm along each edge',
+     [F(corner, 5, setbacks=[{"vertex": [60, 40, 20], "distance": 8}])],
+     {"body_count": 1, "volume_mm3": (v13lo + v13hi) / 2, "faces": 15, "edges": 36, "vertices": 23, "bbox": BBOX,
+      "tolerance": {"rel": (v13hi - v13lo) / (v13hi + v13lo) + 1e-6}},
+     "outside the corner cube C = [52,60]x[32,40]x[12,20] the body is the sphere corner's (009: V0 = 47377.120025868, of which 512 - 225 (1-pi/4) - 125 (1-pi/6) lies in C); the body is convex, so in C it holds the hull of its points on C's faces (the rounds' sections at the setback planes x=52, y=32, z=12 and the cube's corners outside the patch: 299.0201 by a hull of the sections sampled, below the true hull) and lies within the planes tangent to it along those sections, the three rounds' prisms (512 - 225 (1-pi/4) - 125 (sqrt2-1): the corner cube of r keeps the cylinders' common octant (2-sqrt2) r^3). The volume is the middle of [47271.9757, 47384.8935] with that half width as its tolerance. The box is unchanged. SMLib's setback patch is two quadrilaterals per side meeting at its centre: 6 box faces, 3 rounds, 6 patch pieces; vertices: 4 untouched box corners, 2 at each round's far end, the 6 section ends (where the patch starts, 8 from the vertex along each edge), the 6 side middles and the centre (23); edges by Euler, 23 + 15 - 2", base=B1, source="invariants")
 case(T7, "014-curved-edge-r2", "an r2 round on the top edge of a cylinder r10 h20",
      [cyl([0, 0, 0], 10, 20, body_name="Part"), F([[10, 0, 20]], 2)],
      {"body_count": 1, "volume_mm3": PI * 100 * 20 - SPANDREL * 4 * 2 * PI * (10 - XBAR * 2), "faces": 4},
