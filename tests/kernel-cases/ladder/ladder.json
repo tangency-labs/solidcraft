@@ -124,6 +124,7 @@
     {
       "cases": [
         "ladder/07-fillets/015-corner-g2-patch",
+        "ladder/07-fillets/019-concave-corner-g2-patch",
         "ladder/07-fillets/006-variable-r5-to-zero",
         "ladder/07-fillets/001-single-edge-r5",
         "ladder/07-fillets/007-variable-r5-to-1e-3",

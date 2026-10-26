@@ -49,7 +49,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "MODIFY")
         .icon("fillet")
         .key("F")
-        .params("edges: [[x,y,z] point on edge | {body, index}] ; radius: expr; tangent_chain?: bool (default true: each picked edge's tangent chain is rounded with it; false: exactly the picked edges); body?; type?: constant|curvature (alias g2: curvature-continuous quintic between planar faces along straight edges, one planar end face at each end (including sloped ends); radius sets the equivalent circular setback, not constant curvature; exact fit only)|chord (radius is the width across)|variable (radius at the end nearest start, radius2 at the other; one end may be 0, where the round closes to the corner)|spline (the radius along the edge is a clamped B-spline from the end nearest start: radius is its first control radius, radii the rest, knots its knot vector from 0 to 1; one end may be 0); radius2?; start?: [x,y,z]; radii?: [expr, …]; knots?: [number, …]; mid?: [[position 0…1 from start, radius expr], …] (variable radii between the ends); smooth?: bool (smooth instead of straight between the radii); corner?: rolling|g2 (rolling, the default: the corners where three blended edges meet are pieces of the rolling ball's sphere, tangent to each blend; g2: a patch repeating each blend's surface up to the second order, constant-radius exact fillets only, refused where it cannot be built); setbacks?: [{vertex: [x,y,z], distance: expr}, …] (corner setbacks: the corner at the vertex nearest `vertex`, where every edge meeting it is rounded, starts its patch `distance` along each of those edges from the vertex, past where the rounds would meet (past the radius at a square corner), so the rounds blend through a larger patch; one distance for all of a corner's edges; constant-radius exact fillets with rolling corners only); fit?: exact|reduce|taper (exact, the default: a radius too large for the geometry around the edges is refused; reduce: where it doesn't fit it is reduced to the largest that does, one radius for edges sharing a face; the smallest used is returned as `radius_applied`, each edge's as `radii_applied: [{edge: [x,y,z], radius}]`, and noted in the feature's warning; taper: along each straight edge between planar faces where it doesn't fit, the radius follows the room there as a smooth spline, down to 0 where a face closes to a point, noted in the feature's warning)"),
+        .params("edges: [[x,y,z] point on edge | {body, index}] ; radius: expr; tangent_chain?: bool (default true: each picked edge's tangent chain is rounded with it; false: exactly the picked edges); body?; type?: constant|curvature (alias g2: curvature-continuous quintic between planar faces along straight edges, one planar end face at each end (including sloped ends); radius sets the equivalent circular setback, not constant curvature; exact fit only)|chord (radius is the width across)|variable (radius at the end nearest start, radius2 at the other; one end may be 0, where the round closes to the corner)|spline (the radius along the edge is a clamped B-spline from the end nearest start: radius is its first control radius, radii the rest, knots its knot vector from 0 to 1; one end may be 0); radius2?; start?: [x,y,z]; radii?: [expr, …]; knots?: [number, …]; mid?: [[position 0…1 from start, radius expr], …] (variable radii between the ends); smooth?: bool (smooth instead of straight between the radii); corner?: rolling|g2 (rolling, the default: the corners where three blended edges meet are pieces of the rolling ball's sphere, tangent to each blend; g2: each corner where three or more rounded edges meet, and every edge there is rounded, is set back (1.5 × the radius along each edge unless `setbacks` names it) and filled with a patch meeting the rounds and the faces round it to the second order (curvature-continuous seams, clear of the points where a round's section ends on a face), constant-radius exact fillets only, refused where it cannot be built); setbacks?: [{vertex: [x,y,z], distance: expr}, …] (corner setbacks: the corner at the vertex nearest `vertex`, where every edge meeting it is rounded, starts its patch `distance` along each of those edges from the vertex, past where the rounds would meet (past the radius at a square corner), so the rounds blend through a larger patch; one distance for all of a corner's edges; constant-radius exact fillets only; with `corner: g2`, the G2 patch's corners); fit?: exact|reduce|taper (exact, the default: a radius too large for the geometry around the edges is refused; reduce: where it doesn't fit it is reduced to the largest that does, one radius for edges sharing a face; the smallest used is returned as `radius_applied`, each edge's as `radii_applied: [{edge: [x,y,z], radius}]`, and noted in the feature's warning; taper: along each straight edge between planar faces where it doesn't fit, the radius follows the room there as a smooth spline, down to 0 where a face closes to a point, noted in the feature's warning)"),
     CommandSpec::new("solid.chamfer", "Chamfer", chamfer).at("SOLID", "MODIFY").icon("chamfer").params("edges: [[x,y,z] | {body, index}] ; distance: expr; tangent_chain?: bool (default true: each picked edge's tangent chain is cut with it; false: exactly the picked edges); distance2?: expr (along the second face) | angle?: expr (from the first face); flip?: bool (which face is first: by default the one facing up most); body?"),
     CommandSpec::new("solid.combine", "Combine", combine).at("SOLID", "MODIFY").icon("combine").params("target: body; tools: [body]; operation?: join|cut|intersect; touching?: separate|one_body (what a join makes of pieces that share no face: separate, the default, makes each piece that touches another only along an edge or at a point a body of its own and keeps pieces that touch nothing in one body; one_body keeps every piece in one body); keep_tools?: bool; new_component?: bool (the result goes into a new component; component_name?)"),
     CommandSpec::new("solid.pattern.rectangular", "Rectangular Pattern", pattern_rect)
@@ -1676,8 +1676,8 @@ fn fillet(s: &mut Session, p: &Value) -> Result<Value> {
             check_expr(s, &distance, Kind::Length, cmd, "setback distance")?;
             setbacks.push(solidcraft_doc::CornerSetback { vertex: Position(vertex), distance });
         }
-        if !setbacks.is_empty() && (!style.is_constant() || !fit.is_exact() || !corner.is_rolling()) {
-            return Err(bad(cmd, "`setbacks` are built for a constant-radius fillet (`type: constant`, `fit: exact`, `corner: rolling`) only"));
+        if !setbacks.is_empty() && (!style.is_constant() || !fit.is_exact()) {
+            return Err(bad(cmd, "`setbacks` are built for a constant-radius fillet (`type: constant`, `fit: exact`) only"));
         }
     }
     let mut out = add_feature(
@@ -3192,8 +3192,8 @@ mod thin_extrude_tests;
 #[path = "extrude_convention_tests.rs"]
 mod extrude_convention_tests;
 /// `solid.fillet corner?: rolling|g2`: the default keeps the rolling ball's sphere corner, `g2`
-/// is accepted and refuses (item 10's patch is built but not sewn in yet, see `corner_g2`), and an
-/// unknown word is refused.
+/// sets the corner back and fills it with the G2 patch (`solidcraft_kernel::fillet_g2_corners`),
+/// with `setbacks` naming its distance, and an unknown word is refused.
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod corner_tests {
@@ -3218,7 +3218,7 @@ mod corner_tests {
     }
 
     #[test]
-    fn the_default_corner_is_the_rolling_ball_and_g2_refuses_clearly() {
+    fn the_default_corner_is_the_rolling_ball_and_g2_sets_it_back_for_its_patch() {
         let (default, reply) = cornered(None);
         assert_eq!(reply["warning"], json!(null), "{reply}");
         let (rolling, _) = cornered(Some("rolling"));
@@ -3227,13 +3227,23 @@ mod corner_tests {
         // `corner: rolling` is the default: the same body, to the last bit of its area.
         assert_eq!(solidcraft_kernel::measure(&ball).unwrap().area, solidcraft_kernel::measure(&same).unwrap().area);
         assert!(solidcraft_kernel::measure(&ball).unwrap().volume > 7000.0);
-        // `corner: g2`: accepted, and refused with a clear message until the patch sews in.
+        // `corner: g2`: the corner set back (1.5 r by default, or as `setbacks` says) and filled
+        // with the G2 patch: one closed solid of the box's faces, the rounds and the patch, a
+        // little fuller than the ball's corner (its patch spans the setback, not the ball).
+        let ball_volume = solidcraft_kernel::measure(&ball).unwrap().volume;
+        for setbacks in [json!([]), json!([{"vertex": [0, 0, 0], "distance": 7}])] {
+            let mut s = Session::default();
+            run(&mut s, "solid.box", &json!({"length": 20, "width": 20, "height": 20, "body_name": "B"}));
+            run(&mut s, "solid.fillet", &json!({"edges": [[10, 0, 0], [0, 10, 0], [0, 0, 10]], "radius": 4, "corner": "g2", "setbacks": setbacks}));
+            let body = s.world_state().unwrap().body("B").unwrap().body.clone();
+            assert!(body.validity().is_empty(), "{:?}", body.validity());
+            let m = solidcraft_kernel::measure(&body).unwrap();
+            eprintln!("corner g2, setbacks {setbacks}: {} faces, volume {:.4} (ball {:.4})", m.faces, m.volume, ball_volume);
+            assert_eq!(m.faces, 10);
+            assert!((m.volume - ball_volume).abs() < 1e-3 * ball_volume, "{} vs {}", m.volume, ball_volume);
+        }
         let mut s = Session::default();
         run(&mut s, "solid.box", &json!({"length": 20, "width": 20, "height": 20, "body_name": "B"}));
-        let err =
-            s.execute("solid.fillet", &json!({"edges": [[10, 0, 0], [0, 10, 0], [0, 0, 10]], "radius": 4, "corner": "g2"})).unwrap_err().to_string();
-        eprintln!("corner g2: {err}");
-        assert!(err.contains("not supported yet:") && err.contains("G2 corner"), "{err}");
         // An unknown word, and a style the G2 corner has no patch for, are refused as parameters.
         assert!(s.execute("solid.fillet", &json!({"edges": [[10, 0, 0]], "radius": 4, "corner": "round"})).is_err());
         assert!(s.execute("solid.fillet", &json!({"edges": [[10, 0, 0]], "radius": 4, "corner": "g2", "type": "chord"})).is_err());

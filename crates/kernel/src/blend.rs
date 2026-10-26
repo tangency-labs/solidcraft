@@ -233,8 +233,9 @@ pub fn fillet_setback(body: &Body, edges: &[Vec3], radius: f64, setbacks: &[(Vec
 /// its vertex and the distance its patch starts along each edge there (the others take
 /// [`crate::DEFAULT_SETBACK_FACTOR`] times the radius), SMLib leaves it open, and a patch that
 /// meets the rounds and the faces round it to the second order fills it. The faces are sewn
-/// into one solid. Without such a corner this is [`fillet`]. Refused: a corner where an edge is
-/// not rounded (SMLib sets back only corners where all are), a setback that does not reach past
+/// into one solid, convex corners and concave ones alike. Without such a corner this is
+/// [`fillet`]. Refused: a corner where an edge is not rounded, or whose edges are not all of one
+/// convexity (SMLib sets back only corners where all are rounded, alike), a setback that does not reach past
 /// where the rounds would meet, a hole that is no height field over its plane or a patch that
 /// does not meet its neighbours within the tolerances.
 pub fn fillet_g2_corners(body: &Body, edges: &[Vec3], radius: f64, setbacks: &[(Vec3, f64)]) -> Result<Body> {

@@ -114,6 +114,60 @@ fn open_edges(positions: &[solidcraft_engine::geom::Vec3], triangles: &[[u32; 3]
 }
 
 /// An error that means "this kernel can't do it yet", not a wrong answer.
+/// Stations along each seam the `continuity` check samples.
+const SEAM_SAMPLES: usize = 65;
+/// A seam is tangent (G1), and two seams meeting at a vertex turn there, past this angle (°).
+const SEAM_ANGLE_DEG: f64 = 1.0;
+
+/// The `continuity` check's measure of `body`: over the tangent seams lying wholly within
+/// `within` of `near`, the worst curvature jump (1/mm) at every station and at the stations at
+/// least `clear` (mm, along the seam) from each vertex where two of those seams turn (a corner of
+/// the patch's boundary, where its neighbours' own G1 seams end and no surface is G2 to both),
+/// with how many seams and stations clear there were. An error where the seams can't be measured.
+fn curvature_jumps(body: &solidcraft_engine::kernel::Body, near: [f64; 3], within: f64, clear: f64) -> Result<Value, String> {
+    use solidcraft_engine::geom::Vec3;
+    let tol = solidcraft_engine::kernel::ContinuityTolerances { gap_mm: 1e-3, angle_deg: SEAM_ANGLE_DEG, curvature_per_mm: 0.0 };
+    let report = solidcraft_engine::kernel::seam_diagnostics(body, &[], SEAM_SAMPLES, tol).map_err(|e| e.to_string())?;
+    let at = Vec3::new(near[0], near[1], near[2]);
+    let seams: Vec<_> = report
+        .seams
+        .iter()
+        .filter(|s| s.normal_angle_deg.value <= SEAM_ANGLE_DEG && s.points.len() >= 2 && s.points.iter().all(|p| p.dist(at) <= within))
+        .collect();
+    // Each seam's end directions, pointing into it.
+    let ends = |s: &solidcraft_engine::kernel::SeamReport| -> Option<[(Vec3, Vec3); 2]> {
+        let (p0, p1) = (*s.points.first()?, *s.points.last()?);
+        let (q0, q1) = (*s.points.get(1)?, *s.points.get(s.points.len() - 2)?);
+        Some([(p0, (q0 - p0).normalized()?), (p1, (q1 - p1).normalized()?)])
+    };
+    let all_ends: Vec<(Vec3, Vec3)> = seams.iter().filter_map(|s| ends(s)).flatten().collect();
+    let weld = 1e-6 * within.max(1.0);
+    let cos = SEAM_ANGLE_DEG.to_radians().cos();
+    // A vertex turns where another seam leaves it other than straight on.
+    let turns = |p: Vec3, d: Vec3| all_ends.iter().any(|(q, e)| q.dist(p) <= weld && (*e - d).len() > 1e-9 && -e.dot(d) < cos);
+    let (mut worst, mut worst_clear, mut stations) = (0.0f64, 0.0f64, 0usize);
+    for s in &seams {
+        let Some(e) = ends(s) else { continue };
+        let turning: Vec<Vec3> = e.iter().filter(|(p, d)| turns(*p, *d)).map(|(p, _)| *p).collect();
+        // Arc length along the seam to each station, from its start.
+        let mut along = vec![0.0f64; s.points.len()];
+        for k in 1..s.points.len() {
+            along[k] = along[k - 1] + s.points[k].dist(s.points[k - 1]);
+        }
+        let length = along.last().copied().unwrap_or(0.0);
+        for (k, st) in s.stations.iter().enumerate() {
+            worst = worst.max(st.curvature_jump_per_mm);
+            let a = along.get(k).copied().unwrap_or(0.0);
+            let from_turn = turning.iter().map(|p| if p.dist(s.points[0]) <= weld { a } else { length - a }).fold(f64::INFINITY, f64::min);
+            if from_turn >= clear {
+                worst_clear = worst_clear.max(st.curvature_jump_per_mm);
+                stations += 1;
+            }
+        }
+    }
+    Ok(json!({"seams": seams.len(), "stations_clear": stations, "worst_per_mm": worst, "worst_clear_per_mm": worst_clear}))
+}
+
 fn unsupported(e: &str) -> bool {
     e.contains("not supported yet")
 }
@@ -255,6 +309,24 @@ fn check_case(dir: &str, dumps: Option<&std::path::Path>) -> Value {
                 json!("no open edges"),
                 open == 0 && over == 0,
             );
+        }
+        // Curvature continuity across the seams round a point: the worst jump clear of the
+        // seams' turns must be within the case's bound.
+        if let Some(cont) = want.get("continuity").filter(|c| !c.is_null()) {
+            let (near, within, clear, bound) =
+                (v3(&cont["near"]), cont["within_mm"].as_f64(), cont["clear_mm"].as_f64(), cont["curvature_jump_per_mm"].as_f64());
+            match (near, within, clear, bound) {
+                (Some(near), Some(within), Some(clear), Some(bound)) => match curvature_jumps(&b.body, near, within, clear) {
+                    Ok(got) => {
+                        let ok = got["seams"].as_u64().unwrap_or(0) > 0
+                            && got["stations_clear"].as_u64().unwrap_or(0) > 0
+                            && got["worst_clear_per_mm"].as_f64().is_some_and(|w| w <= bound);
+                        c.push("curvature_jump", got, json!({"worst_clear_per_mm": format!("<= {bound}")}), ok);
+                    }
+                    Err(e) => c.push("curvature_jump", json!(format!("{}: {e}", b.name)), json!("measurable"), false),
+                },
+                _ => c.push("curvature_jump", json!("continuity needs near, within_mm, clear_mm and curvature_jump_per_mm"), json!("a bound"), false),
+            }
         }
         if want_valid {
             // Closed shells, and every validity check this build has.

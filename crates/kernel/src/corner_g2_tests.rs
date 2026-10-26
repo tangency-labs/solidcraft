@@ -164,3 +164,44 @@ fn what_the_g2_corner_cannot_build_is_refused() {
     let plain = fillet(&body, &edges[..2], 5.0).unwrap();
     assert_eq!(measure(&two).unwrap().faces, measure(&plain).unwrap().faces);
 }
+
+/// The 60 x 40 x 20 box with a 20 x 20 x 10 notch cut from its top corner (60, 40, 20): its
+/// inner corner (40, 20, 10) where three concave edges meet, and the notch's outer corner
+/// (60, 20, 10) where the concave edge along x meets two convex ones.
+fn notched() -> Body {
+    let a = box_solid(Vec3::ZERO, Vec3::new(60.0, 40.0, 20.0)).unwrap();
+    let b = box_solid(Vec3::new(40.0, 20.0, 10.0), Vec3::new(70.0, 50.0, 30.0)).unwrap();
+    boolean(&a, &b, BoolOp::Cut).unwrap().unwrap()
+}
+
+/// The notch's inner corner, three concave r5 rounds (ladder 07/019): set back 7.5 and filled,
+/// one closed valid solid with the faces the ball corner has, the patch's seams G2 clear of the
+/// hole's corners where the ball's jump 1/r.
+#[test]
+fn a_concave_corner_takes_the_g2_patch_too() {
+    let body = notched();
+    let edges = [Vec3::new(50.0, 20.0, 10.0), Vec3::new(40.0, 30.0, 10.0), Vec3::new(40.0, 20.0, 15.0)];
+    let ball = fillet(&body, &edges, 5.0).unwrap();
+    let g2 = fillet_g2_corners(&body, &edges, 5.0, &[]).unwrap();
+    assert!(g2.validity().is_empty(), "{:?}", g2.validity());
+    let v = crate::validity::validity(&g2);
+    assert!(v.ok(), "{v:?}");
+    let (m, mb) = (measure(&g2).unwrap(), measure(&ball).unwrap());
+    let (_, clear, n) = corner_seams(&g2, 0.15);
+    let (_, ball_clear, _) = corner_seams(&ball, 0.15);
+    eprintln!("concave G2 corner: {} faces (ball {}), volume {:.4} (ball {:.4}), jump clear of the corners {clear:.3e} ({n} stations), ball's {ball_clear:.3e}", m.faces, mb.faces, m.volume, mb.volume);
+    assert_eq!(m.faces, mb.faces);
+    assert!(clear <= CURVATURE_SHARE / 5.0 && ball_clear > 0.19, "{clear} {ball_clear}");
+}
+
+/// The notch's outer corner, two convex rounds and a concave one: SMLib sets back only a corner
+/// of one convexity, so the G2 corner is refused as not supported (the rolling ball builds).
+#[test]
+fn a_mixed_convexity_corner_is_refused() {
+    let body = notched();
+    let edges = [Vec3::new(50.0, 20.0, 10.0), Vec3::new(60.0, 30.0, 10.0), Vec3::new(60.0, 20.0, 15.0)];
+    assert!(fillet(&body, &edges, 5.0).is_ok());
+    let err = fillet_g2_corners(&body, &edges, 5.0, &[]).unwrap_err().to_string();
+    eprintln!("mixed corner: {err}");
+    assert!(err.contains("not supported yet"), "{err}");
+}
