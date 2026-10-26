@@ -304,6 +304,7 @@ surface_unstitch	false
 surface_untrim	false
 svg	false
 sweep	false
+sync	false
 text	false
 thread	false
 timeline_play	false

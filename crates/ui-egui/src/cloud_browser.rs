@@ -10,7 +10,7 @@ use solidcraft_cloud::{
     Connection, Destination,
     jobs::{JobStatus, Phase},
 };
-use solidcraft_engine::{Session, doc::Document};
+use solidcraft_engine::doc::Document;
 
 use crate::{SolveApp, i18n::tr, ui_kit};
 pub(crate) mod management;
@@ -24,7 +24,6 @@ pub(crate) struct Browser {
     selected: Option<String>,
     catalogs: BTreeMap<String, Catalog>,
     picker: Option<Picker>,
-    opening: Option<String>,
     error: Option<String>,
     statuses: Vec<SaveStatus>,
     publications: BTreeMap<String, usize>,
@@ -53,6 +52,7 @@ struct Catalog {
     entries: Arc<Vec<Destination>>,
     stored: Vec<SaveStatus>,
     pending: Option<String>,
+    local_loaded: bool,
     message: Option<String>,
 }
 
@@ -75,7 +75,7 @@ pub(crate) fn start(app: &mut SolveApp, command: &str) {
     }
     if app.session.cloud_binding().is_some() {
         if let Err(error) = app.run("cloud.save", json!({})) {
-            app.set_status(error, true);
+            app.cloud.browser.error = Some(error);
         }
         return;
     }
@@ -112,6 +112,12 @@ fn default_project(browser: &Browser, connection: &str) -> (String, bool) {
     (projects.get("Designs").or_else(|| projects.first()).cloned().unwrap_or_else(|| "Designs".into()), projects.is_empty())
 }
 
+pub(crate) fn synchronizing(app: &SolveApp, connection: &str) -> bool {
+    app.cloud.browser.catalogs.get(connection).is_some_and(|catalog| catalog.pending.is_some())
+        || app.cloud.operations.busy("cloud.sync", connection)
+        || app.cloud.operations.busy("cloud.save", connection)
+}
+
 fn request(app: &mut SolveApp, connection: &Connection) {
     let result = app.run("cloud.list", json!({"connection":connection.id}));
     match result.and_then(|r| r.get("operation").and_then(|v| v.as_str()).map(str::to_owned).ok_or_else(|| "missing list operation".into())) {
@@ -120,11 +126,12 @@ fn request(app: &mut SolveApp, connection: &Connection) {
             if let Some(old) = previous.as_ref().and_then(|c| c.pending.as_ref()) {
                 let _ = app.run("cloud.cancel", json!({"operation":old}));
             }
-            let (entries, stored) = previous.filter(|c| c.connection == *connection).map(|c| (c.entries, c.stored)).unwrap_or_default();
-            app.cloud
-                .browser
-                .catalogs
-                .insert(connection.id.clone(), Catalog { connection: connection.clone(), entries, stored, pending: Some(operation), message: None });
+            let (entries, stored, local_loaded) =
+                previous.filter(|c| c.connection == *connection).map(|c| (c.entries, c.stored, c.local_loaded)).unwrap_or_default();
+            app.cloud.browser.catalogs.insert(
+                connection.id.clone(),
+                Catalog { connection: connection.clone(), entries, stored, pending: Some(operation), local_loaded, message: None },
+            );
         }
         Err(error) => {
             app.cloud.browser.catalogs.entry(connection.id.clone()).or_insert_with(|| Catalog {
@@ -132,6 +139,7 @@ fn request(app: &mut SolveApp, connection: &Connection) {
                 entries: Default::default(),
                 stored: Vec::new(),
                 pending: None,
+                local_loaded: false,
                 message: Some(error.clone()),
             });
             app.cloud.browser.error = Some(error);
@@ -192,8 +200,6 @@ fn entries(status: &JobStatus, connection: &str) -> Result<(Vec<Destination>, Ve
 /// completed in a fresh editor so changing tabs or editing during IO cannot lose work.
 pub(crate) fn tick(app: &mut SolveApp, statuses: &[JobStatus]) {
     poll(app, statuses);
-    // Management can start an Open here. Its status belongs to the next poll;
-    // examining this frame's older status list would discard the new request.
     management::tick(app, statuses);
 }
 
@@ -250,17 +256,20 @@ fn poll(app: &mut SolveApp, statuses: &[JobStatus]) {
             && let Some(status) = statuses.iter().find(|s| s.operation == *operation)
         {
             match status.phase {
-                Phase::Ready => {
+                Phase::Ready | Phase::Working if status.phase == Phase::Ready || (!catalog.local_loaded && status.result.is_some()) => {
                     match entries(status, id) {
                         Ok((entries, stored)) => {
                             catalog.entries = Arc::new(entries);
                             catalog.stored = stored;
+                            catalog.local_loaded = true;
                             refreshed.push(id.clone());
                             catalog.message = status.message.clone();
                         }
                         Err(error) => catalog.message = Some(error),
                     }
-                    catalog.pending = None;
+                    if status.phase == Phase::Ready {
+                        catalog.pending = None;
+                    }
                 }
                 Phase::Failed | Phase::Cancelled => {
                     catalog.message = status.message.clone().or_else(|| Some(attention.clone()));
@@ -308,64 +317,14 @@ fn poll(app: &mut SolveApp, statuses: &[JobStatus]) {
             }
         }
     }
-    let Some(operation) = app.cloud.browser.opening.clone() else { return };
-    let Some(status) = statuses.iter().find(|s| s.operation == operation) else {
-        app.cloud.browser.opening = None;
-        app.cloud.browser.error = Some(app.tr("cloud.needs_attention").into());
-        return;
-    };
-    match status.phase {
-        Phase::Ready => {
-            // Do not consume the downloaded snapshot if there is no room to adopt it.
-            if app.docs.count() >= crate::documents::MAX_OPEN && !crate::documents::active_is_blank(app) {
-                app.cloud.browser.error = Some(tr("cloud.tabs_full").into());
-                return;
-            }
-            if app.file_picker_busy() || app.saving.is_some() {
-                return;
-            }
-            let result = opened_session(app, &operation);
-            app.cloud.browser.opening = None;
-            match result {
-                Ok(session) => {
-                    app.open_meshing_next = true;
-                    crate::documents::adopt(app, session);
-                    app.home.open = false;
-                    crate::open_meshing::start(app, None);
-                    app.cloud.browser.error = None;
-                    if let Some(connection) = app
-                        .session
-                        .cloud_binding()
-                        .and_then(|binding| app.session.cloud_settings().connection(&binding.destination.connection))
-                        .cloned()
-                    {
-                        request(app, &connection);
-                    }
-                }
-                Err(error) => {
-                    app.set_status(error.clone(), true);
-                    app.cloud.browser.error = Some(error);
-                }
-            }
-        }
-        Phase::Failed | Phase::Cancelled => {
-            app.cloud.browser.opening = None;
-            app.cloud.browser.error = status.message.clone().or_else(|| Some(tr("cloud.needs_attention").into()));
-        }
-        _ => {}
-    }
 }
 
-fn opened_session(app: &mut SolveApp, operation: &str) -> Result<Session, String> {
-    if app.session.cloud_operations().map_err(|e| e.to_string())?.iter().any(|s| s.operation == operation) {
-        return app.session.cloud_open_session(operation).map_err(|e| e.to_string());
-    }
-    for slot in app.docs.background_mut() {
-        if slot.session.cloud_operations().map_err(|e| e.to_string())?.iter().any(|s| s.operation == operation) {
-            return slot.session.cloud_open_session(operation).map_err(|e| e.to_string());
-        }
-    }
-    Err("opening operation no longer available".into())
+pub(crate) fn opening_preview(app: &SolveApp, destination: &Destination) -> Option<egui::TextureHandle> {
+    previews::texture(app, destination)
+}
+
+pub(crate) fn error(app: &mut SolveApp, error: String) {
+    app.cloud.browser.error = Some(error);
 }
 
 fn open(app: &mut SolveApp, destination: &Destination) {
@@ -387,15 +346,27 @@ fn open(app: &mut SolveApp, destination: &Destination) {
 }
 
 fn open_revision(app: &mut SolveApp, destination: &Destination, revision: Option<&str>) {
-    if app.cloud.browser.opening.is_some() {
+    if app.file_load.busy() {
+        return;
+    }
+    if app.docs.count() >= crate::documents::MAX_OPEN && !crate::documents::active_is_blank(app) {
+        app.cloud.browser.error = Some(tr("cloud.tabs_full").into());
         return;
     }
     match app.run("cloud.open", json!({"destination":destination, "local_revision":revision})) {
         Ok(result) => {
-            app.cloud.browser.opening = result.get("operation").and_then(|v| v.as_str()).map(str::to_owned);
-            // Match File > Open: enter the workspace before showing loading progress.
             app.home.open = false;
             app.cloud.browser.error = None;
+            if let Some(operation) = result.get("operation").and_then(|v| v.as_str()) {
+                let request = crate::file_load::Request::new(
+                    &destination.file,
+                    crate::file_load::Kind::CloudOpen { operation: operation.into(), destination: destination.clone() },
+                );
+                if let Err(error) = crate::file_load::begin_request(app, request) {
+                    let _ = app.run("cloud.cancel", json!({"operation":operation}));
+                    app.cloud.browser.error = Some(error);
+                }
+            }
         }
         Err(error) => app.cloud.browser.error = Some(error),
     }
@@ -432,7 +403,9 @@ pub(crate) fn home(app: &mut SolveApp, ui: &mut egui::Ui) {
     {
         request(app, c);
     }
-    ui_kit::FileView::section(ui, tr("cloud.title"), t.space_10, |ui| {
+    let notice = status::notice(app, connection.as_ref());
+    let indicator = notice.as_deref().map(|label| ui_kit::FileStatus { label, tone: ui_kit::FileStatusTone::Attention, pulse: false });
+    ui_kit::FileView::section_with_status(ui, tr("cloud.title"), t.space_10, indicator, |ui| {
         ui_kit::FileView::control_row(ui, |ui| {
             let mut action = None;
             let label = tr("cloud.add_storage");
@@ -490,11 +463,7 @@ pub(crate) fn home(app: &mut SolveApp, ui: &mut egui::Ui) {
                     })
                 });
                 crate::scenario::publish_target("cloud:repositories", response.rect);
-                let listing = app.cloud.browser.catalogs.get(&c.id).is_some_and(|catalog| catalog.pending.is_some());
-                if busy_button(ui, "cloud:refresh", tr("ui.agent_chat_refresh"), !app.session.cloud_configuring(), listing) {
-                    request(app, c);
-                }
-                let synchronizing = app.cloud.operations.busy("cloud.sync", &c.id) || app.cloud.operations.busy("cloud.save", &c.id);
+                let synchronizing = synchronizing(app, &c.id);
                 if busy_button(ui, "cloud:sync", tr("cmd.cloud.sync"), !app.session.cloud_configuring(), synchronizing)
                     && let Err(error) = app.run("cloud.sync", json!({"connection":c.id}))
                 {
@@ -517,9 +486,6 @@ pub(crate) fn home(app: &mut SolveApp, ui: &mut egui::Ui) {
             if let Some(catalog) = app.cloud.browser.catalogs.get(&c.id) {
                 let pending = catalog.pending.is_some();
                 let designs = catalog.entries.clone();
-                if let Some(message) = &catalog.message {
-                    ui_kit::text(ui, message, ui_kit::Text::Report("cloud_list_message", true));
-                }
                 ui.add_space(t.space_8);
                 if designs.is_empty() && !pending {
                     ui_kit::FileView::detail(ui, tr("cloud.empty"));
@@ -542,7 +508,7 @@ pub(crate) fn home(app: &mut SolveApp, ui: &mut egui::Ui) {
                                 let state = status::presentation(status, app.cloud.browser.receiving.contains(&c.id));
                                 let outdated = status.is_some_and(|s| s.outdated);
                                 let response = ui
-                                    .add_enabled_ui(app.cloud.browser.opening.is_none() && !outdated, |ui| {
+                                    .add_enabled_ui(!app.file_load.busy() && !outdated, |ui| {
                                         ui_kit::FileView::recent_row_with_status(
                                             ui,
                                             &format!("cloud:design:{index}"),
@@ -583,9 +549,6 @@ pub(crate) fn home(app: &mut SolveApp, ui: &mut egui::Ui) {
         } else {
             ui_kit::FileView::detail(ui, tr("cloud.setup_hint"));
         }
-        if let Some(error) = &app.cloud.browser.error {
-            ui_kit::text(ui, error, ui_kit::Text::Report("cloud_browser_error", true));
-        }
     });
     ui.add_space(t.file_section_gap);
     for destination in seen {
@@ -601,8 +564,8 @@ fn button(ui: &mut egui::Ui, id: &str, label: &str, enabled: bool) -> bool {
 
 fn busy_button(ui: &mut egui::Ui, id: &str, label: &str, enabled: bool, busy: bool) -> bool {
     let icon = match id {
-        "cloud:refresh" | "cloud:manage:refresh" => "redo",
-        "cloud:sync" => "send",
+        "cloud:manage:refresh" => "redo",
+        "cloud:sync" => "sync",
         "cloud:manage:rename" => "settings",
         "cloud:manage:delete" => "delete",
         "cloud:manage:discard" => "stop",
@@ -618,23 +581,6 @@ fn busy_button(ui: &mut egui::Ui, id: &str, label: &str, enabled: bool, busy: bo
 pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
     management::show(app, ctx);
     versions::show(app, ctx);
-    if let Some(operation) = app.cloud.browser.opening.clone() {
-        let (closed, action) = ui_kit::Window::new(egui::Id::new("cloud_opening"), "open", tr("cmd.cloud.open"))
-            .fields()
-            .cards(1.0)
-            .actions(tr("ui.open"), "Cancel", None)
-            .show(ctx, false, |ui| {
-                ui.spinner();
-                ui.label(tr("home.opening"));
-                if let Some(error) = &app.cloud.browser.error {
-                    ui_kit::text(ui, error, ui_kit::Text::Report("cloud_open_error", true));
-                }
-            });
-        if closed || action == ui_kit::Action::Cancel {
-            let _ = app.run("cloud.cancel", json!({"operation":operation}));
-            app.cloud.browser.opening = None;
-        }
-    }
     let Some(mut picker) = app.cloud.browser.picker.take() else { return };
     if picker.tab != app.docs.active || !Arc::ptr_eq(&picker.owner, &app.session.doc) {
         app.set_status(app.tr("cloud.design_changed"), true);

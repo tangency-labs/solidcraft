@@ -188,6 +188,31 @@ impl LocalOutbox {
     }
 }
 
+impl solidcraft_cloud::DownloadCache for LocalOutbox {
+    async fn load(&self, path: &str) -> Result<Option<Vec<u8>>> {
+        if !path.starts_with("objects/") && !path.starts_with("checks/") {
+            return Err(storage("invalid download object path"));
+        }
+        if !self.path(path)?.exists() {
+            return Ok(None);
+        }
+        self.read(path).map(Some)
+    }
+    async fn store(&self, path: &str, bytes: &[u8]) -> Result<()> {
+        if !path.starts_with("objects/") && !path.starts_with("checks/") || bytes.len() > solidcraft_cloud::CHUNK_BYTES {
+            return Err(storage("invalid download object"));
+        }
+        if path.starts_with("checks/") {
+            let target = self.path(path)?;
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent).map_err(storage)?;
+            }
+            return crate::safe_write::write_atomic(&target, bytes, false).map_err(storage);
+        }
+        self.store(path, bytes)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

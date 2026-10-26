@@ -14,7 +14,7 @@ use js_sys::{Function, Promise, Reflect};
 use solidcraft_cloud::{CachedEntry, Connection, Destination, Error, PendingSave, Published, Result, Snapshot, StagedSave};
 use wasm_bindgen::{JsCast as _, JsValue, closure::Closure};
 use wasm_bindgen_futures::{JsFuture, future_to_promise};
-use web_sys::{FileSystemDirectoryHandle, FileSystemFileHandle, FileSystemGetDirectoryOptions, FileSystemGetFileOptions};
+use web_sys::{FileSystemDirectoryHandle, FileSystemFileHandle, FileSystemGetDirectoryOptions};
 
 const MAX_QUEUE_METADATA: usize = 128 << 20;
 
@@ -150,9 +150,7 @@ impl Store {
         for component in parent.split('/') {
             dir = directory(&dir, component, create).await?;
         }
-        let options = FileSystemGetFileOptions::new();
-        options.set_create(create);
-        JsFuture::from(dir.get_file_handle_with_options(name, &options)).await.map_err(js_error)?.dyn_into().map_err(|_| storage("not a file"))
+        crate::files::file_handle(&dir, name, create).await.map_err(storage)
     }
 
     async fn read(&self, path: &str) -> Result<Vec<u8>> {
@@ -515,5 +513,33 @@ impl Store {
             return Err(storage("publication receipt identifier mismatch"));
         }
         Ok(Some(published))
+    }
+}
+
+impl solidcraft_cloud::DownloadCache for Store {
+    async fn load(&self, path: &str) -> Result<Option<Vec<u8>>> {
+        if !path.starts_with("objects/") && !path.starts_with("checks/") {
+            return Err(storage("invalid download object path"));
+        }
+        // Missing files are cache misses; other storage failures are reported by writes.
+        match self.file(path, false).await {
+            Ok(file) => crate::files::read_handle_bounded(&file, solidcraft_cloud::CHUNK_BYTES).await.map(Some).map_err(storage),
+            Err(_) => Ok(None),
+        }
+    }
+    async fn store(&self, path: &str, bytes: &[u8]) -> Result<()> {
+        if !path.starts_with("objects/") && !path.starts_with("checks/") || bytes.len() > solidcraft_cloud::CHUNK_BYTES {
+            return Err(storage("invalid download object"));
+        }
+        let store = self.clone();
+        let (path, bytes) = (path.to_owned(), bytes.to_vec());
+        with_lock(&self.lock, async move {
+            if path.starts_with("checks/") {
+                let file = store.file(&path, true).await?;
+                return crate::files::write_handle(&file, &bytes).await.map_err(storage);
+            }
+            store.put_objects(BTreeMap::from([(path, bytes)])).await
+        })
+        .await
     }
 }

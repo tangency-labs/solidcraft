@@ -7,7 +7,11 @@ pub trait ProviderRepository {
     fn test(&mut self) -> Result<()>;
     fn list(&mut self, stored: &mut [StoredDesign]) -> Result<Vec<Destination>>;
     fn trash(&mut self) -> Result<Vec<Destination>>;
-    fn open(&mut self, destination: &Destination) -> Result<Snapshot>;
+    fn open(&mut self, destination: &Destination, cache: &super::LocalOutbox) -> Result<Snapshot>;
+    /// Check repository metadata before reusing a locally confirmed snapshot.
+    fn is_current(&mut self, _cached: &StoredDesign, _cache: &super::LocalOutbox) -> Result<bool> {
+        Ok(false)
+    }
     fn thumbnail(&mut self, destination: &Destination) -> Result<Option<Vec<u8>>>;
     fn history(&mut self, destination: &Destination) -> Result<History>;
     fn open_at(&mut self, destination: &Destination, commit: &str) -> Result<Snapshot>;

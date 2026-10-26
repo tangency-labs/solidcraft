@@ -173,11 +173,10 @@ pub(crate) async fn root() -> Result<FileSystemDirectoryHandle, String> {
 }
 
 pub(crate) async fn read_handle(h: &FileSystemFileHandle) -> Result<Vec<u8>, String> {
-    let file: web_sys::File = JsFuture::from(h.get_file()).await.map_err(err)?.dyn_into().map_err(|_| "not a file".to_string())?;
-    blob_bytes(&file).await
+    read_handle_bounded(h, usize::MAX).await
 }
 
-/// Cloud chunks and metadata must be bounded before allocating an ArrayBuffer.
+/// Check file size before allocating an ArrayBuffer, then verify the completed read.
 pub(crate) async fn read_handle_bounded(h: &FileSystemFileHandle, max: usize) -> Result<Vec<u8>, String> {
     let file: web_sys::File = JsFuture::from(h.get_file()).await.map_err(err)?.dyn_into().map_err(|_| "not a file".to_string())?;
     let size = file.size();
@@ -196,7 +195,7 @@ async fn blob_bytes(b: &web_sys::Blob) -> Result<Vec<u8>, String> {
     Ok(Uint8Array::new(&buf).to_vec())
 }
 
-async fn file_handle(dir: &FileSystemDirectoryHandle, name: &str, create: bool) -> Result<FileSystemFileHandle, String> {
+pub(crate) async fn file_handle(dir: &FileSystemDirectoryHandle, name: &str, create: bool) -> Result<FileSystemFileHandle, String> {
     let opts = FileSystemGetFileOptions::new();
     opts.set_create(create);
     JsFuture::from(dir.get_file_handle_with_options(name, &opts)).await.map_err(err)?.dyn_into().map_err(|_| "not a file".to_string())

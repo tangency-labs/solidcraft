@@ -329,8 +329,23 @@ fn publication_reuses_assets_preserves_other_files_and_retries_without_a_second_
         let repo = repository.lock().unwrap();
         assert_eq!(repo.commits, 1);
         assert_eq!(repo.files["docs/README.md"], b"Unrelated documentation");
+        assert_eq!(repo.files["Robot/.gitattributes"], Publication::GIT_ATTRIBUTES);
         let changes = &repo.requests.iter().find(|(method, path, _)| method == "POST" && path.ends_with("/git/trees")).unwrap().2["tree"];
         assert!(changes.as_array().unwrap().iter().all(|entry| !entry["path"].as_str().unwrap().contains("/objects/")));
+    });
+}
+
+#[test]
+fn custom_project_attributes_are_preserved_before_any_remote_write() {
+    run_test(async {
+        let repository = repository();
+        let (api, connection) = adapter(repository.clone());
+        repository.lock().unwrap().files.insert("Robot/.gitattributes".into(), b"custom project rules\n".to_vec());
+        let save = stage(&connection, b"{}", None);
+        assert!(api.publish(&save.record, || recover(&save), |_| Ok(())).await.is_err());
+        let repo = repository.lock().unwrap();
+        assert_eq!(repo.files["Robot/.gitattributes"], b"custom project rules\n");
+        assert!(repo.requests.iter().all(|(method, _, _)| method == "GET"));
     });
 }
 
@@ -551,4 +566,89 @@ fn setup_checks_token_write_permission_even_when_account_can_push() {
         assert_eq!(probe["force"], false);
         assert_eq!(probe["sha"], state.commit);
     }));
+}
+
+#[test]
+fn cached_open_checks_one_ref_and_interrupted_downloads_reuse_verified_chunks() {
+    #[derive(Default)]
+    struct Cache(Mutex<BTreeMap<String, Vec<u8>>>);
+    impl crate::DownloadCache for Cache {
+        async fn load(&self, path: &str) -> Result<Option<Vec<u8>>> {
+            Ok(self.0.lock().unwrap().get(path).cloned())
+        }
+        async fn store(&self, path: &str, bytes: &[u8]) -> Result<()> {
+            self.0.lock().unwrap().insert(path.into(), bytes.into());
+            Ok(())
+        }
+    }
+    run_test(async {
+        let repository = repository();
+        let (api, connection) = adapter(repository.clone());
+        let snapshot =
+            Snapshot::prepare(b"{}".to_vec(), BTreeMap::from([("blobs/a.step".into(), vec![11; 1000]), ("blobs/b.step".into(), vec![22; 1000])]))
+                .unwrap();
+        let staged = PendingSave::stage(&connection, "Robot", "parts/bracket", None, snapshot).unwrap();
+        let published = api.publish(&staged.record, || recover(&staged), |_| Ok(())).await.unwrap();
+        let cache = Cache::default();
+        let first_chunk = std::cell::RefCell::new(None);
+        let interrupted = api
+            .open_cached(
+                &published.destination,
+                |_| Ok(()),
+                &cache,
+                |done, _| {
+                    if done == 1 {
+                        *first_chunk.borrow_mut() = repository
+                            .lock()
+                            .unwrap()
+                            .requests
+                            .iter()
+                            .rev()
+                            .find(|(method, path, _)| method == "GET" && path.contains("/git/blobs/"))
+                            .map(|(_, path, _)| path.clone());
+                        return Err(storage("connection interrupted"));
+                    }
+                    Ok(())
+                },
+            )
+            .await;
+        assert!(interrupted.is_err());
+        assert_eq!(cache.0.lock().unwrap().len(), 1, "verified chunks survive an interrupted download");
+        repository.lock().unwrap().requests.clear();
+        let opened = api.open_cached(&published.destination, |_| Ok(()), &cache, |_, _| Ok(())).await.unwrap();
+        let path = first_chunk.borrow().clone().unwrap();
+        assert!(!repository.lock().unwrap().requests.iter().any(|(method, p, _)| method == "GET" && p == &path));
+        let entry = crate::CachedEntry::new(staged.record.clone(), published.destination.clone(), Some(published.revision), true).unwrap();
+        let stored = crate::stored_designs(vec![entry], vec![]).unwrap().remove(0);
+        repository.lock().unwrap().requests.clear();
+        assert!(api.is_current_cached(&stored, &cache).await.unwrap());
+        let requests = repository.lock().unwrap().requests.clone();
+        assert_eq!(requests.len(), 1, "unchanged branches require only the ref check after restart");
+        assert!(requests[0].1.contains("/git/ref/"));
+        let document_path = format!("{}/document.json", published.destination.design_path().unwrap());
+        let original_document = repository.lock().unwrap().files[&document_path].clone();
+        {
+            let mut remote = repository.lock().unwrap();
+            remote.commit = "e".repeat(40);
+            remote.files.insert(document_path.clone(), b"changed without updating the manifest".to_vec());
+        }
+        assert!(matches!(api.is_current_cached(&stored, &cache).await, Err(Error::Invalid(_))));
+        let manifest_path = format!("{}/manifest.json", published.destination.design_path().unwrap());
+        {
+            let mut remote = repository.lock().unwrap();
+            remote.files.insert(document_path, original_document);
+            remote.commit = "d".repeat(40);
+            let mut manifest = opened.manifest;
+            manifest.extra.insert("revision".into(), json!("external"));
+            remote.files.insert(manifest_path.clone(), manifest.write().unwrap());
+        }
+        assert!(!api.is_current_cached(&stored, &cache).await.unwrap(), "a changed remote revision is never opened as current");
+        {
+            let mut remote = repository.lock().unwrap();
+            let mut future: Value = serde_json::from_slice(&remote.files[&manifest_path]).unwrap();
+            future["format"] = json!("solidcraft-cloud/999");
+            remote.files.insert(manifest_path, serde_json::to_vec(&future).unwrap());
+        }
+        assert!(matches!(api.is_current_cached(&stored, &cache).await, Err(Error::UpgradeRequired(_))));
+    });
 }

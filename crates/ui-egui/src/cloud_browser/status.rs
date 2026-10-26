@@ -2,6 +2,19 @@
 use super::*;
 use crate::ui_kit::{FileStatus, FileStatusTone};
 
+pub(super) fn notice(app: &SolveApp, connection: Option<&Connection>) -> Option<String> {
+    let mut messages = crate::cloud::notices(app);
+    if let Some(error) = &app.cloud.browser.error {
+        messages.push(error.clone());
+    }
+    if let Some(message) = connection.and_then(|c| app.cloud.browser.catalogs.get(&c.id)).and_then(|c| c.message.as_ref())
+        && !messages.iter().any(|m| m.ends_with(message))
+    {
+        messages.push(message.clone());
+    }
+    (!messages.is_empty()).then(|| messages.join("\n\n"))
+}
+
 pub(super) fn presentation(status: Option<&SaveStatus>, receiving: bool) -> FileStatus<'static> {
     let (label, tone) = match status {
         Some(s) if s.outdated && receiving => ("cloud.status_pulling", FileStatusTone::Pending),

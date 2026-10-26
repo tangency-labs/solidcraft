@@ -14,8 +14,8 @@ Existing infrastructure is preferred over new protocol, cryptographic, database,
 
 | Responsibility | Reuse decision |
 | --- | --- |
-| Desktop repository engine | Installed Git, preserving its transports, helpers, agent, configuration, hooks, and signing. `process-wrap` owns cancellable Unix process groups and Windows Job Objects; a narrow adapter bounds input/output and deadlines. |
-| GitHub client | Octocrab 0.54.5 with default features disabled and a small browser service/executor adapter. Real typed Git Database read/write calls compile, and public Git reads executed in Chromium. |
+| Standalone desktop Git engine | Installed Git, preserving its transports, helpers, agent, configuration, hooks, and signing. `process-wrap` owns cancellable Unix process groups and Windows Job Objects; a narrow adapter bounds input/output and deadlines. |
+| GitHub client | Octocrab 0.54.5 with default features disabled; desktop ureq and browser Fetch service/executor adapters share Git Database operations. Real typed Git Database read/write calls compile, and public Git reads executed in Chromium. |
 | Browser queue and metadata | `indexed_db_futures` provides schema upgrades, indices, durability options, and explicit transaction completion; its required APIs passed the browser-target compile probe. |
 | OPFS assets | Shared OPFS adapter in `apps/solidcraft-web/src/files.rs`, with bounded reads and awaited write/close. |
 | Native credentials | Existing `keyring` service with opaque credential identifiers. |
@@ -36,10 +36,18 @@ opens them through `cloud.open`, and chooses initial `cloud.save` destinations.
 Its per-connection catalogs are disposable presentation caches. Failed refreshes
 retain displayed entries, and the platform host remains authoritative for offline
 availability, version checks and publication. Large catalogs use virtual scrolling.
+Listing publishes its local destination array and catalog while the job is still
+`Working`, before accessing credentials or the repository. Home adopts that initial
+snapshot immediately, then replaces it with the completed refresh. Existing rows
+remain visible during subsequent refreshes and failures.
 Known occupied names are rejected in the picker; publication still handles races.
 
-A completed download runs `cloud.open.finish` in an isolated session through
-`Session::cloud_open_session`, then follows normal document-tab adoption. Edits and
+Cloud Open enters the shared `file_load` pipeline immediately. Its isolated session
+is prepared with `Session::cloud_open_target`; a native worker waits for the sync
+check, decodes through `cloud.open.finish`, and evaluates with the normal feature
+progress watcher. The browser stages these phases through its frame loader.
+The same loading card shows the design name, sync check, asset counts, rebuild
+progress, partial preview and cancellation before normal document-tab adoption. Edits and
 tab changes during networking cannot replace the current design. Destination
 choices retain the originating tab and document and are cancelled if it changes.
 Close/Quit waits for the picker and durable local acknowledgement. New designs use
@@ -72,7 +80,7 @@ dirty; an open deleted design becomes an unsaved local copy. Restore opens its
 confirmed head separately. Pending management and its assets remain local until
 publication, and immutable receipts make restarts idempotent.
 
-Host setup and repository access are separate adapters. A host setup adapter supplies guided authentication, repository discovery/creation, and host settings links. The native repository adapter uses standard Git; a browser adapter uses a CORS-compatible provider interface. Adding GitLab or Gitea setup must not change the snapshot format.
+Host setup and repository access are separate adapters. A host setup adapter supplies guided authentication, repository discovery/creation, and host settings links. GitHub uses the shared provider API on desktop and browser. Standalone desktop repositories use standard Git. Adding GitLab or Gitea setup must not change the snapshot format.
 
 The GitHub wizard can reuse another connection's opaque credential identifier.
 The selector includes pending connections in Cloud Saves preferences and selects
@@ -91,10 +99,18 @@ Browser integration must persist connection metadata and pending saves in Indexe
 the caller's allowed-folder scope. Give it the app's private cloud recovery
 directory. Each connection has its own outbox under the SHA-256 of its identifier,
 preventing case-insensitive filesystem aliases. Save persists its captured objects
-and queue record before starting Git. Listing combines queued and confirmed local
-destinations with the checkout. Opening prefers the latest queued revision;
-otherwise it reads the checkout, with a confirmed local capture as a fallback
-when the checkout or Git is unavailable. Unsupported or corrupt checkout formats
+and queue record before requesting credentials or accessing the network. The provider
+worker in `io/src/cloud/provider/worker.rs` and standard Git worker share the same
+outbox, cache, receipts, locks and recovery rules. `ProviderRepository` owns blocking
+repository operations; `NativeAccess` selects and constructs the host adapter.
+The desktop GitHub implementation in `apps/solidcraft/src/cloud/access/repository.rs`
+uses the shared Octocrab adapter and the desktop HTTP configuration shared by
+agent chat and update checks. Browser object access reuses the normal OPFS file
+handles, bounded readers and atomic stream writer. A new host implements this boundary and registers
+its guided setup menu entry. Listing combines queued and confirmed local
+destinations with the selected repository. Opening prefers the latest queued revision;
+otherwise it checks the repository head and reads the confirmed local snapshot when
+unchanged, including when connectivity or credentials are unavailable. Unsupported or corrupt repository formats
 return an error instead of silently opening an older cache. Competing local tips
 remain intact and return a conflict rather than opening an arbitrary version.
 
@@ -129,7 +145,10 @@ checkout is unavailable. Validated checkout snapshots are cached by Open, includ
 The desktop app installs this worker through `Services::cloud_host`, using its
 private `cloud` data directory. `SolveApp` loads settings through the registered
 command, polls active and background document tabs, and retries pending queues
-after startup and once a minute when enabled. New tabs inherit connections;
+once at startup when enabled. `cloud/startup.rs` tracks each connection independently
+and retries failed startup attempts with bounded backoff; successful attempts stop.
+Standard Git refreshes verified remotes before push; GitHub reads the observed head
+and publishes with non-forced ref updates. New tabs inherit connections;
 existing bindings stay with their designs when the default changes. Confirmed
 publications from any tab update only matching captured revisions in other tabs.
 Normal cloud Save runs on the live session, bypassing the native scratch-session
@@ -278,9 +297,8 @@ it does not change preferences. The UI merges that result into current settings 
 `cloud.configure` to apply it durably. Cancelling before Apply leaves settings unchanged.
 Setup jobs remain accessible if the user changes document tabs. An empty repository
 override is a setup request: the provider resolves the account and returns the stable
-repository identity while preserving its opaque credential reference. Desktop keys
-the managed checkout and setup lock by that resolved identity, so reconnects reuse
-the checkout and different accounts remain isolated.
+repository identity while preserving its opaque credential reference. Connection
+identities isolate credentials and recovery data across repositories and accounts.
 
 Secrets enter `Host::store_credential` directly, outside serializable engine parameters
 and command/crash logs. Replacement tokens have separate local identifiers, so a failed
@@ -300,19 +318,15 @@ no design revision; a concurrent branch advance rejects the probe safely. Existi
 are never overwritten by initialization. Read-only/archived repositories and HTTP access
 failures leave local queues untouched.
 
-Native setup clones into an automatically cleaned temporary directory, validates the
-clone, then renames it into that connection's private checkout. Retries reuse the checkout
-only after verifying its origin and selected branch. HTTPS credentials use Git's standard
-credential-helper protocol with a fixed helper and connection-specific environment values.
-The helper answers only for HTTPS, `github.com`, and the exact selected repository path;
-it ignores store/erase calls. Tokens never enter argv, URLs, Git config or diagnostic output.
-Redirects and Git trace output are disabled for token-authenticated commands; effective
-fetch/push URL rewrites are checked before publication. System authentication is retained
-for connections that select it. Token lookup happens only for network operations, so an
-unavailable keychain does not prevent local checkout opens. Commits use the configured Git
-identity; missing identity fields get per-command fallbacks without editing Git config.
+Native GitHub setup returns its verified API connection directly. The same token
+handles setup, reads and publication. Responses and base64 object uploads are
+bounded, and credentials are requested only for network operations. Standard Git
+connections use system credential helpers, saved HTTPS credentials or SSH configuration and retain
+verified fetch/push endpoints. Commits use the configured Git identity; missing
+identity fields get per-command fallbacks without editing Git config.
 
-The Start page opens this wizard and browses connected repositories. The Cloud
+The Start page and Settings use **Add new repository → GitHub / Git**. GitHub opens
+guided token setup; Git opens the standalone native checkout editor. The Cloud
 Saves preference editor manages pending connection edits. All setup labels cover all
 supported locale catalogs, including en-GB.
 
@@ -333,7 +347,10 @@ Testing and synchronization use the applied connection through existing commands
 The shared UI kit table in `cloud_settings/repositories.rs` owns row selection,
 default destination and removal controls. Labels use `Connection::repository_label()`
 from remote metadata. Operation feedback has a fixed footer, and busy buttons
-replace their leading icon without changing dimensions.
+replace their leading icon without changing dimensions. Native checkout setup opened
+from Start owns a standalone modal and applies verified connections directly.
+The Preferences entry stages edits for Apply/OK. New setup uses the New Git
+repository title; editing an existing connection uses Git connection settings.
 
 ## Verified native remotes
 
@@ -353,20 +370,28 @@ histories retain the local save for the user to reconcile through Git. A missing
 remote branch receives its first publication. Pushes use the verified URLs, and
 publication is acknowledged only after every push destination confirms the commit.
 A changed remote requires verification before the captured save can be published.
-
-GitHub HTTPS credentials remain scoped to the chosen repository when a named
-remote resolves to that same repository. Endpoint checks run before credentialed
-network operations; Git's credential protocol still supplies the token.
+An unborn local branch uses Git's empty tree as its comparison baseline. The same
+path-limited commit creates the first revision directly and leaves unrelated staged
+and working files intact. Branch existence is checked separately from commit
+resolution so repository errors and cancellations still propagate. This shared
+publication path applies to SSH, HTTPS and local remotes.
+Shared publication includes exact-byte Git attributes inside the project. Native
+Git explicitly stages only owned paths even when ignored, and verifies committed
+document/chunk hashes before pushing, including resumed commits. The GitHub API
+adapter reuses the attributes blob and preserves conflicting custom rules before
+any remote write. Ordinary project documentation retains repository attributes.
 
 The native editor lives in `ui-egui/src/cloud_settings/git.rs`. Interactive
-`cloud.configure` opens it within Cloud Saves preferences. It uses `cloud.test`
-with a proposed connection and Git executable, shows the resolved endpoints, and
-stages the verified result through the parent editor. Apply owns the durable
-configuration write. Editing any tested field invalidates the result. Cancellation
-stops the test; delayed picker replies carry an editor identity so a closed or
-replaced editor cannot receive them. Directory selection is injected by the
-desktop host alongside the existing asynchronous file pickers. System and chosen
-SSH keys stay connection-scoped; the Git executable is a shared setting.
+`cloud.configure` opens a standalone modal from Start or stages edits within Cloud
+Saves Preferences. It uses `cloud.test` with a proposed connection and Git
+executable, shows the resolved endpoints, and retains the verified result. Home
+persists the connection directly; Preferences Apply owns its durable write.
+Editing any tested field invalidates the result. Cancellation stops the test;
+delayed picker replies carry an editor identity so a closed or replaced editor
+cannot receive them. Directory selection is injected by the desktop host alongside
+the existing asynchronous file pickers. System and chosen SSH keys stay
+connection-scoped; the Git executable is a shared setting. GitHub connections
+expose their guided reconnect action, while standalone Git exposes this editor.
 
 
 ### Native SSH key generation
@@ -512,13 +537,25 @@ subsequent desktop Sync/Open and remove only the disposable ref with an exact le
 The ordinary cloud-storage fixture remains deterministic and credential-free.
 
 
-Authenticated acceptance has exercised native HTTPS publication using the desktop
+Authenticated acceptance has exercised standard Git HTTPS publication using the desktop
 credential adapter, browser opening and publication through GitHub, offline browser
 restart with retained settings/credentials, and desktop Sync/Open of the browser
 revision with both editable Box features intact. Test data used a disposable orphan
 branch; all such refs were removed with exact leases after checking their contents.
 
+The native provider-worker regression uses an in-memory repository and an invalid
+Git executable to verify API dispatch, offline capture, restart recovery, immutable
+receipts, rename, Trash and historical restore. Its repository adapter uses the
+same publication planner as GitHub. The desktop HTTP adapter is checked separately
+with strict compilation and its local-executor regression.
+
 ### Observed repository changes and action lifetimes
+
+Cloud operation notices stay with the Cloud Saves section. Its shared FileView
+header exposes an accessible status dot and a colored detail tooltip. Per-connection
+action notices clear after successful testing or publication; background preview
+reads preserve outstanding push failures. Listing errors clear after a successful refresh.
+
 
 `StoredDesign::outdated` distinguishes an observed stale cache from a listing that
 has not yet been confirmed. Listing compares revision, document hash and manifest
@@ -540,3 +577,27 @@ without changing the button width or text position.
 Working and syncing operations keep their action disabled; terminal acknowledgements
 (including failure, cancellation and worker timeout) release it. Local durability
 alone does not release an action while its upload continues.
+
+### Local-first opening on unstable networks
+
+`github/opening.rs` persists a machine-local checked-head record under `checks/`.
+It binds the exact endpoint, branch, destination, document identity, manifest identity
+and revision to a verified Git commit. An unchanged branch needs one ref request;
+changed branches revalidate the project and manifest before any cache reuse.
+The check never acknowledges a stale design or changes its saved revision.
+Unknown envelopes and observed outdated heads cannot fall back to an older local copy.
+
+The portable `DownloadCache` boundary stores SHA-256 addressed chunks separately
+from complete design heads. Native outboxes and browser OPFS persist each verified
+chunk before requesting the next. Interrupted downloads reuse these objects after
+restart; changes to parameters reuse existing assets. Complete snapshots are
+validated before publishing cache metadata. Local thumbnails are read locally.
+`JobStatus.download_progress` exposes verified chunk counts during opening.
+
+Platform transports bound metadata requests to 10 seconds and asset requests to
+300 seconds. Cached designs remain openable after a failed metadata check; large
+chunks can finish over slow links. Explicit cancellation stops the loading worker
+and retains both pending saves and verified download objects.
+
+The [Git scenario checklist](cloud-git-scenarios.md) maps repository, branch,
+authentication, publication, offline and conflict workflows to focused regressions.

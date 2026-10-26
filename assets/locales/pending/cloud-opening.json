@@ -1,0 +1,106 @@
+{
+  "en": {
+    "cloud.checking_updates": "Checking for updates…",
+    "cloud.downloading": "Downloading assets ({done}/{total})…"
+  },
+  "cs": {
+    "cloud.checking_updates": "Kontrola aktualizací…",
+    "cloud.downloading": "Stahování dat ({done}/{total})…"
+  },
+  "da": {
+    "cloud.checking_updates": "Søger efter opdateringer…",
+    "cloud.downloading": "Henter data ({done}/{total})…"
+  },
+  "de": {
+    "cloud.checking_updates": "Nach Aktualisierungen suchen…",
+    "cloud.downloading": "Daten herunterladen ({done}/{total})…"
+  },
+  "en-GB": {
+    "cloud.checking_updates": "Checking for updates…",
+    "cloud.downloading": "Downloading assets ({done}/{total})…"
+  },
+  "es": {
+    "cloud.checking_updates": "Buscando actualizaciones…",
+    "cloud.downloading": "Descargando recursos ({done}/{total})…"
+  },
+  "fr": {
+    "cloud.checking_updates": "Vérification des mises à jour…",
+    "cloud.downloading": "Téléchargement des ressources ({done}/{total})…"
+  },
+  "gl": {
+    "cloud.checking_updates": "Comprobando actualizacións…",
+    "cloud.downloading": "Descargando recursos ({done}/{total})…"
+  },
+  "hu": {
+    "cloud.checking_updates": "Frissítések keresése…",
+    "cloud.downloading": "Adatok letöltése ({done}/{total})…"
+  },
+  "id": {
+    "cloud.checking_updates": "Memeriksa pembaruan…",
+    "cloud.downloading": "Mengunduh aset ({done}/{total})…"
+  },
+  "it": {
+    "cloud.checking_updates": "Verifica degli aggiornamenti…",
+    "cloud.downloading": "Download delle risorse ({done}/{total})…"
+  },
+  "ja": {
+    "cloud.checking_updates": "更新を確認中…",
+    "cloud.downloading": "アセットをダウンロード中（{done}/{total}）…"
+  },
+  "ko": {
+    "cloud.checking_updates": "업데이트 확인 중…",
+    "cloud.downloading": "에셋 다운로드 중 ({done}/{total})…"
+  },
+  "ms": {
+    "cloud.checking_updates": "Menyemak kemas kini…",
+    "cloud.downloading": "Memuat turun aset ({done}/{total})…"
+  },
+  "nb": {
+    "cloud.checking_updates": "Ser etter oppdateringer…",
+    "cloud.downloading": "Laster ned data ({done}/{total})…"
+  },
+  "nl": {
+    "cloud.checking_updates": "Controleren op updates…",
+    "cloud.downloading": "Gegevens downloaden ({done}/{total})…"
+  },
+  "pl": {
+    "cloud.checking_updates": "Sprawdzanie aktualizacji…",
+    "cloud.downloading": "Pobieranie zasobów ({done}/{total})…"
+  },
+  "pt-BR": {
+    "cloud.checking_updates": "Verificando atualizações…",
+    "cloud.downloading": "Baixando recursos ({done}/{total})…"
+  },
+  "ro": {
+    "cloud.checking_updates": "Se verifică actualizările…",
+    "cloud.downloading": "Se descarcă resursele ({done}/{total})…"
+  },
+  "ru": {
+    "cloud.checking_updates": "Проверка обновлений…",
+    "cloud.downloading": "Загрузка ресурсов ({done}/{total})…"
+  },
+  "sv": {
+    "cloud.checking_updates": "Söker efter uppdateringar…",
+    "cloud.downloading": "Hämtar resurser ({done}/{total})…"
+  },
+  "tr": {
+    "cloud.checking_updates": "Güncellemeler denetleniyor…",
+    "cloud.downloading": "Varlıklar indiriliyor ({done}/{total})…"
+  },
+  "uk": {
+    "cloud.checking_updates": "Перевірка оновлень…",
+    "cloud.downloading": "Завантаження ресурсів ({done}/{total})…"
+  },
+  "vi": {
+    "cloud.checking_updates": "Đang kiểm tra cập nhật…",
+    "cloud.downloading": "Đang tải tài nguyên ({done}/{total})…"
+  },
+  "zh": {
+    "cloud.checking_updates": "正在检查更新…",
+    "cloud.downloading": "正在下载资源（{done}/{total}）…"
+  },
+  "zh-TW": {
+    "cloud.checking_updates": "正在檢查更新…",
+    "cloud.downloading": "正在下載資源（{done}/{total}）…"
+  }
+}

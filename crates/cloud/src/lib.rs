@@ -6,6 +6,7 @@
 mod catalog;
 mod configuration;
 pub mod credentials;
+mod download;
 #[cfg(feature = "github")]
 pub mod github;
 pub mod jobs;
@@ -19,6 +20,7 @@ mod snapshot;
 mod thumbnail;
 pub use catalog::{CachedEntry, LocalRevision, StoredDesign, manifest_digest, stored_designs};
 pub use configuration::{Configuration, MAX_SETTINGS_BYTES};
+pub use download::DownloadCache;
 pub use outbox::{PendingSave, StagedSave};
 pub use project::{Destination, PROJECT_MARKER, Project, check_path};
 pub use publication::{Publication, Published, revision};

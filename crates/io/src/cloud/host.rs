@@ -187,6 +187,7 @@ impl NativeHost {
                 let has_local = !cached.is_empty() || !pending.is_empty();
                 let hidden: Vec<_> = pending.iter().filter(|s| s.manifest.deleted()).map(|s| s.destination.clone()).collect();
                 let mut catalog = solidcraft_cloud::stored_designs(cached, pending)?;
+                job.local_catalog(catalog.clone())?;
                 let mut destinations = BTreeMap::new();
                 for entry in &catalog {
                     destinations.insert(entry.destination.design_path()?, entry.destination.clone());

@@ -89,21 +89,15 @@ impl NativeAccess for Access {
 fn client(token: &str, job: Job) -> std::result::Result<octocrab::Octocrab, BoxError> {
     const API_BYTES: usize = solidcraft_cloud::MAX_MANIFEST_BYTES * 2 + solidcraft_cloud::CHUNK_BYTES;
     solidcraft_cloud::setup::check_token(token)?;
-    let tls = ureq::tls::TlsConfig::builder()
-        .root_certs(ureq::tls::RootCerts::PlatformVerifier)
-        .unversioned_rustls_crypto_provider(Arc::new(rustls::crypto::ring::default_provider()))
-        .build();
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .tls_config(tls)
-        .http_status_as_error(false)
-        .user_agent("SolidCraft")
-        .max_redirects(0)
-        .timeout_global(Some(std::time::Duration::from_secs(30)))
-        .build()
-        .into();
-    let agent = Arc::new(agent);
+    let agent = |seconds| -> Arc<ureq::Agent> {
+        Arc::new(crate::native_http::config().max_redirects(0).timeout_global(Some(std::time::Duration::from_secs(seconds))).build().into())
+    };
+    // Small sync checks fail over to the confirmed local copy promptly. Large immutable
+    // chunks get time to cross a slow cellular link and are retained once verified.
+    let metadata_agent = agent(10);
+    let payload_agent = agent(300);
     let service = service_fn(move |request: Request<OctoBody>| {
-        let agent = agent.clone();
+        let agent = if request.uri().path().contains("/git/blobs") { payload_agent.clone() } else { metadata_agent.clone() };
         let job = job.clone();
         async move {
             if job.cancelled()? {

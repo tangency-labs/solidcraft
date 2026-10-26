@@ -176,6 +176,19 @@ impl GitRepository {
         self.run(&["show", &specification], None).map(Some)
     }
 
+    fn current_commit(&self) -> Result<Option<String>> {
+        let reference = format!("refs/heads/{}", self.connection.branch);
+        let prefix = format!("{reference} ");
+        // An unborn branch has no ref. Enumerate it rather than treating every failed
+        // rev-parse (including corrupt repositories or a cancelled job) as an empty repo.
+        let references = self.text(&["for-each-ref", "--format=%(refname) %(objectname)", "--", &reference])?;
+        if references.lines().any(|line| line.starts_with(&prefix)) {
+            self.text(&["rev-parse", "--verify", "HEAD^{commit}"]).map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
     fn check_ready(&self) -> Result<()> {
         for name in ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply", "BISECT_LOG", "index.lock"] {
             let path = PathBuf::from(self.text(&["rev-parse", "--git-path", name])?);
@@ -324,11 +337,19 @@ impl GitRepository {
             self.check_token_destination()?;
         }
         super::check_document(&snapshot.document)?;
+        let captured_objects: Vec<_> = snapshot.objects.keys().cloned().collect();
         let remote = self.pinned_remote()?;
         if let Some(remote) = &remote {
             self.fetch_destinations(remote)?;
         }
-        let base = self.text(&["rev-parse", "HEAD"])?;
+        self.check_ready()?;
+        let previous_commit = self.current_commit()?;
+        // The empty tree is only a comparison baseline. The normal commit command
+        // creates the first design revision directly, preserving hooks and signing.
+        let base = match &previous_commit {
+            Some(commit) => commit.clone(),
+            None => String::from_utf8(self.run(&["hash-object", "-w", "-t", "tree", "--stdin"], None)?).map_err(storage)?.trim().to_owned(),
+        };
         let target = Published::target(save, parent)?;
         let prefix = target.design_path()?;
         let marker_path = format!("{}/{PROJECT_MARKER}", save.destination.project);
@@ -371,11 +392,15 @@ impl GitRepository {
         }
         if !publication.already_published && existing_conflict.is_none() {
             let mut files = publication.files;
+            let attributes_path = format!("{}/.gitattributes", publication.destination.project);
+            if self.read(&attributes_path)?.is_some_and(|bytes| bytes != Publication::GIT_ATTRIBUTES) {
+                return Err(storage("cloud project .gitattributes has custom changes; preserve them before synchronizing"));
+            }
             // Already-present immutable objects are neither rewritten nor staged.
             let object_prefix = format!("{}/objects/", publication.destination.project);
             let mut reusable = Vec::new();
             for (path, bytes) in &files {
-                if path.starts_with(&object_prefix)
+                if (path.starts_with(&object_prefix) || path == &attributes_path)
                     && self.read(path)?.as_deref() == Some(bytes.as_slice())
                     && self.committed(&base, path)?.as_deref() == Some(bytes.as_slice())
                 {
@@ -412,7 +437,8 @@ impl GitRepository {
                     return Err(storage("project file too large"));
                 }
             }
-            if self.text(&["rev-parse", "HEAD"])? != base {
+            self.check_ready()?;
+            if self.current_commit()? != previous_commit {
                 return Err(Error::Conflict);
             }
             for (relative, bytes) in &files {
@@ -422,7 +448,8 @@ impl GitRepository {
                 }
                 crate::safe_write::write_atomic(&path, bytes, false).map_err(storage)?;
             }
-            self.run(&["add", "--pathspec-from-file=-", "--pathspec-file-nul"], Some(&paths))?;
+            // The explicit save owns these paths even if a repository ignores the project.
+            self.run(&["add", "--force", "--pathspec-from-file=-", "--pathspec-file-nul"], Some(&paths))?;
             let mut identity = Vec::new();
             if !self.text(&["config", "--get", "user.name"]).is_ok_and(|value| !value.is_empty()) {
                 identity.extend(["-c", "user.name=SolidCraft"]);
@@ -441,6 +468,20 @@ impl GitRepository {
         let confirmed = self.committed(&commit, &published_path)?.ok_or_else(|| storage("saved revision is missing from its commit"))?;
         if solidcraft_cloud::revision(&Manifest::read(&confirmed)?) != Some(save.id.as_str()) {
             return Err(Error::Conflict);
+        }
+        // A higher-priority Git attribute or hook can transform bytes despite the project's
+        // rules. Check the actual commit on retries too, before any remote publication.
+        let prefix = publication.destination.design_path()?;
+        let document = self.committed(&commit, &format!("{prefix}/document.json"))?.ok_or_else(|| storage("saved document is missing"))?;
+        if solidcraft_cloud::digest(&document) != save.manifest.document_hash {
+            return Err(storage("Git changed captured document bytes; check repository attributes and filters. Local save retained"));
+        }
+        for path in captured_objects {
+            let bytes =
+                self.committed(&commit, &format!("{}/{path}", publication.destination.project))?.ok_or_else(|| storage("saved asset is missing"))?;
+            if path.rsplit('/').next() != Some(solidcraft_cloud::digest(&bytes).as_str()) {
+                return Err(storage("Git changed captured asset bytes; check repository attributes and filters. Local save retained"));
+            }
         }
         if let Some(remote) = &remote {
             self.push_destinations(remote, &commit)?;
@@ -461,6 +502,7 @@ mod tests {
     struct Fixture {
         root: PathBuf,
         checkout: PathBuf,
+        branch: String,
     }
     impl Fixture {
         fn git(path: &Path, args: &[&str]) -> Vec<u8> {
@@ -469,26 +511,33 @@ mod tests {
             output.stdout
         }
         fn new() -> Self {
+            let fixture = Self::empty();
+            fs::write(fixture.checkout.join("README.md"), "Project repository\n").unwrap();
+            Self::git(&fixture.checkout, &["add", "README.md"]);
+            Self::git(&fixture.checkout, &["commit", "-m", "Initial repository"]);
+            Self::git(&fixture.checkout, &["push", "origin", "main"]);
+            fixture
+        }
+        fn empty() -> Self {
+            Self::empty_on("main", "sha1")
+        }
+        fn empty_on(branch: &str, object_format: &str) -> Self {
             let root = std::env::temp_dir().join(format!(
                 "solidcraft cloud git {} {}",
                 std::process::id(),
                 std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
             ));
             fs::create_dir_all(&root).unwrap();
-            Self::git(&root, &["init", "--bare", "--initial-branch=main", "remote.git"]);
+            Self::git(&root, &["init", "--bare", &format!("--initial-branch={branch}"), &format!("--object-format={object_format}"), "remote.git"]);
             Self::git(&root, &["clone", "remote.git", "checkout"]);
             let checkout = root.join("checkout");
             Self::git(&checkout, &["config", "user.name", "Cloud tests"]);
             Self::git(&checkout, &["config", "user.email", "cloud@example.invalid"]);
             Self::git(&checkout, &["config", "commit.gpgSign", "false"]);
-            fs::write(checkout.join("README.md"), "Project repository\n").unwrap();
-            Self::git(&checkout, &["add", "README.md"]);
-            Self::git(&checkout, &["commit", "-m", "Initial repository"]);
-            Self::git(&checkout, &["push", "origin", "main"]);
-            Self { root, checkout }
+            Self { root, checkout, branch: branch.into() }
         }
         fn connection(&self) -> Connection {
-            Connection { checkout: self.checkout.to_string_lossy().into_owned(), ..Default::default() }
+            Connection { checkout: self.checkout.to_string_lossy().into_owned(), branch: self.branch.clone(), ..Default::default() }
         }
         fn stage(&self) -> solidcraft_cloud::StagedSave {
             let doc = solidcraft_doc::Document::new("Bracket");
@@ -498,6 +547,180 @@ mod tests {
     impl Drop for Fixture {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    #[test]
+    fn empty_checkout_publishes_first_design_without_committing_unrelated_staged_files() {
+        for (branch, object_format, remote) in [("main", "sha1", ""), ("main", "sha1", "origin"), ("designs/work", "sha256", "origin")] {
+            let fixture = Fixture::empty_on(branch, object_format);
+            fs::write(fixture.checkout.join("staged.txt"), b"unrelated staged").unwrap();
+            Fixture::git(&fixture.checkout, &["add", "staged.txt"]);
+            fs::write(fixture.checkout.join("staged.txt"), b"unrelated working changes").unwrap();
+            let connection = Connection { remote: remote.into(), ..fixture.connection() };
+            let repository = GitRepository::open(connection.clone(), "").unwrap();
+            repository.refresh().unwrap();
+            // Another client can connect before the first publication exists too.
+            Fixture::git(&fixture.root, &["clone", "remote.git", "waiting checkout"]);
+            let save = PendingSave::stage(
+                &connection,
+                "Robot project",
+                "parts/bracket",
+                None,
+                super::super::prepare_document(&solidcraft_doc::Document::new("Bracket")).unwrap(),
+            )
+            .unwrap();
+            let snapshot = || save.record.recover(|path| Ok(save.objects[path].clone())).unwrap();
+            let published = repository.publish(&save.record, snapshot()).unwrap();
+            assert!(!published.conflict);
+            assert_eq!(Fixture::git(&fixture.checkout, &["rev-list", "--count", "HEAD"]), b"1\n");
+            assert_eq!(Fixture::git(&fixture.checkout, &["diff", "--cached", "--name-only"]), b"staged.txt\n");
+            assert_eq!(Fixture::git(&fixture.checkout, &["show", ":staged.txt"]), b"unrelated staged");
+            assert_eq!(fs::read(fixture.checkout.join("staged.txt")).unwrap(), b"unrelated working changes");
+            assert!(Fixture::git(&fixture.checkout, &["ls-tree", "HEAD", "--", "staged.txt"]).is_empty());
+            assert_eq!(repository.open_design(&published.destination).unwrap().0.name, "Bracket");
+            assert_eq!(repository.publish(&save.record, snapshot()).unwrap().commit, published.commit);
+            if !remote.is_empty() {
+                assert_eq!(Fixture::git(&fixture.root, &["--git-dir=remote.git", "rev-parse", branch]), format!("{}\n", published.commit).as_bytes());
+                let waiting = fixture.root.join("waiting checkout");
+                fs::write(waiting.join("peer-staged.txt"), b"peer work").unwrap();
+                Fixture::git(&waiting, &["add", "peer-staged.txt"]);
+                let peer = GitRepository::open(Connection { checkout: waiting.to_string_lossy().into_owned(), ..connection }, "").unwrap();
+                peer.refresh().unwrap();
+                assert_eq!(peer.open_design(&published.destination).unwrap().0.name, "Bracket");
+                assert_eq!(Fixture::git(&waiting, &["diff", "--cached", "--name-only"]), b"peer-staged.txt\n");
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn rejected_initial_push_resumes_the_same_commit_from_the_durable_queue() {
+        use std::os::unix::fs::PermissionsExt;
+        for mirror in [false, true] {
+            let fixture = Fixture::empty();
+            let rejected_remote = if mirror {
+                Fixture::git(&fixture.root, &["init", "--bare", "--initial-branch=main", "mirror.git"]);
+                for remote in ["remote.git", "mirror.git"] {
+                    Fixture::git(&fixture.checkout, &["config", "--add", "remote.origin.pushurl", fixture.root.join(remote).to_str().unwrap()]);
+                }
+                "mirror.git"
+            } else {
+                "remote.git"
+            };
+            let hook = fixture.root.join(rejected_remote).join("hooks/pre-receive");
+            fs::write(&hook, b"#!/bin/sh\nexit 1\n").unwrap();
+            fs::set_permissions(&hook, fs::Permissions::from_mode(0o700)).unwrap();
+            let outbox = super::super::LocalOutbox::new(fixture.root.join("recovery")).unwrap();
+            let save = fixture.stage();
+            outbox.stage(&save).unwrap();
+            let repository = GitRepository::open(fixture.connection(), "").unwrap();
+            assert!(repository.publish(&save.record, outbox.recover(&save.record).unwrap()).is_err());
+            assert_eq!(outbox.pending().unwrap().len(), 1);
+            let commit = Fixture::git(&fixture.checkout, &["rev-parse", "HEAD"]);
+            if mirror {
+                assert_eq!(Fixture::git(&fixture.root.join("remote.git"), &["rev-parse", "main"]), commit);
+            }
+            // An unrelated later commit must remain local when retrying this save.
+            Fixture::git(&fixture.checkout, &["commit", "--allow-empty", "-m", "Later unrelated change"]);
+            fs::remove_file(hook).unwrap();
+            let restarted_outbox = super::super::LocalOutbox::new(fixture.root.join("recovery")).unwrap();
+            let published = repository.publish(&save.record, restarted_outbox.recover(&save.record).unwrap()).unwrap();
+            assert_eq!(format!("{}\n", published.commit).as_bytes(), commit);
+            assert_eq!(Fixture::git(&fixture.checkout, &["rev-list", "--count", "HEAD"]), b"2\n");
+            restarted_outbox.published(&save.record, &published).unwrap();
+            assert!(restarted_outbox.pending().unwrap().is_empty());
+            assert_eq!(Fixture::git(&fixture.root.join(rejected_remote), &["rev-parse", "main"]), commit);
+            assert_eq!(Fixture::git(&fixture.root.join(rejected_remote), &["rev-list", "--count", "main"]), b"1\n");
+        }
+    }
+
+    #[test]
+    fn external_git_operations_and_wrong_branches_pause_before_writing() {
+        let fixture = Fixture::new();
+        let repository = GitRepository::open(fixture.connection(), "").unwrap();
+        let save = fixture.stage();
+        let snapshot = || save.record.recover(|path| Ok(save.objects[path].clone())).unwrap();
+        for marker in ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply", "BISECT_LOG", "index.lock"] {
+            let path = fixture.checkout.join(".git").join(marker);
+            fs::write(&path, b"external operation").unwrap();
+            assert!(repository.publish(&save.record, snapshot()).unwrap_err().to_string().contains("external Git operation"));
+            assert!(!fixture.checkout.join("Robot project").exists());
+            fs::remove_file(path).unwrap();
+        }
+        Fixture::git(&fixture.checkout, &["checkout", "-b", "other"]);
+        assert!(repository.publish(&save.record, snapshot()).is_err());
+        Fixture::git(&fixture.checkout, &["checkout", "--detach"]);
+        assert!(repository.publish(&save.record, snapshot()).is_err());
+        assert!(!fixture.checkout.join("Robot project").exists());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn divergent_histories_and_commit_checks_preserve_local_work_for_retry() {
+        use std::os::unix::fs::PermissionsExt;
+        for check in ["divergence", "hook", "signing"] {
+            let fixture = Fixture::new();
+            let executable = fixture.root.join("reject commit");
+            if check == "divergence" {
+                Fixture::git(&fixture.root, &["clone", "remote.git", "peer"]);
+                Fixture::git(
+                    &fixture.root.join("peer"),
+                    &[
+                        "-c",
+                        "user.name=Peer",
+                        "-c",
+                        "user.email=peer@example.invalid",
+                        "-c",
+                        "commit.gpgSign=false",
+                        "commit",
+                        "--allow-empty",
+                        "-m",
+                        "Peer change",
+                    ],
+                );
+                Fixture::git(&fixture.root.join("peer"), &["push", "origin", "main"]);
+                Fixture::git(&fixture.checkout, &["commit", "--allow-empty", "-m", "Local change"]);
+            } else {
+                fs::write(&executable, b"#!/bin/sh\ntouch \"$0.invoked\"\nexit 1\n").unwrap();
+                fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+                if check == "hook" {
+                    fs::copy(&executable, fixture.checkout.join(".git/hooks/pre-commit")).unwrap();
+                } else {
+                    Fixture::git(&fixture.checkout, &["config", "gpg.program", executable.to_str().unwrap()]);
+                    Fixture::git(&fixture.checkout, &["config", "user.signingkey", "example"]);
+                    Fixture::git(&fixture.checkout, &["config", "commit.gpgSign", "true"]);
+                }
+            }
+            fs::write(fixture.checkout.join("staged.txt"), b"staged unrelated").unwrap();
+            Fixture::git(&fixture.checkout, &["add", "staged.txt"]);
+            fs::write(fixture.checkout.join("staged.txt"), b"working unrelated").unwrap();
+            let before = Fixture::git(&fixture.checkout, &["rev-parse", "HEAD"]);
+            let remote_before = Fixture::git(&fixture.root.join("remote.git"), &["rev-parse", "main"]);
+            let outbox = super::super::LocalOutbox::new(fixture.root.join("recovery")).unwrap();
+            let save = fixture.stage();
+            outbox.stage(&save).unwrap();
+            let repository = GitRepository::open(fixture.connection(), "").unwrap();
+            assert!(repository.publish(&save.record, outbox.recover(&save.record).unwrap()).is_err());
+            assert_eq!(Fixture::git(&fixture.checkout, &["rev-parse", "HEAD"]), before);
+            assert_eq!(Fixture::git(&fixture.root.join("remote.git"), &["rev-parse", "main"]), remote_before);
+            assert_eq!(Fixture::git(&fixture.checkout, &["show", ":staged.txt"]), b"staged unrelated");
+            assert_eq!(fs::read(fixture.checkout.join("staged.txt")).unwrap(), b"working unrelated");
+            assert_eq!(outbox.pending().unwrap().len(), 1);
+            if check == "divergence" {
+                assert!(!fixture.checkout.join("Robot project").exists());
+            } else {
+                let invoked =
+                    if check == "hook" { fixture.checkout.join(".git/hooks/pre-commit.invoked") } else { executable.with_extension("invoked") };
+                assert!(invoked.exists(), "the configured {check} must actually run");
+                if check == "hook" {
+                    fs::remove_file(fixture.checkout.join(".git/hooks/pre-commit")).unwrap();
+                } else {
+                    Fixture::git(&fixture.checkout, &["config", "commit.gpgSign", "false"]);
+                }
+                repository.publish(&save.record, outbox.recover(&save.record).unwrap()).unwrap();
+                assert_eq!(Fixture::git(&fixture.checkout, &["diff", "--cached", "--name-only"]), b"staged.txt\n");
+            }
         }
     }
 
@@ -564,6 +787,121 @@ mod tests {
         assert!(outbox.pending().unwrap().is_empty());
         let other = Connection { id: "other".into(), credential: "cloud:other".into(), ..fixture.connection() };
         assert!(GitRepository::open(other, "").unwrap().publish(&save.record, Snapshot::prepare(b"{}".to_vec(), BTreeMap::new()).unwrap()).is_err());
+    }
+
+    #[test]
+    fn linked_worktrees_publish_their_branch_and_preserve_their_separate_index() {
+        let fixture = Fixture::new();
+        let path = fixture.root.join("linked checkout");
+        Fixture::git(&fixture.checkout, &["worktree", "add", "-b", "designs/work", path.to_str().unwrap()]);
+        fs::write(path.join("staged.txt"), b"linked work").unwrap();
+        Fixture::git(&path, &["add", "staged.txt"]);
+        let original = Fixture::git(&fixture.checkout, &["rev-parse", "HEAD"]);
+        let connection = Connection { checkout: path.to_string_lossy().into_owned(), branch: "designs/work".into(), ..fixture.connection() };
+        let repository = GitRepository::open(connection.clone(), "").unwrap();
+        let save = PendingSave::stage(
+            &connection,
+            "Robot project",
+            "parts/bracket",
+            None,
+            super::super::prepare_document(&solidcraft_doc::Document::new("Linked bracket")).unwrap(),
+        )
+        .unwrap();
+        let published = repository.publish(&save.record, save.record.recover(|path| Ok(save.objects[path].clone())).unwrap()).unwrap();
+        assert_eq!(repository.open_design(&published.destination).unwrap().0.name, "Linked bracket");
+        assert_eq!(Fixture::git(&path, &["diff", "--cached", "--name-only"]), b"staged.txt\n");
+        assert_eq!(Fixture::git(&fixture.checkout, &["rev-parse", "HEAD"]), original);
+        assert_eq!(Fixture::git(&fixture.root.join("remote.git"), &["rev-parse", "designs/work"]), format!("{}\n", published.commit).as_bytes());
+        assert_eq!(Fixture::git(&fixture.root.join("remote.git"), &["rev-parse", "main"]), original);
+    }
+
+    #[test]
+    fn externally_changed_design_paths_are_preserved_before_any_save_writes() {
+        for state in ["untracked", "staged", "unstaged"] {
+            let fixture = Fixture::empty();
+            let repository = GitRepository::open(fixture.connection(), "").unwrap();
+            let first = fixture.stage();
+            let parent = if state == "untracked" {
+                None
+            } else {
+                Some(repository.publish(&first.record, first.record.recover(|path| Ok(first.objects[path].clone())).unwrap()).unwrap().revision)
+            };
+            let save = PendingSave::stage(
+                &fixture.connection(),
+                "Robot project",
+                "parts/bracket",
+                parent,
+                super::super::prepare_document(&solidcraft_doc::Document::new("Next captured edit")).unwrap(),
+            )
+            .unwrap();
+            let relative = "Robot project/parts/bracket/document.json";
+            let path = fixture.checkout.join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            let external = super::super::prepare_document(&solidcraft_doc::Document::new("External edit")).unwrap().document;
+            fs::write(&path, &external).unwrap();
+            if state == "staged" {
+                Fixture::git(&fixture.checkout, &["add", "--", relative]);
+            }
+            let before = Fixture::git(&fixture.checkout, &["status", "--porcelain=v1", "-z"]);
+            assert!(repository.publish(&save.record, save.record.recover(|path| Ok(save.objects[path].clone())).unwrap()).is_err());
+            assert_eq!(fs::read(path).unwrap(), external);
+            assert_eq!(Fixture::git(&fixture.checkout, &["status", "--porcelain=v1", "-z"]), before);
+        }
+    }
+
+    #[test]
+    fn cloud_projects_keep_exact_bytes_across_line_endings_and_repository_ignore_rules() {
+        for ignored in [false, true] {
+            let fixture = Fixture::empty();
+            if ignored {
+                fs::write(fixture.checkout.join(".gitignore"), b"Robot project/\n").unwrap();
+            }
+            let repository = GitRepository::open(fixture.connection(), "").unwrap();
+            let save = fixture.stage();
+            let snapshot = save.record.recover(|path| Ok(save.objects[path].clone())).unwrap();
+            let document = snapshot.document.clone();
+            let published = repository.publish(&save.record, snapshot).unwrap();
+            Fixture::git(&fixture.root, &["clone", "-c", "core.autocrlf=true", "remote.git", "CRLF checkout"]);
+            let peer = GitRepository::open(
+                Connection { checkout: fixture.root.join("CRLF checkout").to_string_lossy().into_owned(), ..fixture.connection() },
+                "",
+            )
+            .unwrap();
+            assert_eq!(peer.open_design(&published.destination).unwrap().0.name, "Bracket");
+            assert_eq!(peer.snapshot(&published.destination).unwrap().document, document);
+            assert_eq!(fs::read(fixture.checkout.join(".gitignore")).ok(), ignored.then(|| b"Robot project/\n".to_vec()));
+            let attributes = fixture.checkout.join("Robot project/.gitattributes");
+            fs::write(&attributes, b"custom project rules\n").unwrap();
+            let next = PendingSave::stage(
+                &fixture.connection(),
+                "Robot project",
+                "parts/bracket",
+                Some(published.revision),
+                super::super::prepare_document(&solidcraft_doc::Document::new("Next edit")).unwrap(),
+            )
+            .unwrap();
+            assert!(repository.publish(&next.record, next.record.recover(|path| Ok(next.objects[path].clone())).unwrap()).is_err());
+            assert_eq!(fs::read(attributes).unwrap(), b"custom project rules\n");
+        }
+    }
+
+    #[test]
+    fn higher_priority_git_filters_cannot_publish_changed_capture_bytes_even_on_retry() {
+        let fixture = Fixture::empty();
+        fs::write(fixture.checkout.join(".git/info/attributes"), b"**/document.json filter=convert\n").unwrap();
+        Fixture::git(&fixture.checkout, &["config", "filter.convert.clean", "cat; printf '\\n'"]);
+        Fixture::git(&fixture.checkout, &["config", "filter.convert.smudge", "cat"]);
+        let outbox = super::super::LocalOutbox::new(fixture.root.join("recovery")).unwrap();
+        let save = fixture.stage();
+        outbox.stage(&save).unwrap();
+        let repository = GitRepository::open(fixture.connection(), "").unwrap();
+        for _ in 0..2 {
+            let error = repository.publish(&save.record, outbox.recover(&save.record).unwrap()).unwrap_err();
+            assert!(error.to_string().contains("Git changed captured document bytes"), "{error}");
+            assert_eq!(outbox.pending().unwrap().len(), 1);
+            assert_eq!(Fixture::git(&fixture.checkout, &["rev-list", "--count", "HEAD"]), b"1\n");
+            assert!(Fixture::git(&fixture.root.join("remote.git"), &["for-each-ref", "refs/heads/"]).is_empty());
+        }
     }
 
     #[test]

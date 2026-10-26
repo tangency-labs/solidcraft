@@ -114,6 +114,15 @@ buttons aligned. Each action stays disabled until its operation finishes.
 Opening a cloud design enters the workspace before showing progress, just like
 opening a local file. Its parts appear as display meshes become ready.
 
+Synced designs open from this device after a small repository check. The loading
+card shows the design name and the same reading and rebuild progress as a local
+file. If a newer revision needs downloading, it shows completed asset counts.
+Completed download chunks survive an interruption or browser restart, so retrying
+only transfers missing data. A failed connection check keeps confirmed local
+designs available; a design already marked Outdated must finish synchronizing.
+
+![Opening a locally retained cloud design with its saved preview and sync check](images/cloud-saves-opening.png)
+
 Cloud-backed document tabs use the usual unsaved-marker position after the name.
 Unsaved edits show a white dot; pushing makes it pulse white. A push still waiting
 after 30 seconds pulses orange, and a failed save or push shows red. Saved cloud tabs
@@ -177,6 +186,12 @@ Cancelling synchronization keeps queued designs. When a conflicting design edit
 is found, SolidCraft preserves a conflict copy rather than replacing either edit.
 Newer storage formats ask you to upgrade before opening or saving.
 
+Connection problems appear as a red dot beside **Cloud Saves**. Hover over the dot
+for connection error details in a colored tooltip. Locally retained designs
+and their synchronization states remain visible.
+
+[![A connection error appears as a dot beside Cloud Saves, with details in its hover tooltip.](images/cloud-saves-connection-status.png)](images/cloud-saves-connection-status.png)
+
 ## Manage connections
 
 Open **Cloud Saves Settings** from Start, or choose **Settings → Cloud Saves**.
@@ -219,6 +234,11 @@ SolidCraft commits the files belonging to its save and preserves unrelated stage
 and unstaged changes. It waits for external merges or rebases to finish.
 Git configuration and signing remain in effect. If no author identity is available,
 the app uses `SolidCraft <cloud@solidcraft.invalid>` for that save only.
+An empty checkout and remote are ready to use: the first save creates and pushes
+the initial commit, including only that design's files. This works with SSH,
+HTTPS and local remotes.
+Project-local Git attributes preserve storage hashes across operating systems.
+An explicit cloud save also works when repository ignore rules cover the project.
 
 ### Connect an existing checkout
 

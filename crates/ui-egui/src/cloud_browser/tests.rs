@@ -4,6 +4,7 @@ use solidcraft_cloud::{
     Settings,
     jobs::{Host, Job, Operation},
 };
+use solidcraft_engine::Session;
 use std::sync::Mutex;
 
 struct Worker {
@@ -173,7 +174,7 @@ fn management_waits_for_history_preserves_observed_revision_and_recovers_a_queue
         h.app.session.doc_mut().name = "Keep my open design".into();
         latest(&worker, "manage").update(|s| s.phase = Phase::Synced).unwrap();
         h.frames(2);
-        assert!(h.app.cloud.browser.opening.is_some(), "restoration starts an Open after this frame's status poll");
+        assert!(h.app.file_load.busy(), "restoration starts an Open after this frame's status poll");
         assert_eq!(h.app.session.doc.name, "Keep my open design");
         let opening = latest(&worker, "open");
         opening
@@ -183,11 +184,20 @@ fn management_waits_for_history_preserves_observed_revision_and_recovers_a_queue
             })
             .unwrap();
         opening.opened(solidcraft_engine::io::cloud::prepare_document(&Document::new("Restored bracket")).unwrap()).unwrap();
-        h.frames(3);
+        h.settle();
         assert_eq!(h.app.session.doc.name, "Restored bracket");
         assert_eq!(h.app.docs.count(), 2, "restoring keeps the existing edited design in its tab");
         assert_eq!(h.app.session.cloud_binding().unwrap().destination, destination);
     }
+}
+
+// Fake cloud jobs are completed explicitly by each test. Do not let Harness::settle
+// wait for a network job before the test has had a chance to provide its response.
+fn click_cloud(h: &mut Harness, handle: &str) {
+    let at = crate::scenario::handle_at(handle).unwrap();
+    let (request, _) = crate::control::ControlRequest::new("ui.click", json!({"x":at.x,"y":at.y}));
+    crate::control::handle(&mut h.app, &h.ctx, &request);
+    h.frames(8);
 }
 
 fn show_listing(h: &mut Harness, worker: &Worker, destination: &Destination) {
@@ -200,6 +210,95 @@ fn show_listing(h: &mut Harness, worker: &Worker, destination: &Destination) {
         })
         .unwrap();
     h.frames(2);
+}
+
+#[test]
+fn startup_shows_local_projects_while_synchronization_and_remote_listing_are_pending() {
+    for dark in [false, true] {
+        let (mut h, worker, destination) = setup(dark);
+        let mut settings = h.app.session.cloud_settings().clone();
+        settings.retry_pending = true;
+        h.app.run("cloud.configure", json!({"settings":settings})).unwrap();
+        h.app.start("cloud.list");
+        h.frames(2);
+        let listing = latest(&worker, "list");
+        listing.update(|s| s.result = Some(json!([destination]))).unwrap();
+        h.frames(3);
+        assert_eq!(listing.status().unwrap().phase, Phase::Working);
+        assert!(crate::scenario::rect_of("cloud:refresh").is_none(), "Synchronize is the single repository action");
+        assert_eq!(crate::scenario::count_of("cloud:sync:enabled"), Some(0.0));
+        assert!(
+            worker
+                .jobs
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(job, op)| matches!(op, Operation::Synchronize(_)) && job.status().unwrap().phase == Phase::Working)
+        );
+        assert_eq!(h.app.cloud.browser.catalogs["github"].entries.as_ref(), std::slice::from_ref(&destination));
+        assert!(crate::scenario::rect_of("cloud:design:0").is_some(), "cached projects must be visible before either network operation finishes");
+        listing.fail(solidcraft_cloud::Error::Storage("cellular connection lost".into())).unwrap();
+        h.frames(3);
+        assert_eq!(
+            h.app.cloud.browser.catalogs["github"].entries.as_ref(),
+            std::slice::from_ref(&destination),
+            "a failed refresh retains local projects"
+        );
+    }
+}
+
+#[test]
+fn cloud_errors_stay_in_the_header_tooltip_and_clear_after_recovery() {
+    for dark in [false, true] {
+        let (mut h, worker, destination) = setup(dark);
+        show_listing(&mut h, &worker, &destination);
+        h.app.status = None;
+        let submitted = h.app.run("cloud.sync", json!({"connection":"github"})).unwrap();
+        let job = worker.jobs.lock().unwrap().iter().find(|(job, _)| job.status().unwrap().operation == submitted["operation"]).unwrap().0.clone();
+        job.fail(solidcraft_cloud::Error::Storage("offline example; local saves retained".into())).unwrap();
+        h.frames(3);
+        assert!(!h.app.status.as_ref().is_some_and(|s| s.0.contains("offline example")), "cloud errors must not become page banners");
+        assert!(crate::scenario::rect_of("dialog:section_status").is_some());
+        assert!(status::notice(&h.app, selected(&h.app).as_ref()).unwrap().contains("offline example"));
+        assert_eq!(h.app.cloud.browser.catalogs["github"].entries.as_ref(), std::slice::from_ref(&destination));
+        let preview = h.app.run("cloud.thumbnail", json!({"destination":destination})).unwrap();
+        worker
+            .jobs
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(job, _)| job.status().unwrap().operation == preview["operation"])
+            .unwrap()
+            .0
+            .update(|s| {
+                s.phase = Phase::Ready;
+                s.result = Some(solidcraft_cloud::Thumbnail::response(None));
+            })
+            .unwrap();
+        h.frames(3);
+        assert!(status::notice(&h.app, selected(&h.app).as_ref()).unwrap().contains("offline example"), "a preview cannot clear a failed push");
+        let retried = h.app.run("cloud.sync", json!({"connection":"github"})).unwrap();
+        worker
+            .jobs
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(job, _)| job.status().unwrap().operation == retried["operation"])
+            .unwrap()
+            .0
+            .update(|s| s.phase = Phase::Synced)
+            .unwrap();
+        h.frames(3);
+        latest(&worker, "list")
+            .update(|s| {
+                s.phase = Phase::Ready;
+                s.result = Some(json!([destination]));
+            })
+            .unwrap();
+        h.frames(3);
+        assert!(status::notice(&h.app, selected(&h.app).as_ref()).is_none());
+        assert!(crate::scenario::rect_of("dialog:section_status").is_none());
+    }
 }
 
 #[test]
@@ -235,7 +334,7 @@ fn home_controls_have_consistent_heights_and_left_alignment() {
         let repository = crate::scenario::rect_of("cloud:repositories").unwrap();
         assert!(connect.width() < repository.width(), "Add storage is an action-sized dropdown rather than a full-width form field");
         assert!((connect.left() - repository.left()).abs() < 1.0, "repository selector aligns with actions");
-        for id in ["cloud:save", "cloud:settings", "cloud:repositories", "cloud:refresh", "cloud:sync"] {
+        for id in ["cloud:save", "cloud:settings", "cloud:repositories", "cloud:sync"] {
             let rect = crate::scenario::rect_of(id).unwrap();
             assert!((rect.height() - connect.height()).abs() < 1.0, "{id}: {rect:?} versus {connect:?}");
         }
@@ -243,7 +342,7 @@ fn home_controls_have_consistent_heights_and_left_alignment() {
             h.call("ui.resize", json!({"width":width,"height":1100}));
             h.frames(3);
             let page = crate::scenario::rect_of("home:page").unwrap();
-            let controls: Vec<_> = ["cloud:connect", "cloud:save", "cloud:settings", "cloud:repositories", "cloud:refresh", "cloud:sync"]
+            let controls: Vec<_> = ["cloud:connect", "cloud:save", "cloud:settings", "cloud:repositories", "cloud:sync"]
                 .into_iter()
                 .map(|id| crate::scenario::rect_of(id).unwrap())
                 .collect();
@@ -299,8 +398,8 @@ fn cloud_status_dots_remain_visible_and_outdated_rows_wait_for_synchronization()
                 h.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Circle(c) if c.center == dot.center() && c.fill == expected)),
                 "outdated dot stays red at {width} in either theme"
             );
-            h.step(&json!({"click":{"handle":"cloud:design:0"}})).unwrap();
-            assert!(h.app.cloud.browser.opening.is_none(), "outdated rows cannot open before pulling");
+            click_cloud(&mut h, "cloud:design:0");
+            assert!(!h.app.file_load.busy(), "outdated rows cannot open before pulling");
             assert_eq!(status::presentation(h.app.cloud.browser.catalogs["github"].stored.first(), false).label, tr("cloud.status_outdated"));
         }
         let sync = h.app.run("cloud.sync", json!({"connection":"github"})).unwrap();
@@ -326,8 +425,8 @@ fn cloud_status_dots_remain_visible_and_outdated_rows_wait_for_synchronization()
                 .iter()
                 .any(|s| matches!(&s.shape, egui::Shape::Circle(c) if c.center == dot.center() && c.fill == FileStatusTone::Current.color()))
         );
-        h.step(&json!({"click":{"handle":"cloud:design:0"}})).unwrap();
-        assert!(h.app.cloud.browser.opening.is_some(), "a synchronized row becomes openable again");
+        click_cloud(&mut h, "cloud:design:0");
+        assert!(h.app.file_load.busy(), "a synchronized row becomes openable again");
     }
 }
 
@@ -359,8 +458,8 @@ fn queued_cloud_saves_show_a_short_yellow_pushing_status() {
     assert_eq!(state.tone, ui_kit::FileStatusTone::Pending);
     let dot = crate::scenario::rect_of("cloud:design:0:status-dot").unwrap();
     assert!(h.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Circle(c) if c.center == dot.center() && c.fill == state.tone.color())));
-    h.step(&json!({"click":{"handle":"cloud:design:0"}})).unwrap();
-    assert!(h.app.cloud.browser.opening.is_some(), "queued local work stays accessible");
+    click_cloud(&mut h, "cloud:design:0");
+    assert!(h.app.file_load.busy(), "queued local work stays accessible");
 }
 
 #[test]
@@ -416,7 +515,8 @@ fn home_browses_independent_repositories_and_keeps_entries_when_refresh_fails() 
         show_listing(&mut h, &worker, &destination);
         assert!(crate::scenario::rect_of("cloud:design:0").is_some());
         assert!(crate::scenario::rect_of("cloud:repositories").is_some());
-        h.step(&json!({"click":{"handle":"cloud:refresh"}})).unwrap();
+        let connection = selected(&h.app).unwrap();
+        request(&mut h.app, &connection);
         latest(&worker, "list").fail(solidcraft_cloud::Error::Storage("offline".into())).unwrap();
         h.frames(2);
         assert_eq!(*h.app.cloud.browser.catalogs["github"].entries, vec![destination]);
@@ -441,7 +541,7 @@ fn opening_a_design_keeps_edits_made_during_download_and_after_switching_tabs() 
     let (mut h, worker, destination) = setup(true);
     h.app.session.doc_mut().name = "Unsaved first tab".into();
     show_listing(&mut h, &worker, &destination);
-    h.step(&json!({"click":{"handle":"cloud:design:0"}})).unwrap();
+    click_cloud(&mut h, "cloud:design:0");
     let job = latest(&worker, "open");
     assert!(!h.app.home.open, "cloud opening enters the workspace before progress appears, like local opening");
     assert_eq!(h.app.session.doc.name, "Unsaved first tab", "the existing design stays intact until the download succeeds");
@@ -457,7 +557,7 @@ fn opening_a_design_keeps_edits_made_during_download_and_after_switching_tabs() 
     })
     .unwrap();
     job.opened(snapshot).unwrap();
-    h.frames(3);
+    h.settle();
     assert_eq!(h.app.session.doc.name, "Cloud bracket");
     assert!(h.app.open_meshing.is_some(), "cloud designs use the same post-adoption meshing as local files");
     assert_eq!(h.app.session.cloud_binding().unwrap().destination, destination);
@@ -517,17 +617,17 @@ fn competing_local_versions_require_a_choice_and_open_only_the_selected_capture(
             })
             .unwrap();
         h.frames(3);
-        h.step(&json!({"click":{"handle":"cloud:design:0"}})).unwrap();
+        click_cloud(&mut h, "cloud:design:0");
         h.frames(2);
         assert!(h.app.cloud.browser.versions.is_some());
         assert!(!worker.jobs.lock().unwrap().iter().any(|(_, op)| matches!(op, Operation::Open { .. })));
         h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
         assert!(h.app.cloud.browser.versions.is_none());
-        h.step(&json!({"click":{"handle":"cloud:design:0"}})).unwrap();
+        click_cloud(&mut h, "cloud:design:0");
         h.frames(2);
         h.step(&json!({"click":{"handle":"cloud:version:1"}})).unwrap();
         let selected = h.app.cloud.browser.catalogs["github"].stored[0].local_revisions[1].revision.clone();
-        h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+        click_cloud(&mut h, "dialog:ok");
         let job = latest(&worker, "open");
         {
             let jobs = worker.jobs.lock().unwrap();
@@ -546,7 +646,7 @@ fn competing_local_versions_require_a_choice_and_open_only_the_selected_capture(
         })
         .unwrap();
         job.opened(capture.record.recover(|p| Ok(capture.objects[p].clone())).unwrap()).unwrap();
-        h.frames(3);
+        h.settle();
         assert_eq!(h.app.session.cloud_binding().unwrap().revision.as_ref(), Some(&selected));
         assert!(!h.app.session.is_dirty());
     }
@@ -725,7 +825,8 @@ fn home_restores_durable_statuses_and_refreshes_confirmed_publications_in_both_t
         h.frames(3);
         assert!(h.app.cloud.browser.statuses.is_empty(), "restart has no Save jobs");
         assert_eq!(phase(&h.app.cloud.browser.catalogs["github"].stored[0]), tr("cloud.status_pushing"));
-        h.step(&json!({"click":{"handle":"cloud:refresh"}})).unwrap();
+        let connection = selected(&h.app).unwrap();
+        request(&mut h.app, &connection);
         latest(&worker, "list").fail(solidcraft_cloud::Error::Storage("offline".into())).unwrap();
         h.frames(3);
         assert_eq!(h.app.cloud.browser.catalogs["github"].stored[0].phase, Phase::SavedLocally);
@@ -808,19 +909,20 @@ fn home_loading_buttons_keep_their_positions_and_wait_for_terminal_results() {
             let (mut h, worker, destination) = setup(dark);
             h.call("ui.resize", json!({"width":width,"height":1100}));
             show_listing(&mut h, &worker, &destination);
-            let ids = ["cloud:connect", "cloud:save", "cloud:settings", "cloud:repositories", "cloud:refresh", "cloud:sync"];
+            let ids = ["cloud:connect", "cloud:save", "cloud:settings", "cloud:repositories", "cloud:sync"];
             let idle: Vec<_> = ids.iter().map(|id| crate::scenario::rect_of(id).unwrap()).collect();
             let count = || worker.jobs.lock().unwrap().iter().filter(|(_, op)| matches!(op, Operation::List(_))).count();
-            h.step(&json!({"click":{"handle":"cloud:refresh"}})).unwrap();
+            let connection = selected(&h.app).unwrap();
+            request(&mut h.app, &connection);
             let pending = latest(&worker, "list");
             let before = count();
             h.frames(3);
-            assert_eq!(crate::scenario::count_of("cloud:refresh:enabled"), Some(0.0));
+            assert_eq!(crate::scenario::count_of("cloud:sync:enabled"), Some(0.0));
             for (id, rect) in ids.iter().zip(&idle) {
                 assert_eq!(crate::scenario::rect_of(id), Some(*rect), "loading must not move {id} at {width}");
             }
-            h.step(&json!({"click":{"handle":"cloud:refresh"}})).unwrap();
-            assert_eq!(count(), before, "refresh cannot submit twice while pending");
+            h.step(&json!({"click":{"handle":"cloud:sync"}})).unwrap();
+            assert_eq!(count(), before, "Sync cannot start while its catalog is pending");
             pending
                 .update(|s| {
                     s.phase = Phase::Failed;
@@ -828,7 +930,7 @@ fn home_loading_buttons_keep_their_positions_and_wait_for_terminal_results() {
                 })
                 .unwrap();
             h.frames(3);
-            assert_eq!(crate::scenario::count_of("cloud:refresh:enabled"), Some(1.0));
+            assert_eq!(crate::scenario::count_of("cloud:sync:enabled"), Some(1.0));
             h.app.status = None;
             h.frames(3);
             for terminal in [Phase::Synced, Phase::Failed, Phase::Cancelled] {
@@ -844,7 +946,7 @@ fn home_loading_buttons_keep_their_positions_and_wait_for_terminal_results() {
                 assert_eq!(worker.jobs.lock().unwrap().len(), before);
                 job.update(|s| s.phase = terminal).unwrap();
                 h.frames(3);
-                assert_eq!(crate::scenario::count_of("cloud:sync:enabled"), Some(1.0));
+                assert_eq!(crate::scenario::count_of("cloud:sync:enabled"), Some(f64::from(terminal != Phase::Synced)));
                 // Successful synchronization refreshes the catalog; settle that request too.
                 latest(&worker, "list")
                     .update(|s| {
@@ -977,4 +1079,33 @@ fn cloud_document_tabs_follow_captures_edits_background_tabs_and_newer_heads() {
         assert_eq!(indicator.status.label, tr("cloud.status_outdated"), "a newer cached head does not make the open older revision current");
         assert!(indicator.status.pulse);
     }
+}
+
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn cloud_open_uses_the_file_worker_and_keeps_loading_frames_responsive() {
+    let (mut h, worker, destination) = setup(true);
+    h.app.session.doc_mut().name = "Keep my edits".into();
+    let original = h.app.session.doc.clone();
+    let (started, on_worker) = std::sync::mpsc::channel();
+    let (release, released) = std::sync::mpsc::channel();
+    h.app.file_load.worker_gate = Some((started, released));
+    open_revision(&mut h.app, &destination, None);
+    assert_ne!(on_worker.recv_timeout(std::time::Duration::from_secs(5)).unwrap(), std::thread::current().id());
+    let job = latest(&worker, "open");
+    job.update(|s| {
+        s.destination = Some(destination.clone());
+        s.revision = Some("a".repeat(64));
+        s.download_progress = Some((2, 5));
+    })
+    .unwrap();
+    h.frames(4);
+    assert!(h.app.file_load.busy());
+    assert!(crate::scenario::handle_at("file_loading:cancel").is_some(), "normal file-loading progress is shown during the sync check");
+    assert!(Arc::ptr_eq(&original, &h.app.session.doc));
+    job.opened(solidcraft_engine::io::cloud::prepare_document(&Document::new("Opened locally")).unwrap()).unwrap();
+    release.send(()).unwrap();
+    h.settle();
+    assert_eq!(h.app.session.doc.name, "Opened locally");
+    assert_eq!(h.app.docs.count(), 2);
 }

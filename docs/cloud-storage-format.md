@@ -10,6 +10,7 @@ For example, a repository can contain:
 
 ```text
 Robot/
+  .gitattributes
   solidcraft-project.json
   parts/
     bracket/
@@ -25,6 +26,7 @@ Robot/
     ab/
       <64-character stored-chunk hash>
 Enclosure/
+  .gitattributes
   solidcraft-project.json
   ...
 ```
@@ -32,6 +34,15 @@ Enclosure/
 `solidcraft-project.json` contains `format: "solidcraft-cloud/1"`, `required: ["projects/1"]`, and a project `name`. Compatible optional fields are retained. An unsupported format or required project capability requests an upgrade before any project writes. Parts and assemblies use the same document representation; the directory organization does not change CAD semantics. Documentation remains ordinary Git files. Discover designs through their manifest paths rather than rewriting a central catalog for every save.
 
 Object paths in a design manifest are relative to the project folder, so moving an entire project folder keeps its assets together. Shared chunks deduplicate across designs within that project. Paths must have portable meanings in browser storage, Git trees, Windows, and Unix: absolute paths, traversal, backslashes, control characters, reserved device names, and `.git` components are rejected. Adapters must also reject symlinks in managed paths rather than following them outside a project.
+
+Each save includes project-local `.gitattributes` rules for the marker, design JSON,
+immutable objects and the attributes file itself. These managed paths use
+`-text -filter -ident -working-tree-encoding` so ordinary checkouts preserve their
+hashed bytes, including with `core.autocrlf=true`. Ordinary project documentation
+keeps the repository's own rules. Existing differing project attributes are
+preserved and require reconciliation before a new save. Native publication checks
+the captured document and object hashes in the actual Git commit before pushing,
+including retries, so higher-priority filters cannot publish transformed data.
 
 ## Snapshot envelope
 

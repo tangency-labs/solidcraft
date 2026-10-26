@@ -18,6 +18,9 @@ fn storage(message: impl std::fmt::Display) -> Error {
 
 fn cached(outbox: &LocalOutbox, connection: &Connection, destination: &Destination) -> Result<Option<Snapshot>> {
     let Some(entry) = outbox.cached(connection, destination)? else { return Ok(None) };
+    if entry.outdated {
+        return Ok(None);
+    }
     let mut snapshot = outbox.recover_document(&entry.save)?;
     if let Some(revision) = entry.revision {
         snapshot.manifest.extra.insert("revision".into(), revision.into());
@@ -31,7 +34,7 @@ fn current(outbox: &LocalOutbox, connection: &Connection, destination: &Destinat
         snapshot.manifest.extra.insert("revision".into(), save.id.into());
         return Ok(snapshot);
     }
-    match access.provider_repository(connection, job).and_then(|mut repository| repository.open(destination)) {
+    match access.provider_repository(connection, job).and_then(|mut repository| repository.open(destination, outbox)) {
         Ok(snapshot) => Ok(snapshot),
         Err(error @ Error::Storage(_)) => cached(outbox, connection, destination)?.ok_or(error),
         Err(error) => Err(error),
@@ -95,6 +98,7 @@ pub(in crate::cloud) fn run(operation: Operation, outbox: &LocalOutbox, job: &Jo
             let hidden: Vec<_> = pending.iter().filter(|s| s.manifest.deleted()).map(|s| s.destination.clone()).collect();
             let has_local = !entries.is_empty() || !pending.is_empty();
             let mut catalog = solidcraft_cloud::stored_designs(entries, pending)?;
+            job.local_catalog(catalog.clone())?;
             let mut destinations: BTreeMap<_, _> =
                 catalog.iter().map(|e| Ok((e.destination.design_path()?, e.destination.clone()))).collect::<Result<_>>()?;
             match access.provider_repository(&connection, job).and_then(|mut repository| repository.list(&mut catalog)) {
@@ -124,11 +128,29 @@ pub(in crate::cloud) fn run(operation: Operation, outbox: &LocalOutbox, job: &Jo
                 snapshot.manifest.extra.insert("revision".into(), save.id.into());
                 snapshot
             } else {
-                match access.provider_repository(&connection, job).and_then(|mut repository| repository.open(&destination)) {
-                    Ok(snapshot) => {
-                        outbox.cache_synchronized_checkout(&connection, &destination, &snapshot)?;
-                        snapshot
+                let remote = (|| {
+                    let mut repository = access.provider_repository(&connection, job)?;
+                    if let Some(entry) = outbox.cached(&connection, &destination)? {
+                        let stored = solidcraft_cloud::stored_designs(vec![entry.clone()], Vec::new())?;
+                        if entry.confirmed
+                            && !entry.outdated
+                            && let Some(stored) = stored.first()
+                        {
+                            if repository.is_current(stored, outbox)? {
+                                return cached(outbox, &connection, &destination)?.ok_or_else(|| storage("cached design missing"));
+                            }
+                            let mut observed = stored.clone();
+                            observed.outdated = true;
+                            observed.phase = Phase::Ready;
+                            outbox.mark_outdated(&connection, &observed)?;
+                        }
                     }
+                    let snapshot = repository.open(&destination, outbox)?;
+                    outbox.cache_synchronized_checkout(&connection, &destination, &snapshot)?;
+                    Ok(snapshot)
+                })();
+                match remote {
+                    Ok(snapshot) => snapshot,
                     Err(error @ Error::Storage(_)) => {
                         job.update(|s| s.message = Some(error.to_string()))?;
                         cached(outbox, &connection, &destination)?.ok_or(error)?
@@ -154,6 +176,8 @@ pub(in crate::cloud) fn run(operation: Operation, outbox: &LocalOutbox, job: &Jo
             let local = pending_tip(outbox, &connection, &destination)?;
             let png = if let Some(save) = local {
                 super::super::previews::captured(outbox, &save)?
+            } else if let Some(entry) = outbox.cached(&connection, &destination)? {
+                super::super::previews::captured(outbox, &entry.save)?
             } else {
                 match access.provider_repository(&connection, job).and_then(|mut repository| repository.thumbnail(&destination)) {
                     Ok(png) => png,
@@ -250,7 +274,7 @@ pub(in crate::cloud) fn run(operation: Operation, outbox: &LocalOutbox, job: &Jo
             if pending.iter().any(|s| s.expected_revision.as_deref() == Some(&revision)) {
                 return Err(storage("later saves depend on this action; synchronize before discarding it"));
             }
-            let snapshot = access.provider_repository(&connection, job)?.open(&destination)?;
+            let snapshot = access.provider_repository(&connection, job)?.open(&destination, outbox)?;
             if solidcraft_cloud::revision(&snapshot.manifest) == Some(&revision) {
                 return Err(storage("this action reached the repository; synchronize to confirm it"));
             }
@@ -290,7 +314,7 @@ fn refresh(outbox: &LocalOutbox, connection: &Connection, job: &Job, repository:
             continue;
         }
         outbox.mark_outdated(connection, &observed)?;
-        let snapshot = repository.open(&observed.destination)?;
+        let snapshot = repository.open(&observed.destination, outbox)?;
         outbox.cache_synchronized_checkout(connection, &observed.destination, &snapshot)?;
     }
     Ok(())

@@ -37,6 +37,15 @@ async fn repository(connection: &Connection, job: &Job) -> Result<GitHub> {
     GitHub::new(client, connection)
 }
 
+async fn download(remote: &GitHub, store: &Store, destination: &Destination, job: &Job) -> Result<Snapshot> {
+    remote
+        .open_cached(destination, solidcraft_engine::io::cloud::check_document, store, |done, total| {
+            check_cancelled(job)?;
+            job.update(|status| status.download_progress = Some((done, total)))
+        })
+        .await
+}
+
 async fn recovered(store: &Store, save: &PendingSave) -> Result<Snapshot> {
     store.recover_checked(save, solidcraft_engine::io::cloud::check_document).await
 }
@@ -59,14 +68,35 @@ async fn open(store: &Store, connection: &Connection, destination: &Destination,
         })?;
         return job.opened(snapshot);
     }
-    let remote = async { repository(connection, job).await?.open(destination, solidcraft_engine::io::cloud::check_document).await }.await;
+    let remote = async {
+        let remote = repository(connection, job).await?;
+        if let Some(cached) = store.cached(destination).await? {
+            let stored = solidcraft_cloud::stored_designs(vec![cached.clone()], Vec::new())?;
+            if cached.confirmed
+                && !cached.outdated
+                && let Some(stored) = stored.first()
+            {
+                if remote.is_current_cached(stored, store).await? {
+                    return Ok(None);
+                }
+                let mut observed = stored.clone();
+                observed.outdated = true;
+                observed.phase = Phase::Ready;
+                store.mark_outdated(&observed).await?;
+            }
+        }
+        download(&remote, store, destination, job).await.map(Some)
+    }
+    .await;
     match remote {
         Ok(snapshot) => {
             check_cancelled(job)?;
-            store.cache_remote(destination.clone(), snapshot).await?;
+            if let Some(snapshot) = snapshot {
+                store.cache_remote(destination.clone(), snapshot).await?;
+            }
         }
         Err(error @ Error::Storage(_)) => {
-            if store.cached(destination).await?.is_none() {
+            if store.cached(destination).await?.is_none_or(|entry| entry.outdated) {
                 return Err(error);
             }
             job.update(|status| status.message = Some(error.to_string()))?;
@@ -348,6 +378,7 @@ async fn run(operation: Operation, job: &Job) -> Result<()> {
             let has_local = !cached.is_empty() || !pending.is_empty();
             let hidden: Vec<_> = pending.iter().filter(|s| s.manifest.deleted()).map(|s| s.destination.clone()).collect();
             let mut catalog = solidcraft_cloud::stored_designs(cached, pending)?;
+            job.local_catalog(catalog.clone())?;
             let mut destinations = BTreeMap::new();
             for entry in &catalog {
                 destinations.insert(entry.destination.design_path()?, entry.destination.clone());

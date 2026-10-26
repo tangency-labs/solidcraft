@@ -215,7 +215,7 @@ fn startup_resumes_connections_once_without_duplicate_active_synchronizations() 
     let mut output = h.ctx.run_ui(egui::RawInput { time: Some(62.0), ..Default::default() }, |ui| h.app.logic(ui.ctx()));
     // This logic-only frame has no renderer to consume font texture updates.
     output.textures_delta.clear();
-    assert_eq!(worker.jobs.lock().unwrap().len(), 2, "offline queues get another attempt later");
+    assert_eq!(worker.jobs.lock().unwrap().len(), 1, "successful startup synchronization does not repeat on a timer");
 }
 
 #[test]

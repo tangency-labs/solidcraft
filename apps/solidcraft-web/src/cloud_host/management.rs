@@ -11,7 +11,7 @@ pub(super) async fn current(store: &Store, connection: &Connection, destination:
         snapshot.manifest.extra.insert("revision".into(), serde_json::json!(save.id));
         return Ok(snapshot);
     }
-    match async { repository(connection, job).await?.open(destination, solidcraft_engine::io::cloud::check_document).await }.await {
+    match async { download(&repository(connection, job).await?, store, destination, job).await }.await {
         Ok(snapshot) => Ok(snapshot),
         Err(error @ Error::Storage(_)) => {
             let Some(entry) = store.cached(destination).await? else { return Err(error) };
@@ -67,7 +67,7 @@ pub(super) async fn discard(store: Store, connection: Connection, destination: D
         if pending.iter().any(|s| s.expected_revision.as_ref() == Some(&revision)) {
             return Err(storage("later saves depend on this action; synchronize before discarding it"));
         }
-        let snapshot = repository(&connection, &job).await?.open(&destination, solidcraft_engine::io::cloud::check_document).await?;
+        let snapshot = download(&repository(&connection, &job).await?, &store, &destination, &job).await?;
         if solidcraft_cloud::revision(&snapshot.manifest) == Some(&revision) {
             return Err(storage("this action reached the repository; synchronize to confirm it"));
         }

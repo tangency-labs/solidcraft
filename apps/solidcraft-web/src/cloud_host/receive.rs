@@ -12,7 +12,7 @@ pub(super) async fn refresh(connection: &Connection, store: &Store, job: &Job) -
             continue;
         }
         store.mark_outdated(&entry).await?;
-        let snapshot = remote.open(&entry.destination, solidcraft_engine::io::cloud::check_document).await?;
+        let snapshot = download(&remote, store, &entry.destination, job).await?;
         check_cancelled(job)?;
         store.cache_remote(entry.destination, snapshot).await?;
     }
