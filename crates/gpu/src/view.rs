@@ -1243,6 +1243,7 @@ pub fn placed_box_in_view(rows: &[[f32; 4]; 3], bounds: &[[f32; 3]; 2], vp: &[[f
 
 /// One level of an [`InstancedDraw`]: its triangles and the placements drawn from it.
 struct LevelDraw {
+    source: Arc<SharedTris>,
     tris: Arc<SharedGpu>,
     flat: bool,
     /// How far it strays from the full triangles (mm; 0 for them).
@@ -1251,11 +1252,16 @@ struct LevelDraw {
     instances: wgpu::Buffer,
     count: u32,
     range: Option<std::ops::Range<u32>>,
+    bytes: Vec<u8>,
 }
+
+type InstanceKey = (usize, InstanceLook, Option<(u32, u32)>);
+type SharedBuffers = std::collections::HashMap<usize, (Arc<SharedTris>, Arc<SharedGpu>)>;
 
 /// An [`InstancedMesh`] on the GPU: its triangles and coarser levels (shared with the next scene
 /// while they come back), and the placements in view, each drawn from its level.
 struct InstancedDraw {
+    key: InstanceKey,
     look: InstanceLook,
     /// The full triangles first, then coarser ones.
     levels: Vec<LevelDraw>,
@@ -1264,6 +1270,9 @@ struct InstancedDraw {
     placements: Vec<u8>,
     /// Which placements the levels hold now, with their level (none drawn yet: `None`).
     shown: Option<Vec<(u32, u8)>>,
+    next_shown: Vec<(u32, u8)>,
+    errors: Vec<f32>,
+    depths: Vec<f32>,
 }
 
 impl InstancedDraw {
@@ -1657,7 +1666,9 @@ struct Batches {
     selected_instanced: Vec<InstancedDraw>,
     /// The instanced meshes' triangles (and their levels) on the GPU, by the address of the
     /// triangles they were uploaded from (held, so it stays theirs).
-    instanced_tris: std::collections::HashMap<usize, (Arc<SharedTris>, Arc<SharedGpu>)>,
+    instanced_tris: SharedBuffers,
+    spare_tris: SharedBuffers,
+    retained_instances: std::collections::HashMap<InstanceKey, InstancedDraw>,
     /// Evaluated chunks by their plans' addresses, holding the plans so the addresses stay
     /// theirs: a chunk whose plans are unchanged is not evaluated again when the scene is rebuilt.
     resident: std::collections::HashMap<Vec<usize>, (Vec<Arc<solidcraft_geom::tess::TessPlan>>, Arc<crate::GpuMesh>)>,
@@ -1696,14 +1707,21 @@ impl Batches {
                 Some((tess, encoder)) => self.planned(device, tess, encoder, &sc.planned),
                 None => Vec::new(),
             };
-            self.instanced = self.instanced(device, &sc.instanced);
+            let mut triangles = std::mem::take(&mut self.instanced_tris);
+            std::mem::swap(&mut self.instanced_tris, &mut self.spare_tris);
+            let previous = std::mem::take(&mut self.instanced);
+            self.instanced = self.instanced(device, queue, &sc.instanced, previous, &mut triangles);
             self.hover_planned = sc.hover_planned;
             self.selected_planned = sc.selected_planned;
             self.hover_blocks = sc.hover_blocks;
             self.selected_blocks = sc.selected_blocks;
             self.recoloured = sc.recoloured;
-            self.hover_instanced = self.instanced(device, &sc.hover_instanced);
-            self.selected_instanced = self.instanced(device, &sc.selected_instanced);
+            let previous = std::mem::take(&mut self.hover_instanced);
+            self.hover_instanced = self.instanced(device, queue, &sc.hover_instanced, previous, &mut triangles);
+            let previous = std::mem::take(&mut self.selected_instanced);
+            self.selected_instanced = self.instanced(device, queue, &sc.selected_instanced, previous, &mut triangles);
+            triangles.clear();
+            self.spare_tris = triangles;
             let mut kept = std::mem::take(&mut self.blocks);
             let mut order = Vec::with_capacity(sc.blocks.len());
             let mut geometry = 0;
@@ -1772,11 +1790,20 @@ impl Batches {
         }
     }
 
-    /// The instanced meshes on the GPU: triangles uploaded once per key (kept while the key comes
-    /// back with the same bytes), placements every time.
-    fn instanced(&mut self, device: &wgpu::Device, meshes: &[InstancedMesh]) -> Vec<InstancedDraw> {
-        let mut kept = std::mem::take(&mut self.instanced_tris);
-        let mut out = Vec::with_capacity(meshes.len());
+    /// Retain triangles and instance capacity across scene updates. All three instance passes
+    /// contribute to one live triangle set, including when a highlight pass is empty.
+    fn instanced(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        meshes: &[InstancedMesh],
+        mut out: Vec<InstancedDraw>,
+        kept: &mut SharedBuffers,
+    ) -> Vec<InstancedDraw> {
+        for draw in out.drain(..) {
+            self.retained_instances.insert(draw.key, draw);
+        }
+        out.reserve(meshes.len());
         for m in meshes {
             if m.range
                 .as_ref()
@@ -1788,36 +1815,103 @@ impl Batches {
             if count == 0 {
                 continue;
             }
-            let placements = m.instances.get(..count as usize * INSTANCE_SIZE).unwrap_or_default().to_vec();
-            let mut levels = Vec::with_capacity(1 + m.levels.len());
+            let placements = m.instances.get(..count as usize * INSTANCE_SIZE).unwrap_or_default();
+            if placements.len() as u64 > device.limits().max_buffer_size {
+                log::warn!("instance placements exceed the device buffer limit");
+                continue;
+            }
+            let key = (Arc::as_ptr(&m.tris) as usize, m.look, m.range.as_ref().map(|r| (r.start, r.end)));
+            let mut draw = self.retained_instances.remove(&key).unwrap_or_else(|| InstancedDraw {
+                key,
+                look: m.look,
+                levels: Vec::with_capacity(1 + m.levels.len()),
+                bounds: m.tris.bounds,
+                placements: Vec::new(),
+                shown: None,
+                next_shown: Vec::new(),
+                errors: Vec::new(),
+                depths: Vec::new(),
+            });
+            let changed = draw.placements.as_slice() != placements;
+            if changed {
+                draw.placements.clear();
+                draw.placements.extend_from_slice(placements);
+                draw.shown = None;
+            }
+            let mut made = 0;
             for (i, (tris, error)) in
                 std::iter::once((&m.tris, 0.0f32)).chain(m.levels.iter().filter(|_| m.range.is_none()).map(|(t, e)| (t, *e))).enumerate()
             {
                 let key = Arc::as_ptr(tris) as usize;
-                let gpu = match kept.remove(&key).or_else(|| self.instanced_tris.remove(&key)).filter(|(b, _)| Arc::ptr_eq(b, tris)) {
+                let gpu = match self.instanced_tris.get(&key).cloned().or_else(|| kept.remove(&key)).filter(|(b, _)| Arc::ptr_eq(b, tris)) {
                     Some(t) => t,
                     None => match SharedGpu::new(device, tris) {
                         Some(g) => {
                             self.uploads.geometry += (tris.vertices.len() + tris.indices.len() * 4) as u64;
                             (tris.clone(), Arc::new(g))
                         }
-                        None => continue,
+                        None => break,
                     },
                 };
-                // Until the first cull, every placement is drawn in full.
-                let Some(instances) = buffer_init(device, "sc_instances", &placements, wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST)
-                else {
-                    continue;
-                };
-                self.uploads.placements += placements.len() as u64;
-                let count = if i == 0 { count } else { 0 };
-                levels.push(LevelDraw { tris: gpu.1.clone(), flat: tris.flat, error, instances, count, range: m.range.clone() });
+                let mut upload = changed;
+                match draw.levels.get_mut(i) {
+                    Some(level) => {
+                        if !Arc::ptr_eq(&level.source, tris) {
+                            level.source = tris.clone();
+                            level.tris = gpu.1.clone();
+                            level.flat = tris.flat;
+                            draw.shown = None;
+                            upload = true;
+                        }
+                        if level.error != error {
+                            level.error = error;
+                            draw.shown = None;
+                        }
+                        if level.instances.size() < placements.len() as u64 {
+                            let Some(buffer) = instance_buffer(device, placements.len()) else { break };
+                            level.instances = buffer;
+                            draw.shown = None;
+                            upload = true;
+                        }
+                    }
+                    None => {
+                        let Some(instances) = instance_buffer(device, placements.len()) else { break };
+                        draw.levels.push(LevelDraw {
+                            source: tris.clone(),
+                            tris: gpu.1.clone(),
+                            flat: tris.flat,
+                            error,
+                            instances,
+                            count: 0,
+                            range: m.range.clone(),
+                            bytes: Vec::new(),
+                        });
+                        draw.shown = None;
+                        upload = true;
+                    }
+                }
+                if upload && let Some(level) = draw.levels.get_mut(i) {
+                    // Highlights have no culling pass: their base level must be ready now.
+                    level.count = if i == 0 { count } else { 0 };
+                    if i == 0 {
+                        queue.write_buffer(&level.instances, 0, placements);
+                        self.uploads.placements += placements.len() as u64;
+                    }
+                }
                 self.instanced_tris.insert(key, gpu);
+                made += 1;
             }
-            if !levels.is_empty() {
-                out.push(InstancedDraw { look: m.look, levels, bounds: m.tris.bounds, placements, shown: None });
+            if draw.levels.len() != made {
+                draw.shown = None;
+                draw.levels.truncate(made);
+            }
+            draw.errors.clear();
+            draw.errors.extend(draw.levels.iter().map(|l| l.error));
+            if !draw.levels.is_empty() {
+                out.push(draw);
             }
         }
+        self.retained_instances.clear();
         out
     }
 
@@ -1848,52 +1942,63 @@ impl Batches {
         self.cull_blocks(vp);
         let f = |b: &[u8], i: usize| b.get(i..i + 4).and_then(|x| x.try_into().ok()).map_or(0.0, f32::from_le_bytes);
         for d in &mut self.instanced {
-            let errors: Vec<f32> = d.levels.iter().map(|l| l.error).collect();
-            let mut shown: Vec<(u32, u8)> = d
-                .placements
-                .as_chunks::<INSTANCE_SIZE>()
-                .0
-                .iter()
-                .enumerate()
-                .filter_map(|(i, p)| {
-                    let rows = [0, 1, 2].map(|r| [f(&p[..], 16 * r), f(&p[..], 16 * r + 4), f(&p[..], 16 * r + 8), f(&p[..], 16 * r + 12)]);
-                    placed_box_in_view(&rows, &d.bounds, vp).then(|| {
-                        let level = if errors.len() > 1 { level_for(&errors, placement_scale(&rows, &d.bounds, vp, size)) } else { 0 };
-                        (i as u32, u8::try_from(level).unwrap_or(0))
-                    })
-                })
-                .collect();
+            d.next_shown.clear();
+            for (i, p) in d.placements.as_chunks::<INSTANCE_SIZE>().0.iter().enumerate() {
+                let rows = [0, 1, 2].map(|r| [f(&p[..], 16 * r), f(&p[..], 16 * r + 4), f(&p[..], 16 * r + 8), f(&p[..], 16 * r + 12)]);
+                if placed_box_in_view(&rows, &d.bounds, vp) {
+                    let level = if d.errors.len() > 1 { level_for(&d.errors, placement_scale(&rows, &d.bounds, vp, size)) } else { 0 };
+                    d.next_shown.push((i as u32, u8::try_from(level).unwrap_or(0)));
+                }
+            }
             // See-through placements back to front (by their box's centre), so each blends over
             // what lies behind it.
             if d.look != InstanceLook::Opaque {
+                let placements = &d.placements;
+                let bounds = d.bounds;
                 let depth = |i: u32| {
-                    let p = d.placements.get(i as usize * INSTANCE_SIZE..(i as usize + 1) * INSTANCE_SIZE).unwrap_or_default();
+                    let p = placements.get(i as usize * INSTANCE_SIZE..(i as usize + 1) * INSTANCE_SIZE).unwrap_or_default();
                     let rows = [0, 1, 2].map(|r| [f(p, 16 * r), f(p, 16 * r + 4), f(p, 16 * r + 8), f(p, 16 * r + 12)]);
-                    let [lo, hi] = d.bounds;
+                    let [lo, hi] = bounds;
                     let c = [0, 1, 2].map(|k| (lo[k] + hi[k]) * 0.5);
                     let w = rows.map(|r| r[0] * c[0] + r[1] * c[1] + r[2] * c[2] + r[3]);
                     let clip: [f32; 4] = std::array::from_fn(|k| vp[0][k] * w[0] + vp[1][k] * w[1] + vp[2][k] * w[2] + vp[3][k]);
                     if clip[3].abs() > 1e-12 { clip[2] / clip[3] } else { f32::INFINITY }
                 };
-                shown.sort_by(|a, b| depth(b.0).total_cmp(&depth(a.0)).then(a.0.cmp(&b.0)));
+                d.depths.resize(placements.len() / INSTANCE_SIZE, 0.);
+                for (i, _) in &d.next_shown {
+                    if let Some(value) = d.depths.get_mut(*i as usize) {
+                        *value = depth(*i);
+                    }
+                }
+                let depths = &d.depths;
+                d.next_shown.sort_unstable_by(|a, b| {
+                    depths
+                        .get(b.0 as usize)
+                        .copied()
+                        .unwrap_or(f32::INFINITY)
+                        .total_cmp(&depths.get(a.0 as usize).copied().unwrap_or(f32::INFINITY))
+                        .then(a.0.cmp(&b.0))
+                });
             }
-            if d.shown.as_ref() == Some(&shown) {
+            if d.shown.as_ref() == Some(&d.next_shown) {
                 continue;
             }
             for (k, level) in d.levels.iter_mut().enumerate() {
-                let bytes: Vec<u8> = shown
-                    .iter()
-                    .filter(|(_, l)| usize::from(*l) == k)
-                    .filter_map(|(i, _)| d.placements.get(*i as usize * INSTANCE_SIZE..(*i as usize + 1) * INSTANCE_SIZE))
-                    .flatten()
-                    .copied()
-                    .collect();
-                if !bytes.is_empty() {
-                    queue.write_buffer(&level.instances, 0, &bytes);
+                level.bytes.clear();
+                for (i, _) in d.next_shown.iter().filter(|(_, l)| usize::from(*l) == k) {
+                    if let Some(bytes) = d.placements.get(*i as usize * INSTANCE_SIZE..(*i as usize + 1) * INSTANCE_SIZE) {
+                        level.bytes.extend_from_slice(bytes);
+                    }
                 }
-                level.count = u32::try_from(bytes.len() / INSTANCE_SIZE).unwrap_or(u32::MAX);
+                if !level.bytes.is_empty() {
+                    queue.write_buffer(&level.instances, 0, &level.bytes);
+                }
+                level.count = u32::try_from(level.bytes.len() / INSTANCE_SIZE).unwrap_or(u32::MAX);
             }
-            d.shown = Some(shown);
+            match &mut d.shown {
+                Some(shown) => std::mem::swap(shown, &mut d.next_shown),
+                None => d.shown = Some(std::mem::take(&mut d.next_shown)),
+            }
         }
     }
 
@@ -3137,6 +3242,21 @@ fn viewport_fill_pipeline(
         }),
         multiview_mask: None,
         cache: None,
+    }))
+}
+
+fn instance_buffer(device: &wgpu::Device, bytes: usize) -> Option<wgpu::Buffer> {
+    let required = u64::try_from(bytes).ok()?;
+    let limit = device.limits().max_buffer_size / 4 * 4;
+    if required == 0 || required > limit {
+        return None;
+    }
+    let size = required.checked_next_power_of_two().unwrap_or(required).min(limit);
+    Some(device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("sc_instances"),
+        size,
+        mapped_at_creation: false,
+        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
     }))
 }
 
@@ -4620,6 +4740,60 @@ mod tests {
 #[cfg(test)]
 mod glass_tests {
     use super::*;
+
+    #[test]
+    fn instance_buffers_and_geometry_survive_scene_updates_and_empty_highlights() {
+        let Ok((_, device, queue)) = crate::open_headless() else {
+            eprintln!("skipping: no GPU adapter");
+            return;
+        };
+        let mesh = solidcraft_geom::Mesh {
+            positions: vec![solidcraft_geom::Vec3::ZERO, solidcraft_geom::Vec3::X, solidcraft_geom::Vec3::Y],
+            normals: vec![solidcraft_geom::Vec3::Z; 3],
+            triangles: vec![[0, 1, 2]],
+            tri_face: vec![0],
+            ..Default::default()
+        };
+        let tris = Arc::new(SharedTris::new(&mesh));
+        let mut part = InstancedMesh { key: 1, tris, instances: Vec::new(), look: InstanceLook::Opaque, levels: Vec::new(), range: None };
+        part.place([[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]], PaletteIndex(0));
+        let renderer =
+            Renderer::new(&device, GpuTarget { format: wgpu::TextureFormat::Rgba8Unorm, depth: None, samples: 1, tess: false, oit: false }, None);
+        let palette = Arc::new(Palette::with_stable(vec![[255; 4], [1, 2, 3, 255]]));
+        let mut batches = Batches::default();
+        let load = |batches: &mut Batches, key, part: &InstancedMesh| {
+            let scene = GpuScene { instanced: vec![part.clone()], palette: palette.clone(), ..Default::default() };
+            batches.take(&device, &queue, &renderer.uniform, &renderer.uniform_bgl, key, &Arc::new(Mutex::new(Some(scene))), None, false);
+        };
+        load(&mut batches, 1, &part);
+        let buffer = batches.instanced[0].levels[0].instances.clone();
+        let geometry = batches.instanced[0].levels[0].tris.clone();
+        assert_eq!(batches.instanced_tris.len(), 1, "empty highlight passes retain the model source");
+        load(&mut batches, 2, &part);
+        assert_eq!(buffer, batches.instanced[0].levels[0].instances);
+        assert!(Arc::ptr_eq(&geometry, &batches.instanced[0].levels[0].tris));
+        assert_eq!(batches.uploads.geometry, 0);
+        assert_eq!(batches.uploads.placements, 0);
+        // A placement or palette-slot edit updates contents within the existing capacity.
+        part.instances.clear();
+        part.place([[1., 0., 0., 3.], [0., 1., 0., 0.], [0., 0., 1., 0.]], PaletteIndex(1));
+        load(&mut batches, 3, &part);
+        assert_eq!(buffer, batches.instanced[0].levels[0].instances);
+        let vp = [[0.1, 0., 0., 0.], [0., 0.1, 0., 0.], [0., 0., 0.01, 0.], [0., 0., 0.5, 1.]];
+        batches.cull(&queue, &vp, [200.; 2]);
+        assert_eq!(batches.instanced[0].levels[0].bytes, part.instances);
+        part.place([[1., 0., 0., 5.], [0., 1., 0., 0.], [0., 0., 1., 0.]], PaletteIndex(0));
+        part.place([[1., 0., 0., 7.], [0., 1., 0., 0.], [0., 0., 1., 0.]], PaletteIndex(0));
+        load(&mut batches, 4, &part);
+        let grown = batches.instanced[0].levels[0].instances.clone();
+        assert_ne!(buffer, grown, "growth replaces only the instance buffer");
+        assert!(Arc::ptr_eq(&geometry, &batches.instanced[0].levels[0].tris));
+        part.instances.truncate(INSTANCE_SIZE);
+        load(&mut batches, 5, &part);
+        assert_eq!(grown, batches.instanced[0].levels[0].instances, "shrinking retains capacity");
+        batches.take(&device, &queue, &renderer.uniform, &renderer.uniform_bgl, 6, &Arc::new(Mutex::new(Some(GpuScene::default()))), None, false);
+        assert!(batches.instanced.is_empty() && batches.instanced_tris.is_empty());
+    }
 
     #[test]
     fn ground_shadow_does_not_require_order_independent_transparency() {
