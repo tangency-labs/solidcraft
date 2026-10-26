@@ -1,0 +1,1138 @@
+{
+  "cases": [
+    {
+      "name": "cross_body_tangent",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp: SmBrep::BrepIntersect; independent quadratic paraboloid / analytic plane finite faces",
+      "inputs": {
+        "op": "brep_intersect2",
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0.0,
+                    0.0,
+                    0.5,
+                    1
+                  ],
+                  [
+                    0.0,
+                    0.5,
+                    0.0,
+                    1
+                  ],
+                  [
+                    0.0,
+                    1.0,
+                    0.5,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    0.5,
+                    0.0,
+                    0.0,
+                    1
+                  ],
+                  [
+                    0.5,
+                    0.5,
+                    -0.5,
+                    1
+                  ],
+                  [
+                    0.5,
+                    1.0,
+                    0.0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    1.0,
+                    0.0,
+                    0.5,
+                    1
+                  ],
+                  [
+                    1.0,
+                    0.5,
+                    0.0,
+                    1
+                  ],
+                  [
+                    1.0,
+                    1.0,
+                    0.5,
+                    1
+                  ]
+                ]
+              ],
+              "p": 2,
+              "q": 2,
+              "u": [
+                0,
+                0,
+                0,
+                1,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                0,
+                1,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "other": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "tol": 1e-06,
+        "ang": 2.0,
+        "want_points": true
+      }
+    },
+    {
+      "name": "cross_body_tangent_reverse",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp: SmBrep::BrepIntersect; independent quadratic paraboloid / analytic plane finite faces",
+      "inputs": {
+        "op": "brep_intersect2",
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "other": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0.0,
+                    0.0,
+                    0.5,
+                    1
+                  ],
+                  [
+                    0.0,
+                    0.5,
+                    0.0,
+                    1
+                  ],
+                  [
+                    0.0,
+                    1.0,
+                    0.5,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    0.5,
+                    0.0,
+                    0.0,
+                    1
+                  ],
+                  [
+                    0.5,
+                    0.5,
+                    -0.5,
+                    1
+                  ],
+                  [
+                    0.5,
+                    1.0,
+                    0.0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    1.0,
+                    0.0,
+                    0.5,
+                    1
+                  ],
+                  [
+                    1.0,
+                    0.5,
+                    0.0,
+                    1
+                  ],
+                  [
+                    1.0,
+                    1.0,
+                    0.5,
+                    1
+                  ]
+                ]
+              ],
+              "p": 2,
+              "q": 2,
+              "u": [
+                0,
+                0,
+                0,
+                1,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                0,
+                1,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "tol": 1e-06,
+        "ang": 2.0,
+        "want_points": true
+      }
+    },
+    {
+      "name": "cross_body_tangent_no_points",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp: SmBrep::BrepIntersect; independent quadratic paraboloid / analytic plane finite faces",
+      "inputs": {
+        "op": "brep_intersect2",
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0.0,
+                    0.0,
+                    0.5,
+                    1
+                  ],
+                  [
+                    0.0,
+                    0.5,
+                    0.0,
+                    1
+                  ],
+                  [
+                    0.0,
+                    1.0,
+                    0.5,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    0.5,
+                    0.0,
+                    0.0,
+                    1
+                  ],
+                  [
+                    0.5,
+                    0.5,
+                    -0.5,
+                    1
+                  ],
+                  [
+                    0.5,
+                    1.0,
+                    0.0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    1.0,
+                    0.0,
+                    0.5,
+                    1
+                  ],
+                  [
+                    1.0,
+                    0.5,
+                    0.0,
+                    1
+                  ],
+                  [
+                    1.0,
+                    1.0,
+                    0.5,
+                    1
+                  ]
+                ]
+              ],
+              "p": 2,
+              "q": 2,
+              "u": [
+                0,
+                0,
+                0,
+                1,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                0,
+                1,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "other": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1,
+                0,
+                0
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "tol": 1e-06,
+        "ang": 2.0,
+        "want_points": false
+      }
+    },
+    {
+      "name": "cross_body_disjoint",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp: SmBrep::BrepIntersect; independent quadratic paraboloid / analytic plane finite faces",
+      "inputs": {
+        "op": "brep_intersect2",
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0.0,
+                    0.0,
+                    0.5,
+                    1
+                  ],
+                  [
+                    0.0,
+                    0.5,
+                    0.0,
+                    1
+                  ],
+                  [
+                    0.0,
+                    1.0,
+                    0.5,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    0.5,
+                    0.0,
+                    0.0,
+                    1
+                  ],
+                  [
+                    0.5,
+                    0.5,
+                    -0.5,
+                    1
+                  ],
+                  [
+                    0.5,
+                    1.0,
+                    0.0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    1.0,
+                    0.0,
+                    0.5,
+                    1
+                  ],
+                  [
+                    1.0,
+                    0.5,
+                    0.0,
+                    1
+                  ],
+                  [
+                    1.0,
+                    1.0,
+                    0.5,
+                    1
+                  ]
+                ]
+              ],
+              "p": 2,
+              "q": 2,
+              "u": [
+                0,
+                0,
+                0,
+                1,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                0,
+                1,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "other": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1,
+                0,
+                -0.125
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "tol": 1e-06,
+        "ang": 2.0,
+        "want_points": true
+      }
+    },
+    {
+      "name": "cross_body_disjoint_reverse",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp: SmBrep::BrepIntersect; independent quadratic paraboloid / analytic plane finite faces",
+      "inputs": {
+        "op": "brep_intersect2",
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1,
+                0,
+                -0.125
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "other": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0.0,
+                    0.0,
+                    0.5,
+                    1
+                  ],
+                  [
+                    0.0,
+                    0.5,
+                    0.0,
+                    1
+                  ],
+                  [
+                    0.0,
+                    1.0,
+                    0.5,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    0.5,
+                    0.0,
+                    0.0,
+                    1
+                  ],
+                  [
+                    0.5,
+                    0.5,
+                    -0.5,
+                    1
+                  ],
+                  [
+                    0.5,
+                    1.0,
+                    0.0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    1.0,
+                    0.0,
+                    0.5,
+                    1
+                  ],
+                  [
+                    1.0,
+                    0.5,
+                    0.0,
+                    1
+                  ],
+                  [
+                    1.0,
+                    1.0,
+                    0.5,
+                    1
+                  ]
+                ]
+              ],
+              "p": 2,
+              "q": 2,
+              "u": [
+                0,
+                0,
+                0,
+                1,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                0,
+                1,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "tol": 1e-06,
+        "ang": 2.0,
+        "want_points": true
+      }
+    },
+    {
+      "name": "cross_body_disjoint_no_points",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp: SmBrep::BrepIntersect; independent quadratic paraboloid / analytic plane finite faces",
+      "inputs": {
+        "op": "brep_intersect2",
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0.0,
+                    0.0,
+                    0.5,
+                    1
+                  ],
+                  [
+                    0.0,
+                    0.5,
+                    0.0,
+                    1
+                  ],
+                  [
+                    0.0,
+                    1.0,
+                    0.5,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    0.5,
+                    0.0,
+                    0.0,
+                    1
+                  ],
+                  [
+                    0.5,
+                    0.5,
+                    -0.5,
+                    1
+                  ],
+                  [
+                    0.5,
+                    1.0,
+                    0.0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    1.0,
+                    0.0,
+                    0.5,
+                    1
+                  ],
+                  [
+                    1.0,
+                    0.5,
+                    0.0,
+                    1
+                  ],
+                  [
+                    1.0,
+                    1.0,
+                    0.5,
+                    1
+                  ]
+                ]
+              ],
+              "p": 2,
+              "q": 2,
+              "u": [
+                0,
+                0,
+                0,
+                1,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                0,
+                1,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "other": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1,
+                0,
+                -0.125
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "tol": 1e-06,
+        "ang": 2.0,
+        "want_points": false
+      }
+    },
+    {
+      "name": "cross_body_transverse",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp: SmBrep::BrepIntersect; independent quadratic paraboloid / analytic plane finite faces",
+      "inputs": {
+        "op": "brep_intersect2",
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0.0,
+                    0.0,
+                    0.5,
+                    1
+                  ],
+                  [
+                    0.0,
+                    0.5,
+                    0.0,
+                    1
+                  ],
+                  [
+                    0.0,
+                    1.0,
+                    0.5,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    0.5,
+                    0.0,
+                    0.0,
+                    1
+                  ],
+                  [
+                    0.5,
+                    0.5,
+                    -0.5,
+                    1
+                  ],
+                  [
+                    0.5,
+                    1.0,
+                    0.0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    1.0,
+                    0.0,
+                    0.5,
+                    1
+                  ],
+                  [
+                    1.0,
+                    0.5,
+                    0.0,
+                    1
+                  ],
+                  [
+                    1.0,
+                    1.0,
+                    0.5,
+                    1
+                  ]
+                ]
+              ],
+              "p": 2,
+              "q": 2,
+              "u": [
+                0,
+                0,
+                0,
+                1,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                0,
+                1,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "other": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1,
+                0,
+                0.125
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "tol": 1e-06,
+        "ang": 2.0,
+        "want_points": true
+      }
+    },
+    {
+      "name": "cross_body_transverse_reverse",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp: SmBrep::BrepIntersect; independent quadratic paraboloid / analytic plane finite faces",
+      "inputs": {
+        "op": "brep_intersect2",
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1,
+                0,
+                0.125
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "other": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0.0,
+                    0.0,
+                    0.5,
+                    1
+                  ],
+                  [
+                    0.0,
+                    0.5,
+                    0.0,
+                    1
+                  ],
+                  [
+                    0.0,
+                    1.0,
+                    0.5,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    0.5,
+                    0.0,
+                    0.0,
+                    1
+                  ],
+                  [
+                    0.5,
+                    0.5,
+                    -0.5,
+                    1
+                  ],
+                  [
+                    0.5,
+                    1.0,
+                    0.0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    1.0,
+                    0.0,
+                    0.5,
+                    1
+                  ],
+                  [
+                    1.0,
+                    0.5,
+                    0.0,
+                    1
+                  ],
+                  [
+                    1.0,
+                    1.0,
+                    0.5,
+                    1
+                  ]
+                ]
+              ],
+              "p": 2,
+              "q": 2,
+              "u": [
+                0,
+                0,
+                0,
+                1,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                0,
+                1,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "tol": 1e-06,
+        "ang": 2.0,
+        "want_points": true
+      }
+    },
+    {
+      "name": "cross_body_transverse_no_points",
+      "upstream_ref": "source/SMLib/src/SmBrep.cpp: SmBrep::BrepIntersect; independent quadratic paraboloid / analytic plane finite faces",
+      "inputs": {
+        "op": "brep_intersect2",
+        "brep": {
+          "kind": "face",
+          "surface": {
+            "bspline": {
+              "net": [
+                [
+                  [
+                    0.0,
+                    0.0,
+                    0.5,
+                    1
+                  ],
+                  [
+                    0.0,
+                    0.5,
+                    0.0,
+                    1
+                  ],
+                  [
+                    0.0,
+                    1.0,
+                    0.5,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    0.5,
+                    0.0,
+                    0.0,
+                    1
+                  ],
+                  [
+                    0.5,
+                    0.5,
+                    -0.5,
+                    1
+                  ],
+                  [
+                    0.5,
+                    1.0,
+                    0.0,
+                    1
+                  ]
+                ],
+                [
+                  [
+                    1.0,
+                    0.0,
+                    0.5,
+                    1
+                  ],
+                  [
+                    1.0,
+                    0.5,
+                    0.0,
+                    1
+                  ],
+                  [
+                    1.0,
+                    1.0,
+                    0.5,
+                    1
+                  ]
+                ]
+              ],
+              "p": 2,
+              "q": 2,
+              "u": [
+                0,
+                0,
+                0,
+                1,
+                1,
+                1
+              ],
+              "v": [
+                0,
+                0,
+                0,
+                1,
+                1,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "other": {
+          "kind": "face",
+          "surface": {
+            "plane": {
+              "o": [
+                1,
+                0,
+                0.125
+              ],
+              "n": [
+                0,
+                0,
+                1
+              ]
+            }
+          },
+          "dom": [
+            0,
+            0,
+            1,
+            1
+          ]
+        },
+        "tol": 1e-06,
+        "ang": 2.0,
+        "want_points": false
+      }
+    }
+  ]
+}

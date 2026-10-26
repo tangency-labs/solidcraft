@@ -36,6 +36,7 @@
 //! | `Redistribute` | `edge has_uv seam u0 v0 u1 v1`                   | `0 swapped`, or `-3` where the Rust side defers (`sm_RedistributeSeamUVTrimCurves`) |
 //! | `SplitUv`      | `eu_orig eu_new P[3] t scaled_zero orient for_tess` | `status`, both edge uses' states (as `topology.edgeuse_p1`'s `SetUv`), both edge tolerances (`sm_MakeVertexSplitUVTrimCurve`) |
 //! | `BrepIntersect`| `tol ang want_points`                            | `status n_curves n_points` (with itself; `-3` when the B-rep has faces) |
+//! | `BrepIntersect2`| `face_block face_block tol ang want_points` (no common prefix block) | `build1 build2 ran [status n_curves n_points curve_observation*n_curves point[3]*n_points]`; `n_points=-1` when disabled |
 //! | `CornerBlend`  | `n eu*n has_tan nt tan*nt tol ang`               | `status n_surfaces surface*n` (`-2` before an upstream null dereference) |
 //! | `EdgeEdgeBlend`| `flag eu1 eu2 dir`                               | `status [surface block]` |
 //! | `EdgeEdgeBlend2`| `[second B-rep block] eu1 eu2 dir`              | `status [surface block]` (ruled; `eu2` in the second B-rep) |
@@ -44,6 +45,16 @@
 //!
 //! A curve id is `-1` (none) or `1 t0 t1 P(t0) P(mid) P(t1)`; an edge use state is `-1`
 //! or `1 curve_id owner has_fail fail_status fail_brep vu_face_gap_init`.
+//!
+//! `BrepIntersect2` accepts two existing face B-rep blocks only (kind 2, each
+//! including its validate-only/init-gaps flags). Its output has no legacy `0`
+//! prefix. Each curve observation is `actual_type t0 t1`, six
+//! `evaluation_status [XYZ on SM_SUCCESS]` records at normalized fractions
+//! `0,.17,.37,.5,.83,1`, then `is_bspline [dim has_nurb [n p m
+//! (weighted_x weighted_y weighted_z weight)*(n+1) knot*(m+1)]]`.
+//! Non-B-spline result types retain their type/domain/samples, not a stand-in.
+//! Results are observed even when the operation reports an error. Build failure
+//! ends after `build1 build2 0`, without inventing an operation status.
 //!
 //! [`eval`] accepts only what upstream handles without undefined behaviour: the B-rep
 //! block rules of `topology.edgeuse_p1`, indices inside the B-rep's export (it builds
@@ -84,6 +95,7 @@ pub enum Op {
     ParallelProj = 25,
     Heal = 26,
     EdgeEdgeBlend2 = 27,
+    BrepIntersect2 = 28,
 }
 
 impl Op {
@@ -196,7 +208,7 @@ fn brep_args(op: Op, rd: &mut Reader<'_>, c: [usize; 10]) -> Result<(), FfiError
     match op {
         // (EdgeEdgeBlend2's second B-rep block is checked in `eval`: it needs that B-rep's
         // counts)
-        Op::Export | Op::LockBox | Op::EdgeEdgeBlend2 => {}
+        Op::Export | Op::LockBox | Op::EdgeEdgeBlend2 | Op::BrepIntersect2 => {}
         Op::Lists => {
             rd.index(9)?;
             attribute_id(rd)?;
@@ -412,6 +424,9 @@ fn raw(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
 /// [`FfiError::InvalidArgument`] for a malformed input; [`FfiError::Status`] for a shim
 /// failure.
 pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
+    if op == Op::BrepIntersect2 {
+        return eval_brep_intersect2(input);
+    }
     let mut rd = Reader { input, at: 0 };
     brep_block(&mut rd, path)?;
     let block = input.get(..rd.at).ok_or_else(|| bad("input too short"))?;
@@ -462,3 +477,103 @@ pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
 /// The largest B-rep block value the shim is given (HANG-29: face surfaces at 1e154 and
 /// beyond recurse without bound while their UV trim curves are built).
 pub const MAX_BLOCK_COORD: f64 = 1e150;
+
+// Validate both complete face blocks before any native call. Reuse the existing
+// codec's bounded degree/count/knot/coordinate checks; do not preallocate from
+// caller-declared counts or perform graph-import/export preflight constructions.
+fn eval_brep_intersect2(input: &[f64]) -> Result<Vec<f64>, FfiError> {
+    let mut rd = Reader { input, at: 0 };
+    for _ in 0..2 {
+        let start = rd.at;
+        if rd.input.get(start) != Some(&2.0) {
+            return Err(bad("cross-body intersection requires two face blocks"));
+        }
+        brep_block(&mut rd, "")?;
+        let block = input
+            .get(start..rd.at)
+            .ok_or_else(|| bad("input too short"))?;
+        if block
+            .iter()
+            .any(|v| v.abs() > MAX_BLOCK_COORD && v.abs() != f64::MAX)
+        {
+            return Err(bad("B-rep block value beyond 1e150 (HANG-29)"));
+        }
+    }
+    rd.finite()?;
+    rd.finite()?;
+    rd.flag()?;
+    rd.done()?;
+    raw(Op::BrepIntersect2, "", input)
+}
+
+#[cfg(test)]
+mod cross_body_tests {
+    use super::*;
+
+    fn input() -> Vec<f64> {
+        let face = [
+            2.0, 1.0, 1.0, 0.0, 0.125, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0,
+        ];
+        let mut input = face.to_vec();
+        input.extend(face);
+        input.extend([1e-6, 2.0, 1.0]);
+        input
+    }
+
+    #[test]
+    fn cross_body_rejects_truncated_and_extraneous_before_native() {
+        let input = input();
+        for length in 0..input.len() {
+            assert!(
+                matches!(
+                    eval(Op::BrepIntersect2, "", &input[..length]),
+                    Err(FfiError::InvalidArgument(_))
+                ),
+                "length {length}"
+            );
+        }
+        let mut trailing = input;
+        trailing.push(42.0);
+        assert!(matches!(
+            eval(Op::BrepIntersect2, "", &trailing),
+            Err(FfiError::InvalidArgument(_))
+        ));
+    }
+
+    #[test]
+    fn cross_body_rejects_malformed_faces_and_parameters_before_native() {
+        // Surface counts fail before allocation/reading a control net.
+        for count in [-1.0, 1e20, f64::NAN, f64::INFINITY] {
+            let prefix = [2.0, 0.0, 0.0, 0.0, count];
+            assert!(matches!(
+                eval(Op::BrepIntersect2, "", &prefix),
+                Err(FfiError::InvalidArgument(_))
+            ));
+        }
+        for (slot, value) in [
+            (0, 1.0),
+            (14, 0.0),
+            (10, -1.0),
+            (5, 0.0),
+            (6, 0.0),
+            (7, 0.0),
+            (28, f64::NAN),
+            (29, f64::INFINITY),
+            (30, 2.0),
+        ] {
+            let mut bad_input = input();
+            // A zero normal needs all its components zero (X/Y already are).
+            if slot == 5 || slot == 6 {
+                bad_input[7] = 0.0;
+            }
+            bad_input[slot] = value;
+            assert!(
+                matches!(
+                    eval(Op::BrepIntersect2, "", &bad_input),
+                    Err(FfiError::InvalidArgument(_))
+                ),
+                "slot {slot}"
+            );
+        }
+    }
+}

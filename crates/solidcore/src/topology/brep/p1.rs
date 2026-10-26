@@ -28,6 +28,7 @@
 //! | [`set_region_is_void_flags_for_nested_solids`]    | `SmBrep::SetRegionIsVoidFlagsForNestedSolids` |
 //! | [`heal_brep`]                                     | `SmBrep::HealBrep`                            |
 //! | [`brep_intersect`]                                | `SmBrep::BrepIntersect`                       |
+//! | [`brep_intersect_mut`]                            | `SmBrep::BrepIntersect` (mutable B-reps)      |
 //! | [`create_corner_blend`]                           | `SmBrep::CreateCornerBlend`                   |
 //! | [`create_edge_edge_blend`]                        | `SmBrep::CreateEdgeEdgeBlend`                 |
 //! | [`create_parallel_projection_curves`], [`ParallelProjectionOptions`], [`ParallelProjectionCurves`] | `SmBrep::CreateParallelProjectionCurves` |
@@ -2367,6 +2368,54 @@ pub fn brep_intersect(
     )
 }
 
+/// [`brep_intersect`] with two distinct B-reps lent mutably so the faces' trimmed
+/// surface caches and UV trim curves can be made on their owning B-reps.
+///
+/// Face pairs are visited in the same order as [`brep_intersect`], with the same
+/// duplicate-curve removal. Singular points are returned only when `want_points`;
+/// wire edges and shell vertices are not handled. Use [`brep_intersect_self`] when
+/// both operands are the same B-rep.
+///
+/// # Errors
+///
+/// Those of face enumeration, `SmFace::FaceIntersect` and duplicate-curve removal.
+pub fn brep_intersect_mut(
+    k: &Kernel,
+    b: &mut Brep,
+    other: &mut Brep,
+    approx_tol_3d: f64,
+    crv_angle_tolerance_deg: f64,
+    want_points: bool,
+) -> Result<(Vec<Curve>, Option<Vec<Point3>>)> {
+    let this_faces = faces(b, None)?;
+    let other_faces = faces(other, None)?;
+    brep_intersect_faces(
+        k,
+        &this_faces,
+        &other_faces,
+        want_points,
+        |this_face, other_face| {
+            let options = crate::topology::face::p3::FaceIntersectOptions {
+                want_points: true,
+                ..Default::default()
+            };
+            let out = crate::topology::face::p3::face_intersect_breps(
+                k,
+                crate::topology::face::p3::FaceBreps::Two(&mut *b, &mut *other),
+                this_face,
+                other_face,
+                approx_tol_3d,
+                crv_angle_tolerance_deg,
+                &options,
+            )?;
+            Ok((
+                out.curves_3d.into_iter().map(Some).collect(),
+                out.points_3d.unwrap_or_default(),
+            ))
+        },
+    )
+}
+
 /// [`brep_intersect`] of a B-rep with itself (`brep->BrepIntersect(ctx, brep, ..)`),
 /// the B-rep lent mutably: each face's surface reaches its face, so the faces' trimmed
 /// caches (and their UV trim curves) are made on it as upstream's
@@ -3250,6 +3299,181 @@ mod tests {
     use super::*;
     use crate::geom::a_object;
     use crate::topology::Region;
+
+    fn cross_body_face(k: &mut Kernel, surface: Surface) -> Brep {
+        use crate::geom::tol;
+        use crate::topology::brep::p2::ArenaNotifyState;
+        use crate::topology::brep::p8::{create_face_from_surface, FaceBuildEnv};
+        use crate::topology::brep_cache::{arena_identity, CacheObject};
+        use crate::topology::topology_traverser::Marks;
+
+        let mut b =
+            crate::topology::brep::p3::new_brep(k, tol::USE_DEFAULT, tol::USE_DEFAULT).unwrap();
+        let mut state = ArenaNotifyState::new(&b);
+        let mut env = state.env(None);
+        let mut marks = Marks::default();
+        let key = |f| arena_identity(CacheObject::Face(f));
+        let mut fenv = FaceBuildEnv {
+            env: &mut env,
+            marks: &mut marks,
+            this_face: &key,
+        };
+        create_face_from_surface(
+            k,
+            &mut b,
+            Some(surface),
+            &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+            &mut fenv,
+        )
+        .unwrap();
+        assert_eq!(
+            (b.faces().len(), b.edges().len(), b.vertices().len()),
+            (1, 4, 4)
+        );
+        b
+    }
+
+    fn cross_body_pair(k: &mut Kernel, z: f64) -> (Brep, Brep) {
+        use crate::math::Point2;
+        use crate::nurbs::{math::CPoint, srf_basic::Surface as NurbSurface};
+        use crate::surface::plane::Plane;
+
+        let q = [0.25, -0.25, 0.25];
+        let net = (0..3)
+            .map(|i| {
+                (0..3)
+                    .map(|j| CPoint::new(i as f64 / 2.0, j as f64 / 2.0, q[i] + q[j], 1.0))
+                    .collect()
+            })
+            .collect();
+        let knots = vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0];
+        let paraboloid = Surface::from(BSplineSurface::from_nurb(
+            NurbSurface::new(net, 2, 2, knots.clone(), knots).unwrap(),
+            false,
+        ));
+        let plane = Surface::from(Plane::new(
+            Point3::new(0.0, 0.0, z),
+            Point3::new(1.0, 0.0, 0.0),
+            Point3::new(0.0, 1.0, 0.0),
+            Point2::new(1.0, 1.0),
+            &Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+        ));
+        for (u, v) in [(0.0, 0.0), (0.5, 0.5), (1.0, 1.0), (0.25, 0.75)] {
+            let uv = Point2::new(u, v);
+            assert_eq!(
+                paraboloid.evaluate_point(k, uv).unwrap(),
+                Point3::new(u, v, (u - 0.5) * (u - 0.5) + (v - 0.5) * (v - 0.5))
+            );
+            assert_eq!(plane.evaluate_point(k, uv).unwrap(), Point3::new(u, v, z));
+        }
+        (cross_body_face(k, paraboloid), cross_body_face(k, plane))
+    }
+
+    #[test]
+    fn brep_intersect_mut_preserves_shared_refusal() {
+        let mut k = Kernel::default();
+        for z in [0.0, -0.125, 0.125] {
+            let (b, other) = cross_body_pair(&mut k, z);
+            assert!(matches!(
+                brep_intersect(&k, &b, &other, 1e-6, 2.0, true),
+                Err(SolidError::Unported {
+                    upstream: "SmFace handle of a surface's face",
+                    unit: "topology.face_p2",
+                })
+            ));
+        }
+    }
+
+    #[test]
+    fn brep_intersect_mut_empty_controls_and_point_options() {
+        let mut k = Kernel::default();
+        // Native also returns no singular point for this exact tangency.
+        for z in [0.0, -0.125] {
+            for reverse in [false, true] {
+                for want_points in [false, true] {
+                    let (mut b, mut other) = cross_body_pair(&mut k, z);
+                    let (first, second) = if reverse {
+                        (&mut other, &mut b)
+                    } else {
+                        (&mut b, &mut other)
+                    };
+                    let (curves, points) =
+                        brep_intersect_mut(&k, first, second, 1e-6, 2.0, want_points).unwrap();
+                    assert!(curves.is_empty());
+                    assert_eq!(points, want_points.then(Vec::new));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn brep_intersect_mut_transverse_geometry_and_reversal() {
+        use crate::curve::curve::CurveKind;
+
+        let mut k = Kernel::default();
+        // Real native samples for the same +X/+Y finite-plane parameterization.
+        let native_samples = [
+            (0.0, Point3::new(0.25, 0.25, 0.12499999999999994)),
+            (
+                0.17,
+                Point3::new(0.5986382760814888, 0.16048491945102275, 0.12500000000000014),
+            ),
+            (
+                0.37,
+                Point3::new(0.8533789339730656, 0.4888946399516082, 0.12500000000000017),
+            ),
+            (
+                0.5,
+                Point3::new(0.7499999845540126, 0.7500000141604762, 0.12500000000000014),
+            ),
+            (
+                0.83,
+                Point3::new(0.160484902323279, 0.5986382191973311, 0.1250000000000001),
+            ),
+            (1.0, Point3::new(0.25, 0.25, 0.12499999999999994)),
+        ];
+        for reverse in [false, true] {
+            for want_points in [false, true] {
+                let (mut b, mut other) = cross_body_pair(&mut k, 0.125);
+                let (first, second) = if reverse {
+                    (&mut other, &mut b)
+                } else {
+                    (&mut b, &mut other)
+                };
+                let (curves, points) =
+                    brep_intersect_mut(&k, first, second, 1e-6, 2.0, want_points).unwrap();
+                assert_eq!(points, want_points.then(Vec::new));
+                assert_eq!(curves.len(), 1);
+                let curve = &curves[0];
+                assert!(matches!(curve.kind(), CurveKind::BSpline(_)));
+                let domain = curve.natural_interval();
+                assert_eq!(domain.min(), 0.0);
+                assert!((domain.max() - 2.2213861199585656).abs() <= 1e-9 * domain.max());
+                for (fraction, expected) in native_samples {
+                    let t = domain.min() + (domain.max() - domain.min()) * fraction;
+                    let p = curve.evaluate_point(&k, t).unwrap();
+                    assert!((0.0..=1.0).contains(&p.x) && (0.0..=1.0).contains(&p.y));
+                    assert!((p.z - 0.125).abs() <= 1e-9 * p.z.abs());
+                    // The curve approximates the circle on the paraboloid to the
+                    // requested 3D approximation tolerance, regardless of orientation.
+                    assert!(((p.x - 0.5).powi(2) + (p.y - 0.5).powi(2) - 0.125).abs() <= 1e-6);
+                    if !reverse {
+                        for (actual, expected) in
+                            [(p.x, expected.x), (p.y, expected.y), (p.z, expected.z)]
+                        {
+                            assert!(
+                                (actual - expected).abs()
+                                    <= 1e-9 * actual.abs().max(expected.abs())
+                            );
+                        }
+                    }
+                }
+                let start = curve.evaluate_point(&k, domain.min()).unwrap();
+                let end = curve.evaluate_point(&k, domain.max()).unwrap();
+                assert!((start - end).length() <= 1e-9);
+            }
+        }
+    }
 
     fn seam_fixture() -> (Brep, EdgeId, [EdgeuseId; 4], [EdgeuseId; 2]) {
         use crate::curve::line::Line;

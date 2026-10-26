@@ -667,6 +667,7 @@ enum Op
     OP_PARALLEL_PROJ = 25,
     OP_HEAL = 26,
     OP_EDGE_EDGE_BLEND2 = 27,
+    OP_BREP_INTERSECT2 = 28,
 };
 
 // The type codes IsKindOf is asked about.
@@ -1224,10 +1225,84 @@ void put_healed(SmBrep* brep, std::vector<double>& o)
     o.push_back(flg(brep->m_bValidateOnly));
 }
 
+// Additive cross-body observer. Unlike the legacy curve fingerprint, always retain
+// the actual dynamic type, domain and evaluation statuses, even for non-B-splines.
+void put_intersection_curve(std::vector<double>& o, const SmCurve& curve)
+{
+    o.push_back((double)curve.GetType());
+    SmExtent1d domain = curve.GetNaturalInterval();
+    o.push_back(domain.GetMin());
+    o.push_back(domain.GetMax());
+    for (double fraction : {0.0, 0.17, 0.37, 0.5, 0.83, 1.0})
+    {
+        SmPoint3d point(0.0, 0.0, 0.0);
+        SmStatus status = curve.EvaluatePoint(domain.Evaluate(fraction), point);
+        o.push_back(st(status));
+        // On failure XYZ is omitted, never manufactured from the initialized point.
+        if (status == SM_SUCCESS)
+            put_vec(o, point);
+    }
+    const SmBSplineCurve* spline = SM_CAST_PTR(SmBSplineCurve, &curve);
+    o.push_back(spline ? 1.0 : 0.0);
+    if (spline == nullptr)
+        return; // the type/domain/samples above still describe this result
+    o.push_back((double)spline->GetDim());
+    gw_CURVE* nurb = spline->GetGwNurbPointer();
+    o.push_back(nurb ? 1.0 : 0.0);
+    if (nurb == nullptr)
+        return;
+    o.push_back((double)nurb->pol->n);
+    o.push_back((double)nurb->p);
+    o.push_back((double)nurb->knt->m);
+    for (gw_INDEX i = 0; i <= nurb->pol->n; ++i)
+    {
+        o.push_back(nurb->pol->Pw[i].x);
+        o.push_back(nurb->pol->Pw[i].y);
+        o.push_back(nurb->pol->Pw[i].z);
+        o.push_back(nurb->pol->Pw[i].w);
+    }
+    for (gw_INDEX i = 0; i <= nurb->knt->m; ++i)
+        o.push_back(nurb->knt->U[i]);
+}
+
+void run_brep_intersect2(Rd& rd, std::vector<double>& o)
+{
+    const SmContext& ctx = the_context();
+    SmStatus first_status, second_status;
+    Built first, second;
+    first.brep = build(rd, "", first_status);
+    second.brep = build(rd, "", second_status);
+    double tol = rd.num(), angle = rd.num();
+    bool want_points = rd.flag();
+    o.push_back(st(first_status));
+    o.push_back(st(second_status));
+    bool ran = first.brep != nullptr && second.brep != nullptr;
+    o.push_back(ran ? 1.0 : 0.0);
+    if (!ran)
+        return;
+    SmTArray<SmCurve*> curves;
+    SmObjsDelete<SmCurve*> clean_curves(&curves);
+    SmTArray<SmPoint3d> points;
+    SmStatus status = first.brep->BrepIntersect(ctx, second.brep, tol, angle, curves,
+                                              want_points ? &points : NULL);
+    o.push_back(st(status));
+    o.push_back((double)curves.GetSize());
+    o.push_back(want_points ? (double)points.GetSize() : -1.0);
+    for (ULONG i = 0; i < curves.GetSize(); ++i)
+        put_intersection_curve(o, *curves[i]);
+    for (ULONG i = 0; i < points.GetSize(); ++i)
+        put_vec(o, points[i]);
+}
+
 void run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
 {
     SmContext& ctx = const_cast<SmContext&>(the_context());
     CtxSave save(ctx);
+    if (op == OP_BREP_INTERSECT2)
+    {
+        run_brep_intersect2(rd, o);
+        return;
+    }
     SmStatus bst;
     Built b;
     b.brep = build(rd, path, bst);
