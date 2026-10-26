@@ -10,7 +10,8 @@
 //! `outer` (`FindOuterLoops` on given loops), `mirror`, `iso_at`, `iso`, `iso_seam`,
 //! `continuity`, `uv_gap` (`sm_IsLoopUVGapWithinTolerance`, copied verbatim into the
 //! shim), `min`, `trim_null` (the null-region error of `TrimSurfaceWithModelSpaceCurves`)
-//! and `loops`, a script of `SmCurveLoops` / `SmIsoXSectSegment` / `SmCurveIntersections`
+//! `trim_constructed`, two fixed positive original-trim constructors (a Plane square
+//! and a degree-one creased strip), and `loops`, a script of `SmCurveLoops` / `SmIsoXSectSegment` / `SmCurveIntersections`
 //! operations on a store of curves.
 //!
 //! **B-rep ops** use the B-reps of unit `topology.vertexuse` (upstream `.smb` files and
@@ -21,7 +22,9 @@
 //! face and edge use selectors are taken modulo their counts. The mutating ops compare
 //! every edge use's UV trim curve afterwards.
 //!
-//! Both sides produce one flat record (`out`), laid out as in the ffi module; `-2` marks a
+//! Existing ops produce one flat record (`out`); `trim_constructed` reuses the complete
+//! typed `topology.brep_p10` snapshot plus its trim result. Layouts are in the ffi
+//! module. `-2` marks a
 //! call the shim skips because upstream would dereference null or read out of bounds (the
 //! Rust side reports [`SolidError::InvalidInput`] or fails the same guard), `-3` a call
 //! the shim skips because the Rust side defers it to an unported unit.
@@ -63,8 +66,8 @@ use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::b_spline_surface::p1::SurfParamType;
 use solidcore::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm};
 use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
-use solidcore::nurbs::nurbs_crv::allocate_nurb_curve;
 use solidcore::nurbs::math::{CPoint, NOW, NOZ};
+use solidcore::nurbs::nurbs_crv::allocate_nurb_curve;
 use solidcore::nurbs::srf_basic::Surface as NlSurface;
 use solidcore::surface::curve_bounded_surface::CurveBoundedSurface;
 use solidcore::surface::plane::Plane;
@@ -268,6 +271,23 @@ struct IntsIn {
     sols: Vec<(i64, f64)>,
 }
 
+/// Fixed valid inputs for the original trimming constructor.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum TrimConstructedKind {
+    PlaneSquare,
+    CreasedStrip,
+}
+
+impl TrimConstructedKind {
+    fn code(self) -> u8 {
+        match self {
+            Self::PlaneSquare => 0,
+            Self::CreasedStrip => 1,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 enum OpIn {
@@ -322,6 +342,9 @@ enum OpIn {
     TrimNull {
         surface: SrfIn,
         curves: Vec<CurveIn>,
+    },
+    TrimConstructed {
+        kind: TrimConstructedKind,
     },
     Loops {
         store: Vec<CurveIn>,
@@ -425,7 +448,9 @@ fn resolve(c: &CurveIn) -> Result<CurveIn, HarnessError> {
         solidcore::nurbs::b_spline_curve::NurbCircleParam::Quadratic,
     )
     .map_err(|e| harness(format!("circle: {e}")))?;
-    let cur = arc.gw_nurb().ok_or_else(|| harness("circle without NURB"))?;
+    let cur = arc
+        .gw_nurb()
+        .ok_or_else(|| harness("circle without NURB"))?;
     Ok(CurveIn::Bspline(BSplineIn {
         dim: 3,
         oob: false,
@@ -458,7 +483,13 @@ fn push_curve(v: &mut Vec<f64>, c: &CurveIn) -> Result<(), HarnessError> {
             v.extend_from_slice(&e.c);
             v.extend_from_slice(&e.x);
             v.extend_from_slice(&e.y);
-            v.extend([e.domain[0], e.domain[1], e.radii[0], e.radii[1], flag(e.inside_out)]);
+            v.extend([
+                e.domain[0],
+                e.domain[1],
+                e.radii[0],
+                e.radii[1],
+                flag(e.inside_out),
+            ]);
         }
         CurveIn::Circle(_) => return Err(harness("unresolved circle")),
     }
@@ -478,7 +509,11 @@ fn push_surface(v: &mut Vec<f64>, s: &SrfIn) -> Result<(), HarnessError> {
             v.extend(n);
         }
         SrfIn::Bspline(b) => {
-            let n = b.net.len().checked_sub(1).ok_or_else(|| harness("empty net"))?;
+            let n = b
+                .net
+                .len()
+                .checked_sub(1)
+                .ok_or_else(|| harness("empty net"))?;
             let m = b
                 .net
                 .first()
@@ -563,7 +598,12 @@ fn push_loop_op(v: &mut Vec<f64>, op: &LoopOp) {
         } => {
             v.extend([10.0, ints.len() as f64]);
             for ci in ints {
-                v.extend([ci.iso as f64, f64::from(ci.dir), ci.param, ci.sols.len() as f64]);
+                v.extend([
+                    ci.iso as f64,
+                    f64::from(ci.dir),
+                    ci.param,
+                    ci.sols.len() as f64,
+                ]);
                 for (o, t) in &ci.sols {
                     v.extend([*o as f64, *t]);
                 }
@@ -671,6 +711,10 @@ fn encode(op: &OpIn) -> Result<(Op, String, Vec<f64>), HarnessError> {
         OpIn::Min { a, b } => {
             v.extend([*a, *b]);
             (Op::Min, String::new())
+        }
+        OpIn::TrimConstructed { kind } => {
+            v.push(f64::from(kind.code()));
+            (Op::TrimConstructed, String::new())
         }
         OpIn::TrimNull { surface, curves } => {
             push_surface(&mut v, surface)?;
@@ -894,7 +938,11 @@ fn run_cpp(i: &OpIn) -> Result<Output, HarnessError> {
     };
     let (code, path, input) = encode(&op)?;
     let out = ffi::eval(code, &path, &input).map_err(|e| harness(format!("c++: {e}")))?;
-    Ok(Output::new().values("out", out))
+    if matches!(op, OpIn::TrimConstructed { .. }) {
+        constructed_output(&out)
+    } else {
+        Ok(Output::new().values("out", out))
+    }
 }
 
 // ---- Rust side --------------------------------------------------------------------------
@@ -935,7 +983,10 @@ fn rust_curve(c: &CurveIn) -> Result<Curve, HarnessError> {
                 .len()
                 .checked_sub(1)
                 .ok_or_else(|| harness("no points"))?;
-            let m = bs.u.len().checked_sub(1).ok_or_else(|| harness("no knots"))?;
+            let m =
+                bs.u.len()
+                    .checked_sub(1)
+                    .ok_or_else(|| harness("no knots"))?;
             let mut cur =
                 allocate_nurb_curve(n, bs.p, m).map_err(|e| harness(format!("curve: {e}")))?;
             for (d, s) in cur.cpts_mut().iter_mut().zip(&bs.cpts) {
@@ -988,13 +1039,10 @@ fn rust_curve(c: &CurveIn) -> Result<Curve, HarnessError> {
 
 fn rust_surface(s: &SrfIn) -> Result<Surface, HarnessError> {
     match s {
-        SrfIn::Bounded { basis, implicit } => Ok(Surface::from(CurveBoundedSurface::new(
-            rust_surface(basis)?,
-            Vec::new(),
-            Vec::new(),
-            *implicit,
-        )
-        .map_err(|e| harness(e.to_string()))?)),
+        SrfIn::Bounded { basis, implicit } => Ok(Surface::from(
+            CurveBoundedSurface::new(rust_surface(basis)?, Vec::new(), Vec::new(), *implicit)
+                .map_err(|e| harness(e.to_string()))?,
+        )),
         SrfIn::Plane { o, n } => Ok(Surface::from(Plane::from_normal(v3(*o), v3(*n)))),
         SrfIn::Bspline(b) => {
             let net = b
@@ -1722,8 +1770,14 @@ fn gap_pre(
                 CurveKind::Line(c) => (|| {
                     let mut base = c.base_with_nurb()?.into_owned();
                     let r = base.edit_end_point(point, true, None);
-                    *c = Line::from_parts(base, c.line_point(), c.line_vector(),
-                        c.step_interval(), c.line_scale(), c.inside_out());
+                    *c = Line::from_parts(
+                        base,
+                        c.line_point(),
+                        c.line_vector(),
+                        c.step_interval(),
+                        c.line_scale(),
+                        c.inside_out(),
+                    );
                     r?;
                     c.refresh_analytics()
                 })(),
@@ -2061,6 +2115,13 @@ fn run_rust_brep(k: &mut Kernel, b: &mut Brep, op: &OpIn) -> Result<Vec<f64>, Fa
 
 fn run_rust(i: &OpIn) -> Result<Output, HarnessError> {
     let mut k = Kernel::default();
+    if let OpIn::TrimConstructed { kind } = i {
+        return match run_rust_constructed(&mut k, *kind) {
+            Ok(output) => Ok(output),
+            Err(Fail::Deferred(output)) => Ok(*output),
+            Err(Fail::Harness(error)) => Err(error),
+        };
+    }
     let r = match brep_of(i) {
         Some(brep) => {
             let ex = export_of(brep)?;
@@ -2080,6 +2141,252 @@ fn run_rust(i: &OpIn) -> Result<Output, HarnessError> {
         Err(Fail::Deferred(o)) => Ok(*o),
         Err(Fail::Harness(e)) => Err(e),
     }
+}
+
+// ---- fresh, positive original-trim controls ----------------------------------------------
+
+fn constructed_surface(kind: TrimConstructedKind) -> Result<(Surface, Vec<Point2>), HarnessError> {
+    let uv = match kind {
+        TrimConstructedKind::PlaneSquare => {
+            return Ok((
+                Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0))),
+                vec![
+                    Point2::new(0.0, 0.0),
+                    Point2::new(1.0, 0.0),
+                    Point2::new(1.0, 1.0),
+                    Point2::new(0.0, 1.0),
+                ],
+            ));
+        }
+        TrimConstructedKind::CreasedStrip => vec![
+            Point2::new(0.0, 0.0),
+            Point2::new(0.5, 0.0),
+            Point2::new(1.0, 0.0),
+            Point2::new(1.0, 1.0),
+            Point2::new(0.5, 1.0),
+            Point2::new(0.0, 1.0),
+        ],
+    };
+    let net = (0..3)
+        .map(|i| {
+            (0..2)
+                .map(|j| {
+                    CPoint::new(
+                        0.5 * f64::from(i),
+                        f64::from(j),
+                        if i == 1 { 0.25 } else { 0.0 },
+                        1.0,
+                    )
+                })
+                .collect()
+        })
+        .collect();
+    let nurb = NlSurface::new(
+        net,
+        1,
+        1,
+        vec![0.0, 0.0, 0.5, 1.0, 1.0],
+        vec![0.0, 0.0, 1.0, 1.0],
+    )
+    .map_err(|e| harness(format!("constructed surface: {e}")))?;
+    Ok((Surface::from(BSplineSurface::from_nurb(nurb, false)), uv))
+}
+
+struct ConstructedTrim {
+    body: Brep,
+    state: solidcore::topology::brep::p2::ArenaNotifyState,
+    serial: u64,
+    trim: Vec<i64>,
+}
+
+fn construct_rust_trim(k: &mut Kernel, kind: TrimConstructedKind) -> Result<ConstructedTrim, Fail> {
+    use super::topology_brep_p10 as snapshot;
+    use solidcore::topology::brep::{p2::ArenaNotifyState, p3};
+    use solidcore::topology::topology::Topology;
+    use solidcore::{topology::BrepId, EntityRef};
+
+    let mut b = p3::new_brep(
+        k,
+        solidcore::geom::tol::USE_DEFAULT,
+        solidcore::geom::tol::USE_DEFAULT,
+    )
+    .map_err(|e| fail(&e))?;
+    let serial = p3::notify_serial(&mut k.context, &mut b).map_err(|e| fail(&e))?;
+    let key_of = |entity| p3::topology_ref(serial, entity);
+    let mut state = ArenaNotifyState::default();
+    state.records.insert(
+        key_of(EntityRef::Brep(BrepId::from_index(0))).key,
+        Topology::default(),
+    );
+    for (region, _) in b.regions().iter() {
+        state
+            .records
+            .insert(key_of(EntityRef::Region(region)).key, Topology::default());
+    }
+    let (surface, uv) = constructed_surface(kind)?;
+    let g1 = tt::surface_continuity_check(k, &surface).map_err(|e| fail(&e))?;
+    let points = uv
+        .iter()
+        .map(|p| surface.evaluate_point(k, *p))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| fail(&e))?;
+    let interval = Extent1d::from_min_max(0.0, 1.0);
+    let curves = points
+        .iter()
+        .zip(points.iter().cycle().skip(1))
+        .map(|(&start, &end)| {
+            Line::create_line_segment(3, start, end, Some(&interval)).map(Curve::from)
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| fail(&e))?;
+    let input = tt::TrimInput {
+        loop_counts: vec![curves.len()],
+        curves,
+        orientations: vec![OrientType::Same; points.len()],
+        loop_points: Vec::new(),
+        surface,
+        uv_domain: Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0),
+        surface_orientation: OrientType::Same,
+    };
+    let region = b.infinite_region();
+    let result = {
+        // Public API control: callbacks disabled, actual issued identities and records retained.
+        let mut env = state.env(None);
+        env.key_of = &key_of;
+        tt::trim_surface_with_model_space_curves(
+            k,
+            &mut b,
+            region,
+            1e-5,
+            input,
+            true,
+            matches!(kind, TrimConstructedKind::CreasedStrip),
+            false,
+            &mut env,
+        )
+    };
+    let trim_status = status(&result)? as i64;
+    let mut trim = vec![0, i64::from(g1), trim_status, i64::from(result.is_ok())];
+    if let Ok(returned) = result {
+        let graph = snapshot::Graph::walk(&b).map_err(|e| fail(&e))?;
+        trim.push(returned.len() as i64);
+        for face in returned {
+            let label = graph.faces.find(Some(face), FaceId::index);
+            if label < 0 {
+                return Err(harness("returned face is outside the constructed graph").into());
+            }
+            trim.push(label);
+        }
+    }
+    Ok(ConstructedTrim {
+        body: b,
+        state,
+        serial,
+        trim,
+    })
+}
+
+fn run_rust_constructed(k: &mut Kernel, kind: TrimConstructedKind) -> Result<Output, Fail> {
+    let built = construct_rust_trim(k, kind)?;
+    let key_of = |entity| solidcore::topology::brep::p3::topology_ref(built.serial, entity);
+    Ok(super::topology_brep_p10::snapshot_with_identity(
+        k,
+        &built.body,
+        &built.state.records,
+        &key_of,
+    )?
+    .ints("trim", built.trim))
+}
+
+struct ConstructedReader<'a> {
+    data: &'a [f64],
+    at: usize,
+}
+
+impl ConstructedReader<'_> {
+    fn number(&mut self) -> Result<f64, HarnessError> {
+        let value = *self
+            .data
+            .get(self.at)
+            .ok_or_else(|| harness("truncated constructed trim output"))?;
+        self.at += 1;
+        if !value.is_finite() {
+            return Err(harness("nonfinite constructed trim output"));
+        }
+        Ok(value)
+    }
+
+    fn integer(&mut self) -> Result<i64, HarnessError> {
+        let value = self.number()?;
+        if value.fract() != 0.0 || value.abs() > 9_007_199_254_740_991.0 {
+            return Err(harness("inexact constructed trim integer"));
+        }
+        Ok(value as i64)
+    }
+
+    fn count(&mut self) -> Result<usize, HarnessError> {
+        let value = usize::try_from(self.integer()?)
+            .map_err(|_| harness("negative constructed trim count"))?;
+        if value > self.data.len().saturating_sub(self.at) {
+            return Err(harness("constructed trim count exceeds output"));
+        }
+        Ok(value)
+    }
+
+    fn integers(&mut self) -> Result<Vec<i64>, HarnessError> {
+        let n = self.count()?;
+        (0..n).map(|_| self.integer()).collect()
+    }
+}
+
+fn constructed_output(data: &[f64]) -> Result<Output, HarnessError> {
+    let mut reader = ConstructedReader { data, at: 0 };
+    let continuity_status = reader.integer()?;
+    let g1 = reader.integer()?;
+    let trim_status = reader.integer()?;
+    let returned_available = reader.integer()?;
+    let mut trim = vec![continuity_status, g1, trim_status, returned_available];
+    if !matches!(g1, 0 | 1)
+        || !matches!(returned_available, 0 | 1)
+        || (trim_status == 0) != (returned_available == 1)
+    {
+        return Err(harness("invalid constructed trim availability"));
+    }
+    if returned_available == 1 {
+        let returned = reader.integers()?;
+        trim.push(returned.len() as i64);
+        trim.extend(returned);
+    }
+    let count = reader.count()?;
+    let (mut kinds, mut ints, mut doubles) = (Vec::new(), Vec::new(), Vec::new());
+    for _ in 0..count {
+        let tag = reader.integer()?;
+        kinds.push(tag);
+        match tag {
+            0 => ints.push(reader.integer()?),
+            1 => doubles.push(reader.number()?),
+            _ => return Err(harness("unknown constructed snapshot tag")),
+        }
+    }
+    let validate_only = reader.integer()?;
+    let links = reader.integers()?;
+    let flags = reader.integers()?;
+    let n = reader.count()?;
+    let uv = (0..n)
+        .map(|_| reader.number())
+        .collect::<Result<Vec<_>, _>>()?;
+    if reader.at != data.len() {
+        return Err(harness("trailing constructed trim output"));
+    }
+    Ok(Output::new()
+        .ints("trim", trim)
+        .ints("ints", ints)
+        .ints("kinds", kinds)
+        .values("dbls", doubles)
+        .int("validate_only", validate_only)
+        .ints("faceuse_links", links)
+        .ints("gap_initialized", flags)
+        .values("uv", uv))
 }
 
 // ---- generation -------------------------------------------------------------------------
@@ -2654,7 +2961,8 @@ fn gen_mirror(rng: &mut Rng) -> Option<(i64, u8)> {
 }
 
 fn gen_tol(rng: &mut Rng) -> f64 {
-    *rng.choose(&[1e-5, 1e-3, 1e-2, 0.1, 0.0, 1e-8]).unwrap_or(&1e-5)
+    *rng.choose(&[1e-5, 1e-3, 1e-2, 0.1, 0.0, 1e-8])
+        .unwrap_or(&1e-5)
 }
 
 fn gen_op(rng: &mut Rng) -> OpIn {
@@ -2737,7 +3045,9 @@ fn gen_op(rng: &mut Rng) -> OpIn {
             }
         }
         26..=28 => gen_loops_op(rng),
-        29 => OpIn::BPresent { brep: gen_brep(rng) },
+        29 => OpIn::BPresent {
+            brep: gen_brep(rng),
+        },
         30 => OpIn::BExtremes {
             brep: gen_brep(rng),
             eu: gen_sel(rng),
@@ -2838,5 +3148,322 @@ impl UnitDiff for Runner {
             ..ctx.clone()
         };
         default_cases(self, &ctx)
+    }
+}
+
+#[cfg(test)]
+mod constructed_tests {
+    use super::*;
+
+    #[test]
+    fn constructed_trim_wire_has_only_the_fixed_kind() {
+        for (kind, expected) in [
+            (TrimConstructedKind::PlaneSquare, 0.0),
+            (TrimConstructedKind::CreasedStrip, 1.0),
+        ] {
+            let (op, path, input) = encode(&OpIn::TrimConstructed { kind }).unwrap();
+            assert_eq!(op, Op::TrimConstructed);
+            assert!(path.is_empty());
+            assert_eq!(input, [expected]);
+        }
+        assert!(serde_json::from_value::<OpIn>(serde_json::json!({
+            "op": "trim_constructed", "kind": "unknown"
+        }))
+        .is_err());
+        let (op, path, wire) = encode(&OpIn::TrimNull {
+            surface: SrfIn::Plane {
+                o: [0.0; 3],
+                n: [0.0, 0.0, 1.0],
+            },
+            curves: Vec::new(),
+        })
+        .unwrap();
+        assert_eq!(op, Op::TrimNull);
+        assert!(path.is_empty());
+        assert_eq!(wire, [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn constructed_snapshot_rejects_truncation_and_invalid_tags() {
+        for raw in [
+            vec![],
+            vec![0.0, 1.0, 0.0, 0.0],
+            vec![0.0, 1.0, 0.0, 1.0, -1.0],
+            vec![0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 2.0, 0.0],
+        ] {
+            assert!(constructed_output(&raw).is_err(), "{raw:?}");
+        }
+    }
+
+    fn actual_trim(k: &mut Kernel, kind: TrimConstructedKind) -> ConstructedTrim {
+        construct_rust_trim(k, kind)
+            .unwrap_or_else(|_| panic!("actual original trim construction failed"))
+    }
+
+    fn assert_one_owner_bit_changes(before: &Output, after: &Output) {
+        assert_eq!(before.values, after.values);
+        assert_eq!(
+            before.ints.keys().collect::<Vec<_>>(),
+            after.ints.keys().collect::<Vec<_>>()
+        );
+        for (key, values) in &before.ints {
+            if key == "ints" {
+                assert_eq!(values.len(), after.ints[key].len());
+                let changed = values
+                    .iter()
+                    .zip(&after.ints[key])
+                    .filter(|(a, b)| a != b)
+                    .map(|(a, b)| (*a, *b))
+                    .collect::<Vec<_>>();
+                assert_eq!(changed, vec![(1, 0)]);
+            } else {
+                assert_eq!(values, &after.ints[key]);
+            }
+        }
+    }
+
+    #[test]
+    fn constructed_notify_uv_owners_resolve_actual_holders() {
+        use super::super::topology_brep_p10::notify_uv_owner_matches;
+        use solidcore::topology::brep::{p2::ArenaNotifyState, p3};
+        use solidcore::EntityRef;
+
+        for kind in [
+            TrimConstructedKind::PlaneSquare,
+            TrimConstructedKind::CreasedStrip,
+        ] {
+            let mut k = Kernel::default();
+            let built = actual_trim(&mut k, kind);
+            let mut producer = ArenaNotifyState::new(&built.body);
+            let local = producer.env(None).key_of;
+            let canonical = |entity| p3::topology_ref(built.serial, entity);
+            for (holder, eu) in built.body.edgeuses().iter() {
+                if let Some(curve) = eu.uv_trim_curve.as_ref() {
+                    let owner = curve.owner().unwrap();
+                    assert_ne!(owner, canonical(EntityRef::Edgeuse(holder)));
+                    assert!(notify_uv_owner_matches(&built.body, local, holder, owner));
+                }
+            }
+            // Face/edge constructors have the explicit caller issuer, unlike the UV setter.
+            for face in solidcore::topology::brep::p1::faces(&built.body, None).unwrap() {
+                assert_eq!(
+                    built
+                        .body
+                        .face(face)
+                        .unwrap()
+                        .surface
+                        .as_ref()
+                        .unwrap()
+                        .owner(),
+                    Some(canonical(EntityRef::Face(face)))
+                );
+            }
+            for edge in solidcore::topology::brep::p1::edges(&built.body, None).unwrap() {
+                assert_eq!(
+                    built
+                        .body
+                        .edge(edge)
+                        .unwrap()
+                        .curve
+                        .as_ref()
+                        .unwrap()
+                        .owner(),
+                    Some(canonical(EntityRef::Edge(edge)))
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn constructed_uv_owner_rejects_same_edge_mate_and_absence() {
+        use super::super::topology_brep_p10::{notify_uv_owner_matches, snapshot_with_identity};
+        use solidcore::topology::brep::{p2::ArenaNotifyState, p3};
+        use solidcore::EntityRef;
+
+        let mut k = Kernel::default();
+        let mut built = actual_trim(&mut k, TrimConstructedKind::PlaneSquare);
+        let serial = built.serial;
+        let canonical = |entity| p3::topology_ref(serial, entity);
+        let mut producer = ArenaNotifyState::new(&built.body);
+        let local = producer.env(None).key_of;
+        let holder = built
+            .body
+            .edgeuses()
+            .iter()
+            .find_map(|(id, eu)| eu.uv_trim_curve.is_some().then_some(id))
+            .unwrap();
+        let mate = eu1::mate(&built.body, holder).unwrap().unwrap();
+        assert_eq!(
+            built.body.edgeuse(holder).unwrap().edge,
+            built.body.edgeuse(mate).unwrap().edge
+        );
+        let original = built
+            .body
+            .edgeuse(holder)
+            .unwrap()
+            .uv_trim_curve
+            .as_ref()
+            .unwrap()
+            .owner();
+        let before =
+            snapshot_with_identity(&k, &built.body, &built.state.records, &canonical).unwrap();
+        let wrong = local(EntityRef::Edgeuse(mate));
+        for owner in [Some(wrong), None] {
+            built
+                .body
+                .edgeuse_mut(holder)
+                .unwrap()
+                .uv_trim_curve
+                .as_mut()
+                .unwrap()
+                .set_owner(owner, None);
+            assert!(!notify_uv_owner_matches(&built.body, local, holder, wrong));
+            let after =
+                snapshot_with_identity(&k, &built.body, &built.state.records, &canonical).unwrap();
+            assert_one_owner_bit_changes(&before, &after);
+        }
+        built
+            .body
+            .edgeuse_mut(holder)
+            .unwrap()
+            .uv_trim_curve
+            .as_mut()
+            .unwrap()
+            .set_owner(original, None);
+        assert_eq!(
+            before,
+            snapshot_with_identity(&k, &built.body, &built.state.records, &canonical).unwrap()
+        );
+    }
+
+    #[test]
+    fn constructed_uv_fallback_preserves_other_owner_domains() {
+        use super::super::topology_brep_p10::{notify_uv_owner_matches, snapshot_with_identity};
+        use solidcore::topology::{
+            brep::{p2::ArenaNotifyState, p3},
+            NamingScheme,
+        };
+        use solidcore::EntityRef;
+
+        let mut k = Kernel::default();
+        let mut built = actual_trim(&mut k, TrimConstructedKind::PlaneSquare);
+        let serial = built.serial;
+        let canonical = |entity| p3::topology_ref(serial, entity);
+        let mut producer = ArenaNotifyState::new(&built.body);
+        let local = producer.env(None).key_of;
+        let holder = built
+            .body
+            .edgeuses()
+            .iter()
+            .find_map(|(id, eu)| eu.uv_trim_curve.is_some().then_some(id))
+            .unwrap();
+        let owner = built
+            .body
+            .edgeuse(holder)
+            .unwrap()
+            .uv_trim_curve
+            .as_ref()
+            .unwrap()
+            .owner()
+            .unwrap();
+        for naming in [
+            NamingScheme::Unknown,
+            NamingScheme::Caller,
+            NamingScheme::Arena,
+        ] {
+            built.body.set_naming(naming);
+            assert!(!notify_uv_owner_matches(&built.body, local, holder, owner));
+        }
+        built.body.set_naming(NamingScheme::Notify);
+        let mate = eu1::mate(&built.body, holder).unwrap().unwrap();
+        assert!(built.body.edgeuse(mate).unwrap().uv_trim_curve.is_none());
+        assert!(!notify_uv_owner_matches(&built.body, local, mate, owner));
+        let before =
+            snapshot_with_identity(&k, &built.body, &built.state.records, &canonical).unwrap();
+        let face = solidcore::topology::brep::p1::faces(&built.body, None).unwrap()[0];
+        assert!(!notify_uv_owner_matches(
+            &built.body,
+            local,
+            holder,
+            canonical(EntityRef::Face(face))
+        ));
+        let face_owner = built
+            .body
+            .face(face)
+            .unwrap()
+            .surface
+            .as_ref()
+            .unwrap()
+            .owner();
+        built
+            .body
+            .face_mut(face)
+            .unwrap()
+            .surface
+            .as_mut()
+            .unwrap()
+            .set_owner(Some(local(EntityRef::Face(face))));
+        let wrong_face =
+            snapshot_with_identity(&k, &built.body, &built.state.records, &canonical).unwrap();
+        assert_one_owner_bit_changes(&before, &wrong_face);
+        built
+            .body
+            .face_mut(face)
+            .unwrap()
+            .surface
+            .as_mut()
+            .unwrap()
+            .set_owner(face_owner);
+        let edge = built.body.edgeuse(holder).unwrap().edge.unwrap();
+        let edge_owner = built
+            .body
+            .edge(edge)
+            .unwrap()
+            .curve
+            .as_ref()
+            .unwrap()
+            .owner();
+        built
+            .body
+            .edge_mut(edge)
+            .unwrap()
+            .curve
+            .as_mut()
+            .unwrap()
+            .set_owner(Some(local(EntityRef::Edge(edge))), None);
+        let wrong_edge =
+            snapshot_with_identity(&k, &built.body, &built.state.records, &canonical).unwrap();
+        assert_one_owner_bit_changes(&before, &wrong_edge);
+        built
+            .body
+            .edge_mut(edge)
+            .unwrap()
+            .curve
+            .as_mut()
+            .unwrap()
+            .set_owner(edge_owner, None);
+        assert_eq!(
+            before,
+            snapshot_with_identity(&k, &built.body, &built.state.records, &canonical).unwrap()
+        );
+    }
+
+    #[test]
+    fn original_trim_constructs_actual_g1_and_creased_bodies() {
+        for (kind, g1, count) in [
+            (TrimConstructedKind::PlaneSquare, 1, 1),
+            (TrimConstructedKind::CreasedStrip, 0, 2),
+        ] {
+            let output = run_rust(&OpIn::TrimConstructed { kind }).unwrap();
+            assert_eq!(output.error, None);
+            assert_eq!(output.deferred, None);
+            let trim = &output.ints["trim"];
+            assert_eq!(&trim[..5], &[0, g1, 0, 1, count]);
+            let topology = &output.ints["ints"];
+            assert_eq!(topology[4], count);
+            assert_eq!(topology[8], 4 * count);
+            assert_eq!(topology[10], 4 * count);
+            assert!(!output.values["dbls"].is_empty());
+        }
     }
 }

@@ -105,6 +105,9 @@ struct EuPeek : SmEdgeuse
     static SmTopology* SmEdgeuse::*sorlu() { return &EuPeek::m_pSorLU; }
     static SmBSplineCurve* SmEdgeuse::*uv() { return &EuPeek::m_pUVTrimCurve; }
     static SmVertexuse* SmEdgeuse::*vu() { return &EuPeek::m_pVU; }
+    static SmDropCurveFail* SmEdgeuse::*fail() { return &EuPeek::m_pDropCurveFail; }
+    static SmEdgeFaceGap SmEdgeuse::*face_gap() { return &EuPeek::m_sMaxEdgeFaceGap3d; }
+    static SmEdgeEdgeGap SmEdgeuse::*ccw_gap() { return &EuPeek::m_sEdgeCCWEdgeGap3d; }
 };
 struct FuPeek : SmFaceuse
 {
@@ -122,6 +125,9 @@ struct LuPeek : SmLoopuse
 struct VuPeek : SmVertexuse
 {
     static SmTopology* SmVertexuse::*owner() { return &VuPeek::m_pSorLUorEU; }
+    static SmVertexFaceGap SmVertexuse::*face_gap() { return &VuPeek::m_sVertexFaceGap3d; }
+    static SmVertexEdgeGap SmVertexuse::*edge_gap() { return &VuPeek::m_sVertexEdgeGap3d; }
+    static SmPoint2d SmVertexuse::*uv() { return &VuPeek::m_sUVPoint; }
 };
 struct FPeek : SmFace
 {
@@ -1128,4 +1134,62 @@ SC_EXPORT int32_t sc_topology_brep_p10_run(const char* path, const int64_t* ints
         return s;
     return sc_copy_out(o.v.data(), (int64_t)o.v.size(), out, cap, out_len);
     SC_CATCH
+}
+
+// C++-only observer reuse by the positive original-trim control. The caller holds
+// SC_NATIVE_LOCK; no operation, geometry conversion or ownership mutation occurs here.
+void sc_topology_brep_p10_append_snapshot(SmBrep* brep, const SmTArray<SmFace*>* returned,
+                                         std::vector<double>& output)
+{
+    Graph graph;
+    walk(brep, graph);
+    if (returned != nullptr)
+    {
+        output.push_back((double)returned->GetSize());
+        for (ULONG i = 0; i < returned->GetSize(); ++i)
+            output.push_back((double)graph.find(3, (*returned)[i]));
+    }
+    Out snapshot;
+    export_graph(brep, graph, snapshot);
+    output.push_back((double)(snapshot.v.size() / 2));
+    for (size_t i = 0; i < snapshot.v.size(); i += 2)
+    {
+        int64_t tag = snapshot.v[i];
+        output.push_back((double)tag);
+        double value;
+        if (tag == 0)
+            value = (double)snapshot.v[i + 1];
+        else
+            std::memcpy(&value, &snapshot.v[i + 1], sizeof value);
+        output.push_back(value);
+    }
+    output.push_back(brep->m_bValidateOnly ? 1.0 : 0.0);
+    output.push_back((double)(2 * graph.faceuses.size()));
+    for (SmFaceuse* faceuse : graph.faceuses)
+    {
+        output.push_back((double)graph.find(2, faceuse->GetNext()));
+        output.push_back((double)graph.find(2, faceuse->GetLast()));
+    }
+    output.push_back((double)(5 * graph.edgeuses.size() + 2 * graph.vertexuses.size()));
+    for (SmEdgeuse* edgeuse : graph.edgeuses)
+    {
+        SmDropCurveFail* failure = edgeuse->*EuPeek::fail();
+        output.push_back(failure != nullptr ? 1.0 : 0.0);
+        output.push_back(failure != nullptr ? (double)failure->m_sFailStatus : 0.0);
+        output.push_back(failure != nullptr && failure->m_pBrep != nullptr ? 1.0 : 0.0);
+        output.push_back((edgeuse->*EuPeek::face_gap()).IsInit() ? 1.0 : 0.0);
+        output.push_back((edgeuse->*EuPeek::ccw_gap()).IsInit() ? 1.0 : 0.0);
+    }
+    for (SmVertexuse* vertexuse : graph.vertexuses)
+    {
+        output.push_back((vertexuse->*VuPeek::face_gap()).IsInit() ? 1.0 : 0.0);
+        output.push_back((vertexuse->*VuPeek::edge_gap()).IsInit() ? 1.0 : 0.0);
+    }
+    output.push_back((double)(2 * graph.vertexuses.size()));
+    for (SmVertexuse* vertexuse : graph.vertexuses)
+    {
+        SmPoint2d uv = vertexuse->*VuPeek::uv();
+        output.push_back(uv.x);
+        output.push_back(uv.y);
+    }
 }

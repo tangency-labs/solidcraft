@@ -21,6 +21,11 @@
 #include <SmEllipse.h>
 #include <SmTrimmingTools.h>
 
+#include <memory>
+
+// Reuses the existing p10 read-only observer, not its operations or input model.
+void sc_topology_brep_p10_append_snapshot(SmBrep*, const SmTArray<SmFace*>*, std::vector<double>&);
+
 namespace
 {
 enum : int32_t
@@ -36,6 +41,7 @@ enum : int32_t
     OP_MIN = 9,
     OP_LOOPS = 10,
     OP_TRIM_NULL = 11,
+    OP_TRIM_CONSTRUCTED = 12,
 
     OP_B_PRESENT = 20,
     OP_B_EXTREMES = 21,
@@ -51,6 +57,78 @@ enum : int32_t
 
 const double TT_NULL_DEREF = -2.0;
 const double TT_NOT_RUN = -3.0;
+
+// Two fixed, valid ORIGINAL-trim controls. No caller-supplied geometry, dimensions
+// or flags are admitted; the original surface is never read after the consuming call.
+int32_t tt_trim_constructed(int kind, std::vector<double>& output)
+{
+    SmContext context;
+    std::unique_ptr<SmBrep> body(new (context) SmBrep());
+    std::unique_ptr<SmSurface> original;
+    if (kind == 0)
+        original.reset(new (context) SmPlane(SmPoint3d(0, 0, 0), SmVector3d(0, 0, 1), &context));
+    else
+    {
+        gw_SURFACE* nurb = sm_AllocateNurbSurface(2, 1, 1, 1, 4, 3);
+        const double uk[5] = {0, 0, 0.5, 1, 1};
+        const double vk[4] = {0, 0, 1, 1};
+        for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 2; ++j)
+            {
+                nurb->net->Pw[i][j].x = 0.5 * i;
+                nurb->net->Pw[i][j].y = j;
+                nurb->net->Pw[i][j].z = i == 1 ? 0.25 : 0;
+                nurb->net->Pw[i][j].w = 1;
+            }
+        for (int i = 0; i < 5; ++i)
+            nurb->knu->U[i] = uk[i];
+        for (int i = 0; i < 4; ++i)
+            nurb->knv->U[i] = vk[i];
+        original.reset(new (context) SmBSplineSurface(nurb, FALSE, &context));
+    }
+    SmBoolean g1 = FALSE;
+    SmStatus continuity = SmTrimmingTools::SurfaceContinuityCheck(original.get(), g1);
+    if (continuity != SM_SUCCESS)
+        return SC_ERR_ARG; // construction/continuity failed before the operation
+    const SmPoint2d plane_uv[4] = {SmPoint2d(0, 0), SmPoint2d(1, 0), SmPoint2d(1, 1), SmPoint2d(0, 1)};
+    const SmPoint2d creased_uv[6] = {SmPoint2d(0, 0), SmPoint2d(0.5, 0), SmPoint2d(1, 0),
+                                    SmPoint2d(1, 1), SmPoint2d(0.5, 1), SmPoint2d(0, 1)};
+    const int count = kind == 0 ? 4 : 6;
+    SmPoint3d points[6];
+    for (int i = 0; i < count; ++i)
+        if (original->EvaluatePoint(kind == 0 ? plane_uv[i] : creased_uv[i], points[i]) != SM_SUCCESS)
+            return SC_ERR_ARG;
+    std::vector<std::unique_ptr<SmCurve>> owned_curves;
+    SmTArray<SmCurve*> curves;
+    SmTArray<SmOrientType> orientations;
+    for (int i = 0; i < count; ++i)
+    {
+        SmLine* line = nullptr;
+        SmExtent1d interval(0, 1);
+        if (SmLine::CreateLineSegment(context, 3, points[i], points[(i + 1) % count], line, &interval) != SM_SUCCESS)
+            return SC_ERR_ARG;
+        owned_curves.emplace_back(line);
+        curves.Add(line);
+        orientations.Add(SM_OT_SAME);
+    }
+    SmTArray<ULONG> counts;
+    counts.Add((ULONG)count);
+    SmTArray<SmPoint3d> loop_points;
+    SmTArray<SmFace*> returned;
+    for (auto& curve : owned_curves)
+        curve.release();
+    SmSurface* consumed = original.release();
+    SmStatus status = SmTrimmingTools::TrimSurfaceWithModelSpaceCurves(
+        context, body->GetInfiniteRegion(), 1e-5, counts, curves, orientations, loop_points, consumed,
+        SmExtent2d(SmPoint2d(0, 0), SmPoint2d(1, 1)), SM_OT_SAME, TRUE, kind == 0 ? FALSE : TRUE, FALSE, &returned);
+    // Neither consumed nor curves are inspected after the call, on any status.
+    output.push_back(st(continuity));
+    output.push_back(flg(g1));
+    output.push_back(st(status));
+    output.push_back(status == SM_SUCCESS ? 1.0 : 0.0);
+    sc_topology_brep_p10_append_snapshot(body.get(), status == SM_SUCCESS ? &returned : nullptr, output);
+    return SC_OK;
+}
 
 // ---- geometry blocks ------------------------------------------------------------------
 
@@ -1267,7 +1345,17 @@ SC_EXPORT int32_t sc_topology_trimming_tools_eval(int32_t op, const char* path, 
 {
     if (in == NULL || n_in < 1 || out_len == NULL || path == NULL)
         return SC_ERR_ARG;
+    if (op == OP_TRIM_CONSTRUCTED && (n_in != 1 || (in[0] != 0.0 && in[0] != 1.0)))
+        return SC_ERR_ARG;
     SC_TRY
+    if (op == OP_TRIM_CONSTRUCTED)
+    {
+        std::vector<double> result;
+        int32_t status = tt_trim_constructed((int)in[0], result);
+        if (status != SC_OK)
+            return status;
+        return sc_copy_out(result.data(), (int64_t)result.size(), out, cap, out_len);
+    }
     Rd rd{in, 0};
     std::vector<double> o;
     if (op == OP_LOOPS)

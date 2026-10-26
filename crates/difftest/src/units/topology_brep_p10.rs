@@ -34,9 +34,9 @@ use solidcore::math::Vec3;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::surface::surface::Surface;
 use solidcore::topology::brep::p10::{
-    make_topology_from_data, project_and_trim, remove_all_topology_notified, test_closure_split_region,
-    MakeTopologyOptions, ProjectAndTrimOptions, ProjectEnv, TopologyEnv, TrimType,
-    HEALER_VERSION,
+    make_topology_from_data, project_and_trim, remove_all_topology_notified,
+    test_closure_split_region, MakeTopologyOptions, ProjectAndTrimOptions, ProjectEnv, TopologyEnv,
+    TrimType, HEALER_VERSION,
 };
 use solidcore::topology::brep_cache::CacheObject;
 use solidcore::topology::brep_data::{BrepData, TopologyData};
@@ -221,8 +221,7 @@ fn heal_guard(i: &Inputs) -> Option<&'static str> {
             data.shells.iter().any(|s| {
                 s.shell_type == 0
                     && usize::try_from(s.faceuse_start).is_ok_and(|a| {
-                        usize::try_from(s.num_faceuses)
-                            .is_ok_and(|n| f >= a && f - a < n)
+                        usize::try_from(s.num_faceuses).is_ok_and(|n| f >= a && f - a < n)
                     })
             })
         };
@@ -901,6 +900,8 @@ impl Graph {
 struct Out<'a> {
     o: &'a mut Vec<Item>,
     records: &'a BTreeMap<ObjectKey, Topology>,
+    key_of: &'a dyn Fn(EntityRef) -> ObjectRef,
+    uv_owner_matches: Option<&'a dyn Fn(EdgeuseId, ObjectRef) -> bool>,
 }
 
 impl Out<'_> {
@@ -919,7 +920,7 @@ impl Out<'_> {
     fn topo(&mut self, e: EntityRef) {
         let t = self
             .records
-            .get(&key_of(e).key)
+            .get(&(self.key_of)(e).key)
             .copied()
             .unwrap_or_else(Topology::new);
         self.i(t.all_flags() as i64);
@@ -953,7 +954,12 @@ impl Out<'_> {
             let t = ivl.min() + 0.25 * f64::from(k) * (ivl.max() - ivl.min());
             self.point(c.evaluate_point(&Kernel::default(), t));
         }
-        self.i(i64::from(c.owner() == Some(key_of(owner))));
+        let matches = c.owner().is_some_and(|actual| {
+            actual == (self.key_of)(owner)
+                || matches!(owner, EntityRef::Edgeuse(holder)
+                    if self.uv_owner_matches.is_some_and(|resolve| resolve(holder, actual)))
+        });
+        self.i(i64::from(matches));
     }
     fn surface(&mut self, k: &Kernel, s: Option<&Surface>, owner: EntityRef) {
         let Some(s) = s else {
@@ -977,7 +983,7 @@ impl Out<'_> {
                 self.point(s.evaluate_point(k, uv));
             }
         }
-        self.i(i64::from(s.owner() == Some(key_of(owner))));
+        self.i(i64::from(s.owner() == Some((self.key_of)(owner))));
     }
 }
 
@@ -989,7 +995,25 @@ fn export(
     records: &BTreeMap<ObjectKey, Topology>,
     o: &mut Vec<Item>,
 ) -> Result<(), SolidError> {
-    let mut w = Out { o, records };
+    export_with_identity(k, b, g, records, &key_of, None, o)
+}
+
+#[allow(clippy::too_many_lines)]
+fn export_with_identity(
+    k: &Kernel,
+    b: &Brep,
+    g: &Graph,
+    records: &BTreeMap<ObjectKey, Topology>,
+    key_of: &dyn Fn(EntityRef) -> ObjectRef,
+    uv_owner_matches: Option<&dyn Fn(EdgeuseId, ObjectRef) -> bool>,
+    o: &mut Vec<Item>,
+) -> Result<(), SolidError> {
+    let mut w = Out {
+        o,
+        records,
+        key_of,
+        uv_owner_matches,
+    };
     w.d(b.tolerance());
     w.i(i64::from(b.editing_enabled()));
     for n in [
@@ -1155,9 +1179,62 @@ fn export(
 /// Shared post-state snapshot: topology in traversal order, sampled geometry,
 /// and lazy-cache initialization/UV fields not used by the p10 operation runner.
 pub(crate) fn snapshot(k: &Kernel, b: &Brep) -> Result<Output, HarnessError> {
+    snapshot_impl(k, b, &BTreeMap::new(), &key_of, None)
+}
+
+/// The same snapshot with the actual records and topology issuer of a constructed body.
+pub(crate) fn snapshot_with_identity(
+    k: &Kernel,
+    b: &Brep,
+    records: &BTreeMap<ObjectKey, Topology>,
+    key_of: &dyn Fn(EntityRef) -> ObjectRef,
+) -> Result<Output, HarnessError> {
+    // The UV setter takes the body's naming, not this snapshot's topology issuer.
+    // Use only the existing public producer callback; these seeded records are not
+    // substituted for the actual edit records passed to the snapshot.
+    let mut producer = solidcore::topology::brep::p2::ArenaNotifyState::new(b);
+    let producer_key_of = producer.env(None).key_of;
+    let uv_owner_matches =
+        |holder, owner| notify_uv_owner_matches(b, producer_key_of, holder, owner);
+    snapshot_impl(k, b, records, key_of, Some(&uv_owner_matches))
+}
+
+/// Resolve a Notify UV owner to its exact current holder, not merely its edge.
+/// Other geometry keeps the explicit caller issuer; no global owner aliases are inferred.
+pub(crate) fn notify_uv_owner_matches(
+    body: &Brep,
+    producer_key_of: &dyn Fn(EntityRef) -> ObjectRef,
+    holder: EdgeuseId,
+    owner: ObjectRef,
+) -> bool {
+    if body.naming() != solidcore::topology::NamingScheme::Notify
+        || body
+            .edgeuse(holder)
+            .ok()
+            .and_then(|eu| eu.uv_trim_curve.as_ref())
+            .and_then(Curve::owner)
+            != Some(owner)
+    {
+        return false;
+    }
+    let mut matches = body
+        .edgeuses()
+        .iter()
+        .filter_map(|(id, _)| (producer_key_of(EntityRef::Edgeuse(id)) == owner).then_some(id));
+    matches.next() == Some(holder) && matches.next().is_none()
+}
+
+fn snapshot_impl(
+    k: &Kernel,
+    b: &Brep,
+    records: &BTreeMap<ObjectKey, Topology>,
+    key_of: &dyn Fn(EntityRef) -> ObjectRef,
+    uv_owner_matches: Option<&dyn Fn(EdgeuseId, ObjectRef) -> bool>,
+) -> Result<Output, HarnessError> {
     let g = Graph::walk(b).map_err(|e| harness(e.to_string()))?;
     let mut items = Vec::new();
-    export(k, b, &g, &BTreeMap::new(), &mut items).map_err(|e| harness(e.to_string()))?;
+    export_with_identity(k, b, &g, records, key_of, uv_owner_matches, &mut items)
+        .map_err(|e| harness(e.to_string()))?;
     // This caller uses the normal relative comparison, not p10's bit audit.
     let mut output = to_output(&items, false).int("validate_only", i64::from(b.validate_only()));
     output.values.insert(
