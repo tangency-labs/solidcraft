@@ -1,12 +1,13 @@
 //! Topology at the end of one filleted edge.
 //!
-//! Upstream: `source/SMLib/src/SmFilletCorner.cpp` (44–119, 443–506, 5990–6443,
-//! 6487–6859).
+//! Upstream: `source/SMLib/src/SmFilletCorner.cpp` (44–119, 443–506, 5642–5815,
+//! 5990–6443, 6487–6859).
 //!
 //! | Rust | Upstream |
 //! |------|----------|
 //! | [`FilletCorner::make_nx1_corner_topology`] | `SmFilletNx1Corner::MakeCornerTopology` |
 //! | [`FilletCorner::make_nx2_corner_topology`] | `SmFilletNx2Corner::MakeCornerTopology` |
+//! | [`FilletCorner::make_convex_nxn_corner_topology`] | `SmFilletConvexNxNCorner::MakeCornerTopology` |
 //! | `find_side_edgeuse`, `find_closed_side_edgeuse` | `sm_FindSideEdgeuse`, `sm_FindClosedSideEdgeuse` |
 //! | `same_convexity_edges` | `same_convexity_edges` |
 //!
@@ -17,7 +18,10 @@
 //! `Make4x2ConcaveCornerTopology`. The Nx2 corner's two solvers are resolved by the
 //! caller (upstream looks them up after the 4x2 checks; the lookup has no effects).
 //! An unset `sm_TestG1Continuity` angle (upstream reads it uninitialised) is an input
-//! error where the mixed-convexity tests read it. There is no recursion.
+//! error where the mixed-convexity tests read it. The convex `NxN` corner's solvers are
+//! resolved by the caller before any allocation (upstream resolves each inside its
+//! vertex loop; the lookups have no effects), and its unused `GetEdges` read is
+//! omitted. There is no recursion.
 
 use crate::blend::fillet_corner::p1::{
     check_face_complimentary_corner_concavity, face_by_two_edgeuses, test_g1_continuity,
@@ -37,6 +41,23 @@ use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, Vertex, VertexId};
 
 const OP: &str = "blend::fillet_corner::topology::make_nx1_corner_topology";
 const OP_NX2: &str = "blend::fillet_corner::topology::make_nx2_corner_topology";
+const OP_NXN: &str = "blend::fillet_corner::topology::make_convex_nxn_corner_topology";
+
+/// Actual objects used by `SmFilletConvexNxNCorner::MakeCornerTopology`.
+#[derive(Debug)]
+pub struct NxNTopologyEnv<'a> {
+    /// The executive's kernel.
+    pub k: &'a Kernel,
+    /// The target whose edge uses the corner stores.
+    pub target: &'a mut Brep,
+    /// The executive's actual pseudo-B-rep.
+    pub pseudo: &'a mut FilletBrep,
+    /// This corner's identity in the executive's corner store.
+    pub corner: FilletCornerId,
+    /// The loaded solver of each outward edge use, in `m_pAllEUs` order
+    /// (`GetFilletSolverOfEdgeuse` of the edge use, else of its mate).
+    pub solvers: Vec<&'a FilletSolver>,
+}
 
 /// Actual objects used by `SmFilletNx2Corner::MakeCornerTopology`.
 #[derive(Debug)]
@@ -681,6 +702,250 @@ impl FilletCorner {
     }
 }
 
+impl FilletCorner {
+    /// `SmFilletConvexNxNCorner::MakeCornerTopology`: one fillet vertex per face
+    /// between consecutive filleted edge uses (rail/rail intersection, or a mate and a
+    /// setback vertex for a setback corner), the rail edge uses of both fillets on that
+    /// face, and the corner's cross edges (iso-curves of a blending corner, edges to a
+    /// shared centre vertex of a three-edge bevel corner, plus the in-face edges of a
+    /// setback corner).
+    ///
+    /// Allocations and corner-list insertions occur in native order and remain visible
+    /// if a later operation fails. Vertex geometry is computed later.
+    ///
+    /// # Errors
+    /// [`SolidError::NullPointer`] when two consecutive edge uses share no face;
+    /// `SM_ERR` for a bevel corner other than three edge uses;
+    /// [`SolidError::InvalidInput`] for a different corner kind, a solver list that does
+    /// not match the edge uses, or missing topology upstream dereferences; those of the
+    /// solver and pseudo-topology operations.
+    #[allow(clippy::too_many_lines)] // one upstream routine
+    pub fn make_convex_nxn_corner_topology(&mut self, env: NxNTopologyEnv<'_>) -> Result<()> {
+        fn lookup(corner: FilletCornerId, this: &FilletCorner) -> CornerLookup<'_> {
+            CornerLookup {
+                this: Some((Some(corner), this)),
+                ..Default::default()
+            }
+        }
+        let NxNTopologyEnv {
+            k,
+            target,
+            pseudo,
+            corner,
+            solvers,
+        } = env;
+        let invalid = |reason: &'static str| SolidError::invalid_input(OP_NXN, reason);
+        if self.kind != FilletCornerKind::ConvexNByN {
+            return Err(invalid("requires a ConvexNByN corner"));
+        }
+        // Determine if this is a setback corner
+        let is_set_back = self.set_back_dist > self.approx_tol_3d * 100.0;
+
+        // All the edges of corner are filletted
+        let all = self
+            .all_eus
+            .clone()
+            .ok_or_else(|| invalid("corner without outward edge uses"))?;
+        let total_eus = all.len();
+        if solvers.len() != total_eus {
+            return Err(invalid("one solver per edge use required"));
+        }
+        let (Some(&last_eu), Some(&last_solver)) = (all.last(), solvers.last()) else {
+            return Err(invalid("corner without edge uses"));
+        };
+        let unknown = crate::nurbs::b_spline_surface_n_lib::p2::OrientType::Unknown;
+
+        let mut prev_eu = last_eu;
+        let mut prev_solver = last_solver;
+        // Create all fillet vertices
+        for (&curr_eu, &curr_solver) in all.iter().zip(&solvers) {
+            let common_face = face_by_two_edgeuses(target, Some(prev_eu), Some(curr_eu), None)?;
+            if common_face.is_none() {
+                //Unrecoverable error
+                return Err(SolidError::null_pointer(OP_NXN));
+            }
+            let prev_rail = prev_solver.find_index_of_rail_on_face(target, common_face)?;
+            let curr_rail = curr_solver.find_index_of_rail_on_face(target, common_face)?;
+
+            let curr_fv = new_corner_vertex(k, pseudo, corner)?;
+            pseudo
+                .fillet_vertex_mut(curr_fv)?
+                .set_point_class(PointClassType::Face, common_face.map(EntityRef::Face));
+
+            let prev_geom = prev_solver.first_fillet_geom()?;
+            let curr_geom = curr_solver.first_fillet_geom()?;
+            if is_set_back {
+                // Will insert a new vertex before curr vert
+                let new_v = new_corner_vertex(k, pseudo, corner)?;
+                {
+                    let fv = pseudo.fillet_vertex_mut(new_v)?;
+                    fv.set_point_class(PointClassType::Face, common_face.map(EntityRef::Face));
+                    fv.set_fillet_vertex_type(FilletVertexType::Mate);
+                }
+                self.vertices.push(new_v);
+                self.vertices.push(curr_fv);
+                // Setup rails of fillets
+                pseudo.make_rail_edgeuse_on(
+                    prev_geom,
+                    prev_rail,
+                    Some(new_v),
+                    unknown,
+                    None,
+                    lookup(corner, self),
+                    prev_solver,
+                    target,
+                )?;
+                pseudo
+                    .fillet_vertex_mut(curr_fv)?
+                    .set_fillet_vertex_type(FilletVertexType::Setback);
+                pseudo.make_rail_edgeuse_on(
+                    curr_geom,
+                    curr_rail,
+                    Some(curr_fv),
+                    unknown,
+                    None,
+                    lookup(corner, self),
+                    curr_solver,
+                    target,
+                )?;
+            } else {
+                // Regular corner, no setbacks
+                pseudo
+                    .fillet_vertex_mut(curr_fv)?
+                    .set_fillet_vertex_type(FilletVertexType::RailXRail);
+                // Setup rails of fillets
+                pseudo.make_rail_edgeuse_on(
+                    prev_geom,
+                    prev_rail,
+                    Some(curr_fv),
+                    unknown,
+                    None,
+                    lookup(corner, self),
+                    prev_solver,
+                    target,
+                )?;
+                pseudo.make_rail_edgeuse_on(
+                    curr_geom,
+                    curr_rail,
+                    Some(curr_fv),
+                    unknown,
+                    None,
+                    lookup(corner, self),
+                    curr_solver,
+                    target,
+                )?;
+                self.vertices.push(curr_fv);
+            }
+            prev_solver = curr_solver;
+            prev_eu = curr_eu;
+        }
+
+        // Define center vert for Bevel cases
+        let center_fv = if self.bevel {
+            self.blending = false;
+            if total_eus != 3 {
+                // Will not handle other cases for now
+                return Err(SolidError::sm_err(OP_NXN));
+            }
+            let center = new_corner_vertex(k, pseudo, corner)?;
+            pseudo
+                .fillet_vertex_mut(center)?
+                .set_fillet_vertex_type(FilletVertexType::FilletX2Fillets);
+            Some(center)
+        } else {
+            // This is a blending corner (it blends all edge-fillets)
+            self.blending = true;
+            None
+        };
+
+        // Now, create all fillet edges
+        let total = self.vertices.len();
+        let vertex_at = |this: &Self, index: usize| {
+            this.vertices
+                .get(index)
+                .copied()
+                .ok_or_else(|| invalid("corner vertex index out of range"))
+        };
+        let mut prev_solver = last_solver;
+        let mut count = 0;
+        let mut curr_fv = vertex_at(self, count)?;
+        for &curr_solver in &solvers {
+            let prev_geom = prev_solver.first_fillet_geom()?;
+            let curr_geom = curr_solver.first_fillet_geom()?;
+            // Get next vertex
+            count = (count + 1) % total;
+            let mut next_fv = vertex_at(self, count)?;
+            if is_set_back {
+                // Insert a rail-rail-interpo edge
+                let edge = pseudo.make_fillet_edge(Some(curr_fv), Some(next_fv), Some(corner))?;
+                let Some(EntityRef::Face(common_face)) =
+                    pseudo.fillet_vertex(next_fv)?.point_class_object()
+                else {
+                    return Err(SolidError::null_pointer(OP_NXN));
+                };
+                {
+                    let edge = pseudo.fillet_edge_mut(edge)?;
+                    edge.set_fillet_edge_type(FilletEdgeType::RailRailInterpolation);
+                    edge.set_original_face(Some(common_face));
+                }
+                self.edges.push(edge);
+                curr_fv = next_fv;
+                count = (count + 1) % total;
+                next_fv = vertex_at(self, count)?;
+            }
+            let fillet_edge = if self.bevel {
+                // Make edge from curr vert to center
+                let edge = pseudo.make_fillet_edge(Some(curr_fv), center_fv, Some(corner))?;
+                pseudo
+                    .fillet_edge_mut(edge)?
+                    .set_fillet_edge_type(FilletEdgeType::FilletXFillet);
+                let primary = need(
+                    eu1::primary_edgeuse(pseudo.brep(), edge)?,
+                    "cross edge without primary edge use",
+                )?;
+                let mate = need(
+                    eu1::mate(pseudo.brep(), primary)?,
+                    "cross edge without mate edge use",
+                )?;
+                pseudo.set_edgeuse_fillet_geom(primary, Some(prev_geom))?;
+                pseudo.set_edgeuse_fillet_geom(mate, Some(curr_geom))?;
+                edge
+            } else {
+                // Make a cross-section (iso-curve) on fillet
+                let edge = pseudo.make_fillet_edge(Some(curr_fv), Some(next_fv), Some(corner))?;
+                pseudo
+                    .fillet_edge_mut(edge)?
+                    .set_fillet_edge_type(FilletEdgeType::CrossSection);
+                let primary = need(
+                    eu1::primary_edgeuse(pseudo.brep(), edge)?,
+                    "cross edge without primary edge use",
+                )?;
+                pseudo.set_edgeuse_fillet_geom(primary, Some(curr_geom))?;
+                if is_set_back {
+                    pseudo
+                        .fillet_vertex_mut(curr_fv)?
+                        .set_mate(0, Some(next_fv));
+                    pseudo
+                        .fillet_vertex_mut(next_fv)?
+                        .set_mate(0, Some(curr_fv));
+                }
+                edge
+            };
+            self.edges.push(fillet_edge);
+
+            curr_fv = next_fv;
+            prev_solver = curr_solver;
+        }
+
+        // Add center vertex for BEVEL case
+        if let Some(center) = center_fv {
+            self.vertices.push(center);
+        }
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -706,6 +971,45 @@ mod tests {
             corner: FilletCornerId(0),
             solvers: [&solver, &solver],
         })
+    }
+
+    fn run_nxn(kind: FilletCornerKind, all: usize, solvers: usize) -> Result<()> {
+        let k = Kernel::default();
+        let mut target = Brep::new();
+        let mut pseudo = FilletBrep::new();
+        let solver = FilletSolver::new(1e-5, 1e-3, 0.01);
+        let mut corner = FilletCorner::new(kind, None, None, None, 1e-3, 0.1);
+        let eus = (0..all)
+            .map(|_| {
+                target
+                    .add_edgeuse_record(crate::topology::Edgeuse::default())
+                    .unwrap()
+            })
+            .collect();
+        corner.all_eus = Some(eus);
+        corner.make_convex_nxn_corner_topology(NxNTopologyEnv {
+            k: &k,
+            target: &mut target,
+            pseudo: &mut pseudo,
+            corner: FilletCornerId(0),
+            solvers: vec![&solver; solvers],
+        })
+    }
+
+    #[test]
+    fn convex_nxn_topology_rejects_other_kinds_and_mismatched_solvers() {
+        assert!(matches!(
+            run_nxn(FilletCornerKind::NByTwo, 3, 3),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        assert!(matches!(
+            run_nxn(FilletCornerKind::ConvexNByN, 3, 2),
+            Err(SolidError::InvalidInput { .. })
+        ));
+        assert!(matches!(
+            run_nxn(FilletCornerKind::ConvexNByN, 0, 0),
+            Err(SolidError::InvalidInput { .. })
+        ));
     }
 
     #[test]

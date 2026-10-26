@@ -10,6 +10,8 @@ use crate::error::{Result, SolidError};
 use crate::surface::surface::Surface;
 use crate::topology::{edge, Brep, EdgeId, FaceId};
 
+const OP: &str = "blend::fillet_executive::session::insertion::corner";
+
 impl LiveGeometryInsertion<'_> {
     pub(super) fn insert_corner(
         &mut self,
@@ -99,14 +101,17 @@ impl CornerInsertionContext for LiveGeometryInsertion<'_> {
     }
     fn register_blending_intersection(
         &mut self,
-        _target: &mut Brep,
-        _face: FaceId,
+        target: &mut Brep,
+        face: FaceId,
         _surface: &Surface,
+        surface_face: Option<FaceId>,
     ) -> Result<()> {
-        // UNPORTED(blend.fillet_executive_p1): actual retained corner-patch Surface identity for RegisterExistingSSI
-        Err(SolidError::unported(
-            "SmTopologyIntersector::RegisterExistingSSI (retained corner patch Surface)",
-            "blend.fillet_executive_p1",
-        ))
+        // The patch surface is owned by the fillet-B-rep face MakeFaceBrep built on it.
+        let surface_face = surface_face.ok_or_else(|| {
+            SolidError::invalid_input(OP, "corner patch surface without fillet B-rep face")
+        })?;
+        let patch = LiveGeometryInsertion::capture_managed_surface(self, surface_face)?
+            .ok_or_else(|| SolidError::invalid_input(OP, "corner patch face without surface"))?;
+        LiveGeometryInsertion::register_bound_intersection(self, target, face, Some(&patch))
     }
 }

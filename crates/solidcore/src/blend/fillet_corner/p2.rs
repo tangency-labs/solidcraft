@@ -8,10 +8,10 @@
 //! |---------------------------------------------------|--------------------------------------------------|
 //! | [`find_concave_edgeuses`]                         | `sm_FindConcaveEdgeuses`                         |
 //! | [`FilletCorner::adjust_concave_corner_topology`]  | `SmFilletNx2Corner::AdjustConcaveCornerTopology` |
-//! | [`FilletCorner::adjust_topology_convex_nxn`]      | `SmFilletConvexNxNCorner::AdjustTopology`        |
+//! | [`FilletCorner::adjust_topology_convex_nxn`], [`FilletCorner::adjust_topology_convex_nxn_with`] | `SmFilletConvexNxNCorner::AdjustTopology` |
 //! | [`FilletCorner::adjust_tangent_corner_nx1_closed`] | `SmFilletNx1ClosedCorner::AdjustTangentCorner`  |
-//! | [`FilletCorner::make_analytic_corner_surface`]    | `SmFilletCorner::MakeAnalyticCornerSurface`      |
-//! | [`FilletCorner::make_variable_radius_fillet`]     | `SmFilletCorner::MakeVariableRadiusFillet`       |
+//! | [`FilletCorner::make_analytic_corner_surface`], [`FilletCorner::make_analytic_corner_surface_with`] | `SmFilletCorner::MakeAnalyticCornerSurface` |
+//! | [`FilletCorner::make_variable_radius_fillet`], [`FilletCorner::make_variable_radius_fillet_with`] | `SmFilletCorner::MakeVariableRadiusFillet` |
 //! | [`FilletCorner::record_fillet_error`]             | `SmFilletCorner::RecordFilletError`              |
 //! | [`FilletCorner::update_split_face`]               | `SmFilletCorner::UpdateSplitFace`                |
 //! | [`FilletCorner::tangent_fillet_solver_nx1_closed`] | `SmFilletNx1ClosedCorner::GetTangentFilletSolver` |
@@ -90,7 +90,7 @@ use crate::blend::fillet_corner::p1::{
 };
 use crate::blend::fillet_corner::p3::{
     move_vertexuse, primary_eu, rail_tangent_unchecked, recalc_split_geoms, set_vertex_point,
-    unchecked_point, CornerEnv, FilletCorner, FilletExecutiveData,
+    unchecked_point, CornerEnv, CornerPatchEnv, FilletCorner, FilletExecutiveData,
 };
 use crate::blend::fillet_custom_solver::{OffsetSurface, SurfaceId};
 use crate::blend::fillet_executive::p3::{ErrorInfo, FilletExecutive};
@@ -581,8 +581,40 @@ impl FilletCorner {
     /// curve or a new vertex without rail vertex use; those of the evaluations;
     /// [`SolidError::InvalidInput`] where upstream dereferences `NULL` or indexes past
     /// an array (module docs).
-    #[allow(clippy::too_many_lines)]
     pub fn adjust_topology_convex_nxn(&mut self, env: &mut CornerEnv<'_>) -> Result<()> {
+        let solvers = &*env.solvers;
+        self.adjust_topology_convex_nxn_with(
+            env.k,
+            env.target,
+            env.pseudo,
+            env.corner,
+            &|id: FilletSolverId| {
+                usize::try_from(id.0)
+                    .ok()
+                    .and_then(|i| solvers.get(i))
+                    .ok_or_else(|| {
+                        invalid(OP_CONVEX_TOPO, "fillet solver id not in the solver table")
+                    })
+            },
+        )
+    }
+
+    /// [`FilletCorner::adjust_topology_convex_nxn`] against explicit objects: the
+    /// executive's kernel, target and pseudo-B-rep, this corner's identity and its
+    /// solver store (the legacy [`CornerEnv`] or a live executive session).
+    ///
+    /// # Errors
+    /// As [`FilletCorner::adjust_topology_convex_nxn`], plus the store's unresolved
+    /// solver identities.
+    #[allow(clippy::too_many_lines)]
+    pub fn adjust_topology_convex_nxn_with<'s>(
+        &mut self,
+        k: &Kernel,
+        target: &Brep,
+        pseudo: &mut FilletBrep,
+        corner: Option<crate::blend::fillet_geom::p1::FilletCornerId>,
+        solver: &dyn Fn(FilletSolverId) -> Result<&'s FilletSolver>,
+    ) -> Result<()> {
         const OP: &str = OP_CONVEX_TOPO;
         // Only non-chamfer & three-sided corners can be adjusted for now
         let total = self.vertices.len();
@@ -600,59 +632,52 @@ impl FilletCorner {
         // i.e. replacing the vertex by a rail-rail-interpolating edge
         for ii in 0..total {
             let curr_vert = vertex_at(&self.vertices, ii, OP)?;
-            if env.pseudo.fillet_vertex(curr_vert)?.fillet_vertex_type()
-                != FilletVertexType::RailXRail
+            if pseudo.fillet_vertex(curr_vert)?.fillet_vertex_type() != FilletVertexType::RailXRail
             {
                 return Err(SolidError::sm_err(OP)); // Unknown case
             }
             let next_vert = vertex_at(&self.vertices, (ii + 1) % total, OP)?;
 
-            let vert_pnt = env.pseudo.vertex_point(curr_vert)?;
-            let dist_to_next_vert = vert_pnt.distance(env.pseudo.vertex_point(next_vert)?);
+            let vert_pnt = pseudo.vertex_point(curr_vert)?;
+            let dist_to_next_vert = vert_pnt.distance(pseudo.vertex_point(next_vert)?);
             if min_dist > dist_to_next_vert {
                 min_dist = dist_to_next_vert;
             }
 
             // Get the original face which pCurrVert is on
-            let orig_face = point_class_face(env.pseudo, curr_vert)
-                .ok_or_else(|| SolidError::null_pointer(OP))?;
+            let orig_face =
+                point_class_face(pseudo, curr_vert).ok_or_else(|| SolidError::null_pointer(OP))?;
 
             let mut is_candidate = true;
-            let vertexuses = env.pseudo.brep().vertex(curr_vert)?.vertexuses.clone();
+            let vertexuses = pseudo.brep().vertex(curr_vert)?.vertexuses.clone();
             let mut pnt = [Point3::UNDEF; 4];
             let mut vec = [Vec3::UNDEF; 2];
             let mut count = 0usize;
             // Try to determine the estimated distance between two adjacent fillets
             // if iso-edges are used in the stretched corner patch.
             for vu in vertexuses {
-                let eu = eu1::vertexuse_edgeuse(env.pseudo.brep(), vu)?
+                let eu = eu1::vertexuse_edgeuse(pseudo.brep(), vu)?
                     .ok_or_else(|| invalid(OP, "vertex use without edge use"))?;
-                let e = env
-                    .pseudo
+                let e = pseudo
                     .brep()
                     .edgeuse(eu)?
                     .edge
                     .ok_or_else(|| invalid(OP, "edge use without edge"))?;
-                if env.pseudo.fillet_edge(e)?.fillet_edge_type() != FilletEdgeType::CrossSection {
+                if pseudo.fillet_edge(e)?.fillet_edge_type() != FilletEdgeType::CrossSection {
                     continue;
                 }
-                let fillet_geom = edgeuse_or_mate_geom(env.pseudo, eu, OP)?
+                let fillet_geom = edgeuse_or_mate_geom(pseudo, eu, OP)?
                     .ok_or_else(|| SolidError::null_pointer(OP))?;
-                let fil_solver = solver_of_geom(env, fillet_geom, OP)?;
+                let fil_solver = geom_solver(pseudo, fillet_geom, OP)?;
 
-                let other_v = edge::other_vertex(env.pseudo.brep(), e, Some(curr_vert))?
+                let other_v = edge::other_vertex(pseudo.brep(), e, Some(curr_vert))?
                     .ok_or_else(|| invalid(OP, "cross section without other vertex"))?;
-                let rail_vu = env
-                    .pseudo
+                let rail_vu = pseudo
                     .vu_at_rail_end(other_v, Some(fillet_geom), None, None)?
                     .ok_or_else(|| invalid(OP, "no rail vertex use"))?;
-                let rail_index = env
-                    .solvers
-                    .get(fil_solver)
-                    .ok_or_else(|| invalid(OP, "fillet solver id not in the solver table"))?
-                    .find_index_of_rail_on_face(env.target, Some(orig_face))?;
-                let uv = env
-                    .pseudo
+                let rail_index =
+                    solver(fil_solver)?.find_index_of_rail_on_face(target, Some(orig_face))?;
+                let uv = pseudo
                     .fillet_vertexuse(rail_vu)?
                     .tsect_pnt()
                     .uv_pos(srf_index(rail_index));
@@ -663,7 +688,7 @@ impl FilletCorner {
                         "more than two cross sections at a corner vertex",
                     ));
                 };
-                *p = face_surface(env.target, orig_face, OP)?.evaluate_point(env.k, uv)?;
+                *p = face_surface(target, orig_face, OP)?.evaluate_point(k, uv)?;
 
                 // The following is a simple way to determine if two iso-edges
                 // are crossing each other.
@@ -671,25 +696,21 @@ impl FilletCorner {
                 if let Some(slot) = vec.get_mut(count) {
                     *slot = v;
                 }
-                let filleted_eu = env
-                    .solvers
-                    .get(fil_solver)
-                    .ok_or_else(|| invalid(OP, "fillet solver id not in the solver table"))?
+                let filleted_eu = solver(fil_solver)?
                     .edgeuse(0)?
                     .ok_or_else(|| invalid(OP, "fillet solver without edge use"))?;
-                let filleted_edge = eu1::edge(env.target, filleted_eu)?
+                let filleted_edge = eu1::edge(target, filleted_eu)?
                     .ok_or_else(|| invalid(OP, "filleted edge use without edge"))?;
-                let ivl = edge::interval(env.target, filleted_edge)?;
-                let curve = env
-                    .target
+                let ivl = edge::interval(target, filleted_edge)?;
+                let curve = target
                     .edge(filleted_edge)?
                     .curve
                     .as_ref()
                     .ok_or_else(|| SolidError::null_pointer(OP))?;
-                let tangent = if edge::start_vertex(env.target, filleted_edge)? == self.vertex {
-                    tangent_at(env.k, curve, ivl.min(), OP)?
+                let tangent = if edge::start_vertex(target, filleted_edge)? == self.vertex {
+                    tangent_at(k, curve, ivl.min(), OP)?
                 } else {
-                    -tangent_at(env.k, curve, ivl.max(), OP)?
+                    -tangent_at(k, curve, ivl.max(), OP)?
                 };
                 if tangent.dot(v) < -EFF_ZERO {
                     // Reject this vertex if crossing of the iso-edges happened
@@ -733,10 +754,9 @@ impl FilletCorner {
         // Insert an interpolating edge to substitute the found vertex
         let adjust_vert = vertex_at(&self.vertices, found_vert_index, OP)?;
         // (a vertex without face: upstream calls GetSurface on NULL)
-        let orig_face = point_class_face(env.pseudo, adjust_vert)
+        let orig_face = point_class_face(pseudo, adjust_vert)
             .ok_or_else(|| invalid(OP, "corner vertex without original face"))?;
-        let orig_surf = env
-            .target
+        let orig_surf = target
             .face(orig_face)?
             .surface
             .clone()
@@ -755,7 +775,7 @@ impl FilletCorner {
                 .get(ii)
                 .ok_or_else(|| invalid(OP, "fewer corner edges than vertices"))?;
             next_e = Some(e);
-            if edge::vertex(env.pseudo.brep(), e)? == Some(adjust_vert) {
+            if edge::vertex(pseudo.brep(), e)? == Some(adjust_vert) {
                 found_edge_index = Some(ii);
                 break;
             }
@@ -767,107 +787,89 @@ impl FilletCorner {
         let next_e = next_e.ok_or_else(|| invalid(OP, "no corner edge"))?;
 
         // Set pAdjustVert as the SM_FV_MATE type and compute its geometry
-        let prev_eu = primary_eu(env.pseudo, prev_e, OP)?;
-        let prev_fg = env
-            .pseudo
+        let prev_eu = primary_eu(pseudo, prev_e, OP)?;
+        let prev_fg = pseudo
             .fillet_edgeuse(prev_eu)?
             .fillet_geom()
             .ok_or_else(|| SolidError::null_pointer(OP))?;
         let prev_v = vertex_at(&self.vertices, (found_vert_index + total - 1) % total, OP)?;
-        let prev_vu = env
-            .pseudo
+        let prev_vu = pseudo
             .vu_at_rail_end(prev_v, Some(prev_fg), None, None)?
             .ok_or_else(|| invalid(OP, "no rail vertex use"))?;
-        let prev_fs = solver_of_geom(env, prev_fg, OP)?;
-        let rail_index1 = env
-            .solvers
-            .get(prev_fs)
-            .ok_or_else(|| invalid(OP, "fillet solver id not in the solver table"))?
-            .find_index_of_rail_on_face(env.target, Some(orig_face))?;
-        let tsect_pnt1 = env.pseudo.fillet_vertexuse(prev_vu)?.tsect_pnt().clone();
+        let prev_fs = geom_solver(pseudo, prev_fg, OP)?;
+        let rail_index1 = solver(prev_fs)?.find_index_of_rail_on_face(target, Some(orig_face))?;
+        let tsect_pnt1 = pseudo.fillet_vertexuse(prev_vu)?.tsect_pnt().clone();
         let uv1 = tsect_pnt1.uv_pos(srf_index(rail_index1));
-        let pnt1 = orig_surf.evaluate_point(env.k, uv1)?;
-        env.pseudo
-            .fillet_vertex_mut(adjust_vert)?
-            .set_original_uv(uv1);
-        set_vertex_point(env.pseudo, adjust_vert, pnt1)?;
-        let fv = env.pseudo.fillet_vertex_mut(adjust_vert)?;
+        let pnt1 = orig_surf.evaluate_point(k, uv1)?;
+        pseudo.fillet_vertex_mut(adjust_vert)?.set_original_uv(uv1);
+        set_vertex_point(pseudo, adjust_vert, pnt1)?;
+        let fv = pseudo.fillet_vertex_mut(adjust_vert)?;
         fv.set_fillet_vertex_type(FilletVertexType::Mate);
         fv.set_mate(0, Some(prev_v));
-        env.pseudo
+        pseudo
             .fillet_vertex_mut(prev_v)?
             .set_mate(0, Some(adjust_vert));
-        let vu1 = env
-            .pseudo
+        let vu1 = pseudo
             .vu_at_rail_end(adjust_vert, Some(prev_fg), None, None)?
             .ok_or_else(|| SolidError::null_pointer(OP))?;
-        copy_uv_pos(env.pseudo, vu1, &tsect_pnt1)?;
+        copy_uv_pos(pseudo, vu1, &tsect_pnt1)?;
 
         // Make a new vertex
         // Compute its geometry
-        let next_eu = primary_eu(env.pseudo, next_e, OP)?;
-        let next_fg = env
-            .pseudo
+        let next_eu = primary_eu(pseudo, next_e, OP)?;
+        let next_fg = pseudo
             .fillet_edgeuse(next_eu)?
             .fillet_geom()
             .ok_or_else(|| SolidError::null_pointer(OP))?;
         let next_v = vertex_at(&self.vertices, (found_vert_index + 1) % total, OP)?;
-        let next_vu = env
-            .pseudo
+        let next_vu = pseudo
             .vu_at_rail_end(next_v, Some(next_fg), None, None)?
             .ok_or_else(|| invalid(OP, "no rail vertex use"))?;
-        let next_fs = solver_of_geom(env, next_fg, OP)?;
-        let rail_index2 = env
-            .solvers
-            .get(next_fs)
-            .ok_or_else(|| invalid(OP, "fillet solver id not in the solver table"))?
-            .find_index_of_rail_on_face(env.target, Some(orig_face))?;
-        let tsect_pnt2 = env.pseudo.fillet_vertexuse(next_vu)?.tsect_pnt().clone();
+        let next_fs = geom_solver(pseudo, next_fg, OP)?;
+        let rail_index2 = solver(next_fs)?.find_index_of_rail_on_face(target, Some(orig_face))?;
+        let tsect_pnt2 = pseudo.fillet_vertexuse(next_vu)?.tsect_pnt().clone();
         let uv2 = tsect_pnt2.uv_pos(srf_index(rail_index2));
-        let pnt2 = orig_surf.evaluate_point(env.k, uv2)?;
-        let new_vert = env.pseudo.brep_mut().add_vertex(pnt2)?;
-        let mut fv = FilletVertex::new(env.k, env.corner);
+        let pnt2 = orig_surf.evaluate_point(k, uv2)?;
+        let new_vert = pseudo.brep_mut().add_vertex(pnt2)?;
+        let mut fv = FilletVertex::new(k, corner);
         fv.set_original_uv(uv2);
         fv.set_point_class(PointClassType::Face, Some(EntityRef::Face(orig_face)));
         fv.set_fillet_vertex_type(FilletVertexType::Mate);
         fv.set_mate(0, Some(next_v));
         fv.set_status(FilStatus::Processed);
-        env.pseudo.insert_fillet_vertex(new_vert, fv);
-        env.pseudo
+        pseudo.insert_fillet_vertex(new_vert, fv);
+        pseudo
             .fillet_vertex_mut(next_v)?
             .set_mate(0, Some(new_vert));
-        let vu2 = env
-            .pseudo
+        let vu2 = pseudo
             .vu_at_rail_end(adjust_vert, Some(next_fg), None, None)?
             .ok_or_else(|| SolidError::null_pointer(OP))?;
-        copy_uv_pos(env.pseudo, vu2, &tsect_pnt2)?;
+        copy_uv_pos(pseudo, vu2, &tsect_pnt2)?;
 
         // Move pVU2 from pAdjustVert to pNewVert
-        move_vertexuse(env.pseudo, vu2, adjust_vert, new_vert)?;
+        move_vertexuse(pseudo, vu2, adjust_vert, new_vert)?;
 
-        let mut vu3 = env
-            .pseudo
+        let mut vu3 = pseudo
             .brep()
             .edgeuse(next_eu)?
             .vertexuse
             .ok_or_else(|| invalid(OP, "edge use without vertex use"))?;
-        if env.pseudo.brep().vertexuse(vu3)?.vertex != Some(adjust_vert) {
-            let mate = eu1::mate(env.pseudo.brep(), next_eu)?
+        if pseudo.brep().vertexuse(vu3)?.vertex != Some(adjust_vert) {
+            let mate = eu1::mate(pseudo.brep(), next_eu)?
                 .ok_or_else(|| invalid(OP, "edge use without mate"))?;
-            vu3 = env
-                .pseudo
+            vu3 = pseudo
                 .brep()
                 .edgeuse(mate)?
                 .vertexuse
                 .ok_or_else(|| invalid(OP, "edge use without vertex use"))?;
         }
         // Move pVU3 from pAdjustVert to pNewVert
-        move_vertexuse(env.pseudo, vu3, adjust_vert, new_vert)?;
+        move_vertexuse(pseudo, vu3, adjust_vert, new_vert)?;
 
         self.vertices.insert(found_vert_index, new_vert);
 
-        let new_edge = make_fillet_edge(env, adjust_vert, new_vert)?;
-        let fe = env.pseudo.fillet_edge_mut(new_edge)?;
+        let new_edge = pseudo.make_fillet_edge(Some(adjust_vert), Some(new_vert), corner)?;
+        let fe = pseudo.fillet_edge_mut(new_edge)?;
         fe.set_fillet_edge_type(FilletEdgeType::RailRailInterpolation);
         fe.set_original_face(Some(orig_face));
 
@@ -1274,6 +1276,17 @@ impl FilletCorner {
     /// [`SolidError::Unported`] (`MakeConstantRadiusFillet`, unit
     /// `blend.fillet_corner_p1`).
     pub fn make_analytic_corner_surface(&mut self, env: &mut CornerEnv<'_>) -> Result<bool> {
+        env.with_patch_env(|env| self.make_analytic_corner_surface_with(env))
+    }
+
+    /// [`FilletCorner::make_analytic_corner_surface`] against any [`CornerPatchEnv`].
+    ///
+    /// # Errors
+    /// As [`FilletCorner::make_analytic_corner_surface`].
+    pub fn make_analytic_corner_surface_with(
+        &mut self,
+        env: &mut CornerPatchEnv<'_, '_>,
+    ) -> Result<bool> {
         match self.analytic_corner_surface(env) {
             Ok(made) => Ok(made),
             Err(e @ (SolidError::Unported { .. } | SolidError::InvalidInput { .. })) => Err(e),
@@ -1285,7 +1298,7 @@ impl FilletCorner {
     /// [`FilletCorner::make_analytic_corner_surface`] with its `SER` / `NER` exits as
     /// errors.
     #[allow(clippy::too_many_lines)]
-    fn analytic_corner_surface(&mut self, env: &mut CornerEnv<'_>) -> Result<bool> {
+    fn analytic_corner_surface(&mut self, env: &mut CornerPatchEnv<'_, '_>) -> Result<bool> {
         const OP: &str = OP_ANALYTIC;
         // no work - Vertex does not have exactly 3 or 4 edges
         let total_edges = self.edges.len();
@@ -1469,7 +1482,7 @@ impl FilletCorner {
                     // when SurfOfRevolution could not be found to fill Boundary Curves
                     // try to convert it to a variable-radius fillet to achive better G1
                     // continuity.
-                    match soft(self.make_variable_radius_fillet(env))? {
+                    match soft(self.make_variable_radius_fillet_with(env))? {
                         Some(s) => s,
                         // when both tries fail - quit
                         None => return Ok(false),
@@ -1487,7 +1500,7 @@ impl FilletCorner {
                 None => {
                     // When a Sphere could not be found to fill Boundary Curves try to
                     // convert it to a constant-radius fillet.
-                    match soft(self.make_constant_radius_fillet(env))? {
+                    match soft(self.make_constant_radius_fillet_with(env))? {
                         Some(s) => s,
                         // when both tries fail - quit
                         None => return Ok(false),
@@ -1533,8 +1546,19 @@ impl FilletCorner {
     /// axis or normal; those of the projections and evaluations;
     /// [`SolidError::InvalidInput`] where upstream dereferences `NULL` (a vertex,
     /// primary edge use, fillet solver, surface generator, vertex use or UV trim curve).
-    #[allow(clippy::too_many_lines)]
     pub fn make_variable_radius_fillet(&mut self, env: &mut CornerEnv<'_>) -> Result<Surface> {
+        env.with_patch_env(|env| self.make_variable_radius_fillet_with(env))
+    }
+
+    /// [`FilletCorner::make_variable_radius_fillet`] against any [`CornerPatchEnv`].
+    ///
+    /// # Errors
+    /// As [`FilletCorner::make_variable_radius_fillet`].
+    #[allow(clippy::too_many_lines)]
+    pub fn make_variable_radius_fillet_with(
+        &mut self,
+        env: &mut CornerPatchEnv<'_, '_>,
+    ) -> Result<Surface> {
         const OP: &str = OP_VAR_RAD;
         let sm_err = || SolidError::sm_err(OP); // Unable to convert
         let null = || SolidError::null_pointer(OP);
@@ -2163,9 +2187,9 @@ pub(super) const fn is_b_spline_kind(c: &Curve) -> bool {
     )
 }
 
-/// `pFilletGeom->GetFilletSolver()` in [`CornerEnv::solvers`] (dereferenced).
+/// `pFilletGeom->GetFilletSolver()` in [`CornerPatchEnv::solvers`] (dereferenced).
 fn solver_ref<'e>(
-    env: &'e CornerEnv<'_>,
+    env: &'e CornerPatchEnv<'_, '_>,
     g: FilletGeomId,
     op: &'static str,
 ) -> Result<&'e FilletSolver> {
@@ -2173,6 +2197,19 @@ fn solver_ref<'e>(
     env.solvers
         .get(i)
         .ok_or_else(|| invalid(op, "fillet solver id not in the solver table"))
+}
+
+fn solver_of_geom(
+    env: &CornerPatchEnv<'_, '_>,
+    g: FilletGeomId,
+    op: &'static str,
+) -> Result<usize> {
+    let si = env
+        .pseudo
+        .geom(g)?
+        .fillet_solver()
+        .ok_or_else(|| SolidError::invalid_input(op, "fillet geometry without solver"))?;
+    usize::try_from(si.0).map_err(|_| SolidError::invalid_input(op, "fillet solver id"))
 }
 
 fn invalid(op: &'static str, reason: &'static str) -> SolidError {
@@ -2219,14 +2256,12 @@ fn edgeuse_or_mate_geom(
     Ok(pseudo.fillet_edgeuse(mate)?.fillet_geom())
 }
 
-/// The index in [`CornerEnv::solvers`] of `pFilletGeom->GetFilletSolver()`.
-fn solver_of_geom(env: &CornerEnv<'_>, g: FilletGeomId, op: &'static str) -> Result<usize> {
-    let si = env
-        .pseudo
+/// `pFilletGeom->GetFilletSolver()` of a fillet geometry (dereferenced).
+fn geom_solver(pseudo: &FilletBrep, g: FilletGeomId, op: &'static str) -> Result<FilletSolverId> {
+    pseudo
         .geom(g)?
         .fillet_solver()
-        .ok_or_else(|| SolidError::invalid_input(op, "fillet geometry without solver"))?;
-    usize::try_from(si.0).map_err(|_| SolidError::invalid_input(op, "fillet solver id"))
+        .ok_or_else(|| SolidError::invalid_input(op, "fillet geometry without solver"))
 }
 
 /// The surface of a rail index (`UVPos(lRailIndex)`).

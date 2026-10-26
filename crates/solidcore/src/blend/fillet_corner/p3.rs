@@ -18,6 +18,7 @@
 //! | [`FilletCorner::create_with_solver_lookup`] | `Create` with borrowed executive solvers |
 //! | [`FilletCorner::calc_corner_geom`]                 | `SmFilletCorner::CalcCornerGeom`                      |
 //! | [`FilletCorner::create_corner_patch`]              | `CreateCornerPatch` (virtual: `SmFilletCorner`, `SmFillet3x2MixedConvexityCorner`, `SmFilletNx1Corner`, `SmFilletNx2Corner`) |
+//! | [`FilletCorner::create_corner_patch_default_with`], [`CornerPatchEnv`], [`CornerSolverStore`] | `SmFilletCorner::CreateCornerPatch` on a caller's objects (the executive's members it reads) |
 //! | [`FilletCorner::adjust_topology`]                  | `AdjustTopology` (virtual; `SmFilletNx2Corner::AdjustTopology` here) |
 //! | [`FilletCorner::adjust_tangent_corner`]            | `AdjustTangentCorner` (virtual; `SmFilletNx2Corner::AdjustTangentCorner` here) |
 //! | [`FilletCorner::adjust_topology_nx2_with`], [`Nx2AdjustContext`] | `SmFilletNx2Corner::AdjustTopology` (against a live or legacy context) |
@@ -621,6 +622,10 @@ pub struct FilletCorner {
     /// `m_vSurfaces`: the surfaces built for the corner (`SM_FILLETSURF_TYPE` is
     /// `SmSurface`: an end patch copied with `CopyAndAddAnalytics` can be analytic).
     pub surfaces: Vec<Surface>,
+    /// The fillet-B-rep faces `MakeFaceBrep` built on [`Self::surfaces`], in order
+    /// (upstream the faces own the `m_vSurfaces` pointers, so the registered corner
+    /// patch surfaces are those faces' surfaces).
+    pub surface_faces: Vec<FaceId>,
     /// `m_bBevel`.
     pub bevel: bool,
     /// `m_bBlending`.
@@ -668,6 +673,107 @@ pub struct CornerEnv<'a> {
     /// `m_pExecutive->m_pFilletBrep`, the B-rep `MakeFaceBrep` builds the corner's faces
     /// in (`None`: `NULL`).
     pub fillet: Option<CornerFilletBrep<'a>>,
+}
+
+/// The solver store the corner-patch builders resolve fillet geometries' solvers
+/// through (`pFilletGeom->GetFilletSolver()`, indexed by `FilletSolverId.0`).
+pub trait CornerSolverStore {
+    /// The solver at `index`, or `None` when it is not in the store.
+    fn get(&self, index: usize) -> Option<&FilletSolver>;
+    /// The number of solver slots (the identity a temporary solver takes).
+    fn len(&self) -> usize;
+    /// Whether the store has no slots.
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+/// A plain solver table as a [`CornerSolverStore`].
+#[derive(Debug, Clone, Copy)]
+pub struct IndexedSolvers<'s>(pub &'s [FilletSolver]);
+
+impl CornerSolverStore for IndexedSolvers<'_> {
+    fn get(&self, index: usize) -> Option<&FilletSolver> {
+        self.0.get(index)
+    }
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+/// What the corner-patch builders (`CreateCornerPatch`, `MakeAnalyticCornerSurface`,
+/// `MakeFaceBrep` and their helpers) operate on besides the corner itself: the
+/// legacy [`CornerEnv`] ([`CornerEnv::with_patch_env`]) or a live executive session.
+pub struct CornerPatchEnv<'e, 'a> {
+    /// `m_crContext`.
+    pub k: &'e mut Kernel,
+    /// The B-rep being filleted.
+    pub target: &'e Brep,
+    /// `m_pPseudoBrep`.
+    pub pseudo: &'e mut FilletBrep,
+    /// The executive's solvers.
+    pub solvers: &'e dyn CornerSolverStore,
+    /// `m_pExecutive->m_pFilletBrep` (`None`: `NULL`).
+    pub fillet: Option<&'e mut CornerFilletBrep<'a>>,
+    /// `FILEXEC_CORNER_ERR(this, "Corner Face Creation Error")`: notes the failed
+    /// corner face on the executive.
+    pub note_face_error: &'e mut dyn FnMut(&FilletCorner),
+}
+
+impl std::fmt::Debug for CornerPatchEnv<'_, '_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CornerPatchEnv")
+            .field("target", &self.target)
+            .field("pseudo", &self.pseudo)
+            .field("fillet", &self.fillet)
+            .finish_non_exhaustive()
+    }
+}
+
+impl CornerEnv<'_> {
+    /// Run `f` on this environment's corner-patch view (its executive's error notes
+    /// the failed corner face).
+    ///
+    /// # Errors
+    /// Those of `f`.
+    pub fn with_patch_env<T>(
+        &mut self,
+        f: impl FnOnce(&mut CornerPatchEnv<'_, '_>) -> Result<T>,
+    ) -> Result<T> {
+        let CornerEnv {
+            k,
+            target,
+            pseudo,
+            exec,
+            solvers,
+            fillet,
+            ..
+        } = self;
+        let mut note = |corner: &FilletCorner| {
+            exec.error.note_corner_error(
+                FilletErrorType::VertexProblem,
+                corner.corner_type(),
+                FilStatus::Failure,
+                Some(corner.kind.name()),
+                corner
+                    .filleted_vertex()
+                    .map(ExecutiveErrorObject::TargetVertex),
+                [None, None], // For now, we don't generally have just two surfaces.
+                [None, None], // For now, we don't generally have just two edgeuses.
+                Some("Fillet Corner Error: Corner Face Creation Error"),
+            );
+        };
+        let store = IndexedSolvers(solvers);
+        let mut env = CornerPatchEnv {
+            k,
+            target,
+            pseudo,
+            solvers: &store,
+            fillet: fillet.as_mut(),
+            note_face_error: &mut note,
+        };
+        f(&mut env)
+    }
 }
 
 /// The fillet B-rep of [`CornerEnv::fillet`] and the notification environment of its
@@ -841,6 +947,7 @@ impl FilletCorner {
             vertices: Vec::new(),
             edges: Vec::new(),
             surfaces: Vec::new(),
+            surface_faces: Vec::new(),
             bevel: false,
             blending: false,
             chamfer: false,
@@ -1181,10 +1288,22 @@ impl FilletCorner {
     /// [`SolidError::InvalidInput`] where upstream dereferences null or indexes past the
     /// corner's arrays; those of the point curves and `CreateCornerBlend`.
     pub fn create_corner_patch_default(&mut self, env: &mut CornerEnv<'_>) -> Result<()> {
+        env.with_patch_env(|env| self.create_corner_patch_default_with(env))
+    }
+
+    /// [`FilletCorner::create_corner_patch_default`] against any [`CornerPatchEnv`].
+    ///
+    /// # Errors
+    /// As [`FilletCorner::create_corner_patch_default`].
+    #[allow(clippy::too_many_lines)] // one upstream routine
+    pub fn create_corner_patch_default_with(
+        &mut self,
+        env: &mut CornerPatchEnv<'_, '_>,
+    ) -> Result<()> {
         // if an AnalyticSurface can approx FilletCorner->Curves to tol,
         //   Make and store that AnalyticSurface in m_vSurfaces, and return TRUE
         // else return FALSE.
-        let success = self.make_analytic_corner_surface(env)?;
+        let success = self.make_analytic_corner_surface_with(env)?;
 
         if !success {
             // When unable to create analytic corner - create COONS patch
@@ -1390,7 +1509,7 @@ impl FilletCorner {
         }
 
         // Create Face (and Edges and Verts) in m_pFilletBrep from m_vSurfaces with call m_pFilletBrep->MakeFaceWithCurves()
-        match self.make_face_brep(env) {
+        match self.make_face_brep_with(env) {
             Ok(()) => {}
             Err(e) if e.is_unported() => return Err(e),
             Err(
@@ -1401,17 +1520,7 @@ impl FilletCorner {
             ) => return Err(e),
             Err(_) => {
                 // when MakeFaceBrep failed - note the error
-                env.exec.error.note_corner_error(
-                    FilletErrorType::VertexProblem,
-                    self.corner_type(),
-                    FilStatus::Failure,
-                    Some(self.kind.name()),
-                    self.filleted_vertex()
-                        .map(ExecutiveErrorObject::TargetVertex),
-                    [None, None], // For now, we don't generally have just two surfaces.
-                    [None, None], // For now, we don't generally have just two edgeuses.
-                    Some("Fillet Corner Error: Corner Face Creation Error"),
-                );
+                (env.note_face_error)(self);
                 // FILEXEC_CORNER_ERR(this, "Corner Face Creation Error")
                 return Err(SolidError::sm_err(OP_PATCH));
             }

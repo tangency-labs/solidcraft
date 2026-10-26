@@ -469,12 +469,17 @@ impl FilletSession<'_> {
         }
         // SetFilletBrepEdgeMap, then the geometry and corner insertion.
         self.insert_fillet_intersection_topology(k)?;
+        // Upstream cbi_MAP_TOPO_EDGES=0: do not collect mapped intersections.
         if self.executive.options.global_merge {
-            // UNPORTED(blend.fillet_executive_p1): SmTopologyIntersector::IntersectInsertRelate on the live session
-            return Err(SolidError::unported(
-                "SmTopologyIntersector::IntersectInsertRelate",
-                "blend.fillet_executive_p1",
-            ));
+            // SmTol::GetApproxTol3d(m_pTargetBrep), then m_vTI.IntersectInsertRelate()
+            // between the target and the intermediate body.
+            let tolerance =
+                crate::geom::tol::approx_tol3d(k, 0.5 * self.objects.target.tolerance());
+            self.executive.intersector.set_this_approx_tol_3d(tolerance);
+            self.with_insertion_geometry(k, |k, ti, geometry| {
+                ti.intersect_insert_relate(k, geometry, FilletObject::Intersector)
+                    .map(|_| ())
+            })?;
         }
         if self.executive.options.trimming {
             self.with_original_trim_marks(k, |session, k, locks, serial| {

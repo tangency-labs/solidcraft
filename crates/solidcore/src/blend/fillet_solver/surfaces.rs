@@ -17,8 +17,6 @@ use crate::kernel::Kernel;
 use crate::surface::surface::Surface;
 use crate::topology::{Brep, EdgeuseId};
 
-use crate::blend::fillet_standard_solver::p1::VariableRadiusFs;
-
 use super::p1::{FilletSolver, FilletSolverOps, OffsetSurfaceSlot};
 
 struct GeometrySolver<'a> {
@@ -256,22 +254,22 @@ pub(crate) fn base_rail_edgeuse_intersect(
     )
 }
 
-/// The transient keys of the geometry's offset surfaces while a variable-radius
-/// solver holds them; they never leave [`variable_radius_rail_edgeuse_intersect`].
+/// The transient keys of the geometry's offset surfaces while a slot-reading solver
+/// holds them; they never leave [`slot_rail_edgeuse_intersect`].
 const SELECTED_KEYS: [u64; 2] = [u64::MAX - 1, u64::MAX];
 
 /// `SmFilletGeom::RailEdgeuseIntersect`'s call into `SmFilletSolver::RailEdgeuseIntersect`
-/// for a variable-radius solver while `geometry` is its geometry for surfaces: every
-/// `GetSurface(rail)` then returns the geometry's offset surface. The variable-radius
-/// solver reads its rails through its own slots, so the geometry's offset surfaces are
-/// moved into those slots for the call and moved back afterwards (also on error),
-/// with the solver's own surfaces and geometry for surfaces restored. A rail the
-/// geometry has no offset surface for has no surface during the call (upstream's
-/// `GetOffsetSurface` falls back to the solver's `GetSurface`, which asks the same
-/// geometry again without end: UB-204).
+/// for a solver that reads its rails through its own slots (`SmVariableRadiusFS`,
+/// `SmConstantDistanceFS`) while `geometry` is its geometry for surfaces: every
+/// `GetSurface(rail)` then returns the geometry's offset surface. The geometry's offset
+/// surfaces are moved into the solver's slots for the call and moved back afterwards
+/// (also on error), with the solver's own surfaces and geometry for surfaces restored.
+/// A rail the geometry has no offset surface for has no surface during the call
+/// (upstream's `GetOffsetSurface` falls back to the solver's `GetSurface`, which asks
+/// the same geometry again without end: UB-204).
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn variable_radius_rail_edgeuse_intersect(
-    actual: &mut VariableRadiusFs,
+pub(crate) fn slot_rail_edgeuse_intersect<S: FilletSolverOps>(
+    actual: &mut S,
     k: &Kernel,
     geometry: &mut FilletGeom,
     target: &mut Brep,
@@ -280,11 +278,10 @@ pub(crate) fn variable_radius_rail_edgeuse_intersect(
     guess: f64,
     tsect: &mut TsectPnt,
 ) -> Result<Option<f64>> {
-    let saved_geom = actual.curve_based.solver.fillet_geom_for_surfaces();
+    let saved_geom = actual.solver().fillet_geom_for_surfaces();
     let mut own: [Option<OffsetSurfaceSlot>; 2] = [None, None];
     for ((slot, kept), (selected, key)) in actual
-        .curve_based
-        .solver
+        .solver_mut()
         .surfaces
         .iter_mut()
         .zip(own.iter_mut())
@@ -295,16 +292,12 @@ pub(crate) fn variable_radius_rail_edgeuse_intersect(
             .map(|surface| OffsetSurfaceSlot { key, surface });
         *kept = std::mem::replace(slot, selected);
     }
-    actual.curve_based.solver.set_fillet_geom_for_surfaces(None);
+    actual.solver_mut().set_fillet_geom_for_surfaces(None);
     let result =
         FilletSolver::rail_edgeuse_intersect(actual, k, target, rail_index, edgeuse, guess, tsect);
-    actual
-        .curve_based
-        .solver
-        .set_fillet_geom_for_surfaces(saved_geom);
+    actual.solver_mut().set_fillet_geom_for_surfaces(saved_geom);
     for ((slot, kept), selected) in actual
-        .curve_based
-        .solver
+        .solver_mut()
         .surfaces
         .iter_mut()
         .zip(own.iter_mut())
