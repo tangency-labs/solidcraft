@@ -17,7 +17,7 @@
 //! | [`Surface::local_point_solve_0`], [`PointSolve0`]   | `LocalPointSolve_0`                           |
 //! | [`Surface::drop_point`], [`DropPointOptions`], [`DropPoint`] | `DropPoint`                          |
 //! | [`Surface::local_surface_surface_intersect_xyz`]    | `LocalSurfaceSurfaceIntersect` (from an image-space guess) |
-//! | [`Surface::cover_other_coincident_surface`], [`CoverOtherCoincident`] | `CoverOtherCoincidentSurface` |
+//! | [`Surface::cover_other_coincident_surface_deferring_trims`], [`CoverOtherCoincident`] | `CoverOtherCoincidentSurface` |
 //! | [`Surface::cover_other_coincident_surface_deferring_trims_with_context`], [`CoverSolveContext`] | `CoverOtherCoincidentSurface` (`smsurf_GetSurfaceCache` seeing each face) |
 //! | [`sp_local_solve`]                                  | `sm_SpLocalSolve` (static)                    |
 //! | [`filter_solution`]                                 | `sm_FilterSolution` (static)                  |
@@ -53,9 +53,7 @@
 //!   statement). The `SmFace::RemoveUVTrimCurves` a successful `CoverCoincidentSurface`
 //!   runs on a face-owned covering surface is left to the caller holding the B-rep
 //!   ([`Surface::cover_other_coincident_surface_deferring_trims`] lists the faces in
-//!   [`CoverOtherCoincident::remove_uv_trim_curves_of`], in call order);
-//!   [`Surface::cover_other_coincident_surface`] returns [`SolidError::Unported`]
-//!   (`topology.face_p1`) there, as before. A caller holding the faces lends them
+//!   [`CoverOtherCoincident::remove_uv_trim_curves_of`], in call order). A caller holding the faces lends them
 //!   through a [`CoverSolveContext`], under which each `CoverCoincidentSurface`'s
 //!   `STEPInversion` solves see the covering surface's face.
 //! - **Unported callees** (return [`SolidError::Unported`]): `SmSurface::GetFace`,
@@ -1452,7 +1450,7 @@ impl Surface {
 
 // ---- CoverOtherCoincidentSurface --------------------------------------------------------------
 
-/// The result of [`Surface::cover_other_coincident_surface`].
+/// The result of [`Surface::cover_other_coincident_surface_deferring_trims`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct CoverOtherCoincident {
     /// `pCoveringSurf`: which surface covers the other: `Some(false)` this one,
@@ -1468,8 +1466,7 @@ pub struct CoverOtherCoincident {
     /// The faces whose `SmFace::RemoveUVTrimCurves` the successful
     /// `CoverCoincidentSurface` calls ran upstream (a face-owned covering surface), in
     /// call order, for the caller holding the B-rep to run
-    /// (`topology::face::p1::remove_uv_trim_curves`). Empty unless returned by
-    /// [`Surface::cover_other_coincident_surface_deferring_trims`].
+    /// (`topology::face::p1::remove_uv_trim_curves`).
     pub remove_uv_trim_curves_of: Vec<ObjectRef>,
 }
 
@@ -1486,9 +1483,8 @@ struct CoverCoincident {
 
 /// `cover->CoverCoincidentSurface(covered, tol, bSuccess, rdMaxDist, &covered_domain
 /// [, &step_domain])`: whether `cover` covers `covered_domain` of `covered` and the
-/// largest gap. `cover` is expanded on success. With `defer_trims` the owner face whose
-/// `RemoveUVTrimCurves` the call runs upstream is appended to `trims`; without it that
-/// call is [`SolidError::Unported`] ([`Surface::cover_coincident_surface`]). With
+/// largest gap. `cover` is expanded on success. The owner face whose
+/// `RemoveUVTrimCurves` the call runs upstream is appended to `trims`. With
 /// `context` (the face solve context and `cover`'s handle in it) the cover's
 /// `STEPInversion` solves see `cover`'s face
 /// ([`Surface::cover_coincident_surface_deferring_trims_with_context`]).
@@ -1500,34 +1496,22 @@ fn cover_coincident_surface<O: SolutionObject>(
     tol: f64,
     covered_domain: &Extent2d,
     want_step_domain: bool,
-    trims: &mut Option<&mut Vec<ObjectRef>>,
+    trims: &mut Vec<ObjectRef>,
     context: Option<(&mut dyn SurfaceSolveContext<O>, Option<O>)>,
 ) -> Result<CoverCoincident> {
-    let r = match (trims, context) {
-        (Some(list), Some(context)) => {
-            let r = cover.cover_coincident_surface_deferring_trims_with_context(
-                k,
-                covered,
-                tol,
-                Some(covered_domain),
-                context,
-            )?;
-            list.extend(r.remove_uv_trim_curves_of);
-            r
+    let r = match context {
+        Some(context) => cover.cover_coincident_surface_deferring_trims_with_context(
+            k,
+            covered,
+            tol,
+            Some(covered_domain),
+            context,
+        )?,
+        None => {
+            cover.cover_coincident_surface_deferring_trims(k, covered, tol, Some(covered_domain))?
         }
-        (Some(list), None) => {
-            let r = cover.cover_coincident_surface_deferring_trims(
-                k,
-                covered,
-                tol,
-                Some(covered_domain),
-            )?;
-            list.extend(r.remove_uv_trim_curves_of);
-            r
-        }
-        // (a context is only lent together with the trim deferral)
-        (None, _) => cover.cover_coincident_surface(k, covered, tol, Some(covered_domain))?,
     };
+    trims.extend(r.remove_uv_trim_curves_of);
     Ok(CoverCoincident {
         success: r.success,
         max_dist: r.max_dist,
@@ -1549,8 +1533,8 @@ struct CoverState {
     max_dist: f64,
     /// `*pOptMergedDomain`.
     merged: Option<Extent2d>,
-    /// The faces whose UV trim curves the caller deletes, when it defers them.
-    trims: Option<Vec<ObjectRef>>,
+    /// The faces whose UV trim curves the caller deletes.
+    trims: Vec<ObjectRef>,
 }
 
 /// The face solve context of
@@ -1614,7 +1598,6 @@ fn try_cover<O: SolutionObject>(
         st.domain1
     };
 
-    let mut trims = st.trims.as_mut();
     if !want_merged {
         return match cover_coincident_surface(
             k,
@@ -1623,7 +1606,7 @@ fn try_cover<O: SolutionObject>(
             tol,
             &covered_domain,
             false,
-            &mut trims,
+            &mut st.trims,
             cover_context(context, cover_handle),
         ) {
             Ok(r) => {
@@ -1653,7 +1636,7 @@ fn try_cover<O: SolutionObject>(
         tol,
         &covered_domain,
         true,
-        &mut trims,
+        &mut st.trims,
         cover_context(context, cover_handle),
     ) {
         Ok(r) => r,
@@ -1690,43 +1673,16 @@ impl Surface {
     /// covering surface may have been expanded (`CoverCoincidentSurface` changes the
     /// surface it is called on when it succeeds).
     ///
-    /// # Errors
-    ///
-    /// [`SolidError::Unported`] from `CoverCoincidentSurface` (`SmFace::RemoveUVTrimCurves`
-    /// for a face-owned surface, the tolerance of an owned surface) and, when a merged
-    /// domain is wanted, the STEP domain conversions.
-    pub fn cover_other_coincident_surface(
-        &mut self,
-        k: &Kernel,
-        other: &mut Self,
-        tol: f64,
-        this_domain: Option<&Extent2d>,
-        other_domain: Option<&Extent2d>,
-        want_merged: bool,
-    ) -> Result<CoverOtherCoincident> {
-        self.cover_other_coincident_surface_in::<NoObject>(
-            k,
-            other,
-            tol,
-            this_domain,
-            other_domain,
-            want_merged,
-            false,
-            None,
-        )
-    }
-
-    /// [`Surface::cover_other_coincident_surface`] for a caller holding the B-rep: the
-    /// faces whose UV trim curves the successful `CoverCoincidentSurface` calls delete
-    /// upstream (`SmFace::RemoveUVTrimCurves` of a face-owned covering surface) are
-    /// returned in [`CoverOtherCoincident::remove_uv_trim_curves_of`], in call order,
-    /// and the caller runs `topology::face::p1::remove_uv_trim_curves` on each right
-    /// after this call.
+    /// The faces whose UV trim curves the successful `CoverCoincidentSurface` calls
+    /// delete upstream (`SmFace::RemoveUVTrimCurves` of a face-owned covering surface)
+    /// are returned in [`CoverOtherCoincident::remove_uv_trim_curves_of`], in call
+    /// order, and the caller, which holds the B-rep, runs
+    /// `topology::face::p1::remove_uv_trim_curves` on each right after this call.
     ///
     /// # Errors
     ///
-    /// As [`Surface::cover_other_coincident_surface`], without the
-    /// `SmFace::RemoveUVTrimCurves` deferral.
+    /// [`SolidError::Unported`] from `CoverCoincidentSurface` (the tolerance of an owned
+    /// surface) and, when a merged domain is wanted, the STEP domain conversions.
     pub fn cover_other_coincident_surface_deferring_trims(
         &mut self,
         k: &Kernel,
@@ -1743,7 +1699,6 @@ impl Surface {
             this_domain,
             other_domain,
             want_merged,
-            true,
             None,
         )
     }
@@ -1775,7 +1730,6 @@ impl Surface {
             this_domain,
             other_domain,
             want_merged,
-            true,
             Some(context),
         )
     }
@@ -1789,7 +1743,6 @@ impl Surface {
         this_domain: Option<&Extent2d>,
         other_domain: Option<&Extent2d>,
         want_merged: bool,
-        defer_trims: bool,
         mut context: Option<CoverSolveContext<'_, O>>,
     ) -> Result<CoverOtherCoincident> {
         let mut st = CoverState {
@@ -1801,13 +1754,13 @@ impl Surface {
                 .unwrap_or_else(|| other.natural_uv_domain()),
             max_dist: BIG_DOUBLE,
             merged: None,
-            trims: defer_trims.then(Vec::new),
+            trims: Vec::new(),
         };
         let done = |st: &mut CoverState, covering_is_other: bool| CoverOtherCoincident {
             covering_is_other: Some(covering_is_other),
             max_dist: st.max_dist,
             merged_domain: st.merged,
-            remove_uv_trim_curves_of: st.trims.take().unwrap_or_default(),
+            remove_uv_trim_curves_of: core::mem::take(&mut st.trims),
         };
 
         let is_plane = |s: &Self| matches!(s.kind(), SurfaceKind::Plane(_));
@@ -1951,7 +1904,7 @@ impl Surface {
             covering_is_other: None,
             max_dist: st.max_dist,
             merged_domain: st.merged,
-            remove_uv_trim_curves_of: st.trims.take().unwrap_or_default(),
+            remove_uv_trim_curves_of: core::mem::take(&mut st.trims),
         })
     }
 }
@@ -2769,7 +2722,14 @@ mod tests {
         let mut a = xy_plane();
         let mut b = xy_plane();
         let r = a
-            .cover_other_coincident_surface(&Kernel::default(), &mut b, 1e-6, None, None, false)
+            .cover_other_coincident_surface_deferring_trims(
+                &Kernel::default(),
+                &mut b,
+                1e-6,
+                None,
+                None,
+                false,
+            )
             .unwrap();
         assert_eq!(r.covering_is_other, Some(false));
         assert!(r.max_dist <= 1e-6);

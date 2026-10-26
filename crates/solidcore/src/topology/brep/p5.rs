@@ -1747,7 +1747,7 @@ impl FaceEdgeBackend for ArenaFaceEdge<'_, '_> {
 /// all_sectors, ...)` with upstream's default `bUVSpaceOkay = TRUE`
 /// ([`face_p4::find_vertex_sector`]); only the sector's vertex use is read.
 #[allow(clippy::too_many_arguments)]
-fn find_vertex_sector(
+pub(crate) fn find_vertex_sector(
     k: &Kernel,
     b: &mut Brep,
     f: FaceId,

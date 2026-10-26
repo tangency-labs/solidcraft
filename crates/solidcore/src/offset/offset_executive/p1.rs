@@ -712,8 +712,9 @@ impl OffsetExecutive {
     /// Removes result faces too close to the original (`RemoveExcessFaces`).
     ///
     /// The source is borrowed immutably while solving, corresponding to the upstream
-    /// editing-disabled query. This legacy immutable-kernel entry cannot advance the
-    /// real traversal mark at removal; use the kernel-context entry for that step.
+    /// editing-disabled query; the removal uses the result's actual editing flag and
+    /// the kernel's traversal marks. An empty deletion list still calls the landed
+    /// `RemoveFaces` implementation.
     /// Each original edge and face is identified by its geometry's owner key
     /// ([`arena_identity`] when unowned); an owner shared by two records or naming
     /// another record returns [`SolidError::Unsupported`] rather than omitting geometry.
@@ -721,24 +722,6 @@ impl OffsetExecutive {
     /// evaluation statuses are ignored, but an unported evaluator still defers.
     /// Result edges are visited in upstream edge list order (`SmBrep::GetEdges`).
     pub fn remove_excess_faces(
-        &self,
-        kernel: &Kernel,
-        original: &mut Brep,
-        result: &mut Brep,
-    ) -> Result<()> {
-        if self.excess_faces(kernel, original, result)?.is_none() {
-            return Ok(());
-        }
-        // UNPORTED(offset.offset_executive_p1): SmOffsetExecutive::RemoveExcessFaces (mutable Kernel adapter)
-        Err(SolidError::unported(
-            "SmOffsetExecutive::RemoveExcessFaces (mutable Kernel adapter)",
-            "offset.offset_executive_p1",
-        ))
-    }
-
-    /// Removes excess faces using the result's actual editing flag and kernel marks.
-    /// An empty deletion list still calls the landed `RemoveFaces` implementation.
-    pub fn remove_excess_faces_with_kernel_context(
         &mut self,
         kernel: &mut Kernel,
         original: &mut Brep,
@@ -3067,16 +3050,6 @@ mod tests {
         })
     }
 
-    fn assert_dependency<T: core::fmt::Debug>(result: Result<T>, symbol: &str, owner: &str) {
-        match result.unwrap_err() {
-            SolidError::Unported { upstream, unit } => {
-                assert_eq!(upstream, symbol);
-                assert_eq!(unit, owner);
-            }
-            other => panic!("expected dependency {symbol}, got {other:?}"),
-        }
-    }
-
     #[test]
     fn settings_defaults_and_scalar_view() {
         for (code, operation) in [
@@ -3562,35 +3535,33 @@ mod tests {
 
     #[test]
     fn excess_face_early_returns_and_actual_dependencies() {
-        let kernel = Kernel::default();
+        let mut kernel = Kernel::default();
         let mut executive = executive();
         let mut original = Brep::new();
         let mut result = Brep::new();
         executive
-            .remove_excess_faces(&kernel, &mut original, &mut result)
+            .remove_excess_faces(&mut kernel, &mut original, &mut result)
             .unwrap();
         executive.set_merge_results(true);
         executive.set_shell_faces(&[FaceId::from_index(1)]);
         executive
-            .remove_excess_faces(&kernel, &mut original, &mut result)
+            .remove_excess_faces(&mut kernel, &mut original, &mut result)
             .unwrap();
         executive.set_shell_faces(&[]);
-        // No result edge: the original's editing flag is not touched.
+        // No result edge: the original's editing flag is not touched; the empty
+        // deletion list still reaches RemoveFaces, whose editing-disabled refusal is
+        // ignored (cpp:2099-2102).
+        executive
+            .remove_excess_faces(&mut kernel, &mut original, &mut result)
+            .unwrap();
         assert!(!original.editing_enabled());
-        assert_dependency(
-            executive.remove_excess_faces(&kernel, &mut original, &mut result),
-            "SmOffsetExecutive::RemoveExcessFaces (mutable Kernel adapter)",
-            "offset.offset_executive_p1",
-        );
         add_use(&mut result, 0.0, 1.0, 1.0);
         add_use(&mut result, 0.0, 1.0, 2.0);
-        // The edges evaluate and solve against the empty original; the legacy entry
-        // still defers at its removal step without removing any result faces.
-        assert_dependency(
-            executive.remove_excess_faces(&kernel, &mut original, &mut result),
-            "SmOffsetExecutive::RemoveExcessFaces (mutable Kernel adapter)",
-            "offset.offset_executive_p1",
-        );
+        // The edges evaluate and solve against the empty original; no result face is
+        // close to it, so nothing is removed.
+        executive
+            .remove_excess_faces(&mut kernel, &mut original, &mut result)
+            .unwrap();
         assert_eq!(result.edges().len(), 2);
         assert_eq!(result.edgeuses().len(), 2);
         assert!(result.faces().is_empty());
@@ -3742,7 +3713,7 @@ mod tests {
         exec.set_merge_results(true);
         // Native RemoveExcessFaces ignores the editing-disabled refusal from
         // RemoveFaces. No traversal mark is acquired by that refused inner call.
-        exec.remove_excess_faces_with_kernel_context(&mut kernel, &mut original, &mut result)
+        exec.remove_excess_faces(&mut kernel, &mut original, &mut result)
             .unwrap();
         assert!(!result.editing_enabled());
         assert_eq!(kernel.context.current_mark(MarkType::Mark), 1);
@@ -3752,7 +3723,7 @@ mod tests {
             crate::geom::context::ALL_MARKS,
             |kernel, mark| {
                 assert_eq!(mark, MarkType::Mark);
-                exec.remove_excess_faces_with_kernel_context(kernel, &mut original, &mut result)
+                exec.remove_excess_faces(kernel, &mut original, &mut result)
                     .unwrap();
                 assert!(kernel.context.is_mark_locked(mark));
                 assert!(!kernel.context.is_mark_locked(MarkType::Mark2));

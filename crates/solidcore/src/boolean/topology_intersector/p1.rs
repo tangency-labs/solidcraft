@@ -118,7 +118,7 @@
 //!   `face_face_intersect_curves` asks for ([`FaceIntersectWants`]).
 //! - **Callees not ported yet** are private stubs returning [`SolidError::Unported`],
 //!   each tagged `UNPORTED(<unit>)`: `SmBrep::MakeVertexLoop` / `MakeVertexSplitEdge`
-//!   (`topology.brep_p9`), `MakeEdgeInFace` (`topology.brep_p5`),
+//!   (`topology.brep_p9`),
 //!   `SmFace::Point3DClassify` (`query.face_p1`; `SmFace::CalculateBoundingBox` goes
 //!   through [`IntersectorBrep::face_calculate_bounding_box`] since the `query.face_p1`
 //!   port). The
@@ -130,6 +130,12 @@
 //!   (`topology.face_p1`, through [`IntersectorBrep`]; its `CreateUVTrimCurves` is
 //!   `topology.face_p3`'s), `SmFace::FaceIntersect` and `SmFace::SetTolerance`
 //!   (`topology.face_p3`, through [`IntersectorBrep`]) are the ported calls.
+//! - **`SmBrep::MakeEdgeInFace`** (`topology.brep_p5`) runs its checks on the handles
+//!   and its `SmFace::FindVertexSector` (`topology.face_p4`) and
+//!   `SmBrep::MakeEdgeInFaceWithVU` (`topology.brep_p9`) on the arena the face's handle
+//!   names, through the owner's `MergeIntervalBrep::merge_context_with_curve_identity`; the curves are
+//!   copied out of the owner's stores (the edge takes the copy, as upstream it takes
+//!   the pointer).
 //! - **Undefined behaviour upstream** (a null object dereferenced, a solution without
 //!   objects, the maps of an intersector made with the context-only constructor) is
 //!   [`SolidError::InvalidInput`].
@@ -268,6 +274,7 @@ pub trait IntersectorBrep<O>:
     ProtoBrep<O>
     + crate::topology::proto_topology::p3::BrepGlue<O>
     + crate::intersect::curve_class::p5::ClassGeometryMut<O>
+    + crate::intersect::curve_class::p6::MergeIntervalBrep<O>
 {
     /// `SmFace::Point3DClassify(rPnt, sSrcZoneTol3d, bDoBoundaryIntersections,
     /// rPointClass, pOptGuessUV)` with the remaining arguments at their defaults
@@ -485,16 +492,9 @@ pub trait IntersectorBrep<O>:
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] by default: an owner that cannot lend the face's B-rep.
-    fn face_cache_target(&mut self, face: O) -> Result<FaceCacheTarget<'_, O>> {
-        let _ = face;
-        // UNPORTED(topology.face_p2): SmSurface::GetFace of a face-owned surface on an
-        // owner that cannot lend the face's B-rep
-        Err(SolidError::unported(
-            "SmFace handle of a surface's face",
-            "topology.face_p2",
-        ))
-    }
+    /// Those of the implementer for a handle that names no face of a B-rep or a face
+    /// without a surface.
+    fn face_cache_target(&mut self, face: O) -> Result<FaceCacheTarget<'_, O>>;
     /// The handle of each entity of the B-rep of `face` (the forward mapping of
     /// [`IntersectorBrep::face_cache_target`]), for the classifications of a face
     /// whose surface cache was prepared.
@@ -502,15 +502,7 @@ pub trait IntersectorBrep<O>:
     /// # Errors
     ///
     /// As [`IntersectorBrep::face_cache_target`].
-    fn face_entity_handles(&self, face: O) -> Result<EntityHandles<O>> {
-        let _ = face;
-        // UNPORTED(topology.face_p2): SmSurface::GetFace of a face-owned surface on an
-        // owner that cannot lend the face's B-rep
-        Err(SolidError::unported(
-            "SmFace handle of a surface's face",
-            "topology.face_p2",
-        ))
-    }
+    fn face_entity_handles(&self, face: O) -> Result<EntityHandles<O>>;
     /// `SmBrep::DeleteFace(pFace)` with upstream's default arguments (`FALSE, TRUE,
     /// NULL, NULL`) on the B-rep `brep`: the owner of a real B-rep implements it with
     /// `topology::brep::p3::delete_face`.
@@ -585,6 +577,7 @@ pub trait IntersectorBrep<O>:
 /// split) face, each null when not made. The face and vertices may be null
 /// (`MakeEdgeInFace` checks them itself).
 pub(super) fn brep_make_edge_in_face<O: Copy, B: IntersectorBrep<O>>(
+    k: &Kernel,
     backend: &mut B,
     brep: O,
     face: Option<O>,
@@ -599,7 +592,7 @@ pub(super) fn brep_make_edge_in_face<O: Copy, B: IntersectorBrep<O>>(
     let editing = backend.editing_enabled(brep)?;
     let mut out = None;
     crate::topology::brep::p5::make_edge_with_backend(
-        &mut HandleFaceEdge { backend, brep },
+        &mut HandleFaceEdge { k, backend, brep },
         editing,
         face,
         v1,
@@ -615,9 +608,39 @@ pub(super) fn brep_make_edge_in_face<O: Copy, B: IntersectorBrep<O>>(
         .ok_or_else(|| SolidError::null_pointer(OP))
 }
 
+/// `MakeEdgeInFace`'s face, vertex and curve handles: its `SmFace::FindVertexSector`
+/// and `SmBrep::MakeEdgeInFaceWithVU` run on the arena the face's handle names, through
+/// the owner's [`MergeIntervalBrep::merge_context_with_curve_identity`](crate::intersect::curve_class::p6::MergeIntervalBrep::merge_context_with_curve_identity)
+/// (`topology::brep::p5`'s calls of `topology::face::p4::find_vertex_sector` and
+/// `topology::brep::p9::make_edge_in_face_with_vu`).
 struct HandleFaceEdge<'a, O, B> {
+    k: &'a Kernel,
     backend: &'a mut B,
     brep: O,
+}
+
+impl<O: Copy, B: IntersectorBrep<O>> HandleFaceEdge<'_, O, B> {
+    /// The B-rep entity behind topology handle `o`.
+    fn entity(&self, o: O) -> Result<EntityRef> {
+        ClassGeometry::topology_entity(&*self.backend, o)
+            .map(|(_, e)| e)
+            .ok_or_else(|| {
+                SolidError::invalid_input(OP, "topology handle the owner cannot resolve")
+            })
+    }
+    /// A copy of the curve behind handle `o` (`MakeEdgeInFaceWithVU` consumes it).
+    fn curve(&self, o: O) -> Result<Curve> {
+        ClassGeometry::curve(&*self.backend, o)
+            .cloned()
+            .ok_or_else(|| SolidError::invalid_input(OP, "curve handle the owner cannot resolve"))
+    }
+    /// The vertex use behind handle `o`.
+    fn vertexuse(&self, o: O) -> Result<crate::topology::VertexuseId> {
+        match self.entity(o)? {
+            EntityRef::Vertexuse(vu) => Ok(vu),
+            _ => Err(SolidError::invalid_input(OP, "not a vertex use handle")),
+        }
+    }
 }
 impl<O: Copy, B: IntersectorBrep<O>> crate::topology::brep::p5::FaceEdgeBackend
     for HandleFaceEdge<'_, O, B>
@@ -638,39 +661,92 @@ impl<O: Copy, B: IntersectorBrep<O>> crate::topology::brep::p5::FaceEdgeBackend
     }
     fn sector(
         &mut self,
-        _face: O,
-        _vertex: Option<O>,
-        _curve: &O,
-        _uv: Option<&O>,
-        _start: f64,
-        _end: f64,
-        _orientation: OrientType,
-        _tol: f64,
-        _all: bool,
+        face: O,
+        vertex: Option<O>,
+        curve: &O,
+        uv: Option<&O>,
+        start: f64,
+        end: f64,
+        orientation: OrientType,
+        tol: f64,
+        all: bool,
     ) -> Result<Option<O>> {
-        // UNPORTED(topology.face_p4): SmFace::FindVertexSector
-        Err(SolidError::unported(
-            "SmFace::FindVertexSector",
-            "topology.face_p4",
-        ))
+        // NER(cpVertex) before anything is resolved
+        let vertex = vertex.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let EntityRef::Vertex(vertex) = self.entity(vertex)? else {
+            return Err(SolidError::invalid_input(OP, "not a vertex handle"));
+        };
+        let curve = self.curve(*curve)?;
+        let uv = uv.map(|o| self.curve(*o)).transpose()?;
+        let k = self.k;
+        let ctx = self
+            .backend
+            .merge_context_with_curve_identity(face)
+            .ok_or_else(|| SolidError::invalid_input(OP, "face handle the owner cannot resolve"))?;
+        let EntityRef::Face(f) = ctx.target else {
+            return Err(SolidError::invalid_input(OP, "not a face handle"));
+        };
+        let vu = crate::topology::brep::p5::find_vertex_sector(
+            k,
+            ctx.brep,
+            f,
+            Some(vertex),
+            &curve,
+            uv.as_ref(),
+            start,
+            end,
+            orientation,
+            tol,
+            all,
+        )?;
+        Ok(vu.map(|vu| (ctx.handle)(EntityRef::Vertexuse(vu))))
     }
     fn insert(
         &mut self,
-        _face: O,
-        _first: O,
-        _last: O,
-        _curve: O,
-        _uv: Option<O>,
-        _interval: Extent1d,
-        _orientation: OrientType,
-        _gap: f64,
-        _output: &mut Self::Output,
+        face: O,
+        first: O,
+        last: O,
+        curve: O,
+        uv: Option<O>,
+        interval: Extent1d,
+        orientation: OrientType,
+        gap: f64,
+        output: &mut Self::Output,
     ) -> Result<()> {
-        // UNPORTED(topology.brep_p9): SmBrep::MakeEdgeInFaceWithVU
-        Err(SolidError::unported(
-            "SmBrep::MakeEdgeInFaceWithVU",
-            "topology.brep_p9",
-        ))
+        let first = self.vertexuse(first)?;
+        let last = self.vertexuse(last)?;
+        let curve = self.curve(curve)?;
+        let uv = uv.map(|o| self.curve(o)).transpose()?;
+        let k = self.k;
+        let mut ctx = self
+            .backend
+            .merge_context_with_curve_identity(face)
+            .ok_or_else(|| SolidError::invalid_input(OP, "face handle the owner cannot resolve"))?;
+        let EntityRef::Face(f) = ctx.target else {
+            return Err(SolidError::invalid_input(OP, "not a face handle"));
+        };
+        let made = crate::topology::brep::p9::make_edge_in_face_with_vu_with_curve_identity(
+            k,
+            ctx.brep,
+            crate::topology::brep::p9::EdgeInFaceInput {
+                face: Some(f),
+                vertices: [Some(first), Some(last)],
+                curve: Some(curve),
+                uv_trim: uv,
+                drop_fail: None,
+                interval,
+                orientation,
+                curve_zone_tol_3d: zone_tol3d(k, gap),
+            },
+            &mut ctx.notifications,
+            ctx.curve_identity,
+        )?;
+        *output = Some((
+            (ctx.handle)(EntityRef::Edge(made.edge)),
+            made.loop_.map(|l| (ctx.handle)(EntityRef::Loop(l))),
+            made.face.map(|f| (ctx.handle)(EntityRef::Face(f))),
+        ));
+        Ok(())
     }
 }
 
@@ -3037,6 +3113,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         // checks them itself. The status is ignored: a failed MakeEdgeInFace leaves the
         // edge and face null, and the curve copy stays in the store as upstream leaks it)
         let made = ignore_soft(brep_make_edge_in_face(
+            k,
             brep,
             this_brep,
             old_face,

@@ -697,8 +697,7 @@ impl OffsetExecutive {
             if !excess_after_merge {
                 // cpp:1580: retain the same temporary on both success and failure.
                 let mut temporary = required(self.take_offset_brep(), OP_EXTENDED)?;
-                let status =
-                    self.remove_excess_faces_with_kernel_context(kernel, original, &mut temporary);
+                let status = self.remove_excess_faces(kernel, original, &mut temporary);
                 self.set_offset_brep(temporary);
                 status?;
             }
@@ -743,7 +742,7 @@ impl OffsetExecutive {
             let remove_after_merge = !self.create_offset_solid()
                 || (excess_after_merge && brep_is_manifold_solid(original)?);
             if remove_after_merge {
-                self.remove_excess_faces_with_kernel_context(kernel, original, &mut result)?;
+                self.remove_excess_faces(kernel, original, &mut result)?;
             }
             // cpp:1772 is called even after stitching in PiecewiseMerge. Its
             // ordinary status is only asserted, but Unported must still defer.

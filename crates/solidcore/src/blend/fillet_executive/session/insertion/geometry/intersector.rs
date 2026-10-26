@@ -476,6 +476,32 @@ impl ti::IntersectorBrep<FilletObject> for InsertionGeometry<'_> {
     fn topology_objects(&self) -> &dyn TopologyObjects<FilletObject> {
         self
     }
+    /// The body of `face` lent for its surface's trimmed cache, with the handles of
+    /// that body's entities and their inverse.
+    fn face_cache_target(
+        &mut self,
+        face: FilletObject,
+    ) -> Result<ti::FaceCacheTarget<'_, FilletObject>> {
+        let (role, id) = fid(face)?;
+        let surface = self
+            .face_surface(face)
+            .flatten()
+            .ok_or_else(|| invalid("face without surface"))?;
+        Ok(ti::FaceCacheTarget {
+            brep: self.body_mut(role),
+            face: id,
+            surface,
+            handles: Box::new(move |e| Ok(InsertionGeometry::handle(role, e))),
+            entities: Box::new(move |h| match InsertionGeometry::topology(h) {
+                Some((r, e)) if r == role => Ok(e),
+                _ => Err(invalid("handle outside the face's body")),
+            }),
+        })
+    }
+    fn face_entity_handles(&self, face: FilletObject) -> Result<ti::EntityHandles<FilletObject>> {
+        let (role, _) = fid(face)?;
+        Ok(Box::new(move |e| Ok(InsertionGeometry::handle(role, e))))
+    }
     fn brep_delete_face(
         &mut self,
         k: &mut Kernel,

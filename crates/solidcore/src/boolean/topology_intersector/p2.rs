@@ -2129,6 +2129,7 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                         .ok_or(invalid(OP_EDGE_FACE_COIN, "curve store is full"))?;
                     // (status unchecked: no new edge, loop or face on failure)
                     let made = ignore_soft(brep_make_edge_in_face(
+                        k,
                         brep,
                         face_b,
                         Some(f),

@@ -360,7 +360,7 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
             let other = surface_of(other)?;
             let d = dom.map(dom_of);
             let k = Kernel::new(&KernelOptions::default());
-            match stat(s.cover_coincident_surface(&k, &other, *tol, d.as_ref()))? {
+            match stat(s.cover_coincident_surface_deferring_trims(&k, &other, *tol, d.as_ref()))? {
                 Ok(r) => {
                     o.extend([0.0, b(r.success), r.max_dist]);
                     if let Some(c) = r.covered_step_domain.filter(|_| r.success) {

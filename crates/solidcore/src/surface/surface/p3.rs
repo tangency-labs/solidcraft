@@ -13,7 +13,7 @@
 //! | [`Surface::evaluate_geometric`], [`evaluate_geometric_of`] | `SmSurface::EvaluateGeometric`          |
 //! | [`Surface::evaluate_normal_section`], [`evaluate_normal_section_of`], [`SurfaceNormalSection`] | `SmSurface::EvaluateNormalSection` |
 //! | [`Surface::get_singularities`], [`Surface::get_singularities_of_face`], [`Singularities`] | `SmSurface::GetSingularities`                    |
-//! | [`Surface::cover_coincident_surface`], [`CoverCoincident`] | `SmSurface::CoverCoincidentSurface`     |
+//! | [`Surface::cover_coincident_surface_deferring_trims`], [`CoverCoincident`] | `SmSurface::CoverCoincidentSurface`     |
 //! | [`check_shape_match`]                             | `smsurf_CheckShapeMatch`                         |
 //! | [`FindPsNormalEnfo`] (`EvalNFunctions`)           | `SmFindPSNormalENFO::Evaluate` (struct: `surface.surface_p1`) |
 //! | [`SssIntersectEnfo`] (`EvalNFunctions`)           | `SmSSSIntersectENFO::Evaluate` (struct: `surface.surface_p1`) |
@@ -27,7 +27,7 @@
 //! - **Out-params** become return values; a solve that finds nothing returns `None`.
 //! - **Temporary out-of-bounds evaluation.** `SmTemporaryChangeValue` on the
 //!   `OutOfBoundsEnabled` flag of the (B-spline based) surfaces is done on the surface
-//!   itself where it is `&mut` ([`Surface::cover_coincident_surface`]) and on an
+//!   itself where it is `&mut` ([`Surface::cover_coincident_surface_deferring_trims`]) and on an
 //!   out-of-bounds copy where upstream changes a `const` surface
 //!   ([`Surface::local_surface_surface_intersect`]).
 //! - **Ignored statuses.** Where upstream ignores the status of an evaluation its
@@ -44,9 +44,8 @@
 //!   curves itself. [`Surface::cover_coincident_surface_deferring_trims`] returns the
 //!   face in [`CoverCoincident::remove_uv_trim_curves_of`] and the caller that holds the
 //!   B-rep runs `topology::face::p1::remove_uv_trim_curves` right after the call (nothing
-//!   runs in between, so the order is upstream's).
-//!   [`Surface::cover_coincident_surface`] keeps returning [`SolidError::Unported`]
-//!   (`topology.face_p1`) for a face-owned surface for callers without the B-rep.
+//!   runs in between, so the order is upstream's). There is no entry point that skips
+//!   the deletion: every caller receives the face.
 //! - **A folded continuation is not covered** (opt-in
 //!   `Kernel::fixes.cover_refuses_folded_continuation`, WR-407; off by default, which
 //!   merges as upstream does). SolidCraft change, tangency-labs/smlib 1b6f5fa (`SmSurface::CoverCoincidentSurface`, before its
@@ -268,7 +267,7 @@ pub struct Singularities {
     pub pole_normals: Option<[Vec3; 4]>,
 }
 
-/// The result of [`Surface::cover_coincident_surface`].
+/// The result of [`Surface::cover_coincident_surface_deferring_trims`].
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CoverCoincident {
     /// `rbSuccess`: the other surface fits inside this one.
@@ -281,8 +280,7 @@ pub struct CoverCoincident {
     /// The face owning this surface whose `SmFace::RemoveUVTrimCurves` upstream runs at
     /// the end of a successful call: the caller holding the B-rep runs it
     /// (`topology::face::p1::remove_uv_trim_curves`) right after the call. `None` on
-    /// failure and for a surface no face owns. Set only by
-    /// [`Surface::cover_coincident_surface_deferring_trims`].
+    /// failure and for a surface no face owns.
     pub remove_uv_trim_curves_of: Option<ObjectRef>,
 }
 
@@ -745,41 +743,12 @@ impl Surface {
     /// Whether `other` (or the subset `other_domain` of it) fits inside this surface: a
     /// grid of points of `other` is dropped to this surface and, when all coincide within
     /// `tol`, this surface's STEP domain is expanded to cover them
-    /// (`CoverCoincidentSurface`). The surface is changed only on success.
-    ///
-    /// # Errors
-    ///
-    /// [`SolidError::Unported`]: `SmFace::RemoveUVTrimCurves` for a successful cover by a
-    /// surface owned by a face (`topology.face_p1`; the surface has been expanded, as
-    /// upstream before that call); those of the evaluations and of `STEPInversion`.
-    /// A caller holding the B-rep uses
-    /// [`Surface::cover_coincident_surface_deferring_trims`] instead.
-    pub fn cover_coincident_surface(
-        &mut self,
-        k: &Kernel,
-        other: &Surface,
-        tol: f64,
-        other_domain: Option<&Extent2d>,
-    ) -> Result<CoverCoincident> {
-        let r = self.cover_coincident_surface_deferring_trims(k, other, tol, other_domain)?;
-        if r.remove_uv_trim_curves_of.is_some() {
-            // UNPORTED(topology.face_p1): SmFace::RemoveUVTrimCurves
-            // (ported as topology::face::p1::remove_uv_trim_curves; a caller without
-            // the B-rep of the owner face cannot run it: callers with it use
-            // `cover_coincident_surface_deferring_trims`)
-            return Err(SolidError::unported(
-                "SmFace::RemoveUVTrimCurves",
-                "topology.face_p1",
-            ));
-        }
-        Ok(r)
-    }
-
-    /// [`Surface::cover_coincident_surface`] for a caller holding the B-rep: on success
+    /// (`CoverCoincidentSurface`). The surface is changed only on success. On success
     /// for a face-owned surface, the face whose UV trim curves upstream deletes at the
     /// end of the call (`SmFace::RemoveUVTrimCurves`) is returned in
-    /// [`CoverCoincident::remove_uv_trim_curves_of`], and the caller runs
-    /// `topology::face::p1::remove_uv_trim_curves` on it right after this call.
+    /// [`CoverCoincident::remove_uv_trim_curves_of`], and the caller, which holds the
+    /// B-rep, runs `topology::face::p1::remove_uv_trim_curves` on it right after this
+    /// call.
     ///
     /// # Errors
     ///
@@ -835,7 +804,8 @@ impl Surface {
         result
     }
 
-    /// The body of [`Surface::cover_coincident_surface`] with out-of-bounds evaluation on.
+    /// The body of [`Surface::cover_coincident_surface_deferring_trims`] with out-of-bounds
+    /// evaluation on.
     fn cover_coincident_surface_inner<O: SolutionObject>(
         &mut self,
         k: &Kernel,
@@ -1830,7 +1800,7 @@ mod tests {
             false,
         ));
 
-        let covered = this.cover_coincident_surface(k, &other, 1.0e-6, None)?;
+        let covered = this.cover_coincident_surface_deferring_trims(k, &other, 1.0e-6, None)?;
         Ok((covered, this.step_uv_domain().u_interval().max()))
     }
 

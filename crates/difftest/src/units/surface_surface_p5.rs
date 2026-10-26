@@ -785,7 +785,7 @@ fn rust_run(i: &Inputs) -> Result<Vec<f64>, Fail> {
         OpIn::Cover { other, tol, merged } => {
             let mut this = s.clone();
             let mut other = surface_of(other)?;
-            match st(this.cover_other_coincident_surface(&k, &mut other, *tol, None, None, *merged))?
+            match st(this.cover_other_coincident_surface_deferring_trims(&k, &mut other, *tol, None, None, *merged))?
             {
                 Ok(r) => {
                     let which = r.covering_is_other.map_or(-1.0, b);
