@@ -761,6 +761,14 @@ pub struct Brep {
     geometry_owner_keys: std::collections::BTreeMap<EntityRef, crate::geom::object::ObjectRef>,
 }
 
+/// A copy of the arenas whose curves and surfaces have no owner (the geometry's copy
+/// constructor resets it). Operations that find a curve's edge or a surface's face
+/// through its owner (the fillet merge, B-rep ray-fire caches, transforms of a body's
+/// geometry) therefore do not see the clone's topology: `fillet_edges` of a clone fails
+/// in its merge (#1144). To copy a body that is edited later (undo, history, preview),
+/// use [`brep::p3::api_brep_copy`] (`SmApiBrepCopy`), whose geometry the copy owns.
+/// [`Brep::clone_standing_for_self`] is a private stand-in for this B-rep (its geometry
+/// keeps this B-rep's owners) and not an independent body.
 impl Clone for Brep {
     fn clone(&self) -> Self {
         self.copy(false)
