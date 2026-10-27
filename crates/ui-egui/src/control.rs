@@ -1152,10 +1152,11 @@ fn occurrence(s: &solidcraft_engine::Session, v: &Value) -> Result<u64, String> 
         .ok_or_else(|| format!("no occurrence `{key}`"))
 }
 
-/// Save a screenshot PNG.
+/// Save a screenshot PNG; without a `path`, in the temporary folder ([`vfs::temp_dir`], which in
+/// the browser keeps it in memory: std's would panic there).
 pub fn save_screenshot(image: &egui::ColorImage, path: Option<&str>) -> Value {
     let [w, h] = image.size;
-    let path = path.map(str::to_string).unwrap_or_else(|| std::env::temp_dir().join("solidcraft-shot.png").to_string_lossy().to_string());
+    let path = path.map(str::to_string).unwrap_or_else(|| vfs::temp_dir().join("solidcraft-shot.png").to_string_lossy().to_string());
     match write_screenshot(image, &path) {
         Ok(()) => json!({"ok": true, "result": {"path": path, "width": w, "height": h}}),
         Err(e) => json!({"ok": false, "error": e}),
@@ -1870,6 +1871,17 @@ mod tests {
         assert!(v["ok"] == false && v["error"].as_str().is_some_and(|e| e.contains("outside the folders this agent may use")), "{v}");
         assert_eq!(std::fs::read_dir(&out).unwrap().count(), 0, "nothing written outside");
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Without a `path`, a screenshot goes to `vfs::temp_dir`: in the web app a folder kept in
+    /// memory, where std's temporary folder panics (#7192).
+    #[test]
+    fn a_screenshot_without_a_path_goes_to_the_vfs_temporary_folder() {
+        let image = egui::ColorImage::new([4, 3], vec![egui::Color32::GREEN; 12]);
+        let path = vfs::temp_dir().join("solidcraft-shot.png");
+        let reply = save_screenshot(&image, None);
+        assert_eq!(reply, json!({"ok": true, "result": {"path": path.to_string_lossy(), "width": 4, "height": 3}}));
+        assert!(path.is_file());
     }
 
     /// `ui.camera` reads the camera and sets it; its reply, passed back, sets the same view

@@ -177,7 +177,7 @@ fn hidden(name: &std::ffi::OsStr) -> bool {
 /// in a hidden folder. So a design saved in home itself, in `/`, on a drive root or in a system
 /// folder never puts `~/.ssh`, `~/.bashrc` or anything else of the user's in reach.
 pub fn design_folder_refusal(dir: &std::path::Path) -> Option<String> {
-    design_folder_refusal_in(dir, home_dir().as_deref(), Some(&std::env::temp_dir()))
+    design_folder_refusal_in(dir, home_dir().as_deref(), Some(&temp_dir()))
 }
 
 /// [`design_folder_refusal`] with the home and temporary folders given (tests).
@@ -585,9 +585,17 @@ pub fn long_names(path: &std::path::Path) -> std::path::PathBuf {
     }
 }
 
+/// The temporary folder in the browser. std has none there (`std::env::temp_dir` panics on
+/// wasm32-unknown-unknown), so it is a folder of the in-memory files: what is written in it stays
+/// in memory, neither stored nor downloaded (#7192).
+pub const BROWSER_TEMP: &str = "/tmp";
+
 /// The temporary folder spelled with long names ([`long_names`]), for the folders SolidCraft
-/// makes in it.
+/// makes in it; [`BROWSER_TEMP`] in the browser.
 pub fn temp_dir() -> std::path::PathBuf {
+    if cfg!(target_arch = "wasm32") {
+        return std::path::PathBuf::from(BROWSER_TEMP);
+    }
     long_names(&std::env::temp_dir())
 }
 

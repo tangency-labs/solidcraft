@@ -612,6 +612,8 @@ mod tests {
         assert_eq!(route("/disk/18f-2a/Bracket.solidcraft"), WriteTo::Disk);
         assert_eq!(route("/downloads/part.step"), WriteTo::Download);
         assert_eq!(route("/upload/part.step"), WriteTo::Memory);
+        // The temporary folder (a screenshot without a path, #7192) stays in memory.
+        assert_eq!(route(&format!("{}/solidcraft-shot.png", solidcraft_engine::io::vfs::BROWSER_TEMP)), WriteTo::Memory);
     }
 
     #[test]
