@@ -43,6 +43,7 @@ use solidcore::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use solidcore::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use solidcore::nurbs::knots::Side;
 use solidcore::surface::bend_volume::BendVolume;
+use solidcore::surface::cone::Cone;
 use solidcore::surface::plane::Plane;
 use solidcore::surface::srf_in_volume::SrfInVolume;
 use solidcore::surface::surface::p2::{Surface, SurfaceKind};
@@ -75,8 +76,25 @@ fn harness(msg: impl Into<String>) -> HarnessError {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum SurfIn {
-    Bspline { bss: BssIn },
-    Plane { o: [f64; 3], n: [f64; 3] },
+    Bspline {
+        bss: BssIn,
+    },
+    Plane {
+        o: [f64; 3],
+        n: [f64; 3],
+    },
+    /// `SmCylinder(o, x, y, r, start, end, h, swap, inside, FALSE)` with its NURB made.
+    Cylinder {
+        o: [f64; 3],
+        x: [f64; 3],
+        y: [f64; 3],
+        r: f64,
+        start: f64,
+        end: f64,
+        h: f64,
+        swap: bool,
+        inside: bool,
+    },
 }
 
 /// One map of a volume chain.
@@ -236,6 +254,23 @@ fn surf_block(v: &mut Vec<f64>, s: &SurfIn) -> Result<(), HarnessError> {
             v.push(1.0);
             v.extend_from_slice(o);
             v.extend_from_slice(n);
+        }
+        SurfIn::Cylinder {
+            o,
+            x,
+            y,
+            r,
+            start,
+            end,
+            h,
+            swap,
+            inside,
+        } => {
+            v.push(2.0);
+            v.extend_from_slice(o);
+            v.extend_from_slice(x);
+            v.extend_from_slice(y);
+            v.extend([*r, *start, *end, *h, b(*swap), b(*inside)]);
         }
     }
     Ok(())
@@ -460,22 +495,54 @@ fn build_volume(v: &Vol) -> Result<Volume, HarnessError> {
             }
             k => return Err(harness(format!("bad map kind {k}"))),
         };
-        next = Some(Volume::with_maps(kind, m.orient.map(transform_of), next).map_err(|e| HarnessError::new(e.to_string()))?);
+        next = Some(
+            Volume::with_maps(kind, m.orient.map(transform_of), next)
+                .map_err(|e| HarnessError::new(e.to_string()))?,
+        );
     }
     next.ok_or_else(|| harness("volume without maps"))
 }
 
-fn build_surface(s: &SurfIn) -> Result<Surface, HarnessError> {
+fn build_surface(k: &Kernel, s: &SurfIn) -> Result<Surface, HarnessError> {
     match s {
         SurfIn::Bspline { bss } => Ok(Surface::from(bss_of(bss)?)),
         SurfIn::Plane { o, n } => Ok(Surface::from(Plane::from_normal(v3(*o), v3(*n)))),
+        SurfIn::Cylinder {
+            o,
+            x,
+            y,
+            r,
+            start,
+            end,
+            h,
+            swap,
+            inside,
+        } => {
+            let mut c = Cone::new_cylinder_bounded(
+                v3(*o),
+                v3(*x),
+                v3(*y),
+                *r,
+                *start,
+                *end,
+                *h,
+                *swap,
+                *inside,
+                false,
+            );
+            // (the shim ignores MakeNurb's status: the ffi wrapper admits only inputs it
+            // succeeds on)
+            c.make_nurb(k)
+                .map_err(|e| harness(format!("cylinder MakeNurb: {e}")))?;
+            Ok(Surface::from(c))
+        }
     }
 }
 
 fn build(k: &Kernel, c: &SivIn) -> Result<SrfInVolume, HarnessError> {
     SrfInVolume::new(
         k,
-        build_surface(&c.surface)?,
+        build_surface(k, &c.surface)?,
         c.in_param,
         build_volume(&c.volume)?,
         c.copy,
@@ -527,6 +594,8 @@ fn put_surface(o: &mut Vec<f64>, s: &Surface) {
             Ok(b) => put_bss(o, &b),
             Err(_) => o.push(0.0),
         },
+        // an SmCylinder is an SmBSplineSurface: its NURB
+        SurfaceKind::Cone(c) => put_bss(o, c.rev().base()),
         _ => o.push(0.0),
     }
 }
@@ -692,7 +761,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         OpIn::Info { uv, types } => {
             let c = siv_of(&s)?;
             let step = s.step_uv_domain();
-            let max = tri!(o, s.max_analytic_domain(&k, ));
+            let max = tri!(o, s.max_analytic_domain(&k,));
             o.push(0.0);
             o.extend([
                 s.type_code() as f64,
@@ -836,7 +905,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             copy,
             owns,
         } => {
-            let ns = build_surface(surface)?;
+            let ns = build_surface(&k, surface)?;
             if let SurfaceKind::SrfInVolume(c) = s.kind_mut() {
                 tri!(o, c.set_base_surface(&k, ns, *in_param, *copy, *owns));
             }
@@ -900,7 +969,12 @@ fn gen_surface(rng: &mut Rng) -> (SurfIn, [f64; 4]) {
             s.u.last().copied().unwrap_or(1.0),
             s.v.last().copied().unwrap_or(1.0),
         ];
-        (SurfIn::Bspline { bss: gen_bss(rng, s) }, dom)
+        (
+            SurfIn::Bspline {
+                bss: gen_bss(rng, s),
+            },
+            dom,
+        )
     }
 }
 
@@ -922,7 +996,12 @@ fn gen_transform(rng: &mut Rng) -> [[f64; 3]; 4] {
             let x = coord(rng, 2.0);
             [coord(rng, 5.0), x, x, coord(rng, 2.0)]
         }
-        _ => [coord(rng, 5.0), coord(rng, 2.0), coord(rng, 2.0), coord(rng, 2.0)],
+        _ => [
+            coord(rng, 5.0),
+            coord(rng, 2.0),
+            coord(rng, 2.0),
+            coord(rng, 2.0),
+        ],
     }
 }
 
@@ -1033,7 +1112,11 @@ fn gen_orders(rng: &mut Rng) -> (usize, usize, bool) {
                 (0, n, rng.chance(0.5))
             }
         }
-        _ => (1 + rng.below(3) as usize, 1 + rng.below(3) as usize, rng.chance(0.5)),
+        _ => (
+            1 + rng.below(3) as usize,
+            1 + rng.below(3) as usize,
+            rng.chance(0.5),
+        ),
     }
 }
 
@@ -1118,7 +1201,11 @@ fn gen_case(rng: &mut Rng) -> Inputs {
         },
         44..=49 => {
             let v_dir = rng.chance(0.5);
-            let (a, e) = if v_dir { (dom[1], dom[3]) } else { (dom[0], dom[2]) };
+            let (a, e) = if v_dir {
+                (dom[1], dom[3])
+            } else {
+                (dom[0], dom[2])
+            };
             let ivl = rng.chance(0.5).then(|| {
                 let x = a + (e - a) * rng.uniform(-0.2, 1.2);
                 let y = a + (e - a) * rng.uniform(-0.2, 1.2);
@@ -1153,7 +1240,11 @@ fn gen_case(rng: &mut Rng) -> Inputs {
         }
         71..=76 => {
             let v_dir = rng.chance(0.5);
-            let (a, e) = if v_dir { (dom[1], dom[3]) } else { (dom[0], dom[2]) };
+            let (a, e) = if v_dir {
+                (dom[1], dom[3])
+            } else {
+                (dom[0], dom[2])
+            };
             OpIn::Split {
                 v_dir,
                 t: a + (e - a) * rng.uniform(0.05, 0.95),
@@ -1313,12 +1404,94 @@ fn inline_cases() -> Result<Vec<Case>, HarnessError> {
                 ffi::validate(o, &input).map_err(|e| harness(format!("inline case: {e}")))?;
                 out.push(Case {
                     unit: "surface.srf_in_volume".to_string(),
-                    name: format!("inline_{name}_{}_{op_name}", if in_param { "param" } else { "in" }),
+                    name: format!(
+                        "inline_{name}_{}_{op_name}",
+                        if in_param { "param" } else { "in" }
+                    ),
                     source: CaseSource::Inline,
                     inputs: serde_json::to_value(inputs)
                         .map_err(|e| harness(format!("inline case: {e}")))?,
                 });
             }
+        }
+    }
+    out.extend(cylinder_cases()?);
+    Ok(out)
+}
+
+/// `Info` (and point evaluation) on a surface in volume over an `SmCylinder` base: the
+/// object forwards `ConvertUVFromSTEPToNURBS` / `ConvertUVFromNURBSToSTEP` (and the STEP
+/// domain) to the analytic base, whose conversions are not the identity (STEP u in
+/// degrees over [start, end], NURBS u over the rational circle's knots).
+fn cylinder_cases() -> Result<Vec<Case>, HarnessError> {
+    let transform = MapIn {
+        kind: 1,
+        comp: None,
+        t: Some([
+            [1.0, 2.0, 3.0],
+            [0.0, 1.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ]),
+        orient: None,
+    };
+    let cylinders = [
+        ("full", 0.0, 360.0, false, false),
+        ("arc", 30.0, 200.0, false, false),
+        ("arc_swap", 30.0, 200.0, true, false),
+        ("arc_inside", -90.0, 120.0, false, true),
+    ];
+    let mut out = Vec::new();
+    for (name, start, end, swap, inside) in cylinders {
+        let siv = SivIn {
+            surface: SurfIn::Cylinder {
+                o: [0.5, -1.0, 2.0],
+                x: [1.0, 0.0, 0.0],
+                y: [0.0, 1.0, 0.0],
+                r: 2.5,
+                start,
+                end,
+                h: 4.0,
+                swap,
+                inside,
+            },
+            volume: vec![transform.clone()],
+            in_param: false,
+            copy: 0,
+            owner: 3,
+        };
+        // a STEP (degrees, height) point and a NURBS-range point, as the ops convert both
+        let ops = [
+            (
+                "info_step",
+                OpIn::Info {
+                    uv: [0.5 * (start + end), 1.5],
+                    types: vec![],
+                },
+            ),
+            (
+                "info_unit",
+                OpIn::Info {
+                    uv: [0.375, 0.625],
+                    types: vec![],
+                },
+            ),
+            ("eval_point", OpIn::EvalPoint { uv: [0.375, 0.625] }),
+        ];
+        for (op_name, op) in ops {
+            let inputs = Inputs {
+                siv: siv.clone(),
+                op,
+            };
+            let (o, input) = cpp_input(&inputs)?;
+            ffi::validate(o, &input).map_err(|e| harness(format!("cylinder case: {e}")))?;
+            out.push(Case {
+                unit: "surface.srf_in_volume".to_string(),
+                name: format!("inline_cylinder_{name}_{op_name}"),
+                source: CaseSource::Inline,
+                inputs: serde_json::to_value(inputs)
+                    .map_err(|e| harness(format!("cylinder case: {e}")))?,
+            });
         }
     }
     Ok(out)

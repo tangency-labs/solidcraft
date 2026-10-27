@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // difftest shim for unit `surface.srf_in_volume`: the SmSrfInVolume members owned by the unit
 // (source/SMLib/src/SmSrfInVolume.cpp, source/SMLib/inc/SmSrfInVolume.h), called through
-// SmSrfInVolume / SmSurface on objects built from an SmBSplineSurface or SmPlane base surface
-// and a chain of SmTransform / SmTwistVolume / SmUnbendVolume / plain SmVolume maps.
+// SmSrfInVolume / SmSurface on objects built from an SmBSplineSurface, SmPlane or SmCylinder base
+// surface and a chain of SmTransform / SmTwistVolume / SmUnbendVolume / plain SmVolume maps.
 //
 // One entry point, sc_surface_srf_in_volume_eval(op, in, n_in, out, cap, out_len). Layouts are
 // documented in crates/solidcore-ffi/src/units/surface_srf_in_volume.rs, which validates every
@@ -15,6 +15,7 @@
 #include <SmBendVolume.h>
 #include <SmBSplineSurface.h>
 #include <SmContext.h>
+#include <SmCylinder.h>
 #include <SmDatabaseIO.h>
 #include <SmExtent1d.h>
 #include <SmExtent2d.h>
@@ -222,7 +223,9 @@ void put_volume(std::vector<double>& o, const SmVolume* v)
 // ---- surfaces -------------------------------------------------------------------------
 
 // A surface block: `0 oob form n m p q r s cpts(x y z w) u v` (SmBSplineSurface(gw_SURFACE*,
-// FALSE, NULL)) or `1 O[3] N[3]` (SmPlane(O, N)).
+// FALSE, NULL)), `1 O[3] N[3]` (SmPlane(O, N)) or `2 O[3] X[3] Y[3] r start end h swap inside`
+// (SmCylinder(O, X, Y, r, start, end, h, swap, inside, FALSE) + MakeNurb, status ignored: the
+// ffi wrapper admits only inputs it succeeds on).
 SmSurface* read_surface(Rd& rd, const SmContext& ctx)
 {
     int64_t kind = rd.idx();
@@ -231,6 +234,21 @@ SmSurface* read_surface(Rd& rd, const SmContext& ctx)
         SmPoint3d o = rd.vec();
         SmVector3d n = rd.vec();
         return new (ctx) SmPlane(o, n, &ctx);
+    }
+    if (kind == 2)
+    {
+        SmPoint3d o = rd.vec();
+        SmVector3d x = rd.vec();
+        SmVector3d y = rd.vec();
+        double r = rd.num();
+        double a0 = rd.num();
+        double a1 = rd.num();
+        double h = rd.num();
+        SmBoolean swap = rd.bflag();
+        SmBoolean inside = rd.bflag();
+        SmCylinder* c = new (ctx) SmCylinder(o, x, y, r, a0, a1, h, swap, inside, FALSE, &ctx);
+        c->MakeNurb();
+        return c;
     }
     bool oob = rd.flag();
     SmBSplineSurfaceForm form = (SmBSplineSurfaceForm)rd.idx();

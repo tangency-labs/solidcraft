@@ -1265,4 +1265,39 @@ mod tests {
         let p = siv.evaluate_point(k, uv).unwrap();
         assert_eq!(d.first().and_then(|r| r.first()).copied(), Some(p));
     }
+
+    /// `SmSrfInVolume::ConvertUVFromSTEPToNURBS` / `ConvertUVFromNURBSToSTEP`
+    /// (`SmSrfInVolume.h`) forward to the base surface: through the `Surface`
+    /// dispatch, a surface in volume over a cone converts as the cone does, not as the
+    /// identity.
+    #[test]
+    fn surface_dispatch_converts_uv_like_the_base_surface() {
+        let k = &Kernel::default();
+        let cone = crate::surface::cone::Cone::create_canonical(
+            k,
+            &Axis2Placement::IDENTITY,
+            2.0,
+            1.0,
+            3.0,
+            false,
+            false,
+        )
+        .unwrap();
+        let base = Surface::from(cone);
+        let volume = TwistVolume::create(
+            Vec3::ZERO,
+            Vec3::new(0.0, 0.0, 1.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            4.0,
+            1e-3,
+        );
+        let siv = Surface::from(SrfInVolume::new(k, base.clone(), true, volume, 0, 3).unwrap());
+        let uv = Point2::new(1.1, 0.4);
+        let to_nurbs = base.convert_uv_from_step_to_nurbs(k, uv).unwrap();
+        assert_ne!(to_nurbs, uv);
+        assert_eq!(siv.convert_uv_from_step_to_nurbs(k, uv).unwrap(), to_nurbs);
+        let to_step = base.convert_uv_from_nurbs_to_step(k, uv).unwrap();
+        assert_ne!(to_step, uv);
+        assert_eq!(siv.convert_uv_from_nurbs_to_step(k, uv).unwrap(), to_step);
+    }
 }

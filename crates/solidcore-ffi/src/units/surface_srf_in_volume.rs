@@ -5,7 +5,9 @@
 //!
 //! Every input starts with a block building the `SmSrfInVolume` `c` the op runs on: a
 //! surface block (`0 oob form n m p q r s cpts(x y z w) u v`: an
-//! `SmBSplineSurface(gw_SURFACE*, FALSE, NULL)`, or `1 O[3] N[3]`: `SmPlane(O, N)`), a
+//! `SmBSplineSurface(gw_SURFACE*, FALSE, NULL)`, `1 O[3] N[3]`: `SmPlane(O, N)`, or
+//! `2 O[3] X[3] Y[3] r start end h swap inside`: `SmCylinder(O, X, Y, r, start, end, h,
+//! swap, inside, FALSE)` with its NURB made), a
 //! volume block (`n` maps, each `kind [T[12]] has_orient [O[12]]` with kind `0` a plain
 //! `SmVolume`, `1` an `SmTransform(ctx, origin, X, Y, &Z)` from the twelve numbers `T`,
 //! `2` a default `SmTwistVolume`, `3` a default `SmUnbendVolume`, `4` a default
@@ -58,6 +60,10 @@
 //! parameters inside the base B-spline's domain, placements with independent axes, and
 //! database text that is a complete ASCII record without a plain `SmVolume` or a
 //! B-spline volume (reading a plain volume fills a null volume).
+//! A cylinder base needs independent placement axes, a positive radius and height and
+//! `-360 <= start < end <= start + 360`; it runs only `Info` and the evaluation ops (it
+//! is there for the analytic base's virtuals the object forwards to, such as
+//! `ConvertUVFrom*`), not `SetBase`.
 
 use crate::validate::{bad, check_knots, NOW};
 use crate::{call_with_buffer, FfiError};
@@ -142,6 +148,8 @@ struct Block {
     any_base: bool,
     /// The constructor copies the volume.
     copies_volume: bool,
+    /// The base surface is a cylinder.
+    cylinder: bool,
 }
 
 impl Reader<'_> {
@@ -230,12 +238,32 @@ fn check_points(rd: &mut Reader<'_>, k: usize) -> Result<(), FfiError> {
     Ok(())
 }
 
-/// A surface block; returns its parameter domain (`None` for a plane).
-fn surface(rd: &mut Reader<'_>) -> Result<Option<[f64; 4]>, FfiError> {
-    if rd.index(1)? == 1 {
+/// A surface block; returns its parameter domain (`None` for a plane or a cylinder) and
+/// whether it is a cylinder (only where `cylinder_ok`).
+fn surface(rd: &mut Reader<'_>, cylinder_ok: bool) -> Result<(Option<[f64; 4]>, bool), FfiError> {
+    let kind = rd.index(2)?;
+    if kind == 1 {
         rd.vec3()?;
         rd.nonzero3()?;
-        return Ok(None);
+        return Ok((None, false));
+    }
+    if kind == 2 {
+        if !cylinder_ok {
+            return Err(bad("cylinder base not allowed here"));
+        }
+        rd.placement()?;
+        let r = rd.finite()?;
+        let (a0, a1) = (rd.finite()?, rd.finite()?);
+        let h = rd.finite()?;
+        if r < 1e-6 || h < 1e-6 {
+            return Err(bad("cylinder: need a positive radius and height"));
+        }
+        if a0 < -360.0 || a1 > a0 + 360.0 || a1 <= a0 || a1 > 360.0 {
+            return Err(bad("cylinder: need -360 <= start < end <= start + 360"));
+        }
+        rd.flag()?;
+        rd.flag()?;
+        return Ok((None, true));
     }
     rd.flag()?;
     rd.index(11)?;
@@ -255,7 +283,7 @@ fn surface(rd: &mut Reader<'_>) -> Result<Option<[f64; 4]>, FfiError> {
     let v = rd.finites(s + 1)?;
     let (u0, u1) = check_knots(&u, p, "surface u")?;
     let (v0, v1) = check_knots(&v, q, "surface v")?;
-    Ok(Some([u0, v0, u1, v1]))
+    Ok((Some([u0, v0, u1, v1]), false))
 }
 
 /// A volume block; returns (head is a plain volume, all maps transforms, some map is a
@@ -301,7 +329,7 @@ fn volume(rd: &mut Reader<'_>) -> Result<(bool, bool, bool), FfiError> {
 
 /// An object block (see the module docs).
 fn object_block(rd: &mut Reader<'_>) -> Result<Block, FfiError> {
-    let domain = surface(rd)?;
+    let (domain, cylinder) = surface(rd, true)?;
     let (head_base, all_transforms, any_base) = volume(rd)?;
     rd.flag()?;
     let copy_flag = rd.index(3)?;
@@ -316,6 +344,7 @@ fn object_block(rd: &mut Reader<'_>) -> Result<Block, FfiError> {
         all_transforms,
         any_base,
         copies_volume,
+        cylinder,
     })
 }
 
@@ -334,6 +363,14 @@ fn inside(rd: &mut Reader<'_>, c: &Block, v_dir: bool) -> Result<f64, FfiError> 
 }
 
 fn validate_op(op: Op, rd: &mut Reader<'_>, c: &Block) -> Result<(), FfiError> {
+    if c.cylinder
+        && !matches!(
+            op,
+            Op::Info | Op::Eval | Op::EvalSimple | Op::EvalPoint | Op::Normal
+        )
+    {
+        return Err(bad("cylinder base: only Info and the evaluation ops"));
+    }
     match op {
         Op::Info => {
             rd.uv()?;
@@ -419,7 +456,7 @@ fn validate_op(op: Op, rd: &mut Reader<'_>, c: &Block) -> Result<(), FfiError> {
             rd.index(3)?;
         }
         Op::SetBase => {
-            surface(rd)?;
+            surface(rd, false)?;
             rd.flag()?;
             rd.flag()?;
             rd.flag()?;
