@@ -774,15 +774,24 @@ fn c1_collect_points(
 
     // Now, compute 'through points' from all internal G1 knots
     // (the size is re-read every iteration, as upstream's GetSize())
+    // SolidCraft (tangency-labs/solidcore#1022, WR-468, opt-in): then from the edge's
+    // ends where a rail of geometry 0 ends on an extended edge
+    // ([`c1_extended_rail_end_knots`]).
+    let extra_knots = if cx.k.fixes.fillet_through_extended_rail_end {
+        c1_extended_rail_end_knots(ops, cx, st)?
+    } else {
+        Vec::new()
+    };
     let mut k = 0;
-    while k < ops.solver().g1_knots.len() {
+    while k < ops.solver().g1_knots.len() + extra_knots.len() {
         // get position and tangent at G1 knot (status checked, values unused)
-        let knot = ops
-            .solver()
-            .g1_knots
-            .get(k)
-            .copied()
-            .ok_or_else(|| invalid("G1 knot index out of range"))?;
+        let knot = match ops.solver().g1_knots.get(k) {
+            Some(&knot) => knot,
+            None => extra_knots
+                .get(k - ops.solver().g1_knots.len())
+                .copied()
+                .ok_or_else(|| invalid("G1 knot index out of range"))?,
+        };
         st.edge_curve.evaluate(cx.k, knot, 1, true, false)?;
 
         // guess point: GetSurface(0) point nearest to the end of the binormal (half
@@ -873,6 +882,85 @@ fn c1_collect_points(
     }
 
     Ok(Some(SurfPass { uv_curve, all }))
+}
+
+/// Not upstream: the SolidCraft fork's addition to `CalcFilletGeom`
+/// (tangency-labs/solidcore#1022, WR-468; opt-in
+/// `Kernel::fixes.fillet_through_extended_rail_end`). A rail end on an extended edge
+/// (`SM_FV_RAIL_X_EXTENDED_EDGEUSE`) is found on the fillet surface only once that is
+/// made, so it gives the trace no point, and the surface can stop short of the
+/// filleted edge's end when the other rail ends well inside it. At such an end the
+/// corner's cap edges meet at the filleted edge's end, so the fillet runs at least to
+/// it: the edge's end parameter (`sIvl.GetMin()` / `GetMax()`, whichever end is the
+/// corner's filleted vertex) is a through point too. Returns those parameters not
+/// already among the G1 knots, in rail and end order; none for a closed edge or
+/// without the executive's corners.
+///
+/// # Errors
+///
+/// `SM_ERR_NULL_POINTER` for a missing edge use, edge, rail or corner.
+fn c1_extended_rail_end_knots(
+    ops: &dyn FilletSolverOps,
+    cx: &Cx<'_>,
+    st: &CalcState,
+) -> Result<Vec<f64>> {
+    use crate::blend::fillet_geom::p1::FilletVertexType;
+    use crate::topology::edge as topo_edge;
+
+    // a standalone entry point has no executive corners to resolve the rail ends'
+    // corners with: nothing to add
+    let corners = match &cx.solvers {
+        GeometrySolvers::Live(context) => context.corners(),
+        GeometrySolvers::Indexed(_) => return Ok(Vec::new()),
+    };
+    let eu0 = ops
+        .solver()
+        .edgeuse(0)?
+        .ok_or_else(|| SolidError::null_pointer(OP))?;
+    let edge = eu::edge(cx.target, eu0)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+    let start = topo_edge::start_vertex(cx.target, edge)?;
+    let end = topo_edge::end_vertex(cx.target, edge)?;
+    let mut knots = Vec::new();
+    // a closed edge has no end the fillet stops at
+    if start == end {
+        return Ok(knots);
+    }
+    for which_rail in 0..2 {
+        let rail = cx
+            .fillets
+            .geom(st.geom0)?
+            .rail(which_rail)
+            .ok_or_else(|| SolidError::null_pointer(OP))?;
+        let brep = cx.fillets.brep();
+        let first = topo_edge::vertex(brep, rail)?;
+        let second = match first {
+            Some(v) => topo_edge::other_vertex(brep, rail, Some(v))?,
+            None => None,
+        };
+        for fv in [first, second].into_iter().flatten() {
+            let fillet_vertex = cx.fillets.fillet_vertex(fv)?;
+            if fillet_vertex.fillet_vertex_type() != FilletVertexType::RailXExtendedEdgeuse {
+                continue;
+            }
+            let Some(corner) = fillet_vertex.fillet_corner() else {
+                continue;
+            };
+            let Some(corner_vertex) = corners.corner(corner)?.filleted_vertex() else {
+                continue;
+            };
+            let param = if Some(corner_vertex) == start {
+                st.ivl.min()
+            } else if Some(corner_vertex) == end {
+                st.ivl.max()
+            } else {
+                continue;
+            };
+            if !ops.solver().g1_knots.contains(&param) && !knots.contains(&param) {
+                knots.push(param);
+            }
+        }
+    }
+    Ok(knots)
 }
 
 #[cfg(test)]
@@ -1281,6 +1369,117 @@ mod tests_c1 {
                 entity: None,
             }
         );
+    }
+
+    /// The executive's corner table, for [`c1_extended_rail_end_knots`]; the other
+    /// context calls are not reached.
+    struct CornersOnly(
+        Vec<crate::blend::fillet_corner::p3::FilletCorner>,
+        NoCorners,
+    );
+
+    impl FilletGeometryContext for CornersOnly {
+        fn set_extension_flags(
+            &self,
+            _solver: &mut dyn FilletSolverOps,
+            _k: &Kernel,
+            _target: &Brep,
+        ) -> Result<()> {
+            Ok(())
+        }
+        fn solver<'s>(
+            &'s self,
+            _id: FilletSolverId,
+            current: &'s FilletSolver,
+        ) -> Result<&'s FilletSolver> {
+            Ok(current)
+        }
+        fn corners(&self) -> CornerLookup<'_> {
+            CornerLookup::table(&self.0)
+        }
+        fn split_corners(&mut self) -> &mut dyn SplitCorners {
+            &mut self.1
+        }
+    }
+
+    /// tangency-labs/solidcore#1022: a rail of geometry 0 that ends on an extended edge
+    /// (`SM_FV_RAIL_X_EXTENDED_EDGEUSE`) at the corner of the filleted edge's start
+    /// (or end) makes that end parameter a through knot, once, and only for a corner at
+    /// one of the edge's ends.
+    #[test]
+    fn issue_1022_extended_rail_end_adds_the_edge_end_as_a_through_knot() {
+        use crate::blend::fillet_corner::p3::{FilletCorner, FilletCornerKind};
+        use crate::blend::fillet_geom::p1::FilletCornerId;
+
+        let k = Kernel::default();
+        // the target edge v0 -> v1 with a vertex use on each edge use (start, end)
+        let (mut tb, eus) = target(Some(line_curve([0.0, 0.0, 0.0], [2.0, 0.0, 0.0], 3)));
+        let edge = eu::edge(&tb, eus[0]).unwrap().unwrap();
+        let [v0, v1] = tb.edge(edge).unwrap().vertices;
+        for (e, v) in [(eus[0], v0), (eus[1], v1)] {
+            let vu = tb
+                .add_vertexuse_record(Vertexuse {
+                    vertex: Some(v),
+                    ..Vertexuse::default()
+                })
+                .unwrap();
+            tb.edgeuse_mut(e).unwrap().vertexuse = Some(vu);
+        }
+        // ROWS: rail 1's first end is the only SM_FV_RAIL_X_EXTENDED_EDGEUSE vertex
+        let (mut fb, _g, _) = fillets(&k, ROWS);
+        let extended: Vec<_> = crate::topology::brep::p1::vertices(fb.brep(), None)
+            .unwrap()
+            .into_iter()
+            .filter(|&v| {
+                fb.fillet_vertex(v)
+                    .is_ok_and(|f| f.fillet_vertex_type() == FilletVertexType::RailXExtendedEdgeuse)
+            })
+            .collect();
+        assert_eq!(extended.len(), 1);
+        fb.fillet_vertex_mut(extended[0])
+            .unwrap()
+            .set_fillet_corner(Some(FilletCornerId(0)));
+
+        for (corner_vertex, want) in [(v0, vec![0.0]), (v1, vec![1.0])] {
+            let corner = FilletCorner::new(
+                FilletCornerKind::Open,
+                Some(corner_vertex),
+                None,
+                None,
+                1e-6,
+                1e-3,
+            );
+            let mut ctx = CornersOnly(vec![corner], NoCorners);
+            let mut ops = solver(&k, eus);
+            let mut cx = Cx {
+                k: &k,
+                target: &mut tb,
+                fillets: &mut fb,
+                solvers: GeometrySolvers::Live(&mut ctx),
+                error_info: None,
+            };
+            let st = c1_setup(&mut ops, &mut cx).unwrap();
+            assert_eq!(c1_extended_rail_end_knots(&ops, &cx, &st).unwrap(), want);
+            // a knot already among the G1 knots is not added again
+            ops.0.g1_knots.push(want[0]);
+            assert!(c1_extended_rail_end_knots(&ops, &cx, &st)
+                .unwrap()
+                .is_empty());
+        }
+
+        // without the executive's corners (a standalone entry point): none
+        let mut ops = solver(&k, eus);
+        let mut cx = Cx {
+            k: &k,
+            target: &mut tb,
+            fillets: &mut fb,
+            solvers: GeometrySolvers::Indexed(&[]),
+            error_info: None,
+        };
+        let st = c1_setup(&mut ops, &mut cx).unwrap();
+        assert!(c1_extended_rail_end_knots(&ops, &cx, &st)
+            .unwrap()
+            .is_empty());
     }
 }
 
