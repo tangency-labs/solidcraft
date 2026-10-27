@@ -638,7 +638,8 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
 const BRANCH_BUTTON_MAX: f32 = 160.0;
 
 /// The branch the History shows, as a button left of the features. Its menu switches to
-/// another branch, starts a new one from here, or opens the Versions window. Returns its width.
+/// another branch, starts a new one from here, renames the open one in place, or opens the
+/// Versions window. Returns its width.
 fn history_branch(app: &mut SolveApp, ui: &mut egui::Ui, left_center: egui::Pos2) -> f32 {
     let t = Tokens::get();
     let versions = &app.session.doc.versions;
@@ -653,8 +654,32 @@ fn history_branch(app: &mut SolveApp, ui: &mut egui::Ui, left_center: egui::Pos2
     let rect = Rect::from_min_size(pos2(left_center.x, left_center.y - t.space_24 / 2.0), vec2(BRANCH_BUTTON_MAX, t.space_24));
     let mut child = ui.new_child(UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
     child.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+    // Renaming: the button is a name field until Enter renames the open branch, or Escape or a
+    // click elsewhere leaves the name as it was. An empty name changes nothing.
+    let rename_id = egui::Id::new("sc_history_branch_rename");
+    if let Some(mut name) = ui.data(|d| d.get_temp::<String>(rename_id)) {
+        let enter = crate::ui_kit::focused_text_field(&mut child, &mut name, &open);
+        let field = child.min_rect();
+        crate::scenario::publish_rect("history:branch", field);
+        let (escape, elsewhere) =
+            ui.input(|i| (i.key_pressed(egui::Key::Escape), i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !field.contains(p))));
+        if enter || escape || elsewhere {
+            ui.data_mut(|d| d.remove::<String>(rename_id));
+        } else {
+            ui.data_mut(|d| d.insert_temp(rename_id, name.clone()));
+        }
+        if enter
+            && !name.trim().is_empty()
+            && let Err(e) = app.run("version.rename", json!({ "workspace": current, "name": name.trim() }))
+        {
+            app.set_status(e, true);
+        }
+        return field.width();
+    }
     let mut chosen: Option<(&str, Value)> = None;
-    let response = crate::ui_kit::Menu::button(&mut child, open, |ui| {
+    let mut rename = false;
+    let shown = open.clone();
+    let response = crate::ui_kit::Menu::button(&mut child, shown, |ui| {
         for (id, name) in &branches {
             let mut item = crate::ui_kit::MenuItem::new(id, name, "");
             item.checked = Some(*id == current);
@@ -674,6 +699,12 @@ fn history_branch(app: &mut SolveApp, ui: &mut egui::Ui, left_center: egui::Pos2
             chosen = Some(("version.branch", json!({ "name": crate::dialogs::versions_ui::fresh_branch_name(app, "") })));
             ui.close();
         }
+        let renamer = crate::context_menu::button(ui, crate::i18n::tr_label("Rename"), "");
+        crate::scenario::publish_handle("history:branch_rename", renamer.rect.center());
+        if renamer.clicked() {
+            rename = true;
+            ui.close();
+        }
         if crate::context_menu::button(ui, crate::i18n::tr_label("Versions"), "").clicked() {
             chosen = Some(("version.graph", Value::Null));
             ui.close();
@@ -683,6 +714,9 @@ fn history_branch(app: &mut SolveApp, ui: &mut egui::Ui, left_center: egui::Pos2
     crate::scenario::publish_handle("history:branch", response.rect.center());
     crate::scenario::publish_rect("history:branch", response.rect);
     let width = response.rect.width();
+    if rename {
+        ui.data_mut(|d| d.insert_temp(rename_id, String::new()));
+    }
     match chosen {
         Some(("version.graph", _)) => app.start("version.graph"),
         Some((id, params)) => {
@@ -1167,8 +1201,20 @@ mod tests {
             assert_eq!(h.app.session.doc.versions.current, to);
             assert_eq!(h.app.session.doc.features.len(), features, "{to}");
         }
-        h.app.run("version.rename", json!({"workspace": branch, "name": "A branch name long enough to crowd out the features"})).unwrap();
-        h.frames(2);
+        // Rename in place: Escape keeps the name, Enter takes the typed one.
+        let long = "A branch name long enough to crowd out the features";
+        for (key, name) in [("Escape", "Branch 2"), ("Enter", long)] {
+            h.step(&json!({"click": {"handle": "history:branch"}})).unwrap();
+            h.frames(2);
+            h.step(&json!({"click": {"handle": "history:branch_rename"}})).unwrap();
+            h.frames(2);
+            h.step(&json!({"text": long})).unwrap();
+            h.frames(1);
+            h.step(&json!({"key": key})).unwrap();
+            h.frames(3);
+            let open = h.app.session.doc.versions.workspaces.iter().find(|w| w.id == branch).map(|w| w.name.clone());
+            assert_eq!(open.as_deref(), Some(name), "{key}");
+        }
         assert!(crate::scenario::rect_of("history:branch").unwrap().width() <= super::BRANCH_BUTTON_MAX + 1.0);
     }
 }
