@@ -14,6 +14,9 @@
   "ja": {
     "ui.gpu_memory_lowered": "グラフィックカードのメモリが不足しています。ビューは低い画質で描画されます。"
   },
+  "vi": {
+    "ui.gpu_memory_lowered": "Card đồ họa đã hết bộ nhớ: khung nhìn được vẽ với chất lượng thấp hơn."
+  },
   "zh": {
     "ui.gpu_memory_lowered": "显卡内存不足：视图以较低画质绘制。"
   }
