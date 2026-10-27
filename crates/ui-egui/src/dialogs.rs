@@ -420,6 +420,10 @@ pub struct HoleOpts {
     pub thread_depth: String,
     /// The tapped thread's hand (right or left).
     pub hand: solidcraft_engine::doc::thread_forms::ThreadHand,
+    /// The tapped thread cut into the wall, not only listed.
+    pub modeled: bool,
+    /// A modelled tapped thread's inner end, towards the bottom: square or a fade.
+    pub ease_out: crate::dialogs_thread::Ease,
 }
 
 impl Default for HoleOpts {
@@ -436,6 +440,8 @@ impl Default for HoleOpts {
             thread_full_depth: true,
             thread_depth: "10 mm".into(),
             hand: solidcraft_engine::doc::thread_forms::ThreadHand::Right,
+            modeled: false,
+            ease_out: crate::dialogs_thread::Ease::default(),
         }
     }
 }
@@ -4487,13 +4493,19 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                         return Err(error.clone());
                     }
                     solidcraft_engine::doc::parse_tapped_thread(&opts.thread)
-                        .ok_or("select a valid metric or catalogued UNC/UNF, G or Rp thread size")?;
+                        .ok_or("select a valid metric or catalogued UNC/UNF, G, Rp, Rc or NPT thread size")?;
                     params["thread"] = json!(opts.thread.trim());
                     if !opts.thread_full_depth {
                         params["thread_depth"] = json!(opts.thread_depth.trim());
                     }
                     if opts.hand != solidcraft_engine::doc::thread_forms::ThreadHand::Right {
                         params["hand"] = json!(opts.hand);
+                    }
+                    if opts.modeled {
+                        params["modeled"] = json!(true);
+                        if let Some(e) = opts.ease_out.param() {
+                            params["ease_out"] = e;
+                        }
                     }
                 }
                 match *kind {
@@ -5416,7 +5428,22 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             d.extra.insert("pull".into(), pt3(pull.0));
             d
         }
-        FeatureKind::Hole { position, at, direction, diameter, depth, hole, points, thread, thread_depth, hand, to, references } => {
+        FeatureKind::Hole {
+            position,
+            at,
+            direction,
+            diameter,
+            depth,
+            hole,
+            points,
+            thread,
+            thread_depth,
+            hand,
+            modeled,
+            ease_out,
+            to,
+            references,
+        } => {
             let mut d = start("solid.hole")?;
             let mut k = hole_defaults(s);
             if let Kind::Hole { diameter: dia, depth: dep, kind, cb_diameter, cb_depth, cs_diameter, cs_angle, opts } = &mut k {
@@ -5428,6 +5455,8 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     opts.tapped = true;
                     opts.thread = th.clone();
                     opts.hand = *hand;
+                    opts.modeled = *modeled;
+                    opts.ease_out = crate::dialogs_thread::Ease::of(ease_out);
                 }
                 opts.thread_full_depth = thread_depth.is_none();
                 if let Some(depth) = thread_depth {

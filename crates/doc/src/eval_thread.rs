@@ -87,7 +87,7 @@ pub(super) struct ThreadAsk<'a> {
     /// is mm + pitches x the pitch. The start never fades: it runs off its free end.
     pub ease_out: (f64, f64),
     /// A tapped hole's thread: `designation` is a catalogue size (ISO metric, or a catalogued
-    /// UNC/UNF, G or Rp size), and a size that is not metric fits the hole drilled for it.
+    /// UNC/UNF, G, Rp, Rc or NPT size), and a size that is not metric fits the hole drilled for it.
     pub tapped: bool,
 }
 
@@ -185,10 +185,9 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
     let tapped = match (ask.tapped, ask.designation) {
         (false, _) => None,
         (true, None) => return Err(DocError::Invalid("a tapped hole needs a designation".into())),
-        (true, Some(name)) => Some(
-            crate::parse_tapped_thread(name)
-                .ok_or_else(|| DocError::Invalid(format!("unknown tapped thread `{name}` (ISO metric or a catalogued UNC/UNF, G or Rp size)")))?,
-        ),
+        (true, Some(name)) => Some(crate::parse_tapped_thread(name).ok_or_else(|| {
+            DocError::Invalid(format!("unknown tapped thread `{name}` (ISO metric or a catalogued UNC/UNF, G, Rp, Rc or NPT size)"))
+        })?),
     };
     let size = match (&tapped, ask.designation) {
         (Some(t), _) => crate::thread_forms::ThreadSize { form, major: t.major_diameter, pitch: t.pitch, lead: t.pitch },
@@ -707,24 +706,35 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         ease_out: (0.0, 0.0),
         tapped: false,
     };
-    // ISO 3508's runouts: standard 2.5 P, short 1.25 P.
-    let runout = |e: &Option<crate::ThreadRunout>| -> Result<(f64, f64)> {
-        Ok(match e {
-            None => (0.0, 0.0),
-            Some(crate::ThreadRunout::Standard) => (0.0, 2.5),
-            Some(crate::ThreadRunout::Short) => (0.0, 1.25),
-            Some(crate::ThreadRunout::Length { length }) => (val(vals, length, Kind::Length)?, 0.0),
-        })
-    };
     if ease_out.is_some() && !*modeled {
         return Err(DocError::Invalid("a runout is cut only on a modelled thread".into()));
     }
-    let ask = ThreadAsk { ease_out: runout(ease_out)?, ..ask };
-    let ThreadOn { info: t, cyl, ends, steep, ease, from: from_side } = thread_on(st, f.id, face.0, &ask)?;
+    let ask = ThreadAsk { ease_out: runout(vals, ease_out)?, ..ask };
+    let on = thread_on(st, f.id, face.0, &ask)?;
     if !*modeled {
-        st.threads.push(t);
+        st.threads.push(on.info);
         return Ok(());
     }
+    let angle = chamfer_angle.as_deref().map(|e| val(vals, e, Kind::Angle)).transpose()?;
+    let depth = chamfer_depth.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?;
+    cut(st, on, (*tip, angle, depth))
+}
+
+/// A runout as (mm, pitches): ISO 3508's standard 2.5 P and short 1.25 P, or a length.
+pub(super) fn runout(vals: &BTreeMap<String, Value>, e: &Option<crate::ThreadRunout>) -> Result<(f64, f64)> {
+    Ok(match e {
+        None => (0.0, 0.0),
+        Some(crate::ThreadRunout::Standard) => (0.0, 2.5),
+        Some(crate::ThreadRunout::Short) => (0.0, 1.25),
+        Some(crate::ThreadRunout::Length { length }) => (val(vals, length, Kind::Length)?, 0.0),
+    })
+}
+
+/// Cut a modelled thread resolved on its face into its body: the grooves (SMLib's exact screw
+/// sweeps, a taper's crests by its envelope) by one B-rep boolean, then the chamfered tip
+/// (`tip`, with its angle and depth when given).
+pub(super) fn cut(st: &mut ModelState, on: ThreadOn, (tip, angle, depth): (ThreadTip, Option<f64>, Option<f64>)) -> Result<()> {
+    let ThreadOn { info: t, cyl, ends, steep, ease, from: from_side } = on;
     let i = st.bodies.iter().position(|b| b.name == t.body).ok_or_else(|| DocError::Invalid("threaded body".into()))?;
     let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
     let (input, radius) = (mb.traced(), cyl.radius);
@@ -758,10 +768,8 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
     let groove = crate::lineage::Lineage::unnamed_faces(groove_faces);
     let lineage = input.lineage.and_then(|l| crate::lineage::Lineage::step(&nb, &[&l, &groove]));
     let mut nb = Traced { body: nb, lineage };
-    if *tip != ThreadTip::None {
-        let angle = chamfer_angle.as_deref().map(|e| val(vals, e, Kind::Angle)).transpose()?;
-        let depth = chamfer_depth.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?;
-        for cone in tip_cones(&t, radius, ends, (*tip, from_side), angle, depth, taper)? {
+    if tip != ThreadTip::None {
+        for cone in tip_cones(&t, radius, ends, (tip, from_side), angle, depth, taper)? {
             let faces = cone.face_count();
             let cut = kernel::boolean(&nb.body, &cone, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("the chamfer removed everything".into()))?;
             let unnamed = crate::lineage::Lineage::unnamed_faces(faces);

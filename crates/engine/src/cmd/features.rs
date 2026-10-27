@@ -69,7 +69,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "CREATE")
         .icon("hole")
         .key("H")
-        .params("position: [x,y,z] on a face (numbers, or length expressions the hole follows) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); flip?: bool (sketch points: drill to the other side); single?: bool (with one sketch point: a Single hole that follows the point, drilled into the face there); direction?: [x,y,z] (default: into the face, against its outward normal; one that leaves the face is mirrored into it; ignored with sketch points unless single); diameter | thread (a tapped hole: metric major minus pitch or tabulated UNC/UNF, G or Rp cut-tap drill) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); depth? (default through all) | to?: [x,y,z] (To Object: drill to that face or point); references?: [{edge: [x,y,z] on a straight edge of the face, distance: expr}] (at most two; the centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric position only); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?; cs_diameter?, cs_angle?; thread?: \"M6\" or \"1/4-20 UNC\" (cosmetic); hand?: right|left (the tapped thread's hand; default right; needs thread); thread_depth?: positive length independent of drill depth (default: full useful cylindrical wall; must fit that wall); targets?: [body] (the bodies to drill; holes at the points of a sketch on a body's face default to that body, found along the holes' direction on it alone; explicit targets or participants override, [\"*\"] every body)"),
+        .params("position: [x,y,z] on a face (numbers, or length expressions the hole follows) | sketch + points: [sketch point ids] (one hole each, perpendicular to the sketch, into the material on whichever side of the sketch plane it is) | sketch alone (every sketch point: standalone points and circle centres); flip?: bool (sketch points: drill to the other side); single?: bool (with one sketch point: a Single hole that follows the point, drilled into the face there); direction?: [x,y,z] (default: into the face, against its outward normal; one that leaves the face is mirrored into it; ignored with sketch points unless single); diameter | thread (a tapped hole: metric major minus pitch or tabulated UNC/UNF, G or Rp cut-tap drill, or the Rc/NPT drill to the internal minor diameter where the thread ends) | clearance: \"M6\" with fit?: close|normal|loose (ISO 273); depth? (default through all) | to?: [x,y,z] (To Object: drill to that face or point); references?: [{edge: [x,y,z] on a straight edge of the face, distance: expr}] (at most two; the centre goes that far from each edge's line, in the face's plane, and follows the edges; with a numeric position only); type?: simple|drilled|counterbore|countersink; tip_angle?; cb_diameter?, cb_depth?; cs_diameter?, cs_angle?; thread?: \"M6\", \"1/4-20 UNC\", \"G 1/4\", \"Rp 1/4\", \"Rc 1/4\" or \"1/4-18 NPT\" (cosmetic unless modeled); hand?: right|left (the tapped thread's hand; default right; needs thread); thread_depth?: positive length independent of drill depth (default: full useful cylindrical wall; must fit that wall); modeled?: bool (needs thread: the tapped thread cut into the wall, the groove between its teeth, as solid.thread's modelled one; default false: listed only); ease_out?: expr|standard|short (modelled tapped threads: the inner end, towards the bottom, fades out over this length, ISO 3508's runout, standard 2.5 P, short 1.25 P; without it the groove stops square at thread_depth, or clear of a blind hole's bottom); targets?: [body] (the bodies to drill; holes at the points of a sketch on a body's face default to that body, found along the holes' direction on it alone; explicit targets or participants override, [\"*\"] every body)"),
     CommandSpec::new("solid.pipe", "Pipe", pipe)
         .at("SOLID", "CREATE")
         .icon("pipe")
@@ -2434,13 +2434,21 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
     {
         return Err(bad(
             cmd,
-            fine_only_hint(t).unwrap_or_else(|| format!("unknown tapped thread `{t}` (ISO metric or a catalogued UNC/UNF, G or Rp size)")),
+            fine_only_hint(t).unwrap_or_else(|| format!("unknown tapped thread `{t}` (ISO metric or a catalogued UNC/UNF, G, Rp, Rc or NPT size)")),
         ));
     }
     let thread_depth = match p.get("thread_depth") {
         None | Some(Value::Null) => None,
         Some(_) => Some(req_expr(cmd, p, "thread_depth")?),
     };
+    let modeled = p.get("modeled").and_then(Value::as_bool).unwrap_or(false);
+    if modeled && thread.is_none() {
+        return Err(bad(cmd, "`modeled` needs `thread` (a tapped hole)"));
+    }
+    let ease_out = runout_param(s, p, cmd, "ease_out")?;
+    if ease_out.is_some() && !modeled {
+        return Err(bad(cmd, "`ease_out` is cut only on a modelled thread (`modeled: true`)"));
+    }
     if let Some(d) = &thread_depth {
         if thread.is_none() {
             return Err(bad(cmd, "`thread_depth` requires `thread` (a tapped hole)"));
@@ -2602,10 +2610,28 @@ fn hole(s: &mut Session, p: &Value) -> Result<Value> {
             thread,
             thread_depth,
             hand,
+            modeled,
+            ease_out,
             to: to.map(FacePick),
             references,
         },
     )
+}
+
+/// A thread's runout parameter: a length, `standard` (ISO 3508's 2.5 P) or `short` (1.25 P);
+/// none or 0: no runout.
+fn runout_param(s: &Session, p: &Value, cmd: &str, key: &str) -> Result<Option<solidcraft_doc::ThreadRunout>> {
+    Ok(match p.get(key) {
+        None | Some(Value::Null) => None,
+        Some(Value::String(t)) if t == "standard" => Some(solidcraft_doc::ThreadRunout::Standard),
+        Some(Value::String(t)) if t == "short" => Some(solidcraft_doc::ThreadRunout::Short),
+        Some(Value::Number(n)) if n.as_f64() == Some(0.0) => None,
+        Some(_) => {
+            let e = expr(p, key).ok_or_else(|| bad(cmd, format!("`{key}` must be a length, \"standard\" or \"short\"")))?;
+            check_expr(s, &e, Kind::Length, cmd, key)?;
+            Some(solidcraft_doc::ThreadRunout::Length { length: e })
+        }
+    })
 }
 
 /// A hole's reference edges (#37): `references: [{edge: [x, y, z], distance: expr}]`, at most
@@ -2964,26 +2990,13 @@ fn thread(s: &mut Session, p: &Value) -> Result<Value> {
     if tip == ThreadTip::None && (chamfer_angle.is_some() || chamfer_depth.is_some()) {
         return Err(bad(cmd, "`chamfer_angle` and `chamfer_depth` go with a chamfered tip (`tip: start` or `both`)"));
     }
-    let ease = |key: &str| -> Result<Option<solidcraft_doc::ThreadRunout>> {
-        Ok(match p.get(key) {
-            None | Some(Value::Null) => None,
-            Some(Value::String(t)) if t == "standard" => Some(solidcraft_doc::ThreadRunout::Standard),
-            Some(Value::String(t)) if t == "short" => Some(solidcraft_doc::ThreadRunout::Short),
-            Some(Value::Number(n)) if n.as_f64() == Some(0.0) => None,
-            Some(_) => {
-                let e = expr(p, key).ok_or_else(|| bad(cmd, format!("`{key}` must be a length, \"standard\" or \"short\"")))?;
-                check_expr(s, &e, Kind::Length, cmd, key)?;
-                Some(solidcraft_doc::ThreadRunout::Length { length: e })
-            }
-        })
-    };
     if p.get("ease_in").is_some() {
         return Err(bad(
             cmd,
             "`ease_in` is gone: a thread's start runs off its free end, plain or chamfered (`tip: start`); fade the inner end with `ease_out`",
         ));
     }
-    let ease_out = ease("ease_out")?;
+    let ease_out = runout_param(s, p, cmd, "ease_out")?;
     let length = expr(p, "length");
     if let Some(l) = &length {
         check_expr(s, l, Kind::Length, cmd, "length")?;

@@ -831,6 +831,14 @@ pub enum FeatureKind {
         /// The tapped thread's hand: right (the default) or left; never both.
         #[serde(default, skip_serializing_if = "crate::thread_forms::is_default")]
         hand: crate::thread_forms::ThreadHand,
+        /// The tapped thread cut into the wall (the groove between its teeth, as a modelled
+        /// `solid.thread` cuts it) instead of only listed.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        modeled: bool,
+        /// A modelled tapped thread's inner end, towards the bottom: it fades out over this
+        /// length (ISO 3508's runout); none: it stops square, or clear of a blind hole's bottom.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ease_out: Option<ThreadRunout>,
         /// To Object: drill down to the face (or point) here instead of `depth`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         to: Option<FacePick>,

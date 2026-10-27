@@ -568,7 +568,11 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             if opts.tapped {
                 enter |= crate::dialogs_thread::hole_rows(ui, &app.session.doc, &mut opts.thread, &mut opts.custom_thread);
                 crate::dialogs_thread::hole_hand_row(ui, &mut opts.hand);
-                ui_kit::checkbox_grid(ui, &mut [("Full thread depth", &mut opts.thread_full_depth)], 1);
+                ui_kit::checkbox_grid(ui, &mut [("Full thread depth", &mut opts.thread_full_depth), ("Modeled", &mut opts.modeled)], 1);
+                // A modelled thread's inner end, towards the bottom, as the thread dialog's.
+                if opts.modeled {
+                    enter |= crate::dialogs_thread::end_rows(ui, &mut opts.ease_out);
+                }
             }
             // Through all, the tip lies past the part.
             if !opts.all {

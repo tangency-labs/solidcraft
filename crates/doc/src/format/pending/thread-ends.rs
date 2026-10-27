@@ -1,8 +1,10 @@
 //! A modelled thread saves how its ends are finished: `ease_out`, the runout at the inner end,
 //! away from where it starts (`standard` 2.5 P, `short` 1.25 P or `{length}`, ISO 3508), and
 //! `tip`, which free ends are chamfered (`start`: the end it starts from, `both`: each free end;
-//! ISO 4753), with `chamfer_angle` and `chamfer_depth`. Without them, as in an older design, the
-//! groove stops square and no end is chamfered. Designs saved while these were being made are
+//! ISO 4753), with `chamfer_angle` and `chamfer_depth`. A tapped hole saves `modeled` (its thread
+//! cut into the wall) and that thread's `ease_out` towards the bottom. Without them, as in an
+//! older design, the groove stops square, no end is chamfered and a tapped hole's thread is only
+//! listed. Designs saved while these were being made are
 //! rewritten as they open: `tip: chamfer` (every free end) becomes `both`, and an `ease_in` (a
 //! runout at the start, which now always runs off its free end) is dropped. The last release
 //! refuses a design saved with this (the newer format number).

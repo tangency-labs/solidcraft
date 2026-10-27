@@ -1212,3 +1212,48 @@ fn a_taper_pipe_thread_starts_at_a_free_end_and_is_named_for_its_side() {
     let (chamfered, threaded) = (exact_volume(&s, "Part"), exact_volume(&plain, "Part"));
     assert!(chamfered < threaded - 1e-3, "the tip cuts the first teeth: {chamfered} vs {threaded}");
 }
+
+/// A tapped hole's thread cut into its wall (`modeled`), as the thread feature cuts one: an M8
+/// blind hole whose groove stops clear of the drill point's bottom, or fades out before it
+/// (`ease_out`, ISO 3508), which leaves more of the wall than the full form there; an Rc 1/2
+/// through a plate, drilled with the stocked drill under its minor where the thread ends and cut
+/// to its taper; each a valid body that reopens the same.
+#[test]
+fn a_modelled_tapped_hole_stops_clear_of_its_bottom_or_fades_out_before_it() {
+    let blind = |extra: Value| {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length":30,"width":30,"height":20,"body_name":"Plate"}));
+        let mut p = json!({"position":[15,15,20],"direction":[0,0,-1],"thread":"M8","depth":14,"type":"drilled"});
+        for (k, v) in extra.as_object().unwrap() {
+            p[k] = v.clone();
+        }
+        run(&mut s, "solid.hole", p);
+        assert!(s.model.state().body("Plate").unwrap().body.validity().is_empty(), "{extra}");
+        s
+    };
+    let (drilled, square, fade) = (blind(json!({})), blind(json!({"modeled":true})), blind(json!({"modeled":true,"ease_out":"standard"})));
+    let (v0, v1, v2) = (exact_volume(&drilled, "Plate"), exact_volume(&square, "Plate"), exact_volume(&fade, "Plate"));
+    assert!(v1 < v2 && v2 < v0, "drilled {v0}, square {v1}, fade {v2}");
+    // The groove never reaches the drill point: the bottom's cone is the drilled one.
+    assert!(square.model.state().threads.is_empty(), "a modelled thread is cut, not listed");
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&fade.doc.to_json()).unwrap());
+    assert!((exact_volume(&reopened, "Plate") - v2).abs() < 1e-6);
+
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":40,"height":12,"body_name":"Plate"}));
+    let out = run(&mut s, "solid.hole", json!({"position":[20,20,12],"direction":[0,0,-1],"thread":"Rc 1/2"}));
+    let drilled = exact_volume(&s, "Plate");
+    // d1 at the face less 13.2 mm of useful thread at 1 in 16 is 17.807 mm: the stocked drill
+    // under it is 17.75 mm (DIN 345).
+    let drill: f64 = 17.75;
+    assert!((drilled - (40.0 * 40.0 * 12.0 - PI * (drill / 2.0).powi(2) * 12.0)).abs() < 1e-3, "{drilled}");
+    let id = out["feature"].as_u64().unwrap();
+    let redefine = json!({"position":[20,20,12],"direction":[0,0,-1],"thread":"Rc 1/2","modeled":true});
+    run(&mut s, "timeline.redefine", json!({"feature":id,"command":"solid.hole","params":redefine}));
+    assert!(s.model.state().body("Plate").unwrap().body.validity().is_empty());
+    assert!(exact_volume(&s, "Plate") < drilled - 1.0);
+
+    let err = |p: Value| Session::default().execute("solid.hole", &p).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(err(json!({"position":[0,0,0],"diameter":5,"modeled":true})).contains("`modeled` needs `thread`"));
+    assert!(err(json!({"position":[0,0,0],"thread":"M8","ease_out":"standard"})).contains("modelled thread"));
+}

@@ -6285,10 +6285,16 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             let extra: Vec<String> = if *operation == Operation::Join { to_body.into_iter().collect() } else { Vec::new() };
             apply_traced_with(doc, st, f, tools, *operation, &crate::plain(targets), &extra)
         }
-        FeatureKind::Hole { thread, thread_depth, diameter, hand, .. } => {
+        FeatureKind::Hole { thread, thread_depth, diameter, hand, modeled, ease_out, .. } => {
             let thread_depth = thread_depth.as_ref().map(|d| val(vals, d, Kind::Length)).transpose()?;
             if thread_depth.is_some() && thread.is_none() {
                 return Err(DocError::Invalid("thread depth requires a tapped hole".into()));
+            }
+            if *modeled && thread.is_none() {
+                return Err(DocError::Invalid("a modelled thread needs a tapped hole".into()));
+            }
+            if ease_out.is_some() && !*modeled {
+                return Err(DocError::Invalid("a runout is cut only on a modelled thread".into()));
             }
             if thread_depth.is_some_and(|d| !d.is_finite() || d <= 0.0) {
                 return Err(DocError::Invalid("thread depth must be finite and positive".into()));
@@ -6305,14 +6311,31 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             if let Some(d) = thread {
                 // Find the bore beyond any entry recess, including shallow and through holes.
                 let r = val(vals, diameter, Kind::Length)? / 2.0;
-                let parallel_pipe = crate::pipe_thread_catalog::parse_pipe_thread(d).is_some();
+                // A pipe thread's wall must be found: no fallback place on a guessed wall.
+                let pipe = crate::parse_tapped_thread(d).is_some_and(|t| {
+                    matches!(
+                        t.family,
+                        crate::TappedThreadFamily::G | crate::TappedThreadFamily::Rp | crate::TappedThreadFamily::Rc | crate::TappedThreadFamily::Npt
+                    )
+                });
+                let ease = thread::runout(vals, ease_out)?;
                 for p in spots {
-                    let wall = if parallel_pipe {
+                    let wall = if pipe {
                         parallel_tapped_wall(st, p, dir, r).ok_or_else(|| DocError::Invalid("no cylindrical pipe-thread wall remains".into()))?
                     } else {
                         parallel_tapped_wall(st, p, dir, r).unwrap_or(p + dir.any_perp() * r + dir * (r * 0.5))
                     };
                     let ask = thread::ThreadAsk { designation: Some(d), tapped: true, hand: *hand, ..Default::default() };
+                    if *modeled {
+                        // Cut from the entry, as deep as `thread_depth` or along the whole wall:
+                        // at a blind hole's bottom the groove stops clear of it, or fades out
+                        // before it with a runout.
+                        let extent = thread_depth.map_or(thread::Extent::Full, thread::Extent::Length);
+                        let ask = thread::ThreadAsk { modeled: true, extent, from: Some(p), ease_out: ease, ..ask };
+                        let on = thread_on(st, f.id, wall, &ask)?;
+                        thread::cut(st, on, (crate::thread_forms::ThreadTip::None, None, None))?;
+                        continue;
+                    }
                     let mut t = thread_on(st, f.id, wall, &ask)?.info;
                     if let Some(depth) = thread_depth {
                         let available = t.end - t.start;

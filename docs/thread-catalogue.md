@@ -1,8 +1,9 @@
 # Tapped-hole catalogue
 
 The Hole dialog offers ISO metric coarse sizes, 15 additional fine diameter/pitch
-pairs, a finite set of 14 UNC and 14 UNF sizes, and six sizes each for internal
-G/BSPP and Rp parallel pipe threads. This is a verified subset,
+pairs, a finite set of 14 UNC and 14 UNF sizes, six sizes each for internal
+G/BSPP and Rp parallel pipe threads, and the ISO 7-1 Rc and ASME B1.20.1 NPT
+internal taper threads (every size of their tables, `docs/threads.md`). This is a verified subset,
 not complete coverage of these standards. Unified sizes range from #4 through
 #12 and 1/4 through 1 inch. Include the family in a designation, for example
 `1/4-20 UNC` or `#10-32 UNF`.
@@ -26,11 +27,29 @@ not presented as a tabulated 75% cut-tap recommendation. Existing files retain
 their saved diameter expressions. Custom metric dimensions remain editable, and
 Custom stays selected even when its current dimensions match a catalogue entry.
 
-Tapped holes create the physical pilot bore and cosmetic thread metadata. The
-separate Thread command and its automatic sizing remain ISO metric only; this
-catalogue does not enable modelled Unified or pipe threads. Rc, external R, NPT,
-thread classes, handedness and sealing behavior are outside this tranche.
-No tapered thread is represented as a cylindrical hole.
+Tapped holes create the physical pilot bore and the thread, listed (cosmetic) or,
+with `modeled`, cut into the wall as the Thread command cuts a modelled thread:
+the entry is where it starts, and towards the bottom it stops square at the
+thread depth, clear of a blind hole's bottom, or fades out (`ease_out`, ISO 3508).
+A Unified thread is cut with the ISO 68-1 basic profile both share. External R,
+thread classes and sealing behaviour are outside this catalogue.
+
+## Taper Rc and NPT threads
+
+An Rc or NPT hole is drilled with the largest stocked drill not larger than the
+internal thread's minor diameter where the thread ends: the reference plane's
+minor (d - 2h for ISO 7-1, E1 - h for NPT) at the face, less the 1 in 16 taper
+over the thread's length (ISO 7-1's useful thread, NPT's effective thread L2), so
+that the tap cuts full form over the whole length. Rc takes a metric drill of the
+DIN 345 series (to 100 mm), NPT a letter or fractional inch drill (by 64ths to
+1 1/2 in, ASME B94.11M); past the series the hole is bored to the exact value. The
+Hole dialog shows the drill and, as its tooltip, the exact value: Rc 1/2 is
+17.807 mm, drilled 17.75 mm; 1/2 NPT is 17.473 mm (0.6879 in), drilled 11/16 in
+(17.4625 mm). This is derived from the standards, not a tap maker's
+recommendation (which often allows for reaming); an explicit `diameter`
+overrides it. Listed, the hole
+is that cylindrical drill; modelled, the thread's taper is cut into it (the tap's
+minor cone and the helical groove).
 
 ## Parallel G/BSPP and Rp threads
 
@@ -38,8 +57,8 @@ Both families use a 55-degree profile and a cylindrical pilot bore. Keep G and R
 separate: their process-drill recommendations differ. The UI shows the nominal
 pipe designation, actual basic major diameter, pitch/TPI and pilot drill. The
 command accepts canonical labels such as `G 1/4` and `Rp 1/4`, compact forms
-`G1/4` and `Rp1/4`, and `BSPP 1/4` as an alias for G. The separate Thread command
-remains metric-only.
+`G1/4` and `Rp1/4`, and `BSPP 1/4` as an alias for G. The Thread command cuts
+them too (forms `bspp` and `rp`).
 
 | Nominal | TPI | Major mm | Pitch diameter mm | Minor mm | G drill mm | Rp drill mm |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -54,10 +73,17 @@ Pitch is exactly 25.4/TPI. These basic thread dimensions are separate from proce
 bores. The catalogue uses Yamawa's drill column as its default pilot. Its separate
 recommended process-bore references, for the six rows above, are G: 8.78, 11.78,
 15.28, 19.04, 24.52, 30.77 mm and Rp: 8.55, 11.5, 14.9, 18.55, 24.1, 30.25 mm.
-A saved explicit diameter remains authoritative. The geometry stays a physical
-cylindrical pilot plus cosmetic designation, without a helical cut.
+A saved explicit diameter remains authoritative. Listed, the geometry is the
+cylindrical pilot plus the designation; modelled, the helical groove is cut too.
 
 ## Primary sources
+
+- DIN 345:2006 (taper shank twist drills), the metric drill diameters to 100 mm as
+  reproduced at <https://www.fasten.it/en/Norms/Norm/DIN%20345>: the stocked drills
+  of Rc holes. Three digits that reproduction drops (15.25, 34.5, 54) are restored
+  from their neighbours.
+- ASME B94.11M (twist drills): the letter drill sizes A to Z and fractional sizes
+  by 64ths of an inch, the stocked drills of NPT holes.
 
 - [Yamawa, YEU23 European catalogue](https://www.yamawa.eu/files/Yamawa_European_Catalogue_YEU23.pdf),
   printed page 668: basic G/Rp dimensions; page 707: separate G and Rp drill and
@@ -79,8 +105,8 @@ cylindrical pilot plus cosmetic designation, without a helical cut.
 ## Trial
 
 On a small plate, open Hole, choose Tapped, then switch Profile between ISO metric,
-UNC, UNF, G / BSPP and Rp. Try M8, M8x1, 1/4-20 UNC, #10-32 UNF, G 1/4
-and Rp 1/4. Check the displayed drill,
+UNC, UNF, G / BSPP, Rp, Rc and NPT. Try M8, M8x1, 1/4-20 UNC, #10-32 UNF, G 1/4,
+Rp 1/4, Rc 1/4 and 1/4-18 NPT, listed and Modeled, with the End Square or Fade. Check the displayed drill,
 create the hole, save, reopen and check the designation and bore. In ISO metric,
 choose Custom, edit the nominal diameter and pitch, and verify that Custom stays
 selected and an invalid draft cannot apply an earlier valid value.

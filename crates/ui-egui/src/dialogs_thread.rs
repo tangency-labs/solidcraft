@@ -70,11 +70,19 @@ impl HoleThreadDraft {
 /// Custom remains a dialog mode even when its current values match a catalogue size.
 pub(crate) fn hole_rows(ui: &mut egui::Ui, doc: &Document, designation: &mut String, custom: &mut Option<HoleThreadDraft>) -> bool {
     let designation_id = ui.make_persistent_id("hole_thread_designation");
-    let families = [TappedThreadFamily::Metric, TappedThreadFamily::Unc, TappedThreadFamily::Unf, TappedThreadFamily::G, TappedThreadFamily::Rp];
+    let families = [
+        TappedThreadFamily::Metric,
+        TappedThreadFamily::Unc,
+        TappedThreadFamily::Unf,
+        TappedThreadFamily::G,
+        TappedThreadFamily::Rp,
+        TappedThreadFamily::Rc,
+        TappedThreadFamily::Npt,
+    ];
     let family = parse_tapped_thread(designation).map(|s| s.family).unwrap_or(TappedThreadFamily::Metric);
     let mut profile = families.iter().position(|f| *f == family).unwrap_or(0);
     let before_profile = profile;
-    form_row(ui, "Profile", |ui| combo(ui, "hole_thread_profile", &["ISO metric", "UNC", "UNF", "G / BSPP", "Rp"], &mut profile));
+    form_row(ui, "Profile", |ui| combo(ui, "hole_thread_profile", &["ISO metric", "UNC", "UNF", "G / BSPP", "Rp", "Rc", "NPT"], &mut profile));
     let family = families.get(profile).copied().unwrap_or(TappedThreadFamily::Metric);
     let sizes = tapped_thread_sizes(family);
     if family != TappedThreadFamily::Metric {
@@ -107,6 +115,8 @@ pub(crate) fn hole_rows(ui: &mut egui::Ui, doc: &Document, designation: &mut Str
             TappedThreadFamily::Unf => "hole_thread_catalogue_unf",
             TappedThreadFamily::G => "hole_thread_catalogue_g",
             TappedThreadFamily::Rp => "hole_thread_catalogue_rp",
+            TappedThreadFamily::Rc => "hole_thread_catalogue_rc",
+            TappedThreadFamily::Npt => "hole_thread_catalogue_npt",
         };
         combo(ui, catalogue_id, &labels, &mut selected);
         if selected != before {
@@ -118,10 +128,10 @@ pub(crate) fn hole_rows(ui: &mut egui::Ui, doc: &Document, designation: &mut Str
             }
         }
     });
-    if matches!(family, TappedThreadFamily::G | TappedThreadFamily::Rp) {
+    if matches!(family, TappedThreadFamily::G | TappedThreadFamily::Rp | TappedThreadFamily::Rc | TappedThreadFamily::Npt) {
         form_row(ui, "Thread diameter", |ui| {
             if let Some(size) = parse_tapped_thread(designation) {
-                ui.label(format!("{:.3} mm, 55°", size.major_diameter));
+                ui.label(format!("{:.3} mm, {}°", size.major_diameter, size.profile_degrees()));
             }
         });
         form_row(ui, "Pitch", |ui| {
@@ -145,9 +155,21 @@ pub(crate) fn hole_rows(ui: &mut egui::Ui, doc: &Document, designation: &mut Str
     }
     form_row(ui, "Tap drill diameter", |ui| {
         match parse_tapped_thread(designation).filter(|_| custom.as_ref().is_none_or(|draft| draft.error.is_none())) {
-            Some(size) => {
-                ui.label(format!("{} mm", size.tap_drill));
-            }
+            // An Rc or NPT hole is drilled with the stocked drill under the standard's minor
+            // diameter where the thread ends; that exact value is the tooltip.
+            Some(size) => match size.taper_drill() {
+                Some(d) => {
+                    let shown = d
+                        .name
+                        .filter(|n| !n.ends_with(" mm"))
+                        .map_or_else(|| format!("{} mm", size.tap_drill), |n| format!("{} mm ({n})", size.tap_drill));
+                    let exact = format!("{:.3}", d.exact);
+                    ui.label(shown).on_hover_text(crate::i18n::format("thread.taper_drill_exact", &[("exact", &exact)]));
+                }
+                None => {
+                    ui.label(format!("{} mm", size.tap_drill));
+                }
+            },
             None => {
                 ui.label(tr("thread.select_size"));
             }
@@ -205,7 +227,7 @@ pub struct Ease {
 }
 
 impl Ease {
-    fn of(r: &Option<ThreadRunout>) -> Ease {
+    pub(crate) fn of(r: &Option<ThreadRunout>) -> Ease {
         match r {
             None => Ease::default(),
             Some(ThreadRunout::Standard) => Ease { fade: true, ..Ease::default() },
@@ -215,7 +237,7 @@ impl Ease {
     }
 
     /// The command's `ease_out`, none for a square end.
-    fn param(&self) -> Option<Value> {
+    pub(crate) fn param(&self) -> Option<Value> {
         let typed = self.length.trim();
         self.fade.then(|| match (typed.is_empty(), self.short) {
             (false, _) => json!(typed),
@@ -446,16 +468,22 @@ pub(crate) fn rows(
             let depth = if f == ThreadForm::Metric { "ui.iso_4753" } else { "thread.chamfer_depth_needed" };
             enter |= hint_row(ui, "Chamfer Depth", &mut o.chamfer_depth, tr(depth));
         }
-        // The inner end: square, or a fade over its length.
-        let mut fade = usize::from(o.ease_out.fade);
-        choice_row(ui, "End", "thread_end", &mut fade, ENDS_AT);
-        o.ease_out.fade = fade == 1;
-        if o.ease_out.fade {
-            let hint = if o.ease_out.short { tr("thread.fade_short") } else { tr("thread.fade_standard") };
-            enter |= hint_row(ui, "Fade Length", &mut o.ease_out.length, hint);
-        }
+        enter |= end_rows(ui, &mut o.ease_out);
     });
     (enter, reset)
+}
+
+/// The inner end of a modelled thread (a thread's, or a tapped hole's towards its bottom):
+/// square, or a fade over its length.
+pub(crate) fn end_rows(ui: &mut egui::Ui, ease: &mut Ease) -> bool {
+    let mut fade = usize::from(ease.fade);
+    choice_row(ui, "End", "thread_end", &mut fade, ENDS_AT);
+    ease.fade = fade == 1;
+    if !ease.fade {
+        return false;
+    }
+    let hint = if ease.short { tr("thread.fade_short") } else { tr("thread.fade_standard") };
+    hint_row(ui, "Fade Length", &mut ease.length, hint)
 }
 
 /// The Size choice of a form with a size table, and the Pitch choice of the metric ones (an
@@ -766,6 +794,37 @@ mod contribution_tests {
         assert_eq!((h.app.session.undo.len(), h.app.session.redo.len()), history);
     }
 
+    /// A tapped hole offers what a thread does: Modeled, and then its inner end, square or a
+    /// fade, towards the bottom. OK cuts it; editing the hole brings them back.
+    #[test]
+    fn a_tapped_hole_is_modelled_with_the_threads_end() {
+        let (app, dialog) = hole();
+        let mut h = crate::scenario::Harness::new();
+        h.app = app;
+        h.app.dialog = Some(dialog);
+        h.frames(3);
+        for handle in ["dialog:Hole Tap Type", "dialog:Hole Tap Type:Tapped"] {
+            h.step(&json!({"click":{"handle":handle}})).unwrap();
+        }
+        h.frames(2);
+        assert!(crate::scenario::rect_of("dialog:row:End").is_none(), "a listed thread has no end to finish");
+        h.step(&json!({"click":{"handle":"dialog:Modeled"}})).unwrap();
+        h.frames(2);
+        for handle in ["dialog:End", "dialog:End:ui.fade"] {
+            h.step(&json!({"click":{"handle":handle}})).unwrap();
+        }
+        h.frames(2);
+        let (cmd, p) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
+        assert_eq!((&p["modeled"], &p["ease_out"]), (&json!(true), &json!("standard")), "{p}");
+        let id = h.app.run(&cmd, p.clone()).unwrap()["feature"].as_u64().unwrap();
+        h.app.dialog = None;
+        h.app.edit_feature(id);
+        h.frames(2);
+        let (_, again) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
+        let again = if again.get("params").is_some() { again["params"].clone() } else { again };
+        assert_eq!((&again["modeled"], &again["ease_out"]), (&json!(true), &json!("standard")), "{again}");
+    }
+
     #[test]
     fn manual_designation_keeps_keyboard_focus_when_custom_fields_appear() {
         let (app, dialog) = hole();
@@ -937,10 +996,10 @@ mod contribution_tests {
     }
 
     #[test]
-    fn expanded_catalogue_rejects_tapered_holes_and_nonmetric_thread_features() {
+    fn expanded_catalogue_rejects_external_taper_holes_and_nonmetric_thread_features() {
         let (mut app, _) = hole();
         let before = app.session.doc.to_json();
-        for name in ["1/4-18 NPT", "Rc1/4", "R1/4", "1/4-20 UNF"] {
+        for name in ["R1/4", "1/4-20 UNF"] {
             assert!(app.run("solid.hole", json!({"position":[10,10,10],"thread":name})).is_err());
             assert_eq!(app.session.doc.to_json(), before);
         }
