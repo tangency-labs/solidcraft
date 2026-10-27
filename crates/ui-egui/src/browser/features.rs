@@ -202,18 +202,21 @@ fn feature_row(
     let selected = app.session.selection.contains(&Sel::Feature { id });
     app.tree.remember(&format!("f:{id}"));
     let action = sketch.map(|_| ("sketch", "Edit Profile Sketch"));
-    // The bodies it made show and hide with its eye (#5099); a component listed on its own
-    // stands for all of its placements.
+    // A sketch row has the eye its Sketches folder row has. A feature's eye shows and hides the
+    // bodies it made (#5099); a component listed on its own stands for all of its placements.
     let placement = (component == 0 || !path.is_empty()).then_some((component, path));
-    let bodies = app.session.feature_bodies(&[id], placement);
-    let visible = bodies.iter().any(|b| !app.session.visibility.hidden_bodies.contains(b));
-    let eye = (!bodies.is_empty()).then_some(visible);
+    let bodies = if is_sketch { Vec::new() } else { app.session.feature_bodies(&[id], placement) };
+    let visible =
+        if is_sketch { crate::browser::sketch_visible(app, id) } else { bodies.iter().any(|b| !app.session.visibility.hidden_bodies.contains(b)) };
+    let eye = (is_sketch || !bodies.is_empty()).then_some(visible);
     let r = draw_row(
         ui,
         ui.id().with(("browser_feature", id)),
-        &Row { depth, fold, eye, icon, label: &label, selected, dim: dim || eye == Some(false), action, mark, ..Default::default() },
+        &Row { depth, fold, eye, icon, label: &label, selected, dim: dim || (!is_sketch && eye == Some(false)), action, mark, ..Default::default() },
     );
-    if r.eye {
+    if r.eye && is_sketch {
+        crate::browser::set_sketch_visible(app, id, !visible);
+    } else if r.eye {
         let mut p = json!({"visible": !visible, "features": [id]});
         if !path.is_empty() {
             p["path"] = json!(path);
@@ -695,11 +698,9 @@ mod tests {
         h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
         assert!(h.app.preferences.history_in_browser && !h.app.preferences.timeline_left);
         h.frames(3);
-        let elsewhere = count("Profile");
-        assert_eq!(elsewhere, 0, "the Sketches folder starts closed with the history in the browser");
         assert!(h.app.shell.history.is_none(), "no timeline beside the browser history");
+        assert_eq!(count("Profile"), 1, "the Sketches folder starts closed: only the sketch's history row");
         assert_eq!(fold_of("Pad"), None, "in creation order nothing is listed under the extrusion");
-        assert_eq!(count("Profile"), 1);
 
         h.app.preferences.history_sketches = crate::prefs::HistorySketches::UnderFeature;
         h.frames(2);
@@ -765,5 +766,31 @@ mod tests {
         h.frames(2);
         assert_eq!(fold_of("Post"), None, "split by the marker: nothing under the post");
         assert_eq!(count("PostSketch"), 1, "the sketch is its own row");
+    }
+
+    /// A sketch row in the browser's history has the eye its Sketches folder row has.
+    #[test]
+    fn browser_history_sketch_rows_have_an_eye() {
+        let mut h = Harness::new();
+        h.app.preferences.history_sketches = crate::prefs::HistorySketches::UnderFeature;
+        h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
+        let two = h.app.run("sketch.create", json!({"plane":"XY","name":"Two"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("solid.extrude", json!({"sketch":"Two","profiles":[0],"distance":5,"name":"Low","body_name":"A"})).unwrap();
+        let shown = |h: &Harness| solidcraft_engine::view::sketch_shown(&h.app.session, two);
+        h.frames(2);
+        assert!(!shown(&h), "a used sketch is hidden");
+        h.step(&json!({"click": {"handle": "fold:Low"}})).unwrap();
+        h.frames(2);
+        let row = crate::scenario::handle_at(&format!("row:browser-feature:c0:{two}")).unwrap();
+        let eye = crate::scenario::handle_at("eye:Two").unwrap();
+        assert!((eye.y - row.y).abs() < 2.0, "the eye is on the sketch's history row");
+        h.step(&json!({"click": {"handle": "eye:Two"}})).unwrap();
+        h.frames(2);
+        assert!(shown(&h), "its eye shows it");
+        h.step(&json!({"click": {"handle": "eye:Two"}})).unwrap();
+        h.frames(2);
+        assert!(!shown(&h), "and hides it again");
     }
 }
