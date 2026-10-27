@@ -1174,6 +1174,37 @@ mod tests {
         });
     }
 
+    /// An Open says which design it brought in, by the name its tab shows, and whether it took
+    /// a tab of its own or replaced the blank design.
+    #[test]
+    fn an_open_names_the_design_and_says_when_it_got_a_new_tab() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-opened-status-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in ["plate", "post"] {
+            let mut part = Session::default();
+            part.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+            part.execute("file.save", &json!({"path": dir.join(format!("{name}.solidcraft")), "overwrite": true})).unwrap();
+        }
+        let ctx = crate::fonts::test_context();
+        let mut app = SolveApp::new(Session::default(), Default::default());
+        let open = |app: &mut SolveApp, name: &str| {
+            app.open_path_async(&dir.join(format!("{name}.solidcraft")).to_string_lossy());
+            for _ in 0..10_000 {
+                tick(app, &ctx);
+                if app.file_load.idle() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default()
+        };
+        assert_eq!(open(&mut app, "plate"), "Opened plate", "the blank design is replaced in its tab");
+        assert_eq!(app.docs.count(), 1);
+        assert_eq!(open(&mut app, "post"), "Opened post in a new tab");
+        assert_eq!(app.docs.count(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn repeated_queued_opens_reply_once_and_keep_one_session() {
         let mut app = SolveApp::new(Session::default(), Default::default());
