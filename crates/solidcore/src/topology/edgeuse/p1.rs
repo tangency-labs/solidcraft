@@ -832,7 +832,7 @@ pub fn set_uv_trim_curve(
 
 /// The identity edge use `eu` owns geometry under in a B-rep with naming `naming`
 /// ([`NamingScheme`]); `None` when the B-rep records no scheme.
-fn owner_ref(naming: NamingScheme, eu: EdgeuseId) -> Option<ObjectRef> {
+pub(crate) fn owner_ref(naming: NamingScheme, eu: EdgeuseId) -> Option<ObjectRef> {
     match naming {
         NamingScheme::Unknown | NamingScheme::Caller => None,
         NamingScheme::Notify => Some(crate::topology::loopuse::notify_ref(EntityRef::Edgeuse(eu))),

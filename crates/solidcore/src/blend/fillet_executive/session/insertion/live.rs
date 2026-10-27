@@ -254,6 +254,11 @@ impl LiveGeometryInsertion<'_> {
                 classifications: None,
             };
             let attempt = ti.merge_curve_on_surfaces_linked_attempt(k, geometry, &input);
+            // MergeCurveOnSurfaces deletes its temporary curves (`SmObjDelete
+            // sCleanBSC`) on every return, before its status reaches this caller.
+            for temporary in attempt.output.deleted_curves {
+                geometry.destroy_curve_copy(temporary)?;
+            }
             if let Some(edges) = attempt.output.deleted_edges {
                 for edge in edges {
                     match edge {
@@ -264,12 +269,6 @@ impl LiveGeometryInsertion<'_> {
                         _ => return Err(invalid("deleted edge outside actual merge operands")),
                     }
                 }
-            }
-            if !attempt.output.deleted_curves.is_empty() {
-                return Err(SolidError::unported(
-                    "SmTopologyIntersector temporary Curve destruction",
-                    "blend.fillet_executive_p1",
-                ));
             }
             attempt.status
         })

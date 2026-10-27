@@ -240,6 +240,25 @@ impl<'a> InsertionGeometry<'a> {
             curves.insert(notifications.context, curve)?,
         ))
     }
+    /// Free a temporary curve copy an intersector call reported for deletion
+    /// ([`InsertionCurves::destroy`] in the operation's notification domain).
+    /// # Errors
+    /// Not an operation-owned curve handle, missing edit stores, or those of
+    /// [`InsertionCurves::destroy`].
+    pub fn destroy_curve_copy(&mut self, curve: FilletObject) -> Result<()> {
+        let FilletObject::InsertionCurve(binding) = curve else {
+            return Err(invalid("deleted curve is not an operation-owned copy"));
+        };
+        let notifications = self
+            .notifications
+            .as_mut()
+            .ok_or_else(|| invalid("missing insertion notification context"))?;
+        let curves = self
+            .curves
+            .as_mut()
+            .ok_or_else(|| invalid("missing insertion curve ownership"))?;
+        curves.destroy(notifications.context, notifications.attributes, binding)
+    }
     /// Run one edit against the actual body and retained notification stores.
     /// # Errors
     /// Missing actual context or the original edit failure, with partial writes retained.
@@ -634,7 +653,14 @@ impl<'a> InsertionGeometry<'a> {
     /// Missing original Surface, or an owner no insertion body resolves to one
     /// entity.
     pub fn surface_face(&self, binding: SurfaceBinding) -> Result<Option<FilletObject>> {
-        let Some(owner) = self.bound_surface(binding)?.owner() else {
+        self.face_slot_surface_face(self.bound_surface(binding)?)
+    }
+    /// `SmSurface::GetFace()` of a surface held in an insertion body's face slot (a
+    /// bound original or a face's current surface).
+    /// # Errors
+    /// An owner no insertion body resolves to one entity.
+    fn face_slot_surface_face(&self, surface: &Surface) -> Result<Option<FilletObject>> {
+        let Some(owner) = surface.owner() else {
             return Ok(None);
         };
         match self.owner_binding(owner) {
@@ -1053,9 +1079,8 @@ mod tests {
             .as_mut()
             .unwrap()
             .set_owner(Some(foreign), None);
-        assert!(TopologyObjects::curve_edge(&view, curve)
-            .unwrap_err()
-            .is_unported());
+        // Not an edge, curve or edge use: SmCurve::GetEdge's walk stops (NULL).
+        assert_eq!(TopologyObjects::curve_edge(&view, curve).unwrap(), None);
         assert_eq!(
             ClassGeometry::curve(&view, curve).unwrap().owner(),
             Some(foreign)
