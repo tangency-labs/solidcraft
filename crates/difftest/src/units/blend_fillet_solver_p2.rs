@@ -742,7 +742,7 @@ fn put_stored(
 ) -> Result<(), SolidError> {
     let geom = fb.geom(g)?;
     let surface = geom
-        .fillet_surface()?
+        .fillet_surface(None)?
         .ok_or_else(|| SolidError::invalid_input("difftest", "no fillet surface"))?;
     put_srf(k, o, surface);
     let rails = [

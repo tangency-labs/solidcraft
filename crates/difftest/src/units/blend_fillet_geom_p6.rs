@@ -1303,7 +1303,7 @@ impl RustModel {
             for &eu in &geom.ref_eus {
                 self.put_eu(o, eu);
             }
-            dump_surface(o, geom.fillet_surface().map_err(h)?)?;
+            dump_surface(o, geom.fillet_surface(None).map_err(h)?)?;
             dump_bcurve(o, geom.center_line_curve());
             o.extend(geom.deviations);
             for off in &geom.off_surfs {
@@ -1700,7 +1700,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 .fb
                 .geom(g)
                 .map_err(h)?
-                .fillet_surface()
+                .fillet_surface(None)
                 .map_err(h)?
                 .map(|_| GeomErrorObject::FilletSurface(g));
             let comment = ((code & 1) != 0).then_some("SmFilletGeom::RecordFilletError");

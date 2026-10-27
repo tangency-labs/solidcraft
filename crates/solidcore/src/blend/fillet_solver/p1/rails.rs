@@ -398,8 +398,8 @@ impl Rails<'_> {
         let mate = required(eu::mate(self.fillets.brep(), primary)?)?;
         let first = required(self.fillets.fillet_edgeuse(primary)?.fillet_geom())?;
         let second = required(self.fillets.fillet_edgeuse(mate)?.fillet_geom())?;
-        let surf1 = required(self.fillets.geom(first)?.fillet_surface()?)?.clone();
-        let surf2 = required(self.fillets.geom(second)?.fillet_surface()?)?.clone();
+        let surf1 = required(self.fillets.geom(first)?.fillet_surface(None)?)?.clone();
+        let surf2 = required(self.fillets.geom(second)?.fillet_surface(None)?)?.clone();
         let outcome = ops.surface_intersection(
             self.k,
             self.fillets,
@@ -426,7 +426,7 @@ impl Rails<'_> {
             }
         };
         let mut interval = curve.natural_interval();
-        let surface = required(self.fillets.geom(geom)?.fillet_surface()?)?;
+        let surface = required(self.fillets.geom(geom)?.fillet_surface(None)?)?;
         let solutions = surface.global_curve_intersect(
             self.k,
             [CliffHandle::Curve(&curve), CliffHandle::Surface(surface)],

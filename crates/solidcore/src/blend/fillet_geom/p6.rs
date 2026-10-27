@@ -420,7 +420,7 @@ pub(super) fn join_two_fillet_verts_by_curves_resolved<'s>(
 
     // locals
     let geom = fb.geom(g)?;
-    let fillet_surface = geom.fillet_surface()?;
+    let fillet_surface = geom.fillet_surface(None)?;
     let solver_id = geom
         .fillet_solver()
         .ok_or_else(|| invalid(OP_JOIN, "fillet geometry without solver"))?;
@@ -953,7 +953,7 @@ impl FilletBrep {
 
         let fillet_surface = self
             .geom(fillet_geom1)?
-            .fillet_surface()?
+            .fillet_surface(None)?
             .ok_or_else(nul)?
             .clone();
 
@@ -1186,7 +1186,10 @@ impl FilletBrep {
             c.clone()
         } else {
             // RailUVCurve as the appropriate FilletSurface IsoParameterCurve
-            let surface = self.geom(fillet_geom)?.fillet_surface()?.ok_or_else(nul)?;
+            let surface = self
+                .geom(fillet_geom)?
+                .fillet_surface(None)?
+                .ok_or_else(nul)?;
             let uv_domain = surface.natural_uv_domain_with_nurb(k)?;
 
             // compare RailPoint to a FilletSurface Point to see if rail runs along
@@ -1473,7 +1476,7 @@ impl FilletBrep {
 
         // copy FilletSurface and CenterLineCurve
         let to_copy = self.geom(other)?;
-        let copy_surface = match to_copy.fillet_surface()? {
+        let copy_surface = match to_copy.fillet_surface(None)? {
             Some(s) => copy_as_b_spline_surface(k, s)?,
             None => None,
         };
@@ -1817,7 +1820,7 @@ impl FilletBrep {
         // Get UV value (in the fillet surface) for this corner vertexuse
         let surface = self
             .geom(g)?
-            .fillet_surface()?
+            .fillet_surface(None)?
             .ok_or_else(|| SolidError::null_pointer(OP_SETUP))?;
         let uv_domain = surface.natural_uv_domain_with_nurb(k)?;
         let mut uv = uv_domain.evaluate(end_index as f64, rail_index as f64);
@@ -2740,7 +2743,7 @@ mod tests {
         fb.brep_mut().edge_mut(rails_b[0]).unwrap().curve = None;
         fb.copy_geom(&k, b, a, &solvers).unwrap();
         let gb = fb.geom(b).unwrap();
-        assert!(gb.fillet_surface().unwrap().is_some() && gb.center_line_curve().is_some());
+        assert!(gb.fillet_surface(None).unwrap().is_some() && gb.center_line_curve().is_some());
         assert_eq!(gb.deviations, [1e-3, 2e-3]);
         assert_eq!(
             fb.fillet_edge(rails_b[0]).unwrap().original_face(),

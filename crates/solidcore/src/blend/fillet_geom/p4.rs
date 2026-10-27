@@ -1073,7 +1073,7 @@ impl FilletBrep {
         // seen or the geometry has no fillet surface yet
         let surface_of = |g: Option<FilletGeomId>| -> Result<Option<&Surface>> {
             Ok(match g {
-                Some(g) => self.geom(g)?.fillet_surface()?,
+                Some(g) => self.geom(g)?.fillet_surface(None)?,
                 None => None,
             })
         };
@@ -1198,8 +1198,8 @@ impl FilletBrep {
                 .fillet_geom()
                 .ok_or_else(|| SolidError::null_pointer(OP_INT2))?;
             let (Some(fillet_surface1), Some(fillet_surface2)) = (
-                self.geom(g1)?.fillet_surface()?,
-                self.geom(g2)?.fillet_surface()?,
+                self.geom(g1)?.fillet_surface(None)?,
+                self.geom(g2)?.fillet_surface(None)?,
             ) else {
                 return Ok(()); // Fillet surfaces have not yet been computed
             };
@@ -1472,7 +1472,7 @@ impl FilletBrep {
         let ang_tol = fil_solver()?.ang_tol_rad;
         let fillet_surface = self
             .geom(fillet_geom)?
-            .fillet_surface()?
+            .fillet_surface(None)?
             .ok_or_else(|| SolidError::null_pointer(OP_EXT))?;
 
         let result = srf_srf_intersection(
@@ -1704,7 +1704,7 @@ impl FilletBrep {
         // check state - must have a FilletSurface
         let uv_domain = self
             .geom(g)?
-            .fillet_surface()?
+            .fillet_surface(None)?
             .ok_or_else(nul)?
             .natural_uv_domain_with_nurb(k)?;
         let (geom_type, solver_id, rails, other_rails1, other_rails2, side_eus) = {
@@ -1754,7 +1754,7 @@ impl FilletBrep {
                 approx_tol_3d,
                 uv,
                 uv_dir,
-                self.geom(g)?.fillet_surface()?.ok_or_else(nul)?,
+                self.geom(g)?.fillet_surface(None)?.ok_or_else(nul)?,
             )?;
         }
 
@@ -1880,7 +1880,7 @@ impl FilletBrep {
             Self::cap_gap(
                 k,
                 approx_tol_3d,
-                self.geom(g)?.fillet_surface()?.ok_or_else(nul)?,
+                self.geom(g)?.fillet_surface(None)?.ok_or_else(nul)?,
                 [
                     (last.as_ref(), OrientType::Same),
                     (first.as_ref(), OrientType::Same),
@@ -1921,7 +1921,7 @@ impl FilletBrep {
             Self::cap_gap(
                 k,
                 approx_tol_3d,
-                self.geom(g)?.fillet_surface()?.ok_or_else(nul)?,
+                self.geom(g)?.fillet_surface(None)?.ok_or_else(nul)?,
                 [
                     (last.as_ref(), OrientType::Opposite),
                     (first.as_ref(), OrientType::Opposite),
@@ -1977,7 +1977,7 @@ impl FilletBrep {
         if matches!(surface_backend, FaceSurfaceBackend::IndexedValue) {
             // Preserve the existing indexed value contract, including its cliff path.
             // This API does not provide shared source-surface/managed-face binding.
-            let surface = self.geom(g)?.fillet_surface()?.ok_or_else(nul)?.clone();
+            let surface = self.geom(g)?.fillet_surface(None)?.ok_or_else(nul)?.clone();
             if use_uv_curves {
                 let input = FaceCurvesInput {
                     loops: curve_loops,
@@ -2478,7 +2478,7 @@ impl FilletBrep {
                     let fg = self.fillet_edgeuse(prim)?.fillet_geom().ok_or_else(nul)?;
                     (
                         eu1::uv_trim_curve(self.brep(), prim)?.0,
-                        self.geom(fg)?.fillet_surface()?,
+                        self.geom(fg)?.fillet_surface(None)?,
                     )
                 }
             };

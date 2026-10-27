@@ -451,14 +451,15 @@ impl Recovery<'_> {
     ) -> Result<()> {
         let solver_eu = required(self.solver.solver().edgeuse(0)?)?;
         let convex = ops.convex(self, solver_eu, 10, false, 0.0)?;
-        let surface = required(self.fillets.geom(id)?.fillet_surface()?)?;
+        let surface = required(self.fillets.geom(id)?.fillet_surface(None)?)?;
         let analytic = if surface.is_kind_of(crate::surface::surface::p2::B_SPLINE_SURFACE_TYPE)? {
             SurfOfRevolution::is_nurb_surface_surf_of_revolution(self.k, surface, 1.0)?.is_some()
         } else {
             false
         };
         let mut rails = [self.rail_copy(id, 0)?, self.rail_copy(id, 1)?];
-        let original_surface = required(self.fillets.geom(id)?.fillet_surface()?)?.copy(self.k)?;
+        let original_surface =
+            required(self.fillets.geom(id)?.fillet_surface(None)?)?.copy(self.k)?;
         let mut processing_rollover = false;
         let mut corner_eu = None;
         let mut corner_vertex = None;

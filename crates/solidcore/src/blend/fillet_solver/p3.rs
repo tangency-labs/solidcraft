@@ -1521,7 +1521,7 @@ impl FilletSolver {
 
         let fillet_surface = fillets
             .geom(geom)?
-            .fillet_surface()?
+            .fillet_surface(None)?
             .cloned()
             .ok_or_else(nul)?;
         let mut rail = fillets

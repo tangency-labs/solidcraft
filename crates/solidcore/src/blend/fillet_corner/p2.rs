@@ -947,7 +947,7 @@ impl FilletCorner {
             .ok_or_else(|| invalid(OP, "corner vertex without fillet geometry"))?;
         let fillet_srf = pseudo
             .geom(orig_fg)?
-            .fillet_surface()?
+            .fillet_surface(None)?
             .ok_or_else(|| invalid(OP, "fillet geometry without fillet surface"))?;
 
         let srf_domain = fillet_srf.natural_uv_domain_with_nurb(k)?;
@@ -1454,7 +1454,7 @@ impl FilletCorner {
                         .ok_or_else(|| invalid(OP, "fillet edge use without fillet geometry"))?;
                     let fs = solver_ref(env, fillet_geom, OP)?;
                     (
-                        env.pseudo.geom(fillet_geom)?.fillet_surface()?.cloned(),
+                        env.pseudo.geom(fillet_geom)?.fillet_surface(None)?.cloned(),
                         fs.this_approx_tol_3d(),
                         fs.this_ang_tol_rad(),
                     )
@@ -1757,7 +1757,7 @@ impl FilletCorner {
         let opposite_fillet = env
             .pseudo
             .geom(opposite_fg)?
-            .fillet_surface()?
+            .fillet_surface(None)?
             .cloned()
             .ok_or_else(null)?;
         let opposite_fs = solver_of_geom(env, opposite_fg, OP)?;
@@ -2124,7 +2124,7 @@ impl FilletCorner {
         // set output
         env.pseudo
             .geom(new_fg)?
-            .fillet_surface()?
+            .fillet_surface(None)?
             .cloned()
             .ok_or_else(|| invalid(OP, "new fillet geometry without fillet surface"))
     }

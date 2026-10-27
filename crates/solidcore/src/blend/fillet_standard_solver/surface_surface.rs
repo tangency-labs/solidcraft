@@ -171,7 +171,7 @@ impl SurfaceSurfaceFs {
 
         let uv_domain = pseudo
             .geom(fillet_geom)?
-            .fillet_surface()?
+            .fillet_surface(None)?
             .ok_or_else(|| SolidError::null_pointer(OP))?
             .natural_uv_domain_with_nurb(k)?;
         let uv_max = uv_domain.max();
