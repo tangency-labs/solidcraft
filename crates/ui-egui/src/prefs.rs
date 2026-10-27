@@ -558,6 +558,11 @@ preference_settings! {
     /// 3Dconnexion's. A device without one is read as it reports. Page resets keep calibrations.
     #[serde(deserialize_with = "calibrations_that_read")]
     space_mouse_calibrations: std::collections::BTreeMap<String, solidcraft_space_mouse::Calibration> = Default::default();
+    /// Whether a saved `spacenavd` calibration is on the raw axes the spacenavd reader has read
+    /// since #2365, which turned the daemon's rotations around. A file from before then has no such
+    /// field and reads as `false`: [`migrate`] moves that calibration onto the new axes once.
+    #[serde(default)]
+    space_mouse_spacenavd_rotations: bool = true;
     /// Per 3D mouse, what each of its buttons does, by number from 1, once the user has changed
     /// any of them; until then a measured device has its printed keys' jobs
     /// (`space_mouse::default_button_jobs`). Kept, like calibrations, when settings are reset.
@@ -2233,6 +2238,12 @@ pub fn migrate(mut p: Prefs) -> Prefs {
         log::warn!("preferences: the 3D mouse axis assignment {:?} doesn't drive each axis once; using the default", p.space_mouse_axis_source);
         p.space_mouse_axis_source = crate::space_mouse::SAME_AXES;
     }
+    if !p.space_mouse_spacenavd_rotations {
+        if let Some(calibration) = p.space_mouse_calibrations.get_mut("spacenavd") {
+            *calibration = spacenavd_rotations_moved(*calibration);
+        }
+        p.space_mouse_spacenavd_rotations = true;
+    }
     p.space_mouse_calibrations.retain(|device, calibration| {
         let usable = calibration.is_usable();
         if !usable {
@@ -2241,6 +2252,27 @@ pub fn migrate(mut p: Prefs) -> Prefs {
         usable
     });
     p
+}
+
+/// A spacenavd calibration made before #2365, on the raw axes the reader has read since. The
+/// old reader's Rx is the new one's reversed, its Ry the new Rz and its Rz the new Ry reversed
+/// (`spacenavd::decode` in the app), so each canonical axis reads the same motion as before.
+fn spacenavd_rotations_moved(mut calibration: solidcraft_space_mouse::Calibration) -> solidcraft_space_mouse::Calibration {
+    for axis in &mut calibration.axes {
+        let (source, reversed) = match axis.source {
+            3 => (3, true),
+            4 => (5, false),
+            5 => (4, true),
+            other => (other, false),
+        };
+        axis.source = source;
+        if reversed {
+            axis.reversed = !axis.reversed;
+            axis.rest = axis.rest.saturating_neg();
+            axis.full.reverse();
+        }
+    }
+    calibration
 }
 
 /// Drop plugin ids this page would not show, and keep at most [`crate::plugins::MAX_DISABLED`],
@@ -4472,6 +4504,51 @@ mod tests {
         set(&mut app, &json!({"orbit_cursor": true})).unwrap();
         assert_eq!(app.preferences.orbit_around, OrbitAround::Cursor, "the old key still moves the choice");
         assert!(!app.preferences.orbit_cursor, "and is folded away");
+    }
+
+    #[test]
+    fn a_spacenavd_calibration_from_before_2365_reads_each_motion_as_it_did() {
+        use solidcraft_space_mouse::{AxisCalibration, Calibration};
+        // What calibrating through the old reader recorded: its Rx ran the other way, its Ry was
+        // the twist and its Rz the tilt left, reversed. Uneven rests and travels, so a move that
+        // loses one shows.
+        let axis = |source, reversed, rest, full| AxisCalibration { source, reversed, rest, dead_zone: 4, full };
+        let old = Calibration {
+            dead_zone_share: 0.0,
+            kind: Default::default(),
+            axes: [
+                axis(0, false, 3, [340, 360]),
+                axis(1, false, -2, [350, 330]),
+                axis(2, true, 1, [300, 350]),
+                axis(3, true, 6, [320, 345]),
+                axis(5, true, -5, [310, 355]),
+                axis(4, false, 2, [335, 300]),
+            ],
+        };
+        let mut saved = serde_json::to_value(Prefs::default()).unwrap();
+        saved["space_mouse_calibrations"] = json!({ "spacenavd": old, "hid 256f:c63a": old });
+        saved.as_object_mut().unwrap().remove("space_mouse_spacenavd_rotations");
+        let read = lenient(&saved);
+        assert!(read.space_mouse_spacenavd_rotations);
+        assert_eq!(read.space_mouse_calibrations["hid 256f:c63a"], old, "a device read directly is left as it is");
+        let moved = read.space_mouse_calibrations["spacenavd"];
+        // Each reading of the new reader, and what the old one read for the same record.
+        for new in [
+            [0, 0, 0, 200, 0, 0],
+            [0, 0, 0, -200, 0, 0],
+            [0, 0, 0, 0, 150, 0],
+            [0, 0, 0, 0, -330, 0],
+            [0, 0, 0, 0, 0, 90],
+            [40, -60, 80, -120, 250, -300],
+        ] {
+            let [x, y, z, rx, ry, rz]: [i16; 6] = new;
+            assert_eq!(moved.apply(new), old.apply([x, y, z, -rx, rz, -ry]), "{new:?}");
+        }
+        // Saved again, it is not moved a second time; a fresh install's calibration never is.
+        assert_eq!(lenient(&serde_json::to_value(&read).unwrap()), read);
+        let mut fresh = Prefs::default();
+        fresh.space_mouse_calibrations.insert("spacenavd".into(), old);
+        assert_eq!(lenient(&serde_json::to_value(&fresh).unwrap()).space_mouse_calibrations["spacenavd"], old);
     }
 
     #[test]

@@ -38,12 +38,16 @@ fn connect_to(path: &Path) -> Option<UnixStream> {
     UnixStream::connect(path).ok()
 }
 
-/// The axes of one record, or `None` for a record that is not motion.
+/// The axes of one record, or `None` for a record that is not motion, in the device's raw frame
+/// (3Dconnexion's, as calibration has it: x right, y towards the user, z down, the rotations
+/// about them right-handed).
 ///
-/// The daemon's frame is right-handed with x to the right, y away from the user and z up; ours is
-/// the device's raw one, x right, y towards the user and z down, so y and z (and the rotations
-/// about them) change sign. With nothing set in `spnavcfg` the two give the same motion; what
-/// the user swaps or inverts there then carries over.
+/// The daemon's translations have x right, y away from the user and z up, so y and z change
+/// sign. Its rotations don't follow them (#2365): rx is the top tilting away, ry the twist
+/// anticlockwise seen from above (the rotation about its up axis) and rz the tilt left (about
+/// the axis away from the user), so rx changes sign, its ry is our -Rz and its rz our Ry. With
+/// nothing set in `spnavcfg` the reading is then what the device itself sends, and the driver
+/// mapping treats it as it does a hidraw one; what the user swaps or inverts there carries over.
 fn decode(record: &[u8; RECORD_BYTES]) -> Option<Axes> {
     let mut data = [0_i32; 8];
     for (slot, bytes) in data.iter_mut().zip(record.as_chunks::<4>().0) {
@@ -52,7 +56,7 @@ fn decode(record: &[u8; RECORD_BYTES]) -> Option<Axes> {
     let [kind, x, y, z, rx, ry, rz, _period] = data;
     (kind == 0).then(|| Axes {
         translation: [unit(x), unit(-i64::from(y)), unit(-i64::from(z))],
-        rotation: [unit(rx), unit(-i64::from(ry)), unit(-i64::from(rz))],
+        rotation: [unit(-i64::from(rx)), unit(rz), unit(-i64::from(ry))],
     })
 }
 
@@ -151,10 +155,42 @@ mod tests {
     fn motion_records_become_axes_in_the_devices_raw_frame() {
         // Full deflection of the daemon's x, y and z is the device's full scale, and y and z flip.
         assert_eq!(decode(&record([0, 500, 500, 500, 0, 0, 0, 8])), Some(Axes { translation: [350, -350, -350], rotation: [0; 3] }));
-        // Rotations follow translations: right-handed in both frames, so ry and rz flip as y and z do.
-        assert_eq!(decode(&record([0, 0, 0, 0, 250, 250, 250, 8])), Some(Axes { translation: [0; 3], rotation: [175, -175, -175] }));
+        // Rotations: rx flips, the daemon's ry is the twist (our Rz, flipped) and its rz the tilt left (our Ry).
+        assert_eq!(decode(&record([0, 0, 0, 0, 250, 0, 0, 8])), Some(Axes { translation: [0; 3], rotation: [-175, 0, 0] }));
+        assert_eq!(decode(&record([0, 0, 0, 0, 0, 250, 0, 8])), Some(Axes { translation: [0; 3], rotation: [0, 0, -175] }));
+        assert_eq!(decode(&record([0, 0, 0, 0, 0, 0, 250, 8])), Some(Axes { translation: [0; 3], rotation: [0, 175, 0] }));
         // Rest is a motion record of zeros.
         assert_eq!(decode(&record([0, 0, 0, 0, 0, 0, 0, 1200])), Some(Axes::default()));
+    }
+
+    /// With nothing set in `spnavcfg`, each motion of the cap moves the view as it does read
+    /// through hidraw (#2365: tilt left/right and twist came out swapped). The daemon's record for
+    /// each motion one way at full deflection, and the raw HID reading the device sends for it.
+    #[test]
+    fn each_motion_through_the_daemon_moves_the_view_as_through_hidraw() {
+        use solidcraft_ui_egui::space_mouse::DriverMapping;
+        let motions: [(&str, [i32; 6], [i16; 6], [f64; 6]); 6] = [
+            ("slide right", [500, 0, 0, 0, 0, 0], [350, 0, 0, 0, 0, 0], [1.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+            ("push away", [0, 500, 0, 0, 0, 0], [0, -350, 0, 0, 0, 0], [0.0, -1.0, 0.0, 0.0, 0.0, 0.0]),
+            ("lift", [0, 0, 500, 0, 0, 0], [0, 0, -350, 0, 0, 0], [0.0, 0.0, -1.0, 0.0, 0.0, 0.0]),
+            // Logical rotations: orbit up/down, orbit sideways, roll (`navigation::device_camera`).
+            ("tilt the top away", [0, 0, 0, 500, 0, 0], [0, 0, 0, -350, 0, 0], [0.0, 0.0, 0.0, -1.0, 0.0, 0.0]),
+            ("twist anticlockwise from above", [0, 0, 0, 0, 500, 0], [0, 0, 0, 0, 0, -350], [0.0, 0.0, 0.0, 0.0, 1.0, 0.0]),
+            ("tilt left", [0, 0, 0, 0, 0, 500], [0, 0, 0, 0, 350, 0], [0.0, 0.0, 0.0, 0.0, 0.0, -1.0]),
+        ];
+        let view = |axes: Axes| {
+            let motion = DriverMapping::object_mode().apply(axes);
+            [motion.translation, motion.rotation].concat()
+        };
+        for (name, [x, y, z, rx, ry, rz], [hx, hy, hz, hrx, hry, hrz], expected) in motions {
+            let axes = decode(&record([0, x, y, z, rx, ry, rz, 8]));
+            let hid = Axes { translation: [hx, hy, hz], rotation: [hrx, hry, hrz] };
+            assert_eq!(axes, Some(hid), "{name}: the device's own reading");
+            assert_eq!(axes.map(view), Some(expected.to_vec()), "{name}: the view");
+            // And the other way, the opposite motion.
+            let back = decode(&record([0, -x, -y, -z, -rx, -ry, -rz, 8])).map(view);
+            assert_eq!(back, Some(expected.map(|v| -v).to_vec()), "{name}, the other way");
+        }
     }
 
     #[test]
@@ -180,7 +216,9 @@ mod tests {
         let extreme = decode(&record([0, i32::MIN, i32::MIN, i32::MAX, i32::MAX, i32::MIN, i32::MIN, -1]));
         assert_eq!(extreme.map(|axes| axes.translation[0]), Some(i16::MIN));
         assert_eq!(extreme.map(|axes| axes.translation[1]), Some(i16::MAX));
-        assert_eq!(extreme.map(|axes| axes.rotation[0]), Some(i16::MAX));
+        assert_eq!(extreme.map(|axes| axes.rotation[0]), Some(i16::MIN));
+        assert_eq!(extreme.map(|axes| axes.rotation[1]), Some(i16::MIN));
+        assert_eq!(extreme.map(|axes| axes.rotation[2]), Some(i16::MAX));
     }
 
     #[test]
