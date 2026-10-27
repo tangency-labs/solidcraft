@@ -20,6 +20,10 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             if !edges.is_empty() {
                 let i = body_at(st, body, &crate::plain(edges))?;
                 let b = st.bodies.get(i).ok_or_else(|| DocError::Invalid("body".into()))?;
+                // A design may carry an order the fill does not build yet: refused, not built lower.
+                for g in std::iter::once(continuity.all).chain(continuity.edges.iter().map(|e| e.g)) {
+                    g.built_by(kernel::Construction::Patch)?;
+                }
                 let spec = kernel::PatchSpec {
                     continuity: continuity.all,
                     edges: continuity.edges.iter().map(|e| (e.edge.0, e.g)).collect(),

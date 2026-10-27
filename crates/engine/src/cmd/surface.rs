@@ -8,7 +8,7 @@ use solidcraft_doc::{
 };
 use solidcraft_doc::{BodyName, SketchId};
 use solidcraft_doc::{Dir, FacePick, Position};
-use solidcraft_kernel::Continuity;
+use solidcraft_kernel::{Construction, Continuity};
 
 use super::CommandSpec;
 use super::features::{add_feature, axis_param, check_expr, extent_param, feature_sketch, operation, plane_param, profiles, sketch_id};
@@ -134,12 +134,9 @@ fn patch(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(v)
 }
 
-/// A continuity word for a patch: g0, g1 or g2 (a patch does not hold g3).
+/// A continuity word for a patch, within what a patch builds ([`Construction::Patch`]).
 fn patch_order(v: Option<&Value>, cmd: &str) -> Result<Continuity> {
-    match v.and_then(Value::as_str).and_then(Continuity::parse) {
-        Some(g) if g != Continuity::G3 => Ok(g),
-        _ => Err(bad(cmd, "a patch's continuity is g0, g1 or g2")),
-    }
+    crate::params::continuity(cmd, v, "a patch's continuity", Construction::Patch)
 }
 
 /// The patch's `continuity`: one word for every edge, a list of `{edge, g}` for some edges (the
@@ -172,7 +169,10 @@ fn patch_continuity(p: &Value, cmd: &str) -> Result<PatchContinuity> {
             };
             Ok(PatchContinuity { all, edges })
         }
-        Some(_) => Err(bad(cmd, "`continuity` must be g0, g1 or g2, or a list of {edge, g}")),
+        Some(_) => {
+            let (lowest, highest) = Construction::Patch.orders();
+            Err(bad(cmd, format!("`continuity` must be {}, or a list of {{edge, g}}", Continuity::words(lowest, highest))))
+        }
     }
 }
 
@@ -219,9 +219,7 @@ fn blend(s: &mut Session, p: &Value) -> Result<Value> {
         None => [Continuity::G1, Continuity::G1],
         Some(v) => {
             let list = v.as_array().filter(|a| a.len() == 2).ok_or_else(|| bad(cmd, "`continuity` must be two words, one per end"))?;
-            let word = |x: Option<&Value>| -> Result<Continuity> {
-                x.and_then(Value::as_str).and_then(Continuity::parse).ok_or_else(|| bad(cmd, "`continuity` entries must be g0, g1, g2 or g3"))
-            };
+            let word = |x: Option<&Value>| crate::params::continuity(cmd, x, "a `continuity` entry", Construction::Bridge);
             [word(list.first())?, word(list.get(1))?]
         }
     };
@@ -413,9 +411,7 @@ fn surface_loft(s: &mut Session, p: &Value) -> Result<Value> {
         None => [Continuity::G0, Continuity::G0],
         Some(v) => {
             let list = v.as_array().filter(|a| a.len() == 2).ok_or_else(|| bad(cmd, "`continuity` must be two words, one per end"))?;
-            let word = |x: Option<&Value>| -> Result<Continuity> {
-                x.and_then(Value::as_str).and_then(Continuity::parse).ok_or_else(|| bad(cmd, "`continuity` entries must be g0, g1, g2 or g3"))
-            };
+            let word = |x: Option<&Value>| crate::params::continuity(cmd, x, "a `continuity` entry", Construction::Bridge);
             [word(list.first())?, word(list.get(1))?]
         }
     };

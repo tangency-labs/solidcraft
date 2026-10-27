@@ -440,14 +440,8 @@ fn end_of(sk: &Sketch, pi: usize) -> Option<(usize, Vec2)> {
 fn blend_order(p: &Value, cmd: &str) -> Result<usize> {
     match p.get("continuity") {
         None | Some(Value::Null) => Ok(1),
-        Some(Value::String(v)) => match v.trim().to_ascii_lowercase().as_str() {
-            "" | "g1" => Ok(1),
-            "g2" => Ok(2),
-            "g3" => Ok(3),
-            "g4" => Ok(4),
-            _ => Err(bad(cmd, "`continuity` must be g1, g2, g3 or g4")),
-        },
-        Some(_) => Err(bad(cmd, "`continuity` must be g1, g2, g3 or g4")),
+        Some(Value::String(v)) if v.trim().is_empty() => Ok(1),
+        given => Ok(crate::params::continuity(cmd, given, "`continuity`", solidcraft_kernel::Construction::BlendCurve)?.order()),
     }
 }
 

@@ -5,7 +5,7 @@
 
 use serde_json::Value;
 use solidcraft_doc::{BodyName, FacePick, FeatureKind, Position};
-use solidcraft_kernel::Continuity;
+use solidcraft_kernel::{Construction, Continuity};
 
 use super::CommandSpec;
 use super::features::add_feature;
@@ -43,7 +43,7 @@ fn match_surface(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let order = match p.get("order") {
         None => Continuity::G2,
-        Some(v) => v.as_str().and_then(Continuity::parse).filter(|o| *o != Continuity::G0).ok_or_else(|| bad(cmd, "`order` must be g1, g2 or g3"))?,
+        Some(v) => crate::params::continuity(cmd, Some(v), "`order`", Construction::Match)?,
     };
     add_feature(
         s,

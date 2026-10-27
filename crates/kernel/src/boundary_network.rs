@@ -18,7 +18,7 @@ use solidcraft_geom::network::{self, CrossFace, FaceFrame, NetCurve, NetworkCurv
 use solidcraft_geom::{Plane, Seg2, Vec3};
 
 use crate::body::Body;
-use crate::bridge::Continuity;
+use crate::continuity_order::{Construction, Continuity};
 use crate::surfaces::{Chain, Parts, spline_curve, spline_surface, surface_body, uv_line};
 use crate::{KernelError, Result};
 
@@ -33,13 +33,18 @@ pub const MAX_EDGE_PICKS: usize = 10_000;
 /// Most sketch curves one curve of a boundary surface chains.
 pub const MAX_CHAIN_CURVES: usize = 1000;
 
-/// The network's continuity for a curve's: G3 is refused (a network holds up to G2).
+/// The network's continuity for a curve's, refused past what a network builds
+/// ([`Construction::Network`]).
 fn net_order(c: &BoundaryCurve) -> Result<network::Continuity> {
-    match c.continuity {
+    let named = |e: KernelError| match e {
+        KernelError::Invalid(why) => KernelError::Invalid(format!("{}: {why}", c.label)),
+        other => other,
+    };
+    match c.continuity.built_by(Construction::Network).map_err(named)? {
         Continuity::G0 => Ok(network::Continuity::G0),
         Continuity::G1 => Ok(network::Continuity::G1),
         Continuity::G2 => Ok(network::Continuity::G2),
-        Continuity::G3 => Err(KernelError::Invalid(format!("not supported yet: G3 continuity on {} (a curve network holds up to G2)", c.label))),
+        higher => Err(KernelError::Failed(format!("a curve network has no {} condition yet", higher.code()))),
     }
 }
 
@@ -732,17 +737,16 @@ mod tests {
         assert!((k1 + 1.0 / r).abs() > 0.1 / r, "G1 alone does not carry the curvature: {k1}");
     }
 
-    /// G3 is more than a network holds: refused, never a panic.
+    /// G3 and G4 are more than a network holds: refused, naming the curve, never a panic.
     #[test]
     fn g3_is_not_supported() {
         let base = sheet();
-        let edge = BoundaryCurve {
-            label: "edge".into(),
-            source: CurveSource::Edges { body: &base, at: vec![Vec3::new(5.0, 0.0, 0.0)] },
-            continuity: Continuity::G3,
-        };
-        let e = boundary_surface(&[edge, line3("far", Vec3::new(0.0, 10.0, 5.0), Vec3::new(10.0, 10.0, 5.0))], &[]).unwrap_err();
-        assert!(e.to_string().contains("not supported yet"), "{e}");
+        for g in [Continuity::G3, Continuity::G4] {
+            let edge =
+                BoundaryCurve { label: "edge".into(), source: CurveSource::Edges { body: &base, at: vec![Vec3::new(5.0, 0.0, 0.0)] }, continuity: g };
+            let e = boundary_surface(&[edge, line3("far", Vec3::new(0.0, 10.0, 5.0), Vec3::new(10.0, 10.0, 5.0))], &[]).unwrap_err();
+            assert!(e.to_string().contains("not supported yet") && e.to_string().contains("edge") && e.to_string().contains(g.as_str()), "{e}");
+        }
     }
 
     /// Refusals: G1 on a sketch curve, on an edge between two faces, curves that miss.
