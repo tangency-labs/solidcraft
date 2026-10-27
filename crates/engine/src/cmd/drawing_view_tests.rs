@@ -104,6 +104,17 @@ fn nest(s: &mut Session, level: u64) {
     doc.occurrences.push(serde_json::from_value(occurrence).unwrap());
 }
 
+/// Part `Part` with a 10 mm cube `Cube` from the origin, placed twice: the second copy 30 mm along
+/// X. The session and the two occurrences.
+fn two_cubes() -> (Session, [u64; 2]) {
+    let mut s = Session::default();
+    let created = run(&mut s, "component.create", json!({"name": "Part"}));
+    let first = created["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Cube", "operation": "new"}));
+    let second = run(&mut s, "occurrence.copy", json!({"occurrence": first, "translate": [30, 0, 0]}))["occurrence"].as_u64().unwrap();
+    (s, [first, second])
+}
+
 fn edit_refused(s: &mut Session, view: u64, set: Value) -> String {
     s.execute(EDIT, &json!({"view": ids::encode(view), "set": set})).err().map(|e| e.to_string()).unwrap_or_else(|| panic!("accepted: {set}"))
 }
@@ -466,6 +477,21 @@ fn hostile_snapshots_are_refused() {
     assert!(e.contains("past ±100000 mm"), "{e}");
     let e = refused(&mut Session::default(), json!({}));
     assert!(e.contains("no bodies"), "{e}");
+}
+
+/// A view shows each placement of a part as a body of its own, named by the occurrences that place
+/// it and its definition's body, and measures them all: the two cubes span 0 to 40 mm across.
+#[test]
+fn a_view_shows_each_placement_of_a_part_with_its_path() {
+    let (mut s, [first, second]) = two_cubes();
+    let set = crate::drawing_view::shown(&s).unwrap();
+    let mut placed: Vec<(Vec<u64>, String)> = set.bodies.iter().map(|b| (b.path.clone(), b.body.clone())).collect();
+    placed.sort();
+    assert_eq!(placed, vec![(vec![first], "Cube".to_string()), (vec![second], "Cube".to_string())]);
+    let v = snap(&mut s, json!({"scale": "1:1"}));
+    assert_eq!(v["source"]["bodies"], 2, "{v}");
+    let (min, max) = (point(&v["extents"]["min"]), point(&v["extents"]["max"]));
+    assert!((max.x - min.x - 40.0).abs() < 1e-6 && (max.y - min.y - 10.0).abs() < 1e-6, "{v}");
 }
 
 /// A view shows every body the design places, so a design whose assembly walk stops at its depth

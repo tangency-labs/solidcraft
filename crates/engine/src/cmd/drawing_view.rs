@@ -105,7 +105,8 @@ fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
     let paper = sheet.size_mm().map_err(|e| bad(CMD, e.to_string()))?;
     let border = DrawingBorderProfile::iso().layout(&sheet).map_err(|e| bad(CMD, e.to_string()))?.drawing_border;
 
-    let extents = crate::drawing_view::measure(s, &basis).map_err(|why| bad(CMD, why.to_string()))?;
+    let set = crate::drawing_view::shown(s).map_err(|why| bad(CMD, why.to_string()))?;
+    let extents = crate::drawing_view::measure(&set, &basis).map_err(|why| bad(CMD, why.to_string()))?;
     let shown = extents.model.inflated(settings.reference_margin_mm);
     let position = request.position_mm.map_or(paper * 0.5, |p| p.0);
     let (scale, fitted) = match settings.scale {

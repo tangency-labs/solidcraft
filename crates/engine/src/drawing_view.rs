@@ -2,13 +2,15 @@
 //! and where a saved view sits on its sheet (#4816). The snapshot command and saved views use it;
 //! their pictures (W17b) will too.
 //!
-//! A view shows every body the design places, where its occurrences place it. The browser's eye
-//! counts for nothing: hiding a part in the model never changes a drawing.
+//! A view shows every body the design places, where its occurrences place it ([`shown`]). The
+//! browser's eye counts for nothing: hiding a part in the model never changes a drawing.
 
+use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::Arc;
 
 use solidcraft_doc::drawing::Drawing;
-use solidcraft_doc::{MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, ids};
+use solidcraft_doc::{MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, ModelBody, ModelState, ids};
 use solidcraft_geom::drawing_view::{Scale, ViewFrame};
 use solidcraft_geom::{Aabb2, EPS, Plane, Vec2};
 
@@ -59,6 +61,54 @@ impl fmt::Display for Unmeasured {
     }
 }
 
+/// One body a view shows.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Shown {
+    /// Its index among the world state's bodies: the body in place, with its mesh.
+    pub index: usize,
+    /// The occurrences that place it, from the design's root.
+    pub path: Vec<u64>,
+    /// Its definition's body name.
+    pub body: String,
+}
+
+/// What a view shows, worked out once per request: the world state and each body it shows, in the
+/// world state's order. The extents and the lines read it; choosing occurrences and hiding parts
+/// (V4) and the reference split (V5) will filter it.
+pub struct ShownSet {
+    pub state: Arc<ModelState>,
+    pub bodies: Vec<Shown>,
+}
+
+impl ShownSet {
+    /// The shown body in place.
+    pub fn body(&self, shown: &Shown) -> Option<&ModelBody> {
+        self.state.bodies.get(shown.index)
+    }
+}
+
+/// Every body the design places, or why there's nothing to show: the assembly places more than a
+/// view walks, or it has no bodies.
+pub fn shown(s: &Session) -> std::result::Result<ShownSet, Unmeasured> {
+    if !s.doc.placements_complete() {
+        return Err(Unmeasured::PastWalkLimit);
+    }
+    let state = s.world_state();
+    // The world state names each placed body as this walk does, so its name finds its path.
+    let mut placed: BTreeMap<String, (Vec<u64>, String)> =
+        s.doc.body_frames_with_source(&s.model.state()).into_iter().map(|(name, body, _, path, _)| (name, (path, body))).collect();
+    let bodies: Vec<Shown> = state
+        .bodies
+        .iter()
+        .enumerate()
+        .map(|(index, b)| {
+            let (path, body) = placed.remove(&b.name).unwrap_or_else(|| (Vec::new(), b.definition_name().to_string()));
+            Shown { index, path, body }
+        })
+        .collect();
+    if bodies.is_empty() { Err(Unmeasured::NoBodies) } else { Ok(ShownSet { state, bodies }) }
+}
+
 /// A saved view on its sheet.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct OnSheet {
@@ -71,14 +121,10 @@ pub struct OnSheet {
     pub unmeasured: Option<Unmeasured>,
 }
 
-/// The extents of every body the design places, seen on `basis`, or why there's nothing to
-/// measure: the assembly places more than a view walks, or it has no bodies.
-pub fn measure(s: &Session, basis: &Plane) -> std::result::Result<Extents, Unmeasured> {
-    if !s.doc.placements_complete() {
-        return Err(Unmeasured::PastWalkLimit);
-    }
-    let st = s.world_state();
-    let extents = st.bodies.iter().fold(Extents { model: Aabb2::EMPTY, error_mm: 0.0, bodies: 0 }, |e, body| Extents {
+/// The extents of the bodies `shown` holds, seen on `basis`, or that they have nothing to measure.
+pub fn measure(shown: &ShownSet, basis: &Plane) -> std::result::Result<Extents, Unmeasured> {
+    let bodies = shown.bodies.iter().filter_map(|b| shown.body(b));
+    let extents = bodies.fold(Extents { model: Aabb2::EMPTY, error_mm: 0.0, bodies: 0 }, |e, body| Extents {
         model: e.model.union(&body.mesh_bounds_in(basis)),
         error_mm: e.error_mm.max(body.display_tol()),
         bodies: e.bodies + 1,
@@ -102,7 +148,7 @@ pub fn on_sheet(s: &Session, drawing: &Drawing, id: u64, cmd: &str) -> Result<On
     let view = drawing.resolve_view(id).map_err(|e| bad(cmd, e.to_string()))?;
     let centre = drawing.view_centre(id).map_err(|e| bad(cmd, e.to_string()))?;
     let scale = view.scale.value;
-    let (extents, shown, unmeasured) = match measure(s, &view.basis) {
+    let (extents, shown, unmeasured) = match shown(s).and_then(|set| measure(&set, &view.basis)) {
         Ok(extents) => (extents, extents.model.inflated(view.reference_margin_mm), None),
         Err(why) => {
             let half = PLACEHOLDER_MM / 2.0 / scale.factor();
