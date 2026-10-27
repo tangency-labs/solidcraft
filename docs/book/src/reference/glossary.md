@@ -274,6 +274,19 @@ A material sets mass, centre of gravity and strength values. How the body looks 
 - **Elsewhere:** material, physical material.
 - **For translators:** not an appearance.
 
+### mitre
+
+A corner of two frame members cut on the plane halfway between them.
+
+Both members' ends at the corner lie on that plane (or `gap` apart either side of it), so for a
+right-angled corner each end is cut at 45°.
+
+- **In SolidCraft:** `frame.corner` with `kind: mitre`; the `frame_corner` design-file feature.
+- **Don't use:** miter (the American spelling), bevel joint.
+- **Elsewhere:** mitre, miter, mitre joint.
+- **For translators:** the joint of two frame members, not a fillet or chamfer meeting another
+  at a corner.
+
 ### moment of inertia
 
 How a body's mass resists turning about an axis: the mass times the square of its distance from

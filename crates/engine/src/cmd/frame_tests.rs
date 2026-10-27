@@ -1305,3 +1305,242 @@ fn trims_put_member_ends_where_the_hand_derived_answer_says() {
         }
     }
 }
+
+// ---------------------------------------------------------------------------------------------
+// Corners (frame.corner)
+
+/// A frame of 45 × 45 bar on XY round a W × 400 rectangle (W a parameter, 600 mm), its lines
+/// through the bars' middles, each from the corner before it: `Bar` along +X at y = 0, `Bar (2)`
+/// along +Y at x = W, `Bar (3)` along −X at y = 400, `Bar (4)` along −Y at x = 0.
+fn square_frame(s: &mut Session) -> Vec<String> {
+    run(s, "parameters.add", json!({"name": "W", "expression": "600 mm"}));
+    run(s, "sketch.create", json!({"plane": "XY", "name": "Frame"}));
+    run(s, "sketch.line", json!({"points": [[0, 0], ["W", 0]]}));
+    run(s, "sketch.line", json!({"points": [["W", 0], ["W", 400]]}));
+    run(s, "sketch.line", json!({"points": [["W", 400], [0, 400]]}));
+    run(s, "sketch.line", json!({"points": [[0, 400], [0, 0]]}));
+    run(s, "sketch.finish", json!({}));
+    made(&run(s, "frame.member", json!({"sketch": "Frame", "profile": bar45(), "body_name": "Bar"})))
+}
+
+/// Mitre each corner of the square frame, the cut faces `gap` apart; the corner features.
+fn mitre_square(s: &mut Session, bars: &[String], gap: f64) -> Vec<Value> {
+    (0..4).map(|k| run(s, "frame.corner", json!({"members": [bars[k], bars[(k + 1) % 4]], "gap": gap}))["feature"].clone()).collect()
+}
+
+/// The angle (degrees) between the line of member `name`, along `dir`, and the normal of its cut
+/// at `end` (0 its start, 1 its end): 0 for a square end, 45 for a mitre of a right angle.
+fn cut_angle(s: &Session, name: &str, end: usize, dir: [f64; 3]) -> f64 {
+    let st = s.model.state();
+    let pl = st.frame_member(name).unwrap().ends[end].unwrap();
+    let d = solidcore_record::Vec3::new(dir[0], dir[1], dir[2]).normalized().unwrap();
+    pl.normal().dot(d).abs().min(1.0).acos().to_degrees()
+}
+
+#[test]
+fn a_square_frame_mitres_at_its_four_corners() {
+    let mut s = Session::default();
+    let bars = square_frame(&mut s);
+    // Before: each bar runs square from corner to corner, so they overlap 45 × 45 × 45 at each.
+    let bs = boxes(&mut s);
+    assert!(near3(bs[&bars[0]].0, [0.0, -22.5, -22.5]) && near3(bs[&bars[0]].1, [600.0, 22.5, 22.5]), "{:?}", bs[&bars[0]]);
+    let r = run(&mut s, "frame.corner", json!({"members": [bars[0], bars[1]]}));
+    assert_eq!(r["changed_bodies"], json!([bars[0], bars[1]]), "{r}");
+    for k in 1..4 {
+        run(&mut s, "frame.corner", json!({"members": [bars[k], bars[(k + 1) % 4]]}));
+    }
+    // After: each bar reaches the outer corners, 22.5 past its line's ends, and stops at the inner
+    // ones, 22.5 short of them. A plane cut through the middle line's end leaves the volume of the
+    // section times the line's length: 2025 × (2 × 600 + 2 × 400).
+    let bs = boxes(&mut s);
+    assert!(near3(bs[&bars[0]].0, [-22.5, -22.5, -22.5]) && near3(bs[&bars[0]].1, [622.5, 22.5, 22.5]), "{:?}", bs[&bars[0]]);
+    assert!(near3(bs[&bars[1]].0, [577.5, -22.5, -22.5]) && near3(bs[&bars[1]].1, [622.5, 422.5, 22.5]), "{:?}", bs[&bars[1]]);
+    assert!(near3(bs[&bars[2]].0, [-22.5, 377.5, -22.5]) && near3(bs[&bars[2]].1, [622.5, 422.5, 22.5]), "{:?}", bs[&bars[2]]);
+    assert!(near3(bs[&bars[3]].0, [-22.5, -22.5, -22.5]) && near3(bs[&bars[3]].1, [22.5, 422.5, 22.5]), "{:?}", bs[&bars[3]]);
+    for b in bodies(&mut s) {
+        let want = BAR45 * if b.0 == bars[0] || b.0 == bars[2] { 600.0 } else { 400.0 };
+        assert!(rel(b.1, want) < MEASURED, "{b:?} vs {want}");
+    }
+    // Both ends of every bar are cut at 45° to its line.
+    for (bar, dir) in bars.iter().zip([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, -1.0, 0.0]]) {
+        for end in 0..2 {
+            let a = cut_angle(&s, bar, end, dir);
+            assert!((a - 45.0).abs() < 1e-9, "{bar} end {end}: {a}°");
+        }
+    }
+    // The mitred bars don't overlap: joined, they keep the whole volume, 2025 × 2000.
+    run(&mut s, "solid.combine", json!({"target": bars[0], "tools": [bars[1], bars[2], bars[3]]}));
+    let v = total_volume(&mut s);
+    assert!(rel(v, BAR45 * 2000.0) < MEASURED, "{v}");
+}
+
+#[test]
+fn a_mitre_gap_shortens_each_bar_by_its_share_at_the_middle_line() {
+    let mut s = Session::default();
+    let bars = square_frame(&mut s);
+    mitre_square(&mut s, &bars, 3.0);
+    // The cut faces stand 3 apart, each 1.5 back from the mitre plane along its normal, which
+    // leans 45° from the line: each end moves 1.5 / cos 45° = 1.5 √2 along it. A bar is
+    // 2 × 1.5 √2 = 3 √2 shorter at its middle line, and at its outer edge.
+    let e = 1.5 * 2f64.sqrt();
+    let bs = boxes(&mut s);
+    assert!(near3(bs[&bars[0]].0, [-22.5 + e, -22.5, -22.5]) && near3(bs[&bars[0]].1, [622.5 - e, 22.5, 22.5]), "{:?}", bs[&bars[0]]);
+    for b in bodies(&mut s) {
+        let len = if b.0 == bars[0] || b.0 == bars[2] { 600.0 } else { 400.0 };
+        let want = BAR45 * (len - 2.0 * e);
+        assert!(rel(b.1, want) < MEASURED, "{b:?} vs {want}");
+    }
+}
+
+#[test]
+fn mitres_follow_a_wider_frame() {
+    let mut s = Session::default();
+    let bars = square_frame(&mut s);
+    mitre_square(&mut s, &bars, 0.0);
+    run(&mut s, "parameters.change", json!({"name": "W", "expression": "800 mm"}));
+    // The long bars grow to 800 + 45 outside; the right bar moves with its line.
+    let bs = boxes(&mut s);
+    assert!(near3(bs[&bars[0]].0, [-22.5, -22.5, -22.5]) && near3(bs[&bars[0]].1, [822.5, 22.5, 22.5]), "{:?}", bs[&bars[0]]);
+    assert!(near3(bs[&bars[1]].0, [777.5, -22.5, -22.5]) && near3(bs[&bars[1]].1, [822.5, 422.5, 22.5]), "{:?}", bs[&bars[1]]);
+    let v = total_volume(&mut s);
+    assert!(rel(v, BAR45 * (2.0 * 800.0 + 2.0 * 400.0)) < MEASURED, "{v}");
+}
+
+#[test]
+fn a_sixty_degree_corner_cuts_each_bar_at_sixty_degrees() {
+    // Two bars 200 long from the origin, along X and at 60° to it in XY.
+    let mut s = Session::default();
+    let (c, sn) = (100.0, 100.0 * 3f64.sqrt());
+    let bars = members_3d(&mut s, "Bar", &[([0.0, 0.0, 0.0], [200.0, 0.0, 0.0]), ([0.0, 0.0, 0.0], [c, sn, 0.0])]);
+    let f = run(&mut s, "frame.corner", json!({"members": bars}))["feature"].clone();
+    // The corner plane holds the bisector, at 30° to each bar, so each cut leans 90° − 30° = 60°
+    // from square. Across the 45 wide bar along X the cut runs from x = −22.5 / tan 30° (the outer
+    // edge, y = −22.5) to +22.5 / tan 30° (the inner one): 22.5 √3 either side of the corner.
+    assert!((cut_angle(&s, &bars[0], 0, [1.0, 0.0, 0.0]) - 60.0).abs() < 1e-9);
+    assert!((cut_angle(&s, &bars[1], 0, [c, sn, 0.0]) - 60.0).abs() < 1e-9);
+    let o = 22.5 * 3f64.sqrt();
+    let bs = boxes(&mut s);
+    assert!(near3(bs[&bars[0]].0, [-o, -22.5, -22.5]) && near3(bs[&bars[0]].1, [200.0, 22.5, 22.5]), "{:?}", bs[&bars[0]]);
+    // The cut passes through the middle line's end: each bar keeps 2025 × 200.
+    for b in bodies(&mut s) {
+        assert!(rel(b.1, BAR45 * 200.0) < MEASURED, "{b:?}");
+    }
+    // A gap of 4: each cut face 2 back along the normal, which leans 60° from the line, so the end
+    // moves 2 / cos 60° = 4 along it; each bar keeps 2025 × 196.
+    let p = json!({"members": bars, "gap": "4 mm"});
+    run(&mut s, "timeline.redefine", json!({"feature": f, "command": "frame.corner", "params": p}));
+    let bs = boxes(&mut s);
+    assert!(near3(bs[&bars[0]].0, [-o + 4.0, -22.5, -22.5]), "{:?}", bs[&bars[0]]);
+    for b in bodies(&mut s) {
+        assert!(rel(b.1, BAR45 * 196.0) < MEASURED, "{b:?}");
+    }
+}
+
+#[test]
+fn a_corner_extends_members_that_stop_short_of_it() {
+    // Lines that stop 10 short of the corner at (0, 0): the bars grow to it, as a trim extends.
+    let mut s = Session::default();
+    let bars = members_3d(&mut s, "Bar", &[([10.0, 0.0, 0.0], [300.0, 0.0, 0.0]), ([0.0, 10.0, 0.0], [0.0, 300.0, 0.0])]);
+    run(&mut s, "frame.corner", json!({"members": bars}));
+    let bs = boxes(&mut s);
+    assert!(near3(bs[&bars[0]].0, [-22.5, -22.5, -22.5]) && near3(bs[&bars[0]].1, [300.0, 22.5, 22.5]), "{:?}", bs[&bars[0]]);
+    for b in bodies(&mut s) {
+        assert!(rel(b.1, BAR45 * 300.0) < MEASURED, "{b:?}");
+    }
+}
+
+#[test]
+fn bad_corners_are_refused_with_the_reason() {
+    let mut s = Session::default();
+    let bars = square_frame(&mut s);
+    // Two rails side by side, a rail far above the frame, and a post standing in the middle of
+    // the bottom bar.
+    let side = members_3d(&mut s, "Side", &[([0.0, 100.0, 0.0], [600.0, 100.0, 0.0])]);
+    let high = members_3d(&mut s, "High", &[([600.0, 200.0, 300.0], [900.0, 200.0, 300.0])]);
+    let post = members_3d(&mut s, "Post", &[([300.0, 0.0, 0.0], [300.0, 0.0, 500.0])]);
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Block"}));
+    for (p, why) in [
+        (json!({}), "`members`"),
+        (json!({"members": [bars[0]]}), "`members`"),
+        (json!({"members": [bars[0], bars[1], bars[2]]}), "`members`"),
+        (json!({"members": bars[0]}), "`members`"),
+        (json!({"members": [bars[0], bars[0]]}), "twice"),
+        (json!({"members": [bars[0], {"feature": "Member1", "line": "l1"}]}), "twice"),
+        (json!({"members": [bars[0], "Block"]}), "not a frame member"),
+        (json!({"members": [bars[0], bars[1]], "kind": "butt"}), "`kind`"),
+        (json!({"members": [bars[0], bars[1]], "gap": -1}), "`gap`"),
+        (json!({"members": [bars[0], bars[1]], "gap": 1001}), "`gap`"),
+        (json!({"members": [bars[0], bars[1]], "gap": "wide"}), "gap"),
+        // Parallel, both ways round.
+        (json!({"members": [bars[0], side[0]]}), "parallel"),
+        (json!({"members": [bars[0], bars[2]]}), "parallel"),
+        // Crossing the right bar's line from 300 above it: they never touch.
+        (json!({"members": [bars[1], high[0]]}), "don't meet"),
+        // The post stands on the bottom bar 300 from either of its ends.
+        (json!({"members": [bars[0], post[0]]}), "doesn't end at the corner"),
+    ] {
+        let err = s.execute("frame.corner", &p).unwrap_err().to_string();
+        assert!(err.contains(why), "{p}: {err}");
+    }
+    // A member a later feature changed is not rebuilt.
+    run(&mut s, "solid.move", json!({"bodies": [bars[0]], "translate": [0, 0, 5]}));
+    let err = s.execute("frame.corner", &json!({"members": [bars[0], bars[1]]})).unwrap_err().to_string();
+    assert!(err.contains("changed after"), "{err}");
+    // Not while a sketch is open.
+    run(&mut s, "sketch.create", json!({"plane": "XY"}));
+    assert!(s.execute("frame.corner", &json!({"members": [bars[1], bars[2]]})).is_err());
+}
+
+#[test]
+fn corners_undo_and_reopen_with_their_members() {
+    let mut s = Session::default();
+    let bars = square_frame(&mut s);
+    mitre_square(&mut s, &bars, 2.0);
+    let want = total_volume(&mut s);
+    run(&mut s, "edit.undo", json!({}));
+    // The last corner taken back: the last bar's end and the first bar's start square again.
+    assert!(near3(boxes(&mut s)[&bars[3]].0, [-22.5, 0.0, -22.5]), "{:?}", boxes(&mut s)[&bars[3]]);
+    assert!(near3(boxes(&mut s)[&bars[0]].0, [0.0, -22.5, -22.5]), "{:?}", boxes(&mut s)[&bars[0]]);
+    run(&mut s, "edit.redo", json!({}));
+    assert!(rel(total_volume(&mut s), want) < 1e-12);
+    // Saved and opened again, the corners hold.
+    let mut t = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(rel(total_volume(&mut t), want) < MEASURED);
+}
+
+#[test]
+fn hostile_corners_are_refused_not_crashed() {
+    let mut s = Session::default();
+    let bars = square_frame(&mut s);
+    let hostile = [
+        json!(null),
+        json!(1e308),
+        json!(-1e308),
+        json!(f64::MAX),
+        json!("1e400 mm"),
+        json!("-1e300 mm"),
+        json!(""),
+        json!([]),
+        json!({}),
+        json!([[]]),
+        json!([null, null]),
+        json!([{"feature": 1e300, "line": []}, {"feature": -1, "line": "l1"}]),
+        json!([{"feature": "Member1", "line": "x".repeat(10_000)}, bars[0]]),
+        json!(["mitre", "miter"]),
+        json!("x".repeat(100_000)),
+    ];
+    let good = json!({"members": [bars[0], bars[1]]});
+    for key in ["members", "kind", "gap"] {
+        for v in &hostile {
+            let mut p = good.clone();
+            p[key] = v.clone();
+            match s.execute("frame.corner", &p) {
+                Err(crate::EngineError::Internal(id, msg)) => panic!("{id} {p}: {msg}"),
+                Ok(_) => {
+                    run(&mut s, "edit.undo", json!({}));
+                }
+                Err(_) => {}
+            }
+        }
+    }
+}

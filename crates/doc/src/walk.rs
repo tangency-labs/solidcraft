@@ -45,6 +45,7 @@ impl Walk for u32 {}
 impl Walk for ProfileSel {}
 impl Walk for std::collections::BTreeMap<String, String> {}
 impl Walk for crate::frame::Anchor {}
+impl Walk for crate::frame::CornerKind {}
 impl Walk for crate::frame::Side {}
 impl Walk for crate::frame::TrimEnd {}
 impl Walk for solidcraft_sketch::Sketch {}

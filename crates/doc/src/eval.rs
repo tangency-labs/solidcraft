@@ -578,7 +578,7 @@ pub struct ModelState {
     pub sheets: Vec<crate::sheet::SheetBody>,
     /// Construction planes, axes and points as evaluated (by feature).
     pub construct: Vec<crate::construct::Construct>,
-    /// Frame members as made and trimmed so far (`frame.member`, `frame.trim`).
+    /// Frame members as made and trimmed so far (`frame.member`, `frame.trim`, `frame.corner`).
     pub frame_members: Vec<crate::frame::MemberRecord>,
     /// Evaluation-cache keys of the sketches (by sketch feature id).
     sketch_keys: BTreeMap<u64, u64>,
@@ -7630,6 +7630,7 @@ fn eval_feature(
         }
         FeatureKind::FrameMember { .. } => frame_member::evaluate(doc, vals, f, st),
         FeatureKind::FrameTrim { .. } => frame_member::trim(doc, vals, f, st, warning),
+        FeatureKind::FrameCorner { .. } => frame_member::corner(doc, vals, f, st),
         FeatureKind::BoundingSolid { bodies, margin } => {
             let m = val(vals, margin, Kind::Length)?;
             let mut bb = solidcraft_geom::Aabb3::EMPTY;

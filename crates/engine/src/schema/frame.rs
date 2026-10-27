@@ -1,4 +1,4 @@
-//! Contracts for frame trim commands.
+//! Contracts for frame trim and corner commands.
 
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -71,6 +71,31 @@ pub struct TrimParams {
     #[serde(default)]
     pub end: Option<End>,
     /// Weld gap in design length units or a length expression. Default: 0; at most 1 m.
+    #[serde(default)]
+    pub gap: Option<LengthExpr>,
+    #[serde(flatten, deserialize_with = "feature_common")]
+    pub common: FeatureCommon,
+}
+
+/// How the two members of a corner meet.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CornerKind {
+    Mitre,
+}
+
+/// Join two frame members that meet at their ends in a corner.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CornerParams {
+    /// The two members that meet, by body name or {feature, line}.
+    #[schemars(length(min = 2, max = 2))]
+    pub members: Vec<Member>,
+    /// How they meet. Default: mitre, both cut on the plane halfway between them.
+    #[serde(default)]
+    pub kind: Option<CornerKind>,
+    /// Weld gap between the two cut faces, in design length units or a length expression.
+    /// Default: 0; at most 1 m.
     #[serde(default)]
     pub gap: Option<LengthExpr>,
     #[serde(flatten, deserialize_with = "feature_common")]

@@ -1,6 +1,6 @@
 use serde_json::json;
 
-use super::TrimParams;
+use super::{CornerParams, TrimParams};
 use crate::Session;
 use crate::schema::features::FeatureResult;
 use crate::schema::tests::{assert_keys, conforms};
@@ -42,4 +42,42 @@ fn schemas_cover_trim_parameters_and_results() {
     let output = output_schema_for::<FeatureResult>();
     assert!(conforms(output.as_value(), output.as_value(), &result), "{result}");
     assert_eq!(result["changed_bodies"], json!(["Bar"]));
+}
+
+#[test]
+fn schemas_cover_corner_parameters_and_results() {
+    let schema = input_schema_for::<CornerParams>();
+    assert_keys(schema.clone(), &["body_name", "body_names", "gap", "kind", "members", "name", "participants"]);
+    for p in [
+        json!({"members": ["Bar", "Bar (2)"]}),
+        json!({"members": ["Bar", {"feature": 3, "line": "l2"}], "kind": "mitre", "gap": "2 mm"}),
+        json!({"members": [{"feature": "Members", "line": "l1"}, {"feature": "Members", "line": "l2"}], "gap": 1.5}),
+    ] {
+        assert!(serde_json::from_value::<CornerParams>(p.clone()).is_ok(), "{p}");
+        assert!(conforms(schema.as_value(), schema.as_value(), &p), "{p}");
+    }
+    for p in [json!({"members": ["Bar"]}), json!({"members": ["Bar", "Bar (2)", "Bar (3)"]}), json!({"members": ["Bar", "Bar (2)"], "kind": "miter"})]
+    {
+        assert!(!conforms(schema.as_value(), schema.as_value(), &p), "{p}");
+    }
+    let mut s = Session { param_check: ParamCheck::Strict, ..Session::default() };
+    for (command, params) in [
+        ("sketch.create", json!({"plane": "XY", "name": "Corner"})),
+        ("sketch.line", json!({"points": [[0, 0], [100, 0]]})),
+        ("sketch.line", json!({"points": [[100, 0], [100, 100]]})),
+        ("sketch.finish", json!({})),
+        ("frame.member", json!({"sketch": "Corner", "profile": {"kind": "bar", "width": 10, "height": 10}, "body_name": "Bar"})),
+    ] {
+        s.execute(command, &params).unwrap();
+    }
+    let mut p = json!({"members": ["Bar", "Bar (2)"], "gap": 1});
+    let before = s.doc.features.len();
+    p["gaap"] = json!(2);
+    assert!(s.execute("frame.corner", &p).unwrap_err().to_string().contains("gaap"));
+    assert_eq!(s.doc.features.len(), before);
+    p.as_object_mut().unwrap().remove("gaap");
+    let result = s.execute("frame.corner", &p).unwrap();
+    let output = output_schema_for::<FeatureResult>();
+    assert!(conforms(output.as_value(), output.as_value(), &result), "{result}");
+    assert_eq!(result["changed_bodies"], json!(["Bar", "Bar (2)"]));
 }

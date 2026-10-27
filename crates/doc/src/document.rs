@@ -1169,6 +1169,17 @@ pub enum FeatureKind {
         #[walk(length = "Gap")]
         gap: Option<Expr>,
     },
+    /// A corner of two frame members (#4003) that meet at their ends: each member's end at the
+    /// corner is rebuilt cut on the plane halfway between them (a mitre), the cut faces `gap`
+    /// apart. The members keep their bodies and names.
+    FrameCorner {
+        members: Vec<crate::frame::MemberRef>,
+        kind: crate::frame::CornerKind,
+        /// The weld gap between the two cut faces (default 0).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[walk(length = "Gap")]
+        gap: Option<Expr>,
+    },
     /// Raise or sink profiles on a planar face, or wrap them on a selected cylindrical wall.
     Emboss {
         sketch: SketchId,
@@ -2644,6 +2655,7 @@ impl FeatureKind {
             FeatureKind::Pipe { .. } => "PipeFeature",
             FeatureKind::FrameMember { .. } => "FrameMemberFeature",
             FeatureKind::FrameTrim { .. } => "FrameTrimFeature",
+            FeatureKind::FrameCorner { .. } => "FrameCornerFeature",
             FeatureKind::Emboss { .. } => "EmbossFeature",
             FeatureKind::Boss { .. } => "BossFeature",
             FeatureKind::Lip { groove: false, .. } => "LipFeature",
@@ -2894,6 +2906,7 @@ impl FeatureKind {
             FeatureKind::Pipe { .. } => "Pipe",
             FeatureKind::FrameMember { .. } => "Member",
             FeatureKind::FrameTrim { .. } => "MemberTrim",
+            FeatureKind::FrameCorner { .. } => "MemberCorner",
             FeatureKind::Emboss { .. } => "Emboss",
             FeatureKind::Boss { .. } => "Boss",
             FeatureKind::Lip { groove: false, .. } => "Lip",

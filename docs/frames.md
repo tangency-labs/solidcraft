@@ -2,8 +2,8 @@
 
 Frames and weldments (#4003) are structural members (tube, angle, channel, beam, an aluminium
 extrusion of your own) laid along the lines of a frame sketch. This page covers what has landed:
-members, their profiles, and trims (butt joints, and trimming or extending to planes and faces).
-Mitre corners, copes, end caps, gussets, welds and the cut list follow.
+members, their profiles, trims (butt joints, and trimming or extending to planes and faces) and
+mitre corners. Butt and end-trim corners, copes, end caps, gussets, welds and the cut list follow.
 
 ## The workflow
 
@@ -18,6 +18,8 @@ Mitre corners, copes, end caps, gussets, welds and the cut list follow.
    lines.
 4. **Trim them**: **Trim/Extend** (WELDMENTS › MODIFY, `frame.trim`) butts members against the
    members they meet, or trims or extends them to a plane or face (below).
+5. **Mitre the corners**: `frame.corner` cuts two members that meet at their ends on the plane
+   halfway between them (below).
 
 ```json
 {"command": "frame.member", "params": {"sketch": "Frame", "profile": {"kind": "rect_tube", "width": 40, "height": 40, "wall": 3}}}
@@ -25,7 +27,7 @@ Mitre corners, copes, end caps, gussets, welds and the cut list follow.
 ```
 
 Members are ordinary bodies: mirror, pattern, move, drill and combine them with the usual
-commands. Where members meet they overlap until they are trimmed; mitre corners come later.
+commands. Where members meet they overlap until they are trimmed or mitred.
 
 The **Weldments** ribbon tab gathers the frame commands: New Sketch, Frame Member, Trim/Extend
 and Parameters. Like Sheet Metal it is always there, and it selects itself when a frame member is
@@ -132,6 +134,33 @@ are not supported yet.
 - **Edit Feature** reopens the dialog with the trim's picks and values. Targets a pick can't show
   (a member's chosen side, a face, a plane given by its origin and normal) are listed as **Keep:
   n more targets**, kept while ticked; untick it to drop them all and pick again.
+
+## Corners
+
+`frame.corner` joins two members that meet at their ends in a **mitre**: both ends are cut on the
+plane halfway between the members, so a right-angled corner cuts each at 45° and a 60° corner each
+at 60° from square. A corner extends or shortens each member to that plane, as a trim does, and
+each member keeps its body and its name.
+
+```json
+{"command": "frame.corner", "params": {"members": ["Rail", "Rail (2)"]}}
+{"command": "frame.corner", "params": {"members": ["Rail (2)", "Rail (3)"], "gap": "2 mm"}}
+```
+
+- `members`: the two members, each a member's body name or `{feature, line}`.
+- `kind`: `mitre` (the default; butt and end trim come later).
+- `gap`: the weld gap between the two cut faces, a length expression (default 0, at most 1 m).
+  Each face stands half the gap back from the mitre plane, so an end moves along its member by
+  half the gap over the cosine of the angle between the member and the plane's normal: `gap / √2`
+  at a right angle.
+
+The members meet where the lines through the middle of their profiles cross. That point must be
+at an end of each member, within its profile's size of the end (members drawn through their
+profiles' middles, or along their outsides or insides, all qualify). A corner is refused, with
+the reason, when the members are parallel, when their middle lines pass each other without
+meeting, when they cross away from a member's ends (a T: trim it instead), when one member is given
+twice, and, as for a trim, when a member was changed by a later feature. There is no dialog or ribbon
+button yet: the corner is a command for scripts, the CLI and MCP, and `timeline.redefine` changes it.
 
 ## Built-in profiles
 

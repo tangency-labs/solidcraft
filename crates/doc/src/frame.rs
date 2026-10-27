@@ -334,6 +334,15 @@ impl TrimEnd {
     }
 }
 
+/// How two members meet at a corner (`frame.corner`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CornerKind {
+    /// Both members cut on the plane halfway between them.
+    #[default]
+    Mitre,
+}
+
 /// Most targets one trim feature trims to.
 pub const MAX_TRIM_TARGETS: usize = 256;
 /// The largest weld gap (mm).

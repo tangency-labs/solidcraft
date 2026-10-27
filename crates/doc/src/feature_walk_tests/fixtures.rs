@@ -133,6 +133,11 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
                 "to": [{"type": "member", "member": {"feature": "F", "line": "l2"}, "side": "left"}, {"type": "plane", "plane": plane("frame_trim")}],
                 "end": "start", "gap": "frame_trim.gap"}),
         ),
+        (
+            "frame_corner",
+            json!({"type": "frame_corner", "members": [{"feature": "F", "line": "l1"}, {"feature": "F", "line": "l2"}],
+                "kind": "mitre", "gap": "frame_corner.gap"}),
+        ),
         ("emboss", json!({"type": "emboss", "sketch": 1, "profiles": {"type": "all"}, "depth": "emboss.depth"})),
         ("rib", json!({"type": "rib", "sketch": 1, "curves": ["l1"], "thickness": "rib.thickness", "depth": "rib.depth"})),
         ("replace_face", json!({"type": "replace_face", "faces": [o], "target": plane("replace_face")})),
