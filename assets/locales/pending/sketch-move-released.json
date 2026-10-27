@@ -1,0 +1,38 @@
+{
+  "en": {
+    "sketch.move_released": "Moved: {count} constraints tying it to what stays were let go ({names}). Click to undo.",
+    "sketch.move_released_one": "Moved: {count} constraint tying it to what stays was let go ({names}). Click to undo."
+  },
+  "ar": {
+    "sketch.move_released": "تم النقل: أُزيلت {count} قيود كانت تربطه بما بقي ({names}). انقر للتراجع.",
+    "sketch.move_released_one": "تم النقل: أُزيل {count} قيد كان يربطه بما بقي ({names}). انقر للتراجع."
+  },
+  "de": {
+    "sketch.move_released": "Verschoben: {count} Abhängigkeiten zum Rest wurden gelöst ({names}). Klicken zum Rückgängigmachen.",
+    "sketch.move_released_one": "Verschoben: {count} Abhängigkeit zum Rest wurde gelöst ({names}). Klicken zum Rückgängigmachen."
+  },
+  "es": {
+    "sketch.move_released": "Movido: se soltaron {count} restricciones que lo unían a lo que queda ({names}). Haz clic para deshacer.",
+    "sketch.move_released_one": "Movido: se soltó {count} restricción que lo unía a lo que queda ({names}). Haz clic para deshacer."
+  },
+  "fr": {
+    "sketch.move_released": "Déplacé : {count} contraintes qui le liaient au reste ont été relâchées ({names}). Cliquez pour annuler.",
+    "sketch.move_released_one": "Déplacé : {count} contrainte qui le liait au reste a été relâchée ({names}). Cliquez pour annuler."
+  },
+  "he": {
+    "sketch.move_released": "הוזז: {count} אילוצים שקשרו אותו למה שנשאר שוחררו ({names}). לחצו לביטול.",
+    "sketch.move_released_one": "הוזז: {count} אילוץ שקשר אותו למה שנשאר שוחרר ({names}). לחצו לביטול."
+  },
+  "ja": {
+    "sketch.move_released": "移動しました: 残る要素とつないでいた拘束 {count} 個を解除しました ({names})。クリックで元に戻します。",
+    "sketch.move_released_one": "移動しました: 残る要素とつないでいた拘束 {count} 個を解除しました ({names})。クリックで元に戻します。"
+  },
+  "vi": {
+    "sketch.move_released": "Đã di chuyển: đã bỏ {count} ràng buộc nối nó với phần còn lại ({names}). Nhấp để hoàn tác.",
+    "sketch.move_released_one": "Đã di chuyển: đã bỏ {count} ràng buộc nối nó với phần còn lại ({names}). Nhấp để hoàn tác."
+  },
+  "zh": {
+    "sketch.move_released": "已移动：已解除 {count} 个将其与保留部分相连的约束（{names}）。单击可撤销。",
+    "sketch.move_released_one": "已移动：已解除 {count} 个将其与保留部分相连的约束（{names}）。单击可撤销。"
+  }
+}
