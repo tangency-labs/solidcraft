@@ -1883,6 +1883,7 @@ impl FilletBrep {
         guess_edge_parameter: f64,
         tsect: &mut TsectPnt,
     ) -> Result<Option<f64>> {
+        let rollover = self.rollover_guesses(g)?;
         let geometry = self.geom_mut(g)?;
         // NER( pFS )
         if geometry.fillet_solver().is_none() {
@@ -1891,9 +1892,10 @@ impl FilletBrep {
 
         // Tell our FilletSolver to use our surfaces.
         // If there's anything there already, restore it when we're done.
-        let saved_fg = solver
-            .solver_mut()
-            .lend_geometry_surfaces(g, &mut geometry.off_surfs);
+        let saved_fg =
+            solver
+                .solver_mut()
+                .lend_geometry_surfaces(g, rollover, &mut geometry.off_surfs);
 
         let stat = FilletSolver::rail_edgeuse_intersect(
             solver,
@@ -1991,11 +1993,12 @@ impl FilletBrep {
             return Err(SolidError::null_pointer(OP_RAIL_EU));
         }
         // pFS->SetFilletGeomForSurfaces(this), its surfaces lent to the solver
-        let saved = solver
-            .solver_mut()
-            .lend_geometry_surfaces(g, &mut geometry.off_surfs);
+        let saved =
+            solver
+                .solver_mut()
+                .lend_geometry_surfaces(g, rollover, &mut geometry.off_surfs);
         let result = solver.rail_edgeuse_intersect_on_geometry(
-            k, geometry, rollover, target, rail_index, edgeuse, guess, tsect,
+            k, geometry, target, rail_index, edgeuse, guess, tsect,
         );
         solver
             .solver_mut()

@@ -153,6 +153,142 @@ int32_t p2r_run(Rd& rd, std::vector<double>& o)
     delete b;
     return SC_OK;
 }
+
+// The tangent-rollover op: SmConstantRadiusFS::LoadInitialValues on an SmSurfaceSurfaceFS
+// while a Model geometry is its geometry for the surfaces (SetFilletGeomForSurfaces), as
+// SmFilletGeom::RailEdgeuseIntersect and the corners' ReCalcFilletGeom scopes make it.
+// Input: the Model block; the geometry `g` (-1: none set); the intersection points
+// (`edge which  crv_pos[3] crv_deriv[3]  t  uv0[2] uv1[2]  point_type`); base surfaces A and
+// B; `r0 r1 o0 o1 uvg0[2] uvg1[2]` (the SmSurfaceSurfaceFS constructor: radii,
+// orientations, UV guesses); `rail s1_index dim` `dim` x `min max` `np per[np] ng guess[ng]`.
+// The geometry's offset surfaces (SetOffsetSurface) are offsets of A and B at the solver's
+// signed radii (allowing extension), and crSrf1Offset is another such offset of rail
+// `rail`'s base. Output: `status s2 s2_index`, the intervals, `np per`, `ng guess` (s2: -1
+// none, 0 / 1 the geometry's offset surface of that rail, -2 another surface).
+struct P2SsRo : SmSurfaceSurfaceFS
+{
+    P2SsRo(const SmContext& ctx, double r0, double r1, SmSurface& a, SmSurface& b, bool o0, bool o1,
+           const SmPoint2d& g0, const SmPoint2d& g1)
+        : SmSurfaceSurfaceFS(ctx, 1.0e-6, 30.0 * SM_PI / 180.0, 2.0 * SM_PI / 180.0, r0, r1, a, b, o0 ? TRUE : FALSE,
+                             o1 ? TRUE : FALSE, g0, g1)
+    {
+        // UB-262: neither the SmFilletSolver nor the surfaces constructors initialise
+        // m_pEdgeuses, which LoadInitialValues reads (GetEdgeuse(lOtherRailIndex)); the
+        // surface-built solver has no edge uses (the Rust solver's are None)
+        m_pEdgeuses[0] = NULL;
+        m_pEdgeuses[1] = NULL;
+    }
+    double orientation(ULONG i) const { return m_dOrientations[i]; }
+};
+
+int32_t p2ro_run(Rd& rd, std::vector<double>& o)
+{
+    const SmContext& ctx = the_context();
+    Model M(ctx);
+    if (!M.build(rd))
+        return SC_ERR_ARG;
+    int64_t g = rd.idx();
+    int64_t nt = rd.idx();
+    bool ok = true;
+    for (int64_t i = 0; i < nt && !rd.bad && ok; ++i)
+    {
+        int64_t e = rd.idx(), which = rd.idx();
+        SmPoint3d pos = rd.pt3();
+        SmPoint3d deriv = rd.pt3();
+        double t = rd.num();
+        SmPoint2d uv0 = rd.uv(), uv1 = rd.uv();
+        int64_t ptype = rd.idx();
+        SmFilletEdgeuse* eu = M.edgeuse(e, which);
+        SmFilletVertexuse* vu = eu ? (SmFilletVertexuse*)eu->GetVertexuse() : NULL;
+        if (vu == NULL)
+        {
+            ok = false;
+            break;
+        }
+        SmTsectPnt& tp = vu->GetTsectPnt();
+        tp.CrvPos() = pos;
+        tp.CrvDeriv() = SmVector3d(deriv.x, deriv.y, deriv.z);
+        tp.m_dCurveParameter = t;
+        tp.UVPos(0) = uv0;
+        tp.UVPos(1) = uv1;
+        tp.PointType() = (SmIntersectionPointType)ptype;
+    }
+    SmSurface* a = read_surface(rd, ctx);
+    SmSurface* b = read_surface(rd, ctx);
+    double r0 = rd.num(), r1 = rd.num();
+    bool o0 = rd.flag(), o1 = rd.flag();
+    SmPoint2d g0 = rd.uv(), g1 = rd.uv();
+    ULONG rail = (ULONG)rd.idx();
+    ULONG s1_index = (ULONG)rd.idx();
+    ULONG dim = (ULONG)rd.idx();
+    SmExtentNd ivls(dim);
+    for (ULONG i = 0; i < dim && !rd.bad; i++)
+    {
+        double lo = rd.num();
+        double hi = rd.num();
+        ivls[i] = SmExtent1d(lo, hi);
+    }
+    int64_t np = rd.idx();
+    SmTArray<SmBoolean> per;
+    for (int64_t i = 0; i < np && !rd.bad; i++)
+        per.Add(rd.flag() ? TRUE : FALSE);
+    int64_t ng = rd.idx();
+    SmTArray<double> gt;
+    for (int64_t i = 0; i < ng && !rd.bad; i++)
+        gt.Add(rd.num());
+    if (!ok || rd.bad || a == NULL || b == NULL || rail > 1)
+    {
+        delete a;
+        delete b;
+        return SC_ERR_ARG;
+    }
+    SmFilletGeom* geom = M.geom(g);
+    {
+        P2SsRo fs(ctx, r0, r1, *a, *b, o0, o1, g0, g1);
+        SmSurface* bases[2] = {a, b};
+        double radii[2] = {r0, r1};
+        if (geom != NULL)
+            for (ULONG i = 0; i < 2; i++)
+            {
+                SmOffsetSurface* off = new (ctx) SmOffsetSurface(radii[i] * fs.orientation(i), *bases[i]);
+                off->SetAllowExtension(TRUE);
+                geom->SetOffsetSurface(i, off);
+            }
+        SmOffsetSurface* s1 = new (ctx) SmOffsetSurface(radii[rail] * fs.orientation(rail), *bases[rail]);
+        s1->SetAllowExtension(TRUE);
+        SmSurface* s2 = NULL;
+        ULONG s2_index = 999;
+        ULONG do2 = 1;
+        fs.SetFilletGeomForSurfaces(geom);
+        SmStatus stt = fs.LoadInitialValues(do2, rail, *s1, s1_index, s2, s2_index, ivls, per, gt);
+        double s2_rail = -1.0;
+        if (s2 != NULL)
+            s2_rail = s2 == fs.GetSurface(0) ? 0.0 : s2 == fs.GetSurface(1) ? 1.0 : -2.0;
+        fs.SetFilletGeomForSurfaces(NULL);
+        delete s1;
+        // the geometry's offsets reference A and B: delete them before the bases
+        if (geom != NULL)
+            for (ULONG i = 0; i < 2; i++)
+                geom->SetOffsetSurface(i, NULL);
+        o.push_back(stt == SM_SUCCESS ? 0.0 : (double)stt);
+        o.push_back(s2_rail);
+        o.push_back((double)s2_index);
+        for (ULONG i = 0; i < dim; i++)
+        {
+            o.push_back(ivls[i].GetMin());
+            o.push_back(ivls[i].GetMax());
+        }
+        o.push_back((double)per.GetSize());
+        for (ULONG i = 0; i < per.GetSize(); i++)
+            o.push_back(per[i] != FALSE ? 1.0 : 0.0);
+        o.push_back((double)gt.GetSize());
+        for (ULONG i = 0; i < gt.GetSize(); i++)
+            o.push_back(gt[i]);
+    }
+    delete a;
+    delete b;
+    return SC_OK;
+}
 } // namespace
 
 SC_EXPORT int32_t sc_blend_fillet_standard_solver_p2_recalc(const double* in, int64_t n_in, double* out,
@@ -164,6 +300,23 @@ SC_EXPORT int32_t sc_blend_fillet_standard_solver_p2_recalc(const double* in, in
     Rd rd(in, n_in);
     std::vector<double> o;
     int32_t rc = p2r_run(rd, o);
+    if (rc != SC_OK)
+        return rc;
+    if (rd.at != n_in)
+        return SC_ERR_ARG; // trailing input
+    return sc_copy_out(o.data(), (int64_t)o.size(), out, cap, out_len);
+    SC_CATCH
+}
+
+SC_EXPORT int32_t sc_blend_fillet_standard_solver_p2_rollover(const double* in, int64_t n_in, double* out,
+                                                              int64_t cap, int64_t* out_len)
+{
+    if (out == NULL || out_len == NULL || n_in < 0 || cap < 0)
+        return SC_ERR_ARG;
+    SC_TRY
+    Rd rd(in, n_in);
+    std::vector<double> o;
+    int32_t rc = p2ro_run(rd, o);
     if (rc != SC_OK)
         return rc;
     if (rd.at != n_in)

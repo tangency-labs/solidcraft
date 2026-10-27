@@ -34,9 +34,11 @@
 //! Deviations:
 //! - **Object model** as in `blend.fillet_standard_solver_p1` (the solvers are its
 //!   structs). The tangent-rollover guess of `SmConstantRadiusFS::LoadInitialValues`
-//!   comes from [`ConstantRadiusOps::tangent_rollover_guess`]: the geometry for the
-//!   surfaces of `SmFilletGeom::RailEdgeuseIntersect` supplies its rails' guesses
-//!   (`blend::fillet_solver::surfaces`); context-free callers have none.
+//!   comes from [`ConstantRadiusOps::tangent_rollover_guess`]: every scope that sets
+//!   the solver's geometry for the surfaces (`SmFilletGeom::RailEdgeuseIntersect`, the
+//!   corners' `ReCalcFilletGeom` scopes) hands the solver that geometry's rail guesses,
+//!   taken when the scope starts (`blend::fillet_solver::surfaces`); context-free
+//!   callers have none.
 //! - **Virtual dispatch.** `SetupOffsetExtension` is dispatched on the solver's class
 //!   through [`ConstantRadiusOps`]: `SmSurfaceSurfaceFS` has its own version
 //!   (`blend.fillet_standard_solver_p1`); every other constant-radius solver uses the
@@ -361,14 +363,15 @@ pub trait ConstantRadiusOps {
     /// The tangent-rollover guess of rail `rail`'s other surface: in the
     /// tangent-rollover case (`GetFilletGeomForSurfaces()` of type
     /// `SM_FG_TANGENT_ROLLOVER`) the UV position stored in a rail vertex use's
-    /// intersection point (`None`: no such point, or no such geometry). Context-free
-    /// callers have no geometry for the surfaces.
+    /// intersection point (`None`: no such point, or no such geometry). The geometry
+    /// for the surfaces is the solver's, set by the scope that lent its surfaces
+    /// ([`FilletSolver::tangent_rollover_guess`]); context-free callers have none.
     ///
     /// # Errors
-    /// `SM_ERR_NULL_POINTER` without the geometry's rail.
+    /// `SM_ERR_NULL_POINTER` without the geometry's rail; [`SolidError::InvalidInput`]
+    /// for a geometry for the surfaces set outside a lending scope.
     fn tangent_rollover_guess(&self, rail: usize) -> Result<Option<Point2>> {
-        let _ = rail;
-        Ok(None)
+        self.constant_radius().solver.tangent_rollover_guess(rail)
     }
 
     /// `SetupOffsetExtension(pSurf, rDomain)` of the solver's class.

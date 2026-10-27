@@ -65,6 +65,19 @@
 //! uv0[2] uv1[2]`. [`recalc`] accepts what the block validator accepts, edge indices inside
 //! the block, finite values, `tol > 0` and well-formed curves and surfaces.
 //!
+//! [`rollover`] (the same shim file, `sc_blend_fillet_standard_solver_p2_rollover`) runs
+//! `SmConstantRadiusFS::LoadInitialValues` on an `SmSurfaceSurfaceFS` while geometry `g`
+//! of the pseudo B-rep block is its geometry for the surfaces (`SetFilletGeomForSurfaces`;
+//! `-1`: none): the block, `g`, `nt` intersection points `e which crv_pos[3] crv_deriv[3]
+//! t uv0[2] uv1[2] point_type`, surfaces A and B, `r0 r1 o0 o1 uvg0[2] uvg1[2]` (the
+//! constructor's radii, orientations and UV guesses) and `rail s1_index dim` `dim` x
+//! `min max` `np per[np] ng guess[ng]`. The geometry's offset surfaces become offsets of A
+//! and B at the solver's signed radii; `crSrf1Offset` is another offset of rail `rail`'s
+//! base. Output `status s2 s2_index`, the intervals, `np per`, `ng guess`. [`rollover`]
+//! accepts what the block validator accepts, edge indices inside the block, point types
+//! of `SmIntersectionPointType`, finite values, positive radii, rail 0 or 1 and guess and
+//! interval indices in range.
+//!
 //! [`eval_edgeuse`] (shim `harness/cpp/shim/blend_fillet_standard_solver_p2_eu.cpp`,
 //! `sc_blend_fillet_standard_solver_p2_eu_eval`) runs on a B-rep block of unit
 //! `topology.edgeuse_p1` ([`super::topology_edgeuse_p1`]) followed by `mode`:
@@ -153,6 +166,13 @@ mod sys {
             out_len: *mut i64,
         ) -> i32;
         pub fn sc_blend_fillet_standard_solver_p2_recalc(
+            input: *const f64,
+            n_in: i64,
+            out: *mut f64,
+            cap: i64,
+            out_len: *mut i64,
+        ) -> i32;
+        pub fn sc_blend_fillet_standard_solver_p2_rollover(
             input: *const f64,
             n_in: i64,
             out: *mut f64,
@@ -537,6 +557,78 @@ fn validate_recalc(input: &[f64]) -> Result<(), FfiError> {
         curve(&mut rd, 3, "reference curve")?;
     }
     rd.done()
+}
+
+/// Largest `SmIntersectionPointType` value (`SM_IP_TOUCHING`).
+pub const MAX_POINT_TYPE: usize = 7;
+
+fn validate_rollover(input: &[f64]) -> Result<(), FfiError> {
+    use super::blend_fillet_geom_p1::{surface, validate_block, Reader as P1Reader, MAX_MAGNITUDE};
+    let mut rd = P1Reader {
+        cursor: crate::reader::Cursor::new(input),
+        bound: MAX_MAGNITUDE,
+    };
+    let b = validate_block(&mut rd)?;
+    rd.opt_index(b.ng())?;
+    let nt = rd.index(MAX_TSECTS)?;
+    for _ in 0..nt {
+        rd.opt_index(b.ne())?
+            .ok_or_else(|| bad("intersection point: edge -1"))?;
+        rd.index(1)?;
+        rd.finites(11)?;
+        rd.index(MAX_POINT_TYPE)?;
+    }
+    surface(&mut rd)?;
+    surface(&mut rd)?;
+    let r = rd.finites(2)?;
+    if r.iter().any(|&r| r <= 0.0) {
+        return Err(bad("radius not positive"));
+    }
+    rd.flag()?;
+    rd.flag()?;
+    rd.finites(4)?;
+    rd.index(1)?;
+    let s1_index = rd.index(MAX_ARRAY)?;
+    let dim = rd.index(MAX_ARRAY)?;
+    rd.finites(2 * dim)?;
+    let np = rd.index(MAX_ARRAY)?;
+    for _ in 0..np {
+        rd.flag()?;
+    }
+    let ng = rd.index(MAX_ARRAY)?;
+    rd.finites(ng)?;
+    // reads rGuessT[s1_index..+2], writes rIntervals[ng..+2]
+    if s1_index + 1 >= ng || ng + 1 >= dim {
+        return Err(bad("rollover: guess or interval index out of range"));
+    }
+    rd.done()
+}
+
+/// Runs `SmConstantRadiusFS::LoadInitialValues` on an `SmSurfaceSurfaceFS` with a
+/// geometry for the surfaces (layout in the module docs).
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for input the shim must not see; [`FfiError::Status`]
+/// for a shim failure.
+pub fn rollover(input: &[f64]) -> Result<Vec<f64>, FfiError> {
+    validate_rollover(input)?;
+    call_with_buffer(4096, |buf, len| {
+        // SAFETY: input is valid for input.len() reads and holds exactly what the shim
+        // reads (validated above: the pseudo B-rep block, indices inside it, finite
+        // values, well-formed surfaces, rail 0 or 1 and the guess and interval indices
+        // LoadInitialValues reads and writes in range); buf is valid for buf.len()
+        // writes and the shim honours the capacity; len is valid.
+        unsafe {
+            sys::sc_blend_fillet_standard_solver_p2_rollover(
+                input.as_ptr(),
+                input.len() as i64,
+                buf.as_mut_ptr(),
+                buf.len() as i64,
+                &raw mut *len,
+            )
+        }
+    })
 }
 
 /// Runs `SmVariableRadiusFS::ReCalcFilletGeom` (layout in the module docs).

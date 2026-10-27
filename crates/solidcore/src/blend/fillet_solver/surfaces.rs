@@ -3,7 +3,7 @@
 use crate::blend::fillet_custom_solver::{
     ConstantRadiusAssistedFs, InitialValues, JacobianLoad, OffsetSurface,
 };
-use crate::blend::fillet_geom::p1::{FilletGeom, FilletGeomId, FilletGeomType};
+use crate::blend::fillet_geom::p1::{FilletGeom, FilletGeomId};
 use crate::blend::fillet_standard_solver::p1::constant_radius_load_jacobian;
 use crate::blend::fillet_standard_solver::p2::{
     constant_radius_load_initial_values, ConstantRadiusOps,
@@ -23,7 +23,6 @@ use crate::math::Point2;
 struct GeometrySolver<'a> {
     actual: &'a mut ConstantRadiusAssistedFs,
     geometry: &'a mut FilletGeom,
-    rollover: RolloverGuesses,
 }
 
 impl ConstantRadiusOps for GeometrySolver<'_> {
@@ -55,17 +54,6 @@ impl ConstantRadiusOps for GeometrySolver<'_> {
         let distance = self.actual.fillet_radius(rail)? * self.actual.solver.orientation(rail)?;
         ConstantRadiusOps::offset_surface_mut(self, rail)?.set_offset_distance(distance);
         Ok(())
-    }
-
-    fn tangent_rollover_guess(&self, rail: usize) -> Result<Option<Point2>> {
-        if self.geometry.fillet_geom_type() != FilletGeomType::TangentRollover {
-            return Ok(None);
-        }
-        match self.rollover.rails.get(rail).copied().flatten() {
-            Some(guess) => Ok(guess),
-            // pFG->GetRail(lRailIndex) is NULL: upstream dereferences it
-            None => Err(SolidError::null_pointer("blend::fillet_solver::surfaces")),
-        }
     }
 
     fn setup_offset_extension(
@@ -166,7 +154,6 @@ pub(crate) fn rail_edgeuse_intersect(
     actual: &mut ConstantRadiusAssistedFs,
     k: &Kernel,
     geometry: &mut FilletGeom,
-    rollover: RolloverGuesses,
     target: &mut Brep,
     rail_index: usize,
     edgeuse: EdgeuseId,
@@ -174,11 +161,7 @@ pub(crate) fn rail_edgeuse_intersect(
     tsect: &mut TsectPnt,
 ) -> Result<Option<f64>> {
     FilletSolver::rail_edgeuse_intersect(
-        &mut GeometrySolver {
-            actual,
-            geometry,
-            rollover,
-        },
+        &mut GeometrySolver { actual, geometry },
         k,
         target,
         rail_index,
@@ -198,6 +181,8 @@ const SELECTED_KEYS: [u64; 2] = [u64::MAX - 1, u64::MAX];
 pub(crate) struct LentSurfaces {
     /// The geometry for the surfaces before the scope (`pSavedFG` / `pBackupFG`).
     saved_fg: Option<FilletGeomId>,
+    /// That geometry's tangent-rollover guesses.
+    saved_rollover: Option<(FilletGeomId, RolloverGuesses)>,
     /// The enclosing scope's lent geometry and surfaces, when this scope lent other
     /// surfaces; `None` when the geometry's surfaces were already lent.
     enclosing: Option<(Option<FilletGeomId>, [Option<OffsetSurfaceSlot>; 2])>,
@@ -209,16 +194,22 @@ impl FilletSolver {
     /// `GetSurface` / `SetSurface` reach them as upstream's `GetOffsetSurface` /
     /// `SetOffsetSurface` do. Surfaces already lent by an enclosing scope for the same
     /// geometry stay where they are (`off_surfs` is then the emptied geometry's).
+    /// `rollover` is the geometry's tangent-rollover guesses
+    /// ([`FilletBrep::rollover_guesses`](crate::blend::fillet_geom::p1::FilletBrep::rollover_guesses)),
+    /// which `SmConstantRadiusFS::LoadInitialValues` reads in the scope.
     pub(crate) fn lend_geometry_surfaces(
         &mut self,
         geometry: FilletGeomId,
+        rollover: RolloverGuesses,
         off_surfs: &mut [Option<OffsetSurface>; 2],
     ) -> LentSurfaces {
         let saved_fg = self.fg_for_surfaces;
         self.fg_for_surfaces = Some(geometry);
+        let saved_rollover = self.lent_rollover.replace((geometry, rollover));
         if self.lent_geometry == Some(geometry) {
             return LentSurfaces {
                 saved_fg,
+                saved_rollover,
                 enclosing: None,
             };
         }
@@ -234,6 +225,7 @@ impl FilletSolver {
         );
         LentSurfaces {
             saved_fg,
+            saved_rollover,
             enclosing: Some(enclosing),
         }
     }
@@ -254,6 +246,39 @@ impl FilletSolver {
             }
         }
         self.fg_for_surfaces = saved.saved_fg;
+        self.lent_rollover = saved.saved_rollover;
+    }
+
+    /// The tangent-rollover guess `SmConstantRadiusFS::LoadInitialValues` reads for rail
+    /// `rail` through the geometry for the surfaces (`GetFilletGeomForSurfaces()` of
+    /// type `SM_FG_TANGENT_ROLLOVER`): the other surface's UV of the rail's first
+    /// `SM_FV_RAIL_X_EDGEUSE` vertex use with a set intersection point. `None` without
+    /// a geometry for the surfaces, for another geometry type, or without such a vertex
+    /// use.
+    ///
+    /// # Errors
+    /// `SM_ERR_NULL_POINTER` when the geometry has no rail `rail` (upstream dereferences
+    /// it); [`SolidError::InvalidInput`] when the geometry for the surfaces was set
+    /// without a lending scope (the solver cannot reach the pseudo B-rep).
+    pub(crate) fn tangent_rollover_guess(&self, rail: usize) -> Result<Option<Point2>> {
+        const OP: &str = "blend::fillet_solver::surfaces";
+        let Some(fg) = self.fg_for_surfaces else {
+            return Ok(None);
+        };
+        let Some((_, guesses)) = self.lent_rollover.filter(|(g, _)| *g == fg) else {
+            return Err(SolidError::invalid_input(
+                OP,
+                "the geometry for the surfaces has not lent its rollover guesses",
+            ));
+        };
+        if !guesses.tangent_rollover {
+            return Ok(None);
+        }
+        match guesses.rails.get(rail).copied().flatten() {
+            Some(guess) => Ok(guess),
+            // pFG->GetRail(lRailIndex) is NULL: upstream dereferences it
+            None => Err(SolidError::null_pointer(OP)),
+        }
     }
 }
 
@@ -265,7 +290,7 @@ impl FilletSolver {
 ///
 /// # Errors
 /// [`SolidError::NotFound`] for a geometry not in `pseudo`; those of `f`.
-pub(crate) fn with_geometry_surfaces<T>(
+pub fn with_geometry_surfaces<T>(
     ops: &mut dyn FilletSolverOps,
     pseudo: &mut crate::blend::fillet_geom::p1::FilletBrep,
     geometry: FilletGeomId,
@@ -274,9 +299,12 @@ pub(crate) fn with_geometry_surfaces<T>(
         &mut crate::blend::fillet_geom::p1::FilletBrep,
     ) -> Result<T>,
 ) -> Result<T> {
-    let saved = ops
-        .solver_mut()
-        .lend_geometry_surfaces(geometry, &mut pseudo.geom_mut(geometry)?.off_surfs);
+    let rollover = pseudo.rollover_guesses(geometry)?;
+    let saved = ops.solver_mut().lend_geometry_surfaces(
+        geometry,
+        rollover,
+        &mut pseudo.geom_mut(geometry)?.off_surfs,
+    );
     let result = f(&mut *ops, &mut *pseudo);
     let back = pseudo.geom_mut(geometry).map(|g| {
         ops.solver_mut()
@@ -291,7 +319,7 @@ pub(crate) fn with_geometry_surfaces<T>(
 mod tests {
     use super::*;
     use crate::blend::fillet_custom_solver::SurfaceId;
-    use crate::blend::fillet_geom::p1::{FilletBrep, FilletGeomId, FilletSolverId};
+    use crate::blend::fillet_geom::p1::{FilletBrep, FilletGeomId, FilletGeomType, FilletSolverId};
     use crate::math::Point3;
     use crate::nurbs::b_spline_surface::BSplineSurface;
     use crate::nurbs::math::{CPoint, NOW};
@@ -357,7 +385,6 @@ mod tests {
         let mut view = GeometrySolver {
             actual: &mut actual,
             geometry: &mut geometry,
-            rollover: RolloverGuesses::default(),
         };
         assert!(std::ptr::eq(
             view.solver_surface(0).unwrap().unwrap(),

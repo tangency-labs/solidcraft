@@ -478,6 +478,10 @@ pub struct FilletSolver {
     /// The lent offset surfaces of [`FilletSolver::lent_geometry`], each with a transient
     /// identity key (`SetOffsetsData` compares keys).
     pub(crate) lent_surfaces: [Option<OffsetSurfaceSlot>; 2],
+    /// The tangent-rollover guesses of the geometry for the surfaces, taken by the
+    /// scope that set it ([`FilletSolver::lend_geometry_surfaces`]); upstream's
+    /// `SmConstantRadiusFS::LoadInitialValues` reads them through `m_pFGForSurfaces`.
+    pub(crate) lent_rollover: Option<(FilletGeomId, RolloverGuesses)>,
     /// `m_dSavedOffsets` (not initialised upstream; `0.0` here).
     pub saved_offsets: [f64; 2],
     /// `m_dSurfaceExtensionFactor` (`0.5`).
@@ -534,6 +538,7 @@ impl FilletSolver {
             fg_for_surfaces: None,
             lent_geometry: None,
             lent_surfaces: [None, None],
+            lent_rollover: None,
             saved_offsets: [0.0, 0.0],
             surface_extension_factor: 0.5,
             conversion_tol: EFF_ZERO / 10.0,
@@ -1812,7 +1817,6 @@ pub trait FilletSolverOps: AsFilletSolverOps {
         &mut self,
         k: &Kernel,
         _geometry: &mut FilletGeom,
-        _rollover: RolloverGuesses,
         b: &mut Brep,
         rail_index: usize,
         edgeuse: EdgeuseId,

@@ -2067,7 +2067,6 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
         &mut self,
         k: &Kernel,
         geometry: &mut crate::blend::fillet_geom::p1::FilletGeom,
-        rollover: crate::blend::fillet_solver::p1::RolloverGuesses,
         target: &mut Brep,
         rail_index: usize,
         edgeuse: EdgeuseId,
@@ -2075,7 +2074,7 @@ impl FilletSolverOps for ConstantRadiusAssistedFs {
         tsect: &mut TsectPnt,
     ) -> Result<Option<f64>> {
         crate::blend::fillet_solver::surfaces::rail_edgeuse_intersect(
-            self, k, geometry, rollover, target, rail_index, edgeuse, guess, tsect,
+            self, k, geometry, target, rail_index, edgeuse, guess, tsect,
         )
     }
 

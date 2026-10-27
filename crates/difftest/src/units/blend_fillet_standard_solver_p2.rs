@@ -3,7 +3,11 @@
 //! `SmConstantRadiusAssistedFS` `GuessPointOnPlaneSolve` (with `SmGuessSphereSolveENFO`)
 //! and `PointOnPlaneSolve`, the `SmSurfaceSurfaceFS` constructor and `CalcFilletGeom`'s
 //! first exit, and the `IsKindOf` of the assisted, surface/surface and variable-radius
-//! solvers.
+//! solvers. The `rollover` cases (own names and seeds) run `LoadInitialValues` on an
+//! `SmSurfaceSurfaceFS` while a pseudo-B-rep geometry of unit `blend.fillet_geom_p1`
+//! (mostly `SM_FG_TANGENT_ROLLOVER`, rails ending in `SM_FV_RAIL_X_EDGEUSE` vertex uses
+//! with set intersection points) is its geometry for the surfaces: the tangent-rollover
+//! guess, its skipped vertex uses and the fallback without a guess or geometry.
 //!
 //! C++: `solidcore_ffi::units::blend_fillet_standard_solver_p2` (upstream
 //! `source/SMLib/src/SmFilletStandardSolver.cpp`). Rust:
@@ -29,7 +33,8 @@ use serde_json::Value;
 
 use solidcore::blend::fillet_custom_solver::{OffsetSurface, SurfaceId};
 use solidcore::blend::fillet_geom::p1::{FilletBrep, FilletSolverId};
-use solidcore::blend::fillet_solver::p1::{FilletSolver, OffsetSurfaceSlot};
+use solidcore::blend::fillet_solver::p1::{FilletSolver, FilletSolverOps, OffsetSurfaceSlot};
+use solidcore::blend::fillet_solver::surfaces::with_geometry_surfaces;
 use solidcore::curve::curve::Curve;
 use solidcore::blend::fillet_standard_solver::p1::{
     constant_radius_from_edgeuse, ConstantDistanceFs, ConstantRadiusFs, CurveBasedFs, FilletLaw,
@@ -43,7 +48,7 @@ use solidcore::geom::extent1d::{Extent1d, ExtentNd};
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::vector2d::{Point2, Vec2};
 use solidcore::geom::vector3d::Vec3;
-use solidcore::intersect::surface_intersector::p1::{SrfIndex, TsectPnt};
+use solidcore::intersect::surface_intersector::p1::{IntersectionPointType, SrfIndex, TsectPnt};
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_curve::p1::NurbCircleParam;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
@@ -207,6 +212,39 @@ enum Inputs {
     /// `SmVariableRadiusFS::ReCalcFilletGeom` on a pseudo B-rep of unit
     /// `blend.fillet_geom_p1`.
     Recalc(Box<RecalcIn>),
+    /// `SmConstantRadiusFS::LoadInitialValues` on an `SmSurfaceSurfaceFS` while a pseudo
+    /// B-rep geometry of unit `blend.fillet_geom_p1` is its geometry for the surfaces
+    /// (the tangent-rollover guess).
+    Rollover(Box<RolloverIn>),
+}
+
+/// The inputs of a `rollover` case.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RolloverIn {
+    model: Model,
+    /// The geometry for the surfaces (`-1` none).
+    g: i64,
+    tsects: Vec<RoTsectIn>,
+    /// The base surfaces A and B.
+    a: Srf,
+    b: Srf,
+    /// The constructor's radii, orientations and UV guesses.
+    r: [f64; 2],
+    o: [bool; 2],
+    uvg: [[f64; 2]; 2],
+    rail: usize,
+    s1_index: usize,
+    intervals: Vec<[f64; 2]>,
+    per: Vec<bool>,
+    guess: Vec<f64>,
+}
+
+/// A [`TsectIn`] with its `SmIntersectionPointType` code.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RoTsectIn {
+    #[serde(flatten)]
+    t: TsectIn,
+    ptype: i64,
 }
 
 /// An intersection point set on the vertex use of edge use `which` of model edge `e`.
@@ -256,7 +294,10 @@ impl Inputs {
             Inputs::Plane { .. } => Op::Plane,
             Inputs::Ss { .. } => Op::Ss,
             Inputs::Types { .. } => Op::Types,
-            Inputs::CdEu { .. } | Inputs::CrEu { .. } | Inputs::Recalc(_) => return None,
+            Inputs::CdEu { .. }
+            | Inputs::CrEu { .. }
+            | Inputs::Recalc(_)
+            | Inputs::Rollover(_) => return None,
         })
     }
 }
@@ -424,7 +465,7 @@ fn cpp_input(i: &Inputs) -> Result<Vec<f64>, HarnessError> {
             push_kinds(&mut o, kinds);
         }
         Inputs::Types { kinds } => push_kinds(&mut o, kinds),
-        Inputs::CdEu { .. } | Inputs::CrEu { .. } | Inputs::Recalc(_) => {
+        Inputs::CdEu { .. } | Inputs::CrEu { .. } | Inputs::Recalc(_) | Inputs::Rollover(_) => {
             return Err(harness("the edge-use op has its own input"))
         }
     }
@@ -437,6 +478,9 @@ fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
     }
     if let Inputs::Recalc(ri) = i {
         return cpp_recalc(ri);
+    }
+    if let Inputs::Rollover(ri) = i {
+        return cpp_rollover(ri);
     }
     let Some(op) = i.ffi() else {
         return cpp_edgeuse(i);
@@ -1403,7 +1447,7 @@ fn rust_record(i: &Inputs) -> Result<Rec, HarnessError> {
             push_types(&mut o, ss.type_code(), |t| ss.is_kind_of(t), kinds);
             push_types(&mut o, vr.type_code(), |t| vr.is_kind_of(t), kinds);
         }
-        Inputs::CdEu { .. } | Inputs::CrEu { .. } | Inputs::Recalc(_) => {
+        Inputs::CdEu { .. } | Inputs::CrEu { .. } | Inputs::Recalc(_) | Inputs::Rollover(_) => {
             return Err(harness("the edge-use op runs apart"))
         }
     }
@@ -1416,6 +1460,9 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     }
     if let Inputs::Recalc(ri) = i {
         return rust_recalc(ri);
+    }
+    if let Inputs::Rollover(ri) = i {
+        return rust_rollover(ri);
     }
     if i.ffi().is_none() {
         return rust_edgeuse(i);
@@ -1572,6 +1619,295 @@ fn rust_recalc(ri: &RecalcIn) -> Result<Output, HarnessError> {
     }
     Ok(to_output(&o))
 }
+
+// ---- LoadInitialValues with a geometry for the surfaces ------------------------------
+
+fn rollover_input(ri: &RolloverIn) -> Result<Vec<f64>, HarnessError> {
+    let mut o = Vec::new();
+    push_model(&mut o, &ri.model)?;
+    o.push(ri.g as f64);
+    o.push(ri.tsects.len() as f64);
+    for rt in &ri.tsects {
+        let t = &rt.t;
+        o.extend([t.e as f64, t.which as f64]);
+        o.extend(t.pos);
+        o.extend(t.deriv);
+        o.push(t.t);
+        o.extend(t.uv0);
+        o.extend(t.uv1);
+        o.push(rt.ptype as f64);
+    }
+    gp1_push_srf(&mut o, &ri.a)?;
+    gp1_push_srf(&mut o, &ri.b)?;
+    o.extend(ri.r);
+    o.extend([flag(ri.o[0]), flag(ri.o[1])]);
+    o.extend(ri.uvg.iter().flatten());
+    o.extend([ri.rail as f64, ri.s1_index as f64, ri.intervals.len() as f64]);
+    o.extend(ri.intervals.iter().flatten());
+    o.push(ri.per.len() as f64);
+    o.extend(ri.per.iter().map(|&b| flag(b)));
+    o.push(ri.guess.len() as f64);
+    o.extend_from_slice(&ri.guess);
+    Ok(o)
+}
+
+fn cpp_rollover(ri: &RolloverIn) -> Result<Output, HarnessError> {
+    let input = rollover_input(ri)?;
+    let flat = ffi::rollover(&input).map_err(|e| harness(e.to_string()))?;
+    Ok(to_output(&flat))
+}
+
+fn rust_rollover(ri: &RolloverIn) -> Result<Output, HarnessError> {
+    let mut rm = RustModel::build(&ri.model)?;
+    for rt in &ri.tsects {
+        let t = &rt.t;
+        let eu = rm.edgeuse(t.e, t.which)?;
+        let vu = rm
+            .fb
+            .brep()
+            .edgeuse(eu)
+            .map_err(|e| he(&e))?
+            .vertexuse
+            .ok_or_else(|| harness("edge use without vertex use"))?;
+        let tp = rm.fb.fillet_vertexuse_mut(vu).map_err(|e| he(&e))?.tsect_pnt_mut();
+        *tp.crv_pos_mut() = v3(t.pos);
+        *tp.crv_deriv_mut() = v3(t.deriv);
+        tp.curve_parameter = t.t;
+        *tp.uv_pos_mut(SrfIndex::First) = p2(t.uv0);
+        *tp.uv_pos_mut(SrfIndex::Second) = p2(t.uv1);
+        tp.point_type = i32::try_from(rt.ptype)
+            .ok()
+            .and_then(IntersectionPointType::from_code)
+            .ok_or_else(|| harness("point type"))?;
+    }
+    let k = Kernel::default();
+    let bases = [gp1_surface_of(&ri.a)?, gp1_surface_of(&ri.b)?];
+    let ids = [SurfaceId::Free(0), SurfaceId::Free(1)];
+    let [a, b] = bases.clone();
+    let mut fs = SurfaceSurfaceFs::new(
+        &k,
+        &mut rm.fb,
+        FilletSolverId(0),
+        1.0e-6,
+        30.0 * DEG,
+        2.0 * DEG,
+        ri.r,
+        [(a, ids[0]), (b, ids[1])],
+        ri.o,
+        [p2(ri.uvg[0]), p2(ri.uvg[1])],
+    )
+    .map_err(|e| he(&e))?;
+    let signed = |fs: &SurfaceSurfaceFs, i: usize| -> Result<f64, HarnessError> {
+        let r = *ri.r.get(i).ok_or_else(|| harness("rail"))?;
+        Ok(r * fs.base.solver.orientation(i).map_err(|e| he(&e))?)
+    };
+    let offset = |fs: &SurfaceSurfaceFs, i: usize| -> Result<OffsetSurface, HarnessError> {
+        let base = bases.get(i).cloned().ok_or_else(|| harness("rail"))?;
+        let id = *ids.get(i).ok_or_else(|| harness("rail"))?;
+        let mut off = offset_of(&k, signed(fs, i)?, base, id)?;
+        off.surface.set_allow_extension(true);
+        Ok(off)
+    };
+    let geom = usize::try_from(ri.g).ok().map(|gi| rm.geom(gi)).transpose()?;
+    if let Some(g) = geom {
+        let surfs = [Some(offset(&fs, 0)?), Some(offset(&fs, 1)?)];
+        rm.fb.geom_mut(g).map_err(|e| he(&e))?.off_surfs = surfs;
+    }
+    let mut s1 = offset(&fs, ri.rail)?;
+    let mut ivls = ExtentNd::new(ri.intervals.len());
+    for (n, iv) in ri.intervals.iter().enumerate() {
+        *ivls.get_mut(n).ok_or_else(|| harness("interval index"))? =
+            Extent1d::from_min_max(iv[0], iv[1]);
+    }
+    let mut per = ri.per.clone();
+    let mut guess = ri.guess.clone();
+    let (rail, s1_index) = (ri.rail, ri.s1_index);
+    let mut load = |fs: &mut dyn FilletSolverOps| {
+        fs.load_initial_values(
+            &k, None, true, rail, &mut s1, s1_index, &mut ivls, &mut per, &mut guess,
+        )
+    };
+    let res = match geom {
+        Some(g) => with_geometry_surfaces(&mut fs, &mut rm.fb, g, |fs, _| load(fs)),
+        None => load(&mut fs),
+    };
+    let mut o = Vec::new();
+    match &res {
+        Ok(Some(v)) => o.extend([0.0, v.surface2_rail as f64, v.surface2_index as f64]),
+        Ok(None) => o.extend([0.0, -1.0, 999.0]),
+        Err(e) => match fail(e) {
+            // (upstream sets rpSrf2Offset first and leaves the index unchanged)
+            Ok(st) => o.extend([st, 1usize.wrapping_sub(rail) as f64, 999.0]),
+            Err(out) => return Ok(*out),
+        },
+    }
+    for n in 0..ri.intervals.len() {
+        let iv = ivls.get(n).ok_or_else(|| harness("interval index"))?;
+        o.extend([iv.min(), iv.max()]);
+    }
+    o.push(per.len() as f64);
+    o.extend(per.iter().map(|&b| flag(b)));
+    o.push(guess.len() as f64);
+    o.extend_from_slice(&guess);
+    Ok(to_output(&o))
+}
+
+/// Two rail edges (vertices 0-1 and 2-3) of one geometry, mostly `SM_FG_TANGENT_ROLLOVER`
+/// with `SM_FV_RAIL_X_EDGEUSE` rail-end vertices whose vertex uses carry set intersection
+/// points: the other surface's UV there is the rollover guess, inside the base domain,
+/// past it (the other side of a seam) or far from the answer. Sometimes another geometry
+/// type, other vertex types, unset point types or no geometry for the surfaces (the
+/// fallback through the base surface).
+fn gen_rollover(rng: &mut Rng) -> Inputs {
+    let scale = 4.0;
+    let a = ro_surface(rng, false);
+    let b = ro_surface(rng, true);
+    let vtype = |rng: &mut Rng| match rng.below(8) {
+        0 => rng.below(14) as i64,
+        _ => 9, // SM_FV_RAIL_X_EDGEUSE
+    };
+    let vertices = (0..4)
+        .map(|_| {
+            let mut v = vin([
+                rng.uniform(-1.0, 1.0) * scale,
+                rng.uniform(-1.0, 1.0) * scale,
+                rng.uniform(-1.0, 1.0) * scale,
+            ]);
+            v.vtype = vtype(rng);
+            v.status = 1;
+            v
+        })
+        .collect::<Vec<_>>();
+    let edge = |vs: usize, ve: usize| EdgeIn {
+        vs,
+        ve,
+        etype: 14,
+        status: 1,
+        corner: -1,
+        curve: None,
+        interval: None,
+        fbe: [-1, -1],
+        eus: [eu_none(), eu_none()],
+    };
+    let gtype = match rng.below(10) {
+        0 => 0,
+        1 => 2,
+        _ => 3, // SM_FG_TANGENT_ROLLOVER
+    };
+    let model = Model {
+        targets: Vec::new(),
+        faces: Vec::new(),
+        fillet_brep: Vec::new(),
+        vertices,
+        geoms: vec![GeomIn {
+            gtype,
+            status: 1,
+            center: None,
+            surface: None,
+            rails: [0, 1],
+            other1: Vec::new(),
+            other2: Vec::new(),
+            sides: Vec::new(),
+        }],
+        edges: vec![edge(0, 1), edge(2, 3)],
+    };
+    // a UV of a base: inside its domain (assumed [0, 1]^2 here), near or past an edge
+    let uv = |rng: &mut Rng| -> [f64; 2] {
+        let c = |rng: &mut Rng| match rng.below(6) {
+            0 => rng.uniform(-0.3, 0.0),
+            1 => rng.uniform(1.0, 1.3),
+            _ => rng.uniform(0.02, 0.98),
+        };
+        [c(rng), c(rng)]
+    };
+    let mut tsects = Vec::new();
+    for e in 0..2 {
+        for which in 0..2 {
+            if rng.below(6) == 0 {
+                continue;
+            }
+            let ptype = match rng.below(10) {
+                0 => 0, // SM_IP_UNDEFINED: skipped
+                1 => 1, // SM_IP_UNKNOWN: skipped
+                _ => 2 + rng.below(6) as i64,
+            };
+            tsects.push(RoTsectIn {
+                t: TsectIn {
+                    e,
+                    which,
+                    pos: [rng.uniform(-1.0, 1.0) * scale; 3],
+                    deriv: [0.0, 0.0, 1.0],
+                    t: rng.uniform(0.0, 1.0),
+                    uv0: uv(rng),
+                    uv1: uv(rng),
+                },
+                ptype,
+            });
+        }
+    }
+    let radius = rng.uniform(0.05, 0.5);
+    let s1_index = if rng.chance(0.8) { 0 } else { 2 };
+    let mut guess: Vec<f64> = (0..s1_index).map(|_| rng.uniform(0.0, 1.0)).collect();
+    guess.push(rng.uniform(0.05, 0.95));
+    guess.push(rng.uniform(0.05, 0.95));
+    let dim = guess.len() + 2 + rng.below(2) as usize;
+    let intervals = (0..dim)
+        .map(|_| {
+            let lo = rng.uniform(-1.0, 0.5);
+            [lo, lo + rng.uniform(0.0, 2.0)]
+        })
+        .collect();
+    let per = (0..s1_index).map(|_| rng.chance(0.2)).collect();
+    Inputs::Rollover(Box::new(RolloverIn {
+        model,
+        g: if rng.below(10) == 0 { -1 } else { 0 },
+        tsects,
+        a,
+        b,
+        r: [radius, radius * rng.uniform(0.5, 1.5)],
+        o: [rng.chance(0.5), rng.chance(0.5)],
+        uvg: [[0.5, 0.5], [0.5, 0.5]],
+        rail: rng.below(2) as usize,
+        s1_index,
+        intervals,
+        per,
+        guess,
+    }))
+}
+
+/// A non-rational B-spline patch over `[0, 4]^2` (`z` near 1) with uniform knots on
+/// `[0, 1]`; `wall` swaps `y` and `z` (a wall along the first one's `x` edge).
+fn ro_surface(rng: &mut Rng, wall: bool) -> Srf {
+    let p = 1 + rng.below(3) as usize;
+    let q = 1 + rng.below(3) as usize;
+    let n = p + rng.below(2) as usize;
+    let m = q + rng.below(2) as usize;
+    let net = (0..=n)
+        .map(|i| {
+            (0..=m)
+                .map(|j| {
+                    let (x, y) = (4.0 * i as f64 / n as f64, 4.0 * j as f64 / m as f64);
+                    let z = 1.0 + rng.uniform(-0.3, 0.3);
+                    if wall {
+                        [x, z, y, NOW]
+                    } else {
+                        [x, y, z, NOW]
+                    }
+                })
+                .collect()
+        })
+        .collect();
+    Srf {
+        net,
+        p,
+        q,
+        u: uniform_knots(n, p, 0.0, 1.0),
+        v: uniform_knots(m, q, 0.0, 1.0),
+    }
+}
+
+/// Generated `rollover` cases per run.
+pub const ROLLOVER_GENERATED: usize = 120;
 
 /// A fillet vertex at `point` (type and status set by the caller).
 fn vin(point: [f64; 3]) -> VertexIn {
@@ -2144,12 +2480,25 @@ impl UnitDiff for Runner {
         serde_json::to_value(gen_case(rng)).ok()
     }
 
-    fn cases(&self, ctx: &CaseContext) -> Result<Vec<Case>, HarnessError> {
+    fn cases(&self, base: &CaseContext) -> Result<Vec<Case>, HarnessError> {
         let ctx = CaseContext {
-            seeds: ctx.seeds.max(MIN_GENERATED),
-            ..ctx.clone()
+            seeds: base.seeds.max(MIN_GENERATED),
+            ..base.clone()
         };
-        default_cases(self, &ctx)
+        let mut v = default_cases(self, &ctx)?;
+        // the `rollover` cases under their own names and seeds, so that each `gen` case
+        // stays the one the baseline has
+        let ro_ctx = CaseContext {
+            seeds: base.seeds.max(ROLLOVER_GENERATED),
+            ..base.clone()
+        };
+        let gen = |rng: &mut Rng| serde_json::to_value(gen_rollover(rng)).ok();
+        for mut c in ro_ctx.generated_cases("blend.fillet_standard_solver_p2:rollover", gen) {
+            c.unit = self.id().to_string();
+            c.name = c.name.replacen("gen", "rollover", 1);
+            v.push(c);
+        }
+        Ok(v)
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
@@ -2165,6 +2514,21 @@ impl UnitDiff for Runner {
 mod tests {
     use super::*;
     use std::collections::BTreeMap;
+
+    /// Most `rollover` cases succeed on the Rust side, so they compare the guess.
+    #[test]
+    fn rollover_cases_mostly_succeed() {
+        let mut ok = 0;
+        for seed in 0..60u64 {
+            let mut rng = Rng::new(0x5eed_2000 + seed);
+            let out = rust(&gen_rollover(&mut rng)).expect("harness");
+            assert!(out.deferred.is_none(), "deferred rollover case");
+            if out.values.get("status").and_then(|v| v.first()) == Some(&0.0) {
+                ok += 1;
+            }
+        }
+        assert!(ok > 40, "too few successful rollover cases: {ok}");
+    }
 
     /// The generators reach every op, mostly with real values on the Rust side.
     #[test]
