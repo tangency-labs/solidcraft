@@ -30,7 +30,7 @@
 //! | [`SrfInVolume::reverse`], [`SrfInVolume::swap_uv`], [`SrfInVolume::trim_with_domain`], [`SrfInVolume::transform`] | `Reverse`, `SwapUV`, `TrimWithDomain`, `Transform` |
 //! | [`SrfInVolume::split_at`]                      | `SplitAt`                                         |
 //! | [`SrfInVolume::create_mirror_surface`]         | `CreateMirrorSurface`                             |
-//! | [`SrfInVolume::make_exact_b_spline_if_possible`], [`SrfInVolume::make_exact_b_spline_if_possible_with`] | `MakeExactBSplineIfPossible` |
+//! | [`SrfInVolume::make_exact_b_spline_if_possible_with`] | `MakeExactBSplineIfPossible` |
 //! | `make_exact_b_spline_out_surface_from_{in,param}_space` (private) | `SmVolume::MakeExactBSplineOutSurfaceFrom{In,Param}Space` |
 //! | `make_exact_b_spline_1st_out_surface` (private) | `SmVolume`/`SmBSplineVolume`/`SmTransform::MakeExactBSpline1stOutSurface` |
 //! | `transform_axis2_placement` (private) | `SmTransform::LoadAxis2Placement`, `IsUnitOrthonormal` |
@@ -53,8 +53,8 @@
 //!   [`SrfInVolume::make_exact_b_spline_if_possible_with`], which takes the kernel the
 //!   surface copy and transform need. The bend, unbend and twist overrides (some 700
 //!   upstream lines, also in no unit) stay [`SolidError::Unported`], tagged with this
-//!   unit as a dispatch gap, as does the kernel-less
-//!   [`SrfInVolume::make_exact_b_spline_if_possible`]. The compounding loops stop with
+//!   unit as a dispatch gap. (There is no kernel-less variant: upstream's
+//!   `MakeExactBSplineIfPossible` takes the context.) The compounding loops stop with
 //!   `InvalidInput` past `MAX_GEOMETRY_NESTING` maps (upstream walks the whole chain);
 //!   the result is a [`Surface`] (upstream an `SmBSplineSurface*` that may be a
 //!   derived kind).
@@ -100,7 +100,7 @@ use crate::geom::vector2d::Point2;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::EFF_ZERO;
-use crate::nurbs::b_spline_surface::{BSplineSurface, LocationType, SurfParamType};
+use crate::nurbs::b_spline_surface::{LocationType, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::knots::Side;
 use crate::surface::surface::p2::{
@@ -128,25 +128,6 @@ const MAX_DERIVS: usize = 3;
 /// `SmVolume::Mirror` (in no unit in units.json; co-ported as [`Volume::mirror`]).
 fn volume_mirror(volume: &mut Volume, plane: &Axis2Placement) -> Result<()> {
     volume.mirror(plane)
-}
-
-/// `SmVolume::MakeExactBSplineOutSurfaceFromParamSpace` / `...FromInSpace` without a
-/// kernel (see [`SrfInVolume::make_exact_b_spline_if_possible_with`]).
-fn volume_make_exact_b_spline(
-    _volume: &Volume,
-    _surface: &Surface,
-    in_param_space: bool,
-) -> Result<BSplineSurface> {
-    // DISPATCH GAP: the copy and transform of the exact surface need the kernel; the
-    // kernel-taking port is SrfInVolume::make_exact_b_spline_if_possible_with
-    Err(SolidError::unported(
-        if in_param_space {
-            "SmVolume::MakeExactBSplineOutSurfaceFromParamSpace"
-        } else {
-            "SmVolume::MakeExactBSplineOutSurfaceFromInSpace"
-        },
-        "surface.srf_in_volume",
-    ))
 }
 
 /// `SmTransform::LoadAxis2Placement`: the placement of a right-handed, unit,
@@ -667,18 +648,6 @@ impl SrfInVolume {
     }
 
     // ---- exact B-spline and mirror --------------------------------------------------
-
-    /// `MakeExactBSplineIfPossible`: the exact B-spline equivalent of the base
-    /// surface mapped to the volume's final out-space.
-    ///
-    /// # Errors
-    ///
-    /// [`SolidError::Unported`]: the volume's `MakeExactBSplineOutSurfaceFrom*Space`
-    /// (in no unit: a dispatch gap).
-    pub fn make_exact_b_spline_if_possible(&self) -> Result<BSplineSurface> {
-        // Ask Volume to make exact BSpline if Possible - handles compounding
-        volume_make_exact_b_spline(&self.volume, &self.surface, self.in_param_space)
-    }
 
     /// `MakeExactBSplineIfPossible`: the exact B-spline equivalent (upstream an
     /// `SmBSplineSurface` or a derived kind) of the base surface mapped through every

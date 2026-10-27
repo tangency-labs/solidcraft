@@ -935,10 +935,8 @@ impl FilletBrep {
     /// project to exactly one curve point, or when the traced curve misses a point;
     /// [`SolidError::InvalidInput`] where upstream dereferences `NULL` (no solver, edge
     /// use, offset surface, vertex use); those of `SetupOffsetValues`, the offset
-    /// evaluation and the curve solve; [`SolidError::Unported`] for the fillet
-    /// intersector's point intersection (a DISPATCH GAP of
-    /// `intersect.surface_intersector_p4`); those of the analytic fillets'
-    /// `Unported` callees (`blend.fillet_solver_p2`).
+    /// evaluation and the curve solve; those of the analytic fillets' `Unported`
+    /// callees (`blend.fillet_solver_p2`).
     pub fn re_calc_fillet_geom(
         &mut self,
         k: &Kernel,

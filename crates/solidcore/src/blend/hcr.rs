@@ -101,7 +101,7 @@ use crate::surface::surface::{Surface, SurfaceKind};
 use crate::surface::surface_cache::face_context::prepare_face_surface_cache;
 use crate::surface::volume::Volume;
 use crate::topology::{edge, edgeuse, vertex, vertexuse};
-use crate::topology::{Brep, EdgeId, EdgeuseId, FaceId, RegionId, VertexId};
+use crate::topology::{Brep, BrepId, EdgeId, EdgeuseId, FaceId, RegionId, VertexId};
 use crate::EntityRef;
 
 const OP: &str = "blend::hcr";
@@ -197,6 +197,11 @@ impl ClassGeometry<HcrObject> for Geometry<'_> {
             EntityRef::Region(r) => Some(HcrObject::Region(r)),
             _ => None,
         }
+    }
+    /// The scene is the only B-rep the handles reach, so its `GetBrep` identity is a
+    /// constant id (the first); any other B-rep has none.
+    fn brep_id(&self, brep: &Brep) -> Option<BrepId> {
+        core::ptr::eq(brep, self.brep).then_some(BrepId::from_index(0))
     }
 }
 
@@ -1767,6 +1772,42 @@ impl Hcr {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scene_geometry_names_its_brep() {
+        // `PointClassification::GetBrep` of a vertex and an edge point reaches the
+        // scene's (constant) B-rep id; the skipped B-rep gives none
+        let mut k = Kernel::default();
+        let scene = crate::primitive::api_primitives::create_box(
+            &mut k,
+            Vec3::new(0.0, 0.0, 0.0),
+            1.0,
+            1.0,
+            1.0,
+        )
+        .unwrap();
+        let geometry = Geometry { brep: &scene };
+        let v = crate::topology::brep::p1::vertices(&scene, None).unwrap()[0];
+        let e = crate::topology::brep::p1::edges(&scene, None).unwrap()[0];
+        let mut pc = PointClassification::<HcrObject>::new(1e-6);
+        pc.set_class_object(PointClassType::Vertex, Some(HcrObject::Vertex(v)));
+        assert_eq!(
+            pc.brep(&geometry, None).unwrap(),
+            Some(BrepId::from_index(0))
+        );
+        assert_eq!(
+            pc.brep(&geometry, Some(BrepId::from_index(0))).unwrap(),
+            None
+        );
+        pc.set_class_object(PointClassType::Edge, Some(HcrObject::Edge(e)));
+        assert_eq!(
+            pc.brep(&geometry, None).unwrap(),
+            Some(BrepId::from_index(0))
+        );
+        // another B-rep has no id here
+        let other = scene.clone();
+        assert_eq!(geometry.brep_id(&other), None);
+    }
 
     #[test]
     fn view_transform_maps_view_to_z() {

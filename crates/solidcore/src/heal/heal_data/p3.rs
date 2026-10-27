@@ -1302,6 +1302,11 @@ impl<O: LoopObject> ClassGeometry<O> for BrepTopology<'_> {
     fn topology_entity(&self, o: O) -> Option<(&Brep, EntityRef)> {
         o.as_topology().map(|e| (self.0, e))
     }
+    /// The healed B-rep is the only one the handles reach: a constant id (the first);
+    /// any other B-rep has none.
+    fn brep_id(&self, brep: &Brep) -> Option<crate::topology::BrepId> {
+        core::ptr::eq(brep, self.0).then_some(crate::topology::BrepId::from_index(0))
+    }
 }
 
 fn classification_has_dead_topology<O: LoopObject>(
@@ -1389,6 +1394,57 @@ mod tests {
         fn from_loop(id: LoopId) -> Self {
             Self(id)
         }
+    }
+
+    /// A handle naming a vertex or a loop.
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    enum T {
+        Vertex(VertexId),
+        Loop(LoopId),
+    }
+    impl ClassObject for T {
+        fn class_kind(&self) -> ClassObjectKind {
+            match self {
+                Self::Vertex(_) => ClassObjectKind::Vertex,
+                Self::Loop(_) => ClassObjectKind::Loop,
+            }
+        }
+    }
+    impl LoopObject for T {
+        fn from_loop(id: LoopId) -> Self {
+            Self::Loop(id)
+        }
+        fn as_topology(&self) -> Option<EntityRef> {
+            match self {
+                Self::Vertex(v) => Some(EntityRef::Vertex(*v)),
+                Self::Loop(l) => Some(EntityRef::Loop(*l)),
+            }
+        }
+    }
+
+    #[test]
+    fn brep_topology_names_the_healed_brep() {
+        // `PointClassification::GetBrep` of a vertex point reaches the healed
+        // B-rep's (constant) id; the skipped B-rep gives none
+        use crate::intersect::point_class::{PointClassType, PointClassification};
+        let mut k = Kernel::default();
+        let b = crate::primitive::api_primitives::create_box(
+            &mut k,
+            crate::math::Vec3::new(0.0, 0.0, 0.0),
+            1.0,
+            1.0,
+            1.0,
+        )
+        .unwrap();
+        let v = bp1::vertices(&b, None).unwrap()[0];
+        let topology = BrepTopology(&b);
+        let mut pc = PointClassification::<T>::new(1e-6);
+        pc.set_class_object(PointClassType::Vertex, Some(T::Vertex(v)));
+        let id = crate::topology::BrepId::from_index(0);
+        assert_eq!(pc.brep(&topology, None).unwrap(), Some(id));
+        assert_eq!(pc.brep(&topology, Some(id)).unwrap(), None);
+        let other = b.clone();
+        assert_eq!(ClassGeometry::<T>::brep_id(&topology, &other), None);
     }
 
     #[test]
