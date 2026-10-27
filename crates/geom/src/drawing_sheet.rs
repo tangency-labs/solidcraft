@@ -362,6 +362,9 @@ impl DrawingBorderProfile {
         let narrowest = self.laid_out_margins().sides().into_iter().fold(f64::INFINITY, f64::min);
         let g = self.grid_border_mm;
         require(g.is_finite() && g >= 0.0 && g <= narrowest, "the grid reference border lies between the sheet border and the drawing border")?;
+        // Its field marks run from the drawing border out to it, so closer than a field's shortest
+        // length they would be slivers drawn on the drawing border's own line.
+        require(g == 0.0 || g >= MIN_FIELD_MM, "the grid reference border lies on the drawing border or at least 1 mm outside it")?;
         if let Some(reach) = self.centring_mark_mm {
             let fits = reach.is_finite() && (0.0..=MAX_SIDE_MM).contains(&reach);
             require(fits, "a centring mark ends on the drawing border or at most 5000 mm inside it")?;
