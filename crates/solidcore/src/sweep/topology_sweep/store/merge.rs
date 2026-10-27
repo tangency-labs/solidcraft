@@ -9,7 +9,9 @@
 //!
 //! Deviations: never-reused handles replace pointers. The existing merge ports own
 //! all algorithms. Operands move into their nullable slots for Boolean calls and
-//! surviving bodies return to the same store slots, including after errors. The
+//! surviving bodies return to the same store slots, including after errors; a
+//! caller-borrowed operand (`DoSweep` merging into `pBrepToSweepInto`) lends its
+//! content and gets the edited body back in the caller's own B-rep. The
 //! scope releases its temporary bodies; traversal caches follow body identities.
 //! The merge constructor's context may differ from the primary body's context;
 //! subsequent modeling services use the actual operand contexts.
@@ -329,21 +331,57 @@ impl Driver<'_, '_> {
 
 // Restore each surviving operand to its original slot; deletion must invalidate
 // the handle even when the Boolean returns an error after consuming an operand.
-fn restore_body(
-    bodies: &mut BodySlots<'_>,
+/// Returns a Boolean operand to its slot: an owned body as owned, a borrowed caller
+/// body into the caller's own B-rep (still borrowed). A borrowed body the Boolean
+/// deleted leaves its slot empty and the caller's B-rep empty, and is reported:
+/// upstream would leave the caller holding a deleted B-rep.
+fn restore_body<'caller>(
+    bodies: &mut BodySlots<'caller>,
     id: BrepId,
     context: ContextId,
     namespace: u32,
     body: Option<Brep>,
+    borrowed: Option<&'caller mut Brep>,
 ) -> Result<()> {
-    *bodies
+    let slot = bodies
         .get_mut(id.index() as usize)
-        .ok_or_else(|| invalid("body slot lost"))? = body.map(|b| BodyEntry {
+        .ok_or_else(|| invalid("body slot lost"))?;
+    let consumed_borrow = body.is_none() && borrowed.is_some();
+    *slot = match (body, borrowed) {
+        (Some(b), Some(original)) => {
+            *original = b;
+            Some(Body::Borrowed(original))
+        }
+        (Some(b), None) => Some(Body::Owned(Box::new(b))),
+        (None, _) => None,
+    }
+    .map(|body| BodyEntry {
         context,
         namespace,
-        body: Body::Owned(Box::new(b)),
+        body,
     });
+    if consumed_borrow {
+        return Err(invalid("a Boolean deleted a borrowed caller body"));
+    }
     Ok(())
+}
+
+/// Moves a Boolean operand out of its slot entry: an owned body itself, or a
+/// borrowed caller body's content together with the borrow it returns to
+/// ([`restore_body`]). A retained HCR scene is never an operand: its slot is left
+/// as it is.
+fn take_operand<'caller>(
+    slot: Option<&mut Option<BodyEntry<'caller>>>,
+    what: &'static str,
+) -> Result<(Brep, Option<&'caller mut Brep>)> {
+    let entry = slot
+        .and_then(|slot| slot.take_if(|e| !matches!(e.body, Body::Hcr(_))))
+        .ok_or_else(|| invalid(what))?;
+    match entry.body {
+        Body::Owned(b) => Ok((*b, None)),
+        Body::Borrowed(original) => Ok((core::mem::take(original), Some(original))),
+        Body::Hcr(_) => Err(invalid(what)),
+    }
 }
 
 fn curve_keys(
@@ -410,6 +448,9 @@ struct BooleanBodies<'a, 'caller> {
     slots: &'a mut BodySlots<'caller>,
     primary: Option<Brep>,
     other: Option<Brep>,
+    /// The caller B-reps that borrowed operands return to ([`restore_body`]).
+    primary_borrow: Option<&'caller mut Brep>,
+    other_borrow: Option<&'caller mut Brep>,
     primary_meta: (BrepId, ContextId, u32),
     other_meta: (BrepId, ContextId, u32),
     primary_keys: Vec<ObjectKey>,
@@ -420,16 +461,28 @@ struct BooleanBodies<'a, 'caller> {
 }
 impl Drop for BooleanBodies<'_, '_> {
     fn drop(&mut self) {
-        for (body, (id, context, namespace), keys) in [
-            (&mut self.primary, self.primary_meta, &self.primary_keys),
-            (&mut self.other, self.other_meta, &self.other_keys),
+        for (body, borrowed, (id, context, namespace), keys) in [
+            (
+                &mut self.primary,
+                self.primary_borrow.take(),
+                self.primary_meta,
+                &self.primary_keys,
+            ),
+            (
+                &mut self.other,
+                self.other_borrow.take(),
+                self.other_meta,
+                &self.other_keys,
+            ),
         ] {
             if body.is_none() {
                 if let Err(error) = clear_deleted(self.records, self.attributes, keys) {
                     self.cleanup_errors.push(error);
                 }
             }
-            if let Err(error) = restore_body(self.slots, id, context, namespace, body.take()) {
+            if let Err(error) =
+                restore_body(self.slots, id, context, namespace, body.take(), borrowed)
+            {
                 self.cleanup_errors.push(error);
             }
         }
@@ -483,7 +536,10 @@ impl BooleanDriver for Driver<'_, '_> {
         let a = primary.ok_or_else(|| SolidError::null_pointer(OP))?;
         let b = other.ok_or_else(|| SolidError::null_pointer(OP))?;
         let (source, destination) = body_pair_mut(self.bodies, b, a)?;
-        if !matches!(destination.body, Body::Owned(_)) || !matches!(source.body, Body::Owned(_)) {
+        // `SmMerge::ManifoldBoolean` edits its operands in place: an owned body or a
+        // caller-borrowed one (`DoSweep`'s merge into `pBrepToSweepInto`), never a
+        // retained HCR scene.
+        if matches!(destination.body, Body::Hcr(_)) || matches!(source.body, Body::Hcr(_)) {
             return Err(invalid(
                 "a retained HCR scene cannot be consumed by a Boolean",
             ));
@@ -512,26 +568,16 @@ impl BooleanDriver for Driver<'_, '_> {
             }
             Some(&mut **kernel)
         };
-        let ae = self
-            .bodies
-            .get_mut(a.index() as usize)
-            .and_then(Option::take)
-            .ok_or_else(|| invalid("unknown primary"))?;
-        let be = self
-            .bodies
-            .get_mut(b.index() as usize)
-            .and_then(Option::take)
-            .ok_or_else(|| invalid("unknown other"))?;
-        let Body::Owned(ab) = ae.body else {
-            return Err(invalid("non-owned primary"));
-        };
-        let Body::Owned(bb) = be.body else {
-            return Err(invalid("non-owned other"));
-        };
+        let (ab, primary_borrow) =
+            take_operand(self.bodies.get_mut(a.index() as usize), "unknown primary")?;
+        let (bb, other_borrow) =
+            take_operand(self.bodies.get_mut(b.index() as usize), "unknown other")?;
         let mut operands = BooleanBodies {
             slots: self.bodies,
-            primary: Some(*ab),
-            other: Some(*bb),
+            primary: Some(ab),
+            other: Some(bb),
+            primary_borrow,
+            other_borrow,
             primary_meta: (a, ac, an),
             other_meta: (b, bc, bn),
             primary_keys: ag,

@@ -1,0 +1,44 @@
+# Whole-B-rep DoSweep with stitching or merging: the C++ result follows the heap
+# layout (pointer-hash silhouette order, ND-491). Each Rust result equals one of the
+# observed C++ results for the same input (plan/findings/sweep.topology_sweep--addendum-2026-10-27-whole-brep-stitch-and-merge-compared.md).
+[[mismatch]]
+unit = "sweep.topology_sweep"
+case = "whole_stitch_linear_x_flat_box"
+libc = "glibc"
+cpp_defect = "ND-491"
+why = "C++ heap-layout dependent (ND-491): 180/200 fresh processes succeed with 1 region, 14 faces, 28 edges, 16 vertices (the Rust result), 20/200 return SM_ERR"
+
+[[mismatch]]
+unit = "sweep.topology_sweep"
+case = "whole_stitch_linear_neg_y_flat_box"
+libc = "glibc"
+cpp_defect = "ND-491"
+why = "C++ heap-layout dependent (ND-491): 187/200 fresh processes give 1 region/shell (the Rust result), 13/200 give 2"
+
+[[mismatch]]
+unit = "sweep.topology_sweep"
+case = "whole_stitch_linear_tiny_box"
+libc = "glibc"
+cpp_defect = "ND-491"
+why = "C++ heap-layout dependent (ND-491): 164/200 fresh processes give 3 regions/shells, 29/200 give 4 (the Rust result), 7/200 give 2"
+
+[[mismatch]]
+unit = "sweep.topology_sweep"
+case = "whole_stitch_rotation_y_90"
+libc = "glibc"
+cpp_defect = "ND-491"
+why = "C++ heap-layout dependent (ND-491): 146/200 fresh processes succeed with 15 faces, 25 edges, 12 vertices (the Rust result), 54/200 return SM_ERR"
+
+[[mismatch]]
+unit = "sweep.topology_sweep"
+case = "whole_stitch_rotation_x_30"
+libc = "glibc"
+cpp_defect = "ND-491"
+why = "C++ heap-layout dependent (ND-491): 196/200 fresh processes give 1 region/shell (the Rust result), 4/200 give 2"
+
+[[mismatch]]
+unit = "sweep.topology_sweep"
+case = "whole_merge_rotation_y_90"
+libc = "glibc"
+cpp_defect = "ND-491"
+why = "C++ heap-layout dependent (ND-491): 95/200 fresh processes give 3 regions, 20 faces (the Rust result), 87/200 give 2 regions, 19 faces, 18/200 give 3 regions, 19 faces"

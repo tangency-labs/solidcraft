@@ -442,8 +442,34 @@ impl solidcore::sweep::topology_sweep::store::SweepIdentities for WholeIdentitie
             key: ObjectKey((u64::from(b.index()) << 40) | (20 << 32) | u64::from(e.index())),
         }
     }
+    /// A curve the stitch allocates when it splits an edge (`MakeVertexSplitEdge`'s
+    /// curve copy) is named, as every edge curve here, by its edge: the native copy
+    /// is a new object of its own, distinct from every other curve.
+    fn new_curve(
+        &self,
+        b: BrepId,
+        e: EdgeId,
+        type_code: i64,
+    ) -> Result<solidcore::geom::object::ObjectRef> {
+        Ok(solidcore::geom::object::ObjectRef {
+            type_code,
+            key: ObjectKey((u64::from(b.index()) << 40) | (20 << 32) | u64::from(e.index())),
+        })
+    }
     fn owned_auxiliary_objects(&self, _: BrepId, _: &Brep) -> Vec<ObjectKey> {
         Vec::new()
+    }
+    /// The merge's two source lists of a primary region: handles outside every
+    /// topology and curve kind above.
+    fn source_lists(
+        &self,
+        b: BrepId,
+        r: RegionId,
+    ) -> Result<[solidcore::geom::object::ObjectRef; 2]> {
+        Ok([21_u64, 22].map(|kind| solidcore::geom::object::ObjectRef {
+            type_code: 0,
+            key: ObjectKey((u64::from(b.index()) << 40) | (kind << 32) | u64::from(r.index())),
+        }))
     }
 }
 
@@ -469,12 +495,29 @@ fn whole_output(record: &[f64]) -> Output {
             .as_chunks::<3>()
             .0
             .to_vec();
+        // The canonical order sorts on coordinates quantized to 1e-7 of the largest
+        // coordinate, then exactly: rounding noise (a coordinate of 10 computed as
+        // 10 + 2e-15 on one side) must not reorder two records whose values agree.
+        // Only the order uses the quantization; the values are compared unchanged.
+        let scale = vertices
+            .iter()
+            .flatten()
+            .fold(0.0_f64, |m, x| m.max(x.abs()))
+            .max(f64::MIN_POSITIVE)
+            * 1e-7;
         let cmp = |a: &[f64; 3], b: &[f64; 3]| {
-            a.iter()
+            let quantized = a
+                .iter()
                 .zip(b)
-                .map(|(x, y)| x.total_cmp(y))
-                .find(|o| o.is_ne())
-                .unwrap_or(std::cmp::Ordering::Equal)
+                .map(|(x, y)| (x / scale).round().total_cmp(&(y / scale).round()))
+                .find(|o| o.is_ne());
+            quantized.unwrap_or_else(|| {
+                a.iter()
+                    .zip(b)
+                    .map(|(x, y)| x.total_cmp(y))
+                    .find(|o| o.is_ne())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
         };
         let mut sorted = vertices.clone();
         sorted.sort_by(cmp);
@@ -776,8 +819,13 @@ impl UnitDiff for Runner {
     fn run_cpp(&self, c: &Case) -> std::result::Result<Output, HarnessError> {
         let i: Input = c.parse()?;
         if let Some(whole) = i.whole {
-            return solidcore_ffi::units::sweep_topology_sweep::whole(whole)
-                .map(|record| whole_output(&record))
+            // Each whole-B-rep case runs in a fresh process: native stitching follows
+            // heap layout (the pointer-hash silhouette order), so a case's C++ result
+            // must not depend on the cases run before it in the same process.
+            return solidcore_ffi::isolate::fresh_process(|| {
+                solidcore_ffi::units::sweep_topology_sweep::whole(whole)
+            })
+            .map(|record| whole_output(&record))
                 .map_err(|e| HarnessError::new(e.to_string()));
         }
         solidcore_ffi::units::sweep_topology_sweep::eval_with_values(&i.steps, i.vector, i.kind)
