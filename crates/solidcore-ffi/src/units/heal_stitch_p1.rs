@@ -23,11 +23,13 @@
 //! | `VPairs`    | `tol ignore n1 v*n1 n2 v*n2`                        | `status [max_gap min_gap processed deleted list1 list2 [digest]]` (`StitchVertexPairs`; lists `n idx*n`, `-1` for null) |
 //! | `Edges`     | `tol manifold fast ignore nesting n v*n`            | `status [max_gap min_gap glued deleted [digest]]` (`StitchEdgesOfVertices`) |
 //! | `Simple`    | `api tol nk f*nk nd f*nd`                           | `status [max_vertex_gap max_edge_gap stitched digest]` (`DoSimpleFaceStitch`, or `SmApiSimpleFaceStitch` with the B-rep tolerance) |
-//! | `Unify`     | `api tol face n_samples`                            | `status [flipped (u0 v0 u1 v1)*n]` (`UnifyNormals`, or `SmApiUnifyNormals`) |
-//! | `Api`       | `which null_brep ..`                                | which 0 `SmApiStitch(brep)`: `status`; 1 `face+1` `SmApiStitch(brep, face)` (only with a null B-rep or face: otherwise `SmMerge`'s constructor dereferences the null other B-rep, UB-167): `status`; 2 `SmApiStitchIntoSolid`: `status [solid n vgap egap]`; 3 `well_formed ratio` `SmApiStitchIntoShell`: `status [n vgap egap]`; 4 `face+1 n` `SmApiUnifyNormals`: `status [flipped]`; 5 `SmApiSimpleFaceStitch` (empty lists): `status`; 6 `tol squeeze split manifold slivers` `SmApiStitchAdvanced`: `status [n lamina vgap egap]` |
+//! | `Unify`     | `api tol face n_samples`                            | `status [flipped (u0 v0 u1 v1)*n digest]` (`UnifyNormals`, or `SmApiUnifyNormals`) |
+//! | `Api`       | `which null_brep ..`                                | which 0 `SmApiStitch(brep)`: `status`; 1 `face+1` `SmApiStitch(brep, face)` (only with a null B-rep or face: otherwise `SmMerge`'s constructor dereferences the null other B-rep, UB-167): `status`; 2 `SmApiStitchIntoSolid`: `status [solid n vgap egap]`; 3 `well_formed ratio` `SmApiStitchIntoShell`: `status [n vgap egap]`; 4 `face+1 n` `SmApiUnifyNormals`: `status [flipped]`; 5 `SmApiSimpleFaceStitch` (empty lists): `status`; 6 `tol squeeze split manifold slivers` `SmApiStitchAdvanced`: `status [n lamina vgap egap]`; every call that succeeds on a B-rep is followed by its digest |
 //!
-//! A digest is the B-rep after a mutating op: `n_faces n_edges n_vertices` then each
-//! vertex point in list order. `Simple` reports `-2` when the face lists are equally
+//! A digest is the B-rep after a mutating op: `n_faces n_edges n_vertices`, each vertex's
+//! point and tolerance in list order, then the topology of
+//! `harness/cpp/shim/sc_stitch_digest.h` (shell count; per edge its end vertices,
+//! tolerance, interval and use count; per face its loops as edges and orientations). `Simple` reports `-2` when the face lists are equally
 //! long and non-empty and a face repeats in the delete list or appears in both lists, a
 //! vertex is shared by both lists, or a vertex of the faces to delete has no other
 //! face (upstream frees it, then glues it).

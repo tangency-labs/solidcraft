@@ -5,11 +5,14 @@
 //! a face or the `prog_test` wire network (the B-rep blocks of `topology.edgeuse_p1`),
 //! unstitched sheets (one face per surface in one B-rep; generated as grids of
 //! bilinear or biquadratic patches whose shared corners and edges are pulled apart by
-//! a gap), or `SmApiCreateBox` (the upstream tests' box). The Rust side builds the same
-//! B-rep with the Rust kernel ([`own_brep`]: the Rust `.smb` reader, the Rust
-//! constructors), renumbered into the shim's traversal order, so no C++ export reaches
-//! it. Every op's C++ output after the build status is compared with the Rust side's as one float array (`out`): statuses (`0`,
-//! an `SmStatus` code), traversal indices, flags and values; `-2` (the shim's guard on
+//! a gap), or `SmApiCreateBox` (the upstream tests' box). The Rust side imports the
+//! export of unit `topology.brep_p1` (the graph of `topology.edgeuse_p1` plus list
+//! orders and vertex use lists) into a [`Brep`]. Every op's C++ output after the build
+//! status is compared with the Rust side's as one float array (`out`): statuses (`0`,
+//! an `SmStatus` code), traversal indices, flags and values, and after every op that
+//! changes the B-rep its digest ([`digest`]: counts, vertex points and tolerances, and
+//! the topology in list order, so a stitch that reports the right counts but builds a
+//! different B-rep fails); `-2` (the shim's guard on
 //! input upstream would dereference null or free twice) is an error on both sides.
 //!
 //! Selectors are taken modulo the entity count; an op needing an entity the B-rep
@@ -24,8 +27,11 @@ use serde_json::{json, Value};
 use solidcore::heal::stitch::p1 as st;
 use solidcore::kernel::Kernel;
 use solidcore::math::Point3;
+use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use solidcore::topology::brep::p1 as bp1;
+use solidcore::topology::edgeuse::p1 as eu1;
 use solidcore::topology::face::p2 as fp2;
+use solidcore::topology::loopuse as lu;
 use solidcore::topology::{edge, vertex, Brep, EdgeId, FaceId, VertexId};
 use solidcore::{EntityRef, SolidError};
 use solidcore_ffi::units::heal_stitch_p1::{self as ffi, Op, TY_EDGE, TY_FACE, TY_VERTEX};
@@ -665,7 +671,17 @@ fn run_cpp(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
     let (code, a) = args(&op);
     let mut input = block_of(&i.brep)?;
     input.extend(a);
-    let out = ffi::eval(code, &path(&i.brep)?, &input).map_err(|e| harness(format!("c++: {e}")))?;
+    let p = path(&i.brep)?;
+    let call = || ffi::eval(code, &p, &input);
+    // A file B-rep's op runs in a fresh process: after a stitch of an `.smb` B-rep, the
+    // next read of a file in the same process exports differently (state the shim's
+    // context keeps), so a case's C++ result would depend on the cases before it.
+    let out = if p.is_empty() {
+        call()
+    } else {
+        solidcore_ffi::isolate::fresh_process(call)
+    }
+    .map_err(|e| harness(format!("c++: {e}")))?;
     let body = out.get(1..).ok_or_else(|| harness("c++: empty output"))?;
     Ok(guarded_output(body.to_vec()))
 }
@@ -715,15 +731,70 @@ fn opt_ids_out(ids: &[Option<VertexId>]) -> Vec<f64> {
     v
 }
 
-/// The B-rep after a mutating op (as the shim's `put_digest`).
-pub(crate) fn digest(b: &Brep, o: &mut Vec<f64>) -> solidcore::Result<()> {
+/// The B-rep after a mutating op (as the shim's `put_digest`): the counts, each vertex's
+/// point and tolerance, then [`topology_digest`].
+pub(crate) fn digest(k: &mut Kernel, b: &Brep, o: &mut Vec<f64>) -> solidcore::Result<()> {
     let fs = bp1::faces(b, None)?;
     let es = bp1::edges(b, None)?;
     let vs = bp1::vertices(b, None)?;
     o.extend([fs.len() as f64, es.len() as f64, vs.len() as f64]);
     for v in vs {
         let p = vertex::point(b, v)?;
-        o.extend([p.x, p.y, p.z]);
+        o.extend([p.x, p.y, p.z, vertex::tolerance(b, v)?]);
+    }
+    topology_digest(k, b, o)
+}
+
+/// The topology after a stitch, in list order (the shim's `put_topology`,
+/// `harness/cpp/shim/sc_stitch_digest.h`): the shell count; per edge its start and end
+/// vertex (index in the vertex list, `-1` none), tolerance, interval and edge use count;
+/// per face its loops, each as its edge uses' edges (index in the edge list) and
+/// orientations. Positions in the lists, not arena ids, so record numbering never
+/// enters the comparison.
+pub(crate) fn topology_digest(
+    k: &mut Kernel,
+    b: &Brep,
+    o: &mut Vec<f64>,
+) -> solidcore::Result<()> {
+    let shells = bp1::shells(k, b, None)?;
+    let fs = bp1::faces(b, None)?;
+    let es = bp1::edges(b, None)?;
+    let vs = bp1::vertices(b, None)?;
+    let vpos = |v: Option<VertexId>| {
+        v.and_then(|v| vs.iter().position(|&x| x == v))
+            .map_or(-1.0, |i| i as f64)
+    };
+    let epos = |e: Option<EdgeId>| {
+        e.and_then(|e| es.iter().position(|&x| x == e))
+            .map_or(-1.0, |i| i as f64)
+    };
+    o.push(shells.len() as f64);
+    for &e in &es {
+        let iv = edge::interval(b, e)?;
+        o.extend([
+            vpos(edge::start_vertex(b, e)?),
+            vpos(edge::end_vertex(b, e)?),
+            edge::tolerance(b, e)?,
+            iv.min(),
+            iv.max(),
+            edge::edgeuses(b, e, None, None)?.len() as f64,
+        ]);
+    }
+    for f in fs {
+        let ls = fp2::loops(b, f, false, None)?;
+        o.push(ls.len() as f64);
+        for l in ls {
+            let eus = lu::loop_edgeuses(b, l)?;
+            o.push(eus.len() as f64);
+            for eu in eus {
+                o.push(epos(eu1::edge(b, eu)?));
+                o.push(match eu1::orientation(b, eu)? {
+                    OrientType::Unknown => 0.0,
+                    OrientType::Same => 1.0,
+                    OrientType::Opposite => 2.0,
+                });
+            }
+        }
     }
     Ok(())
 }
@@ -763,7 +834,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
                     flag(r.new_vertex.is_some()),
                 ];
                 if r.new_vertex.is_some() {
-                    digest(b, &mut o)?;
+                    digest(k, b, &mut o)?;
                 }
                 Ok(o)
             }
@@ -788,7 +859,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
                     o.extend(opt_ids_out(&a));
                     o.extend(opt_ids_out(&c));
                     if !r.processed.is_empty() {
-                        digest(b, &mut o)?;
+                        digest(k, b, &mut o)?;
                     }
                     Ok(o)
                 }
@@ -809,7 +880,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
                     o.extend(ids_out(&r.glued));
                     o.extend(ids_out(&r.deleted));
                     if !r.glued.is_empty() {
-                        digest(b, &mut o)?;
+                        digest(k, b, &mut o)?;
                     }
                     Ok(o)
                 }
@@ -836,7 +907,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
                         r.max_edge_gap,
                         r.stitched_edges as f64,
                     ];
-                    digest(b, &mut o)?;
+                    digest(k, b, &mut o)?;
                     Ok(o)
                 }
                 Err(e) if e.is_unported() => Err(e),
@@ -857,6 +928,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
                         let d = fp2::uv_domain(b, *f)?;
                         o.extend([d.min().x, d.min().y, d.max().x, d.max().y]);
                     }
+                    digest(k, b, &mut o)?;
                     Ok(o)
                 }
                 Err(e) if e.is_unported() => Err(e),
@@ -873,8 +945,8 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
             tol,
             flags,
         } => {
-            let brep = if *null_brep { None } else { Some(b) };
-            match which {
+            let brep = if *null_brep { None } else { Some(&mut *b) };
+            let out = match which {
                 0 => status_or(st::api_stitch(k, brep), |()| Vec::new()),
                 1 => status_or(st::api_stitch_face(k, brep, *face), |()| Vec::new()),
                 2 => status_or(st::api_stitch_into_solid(k, brep), |r| {
@@ -911,7 +983,13 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
                         ]
                     })
                 }
+            };
+            // the B-rep after a successful call (the shim's `put_digest`)
+            let mut out = out?;
+            if !*null_brep && out.first() == Some(&0.0) {
+                digest(k, b, &mut out)?;
             }
+            Ok(out)
         }
     }
 }

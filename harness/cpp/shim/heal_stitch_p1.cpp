@@ -28,6 +28,7 @@
 #undef SmStitchCallback
 
 #include "sc_edgeuse_graph.h"
+#include "sc_stitch_digest.h"
 
 #include <SmApiBrep.h>
 #include <SmApiGeneral.h>
@@ -214,7 +215,8 @@ template <class T> void put_indices(std::vector<double>& o, Graph& g, int kind, 
 }
 
 // The B-rep after a mutating op: face, edge and vertex counts (GetFaces / GetEdges /
-// GetVertices), then each vertex's point in list order.
+// GetVertices), each vertex's point and tolerance in list order, then the topology of
+// sc_stitch_digest.h.
 void put_digest(SmBrep* brep, std::vector<double>& o)
 {
     SmTArray<SmFace*> fs;
@@ -227,7 +229,11 @@ void put_digest(SmBrep* brep, std::vector<double>& o)
     o.push_back((double)es.GetSize());
     o.push_back((double)vs.GetSize());
     for (ULONG i = 0; i < vs.GetSize(); i++)
+    {
         put_vec(o, vs[i]->GetPoint());
+        o.push_back((double)vs[i]->GetTolerance());
+    }
+    put_topology(brep, o);
 }
 
 // DoSimpleFaceStitch's validation, read-only: a VERBATIM copy of SmStitch.cpp:625-780 (commit
@@ -596,6 +602,7 @@ void run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
                 o.push_back(d.GetMax().x);
                 o.push_back(d.GetMax().y);
             }
+            put_digest(brep, o);
         }
         break;
     }
@@ -607,13 +614,21 @@ void run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         switch (which)
         {
         case 0:
-            o.push_back(st(SmApiStitch(p)));
+        {
+            SmStatus s = SmApiStitch(p);
+            o.push_back(st(s));
+            if (s == SM_SUCCESS && p != NULL)
+                put_digest(brep, o);
             break;
+        }
         case 1:
         {
             int64_t f = rd.idx() - 1;
             SmFace* face = f < 0 ? NULL : g.faces[(size_t)f];
-            o.push_back(st(SmApiStitch(p, face)));
+            SmStatus s = SmApiStitch(p, face);
+            o.push_back(st(s));
+            if (s == SM_SUCCESS && p != NULL)
+                put_digest(brep, o);
             break;
         }
         case 2:
@@ -629,6 +644,7 @@ void run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
                 o.push_back((double)n);
                 o.push_back(mv);
                 o.push_back(me);
+                put_digest(brep, o);
             }
             break;
         }
@@ -645,6 +661,7 @@ void run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
                 o.push_back((double)n);
                 o.push_back(mv);
                 o.push_back(me);
+                put_digest(brep, o);
             }
             break;
         }
@@ -657,7 +674,10 @@ void run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
             SmStatus s = SmApiUnifyNormals(p, face, n, flipped);
             o.push_back(st(s));
             if (s == SM_SUCCESS)
+            {
                 put_indices(o, g, 3, flipped);
+                put_digest(brep, o);
+            }
             break;
         }
         case 5:
@@ -667,6 +687,8 @@ void run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
             double mv = 0.0, me = 0.0;
             SmStatus s = SmApiSimpleFaceStitch(p, keep, del, n, mv, me);
             o.push_back(st(s));
+            if (s == SM_SUCCESS)
+                put_digest(brep, o);
             break;
         }
         default:
@@ -683,6 +705,7 @@ void run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
                 o.push_back((double)lam);
                 o.push_back(mv);
                 o.push_back(me);
+                put_digest(brep, o);
             }
             break;
         }

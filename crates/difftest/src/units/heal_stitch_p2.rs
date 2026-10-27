@@ -191,6 +191,11 @@ enum OpIn {
         ignore: bool,
         verts: Vec<i64>,
         edges: Vec<i64>,
+        /// Run on a B-rep with `m_bEditingEnabled` set, as upstream's callers
+        /// (`SmMerge`, `SmBrep::SqueezeFace`) do; without it `MakeVertexSplitEdge`
+        /// refuses every split.
+        #[serde(default)]
+        editing: bool,
     },
 }
 
@@ -232,6 +237,7 @@ enum Resolved {
         ignore: bool,
         verts: Vec<Option<VertexId>>,
         edges: Vec<Option<EdgeId>>,
+        editing: bool,
     },
 }
 
@@ -318,6 +324,7 @@ fn resolve(op: &OpIn, b: &Brep) -> Option<Resolved> {
             ignore,
             verts,
             edges,
+            editing,
         } => {
             if b.vertices().is_empty() {
                 return None;
@@ -328,6 +335,7 @@ fn resolve(op: &OpIn, b: &Brep) -> Option<Resolved> {
                 ignore: *ignore,
                 verts: verts.iter().map(|&x| opt_vertex(x, b)).collect(),
                 edges: edges.iter().map(|&x| opt_edge(x, b)).collect(),
+                editing: *editing,
             }
         }
     })
@@ -388,10 +396,12 @@ fn args(op: &Resolved) -> (Op, Vec<f64>) {
             ignore,
             verts,
             edges,
+            editing,
         } => {
             v.extend([*tol, flag(*manifold), flag(*ignore)]);
             push_opt(&mut v, verts);
             push_opt(&mut v, edges);
+            v.push(flag(*editing));
             Op::Split
         }
     };
@@ -449,7 +459,17 @@ fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
     let (code, a) = args(&op);
     let mut input = block_of(&i.brep)?;
     input.extend(a);
-    let out = ffi::eval(code, &path(&i.brep)?, &input).map_err(|e| harness(format!("c++: {e}")))?;
+    let p = path(&i.brep)?;
+    let call = || ffi::eval(code, &p, &input);
+    // A file B-rep's op runs in a fresh process: after a stitch of an `.smb` B-rep, the
+    // next read of a file in the same process exports differently (state the shim's
+    // context keeps), so a case's C++ result would depend on the cases before it.
+    let out = if p.is_empty() {
+        call()
+    } else {
+        solidcore_ffi::isolate::fresh_process(call)
+    }
+    .map_err(|e| harness(format!("c++: {e}")))?;
     let body = out.get(1..).ok_or_else(|| harness("c++: empty output"))?;
     Ok(guarded_output(body.to_vec()))
 }
@@ -510,8 +530,9 @@ impl Ids {
     }
 }
 
-/// The B-rep after the op (as the shim's `put_digest`).
-fn digest(b: &Brep, o: &mut Vec<f64>) -> solidcore::Result<()> {
+/// The B-rep after the op (as the shim's `put_digest`): the counts, each vertex's point
+/// and tolerance, then `heal.stitch_p1`'s topology digest.
+fn digest(k: &mut Kernel, b: &Brep, o: &mut Vec<f64>) -> solidcore::Result<()> {
     let fs = bp1::faces(b, None)?;
     let es = bp1::edges(b, None)?;
     let vs = bp1::vertices(b, None)?;
@@ -520,7 +541,7 @@ fn digest(b: &Brep, o: &mut Vec<f64>) -> solidcore::Result<()> {
         let p = vertex::point(b, v)?;
         o.extend([p.x, p.y, p.z, vertex::tolerance(b, v)?]);
     }
-    Ok(())
+    super::heal_stitch_p1::topology_digest(k, b, o)
 }
 
 fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result<Vec<f64>> {
@@ -566,7 +587,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
                     ];
                     o.extend(r.min_unstitched_vert_gap);
                     o.extend(r.min_unstitched_edge_gap);
-                    digest(b, &mut o)?;
+                    digest(k, b, &mut o)?;
                     Ok(o)
                 }
                 Err(e) => failed(e),
@@ -592,7 +613,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
                         r.max_vertex_gap,
                         r.max_edge_gap,
                     ];
-                    digest(b, &mut o)?;
+                    digest(k, b, &mut o)?;
                     Ok(o)
                 }
                 Err(e) => failed(e),
@@ -614,7 +635,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
                         r.max_vertex_gap,
                         r.max_edge_gap,
                     ];
-                    digest(b, &mut o)?;
+                    digest(k, b, &mut o)?;
                     Ok(o)
                 }
                 Err(e) => failed(e),
@@ -638,7 +659,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
                     ids.edges(&mut o, r.deleted_edges.iter().map(|&e| Some(e)));
                     ids.vertices(&mut o, l.iter().copied());
                     if !r.deleted.is_empty() {
-                        digest(b, &mut o)?;
+                        digest(k, b, &mut o)?;
                     }
                     Ok(o)
                 }
@@ -651,7 +672,11 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
             ignore,
             verts,
             edges,
+            editing,
         } => {
+            if *editing {
+                b.set_editing_enabled(true);
+            }
             let mut s = st1::Stitch::new(&mut cb, *tol, true, true);
             s.making_manifold_solid = *manifold;
             s.ignore_problems = *ignore;
@@ -666,7 +691,7 @@ fn run_rust_op(k: &mut Kernel, b: &mut Brep, op: &Resolved) -> solidcore::Result
                     ids.vertices(&mut o, v.iter().copied());
                     ids.edges(&mut o, e.iter().copied());
                     if !r.processed.is_empty() || !r.new_edges.is_empty() {
-                        digest(b, &mut o)?;
+                        digest(k, b, &mut o)?;
                     }
                     Ok(o)
                 }
@@ -811,6 +836,7 @@ fn gen_op(rng: &mut Rng) -> OpIn {
             ignore: rng.chance(0.3),
             verts: gen_opt_sels(rng, 8),
             edges: gen_opt_sels(rng, 12),
+            editing: false,
         },
     }
 }
