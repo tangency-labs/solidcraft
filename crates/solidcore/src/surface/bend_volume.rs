@@ -35,6 +35,8 @@
 //! | [`BendVolume::is_line_in_param_domain_simple`]    | `IsLineInParamDomainSimple`                    |
 //! | [`BendVolume::is_curve_in_param_domain_simple`]   | `IsCurveInParamDomainSimple`                   |
 //! | [`BendVolume::read_from_db`]                      | `ReadFromDB`                                   |
+//! | [`BendVolume::make_exact_b_spline_1st_out_surface`] | `MakeExactBSpline1stOutSurface` (in no unit in units.json; called by `SrfInVolume::make_exact_b_spline_if_possible_with`) |
+//! | [`BendVolume::make_exact_b_spline_1st_out_curve`] | `MakeExactBSpline1stOutCurve` (in no unit in units.json; called by `CrvInVolume::make_exact_b_spline_if_possible_with`) |
 //! | [`BEND_VOLUME_TYPE`], [`is_kind_of`], [`Volume::type_code`] and friends | `GetType`, `GetTypeString`, `GetClassString` (`SM_COMMON`), `IsKindOf` |
 //!
 //! Deviations:
@@ -79,27 +81,62 @@
 //! - **Unused arguments** upstream ignores (the from-left flags, zero-tangent and
 //!   zero-sampling options of the evaluations) are dropped where the call is local
 //!   to this module.
+//! - **`MakeExactBSpline1stOutCurve`** takes the input space as a flag, as the surface
+//!   variant, and returns the new curve (`None` for upstream's `NULL`). The statuses
+//!   upstream ignores (the sample `EvaluatePoint`s, the end-point `MapPoint` /
+//!   `EvaluatePoint`, `Evaluate`, `CCWAngleBetween`) leave the previous value
+//!   ([`Vec3::UNDEF`] for points, `0` for angles; upstream's angles are then
+//!   uninitialised). The unused plane-distance sums and the debug drawing are dropped.
+//!   When all three frame planes are constant (a degenerate curve) the line is built
+//!   and then replaced by the circle, as upstream (which leaks the line).
+//! - **`MakeExactBSpline1stOutSurface`** takes the input space as a flag
+//!   (`in_space`: `SM_VS_IN_SPACE`; otherwise `SM_VS_PARAM_SPACE`, so the invalid-space
+//!   `SM_ERR` has no counterpart) and returns the new surface (`None` for upstream's
+//!   `NULL`). The statuses upstream ignores (the sample `EvaluatePoint`s, the corner
+//!   `MapPoint` / `EvaluatePoint`, `EvaluateNormal`, the `SetUMin`-style setters)
+//!   leave the previous value, as upstream's out-params do (the defaults are
+//!   [`Vec3::UNDEF`]); [`SolidError::Unported`] still propagates. When more than one
+//!   frame plane is constant (a degenerate input), each matching branch builds its
+//!   surface and the last one wins (upstream leaks the earlier ones). The unused
+//!   `sCylinderOrigin` and the debug drawing are dropped.
 //! - **Recursion:** none here; the next-map compounding recurses through
 //!   [`Volume::map`] as in `surface::volume::p1`.
 
 use crate::curve::curve::p2::Curve;
-use crate::error::{Result, SolidError};
+use crate::curve::ellipse::{Ellipse, EllipseOptions};
+use crate::curve::line::Line;
+use crate::error::{ignored, Result, SolidError};
 use crate::geom::extent1d::Extent1d;
+use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::pseudo_box::PseudoBox;
 use crate::geom::solution_array::{Solution, SolutionArray, SolutionObject, SolutionType};
-use crate::geom::tol::{is_zero, scaled_zero2, ZONE_TOL_3D};
+use crate::geom::tol::{approx_tol_3d, is_zero, scaled_zero2, SmallTopoType, ZONE_TOL_3D};
 use crate::geom::transform::Transform;
+use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
 use crate::math::{
-    max2, max4, min2, min4, EFF_ZERO, EFF_ZERO_DEG, INFINITE_PARAMETER, PI, UNDEF_DOUBLE,
+    max2, max4, min2, min4, rad_to_deg, EFF_ZERO, EFF_ZERO_DEG, INFINITE_PARAMETER, PI,
+    UNDEF_DOUBLE,
 };
+use crate::nurbs::knots::Side;
+use crate::surface::cone::Cone;
+use crate::surface::plane::p1::Plane;
+use crate::surface::surface::p2::Surface;
 use crate::surface::volume::p1::{
     concat_evals, is_kind_of as volume_is_kind_of, EvalOptions, Volume, VolumeKind,
 };
 use crate::surface::volume::p2::ignore_read;
 use crate::topology::database_io::{DatabaseReader, FileType};
+
+/// `lSmpSize` of `MakeExactBSpline1stOutSurface`: the sample grid is
+/// `(SMP_SIZE + 1) x (SMP_SIZE + 1)`.
+const SMP_SIZE: u32 = 5;
+
+/// `lSmpSize` of `MakeExactBSpline1stOutCurve`: the curve is sampled at
+/// `CRV_SMP_SIZE + 1` points.
+const CRV_SMP_SIZE: u32 = 11;
 
 pub use crate::surface::volume::p1::BEND_VOLUME_TYPE;
 
@@ -851,6 +888,455 @@ impl BendVolume {
         param_curve.is_on_positive_side_of_planes(k, &plane_points, &plane_normals)
     }
 
+    /// `MakeExactBSpline1stOutSurface`: the exact first out-space image of `input`
+    /// (from in-space when `in_space`, else from parameter space) through the bend
+    /// `volume` (whose kind is `self`), or `None` when it is not one of the analytic
+    /// cases. A surface parallel to the plane normal to the bend axis maps to a plane
+    /// normal to the axis, one parallel to the neutral plane (normal to the mid
+    /// direction) to a cylinder about the bend axis, and one normal to the binormal to
+    /// a plane through the bend axis. The test samples a 6 x 6 grid of the natural
+    /// domain; any sample outside the bend's domain gives `None`.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] from the surface or volume services.
+    pub fn make_exact_b_spline_1st_out_surface(
+        &self,
+        k: &Kernel,
+        volume: &Volume,
+        in_space: bool,
+        input: &Surface,
+    ) -> Result<Option<Surface>> {
+        // locals: ParamSpace and InSpace Bend orientations - Bend's Neutral plane is perp
+        // to the Bend's MidDirection
+        let (param_origin, bend_origin) = (Vec3::ZERO, volume.bend_origin());
+        let (param_mid_dir, bend_mid_dir) = (Vec3::X, volume.bend_mid_dir());
+        let (param_axis, bend_axis) = (Vec3::Z, volume.bend_axis());
+        let (param_binormal, bend_binormal) = (Vec3::Y, volume.bend_binormal());
+        let bend_neutral_dist = self.bend_neutral_dist();
+
+        // locals: making InputSpace either ParamSpace or InSpace
+        let (input_origin, input_mid_dir, input_axis) = if in_space {
+            (bend_origin, bend_mid_dir, bend_axis)
+        } else {
+            (param_origin, param_mid_dir, param_axis)
+        };
+        let _ = param_binormal;
+
+        // locals
+        let mut input_pt = Vec3::UNDEF;
+        let mut out_space_pt = Vec3::UNDEF;
+
+        let approx_tol = approx_tol_3d(k, SmallTopoType::NormalSize);
+        let domain = input.natural_uv_domain_with_nurb(k)?;
+        let ivl_u = domain.u_interval();
+        let ivl_v = domain.v_interval();
+
+        // note: for Bend mapping Bend principle axes happen to be the same in InSpace and
+        // OutSpace
+        let mut axis_plane_sum = 0.0;
+        let mut mid_plane_sum = 0.0;
+        let mut binormal_plane_sum = 0.0;
+        let mut axis_plane_range = Extent1d::new();
+        let mut mid_dir_plane_range = Extent1d::new();
+        let mut binormal_plane_range = Extent1d::new();
+        let mut const_axis_plane = false;
+        let mut const_mid_dir_plane = false;
+        let mut const_binormal_plane = false;
+        let mut out_space_bbox = PseudoBox::from_basis_intervals(
+            [bend_mid_dir, bend_binormal, bend_axis],
+            [mid_dir_plane_range, binormal_plane_range, axis_plane_range],
+        );
+
+        // See if the InputSurface is perpendicular to any of the Bend principle axes
+        // (parallel to any Bend principle planes)
+        for ii in 0..=SMP_SIZE {
+            let u = ivl_u.evaluate(f64::from(ii) / f64::from(SMP_SIZE));
+            for jj in 0..=SMP_SIZE {
+                let uv = Point2::new(u, ivl_v.evaluate(f64::from(jj) / f64::from(SMP_SIZE)));
+
+                // Surface sample (status ignored)
+                if let Some(p) = ignored(input.evaluate_point(k, uv))? {
+                    input_pt = p;
+                }
+                let input_vec = input_pt - input_origin;
+
+                // save OutSpace Extents of the corner points
+                if (ii == 0 || ii == SMP_SIZE) && (jj == 0 || jj == SMP_SIZE) {
+                    // without compounding (status ignored)
+                    let mapped = if in_space {
+                        volume.map_point(input_pt, false)
+                    } else {
+                        volume.evaluate_point(input_pt, false)
+                    };
+                    if let Some(p) = ignored(mapped)? {
+                        out_space_pt = p;
+                    }
+                    out_space_bbox.add_point(out_space_pt - bend_origin);
+                }
+
+                // no work - sample point not within bend domain
+                let is_in = if in_space {
+                    volume.is_point_in_in_space_domain(input_pt, true)?.0
+                } else {
+                    volume.is_point_in_param_domain(input_pt, true)?
+                };
+                if !is_in {
+                    return Ok(None);
+                }
+
+                // distances to the planes through the origin perpendicular to the axes
+                let mid_plane = bend_mid_dir.dot(input_vec);
+                let binormal_plane = bend_binormal.dot(input_vec);
+                let axis_plane = bend_axis.dot(input_vec);
+
+                // accumulate the ranges
+                mid_dir_plane_range.add_value(mid_plane);
+                axis_plane_range.add_value(axis_plane);
+                binormal_plane_range.add_value(binormal_plane);
+
+                // accumulate the sums of plane distances
+                axis_plane_sum += axis_plane;
+                mid_plane_sum += mid_plane;
+                binormal_plane_sum += binormal_plane;
+
+                // remember when the surface is a constant distance from a bend plane
+                const_axis_plane = axis_plane_range.length() < approx_tol;
+                const_mid_dir_plane = mid_dir_plane_range.length() < approx_tol;
+                const_binormal_plane = binormal_plane_range.length() < approx_tol;
+
+                // no work - Surface not const distance from at least one plane
+                if u8::from(const_axis_plane)
+                    + u8::from(const_mid_dir_plane)
+                    + u8::from(const_binormal_plane)
+                    < 1
+                {
+                    return Ok(None);
+                }
+            }
+        }
+
+        // find the current input surface normal - it's a plane so sample it once anywhere
+        // (status ignored)
+        let mid_uv = Point2::new(ivl_u.evaluate(0.5), ivl_v.evaluate(0.5));
+        let input_surface_normal =
+            ignored(input.evaluate_normal(k, mid_uv, Side::Left, Side::Left))?
+                .unwrap_or(Vec3::UNDEF);
+        let samples = f64::from(SMP_SIZE) + 1.0;
+        let mut new_surface = None;
+
+        // surfaces perpendicular to the BendAxis map to planes with the same orientation
+        // perpendicular to the BendAxis
+        if const_axis_plane {
+            let origin = bend_origin + axis_plane_sum / samples / samples * bend_axis;
+            let uv_scale = Vec2::new(1.0, 1.0);
+
+            // check orientation of surface against the Input BendAxis axis
+            let positive = input_surface_normal.dot(input_axis) > 0.0;
+
+            // UVDomain = BBox3d U (BendMidDir) and V (BendBiNormal) extents
+            let [box_u, box_v, _] = *out_space_bbox.intervals();
+            let mut uv_domain =
+                Extent2d::from_bounds(box_u.min(), box_v.min(), box_u.max(), box_v.max());
+
+            // bump BBox for maximums not in the corners (statuses ignored)
+            let ang_range_rad = Extent1d::from_min_max(
+                binormal_plane_range.min() / bend_neutral_dist,
+                binormal_plane_range.max() / bend_neutral_dist,
+            );
+            let mid_max = mid_dir_plane_range.max();
+            if ang_range_rad.contains_value(-PI, EFF_ZERO_DEG) {
+                let _ = uv_domain.set_u_min(-mid_max);
+            }
+            if ang_range_rad.contains_value(-PI / 2.0, EFF_ZERO_DEG) {
+                let _ = uv_domain.set_v_min(-mid_max);
+            }
+            if ang_range_rad.contains_value(0.0, EFF_ZERO_DEG) {
+                let _ = uv_domain.set_u_max(mid_max);
+            }
+            if ang_range_rad.contains_value(PI / 2.0, EFF_ZERO_DEG) {
+                let _ = uv_domain.set_v_max(mid_max);
+            }
+            if ang_range_rad.contains_value(PI, EFF_ZERO_DEG) {
+                let _ = uv_domain.set_u_min(-mid_max);
+            }
+
+            // Create Plane with SrfNormal = input surface normal
+            let (x_vector, y_vector) = if positive {
+                (bend_mid_dir, bend_binormal)
+            } else {
+                uv_domain.transpose();
+                (bend_binormal, bend_mid_dir)
+            };
+
+            // create new plane - positive orientation:[SrfNormal = BendMidDir X BendBinormal]
+            new_surface = Some(Surface::from(Plane::new(
+                origin, x_vector, y_vector, uv_scale, &uv_domain,
+            )));
+        }
+
+        // surfaces perpendicular to the MidDir plane map to BendAxis centered cylinders
+        if const_mid_dir_plane {
+            let radius = mid_plane_sum / samples / samples;
+            let axis_length = axis_plane_range.length();
+            let start_angle_deg = rad_to_deg(binormal_plane_range.min() / bend_neutral_dist);
+            let stop_angle_deg = rad_to_deg(binormal_plane_range.max() / bend_neutral_dist);
+
+            // check orientation of surface against the Input BendMidDir axis
+            let positive = input_surface_normal.dot(input_mid_dir) > 0.0;
+
+            // FALSE = outward pointing SrfNormals, TRUE = inward pointing SrfNormals
+            let inside_out = !positive;
+
+            new_surface = Some(Surface::from(Cone::new_cylinder_bounded(
+                bend_origin,
+                bend_mid_dir,
+                bend_binormal,
+                radius,
+                start_angle_deg,
+                stop_angle_deg,
+                axis_length,
+                false,
+                inside_out,
+                false,
+            )));
+        }
+
+        // surfaces perpendicular to the Binormal Axis map to planes containing the
+        // BendAxis (radiating out)
+        if const_binormal_plane {
+            let ang_rad = (binormal_plane_sum / samples / samples) / bend_neutral_dist;
+            let mut x_vector = bend_axis;
+            let mut y_vector = ang_rad.cos() * bend_mid_dir + ang_rad.sin() * bend_binormal;
+
+            let uv_scale = Vec2::new(1.0, 1.0);
+            let mut uv_domain = Extent2d::from_bounds(
+                axis_plane_range.min(),
+                mid_dir_plane_range.min(),
+                axis_plane_range.max(),
+                mid_dir_plane_range.max(),
+            );
+
+            // check orientation of surface against the Input BendBinormal axis
+            let positive = input_surface_normal.dot(bend_binormal) > 0.0;
+
+            // Create Plane with SrfNormal = input surface normal
+            if !positive {
+                x_vector = y_vector;
+                y_vector = bend_axis;
+                uv_domain.transpose();
+            }
+
+            // create new plane - positive orientation:[SrfNormal = sBendAxis X sYVector]
+            new_surface = Some(Surface::from(Plane::new(
+                bend_origin,
+                x_vector,
+                y_vector,
+                uv_scale,
+                &uv_domain,
+            )));
+        }
+
+        // all done
+        Ok(new_surface)
+    }
+
+    /// `MakeExactBSpline1stOutCurve`: the exact first out-space image of `input` (from
+    /// in-space when `in_space`, else from parameter space) through the bend `volume`
+    /// (whose kind is `self`), or `None` when it is not one of the analytic cases. A
+    /// line parallel to the bend axis or to the mid direction maps to a line, one
+    /// parallel to the binormal to a circular arc about the bend axis. The test samples
+    /// 12 points of the natural interval; any sample outside the bend's domain gives
+    /// `None`.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::Unported`] from the curve or volume services.
+    pub fn make_exact_b_spline_1st_out_curve(
+        &self,
+        k: &Kernel,
+        volume: &Volume,
+        in_space: bool,
+        input: &Curve,
+    ) -> Result<Option<Curve>> {
+        // locals: ParamSpace and InSpace Bend orientations - Bend's Neutral plane is perp
+        // to the Bend's MidDirection
+        let (param_origin, bend_origin) = (Vec3::ZERO, volume.bend_origin());
+        let (param_mid_dir, bend_mid_dir) = (Vec3::X, volume.bend_mid_dir());
+        let (param_axis, bend_axis) = (Vec3::Z, volume.bend_axis());
+        let (param_binormal, bend_binormal) = (Vec3::Y, volume.bend_binormal());
+
+        // locals: making InputSpace either ParamSpace or InSpace
+        let (input_origin, input_mid_dir, input_axis, input_binormal) = if in_space {
+            (bend_origin, bend_mid_dir, bend_axis, bend_binormal)
+        } else {
+            (param_origin, param_mid_dir, param_axis, param_binormal)
+        };
+
+        // locals
+        let mut input_first = Vec3::UNDEF;
+        let mut input_last = Vec3::UNDEF;
+        let mut out_space_first = Vec3::UNDEF;
+        let mut out_space_last = Vec3::UNDEF;
+
+        let approx_tol = approx_tol_3d(k, SmallTopoType::NormalSize);
+        let ivl = input.natural_interval();
+        let mut input_pt = Vec3::UNDEF;
+        let mut on_axis_pt = Vec3::UNDEF;
+
+        let mut axis_plane_range = Extent1d::new();
+        let mut mid_dir_plane_range = Extent1d::new();
+        let mut binormal_plane_range = Extent1d::new();
+        let mut const_axis_plane = false;
+        let mut const_mid_dir_plane = false;
+        let mut const_binormal_plane = false;
+
+        // See if the InputCurve is linear and parallel to one of the BendAxes (parallel
+        // to two BendPlanes)
+        for ii in 0..=CRV_SMP_SIZE {
+            let smp_u = ivl.evaluate(f64::from(ii) / f64::from(CRV_SMP_SIZE));
+
+            // Curve sample (status ignored)
+            if let Some(p) = ignored(input.evaluate_point(k, smp_u))? {
+                input_pt = p;
+            }
+
+            // no work - sample point not within bend domain
+            let is_in = if in_space {
+                volume.is_point_in_in_space_domain(input_pt, true)?.0
+            } else {
+                volume.is_point_in_param_domain(input_pt, true)?
+            };
+            if !is_in {
+                return Ok(None);
+            }
+
+            // save 1st and last sample pts and pick a point on Axis near line to keep
+            // vector sizes small
+            if ii == 0 {
+                input_first = input_pt;
+                let to_orig_vec = input_pt - input_origin;
+                on_axis_pt = input_origin + input_axis.dot(to_orig_vec) * input_axis;
+            } else if ii == CRV_SMP_SIZE {
+                input_last = input_pt;
+            }
+
+            // Input vec from SamplePt to OnAxisPt
+            let on_axis_vec = input_pt - on_axis_pt;
+
+            // InputSpace distances to planes perp to Bend axes
+            let axis_plane = input_axis.dot(on_axis_vec);
+            let mid_dir_plane = input_mid_dir.dot(on_axis_vec);
+            let binormal_plane = input_binormal.dot(on_axis_vec);
+
+            // accumulate the range of Plane distances
+            axis_plane_range.add_value(axis_plane);
+            mid_dir_plane_range.add_value(mid_dir_plane);
+            binormal_plane_range.add_value(binormal_plane);
+
+            // remember when curve is const dist from bend plane
+            const_axis_plane = axis_plane_range.length() < approx_tol;
+            const_mid_dir_plane = mid_dir_plane_range.length() < approx_tol;
+            const_binormal_plane = binormal_plane_range.length() < approx_tol;
+
+            // no work - curve not const distance from at least two planes
+            if u8::from(const_axis_plane)
+                + u8::from(const_mid_dir_plane)
+                + u8::from(const_binormal_plane)
+                < 2
+            {
+                return Ok(None);
+            }
+        }
+
+        // OutSpace 1st and Last points, without compounding (statuses ignored)
+        let out_point = |p: Point3| {
+            if in_space {
+                volume.map_point(p, false)
+            } else {
+                volume.evaluate_point(p, false)
+            }
+        };
+        if let Some(p) = ignored(out_point(input_first))? {
+            out_space_first = p;
+        }
+        if let Some(p) = ignored(out_point(input_last))? {
+            out_space_last = p;
+        }
+
+        let mut new_curve = None;
+
+        // lines parallel to BendAxis => map to OutSpace lines
+        // lines parallel to MidBendAxis => map to OutSpace lines
+        let parallel_to_axis = const_mid_dir_plane && const_binormal_plane;
+        let parallel_to_mid_dir = const_axis_plane && const_binormal_plane;
+        if parallel_to_axis || parallel_to_mid_dir {
+            // create the OutSpace Line
+            new_curve = Some(Curve::from(Line::from_points(
+                out_space_first,
+                out_space_last,
+                3,
+            )));
+        }
+
+        // lines parallel to BinormalAxis => map to OutSpace circles
+        if const_mid_dir_plane && const_axis_plane {
+            // OutSpace bend parameters
+            let out_space_mid_dir = volume.bend_mid_dir();
+            let out_space_axis = volume.bend_axis();
+            let out_space_binormal = volume.bend_binormal();
+
+            // find the current rInputCurve curve tangent - it's a line so sample it once
+            // anywhere (status ignored)
+            let input_tangent = ignored(input.evaluate(k, ivl.evaluate(0.5), 1, true, true))?
+                .and_then(|pn| pn.get(1).copied())
+                .unwrap_or(Vec3::UNDEF);
+
+            // check orientation of curve against the Input BinormalAxis axis and select
+            // appropriate coordinate system
+            let positive = input_tangent.dot(input_binormal) > 0.0;
+            let (x_axis, y_axis, z_axis) = if positive {
+                (out_space_mid_dir, out_space_binormal, out_space_axis)
+            } else {
+                (out_space_binormal, out_space_mid_dir, -out_space_axis)
+            };
+
+            // OutSpace circle circ center and radius (status ignored)
+            let out_space_on_axis = ignored(out_point(on_axis_pt))?.unwrap_or(Vec3::UNDEF);
+
+            let radius1 = (out_space_first - out_space_on_axis).length();
+            let radius2 = (out_space_last - out_space_on_axis).length();
+            let radius = (radius1 + radius2) / 2.0;
+
+            // Start and End AngDeg
+            // (statuses ignored: a failure leaves 0)
+            let start_ang_rad =
+                ignored(z_axis.ccw_angle_between(x_axis, out_space_first - out_space_on_axis))?
+                    .unwrap_or(0.0);
+            let end_ang_rad =
+                ignored(z_axis.ccw_angle_between(x_axis, out_space_last - out_space_on_axis))?
+                    .unwrap_or(0.0);
+
+            let mut ang_domain_deg = Extent1d::new();
+            ang_domain_deg.add_value(rad_to_deg(start_ang_rad));
+            ang_domain_deg.add_value(rad_to_deg(end_ang_rad));
+
+            // create the OutSpace Circular Arc
+            new_curve = Some(Curve::from(Ellipse::new_circle(
+                k,
+                out_space_on_axis,
+                x_axis,
+                y_axis,
+                ang_domain_deg,
+                radius,
+                &EllipseOptions::default(),
+            )?));
+        }
+
+        // all done
+        Ok(new_curve)
+    }
+
     /// Reads a bend volume from a database stream: the neutral distance and the
     /// singularity tolerance, then the volume base data
     /// ([`Volume::read_base_from_db`], status ignored as upstream) (`ReadFromDB`).
@@ -1026,7 +1512,7 @@ mod tests {
         assert!(b.is_line_in_param_domain_simple(v(1.0, -3.0, 0.0), v(2.0, 3.0, 1.0)));
         assert!(!b.is_line_in_param_domain_simple(v(1.0, -3.0, 0.0), v(-2.0, 3.0, 1.0)));
         let k = Kernel::default();
-        let seg = |a, c| Curve::from(crate::curve::line::Line::from_points(a, c, 3));
+        let seg = |a, c| Curve::from(Line::from_points(a, c, 3));
         assert!(b
             .is_curve_in_param_domain_simple(&k, &seg(v(1.0, 1.0, 0.0), v(2.0, 1.0, 0.0)))
             .unwrap());

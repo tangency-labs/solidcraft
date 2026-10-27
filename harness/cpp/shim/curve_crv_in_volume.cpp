@@ -5,6 +5,11 @@
 // curve and an identity SmTransform volume (the simplest SmVolume; the Rust side builds
 // the same volume and runs every op through it).
 //
+// The static op OP_EXACT builds its own object from an SmBSplineCurve, SmHermiteCurve, SmLine
+// or SmCircle base curve and a chain of SmTransform / SmTwistVolume / SmUnbendVolume /
+// SmBendVolume / plain SmVolume maps (as the surface.srf_in_volume shim) and runs
+// MakeExactBSplineIfPossible.
+//
 // One entry point, sc_curve_crv_in_volume_eval(op, in, n_in, out, cap, out_len). Layouts are
 // documented in crates/solidcore-ffi/src/units/curve_crv_in_volume.rs, which validates every
 // input. `out` receives the op status (0 = SM_SUCCESS, else the SmStatus value) and the op's
@@ -17,7 +22,9 @@
 
 #include "StdAfx.h"
 #include <SmAxis2Placement.h>
+#include <SmBendVolume.h>
 #include <SmBSplineCurve.h>
+#include <SmCircle.h>
 #include <SmContext.h>
 #include <SmCrvInVolume.h>
 #include <SmCurve.h>
@@ -25,10 +32,14 @@
 #include <SmDatabaseIO.h>
 #include <SmExtent1d.h>
 #include <SmHermiteCurve.h>
+#include <SmLine.h>
 #include <SmNurbsCrv.h>
 #include <SmTArray.h>
 #include <SmTransform.h>
+#include <SmTwistVolume.h>
+#include <SmUnbendVolume.h>
 #include <SmVector3d.h>
+#include <SmVolume.h>
 #include <nurbs.h>
 
 #include <sstream>
@@ -61,6 +72,20 @@ enum : int32_t
     OP_TRIM = 11,
     OP_TRANSFORM = 12,
     OP_READ_DB = 40,
+    OP_EXACT = 41,
+};
+
+// Map kinds of an OP_EXACT volume chain (as the surface.srf_in_volume shim).
+enum : int64_t
+{
+    K_BASE = 0,
+    K_TRANSFORM = 1,
+    K_TWIST = 2,
+    K_UNBEND = 3,
+    K_BEND = 4,
+    K_TWIST_C = 5,
+    K_UNBEND_C = 6,
+    K_BEND_C = 7,
 };
 
 class ScCiv : public SmCrvInVolume
@@ -440,6 +465,134 @@ void civ_op(int32_t op, Rd& rd, const SmContext& ctx, Built& bb, std::vector<dou
     }
 }
 
+// ---- OP_EXACT ---------------------------------------------------------------------------
+
+// An exact-op curve block: a curve block (kinds 0, 1), `2 P1 P2` (SmLine(P1, P2, 3)) or
+// `3 C X Y a0 a1 r` (SmCircle(C, X, Y, SmExtent1d(a0, a1), r, 3)).
+SmCurve* read_exact_curve(Rd& rd, const SmContext& ctx)
+{
+    int64_t kind = rd.idx();
+    if (kind == 2)
+    {
+        SmPoint3d p1 = rd.vec();
+        SmPoint3d p2 = rd.vec();
+        return new (ctx) SmLine(p1, p2, 3, &ctx);
+    }
+    if (kind == 3)
+    {
+        SmPoint3d c = rd.vec();
+        SmVector3d x = rd.vec();
+        SmVector3d y = rd.vec();
+        double a0 = rd.num();
+        double a1 = rd.num();
+        double r = rd.num();
+        return new (ctx) SmCircle(c, x, y, SmExtent1d(a0, a1), r, 3, &ctx);
+    }
+    rd.at--; // the kind belongs to the plain curve block
+    return read_curve(rd, ctx);
+}
+
+// `origin X Y Z`: SmTransform(ctx, origin, X, Y, &Z).
+SmTransform* read_transform(Rd& rd, const SmContext& ctx)
+{
+    SmVector3d o = rd.vec();
+    SmVector3d x = rd.vec();
+    SmVector3d y = rd.vec();
+    SmVector3d z = rd.vec();
+    return new (ctx) SmTransform(&ctx, o, x, y, &z);
+}
+
+// `n` maps `kind [T(12) | C(11)] has_orient [O(12)]` (kinds 5-7 are the component
+// constructors with `C` = `p0 axis mid a b`, and never have an orient map here), chained
+// in order with AddNextMap(m, 2).
+SmVolume* read_volume(Rd& rd, const SmContext& ctx)
+{
+    int64_t n = rd.idx();
+    SmVolume* head = NULL;
+    for (int64_t i = 0; i < n; ++i)
+    {
+        int64_t kind = rd.idx();
+        SmVolume* v = NULL;
+        switch (kind)
+        {
+        case K_TRANSFORM: v = read_transform(rd, ctx); break;
+        case K_TWIST: v = new (ctx) SmTwistVolume(&ctx); break;
+        case K_UNBEND: v = new (ctx) SmUnbendVolume(&ctx); break;
+        case K_BEND: v = new (ctx) SmBendVolume(&ctx); break;
+        case K_TWIST_C:
+        case K_UNBEND_C:
+        case K_BEND_C:
+        {
+            SmPoint3d p0 = rd.vec();
+            SmVector3d axis = rd.vec();
+            SmVector3d mid = rd.vec();
+            double a = rd.num();
+            double b = rd.num();
+            if (kind == K_TWIST_C)
+                v = new (ctx) SmTwistVolume(ctx, p0, axis, mid, a, b);
+            else if (kind == K_UNBEND_C)
+                v = new (ctx) SmUnbendVolume(ctx, p0, axis, mid, a, b);
+            else
+                v = new (ctx) SmBendVolume(ctx, p0, axis, mid, a, b);
+            break;
+        }
+        default: v = new (ctx) SmVolume(&ctx); break;
+        }
+        if (rd.flag())
+            v->SetOrientMap(read_transform(rd, ctx), 2);
+        if (head == NULL)
+            head = v;
+        else
+            head->AddNextMap(v, 2);
+    }
+    return head;
+}
+
+// An exact result: `type dim had_nurb` then the NURB after GetOrCreateGwNurbPointer
+// (`n p m cpts(x y z w) knots`, or `-1`), the natural interval `a b`, and
+// `st P[3] T[3]` of Evaluate(t, 1, TRUE, .., TRUE) at the interval fractions 0, 1/4,
+// 1/2, 3/4, 1.
+void put_exact_curve(std::vector<double>& o, SmBSplineCurve* c)
+{
+    o.push_back((double)c->GetType());
+    o.push_back((double)c->GetDim());
+    o.push_back(c->GetGwNurbPointer() != NULL ? 1.0 : 0.0);
+    const gw_CURVE* cur = c->GetOrCreateGwNurbPointer();
+    if (cur == NULL)
+        o.push_back(-1.0);
+    else
+    {
+        gw_INDEX n = cur->pol->n;
+        gw_INDEX m = cur->knt->m;
+        o.push_back((double)n);
+        o.push_back((double)cur->p);
+        o.push_back((double)m);
+        for (gw_INDEX i = 0; i <= n; i++)
+        {
+            o.push_back(cur->pol->Pw[i].x);
+            o.push_back(cur->pol->Pw[i].y);
+            o.push_back(cur->pol->Pw[i].z);
+            o.push_back(cur->pol->Pw[i].w);
+        }
+        for (gw_INDEX i = 0; i <= m; i++)
+            o.push_back(cur->knt->U[i]);
+    }
+    SmExtent1d ivl = c->GetNaturalInterval();
+    o.push_back(ivl.GetMin());
+    o.push_back(ivl.GetMax());
+    for (int i = 0; i <= 4; i++)
+    {
+        SmVector3d pn[2];
+        SmStatus s = c->Evaluate(ivl.Evaluate(0.25 * i), 1, TRUE, pn, TRUE);
+        o.push_back(st(s));
+        if (s == SM_SUCCESS)
+        {
+            put_vec(o, pn[0]);
+            put_vec(o, pn[1]);
+        }
+    }
+}
+
 void static_op(int32_t op, Rd& rd, const SmContext& ctx, std::vector<double>& o)
 {
     switch (op)
@@ -464,6 +617,27 @@ void static_op(int32_t op, Rd& rd, const SmContext& ctx, std::vector<double>& o)
         }
         else
             o.push_back(0.0);
+        break;
+    }
+    case OP_EXACT:
+    {
+        // the object owns (and deletes) the curve and the volume chain
+        SmCurve* curve = read_exact_curve(rd, ctx);
+        bool in_param = rd.flag();
+        SmVolume* volume = read_volume(rd, ctx);
+        SmCrvInVolume* civ =
+            new (ctx) SmCrvInVolume(*curve, in_param ? TRUE : FALSE, *volume, 0, 3, &ctx);
+        SmBSplineCurve* b = NULL;
+        SmStatus s = civ->MakeExactBSplineIfPossible(b);
+        o.push_back(st(s));
+        if (s == SM_SUCCESS)
+        {
+            o.push_back(b != NULL ? 1.0 : 0.0);
+            if (b != NULL)
+                put_exact_curve(o, b);
+        }
+        delete b;
+        delete civ;
         break;
     }
     default: o.push_back((double)SC_ERR_ARG); break;

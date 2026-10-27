@@ -72,6 +72,10 @@
 //!   that [`SolidError::Unported`] always propagates and a failure whose output
 //!   upstream would read uninitialised (a failed generator or surface evaluation, a
 //!   failed iso curve in `RebuildPolarConverter`) is returned.
+//! - **`RebuildPolarConverter`** makes a missing NURB first, as its upstream
+//!   `GetNaturalUVDomain` does (a lazy surface that is transformed or edited gets its
+//!   NURB there); called from `MakeNurbWithSweepParams` it does not, which bounds the
+//!   recursion upstream would enter if that NURB were missing.
 //! - **Unported callees.** `ConvertUVFromNURBSToSTEP` without exact polar conversion
 //!   needs `SmSTEPSurface` (unit `surface.surface_p1`), which returns
 //!   [`SolidError::Unported`].
@@ -651,7 +655,7 @@ impl SurfOfRevolution {
         self.base.nurb = tmp.nurb;
 
         // Set up the Polar conversion - create a sweep isoParametric curve
-        ignore_status(self.rebuild_polar_converter(k, iso))?;
+        ignore_status(self.rebuild_polar_converter_from(k, iso, false))?;
         Ok(())
     }
 
@@ -683,7 +687,27 @@ impl SurfOfRevolution {
         k: &Kernel,
         iso: SweepIsoFn<'_>,
     ) -> Result<()> {
-        // Try the beginning of the curve if possible
+        self.rebuild_polar_converter_from(k, iso, true)
+    }
+
+    /// [`Self::rebuild_polar_converter`]; `make_nurb` says whether a missing NURB is
+    /// made first, as upstream's `GetNaturalUVDomain` does
+    /// (`GetOrCreateGwNurbPointer` calls the virtual `MakeNurb`, the
+    /// `MakeNurbWithSweepParams` of `iso`'s class, which rebuilds the converter itself;
+    /// its status is ignored). [`Self::make_nurb_with_sweep_params_using`] passes
+    /// `false`: it has just stored its NURB, and upstream would recurse without bound
+    /// if that NURB were missing.
+    fn rebuild_polar_converter_from(
+        &mut self,
+        k: &Kernel,
+        iso: SweepIsoFn<'_>,
+        make_nurb: bool,
+    ) -> Result<()> {
+        // Try the beginning of the curve if possible (GetNaturalUVDomain makes a missing
+        // NURB)
+        if make_nurb && self.base.gw_nurb().is_none() {
+            ignore_status(self.make_nurb_with_sweep_params_using(k, None, iso))?;
+        }
         let nurb_domain = self.base.natural_uv_domain();
         let nurb_min_uv = nurb_domain.min();
         self.polar.set_polar_conversion_possible(false);

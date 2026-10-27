@@ -27,10 +27,23 @@
 //! | `Trim`       | `Trim(ivl, notify, FALSE)`                 | `a b mode` (0 `TRUE`, 1 `FALSE`, 2 `UNSURE`) | `a' b'` state |
 //! | `Transform`  | `Transform`                                | `O X Y has_scale S`     | state |
 //! | `ReadDb`     | `SmCrvInVolume::ReadFromDB` (static, ASCII) | `version nb B[nb]`     | `made [state]` |
+//! | `Exact`      | `MakeExactBSplineIfPossible` (static: builds its own object) | `curve in_param volume` | `made [exact]` (on success) |
 //!
 //! A cache is `need nb B[nb] nc C[nc]`; a state is `owner_flag in_param` cache and the
 //! base curve (`0 dim n p m cpts knots`, `1 dim P(0) C'(0) P(1) C'(1)` evaluated back,
 //! or `-1`).
+//!
+//! `Exact` builds `SmCrvInVolume(curve, in_param, volume, 0, 3)` from an exact curve
+//! block (a curve block as above; `2 P1[3] P2[3]`: `SmLine(P1, P2, 3)`; or
+//! `3 C[3] X[3] Y[3] a0 a1 r`: `SmCircle(C, X, Y, SmExtent1d(a0, a1), r, 3)`) and a
+//! volume chain `n` maps `kind [T(12) | C(11)] has_orient [O(12)]` (as unit
+//! `surface.srf_in_volume`: `0` plain `SmVolume`, `1` `SmTransform(O, X, Y, &Z)`, `2`..`4`
+//! default twist / unbend / bend volumes, `5`..`7` their component constructors with
+//! `C` = `p0 axis mid a b`, never with an orient map), chained with `AddNextMap(m, 2)`.
+//! Its exact record is `type dim had_nurb`, the NURB made by
+//! `GetOrCreateGwNurbPointer` (`n p m cpts(x y z w) knots`, or `-1`), the natural
+//! interval `a b`, then `st P[3] T[3]` of `Evaluate(t, 1, TRUE, .., TRUE)` at the
+//! interval fractions `0, 1/4, 1/2, 3/4, 1`.
 //!
 //! [`eval`] accepts only what upstream handles without undefined behaviour: well-formed
 //! clamped B-splines (as unit `curve.curve_p2`), finite bounded Hermite data, cached
@@ -41,6 +54,11 @@
 //! breaks), no `Copy` of an owned Hermite base curve (its `Copy` fails and both objects
 //! would delete it), and database text without a volume type code (`22000..=22999`:
 //! reading those needs volume data, and `SmVolume_TYPE` dereferences a null volume).
+//! For `Exact` it also needs finite line ends, circles with independent axes, a
+//! positive radius and `-360 <= a0 < a1 <= a0 + 360`, at most [`MAX_MAPS`] maps with
+//! non-zero component axes, and no Hermite base curve under a twist head map (the twist
+//! copies the curve it maps, a Hermite curve's `Copy` fails and upstream then
+//! dereferences the `NULL` copy).
 
 use crate::validate::{bad, euclid, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
@@ -57,6 +75,8 @@ pub const MAX_REL_DIST: f64 = 4.0;
 pub const MAX_ARRAY: usize = 1024;
 /// Most bytes of a database stream.
 pub const MAX_DB_BYTES: usize = 1 << 16;
+/// Most maps of an `Exact` volume chain.
+pub const MAX_MAPS: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(missing_docs)]
@@ -75,6 +95,7 @@ pub enum Op {
     Trim,
     Transform,
     ReadDb,
+    Exact,
 }
 
 impl Op {
@@ -96,6 +117,7 @@ impl Op {
             Op::Trim => 11,
             Op::Transform => 12,
             Op::ReadDb => 40,
+            Op::Exact => 41,
         }
     }
 
@@ -355,9 +377,109 @@ fn validate_object_op(op: Op, rd: &mut Reader<'_>, c: &Block) -> Result<(), FfiE
             rd.flag()?;
             rd.vec3()?;
         }
-        Op::ReadDb => return Err(bad("not an object op")),
+        Op::ReadDb | Op::Exact => return Err(bad("not an object op")),
     }
     Ok(())
+}
+
+/// A non-zero vector.
+fn nonzero3(rd: &mut Reader<'_>) -> Result<[f64; 3], FfiError> {
+    let v = rd.vec3()?;
+    if v.iter().map(|c| c * c).sum::<f64>() < 1e-12 {
+        return Err(bad("zero vector"));
+    }
+    Ok(v)
+}
+
+/// An `Exact` curve block (see the module docs); returns whether it is a Hermite curve.
+fn exact_curve(rd: &mut Reader<'_>) -> Result<bool, FfiError> {
+    let kind = rd.index(3)?;
+    match kind {
+        0 | 1 => {
+            let dim = rd.index(3)?;
+            if dim < 2 {
+                return Err(bad("curve block: dimension must be 2 or 3"));
+            }
+            if kind == 0 {
+                rd.flag()?;
+                bspline(rd)?;
+            } else {
+                for _ in 0..4 {
+                    rd.vec3()?;
+                }
+            }
+            Ok(kind == 1)
+        }
+        2 => {
+            rd.vec3()?;
+            rd.vec3()?;
+            Ok(false)
+        }
+        _ => {
+            rd.vec3()?;
+            let x = nonzero3(rd)?;
+            let y = nonzero3(rd)?;
+            let cross = [
+                x[1] * y[2] - x[2] * y[1],
+                x[2] * y[0] - x[0] * y[2],
+                x[0] * y[1] - x[1] * y[0],
+            ];
+            let c2: f64 = cross.iter().map(|c| c * c).sum();
+            let l2: f64 =
+                x.iter().map(|c| c * c).sum::<f64>() * y.iter().map(|c| c * c).sum::<f64>();
+            if c2 < 1e-6 * l2 {
+                return Err(bad("circle: axes parallel"));
+            }
+            let (a0, a1) = (rd.finite()?, rd.finite()?);
+            let r = rd.finite()?;
+            if r < 1e-9 {
+                return Err(bad("circle: need a positive radius"));
+            }
+            if a0 < -360.0 || a1 > a0 + 360.0 || a1 <= a0 || a1 > 360.0 {
+                return Err(bad("circle: need -360 <= a0 < a1 <= a0 + 360"));
+            }
+            Ok(false)
+        }
+    }
+}
+
+/// An `Exact` volume chain (see the module docs); returns whether the head map is a
+/// twist volume.
+fn volume(rd: &mut Reader<'_>) -> Result<bool, FfiError> {
+    let n = rd.index(MAX_MAPS)?;
+    if n == 0 {
+        return Err(bad("volume without maps"));
+    }
+    let mut head_twist = false;
+    for i in 0..n {
+        let kind = rd.index(7)?;
+        if kind == 1 {
+            for _ in 0..4 {
+                rd.vec3()?;
+            }
+        }
+        let component = kind >= 5;
+        if component {
+            // origin / center, axis and mid direction (non-zero), then two numbers
+            rd.vec3()?;
+            nonzero3(rd)?;
+            nonzero3(rd)?;
+            rd.finite()?;
+            rd.finite()?;
+        }
+        if i == 0 {
+            head_twist = kind == 2 || kind == 5;
+        }
+        if rd.flag()? {
+            if component {
+                return Err(bad("component volume with an orient map"));
+            }
+            for _ in 0..4 {
+                rd.vec3()?;
+            }
+        }
+    }
+    Ok(head_twist)
 }
 
 /// Whether `bytes` holds a digit run (as `operator>>` would extract it) in
@@ -393,6 +515,14 @@ fn validate_static(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
                 return Err(bad("read: the text names a volume type"));
             }
         }
+        Op::Exact => {
+            let hermite = exact_curve(rd)?;
+            rd.flag()?;
+            let head_twist = volume(rd)?;
+            if hermite && head_twist {
+                return Err(bad("exact: a twist copies the curve; a Hermite copy fails"));
+            }
+        }
         _ => return Err(bad("not a static op")),
     }
     Ok(())
@@ -426,7 +556,8 @@ pub fn eval(op: Op, input: &[f64]) -> Result<Vec<f64>, FfiError> {
         // SAFETY: input is valid for input.len() reads and holds exactly what the shim
         // reads for `op` (validated above: well-formed curve blocks, every index, count,
         // flag and continuity code the shim passes to upstream, cache shapes upstream
-        // indexes safely, no volume type in database text); buf is valid for buf.len()
+        // indexes safely, no volume type in database text, exact curve and volume
+        // blocks upstream builds and maps safely); buf is valid for buf.len()
         // writes and the shim honours the capacity; len is valid.
         unsafe {
             sys::sc_curve_crv_in_volume_eval(

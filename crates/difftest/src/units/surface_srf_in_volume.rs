@@ -57,7 +57,7 @@ use solidcore_ffi::units::surface_srf_in_volume::{self as ffi, Op};
 use crate::case::CaseContext;
 use crate::runner::default_cases;
 use crate::units::surface_surface_cache_p1::{
-    bss_of, gen_bss, gen_srf, gen_sub_dom, push_bss, srf, BssIn, InlineSrf, SrfIn,
+    bss_of, default_form, gen_bss, gen_srf, gen_sub_dom, push_bss, srf, BssIn, InlineSrf, SrfIn,
 };
 use crate::{Case, CaseSource, HarnessError, Output, Rng, UnitDiff};
 
@@ -932,6 +932,33 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             o.push(b(exact.is_some()));
             if let Some(exact) = exact {
                 put_surface(&mut o, &exact);
+                // what the result evaluates to (the shim's `put_exact_eval`)
+                let d = tri!(o, exact.natural_uv_domain_with_nurb(&k));
+                let c = [d.u_min(), d.v_min(), d.u_max(), d.v_max()];
+                o.extend(c);
+                let finite = c.iter().all(|x| x.is_finite() && x.abs() < 1.0e12);
+                o.push(b(finite));
+                if finite {
+                    let (iu, iv) = (d.u_interval(), d.v_interval());
+                    for i in 0..=2 {
+                        for j in 0..=2 {
+                            let uv = Point2::new(
+                                iu.evaluate(0.5 * f64::from(i)),
+                                iv.evaluate(0.5 * f64::from(j)),
+                            );
+                            let p = exact.evaluate_point(&k, uv);
+                            st!(o, p);
+                            if let Ok(p) = p {
+                                pv(&mut o, p);
+                            }
+                            let n = exact.evaluate_normal(&k, uv, Side::Left, Side::Left);
+                            st!(o, n);
+                            if let Ok(n) = n {
+                                pv(&mut o, n);
+                            }
+                        }
+                    }
+                }
             }
         }
         OpIn::ReadDb { .. } => return Err(harness("static op")),
@@ -1313,6 +1340,380 @@ fn mirror_cases() -> Result<Vec<Case>, HarnessError> {
     Ok(cases)
 }
 
+// ---- exact images through bend, unbend and twist volumes ----------------------------
+
+fn add3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
+}
+
+fn scale3(s: f64, a: [f64; 3]) -> [f64; 3] {
+    [s * a[0], s * a[1], s * a[2]]
+}
+
+fn unit3(a: [f64; 3]) -> [f64; 3] {
+    let l = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+    scale3(1.0 / l, a)
+}
+
+fn cross3(a: [f64; 3], b: [f64; 3]) -> [f64; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+/// An orthonormal frame `(origin, mid, binormal, axis)`: axis-aligned or random.
+fn gen_frame(rng: &mut Rng, scale: f64) -> [[f64; 3]; 4] {
+    if rng.chance(0.3) {
+        return [
+            scale3(scale, coord(rng, 2.0)),
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ];
+    }
+    let axis = loop {
+        let a = coord(rng, 1.0);
+        if a.iter().map(|c| c * c).sum::<f64>() > 0.1 {
+            break unit3(a);
+        }
+    };
+    let mid = loop {
+        let m = coord(rng, 1.0);
+        let d = m[0] * axis[0] + m[1] * axis[1] + m[2] * axis[2];
+        let m = add3(m, scale3(-d, axis));
+        if m.iter().map(|c| c * c).sum::<f64>() > 0.1 {
+            break unit3(m);
+        }
+    };
+    [scale3(scale, coord(rng, 2.0)), mid, cross3(axis, mid), axis]
+}
+
+/// The point at frame coordinates `(a, b, c)`.
+fn at_frame(f: &[[f64; 3]; 4], a: f64, b: f64, c: f64) -> [f64; 3] {
+    add3(
+        add3(f[0], scale3(a, f[1])),
+        add3(scale3(b, f[2]), scale3(c, f[3])),
+    )
+}
+
+/// The bilinear B-spline patch with corners `p[i][j]` (i along u, j along v).
+fn patch(rng: &mut Rng, p: [[[f64; 3]; 2]; 2]) -> SurfIn {
+    let (u0, v0) = if rng.chance(0.5) {
+        (0.0, 0.0)
+    } else {
+        (rng.uniform(-2.0, 2.0), rng.uniform(-2.0, 2.0))
+    };
+    let (u1, v1) = (u0 + rng.uniform(0.5, 3.0), v0 + rng.uniform(0.5, 3.0));
+    let row = |r: [[f64; 3]; 2]| r.iter().map(|q| [q[0], q[1], q[2], 1.0]).collect();
+    SurfIn::Bspline {
+        bss: BssIn {
+            oob: false,
+            form: default_form(),
+            srf: SrfIn::Inline(InlineSrf {
+                net: vec![row(p[0]), row(p[1])],
+                p: 1,
+                q: 1,
+                u: vec![u0, u0, u1, u1],
+                v: vec![v0, v0, v1, v1],
+            }),
+        },
+    }
+}
+
+/// Two increasing values in `[lo, hi]`.
+fn span(rng: &mut Rng, lo: f64, hi: f64) -> (f64, f64) {
+    let a = rng.uniform(lo, hi);
+    let b = rng.uniform(lo, hi);
+    (a.min(b), a.max(b))
+}
+
+/// A patch over a random sub-rectangle of `x_range` by `y_range` in frame coordinates, `put(x, y)`
+/// placing a point; reversed orientation, a tolerance-limit tilt (below or above the
+/// approximation tolerance) or a degenerate (zero-width) side by chance.
+fn frame_patch(
+    rng: &mut Rng,
+    x_range: (f64, f64),
+    y_range: (f64, f64),
+    tilt_dir: [f64; 3],
+    put: &dyn Fn(f64, f64) -> [f64; 3],
+) -> SurfIn {
+    let (x0, x1) = span(rng, x_range.0, x_range.1);
+    let (y0, y1) = span(rng, y_range.0, y_range.1);
+    let x1 = if rng.chance(0.05) { x0 } else { x1 };
+    let mut p = [[put(x0, y0), put(x0, y1)], [put(x1, y0), put(x1, y1)]];
+    if rng.chance(0.15) {
+        let t = if rng.chance(0.5) { 1e-8 } else { 1e-5 };
+        p[1][1] = add3(p[1][1], scale3(t, tilt_dir));
+    }
+    if rng.chance(0.5) {
+        p.swap(0, 1);
+    }
+    patch(rng, p)
+}
+
+/// A surface in volume whose head map is a bend, unbend or twist volume and whose
+/// surface is aligned with that volume's frame (in-space or parameter space), so the
+/// analytic branches of `MakeExactBSpline1stOutSurface` run; then `Exact`.
+fn gen_exact_volume_case(rng: &mut Rng) -> Inputs {
+    let scale = match rng.below(10) {
+        0 => 1e-3,
+        1 => 1e3,
+        2 => 1e4,
+        _ => 1.0,
+    };
+    let kind = match rng.below(20) {
+        0 => 2,
+        1 => 3,
+        2 => 4,
+        3..=7 => 5,
+        8..=13 => 6,
+        _ => 7,
+    };
+    let in_param = rng.chance(0.35);
+    let frame = gen_frame(rng, scale);
+    // neutral distance (bend, unbend) or period (twist); a tiny one is clamped upstream
+    let a = match rng.below(12) {
+        0 => 1e-7 * scale,
+        1 if kind == 5 => -rng.uniform(1.0, 8.0) * scale,
+        _ => rng.uniform(0.5, 4.0) * scale,
+    };
+    let b = match rng.below(6) {
+        0 => 0.0,
+        1 => 0.9 * scale,
+        _ => rng.uniform(1e-6, 0.2) * scale,
+    };
+    let head = if kind >= 5 {
+        MapIn {
+            kind,
+            comp: Some(CompIn {
+                p: frame[0],
+                axis: frame[3],
+                mid: frame[1],
+                a,
+                b,
+            }),
+            t: None,
+            orient: None,
+        }
+    } else {
+        MapIn {
+            kind,
+            comp: None,
+            t: None,
+            orient: rng.chance(0.5).then_some(frame),
+        }
+    };
+    // the input frame: in-space is the volume's frame, parameter space the identity
+    let f = if in_param || kind < 5 {
+        [[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+    } else {
+        frame
+    };
+    let f = if kind < 5 && !in_param {
+        head.orient.unwrap_or(f)
+    } else {
+        f
+    };
+    let n = a.abs().max(1e-3 * scale);
+    let s = scale;
+    let surface = match (kind, rng.below(6)) {
+        // twist: planes normal to the axis (height 0 is the zero angle)
+        (2 | 5, 0..=3) => {
+            let c = if rng.chance(0.2) { 0.0 } else { rng.uniform(-3.0, 3.0) * s };
+            frame_patch(rng, (-2.0 * s, 2.0 * s), (-2.0 * s, 2.0 * s), f[3], &|x, y| {
+                at_frame(&f, x, y, c)
+            })
+        }
+        // unbend: cylinders about the axis
+        (3 | 6, 0 | 1) => {
+            let (st, en) = span(rng, -170.0, 170.0);
+            SurfIn::Cylinder {
+                o: at_frame(&f, 0.0, 0.0, rng.uniform(-2.0, 2.0) * s),
+                x: f[1],
+                y: f[2],
+                r: rng.uniform(0.3, 3.0) * s,
+                start: st,
+                end: en.max(st + 1.0),
+                h: rng.uniform(0.2, 3.0) * s,
+                swap: rng.chance(0.3),
+                inside: rng.chance(0.5),
+            }
+        }
+        // unbend: planes through the axis
+        (3 | 6, 2) => {
+            let t: f64 = if rng.chance(0.2) { 0.0 } else { rng.uniform(-3.0, 3.0) };
+            frame_patch(rng, (0.2 * s, 3.0 * s), (-2.0 * s, 2.0 * s), f[3], &|r, z| {
+                at_frame(&f, r * t.cos(), r * t.sin(), z)
+            })
+        }
+        // unbend: planes normal to the axis
+        (3 | 6, 3) => {
+            let c = rng.uniform(-2.0, 2.0) * s;
+            frame_patch(rng, (0.2 * s, 3.0 * s), (-2.0 * s, 2.0 * s), f[3], &|x, y| {
+                at_frame(&f, x, y, c)
+            })
+        }
+        // bend: planes normal to the axis, the mid direction or the binormal
+        (4 | 7, 0 | 1) => {
+            let c = rng.uniform(-2.0, 2.0) * s;
+            frame_patch(rng, (0.2 * s, 3.0 * s), (-3.0 * n, 3.0 * n), f[3], &|x, y| {
+                at_frame(&f, x, y, c)
+            })
+        }
+        (4 | 7, 2 | 3) => {
+            let m = rng.uniform(0.2, 3.0) * s;
+            frame_patch(rng, (-3.0 * n, 3.0 * n), (-2.0 * s, 2.0 * s), f[1], &|y, z| {
+                at_frame(&f, m, y, z)
+            })
+        }
+        (4 | 7, 4) => {
+            let y0 = if rng.chance(0.2) { 0.0 } else { rng.uniform(-3.0, 3.0) * n };
+            frame_patch(rng, (0.2 * s, 3.0 * s), (-2.0 * s, 2.0 * s), f[2], &|x, z| {
+                at_frame(&f, x, y0, z)
+            })
+        }
+        // anything else: an unaligned patch (no exact image) or one crossing the domain
+        _ => {
+            let c0 = rng.uniform(-2.0, 2.0) * s;
+            frame_patch(rng, (-s, 3.0 * s), (-2.0 * s, 2.0 * s), f[3], &|x, y| {
+                at_frame(&f, x, y, c0 + 0.3 * x)
+            })
+        }
+    };
+    let mut volume = vec![head.clone()];
+    match rng.below(6) {
+        0 => volume.push(MapIn {
+            kind: 1,
+            comp: None,
+            t: Some(gen_transform(rng)),
+            orient: None,
+        }),
+        1 => volume.push(head),
+        _ => {}
+    }
+    Inputs {
+        siv: SivIn {
+            surface,
+            volume,
+            in_param,
+            copy: 0,
+            owner: 3,
+        },
+        op: OpIn::Exact,
+    }
+}
+
+/// Generated `MakeExactBSplineIfPossible` cases on bend, unbend and twist volumes the
+/// ffi wrapper accepts, from a fixed seed.
+fn exact_volume_cases() -> Result<Vec<Case>, HarnessError> {
+    const WANT: usize = 400;
+    let mut rng = Rng::new(0x5eed_be4d);
+    let mut cases = Vec::new();
+    // hand-built: the bend plane bumps at angles -PI..PI (both orientations), an
+    // unbend cylinder over almost a full turn, a zero-angle and a left-hand twist
+    let comp = |kind: u8, a: f64| MapIn {
+        kind,
+        comp: Some(CompIn {
+            p: [0.0; 3],
+            axis: [0.0, 0.0, 1.0],
+            mid: [1.0, 0.0, 0.0],
+            a,
+            b: 1e-3,
+        }),
+        t: None,
+        orient: None,
+    };
+    let rect = |x: [f64; 2], y: [f64; 2], z: f64, flip: bool| {
+        let mut p = [
+            [[x[0], y[0], z], [x[0], y[1], z]],
+            [[x[1], y[0], z], [x[1], y[1], z]],
+        ];
+        if flip {
+            p.swap(0, 1);
+        }
+        let row = |r: [[f64; 3]; 2]| r.iter().map(|q| [q[0], q[1], q[2], 1.0]).collect();
+        SurfIn::Bspline {
+            bss: BssIn {
+                oob: false,
+                form: default_form(),
+                srf: SrfIn::Inline(InlineSrf {
+                    net: vec![row(p[0]), row(p[1])],
+                    p: 1,
+                    q: 1,
+                    u: vec![0.0, 0.0, 1.0, 1.0],
+                    v: vec![0.0, 0.0, 1.0, 1.0],
+                }),
+            },
+        }
+    };
+    let b = core::f64::consts::PI * (1.0 - 1e-7);
+    let hand = [
+        (comp(7, 1.0), rect([0.5, 2.0], [-b, b], 0.5, false)),
+        (comp(7, 1.0), rect([0.5, 2.0], [-b, b], 0.5, true)),
+        (comp(7, 1.0), rect([0.5, 2.0], [-1.0, 1.0], 0.5, false)),
+        (
+            comp(6, 1.0),
+            SurfIn::Cylinder {
+                o: [0.0, 0.0, -1.0],
+                x: [1.0, 0.0, 0.0],
+                y: [0.0, 1.0, 0.0],
+                r: 1.5,
+                start: -179.0,
+                end: 179.0,
+                h: 2.0,
+                swap: false,
+                inside: false,
+            },
+        ),
+        (comp(5, 2.0), rect([-1.0, 1.0], [-1.0, 1.0], 0.0, false)),
+        (comp(5, -3.0), rect([-1.0, 1.0], [-1.0, 1.0], 0.75, true)),
+    ];
+    for (n, (map, surface)) in hand.into_iter().enumerate() {
+        for in_param in [false, true] {
+            let i = Inputs {
+                siv: SivIn {
+                    surface: surface.clone(),
+                    volume: vec![map.clone()],
+                    in_param,
+                    copy: 0,
+                    owner: 3,
+                },
+                op: OpIn::Exact,
+            };
+            let (op, input) = cpp_input(&i)?;
+            ffi::validate(op, &input).map_err(|e| harness(format!("{e:?}")))?;
+            cases.push(Case {
+                unit: "surface.srf_in_volume".into(),
+                name: format!("exact_volume_hand_{n}_{}", u8::from(in_param)),
+                source: CaseSource::Inline,
+                inputs: serde_json::to_value(&i).map_err(|e| harness(e.to_string()))?,
+            });
+        }
+    }
+    let hand_count = cases.len();
+    for _ in 0..20_000 {
+        if cases.len() >= hand_count + WANT {
+            break;
+        }
+        let i = gen_exact_volume_case(&mut rng);
+        let Ok((op, input)) = cpp_input(&i) else {
+            continue;
+        };
+        if ffi::validate(op, &input).is_err() {
+            continue;
+        }
+        cases.push(Case {
+            unit: "surface.srf_in_volume".into(),
+            name: format!("exact_volume_{}", cases.len() - hand_count),
+            source: CaseSource::Inline,
+            inputs: serde_json::to_value(&i).map_err(|e| harness(e.to_string()))?,
+        });
+    }
+    Ok(cases)
+}
+
 fn inline_cases() -> Result<Vec<Case>, HarnessError> {
     let plane = SurfIn::Plane {
         o: [0.0, 0.0, 0.0],
@@ -1523,6 +1924,7 @@ impl UnitDiff for Runner {
         let mut cases = default_cases(self, &ctx)?;
         cases.extend(inline_cases()?);
         cases.extend(mirror_cases()?);
+        cases.extend(exact_volume_cases()?);
         Ok(cases)
     }
 
@@ -1619,7 +2021,7 @@ mod tests {
             "{name}: transformed control net"
         );
         assert_eq!(
-            data.get(25..),
+            data.get(25..33),
             Some([-2.0, -2.0, 3.0, 3.0, 4.0, 4.0, 6.0, 6.0].as_slice()),
             "{name}: knots"
         );
@@ -1642,6 +2044,36 @@ mod tests {
             let diff = crate::compare::compare(&native, &port, &[]);
             assert!(diff.pass(), "{name}: {diff:?}");
             assert!(diff.values_compared > 0, "{name}: empty comparison");
+        }
+    }
+
+    #[test]
+    fn exact_volume_hand_cases_build_analytic_images() {
+        let want = [
+            Plane::TYPE,
+            Plane::TYPE,
+            Plane::TYPE,
+            Plane::TYPE,
+            BSplineSurface::TYPE,
+            BSplineSurface::TYPE,
+        ];
+        let cases: Vec<Case> = exact_volume_cases()
+            .unwrap()
+            .into_iter()
+            .filter(|c| c.name.starts_with("exact_volume_hand_"))
+            .collect();
+        assert_eq!(cases.len(), 2 * want.len());
+        for c in cases {
+            let input: Inputs = c.parse().unwrap();
+            let native = cpp(&input).unwrap();
+            let port = rust(&input).unwrap();
+            let n: usize = c.name["exact_volume_hand_".len()..][..1].parse().unwrap();
+            let out = &port.values["out"];
+            assert_eq!(out.first(), Some(&1.0), "{}: no exact image", c.name);
+            assert_eq!(out.get(1), Some(&(want[n] as f64)), "{}", c.name);
+            let diff = crate::compare::compare(&native, &port, &[]);
+            assert!(diff.pass(), "{}: {diff:?}", c.name);
+            assert!(diff.values_compared > 40, "{}: {diff:?}", c.name);
         }
     }
 

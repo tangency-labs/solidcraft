@@ -20,6 +20,7 @@
 //! | [`Extent2d::set_min_max`]              | `SetMinMax(const SmPoint2d&, const SmPoint2d&)` |
 //! | [`Extent2d::set_min_max_coords`]       | `SetMinMax(double x4)`                         |
 //! | [`Extent2d::set_u_interval`], [`Extent2d::set_v_interval`] | `SetUInterval`, `SetVInterval` |
+//! | [`Extent2d::set_u_min`], [`Extent2d::set_u_max`], [`Extent2d::set_v_min`], [`Extent2d::set_v_max`] | `SetUMin`, `SetUMax`, `SetVMin`, `SetVMax` |
 //! | [`Extent2d::transpose`]                | `Transpose`                                    |
 //! | [`Extent2d::expand_absolute`]          | `ExpandAbsolute(double)`                       |
 //! | [`Extent2d::expand_absolute_vec`]      | `ExpandAbsolute(const SmVector2d)`             |
@@ -282,6 +283,54 @@ impl Extent2d {
     pub fn set_v_interval(&mut self, ivl: &Extent1d) {
         self.min.y = ivl.min();
         self.max.y = ivl.max();
+    }
+
+    /// Sets the u minimum; [`SolidError::InvalidInput`] (extent unchanged) when it
+    /// exceeds the u maximum (`SetUMin`).
+    pub fn set_u_min(&mut self, value: f64) -> Result<()> {
+        if value > self.max.x {
+            return Err(Self::bad_bound("geom::extent2d::Extent2d::set_u_min"));
+        }
+        self.min.x = value;
+        Ok(())
+    }
+
+    /// Sets the u maximum; [`SolidError::InvalidInput`] (extent unchanged) when it
+    /// is below the u minimum (`SetUMax`).
+    pub fn set_u_max(&mut self, value: f64) -> Result<()> {
+        if value < self.min.x {
+            return Err(Self::bad_bound("geom::extent2d::Extent2d::set_u_max"));
+        }
+        self.max.x = value;
+        Ok(())
+    }
+
+    /// Sets the v minimum; [`SolidError::InvalidInput`] (extent unchanged) when it
+    /// exceeds the v maximum (`SetVMin`).
+    pub fn set_v_min(&mut self, value: f64) -> Result<()> {
+        if value > self.max.y {
+            return Err(Self::bad_bound("geom::extent2d::Extent2d::set_v_min"));
+        }
+        self.min.y = value;
+        Ok(())
+    }
+
+    /// Sets the v maximum; [`SolidError::InvalidInput`] (extent unchanged) when it
+    /// is below the v minimum (`SetVMax`).
+    pub fn set_v_max(&mut self, value: f64) -> Result<()> {
+        if value < self.min.y {
+            return Err(Self::bad_bound("geom::extent2d::Extent2d::set_v_max"));
+        }
+        self.max.y = value;
+        Ok(())
+    }
+
+    /// The `SM_ERR_INVALID_INPUT` of the single-bound setters.
+    const fn bad_bound(operation: &'static str) -> SolidError {
+        SolidError::InvalidInput {
+            operation,
+            reason: "bound crosses the opposite bound",
+        }
     }
 
     /// Swaps the u and v intervals (`Transpose`).

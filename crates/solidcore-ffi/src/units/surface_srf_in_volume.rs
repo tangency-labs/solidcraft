@@ -49,7 +49,10 @@
 //! if a twist, unbend or bend volume] has_orient [O(16)] has_inv [I(16)]`).
 //! `Exact` returns `made = 0` for a successful null result; otherwise its surface
 //! record is `type has_nurb [n m p q r s cpts(x y z w) u_knots v_knots]`, including
-//! the concrete derived type (for example, a plane) rather than a B-spline stand-in.
+//! the concrete derived type (for example, a plane) rather than a B-spline stand-in,
+//! then `dom[4] finite` and, for a finite natural domain, `st P st N` of
+//! `EvaluatePoint` / `EvaluateNormal(uv, TRUE, TRUE)` at the 3 x 3 grid of interval
+//! fractions `0, 0.5, 1`.
 //!
 //! [`eval`] accepts only what upstream handles without undefined behaviour: finite
 //! values, well-formed clamped B-splines, planes with a non-zero normal, derivative
@@ -61,9 +64,10 @@
 //! database text that is a complete ASCII record without a plain `SmVolume` or a
 //! B-spline volume (reading a plain volume fills a null volume).
 //! A cylinder base needs independent placement axes, a positive radius and height and
-//! `-360 <= start < end <= start + 360`; it runs only `Info` and the evaluation ops (it
+//! `-360 <= start < end <= start + 360`; it runs only `Info`, the evaluation ops (it
 //! is there for the analytic base's virtuals the object forwards to, such as
-//! `ConvertUVFrom*`), not `SetBase`.
+//! `ConvertUVFrom*`) and `Exact` (an unbend maps a cylinder about its axis to a
+//! plane), not `SetBase`.
 
 use crate::validate::{bad, check_knots, NOW};
 use crate::{call_with_buffer, FfiError};
@@ -366,10 +370,10 @@ fn validate_op(op: Op, rd: &mut Reader<'_>, c: &Block) -> Result<(), FfiError> {
     if c.cylinder
         && !matches!(
             op,
-            Op::Info | Op::Eval | Op::EvalSimple | Op::EvalPoint | Op::Normal
+            Op::Info | Op::Eval | Op::EvalSimple | Op::EvalPoint | Op::Normal | Op::Exact
         )
     {
-        return Err(bad("cylinder base: only Info and the evaluation ops"));
+        return Err(bad("cylinder base: only Info, the evaluation ops and Exact"));
     }
     match op {
         Op::Info => {
@@ -482,9 +486,6 @@ fn validate_op(op: Op, rd: &mut Reader<'_>, c: &Block) -> Result<(), FfiError> {
     }
     if op == Op::MakeOwner && c.head_base {
         return Err(bad("make owner copies a plain volume"));
-    }
-    if op == Op::Exact && !c.all_transforms {
-        return Err(bad("exact: only transform maps"));
     }
     Ok(())
 }

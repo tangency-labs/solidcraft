@@ -12,6 +12,7 @@
 
 #include "StdAfx.h"
 #include <SmAxis2Placement.h>
+#include <cmath>
 #include <SmBendVolume.h>
 #include <SmBSplineSurface.h>
 #include <SmContext.h>
@@ -316,6 +317,47 @@ void put_surface(std::vector<double>& o, const SmSurface* srf)
         o.push_back(sur->knu->U[i]);
     for (gw_INDEX i = 0; i <= ss; i++)
         o.push_back(sur->knv->U[i]);
+}
+
+// What an exact result evaluates to: `dom[4] finite` and, when the natural domain is
+// finite, `st P[3] st N[3]` (EvaluatePoint, EvaluateNormal(uv, TRUE, TRUE)) at the 3 x 3
+// grid of fractions 0, 0.5, 1 of each interval.
+void put_exact_eval(std::vector<double>& o, const SmSurface* srf)
+{
+    SmExtent2d d = srf->GetNaturalUVDomain();
+    double c[4] = {d.GetUMin(), d.GetVMin(), d.GetUMax(), d.GetVMax()};
+    bool finite = true;
+    for (double x : c)
+    {
+        o.push_back(x);
+        finite = finite && std::isfinite(x) && std::fabs(x) < 1.0e12;
+    }
+    o.push_back(flg(finite));
+    if (!finite)
+        return;
+    for (int i = 0; i <= 2; i++)
+        for (int j = 0; j <= 2; j++)
+        {
+            SmPoint2d uv(d.GetUInterval().Evaluate(0.5 * i), d.GetVInterval().Evaluate(0.5 * j));
+            SmPoint3d p;
+            SmStatus s = srf->EvaluatePoint(uv, p);
+            o.push_back(st(s));
+            if (s == SM_SUCCESS)
+            {
+                o.push_back(p.x);
+                o.push_back(p.y);
+                o.push_back(p.z);
+            }
+            SmVector3d n;
+            s = srf->EvaluateNormal(uv, TRUE, TRUE, n);
+            o.push_back(st(s));
+            if (s == SM_SUCCESS)
+            {
+                o.push_back(n.x);
+                o.push_back(n.y);
+                o.push_back(n.z);
+            }
+        }
 }
 
 // Full state: owner_flag in_param surface volume.
@@ -664,7 +706,10 @@ void siv_op(int32_t op, Rd& rd, const SmContext& ctx, Built& bb, std::vector<dou
         {
             o.push_back(flg(b != NULL));
             if (b != NULL)
+            {
                 put_surface(o, b);
+                put_exact_eval(o, b);
+            }
         }
         delete b;
         break;
