@@ -16,9 +16,14 @@
 //! | `MakeFace`          | `kind side orient region_null` (`kind` 0: null surface, 1: a square wire loop on `z = 0`) | `-3 \| status [face shell region counts]` (`-3`: the square's lines cannot be made) |
 //! | `Glue`              | `e1 e2 orient gap nesting`, B-rep block | `0 (-2 \| status counts edge_tols vertex_tols)` (tolerances sorted) (`-2`: `SM_OT_SAME`, equal intervals and one edge without curve) (`-1 status` when the B-rep build fails) |
 //! | `Copy`              | `n use_merge`, B-rep block | `0 status nfaces counts` |
-//! | `MergeSelf`         | `face tol ncurves (curve3d curveuv1 curveuv2)*`, B-rep block | `0 (-2 \| status nedges counts)` (UV curves 2D) |
+//! | `MergeSelf`         | `face tol ncurves (raw curve3d raw curveuv1 raw curveuv2)*`, B-rep block | `0 (-2 \| status nedges counts edges*)` (UV curves 2D) |
 //!
 //! `counts` are the region, shell, face, loop, edge and vertex counts of the B-rep made.
+//! Each returned edge contains its used interval, optional endpoint positions, curve
+//! type (or -1), and, when present, its natural interval and five evaluated samples
+//! with statuses; its edge uses follow in list order with each UV trim's type,
+//! natural interval and five UV samples if present. Raw flags restore supplied knots
+//! after construction; distinct raw knots must be more than `1e-12` apart (UB-266).
 //!
 //! [`eval`] accepts only what upstream handles without undefined behaviour: clamped
 //! B-splines of degree 1 to 5 with at most 33 control points, positive (or `NOW`)
@@ -269,9 +274,7 @@ pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
                 // MakeTopologyFromData uses a modified stream's indices unchecked (UB-164):
                 // its read runs in a fresh child process, which some such indices also
                 // keep looping: one that runs past READ_SECONDS is ended as crashed
-                return crate::isolate::fresh_process_within(READ_SECONDS, || {
-                    raw(op, path, input)
-                });
+                return crate::isolate::fresh_process_within(READ_SECONDS, || raw(op, path, input));
             }
         }
         Op::MakeFaceWithCurves => {
@@ -374,13 +377,42 @@ fn merge_self_curves(input: &[f64]) -> Result<usize, FfiError> {
     rd.num()?;
     let nc = rd.index(MAX_CURVES)?;
     for _ in 0..nc {
-        curve(&mut rd)?;
-        for _ in 0..2 {
-            if rd.num()? != 2.0 {
+        for uv in [false, true, true] {
+            let raw = rd.flag()?;
+            let start = rd.at;
+            if uv && rd.num()? != 2.0 {
                 return Err(bad("UV curve dimension must be 2"));
             }
-            rd.at -= 1;
+            rd.at = start;
             curve(&mut rd)?;
+            if raw {
+                let block = input.get(start..rd.at).ok_or_else(|| bad("curve block"))?;
+                let n = *block.get(1).ok_or_else(|| bad("curve count"))? as usize;
+                let p = *block.get(2).ok_or_else(|| bad("curve degree"))? as usize;
+                let knot_start = n
+                    .checked_add(1)
+                    .and_then(|n| n.checked_mul(4))
+                    .and_then(|n| n.checked_add(4))
+                    .ok_or_else(|| bad("curve size overflow"))?;
+                let knots = block.get(knot_start..).ok_or_else(|| bad("curve knots"))?;
+                let (&first, rest) = knots.split_first().ok_or_else(|| bad("no knots"))?;
+                let mut unique = first;
+                let mut multiplicity = 1;
+                for &knot in rest {
+                    if knot == unique {
+                        multiplicity += 1;
+                    } else {
+                        if knot - unique <= 1.0e-12 || multiplicity > p + 1 {
+                            return Err(bad("unsafe raw knot spacing or multiplicity"));
+                        }
+                        unique = knot;
+                        multiplicity = 1;
+                    }
+                }
+                if multiplicity > p + 1 {
+                    return Err(bad("unsafe raw knot multiplicity"));
+                }
+            }
         }
     }
     Ok(rd.at)
@@ -442,8 +474,11 @@ mod tests {
     fn merge_self_args(curves: &[(f64, f64, f64)]) -> Vec<f64> {
         let mut v = vec![0.0, 1.0e-5, curves.len() as f64];
         for &(c3, u1, u2) in curves {
+            v.push(0.0);
             v.extend(line(c3));
+            v.push(0.0);
             v.extend(line(u1));
+            v.push(0.0);
             v.extend(line(u2));
         }
         v
@@ -471,5 +506,23 @@ mod tests {
         assert!(merge_self_curves(&[0.0, 1.0e-5, (MAX_CURVES + 1) as f64]).is_err());
         // truncated: the count promises a curve that is not there
         assert!(merge_self_curves(&[0.0, 1.0e-5, 1.0]).is_err());
+    }
+
+    #[test]
+    fn merge_self_raw_knots_require_safe_spacing() {
+        let raw = |middle: f64| {
+            let mut v = vec![0.0, 1.0e-5, 1.0];
+            for dim in [3.0, 2.0, 2.0] {
+                let z = if dim == 2.0 { NOZ } else { 0.0 };
+                v.extend([1.0, dim, 3.0, 1.0, 5.0]);
+                for x in [0.0, 0.3, 0.7, 1.0] {
+                    v.extend([x, 0.0, z, NOW]);
+                }
+                v.extend([0.0, 0.0, 0.5, middle, 1.0, 1.0]);
+            }
+            v
+        };
+        assert!(merge_self_curves(&raw(0.5 + 2.0e-12)).is_ok());
+        assert!(merge_self_curves(&raw(0.5 + 0.5e-12)).is_err());
     }
 }

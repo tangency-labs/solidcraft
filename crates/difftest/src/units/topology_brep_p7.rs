@@ -7,10 +7,12 @@
 //! `make_face` (a null surface, or a square wire loop built in the shim), `glue`
 //! (`GlueEdgesGeneral` of edge pairs of a B-rep of unit `topology.vertexuse`), `copy`
 //! (`CopyFaces` of the first faces into a new B-rep) and `merge_self`
-//! (`MergeSelfIntersectionCurves` without curves, or with UV lines on a face over a
-//! known domain: inside, crossing, along and partly along its sides; output the status,
-//! the glued edge count and the B-rep's counts after the merge). Both sides produce one record
-//! (`out`) laid out as in the ffi module; statuses are `SmStatus` values (a Rust
+//! (`MergeSelfIntersectionCurves` with and without curves, including raw-knot splines).
+//! The output includes status and topology counts, and for returned edges their used
+//! intervals, endpoint vertices, curve types, natural intervals, point samples and
+//! each edge use's UV trim type, interval and samples when present.
+//! The raw-knot plane fixtures construct their B-reps independently on each side.
+//! Both sides produce one record (`out`) laid out as in the ffi module; statuses are `SmStatus` values (a Rust
 //! `InvalidInput` is `SM_ERR_INVALID_INPUT`, `1007`).
 //!
 //! **Guards.** A `read` stream goes through the stream guard of unit `topology.brep_data`
@@ -31,24 +33,9 @@
 //! `cpp-guard:null-surface`
 //! (`MergeSelfIntersectionCurves` on a face without surface).
 //!
-//! **Deferred.** Every read that gets past `SmBrepData::ReadFromFile` (it now runs
-//! `MakeTopologyFromData` of `topology.brep_p10` on a B-rep with the infinite region
-//! and defers later: `sm_CheckAndFixUVTrimCurves`, analytic copies, `HealBrep`'s
-//! callees), every face made (`MakeShellVertex`, `SmFace::SetTolerance` inside
-//! `MakeFaceTopology`), every glue past its early returns, every copy
-//! (`SmBrep::SetTolerance`). Every new B-rep is the shim's `new SmBrep()`, with its void
-//! infinite region (`native_brep`). The comparisons are the read
-//! errors of damaged files, the input errors of the face makers, the null-surface status
-//! of `MakeFace`, the glue no-ops and `MergeSelfIntersectionCurves` without curves.
-//! Every `MergeSelfIntersectionCurves` with curves defers at the classification
-//! constructor's `ReSet` (`intersect.curve_class_p2`, wired in `intersect.curve_class_p4`
-//! by PR #137) for now, and after #137 at `SmSurface::DropCurve`
-//! (`intersect.surface_drop_lib_p3`): they compare only once both land. In C++ the 22
-//! built-in ones (11 shapes at two tolerances, same outcomes) take these paths: along a
-//! side (same, reversed, opposite, adjacent) glues one edge (8); along a side then
-//! crossing, and outside, are no-ops (4); inside, two curves and from a corner return
-//! `SM_ERR` after a partial imprint (6); crossing and partly along a side return `SM_ERR`
-//! with the B-rep unchanged (4).
+//! Raw-knot fixtures reject positive spans at or below `1e-12` (UB-266); their
+//! comparison does not establish that the input curves retain raw knots after copying
+//! inside the operation. No kernel clone change is implied by this coverage.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -234,6 +221,8 @@ struct SelfCurveIn {
     c3: CrvIn,
     uv1: CrvIn,
     uv2: CrvIn,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    raw_knots: bool,
 }
 
 fn flag(b: bool) -> f64 {
@@ -437,6 +426,22 @@ fn resolve(i: &Inputs) -> Result<Result<(Inputs, Option<Rc<Vec<f64>>>), Output>,
     else {
         return Ok(Ok((i.clone(), None)));
     };
+    if let Inputs::MergeSelf { face, curves, .. } = i {
+        if curves.iter().any(|c| c.raw_knots) {
+            if *face != 0
+                || !matches!(
+                    brep,
+                    BrepIn::Face {
+                        surface: shared::SrfIn::Plane { .. },
+                        ..
+                    }
+                )
+            {
+                return Err(harness("raw merge requires face 0 of a plane fixture"));
+            }
+            return Ok(Ok((i.clone(), None)));
+        }
+    }
     let ex = export_of(brep)?;
     let Some(c) = fixture::counts(&ex) else {
         return Ok(Err(Output::new().values("out", ex.to_vec())));
@@ -566,8 +571,11 @@ fn encode(i: &Inputs) -> Result<(Op, String, Vec<f64>), HarnessError> {
         } => {
             v.extend([*face as f64, *tol, curves.len() as f64]);
             for c in curves {
+                v.push(flag(c.raw_knots));
                 push_curve(&mut v, &c.c3);
+                v.push(flag(c.raw_knots));
                 push_curve(&mut v, &c.uv1);
+                v.push(flag(c.raw_knots));
                 push_curve(&mut v, &c.uv2);
             }
             v.extend(brep_block(brep)?);
@@ -693,6 +701,24 @@ fn rust_curve(c: &CrvIn) -> Result<SmCurve, HarnessError> {
         .collect();
     let cur = NlCurve::new(pw, c.p, c.u.clone()).map_err(|e| harness(format!("curve: {e}")))?;
     Ok(SmCurve::from(BSplineCurve::from_nurb(cur, c.dim, false)))
+}
+
+fn rust_self_curve(c: &CrvIn, raw: bool) -> Result<SmCurve, HarnessError> {
+    let pw = c
+        .cpts
+        .iter()
+        .map(|p| CPoint::new(p[0], p[1], p[2], p[3]))
+        .collect();
+    let cur = NlCurve::new(pw, c.p, c.u.clone()).map_err(|e| harness(format!("curve: {e}")))?;
+    let mut curve = BSplineCurve::from_nurb(cur, c.dim, false);
+    if raw {
+        curve
+            .get_or_create_gw_nurb()
+            .map_err(|e| harness(format!("curve: {e}")))?
+            .knots_mut()
+            .copy_from_slice(&c.u);
+    }
+    Ok(SmCurve::from(curve))
 }
 
 fn rust_surface(s: &SrfIn) -> Result<Surface, HarnessError> {
@@ -1227,11 +1253,58 @@ fn rust_record(k: &mut Kernel, i: &Inputs, ex: Option<&[f64]>) -> Record {
             Ok(o)
         }
         Inputs::MergeSelf {
-            face, tol, curves, ..
+            brep,
+            face,
+            tol,
+            curves,
         } => {
-            let ex = ex.ok_or_else(|| hfail("no export"))?;
-            let (mut b, _) = shared::import(ex)?;
-            let f = FaceId::from_index(*face as u32);
+            let (mut b, f) = if curves.iter().any(|c| c.raw_knots) {
+                let BrepIn::Face {
+                    surface: shared::SrfIn::Plane { o, n },
+                    dom,
+                } = brep
+                else {
+                    return Err(hfail("raw merge requires plane fixture"));
+                };
+                let mut b = solidcore::topology::brep::p3::new_brep(
+                    k,
+                    solidcore::geom::tol::USE_DEFAULT,
+                    solidcore::geom::tol::USE_DEFAULT,
+                )
+                .map_err(hfail)?;
+                let mut records = BTreeMap::new();
+                let mut attrs = AttributeStore::default();
+                let mut env = ed::NotifyEnv {
+                    records: &mut records,
+                    attributes: &mut attrs,
+                    context: None,
+                    key_of: &read_key_of,
+                };
+                let mut marks = solidcore::topology::topology_traverser::Marks::default();
+                let face_ref = |f| read_key_of(EntityRef::Face(f));
+                let mut fenv = solidcore::topology::brep::p8::FaceBuildEnv {
+                    env: &mut env,
+                    marks: &mut marks,
+                    this_face: &face_ref,
+                };
+                let domain = Extent2d::from_bounds(dom[0], dom[1], dom[2], dom[3]);
+                let f = solidcore::topology::brep::p8::create_face_from_surface(
+                    k,
+                    &mut b,
+                    Some(Surface::from(Plane::from_normal(
+                        Vec3::new(o[0], o[1], o[2]),
+                        Vec3::new(n[0], n[1], n[2]),
+                    ))),
+                    &domain,
+                    &mut fenv,
+                )
+                .map_err(hfail)?;
+                (b, f)
+            } else {
+                let ex = ex.ok_or_else(|| hfail("no export"))?;
+                let (b, _) = shared::import(ex)?;
+                (b, FaceId::from_index(*face as u32))
+            };
             if b.face(f).map_err(hfail)?.surface.is_none() {
                 return Err(cpp_null_deref(
                     "cpp-guard:null-surface",
@@ -1252,9 +1325,9 @@ fn rust_record(k: &mut Kernel, i: &Inputs, ex: Option<&[f64]>) -> Record {
                 .iter()
                 .map(|c| {
                     Ok(p7::SelfIntersectionCurve {
-                        curve_3d: rust_curve(&c.c3)?,
-                        uv_curve_1: rust_curve(&c.uv1)?,
-                        uv_curve_2: rust_curve(&c.uv2)?,
+                        curve_3d: rust_self_curve(&c.c3, c.raw_knots)?,
+                        uv_curve_1: rust_self_curve(&c.uv1, c.raw_knots)?,
+                        uv_curve_2: rust_self_curve(&c.uv2, c.raw_knots)?,
                     })
                 })
                 .collect::<Result<Vec<_>, HarnessError>>()?;
@@ -1268,9 +1341,54 @@ fn rust_record(k: &mut Kernel, i: &Inputs, ex: Option<&[f64]>) -> Record {
                 &edge_curve_key,
             );
             let s = status(&r)?;
-            let n = r.map_or(0, |v| v.len());
+            let n = r.as_ref().map_or(0, Vec::len);
             let mut o = vec![0.0, s, n as f64];
             o.extend(brep_counts(&b));
+            if let Ok(edges) = r {
+                for id in edges {
+                    let edge = b.edge(id).map_err(hfail)?;
+                    o.extend([edge.interval.min(), edge.interval.max()]);
+                    let (start, end) = ed::start_end_vertices(&b, id).map_err(hfail)?;
+                    for vertex in [start, end] {
+                        o.push(flag(vertex.is_some()));
+                        if let Some(vertex) = vertex {
+                            let p = b.vertex(vertex).map_err(hfail)?.point;
+                            o.extend([p.x, p.y, p.z]);
+                        }
+                    }
+                    if let Some(curve) = &edge.curve {
+                        let natural = curve.natural_interval();
+                        o.extend([curve.type_code() as f64, natural.min(), natural.max()]);
+                        for fraction in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                            let point = curve.evaluate_point(k, edge.interval.evaluate(fraction));
+                            o.push(status(&point)?);
+                            if let Ok(p) = point {
+                                o.extend([p.x, p.y, p.z]);
+                            }
+                        }
+                    } else {
+                        o.push(-1.0);
+                    }
+                    o.push(edge.edgeuses.len() as f64);
+                    for &eu in &edge.edgeuses {
+                        let (trim, _) = solidcore::topology::edgeuse::p1::uv_trim_curve(&b, eu)
+                            .map_err(hfail)?;
+                        if let Some(trim) = trim {
+                            let natural = trim.natural_interval();
+                            o.extend([trim.type_code() as f64, natural.min(), natural.max()]);
+                            for fraction in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                                let point = trim.evaluate_point(k, natural.evaluate(fraction));
+                                o.push(status(&point)?);
+                                if let Ok(p) = point {
+                                    o.extend([p.x, p.y]);
+                                }
+                            }
+                        } else {
+                            o.push(-1.0);
+                        }
+                    }
+                }
+            }
             Ok(o)
         }
     }
@@ -1446,6 +1564,7 @@ fn self_curve(dom: [f64; 4], a: [f64; 2], b: [f64; 2], c: [f64; 2], d: [f64; 2])
         c3: line(3, at(a), at(b)),
         uv1: line(2, at(a), at(b)),
         uv2: line(2, at(c), at(d)),
+        raw_knots: false,
     }
 }
 
@@ -1586,6 +1705,43 @@ fn self_curve_cases() -> Vec<(String, Inputs)> {
                 },
             ));
         }
+    }
+    for (name, knots) in [
+        ("control", vec![0.0, 0.0, 0.3, 0.49, 0.51, 1.0, 1.0]),
+        (
+            "close",
+            vec![0.0, 0.0, 0.3, 0.5 - 1.0e-12, 0.5 + 0.5e-12, 1.0, 1.0],
+        ),
+    ] {
+        let make = |dim| CrvIn {
+            dim,
+            p: 1,
+            u: knots.clone(),
+            cpts: [0.0, 3.0, 4.9, 5.1, 10.0]
+                .into_iter()
+                .map(|x| [x, 0.0, if dim == 2 { NOZ } else { 0.0 }, NOW])
+                .collect(),
+        };
+        out.push((
+            format!("merge_self_raw_{name}"),
+            Inputs::MergeSelf {
+                brep: BrepIn::Face {
+                    surface: shared::SrfIn::Plane {
+                        o: [0.0, 0.0, 0.0],
+                        n: [0.0, 0.0, 1.0],
+                    },
+                    dom,
+                },
+                face: 0,
+                tol: 1.0e-5,
+                curves: vec![SelfCurveIn {
+                    c3: make(3),
+                    uv1: make(2),
+                    uv2: make(2),
+                    raw_knots: true,
+                }],
+            },
+        ));
     }
     out
 }
@@ -1869,19 +2025,39 @@ impl UnitDiff for Runner {
         // A missing closing side requires UV endpoint deformation, rather than
         // approximating the 3D curve on surface. Exercise both surface kinds,
         // both face orientations and distinct scales around the original case.
-        for (surface_kind, scale) in [("plane", 0.1), ("plane", 1.0),
-            ("bspline", 0.1), ("bspline", 1.0), ("bspline", 10.0)] {
+        for (surface_kind, scale) in [
+            ("plane", 0.1),
+            ("plane", 1.0),
+            ("bspline", 0.1),
+            ("bspline", 1.0),
+            ("bspline", 10.0),
+        ] {
             for orient in [1, 2] {
-                let surface = if surface_kind == "plane" { plane.clone() }
-                    else { patch(10.0 * scale) };
+                let surface = if surface_kind == "plane" {
+                    plane.clone()
+                } else {
+                    patch(10.0 * scale)
+                };
                 let curves = square(scale, scale, 8.0 * scale, true)
-                    .into_iter().take(3).collect();
-                push(&mut v, format!("face_curves_cos_gap_{surface_kind}_{scale}_orient{orient}"),
+                    .into_iter()
+                    .take(3)
+                    .collect();
+                push(
+                    &mut v,
+                    format!("face_curves_cos_gap_{surface_kind}_{scale}_orient{orient}"),
                     &Inputs::MakeFaceWithCurves {
-                        surface, dom: [0.0, 0.0, 10.0 * scale, 10.0 * scale],
-                        orient, region_null: false, crv_on_surf: 2, loops: vec![3],
-                        has3d: false, has_uv: true, curves, points: Vec::new(),
-                    })?;
+                        surface,
+                        dom: [0.0, 0.0, 10.0 * scale, 10.0 * scale],
+                        orient,
+                        region_null: false,
+                        crv_on_surf: 2,
+                        loops: vec![3],
+                        has3d: false,
+                        has_uv: true,
+                        curves,
+                        points: Vec::new(),
+                    },
+                )?;
             }
         }
         // a square too small for its lines (CreateLineSegment fails: -3 on both sides) and
@@ -1998,7 +2174,11 @@ impl UnitDiff for Runner {
                 let Some(&at) = tokens.get(tokens.len() * q / 5) else {
                     continue;
                 };
-                let byte = if bytes.get(at) == Some(&b'9') { b'1' } else { b'9' };
+                let byte = if bytes.get(at) == Some(&b'9') {
+                    b'1'
+                } else {
+                    b'9'
+                };
                 let d = Damage::Overwrite { at, byte };
                 let b2 = read_bytes(file, Some(d))?;
                 if b2 == bytes || !guard_accepts(&b2, false)? {
