@@ -346,6 +346,26 @@ The kernel core is one big call cycle, so the plan dropped ~2,300 calls as *back
 - **Local swarms only:** when several agents share one clone, everything that writes
   that clone's `main` runs under `flock .git/swarm.lock -c '<commands>'`.
 
+## 4b. Fixing upstream defects
+
+Every unit is ported; most new work fixes SMLib defects in the port. The long-term policy
+is still open in #1018. Until it is settled, the interim rule is the one in that thread:
+
+- **Default = the C++ reference.** Default behaviour matches the pinned C++ (usd-brep
+  v1.0.1 since #1277), and difftest keeps gating it at parity.
+- **Result-changing fixes are opt-in.** A fix that changes a result is a
+  `Kernel::fixes` (`UpstreamFixes`) field, off by default, with a regression test of the
+  issue's case and an addendum in `plan/upstream-issues/` naming the field. Examples:
+  #1233, #1285, #1287.
+- **Crash, UB, hang and nondeterminism fixes are unconditional**, e.g. #1160 for UB-87.
+- **Check that the issue is still open work before you claim it.** Many issues were
+  fixed by a PR that did not close them (see #1206). Search merged PRs for the issue
+  number, the upstream symbol and the `WR-`/`UB-`/`HANG-` record id, and grep
+  `plan/upstream-issues/` and the `UpstreamFixes` docs. Issues about fork-only features
+  that are not in SMLib or SM_API at the pin (e.g. the screw sweep, #1162/#1163) are out
+  of scope.
+- A fixing PR uses a closing keyword (`Fixes #n`) so the issue closes when it merges.
+
 ## 5. Where things go
 
 - `plan/units/<id>.toml`: one unit's plan entry (status, claims, notes). Edit only
