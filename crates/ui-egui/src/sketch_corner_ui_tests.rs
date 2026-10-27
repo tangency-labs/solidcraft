@@ -653,10 +653,10 @@ fn trim_hover_shows_the_piece_a_click_takes_away() {
 }
 
 /// #3141: the 2-tangent circle tool, clicked on two sides of a rectangle drawn away from the
-/// origin, puts its circle in the corner between the clicks without moving the rectangle, and
-/// fixed sides no longer make it fail.
+/// origin, offers its default radius before it puts the circle in the corner between the clicks.
+/// A typed radius reaches the command, neither path moves the rectangle, and fixed sides work.
 #[test]
-fn two_tangent_circle_clicked_on_two_sides_fits_the_corner_and_moves_nothing() {
+fn two_tangent_circle_takes_its_default_or_a_typed_radius_and_moves_nothing() {
     for fixed in [false, true] {
         let mut h = crate::scenario::Harness::new();
         h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
@@ -673,10 +673,25 @@ fn two_tangent_circle_clicked_on_two_sides_fits_the_corner_and_moves_nothing() {
         h.step(&json!({"start":"sketch.circle.two_tangent"})).unwrap();
         h.step(&json!({"click":{"world":[-550,0,0]}})).unwrap();
         h.step(&json!({"click":{"world":[-800,250,0]}})).unwrap();
+        let before_circle = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
+        assert!(!before_circle.curves.iter().any(|c| matches!(c.kind, CurveKind::Circle { .. })), "the second pick waits for Radius");
+        let tool = h.app.tool.as_ref().unwrap();
+        assert_eq!(tool.dims.iter().map(|dimension| dimension.label).collect::<Vec<_>>(), ["Radius"]);
+        let offered = tool.dims[0].value.parse::<f64>().unwrap_or_default();
+        assert!((offered - 50.0).abs() < 1e-6, "the shorter 500 mm side offers 50 mm: {offered}");
+        let radius = if fixed {
+            h.step(&json!({"key":"A","cmd":true})).unwrap();
+            h.step(&json!({"text":"30"})).unwrap();
+            30.0
+        } else {
+            50.0
+        };
+        h.step(&json!({"key":"Enter"})).unwrap();
         let sk = h.app.session.model.state().sketch(sid).unwrap().sketch.clone();
         let circle = sk.curves.iter().position(|c| matches!(c.kind, CurveKind::Circle { .. }));
         let circle = circle.unwrap_or_else(|| panic!("fixed {fixed}: no circle: {:?}", h.app.status));
-        assert!(sk.center(circle).unwrap().dist(Vec2::new(-750.0, 50.0)) < 1e-6, "fixed {fixed}: {:?}", sk.center(circle));
+        assert!(sk.center(circle).unwrap().dist(Vec2::new(-800.0 + radius, radius)) < 1e-6, "fixed {fixed}: {:?}", sk.center(circle));
+        assert!((sk.radius(circle).unwrap() - radius).abs() < 1e-6, "fixed {fixed}: {:?}", sk.radius(circle));
         let after = points(&h);
         assert!(before.iter().zip(&after).all(|(a, b)| a.dist(*b) < 1e-9), "fixed {fixed}: the rectangle moved: {after:?}");
     }
