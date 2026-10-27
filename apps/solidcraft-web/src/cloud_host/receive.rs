@@ -5,7 +5,7 @@ pub(super) async fn refresh(connection: &Connection, store: &Store, job: &Job) -
     job.update(|status| status.phase = Phase::Syncing)?;
     let remote = repository(connection, job).await?;
     let mut observed = solidcraft_cloud::stored_designs(store.cached_entries().await?, Vec::new())?;
-    remote.list_with_status(&mut observed).await?;
+    remote.list_with_status_cached(&mut observed, store).await?;
     for entry in observed {
         check_cancelled(job)?;
         if !entry.outdated || pending_tip(store, &entry.destination).await?.is_some() {

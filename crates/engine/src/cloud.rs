@@ -1,9 +1,9 @@
-//! Cloud state belongs to the editor connection, never to a shared CAD document.
-use std::collections::BTreeMap;
-use std::sync::Arc;
+//! Application cloud services are shared; captures and saved baselines belong to each editor.
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use solidcraft_cloud::{
-    Destination, Published, Settings,
+    Destination, Settings,
     jobs::{Host, Job, JobStatus, Phase},
 };
 
@@ -25,22 +25,56 @@ pub(crate) struct Capture {
     pub binding: Binding,
 }
 
+/// One runtime per application; every editor and background operation shares it.
 #[derive(Default)]
-pub(crate) struct State {
+pub(crate) struct Runtime {
     pub settings: Settings,
     pub host: Option<Arc<dyn Host>>,
     pub jobs: BTreeMap<String, Job>,
+    pub capture_jobs: BTreeSet<String>,
+    pub configuration: Option<String>,
+}
+
+#[derive(Default)]
+pub(crate) struct State {
+    runtime: Arc<Mutex<Runtime>>,
     pub captures: BTreeMap<String, Capture>,
     pub binding: Option<Binding>,
-    pub configuration: Option<String>,
-    pub settings_changed: bool,
     pub ssh_key_input: Option<solidcraft_cloud::jobs::SshKeyInput>,
     pub repository_check_input: Option<solidcraft_cloud::jobs::RepositoryCheckInput>,
 }
 
 impl State {
+    pub fn runtime(&self) -> MutexGuard<'_, Runtime> {
+        // The runtime holds only handles and validated settings. Recovering the lock
+        // leaves durable data in the platform store and lets failed jobs report errors.
+        self.runtime.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    pub fn clear_captures(&mut self) {
+        {
+            let mut runtime = self.runtime();
+            for id in self.captures.keys() {
+                runtime.capture_jobs.remove(id);
+            }
+        }
+        self.captures.clear();
+    }
+
     pub fn scratch(&self) -> Self {
-        Self { settings: self.settings.clone(), host: self.host.clone(), binding: self.binding.clone(), ..Default::default() }
+        Self {
+            runtime: self.runtime.clone(),
+            binding: self.binding.clone(),
+            captures: BTreeMap::new(),
+            ssh_key_input: None,
+            repository_check_input: None,
+        }
+    }
+}
+
+impl Drop for State {
+    fn drop(&mut self) {
+        self.clear_captures();
     }
 }
 
@@ -70,25 +104,20 @@ impl Session {
     }
 
     pub fn set_cloud_host(&mut self, host: Option<Arc<dyn Host>>) {
-        self.cloud.host = host;
+        self.cloud.runtime().host = host;
     }
 
-    pub fn cloud_settings(&self) -> &Settings {
-        &self.cloud.settings
+    pub fn cloud_settings(&self) -> Settings {
+        self.cloud.runtime().settings.clone()
     }
 
     /// Host preferences are shared by tabs, while bindings and captured saves stay per design.
     pub fn inherit_cloud_services(&mut self, source: &Session) {
-        self.cloud.settings = source.cloud.settings.clone();
-        self.cloud.host = source.cloud.host.clone();
-    }
-
-    pub fn take_cloud_settings_change(&mut self) -> Option<Settings> {
-        std::mem::take(&mut self.cloud.settings_changed).then(|| self.cloud.settings.clone())
+        self.cloud.runtime = source.cloud.runtime.clone();
     }
 
     pub fn cloud_configuring(&self) -> bool {
-        self.cloud.configuration.is_some()
+        self.cloud.runtime().configuration.is_some()
     }
 
     pub fn cloud_save_pending(&self) -> bool {
@@ -99,7 +128,7 @@ impl Session {
     }
 
     pub fn cloud_operations(&self) -> Result<Vec<JobStatus>> {
-        self.cloud.jobs.values().map(|job| job.status().map_err(error)).collect()
+        self.cloud.runtime().jobs.values().map(|job| job.status().map_err(error)).collect()
     }
 
     /// Complete a download through the registered command in a separate editor. The UI can
@@ -112,55 +141,70 @@ impl Session {
 
     /// Prepare an isolated editor without decoding or evaluating on the caller's thread.
     pub fn cloud_open_target(&self, operation: &str) -> Result<Session> {
-        let job = self.cloud.jobs.get(operation).ok_or_else(|| EngineError::Other("unknown cloud opening operation".into()))?;
+        if !self.cloud.runtime().jobs.contains_key(operation) {
+            return Err(EngineError::Other("unknown cloud opening operation".into()));
+        }
         let mut opened = Session::default();
         opened.inherit_cloud_services(self);
-        opened.cloud.jobs.insert(operation.into(), job.clone());
         Ok(opened)
     }
 
     /// A captured save may become the saved baseline after later edits. Adopting the captured
     /// Arc instead of calling mark_saved keeps those newer edits dirty.
     pub fn poll_cloud(&mut self) -> Result<()> {
-        self.poll_cloud_with_publications(&[])
-    }
-
-    /// Share confirmed host results across tabs without sharing undo, bindings or captures.
-    /// Only a matching connection and captured revision can follow a publication.
-    pub fn poll_cloud_with_publications(&mut self, confirmed: &[Published]) -> Result<()> {
-        if let Some(id) = self.cloud.configuration.as_ref() {
-            let status =
-                self.cloud.jobs.get(id).ok_or_else(|| EngineError::Other("cloud settings operation missing".into()))?.status().map_err(error)?;
-            match status.phase {
-                Phase::Ready | Phase::Synced => {
-                    let settings: Settings =
-                        serde_json::from_value(status.result.ok_or_else(|| EngineError::Other("cloud settings missing".into()))?)
-                            .map_err(|e| EngineError::Other(e.to_string()))?;
-                    settings.validate().map_err(error)?;
-                    self.cloud.settings = settings;
-                    self.cloud.settings_changed = true;
-                    self.cloud.configuration = None;
+        {
+            let mut runtime = self.cloud.runtime();
+            if let Some(id) = runtime.configuration.clone() {
+                let status =
+                    runtime.jobs.get(&id).ok_or_else(|| EngineError::Other("cloud settings operation missing".into()))?.status().map_err(error)?;
+                match status.phase {
+                    Phase::Ready | Phase::Synced => {
+                        let settings: Settings =
+                            serde_json::from_value(status.result.ok_or_else(|| EngineError::Other("cloud settings missing".into()))?)
+                                .map_err(|e| EngineError::Other(e.to_string()))?;
+                        settings.validate().map_err(error)?;
+                        runtime.settings = settings;
+                        runtime.configuration = None;
+                    }
+                    Phase::Failed | Phase::Cancelled => runtime.configuration = None,
+                    _ => {}
                 }
-                Phase::Failed | Phase::Cancelled => self.cloud.configuration = None,
-                _ => {}
             }
         }
         let ids: Vec<String> = self.cloud.captures.keys().cloned().collect();
         for id in ids {
-            let status =
-                self.cloud.jobs.get(&id).ok_or_else(|| EngineError::Other("cloud save operation missing".into()))?.status().map_err(error)?;
+            let status = self
+                .cloud
+                .runtime()
+                .jobs
+                .get(&id)
+                .ok_or_else(|| EngineError::Other("cloud save operation missing".into()))?
+                .status()
+                .map_err(error)?;
             if status.saved_locally {
+                if status
+                    .revision
+                    .as_ref()
+                    .is_none_or(|revision| revision.len() != 64 || !revision.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)))
+                {
+                    return Err(EngineError::Other("cloud save acknowledgement is missing its captured revision".into()));
+                }
                 let capture = self.cloud.captures.remove(&id).ok_or_else(|| EngineError::Other("cloud save capture missing".into()))?;
+                self.cloud.runtime().capture_jobs.remove(&id);
                 self.saved = capture.doc;
                 self.saved_visibility = capture.visibility;
-                self.cloud.binding = Some(capture.binding);
+                let mut binding = capture.binding;
+                binding.revision = status.revision;
+                self.cloud.binding = Some(binding);
             } else if matches!(status.phase, Phase::Failed | Phase::Cancelled) {
                 self.cloud.captures.remove(&id);
+                self.cloud.runtime().capture_jobs.remove(&id);
             }
         }
         // A later explicit synchronization can finish older offline Save operations. Apply
         // each confirmed capture even when another file in the same synchronization failed.
-        let statuses = self.cloud.jobs.iter().map(|(id, job)| Ok((id.clone(), job.status().map_err(error)?))).collect::<Result<Vec<_>>>()?;
+        let statuses =
+            self.cloud.runtime().jobs.iter().map(|(id, job)| Ok((id.clone(), job.status().map_err(error)?))).collect::<Result<Vec<_>>>()?;
         let mut publications = BTreeMap::new();
         for (_, status) in &statuses {
             for publication in &status.publications {
@@ -170,7 +214,7 @@ impl Session {
                 }
             }
         }
-        for publication in statuses.iter().flat_map(|(_, status)| &status.publications).chain(confirmed) {
+        for publication in statuses.iter().flat_map(|(_, status)| &status.publications) {
             publication.destination.validate().map_err(error)?;
             let key = (&publication.destination.connection, &publication.revision);
             if let Some(previous) = publications.insert(key, publication)
@@ -184,7 +228,7 @@ impl Session {
                 && status.phase != Phase::Synced
                 && let Some(revision) = &status.revision
                 && let Some(publication) = publications.get(&(&status.connection, revision))
-                && let Some(job) = self.cloud.jobs.get(id)
+                && let Some(job) = self.cloud.runtime().jobs.get(id)
             {
                 let result = serde_json::to_value(publication).map_err(|e| EngineError::Other(e.to_string()))?;
                 job.update(|status| {
@@ -210,6 +254,7 @@ impl Session {
                 && let Some(binding) = &mut self.cloud.binding
                 && binding.revision.is_some()
                 && binding.revision == status.revision
+                && binding.destination.connection == status.connection
                 && let Some(destination) = status.destination
             {
                 binding.destination = destination;

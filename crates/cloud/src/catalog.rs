@@ -199,6 +199,48 @@ pub fn stored_designs(cached: Vec<CachedEntry>, pending: Vec<PendingSave>) -> Re
     Ok(entries.into_values().collect())
 }
 
+/// Shared local-first listing policy. Adapters only fetch remote metadata and persist
+/// observed outdated heads; recoverable local work and queued deletions win everywhere.
+pub struct Listing {
+    pub catalog: Vec<StoredDesign>,
+    destinations: BTreeMap<String, Destination>,
+    hidden: BTreeSet<String>,
+    has_local: bool,
+}
+impl Listing {
+    pub fn new(cached: Vec<CachedEntry>, pending: Vec<PendingSave>, job: &crate::jobs::Job) -> Result<Self> {
+        let has_local = !cached.is_empty() || !pending.is_empty();
+        let hidden = pending.iter().filter(|s| s.manifest.deleted()).map(|s| s.destination.design_path()).collect::<Result<_>>()?;
+        let catalog = stored_designs(cached, pending)?;
+        job.local_catalog(catalog.clone())?;
+        let destinations = catalog.iter().map(|e| Ok((e.destination.design_path()?, e.destination.clone()))).collect::<Result<_>>()?;
+        Ok(Self { catalog, destinations, hidden, has_local })
+    }
+    pub fn merge(&mut self, remote: Result<Vec<Destination>>, job: &crate::jobs::Job) -> Result<()> {
+        match remote {
+            Ok(destinations) => {
+                for destination in destinations {
+                    self.destinations.insert(destination.design_path()?, destination);
+                }
+            }
+            Err(error @ Error::Storage(_)) if self.has_local => job.update(|s| s.message = Some(error.to_string()))?,
+            Err(error) => return Err(error),
+        }
+        Ok(())
+    }
+    pub fn finish(mut self, job: &crate::jobs::Job) -> Result<()> {
+        crate::sync::check_cancelled(job)?;
+        for path in self.hidden {
+            self.destinations.remove(&path);
+        }
+        job.update(|s| {
+            s.result = Some(serde_json::json!(self.destinations.into_values().collect::<Vec<_>>()));
+            s.catalog = self.catalog;
+            s.phase = Phase::Ready;
+        })
+    }
+}
+
 /// Presentation-only content identity. Required capabilities and asset mappings count;
 /// publication bookkeeping and compatible optional metadata do not change the payload.
 pub fn manifest_digest(manifest: &Manifest) -> Result<String> {

@@ -4,7 +4,7 @@ use solidcraft_cloud::management::{Change, Managed};
 
 impl Session {
     pub fn poll_cloud_management(&mut self, confirmed: &[Managed]) -> Result<()> {
-        let local = self.cloud.jobs.values().map(|j| j.status().map_err(error)).collect::<Result<Vec<_>>>()?;
+        let local = self.cloud.runtime().jobs.values().map(|j| j.status().map_err(error)).collect::<Result<Vec<_>>>()?;
         for managed in local.iter().flat_map(|s| &s.managed).chain(confirmed) {
             managed.change.validate(&managed.source).map_err(error)?;
             if managed.destination != managed.change.destination(&managed.source)

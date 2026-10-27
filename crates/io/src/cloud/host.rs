@@ -1,6 +1,6 @@
 //! Native asynchronous adapter. Saves reach disk before any Git or network operation.
 //! Each connection has an independent queue and local synchronization lock.
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use solidcraft_cloud::{
@@ -34,14 +34,37 @@ impl NativeHost {
         self
     }
 
-    fn run(
-        operation: Operation,
-        executable: &str,
-        outbox: &LocalOutbox,
-        job: &Job,
-        access: Option<&dyn super::NativeAccess>,
-        root: &std::path::Path,
-    ) -> Result<()> {
+    fn spawn(
+        &self,
+        connection: Option<&Connection>,
+        executable: String,
+        prepare: impl FnOnce(&Job) -> Result<Operation> + Send + 'static,
+    ) -> Result<Job> {
+        let job = Job::new(connection.map(|c| c.id.clone()).unwrap_or_default())?;
+        let outbox_root = connection.map(|c| self.root.join(solidcraft_cloud::digest(c.id.as_bytes()))).unwrap_or_else(|| self.root.clone());
+        let access = self.access.clone();
+        let worker = job.clone();
+        let scope = crate::vfs::current_scope();
+        std::thread::Builder::new()
+            .name("solidcraft-cloud".into())
+            .spawn(move || {
+                crate::vfs::scoped(scope, || {
+                    let result = (|| {
+                        check_cancelled(&worker)?;
+                        let operation = prepare(&worker)?;
+                        let outbox = LocalOutbox::new(outbox_root)?;
+                        Self::run(operation, &executable, &outbox, &worker, access.as_deref())
+                    })();
+                    if let Err(error) = result {
+                        let _ = worker.fail(error);
+                    }
+                });
+            })
+            .map_err(storage)?;
+        Ok(job)
+    }
+
+    fn run(operation: Operation, executable: &str, outbox: &LocalOutbox, job: &Job, access: Option<&dyn super::NativeAccess>) -> Result<()> {
         check_cancelled(job)?;
         if let Some(access) = access
             && super::provider::connection(&operation).is_some_and(|connection| access.uses_provider_api(connection))
@@ -58,7 +81,7 @@ impl NativeHost {
             }
             Operation::Manage { connection, destination, expected_revision, change } => {
                 let save = management::stage(outbox, &connection, &destination, expected_revision, &change, executable, job)?;
-                Self::run(Operation::Save { connection, save: Box::new(save), synchronize: true }, executable, outbox, job, access, root)?;
+                Self::run(Operation::Save { connection, save: Box::new(save), synchronize: true }, executable, outbox, job, access)?;
             }
             Operation::Trash(connection) => {
                 let entries = management::trash(outbox, &connection, executable, job)?;
@@ -129,14 +152,6 @@ impl NativeHost {
                 let connection = access.prepare(connection, job)?;
                 connection.validate()?;
                 check_cancelled(job)?;
-                // Account discovery resolves a provisional setup id. Use the final
-                // repository's private directory for cloning and reconnecting.
-                let outbox = LocalOutbox::new(root.join(solidcraft_cloud::digest(connection.id.as_bytes())))?;
-                let lock = outbox.synchronization_lock()?;
-                let token = access.credential(&connection.credential)?;
-                let connection = super::provision::checkout(connection, executable, outbox.root(), token, job)?;
-                check_cancelled(job)?;
-                drop(lock);
                 job.update(|status| {
                     status.result = Some(serde_json::json!(connection));
                     status.phase = Phase::Ready;
@@ -184,17 +199,10 @@ impl NativeHost {
                         pending.push(save);
                     }
                 }
-                let has_local = !cached.is_empty() || !pending.is_empty();
-                let hidden: Vec<_> = pending.iter().filter(|s| s.manifest.deleted()).map(|s| s.destination.clone()).collect();
-                let mut catalog = solidcraft_cloud::stored_designs(cached, pending)?;
-                job.local_catalog(catalog.clone())?;
-                let mut destinations = BTreeMap::new();
-                for entry in &catalog {
-                    destinations.insert(entry.destination.design_path()?, entry.destination.clone());
-                }
-                match GitRepository::open_cancellable(connection.clone(), executable, job.clone()).and_then(|repository| {
+                let mut listing = solidcraft_cloud::Listing::new(cached, pending, job)?;
+                let remote = GitRepository::open_cancellable(connection.clone(), executable, job.clone()).and_then(|repository| {
                     let entries = repository.list()?;
-                    for entry in catalog.iter_mut().filter(|e| matches!(e.phase, Phase::Ready | Phase::Synced) && !e.outdated) {
+                    for entry in listing.catalog.iter_mut().filter(|e| matches!(e.phase, Phase::Ready | Phase::Synced) && !e.outdated) {
                         if !repository.matches_stored(entry).unwrap_or(false) {
                             entry.phase = Phase::Ready;
                             entry.outdated = true;
@@ -202,25 +210,9 @@ impl NativeHost {
                         }
                     }
                     Ok(entries)
-                }) {
-                    Ok(entries) => {
-                        for destination in entries {
-                            destinations.insert(destination.design_path()?, destination);
-                        }
-                    }
-                    Err(error @ Error::Storage(_)) if has_local => job.update(|status| status.message = Some(error.to_string()))?,
-                    Err(error) => return Err(error),
-                }
-                check_cancelled(job)?;
-                for destination in hidden {
-                    destinations.remove(&destination.design_path()?);
-                }
-                let result = serde_json::to_value(destinations.into_values().collect::<Vec<_>>()).map_err(storage)?;
-                job.update(|status| {
-                    status.result = Some(result);
-                    status.catalog = catalog;
-                    status.phase = Phase::Ready;
-                })?;
+                });
+                listing.merge(remote, job)?;
+                listing.finish(job)?;
             }
             Operation::Open { connection, destination, local_revision } => {
                 destination.validate()?;
@@ -280,96 +272,7 @@ impl NativeHost {
         target: Option<PendingSave>,
         access: Option<&dyn super::NativeAccess>,
     ) -> Result<()> {
-        check_cancelled(job)?;
-        let lock = outbox.wait_for_synchronization(job)?;
-        let mut pending = outbox.pending()?;
-        // Another completed worker may have removed this record after its caller staged the
-        // same capture. Publishing it again is idempotent and confirms its own result.
-        if let Some(target) = &target
-            && !pending.iter().any(|save| save.id == target.id)
-        {
-            pending.push(target.clone());
-            pending = PendingSave::ordered(pending)?;
-        }
-        if pending.is_empty() {
-            super::receive::refresh(&connection, executable, outbox, job, access)?;
-            drop(lock);
-            job.update(|status| {
-                status.phase = Phase::Synced;
-                status.result = Some(serde_json::json!([]));
-            })?;
-            return Ok(());
-        }
-        // Completed receipts can acknowledge an interrupted queue removal without Git,
-        // credentials, a checkout, or a second network publication.
-        let mut repository = None;
-        job.update(|status| status.phase = Phase::Syncing)?;
-        let mut blocked = BTreeSet::new();
-        let mut results = Vec::new();
-        let mut first_error = None;
-        for save in pending {
-            check_cancelled(job)?;
-            if save.expected_revision.as_ref().is_some_and(|parent| blocked.contains(parent)) {
-                blocked.insert(save.id);
-                continue;
-            }
-            let result = save
-                .check_connection(&connection)
-                .and_then(|()| {
-                    if let Some(published) = outbox.receipt(&save)? {
-                        return Ok(published);
-                    }
-                    let snapshot = outbox.recover_document(&save)?;
-                    let parent = outbox.published_parent(&save)?;
-                    if repository.is_none() {
-                        repository = Some(open_repository(connection.clone(), executable, job, access)?);
-                    }
-                    repository.as_ref().ok_or_else(|| storage("repository unavailable"))?.publish_with_parent(&save, snapshot, parent.as_ref())
-                })
-                .and_then(|published| {
-                    outbox.published(&save, &published)?;
-                    Ok(published)
-                });
-            match result {
-                Ok(published) => {
-                    let managed = solidcraft_cloud::management::Managed::confirmed(&save, &published)?;
-                    let result = serde_json::to_value(&published).map_err(storage)?;
-                    job.update(|status| {
-                        status.publications.push(published.clone());
-                        status.managed.extend(managed);
-                    })?;
-                    if target.as_ref().is_some_and(|target| target.id == save.id) {
-                        // A Save job belongs to this capture alone, never whichever other
-                        // queued design happened to finish last during synchronization.
-                        drop(lock);
-                        job.update(|status| {
-                            status.destination = Some(published.destination);
-                            status.revision = Some(published.revision);
-                            status.result = Some(result);
-                            status.phase = Phase::Synced;
-                        })?;
-                        return Ok(());
-                    }
-                    results.push(result);
-                }
-                Err(error) => {
-                    blocked.insert(save.id);
-                    if first_error.is_none() {
-                        first_error = Some(error);
-                    }
-                }
-            }
-        }
-        job.update(|status| status.result = Some(serde_json::Value::Array(results)))?;
-        if let Some(error) = first_error {
-            return Err(error);
-        }
-        if target.is_none() {
-            super::receive::refresh(&connection, executable, outbox, job, access)?;
-        }
-        // A caller can immediately submit its next save or setup after this acknowledgement.
-        drop(lock);
-        job.update(|status| status.phase = Phase::Synced)
+        super::sync::synchronize(outbox, &connection, executable, job, access, target)
     }
 }
 
@@ -456,6 +359,17 @@ impl Host for NativeHost {
             .map_err(storage)?;
         Ok(job)
     }
+    fn prepare_save(
+        &self,
+        connection: Connection,
+        prepare: solidcraft_cloud::jobs::PrepareSave,
+        synchronize: bool,
+        executable: String,
+    ) -> Result<Job> {
+        connection.validate()?;
+        self.spawn(Some(&connection.clone()), executable, move |job| Ok(Operation::Save { connection, save: Box::new(prepare(job)?), synchronize }))
+    }
+
     fn submit(&self, operation: Operation, git_executable: String) -> Result<Job> {
         let connection = match &operation {
             Operation::LoadSettings | Operation::Configure(_) | Operation::GenerateSshKey(_) => None,
@@ -477,26 +391,8 @@ impl Host for NativeHost {
         if let Operation::Configure(settings) = &operation {
             settings.validate()?;
         }
-        let job = Job::new(connection.map(|c| c.id.clone()).unwrap_or_default())?;
-        // Hash identifiers so case-insensitive filesystems and reserved device names cannot
-        // alias two distinct connections' private queues.
-        let root = connection.map(|c| self.root.join(solidcraft_cloud::digest(c.id.as_bytes()))).unwrap_or_else(|| self.root.clone());
-        let outbox = LocalOutbox::new(root)?;
-        let access = self.access.clone();
-        let root = self.root.clone();
-        let worker = job.clone();
-        let scope = crate::vfs::current_scope();
-        std::thread::Builder::new()
-            .name("solidcraft-cloud".into())
-            .spawn(move || {
-                crate::vfs::scoped(scope, || {
-                    if let Err(error) = Self::run(operation, &git_executable, &outbox, &worker, access.as_deref(), &root) {
-                        let _ = worker.fail(error);
-                    }
-                });
-            })
-            .map_err(storage)?;
-        Ok(job)
+        let connection = connection.cloned();
+        self.spawn(connection.as_ref(), git_executable, |_| Ok(operation))
     }
 }
 

@@ -13,8 +13,8 @@ pub(crate) mod git;
 
 pub(crate) const HELP: &str = "https://tangency-labs.github.io/solidcraft/guide/cloud-saves.html";
 
-pub(crate) fn connections(app: &SolveApp) -> &[Connection] {
-    app.cloud.editor.as_ref().map(|e| e.draft.connections.as_slice()).unwrap_or(&app.session.cloud_settings().connections)
+pub(crate) fn connections(app: &SolveApp) -> Vec<Connection> {
+    app.cloud.editor.as_ref().map(|e| e.draft.connections.clone()).unwrap_or_else(|| app.session.cloud_settings().connections)
 }
 
 pub(crate) struct Editor {
@@ -117,7 +117,7 @@ pub(crate) fn apply(app: &mut SolveApp, close: bool) -> bool {
     } else if editor.draft == editor.baseline {
         app.cloud.editor = Some(editor);
         return true;
-    } else if app.session.cloud_settings() != &editor.baseline {
+    } else if app.session.cloud_settings() != editor.baseline {
         Err(tr("cloud.settings_changed").to_owned())
     } else {
         editor.draft.validate().map_err(|e| e.to_string()).and_then(|()| {
@@ -137,11 +137,7 @@ pub(crate) fn apply(app: &mut SolveApp, close: bool) -> bool {
 }
 
 fn statuses(app: &mut SolveApp) -> Vec<JobStatus> {
-    let mut all = app.session.cloud_operations().unwrap_or_default();
-    for tab in app.docs.background_mut() {
-        all.extend(tab.session.cloud_operations().unwrap_or_default());
-    }
-    all
+    app.session.cloud_operations().unwrap_or_default()
 }
 
 /// Apply completes only after the worker confirms durable connection storage.

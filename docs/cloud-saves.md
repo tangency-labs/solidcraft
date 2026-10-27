@@ -54,6 +54,29 @@ Close/Quit waits for the picker and durable local acknowledgement. New designs u
 the default cloud destination picker for normal Save; existing disk files continue
 using their disk destination. Repository selection never changes the saved default.
 
+## Shared runtime and workflow
+
+`Session` editors share an `Arc`-backed cloud runtime containing validated settings,
+the platform host and the operation registry. Each editor keeps only its binding,
+immutable captures and saved baseline. Commands in any tab see the same operation
+IDs and configuration guard. Setup, settings and file loading read that registry
+directly. Opening another design or closing a tab retains application operations.
+
+`solidcraft_cloud::sync` owns queue ordering, receipt reuse, parent routing,
+blocked descendants, cancellation, partial success and publication acknowledgement.
+Its asynchronous `Backend` interface provides storage and repository operations.
+Native workers run it through `futures-lite`; browser tasks await the same workflow
+under a Web Lock. The native adapter chooses installed Git or a provider API.
+`Listing` shares local-first catalog merging and queued-deletion visibility.
+
+The GitHub adapter persists tree metadata for the observed commit and metadata blobs
+by verified Git object hash through `DownloadCache`. An unchanged catalog needs one
+ref request; a changed head reuses unchanged blobs. Initial manifest requests have
+a concurrency limit of four, and cached-design comparisons reuse those results.
+Each browser request registers its own cancellation guard, so Cancel aborts all
+in-flight reads. Retry acknowledgements compare the remote document and asset mapping
+with the capture and verify document/chunk Git identities before removing queued work.
+
 ## Integration contract
 
 ### Design management
@@ -157,15 +180,18 @@ checkout is unavailable. Validated checkout snapshots are cached by Open, includ
 
 The desktop app installs this worker through `Services::cloud_host`, using its
 private `cloud` data directory. `SolveApp` loads settings through the registered
-command, polls active and background document tabs, and retries pending queues
+command, polls the shared runtime and each document's save baseline, and retries pending queues
 once at startup when enabled. `cloud/startup.rs` tracks each connection independently
 and retries failed startup attempts with bounded backoff; successful attempts stop.
 Standard Git refreshes verified remotes before push; GitHub reads the observed head
 and publishes with non-forced ref updates. New tabs inherit connections;
 existing bindings stay with their designs when the default changes. Confirmed
 publications from any tab update only matching captured revisions in other tabs.
-Normal cloud Save runs on the live session, bypassing the native scratch-session
-file writer. Close/Quit waits for local capture acknowledgement, independently
+Normal cloud Save captures immutable document and visibility handles on the live
+session. The native cloud worker then serializes, chunks, compresses and hashes
+assets, renders the preview, and persists the captured snapshot. The operation ID
+is available before preparation starts; only durable local acknowledgement advances
+the originating document's saved baseline. Close/Quit waits for local capture acknowledgement, independently
 of network publication. Platform workers expose `Syncing` while an acknowledged
 capture is still uploading, so idle windows continue polling.
 

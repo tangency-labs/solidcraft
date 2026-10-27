@@ -137,6 +137,7 @@ impl GitRepository {
         super::local::ProcessLock::acquire(&path, "another SolidCraft process is synchronizing this checkout; try again shortly")
     }
 
+    #[cfg(test)]
     pub(super) fn setup_text(&self, args: &[&str]) -> Result<String> {
         self.text(args)
     }
@@ -146,7 +147,7 @@ impl GitRepository {
     }
 
     fn path(&self, relative: &str) -> Result<PathBuf> {
-        solidcraft_cloud::check_path(relative)?;
+        solidcraft_cloud::check_repository_path(relative)?;
         let mut path = self.checkout.clone();
         for segment in relative.split('/') {
             path.push(segment);
@@ -167,7 +168,7 @@ impl GitRepository {
     }
 
     fn committed(&self, commit: &str, relative: &str) -> Result<Option<Vec<u8>>> {
-        solidcraft_cloud::check_path(relative)?;
+        solidcraft_cloud::check_repository_path(relative)?;
         let specification = format!("{commit}:{relative}");
         let exists = self.run(&["ls-tree", "-z", commit, "--", relative], None)?;
         if exists.is_empty() {
@@ -482,7 +483,9 @@ impl GitRepository {
         // Find the commit that captured this revision instead of pushing later unrelated edits.
         let commit = self.text(&["log", "-1", "--format=%H", "--", &published_path])?;
         let confirmed = self.committed(&commit, &published_path)?.ok_or_else(|| storage("saved revision is missing from its commit"))?;
-        if solidcraft_cloud::revision(&Manifest::read(&confirmed)?) != Some(save.id.as_str()) {
+        let confirmed = Manifest::read(&confirmed)?;
+        Publication::verify_payload(save, &confirmed)?;
+        if solidcraft_cloud::revision(&confirmed) != Some(save.id.as_str()) {
             return Err(Error::Conflict);
         }
         // A higher-priority Git attribute or hook can transform bytes despite the project's

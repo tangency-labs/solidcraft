@@ -224,14 +224,14 @@ fn a_proposed_connection_can_be_tested_without_changing_saved_preferences() {
         ..Default::default()
     };
     session.execute("cloud.test", &json!({"proposed":proposed, "git_executable":"/example/git"})).unwrap();
-    assert_eq!(session.cloud_settings(), &before);
+    assert_eq!(session.cloud_settings(), before);
     let jobs = host.0.lock().unwrap();
     let (_, Operation::Test(actual)) = jobs.last().unwrap() else { panic!("connection test") };
     assert_eq!(actual, &proposed);
     drop(jobs);
     assert!(session.execute("cloud.test", &json!({"connection":"github","proposed":proposed})).is_err());
     assert!(session.execute("cloud.test", &json!({"proposed":proposed,"git_executable":"git\nother"})).is_err());
-    assert_eq!(session.cloud_settings(), &before);
+    assert_eq!(session.cloud_settings(), before);
 }
 
 #[test]
@@ -261,12 +261,10 @@ fn configuration_is_adopted_after_storage_and_failure_keeps_previous_settings() 
         .unwrap();
     session.execute("cloud.status", &json!({"operation":job["operation"]})).unwrap();
     assert!(!session.cloud_configuring());
-    assert_eq!(session.take_cloud_settings_change(), Some(requested.clone()));
     session.execute("cloud.configure", &json!({"settings":Settings::default()})).unwrap();
     host.0.lock().unwrap()[1].fail(solidcraft_cloud::Error::Storage("disk full".into())).unwrap();
     session.poll_cloud().unwrap();
-    assert_eq!(session.cloud_settings(), &requested);
-    assert_eq!(session.take_cloud_settings_change(), None);
+    assert_eq!(session.cloud_settings(), requested);
     session.execute("cloud.settings", &json!({"reload":true})).unwrap();
     host.0.lock().unwrap()[2]
         .update(|s| {
@@ -597,4 +595,45 @@ fn preview_commands_validate_destinations_and_consume_transient_results_once() {
     assert!(Arc::ptr_eq(&before, &session.doc));
     let invalid = Destination { connection: "not-connected".into(), ..destination };
     assert!(session.execute("cloud.thumbnail", &json!({"destination":invalid})).is_err());
+}
+
+#[test]
+fn runtime_operations_and_settings_are_shared_while_document_baselines_stay_separate() {
+    let (mut first, host, destination) = configured();
+    let mut second = Session::default();
+    second.inherit_cloud_services(&first);
+    first.execute("cloud.save", &json!({"destination":destination})).unwrap();
+    let operation = host.job(0).status().unwrap().operation;
+    assert!(second.cloud_operations().unwrap().iter().any(|s| s.operation == operation));
+    let mut settings = first.cloud_settings();
+    settings.retry_pending = !settings.retry_pending;
+    second.execute("cloud.configure", &json!({"settings":settings})).unwrap();
+    assert_eq!(first.cloud_settings(), settings);
+    host.saved(0);
+    second.poll_cloud().unwrap();
+    assert!(second.cloud_binding().is_none());
+    assert!(first.cloud_save_pending());
+    first.poll_cloud().unwrap();
+    assert!(!first.cloud_save_pending());
+    assert_eq!(first.cloud_binding().unwrap().destination, destination);
+    assert!(!first.is_dirty());
+    assert!(second.cloud_binding().is_none());
+}
+
+#[test]
+fn a_deferred_save_requires_a_revision_before_advancing_the_saved_baseline() {
+    let (mut session, host, destination) = configured();
+    session.execute("cloud.save", &json!({"destination":destination})).unwrap();
+    host.job(0)
+        .update(|s| {
+            s.saved_locally = true;
+            s.phase = Phase::SavedLocally;
+        })
+        .unwrap();
+    assert!(session.poll_cloud().is_err());
+    assert!(session.cloud_save_pending() && session.is_dirty());
+    assert!(session.cloud_binding().is_none());
+    host.saved(0);
+    session.poll_cloud().unwrap();
+    assert!(!session.cloud_save_pending() && !session.is_dirty());
 }

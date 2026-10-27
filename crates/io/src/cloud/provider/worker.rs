@@ -10,7 +10,7 @@ use solidcraft_cloud::{
     jobs::{Job, Operation, Phase},
     management::Change,
 };
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 fn storage(message: impl std::fmt::Display) -> Error {
     Error::Storage(message.to_string())
@@ -95,32 +95,13 @@ pub(in crate::cloud) fn run(operation: Operation, outbox: &LocalOutbox, job: &Jo
         Operation::List(connection) => {
             let entries = outbox.cached_entries(&connection)?;
             let pending = pending(outbox, &connection)?;
-            let hidden: Vec<_> = pending.iter().filter(|s| s.manifest.deleted()).map(|s| s.destination.clone()).collect();
-            let has_local = !entries.is_empty() || !pending.is_empty();
-            let mut catalog = solidcraft_cloud::stored_designs(entries, pending)?;
-            job.local_catalog(catalog.clone())?;
-            let mut destinations: BTreeMap<_, _> =
-                catalog.iter().map(|e| Ok((e.destination.design_path()?, e.destination.clone()))).collect::<Result<_>>()?;
-            match access.provider_repository(&connection, job).and_then(|mut repository| repository.list(&mut catalog)) {
-                Ok(remote) => {
-                    for destination in remote {
-                        destinations.insert(destination.design_path()?, destination);
-                    }
-                }
-                Err(error @ Error::Storage(_)) if has_local => job.update(|s| s.message = Some(error.to_string()))?,
-                Err(error) => return Err(error),
-            }
-            for entry in catalog.iter().filter(|e| e.outdated) {
+            let mut listing = solidcraft_cloud::Listing::new(entries, pending, job)?;
+            let remote = access.provider_repository(&connection, job).and_then(|mut repository| repository.list_cached(&mut listing.catalog, outbox));
+            listing.merge(remote, job)?;
+            for entry in listing.catalog.iter().filter(|e| e.outdated) {
                 outbox.mark_outdated(&connection, entry)?;
             }
-            for destination in hidden {
-                destinations.remove(&destination.design_path()?);
-            }
-            job.update(|s| {
-                s.catalog = catalog;
-                s.result = Some(serde_json::json!(destinations.into_values().collect::<Vec<_>>()));
-                s.phase = Phase::Ready;
-            })?;
+            listing.finish(job)?;
         }
         Operation::Open { connection, destination, local_revision } => {
             let snapshot = if let Some(save) = pending_revision(outbox, &connection, &destination, local_revision.as_deref())? {
@@ -302,9 +283,9 @@ fn pending(outbox: &LocalOutbox, connection: &Connection) -> Result<Vec<PendingS
     Ok(saves)
 }
 
-fn refresh(outbox: &LocalOutbox, connection: &Connection, job: &Job, repository: &mut dyn ProviderRepository) -> Result<()> {
+pub(in crate::cloud) fn refresh(outbox: &LocalOutbox, connection: &Connection, job: &Job, repository: &mut dyn ProviderRepository) -> Result<()> {
     let mut catalog = solidcraft_cloud::stored_designs(outbox.cached_entries(connection)?, Vec::new())?;
-    repository.list(&mut catalog)?;
+    repository.list_cached(&mut catalog, outbox)?;
     for observed in catalog {
         check_cancelled(job)?;
         if pending_tip(outbox, connection, &observed.destination)?.is_some() {
@@ -321,75 +302,5 @@ fn refresh(outbox: &LocalOutbox, connection: &Connection, job: &Job, repository:
 }
 
 fn synchronize(outbox: &LocalOutbox, connection: &Connection, job: &Job, access: &dyn NativeAccess, target: Option<PendingSave>) -> Result<()> {
-    let lock = outbox.wait_for_synchronization(job)?;
-    let mut saves = outbox.pending()?;
-    if let Some(target) = &target
-        && !saves.iter().any(|s| s.id == target.id)
-    {
-        saves.push(target.clone());
-        saves = PendingSave::ordered(saves)?;
-    }
-    let mut repository = None;
-    let mut blocked = BTreeSet::new();
-    let mut results = Vec::new();
-    let mut first_error = None;
-    job.update(|s| s.phase = Phase::Syncing)?;
-    for save in saves {
-        check_cancelled(job)?;
-        if save.expected_revision.as_ref().is_some_and(|parent| blocked.contains(parent)) {
-            blocked.insert(save.id);
-            continue;
-        }
-        let result = (|| {
-            save.check_connection(connection)?;
-            if let Some(receipt) = outbox.receipt(&save)? {
-                return Ok(receipt);
-            }
-            let snapshot = outbox.recover_document(&save)?;
-            let parent = outbox.published_parent(&save)?;
-            if repository.is_none() {
-                repository = Some(access.provider_repository(connection, job)?);
-            }
-            let published = repository.as_mut().ok_or_else(|| storage("provider unavailable"))?.publish(&save, snapshot, parent.as_ref())?;
-            outbox.published(&save, &published)?;
-            Ok(published)
-        })();
-        match result {
-            Ok(published) => {
-                let managed = solidcraft_cloud::management::Managed::confirmed(&save, &published)?;
-                job.update(|s| {
-                    s.publications.push(published.clone());
-                    s.managed.extend(managed);
-                })?;
-                if target.as_ref().is_some_and(|target| target.id == save.id) {
-                    drop(lock);
-                    return job.update(|s| {
-                        s.destination = Some(published.destination.clone());
-                        s.revision = Some(published.revision.clone());
-                        s.result = Some(serde_json::json!(published));
-                        s.phase = Phase::Synced;
-                    });
-                }
-                results.push(published);
-            }
-            Err(error) => {
-                blocked.insert(save.id);
-                if first_error.is_none() {
-                    first_error = Some(error);
-                }
-            }
-        }
-    }
-    job.update(|s| s.result = Some(serde_json::json!(results)))?;
-    if let Some(error) = first_error {
-        return Err(error);
-    }
-    if target.is_none() {
-        if repository.is_none() {
-            repository = Some(access.provider_repository(connection, job)?);
-        }
-        refresh(outbox, connection, job, repository.as_deref_mut().ok_or_else(|| storage("provider unavailable"))?)?;
-    }
-    drop(lock);
-    job.update(|s| s.phase = Phase::Synced)
+    super::super::sync::synchronize(outbox, connection, "", job, Some(access), target)
 }

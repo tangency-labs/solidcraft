@@ -99,7 +99,7 @@ fn apply_waits_for_durability_across_tabs_and_cancel_keeps_the_last_apply() {
         changed.retry_pending = true;
         h.app.cloud.editor.as_mut().unwrap().draft = changed.clone();
         h.step(&json!({"click":{"handle":"prefs:apply"}})).unwrap();
-        assert_eq!(h.app.session.cloud_settings(), &worker.settings);
+        assert_eq!(h.app.session.cloud_settings(), worker.settings);
         assert!(busy(&h.app));
         let grid_at_apply = h.app.ui.show_grid;
         h.app.ui.show_grid = !grid_at_apply;
@@ -108,16 +108,16 @@ fn apply_waits_for_durability_across_tabs_and_cancel_keeps_the_last_apply() {
         documents::open_tab(&mut h.app, Default::default()).unwrap();
         complete_configuration(&worker, false);
         h.frames(3);
-        assert_eq!(h.app.session.cloud_settings(), &changed);
+        assert_eq!(h.app.session.cloud_settings(), changed);
         assert!(!busy(&h.app));
         h.app.cloud.editor.as_mut().unwrap().draft.connections.clear();
         h.step(&json!({"click":{"handle":"prefs:cancel"}})).unwrap();
         assert!(!h.app.prefs_window.open);
-        assert_eq!(h.app.session.cloud_settings(), &changed);
+        assert_eq!(h.app.session.cloud_settings(), changed);
         assert!(h.app.cloud.editor.is_none());
         assert_eq!(h.app.ui.show_grid, grid_at_apply, "Cancel restores the settings captured when Apply was requested");
         documents::switch(&mut h.app, 0);
-        assert_eq!(h.app.session.cloud_settings(), &changed);
+        assert_eq!(h.app.session.cloud_settings(), changed);
     }
 }
 
@@ -154,7 +154,7 @@ fn defaults_preserve_connections_and_disconnect_applies_only_after_confirmation(
     assert_eq!(h.app.session.cloud_settings().connections.len(), 2);
     assert_eq!(h.app.cloud.editor.as_ref().unwrap().draft.connections.len(), 1);
     h.step(&json!({"click":{"handle":"prefs:cancel"}})).unwrap();
-    assert_eq!(h.app.session.cloud_settings(), &worker.settings);
+    assert_eq!(h.app.session.cloud_settings(), worker.settings);
     h.app.start("cloud.settings");
     h.frames(2);
     h.step(&json!({"click":{"handle":"cloud_settings:disconnect"}})).unwrap();
@@ -184,10 +184,10 @@ fn verified_setup_stays_pending_until_preferences_apply_and_cancel_discards_it()
     drop(jobs);
     h.frames(3);
     assert!(h.app.cloud.setup.is_none());
-    assert_eq!(h.app.session.cloud_settings(), &worker.settings);
+    assert_eq!(h.app.session.cloud_settings(), worker.settings);
     assert_eq!(h.app.cloud.editor.as_ref().unwrap().draft.connections[0].credential, "replacement-credential");
     h.step(&json!({"click":{"handle":"prefs:cancel"}})).unwrap();
-    assert_eq!(h.app.session.cloud_settings(), &worker.settings);
+    assert_eq!(h.app.session.cloud_settings(), worker.settings);
     assert!(!worker.jobs.lock().unwrap().iter().any(|(_, op)| matches!(op, Operation::Configure(_))));
 }
 
@@ -203,7 +203,7 @@ fn external_configuration_is_retained_and_requires_reload_before_applying_local_
     h.step(&json!({"click":{"handle":"prefs:apply"}})).unwrap();
     assert!(!busy(&h.app));
     assert!(h.app.cloud.editor.as_ref().unwrap().error.is_some());
-    assert_eq!(h.app.session.cloud_settings(), &external);
+    assert_eq!(h.app.session.cloud_settings(), external);
     h.step(&json!({"click":{"handle":"cloud_settings:reload"}})).unwrap();
     assert_eq!(h.app.cloud.editor.as_ref().unwrap().draft, external);
 }

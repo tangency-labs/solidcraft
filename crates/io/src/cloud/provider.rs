@@ -6,6 +6,9 @@ use solidcraft_cloud::{Connection, Destination, PendingSave, Published, Result, 
 pub trait ProviderRepository {
     fn test(&mut self) -> Result<()>;
     fn list(&mut self, stored: &mut [StoredDesign]) -> Result<Vec<Destination>>;
+    fn list_cached(&mut self, stored: &mut [StoredDesign], _cache: &super::LocalOutbox) -> Result<Vec<Destination>> {
+        self.list(stored)
+    }
     fn trash(&mut self) -> Result<Vec<Destination>>;
     fn open(&mut self, destination: &Destination, cache: &super::LocalOutbox) -> Result<Snapshot>;
     /// Check repository metadata before reusing a locally confirmed snapshot.
@@ -19,7 +22,7 @@ pub trait ProviderRepository {
 }
 
 mod worker;
-pub(super) use worker::run;
+pub(super) use worker::{refresh, run};
 
 pub(super) fn connection(operation: &solidcraft_cloud::jobs::Operation) -> Option<&Connection> {
     use solidcraft_cloud::jobs::Operation;

@@ -116,7 +116,7 @@ fn settings(session: &mut Session, params: &Value) -> Result<Value> {
     if params.get("reload").and_then(Value::as_bool) == Some(true) {
         return configure_operation(session, Operation::LoadSettings);
     }
-    Ok(json!({"settings":session.cloud.settings,"binding":session.cloud.binding,"configuring":session.cloud_configuring()}))
+    Ok(json!({"settings":session.cloud_settings(),"binding":session.cloud.binding,"configuring":session.cloud_configuring()}))
 }
 
 #[derive(Deserialize)]
@@ -129,9 +129,8 @@ fn configure(session: &mut Session, params: &Value) -> Result<Value> {
     let input: Configure = serde_json::from_value(params.clone()).map_err(|e| bad("cloud.configure", e.to_string()))?;
     input.settings.validate().map_err(error)?;
     session.poll_cloud()?;
-    if session.cloud.host.is_none() {
-        session.cloud.settings = input.settings;
-        session.cloud.settings_changed = true;
+    if session.cloud.runtime().host.is_none() {
+        session.cloud.runtime().settings = input.settings;
         return settings(session, &Value::Null);
     }
     configure_operation(session, Operation::Configure(input.settings))
@@ -142,46 +141,49 @@ fn configure_operation(session: &mut Session, operation: Operation) -> Result<Va
         return Err(bad("cloud.configure", "connection settings are still being stored or loaded"));
     }
     let reply = submit(session, operation)?;
-    session.cloud.configuration = Some(operation_id(&reply)?.to_owned());
+    session.cloud.runtime().configuration = Some(operation_id(&reply)?.to_owned());
     session.poll_cloud()?;
     Ok(reply)
 }
 
 fn submit(session: &mut Session, operation: Operation) -> Result<Value> {
-    let executable = session.cloud.settings.git_executable.clone();
+    let executable = session.cloud.runtime().settings.git_executable.clone();
     submit_using(session, operation, executable)
 }
 
 fn submit_using(session: &mut Session, operation: Operation, executable: String) -> Result<Value> {
     prune_jobs(session)?;
-    let host = session.cloud.host.as_ref().ok_or_else(|| bad("cloud", "cloud storage is unavailable in this host"))?;
+    let host = session.cloud.runtime().host.clone().ok_or_else(|| bad("cloud", "cloud storage is unavailable in this host"))?;
     let job = host.submit(operation, executable).map_err(error)?;
     record_job(session, job)
 }
 
 fn prune_jobs(session: &mut Session) -> Result<()> {
     // Retain active saves; bound terminal history to avoid unbounded state on long sessions.
-    if session.cloud.jobs.len() >= 128 {
-        let removable = session.cloud.jobs.iter().find_map(|(id, job)| {
-            if session.cloud.captures.contains_key(id) {
-                return None;
-            }
-            job.status()
-                .ok()
-                .filter(|s| {
-                    matches!(
-                        s.phase,
-                        solidcraft_cloud::jobs::Phase::SavedLocally
-                            | solidcraft_cloud::jobs::Phase::Ready
-                            | solidcraft_cloud::jobs::Phase::Synced
-                            | solidcraft_cloud::jobs::Phase::Cancelled
-                            | solidcraft_cloud::jobs::Phase::Failed
-                    )
-                })
-                .map(|_| id.clone())
-        });
+    if session.cloud.runtime().jobs.len() >= 128 {
+        let removable = {
+            let runtime = session.cloud.runtime();
+            runtime.jobs.iter().find_map(|(id, job)| {
+                if runtime.capture_jobs.contains(id) {
+                    return None;
+                }
+                job.status()
+                    .ok()
+                    .filter(|s| {
+                        matches!(
+                            s.phase,
+                            solidcraft_cloud::jobs::Phase::SavedLocally
+                                | solidcraft_cloud::jobs::Phase::Ready
+                                | solidcraft_cloud::jobs::Phase::Synced
+                                | solidcraft_cloud::jobs::Phase::Cancelled
+                                | solidcraft_cloud::jobs::Phase::Failed
+                        )
+                    })
+                    .map(|_| id.clone())
+            })
+        };
         if let Some(id) = removable {
-            session.cloud.jobs.remove(&id);
+            session.cloud.runtime().jobs.remove(&id);
         } else {
             return Err(bad("cloud", "too many cloud operations; finish or cancel a pending operation"));
         }
@@ -191,7 +193,7 @@ fn prune_jobs(session: &mut Session) -> Result<()> {
 
 fn record_job(session: &mut Session, job: solidcraft_cloud::jobs::Job) -> Result<Value> {
     let status = job.status().map_err(error)?;
-    session.cloud.jobs.insert(status.operation.clone(), job);
+    session.cloud.runtime().jobs.insert(status.operation.clone(), job);
     Ok(json!(status))
 }
 
@@ -206,7 +208,7 @@ fn connection(session: &Session, params: &Value) -> Result<solidcraft_cloud::Con
         return Err(bad("cloud", "connection settings are still being stored or loaded"));
     }
     let input: ConnectionInput = serde_json::from_value(params.clone()).map_err(|e| bad("cloud", e.to_string()))?;
-    session.cloud.settings.destination(input.connection.as_deref()).cloned().map_err(error)
+    session.cloud.runtime().settings.destination(input.connection.as_deref()).cloned().map_err(error)
 }
 
 #[derive(Default, Deserialize)]
@@ -233,7 +235,7 @@ fn test(session: &mut Session, params: &Value) -> Result<Value> {
             connection.validate().map_err(error)?;
             connection
         }
-        None => session.cloud.settings.destination(input.connection.as_deref()).cloned().map_err(error)?,
+        None => session.cloud.runtime().settings.destination(input.connection.as_deref()).cloned().map_err(error)?,
     };
     if input.metadata_only {
         if candidate.provider != "github" {
@@ -241,11 +243,11 @@ fn test(session: &mut Session, params: &Value) -> Result<Value> {
         }
         solidcraft_cloud::setup::github_repository(&candidate.repository).map_err(error)?;
         prune_jobs(session)?;
-        let host = session.cloud.host.as_ref().ok_or_else(|| bad("cloud.test", "cloud storage is unavailable"))?;
+        let host = session.cloud.runtime().host.clone().ok_or_else(|| bad("cloud.test", "cloud storage is unavailable"))?;
         let job = host.check_repository(candidate, secret).map_err(error)?;
         return record_job(session, job);
     }
-    let executable = input.git_executable.unwrap_or_else(|| session.cloud.settings.git_executable.clone());
+    let executable = input.git_executable.unwrap_or_else(|| session.cloud.runtime().settings.git_executable.clone());
     let settings = Settings { git_executable: executable.clone(), ..Default::default() };
     settings.validate().map_err(error)?;
     submit_using(session, Operation::Test(candidate), executable)
@@ -279,13 +281,13 @@ fn thumbnail(session: &mut Session, params: &Value) -> Result<Value> {
     }
     let input: Open = serde_json::from_value(params.clone()).map_err(|e| bad("cloud.thumbnail", e.to_string()))?;
     input.destination.validate().map_err(error)?;
-    let connection = session.cloud.settings.destination(Some(&input.destination.connection)).cloned().map_err(error)?;
+    let connection = session.cloud.runtime().settings.destination(Some(&input.destination.connection)).cloned().map_err(error)?;
     submit(session, Operation::Thumbnail { connection, destination: input.destination })
 }
 
 fn finish_thumbnail(session: &mut Session, params: &Value) -> Result<Value> {
     let id = operation_id(params)?;
-    let job = session.cloud.jobs.get(id).ok_or_else(|| bad("cloud.thumbnail.finish", "unknown operation"))?;
+    let job = session.cloud.runtime().jobs.get(id).cloned().ok_or_else(|| bad("cloud.thumbnail.finish", "unknown operation"))?;
     let status = job.status().map_err(error)?;
     solidcraft_cloud::Thumbnail::decode_response(status.result.as_ref().ok_or_else(|| bad("cloud.thumbnail.finish", "preview missing"))?)
         .map_err(error)?;
@@ -299,7 +301,7 @@ fn open(session: &mut Session, params: &Value) -> Result<Value> {
     }
     let input: OpenRevision = serde_json::from_value(params.clone()).map_err(|e| bad("cloud.open", e.to_string()))?;
     input.destination.validate().map_err(error)?;
-    let connection = session.cloud.settings.destination(Some(&input.destination.connection)).cloned().map_err(error)?;
+    let connection = session.cloud.runtime().settings.destination(Some(&input.destination.connection)).cloned().map_err(error)?;
     if input.local_revision.as_ref().is_some_and(|id| id.len() != 64 || !id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))) {
         return Err(bad("cloud.open", "invalid local revision"));
     }
@@ -312,7 +314,7 @@ fn operation_id(params: &Value) -> Result<&str> {
 
 fn finish(session: &mut Session, params: &Value) -> Result<Value> {
     let id = operation_id(params)?;
-    let job = session.cloud.jobs.get(id).ok_or_else(|| bad("cloud.open.finish", "unknown operation"))?;
+    let job = session.cloud.runtime().jobs.get(id).cloned().ok_or_else(|| bad("cloud.open.finish", "unknown operation"))?;
     let status = job.status().map_err(error)?;
     let snapshot = job.take_opened().map_err(error)?;
     let document = solidcraft_io::cloud::open_document(&snapshot.manifest, &snapshot.document, |path| {
@@ -345,7 +347,7 @@ pub(super) fn save(session: &mut Session, params: &Value) -> Result<Value> {
         .destination
         .or_else(|| session.cloud.binding.as_ref().map(|b| b.destination.clone()))
         .ok_or_else(|| bad("cloud.save", "choose a repository, project folder, and file name"))?;
-    let connection = session.cloud.settings.destination(Some(&destination.connection)).cloned().map_err(error)?;
+    let connection = session.cloud.runtime().settings.destination(Some(&destination.connection)).cloned().map_err(error)?;
     destination.validate().map_err(error)?;
     // Reusing the saved baseline must not capture a new parent-linked revision or
     // start an upload. A different destination is still an explicit cloud copy.
@@ -370,14 +372,30 @@ pub(super) fn save(session: &mut Session, params: &Value) -> Result<Value> {
 
 fn capture(session: &mut Session, connection: solidcraft_cloud::Connection, destination: Destination) -> Result<Value> {
     let parent = session.cloud.binding.as_ref().filter(|binding| binding.destination == destination).and_then(|binding| binding.revision.clone());
-    let mut snapshot = solidcraft_io::cloud::prepare_document(&session.design()).map_err(error)?;
-    if let Some(png) = crate::thumbnail::saved(session) {
-        let _ = solidcraft_cloud::attach_thumbnail(&mut snapshot, png);
-    }
-    let save = PendingSave::stage(&connection, &destination.project, &destination.file, parent, snapshot).map_err(error)?;
-    let binding = Binding { destination, revision: Some(save.record.id.clone()) };
-    let reply = submit(session, Operation::Save { connection, save: Box::new(save), synchronize: session.cloud.settings.sync_after_save })?;
+    // Only immutable editor state is captured here. Encoding, chunking, hashing and
+    // preview rendering all belong to the platform's worker.
+    let copy = session.scratch();
+    let captured_connection = connection.clone();
+    let captured_destination = destination.clone();
+    let prepare = Box::new(move |job: &solidcraft_cloud::jobs::Job| {
+        let check = || if job.cancelled()? { Err(solidcraft_cloud::Error::Storage("save cancelled".into())) } else { Ok(()) };
+        check()?;
+        let mut snapshot = solidcraft_io::cloud::prepare_document(&copy.design())?;
+        check()?;
+        if let Some(png) = crate::thumbnail::saved(&copy) {
+            let _ = solidcraft_cloud::attach_thumbnail(&mut snapshot, png);
+        }
+        check()?;
+        PendingSave::stage(&captured_connection, &captured_destination.project, &captured_destination.file, parent, snapshot)
+    });
+    prune_jobs(session)?;
+    let host = session.cloud.runtime().host.clone().ok_or_else(|| bad("cloud", "cloud storage is unavailable in this host"))?;
+    let settings = session.cloud_settings();
+    let job = host.prepare_save(connection, prepare, settings.sync_after_save, settings.git_executable).map_err(error)?;
+    let reply = record_job(session, job)?;
+    let binding = Binding { destination, revision: reply.get("revision").and_then(Value::as_str).map(str::to_owned) };
     let id = operation_id(&reply)?.to_string();
+    session.cloud.runtime().capture_jobs.insert(id.clone());
     session.cloud.captures.insert(id, Capture { doc: session.doc.clone(), visibility: session.visibility.clone(), binding });
     Ok(reply)
 }
@@ -385,7 +403,7 @@ fn capture(session: &mut Session, connection: solidcraft_cloud::Connection, dest
 fn status(session: &mut Session, params: &Value) -> Result<Value> {
     session.poll_cloud()?;
     if let Some(id) = params.get("operation").and_then(Value::as_str) {
-        let job = session.cloud.jobs.get(id).ok_or_else(|| bad("cloud.status", "unknown operation"))?;
+        let job = session.cloud.runtime().jobs.get(id).cloned().ok_or_else(|| bad("cloud.status", "unknown operation"))?;
         Ok(json!(job.status().map_err(error)?))
     } else {
         Ok(json!(session.cloud_operations()?))
@@ -394,7 +412,7 @@ fn status(session: &mut Session, params: &Value) -> Result<Value> {
 
 fn cancel(session: &mut Session, params: &Value) -> Result<Value> {
     let id = operation_id(params)?;
-    let job = session.cloud.jobs.get(id).ok_or_else(|| bad("cloud.cancel", "unknown operation"))?;
+    let job = session.cloud.runtime().jobs.get(id).cloned().ok_or_else(|| bad("cloud.cancel", "unknown operation"))?;
     job.cancel().map_err(error)?;
     Ok(json!(job.status().map_err(error)?))
 }

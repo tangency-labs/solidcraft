@@ -788,7 +788,7 @@ impl Session {
         let replacements = self.replacements.wrapping_add(1);
         let mut cloud = std::mem::take(&mut self.cloud);
         cloud.binding = fresh.cloud.binding.clone();
-        cloud.captures.clear();
+        cloud.clear_captures();
         *self = fresh;
         self.crash_journal = crash_journal;
         self.auto_project = auto_project;

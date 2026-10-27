@@ -215,6 +215,18 @@ fn recover(save: &crate::StagedSave) -> Result<Snapshot> {
     save.record.recover(|path| Ok(save.objects[path].clone()))
 }
 
+#[derive(Default)]
+struct Cache(Mutex<BTreeMap<String, Vec<u8>>>);
+impl crate::DownloadCache for Cache {
+    async fn load(&self, path: &str) -> Result<Option<Vec<u8>>> {
+        Ok(self.0.lock().unwrap().get(path).cloned())
+    }
+    async fn store(&self, path: &str, bytes: &[u8]) -> Result<()> {
+        self.0.lock().unwrap().insert(path.into(), bytes.into());
+        Ok(())
+    }
+}
+
 fn run_test(future: impl std::future::Future<Output = ()>) {
     let runtime = tokio::runtime::Builder::new_current_thread().build().unwrap();
     tokio::task::LocalSet::new().block_on(&runtime, future);
@@ -570,17 +582,6 @@ fn setup_checks_token_write_permission_even_when_account_can_push() {
 
 #[test]
 fn cached_open_checks_one_ref_and_interrupted_downloads_reuse_verified_chunks() {
-    #[derive(Default)]
-    struct Cache(Mutex<BTreeMap<String, Vec<u8>>>);
-    impl crate::DownloadCache for Cache {
-        async fn load(&self, path: &str) -> Result<Option<Vec<u8>>> {
-            Ok(self.0.lock().unwrap().get(path).cloned())
-        }
-        async fn store(&self, path: &str, bytes: &[u8]) -> Result<()> {
-            self.0.lock().unwrap().insert(path.into(), bytes.into());
-            Ok(())
-        }
-    }
     run_test(async {
         let repository = repository();
         let (api, connection) = adapter(repository.clone());
@@ -650,5 +651,107 @@ fn cached_open_checks_one_ref_and_interrupted_downloads_reuse_verified_chunks() 
             remote.files.insert(manifest_path, serde_json::to_vec(&future).unwrap());
         }
         assert!(matches!(api.is_current_cached(&stored, &cache).await, Err(Error::UpgradeRequired(_))));
+    });
+}
+
+#[test]
+fn publication_retries_verify_documents_chunks_and_conflict_copies_before_acknowledging() {
+    run_test(async {
+        for conflict in [false, true] {
+            for corruption in 0..3 {
+                let state = repository();
+                let (api, connection) = adapter(state.clone());
+                if conflict {
+                    let first = stage(&connection, b"{\"first\":true}", None);
+                    api.publish(&first.record, || recover(&first), |_| Ok(())).await.unwrap();
+                }
+                let save = stage(&connection, b"{}", None);
+                let published = api.publish(&save.record, || recover(&save), |_| Ok(())).await.unwrap();
+                assert_eq!(published.conflict, conflict);
+                let commits = state.lock().unwrap().commits;
+                if corruption == 1 {
+                    let path = save.record.manifest.assets.values().next().unwrap().chunks[0].path().unwrap();
+                    state.lock().unwrap().files.remove(&format!("Robot/{path}"));
+                } else if corruption == 2 {
+                    let path = format!("{}/manifest.json", published.destination.design_path().unwrap());
+                    let mut state = state.lock().unwrap();
+                    let mut manifest = Manifest::read(&state.files[&path]).unwrap();
+                    manifest.document_hash = "0".repeat(64);
+                    state.files.insert(path, manifest.write().unwrap());
+                } else {
+                    let path = format!("{}/document.json", published.destination.design_path().unwrap());
+                    state.lock().unwrap().files.insert(path, b"{\"corrupt\":true}".to_vec());
+                }
+                assert!(api.publish(&save.record, || recover(&save), |_| Ok(())).await.is_err());
+                assert_eq!(state.lock().unwrap().commits, commits);
+            }
+        }
+    });
+}
+
+#[test]
+fn cached_catalogs_read_each_blob_once_and_only_check_the_ref_on_unchanged_heads() {
+    run_test(async {
+        let state = repository();
+        let (api, connection) = adapter(state.clone());
+        let mut cached = Vec::new();
+        for n in 0..100 {
+            let save = PendingSave::stage(
+                &connection,
+                "Robot",
+                &format!("parts/item-{n}"),
+                None,
+                Snapshot::prepare(format!("{{\"item\":{n}}}").into_bytes(), BTreeMap::new()).unwrap(),
+            )
+            .unwrap();
+            let plan = Publication::prepare(&save.record, recover(&save).unwrap(), None, None).unwrap();
+            state.lock().unwrap().files.extend(plan.files);
+            cached.push(crate::CachedEntry::new(save.record.clone(), save.record.destination.clone(), Some(save.record.id), true).unwrap());
+        }
+        let cache = Cache::default();
+        let mut stored = crate::stored_designs(cached, vec![]).unwrap();
+        assert_eq!(api.list_with_status_cached(&mut stored, &cache).await.unwrap().len(), 100);
+        assert_eq!(state.lock().unwrap().requests.len(), 104, "ref + commit + tree + marker + 100 unique manifests");
+        assert!(stored.iter().all(|entry| !entry.outdated));
+        state.lock().unwrap().requests.clear();
+        // A recreated adapter represents another worker/application launch.
+        let (api, _) = adapter(state.clone());
+        assert_eq!(api.list_with_status_cached(&mut stored, &cache).await.unwrap().len(), 100);
+        assert_eq!(state.lock().unwrap().requests.len(), 1);
+        state.lock().unwrap().requests.clear();
+        {
+            let mut state = state.lock().unwrap();
+            let mut manifest = Manifest::read(&state.files["Robot/parts/item-0/manifest.json"]).unwrap();
+            manifest.extra.insert("revision".into(), "external".into());
+            state.files.insert("Robot/parts/item-0/manifest.json".into(), manifest.write().unwrap());
+            state.commit = "d".repeat(40);
+        }
+        api.list_with_status_cached(&mut stored, &cache).await.unwrap();
+        assert_eq!(state.lock().unwrap().requests.len(), 4, "changed head downloads only its changed manifest");
+        assert_eq!(stored.iter().filter(|entry| entry.outdated).count(), 1);
+    });
+}
+
+#[test]
+fn maximum_length_names_publish_conflict_copies_that_can_be_opened_and_retried() {
+    run_test(async {
+        for name in ["a".repeat(128), "é".repeat(64)] {
+            let state = repository();
+            let (api, connection) = adapter(state.clone());
+            let make = |text: &[u8]| {
+                PendingSave::stage(&connection, "Robot", &format!("parts/{name}"), None, Snapshot::prepare(text.to_vec(), BTreeMap::new()).unwrap())
+                    .unwrap()
+            };
+            let first = make(b"first");
+            api.publish(&first.record, || recover(&first), |_| Ok(())).await.unwrap();
+            let other = make(b"other");
+            let copy = api.publish(&other.record, || recover(&other), |_| Ok(())).await.unwrap();
+            assert!(copy.conflict);
+            assert_eq!(crate::conflicts::original(&copy.destination).unwrap().unwrap(), first.record.destination);
+            assert_eq!(api.open(&copy.destination, |_| Ok(())).await.unwrap().document, b"other");
+            let commits = state.lock().unwrap().commits;
+            api.publish(&other.record, || recover(&other), |_| Ok(())).await.unwrap();
+            assert_eq!(state.lock().unwrap().commits, commits);
+        }
     });
 }

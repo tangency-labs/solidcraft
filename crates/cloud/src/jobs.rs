@@ -1,5 +1,6 @@
 //! Application-owned asynchronous operations. Native workers and browser tasks expose the
 //! same durable-save boundary; polling never substitutes the editor's current document.
+use std::collections::BTreeMap;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicU64, Ordering},
@@ -50,7 +51,7 @@ pub enum Operation {
     GenerateSshKey(SshKeyInput),
     LoadSettings,
     Configure(Settings),
-    /// Verify provider access and prepare a checkout; settings apply separately.
+    /// Verify provider access and resolve its repository; settings apply separately.
     Setup(Connection),
     Test(Connection),
     List(Connection),
@@ -87,8 +88,18 @@ pub enum Operation {
     Synchronize(Connection),
 }
 
+/// Immutable document capture prepared by a platform worker, outside serialized commands.
+pub type PrepareSave = Box<dyn FnOnce(&Job) -> Result<StagedSave> + Send>;
+
 pub trait Host: Send + Sync {
     fn submit(&self, operation: Operation, git_executable: String) -> Result<Job>;
+
+    /// Platform hosts schedule expensive serialization, compression and previews before
+    /// staging. Small embedding/test hosts may execute preparation synchronously.
+    fn prepare_save(&self, connection: Connection, prepare: PrepareSave, synchronize: bool, git_executable: String) -> Result<Job> {
+        let preparation = Job::new(connection.id.clone())?;
+        self.submit(Operation::Save { connection, save: Box::new(prepare(&preparation)?), synchronize }, git_executable)
+    }
 
     /// Read-only setup check. Unsaved credentials stay outside JSON commands and storage.
     fn check_repository(&self, _connection: Connection, _input: RepositoryCheckInput) -> Result<Job> {
@@ -161,11 +172,24 @@ struct State {
     status: JobStatus,
     cancelled: bool,
     opened: Option<Snapshot>,
-    cancel_handler: Option<Box<dyn FnOnce() + Send>>,
+    cancel_handlers: BTreeMap<u64, Box<dyn FnOnce() + Send>>,
+    next_handler: u64,
 }
 
 #[derive(Clone)]
 pub struct Job(Arc<Mutex<State>>);
+
+pub struct Cancellation {
+    job: Job,
+    id: u64,
+}
+impl Drop for Cancellation {
+    fn drop(&mut self) {
+        if let Ok(mut state) = self.job.0.lock() {
+            state.cancel_handlers.remove(&self.id);
+        }
+    }
+}
 
 impl Job {
     pub fn new(connection: String) -> Result<Self> {
@@ -196,7 +220,8 @@ impl Job {
             },
             cancelled: false,
             opened: None,
-            cancel_handler: None,
+            cancel_handlers: BTreeMap::new(),
+            next_handler: 0,
         }))))
     }
 
@@ -222,7 +247,7 @@ impl Job {
         }
         change(&mut state.status);
         if matches!(state.status.phase, Phase::Synced | Phase::Ready | Phase::Failed) {
-            state.cancel_handler = None;
+            state.cancel_handlers.clear();
         }
         if state.cancelled && state.status.phase != Phase::Synced {
             state.status.phase = if state.status.saved_locally { Phase::SavedLocally } else { Phase::Cancelled };
@@ -238,29 +263,29 @@ impl Job {
         state.cancelled = true;
         state.status.phase = if state.status.saved_locally { Phase::SavedLocally } else { Phase::Cancelled };
         // A durable queued save is retained even when the user cancels its upload.
-        let handler = state.cancel_handler.take();
+        let handlers = std::mem::take(&mut state.cancel_handlers);
         drop(state);
-        if let Some(handler) = handler {
+        for handler in handlers.into_values() {
             handler();
         }
         Ok(())
     }
 
-    /// Install the current worker's cancellation hook. Browser requests are sequential;
-    /// replace the completed request's hook before starting the next. Never run it under
-    /// the state mutex, since aborting can wake a future which reads this job immediately.
-    pub fn set_cancel_handler(&self, handler: impl FnOnce() + Send + 'static) -> Result<()> {
+    /// Register one in-flight request. Concurrent requests are all aborted on Cancel;
+    /// dropping its guard removes the hook as soon as that request finishes.
+    pub fn on_cancel(&self, handler: impl FnOnce() + Send + 'static) -> Result<Cancellation> {
         let mut state = self.0.lock().map_err(|_| Error::Storage("cloud operation state unavailable".into()))?;
-        if state.status.phase == Phase::Synced {
-            return Ok(());
-        }
         if state.cancelled {
             drop(state);
             handler();
-        } else {
-            state.cancel_handler = Some(Box::new(handler));
+            return Ok(Cancellation { job: self.clone(), id: 0 });
         }
-        Ok(())
+        let id = state.next_handler.checked_add(1).ok_or_else(|| Error::Storage("cloud cancellation identity exhausted".into()))?;
+        state.next_handler = id;
+        if state.status.phase != Phase::Synced {
+            state.cancel_handlers.insert(id, Box::new(handler));
+        }
+        Ok(Cancellation { job: self.clone(), id })
     }
 
     pub fn cancelled(&self) -> Result<bool> {
@@ -281,7 +306,7 @@ impl Job {
         if !state.cancelled {
             state.opened = Some(snapshot);
             state.status.phase = Phase::Ready;
-            state.cancel_handler = None;
+            state.cancel_handlers.clear();
         }
         Ok(())
     }
@@ -310,46 +335,36 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
 
     #[test]
-    fn cancellation_wakes_only_the_current_request_outside_the_job_lock() {
+    fn cancellation_wakes_concurrent_requests_outside_the_job_lock_and_drops_finished_hooks() {
         let job = Job::new("connection".into()).unwrap();
         let called = Arc::new(AtomicUsize::new(0));
-        let first = called.clone();
-        job.set_cancel_handler(move || {
-            first.fetch_add(100, Ordering::SeqCst);
-        })
-        .unwrap();
-        let current = called.clone();
-        let inspect = job.clone();
-        job.set_cancel_handler(move || {
-            assert_eq!(inspect.status().unwrap().phase, Phase::Cancelled);
-            current.fetch_add(1, Ordering::SeqCst);
-        })
-        .unwrap();
-        job.cancel().unwrap();
-        assert_eq!(called.load(Ordering::SeqCst), 1);
-        job.fail(Error::Storage("worker observed cancellation".into())).unwrap();
-        assert_eq!(job.status().unwrap().phase, Phase::Cancelled);
-        assert!(job.status().unwrap().message.is_none(), "a superseded preview is not a storage failure");
-        job.cancel().unwrap();
-        assert_eq!(called.load(Ordering::SeqCst), 1);
-        let late = called.clone();
-        job.set_cancel_handler(move || {
-            late.fetch_add(1, Ordering::SeqCst);
-        })
-        .unwrap();
-        assert_eq!(called.load(Ordering::SeqCst), 2);
-        let synced = Job::new("other".into()).unwrap();
-        let completed = called.clone();
-        synced
-            .set_cancel_handler(move || {
-                completed.fetch_add(100, Ordering::SeqCst);
+        let add = |count| {
+            let called = called.clone();
+            let inspect = job.clone();
+            job.on_cancel(move || {
+                assert!(inspect.cancelled().unwrap());
+                called.fetch_add(count, Ordering::SeqCst);
             })
-            .unwrap();
-        synced.update(|status| status.phase = Phase::Synced).unwrap();
+            .unwrap()
+        };
+        let finished = add(100);
+        let _first = add(1);
+        let _second = add(2);
+        drop(finished);
+        job.cancel().unwrap();
+        assert_eq!(called.load(Ordering::SeqCst), 3);
+        job.fail(Error::Storage("cancelled".into())).unwrap();
+        assert_eq!(job.status().unwrap().phase, Phase::Cancelled);
+        assert!(job.status().unwrap().message.is_none());
+        job.cancel().unwrap();
+        let _late = add(4);
+        assert_eq!(called.load(Ordering::SeqCst), 7);
+        let synced = Job::new("other".into()).unwrap();
+        let _hook = synced.on_cancel(|| panic!("confirmed publication cannot be cancelled")).unwrap();
+        synced.update(|s| s.phase = Phase::Synced).unwrap();
         synced.cancel().unwrap();
-        assert_eq!(called.load(Ordering::SeqCst), 2, "confirmed publication cannot be cancelled");
         let queued = Job::new("durable".into()).unwrap();
-        queued.update(|status| status.saved_locally = true).unwrap();
+        queued.update(|s| s.saved_locally = true).unwrap();
         queued.cancel().unwrap();
         queued.fail(Error::Storage("upload stopped".into())).unwrap();
         assert_eq!(queued.status().unwrap().phase, Phase::SavedLocally);

@@ -1,8 +1,8 @@
 //! Browser tasks implement the same asynchronous command boundary as native Git workers.
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
 use solidcraft_cloud::{
-    Connection, Destination, Error, PendingSave, Result, Snapshot,
+    Connection, Destination, Error, PendingSave, Published, Result, Snapshot,
     github::GitHub,
     jobs::{Host, Job, Operation, Phase},
 };
@@ -119,112 +119,55 @@ async fn open(store: &Store, connection: &Connection, destination: &Destination,
 async fn synchronize(connection: Connection, store: Store, job: Job, target: Option<PendingSave>) -> Result<()> {
     let lock = format!("solidcraft-cloud-sync-{}", solidcraft_cloud::digest(connection.id.as_bytes()));
     with_lock(&lock, async move {
-        check_cancelled(&job)?;
-        let mut pending = store.pending().await?;
-        if let Some(target) = &target
-            && !pending.iter().any(|save| save.id == target.id)
-        {
-            if let Some(published) = store.receipt(&target.id).await? {
-                job.update(|status| {
-                    status.destination = Some(published.destination.clone());
-                    status.result = Some(serde_json::json!(published));
-                    status.publications.push(published);
-                    if let Some(published) = status.publications.last()
-                        && let Ok(Some(change)) = solidcraft_cloud::management::Managed::confirmed(target, published)
-                    {
-                        status.managed.push(change);
-                    }
-                    status.phase = Phase::Synced;
-                })?;
-                return Ok(());
-            }
-            pending.push(target.clone());
-            pending = PendingSave::ordered(pending)?;
-        }
-        if pending.is_empty() {
-            receive::refresh(&connection, &store, &job).await?;
-            return job.update(|status| {
-                status.result = Some(serde_json::json!([]));
-                status.phase = Phase::Synced;
-            });
-        }
-        let mut remote = None;
-        job.update(|status| status.phase = Phase::Syncing)?;
-        let mut blocked = BTreeSet::new();
-        let mut first_error = None;
-        let mut results = Vec::new();
-        for save in pending {
-            check_cancelled(&job)?;
-            if save.expected_revision.as_ref().is_some_and(|parent| blocked.contains(parent)) {
-                blocked.insert(save.id);
-                continue;
-            }
-            let result = async {
-                save.check_connection(&connection)?;
-                let parent = match &save.expected_revision {
-                    Some(id) => store.receipt(id).await?,
-                    None => None,
-                };
-                let published = if let Some(published) = store.receipt(&save.id).await? {
-                    published
-                } else {
-                    if remote.is_none() {
-                        remote = Some(repository(&connection, &job).await?);
-                    }
-                    remote
-                        .as_ref()
-                        .ok_or_else(|| storage("repository unavailable"))?
-                        .publish_with_parent(
-                            &save,
-                            || recovered(&store, &save),
-                            |bytes| {
-                                check_cancelled(&job)?;
-                                solidcraft_engine::io::cloud::check_document(bytes)
-                            },
-                            parent.as_ref(),
-                        )
-                        .await?
-                };
-                // Finish this acknowledgement even if Cancel raced a successful ref update.
-                store.confirm(save.clone(), published.clone()).await?;
-                Ok(published)
-            }
-            .await;
-            match result {
-                Ok(published) => {
-                    let managed = solidcraft_cloud::management::Managed::confirmed(&save, &published)?;
-                    let value = serde_json::json!(published);
-                    job.update(|status| {
-                        status.publications.push(published.clone());
-                        status.managed.extend(managed);
-                    })?;
-                    if target.as_ref().is_some_and(|target| target.id == save.id) {
-                        job.update(|status| {
-                            status.destination = Some(published.destination);
-                            status.revision = Some(published.revision);
-                            status.result = Some(value);
-                            status.phase = Phase::Synced;
-                        })?;
-                        return Ok(());
-                    }
-                    results.push(value);
-                }
-                Err(error) => {
-                    blocked.insert(save.id);
-                    if first_error.is_none() {
-                        first_error = Some(error);
-                    }
-                }
-            }
-        }
-        job.update(|status| status.result = Some(serde_json::json!(results)))?;
-        if let Some(error) = first_error {
-            return Err(error);
-        }
-        receive::refresh(&connection, &store, &job).await?;
-        job.update(|status| status.phase = Phase::Synced)
+        let mut backend = BrowserSync { connection: &connection, store: &store, job: &job, remote: None };
+        solidcraft_cloud::sync::synchronize(&mut backend, &connection, &job, target).await
     })
     .await
+}
+
+struct BrowserSync<'a> {
+    connection: &'a Connection,
+    store: &'a Store,
+    job: &'a Job,
+    remote: Option<GitHub>,
+}
+impl solidcraft_cloud::sync::Backend for BrowserSync<'_> {
+    async fn pending(&mut self) -> Result<Vec<PendingSave>> {
+        self.store.pending().await
+    }
+    async fn receipt(&mut self, save: &PendingSave) -> Result<Option<Published>> {
+        self.store.receipt(&save.id).await
+    }
+    async fn parent(&mut self, save: &PendingSave) -> Result<Option<Published>> {
+        match &save.expected_revision {
+            Some(id) => self.store.receipt(id).await,
+            None => Ok(None),
+        }
+    }
+    async fn publish(&mut self, save: &PendingSave, parent: Option<&Published>) -> Result<Published> {
+        if self.remote.is_none() {
+            self.remote = Some(repository(self.connection, self.job).await?);
+        }
+        self.remote
+            .as_ref()
+            .ok_or_else(|| storage("repository unavailable"))?
+            .publish_with_parent(
+                save,
+                || recovered(self.store, save),
+                |bytes| {
+                    check_cancelled(self.job)?;
+                    solidcraft_engine::io::cloud::check_document(bytes)
+                },
+                parent,
+            )
+            .await
+    }
+    async fn confirm(&mut self, save: &PendingSave, published: &Published) -> Result<()> {
+        self.store.confirm(save.clone(), published.clone()).await
+    }
+    async fn refresh(&mut self) -> Result<()> {
+        receive::refresh(self.connection, self.store, self.job).await
+    }
 }
 
 async fn run(operation: Operation, job: &Job) -> Result<()> {
@@ -375,35 +318,13 @@ async fn run(operation: Operation, job: &Job) -> Result<()> {
                     pending.push(save);
                 }
             }
-            let has_local = !cached.is_empty() || !pending.is_empty();
-            let hidden: Vec<_> = pending.iter().filter(|s| s.manifest.deleted()).map(|s| s.destination.clone()).collect();
-            let mut catalog = solidcraft_cloud::stored_designs(cached, pending)?;
-            job.local_catalog(catalog.clone())?;
-            let mut destinations = BTreeMap::new();
-            for entry in &catalog {
-                destinations.insert(entry.destination.design_path()?, entry.destination.clone());
-            }
-            match async { repository(&connection, job).await?.list_with_status(&mut catalog).await }.await {
-                Ok(entries) => {
-                    for destination in entries {
-                        destinations.insert(destination.design_path()?, destination);
-                    }
-                }
-                Err(error @ Error::Storage(_)) if has_local => job.update(|status| status.message = Some(error.to_string()))?,
-                Err(error) => return Err(error),
-            }
-            for entry in catalog.iter().filter(|entry| entry.outdated) {
+            let mut listing = solidcraft_cloud::Listing::new(cached, pending, job)?;
+            let remote = async { repository(&connection, job).await?.list_with_status_cached(&mut listing.catalog, &store).await }.await;
+            listing.merge(remote, job)?;
+            for entry in listing.catalog.iter().filter(|entry| entry.outdated) {
                 store.mark_outdated(entry).await?;
             }
-            check_cancelled(job)?;
-            for destination in hidden {
-                destinations.remove(&destination.design_path()?);
-            }
-            job.update(|status| {
-                status.result = Some(serde_json::json!(destinations.into_values().collect::<Vec<_>>()));
-                status.catalog = catalog;
-                status.phase = Phase::Ready;
-            })?;
+            listing.finish(job)?;
         }
         Operation::Thumbnail { connection, destination } => {
             let png = if let Some(save) = pending_tip(&store, &destination).await? {
@@ -476,6 +397,24 @@ impl Host for BrowserHost {
         });
         Ok(job)
     }
+    fn prepare_save(&self, connection: Connection, prepare: solidcraft_cloud::jobs::PrepareSave, synchronize: bool, _: String) -> Result<Job> {
+        connection.validate()?;
+        let job = Job::new(connection.id.clone())?;
+        let worker = job.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let result = async {
+                check_cancelled(&worker)?;
+                let save = prepare(&worker)?;
+                run(Operation::Save { connection, save: Box::new(save), synchronize }, &worker).await
+            }
+            .await;
+            if let Err(error) = result {
+                let _ = worker.fail(error);
+            }
+        });
+        Ok(job)
+    }
+
     fn submit(&self, operation: Operation, _: String) -> Result<Job> {
         let connection = match &operation {
             Operation::LoadSettings | Operation::Configure(_) | Operation::GenerateSshKey(_) => None,

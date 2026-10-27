@@ -65,12 +65,30 @@ impl Published {
 
 fn conflict_destination(destination: &Destination, revision: &str) -> Result<Destination> {
     let mut destination = destination.clone();
-    destination.file = format!("conflicts/{}-{}", destination.file, revision.get(..12).ok_or_else(|| Error::Invalid("short revision".into()))?);
+    let suffix = revision.get(..12).ok_or_else(|| Error::Invalid("short revision".into()))?;
+    let original = destination.file.clone();
+    destination.file = format!("conflicts/{original}-{suffix}");
+    if destination.validate().is_err() {
+        destination.file = format!("conflicts/{suffix}/{original}");
+    }
     destination.validate()?;
     Ok(destination)
 }
 
 impl Publication {
+    /// Check the captured payload mapping before acknowledging a retry. Transports
+    /// additionally verify the committed document and object bytes (or Git identities).
+    pub fn verify_payload(save: &PendingSave, manifest: &Manifest) -> Result<()> {
+        manifest.write()?;
+        let mut manifest = manifest.clone();
+        // Management normalizes lifecycle requirements; optional metadata may grow.
+        manifest.required.clone_from(&save.manifest.required);
+        if crate::manifest_digest(&manifest)? != crate::manifest_digest(&save.manifest)? {
+            return Err(Error::Invalid("published payload differs from captured save; local save retained".into()));
+        }
+        Ok(())
+    }
+
     /// Managed storage bytes must survive ordinary Git checkouts without conversion.
     /// Ordinary project documents retain the repository's own attributes.
     pub const GIT_ATTRIBUTES: &[u8] = b".gitattributes -text -filter -ident -working-tree-encoding\nsolidcraft-project.json -text -filter -ident -working-tree-encoding\n**/document.json -text -filter -ident -working-tree-encoding\n**/manifest.json -text -filter -ident -working-tree-encoding\nobjects/** -text -filter -ident -working-tree-encoding\n";
@@ -190,6 +208,26 @@ impl Publication {
 mod tests {
     use super::*;
     use crate::Connection;
+
+    #[test]
+    fn conflict_paths_preserve_maximum_names_unicode_and_full_paths() {
+        for file in ["a".repeat(128), "é".repeat(64), format!("{}/{}/{}/{}", "x".repeat(127), "y".repeat(127), "z".repeat(127), "w".repeat(128))] {
+            let connection = Connection::default();
+            let destination = Destination { connection: connection.id.clone(), project: "Project".into(), file };
+            destination.validate().unwrap();
+            let copy = conflict_destination(&destination, &"a".repeat(64)).unwrap();
+            assert!(copy.file.split('/').all(|part| part.len() <= 128));
+            assert_eq!(crate::conflicts::original(&copy).unwrap().unwrap(), destination);
+            let child = conflict_destination(&copy, &"b".repeat(64)).unwrap();
+            assert_eq!(crate::conflicts::original(&child).unwrap().unwrap(), copy);
+            let change = crate::management::Change::Resolve {
+                file: destination.file.clone(),
+                revision: Some("a".repeat(64)),
+                keep: crate::conflicts::Keep::Local,
+            };
+            change.validate(&copy).unwrap();
+        }
+    }
 
     #[test]
     fn conflict_resolution_checks_both_heads_is_atomic_and_retries_without_replacing_newer_edits() {

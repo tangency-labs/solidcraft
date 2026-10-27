@@ -1083,7 +1083,7 @@ fn asynchronous_git_operations_retain_the_callers_allowed_folders() {
 }
 
 #[test]
-fn guided_checkout_setup_retries_and_pushes_without_git_identity_configuration() {
+fn setup_keeps_prepared_connections_and_standalone_push_uses_a_local_identity() {
     struct Access {
         connection: Connection,
         secrets: std::sync::Mutex<BTreeMap<String, String>>,
@@ -1099,7 +1099,7 @@ fn guided_checkout_setup_retries_and_pushes_without_git_identity_configuration()
         fn prepare(&self, mut connection: Connection, _: &Job) -> Result<Connection> {
             connection.id = self.connection.id.clone();
             connection.remote = self.connection.remote.clone();
-            connection.checkout.clear();
+            connection.checkout.clone_from(&self.connection.checkout);
             Ok(connection)
         }
     }
@@ -1107,8 +1107,13 @@ fn guided_checkout_setup_retries_and_pushes_without_git_identity_configuration()
     let source = fixture.checkout("source");
     let bare = fixture.0.join("remote with spaces.git");
     Fixture::git(&fixture.0, &["clone", "--bare", &source.checkout, bare.to_str().unwrap()]);
-    let connection =
-        Connection { id: "guided".into(), remote: bare.to_string_lossy().into_owned(), repository: "owner/designs".into(), ..Default::default() };
+    let connection = Connection {
+        id: "guided".into(),
+        checkout: source.checkout.clone(),
+        remote: bare.to_string_lossy().into_owned(),
+        repository: "owner/designs".into(),
+        ..Default::default()
+    };
     let access = std::sync::Arc::new(Access { connection: connection.clone(), secrets: Default::default() });
     let host = fixture.host().with_access(access.clone());
     assert_eq!(complete(&host.store_credential("test-id".into(), "test-token".into()).unwrap()).phase, Phase::Ready);
@@ -1125,7 +1130,9 @@ fn guided_checkout_setup_retries_and_pushes_without_git_identity_configuration()
     let other = complete(&other_host.submit(Operation::Setup(requested), String::new()).unwrap());
     assert_eq!(other.phase, Phase::Ready, "{other:?}");
     let other: Connection = serde_json::from_value(other.result.unwrap()).unwrap();
-    assert_ne!(prepared.checkout, other.checkout, "automatic account discovery must keep checkouts isolated");
+    assert_ne!(prepared.id, other.id);
+    assert_eq!(prepared.checkout, source.checkout);
+    assert!(!fixture.0.join("recovery").join(solidcraft_cloud::digest(prepared.id.as_bytes())).join("checkout").exists());
     // Empty local identity overrides any machine-wide identity without changing it.
     Fixture::git(Path::new(&prepared.checkout), &["config", "user.name", ""]);
     Fixture::git(Path::new(&prepared.checkout), &["config", "user.email", ""]);
@@ -1307,4 +1314,82 @@ fn previews_do_not_read_imports_and_a_missing_preview_does_not_block_opening() {
     let opening = host.submit(Operation::Open { connection, destination, local_revision: None }, String::new()).unwrap();
     assert_eq!(complete(&opening).phase, Phase::Ready);
     assert_eq!(opening.take_opened().unwrap().manifest.assets.len(), 1);
+}
+
+#[test]
+fn capture_preparation_runs_on_the_worker_before_local_durability() {
+    let fixture = Fixture::new();
+    let connection = fixture.checkout("deferred");
+    let capture = save(&connection, "parts/bracket", "Captured", None);
+    let caller = std::thread::current().id();
+    let (started, running) = std::sync::mpsc::channel();
+    let (finish, ready) = std::sync::mpsc::channel();
+    let job = fixture
+        .host()
+        .prepare_save(
+            connection.clone(),
+            Box::new(move |_| {
+                assert_ne!(std::thread::current().id(), caller);
+                started.send(()).unwrap();
+                ready.recv().unwrap();
+                Ok(capture)
+            }),
+            false,
+            String::new(),
+        )
+        .unwrap();
+    running.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert_eq!(job.status().unwrap().phase, Phase::Working);
+    assert!(!job.status().unwrap().saved_locally);
+    finish.send(()).unwrap();
+    let status = complete(&job);
+    assert_eq!(status.phase, Phase::SavedLocally, "{status:?}");
+    assert!(status.saved_locally);
+    let pending = fixture.outbox(&connection).pending().unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(status.revision.as_ref(), Some(&pending[0].id));
+}
+
+#[test]
+fn native_git_preserves_maximum_basename_conflicts_without_duplicate_revisions() {
+    let fixture = Fixture::new();
+    let connection = fixture.checkout("long-names");
+    let host = fixture.host();
+    let publish = |capture| {
+        let status = published(
+            &host.submit(Operation::Save { connection: connection.clone(), save: Box::new(capture), synchronize: true }, String::new()).unwrap(),
+        );
+        assert_eq!(status.phase, Phase::Synced, "{status:?}");
+        serde_json::from_value::<solidcraft_cloud::Published>(status.result.unwrap()).unwrap()
+    };
+    for name in ["a".repeat(128), "é".repeat(64)] {
+        let file = format!("parts/{name}");
+        let initial = publish(save(&connection, &file, "First", None));
+        let copy = publish(save(&connection, &file, "Other", None));
+        assert!(copy.conflict);
+        assert_eq!(solidcraft_cloud::conflicts::original(&copy.destination).unwrap().unwrap(), initial.destination);
+        assert_eq!(GitRepository::open(connection.clone(), "").unwrap().open_design(&copy.destination).unwrap().0.name, "Other");
+        let retry = publish(save(&connection, &file, "Other", None));
+        assert_eq!(retry.commit, copy.commit);
+    }
+}
+
+#[test]
+fn native_retries_reject_a_corrupt_manifest_even_when_the_document_and_revision_are_intact() {
+    let fixture = Fixture::new();
+    let connection = fixture.checkout("corrupt-manifest");
+    let capture = save(&connection, "parts/bracket", "Captured", None);
+    let recover = || capture.record.recover(|path| Ok(capture.objects[path].clone())).unwrap();
+    let repository = GitRepository::open(connection.clone(), "").unwrap();
+    let publication = repository.publish(&capture.record, recover()).unwrap();
+    let path = format!("{}/manifest.json", publication.destination.design_path().unwrap());
+    let checkout = Path::new(&connection.checkout);
+    let mut manifest = solidcraft_cloud::Manifest::read(&fs::read(checkout.join(&path)).unwrap()).unwrap();
+    manifest.document_hash = "0".repeat(64);
+    fs::write(checkout.join(&path), manifest.write().unwrap()).unwrap();
+    Fixture::git(checkout, &["add", "--", &path]);
+    Fixture::git(checkout, &["commit", "-m", "External manifest corruption"]);
+    assert!(repository.open_design(&publication.destination).is_err());
+    let error = repository.publish(&capture.record, recover()).unwrap_err().to_string();
+    assert!(error.contains("published payload differs"), "{error}");
 }

@@ -12,7 +12,17 @@ pub const PROJECT_MARKER: &str = "solidcraft-project.json";
 
 /// Paths must have the same meaning on Unix, Windows, in Git trees, and in browser storage.
 pub fn check_path(path: &str) -> Result<()> {
-    if path.len() > 512 || path.chars().any(|c| c.is_control() || "\\:*?<>|\"".contains(c)) {
+    check_path_limit(path, 512)
+}
+
+/// A repository path includes a project, a design, generated conflict prefixes and
+/// a payload filename. Each user-supplied path retains its separate 512-byte limit.
+pub fn check_repository_path(path: &str) -> Result<()> {
+    check_path_limit(path, 1536)
+}
+
+fn check_path_limit(path: &str, limit: usize) -> Result<()> {
+    if path.len() > limit || path.chars().any(|c| c.is_control() || "\\:*?<>|\"".contains(c)) {
         return Err(Error::Invalid("invalid project path".into()));
     }
     for part in path.split('/') {
@@ -26,6 +36,20 @@ pub fn check_path(path: &str) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Generated conflict folders reserve their own bounded prefix instead of making a
+/// user's valid 128-byte basename longer. The original path keeps its normal limits.
+fn check_design_path(mut path: &str) -> Result<()> {
+    for _ in 0..16 {
+        let Some(rest) = path.strip_prefix("conflicts/") else { break };
+        let Some((revision, original)) = rest.split_once('/') else { break };
+        if revision.len() != 12 || !revision.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
+            break;
+        }
+        path = original;
+    }
+    check_path(path)
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -82,7 +106,7 @@ impl Destination {
             return Err(Error::Invalid("invalid repository connection".into()));
         }
         check_path(&self.project)?;
-        check_path(&self.file)?;
+        check_design_path(&self.file)?;
         if self.file.split('/').any(|s| matches!(s, "objects" | PROJECT_MARKER | "manifest.json" | "document.json")) {
             return Err(Error::Invalid("reserved project path".into()));
         }

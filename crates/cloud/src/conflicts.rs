@@ -17,6 +17,14 @@ pub enum Keep {
 pub fn original(copy: &Destination) -> Result<Option<Destination>> {
     copy.validate()?;
     let Some(path) = copy.file.strip_prefix("conflicts/") else { return Ok(None) };
+    if let Some((revision, file)) = path.split_once('/')
+        && revision.len() == 12
+        && revision.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        let original = Destination { file: file.into(), ..copy.clone() };
+        original.validate()?;
+        return Ok(Some(original));
+    }
     let Some((file, suffix)) = path.rsplit_once('-') else { return Ok(None) };
     if suffix.len() != 12 || !suffix.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
         return Ok(None);

@@ -199,7 +199,7 @@ fn verified_checkout_waits_for_use_and_durable_apply_in_both_themes() {
         })
         .unwrap();
         h.frames(3);
-        assert_eq!(h.app.session.cloud_settings(), &settings);
+        assert_eq!(h.app.session.cloud_settings(), settings);
     }
 }
 
@@ -290,6 +290,7 @@ fn editing_a_connection_preserves_its_credentials_and_other_destinations() {
     let (mut h, worker) = setup(true);
     let first = Connection {
         provider: String::new(),
+        https_username: "test-user".into(),
         checkout: "/example/checkout".into(),
         ..solidcraft_cloud::setup::github_connection("example/personal").unwrap()
     };

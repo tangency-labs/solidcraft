@@ -176,7 +176,7 @@ fn tabs_share_connection_updates_and_confirmed_conflicts_without_redirecting_oth
     h.frame();
     let revision = h.app.session.cloud_binding().unwrap().revision.clone().unwrap();
     documents::open_tab(&mut h.app, Default::default()).unwrap();
-    assert_eq!(h.app.session.cloud_settings(), &worker.settings);
+    assert_eq!(h.app.session.cloud_settings(), worker.settings);
     assert!(h.app.session.cloud_binding().is_none());
     h.app.run("cloud.sync", json!({})).unwrap();
     let conflict = Destination { file: "conflicts/bracket".into(), ..destination };
@@ -198,9 +198,9 @@ fn tabs_share_connection_updates_and_confirmed_conflicts_without_redirecting_oth
     h.app.run("cloud.configure", json!({"settings":changed})).unwrap();
     documents::switch(&mut h.app, 1);
     h.frame();
-    assert_eq!(h.app.session.cloud_settings(), &changed);
+    assert_eq!(h.app.session.cloud_settings(), changed);
     documents::switch(&mut h.app, 0);
-    assert_eq!(h.app.session.cloud_settings(), &changed);
+    assert_eq!(h.app.session.cloud_settings(), changed);
     assert_eq!(h.app.session.cloud_binding().unwrap().destination, conflict, "changing the default never retargets an open design");
 }
 
@@ -284,7 +284,7 @@ fn actual_native_storage_recovers_an_offline_design_through_application_commands
     assert_eq!(wait(&mut h, saved["operation"].as_str().unwrap()).phase, Phase::SavedLocally);
     assert!(!h.app.session.is_dirty());
     launch(&mut h, &root);
-    assert_eq!(h.app.session.cloud_settings(), &settings);
+    assert_eq!(h.app.session.cloud_settings(), settings);
     let listed = h.app.run("cloud.list", json!({})).unwrap();
     assert_eq!(wait(&mut h, listed["operation"].as_str().unwrap()).result.unwrap(), json!([destination]));
     let opened = h.app.run("cloud.open", json!({"destination":destination})).unwrap();
@@ -320,12 +320,8 @@ fn cloud_action_lifetimes_include_uploads_background_tabs_and_cancellation() {
     assert!(!h.app.cloud.operations.busy("cloud.save", "github"));
     assert!(!h.app.cloud.operations.cancelling(&save.status().unwrap().operation));
     h.app.run("cloud.save", json!({"destination":destination})).unwrap();
-    let next = worker.jobs.lock().unwrap().last().unwrap().0.clone();
-    next.update(|s| {
-        s.saved_locally = true;
-        s.phase = Phase::SavedLocally;
-    })
-    .unwrap();
+    let index = worker.jobs.lock().unwrap().len() - 1;
+    worker.saved(index);
     h.frames(2);
     assert!(!h.app.cloud.operations.busy("cloud.save", "github"), "an offline save finishes after its durable acknowledgement");
 }
