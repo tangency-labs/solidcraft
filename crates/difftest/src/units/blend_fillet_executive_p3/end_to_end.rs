@@ -573,57 +573,6 @@ pub(super) fn topology(b: &Brep, out: &mut Vec<f64>) -> SolidResult<()> {
     }
     Ok(())
 }
-/// The topology identities [`read_file`]'s reader gives the objects it builds, as
-/// the `topology.brep_p7` runner keys them: one distinct key per object.
-fn read_key_of(e: solidcore::EntityRef) -> solidcore::geom::object::ObjectRef {
-    use solidcore::geom::attribute::ObjectKey;
-    use solidcore::EntityRef as E;
-    let (type_code, kind, i) = match e {
-        E::Brep(x) => (16011, 0u64, x.index()),
-        E::Region(x) => (16012, 1, x.index()),
-        E::Shell(x) => (16013, 2, x.index()),
-        E::Faceuse(x) => (16022, 3, x.index()),
-        E::Face(x) => (16002, 4, x.index()),
-        E::Loopuse(x) => (16004, 5, x.index()),
-        E::Loop(x) => (16003, 6, x.index()),
-        E::Edgeuse(x) => (16005, 7, x.index()),
-        E::Edge(x) => (16016, 8, x.index()),
-        E::Vertexuse(x) => (16006, 9, x.index()),
-        E::Vertex(x) => (16021, 10, x.index()),
-    };
-    solidcore::geom::object::ObjectRef {
-        type_code,
-        key: ObjectKey(((kind + 1) << 40) | u64::from(i)),
-    }
-}
-/// The Rust B-rep of the ASCII `.smb` file at `path`, read by the Rust reader alone
-/// (`SmBrep::ReadFromFile` into `new SmBrep(ctx)`, no rebuild), as the C++ side
-/// reads it: no C++-built geometry or topology reaches the Rust side.
-fn read_file(k: &mut Kernel, path: &str) -> Result<SolidResult<Brep>, HarnessError> {
-    use solidcore::geom::attribute::AttributeStore;
-    use solidcore::topology::brep::{p10::TopologyEnv, p7};
-    use solidcore::topology::database_io::FileType;
-    let bytes = std::fs::read(path).map_err(|e| HarnessError::new(format!("{path}: {e}")))?;
-    let read = |k: &mut Kernel| -> SolidResult<Brep> {
-        let mut body = Brep::new_with_infinite_region()?;
-        let mut attributes = AttributeStore::default();
-        let mut records = std::collections::BTreeMap::new();
-        let mut env = TopologyEnv {
-            all_attributes: &[],
-            attributes: &mut attributes,
-            key_of: &read_key_of,
-            records: &mut records,
-            next_key: 1u64 << 50,
-        };
-        p7::read_from_file(k, &mut body, bytes, FileType::Ascii, false, &mut env)?;
-        // Record the geometry owners under arena identities, as a kernel-built
-        // B-rep does, so `GetFace` / `GetEdge` on that geometry resolve to the
-        // owning topology.
-        body.use_arena_naming()?;
-        Ok(body)
-    };
-    Ok(read(k))
-}
 /// The Rust body of `input`'s source (the box by default).
 fn build(k: &mut Kernel, input: &RealSolid) -> Result<SolidResult<Brep>, HarnessError> {
     use solidcore::primitive::api_primitives as primitives;
@@ -636,7 +585,7 @@ fn build(k: &mut Kernel, input: &RealSolid) -> Result<SolidResult<Brep>, Harness
             let [x, y, z] = input.dimensions.unwrap_or_default();
             primitives::create_box(k, Vec3::ZERO, x, y, z)
         }
-        Some(Source::File { path }) => read_file(k, path)?,
+        Some(Source::File { path }) => crate::own_reader::read_file(k, path)?,
         Some(Source::Cylinder {
             origin,
             radius,

@@ -770,25 +770,6 @@ fn build_failure(export: &[f64]) -> Output {
     ))
 }
 
-/// The Rust B-rep of an upstream `.smb` file at `path`, imported through this unit's
-/// export (list orders, vertex use lists and face back-links applied), for the
-/// runners of other units whose Rust side needs the file's B-rep.
-pub(crate) fn import_file(path: &str, rebuild: bool) -> Result<Brep, HarnessError> {
-    // the file block: kind 0, rebuild, validate_only, init_gaps
-    let block = [0.0, flag(rebuild), 0.0, 0.0];
-    let ex = crate::export_memo::export("topology_brep_p1", &[path], &block, || {
-        ffi::eval(Op::Export, path, &block)
-    })
-    .map_err(|e| harness(format!("c++ export: {e}")))?;
-    let Some((_, graph_at)) = ffi::counts(&ex) else {
-        return Err(harness(format!(
-            "brep_build_status_{}",
-            ex.get(1).copied().unwrap_or(0.0)
-        )));
-    };
-    Ok(import(&ex, graph_at)?.0)
-}
-
 /// The Rust B-rep of an export with this unit's extras applied, and the geometry
 /// types of the import, with its cached gaps refilled on the finished B-rep
 /// ([`super::topology_vertexuse::refill_gaps`]).

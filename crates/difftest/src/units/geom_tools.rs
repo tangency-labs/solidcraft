@@ -17,8 +17,8 @@
 //! `coincident` uses the curve, interval and end vertices of edge `edge` of the B-rep
 //! (`SmBrep::GetEdges` order) as the target and searches every edge from `start`; with
 //! `copy_curve` the target is a copy of the curve (no owner), else the edge's own curve
-//! (the edge owning it is skipped). The Rust side imports the file's B-rep through the
-//! `topology.brep_p1` export (`file_brep`), as for `edge` / `face`.
+//! (the edge owning it is skipped). The Rust side reads the file's B-rep with the Rust
+//! reader (`file_brep`, `crate::own_reader`), as for `edge` / `face`.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -167,7 +167,7 @@ fn index_i64(i: usize) -> Result<i64, HarnessError> {
     i64::try_from(i).map_err(|e| harness(&e))
 }
 
-fn rust(k: &solidcore::kernel::Kernel, i: &Inputs) -> Result<Output, HarnessError> {
+fn rust(k: &mut solidcore::kernel::Kernel, i: &Inputs) -> Result<Output, HarnessError> {
     match i {
         Inputs::Point { pts, target, tol } => {
             let pts: Vec<Point3> = pts.iter().copied().map(p3).collect();
@@ -209,7 +209,7 @@ fn rust(k: &solidcore::kernel::Kernel, i: &Inputs) -> Result<Output, HarnessErro
         } => {
             // the file's B-rep in SmBrep::GetEdges order; the target is edge `edge`'s
             // curve (its own: owned by the edge, so skipped; or a copy: no owner)
-            let brep = file_brep(file)?;
+            let brep = file_brep(k, file)?;
             let edges = solidcore::topology::brep::p1::edges(&brep, None).map_err(|e| harness(&e))?;
             if edges.len() != *n_edges {
                 return Err(harness(&format!("file has {} edges, case says {n_edges}", edges.len())));
@@ -249,7 +249,7 @@ fn rust(k: &solidcore::kernel::Kernel, i: &Inputs) -> Result<Output, HarnessErro
         }
         Inputs::Edge { file, pnt } => match tools::find_edge(
             &solidcore::kernel::Kernel::default(),
-            &file_brep(file)?,
+            &file_brep(k, file)?,
             p3(*pnt),
         ) {
             Ok(Some(m)) => Ok(status_only(0)
@@ -259,7 +259,7 @@ fn rust(k: &solidcore::kernel::Kernel, i: &Inputs) -> Result<Output, HarnessErro
             Err(e) => Ok(rust_err(&e)),
         },
         Inputs::Face { file, pnt } => {
-            let mut brep = file_brep(file)?;
+            let mut brep = file_brep(k, file)?;
             match tools::find_face(
                 &solidcore::kernel::Kernel::default(),
                 &mut brep,
@@ -285,11 +285,12 @@ fn rust(k: &solidcore::kernel::Kernel, i: &Inputs) -> Result<Output, HarnessErro
     }
 }
 
-/// The file's B-rep on the Rust side (`SmBrep::ReadFromFile` in the shim), imported
-/// through the `topology.brep_p1` export so its edge and face lists are in upstream's
-/// list order (`FindEdge` / `FindFace` report indices into them).
-fn file_brep(file: &str) -> Result<Brep, HarnessError> {
-    crate::units::topology_brep_p1::import_file(file, false)
+/// The file's B-rep on the Rust side, read by the Rust reader
+/// ([`crate::own_reader::read_file`]) as the shim reads it (`SmBrep::ReadFromFile`):
+/// its edge and face lists are in upstream's list order (`FindEdge` / `FindFace`
+/// report indices into them). No C++ export reaches the Rust side.
+fn file_brep(k: &mut solidcore::kernel::Kernel, file: &str) -> Result<Brep, HarnessError> {
+    crate::own_reader::read_file_or_fail(k, file)
 }
 
 /// Upstream `SM_ERR`.
@@ -406,7 +407,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        let k = &solidcore::Kernel::default();
+        let k = &mut solidcore::Kernel::default();
         rust(k, &case.parse()?)
     }
 }
