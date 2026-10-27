@@ -119,7 +119,11 @@ fn swung_nurb(kernel: &crate::kernel::Kernel, curve: &Curve) -> Result<BSplineCu
         }
         CurveKind::Ellipse(ellipse) => {
             let mut ellipse = ellipse.clone();
-            ignore_status(ellipse.make_nurb_owned(kernel, curve.owner()))?;
+            ignore_status(ellipse.make_nurb_owned_with_edge_tol(
+                kernel,
+                curve.owner(),
+                curve.owner_zone_tol_3d(),
+            ))?;
             Ok(ellipse.base().clone())
         }
         CurveKind::Parabola(parabola) => {

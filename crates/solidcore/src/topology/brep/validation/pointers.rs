@@ -1028,6 +1028,7 @@ fn fix_reversed_on(
 ) -> Result<()> {
     use crate::curve::curve::CurveKind;
     let owner = c.owner();
+    let edge_zone_tol_3d = c.owner_zone_tol_3d();
     let base = match c.kind_mut() {
         CurveKind::BSpline(base) => base,
         CurveKind::Line(line) => {
@@ -1038,7 +1039,7 @@ fn fix_reversed_on(
         }
         CurveKind::Ellipse(ellipse) => {
             if ellipse.base().gw_nurb().is_none() {
-                ellipse.make_nurb_owned(k, owner)?;
+                ellipse.make_nurb_owned_with_edge_tol(k, owner, edge_zone_tol_3d)?;
             }
             ellipse.base_mut()
         }

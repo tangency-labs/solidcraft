@@ -757,8 +757,8 @@ pub fn delete_topological_vertex_with_notifications(
     // that metadata. Coincidence classification still handles equal geometry.
     let mut same_geometry = false;
     if !same_geometry {
-        let delete_curve = edge_curve(b, deleted)?;
-        let survive_curve = edge_curve(b, survivor)?;
+        let delete_curve = edge_curve_with_tolerance(b, deleted)?;
+        let survive_curve = edge_curve_with_tolerance(b, survivor)?;
         let deleted_range = delete_curve.natural_interval();
         let survivor_range = survive_curve.natural_interval();
         // The native overload defaults bSnapToEnds to TRUE. Its additional-work
@@ -767,7 +767,7 @@ pub fn delete_topological_vertex_with_notifications(
             crate::error::ignored(delete_curve.global_coincidence_checker::<JoinCurve>(
                 k,
                 &deleted_range,
-                survive_curve,
+                &survive_curve,
                 &survivor_range,
                 0.001,
                 true,
@@ -914,6 +914,16 @@ fn edge_curve(b: &Brep, edge: EdgeId) -> Result<&Curve> {
         .as_ref()
         .ok_or_else(|| SolidError::null_pointer(OP))
 }
+
+/// An evaluation copy of the edge's curve carrying the edge's tolerance
+/// ([`Curve::set_owner_zone_tol_3d`]), so the caches its solves build use it as
+/// upstream's over the edge-owned curve (`SmTol::GetApproxTol3d(&m_crCurve)`).
+fn edge_curve_with_tolerance(b: &Brep, edge: EdgeId) -> Result<Curve> {
+    let mut curve = edge_curve(b, edge)?.clone_for_evaluation()?;
+    curve.set_owner_zone_tol_3d(Some(b.edge(edge)?.tolerance));
+    Ok(curve)
+}
+
 /// The two curves of `DeleteTopologicalVertex`'s coincidence check as its solutions
 /// name them (upstream's `pDeleteCurve`, `pSurviveCurve`), with the natural interval
 /// `IdenticalSolutions` reads through them (`SmCurve::GetNaturalInterval`).

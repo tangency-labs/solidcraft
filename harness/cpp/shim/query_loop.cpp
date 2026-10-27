@@ -21,6 +21,7 @@
 #include <SmBrep.h>
 #include <SmBrepData.h>
 #include <SmCircle.h>
+#include <SmHermiteCurve.h>
 #include <SmContext.h>
 #include <SmEdge.h>
 #include <SmEdgeuse.h>
@@ -77,7 +78,8 @@ SmBSplineCurve* read_bspline_curve(Rd& rd, const SmContext& ctx, ULONG dim)
 }
 
 // A 3D curve block: `0 a[3] b[3]` SmLine(a, b), `1 c[3] x[3] y[3] d0 d1 r`
-// SmCircle(c, x, y, [d0, d1], r) or `2 bspline` (see read_bspline_curve).
+// SmCircle(c, x, y, [d0, d1], r), `2 bspline` (see read_bspline_curve) or
+// `3 p1[3] d1[3] p2[3] d2[3]` SmHermiteCurve(p1, d1, p2, d2, 3).
 SmCurve* read_curve(Rd& rd, const SmContext& ctx)
 {
     int64_t kind = rd.idx();
@@ -96,6 +98,14 @@ SmCurve* read_curve(Rd& rd, const SmContext& ctx)
         double d1 = rd.num();
         double r = rd.num();
         return new (ctx) SmCircle(c, x, y, SmExtent1d(d0, d1), r, 3, &ctx);
+    }
+    if (kind == 3)
+    {
+        SmVector3d p1 = rd.vec();
+        SmVector3d d1 = rd.vec();
+        SmVector3d p2 = rd.vec();
+        SmVector3d d2 = rd.vec();
+        return new (ctx) SmHermiteCurve(p1, d1, p2, d2, 3);
     }
     return read_bspline_curve(rd, ctx, 3);
 }

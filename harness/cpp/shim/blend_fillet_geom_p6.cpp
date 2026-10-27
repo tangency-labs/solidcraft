@@ -401,7 +401,13 @@ struct Model
             e->SetFilletEdgeType((SmFilletEdgeType)etype);
             e->SetStatus((SmFilStatus)status);
             if (rd.flag())
-                e->SetCurve(read_curve(rd, ctx), TRUE);
+            {
+                // as upstream's producers: SetCurve, then the curve's owner is the edge
+                SmCurve* c = read_curve(rd, ctx);
+                e->SetCurve(c, TRUE);
+                if (c != NULL)
+                    c->SetOwner(e);
+            }
             if (rd.flag())
             {
                 double t0 = rd.num();

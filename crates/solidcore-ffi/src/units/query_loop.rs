@@ -87,6 +87,17 @@ pub enum Curve3 {
     },
     /// `SmBSplineCurve(nurb, 3)`.
     BSpline(Nurb),
+    /// `SmHermiteCurve(p1, d1, p2, d2, 3)` over `[0, 1]`.
+    Hermite {
+        /// Start point.
+        p1: [f64; 3],
+        /// Start derivative.
+        d1: [f64; 3],
+        /// End point.
+        p2: [f64; 3],
+        /// End derivative.
+        d2: [f64; 3],
+    },
 }
 
 /// The generator of a surface of revolution.
@@ -401,6 +412,15 @@ fn push_curve(o: &mut Vec<f64>, c: &Curve3) -> Result<(), FfiError> {
             }
             o.push(2.0);
             push_nurb(o, n, 3);
+        }
+        Curve3::Hermite { p1, d1, p2, d2 } => {
+            for v in [p1, d1, p2, d2] {
+                finite(v, "hermite")?;
+            }
+            o.push(3.0);
+            for v in [p1, d1, p2, d2] {
+                o.extend_from_slice(v);
+            }
         }
     }
     Ok(())

@@ -376,11 +376,16 @@ pub(crate) fn contains_uv_point_with_topology(
         // low work: see if TgtPoint is on this EdgeCurve
         let on_edge_curve = {
             let edge = b.edge(this_edge)?;
-            let curve = edge
+            // the drop builds the edge curve's cache at the edge's tolerance
+            // (SmTol::GetApproxTol3d(&m_crCurve) reads pEdge->GetTolerance() through the
+            // owner)
+            let mut curve = edge
                 .curve
                 .as_ref()
-                .ok_or_else(|| null("ContainsUVPoint: edge without curve"))?;
-            drop_on_edge(k, curve, &edge.interval, point_3d, edge.tolerance)?
+                .ok_or_else(|| null("ContainsUVPoint: edge without curve"))?
+                .clone_for_evaluation()?;
+            curve.set_owner_zone_tol_3d(Some(edge.tolerance));
+            drop_on_edge(k, &curve, &edge.interval, point_3d, edge.tolerance)?
         };
         if let Some(param) = on_edge_curve {
             // TgtPoint is on EdgeCurve - set output and return

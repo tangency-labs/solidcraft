@@ -11,7 +11,7 @@
 //! option vectors `vecs`). The `local` and `trees` cases have an object table `objects` of
 //! free-standing vertices (`{"vertex": {p, tol}}`), curves (`{"curve": ..}`: `bspline`
 //! (control points as stored `[x, y, z, w]`), `hermite`, `line`, `ellipse` or `circle`, as
-//! unit `curve.curve_p5`) and edges (`{"edge": {curve, ivl}}`, owning the curve), and the
+//! unit `curve.curve_p5`) and edges (`{"edge": {curve, ivl, tol?}}`, owning the curve; `tol` sets the edge's tolerance, else `SmEdge`'s default 0.0), and the
 //! local solver `local` (`kind` as `solidcore_ffi::units::intersect_topology_solver_p1::
 //! LocalKind`, `swap`, `point`, point vertex `pv`, interval `ivl`, curve `owner`, `curve`,
 //! curve edge `cedge`; indices into the table, `-1` for none). On the Rust side the table
@@ -150,7 +150,13 @@ enum CurveIn {
 enum ObjIn {
     Vertex { p: [f64; 3], tol: f64 },
     Curve(CurveIn),
-    Edge { curve: usize, ivl: [f64; 2] },
+    Edge {
+        curve: usize,
+        ivl: [f64; 2],
+        /// The edge's tolerance; `None` keeps `SmEdge`'s default (0.0).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tol: Option<f64>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -306,8 +312,9 @@ fn objects_block(v: &mut Vec<f64>, objs: &[ObjIn]) {
                 v.push(1.0);
                 curve_block(v, c);
             }
-            ObjIn::Edge { curve, ivl } => {
+            ObjIn::Edge { curve, ivl, tol } => {
                 v.extend([2.0, *curve as f64, ivl[0], ivl[1]]);
+                v.extend([f64::from(u8::from(tol.is_some())), tol.unwrap_or(0.0)]);
             }
         }
     }
@@ -541,8 +548,8 @@ enum Item {
     Vertex(Point3, f64),
     /// A curve and the edge owning it.
     Curve(Box<Curve>, Option<usize>),
-    /// An edge's curve and interval.
-    Edge(usize, Extent1d),
+    /// An edge's curve, interval and tolerance.
+    Edge(usize, Extent1d, f64),
 }
 
 /// The free-standing objects of a case.
@@ -564,12 +571,16 @@ impl Scene {
             match o {
                 ObjIn::Vertex { p, tol } => items.push(Item::Vertex(v3(*p), *tol)),
                 ObjIn::Curve(c) => items.push(Item::Curve(Box::new(build(k, c)?), None)),
-                ObjIn::Edge { curve, ivl } => {
+                ObjIn::Edge { curve, ivl, tol } => {
                     let Some(Item::Curve(_, owner)) = items.get_mut(*curve) else {
                         return Err(harness("edge curve is not a curve"));
                     };
                     *owner = Some(i);
-                    items.push(Item::Edge(*curve, Extent1d::from_min_max(ivl[0], ivl[1])));
+                    items.push(Item::Edge(
+                        *curve,
+                        Extent1d::from_min_max(ivl[0], ivl[1]),
+                        tol.unwrap_or(0.0),
+                    ));
                 }
             }
         }
@@ -604,19 +615,20 @@ impl Scene {
 
 impl TopologyObjects<Obj> for Scene {
     // SmTol::GetZoneTol3d(const SmObject*) of the shim's free-standing objects: a
-    // vertex's own tolerance, an edge's default (`SmEdge` stores 0.0), a curve's edge's
-    // tolerance or, without edge (the cache's analytic line too), the system's
+    // vertex's own tolerance, an edge's (`SmEdge`'s default 0.0 unless the case sets
+    // one), a curve's edge's tolerance or, without edge (the cache's analytic line too),
+    // the system's
     fn object_zone_tol_3d(&self, k: &Kernel, object: Obj) -> solidcore::Result<f64> {
         let system = || {
             solidcore::geom::tol::zone_tol_3d(k, solidcore::geom::tol::SmallTopoType::NormalSize)
         };
         match object {
             Obj::Vertex(_) => self.vertex_tolerance(object),
-            Obj::Edge(_) => Ok(0.0),
-            Obj::Curve(..) => Ok(match self.curve_edge(object)? {
-                Some(_) => 0.0,
-                None => system(),
-            }),
+            Obj::Edge(_) => self.edge_tolerance(object),
+            Obj::Curve(..) => match self.curve_edge(object)? {
+                Some(edge) => self.edge_tolerance(edge),
+                None => Ok(system()),
+            },
             Obj::Analytic(_) => Ok(system()),
         }
     }
@@ -671,7 +683,7 @@ impl TopologyObjects<Obj> for Scene {
     fn edge_curve(&self, edge: Obj) -> solidcore::Result<Option<Obj>> {
         match edge {
             Obj::Edge(i) => match self.items.get(i) {
-                Some(Item::Edge(c, _)) => match self.items.get(*c) {
+                Some(Item::Edge(c, ..)) => match self.items.get(*c) {
                     Some(Item::Curve(curve, _)) => {
                         Ok(Some(Obj::Curve(*c, curve.natural_interval())))
                     }
@@ -686,16 +698,22 @@ impl TopologyObjects<Obj> for Scene {
     fn edge_interval(&self, edge: Obj) -> solidcore::Result<Extent1d> {
         match edge {
             Obj::Edge(i) => match self.items.get(i) {
-                Some(Item::Edge(_, ivl)) => Ok(*ivl),
+                Some(Item::Edge(_, ivl, _)) => Ok(*ivl),
                 _ => Err(not_found("not an edge")),
             },
             _ => Err(not_found("not an edge")),
         }
     }
 
-    fn edge_tolerance(&self, _edge: Obj) -> solidcore::Result<f64> {
-        // only the face solves read it, and the scene has no faces
-        Err(not_found("no edge tolerances in the scene"))
+    fn edge_tolerance(&self, edge: Obj) -> solidcore::Result<f64> {
+        // the case's tolerance, else `SmEdge`'s default (0.0)
+        match edge {
+            Obj::Edge(i) => match self.items.get(i) {
+                Some(Item::Edge(_, _, tol)) => Ok(*tol),
+                _ => Err(not_found("not an edge")),
+            },
+            _ => Err(not_found("not an edge")),
+        }
     }
 
     fn surface_face(&self, _surface: Obj) -> solidcore::Result<Option<Obj>> {
@@ -1365,7 +1383,11 @@ fn gen_point_curve_case(rng: &mut Rng) -> OpIn {
         for (i, c) in curves.iter().enumerate() {
             let ivl = gen_ivl(rng, range_of(c));
             edge_of.push(objects.len() as i64);
-            objects.push(ObjIn::Edge { curve: i, ivl });
+            objects.push(ObjIn::Edge {
+                curve: i,
+                ivl,
+                tol: None,
+            });
         }
     }
     let swap = rng.chance(0.3);
@@ -1451,10 +1473,12 @@ fn gen_curve_curve_case(rng: &mut Rng) -> OpIn {
     objects.push(ObjIn::Edge {
         curve: 0,
         ivl: gen_ivl(rng, r1),
+        tol: None,
     });
     objects.push(ObjIn::Edge {
         curve: 1,
         ivl: gen_ivl(rng, r2),
+        tol: None,
     });
     let ee = rng.chance(0.5);
     let swap = rng.chance(0.3);

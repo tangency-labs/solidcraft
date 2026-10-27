@@ -1444,8 +1444,12 @@ impl<'a, O: SolutionObject> LocalSolver<'a, O> {
             //   The target point is stored in m_vPoint, not the input args.
             //   So - put curve in as both args makes sure this works
             //        no matter the value of m_bSwapOrder
-            let curve = objects.curve(handle)?;
-            self.point_curve(k, ts, curve, Some(handle))?;
+            // the solve builds the edge curve's cache at the edge's tolerance
+            // (SmTol::GetApproxTol3d(&m_crCurve) reads pEdge->GetTolerance() through the
+            // owner)
+            let mut curve = objects.curve(handle)?.clone_for_evaluation()?;
+            curve.set_owner_zone_tol_3d(Some(objects.edge_tolerance(edge)?));
+            self.point_curve(k, ts, &curve, Some(handle))?;
         }
 
         Ok(())
@@ -2376,8 +2380,12 @@ pub(crate) mod tests {
                 _ => Err(SolidError::sm_err("edge")),
             }
         }
-        fn edge_tolerance(&self, _edge: Obj) -> Result<f64> {
-            Err(SolidError::sm_err("edge"))
+        fn edge_tolerance(&self, edge: Obj) -> Result<f64> {
+            // SmEdge's default tolerance (the point/edge solve reads it for the cache)
+            match edge {
+                Obj::Edge(_) => Ok(0.0),
+                _ => Err(SolidError::sm_err("edge")),
+            }
         }
         fn surface_face(&self, _surface: Obj) -> Result<Option<Obj>> {
             Ok(None)

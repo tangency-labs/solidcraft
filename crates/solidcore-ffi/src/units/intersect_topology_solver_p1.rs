@@ -18,8 +18,8 @@
 //!
 //! A box is `min[3] max[3]`. The object table is `n (kind data)*n`: `0 P[3] tol` (a
 //! free-standing `SmVertex` with that point and zone tolerance), `1 curve` (a curve block)
-//! or `2 c a b` (an `SmEdge` over curve object `c` with interval `[a, b]`, the curve's owner
-//! set to it). A curve block is `0 dim oob n p m cpts(x y z w) knots` (an `SmBSplineCurve`),
+//! or `2 c a b has_tol tol` (an `SmEdge` over curve object `c` with interval `[a, b]`, the
+//! curve's owner set to it, its zone tolerance `tol` when `has_tol`, else `SmEdge`'s 0.0). A curve block is `0 dim oob n p m cpts(x y z w) knots` (an `SmBSplineCurve`),
 //! `1 dim P1 D1 P2 D2` (an `SmHermiteCurve`), `2 3 P V d0 d1 scale io` (a bounded `SmLine`),
 //! `3 3 C X Y d0 d1 rx ry io` (an `SmEllipse`) or `4 3 C X Y d0 d1 r io` (an `SmCircle`), as
 //! in unit `curve.curve_p5`. The solver is `kind swap P[3] pv has_ivl a b owner curve
@@ -487,6 +487,11 @@ fn objects(rd: &mut Reader<'_>) -> Result<Vec<Entry>, FfiError> {
                 *owned = true;
                 let info = *info;
                 interval(rd, &info)?;
+                // `has_tol tol`: the edge's tolerance, else SmEdge's default 0.0
+                rd.flag()?;
+                if rd.finite()? < 0.0 {
+                    return Err(bad("negative edge tolerance"));
+                }
                 out.push(Entry::Edge);
             }
         }

@@ -591,6 +591,9 @@ pub struct Curve {
     /// Not upstream: the memo of the curve's cache ([`CurveMemo`]), shared by clones
     /// and emptied by every edit of the geometry.
     memo: CurveMemo,
+    /// Not upstream: the tolerance of the edge whose shape this curve defines, with the
+    /// owner it was recorded under ([`Curve::set_owner_zone_tol_3d`]).
+    owner_zone_tol_3d: Option<(Option<ObjectRef>, f64)>,
 }
 
 /// The copy constructor: copies the geometry, resets the owner (and the identity: a
@@ -602,6 +605,7 @@ impl Clone for Curve {
             owner: None,
             notify_identity: IdentitySlot::new(),
             memo: self.memo.share(),
+            owner_zone_tol_3d: None,
         }
     }
 }
@@ -637,6 +641,7 @@ impl Curve {
             // an evaluation snapshot is never notified under the original's identity
             notify_identity: IdentitySlot::new(),
             memo: self.memo.share(),
+            owner_zone_tol_3d: self.owner_zone_tol_3d,
         }
     }
 }
@@ -794,6 +799,7 @@ impl Curve {
             owner: self.owner,
             notify_identity: IdentitySlot::new(),
             memo: self.memo.share(),
+            owner_zone_tol_3d: self.owner_zone_tol_3d,
         })
     }
 
@@ -806,6 +812,7 @@ impl Curve {
             owner: None,
             notify_identity: IdentitySlot::new(),
             memo: CurveMemo::new(),
+            owner_zone_tol_3d: None,
         }
     }
 
@@ -823,6 +830,7 @@ impl Curve {
             owner: None,
             notify_identity: IdentitySlot::new(),
             memo: CurveMemo::new(),
+            owner_zone_tol_3d: None,
         })
     }
 
@@ -1189,6 +1197,31 @@ impl Curve {
     #[must_use]
     pub const fn owner(&self) -> Option<ObjectRef> {
         self.owner
+    }
+
+    /// The tolerance of the edge whose shape this curve defines
+    /// (`SmTol::GetZoneTol3d(const SmObject*)` on a curve: `GetEdge()->GetTolerance()`),
+    /// when a caller holding the edge recorded it on this curve value
+    /// ([`Curve::set_owner_zone_tol_3d`]) and the owner has not changed since; `None`
+    /// otherwise (the curve's caches then use the system tolerance).
+    #[must_use]
+    pub fn owner_zone_tol_3d(&self) -> Option<f64> {
+        match self.owner_zone_tol_3d {
+            Some((recorded, tol)) if recorded == self.owner => Some(tol),
+            _ => None,
+        }
+    }
+
+    /// Records the tolerance of the edge whose shape this curve defines (`None` clears
+    /// it), for the caches built over this value (`SmCurve::CacheMakeOrValidate` reads
+    /// it through the owner, `SmTol::GetApproxTol3d(&m_crCurve)`). Not upstream: the
+    /// port's curves cannot reach their edge, so a caller that holds the edge records
+    /// its tolerance on its evaluation copy of the edge's curve
+    /// ([`Curve::clone_for_evaluation`] keeps it; a [`Clone`], a new curve without
+    /// owner as upstream's copy, does not). A later owner change
+    /// ([`Curve::set_owner`]) makes the record unreadable.
+    pub fn set_owner_zone_tol_3d(&mut self, tol: Option<f64>) {
+        self.owner_zone_tol_3d = tol.map(|t| (self.owner, t));
     }
 
     /// Sets the owner and returns the previous one (`SetOwner`), plus the

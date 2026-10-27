@@ -396,11 +396,14 @@ pub fn create_uv_trim_curve(
         .clone_for_evaluation()?;
     let face_domain = face_rec.uv_domain;
     let edge_rec = b.edge(e)?;
-    let curve = edge_rec
+    let mut curve = edge_rec
         .curve
         .as_ref()
         .ok_or_else(|| null("CreateUVTrimCurve: edge without curve"))?
         .clone_for_evaluation()?;
+    // the drops build the edge curve's cache at the edge's tolerance
+    // (SmTol::GetApproxTol3d(&m_crCurve) reads pEdge->GetTolerance() through the owner)
+    curve.set_owner_zone_tol_3d(Some(edge_rec.tolerance));
     let mut edge_domain = edge_rec.interval;
     let uv_trim_at_start = uv_trim_curve(b, eu)?.0.is_some();
     let surface_handle = handle(ObjectKind::Surface, f.index());

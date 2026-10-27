@@ -32,7 +32,7 @@
 //! | [`Ellipse::adjust_step_interval`]                  | `SmEllipse::AdjustSTEPInterval`                   |
 //! | [`Ellipse::global_point_solve_step`]               | `SmEllipse::GlobalPointSolveSTEP`                 |
 //! | [`Ellipse::join_with`]                             | `SmEllipse::JoinWith`                             |
-//! | [`Ellipse::make_nurb`], [`Ellipse::make_nurb_owned`] | `SmEllipse::MakeNurb`                           |
+//! | [`Ellipse::make_nurb`], [`Ellipse::make_nurb_owned`], [`Ellipse::make_nurb_owned_with_edge_tol`] | `SmEllipse::MakeNurb` |
 //! | [`Ellipse::notify`]                                | `SmEllipse::Notify`                               |
 //! | [`Ellipse::reverse_parameterization`]              | `SmEllipse::ReverseParameterization`              |
 //! | [`Ellipse::trim`]                                  | `SmEllipse::Trim`                                 |
@@ -57,7 +57,10 @@
 //!   tolerance (`SmTol::GetZoneTol3d(const SmObject*)`, unit `topology.brep_p1`);
 //!   one owned by a surface of extrusion or revolution needs its generator range
 //!   (units `surface.surf_of_extrusion_p1`, `surface.surf_of_revolution_p1`). These
-//!   return [`SolidError::Unported`].
+//!   return [`SolidError::Unported`], except where the caller resolved the edge's
+//!   tolerance ([`Ellipse::make_nurb_owned_with_edge_tol`]: the curve cache of an edge
+//!   curve, and a curve carrying its edge's tolerance,
+//!   [`crate::curve::curve::Curve::owner_zone_tol_3d`]).
 //!   Trimming accepts a caller-resolved owning edge tolerance through
 //!   `trim_with_zone_tol`; public ownerless trimming uses the system tolerance.
 //! - **Notifications.** `Notify(SM_NO_POST_EDIT)` rebuilds the polar converter
@@ -1631,6 +1634,24 @@ impl Ellipse {
     /// owner whose edge tolerance or generator range is needed (see the module
     /// deviations).
     pub fn make_nurb_owned(&mut self, k: &Kernel, owner: Option<ObjectRef>) -> Result<()> {
+        self.make_nurb_owned_with_edge_tol(k, owner, None)
+    }
+
+    /// [`Self::make_nurb_owned`] given the tolerance of the edge the ellipse's owner
+    /// chain reaches (`GetEdge()->GetTolerance()`), resolved by a caller that holds it
+    /// (`Some` means that edge exists, whatever `owner` says). Then the arc's angle
+    /// tolerance is a hundredth of that tolerance over the speed at the mid angle
+    /// (`EvaluateSTEP`) [B630].
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::make_nurb_owned`].
+    pub fn make_nurb_owned_with_edge_tol(
+        &mut self,
+        k: &Kernel,
+        owner: Option<ObjectRef>,
+        edge_zone_tol_3d: Option<f64>,
+    ) -> Result<()> {
         // free existing m_pNurb object
         self.base.nurb = None;
 
@@ -1659,7 +1680,18 @@ impl Ellipse {
         };
 
         // Convert 3d tolerance to Angle tol [B630]: GetEdge()
-        if owner.is_some_and(|o| {
+        let angle_tol = if let Some(z_tol_3d) = edge_zone_tol_3d {
+            let approx_tol_3d = z_tol_3d / 100.;
+
+            let mid_p = (start_ang_deg + end_ang_deg) / 2.0;
+            let point_and_der = self.evaluate_step(mid_p, 1)?;
+            let der = point_and_der
+                .get(1)
+                .copied()
+                .ok_or_else(|| SolidError::sm_err(OP_MAKE_NURB))?;
+
+            approx_tol_3d / der.length()
+        } else if owner.is_some_and(|o| {
             o.type_code == EDGE_TYPE
                 || o.type_code == EDGEUSE_TYPE
                 || crate::curve::curve::p2::is_kind_of(o.type_code)
@@ -1672,8 +1704,9 @@ impl Ellipse {
                 upstream: "SmTol::GetZoneTol3d(const SmObject*)",
                 unit: "geom.tol",
             });
-        }
-        let angle_tol = 0.01; // Preserves behavior
+        } else {
+            0.01 // Preserves behavior
+        };
 
         // Build the circular arc
         let arc = EllipseArc {

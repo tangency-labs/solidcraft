@@ -291,12 +291,17 @@ fn curve_is_line_base(
 ///
 /// Those of the length and knot count queries and of [`CurveCache::tessellate`]
 /// (upstream then has no cache).
+///
+/// The approximation tolerance is half the tolerance of the curve's edge when a caller
+/// recorded it on the curve ([`Curve::owner_zone_tol_3d`]), else half the system
+/// tolerance.
 pub fn make_curve_cache<O: Copy + PartialEq>(
     k: &Kernel,
     curve: &Curve,
     handle: Option<O>,
 ) -> Result<CurveCache<O>> {
-    make_curve_cache_with_zone_tol(k, curve, handle, None)
+    // SmTol::GetApproxTol3d(&m_crCurve): the edge's tolerance through the owner
+    make_curve_cache_with_zone_tol(k, curve, handle, curve.owner_zone_tol_3d())
 }
 
 /// [`make_curve_cache`] for a curve that defines an edge's shape: `zone_tol_3d` is that

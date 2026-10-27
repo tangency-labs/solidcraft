@@ -161,10 +161,15 @@ struct ScVertex : public SmVertex
 
 struct ScEdge : public SmEdge
 {
-    ScEdge(SmCurve* c, const SmExtent1d& ivl) : SmEdge()
+    ScEdge(SmCurve* c, const SmExtent1d& ivl, bool has_tol, double tol) : SmEdge()
     {
         m_pCurve = c;
         m_vInterval = ivl;
+        // an explicit edge tolerance (else SmEdge's default 0.0), which
+        // SmTol::GetZoneTol3d of the edge's curve reads (its curve cache's approximation
+        // tolerance)
+        if (has_tol)
+            m_sZoneTol3d = SM_CAST_ZONETOL3D(tol);
     }
 };
 
@@ -225,7 +230,7 @@ Header read_header(Rd& rd)
     return h;
 }
 
-// The object table `n (kind data)*`: 0 vertex `P tol`, 1 curve block, 2 edge `c a b`.
+// The object table `n (kind data)*`: 0 vertex `P tol`, 1 curve block, 2 edge `c a b has_tol tol`.
 struct Objects
 {
     std::vector<SmObject*> all;
@@ -284,7 +289,9 @@ void read_objects(Rd& rd, const SmContext& ctx, Objects& objs)
             SmCurve* c = (SmCurve*)objs.at(rd.idx());
             double a = rd.num();
             double b = rd.num();
-            ScEdge* e = new (anchor) ScEdge(c, SmExtent1d(a, b));
+            bool has_tol = rd.flag();
+            double tol = rd.num();
+            ScEdge* e = new (anchor) ScEdge(c, SmExtent1d(a, b), has_tol, tol);
             c->SetOwner(e);
             objs.all.push_back(e);
         }
