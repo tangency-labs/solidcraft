@@ -101,6 +101,8 @@ pub struct ViewportState {
     pub(crate) pick_index: crate::pick_index::PickIndexes,
     /// The last click in the view was the middle button's (for the middle double-click).
     pub(crate) middle_clicked: bool,
+    /// The right button held down has moved or been held too long for a click, so it navigates.
+    pub(crate) right_drag: bool,
     /// The last pick (its key and hits): reused while nothing it depends on changed.
     last_pick: Option<(u64, Vec<Hit>)>,
     pub rect: Option<Rect>,
@@ -3761,22 +3763,8 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
     }
     let input =
         if flat { crate::dialogs_sheet::navigate(app, ui, rect, &resp) } else { crate::navigation::handle(app, ui, rect, &resp, NavCaps::MODEL) };
-    let CameraInput {
-        hover,
-        scroll,
-        mods,
-        middle,
-        secondary_down,
-        primary_down,
-        primary_pressed,
-        delta,
-        inside,
-        axes,
-        pinch,
-        pan,
-        primary_nav,
-        mode,
-    } = input;
+    let CameraInput { hover, scroll, mods, middle, secondary_down, primary_down, primary_pressed, inside, axes, pinch, pan, primary_nav, mode } =
+        input;
     app.viewport.physical_scale = ui.ctx().pixels_per_point();
     // Suppress-snap chord and manipulator-free prefs; Shift midpoint targeting while sketching.
     // Preview reselect uses Primary but is skipped while a manipulator drag is under way.
@@ -4157,8 +4145,9 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 .collect();
             let _ = app.run("select.set", json!({ "items": items, "add": add }));
         }
-        // A right-click, unless the same press opened the mouse gestures' ring.
-        if resp.secondary_clicked() && delta == egui::Vec2::ZERO && !crate::mouse_gesture::took_press(app) {
+        // A right-click, unless the same press opened the mouse gestures' ring. egui's click
+        // already allows the pointer a few points of travel, as a mouse moves while it is clicked.
+        if resp.secondary_clicked() && !crate::mouse_gesture::took_press(app) {
             if app.tool.is_some() {
                 crate::tools::finish(app);
             } else if app.dialog.is_none() {
@@ -7695,6 +7684,51 @@ mod tests {
             frame(&mut app, vec![egui::Event::PointerButton { pos: end, button: egui::PointerButton::Primary, pressed: false, modifiers }]);
             if action == "box" {
                 assert!(!app.session.selection.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn right_click_that_moves_a_fraction_of_a_point_opens_the_menu_without_orbiting() {
+        // A Magic Mouse right-click as logged on macOS (#5517): the pointer creeps 0.1 pt while the
+        // button is down, in its own frames or in the release frame.
+        use egui::{Event, PointerButton::Secondary};
+        let p = pos2(400.0, 300.0);
+        let (a, b) = (p + vec2(0.0, -0.02), p + vec2(0.0, -0.1));
+        let button = |pos, pressed| Event::PointerButton { pos, button: Secondary, pressed, modifiers: egui::Modifiers::NONE };
+        let clicks = [
+            vec![vec![Event::PointerMoved(p), button(p, true)], vec![Event::PointerMoved(a)], vec![Event::PointerMoved(b)], vec![button(b, false)]],
+            vec![vec![Event::PointerMoved(p), button(p, true)], vec![Event::PointerMoved(b), button(b, false)]],
+        ];
+        let drag = vec![
+            vec![Event::PointerMoved(p), button(p, true)],
+            vec![Event::PointerMoved(p + vec2(15.0, 10.0))],
+            vec![Event::PointerMoved(p + vec2(30.0, 20.0))],
+            vec![button(p + vec2(30.0, 20.0), false)],
+        ];
+        for nav in [crate::prefs::NAV_PRESETS[0].id, crate::prefs::TOUCHPAD_NAV] {
+            for (frames, is_click) in clicks.iter().map(|f| (f, true)).chain([(&drag, false)]) {
+                let ctx = crate::fonts::test_context();
+                let mut app = hover_app(false);
+                app.preferences.nav = nav.into();
+                hover_frame(&mut app, &ctx, vec![]);
+                let before = app.cam;
+                for (k, events) in frames.iter().enumerate() {
+                    let raw = egui::RawInput {
+                        time: Some(1.0 + k as f64 * 0.016),
+                        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))),
+                        events: events.clone(),
+                        ..Default::default()
+                    };
+                    ctx.run_ui(raw, |ui| show(&mut app, ui)).textures_delta.clear();
+                }
+                if is_click {
+                    assert!(app.viewport.context_menu.is_some(), "{nav}: a right-click opens the menu");
+                    assert_eq!(app.cam, before, "{nav}: a right-click does not orbit");
+                } else {
+                    assert!(app.viewport.context_menu.is_none(), "{nav}: a right drag opens no menu");
+                    assert_ne!(app.cam.yaw, before.yaw, "{nav}: a right drag still orbits");
+                }
             }
         }
     }
