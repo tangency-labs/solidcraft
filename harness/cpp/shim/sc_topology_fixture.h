@@ -20,6 +20,17 @@
 //   `3 validate_only init_gaps`                 the wire network of prog_test my_test_topology
 //   `5 np (x y z)*np ne (a b has_curve [curve])*ne validate_only init_gaps`
 //                                               shell vertices joined by MakeEdgeTopology edges
+//   `10 nf (face)*nf validate_only init_gaps`   nf CreateFaceFromSurface faces of one B-rep,
+//                                               each `surface u0 v0 u1 v1` as kind 2, or
+//                                               `kind scale a b c ox oy oz axis f0u f0v f1u f1v`
+//                                               with kind 10 SmCylinder(radius scale*a), 11
+//                                               SmSphere(radius scale*a), 12 SmTorus(major
+//                                               scale*a, minor scale*b), 13 SmCone(bottom
+//                                               radius scale*a, semi-angle b degrees) made by
+//                                               CreateCanonical at origin (ox, oy, oz), Z axis
+//                                               along z, x or y (`axis` 0, 1, 2), over the
+//                                               fractions (f0, f1) of the natural domain (an
+//                                               unbounded direction clamped to [0, scale*c])
 // `init_gaps` computes the cached vertex/face, vertex/edge, edge/face and edge/CCW-edge
 // gaps (C++ only) before the op, so their reset is observable.
 //
@@ -39,8 +50,10 @@
 #include <SmBSplineCurve.h>
 #include <SmBSplineSurface.h>
 #include <SmBrep.h>
+#include <SmCone.h>
 #include <SmContext.h>
 #include <SmCurve.h>
+#include <SmCylinder.h>
 #include <SmEdge.h>
 #include <SmEdgeuse.h>
 #include <SmExtent1d.h>
@@ -684,6 +697,75 @@ void export_graph(SmBrep* brep, Graph& g, std::vector<double>& o)
         o);
 }
 
+// One face of a kind-10 block (layout in the header) added to `brep`.
+SmStatus analytic_or_surface_face(Rd& rd, const SmContext& ctx, SmBrep* brep)
+{
+    int64_t kind = (int64_t)rd.in[rd.at];
+    SmFace* pFace = nullptr;
+    if (kind < 10)
+    {
+        SmSurface* s = read_surface(rd, ctx);
+        SmPoint2d a = rd.uv(), b = rd.uv();
+        return brep->CreateFaceFromSurface(s, SmExtent2d(a, b), pFace);
+    }
+    rd.at++;
+    double scale = rd.num(), a = rd.num(), b = rd.num(), c = rd.num();
+    SmPoint3d o = rd.vec();
+    int64_t axis = rd.idx();
+    SmPoint2d f0 = rd.uv(), f1 = rd.uv();
+    const SmVector3d x = axis == 1 ? SmVector3d(0, 1, 0) : SmVector3d(1, 0, 0);
+    const SmVector3d y = axis == 0 ? SmVector3d(0, 1, 0) : axis == 1 ? SmVector3d(0, 0, 1) : SmVector3d(0, 0, -1);
+    SmAxis2Placement origin(o, x, y);
+    SmBSplineSurface* s = nullptr;
+    SmStatus st = SM_ERR;
+    if (kind == 10)
+    {
+        SmCylinder* p = nullptr;
+        st = SmCylinder::CreateCanonical(ctx, origin, scale * a, p);
+        s = p;
+    }
+    else if (kind == 11)
+    {
+        SmSphere* p = nullptr;
+        st = SmSphere::CreateCanonical(ctx, origin, scale * a, p);
+        s = p;
+    }
+    else if (kind == 12)
+    {
+        SmTorus* p = nullptr;
+        st = SmTorus::CreateCanonical(ctx, origin, scale * a, scale * b, p);
+        s = p;
+    }
+    else
+    {
+        SmCone* p = nullptr;
+        st = SmCone::CreateCanonical(ctx, origin, scale * a, b, p);
+        s = p;
+    }
+    if (st != SM_SUCCESS)
+    {
+        delete s;
+        return st;
+    }
+    if (s == nullptr)
+        return SM_ERR;
+    SmExtent2d dom = s->GetNaturalUVDomain();
+    SmPoint2d lo = dom.GetMin(), hi = dom.GetMax();
+    if (hi.x - lo.x > 1e5)
+    {
+        lo.x = 0.0;
+        hi.x = scale * c;
+    }
+    if (hi.y - lo.y > 1e5)
+    {
+        lo.y = 0.0;
+        hi.y = scale * c;
+    }
+    SmPoint2d d0(lo.x + f0.x * (hi.x - lo.x), lo.y + f0.y * (hi.y - lo.y));
+    SmPoint2d d1(lo.x + f1.x * (hi.x - lo.x), lo.y + f1.y * (hi.y - lo.y));
+    return brep->CreateFaceFromSurface(s, SmExtent2d(d0, d1), pFace);
+}
+
 // Builds the B-rep of a B-rep block; nullptr (status in `st`) when construction fails.
 SmBrep* build(Rd& rd, const char* path, SmStatus& status)
 {
@@ -772,6 +854,12 @@ SmBrep* build(Rd& rd, const char* path, SmStatus& status)
             pEdge->SetInterval(c->GetNaturalInterval());
             pEdge->SetOrientation(SM_OT_SAME);
         }
+    }
+    else if (kind == 10)
+    {
+        int64_t nf = rd.idx();
+        for (int64_t i = 0; i < nf && status == SM_SUCCESS; i++)
+            status = analytic_or_surface_face(rd, ctx, brep);
     }
     else
     {

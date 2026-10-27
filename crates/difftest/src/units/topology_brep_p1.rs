@@ -2770,33 +2770,6 @@ mod cross_body_tests {
     }
 
     #[test]
-    fn cross_body_legacy_shared_route_remains_blocked() {
-        let i = transverse();
-        let OpIn::BrepIntersect2 {
-            other,
-            tol,
-            ang,
-            want_points,
-        } = &i.op
-        else {
-            unreachable!()
-        };
-        let mut k = Kernel::default();
-        let (b, first_status) = independent_face(&mut k, i.brep.as_ref().unwrap())
-            .map_err(|_| "first face")
-            .unwrap();
-        let (other, second_status) = independent_face(&mut k, other)
-            .map_err(|_| "second face")
-            .unwrap();
-        assert_eq!((first_status, second_status), (0.0, 0.0));
-        assert!(
-            bp1::brep_intersect(&k, &b, &other, *tol, *ang, *want_points)
-                .unwrap_err()
-                .is_unported()
-        );
-    }
-
-    #[test]
     fn cross_body_decoder_bounds_and_optional_points() {
         let enabled = intersection_output(&[0., 0., 1., 0., 0., 0.]).unwrap();
         let disabled = intersection_output(&[0., 0., 1., 0., 0., -1.]).unwrap();

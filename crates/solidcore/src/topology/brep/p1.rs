@@ -27,8 +27,7 @@
 //! | [`reset_infinite_region`], [`SetRegionVoidType`]  | `SmBrep::ResetInfiniteRegion`, `SmSetRegionVoidType` |
 //! | [`set_region_is_void_flags_for_nested_solids`]    | `SmBrep::SetRegionIsVoidFlagsForNestedSolids` |
 //! | [`heal_brep`]                                     | `SmBrep::HealBrep`                            |
-//! | [`brep_intersect`]                                | `SmBrep::BrepIntersect`                       |
-//! | [`brep_intersect_mut`]                            | `SmBrep::BrepIntersect` (mutable B-reps)      |
+//! | [`brep_intersect_mut`], [`brep_intersect_self`]   | `SmBrep::BrepIntersect`                       |
 //! | [`create_corner_blend`]                           | `SmBrep::CreateCornerBlend`                   |
 //! | [`create_edge_edge_blend`]                        | `SmBrep::CreateEdgeEdgeBlend`                 |
 //! | [`create_parallel_projection_curves`], [`ParallelProjectionOptions`], [`ParallelProjectionCurves`] | `SmBrep::CreateParallelProjectionCurves` |
@@ -2331,49 +2330,10 @@ pub fn make_vertex_split_uv_trim_curve(
 
 /// `BrepIntersect`: intersects every face of this B-rep with every face of `other`
 /// (`SmFace::FaceIntersect`) and returns the 3D curves (duplicates removed) and, when
-/// `want_points`, the singular points. Wire edges and shell vertices are not handled.
-///
-/// # Errors
-///
-/// [`SolidError::Unported`] from `SmFace::FaceIntersect` (unit `topology.face_p3`, a
-/// justified stub: the two faces are in different B-reps) when
-/// both B-reps have faces (upstream's `NER` on the faces never fires from arenas);
-/// those of the duplicate removal.
-pub fn brep_intersect(
-    k: &Kernel,
-    b: &Brep,
-    other: &Brep,
-    approx_tol_3d: f64,
-    crv_angle_tolerance_deg: f64,
-    want_points: bool,
-) -> Result<(Vec<Curve>, Option<Vec<Point3>>)> {
-    let this_faces = faces(b, None)?;
-    let other_faces = faces(other, None)?;
-    brep_intersect_faces(
-        k,
-        &this_faces,
-        &other_faces,
-        want_points,
-        |this_face, other_face| {
-            face_intersect(
-                k,
-                b,
-                this_face,
-                other,
-                other_face,
-                approx_tol_3d,
-                crv_angle_tolerance_deg,
-            )
-        },
-    )
-}
-
-/// [`brep_intersect`] with two distinct B-reps lent mutably so the faces' trimmed
-/// surface caches and UV trim curves can be made on their owning B-reps.
-///
-/// Face pairs are visited in the same order as [`brep_intersect`], with the same
-/// duplicate-curve removal. Singular points are returned only when `want_points`;
-/// wire edges and shell vertices are not handled. Use [`brep_intersect_self`] when
+/// `want_points`, the singular points. The two distinct B-reps are lent mutably, as
+/// upstream's faces reach theirs: the faces' trimmed surface caches and UV trim curves
+/// are made, and the curves and touching points classified, on their owning B-reps.
+/// Wire edges and shell vertices are not handled. Use [`brep_intersect_self`] when
 /// both operands are the same B-rep.
 ///
 /// # Errors
@@ -2416,14 +2376,14 @@ pub fn brep_intersect_mut(
     )
 }
 
-/// [`brep_intersect`] of a B-rep with itself (`brep->BrepIntersect(ctx, brep, ..)`),
+/// [`brep_intersect_mut`] of a B-rep with itself (`brep->BrepIntersect(ctx, brep, ..)`),
 /// the B-rep lent mutably: each face's surface reaches its face, so the faces' trimmed
 /// caches (and their UV trim curves) are made on it as upstream's
 /// `smsurf_GetSurfaceCache` does.
 ///
 /// # Errors
 ///
-/// As [`brep_intersect`].
+/// As [`brep_intersect_mut`].
 pub fn brep_intersect_self(
     k: &Kernel,
     b: &mut Brep,
@@ -2490,40 +2450,6 @@ fn brep_intersect_faces(
 
     crate::curve::curve::p5::remove_duplicate_curves(k, &mut curves_3d)?;
     Ok((curves_3d.into_iter().flatten().collect(), points))
-}
-
-/// `SmFace::FaceIntersect(crContext, pOtherFace, dApproxTol3d, dCrvAngTolDeg, r3DCurves,
-/// NULL, NULL, &sPoints)`: the 3D intersection curves and single-point intersections of
-/// two faces.
-#[allow(clippy::too_many_arguments)]
-fn face_intersect(
-    k: &Kernel,
-    b: &Brep,
-    this_face: FaceId,
-    other: &Brep,
-    other_face: FaceId,
-    approx_tol_3d: f64,
-    crv_angle_tolerance_deg: f64,
-) -> Result<(Vec<Option<Curve>>, Vec<Point3>)> {
-    // (only the 3D curves and points are given; no coincidence flag)
-    let options = crate::topology::face::p3::FaceIntersectOptions {
-        want_points: true,
-        ..Default::default()
-    };
-    // (the B-reps are read shared here: a face-owned surface's cache defers)
-    let out = crate::topology::face::p3::face_intersect_breps(
-        k,
-        crate::topology::face::p3::FaceBreps::Shared(b, other),
-        this_face,
-        other_face,
-        approx_tol_3d,
-        crv_angle_tolerance_deg,
-        &options,
-    )?;
-    Ok((
-        out.curves_3d.into_iter().map(Some).collect(),
-        out.points_3d.unwrap_or_default(),
-    ))
 }
 
 // ---- corner blends (SmBrep::CreateCornerBlend) ------------------------------------------
@@ -3367,21 +3293,6 @@ mod tests {
             assert_eq!(plane.evaluate_point(k, uv).unwrap(), Point3::new(u, v, z));
         }
         (cross_body_face(k, paraboloid), cross_body_face(k, plane))
-    }
-
-    #[test]
-    fn brep_intersect_mut_preserves_shared_refusal() {
-        let mut k = Kernel::default();
-        for z in [0.0, -0.125, 0.125] {
-            let (b, other) = cross_body_pair(&mut k, z);
-            assert!(matches!(
-                brep_intersect(&k, &b, &other, 1e-6, 2.0, true),
-                Err(SolidError::Unported {
-                    upstream: "SmFace handle of a surface's face",
-                    unit: "topology.face_p2",
-                })
-            ));
-        }
     }
 
     #[test]

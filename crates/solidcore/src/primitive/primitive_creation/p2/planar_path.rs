@@ -386,13 +386,17 @@ impl PrimitiveCreation {
                     // Intersect the temp cutting curve with every intersection curve
                     // and build the real cutting curve through the two best points.
                     let before_id = before_brep.ok_or_else(|| SolidError::null_pointer(OP))?;
-                    let intersections = ignored(crate::topology::brep::p1::brep_intersect(
-                        a.kernel(context_of)?,
-                        a.brep(before_id)?,
-                        a.brep(after_brep)?,
-                        tol,
-                        2.0,
-                        false,
+                    // `pBrepBefore->BrepIntersect(crContext, pBrepAfter, ..)`: the faces'
+                    // caches, UV trim curves and classifications are made on their own
+                    // B-reps (`after_brep` is of `context_of`'s context)
+                    let intersections = ignored(a.with_breps_mut(
+                        before_id,
+                        after_brep,
+                        |k, before, after, _, _, _, _| {
+                            crate::topology::brep::p1::brep_intersect_mut(
+                                k, before, after, tol, 2.0, false,
+                            )
+                        },
                     ))?
                     .map(|(curves, _)| curves)
                     .unwrap_or_default();

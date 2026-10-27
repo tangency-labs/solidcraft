@@ -45,8 +45,9 @@
 //! - **`FaceIntersect`'s classifications.** With lent B-reps ([`FaceBreps::One`] /
 //!   [`FaceBreps::Two`]) both `CurveOnClassify` calls run on the faces' own B-reps
 //!   ([`crate::query::face::p2::curve_on_classify_mut`]), so their lazy edits stay on
-//!   them in upstream order; as queries they keep the kept face caches. A caller that
-//!   shares the B-reps ([`FaceBreps::Shared`]) classifies on a private copy.
+//!   them in upstream order; as queries they keep the kept face caches. So do the
+//!   touching points' `Point3DClassify` calls. Every caller lends the B-reps: there is no
+//!   shared variant, so nothing classifies on a copy.
 //! - **`ComputeLoopOrientation`** walks with a copy of the face surface; its last-to-first
 //!   span reads `sVeryFirstUV`, which stays at the `SmVector2d` default
 //!   (`SM_UNDEF_DOUBLE`, `SM_UNDEF_DOUBLE`) when no sample point dropped with a guess;
@@ -1894,8 +1895,7 @@ impl qf2::CurveOnClassifyBrep<IntersectObject> for IntersectObjectsMut<'_> {
 ///
 /// [`SolidError::NotFound`] for a dangling id; [`SolidError::InvalidInput`] for a face
 /// without surface; those of the intersection, copies and classifications;
-/// [`SolidError::Unported`] (`Point3DClassify`, the curve classification
-/// constructor).
+/// [`SolidError::Unported`] (the curve classification constructor).
 pub fn face_intersect(
     k: &Kernel,
     b: &mut Brep,
@@ -1916,19 +1916,6 @@ pub fn face_intersect(
     )
 }
 
-/// This face's B-rep and the other face's, read shared.
-fn shared_breps<'a>(
-    this: Option<&'a Brep>,
-    other: Option<&'a Brep>,
-    shared: Option<(&'a Brep, &'a Brep)>,
-) -> Result<(&'a Brep, &'a Brep)> {
-    if let Some(pair) = shared {
-        return Ok(pair);
-    }
-    let b = this.ok_or_else(|| null("FaceIntersect: no B-rep"))?;
-    Ok((b, other.unwrap_or(b)))
-}
-
 /// The B-reps of the two faces of [`face_intersect_breps`]: one B-rep holding both,
 /// or this face's and the other face's. They are lent mutably because the surface
 /// intersection makes the faces' trimmed caches on them (`smsurf_GetSurfaceCache`,
@@ -1939,10 +1926,6 @@ pub enum FaceBreps<'a> {
     One(&'a mut Brep),
     /// This face's B-rep and the other face's.
     Two(&'a mut Brep, &'a mut Brep),
-    /// This face's B-rep and the other face's (possibly the same), held shared by a
-    /// caller that cannot lend them: the faces' caches cannot be made on them, so a
-    /// face-owned surface's cache defers as before.
-    Shared(&'a Brep, &'a Brep),
 }
 
 /// [`face_intersect`] of face `this.1` of B-rep `this.0` and face `other.1` of B-rep
@@ -1996,17 +1979,15 @@ pub fn face_intersect_breps_cached(
     options: &FaceIntersectOptions,
     mut face_caches: [Option<&mut FaceCaches>; 2],
 ) -> Result<FaceIntersection> {
-    let (mut this_brep, mut other_brep, shared) = match breps {
-        FaceBreps::One(b) => (Some(b), None, None),
-        FaceBreps::Two(b, ob) => (Some(b), Some(ob), None),
-        FaceBreps::Shared(b, ob) => (None, None, Some((b, ob))),
+    let (this_brep, mut other_brep) = match breps {
+        FaceBreps::One(b) => (b, None),
+        FaceBreps::Two(b, ob) => (b, Some(ob)),
     };
     // the other face's objects name its own B-rep when it is not this one
-    let other_side = match shared {
-        Some((b, ob)) => !core::ptr::eq(b, ob),
-        None => other_brep.is_some(),
-    };
-    let (b, ob) = shared_breps(this_brep.as_deref(), other_brep.as_deref(), shared)?;
+    let other_side = other_brep.is_some();
+    // read shared until the surface intersection lends the B-reps
+    let b: &Brep = this_brep;
+    let ob: &Brep = other_brep.as_deref().unwrap_or(b);
     let mut out = FaceIntersection {
         this_uv_curves: options.want_this_uv_curves.then(Vec::new),
         other_uv_curves: options.want_other_uv_curves.then(Vec::new),
@@ -2076,7 +2057,7 @@ pub fn face_intersect_breps_cached(
             &other_copy
         };
         let (domain, other_domain) = (face2::uv_domain(b, f)?, face2::uv_domain(ob, other)?);
-        let r = if let Some(this_brep) = this_brep.as_deref_mut() {
+        let r = {
             let [this_caches, other_caches] = &mut face_caches;
             let taken = |slot: &mut Option<&mut FaceCaches>| {
                 slot.as_deref_mut().map(core::mem::take).unwrap_or_default()
@@ -2108,53 +2089,11 @@ pub fn face_intersect_breps_cached(
                 }
             }
             r?
-        } else {
-            surface.global_surface_intersect(
-                k,
-                &domain,
-                other_surface,
-                &other_domain,
-                use_surface_edges,
-                Some(approx_tol_3d),
-                Some(ang_tol_rad),
-            )?
         };
         curves_3d = r.curves_3d;
         uv_curves1 = r.surface1_uv_curves;
         uv_curves2 = r.surface2_uv_curves;
         curve_types = r.curve_types;
-    }
-    // The touching points' classifications (`Point3DClassify` on both faces), made
-    // first because they need the B-reps mutably; they only read the B-reps' topology
-    // and geometry, which nothing below changes.
-    let mut touching_on: Vec<Option<Point3>> = Vec::new();
-    if out.points_3d.is_some() {
-        for (ii, curve) in curves_3d.iter().enumerate() {
-            if curve_types.get(ii).copied() != Some(TsectCurveType::Touching) {
-                touching_on.push(None);
-                continue;
-            }
-            // status ignored upstream
-            let point = ignored(curve.evaluate_point(k, 0.5))?.unwrap_or(Vec3::UNDEF);
-            let Some(tb) = this_brep.as_deref_mut() else {
-                // DISPATCH GAP: a caller sharing both B-reps immutably cannot lend
-                // them to the classification.
-                return Err(SolidError::unported(
-                    "SmFace::Point3DClassify",
-                    "query.face_p1",
-                ));
-            };
-            let pct1 = point_3d_classify(k, tb, f, point, this_zone_tol)?;
-            let ob = other_brep.as_deref_mut().unwrap_or(tb);
-            let pct2 = point_3d_classify(k, ob, other, point, other_zone_tol)?;
-            let on = |t: PointClassType| {
-                matches!(
-                    t,
-                    PointClassType::Face | PointClassType::Edge | PointClassType::Vertex
-                )
-            };
-            touching_on.push((on(pct1) && on(pct2)).then_some(point));
-        }
     }
     for (ii, curve) in curves_3d.iter().enumerate() {
         let curve_type = curve_types
@@ -2165,7 +2104,19 @@ pub fn face_intersect_breps_cached(
             let Some(points) = out.points_3d.as_mut() else {
                 continue;
             };
-            if let Some(point) = touching_on.get(ii).copied().flatten() {
+            // status ignored upstream
+            let point = ignored(curve.evaluate_point(k, 0.5))?.unwrap_or(Vec3::UNDEF);
+            // `Point3DClassify` on both faces, in place on their own B-reps
+            let pct1 = point_3d_classify(k, this_brep, f, point, this_zone_tol)?;
+            let ob = other_brep.as_deref_mut().unwrap_or(&mut *this_brep);
+            let pct2 = point_3d_classify(k, ob, other, point, other_zone_tol)?;
+            let on = |t: PointClassType| {
+                matches!(
+                    t,
+                    PointClassType::Face | PointClassType::Edge | PointClassType::Vertex
+                )
+            };
+            if on(pct1) && on(pct2) {
                 points.push(point);
             }
             continue;
@@ -2183,49 +2134,21 @@ pub fn face_intersect_breps_cached(
         let mut cc1 = curve_classification(k, IntersectObject::Curve(ii), &ivl, uv1, zone_tol)?;
         let mut cc2 = curve_classification(k, IntersectObject::Curve(ii), &ivl, uv2, zone_tol)?;
 
-        if let Some(this) = this_brep.as_deref_mut() {
-            // the classifications' lazy face queries (UV trim curves, gap caches,
-            // tolerance growth) edit the faces' own B-reps, as upstream's; they are
-            // queries, so the kept face caches stay
-            let mut objects = IntersectObjectsMut {
-                b: this,
-                other: other_brep.as_deref_mut(),
-                side: false,
-                curves_3d: &curves_3d,
-                uv1: &uv_curves1,
-                uv2: &uv_curves2,
-                edited: false,
-            };
-            qf2::curve_on_classify_mut(k, f, &mut objects, true, &mut cc1, false, false, true)?;
-            objects.side = other_side;
-            qf2::curve_on_classify_mut(k, other, &mut objects, true, &mut cc2, false, false, true)?;
-        } else {
-            let (b, ob) = shared_breps(None, None, shared)?;
-            let objects = IntersectObjects {
-                b,
-                other: ob,
-                side: false,
-                curves_3d: &curves_3d,
-                uv1: &uv_curves1,
-                uv2: &uv_curves2,
-            };
-            let other_objects = IntersectObjects {
-                side: other_side,
-                ..objects
-            };
-            qf2::curve_on_classify(k, b, f, &objects, true, &mut cc1, false, false, true)?;
-            qf2::curve_on_classify(
-                k,
-                ob,
-                other,
-                &other_objects,
-                true,
-                &mut cc2,
-                false,
-                false,
-                true,
-            )?;
-        }
+        // the classifications' lazy face queries (UV trim curves, gap caches, tolerance
+        // growth) edit the faces' own B-reps, as upstream's; they are queries, so the
+        // kept face caches stay
+        let mut objects = IntersectObjectsMut {
+            b: &mut *this_brep,
+            other: other_brep.as_deref_mut(),
+            side: false,
+            curves_3d: &curves_3d,
+            uv1: &uv_curves1,
+            uv2: &uv_curves2,
+            edited: false,
+        };
+        qf2::curve_on_classify_mut(k, f, &mut objects, true, &mut cc1, false, false, true)?;
+        objects.side = other_side;
+        qf2::curve_on_classify_mut(k, other, &mut objects, true, &mut cc2, false, false, true)?;
 
         let extract = ExtractOptions {
             uv_curves1: true,
@@ -2233,13 +2156,10 @@ pub fn face_intersect_breps_cached(
             points_3d: true,
         };
         // the point drops of `Homogenize` make the faces' trimmed caches on their
-        // B-reps (smsurf_GetSurfaceCache) when the B-reps are lent
-        let ex = if this_brep.is_some() {
-            let this = this_brep
-                .as_deref_mut()
-                .ok_or_else(|| null("FaceIntersect: no B-rep"))?;
+        // B-reps (smsurf_GetSurfaceCache)
+        let ex = {
             let mut objects = IntersectObjectsMut {
-                b: this,
+                b: &mut *this_brep,
                 other: other_brep.as_deref_mut(),
                 side: false,
                 curves_3d: &curves_3d,
@@ -2256,17 +2176,6 @@ pub fn face_intersect_breps_cached(
                 }
             }
             ex?
-        } else {
-            let (b, ob) = shared_breps(None, None, shared)?;
-            let objects = IntersectObjects {
-                b,
-                other: ob,
-                side: false,
-                curves_3d: &curves_3d,
-                uv1: &uv_curves1,
-                uv2: &uv_curves2,
-            };
-            cc1.extract_geometry(k, &objects, &mut cc2, extract)?
         };
         let found = !ex.curves_3d.is_empty();
         out.curves_3d.extend(ex.curves_3d);
