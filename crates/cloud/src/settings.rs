@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Error, Result};
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", content = "path", rename_all = "snake_case")]
 pub enum SshIdentity {
     #[default]
@@ -11,7 +11,7 @@ pub enum SshIdentity {
     File(String),
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Authentication {
     #[default]
@@ -21,7 +21,7 @@ pub enum Authentication {
 }
 
 /// Verified native Git destinations. These are local connection metadata.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct GitRemote {
     pub fetch: String,
     pub push: Vec<String>,
@@ -56,7 +56,7 @@ impl GitRemote {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct Connection {
     pub id: String,
@@ -167,7 +167,7 @@ impl Connection {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default)]
 pub struct Settings {
     pub connections: Vec<Connection>,

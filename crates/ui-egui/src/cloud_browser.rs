@@ -268,6 +268,7 @@ fn poll(app: &mut SolveApp, statuses: &[JobStatus]) {
     let attention = app.tr("cloud.needs_attention").to_owned();
     let settings = app.session.cloud_settings();
     let mut refreshed = Vec::new();
+    let mut consumed = Vec::new();
     app.cloud.browser.catalogs.retain(|id, c| settings.connection(id) == Some(&c.connection));
     for (id, catalog) in &mut app.cloud.browser.catalogs {
         if let Some(operation) = catalog.pending.as_ref()
@@ -286,6 +287,7 @@ fn poll(app: &mut SolveApp, statuses: &[JobStatus]) {
                         Err(error) => catalog.message = Some(error),
                     }
                     if status.phase == Phase::Ready {
+                        consumed.push(status.operation.clone());
                         catalog.pending = None;
                     }
                 }
@@ -308,6 +310,9 @@ fn poll(app: &mut SolveApp, statuses: &[JobStatus]) {
                 Arc::make_mut(&mut catalog.entries).push(destination.clone());
             }
         }
+    }
+    for id in consumed {
+        crate::cloud::consume_result(app, &id);
     }
     for id in refreshed {
         previews::clear(app, &id);

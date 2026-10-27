@@ -27,6 +27,7 @@ pub struct GitHub {
     endpoint: Connection,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
 struct Tree {
     commit: String,
     sha: String,
@@ -36,7 +37,7 @@ struct Tree {
 
 impl Tree {
     fn check_path(&self, path: &str) -> Result<()> {
-        crate::check_path(path)?;
+        crate::check_repository_path(path)?;
         let mut prefix = String::new();
         for part in path.split('/') {
             if !prefix.is_empty() {
@@ -174,7 +175,7 @@ impl GitHub {
         }
         let encoded: String = blob.content.chars().filter(|c| !matches!(c, '\r' | '\n')).collect();
         let bytes = STANDARD.decode(encoded).map_err(invalid)?;
-        if bytes.len() != blob.size {
+        if bytes.len() != blob.size || blob.sha != *hash || blob_hash(&bytes, hash.len())? != *hash {
             return Err(invalid("GitHub blob length mismatch"));
         }
         Ok(Some(bytes))
@@ -189,41 +190,123 @@ impl GitHub {
     }
 
     pub async fn list_with_status(&self, stored: &mut [crate::StoredDesign]) -> Result<Vec<Destination>> {
-        self.list_visibility(stored, false).await
+        self.list_with_status_cached(stored, &crate::download::Uncached).await
     }
 
     pub async fn list_deleted(&self) -> Result<Vec<Destination>> {
-        self.list_visibility(&mut [], true).await
+        self.list_visibility(&mut [], true, &crate::download::Uncached).await
     }
 
-    async fn list_visibility(&self, stored: &mut [crate::StoredDesign], deleted: bool) -> Result<Vec<Destination>> {
+    pub async fn list_with_status_cached(&self, stored: &mut [crate::StoredDesign], cache: &impl crate::DownloadCache) -> Result<Vec<Destination>> {
+        self.list_visibility(stored, false, cache).await
+    }
+
+    async fn catalog_tree(&self, cache: &impl crate::DownloadCache) -> Result<Tree> {
+        let reference = self.client.git(&self.owner, &self.repository).get_ref(&Reference::Branch(self.branch.clone())).await.map_err(api_error)?;
+        let Object::Commit { sha: commit, .. } = reference.object else { return Err(invalid("branch does not refer to a commit")) };
+        check_sha(&commit)?;
+        let key = format!("checks/catalog-{}", crate::digest(&serde_json::to_vec(&self.endpoint).map_err(invalid)?));
+        if let Some(bytes) = cache.load(&key).await?
+            && let Ok((format, tree)) = serde_json::from_slice::<(String, Tree)>(&bytes)
+            && format == "solidcraft-github-catalog/1"
+            && tree.commit == commit
+            && tree.files.len() + tree.blocked.len() <= 100_000
+        {
+            check_sha(&tree.sha)?;
+            for sha in tree.files.values() {
+                check_sha(sha)?;
+            }
+            return Ok(tree);
+        }
+        let tree = self.tree_at(&commit).await?;
+        let bytes = serde_json::to_vec(&("solidcraft-github-catalog/1", &tree)).map_err(invalid)?;
+        if bytes.len() <= crate::CHUNK_BYTES {
+            cache.store(&key, &bytes).await?;
+        }
+        Ok(tree)
+    }
+
+    async fn catalog_blob(&self, tree: &Tree, path: &str, cache: &impl crate::DownloadCache) -> Result<Option<Vec<u8>>> {
+        tree.check_path(path)?;
+        let Some(sha) = tree.files.get(path) else { return Ok(None) };
+        let key = format!("checks/blob-{sha}");
+        if let Some(bytes) = cache.load(&key).await?
+            && bytes.len() <= crate::MAX_MANIFEST_BYTES
+            && blob_hash(&bytes, sha.len())? == *sha
+        {
+            return Ok(Some(bytes));
+        }
+        let bytes = self.read(tree, path, crate::MAX_MANIFEST_BYTES).await?;
+        if let Some(bytes) = &bytes
+            && bytes.len() <= crate::CHUNK_BYTES
+        {
+            cache.store(&key, bytes).await?;
+        }
+        Ok(bytes)
+    }
+
+    async fn list_visibility(
+        &self,
+        stored: &mut [crate::StoredDesign],
+        deleted: bool,
+        cache: &impl crate::DownloadCache,
+    ) -> Result<Vec<Destination>> {
+        use futures_util::{StreamExt, TryStreamExt};
         if stored.len() > 10_000 {
             return Err(invalid("stored catalog is too large"));
         }
         for entry in stored.iter() {
             entry.validate(&self.connection)?;
         }
-        let tree = self.tree().await?;
+        let tree = self.catalog_tree(cache).await?;
         let mut projects = Vec::new();
         for path in tree.files.keys() {
             if let Some(project) = path.strip_suffix(&format!("/{PROJECT_MARKER}")) {
-                let bytes = self.read(&tree, path, crate::MAX_MANIFEST_BYTES).await?.ok_or_else(|| invalid("project marker missing"))?;
+                let bytes = self.catalog_blob(&tree, path, cache).await?.ok_or_else(|| invalid("project marker missing"))?;
                 Project::read(&bytes)?;
                 projects.push(project.to_string());
             }
         }
+        // Bound initial network fanout; the same blob is read once within this listing
+        // and persisted by Git identity for subsequent sessions and unchanged heads.
+        let paths: BTreeSet<_> = tree
+            .files
+            .keys()
+            .filter(|path| path.ends_with("/manifest.json") && projects.iter().any(|p| path.starts_with(&format!("{p}/"))))
+            .cloned()
+            .chain(stored.iter().map(|e| e.destination.design_path().map(|p| format!("{p}/manifest.json"))).collect::<Result<Vec<_>>>()?)
+            .collect();
+        if paths.len() > 10_000 {
+            return Err(storage("too many cloud designs"));
+        }
+        let (manifests, _): (BTreeMap<String, Option<Manifest>>, usize) = futures_util::stream::iter(paths.into_iter().map(|path| {
+            let tree = &tree;
+            async move {
+                let bytes = self.catalog_blob(tree, &path, cache).await?;
+                let size = bytes.as_ref().map_or(0, Vec::len);
+                Ok::<_, Error>((path, bytes.and_then(|bytes| Manifest::read(&bytes).ok()), size))
+            }
+        }))
+        .buffer_unordered(4)
+        .try_fold((BTreeMap::new(), 0usize), |(mut manifests, total), (path, manifest, size)| async move {
+            let total = total.checked_add(size).filter(|total| *total <= 256 << 20).ok_or_else(|| storage("cloud catalog metadata too large"))?;
+            manifests.insert(path, manifest);
+            Ok((manifests, total))
+        })
+        .await?;
         let mut designs = Vec::new();
-        for path in tree.files.keys() {
+        for (path, manifest) in &manifests {
+            if !tree.files.contains_key(path) {
+                continue;
+            }
             if let Some(prefix) = path.strip_suffix("/manifest.json")
                 && let Some(project) = projects.iter().filter(|p| prefix.starts_with(&format!("{p}/"))).max_by_key(|p| p.len())
             {
                 let file = prefix.strip_prefix(&format!("{project}/")).ok_or_else(|| invalid("invalid design path"))?;
                 let destination = Destination { connection: self.connection.clone(), project: project.clone(), file: file.into() };
                 destination.validate()?;
-                let manifest = self.read(&tree, path, crate::MAX_MANIFEST_BYTES).await?.and_then(|bytes| Manifest::read(&bytes).ok());
                 let in_trash = manifest.as_ref().is_some_and(|m| m.deleted() && !m.moved());
-                let moved = manifest.as_ref().is_some_and(Manifest::moved);
-                if !moved && in_trash == deleted {
+                if !manifest.as_ref().is_some_and(Manifest::moved) && in_trash == deleted {
                     designs.push(destination);
                 }
             }
@@ -232,8 +315,8 @@ impl GitHub {
             stored.iter_mut().filter(|entry| matches!(entry.phase, crate::jobs::Phase::Ready | crate::jobs::Phase::Synced) && !entry.outdated)
         {
             let path = format!("{}/manifest.json", entry.destination.design_path()?);
-            let manifest = self.read(&tree, &path, crate::MAX_MANIFEST_BYTES).await?.and_then(|bytes| Manifest::read(&bytes).ok());
-            if !manifest.as_ref().map(|manifest| entry.matches_manifest(manifest)).transpose()?.unwrap_or(false) {
+            let manifest = manifests.get(&path).and_then(Option::as_ref);
+            if !manifest.map(|manifest| entry.matches_manifest(manifest)).transpose()?.unwrap_or(false) {
                 entry.phase = crate::jobs::Phase::Ready;
                 entry.outdated = true;
             }
@@ -298,6 +381,31 @@ impl GitHub {
         crate::Thumbnail::png(&manifest, |path| objects.get(path).cloned().ok_or_else(|| storage("preview unavailable")))
     }
 
+    /// Revision markers identify an attempt, not its integrity. Compare immutable Git
+    /// identities with the captured bytes before acknowledging a retried publication.
+    async fn verify_publication(
+        &self,
+        tree: &Tree,
+        destination: &Destination,
+        save: &PendingSave,
+        captured: &BTreeMap<String, String>,
+    ) -> Result<()> {
+        let prefix = destination.design_path()?;
+        let bytes = self
+            .read(tree, &format!("{prefix}/manifest.json"), crate::MAX_MANIFEST_BYTES)
+            .await?
+            .ok_or_else(|| invalid("published manifest missing"))?;
+        Publication::verify_payload(save, &Manifest::read(&bytes)?)?;
+        for (path, expected) in captured {
+            let path = if path == "document.json" { format!("{prefix}/{path}") } else { format!("{}/{path}", destination.project) };
+            tree.check_path(&path)?;
+            if tree.files.get(&path) != Some(expected) {
+                return Err(invalid("published document or asset is missing or corrupt; local save retained"));
+            }
+        }
+        Ok(())
+    }
+
     pub async fn publish(
         &self,
         save: &PendingSave,
@@ -352,9 +460,19 @@ impl GitHub {
             } else {
                 None
             };
+            let captured = std::iter::once(("document.json".into(), &snapshot.document))
+                .chain(snapshot.objects.iter().map(|(path, bytes)| (path.clone(), bytes)))
+                .map(|(path, bytes)| Ok((path, blob_hash(bytes, tree.sha.len())?)))
+                .collect::<Result<BTreeMap<_, _>>>()?;
             let publication =
                 Publication::prepare_with_target(save, snapshot, marker.as_deref(), existing.as_deref(), parent, resolution_target.as_deref())?;
             if publication.already_published {
+                // A resolution acknowledges its source tombstone even if the original
+                // design has changed again since that resolution completed.
+                self.verify_publication(&tree, &target, save, &captured).await?;
+                if matches!(save.manifest.change()?, Some(crate::management::Change::Rename { .. })) {
+                    self.verify_publication(&tree, &publication.destination, save, &captured).await?;
+                }
                 return Ok(Published {
                     destination: publication.destination,
                     revision: save.id.clone(),
@@ -381,6 +499,7 @@ impl GitHub {
                 if let Some(bytes) = self.read(&tree, &path, crate::MAX_MANIFEST_BYTES).await? {
                     let previous = Manifest::read(&bytes)?;
                     if crate::revision(&previous) == Some(save.id.as_str()) {
+                        self.verify_publication(&tree, &publication.destination, save, &captured).await?;
                         return Ok(Published {
                             destination: publication.destination,
                             revision: save.id.clone(),

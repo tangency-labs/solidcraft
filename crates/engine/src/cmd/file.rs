@@ -897,7 +897,7 @@ fn write_bytes(
     s.disk = solidcraft_io::design_lock::stamp(path);
     s.read_only = false;
     s.cloud.binding = None;
-    s.cloud.captures.clear();
+    s.cloud.clear_captures();
     s.mark_saved();
     let mut out = SaveResult {
         path: path.to_string(),
@@ -995,7 +995,7 @@ impl Session {
         self.disk = done.disk;
         self.read_only = done.read_only;
         self.cloud.binding.clone_from(&done.cloud.binding);
-        self.cloud.captures.clear();
+        self.cloud.clear_captures();
         self.saved = done.saved.clone();
         self.saved_visibility = done.saved_visibility.clone();
     }

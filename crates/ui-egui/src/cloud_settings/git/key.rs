@@ -33,6 +33,7 @@ pub(super) fn poll(app: &mut SolveApp, wizard: &mut Wizard) {
         let status = all.iter().find(|s| &s.operation == id).ok_or_else(|| tr("cloud.setup_failed").to_owned())?;
         match status.phase {
             Phase::Ready => {
+                crate::cloud::consume_result(app, id);
                 let key: SshKey =
                     serde_json::from_value(status.result.clone().ok_or_else(|| tr("cloud.setup_failed").to_owned())?).map_err(|e| e.to_string())?;
                 // Keep the same path validation as a manually chosen identity.

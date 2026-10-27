@@ -79,6 +79,7 @@ pub(super) fn tick(app: &mut SolveApp, statuses: &[JobStatus]) {
     {
         match status.phase {
             Phase::Ready => {
+                crate::cloud::consume_result(app, id);
                 let history = status.result.clone().and_then(|value| serde_json::from_value::<solidcraft_cloud::management::History>(value).ok());
                 if let Some(history) = history.filter(|h| {
                     h.revisions.len() <= 50

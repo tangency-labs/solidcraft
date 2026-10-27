@@ -96,12 +96,14 @@ pub(super) fn trash(app: &mut SolveApp, connection: &str) {
 }
 
 pub(super) fn tick(app: &mut SolveApp, statuses: &[JobStatus]) {
+    let mut consumed = Vec::new();
     if let Some(mut panel) = app.cloud.browser.management.panel.take() {
         if let Some(id) = &panel.loading
             && let Some(status) = statuses.iter().find(|s| &s.operation == id)
         {
             match status.phase {
                 Phase::Ready => {
+                    consumed.push(status.operation.clone());
                     let parsed = status
                         .result
                         .clone()
@@ -205,6 +207,7 @@ pub(super) fn tick(app: &mut SolveApp, statuses: &[JobStatus]) {
     {
         match status.phase {
             Phase::Ready => {
+                consumed.push(status.operation.clone());
                 match super::entries(status, &view.connection) {
                     Ok((entries, _)) => view.entries = entries,
                     Err(e) => view.error = Some(e),
@@ -217,6 +220,9 @@ pub(super) fn tick(app: &mut SolveApp, statuses: &[JobStatus]) {
             }
             _ => {}
         }
+    }
+    for id in consumed {
+        crate::cloud::consume_result(app, &id);
     }
 }
 
