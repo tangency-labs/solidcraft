@@ -59,6 +59,7 @@ pub mod component;
 pub mod construct;
 pub mod drawing;
 pub mod drawing_balloon;
+pub mod drawing_break;
 pub mod drawing_dimension;
 pub mod drawing_export;
 pub mod drawing_image;
