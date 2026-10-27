@@ -66,3 +66,36 @@ fn issue_711_second_overlapping_hole_fails_by_default() {
     let r = boolean_difference(&mut k, disc, second);
     assert!(r.is_err(), "{:?}", r.map(|_| ()));
 }
+
+/// The 0..4 plate is below the tool's midpoint at z = 5. Testing that midpoint
+/// still drops both crossing lines; clipping to the faces' domains keeps them.
+#[test]
+fn issue_711_axial_domain_fix_cuts_below_the_tools_midpoint() {
+    let (r, d) = (5.0_f64, 6.0_f64);
+    let lens = 2.0 * r * r * (d / (2.0 * r)).acos() - 0.5 * d * (4.0 * r * r - d * d).sqrt();
+    let holes = 2.0 * core::f64::consts::PI * r * r - lens;
+    let want = (core::f64::consts::PI * 400.0 - holes) * 4.0;
+    for (midpoint, domains) in [(true, false), (false, true), (true, true)] {
+        let mut k = Kernel::default();
+        k.fixes.cone_parallel_line_midpoint = midpoint;
+        k.fixes.cone_parallel_line_domains = domains;
+        let mut disc = create_cylinder(&mut k, Point3::ZERO, 20.0, 4.0).unwrap();
+        let first = create_cylinder(&mut k, Point3::new(6.0, 0.0, -1.0), 5.0, 12.0).unwrap();
+        disc = boolean_difference(&mut k, disc, first).unwrap();
+        let second = create_cylinder(
+            &mut k,
+            Point3::new(3.0, 3.0 * 3.0_f64.sqrt(), -1.0),
+            5.0,
+            12.0,
+        )
+        .unwrap();
+        let result = boolean_difference(&mut k, disc, second);
+        if domains {
+            let mut result = result.unwrap();
+            let got = volume(&k, &mut result).unwrap();
+            assert!((got - want).abs() <= 1e-5 * want, "{got} vs {want}");
+        } else {
+            assert!(result.is_err(), "{:?}", result.map(|_| ()));
+        }
+    }
+}

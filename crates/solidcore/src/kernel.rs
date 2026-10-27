@@ -225,6 +225,8 @@ pub struct UpstreamFixes {
     pub bspline_trim_preserves_uv_spans: bool,
     /// `SmCone::IntersectWithCone` tests the line of two parallel cylinders against both face domains at its middle, not its bottom end (WR-259, #711).
     pub cone_parallel_line_midpoint: bool,
+    /// `SmCone::IntersectWithCone` clips parallel-cylinder lines to both requested face domains, including overlaps away from the full line's middle (WR-259, #711). Independent of `cone_parallel_line_midpoint`; off by default for pinned SMLib compatibility.
+    pub cone_parallel_line_domains: bool,
     /// The Boolean's topology intersector treats a self-loop proto edge whose ends a vertex definition on a vertex combined (`CanCombineVertexDefinitions`) as degenerate, instead of `SmProtoEdge::Resolve` splitting it onto that one vertex, after which `SmMerge::MakeFaceuse` returns `SM_ERR` (WR-214, #480; `plan/upstream-issues/WR-214--smprotoedge-resolve-splits-a-self-loop-proto-edge-onto-one.md`).
     pub proto_edge_self_loop_on_vertex_degenerate: bool,
     /// `SM_BO_SLICE` keeps a coincident pair whose primary face bounds material on one side only when that material lies on the side the sheet's `SM_OT_SAME` faceuse bounds (step 7.4d's rule), instead of falling through to the difference rule, which keeps a face lying in the slicing sheet in both parts (WR-254, #528; `plan/upstream-issues/WR-254--manifoldboolean-keeps-a-face-lying-in-the-slicing-sheet-in.md`).
