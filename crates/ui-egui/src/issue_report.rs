@@ -294,7 +294,12 @@ fn context_signature(app: &SolveApp, dialog: Option<&dialogs::Dialog>) -> u64 {
     app.docs.active.hash(&mut h.0);
     app.docs.count().hash(&mut h.0);
     app.session.doc.name.hash(&mut h.0);
-    let _ = write!(&mut h, "{:?}{:?}", dialog, app.session.selection);
+    // What the dialog makes, not its state: a preview error it shows (a sketch fillet's) is often
+    // what is being reported.
+    if let Some(d) = dialog {
+        let _ = write!(&mut h, "{:?}{:?}{:?}", d.kind, d.inputs, d.extra);
+    }
+    let _ = write!(&mut h, "{:?}", app.session.selection);
     h.0.finish()
 }
 
@@ -604,10 +609,7 @@ pub(crate) fn hold_input(app: &mut SolveApp, raw: &mut egui::RawInput) {
     } else if state.pending.is_some() {
         let mut kept = Vec::with_capacity(raw.events.len());
         for event in raw.events.drain(..) {
-            if matches!(
-                event,
-                egui::Event::Text(_) | egui::Event::Key { .. } | egui::Event::Paste(_) | egui::Event::Copy | egui::Event::Cut | egui::Event::Ime(_)
-            ) {
+            if typing(&event) {
                 if state.held.len() < MAX_HELD {
                     state.held.push(event);
                 }
@@ -621,6 +623,14 @@ pub(crate) fn hold_input(app: &mut SolveApp, raw: &mut egui::RawInput) {
         events.append(&mut raw.events);
         raw.events = events;
     }
+}
+
+/// What [`hold_input`] keeps for the form.
+fn typing(event: &egui::Event) -> bool {
+    matches!(
+        event,
+        egui::Event::Text(_) | egui::Event::Key { .. } | egui::Event::Paste(_) | egui::Event::Copy | egui::Event::Cut | egui::Event::Ime(_)
+    )
 }
 
 pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
@@ -638,6 +648,18 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                 draft.source_signature = source;
             }
             capture_unless_busy(app, ctx, dialog.as_ref(), false);
+            // The capture hides the form before it is drawn this frame: what was typed in it
+            // waits with what comes while it is hidden.
+            if pending(app) {
+                let state = &mut app.issue_report;
+                ctx.input(|i| {
+                    for event in i.events.iter().filter(|e| typing(e)) {
+                        if state.held.len() < MAX_HELD {
+                            state.held.push(event.clone());
+                        }
+                    }
+                });
+            }
         } else {
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
@@ -1413,6 +1435,42 @@ mod tests {
         let token = app.issue_report.pending.as_ref().unwrap().token;
         receive(&mut app, token, Arc::new(ColorImage::new([4, 3], vec![egui::Color32::GREEN; 12])));
         assert!(app.issue_report.draft.as_ref().unwrap().image.is_some());
+    }
+
+    /// What is typed in the frame the preview finishes, as the waiting screenshot is taken and
+    /// hides the form, is kept too (#7171). A preview error the dialog shows meanwhile is not a
+    /// change: it is often what is being reported.
+    #[test]
+    fn issue_report_typing_as_a_waiting_screenshot_is_taken_is_kept() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.issue_report.draft = Some(draft_for(&h.app, None, None));
+        h.frames(8);
+        h.frame_with(vec![egui::Event::Text("The preview ".into())]);
+        // The wait ends in the next frame (here: its time is up), before the form is drawn.
+        let context = context_signature(&h.app, None);
+        h.app.issue_report.waiting = Some(Waiting { deadline: -1.0, context });
+        h.frame_with(vec![egui::Event::Text("vanished".into())]);
+        assert!(pending(&h.app) && h.app.issue_report.waiting.is_none());
+        h.frame_with(vec![egui::Event::Text(".".into())]);
+        let token = h.app.issue_report.pending.as_ref().unwrap().token;
+        receive(&mut h.app, token, Arc::new(ColorImage::new([4, 3], vec![egui::Color32::GREEN; 12])));
+        h.frames(4);
+        let draft = h.app.issue_report.draft.as_ref().unwrap();
+        assert_eq!(draft.description, "The preview vanished.");
+        assert!(draft.image.is_some(), "{}", draft.note);
+        // The dialog's preview error is not part of the context; its inputs are.
+        let mut app = app();
+        app.start("solid.combine");
+        let before = context_signature(&app, app.dialog.as_ref());
+        if let Some(d) = app.dialog.as_mut() {
+            d.error = Some("the operation failed".into());
+        }
+        assert_eq!(context_signature(&app, app.dialog.as_ref()), before);
+        if let Some(d) = app.dialog.as_mut() {
+            d.extra.insert("probe".into(), json!(1));
+        }
+        assert_ne!(context_signature(&app, app.dialog.as_ref()), before);
     }
 
     /// What is typed while a capture hides the report goes into the field it was typed in.
