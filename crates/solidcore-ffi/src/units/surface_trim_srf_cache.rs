@@ -13,7 +13,7 @@
 //! |---------------|----------------------------------------------|-------------------------------|
 //! | `New`         | constructor, `GetType`, `IsKindOf`, state    | `S ch ang ar max min ratio k type..` |
 //! | `PointTest`   | `PointTest` without face (testing off or face modified) | `S enabled modified u v has_tol tol` |
-//! | `ImplantEu`   | `ImplantEdgeuse` on a hand-built tree        | `S D factor T init D k` then `k` x `C subdiv node` |
+//! | `ImplantEu`   | `ImplantEdgeuse` on a hand-built tree        | `S D factor T init D k` then `k` x `C subdiv node has_owner owner_tol` |
 //! | `ImplantPoly` | `ImplantPolyEdge`, then `ImplantEdgeuse` / `SubdivideNode` | `S D factor T S k` then `k` x `start(x y z) end(x y z) tolerance node`, `remap m` then `m` x `C subdiv node` |
 //! | `Face`        | `BuildTree`, `PointTest`, `PointClassify` on a face's cache | `S build k` then `k` x `u v has_tol tol` |
 //!
@@ -42,8 +42,11 @@ use crate::{call_with_buffer, FfiError};
 pub const MAX_INDEX: usize = 24;
 /// Largest NURB degree accepted by [`eval`].
 pub const MAX_DEGREE: usize = 5;
-/// Largest coordinate magnitude accepted by [`eval`].
+/// Largest ordinary coordinate magnitude accepted by [`eval`].
 pub const MAX_COORD: f64 = 1.0e6;
+// ImplantEu alone admits large finite UV data to expose Bezier-decomposition
+// roundoff. This is a fixture envelope, not a native defined-behavior threshold.
+const MAX_IMPLANT_UV_COORD: f64 = 1.0e11;
 /// Largest number of subdivision tree nodes.
 pub const MAX_NODES: usize = 256;
 /// The upstream routine run by the shim.
@@ -93,14 +96,18 @@ crate::reader::unit_reader!(MAX_COORD);
 impl Reader<'_> {
     fn finite(&mut self) -> Result<f64, FfiError> {
         let v = self.num()?;
-        if !v.is_finite() || v.abs() > MAX_COORD {
+        if !v.is_finite() || v.abs() > 1.0e6 {
             return Err(bad("non-finite or huge value"));
         }
         Ok(v)
     }
 
+    fn coordinate(&mut self) -> Result<f64, FfiError> {
+        self.0.finite()
+    }
+
     fn finites(&mut self, k: usize) -> Result<Vec<f64>, FfiError> {
-        (0..k).map(|_| self.finite()).collect()
+        (0..k).map(|_| self.coordinate()).collect()
     }
 
     fn index(&mut self, max: usize) -> Result<usize, FfiError> {
@@ -126,10 +133,10 @@ impl Reader<'_> {
 
     fn domain(&mut self) -> Result<[f64; 4], FfiError> {
         let d = [
-            self.finite()?,
-            self.finite()?,
-            self.finite()?,
-            self.finite()?,
+            self.coordinate()?,
+            self.coordinate()?,
+            self.coordinate()?,
+            self.coordinate()?,
         ];
         if d[0] > d[2] || d[1] > d[3] {
             return Err(bad("domain not ordered"));
@@ -155,8 +162,8 @@ impl Reader<'_> {
 fn check_points(rd: &mut Reader<'_>, k: usize, two_d: bool, what: &str) -> Result<(), FfiError> {
     let mut w0 = None;
     for _ in 0..k {
-        let x = rd.num()?;
-        let y = rd.num()?;
+        rd.coordinate()?;
+        rd.coordinate()?;
         let z = rd.num()?;
         let w = rd.num()?;
         if two_d != (z == NOZ) {
@@ -172,10 +179,7 @@ fn check_points(rd: &mut Reader<'_>, k: usize, two_d: bool, what: &str) -> Resul
             return Err(bad(format!("{what}: weight out of range")));
         }
         let zz = if two_d { 0.0 } else { z };
-        if [x, y, zz]
-            .iter()
-            .any(|c| !c.is_finite() || c.abs() > MAX_COORD)
-        {
+        if !zz.is_finite() || zz.abs() > MAX_COORD {
             return Err(bad(format!("{what}: point out of range")));
         }
     }
@@ -320,6 +324,10 @@ fn validate_op(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
                 curve_2d(rd)?;
                 rd.flag()?;
                 rd.opt_index(n as i64)?;
+                rd.flag()?;
+                if rd.finite()? < 0.0 {
+                    return Err(bad("negative edge owner tolerance"));
+                }
             }
         }
         Op::ImplantPoly => {
@@ -369,6 +377,9 @@ fn validate_op(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
 /// [`FfiError::InvalidArgument`] for input the shim must not see.
 pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
     let mut rd = Reader::new(input);
+    if op == Op::ImplantEu {
+        rd.0 = crate::reader::Coords::new(input, MAX_IMPLANT_UV_COORD);
+    }
     validate_op(op, &mut rd)?;
     rd.done()
 }

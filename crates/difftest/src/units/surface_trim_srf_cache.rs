@@ -4,9 +4,9 @@
 //! cache of a face).
 //!
 //! C++: `solidcore_ffi::units::surface_trim_srf_cache` (upstream
-//! `source/SMLib/src/SmTrimSrfCache.cpp`; trees are built by hand, edge uses are bare
-//! `SmEdgeuse` objects holding their UV trim curve, faces come from
-//! `SmBrep::CreateFaceFromSurface`). Rust: `solidcore::surface::trim_srf_cache`.
+//! `source/SMLib/src/SmTrimSrfCache.cpp`; trees are built by hand. Edge uses either
+//! carry ownerless UV inputs or genuinely own them through a real wire edge with
+//! an explicit edge tolerance; faces come from `SmBrep::CreateFaceFromSurface`).
 //!
 //! A case is a surface `srf` (`oob`, `form` and an inline or `.sms` surface) and an `op` with
 //! its parameters. Both sides produce the flat record documented in the ffi module; the runner
@@ -45,7 +45,7 @@ use solidcore::nurbs::srf_basic::Surface as NlSurface;
 use solidcore::surface::surface::Surface;
 use solidcore::surface::surface_cache::p1::FaceContainment;
 use solidcore::surface::surface_cache::{BezierAux2d, BezierPatch, SurfaceCacheOptions};
-use solidcore::surface::trim_srf_cache::TrimSrfCache;
+use solidcore::surface::trim_srf_cache::{EdgeuseInput, TrimSrfCache};
 use solidcore::SolidError;
 use solidcore_ffi::units::surface_trim_srf_cache::{self as ffi, Op};
 
@@ -145,6 +145,9 @@ struct CallIn {
     subdiv: bool,
     /// Node to implant into, `-1` = all nodes meeting the curve box.
     node: i64,
+    /// Explicit edge owner tolerance; absent retains the ownerless synthetic path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    owner_tol: Option<f64>,
 }
 
 /// A face point: `PointTest` with `tol` when `test_tol`, `PointClassify` with `tol`.
@@ -336,6 +339,7 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
             for c in calls {
                 push_crv(&mut o, &c.crv);
                 o.extend([flag(c.subdiv), c.node as f64]);
+                o.extend([flag(c.owner_tol.is_some()), c.owner_tol.unwrap_or(0.0)]);
             }
         }
         OpIn::Face { build, points } => {
@@ -590,8 +594,11 @@ fn rust_op(i: &Inputs) -> Result<Run, HarnessError> {
                 let crv = curve_of(&call.crv)?;
                 match c.implant_edgeuse(
                     &k,
-                    idx as i64,
-                    Some(&crv),
+                    EdgeuseInput {
+                        edgeuse: idx as i64,
+                        uv_trim_curve: Some(crv),
+                        owner_zone_tol_3d: call.owner_tol,
+                    },
                     call.subdiv,
                     &mut ext,
                     link(call.node),
@@ -1006,6 +1013,7 @@ fn gen_case(rng: &mut Rng) -> Inputs {
                         crv: gen_curve(rng, dom),
                         subdiv: rng.chance(0.08),
                         node,
+                        owner_tol: None,
                     }
                 })
                 .collect();

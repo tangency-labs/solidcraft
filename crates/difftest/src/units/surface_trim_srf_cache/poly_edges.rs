@@ -10,7 +10,7 @@ use super::{
 };
 use crate::case::CaseSource;
 use solidcore::geom::vector3d::Point3;
-use solidcore::surface::trim_srf_cache::PolyEdgeInput;
+use solidcore::surface::trim_srf_cache::{EdgeuseInput, PolyEdgeInput};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Edge {
@@ -35,6 +35,9 @@ struct Input {
 
 fn encoded(i: &Input) -> Result<Vec<f64>, HarnessError> {
     let mut o = Vec::new();
+    if i.calls.iter().any(|call| call.owner_tol.is_some()) {
+        return Err(harness("owned UV inputs require the ImplantEu protocol"));
+    }
     push_srf(&mut o, &i.srf)?;
     o.extend(i.dom);
     o.push(i.factor);
@@ -64,6 +67,9 @@ pub(super) fn run_cpp(value: &Value) -> Result<Output, HarnessError> {
 
 pub(super) fn run_rust(value: &Value) -> Result<Output, HarnessError> {
     let i: Input = serde_json::from_value(value.clone()).map_err(|e| harness(e.to_string()))?;
+    if i.calls.iter().any(|call| call.owner_tol.is_some()) {
+        return Err(harness("owned UV inputs require the ImplantEu protocol"));
+    }
     let k = Kernel::default();
     let mut c = cache_of(&bss_of(&i.srf)?, DEFAULT_OPTS);
     c.base_mut().set_uv_domain(dom_of(i.dom));
@@ -102,11 +108,14 @@ pub(super) fn run_rust(value: &Value) -> Result<Output, HarnessError> {
                 .set_subdivision_handles(Some(|n| 1000 + n as i64));
         }
         let mut extent = Extent2d::new();
-        for (id, (call, curve)) in i.calls.iter().zip(&curves).enumerate() {
+        for (id, (call, curve)) in i.calls.iter().zip(curves).enumerate() {
             match c.implant_edgeuse(
                 &k,
-                id as i64,
-                Some(curve),
+                EdgeuseInput {
+                    edgeuse: id as i64,
+                    uv_trim_curve: Some(curve),
+                    owner_zone_tol_3d: None,
+                },
                 call.subdiv,
                 &mut extent,
                 link(call.node),
@@ -217,16 +226,19 @@ pub(super) fn cases() -> Result<Vec<Case>, HarnessError> {
                 crv: curve(point(0.1, 0.1), point(0.9, 0.9)),
                 subdiv: false,
                 node: 0,
+                owner_tol: None,
             },
             CallIn {
                 crv: curve(point(0.1, 0.9), point(0.9, 0.1)),
                 subdiv: true,
                 node: 0,
+                owner_tol: None,
             },
             CallIn {
                 crv: curve(point(0.1, 0.5), point(0.9, 0.5)),
                 subdiv: true,
                 node: 0,
+                owner_tol: None,
             },
         ];
         let input = Input {

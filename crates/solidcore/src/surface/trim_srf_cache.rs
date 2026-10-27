@@ -45,9 +45,13 @@
 //!   falling back to the cache surface only when the adapter does not supply it.
 //!   An explicit [`TrimSrfCache::bind_face`] validates the source owner key and
 //!   records its caller handle without decoding the key as a topology id.
-//!   `SubdivideNode` re-implants a moved edge use with the curve it was implanted with
-//!   (its `GetUVTrimCurve`, retained as an exact B-spline copy). Poly edges retain
-//!   their endpoints, tolerance and an evaluation copy of their original face surface;
+//!   `SubdivideNode` re-implants a moved edge use with its retained exact UV curve
+//!   and resolved edge owner tolerance, without cloning it for either child.
+//!   [`EdgeuseInput`] transfers that input into the cache; face construction resolves
+//!   the tolerance through [`CacheFace::zone_tol_3d`], and `None` is reserved for
+//!   ownerless standalone UV curves. Handle mapping retains the same tolerance.
+//!   Poly edges retain their endpoints, tolerance and an evaluation copy of their
+//!   original face surface;
 //!   callers must reimplant an edited edge before subdividing, as for edge-use curves.
 //! - **Node lists.** `SmTList::Prepend` onto a node's edge use, vertex and poly edge
 //!   lists inserts at the front of the [`BezierAux2d`] `Vec`s (list order, head first).
@@ -150,6 +154,20 @@ pub struct VertexuseInput<O> {
     pub uv_point: Point2,
     /// `GetVertex()->GetTolerance()`.
     pub vertex_tolerance: f64,
+}
+
+/// What `ImplantEdgeuse` reads from the edge use, transferred into the cache for
+/// later child reimplantation without copying the curve.
+#[derive(Debug)]
+pub struct EdgeuseInput<O> {
+    /// The edge use stored in the node lists.
+    pub edgeuse: O,
+    /// The exact `GetUVTrimCurve()` geometry; `None` preserves the native null error.
+    pub uv_trim_curve: Option<BSplineCurve>,
+    /// The zone tolerance of the edge reached through the curve's owning edge use.
+    /// Supply `Some` for an owned UV curve, resolved from its actual B-rep; `None`
+    /// is only for an ownerless standalone curve and retains the system tolerance.
+    pub owner_zone_tol_3d: Option<f64>,
 }
 
 /// What `ImplantPolyEdge` reads from the poly edge (see the module deviations).
@@ -334,15 +352,23 @@ impl PolyEdgeGeometry {
     }
 }
 
+/// Exact UV input and its resolved owner context, retained together across
+/// subdivision and handle mapping.
+#[derive(Debug, Clone)]
+struct EdgeuseGeometry {
+    curve: BSplineCurve,
+    owner_zone_tol_3d: Option<f64>,
+}
+
 /// The trimmed surface cache (`SmTrimSrfCache`): a [`SurfaceCache`] whose tree
 /// knows the face boundary.
 #[derive(Debug, Clone)]
 pub struct TrimSrfCache<O> {
     /// The `SmSurfaceCache` base.
     base: SurfaceCache<O>,
-    /// The UV trim curve of every edge use implanted (`GetUVTrimCurve`, read again
-    /// when a subdivision moves the edge use into the new children).
-    edgeuse_curves: Vec<(O, BSplineCurve)>,
+    /// UV trim geometry and resolved owner tolerance, read again when subdivision
+    /// moves an edge use into the new children.
+    edgeuse_curves: Vec<(O, EdgeuseGeometry)>,
     /// Geometry of implanted polygon edges, keyed by their opaque handles.
     poly_edge_geometry: Vec<(O, PolyEdgeGeometry)>,
 }
@@ -407,7 +433,15 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
         let edgeuse_curves = self
             .edgeuse_curves
             .iter()
-            .map(|(o, c)| Ok((map(*o)?, c.clone_exact())))
+            .map(|(o, g)| {
+                Ok((
+                    map(*o)?,
+                    EdgeuseGeometry {
+                        curve: g.curve.clone_exact(),
+                        owner_zone_tol_3d: g.owner_zone_tol_3d,
+                    },
+                ))
+            })
             .collect::<Result<_>>()?;
         Ok(TrimSrfCache {
             base: self.base.map_handles(&map)?,
@@ -759,8 +793,14 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
                 let curve = face.edgeuse_uv_trim_curve(eu)?;
                 self.implant_edgeuse(
                     k,
-                    eu,
-                    curve.as_ref(),
+                    EdgeuseInput {
+                        edgeuse: eu,
+                        owner_zone_tol_3d: curve
+                            .as_ref()
+                            .map(|_| face.zone_tol_3d(k, eu))
+                            .transpose()?,
+                        uv_trim_curve: curve,
+                    },
                     do_subdivision,
                     &mut face_domain,
                     None,
@@ -865,7 +905,7 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
         self.base.aux_mut(node)
     }
 
-    /// Embeds the edge use `edgeuse`, whose UV trim curve is `uv_trim_curve`, into
+    /// Embeds the edge use and its UV curve / owner context from `input` into
     /// the decomposition (`ImplantEdgeuse`): every leaf near the curve (or near a pole
     /// side of the surface) is marked on the boundary and gets the edge use, the
     /// change is propagated to its ancestors; with `do_subdivision` large leaves are
@@ -877,29 +917,52 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
     /// `SM_ERR_NULL_POINTER` without trim curve; those of the curve box, the curve
     /// cache and the tree; [`SolidError::Unported`] for `FindUVNodes` and
     /// `SubdivideNode`.
-    #[allow(clippy::too_many_lines)]
     pub fn implant_edgeuse(
         &mut self,
         k: &Kernel,
-        edgeuse: O,
-        uv_trim_curve: Option<&BSplineCurve>,
+        input: EdgeuseInput<O>,
         do_subdivision: bool,
         face_extent: &mut Extent2d,
         opt_tree_node: Option<NodeId>,
     ) -> Result<()> {
-        // locals
-        let eu_curve = uv_trim_curve.ok_or(SolidError::null_pointer(OP_EU))?;
-        // Subdivision may need a curve implanted by an earlier call. Retain its
-        // exact input data instead of trying to resolve an opaque edge-use handle.
-        if let Some((_, curve)) = self
+        let geometry = EdgeuseGeometry {
+            curve: input.uv_trim_curve.ok_or(SolidError::null_pointer(OP_EU))?,
+            owner_zone_tol_3d: input.owner_zone_tol_3d,
+        };
+        let index = if let Some(index) = self
             .edgeuse_curves
-            .iter_mut()
-            .find(|(handle, _)| *handle == edgeuse)
+            .iter()
+            .position(|(handle, _)| *handle == input.edgeuse)
         {
-            *curve = eu_curve.clone_exact();
+            let (_, retained) = self
+                .edgeuse_curves
+                .get_mut(index)
+                .ok_or_else(|| invalid(OP_EU, "edge use has no retained geometry"))?;
+            *retained = geometry;
+            index
         } else {
-            self.edgeuse_curves.push((edgeuse, eu_curve.clone_exact()));
-        }
+            let index = self.edgeuse_curves.len();
+            self.edgeuse_curves.push((input.edgeuse, geometry));
+            index
+        };
+        self.implant_retained_edgeuse(k, index, do_subdivision, face_extent, opt_tree_node)
+    }
+
+    #[allow(clippy::too_many_lines)]
+    fn implant_retained_edgeuse(
+        &mut self,
+        k: &Kernel,
+        index: usize,
+        do_subdivision: bool,
+        face_extent: &mut Extent2d,
+        opt_tree_node: Option<NodeId>,
+    ) -> Result<()> {
+        let (edgeuse, geometry) = self
+            .edgeuse_curves
+            .get(index)
+            .ok_or_else(|| invalid(OP_EU, "edge use has no retained geometry"))?;
+        let edgeuse = *edgeuse;
+        let eu_curve = &geometry.curve;
 
         // set up for poles
         let (poles, u_ivl, v_ivl, u_tol, v_tol) = {
@@ -1031,6 +1094,7 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
                     ..CurveCacheOptions::default()
                 },
             );
+            cc.set_owner_zone_tol_3d(geometry.owner_zone_tol_3d);
             cc.tessellate(k)?;
             Some(cc)
         } else {
@@ -1164,21 +1228,20 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
                 while let Some(eu) = self.base.aux(node)?.edgeuse_list.last().copied() {
                     // implant the edge use in both children without subsequent
                     // subdivision (the status is ignored)
-                    let curve = self
-                        .edgeuse_curves
-                        .iter()
-                        .find(|(e, _)| *e == eu)
-                        .map(|(_, c)| c.clone_exact());
+                    let index = self.edgeuse_curves.iter().position(|(e, _)| *e == eu);
                     for child in [node1, node2] {
                         let mut temp_ext = Extent2d::new();
-                        let r = self.implant_edgeuse(
-                            k,
-                            eu,
-                            curve.as_ref(),
-                            false,
-                            &mut temp_ext,
-                            Some(child),
-                        );
+                        let r = if let Some(index) = index {
+                            self.implant_retained_edgeuse(
+                                k,
+                                index,
+                                false,
+                                &mut temp_ext,
+                                Some(child),
+                            )
+                        } else {
+                            Err(SolidError::null_pointer(OP_EU))
+                        };
                         if let Err(e) = r {
                             if e.is_unported() {
                                 return Err(e);
@@ -1624,17 +1687,47 @@ mod tests {
         let mut c = cache();
         let mut ext = Extent2d::new();
         let crv = line_2d([0.3, 0.3], [0.4, 0.7]);
-        c.implant_edgeuse(&k, 7, Some(&crv), false, &mut ext, Some(NodeId(1)))
-            .unwrap();
+        c.implant_edgeuse(
+            &k,
+            EdgeuseInput {
+                edgeuse: 7,
+                uv_trim_curve: Some(crv.clone_exact()),
+                owner_zone_tol_3d: None,
+            },
+            false,
+            &mut ext,
+            Some(NodeId(1)),
+        )
+        .unwrap();
         assert_eq!(c.base().aux(NodeId(1)).unwrap().edgeuse_list, vec![7]);
         // the other leaf is not visited, the root is not a leaf
-        c.implant_edgeuse(&k, 8, Some(&crv), false, &mut ext, Some(NodeId(2)))
-            .unwrap();
+        c.implant_edgeuse(
+            &k,
+            EdgeuseInput {
+                edgeuse: 8,
+                uv_trim_curve: Some(crv),
+                owner_zone_tol_3d: None,
+            },
+            false,
+            &mut ext,
+            Some(NodeId(2)),
+        )
+        .unwrap();
         assert!(c.base().aux(NodeId(2)).unwrap().edgeuse_list.is_empty());
         assert!(ext.min().x < 0.3 && ext.max().y > 0.7);
         // without trim curve
         assert!(c
-            .implant_edgeuse(&k, 9, None, false, &mut ext, Some(NodeId(1)))
+            .implant_edgeuse(
+                &k,
+                EdgeuseInput {
+                    edgeuse: 9,
+                    uv_trim_curve: None,
+                    owner_zone_tol_3d: None,
+                },
+                false,
+                &mut ext,
+                Some(NodeId(1)),
+            )
             .is_err());
     }
 
@@ -1645,7 +1738,17 @@ mod tests {
         let crv = line_2d([0.3, 0.3], [0.4, 0.7]);
         let mut ext = Extent2d::new();
         assert!(c
-            .implant_edgeuse(&k, 7, Some(&crv), false, &mut ext, Some(NodeId(usize::MAX)))
+            .implant_edgeuse(
+                &k,
+                EdgeuseInput {
+                    edgeuse: 7,
+                    uv_trim_curve: Some(crv),
+                    owner_zone_tol_3d: None,
+                },
+                false,
+                &mut ext,
+                Some(NodeId(usize::MAX)),
+            )
             .is_err());
         assert!(c.base().aux(NodeId(1)).unwrap().edgeuse_list.is_empty());
         assert!(ext.is_init());

@@ -6,8 +6,8 @@
 // documented in crates/solidcore-ffi/src/units/surface_trim_srf_cache.rs, which validates every
 // input. Every op starts with a B-spline surface block `oob form n m p q r s cpts(x y z w) u v`.
 // Protected members are reached through a derived "peek" class; decomposition trees are built by
-// hand in the tree's own node manager (as in the surface.surface_cache_p1 shim), edge uses are bare
-// SmEdgeuse objects carrying only their UV trim curve, and faces come from
+// hand in the tree's own node manager (as in the surface.surface_cache_p1 shim). Edge uses either
+// carry an ownerless UV curve or own it through a real wire edge with an explicit tolerance; faces come from
 // SmBrep::CreateFaceFromSurface. `out` receives the op status (0 = SM_SUCCESS, else the SmStatus
 // value) and the op's outputs.
 #include "sc_shim.h"
@@ -17,9 +17,11 @@
 #include <SmBSplineSurface.h>
 #include <SmBrep.h>
 #include <SmContext.h>
+#include <SmEdge.h>
 #include <SmEdgeuse.h>
 #include <SmExtent2d.h>
 #include <SmFace.h>
+#include <SmLine.h>
 #include <SmNurbsCrv.h>
 #include <SmNurbsSrf.h>
 #include <SmPoly.h>
@@ -264,7 +266,8 @@ void op_implant_eu(Rd& rd, SmBSplineSurface* s, const SmContext& ctx, std::vecto
     if (!init)
         fe = given;
     int64_t k = rd.idx();
-    std::vector<EdgeusePeek*> eus;
+    std::vector<SmEdgeuse*> eus;
+    std::vector<SmBrep*> owners;
     o.push_back(0.0);
     bool failed = false;
     for (int64_t i = 0; i < k; i++)
@@ -272,8 +275,33 @@ void op_implant_eu(Rd& rd, SmBSplineSurface* s, const SmContext& ctx, std::vecto
         SmBSplineCurve* crv = read_curve(rd, ctx);
         bool subdiv = rd.flag();
         int64_t node = rd.idx();
-        EdgeusePeek* eu = new (static_cast<SmObject*>(c)) EdgeusePeek();
-        eu->set_curve(crv);
+        const bool owned = rd.flag();
+        const double owner_tol = rd.num();
+        SmEdgeuse* eu = nullptr;
+        if (owned)
+        {
+            // Use a real wire edge/edgeuse ownership chain. Only its tolerance
+            // is read by ImplantEdgeuse; the UV input remains the actual curve.
+            SmBrep* brep = new (ctx) SmBrep();
+            owners.push_back(brep);
+            SmLine* line = new (ctx) SmLine(SmPoint3d(0, 0, 0), SmVector3d(1, 0, 0),
+                SmExtent1d(0, 1), 1.0, 3, &ctx, nullptr, FALSE);
+            SmEdge* edge = nullptr;
+            if (brep->CreateWireEdgeFromCurve(line, SmExtent1d(0, 1), edge) != SM_SUCCESS ||
+                edge == nullptr) throw std::runtime_error("cannot construct trim owner edge");
+            edge->SetTolerance(owner_tol, FALSE, FALSE);
+            eu = edge->GetSameOrientedEdgeuse();
+            if (eu == nullptr) throw std::runtime_error("missing trim owner edgeuse");
+            eu->SetMemberUVTrimCurve(crv);
+            if (crv->GetOwner() != eu || crv->GetEdge() != edge)
+                throw std::runtime_error("UV curve does not retain its edgeuse/edge owner");
+        }
+        else
+        {
+            EdgeusePeek* bare = new (static_cast<SmObject*>(c)) EdgeusePeek();
+            bare->set_curve(crv);
+            eu = bare;
+        }
         eus.push_back(eu);
         if (failed)
             continue;
@@ -306,8 +334,11 @@ void op_implant_eu(Rd& rd, SmBSplineSurface* s, const SmContext& ctx, std::vecto
         }
     }
     delete c;
-    for (EdgeusePeek* eu : eus)
-        delete eu;
+    for (SmEdgeuse* eu : eus)
+        if (eu->GetUVTrimCurve()->GetOwner() != eu)
+            delete static_cast<EdgeusePeek*>(eu);
+    for (SmBrep* owner : owners)
+        delete owner;
 }
 
 #include "surface_trim_srf_cache_poly.inc"
