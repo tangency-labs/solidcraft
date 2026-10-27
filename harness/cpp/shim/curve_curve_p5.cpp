@@ -22,12 +22,14 @@
 
 #include "StdAfx.h"
 #include <SmBSplineCurve.h>
+#include <SmBrep.h>
 #include <SmCircle.h>
 #include <SmContext.h>
 #include <SmCrvOnSurf.h>
 #include <SmCurve.h>
 #include <SmCurveCache.h>
 #include <SmCurveTypes.h>
+#include <SmEdge.h>
 #include <SmEllipse.h>
 #include <SmExtent1d.h>
 #include <SmExtent2d.h>
@@ -45,6 +47,7 @@
 #include <nurbs.h>
 
 #include <map>
+#include <stdexcept>
 #include <vector>
 
 #include "sc_sm.h"
@@ -1697,6 +1700,7 @@ enum : int32_t
     OP_CCI = 13,
     OP_CC_TAN = 14,
     OP_NORMAL = 15,
+    OP_EDGE_CACHE = 16,
 };
 
 double st(SmStatus s) { return s == SM_SUCCESS ? 0.0 : (double)s; }
@@ -1899,6 +1903,42 @@ void run(int32_t op, Rd& rd, const SmContext& ctx, std::vector<double>& o)
             }
         }
         delete c;
+        break;
+    }
+    case OP_EDGE_CACHE:
+    {
+        // the cache of a curve that defines a wire edge's shape, the edge's tolerance set
+        // (SmTol::GetApproxTol3d(&m_crCurve) in Tessellate reads it through GetEdge)
+        SmCurve* c = read_curve(rd, ctx);
+        double tol = rd.num();
+        SmBrep* brep = new (ctx) SmBrep();
+        SmEdge* edge = NULL;
+        SmStatus s = brep->CreateWireEdgeFromCurve(c, c->GetNaturalInterval(), edge);
+        if (s == SM_SUCCESS && (edge == NULL || edge->GetCurve() != c))
+            throw std::runtime_error("CreateWireEdgeFromCurve did not keep the curve");
+        SmCacheObj* made = NULL;
+        if (s == SM_SUCCESS)
+        {
+            edge->SetTolerance(tol, FALSE, FALSE);
+            s = c->CacheMakeOrValidate(SM_OC_CURVE, c, NULL, made);
+        }
+        o.push_back(st(s));
+        if (s == SM_SUCCESS)
+        {
+            SmCurveCache* cache = (SmCurveCache*)made;
+            o.push_back((double)cache->GetSpanCount());
+            for (ULONG i = 0; i < cache->GetSpanCount(); i++)
+            {
+                SmExtent1d& ivl = cache->GetAt(i)->GetInterval();
+                o.push_back(ivl.GetMin());
+                o.push_back(ivl.GetMax());
+            }
+        }
+        // the B-rep owns the curve once the edge holds it (CreateWireEdgeFromCurve
+        // consumes it on success)
+        if (s != SM_SUCCESS && c->GetOwner() == NULL)
+            delete c;
+        delete brep;
         break;
     }
     case OP_CP_GUESS:

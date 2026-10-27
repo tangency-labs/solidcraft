@@ -30,7 +30,8 @@ use solidcore::curve::curve::p2::{Curve, CurvePropertyType};
 use solidcore::curve::curve::p4::{CcIntersectEnfo, CcTangentIntEnfo, FindCcNormalEnfo};
 use solidcore::curve::curve::p5::{
     crvs_cleanup, find_additional_cp_guess, is_point_solution_across_closed_seam_boundary,
-    local_property_analysis, make_curve_cache, remove_duplicate_curves, validate_curve_cache,
+    local_property_analysis, make_curve_cache, make_curve_cache_with_zone_tol,
+    remove_duplicate_curves, validate_curve_cache,
 };
 use solidcore::curve::curve_cache::CurveCache;
 use solidcore::curve::ellipse::{Ellipse, EllipseOptions};
@@ -50,6 +51,8 @@ use solidcore::math::EFF_ZERO_SQ;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::math::{NOW, NOZ};
 use solidcore::nurbs::nurbs_crv::allocate_nurb_curve;
+use solidcore::topology::brep::p5::create_wire_edge_from_curve;
+use solidcore::topology::{edge, Brep};
 use solidcore::SolidError;
 use solidcore_ffi::units::curve_curve_p5::{self as ffi, Op};
 
@@ -247,6 +250,11 @@ enum OpIn {
         vecs: Vec<[f64; 3]>,
         calls: Vec<CallIn>,
     },
+    /// The cache of the curve of a wire edge whose tolerance is `tol`.
+    EdgeCache {
+        curve: CurveIn,
+        tol: f64,
+    },
 }
 
 // ---- C++ input --------------------------------------------------------------------
@@ -345,6 +353,7 @@ fn op_of(op: &OpIn) -> Op {
         OpIn::Cci { .. } => Op::Cci,
         OpIn::CcTan { .. } => Op::CcTan,
         OpIn::Normal { .. } => Op::Normal,
+        OpIn::EdgeCache { .. } => Op::EdgeCache,
     }
 }
 
@@ -468,6 +477,10 @@ fn cpp_input(op: &OpIn) -> Result<(Op, Vec<f64>), HarnessError> {
             for c in calls {
                 v.extend([c.x[0], c.x[1], b(c.jac)]);
             }
+        }
+        OpIn::EdgeCache { curve, tol } => {
+            curve_block(&mut v, curve)?;
+            v.push(*tol);
         }
     }
     Ok((op_of(op), v))
@@ -670,7 +683,7 @@ fn put_points(k: &Kernel, o: &mut Vec<f64>, c: &Curve) {
 
 #[allow(clippy::too_many_lines)]
 fn rust(op: &OpIn) -> Result<Output, HarnessError> {
-    let k = Kernel::default();
+    let mut k = Kernel::default();
     let mut o: Vec<f64> = Vec::new();
     match op {
         OpIn::Cleanup { curves, tol } => {
@@ -759,6 +772,25 @@ fn rust(op: &OpIn) -> Result<Output, HarnessError> {
                 _ => (false, tri!(o, make_curve_cache::<()>(&k, &c, None))),
             };
             o.extend([0.0, b(reused), cache.span_count() as f64]);
+            for i in 0..cache.span_count() {
+                let span = tri!(o, cache.span(i));
+                o.extend([span.aux.interval.min(), span.aux.interval.max()]);
+            }
+        }
+        OpIn::EdgeCache { curve, tol } => {
+            let c = build(&k, curve)?;
+            let mut brep = tri!(o, Brep::new_with_infinite_region());
+            let ivl = c.natural_interval();
+            let e = tri!(o, create_wire_edge_from_curve(&mut k, &mut brep, c, ivl));
+            tri!(o, edge::set_tolerance(&mut brep, e, *tol, false, false));
+            let edge_curve = tri!(o, edge::curve(&brep, e)).ok_or_else(|| harness("edge curve"))?;
+            // the cache is the edge curve's own: its tolerance is the edge's
+            let zone_tol_3d = tri!(o, edge::tolerance(&brep, e));
+            let cache = tri!(
+                o,
+                make_curve_cache_with_zone_tol::<()>(&k, edge_curve, None, Some(zone_tol_3d))
+            );
+            o.extend([0.0, cache.span_count() as f64]);
             for i in 0..cache.span_count() {
                 let span = tri!(o, cache.span(i));
                 o.extend([span.aux.interval.min(), span.aux.interval.max()]);

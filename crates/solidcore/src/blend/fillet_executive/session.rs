@@ -3035,10 +3035,12 @@ impl SolverLoadingAccess<FilletObject> for SessionObjects<'_> {
             .ok_or_else(|| SolidError::null_pointer(LOADER))?;
         let knots = curve.knots(k, None)?.0;
         if let std::collections::btree_map::Entry::Vacant(entry) = self.edge_caches.entry(id) {
-            let cache = crate::curve::curve::p5::make_curve_cache(
+            // the cache is the edge curve's own: its tolerance is the edge's
+            let cache = crate::curve::curve::p5::make_curve_cache_with_zone_tol(
                 k,
                 curve,
                 Some(FilletObject::Curve(FilletBody::Target, id)),
+                Some(crate::topology::edge::tolerance(self.target, id)?),
             )
             .map_err(|error| {
                 if error.is_unported() {

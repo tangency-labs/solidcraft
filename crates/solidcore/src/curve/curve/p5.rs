@@ -16,6 +16,7 @@
 //! | [`is_point_solution_across_closed_seam_boundary`] | `sm_IsPointSolutionAcrossClosedSeamBoundary` (static) |
 //! | [`find_additional_cc_tangent_guess`]         | `sm_FindAdditionalCcTangentGuess` (static)     |
 //! | [`make_curve_cache`], [`validate_curve_cache`] | `SmCurve::CacheMakeOrValidate`               |
+//! | [`make_curve_cache_with_zone_tol`]          | `SmCurve::CacheMakeOrValidate` (edge curve) |
 //! | [`find_additional_cp_guess`]                 | `sm_FindAdditionalCpGuess` (static)            |
 //! | [`is_arc_base`], [`Curve::is_arc`]           | `SmCurve::IsArc` (virtual: base, circle, line, parabola, hyperbola) |
 //! | [`is_line_base`], [`Curve::is_line`]         | `SmCurve::IsLine` (virtual: base, B-spline, line) |
@@ -53,6 +54,11 @@
 //!   `CacheMakeOrValidate`: the `SM_OC_CURVE` type check and the reuse of an existing
 //!   cache; the context check has no counterpart (a [`Curve`] always
 //!   has the kernel's context).
+//! - **Owner tolerance.** Upstream builds the cache on the curve object itself, so a
+//!   curve that defines an edge's shape tessellates with half the edge's tolerance
+//!   (`SmTol::GetApproxTol3d(&m_crCurve)`). The cache holds an owner-free copy and
+//!   no `Brep`, so a caller holding the B-rep passes the edge's tolerance
+//!   ([`make_curve_cache_with_zone_tol`]); it is part of the memo key.
 //! - **Curve lists.** `CrvsCleanup` and `RemoveDuplicateCurves` take owned lists;
 //!   removed curves are dropped (`bDelCrv` is always true; `NULL` entries are
 //!   `None`). `CrvsCleanup` casts the curves around a removed one to
@@ -289,14 +295,32 @@ pub fn make_curve_cache<O: Copy + PartialEq>(
     curve: &Curve,
     handle: Option<O>,
 ) -> Result<CurveCache<O>> {
+    make_curve_cache_with_zone_tol(k, curve, handle, None)
+}
+
+/// [`make_curve_cache`] for a curve that defines an edge's shape: `zone_tol_3d` is that
+/// edge's tolerance (`SmTol::GetZoneTol3d(cpCurve)`, resolved by the caller, which holds
+/// the B-rep), whose half is the tessellation's approximation tolerance
+/// ([`CurveCache::set_owner_zone_tol_3d`]). `None` builds as [`make_curve_cache`]:
+/// the system tolerance.
+///
+/// # Errors
+///
+/// Those of [`make_curve_cache`].
+pub fn make_curve_cache_with_zone_tol<O: Copy + PartialEq>(
+    k: &Kernel,
+    curve: &Curve,
+    handle: Option<O>,
+    zone_tol_3d: Option<f64>,
+) -> Result<CurveCache<O>> {
     // not upstream: the memo of this build in the curve value (see CurveMemo)
-    let key = CurveMemoKey::of(k, curve);
+    let key = CurveMemoKey::of(k, curve, zone_tol_3d);
     if let Some(key) = &key {
         if let Some(hit) = curve.memo().lookup(key, handle) {
             return Ok(hit);
         }
     }
-    let cache = build_curve_cache(k, curve, handle)?;
+    let cache = build_curve_cache(k, curve, handle, zone_tol_3d)?;
     if let Some(key) = key {
         if let Some(neutral) = cache.retag::<()>(None) {
             curve.memo().store(key, neutral);
@@ -315,18 +339,25 @@ pub(crate) struct CurveMemoKey {
     context_bits: [u64; 3],
     context_flags: [bool; 1],
     fixes: crate::kernel::UpstreamFixes,
+    /// The bits of the owner zone tolerance the build was given
+    /// ([`make_curve_cache_with_zone_tol`]).
+    owner_zone_tol_bits: Option<u64>,
 }
 
 impl CurveMemoKey {
-    /// The key of a build of `curve` under `k`, or `None` when the build must not be
-    /// memoised: the memo is off, or the curve is not a pure value ([`memo_pure`]). The
-    /// owner is not an input: the build works on its own copy of the curve, which has
-    /// none.
-    fn of(k: &Kernel, curve: &Curve) -> Option<Self> {
+    /// The key of a build of `curve` under `k` with the owner zone tolerance
+    /// `zone_tol_3d`, or `None` when the build must not be memoised: the memo is off,
+    /// or the curve is not a pure value ([`memo_pure`]). The owner itself is not an
+    /// input: the build works on its own copy of the curve, which has none, and reads
+    /// the owner only through `zone_tol_3d`.
+    fn of(k: &Kernel, curve: &Curve, zone_tol_3d: Option<f64>) -> Option<Self> {
         if !k.memoize_curve_caches || !memo_pure(curve) {
             return None;
         }
-        Self::of_kernel(k)
+        Self::of_kernel(k).map(|key| Self {
+            owner_zone_tol_bits: zone_tol_3d.map(f64::to_bits),
+            ..key
+        })
     }
 
     /// The kernel part of a memo key, for any memo of a build that reads `k` only
@@ -345,6 +376,7 @@ impl CurveMemoKey {
             ],
             context_flags: [c.doing_boolean()],
             fixes: k.fixes,
+            owner_zone_tol_bits: None,
         })
     }
 }
@@ -452,6 +484,7 @@ fn build_curve_cache<O: Copy + PartialEq>(
     k: &Kernel,
     curve: &Curve,
     handle: Option<O>,
+    zone_tol_3d: Option<f64>,
 ) -> Result<CurveCache<O>> {
     // cast Object to SmCurve and get its interval
     let ivl = curve.natural_interval();
@@ -486,6 +519,9 @@ fn build_curve_cache<O: Copy + PartialEq>(
         },
     );
     cache.set_curve_handle(handle);
+    // not upstream: the cached copy has no owner, so the builder gives its edge's
+    // tolerance (SmTol::GetApproxTol3d(&m_crCurve) in Tessellate)
+    cache.set_owner_zone_tol_3d(zone_tol_3d);
 
     // build the CruveCache's curve subdivision tree
     cache.tessellate(k)?;
@@ -2633,7 +2669,7 @@ mod tests {
             hermite([0.0; 3], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]),
         ] {
             let fresh = format!("{:?}", make_curve_cache(&off, &c, Some(7u32)).unwrap());
-            let key = CurveMemoKey::of(&k, &c).unwrap();
+            let key = CurveMemoKey::of(&k, &c, None).unwrap();
             assert!(c.memo().lookup(&key, None::<u32>).is_none());
             let miss = format!("{:?}", make_curve_cache(&k, &c, Some(7u32)).unwrap());
             assert!(c.memo().lookup(&key, None::<u32>).is_some());
@@ -2646,7 +2682,7 @@ mod tests {
             assert_eq!(hit, fresh);
             assert_eq!(hit_copy, fresh_copy);
             // the memo was off for `off`, so it stored nothing
-            assert!(CurveMemoKey::of(&off, &c).is_none());
+            assert!(CurveMemoKey::of(&off, &c, None).is_none());
         }
     }
 
@@ -2657,7 +2693,7 @@ mod tests {
             ..Kernel::default()
         };
         let mut c = ellipse_spline();
-        let key = CurveMemoKey::of(&k, &c).unwrap();
+        let key = CurveMemoKey::of(&k, &c, None).unwrap();
         let _ = make_curve_cache(&k, &c, None::<u32>).unwrap();
         let copy = c.clone();
         assert!(copy.memo().lookup(&key, None::<u32>).is_some());
@@ -2679,11 +2715,42 @@ mod tests {
             ..Kernel::default()
         };
         loose.tolerances.zone_tol_3d *= 10.0;
-        let loose_key = CurveMemoKey::of(&loose, &copy).unwrap();
+        let loose_key = CurveMemoKey::of(&loose, &copy, None).unwrap();
         assert!(copy.memo().lookup(&loose_key, None::<u32>).is_none());
         // a Hermite curve is a pure value and memoised
         let h = hermite([0.0; 3], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 1.0, 0.0]);
-        assert!(CurveMemoKey::of(&k, &h).is_some());
+        assert!(CurveMemoKey::of(&k, &h, None).is_some());
+    }
+
+    #[test]
+    fn owner_zone_tol_sets_the_approximation_tolerance_and_the_memo_key() {
+        let k = Kernel {
+            memoize_curve_caches: true,
+            ..Kernel::default()
+        };
+        // at 1e10 the Bezier spans' rounding (above half the system tolerance) splits
+        // spans, half an edge tolerance of 1 does not
+        let mut pts = vec![
+            [1.2e9, 0.0, 0.0],
+            [1.1e10, 2e10, 0.0],
+            [3.1e10, -1e10, 1e10],
+        ];
+        pts.extend([[4.1e10, 1e10, 0.0], [6.1e10, 0.0, 2e10]]);
+        let mut cur = allocate_nurb_curve(4, 3, 8).unwrap();
+        for (d, p) in cur.cpts_mut().iter_mut().zip(pts) {
+            *d = crate::nurbs::math::CPoint::new(p[0], p[1], p[2], crate::nurbs::math::NOW);
+        }
+        cur.knots_mut()
+            .copy_from_slice(&[0.0, 0.0, 0.0, 0.0, 0.37, 1.0, 1.0, 1.0, 1.0]);
+        let big = Curve::from(BSplineCurve::from_nurb(cur, 3, false));
+        let system = make_curve_cache(&k, &big, None::<u32>).unwrap();
+        let edge = make_curve_cache_with_zone_tol(&k, &big, None::<u32>, Some(1.0)).unwrap();
+        assert!(system.span_count() > edge.span_count());
+        // each tolerance has its own key: no hit across them
+        let again = make_curve_cache(&k, &big, None::<u32>).unwrap();
+        assert_eq!(again.span_count(), system.span_count());
+        let key = CurveMemoKey::of(&k, &big, Some(1.0)).unwrap();
+        assert!(big.memo().lookup(&key, None::<u32>).is_none());
     }
 
     /// A planar degree-4 B-spline `C(t) = (x(s(t)), s(t), 0)` over `[-1, 12]` with

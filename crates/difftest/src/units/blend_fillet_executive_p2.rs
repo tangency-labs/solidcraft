@@ -441,8 +441,18 @@ impl ExecutiveAccess<Handle> for Access {
         if let std::collections::btree_map::Entry::Vacant(entry) = self.edge_caches.entry(id) {
             // The cache manager returns null on construction failure; LoadFilletSolver
             // applies NER to that pointer after GetKnots has succeeded.
-            let cache = solidcore::curve::curve::p5::make_curve_cache(k, curve, Some(edge))
-                .map_err(|error| {
+            // the cache is the edge curve's own: its tolerance is the edge's
+            let zone_tol_3d = edge::tolerance(
+                self.breps.first().ok_or_else(missing_error)?,
+                id,
+            )?;
+            let cache = solidcore::curve::curve::p5::make_curve_cache_with_zone_tol(
+                k,
+                curve,
+                Some(edge),
+                Some(zone_tol_3d),
+            )
+            .map_err(|error| {
                     if error.is_unported() {
                         error
                     } else {
