@@ -314,7 +314,8 @@ pub struct Model {
     pub header: crate::part21::Header,
     /// `FILE_SCHEMA` names.
     pub schemas: Vec<String>,
-    /// Bodies in entity id order.
+    /// Bodies in entity id order. Includes a one-face open-shell
+    /// [`BodyKind::ShellModel`] body for every face that no shell references.
     pub bodies: Vec<Body>,
     /// Bodies that could not be mapped, with the reason.
     pub skipped: Vec<Skipped>,

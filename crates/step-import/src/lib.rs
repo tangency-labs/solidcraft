@@ -3,7 +3,9 @@
 //! [`import`] parses a Part 21 file ([`part21`]) and maps its B-rep bodies
 //! ([`map`]) to a neutral, plain-data [`Model`] ([`model`]): shells, faces with
 //! orientation, loops of oriented edges, vertices, and analytic or B-spline geometry,
-//! in millimetres with every placement resolved. [`flat::encode`] turns a body into
+//! in millimetres with every placement resolved. A face that no shell references (a
+//! hand-written or geometrically bounded sheet) becomes a one-face open-shell body, so
+//! sheet-only files do not report "no B-rep bodies". [`flat::encode`] turns a body into
 //! one `f64` array for the C++ side of the difftest, so both kernels build from the
 //! same numbers. Nothing here depends on either kernel.
 //!
@@ -25,7 +27,27 @@ pub use part21::{Limits, ParseError};
 
 /// Parses `bytes` and maps every B-rep body.
 pub fn import(bytes: &[u8], limits: &Limits) -> Result<Model, ParseError> {
-    let file = part21::parse(bytes, limits)?;
+    // Some AP203 files use the Part 21 short entity names. The parser stores the raw
+    // name, so normalize the handful of geometry entities needed by the mapper.
+    const ALIASES: [(&str, &str); 11] = [
+        ("FCSRF", "FACE_SURFACE"),
+        ("FCOTBN", "FACE_OUTER_BOUND"),
+        ("PLYLP", "POLY_LOOP"),
+        ("CRTPNT", "CARTESIAN_POINT"),
+        ("DRCTN", "DIRECTION"),
+        ("A2PL3D", "AXIS2_PLACEMENT_3D"),
+        ("CLSSHL", "CLOSED_SHELL"),
+        ("BSSWK", "B_SPLINE_SURFACE_WITH_KNOTS"),
+        ("BSCWK", "B_SPLINE_CURVE_WITH_KNOTS"),
+        ("TRMCRV", "TRIMMED_CURVE"),
+        ("CMCRSG", "COMPOSITE_CURVE"),
+    ];
+    let text = String::from_utf8_lossy(bytes);
+    let mut normalized = text.into_owned();
+    for (short, long) in ALIASES {
+        normalized = normalized.replace(&format!("={short}("), &format!("={long}("));
+    }
+    let file = part21::parse(normalized.as_bytes(), limits)?;
     Ok(map::map_file(&file, limits))
 }
 

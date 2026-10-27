@@ -146,6 +146,21 @@ mod tests {
     }
 
     #[test]
+    fn accepts_a_synthetic_sheet_body() {
+        // A face with no shell is mapped as a one-face open-shell sheet body; its
+        // synthetic shell must still validate.
+        let text = "ISO-10303-21;\nHEADER;\nFILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));\nENDSEC;\nDATA;\n#6=FACE('',(#7));#7=FACE_OUTER_BOUND('',#8,.T.);#8=POLY_LOOP('',(#9,#10,#11));#9=CARTESIAN_POINT('',(0.,0.,0.));#10=CARTESIAN_POINT('',(3.,0.,0.));#11=CARTESIAN_POINT('',(0.,4.,0.));\nENDSEC;\nEND-ISO-10303-21;\n";
+        let file = parse(text.as_bytes(), &Limits::default()).unwrap();
+        let model = map_file(&file, &Limits::default());
+        assert_eq!(model.bodies.len(), 1);
+        assert!(
+            validate(&file, &model).is_empty(),
+            "{:?}",
+            validate(&file, &model)
+        );
+    }
+
+    #[test]
     fn accepts_a_consistent_model() {
         let file = parse(b"ISO-10303-21;HEADER;FILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));ENDSEC;DATA;ENDSEC;END-ISO-10303-21;", &Limits::default()).unwrap();
         let model = map_file(&file, &Limits::default());
