@@ -1335,6 +1335,9 @@ impl FilletBrep {
                         return Ok(own_solver);
                     }
                     // UNPORTED(blend.fillet_geom_p5): SmFilletEdge::CalcCrossSection (a neighbouring geometry's solver: ReCalcFilletGeom holds only its own)
+                    // Unreachable by construction upstream: no geometry's m_vEdges holds a cross-section
+                    // edge with a use on another solver's geometry; see
+                    // plan/findings/blend.fillet_geom_p3--calc-cross-section-neighbour-unreachable.md
                     Err(SolidError::unported(
                         "SmFilletEdge::CalcCrossSection (neighbouring geometry's solver)",
                         "blend.fillet_geom_p5",
