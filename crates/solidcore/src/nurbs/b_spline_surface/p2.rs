@@ -62,6 +62,11 @@
 //!   `rOrigin` is a reference into the frame those calls overwrite, so the centre check
 //!   never fires and the sphere centre is the last examined arc's (WR-103): the port
 //!   reads the current frame's origin at each use.
+//! - **Edit notifications.** `SetCanonical`'s `SM_NO_PRE_EDIT` / `SM_NO_POST_EDIT`
+//!   (`this`, `SM_NO_GET_OWNER(this)` = null) need the wrapping [`Surface`]'s identity,
+//!   so the B-spline sends them through a caller hook
+//!   ([`BSplineSurface::set_canonical_notifying`], [`BSplineSurface::swap_uv_notifying`],
+//!   used by `Surface::swap_uv_notifying`); the plain entry points notify nobody.
 //! - **`SetCanonical`** passes no domain to `CreateCanonical` (as upstream), so the
 //!   [`CanonicalSurfaceData::uv_domain`] of its argument is ignored. As upstream, only
 //!   the NURB is replaced: form and knot type stay those of the surface.
@@ -83,6 +88,7 @@ use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::extent2d::Extent2d;
 use crate::geom::geom_utility::p1::line_closest_point;
+use crate::geom::object::NotifyOperation;
 use crate::geom::vector2d::{Point2, Vec2};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
@@ -105,6 +111,10 @@ use crate::surface::surface::Surface;
 use super::p1::{
     BSplineSurface, BSplineSurfaceForm, BoundingBoxRequest, CanonicalSurfaceData, SurfParamType,
 };
+
+/// The edit notification hook of [`BSplineSurface::set_canonical_notifying`]: called
+/// with `SM_NO_PRE_EDIT` / `SM_NO_POST_EDIT` where upstream's `SetCanonical` notifies.
+pub(crate) type EditNotify<'a> = dyn FnMut(NotifyOperation) -> Result<()> + 'a;
 
 const OP_ISO: &str = "nurbs::b_spline_surface::p2::BSplineSurface::create_iso_parametric_curve";
 const OP_SPHERE: &str = "nurbs::b_spline_surface::p2::BSplineSurface::create_sphere_from_arcs";
@@ -1301,14 +1311,34 @@ impl BSplineSurface {
     ///
     /// The errors of [`BSplineSurface::create_canonical`] (the surface is unchanged).
     pub fn set_canonical(&mut self, data: &CanonicalSurfaceData<'_>) -> Result<()> {
+        self.set_canonical_notifying(data, &mut |_| Ok(()))
+    }
+
+    /// [`BSplineSurface::set_canonical`] sending its `Notify(SM_NO_PRE_EDIT` /
+    /// `SM_NO_POST_EDIT, this, SM_NO_GET_OWNER(this), NULL)` through `notify` around
+    /// the NURB swap (after the temporary surface is built, before the analytic
+    /// rebuild), as upstream does.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`BSplineSurface::set_canonical`] and of `notify`.
+    pub(crate) fn set_canonical_notifying(
+        &mut self,
+        data: &CanonicalSurfaceData<'_>,
+        notify: &mut EditNotify<'_>,
+    ) -> Result<()> {
         // Create a temporary one
         let tmp = Self::create_canonical(&CanonicalSurfaceData {
             uv_domain: None,
             ..*data
         })?;
 
+        notify(NotifyOperation::PreEdit)?;
+
         // Swap Nurbs with this
         self.nurb = tmp.nurb;
+
+        notify(NotifyOperation::PostEdit)?;
 
         // give analytics a chance to update their nested STEP data
         self.rebuild_step_from_nurb_parameters()
@@ -1463,6 +1493,16 @@ impl BSplineSurface {
     /// `SM_ERR_NULL_POINTER` without NURB; the errors of
     /// [`BSplineSurface::set_canonical`] (the swap bit is then restored).
     pub fn swap_uv(&mut self) -> Result<()> {
+        self.swap_uv_notifying(&mut |_| Ok(()))
+    }
+
+    /// [`BSplineSurface::swap_uv`] with `SetCanonical`'s edit notifications sent
+    /// through `notify` ([`BSplineSurface::set_canonical_notifying`]).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`BSplineSurface::swap_uv`] and of `notify`.
+    pub(crate) fn swap_uv_notifying(&mut self, notify: &mut EditNotify<'_>) -> Result<()> {
         // get current surface description
         let c = self.canonical()?;
 
@@ -1477,19 +1517,22 @@ impl BSplineSurface {
         transpose(&mut weights, num_v_cpts);
 
         // Transpose Surface definition; on failure, restore the bit
-        let status = self.set_canonical(&CanonicalSurfaceData {
-            u_degree: c.v_degree,
-            v_degree: c.u_degree,
-            control_points: &cpts,
-            form: c.form,
-            u_multiplicities: &c.v_multiplicities,
-            v_multiplicities: &c.u_multiplicities,
-            u_knots: &c.v_knots,
-            v_knots: &c.u_knots,
-            knot_type: c.knot_type,
-            weights: Some(&weights),
-            uv_domain: None,
-        });
+        let status = self.set_canonical_notifying(
+            &CanonicalSurfaceData {
+                u_degree: c.v_degree,
+                v_degree: c.u_degree,
+                control_points: &cpts,
+                form: c.form,
+                u_multiplicities: &c.v_multiplicities,
+                v_multiplicities: &c.u_multiplicities,
+                u_knots: &c.v_knots,
+                v_knots: &c.u_knots,
+                knot_type: c.knot_type,
+                weights: Some(&weights),
+                uv_domain: None,
+            },
+            notify,
+        );
         if status.is_err() {
             self.toggle_swap_uv_bit();
         }

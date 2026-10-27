@@ -49,6 +49,12 @@
 //!   list edits) append to / remove from [`crate::topology::Faceuse::loopuses`] and set /
 //!   clear the loop use's face use. `Remove` of a loop use not on the face use's list is
 //!   `SM_ERR`, as upstream's owner check.
+//! - **`SwapUV` notifications.** [`swap_uv`] (no environment) sends the face's
+//!   notifications under the empty environment and the surface's to nobody;
+//!   [`swap_uv_with_notifications`] sends both through the caller's (the surface's
+//!   under its notify identity from the env's context, reported owned by the face).
+//!   The owner links of surfaces nested in an offset surface or a surface in a volume
+//!   are not reported: a callback walking their owners finds none.
 //! - **`CreateOrientedTrimBoundary`** returns the curves and per-loop counts in
 //!   [`OrientedTrimBoundary`]. A failed `SmLine::CreateLineSegment` (only possible for
 //!   coincident points, which the gap test excludes) is [`SolidError::InvalidInput`]
@@ -136,7 +142,9 @@ use crate::curve::curve::p2::BSPLINE_CURVE_TYPE;
 use crate::curve::curve::Curve;
 use crate::curve::line::Line;
 use crate::error::{ignore_status, ignored, EntityRef, Result, SolidError};
+use crate::geom::attribute::ObjectKey;
 use crate::geom::axis2_placement::Axis2Placement;
+use crate::geom::context::IdentitySlot;
 use crate::geom::extent1d::{Extent1d, ExtentPointType};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::object::{NotifyOperation, ObjectRef};
@@ -1160,36 +1168,113 @@ fn remove_uv_trim_curves_notifying(
 /// without loop or mate, an edge use without mate; those of the mirror and surface
 /// swap and of the edit notifications.
 pub fn swap_uv(k: &Kernel, b: &mut Brep, f: FaceId) -> Result<()> {
-    swap_uv_notifying(k, b, f, &mut |b, op| face_notify(b, f, op))
+    swap_uv_notifying(k, b, f, &mut Unnotified)
 }
 
 /// [`swap_uv`] with its `SM_NO_PRE_EDIT` / `SM_NO_POST_EDIT` (`this`,
 /// `SM_NO_GET_BREP(this)`, `NULL`) sent through the caller's notification environment
 /// (`env.key_of` names the face; `SM_NO_GET_BREP` is a null pointer upstream, so no
-/// B-rep; the context's callbacks see them, as upstream's B-rep context's do).
+/// B-rep; the context's callbacks see them, as upstream's B-rep context's do), and so
+/// are the surface's own (`SetCanonical`'s, `Surface::swap_uv_notifying`): `this` and
+/// data 1 the edited surface under its identity from `env.context` (the face's
+/// surface reported owned by the face first, the `GetOwner()` a callback reads),
+/// data 2 `SM_NO_GET_OWNER` (null). Without context, a surface that has an identity
+/// notifies its attributes only; one without has nothing to notify.
 ///
 /// # Errors
 ///
-/// Those of [`swap_uv`].
+/// Those of [`swap_uv`] and of the identity issue (an exhausted domain).
 pub fn swap_uv_with_notifications(
     k: &Kernel,
     b: &mut Brep,
     f: FaceId,
     env: &mut crate::topology::edge::NotifyEnv<'_>,
 ) -> Result<()> {
-    swap_uv_notifying(k, b, f, &mut |b, op| {
-        let this = (env.key_of)(EntityRef::Face(f));
-        // SM_NO_GET_BREP(this) is a null pointer upstream (SmTypes.h)
-        fp3::notify(b, f, env, None, op, [Some(this), None, None])
-    })
+    let face = (env.key_of)(EntityRef::Face(f));
+    // the face owns its surface (the link a callback's owner walk reads)
+    if let Some(ctx) = env.context.as_deref_mut() {
+        if let Some(s) = b.face_mut(f)?.surface.as_mut() {
+            let key = ctx.geometry_key(s.notify_identity_slot())?;
+            crate::geom::object::report_owner_link(Some(ctx), key, Some(face));
+        }
+    }
+    swap_uv_notifying(k, b, f, &mut EnvNotified { env, face })
 }
 
-/// [`swap_uv`]'s body, `notify` sending the face's edit notifications.
+/// Where [`swap_uv_notifying`] sends the face's and the surface's edit notifications.
+trait SwapUvNotify {
+    /// The face's `Notify(op, this, SM_NO_GET_BREP(this), NULL)`.
+    fn face(&mut self, b: &mut Brep, f: FaceId, op: NotifyOperation) -> Result<()>;
+    /// An edited surface's `SmAObject::Notify` ([`Surface::swap_uv_notifying`]).
+    fn surface(
+        &mut self,
+        slot: &mut IdentitySlot,
+        type_code: i64,
+        op: NotifyOperation,
+    ) -> Result<()>;
+}
+
+/// [`swap_uv`]'s notifications: the face's under the empty environment
+/// ([`face_notify`]), the surface's to nobody (no context or attribute store).
+struct Unnotified;
+
+impl SwapUvNotify for Unnotified {
+    fn face(&mut self, b: &mut Brep, f: FaceId, op: NotifyOperation) -> Result<()> {
+        face_notify(b, f, op)
+    }
+
+    fn surface(&mut self, _: &mut IdentitySlot, _: i64, _: NotifyOperation) -> Result<()> {
+        Ok(())
+    }
+}
+
+/// [`swap_uv_with_notifications`]' notifications, through `env`.
+struct EnvNotified<'e, 'a> {
+    env: &'e mut crate::topology::edge::NotifyEnv<'a>,
+    face: ObjectRef,
+}
+
+impl SwapUvNotify for EnvNotified<'_, '_> {
+    fn face(&mut self, b: &mut Brep, f: FaceId, op: NotifyOperation) -> Result<()> {
+        // SM_NO_GET_BREP(this) is a null pointer upstream (SmTypes.h)
+        fp3::notify(b, f, self.env, None, op, [Some(self.face), None, None])
+    }
+
+    fn surface(
+        &mut self,
+        slot: &mut IdentitySlot,
+        type_code: i64,
+        op: NotifyOperation,
+    ) -> Result<()> {
+        let env = &mut *self.env;
+        let key = match env.context.as_deref_mut() {
+            Some(ctx) => ctx.geometry_key(slot)?,
+            None => match slot.value() {
+                Some(v) => ObjectKey(v),
+                None => return Ok(()),
+            },
+        };
+        let this = ObjectRef { type_code, key };
+        // SM_NO_GET_OWNER(this) is a null pointer upstream (SmTypes.h)
+        crate::geom::a_object::notify(
+            env.attributes,
+            env.context.as_deref_mut(),
+            op,
+            this,
+            Some(this),
+            None,
+            None,
+        )
+    }
+}
+
+/// [`swap_uv`]'s body, `notify` sending the face's and the surface's edit
+/// notifications.
 fn swap_uv_notifying(
     k: &Kernel,
     b: &mut Brep,
     f: FaceId,
-    notify: &mut dyn FnMut(&mut Brep, NotifyOperation) -> Result<()>,
+    notify: &mut dyn SwapUvNotify,
 ) -> Result<()> {
     // GetBrep()->GetContext()
     if !has_brep(b, f)? {
@@ -1259,14 +1344,16 @@ fn swap_uv_notifying(
     }
 
     // prepare to Edit
-    notify(b, NotifyOperation::PreEdit)?;
+    notify.face(b, f, NotifyOperation::PreEdit)?;
 
     // swap theSurface UV orientation
     b.face_mut(f)?
         .surface
         .as_mut()
         .ok_or_else(|| null("face without surface"))?
-        .swap_uv(k)?;
+        .swap_uv_notifying(k, &mut |slot, type_code, op| {
+            notify.surface(slot, type_code, op)
+        })?;
 
     // Transpose the Face->UVDomain
     let d = fp2::uv_domain(b, f)?;
@@ -1302,7 +1389,7 @@ fn swap_uv_notifying(
     b.faceuse_mut(fu_mate)?.orientation = OrientType::Same;
     b.face_mut(f)?.faceuse = Some(fu_mate);
 
-    notify(b, NotifyOperation::PostEdit)?;
+    notify.face(b, f, NotifyOperation::PostEdit)?;
     Ok(())
 }
 

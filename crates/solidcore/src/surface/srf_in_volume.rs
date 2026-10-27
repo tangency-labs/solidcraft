@@ -1114,8 +1114,19 @@ impl SrfInVolume {
     /// surface's `SwapUV`.
     pub fn swap_uv(&mut self, k: &Kernel) -> Result<()> {
         // check input - Can not swap UV on an unowned surface
+        self.owned_surface_mut()?.swap_uv(k)
+    }
+
+    /// The base surface, for an edit of it this object makes (`SM_ERR` when this
+    /// object does not own it). `Surface::swap_uv_notifying` notifies this object
+    /// around the base surface's swap, as upstream `SwapUV` does.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR` when this object does not own the surface.
+    pub(crate) fn owned_surface_mut(&mut self) -> Result<&mut Surface> {
         self.require_owned_surface()?;
-        self.surface.swap_uv(k)
+        Ok(&mut self.surface)
     }
 
     /// Trims the base surface to `trim_domain` when possible (`TrimWithDomain`).

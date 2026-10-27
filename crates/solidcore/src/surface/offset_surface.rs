@@ -1816,13 +1816,28 @@ impl OffsetSurface {
     /// `SM_ERR` when the base surface is not owned (after the extended surface was
     /// swapped); those of [`Surface::swap_uv`].
     pub fn swap_uv(&mut self, k: &Kernel) -> Result<()> {
+        self.swap_uv_notifying(k, &mut |_, _, _| Ok(()))
+    }
+
+    /// [`OffsetSurface::swap_uv`] with the extended and base surfaces' edit
+    /// notifications sent through `notify` ([`Surface::swap_uv_notifying`]); the offset
+    /// surface notifies nothing itself, as upstream.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`OffsetSurface::swap_uv`] and of `notify`.
+    pub(crate) fn swap_uv_notifying(
+        &mut self,
+        k: &Kernel,
+        notify: &mut crate::surface::surface::p2::SurfaceEditNotify<'_>,
+    ) -> Result<()> {
         self.fold_pending_extension();
         if let Some(e) = self.extended_surface.as_deref_mut() {
-            e.swap_uv(k)?;
+            e.swap_uv_notifying(k, notify)?;
             self.offset_distance.set(-self.offset_distance.get());
         }
         if self.owns_surface {
-            self.surface.swap_uv(k)?;
+            self.surface.swap_uv_notifying(k, notify)?;
             self.offset_distance.set(-self.offset_distance.get());
         } else {
             // Can not swap UV if I do not own the surface

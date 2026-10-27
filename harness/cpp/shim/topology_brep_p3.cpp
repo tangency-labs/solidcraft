@@ -835,8 +835,7 @@ void run(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         {
             // the trailer the runner splits on: for each face before the op the number of
             // its SmFace::SwapUV POST_EDITs among the events, the face count and where
-            // the tracker's values start (a swap's surface edit is not comparable: the
-            // runner drops the tracker's values of a side whose events show a swap)
+            // the tracker's values start
             SmTArray<SmNotifyEvent>* ev = trk->GetNotifyEvents();
             for (SmFace* f : g.faces)
             {
