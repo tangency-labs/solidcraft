@@ -1699,6 +1699,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "nightly: runs the whole SolidCraft corpus (.github/workflows/nightly.yml)"]
     fn every_case_reaches_a_verdict_without_a_harness_error() {
         for l in all() {
             let run = run_rust(&l.case);
@@ -1824,6 +1825,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "nightly: runs the whole SolidCraft corpus (.github/workflows/nightly.yml)"]
     fn deferrals_name_a_plan_unit() {
         let units: Vec<String> = crate::plan::load(&crate::case::repo_root())
             .unwrap()

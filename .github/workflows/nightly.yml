@@ -72,6 +72,16 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo test -p solidcore --release --test max_solve_branches_tiny_torus -- --ignored
 
+      # Owner-approved (2026-10-27): the SolidCraft whole-corpus harness checks (every
+      # case reaches a verdict; every deferral names a plan unit) take minutes even
+      # optimised, so they run here instead of on every pull request.
+      - name: SolidCraft corpus harness checks
+        if: ${{ !cancelled() }}
+        run: >-
+          cargo test --profile difftest -p difftest --features cpp --lib -- --ignored --exact
+          solidcraft::tests::every_case_reaches_a_verdict_without_a_harness_error
+          solidcraft::tests::deferrals_name_a_plan_unit
+
       - name: Upload fuzz reproducers (failures and diagnostic notes)
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4

@@ -104,9 +104,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> bin"
-      # tests/primitives_solid.rs takes minutes unoptimised, so its four tests are
-      # skipped here and run once, optimised, in the next step (the difftest-profile
-      # solidcore it builds is the one the runner tests below reuse).
+      # Tests that take minutes unoptimised are skipped here and run once, optimised,
+      # in the next step: tests/primitives_solid.rs (four tests) and
+      # tests/curve_cache_memo.rs (about 10 min unoptimised). Its difftest-profile
+      # solidcore is the one the runner tests below reuse. The two SolidCraft
+      # whole-corpus tests are #[ignore]d and run nightly (nightly.yml).
       - if: needs.changes.outputs.full == 'true'
         run: >-
           cargo test --workspace -- --exact
@@ -114,9 +116,12 @@ jobs:
           --skip primitives_are_closed_solids_with_analytic_properties
           --skip precise_sphere_properties_scale_and_translate
           --skip pole_free_sphere_tolerance_is_explicit_and_validated
-      - name: Primitives solid tests (difftest profile)
+          --skip memo_on_and_off_give_bit_identical_results
+      - name: Primitives solid and curve-cache memo tests (difftest profile)
         if: needs.changes.outputs.full == 'true'
-        run: cargo test --profile difftest -p solidcore --test primitives_solid
+        run: >-
+          cargo test --profile difftest -p solidcore
+          --test primitives_solid --test curve_cache_memo
       # Solids: the primitives example's per-shape results (built, blocker, checks) for
       # the site's Solids page. It reuses the difftest-profile build above and exits 1
       # while any primitive fails, so only a crash (or a missing JSON) fails the job.
