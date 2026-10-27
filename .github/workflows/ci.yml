@@ -105,7 +105,7 @@ jobs:
       kernel: ${{ steps.paths.outputs.kernel }}
       goldens: ${{ steps.paths.outputs.goldens }}
       windows: ${{ steps.paths.outputs.windows }}
-      # The GPU path tests run: native, and the whole workspace or solidcraft-gpu selected. The
+      # GPU path tests run when native tests select the whole workspace, GPU or UI crate. The
       # job's `if` and the `ci` job's check both read this, so they cannot disagree.
       gpu: ${{ steps.paths.outputs.gpu }}
       full: ${{ steps.paths.outputs.full }}
@@ -268,11 +268,11 @@ jobs:
               goldens=false
             fi
           fi
-          # The GPU path tests (their own job) run with the other tests, when solidcraft-gpu is
-          # among the packages they test.
+          # Both the GPU tests and the UI's real progressive renderer need the cached,
+          # serial path shards. Keep UI-only changes covered when the native job excludes it.
           gpu=false
           if [ "$native" = true ]; then
-            case " $packages " in *" solidcraft-gpu "*) gpu=true ;; esac
+            case " $packages " in *" solidcraft-gpu "*|*" solidcraft-ui-egui "*) gpu=true ;; esac
             if [ "$full" = true ]; then gpu=true; fi
           fi
           {
@@ -528,7 +528,7 @@ jobs:
           # The GPU path tracer's tests run in their own job (GPU path tests): one at a time, they
           # took about 36 of this job's 45 minutes.
           cargo nextest run "${scope[@]}" --cargo-profile ci --locked --profile ci --no-tests=pass \
-            --ignore-default-filter -E "($base) & not (package(=solidcraft-gpu) & test(/^path::/))" || status=1
+            --ignore-default-filter -E "($base) & not ((package(=solidcraft-gpu) & test(/^path::/)) | (package(=solidcraft-ui-egui) & test(=render_workspace::tests::progressive_image_controls_route_to_the_registered_host)))" || status=1
           if [ "$status" != 0 ]; then
             # A failed golden gets the hint to re-record it (junit.xml lists the failures).
             if [ -f "$junit" ] && tr '\n' ' ' < "$junit" | grep -q '<testcase name="tests::robustness_goldens::[^"]*"[^>]*>[[:space:]]*<failure'; then
@@ -621,12 +621,22 @@ jobs:
       - name: Run one shard of the GPU path tests
         env:
           SHARD: ${{ matrix.shard }}
+          FULL: ${{ needs.changes.outputs.full }}
+          PACKAGES: ${{ needs.changes.outputs.packages }}
         run: |
-          # None of these is in the default filter (the heavy tests), so pull requests, the merge
-          # queue, main and nightly all run every one of them, as before. `count` deals the tests
-          # out in turn (27 each); `hash` split them 41/40/27 across three shards.
-          cargo nextest run -p solidcraft-gpu --cargo-profile ci --locked --profile ci --no-tests=pass \
-            --ignore-default-filter -E 'test(/^path::/)' --partition "count:$SHARD/4"
+          # Path tests are not excluded as heavy tests: preserve affected-package coverage on
+          # pull requests and run both crates on full runs. `count` deals the tests
+          # out in turn; `hash` previously left the shards unbalanced.
+          # UI-only changes run the UI test without also running unrelated GPU crate tests.
+          scope=(-p solidcraft-gpu -p solidcraft-ui-egui)
+          if [ "$FULL" != true ]; then
+            scope=()
+            for p in $PACKAGES; do
+              case "$p" in solidcraft-gpu|solidcraft-ui-egui) scope+=(-p "$p") ;; esac
+            done
+          fi
+          cargo nextest run "${scope[@]}" --lib --cargo-profile ci --locked --profile ci --no-tests=pass \
+            --ignore-default-filter -E '(package(=solidcraft-gpu) & test(/^path::/)) | (package(=solidcraft-ui-egui) & test(=render_workspace::tests::progressive_image_controls_route_to_the_registered_host))' --partition "count:$SHARD/4"
       - name: Compiler cache statistics
         if: always()
         run: sccache --show-stats
