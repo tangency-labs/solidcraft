@@ -510,6 +510,12 @@ pub(crate) fn slider<T: egui::emath::Numeric>(ui: &mut Ui, value: &mut T, range:
             widget = widget.integer();
         }
         let response = ui.add(widget);
+        if ui.ctx().memory(|memory| memory.focused()).is_some_and(|id| {
+            ui.ctx().read_response(id).is_some_and(|focused| response.rect.contains(focused.rect.center()))
+                || egui::TextEdit::load_state(ui.ctx(), id).is_some()
+        }) {
+            crate::prefs_search::note_key_sink(ui.ctx());
+        }
         let slider = egui::Rect::from_min_size(response.rect.min, vec2(ui.spacing().slider_width, response.rect.height()));
         let mut background = ui.painter().clone();
         background.set_opacity(if ui.is_visible() { 1.0 } else { 0.0 });

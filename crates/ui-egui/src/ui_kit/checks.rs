@@ -68,6 +68,8 @@ pub(crate) fn checkbox_indeterminate(ui: &mut Ui, label: &str, value: &mut bool,
     let width = (t.space_14 + gap + galley.size().x).max(ui.spacing().interact_size.y).min(super::metrics::dimension(ui.available_width()));
     let height = ui.spacing().interact_size.y.max(t.space_14).max(galley.size().y);
     let (rect, mut response) = ui.allocate_exact_size(vec2(width, height), egui::Sense::click());
+    crate::prefs_search::remember(ui, label, rect);
+    crate::prefs_search::follow(ui, label, rect);
     if response.clicked() {
         *value = mixed || !*value;
         response.mark_changed();

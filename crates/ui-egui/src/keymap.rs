@@ -917,6 +917,17 @@ mod tests {
     }
 
     #[test]
+    fn recording_a_shortcut_does_not_type_into_preferences_search() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_SHORTCUTS);
+        h.app.keymap.capturing = Some("solid.extrude".into());
+        h.frames(1);
+        h.step(&json!({"text": "z"})).expect("key while recording");
+        assert!(h.app.prefs_window.filter.is_empty(), "a shortcut being recorded keeps the key");
+    }
+
+    #[test]
     fn escape_cancels_only_recording_and_no_command_fires_during_capture() {
         let mut h = crate::scenario::Harness::new();
         h.call("ui.prefs", json!({"open": "Keyboard Shortcuts"}));

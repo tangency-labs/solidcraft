@@ -53,7 +53,12 @@ pub(crate) fn label(ui: &Ui) -> &str {
 pub(super) fn publish(ui: &Ui, response: &Response, kind: egui::WidgetType) {
     let t = Tokens::get();
     match kind {
-        egui::WidgetType::TextEdit => t.input_bevel(ui, response),
+        egui::WidgetType::TextEdit => {
+            t.input_bevel(ui, response);
+            if response.has_focus() {
+                crate::prefs_search::note_key_sink(ui.ctx());
+            }
+        }
         egui::WidgetType::ComboBox | egui::WidgetType::Button => t.button_bevel(ui, response, false),
         _ => {}
     }
@@ -116,6 +121,8 @@ fn sized_row_body<R>(ui: &mut Ui, text: &str, height: f32, control: impl FnOnce(
     let t = Tokens::get();
     let width = dimension(ui.available_width());
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), egui::Sense::hover());
+    crate::prefs_search::remember(ui, text, rect);
+    crate::prefs_search::follow(ui, text, rect);
     // A nested row (`"  Of"`) lines up under the one above: the lookup uses the text without its
     // indent and the indent stays in front of the translation. The `LABEL` tag keeps the original.
     let shown = indented_label(text);
@@ -247,6 +254,7 @@ pub(crate) fn section_count<R>(
     let id = ui.make_persistent_id(id);
     let mut open = searching || ui.ctx().data_mut(|data| data.get_persisted::<bool>(id)).unwrap_or(default_open);
     let (rect, response) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), row_height()), egui::Sense::click());
+    crate::prefs_search::follow(ui, title, rect);
     if response.hovered() || response.has_focus() {
         ui.painter().rect_filled(rect.shrink2(vec2(0.0, 1.0)), t.radius_sm, t.hover);
     }
@@ -519,6 +527,10 @@ pub(crate) fn text(ui: &mut Ui, text: &str, style: Text<'_>) -> Response {
     };
     let id = format!("dialog:{kind}:{key}");
     scenario::publish_rect(&id, response.rect);
+    if matches!(style, Text::Heading(_)) {
+        crate::prefs_search::remember(ui, text, response.rect);
+        crate::prefs_search::follow(ui, text, response.rect);
+    }
     if !matches!(style, Text::Note(_) | Text::MonoNote(_)) {
         scenario::publish_handle(&id, response.rect.center());
     }

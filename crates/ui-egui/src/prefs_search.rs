@@ -11,6 +11,41 @@ use crate::theme::Tokens;
 
 const STATE: &str = "prefs_search_state";
 const SCROLL: &str = "prefs_search_force_scroll";
+const NAV: &str = "prefs_search_nav";
+const SINK_NOW: &str = "prefs_search_key_sink";
+const SINK_PREV: &str = "prefs_search_key_sink_prev";
+const REVEAL_ID: &str = "prefs_search_reveal";
+
+/// How long an opened result stays outlined, in milliseconds.
+const REVEAL_MS: f64 = 900.0;
+
+/// One keyboard-reachable match from the last finished pass.
+#[derive(Clone)]
+pub(crate) struct NavHit {
+    pub page: usize,
+    pub label: String,
+}
+
+#[derive(Clone)]
+struct PaintedHit {
+    page: usize,
+    label: String,
+}
+
+#[derive(Clone, Default)]
+struct NavStore {
+    query: String,
+    cursor: usize,
+    hits: Vec<NavHit>,
+}
+
+/// The row to scroll to and outline after a result is chosen.
+#[derive(Clone)]
+pub(crate) struct Reveal {
+    pub page: usize,
+    pub label: String,
+    pub until: f64,
+}
 
 #[derive(Clone, Default)]
 struct State {
@@ -30,6 +65,9 @@ struct State {
     hiding: u32,
     key: String,
     hits: u32,
+    page_index: usize,
+    /// Rows whose own text matched, in the order they were drawn this pass.
+    nav: Vec<PaintedHit>,
     dirty: bool,
     child_matched: bool,
     memory_query: String,
@@ -77,6 +115,7 @@ pub(crate) fn begin(ui: &Ui, filter: &str) -> SearchFrame {
         state.hiding = 0;
         state.key.clear();
         state.hits = 0;
+        state.nav.clear();
         state.dirty = false;
         state.child_matched = false;
     });
@@ -213,8 +252,9 @@ pub(crate) fn force_scroll(ctx: &Context) -> bool {
     ctx.data(|data| data.get_temp(Id::new(SCROLL))).unwrap_or(false)
 }
 
-pub(crate) fn begin_page(ui: &Ui, label: &str) {
+pub(crate) fn begin_page(ui: &Ui, index: usize, label: &str) {
     with(ui, |state| {
+        state.page_index = index;
         state.page = label.to_string();
         state.page_shown = false;
         state.section.clear();
@@ -379,7 +419,8 @@ pub(crate) fn reveal(ui: &mut Ui) {
         ui.label(RichText::new(page).strong().size(t.font_label).color(t.form_ink));
     }
     if draw_section {
-        ui.label(RichText::new(section.to_uppercase()).size(t.font_small).color(t.text_dim));
+        let response = ui.label(RichText::new(section.to_uppercase()).size(t.font_small).color(t.text_dim));
+        remember(ui, &section, response.rect);
     }
 }
 
@@ -418,23 +459,29 @@ fn text_hit(ui: &Ui, text: &str) -> bool {
     if text.is_empty() {
         return false;
     }
-    with(ui, |state| setting_score(&state.query, text) > 0 || english_hit(&state.query, text)).unwrap_or(false)
+    with(ui, |state| text_matches(&state.query, text)).unwrap_or(false)
+}
+
+fn text_matches(query: &str, text: &str) -> bool {
+    setting_score(query, text) > 0 || english_hit(query, text) || keywords(text).iter().any(|word| setting_score(query, word) > 0)
 }
 
 /// Prefix, the start of a word, or a run of at least three characters. Scattered letters are not
-/// a match: "zoom" finds "Reverse zoom direction", and "rzd" does not.
+/// a match: "zoom" finds "Reverse zoom direction", and "rzd" does not. Marks are ignored, so
+/// "preferences" finds "préférences".
 fn setting_score(query: &str, text: &str) -> u32 {
     if query.chars().count() < 2 || text.is_empty() {
         return 0;
     }
-    let text = text.to_lowercase();
-    if text.starts_with(query) {
+    let query = fold(query);
+    let text = fold(text);
+    if text.starts_with(&query) {
         return 1000;
     }
-    if text.split(|c: char| !c.is_alphanumeric()).any(|word| !word.is_empty() && word.starts_with(query)) {
+    if text.split(|c: char| !c.is_alphanumeric()).any(|word| !word.is_empty() && word.starts_with(&query)) {
         return 800;
     }
-    if query.chars().count() >= 3 && text.contains(query) {
+    if query.chars().count() >= 3 && text.contains(&query) {
         return 600;
     }
     0
@@ -446,7 +493,45 @@ pub(crate) fn matches_text(query: &str, texts: &[&str]) -> bool {
     if query.is_empty() {
         return true;
     }
-    texts.iter().any(|text| setting_score(&query, text) > 0 || english_hit(&query, text))
+    texts.iter().any(|text| text_matches(&query, text))
+}
+
+/// Words that find a setting even though they are not written on it.
+fn keywords(text: &str) -> &'static [&'static str] {
+    match fold(text).as_str() {
+        "theme" => &["dark", "light", "appearance"],
+        "anti-aliasing" | "antialiasing" => &["antialiasing", "msaa"],
+        _ => &[],
+    }
+}
+
+/// Lower case, without the marks that distinguish "é" from "e".
+fn fold(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        match c {
+            'œ' | 'Œ' => out.push_str("oe"),
+            'æ' | 'Æ' => out.push_str("ae"),
+            'ß' => out.push_str("ss"),
+            c => out.extend(strip_mark(c).to_lowercase()),
+        }
+    }
+    out
+}
+
+fn strip_mark(c: char) -> char {
+    match c {
+        'À'..='Å' | 'à'..='å' | 'Ā' | 'ā' | 'Ă' | 'ă' | 'Ą' | 'ą' => 'a',
+        'Ç' | 'ç' | 'Ć' | 'ć' | 'Č' | 'č' => 'c',
+        'È'..='Ë' | 'è'..='ë' | 'Ē' | 'ē' | 'Ĕ' | 'ĕ' | 'Ė' | 'ė' | 'Ę' | 'ę' | 'Ě' | 'ě' => 'e',
+        'Ì'..='Ï' | 'ì'..='ï' | 'Ī' | 'ī' | 'Į' | 'į' => 'i',
+        'Ñ' | 'ñ' | 'Ń' | 'ń' | 'Ň' | 'ň' => 'n',
+        'Ò'..='Ö' | 'ò'..='ö' | 'Ō' | 'ō' | 'Ő' | 'ő' => 'o',
+        'Ù'..='Ü' | 'ù'..='ü' | 'Ū' | 'ū' | 'Ů' | 'ů' | 'Ű' | 'ű' | 'Ų' | 'ų' => 'u',
+        'Ý' | 'ý' | 'Ÿ' | 'ÿ' => 'y',
+        'Ž' | 'ž' => 'z',
+        c => c,
+    }
 }
 
 fn english_hit(query: &str, shown: &str) -> bool {
@@ -471,8 +556,113 @@ fn english_hit(query: &str, shown: &str) -> bool {
             });
             *slot = (lang, map);
         }
-        slot.1.get(shown).is_some_and(|lines| lines.iter().any(|english| setting_score(query, english) > 0))
+        slot.1.get(shown).is_some_and(|lines| {
+            lines.iter().any(|english| setting_score(query, english) > 0 || keywords(english).iter().any(|word| setting_score(query, word) > 0))
+        })
     })
+}
+
+/// A text field or drag value had the keyboard on the previous frame.
+pub(crate) fn shift_key_sink(ctx: &Context) -> bool {
+    let held = ctx.data(|data| data.get_temp::<bool>(Id::new(SINK_NOW))).unwrap_or(false);
+    ctx.data_mut(|data| data.insert_temp(Id::new(SINK_NOW), false));
+    held
+}
+
+pub(crate) fn key_sink(ctx: &Context) -> bool {
+    ctx.data(|data| data.get_temp::<bool>(Id::new(SINK_PREV))).unwrap_or(false)
+}
+
+pub(crate) fn note_key_sink(ctx: &Context) {
+    ctx.data_mut(|data| data.insert_temp(Id::new(SINK_NOW), true));
+}
+
+pub(crate) fn set_key_sink_prev(ctx: &Context, held: bool) {
+    ctx.data_mut(|data| data.insert_temp(Id::new(SINK_PREV), held));
+}
+
+/// The matches drawn last frame, for Up/Down and Enter before this pass rebuilds them.
+pub(crate) fn nav(ctx: &Context) -> (String, usize, Vec<NavHit>) {
+    ctx.data(|data| {
+        let store = data.get_temp::<NavStore>(Id::new(NAV)).unwrap_or_default();
+        (store.query, store.cursor, store.hits)
+    })
+}
+
+pub(crate) fn set_cursor(ctx: &Context, cursor: usize) {
+    ctx.data_mut(|data| {
+        let store = data.get_temp_mut_or_default::<NavStore>(Id::new(NAV));
+        store.cursor = cursor;
+    });
+}
+
+/// Keep this pass's matches for the next frame's keys.
+pub(crate) fn store_nav(ui: &Ui) {
+    let (query, hits) =
+        with(ui, |state| (state.query.clone(), state.nav.iter().map(|hit| NavHit { page: hit.page, label: hit.label.clone() }).collect::<Vec<_>>()))
+            .unwrap_or_default();
+    ui.ctx().data_mut(|data| {
+        let store = data.get_temp_mut_or_default::<NavStore>(Id::new(NAV));
+        store.query = query;
+        store.hits = hits;
+        if store.cursor >= store.hits.len() {
+            store.cursor = 0;
+        }
+    });
+}
+
+/// A row whose own words matched. Section titles and controls both call this once they have a rect.
+pub(crate) fn remember(ui: &mut Ui, label: &str, rect: Rect) {
+    if !ui.is_visible() || !querying(ui) || label.is_empty() || !text_hit(ui, label) {
+        return;
+    }
+    if with(ui, |state| state.hiding > 0).unwrap_or(true) {
+        return;
+    }
+    let cursor = ui.ctx().data(|data| data.get_temp::<NavStore>(Id::new(NAV)).unwrap_or_default().cursor);
+    let selected = with(ui, |state| {
+        let selected = state.nav.len() == cursor;
+        state.nav.push(PaintedHit { page: state.page_index, label: label.to_string() });
+        selected
+    })
+    .unwrap_or(false);
+    if !selected {
+        return;
+    }
+    let t = Tokens::get();
+    ui.painter().rect_stroke(rect, t.radius_sm, egui::Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Outside);
+    ui.scroll_to_rect(rect, Some(egui::Align::Center));
+    crate::scenario::publish_handle("prefs:search:current", rect.center());
+}
+
+pub(crate) fn set_reveal(ctx: &Context, reveal: Option<Reveal>) {
+    ctx.data_mut(|data| {
+        if let Some(reveal) = reveal {
+            data.insert_temp(Id::new(REVEAL_ID), reveal);
+        } else {
+            data.remove::<Reveal>(Id::new(REVEAL_ID));
+        }
+    });
+}
+
+pub(crate) fn reveal_for(page: usize, label: &str) -> Reveal {
+    Reveal { page, label: label.to_string(), until: crate::now_ms() + REVEAL_MS }
+}
+
+/// Scroll the opened setting into view and outline it until [`Reveal::until`].
+pub(crate) fn follow(ui: &Ui, label: &str, rect: Rect) {
+    let Some(reveal) = ui.data(|data| data.get_temp::<Reveal>(Id::new(REVEAL_ID))) else { return };
+    if crate::now_ms() > reveal.until || fold(label) != fold(&reveal.label) {
+        return;
+    }
+    let page = with(ui, |state| state.page_index);
+    if page.is_some_and(|page| page != reveal.page) {
+        return;
+    }
+    ui.scroll_to_rect(rect, Some(egui::Align::Center));
+    let t = Tokens::get();
+    ui.painter().rect_stroke(rect, t.radius_sm, egui::Stroke::new(t.space_2, t.form_primary), egui::StrokeKind::Outside);
+    crate::scenario::publish_handle("prefs:revealed", rect.center());
 }
 
 #[cfg(test)]
@@ -488,6 +678,49 @@ mod tests {
         assert!(!matches_text("qqqq", &["Units of new designs"]));
         let _language = crate::i18n::scope("fr");
         assert!(matches_text("units", &["Unités des nouvelles conceptions"]));
+        assert!(matches_text("preferences", &["préférences"]));
+        assert!(matches_text("dark", &["Theme"]));
+        assert!(matches_text("antialiasing", &["Anti-aliasing"]));
+        assert!(!matches_text("dark", &["Units of new designs"]));
+    }
+
+    /// Typing focuses the field, Enter opens that setting, and Escape returns to the page
+    /// that was up when the search started. Recording a shortcut keeps the key.
+    #[test]
+    fn preferences_search_types_opens_and_returns() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GRAPHICS);
+        h.frames(2);
+        h.step(&serde_json::json!({"key": "F", "cmd": true})).expect("find");
+        h.frames(1);
+        assert!(h.ctx.memory(|memory| memory.has_focus(egui::Id::new("prefs_search"))), "Cmd+F focuses search");
+        h.step(&serde_json::json!({"text": "zo"})).expect("type");
+        h.frames(3);
+        assert!(h.widget("Reverse zoom direction").is_some(), "typed letters search from the open page");
+        assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_GRAPHICS);
+        let first = crate::scenario::handle_at("prefs:search:current");
+        h.step(&serde_json::json!({"key": "ArrowDown"})).expect("next match");
+        h.frames(1);
+        let second = crate::scenario::handle_at("prefs:search:current");
+        assert!(first.is_some() && second.is_some() && first != second, "Down moves to the next match");
+        h.step(&serde_json::json!({"key": "ArrowUp"})).expect("previous match");
+        h.frames(1);
+        assert_eq!(crate::scenario::handle_at("prefs:search:current"), first, "Up moves back");
+        h.step(&serde_json::json!({"key": "Enter"})).expect("open");
+        h.frames(2);
+        assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_NAVIGATION, "Enter opens the match's page");
+        assert!(h.app.prefs_window.filter.is_empty());
+        assert!(h.widget("Reverse zoom direction").is_some());
+        assert!(crate::scenario::handle_at("prefs:revealed").is_some(), "the opened row is highlighted");
+        crate::prefs::open_at(&mut h.app, crate::prefs::PAGE_GRAPHICS);
+        h.frames(2);
+        h.step(&serde_json::json!({"text": "zo"})).expect("search again");
+        h.frames(2);
+        h.step(&serde_json::json!({"key": "Escape"})).expect("clear");
+        h.frames(1);
+        assert!(h.app.prefs_window.filter.is_empty());
+        assert_eq!(h.app.prefs_window.section, crate::prefs::PAGE_GRAPHICS, "Escape returns to the page from before the search");
     }
 
     #[test]
