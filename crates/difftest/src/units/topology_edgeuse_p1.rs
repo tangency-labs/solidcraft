@@ -4,9 +4,10 @@
 //! **B-rep ops.** The C++ side builds a real `SmBrep` per call: read from an upstream
 //! `.smb` test file (optionally rebuilding its UV trim curves), a wire edge from a
 //! B-spline curve (`CreateWireEdgeFromCurve`), a face from a B-spline surface or a plane
-//! (`CreateFaceFromSurface`), or the wire network of `prog_test` `my_test_topology`. There
-//! is no Rust B-rep reader or builder yet (units `topology.brep_*`), so the Rust side
-//! imports the graph the shim exports in traversal order (raw members: list owners,
+//! (`CreateFaceFromSurface`), or the wire network of `prog_test` `my_test_topology`. The
+//! Rust side builds every non-file source with the Rust kernel in the shim's call order
+//! ([`crate::own_builder`], renumbered into the shim's traversal order). For an `.smb`
+//! file it still imports the graph the shim exports in traversal order (raw members: list owners,
 //! list order, loop neighbours, orientations, UV trim curves, cached gap states,
 //! tolerances, face UV domains, geometry as B-splines; an `SmPlane` face surface as the
 //! exact [`Plane`] (origin, axes, scales, analytic domain), an `SmSurfOfRevolution` face
@@ -178,8 +179,8 @@ pub(crate) enum BrepIn {
 /// The face of a [`BrepIn::Mixed`] B-rep (as [`BrepIn::Face`]).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct FaceIn {
-    surface: SrfIn,
-    dom: [f64; 4],
+    pub(crate) surface: SrfIn,
+    pub(crate) dom: [f64; 4],
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1472,7 +1473,48 @@ fn rust_err(e: &SolidError) -> Result<Output, HarnessError> {
     }
 }
 
-fn run_rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
+/// The Rust B-rep of a B-rep input, its geometry types and its entity counts, or the
+/// output of a failed build. Shim-built sources are built by the Rust kernel
+/// ([`crate::own_builder`]); only `.smb` file sources are still imported from the
+/// C++ export.
+pub(crate) fn rust_brep(
+    k: &mut Kernel,
+    brep: Option<&BrepIn>,
+    validate_only: bool,
+    init_gaps: bool,
+) -> Result<crate::own_builder::RustBrep<(Brep, ImportTypes, [usize; 10])>, HarnessError> {
+    use crate::own_builder::{build, build_status, counts, Built};
+    let src = brep.ok_or_else(|| harness("B-rep op without brep"))?;
+    match build(k, src, validate_only, init_gaps)? {
+        Some(Built::Brep(b)) => {
+            let b = *b;
+            let c = counts(&b);
+            Ok(Ok((b, ImportTypes::default(), c)))
+        }
+        Some(Built::Failed(e)) => match Output::unported(&e) {
+            Some(o) => Ok(Err(o)),
+            None => Ok(Err(Output::err(format!(
+                "brep_build_status_{}",
+                build_status(&e)
+            )))),
+        },
+        None => {
+            let path = path_of(brep)?;
+            let block = brep_block_of(brep, validate_only, init_gaps)?;
+            let ex = crate::export_memo::export("topology_edgeuse_p1", &[&path], &block, || {
+                ffi::eval(Op::Export, &path, &block)
+            })
+            .map_err(|e| harness(format!("c++ export: {e}")))?;
+            let Some(c) = ffi::counts(&ex) else {
+                return Ok(Err(build_failure(&ex)));
+            };
+            let (b, types) = import_with_types(&ex)?;
+            Ok(Ok((b, types, c)))
+        }
+    }
+}
+
+fn run_rust(k: &mut Kernel, i: &Inputs) -> Result<Output, HarnessError> {
     if !is_brep_op(&i.op) {
         return match run_rust_geom(k, &i.op) {
             Ok(o) => Ok(o),
@@ -1480,11 +1522,10 @@ fn run_rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
             Err(Fail::Harness(h)) => Err(h),
         };
     }
-    let ex = export(i)?;
-    let Some(c) = ffi::counts(&ex) else {
-        return Ok(build_failure(&ex));
+    let (mut b, types, c) = match rust_brep(k, i.brep.as_ref(), i.validate_only, i.init_gaps)? {
+        Ok(x) => x,
+        Err(o) => return Ok(o),
     };
-    let (mut b, types) = import_with_types(&ex)?;
     let Some(op) = resolve(&i.op, c) else {
         return Ok(no_entity());
     };
@@ -2371,7 +2412,7 @@ impl UnitDiff for Runner {
     }
 
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
-        let k = &Kernel::default();
+        let k = &mut Kernel::default();
         run_rust(k, &case.parse::<Inputs>()?)
     }
 

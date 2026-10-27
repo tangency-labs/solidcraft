@@ -96,7 +96,7 @@ fn ellipse_trims_survive_both_shared_graph_exports() {
                     ..input.clone()
                 };
                 let cpp = run_cpp(&sample_input).unwrap();
-                let rust = run_rust(&Kernel::default(), &sample_input).unwrap();
+                let rust = run_rust(&mut Kernel::default(), &sample_input).unwrap();
                 let second = run_rust_brep(&Kernel::default(), &mut other, &op)
                     .ok()
                     .unwrap();
