@@ -926,6 +926,10 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                     // No tab left for it: `adopt` said why, and nothing else of the open happens.
                     if !crate::documents::adopt(app, made.session) {
                         app.open_meshing_next = false;
+                        // A design to recover stays offered, as when its read fails.
+                        if let Kind::Recover { id, dir } = &request.kind {
+                            reoffer(app, id, dir.as_deref());
+                        }
                         request.answer(Err(app.status.as_ref().map_or_else(String::new, |s| s.0.clone())));
                         break 'open;
                     }
@@ -1213,9 +1217,15 @@ mod tests {
             saved.path = Some(format!("tab{}.solidcraft", app.docs.count()));
             crate::documents::open_tab(&mut app, saved).unwrap();
         }
-        let (status, error) = open(&mut app, "full");
+        let mut request = Request::new("full.solidcraft", Kind::Open);
+        let (tx, reply) = std::sync::mpsc::channel();
+        request.reply = Some(tx);
+        completed_open(&mut app, request, Session::default());
+        tick(&mut app, &ctx);
+        let (status, _, error) = app.status.clone().unwrap_or_default();
         assert!(error && status.contains(&crate::documents::MAX_OPEN.to_string()), "{status}");
         assert_eq!(app.docs.count(), crate::documents::MAX_OPEN);
+        assert!(reply.try_recv().is_ok_and(|r| r["ok"] == json!(false)), "the caller hears it failed");
     }
 
     #[test]
