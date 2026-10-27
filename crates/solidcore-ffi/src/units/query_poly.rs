@@ -42,7 +42,45 @@ mod sys {
             cap: i64,
             out_len: *mut i64,
         ) -> i32;
+        pub fn sc_query_poly_original_copy(
+            input: *const f64,
+            n_in: i64,
+            out: *mut f64,
+            cap: i64,
+            out_len: *mut i64,
+        ) -> i32;
     }
+}
+
+/// Real face-to-poly-face attribute propagation, isolated from legacy fake labels.
+///
+/// Each step is `(source, propagate)`, with source `0` null or `1..=2` a real face.
+/// `composite` constructs an actual `SmCPolyFace` around the initial plain face.
+/// Returns snapshots of original identity, flags, marks, payloads, user counts and
+/// source/destination aliasing, including mutation and source-list lifetime effects.
+///
+/// # Errors
+/// Rejects an empty/oversized sequence or an unknown source before native execution.
+pub fn original_copy(steps: &[(u8, bool)], composite: bool) -> Result<Vec<f64>, FfiError> {
+    if steps.is_empty() || steps.len() > 16 || steps.iter().any(|(s, _)| *s > 2) {
+        return Err(bad("original_copy requires 1..=16 valid source steps"));
+    }
+    let mut input = vec![steps.len() as f64, f64::from(composite)];
+    for &(source, propagate) in steps {
+        input.extend([f64::from(source), f64::from(propagate)]);
+    }
+    call_with_buffer(1024, |buf, len| {
+        // SAFETY: validated input; the helper provides a live output slice and length.
+        unsafe {
+            sys::sc_query_poly_original_copy(
+                input.as_ptr(),
+                input.len() as i64,
+                buf.as_mut_ptr(),
+                buf.len() as i64,
+                &raw mut *len,
+            )
+        }
+    })
 }
 
 /// One loop of a face.

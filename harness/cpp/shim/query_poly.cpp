@@ -18,6 +18,7 @@
 
 #include "StdAfx.h"
 #include <SmAxis2Placement.h>
+#include <SmAttribute.h>
 #include <SmBSplineSurface.h>
 #include <SmContext.h>
 #include <SmCoreTypes.h>
@@ -1033,5 +1034,79 @@ SC_EXPORT int32_t sc_query_poly_eval(const double* in, int64_t n_in, double* out
     dump(m, o);
     delete m.brep;
     return sc_copy_out(o.o.data(), (int64_t)o.o.size(), out, cap, out_len);
+    SC_CATCH
+}
+
+// Isolated real-object route: no legacy labelled pointer enters this fixture.
+SC_EXPORT int32_t sc_query_poly_original_copy(const double* in, int64_t n_in,
+                                             double* out, int64_t cap, int64_t* out_len)
+{
+    SC_TRY
+    if (n_in < 2 || in[0] < 1 || in[0] > 16 || n_in != 2 + 2 * (int64_t)in[0])
+        return SC_ERR_ARG;
+    SmContext ctx;
+    std::unique_ptr<OwnerFace> sources[2];
+    for (int i = 0; i < 2; ++i)
+    {
+        sources[i].reset(new (ctx) OwnerFace(NULL));
+        sources[i]->SetAllFlags(16 + i);
+        sources[i]->Mark(SM_MT_MARK);
+        sources[i]->Mark(SM_MT_MARKIO);
+        sources[i]->AddAttribute(new (ctx) SmLongAttribute(501, 41 + i, SM_AB_COPY));
+        sources[i]->AddAttribute(new (ctx) SmColorAttribute(
+            502, SmVector3d(0.2 + i, 0.4, 0.6), SM_AB_REFERENCE));
+        sources[i]->AddAttribute(new (ctx) SmLongAttribute(503, 81 + i, SM_AB_TEMP));
+    }
+    std::unique_ptr<SmPolyBrep> poly(new (ctx) SmPolyBrep(1e-5));
+    SmPolyFace* target = new (poly.get()) SmPolyFace(1e-5, poly.get(), NULL, NULL, NULL);
+    if (in[1] != 0)
+        target = new (poly.get()) SmCPolyFace(target);
+    target->SetAllFlags(2);
+    target->Mark(SM_MT_MARK);
+    target->Mark(SM_MT_MARKIO);
+    target->AddAttribute(new (ctx) SmLongAttribute(504, 99, SM_AB_COPY));
+    std::vector<double> values;
+    auto snapshot = [&]() {
+        values.push_back(target->GetOriginalFace() == sources[0].get() ? 1 :
+                         target->GetOriginalFace() == sources[1].get() ? 2 : 0);
+        values.push_back(target->GetAllFlags());
+        for (SmMarkType mark : {SM_MT_MARK, SM_MT_MARK2, SM_MT_MARK3, SM_MT_MARKIO, SM_MT_MARKASSERT})
+            values.push_back(target->GetMark(mark));
+        for (ULONG id : {501UL, 502UL, 503UL, 504UL})
+        {
+            SmAttribute* a = target->FindAttribute(id);
+            values.push_back(a != NULL);
+            if (!a) continue;
+            values.push_back(a->GetBehavior());
+            values.push_back(a->GetUsersRef()->GetSize());
+            values.push_back(a == sources[0]->FindAttribute(id));
+            values.push_back(a == sources[1]->FindAttribute(id));
+            if (id == 502)
+            {
+                const SmVector3d& v = ((SmColorAttribute*)a)->GetValue();
+                values.push_back(v.x); values.push_back(v.y); values.push_back(v.z);
+            }
+            else values.push_back(((SmLongAttribute*)a)->GetValue());
+        }
+    };
+    snapshot();
+    for (int64_t i = 0; i < (int64_t)in[0]; ++i)
+    {
+        int64_t source = (int64_t)in[2 + 2 * i];
+        if (source < 0 || source > 2) return SC_ERR_ARG;
+        target->SetOriginalFace(source ? sources[source - 1].get() : NULL, in[3 + 2 * i] != 0);
+        snapshot();
+    }
+    SmVector3d changed_color(7, 8, 9);
+    for (auto& source : sources)
+    {
+        ((SmColorAttribute*)source->FindAttribute(502))->SetValue(changed_color);
+    }
+    snapshot();
+    for (auto& source : sources) source->ClearAttributes();
+    snapshot(); // reference survives its source losing its last source-side user
+    target->ClearAttributes();
+    snapshot();
+    return sc_copy_out(values.data(), (int64_t)values.size(), out, cap, out_len);
     SC_CATCH
 }

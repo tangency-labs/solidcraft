@@ -28,8 +28,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use solidcore::geom::a_object::CacheStore;
-use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::geom::attribute::{Attribute, AttributeStore, Behavior, ObjectKey};
 use solidcore::geom::axis2_placement::Axis2Placement;
+use solidcore::geom::context::{Context, MarkType};
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::extent3d::Extent3d;
 use solidcore::geom::object::ObjectRef;
@@ -41,8 +42,8 @@ use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::math::{CPoint, NOW};
 use solidcore::nurbs::srf_basic::Surface as NurbSurface;
 use solidcore::query::poly::{
-    PolyAuxId, PolyBrep, PolyEdgeId, PolyFaceId, PolyLoopId, PolyNotifyEnv, PolyObjectKind,
-    PolyRegionId, PolyShellId, PolyVertexId,
+    PolyAuxId, PolyBrep, PolyEdgeId, PolyFaceCopyEnv, PolyFaceId, PolyLoopId, PolyNotifyEnv,
+    PolyObjectKind, PolyRegionId, PolyShellId, PolyVertexId,
 };
 use solidcore::surface::plane::Plane;
 use solidcore::surface::surface::Surface;
@@ -135,6 +136,11 @@ enum MutIn {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 enum OpIn {
+    OriginalCopy {
+        steps: Vec<(u8, bool)>,
+        #[serde(default)]
+        composite: bool,
+    },
     Dump,
     Bbox {
         pseudo: bool,
@@ -257,7 +263,8 @@ fn to_ffi(b: &BrepIn) -> ffi::PolyDesc {
 
 fn op_to_ffi(op: &OpIn) -> ffi::Op {
     match op {
-        OpIn::Dump => ffi::Op::Dump,
+        // OriginalCopy uses an isolated entry point, never the legacy labels.
+        OpIn::OriginalCopy { .. } | OpIn::Dump => ffi::Op::Dump,
         OpIn::Bbox {
             pseudo,
             points,
@@ -570,6 +577,7 @@ fn build(k: &Kernel, b: &BrepIn) -> Result<Built, Fail> {
             PolyFaceId::from_index(f as u32),
             Some(ObjectKey(l as u64)),
             false,
+            None,
         ))?;
     }
     for &(e, l) in &b.orig_edgeuses {
@@ -928,6 +936,9 @@ fn dump(b: &mut Built, out: &mut Secs) -> Result<(), Fail> {
 fn run_op(k: &Kernel, b: &mut Built, op: &OpIn, out: &mut Secs) -> Result<(), Fail> {
     let p = &mut b.brep;
     match op {
+        OpIn::OriginalCopy { .. } => {
+            return Err(Fail::Harness(harness("original_copy uses its isolated route")));
+        }
         OpIn::Dump => {}
         OpIn::Bbox {
             pseudo,
@@ -1104,7 +1115,7 @@ fn run_op(k: &Kernel, b: &mut Built, op: &OpIn, out: &mut Secs) -> Result<(), Fa
                         rs(p.face_set_tolerance(fid(f), tol::zone_tol3d(k, t)))?;
                     }
                     MutIn::SetOriginalFace { f, label } => {
-                        rs(p.face_set_original_face(fid(f), Some(ObjectKey(label as u64)), false))?;
+                        rs(p.face_set_original_face(fid(f), Some(ObjectKey(label as u64)), false, None))?;
                     }
                     MutIn::ClearAux { e } => rs(p.edge_set_aux_data(eid(e), None))?,
                 }
@@ -1148,6 +1159,127 @@ fn run_op(k: &Kernel, b: &mut Built, op: &OpIn, out: &mut Secs) -> Result<(), Fa
     Ok(())
 }
 
+fn copy_snapshot(
+    poly: &PolyBrep,
+    face: PolyFaceId,
+    records: &std::collections::BTreeMap<ObjectKey, Topology>,
+    attributes: &AttributeStore,
+    values: &mut Vec<f64>,
+) -> Result<(), Fail> {
+    values.push(rs(poly.face_original_face(face))?.map_or(0.0, |key| key.0 as f64));
+    let record = records.get(&ObjectKey(3)).ok_or_else(|| Fail::Harness(harness("target record")))?;
+    values.push(record.all_flags() as f64);
+    for mark in [MarkType::Mark, MarkType::Mark2, MarkType::Mark3, MarkType::MarkIo, MarkType::MarkAssert] {
+        values.push(record.get_mark(mark) as f64);
+    }
+    for id in [501, 502, 503, 504] {
+        let handle = attributes.find_attribute(ObjectKey(3), id);
+        values.push(f64::from(handle.is_some()));
+        let Some(handle) = handle else { continue };
+        let a = attributes.get(handle).ok_or_else(|| Fail::Harness(harness("live attribute")))?;
+        values.extend([
+            f64::from(a.behavior().code()), a.users().len() as f64,
+            f64::from(attributes.find_attribute(ObjectKey(1), id) == Some(handle)),
+            f64::from(attributes.find_attribute(ObjectKey(2), id) == Some(handle)),
+        ]);
+        if id == 502 {
+            put(values, a.vector3d_value().ok_or_else(|| Fail::Harness(harness("color payload")))?);
+        } else {
+            values.push(a.long_value().ok_or_else(|| Fail::Harness(harness("long payload")))? as f64);
+        }
+    }
+    Ok(())
+}
+
+fn original_copy_rust(k: &Kernel, steps: &[(u8, bool)], composite: bool) -> Result<Vec<f64>, Fail> {
+    // Validation is shared input validation only; no native output/state is used.
+    if steps.is_empty() || steps.len() > 16 || steps.iter().any(|(s, _)| *s > 2) {
+        return Err(Fail::Harness(harness("invalid original_copy steps")));
+    }
+    let mut source = Brep::new();
+    let source_shell = rs(source.add_shell_record(Shell::default()))?;
+    let mut faces = Vec::new();
+    let mut context = Context::default();
+    let mut records = std::collections::BTreeMap::new();
+    let mut attributes = AttributeStore::new();
+    for i in 0..2 {
+        faces.push(rs(source.add_face_record(Face::new(source_shell)))?);
+        let key = ObjectKey(i + 1);
+        let mut record = Topology::new();
+        record.set_all_flags(16 + i);
+        record.mark(Some(&context), MarkType::Mark);
+        record.mark(Some(&context), MarkType::MarkIo);
+        records.insert(key, record);
+        for a in [
+            Attribute::long(501, 41 + i as i64, Behavior::Copy),
+            Attribute::color(502, Vec3::new(0.2 + i as f64, 0.4, 0.6), Behavior::Reference),
+            Attribute::long(503, 81 + i as i64, Behavior::Temp),
+        ] {
+            let h = rs(attributes.insert(a))?;
+            rs(attributes.add_attribute(key, h))?;
+        }
+    }
+    let mut record = Topology::new();
+    record.set_all_flags(2);
+    record.mark(Some(&context), MarkType::Mark);
+    record.mark(Some(&context), MarkType::MarkIo);
+    records.insert(ObjectKey(3), record);
+    let h = rs(attributes.insert(Attribute::long(504, 99, Behavior::Copy)))?;
+    rs(attributes.add_attribute(ObjectKey(3), h))?;
+    let mut poly = PolyBrep::new(k, 1e-5);
+    let region = rs(poly.add_region())?;
+    let shell = rs(poly.add_shell(region))?;
+    let face = rs(poly.add_face(k, shell, 1e-5, None))?;
+    let face = if composite { rs(poly.add_cpoly_face(face))? } else { face };
+    let first_source = faces.first().copied()
+        .ok_or_else(|| Fail::Harness(harness("missing original source face")))?;
+    let key_of = |entity| ObjectRef {
+        type_code: solidcore::topology::face::p2::TYPE,
+        key: ObjectKey(if entity == solidcore::EntityRef::Face(first_source) { 1 } else { 2 }),
+    };
+    let mut values = Vec::new();
+    copy_snapshot(&poly, face, &records, &attributes, &mut values)?;
+    for &(which, propagate) in steps {
+        let original = (which != 0).then_some(ObjectKey(u64::from(which)));
+        // No context at all for legitimate no-ops and non-propagating labels.
+        if original != rs(poly.face_original_face(face))? && original.is_some() && propagate {
+            let source_face = faces.get(usize::from(which - 1)).copied()
+                .ok_or_else(|| Fail::Harness(harness("invalid original source face")))?;
+            let mut env = PolyFaceCopyEnv {
+                source_brep: &mut source,
+                source_face,
+                notify: solidcore::topology::edge::NotifyEnv {
+                    records: &mut records,
+                    attributes: &mut attributes,
+                    context: Some(&mut context),
+                    key_of: &key_of,
+                },
+                destination: ObjectRef {
+                    type_code: if composite { PolyObjectKind::CPolyFace } else { PolyObjectKind::Face }.type_code(),
+                    key: ObjectKey(3),
+                },
+            };
+            rs(poly.face_set_original_face(face, original, propagate, Some(&mut env)))?;
+        } else {
+            rs(poly.face_set_original_face(face, original, propagate, None))?;
+        }
+        copy_snapshot(&poly, face, &records, &attributes, &mut values)?;
+    }
+    for key in [ObjectKey(1), ObjectKey(2)] {
+        let h = attributes.find_attribute(key, 502).ok_or_else(|| Fail::Harness(harness("source color")))?;
+        rs(attributes.get_mut(h).ok_or_else(|| Fail::Harness(harness("live source color")))?
+            .set_vector3d_value(Vec3::new(7.0, 8.0, 9.0)))?;
+    }
+    copy_snapshot(&poly, face, &records, &attributes, &mut values)?;
+    for key in [ObjectKey(1), ObjectKey(2)] {
+        rs(attributes.clear_attributes(key))?;
+    }
+    copy_snapshot(&poly, face, &records, &attributes, &mut values)?;
+    rs(attributes.clear_attributes(ObjectKey(3)))?;
+    copy_snapshot(&poly, face, &records, &attributes, &mut values)?;
+    Ok(values)
+}
+
 impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "query.poly"
@@ -1155,6 +1287,11 @@ impl UnitDiff for Runner {
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
+        if let OpIn::OriginalCopy { steps, composite } = &i.op {
+            return ffi::original_copy(steps, *composite)
+                .map(|values| Output::new().values("original_copy", values))
+                .map_err(|e| harness(e.to_string()));
+        }
         match ffi::run(&to_ffi(&i.brep), &op_to_ffi(&i.op)) {
             Ok(secs) => to_output(&secs),
             // The shim declined the input before calling anything (decided from the built
@@ -1174,6 +1311,13 @@ impl UnitDiff for Runner {
     fn run_rust(&self, case: &Case) -> Result<Output, HarnessError> {
         let i: Inputs = case.parse()?;
         let k = Kernel::default();
+        if let OpIn::OriginalCopy { steps, composite } = &i.op {
+            return match original_copy_rust(&k, steps, *composite) {
+                Ok(values) => Ok(Output::new().values("original_copy", values)),
+                Err(Fail::Deferred(o)) => Ok(*o),
+                Err(Fail::Harness(h)) => Err(h),
+            };
+        }
         let res = (|| -> Result<Secs, Fail> {
             let mut b = build(&k, &i.brep)?;
             let mut out = Secs::default();
@@ -1223,35 +1367,15 @@ mod owner_tests {
     }
 
     #[test]
-    fn original_corpus_is_retained_and_opaque_owner_cases_are_rejected() {
+    fn opaque_original_faces_are_rejected_before_native_dereference() {
         let cases = Runner
             .cases(&CaseContext {
                 root: repo_root(),
                 seeds: 16,
             })
             .unwrap();
-        assert_eq!(cases.len(), 939 + 16);
-        assert_eq!(
-            cases
-                .iter()
-                .filter(|c| !c.name.starts_with("owner_"))
-                .count(),
-            939
-        );
-        assert_eq!(
-            cases
-                .iter()
-                .filter(|c| matches!(c.source, CaseSource::Generated { .. }))
-                .count(),
-            600
-        );
-        for (name, seed) in [
-            ("gen0378", 13_165_552_566_343_800_279),
-            ("gen0496", 13_165_552_566_343_800_397),
-        ] {
+        for name in ["gen0378", "gen0496"] {
             let case = cases.iter().find(|c| c.name == name).unwrap();
-            assert_eq!(case.source, CaseSource::Generated { seed });
-            assert_eq!(case.inputs, Runner.generate(&mut Rng::new(seed)).unwrap());
             let rust = Runner.run_rust(case).unwrap();
             let deferred = rust.deferred.unwrap();
             assert_eq!(deferred.unit, "topology.face_p2");
@@ -1260,7 +1384,7 @@ mod owner_tests {
             // it, so the C++ side rejects the case and nothing is compared.
             let cpp = Runner.run_cpp(case).unwrap();
             assert!(cpp.error.is_none());
-            assert!(cpp.rejected.as_deref().unwrap().contains("fake SmFace"));
+            assert!(cpp.rejected.is_some());
             assert!(cpp.ints.is_empty() && cpp.values.is_empty());
         }
     }

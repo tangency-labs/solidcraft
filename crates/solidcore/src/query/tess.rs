@@ -973,7 +973,9 @@ impl TessSrfCache {
                     pb.face_point_in_polygon(k, pf, Point3::new(mid.x, mid.y, 0.0), false)?;
                 if inside {
                     found_class = NodeClass::Inside;
-                    pb.face_set_original_face(pf, original, true)?;
+                    // The source key was read from this same face above: native
+                    // SetOriginalFace takes its unchanged branch, with no notify.
+                    pb.face_set_original_face(pf, original, true, None)?;
                 } else {
                     found_class = NodeClass::Outside;
                 }
