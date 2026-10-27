@@ -4,8 +4,13 @@
 //! Upstream: `source/SMLib/src/SmSurface.cpp`, `source/SMLib/inc/SmSurface.h`.
 //!
 //! The input starts with a surface block `ctor`: `0` (static ops), `1` (`SmSurface()`, the
-//! base class) or `2` (`SmBSplineSurface(gw_SURFACE*, FALSE, NULL)` from `oob form n m p q r s
-//! cpts(x y z w) u v`, control points with the v index fastest). A curve `C` is `dim n p m
+//! base class), `2` (`SmBSplineSurface(gw_SURFACE*, FALSE, NULL)` from `oob form n m p q r s
+//! cpts(x y z w) u v`, control points with the v index fastest) or `3` (a revolution record:
+//! `kind O X Y a b c swap inside non_planar`, `kind` `0` for `SmTorus::CreateCanonical(O,
+//! a, b, .., swap, inside)`, `1` for `SmCone::CreateCanonical(O, a, b, c, .., swap,
+//! inside)`; the surface is written with `WriteToDB` to an ASCII stream, its planar generator
+//! flag is cleared in the record when `non_planar` is set, and it is read back with
+//! `SmSurface::ReadFromDB`; only `StepInv`, `EvalPt` and `ConvertUv` run on it). A curve `C` is `dim n p m
 //! cpts(x y z w) knots` (`SmBSplineCurve(gw_CURVE*, dim, FALSE)`). `D` is a domain `umin vmin
 //! umax vmax`, `I` an interval `a b`, `V` a vector `x y z`, `B` a box (two corners `V V`). The
 //! op's parameters follow:
@@ -730,6 +735,41 @@ fn validate_static(op: Op, rd: &mut Reader<'_>) -> Result<(), FfiError> {
     Ok(())
 }
 
+/// A revolution record block (`kind O X Y a b c swap inside non_planar`, see the module
+/// docs): orthonormal placement axes and the radii and height the canonical constructors
+/// build a surface from (a torus with `0 < minor < major`, a cone with non-negative radii,
+/// not both zero, and a positive height), all of moderate size.
+fn revolution_block(rd: &mut Reader<'_>) -> Result<(), FfiError> {
+    let kind = rd.index(1)?;
+    let o = rd.vec3()?;
+    let x = rd.vec3()?;
+    let y = rd.vec3()?;
+    let dot = |a: [f64; 3], b: [f64; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    if o.iter().any(|c| c.abs() > 1e6)
+        || (dot(x, x) - 1.0).abs() > 1e-12
+        || (dot(y, y) - 1.0).abs() > 1e-12
+        || dot(x, y).abs() > 1e-12
+    {
+        return Err(bad("revolution record: placement not orthonormal"));
+    }
+    let a = rd.finite()?;
+    let b = rd.finite()?;
+    let c = rd.finite()?;
+    let sized = |v: f64| (1e-3..=1e3).contains(&v);
+    let ok = if kind == 0 {
+        sized(a) && sized(b) && b < a
+    } else {
+        a >= 0.0 && b >= 0.0 && a <= 1e3 && b <= 1e3 && (sized(a) || sized(b)) && sized(c)
+    };
+    if !ok {
+        return Err(bad("revolution record: radii or height"));
+    }
+    rd.flag()?;
+    rd.flag()?;
+    rd.flag()?;
+    Ok(())
+}
+
 /// The `Cross` arrays: `n flags` `n` `V`, `k` `k` `V`, then per set flag bit `k` `k` `V`.
 fn vectors_cross(rd: &mut Reader<'_>) -> Result<(), FfiError> {
     let n = rd.index(32)?;
@@ -753,12 +793,18 @@ fn vectors_cross(rd: &mut Reader<'_>) -> Result<(), FfiError> {
 /// [`FfiError::InvalidArgument`] for input the shim must not see.
 pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
     let mut rd = Reader::new(input);
-    let ctor = rd.index(2)?;
+    let ctor = rd.index(3)?;
     if (ctor == 0) != op.is_static() {
         return Err(bad("static ops need ctor 0, surface ops a surface"));
     }
     if ctor == 0 {
         validate_static(op, &mut rd)?;
+    } else if ctor == 3 {
+        revolution_block(&mut rd)?;
+        if !matches!(op, Op::StepInv | Op::EvalPt | Op::ConvertUv) {
+            return Err(bad("revolution record: only step inversion, point and conversion ops"));
+        }
+        validate_surface_op(op, &mut rd, None)?;
     } else {
         let dom = if ctor == 2 {
             Some(bspline_block(&mut rd)?)

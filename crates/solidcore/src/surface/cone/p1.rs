@@ -1657,22 +1657,13 @@ impl Cone {
         tol_3d: f64,
         uv_guess: Option<Point2>,
     ) -> Result<ConeStepInversion> {
-        self.step_inversion_on_domain(k, &self.rev.anal_uv_domain, point_on_surf, tol_3d, uv_guess)
-    }
-
-    pub(crate) fn step_inversion_on_domain(
-        &self,
-        k: &Kernel,
-        anal_domain: &Extent2d,
-        point_on_surf: Point3,
-        tol_3d: f64,
-        uv_guess: Option<Point2>,
-    ) -> Result<ConeStepInversion> {
         // mirror points on the negative side of the apex to the positive side
         let pos = self.positive_point(k, point_on_surf)?;
 
-        // do the conversion
-        let mut inv = self.rev_step_inversion(k, anal_domain, pos.point, tol_3d, uv_guess)?;
+        // do the conversion (over the cone's own STEP domain: the caller's crAnalDomain
+        // is ignored upstream)
+        let anal_domain = self.rev.anal_uv_domain;
+        let mut inv = self.rev_step_inversion(k, &anal_domain, pos.point, tol_3d, uv_guess)?;
 
         // when point is on far side of apex - flip the Z coordinate about the apex point
         if pos.negated {

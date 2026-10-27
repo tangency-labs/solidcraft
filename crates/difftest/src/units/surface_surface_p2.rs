@@ -14,6 +14,13 @@
 //! `-1` for a Rust error upstream cannot produce) and the rest as the `out` values. The
 //! Rust side runs the base-class defaults (`base_*`) for `this.base`.
 //!
+//! `this.rev` is a revolution record: a canonical torus or cone that each side builds,
+//! writes with `WriteToDB` to an ASCII record, optionally clears the planar generator flag
+//! in that record, and reads back with `SmSurface::ReadFromDB` (no C++ bytes reach the
+//! Rust side). With the flag cleared, `STEPInversion` takes `SmSurfOfRevolution`'s general
+//! solver branch with the torus's or cone's own parameter conversions
+//! ([`revolution_cases`]).
+//!
 //! Deferred cases: the paths into unported units (`CopyAndAddAnalytics` and
 //! `GetMaxAnalyticDomain` of B-splines, `GlobalSurfaceIntersect`, `CreatePlaneWith3DCurves`,
 //! curve property analyses). Every run has at least [`MIN_GENERATED`] generated cases;
@@ -144,6 +151,26 @@ struct This {
     base: bool,
     #[serde(default, flatten, skip_serializing_if = "Option::is_none")]
     bss: Option<BssIn>,
+    /// A revolution record read back from the database.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    rev: Option<RevIn>,
+}
+
+/// A canonical torus (`r = [major, minor, -]`) or cone (`r = [bot, top, height]`) written
+/// to an ASCII database record and read back, with the record's planar generator flag
+/// cleared when `non_planar` is set (the way `SmTorus` / `SmCone::ReadFromDB` produce a
+/// non-planar generator; both constructors set the flag).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(clippy::struct_excessive_bools)]
+struct RevIn {
+    cone: bool,
+    origin: [f64; 3],
+    x: [f64; 3],
+    y: [f64; 3],
+    r: [f64; 3],
+    swap: bool,
+    inside: bool,
+    non_planar: bool,
 }
 
 /// An inline curve: dimension, control points as stored, degree, knots.
@@ -702,6 +729,15 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
     match &i.this {
         None => o.push(0.0),
         Some(t) if t.base => o.push(1.0),
+        Some(This { rev: Some(r), .. }) => {
+            o.push(3.0);
+            o.push(flag(r.cone));
+            o.extend_from_slice(&r.origin);
+            o.extend_from_slice(&r.x);
+            o.extend_from_slice(&r.y);
+            o.extend_from_slice(&r.r);
+            o.extend([flag(r.swap), flag(r.inside), flag(r.non_planar)]);
+        }
         Some(t) => {
             o.push(2.0);
             let b = t
@@ -1304,6 +1340,58 @@ fn this_surface(t: &This) -> Result<Option<Surface>, HarnessError> {
     Ok(Some(Surface::from(bss_of(b)?)))
 }
 
+/// The planar generator flag line of an ASCII `SmSurfOfRevolution` record (value first).
+const PLANAR_LINE: &[u8] = b"1 SmSurfOfRevolution Planar Generator Curve";
+
+/// The canonical surface of `r` (not yet written).
+fn revolution_made(k: &Kernel, r: &RevIn) -> solidcore::Result<(Surface, i64)> {
+    use solidcore::surface::cone::Cone;
+    use solidcore::surface::torus::{Torus, TorusOptions};
+    let frame = Axis2Placement::new(v3(r.origin), v3(r.x), v3(r.y));
+    let [a, b, c] = r.r;
+    Ok(if r.cone {
+        let cone = Cone::create_canonical(k, &frame, a, b, c, r.swap, r.inside)?;
+        (Surface::from(cone), sp2::CONE_TYPE)
+    } else {
+        let opts = TorusOptions {
+            swap_uv: r.swap,
+            inside_out: r.inside,
+            circle_nurb: None,
+        };
+        let torus = Torus::create_canonical(k, &frame, a, b, opts, None)?;
+        (Surface::from(torus), sp2::TORUS_TYPE)
+    })
+}
+
+/// [`RevIn`]'s surface: the canonical surface written to an ASCII record
+/// (`WriteToDB`), the record's planar flag cleared when asked, then
+/// `SmSurface::ReadFromDB` of the record. The inner error is the status the case records.
+fn revolution_surface(k: &Kernel, r: &RevIn) -> Result<solidcore::Result<Surface>, HarnessError> {
+    use solidcore::topology::database_io::DatabaseWriter;
+    use solidcore::topology::geometry_write::write_surface;
+    let (made, ty) = match revolution_made(k, r) {
+        Ok(m) => m,
+        Err(e) => return Ok(Err(e)),
+    };
+    let mut w = DatabaseWriter::open_for_write(FileType::Ascii);
+    if let Err(e) = write_surface(&made, &mut w, 30) {
+        return Ok(Err(e));
+    }
+    let mut text = w.into_bytes();
+    if r.non_planar {
+        let at = text
+            .windows(PLANAR_LINE.len())
+            .position(|w| w == PLANAR_LINE)
+            .ok_or_else(|| harness("revolution record: no planar generator flag line"))?;
+        if let Some(b) = text.get_mut(at) {
+            *b = b'0';
+        }
+    }
+    let mut rd = DatabaseReader::new();
+    rd.open_for_read(text, FileType::Ascii);
+    Ok(Surface::read_from_db(k, ty, &mut rd, 30))
+}
+
 fn base_err() -> SolidError {
     SolidError::sm_err("difftest: base class default")
 }
@@ -1324,7 +1412,13 @@ fn edit(s: &mut Option<Surface>, f: impl FnOnce(&mut Surface) -> solidcore::Resu
 }
 
 fn rust_surface_op(k: &Kernel, op: &OpIn, t: &This) -> Result<Run, HarnessError> {
-    let mut s = this_surface(t)?;
+    let mut s = match &t.rev {
+        Some(r) => match revolution_surface(k, r)? {
+            Ok(s) => Some(s),
+            Err(e) => return Ok(Err(e)),
+        },
+        None => this_surface(t)?,
+    };
     let base = s.is_none();
     let run = match op {
         OpIn::Eval {
@@ -2394,6 +2488,7 @@ fn gen_surface_case(rng: &mut Rng) -> Inputs {
     let this = This {
         base,
         bss: (!base).then_some(bss),
+        rev: None,
     };
     let op = match rng.below(22) {
         0 | 1 => {
@@ -2846,6 +2941,126 @@ fn gen_static_case(rng: &mut Rng) -> Inputs {
     Inputs { this: None, op }
 }
 
+/// `STEPInversion` on revolution records ([`RevIn`]), with and without the planar
+/// generator flag: tori and cones (one through the apex), both placements, every swap /
+/// inside-out combination. The points are STEP points of the canonical surface (interior,
+/// on the seams, at the cone's apex), points moved off it (outside and inside the
+/// tolerance) and one far away; the domain is the STEP domain or a sub-domain of it.
+fn revolution_cases() -> Result<Vec<Case>, HarnessError> {
+    type StepOp = (String, [f64; 4], [f64; 3], f64, Option<[f64; 2]>);
+    let k = Kernel::default();
+    let placements = [
+        ([0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
+        ([1.0, -2.0, 0.5], [0.6, 0.8, 0.0], [0.0, 0.0, 1.0]),
+    ];
+    let shapes: [(&str, bool, [f64; 3]); 3] = [
+        ("torus", false, [3.0, 1.0, 0.0]),
+        ("cone", true, [1.0, 2.0, 3.0]),
+        ("apex_cone", true, [0.0, 2.0, 3.0]),
+    ];
+    let fractions: [(f64, f64); 9] = [
+        (0.3, 0.4),
+        (0.7, 0.15),
+        (0.55, 0.8),
+        (0.0, 0.5),
+        (1.0, 0.5),
+        (0.5, 0.0),
+        (0.5, 1.0),
+        (0.0, 0.0),
+        (1.0, 1.0),
+    ];
+    let mut cases = Vec::new();
+    for (name, cone, r) in shapes {
+        for (pi, (origin, x, y)) in placements.iter().enumerate() {
+            for swap in [false, true] {
+                for inside in [false, true] {
+                    let mut rev = RevIn {
+                        cone,
+                        origin: *origin,
+                        x: *x,
+                        y: *y,
+                        r,
+                        swap,
+                        inside,
+                        non_planar: false,
+                    };
+                    let (made, _) = revolution_made(&k, &rev)
+                        .map_err(|e| harness(format!("revolution {name}: {e}")))?;
+                    let d = made.step_uv_domain();
+                    let full = [d.min().x, d.min().y, d.max().x, d.max().y];
+                    let at = |fu: f64, fv: f64| {
+                        let uv = d.evaluate(fu, fv);
+                        made.evaluate_step_point(&k, uv).map_err(|e| {
+                            harness(format!("revolution {name} point ({fu}, {fv}): {e}"))
+                        })
+                    };
+                    let mut ops: Vec<StepOp> = Vec::new();
+                    for (fi, (fu, fv)) in fractions.iter().enumerate() {
+                        let p = at(*fu, *fv)?;
+                        ops.push((format!("on{fi}"), full, [p.x, p.y, p.z], 1e-7, None));
+                    }
+                    // a guess (upstream hands it on unconverted in the non-planar branch)
+                    for (fi, (fu, fv, gu, gv)) in
+                        [(0.3, 0.4, 0.32, 0.38), (0.0, 0.5, 0.02, 0.5)].iter().enumerate()
+                    {
+                        let p = at(*fu, *fv)?;
+                        let g = d.evaluate(*gu, *gv);
+                        ops.push((format!("guess{fi}"), full, [p.x, p.y, p.z], 1e-7, Some([g.x, g.y])));
+                    }
+                    let p = at(0.3, 0.4)?;
+                    let c = v3(*origin);
+                    let dir = (p - c).unitize_or_z();
+                    for (tag, off, tol) in [("off", 1e-3, 1e-7), ("near", 1e-6, 1e-4)] {
+                        let q = p + dir * off;
+                        ops.push((tag.into(), full, [q.x, q.y, q.z], tol, None));
+                    }
+                    let far = c + v3(*x) * 40.0;
+                    ops.push(("far".into(), full, [far.x, far.y, far.z], 1e-7, None));
+                    let sub = d.evaluate(0.2, 0.2);
+                    let sub_hi = d.evaluate(0.8, 0.8);
+                    let sub = [sub.x, sub.y, sub_hi.x, sub_hi.y];
+                    for (fi, (fu, fv)) in [(0.3, 0.4), (0.9, 0.5)].iter().enumerate() {
+                        let p = at(*fu, *fv)?;
+                        ops.push((format!("sub{fi}"), sub, [p.x, p.y, p.z], 1e-7, None));
+                    }
+                    for non_planar in [false, true] {
+                        rev.non_planar = non_planar;
+                        for (tag, dom, p, tol, guess) in &ops {
+                            let inputs = Inputs {
+                                this: Some(This {
+                                    base: false,
+                                    bss: None,
+                                    rev: Some(rev.clone()),
+                                }),
+                                op: OpIn::StepInv {
+                                    dom: *dom,
+                                    p: *p,
+                                    tol: *tol,
+                                    guess: *guess,
+                                },
+                            };
+                            let value = serde_json::to_value(inputs)
+                                .map_err(|e| harness(e.to_string()))?;
+                            cases.push(Case {
+                                unit: "surface.surface_p2".into(),
+                                name: format!(
+                                    "rev_step_inv_{name}_p{pi}_s{}_i{}_{}_{tag}",
+                                    u8::from(swap),
+                                    u8::from(inside),
+                                    if non_planar { "nonplanar" } else { "planar" },
+                                ),
+                                source: crate::case::CaseSource::Inline,
+                                inputs: value,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(cases)
+}
+
 fn gen_case(rng: &mut Rng) -> Inputs {
     if rng.chance(0.5) {
         gen_surface_case(rng)
@@ -2882,6 +3097,7 @@ impl UnitDiff for Runner {
         };
         let mut cases = default_cases(self, &ctx)?;
         cases.extend(super::surface_cone_p1::common_cases(&ctx)?);
+        cases.extend(revolution_cases()?);
         cases.extend(super::surface_sphere::const_make_cases());
         cases.extend(super::surface_torus::const_make_cases());
         cases.extend(super::surface_surf_of_revolution_p1::const_make_cases());
