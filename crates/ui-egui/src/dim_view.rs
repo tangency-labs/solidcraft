@@ -202,8 +202,8 @@ pub fn pin(app: &SolveApp, at: Vec2) {
 }
 
 /// Move a draft's text to `at`. Where the text goes can change what the dimension measures
-/// (two points or a slanted line: across from them the distance between them, above or below
-/// the horizontal one, beside them the vertical one), so a value nothing was typed into yet
+/// (two points or a slanted line: inside the box they span the distance between them, above or
+/// below it the horizontal one, beside it the vertical one), so a value nothing was typed into yet
 /// becomes what the new dimension measures; carrying the old one over would preview, and on
 /// Enter apply, the aligned length as a horizontal or vertical span, moving the picked points.
 fn move_text(app: &SolveApp, e: &mut Edit, at: Vec2) {

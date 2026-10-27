@@ -126,7 +126,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params(concat!("p0, p1: overall ends, width", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.point", "Point", draw_point).at("SKETCH", "CREATE").icon("point").enabled(in_sketch).params(concat!("point: [x,y] (each a number or an expression over the design's parameters: the point is then fixed where it comes to and follows them) or a snap: \"mid:<line>\" (held at the line's midpoint), \"on:<curve>:x,y\" (on the curve near x,y), {vertex: [x,y,z]} or {on_edge: [x,y,z]} of the model; id?", connect_doc!(), created_doc!())),
     CommandSpec::new("sketch.dimension", "Sketch Dimension", dimension).at("SKETCH", "CREATE").icon("dimension").key("D").enabled(in_sketch).params(
-        "entities: [refs] (a line midpoint is \"mid:line_id\"), type?: auto|distance|horizontal|distance_x|vertical|distance_y|length|radius|diameter|angle, value?: number or expression (default: current; a bare number is in the design's units, e.g. 2 means 2 in in an inch design; give a unit such as \"50 mm\" to override), or `name = expression` (e.g. \"width = 40\"; also `#name = expression`), which adds the user parameter `name` with that expression and dimensions with `name` (refused when the name is taken or reserved; the reply's `defined` names it); text_at?: [x, y]. Two points or a line off the axes: with auto, text_at across from them is the distance between them, above or below them horizontal, beside them vertical. Two midpoints: placing text above or below their bounding box measures horizontally, beside it vertically. Two lines: the angle between them (acute, or 180° − it when the value is nearer that) unless text_at picks a sector. A line and a circle or arc: the distance from the line to its edge (the gap, or how far the edge reaches past a line that cuts it; 0 is tangent); dimension the centre point for the distance to the centre. A point and a circle or arc: the distance from the point to its edge (or how far within it a point inside lies). Two circles or arcs: the gap between their edges (or how far they overlap when they cross, or the narrowest gap between them when one lies inside the other), or the centre-to-centre distance when they are the two caps of a slot. An arc and one of its end points: the arc's length (type arc_length does it from the arc alone). A dimension the sketch already determines is refused (naming what determines it); if_redundant?: \"driven\" places it as a driven (reference) dimension instead. scale_sketch?: bool (the dimension tool sends true): when this is the sketch's first length dimension and nothing in the sketch fixes a size (no other driving length dimension, nothing fixed or projected), the whole sketch scales about its origin to the value instead of distorting. Returns measured in unit (mm or deg), and scaled: the factor when the sketch was scaled",
+        "entities: [refs] (a line midpoint is \"mid:line_id\"), type?: auto|distance|horizontal|distance_x|vertical|distance_y|length|radius|diameter|angle, value?: number or expression (default: current; a bare number is in the design's units, e.g. 2 means 2 in in an inch design; give a unit such as \"50 mm\" to override), or `name = expression` (e.g. \"width = 40\"; also `#name = expression`), which adds the user parameter `name` with that expression and dimensions with `name` (refused when the name is taken or reserved; the reply's `defined` names it); text_at?: [x, y]. Two points, two midpoints or a line off the axes: with auto, text_at inside the box they span (as opposite corners) or in its outer corners is the distance between them, above or below the box horizontal, beside it vertical. Two lines: the angle between them (acute, or 180° − it when the value is nearer that) unless text_at picks a sector. A line and a circle or arc: the distance from the line to its edge (the gap, or how far the edge reaches past a line that cuts it; 0 is tangent); dimension the centre point for the distance to the centre. A point and a circle or arc: the distance from the point to its edge (or how far within it a point inside lies). Two circles or arcs: the gap between their edges (or how far they overlap when they cross, or the narrowest gap between them when one lies inside the other), or the centre-to-centre distance when they are the two caps of a slot. An arc and one of its end points: the arc's length (type arc_length does it from the arc alone). A dimension the sketch already determines is refused (naming what determines it); if_redundant?: \"driven\" places it as a driven (reference) dimension instead. scale_sketch?: bool (the dimension tool sends true): when this is the sketch's first length dimension and nothing in the sketch fixes a size (no other driving length dimension, nothing fixed or projected), the whole sketch scales about its origin to the value instead of distorting. Returns measured in unit (mm or deg), and scaled: the factor when the sketch was scaled",
     ),
     CommandSpec::new("sketch.constraint.horizontal_vertical", "Horizontal/Vertical", c_horizontal_vertical)
         .at("SKETCH", "CONSTRAINTS")
@@ -2480,12 +2480,7 @@ fn dimension(s: &mut Session, p: &Value) -> Result<Value> {
             }
             ((Some(a), None), Some((Some(b), None))) => {
                 let (pa, pb) = (sk.point(a).unwrap_or_default(), sk.point(b).unwrap_or_default());
-                let orientation = if ents.iter().all(|id| id.starts_with("mid:")) {
-                    midpoint_orientation(&ty, pa, pb, text_at)
-                } else {
-                    auto_orientation(&ty, pa, pb, text_at)
-                };
-                match orientation {
+                match auto_orientation(&ty, pa, pb, text_at) {
                     "horizontal" => (ConstraintKind::DistanceX { p: a, q: b, value: (pb.x - pa.x).abs() }, (pb.x - pa.x).abs()),
                     "vertical" => (ConstraintKind::DistanceY { p: a, q: b, value: (pb.y - pa.y).abs() }, (pb.y - pa.y).abs()),
                     _ => (ConstraintKind::Distance { p: a, q: b, value: pa.dist(pb) }, pa.dist(pb)),
@@ -2720,47 +2715,26 @@ fn solved_measure(s: &Session, p: &Value, cmd: &str) -> Option<(f64, &'static st
     Some(measured(k.is_angle(), solidcraft_sketch::measure_dimension(sk, k)?))
 }
 
-/// The type of a dimension between `a` and `b` (two points or a line's ends). `auto` takes it
-/// from where the text is placed: across from the two (between the perpendiculars through
-/// them) the distance between them; past that, above or below them the horizontal distance,
-/// beside them the vertical one (#257). With no text, or when the two already line up with
-/// an axis, `auto` stays the distance between them; other types are returned unchanged.
+/// The type of a dimension between `a` and `b` (two points, a line's ends or two line
+/// midpoints). `auto` takes it from where the text is placed relative to the box the two span
+/// as opposite corners: inside the box the distance between them; above or below it the
+/// horizontal distance, beside it the vertical one; in the corners outside it the distance
+/// again (#7295). Every type keeps a zone the size of the box's side whatever the slope, and
+/// the box's edges are the thresholds. With no text, or when the two already line up with an
+/// axis, `auto` stays the distance between them; other types are returned unchanged.
 fn auto_orientation(ty: &str, a: Vec2, b: Vec2, text_at: Option<Vec2>) -> &str {
     let Some(t) = text_at.filter(|_| ty == "auto") else { return ty };
     let d = b - a;
     let len = d.len();
-    let along = (t - a).dot(d) / len;
+    if !t.x.is_finite() || !t.y.is_finite() || d.x.abs() <= 1e-9 * len || d.y.abs() <= 1e-9 * len {
+        return ty;
+    }
     let between = |v: f64, p: f64, q: f64| p.min(q) <= v && v <= p.max(q);
-    if d.x.abs() <= 1e-9 * len || d.y.abs() <= 1e-9 * len || !along.is_finite() || (0.0..=len).contains(&along) {
-        ty
-    } else if between(t.x, a.x, b.x) {
-        "horizontal"
-    } else if between(t.y, a.y, b.y) {
-        "vertical"
-    } else {
-        ty
+    match (between(t.x, a.x, b.x), between(t.y, a.y, b.y)) {
+        (true, false) => "horizontal",
+        (false, true) => "vertical",
+        _ => ty,
     }
-}
-
-/// Midpoint pairs choose an axis as soon as the text passes their bounding box.
-/// Keeping the aligned sector inside that box avoids requiring a long pointer move
-/// for shallow diagonals; explicit types and already aligned points retain their behavior.
-fn midpoint_orientation(ty: &str, a: Vec2, b: Vec2, text_at: Option<Vec2>) -> &str {
-    let d = b - a;
-    if ty == "auto"
-        && d.x.abs() > 1e-9 * d.len()
-        && d.y.abs() > 1e-9 * d.len()
-        && let Some(t) = text_at
-    {
-        let between = |v: f64, p: f64, q: f64| p.min(q) <= v && v <= p.max(q);
-        if between(t.x, a.x, b.x) && !between(t.y, a.y, b.y) {
-            return "horizontal";
-        }
-        if between(t.y, a.y, b.y) && !between(t.x, a.x, b.x) {
-            return "vertical";
-        }
-    }
-    auto_orientation(ty, a, b, text_at)
 }
 
 /// Keep a dimension's text where it was placed (`at`, sketch coordinates), relative to the

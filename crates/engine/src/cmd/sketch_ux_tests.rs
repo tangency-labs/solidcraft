@@ -1420,15 +1420,15 @@ fn pipe_and_sweep_follow_3d_sketch_curves() {
 }
 
 /// Between two points, or on a line, that don't line up with an axis, an `auto` dimension takes
-/// its orientation from where its text goes: across from the two the distance between them,
-/// past that above or below them the horizontal distance, beside them the vertical one (#257).
+/// its orientation from where its text goes relative to the box the two span: inside it the
+/// distance between them, above or below it the horizontal distance, beside it the vertical
+/// one, in its outer corners the distance again (#257, #7295).
 #[test]
 fn auto_dimension_orientation_follows_where_its_text_is_placed() {
     use solidcraft_sketch::ConstraintKind;
-    // The ends of a 30 × 40 line: 50 long, and the slope keeps "across" and "past" distinct.
-    let dimension = |end: [f64; 2], entities: Value, extra: Value| {
+    let dimension = |start: [f64; 2], end: [f64; 2], entities: Value, extra: Value| {
         let mut s = new_sketch();
-        run(&mut s, "sketch.line", json!({"points": [[0, 0], end], "connect": false}));
+        run(&mut s, "sketch.line", json!({"points": [start, end], "connect": false}));
         let mut p = json!({"entities": entities});
         if let (Some(p), Some(extra)) = (p.as_object_mut(), extra.as_object()) {
             p.extend(extra.clone());
@@ -1439,38 +1439,74 @@ fn auto_dimension_orientation_follows_where_its_text_is_placed() {
         (kind, r["measured"].as_f64().unwrap_or(f64::NAN), sk)
     };
     let points = json!(["l1.start", "l1.end"]);
-    for entities in [points.clone(), json!(["l1"])] {
-        for (at, expected) in [
-            ([15.0, 60.0], "horizontal"),
-            ([15.0, -20.0], "horizontal"),
-            ([-30.0, 5.0], "vertical"),
-            ([55.0, 38.0], "vertical"),
-            ([-20.0, 25.0], "aligned"),
-            ([45.0, 10.0], "aligned"),
-            ([-20.0, -20.0], "aligned"),
-        ] {
-            let (kind, measured, _) = dimension([30.0, 40.0], entities.clone(), json!({"text_at": at}));
-            let (got, value) = match kind {
-                ConstraintKind::DistanceX { .. } => ("horizontal", 30.0),
-                ConstraintKind::DistanceY { .. } => ("vertical", 40.0),
-                ConstraintKind::Distance { .. } | ConstraintKind::Length { .. } => ("aligned", 50.0),
-                other => panic!("{entities} at {at:?}: {other:?}"),
-            };
-            assert_eq!(got, expected, "{entities} with its text at {at:?}");
-            assert!((measured - value).abs() < 1e-9, "{entities} at {at:?} measured {measured}");
+    // A 30 × 40 line (50 long), and a shallow one, 50 × 10, whose box is a thin strip: above
+    // the middle of it is horizontal, not the distance between its ends.
+    let shallow = 2600_f64.sqrt();
+    let cases: [([f64; 2], [f64; 2], [f64; 3], &[([f64; 2], &str)]); 2] = [
+        (
+            [0.0, 0.0],
+            [30.0, 40.0],
+            [30.0, 40.0, 50.0],
+            &[
+                ([15.0, 60.0], "horizontal"),
+                ([15.0, 41.0], "horizontal"),
+                ([15.0, -20.0], "horizontal"),
+                ([-30.0, 5.0], "vertical"),
+                ([55.0, 38.0], "vertical"),
+                ([-20.0, 25.0], "vertical"),
+                ([45.0, 10.0], "vertical"),
+                ([20.0, 10.0], "aligned"),
+                ([10.0, 30.0], "aligned"),
+                ([-20.0, -20.0], "aligned"),
+                ([40.0, 50.0], "aligned"),
+            ],
+        ),
+        (
+            [10.0, 10.0],
+            [60.0, 0.0],
+            [50.0, 10.0, shallow],
+            &[
+                ([35.0, 30.0], "horizontal"),
+                ([35.0, -20.0], "horizontal"),
+                ([12.0, 40.0], "horizontal"),
+                ([80.0, 5.0], "vertical"),
+                ([0.0, 3.0], "vertical"),
+                ([35.0, 6.0], "aligned"),
+                ([80.0, 40.0], "aligned"),
+                ([0.0, -10.0], "aligned"),
+            ],
+        ),
+    ];
+    for (start, end, [dx, dy, len], placements) in cases {
+        for entities in [points.clone(), json!(["l1"])] {
+            for &(at, expected) in placements {
+                let (kind, measured, _) = dimension(start, end, entities.clone(), json!({"text_at": at}));
+                let (got, value) = match kind {
+                    ConstraintKind::DistanceX { .. } => ("horizontal", dx),
+                    ConstraintKind::DistanceY { .. } => ("vertical", dy),
+                    ConstraintKind::Distance { .. } | ConstraintKind::Length { .. } => ("aligned", len),
+                    other => panic!("{entities} at {at:?}: {other:?}"),
+                };
+                assert_eq!(got, expected, "{start:?}–{end:?}: {entities} with its text at {at:?}");
+                assert!((measured - value).abs() < 1e-6, "{entities} at {at:?} measured {measured}");
+            }
         }
+    }
+    for entities in [points.clone(), json!(["l1"])] {
         // No text, an explicit type, or two ends already on an axis keep today's dimension.
-        let (kind, ..) = dimension([30.0, 40.0], entities.clone(), json!({}));
+        let (kind, ..) = dimension([0.0, 0.0], [30.0, 40.0], entities.clone(), json!({}));
         assert!(matches!(kind, ConstraintKind::Distance { .. } | ConstraintKind::Length { .. }), "{kind:?}");
-        let (kind, ..) = dimension([30.0, 40.0], entities.clone(), json!({"type": "distance", "text_at": [15, 60]}));
+        let (kind, ..) = dimension([0.0, 0.0], [30.0, 40.0], entities.clone(), json!({"type": "distance", "text_at": [15, 60]}));
         assert!(matches!(kind, ConstraintKind::Distance { .. } | ConstraintKind::Length { .. }), "{kind:?}");
-        let (kind, ..) = dimension([30.0, 40.0], entities.clone(), json!({"type": "vertical", "text_at": [15, 60]}));
+        let (kind, ..) = dimension([0.0, 0.0], [30.0, 40.0], entities.clone(), json!({"type": "vertical", "text_at": [15, 60]}));
         assert!(matches!(kind, ConstraintKind::DistanceY { .. }), "{kind:?}");
-        let (kind, ..) = dimension([40.0, 0.0], json!(["l1.start", "l1.end"]), json!({"text_at": [60, 5]}));
+        let (kind, ..) = dimension([0.0, 0.0], [40.0, 0.0], json!(["l1.start", "l1.end"]), json!({"text_at": [60, 5]}));
+        assert!(matches!(kind, ConstraintKind::Distance { .. }), "{kind:?}");
+        let (kind, ..) = dimension([0.0, 0.0], [40.0, 0.0], json!(["l1.start", "l1.end"]), json!({"text_at": [20, 15]}));
         assert!(matches!(kind, ConstraintKind::Distance { .. }), "{kind:?}");
     }
     // The chosen dimension drives that coordinate: 24 across X, the 40 in Y kept.
-    let (_, _, sk) = dimension([30.0, 40.0], points, json!({"text_at": [15, 60], "value": 24}));
+    let (_, _, sk) = dimension([0.0, 0.0], [30.0, 40.0], points, json!({"text_at": [15, 60], "value": 24}));
     let end = sk.point(sk.resolve_point("l1.end").expect("end")).expect("end point");
     let start = sk.point(sk.resolve_point("l1.start").expect("start")).expect("start point");
     assert!(((end.x - start.x).abs() - 24.0).abs() < 1e-6 && ((end.y - start.y).abs() - 40.0).abs() < 1e-6, "{start:?} {end:?}");
