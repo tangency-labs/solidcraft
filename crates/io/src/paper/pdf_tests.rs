@@ -308,3 +308,88 @@ fn what_cannot_be_written_is_refused() {
     let e = paper_pdf(&prepared, &PdfOptions { title: None, output_time: Some(MAX_OUTPUT_TIME + 1) }).unwrap_err();
     assert!(e.to_string().contains("9999"), "{e}");
 }
+
+// Small private limits exercise the real content writer without allocating a
+// maximum-sized scene. They can tighten, never raise, the production ceiling.
+#[test]
+fn content_budget_includes_the_header_and_the_final_graphics_restore() {
+    let expected = "q 2.834645669 0 0 2.834645669 0 0 cm 0 J 0 j 4 M\nQ\n";
+    assert_eq!(super::content_with_limit(&[], expected.len()).unwrap(), expected);
+    for limit in 0..expected.len() {
+        assert!(super::content_with_limit(&[], limit).is_err(), "accepted {limit} bytes for an empty sheet's stream");
+    }
+}
+
+#[test]
+fn content_budget_stops_inside_one_long_path_before_its_paint_operator() {
+    let path = GridPath {
+        start: GridPoint { x: 0, y: 0 },
+        pieces: (1..=128).map(|i| Piece::Line { to: GridPoint { x: i * 100_000, y: 0 } }).collect(),
+        closed: false,
+    };
+    let mut writer = Content::new(96).unwrap();
+    assert!(writer.path(&path).is_err(), "the path must stop before the whole item is built");
+    assert!(writer.out.len() <= 96, "oversized partial content was allocated");
+}
+
+#[test]
+fn content_budget_stops_inside_one_arcs_cubic_expansion() {
+    // The arc is already in grid steps, as Piece::seg supplies it. A 5 m
+    // quarter circle needs several cubics; even one input piece must be bounded.
+    let mut writer = Content::new(64).unwrap();
+    let arc = Seg2::Arc { center: Vec2::ZERO, radius: 500_000_000.0, start: 0.0, sweep: FRAC_PI_2 };
+    assert!(writer.arc(arc, GridPoint { x: 0, y: 500_000_000 }).is_err());
+    assert!(writer.out.len() <= 64);
+}
+
+#[test]
+fn content_budget_is_cumulative_over_groups_and_fill_loops() {
+    let square = Loop2::polygon(&[p(0.0, 0.0), p(2.0, 0.0), p(2.0, 2.0), p(0.0, 2.0)]);
+    let source = Scene {
+        size_mm: p(20.0, 20.0),
+        groups: vec![
+            Group { object: 1, kind: ObjectKind::DrawingBorder, items: vec![stroke(square.segs.clone(), true, 0.35, None)] },
+            Group { object: 2, kind: ObjectKind::TitleBlock, items: vec![Item::Fill { region: Region2 { outer: square, holes: vec![] } }] },
+        ],
+    };
+    let on = source.prepare().unwrap().on_grid(Grid::TEN_NANOMETRES).unwrap();
+    let complete = super::content(&on.groups).unwrap();
+    assert_eq!(super::content_with_limit(&on.groups, complete.len()).unwrap(), complete);
+    assert!(super::content_with_limit(&on.groups, complete.len() - 1).is_err(), "the final Q is part of the cumulative limit");
+    let first = super::content(&on.groups[..1]).unwrap();
+    assert!(super::content_with_limit(&on.groups, first.len()).is_err(), "groups must share one allowance");
+    assert_eq!(Content::new(usize::MAX).unwrap().max_bytes, MAX_DRAWING_BYTES);
+}
+
+#[test]
+fn content_budget_rejects_an_append_before_mutating_existing_bytes() {
+    let mut w = Content::new(4).unwrap();
+    w.append("abc").unwrap();
+    assert!(w.append("de").is_err());
+    assert_eq!(w.out, "abc");
+    w.append("d").unwrap();
+    assert_eq!(w.out, "abcd");
+    w.append("").unwrap();
+    assert!(w.append("e").is_err());
+    assert_eq!(w.out, "abcd");
+}
+
+#[test]
+fn content_budget_reuses_the_original_formatter_at_integer_extremes() {
+    for (n, expected) in [
+        (0, "0"),
+        (1, "0.00001"),
+        (-1, "-0.00001"),
+        (100_000, "1"),
+        (-100_000, "-1"),
+        (i64::MAX, "92233720368547.75807"),
+        (i64::MIN, "-92233720368547.75808"),
+    ] {
+        let mut w = Content::new(expected.len()).unwrap();
+        w.number(n).unwrap();
+        assert_eq!(w.out, expected);
+        let mut too_small = Content::new(expected.len() - 1).unwrap();
+        assert!(too_small.number(n).is_err());
+        assert!(too_small.out.is_empty());
+    }
+}

@@ -15,9 +15,11 @@
 //! - **Paint:** strokes at their width `w` (the walk never gives 0, which 8.4.3.2 says is a device
 //!   pixel and shouldn't be used), butt caps, miter joins and a miter limit of 4, dashed by `d`;
 //!   fills black, even-odd (`f*`). Black on no background, as SVG.
+//! - **Content size:** every append checks the cumulative byte limit before growing the
+//!   buffer, including inside a path/arc and the final graphics-state restore. Allocation
+//!   failure is an error. The limit is for uncompressed content, not total export memory.
 
 use std::f64::consts::FRAC_PI_2;
-use std::fmt::Write as _;
 use std::io::Write as _;
 
 use flate2::Compression;
@@ -108,57 +110,92 @@ fn date(secs: u64) -> Result<Date> {
 
 /// The page's content stream: the scene in millimetres, scaled to points once.
 fn content(groups: &[GridGroup]) -> Result<String> {
-    let mut w = Content { out: String::new(), width: None, dashes: None };
-    let _ = writeln!(w.out, "q {PT_PER_MM:.9} 0 0 {PT_PER_MM:.9} 0 0 cm 0 J 0 j 4 M");
+    content_with_limit(groups, MAX_DRAWING_BYTES)
+}
+
+// The private seam permits smaller test limits, never a higher production cap.
+fn content_with_limit(groups: &[GridGroup], max_bytes: usize) -> Result<String> {
+    let mut w = Content::new(max_bytes)?;
+    w.append(&format!("q {PT_PER_MM:.9} 0 0 {PT_PER_MM:.9} 0 0 cm 0 J 0 j 4 M\n"))?;
     for item in groups.iter().flat_map(|g| &g.items) {
         match item {
             GridItem::Stroke { width, path, dashes } => {
                 if w.width != Some(*width) {
-                    w.number(*width);
-                    w.out.push_str(" w\n");
+                    w.number(*width)?;
+                    w.append(" w\n")?;
                     w.width = Some(*width);
                 }
                 if w.dashes.as_ref() != dashes.as_ref() {
-                    w.dashes(dashes.as_ref());
+                    w.dashes(dashes.as_ref())?;
                     w.dashes.clone_from(dashes);
                 }
                 w.path(path)?;
                 // A closed path's closing line, then the stroke: `s`.
-                w.out.push_str(if path.closed { "s\n" } else { "S\n" });
+                w.append(if path.closed { "s\n" } else { "S\n" })?;
             }
             GridItem::Fill { loops } => {
                 for l in loops {
                     w.path(l)?;
-                    w.out.push_str("h\n");
+                    w.append("h\n")?;
                 }
-                w.out.push_str("f*\n");
+                w.append("f*\n")?;
             }
         }
-        if w.out.len() > MAX_DRAWING_BYTES {
-            return Err(IoError::Invalid(format!("the PDF's drawing would be over {} MiB", MAX_DRAWING_BYTES >> 20)));
-        }
     }
-    w.out.push_str("Q\n");
+    w.append("Q\n")?;
     Ok(w.out)
+}
+
+// One growth path for every operand/operator. Reserve geometrically, capped at
+// the allowance, rather than repeatedly reallocating for individual numbers.
+fn append_bounded(out: &mut String, text: &str, max_bytes: usize) -> Result<()> {
+    let length = out
+        .len()
+        .checked_add(text.len())
+        .filter(|&n| n <= max_bytes)
+        .ok_or_else(|| IoError::Invalid(format!("the PDF's drawing would be over {max_bytes} bytes")))?;
+    if length > out.capacity() {
+        let capacity = out.capacity().saturating_mul(2).max(length).min(max_bytes);
+        out.try_reserve_exact(capacity - out.len())
+            .map_err(|_| IoError::Invalid("the sheet PDF: cannot allocate its bounded content buffer".into()))?;
+    }
+    out.push_str(text);
+    Ok(())
 }
 
 struct Content {
     out: String,
+    max_bytes: usize,
+    // Reuse a small buffer for the existing shared integer formatter. Any i64
+    // on this grid needs at most 21 bytes, including a minus sign and point.
+    number_text: String,
     /// The stroke width and dash pattern last set, so each is written only when it changes.
     width: Option<i64>,
     dashes: Option<GridDashes>,
 }
 
 impl Content {
-    fn number(&mut self, n: i64) {
-        push_mm(&mut self.out, n, DECIMALS);
+    fn new(max_bytes: usize) -> Result<Self> {
+        let mut number_text = String::new();
+        number_text.try_reserve_exact(32).map_err(|_| IoError::Invalid("the sheet PDF: cannot allocate its number buffer".into()))?;
+        Ok(Self { out: String::new(), max_bytes: max_bytes.min(MAX_DRAWING_BYTES), number_text, width: None, dashes: None })
     }
 
-    fn point(&mut self, p: GridPoint) {
-        self.number(p.x);
-        self.out.push(' ');
-        self.number(p.y);
-        self.out.push(' ');
+    fn append(&mut self, text: &str) -> Result<()> {
+        append_bounded(&mut self.out, text, self.max_bytes)
+    }
+
+    fn number(&mut self, n: i64) -> Result<()> {
+        self.number_text.clear();
+        push_mm(&mut self.number_text, n, DECIMALS);
+        append_bounded(&mut self.out, &self.number_text, self.max_bytes)
+    }
+
+    fn point(&mut self, p: GridPoint) -> Result<()> {
+        self.number(p.x)?;
+        self.append(" ")?;
+        self.number(p.y)?;
+        self.append(" ")
     }
 
     /// `p` in steps, rounded onto the grid.
@@ -166,50 +203,49 @@ impl Content {
         if !p.is_finite() {
             return Err(IoError::Invalid("the sheet PDF: a curve point is not a number".into()));
         }
-        self.point(GridPoint { x: p.x.round() as i64, y: p.y.round() as i64 });
-        Ok(())
+        self.point(GridPoint { x: p.x.round() as i64, y: p.y.round() as i64 })
     }
 
-    /// A dash pattern `[on off …] phase d`, or a solid line `[] 0 d`.
-    fn dashes(&mut self, dashes: Option<&GridDashes>) {
-        self.out.push('[');
+    /// A dash pattern `[on off ...] phase d`, or a solid line `[] 0 d`.
+    fn dashes(&mut self, dashes: Option<&GridDashes>) -> Result<()> {
+        self.append("[")?;
         if let Some(d) = dashes {
             for (i, length) in d.lengths.iter().enumerate() {
                 if i > 0 {
-                    self.out.push(' ');
+                    self.append(" ")?;
                 }
-                self.number(*length);
+                self.number(*length)?;
             }
         }
-        self.out.push_str("] ");
-        self.number(dashes.map_or(0, |d| d.phase));
-        self.out.push_str(" d\n");
+        self.append("] ")?;
+        self.number(dashes.map_or(0, |d| d.phase))?;
+        self.append(" d\n")
     }
 
     /// A path from its start; a closed one's closing line is left to the caller's `h` or `s`.
     fn path(&mut self, path: &GridPath) -> Result<()> {
-        self.point(path.start);
-        self.out.push_str("m\n");
+        self.point(path.start)?;
+        self.append("m\n")?;
         let mut at = path.start;
         for piece in &path.pieces {
             match *piece {
                 Piece::Line { to } => {
-                    self.point(to);
-                    self.out.push_str("l\n");
+                    self.point(to)?;
+                    self.append("l\n")?;
                 }
                 Piece::Cubic { c1, c2, to } => {
-                    self.point(c1);
-                    self.point(c2);
-                    self.point(to);
-                    self.out.push_str("c\n");
+                    self.point(c1)?;
+                    self.point(c2)?;
+                    self.point(to)?;
+                    self.append("c\n")?;
                 }
                 // A parabola is the cubic with its control points two thirds of the way to `c`.
                 Piece::Quadratic { c, to } => {
                     let (a, c, b) = (at.vec(), c.vec(), to.vec());
                     self.near(a + (c - a) * (2.0 / 3.0))?;
                     self.near(b + (c - b) * (2.0 / 3.0))?;
-                    self.point(to);
-                    self.out.push_str("c\n");
+                    self.point(to)?;
+                    self.append("c\n")?;
                 }
                 Piece::Arc { .. } => self.arc(piece.seg(at), piece.to())?,
             }
@@ -233,11 +269,11 @@ impl Content {
             self.near(p0 + tangent(a0) * k)?;
             self.near(p3 - tangent(a1) * k)?;
             if i + 1 == n {
-                self.point(to)
+                self.point(to)?
             } else {
                 self.near(p3)?
             }
-            self.out.push_str("c\n");
+            self.append("c\n")?;
         }
         Ok(())
     }
