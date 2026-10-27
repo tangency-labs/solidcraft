@@ -899,7 +899,7 @@ v{esc(UPSTREAM_VERSION)} in green or partial units; {gpct:.1f}% green</div></div
 <div class="tile"><div class="k">ready to claim</div><div class="v">{ready_n}</div><div class="sub">todo with all dependencies done</div></div>
 {solids_tile}
 </section>
-<section>
+{reference_history_html()}<section>
 <h2>Progress over time</h2>
 <p class="muted">Share of in-scope upstream lines in green and partial units, from
 <code>plan/units/</code> along <code>main</code>'s history ({len(points)} sampled states).</p>
@@ -1254,6 +1254,29 @@ the C++ result's.</p>
             "timeline": len(points),
             "seconds": time.time() - t_start}
 
+
+
+def reference_history_html():
+    """Rows for site/reference-history/*.json: one file per past upstream pin."""
+    rows = []
+    for f in sorted((ROOT / "site" / "reference-history").glob("*.json")):
+        h = json.loads(f.read_text())
+        pk, fn, nx = h.get("peak", {}), h.get("final", {}), h.get("superseded_by", {})
+        peak = (f'{pk.get("green")}/{pk.get("units")} green on {esc(pk.get("date", ""))} '
+                f'(<a href="{REPO_URL}/pull/{pk.get("pr")}">#{pk.get("pr")}</a>, '
+                f'<code>{esc(pk.get("commit", ""))}</code>)') if pk else ""
+        final = (f'{fn.get("green")} green, {fn.get("partial", 0)} partial at '
+                 f'<code>{esc(fn.get("commit", ""))}</code>: {esc(fn.get("note", ""))}') if fn else ""
+        moved = (f'v{esc(nx.get("version", ""))} on {esc(nx.get("date", ""))} '
+                 f'(<a href="{REPO_URL}/pull/{nx.get("pr")}">#{nx.get("pr")}</a>)') if nx else ""
+        rows.append(f'<tr><td>v{esc(h["version"])} <code>{esc(h.get("commit", ""))}</code></td>'
+                    f'<td>{peak}</td><td>{final}</td><td>{moved}</td></tr>')
+    if not rows:
+        return ""
+    return ('<section>\n<h2>Earlier upstream pins</h2>\n<p class="muted">Difftest results against '
+            'previous C++ references, kept after the pin moved on.</p>\n<div class="scroll"><table>'
+            '<thead><tr><th>Pin</th><th>Best</th><th>Last state</th><th>Moved to</th></tr></thead><tbody>'
+            + "".join(rows) + '</tbody></table></div>\n</section>\n')
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
