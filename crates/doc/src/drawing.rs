@@ -42,6 +42,7 @@
 //! dimensions and balloons by id, then [`Drawing::validate`]; [`Drawing::from_value`] the same from the
 //! format check on.
 
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
@@ -393,6 +394,11 @@ impl Drawing {
             None => Ok(()),
         }
     }
+
+    /// How a message names this drawing: by its name and id.
+    pub fn label(&self) -> String {
+        format!("drawing {:?} ({})", self.name, ids::encode(self.id))
+    }
 }
 
 /// A design's drawings as read, each checked on its own already: in their order (by name, then id)
@@ -441,6 +447,20 @@ fn in_id_order<T>(records: &[Arc<T>], id: impl Fn(&T) -> u64) -> bool {
 
 fn no_revisions(revisions: &Arc<RevisionRecord>) -> bool {
     **revisions == RevisionRecord::default()
+}
+
+/// `doc` without its drawings that break a rule of the record, and a line naming each one left
+/// out and the rule. Reading refuses a design whole for one such drawing, so a copy that must open
+/// again (an autosave, a crash report's design) keeps the rest.
+pub fn openable(doc: &crate::Document) -> (Cow<'_, crate::Document>, Vec<String>) {
+    let (kept, broken): (Vec<_>, Vec<_>) = doc.drawings.iter().map(|d| (d, d.validate())).partition(|(_, checked)| checked.is_ok());
+    if broken.is_empty() {
+        return (Cow::Borrowed(doc), Vec::new());
+    }
+    let left_out = broken.iter().filter_map(|(d, checked)| checked.as_ref().err().map(|e| format!("{} left out: {e}", d.label()))).collect();
+    let mut doc = doc.clone();
+    doc.drawings = kept.into_iter().map(|(d, _)| d.clone()).collect();
+    (Cow::Owned(doc), left_out)
 }
 
 /// `Ok` when `ok`, else the rule `broken` names.

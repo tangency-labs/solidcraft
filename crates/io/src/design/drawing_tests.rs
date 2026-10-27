@@ -140,3 +140,19 @@ fn a_design_with_two_drawings_of_one_id_is_not_saved() {
     let why = write_design_container(&doc).unwrap_err().to_string();
     assert_eq!(why, format!("two drawings have the id {}", ids::encode(first.id)));
 }
+
+/// A drawing that can't be saved names itself in the design's error: which of the design's
+/// drawings, and why. Here one too large to open again (2,000,000 numbers indent past the limit).
+#[test]
+fn a_drawing_not_saved_is_named_in_the_designs_error() {
+    let items = vec!["0"; 2_000_000].join(",");
+    let format = DRAWING.format_string(1);
+    let big = Drawing::from_json(&format!(
+        r#"{{"format":"{format}","id":"0000000000002","name":"Huge","sources":[],"language":"en","sheets":[{{"id":"0000000000003","name":"S","sheet":{{"size":{{"standard":"a4"}}}}}}],"properties":{{"com.example":{{"items":[{items}]}}}}}}"#
+    ))
+    .unwrap();
+    let mut doc = plate();
+    doc.drawings.push(Arc::new(big));
+    let why = write_design_container(&doc).unwrap_err().to_string();
+    assert_eq!(why, r#"design container: drawing "Huge" (0000000000002) not saved: drawing too large to save (at most 16 MiB)"#);
+}

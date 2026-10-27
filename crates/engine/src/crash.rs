@@ -38,7 +38,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use serde_json::{Value, json};
-use solidcraft_doc::Document;
+use solidcraft_doc::{Document, drawing};
 
 use crate::Session;
 
@@ -573,7 +573,8 @@ pub(crate) fn command_done(
     let pending: Vec<Panic> = PENDING.with(|q| std::mem::take(&mut *q.borrow_mut()));
     for p in pending {
         let kind = if p.recovered { "kernel_panic_recovered" } else { "command_panic" };
-        let design = solidcraft_io::write_design(before);
+        let (openable, left_out) = drawing::openable(before);
+        let design = solidcraft_io::write_design(&openable);
         let replay = json!({ "commands": [{ "command": id, "params": params }], "ids": ids });
         let recent = if journaled { read_live_journal(state).recent } else { Vec::new() };
         let extra = Extra {
@@ -582,7 +583,7 @@ pub(crate) fn command_done(
             replay: Some(replay),
             recent,
             base: json!("the design as it was when the command started"),
-            notes: Vec::new(),
+            notes: left_out,
             fields: serde_json::Map::new(),
             attach: Vec::new(),
         };

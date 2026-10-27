@@ -20,7 +20,8 @@ const FOLDER: &str = "drawings/";
 pub(super) fn write(writer: &mut PackageWriter, doc: &Document) -> Result<()> {
     drawing::check_in_design(&doc.drawings)?;
     for d in &doc.drawings {
-        writer.part(&format!("{FOLDER}{}.json", ids::encode(d.id)), d.to_json()?.as_bytes(), true)?;
+        let text = d.to_json().map_err(|e| invalid(format!("{} not saved: {e}", d.label())))?;
+        writer.part(&format!("{FOLDER}{}.json", ids::encode(d.id)), text.as_bytes(), true)?;
     }
     Ok(())
 }

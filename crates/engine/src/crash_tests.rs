@@ -139,6 +139,13 @@ fn child() {
             }
             assert_eq!(s.doc.features.len(), 1, "the design is unchanged");
         }
+        "drawing" => {
+            s.execute("drawing.create", &json!({"name": "Broken"})).unwrap();
+            let mut doc = (*s.doc).clone();
+            std::sync::Arc::make_mut(&mut doc.drawings[0]).language = "?".into();
+            s.doc = std::sync::Arc::new(doc);
+            assert!(s.execute("diagnostics.crash_test", &json!({"mode": "panic"})).is_err());
+        }
         "kernel" => {
             assert!(s.execute("diagnostics.crash_test", &json!({"mode": "kernel"})).is_err());
         }
@@ -247,6 +254,22 @@ fn a_command_panic_is_reported_once_with_the_design_and_the_command() {
     assert_eq!(replay["commands"], json!([{"command": "diagnostics.crash_test", "params": {"mode": "panic"}}]));
     assert_eq!(replay["ids"], json!(printed_seed(&out, "IDS ")), "the session's id seed when the command started");
     assert!(fs::read_dir(d.join("sessions")).unwrap().next().is_none(), "a clean exit leaves no journal");
+    let _ = fs::remove_dir_all(&d);
+}
+
+/// A drawing that breaks a rule of the record would keep the report's design from opening: the
+/// copy leaves it out, and the report's notes name it and the rule.
+#[test]
+fn a_crash_reports_design_leaves_out_a_drawing_that_breaks_a_rule() {
+    let d = fresh_dir("drawing");
+    let (_, ok) = run_child(&d, "drawing");
+    assert!(ok, "the panic was caught");
+    let (_, v) = only_report(&d);
+    let design = solidcraft_io::read_design(&fs::read(v["design_path"].as_str().unwrap()).unwrap()).unwrap();
+    assert_eq!(design.features.len(), 1);
+    assert!(design.drawings.is_empty());
+    let notes = v["notes"].to_string();
+    assert!(notes.contains(r#"drawing \"Broken\" ("#) && notes.contains(") left out: the language is not"), "{notes}");
     let _ = fs::remove_dir_all(&d);
 }
 
