@@ -135,6 +135,19 @@ const STEP_NAMES: OptionSpec = OptionSpec {
 
 const BREP_IMPORT: &[OptionSpec] = &[UP_Z, STEP_NAMES];
 
+/// A KiCad PCB's import options (see `doc.open`). The board's own thickness and colour are used
+/// unless the command is given others, so neither is offered here.
+const KICAD_IMPORT: &[OptionSpec] = &[
+    OptionSpec { param: "components", label: "Include components", kind: OptionKind::Bool { default: true } },
+    OptionSpec {
+        param: "copper",
+        label: "Copper (traces, vias, zones, pads)",
+        kind: OptionKind::Choice { choices: &[("none", "None"), ("overlay", "Overlay on the board"), ("mesh", "Modelled")], default: 0 },
+    },
+    OptionSpec { param: "silkscreen", label: "Include silkscreen", kind: OptionKind::Bool { default: true } },
+    OptionSpec { param: "representation", label: "Board", kind: OptionKind::Choice { choices: &[("brep", "Solid"), ("mesh", "Mesh")], default: 0 } },
+];
+
 /// Binary is the `stl` format value, ASCII is `stla` (see `file.export`).
 const STL_ENCODING: OptionSpec =
     OptionSpec { param: "format", label: "Encoding", kind: OptionKind::Choice { choices: &[("stl", "Binary"), ("stla", "ASCII")], default: 0 } };
@@ -213,6 +226,14 @@ pub static FORMATS: &[FormatSpec] = &[
         extensions: &["3dm"],
         role: Role::Artifact,
         import: Some(ImportSpec { target: ImportTarget::Brep, options: BREP_IMPORT, native_only: true }),
+        export: None,
+    },
+    FormatSpec {
+        id: "kicad",
+        label: "KiCad PCB",
+        extensions: &["kicad_pcb", "kicad_pro"],
+        role: Role::Artifact,
+        import: Some(ImportSpec { target: ImportTarget::Brep, options: KICAD_IMPORT, native_only: false }),
         export: None,
     },
     FormatSpec {

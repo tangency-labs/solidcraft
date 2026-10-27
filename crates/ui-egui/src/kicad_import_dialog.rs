@@ -1,0 +1,264 @@
+//! Import settings for a KiCad board.
+//!
+//! Opening a board asks what comes in with it: the referenced 3D models, the front and back
+//! copper (and its pads) as an overlay or modelled, the silkscreen and its text, the substrate
+//! colour and the thickness. The chosen values are the `doc.open` options, so the same board can
+//! be opened again from a script or the control channel.
+
+use serde_json::{Value, json};
+use solidcraft_engine::io::KicadCopper;
+
+use crate::SolveApp;
+
+/// The open KiCad import window.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Dialog {
+    pub path: String,
+    pub components: bool,
+    pub copper: KicadCopper,
+    pub silkscreen: bool,
+    /// The board's thickness (mm): its own when the window opens, and editable.
+    pub thickness: f64,
+    pub color: [u8; 3],
+}
+
+impl Dialog {
+    pub fn new(path: &str) -> Dialog {
+        Dialog { path: path.to_string(), components: true, copper: KicadCopper::None, silkscreen: true, thickness: 1.6, color: [13, 84, 46] }
+    }
+
+    /// The `doc.open` parameters, without the path.
+    pub fn params(&self) -> Value {
+        json!({
+            "components": self.components,
+            "copper": self.copper.as_str(),
+            "silkscreen": self.silkscreen,
+            "color": format!("#{:02x}{:02x}{:02x}", self.color[0], self.color[1], self.color[2]),
+            "thickness": self.thickness,
+        })
+    }
+
+    /// Why the options cannot be imported yet, if they cannot.
+    fn problem(&self) -> Option<&'static str> {
+        if !self.thickness.is_finite() || self.thickness <= 0.0 || self.thickness > 1000.0 {
+            return Some("Board thickness must be greater than 0 and at most 1000 mm.");
+        }
+        None
+    }
+}
+
+/// Open the window for a chosen board, starting from the board's own thickness.
+pub fn open(app: &mut SolveApp, path: &str) {
+    let mut dialog = Dialog::new(path);
+    if let Some(thickness) = board_thickness(path) {
+        dialog.thickness = thickness;
+    }
+    app.kicad_import = Some(dialog);
+}
+
+/// The board's own thickness, read without building it (the import reads it again on a worker).
+fn board_thickness(path: &str) -> Option<f64> {
+    let board = solidcraft_engine::io::kicad_board_path(std::path::Path::new(path)).ok()?;
+    let bytes = solidcraft_engine::io::vfs::read(&board.to_string_lossy(), solidcraft_engine::io::MAX_KICAD_BYTES).ok()?;
+    solidcraft_engine::io::kicad_board_thickness(&bytes)
+}
+
+/// The window. Called once per frame while it is open.
+pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
+    let Some(mut dialog) = app.kicad_import.take() else { return };
+
+    let (closed, action) = crate::ui_kit::Window::new(egui::Id::new("sc_kicad_import"), "import", crate::i18n::tr_label("Open KiCad PCB"))
+        .cards(2.0)
+        .fields()
+        .actions(crate::i18n::tr("Open"), crate::i18n::tr("Cancel"), None)
+        .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+        .show(ctx, dialog.problem().is_none(), |ui| {
+            ui.label(crate::i18n::tr_label("Import options"));
+            ui.add_space(6.0);
+            egui::Grid::new("kicad_import_grid").num_columns(2).min_col_width(200.0).spacing([12.0, 6.0]).show(ui, |ui| {
+                let r = ui.checkbox(&mut dialog.components, crate::i18n::tr_label("Include components"));
+                crate::scenario::publish_handle("kicad:components", r.rect.center());
+                ui.end_row();
+
+                let copper_label = ui.label(crate::i18n::tr_label("Copper (traces, vias, zones, pads)"));
+                crate::scenario::publish_rect("kicad:copper_label", copper_label.rect);
+                ui.vertical(|ui| {
+                    ui.spacing_mut().item_spacing.y = 2.0;
+                    for (mode, label) in
+                        [(KicadCopper::None, "None"), (KicadCopper::Overlay, "Overlay on the board"), (KicadCopper::Mesh, "Modelled")]
+                    {
+                        let r = ui.radio(dialog.copper == mode, crate::i18n::tr_label(label));
+                        crate::scenario::publish_handle(&format!("kicad:copper:{}", mode.as_str()), r.rect.center());
+                        if r.clicked() {
+                            dialog.copper = mode;
+                        }
+                    }
+                });
+                ui.end_row();
+
+                let r = ui.checkbox(&mut dialog.silkscreen, crate::i18n::tr_label("Include silkscreen"));
+                crate::scenario::publish_handle("kicad:silkscreen", r.rect.center());
+                ui.end_row();
+
+                ui.label(crate::i18n::tr_label("Board colour"));
+                let r = ui.color_edit_button_srgb(&mut dialog.color);
+                crate::scenario::publish_handle("kicad:color", r.rect.center());
+                ui.end_row();
+
+                ui.label(crate::i18n::tr_label("Board thickness"));
+                let t = ui.add(egui::DragValue::new(&mut dialog.thickness).speed(0.1).range(0.01..=1000.0).suffix(" mm").max_decimals(3));
+                crate::scenario::publish_handle("kicad:thickness", t.rect.center());
+                ui.end_row();
+            });
+            if let Some(problem) = dialog.problem() {
+                ui.add_space(4.0);
+                ui.colored_label(crate::theme::Tokens::get().error, crate::i18n::tr_label(problem));
+            }
+        });
+
+    match action {
+        crate::ui_kit::Action::Ok if dialog.problem().is_none() => {
+            let params = dialog.params();
+            app.open_path_async_with_options(&dialog.path, params);
+            app.set_status(format!("{}: {}", crate::i18n::tr_label("Importing KiCad board"), dialog.path), false);
+        }
+        crate::ui_kit::Action::None if !closed => app.kicad_import = Some(dialog),
+        _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn params_name_only_the_chosen_options() {
+        let mut d = Dialog::new("board.kicad_pcb");
+        d.components = false;
+        d.copper = KicadCopper::Overlay;
+        d.silkscreen = false;
+        d.color = [1, 2, 3];
+        let p = d.params();
+        assert_eq!(p["components"], json!(false));
+        assert_eq!(p["copper"], json!("overlay"));
+        assert!(p.get("pads").is_none(), "pads follow the copper option");
+        assert_eq!(p["silkscreen"], json!(false));
+        assert_eq!(p["color"], json!("#010203"));
+        assert_eq!(p["thickness"], json!(1.6), "the board's thickness is always sent");
+        d.thickness = 2.4;
+        assert_eq!(d.params()["thickness"], json!(2.4));
+    }
+
+    #[test]
+    fn an_impossible_thickness_is_refused() {
+        let mut d = Dialog::new("board.kicad_pcb");
+        d.thickness = 0.0;
+        assert!(d.problem().is_some());
+        d.thickness = 2.0;
+        assert!(d.problem().is_none());
+    }
+
+    #[test]
+    fn the_open_picker_shows_the_settings_window_for_a_board() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.open_chosen_file("board.kicad_pcb");
+        h.frames(1);
+        assert!(h.app.kicad_import.is_some(), "a board opens through its settings");
+        assert!(!h.app.file_load.busy(), "nothing is read before the settings are chosen");
+    }
+
+    #[test]
+    fn a_dropped_board_asks_for_its_settings() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.drop_path("board.kicad_pcb");
+        h.frames(1);
+        assert!(h.app.kicad_import.is_some(), "a dropped board opens through its settings");
+        assert!(!h.app.file_load.busy());
+    }
+
+    /// The Open command itself (the palette, a pinned button, `ui.start`) picks the file and
+    /// then shows the settings, like every other Open route.
+    #[test]
+    fn the_open_command_picks_the_file_and_shows_the_settings() {
+        let mut h = crate::scenario::Harness::new();
+        h.step(&json!({ "choose_file": "board.kicad_pcb" })).unwrap();
+        h.app.start("doc.open");
+        h.frames(2);
+        assert!(h.app.kicad_import.is_some(), "the Open command skipped the import settings");
+        assert!(!h.app.file_load.busy(), "the Open command read the board before its settings");
+    }
+
+    /// Every way of opening a file goes through the settings window: the app bar's File > Open
+    /// and Ctrl+O too, not only Home, a drop and the command behind the Open button.
+    #[test]
+    fn the_file_menu_and_ctrl_o_open_a_board_through_its_settings() {
+        for by_menu in [true, false] {
+            let mut h = crate::scenario::Harness::new();
+            h.frames(2);
+            h.step(&json!({ "choose_file": "board.kicad_pcb" })).unwrap();
+            if by_menu {
+                h.step(&json!({ "click": { "handle": "appbar:file" } })).unwrap();
+                h.step(&json!({ "widget": "Open…" })).unwrap();
+            } else {
+                h.step(&json!({ "key": "O", "cmd": true })).unwrap();
+            }
+            h.frames(2);
+            let how = if by_menu { "the File menu" } else { "Ctrl+O" };
+            assert!(h.app.kicad_import.is_some(), "{how} skipped the import settings");
+            assert!(!h.app.file_load.busy(), "{how} read the board before its settings were chosen");
+        }
+    }
+
+    #[test]
+    fn the_window_follows_its_switches_and_imports() {
+        let mut h = crate::scenario::Harness::new();
+        open(&mut h.app, "board.kicad_pcb");
+        h.frames(2);
+        // The shared footer is the only button row, with Open as its primary action.
+        assert!(h.widget("Open").is_some() && h.widget("Cancel").is_some(), "the footer is missing its actions");
+        assert!(h.widget("Import").is_none(), "a second Import row is still drawn");
+        // A long switch label is not squeezed into a narrow column.
+        let label = crate::scenario::rect_of("kicad:copper_label").expect("the copper label was drawn");
+        assert!(label.width() > 150.0, "the copper label is squeezed: {label:?}");
+        for label in ["Include components", "Copper (traces, vias, zones, pads)", "None", "Overlay on the board", "Modelled", "Include silkscreen"] {
+            assert!(h.widget(label).is_some(), "`{label}` is missing");
+        }
+        h.frames(4);
+        h.step(&json!({"widget": "Modelled"})).unwrap();
+        h.frames(1);
+        h.step(&json!({"click": {"handle": "kicad:silkscreen"}})).unwrap();
+        h.frames(1);
+        let d = h.app.kicad_import.as_ref().unwrap();
+        assert_eq!((d.copper, d.silkscreen), (KicadCopper::Mesh, false), "{d:?}");
+        // Cancel leaves the design and the background queue alone.
+        h.step(&json!({"widget": "Cancel"})).unwrap();
+        h.frames(1);
+        assert!(h.app.kicad_import.is_none() && !h.app.file_load.busy());
+        assert!(h.app.session.doc.features.is_empty());
+
+        // Import hands the switches to the command and the board comes in with copper overlay.
+        let path = std::env::temp_dir().join(format!("kicad_dialog_{}.kicad_pcb", std::process::id()));
+        std::fs::write(
+            &path,
+            r#"(kicad_pcb (version 20240108) (generator pcbnew)
+  (general (thickness 2.2))
+  (gr_rect (start -20 -20) (end 20 20) (stroke (width 0.1) (type default)) (fill none) (layer "Edge.Cuts"))
+  (segment (start -10 0) (end 10 0) (width 2) (layer "F.Cu") (net 0)))"#,
+        )
+        .unwrap();
+        open(&mut h.app, &path.to_string_lossy());
+        h.frames(2);
+        assert!(
+            (h.app.kicad_import.as_ref().expect("the window opened").thickness - 2.2).abs() < 1e-9,
+            "the window did not start at the board's thickness"
+        );
+        h.step(&json!({"click": {"handle": "kicad:copper:overlay"}})).unwrap();
+        h.frames(1);
+        h.step(&json!({"widget": "Open"})).unwrap();
+        h.settle();
+        assert!(h.app.kicad_import.is_none() && !h.app.file_load.busy());
+        let names: Vec<String> = h.app.session.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+        assert!(names.iter().any(|n| n == "Copper F.Cu"), "{names:?}");
+        let _ = std::fs::remove_file(path);
+    }
+}
