@@ -13,7 +13,7 @@ pub(crate) enum AssistantEntryState {
 }
 
 /// Paint the compact entry point in its caller-owned target. The caller owns state and actions.
-/// Tokens: app_bar, app_bar_hover_button/strong, agent_ok/busy, warning/error, radius_sm, font_badge.
+/// Tokens: app_bar, app_bar_hover_button/strong, agent_ok/busy, warning/error, shade, radius_sm, font_badge.
 pub(crate) fn assistant_entry(ui: &egui::Ui, response: &Response, state: AssistantEntryState, open: bool, animate: bool) {
     let t = Tokens::get();
     let at = response.rect;
@@ -57,11 +57,11 @@ pub(crate) fn assistant_entry(ui: &egui::Ui, response: &Response, state: Assista
         AssistantEntryState::Waiting(count) => {
             let text = count.to_string();
             let font = FontId::proportional(t.font_badge);
-            let galley = ui.painter().layout_no_wrap(text, font, t.app_bar);
+            let galley = ui.painter().layout_no_wrap(text, font, t.shade);
             let badge = Rect::from_center_size(c, vec2((galley.size().x + t.space_6).max(t.space_14), t.space_14));
             ui.painter().rect_filled(badge.expand(1.5), Tokens::outset_radius(f32::from(t.sketch_mode_radius), 1.5), ring);
             ui.painter().rect_filled(badge, t.sketch_mode_radius, t.warning);
-            ui.painter().galley(badge.center() - galley.size() / 2.0, galley, t.app_bar);
+            ui.painter().galley(badge.center() - galley.size() / 2.0, galley, t.shade);
         }
     }
 }

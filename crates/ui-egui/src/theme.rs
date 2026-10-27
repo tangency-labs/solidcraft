@@ -768,7 +768,7 @@ pub struct Tokens {
     pub overlay: Color32,
     /// Rubber band of the shape being drawn.
     pub rubber_band: Color32,
-    /// Light text on the application bar.
+    /// Text and icons on the application bar.
     pub app_bar_text: Color32,
     /// A hovered tab on the application bar (keeps `app_bar_text` readable).
     pub app_bar_hover: Color32,
@@ -777,6 +777,9 @@ pub struct Tokens {
     pub app_bar_hover_strong: Color32,
     /// The active document tab: a solid surface lifted from the bar.
     pub app_bar_tab_active: Color32,
+    /// Dark ink that stays dark whatever the application bar is: drop shadows, and the number on
+    /// a bright badge.
+    pub shade: Color32,
     /// Dense feature dialogs: the body surface, the footer band, the dividers, input controls
     /// (fill and border), field labels, and the selected-element foreground and background.
     pub dialog_body: Color32,
@@ -827,9 +830,9 @@ impl Tokens {
         if radius > 0.0 { radius + outset } else { 0.0 }
     }
 
-    /// Subtle shell elevation, derived from the semantic application-bar colour.
+    /// Subtle shell elevation, in the theme's shade.
     pub(crate) fn shell_shadow(self) -> egui::Shadow {
-        egui::Shadow { offset: [0, self.space_2 as i8], blur: self.space_8 as u8, spread: 0, color: self.app_bar.gamma_multiply(0.18) }
+        egui::Shadow { offset: [0, self.space_2 as i8], blur: self.space_8 as u8, spread: 0, color: self.shade.gamma_multiply(0.18) }
     }
 
     /// The X, Y and Z axis colours, in that order.

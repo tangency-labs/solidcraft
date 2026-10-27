@@ -71,6 +71,7 @@
     "rubber_band": "#83a598",
     "app_bar_text": "#ebdbb2",
     "app_bar_hover": "#ebdbb21c",
+    "shade": "#141617",
     "timeline_item": "#3c3836",
     "timeline_item_error": "#63221f",
     "timeline_marker": "#bdae93",

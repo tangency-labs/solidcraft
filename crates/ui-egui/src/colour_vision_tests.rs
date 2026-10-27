@@ -472,6 +472,7 @@ const NO_MEANING: &[(&str, &str)] = &[
     ("app_bar_hover_button", "translucent hover chrome"),
     ("app_bar_hover_strong", "translucent hover chrome"),
     ("app_bar_tab_active", "the active document tab's surface"),
+    ("shade", "drop shadows, and the number on the bright waiting badge"),
     ("dialog_footer", "dense dialog footer band"),
     ("dialog_rule", "dense dialog divider"),
     ("control_fill", "input control fill"),
@@ -493,7 +494,7 @@ const NO_MEANING: &[(&str, &str)] = &[
     ("overlay", "a chip's ground over the view"),
     ("app_bar_text", "text"),
     ("app_bar_separator", "neutral chrome divider"),
-    ("app_bar_hover", "a hovered tab, translucent white"),
+    ("app_bar_hover", "a hovered tab, a translucent tint"),
     ("timeline_marker", "the rollback marker, alone"),
     ("field", "a field's ground"),
     // Highlights: shades of the accent blue over what they mark, by design close to each other.

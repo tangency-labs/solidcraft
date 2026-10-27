@@ -98,8 +98,9 @@ impl Tokens {
             sketch_mode_tint: 0.12,
             sketch_footer_icon_size: 15.0,
             font_section_tracking: 0.04,
-            app_bar: Color32::from_rgb(52, 56, 64),
-            app_bar_separator: Color32::from_rgb(136, 145, 160),
+            // A light bar, a step darker than the toolbar below it (#5918).
+            app_bar: Color32::from_rgb(228, 231, 236),
+            app_bar_separator: Color32::from_rgb(118, 126, 140),
             toolbar: Color32::from_rgb(246, 247, 249),
             panel: Color32::from_rgb(250, 251, 252),
             panel_header: Color32::from_rgb(236, 238, 242),
@@ -196,12 +197,13 @@ impl Tokens {
             glyph_text: icon_primary(crate::icon_svg::CONSTRAINT_PRIMARY[0]),
             overlay: Color32::from_rgba_unmultiplied_const(255, 255, 255, 235),
             rubber_band: Color32::from_rgb(30, 120, 230),
-            app_bar_text: Color32::from_rgb(230, 234, 242),
-            app_bar_hover: Color32::from_rgba_unmultiplied_const(255, 255, 255, 28),
-            app_bar_hover_subtle: Color32::from_rgba_unmultiplied_const(255, 255, 255, 18),
-            app_bar_hover_button: Color32::from_rgba_unmultiplied_const(255, 255, 255, 30),
-            app_bar_hover_strong: Color32::from_rgba_unmultiplied_const(255, 255, 255, 40),
-            app_bar_tab_active: Color32::from_rgb(53, 59, 71),
+            app_bar_text: Color32::from_rgb(38, 42, 50),
+            app_bar_hover: Color32::from_rgba_unmultiplied_const(0, 0, 0, 14),
+            app_bar_hover_subtle: Color32::from_rgba_unmultiplied_const(0, 0, 0, 9),
+            app_bar_hover_button: Color32::from_rgba_unmultiplied_const(0, 0, 0, 16),
+            app_bar_hover_strong: Color32::from_rgba_unmultiplied_const(0, 0, 0, 22),
+            app_bar_tab_active: Color32::from_rgb(250, 251, 252),
+            shade: Color32::from_rgb(52, 56, 64),
             dialog_body: Color32::from_rgb(255, 255, 255),
             dialog_footer: Color32::from_rgb(244, 246, 249),
             dialog_rule: Color32::from_rgb(230, 234, 240),
@@ -282,6 +284,14 @@ impl Tokens {
         t.file_recovery_ink = Color32::from_rgb(245, 204, 137);
         t.file_recovery_border = Color32::from_rgb(115, 88, 43);
         t.app_bar = Color32::from_rgb(28, 31, 38);
+        t.app_bar_separator = Color32::from_rgb(136, 145, 160);
+        t.app_bar_text = Color32::from_rgb(230, 234, 242);
+        t.app_bar_hover = Color32::from_rgba_unmultiplied_const(255, 255, 255, 28);
+        t.app_bar_hover_subtle = Color32::from_rgba_unmultiplied_const(255, 255, 255, 18);
+        t.app_bar_hover_button = Color32::from_rgba_unmultiplied_const(255, 255, 255, 30);
+        t.app_bar_hover_strong = Color32::from_rgba_unmultiplied_const(255, 255, 255, 40);
+        t.app_bar_tab_active = Color32::from_rgb(53, 59, 71);
+        t.shade = Color32::from_rgb(28, 31, 38);
         t.toolbar = Color32::from_rgb(39, 43, 52);
         t.panel = Color32::from_rgb(39, 43, 52);
         t.panel_header = Color32::from_rgb(47, 52, 62);

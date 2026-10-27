@@ -155,6 +155,7 @@
     "sel_vertex": "#555599",
     "selected_bg": "#ccccff",
     "selected_ink": "#333366",
+    "shade": "#c5c5c5",
     "sheet_fill": "#6a9e9e",
     "sheet_ink": "#376060",
     "sheet_soft": "#d1d5d5",

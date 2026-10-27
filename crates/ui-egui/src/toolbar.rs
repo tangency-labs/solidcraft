@@ -3082,7 +3082,7 @@ mod app_bar_tests {
                     assert!(contrast(t.app_bar_text, bg) >= 4.5, "dark={dark}, {vision:?}, {fill:?}");
                 }
                 assert!(contrast(t.app_bar_separator, t.app_bar) >= 3.0);
-                assert!(contrast(t.app_bar, t.warning) >= 4.5, "approval counts need dark ink on amber");
+                assert!(contrast(t.shade, t.warning) >= 4.5, "approval counts need dark ink on amber");
             }
         }
     }
