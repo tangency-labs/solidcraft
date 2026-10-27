@@ -116,21 +116,47 @@ fn primitive_dialogs_show_millimetres_and_make_the_same_sizes() {
     assert_size(&mut h.app.session, [20.0, 20.0, 20.0]);
 }
 
+/// A default's millimetre number as a new field shows it in `units` (#7407): converted exactly in
+/// metric units and to the nearest 1, 2, 2.5 or 5 times a power of ten in imperial ones.
+fn converted(number: &str, units: &str) -> String {
+    let table: &[(&str, [&str; 5])] = &[
+        // The number of millimetres, then its text in mm, cm, m, in and ft.
+        ("0", ["0", "0", "0", "0", "0"]),
+        ("1", ["1", "0.1", "0.001", "0.05", "0.0025"]),
+        ("1.5", ["1.5", "0.15", "0.0015", "0.05", "0.005"]),
+        ("2", ["2", "0.2", "0.002", "0.1", "0.005"]),
+        ("3", ["3", "0.3", "0.003", "0.1", "0.01"]),
+        ("5", ["5", "0.5", "0.005", "0.2", "0.02"]),
+        ("6", ["6", "0.6", "0.006", "0.25", "0.02"]),
+        ("8", ["8", "0.8", "0.008", "0.25", "0.025"]),
+        ("9", ["9", "0.9", "0.009", "0.5", "0.025"]),
+        ("10", ["10", "1", "0.01", "0.5", "0.025"]),
+        ("15", ["15", "1.5", "0.015", "0.5", "0.05"]),
+        ("20", ["20", "2", "0.02", "1", "0.05"]),
+        ("40", ["40", "4", "0.04", "2", "0.1"]),
+    ];
+    let column = ["mm", "cm", "m", "in", "ft"].iter().position(|u| *u == units).unwrap_or_else(|| panic!("no column for {units}"));
+    let row = table.iter().find(|(n, _)| *n == number).unwrap_or_else(|| panic!("no row for {number} mm"));
+    format!("{} {units}", row.1[column])
+}
+
 #[test]
-fn in_an_inch_design_primitive_dialogs_show_inches_and_read_bare_numbers_as_inches() {
+fn in_an_inch_design_primitive_dialogs_start_at_their_sizes_in_inches_and_read_bare_numbers_as_inches() {
     for (cmd, sizes) in PRIMITIVES {
         let mut h = design("in");
         h.app.start(cmd);
         h.frames(3);
         let shown = fields(&h);
         let want: Vec<(&str, String)> =
-            sizes.iter().map(|(k, v)| (*k, if *k == "revolutions" { (*v).to_string() } else { format!("{v} in") })).collect();
+            sizes.iter().map(|(k, v)| (*k, if *k == "revolutions" { (*v).to_string() } else { converted(v, "in") })).collect();
         assert_eq!(shown, want, "{cmd}");
         assert_shown(&h, &shown);
         ok(&mut h);
-        // The same size the bare numbers made in an inch design.
+        // The size the shown numbers make as bare numbers in an inch design.
         let made = volume(&mut h.app.session);
-        let before = bare_volume("in", cmd, sizes);
+        let bare: Vec<(&str, String)> = want.iter().map(|(k, v)| (*k, v.trim_end_matches(" in").to_string())).collect();
+        let bare: Vec<(&str, &str)> = bare.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        let before = bare_volume("in", cmd, &bare);
         assert!(made > 0.0 && (made - before).abs() < 1e-6 * before, "{cmd}: {made} mm³, the bare numbers made {before} mm³");
     }
     // A bare number typed into a field is in the design's units; a typed unit is honoured.
@@ -141,9 +167,37 @@ fn in_an_inch_design_primitive_dialogs_show_inches_and_read_bare_numbers_as_inch
     type_into(&mut h, "height", "10 mm");
     h.frames(2);
     let (_, params) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
-    assert_eq!((&params["length"], &params["width"], &params["height"]), (&json!("20 in"), &json!("2 in"), &json!("10 mm")));
+    assert_eq!((&params["length"], &params["width"], &params["height"]), (&json!("1 in"), &json!("2 in"), &json!("10 mm")));
     ok(&mut h);
-    assert_size(&mut h.app.session, [508.0, 50.8, 10.0]);
+    assert_size(&mut h.app.session, [25.4, 50.8, 10.0]);
+}
+
+/// #7407: with "Convert default lengths to the design unit" off, a new field keeps the number
+/// and only takes the design's unit, as before (a 20 mm box starts at 20 in).
+#[test]
+fn with_conversion_off_an_inch_design_starts_at_the_same_numbers_in_inches() {
+    let mut h = design("in");
+    h.app.preferences.scaled_length_defaults = false;
+    h.frames(2);
+    h.app.start("solid.box");
+    h.frames(3);
+    assert_eq!(fields(&h), vec![("length", "20 in".to_string()), ("width", "20 in".to_string()), ("height", "20 in".to_string())]);
+    ok(&mut h);
+    assert_size(&mut h.app.session, [508.0, 508.0, 508.0]);
+    let d = crate::dialogs::Dialog::for_command(&h.app, "solid.extrude").unwrap();
+    match &d.kind {
+        Kind::Extrude { distance, distance2, wall, wall2, .. } => {
+            assert_eq!([distance, distance2, wall, wall2], ["10 in", "10 in", "2 in", "1 in"]);
+        }
+        other => panic!("not an extrude: {other:?}"),
+    }
+    // Back on, the next dialog converts again.
+    h.app.preferences.scaled_length_defaults = true;
+    h.frames(2);
+    match crate::dialogs::Dialog::for_command(&h.app, "solid.extrude").map(|d| d.kind) {
+        Some(Kind::Extrude { distance, .. }) => assert_eq!(distance, "0.5 in"),
+        other => panic!("not an extrude: {other:?}"),
+    }
 }
 
 #[test]
@@ -151,9 +205,9 @@ fn a_centimetre_design_shows_centimetres() {
     let mut h = design("cm");
     h.app.start("solid.sphere");
     h.frames(3);
-    assert_eq!(fields(&h), vec![("diameter", "20 cm".to_string())]);
+    assert_eq!(fields(&h), vec![("diameter", "2 cm".to_string())]);
     ok(&mut h);
-    assert_size(&mut h.app.session, [200.0, 200.0, 200.0]);
+    assert_size(&mut h.app.session, [20.0, 20.0, 20.0]);
 }
 
 /// The sizes a primitive feature keeps, as stored.
@@ -273,7 +327,8 @@ fn editing_a_coil_reopens_its_dialog_filled_in_and_ok_redefines_it() {
     }
 }
 
-/// #3271: cover secondary and optional lengths as well as each tool's primary canvas value.
+/// #3271: cover secondary and optional lengths as well as each tool's primary canvas value. The
+/// numbers are millimetres; each design shows them converted to its unit (#7407).
 #[test]
 fn operation_length_defaults_follow_every_design_unit() {
     const CASES: &[(&str, &[&str])] = &[
@@ -322,7 +377,7 @@ fn operation_length_defaults_follow_every_design_unit() {
         for &(command, numbers) in CASES {
             let mut d = crate::dialogs::Dialog::for_command(&h.app, command).unwrap_or_else(|| panic!("no dialog for {command}"));
             let values: Vec<_> = crate::length_input::fields(&h.app.session.doc, &mut d.kind).into_iter().map(|v| v.clone()).collect();
-            let expected: Vec<_> = numbers.iter().map(|n| if n.is_empty() { String::new() } else { format!("{n} {units}") }).collect();
+            let expected: Vec<_> = numbers.iter().map(|n| if n.is_empty() { String::new() } else { converted(n, units) }).collect();
             assert_eq!(values, expected, "{command} in {units}");
         }
     }

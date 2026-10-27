@@ -254,10 +254,11 @@ fn corner_window_takes_the_corner_then_applies_the_typed_size() {
     }
 }
 
-/// #2420: the shared corner window shows the design unit, including both chamfer legs.
+/// #2420: the shared corner window shows the design unit, including both chamfer legs; the
+/// 2 mm default is converted to it (#7407).
 #[test]
 fn corner_defaults_show_design_units() {
-    for units in ["mm", "cm", "m", "in", "ft"] {
+    for (units, two_mm) in [("mm", "2"), ("cm", "0.2"), ("m", "0.002"), ("in", "0.1"), ("ft", "0.005")] {
         for command in ["sketch.fillet", "sketch.chamfer.equal_distance", "sketch.chamfer.two_distance", "sketch.chamfer.distance_angle"] {
             let mut h = crate::scenario::Harness::new();
             h.app.run("document.units", json!({"units": units})).unwrap();
@@ -268,8 +269,8 @@ fn corner_defaults_show_design_units() {
             else {
                 panic!("{command}: no corner window");
             };
-            assert_eq!(size, &format!("2 {units}"), "{command}");
-            assert_eq!(distance2, &format!("2 {units}"), "{command}");
+            assert_eq!(size, &format!("{two_mm} {units}"), "{command}");
+            assert_eq!(distance2, &format!("{two_mm} {units}"), "{command}");
             assert_eq!(angle, "45 deg", "length units must not change angles");
         }
     }

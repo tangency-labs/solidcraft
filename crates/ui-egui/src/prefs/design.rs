@@ -35,6 +35,8 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
         let tip = app.tr("ui.step_values_tip").to_string();
         let step = setting::step_values(app, ui).on_hover_text(tip);
         crate::scenario::publish_handle("prefs:step_values", step.rect.center());
+        setting::scaled_length_defaults(app, ui);
+        ui_kit::text(ui, app.tr("ui.scaled_length_defaults_note"), ui_kit::Text::Hint("scaled_length_defaults"));
     });
     ui_kit::settings_section(ui, "orientation", app.tr("prefs.orientation"), |ui| {
         ui.horizontal_wrapped(|ui| {

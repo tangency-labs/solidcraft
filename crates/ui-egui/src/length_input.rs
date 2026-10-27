@@ -1,6 +1,8 @@
 //! Lengths at the UI boundary. Bare values use the current design unit; explicit units and
 //! parameter expressions keep their meaning. The engine and saved geometry remain in mm.
 
+use std::cell::Cell;
+
 use solidcraft_engine::doc::{
     Document,
     expr::{Kind, unit_info},
@@ -10,9 +12,59 @@ pub(crate) fn unit(doc: &Document) -> &str {
     solidcraft_engine::doc::expr::length_unit_or_mm(&doc.units)
 }
 
-/// A new field follows the same numeric-default policy as the primitive and sketch dialogs.
+thread_local! {
+    /// The `scaled_length_defaults` preference, per thread: each app sets it from its own
+    /// preferences at the start of every frame (`prefs::apply`). On unless a frame turns it off.
+    static SCALED: Cell<bool> = const { Cell::new(true) };
+}
+
+/// Whether new length fields start at their millimetre size converted to the design unit
+/// (`true`) or at the same number written in the design unit (`false`, before #7407).
+pub(crate) fn set_scaled(scaled: bool) {
+    SCALED.set(scaled);
+}
+
+/// A new field's first text, from its size in millimetres (`number`), in the design unit. The
+/// size is converted (#7407): exactly in metric units, and to the nearest 1, 2, 2.5 or 5 times
+/// a power of ten in imperial ones, so 10 mm starts as "0.5 in", not "10 in". With the
+/// preference off, the number is kept and only the unit changes.
 pub(crate) fn default(doc: &Document, number: &str) -> String {
-    format!("{} {}", number.trim(), unit(doc))
+    let unit = unit(doc);
+    let number = number.trim();
+    let scale = unit_info(unit).map_or(1.0, |(_, scale)| scale);
+    match number.parse::<f64>() {
+        Ok(mm) if SCALED.get() && scale != 1.0 && mm.is_finite() && scale.is_finite() && scale > 0.0 => {
+            format!("{} {unit}", converted(mm / scale, scale))
+        }
+        _ => format!("{number} {unit}"),
+    }
+}
+
+/// `value` (in a unit `scale` millimetres long) as a default's text: exact where the unit is a
+/// power of ten of a millimetre, else rounded to a tidy value.
+fn converted(value: f64, scale: f64) -> String {
+    let exponent = scale.log10();
+    if value == 0.0 || (exponent - exponent.round()).abs() < 1e-9 {
+        return trimmed(value, 12);
+    }
+    let power = value.abs().log10().floor();
+    let (mut best, mut best_ratio) = (value, f64::INFINITY);
+    // The candidates around the value: 1, 2, 2.5 and 5 in its decade, and 1 in the next.
+    for step in [1.0, 2.0, 2.5, 5.0, 10.0] {
+        let candidate = step * 10f64.powf(power);
+        let ratio = (value.abs() / candidate).ln().abs();
+        if ratio < best_ratio {
+            (best, best_ratio) = (candidate.copysign(value), ratio);
+        }
+    }
+    trimmed(best, 12)
+}
+
+/// `value` with at most `decimals` decimals and no trailing zeros ("0.5", "1", "0.025").
+fn trimmed(value: f64, decimals: usize) -> String {
+    let text = format!("{value:.decimals$}");
+    let text = if text.contains('.') { text.trim_end_matches('0').trim_end_matches('.') } else { &text };
+    if text == "-0" { "0".to_string() } else { text.to_string() }
 }
 
 /// Apply the design unit to numeric defaults from declarative dialog descriptors.

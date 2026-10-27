@@ -509,6 +509,9 @@ macro_rules! preference_settings {
 preference_settings! {
     /// Units of new designs.
     default_units: String = "mm".into(), PAGE_DESIGN;
+    /// New length fields start at their millimetre size converted to the design unit (10 mm as
+    /// 0.5 in, #7407); off: the same number in the design unit (10 in), as before.
+    scaled_length_defaults: bool = true, PAGE_DESIGN => check_id("ui.scaled_length_defaults");
     /// Mouse mapping: `fusion`, `solidworks` or `inventor`.
     nav: String = "fusion".into(), PAGE_NAVIGATION;
     /// Opt in to rotation through both poles with roll, without the Shift axis-snap spring.
@@ -1099,6 +1102,7 @@ fn defaults(app: &mut SolveApp, page: usize) {
 /// the interface scale.
 pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     apply_network(&app.preferences);
+    crate::length_input::set_scaled(app.preferences.scaled_length_defaults);
     // The viewport's display quality (an unknown saved value draws at Normal).
     solidcraft_engine::doc::display_quality::set_current(
         solidcraft_engine::doc::display_quality::DisplayQuality::parse(&app.preferences.display_quality).unwrap_or_default(),

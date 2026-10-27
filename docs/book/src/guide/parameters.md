@@ -55,7 +55,11 @@ in use can't be deleted (the error lists its users).
 The design's units (Document Settings in the browser: mm, cm, m, in or ft) set how a bare number
 or unitless arithmetic expression typed into a length field is read. In an inch design `0.25`
 and `1 / 4` mean 0.25 in. Operation dialogs start with lengths in the design's units, including
-secondary distances, wall thicknesses, gaps, offsets and radii. Canvas handles and live sketch
+secondary distances, wall thicknesses, gaps, offsets and radii. A starting length is its
+usual size converted to the design's units: exactly in metric units, and rounded to a tidy
+value in imperial ones, so an Extrude that starts at 10 mm starts at 0.5 in in an inch design.
+Turn off Preferences › Design › "Convert default lengths to the design unit" to start at the
+same number with the design's unit instead (10 in). Canvas handles and live sketch
 values use the same units as the operation. Angles, counts and scale factors keep their own
 units. Preferences selects the default units for new designs; existing designs use their own
 Document Settings.

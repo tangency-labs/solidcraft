@@ -1,0 +1,34 @@
+{
+  "en": {
+    "ui.scaled_length_defaults": "Convert default lengths to the design unit",
+    "ui.scaled_length_defaults_note": "New length fields start at their usual size in the design's unit: 10 mm starts as 0.5 in. Off: the same number with the design's unit (10 in)."
+  },
+  "ar": {
+    "ui.scaled_length_defaults": "تحويل الأطوال الافتراضية إلى وحدة التصميم",
+    "ui.scaled_length_defaults_note": "تبدأ حقول الطول الجديدة بحجمها المعتاد بوحدة التصميم: 10 mm تبدأ كـ 0.5 in. عند الإيقاف: الرقم نفسه مع وحدة التصميم (10 in)."
+  },
+  "de": {
+    "ui.scaled_length_defaults": "Standardlängen in die Einheit des Entwurfs umrechnen",
+    "ui.scaled_length_defaults_note": "Neue Längenfelder beginnen mit ihrer üblichen Größe in der Einheit des Entwurfs: 10 mm werden zu 0,5 in. Aus: dieselbe Zahl mit der Einheit des Entwurfs (10 in)."
+  },
+  "he": {
+    "ui.scaled_length_defaults": "המרת אורכי ברירת המחדל ליחידת התכנון",
+    "ui.scaled_length_defaults_note": "שדות אורך חדשים מתחילים בגודלם הרגיל ביחידת התכנון: 10 mm מתחיל כ-0.5 in. כבוי: אותו מספר עם יחידת התכנון (10 in)."
+  },
+  "ja": {
+    "ui.scaled_length_defaults": "既定の長さを設計の単位に換算",
+    "ui.scaled_length_defaults_note": "新しい長さの入力欄は、通常の大きさを設計の単位に換算した値で始まります（10 mm は 0.5 in）。オフ：同じ数値に設計の単位を付けます（10 in）。"
+  },
+  "ko": {
+    "ui.scaled_length_defaults": "기본 길이를 설계 단위로 변환",
+    "ui.scaled_length_defaults_note": "새 길이 입력란은 평소 크기를 설계 단위로 변환한 값으로 시작합니다(10 mm는 0.5 in). 끄기: 같은 숫자에 설계 단위를 붙입니다(10 in)."
+  },
+  "vi": {
+    "ui.scaled_length_defaults": "Quy đổi độ dài mặc định sang đơn vị của thiết kế",
+    "ui.scaled_length_defaults_note": "Các ô độ dài mới bắt đầu với kích thước thông thường theo đơn vị của thiết kế: 10 mm thành 0.5 in. Tắt: giữ nguyên con số với đơn vị của thiết kế (10 in)."
+  },
+  "zh": {
+    "ui.scaled_length_defaults": "将默认长度换算为设计单位",
+    "ui.scaled_length_defaults_note": "新的长度字段以其常用尺寸换算到设计单位后的值开始：10 mm 显示为 0.5 in。关闭：使用相同数值加设计单位（10 in）。"
+  }
+}
