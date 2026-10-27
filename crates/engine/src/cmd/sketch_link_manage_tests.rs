@@ -11,6 +11,12 @@ fn run(s: &mut Session, cmd: &str, params: Value) -> Value {
     s.execute(cmd, &params).unwrap_or_else(|e| panic!("{cmd} {params}: {e}"))
 }
 
+/// Why `sketch.delete` (its result `r`) broke off what remained of `link` (empty: it did not).
+fn broken_because(r: &Value, link: &str) -> String {
+    let broken = r["broken_links"].as_array().cloned().unwrap_or_default();
+    broken.iter().find(|b| b["link"] == link).and_then(|b| b["why"].as_str()).unwrap_or_default().to_string()
+}
+
 /// A 40 × 40 × 10 plate with a Ø10 hole through its middle (part A, placed twice: A:2 at
 /// x = 100), and part B with a sketch on its XY plane. Returns (session, a1, a2, sketch).
 fn holed_parts() -> (Session, u64, u64, u64) {
@@ -486,15 +492,15 @@ fn rounds(s: &Session, sketch: u64, link: &str) -> Vec<(String, Vec2)> {
 }
 
 #[test]
-fn half_a_hole_is_refused_and_the_whole_hole_stays_deleted_through_a_resize() {
+fn half_a_hole_breaks_the_rest_off_and_the_whole_hole_stays_deleted_through_a_resize() {
     let (mut s, _, sketch, face) = parametric_plate(true);
     let hole: Vec<String> = rounds(&s, sketch, &face).into_iter().map(|(id, _)| id).collect();
     assert_eq!(hole.len(), 2, "the hole comes as two halves, one per piece of its wall");
-    // One half: its wall's two pieces are told apart only by number, so it is refused.
-    let before = s.doc.to_json();
-    let e = s.execute("sketch.delete", &json!({"entities":[hole[0]]})).unwrap_err();
-    assert!(e.to_string().contains("delete them together"), "{e}");
-    assert_eq!(s.doc.to_json(), before);
+    // One half: its wall's two pieces are told apart only by number, so the rest is broken off.
+    let r = run(&mut s, "sketch.delete", json!({"entities":[hole[0]]}));
+    assert!(broken_because(&r, &face).contains("told apart only by number"), "{r}");
+    assert!(s.doc.sketch(sketch).unwrap().link(&face).is_none());
+    run(&mut s, "edit.undo", json!({}));
     // The whole hole: kept out by its wall's family, however far the plate grows.
     let outer: Vec<String> = link_lines(&s, sketch, &face, true).into_iter().map(|(id, ..)| id).collect();
     run(&mut s, "sketch.delete", json!({"entities":hole}));
@@ -541,20 +547,24 @@ fn a_deleted_member_whose_source_edge_is_gone_makes_the_projection_lost_not_shor
 }
 
 #[test]
-fn part_of_a_projection_without_source_edges_is_refused() {
+fn part_of_a_projection_without_source_edges_breaks_off_the_rest() {
     let (mut s, a2, sketch, face) = parametric_plate(false);
     // Seen from above, the plate's silhouette is its top face, already shown: that goes first.
     run(&mut s, "sketch.remove_link", json!({"link":face}));
-    // A body silhouette: no source edge per curve, so it is kept whole.
+    // A body silhouette: no source edge per curve, so the curves left are broken off as they are.
     let r = run(&mut s, "sketch.project", json!({"refs":[{"body":"Plate","path":[a2]}]}));
+    let link = r["links"][0]["link"].as_str().unwrap().to_string();
     let silhouette = r["links"][0]["curves"].as_array().unwrap().clone();
     assert!(silhouette.len() > 1);
-    let before = s.doc.to_json();
-    let e = s.execute("sketch.delete", &json!({"entities":[silhouette[0]]})).unwrap_err();
-    assert!(e.to_string().contains("kept whole"), "{e}");
-    assert_eq!(s.doc.to_json(), before);
-    // Removing the whole projection, or all its curves, is fine.
-    run(&mut s, "sketch.delete", json!({"entities":silhouette}));
+    let r = run(&mut s, "sketch.delete", json!({"entities":[silhouette[0]]}));
+    assert!(broken_because(&r, &link).contains("only a projected face"), "{r}");
+    let sk = s.doc.sketch(sketch).unwrap();
+    assert!(sk.links.is_empty());
+    assert_eq!(sk.curves.iter().filter(|c| c.link.is_none()).count(), silhouette.len() - 1, "the rest stays, unlinked");
+    // Removing all its curves removes it, with nothing broken off.
+    run(&mut s, "edit.undo", json!({}));
+    let r = run(&mut s, "sketch.delete", json!({"entities":silhouette}));
+    assert!(r.get("broken_links").is_none(), "{r}");
     assert!(s.doc.sketch(sketch).unwrap().links.is_empty());
 }
 
@@ -562,8 +572,8 @@ fn part_of_a_projection_without_source_edges_is_refused() {
 /// cubic control-point spline), placed twice (A:2 at x = 100); part B's sketch projects A:2's
 /// top face. The spline's edge comes in as its exact Bézier piece (#1508), and a deleted
 /// member is matched against that same piece: it is found to be the spline's source edge, and
-/// refused only because that edge's name does not follow exact history (a pocket's wall is
-/// found again by geometry), not as a curve of no source edge.
+/// the rest is broken off only because that edge's name does not follow exact history (a
+/// pocket's wall is found again by geometry), not as a curve of no source edge.
 #[test]
 fn a_deleted_exact_spline_member_is_matched_to_its_source_edge() {
     let mut s = Session::default();
@@ -592,10 +602,8 @@ fn a_deleted_exact_spline_member_is_matched_to_its_source_edge() {
         .map(|c| sk.curves[c].id.clone())
         .collect();
     assert_eq!(exact.len(), 1, "the spline comes in as its exact piece");
-    let before = s.doc.to_json();
-    let e = s.execute("sketch.delete", &json!({"entities":exact})).unwrap_err();
-    assert!(e.to_string().contains("name is not exact"), "matched to its source edge: {e}");
-    assert_eq!(s.doc.to_json(), before);
+    let r = run(&mut s, "sketch.delete", json!({"entities":exact}));
+    assert!(broken_because(&r, &face).contains("name is not exact"), "matched to its source edge: {r}");
 }
 
 /// A solid's exact pieces (#1508) are matched on the curves they gave the sketch: a control-point

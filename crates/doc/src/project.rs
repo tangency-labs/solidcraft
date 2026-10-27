@@ -947,7 +947,7 @@ pub fn face_link_edges(
     anchor: Option<&crate::FaceAnchor>,
 ) -> Result<Vec<EdgePieces>> {
     if link.kind == LinkKind::Intersect || !matches!(link.source, LinkSource::Face { .. }) {
-        return Err(DocError::Invalid(format!("the {} is kept whole", link.source.describe())));
+        return Err(DocError::Invalid("only a projected face is made of source edges".into()));
     }
     let (st, plane, source) = match &link.placement {
         None => (st, *plane, link.source.clone()),

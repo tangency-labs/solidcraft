@@ -193,7 +193,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .params("curves: [ids], value?: bool (default: construction unless all of them already are)"),
     CommandSpec::new("sketch.delete", "Delete Sketch Entities", sketch_delete).icon("delete")
         .enabled(in_sketch)
-        .params("entities: [curve, point or constraint ids]"),
+        .params("entities: [curve, point or constraint ids]. Deleting part of a projection leaves those source edges out of it; where they cannot be told apart, what remains is broken off as normal geometry (listed in `broken_links` with why)"),
     CommandSpec::new("sketch.move_point", "Drag Sketch Point", move_point).icon("sketch_move").enabled(in_sketch).params("point: ref, to: [x,y]"),
     CommandSpec::new("sketch.drag", "Drag Sketch Geometry", drag).icon("sketch_move").enabled(in_sketch).live(drag_live).params(
         "entity: point or curve, from: [x,y] where it was grabbed, to: [x,y], live?: bool: points and the material point grabbed on a line move toward `to` within the design constraints. When exact placement is impossible, bounded feasible steps minimize cursor distance. Splines slide by to - from; a circle or arc grabbed on its edge takes the radius to `to`. `with?`: [point or curve ids] moves the rest of a selection with the entity as one translation (circles keep their radii). Long moves retain the solution branch; arcs cannot sweep through their starts. Returns `reached`: progress projected onto the requested move (0..1), `at`: the grabbed position for the next frame, and `retry`: budget-limited progress can continue in another frame. `live: true` shares a work budget across held-solve decomposition and cursor correction; ordinary recovery and the final model evaluation retain their existing limits, not a wall-clock deadline. Later features stay stale until `sketch.drag_end`; `dof` stays from before the drag",
@@ -3396,7 +3396,7 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
         .and_then(|id| Some((id, s.doc.sketch(id).ok()?)))
         .map(|(id, sk)| super::sketch_project::link_pieces(s, &s.doc, id, &super::sketch_links::touched_links(sk, &ids)))
         .unwrap_or_default();
-    let (n, info) = edit(s, p, cmd, false, |sk, doc| {
+    let ((n, broken), info) = edit(s, p, cmd, false, |sk, doc| {
         let mut curves = Vec::new();
         let mut points = Vec::new();
         let mut cons = Vec::new();
@@ -3447,7 +3447,7 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
             sk.refresh_offsets()?;
         }
         sk.constraints.retain(|c| !cons.contains(&c.id));
-        super::sketch_links::omit_removed(sk, &pieces, &curves, &points, cmd)?;
+        let (kept, broken) = super::sketch_links::omit_removed(sk, &pieces, &curves, &points, cmd)?;
         let pids: Vec<String> = points.iter().filter_map(|q| sk.points.get(*q).map(|x| x.id.clone())).collect();
         // Linked geometry from the model, by its entity count before the delete (#5098).
         let size = |sk: &Sketch, id: &str| sk.link_curves(id).len() + sk.link_points(id).len();
@@ -3460,19 +3460,25 @@ fn sketch_delete(s: &mut Session, p: &Value) -> Result<Value> {
         sk.remove_curves(&curves);
         let pidx: Vec<usize> = pids.iter().filter_map(|id| sk.point_index(id)).collect();
         sk.remove_points(&pidx);
-        // Part of a link deleted: the rest is broken off where it is. Still linked, the next
-        // refresh would rebuild the whole link, deleted curves and all, as normal geometry.
+        // Part of a link deleted that its source edges cannot leave out: the rest is broken off
+        // where it is. Still linked, the next refresh would rebuild the whole link, deleted
+        // curves and all, as normal geometry.
         for (id, before) in &linked {
-            if sk.link(id).is_some() && size(sk, id) < *before {
+            if sk.link(id).is_some() && !kept.contains(id) && size(sk, id) < *before {
                 sk.break_link(id)?;
             }
         }
         doc.prune_model_params();
-        Ok(ids.len())
+        Ok((ids.len(), broken))
     })?;
     // Dimension parameters may have been dropped; prune again with the stored sketch.
     s.doc_mut().prune_model_params();
-    Ok(json!({"deleted": n, "sketch": info}))
+    let mut out = json!({"deleted": n, "sketch": info});
+    if !broken.is_empty() {
+        // What remained of these projections is normal geometry now, and why.
+        out["broken_links"] = broken.iter().map(|(link, why)| json!({"link": link, "why": why})).collect();
+    }
+    Ok(out)
 }
 
 fn move_point(s: &mut Session, p: &Value) -> Result<Value> {
