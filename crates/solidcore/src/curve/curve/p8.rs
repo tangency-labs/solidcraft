@@ -149,6 +149,119 @@ impl<'a, O: SolutionObject> Named<'a, O> {
     }
 }
 
+/// `sm_MoveContactsToCurveEnds` (the fork's tangency-labs/smlib@601d804, opt-in
+/// [`UpstreamFixes::curve_contacts_at_curve_ends`](crate::kernel::UpstreamFixes::curve_contacts_at_curve_ends),
+/// WR-455): a point solution whose contact runs on to an end of either curve's interval
+/// is at that end. It moves there when that end lies within `dist_tol` of the other
+/// curve and the two curves stay within `dist_tol` of each other over the whole stretch
+/// between the end and the solution, measured on each curve.
+fn move_contacts_to_curve_ends<O: SolutionObject>(
+    k: &Kernel,
+    curve: &Curve,
+    interval: &Extent1d,
+    other: &Curve,
+    other_interval: &Extent1d,
+    dist_tol: f64,
+    sols: &mut SolutionArray<O>,
+) -> Result<()> {
+    for ii in 0..sols.len() {
+        let mut sol = sol_at(sols, ii)?;
+        if sol.solution_type != SolutionType::SingleValue {
+            continue;
+        }
+        let t1 = sol.start.parameters[0];
+        let t2 = sol.start.parameters[1];
+        let mut moved = false;
+        // which 0: an end of this curve, dropped to the other; 1: an end of the other,
+        // dropped to this
+        for which in 0..2 {
+            if moved {
+                break;
+            }
+            let (end_curve, drop_curve, end_ivl, drop_ivl) = if which == 0 {
+                (curve, other, interval, other_interval)
+            } else {
+                (other, curve, other_interval, interval)
+            };
+            let (sol_on_end, sol_on_drop) = if which == 0 { (t1, t2) } else { (t2, t1) };
+            for end in 0..2 {
+                if moved {
+                    break;
+                }
+                let end_t = if end == 0 {
+                    end_ivl.min()
+                } else {
+                    end_ivl.max()
+                };
+                if end_t == sol_on_end {
+                    continue; // already there
+                }
+                let end_pt = end_curve.evaluate_point(k, end_t)?;
+                let dropped = drop_curve.drop_point(
+                    k,
+                    drop_ivl,
+                    end_pt,
+                    None,
+                    dist_tol,
+                    Some(sol_on_drop),
+                    SolverOperation::Minimize,
+                )?;
+                if !dropped.success || dropped.distance.is_nan() || dropped.distance > dist_tol {
+                    continue;
+                }
+                let drop_t = dropped.parameter;
+                // the curves within tolerance of one another over the whole stretch, on
+                // each curve (one way alone passes a closed curve's whole turn against the
+                // one point of a line it touches at its start)
+                let mut stretch = Extent1d::from_value(end_t);
+                stretch.add_value(sol_on_end);
+                let mut drop_stretch = Extent1d::from_value(drop_t);
+                drop_stretch.add_value(sol_on_drop);
+                let (drop_at_min, drop_at_max) = if end_t < sol_on_end {
+                    (drop_t, sol_on_drop)
+                } else {
+                    (sol_on_drop, drop_t)
+                };
+                let gap = end_curve.curve_max_distance_between(
+                    k,
+                    &stretch,
+                    drop_curve,
+                    drop_at_min,
+                    drop_at_max,
+                    0,
+                    Some(dist_tol),
+                )?;
+                if gap.distance.is_nan() || gap.distance > dist_tol {
+                    continue;
+                }
+                let (end_at_min, end_at_max) = if drop_t < sol_on_drop {
+                    (end_t, sol_on_end)
+                } else {
+                    (sol_on_end, end_t)
+                };
+                let gap = drop_curve.curve_max_distance_between(
+                    k,
+                    &drop_stretch,
+                    end_curve,
+                    end_at_min,
+                    end_at_max,
+                    0,
+                    Some(dist_tol),
+                )?;
+                if gap.distance.is_nan() || gap.distance > dist_tol {
+                    continue;
+                }
+                sol.start.parameters[0] = if which == 0 { end_t } else { drop_t };
+                sol.start.parameters[1] = if which == 0 { drop_t } else { end_t };
+                sol.start.solution_value = dropped.distance;
+                put_at(sols, ii, &sol)?;
+                moved = true;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Runs `sm_RefineCCSolutions` on `sols` (status ignored).
 fn refine<O: SolutionObject>(
     k: &Kernel,
@@ -758,6 +871,17 @@ impl Curve {
 
         // Refine Range solutions.
         refine(k, &mut sols, &named)?;
+        if k.fixes.curve_contacts_at_curve_ends {
+            move_contacts_to_curve_ends(
+                k,
+                self,
+                interval,
+                other,
+                other_interval,
+                dist_tol,
+                &mut sols,
+            )?;
+        }
 
         // Now sort through the intersections looking for cases to combine, split, or
         // convert from 'coincident maybe' intervals to point intersections.

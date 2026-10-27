@@ -58,7 +58,9 @@ use crate::geom::attribute::{AttributeStore, ObjectKey};
 use crate::geom::context::{with_mark_lock, MarkType, ALL_MARKS};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::object::{FaceKey, NotifyOperation, ObjectRef};
+use crate::heal::stitch::p1::{DefaultStitchCallback, Stitch};
 use crate::heal::stitch::p2 as stitch;
+use crate::heal::stitch::p2::MinGapRequest;
 use crate::kernel::Kernel;
 use crate::math::Vec3;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
@@ -753,7 +755,21 @@ impl OffsetExecutive {
             // FindAndSetInfiniteRegion when >1 region (editing temporarily false),
             // refresh regions, set void flags by infinite-region identity, then
             // transfer result ownership and clear the executive temporary.
-            crate::error::ignore_status(stitch::stitch_into_solid(kernel, &mut result))?;
+            if kernel.fixes.offset_stitch_at_body_tolerance {
+                // Opt-in (WR-455, #855; tangency-labs/smlib@601d804): one pass at the body's
+                // tolerance. `StitchIntoSolid` doubles its tolerance until no lamina edge is
+                // left, but the lamina edges a merge leaves are the rims of the cut-off
+                // pieces `MakeManifold` removes next; escalating, it welds two of them into
+                // one edge of a far larger tolerance. (SER: a failure propagates.)
+                let mut callback = DefaultStitchCallback::new();
+                let mut one_pass = Stitch::new(&mut callback, result.tolerance(), true, false);
+                one_pass.fast_edge_compare = true;
+                one_pass.split_edges_with_vertices = false;
+                one_pass.making_manifold_solid = true;
+                one_pass.do_stitching(kernel, &mut result, None, None, MinGapRequest::default())?;
+            } else {
+                crate::error::ignore_status(stitch::stitch_into_solid(kernel, &mut result))?;
+            }
             // MakeManifold exists in p5, but its remaining metadata/topology
             // adapters must still propagate Unported even though native ignores
             // ordinary errors. Do not turn that partial path into empty success.
@@ -4614,5 +4630,76 @@ mod tests {
             (volume - expected).abs() < 1e-6 * expected,
             "volume {volume}"
         );
+    }
+
+    /// tangency-labs/solidcore#855: a 40 x 40 x 10 plate with a 4 mm hole at (4.99, 20)
+    /// shelled 1.5 inward open at the top: the hole's offset (r 3.5) crosses the offset
+    /// side x = 1.5 only 0.01 mm deep. Upstream's `StitchIntoSolid` doubles its tolerance
+    /// until the cut-off rims of that crossing are welded, and the shell is no solid;
+    /// with the opt-in one pass at the body's tolerance leaves a solid whose volume is
+    /// the inner box less the hole's offset disk (cut by x = 1.5), over the height 8.5.
+    /// `contacts_at_ends` adds the other opt-in of #855 (a tangential contact is found at
+    /// a curve's end), which must not change this shell.
+    #[test]
+    fn issue_855_offset_stitch_keeps_the_bodys_tolerance() {
+        let shell = |stitch: bool, contacts_at_ends: bool| -> Result<Option<f64>> {
+            use crate::primitive::api_primitives::{create_box, create_cylinder};
+            let mut kernel = Kernel::default();
+            kernel.fixes.offset_resolve_crossing_loops = true;
+            kernel.fixes.offset_stitch_at_body_tolerance = stitch;
+            kernel.fixes.curve_contacts_at_curve_ends = contacts_at_ends;
+            let plate =
+                create_box(&mut kernel, Vec3::new(0.0, 0.0, 0.0), 40.0, 40.0, 10.0).unwrap();
+            let hole =
+                create_cylinder(&mut kernel, Vec3::new(4.99, 20.0, -1.0), 2.0, 12.0).unwrap();
+            let mut part =
+                crate::boolean::api_brep::boolean_difference(&mut kernel, plate, hole).unwrap();
+            part.set_key(original_key(EntityRef::Brep(BrepId::from_index(0))).key);
+            let top = planar_faces_at_z(&kernel, &part, 10.0);
+            let mut notifications = NotificationFixture::new(&part);
+            let mut result = OffsetExecutive::shell_brep(
+                &mut kernel,
+                part,
+                ShellOptions {
+                    offset: OffsetOptions {
+                        distance: -1.5,
+                        extend_convex_edges: true,
+                        merge_results: true,
+                    },
+                    create_offset_solid: false,
+                    merge_sheet_side_walls: false,
+                },
+                &top,
+                &mut notifications.context(),
+            )
+            .result?;
+            if !brep_is_manifold_solid(&result)? {
+                return Ok(None);
+            }
+            let store = AttributeStore::default();
+            let key_of = |_| ObjectKey(0);
+            let attributes = crate::mass::integrator::properties::PropertyAttributes {
+                store: &store,
+                key_of: &key_of,
+            };
+            let volume = crate::mass::integrator::properties::brep_volume(
+                &kernel,
+                &mut result,
+                1e-6,
+                &attributes,
+            )?;
+            Ok(Some(volume))
+        };
+        assert_eq!(shell(false, false).unwrap(), None);
+        // 40 x 40 x 10 less the hole, less the cavity: 8.5 high over the inner box (37 x 37)
+        // less the hole's offset disk (r 3.5, centre 3.49 from x = 1.5) cut by x = 1.5
+        let expected = 4564.924657;
+        for contacts_at_ends in [false, true] {
+            let volume = shell(true, contacts_at_ends).unwrap().unwrap();
+            assert!(
+                (volume - expected).abs() < 1e-6 * expected,
+                "volume {volume}"
+            );
+        }
     }
 }
