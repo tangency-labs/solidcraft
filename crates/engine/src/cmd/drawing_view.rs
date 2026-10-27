@@ -35,7 +35,7 @@ use solidcraft_geom::{Aabb2, Vec2};
 use solidcraft_render::VisualStyle;
 
 use super::CommandSpec;
-use crate::drawing_view::{CHORD_RANGE, Extents, Lines, OnSheet, ShownSet, Unmeasured};
+use crate::drawing_view::{CHORD_RANGE, Extents, Lines, MAX_PATH_IDS, MAX_PATHS, OnSheet, ShownSet, Unmeasured};
 use crate::params::bad;
 use crate::schema::drawing_view::{
     AccuracyResult, BoxResult, ChoicesResult, CopyParams, DPI_RANGE, EditParams, EditResult, ExtentsResult, FromResult, InspectParams, InspectResult,
@@ -61,7 +61,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
     .noundo()
     .contract(&CONTRACT)
     .output(output_schema_for::<SnapshotResult>)
-    .params("view?: front (default), back, top, bottom, left, right, iso (= iso_front_right), iso_front_left, iso_back_right, iso_back_left, or {direction, up, origin?}; scale?: \"paper:model\" such as \"1:2\" (default: the largest ISO 5455 scale that fits the sheet's drawing area); position_mm?: [x, y] for the view's centre on the sheet (default the sheet's centre); sheet?: {size: {standard: a3} or {custom: {sides_mm: [w, h]}}, orientation?: landscape|portrait, dpi?: 25..2400} (default A3 landscape, 300 dpi); display_style?, reference_style?: visible (default) or visible_hidden (the shaded styles aren't supported yet); reference_hides_model?: false; reference_margin_mm?: 0..100000 model mm on every side; tangent_edges?: hide (default) or show; chord_mm?: 0.001..1 paper mm the lines are sampled at (default 0.01); max_error_mm?: the accuracy the lines must certify on paper (refused while they come from the mesh); scene?: true adds the lines as a paper scene of the sheet (visible lines only for now). Every body the design places, whatever the browser shows. Returns {view, scale: {text, factor, fitted}, position_mm, sheet, extents (model mm on the view's plane), boundary_mm (on the sheet), lines: [{occurrence, body, reference, source: {kind: edge, edge, tangent} or {kind: silhouette, face}, pieces: [{visibility, path: [paper mm lines, and arcs for circles facing the view], accuracy}]}], status: {lines: approximate, provenance: mesh_projection, chord_mm, model_chord_mm, uncertain_pieces, covered_pieces}, stats, scene (with scene: true: {size_mm, groups: [{object: 0, kind: view, items: [{kind: stroke, path, closed, width_mm}]}]}), source}. Read-only: saves nothing."),
+    .params("view?: front (default), back, top, bottom, left, right, iso (= iso_front_right), iso_front_left, iso_back_right, iso_back_left, or {direction, up, origin?}; scale?: \"paper:model\" such as \"1:2\" (default: the largest ISO 5455 scale that fits the sheet's drawing area); position_mm?: [x, y] for the view's centre on the sheet (default the sheet's centre); sheet?: {size: {standard: a3} or {custom: {sides_mm: [w, h]}}, orientation?: landscape|portrait, dpi?: 25..2400} (default A3 landscape, 300 dpi); display_style?, reference_style?: visible (default) or visible_hidden (the shaded styles aren't supported yet); reference_hides_model?: false; reference_margin_mm?: 0..100000 model mm on every side; tangent_edges?: hide (default) or show; chord_mm?: 0.001..1 paper mm the lines are sampled at (default 0.01); max_error_mm?: the accuracy the lines must certify on paper (refused while they come from the mesh); scene?: true adds the lines as a paper scene of the sheet (visible lines only for now); source?: {occurrences: [[ids…]]}, the occurrence subtrees drawn ([] the design's own bodies; default every body); hide?: [[ids…]], subtrees left out; at most 1000 paths in each and 4096 ids in all. Every body the design places, whatever the browser shows. Returns {view, scale: {text, factor, fitted}, position_mm, sheet, extents (model mm on the view's plane), boundary_mm (on the sheet), lines: [{occurrence, body, reference, source: {kind: edge, edge, tangent} or {kind: silhouette, face}, pieces: [{visibility, path: [paper mm lines, and arcs for circles facing the view], accuracy}]}], status: {lines: approximate, provenance: mesh_projection, chord_mm, model_chord_mm, uncertain_pieces, covered_pieces}, stats, scene (with scene: true: {size_mm, groups: [{object: 0, kind: view, items: [{kind: stroke, path, closed, width_mm}]}]}), source}. Read-only: saves nothing."),
     CommandSpec::new(INSPECT, "Inspect Drawing View", crate::checked!("drawing.view.inspect", INSPECT_CONTRACT, inspect))
         .icon("inspect")
         .in_drawing()
@@ -117,7 +117,12 @@ fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
     let paper = sheet.size_mm().map_err(|e| bad(CMD, e.to_string()))?;
     let border = DrawingBorderProfile::iso().layout(&sheet).map_err(|e| bad(CMD, e.to_string()))?.drawing_border;
 
-    let set = crate::drawing_view::shown(s).map_err(|why| bad(CMD, why.to_string()))?;
+    let source = request.source.as_ref().map(|chosen| chosen.occurrences.as_slice());
+    check_paths(s, source, &request.hide)?;
+    let set = crate::drawing_view::shown(s).map_err(|why| bad(CMD, why.to_string()))?.keep(source, &request.hide);
+    if set.bodies.is_empty() {
+        return Err(bad(CMD, "the source and hide leave no bodies to draw"));
+    }
     let extents = crate::drawing_view::measure(&set, &basis).map_err(|why| bad(CMD, why.to_string()))?;
     let shown = extents.model.inflated(settings.reference_margin_mm);
     let position = request.position_mm.map_or(paper * 0.5, |p| p.0);
@@ -187,6 +192,27 @@ fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| crate::EngineError::Other(e.to_string()))
+}
+
+/// `source` and `hide` checked: at most [`MAX_PATHS`] paths in each and [`MAX_PATH_IDS`] ids in all,
+/// each a path `occurrence_placement` takes, with `[]` (the design's own bodies) in `source` only.
+fn check_paths(s: &Session, source: Option<&[Vec<u64>]>, hide: &[Vec<u64>]) -> Result<()> {
+    let lists = [("source.occurrences", source.unwrap_or_default()), ("hide", hide)];
+    let ids: usize = lists.iter().flat_map(|(_, paths)| paths.iter()).map(Vec::len).sum();
+    if lists.iter().any(|(_, paths)| paths.len() > MAX_PATHS) || ids > MAX_PATH_IDS {
+        return Err(bad(CMD, format!("at most {MAX_PATHS} occurrence paths in source.occurrences and in hide, and {MAX_PATH_IDS} ids in all")));
+    }
+    for (name, paths) in lists {
+        for path in paths {
+            if path.is_empty() && name == "hide" {
+                return Err(bad(CMD, "hide [] would leave out the design's own bodies: give source instead"));
+            }
+            if !path.is_empty() {
+                s.occurrence_placement(path).map_err(|e| bad(CMD, format!("{name} path {path:?}: {e}")))?;
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Refused unless every piece of `drawn` certifies `max` paper mm at `scale` (the accuracy rule on

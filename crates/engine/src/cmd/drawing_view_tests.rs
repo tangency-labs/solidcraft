@@ -921,6 +921,75 @@ fn a_scene_with_hidden_lines_or_a_bad_flag_is_refused() {
     }
 }
 
+/// The occurrence paths `v`'s lines name, each once.
+fn line_paths(v: &Value) -> Vec<Value> {
+    let mut paths: Vec<Value> = v["lines"].as_array().unwrap().iter().map(|l| l["occurrence"].clone()).collect();
+    paths.sort_by_key(|p| p.to_string());
+    paths.dedup();
+    paths
+}
+
+/// Two copies of a part: `source` with the first copy's path draws only that copy, 10 mm across
+/// at 1:1; hiding the second copy draws the same; both together leave nothing and are refused.
+#[test]
+fn a_views_source_and_hide_choose_its_copies() {
+    let (mut s, [first, second]) = two_cubes();
+    for p in [json!({"scale": "1:1", "source": {"occurrences": [[first]]}}), json!({"scale": "1:1", "hide": [[second]]})] {
+        let v = snap(&mut s, p.clone());
+        assert_eq!(line_paths(&v), [json!([first])], "{p}: {v}");
+        let (size, _) = boundary(&v);
+        assert!((size.x - 10.0).abs() < 1e-6, "{p}: {v}");
+    }
+    let e = refused(&mut s, json!({"source": {"occurrences": [[first]]}, "hide": [[first]]}));
+    assert!(e.contains("the source and hide leave no bodies to draw"), "{e}");
+}
+
+/// The empty path takes the design's own bodies only: the block made at the top of the design and
+/// not the cube placed in a part.
+#[test]
+fn the_empty_path_is_the_designs_own_bodies() {
+    let mut s = block();
+    run(&mut s, "component.create", json!({"name": "Part"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [200, 0, 0], "body_name": "Cube", "operation": "new"}));
+    let bodies = |v: &Value| {
+        let mut names: Vec<Value> = v["lines"].as_array().unwrap().iter().map(|l| l["body"].clone()).collect();
+        names.sort_by_key(|n| n.to_string());
+        names.dedup();
+        names
+    };
+    assert_eq!(bodies(&snap(&mut s, json!({"scale": "1:5"}))), [json!("Block"), json!("Cube")]);
+    assert_eq!(bodies(&snap(&mut s, json!({"scale": "1:5", "source": {"occurrences": [[]]}}))), [json!("Block")]);
+}
+
+/// Paths the occurrences don't make, too many paths or ids, `[]` in `hide` and malformed values
+/// are refused with their reason, and the design is left as it was.
+#[test]
+fn hostile_source_and_hide_paths_are_refused() {
+    let (mut s, [first, _]) = two_cubes();
+    let doc = s.doc.clone();
+    let many: Vec<Vec<u64>> = vec![vec![first]; 1001];
+    let deep: Vec<Vec<u64>> = vec![vec![first; 64]; 65];
+    let cases = [
+        (json!({"source": {"occurrences": [[999]]}}), "missing or mismatched parent"),
+        (json!({"hide": [[first, first]]}), "repeats an id"),
+        (json!({"source": {"occurrences": [vec![first; 65]]}}), "1..64 ids"),
+        (json!({"hide": many}), "at most 1000 occurrence paths"),
+        (json!({"source": {"occurrences": deep}}), "4096 ids in all"),
+        (json!({"hide": [[]]}), "hide [] would leave out"),
+        (json!({"hide": [[-1]]}), "hide"),
+        (json!({"hide": [[1.5]]}), "hide"),
+        (json!({"source": {"occurrences": [["a"]]}}), "source"),
+        (json!({"source": null}), "source"),
+        (json!({"source": {}}), "occurrences"),
+        (json!({"source": {"occurrences": [], "extra": 1}}), "extra"),
+    ];
+    for (p, says) in cases {
+        let e = refused(&mut s, p.clone());
+        assert!(e.contains(says), "{p}: {e}");
+        assert!(std::sync::Arc::ptr_eq(&doc, &s.doc), "{p}");
+    }
+}
+
 /// A view shows every body the design places, so a design whose assembly walk stops at its depth
 /// limit before some occurrences is refused, and one that ends at the limit is drawn: a chain of
 /// components one inside the next, one level at a time across the limit.

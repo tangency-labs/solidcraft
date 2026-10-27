@@ -58,6 +58,21 @@ pub struct SnapshotParams {
     /// Whether the reply carries the view's lines as a paper scene of the sheet (`scene`), the
     /// strokes the sheet writers draw (false when not given).
     pub scene: bool,
+    /// The occurrence subtrees the view draws (every body the design places when not given).
+    #[serde(deserialize_with = "super::present")]
+    #[schemars(with = "SourceParam")]
+    pub source: Option<SourceParam>,
+    /// Occurrence paths left out of this view, with everything under them (none when not given).
+    pub hide: Vec<Vec<u64>>,
+}
+
+/// What a view draws: occurrence paths from the design's root, each the subtree it places, with
+/// `[]` for the design's own bodies.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
+pub struct SourceParam {
+    pub occurrences: Vec<Vec<u64>>,
 }
 
 impl SnapshotParams {
