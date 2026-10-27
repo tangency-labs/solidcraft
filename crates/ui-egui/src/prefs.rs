@@ -660,6 +660,9 @@ preference_settings! {
     /// Draw the parts browser on a translucent card over the 3D view instead of a column of its
     /// own, so the workspace keeps the whole window width.
     browser_float: bool = false, PAGE_INTERFACE;
+    /// Show the Parameters panel compact (every parameter as its name and expression, its value on
+    /// hover) instead of full.
+    parameters_compact: bool = false, PAGE_INTERFACE;
     /// The wheel zooms toward the point under the cursor (else toward the view's centre).
     zoom_to_cursor: bool = true, PAGE_NAVIGATION => check("Zoom to the cursor", "The wheel zooms toward the point under the cursor (off: toward the view's centre)");
     /// Spread discrete wheel input across frames (off: apply each event immediately).

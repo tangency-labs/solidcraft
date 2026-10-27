@@ -72,6 +72,7 @@ struct GroupLayout {
     font: String,
     system_fonts: bool,
     language: &'static str,
+    compact: bool,
 }
 
 impl ParamsDialog {
@@ -196,10 +197,16 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         if palette.is_some() && crate::sketch_palette::fits_beside_a_dialog(app, ctx) { crate::frame::Side::Left } else { crate::frame::Side::Right };
     let top = crate::shell::panel_top(app, viewport, viewport.bottom(), side);
     let docked = egui::pos2(side.anchor_x(viewport), top);
-    let moved = crate::frame::dock_offset(ctx, "PARAMETERS");
+    // Compact shows every parameter as its name and expression (its value on hover), for tuning values beside
+    // the model; Full is the whole editor. Each keeps its own place.
+    let compact = app.preferences.parameters_compact;
+    let key = if compact { "PARAMETERS_COMPACT" } else { "PARAMETERS" };
+    let moved = crate::frame::dock_offset(ctx, key);
     let drag_bounds = crate::shell::tool_drag_rect(app, viewport);
     let anchor = crate::frame::offset_anchor(docked, moved, drag_bounds, side);
     let title = crate::i18n::tr_label("Parameters");
+    let t = crate::theme::Tokens::get();
+    let width = if compact { t.form_card_width * 1.2 } else { t.form_card_width * 3.0 };
     let panel = ui_kit::Panel::new(
         title,
         egui::Id::new("sc_params_dialog"),
@@ -208,12 +215,12 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         side,
         ui_kit::Panel::feature_frame(ctx, app.ui.layout, side),
     )
-    .wide()
+    .width(width)
     .body_rows(16.0)
     .reset_scroll(d.reset_scroll);
     let panel = if side == crate::frame::Side::Left {
-        let available = palette.map_or(viewport.width(), |r| (r.left() - viewport.left() - crate::theme::Tokens::get().space_8).max(0.0));
-        panel.width((crate::theme::Tokens::get().form_card_width * 3.0).min(available))
+        let available = palette.map_or(viewport.width(), |r| (r.left() - viewport.left() - t.space_8).max(0.0));
+        panel.width(width.min(available))
     } else {
         panel
     };
@@ -232,7 +239,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             ui_kit::FeatureOptions {
                 icon: solidcraft_engine::find_command("parameters.change").map_or("", |c| c.icon),
                 title,
-                drag_key: "PARAMETERS",
+                drag_key: key,
                 moved,
                 docked,
                 apply_label: None,
@@ -240,24 +247,34 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             false,
             true,
             |ui| {
-                ui_kit::text(ui, crate::i18n::tr("manage.parameters_hint"), ui_kit::Text::Hint("manage"));
+                let mut view = usize::from(!compact);
+                ui_kit::row(ui, "View", |ui| {
+                    if ui_kit::segmented(ui, &mut view, &["Compact", "Full"], Default::default()) {
+                        app.preferences.parameters_compact = view == 0;
+                    }
+                });
+                if !compact {
+                    ui_kit::text(ui, crate::i18n::tr("manage.parameters_hint"), ui_kit::Text::Hint("manage"));
+                }
                 ui_kit::row(ui, "Filter", |ui| {
                     let id = ui.make_persistent_id("parameter_filter");
                     ui_kit::search_field(ui, id, &mut d.filter, "Filter");
                 });
-                ui.horizontal_wrapped(|ui| {
-                    if ui_kit::icon_label_button(ui, "Import…", "import_tray", true, false)
-                        .on_hover_text(crate::i18n::tr_label("CSV or JSON: updates existing parameters, adds new ones"))
-                        .clicked()
-                    {
-                        app.pick_open_command("parameters.import", json!({}), IMPORT_TYPES);
-                    }
-                    for (label, ext) in [("Export CSV…", "csv"), ("Export JSON…", "json")] {
-                        if ui_kit::icon_label_button(ui, label, "export_tray", true, false).clicked() {
-                            app.pick_save_command(&format!("parameters.{ext}"), &[ext], "parameters.export", json!({"format": ext}));
+                if !compact {
+                    ui.horizontal_wrapped(|ui| {
+                        if ui_kit::icon_label_button(ui, "Import…", "import_tray", true, false)
+                            .on_hover_text(crate::i18n::tr_label("CSV or JSON: updates existing parameters, adds new ones"))
+                            .clicked()
+                        {
+                            app.pick_open_command("parameters.import", json!({}), IMPORT_TYPES);
                         }
-                    }
-                });
+                        for (label, ext) in [("Export CSV…", "csv"), ("Export JSON…", "json")] {
+                            if ui_kit::icon_label_button(ui, label, "export_tray", true, false).clicked() {
+                                app.pick_save_command(&format!("parameters.{ext}"), &[ext], "parameters.export", json!({"format": ext}));
+                            }
+                        }
+                    });
+                }
                 if let Some(error) = &d.error {
                     ui_kit::text(ui, error, ui_kit::Text::Error("parameters_error"));
                 }
@@ -305,6 +322,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                                 font: app.applied_ui_font.clone(),
                                 system_fonts: app.applied_system_fonts,
                                 language: crate::i18n::language(),
+                                compact,
                             };
                             if d.group_layout.as_ref() != Some(&layout) {
                                 d.group_sizes.clear();
@@ -394,8 +412,10 @@ fn new_check(app: &mut SolveApp, d: &mut ParamsDialog, unit: &str) -> Result<Str
 }
 
 fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&Row], salt: &str) {
+    let compact = app.preferences.parameters_compact;
     let units: Vec<_> = UNITS.iter().map(|unit| unit_label(unit)).collect();
-    let columns = [
+    let compact_columns = [Column::new("Name", 1.0).flex(), Column::new("Expression", 1.2).flex()];
+    let full_columns = [
         Column::new("", 0.0).min_content_width(crate::theme::Tokens::get().space_24 * 3.0),
         Column::new("Name", 1.1).flex(),
         Column::new("Unit", 0.65).min_content_width(
@@ -406,36 +426,39 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
         Column::new("Comment", 1.2).flex(),
         Column::new("Actions", 0.0).icon_only().min_content_width(ui_kit::table_row_height()),
     ];
-    ui_kit::table(ui, salt, &columns, crate::i18n::tr("manage.empty"), |ui, table| {
+    let columns: &[Column] = if compact { &compact_columns } else { &full_columns };
+    ui_kit::table(ui, salt, columns, crate::i18n::tr("manage.empty"), |ui, table| {
         for (index, r) in rows.iter().enumerate() {
             // Skip cells outside the clip while preserving the table's row geometry (#2723).
             // Drafts remain live until their edits have been committed.
             let busy =
                 d.editing.contains_key(&r.name) || d.comments.contains_key(&r.name) || d.renaming.as_ref().is_some_and(|(old, _)| *old == r.name);
             table.row_visible(ui, &r.name, false, busy, |row| {
-                row.cell(|ui| {
-                    let star = if r.favorite { "★" } else { "☆" };
-                    ui.spacing_mut().item_spacing.x = 0.0;
-                    let favorite = ui_kit::compact_button(ui, star, "Favourite", true, r.favorite);
-                    crate::scenario::publish_handle(&format!("param:star:{}", r.name), favorite.rect.center());
-                    if favorite.clicked() {
-                        d.error = app.run("parameters.favorite", json!({"name": r.name, "favorite": !r.favorite})).err();
-                    }
-                    if salt == "user" {
-                        for (glyph, tip, neighbour, side) in [
-                            (ui_kit::MOVE_UP, "Move up", index.checked_sub(1).and_then(|i| rows.get(i)), "before"),
-                            (ui_kit::MOVE_DOWN, "Move down", rows.get(index + 1), "after"),
-                        ] {
-                            let response = ui_kit::compact_button(ui, glyph, tip, neighbour.is_some(), false);
-                            crate::scenario::publish_handle(&format!("param:{side}:{}", r.name), response.rect.center());
-                            if response.clicked()
-                                && let Some(neighbour) = neighbour
-                            {
-                                d.error = app.run("parameters.move", json!({"name":r.name, side:neighbour.name})).err();
+                if !compact {
+                    row.cell(|ui| {
+                        let star = if r.favorite { "★" } else { "☆" };
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        let favorite = ui_kit::compact_button(ui, star, "Favourite", true, r.favorite);
+                        crate::scenario::publish_handle(&format!("param:star:{}", r.name), favorite.rect.center());
+                        if favorite.clicked() {
+                            d.error = app.run("parameters.favorite", json!({"name": r.name, "favorite": !r.favorite})).err();
+                        }
+                        if salt == "user" {
+                            for (glyph, tip, neighbour, side) in [
+                                (ui_kit::MOVE_UP, "Move up", index.checked_sub(1).and_then(|i| rows.get(i)), "before"),
+                                (ui_kit::MOVE_DOWN, "Move down", rows.get(index + 1), "after"),
+                            ] {
+                                let response = ui_kit::compact_button(ui, glyph, tip, neighbour.is_some(), false);
+                                crate::scenario::publish_handle(&format!("param:{side}:{}", r.name), response.rect.center());
+                                if response.clicked()
+                                    && let Some(neighbour) = neighbour
+                                {
+                                    d.error = app.run("parameters.move", json!({"name":r.name, side:neighbour.name})).err();
+                                }
                             }
                         }
-                    }
-                });
+                    });
+                }
                 let renaming_here = d.rename_table == salt;
                 row.cell(|ui| match &mut d.renaming {
                     Some((old, new)) if *old == r.name && renaming_here => {
@@ -463,27 +486,37 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
                         }
                     }
                 });
-                row.cell(|ui| {
-                    if r.source == "user" {
-                        let mut selected = UNITS.iter().position(|u| *u == r.unit).unwrap_or(0);
-                        let before = selected;
-                        ui_kit::dropdown(ui, &format!("punit:{salt}:{}", r.name), &mut selected, &units);
-                        if selected != before
-                            && let Some(unit) = UNITS.get(selected)
-                        {
-                            d.error = app.run("parameters.change", json!({"name":r.name,"expression":r.expression,"unit":unit})).err();
+                if !compact {
+                    row.cell(|ui| {
+                        if r.source == "user" {
+                            let mut selected = UNITS.iter().position(|u| *u == r.unit).unwrap_or(0);
+                            let before = selected;
+                            ui_kit::dropdown(ui, &format!("punit:{salt}:{}", r.name), &mut selected, &units);
+                            if selected != before
+                                && let Some(unit) = UNITS.get(selected)
+                            {
+                                d.error = app.run("parameters.change", json!({"name":r.name,"expression":r.expression,"unit":unit})).err();
+                            }
+                        } else {
+                            ui_kit::text(ui, unit_label(&r.unit), ui_kit::Text::MonoCell);
                         }
-                    } else {
-                        ui_kit::text(ui, unit_label(&r.unit), ui_kit::Text::MonoCell);
-                    }
-                });
+                    });
+                }
                 let mut expression = d.editing.get(&r.name).cloned().unwrap_or_else(|| r.expression.clone());
                 let live = (expression != r.expression).then(|| check(app, &expression, &r.unit));
                 let invalid = matches!(live, Some(Err(_))) || (live.is_none() && r.error.is_some());
+                let (value, error) = match (&live, &r.error) {
+                    (Some(Err(message)), _) | (None, Some(message)) => (message.clone(), true),
+                    (Some(Ok(value)), _) => (value.clone(), false),
+                    (None, None) => (show_value(r), false),
+                };
                 row.cell(|ui| {
                     let id = ui.make_persistent_id(("pexpr", salt, &r.name));
                     let focused = ui.memory(|m| m.has_focus(id) || m.had_focus_last_frame(id));
                     let response = ui_kit::cell_editor(ui, id, &mut expression, "Expression", invalid);
+                    // Compact has no Value column: what the expression works out to (or what is
+                    // wrong with it) shows on hover, e.g. `width / 2` → `40.0000 mm`.
+                    let response = if compact { response.on_hover_text(&value) } else { response };
                     crate::scenario::publish_handle(&format!("param:{}", r.name), response.rect.center());
                     if salt == "fav" {
                         crate::scenario::publish_handle(&format!("param:favorite:{}", r.name), response.rect.center());
@@ -510,13 +543,11 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
                         }
                     }
                 });
+                if compact {
+                    return;
+                }
                 row.cell(|ui| {
-                    let (text, error) = match (&live, &r.error) {
-                        (Some(Err(message)), _) | (None, Some(message)) => (message.clone(), true),
-                        (Some(Ok(value)), _) => (value.clone(), false),
-                        (None, None) => (show_value(r), false),
-                    };
-                    ui_kit::text(ui, &text, ui_kit::Text::Value(&format!("value:{}", r.name), error)).on_hover_text(&text);
+                    ui_kit::text(ui, &value, ui_kit::Text::Value(&format!("value:{}", r.name), error)).on_hover_text(&value);
                 });
                 row.cell(|ui| {
                     let mut comment = d.comments.get(&r.name).cloned().unwrap_or_else(|| r.comment.clone());
@@ -541,7 +572,7 @@ fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&R
                 });
             });
         }
-        if salt == "user" {
+        if salt == "user" && !compact {
             if d.adding {
                 ui.push_id("parameter_draft", |ui| add_row(app, ui, table, d));
             }
