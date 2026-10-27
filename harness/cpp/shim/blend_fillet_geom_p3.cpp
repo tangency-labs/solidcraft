@@ -339,7 +339,16 @@ struct Model
             e->SetFilletEdgeType((SmFilletEdgeType)etype);
             e->SetStatus((SmFilStatus)status);
             if (rd.flag())
-                e->SetCurve(read_curve(rd, ctx), TRUE);
+            {
+                // Every upstream producer of a fillet edge's curve follows SetCurve (which
+                // leaves the owner unset) with SetOwner(edge), so SmTol::GetZoneTol3d of the
+                // curve (SmBSplineCurve::Trim in CalcFilletIntFillet) reads the edge's
+                // tolerance; the port has no owners and always uses the holding edge.
+                SmCurve* c = read_curve(rd, ctx);
+                e->SetCurve(c, TRUE);
+                if (c != NULL)
+                    c->SetOwner(e);
+            }
             if (rd.flag())
             {
                 double t0 = rd.num();

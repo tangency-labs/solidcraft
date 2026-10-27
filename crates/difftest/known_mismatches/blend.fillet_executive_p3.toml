@@ -16,11 +16,6 @@ why = "mass area 855.6511940507597 vs 855.6495364737889; topology and geometry a
 
 [[mismatch]]
 unit = "blend.fillet_executive_p3"
-case = "sweep5-sphere_diff_3cylinders-e29-r1.0"
-why = "one result vertex tolerance differs (C++ 9.1005e-5, Rust 9.3047e-5); everything else agrees (plan/findings/blend.fillet_executive_p3--sweep5-sphere-diff-e29-vertex-tolerance.md)"
-
-[[mismatch]]
-unit = "blend.fillet_executive_p3"
 case = "sweep5-ext_w_hole-e15-r1.0"
 why = "one face's tolerance (5.2976e-5 vs 4e-5) and UV domain minimum ((0, 0.5869) vs (2.5, 7.5)) differ, so its surface samples do; topology agrees (plan/findings/blend.fillet_executive_p3--sweep5-ext-w-hole-e15-face-domain.md)"
 

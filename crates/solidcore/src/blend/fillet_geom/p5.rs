@@ -2092,7 +2092,8 @@ impl FilletBrep {
 
     /// The trims at the end of `TrimRailCurves`: the rail's curve, then its mate's UV
     /// curve (the original face's, when it has one), then its primary use's UV curve,
-    /// each with the (possibly snapped) interval.
+    /// each with the (possibly snapped) interval. Each trim reads
+    /// `SmTol::GetZoneTol3d(curve)` of the curve's holder ([`held_curve_zone_tol_3d`]).
     fn trim_rail_and_uv_curves(
         &mut self,
         k: &Kernel,
@@ -2101,12 +2102,17 @@ impl FilletBrep {
         mate: EdgeuseId,
         trim_ivl: &mut Extent1d,
     ) -> Result<()> {
+        let rail_tol = held_curve_zone_tol_3d(k, self.brep(), Some(rail))?;
+        let mate_edge = self.brep().edgeuse(mate)?.edge;
+        let mate_tol = held_curve_zone_tol_3d(k, self.brep(), mate_edge)?;
+        let prim_edge = self.brep().edgeuse(prim)?.edge;
+        let prim_tol = held_curve_zone_tol_3d(k, self.brep(), prim_edge)?;
         self.brep_mut()
             .edge_mut(rail)?
             .curve
             .as_mut()
             .ok_or_else(|| SolidError::null_pointer(OP_TRIM))?
-            .trim(k, trim_ivl, TrimMode::Notify)?;
+            .trim_with_zone_tol(k, trim_ivl, TrimMode::Notify, rail_tol)?;
         if let Some(c) = self
             .brep_mut()
             .edgeuse_mut(mate)?
@@ -2114,14 +2120,14 @@ impl FilletBrep {
             .as_mut()
             .filter(|c| is_b_spline(c))
         {
-            c.trim(k, trim_ivl, TrimMode::Notify)?;
+            c.trim_with_zone_tol(k, trim_ivl, TrimMode::Notify, mate_tol)?;
         }
         self.brep_mut()
             .edgeuse_mut(prim)?
             .uv_trim_curve
             .as_mut()
             .ok_or_else(|| SolidError::null_pointer(OP_TRIM))?
-            .trim(k, trim_ivl, TrimMode::Notify)?;
+            .trim_with_zone_tol(k, trim_ivl, TrimMode::Notify, prim_tol)?;
         Ok(())
     }
 
@@ -2438,6 +2444,18 @@ fn user_surface(
         .surface
         .clone()
         .map(|s| crate::intersect::surface_intersector::p1::UserSurface(std::sync::Arc::new(s))))
+}
+
+/// `SmTol::GetZoneTol3d(pCurve)` for a curve held by an edge, or by an edge use (a UV
+/// trim curve, whose `SmCurve::GetEdge` is the edge use's owning edge): that edge's
+/// tolerance (`SmEdge::GetTolerance`, zero on a fillet B-rep's rails); the system zone
+/// tolerance when there is no edge. `SmBSplineCurve::Trim` maps it to parameter space
+/// to find degenerate end spans to remove.
+pub(super) fn held_curve_zone_tol_3d(k: &Kernel, b: &Brep, holder: Option<EdgeId>) -> Result<f64> {
+    Ok(match holder {
+        Some(e) => edge::tolerance(b, e)?,
+        None => crate::geom::tol::zone_tol_3d(k, crate::geom::tol::SmallTopoType::NormalSize),
+    })
 }
 
 #[cfg(test)]
