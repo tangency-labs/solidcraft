@@ -634,6 +634,9 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
     });
 }
 
+/// The widest the History's branch button gets.
+const BRANCH_BUTTON_MAX: f32 = 160.0;
+
 /// The branch the History shows, as a button left of the features. Its menu switches to
 /// another branch, starts a new one from here, or opens the Versions window. Returns its width.
 fn history_branch(app: &mut SolveApp, ui: &mut egui::Ui, left_center: egui::Pos2) -> f32 {
@@ -642,8 +645,14 @@ fn history_branch(app: &mut SolveApp, ui: &mut egui::Ui, left_center: egui::Pos2
     let open = versions.workspaces.iter().find(|w| w.id == versions.current).map_or_else(|| "Main".to_string(), |w| w.name.clone());
     let branches: Vec<(String, String)> = versions.workspaces.iter().map(|w| (w.id.clone(), w.name.clone())).collect();
     let current = versions.current.clone();
-    let rect = Rect::from_min_size(pos2(left_center.x, left_center.y - t.space_24 / 2.0), vec2(ui.max_rect().right() - left_center.x, t.space_24));
+    // A long name is cut short, and a window too narrow for the button and a few features leaves it out.
+    let room = ui.max_rect().right() - left_center.x;
+    if room < BRANCH_BUTTON_MAX + 96.0 {
+        return 0.0;
+    }
+    let rect = Rect::from_min_size(pos2(left_center.x, left_center.y - t.space_24 / 2.0), vec2(BRANCH_BUTTON_MAX, t.space_24));
     let mut child = ui.new_child(UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    child.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
     let mut chosen: Option<(&str, Value)> = None;
     let response = crate::ui_kit::Menu::button(&mut child, open, |ui| {
         for (id, name) in &branches {
@@ -672,8 +681,8 @@ fn history_branch(app: &mut SolveApp, ui: &mut egui::Ui, left_center: egui::Pos2
     })
     .response;
     crate::scenario::publish_handle("history:branch", response.rect.center());
+    crate::scenario::publish_rect("history:branch", response.rect);
     let width = response.rect.width();
-    response.on_hover_text(crate::i18n::tr_label("Versions"));
     match chosen {
         Some(("version.graph", _)) => app.start("version.graph"),
         Some((id, params)) => {
@@ -1158,5 +1167,8 @@ mod tests {
             assert_eq!(h.app.session.doc.versions.current, to);
             assert_eq!(h.app.session.doc.features.len(), features, "{to}");
         }
+        h.app.run("version.rename", json!({"workspace": branch, "name": "A branch name long enough to crowd out the features"})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("history:branch").unwrap().width() <= super::BRANCH_BUTTON_MAX + 1.0);
     }
 }
