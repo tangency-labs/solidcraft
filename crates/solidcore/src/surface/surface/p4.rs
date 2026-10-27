@@ -1583,7 +1583,7 @@ impl Surface {
                         let cache = if let Some(cache) = cache {
                             cache
                         } else {
-                            built = context.build_surface_cache(k, self, surface)?;
+                            built = context.surface_cache_state(k, self, surface)?;
                             &built
                         };
                         if cache.is_trimmed()

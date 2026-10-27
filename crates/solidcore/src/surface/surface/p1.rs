@@ -1237,6 +1237,23 @@ pub trait SurfaceSolveContext<O: Copy + PartialEq> {
         handle: Option<O>,
     ) -> Result<SurfaceCache<O>>;
 
+    /// This surface's cache as `smsurf_GetSurfaceCache` hands it out to a reader that
+    /// does not call `GetTree` (the state bits `GlobalPointSolve`'s fast-drop face
+    /// test reads). Upstream's factory defers the tree during a Boolean operation, and
+    /// the tree build may change those bits, so a context that keeps face caches
+    /// answers the cache without the deferred tree; by default the solve's cache.
+    ///
+    /// # Errors
+    /// As [`SurfaceSolveContext::build_surface_cache`].
+    fn surface_cache_state(
+        &mut self,
+        k: &Kernel,
+        surface: &Surface,
+        handle: Option<O>,
+    ) -> Result<SurfaceCache<O>> {
+        self.build_surface_cache(k, surface, handle)
+    }
+
     /// Read-only classification of the topology prepared by this context.
     fn face_queries(&self) -> Option<&dyn FaceQueries<O>>;
 }
