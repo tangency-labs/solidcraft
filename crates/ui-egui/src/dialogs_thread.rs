@@ -155,16 +155,12 @@ pub(crate) fn hole_rows(ui: &mut egui::Ui, doc: &Document, designation: &mut Str
     }
     form_row(ui, "Tap drill diameter", |ui| {
         match parse_tapped_thread(designation).filter(|_| custom.as_ref().is_none_or(|draft| draft.error.is_none())) {
-            // An Rc or NPT hole is drilled with the stocked drill under the standard's minor
-            // diameter where the thread ends; that exact value is the tooltip.
+            // An Rc or NPT hole takes the tap maker's drill; the standard's minor diameter where
+            // the thread ends is the tooltip.
             Some(size) => match size.taper_drill() {
                 Some(d) => {
-                    let shown = d
-                        .name
-                        .filter(|n| !n.ends_with(" mm"))
-                        .map_or_else(|| format!("{} mm", size.tap_drill), |n| format!("{} mm ({n})", size.tap_drill));
                     let exact = format!("{:.3}", d.exact);
-                    ui.label(shown).on_hover_text(crate::i18n::format("thread.taper_drill_exact", &[("exact", &exact)]));
+                    ui.label(format!("{} mm", size.tap_drill)).on_hover_text(crate::i18n::format("thread.taper_drill_exact", &[("exact", &exact)]));
                 }
                 None => {
                     ui.label(format!("{} mm", size.tap_drill));

@@ -46,138 +46,108 @@ fn pipe_size(size: crate::pipe_thread_catalog::PipeThread) -> TappedThread {
     }
 }
 
-/// The drill of an internal taper thread (Rc, NPT): `exact` is the standard's internal minor
-/// diameter where the thread ends (mm), the reference plane's minor at the face (d - 2h for ISO
-/// 7-1, E1 - h for NPT) less the 1 in 16 taper over the thread's length (ISO 7-1's useful thread,
-/// NPT's effective thread L2), so a tap cuts full form over the whole length. The hole is
-/// drilled with the largest stocked drill not larger than that (`name`, `diameter`): metric for
-/// Rc, inch for NPT. Above the drill series it is bored to `exact` (no `name`).
+/// The drill of an internal taper thread (Rc, NPT). `diameter` is the tap maker's tabulated
+/// drill for a straight (not reamed) hole; `exact` is the standard's internal minor diameter where
+/// the thread ends (mm), the reference plane's minor at the face (d - 2h for ISO 7-1, E1 - h for
+/// NPT) less the 1 in 16 taper over the thread's length (ISO 7-1's useful thread, NPT's effective
+/// thread L2), which the dialog shows beside it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TaperDrill {
     pub exact: f64,
     pub diameter: f64,
-    pub name: Option<String>,
 }
 
-/// Metric twist drill diameters (mm), DIN 345:2006 (taper shank twist drills, the series up to
-/// 100 mm), as reproduced at <https://www.fasten.it/en/Norms/Norm/DIN%20345>; three digits that
-/// reproduction drops are restored from their neighbours (15.25, 34.5, 54).
-const DIN_345: &[f64] = &[
-    3.0, 3.2, 3.5, 3.8, 4.0, 4.2, 4.5, 4.8, 5.0, 5.2, 5.5, 5.8, 6.0, 6.2, 6.5, 6.8, 7.0, 7.2, 7.5, 7.8, 8.0, 8.2, 8.5, 8.8, 9.0, 9.2, 9.5, 9.8, 10.0,
-    10.2, 10.5, 10.8, 11.0, 11.2, 11.5, 11.8, 12.0, 12.2, 12.5, 12.8, 13.0, 13.2, 13.5, 13.8, 14.0, 14.25, 14.5, 14.75, 15.0, 15.25, 15.5, 15.75,
-    16.0, 16.25, 16.5, 16.75, 17.0, 17.25, 17.5, 17.75, 18.0, 18.25, 18.5, 18.75, 19.0, 19.25, 19.5, 19.75, 20.0, 20.25, 20.5, 20.75, 21.0, 21.25,
-    21.5, 21.75, 22.0, 22.25, 22.5, 22.75, 23.0, 23.25, 23.5, 23.75, 24.0, 24.25, 24.5, 24.75, 25.0, 25.25, 25.5, 25.75, 26.0, 26.25, 26.5, 26.75,
-    27.25, 27.5, 27.75, 28.0, 28.25, 28.5, 28.75, 29.0, 29.25, 29.5, 29.75, 30.0, 30.25, 30.5, 30.75, 31.0, 31.25, 31.5, 31.75, 32.0, 32.5, 33.0,
-    33.5, 34.5, 35.0, 35.5, 36.0, 36.5, 37.0, 37.5, 38.0, 38.5, 39.0, 39.5, 40.0, 40.5, 41.0, 41.5, 42.0, 42.5, 43.0, 43.5, 44.0, 44.5, 45.0, 45.5,
-    46.0, 46.5, 47.0, 47.5, 48.0, 48.5, 49.0, 49.5, 50.0, 50.5, 51.0, 52.0, 53.0, 54.0, 55.0, 56.0, 57.0, 58.0, 59.0, 60.0, 61.0, 62.0, 63.0, 64.0,
-    65.0, 66.0, 67.0, 68.0, 69.0, 70.0, 71.0, 72.0, 73.0, 74.0, 76.0, 77.0, 78.0, 79.0, 80.0, 81.0, 82.0, 83.0, 84.0, 85.0, 86.0, 87.0, 88.0, 89.0,
-    90.0, 91.0, 92.0, 93.0, 94.0, 95.0, 96.0, 97.0, 98.0, 99.0, 100.0,
+/// Rc (ISO 7-1, "PT") drills: Yamawa YEU23, printed p.709 ("Taper Internal Pipe Threads -
+/// Rc(BSPT)-PT"), the maximum size of a straight bored hole when the threads have non-full
+/// threads (the same values as the Rc tap's bored hole A on printed p.121), for the sizes of
+/// ISO 7-1's table it lists (1/16 to 4).
+/// <https://www.yamawa.eu/files/Yamawa_European_Catalogue_YEU23.pdf>
+const RC_DRILLS: &[(&str, f64)] = &[
+    ("1/16", 6.1),
+    ("1/8", 8.1),
+    ("1/4", 10.7),
+    ("3/8", 14.2),
+    ("1/2", 17.6),
+    ("3/4", 23.0),
+    ("1", 29.0),
+    ("1 1/4", 37.6),
+    ("1 1/2", 43.5),
+    ("2", 55.0),
+    ("2 1/2", 70.3),
+    ("3", 82.8),
+    ("4", 107.6),
 ];
 
-/// Letter drill sizes (in), ASME B94.11M (twist drills).
-const LETTER_DRILLS: &[(char, f64)] = &[
-    ('A', 0.234),
-    ('B', 0.238),
-    ('C', 0.242),
-    ('D', 0.246),
-    ('E', 0.250),
-    ('F', 0.257),
-    ('G', 0.261),
-    ('H', 0.266),
-    ('I', 0.272),
-    ('J', 0.277),
-    ('K', 0.281),
-    ('L', 0.290),
-    ('M', 0.295),
-    ('N', 0.302),
-    ('O', 0.316),
-    ('P', 0.323),
-    ('Q', 0.332),
-    ('R', 0.339),
-    ('S', 0.348),
-    ('T', 0.358),
-    ('U', 0.368),
-    ('V', 0.377),
-    ('W', 0.386),
-    ('X', 0.397),
-    ('Y', 0.404),
-    ('Z', 0.413),
+/// NPT drills: Yamawa YEU23, printed p.710 ("American Taper Pipe Threads (NPT)", referring to
+/// ASME B1.20.1), the maximum size of a straight bored hole, 1/16 to 3.
+const NPT_DRILLS: &[(&str, f64)] = &[
+    ("1/16", 6.05),
+    ("1/8", 8.39),
+    ("1/4", 10.85),
+    ("3/8", 14.27),
+    ("1/2", 17.60),
+    ("3/4", 22.91),
+    ("1", 28.78),
+    ("1 1/4", 37.50),
+    ("1 1/2", 43.57),
+    ("2", 55.58),
+    ("2 1/2", 66.28),
+    ("3", 82.05),
 ];
 
-/// Fractional drill sizes by 64ths of an inch up to this many 64ths (1 1/2 in), ASME B94.11M.
-const FRACTIONAL_64THS: u32 = 96;
-
-/// A fraction of an inch in lowest terms: `11/16 in`, `1 1/4 in`.
-fn inch_fraction(n64: u32) -> String {
-    let (whole, mut num, mut den) = (n64 / 64, n64 % 64, 64);
-    while num > 0 && num % 2 == 0 {
-        num /= 2;
-        den /= 2;
-    }
-    match (whole, num) {
-        (0, _) => format!("{num}/{den} in"),
-        (w, 0) => format!("{w} in"),
-        (w, _) => format!("{w} {num}/{den} in"),
-    }
+/// The drill of an Rc or NPT size the tap maker tabulates; none for the others.
+fn taper_drill(family: TappedThreadFamily, size: &crate::pipe_thread_sizes::PipeSize) -> Option<TaperDrill> {
+    let (table, h) = match family {
+        TappedThreadFamily::Npt => (NPT_DRILLS, crate::pipe_thread_sizes::NPT_HEIGHT * size.pitch()),
+        _ => (RC_DRILLS, 0.640327 * size.pitch()),
+    };
+    let diameter = table.iter().find(|(n, _)| *n == size.nominal)?.1;
+    Some(TaperDrill { exact: size.major - 2.0 * h - size.length / 16.0, diameter })
 }
 
-/// The largest stocked drill not larger than `exact` mm: metric (DIN 345) or inch (letter and
-/// fractional drills, ASME B94.11M). None past the series.
-fn stocked_drill(exact: f64, inch: bool) -> Option<(f64, String)> {
-    let fits = |d: f64| d <= exact + 1e-9;
-    if !inch {
-        let max = DIN_345.iter().copied().fold(0.0, f64::max);
-        if exact > max + 1.0 {
-            return None;
-        }
-        return DIN_345
-            .iter()
-            .copied()
-            .filter(|d| fits(*d))
-            .fold(None, |a: Option<f64>, d| Some(a.map_or(d, |a| a.max(d))))
-            .map(|d| (d, format!("{d} mm")));
-    }
-    if exact > f64::from(FRACTIONAL_64THS) / 64.0 * 25.4 + 25.4 / 64.0 {
-        return None;
-    }
-    let letters = LETTER_DRILLS.iter().map(|(c, d)| (d * 25.4, format!("{c} ({d:.3} in)")));
-    let fractions = (1..=FRACTIONAL_64THS).map(|n| (f64::from(n) / 64.0 * 25.4, inch_fraction(n)));
-    letters.chain(fractions).filter(|(d, _)| fits(*d)).max_by(|a, b| a.0.total_cmp(&b.0))
-}
-
-/// The drill of an Rc or NPT size ([`TaperDrill`]).
-fn taper_drill(family: TappedThreadFamily, size: &crate::pipe_thread_sizes::PipeSize) -> TaperDrill {
-    let p = size.pitch();
-    let h = if family == TappedThreadFamily::Npt { crate::pipe_thread_sizes::NPT_HEIGHT * p } else { 0.640327 * p };
-    let exact = size.major - 2.0 * h - size.length / 16.0;
-    match stocked_drill(exact, family == TappedThreadFamily::Npt) {
-        Some((diameter, name)) => TaperDrill { exact, diameter, name: Some(name) },
-        None => TaperDrill { exact, diameter: (exact * 1000.0).floor() / 1000.0, name: None },
+/// The pipe sizes of a taper family.
+fn taper_sizes(family: TappedThreadFamily) -> Vec<crate::pipe_thread_sizes::PipeSize> {
+    match family {
+        TappedThreadFamily::Rc => crate::pipe_thread_sizes::iso_7_1().collect(),
+        TappedThreadFamily::Npt => crate::pipe_thread_sizes::npt().collect(),
+        _ => Vec::new(),
     }
 }
 
 impl TappedThread {
-    /// An Rc or NPT size's drill: the standard's exact value and the stocked drill it is.
+    /// An Rc or NPT size's drill: the tap maker's and the standard's exact value.
     pub fn taper_drill(&self) -> Option<TaperDrill> {
-        let sizes = match self.family {
-            TappedThreadFamily::Rc => crate::pipe_thread_sizes::iso_7_1().collect::<Vec<_>>(),
-            TappedThreadFamily::Npt => crate::pipe_thread_sizes::npt().collect(),
-            _ => return None,
-        };
-        sizes.iter().find(|z| (z.major - self.major_diameter).abs() < 1e-9).map(|z| taper_drill(self.family, z))
+        taper_sizes(self.family).iter().find(|z| (z.major - self.major_diameter).abs() < 1e-9).and_then(|z| taper_drill(self.family, z))
     }
 }
 
+/// Why an Rc or NPT designation is no tapped hole's: a size of its standard the tap maker's table
+/// has no drill for. None for any other text.
+pub fn untabulated_taper_tap(text: &str) -> Option<String> {
+    use crate::thread_forms::ThreadForm;
+    let (family, form, listed) = match ThreadForm::of_designation(text) {
+        Some(ThreadForm::Bspt) if ThreadForm::pipe_internal(text) => (TappedThreadFamily::Rc, ThreadForm::Bspt, "Rc 1/16 to Rc 4"),
+        Some(ThreadForm::Npt) => (TappedThreadFamily::Npt, ThreadForm::Npt, "1/16 to 3 NPT"),
+        _ => return None,
+    };
+    let size = form.parse(text, 1).ok()?;
+    let z = taper_sizes(family).into_iter().find(|z| (z.major - size.major).abs() < 1e-9)?;
+    taper_drill(family, &z).is_none().then(|| {
+        format!("no tap drill is tabulated for `{}` (Yamawa's table, which the tapped-hole drills come from, lists {listed}): it is not offered as a tapped hole", text.trim())
+    })
+}
+
 /// An internal taper thread (Rc, NPT) of the size tables a modelled thread cuts
-/// ([`crate::pipe_thread_sizes`]), drilled with [`TaperDrill`]'s stocked drill.
-fn taper_size(family: TappedThreadFamily, size: crate::pipe_thread_sizes::PipeSize) -> TappedThread {
+/// ([`crate::pipe_thread_sizes`]), drilled with the tap maker's drill ([`TaperDrill`]); none for
+/// a size without one.
+fn taper_size(family: TappedThreadFamily, size: crate::pipe_thread_sizes::PipeSize) -> Option<TappedThread> {
     use crate::thread_forms::ThreadForm;
     let p = size.pitch();
     let form = if family == TappedThreadFamily::Npt { ThreadForm::Npt } else { ThreadForm::Bspt };
     let designation = form.format(size.major, p, p);
     let designation = if form == ThreadForm::Bspt { designation.replacen("R ", "Rc ", 1) } else { designation };
-    let tap_drill = taper_drill(family, &size).diameter;
-    TappedThread { family, designation, major_diameter: size.major, pitch: p, tap_drill }
+    let tap_drill = taper_drill(family, &size)?.diameter;
+    Some(TappedThread { family, designation, major_diameter: size.major, pitch: p, tap_drill })
 }
 
 // Diameter/pitch pairs verified against Guhring, plus Yamawa for M12x1.25.
@@ -249,8 +219,7 @@ pub fn tapped_thread_sizes(family: TappedThreadFamily) -> Vec<TappedThread> {
         return crate::pipe_thread_catalog::pipe_thread_sizes().map(pipe_size).filter(|s| s.family == family).collect();
     }
     match family {
-        TappedThreadFamily::Rc => return crate::pipe_thread_sizes::iso_7_1().map(|z| taper_size(family, z)).collect(),
-        TappedThreadFamily::Npt => return crate::pipe_thread_sizes::npt().map(|z| taper_size(family, z)).collect(),
+        TappedThreadFamily::Rc | TappedThreadFamily::Npt => return taper_sizes(family).into_iter().filter_map(|z| taper_size(family, z)).collect(),
         _ => {}
     }
 
@@ -274,8 +243,8 @@ pub fn tapped_thread_sizes(family: TappedThreadFamily) -> Vec<TappedThread> {
 }
 
 /// Explicit metric custom sizes remain supported. Unified sizes must be in the verified
-/// catalogue and include their UNC/UNF suffix. G/Rp use explicit process drills, Rc/NPT the drill
-/// derived from their standards ([`taper_size`]).
+/// catalogue and include their UNC/UNF suffix. G/Rp use explicit process drills, Rc/NPT the tap
+/// maker's tabulated drills ([`TaperDrill`]); an Rc or NPT size without one is none.
 pub fn parse_tapped_thread(text: &str) -> Option<TappedThread> {
     if text.len() > 128 {
         return None;
@@ -319,36 +288,35 @@ mod tests {
         }
     }
 
-    /// Rc and NPT holes: the size tables' diameters, and the stocked drill just under the internal
-    /// minor where the thread ends (Rc 1/2: d1 18.631 at the face less 13.2 mm of useful thread at
-    /// 1 in 16, 17.807, drilled 17.75 mm; 1/2 NPT: E1 - h = 0.77843 - 0.05714 in at the face less
-    /// L2 = 0.5337 in at 1 in 16, 0.6879 in, drilled 11/16 in), and no external R.
+    /// Rc and NPT holes: the size tables' diameters, the tap maker's drill (Yamawa YEU23 pp.709
+    /// and 710) and the standard's minor where the thread ends (Rc 1/2: d1 18.631 at the face less
+    /// 13.2 mm of useful thread at 1 in 16; 1/2 NPT: E1 - h = 0.77843 - 0.05714 in at the face less
+    /// L2 = 0.5337 in at 1 in 16), a size without a tabulated drill refused, and no external R.
     #[test]
-    fn internal_taper_threads_drill_to_their_minor_where_the_thread_ends() {
+    fn internal_taper_threads_take_the_tap_makers_drill() {
         let rc = parse_tapped_thread("Rc1/2").unwrap();
-        assert_eq!((rc.family, rc.designation.as_str(), rc.major_diameter), (TappedThreadFamily::Rc, "Rc 1/2", 20.955));
+        assert_eq!((rc.family, rc.designation.as_str(), rc.major_diameter, rc.tap_drill), (TappedThreadFamily::Rc, "Rc 1/2", 20.955, 17.6));
         let d = rc.taper_drill().unwrap();
         assert!((d.exact - (18.631 - 13.2 / 16.0)).abs() < 2e-3, "{d:?}");
-        assert_eq!((rc.tap_drill, d.name.as_deref()), (17.75, Some("17.75 mm")));
         let npt = parse_tapped_thread("1/2 NPT").unwrap();
-        assert_eq!((npt.family, npt.designation.as_str()), (TappedThreadFamily::Npt, "1/2-14 NPT"));
+        assert_eq!((npt.family, npt.designation.as_str(), npt.tap_drill), (TappedThreadFamily::Npt, "1/2-14 NPT", 17.6));
         let d = npt.taper_drill().unwrap();
         assert!((d.exact - (0.77843 - 0.8 / 14.0 - 0.5337 / 16.0) * 25.4).abs() < 2e-3, "{d:?}");
-        assert_eq!((npt.tap_drill, d.name.as_deref()), (11.0 / 16.0 * 25.4, Some("11/16 in")));
-        // A letter drill where it is the closer stocked size (1/8 NPT), and a bore past the series.
-        let small = parse_tapped_thread("1/8 NPT").unwrap().taper_drill().unwrap();
-        assert!(small.diameter <= small.exact && small.name.is_some(), "{small:?}");
-        let large = parse_tapped_thread("Rc 6").unwrap().taper_drill().unwrap();
-        assert!(large.name.is_none() && (large.diameter - large.exact).abs() < 1e-3, "{large:?}");
-        for family in [TappedThreadFamily::Rc, TappedThreadFamily::Npt] {
-            for s in tapped_thread_sizes(family) {
-                let d = s.taper_drill().unwrap();
-                assert!(d.diameter <= d.exact + 1e-9 && d.exact - d.diameter < 0.02 * d.exact + 0.4, "{}: {d:?}", s.designation);
-            }
-        }
         assert_eq!(rc.profile_degrees(), 55.0);
         assert_eq!(npt.profile_degrees(), 60.0);
         assert!(parse_tapped_thread("R 1/2").is_none(), "an external taper thread is no hole's");
+        for untabulated in ["Rc 5", "Rc 6", "4-8 NPT", "12 NPT"] {
+            assert!(parse_tapped_thread(untabulated).is_none(), "{untabulated}");
+            assert!(untabulated_taper_tap(untabulated).is_some_and(|e| e.contains("no tap drill is tabulated")), "{untabulated}");
+        }
+        assert!(untabulated_taper_tap("Rc 1/2").is_none() && untabulated_taper_tap("M8").is_none());
+        // Each tabulated drill lies within a pitch of the standard's minor where the thread ends.
+        for family in [TappedThreadFamily::Rc, TappedThreadFamily::Npt] {
+            for s in tapped_thread_sizes(family) {
+                let d = s.taper_drill().unwrap();
+                assert!((d.diameter - d.exact).abs() < s.pitch, "{}: {d:?}", s.designation);
+            }
+        }
     }
 
     #[test]
@@ -367,8 +335,8 @@ mod tests {
             let count = match family {
                 TappedThreadFamily::Metric => sizes.len(),
                 TappedThreadFamily::G | TappedThreadFamily::Rp => 6,
-                TappedThreadFamily::Rc => 15,
-                TappedThreadFamily::Npt => crate::pipe_thread_sizes::npt().count(),
+                TappedThreadFamily::Rc => RC_DRILLS.len(),
+                TappedThreadFamily::Npt => NPT_DRILLS.len(),
                 _ => 14,
             };
             assert_eq!(sizes.len(), count, "{family:?}");

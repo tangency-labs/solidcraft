@@ -36,18 +36,16 @@ thread classes and sealing behaviour are outside this catalogue.
 
 ## Taper Rc and NPT threads
 
-An Rc or NPT hole is drilled with the largest stocked drill not larger than the
-internal thread's minor diameter where the thread ends: the reference plane's
-minor (d - 2h for ISO 7-1, E1 - h for NPT) at the face, less the 1 in 16 taper
-over the thread's length (ISO 7-1's useful thread, NPT's effective thread L2), so
-that the tap cuts full form over the whole length. Rc takes a metric drill of the
-DIN 345 series (to 100 mm), NPT a letter or fractional inch drill (by 64ths to
-1 1/2 in, ASME B94.11M); past the series the hole is bored to the exact value. The
-Hole dialog shows the drill and, as its tooltip, the exact value: Rc 1/2 is
-17.807 mm, drilled 17.75 mm; 1/2 NPT is 17.473 mm (0.6879 in), drilled 11/16 in
-(17.4625 mm). This is derived from the standards, not a tap maker's
-recommendation (which often allows for reaming); an explicit `diameter`
-overrides it. Listed, the hole
+An Rc or NPT hole takes the tap maker's drill for a straight (not reamed) hole:
+Yamawa YEU23's "maximum size of straight bored hole", for Rc with non-full
+threads (printed p.709, Rc 1/16 to 4) and for NPT (printed p.710, 1/16 to 3).
+A size of ISO 7-1 or ASME B1.20.1 outside those (Rc 5 and 6, NPT 3 1/2 to 12) is
+refused as a tapped hole. The Hole dialog shows the drill and, as its tooltip,
+the standard's minor diameter where the thread ends: the reference plane's minor
+(d - 2h for ISO 7-1, E1 - h for NPT) at the face less the 1 in 16 taper over the
+thread's length (ISO 7-1's useful thread, NPT's effective thread L2). Rc 1/2:
+drill 17.6 mm, minor 17.807 mm; 1/2 NPT: drill 17.60 mm, minor 17.473 mm. An
+explicit `diameter` overrides the drill. Listed, the hole
 is that cylindrical drill; modelled, the thread's taper is cut into it (the tap's
 minor cone and the helical groove).
 
@@ -78,16 +76,11 @@ cylindrical pilot plus the designation; modelled, the helical groove is cut too.
 
 ## Primary sources
 
-- DIN 345:2006 (taper shank twist drills), the metric drill diameters to 100 mm as
-  reproduced at <https://www.fasten.it/en/Norms/Norm/DIN%20345>: the stocked drills
-  of Rc holes. Three digits that reproduction drops (15.25, 34.5, 54) are restored
-  from their neighbours.
-- ASME B94.11M (twist drills): the letter drill sizes A to Z and fractional sizes
-  by 64ths of an inch, the stocked drills of NPT holes.
 
 - [Yamawa, YEU23 European catalogue](https://www.yamawa.eu/files/Yamawa_European_Catalogue_YEU23.pdf),
   printed page 668: basic G/Rp dimensions; page 707: separate G and Rp drill and
-  recommended bore columns. These supply the finite parallel-pipe entries above.
+  recommended bore columns; page 709: Rc drills (maximum straight bored hole);
+  page 710: NPT drills. These supply the finite parallel-pipe entries above.
 
 - [Guhring, Tap Drill Sizes](https://guhring.com/media/catalogs/lgbkp3ieki4.pdf),
   PDF page 2: UNC/UNF pitch and practical CUT TAPS approximately75% drills;

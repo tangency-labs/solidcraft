@@ -1216,8 +1216,8 @@ fn a_taper_pipe_thread_starts_at_a_free_end_and_is_named_for_its_side() {
 /// A tapped hole's thread cut into its wall (`modeled`), as the thread feature cuts one: an M8
 /// blind hole whose groove stops clear of the drill point's bottom, or fades out before it
 /// (`ease_out`, ISO 3508), which leaves more of the wall than the full form there; an Rc 1/2
-/// through a plate, drilled with the stocked drill under its minor where the thread ends and cut
-/// to its taper; each a valid body that reopens the same.
+/// through a plate, drilled with the tap maker's drill and cut to its taper; each a valid body
+/// that reopens the same. An Rc size with no tabulated drill is refused.
 #[test]
 fn a_modelled_tapped_hole_stops_clear_of_its_bottom_or_fades_out_before_it() {
     let blind = |extra: Value| {
@@ -1243,9 +1243,8 @@ fn a_modelled_tapped_hole_stops_clear_of_its_bottom_or_fades_out_before_it() {
     run(&mut s, "solid.box", json!({"length":40,"width":40,"height":12,"body_name":"Plate"}));
     let out = run(&mut s, "solid.hole", json!({"position":[20,20,12],"direction":[0,0,-1],"thread":"Rc 1/2"}));
     let drilled = exact_volume(&s, "Plate");
-    // d1 at the face less 13.2 mm of useful thread at 1 in 16 is 17.807 mm: the stocked drill
-    // under it is 17.75 mm (DIN 345).
-    let drill: f64 = 17.75;
+    // The tap maker's drill for a straight Rc 1/2 hole (Yamawa YEU23 p.709).
+    let drill: f64 = 17.6;
     assert!((drilled - (40.0 * 40.0 * 12.0 - PI * (drill / 2.0).powi(2) * 12.0)).abs() < 1e-3, "{drilled}");
     let id = out["feature"].as_u64().unwrap();
     let redefine = json!({"position":[20,20,12],"direction":[0,0,-1],"thread":"Rc 1/2","modeled":true});
@@ -1256,4 +1255,5 @@ fn a_modelled_tapped_hole_stops_clear_of_its_bottom_or_fades_out_before_it() {
     let err = |p: Value| Session::default().execute("solid.hole", &p).err().map(|e| e.to_string()).unwrap_or_default();
     assert!(err(json!({"position":[0,0,0],"diameter":5,"modeled":true})).contains("`modeled` needs `thread`"));
     assert!(err(json!({"position":[0,0,0],"thread":"M8","ease_out":"standard"})).contains("modelled thread"));
+    assert!(err(json!({"position":[0,0,0],"thread":"Rc 5"})).contains("no tap drill is tabulated"));
 }

@@ -4,48 +4,48 @@
     "thread.form_bspt": "Pipe taper R, Rc (ISO 7-1)",
     "thread.form_npt": "Pipe taper NPT (ASME B1.20.1)",
     "thread.form_rp": "Pipe Rp (ISO 7-1)",
-    "thread.taper_drill_exact": "The standard's minor diameter where the thread ends is {exact} mm; this is the stocked drill under it"
+    "thread.taper_drill_exact": "The standard's minor diameter where the thread ends is {exact} mm; the drill is the tap maker's recommendation"
   },
   "ar": {
     "thread.form_bspp": "سن أنابيب G (ISO 228-1)",
     "thread.form_bspt": "سن أنابيب مخروطي R، Rc (ISO 7-1)",
     "thread.form_npt": "سن أنابيب مخروطي NPT (ASME B1.20.1)",
     "thread.form_rp": "سن أنابيب داخلي متوازٍ Rp (ISO 7-1)",
-    "thread.taper_drill_exact": "القطر الأصغر القياسي عند نهاية السن {exact} مم؛ هذا هو المثقاب المتوفر الأصغر منه مباشرة"
+    "thread.taper_drill_exact": "القطر الأصغر القياسي عند نهاية السن {exact} مم؛ المثقاب هو ما يوصي به صانع اللقمة"
   },
   "he": {
     "thread.form_bspp": "תבריג צנרת G (ISO 228-1)",
     "thread.form_bspt": "תבריג צנרת קוני R, Rc (ISO 7-1)",
     "thread.form_npt": "תבריג צנרת קוני NPT (ASME B1.20.1)",
     "thread.form_rp": "תבריג צנרת פנימי מקביל Rp (ISO 7-1)",
-    "thread.taper_drill_exact": "הקוטר הקטן התקני בסוף התבריג הוא {exact} מ\"מ; זהו המקדח המלאי שמתחתיו"
+    "thread.taper_drill_exact": "הקוטר הקטן התקני בסוף התבריג הוא {exact} מ\"מ; המקדח הוא המלצת יצרן המברז"
   },
   "ja": {
     "thread.form_bspp": "管用平行ねじ G（ISO 228-1）",
     "thread.form_bspt": "管用テーパねじ R、Rc（ISO 7-1）",
     "thread.form_npt": "管用テーパねじ NPT（ASME B1.20.1）",
     "thread.form_rp": "管用平行めねじ Rp（ISO 7-1）",
-    "thread.taper_drill_exact": "ねじ終端での規格の谷径は {exact} mm です。これはそれ以下で最も近い市販ドリルです"
+    "thread.taper_drill_exact": "ねじ終端での規格の谷径は {exact} mm です。下穴ドリルはタップメーカーの推奨値です"
   },
   "zh": {
     "thread.form_bspp": "管螺纹 G（ISO 228-1）",
     "thread.form_bspt": "圆锥管螺纹 R、Rc（ISO 7-1）",
     "thread.form_npt": "圆锥管螺纹 NPT（ASME B1.20.1）",
     "thread.form_rp": "圆柱内管螺纹 Rp（ISO 7-1）",
-    "thread.taper_drill_exact": "螺纹终端处的标准小径为 {exact} mm；这是不大于它的常备钻头"
+    "thread.taper_drill_exact": "螺纹终端处的标准小径为 {exact} mm；钻头为丝锥制造商的推荐值"
   },
   "de": {
     "thread.form_bspp": "Rohrgewinde G (ISO 228-1)",
     "thread.form_bspt": "Kegeliges Rohrgewinde R, Rc (ISO 7-1)",
     "thread.form_npt": "Kegeliges Rohrgewinde NPT (ASME B1.20.1)",
     "thread.form_rp": "Zylindrisches Innenrohrgewinde Rp (ISO 7-1)",
-    "thread.taper_drill_exact": "Der genormte Kerndurchmesser am Gewindeende ist {exact} mm; dies ist der nächstkleinere Lagerbohrer"
+    "thread.taper_drill_exact": "Der genormte Kerndurchmesser am Gewindeende ist {exact} mm; der Bohrer ist die Empfehlung des Gewindebohrerherstellers"
   },
   "ko": {
     "thread.form_bspp": "관용 평행나사 G (ISO 228-1)",
     "thread.form_bspt": "관용 테이퍼나사 R, Rc (ISO 7-1)",
     "thread.form_npt": "관용 테이퍼나사 NPT (ASME B1.20.1)",
     "thread.form_rp": "관용 평행 암나사 Rp (ISO 7-1)",
-    "thread.taper_drill_exact": "나사 끝에서의 규격 골지름은 {exact} mm이며, 이는 그 이하의 가장 가까운 상용 드릴입니다"
+    "thread.taper_drill_exact": "나사 끝에서의 규격 골지름은 {exact} mm이며, 드릴은 탭 제조사의 권장값입니다"
   }
 }
