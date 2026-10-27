@@ -22,7 +22,7 @@ fn lift_error(surface: &Surface, curve: &Curve, interval: [f64; 2], pc: &Curve2)
     let knots = match pc {
         Curve2::Spline { knots, .. } | Curve2::RationalSpline { knots, .. } => knots,
     };
-    let mut ts: Vec<f64> = (0..=64).map(|k| t0 + (t1 - t0) * k as f64 / 64.).collect();
+    let mut ts: Vec<f64> = (0..=64).map(|k| if k == 64 { t1 } else { t0 + (t1 - t0) * k as f64 / 64. }).collect();
     ts.extend(knots.windows(2).filter(|k| k[0] < k[1]).map(|k| 0.5 * (k[0] + k[1])));
     ts.iter().map(|&t| s.point(pc.eval(t).unwrap()).unwrap().dist(c.point(t).unwrap())).fold(0., f64::max)
 }
@@ -31,6 +31,18 @@ fn segment_points(pc: &Curve2) -> [[f64; 2]; 2] {
         Curve2::Spline { knots, points } if knots.len() == 4 && points.len() == 2 => [points[0], points[1]],
         other => panic!("not a degree-1 segment: {other:?}"),
     }
+}
+
+#[test]
+fn a_spline_on_a_plane_over_an_interval_whose_even_steps_round_past_its_end_is_mapped() {
+    // Poppy Humanoid's edge: t0 + (t1 − t0)·1 is 1.2985843833752289, one rounding past t1, where
+    // a pcurve on [t0, t1] has no point; the closed form was refused for it.
+    let (t0, t1) = (0.013209624271103393f64, 1.2985843833752286f64);
+    assert!(t0 + (t1 - t0) * 1.0 > t1, "the interval's even step rounds past its end");
+    let plane = Surface::Plane { origin: [0.; 3], u_axis: [1., 0., 0.], v_axis: [0., 1., 0.] };
+    let curve = Curve::Spline { knots: vec![t0, t0, t0, t1, t1, t1], points: vec![[0., 0., 0.], [1., 2., 0.], [3., 1., 0.]] };
+    let pc = &pcurves_within(&plane, &one(&curve, [t0, t1]), 1e-9, None).unwrap()[0][0];
+    assert!(lift_error(&plane, &curve, [t0, t1], pc) < 1e-12);
 }
 
 #[test]

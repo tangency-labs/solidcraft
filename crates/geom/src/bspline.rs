@@ -303,16 +303,24 @@ pub fn basis_bezier(knots: &[f64], a: f64, b: f64) -> SplineResult<Vec<f64>> {
     Ok(out)
 }
 
+/// Ulps of the domain's magnitude a parameter may lie past a spline's domain end and still be
+/// that end ([`find_span`]): the rounding of an affine step, `a + (b − a)·s`, a few ulps at most.
+pub const DOMAIN_ROUNDING: f64 = 8.0;
+
 /// The span index `k` with `knots[k] ≤ u < knots[k+1]` among the valid spans `p ≤ k < n`
-/// (`n` control points), the last span closed at the domain end (NURBS Book A2.1).
+/// (`n` control points), the last span closed at the domain end (NURBS Book A2.1). A parameter
+/// past an end of the domain by floating-point rounding only ([`DOMAIN_ROUNDING`]) is at that
+/// end: `a + (b − a)·1`, the last of a range's even steps, may round one step past `b`.
 pub fn find_span(knots: &[f64], p: usize, n: usize, u: f64) -> Option<usize> {
     if n <= p || knots.len() != n + p + 1 || !u.is_finite() {
         return None;
     }
     let (lo, hi) = (*knots.get(p)?, *knots.get(n)?);
-    if u < lo || u > hi {
+    let slack = DOMAIN_ROUNDING * f64::EPSILON * lo.abs().max(hi.abs()).max(1.0);
+    if u < lo - slack || u > hi + slack {
         return None;
     }
+    let u = u.clamp(lo, hi);
     // The last non-empty span in [p, n−1] that starts at or before u: by bisection (the knots
     // are sorted), and at the domain end the last non-empty span.
     let mut k = if u >= hi {
@@ -768,6 +776,19 @@ pub(crate) mod tests {
         }
         assert_eq!(find_span(&knots, p, n, 1.5), None);
         assert_eq!(find_span(&knots, p, n, f64::NAN), None);
+    }
+
+    #[test]
+    fn a_parameter_a_rounding_past_the_domain_end_is_the_end() {
+        // Poppy Humanoid's interval: the last even step, t0 + (t1 − t0)·1, rounds one ulp past t1.
+        let (t0, t1) = (0.013209624271103393f64, 1.2985843833752286f64);
+        let past = t0 + (t1 - t0) * 1.0;
+        assert!(past > t1);
+        let knots = [t0, t0, t0, t1, t1, t1];
+        assert_eq!(find_span(&knots, 2, 3, past), find_span(&knots, 2, 3, t1));
+        assert_eq!(find_span(&knots, 2, 3, t0 - f64::EPSILON), find_span(&knots, 2, 3, t0));
+        // A parameter outside the domain by more than rounding is still none.
+        assert_eq!(find_span(&knots, 2, 3, t1 + 1e-9), None);
     }
 
     #[test]

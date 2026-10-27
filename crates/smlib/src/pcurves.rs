@@ -49,16 +49,49 @@ fn trims(face: &TrimFace<'_>) -> Result<Vec<Vec<Curve2>>, String> {
             let e = edge_of(u.edge)?;
             let edge = out.edges.get(e).ok_or("an edge SMLib lost")?;
             let ours = face.edges.get(u.edge as usize).ok_or("edge reference")?;
-            let slack = 1e-9 * ours.interval.iter().fold(1.0f64, |m, t| m.max(t.abs()));
-            if (0..2).any(|k| (edge.interval[k] - ours.interval[k]).abs() > slack) {
-                return Err(format!("SMLib moved an edge's interval from {:?} to {:?}", ours.interval, edge.interval));
-            }
             let found = made_uses.iter().find(|m| m.edge as usize == e && m.forward == (u.forward != reversed));
-            pcs.push(found.ok_or("a use SMLib did not keep")?.pcurve.clone());
+            let pc = found.ok_or("a use SMLib did not keep")?.pcurve.clone();
+            pcs.push(on_our_interval(pc, ours, edge.interval)?);
         }
         result.push(pcs);
     }
     Ok(result)
+}
+
+/// A pcurve SMLib made on its edge's interval `theirs`, on ours. SMLib may set an edge's end to
+/// a parameter of its own (a knot its vertex lies at, the end of the part on the face): where
+/// each end it chose is within the edge's tolerance of ours on the edge's curve, the pcurve is
+/// mapped onto our interval by the affine change of parameter (exact for a B-spline: its knots
+/// move), and the record's check measures it against the edge as any pcurve. Farther is SMLib
+/// trimming the edge, refused with how far.
+pub(crate) fn on_our_interval(pc: Curve2, ours: &solidcraft_geom::brep::pcurve::TrimEdge<'_>, theirs: [f64; 2]) -> Result<Curve2, String> {
+    let [a, b] = ours.interval;
+    let [c, d] = theirs;
+    if a == c && b == d {
+        return Ok(pc);
+    }
+    let curve = solidcraft_geom::brep::eval::CurveEval::new(ours.nurbs.unwrap_or(ours.curve)).map_err(|e| e.to_string())?;
+    let at = |t: f64| curve.point(t).ok_or_else(|| format!("the edge's curve has no point at {t}"));
+    let shift = at(a)?.dist(at(c)?).max(at(b)?.dist(at(d)?));
+    if !(shift <= ours.tolerance) || !(d > c) {
+        return Err(format!(
+            "SMLib moved an edge's interval from {:?} to {:?}, its ends {shift} mm along its curve (tolerance {} mm)",
+            ours.interval, theirs, ours.tolerance
+        ));
+    }
+    let map = |k: f64| {
+        if k == c {
+            a
+        } else if k == d {
+            b
+        } else {
+            a + (k - c) * ((b - a) / (d - c))
+        }
+    };
+    Ok(match pc {
+        Curve2::Spline { knots, points } => Curve2::Spline { knots: knots.into_iter().map(map).collect(), points },
+        Curve2::RationalSpline { knots, homogeneous } => Curve2::RationalSpline { knots: knots.into_iter().map(map).collect(), homogeneous },
+    })
 }
 
 /// The face as a one-face open sheet, and its uses that go without trims.

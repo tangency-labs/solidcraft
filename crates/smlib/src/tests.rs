@@ -90,3 +90,22 @@ fn every_call_is_a_profiler_span_timed_by_the_c_api() {
     let names: Vec<&str> = r.rows.iter().filter(|r| r.category == "smlib").map(|r| r.name).collect();
     assert!(names.contains(&"smlib_make_box") && names.contains(&"smlib_brep_volume"), "{r:?}");
 }
+
+/// SMLib may end an edge at a parameter of its own (a knot its vertex lies at): within the
+/// edge's tolerance on its curve the pcurve is mapped onto our interval exactly; farther is SMLib
+/// trimming the edge, refused with how far.
+#[test]
+fn a_pcurve_smlib_ends_within_the_edges_tolerance_is_mapped_onto_our_interval() {
+    use solidcraft_geom::brep::pcurve::TrimEdge;
+    use solidcraft_geom::brep::{Curve, Curve2};
+    let line = Curve::Line { start: [0.0, 0.0, 0.0], end: [2.0, 0.0, 0.0] };
+    let edge = TrimEdge { curve: &line, nurbs: None, interval: [0.0, 1.0], vertices: [0, 1], tolerance: 1e-5 };
+    let theirs = [0.0, 1.0 - 2e-8];
+    let pc = Curve2::Spline { knots: vec![0.0, 0.0, theirs[1], theirs[1]], points: vec![[0.0, 0.0], [1.0, 0.0]] };
+    let mapped = crate::pcurves::on_our_interval(pc.clone(), &edge, theirs).unwrap();
+    assert_eq!(mapped.interval(), Some([0.0, 1.0]));
+    assert_eq!(mapped.eval(1.0), Some([1.0, 0.0]));
+    // 0.02 mm along the edge is past its 1e-5 mm.
+    let err = crate::pcurves::on_our_interval(pc, &edge, [0.0, 0.99]).unwrap_err();
+    assert!(err.contains("SMLib moved an edge's interval") && err.contains("tolerance"), "{err}");
+}

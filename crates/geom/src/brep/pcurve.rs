@@ -495,7 +495,8 @@ impl On {
         let knots = match pc {
             Curve2::Spline { knots, .. } | Curve2::RationalSpline { knots, .. } => knots,
         };
-        let even = (0..=CHECKS).map(|k| t0 + (t1 - t0) * k as f64 / CHECKS as f64);
+        // The ends exactly: `t0 + (t1 − t0)·1` may round past `t1`, where the pcurve has no point.
+        let even = (0..=CHECKS).map(|k| if k == CHECKS { t1 } else { t0 + (t1 - t0) * k as f64 / CHECKS as f64 });
         let spans = knots.windows(2).filter_map(|k| Some((*k.first()?, *k.get(1)?))).filter(|(a, b)| a < b).take(1 << 12).map(|(a, b)| 0.5 * (a + b));
         even.chain(spans).all(|t| {
             let lifted = pc.eval(t).and_then(|q| self.surface.point(q));

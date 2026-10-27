@@ -458,18 +458,11 @@ impl<'b, 'a> Builder<'b, 'a> {
     /// and the edge's tolerance covers it. A spline face's gaps are measured on the pcurves its
     /// kernel makes (`raise_edges`): an iterative nearest point may settle elsewhere on it.
     fn measure_edges(&mut self, surface: &BSurface, edge_loops: &[Vec<(u32, bool)>]) -> R<()> {
-        if !matches!(
-            surface,
-            BSurface::Plane { .. }
-                | BSurface::PlaneThrough { .. }
-                | BSurface::Cylinder { .. }
-                | BSurface::Cone { .. }
-                | BSurface::Sphere { .. }
-                | BSurface::Torus { .. }
-        ) {
-            return Ok(());
-        }
         let on = SurfaceEval::new(surface).map_err(|m| m.to_string())?;
+        // One search grid for all of the face's points, each searched from the whole grid: a
+        // nearest point carried on as the next one's start can settle on another part of a
+        // closed spline.
+        let starts = solidcraft_geom::tess::uv::Starts::default();
         for l in edge_loops {
             for &(e, _) in l {
                 let edge = self.edges.get(e as usize).ok_or("edge reference")?;
@@ -480,10 +473,10 @@ impl<'b, 'a> Builder<'b, 'a> {
                 let eval = CurveEval::new(curve).map_err(|m| m.to_string())?;
                 let mut gap = 0.0f64;
                 for k in 0..=EDGE_GAP_SAMPLES {
-                    let t = t0 + (t1 - t0) * (k as f64 / EDGE_GAP_SAMPLES as f64);
+                    let t = if k == EDGE_GAP_SAMPLES { t1 } else { t0 + (t1 - t0) * (k as f64 / EDGE_GAP_SAMPLES as f64) };
                     let Some(p) = eval.point(t) else { continue };
                     // A point with no nearest point is the pcurves' to refuse, with why.
-                    let Some(s) = on.project(p, None, f64::INFINITY).and_then(|q| on.point(q)) else { continue };
+                    let Some(s) = on.project_with(&starts, p, None, f64::INFINITY).and_then(|q| on.point(q)) else { continue };
                     gap = gap.max(s.dist(p));
                 }
                 self.cover_edge(e, gap, EDGE_SURFACE_MARGIN)?;
@@ -502,7 +495,14 @@ impl<'b, 'a> Builder<'b, 'a> {
             return Err(format!("an edge lies {gap} mm off the face's surface"));
         }
         x.tolerance = margin * gap;
+        let (tolerance, ends) = (x.tolerance, x.vertices);
         self.raised_edges.insert(e);
+        // A vertex's tolerance covers every edge that meets it, as in any tolerant record.
+        for v in ends {
+            if let Some(vx) = self.vertices.get_mut(v as usize) {
+                vx.tolerance = vx.tolerance.max(tolerance);
+            }
+        }
         Ok(())
     }
 
@@ -523,7 +523,7 @@ impl<'b, 'a> Builder<'b, 'a> {
                 let eval = CurveEval::new(curve).map_err(|m| m.to_string())?;
                 let mut gap = 0.0f64;
                 for k in 0..=EDGE_GAP_SAMPLES {
-                    let t = t0 + (t1 - t0) * (k as f64 / EDGE_GAP_SAMPLES as f64);
+                    let t = if k == EDGE_GAP_SAMPLES { t1 } else { t0 + (t1 - t0) * (k as f64 / EDGE_GAP_SAMPLES as f64) };
                     // A point a pcurve or surface lacks is the record check's to name.
                     let (Some(q), Some(p)) = (c.eval(t), eval.point(t)) else { continue };
                     if let Some(s) = on.point(q) {
