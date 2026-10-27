@@ -1015,4 +1015,93 @@ mod tests {
             assert!(crate::topology::brep::p2::is_manifold_solid(&b).unwrap());
         }
     }
+
+    /// A quarter disc of radius 20 turned a whole turn about z: a dome. Its arc is a
+    /// sketch's arc through (20, 0), a rounded (14.142136, 14.142136) and (0, 20), whose
+    /// centre (c, 0, c), c = 1.28e-6, is off the axis by far less than the B-rep
+    /// tolerance (SolidCraft rig shell/4847, #1123).
+    fn rounded_quarter_disc(k: &mut Kernel, fix: bool) -> Brep {
+        k.fixes.revolve_analytic_profile_faces = true;
+        k.fixes.revolve_arc_centre_near_axis_is_sphere = fix;
+        let (c, r, a0) = (
+            1.2846627950203038e-06,
+            19.99999871533725,
+            -6.42331438769116e-08,
+        );
+        let to_deg = 180.0 / std::f64::consts::PI;
+        let arc = Curve::from(
+            BSplineCurve::create_circle_segment(
+                3,
+                &Axis2Placement::new(Vec3::new(c, 0.0, c), Vec3::X, Vec3::Z),
+                r,
+                a0 * to_deg,
+                (a0 + 1.5707964552611844) * to_deg,
+                crate::nurbs::b_spline_curve::NurbCircleParam::Quadratic,
+            )
+            .unwrap(),
+        );
+        let seg =
+            |a: Vec3, b: Vec3| Curve::from(BSplineCurve::create_line_segment(3, a, b).unwrap());
+        let rim = seg(Vec3::ZERO, Vec3::new(20.0, 0.0, 0.0));
+        let axis = seg(Vec3::new(0.0, 0.0, 20.0), Vec3::ZERO);
+        create_rotational_sweep(
+            k,
+            &[Some(&rim), Some(&arc), Some(&axis)],
+            Vec3::ZERO,
+            Vec3::Z,
+            360.0,
+            false,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn issue_1123_arc_centred_within_tolerance_of_the_axis_is_a_sphere_with_its_pole_on_it() {
+        use crate::geom::attribute::{AttributeStore, ObjectKey};
+        use crate::mass::integrator::properties::{brep_volume, PropertyAttributes};
+        let store = AttributeStore::default();
+        let key_of = |_| ObjectKey(0);
+        let attributes = PropertyAttributes {
+            store: &store,
+            key_of: &key_of,
+        };
+        for fix in [false, true] {
+            let mut k = Kernel::default();
+            let mut b = rounded_quarter_disc(&mut k, fix);
+            let dome = *b.face_list().last().unwrap();
+            let surface = b.face(dome).unwrap().surface.as_ref().unwrap();
+            let d = surface.natural_uv_domain();
+            // the farthest the dome's surface strays from the sphere of radius 20 about the origin
+            let mut stray = 0.0_f64;
+            for i in 0..=8 {
+                for j in 0..=8 {
+                    let p = surface
+                        .evaluate_point(&k, d.evaluate(f64::from(i) / 8.0, f64::from(j) / 8.0))
+                        .unwrap();
+                    stray = stray.max((p.length() - 20.0).abs());
+                }
+            }
+            let pole_off = crate::topology::brep::p1::vertices(&b, None)
+                .unwrap()
+                .iter()
+                .map(|&v| crate::topology::vertex::point(&b, v).unwrap())
+                .filter(|p| p.z > 10.0)
+                .map(|p| p.x.hypot(p.y))
+                .fold(0.0, f64::max);
+            let volume = brep_volume(&k, &mut b, 1e-8, &attributes).unwrap();
+            // 2/3 pi 20^3
+            let want = 2.0 / 3.0 * std::f64::consts::PI * 8000.0;
+            if fix {
+                assert_eq!(face_kinds(&b), ["plane", "sphere"]);
+                assert!(stray <= 1e-9, "dome strays {stray} from its sphere");
+                assert!(pole_off <= 1e-12, "pole {pole_off} off the axis");
+                assert!((volume - want).abs() <= 1e-6 * want, "{volume} vs {want}");
+                assert!(crate::topology::brep::p2::is_manifold_solid(&b).unwrap());
+            } else {
+                // the arc's own circle: a torus 1.28e-6 about the axis, off the sphere
+                assert_eq!(face_kinds(&b), ["plane", "torus"]);
+                assert!(stray > 1e-7, "{stray}");
+            }
+        }
+    }
 }

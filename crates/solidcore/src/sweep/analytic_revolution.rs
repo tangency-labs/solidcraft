@@ -91,8 +91,16 @@ pub fn analytic_revolution(
         .max_dimension()
         .max(ends.end.max_dimension())
         .max(base_pt.max_dimension());
+    // WR-471: the caller's own tolerance, which decides if an arc is centred on the axis
+    let axis_tol = if k.fixes.revolve_arc_centre_near_axis_is_sphere {
+        tol
+    } else {
+        0.0
+    };
     let tol = tol.min(FIT_REL * (1.0 + size));
-    let Some(Some(candidate)) = ignored(candidate(k, curve, base_pt, axis, angle_deg, tol))? else {
+    let Some(Some(candidate)) =
+        ignored(candidate(k, curve, base_pt, axis, angle_deg, tol, axis_tol))?
+    else {
         return Ok(None);
     };
     let made;
@@ -227,6 +235,7 @@ fn candidate(
     axis: Vec3,
     angle_deg: f64,
     tol: f64,
+    axis_tol: f64,
 ) -> Result<Option<Surface>> {
     let ends = curve.ends(k)?;
     let (start_dist, _) = line_point_distance(base_pt, axis, ends.start);
@@ -307,7 +316,7 @@ fn candidate(
     let mid = curve.evaluate_point(k, interval.evaluate(0.5))?;
     let to_deg = 180.0 / PI;
 
-    if centre_dist <= tol {
+    if centre_dist <= tol.max(axis_tol) {
         // a sphere: its meridian is the arc, in the plane of x and the axis
         let Some(x) = radial(base_pt, axis, mid, tol) else {
             return Ok(None);
@@ -315,6 +324,26 @@ fn candidate(
         let y = axis.cross(x);
         if !in_half_plane(k, curve, base_pt, x, y, tol)? {
             return Ok(None);
+        }
+        // WR-471: a centre off the axis by more than `tol` but within `axis_tol` makes the
+        // sphere centred on the axis through the arc's two ends (the corners the
+        // neighbouring profile edges share), not the arc's own circle moved onto the axis,
+        // which misses both ends and leaves a pole parallel of radius about
+        // sqrt(2 axis_tol R) where the arc ends on the axis
+        let (mut centre, mut radius) = (centre, radius);
+        if centre_dist > tol {
+            let (a0, a1) = (
+                line_closest_point(base_pt, axis, ends.start),
+                line_closest_point(base_pt, axis, ends.end),
+            );
+            let h = if (a1 - a0).abs() > axis_tol {
+                0.5 * (a0 + a1)
+                    + 0.5 * (end_dist - start_dist) * (end_dist + start_dist) / (a1 - a0)
+            } else {
+                line_closest_point(base_pt, axis, centre)
+            };
+            centre = base_pt + axis * h;
+            radius = 0.5 * ((a0 - h).hypot(start_dist) + (a1 - h).hypot(end_dist));
         }
         let latitude = |p: Point3| {
             let d = p - centre;
