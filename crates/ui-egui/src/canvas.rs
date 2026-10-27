@@ -899,9 +899,7 @@ fn value_box_full(
                 let r = crate::ui_kit::canvas_value_field(ui, id, value, keep_tab);
                 crate::params_dialog::complete(ui, &r, value);
                 if select_all {
-                    if auto {
-                        r.request_focus();
-                    }
+                    r.request_focus();
                     let n = value.chars().count();
                     let mut st = egui::text_edit::TextEditState::load(ui.ctx(), id).unwrap_or_default();
                     st.cursor.set_char_range(Some(egui::text_selection::CCursorRange::two(egui::text::CCursor::new(0), egui::text::CCursor::new(n))));

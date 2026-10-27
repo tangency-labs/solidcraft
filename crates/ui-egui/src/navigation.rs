@@ -795,7 +795,6 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     }
     // A twist of two fingers rolls the view the way they turn, as the 3D mouse's roll does.
     if touch_roll != 0.0 {
-        app.viewport.orbit_snap = None;
         app.viewport.orbit_free = None;
         app.cancel_view_animation();
         app.cam.roll_by(touch_roll);
@@ -803,7 +802,6 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     // Three fingers turn the view with them, as the mouse's orbit drag does (around the point
     // the gesture began on when Orbit around says cursor).
     if touch_orbit != egui::Vec2::ZERO {
-        app.viewport.orbit_snap = None;
         app.viewport.orbit_free = None;
         app.cancel_view_animation();
         let center = app.viewport.touch.map(|g| g.center);

@@ -1052,6 +1052,85 @@ impl<'a> Window<'a> {
         self.surface(ctx, false, |ui| self.content(ui, valid, body, left))
     }
 
+    pub(super) fn surface(&self, ctx: &egui::Context, modal: bool, add: impl FnOnce(&mut Ui) -> (bool, super::Action)) -> (bool, super::Action) {
+        let frame = if self.page_chrome {
+            // A system window covers what is behind it, like every other window (#9078).
+            super::navigation_popup_frame().inner_margin(0).fill(Tokens::get().dialog_body)
+        } else {
+            Panel::card_frame(ctx)
+        };
+        let viewport = ctx.viewport_rect();
+        let display = ctx.content_rect();
+        let was_filling = fills_display(ctx, self.id);
+        // A card that cannot hold its own size takes the display: a phone has no room for a
+        // floating card, so the card covers the screen and its content scrolls inside it.
+        let fills = self.fills_display && (self.width > dimension(viewport.width()) + 0.5 || self.height > dimension(viewport.height()) + 0.5);
+        let margin_x = frame.total_margin().sum().x;
+        let inner_width =
+            if fills { (dimension(viewport.width()) - margin_x).max(0.0) } else { (self.width.min(dimension(display.width())) - margin_x).max(0.0) };
+        // A card that took the display has square corners: it reaches the screen's edges.
+        let frame = if fills { frame.corner_radius(0.0) } else { frame };
+        if modal {
+            let shown = super::Container::new(ctx, super::Surface::Window)
+                .modal(self.id)
+                .backdrop_color(Tokens::get().tab_on_fill_dark.gamma_multiply(0.35))
+                .frame(frame)
+                .show(ctx, |ui| {
+                    ui.set_width(inner_width);
+                    let result = add(ui);
+                    super::Container::finish_content(ui, frame);
+                    result
+                });
+            scenario::publish_rect("dialog:window", shown.response.rect);
+            // The content lays out for the mode the card is in.
+            ctx.data_mut(|data| data.insert_temp(self.id.with(FILLS_DISPLAY), fills));
+            return shown.inner;
+        }
+        let window = super::Container::new(ctx, super::Surface::Window)
+            .window(self.title)
+            .id(self.id)
+            .title_bar(false)
+            .collapsible(false)
+            .resizable(false)
+            .min_width(inner_width)
+            .max_width(inner_width)
+            .default_width(inner_width)
+            .scroll(false)
+            .frame(frame)
+            .fade_in(false)
+            .fade_out(false);
+        let window = if fills {
+            // Edge to edge: the card covers the display and stays where it is.
+            window.pivot(egui::Align2::LEFT_TOP).fixed_rect(viewport).constrain_to(viewport).movable(false).resizable(false)
+        } else {
+            match (self.anchor, self.placed) {
+                (Some((align, offset)), _) => window.anchor(align, offset),
+                (None, Some((pivot, pos))) => {
+                    let window = window.pivot(pivot).default_pos(pos);
+                    // A card that took the display goes back to its own place when the display
+                    // grows again.
+                    if was_filling { window.current_pos(pos) } else { window }
+                }
+                (None, None) => {
+                    let pos = ctx.content_rect().center() - vec2(0.0, row_height() * 2.5);
+                    let window = window.pivot(egui::Align2::CENTER_CENTER).default_pos(pos);
+                    if was_filling { window.current_pos(pos) } else { window }
+                }
+            }
+        };
+        let shown = window.show(ctx, |ui| {
+            let result = add(ui);
+            super::Container::finish_content(ui, frame);
+            result
+        });
+        if let Some(shown) = &shown {
+            scenario::publish_rect("dialog:window", shown.response.rect);
+        }
+        // The content lays out for the mode the card is in.
+        ctx.data_mut(|data| data.insert_temp(self.id.with(FILLS_DISPLAY), fills));
+        shown.and_then(|r| r.inner).unwrap_or((false, super::Action::None))
+    }
+
     pub(super) fn content(&self, ui: &mut Ui, valid: bool, body: impl FnOnce(&mut Ui), left: impl FnOnce(&mut Ui)) -> (bool, super::Action) {
         let fills = fills_display(ui.ctx(), self.id);
         super::scope(ui, |ui| {
@@ -1149,61 +1228,16 @@ impl<'a> Window<'a> {
         let padding = self.page_padding;
         self.show_with_left(ctx, true, |ui| page_list_sized(ui, selected, pages, state, rows, padding, header, on_select), left)
     }
-
-    /// The same bounded card frame, either movable or an input-blocking modal.
-    pub(super) fn surface(&self, ctx: &egui::Context, modal: bool, add: impl FnOnce(&mut Ui) -> (bool, super::Action)) -> (bool, super::Action) {
-        let frame = if self.page_chrome {
-            // A system window covers what is behind it, like every other window (#9078).
-            super::navigation_popup_frame().inner_margin(0).fill(Tokens::get().dialog_body)
-        } else {
-            Panel::card_frame(ctx)
-        };
-        let inner_width = (self.width.min(dimension(ctx.content_rect().width())) - frame.total_margin().sum().x).max(0.0);
-        if modal {
-            let shown = super::Container::new(ctx, super::Surface::Window)
-                .modal(self.id)
-                .backdrop_color(Tokens::get().tab_on_fill_dark.gamma_multiply(0.35))
-                .frame(frame)
-                .show(ctx, |ui| {
-                    ui.set_width(inner_width);
-                    let result = add(ui);
-                    super::Container::finish_content(ui, frame);
-                    result
-                });
-            scenario::publish_rect("dialog:window", shown.response.rect);
-            return shown.inner;
-        }
-        let window = super::Container::new(ctx, super::Surface::Window)
-            .window(self.title)
-            .id(self.id)
-            .title_bar(false)
-            .collapsible(false)
-            .resizable(false)
-            .min_width(inner_width)
-            .max_width(inner_width)
-            .default_width(inner_width)
-            .scroll(false)
-            .frame(frame)
-            .fade_in(false)
-            .fade_out(false);
-        let window = match (self.anchor, self.placed) {
-            (Some((align, offset)), _) => window.anchor(align, offset),
-            (None, Some((pivot, pos))) => window.pivot(pivot).default_pos(pos),
-            (None, None) => window.pivot(egui::Align2::CENTER_CENTER).default_pos(ctx.content_rect().center() - vec2(0.0, row_height() * 2.5)),
-        };
-        let shown = window.show(ctx, |ui| {
-            let result = add(ui);
-            super::Container::finish_content(ui, frame);
-            result
-        });
-        if let Some(shown) = &shown {
-            scenario::publish_rect("dialog:window", shown.response.rect);
-        }
-        shown.and_then(|r| r.inner).unwrap_or((false, super::Action::None))
-    }
 }
 
-/// A page's existing icon, translated label key, stable handle and draw callback.
+/// Temp-data key suffix: whether a window took the display.
+const FILLS_DISPLAY: &str = "fills_display";
+
+/// Whether a window took the display: its content lays out for the whole screen.
+pub(crate) fn fills_display(ctx: &egui::Context, id: egui::Id) -> bool {
+    ctx.data(|data| data.get_temp::<bool>(id.with(FILLS_DISPLAY)).unwrap_or(false))
+}
+
 pub(crate) struct WindowPage<S> {
     pub icon: &'static str,
     pub label: &'static str,
