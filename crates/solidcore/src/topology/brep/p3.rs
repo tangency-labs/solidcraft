@@ -3558,7 +3558,7 @@ fn turn_to_nurbs_in(
             let ivl = b.edge(e)?.interval;
             match base.lift_curve(
                 k,
-                &base.natural_uv_domain(),
+                &base.natural_uv_domain_with_nurb(k)?,
                 cos.uv_curve(),
                 &ivl,
                 approx_tol,

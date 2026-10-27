@@ -1228,7 +1228,7 @@ pub fn find_vertex_sector(
                 checked_poles = true;
                 (singularities, pole_points) = surface_singularities(k, b, f, &surface)?;
                 vertex_point = vertex::point(b, v)?;
-                surf_domain = surface.natural_uv_domain();
+                surf_domain = surface.natural_uv_domain_with_nurb(k)?;
             }
 
             // just once - get closed status
@@ -1883,7 +1883,7 @@ pub fn has_seam_problem_mut<O: LoopObject, M: CurveOnClassifyBrep<O>>(
     };
 
     // classify periodic surface and prepare for upcoming classifications
-    let uv_domain = surface.natural_uv_domain();
+    let uv_domain = surface.natural_uv_domain_with_nurb(k)?;
     let closed_c1 = |closed: Tri, val: ContinuityType| {
         closed != Tri::False && val as i32 >= ContinuityType::C1 as i32
     };

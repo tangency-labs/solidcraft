@@ -2159,7 +2159,7 @@ fn redistribute_inner_loops(
             let uv = crate::error::ignored(surface.drop_point::<crate::topology::ObjectHandle>(
                 k,
                 point,
-                &surface.natural_uv_domain(),
+                &surface.natural_uv_domain_with_nurb(k)?,
                 &crate::surface::surface::p5::DropPointOptions::default(),
             ))?
             .map_or(crate::geom::vector2d::Vec2::UNDEF, |drop| drop.result_uv);
