@@ -576,6 +576,7 @@ fn put_state(o: &mut Vec<f64>, a: &Plane) {
         f64::from(base.knot_type() as i32),
         f64::from(base.form() as i32),
     ]);
+    o.push(b(base.gw_nurb().is_some()));
     match a.base_with_nurb() {
         Ok(w) => put_surface_nurb(o, w.gw_nurb()),
         Err(_) => o.push(0.0),
@@ -1378,7 +1379,7 @@ fn gen_other(rng: &mut Rng, m: &MakeIn, g: &Geo) -> SurfaceIn {
     SurfaceIn::Plane { make }
 }
 
-fn gen_op(rng: &mut Rng, m: &MakeIn, g: &Geo, nurb_safe: bool) -> OpIn {
+fn gen_op(rng: &mut Rng, m: &MakeIn, g: &Geo) -> OpIn {
     let r = rng.below(27);
     match r {
         0 => OpIn::State,
@@ -1407,7 +1408,7 @@ fn gen_op(rng: &mut Rng, m: &MakeIn, g: &Geo, nurb_safe: bool) -> OpIn {
         11 => OpIn::Reparam {
             dom: DomIn::Explicit(gen_domain(rng)),
         },
-        12 if nurb_safe => OpIn::Toggle,
+        12 => OpIn::Toggle,
         13 => OpIn::Rebuild,
         14 | 15 => {
             let sop = pick(rng, &[3u8, 5, 0, 4, 1]);
@@ -1485,10 +1486,10 @@ fn gen_op(rng: &mut Rng, m: &MakeIn, g: &Geo, nurb_safe: bool) -> OpIn {
             tol: pick(rng, &[1e-6, 1e-3, 0.1]),
             whole: rng.chance(0.4),
         },
-        24 if nurb_safe => OpIn::Eq {
+        24 => OpIn::Eq {
             other: if rng.chance(0.5) { m.clone() } else { gen_make(rng) },
         },
-        10 | 12 | 24 => OpIn::MakeNurb,
+        10 => OpIn::MakeNurb,
         25 => {
             if rng.chance(0.5) {
                 OpIn::Copy
@@ -1556,31 +1557,10 @@ fn gen_case(rng: &mut Rng) -> Inputs {
     let make = gen_make(rng);
     let g = Geo::of(&make);
     let n = 1 + rng.below(5) as usize;
-    // A NURB upstream makes lazily in a const method (or a copy) stays with the plane;
-    // the port makes it on a copy (also in the general DropCurve a drop may fall back on).
-    // ToggleSwapUVBit (which leaves the NURB alone) and
-    // operator== (which compares NURBs) observe the difference, so they come only
-    // while both sides agree: before any such method or once the NURB is made in place.
-    let mut made = matches!(make, MakeIn::Canonical { .. });
-    let mut lazy = false;
-    let mut ops = Vec::with_capacity(n);
-    for _ in 0..n {
-        let op = gen_op(rng, &make, &g, made || !lazy);
-        match &op {
-            OpIn::MakeNurb
-            | OpIn::Reparam { .. }
-            | OpIn::Rebuild
-            | OpIn::Reverse { .. }
-            | OpIn::Swap => made = true,
-            // (DropCurve: the general SmSurface::DropCurve asks GetNaturalUVDomain)
-            OpIn::Coincidence { .. } | OpIn::Iso { .. } | OpIn::Copy | OpIn::DropCurve { .. } => {
-                lazy = true;
-            }
-            OpIn::Drop { sop, .. } if *sop == 5 => lazy = true,
-            _ => {}
-        }
-        ops.push(op);
-    }
+    // A NURB upstream makes lazily in a const method (or a copy) stays with the plane,
+    // and the port keeps it too, so ToggleSwapUVBit (which leaves the NURB alone) and
+    // operator== (which compares NURBs) may come anywhere in the program.
+    let ops = (0..n).map(|_| gen_op(rng, &make, &g)).collect();
     Inputs { make, ops }
 }
 

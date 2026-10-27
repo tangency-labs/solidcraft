@@ -423,7 +423,9 @@ fn rust_op(i: &Inputs) -> Result<solidcore::Result<Vec<f64>>, HarnessError> {
     let op = solver_op(i.solver)?;
     let test = v3(i.test);
     let tol = i.tol;
-    let obj = SrfObj(surface.natural_uv_domain_with_nurb(&k).map_err(|e| HarnessError::new(e.to_string()))?);
+    // the object key is read from a second build of the surface: a query on the
+    // solved surface would make and keep a lazy plane's NURB, which C++ does not
+    let obj = SrfObj(any_surface(&k, i.wrap, &i.surf)?.natural_uv_domain_with_nurb(&k).map_err(|e| HarnessError::new(e.to_string()))?);
     let global = || {
         SurfPtGlobalSolver::new(
             &k,

@@ -48,23 +48,16 @@
 //!   `ToggleSwapUVBit`, `RebuildSTEPFromNURBParameters`, `IsPlanar`, `IsSingularity`,
 //!   `IsClosed`) are re-dispatched here. A missing NURB is made with [`Plane::make_nurb`] where
 //!   upstream calls `GetOrCreateGwNurbPointer`: `&mut self` methods make it in
-//!   place, read-only methods (upstream `const` methods that make it through a
-//!   `const_cast`) make it on a copy ([`Plane::base_with_nurb`]), so the plane keeps
-//!   none (so does the source of a copy). The observable differences are the NURB a
-//!   later [`Plane::toggle_swap_uv_bit`] leaves alone and `operator==`, which compares
-//!   the NURBs; the difftest therefore runs those two only while both sides agree
-//!   (before such a method, or once the NURB is made in place), and the shim copies a
-//!   plane without NURB from its analytic data (`plan/findings.md`).
-//!   [`Plane::natural_uv_domain`] is one of those read-only queries: upstream
-//!   `SmBSplineSurface::GetNaturalUVDomain` makes and keeps the NURB, the port makes it
-//!   on a copy and caches nothing. That also changes `IntersectWithPlane`
-//!   (`SmPlane.cpp:2183`, `surface::plane::p2`): for parallel planes it returns "no
-//!   intersection, done" when either plane has no NURB, and only otherwise tests for
-//!   coincidence and hands coincident planes to the general intersector. So after
-//!   `GetNaturalUVDomain` upstream and `natural_uv_domain` here, the same coincident
-//!   planes take different branches (found by difftest `--ssi-corpus`,
-//!   `c6_planes_identical` / `c6_planes_overlap`; follow-up in `plan/modules.toml`:
-//!   model the cache).
+//!   place; read-only methods (upstream `const` methods that make it through a
+//!   `const_cast`, such as `GetNaturalUVDomain`) make it from the analytic data and
+//!   keep it on the plane ([`Plane::base_with_nurb`]: the B-spline part's NURB slot is
+//!   filled once from `&self`), so later code sees it as upstream does: the
+//!   `IntersectWithPlane` "has a NURB" test (`surface::plane::p2`), `ToggleSwapUVBit`
+//!   (which leaves the NURB alone), `operator==` (which compares NURBs) and the copy
+//!   constructor, which makes the source's missing NURB and keeps it there
+//!   ([`Plane::copy`]). Internal stand-in copies (`Surface::from(self.clone())`, for
+//!   upstream's inherited methods on `this`) therefore also fill the plane's NURB, as
+//!   the inherited bodies upstream make it on `this`.
 //! - **Arguments.** Out-params become return values; `SmContext` arguments and the
 //!   arguments upstream marks `NotUsed` (`DropPointFast`'s pointing vector and
 //!   solution request, `Evaluate`'s sides and zero-tangent flags,
@@ -280,28 +273,30 @@ impl Plane {
     }
 
     /// An exact copy (`Copy`, the copy constructor): the B-spline part is copied
-    /// with the NURB of [`Plane::base_with_nurb`] (upstream makes the source's missing
-    /// NURB first, through a `const_cast`; here the source keeps none).
+    /// with the NURB of [`Plane::base_with_nurb`] (the `SmBSplineSurface` copy
+    /// constructor makes the source's missing NURB first, through a `const_cast`, and
+    /// the source keeps it; a failed make copies none).
     #[must_use]
     pub fn copy(&self) -> Self {
-        let mut src = self.member_copy();
-        if src.base.gw_nurb().is_none() {
-            let _ = src.make_nurb();
-        }
-        Self {
-            base: src.base.copy(),
-            ..src
-        }
+        let _ = self.base_with_nurb();
+        self.member_copy()
     }
 
-    /// A private solver copy without constructing or fixing the NURBS representation.
-    pub(crate) fn clone_exact(&self) -> Self {
+    /// An evaluation copy that stands for this plane object (upstream's pointer to it):
+    /// exact, and sharing this plane's NURB cell, so a NURB a read-only query makes
+    /// through the copy is kept on this plane, as upstream keeps it on the object.
+    pub(crate) fn clone_shared(&self) -> Self {
         Self {
-            base: self.base.clone_exact(),
+            base: self.base.clone_exact_shared(),
             position: self.position,
             anal_uv_domain: self.anal_uv_domain,
             uv_scale: self.uv_scale,
         }
+    }
+
+    /// Detaches a NURB cell shared with evaluation copies ([`Plane::clone_shared`]).
+    pub(crate) fn detach_nurb(&mut self) {
+        self.base.detach_nurb();
     }
 
     /// A copy of every member as is (no NURB is made).
@@ -355,19 +350,23 @@ impl Plane {
         *self.base.out_of_bounds_enabled_mut() = enabled;
     }
 
-    /// The B-spline part with a NURB: the stored one, or one made on a copy when the
-    /// plane has none (`GetOrCreateGwNurbPointer` from a `const` method).
+    /// The B-spline part with a NURB (`GetOrCreateGwNurbPointer` from a `const`
+    /// method): the stored one, or the one [`Plane::make_nurb`] makes when the plane has
+    /// none, which the plane then keeps, as upstream keeps it on the object (made on a
+    /// copy of the analytic data and stored once).
     ///
     /// # Errors
     ///
-    /// Those of [`Plane::make_nurb`].
+    /// Those of [`Plane::make_nurb`] (the plane stays without NURB).
     pub fn base_with_nurb(&self) -> Result<Cow<'_, BSplineSurface>> {
-        if self.base.gw_nurb().is_some() {
-            return Ok(Cow::Borrowed(&self.base));
+        if self.base.gw_nurb().is_none() {
+            let mut tmp = self.member_copy();
+            tmp.make_nurb()?;
+            if let Some(made) = tmp.base.nurb.take() {
+                self.base.nurb.fill(made);
+            }
         }
-        let mut tmp = self.member_copy();
-        tmp.make_nurb()?;
-        Ok(Cow::Owned(tmp.base))
+        Ok(Cow::Borrowed(&self.base))
     }
 
     /// The B-spline part for an inherited query: with a NURB when one can be made,
@@ -414,6 +413,19 @@ impl Plane {
     #[must_use]
     pub fn natural_uv_domain(&self) -> Extent2d {
         self.base_for_query().natural_uv_domain()
+    }
+
+    /// [`Plane::natural_uv_domain`] without keeping a made NURB: a missing one is made on
+    /// a copy (for the port's own bookkeeping, where upstream makes none).
+    pub(crate) fn natural_uv_domain_without_keeping(&self) -> Extent2d {
+        if self.base.gw_nurb().is_some() {
+            return self.base.natural_uv_domain();
+        }
+        let mut tmp = self.member_copy();
+        match tmp.make_nurb() {
+            Ok(()) => tmp.base.natural_uv_domain(),
+            Err(_) => self.base.natural_uv_domain(),
+        }
     }
 
     /// `SmPlane_TYPE` (`GetType`).
@@ -2469,7 +2481,8 @@ mod tests {
             p.natural_uv_domain(),
             Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0)
         );
-        assert!(p.base().gw_nurb().is_none());
+        // GetNaturalUVDomain makes the NURB and the plane keeps it
+        assert!(p.base().gw_nurb().is_some());
         p.make_nurb().unwrap();
         assert!(p.base().is_bilinear());
         assert!(p.is_kind_of(Plane::TYPE).unwrap());

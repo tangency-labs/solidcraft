@@ -1914,7 +1914,8 @@ mod tests {
                 assert!(copy.evaluate_point(k, uv).unwrap().distance(expected) < 1e-12);
             }
             if let crate::surface::surface::SurfaceKind::SurfOfExtrusion(extrusion) = copy.kind() {
-                assert_eq!(extrusion.base().gw_nurb().is_some(), swap_uv);
+                // the evaluations made the missing NURB and the extrusion keeps it
+                assert!(extrusion.base().gw_nurb().is_some());
             }
         }
     }

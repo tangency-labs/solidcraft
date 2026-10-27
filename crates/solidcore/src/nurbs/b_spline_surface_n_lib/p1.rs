@@ -1435,12 +1435,14 @@ impl BSplineSurface {
         let mut sur_list = [this_sur, sur_2_join];
         let res = make_surfaces_compatible(&mut sur_list, compat_dir);
         let [this_sur, sur_2_join] = sur_list;
-        self.nurb = Some(this_sur);
-        surface_to_join.nurb = Some(sur_2_join);
+        self.nurb = Some(this_sur).into();
+        surface_to_join.nurb = Some(sur_2_join).into();
         // surfaces not compatible, so not joined
         res.map_err(SolidError::nl_ser(OP))?;
 
-        let (Some(this_sur), Some(sur_2_join)) = (&self.nurb, &surface_to_join.nurb) else {
+        let (Some(this_sur), Some(sur_2_join)) =
+            (self.nurb.as_ref(), surface_to_join.nurb.as_ref())
+        else {
             return Err(SolidError::sm_err(OP));
         };
         // join operation failed -> SM_ERR
@@ -1770,7 +1772,9 @@ impl BSplineSurface {
 
         let rtn = if same_size {
             // copy surQ values into surP
-            sur_q.copy_into(&mut self.nurb);
+            let mut nurb = self.nurb.take();
+            sur_q.copy_into(&mut nurb);
+            self.nurb = nurb.into();
             Ok(())
         } else {
             // something went wrong - leave surP unmodified

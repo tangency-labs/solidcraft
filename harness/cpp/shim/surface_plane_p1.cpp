@@ -12,9 +12,11 @@
 // only when the status is 0), then the state of A. A failed plane block ends the record after
 // its status.
 //
-// Const queries that make the NURB of a plane without one (GetNaturalUVDomain and friends) are
-// asked of a copy here, so that the record does not depend on when upstream makes it lazily; the
-// state prints the NURB the plane has, or the one a copy makes.
+// Const queries that make the NURB of a plane without one (GetNaturalUVDomain and friends, the
+// copy constructor) are asked of the plane itself: upstream makes the NURB then and keeps it
+// (GetOrCreateGwNurbPointer through a const_cast), and the port models that, so the record shows
+// when it is made. The state prints whether the plane has its NURB, then that NURB (made first
+// when missing, as GetOrCreateGwNurbPointer does).
 #include "sc_shim.h"
 
 #include <SmAxis2Placement.h>
@@ -329,25 +331,10 @@ void put_surface_nurb(std::vector<double>& o, const gw_SURFACE* sur)
         o.push_back(sur->knv->U[i]);
 }
 
-// A copy of `a` that leaves `a` alone: the copy constructor makes the source's missing NURB
-// (through a const_cast), so a plane without NURB is rebuilt from its analytic data instead,
-// then given the source's exact placement.
-SmPlane* side_free_copy(const SmContext& ctx, const SmPlane* a)
-{
-    if (a->GetGwNurbPointer() != NULL)
-        return new (ctx) SmPlane(*a);
-    const SmAxis2Placement& pos = a->GetPosition();
-    SmPlane* c = new (ctx) SmPlane(pos.GetOrigin(), pos.GetXAxis(), pos.GetYAxis(), a->GetUVScale(),
-                                   a->GetSTEPUVDomain(), &ctx);
-    c->GetOutOfBoundsEnabled() = a->IsOutOfBoundsEnabled();
-    // SetCanonical is not idempotent for a degenerate placement: copy it exactly
-    c->SetPosition(pos);
-    return c;
-}
-
-// type O X Y Z domain scale oob kt form, then the NURB (made on a copy when missing).
+// type O X Y Z domain scale oob kt form, has-NURB, then the NURB (made and kept when missing).
 void put_state(std::vector<double>& o, const SmContext& ctx, const SmPlane* a)
 {
+    (void)ctx;
     const SmAxis2Placement& pos = a->GetPosition();
     o.push_back((double)a->GetType());
     put_vec(o, pos.GetOrigin());
@@ -360,15 +347,8 @@ void put_state(std::vector<double>& o, const SmContext& ctx, const SmPlane* a)
     o.push_back(flg(a->IsOutOfBoundsEnabled()));
     o.push_back((double)(a->*PeekS::kt()));
     o.push_back((double)(a->*PeekS::form()));
-    const gw_SURFACE* sur = a->GetGwNurbPointer();
-    if (sur)
-    {
-        put_surface_nurb(o, sur);
-        return;
-    }
-    SmPlane* tmp = side_free_copy(ctx, a);
-    put_surface_nurb(o, tmp->GetOrCreateGwNurbPointer());
-    delete tmp;
+    o.push_back(flg(a->GetGwNurbPointer() != NULL));
+    put_surface_nurb(o, ((SmPlane*)a)->GetOrCreateGwNurbPointer());
 }
 
 void put_curve_nurb(std::vector<double>& o, const SmBSplineCurve* c)
@@ -442,7 +422,7 @@ void put_sols(std::vector<double>& o, SmSolutionArray& sols, const SmObject* a)
     }
 }
 
-// Domain `kind a b c d`: 0 STEP domain, 1 SmExtent2d(a, b, c, d), 2 natural domain (of a copy).
+// Domain `kind a b c d`: 0 STEP domain, 1 SmExtent2d(a, b, c, d), 2 natural domain (made and kept when missing).
 SmExtent2d read_dom(Rd& rd, const SmContext& ctx, const SmPlane* a)
 {
     int64_t kind = rd.idx(0, 2);
@@ -450,12 +430,7 @@ SmExtent2d read_dom(Rd& rd, const SmContext& ctx, const SmPlane* a)
     if (kind == 0)
         return a->GetSTEPUVDomain();
     if (kind == 2)
-    {
-        SmPlane* tmp = side_free_copy(ctx, a);
-        SmExtent2d e = tmp->GetNaturalUVDomain();
-        delete tmp;
-        return e;
-    }
+        return a->GetNaturalUVDomain();
     return d;
 }
 
@@ -779,7 +754,8 @@ void run_op(int32_t op, Rd& rd, const SmContext& ctx, SmPlane* a, std::vector<do
     case OP_INHERITED:
     {
         SmVector3d v = rd.vec();
-        SmPlane* tmp = side_free_copy(ctx, a);
+        // asked of a copy, as the port does (the copy constructor makes a's missing NURB)
+        SmPlane* tmp = new (ctx) SmPlane(*a);
         o.push_back(0.0);
         put_dom(o, tmp->GetNaturalUVDomain());
         put_dom(o, tmp->GetMaxAnalyticDomain());
@@ -811,17 +787,15 @@ void run_op(int32_t op, Rd& rd, const SmContext& ctx, SmPlane* a, std::vector<do
         SmSurfParamType dir = (SmSurfParamType)rd.idx(0, SM_SP_VMAX);
         double dist = rd.num();
         SmContinuityType cont = (SmContinuityType)rd.idx(0, SM_CT_CINFINITY);
-        SmPlane* tmp = side_free_copy(ctx, a);
         // upstream copies a NULL NURB (N_SrfCopy) when none can be made
-        if (tmp->GetOrCreateGwNurbPointer() == NULL)
+        if (a->GetOrCreateGwNurbPointer() == NULL)
         {
-            delete tmp;
             o.push_back(st(SM_ERR)); // the port returns SM_ERR (no NURB)
             break;
         }
         SmSurface* e = NULL;
-        SmStatus stt = has_dir ? tmp->CreateExtendedSurface(ctx, dir, dist, cont, e)
-                               : tmp->CreateExtendedSurface(ctx, dist, cont, e);
+        SmStatus stt = has_dir ? a->CreateExtendedSurface(ctx, dir, dist, cont, e)
+                               : a->CreateExtendedSurface(ctx, dist, cont, e);
         o.push_back(st(stt));
         if (stt == SM_SUCCESS)
         {
@@ -829,7 +803,6 @@ void run_op(int32_t op, Rd& rd, const SmContext& ctx, SmPlane* a, std::vector<do
             put_surface_nurb(o, bs ? bs->GetGwNurbPointer() : NULL);
         }
         delete e;
-        delete tmp;
         break;
     }
     default: throw Bad();

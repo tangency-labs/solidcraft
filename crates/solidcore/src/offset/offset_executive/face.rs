@@ -235,6 +235,16 @@ mod tests {
                     key: ObjectKey(71),
                     type_code: crate::geom::assert_array::labels::FACE_TYPE,
                 });
+                // the offset reads the source plane's NURB, which upstream makes and
+                // keeps on it (GetOrCreateGwNurbPointer): make it before the snapshot
+                original
+                    .face(face)
+                    .unwrap()
+                    .surface
+                    .as_ref()
+                    .unwrap()
+                    .natural_uv_domain_with_nurb(&kernel)
+                    .unwrap();
                 let before = format!("{original:?}");
                 let (made, ssi) = build(
                     &kernel,

@@ -2376,8 +2376,12 @@ pub fn face_intersect_breps_cached(
         // the surfaces reach their faces' caches through the B-reps
         // (smsurf_GetSurfaceCache); exact evaluation copies, as the caches are made
         // on the B-reps meanwhile
-        let surface = surface_of(b, f)?.clone_for_evaluation()?;
-        let other_copy = surface_of(ob, other)?.clone_for_evaluation()?;
+        let mut surface = surface_of(b, f)?.clone_for_evaluation()?;
+        let mut other_copy = surface_of(ob, other)?.clone_for_evaluation()?;
+        // the copies reach their faces, whose tolerances (`GetFace()->GetTolerance()`,
+        // read by the plane/plane intersector's boxes) were read above
+        surface.set_owner_zone_tol_3d(Some(this_zone_tol));
+        other_copy.set_owner_zone_tol_3d(Some(other_zone_tol));
         // a face intersected with itself intersects one surface object with itself
         // (the intersectors compare the two surfaces by identity)
         let other_surface = if !other_side && other == f {

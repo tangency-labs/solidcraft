@@ -849,7 +849,8 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         // edited below, so an evaluation copy (exact knots, owner kept) stands for it: the
         // copy constructor's knot fix-up would move near-coincident knots and so the splits.
         // An `SmPlane` keeps the copy constructor: its copy carries the NURB upstream has
-        // made on the plane by now (the port keeps none on the original), and a freshly
+        // made on the plane by now (the copy constructor makes and keeps it there first),
+        // and a freshly
         // made plane NURB has no knots for the fix-up to move.
         let node_surface = self.node_surface(Some(handle))?;
         let surface = if let SurfaceKind::Plane(_) = node_surface.kind() {

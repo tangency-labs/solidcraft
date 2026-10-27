@@ -1654,10 +1654,7 @@ impl Surface {
                 src_zone_tol_3d,
                 opt_target_distance,
                 requested,
-                Some(OperandObject::Surface(
-                    0,
-                    self.natural_uv_domain_with_nurb(k)?,
-                )),
+                Some(OperandObject::Surface(0, self.stand_in_key_domain(k)?)),
             )?
             .without_objects()
         } else if let Some(surface) = surface {

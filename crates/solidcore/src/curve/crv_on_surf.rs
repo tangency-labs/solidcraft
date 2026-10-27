@@ -292,8 +292,24 @@ pub struct CrvOnSurf {
     parametrization_matches: bool,
 }
 
+/// An exact copy as a separate curve (the [`Curve`] copy constructor's): as upstream's
+/// copy constructor, which deep-copies the surface when the curve owns its UV curve or
+/// surface (owner flags 1 to 3), the copy's surface then gets its own NURB cells; with
+/// flag 0 both curves name the same surface upstream and the cells stay shared.
 impl Clone for CrvOnSurf {
     fn clone(&self) -> Self {
+        let mut c = self.clone_exact_shared();
+        if matches!(self.owner_flag, 1..=3) {
+            c.surface.detach_nurb_cells();
+        }
+        c
+    }
+}
+
+impl CrvOnSurf {
+    /// An exact copy that stands for this curve (an evaluation copy): the surface
+    /// shares its NURB cells with this curve's surface.
+    pub(crate) fn clone_exact_shared(&self) -> Self {
         // All factories and replacement paths validate the complete graph first.
         Self {
             uv_curve: Box::new(self.uv_curve.clone_exact_bounded()),
@@ -2195,6 +2211,34 @@ mod tests {
                 panic!("copy lost the concrete offset surface");
             };
             assert_eq!(offset.base_surface().reached_face(), Some(face));
+        }
+    }
+
+    #[test]
+    fn copy_of_owning_curve_detaches_the_plane_nurb_cell() {
+        use crate::surface::plane::Plane;
+        use crate::surface::surface::SurfaceKind;
+        let k = Kernel::default();
+        let on = |c: &Curve| match c.kind() {
+            CurveKind::CrvOnSurf(c) => c.surface().clone_exact_bounded(),
+            _ => panic!("not a curve on a surface"),
+        };
+        let has_nurb = |c: &Curve| match on(c).kind() {
+            SurfaceKind::Plane(p) => p.base().gw_nurb().is_some(),
+            _ => panic!("not a curve on a plane"),
+        };
+        let domain = Extent2d::from_bounds(0.0, 0.0, 1.0, 1.0);
+        // flag 0 names the same surface upstream (shared cell); flag 1 deep-copies it
+        for (flag, shared) in [(0, true), (1, false)] {
+            let plane = Surface::from(Plane::from_normal(Vec3::ZERO, Vec3::Z));
+            let curve = Curve::from(CrvOnSurf::new(&k, uv(), plane, Some(domain), flag).unwrap());
+            assert!(!has_nurb(&curve));
+            let evaluation = curve.clone_exact_bounded();
+            let copy = curve.clone();
+            on(&curve).natural_uv_domain_with_nurb(&k).unwrap();
+            assert!(has_nurb(&curve));
+            assert!(has_nurb(&evaluation));
+            assert_eq!(has_nurb(&copy), shared);
         }
     }
 

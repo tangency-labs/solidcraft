@@ -452,7 +452,7 @@ impl Curve {
         match self.kind() {
             // the SmCrvOnSurf override (its cache update is lost on this copy)
             CurveKind::CrvOnSurf(c) => {
-                let mut c = c.as_ref().clone();
+                let mut c = c.clone_exact_shared();
                 let (curve, gap) =
                     c.approximate_curve(k, breaks, approx_tol_3d, opts.match_parameterization)?;
                 Ok(CurveApproximation {

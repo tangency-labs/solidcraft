@@ -126,6 +126,7 @@
 //!   wrapped as a `Surface` (without owner).
 
 use core::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 
 use crate::error::{Result, SolidError};
 use crate::geom::axis2_placement::Axis2Placement;
@@ -411,8 +412,10 @@ pub struct BoundingBoxes {
 /// flags.
 #[derive(Debug)]
 pub struct BSplineSurface {
-    /// The NURB (`m_pNurb`); `None` is `NULL`.
-    pub(crate) nurb: Option<Surface>,
+    /// The NURB (`m_pNurb`); empty is `NULL`. A lazy analytic kind fills it once from a
+    /// read-only query ([`NurbSlot::fill`]), as upstream's `GetOrCreateGwNurbPointer`
+    /// does through a `const_cast`.
+    pub(crate) nurb: NurbSlot,
     /// `m_bNurbIsBorrowed`.
     pub(crate) nurb_is_borrowed: bool,
     /// `m_bOutOfBoundsEnabled`: evaluate beyond the natural domain. Interior-mutable
@@ -425,6 +428,80 @@ pub struct BSplineSurface {
     pub(crate) knot_type: KnotType,
     /// `m_eBSplineSurfaceForm`.
     pub(crate) form: BSplineSurfaceForm,
+}
+
+/// The storage of a B-spline surface's NURB (`m_pNurb`): set and edited through
+/// `&mut` like an `Option`, and also fillable once through `&` ([`NurbSlot::fill`]).
+///
+/// Upstream's `GetOrCreateGwNurbPointer` runs the virtual `MakeNurb` when `m_pNurb` is
+/// null and keeps the NURB on the object, also when called from a `const` method
+/// (through a `const_cast`), so every later reader of that surface (`IntersectWithPlane`'s
+/// "has a NURB" test, `operator==`, the copy constructor, `ToggleSwapUVBit`, transforms)
+/// sees it. A `OnceLock` gives the port the same once-only fill from `&self` while
+/// keeping the surface `Send + Sync`; the made value depends only on the surface's own
+/// data, so the result is deterministic.
+///
+/// The cell sits behind an `Arc` so that an evaluation copy of a surface (which stands
+/// for upstream's pointer to the one object, as the surface's cache slot does) can share
+/// it ([`NurbSlot::shared`]): a NURB made through the copy is then kept on the surface
+/// too. Every `&mut` access detaches a shared cell first (copy on write), so an edit of
+/// one never reaches the other.
+#[derive(Debug, Default)]
+pub(crate) struct NurbSlot(Arc<OnceLock<Surface>>);
+
+impl NurbSlot {
+    /// No NURB (`NULL`).
+    pub(crate) fn none() -> Self {
+        Self(Arc::new(OnceLock::new()))
+    }
+
+    /// The same cell (for an evaluation copy that stands for the same surface object).
+    pub(crate) fn shared(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
+
+    /// The NURB, if any.
+    pub(crate) fn as_ref(&self) -> Option<&Surface> {
+        self.0.get()
+    }
+
+    /// The NURB, mutable, if any (detaches a shared cell first).
+    pub(crate) fn as_mut(&mut self) -> Option<&mut Surface> {
+        Arc::make_mut(&mut self.0).get_mut()
+    }
+
+    /// Whether there is no NURB.
+    pub(crate) fn is_none(&self) -> bool {
+        self.0.get().is_none()
+    }
+
+    /// Whether there is a NURB.
+    pub(crate) fn is_some(&self) -> bool {
+        self.0.get().is_some()
+    }
+
+    /// Takes the NURB out, leaving none (detaches a shared cell first).
+    pub(crate) fn take(&mut self) -> Option<Surface> {
+        Arc::make_mut(&mut self.0).take()
+    }
+
+    /// Detaches a shared cell, so that what is made through this surface from now on
+    /// is its own (for an edit of the surface's other data).
+    pub(crate) fn detach(&mut self) {
+        Arc::make_mut(&mut self.0);
+    }
+
+    /// Stores `made` when there is no NURB yet (the first fill wins, as upstream's
+    /// `GetOrCreateGwNurbPointer` makes once) and returns the stored NURB.
+    pub(crate) fn fill(&self, made: Surface) -> &Surface {
+        self.0.get_or_init(|| made)
+    }
+}
+
+impl From<Option<Surface>> for NurbSlot {
+    fn from(nurb: Option<Surface>) -> Self {
+        Self(Arc::new(nurb.map_or_else(OnceLock::new, OnceLock::from)))
+    }
 }
 
 impl Clone for BSplineSurface {
@@ -665,9 +742,9 @@ impl BSplineSurface {
     /// A surface without NURB data (`SmBSplineSurface()`); only set methods can give it
     /// one.
     #[must_use]
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
-            nurb: None,
+            nurb: NurbSlot::none(),
             nurb_is_borrowed: false,
             out_of_bounds_enabled: AtomicBool::new(false),
             knot_type: KnotType::Unspecified,
@@ -723,7 +800,7 @@ impl BSplineSurface {
         fixup_knot_vector(new_sur.u_knots_mut(), EFF_ZERO_PARAM);
         fixup_knot_vector(new_sur.v_knots_mut(), EFF_ZERO_PARAM);
         Ok(Self {
-            nurb: Some(new_sur),
+            nurb: Some(new_sur).into(),
             ..Self::new()
         })
     }
@@ -739,7 +816,7 @@ impl BSplineSurface {
             fixup_knot_vector(nurb.v_knots_mut(), EFF_ZERO_PARAM);
         }
         Self {
-            nurb: Some(nurb),
+            nurb: Some(nurb).into(),
             nurb_is_borrowed: borrowed,
             ..Self::new()
         }
@@ -753,7 +830,7 @@ impl BSplineSurface {
         fixup_knot_vector(nurb.u_knots_mut(), EFF_ZERO_PARAM);
         fixup_knot_vector(nurb.v_knots_mut(), EFF_ZERO_PARAM);
         Self {
-            nurb: Some(nurb),
+            nurb: Some(nurb).into(),
             ..Self::new()
         }
     }
@@ -770,7 +847,7 @@ impl BSplineSurface {
             nurb
         });
         Self {
-            nurb,
+            nurb: nurb.into(),
             nurb_is_borrowed: false,
             out_of_bounds_enabled: AtomicBool::new(
                 self.out_of_bounds_enabled.load(Ordering::Relaxed),
@@ -786,8 +863,26 @@ impl BSplineSurface {
     /// `Surface` holding the surface) use this one.
     #[must_use]
     pub fn clone_exact(&self) -> Self {
+        self.clone_exact_with(NurbSlot::from(self.nurb.as_ref().map(copy_nurb_surface)))
+    }
+
+    /// [`BSplineSurface::clone_exact`] for an evaluation copy that stands for this
+    /// surface object: the copy shares this surface's NURB cell ([`NurbSlot::shared`]),
+    /// so a NURB made through it is kept here too.
+    #[must_use]
+    pub(crate) fn clone_exact_shared(&self) -> Self {
+        self.clone_exact_with(self.nurb.shared())
+    }
+
+    /// Detaches a NURB cell shared with evaluation copies (before an edit of this
+    /// surface or of the analytic data it is made from).
+    pub(crate) fn detach_nurb(&mut self) {
+        self.nurb.detach();
+    }
+
+    fn clone_exact_with(&self, nurb: NurbSlot) -> Self {
         Self {
-            nurb: self.nurb.as_ref().map(copy_nurb_surface),
+            nurb,
             nurb_is_borrowed: false,
             out_of_bounds_enabled: AtomicBool::new(
                 self.out_of_bounds_enabled.load(Ordering::Relaxed),
@@ -805,7 +900,7 @@ impl BSplineSurface {
         if core::ptr::eq(self, other) {
             return true;
         }
-        match (&self.nurb, &other.nurb) {
+        match (self.nurb.as_ref(), other.nurb.as_ref()) {
             (None, None) => true,
             (Some(a), Some(b)) => a.equals(b, EFF_ZERO, EFF_ZERO),
             _ => false,
@@ -2267,7 +2362,7 @@ impl BSplineSurface {
 
         // set output
         Ok(Self {
-            nurb: Some(sur),
+            nurb: Some(sur).into(),
             nurb_is_borrowed: false,
             out_of_bounds_enabled: AtomicBool::new(false),
             knot_type,

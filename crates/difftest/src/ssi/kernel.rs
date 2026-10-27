@@ -98,7 +98,7 @@ pub(crate) fn rust_surface(
             v,
         } => {
             let dom = Extent2d::from_bounds(u[0], v[0], u[1], v[1]);
-            let mut plane = Plane::new(
+            let plane = Plane::new(
                 v3(*origin),
                 v3(*xaxis),
                 v3(*yaxis),
@@ -106,19 +106,10 @@ pub(crate) fn rust_surface(
                 &dom,
             );
             // The C++ runner's `GetNaturalUVDomain()` makes the plane's NURB in place
-            // (`GetOrCreateGwNurbPointer` through a const cast); the port's query works on a
-            // copy, so make it here to start GlobalSurfaceIntersect from the same state
-            // (`IntersectWithPlane`'s parallel branch tests for the NURB).
-            match plane.make_nurb() {
-                Ok(()) => {}
-                Err(SolidError::Unported { upstream, unit }) => {
-                    return Ok(Err(Deferred {
-                        unit: unit.into(),
-                        symbol: upstream.into(),
-                    }))
-                }
-                Err(e) => return Err(format!("plane: {e}")),
-            }
+            // (`GetOrCreateGwNurbPointer` through a const cast) and keeps it; the port's
+            // query does the same, so ask it here to start GlobalSurfaceIntersect from the
+            // same state (`IntersectWithPlane`'s parallel branch tests for the NURB).
+            let _ = plane.natural_uv_domain();
             Ok(Ok(Surface::from(plane)))
         }
         SurfaceSpec::Nurbs {

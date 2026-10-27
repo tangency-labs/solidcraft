@@ -806,6 +806,17 @@ impl OffsetSurface {
         }
     }
 
+    /// The base surface and the stored extension, mutable, for
+    /// [`Surface::detach_nurb_cells`] (a pending extension is not reached: an exact
+    /// copy has folded it into the stored one).
+    pub(crate) fn nested_surfaces_mut(&mut self) -> Vec<&mut Surface> {
+        let mut v = vec![self.surface.as_mut()];
+        if let Some(e) = self.extended_surface.as_deref_mut() {
+            v.push(e);
+        }
+        v
+    }
+
     /// A copy for evaluation: the members as they are, the base and extended
     /// surfaces copied exactly (no knot fix-up), `depth` the wrapper nesting
     /// already walked.
