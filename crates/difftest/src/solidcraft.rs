@@ -3,7 +3,7 @@
 //!
 //! Each file in `fixtures/solidcraft/` holds the cases of one SolidCraft issue that was
 //! found and fixed on SolidCraft's earlier kernel: the issue, the fixing PR and its test,
-//! and per case a list of `SM_API`-level steps (primitives, booleans, fillet, offset)
+//! and per case a list of `SM_API`-level steps (primitives, booleans, fillet, chamfer, offset)
 //! whose last body, `result`, is checked against values known in closed form (volume,
 //! lump count, face bounds). They keep those bugs fixed once the operations run end to
 //! end on solidcore.
@@ -309,6 +309,20 @@ pub enum Step {
         /// Radius.
         radius: f64,
     },
+    /// `SmApiFilletEdges` with a linear cross section (SolidCraft #2672), edges picked as for
+    /// `fillet`. The constant-radius solver takes `distance` as the radius of the rolling
+    /// ball: the leg on each face for a right-angle edge between planes, `distance * cot(α/2)`
+    /// for an interior angle `α`, and it varies along the edge on curved faces.
+    Chamfer {
+        /// Body written.
+        id: String,
+        /// Body chamfered.
+        body: String,
+        /// A point on each edge to chamfer.
+        edges: Vec<P3>,
+        /// Rolling-ball radius: the leg on each face for a right-angle edge between planes.
+        distance: f64,
+    },
     /// Offset selected faces along their outward normals, the rest of the body
     /// following (SolidCraft's Offset Face).
     OffsetFaces {
@@ -578,6 +592,7 @@ impl Step {
             | Self::Sweep { id, .. }
             | Self::Mirror { id, .. }
             | Self::Fillet { id, .. }
+            | Self::Chamfer { id, .. }
             | Self::OffsetFaces { id, .. }
             | Self::SheetCorner { id, .. } => id,
         }
@@ -599,6 +614,7 @@ impl Step {
             | Self::Difference { a, b, .. }
             | Self::Intersection { a, b, .. } => vec![a, b],
             Self::Fillet { body, .. }
+            | Self::Chamfer { body, .. }
             | Self::OffsetFaces { body, .. }
             | Self::Rotate { body, .. }
             | Self::Mirror { body, .. } => vec![body],
@@ -726,6 +742,9 @@ pub fn validate(case: &Case) -> Result<(), String> {
             Step::Fillet { edges, radius, .. } => {
                 edges.iter().flatten().all(|x| x.is_finite()) && radius.is_finite()
             }
+            Step::Chamfer {
+                edges, distance, ..
+            } => edges.iter().flatten().all(|x| x.is_finite()) && distance.is_finite(),
             Step::OffsetFaces {
                 faces, distance, ..
             } => faces.iter().flatten().all(|x| x.is_finite()) && distance.is_finite(),
@@ -851,6 +870,9 @@ fn solid(e: &SolidError) -> Run {
 /// `SM_FILLET_CIRCULAR`: any cross-section type other than linear (0) or blend curve (2).
 const FILLET_CIRCULAR: u32 = 1;
 
+/// `SM_FILLET_LINEAR`: a planar cross section (a chamfer).
+const FILLET_LINEAR: u32 = 0;
+
 /// Key domain of the copy a fillet step makes of its input.
 const FILLET_COPY_DOMAIN: u64 = 999;
 
@@ -883,6 +905,31 @@ fn copy(k: &mut Kernel, b: &Brep, n: u64) -> Result<Brep, Run> {
     let mut env = state.env(None);
     env.key_of = &target_key;
     p3::api_brep_copy(k, &mut env, Some(b), &|entity| named(entity, 0)).map_err(|e| solid(&e))
+}
+
+/// `SmApiFilletEdges` on the edges picked by `points` of body `name`, with one constant
+/// `value` and cross section `xsect_type`. The body is filleted in place, as
+/// `SmApiFilletEdges` edits its B-rep: a `Clone` would keep the source's geometry owner
+/// names, which the fillet resolves back to their faces and edges.
+fn fillet_picked_edges(
+    k: &mut Kernel,
+    bodies: &BTreeMap<String, Brep>,
+    name: &str,
+    points: &[P3],
+    value: f64,
+    xsect_type: u32,
+) -> Result<Brep, Run> {
+    let source = bodies
+        .get(name)
+        .ok_or_else(|| Run::Error(format!("no body `{name}`")))?;
+    let mut b = copy(k, source, FILLET_COPY_DOMAIN)?;
+    let picked = points
+        .iter()
+        .map(|point| fillet_edge_at_point(k, &b, p3(*point)))
+        .collect::<Result<Vec<_>, Run>>()?;
+    fillet_api::fillet_edges(k, &mut b, &picked, value, xsect_type, 1, 1.0)
+        .map_err(|e| solid(&e))?;
+    Ok(b)
 }
 
 /// A fixture point must name exactly one nearby edge between distinct faces.
@@ -1266,22 +1313,17 @@ fn step_rust(k: &mut Kernel, bodies: &mut BTreeMap<String, Brep>, step: &Step) -
             edges,
             radius,
             ..
-        } => {
-            // The body is filleted in place, as `SmApiFilletEdges` edits its B-rep: a
-            // `Clone` would keep the source's geometry owner names, which the fillet
-            // resolves back to their faces and edges.
-            let source = bodies
-                .get(body.as_str())
-                .ok_or_else(|| Run::Error(format!("no body `{body}`")))?;
-            let mut b = copy(k, source, FILLET_COPY_DOMAIN)?;
-            let picked = edges
-                .iter()
-                .map(|point| fillet_edge_at_point(k, &b, p3(*point)))
-                .collect::<Result<Vec<_>, Run>>()?;
-            fillet_api::fillet_edges(k, &mut b, &picked, *radius, FILLET_CIRCULAR, 1, 1.0)
-                .map_err(|e| solid(&e))?;
-            b
-        }
+        } => fillet_picked_edges(k, bodies, body, edges, *radius, FILLET_CIRCULAR)?,
+        // The same call with a linear cross section. `distance` is the rolling-ball radius:
+        // the leg on each face for a right-angle edge between planes. `chamfer_fillet`
+        // (`SmApiChamferFillet`) is not used: it takes every edge of the body and reads its
+        // distance as a chord.
+        Step::Chamfer {
+            body,
+            edges,
+            distance,
+            ..
+        } => fillet_picked_edges(k, bodies, body, edges, *distance, FILLET_LINEAR)?,
         // SM_API offsets or shells whole bodies only (SmApiOffsetBrepFull,
         // SmApiShellBrepFull); nothing offsets selected faces.
         Step::OffsetFaces { .. } => {
@@ -1799,6 +1841,70 @@ mod tests {
     }
 
     #[test]
+    fn chamfer_box_matches_analytic_removed_volume() {
+        // A linear chamfer of leg d on a right-angle edge of length L removes L * d^2 / 2.
+        let removed = 20.0 * 0.5 * 0.5 / 2.0;
+        let case: Case = serde_json::from_value(json!({
+            "name": "single-edge-chamfer",
+            "steps": [
+                {"op": "box", "id": "box", "origin": [0.0, 0.0, 0.0],
+                 "size": [10.0, 20.0, 30.0]},
+                {"op": "chamfer", "id": "result", "body": "box",
+                 "edges": [[0.0, 10.0, 0.0]], "distance": 0.5}
+            ],
+            "expect": {"lumps": 1, "volume": {
+                "value": 6000.0 - removed, "tol": removed * 0.001,
+                "formula": "box minus one linear chamfer, L * d^2 / 2"
+            }}
+        }))
+        .unwrap();
+        let run = run_rust(&case);
+        let (result, checks) = verdict(&case.expect, &run);
+        assert_eq!(result, "PASS", "{run:?}: {checks:?}");
+        if let Run::Done(measured) = run {
+            // 7 faces, 15 edges, 10 vertices: one chamfer face replaces one edge.
+            assert_eq!(measured.topology, [7, 15, 10]);
+        } else {
+            panic!("chamfer did not produce a measured body");
+        }
+    }
+
+    #[test]
+    fn chamfer_rejects_empty_edges_and_bad_distance() {
+        let case = |edges: Value, distance: f64| -> Case {
+            serde_json::from_value(json!({
+                "name": "bad-chamfer",
+                "steps": [
+                    {"op": "box", "id": "box", "origin": [0.0, 0.0, 0.0],
+                     "size": [10.0, 20.0, 30.0]},
+                    {"op": "chamfer", "id": "result", "body": "box",
+                     "edges": edges, "distance": distance}
+                ],
+                "expect": {}
+            }))
+            .unwrap()
+        };
+        // Empty edges and a non-positive radius fail in the kernel (`fillet_edges`), on step 2.
+        for run in [
+            run_rust(&case(json!([]), 0.5)),
+            run_rust(&case(json!([[0.0, 10.0, 0.0]]), 0.0)),
+            run_rust(&case(json!([[0.0, 10.0, 0.0]]), -0.5)),
+        ] {
+            assert!(
+                matches!(&run, Run::Error(m) if m.starts_with("step 2")),
+                "{run:?}"
+            );
+        }
+        // Not representable in JSON: a NaN distance is refused by `validate`.
+        let mut nan = case(json!([[0.0, 10.0, 0.0]]), 0.5);
+        let Step::Chamfer { distance, .. } = &mut nan.steps[1] else {
+            panic!("not a chamfer")
+        };
+        *distance = f64::NAN;
+        assert!(validate(&nan).is_err());
+    }
+
+    #[test]
     fn fixes_are_enabled_by_name() {
         let mut k = Kernel::default();
         enable_fix(&mut k, "sweep_frame_on_planar_path_normal").unwrap();
@@ -2041,7 +2147,17 @@ mod tests {
             r#"{"op": "box", "id": "a", "origin": [0, 0, 0], "size": [1, 1, 1], "typo": 1}"#
         )
         .is_err());
-        assert!(serde_json::from_str::<Step>(r#"{"op": "chamfer", "id": "a"}"#).is_err());
+        let unknown = serde_json::from_str::<Step>(r#"{"op": "draft", "id": "a"}"#).unwrap_err();
+        assert!(
+            unknown.to_string().contains("unknown variant `draft`"),
+            "{unknown}"
+        );
+        let chamfer =
+            r#"{"op": "chamfer", "id": "a", "body": "b", "edges": [[0, 10, 0]], "distance": 0.5}"#;
+        assert!(serde_json::from_str::<Step>(chamfer).is_ok());
+        let with_typo = chamfer.replace(r#""distance": 0.5"#, r#""distance": 0.5, "typo": 1"#);
+        let err = serde_json::from_str::<Step>(&with_typo).unwrap_err();
+        assert!(err.to_string().contains("unknown field `typo`"), "{err}");
         let ext = r#"{"op": "extrude", "id": "result", "distance": 1, "profile": [{"kind": "polygon", "points": [[0, 0], [1, 0], [1, 1]]}]}"#;
         assert!(validate(&case(vec![step(ext)])).is_ok());
         let flat = ext.replace("[[0, 0], [1, 0], [1, 1]]", "[[0, 0], [1, 0]]");

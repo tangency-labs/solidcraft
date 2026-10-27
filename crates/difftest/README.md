@@ -775,7 +775,12 @@ nice -n 10 cargo run -p difftest -- --solidcraft-cases '3526-*'        # ids (<f
   `sweep` (a closed `profile` in `plane` at `origin` swept along one `path` arc or line in
   the XY plane, `SmApiCreateCurveSweep`), `loft` (`SmApiCreateSkinPrimitive` through
   `sections`, each one closed `profile` with its `plane` and `origin`; `degree` 1, ruled,
-  by default; capped at both ends), `fillet` (edges by a point on each), `offset_faces`
+  by default; capped at both ends), `fillet` (edges by a point on each), `chamfer` (the same
+  edge picking, `SmApiFilletEdges` with a linear cross section: `distance` is the radius of
+  the rolling ball of the constant-radius solver, the leg on each face for a right-angle edge
+  between planes (`distance * cot(α/2)` for an interior angle `α`, varying along curved
+  faces); one distance for all edges; `SmApiChamferFillet` is not used, it chamfers every
+  edge of a body), `offset_faces`
   (faces by a point on each), `sheet_corner` (the deferred sheet-flange recipe below). Each
   writes the body `id`; the last writes `result`.
 * **Fixes** (`fixes`, optional): `Kernel::fixes` (`UpstreamFixes`) fields the case turns
