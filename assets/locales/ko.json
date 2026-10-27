@@ -815,7 +815,6 @@
   "cmd.frame_profile_insert": "프로파일 삽입",
   "cmd.frame_profile_list": "프로파일 라이브러리",
   "cmd.frame_profile_properties": "프로파일 속성",
-  "cmd.frame_trim": "자르기/연장",
   "cmd.inspect_accessibility": "접근성 분석",
   "cmd.inspect_center_of_mass": "무게중심",
   "cmd.inspect_clearance": "여유 간격",

@@ -936,7 +936,6 @@
   "cmd.frame_profile_insert": "Profiel invoegen",
   "cmd.frame_profile_list": "Profielbibliotheek",
   "cmd.frame_profile_properties": "Profieleigenschappen",
-  "cmd.frame_trim": "Inkorten/verlengen",
   "cmd.inspect_accessibility": "Toegankelijkheidsanalyse",
   "cmd.inspect_center_of_mass": "Zwaartepunt",
   "cmd.inspect_clearance": "Speling",

@@ -828,13 +828,85 @@ fn bad_trims_are_refused_with_the_reason() {
     run(&mut s, "solid.move", json!({"bodies": [rails[0]], "translate": [0, 0, 5]}));
     let err = s.execute("frame.trim", &json!({"members": [rails[0]], "to": uprights})).unwrap_err().to_string();
     assert!(err.contains("changed after"), "{err}");
-    // As a target it still serves, a butt joint being worked out from the target's line and
-    // profile: the bottom ring's first rail along Y now starts at its inner side, y = 45.
-    run(&mut s, "frame.trim", json!({"members": [rails[2]], "to": [rails[0]]}));
-    assert!(near3(boxes(&mut s)[&rails[2]].0, [0.0, 45.0, 0.0]), "{:?}", boxes(&mut s)[&rails[2]]);
+    // The moved target's original sketch line is stale too: it must not silently trim
+    // another member to the side where the target used to be.
+    let err = s.execute("frame.trim", &json!({"members": [rails[2]], "to": [rails[0]]})).unwrap_err().to_string();
+    assert!(err.contains("changed after"), "{err}");
     // Not while a sketch is open.
     run(&mut s, "sketch.create", json!({"plane": "XY"}));
     assert!(s.execute("frame.trim", &json!({"members": [rails[1]], "to": uprights})).is_err());
+}
+
+#[test]
+fn a_rotated_square_member_is_not_rebuilt_even_when_its_bounds_match() {
+    let mut s = Session::default();
+    let m = members_3d(&mut s, "Bar", &[([0.0, 0.0, 0.0], [100.0, 0.0, 0.0])]);
+    let before = boxes(&mut s);
+    run(&mut s, "solid.move", json!({"bodies": m, "axis": [1, 0, 0], "angle": 90}));
+    let after = boxes(&mut s);
+    assert!(near3(before["Bar"].0, after["Bar"].0) && near3(before["Bar"].1, after["Bar"].1));
+    let saved = s.model.saved(&s.doc).unwrap();
+    let doc = s.doc.to_json();
+    assert!(solidcraft_doc::Model::adopt(&s.doc, &saved).is_ok(), "the new cache is adopted");
+    let mut legacy = solidcraft_doc::SavedModel { records: saved.records.clone(), bodies: saved.bodies.clone() };
+    for state in legacy.records["states"].as_array_mut().unwrap() {
+        for member in state["frame_members"].as_array_mut().unwrap() {
+            member.as_object_mut().unwrap().remove("unmodified");
+        }
+    }
+    assert!(solidcraft_doc::Model::adopt(&s.doc, &legacy).is_err(), "old identity checks require reevaluation");
+    for mut session in [
+        s,
+        Session::new(solidcraft_doc::Document::from_json(&doc).unwrap()),
+        Session::opened(solidcraft_doc::Document::from_json(&doc).unwrap(), Some(&saved)),
+        Session::opened(solidcraft_doc::Document::from_json(&doc).unwrap(), Some(&legacy)),
+    ] {
+        let body = session.model.state().body("Bar").unwrap().body.clone();
+        let features = session.doc.features.len();
+        let err = session
+            .execute(
+                "frame.trim",
+                &json!({"members": m,
+            "to": {"plane": {"origin": [150, 0, 0], "normal": [1, 0, 0]}}}),
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("changed after"), "{err}");
+        assert_eq!(session.doc.features.len(), features);
+        assert!(body.same_shape(&session.model.state().body("Bar").unwrap().body));
+    }
+}
+
+#[test]
+fn a_transferred_member_cannot_be_rebuilt_in_its_original_component_frame() {
+    let mut s = Session::default();
+    let m = members_3d(&mut s, "Bar", &[([0.0, 0.0, 0.0], [100.0, 0.0, 0.0])]);
+    let c = run(&mut s, "component.create", json!({"name": "Child", "grounded": false}));
+    let component = c["component"].as_u64().unwrap();
+    run(&mut s, "component.move_bodies", json!({"component": component, "bodies": m}));
+    run(&mut s, "occurrence.move", json!({"occurrence": c["occurrence"], "translate": [100, 0, 0], "capture": true}));
+    run(&mut s, "component.activate", json!({"component": "root"}));
+    let saved = s.model.saved(&s.doc).unwrap();
+    let json = s.doc.to_json();
+    assert!(solidcraft_doc::Model::adopt(&s.doc, &saved).is_ok());
+    for mut session in [s, Session::opened(solidcraft_doc::Document::from_json(&json).unwrap(), Some(&saved))] {
+        let body = session.model.state().body("Bar").unwrap().clone();
+        assert!(body.transferred && body.component == component);
+        let before = session.doc.to_json();
+        let err = session
+            .execute(
+                "frame.trim",
+                &json!({"members": m,
+            "to": {"plane": {"origin": [150, 0, 0], "normal": [1, 0, 0]}}}),
+            )
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("changed after"), "{err}");
+        assert_eq!(session.doc.to_json(), before);
+        let state = session.model.state();
+        let after = state.body("Bar").unwrap();
+        assert!(after.body.same(&body.body) && after.component == component && after.transferred);
+    }
 }
 
 #[test]
@@ -847,6 +919,7 @@ fn trims_undo_reopen_and_keep_their_members_through_the_saved_model() {
     // Reopened from its JSON (evaluated again) and from its saved model (adopted as saved).
     let json = s.doc.to_json();
     let saved = s.model.saved(&s.doc).expect("a saved model");
+    assert!(solidcraft_doc::Model::adopt(&s.doc, &saved).is_ok(), "the cache must actually be adopted");
     for adopted in [None, Some(&saved)] {
         let mut r = Session::opened(solidcraft_doc::Document::from_json(&json).unwrap(), adopted);
         let after = bodies(&mut r);
@@ -931,6 +1004,21 @@ fn a_trim_in_a_moved_component_meets_the_face_where_it_is_shown() {
 }
 
 #[test]
+fn a_trim_in_a_rotated_component_resolves_a_world_plane_once() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Line"}));
+    run(&mut s, "sketch.line", json!({"points": [[100, 0], [300, 0]]}));
+    run(&mut s, "sketch.finish", json!({}));
+    let c = run(&mut s, "component.create", json!({"name": "Frame", "grounded": false}))["component"].as_u64().unwrap();
+    let o = s.doc.occurrence_of(c).unwrap().id;
+    run(&mut s, "occurrence.move", json!({"occurrence": o, "axis": [0, 0, 1], "angle": "90 deg", "translate": [40, 70, 0], "capture": true}));
+    let m = made(&run(&mut s, "frame.member", json!({"sketch": "Line", "profile": bar45(), "body_name": "Bar"})));
+    run(&mut s, "frame.trim", json!({"members": m, "to": {"plane": {"origin": [160, 0, 0], "normal": [1, 0, 0]}}}));
+    let b = boxes(&mut s);
+    assert!(near3(b["Bar"].0, [160.0, -22.5, -22.5]) && near3(b["Bar"].1, [300.0, 22.5, 22.5]), "{b:?}");
+}
+
+#[test]
 fn a_member_name_given_again_means_the_new_member() {
     // A member removed, and a new member along another line given its name.
     let mut s = Session::default();
@@ -957,6 +1045,37 @@ fn a_trimmed_member_keeps_its_face_names() {
     let before = names(&s);
     run(&mut s, "frame.trim", json!({"members": m, "to": {"plane": {"origin": [150, 0, 0], "normal": [1, 0, 0]}}}));
     assert_eq!(names(&s), before);
+}
+
+#[test]
+fn a_slanted_trim_keeps_each_side_face_attached_to_the_same_side() {
+    let mut s = Session::default();
+    let m = members_3d(&mut s, "Bar", &[([0.0, 0.0, 0.0], [100.0, 0.0, 0.0])]);
+    let side_names = |s: &Session| {
+        let st = s.model.state();
+        let b = st.body("Bar").unwrap();
+        solidcraft_doc::naming::face_names(b)
+            .iter()
+            .enumerate()
+            .filter_map(|(k, n)| {
+                let normal = b.body.planar_face(k)?.normal();
+                (normal.x.abs() < 1e-9).then_some((n.clone(), normal))
+            })
+            .collect::<std::collections::BTreeMap<_, _>>()
+    };
+    let before = side_names(&s);
+    assert_eq!(before.len(), 4);
+    run(
+        &mut s,
+        "frame.trim",
+        json!({"members": m,
+        "to": {"plane": {"origin": [80, 0, 0], "normal": [1, 0, 1]}}}),
+    );
+    let after = side_names(&s);
+    assert_eq!(after.keys().collect::<Vec<_>>(), before.keys().collect::<Vec<_>>());
+    for (name, normal) in before {
+        assert!(after[&name].dot(normal) > 1.0 - 1e-9, "{name}: {:?} vs {normal:?}", after[&name]);
+    }
 }
 
 /// Hostile values in every parameter of `frame.trim`, on a real tower so they get past the member

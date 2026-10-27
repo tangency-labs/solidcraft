@@ -930,7 +930,6 @@
   "cmd.frame_profile_insert": "Вставить профиль",
   "cmd.frame_profile_list": "Библиотека профилей",
   "cmd.frame_profile_properties": "Свойства профиля",
-  "cmd.frame_trim": "Обрезать/удлинить",
   "cmd.inspect_accessibility": "Анализ доступности",
   "cmd.inspect_center_of_mass": "Центр масс",
   "cmd.inspect_clearance": "Зазор",

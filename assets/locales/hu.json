@@ -936,7 +936,6 @@
   "cmd.frame_profile_insert": "Profil beszúrása",
   "cmd.frame_profile_list": "Profilkönyvtár",
   "cmd.frame_profile_properties": "Profil tulajdonságai",
-  "cmd.frame_trim": "Vágás/hosszabbítás",
   "cmd.inspect_accessibility": "Hozzáférhetőség-elemzés",
   "cmd.inspect_center_of_mass": "Tömegközéppont",
   "cmd.inspect_clearance": "Hézag",

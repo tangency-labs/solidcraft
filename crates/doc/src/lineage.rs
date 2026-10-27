@@ -165,6 +165,22 @@ impl Traced {
         Traced { body: result, lineage }
     }
 
+    /// This tool replaces faces built by `feature`, preserving that feature's roles even
+    /// when a later trim supplies the replacement cap.
+    pub fn rebuilt(mut self, feature: u64) -> Traced {
+        if let Some(lineage) = &mut self.lineage {
+            lineage.operands = lineage
+                .operands
+                .iter()
+                .map(|op| match op.as_ref() {
+                    Operand::Made(roles) => Arc::new(Operand::Rebuilt { roles: roles.clone(), feature }),
+                    _ => op.clone(),
+                })
+                .collect();
+        }
+        self
+    }
+
     /// `result`, made by one kernel operation from this body alone. Where that operation's
     /// history can't be composed with this body's (it blends an edge the same feature made: a
     /// boss's root fillet), this body is a stage of the feature, its faces and edges named as a

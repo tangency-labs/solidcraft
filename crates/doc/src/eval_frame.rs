@@ -7,6 +7,8 @@ use std::collections::{BTreeMap, HashSet};
 
 use solidcraft_geom::{Aabb2, Plane, Region2, Ring, Vec2, Vec3};
 use solidcraft_kernel::{self as kernel, Body};
+
+use crate::lineage::Traced;
 use solidcraft_sketch::CurveKind;
 
 use super::{ModelBody, ModelState, SolvedSketch, new_name, path_in_frame, select_profiles, sketch_in_feature_frame, val};
@@ -104,7 +106,7 @@ pub(super) fn layout(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature
 
 /// Build a member: its section run along its line, each end square at the line's end or cut in
 /// its plane (`ends`, normals out of the member).
-pub(super) fn build(m: &Laid, lay: &Layout, ends: &[Option<Plane>; 2]) -> Result<Body> {
+pub(super) fn build(m: &Laid, lay: &Layout, ends: &[Option<Plane>; 2], feature: u64) -> Result<Traced> {
     let corners = [lay.lo, Vec2::new(lay.hi.x, lay.lo.y), lay.hi, Vec2::new(lay.lo.x, lay.hi.y)].map(|c| m.plane.to_world(c));
     // How far along the line an end plane is at the section's corners (nearest, farthest), and
     // whether it slants across the section.
@@ -134,16 +136,31 @@ pub(super) fn build(m: &Laid, lay: &Layout, ends: &[Option<Plane>; 2]) -> Result
     let from = if s_cut { s_lo - (s_hi - s_lo) - 1.0 } else { s_lo };
     let to = if e_cut { e_hi + (e_hi - e_lo) + 1.0 } else { e_hi };
     let mut bodies = kernel::extrude(&m.plane, &lay.regions, from, to)?;
-    let mut body = match (bodies.pop(), bodies.is_empty()) {
+    let body = match (bodies.pop(), bodies.is_empty()) {
         (Some(body), true) => body,
         _ => return Err(DocError::Invalid(format!("the member on line `{}` is not one solid", m.id))),
     };
-    for (end, cut) in ends.iter().zip([s_cut, e_cut]) {
+    // Start from the extrusion's original numbered roles, before a boolean can reorder its
+    // faces. Cut caps take the role of the cap they replace; surviving sides follow history.
+    let caps = [false, true].map(|high| {
+        body.history().and_then(|h| {
+            h.faces.iter().position(|face| face.origins.iter().any(|o| matches!(o, kernel::history::FaceOrigin::Cap { end } if *end == high)))
+        })
+    });
+    let mut body = crate::lineage::numbered_rebuilt(body, feature);
+    for ((end, cut), cap) in ends.iter().zip([s_cut, e_cut]).zip(caps) {
         if let (Some(pl), true) = (end, cut) {
-            // Keep the side the normal points away from.
-            body = kernel::half_space(&body, pl, false)?
-                .0
-                .ok_or_else(|| DocError::Invalid(format!("trimming leaves nothing of the member on line `{}`", m.id)))?;
+            // Keep the side the normal points away from. The half-space tool's end cap is
+            // the cut face, with the replaced member cap's name.
+            let (part, tool) = kernel::half_space(&body.body, pl, false)?;
+            let part = part.ok_or_else(|| DocError::Invalid(format!("trimming leaves nothing of the member on line `{}`", m.id)))?;
+            let cap = cap.ok_or_else(|| DocError::Invalid("the member's end face has no construction identity".into()))?;
+            let roles = crate::lineage::ProfileRoles { sketch: None, region: None, caps: [None, Some(format!("face:{cap}"))], thin: None };
+            let tool = roles.tool(tool, None).rebuilt(feature);
+            body = Traced::step(part, &[&body, &tool]);
+            if body.lineage.is_none() {
+                return Err(DocError::Invalid("the trimmed member's face identities could not be preserved".into()));
+            }
         }
     }
     Ok(body)
@@ -151,20 +168,7 @@ pub(super) fn build(m: &Laid, lay: &Layout, ends: &[Option<Plane>; 2]) -> Result
 
 /// The record of a member just built.
 fn record(feature: u64, line: &str, body: &str, ends: [Option<Plane>; 2], built: &Body) -> MemberRecord {
-    let (faces, bounds) = shape(built);
-    MemberRecord { feature, line: line.to_string(), body: body.to_string(), ends, faces, bounds }
-}
-
-/// What tells a member's body from one a later feature changed: its face count and outline.
-fn shape(body: &Body) -> (usize, [f64; 6]) {
-    let b = body.outline_bounds();
-    (body.face_count(), [b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z])
-}
-
-/// Whether `body` is still the body the member was last built as.
-fn unchanged(rec: &MemberRecord, body: &Body) -> bool {
-    let (faces, bounds) = shape(body);
-    faces == rec.faces && bounds.iter().zip(rec.bounds).all(|(a, b)| (a - b).abs() <= 1e-7 * (1.0 + b.abs()))
+    MemberRecord { feature, line: line.to_string(), body: body.to_string(), ends, built: Some(built.clone()) }
 }
 
 /// Evaluate a `FrameMember` feature: one new body per line, each named
@@ -174,11 +178,11 @@ pub(super) fn evaluate(doc: &Document, vals: &BTreeMap<String, Value>, f: &Featu
         return Err(DocError::Invalid("not a frame member feature".into()));
     };
     let lay = layout(doc, vals, f, st)?;
-    let made = lay.members.iter().map(|m| build(m, &lay, &[None, None])).collect::<Result<Vec<_>>>()?;
+    let made = lay.members.iter().map(|m| build(m, &lay, &[None, None], f.id)).collect::<Result<Vec<_>>>()?;
     let ids: Vec<String> = lay.members.iter().map(|m| m.id.clone()).collect();
-    let add = |st: &mut ModelState, name: String, id: &str, body: Body| {
-        st.frame_members.push(record(f.id, id, &name, [None, None], &body));
-        st.bodies.push(ModelBody::traced_new(name, crate::lineage::numbered_tool(body), f.id));
+    let add = |st: &mut ModelState, name: String, id: &str, body: Traced| {
+        st.frame_members.push(record(f.id, id, &name, [None, None], &body.body));
+        st.bodies.push(ModelBody::traced_new(name, body, f.id));
     };
     if !f.body_names.is_empty() {
         // A copy (pasted, or in a copied component) names its members by position, as any
@@ -233,7 +237,7 @@ pub(super) fn trim(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
     let tools = to
         .iter()
         .map(|t| match t {
-            TrimTarget::Member { member, side } => Ok(Tool::Member { at: find(doc, vals, f, st, &mut layouts, member, false)?, side: *side }),
+            TrimTarget::Member { member, side } => Ok(Tool::Member { at: find(doc, vals, f, st, &mut layouts, member)?, side: *side }),
             TrimTarget::Plane { plane } => Ok(Tool::Plane(target_plane(doc, vals, f, st, plane, warning)?)),
         })
         .collect::<Result<Vec<_>>>()?;
@@ -242,7 +246,7 @@ pub(super) fn trim(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         if !seen.insert(r) {
             return Err(DocError::Invalid(format!("member `{}` of {} is listed twice", r.line, r.feature)));
         }
-        let m = find(doc, vals, f, st, &mut layouts, r, true)?;
+        let m = find(doc, vals, f, st, &mut layouts, r)?;
         let rec = st.frame_members.get(m.record).cloned().ok_or_else(|| DocError::Invalid("member record".into()))?;
         let lay = layouts.get(&m.feature).ok_or_else(|| DocError::Invalid("member layout".into()))?;
         let laid = lay.member(&rec.line).ok_or_else(|| DocError::Unknown(format!("line `{}` of {}", rec.line, r.feature)))?;
@@ -281,13 +285,13 @@ pub(super) fn trim(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         if by.iter().all(Option::is_none) {
             return Err(DocError::Invalid(format!("`{}` meets none of the targets", m.name)));
         }
-        let body = build(laid, lay, &ends)?;
+        let body = build(laid, lay, &ends, rec.feature)?;
         let i = st.bodies.iter().position(|b| b.name == rec.body).ok_or_else(|| DocError::Unknown(format!("body `{}`", rec.body)))?;
         let Some(mb) = st.bodies.get(i) else { return Err(DocError::Unknown(format!("body `{}`", rec.body))) };
-        let made = record(rec.feature, &rec.line, &rec.body, ends, &body);
+        let made = record(rec.feature, &rec.line, &rec.body, ends, &body.body);
         // Its faces keep the names the member feature gave them, so what later features picked
         // on it stays picked.
-        let rebuilt = ModelBody::traced_new(mb.name.clone(), crate::lineage::numbered_rebuilt(body, rec.feature), mb.feature);
+        let rebuilt = ModelBody::traced_new(mb.name.clone(), body, mb.feature);
         if let (Some(slot), Some(r)) = (st.bodies.get_mut(i), st.frame_members.get_mut(m.record)) {
             *slot = rebuilt;
             *r = made;
@@ -316,9 +320,9 @@ fn target_plane(
 }
 
 /// Find a member in the model: its record, and its feature laid out (into `layouts`). It must be
-/// a member of an earlier feature of the same component. A member to be `rebuilt` must also have
-/// its body as that feature (or an earlier trim) left it; a target is worked out from its line and
-/// profile, so what later features did to its body does not matter.
+/// a member of an earlier feature of the same component, with its body as that feature (or an
+/// earlier trim) left it. Changed targets also need refusal: their line and profile no longer
+/// establish where their sides are. A planar face target can follow such a body instead.
 fn find(
     doc: &Document,
     vals: &BTreeMap<String, Value>,
@@ -326,7 +330,6 @@ fn find(
     st: &ModelState,
     layouts: &mut BTreeMap<u64, Layout>,
     r: &MemberRef,
-    rebuilt: bool,
 ) -> Result<Found> {
     let mf = doc.find_feature(&r.feature).ok_or_else(|| DocError::Unknown(format!("feature `{}`", r.feature)))?;
     if !matches!(mf.kind, FeatureKind::FrameMember { .. }) {
@@ -341,13 +344,13 @@ fn find(
         .position(|m| m.feature == mf.id && m.line == r.line)
         .ok_or_else(|| DocError::Unknown(format!("member on line `{}` of `{}` (it must come earlier in the timeline)", r.line, r.feature)))?;
     let rec = st.frame_members.get(record).ok_or_else(|| DocError::Invalid("member record".into()))?;
-    if rebuilt {
+    {
         // A later feature may have removed the member's body and given its name to another.
         let body = st
             .body(&rec.body)
             .filter(|b| b.feature == rec.feature)
             .ok_or_else(|| DocError::Unknown(format!("body `{}` (member on line `{}` of `{}`)", rec.body, r.line, r.feature)))?;
-        if !unchanged(rec, &body.body) {
+        if body.component != mf.component || body.transferred || !rec.is_unchanged(&body.body) {
             return Err(DocError::Invalid(format!("`{}` was changed after it was made: trim it before the features that change it", rec.body)));
         }
     }

@@ -411,3 +411,13 @@ fn a_line_a_hair_off_vertical_is_vertical() {
     let (_, y) = member_axes(Vec3::new(1e-3, 0.0, 1.0), 0.0).unwrap();
     assert!(y.z > 0.0 && y.x < 0.0, "{y:?}");
 }
+
+#[test]
+fn member_identity_includes_face_splits_that_leave_the_solid_shared() {
+    let body = solidcraft_kernel::box_solid(Vec3::ZERO, Vec3::new(10.0, 10.0, 100.0)).unwrap();
+    let member = MemberRecord { feature: 1, line: "l1".into(), body: "Bar".into(), ends: [None, None], built: Some(body.clone()) };
+    assert!(member.is_unchanged(&body));
+    let split = body.clone().with_split_lines(Some(std::sync::Arc::new(vec![vec![Vec3::ZERO, Vec3::X]])));
+    assert!(body.same_shape(&split));
+    assert!(!member.is_unchanged(&split));
+}

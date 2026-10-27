@@ -340,7 +340,7 @@ pub const MAX_TRIM_GAP: f64 = 1000.0;
 
 /// A member as the model holds it after the features so far: its body, and where its ends are, so
 /// a trim rebuilds it from its feature's line and profile with its ends moved.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MemberRecord {
     /// The `FrameMember` feature, by id, and the line.
     pub feature: u64,
@@ -349,10 +349,19 @@ pub struct MemberRecord {
     /// The plane each end (start, end) is cut in, its normal out of the member; none: square at
     /// its line's end.
     pub ends: [Option<solidcraft_geom::Plane>; 2],
-    /// The body as it was last built (its face count and outline bounds), to tell a body that a
-    /// later feature changed: a trim rebuilds the member and would lose that change.
-    pub faces: usize,
-    pub bounds: [f64; 6],
+    /// Shared body of the last member/trim build. Body identity detects even a symmetric
+    /// rotation or a modification entirely inside the outline. Saved states preserve whether
+    /// the live body still shares this shape; old caches are evaluated again.
+    #[serde(skip)]
+    pub(crate) built: Option<solidcraft_kernel::Body>,
+}
+
+impl MemberRecord {
+    /// Whether this is the body last built by Frame Member or Trim/Extend.
+    /// A later body operation, including a symmetric move, invalidates that identity.
+    pub fn is_unchanged(&self, body: &solidcraft_kernel::Body) -> bool {
+        self.built.as_ref().is_some_and(|built| built.same(body))
+    }
 }
 
 impl Anchor {

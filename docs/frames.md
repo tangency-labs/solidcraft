@@ -117,12 +117,17 @@ with the reason, when a member meets none of the targets, when two targets would
 (trim them in separate features), when a chosen side faces away from the member, and when the
 member's body was changed after it was made (a hole drilled in it, say): a trim rebuilds the member
 from its line and profile, and would lose that change, so trim it before the features that change
-it. Members of another component are not supported yet.
+it. A changed member is also refused as a member target, because its sketch line and profile
+may no longer describe its actual side. Use a planar face target to follow the modified body.
+This includes symmetric rotations whose outline stays the same and bodies transferred into
+another component after the member was made. Members of another component
+are not supported yet.
 
 ### The Trim/Extend dialog
 
 - **Members**: pick the members to trim (their bodies or faces of them).
-- **To**: pick members, planar faces or planes. A face of a member is that member.
+- **To**: pick members, planar faces or planes. A face of an unmodified member selects that
+  member; a face on a modified member is kept as a planar-face target.
 - **End** (Nearer End, Start, End) and **Gap** as above.
 - **Edit Feature** reopens the dialog with the trim's picks and values. Targets a pick can't show
   (a member's chosen side, a face, a plane given by its origin and normal) are listed as **Keep:
