@@ -1,18 +1,21 @@
 //! A drawing view's lines (W07 V3, #5866): every shown body's edges and silhouettes from the mesh
 //! projection ([`crate::mesh_lines`]), each named by what drew it, in pieces of one visibility on
-//! paper. They are approximate: sampled from meshes asked for chords of `chord_mm` on paper. The
-//! exact lines (W06) replace them body by body after the kernel swap (V8).
+//! paper. They are approximate: sampled from meshes asked for chords of `chord_mm` on paper. An
+//! edge that is a circle, or part of one, in a plane parallel to the view is drawn as its exact arc
+//! ([`exact_arcs`]), cut where the mesh says its visibility changes. The exact lines (W06) replace
+//! the rest body by body after the kernel swap (V8).
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+use solidcraft_doc::Mat;
 use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::hlr::{Source, Visibility};
 use solidcraft_geom::paper::MAX_RECORDS;
 use solidcraft_geom::section::CurveAccuracy;
-use solidcraft_geom::{Seg2, Vec2};
+use solidcraft_geom::{Plane, Seg2, Similarity2, Vec2, Vec3};
 
 use super::ShownSet;
-use crate::mesh_lines::{self, Ask, Origin, Owner, View};
+use crate::mesh_lines::{self, Ask, Origin, Owner, Scene, View};
 use crate::params::bad;
 use crate::{Result, Session};
 
@@ -97,23 +100,35 @@ pub fn lines(s: &Session, shown: &ShownSet, frame: &ViewFrame, hidden: bool, tan
     // The merge drops spans up to its tolerance long, so where two stretches meet each can stop
     // that short of the corner.
     let join = 2.0 * drawing.eps;
-    let accuracy = frame.accuracy_on_paper(CurveAccuracy::Sampled { max_sample_deviation_mm: 0.0 });
-    let mut out = Vec::with_capacity(by_owner.len());
+    let runs: Vec<(Owner, Vec<(bool, Vec<Vec2>)>)> = by_owner.into_iter().map(|(owner, stretches)| (owner, chain(&stretches, join))).collect();
+    let arcs = exact_arcs(shown, &scene, &frame.basis(), &runs);
+    let sampled = frame.accuracy_on_paper(CurveAccuracy::Sampled { max_sample_deviation_mm: 0.0 });
+    // A cut point lies on a chord, so off the true curve by up to the chord's sag.
+    let near = |radius: f64| 2.0 * model_chord_mm + radius * 1e-9;
+    let mut out = Vec::with_capacity(runs.len());
     let mut pieces_count = 0usize;
-    for (owner, stretches) in by_owner {
+    for (owner, runs) in runs {
         let placement = scene.placements.get(owner.placement as usize).ok_or_else(|| bad(cmd, "a line names no placement"))?;
         let source = match owner.origin {
             Origin::Edge(edge) => Source::Edge { edge: edge as usize, tangent: placement.tangent.get(edge as usize).copied().unwrap_or(false) },
             Origin::Silhouette(face) => Source::Silhouette { face: face as usize },
         };
-        let pieces: Vec<Piece> = chain(&stretches, join)
-            .into_iter()
-            .map(|(is_hidden, points)| Piece {
-                visibility: if is_hidden { Visibility::Hidden } else { Visibility::Visible },
-                path: points.windows(2).filter_map(|w| Some(frame.seg_to_paper(&Seg2::Line { a: *w.first()?, b: *w.get(1)? }))).collect(),
-                accuracy,
-            })
-            .collect();
+        let arc = arcs.get(&owner);
+        let only = runs.len() == 1;
+        let piece = |(is_hidden, points): &(bool, Vec<Vec2>)| {
+            let visibility = if *is_hidden { Visibility::Hidden } else { Visibility::Visible };
+            match arc.and_then(|a| on_arc(a, points, only, near, join)) {
+                Some((part, whole)) => {
+                    Piece { visibility, path: vec![frame.seg_to_paper(&part)], accuracy: if whole { CurveAccuracy::Analytic } else { sampled } }
+                }
+                None => Piece {
+                    visibility,
+                    path: points.windows(2).filter_map(|w| Some(frame.seg_to_paper(&Seg2::Line { a: *w.first()?, b: *w.get(1)? }))).collect(),
+                    accuracy: sampled,
+                },
+            }
+        };
+        let pieces: Vec<Piece> = runs.iter().map(piece).collect();
         pieces_count = pieces_count.saturating_add(pieces.len());
         if pieces_count > MAX_RECORDS {
             return Err(bad(cmd, format!("the view has more than {MAX_RECORDS} line pieces: raise chord_mm, or choose a smaller view")));
@@ -130,6 +145,101 @@ pub fn lines(s: &Session, shown: &ShownSet, frame: &ViewFrame, hidden: bool, tan
         occlusion_ms: drawing.occlusion_ms,
     };
     Ok(Lines { lines: out, covered, model_chord_mm, stats })
+}
+
+/// The edges `runs` draw that are one circular arc (or a whole circle) in a plane parallel to the
+/// view, as that arc in the view's plane coordinates, by owner. `planar_edges` is asked only for
+/// curved edges, and once for the placements of one shared mesh turned the same way: a part placed
+/// again that way only shifts on the view's plane.
+fn exact_arcs(shown: &ShownSet, scene: &Scene, basis: &Plane, runs: &[(Owner, Vec<(bool, Vec<Vec2>)>)]) -> HashMap<Owner, Seg2> {
+    let mut curved: BTreeMap<u32, BTreeSet<usize>> = BTreeMap::new();
+    for (owner, pieces) in runs {
+        if let Origin::Edge(edge) = owner.origin
+            && pieces.iter().any(|(_, points)| points.len() > 2)
+        {
+            curved.entry(owner.placement).or_default().insert(edge as usize);
+        }
+    }
+    let class = |placement: u32| scene.placements.get(placement as usize).map(|p| (p.mesh, turn(&p.transform)));
+    let mut classes: BTreeMap<(usize, [u64; 9]), (u32, BTreeSet<usize>)> = BTreeMap::new();
+    for (&placement, edges) in &curved {
+        if let Some(key) = class(placement) {
+            classes.entry(key).or_insert((placement, BTreeSet::new())).1.extend(edges);
+        }
+    }
+    // Each class's arcs, read on its first placement's body in place.
+    let mut found: BTreeMap<(usize, [u64; 9]), (u32, HashMap<usize, Seg2>)> = BTreeMap::new();
+    for (key, (first, edges)) in classes {
+        let Some(body) = shown.bodies.get(first as usize).and_then(|b| shown.body(b)) else { continue };
+        let edges: Vec<usize> = edges.into_iter().collect();
+        let exact = body.body.planar_edges(basis, &edges);
+        let arcs = edges
+            .iter()
+            .zip(exact)
+            .filter_map(|(edge, segs)| match segs.as_deref() {
+                Some([arc @ Seg2::Arc { .. }]) => Some((*edge, *arc)),
+                _ => None,
+            })
+            .collect();
+        found.insert(key, (first, arcs));
+    }
+    let mut out = HashMap::new();
+    for (&placement, edges) in &curved {
+        let Some((first, arcs)) = class(placement).and_then(|key| found.get(&key)) else { continue };
+        let (Some(here), Some(there)) = (scene.placements.get(placement as usize), scene.placements.get(*first as usize)) else { continue };
+        let shift = shift(&here.transform) - shift(&there.transform);
+        let Some(by) = Similarity2::new(1.0, 0.0, Vec2::new(shift.dot(basis.x), shift.dot(basis.y))) else { continue };
+        for edge in edges {
+            if let Some(arc) = arcs.get(edge) {
+                out.insert(Owner { placement, origin: Origin::Edge(*edge as u32) }, arc.similar(&by));
+            }
+        }
+    }
+    out
+}
+
+/// A placement's turn: its matrix's rotation, bit for bit.
+fn turn(m: &Mat) -> [u64; 9] {
+    [m[0][0], m[0][1], m[0][2], m[1][0], m[1][1], m[1][2], m[2][0], m[2][1], m[2][2]].map(f64::to_bits)
+}
+
+/// A placement's shift.
+fn shift(m: &Mat) -> Vec3 {
+    Vec3::new(m[3][0], m[3][1], m[3][2])
+}
+
+/// The part of `arc` (an edge's exact curve on the view's plane) that a piece's `points` run
+/// along, and whether it is all of the edge (`only`: the piece is the edge's one run). None when a
+/// point lies further than `near(radius)` from the circle. The ends are the points' own, so a piece
+/// cut where the visibility changes ends where the mesh cut it; ends within `join` of the edge's own
+/// are its ends (the merge stops up to that short of them).
+fn on_arc(arc: &Seg2, points: &[Vec2], only: bool, near: impl Fn(f64) -> f64, join: f64) -> Option<(Seg2, bool)> {
+    let Seg2::Arc { center, radius, start, sweep } = *arc else { return None };
+    let (first, last) = (*points.first()?, *points.last()?);
+    if !(radius > 0.0 && sweep != 0.0) || points.iter().any(|p| (p.dist(center) - radius).abs() > near(radius)) {
+        return None;
+    }
+    let full = std::f64::consts::TAU;
+    let sense = sweep.signum();
+    // How far round from the arc's start, in its own sense: 0 up to a full turn.
+    let along = |p: Vec2| (((p.y - center.y).atan2(p.x - center.x) - start) * sense).rem_euclid(full);
+    if only && points.len() > 2 && first.dist(last) <= near(radius) {
+        // One closed run: the whole circle.
+        return ((sweep.abs() - full).abs() <= 1e-9).then_some((*arc, true));
+    }
+    let (a, b) = (along(first), along(last));
+    let forward = (b - a).rem_euclid(full);
+    // The run's middle point says which way round it goes; two points take the shorter way.
+    let ahead = match points.get(points.len() / 2).filter(|_| points.len() > 2) {
+        Some(mid) => (along(*mid) - a).rem_euclid(full) <= forward,
+        None => forward <= full - forward,
+    };
+    let (from, span) = if ahead { (a, forward) } else { (b, full - forward) };
+    let whole = only && from.min(full - from) * radius <= join && (span - sweep.abs()).abs() * radius <= 2.0 * join;
+    // A run along all of the edge is the edge itself, to the last bit. A part starts within half a
+    // turn of 0, wherever round the edge it begins.
+    let begins = (start + sense * from + std::f64::consts::PI).rem_euclid(full) - std::f64::consts::PI;
+    Some(if whole { (*arc, true) } else { (Seg2::Arc { center, radius, start: begins, sweep: sense * span }, false) })
 }
 
 /// One source's stretches joined end to end where they meet, within `join`, at one visibility:
@@ -187,6 +297,56 @@ fn chain(stretches: &[(Vec2, Vec2, bool)], join: f64) -> Vec<(bool, Vec<Vec2>)> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A quarter of a 5 mm circle round the origin, from 0 to 90 degrees.
+    const QUARTER: Seg2 = Seg2::Arc { center: Vec2 { x: 0.0, y: 0.0 }, radius: 5.0, start: 0.0, sweep: std::f64::consts::FRAC_PI_2 };
+
+    fn at(degrees: f64) -> Vec2 {
+        let a = degrees.to_radians();
+        Vec2::new(5.0 * a.cos(), 5.0 * a.sin())
+    }
+
+    fn near(_: f64) -> f64 {
+        1e-6
+    }
+
+    /// A run along all of an arc is the arc itself, exact, also when its ends stop within the join of
+    /// the arc's; a run cut short ends where its points do and isn't all of the edge, whichever way
+    /// round its points come; a run off the circle has no arc.
+    #[test]
+    fn a_run_on_an_arc_is_drawn_as_its_part_of_the_arc() {
+        let (part, whole) = on_arc(&QUARTER, &[at(0.0), at(45.0), at(90.0)], true, near, 1e-9).unwrap();
+        assert!(whole && part == QUARTER, "{part:?}");
+        for points in [[at(10.0), at(30.0), at(60.0)], [at(60.0), at(30.0), at(10.0)]] {
+            let (part, whole) = on_arc(&QUARTER, &points, false, near, 1e-9).unwrap();
+            let Seg2::Arc { start, sweep, .. } = part else { panic!("{part:?}") };
+            assert!(!whole && (start - 10f64.to_radians()).abs() < 1e-12 && (sweep - 50f64.to_radians()).abs() < 1e-12, "{part:?}");
+        }
+        let (part, _) = on_arc(&QUARTER, &[at(80.0), at(70.0)], false, near, 1e-9).unwrap();
+        let Seg2::Arc { start, sweep, .. } = part else { panic!("{part:?}") };
+        assert!((start - 70f64.to_radians()).abs() < 1e-12 && (sweep - 10f64.to_radians()).abs() < 1e-12, "{part:?}");
+        assert!(on_arc(&QUARTER, &[at(0.0), Vec2::new(4.0, 4.0), at(90.0)], true, near, 1e-9).is_none());
+        // Ends that stop within the join of the arc's own, as the merge leaves them, are its ends.
+        let short = |mm: f64| [at((mm / 5.0).to_degrees()), at(45.0), at(90.0 - (mm / 5.0).to_degrees())];
+        assert_eq!(on_arc(&QUARTER, &short(1e-7), true, near, 1e-6), Some((QUARTER, true)));
+        assert!(on_arc(&QUARTER, &short(1e-5), true, near, 1e-6).is_some_and(|(_, whole)| !whole));
+    }
+
+    /// A whole circle drawn as one closed run is the circle; a clockwise circle cut into a run that
+    /// crosses its start comes out clockwise across the start.
+    #[test]
+    fn a_closed_run_is_the_whole_circle_and_cuts_cross_the_start() {
+        let circle = Seg2::Arc { center: Vec2::new(0.0, 0.0), radius: 5.0, start: 0.0, sweep: -std::f64::consts::TAU };
+        let ring: Vec<Vec2> = (0..=8).map(|i| at(-45.0 * i as f64)).collect();
+        assert_eq!(on_arc(&circle, &ring, true, near, 1e-9), Some((circle, true)));
+        // Closed, but beside the edge's other runs, or on a circle that is only part of its edge:
+        // not the whole edge.
+        assert!(on_arc(&circle, &ring, false, near, 1e-9).is_some_and(|(_, whole)| !whole));
+        assert!(on_arc(&QUARTER, &ring, true, near, 1e-9).is_none());
+        let (part, whole) = on_arc(&circle, &[at(20.0), at(0.0), at(-20.0)], false, near, 1e-9).unwrap();
+        let Seg2::Arc { start, sweep, .. } = part else { panic!("{part:?}") };
+        assert!(!whole && (start - 20f64.to_radians()).abs() < 1e-12 && (sweep + 40f64.to_radians()).abs() < 1e-12, "{part:?}");
+    }
 
     /// Stretches of one source in any order and either way round join into one run per visibility
     /// that meets end to end, across a gap within the join; a wider gap starts another run.

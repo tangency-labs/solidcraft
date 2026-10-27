@@ -502,14 +502,37 @@ fn a_view_shows_each_placement_of_a_part_with_its_path() {
     assert!((max.x - min.x - 40.0).abs() < 1e-6 && (max.y - min.y - 10.0).abs() < 1e-6, "{v}");
 }
 
-/// Every segment of `v`'s pieces at `visibility`, on the sheet.
+/// Every straight segment of `v`'s pieces at `visibility`, on the sheet.
 fn segments(v: &Value, visibility: &str) -> Vec<(Vec2, Vec2)> {
     let pieces = v["lines"].as_array().into_iter().flatten().flat_map(|l| l["pieces"].as_array().into_iter().flatten());
     pieces
         .filter(|p| p["visibility"] == visibility)
         .flat_map(|p| p["path"].as_array().into_iter().flatten())
+        .filter(|seg| seg["type"] == "line")
         .map(|seg| (point(&seg["a"]), point(&seg["b"])))
         .collect()
+}
+
+/// Every arc of `v`'s pieces at `visibility`, on the sheet: its centre, radius and sweep, and its
+/// piece's accuracy.
+fn arcs(v: &Value, visibility: &str) -> Vec<(Vec2, f64, f64, Value)> {
+    let pieces = v["lines"].as_array().into_iter().flatten().flat_map(|l| l["pieces"].as_array().into_iter().flatten());
+    let mut out = Vec::new();
+    for piece in pieces.filter(|p| p["visibility"] == visibility) {
+        for seg in piece["path"].as_array().into_iter().flatten().filter(|seg| seg["type"] == "arc") {
+            out.push((point(&seg["center"]), seg["radius"].as_f64().unwrap(), seg["sweep"].as_f64().unwrap(), piece["accuracy"]["kind"].clone()));
+        }
+    }
+    out
+}
+
+/// A 40 x 40 x 5 mm plate from the origin with a 10 mm hole through it at (20, 20): seen from
+/// above at 1:1, the hole is round the A3 sheet's centre (210, 148.5).
+fn plate() -> Session {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "body_name": "Plate"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 10, "height": 7, "base": [20, 20, -1], "operation": "cut", "targets": ["Plate"]}));
+    s
 }
 
 /// How long `v`'s pieces at `visibility` are altogether, on the sheet.
@@ -754,6 +777,67 @@ fn tangent_edges_are_drawn_only_when_the_view_shows_them() {
         let tall: f64 = upright.map(|(a, b)| a.dist(b)).sum();
         assert!((tall - 20.0).abs() < 1e-6, "{x}: {tall}: {v}");
     }
+}
+
+/// Seen from above, the hole's rim is drawn as its exact circle: radius 5 round the sheet's
+/// centre, analytic, all the way round. Its two rims lie one over the other, so one is covered;
+/// the plate's outline is still its four straight sides.
+#[test]
+fn a_hole_seen_end_on_is_its_exact_circle() {
+    let mut s = plate();
+    let v = snap(&mut s, json!({"view": "top", "scale": "1:1"}));
+    let schema = output_schema_for::<SnapshotResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &v), "{v}");
+    let rims = arcs(&v, "visible");
+    assert!(!rims.is_empty(), "{v}");
+    for (centre, radius, _, accuracy) in &rims {
+        assert!(centre.dist(Vec2::new(210.0, 148.5)) < 1e-9 && (radius - 5.0).abs() < 1e-9 && accuracy == "analytic", "{v}");
+    }
+    let round: f64 = rims.iter().map(|(_, _, sweep, _)| sweep.abs()).sum();
+    assert!((round - std::f64::consts::TAU).abs() < 1e-9, "{round}: {v}");
+    assert!(v["status"]["covered_pieces"].as_u64().unwrap() > 0, "{v}");
+    assert!((drawn_length(&v, "visible") - 160.0).abs() < 1e-6, "{v}");
+}
+
+/// A bar across the plate, above the hole, hides the rim where it passes over: the rim is cut where
+/// the bar's sides cross it (2 mm either side of its centre), 4 asin 0.4 of it hidden and the rest
+/// visible. The cut arcs end where the mesh found the change, so they stay sampled.
+#[test]
+fn a_rim_cut_where_its_visibility_changes_stays_sampled() {
+    let mut s = plate();
+    run(&mut s, "solid.box", json!({"length": 30, "width": 4, "height": 2, "corner": [5, 18, 10], "body_name": "Bar", "operation": "new"}));
+    let v = snap(&mut s, json!({"view": "top", "scale": "1:1", "display_style": "visible_hidden"}));
+    let hidden = 4.0 * 0.4f64.asin();
+    for (visibility, want) in [("hidden", hidden), ("visible", std::f64::consts::TAU - hidden)] {
+        let rims = arcs(&v, visibility);
+        let on_rim = |(c, r, _, a): &(Vec2, f64, f64, Value)| c.dist(Vec2::new(210.0, 148.5)) < 1e-9 && (r - 5.0).abs() < 1e-9 && a == "sampled";
+        assert!(!rims.is_empty() && rims.iter().all(on_rim), "{visibility}: {v}");
+        let round: f64 = rims.iter().map(|(_, _, sweep, _)| sweep.abs()).sum();
+        assert!((round - want).abs() < 0.02, "{visibility}: {round}, not {want}: {v}");
+    }
+}
+
+/// A part with a hole placed three times, the third turned a quarter turn: one mesh serves all
+/// three, and each hole is an exact circle where its own placement puts it, 50 mm apart on the
+/// sheet round its centre.
+#[test]
+fn each_placements_hole_is_its_own_exact_circle() {
+    let mut s = Session::default();
+    let first = run(&mut s, "component.create", json!({"name": "Part"}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "body_name": "Plate", "operation": "new"}));
+    run(&mut s, "solid.cylinder", json!({"diameter": 10, "height": 7, "base": [20, 20, -1], "operation": "cut", "targets": ["Plate"]}));
+    run(&mut s, "occurrence.copy", json!({"occurrence": first, "translate": [50, 0, 0]}));
+    let turned = run(&mut s, "occurrence.copy", json!({"occurrence": first, "translate": [140, 0, 0]}))["occurrence"].as_u64().unwrap();
+    run(&mut s, "occurrence.move", json!({"occurrence": turned, "space": "world", "axis": [0, 0, 1], "angle": "90 deg", "origin": [140, 0, 0]}));
+    let v = snap(&mut s, json!({"view": "top", "scale": "1:1"}));
+    assert_eq!(v["stats"]["shared_meshes"], json!(1), "{v}");
+    let mut round: std::collections::BTreeMap<i64, f64> = std::collections::BTreeMap::new();
+    for (centre, radius, sweep, accuracy) in arcs(&v, "visible") {
+        assert!((centre.y - 148.5).abs() < 1e-9 && (radius - 5.0).abs() < 1e-9 && accuracy == "analytic", "{v}");
+        *round.entry(centre.x.round() as i64).or_default() += sweep.abs();
+    }
+    assert_eq!(round.keys().copied().collect::<Vec<_>>(), [160, 210, 260], "{v}");
+    assert!(round.values().all(|r| (r - std::f64::consts::TAU).abs() < 1e-9), "{v}");
 }
 
 /// A view shows every body the design places, so a design whose assembly walk stops at its depth

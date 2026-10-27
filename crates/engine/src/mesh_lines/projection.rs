@@ -101,14 +101,14 @@ pub(crate) struct Line {
 
 /// What drew a line: a placement, and its edge or a silhouette. Of sources level with each other on
 /// a stretch, the first in this order draws it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) struct Owner {
     /// The index of the placement among the scene's.
     pub placement: u32,
     pub origin: Origin,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum Origin {
     /// The placement's edge, as the body's edges are numbered.
     Edge(u32),
