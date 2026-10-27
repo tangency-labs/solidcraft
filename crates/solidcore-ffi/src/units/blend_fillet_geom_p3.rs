@@ -253,21 +253,23 @@ fn raw(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
     })
 }
 
-/// Runs `op` on `input` (layouts in the module docs; `path` is the `.smb` file of a file
-/// B-rep block, else empty).
-///
-/// # Errors
-///
-/// [`FfiError::InvalidArgument`] for input the shim must not see; [`FfiError::Status`]
-/// for a shim failure (`SC_ERR_ARG` for a model the shim refuses, see the module docs).
-pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
+/// What [`check`] decided: the shim may run on the whole input, or the B-rep cannot be
+/// built and the shim runs on the B-rep block alone (the first `n` values) to report
+/// that failure.
+enum Checked {
+    Run,
+    Unbuilt(usize),
+}
+
+/// The checks of [`eval`] (see the module docs), without calling the shim.
+fn check(op: Op, path: &str, input: &[f64]) -> Result<Checked, FfiError> {
     let mut rd = Reader { input, at: 0 };
     brep_block(&mut rd, path)?;
     let block = input.get(..rd.at).ok_or_else(|| bad("input too short"))?;
     let export = eu1::eval(eu1::Op::Export, path, block)?;
     let Some(counts) = eu1::counts(&export) else {
         // the B-rep cannot be built: the shim reports the same failure
-        return raw(op, path, block);
+        return Ok(Checked::Unbuilt(block.len()));
     };
     let [_, nv, ng, ne] = validate_model(&mut rd, counts)?;
     match op {
@@ -289,5 +291,35 @@ pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
         }
     }
     rd.done()?;
-    raw(op, path, input)
+    Ok(Checked::Run)
+}
+
+/// The checks [`eval`] makes before calling the shim, without running it: `Ok` for an
+/// input `eval` would run (or report as an unbuilt B-rep). The runner applies them to
+/// the Rust side too, so an input the FFI refuses is a harness error on both sides and
+/// the Rust side never builds a model the shim would not: a vertex or edge corner tag at
+/// or above [`MAX_LIST`] is refused here for the C++ (the shim's corner table is indexed
+/// by tag), while the runner's Rust side sized its own corner table by the tag and
+/// aborted asking for 2^31 corners (384 GiB) on nightly fuzz case `fuzz00137`.
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for input the shim must not see, as [`eval`].
+pub fn validate(op: Op, path: &str, input: &[f64]) -> Result<(), FfiError> {
+    check(op, path, input).map(|_| ())
+}
+
+/// Runs `op` on `input` (layouts in the module docs; `path` is the `.smb` file of a file
+/// B-rep block, else empty).
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] for input the shim must not see; [`FfiError::Status`]
+/// for a shim failure (`SC_ERR_ARG` for a model the shim refuses, see the module docs).
+pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
+    match check(op, path, input)? {
+        Checked::Run => raw(op, path, input),
+        // the B-rep cannot be built: the shim reports the same failure from the block alone
+        Checked::Unbuilt(n) => raw(op, path, input.get(..n).ok_or_else(|| bad("input too short"))?),
+    }
 }

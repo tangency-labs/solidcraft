@@ -987,7 +987,9 @@ fn status(e: &SolidError) -> f64 {
 /// `dTangencyTolRadians` `0.01`. Their type is `SM_FCR_UNKNOWN`, which no
 /// [`FilletCornerKind`] has; the compared paths never read it (the shim refuses the
 /// vertex and edge calculators that would, and `CalcRailRailInterpolation` returns
-/// `SM_ERR` at the corner's empty edge list first).
+/// `SM_ERR` at the corner's empty edge list first). The tags are below [`ffi::MAX_LIST`]:
+/// [`rust`] applies the FFI's checks to the input first, so the table is never sized by
+/// an arbitrary tag (nightly fuzz case fuzz00137 asked for 2^31 corners).
 fn shim_corners(m: &RustModel) -> Result<Vec<FilletCorner>, HarnessError> {
     let mut count = 0;
     let mut tag = |c: Option<FilletCornerId>| {
@@ -1011,6 +1013,13 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         Ok(t) => t,
         Err(out) => return Ok(out),
     };
+    // an input the FFI refuses is a harness error on both sides (PR #502's convention):
+    // the shim never sees it, so the Rust side must not build a model from it either.
+    // Nightly fuzz case fuzz00137 mutated a vertex's corner tag to 2^31: the FFI refuses a
+    // tag at or above `MAX_LIST` (the shim's corner table is indexed by tag), while
+    // `shim_corners` sized the Rust table by the tag and aborted asking for 384 GiB.
+    let input = model_input(i, &tg)?;
+    ffi::validate(op_of(&i.op), &tg.path, &input).map_err(|e| harness(e.to_string()))?;
     let mut m = RustModel::build(i, &tg)?;
     let k = std::mem::take(&mut m.k);
     let mut bases: Vec<FilletSolver> = m.solvers.iter().map(|s| s.base.clone()).collect();
@@ -1870,5 +1879,37 @@ impl UnitDiff for Runner {
 
     fn run_rust(&self, case: &crate::Case) -> Result<Output, HarnessError> {
         rust(&case.parse()?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Nightly fuzz case `blend.fillet_geom_p3/fuzz00137` (runs 40177686438 and
+    /// 40298730423): a vertex corner tag of 2^31. The FFI refuses it for the C++ side
+    /// (`MAX_LIST`, the shim's corner table is indexed by tag), and the Rust side must be
+    /// refused the same way instead of sizing `shim_corners`' table by the tag (it
+    /// aborted asking for 2^31 corners, 384 GiB).
+    #[test]
+    fn huge_corner_tag_is_refused_on_both_sides() {
+        let v = serde_json::json!({
+            "brep": {"kind": "file", "file": "box_with_large_fillet.smb", "rebuild": true},
+            "model": {
+                "solvers": [], "geoms": [], "edges": [],
+                "vertices": [{
+                    "point": [0.0, 0.0, 0.0], "vtype": 7, "status": 0,
+                    "corner": 2_147_483_648_i64, "pc_class": 100, "pc_kind": 0,
+                    "pc_index": 0, "pc_face": -1, "t": 0.0, "uv": [0.0, -1e300],
+                    "mates": [-1, -1]
+                }]
+            },
+            "op": "corner_vert", "v": 0
+        });
+        let i: Inputs = serde_json::from_value(v).unwrap();
+        let cpp = cpp(&i).unwrap_err().to_string();
+        let rust = rust(&i).unwrap_err().to_string();
+        assert!(cpp.contains("index 2147483648 out of range (64)"), "{cpp}");
+        assert_eq!(rust, cpp.trim_start_matches("c++: "));
     }
 }

@@ -1,0 +1,51 @@
+{
+ "unit": "blend.fillet_geom_p3",
+ "cases": [
+  {
+   "name": "fuzz00137_corner_vert_corner_tag_2_31",
+   "origin": "nightly fuzz runs 40177686438 and 40298730423: blend.fillet_geom_p3/fuzz00137 (crash: rust: killed by signal 6, memory allocation of 412316860608 bytes failed; base gen0137, mutations /brep/rebuild = true, /model/vertices/0/uv/1 = -1e+300, /model/vertices/0/corner = 2147483648)",
+   "issue": "runner: shim_corners sized the Rust corner table by the tag (2^31 corners of 192 bytes) where the FFI refuses a tag at or above MAX_LIST (64) for the C++ side; fixed by applying the FFI's checks on the Rust side (PR #1367)",
+   "cpp": "harness: c++: invalid argument: index 2147483648 out of range (64)",
+   "rust": "harness: invalid argument: index 2147483648 out of range (64)",
+   "inputs": {
+    "brep": {
+     "file": "box_with_large_fillet.smb",
+     "kind": "file",
+     "rebuild": true
+    },
+    "model": {
+     "edges": [],
+     "geoms": [],
+     "solvers": [],
+     "vertices": [
+      {
+       "corner": 2147483648,
+       "mates": [
+        -1,
+        -1
+       ],
+       "pc_class": 100,
+       "pc_face": -1,
+       "pc_index": 0,
+       "pc_kind": 0,
+       "point": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "status": 0,
+       "t": 0.0,
+       "uv": [
+        0.0,
+        -1e+300
+       ],
+       "vtype": 7
+      }
+     ]
+    },
+    "op": "corner_vert",
+    "v": 0
+   }
+  }
+ ]
+}
