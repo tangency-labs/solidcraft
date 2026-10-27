@@ -1457,6 +1457,9 @@ mod tests {
         draft.image = Some(Arc::new(ColorImage::new([4, 3], vec![egui::Color32::GREEN; 12])));
         h.app.issue_report.draft = Some(draft);
         h.frames(4);
+        // The screenshot's buttons sit low in the review's scroll area: scrolled into view first.
+        h.call("ui.scroll", json!({"x":800,"y":600,"delta":-1000}));
+        h.frames(2);
         for (path, saved) in [(h.dir.join("report.png"), true), (h.dir.join("missing").join("report.png"), false)] {
             let answer = path.to_string_lossy().to_string();
             h.app.services.pick_save = Some(Box::new(move |_, _| Box::pin(std::future::ready(Some(answer.clone())))));
