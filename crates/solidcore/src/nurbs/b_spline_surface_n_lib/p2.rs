@@ -2188,7 +2188,13 @@ fn corner_blend_n(
 
     // pass the call along to create the NSidedPatch
     let mut ders: Vec<Option<BSplineCurve>> = tan_curves.into_iter().map(Some).collect();
-    BSplineSurface::create_n_sided_patch(&mut boundaries, &mut ders, tangency_tol_radians, None)
+    BSplineSurface::create_n_sided_patch_with(
+        &mut boundaries,
+        &mut ders,
+        tangency_tol_radians,
+        None,
+        k.fixes.corner_blend_stays_inside_neighbours,
+    )
 }
 
 #[cfg(test)]
