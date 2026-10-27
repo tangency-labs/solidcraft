@@ -4493,3 +4493,27 @@ fn a_cut_leaves_hidden_bodies_alone() {
     let shown = setup(false);
     assert!(vol(&shown, "Below") < full - 1.0 && vol(&shown, "Above") < full - 1.0, "with nothing hidden, both are cut");
 }
+
+/// #2464: an extrude Join with no targets onto a plate with a hidden coincident copy changes the
+/// shown plate only, and keeps the shown bodies as its participants.
+#[test]
+fn join_leaves_a_hidden_body_alone() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 40, "height": 5, "body_name": "Plate"}));
+    run(&mut s, "solid.move", json!({"bodies": ["Plate"], "copy": true}));
+    run(&mut s, "browser.visibility", json!({"items": ["Plate (2)"], "visible": false}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "offset": 5, "name": "Rim"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [2, 2], "p1": [38, 38]}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [4, 4], "p1": [36, 36]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Rim", "profiles": [{"point": [3, 3]}], "distance": 3, "operation": "join"}));
+    let st = s.model.state();
+    assert_eq!(st.bodies.len(), 2);
+    let v = |n: &str| solidcraft_kernel::measure(&st.body(n).unwrap().body).unwrap().volume;
+    assert!(rel(v("Plate"), 8816.0) < 1e-9 && rel(v("Plate (2)"), 8000.0) < 1e-9);
+    let f = s.doc.features.last().unwrap();
+    assert_eq!(f.participants, vec!["Plate".to_string()]);
+    // Showing the copy again doesn't change the model.
+    run(&mut s, "browser.visibility", json!({"items": ["Plate (2)"], "visible": true}));
+    assert_eq!(s.model.state().bodies.len(), 2);
+}
