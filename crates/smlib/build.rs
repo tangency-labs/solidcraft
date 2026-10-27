@@ -1,15 +1,20 @@
-//! Builds SMLib, SM_API and their C API (tangency-labs/smlib, at the commit in `SMLIB_REV`) into
-//! static libraries, when the `native` feature is on. The sources come from
-//! `SOLIDCRAFT_SMLIB_DIR`, or from `target/smlib-<rev>` as `scripts/fetch-smlib.sh` leaves them.
+//! Links SMLib, SM_API and their C API (tangency-labs/smlib, at the commit in `SMLIB_REV`) as
+//! static libraries, when the `native` feature is on. In order:
+//! - `SOLIDCRAFT_SMLIB_DIR`: a checkout, compiled here;
+//! - the prebuilt library for the target, as `scripts/fetch-smlib.sh` leaves it in
+//!   `target/smlib-<rev>-prebuilt/<target>`, when its SHA-256 is the one in `SMLIB_PREBUILT`;
+//! - the sources in `target/smlib-<rev>` (`scripts/fetch-smlib.sh --source`), compiled here.
 //!
-//! The file lists, defines and include order follow the fork's `capi/CMakeLists.txt`: SMLib/inc
-//! and SM_API/inc each have a StdAfx.h, so each part must find its own first.
+//! The prebuilt libraries come from the fork's `capi/CMakeLists.txt`. The compiled path follows
+//! it: the same file lists, defines and include order (SMLib/inc and SM_API/inc each have a
+//! StdAfx.h, so each part must find its own first).
 
 use std::path::{Path, PathBuf};
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=SMLIB_REV");
+    println!("cargo:rerun-if-changed=SMLIB_PREBUILT");
     println!("cargo:rerun-if-env-changed=SOLIDCRAFT_SMLIB_DIR");
     println!("cargo:rerun-if-env-changed=WASI_SDK_PATH");
     if std::env::var_os("CARGO_FEATURE_NATIVE").is_none() {
@@ -25,14 +30,26 @@ fn main() {
 fn build() -> Result<(), String> {
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").map_err(|e| e.to_string())?);
     let rev = std::fs::read_to_string(manifest.join("SMLIB_REV")).map_err(|e| format!("SMLIB_REV: {e}"))?.trim().to_string();
+    let rev12 = rev.get(..12).unwrap_or(&rev);
+    let target = std::env::var("TARGET").unwrap_or_default();
+    let fetched = manifest.join("../../target");
     let root = match std::env::var_os("SOLIDCRAFT_SMLIB_DIR") {
         Some(d) => PathBuf::from(d),
-        None => manifest.join("../../target").join(format!("smlib-{}", rev.get(..12).unwrap_or(&rev))),
+        None => {
+            let prebuilt = fetched.join(format!("smlib-{rev12}-prebuilt")).join(&target);
+            if let Some(sha) = pinned(&manifest, &target)? {
+                println!("cargo:rerun-if-changed={}", prebuilt.join(".sha256").display());
+                let have = std::fs::read_to_string(prebuilt.join(".sha256")).unwrap_or_default();
+                if have.trim() == sha {
+                    return link_prebuilt(&prebuilt, &target);
+                }
+            }
+            fetched.join(format!("smlib-{rev12}"))
+        }
     };
     if !root.join("capi/include/smlib.h").is_file() {
         return Err(format!(
-            "the SMLib sources are not at {} (feature `native`): run scripts/fetch-smlib.sh, or set SOLIDCRAFT_SMLIB_DIR to a tangency-labs/smlib checkout at {rev}",
-            root.display()
+            "SMLib {rev} for {target} is not fetched (feature `native`): run scripts/fetch-smlib.sh {target}, or set SOLIDCRAFT_SMLIB_DIR to a tangency-labs/smlib checkout at that commit"
         ));
     }
     println!("cargo:rerun-if-changed={}", root.join("capi").display());
@@ -41,7 +58,6 @@ fn build() -> Result<(), String> {
     let src = root.join("source");
     let core = sources(&src.join("SMLib/src"), &["StdAfx.cpp", "SmDllMain.cpp"])?;
     let api = sources(&src.join("SM_API/src"), &["StdAfx.cpp"])?;
-    let target = std::env::var("TARGET").unwrap_or_default();
     let msvc = target.contains("msvc");
     let wasi = if target == "wasm32-unknown-unknown" { Some(wasi_sdk()?) } else { None };
 
@@ -51,6 +67,10 @@ fn build() -> Result<(), String> {
         // Rust links the MSVC runtime as a DLL; the cc crate's default (/MD) matches.
         if msvc {
             b.flag("/EHsc").flag("/bigobj");
+        } else {
+            // No fused multiply-add, as the prebuilt libraries (capi/CMakeLists.txt): SMLib's
+            // tangent cases decide on the last bits. MSVC does not contract by default.
+            b.flag("-ffp-contract=off");
         }
         if let Some(sdk) = &wasi {
             b.compiler(sdk.join("bin/clang++")).archiver(sdk.join("bin/llvm-ar")).target(WASI_TARGET);
@@ -96,6 +116,36 @@ fn build() -> Result<(), String> {
         for l in ["c++", "c++abi", "unwind", "c"] {
             println!("cargo:rustc-link-lib=static={l}");
         }
+    }
+    Ok(())
+}
+
+/// The SHA-256 `SMLIB_PREBUILT` pins for `target`'s prebuilt archive, if there is one.
+fn pinned(manifest: &Path, target: &str) -> Result<Option<String>, String> {
+    let pins = std::fs::read_to_string(manifest.join("SMLIB_PREBUILT")).map_err(|e| format!("SMLIB_PREBUILT: {e}"))?;
+    Ok(pins.lines().filter(|l| !l.starts_with('#')).find_map(|l| {
+        let mut f = l.split_whitespace();
+        (f.next() == Some(target)).then(|| f.next().map(str::to_string)).flatten()
+    }))
+}
+
+/// Links the prebuilt C API in `dir` (one archive, `smlib`) and the C++ runtime it was compiled
+/// against: the system's, or for wasm wasi-sdk's, which the archive carries.
+fn link_prebuilt(dir: &Path, target: &str) -> Result<(), String> {
+    let lib = dir.join("lib");
+    if !lib.is_dir() {
+        return Err(format!("{} has no lib folder: run scripts/fetch-smlib.sh {target} again", dir.display()));
+    }
+    println!("cargo:rustc-link-search=native={}", lib.display());
+    println!("cargo:rustc-link-lib=static=smlib");
+    if target == "wasm32-unknown-unknown" {
+        for l in ["c++", "c++abi", "unwind", "c"] {
+            println!("cargo:rustc-link-lib=static={l}");
+        }
+    } else if target.contains("apple") {
+        println!("cargo:rustc-link-lib=c++");
+    } else if !target.contains("msvc") {
+        println!("cargo:rustc-link-lib=stdc++");
     }
     Ok(())
 }
