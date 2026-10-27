@@ -17,12 +17,14 @@
 //!
 //! The handles are behind the `placement_handles` preference (Preferences > Design > Placement), off by
 //! default: off, a feature is placed by its click only, as before, and its Position input takes faces
-//! only; each tool's [`Spec::serves`] says what turns its handles on.
+//! only. A Single hole's markers (#6818) stay behind Create Hole › Move holes by clicking or dragging
+//! instead, as the hole's own handle was; each tool's [`Spec::serves`] says what turns it on.
 //!
-//! A tool has one place (a Rest) or one per item of its first input (a marker on each): [`Spec::places`]
-//! lists them, and a drag or a click names the place by its key.
+//! A tool has one place (a Rest) or one per item of its first input (a Single hole, a marker on each
+//! hole placed): [`Spec::places`] lists them, and a drag or a click names the place by its key.
 
 mod boss;
+mod hole;
 mod look;
 mod rest;
 mod snap_fit;
@@ -55,8 +57,8 @@ pub(crate) struct Spec {
     pub snap_commands: &'static [&'static str],
     /// The move marker's tooltip.
     pub move_tip: &'static str,
-    /// A marker on each of the tool's places, named `<name>:<n>` by their order, with no ring.
-    /// Off: one place, `<name>:position`, and the ring if any.
+    /// A marker on each of the tool's places, named `<name>:<n>` by their order, with no ring
+    /// (a Single hole's). Off: one place, `<name>:position`, and the ring if any.
     pub many: bool,
     /// The places the handles stand at.
     pub places: fn(&SolveApp, &Dialog) -> Vec<Place>,
@@ -64,7 +66,8 @@ pub(crate) struct Spec {
     /// taken while the dialog is open, so it snaps as a click does) would put it; false when
     /// nothing there can take it.
     pub move_to: fn(&SolveApp, &mut Dialog, &[Hit], usize) -> bool,
-    /// What a click (a press without a drag) on the marker at `key` does. `None`: nothing.
+    /// What a click (a press without a drag) on the marker at `key` does: a Single hole is taken
+    /// out. `None`: a click on the marker does nothing.
     pub click: Option<fn(&SolveApp, &mut Dialog, usize)>,
     /// The footprint outlined while dragging, in world points (empty: no outline).
     pub footprint: fn(&SolveApp, &Dialog, Vec3, Vec3) -> Vec<Vec3>,
@@ -86,7 +89,8 @@ pub(crate) fn one(frame: Option<(Vec3, Vec3)>) -> Vec<Place> {
     frame.map(|(base, n)| Place { key: 0, base, n }).into_iter().collect()
 }
 
-/// Are the shared handles on (Preferences > Design > Placement handles)?
+/// Are the shared handles on (Preferences > Design > Placement handles)? The gate of every
+/// tool but the hole, whose markers keep the hole's own setting.
 pub(crate) fn on(app: &SolveApp) -> bool {
     app.preferences.placement_handles
 }
@@ -108,6 +112,7 @@ pub(crate) struct Turn {
 #[rustfmt::skip]
 static TOOLS: &[&Spec] = &[
     &boss::SPEC,
+    &hole::SPEC,
     &rest::SPEC,
     &snap_fit::SPEC,
 ];
@@ -247,19 +252,6 @@ fn on_plane(proj: &Proj, pos: Pos2, base: Vec3, n: Vec3) -> Option<Vec3> {
     crate::gizmo::on_plane(proj, pos, base, n).filter(|p| p.is_finite())
 }
 
-/// The move marker alone, for a handle another module owns (a Single hole's, #6818): drawn as
-/// [`show`] draws its own, from the handle's hovered and dragged state, so a hole and a Rest on
-/// the same model show one language for the same action. `id` is the handle's; the motions keep
-/// their state under it. Nothing to step back for, so it is never dimmed.
-pub(crate) fn marker(ui: &egui::Ui, painter: &egui::Painter, id: egui::Id, c: Pos2, hovered: bool, dragging: bool) {
-    let style = CrossStyle {
-        hot: MARKER_HOT.run(ui.ctx(), id.with("hot"), hovered || dragging).t,
-        active: MARKER_ACTIVE.run(ui.ctx(), id.with("active"), dragging).t,
-        alpha: 1.0,
-    };
-    crosshair(painter, c, &style, &Tokens::get());
-}
-
 /// The dialog taken out of `app` for a change (a drag's move, a click, a turn), and put back.
 fn with_dialog(app: &mut SolveApp, f: impl FnOnce(&SolveApp, &mut Dialog)) {
     if let Some(mut d) = app.dialog.take() {
@@ -270,7 +262,7 @@ fn with_dialog(app: &mut SolveApp, f: impl FnOnce(&SolveApp, &mut Dialog)) {
 
 /// Draw the handles of the open dialog and take their drags (after the dialog's own arrow, so the
 /// marker wins the pointer near the base). The dialog stays in `app` while the pointer is picked
-/// under, so a drag snaps as a click does.
+/// under, so a drag snaps as a click does (its input's points, the hole's face and rim snaps).
 pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj) {
     DRAWN.with(|h| h.borrow_mut().clear());
     RING_ABOUT.with(|c| c.set(None));
