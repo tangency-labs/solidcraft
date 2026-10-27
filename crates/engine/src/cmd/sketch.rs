@@ -1159,14 +1159,24 @@ fn rect_rounded(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let mut scratch = s.scratch();
     let mut out = scratch.execute("sketch.rectangle.two_point", &rect)?;
-    let corners: Vec<Value> = ["bottom_left", "bottom_right", "top_right", "top_left"]
-        .iter()
-        .filter_map(|k| out["corners"].get(*k).filter(|v| v.is_string()).cloned())
-        .collect();
-    if corners.len() != 4 {
-        return Err(bad(cmd, "the rectangle's corners are missing"));
+    // The fillet rounds each corner by the two sides meeting there, not by the corner point: a
+    // corner that lands on another curve's end is shared with it, and rounding the point would
+    // weld the two together, leaving the corner on three curves (#7878).
+    let sides: Vec<String> =
+        ["bottom", "right", "top", "left"].iter().filter_map(|k| out["sides"].get(*k).and_then(Value::as_str).map(str::to_string)).collect();
+    if sides.len() != 4 {
+        return Err(bad(cmd, "the rectangle's sides are missing"));
     }
-    let mut fillet = json!({"points": corners, "radius": r_expr});
+    let (bottom, right, top, left) = (&sides[0], &sides[1], &sides[2], &sides[3]);
+    let mut fillet = json!({
+        "points": [
+            {"a": bottom, "b": left},
+            {"a": bottom, "b": right},
+            {"a": right, "b": top},
+            {"a": top, "b": left},
+        ],
+        "radius": r_expr,
+    });
     if let Some(sketch) = p.get("sketch") {
         fillet["sketch"] = sketch.clone();
     }
