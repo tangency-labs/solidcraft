@@ -4,12 +4,16 @@
 //! hole's own handle from #2912 did. Behind Create Hole › Move holes by clicking or dragging, not the
 //! shared Placement handles setting. No ring: a hole has nothing to turn. Holes on sketch points
 //! (Multiple) have no markers: their place is the point's.
+//!
+//! Reference edges (#37): with one picked, the marker has two arms along the edge and drags the
+//! hole along it at its distance; with two, the marker has its four arms again and a drag sets
+//! both distances.
 
 use solidcore_record::Vec3;
 use solidcraft_engine::Sel;
 use solidcraft_engine::geom::prelude::*;
 
-use super::{Place, Spec, circle, face_pick, len, vec3_of};
+use super::{Freedom, Place, Spec, circle, face_pick, len, vec3_of};
 use crate::SolveApp;
 use crate::dialogs::{Dialog, Kind};
 use crate::viewport::Hit;
@@ -24,6 +28,7 @@ pub(super) static SPEC: Spec = Spec {
     move_to,
     click: Some(|app, d, key| crate::hole_place::remove_place(d, &app.session, key)),
     footprint,
+    freedom: |_, d, _| crate::hole_refs::freedom(d),
     turn: None,
 };
 
@@ -46,15 +51,18 @@ fn places(app: &SolveApp, d: &Dialog) -> Vec<Place> {
 }
 
 /// The hole at `key` moved to the face place a click with `hits` would take (snapped as the
-/// pick is), unless that face already has another hole. Only while the face input is the active
-/// one: the hits were picked by the active input's rules.
+/// pick is), unless that face already has another hole; held by a reference edge, as far along
+/// the edge as the pick is.
 fn move_to(app: &SolveApp, d: &mut Dialog, hits: &[Hit], key: usize) -> bool {
-    if d.active != 0 {
-        return false;
-    }
     let s = &app.session;
     let Some(to) = face_pick(d, s, hits) else { return false };
-    crate::hole_place::move_place(d, s, key, to)
+    match crate::hole_refs::freedom(d) {
+        Freedom::Plane => crate::hole_place::move_place(d, s, key, to),
+        Freedom::Line(_) => match to {
+            Sel::Face { point, .. } => crate::hole_refs::drag_to(s, d, key, point),
+            _ => false,
+        },
+    }
 }
 
 /// The hole's mouth on the face: the counterbore's or countersink's diameter, else the bore's.
