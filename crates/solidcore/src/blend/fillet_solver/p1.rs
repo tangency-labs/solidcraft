@@ -278,6 +278,21 @@ impl FilletSurfaceGenerator {
         Self::blend_curve(1.5, 1)
     }
 
+    /// `MeetsItsFacesTangentially` (virtual; the fork's, tangency-labs/smlib `8bffb23`):
+    /// whether each cross section is tangent, at its ends on the rails, to the faces the
+    /// fillet rolls on. The linear section cuts across both faces, an arc about the ball's
+    /// centre is square to the faces at each rail unless mirrored about the rails' chord,
+    /// and a blend curve takes its end tangents from that arc; the base generator and any
+    /// custom one are not known to.
+    #[must_use]
+    pub const fn meets_its_faces_tangentially(&self) -> bool {
+        match self {
+            Self::Circular(g) => !g.mirror,
+            Self::BlendCurve(_) => true,
+            Self::Base | Self::Linear | Self::EiffelTower => false,
+        }
+    }
+
     /// `GetFilletSurfaceGeneratorType` (virtual).
     #[must_use]
     pub const fn fillet_surface_generator_type(&self) -> FilletSurfaceGeneratorType {

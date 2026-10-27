@@ -38,6 +38,9 @@ use crate::topology::{edge, edgeuse::p1 as eu, edgeuse::p2, Brep, EdgeId, Edgeus
 #[path = "p5/recovery.rs"]
 mod recovery;
 
+#[path = "p5/rails_fit.rs"]
+mod rails_fit;
+
 const OP: &str = "blend::fillet_solver::p5";
 
 /// Resolve handles used by `TestRollOver`, without assuming the two B-reps' arena
@@ -267,6 +270,9 @@ impl FilletSolver {
                 fillets.with_rail_classification(rail, |pseudo, cc| {
                     context.classify(k, target, pseudo, face, cc)
                 })?;
+                if k.fixes.fillet_rail_rim_on_face {
+                    join_intervals_on_face(fillets, rail)?;
+                }
                 finish_classification(
                     solver,
                     k,
@@ -350,6 +356,33 @@ impl FilletSolver {
         }
         .process(id, adjusted_corners, &mut recovery::Missing)
     }
+}
+
+/// WR-301 (#485): the rail leaves its face only where it runs outside it. Neighbouring
+/// intervals on the face or on its boundary (a rail touching a vertex of the boundary or
+/// running along a piece of an edge, as a blend whose setback reaches exactly the rim of
+/// a hole does) are joined into one, so the rollover sees only the intervals that leave
+/// the face (tangency-labs/smlib `f6ed05a`).
+fn join_intervals_on_face(fillets: &mut FilletBrep, rail: EdgeId) -> Result<()> {
+    let cc = fillets
+        .fillet_edge_mut(rail)?
+        .curve_class
+        .as_mut()
+        .ok_or_else(|| SolidError::null_pointer(OP))?;
+    for index in (1..cc.size()).rev() {
+        let this = cc.at(index)?.mid;
+        let prev = cc.at(index - 1)?.mid;
+        if prev.point_class() == PointClassType::Unknown
+            || this.point_class() == PointClassType::Unknown
+        {
+            continue;
+        }
+        if prev.point_class() != PointClassType::Face {
+            cc.at_mut(index - 1)?.mid = this;
+        }
+        cc.connect_intervals(index, IntervalPosition::Start, false)?;
+    }
+    Ok(())
 }
 
 trait ClassificationOps {

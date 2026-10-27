@@ -1610,6 +1610,16 @@ impl FilletBrep {
                 let ext_factor = fs.extension_factor();
                 fs.set_extension_factor(2.0 * ext_factor);
 
+                // WR-300 (#1023): upstream's retry holds the radius at a corner not
+                // calculated as constant radius too; the fix holds it only as the first
+                // search did.
+                let retry_si = if k.fixes.fillet_retry_radius_as_first
+                    && !corners.corner(corner)?.is_calc_as_const_rad()
+                {
+                    None
+                } else {
+                    Some(si)
+                };
                 for &guess in &guess_edge_parameters {
                     let _ = solvers.solver(si)?;
                     let r = rail_edgeuse_intersect(
@@ -1618,7 +1628,7 @@ impl FilletBrep {
                         g1,
                         solvers,
                         target,
-                        Some(si),
+                        retry_si,
                         rail_index,
                         side_eu1,
                         guess,

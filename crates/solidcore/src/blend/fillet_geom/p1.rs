@@ -290,6 +290,11 @@ pub enum FilletErrorType {
     BadTrim = 6,
     /// `SM_FILERR_BAD_MERGE`.
     BadMerge = 7,
+    /// Not an upstream code (the pin's enum ends at `SM_FILERR_BAD_MERGE`). The "blend does not
+    /// fit its faces" refusal of the SolidCraft opt-ins (the `fixes.fillet_refuse_*` flags that
+    /// refuse a blend larger than its faces). Only those opt-ins record it; with them off the port
+    /// reports pin codes only.
+    NoRoom = 8,
 }
 
 /// `SmFilletCornerType`: the kind of corner where fillets meet.

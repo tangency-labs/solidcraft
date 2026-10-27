@@ -168,9 +168,11 @@ use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface::BSplineSurface;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::nurbs::knots::Side;
+use crate::query::brep::{BrepFaceServices, FaceCaches};
 use crate::surface::plane::Plane;
 use crate::surface::surface::Surface;
 use crate::topology::brep::p7::{make_face_with_curves, FaceCurvesInput};
+use crate::topology::brep_cache::CacheObject;
 use crate::topology::edgeuse::{p1 as eu1, p3 as eu3};
 use crate::topology::{
     edge, vertex, vertexuse, Brep, EdgeId, EdgeuseId, FaceId, ObjectHandle, VertexId, VertexuseId,
@@ -1444,6 +1446,112 @@ impl FilletCorner {
         Ok(())
     }
 
+    /// The start of the fork's `SmFilletNx1Corner::CalcCornerEdgeGeom` (not upstream; opt-in
+    /// `fixes.fillet_nx1_end_rib_global_merge`, WR-303, tangency-labs/solidcore#841;
+    /// tangency-labs/smlib `967f7ab`). At a corner of at most three edges the one corner
+    /// edge is the end rib, from one rail's end on its side edge to the other's. When
+    /// one rail missed its side edge (`SM_FV_NO_INT_RAIL_EU`) because that edge ends
+    /// within the fillet's width, there is no end rib: it is deleted and the caller sets
+    /// the executive's global merge, which cuts the round off where it meets the body.
+    /// Not when the side edge also lies on the fillet's other side surface: it continues
+    /// the filleted edge between the fillet's own two surfaces, no end exists there, and
+    /// the end rib fails as before. Returns whether the rib was deleted.
+    ///
+    /// # Errors
+    /// `SM_ERR_NULL_POINTER` for a missing edge use, face, surface or curve (upstream
+    /// dereferences them); those of the surface coincidence test and the deletion.
+    pub fn drop_end_rib_for_global_merge(
+        &mut self,
+        k: &mut Kernel,
+        target: &mut Brep,
+        pseudo: &mut FilletBrep,
+    ) -> Result<bool> {
+        const OP: &str = "blend::fillet_corner::p1::drop_end_rib_for_global_merge";
+        let [end_rib] = self.edges[..] else {
+            return Ok(false);
+        };
+        if !k.fixes.fillet_nx1_end_rib_global_merge
+            || !matches!(self.kind, FilletCornerKind::NByOne | FilletCornerKind::Open)
+            || pseudo.fillet_edge(end_rib)?.edge_type != FilletEdgeType::FilletXSideFace
+        {
+            return Ok(false);
+        }
+        let start_fv =
+            edge::vertex(pseudo.brep(), end_rib)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let end_fv = edge::other_vertex(pseudo.brep(), end_rib, Some(start_fv))?
+            .ok_or_else(|| SolidError::null_pointer(OP))?;
+        let missed = |miss: VertexId, other: VertexId| -> Result<bool> {
+            Ok(
+                pseudo.fillet_vertex(miss)?.status() == FilStatus::NoIntRailEu
+                    && pseudo.fillet_vertex(other)?.is_processed(),
+            )
+        };
+        let miss_fv = if missed(start_fv, end_fv)? {
+            start_fv
+        } else if missed(end_fv, start_fv)? {
+            end_fv
+        } else {
+            return Ok(false);
+        };
+        let fv = pseudo.fillet_vertex(miss_fv)?;
+        let Some(EntityRef::Edgeuse(side_eu)) = fv.point_class_object() else {
+            return Ok(false);
+        };
+        if fv.point_class() != PointClassType::Edgeuse {
+            return Ok(false);
+        }
+
+        // The side edge the rail missed, and the fillet's side face it does not bound.
+        let fil_eu = self
+            .solver_eus
+            .as_ref()
+            .and_then(|eus| eus.first().copied())
+            .ok_or_else(|| SolidError::null_pointer(OP))?;
+        let radial = |eu| -> Result<EdgeuseId> {
+            eu1::radial(target, eu)?.ok_or_else(|| SolidError::null_pointer(OP))
+        };
+        let face_of = |eu| -> Result<FaceId> {
+            eu1::face(target, eu)?.ok_or_else(|| SolidError::null_pointer(OP))
+        };
+        let side_faces = [face_of(side_eu)?, face_of(radial(side_eu)?)?];
+        let mut other_face = face_of(fil_eu)?;
+        if side_faces.contains(&other_face) {
+            other_face = face_of(radial(fil_eu)?)?;
+        }
+        let surface = crate::topology::face::p2::surface(target, other_face)?
+            .ok_or_else(|| SolidError::null_pointer(OP))?
+            .clone_for_evaluation()?;
+        let side_edge = eu1::edge(target, side_eu)?.ok_or_else(|| SolidError::null_pointer(OP))?;
+        let curve = edge::curve(target, side_edge)?
+            .ok_or_else(|| SolidError::null_pointer(OP))?
+            .clone_for_evaluation()?;
+        let interval = edge::interval(target, side_edge)?;
+        // the face's own surface: its trimmed-surface services come from the B-rep
+        let mut services = BrepFaceServices::with_caches(target, FaceCaches::new());
+        let runs_on = surface
+            .simple_coincidence_checker_with_context(
+                k,
+                &surface.natural_uv_domain(),
+                &curve,
+                &interval,
+                self.approx_tol_3d,
+                false,
+                [
+                    Some(CacheObject::Curve(side_edge)),
+                    Some(CacheObject::Surface(other_face)),
+                ],
+                None,
+                &mut services,
+            )?
+            .is_some();
+        if runs_on {
+            return Ok(false);
+        }
+        pseudo.delete_wire_fillet_edge(k, end_rib)?;
+        self.edges.clear();
+        Ok(true)
+    }
+
     /// `CalcCornerEdgeGeom`: `SmFilletEdge::CalcCornerEdgeGeom` on every corner fillet edge
     /// (not the rails). A failed edge is deleted when the executive does a global merge and
     /// the edge is a fillet-side-face edge, else `SM_ERR`; an edge to be squeezed is squeezed
@@ -1458,6 +1566,9 @@ impl FilletCorner {
     /// failed edge the merge cannot absorb; `SM_ERR_NULL_POINTER` for a processed edge
     /// without curve; those of the squeeze.
     pub fn calc_corner_edge_geom(&mut self, env: &mut CornerEnv<'_>) -> Result<()> {
+        if self.drop_end_rib_for_global_merge(env.k, env.target, env.pseudo)? {
+            env.exec.do_global_merge = true;
+        }
         self.calc_corner_edge_geom_with(
             env,
             |env, corner, edge| {

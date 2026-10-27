@@ -1793,6 +1793,14 @@ impl<'target> FilletSession<'target> {
         }
     }
 
+    /// `GetFilletErrorInfo`: what the executive recorded of its last failure
+    /// (`SmFilletErrorInfo`; the code is the `SmFilletErrorType` value, `FilletErrorType::NoRoom` = 8 for the
+    /// fork's `SM_FILERR_NO_ROOM`).
+    #[must_use]
+    pub const fn error_info(&self) -> &ErrorInfo<FilletObject> {
+        &self.executive.error
+    }
+
     /// `SetDoGlobalMerge`.
     pub fn set_do_global_merge(&mut self, do_global_merge: bool) {
         self.executive.set_do_global_merge(do_global_merge);
@@ -1972,6 +1980,10 @@ impl CornerEdgeAccess<FilletObject> for SessionObjects<'_> {
         let corner = corners
             .get_mut(id.0 as usize)
             .ok_or_else(|| invalid("corner is not live"))?;
+        // WR-303: the Nx1 corner's end rib hands the round to the global merge.
+        if corner.drop_end_rib_for_global_merge(k, target, pseudo)? {
+            executive.options.global_merge = true;
+        }
         let mut context = SessionCornerEdgeContext {
             k,
             target,
@@ -2997,6 +3009,104 @@ impl SolverGeometryAccess<FilletObject> for SessionObjects<'_> {
             FilletBody::Target,
             EntityRef::Edge(edge),
         ))
+    }
+    fn geometry_rails_fit(
+        &mut self,
+        k: &mut Kernel,
+        solver: FilletObject,
+        executive: &FilletExecutive<FilletObject>,
+    ) -> Result<bool> {
+        let FilletObject::Solver(id) = solver else {
+            return Err(invalid("object is not a solver"));
+        };
+        let solver = self
+            .solvers
+            .get_mut(id.0 as usize)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| invalid("solver is not live in this session"))?;
+        let mut context = SessionRollOver {
+            corners: &mut self.corners,
+            executive,
+        };
+        FilletSolver::rails_fit_their_faces_with_ops(
+            live_solver_ops(solver),
+            k,
+            self.target,
+            &mut self.pseudo,
+            &mut context,
+        )
+    }
+    fn geometry_faces_outlast(&mut self, k: &mut Kernel, solvers: &[FilletObject]) -> Result<bool> {
+        use crate::blend::fillet_geom::p1::FilletGeomType;
+        use crate::topology::{edgeuse::p1 as eu, loopuse};
+        // Each face and blended edge whose blend's rail on that face is a point, and
+        // whether that blend's cross section meets the face tangentially.
+        let mut point_rails: Vec<(FaceId, EdgeId, bool)> = Vec::new();
+        for &solver in solvers {
+            let FilletObject::Solver(id) = solver else {
+                return Err(invalid("object is not a solver"));
+            };
+            let base = self.solver(id)?.base();
+            let fil_eu = base
+                .edgeuse(0)?
+                .ok_or_else(|| invalid("solver without first edgeuse"))?;
+            let fil_edge = eu::edge(self.target, fil_eu)?
+                .ok_or_else(|| invalid("solver edgeuse without edge"))?;
+            let tangent = base
+                .fillet_surface_generator()
+                .ok_or_else(|| invalid("solver without surface generator"))?
+                .meets_its_faces_tangentially();
+            for geom in base.fillet_geoms() {
+                let geom = self.pseudo.geom(geom)?;
+                if geom.fillet_geom_type() != FilletGeomType::Default {
+                    continue;
+                }
+                for ii in 0..2 {
+                    let rail = geom
+                        .rail(ii)
+                        .ok_or_else(|| invalid("geometry without rail"))?;
+                    let curve = crate::topology::edge::curve(self.pseudo.brep(), rail)?
+                        .ok_or_else(|| invalid("rail without curve"))?;
+                    if curve.is_degenerate(k, base.approx_tol_3d, None)? {
+                        let face = self
+                            .pseudo
+                            .fillet_edge(rail)?
+                            .original_face()
+                            .ok_or_else(|| invalid("rail without original face"))?;
+                        point_rails.push((face, fil_edge, tangent));
+                    }
+                }
+            }
+        }
+        for &(face, _, _) in &point_rails {
+            let Some(fu) = self.target.face(face)?.faceuse else {
+                continue;
+            };
+            for lu in eu::faceuse_loopuses(self.target, fu, false, None)? {
+                // The loop closes to a point when every edge of it has a point rail on
+                // the face; it ends in that point when some blend there meets the face
+                // at an angle.
+                let edges = loopuse::edges(self.target, lu, None)?;
+                let mut closes_to_a_point = !edges.is_empty();
+                let mut all_tangent = true;
+                for edge in edges {
+                    closes_to_a_point = false;
+                    for &(f, e, tangent) in &point_rails {
+                        if f == face && Some(e) == edge {
+                            closes_to_a_point = true;
+                            all_tangent &= tangent;
+                        }
+                    }
+                    if !closes_to_a_point {
+                        break;
+                    }
+                }
+                if closes_to_a_point && !all_tangent {
+                    return Ok(false);
+                }
+            }
+        }
+        Ok(true)
     }
 }
 
