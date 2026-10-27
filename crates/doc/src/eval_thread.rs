@@ -593,8 +593,12 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
 
 /// The chamfered tip of an external thread (ISO 4753, chamfered end CH) at each of its free ends:
 /// the material outside a cone `angle` to the axis (default 45°) that reaches the diameter
-/// d_f = d - 2 `depth` at the face's end (default: the external thread's minor diameter, the
-/// largest ISO 4753 allows), as a ring to cut after the groove, so the last teeth taper into it.
+/// d_f = d - 2 `depth` at the face's end, as a ring to cut after the groove, so the last teeth
+/// taper into it. ISO 4753 bounds d_f by the external thread's minor diameter; the default is
+/// that bound, d3 = d - 1.226869 P (ISO 724, the rounded root of the design profile). It lies
+/// below the modelled basic root d1, so the cone crosses the root cylinder and leaves a whole
+/// ring on the end; one ending on the root itself would pinch to nothing wherever the groove
+/// reaches the end. ISO 4753 is for ISO metric threads: other forms give `depth`.
 fn tip_cones(t: &ThreadInfo, radius: f64, ends: [End; 2], angle: Option<f64>, depth: Option<f64>) -> Result<Vec<Body>> {
     if t.internal {
         return Err(DocError::Invalid("a chamfered tip is for an external thread (ISO 4753); countersink the hole's entry instead".into()));
@@ -605,7 +609,18 @@ fn tip_cones(t: &ThreadInfo, radius: f64, ends: [End; 2], angle: Option<f64>, de
         return Err(DocError::Invalid("the chamfer's angle to the axis must be between 1° and 89°".into()));
     }
     let r_top = radius.max(t.major_diameter / 2.0);
-    let depth = depth.unwrap_or(t.major_diameter / 2.0 - g.root_r);
+    let depth = match (depth, t.form) {
+        (Some(d), _) => d,
+        // ISO 724: d3 = d1 - H/6 = d - 2 (17/24) H.
+        (None, ThreadForm::Metric) => 17.0 / 24.0 * t.pitch * 3f64.sqrt() / 2.0,
+        (None, form) => {
+            return Err(DocError::Invalid(format!(
+                "ISO 4753's chamfered end is for ISO metric threads: give a {} thread its chamfer depth (its root is {} mm deep)",
+                form.name(),
+                show_mm(t.major_diameter / 2.0 - g.root_r)
+            )));
+        }
+    };
     let r_f = t.major_diameter / 2.0 - depth;
     if !(depth > 0.0 && r_f > 1e-3) {
         return Err(DocError::Invalid(format!("the chamfer's depth must be between 0 and {} mm", show_mm(t.major_diameter / 2.0))));

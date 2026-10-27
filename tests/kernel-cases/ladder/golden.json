@@ -986,14 +986,14 @@
     },
     "ladder/06-threads/017-external-m10-chamfered-tip": {
       "measured": {
-        "area_mm2": 1500.75072007837,
+        "area_mm2": 1492.9858770288445,
         "body_count": 1,
-        "edges": 254,
+        "edges": 258,
         "faces": 88,
-        "vertices": 168,
-        "volume_mm3": 1947.8329205613231
+        "vertices": 172,
+        "volume_mm3": 1945.3543465077544
       },
-      "seconds": 3.485166487,
+      "seconds": 3.293720875,
       "status": "pass"
     },
     "ladder/06-threads/018-external-m10-both-hands": {

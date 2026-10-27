@@ -138,12 +138,29 @@ impl Surf {
 }
 
 /// How a patch on edges meets the faces beside its loop (labels, and the `continuity` parameter).
-const PATCH_CONTINUITY: [(&str, &str); 3] = [("Position (G0)", "g0"), ("Tangent (G1)", "g1"), ("Curvature (G2)", "g2")];
+/// Labels are plain words; the order's code (G0, G1, G2) is in each one's hover text.
+const PATCH_CONTINUITY: [(&str, &str); 3] = [("ui.continuity_position", "g0"), ("ui.continuity_tangent", "g1"), ("ui.continuity_curvature", "g2")];
 
 /// How much of the surface at its edges each end of a blend repeats (labels, and the
 /// `continuity` words).
 const BLEND_CONTINUITY: [(&str, &str); 4] =
-    [("Position (G0)", "g0"), ("Tangent (G1)", "g1"), ("Curvature (G2)", "g2"), ("Curvature change (G3)", "g3")];
+    [("ui.continuity_position", "g0"), ("ui.continuity_tangent", "g1"), ("ui.continuity_curvature", "g2"), ("ui.continuity_curvature_change", "g3")];
+
+/// Each continuity's hover text, in the order of [`BLEND_CONTINUITY`]: where its code (G0 … G3)
+/// is shown.
+const CONTINUITY_TIPS: [&str; 4] =
+    ["ui.continuity_position_tip", "ui.continuity_tangent_tip", "ui.continuity_curvature_tip", "ui.continuity_curvature_change_tip"];
+
+/// A Continuity row's segments over `orders` (the segments draw their text as given).
+fn continuity_segments(ui: &mut egui::Ui, selected: &mut usize, orders: &[(&str, &str)]) -> egui::Response {
+    let labels: Vec<&str> = orders.iter().map(|(label, _)| crate::i18n::tr(label)).collect();
+    ui.scope(|ui| ui_kit::segmented(ui, selected, &labels, Default::default())).response
+}
+
+/// The hover text of a list of `orders` continuities: a line for each.
+fn continuity_tip(orders: usize) -> String {
+    CONTINUITY_TIPS.iter().take(orders).map(|tip| crate::i18n::tr(tip)).collect::<Vec<_>>().join("\n")
+}
 
 /// What a boundary surface becomes: a body of its own, or part of the body of its edges.
 const BOUNDARY_OPS: [&str; 2] = ["New Body", "Join"];
@@ -275,31 +292,27 @@ pub fn rows(ui: &mut egui::Ui, k: &mut Surf) -> bool {
             ui_kit::options(ui, "untrim_options", &mut [("Restore outer boundary", outer), ("In place (surfaces)", in_place)]);
         }
         Surf::Patch { continuity } => {
-            form_row(ui, "Continuity", |ui| {
-                ui_kit::segmented(ui, continuity, &PATCH_CONTINUITY.map(|(label, _)| label), Default::default());
-            });
+            form_row(ui, "Continuity", |ui| continuity_segments(ui, continuity, &PATCH_CONTINUITY))
+                .on_hover_text(continuity_tip(PATCH_CONTINUITY.len()));
         }
         Surf::Blend { continuity, bulge, stitch } => {
             let [from, to] = continuity;
             let [from_bulge, to_bulge] = bulge;
-            form_row(ui, "Start continuity", |ui| {
-                combo(ui, "bl_cont0", &BLEND_CONTINUITY.map(|(label, _)| label), from);
-            });
+            form_row(ui, "Start continuity", |ui| ui_kit::dropdown(ui, "bl_cont0", from, &BLEND_CONTINUITY.map(|(label, _)| label)))
+                .on_hover_text(continuity_tip(BLEND_CONTINUITY.len()));
             form_row(ui, "Start bulge", |ui| {
                 ui_kit::scalar_field(ui, from_bulge, -0.9..=3.0);
             });
-            form_row(ui, "End continuity", |ui| {
-                combo(ui, "bl_cont1", &BLEND_CONTINUITY.map(|(label, _)| label), to);
-            });
+            form_row(ui, "End continuity", |ui| ui_kit::dropdown(ui, "bl_cont1", to, &BLEND_CONTINUITY.map(|(label, _)| label)))
+                .on_hover_text(continuity_tip(BLEND_CONTINUITY.len()));
             form_row(ui, "End bulge", |ui| {
                 ui_kit::scalar_field(ui, to_bulge, -0.9..=3.0);
             });
             ui_kit::options(ui, "blend_options", &mut [("Stitch to both bodies", stitch)]);
         }
         Surf::Boundary { continuity, join } => {
-            form_row(ui, "Continuity", |ui| {
-                ui_kit::segmented(ui, continuity, &PATCH_CONTINUITY.map(|(label, _)| label), Default::default());
-            });
+            form_row(ui, "Continuity", |ui| continuity_segments(ui, continuity, &PATCH_CONTINUITY))
+                .on_hover_text(continuity_tip(PATCH_CONTINUITY.len()));
             form_row(ui, "Operation", |ui| {
                 let mut op = usize::from(*join);
                 combo(ui, "bo_op", &BOUNDARY_OPS, &mut op);

@@ -83,9 +83,13 @@ radially.
 
 **Tip** (`tip: chamfer`, ISO 4753's chamfered end): at each free end of a modelled external
 thread, after the groove, the material outside a cone `chamfer_angle` to the axis (45°) reaching
-d_f = d − 2 `chamfer_depth` at the end (default the external minor diameter, the largest the
-standard allows) is cut, the last teeth tapering into it. An internal thread takes the hole's
-countersink instead.
+d_f = d − 2 `chamfer_depth` at the end is cut, the last teeth tapering into it. ISO 4753 bounds
+d_f by the minor diameter; the default is that bound, the external minor diameter d3 = d −
+1.226869 P of ISO 724 (8.160 for M10), which lies below the modelled basic root d1. The cone
+therefore crosses the root and leaves the end a whole disk of d3 inside a whole conical ring; a
+cone ending on the root itself would pinch to nothing wherever the groove reaches the end. ISO
+4753 is for ISO metric threads, so the other forms give `chamfer_depth`. An internal thread takes
+the hole's countersink instead.
 
 ## Sources
 
@@ -104,4 +108,9 @@ countersink instead.
 - ASME B1.9 (buttress inch): 7°/45°, basic height of engagement 0.6 P; the flat follows from the
   fundamental triangle H = P / (tan 7° + tan 45°) = 0.89064 P truncated equally at crest and root.
 - ISO 3508 (thread runouts) and ISO 4753 (ends of parts with external threads) for the runout and
-  the chamfered tip.
+  the chamfered tip. ISO 4753:2011, figure 1 b) (chamfered end CH; the public preview at
+  <https://cdn.standards.iteh.ai/samples/55928/38ddde12863b4c2db35dc929fd502a4d/ISO-4753-2011.pdf>):
+  the end's diameter "Maximum diameter at the minor thread diameter", the angle ≤ 50°, the
+  incomplete thread u ≤ 2 P.
+- ISO 724 (external minor diameter d3 = d1 − H/6 = d − 1.226869 P, M10x1.5: 8.16), as given at
+  <https://www.valvias.com/miscellanea-metric-thread-din-13.php>.

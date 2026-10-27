@@ -2232,7 +2232,8 @@ fn patch_dialog_takes_continuity_and_points_and_brings_them_back() {
 
 #[test]
 fn patch_dialog_rows_are_translated() {
-    for (lang, continuity, through) in [("en", "Continuity", "Pass through"), ("de", "Stetigkeit", "Durch Punkte"), ("ja", "連続性", "通過点")]
+    for (lang, continuity, through, tangent) in
+        [("en", "Continuity", "Pass through", "Tangent"), ("de", "Stetigkeit", "Durch Punkte", "Tangential"), ("ja", "連続性", "通過点", "接線")]
     {
         let mut h = crate::scenario::Harness::new();
         h.app.preferences.language = lang.into();
@@ -2241,6 +2242,12 @@ fn patch_dialog_rows_are_translated() {
         h.frames(3);
         assert!(h.widget(continuity).is_some(), "{lang}: the Continuity row must show {continuity:?}");
         assert!(h.widget(through).is_some(), "{lang}: the points input must show {through:?}");
+        // The continuity in the language too, in words (the code is in the hover text).
+        if let Some(crate::dialogs::Dialog { kind: Kind::Surface(crate::dialogs_surface::Surf::Patch { continuity }), .. }) = h.app.dialog.as_mut() {
+            *continuity = 1;
+        }
+        h.frames(2);
+        assert!(h.widget(tangent).is_some(), "{lang}: the Tangent segment must show {tangent:?}");
     }
 }
 

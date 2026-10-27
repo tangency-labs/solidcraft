@@ -181,9 +181,9 @@ fn continuity_label(app: &SolveApp, seam: &Value) -> String {
     let jump = seam["curvature_jump_per_mm"]["value"].as_f64().map(|k| format!("\u{394}k {k:.4}/mm")).unwrap_or_default();
     match seam["verdict"].as_str().unwrap_or_default() {
         "gap" => format!("Gap {}", seam["gap_mm"]["value"].as_f64().map(|g| crate::prefs::show_mm(app, g, 1)).unwrap_or_default()),
-        "sharp" => format!("G0 {}", deg("normal_angle_deg")),
-        "curvature_jump" => format!("G1 {} {jump}", deg("normal_angle_deg")),
-        "smooth" => format!("G2 {} {jump}", deg("normal_angle_deg")),
+        "sharp" => format!("{} {}", crate::i18n::tr("ui.continuity_crease"), deg("normal_angle_deg")),
+        "curvature_jump" => format!("{} {} {jump}", crate::i18n::tr("ui.continuity_tangent"), deg("normal_angle_deg")),
+        "smooth" => format!("{} {} {jump}", crate::i18n::tr("ui.continuity_curvature"), deg("normal_angle_deg")),
         other => other.to_string(),
     }
 }
@@ -198,7 +198,12 @@ fn continuity_legend(app: &SolveApp, painter: &egui::Painter, proj: &Proj) {
     let [smooth, jump, sharp, gap] = tk.continuity;
     // Stable ids: this Gap is a hole between faces, not the sheet-metal gap (`ui.sheet_gap`).
     let tr = crate::i18n::tr;
-    let rows = [(tr("ui.continuity_g2"), smooth), (tr("ui.continuity_g1"), jump), (tr("ui.continuity_g0"), sharp), (tr("ui.continuity_gap"), gap)];
+    let rows = [
+        (tr("ui.continuity_curvature"), smooth),
+        (tr("ui.continuity_tangent"), jump),
+        (tr("ui.continuity_crease"), sharp),
+        (tr("ui.continuity_gap"), gap),
+    ];
     let font = egui::FontId::proportional(tk.font_body);
     let (row, pad, swatch) = (18.0, 8.0, 22.0);
     let text_width = rows.iter().map(|(label, _)| painter.layout_no_wrap(label.to_string(), font.clone(), tk.text).size().x).fold(0.0, f32::max);
@@ -303,10 +308,16 @@ pub fn start_hook(app: &mut SolveApp, id: &str) -> bool {
         }
         let Ok(v) = app.run(id, json!({})) else { return false };
         let summary = &v["summary"];
-        let counts: Vec<String> = [("smooth", "G2"), ("curvature_jump", "G1"), ("sharp", "G0"), ("gap", "gap")]
-            .iter()
-            .filter_map(|(key, class)| summary[*key].as_u64().filter(|n| *n > 0).map(|n| format!("{n} {class}")))
-            .collect();
+        // Each class in the legend's words.
+        let counts: Vec<String> = [
+            ("smooth", "ui.continuity_curvature"),
+            ("curvature_jump", "ui.continuity_tangent"),
+            ("sharp", "ui.continuity_crease"),
+            ("gap", "ui.continuity_gap"),
+        ]
+        .iter()
+        .filter_map(|(key, class)| summary[*key].as_u64().filter(|n| *n > 0).map(|n| format!("{n} {}", crate::i18n::tr(class))))
+        .collect();
         app.set_status(format!("Continuity: {} (click the button again to turn it off)", counts.join(", ")), false);
         return true;
     }

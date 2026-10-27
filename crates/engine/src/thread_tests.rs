@@ -521,6 +521,46 @@ fn a_thread_stops_clear_of_a_shoulder() {
     assert!((got - want).abs() < want * 2e-4, "{got} vs {want}");
 }
 
+/// A d10 boss (z 6..22) joined onto a 40x40x6 plate, threaded M10: the plate's top is the
+/// shoulder. The groove, with or without its runout, stays on the boss: the plate keeps all of
+/// its 40 40 6 (what lies below z = 6 after the boss is cut away), and without a runout the
+/// boss loses (16 - w)/P turns, as at a collar.
+#[test]
+fn a_thread_on_a_boss_never_cuts_into_the_plate_below() {
+    let boss = |extra: Value| {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"corner": [-20, -20, 0], "length": 40, "width": 40, "height": 6, "body_name": "Part"}));
+        run(&mut s, "solid.cylinder", json!({"base": [0, 0, 6], "radius": 5, "height": 16, "operation": "join", "targets": ["Part"]}));
+        let mut p = json!({"face": [5, 0, 14], "designation": "M10", "modeled": true});
+        if let (Some(p), Value::Object(e)) = (p.as_object_mut(), extra) {
+            p.extend(e);
+        }
+        run(&mut s, "solid.thread", p);
+        s
+    };
+    let plate_left = |mut s: Session| {
+        run(
+            &mut s,
+            "solid.box",
+            json!({"corner": [-30, -30, 6], "length": 60, "width": 60, "height": 30, "body_name": "Above", "operation": "new_body"}),
+        );
+        run(&mut s, "solid.combine", json!({"target": "Part", "tools": ["Above"], "operation": "cut"}));
+        exact_volume(&s, "Part")
+    };
+    let s = boss(json!({}));
+    let (p, w) = (1.5, ext_half_width(10.0, 1.5));
+    let want = 40.0 * 40.0 * 6.0 + PI * 25.0 * 16.0 - (16.0 - w) / p * ext_turn(10.0, p, 5.0);
+    let got = exact_volume(&s, "Part");
+    assert!((got - want).abs() < want * 2e-4, "{got} vs {want}");
+    assert!((plate_left(s) - 9600.0).abs() < 1e-6);
+    for extra in [json!({"ease_out": "standard"}), json!({"ease_out": "short", "tip": "chamfer"})] {
+        let s = boss(extra.clone());
+        assert!(s.model.state().body("Part").unwrap().body.validity().is_empty(), "{extra}");
+        let left = plate_left(s);
+        assert!((left - 9600.0).abs() < 1e-6, "{extra}: the plate below the boss lost {} mm³", 9600.0 - left);
+    }
+}
+
 /// Rig 602: "from the end nearest the pick" took the head end for a pick a little above the
 /// middle. A thread of limited length starts at the face's only free end, wherever it is picked.
 #[test]
@@ -823,17 +863,26 @@ fn m10_stock(z0: f64, z1: f64, rmax: impl Fn(f64) -> f64) -> f64 {
     (0..n).map(|i| z0 + (z1 - z0) * (i as f64 + 0.5) / n as f64).map(|z| 2.0 * PI * ring(rmax(z)) * (z1 - z0) / n as f64).sum()
 }
 
-/// ISO 4753's chamfered end on both free ends of an M10 stud: a 45° cone down to the minor
-/// diameter, cut after the groove; the volume as the stock's chamfered section with the thread's
-/// material fraction (as ladder 06/006).
+/// ISO 4753's chamfered end on both free ends of an M10 stud: a 45° cone down to the external
+/// minor diameter d3 (ISO 724), cut after the groove; the volume as the stock's chamfered section
+/// with the thread's material fraction (as ladder 06/006). d3 lies below the modelled root, so
+/// each end face is the whole disk of d3, with the cone a whole ring around it, not pinched
+/// where the groove reaches the end.
 #[test]
 fn a_chamfered_tip_tapers_the_last_teeth() {
     let mut s = Session::default();
     run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 30, "body_name": "Stud"}));
     run(&mut s, "solid.thread", json!({"face": [5, 0, 15], "designation": "M10", "tip": "chamfer", "modeled": true}));
     let st = s.model.state();
-    assert!(st.body("Stud").unwrap().body.validity().is_empty());
-    let rf = 5.0 - 5.0 * 1.5 * 3f64.sqrt() / 16.0;
+    let stud = &st.body("Stud").unwrap().body;
+    assert!(stud.validity().is_empty());
+    let rf = 5.0 - 17.0 / 24.0 * 1.5 * 3f64.sqrt() / 2.0;
+    let ends: Vec<f64> =
+        stud.faces(1e-4).unwrap().into_iter().filter(|f| f.plane_normal.is_some_and(|n| n.z.abs() > 0.999)).map(|f| f.area).collect();
+    assert_eq!(ends.len(), 2);
+    for a in ends {
+        assert!((a - PI * rf * rf).abs() < 1e-3 * a, "each end is a whole disk of d3: {a} vs {}", PI * rf * rf);
+    }
     let want = m10_stock(0.0, 30.0, |z| 5f64.min(rf + z).min(rf + 30.0 - z));
     let got = exact_volume(&s, "Stud");
     assert!((got - want).abs() < want * 1e-4, "{got} vs {want}");
@@ -859,6 +908,16 @@ fn a_chamfered_tip_tapers_the_last_teeth() {
         .err()
         .map(|e| e.to_string());
     assert!(e.unwrap_or_default().contains("countersink"));
+    // ISO 4753 is for ISO metric threads: another form names its chamfer depth.
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 10, "height": 40, "body_name": "Screw"}));
+    let e = s
+        .execute("solid.thread", &json!({"face": [10, 0, 20], "designation": "Tr20x4", "tip": "chamfer", "modeled": true}))
+        .err()
+        .map(|e| e.to_string());
+    assert!(e.unwrap_or_default().contains("chamfer depth"));
+    run(&mut s, "solid.thread", json!({"face": [10, 0, 20], "designation": "Tr20x4", "tip": "chamfer", "chamfer_depth": 2.5, "modeled": true}));
+    assert!(s.model.state().body("Screw").unwrap().body.validity().is_empty());
 }
 
 /// M10's groove section moved `d` out from the axis, clipped at the shaft's radius 5: the cut per

@@ -146,7 +146,7 @@ Fillets and chamfers handle straight edges between planar faces, whole smooth lo
 neighbouring edges with mitred or spherical corners, and closed chains of curved edges (a rolling
 ball). See the roadmap's known limitations for the rest.
 
-**Curvature (G2)** in the Fillet dialog's **Radius Type** blends straight edges between two
+**Curvature continuous** (G2) in the Fillet dialog's **Type** blends straight edges between two
 planar faces with an exact quintic section. The tangent plane and curvature match each side
 face: curvature goes to zero at both contact rails, unlike a circular G1 fillet. Each end
 must meet one planar face; perpendicular and sloped planar ends are supported. Curved
@@ -161,6 +161,14 @@ Scripts and MCP use the same command, for example on a 20 mm box:
 {"command": "solid.fillet", "params": {"edges": [[20, 0, 10]], "radius": 2, "type": "curvature"}}
 ```
 `type: "g2"` is an alias. Existing fillets still default to circular, constant-radius G1 blends.
+
+Where three or more rounded edges meet at a corner, the Fillet dialog shows **Corners**: **Ball**
+(the default, a piece of the rolling ball's sphere, tangent (G1) to each round) or **Smooth
+patch** (`corner: "g2"`: the corner is set back along each edge and filled with a
+curvature-continuous (G2) patch, so reflections run through it without a kink). A smooth patch
+takes **Constant radius** and **Exact** fit. Its **Setback** is how far along each edge from the
+corner the patch starts, one distance for every corner (`setbacks`); left empty, it is 1.5 × the
+radius.
 
 Feature references to faces and edges are stored by name, so an upstream edit that moves geometry
 keeps them on the right face (see [Persistent naming](../dev/naming.md)). When a reference can't
