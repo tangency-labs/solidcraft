@@ -1,0 +1,22 @@
+{
+ "unit": "topology.brep_p3",
+ "cases": [
+  {
+   "name": "fuzz00282_turn_nurbs_offset_1e300",
+   "origin": "nightly fuzz runs 40177686438 and 40298730423: topology.brep_p3/fuzz00282 (timeout: rust: no result after 20 s; base nurbs_off_box_with_large_fillet_-0.05, mutation /offset = 1e+300)",
+   "issue": "HANG-16",
+   "cpp": "harness: invalid argument: geometry value beyond 1e150 (HANG-16)",
+   "rust": "harness: invalid argument: geometry value beyond 1e150 (HANG-16)",
+   "inputs": {
+    "brep": {
+     "kind": "file",
+     "file": "box_with_large_fillet.smb",
+     "rebuild": false
+    },
+    "editing": -1,
+    "op": "turn_nurbs_offset",
+    "offset": 1e+300
+   }
+  }
+ ]
+}

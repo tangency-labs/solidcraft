@@ -1624,9 +1624,11 @@ fn put_vertex_points(o: &mut Vec<f64>, b: &Brep, vertices: &[VertexId]) -> Resul
 fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
     let mut k = Kernel::default();
     if standalone(&i.op) {
-        let Some((_, args)) = op_args(&i.op, &[0; 10])? else {
+        let Some((op, args)) = op_args(&i.op, &[0; 10])? else {
             return Ok(Output::err("no target"));
         };
+        // an input the FFI refuses is a harness error on both sides
+        ffi::validate(op, "", &args, &[0; 10], false).map_err(|e| ffi_err(&e))?;
         let mut b = Brep::new();
         return match run_rust_op(&mut k, &mut b, None, &i.op, &args) {
             Ok(out) => Ok(Output::new().values("out", out)),
@@ -1638,9 +1640,24 @@ fn run_rust(i: &Inputs) -> Result<Output, HarnessError> {
         Ok(x) => x,
         Err(o) => return Ok(o),
     };
-    let Some((_, args)) = op_args(&i.op, &c)? else {
+    let Some((op, args)) = op_args(&i.op, &c)? else {
         return Ok(Output::err("no target"));
     };
+    // an input the FFI refuses is a harness error on both sides: the Rust port works
+    // through the guarded hang regimes as upstream does (HANG-16: a `TurnNurbsOffset` of
+    // 1e300 kept it busy for 25 s in the UV trim curve rebuild, nightly fuzz00282), so it
+    // must not run them (fuzz mutations reach them with the C++ side refused). The
+    // checks see the same input vector as the C++ side and this B-rep's own counts.
+    let mut input = head(i)?;
+    input.extend(&args);
+    ffi::validate(
+        op,
+        &path_of(&i.brep)?,
+        &input,
+        &c,
+        b.infinite_region().is_some(),
+    )
+    .map_err(|e| ffi_err(&e))?;
     let mut second = match i.op {
         OpIn::Merge { .. } | OpIn::CopyVertices { .. } => Some(own_brep(&mut k, i)?.map_err(
             |_| harness("the second build of the B-rep failed where the first did not"),
@@ -1999,6 +2016,26 @@ mod tests {
         };
         let err = run_cpp(&case(1e300)).unwrap_err().to_string();
         assert!(err.contains("HANG-16"), "{err}");
+        // the Rust side applies the same guard (`ffi::validate`): the port works through
+        // the regime for tens of seconds (nightly fuzz00282, a 1e300 TurnNurbsOffset)
+        let err = run_rust(&case(1e300)).unwrap_err().to_string();
+        assert!(err.contains("HANG-16"), "{err}");
         assert!(run_cpp(&case(0.5)).is_ok());
+    }
+
+    /// Nightly fuzz case `topology.brep_p3/fuzz00282` (`nurbs_off_box_with_large_fillet_-0.05`
+    /// with `/offset = 1e+300`): the FFI refuses the C++ side (HANG-16) and the Rust side
+    /// must be refused the same way instead of running the operation (it took 25 s).
+    #[test]
+    fn huge_offset_is_refused_on_both_sides() {
+        let v = serde_json::json!({
+            "brep": {"kind": "file", "file": "box_with_large_fillet.smb", "rebuild": false},
+            "editing": -1, "op": "turn_nurbs_offset", "offset": 1e300
+        });
+        let i: Inputs = serde_json::from_value(v).unwrap();
+        let cpp = run_cpp(&i).unwrap_err().to_string();
+        let rust = run_rust(&i).unwrap_err().to_string();
+        assert!(cpp.contains("HANG-16"), "{cpp}");
+        assert_eq!(cpp, rust);
     }
 }
