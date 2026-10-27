@@ -895,10 +895,11 @@ pub(super) fn sheet_eval(
                 let placement = doc.component_transform(doc.model_body_component(&mb));
                 let body_to_world = doc.model_body_offset(&mb).map(|offset| crate::mat_mul(&placement, offset)).unwrap_or(placement);
                 let (mut sh, notes) = sheet::convert_body(&mb, &r.name, &rv, face.0, &found.points, &body_to_world)?;
+                let found_by = if found.points.len() == 1 { "bend found by itself" } else { "bends found by themselves" };
                 append_warning(
                     warning,
                     format!(
-                        "{} bends found by themselves: {:.3} thick, inside radius {:.3} as modelled, the rule's K-factor",
+                        "{} {found_by}: {:.3} thick, inside radius {:.3} as modelled, the rule's K-factor",
                         found.points.len(),
                         found.thickness,
                         found.radius

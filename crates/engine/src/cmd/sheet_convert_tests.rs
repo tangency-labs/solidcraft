@@ -1882,7 +1882,7 @@ fn a_bent_sheet_converts_from_either_skin_or_without_a_fixed_face() {
         let out = s.execute("sheet.convert", &p);
         let warning = out.as_ref().map(|v| v["warning"].as_str().unwrap_or_default().to_string()).unwrap_or_default();
         assert!(out.is_ok(), "face {face:?}: {}", out.err().map(|e| e.to_string()).unwrap_or_default());
-        assert!(warning.contains("1 bends found by themselves: 1.000 thick, inside radius 1.000"), "face {face:?}: {warning}");
+        assert!(warning.contains("1 bend found by itself: 1.000 thick, inside radius 1.000"), "face {face:?}: {warning}");
         assert!((volume(&mut s) - v).abs() < 1e-6 * v, "face {face:?}: {} vs {v}", volume(&mut s));
         assert!(same_size(flat_size(&mut s), flat_size(&mut a), 1e-6), "face {face:?}: {:?} vs {:?}", flat_size(&mut s), flat_size(&mut a));
     }
