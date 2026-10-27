@@ -8,7 +8,8 @@
 //! | [`ProjectedCurve`]                           | `SmProjectedCurve`                               |
 //! | [`OwnsCurve`]                                | `m_bOwnsCurve` (`SmBoolean`: `FALSE`, `TRUE`, `UNSURE`) |
 //! | [`ProjectedCurve::new`]                      | `SmProjectedCurve(const SmCurve*, ...)`          |
-//! | `Clone`, [`ProjectedCurve::copy`]            | copy constructor, `Copy`                         |
+//! | `Clone`                                      | the copy constructor                             |
+//! | [`ProjectedCurve::copy`]                     | `Copy`                                           |
 //! | `Drop` (implicit)                            | `~SmProjectedCurve`                              |
 //! | [`ProjectedCurve::approx_eq`]                | `operator==`                                     |
 //! | [`ProjectedCurve::set_canonical`]            | `SetCanonical`                                   |
@@ -39,12 +40,14 @@
 //!   ownership flag is kept as [`OwnsCurve`] because upstream's edits test it
 //!   (`EditParameterization`, `ReverseParameterization` and `Trim` refuse a
 //!   `FALSE` owner, `Transform` anything below `UNSURE`). The copy constructor
-//!   copies the base curve when it is owned (`Copy`) and shares the pointer
-//!   otherwise; here both are a copy, the borrowed one exact (no knot fix-up, owner
-//!   kept) so it has the same values. When the owned base
+//!   (`Clone`) copies an owned base curve (`Copy`, whose B-spline copy fixes its
+//!   knots up) and a borrowed one exactly (no knot fix-up, owner kept), the values
+//!   upstream has when it shares the pointer; [`ProjectedCurve::copy`] (`Copy`) does
+//!   the same. When the owned base
 //!   curve has no `Copy` (a Hermite curve, `SM_ERR`) upstream ignores the status
 //!   and returns a projected curve with a null base curve, which crashes on first
-//!   use; [`ProjectedCurve::copy`] returns that `SM_ERR` instead.
+//!   use; [`ProjectedCurve::copy`] returns that `SM_ERR` instead, and `Clone` (which
+//!   cannot fail) copies such a base anyway.
 //! - **Curve base.** The class derives from `SmCurve`; its base state is the
 //!   dimension, always 3 (`SmCurve(3)`). `SmCurve::operator==` (same type, same
 //!   dimension) is implied by the Rust type. `SetContext`, the context arguments
@@ -100,7 +103,7 @@ pub enum OwnsCurve {
 }
 
 /// A curve projected onto a plane (`SmProjectedCurve`).
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ProjectedCurve {
     /// `m_cpCurve`: the curve being projected.
     curve: Box<Curve>,
@@ -117,6 +120,38 @@ pub struct ProjectedCurve {
     proj_type: ProjectionType,
     /// `m_bOwnsCurve`.
     owns_curve: OwnsCurve,
+}
+
+/// The copy constructor: an owned base curve is copied ([`Curve::clone`], whose
+/// B-spline copy fixes its knots up), a borrowed one exactly (the bounded exact copy:
+/// no knot fix-up, owner kept), which is what sharing the borrowed pointer upstream
+/// amounts to. Every other member is copied verbatim, and the enclosing
+/// [`Curve::clone`] still resets *its* owner and identity.
+///
+/// The exact branch recurses over the copied base without a depth argument; that is
+/// sound because every path that stores a base curve keeps the graph within
+/// [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING):
+/// [`ProjectedCurve::new`] and [`ProjectedCurve::set_canonical`] check it,
+/// [`ProjectedCurve::read_from_db`] reads its base through [`Curve::read_from_db`]
+/// (bounded by [the database reader's nesting
+/// limit](crate::topology::database_io::MAX_READ_NESTING)), and propagates from
+/// bounded instances.
+impl Clone for ProjectedCurve {
+    fn clone(&self) -> Self {
+        let curve = if self.owns_curve == OwnsCurve::No {
+            self.curve.clone_exact_bounded()
+        } else {
+            (*self.curve).clone()
+        };
+        Self {
+            curve: Box::new(curve),
+            proj_point: self.proj_point,
+            proj_vec: self.proj_vec,
+            aux_data: self.aux_data,
+            proj_type: self.proj_type,
+            owns_curve: self.owns_curve,
+        }
+    }
 }
 
 impl ProjectedCurve {

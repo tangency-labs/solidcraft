@@ -20,6 +20,18 @@
 //! `Copy` reports whether the copy shares the base curve (upstream: the pointer is
 //! shared exactly when it is not owned; the port always copies it, so the Rust side
 //! reports "not owned").
+//!
+//! `clone_ctor` is the copy constructor itself, not the virtual `Copy`: the projected
+//! curve is built with the constructor (only `ctor` 0: `SetCanonical` would copy the
+//! base curve first), moved into a [`Curve`] and cloned, then the copy and the
+//! original are read through the curve object. It reports the copy's state, whether
+//! the base curve is borrowed (upstream: the shared pointer), `copy == original`, the
+//! copy's `EvaluatePoint` at the middle of the original's natural interval and the
+//! copy's unique knots and multiplicities: a borrowed copy keeps a base curve's raw
+//! near-coincident knots distinct, an owned copy's knot fix-up merges them. An owned
+//! or unsure Hermite base (no `Copy`: upstream leaves a null base curve) is outside
+//! the operation's defined domain and is rejected by the native side, so the case is
+//! never compared; a borrowed Hermite base is valid.
 
 use std::fmt::Write as _;
 
@@ -162,6 +174,10 @@ enum OpIn {
         scale: Option<[f64; 3]>,
     },
     Copy,
+    /// The copy constructor (`Clone`), not the virtual `Copy`: the input curve moves
+    /// into a `Curve` and the `Curve`'s `Clone` is the operation under test, so no
+    /// step before it copies the base curve.
+    CloneCtor,
     Equal {
         other: Option<PcIn>,
     },
@@ -283,7 +299,11 @@ fn db_bytes(d: &DbIn) -> Vec<u8> {
             vs.push(d.aux);
         }
         for v in vs {
-            let _ = writeln!(s, "{:.17e} {:.17e} {:.17e} SmProjectedCurve data", v[0], v[1], v[2]);
+            let _ = writeln!(
+                s,
+                "{:.17e} {:.17e} {:.17e} SmProjectedCurve data",
+                v[0], v[1], v[2]
+            );
         }
         let _ = writeln!(s, "{} SmProjectedCurve Projection Type", d.ptype);
         s.push_str(" ProjectedCurve->ProjectedCurve \n");
@@ -356,6 +376,7 @@ fn op_of(op: &OpIn) -> Op {
         OpIn::Trim { .. } => Op::Trim,
         OpIn::Transform { .. } => Op::Transform,
         OpIn::Copy => Op::Copy,
+        OpIn::CloneCtor => Op::CloneCtor,
         OpIn::Equal { .. } => Op::Equal,
         OpIn::Ends => Op::Ends,
         OpIn::ReadDb(_) => Op::ReadDb,
@@ -378,10 +399,13 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
         v.extend(bytes.iter().map(|&x| f64::from(x)));
         return Ok((op, v));
     }
-    let pc = i.pc.as_ref().ok_or_else(|| harness("curve op without pc"))?;
+    let pc =
+        i.pc.as_ref()
+            .ok_or_else(|| harness("curve op without pc"))?;
     pc_block(&mut v, pc);
     match &i.op {
         OpIn::State | OpIn::MakeOrtho | OpIn::Copy | OpIn::Ends | OpIn::ReadDb(_) => {}
+        OpIn::CloneCtor => clone_ctor_ctor0(pc)?,
         OpIn::Eval {
             t,
             n,
@@ -423,6 +447,15 @@ fn to_output(flat: &[f64]) -> Output {
 
 fn cpp(i: &Inputs) -> Result<Output, HarnessError> {
     let (op, input) = cpp_input(i)?;
+    // inputs the copy constructor has no defined result for are rejected by the
+    // native side (the case is then neither compared nor run on Rust), as the FFI
+    // validation shows a shim must not see them
+    let undefined = (op == Op::CloneCtor)
+        .then(|| i.pc.as_ref().and_then(clone_ctor_undefined))
+        .flatten();
+    if let Some(reason) = undefined {
+        return Ok(Output::rejected(reason));
+    }
     match ffi::eval(op, &input) {
         Ok(flat) => Ok(to_output(&flat)),
         Err(e) => Err(harness(e.to_string())),
@@ -438,8 +471,15 @@ fn v3(p: [f64; 3]) -> Vec3 {
 fn build_curve(c: &CurveIn) -> Result<Curve, HarnessError> {
     match c {
         CurveIn::Bspline(bs) => {
-            let n = bs.cpts.len().checked_sub(1).ok_or_else(|| harness("no points"))?;
-            let m = bs.u.len().checked_sub(1).ok_or_else(|| harness("no knots"))?;
+            let n = bs
+                .cpts
+                .len()
+                .checked_sub(1)
+                .ok_or_else(|| harness("no points"))?;
+            let m =
+                bs.u.len()
+                    .checked_sub(1)
+                    .ok_or_else(|| harness("no knots"))?;
             let mut cur =
                 allocate_nurb_curve(n, bs.p, m).map_err(|e| harness(format!("curve: {e}")))?;
             for (d, s) in cur.cpts_mut().iter_mut().zip(&bs.cpts) {
@@ -487,6 +527,28 @@ fn owns_of(o: u8) -> OwnsCurve {
     }
 }
 
+/// `CloneCtor` builds the projected curve with the constructor only: `build`'s
+/// `SetCanonical` path copies the base curve first, which would fix up raw knots
+/// before the operation under test.
+fn clone_ctor_ctor0(pc: &PcIn) -> Result<(), HarnessError> {
+    if pc.ctor != 0 {
+        return Err(harness(
+            "clone_ctor: ctor 1 copies the base curve before the clone",
+        ));
+    }
+    Ok(())
+}
+
+/// Why `pc` is outside `CloneCtor`'s defined domain, if it is: upstream's copy
+/// constructor copies an owned (`TRUE`, `UNSURE`) base curve with its `Copy`, which a
+/// Hermite curve has not (`SM_ERR`, leaving a null base curve and undefined use), so
+/// such inputs are rejected by the native side instead of compared. A borrowed
+/// Hermite base is fine (the pointer is shared).
+fn clone_ctor_undefined(pc: &PcIn) -> Option<&'static str> {
+    (pc.owns != 0 && matches!(&pc.curve, CurveIn::Hermite(_)))
+        .then_some("clone_ctor: an owned or unsure Hermite base curve has no Copy")
+}
+
 /// The projected curve of `pc` and the status of its construction.
 fn build(pc: &PcIn) -> Result<(ProjectedCurve, f64), HarnessError> {
     let base = build_curve(&pc.curve)?;
@@ -501,7 +563,8 @@ fn build(pc: &PcIn) -> Result<(ProjectedCurve, f64), HarnessError> {
                 pc.aux.map(v3),
                 ptype,
                 owns,
-            ).map_err(|e| HarnessError::new(e.to_string()))?,
+            )
+            .map_err(|e| HarnessError::new(e.to_string()))?,
             0.0,
         ))
     } else {
@@ -513,7 +576,8 @@ fn build(pc: &PcIn) -> Result<(ProjectedCurve, f64), HarnessError> {
             None,
             ProjectionType::Unknown,
             OwnsCurve::No,
-        ).map_err(|e| HarnessError::new(e.to_string()))?;
+        )
+        .map_err(|e| HarnessError::new(e.to_string()))?;
         let undef = Vec3::UNDEF;
         let st = match c.set_canonical(
             base,
@@ -619,13 +683,18 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 FileType::Ascii
             },
         );
-        let c = tri!(o, ProjectedCurve::read_from_db(&Kernel::default(), &mut db, d.version));
+        let c = tri!(
+            o,
+            ProjectedCurve::read_from_db(&Kernel::default(), &mut db, d.version)
+        );
         o.push(0.0);
         state(&mut o, &c);
         o.push(c.type_code() as f64);
         return Ok(to_output(&o));
     }
-    let pc_in = i.pc.as_ref().ok_or_else(|| harness("curve op without pc"))?;
+    let pc_in =
+        i.pc.as_ref()
+            .ok_or_else(|| harness("curve op without pc"))?;
     let (mut pc, ctor_status) = build(pc_in)?;
     let k = Kernel::default();
     match &i.op {
@@ -699,7 +768,9 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         }
         OpIn::EditParam { a, b: bb } => {
             let mut c = Curve::from(pc);
-            let s = match st_of(c.edit_parameterization(&Kernel::default(), &Extent1d::from_min_max(*a, *bb))) {
+            let s = match st_of(
+                c.edit_parameterization(&Kernel::default(), &Extent1d::from_min_max(*a, *bb)),
+            ) {
                 Ok(s) => s,
                 Err(d) => return Ok(*d),
             };
@@ -760,6 +831,55 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let eq = tri!(o, nc.approx_eq(&k, &c));
             o.push(b(eq));
         }
+        OpIn::CloneCtor => {
+            clone_ctor_ctor0(pc_in)?;
+            let shared = pc.owns_curve() == OwnsCurve::No;
+            // the operation under test: no clone of the input before this point
+            let c = Curve::from(pc);
+            let nc = c.clone();
+            let CurveKind::Projected(copy) = nc.kind() else {
+                return Err(harness("not a projected curve"));
+            };
+            o.push(ctor_status);
+            state(&mut o, copy);
+            o.push(b(shared));
+            let CurveKind::Projected(orig) = c.kind() else {
+                return Err(harness("not a projected curve"));
+            };
+            let eq = tri!(o, copy.approx_eq(&k, orig));
+            o.push(b(eq));
+            let t = c.natural_interval().mid();
+            match nc.evaluate_point(&k, t) {
+                Ok(p) => {
+                    o.push(0.0);
+                    pv(&mut o, p);
+                }
+                Err(e) => {
+                    if let Some(d) = Output::unported(&e) {
+                        return Ok(d);
+                    }
+                    o.push(status(&e));
+                }
+            }
+            // the copy's unique knots (the state above holds the raw knot vector): a
+            // borrowed copy keeps the base's raw knots, an owned copy's knot fix-up
+            // merges them
+            match nc.knots(&k, None) {
+                Ok((kn, mult)) => {
+                    o.push(0.0);
+                    o.push(kn.len() as f64);
+                    o.extend_from_slice(&kn);
+                    o.push(mult.len() as f64);
+                    o.extend(mult.iter().map(|&x| x as f64));
+                }
+                Err(e) => {
+                    if let Some(d) = Output::unported(&e) {
+                        return Ok(d);
+                    }
+                    o.push(status(&e));
+                }
+            }
+        }
         OpIn::Equal { other } => {
             let c = Curve::from(pc);
             o.push(0.0);
@@ -777,7 +897,7 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         }
         OpIn::Ends => {
             let c = Curve::from(pc);
-            let e = tri!(o, c.ends(&k, ));
+            let e = tri!(o, c.ends(&k,));
             o.push(0.0);
             pv(&mut o, e.start);
             pv(&mut o, e.end);
@@ -809,11 +929,21 @@ fn gen_bspline(rng: &mut Rng) -> BSplineIn {
     let n = p + rng.below(6) as usize;
     let rational = rng.chance(0.25);
     let two_d = rng.chance(0.1);
-    let a = if rng.chance(0.5) { 0.0 } else { rng.uniform(-5.0, 5.0) };
-    let len = if rng.chance(0.5) { 1.0 } else { rng.uniform(0.1, 10.0) };
+    let a = if rng.chance(0.5) {
+        0.0
+    } else {
+        rng.uniform(-5.0, 5.0)
+    };
+    let len = if rng.chance(0.5) {
+        1.0
+    } else {
+        rng.uniform(0.1, 10.0)
+    };
     let mut u = vec![a; p + 1];
     let inner = n - p;
-    let mut ks: Vec<f64> = (0..inner).map(|_| a + len * rng.uniform(0.05, 0.95)).collect();
+    let mut ks: Vec<f64> = (0..inner)
+        .map(|_| a + len * rng.uniform(0.05, 0.95))
+        .collect();
     ks.sort_by(f64::total_cmp);
     if inner >= 2 && p >= 2 && rng.chance(0.3) {
         if let Some(&v) = ks.first() {
@@ -931,9 +1061,21 @@ fn gen_vec(rng: &mut Rng) -> [f64; 3] {
 
 fn gen_pc(rng: &mut Rng) -> PcIn {
     let curve = gen_curve(rng);
-    let ptype = if rng.chance(0.05) { 3 } else { rng.below(3) as u8 };
-    let point = if rng.chance(0.9) { Some(rp(rng, 10.0)) } else { None };
-    let vec = if rng.chance(0.92) { Some(gen_vec(rng)) } else { None };
+    let ptype = if rng.chance(0.05) {
+        3
+    } else {
+        rng.below(3) as u8
+    };
+    let point = if rng.chance(0.9) {
+        Some(rp(rng, 10.0))
+    } else {
+        None
+    };
+    let vec = if rng.chance(0.92) {
+        Some(gen_vec(rng))
+    } else {
+        None
+    };
     let aux = if rng.chance(0.85) {
         Some(if ptype == 1 {
             // an eye point off the plane, usually
@@ -982,7 +1124,11 @@ fn gen_transform(rng: &mut Rng) -> OpIn {
             let f = rng.uniform(0.5, 2.0);
             Some([f, f, f])
         } else {
-            Some([rng.uniform(0.5, 2.0), rng.uniform(0.5, 2.0), rng.uniform(0.5, 2.0)])
+            Some([
+                rng.uniform(0.5, 2.0),
+                rng.uniform(0.5, 2.0),
+                rng.uniform(0.5, 2.0),
+            ])
         }
     } else {
         None

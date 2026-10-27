@@ -27,6 +27,7 @@
 //! | `Trim`         | `Trim`                             | `a b mode` (0 `TRUE`, 1 `FALSE`, 2 `UNSURE`) | `a' b'` state (always) |
 //! | `Transform`    | `Transform`                        | `O X Y has_scale S`    | state (always) |
 //! | `Copy`         | `Copy`                             |                        | `state shared equal` |
+//! | `CloneCtor`    | the copy constructor `SmProjectedCurve(const SmProjectedCurve&)` | | `state shared equal eval knots` |
 //! | `Equal`        | `operator==`                       | `self` [projected-curve block] | flag |
 //! | `Ends`         | `SmCurve::GetEnds` (base default)  |                        | `P0 P1 w0 w1` |
 //! | `ReadDb`       | `SmProjectedCurve::ReadFromDB` (static, no block) | `version binary nb B[nb]` | `[state type]` |
@@ -35,6 +36,20 @@
 //! (B-spline), `1 dim P(0) C'(0) P(1) C'(1)` (Hermite, evaluated back), `-1` (other
 //! type) or `-2` (none). `Copy` of a curve owning a Hermite curve (no `Copy`: upstream
 //! returns a projected curve with a null base curve) reports `SM_ERR`.
+//!
+//! `CloneCtor` runs the copy constructor itself (not the virtual `Copy`) with the
+//! original and a borrowed base curve alive until the copy is destroyed; it reports
+//! the copy's state, whether the copy shares the original's base curve (upstream: the
+//! pointer, so exactly when the base is not owned), `copy == original`, `eval` (the
+//! copy's `EvaluatePoint` at the middle of the original's natural interval) and
+//! `knots` (the copy's `GetKnots`, so a borrowed copy's raw near-coincident knots stay
+//! distinct while an owned copy's knot fix-up merges them), each as its status then
+//! `nk K nm M` / the point when it is `SM_SUCCESS`. Its defined domain is the base
+//! curves the native copy constructor can copy: [`validate`] rejects an owned or
+//! unsure Hermite base curve, which upstream would copy into a null base curve
+//! (undefined use), instead of reporting a status for it (`Copy` keeps that `SM_ERR`
+//! report); the shim's own null-base net (unreachable through [`validate`]) reports
+//! `SC_ERR_ARG`, never an upstream status.
 //!
 //! [`eval`] accepts only what upstream handles without undefined behaviour: the base
 //! curves of unit `curve.curve_p2` (well-formed clamped B-splines of degree 1..=9,
@@ -74,6 +89,7 @@ pub enum Op {
     Trim,
     Transform,
     Copy,
+    CloneCtor,
     Equal,
     Ends,
     ReadDb,
@@ -97,6 +113,7 @@ impl Op {
             Op::Copy => 10,
             Op::Equal => 11,
             Op::Ends => 12,
+            Op::CloneCtor => 13,
             Op::ReadDb => 20,
         }
     }
@@ -188,36 +205,52 @@ fn bspline(rd: &mut Reader<'_>) -> Result<Range, FfiError> {
     Ok(Range { a, b })
 }
 
+/// A base curve block: its parameter range and kind (`0`/`2` B-spline, `1` Hermite).
+#[derive(Debug, Clone, Copy)]
+struct BaseBlock {
+    range: Range,
+    kind: usize,
+}
+
+/// A projected-curve block: the base curve block and the ownership flag (`0`
+/// borrowed, `1` owned, `2` unsure).
+#[derive(Debug, Clone, Copy)]
+struct Block {
+    base: BaseBlock,
+    owns: usize,
+}
+
 /// A base curve block.
-fn curve_block(rd: &mut Reader<'_>) -> Result<Range, FfiError> {
+fn curve_block(rd: &mut Reader<'_>) -> Result<BaseBlock, FfiError> {
     let kind = rd.index(2)?;
     let dim = rd.index(3)?;
     if dim < 2 {
         return Err(bad("curve block: dimension must be 2 or 3"));
     }
     // 2: a B-spline whose raw knots are written back after construction
-    if kind == 0 || kind == 2 {
+    let range = if kind == 0 || kind == 2 {
         rd.flag()?;
-        bspline(rd)
+        bspline(rd)?
     } else {
         for _ in 0..4 {
             rd.vec3()?;
         }
-        Ok(Range { a: 0.0, b: 1.0 })
-    }
+        Range { a: 0.0, b: 1.0 }
+    };
+    Ok(BaseBlock { range, kind })
 }
 
 /// A projected-curve block (see the module docs).
-fn projected_block(rd: &mut Reader<'_>) -> Result<Range, FfiError> {
-    let r = curve_block(rd)?;
+fn projected_block(rd: &mut Reader<'_>) -> Result<Block, FfiError> {
+    let base = curve_block(rd)?;
     rd.index(1)?; // ctor
     for _ in 0..3 {
         rd.flag()?;
         rd.vec3()?;
     }
     rd.index(3)?; // SmProjectionType
-    rd.index(2)?; // SmBoolean
-    Ok(r)
+    let owns = rd.index(2)?; // SmBoolean
+    Ok(Block { base, owns })
 }
 
 /// A parameter within [`MAX_REL_DIST`] ranges of the curve's.
@@ -247,21 +280,30 @@ pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
         return rd.done();
     }
     let c = projected_block(&mut rd)?;
+    // the copy constructor copies an owned base curve with `Copy`, which a Hermite
+    // curve has not: upstream ignores the status, keeping a null base curve that
+    // crashes on first use. That input is outside the operation's defined domain
+    // (`Copy` keeps its own SM_ERR report below).
+    if op == Op::CloneCtor && c.owns != 0 && c.base.kind == 1 {
+        return Err(bad(
+            "clone_ctor: an owned or unsure Hermite base curve has no Copy",
+        ));
+    }
     match op {
-        Op::State | Op::MakeOrtho | Op::Copy | Op::Ends | Op::ReadDb => {}
+        Op::State | Op::MakeOrtho | Op::Copy | Op::CloneCtor | Op::Ends | Op::ReadDb => {}
         Op::Eval => {
-            param(&mut rd, c)?;
+            param(&mut rd, c.base.range)?;
             rd.index(MAX_DERIVS)?;
             rd.flag()?;
             rd.flag()?;
         }
         Op::EvalPoint => {
-            param(&mut rd, c)?;
+            param(&mut rd, c.base.range)?;
         }
         Op::Knots => {
             rd.flag()?;
-            param(&mut rd, c)?;
-            param(&mut rd, c)?;
+            param(&mut rd, c.base.range)?;
+            param(&mut rd, c.base.range)?;
         }
         Op::Continuities => {
             let a = rd.finite()?;
@@ -270,12 +312,12 @@ pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
             }
         }
         Op::EditParam | Op::Reverse => {
-            param(&mut rd, c)?;
-            param(&mut rd, c)?;
+            param(&mut rd, c.base.range)?;
+            param(&mut rd, c.base.range)?;
         }
         Op::Trim => {
-            param(&mut rd, c)?;
-            param(&mut rd, c)?;
+            param(&mut rd, c.base.range)?;
+            param(&mut rd, c.base.range)?;
             rd.index(2)?;
         }
         Op::Transform => {
@@ -318,4 +360,45 @@ pub fn eval(op: Op, input: &[f64]) -> Result<Vec<f64>, FfiError> {
             )
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The Hermite base curve block (`1 dim P1 D1 P2 D2`).
+    fn hermite_base() -> Vec<f64> {
+        vec![1., 3., 0., 0., 0., 1., 0., 0., 1., 1., 0.5, 0., 1., 0.]
+    }
+
+    /// `base` followed by `ctor has_P P[3] has_V V[3] has_A A[3] type owns`.
+    fn projected(base: &[f64], owns: f64) -> Vec<f64> {
+        let mut v = base.to_vec();
+        v.extend([0., 1., 0., 0., 0., 1., 0., 0., 1., 0., 0., 0., 0., 0., owns]);
+        v
+    }
+
+    #[test]
+    fn clone_ctor_domain_rejects_owned_or_unsure_hermite_base_only() {
+        // a borrowed Hermite base curve is shared by the copy constructor: valid
+        validate(Op::CloneCtor, &projected(&hermite_base(), 0.)).unwrap();
+        for owns in [1., 2.] {
+            // an owned or unsure one has no `Copy`: upstream keeps a null base curve
+            // (undefined use), so the input is rejected before C++ instead of run (the
+            // wording is incidental, the category is the contract)
+            assert!(matches!(
+                validate(Op::CloneCtor, &projected(&hermite_base(), owns)),
+                Err(FfiError::InvalidArgument(_))
+            ));
+            // `Copy` keeps its own domain: the shim reports the base curve's SM_ERR
+            validate(Op::Copy, &projected(&hermite_base(), owns)).unwrap();
+        }
+        // a B-spline base curve copies, whatever the ownership flag
+        let bspline = [
+            0., 3., 0., 1., 1., 3., 0., 0., 0., NOW, 1., 0., 0., NOW, 0., 0., 1., 1.,
+        ];
+        for owns in [0., 1., 2.] {
+            validate(Op::CloneCtor, &projected(&bspline, owns)).unwrap();
+        }
+    }
 }
