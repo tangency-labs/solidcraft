@@ -45,8 +45,9 @@ fn texture(device: &wgpu::Device, layout: &wgpu::BindGroupLayout, size: [u32; 2]
 }
 
 impl Resources {
-    pub fn new(device: &wgpu::Device, uniform: &wgpu::BindGroupLayout, module: &wgpu::ShaderModule, reversed: bool) -> Self {
-        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+    /// The layout of the depth map's bind group, which the lit pipelines' layout includes.
+    pub fn layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("sc_ao_depth"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
@@ -58,7 +59,18 @@ impl Resources {
                 },
                 count: None,
             }],
-        });
+        })
+    }
+
+    /// The prepass's pipelines and a 1 x 1 stand-in map, bound with `layout` ([`Resources::layout`]).
+    pub fn new(
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        uniform: &wgpu::BindGroupLayout,
+        module: &wgpu::ShaderModule,
+        reversed: bool,
+    ) -> Self {
+        let layout = layout.clone();
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("sc_ao_prepass"),
             bind_group_layouts: &[Some(uniform)],

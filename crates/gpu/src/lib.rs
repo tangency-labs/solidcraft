@@ -20,6 +20,7 @@ use solidcraft_geom::tess::{EvalCurve, EvalSurface, TessPlan};
 use wgpu::util::DeviceExt;
 
 pub mod capture;
+pub mod concurrent;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod path;
 mod pbr;
@@ -58,6 +59,22 @@ fn popped(f: impl std::future::Future<Output = Option<wgpu::Error>>) -> Option<w
         std::task::Poll::Ready(e) => e,
         std::task::Poll::Pending => None,
     }
+}
+
+/// Error scopes catching what GPU work may raise (popped by [`caught`]).
+fn error_scopes(device: &wgpu::Device) -> [wgpu::ErrorScopeGuard; 3] {
+    [wgpu::ErrorFilter::OutOfMemory, wgpu::ErrorFilter::Internal, wgpu::ErrorFilter::Validation].map(|f| device.push_error_scope(f))
+}
+
+/// The first error the scopes caught.
+fn caught(scopes: [wgpu::ErrorScopeGuard; 3]) -> Option<String> {
+    let mut failed = None;
+    for scope in scopes.into_iter().rev() {
+        if let Some(e) = popped(scope.pop()) {
+            failed.get_or_insert(e.to_string());
+        }
+    }
+    failed
 }
 
 /// An adapter and device without a window (native only): the adapter [`select::pick`] chooses
@@ -141,6 +158,7 @@ pub struct Part {
 }
 
 /// The compute pipeline, ready to evaluate plans on one device.
+#[derive(Clone)]
 pub struct TessGpu {
     adapter: String,
     device: wgpu::Device,

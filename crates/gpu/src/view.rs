@@ -1941,6 +1941,10 @@ pub struct Renderer {
     tri_cut_instanced_flat: Option<Cut>,
     /// The tessellation compute pipeline, where the device runs compute shaders.
     tess: Option<crate::TessGpu>,
+    /// The tessellation compute pipeline while it compiles beside the window ([`TessLater`]):
+    /// `tess` once it is ready.
+    #[cfg(not(target_arch = "wasm32"))]
+    tess_later: Option<TessLater>,
     /// While a section is shown (when the depth buffer has a stencil), in place of `tri`: the
     /// faces marking where the cap shows, their depth pushed back, then the cap again at the
     /// section plane's depth, so it hides the inside ([`Cut`]).
@@ -2447,12 +2451,6 @@ impl Renderer {
                 cache: None,
             })
         };
-        let both = |label: &str, cull: Option<wgpu::Face>| {
-            (see_through(label, TriSource::Instanced, cull), see_through(&format!("{label}_flat"), TriSource::InstancedFlat, cull))
-        };
-        let glass_far_instanced = both("sc_glass_far_instanced", Some(wgpu::Face::Front));
-        let glass_near_instanced = both("sc_glass_near_instanced", Some(wgpu::Face::Back));
-        let trans_instanced = both("sc_trans_instanced", None);
         let image_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("sc_image"),
             entries: &[
@@ -2480,31 +2478,33 @@ impl Renderer {
             immediate_size: 0,
         });
         const IA: [wgpu::VertexAttribute; 3] = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32];
-        let image = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("sc_image"),
-            layout: Some(&image_layout),
-            vertex: wgpu::VertexState {
-                module: &module,
-                entry_point: Some("vs_img"),
-                buffers: &[Some(wgpu::VertexBufferLayout {
-                    array_stride: IMG_SIZE as u64,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &IA,
-                })],
-                compilation_options: Default::default(),
-            },
-            primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
-            depth_stencil: depth(wgpu::CompareFunction::LessEqual, false),
-            multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
-            fragment: Some(wgpu::FragmentState {
-                module: &module,
-                entry_point: Some("fs_img"),
-                targets: &[Some(wgpu::ColorTargetState { format: t.format, blend: alpha, write_mask: wgpu::ColorWrites::ALL })],
-                compilation_options: Default::default(),
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
+        let image = || {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("sc_image"),
+                layout: Some(&image_layout),
+                vertex: wgpu::VertexState {
+                    module: &module,
+                    entry_point: Some("vs_img"),
+                    buffers: &[Some(wgpu::VertexBufferLayout {
+                        array_stride: IMG_SIZE as u64,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &IA,
+                    })],
+                    compilation_options: Default::default(),
+                },
+                primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
+                depth_stencil: depth(wgpu::CompareFunction::LessEqual, false),
+                multisample: wgpu::MultisampleState { count: t.samples.max(1), mask: !0, alpha_to_coverage_enabled: false },
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fs_img"),
+                    targets: &[Some(wgpu::ColorTargetState { format: t.format, blend: alpha, write_mask: wgpu::ColorWrites::ALL })],
+                    compilation_options: Default::default(),
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
         let access_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("sc_access"),
             entries: &[wgpu::BindGroupLayoutEntry {
@@ -2518,10 +2518,11 @@ impl Renderer {
                 count: None,
             }],
         });
-        let ao = ao::Resources::new(device, &bgl, &module, reversed);
+        let ao_layout = ao::Resources::layout(device);
+        let ao = || ao::Resources::new(device, &ao_layout, &bgl, &module, reversed);
         let solid_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("sc_solid"),
-            bind_group_layouts: &[Some(&bgl), Some(&access_bgl), Some(&ao.layout)],
+            bind_group_layouts: &[Some(&bgl), Some(&access_bgl), Some(&ao_layout)],
             immediate_size: 0,
         });
         let built = [Some(tri_layout())];
@@ -2563,38 +2564,48 @@ impl Renderer {
         let solid = |label: &str, fs: &str, cull: Option<wgpu::Face>, ds: Option<wgpu::DepthStencilState>, source: TriSource| {
             solid_writes(label, fs, cull, ds, source, true)
         };
-        // While a section is shown: the stencil marking and the cap (see `Renderer::tri_cut`).
-        let cut = |source: TriSource| {
-            t.depth.filter(|f| f.has_stencil_aspect()).map(|format| {
-                // The visible surface, by its true depth, marks the stencil: 1 where it is a back face (the cap).
-                use wgpu::StencilOperation::{Keep, Replace, Zero};
-                let face = |pass_op| wgpu::StencilFaceState { compare: wgpu::CompareFunction::Always, fail_op: Keep, depth_fail_op: Keep, pass_op };
-                let mark = wgpu::DepthStencilState {
-                    format,
-                    depth_write_enabled: Some(true),
-                    depth_compare: Some(depth_compare(reversed, wgpu::CompareFunction::Less)),
-                    stencil: wgpu::StencilState { front: face(Zero), back: face(Replace), read_mask: 0xff, write_mask: 0xff },
-                    bias: Default::default(),
-                };
-                // Then the cap's back faces again, only there, at the section plane's depth.
-                let only = wgpu::StencilFaceState { compare: wgpu::CompareFunction::Equal, ..face(Keep) };
-                let cap = wgpu::DepthStencilState {
-                    format,
-                    depth_write_enabled: Some(true),
-                    depth_compare: Some(wgpu::CompareFunction::Always),
-                    stencil: wgpu::StencilState { front: only, back: only, read_mask: 0xff, write_mask: 0 },
-                    bias: Default::default(),
-                };
-                Cut {
-                    mark: solid("sc_tris_mark", "fs_solid", None, Some(mark), source),
-                    push: solid_writes("sc_tris_push", "fs_solid", None, pushed(wgpu::CompareFunction::Less, true, FACE_BIAS), source, false),
-                    // Depth only: every back face behind a marked pixel draws here, so writing
-                    // colour let the last one drawn paint the cut, other bodies behind it
-                    // included (their colours and outlines showed through it, #6328). The
-                    // marking pass already drew the nearest back face's colour.
-                    cap: solid_writes("sc_tris_cap", "fs_solid_cut", Some(wgpu::Face::Front), Some(cap), source, false),
-                }
+        // While a section is shown, the depth states of the stencil marking and of the cap (see
+        // `Renderer::tri_cut`), where the depth buffer has a stencil.
+        let cut_states = t.depth.filter(|f| f.has_stencil_aspect()).map(|format| {
+            // The visible surface, by its true depth, marks the stencil: 1 where it is a back face (the cap).
+            use wgpu::StencilOperation::{Keep, Replace, Zero};
+            let face = |pass_op| wgpu::StencilFaceState { compare: wgpu::CompareFunction::Always, fail_op: Keep, depth_fail_op: Keep, pass_op };
+            let mark = wgpu::DepthStencilState {
+                format,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(depth_compare(reversed, wgpu::CompareFunction::Less)),
+                stencil: wgpu::StencilState { front: face(Zero), back: face(Replace), read_mask: 0xff, write_mask: 0xff },
+                bias: Default::default(),
+            };
+            // Then the cap's back faces again, only there, at the section plane's depth.
+            let only = wgpu::StencilFaceState { compare: wgpu::CompareFunction::Equal, ..face(Keep) };
+            let cap = wgpu::DepthStencilState {
+                format,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Always),
+                stencil: wgpu::StencilState { front: only, back: only, read_mask: 0xff, write_mask: 0 },
+                bias: Default::default(),
+            };
+            (mark, cap)
+        });
+        // `Cut::mark` and `Cut::push` use `tri`'s fragment shader; `Cut::cap` has its own.
+        let marks = |source: TriSource| {
+            cut_states.as_ref().map(|(mark, _)| {
+                (
+                    solid("sc_tris_mark", "fs_solid", None, Some(mark.clone()), source),
+                    solid_writes("sc_tris_push", "fs_solid", None, pushed(wgpu::CompareFunction::Less, true, FACE_BIAS), source, false),
+                )
             })
+        };
+        // Depth only: every back face behind a marked pixel draws here, so writing colour let the
+        // last one drawn paint the cut, other bodies behind it included (their colours and
+        // outlines showed through it, #6328). The marking pass already drew the nearest back
+        // face's colour.
+        let cap = |source: TriSource| {
+            cut_states.as_ref().map(|(_, cap)| solid_writes("sc_tris_cap", "fs_solid_cut", Some(wgpu::Face::Front), Some(cap.clone()), source, false))
+        };
+        let cut = |marks: Option<(wgpu::RenderPipeline, wgpu::RenderPipeline)>, cap: Option<wgpu::RenderPipeline>| {
+            marks.zip(cap).map(|((mark, push), cap)| Cut { mark, push, cap })
         };
         let access_bind = access_texture(device, None, &access_bgl, 1, &[]);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -2656,86 +2667,195 @@ impl Renderer {
             })
         };
         let pass_depth = window_depth(wgpu::CompareFunction::Always);
-        let (ss_blit, copy_blit) = (blit("fs", window.samples.max(1), pass_depth.clone()), blit("fs_copy", window.samples.max(1), pass_depth));
-        // Into the cached picture's own texture: no depth, one sample.
-        let ss_filter = blit("fs", 1, None);
-        let oit = oit::Pipelines::new(device, &module, &layout, t.format, t.depth, t.samples);
-        let depth_reset = window.reversed_depth().then(|| depth_reset_pipeline(device, window)).flatten();
-        Renderer {
-            ao,
-            depth_reset,
-            section_reset: t.depth.filter(|f| f.has_stencil_aspect()).and_then(|_| depth_reset_pipeline(device, t)),
-            target: GpuTarget { oit: oit.is_some(), ..t },
-            window,
-            max_texture: device.limits().max_texture_dimension_2d,
-            ss_blit,
-            ss_filter,
-            copy_blit,
-            ss_scaled: false,
-            oit,
-            oit_targets: None,
-            ss_bgl,
-            ss: None,
-            ss_ready: false,
-            stats: DrawStatsHandle::default(),
-            ss_stats: DrawStats::default(),
-            ss_key: None,
-            cached: None,
-            image,
-            image_bgl,
-            sampler,
-            textures: Default::default(),
-            quads: Vec::new(),
-            tri: solid("sc_tris", "fs_solid", None, pushed(wgpu::CompareFunction::Less, true, FACE_BIAS), TriSource::Built),
-            tri_cut: cut(TriSource::Built),
-            tri_planned: solid("sc_tris_planned", "fs_solid", None, pushed(wgpu::CompareFunction::Less, true, FACE_BIAS), TriSource::Planned),
-            tri_cut_planned: cut(TriSource::Planned),
-            tri_instanced: solid("sc_tris_instanced", "fs_solid", None, pushed(wgpu::CompareFunction::Less, true, FACE_BIAS), TriSource::Instanced),
-            tri_cut_instanced: cut(TriSource::Instanced),
-            tri_instanced_flat: solid(
-                "sc_tris_instanced_flat",
-                "fs_solid",
-                None,
-                pushed(wgpu::CompareFunction::Less, true, FACE_BIAS),
-                TriSource::InstancedFlat,
-            ),
-            tri_cut_instanced_flat: cut(TriSource::InstancedFlat),
-            glass_far_instanced,
-            glass_near_instanced,
-            trans_instanced,
-            tess,
-            access_bgl,
-            access_bind,
-            access_version: 0,
-            tri_hl: pipeline("sc_tris_hl", "vs_tri", "fs_tri", tri_layout(), highlight_depth(t.depth), alpha),
-            tri_hl_hover: solid("sc_tris_hl_hover", "fs_hl_hover", None, highlight_depth(t.depth), TriSource::Planned),
-            tri_hl_selected: solid("sc_tris_hl_selected", "fs_hl_selected", None, highlight_depth(t.depth), TriSource::Planned),
-            tri_hl_hover_built: solid("sc_tris_hl_hover_built", "fs_hl_hover", None, highlight_depth(t.depth), TriSource::Built),
-            tri_hl_selected_built: solid("sc_tris_hl_selected_built", "fs_hl_selected", None, highlight_depth(t.depth), TriSource::Built),
-            tri_hl_instanced: solid("sc_tris_hl_instanced", "fs_tri", None, highlight_depth(t.depth), TriSource::Instanced),
-            tri_hl_instanced_flat: solid("sc_tris_hl_instanced_flat", "fs_tri", None, highlight_depth(t.depth), TriSource::InstancedFlat),
-            pbr: pipeline("sc_pbr", "vs_pbr", "fs_pbr", pbr_layout(), pushed(wgpu::CompareFunction::Less, true, FACE_BIAS), None),
-            trans: pipeline("sc_trans", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
-            glass_far: glass("sc_glass_far", wgpu::Face::Front),
-            glass_near: glass("sc_glass_near", wgpu::Face::Back),
-            ghost: pipeline("sc_ghost", "vs_tri", "fs_tri", tri_layout(), pushed(wgpu::CompareFunction::LessEqual, false, GHOST_BIAS), alpha),
-            xray: pipeline("sc_xray", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::Always, false), alpha),
-            line: pipeline("sc_lines", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
-            line_hidden: pipeline("sc_lines_hidden", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::Greater, false), alpha),
-            overlay: pipeline("sc_overlay", "vs_line", "fs_line_all", line_layout(), depth(wgpu::CompareFunction::Always, false), alpha),
-            guide_trans: pipeline("sc_guide_trans", "vs_tri", "fs_tri_all", tri_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
-            guide_line: pipeline("sc_guide_lines", "vs_line", "fs_line_all", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
-            uniform,
-            uniform_bgl: bgl,
-            bind,
-            linear_out: t.format.is_srgb(),
-            model: Batches::default(),
-            product: Batches::default(),
-            empty: Batches::default(),
-            sketch: Batches::default(),
-            highlight: Batches::default(),
-            preview: Batches::default(),
-        }
+        let blits = || {
+            (
+                blit("fs", window.samples.max(1), pass_depth.clone()),
+                blit("fs_copy", window.samples.max(1), pass_depth.clone()),
+                // Into the cached picture's own texture: no depth, one sample.
+                blit("fs", 1, None),
+            )
+        };
+        let oit = || oit::Pipelines::new(device, &module, &layout, t.format, t.depth, t.samples);
+        let resets = || {
+            (
+                window.reversed_depth().then(|| depth_reset_pipeline(device, window)).flatten(),
+                t.depth.filter(|f| f.has_stencil_aspect()).and_then(|_| depth_reset_pipeline(device, t)),
+            )
+        };
+        let opaque = || pushed(wgpu::CompareFunction::Less, true, FACE_BIAS);
+        // One job per fragment shader, the costly part: wgpu compiles a shader for the first
+        // pipeline that uses it and reuses it for the next, so each is still compiled once. A
+        // vertex shader two jobs share may be compiled by both; those are small.
+        let tris = || {
+            (
+                solid("sc_tris", "fs_solid", None, opaque(), TriSource::Built),
+                marks(TriSource::Built),
+                solid("sc_tris_planned", "fs_solid", None, opaque(), TriSource::Planned),
+                marks(TriSource::Planned),
+                solid("sc_tris_instanced", "fs_solid", None, opaque(), TriSource::Instanced),
+                marks(TriSource::Instanced),
+            )
+        };
+        let caps = || (cap(TriSource::Built), cap(TriSource::Planned), cap(TriSource::Instanced));
+        let flat = || (solid("sc_tris_instanced_flat", "fs_solid", None, opaque(), TriSource::InstancedFlat), marks(TriSource::InstancedFlat));
+        let flat_cap = || cap(TriSource::InstancedFlat);
+        let hover = || {
+            (
+                solid("sc_tris_hl_hover", "fs_hl_hover", None, highlight_depth(t.depth), TriSource::Planned),
+                solid("sc_tris_hl_hover_built", "fs_hl_hover", None, highlight_depth(t.depth), TriSource::Built),
+            )
+        };
+        let selected = || {
+            (
+                solid("sc_tris_hl_selected", "fs_hl_selected", None, highlight_depth(t.depth), TriSource::Planned),
+                solid("sc_tris_hl_selected_built", "fs_hl_selected", None, highlight_depth(t.depth), TriSource::Built),
+            )
+        };
+        // `glass_far_instanced`, `glass_near_instanced` and `trans_instanced`, smooth or flat.
+        let see_through_instanced = |source: TriSource, suffix: &str| {
+            (
+                see_through(&format!("sc_glass_far_instanced{suffix}"), source, Some(wgpu::Face::Front)),
+                see_through(&format!("sc_glass_near_instanced{suffix}"), source, Some(wgpu::Face::Back)),
+                see_through(&format!("sc_trans_instanced{suffix}"), source, None),
+            )
+        };
+        let see_through_tris = || {
+            (
+                pipeline("sc_tris_hl", "vs_tri", "fs_tri", tri_layout(), highlight_depth(t.depth), alpha),
+                pipeline("sc_trans", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
+                glass("sc_glass_far", wgpu::Face::Front),
+                glass("sc_glass_near", wgpu::Face::Back),
+                pipeline("sc_ghost", "vs_tri", "fs_tri", tri_layout(), pushed(wgpu::CompareFunction::LessEqual, false, GHOST_BIAS), alpha),
+                pipeline("sc_xray", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::Always, false), alpha),
+                see_through_instanced(TriSource::Instanced, ""),
+                solid("sc_tris_hl_instanced", "fs_tri", None, highlight_depth(t.depth), TriSource::Instanced),
+            )
+        };
+        let see_through_flat = || {
+            (
+                see_through_instanced(TriSource::InstancedFlat, "_flat"),
+                solid("sc_tris_hl_instanced_flat", "fs_tri", None, highlight_depth(t.depth), TriSource::InstancedFlat),
+            )
+        };
+        let pbr = || pipeline("sc_pbr", "vs_pbr", "fs_pbr", pbr_layout(), opaque(), None);
+        let lines = || {
+            (
+                pipeline("sc_lines", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
+                pipeline("sc_lines_hidden", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::Greater, false), alpha),
+            )
+        };
+        let lines_all = || {
+            (
+                pipeline("sc_overlay", "vs_line", "fs_line_all", line_layout(), depth(wgpu::CompareFunction::Always, false), alpha),
+                pipeline("sc_guide_lines", "vs_line", "fs_line_all", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
+            )
+        };
+        let guide_trans = || pipeline("sc_guide_trans", "vs_tri", "fs_tri_all", tri_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha);
+        // Each job on a thread of its own where the device allows it: D3D12 compiles every shader
+        // as its pipeline is made, which took seconds one after another (#4860).
+        crate::concurrent::scope(device, |jobs| {
+            let tris = jobs.spawn(tris);
+            let caps = jobs.spawn(caps);
+            let flat = jobs.spawn(flat);
+            let flat_cap = jobs.spawn(flat_cap);
+            let hover = jobs.spawn(hover);
+            let selected = jobs.spawn(selected);
+            let see_through_tris = jobs.spawn(see_through_tris);
+            let see_through_flat = jobs.spawn(see_through_flat);
+            let pbr = jobs.spawn(pbr);
+            let lines = jobs.spawn(lines);
+            let lines_all = jobs.spawn(lines_all);
+            let guide_trans = jobs.spawn(guide_trans);
+            let image = jobs.spawn(image);
+            let ao = jobs.spawn(ao);
+            let oit = jobs.spawn(oit);
+            let blits = jobs.spawn(blits);
+            let resets = jobs.spawn(resets);
+            let (tri, tri_marks, tri_planned, planned_marks, tri_instanced, instanced_marks) = tris.join();
+            let (tri_cap, planned_cap, instanced_cap) = caps.join();
+            let (tri_instanced_flat, flat_marks) = flat.join();
+            let (tri_hl_hover, tri_hl_hover_built) = hover.join();
+            let (tri_hl_selected, tri_hl_selected_built) = selected.join();
+            let (tri_hl, trans, glass_far, glass_near, ghost, xray, (glass_far_smooth, glass_near_smooth, trans_smooth), tri_hl_instanced) =
+                see_through_tris.join();
+            let ((glass_far_flat, glass_near_flat, trans_flat), tri_hl_instanced_flat) = see_through_flat.join();
+            let (line, line_hidden) = lines.join();
+            let (overlay, guide_line) = lines_all.join();
+            let (ss_blit, copy_blit, ss_filter) = blits.join();
+            let (depth_reset, section_reset) = resets.join();
+            let oit = oit.join();
+            Renderer {
+                ao: ao.join(),
+                depth_reset,
+                section_reset,
+                target: GpuTarget { oit: oit.is_some(), ..t },
+                window,
+                max_texture: device.limits().max_texture_dimension_2d,
+                ss_blit,
+                ss_filter,
+                copy_blit,
+                ss_scaled: false,
+                oit,
+                oit_targets: None,
+                ss_bgl,
+                ss: None,
+                ss_ready: false,
+                stats: DrawStatsHandle::default(),
+                ss_stats: DrawStats::default(),
+                ss_key: None,
+                cached: None,
+                image: image.join(),
+                image_bgl,
+                sampler,
+                textures: Default::default(),
+                quads: Vec::new(),
+                tri,
+                tri_cut: cut(tri_marks, tri_cap),
+                tri_planned,
+                tri_cut_planned: cut(planned_marks, planned_cap),
+                tri_instanced,
+                tri_cut_instanced: cut(instanced_marks, instanced_cap),
+                tri_instanced_flat,
+                tri_cut_instanced_flat: cut(flat_marks, flat_cap.join()),
+                glass_far_instanced: (glass_far_smooth, glass_far_flat),
+                glass_near_instanced: (glass_near_smooth, glass_near_flat),
+                trans_instanced: (trans_smooth, trans_flat),
+                tess,
+                #[cfg(not(target_arch = "wasm32"))]
+                tess_later: None,
+                access_bgl,
+                access_bind,
+                access_version: 0,
+                tri_hl,
+                tri_hl_hover,
+                tri_hl_selected,
+                tri_hl_hover_built,
+                tri_hl_selected_built,
+                tri_hl_instanced,
+                tri_hl_instanced_flat,
+                pbr: pbr.join(),
+                trans,
+                glass_far,
+                glass_near,
+                ghost,
+                xray,
+                line,
+                line_hidden,
+                overlay,
+                guide_trans: guide_trans.join(),
+                guide_line,
+                uniform,
+                uniform_bgl: bgl.clone(),
+                bind,
+                linear_out: t.format.is_srgb(),
+                model: Batches::default(),
+                product: Batches::default(),
+                empty: Batches::default(),
+                sketch: Batches::default(),
+                highlight: Batches::default(),
+                preview: Batches::default(),
+            }
+        })
     }
 }
 
@@ -2903,6 +3023,61 @@ pub fn tessellation(adapter: &wgpu::Adapter, device: &wgpu::Device, queue: &wgpu
     }
 }
 
+/// The plan evaluation ([`tessellation`]) compiled on a thread of its own, so the window does not
+/// wait for it: D3D12 compiles the evaluation shader in seconds, most of the viewport's start
+/// (#4860). Bodies are built on the CPU until [`TessLater::ready`] holds it, and stay so where it
+/// never does (a device that cannot build it), as they are where [`tessellation`] gives `None`.
+#[cfg(not(target_arch = "wasm32"))]
+pub struct TessLater {
+    ready: Arc<std::sync::OnceLock<crate::TessGpu>>,
+    /// Joined when dropped, so the app does not exit in the middle of the driver's compile.
+    worker: Option<std::thread::JoinHandle<()>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl TessLater {
+    /// Start compiling [`tessellation`]'s pipeline (`shader`) for `device`.
+    pub fn start(adapter: &wgpu::Adapter, device: &wgpu::Device, queue: &wgpu::Queue, shader: &'static str) -> TessLater {
+        let ready = Arc::new(std::sync::OnceLock::new());
+        let threaded = crate::concurrent::threads_allowed(device);
+        let (adapter, device, queue, slot) = (adapter.clone(), device.clone(), queue.clone(), ready.clone());
+        let compile = move || {
+            if let Some(tess) = tessellation(&adapter, &device, &queue, shader) {
+                let _ = slot.set(tess);
+            }
+        };
+        // Where the device may not make pipelines on two threads at once (DXC, OpenGL), or no
+        // thread starts, it compiles now, as before.
+        let worker = threaded.then(|| std::thread::Builder::new().name("solidcraft tessellation".into()).spawn(compile.clone()).ok()).flatten();
+        if worker.is_none() {
+            compile();
+        }
+        TessLater { ready, worker }
+    }
+
+    /// The evaluation, there once it has compiled.
+    pub fn ready(&self) -> Arc<std::sync::OnceLock<crate::TessGpu>> {
+        self.ready.clone()
+    }
+
+    /// Wait for the compile to end.
+    #[cfg(test)]
+    fn wait(&mut self) {
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for TessLater {
+    fn drop(&mut self) {
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
 /// A device whose driver hangs on the evaluation shader, so bodies are built on the CPU there:
 /// the AMD FirePro D300/D500/D700 (Mac Pro 2013, Tahiti) under Metal, where macOS resets the GPU
 /// and the whole desktop freezes. `SOLIDCRAFT_CPU_TESS=1` forces CPU evaluation on any device.
@@ -3003,6 +3178,7 @@ impl Renderer {
             res.ss_key = res.ss_ready.then_some(key);
             return;
         }
+        res.take_ready_tessellation();
         res.model.take(
             device,
             queue,
@@ -3137,6 +3313,21 @@ impl Renderer {
     /// The target the pipelines draw into.
     pub fn target(&self) -> GpuTarget {
         self.target
+    }
+
+    /// Evaluate planned bodies with `later`'s pipeline once it has compiled (#4860).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn tessellate_later(&mut self, later: TessLater) {
+        self.tess_later = Some(later);
+    }
+
+    /// [`Renderer::tess`] from [`Renderer::tess_later`] once that has compiled.
+    fn take_ready_tessellation(&mut self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(tess) = self.tess_later.as_ref().and_then(|later| later.ready.get()) {
+            self.tess = Some(tess.clone());
+            self.tess_later = None;
+        }
     }
 }
 
@@ -3769,6 +3960,29 @@ mod tests {
         assert!(!super::hangs_on_gpu_tessellation(wgpu::Backend::Metal, "Apple M2"));
         assert!(!super::hangs_on_gpu_tessellation(wgpu::Backend::Metal, "AMD Radeon Pro 560X"));
         assert!(!super::hangs_on_gpu_tessellation(wgpu::Backend::Vulkan, "AMD FirePro W5100"));
+    }
+
+    /// The plan evaluation compiled beside the window reaches the renderer once it is ready; one
+    /// that does not compile never does, and bodies stay built on the CPU (#4860).
+    #[test]
+    fn a_renderer_takes_the_plan_evaluation_once_it_has_compiled() {
+        let Ok((adapter, device, queue)) = crate::open_headless() else {
+            eprintln!("skipped: no GPU adapter");
+            return;
+        };
+        let depth = crate::depth_format(&device, true);
+        let target = super::GpuTarget { format: wgpu::TextureFormat::Rgba8Unorm, depth: Some(depth), samples: 1, tess: false, oit: false };
+        let compiles = super::tessellation(&adapter, &device, &queue, crate::SHADER).is_some();
+        for (shader, expected) in [(crate::SHADER, compiles), ("not a shader", false)] {
+            let mut later = super::TessLater::start(&adapter, &device, &queue, shader);
+            later.wait();
+            let mut renderer = super::Renderer::new(&device, target, None);
+            renderer.take_ready_tessellation();
+            assert!(renderer.tess.is_none(), "no evaluation before one is handed over");
+            renderer.tessellate_later(later);
+            renderer.take_ready_tessellation();
+            assert_eq!(renderer.tess.is_some(), expected, "shader {shader:.12}");
+        }
     }
 
     /// The viewport shader parses and validates (a bad shader would only fail at run time).

@@ -16,7 +16,7 @@ use solidcraft_render::{AnalysisMode, Camera, Rgb, SECTION_CAP, Scene};
 use wgpu::util::DeviceExt;
 
 use crate::view::{AccessMap, Frame, GpuScene, GpuTarget, Renderer, analysis_colors, analysis_uniform};
-use crate::{GpuError, Result, popped};
+use crate::{GpuError, Result, caught, error_scopes};
 
 /// The colour format pictures are drawn in: sRGB bytes as they are, like the viewport's usual
 /// (non-sRGB) target.
@@ -457,22 +457,6 @@ fn watch_lost(device: &wgpu::Device) -> Arc<AtomicBool> {
         seen.store(true, Ordering::Release);
     });
     lost
-}
-
-/// Error scopes catching what a picture's GPU work may raise (popped by [`caught`]).
-fn error_scopes(device: &wgpu::Device) -> [wgpu::ErrorScopeGuard; 3] {
-    [wgpu::ErrorFilter::OutOfMemory, wgpu::ErrorFilter::Internal, wgpu::ErrorFilter::Validation].map(|f| device.push_error_scope(f))
-}
-
-/// The first error the scopes caught.
-fn caught(scopes: [wgpu::ErrorScopeGuard; 3]) -> Option<String> {
-    let mut failed = None;
-    for scope in scopes.into_iter().rev() {
-        if let Some(e) = popped(scope.pop()) {
-            failed.get_or_insert(e.to_string());
-        }
-    }
-    failed
 }
 
 /// The background gradient: the viewport's top colour at the top, its bottom one at the bottom,

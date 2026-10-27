@@ -114,6 +114,8 @@ pub struct ViewportState {
     /// greys out with it.
     pub(crate) corner_ok: bool,
     pub gpu: Option<GpuTarget>,
+    /// The GPU plan evaluation still compiling: `gpu.tess` once it is ready (#4860).
+    pub(crate) tess_ready: Option<crate::gpu::TessReady>,
     /// What the GPU drew last frame, shared with the renderer (the frame-rate details, #2548).
     pub(crate) draw_stats: Option<crate::gpu::DrawStatsHandle>,
     /// The graphics backend and adapter, as the frame-rate details show them.
@@ -429,6 +431,9 @@ fn scene_key(app: &SolveApp) -> u64 {
     solidcraft_engine::doc::display_quality::current().hash(&mut h);
     lod_generation(app).hash(&mut h);
     app.viewport.mesh_lods.generation().hash(&mut h);
+    // How bodies are drawn: from their plans on the GPU, or built here (until the evaluation
+    // shader has compiled, #4860).
+    app.viewport.gpu.is_some_and(|g| g.tess).hash(&mut h);
     // The section plane (its cut outlines are part of the model scene).
     section_plane(app).map(|(o, n)| [o.x, o.y, o.z, n.x, n.y, n.z].map(f64::to_bits)).hash(&mut h);
     app.cam.up.hash(&mut h);

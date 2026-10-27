@@ -40,6 +40,10 @@ impl Renderer {
             return Ok(MsaaCheck::FailedAtOne);
         }
         replacement.tess = self.tess.take();
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            replacement.tess_later = self.tess_later.take();
+        }
         *self = replacement;
         Ok(MsaaCheck::Fallback)
     }

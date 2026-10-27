@@ -805,7 +805,7 @@ impl SolveApp {
 
     fn set_wgpu_targets(&mut self, rs: &egui_wgpu::RenderState, scene: crate::gpu::GpuTarget, window: crate::gpu::GpuTarget) {
         #[allow(unused_mut)] // Only native hosts can wait for the startup readback.
-        let (mut installed, stats) = gpu::install(rs, scene, window, !self.cpu_meshing);
+        let (mut installed, stats, tess_ready) = gpu::install(rs, scene, window, !self.cpu_meshing);
         #[cfg(not(target_arch = "wasm32"))]
         if scene.depth.is_some() && window.depth.is_none() && window.samples == 1 {
             let mut renderer = rs.renderer.write();
@@ -828,6 +828,7 @@ impl SolveApp {
             }
         }
         self.viewport.gpu = Some(installed);
+        self.viewport.tess_ready = tess_ready;
         self.viewport.draw_stats = Some(stats);
         render_workspace::invalidate_scene(self);
         let (samples, has_depth) = self.viewport.gpu.map_or((1, false), |g| (g.samples.max(1), g.depth.is_some()));
@@ -1971,6 +1972,7 @@ impl SolveApp {
     /// Per-frame logic before layout.
     pub fn logic(&mut self, ctx: &egui::Context) {
         frame_watch::begin(self);
+        gpu::tick_tessellation(self);
         file_picker::tick(self, ctx);
         dialogs_save_mesh::tick_wait(self, ctx);
         easyprint_ui::tick(self, ctx);
