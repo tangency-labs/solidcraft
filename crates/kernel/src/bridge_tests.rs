@@ -209,6 +209,9 @@ fn the_bridge_refuses_what_it_cannot_hold() {
     assert!(bridge(&bad, &b, [Continuity::G1, Continuity::G1], [0.0, 0.0]).is_err());
     // Fewer than two stations.
     assert!(bridge(&a[..1], &b[..1], [Continuity::G1, Continuity::G1], [0.0, 0.0]).is_err());
+    // G4 is past the bridge's Hermite rows: refused by the one check, not built as G3.
+    let e = bridge(&a, &b, [Continuity::G4, Continuity::G1], [0.0, 0.0]).unwrap_err().to_string();
+    assert!(e.contains("not supported yet") && e.contains("g4"), "{e}");
     // Every order from G0 to G3 builds.
     for (x, y) in [(Continuity::G0, Continuity::G0), (Continuity::G1, Continuity::G0), (Continuity::G3, Continuity::G1)] {
         let body = bridge(&a, &b, [x, y], [0.0, 0.0]).unwrap();
@@ -217,15 +220,6 @@ fn the_bridge_refuses_what_it_cannot_hold() {
             assert!(angle_deg(t, Vec3::new(0.0, 1.0, 0.0)) < 0.01, "{x:?}");
         }
     }
-}
-
-#[test]
-fn continuity_parses_its_words() {
-    assert_eq!(Continuity::parse("g0"), Some(Continuity::G0));
-    assert_eq!(Continuity::parse("G3"), Some(Continuity::G3));
-    assert_eq!(Continuity::parse("g9"), None);
-    assert_eq!(Continuity::parse(""), None);
-    assert_eq!([Continuity::G0, Continuity::G1, Continuity::G2, Continuity::G3].map(Continuity::conditions), [1, 2, 3, 4]);
 }
 
 /// A radius-10 tube along z from `z0` to `z0 + 30`, turned `turn` radians about its axis (which

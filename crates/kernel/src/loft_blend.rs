@@ -77,6 +77,9 @@ const ROWS_PER_SOLVE: usize = 16;
 /// [`MAX_BLEND_STATIONS`], a frame that is not finite or a `leave` with no direction, a crown
 /// outside its range, and two neighbouring sections that meet at a station (no room for a blend).
 pub fn loft_blend(sections: &[Vec<Frame>], orders: [Continuity; 2], crown: [f64; 2], samples: usize) -> Result<Body> {
+    for g in orders {
+        g.built_by(crate::continuity_order::Construction::Bridge)?;
+    }
     let blend = Blend::new(sections, orders, crown, samples)?;
     let net = blend.net()?;
     crate::surfaces::tensor_sheet(&net)

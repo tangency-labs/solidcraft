@@ -1,5 +1,5 @@
 //! Continuity-driven bridging surfaces: one B-spline face that leaves one surface and arrives at
-//! another with a requested continuity (G0 up to G3). This is the core the Blend, Boundary and
+//! another with a requested continuity (G0 up to G3, [`Construction::Bridge`]). This is the core the Blend, Boundary and
 //! Match surfaces are built on.
 //!
 //! A bridge is a tensor product. Across it (v) every station's cross-section is a Bézier whose
@@ -22,56 +22,10 @@ use solidcraft_geom::brep::eval::{CurveEval, SurfaceEval};
 use solidcraft_geom::bspline::{CurveN, HPoint, NurbsSurface};
 
 use crate::body::Body;
+use crate::continuity_order::Construction;
+pub use crate::continuity_order::Continuity;
 use crate::surfaces::Chain;
 use crate::{KernelError, Result};
-
-/// How much of a support surface a bridge repeats along its boundary.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Continuity {
-    /// The boundary curve alone: the surfaces meet, nothing else.
-    G0,
-    /// Position and tangent plane.
-    #[default]
-    G1,
-    /// Position, tangent plane and curvature vector.
-    G2,
-    /// Position, tangent plane, curvature vector and its change along the leave direction.
-    G3,
-}
-
-impl Continuity {
-    /// Conditions a side carries: 1 (G0) up to 4 (G3).
-    pub fn conditions(self) -> usize {
-        match self {
-            Continuity::G0 => 1,
-            Continuity::G1 => 2,
-            Continuity::G2 => 3,
-            Continuity::G3 => 4,
-        }
-    }
-
-    /// The word a command parameter uses.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Continuity::G0 => "g0",
-            Continuity::G1 => "g1",
-            Continuity::G2 => "g2",
-            Continuity::G3 => "g3",
-        }
-    }
-
-    /// Parse `g0`…`g3` (upper case accepted), `None` for anything else.
-    pub fn parse(s: &str) -> Option<Continuity> {
-        match s.to_ascii_lowercase().as_str() {
-            "g0" => Some(Continuity::G0),
-            "g1" => Some(Continuity::G1),
-            "g2" => Some(Continuity::G2),
-            "g3" => Some(Continuity::G3),
-            _ => None,
-        }
-    }
-}
 
 /// One station of a boundary: where the bridge starts, the direction it leaves in, and what the
 /// support surface does there along that direction.
@@ -683,6 +637,9 @@ pub fn bridge(a: &[Frame], b: &[Frame], orders: [Continuity; 2], crown: [f64; 2]
         if !c.is_finite() || !(-0.9..=3.0).contains(&c) {
             return Err(KernelError::Invalid("a bridge's crown must be between -0.9 and 3".into()));
         }
+    }
+    for g in orders {
+        g.built_by(Construction::Bridge)?;
     }
     let stations = a.len();
     let n = orders[0].conditions() + orders[1].conditions() - 1;

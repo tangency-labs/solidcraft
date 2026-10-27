@@ -28,6 +28,7 @@ mod build;
 #[cfg(test)]
 mod chamfer_sides_curved_tests;
 mod continuity;
+mod continuity_order;
 #[cfg(test)]
 mod coplanar_tests;
 mod corner_g2;
@@ -160,7 +161,7 @@ pub use blend_variable::{RadiusSpline, Taper, fillet_chord, fillet_tapered, fill
 pub use body::{Body, CapSignature, DISPLAY_ANGLE, DisplayShare, EdgeInfo, FaceInfo, FacePaint, FaceSource, MeshTolerance, Paint};
 pub use boundary::{Boundary, boundary_patch};
 pub use boundary_network::{BoundaryCurve, CurveSource, MAX_CHAIN_CURVES, MAX_EDGE_PICKS, boundary_join, boundary_surface};
-pub use bridge::{Continuity, Frame, blend_between, bridge, chain, chain_closes, frames, frames_across, sample_grid};
+pub use bridge::{Frame, blend_between, bridge, chain, chain_closes, frames, frames_across, sample_grid};
 pub use build::{
     PathSeg, box_solid, canonical_revolve_axis, cylinder, extrude, extrude_tapered, extrude_tapered_between, extrude_whole_sides, loft, loft_regions,
     loft_with_rails, path_polyline, planar_face_record, revolve, revolve_whole, sphere, sweep, sweep_with, torus,
@@ -169,6 +170,7 @@ pub use continuity::{
     ContinuityReport, ContinuityTolerances, EdgePick, MAX_SAMPLES, MIN_SAMPLES, SeamReport, SeamStation, SeamVerdict, SeamWorst, pick_edges,
     seam_diagnostics,
 };
+pub use continuity_order::{Construction, Continuity};
 pub use corner_g2::{CURVATURE_SHARE, DEFAULT_SETBACK_FACTOR};
 pub use delete_face::delete_faces;
 pub use distance::{BodyDistance, DistanceShape, body_distance};
