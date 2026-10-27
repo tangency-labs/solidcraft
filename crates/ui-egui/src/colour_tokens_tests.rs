@@ -152,6 +152,8 @@ const ALLOWED_LITERALS: &[(&str, usize, &str)] = &[
     ("dialogs_motion.rs", 1, "a white outline"),
     ("gizmo.rs", 2, "the gizmo's neutral grey ball"),
     ("icons.rs", 1, "the white tint that carries an icon image's opacity"),
+    ("home.rs", 2, "thumbnail tints"),
+    ("library.rs", 2, "a part's picture drawn untinted, and white ink on its file-kind badge"),
     ("ref_images.rs", 1, "a reference image's opacity tint"),
     ("theme_files.rs", 1, "a colour read from a theme file, which sets tokens"),
     ("titlebar.rs", 2, "the window close button's red hover (the system's convention) and white ink"),

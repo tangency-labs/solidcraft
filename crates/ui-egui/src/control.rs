@@ -441,6 +441,10 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             }
             ok(json!({"workspace":if crate::render_workspace::active(app) {"render"} else {"design"}}))
         }
+        "ui.library" => match crate::library::control(app, p) {
+            Ok(v) => ok(v),
+            Err(e) => err(e),
+        },
         "engine.execute" | "command" => {
             let Some(id) = s("command").or(s("id")) else { return err("missing `command`") };
             wrap(execute(app, id, p.get("params").cloned().filter(|v| !v.is_null()).unwrap_or(json!({}))))

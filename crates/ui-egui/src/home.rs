@@ -282,6 +282,18 @@ pub(crate) fn install(h: &mut HomeState, ctx: &egui::Context, key: &str, img: Op
     }
 }
 
+/// A file's picture for the parts library: a stored one, else made by opening the file (on a
+/// worker thread).
+pub(crate) fn picture_of(key: &str) -> Option<egui::ColorImage> {
+    picture(key).or_else(|| make(key).1)
+}
+
+/// Upload a picture into a texture map (the parts library's).
+pub(crate) fn install_texture(map: &mut HashMap<String, Option<egui::TextureHandle>>, ctx: &egui::Context, key: &str, img: Option<egui::ColorImage>) {
+    let tex = img.map(|i| ctx.load_texture(format!("library:{key}"), i, egui::TextureOptions::LINEAR));
+    map.insert(key.to_string(), tex);
+}
+
 /// Read a disposable picture without evaluating, importing or meshing a model.
 fn picture(key: &str) -> Option<egui::ColorImage> {
     #[cfg(not(target_arch = "wasm32"))]
