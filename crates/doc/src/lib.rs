@@ -70,8 +70,8 @@ pub mod text_params;
 pub mod thread_forms;
 
 pub use assembly::{
-    IDENTITY, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, Occurrence, WorldNames, apply_point, apply_vector, is_identity, is_placement,
-    map_point_expr, mat_inverse, mat_mul, rigid,
+    IDENTITY, MAX_PLACEMENT_DEPTH, MAX_PLACEMENTS, Mat, Occurrence, WorldNames, apply_point, apply_vector, is_identity, is_placement, map_point_expr,
+    mat_inverse, mat_mul, rigid,
 };
 pub use document::*;
 pub use eval::KeptResults;

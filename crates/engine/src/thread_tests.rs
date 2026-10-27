@@ -720,9 +720,7 @@ fn a_format_39_left_hand_thread_and_tapped_hole_open_left_handed() {
     run(&mut s, "solid.hole", json!({"position": [20, 30, 12], "thread": "M6", "depth": 8, "hand": "left"}));
     run(&mut s, "solid.cylinder", json!({"radius": 5, "height": 9, "base": [80, 0, 0], "body_name": "Shaft", "operation": "new"}));
     run(&mut s, "solid.thread", json!({"face": [85, 0, 4.5], "designation": "M10", "hand": "left"}));
-    let hands = |s: &Session| -> Vec<solidcraft_doc::thread_forms::ThreadHand> {
-        s.model.state().threads.iter().map(|t| t.hand).collect()
-    };
+    let hands = |s: &Session| -> Vec<solidcraft_doc::thread_forms::ThreadHand> { s.model.state().threads.iter().map(|t| t.hand).collect() };
     let left = solidcraft_doc::thread_forms::ThreadHand::Left;
     assert_eq!(hands(&s), [left, left]);
     // What format 39 wrote: the direction as `handedness`, no pending changes.

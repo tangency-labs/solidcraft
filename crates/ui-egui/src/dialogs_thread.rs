@@ -374,7 +374,7 @@ pub(crate) fn rows(
     if !f.sizes().is_empty() {
         size_rows(ui, f, designation, suggested);
     }
-    let hint = format!("{}{}", tr("fits the face, e.g. "), example(f));
+    let hint = crate::i18n::format("thread.fits_the_face", &[("example", &example(f))]);
     let (submitted, changed) = text_row(ui, "Designation", designation, &hint);
     enter |= submitted;
     if let Some(at) = crate::scenario::handle_at("dialog:Designation") {
@@ -405,8 +405,8 @@ pub(crate) fn rows(
         enter |= ease_rows(ui, "Ease Out", "thread_ease_out", &mut o.ease_out);
         pick(ui, "Tip", "thread_tip", &mut o.tip, TIPS);
         if o.tip == ThreadTip::Chamfer {
-            enter |= hint_row(ui, "Chamfer Angle", &mut o.chamfer_angle, tr("ISO 4753"));
-            enter |= hint_row(ui, "Chamfer Depth", &mut o.chamfer_depth, tr("ISO 4753"));
+            enter |= hint_row(ui, "Chamfer Angle", &mut o.chamfer_angle, tr("ui.iso_4753"));
+            enter |= hint_row(ui, "Chamfer Depth", &mut o.chamfer_depth, tr("ui.iso_4753"));
         }
     });
     (enter, reset)

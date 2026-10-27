@@ -266,8 +266,11 @@ impl Preset {
         opts.thread.clone_from(&self.thread);
         opts.custom_thread = None;
         opts.thread_full_depth = self.thread_options.full_length;
-        opts.hand =
-            if self.thread_options.handedness == "left" { solidcraft_engine::doc::thread_forms::ThreadHand::Left } else { solidcraft_engine::doc::thread_forms::ThreadHand::Right };
+        opts.hand = if self.thread_options.handedness == "left" {
+            solidcraft_engine::doc::thread_forms::ThreadHand::Left
+        } else {
+            solidcraft_engine::doc::thread_forms::ThreadHand::Right
+        };
         opts.thread_depth = self.thread_options.depth.clone().unwrap_or_else(|| crate::dialogs::HoleOpts::default().thread_depth);
         // Existing placement picks stay with this dialog. To Object stores its mode only:
         // recalling it always asks for a fresh destination in the current design.

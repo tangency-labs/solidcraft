@@ -54,7 +54,8 @@ on:
   # The merge queue: each queued group runs the full suite before it lands on main.
   merge_group:
   push:
-    branches: [main]
+    # develop: the SMLib kernel's trunk until it merges into main (its PRs land there).
+    branches: [main, develop]
   schedule:
     - cron: "17 6 * * *"
   workflow_dispatch:
@@ -182,12 +183,12 @@ jobs:
             if [ "${tested:-0}" -gt 0 ]; then
               echo "The merge queue already tested $PUSH_SHA: repository checks only."
             elif tested=$(curl -fsS -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
-                "https://api.github.com/repos/$REPO/actions/workflows/ci.yml/runs?event=push&branch=main&status=success&per_page=1" \
+                "https://api.github.com/repos/$REPO/actions/workflows/ci.yml/runs?event=push&branch=$GITHUB_REF_NAME&status=success&per_page=1" \
                 | grep -o '"head_sha": *"[0-9a-f]*"' | head -n 1 | grep -o '[0-9a-f]\{40\}') \
               && [ -n "$tested" ] && git merge-base --is-ancestor "$tested" "$PUSH_SHA" \
               && git diff --no-renames --name-only -z "$tested" "$PUSH_SHA" > "$RUNNER_TEMP/ci-paths" \
               && select_packages "$RUNNER_TEMP/ci-paths" && [ "$full" != true ] && [ -z "$packages" ]; then
-              # Nothing a build reads changed since the last push to main whose run passed (the
+              # Nothing a build reads changed since the last push to this branch whose run passed (the
               # push before may never have run: a newer push cancels a waiting one).
               echo "$tested..$PUSH_SHA changes no code: repository checks only."
             else
@@ -306,7 +307,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: repo-checks
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       - name: Format
         run: cargo fmt --all -- --check
       - name: Asset attribution
@@ -350,13 +351,13 @@ jobs:
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
       - uses: dtolnay/rust-toolchain@stable
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: quick-compile
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
       - name: Cargo check
         run: cargo check --workspace --all-targets --locked
 
@@ -371,14 +372,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       # Main saves the cache; every other run restores it, read-only.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: native-clippy
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
       - name: Clippy
         env:
           FULL: ${{ needs.changes.outputs.full }}
@@ -408,9 +409,6 @@ jobs:
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
       - uses: dtolnay/rust-toolchain@stable
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       # sccache lives on a Blacksmith sticky disk (an ext4 volume cloned from the last snapshot,
       # no 10 GB limit and no download). Only main commits it; pull requests, the merge queue and
       # forks mount a clone and never write back, so nothing they build can reach main's cache.
@@ -424,7 +422,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: native-tests
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
       - name: Set up compiler cache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
@@ -481,9 +482,6 @@ jobs:
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
       - uses: dtolnay/rust-toolchain@stable
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       # sccache lives on a Blacksmith sticky disk (an ext4 volume cloned from the last snapshot,
       # no 10 GB limit and no download). Only main commits it; pull requests, the merge queue and
       # forks mount a clone and never write back, so nothing they build can reach main's cache.
@@ -498,7 +496,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: native-tests
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
       - name: Set up compiler cache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
@@ -625,7 +626,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: native-gpu
-          save-if: ${{ github.ref == 'refs/heads/main' && matrix.shard == 1 }}
+          save-if: ${{ (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop') && matrix.shard == 1 }}
       - name: Set up compiler cache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
@@ -761,9 +762,6 @@ jobs:
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
       - uses: dtolnay/rust-toolchain@stable
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       # sccache lives on a Blacksmith sticky disk (an ext4 volume cloned from the last snapshot,
       # no 10 GB limit and no download). Only main commits it; pull requests, the merge queue and
       # forks mount a clone and never write back, so nothing they build can reach main's cache.
@@ -778,7 +776,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: doc-tests
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
       - name: Set up compiler cache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
@@ -822,9 +823,6 @@ jobs:
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
       - uses: dtolnay/rust-toolchain@stable
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       # sccache lives on a Blacksmith sticky disk (an ext4 volume cloned from the last snapshot,
       # no 10 GB limit and no download). Only main commits it; pull requests, the merge queue and
       # forks mount a clone and never write back, so nothing they build can reach main's cache.
@@ -839,7 +837,10 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: oracle
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
       - name: Set up compiler cache
         uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
         with:
@@ -878,7 +879,7 @@ jobs:
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: windows-fxc
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
       # One test at a time: WARP's shader JIT crashes now and then (a null read in
       # d3d10warp.dll's JIT optimizer, about 1 run in 60) when several devices compile compute
       # pipelines at once, which the parallel tests do. Minidumps showed it in WARP itself, not
@@ -899,13 +900,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@stable
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: windows-startup
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
       - name: Backend order and probing on Windows
         run: cargo test -p solidcraft --profile ci --locked -- startup::tests native_crash::tests native_frame::tests
       - name: Build the app
@@ -1023,13 +1024,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: wasm
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh wasm32-unknown-unknown
       - run: cargo xtask wasm
 
   riscv64-gates:
@@ -1048,13 +1049,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: riscv64gc-unknown-linux-gnu
-      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
-        shell: bash
-        run: scripts/fetch-smlib.sh riscv64gc-unknown-linux-gnu
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: riscv64
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' }}
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh riscv64gc-unknown-linux-gnu
       - name: Install cross-compilation dependencies
         run: |
           # Ubuntu's regular archive serves amd64; RISC-V packages live in ports.
