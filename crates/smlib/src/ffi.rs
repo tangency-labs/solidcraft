@@ -259,3 +259,147 @@ mod primitive_calls {
 }
 
 pub use primitive_calls::*;
+
+// ---- WASI calls (wasm32-unknown-unknown) -------------------------------------------------------
+
+/// In a browser build SMLib is compiled against wasi-sdk's C library (build.rs), which calls a few
+/// WASI functions. The page has no WASI host, so they are defined here, where wasm-ld finds them
+/// before it would leave them as imports. There is no file system or environment: those calls fail
+/// with WASI's own error codes. The clocks are the page's (the C API times every call). What
+/// C writes to stdout or stderr goes to the `log` crate (target `smlib`).
+#[cfg(all(feature = "native", target_arch = "wasm32", target_os = "unknown"))]
+mod wasi {
+    const SUCCESS: i32 = 0;
+    const BADF: i32 = 8;
+    const INVAL: i32 = 28;
+    const NOSYS: i32 = 52;
+    const NOTCAPABLE: i32 = 76;
+
+    /// One `__wasi_ciovec_t`: a buffer and its length.
+    #[repr(C)]
+    struct Ciovec {
+        buf: *const u8,
+        len: usize,
+    }
+
+    #[unsafe(no_mangle)]
+    extern "C" fn __imported_wasi_snapshot_preview1_fd_write(fd: i32, iovs: *const Ciovec, n: usize, written: *mut usize) -> i32 {
+        if !(1..=2).contains(&fd) {
+            return BADF;
+        }
+        let mut text = Vec::new();
+        for i in 0..n {
+            // libc passes `n` valid iovecs, each a valid buffer, for the call's duration.
+            let v = unsafe { &*iovs.add(i) };
+            if !v.buf.is_null() {
+                text.extend_from_slice(unsafe { std::slice::from_raw_parts(v.buf, v.len) });
+            }
+        }
+        for line in String::from_utf8_lossy(&text).lines().filter(|l| !l.trim().is_empty()) {
+            log::debug!(target: "smlib", "{line}");
+        }
+        if !written.is_null() {
+            unsafe { *written = text.len() };
+        }
+        SUCCESS
+    }
+
+    #[unsafe(no_mangle)]
+    extern "C" fn __imported_wasi_snapshot_preview1_environ_sizes_get(count: *mut usize, size: *mut usize) -> i32 {
+        if !count.is_null() && !size.is_null() {
+            unsafe {
+                *count = 0;
+                *size = 0;
+            }
+        }
+        SUCCESS
+    }
+
+    #[unsafe(no_mangle)]
+    extern "C" fn __imported_wasi_snapshot_preview1_environ_get(_: *mut *mut u8, _: *mut u8) -> i32 {
+        SUCCESS
+    }
+
+    /// Clock 0 is the wall clock; the others (monotonic, process and thread time) all count from
+    /// the first call, through the page's monotonic clock.
+    #[unsafe(no_mangle)]
+    extern "C" fn __imported_wasi_snapshot_preview1_clock_time_get(id: i32, _: i64, time: *mut u64) -> i32 {
+        static START: std::sync::OnceLock<web_time::Instant> = std::sync::OnceLock::new();
+        let d = match id {
+            0 => match web_time::SystemTime::now().duration_since(web_time::UNIX_EPOCH) {
+                Ok(d) => d,
+                Err(_) => return NOSYS,
+            },
+            1..=3 => START.get_or_init(web_time::Instant::now).elapsed(),
+            _ => return INVAL,
+        };
+        if time.is_null() {
+            return INVAL;
+        }
+        unsafe { *time = u64::try_from(d.as_nanos()).unwrap_or(u64::MAX) };
+        SUCCESS
+    }
+
+    /// No preopened directories: libc stops looking at the first descriptor that is not one.
+    #[unsafe(no_mangle)]
+    extern "C" fn __imported_wasi_snapshot_preview1_fd_prestat_get(_: i32, _: *mut u8) -> i32 {
+        BADF
+    }
+
+    #[unsafe(no_mangle)]
+    extern "C" fn __imported_wasi_snapshot_preview1_fd_prestat_dir_name(_: i32, _: *mut u8, _: usize) -> i32 {
+        BADF
+    }
+
+    #[unsafe(no_mangle)]
+    extern "C" fn __imported_wasi_snapshot_preview1_fd_fdstat_get(_: i32, _: *mut u8) -> i32 {
+        BADF
+    }
+
+    #[unsafe(no_mangle)]
+    extern "C" fn __imported_wasi_snapshot_preview1_fd_fdstat_set_flags(_: i32, _: i32) -> i32 {
+        BADF
+    }
+
+    #[unsafe(no_mangle)]
+    extern "C" fn __imported_wasi_snapshot_preview1_fd_close(_: i32) -> i32 {
+        BADF
+    }
+
+    #[unsafe(no_mangle)]
+    extern "C" fn __imported_wasi_snapshot_preview1_fd_read(_: i32, _: *const Ciovec, _: usize, _: *mut usize) -> i32 {
+        BADF
+    }
+
+    #[unsafe(no_mangle)]
+    extern "C" fn __imported_wasi_snapshot_preview1_fd_seek(_: i32, _: i64, _: i32, _: *mut u64) -> i32 {
+        BADF
+    }
+
+    #[unsafe(no_mangle)]
+    extern "C" fn __imported_wasi_snapshot_preview1_fd_renumber(_: i32, _: i32) -> i32 {
+        BADF
+    }
+
+    #[unsafe(no_mangle)]
+    extern "C" fn __imported_wasi_snapshot_preview1_path_open(
+        _: i32,
+        _: i32,
+        _: *const u8,
+        _: usize,
+        _: i32,
+        _: i64,
+        _: i64,
+        _: i32,
+        _: *mut i32,
+    ) -> i32 {
+        NOTCAPABLE
+    }
+
+    /// C's `exit` and `abort`: the C API catches everything, so this is a kernel defect; stop the
+    /// module as a native build would stop the process.
+    #[unsafe(no_mangle)]
+    extern "C" fn __imported_wasi_snapshot_preview1_proc_exit(_: i32) -> ! {
+        std::arch::wasm32::unreachable()
+    }
+}

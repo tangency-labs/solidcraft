@@ -591,7 +591,10 @@ impl Brep {
                 )?;
             }
             // A circle or ellipse is a label: its geometry is its NURBS form.
-            require(e.nurbs.is_some() || !matches!(e.curve, Curve::Circle { .. } | Curve::Ellipse { .. }), "a circle or ellipse without its NURBS form")?;
+            require(
+                e.nurbs.is_some() || !matches!(e.curve, Curve::Circle { .. } | Curve::Ellipse { .. }),
+                "a circle or ellipse without its NURBS form",
+            )?;
             interval(&e.interval, curve_natural(e.parameters()))?;
             require(e.vertices.iter().all(|&v| (v as usize) < self.vertices.len()), "edge vertices")?;
             tolerance(e.tolerance)?;
@@ -619,7 +622,11 @@ impl Brep {
                 f.nurbs.is_some()
                     || !matches!(
                         f.surface,
-                        Surface::Cylinder { .. } | Surface::Cone { .. } | Surface::Sphere { .. } | Surface::Torus { .. } | Surface::PlacedRevolution { .. }
+                        Surface::Cylinder { .. }
+                            | Surface::Cone { .. }
+                            | Surface::Sphere { .. }
+                            | Surface::Torus { .. }
+                            | Surface::PlacedRevolution { .. }
                     ),
                 "a cylinder, cone, sphere, torus or revolution without its NURBS form",
             )?;

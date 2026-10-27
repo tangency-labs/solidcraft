@@ -1029,7 +1029,8 @@ impl<'b, 'a> Builder<'b, 'a> {
             }
             _ => None,
         };
-        let pcs = pcurve::pcurves_within(&surface, &uses_of(&self.edges, &edge_loops, made.as_ref())?, tol, box_on_form).map_err(|e| e.to_string())?;
+        let pcs =
+            pcurve::pcurves_within(&surface, &uses_of(&self.edges, &edge_loops, made.as_ref())?, tol, box_on_form).map_err(|e| e.to_string())?;
         // Signed areas of the loops that close in (u, v).
         let periods = natural_periods(&surface);
         // Each use starts near where the one before it ends, along a bounded direction that

@@ -147,7 +147,9 @@ pub(crate) fn sync(s: &Session, d: &mut Dialog) {
             Some(sn) if sn.distance != refs.distance => {
                 let values: Option<Vec<f64>> =
                     picked.iter().map(|k| refs.distance.get(*k).and_then(|e| s.doc.eval(e, ValueKind::Length).ok())).collect();
-                if let Some(c) = values.and_then(|v| f.place(at, &v).ok()).filter(|c| on_reference_face(&crate::open_meshing::session_world(s), f, *c)) {
+                if let Some(c) =
+                    values.and_then(|v| f.place(at, &v).ok()).filter(|c| on_reference_face(&crate::open_meshing::session_world(s), f, *c))
+                {
                     to = c;
                 }
             }

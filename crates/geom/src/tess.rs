@@ -268,12 +268,10 @@ impl EvalSurface {
     fn interval(&self, d: usize) -> Option<(f64, f64)> {
         match self {
             EvalSurface::Plane { .. } => None,
-            EvalSurface::Nurbs { degree, knots, count, .. } => {
-                Some((*knots.get(d)?.get(*degree.get(d)?)?, *knots.get(d)?.get(*count.get(d)?)?))
+            EvalSurface::Nurbs { degree, knots, count, .. } => Some((*knots.get(d)?.get(*degree.get(d)?)?, *knots.get(d)?.get(*count.get(d)?)?)),
+            EvalSurface::Revolved { profile, swap, .. } => {
+                (d == usize::from(*swap)).then(|| Some((*profile.knots.get(profile.degree)?, *profile.knots.get(profile.ctrl.len())?))).flatten()
             }
-            EvalSurface::Revolved { profile, swap, .. } => (d == usize::from(*swap))
-                .then(|| Some((*profile.knots.get(profile.degree)?, *profile.knots.get(profile.ctrl.len())?)))
-                .flatten(),
         }
     }
 

@@ -1202,7 +1202,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         }
         "ui.isolate" => {
             // The picked bodies stay (shown first if they were hidden), everything else goes.
-            let others: Vec<String> = crate::open_meshing::session_world(&app.session).bodies.iter().map(|b| b.name.clone()).filter(|b| !bodies.contains(b)).collect();
+            let others: Vec<String> =
+                crate::open_meshing::session_world(&app.session).bodies.iter().map(|b| b.name.clone()).filter(|b| !bodies.contains(b)).collect();
             if !bodies.is_empty() {
                 let _ = app.run("browser.visibility", json!({ "items": bodies, "visible": true }));
             }

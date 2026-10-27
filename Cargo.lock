@@ -4262,6 +4262,7 @@ dependencies = [
  "log",
  "serde_json",
  "solidcraft-geom",
+ "web-time",
 ]
 
 [[package]]

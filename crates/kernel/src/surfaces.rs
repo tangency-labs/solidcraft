@@ -829,7 +829,14 @@ pub fn extend(body: &Body, at: &[Vec3], distance: f64) -> Result<Body> {
         .iter()
         .enumerate()
         .map(|(i, e)| {
-            Ok(b::pcurve::EdgeUse { edge: index(i)?, curve: e.parameters(), interval: e.interval, forward: true, tolerance: e.tolerance, given: None })
+            Ok(b::pcurve::EdgeUse {
+                edge: index(i)?,
+                curve: e.parameters(),
+                interval: e.interval,
+                forward: true,
+                tolerance: e.tolerance,
+                given: None,
+            })
         })
         .collect::<Result<Vec<_>>>()?;
     let surface = b::Surface::Plane { origin: a3(origin), u_axis: a3(du), v_axis: a3(dv) };

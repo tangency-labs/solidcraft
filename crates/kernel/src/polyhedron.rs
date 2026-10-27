@@ -161,7 +161,14 @@ fn polyhedron_record(hs: &[HalfSpace], verts: &[Vec3], faces: &[(usize, Vec<usiz
             Ok(i)
         };
         let vs = [number(s)?, number(t)?];
-        edges.push(rec::Edge { nurbs: None, curve: rec::Curve::Line { start: p(s)?, end: p(t)? }, interval: [0.0, 1.0], vertices: vs, tolerance, uses });
+        edges.push(rec::Edge {
+            nurbs: None,
+            curve: rec::Curve::Line { start: p(s)?, end: p(t)? },
+            interval: [0.0, 1.0],
+            vertices: vs,
+            tolerance,
+            uses,
+        });
     }
     let count = u32::try_from(out.len()).map_err(|_| bad())?;
     let brep = rec::Brep {

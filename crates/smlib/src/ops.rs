@@ -155,7 +155,15 @@ impl Brep {
     /// `setbacks[j]` along each of its edges from the vertex (one distance per corner, as SMLib
     /// keeps it). A corner SMLib builds no setback on (some edge there not blended, a chamfer) is
     /// [`Error::Unsupported`]; a setback as long as an edge there, [`Error::NoRoom`].
-    pub fn blend_setback(&self, kind: Blend, edges: &[[f64; 3]], sizes: &[f64], corners: &[[f64; 3]], setbacks: &[f64], tolerance: f64) -> Result<Brep> {
+    pub fn blend_setback(
+        &self,
+        kind: Blend,
+        edges: &[[f64; 3]],
+        sizes: &[f64],
+        corners: &[[f64; 3]],
+        setbacks: &[f64],
+        tolerance: f64,
+    ) -> Result<Brep> {
         init()?;
         if edges.len() > MAX_POINTS
             || edges.is_empty()

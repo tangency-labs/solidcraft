@@ -814,7 +814,8 @@ fn a_hole_beside_the_seam_lies_in_its_face_turn() {
     let cylinder = Surface::Cylinder { frame: Frame { origin: [0.; 3], x_axis: [1., 0., 0.], y_axis: [0., 1., 0.] }, radius: r };
     let s = -10f64.to_radians();
     let at = |a: f64, z: f64| [r * a.cos(), r * a.sin(), z];
-    let ring = |z: f64| Curve::Circle { frame: Frame { origin: [0., 0., z], x_axis: [s.cos(), s.sin(), 0.], y_axis: [-s.sin(), s.cos(), 0.] }, radius: r };
+    let ring =
+        |z: f64| Curve::Circle { frame: Frame { origin: [0., 0., z], x_axis: [s.cos(), s.sin(), 0.], y_axis: [-s.sin(), s.cos(), 0.] }, radius: r };
     let (bottom, top) = (ring(0.), ring(h));
     let seam = Curve::Line { start: at(s, 0.), end: at(s, h) };
     let (a0, a1) = (15f64.to_radians(), 25f64.to_radians());

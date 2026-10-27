@@ -623,13 +623,7 @@ impl Model {
                 let local = fingerprint(doc, 0, f, &vals, false, &model.step_digests) ^ placement_digest(doc, f, Some(&before));
                 cache.put(
                     cache_key(f, r.fingerprint, local, ctx, &before),
-                    CachedEval {
-                        error: None,
-                        warning: r.warning.clone(),
-                        ms: r.ms,
-                        bytes: r.state.retained_bytes(),
-                        state: r.state.clone(),
-                    },
+                    CachedEval { error: None, warning: r.warning.clone(), ms: r.ms, bytes: r.state.retained_bytes(), state: r.state.clone() },
                 );
                 before = r.state.clone();
             }

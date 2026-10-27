@@ -141,7 +141,8 @@ fn clicking_a_parameter_suggestion_fills_the_length_box() {
     h.frames(1);
     assert_focus(&h, 0);
     assert_eq!(h.app.tool.as_ref().unwrap().dims[0].value, "width");
-    let sketch = |h: &Harness| crate::open_meshing::session_world(&h.app.session).sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.len();
+    let sketch =
+        |h: &Harness| crate::open_meshing::session_world(&h.app.session).sketch(h.app.session.active_sketch.unwrap()).unwrap().sketch.curves.len();
     assert_eq!(sketch(&h), 0, "the click on the list placed no point");
     h.step(&json!({"key": "Enter"})).unwrap();
     let state = crate::open_meshing::session_world(&h.app.session);

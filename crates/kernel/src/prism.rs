@@ -110,10 +110,10 @@ struct Regions {
 
 #[cfg(feature = "smlib")]
 mod sheets {
-    use solidcraft_geom::Vec3;
-    use solidcraft_geom::brep::Surface;
     use solidcraft_geom::Loop2;
+    use solidcraft_geom::Vec3;
     use solidcraft_geom::brep::Loop;
+    use solidcraft_geom::brep::Surface;
     use solidcraft_smlib::{BooleanOp, Brep};
 
     use super::*;

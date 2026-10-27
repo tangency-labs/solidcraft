@@ -115,7 +115,8 @@ fn legacy_v9_imported_emboss_anchor_and_ordinary_face_paint_replay_without_renam
     // and numbering the pieces of its faces as that build did (#3902); saved before joins split
     // off pieces that touch only along an edge or at a point, it keeps them in
     // one body.
-    let anchored = solidcraft_doc::Feature { shell_piece_order: true, kernel_piece_order: true, touching: solidcraft_doc::Touching::OneBody, ..anchored };
+    let anchored =
+        solidcraft_doc::Feature { shell_piece_order: true, kernel_piece_order: true, touching: solidcraft_doc::Touching::OneBody, ..anchored };
     assert_eq!(reopened.doc.feature(anchored.id).unwrap(), &anchored);
     // Names saved before format 14 keep naming the face they named, marked so they are found as
     // the build that saved them found them.

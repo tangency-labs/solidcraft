@@ -714,7 +714,10 @@ fn face_editor_refills_named_faces_after_sketch_resize() {
 fn draft_uses_the_picked_solid_beside_a_hidden_overlapping_mesh() {
     use solidcraft_engine::doc::{Document, MeshData, naming};
 
-    let mesh = solidcraft_engine::kernel::box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 10.0)).unwrap().mesh(&solidcraft_engine::kernel::MeshTolerance::chord(0.01)).unwrap();
+    let mesh = solidcraft_engine::kernel::box_solid(Vec3::ZERO, Vec3::new(20.0, 20.0, 10.0))
+        .unwrap()
+        .mesh(&solidcraft_engine::kernel::MeshTolerance::chord(0.01))
+        .unwrap();
     let mut doc = Document::default();
     doc.add_feature(
         FeatureKind::MeshImport {
