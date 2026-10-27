@@ -246,7 +246,7 @@ fn finish_with(
                 } else {
                     original.clone_for_evaluation()?
                 };
-                let domain = surface.natural_uv_domain();
+                let domain = surface.natural_uv_domain_with_nurb(k)?;
                 covering = detailed_face(
                     k,
                     a,

@@ -259,7 +259,7 @@ impl TranslationalSweepGeometry {
         } else {
             Surface::from(surface)
         };
-        let domain = output_surface.natural_uv_domain();
+        let domain = output_surface.natural_uv_domain_with_nurb(k)?;
         let p00 = output_surface.evaluate_point(k, domain.min())?;
         let p01 = output_surface.evaluate_point(k, domain.evaluate(0.0, 1.0))?;
         let start_point = vertex::point(b, start_id)?;

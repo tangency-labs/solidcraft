@@ -572,7 +572,7 @@ impl DropPt {
         }
 
         let start = self;
-        let uv_domain = surface.natural_uv_domain();
+        let uv_domain = surface.natural_uv_domain_with_nurb(k)?;
         let outside = || SolidError::Upstream {
             operation: OP_SEAM,
             code: SM_ERR_OUTSIDE_OF_DOMAIN,
@@ -1181,7 +1181,7 @@ impl Surface {
                 from_call: 2,
                 create_path_type: path,
                 has_context: true,
-                uv_domain: self.natural_uv_domain(),
+                uv_domain: self.natural_uv_domain_with_nurb(k)?,
                 surface: r.surface,
                 curve: r.curve,
                 interval: *interval,

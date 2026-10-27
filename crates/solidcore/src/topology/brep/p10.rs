@@ -733,7 +733,7 @@ fn build_faces(
 
         let tol = b.tolerance();
         let rec = b.face_mut(f)?;
-        let natural = surface.natural_uv_domain();
+        let natural = surface.natural_uv_domain_with_nurb(k)?;
         rec.surface = Some(surface);
         rec.rectangular_trim = rf.rectangular_trim;
         rec.uv_domain = rf.uv_domain;

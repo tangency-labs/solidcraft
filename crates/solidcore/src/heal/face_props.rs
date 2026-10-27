@@ -1946,7 +1946,7 @@ impl<O: LoopObject> FaceProps<O> {
             return Err(null(OP_STAGE2, "face without surface"));
         };
         self.has_surface = true;
-        self.natural_uv_domain = surface.natural_uv_domain();
+        self.natural_uv_domain = surface.natural_uv_domain_with_nurb(k)?;
 
         let (up_faceuse, down_faceuse) = face_p2::faceuses(b.brep(), m_face)?;
         let (Some(up_faceuse), Some(down_faceuse)) = (up_faceuse, down_faceuse) else {

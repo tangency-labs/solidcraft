@@ -1969,7 +1969,7 @@ impl Curve {
             }
             if surface.approx_eq(k, curve.surface())? {
                 let ends = curve.uv_curve().ends(k)?;
-                let domain = surface.natural_uv_domain();
+                let domain = surface.natural_uv_domain_with_nurb(k)?;
                 let drop_target = |target: Option<Point3>,
                                    current: Point3|
                  -> Result<Option<Point3>> {

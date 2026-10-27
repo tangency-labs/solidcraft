@@ -984,7 +984,7 @@ pub fn compute_uv_point(
         // when PrevUV and ThisUV UVTrimCurve EndPts are far apart - check for
         // singularities and seams
         let surface = face_surface(b, f)?;
-        let surf_uv_domain = surface.natural_uv_domain();
+        let surf_uv_domain = surface.natural_uv_domain_with_nurb(k)?;
         let dist_u = (this_uv_pnt.x - prev_uv_pnt.x).abs();
         let dist_v = (this_uv_pnt.y - prev_uv_pnt.y).abs();
         let domain_length_u = surf_uv_domain.x_length();

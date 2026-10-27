@@ -1843,7 +1843,7 @@ impl Plane {
         let mut max_dist = -1.0;
 
         let domain0 = self.natural_uv_domain();
-        let domain1 = other.natural_uv_domain();
+        let domain1 = other.natural_uv_domain_with_nurb(k)?;
 
         let plane_pnt0 = self.position.origin();
         let plane_norm0 = self.position.z_axis();

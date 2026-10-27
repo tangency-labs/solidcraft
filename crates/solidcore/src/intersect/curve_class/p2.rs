@@ -861,7 +861,7 @@ impl<O: ClassObject> CurveClassification<O> {
         let drop = surface.drop_point::<NoObject>(
             k,
             point,
-            &surface.natural_uv_domain(),
+            &surface.natural_uv_domain_with_nurb(k)?,
             &DropPointOptions::default(),
         )?;
         Ok(drop.result_uv)

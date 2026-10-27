@@ -435,7 +435,7 @@ pub fn validate_pointers(
         r.check(b, 9, surface.owner().is_some(), Object::Surface(f))?;
         if !face
             .uv_domain
-            .is_contained_by(&surface.natural_uv_domain(), EFF_ZERO)
+            .is_contained_by(&surface.natural_uv_domain_with_nurb(k)?, EFF_ZERO)
         {
             r.check(b, 11, false, Object::Surface(f))?;
         }

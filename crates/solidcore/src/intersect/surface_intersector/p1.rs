@@ -648,8 +648,8 @@ impl<'s> SurfaceIntersector<'s> {
         uv_domain2: &Extent2d,
         from_fillet_intersector: bool,
     ) -> Result<Self> {
-        let mut surf1_uv_domain = surface1.natural_uv_domain();
-        let mut surf2_uv_domain = surface2.natural_uv_domain();
+        let mut surf1_uv_domain = surface1.natural_uv_domain_with_nurb(k)?;
+        let mut surf2_uv_domain = surface2.natural_uv_domain_with_nurb(k)?;
 
         // check input - given Surf XSect domains fit within Surface NaturalUVDomains
         //               unless bFromFilletIntersector == TRUE
@@ -1179,8 +1179,14 @@ impl<'s> SurfaceIntersector<'s> {
                     < 2.0 * self.this_approx_tol_3d
             {
                 // get UV distances
-                let uv_tol1 = self.surfaces[0].natural_uv_domain().max_dimension() / 10.0;
-                let uv_tol2 = self.surfaces[1].natural_uv_domain().max_dimension() / 10.0;
+                let uv_tol1 = self.surfaces[0]
+                    .natural_uv_domain_with_nurb(k)?
+                    .max_dimension()
+                    / 10.0;
+                let uv_tol2 = self.surfaces[1]
+                    .natural_uv_domain_with_nurb(k)?
+                    .max_dimension()
+                    / 10.0;
 
                 // UV Points must be close enough
                 if start
@@ -1400,8 +1406,8 @@ impl<'s> SurfaceIntersector<'s> {
                 if success && dist < self.this_approx_tol_3d * 10.0 {
                     let srf1 = self.surfaces[0];
                     let srf2 = self.surfaces[1];
-                    let dom1 = srf1.natural_uv_domain();
-                    let dom2 = srf2.natural_uv_domain();
+                    let dom1 = srf1.natural_uv_domain_with_nurb(k)?;
+                    let dom2 = srf2.natural_uv_domain_with_nurb(k)?;
 
                     let (int_pt_uv1, int_pt_gap1) =
                         surface_drop_point(k, srf1, point, &dom1, None)?;

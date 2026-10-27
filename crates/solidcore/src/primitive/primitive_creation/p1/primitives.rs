@@ -305,7 +305,7 @@ fn drop_uv_curves(
     output.clear();
     let dropped = surface.drop_curve::<NoObject>(
         k,
-        &surface.natural_uv_domain(),
+        &surface.natural_uv_domain_with_nurb(k)?,
         curve,
         &curve.natural_interval(),
         tolerance,
@@ -898,7 +898,7 @@ impl PrimitiveCreation {
                     ignore_status(extrusion_face(k, brep, &extrusion, domain))?;
                     continue;
                 };
-                let domain = surface.natural_uv_domain();
+                let domain = surface.natural_uv_domain_with_nurb(k)?;
                 ignore_status(create_face(k, brep, surface, domain))?;
             }
             if cap_ends {

@@ -630,11 +630,12 @@ impl Surface {
         let s_uv_domain = if uv_domain.x_length() >= EFF_ZERO && uv_domain.y_length() >= EFF_ZERO {
             *uv_domain
         } else {
-            self.natural_uv_domain()
+            self.natural_uv_domain_with_nurb(k)?
         };
         let degen_surf_u = s_uv_domain.x_length() < EFF_ZERO;
         let degen_surf_v = s_uv_domain.x_length() < EFF_ZERO; // (sic) WR-100
-        let contained = s_uv_domain.is_contained_by(&self.natural_uv_domain(), EFF_ZERO);
+        let contained =
+            s_uv_domain.is_contained_by(&self.natural_uv_domain_with_nurb(k)?, EFF_ZERO);
 
         let mut fs: FailState<'_, O> = FailState {
             uv_domain: *uv_domain,
@@ -690,7 +691,7 @@ impl Surface {
         }
 
         // UV Tolerances - proportional to surface 3d/UV mapping size
-        let srf_nat_domain = self.natural_uv_domain();
+        let srf_nat_domain = self.natural_uv_domain_with_nurb(k)?;
         let project_size = approx_derivative_lengths(k, self, &srf_nat_domain)?;
         let uv_tol_x = approx_tol_3d / (project_size.x + 1.0);
         let uv_tol_y = approx_tol_3d / (project_size.y + 1.0);

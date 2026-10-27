@@ -1203,7 +1203,7 @@ impl CreatorExecutive<Handle> for Executive<'_> {
             .inner
             .get_create_extended_surface(k, key, &surface)?
             .clone();
-        let domain = extension.natural_uv_domain();
+        let domain = extension.natural_uv_domain_with_nurb(k)?;
         if let Some(&handle) = self.made.get(&key) {
             return Ok((handle, domain));
         }

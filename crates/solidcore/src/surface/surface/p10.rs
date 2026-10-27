@@ -695,7 +695,7 @@ impl<'t, 's, O: SolutionObject + 't> LsiGlobalSolver<'t, 's, O> {
         }
 
         // the extra work required at discontinuities of the line ends and patch boundaries
-        let natural = cache.surface().natural_uv_domain();
+        let natural = cache.surface().natural_uv_domain_with_nurb(k)?;
         for j in 0..2 {
             // Handle curve discontinuities
             if t_conts.get(j).copied().is_some_and(at_most_c0) {
@@ -1038,7 +1038,7 @@ pub fn global_curve_intersect_combine_solutions<O: SolutionObject>(
     let mut found_coincidence = false;
 
     // Phase 1: combine pairs of solutions of the same type.
-    let uv_size = surface.natural_uv_domain().size();
+    let uv_size = surface.natural_uv_domain_with_nurb(k)?.size();
     let t_size = curve.natural_interval().length();
 
     // set up rSolutions array indexing for Point and interval solutions

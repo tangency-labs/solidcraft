@@ -557,8 +557,8 @@ impl Surface {
         }
 
         // arrive here when both surfaces are not of type SmPlane_TYPE
-        let domain0 = self.natural_uv_domain();
-        let domain1 = other.natural_uv_domain();
+        let domain0 = self.natural_uv_domain_with_nurb(k)?;
+        let domain1 = other.natural_uv_domain_with_nurb(k)?;
 
         // Bad input - Surface types that don't have domains.
         if domain0.size().length_squared() < EFF_ZERO_SQ

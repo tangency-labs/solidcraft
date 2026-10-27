@@ -819,7 +819,7 @@ fn list_operand(k: &mut Kernel, breps: &[Brep], surfaces: &[Surface]) -> Result<
             let copy = copy_base_surface(k, source)?;
             // Upstream records ONLY the last surface's kind.
             planar = matches!(copy.kind(), SurfaceKind::Plane(_));
-            let domain = copy.natural_uv_domain();
+            let domain = copy.natural_uv_domain_with_nurb(k)?;
             create_face_from_surface(k, &mut result, copy, domain)?;
         }
         (result, planar)

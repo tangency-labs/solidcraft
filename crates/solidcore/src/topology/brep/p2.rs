@@ -1569,7 +1569,7 @@ pub fn replace_surface(
     create_uv_trim_curves: bool,
 ) -> Result<(Option<Surface>, Vec<FaceId>)> {
     // locals
-    let new_domain = new_surface.natural_uv_domain();
+    let new_domain = new_surface.natural_uv_domain_with_nurb(k)?;
     if b.face(f)?.surface.is_none() {
         return Err(null_deref("face without surface"));
     }
@@ -2365,7 +2365,7 @@ pub fn mate_lamina_edge_to_surface(
             }
         }
     }
-    let mating_domain = ext_mating.natural_uv_domain();
+    let mating_domain = ext_mating.natural_uv_domain_with_nurb(k)?;
 
     // The first thing to do is to create an extended surface based on the distance the
     // edge is from the surface. Take 20 points to get an approximate distance
@@ -2412,7 +2412,7 @@ pub fn mate_lamina_edge_to_surface(
             .surface
             .as_ref()
             .ok_or(null_deref("face without surface"))?;
-        orig_domain = surf.natural_uv_domain();
+        orig_domain = surf.natural_uv_domain_with_nurb(k)?;
         let ext_dist = max_dist * surface_extension_factor;
         if ext_dist < 0.0 {
             // upstream: N_SrfExtendByDist never returns for a negative distance (HANG-18)
@@ -2423,7 +2423,7 @@ pub fn mate_lamina_edge_to_surface(
         }
         surf.create_extended_surface(k, ext_dist, ContinuityType::G1R)?
     };
-    let ext_domain = ext_surface.natural_uv_domain();
+    let ext_domain = ext_surface.natural_uv_domain_with_nurb(k)?;
 
     // Create extended UV curves (temp copies of the UV trim curves)
     let uv_ccw = uv_trim_curve_copy(k, b, eu_ccw)?;

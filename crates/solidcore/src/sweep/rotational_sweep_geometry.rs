@@ -841,13 +841,13 @@ impl RotationalSweepGeometry {
         };
         let mut new_surf = Surface::from(new_surf);
 
-        let start_uv = new_surf.natural_uv_domain().min();
+        let start_uv = new_surf.natural_uv_domain_with_nurb(k)?.min();
         let normal = new_surf.evaluate_normal(k, start_uv, Side::Left, Side::Left)?;
         out.normal = Some(normal);
 
         let mut flip_orients = false;
         if let Some(to_trim) = &surf_to_trim {
-            let start_param = to_trim.natural_uv_domain().min();
+            let start_param = to_trim.natural_uv_domain_with_nurb(k)?.min();
             let plane_normal = to_trim.evaluate_normal(k, start_param, Side::Left, Side::Left)?;
             let dot = normal.dot(plane_normal);
             if dot.abs() < 0.8 {

@@ -212,7 +212,7 @@ pub fn create_face_in_region_from_surface(
     let region = region.or(b.infinite_region());
 
     // check input - crUVDomain contained within the pSurface->GetNaturalUVDomain()
-    if !uv_domain.is_contained_by(&surface.natural_uv_domain(), EFF_ZERO) {
+    if !uv_domain.is_contained_by(&surface.natural_uv_domain_with_nurb(k)?, EFF_ZERO) {
         return Err(SolidError::sm_err(OP));
     }
 
@@ -317,7 +317,7 @@ pub fn create_faces_from_surface(
         } else {
             let mut sur = surface;
             for &param in &u_knots {
-                let dom = sur.natural_uv_domain();
+                let dom = sur.natural_uv_domain_with_nurb(k)?;
                 let ivl = Extent1d::from_min_max(dom.min().x, dom.max().x);
                 if ivl.is_value_on_boundary(param, EFF_ZERO_SQRT).0 {
                     continue;
@@ -335,7 +335,7 @@ pub fn create_faces_from_surface(
         } else {
             for mut sur in splitted {
                 for &param in &v_knots {
-                    let dom = sur.natural_uv_domain();
+                    let dom = sur.natural_uv_domain_with_nurb(k)?;
                     let ivl = Extent1d::from_min_max(dom.min().y, dom.max().y);
                     if ivl.is_value_on_boundary(param, EFF_ZERO_SQRT).0 {
                         continue;
@@ -350,7 +350,7 @@ pub fn create_faces_from_surface(
 
         // for every subpatch - create face
         for srf in sub_patches {
-            let dom = srf.natural_uv_domain();
+            let dom = srf.natural_uv_domain_with_nurb(k)?;
             let region = b.infinite_region();
             let made = create_face_in_region_from_surface(k, b, region, Some(srf), &dom, fenv)?;
             new_faces.push(made.face);
@@ -521,7 +521,7 @@ pub fn create_faces_with_curves(
         // First create the big face covering the whole surface.
         // (upstream reads pSurface->GetNaturalUVDomain() before its null check)
         let surface = surface.ok_or_else(|| invalid("no surface (upstream dereferences null)"))?;
-        let natural = surface.natural_uv_domain();
+        let natural = surface.natural_uv_domain_with_nurb(k)?;
         let big = create_face_in_region_from_surface(k, b, region, Some(surface), &natural, fenv)?;
         out.shell = big.shell;
         let new_face = big.face;
@@ -1102,7 +1102,7 @@ pub fn make_faces_with_curves(
             let mut pt_uv = Point2::new(pt.x, pt.y);
 
             for (kk, sub) in sub_patches.iter().enumerate() {
-                let sub_domain = sub.natural_uv_domain();
+                let sub_domain = sub.natural_uv_domain_with_nurb(k)?;
                 if curve_dim == 3 {
                     let r = ignored(sub.drop_point::<LoopObject>(
                         k,
@@ -1170,7 +1170,7 @@ pub fn make_faces_with_curves(
         // FindOuterLoops() needs a surface normal.
         let mut norm = Vec3::new(0.0, 0.0, 1.0);
         if curve_dim == 3 {
-            let dom = sub_patch.natural_uv_domain();
+            let dom = sub_patch.natural_uv_domain_with_nurb(k)?;
             match ignored(sub_patch.evaluate_normal(k, dom.mid(), Side::Right, Side::Right))? {
                 Some(nv) => norm = nv,
                 None => continue,
@@ -1223,7 +1223,7 @@ pub fn make_faces_with_curves(
 
             // copy sub patches that have already been used
             let src_to_use = sub_patch.clone();
-            let sub_domain = src_to_use.natural_uv_domain();
+            let sub_domain = src_to_use.natural_uv_domain_with_nurb(k)?;
             let face_input = FaceCurvesInput {
                 loops: single_loops,
                 curves_3d: (curve_dim == 3)

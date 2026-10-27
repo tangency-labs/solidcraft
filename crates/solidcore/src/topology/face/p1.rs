@@ -577,7 +577,7 @@ pub fn calculate_uv_domain_from_uv_trim_curves_into(
     let Some(surface) = fp2::surface(b, f)? else {
         return Ok(());
     };
-    let surf_domain = surface.natural_uv_domain();
+    let surf_domain = surface.natural_uv_domain_with_nurb(k)?;
 
     // limit ThisDomain to XSect(Face->UVDomain, Face->Surface->UVDomain) (a fix for a
     // common problem); its status is ignored: disjoint domains give an Init()-ed extent
@@ -1627,7 +1627,7 @@ pub fn move_seam_notified<O: LoopObject>(
     let lsmp_cnt: usize = 6;
     // (upstream reads the surface's domain before its null check)
     let surface0 = surface_deref(b, f)?;
-    let uv_domain = surface0.natural_uv_domain();
+    let uv_domain = surface0.natural_uv_domain_with_nurb(k)?;
     let ivl_u = uv_domain.u_interval();
     let ivl_v = uv_domain.v_interval();
     let mut periodic_u = PeriodicExtent1d::full(ivl_u.length());
@@ -2123,7 +2123,7 @@ fn split_at_seam_depth<O: LoopObject>(
     }
 
     let surface = surface_deref(b, f)?;
-    let uv_domain = surface.natural_uv_domain();
+    let uv_domain = surface.natural_uv_domain_with_nurb(k)?;
     let (periodic_u, periodic_v) = match props {
         // an UNSURE flag is not FALSE
         Some(p) => (p.closed_u != Tri::False, p.closed_v != Tri::False),

@@ -2105,7 +2105,7 @@ impl Surface {
         let recurses = match self.kind() {
             SurfaceKind::OffsetSurface(s) => !self
                 .natural_uv_domain()
-                .is_contained_by(&s.base_surface().natural_uv_domain(), EFF_ZERO),
+                .is_contained_by(&s.base_surface().natural_uv_domain_with_nurb(k)?, EFF_ZERO),
             _ => true,
         };
         if want[2] && recurses {

@@ -669,7 +669,7 @@ impl<O: LoopObject> HealData<O> {
                 if let Some(vu) = vertex_loop {
                     let surface =
                         face::surface(b, f)?.ok_or_else(|| invalid("face without surface"))?;
-                    let domain = surface.natural_uv_domain();
+                    let domain = surface.natural_uv_domain_with_nurb(k)?;
                     let zone = face::tolerance(b, f)?;
                     let tol = xsect_tol_3d_from_zones(k, zone, zone);
                     let (closed_u, _) =

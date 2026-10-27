@@ -1605,7 +1605,7 @@ impl SurfPtSolveStepper<'_> {
         if prev.is_singular()?.0 && op != SolverOperation::Signed3dDirectedMaximize {
             // Near singularity, use the surface's own domain. [B50]
             let surface = self.base.surface();
-            let srf_domain = surface.natural_uv_domain();
+            let srf_domain = surface.natural_uv_domain_with_nurb(k)?;
 
             match surface.invert_point_near_singularity(
                 k,

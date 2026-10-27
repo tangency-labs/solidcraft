@@ -2048,7 +2048,7 @@ impl PolyBrep {
         // Match SmPolyEdge::IsDegenerate's imperfect UV/XYZ test, not a new one.
         if self.edge_is_2d_or_zero(e)? {
             if let Some(surface) = surface {
-                let domain = surface.natural_uv_domain();
+                let domain = surface.natural_uv_domain_with_nurb(k)?;
                 (su, sv) = domain.classify_point(start_uv, EFF_ZERO_PARAM, None);
                 (eu, ev) = domain.classify_point(end_uv, EFF_ZERO_PARAM, None);
                 if su != ExtentPointType::Outside && sv != ExtentPointType::Outside {

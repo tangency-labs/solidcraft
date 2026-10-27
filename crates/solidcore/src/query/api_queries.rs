@@ -180,7 +180,7 @@ pub fn surface_closest_point(
     let drop = surface.drop_point::<NoObject>(
         k,
         point,
-        &surface.natural_uv_domain(),
+        &surface.natural_uv_domain_with_nurb(k)?,
         &DropPointOptions {
             want_solutions: true,
             ..DropPointOptions::default()

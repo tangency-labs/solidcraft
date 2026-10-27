@@ -2134,7 +2134,7 @@ pub fn copy_faces(
         // (status ignored upstream, which then dereferences the null copy)
         let s2 = ignored(s1.copy_and_add_analytics(k))?
             .ok_or_else(|| null("CopyAndAddAnalytics failed (upstream dereferences null)"))?;
-        let dom = s2.natural_uv_domain();
+        let dom = s2.natural_uv_domain_with_nurb(k)?;
         let input = FaceCurvesInput {
             loops: curves
                 .curve_loops

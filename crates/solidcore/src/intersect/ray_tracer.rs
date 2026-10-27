@@ -232,7 +232,12 @@ fn is_point_valid(
 ) -> Result<(bool, Option<RayObject>)> {
     match surface_face(surface)? {
         // no face - check uv against the natural domain
-        None => Ok((surface.natural_uv_domain().contains_point(uv, 0.0), None)),
+        None => Ok((
+            surface
+                .natural_uv_domain_with_nurb(k)?
+                .contains_point(uv, 0.0),
+            None,
+        )),
         Some(_face) => match faces {
             Some(faces) => faces.is_point_valid(k, index, uv, src_zone_tol),
             None => {

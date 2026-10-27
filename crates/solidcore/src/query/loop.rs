@@ -279,7 +279,7 @@ pub(crate) fn contains_uv_point_with_topology(
     // upstream), so the face's tolerance
     let zone_tol = face_rec.tolerance;
 
-    let srf_uv_domain = surface.natural_uv_domain();
+    let srf_uv_domain = surface.natural_uv_domain_with_nurb(k)?;
     let point_3d = surface.evaluate_point(k, uv)?;
     let uv_pt = Point3::new(uv.x, uv.y, 0.0);
 

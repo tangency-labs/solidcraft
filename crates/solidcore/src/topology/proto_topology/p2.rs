@@ -609,7 +609,7 @@ fn surface_drop_point<O: Copy>(
     let srf = surface
         .and_then(|o| brep.surface(o))
         .ok_or(dangling("surface handle is null or unknown"))?;
-    let domain = srf.natural_uv_domain();
+    let domain = srf.natural_uv_domain_with_nurb(k)?;
     let opts = crate::surface::surface::p5::DropPointOptions {
         operation: SolverOperation::Normalize, // Don't want off-boundary drops.
         ..crate::surface::surface::p5::DropPointOptions::default()

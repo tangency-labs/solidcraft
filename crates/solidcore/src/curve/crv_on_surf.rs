@@ -376,7 +376,7 @@ impl CrvOnSurf {
         // set m_vUVDomain
         c.uv_domain = match uv_domain {
             Some(d) => d,
-            None => c.surface.natural_uv_domain(),
+            None => c.surface.natural_uv_domain_with_nurb(k)?,
         };
 
         // m_lOwnerFlag 1 or 2: Copy Curve to be deleted when SmCrvOnSurf is destructed
@@ -897,7 +897,8 @@ impl CrvOnSurf {
         }
 
         // pick a UVSpace tolerance
-        let tol_2d = EFF_ZERO * (1.0 + self.surface.natural_uv_domain().max_dimension());
+        let tol_2d =
+            EFF_ZERO * (1.0 + self.surface.natural_uv_domain_with_nurb(k)?.max_dimension());
 
         // get the UVCurve knots and multiplicities (status ignored)
         let (mut knots, mut mults) = ignored(self.uv_curve.knots(k, interval))?.unwrap_or_default();

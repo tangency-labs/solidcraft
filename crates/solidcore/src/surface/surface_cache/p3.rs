@@ -279,7 +279,7 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         );
         let (mut u_tol, mut v_tol) = (0.0, 0.0);
         if check_for_poles {
-            let srf_domain = self.surface().natural_uv_domain();
+            let srf_domain = self.surface().natural_uv_domain_with_nurb(k)?;
 
             // save natural domain sizes
             u_ivl = srf_domain.u_interval();

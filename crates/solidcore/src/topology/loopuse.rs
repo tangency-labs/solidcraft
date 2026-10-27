@@ -876,7 +876,7 @@ pub fn is_missing_seam_at_vertices(k: &Kernel, b: &mut Brep, lu: LoopuseId) -> R
     let Some(surface) = surface else {
         return Ok(false);
     };
-    let dom = surface.natural_uv_domain();
+    let dom = surface.natural_uv_domain_with_nurb(k)?;
     if !surface.is_closed(k, &dom, SurfParamType::U, None, false)?.0
         && !surface.is_closed(k, &dom, SurfParamType::V, None, false)?.0
     {

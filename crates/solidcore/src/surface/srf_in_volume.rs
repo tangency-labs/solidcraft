@@ -791,7 +791,7 @@ impl SrfInVolume {
         let stride = n_temp + 1;
 
         // Check for evaluating outside of BaseSurface domain: clamp the UV point
-        let domain = self.surface.natural_uv_domain();
+        let domain = self.surface.natural_uv_domain_with_nurb(k)?;
         let s_uv = if domain.contains_point(uv, 0.0) {
             uv
         } else {

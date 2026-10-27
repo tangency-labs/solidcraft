@@ -2593,7 +2593,7 @@ impl<'a> GapFunction<'a> {
             (Some(u), Some(v)) => Some(Point2::new(u, v)),
             _ => None,
         };
-        let domain = other.natural_uv_domain();
+        let domain = other.natural_uv_domain_with_nurb(k)?;
         let (mut success, mut uv, mut dist) = surface_drop(k, other, this_pos, &domain, guess)?;
 
         // If we don't like the result of the drop with a guess, try without a guess
@@ -2622,7 +2622,7 @@ impl<'a> GapFunction<'a> {
             sample.set_canonical(this_pos, this_u, this_v, p, uv.x, uv.y, drop_type, tol);
         } else {
             // failed to drop - load a zero length gap vector
-            let min = other.natural_uv_domain().min();
+            let min = other.natural_uv_domain_with_nurb(k)?.min();
             sample.set_canonical(
                 this_pos,
                 this_u,

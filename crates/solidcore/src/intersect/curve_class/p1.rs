@@ -2895,7 +2895,7 @@ fn surface_local_point_solve(
     point: Point3,
     guess: Point2,
 ) -> Result<Option<(f64, Point2)>> {
-    let domain = surface.natural_uv_domain();
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
     // (the status is ignored upstream, only bFoundAnswer is read)
     let Some(r) = ignored(surface.local_point_solve::<()>(
         k,
@@ -2945,7 +2945,7 @@ fn surface_global_point_solve(
         surface.global_point_solve::<crate::surface::surface::p4::NoObject>(
             k,
             Some(crate::surface::surface::p4::NoObject),
-            &surface.natural_uv_domain(),
+            &surface.natural_uv_domain_with_nurb(k)?,
             SolverOperation::Minimize,
             point,
             tol,

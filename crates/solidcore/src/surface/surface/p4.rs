@@ -855,7 +855,7 @@ impl SurfaceEval<'_> {
         // On the high side of the 'good' domain, this must be flipped (because it's
         // decreasing).
         let surface = surface.ok_or(SolidError::null_pointer(OP_EVAL_NORMAL))?;
-        let domain = surface.natural_uv_domain();
+        let domain = surface.natural_uv_domain_with_nurb(k)?;
         if sing_u {
             let mut n = duv.cross(dv);
             if uv.x > domain.u_interval().mid() {
@@ -989,7 +989,7 @@ pub fn is_point_on_normal(
         approx_dev: 0.0,
     };
 
-    let natural = surface.natural_uv_domain();
+    let natural = surface.natural_uv_domain_with_nurb(k)?;
     let uv_domain_used = uv_domain.copied().unwrap_or(natural);
 
     // Clamp input uv if indicated.
@@ -1191,7 +1191,7 @@ impl Surface {
     /// [`Surface::is_on_boundary`], the tolerances and [`Surface::is_closed`].
     pub fn is_on_seam(&self, k: &Kernel, uv: Point2, opt_tol_3d: Option<f64>) -> Result<SeamInfo> {
         // locals
-        let domain = self.natural_uv_domain();
+        let domain = self.natural_uv_domain_with_nurb(k)?;
 
         // init output
         let mut info = SeamInfo {
@@ -1654,7 +1654,10 @@ impl Surface {
                 src_zone_tol_3d,
                 opt_target_distance,
                 requested,
-                Some(OperandObject::Surface(0, self.natural_uv_domain())),
+                Some(OperandObject::Surface(
+                    0,
+                    self.natural_uv_domain_with_nurb(k)?,
+                )),
             )?
             .without_objects()
         } else if let Some(surface) = surface {

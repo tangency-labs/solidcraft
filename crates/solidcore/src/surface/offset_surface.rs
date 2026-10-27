@@ -403,7 +403,7 @@ impl OffsetSurface {
                     off.singularities,
                 )
             } else {
-                let domain = surface.natural_uv_domain();
+                let domain = surface.natural_uv_domain_with_nurb(k)?;
                 let u = sm_bool(surface.is_periodic(k, &domain, SurfParamType::U)?);
                 let v = sm_bool(surface.is_periodic(k, &domain, SurfParamType::V)?);
                 let s = if singularities == SS_UNKNOWN {
@@ -894,7 +894,7 @@ impl OffsetSurface {
         want: [bool; 3],
         expand_pos_boxes_by_zone_tol_3d: bool,
     ) -> Result<SurfaceBoxes> {
-        if !uv_domain.is_contained_by(&self.surface.natural_uv_domain(), EFF_ZERO) {
+        if !uv_domain.is_contained_by(&self.surface.natural_uv_domain_with_nurb(k)?, EFF_ZERO) {
             return this.base_calculate_bounding_box(k, want, expand_pos_boxes_by_zone_tol_3d);
         }
 
@@ -1118,7 +1118,7 @@ impl OffsetSurface {
         v_side: Side,
     ) -> Result<Vec3> {
         // see if domainPoint is within BaseSurface domain
-        let domain = self.surface.natural_uv_domain();
+        let domain = self.surface.natural_uv_domain_with_nurb(k)?;
         if domain.contains_point(uv, 0.0) {
             self.surface.evaluate_normal(k, uv, u_side, v_side)
         } else {
@@ -1140,7 +1140,7 @@ impl OffsetSurface {
         u_side: Side,
         v_side: Side,
     ) -> Result<Vec3> {
-        let domain = self.surface.natural_uv_domain();
+        let domain = self.surface.natural_uv_domain_with_nurb(k)?;
         if domain.contains_point(uv, 0.0) {
             return self.surface.evaluate_normal(k, uv, u_side, v_side);
         }
@@ -1827,7 +1827,7 @@ impl OffsetSurface {
     /// the evaluations and of [`Surface::trim_with_domain`].
     pub fn trim_with_domain(&mut self, k: &Kernel, trim_domain: &mut Extent2d) -> Result<()> {
         self.fold_pending_extension();
-        let base_domain = self.surface.natural_uv_domain();
+        let base_domain = self.surface.natural_uv_domain_with_nurb(k)?;
         let mut gets_bigger = false;
         if !base_domain.contains_point(trim_domain.min(), 0.0) {
             self.evaluate_point_extending(k, trim_domain.min())?;
@@ -2338,7 +2338,7 @@ impl SurfaceEvaluate for OffsetEval<'_> {
 
     fn evaluate_normal(&self, k: &Kernel, uv: Point2, u_side: Side, v_side: Side) -> Result<Vec3> {
         // the offset's override, with this call's extension
-        let domain = self.off.surface.natural_uv_domain();
+        let domain = self.off.surface.natural_uv_domain_with_nurb(k)?;
         if domain.contains_point(uv, 0.0) {
             self.off.surface.evaluate_normal(k, uv, u_side, v_side)
         } else {

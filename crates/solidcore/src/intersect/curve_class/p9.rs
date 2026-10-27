@@ -173,7 +173,7 @@ fn lifted(k: &Kernel, uv: &Curve, surface: &Surface) -> Result<Curve> {
         k,
         uv.clone_for_evaluation()?,
         surface.clone_for_evaluation()?,
-        Some(surface.natural_uv_domain()),
+        Some(surface.natural_uv_domain_with_nurb(k)?),
         0,
     )?))
 }

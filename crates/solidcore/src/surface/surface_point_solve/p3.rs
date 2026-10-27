@@ -112,7 +112,7 @@ impl SurfPtSolveStepper<'_> {
             };
         }
 
-        let natural = self.base.surface().natural_uv_domain();
+        let natural = self.base.surface().natural_uv_domain_with_nurb(k)?;
         let (param, iso, guess, iso_domain, cross_domain) = match bound {
             SurfParamType::UMin => (
                 SurfParamType::U,

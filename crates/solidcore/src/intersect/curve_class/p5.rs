@@ -258,7 +258,7 @@ fn project_vertex_point<O>(
     found: &mut bool,
     solution: &mut Solution<NoObject>,
 ) -> Result<bool> {
-    let domain = surface.natural_uv_domain();
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
     if let Some(uv_curve) = any_uv_curve {
         // let good UVguess = UVTrimCurve(nearest param to vertex value)
         let uv_curve = geometry
@@ -783,7 +783,7 @@ impl<O: ClassObject> CurveClassification<O> {
                     k,
                     original_curve.clone_for_evaluation()?,
                     surface.clone_for_evaluation()?,
-                    Some(surface.natural_uv_domain()),
+                    Some(surface.natural_uv_domain_with_nurb(k)?),
                     0,
                 )?))
             } else {
@@ -867,7 +867,7 @@ impl<O: ClassObject> CurveClassification<O> {
                     if !has_big_gaps || solution.start.solution_value > big_tolerance {
                         continue;
                     }
-                    let domain = detached.natural_uv_domain();
+                    let domain = detached.natural_uv_domain_with_nurb(k)?;
                     let vertex_solutions = detached.global_point_solve::<NoObject>(
                         k,
                         None,

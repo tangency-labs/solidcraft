@@ -780,9 +780,10 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
         }
 
         // set SurfaceCacheDomain as SurfaceNaturalDomain/FaceDomain intersection
-        let surface_domain = face
-            .natural_uv_domain()?
-            .unwrap_or_else(|| self.base.surface().natural_uv_domain());
+        let surface_domain = match face.natural_uv_domain()? {
+            Some(d) => d,
+            None => self.base.surface().natural_uv_domain_with_nurb(k)?,
+        };
         let domain = surface_domain.intersect(&face_domain)?;
         self.base.set_uv_domain(domain);
 
@@ -901,7 +902,7 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
 
         // set up for poles
         let (poles, u_ivl, v_ivl, u_tol, v_tol) = {
-            let uv_domain = self.base.surface().natural_uv_domain();
+            let uv_domain = self.base.surface().natural_uv_domain_with_nurb(k)?;
 
             // save natural domain sizes
             let u_ivl = uv_domain.u_interval();
@@ -1317,7 +1318,7 @@ impl<O: Copy + PartialEq> TrimSrfCache<O> {
         );
 
         // expand the UV tolerances when near surface poles
-        let uv_domain = self.base.surface().natural_uv_domain();
+        let uv_domain = self.base.surface().natural_uv_domain_with_nurb(k)?;
         let u_ivl = uv_domain.u_interval();
         let v_ivl = uv_domain.v_interval();
         let u_tol = u_ivl.length() / 100.0;
