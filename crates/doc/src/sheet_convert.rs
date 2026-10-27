@@ -803,6 +803,90 @@ fn drawn_edge(trimmed: &[Vec2], from: &[Option<usize>], pts: &[Vec2], round: &[O
     Ok(Some(Seg2::Arc { center: c, radius: r, start, sweep: 2.0 * half }))
 }
 
+/// The bends of a sheet-metal body found by themselves, for a conversion without bend points
+/// (#1325): every bend cylinder ([`bend_cylinder`]) on the outer skin, the larger of the two
+/// coaxial radii, each picked in its middle (its other pieces and the other skin come with it in
+/// [`convert_body`]). Also the sheet's thickness and inside radius as modelled: the commonest
+/// difference of a bend's two radii, and the inner radius of the bends of that thickness.
+pub struct FoundBends {
+    pub points: Vec<Vec3>,
+    pub thickness: f64,
+    pub radius: f64,
+}
+
+pub fn detect_bends(mb: &ModelBody) -> Option<FoundBends> {
+    let (b, mesh) = (&mb.body, mb.mesh());
+    let size = b.size();
+    if !(size.is_finite() && size > 0.0) {
+        return None;
+    }
+    let tol = (size * 1e-6).max(1e-6);
+    // Each bend cylinder: its face, axis line and radius.
+    let mut found: Vec<(usize, Vec3, UnitVec3, f64)> = Vec::new();
+    for g in 0..b.face_count().min(MAX_DETECT_FACES) {
+        let Some(FaceSurface::Cylinder { origin, axis, radius }) = face_surface(b, g) else { continue };
+        if radius.is_finite() && bend_cylinder(b, &mesh, g, tol).is_some() {
+            found.push((g, origin, axis, radius));
+        }
+    }
+    let coaxial = |x: &(usize, Vec3, UnitVec3, f64), y: &(usize, Vec3, UnitVec3, f64)| {
+        x.2.cross(y.2).len() <= 1e-6 && ((y.1 - x.1) - x.2 * (y.1 - x.1).dot(x.2)).len() <= tol
+    };
+    // The thickness: per axis line, the larger radius less the smaller.
+    let mut gaps: Vec<(f64, f64)> = Vec::new();
+    for x in &found {
+        let outer = found.iter().filter(|y| coaxial(x, y) && y.3 > x.3 + tol).map(|y| y.3).fold(f64::INFINITY, f64::min);
+        if outer.is_finite() {
+            gaps.push((outer - x.3, x.3));
+        }
+    }
+    let close = |a: f64, b: f64| (a - b).abs() <= 1e-4 * a.max(1.0);
+    let thickness = gaps.iter().map(|g| g.0).max_by_key(|t| gaps.iter().filter(|g| close(g.0, *t)).count())?;
+    let mut inner: Vec<f64> = gaps.iter().filter(|g| close(g.0, thickness)).map(|g| g.1).collect();
+    inner.sort_by(f64::total_cmp);
+    let radius = *inner.get(inner.len() / 2)?;
+    // The picks: the outer skin's cylinders (no coaxial one larger by the thickness), in their middle.
+    // A bend's outer cylinder has its inner one a thickness smaller on the same axis; one alone is a
+    // bend only when it runs on along its axis for more than twice the thickness (a bend modelled
+    // with a sharp inside). The round end of a relief or a slot through the sheet is such a lone
+    // cylinder too, tangent to its two straight walls, but it runs only through the sheet.
+    // Cut-outs across a bend split its cylinder: one pick takes all its pieces ([`bend_pieces`]).
+    let mut points = Vec::new();
+    let mut taken: Vec<usize> = Vec::new();
+    for x in &found {
+        if taken.contains(&x.0) || found.iter().any(|y| coaxial(x, y) && close(y.3 - x.3, thickness)) {
+            continue;
+        }
+        let tri: Vec<Vec3> = mesh
+            .triangles
+            .iter()
+            .zip(&mesh.tri_face)
+            .filter(|(_, f)| **f as usize == x.0)
+            .flat_map(|(t, _)| t.iter().filter_map(|k| mesh.positions.get(*k as usize).copied()))
+            .collect();
+        if tri.is_empty() {
+            continue;
+        }
+        let paired = found.iter().any(|y| coaxial(x, y) && close(x.3 - y.3, thickness));
+        let along = tri.iter().map(|p| (*p - x.1).dot(x.2));
+        let (lo, hi) = along.fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), t| (lo.min(t), hi.max(t)));
+        if !paired && !(hi - lo > 2.0 * thickness) {
+            continue;
+        }
+        if let Some(c) = bend_cylinder(b, &mesh, x.0, tol) {
+            taken.extend(bend_pieces(b, &mesh, c, tol).iter().map(|p| p.strip));
+        }
+        let c = tri.iter().fold(Vec3::default(), |s, p| s + *p) * (1.0 / tri.len() as f64);
+        let foot = x.1 + x.2 * (c - x.1).dot(x.2);
+        let Some(out) = (c - foot).normalized() else { continue };
+        points.push(foot + out * x.3);
+    }
+    (!points.is_empty() && points.len() <= MAX_BENDS).then_some(FoundBends { points, thickness, radius })
+}
+
+/// How many faces bend detection reads at most.
+const MAX_DETECT_FACES: usize = 100_000;
+
 /// Names of the edges of `body` at the bend points, to find them again after the body changes.
 /// A point on no edge gets none: the conversion then says so, instead of bending the edge that
 /// happens to be nearest. A point on a chamfer or a bend cylinder gets none either: it stays that
