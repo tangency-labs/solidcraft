@@ -16,8 +16,9 @@
 use serde_json::{Value, json};
 
 /// Run `xr-info` and print the diagnostic report as JSON.
+/// Every failure is inside the JSON — the exit code is always 0.
 pub fn cmd(_args: &[String]) -> Result<(), String> {
-    let report = probe()?;
+    let report = probe();
     println!("{}", pretty(&report));
     Ok(())
 }
@@ -39,11 +40,8 @@ fn load_entry() -> Result<openxr::Entry, String> {
 }
 
 /// Probe the OpenXR runtime and build a JSON diagnostic report.
-fn probe() -> Result<Value, String> {
-    // -----------------------------------------------------------------------
-    // 1. Open the OpenXR entry point.
-    // -----------------------------------------------------------------------
-    let entry = load_entry()?;
+/// Never fails — every error is recorded inside the JSON so the exit code is always 0.
+fn probe() -> Value {
     let mut report = json!({
         "openxr": {
             "runtime": Value::Null,
@@ -51,6 +49,16 @@ fn probe() -> Result<Value, String> {
             "instance_extensions": [],
         }
     });
+    // -----------------------------------------------------------------------
+    // 1. Open the OpenXR entry point.
+    // -----------------------------------------------------------------------
+    let entry = match load_entry() {
+        Ok(e) => e,
+        Err(msg) => {
+            report["openxr"]["error"] = json!(msg);
+            return report;
+        }
+    };
 
     // -----------------------------------------------------------------------
     // 2. Enumerate API layers and instance extensions.
@@ -93,7 +101,7 @@ fn probe() -> Result<Value, String> {
         Ok(inst) => inst,
         Err(e) => {
             report["openxr"]["error"] = json!(format!("failed to create instance: {e}"));
-            return Ok(report);
+            return report;
         }
     };
 
@@ -101,7 +109,7 @@ fn probe() -> Result<Value, String> {
         Ok(p) => p,
         Err(e) => {
             report["openxr"]["error"] = json!(format!("failed to query instance properties: {e}"));
-            return Ok(report);
+            return report;
         }
     };
     report["openxr"]["runtime"] = json!({
@@ -118,7 +126,7 @@ fn probe() -> Result<Value, String> {
             report["openxr"]["systems"] = json!([
                 {"form_factor": "head_mounted_display", "error": format!("{e}")}
             ]);
-            return Ok(report);
+            return report;
         }
     };
 
@@ -128,7 +136,7 @@ fn probe() -> Result<Value, String> {
             report["openxr"]["systems"] = json!([
                 {"form_factor": "head_mounted_display", "error": format!("system_properties failed: {e}")}
             ]);
-            return Ok(report);
+            return report;
         }
     };
     report["openxr"]["systems"] = json!([
@@ -196,7 +204,7 @@ fn probe() -> Result<Value, String> {
         },
     });
 
-    Ok(report)
+    report
 }
 
 fn pretty(v: &Value) -> String {
