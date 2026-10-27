@@ -21,7 +21,9 @@
 //! instead, as the hole's own handle was; each tool's [`Spec::serves`] says what turns it on.
 //!
 //! A tool has one place (a Rest) or one per item of its first input (a Single hole, a marker on each
-//! hole placed): [`Spec::places`] lists them, and a drag or a click names the place by its key.
+//! hole placed): [`Spec::place`] says where they come from, and a drag or a click names the place by
+//! its key. Most tools keep their place as the face item of one input ([`PlaceSource::Input`]): the
+//! marker reads it from there and moves it by replacing the item, as a click on the input does.
 
 mod boss;
 mod hole;
@@ -67,12 +69,8 @@ pub(crate) struct Spec {
     /// (a Single hole's; `turn` is then ignored). Off: one place, `<name>:position`, and the ring
     /// if any.
     pub many: bool,
-    /// The places the handles stand at.
-    pub places: fn(&SolveApp, &Dialog) -> Vec<Place>,
-    /// Re-place the feature at `key` where a click with these hits (the pick under the pointer,
-    /// taken while the dialog is open, so it snaps as a click does) would put it; false when
-    /// nothing there can take it.
-    pub move_to: fn(&SolveApp, &mut Dialog, &[Hit], usize) -> bool,
+    /// Where the places the handles stand at come from, and how a drag moves one.
+    pub place: PlaceSource,
     /// What a click (a press without a drag) on the marker at `key` does: a Single hole is taken
     /// out. `None`: a click on the marker does nothing.
     pub click: Option<fn(&SolveApp, &mut Dialog, usize)>,
@@ -83,6 +81,81 @@ pub(crate) struct Spec {
     /// drag when the line cannot be dragged as the view shows it.
     pub freedom: fn(&SolveApp, &Dialog, usize) -> Freedom,
     pub turn: Option<Turn>,
+}
+
+/// Where a tool keeps its place, so where the marker reads it and how a drag moves it.
+pub(crate) enum PlaceSource {
+    /// The face item of the dialog's input `n` (a Rest's, Boss's or Snap Fit's Position input):
+    /// the picked point, growing along the face's normal, else the stored `direction` when the
+    /// face is gone. A drag replaces the item where a click on that input would put it, snapped
+    /// as the click is, carrying `direction` and the in-face `along` onto the new face.
+    Input(usize),
+    /// The tool's own: `places` lists them; `move_to` re-places the one at `key` where a click
+    /// with these hits (the pick under the pointer, taken while the dialog is open, so it snaps
+    /// as a click does) would put it, false when nothing there can take it.
+    Own { places: fn(&SolveApp, &Dialog) -> Vec<Place>, move_to: fn(&SolveApp, &mut Dialog, &[Hit], usize) -> bool },
+}
+
+impl Spec {
+    /// The places the handles stand at.
+    fn places(&self, app: &SolveApp, d: &Dialog) -> Vec<Place> {
+        match self.place {
+            PlaceSource::Input(i) => one(input_frame(app, d, i)),
+            PlaceSource::Own { places, .. } => places(app, d),
+        }
+    }
+
+    /// Re-place the feature at `key` where a click with these hits would put it.
+    fn move_to(&self, app: &SolveApp, d: &mut Dialog, hits: &[Hit], key: usize) -> bool {
+        match self.place {
+            PlaceSource::Input(i) => input_move(app, d, hits, i),
+            PlaceSource::Own { move_to, .. } => move_to(app, d, hits, key),
+        }
+    }
+
+    /// The input whose rules the marker's pick follows: the place's, else the first (a Single
+    /// hole's places are the items of its first input).
+    fn place_input(&self) -> usize {
+        match self.place {
+            PlaceSource::Input(i) => i,
+            PlaceSource::Own { .. } => 0,
+        }
+    }
+}
+
+/// The place of a tool kept in its input `i`: the face item's point and the direction the
+/// feature grows, the face's normal, else the stored `direction`.
+fn input_frame(app: &SolveApp, d: &Dialog, i: usize) -> Option<(Vec3, Vec3)> {
+    let Sel::Face { body, index, point } = d.inputs.get(i)?.items.first()? else { return None };
+    let n = crate::dialogs::planar_face(&app.session, body, *index)
+        .map(|(_, n)| n)
+        .or_else(|| d.extra.get("direction").and_then(vec3_of))
+        .and_then(|n| n.normalized())?;
+    Some((*point, n))
+}
+
+/// The move of a tool kept in its input `i`: the item replaced where a click with `hits` would
+/// put it (snapped to a sketch point as a click is when the input takes points), with the stored
+/// `direction` and in-face `along` carried onto the new face. False when nothing there can take it.
+fn input_move(app: &SolveApp, d: &mut Dialog, hits: &[Hit], i: usize) -> bool {
+    let s = &app.session;
+    let turned = input_frame(app, d, i).and_then(|(_, n)| d.extra.get("along").and_then(vec3_of).map(|a| angle_of(a, n)));
+    let Some(to) = face_pick(d, s, hits) else { return false };
+    if let Sel::Face { body, index, .. } = &to
+        && let Some((_, nn)) = crate::dialogs::planar_face(s, body, *index)
+    {
+        if d.extra.contains_key("direction") {
+            d.extra.insert("direction".into(), pt(nn));
+        }
+        if let Some(a) = turned {
+            d.extra.insert("along".into(), pt(dir_at(nn, a)));
+        }
+    }
+    if let Some(inp) = d.inputs.get_mut(i) {
+        inp.items = vec![to];
+    }
+    d.error = None;
+    true
 }
 
 /// The ways a place can go on its face.
@@ -346,7 +419,7 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     DRAWN.with(|h| h.borrow_mut().clear());
     RING_ABOUT.with(|c| c.set(None));
     let Some(sp) = app.dialog.as_ref().and_then(|d| spec(app, d)) else { return };
-    let places = |app: &SolveApp| app.dialog.as_ref().map(|d| (sp.places)(app, d)).unwrap_or_default();
+    let places = |app: &SolveApp| app.dialog.as_ref().map(|d| sp.places(app, d)).unwrap_or_default();
     let t = Tokens::get();
     let area = |c: Pos2| egui::Rect::from_center_size(c, vec2(2.0 * REACH, 2.0 * REACH));
     let id = |what: &str| egui::Id::unique(("sc_place", sp.name, what));
@@ -377,10 +450,11 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
         if r.dragged() {
             crate::tool_modifiers::set_manipulator_dragging(true);
             if let Some(p) = r.interact_pointer_pos() {
-                let was = app.dialog.as_mut().map(|d| std::mem::replace(&mut d.active, 0));
+                // The pick follows the place input's rules, whichever input is active.
+                let was = app.dialog.as_mut().map(|d| std::mem::replace(&mut d.active, sp.place_input()));
                 let hits = crate::viewport::pick(app, proj, p - off.unwrap_or_default());
                 with_dialog(app, |app, d| {
-                    (sp.move_to)(app, d, &hits, pl.key);
+                    sp.move_to(app, d, &hits, pl.key);
                 });
                 if let (Some(d), Some(was)) = (app.dialog.as_mut(), was) {
                     d.active = was;
