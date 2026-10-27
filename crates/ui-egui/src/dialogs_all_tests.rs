@@ -234,7 +234,7 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
         | "Bend Line Position" | "From Snap" | "To Snap" | "Joint" | "Joint 1" | "Joint 2" | "Gear 1" | "Gear 2" | "Pinion" | "Rack" | "Screw"
         | "Nut" | "Cam" | "Follower" | "Anchor" => Role::ComboBox,
         "Radius" if command == "joint.rack_pinion" => Role::Label,
-        "Pitch" | "Form" | "Hand" | "Starts" | "Extent" | "Ease In" | "Ease Out" | "Tip" if command == "solid.thread" => Role::ComboBox,
+        "Pitch" | "Form" | "Hand" | "Starts" | "Extent" | "Start" | "End" if command == "solid.thread" => Role::ComboBox,
         "Automatic size" | "Reverse" | "Other side" | "All Lines" | "Mirror" => Role::CheckBox,
         "Animate" => Role::Button,
         "Ratio" if command.starts_with("joint.") && command != "joint.motion_link" => return None,
@@ -362,7 +362,7 @@ form_case!(path_pattern, "solid.pattern.path", ["Type", "Object Type", "Quantity
 form_case!(pipe, "solid.pipe", ["Diameter", "Wall", "Operation"]);
 form_case!(stock, "solid.bounding_solid", ["Margin"]);
 form_case!(frame_member, "frame.member", ["All Lines", "Anchor", "Angle", "Mirror", "Name"]);
-form_case!(thread, "solid.thread", ["Form", "Size", "Pitch", "Designation", "Hand", "Starts", "Extent", "Ease In", "Ease Out", "Tip"]);
+form_case!(thread, "solid.thread", ["Form", "Size", "Pitch", "Designation", "Hand", "Starts", "Extent", "Start", "End"]);
 form_case!(primitive_box, "solid.box", ["length", "width", "height", "Operation"]);
 form_case!(cylinder, "solid.cylinder", ["diameter", "height", "Operation"]);
 form_case!(sphere, "solid.sphere", ["diameter", "Operation"]);

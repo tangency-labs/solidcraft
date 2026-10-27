@@ -868,9 +868,8 @@ pub enum FeatureKind {
         /// Starts (1 to 8): the lead is starts × pitch (unless `designation` gives the lead).
         #[serde(default = "crate::thread_forms::one_start", skip_serializing_if = "crate::thread_forms::is_one_start")]
         starts: u32,
-        /// Runout lengths at the thread's start and end (a groove that fades out).
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        ease_in: Option<ThreadRunout>,
+        /// The runout at the thread's inner end, the one away from where it starts (a groove
+        /// that fades out); none: the groove stops square there.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         ease_out: Option<ThreadRunout>,
         /// The chamfered tip at the thread's free end (ISO 4753).

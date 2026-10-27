@@ -521,43 +521,57 @@ fn a_thread_stops_clear_of_a_shoulder() {
     assert!((got - want).abs() < want * 2e-4, "{got} vs {want}");
 }
 
-/// A d10 boss (z 6..22) joined onto a 40x40x6 plate, threaded M10: the plate's top is the
-/// shoulder. The groove, with or without its runout, stays on the boss: the plate keeps all of
-/// its 40 40 6 (what lies below z = 6 after the boss is cut away), and without a runout the
-/// boss loses (16 - w)/P turns, as at a collar.
+/// A d10 boss (z t..t+16) on a plate t thick, threaded M10: the plate's top is the shoulder.
+/// The groove, with or without its runout, stays on the boss: the plate keeps all of itself
+/// (what lies below z = t after the boss is cut away), and without a runout the boss loses
+/// (16 - w)/P turns, as at a collar. The owner's bug: built as the app builds it (a rounded
+/// plate, a circle sketched on its top face and extruded with Join), a plate thinner than 1.5 P
+/// had no material where the free-end test looked (1 to 1.5 pitches past the face), so its top
+/// was taken for a free end and the overrun cut a pitch into it.
 #[test]
 fn a_thread_on_a_boss_never_cuts_into_the_plate_below() {
-    let boss = |extra: Value| {
+    let boss = |t: f64, extra: Value| {
         let mut s = Session::default();
-        run(&mut s, "solid.box", json!({"corner": [-20, -20, 0], "length": 40, "width": 40, "height": 6, "body_name": "Part"}));
-        run(&mut s, "solid.cylinder", json!({"base": [0, 0, 6], "radius": 5, "height": 16, "operation": "join", "targets": ["Part"]}));
-        let mut p = json!({"face": [5, 0, 14], "designation": "M10", "modeled": true});
+        run(&mut s, "sketch.create", json!({"plane": "XY"}));
+        run(&mut s, "sketch.rectangle.rounded", json!({"p0": [-20, -20], "p1": [20, 20], "radius": 5}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": t}));
+        run(&mut s, "sketch.create", json!({"plane": {"face": [0, 0, t]}}));
+        run(&mut s, "sketch.circle.center", json!({"center": [0, 0], "radius": 5}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "solid.extrude", json!({"distance": 16, "operation": "join"}));
+        assert_eq!(s.model.state().bodies.len(), 1);
+        let mut p = json!({"face": [5, 0, t + 8.0], "modeled": true});
         if let (Some(p), Value::Object(e)) = (p.as_object_mut(), extra) {
             p.extend(e);
         }
         run(&mut s, "solid.thread", p);
         s
     };
-    let plate_left = |mut s: Session| {
+    let plate_left = |mut s: Session, t: f64| {
         run(
             &mut s,
             "solid.box",
-            json!({"corner": [-30, -30, 6], "length": 60, "width": 60, "height": 30, "body_name": "Above", "operation": "new_body"}),
+            json!({"corner": [-30, -30, t], "length": 60, "width": 60, "height": 30, "body_name": "Above", "operation": "new_body"}),
         );
-        run(&mut s, "solid.combine", json!({"target": "Part", "tools": ["Above"], "operation": "cut"}));
-        exact_volume(&s, "Part")
+        run(&mut s, "solid.combine", json!({"target": "Body1", "tools": ["Above"], "operation": "cut"}));
+        exact_volume(&s, "Body1")
     };
-    let s = boss(json!({}));
+    let plate = |t: f64| (40.0 * 40.0 - (4.0 - PI) * 25.0) * t;
     let (p, w) = (1.5, ext_half_width(10.0, 1.5));
-    let want = 40.0 * 40.0 * 6.0 + PI * 25.0 * 16.0 - (16.0 - w) / p * ext_turn(10.0, p, 5.0);
-    let got = exact_volume(&s, "Part");
-    assert!((got - want).abs() < want * 2e-4, "{got} vs {want}");
-    assert!((plate_left(s) - 9600.0).abs() < 1e-6);
+    for t in [6.0, 1.0] {
+        let s = boss(t, json!({}));
+        let want = plate(t) + PI * 25.0 * 16.0 - (16.0 - w) / p * ext_turn(10.0, p, 5.0);
+        let got = exact_volume(&s, "Body1");
+        assert!((got - want).abs() < want * 2e-4, "plate {t}: {got} vs {want}");
+        let left = plate_left(s, t);
+        assert!((left - plate(t)).abs() < 1e-6 * plate(t), "plate {t}: lost {} mm³", plate(t) - left);
+    }
     for extra in [json!({"ease_out": "standard"}), json!({"ease_out": "short", "tip": "both"})] {
-        let s = boss(extra.clone());
-        assert!(s.model.state().body("Part").unwrap().body.validity().is_empty(), "{extra}");
-        let left = plate_left(s);
-        assert!((left - 9600.0).abs() < 1e-6, "{extra}: the plate below the boss lost {} mm³", 9600.0 - left);
+        let s = boss(1.0, extra.clone());
+        assert!(s.model.state().body("Body1").unwrap().body.validity().is_empty(), "{extra}");
+        let left = plate_left(s, 1.0);
+        assert!((left - plate(1.0)).abs() < 1e-6 * plate(1.0), "{extra}: the plate below the boss lost {} mm³", plate(1.0) - left);
     }
 }
 
@@ -971,39 +985,39 @@ fn m10_runout_mean(h: f64) -> f64 {
     simpson / h
 }
 
-/// ISO 3508 runouts on a shaft between two collars: the groove fades out over 2.5 P (standard) at
-/// the end it starts from and 1.25 P (short) at the other, its section moving out past the surface
-/// as it turns, each reaching nothing where its section clears the collar. The cut is the
-/// integral over the turn of the clipped section's 2π∫ r dA (Pappus with the section moving):
-/// full turns at f(0), the runouts at the mean of f over the offsets they pass.
+/// ISO 3508 runouts on a shaft between two collars: the thread starts at the lower collar and
+/// its inner end fades out over 1.25 P (short) or 2.5 P (standard) before the upper one, its
+/// section moving out past the surface as it turns, reaching nothing where its section clears the
+/// collar. The cut is the integral over the turn of the clipped section's 2π∫ r dA (Pappus with
+/// the section moving): full turns at f(0), the runout at the mean of f over the offsets it
+/// passes. A fade shorter than a turn is cut too; the start never fades (`ease_in` is refused).
 #[test]
-fn a_runout_fades_the_groove_out_before_each_shoulder() {
-    let mut s = shaft_on_collar();
-    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 35], "radius": 8, "height": 10, "operation": "join", "targets": ["Part"]}));
-    let before = exact_volume(&s, "Part");
-    run(
-        &mut s,
-        "solid.thread",
-        json!({"face": [5, 0, 20], "designation": "M10", "ease_in": "standard", "ease_out": "short", "from": [0, 0, 10], "modeled": true}),
-    );
-    let st = s.model.state();
-    assert!(st.body("Part").unwrap().body.validity().is_empty());
+fn a_runout_fades_the_groove_out_before_the_shoulder() {
     let (p, w) = (1.5, ext_half_width(10.0, 1.5));
     let root = 5.0 - 5.0 * p * 3f64.sqrt() / 16.0;
     let h = 5.0 - root + 0.05 * p;
     let turns = (35.0 - 10.0 - 2.0 * w) / p;
-    let (r_in, r_out) = (2.5, 1.25);
-    let want = 2.0 * PI * (m10_cut_per_radian(0.0) * (turns - r_in - r_out) + (r_in + r_out) * m10_runout_mean(h));
-    let got = before - exact_volume(&s, "Part");
-    // Where the section moves, the sweep's walls lie within its tolerance (1e-4 P) of the true
-    // surfaces, not on them: up to that times the runouts' walls (about 64 mm² a turn, 3.75 turns),
-    // 0.036 mm³. Full-depth turns are exact radially (6e-4 mm³ here).
-    let bound = 1e-4 * p * 64.0 * (r_in + r_out);
-    assert!((got - want).abs() < bound, "{got} vs {want}");
-    // Longer runouts than the thread are refused.
+    for (ease, r_out) in [(json!("short"), 1.25), (json!("standard"), 2.5), (json!("1 mm"), 1.0 / 1.5)] {
+        let mut s = shaft_on_collar();
+        run(&mut s, "solid.cylinder", json!({"base": [0, 0, 35], "radius": 8, "height": 10, "operation": "join", "targets": ["Part"]}));
+        let before = exact_volume(&s, "Part");
+        run(&mut s, "solid.thread", json!({"face": [5, 0, 20], "designation": "M10", "ease_out": ease, "from": [0, 0, 10], "modeled": true}));
+        assert!(s.model.state().body("Part").unwrap().body.validity().is_empty(), "{ease}");
+        let want = 2.0 * PI * (m10_cut_per_radian(0.0) * (turns - r_out) + r_out * m10_runout_mean(h));
+        let got = before - exact_volume(&s, "Part");
+        // Where the section moves, the sweep's walls lie within its tolerance (1e-4 P) of the
+        // true surfaces, not on them: up to that times the walls (about 64 mm² a turn) of the
+        // runout and of a turn more. Measured: 0.018 (short), 0.012 (standard), 0.011 mm³ (1
+        // mm), not growing with the runout's length; full-depth turns are exact radially.
+        let bound = 1e-4 * p * 64.0 * (r_out + 1.0);
+        assert!((got - want).abs() < bound, "{ease}: {got} vs {want}");
+    }
+    // Longer runouts than the thread are refused, and so is a runout at the start.
     let mut s = shaft_on_collar();
-    let e = s.execute("solid.thread", &json!({"face": [5, 0, 20], "designation": "M10", "ease_in": 14, "ease_out": 14, "modeled": true}));
+    let e = s.execute("solid.thread", &json!({"face": [5, 0, 20], "designation": "M10", "ease_out": 30, "modeled": true}));
     assert!(e.err().map(|e| e.to_string()).unwrap_or_default().contains("longer than the thread"));
+    let e = s.execute("solid.thread", &json!({"face": [5, 0, 20], "designation": "M10", "ease_in": "standard", "modeled": true}));
+    assert!(e.err().map(|e| e.to_string()).unwrap_or_default().contains("`ease_in` is gone"));
 }
 
 /// A modelled M10 thread's flanks are several B-spline faces per turn (spans of one sweep); where
@@ -1055,7 +1069,7 @@ fn a_modelled_threads_flank_joins_are_not_drawn() {
 /// 0.960237 P (taper), ASME B1.20.1 60° h 0.8 P of H 0.866025 P.
 fn pipe_profile(form: &str) -> (f64, f64, f64) {
     let (a, big_h, h) = match form {
-        "bspp" => (27.5f64, 0.960491, 0.640327),
+        "bspp" | "rp" => (27.5f64, 0.960491, 0.640327),
         "bspt" => (27.5, 0.960237, 0.640327),
         _ => (30.0, 0.866025, 0.8),
     };
@@ -1108,11 +1122,14 @@ fn pipe_threads_cut_their_standard_profiles_and_tapers() {
     // (designation, form, internal, stock radius, crest radius at z for a 12 mm stock threaded from z = 12)
     let r_half: f64 = 20.955 / 2.0 - 8.2 / 32.0;
     let npt_half: f64 = ((0.75843 + 0.32 / 16.0) + 0.8 / 14.0) * inch / 2.0 - 0.32 * inch / 32.0;
-    let cases: [(&str, &str, bool, f64, Box<dyn Fn(f64) -> f64>); 4] = [
+    // ISO 7-1's Rp, parallel and internal, in a hole drilled to its minor diameter.
+    let rp_minor = 20.955 / 2.0 - 0.640327 * inch / 14.0;
+    let cases: [(&str, &str, bool, f64, Box<dyn Fn(f64) -> f64>); 5] = [
         ("R 1/2", "bspt", false, 10.65, Box::new(move |z| r_half + (12.0 - z) / 32.0)),
         ("1/2-14 NPT", "npt", false, 0.42 * inch, Box::new(move |z| npt_half + (12.0 - z) / 32.0)),
         ("G 1/2", "bspp", false, 20.955 / 2.0, Box::new(|_| 20.955 / 2.0)),
         ("Rc 1/2", "bspt", true, 9.2, Box::new(|z| 20.955 / 2.0 - (12.0 - z) / 32.0)),
+        ("Rp 1/2", "rp", true, rp_minor + 1e-4, Box::new(|_| 20.955 / 2.0)),
     ];
     for (designation, form, internal, rs, crest) in cases {
         let stock = || {
@@ -1145,19 +1162,23 @@ fn pipe_threads_cut_their_standard_profiles_and_tapers() {
         // A parallel thread's meridians are alike exactly. A taper's section moves off the axis
         // as it turns, so the meridians differ; the averaged profile met the cut within 0.12 % of
         // the removed volume here (R 1/2 0.06 %, NPT 0.12 %).
-        let tol = if form == "bspp" { 1e-5 } else { 2e-3 };
+        let tol = if matches!(form, "bspp" | "rp") { 1e-5 } else { 2e-3 };
         assert!((got - want).abs() < (stock - want).abs() * tol, "{designation}: {got} vs {want} (stock {stock})");
     }
 }
 
 /// A taper pipe thread's rules: it starts at a free end (not at a shoulder), ISO 7-1 names the
-/// internal taper Rc and the external R, a pipe thread has one start and turns one way, and a
-/// chamfered tip is not cut on it yet.
+/// internal taper Rc and the external R (and Rp is internal only), a pipe thread has one start and
+/// turns one way, and its chamfered tip is cut from the small end's major diameter.
 #[test]
 fn a_taper_pipe_thread_starts_at_a_free_end_and_is_named_for_its_side() {
-    let mut s = Session::default();
-    run(&mut s, "solid.cylinder", json!({"radius": 16, "height": 10, "body_name": "Part"}));
-    run(&mut s, "solid.cylinder", json!({"base": [0, 0, 10], "radius": 10.65, "height": 25, "operation": "join", "targets": ["Part"]}));
+    let part = || {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius": 16, "height": 10, "body_name": "Part"}));
+        run(&mut s, "solid.cylinder", json!({"base": [0, 0, 10], "radius": 10.65, "height": 25, "operation": "join", "targets": ["Part"]}));
+        s
+    };
+    let mut s = part();
     let err = |s: &mut Session, p: Value| s.execute("solid.thread", &p).err().map(|e| e.to_string()).unwrap_or_default();
     let e = err(&mut s, json!({"face": [10.65, 0, 20], "designation": "R 1/2", "modeled": true, "from": [10.65, 0, 10]}));
     assert!(e.contains("starts at a free end"), "{e}");
@@ -1167,12 +1188,27 @@ fn a_taper_pipe_thread_starts_at_a_free_end_and_is_named_for_its_side() {
     assert!(e.contains("one start"), "{e}");
     let e = err(&mut s, json!({"face": [10.65, 0, 20], "designation": "R 1/2", "hand": "both", "modeled": true, "from": [10.65, 0, 35]}));
     assert!(e.contains("turns one way"), "{e}");
-    let e = err(&mut s, json!({"face": [10.65, 0, 20], "designation": "R 1/2", "tip": "both", "modeled": true, "from": [10.65, 0, 35]}));
-    assert!(e.contains("taper pipe thread"), "{e}");
+    let e = err(&mut s, json!({"face": [10.65, 0, 20], "designation": "Rp 1/2", "modeled": true, "from": [10.65, 0, 35]}));
+    assert!(e.contains("Rp is an internal thread"), "{e}");
+    // ISO 4753's chamfered end is metric: a pipe thread gives its depth.
+    let e = err(&mut s, json!({"face": [10.65, 0, 20], "designation": "R 1/2", "tip": "start", "modeled": true, "from": [10.65, 0, 35]}));
+    assert!(e.contains("chamfer depth"), "{e}");
     // From the free end it runs ISO 7-1's useful thread, 13.2 mm for R 1/2.
     let out = run(&mut s, "solid.thread", json!({"face": [10.65, 0, 20], "designation": "R 1/2", "from": [10.65, 0, 35]}));
     let t = &out["thread"];
     assert!((t["end"].as_f64().unwrap() - t["start"].as_f64().unwrap() - 13.2).abs() < 1e-9, "{t}");
-    run(&mut s, "solid.thread", json!({"face": [10.65, 0, 20], "designation": "R 1/2", "modeled": true, "from": [10.65, 0, 35]}));
+    let mut plain = part();
+    run(&mut plain, "solid.thread", json!({"face": [10.65, 0, 20], "designation": "R 1/2", "modeled": true, "from": [10.65, 0, 35]}));
+    assert!(plain.model.state().body("Part").unwrap().body.validity().is_empty());
+    // The chamfered tip of a taper thread: the cone reaches the small end's major diameter less
+    // the depth, and cuts the first teeth.
+    let p = 25.4 / 14.0;
+    run(
+        &mut s,
+        "solid.thread",
+        json!({"face": [10.65, 0, 20], "designation": "R 1/2", "modeled": true, "from": [10.65, 0, 35], "tip": "start", "chamfer_depth": 0.640327 * p}),
+    );
     assert!(s.model.state().body("Part").unwrap().body.validity().is_empty());
+    let (chamfered, threaded) = (exact_volume(&s, "Part"), exact_volume(&plain, "Part"));
+    assert!(chamfered < threaded - 1e-3, "the tip cuts the first teeth: {chamfered} vs {threaded}");
 }

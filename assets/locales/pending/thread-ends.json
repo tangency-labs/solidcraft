@@ -1,0 +1,65 @@
+{
+  "en": {
+    "thread.chamfer_depth_needed": "required for this form",
+    "thread.end_square": "Square",
+    "thread.fade_short": "1.25 P (ISO 3508)",
+    "thread.fade_standard": "2.5 P (ISO 3508)",
+    "ui.end": "End",
+    "ui.fade": "Fade",
+    "ui.fade_length": "Fade Length"
+  },
+  "ar": {
+    "thread.chamfer_depth_needed": "مطلوب لهذا الشكل",
+    "thread.end_square": "قائمة",
+    "thread.fade_short": "1.25 P (ISO 3508)",
+    "thread.fade_standard": "2.5 P (ISO 3508)",
+    "ui.end": "النهاية",
+    "ui.fade": "تلاشٍ",
+    "ui.fade_length": "طول التلاشي"
+  },
+  "he": {
+    "thread.chamfer_depth_needed": "נדרש לצורה זו",
+    "thread.end_square": "ישר",
+    "thread.fade_short": "1.25 P (ISO 3508)",
+    "thread.fade_standard": "2.5 P (ISO 3508)",
+    "ui.end": "סוף",
+    "ui.fade": "דעיכה",
+    "ui.fade_length": "אורך דעיכה"
+  },
+  "ja": {
+    "thread.chamfer_depth_needed": "この形状では必須",
+    "thread.end_square": "直角",
+    "thread.fade_short": "1.25 P（ISO 3508）",
+    "thread.fade_standard": "2.5 P（ISO 3508）",
+    "ui.end": "終端",
+    "ui.fade": "切り上げ",
+    "ui.fade_length": "切り上げ長さ"
+  },
+  "zh": {
+    "thread.chamfer_depth_needed": "此牙型必填",
+    "thread.end_square": "直角",
+    "thread.fade_short": "1.25 P（ISO 3508）",
+    "thread.fade_standard": "2.5 P（ISO 3508）",
+    "ui.end": "末端",
+    "ui.fade": "收尾",
+    "ui.fade_length": "收尾长度"
+  },
+  "de": {
+    "thread.chamfer_depth_needed": "für diese Form erforderlich",
+    "thread.end_square": "Rechtwinklig",
+    "thread.fade_short": "1,25 P (ISO 3508)",
+    "thread.fade_standard": "2,5 P (ISO 3508)",
+    "ui.end": "Ende",
+    "ui.fade": "Auslauf",
+    "ui.fade_length": "Auslauflänge"
+  },
+  "ko": {
+    "thread.chamfer_depth_needed": "이 형상에 필요",
+    "thread.end_square": "직각",
+    "thread.fade_short": "1.25 P (ISO 3508)",
+    "thread.fade_standard": "2.5 P (ISO 3508)",
+    "ui.end": "끝",
+    "ui.fade": "페이드",
+    "ui.fade_length": "페이드 길이"
+  }
+}

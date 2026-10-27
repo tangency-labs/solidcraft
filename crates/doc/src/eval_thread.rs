@@ -83,9 +83,9 @@ pub(super) struct ThreadAsk<'a> {
     pub from: Option<Vec3>,
     /// A modelled thread needs to know how each of its ends meets the face's ends.
     pub modeled: bool,
-    /// Runouts at the end the thread starts from and at the other, each as (mm, pitches): its
-    /// length is mm + pitches x the pitch.
-    pub ease: [(f64, f64); 2],
+    /// The runout at the end away from where the thread starts, as (mm, pitches): its length
+    /// is mm + pitches x the pitch. The start never fades: it runs off its free end.
+    pub ease_out: (f64, f64),
     /// A tapped hole's thread: `designation` is a catalogue size (ISO metric, or a catalogued
     /// UNC/UNF, G or Rp size), and a size that is not metric fits the hole drilled for it.
     pub tapped: bool,
@@ -118,12 +118,20 @@ pub(super) struct ThreadOn {
 }
 
 /// The free-end test of a face's two ends (`side` 0 at its start, 1 at its end), each made
-/// once: whether any material lies past the end, over the axial span the groove's one-pitch
-/// overrun reaches beyond its first pitch, within the radii the groove cuts.
+/// once. The groove's one-pitch overrun past a free end reaches 1.5 pitches past it. An end is
+/// closed when, within that reach, material lies outside the face's cylinder (inside it, for a
+/// hole) at the radii the groove cuts beyond the face: a shoulder, a plate, a head, a blind
+/// hole's bottom, however thin, the material stepping out past the face. It is closed too when
+/// material lies in the groove's band of radii beyond its first pitch: the face's cylinder going
+/// on past a split. A chamfer, a neck, a countersink or a counterbore steps the other way and
+/// leaves the end free: the groove runs out through it.
 struct FaceEnds<'a> {
     body: &'a Body,
     cyl: &'a kernel::CylinderFace,
     band: (f64, f64),
+    /// The radii the groove cuts beyond the face's own: from it out to the groove's outer edge
+    /// (external), or in to its inner edge (internal).
+    beyond: (f64, f64),
     pitch: f64,
     free: [Option<bool>; 2],
 }
@@ -134,11 +142,13 @@ impl FaceEnds<'_> {
             return Ok(*f);
         }
         let p = self.pitch;
-        let along = if side == 0 { (self.cyl.start - 1.5 * p, self.cyl.start - p) } else { (self.cyl.end + p, self.cyl.end + 1.5 * p) };
-        // Material that only touches the band's rims (a counterbore as wide as the thread) is
-        // not in the groove's way.
+        let past =
+            |from: f64, to: f64| if side == 0 { (self.cyl.start - to, self.cyl.start - from) } else { (self.cyl.end + from, self.cyl.end + to) };
+        // Material that only touches the band's rims (a counterbore as wide as the thread, the
+        // face's own end) is not in the groove's way.
         let e = p * 1e-3;
-        let free = !kernel::material_in_ring(self.body, self.cyl, self.band.0 + e, self.band.1 - e, along)?;
+        let stepped_out = kernel::material_in_ring(self.body, self.cyl, self.beyond.0 + e, self.beyond.1 - e, past(e, 1.5 * p))?;
+        let free = !stepped_out && !kernel::material_in_ring(self.body, self.cyl, self.band.0 + e, self.band.1 - e, past(p, 1.5 * p))?;
         if let Some(slot) = self.free.get_mut(side) {
             *slot = Some(free);
         }
@@ -206,6 +216,12 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
         if ask.hand == ThreadHand::Both {
             return Err(DocError::Invalid("a pipe thread turns one way: right or left".into()));
         }
+        // ISO 7-1's Rp is the parallel internal thread an R screws into; there is no external Rp.
+        if form == ThreadForm::Rp && !cyl.internal {
+            return Err(DocError::Invalid(format!(
+                "`{designation}` on this shaft: Rp is an internal thread (ISO 7-1); an external pipe thread is R (taper, ISO 7-1) or G (ISO 228-1)"
+            )));
+        }
         // ISO 7-1 names the internal taper thread Rc and the external one R.
         if form == ThreadForm::Bspt {
             if let Some(given) = ask.designation
@@ -240,7 +256,10 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
         (form.groove(major, pitch, false).root_r, major / 2.0)
     };
     let band = (cyl.radius.min(r_lo), cyl.radius.max(r_hi));
-    let mut ends = FaceEnds { body: &mb.body, cyl: &cyl, band, pitch, free: [None; 2] };
+    // As far beyond the face as the groove's section reaches ([`thread_grooves`]).
+    let beyond =
+        if cyl.internal { ((cyl.radius.min(r_lo) - 0.1 * pitch).max(0.0), cyl.radius) } else { (cyl.radius, cyl.radius.max(r_hi) + 0.05 * pitch) };
+    let mut ends = FaceEnds { body: &mb.body, cyl: &cyl, band, beyond, pitch, free: [None; 2] };
     let (lo, hi) = (cyl.start, cyl.end);
     let along = |q: Vec3| (q - cyl.axis_point).dot(cyl.axis);
     let span = |side: usize, to: f64| -> Result<(f64, f64)> {
@@ -289,10 +308,9 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
             (a, b, side)
         }
     };
-    // The runout at each end of the axis: ease in where the thread starts from.
-    let len = |(mm, pitches): (f64, f64)| mm + pitches * pitch;
-    let (e_in, e_out) = (len(ask.ease[0]), len(ask.ease[1]));
-    let ease = if side == 0 { [e_in, e_out] } else { [e_out, e_in] };
+    // The runout at each end of the axis: only at the end away from where it starts.
+    let e_out = ask.ease_out.0 + ask.ease_out.1 * pitch;
+    let ease = if side == 0 { [0.0, e_out] } else { [e_out, 0.0] };
     if ease.iter().any(|e| !(*e >= 0.0 && e.is_finite())) {
         return Err(DocError::Invalid("a runout length must be positive".into()));
     }
@@ -534,7 +552,7 @@ fn thread_grooves(
         law.extend([(turns - r_out, 0.0), (turns, out)]);
     }
     if r_in > 0.0 && r_out > 0.0 && !(turns - r_out > r_in + 1e-9) || r_in.max(r_out) > turns {
-        return Err(DocError::Invalid(format!("the runouts ({} and {} mm) are longer than the thread", show_mm(ease[0]), show_mm(ease[1]))));
+        return Err(DocError::Invalid(format!("the runout ({} mm) is longer than the thread", show_mm(ease[0].max(ease[1])))));
     }
     if taper_rate != 0.0 {
         law = with_taper(&law, turns, taper_rate);
@@ -657,7 +675,6 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         form,
         hand,
         starts,
-        ease_in,
         ease_out,
         tip,
         chamfer_angle,
@@ -687,7 +704,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         extent,
         from: from.map(|q| q.0),
         modeled: *modeled,
-        ease: [(0.0, 0.0); 2],
+        ease_out: (0.0, 0.0),
         tapped: false,
     };
     // ISO 3508's runouts: standard 2.5 P, short 1.25 P.
@@ -699,14 +716,11 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             Some(crate::ThreadRunout::Length { length }) => (val(vals, length, Kind::Length)?, 0.0),
         })
     };
-    if (ease_in.is_some() || ease_out.is_some()) && !*modeled {
+    if ease_out.is_some() && !*modeled {
         return Err(DocError::Invalid("a runout is cut only on a modelled thread".into()));
     }
-    let ask = ThreadAsk { ease: [runout(ease_in)?, runout(ease_out)?], ..ask };
+    let ask = ThreadAsk { ease_out: runout(ease_out)?, ..ask };
     let ThreadOn { info: t, cyl, ends, steep, ease, from: from_side } = thread_on(st, f.id, face.0, &ask)?;
-    if *tip != ThreadTip::None && t.form.is_taper() {
-        return Err(DocError::Invalid("not supported yet: a chamfered tip on a taper pipe thread".into()));
-    }
     if !*modeled {
         st.threads.push(t);
         return Ok(());
@@ -747,7 +761,7 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
     if *tip != ThreadTip::None {
         let angle = chamfer_angle.as_deref().map(|e| val(vals, e, Kind::Angle)).transpose()?;
         let depth = chamfer_depth.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?;
-        for cone in tip_cones(&t, radius, ends, (*tip, from_side), angle, depth)? {
+        for cone in tip_cones(&t, radius, ends, (*tip, from_side), angle, depth, taper)? {
             let faces = cone.face_count();
             let cut = kernel::boolean(&nb.body, &cone, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("the chamfer removed everything".into()))?;
             let unnamed = crate::lineage::Lineage::unnamed_faces(faces);
@@ -769,7 +783,9 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
 /// that bound, d3 = d - 1.226869 P (ISO 724, the rounded root of the design profile). It lies
 /// below the modelled basic root d1, so the cone crosses the root cylinder and leaves a whole
 /// ring on the end; one ending on the root itself would pinch to nothing wherever the groove
-/// reaches the end. ISO 4753 is for ISO metric threads: other forms give `depth`.
+/// reaches the end. ISO 4753 is for ISO metric threads: other forms give `depth`. A taper
+/// thread's `taper` (its major diameter where it starts, the end it starts from) puts each end's
+/// major diameter where the taper has it there, and `depth` is measured from that.
 fn tip_cones(
     t: &ThreadInfo,
     radius: f64,
@@ -777,6 +793,7 @@ fn tip_cones(
     (tip, from): (ThreadTip, usize),
     angle: Option<f64>,
     depth: Option<f64>,
+    taper: Option<(f64, usize)>,
 ) -> Result<Vec<Body>> {
     if t.internal {
         return Err(DocError::Invalid("a chamfered tip is for an external thread (ISO 4753); countersink the hole's entry instead".into()));
@@ -786,7 +803,12 @@ fn tip_cones(
     if !(a > 1f64.to_radians() && a < 89f64.to_radians()) {
         return Err(DocError::Invalid("the chamfer's angle to the axis must be between 1° and 89°".into()));
     }
-    let r_top = radius.max(t.major_diameter / 2.0);
+    // The major diameter at each end of the axis: a taper's grows 1 in 16 from where it starts.
+    let major = |side: usize| match taper {
+        Some((d0, start)) if side == start => d0,
+        Some((d0, _)) => d0 + (t.end - t.start) / 16.0,
+        None => t.major_diameter,
+    };
     let depth = match (depth, t.form) {
         (Some(d), _) => d,
         // ISO 724: d3 = d1 - H/6 = d - 2 (17/24) H.
@@ -799,14 +821,14 @@ fn tip_cones(
             )));
         }
     };
-    let r_f = t.major_diameter / 2.0 - depth;
-    if !(depth > 0.0 && r_f > 1e-3) {
-        return Err(DocError::Invalid(format!("the chamfer's depth must be between 0 and {} mm", show_mm(t.major_diameter / 2.0))));
+    let smallest = major(0).min(major(1)) / 2.0;
+    if !(depth > 0.0 && smallest - depth > 1e-3) {
+        return Err(DocError::Invalid(format!("the chamfer's depth must be between 0 and {} mm", show_mm(smallest))));
     }
     let k = *t.axis;
     let u = k.cross(if k.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) });
     let u = u.normalized().ok_or_else(|| DocError::Invalid("thread axis".into()))?;
-    let (r_out, slope) = (r_top + 0.1 * t.pitch, a.tan());
+    let slope = a.tan();
     // Past the end only the radii the groove's overrun already reaches (r >= d_f / 2), so
     // nothing past a free end beyond the thread is touched.
     let e = 0.5 * t.pitch;
@@ -819,6 +841,8 @@ fn tip_cones(
         if !free(side) || (tip == ThreadTip::Start && side != from) {
             continue;
         }
+        let r_f = major(side) / 2.0 - depth;
+        let r_out = radius.max(major(side) / 2.0) + 0.1 * t.pitch;
         // In the plane: x radial, y outward along the axis from the end.
         let plane = Plane { origin: t.axis_point + k * at, x: u, y: out_dir };
         let pts = [Vec2::new(r_f, 0.0), Vec2::new(r_f, e), Vec2::new(r_out, e), Vec2::new(r_out, -(r_out - r_f) / slope)];

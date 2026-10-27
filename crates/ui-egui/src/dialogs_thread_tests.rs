@@ -73,10 +73,9 @@ fn every_option_reaches_the_command() {
     choose(&mut h, "Starts", "2");
     choose(&mut h, "Extent", "Length");
     type_in(&mut h, "Length", "6 mm");
-    choose(&mut h, "Ease In", "Standard (2.5 P)");
-    choose(&mut h, "Ease Out", "Length");
-    type_in(&mut h, "Ease Out Length", "1.5 mm");
-    choose(&mut h, "Tip", "Both");
+    choose(&mut h, "End", "ui.fade");
+    type_in(&mut h, "Fade Length", "1.5 mm");
+    choose(&mut h, "Start", "Chamfer");
     type_in(&mut h, "Chamfer Angle", "30 deg");
     type_in(&mut h, "Chamfer Depth", "0.5 mm");
     click(&mut h, &["dialog:Modeled"]);
@@ -86,14 +85,20 @@ fn every_option_reaches_the_command() {
         p,
         json!({
             "designation": "Tr20x4", "form": "trapezoidal", "hand": "left", "starts": 2, "extent": "length", "length": "6 mm",
-            "ease_in": "standard", "ease_out": "1.5 mm", "tip": "both", "chamfer_angle": "30 deg", "chamfer_depth": "0.5 mm",
+            "ease_out": "1.5 mm", "tip": "start", "chamfer_angle": "30 deg", "chamfer_depth": "0.5 mm",
             "modeled": true,
         })
     );
-    choose(&mut h, "Ease In", "Short (1.25 P)");
+    // An empty fade length is ISO 3508's standard runout; a square end has none.
+    click(&mut h, &["dialog:Fade Length"]);
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"key":"Backspace"})).unwrap();
+    h.frames(2);
     choose(&mut h, "Hand", "Both");
     let p = params(&h);
-    assert_eq!((&p["ease_in"], &p["hand"]), (&json!("short"), &json!("both")));
+    assert_eq!((&p["ease_out"], &p["hand"]), (&json!("standard"), &json!("both")));
+    choose(&mut h, "End", "thread.end_square");
+    assert!(params(&h).get("ease_out").is_none());
 }
 
 /// Buttress rows only for the buttress forms, the length only with a Length extent, the Up To
@@ -102,10 +107,10 @@ fn every_option_reaches_the_command() {
 #[test]
 fn only_the_fields_that_apply_are_shown() {
     let mut h = shaft();
-    for row in ["Form", "Size", "Pitch", "Designation", "Hand", "Starts", "Extent", "Ease In", "Ease Out", "Tip"] {
+    for row in ["Form", "Size", "Pitch", "Designation", "Hand", "Starts", "Extent", "Start", "End"] {
         assert!(shown(row), "{row}");
     }
-    for row in ["Steep Flank", "Length", "Ease In Length", "Ease Out Length", "Chamfer Angle", "Chamfer Depth"] {
+    for row in ["Steep Flank", "Length", "Fade Length", "Chamfer Angle", "Chamfer Depth"] {
         assert!(!shown(row), "{row}");
     }
     let inputs = |h: &Harness| h.app.dialog.as_ref().unwrap().inputs.iter().map(|i| i.label).collect::<Vec<_>>();
@@ -130,10 +135,10 @@ fn only_the_fields_that_apply_are_shown() {
     assert!(shown("Length"));
     choose(&mut h, "Extent", "Full");
     assert_eq!(inputs(&h), ["Cylindrical face"]);
-    choose(&mut h, "Ease In", "Length");
+    choose(&mut h, "End", "ui.fade");
     assert_eq!(inputs(&h), ["Cylindrical face", START_END], "a runout starts at an end");
-    assert!(shown("Ease In Length") && !shown("Ease Out Length"));
-    choose(&mut h, "Tip", "Start");
+    assert!(shown("Fade Length"));
+    choose(&mut h, "Start", "Chamfer");
     assert!(shown("Chamfer Angle") && shown("Chamfer Depth"));
     let p = params(&h);
     assert!(p.get("chamfer_angle").is_none() && p.get("chamfer_depth").is_none(), "empty values take ISO 4753's: {p}");
@@ -178,7 +183,7 @@ fn a_form_change_keeps_what_still_applies() {
     choose(&mut h, "Starts", "3");
     choose(&mut h, "Extent", "Length");
     type_in(&mut h, "Length", "4 mm");
-    choose(&mut h, "Ease Out", "Short (1.25 P)");
+    choose(&mut h, "End", "ui.fade");
     let kept = options(&h);
 
     choose(&mut h, "Form", "Trapezoidal (ISO 2904)");
@@ -196,7 +201,7 @@ fn a_form_change_keeps_what_still_applies() {
     let now = options(&h);
     assert_eq!(Options { form: kept.form, ..now.clone() }, kept);
     let p = params(&h);
-    assert_eq!((&p["hand"], &p["starts"], &p["length"], &p["ease_out"]), (&json!("left"), &json!(3), &json!("4 mm"), &json!("short")));
+    assert_eq!((&p["hand"], &p["starts"], &p["length"], &p["ease_out"]), (&json!("left"), &json!(3), &json!("4 mm"), &json!("standard")));
 }
 
 /// The dialog shows the command's own error text for options it cannot build.
@@ -225,6 +230,56 @@ fn the_forms_are_the_documents_and_square_is_not_offered() {
     assert_eq!(example(ThreadForm::Trapezoidal), "Tr20x4");
 }
 
+/// The pipe threads: a G 1/2 shaft and an Rc 1/2 hole size themselves by the form, list their
+/// sizes by designation without a pitch, and offer one start turning one way.
+#[test]
+fn pipe_forms_size_the_face_with_one_start_turning_one_way() {
+    let size = |h: &Harness| match &h.app.dialog.as_ref().unwrap().kind {
+        Kind::Thread { designation, .. } => designation.clone(),
+        k => panic!("{k:?}"),
+    };
+    let open = |hole: bool| {
+        let mut h = Harness::new();
+        h.call("ui.resize", json!({"width":1600,"height":1400}));
+        h.app.home.open = false;
+        if hole {
+            h.app.run("solid.box", json!({"corner":[-20,-20,0],"length":40,"width":40,"height":12,"body_name":"Body1"})).unwrap();
+            h.app.run("solid.cylinder", json!({"base":[0,0,-1],"radius":9.2,"height":14,"body_name":"Bore"})).unwrap();
+            h.app.run("solid.combine", json!({"target":"Body1","tools":["Bore"],"operation":"cut"})).unwrap();
+        } else {
+            h.app.run("solid.cylinder", json!({"radius":20.955 / 2.0,"height":15})).unwrap();
+        }
+        h.app.session.selection = vec![thread_face(&h.app, "Body1")];
+        h.step(&json!({"start":"solid.thread"})).unwrap();
+        h.frames(2);
+        h
+    };
+    let mut h = open(false);
+    choose(&mut h, "Form", "thread.form_bspp");
+    assert_eq!(size(&h), "G 1/2");
+    assert!(shown("Size") && shown("Hand") && !shown("Pitch") && !shown("Starts"));
+    choose(&mut h, "Hand", "Left");
+    let p = params(&h);
+    assert_eq!((&p["form"], &p["hand"]), (&json!("bspp"), &json!("left")));
+    choose(&mut h, "Form", "thread.form_bspt");
+    assert_eq!(size(&h), "R 1/2");
+    choose(&mut h, "Form", "thread.form_npt");
+    assert_eq!(params(&h)["form"], json!("npt"));
+    // A hand of both, from a form that has it, turns right on a pipe thread.
+    choose(&mut h, "Form", "ISO metric");
+    choose(&mut h, "Hand", "Both");
+    choose(&mut h, "Form", "thread.form_bspp");
+    assert!(params(&h).get("hand").is_none(), "right, the default");
+
+    let mut h = open(true);
+    choose(&mut h, "Form", "thread.form_bspt");
+    assert_eq!(size(&h), "Rc 1/2", "ISO 7-1 writes the internal taper thread Rc");
+    choose(&mut h, "Form", "thread.form_rp");
+    assert_eq!(size(&h), "Rp 1/2");
+    let (cmd, p) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
+    h.app.session.execute(&cmd, &p).unwrap_or_else(|e| panic!("Rp 1/2 in its hole: {e}"));
+}
+
 /// The face's size follows the form.
 #[test]
 fn the_face_size_follows_the_form() {
@@ -246,7 +301,7 @@ fn a_saved_thread_reopens_with_every_option() {
     for (made, picks) in [
         (
             json!({"designation":"S20x4","steep_flank":"start","hand":"left","starts":2,"length":"12 mm","from":[10,0,20],"modeled":true,
-                "ease_in":"standard","ease_out":"1 mm","tip":"start","chamfer_angle":"30 deg","chamfer_depth":"0.5 mm"}),
+                "ease_out":"1 mm","tip":"start","chamfer_angle":"30 deg","chamfer_depth":"0.5 mm"}),
             vec!["Cylindrical face", START_END],
         ),
         (json!({"designation":"M20","from":[10,0,20],"up_to":[10,0,5]}), vec!["Cylindrical face", START_END, UP_TO]),
@@ -277,7 +332,7 @@ fn a_saved_thread_reopens_with_every_option() {
         assert_eq!(p["extent"], extent);
         if made["designation"] == "S20x4" {
             assert_eq!(p["form"], "buttress", "the form is saved resolved");
-            assert!(shown("Steep Flank") && shown("Chamfer Angle") && shown("Ease Out Length"));
+            assert!(shown("Steep Flank") && shown("Chamfer Angle") && shown("Fade Length"));
         }
         let (cmd, params) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
         h.app.session.execute(&cmd, &params).unwrap_or_else(|e| panic!("{made}: OK on the reopened dialog: {e}"));
