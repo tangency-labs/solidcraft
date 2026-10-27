@@ -16,6 +16,7 @@ pub mod ai_connect;
 pub use solidcraft_ui_kit::app_bar;
 pub use solidcraft_ui_kit::blur;
 pub mod bom_panel;
+pub mod broken_view_preview;
 pub mod browser;
 pub mod browser_canvas;
 pub mod browser_prompts;
