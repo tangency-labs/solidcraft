@@ -515,7 +515,7 @@ impl FilletSession<'_> {
             };
             let geoms = self.objects.solver(id)?.base().fillet_geoms();
             for geom in geoms {
-                if self.objects.pseudo.geom(geom)?.fillet_surface()?.is_none() {
+                if !self.objects.pseudo.geom(geom)?.has_fillet_surface() {
                     continue;
                 }
                 self.objects.faces_make_face(

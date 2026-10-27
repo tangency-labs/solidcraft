@@ -296,7 +296,11 @@ impl RolloverOwnership for Ownership {
             "unexpected new curve owner",
         ))
     }
-    fn owner_changed(&mut self, _: solidcore::curve::curve::p2::OwnerChange) -> SolidResult<()> {
+    fn owner_changed(
+        &mut self,
+        _: &mut Curve,
+        _: solidcore::curve::curve::p2::OwnerChange,
+    ) -> SolidResult<()> {
         Err(SolidError::invalid_input(
             "fixture",
             "unexpected owner notification",

@@ -1403,7 +1403,7 @@ impl FilletBrep {
             .fillet_edgeuse(prim)?
             .fillet_geom()
             .ok_or_else(|| SolidError::null_pointer(OP_EXT))?;
-        if self.geom(fillet_geom)?.fillet_surface()?.is_none() {
+        if !self.geom(fillet_geom)?.has_fillet_surface() {
             // Need fillet surface, will process it later
             return Ok(());
         }

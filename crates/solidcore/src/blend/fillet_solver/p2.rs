@@ -2207,7 +2207,7 @@ impl FilletSolver {
         let mut fil_edges: Vec<EdgeId> = Vec::new();
         for g in self.fillet_geoms() {
             let this_geom = pseudo.geom(g)?;
-            if this_geom.fillet_surface()?.is_some() && !fil_surfs.contains(&g) {
+            if this_geom.has_fillet_surface() && !fil_surfs.contains(&g) {
                 fil_surfs.push(g);
             }
             if this_geom.center_line_curve().is_some() && !fil_curvs.contains(&g) {

@@ -88,7 +88,7 @@ impl RolloverOwnership for Owners {
             None,
         ))
     }
-    fn owner_changed(&mut self, change: OwnerChange) -> Result<()> {
+    fn owner_changed(&mut self, _: &mut Curve, change: OwnerChange) -> Result<()> {
         self.notifications.push(change);
         Ok(())
     }

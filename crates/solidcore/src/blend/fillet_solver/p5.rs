@@ -501,7 +501,11 @@ mod tests {
         fn edge_owner(&self, _: EdgeId) -> Result<(ObjectRef, Option<ObjectRef>)> {
             Err(SolidError::invalid_input(OP, "unexpected owner lookup"))
         }
-        fn owner_changed(&mut self, _: OwnerChange) -> Result<()> {
+        fn owner_changed(
+            &mut self,
+            _: &mut crate::curve::curve::Curve,
+            _: OwnerChange,
+        ) -> Result<()> {
             Err(SolidError::invalid_input(
                 OP,
                 "unexpected owner notification",

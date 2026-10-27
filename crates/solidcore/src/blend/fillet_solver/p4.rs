@@ -3096,7 +3096,7 @@ fn c5_undo_reversal(ops: &mut dyn FilletSolverOps, cx: &mut Cx<'_>) -> Result<()
 
         let k = cx.k;
         let geom = cx.fillets.geom_mut(g)?;
-        if geom.center_line_curve.is_none() || geom.fillet_surface()?.is_none() {
+        if geom.center_line_curve.is_none() || !geom.has_fillet_surface() {
             return Err(SolidError::null_pointer(OP));
         }
         if let Some(center_line) = geom.center_line_curve.as_mut() {

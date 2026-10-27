@@ -2092,24 +2092,6 @@ impl FilletSolverOps for VariableRadiusFs {
         &mut self.curve_based.solver
     }
 
-    /// `SmFilletSolver::RailEdgeuseIntersect` with `geometry` as the geometry for
-    /// surfaces (`SmFilletGeom::RailEdgeuseIntersect`).
-    fn rail_edgeuse_intersect_on_geometry(
-        &mut self,
-        k: &Kernel,
-        geometry: &mut crate::blend::fillet_geom::p1::FilletGeom,
-        _rollover: crate::blend::fillet_solver::p1::RolloverGuesses,
-        target: &mut Brep,
-        rail_index: usize,
-        edgeuse: EdgeuseId,
-        guess: f64,
-        tsect: &mut TsectPnt,
-    ) -> Result<Option<f64>> {
-        crate::blend::fillet_solver::surfaces::slot_rail_edgeuse_intersect(
-            self, k, geometry, target, rail_index, edgeuse, guess, tsect,
-        )
-    }
-
     /// `SmVariableRadiusFS::GetJacobianSize`: 5.
     fn jacobian_size(&self) -> Result<usize> {
         Ok(VariableRadiusFs::jacobian_size(self))
@@ -2252,25 +2234,6 @@ impl FilletSolverOps for ConstantDistanceFs {
 
     fn solver_mut(&mut self) -> &mut FilletSolver {
         &mut self.solver
-    }
-
-    /// `SmFilletSolver::RailEdgeuseIntersect` with `geometry` as the geometry for
-    /// surfaces (`SmFilletGeom::RailEdgeuseIntersect`): this solver reads its rails
-    /// through its own slots, as `SmVariableRadiusFS` does.
-    fn rail_edgeuse_intersect_on_geometry(
-        &mut self,
-        k: &Kernel,
-        geometry: &mut crate::blend::fillet_geom::p1::FilletGeom,
-        _rollover: crate::blend::fillet_solver::p1::RolloverGuesses,
-        target: &mut Brep,
-        rail_index: usize,
-        edgeuse: EdgeuseId,
-        guess: f64,
-        tsect: &mut TsectPnt,
-    ) -> Result<Option<f64>> {
-        crate::blend::fillet_solver::surfaces::slot_rail_edgeuse_intersect(
-            self, k, geometry, target, rail_index, edgeuse, guess, tsect,
-        )
     }
 
     /// `SmConstantDistanceFS::GetJacobianSize`: 5.

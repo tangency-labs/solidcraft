@@ -1432,7 +1432,19 @@ fn rust(k: &Kernel, i: &Inputs) -> Result<Output, HarnessError> {
             let r = (|| -> Result<usize, SolidError> {
                 let mut fs =
                     FilletSolver::new_in(&k, &mut pseudo, FilletSolverId(0), 1.0e-6, 0.1, 0.01)?;
-                fs.split_fillet_geom(&k, &mut pseudo, &NoGeometry, 0, 0, &[], &[], &cc, &cc)?;
+                let target = Brep::new();
+                fs.split_fillet_geom(
+                    &k,
+                    &mut pseudo,
+                    &NoGeometry,
+                    0,
+                    0,
+                    &[],
+                    &[],
+                    &cc,
+                    &cc,
+                    [&target, &target],
+                )?;
                 Ok(fs.fillet_geoms().len())
             })();
             r.map(|n| o.extend_from_slice(&[0.0, n as f64]))

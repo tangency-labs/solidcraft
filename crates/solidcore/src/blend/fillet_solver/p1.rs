@@ -26,7 +26,7 @@
 //! | [`FilletSolver::compute_surface_values`]               | `ComputeSurfaceValues`                                |
 //! | [`compute_uv_vectors`]                                 | `SmFilletSolver::ComputeUVVectors`                    |
 //! | [`FilletSolver::split_fillet_geom_at_side_edge`]       | `SplitFilletGeomAtSideEdge`                           |
-//! | [`FilletSolver::split_fillet_geom`], [`FilletSolver::split_fillet_geom_scoped`], [`FilletSolver::split_fillet_geom_with_target`] | `SplitFilletGeom`                                     |
+//! | [`FilletSolver::split_fillet_geom`], [`FilletSolver::split_fillet_geom_with_target`] | `SplitFilletGeom`                                     |
 //! | [`FilletSolver::trim_rails_with`]                      | `TrimRails`                                           |
 //! | [`FilletSolver::TYPE`], [`FilletSolver::type_string`], [`FilletSolver::is_kind_of`] | `GetType`, `GetTypeString` (`SM_COMMON`), `IsKindOf` |
 //! | [`FilletSolverOps`] (trait, base methods)              | the virtuals `GetJacobianSize`, `SetupOffsetValues`, `CanMakeAnalytic`, `OffsetRadiiCanChange`, `LoadJacobian`, `LoadInitialValues`; `GetSolverType`, `PointOnPlaneSolve` and the `SmConstantDistanceFS::GetDistance` read of `SmFindClippedRadiusEFO` (added by `blend.fillet_solver_p3`) |
@@ -73,14 +73,13 @@
 //!   calls `FinishConstruction`); [`FilletSolver::new`] leaves it out (bare solvers of
 //!   tests and harnesses) and [`FilletSolver::add_constructor_fillet_geom`] adds it
 //!   later. `GetSurface` /
-//!   `SetSurface` with a geometry set for the surfaces (`m_pFGForSurfaces`) do not take
-//!   the pseudo B-rep and stay stubs (`plan/findings.md`, "`blend.fillet_solver_p1`:
-//!   the geometry for the surfaces"). `SmFilletExecutive` and the fillet corners belong
+//!   `SetSurface` with a geometry set for the surfaces (`m_pFGForSurfaces`) read and
+//!   write that geometry's offset surfaces, which the scope setting it lends to the
+//!   solver (`lend_geometry_surfaces`; the solver cannot reach the pseudo B-rep); a rail
+//!   the geometry has none for is refused (upstream recurses without bound, UB-204). `SmFilletExecutive` and the fillet corners belong
 //!   to executive/corner units. [`FilletExecutiveRef`] records only whether the
 //!   native back pointer is set. Callers pass the operation's executive explicitly.
-//!   Calls into unported operations return
-//!   [`SolidError::Unported`] naming the owning unit at the call site (`unported_on`,
-//!   tagged `UNPORTED`). `SplitFilletGeomAtSideEdge`, `SplitFilletGeom`, `TrimRails`,
+//!   `SplitFilletGeomAtSideEdge`, `SplitFilletGeom`, `TrimRails`,
 //!   `sm_SplitRail`, `sm_ComputeSupportEdge` and `sm_TestManifoldTangentRollover` are
 //!   ported in full. The single typed [`split_rail`] / [`compute_support_edge`]
 //!   implementations take [`FilletBrep`] and [`RailOwnership`], preserving topology
@@ -177,13 +176,6 @@ fn as_sm_err(e: SolidError, op: &'static str) -> SolidError {
         SolidError::Unported { .. } | SolidError::InvalidInput { .. } => e,
         _ => SolidError::sm_err(op),
     }
-}
-
-/// A call into a unit that is not ported yet: `upstream` (unit `unit`) on `_args` (the
-/// receiver and arguments of the C++ call, kept so each call site reads as upstream).
-/// Every call site carries its `UNPORTED(<unit>)` tag.
-fn unported_on<A, T>(_args: A, upstream: &'static str, unit: &'static str) -> Result<T> {
-    Err(SolidError::unported(upstream, unit))
 }
 
 // ---- small types ----------------------------------------------------------------------
@@ -478,6 +470,14 @@ pub struct FilletSolver {
     pub orientations: [f64; 2],
     /// `m_pFGForSurfaces`.
     pub fg_for_surfaces: Option<FilletGeomId>,
+    /// The geometry whose offset surfaces (`m_pOffSurfs`) are lent to the solver for
+    /// the scope that made it the geometry for the surfaces
+    /// ([`FilletSolver::lend_geometry_surfaces`]); upstream reads them through
+    /// `m_pFGForSurfaces`, which the solver cannot reach in the pseudo B-rep.
+    pub(crate) lent_geometry: Option<FilletGeomId>,
+    /// The lent offset surfaces of [`FilletSolver::lent_geometry`], each with a transient
+    /// identity key (`SetOffsetsData` compares keys).
+    pub(crate) lent_surfaces: [Option<OffsetSurfaceSlot>; 2],
     /// `m_dSavedOffsets` (not initialised upstream; `0.0` here).
     pub saved_offsets: [f64; 2],
     /// `m_dSurfaceExtensionFactor` (`0.5`).
@@ -532,6 +532,8 @@ impl FilletSolver {
             surfaces: [None, None],
             orientations: [1.0, 1.0],
             fg_for_surfaces: None,
+            lent_geometry: None,
+            lent_surfaces: [None, None],
             saved_offsets: [0.0, 0.0],
             surface_extension_factor: 0.5,
             conversion_tol: EFF_ZERO / 10.0,
@@ -781,40 +783,70 @@ impl FilletSolver {
         Ok(self.executive_self_intersection_handler)
     }
 
-    /// `GetSurface(lRailIndex)`: the fillet geometry's surface when one is set for the
-    /// surfaces, else the solver's own.
-    ///
-    /// # Errors
-    ///
-    /// [`SolidError::InvalidInput`] for a rail index above 1;
-    /// [`SolidError::Unported`] with a geometry for the surfaces
-    /// (`SmFilletGeom::GetOffsetSurface`).
-    pub fn surface(&self, rail: usize) -> Result<Option<&OffsetSurfaceSlot>> {
-        if self.fg_for_surfaces.is_some() {
-            // UNPORTED(blend.fillet_geom_p1): SmFilletGeom::GetOffsetSurface (justified: findings.md "blend.fillet_solver_p1: the geometry for the surfaces")
-            return Err(SolidError::unported(
-                "SmFilletGeom::GetOffsetSurface",
-                "blend.fillet_geom_p1",
+    /// The slot `GetSurface` / `SetSurface` address for rail `rail`: with a geometry for
+    /// the surfaces, that geometry's offset surface (`m_pFGForSurfaces->GetOffsetSurface`
+    /// / `SetOffsetSurface`), lent to the solver by the scope that set the geometry;
+    /// else the solver's own (`m_pSurfaces`).
+    fn addressed_slot(&self, rail: usize) -> Result<&Option<OffsetSurfaceSlot>> {
+        let slots = if self.fg_for_surfaces.is_none() {
+            &self.surfaces
+        } else if self.lent_geometry == self.fg_for_surfaces {
+            &self.lent_surfaces
+        } else {
+            return Err(invalid(
+                "the geometry for the surfaces has not lent its offset surfaces",
             ));
-        }
-        self.surfaces
+        };
+        slots
             .get(rail)
-            .map(Option::as_ref)
             .ok_or_else(|| invalid("rail index out of range"))
     }
 
-    pub(crate) fn surface_mut(&mut self, rail: usize) -> Result<Option<&mut OffsetSurfaceSlot>> {
-        if self.fg_for_surfaces.is_some() {
-            // UNPORTED(blend.fillet_geom_p1): SmFilletGeom::GetOffsetSurface (justified: findings.md "blend.fillet_solver_p1: the geometry for the surfaces")
-            return Err(SolidError::unported(
-                "SmFilletGeom::GetOffsetSurface",
-                "blend.fillet_geom_p1",
+    /// [`FilletSolver::addressed_slot`], mutable.
+    fn addressed_slot_mut(&mut self, rail: usize) -> Result<&mut Option<OffsetSurfaceSlot>> {
+        let slots = if self.fg_for_surfaces.is_none() {
+            &mut self.surfaces
+        } else if self.lent_geometry == self.fg_for_surfaces {
+            &mut self.lent_surfaces
+        } else {
+            return Err(invalid(
+                "the geometry for the surfaces has not lent its offset surfaces",
+            ));
+        };
+        slots
+            .get_mut(rail)
+            .ok_or_else(|| invalid("rail index out of range"))
+    }
+
+    /// `GetSurface(lRailIndex)`: with a geometry for the surfaces, that geometry's
+    /// offset surface (`SmFilletGeom::GetOffsetSurface`, lent to the solver by
+    /// [`FilletSolver::lend_geometry_surfaces`]), else the solver's own.
+    ///
+    /// # Errors
+    ///
+    /// [`SolidError::InvalidInput`] for a rail index above 1; with a geometry for the
+    /// surfaces, when the geometry has no offset surface for the rail
+    /// (`GetOffsetSurface` falls back to `m_pFilletSolver->GetSurface`, which asks the
+    /// same geometry again without bound: UB-204) or has not lent its surfaces.
+    pub fn surface(&self, rail: usize) -> Result<Option<&OffsetSurfaceSlot>> {
+        let slot = self.addressed_slot(rail)?;
+        if self.fg_for_surfaces.is_some() && slot.is_none() {
+            return Err(invalid(
+                "geometry set for surfaces has no offset surface for rail (UB-204)",
             ));
         }
-        self.surfaces
-            .get_mut(rail)
-            .map(Option::as_mut)
-            .ok_or_else(|| invalid("rail index out of range"))
+        Ok(slot.as_ref())
+    }
+
+    pub(crate) fn surface_mut(&mut self, rail: usize) -> Result<Option<&mut OffsetSurfaceSlot>> {
+        let with_geometry = self.fg_for_surfaces.is_some();
+        let slot = self.addressed_slot_mut(rail)?;
+        if with_geometry && slot.is_none() {
+            return Err(invalid(
+                "geometry set for surfaces has no offset surface for rail (UB-204)",
+            ));
+        }
+        Ok(slot.as_mut())
     }
 
     /// After an evaluation of `copy`, a copy of rail `rail`'s offset surface made for
@@ -854,20 +886,20 @@ impl FilletSolver {
         }
     }
 
-    /// `SetSurface(lRailIndex, pNewOffsetSurface)`.
+    /// `SetSurface(lRailIndex, pNewOffsetSurface)`: with a geometry for the surfaces,
+    /// `SmFilletGeom::SetOffsetSurface` on its lent offset surfaces (deleting the
+    /// replaced one), else the solver's own slot.
     ///
     /// # Errors
     ///
-    /// [`SolidError::InvalidInput`] for a rail index above 1;
-    /// [`SolidError::Unported`] with a geometry for the surfaces
-    /// (`SmFilletGeom::SetOffsetSurface`).
+    /// [`SolidError::InvalidInput`] for a rail index above 1 (`SetOffsetSurface`'s
+    /// `SM_ERR_INVALID_INPUT`), or a geometry for the surfaces that has not lent its
+    /// surfaces.
     pub fn set_surface(&mut self, rail: usize, surface: Option<OffsetSurfaceSlot>) -> Result<()> {
         if self.fg_for_surfaces.is_some() {
-            // UNPORTED(blend.fillet_geom_p1): SmFilletGeom::SetOffsetSurface (justified: findings.md "blend.fillet_solver_p1: the geometry for the surfaces")
-            return Err(SolidError::unported(
-                "SmFilletGeom::SetOffsetSurface",
-                "blend.fillet_geom_p1",
-            ));
+            // m_pFGForSurfaces->SetOffsetSurface(lRailIndex, pNewOffsetSurface)
+            *self.addressed_slot_mut(rail)? = surface;
+            return Ok(());
         }
         let slot = self
             .surfaces
@@ -1070,11 +1102,8 @@ impl FilletSolver {
                         .position(|d| d.key == o.key)
                         .map_or_else(|| o.clone(), |pos| self.detached.remove(pos))
                 });
-                let slot = self
-                    .surfaces
-                    .get_mut(i)
-                    .ok_or_else(|| invalid("rail index out of range"))?;
-                *slot = restored;
+                // SetSurface(i, pOrigOffSurf)
+                *self.addressed_slot_mut(i)? = restored;
             }
         }
         Ok(())
@@ -1446,12 +1475,12 @@ impl FilletSolver {
     ///
     /// [`SolidError::InvalidInput`] for a geometry index past the solver's geometries or
     /// fewer second intervals than first ones (upstream only asserts equal sizes, then
-    /// reads `crIvls2[i]` for every `i` of `crIvls1`); [`SolidError::Unported`] for the
-    /// geometry copies (`SmFilletGeom::SmFilletGeom`) and the end curves
-    /// (`CreateEndCurve` without the target B-rep:
-    /// [`FilletSolver::split_fillet_geom_with_target`] makes them); [`SolidError::NotFound`] for a vertex without its fillet
-    /// record; those of [`FilletBrep::rail_vertex`], `FindPointClass`,
-    /// [`FilletBrep::set_up_rail_point`] and [`trim_rail`].
+    /// reads `crIvls2[i]` for every `i` of `crIvls1`); [`SolidError::NotFound`] for a
+    /// vertex without its fillet record; those of [`FilletBrep::rail_vertex`],
+    /// `FindPointClass`, [`FilletBrep::set_up_rail_point`], the end curves
+    /// ([`FilletBrep::create_end_curve_with_solver`], reading rails 0 and 1's base
+    /// B-reps `bases`) and [`trim_rail`].
+    #[allow(clippy::too_many_arguments)]
     pub fn split_fillet_geom(
         &mut self,
         k: &Kernel,
@@ -1463,10 +1492,11 @@ impl FilletSolver {
         ivls2: &[Extent1d],
         cc1: &CurveClassification<EntityRef>,
         cc2: &CurveClassification<EntityRef>,
+        bases: [&Brep; 2],
     ) -> Result<()> {
         let cc1 = cc1.map_objects(&mut |o| Ok(FilletClassObject::Legacy(o)))?;
         let cc2 = cc2.map_objects(&mut |o| Ok(FilletClassObject::Legacy(o)))?;
-        self.split_fillet_geom_scoped(
+        self.split_fillet_geom_with_target(
             k,
             pseudo,
             &LegacyClassificationObjects(geometry),
@@ -1476,47 +1506,18 @@ impl FilletSolver {
             ivls2,
             &cc1,
             &cc2,
+            bases,
         )
     }
 
-    /// Split geometries using retained body-qualified rail classifications.
+    /// [`Self::split_fillet_geom`] with retained body-qualified rail classifications.
+    /// `bases` are the base B-reps of rails 0 and 1 the end curves read
+    /// (`CreateEndCurve`, which for `SM_BT_BLEND` reads each rail end vertex's
+    /// classification edge in its rail's base B-rep; upstream reaches them through the
+    /// vertices' pointers).
     ///
     /// # Errors
     /// As [`Self::split_fillet_geom`], or a non-target point classification.
-    #[allow(clippy::too_many_arguments)]
-    pub fn split_fillet_geom_scoped(
-        &mut self,
-        k: &Kernel,
-        pseudo: &mut FilletBrep,
-        geometry: &impl ClassGeometry<FilletClassObject>,
-        fillet_geom_index: usize,
-        trim_type: i32,
-        ivls1: &[Extent1d],
-        ivls2: &[Extent1d],
-        cc1: &CurveClassification<FilletClassObject>,
-        cc2: &CurveClassification<FilletClassObject>,
-    ) -> Result<()> {
-        self.split_fillet_geom_in(
-            k,
-            pseudo,
-            geometry,
-            fillet_geom_index,
-            trim_type,
-            ivls1,
-            ivls2,
-            cc1,
-            cc2,
-            None,
-        )
-    }
-
-    /// [`Self::split_fillet_geom_scoped`] with the base B-reps of rails 0 and 1 the
-    /// end curves read (`CreateEndCurve`, which for `SM_BT_BLEND` reads each rail end
-    /// vertex's classification edge in its rail's base B-rep).
-    ///
-    /// # Errors
-    /// As [`Self::split_fillet_geom_scoped`], with the errors of
-    /// [`FilletBrep::create_end_curve_with_solver`] for the end curves.
     #[allow(clippy::too_many_arguments)]
     pub fn split_fillet_geom_with_target(
         &mut self,
@@ -1541,7 +1542,7 @@ impl FilletSolver {
             ivls2,
             cc1,
             cc2,
-            Some(bases),
+            bases,
         )
     }
 
@@ -1586,7 +1587,7 @@ impl FilletSolver {
         ivls2: &[Extent1d],
         cc1: &CurveClassification<FilletClassObject>,
         cc2: &CurveClassification<FilletClassObject>,
-        bases: Option<[&Brep; 2]>,
+        bases: [&Brep; 2],
     ) -> Result<()> {
         // SM_ASSERT(sizes equal) is a no-op; a shorter crIvls2 is read past its end.
         if ivls2.len() < ivls1.len() {
@@ -1657,14 +1658,6 @@ impl FilletSolver {
 
             // Create the ending curve on the fillet
             for end in 0..2usize {
-                let Some(bases) = bases else {
-                    // UNPORTED(blend.fillet_geom_p5): SmFilletGeom::CreateEndCurve (caller holds no target B-rep; justified: findings.md "blend.fillet_geom_p5: solver and corner callers")
-                    return unported_on(
-                        (new_fillet_geom, end, trim_type),
-                        "SmFilletGeom::CreateEndCurve",
-                        "blend.fillet_geom_p5",
-                    );
-                };
                 // (SmBoundaryTrimmingType)lTrimType: only SM_BT_BLEND is tested
                 let end_trim = match trim_type {
                     1 => BoundaryTrimmingType::Minimal,
@@ -1809,8 +1802,11 @@ pub trait FilletSolverOps: AsFilletSolverOps {
             .map(|slot| &mut slot.surface))
     }
 
-    /// Rail intersection with the actual selected geometry available to derived
-    /// solvers. The default retains the existing context-free behavior.
+    /// `SmFilletSolver::RailEdgeuseIntersect` while `geometry` is the geometry for the
+    /// surfaces (`SmFilletGeom::RailEdgeuseIntersect`): the caller has lent the
+    /// geometry's offset surfaces to the solver, so the default reads them through
+    /// `GetSurface`; solvers that also need the geometry itself (the tangent-rollover
+    /// guesses) override it.
     #[allow(clippy::too_many_arguments)]
     fn rail_edgeuse_intersect_on_geometry(
         &mut self,
@@ -2053,22 +2049,6 @@ impl FilletSolverOps for FilletSolver {
 
     fn solver_mut(&mut self) -> &mut FilletSolver {
         self
-    }
-
-    fn rail_edgeuse_intersect_on_geometry(
-        &mut self,
-        k: &Kernel,
-        geometry: &mut FilletGeom,
-        _rollover: RolloverGuesses,
-        b: &mut Brep,
-        rail_index: usize,
-        edgeuse: EdgeuseId,
-        guess: f64,
-        tsect: &mut TsectPnt,
-    ) -> Result<Option<f64>> {
-        super::surfaces::base_rail_edgeuse_intersect(
-            self, k, geometry, b, rail_index, edgeuse, guess, tsect,
-        )
     }
 }
 

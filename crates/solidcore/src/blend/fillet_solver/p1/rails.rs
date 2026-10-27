@@ -30,8 +30,12 @@ const OP: &str = "blend::fillet_solver::p1::rails";
 pub trait RailOwnership {
     /// Resolve the actual owner identity and its optional B-rep identity.
     fn edge_owner(&self, edge: EdgeId) -> Result<(ObjectRef, Option<ObjectRef>)>;
-    /// Deliver the notification produced by `Curve::set_owner`.
-    fn owner_changed(&mut self, change: OwnerChange) -> Result<()>;
+    /// Deliver the notification produced by `Curve::set_owner` for `curve`, the
+    /// notifying object (`SM_NO_CHANGE_OWNER` on the curve).
+    ///
+    /// # Errors
+    /// Identity resolution or notification transport failures.
+    fn owner_changed(&mut self, curve: &mut Curve, change: OwnerChange) -> Result<()>;
     /// Set the owner of the actual installed rail curve. The default preserves the
     /// original adapter contract; retained contexts may notify before assignment.
     ///
@@ -46,7 +50,7 @@ pub trait RailOwnership {
     ) -> Result<()> {
         let (_, notification) = curve.set_owner(Some(owner), brep);
         if let Some(notification) = notification {
-            self.owner_changed(notification)?;
+            self.owner_changed(curve, notification)?;
         }
         Ok(())
     }
@@ -117,11 +121,20 @@ impl RailOwnership for RetainedRailOwnership<'_> {
             None,
         ))
     }
-    fn owner_changed(&mut self, _: OwnerChange) -> Result<()> {
-        // UNPORTED(blend.fillet_solver_p5): this legacy callback has no actual Curve identity.
-        Err(SolidError::unported(
-            "SmFilletSolver::ProcessRollOver (actual curve notification context)",
-            "blend.fillet_solver_p5",
+    /// `SM_NO_CHANGE_OWNER` on the actual curve, through the retained context.
+    fn owner_changed(&mut self, curve: &mut Curve, change: OwnerChange) -> Result<()> {
+        let type_code = curve.type_code();
+        let key = self.context.geometry_key(curve.notify_identity_slot())?;
+        let actual = ObjectRef { type_code, key };
+        crate::geom::object::report_owner_link(Some(self.context), actual.key, change.old_owner);
+        crate::error::ignore_status(crate::geom::a_object::notify(
+            self.attributes,
+            Some(self.context),
+            crate::geom::object::NotifyOperation::ChangeOwner,
+            actual,
+            change.new_owner,
+            change.new_owner_brep,
+            change.old_owner,
         ))
     }
     fn set_curve_owner(
@@ -133,20 +146,16 @@ impl RailOwnership for RetainedRailOwnership<'_> {
     ) -> Result<()> {
         let old_owner = curve.owner();
         if old_owner != Some(owner) && curve.dim() == 3 {
-            let type_code = curve.type_code();
-            let key = self.context.geometry_key(curve.notify_identity_slot())?;
-            let actual = ObjectRef { type_code, key };
-            // SmCurve::SetOwner notifies while GetOwner still returns the old owner.
-            crate::geom::object::report_owner_link(Some(self.context), actual.key, old_owner);
-            crate::error::ignore_status(crate::geom::a_object::notify(
-                self.attributes,
-                Some(self.context),
-                crate::geom::object::NotifyOperation::ChangeOwner,
-                actual,
-                Some(owner),
-                None,
-                old_owner,
-            ))?;
+            // SmCurve::SetOwner notifies while GetOwner still returns the old owner
+            // (SM_NO_GET_BREP is NULL in the pinned build).
+            self.owner_changed(
+                curve,
+                OwnerChange {
+                    new_owner: Some(owner),
+                    new_owner_brep: None,
+                    old_owner,
+                },
+            )?;
         }
         curve.set_owner(Some(owner), None);
         if let Some(key) = curve.notify_key() {
