@@ -1,0 +1,50 @@
+{
+  "en": {
+    "table.resize_column_hint": "Drag to resize. Double-click to restore the automatic width.",
+    "manage.parameters_pop_out": "Open in separate window",
+    "manage.parameters_dock": "Dock in main window",
+    "prefs.parameters_fit_columns": "Fit parameter columns to contents"
+  },
+  "de": {
+    "table.resize_column_hint": "Ziehen zum Ändern der Breite. Doppelklicken, um die automatische Breite wiederherzustellen.",
+    "manage.parameters_pop_out": "In eigenem Fenster öffnen",
+    "manage.parameters_dock": "Im Hauptfenster andocken",
+    "prefs.parameters_fit_columns": "Parameterspalten an den Inhalt anpassen"
+  },
+  "ja": {
+    "table.resize_column_hint": "ドラッグして幅を変更します。ダブルクリックすると自動調整に戻ります。",
+    "manage.parameters_pop_out": "別ウィンドウで開く",
+    "manage.parameters_dock": "メインウィンドウに戻す",
+    "prefs.parameters_fit_columns": "パラメータ列の幅を内容に合わせる"
+  },
+  "zh": {
+    "table.resize_column_hint": "拖动以调整宽度。双击以恢复自动宽度。",
+    "manage.parameters_pop_out": "在独立窗口中打开",
+    "manage.parameters_dock": "停靠到主窗口",
+    "prefs.parameters_fit_columns": "按内容自动调整参数列宽"
+  },
+  "ar": {
+    "manage.parameters_dock": "إرساء في النافذة الرئيسية",
+    "manage.parameters_pop_out": "فتح في نافذة منفصلة",
+    "prefs.parameters_fit_columns": "ملاءمة أعمدة المعلمات للمحتوى",
+    "table.resize_column_hint": "اسحب لتغيير العرض. انقر نقرًا مزدوجًا لاستعادة العرض التلقائي."
+  },
+  "he": {
+    "manage.parameters_dock": "עיגון בחלון הראשי",
+    "manage.parameters_pop_out": "פתיחה בחלון נפרד",
+    "prefs.parameters_fit_columns": "התאמת עמודות הפרמטרים לתוכן",
+    "table.resize_column_hint": "גררו לשינוי הרוחב. לחצו פעמיים לשחזור הרוחב האוטומטי."
+  },
+  "ko": {
+    "manage.parameters_dock": "메인 창에 도킹",
+    "manage.parameters_pop_out": "별도 창에서 열기",
+    "prefs.parameters_fit_columns": "매개변수 열 너비를 내용에 맞추기",
+    "table.resize_column_hint": "드래그하여 너비를 조절합니다. 두 번 클릭하면 자동 너비로 복원됩니다."
+  },
+  "vi": {
+    "manage.parameters_dock": "Gắn vào cửa sổ chính",
+    "manage.parameters_pop_out": "Mở trong cửa sổ riêng",
+    "prefs.parameters_fit_columns": "Điều chỉnh độ rộng cột tham số theo nội dung",
+    "table.resize_column_hint": "Kéo để thay đổi độ rộng. Nhấp đúp để khôi phục độ rộng tự động."
+  }
+}

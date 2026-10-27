@@ -1098,3 +1098,269 @@ fn bevel_lighting_reverses_for_fields_and_pressed_buttons_without_changing_geome
     let output = crate::test_support::frame(&ctx, egui::RawInput::default(), |ui| bevel.paint(ui.painter(), tiny, 0, false, true));
     assert!(!output.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::LineSegment { .. })));
 }
+
+#[test]
+fn tear_off_requires_a_deliberate_pull_but_hands_off_before_the_pointer_leaves() {
+    let parent = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+    let rest = egui::Rect::from_min_size(egui::pos2(792.0, 200.0), egui::vec2(800.0, 600.0));
+    let grab = egui::vec2(400.0, 20.0);
+    for distance in [1.0, 10.0, 40.0, 80.0] {
+        let desired = rest.translate(egui::vec2(distance, 0.0));
+        assert!(!crate::ui_kit::floating::crosses_border(parent, desired, desired.min + grab, grab), "{distance} must stay embedded");
+    }
+    let desired = rest.translate(egui::vec2(398.0, 0.0));
+    let pointer = desired.min + grab;
+    assert!(parent.contains(pointer));
+    assert!(crate::ui_kit::floating::crosses_border(parent, desired, pointer, grab));
+    let top = egui::Rect::from_min_size(egui::pos2(500.0, -13.0), rest.size());
+    assert!(parent.contains(top.min + grab));
+    assert!(crate::ui_kit::floating::crosses_border(parent, top, top.min + grab, grab));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn feature_forms_share_resizing_and_deliberate_native_tear_off() {
+    use serde_json::json;
+    for (command, placement) in [("solid.box", "bottom"), ("solid.extrude", "bottom"), ("solid.shell", "bottom"), ("solid.box", "top")] {
+        let identity = match command {
+            "solid.box" => "BOX",
+            "solid.extrude" => "EXTRUDE",
+            _ => "SHELL",
+        };
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1800,"height":1200}));
+        h.call("ui.prefs", json!({"dialog_buttons":placement}));
+        h.step(&json!({"start":command})).unwrap();
+        h.frames(6);
+        let info = crate::scenario::rects("dialog:resize:");
+        let (name, _) = info.iter().find(|(n, _)| n.ends_with(":bottom_left")).unwrap();
+        let key = name.trim_start_matches("dialog:resize:").trim_end_matches(":bottom_left").to_string();
+        let bounds = format!("dialog:resize:{key}:bounds");
+        let before = scenario::rect_of(&bounds).unwrap();
+        let at = scenario::handle_at(name).unwrap();
+        h.step(&json!({"drag":[[at.x,at.y],[at.x-50.0,at.y+30.0]]})).unwrap();
+        h.frames(6);
+        let resized = scenario::rect_of(&bounds).unwrap();
+        assert!(resized.width() > before.width() + 40.0, "{command}: {before:?} -> {resized:?}");
+        assert!(resized.height() > before.height() + 20.0, "{command}: height grows");
+        let title = scenario::handle_at("dialog:title").unwrap();
+        h.step(&json!({"drag":[[title.x,title.y],[title.x+40.0,title.y]]})).unwrap();
+        h.frames(6);
+        assert!(!crate::ui_kit::floating::detached(&h.ctx, egui::Id::new(("sc_dialog", identity))), "small moves stay embedded");
+        let title = scenario::handle_at("dialog:title").unwrap();
+        let to = egui::pos2(1788.0, title.y);
+        h.step(&json!({"drag":[[title.x,title.y],[to.x,to.y]]})).unwrap();
+        h.frames(6);
+        assert!(crate::ui_kit::floating::detached(&h.ctx, egui::Id::new(("sc_dialog", identity))), "{command} tears off");
+        assert!(h.app.dialog.is_some(), "detaching retains the editable tool");
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn preferences_uses_the_shared_resize_and_native_tear_off_host() {
+    use serde_json::json;
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.call("ui.resize", json!({"width":1900,"height":1300}));
+    crate::prefs::open_at(&mut h.app, 0);
+    h.frames(6);
+    let name = scenario::rects("dialog:resize:").into_iter().find(|(n, _)| n.ends_with(":bottom_right")).unwrap().0;
+    let bounds = name.trim_end_matches(":bottom_right").to_string() + ":bounds";
+    let before = scenario::rect_of(&bounds).unwrap();
+    let at = scenario::handle_at(&name).unwrap();
+    h.step(&json!({"drag":[[at.x,at.y],[at.x+80.0,at.y+40.0]]})).unwrap();
+    h.frames(6);
+    let after = scenario::rect_of(&bounds).unwrap();
+    assert!(after.width() > before.width() + 60.0);
+    assert!(after.height() > before.height() + 20.0);
+    let title = scenario::handle_at("dialog:title").unwrap();
+    let to = egui::pos2(1888.0, title.y);
+    h.step(&json!({"drag":[[title.x,title.y],[to.x,to.y]]})).unwrap();
+    h.frames(6);
+    assert!(crate::ui_kit::floating::detached(&h.ctx, egui::Id::new("sc_prefs")));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn tear_off_keeps_the_grab_point_while_crossing_screens_and_adding_native_chrome() {
+    use crate::ui_kit::floating::TearOff;
+    let origin = egui::pos2(-1728.0, 50.0);
+    let grab = egui::vec2(140.0, 20.0);
+    let chrome = egui::vec2(1.0, 32.0);
+    let mut drag = TearOff::new(egui::pos2(-1200.0, 300.0), grab, true);
+    let builder = drag.prepare(egui::ViewportBuilder::default());
+    assert_eq!(builder.visible, Some(false), "do not flash the OS default position");
+    assert_eq!(builder.active, Some(false), "the original window retains pointer capture");
+    let mut previous: Option<(egui::Pos2, egui::Pos2)> = None;
+    for (pointer, down) in [(egui::pos2(700.0, 400.0), true), (egui::pos2(1900.0, 450.0), true), (egui::pos2(1950.0, 460.0), false)] {
+        let (outer, show, finished) = drag.placement(Some(pointer), origin, down, chrome);
+        assert!((outer + chrome + grab - (origin + pointer.to_vec2())).length() < 0.01, "native chrome must not shift the held point");
+        assert_eq!(show, previous.is_none(), "reveal only after aligning, once");
+        assert_eq!(finished, !down, "keep following until release, including its final position");
+        if let Some((last_pointer, last_outer)) = previous {
+            assert!(((outer - last_outer) - (pointer - last_pointer)).length() < 0.01, "the window moves by exactly the pointer delta");
+        }
+        previous = Some((pointer, outer));
+    }
+    let builder = drag.prepare(egui::ViewportBuilder::default());
+    assert!(builder.visible.is_none(), "later frames must not hide or re-place the window");
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_tear_off_released_before_creation_uses_its_drop_position() {
+    use crate::ui_kit::floating::TearOff;
+    let dropped = egui::pos2(1234.0, 300.0);
+    let mut drag = TearOff::new(dropped, egui::vec2(100.0, 20.0), false);
+    let (outer, show, finished) = drag.placement(Some(egui::pos2(5000.0, 5000.0)), egui::pos2(80.0, 60.0), false, egui::vec2(0.0, 32.0));
+    assert_eq!(outer, egui::pos2(1234.0, 268.0));
+    assert!(show && finished, "a quick release shows the window at its drop point without starting another OS drag");
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn enlarged_native_resize_targets_resize_the_child_from_screen_coordinates() {
+    use egui::{Rect, ViewportCommand, ViewportId, pos2, vec2};
+    for (name, axes) in [
+        ("top_left", (-1, -1)),
+        ("top_right", (1, -1)),
+        ("bottom_left", (-1, 1)),
+        ("bottom_right", (1, 1)),
+        ("left", (-1, 0)),
+        ("right", (1, 0)),
+        ("top", (0, -1)),
+        ("bottom", (0, 1)),
+    ] {
+        let ctx = crate::fonts::test_context();
+        let original = Rect::from_min_size(pos2(-900.0, 100.0), vec2(600.0, 400.0));
+        let mut inner = original;
+        let mut draw = |ui: &mut Ui| {
+            crate::ui_kit::floating::native_resize(ui, vec2(260.0, 160.0));
+            // Later content must not silently replace the resize arrow.
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Default);
+        };
+        let frame_input = |inner: Rect, events| {
+            let mut input = egui::RawInput { screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, inner.size())), events, ..Default::default() };
+            let vp = input.viewports.get_mut(&ViewportId::ROOT).unwrap();
+            vp.inner_rect = Some(inner);
+            vp.outer_rect = Some(Rect::from_min_max(inner.min - vec2(0.0, 32.0), inner.max));
+            input
+        };
+        crate::test_support::frame(&ctx, frame_input(inner, vec![]), &mut draw);
+        let hit = scenario::rect_of(&format!("window:native_resize:{name}")).unwrap();
+        // Use points well inside the new targets, beyond the old native border.
+        let press = if axes.0 != 0 && axes.1 == 0 {
+            egui::pos2(if axes.0 < 0 { hit.right() + 3.0 } else { hit.left() - 3.0 }, hit.center().y)
+        } else if axes.0 == 0 {
+            egui::pos2(hit.center().x, if axes.1 < 0 { hit.bottom() + 3.0 } else { hit.top() - 3.0 })
+        } else {
+            hit.center()
+        };
+        let hover = crate::test_support::frame(&ctx, frame_input(inner, vec![egui::Event::PointerMoved(press)]), &mut draw);
+        let cursor = if axes.0 == 0 {
+            egui::CursorIcon::ResizeVertical
+        } else if axes.1 == 0 {
+            egui::CursorIcon::ResizeHorizontal
+        } else if axes.0 == axes.1 {
+            egui::CursorIcon::ResizeNwSe
+        } else {
+            egui::CursorIcon::ResizeNeSw
+        };
+        assert_eq!(hover.platform_output.cursor_icon, cursor, "{name}: show the resize arrow before pressing, throughout the target");
+        if axes.0 != 0 && axes.1 != 0 {
+            assert_eq!(hit.size(), egui::Vec2::splat(12.0));
+        } else if axes.0 != 0 {
+            assert_eq!(hit.width(), 6.0);
+        } else {
+            assert_eq!(hit.height(), 6.0);
+        }
+        crate::test_support::frame(&ctx, frame_input(inner, pointer(press, true)), &mut draw);
+        for delta in [vec2(40.0, 30.0), vec2(70.0, 50.0)] {
+            let global = original.min + press.to_vec2() + delta;
+            let local = global - inner.min.to_vec2();
+            let output = crate::test_support::frame(&ctx, frame_input(inner, vec![egui::Event::PointerMoved(local)]), &mut draw);
+            let commands = &output.viewport_output.get(&ViewportId::ROOT).unwrap().commands;
+            let size = commands.iter().find_map(|c| if let ViewportCommand::InnerSize(s) = c { Some(*s) } else { None }).unwrap();
+            let expected = original.size() + vec2(axes.0 as f32 * delta.x, axes.1 as f32 * delta.y);
+            assert_eq!(size, expected, "{name}: only the requested axes change");
+            let next_min = original.min + vec2(if axes.0 < 0 { delta.x } else { 0.0 }, if axes.1 < 0 { delta.y } else { 0.0 });
+            let position = commands.iter().find_map(|c| if let ViewportCommand::OuterPosition(p) = c { Some(*p) } else { None });
+            if axes.0 < 0 || axes.1 < 0 {
+                assert_eq!(position, Some(next_min - vec2(0.0, 32.0)), "preserve the opposite edge and native title bar");
+            } else {
+                assert!(position.is_none());
+            }
+            inner = Rect::from_min_size(next_min, size);
+        }
+        let release = original.min + press.to_vec2() + vec2(70.0, 50.0) - inner.min.to_vec2();
+        crate::test_support::frame(&ctx, frame_input(inner, pointer(release, false)), &mut draw);
+        let idle = crate::test_support::frame(&ctx, frame_input(inner, vec![]), &mut draw);
+        assert!(
+            !idle
+                .viewport_output
+                .get(&ViewportId::ROOT)
+                .unwrap()
+                .commands
+                .iter()
+                .any(|c| matches!(c, ViewportCommand::InnerSize(_) | ViewportCommand::OuterPosition(_))),
+            "no resize feedback on idle frames"
+        );
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn native_resize_leaves_the_title_close_button_clickable() {
+    let ctx = crate::fonts::test_context();
+    let mut closed = false;
+    let mut draw = |ui: &mut Ui| {
+        header(ui, "settings", "Parameters", || closed = true);
+        crate::ui_kit::floating::native_resize(ui, egui::vec2(260.0, 160.0));
+    };
+    let input = |events| {
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 400.0));
+        let mut input = egui::RawInput { screen_rect: Some(rect), events, ..Default::default() };
+        let vp = input.viewports.get_mut(&egui::ViewportId::ROOT).unwrap();
+        vp.inner_rect = Some(rect);
+        vp.outer_rect = Some(rect.expand(1.0));
+        input
+    };
+    crate::test_support::frame(&ctx, input(vec![]), &mut draw);
+    let close = scenario::handle_at("dialog:close").unwrap();
+    crate::test_support::frame(&ctx, input(pointer(close, true)), &mut draw);
+    crate::test_support::frame(&ctx, input(pointer(close, false)), &mut draw);
+    assert!(closed, "the enlarged corner must not consume the close button's click");
+}
+
+#[test]
+fn native_cursor_refresh_repeats_only_for_internal_resize_targets() {
+    use std::sync::{Arc, Mutex};
+    let ctx = crate::fonts::test_context();
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let observed = calls.clone();
+    set_resize_cursor_handler(&ctx, move |_, icon| {
+        observed.lock().unwrap().push(icon);
+    });
+    let hit = egui::Rect::from_min_max(egui::pos2(100.0, 100.0), egui::pos2(116.0, 300.0));
+    let mut draw = |ui: &mut Ui| {
+        let response = ui.interact(hit, egui::Id::new("internal_resize"), egui::Sense::drag());
+        crate::ui_kit::panel::resize_cursor(ui, hit, &response, egui::CursorIcon::ResizeHorizontal);
+        ui.ctx().set_cursor_icon(egui::CursorIcon::Default);
+    };
+    let input = |point: Option<egui::Pos2>| egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(600.0, 400.0))),
+        events: point.map(|p| vec![egui::Event::PointerMoved(p)]).unwrap_or_default(),
+        ..Default::default()
+    };
+    crate::test_support::frame(&ctx, input(None), &mut draw);
+    for _ in 0..3 {
+        let output = crate::test_support::frame(&ctx, input(Some(egui::pos2(110.0, 200.0))), &mut draw);
+        assert_eq!(output.platform_output.cursor_icon, egui::CursorIcon::ResizeHorizontal);
+    }
+    assert_eq!(*calls.lock().unwrap(), vec![egui::CursorIcon::ResizeHorizontal; 3], "refresh identical cursor requests instead of skipping them");
+    let output = crate::test_support::frame(&ctx, input(Some(egui::pos2(2.0, 200.0))), &mut draw);
+    assert_eq!(output.platform_output.cursor_icon, egui::CursorIcon::Default);
+    assert_eq!(calls.lock().unwrap().len(), 3, "the main window's border never invokes the internal cursor hook");
+}

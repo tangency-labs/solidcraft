@@ -663,6 +663,8 @@ preference_settings! {
     /// Draw the parts browser on a translucent card over the 3D view instead of a column of its
     /// own, so the workspace keeps the whole window width.
     browser_float: bool = false, PAGE_INTERFACE;
+    /// Fit unsized parameter columns to their contents; off keeps proportional widths.
+    parameters_fit_columns: bool = true, PAGE_INTERFACE;
     /// The wheel zooms toward the point under the cursor (else toward the view's centre).
     zoom_to_cursor: bool = true, PAGE_NAVIGATION => check("Zoom to the cursor", "The wheel zooms toward the point under the cursor (off: toward the view's centre)");
     /// Spread discrete wheel input across frames (off: apply each event immediately).
@@ -3415,6 +3417,7 @@ mod tests {
             ("timeline_under_browser", json!(true), PAGE_INTERFACE),
             ("history_sketches", json!("under_feature"), PAGE_INTERFACE),
             ("browser_float", json!(true), PAGE_INTERFACE),
+            ("parameters_fit_columns", json!(false), PAGE_INTERFACE),
             ("color_vision", json!("protan"), PAGE_INTERFACE),
             ("viewport_theme", json!("light"), PAGE_INTERFACE),
             ("view_confirm_corner", json!(true), PAGE_INTERFACE),

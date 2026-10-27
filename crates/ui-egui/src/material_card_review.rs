@@ -78,8 +78,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     } else {
         panel
     };
+    let panel = panel.resizable_to_content();
     let mut close = false;
-    panel.window(ctx).show(ctx, |ui| {
+    panel.show(ctx, |ui| {
         let (closed, action) = panel.feature(
             ui,
             ui_kit::FeatureOptions {

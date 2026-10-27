@@ -528,7 +528,13 @@ pub fn window_builder(app: &SolveApp) -> egui::ViewportBuilder {
 /// The system's close button closes the chat (it opens there again); Dock puts it back.
 #[cfg(not(target_arch = "wasm32"))]
 fn window(app: &mut SolveApp, ctx: &egui::Context) {
+    let parent = ctx.input_for(egui::ViewportId::ROOT, |i| i.viewport().inner_rect);
+    let opening = !app.agent_chat.window_placed;
+    if opening {
+        app.agent_chat.native_docking = Default::default();
+    }
     let builder = window_builder(app);
+    let builder = app.agent_chat.native_handoff.as_ref().map_or_else(|| builder.clone(), |drag| drag.prepare(builder.clone()));
     app.agent_chat.window_placed = true;
     // The side panel isn't drawn: its place no longer counts as "in the chat".
     app.agent_chat.panel_rect = None;
@@ -565,8 +571,31 @@ fn window(app: &mut SolveApp, ctx: &egui::Context) {
             request_new_chat(app);
         }
         let (outer, inner, close) = ctx.input(|i| (i.viewport().outer_rect, i.viewport().inner_rect, i.viewport().close_requested()));
+        if app.agent_chat.native_handoff.is_none() {
+            crate::ui_kit::floating::native_resize(ui, egui::vec2(MIN_WIDTH, 320.0));
+        }
+        let following = crate::ui_kit::floating::follow_pointer(&ctx, &mut app.agent_chat.native_handoff, outer, inner);
         if let (Some(o), Some(n)) = (outer, inner) {
-            app.preferences.agent_chat_window = Some([o.min.x, o.min.y, n.width(), n.height()]);
+            let position = following.unwrap_or(o.min);
+            app.preferences.agent_chat_window = Some([position.x, position.y, n.width(), n.height()]);
+            if !close
+                && following.is_none()
+                && let Some(parent) = parent
+            {
+                if app.agent_chat.native_docking.update(o, n, parent, ctx.input(|i| i.time)) {
+                    app.preferences.agent_chat_popped = false;
+                    app.agent_chat.window_placed = false;
+                    app.agent_chat.native_handoff = None;
+                    crate::ui_kit::floating::end_handoff(&ctx);
+                    ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Focus);
+                    ctx.request_repaint_of(egui::ViewportId::ROOT);
+                } else if app.agent_chat.native_docking.moving {
+                    ctx.request_repaint_after(std::time::Duration::from_millis(50));
+                }
+            }
+        }
+        if opening && following.is_none() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         }
         if close {
             app.agent_chat.open = false;
@@ -747,6 +776,32 @@ fn header(app: &mut SolveApp, ui: &mut egui::Ui, left: bool) {
 /// While the header is dragged: the cursor grabs and the side it would dock on lights up; on
 /// release over the other half of the window the panel moves there.
 fn dock_drag(app: &mut SolveApp, ui: &egui::Ui, drag: &egui::Response, left: bool) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if drag.drag_started() {
+            app.agent_chat.title_grab = ui.input(|i| i.pointer.press_origin()).zip(app.agent_chat.panel_rect).map(|(p, r)| p - r.min);
+        }
+        if (drag.dragged() || drag.drag_stopped())
+            && let (Some(pointer), Some(rect), Some(grab)) =
+                (ui.input(|i| i.pointer.latest_pos()), app.agent_chat.panel_rect, app.agent_chat.title_grab)
+        {
+            let desired = Rect::from_min_size(pointer - grab, rect.size());
+            if crate::ui_kit::floating::crosses_border(ui.ctx().content_rect(), desired, pointer, grab) {
+                let origin = ui.input(|i| i.viewport().inner_rect.map(|r| r.min)).unwrap_or_default();
+                let pos = origin + desired.min.to_vec2();
+                app.preferences.agent_chat_window = Some([pos.x, pos.y, desired.width(), desired.height()]);
+                app.preferences.agent_chat_popped = true;
+                app.agent_chat.window_placed = false;
+                app.agent_chat.native_handoff = Some(crate::ui_kit::floating::TearOff::new(pos, grab, ui.input(|i| i.pointer.primary_down())));
+                crate::ui_kit::floating::mark_handoff(ui.ctx());
+                ui.ctx().request_repaint();
+                return;
+            }
+        }
+        if drag.drag_stopped() {
+            app.agent_chat.title_grab = None;
+        }
+    }
     if drag.hovered() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
     }

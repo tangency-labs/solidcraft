@@ -338,7 +338,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let bottom = vp.bottom().min(ctx.content_rect().bottom()) - gap;
     let top = crate::shell::panel_top(app, vp, bottom, crate::frame::Side::Right);
     let frame = crate::ui_kit::Panel::palette_frame(ctx, app.ui.layout);
-    let anchor = egui::pos2(vp.right() - gap - frame.stroke.width, top + frame.stroke.width);
+    let docked = egui::pos2(vp.right() - gap - frame.stroke.width, top + frame.stroke.width);
+    let anchor = crate::frame::offset_anchor(docked, crate::frame::dock_offset(ctx, "SKETCH_PALETTE"), vp, crate::frame::Side::Right);
     let shown = |key: &str| match key {
         "grid" => !opts.hide_grid,
         "snap" => !opts.no_snap,
@@ -370,8 +371,9 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         crate::frame::Side::Right,
         frame,
     )
-    .width(width(vp));
-    let response = panel.window(ctx).show(ctx, |ui| {
+    .width(width(vp))
+    .resizable_to_content();
+    let response = panel.show(ctx, |ui| {
         panel.palette(ui, bottom, top, |ui, part| match part {
             crate::ui_kit::Part::Header => {
                 let status = if !solved || !geometry || remaining == 0 {

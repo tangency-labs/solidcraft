@@ -38,10 +38,20 @@ pub fn dock_offset(ctx: &egui::Context, key: &str) -> egui::Vec2 {
 
 /// A title drag owns the pointer even when it outruns the dialog's previous position.
 pub(crate) fn dock_dragging(ctx: &egui::Context) -> bool {
+    if crate::ui_kit::floating::handoff_dragging(ctx) {
+        return true;
+    }
     let frame = ctx.cumulative_frame_nr();
     // The viewport can draw before the dialog, so retain the preceding frame's marker.
     ctx.data(|d| d.get_temp::<u64>(egui::Id::new("sc_dock_drag_frame"))).is_some_and(|at| at >= frame.saturating_sub(1))
         && ctx.input(|i| i.pointer.any_down())
+}
+
+/// Only the header drag, excluding resize handles, for cards that may leave the app.
+pub(crate) fn title_dragging(ctx: &egui::Context, key: &str) -> bool {
+    let frame = ctx.cumulative_frame_nr();
+    ctx.data(|d| d.get_temp::<u64>(egui::Id::new(("sc_title_drag_frame", key)))).is_some_and(|at| at >= frame.saturating_sub(1))
+        && ctx.input(|i| i.pointer.primary_down() || i.pointer.primary_released())
 }
 
 /// A docked dialog's anchor moved by `offset`, kept so its docked corner stays in `vp` with
@@ -63,9 +73,10 @@ pub fn offset_anchor(docked: Pos2, offset: egui::Vec2, vp: egui::Rect, side: Sid
 pub fn drag_dock(ui: &Ui, band: egui::Rect, key: &str, moved: egui::Vec2, applied: egui::Vec2) {
     crate::scenario::publish_handle("dialog:title", band.center());
     let response = ui.interact(band, ui.id().with("sc_dock_drag"), egui::Sense::drag());
-    if response.dragged() {
+    if response.dragged() || response.drag_stopped() {
         let frame = ui.ctx().cumulative_frame_nr();
         ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("sc_dock_drag_frame"), frame));
+        ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new(("sc_title_drag_frame", key)), frame));
     }
     // The drag runs from where the press started, so no movement is lost while egui decides
     // it is a drag, nor on the frame it ends.
@@ -229,12 +240,14 @@ mod tests {
             let moved = h.app.viewport.dialog_rect.unwrap();
             assert!((moved.min - rest.min - egui::vec2(-300.0, 120.0)).length() < 2.0, "{rest:?} -> {moved:?}");
             assert!(h.app.dialog.is_some(), "dragging the title keeps the dialog open");
-            // Dragged far off, it stays on screen.
+            // Deliberate pulls tear off on desktop; browser cards remain bounded.
             let title = crate::scenario::handle_at("dialog:title").unwrap();
             h.call("ui.drag", json!({"x0": title.x, "y0": title.y, "x1": title.x + 3000.0, "y1": title.y + 3000.0, "steps": 8}));
             h.frames(4);
-            let viewport = h.app.viewport.rect.unwrap();
-            assert!(viewport.contains(h.app.viewport.dialog_rect.unwrap().min));
+            #[cfg(not(target_arch = "wasm32"))]
+            assert!(crate::ui_kit::floating::detached(&h.ctx, egui::Id::new(("sc_dialog", "CREATE SKETCH"))));
+            #[cfg(target_arch = "wasm32")]
+            assert!(h.app.viewport.rect.unwrap().contains(h.app.viewport.dialog_rect.unwrap().min));
             let last = h.app.viewport.dialog_rect.unwrap();
             h.step(&json!({"key":"Escape"})).unwrap();
             h.frames(2);

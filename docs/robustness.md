@@ -57,6 +57,20 @@ OS-group selection and shared fallback. Unknown Windows environments compare wit
 shared records and refuse recording until an explicit policy is defined.
 All 96 seeds and the strict measurement and topology tolerances remain unchanged.
 
+Apple Silicon macOS uses `platforms.macos-aarch64.seeds`. Intel macOS never reads
+those records. An unrecorded Apple Silicon seed first retains any existing generic
+`platforms.macos` reference, then falls back to the shared record. Recording an
+Apple Silicon result always writes to its architecture's own group, including when
+creating that group, and preserves generic macOS, Windows and shared records.
+
+Seeds 36 and 71 were independently reproduced twice on unmodified engine code at
+`209792da` (identical to upstream `e02ef324` for the engine and its geometry dependencies),
+on macOS arm64 with an Apple M2 Max. Seed 36 has the same known validity failure
+tracked in #3583; its platform snapshot records repeatability and does not accept or
+fix the invalid result. Seed 71 builds 19 faces and 50 edges, the platform difference
+tracked in #2669. These records leave the original fuzz inputs and shared references
+unchanged; #924 still tracks the underlying numerical differences.
+
 The Windows records for seeds 1, 23 and 34 were independently reproduced on unmodified
 main `1e984c8e`; seed 94 was independently reproduced on unmodified main `c5992386`
 after the extrusion rebase. Both match the extrusion branch. Seed 13's was recorded on

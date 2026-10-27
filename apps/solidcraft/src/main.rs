@@ -33,6 +33,8 @@ mod native_menu;
 mod nav_bridge;
 #[cfg(target_os = "macos")]
 mod open_documents;
+#[cfg(target_os = "macos")]
+mod resize_cursor;
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "macos"))]
 mod space_mouse;
 mod startup;
@@ -840,6 +842,8 @@ fn main() -> eframe::Result {
             solidcraft_ui_egui::fonts::setup_bundled_fonts(&cc.egui_ctx);
             solidcraft_ui_egui::fonts::load_system_fonts_in_background(&cc.egui_ctx);
             mark("fonts");
+            #[cfg(target_os = "macos")]
+            solidcraft_ui_egui::ui_kit::set_resize_cursor_handler(&cc.egui_ctx, resize_cursor::refresh);
             let mut app = SolveApp::new(Session::default(), services(cc));
             app.apply_off_thread = Some(solidcraft_ui_egui::dialogs::APPLY_AT_ONCE);
             app.custom_titlebar = custom_titlebar;

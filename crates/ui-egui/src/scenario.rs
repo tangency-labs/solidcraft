@@ -27,7 +27,8 @@
 //! - AT may also be `{"plane": "XY"}` (the middle of an origin plane's square), `{"axis": "Z"}`,
 //!   `{"dimension": "d1"}`, `{"handle": "arrow"}` (a manipulator handle: see [`publish_handle`]),
 //!   `{"browser": "Bodies"}` (a browser row by its label) or `{"chevron": "Bodies"}` (its fold arrow)
-//! - `{"autosave": true}`: autosave into the scenario's recovery folder; `{"restart": "crash" |
+//! - `{"autosave": true}`: enable autosave in the scenario's recovery folder; `{"autosave": "now"}`
+//!   finishes a checkpoint of the current design before a simulated crash. `{"restart": "crash" |
 //!   "close"}`: the app dies (or closes) and a new one starts on the same folders
 //! - `{"script": "examples/…/x.json"}`: run a command script through the engine; `"$DIR"` in a
 //!   `call` step's string parameters is the scenario's folder
@@ -549,8 +550,13 @@ impl Harness {
                 return Ok(());
             } else if let Some(v) = s.get("view_anim").and_then(Value::as_str) {
                 return self.view_anim(v, s.get("max_deg").and_then(Value::as_f64).unwrap_or(10.0));
-            } else if s.get("autosave").is_some() {
-                self.start_autosave();
+            } else if let Some(autosave) = s.get("autosave") {
+                if autosave.as_str() == Some("now") {
+                    let saver = self.app.autosave.as_mut().ok_or("autosave must be started before taking a checkpoint")?;
+                    saver.save(&self.app.session).map_err(|e| e.to_string())?;
+                } else {
+                    self.start_autosave();
+                }
                 return Ok(());
             } else if let Some(how) = s.get("restart").and_then(Value::as_str) {
                 // "crash": the app dies (its autosave lock goes with it, the entry stays);

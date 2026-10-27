@@ -9354,6 +9354,7 @@ mod tests {
             let x = vp.center().x;
             for p in [
                 pos2(dialog.left() + 2.0, dialog.center().y),
+                pos2(dialog.left() - 2.0, dialog.center().y), // The outer half of the resize target belongs to the panel.
                 pos2(dialog.center().x, dialog.bottom() - 2.0),
                 pos2(browser_edge - 2.0, mid),
                 pos2(x, history_edge + 2.0),
@@ -9362,7 +9363,11 @@ mod tests {
                 assert!(h.app.viewport.mouse.is_none(), "the model must not see the pointer at {p:?}");
             }
             // The model itself still zooms right next to them.
-            for p in [pos2(dialog.left() - 2.0, dialog.center().y), pos2(browser_edge + 2.0, mid), pos2(x, history_edge - 2.0)] {
+            for p in [
+                pos2(dialog.left() - crate::theme::Tokens::get().space_8 - 2.0, dialog.center().y),
+                pos2(browser_edge + 2.0, mid),
+                pos2(x, history_edge - 2.0),
+            ] {
                 assert!(wheel(&mut h, p, 60.0), "smooth {smooth}: the wheel at {p:?} on the model ({vp:?}) must zoom it");
                 assert_eq!(h.app.viewport.mouse, Some(p));
                 assert!(gestures(&mut h, p), "a pinch and a two-finger scroll at {p:?} on the model must move it");

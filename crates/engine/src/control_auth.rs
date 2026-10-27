@@ -446,10 +446,11 @@ mod tests {
         assert_eq!(explicit.explain_error("unauthorized"), "unauthorized");
     }
 
-    /// A process file naming a process that has exited marks the token file stale.
+    /// A known exit marks a token stale. An unobservable process stays unknown, as
+    /// it does in a sandbox which cannot run the platform's process inspector.
     #[cfg(any(unix, windows))]
     #[test]
-    fn a_token_file_from_an_exited_process_is_stale() {
+    fn a_token_file_from_an_exited_process_is_stale_when_its_exit_is_observable() {
         let mut child = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "control_auth::tests::tokens_compare_whole"])
             .stdout(std::process::Stdio::null())
@@ -459,8 +460,17 @@ mod tests {
         assert!(child.wait().unwrap().success());
         let source = |writer| Some(TokenSource { path: PathBuf::from("7878.token"), modified: None, writer });
         let stale = ClientToken { token: "secret-token".into(), file: source(Some((pid, None))) };
+        let running = process_running(pid);
         let error = stale.explain_error("unauthorized");
-        assert!(error.contains(&format!("stale token file from an instance that exited (process {pid}): 7878.token")), "{error}");
+        match running {
+            Some(false) => assert!(error.contains(&format!("stale token file from an instance that exited (process {pid}): 7878.token")), "{error}"),
+            None => {
+                assert!(!error.contains("stale"), "unknown liveness must not claim an exit: {error}");
+                assert!(error.contains("token from 7878.token, written at an unknown time"), "{error}");
+                assert!(error.contains("restart it or delete that file"), "{error}");
+            }
+            Some(true) => panic!("the process inspector reports the reaped child {pid} as running"),
+        }
         assert!(!error.contains("secret-token"));
         let live = ClientToken { token: "t".into(), file: source(Some((std::process::id(), process_start(std::process::id())))) };
         assert!(!live.explain_error("unauthorized").contains("stale"));

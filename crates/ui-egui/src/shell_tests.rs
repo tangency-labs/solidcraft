@@ -508,6 +508,11 @@ fn tool_sheets_drag_over_browser_and_history_but_clear_protected_panels() {
             let title = crate::scenario::handle_at("dialog:title").unwrap();
             h.call("ui.drag", json!({"x0":title.x,"y0":title.y,"x1":target.x,"y1":target.y,"steps":10}));
             h.frames(4);
+            #[cfg(not(target_arch = "wasm32"))]
+            if crate::ui_kit::floating::detached(&h.ctx, egui::Id::new(("sc_dialog", "CREATE SKETCH"))) {
+                assert!(h.app.dialog.is_some(), "native sheets retain the tool; workspace reservations apply only while embedded");
+                continue;
+            }
             let sheet = h.app.viewport.dialog_rect.unwrap();
             assert!(!sheet.intersect(chat).is_positive(), "{side}: {sheet:?} overlaps Assistant {chat:?}");
             assert!(!sheet.intersect(ribbon).is_positive(), "sheet clears ribbon");

@@ -21,10 +21,14 @@ fn volume(s: &mut Session) -> f64 {
 /// A cut of `params`: the volume it takes, after checking it built.
 fn cut(s: &mut Session, params: Value) -> f64 {
     let before = volume(s);
+    checked_cut(s, params);
+    before - volume(s)
+}
+
+fn checked_cut(s: &mut Session, params: Value) {
     let id = run(s, "solid.extrude", params)["feature"].as_u64().unwrap();
     let r = s.model.result(id).unwrap();
     assert!(r.error.is_none(), "{r:?}");
-    before - volume(s)
 }
 
 /// An 80 x 50 x 10 plate with a 10 mm round pocket 2 mm deep in its top; `edge` dressed first.
@@ -83,12 +87,24 @@ fn a_ring_cut_round_a_counterbored_hole_in_a_chamfered_disc() {
         run(&mut s, "sketch.circle.center", json!({"center":[20,0],"radius":3}));
         run(&mut s, "sketch.circle.center", json!({"center":[20,0],"radius":6}));
         run(&mut s, "sketch.finish", json!({}));
+        let before = s.model.state().bodies[0].body.clone();
         // The ring between the counterbore's rim (projected from the face) and the 6 mm circle.
-        cut(&mut s, json!({"direction":"negative","distance":3,"operation":"cut","profiles":[{"point":[25.25,0]}]}))
+        checked_cut(&mut s, json!({"direction":"negative","distance":3,"operation":"cut","profiles":[{"point":[25.25,0]}]}));
+        let after = s.model.state().bodies[0].body.clone();
+        // Subtracting two ~49,800 mm³ measurements magnifies their meshing error.
+        // Control the chord precision of this small cut independently of the part
+        // size, and check convergence rather than loosening its analytic tolerance.
+        [1e-4, 2e-5].map(|tol| {
+            let volume = |b: &solidcraft_kernel::Body| b.tessellate_with(tol, true).unwrap().measure().volume;
+            volume(&before) - volume(&after)
+        })
     };
     let want = PI * (36.0 - 20.25) * 3.0;
     for chamfer in [false, true] {
-        let taken = ring(chamfer);
-        assert!((taken - want).abs() < want * 1e-3, "chamfer {chamfer}: {taken} taken, want {want}");
+        let measured = ring(chamfer);
+        for taken in measured {
+            assert!((taken - want).abs() < want * 1e-3, "chamfer {chamfer}: {taken} taken, want {want}");
+        }
+        assert!((measured[0] - measured[1]).abs() < want * 1e-4, "chamfer {chamfer}: removal must converge as the mesh is refined: {measured:?}");
     }
 }

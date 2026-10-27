@@ -385,6 +385,12 @@ pub struct AgentChat {
     running_id: String,
     /// The popped-out chat window was given its saved place (it is open); see `panel::window_builder`.
     pub(crate) window_placed: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    native_docking: crate::ui_kit::floating::NativeDockDrag,
+    #[cfg(not(target_arch = "wasm32"))]
+    native_handoff: Option<crate::ui_kit::floating::TearOff>,
+    #[cfg(not(target_arch = "wasm32"))]
+    title_grab: Option<egui::Vec2>,
     /// The agent's own modes, and the current one.
     modes: Vec<(String, String)>,
     mode: String,

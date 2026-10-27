@@ -54,11 +54,13 @@ fn differs(want: &Value, got: &Value) -> Option<String> {
     (!out.is_empty()).then(|| out.join("; "))
 }
 
-/// Only Windows needs an environment split; other OS policies remain compatible.
+/// Windows distinguishes compiler environments; Apple Silicon has its own verified
+/// records, so its outcomes do not become Intel macOS expectations.
 #[derive(Clone, Copy, Debug)]
 struct Target<'a> {
     os: &'a str,
     env: &'a str,
+    arch: &'a str,
 }
 
 impl<'a> Target<'a> {
@@ -71,7 +73,7 @@ impl<'a> Target<'a> {
         } else {
             "other"
         };
-        Self { os: std::env::consts::OS, env }
+        Self { os: std::env::consts::OS, env, arch: std::env::consts::ARCH }
     }
 
     fn platform(self) -> Option<&'a str> {
@@ -79,14 +81,22 @@ impl<'a> Target<'a> {
             ("windows", "msvc") => Some("windows"), // Existing MSVC-verified records.
             ("windows", "gnu") => Some("windows-gnu"),
             ("windows", _) => None,
+            ("macos", _) if self.arch == "aarch64" => Some("macos-aarch64"),
             (os, _) => Some(os),
         }
+    }
+
+    fn legacy_platform(self) -> Option<&'a str> {
+        (self.os == "macos" && self.arch == "aarch64").then_some("macos")
     }
 
     fn recording_platform(self, file: &Value) -> Result<Option<&'a str>, String> {
         let platform = self.platform();
         if self.os == "windows" {
             return platform.map(Some).ok_or_else(|| format!("no recording policy for Windows target_env={}; define one before blessing", self.env));
+        }
+        if self.os == "macos" && self.arch == "aarch64" {
+            return Ok(platform);
         }
         Ok(platform.filter(|p| file["platforms"][*p]["seeds"].is_object()))
     }
@@ -96,10 +106,10 @@ impl<'a> Target<'a> {
 /// The second return value identifies the selected reference in diagnostics.
 fn expected<'a, 't>(file: &'a Value, seed: u64, target: Target<'t>) -> (&'a Value, &'t str) {
     let key = seed.to_string();
-    if let Some(platform) = target.platform()
-        && let Some(record) = file.get("platforms").and_then(|p| p.get(platform)).and_then(|p| p.get("seeds")).and_then(|s| s.get(&key))
-    {
-        return (record, platform);
+    for platform in [target.platform(), target.legacy_platform()].into_iter().flatten() {
+        if let Some(record) = file.get("platforms").and_then(|p| p.get(platform)).and_then(|p| p.get("seeds")).and_then(|s| s.get(&key)) {
+            return (record, platform);
+        }
     }
     (&file["seeds"][key], "shared")
 }
@@ -107,7 +117,7 @@ fn expected<'a, 't>(file: &'a Value, seed: u64, target: Target<'t>) -> (&'a Valu
 fn difference(file: &Value, seed: u64, got: &Value, target: Target<'_>) -> Option<String> {
     let (want, group) = expected(file, seed, target);
     let change = if want.is_null() { Some("new".to_string()) } else { differs(want, got) };
-    change.map(|d| format!("seed {seed} [target_os={}, target_env={}, reference={group}]: {d}", target.os, target.env))
+    change.map(|d| format!("seed {seed} [target_os={}, target_env={}, reference={group}, target_arch={}]: {d}", target.os, target.env, target.arch))
 }
 
 /// In-memory recording seam: regression tests never write the real reference file.
@@ -189,9 +199,11 @@ fn check(seed: u64) {
     );
 }
 
-const MSVC: Target<'_> = Target { os: "windows", env: "msvc" };
-const GNU: Target<'_> = Target { os: "windows", env: "gnu" };
-const LINUX: Target<'_> = Target { os: "linux", env: "gnu" };
+const MSVC: Target<'_> = Target { os: "windows", env: "msvc", arch: "x86_64" };
+const GNU: Target<'_> = Target { os: "windows", env: "gnu", arch: "x86_64" };
+const LINUX: Target<'_> = Target { os: "linux", env: "gnu", arch: "x86_64" };
+const MACOS_ARM: Target<'_> = Target { os: "macos", env: "", arch: "aarch64" };
+const MACOS_INTEL: Target<'_> = Target { os: "macos", env: "", arch: "x86_64" };
 
 fn policy_fixture() -> Value {
     json!({
@@ -225,19 +237,19 @@ fn policy_selects_msvc_and_gnu_overrides_with_shared_fallback() {
 #[test]
 fn policy_preserves_non_windows_and_refuses_unknown_windows_recording() {
     let mut file = policy_fixture();
-    let macos = Target { os: "macos", env: "" };
+    let macos = MACOS_INTEL;
     assert_eq!(expected(&file, 1, LINUX), (&file["seeds"]["1"], "shared"));
     assert_eq!(expected(&file, 1, macos), (&file["platforms"]["macos"]["seeds"]["1"], "macos"));
     assert_eq!(LINUX.recording_platform(&file), Ok(None));
     assert_eq!(macos.recording_platform(&file), Ok(Some("macos")));
     for env in ["", "other", "new-env"] {
-        let unknown = Target { os: "windows", env };
+        let unknown = Target { os: "windows", env, arch: "x86_64" };
         let before = file.clone();
         assert_eq!(expected(&file, 1, unknown), (&file["seeds"]["1"], "shared"));
         assert!(record(&mut file, 1, &json!({"volume": 30}), "why", unknown).is_err());
         assert_eq!(file, before);
     }
-    assert_eq!(expected(&file, 1, Target { os: "future-os", env: "gnu" }).1, "shared");
+    assert_eq!(expected(&file, 1, Target { os: "future-os", env: "gnu", arch: "x86_64" }).1, "shared");
 }
 
 #[test]
@@ -265,8 +277,8 @@ fn policy_records_only_changed_gnu_seeds_and_preserves_other_destinations_and_no
 }
 
 #[test]
-fn policy_isolates_msvc_recording_even_without_a_namespace() {
-    for target in [MSVC, GNU] {
+fn policy_isolates_platform_recording_even_without_a_namespace() {
+    for target in [MSVC, GNU, MACOS_ARM] {
         let mut file = json!({"seeds": {"1": {"volume": 10}}, "notes": []});
         let before = file.clone();
         assert_eq!(record(&mut file, 1, &json!({"volume": 10}), "why", target), Ok(false));
@@ -281,7 +293,7 @@ fn policy_isolates_msvc_recording_even_without_a_namespace() {
 #[test]
 fn policy_notes_never_coalesce_across_destinations_in_either_direction() {
     let mut file = policy_fixture();
-    for target in [GNU, MSVC, LINUX, GNU, LINUX, MSVC] {
+    for target in [GNU, MSVC, LINUX, MACOS_ARM, GNU, LINUX, MSVC, MACOS_ARM] {
         let previous_notes = file["notes"].as_array().cloned().unwrap_or_default();
         let got = json!({"volume": 100 + previous_notes.len()});
         assert_eq!(record(&mut file, 1, &got, "same reason", target), Ok(true));
@@ -330,7 +342,7 @@ fn policy_non_windows_recording_keeps_existing_os_destination_and_shared_notes()
     let mut file = policy_fixture();
     let before = file.clone();
     let got = json!({"volume": 40});
-    let macos = Target { os: "macos", env: "" };
+    let macos = MACOS_INTEL;
     assert_eq!(record(&mut file, 1, &got, "same reason", macos), Ok(true));
     assert_eq!(file["seeds"], before["seeds"]);
     assert_eq!(file["platforms"]["windows"], before["platforms"]["windows"]);
@@ -341,6 +353,32 @@ fn policy_non_windows_recording_keeps_existing_os_destination_and_shared_notes()
     assert_eq!(file["notes"][2], json!({"reason": "same reason", "seeds": [1]}));
     assert_eq!(record(&mut file, 2, &got, "same reason", LINUX), Ok(true));
     assert_eq!(file["notes"][2]["seeds"], json!([1, 2]));
+}
+
+#[test]
+fn macos_arm_records_are_isolated_and_keep_generic_macos_and_shared_fallbacks() {
+    let mut file = policy_fixture();
+    // Existing OS-wide references remain valid until an architecture-specific
+    // record is supplied, and another architecture never reads that record.
+    assert_eq!(expected(&file, 1, MACOS_ARM).1, "macos");
+    file["platforms"]["macos-aarch64"]["seeds"]["1"] = json!({"volume": 13, "faces": 3});
+    assert_eq!(expected(&file, 1, MACOS_ARM), (&file["platforms"]["macos-aarch64"]["seeds"]["1"], "macos-aarch64"));
+    assert_eq!(expected(&file, 1, MACOS_INTEL), (&file["platforms"]["macos"]["seeds"]["1"], "macos"));
+    assert_eq!(expected(&file, 1, LINUX), (&file["seeds"]["1"], "shared"));
+    assert_eq!(expected(&file, 2, MACOS_ARM), (&file["seeds"]["2"], "shared"));
+    let before = file.clone();
+    let got = json!({"volume": 30, "outcome": "failed", "error": "known platform failure"});
+    assert_eq!(record(&mut file, 2, &got, "independently verified on arm64", MACOS_ARM), Ok(true));
+    for group in ["windows", "macos"] {
+        assert_eq!(file["platforms"][group], before["platforms"][group]);
+    }
+    assert_eq!(file["seeds"], before["seeds"]);
+    assert_eq!(expected(&file, 2, MACOS_ARM), (&got, "macos-aarch64"));
+    assert_eq!(expected(&file, 2, MACOS_INTEL), (&file["seeds"]["2"], "shared"));
+    assert_eq!(file["notes"][1], json!({"platform":"macos-aarch64", "reason":"independently verified on arm64", "seeds":[2]}));
+    assert_eq!(serde_json::from_str::<Value>(&serialize(&file)).ok().as_ref(), Some(&file));
+    let diagnostic = difference(&file, 1, &json!({"volume": 100}), MACOS_ARM).unwrap();
+    assert!(diagnostic.contains("reference=macos-aarch64, target_arch=aarch64"), "{diagnostic}");
 }
 
 /// One test per seed, and the list of them.

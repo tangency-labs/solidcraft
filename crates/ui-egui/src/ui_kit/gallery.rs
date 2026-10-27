@@ -609,7 +609,11 @@ const ELEMENTS: &[Element] = &[
         table(
             ui,
             "flex",
-            &[Column::new("Name", 1.0).flex(), Column::new("Expression", 1.5).flex(), Column::new("Actions", 0.0).icon_only()],
+            &[
+                Column::new("Name", 1.0).flex().fit_content(ContentWidth::label(ui, "Width")).resizable(row_height()),
+                Column::new("Expression", 1.5).flex().resizable(row_height()),
+                Column::new("Actions", 0.0).icon_only(),
+            ],
             "Empty",
             |ui, table| {
                 table.row(ui, "row", false, |row| {

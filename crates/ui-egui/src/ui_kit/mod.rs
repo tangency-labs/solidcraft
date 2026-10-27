@@ -12,6 +12,7 @@ pub mod container;
 mod disclosure;
 mod fields;
 mod file_view;
+pub(crate) mod floating;
 mod history;
 mod layout;
 mod look_chain;
@@ -52,7 +53,7 @@ pub use look_chain::{LookStep, look_chain};
 pub(crate) use menu::{Menu, MenuItem, rename_menu, workspace_menu};
 pub(crate) use metrics::{ContentWidth, header_height, row_height, table_row_height};
 pub(crate) use panel::{ComputeStatus, FeatureOptions, Panel, Part, WindowPage, panel_header_hover};
-pub use panel::{DialogButtons, Window};
+pub use panel::{DialogButtons, Window, set_resize_cursor_handler};
 #[cfg(test)]
 pub(crate) use panel::{collapsible_header, header};
 pub(crate) use preferences::*;

@@ -955,7 +955,7 @@ mod tests {
     }
 
     #[test]
-    fn customization_uses_the_shared_header_keeps_edits_and_has_no_resize_edges() {
+    fn customization_uses_the_shared_header_keeps_edits_and_has_resize_edges() {
         use crate::scenario::{Harness, handle_at, rect_of};
         use serde_json::json;
         for dark in [false, true] {
@@ -977,7 +977,7 @@ mod tests {
             for at in [window.left_center(), window.right_center(), window.right_bottom()] {
                 h.call("ui.move", json!({"x":at.x,"y":at.y}));
                 h.frames(2);
-                assert!(!matches!(
+                assert!(matches!(
                     h.output.cursor_icon,
                     egui::CursorIcon::ResizeHorizontal
                         | egui::CursorIcon::ResizeVertical

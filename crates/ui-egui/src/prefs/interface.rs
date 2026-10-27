@@ -117,6 +117,8 @@ pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                         let check = setting::view_confirm_corner(app, ui).on_hover_text(app.tr("prefs.view_confirm_corner_note"));
                         crate::scenario::publish_target("prefs:view_confirm_corner", check.rect);
                     });
+                    let fit_columns = ui_kit::checkbox(ui, app.tr("prefs.parameters_fit_columns"), &mut app.preferences.parameters_fit_columns);
+                    crate::scenario::publish_target("prefs:parameters_fit_columns", fit_columns.rect);
                     ui_kit::text(ui, app.tr("prefs.layout_note"), ui_kit::Text::Hint("layout"));
                     ui_kit::text(ui, app.tr("prefs.history_sketches_note"), ui_kit::Text::Hint("history_sketches"));
                     ui_kit::LayoutPreview {

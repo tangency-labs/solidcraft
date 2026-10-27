@@ -2864,7 +2864,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     // What the footer's OK takes, for the check in the view's corner too (#6709).
     let ok_enabled = valid && !ok_label.is_empty() && app.applying.is_none();
     let panel = crate::ui_kit::Panel::new(&heading, egui::Id::new(("sc_dialog", title(&d.kind))), anchor, drag_bounds, side, frame)
-        .actions(ok_label, close_label);
+        .actions(ok_label, close_label)
+        .resizable_to_content();
     let panel = if matches!(d.kind, Kind::Appearance(_) | Kind::Material { .. }) {
         panel.width(t.form_card_width + t.form_label_width + t.space_6)
     } else if wide {
@@ -2881,7 +2882,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     let reset_scroll = d.reset_scroll;
     let panel =
         panel.reset_scroll(reset_scroll && matches!(d.kind, Kind::Appearance(_) | Kind::Motion(crate::dialogs_motion::Mo::Configurations { .. })));
-    let window = panel.window(ctx);
+
     let repeatable =
         matches!(&d.kind, Kind::SketchModify(k) if crate::sketch_modify_ui::repeatable(k)) && d.editing.is_none() && !d.extra.contains_key("pattern");
     if let Kind::ConfirmDelete { with, fail, .. } = &d.kind {
@@ -2902,7 +2903,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         cancel = closed || action == crate::ui_kit::Action::Cancel;
         app.viewport.dialog_rect = crate::scenario::rect_of("dialog:window");
     } else {
-        let response = window.open(&mut keep).show(ctx, |ui| {
+        let response = panel.show_open(ctx, &mut keep, |ui| {
             let spec = dense::command(&d.kind).and_then(solidcraft_engine::find_command);
             let icon = spec.as_ref().map_or("", |s| s.icon);
             let label = spec.as_ref().map_or(heading.as_str(), |s| tr(s.label));

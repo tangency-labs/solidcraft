@@ -15,6 +15,8 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use crate::SolveApp;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::ui_kit::floating::NativeDockDrag;
 use crate::ui_kit::{self, Column};
 
 /// What Import reads. The picker must list them: on macOS, files of a type no filter names
@@ -23,10 +25,32 @@ pub(crate) const IMPORT_TYPES: &[&str] = &["csv", "json"];
 
 const UNITS: [&str; 10] = ["mm", "cm", "m", "in", "ft", "deg", "rad", "", "um", "text"];
 
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Default, serde::Deserialize, serde::Serialize)]
+#[serde(default)]
+struct ParameterWindow {
+    detached: bool,
+    place: Option<[f32; 4]>,
+}
+
 /// Dialog state (what is being typed; the parameters themselves live in the document).
 #[derive(Default)]
 pub struct ParamsDialog {
     pub filter: String,
+    #[cfg(not(target_arch = "wasm32"))]
+    window: ParameterWindow,
+    #[cfg(not(target_arch = "wasm32"))]
+    window_loaded: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    window_placed: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    drag_offset: Option<egui::Vec2>,
+    #[cfg(not(target_arch = "wasm32"))]
+    tear_off: Option<ui_kit::floating::TearOff>,
+    #[cfg(not(target_arch = "wasm32"))]
+    native_drag: NativeDockDrag,
+    #[cfg(not(target_arch = "wasm32"))]
+    dock_at: Option<egui::Pos2>,
     reset_scroll: bool,
     /// Expressions being edited, by parameter name.
     pub editing: std::collections::BTreeMap<String, String>,
@@ -72,6 +96,7 @@ struct GroupLayout {
     font: String,
     system_fonts: bool,
     language: &'static str,
+    fit_columns: bool,
 }
 
 impl ParamsDialog {
@@ -178,24 +203,53 @@ pub(crate) fn cancel_on_escape(app: &mut SolveApp, ctx: &egui::Context) -> bool 
 
 /// Draw the dialog when it is open. Called once per frame.
 pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
-    // Completions are offered only under a focused text box; gathering them evaluates every
-    // parameter, so a design changing command after command (an agent building over MCP)
-    // does not pay for it on every change while nobody is typing.
     if app.params.is_some() || ctx.memory(|m| m.focused().is_some()) {
         publish(app, ctx);
     }
     let Some(mut d) = app.params.take() else { return };
+    #[cfg(not(target_arch = "wasm32"))]
+    let close = {
+        if !d.window_loaded {
+            d.window = ctx.data_mut(|data| data.get_persisted::<ParameterWindow>(egui::Id::new("parameters_window"))).unwrap_or_default();
+            d.window_loaded = true;
+        }
+        let close = if d.window.detached { native_window(app, ctx, &mut d) } else { embedded_window(app, ctx, &mut d) };
+        ctx.data_mut(|data| data.insert_persisted(egui::Id::new("parameters_window"), d.window.clone()));
+        close
+    };
+    #[cfg(target_arch = "wasm32")]
+    let close = embedded_window(app, ctx, &mut d);
+    if !close {
+        app.params = Some(d);
+    }
+}
+
+fn publish_handles() {
+    if let Some(at) = crate::scenario::handle_at("dialog:close") {
+        crate::scenario::publish_handle("params:close", at);
+    }
+    if let Some(rect) = crate::scenario::rect_of("dialog:header") {
+        crate::scenario::publish_handle("params:title", rect.center());
+    }
+}
+
+fn embedded_window(app: &mut SolveApp, ctx: &egui::Context, d: &mut ParamsDialog) -> bool {
     ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
     let viewport = crate::agent_chat::tool_space(app, crate::shell::content_rect(app, app.viewport.rect.unwrap_or_else(|| ctx.content_rect())));
     if !viewport.is_finite() || !viewport.is_positive() {
-        app.params = Some(d);
-        return;
+        return false;
     }
     let palette = app.viewport.palette_rect.filter(|r| r.is_finite() && r.is_positive());
     let side =
         if palette.is_some() && crate::sketch_palette::fits_beside_a_dialog(app, ctx) { crate::frame::Side::Left } else { crate::frame::Side::Right };
     let top = crate::shell::panel_top(app, viewport, viewport.bottom(), side);
     let docked = egui::pos2(side.anchor_x(viewport), top);
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(position) = d.dock_at.take() {
+        let size = ctx.data_mut(|data| data.get_persisted::<egui::Vec2>(egui::Id::new("sc_params_dialog").with("size"))).unwrap_or_default();
+        let anchor = if side == crate::frame::Side::Right { position + egui::vec2(size.x, 0.0) } else { position };
+        ctx.data_mut(|data| data.insert_temp(egui::Id::new(("sc_dock_offset", "PARAMETERS")), anchor - docked));
+    }
     let moved = crate::frame::dock_offset(ctx, "PARAMETERS");
     let drag_bounds = crate::shell::tool_drag_rect(app, viewport);
     let anchor = crate::frame::offset_anchor(docked, moved, drag_bounds, side);
@@ -209,6 +263,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
         ui_kit::Panel::feature_frame(ctx, app.ui.layout, side),
     )
     .wide()
+    .resizable()
     .body_rows(16.0)
     .reset_scroll(d.reset_scroll);
     let panel = if side == crate::frame::Side::Left {
@@ -217,16 +272,8 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
     } else {
         panel
     };
-    let all = if let Some((_, rows)) = d.listed.as_ref().filter(|(rev, _)| *rev == app.session.revision) {
-        rows.clone()
-    } else {
-        let rows = Arc::new(rows(app));
-        d.listed = Some((app.session.revision, rows.clone()));
-        d.lists += 1;
-        rows
-    };
     let mut close = false;
-    panel.window(ctx).show(ctx, |ui| {
+    let response = panel.window(ctx).show(ctx, |ui| {
         let (closed, action) = panel.feature(
             ui,
             ui_kit::FeatureOptions {
@@ -239,105 +286,273 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             },
             false,
             true,
-            |ui| {
-                ui_kit::text(ui, crate::i18n::tr("manage.parameters_hint"), ui_kit::Text::Hint("manage"));
-                ui_kit::row(ui, "Filter", |ui| {
-                    let id = ui.make_persistent_id("parameter_filter");
-                    ui_kit::search_field(ui, id, &mut d.filter, "Filter");
-                });
-                ui.horizontal_wrapped(|ui| {
-                    if ui_kit::icon_label_button(ui, "Import…", "import_tray", true, false)
-                        .on_hover_text(crate::i18n::tr_label("CSV or JSON: updates existing parameters, adds new ones"))
-                        .clicked()
-                    {
-                        app.pick_open_command("parameters.import", json!({}), IMPORT_TYPES);
-                    }
-                    for (label, ext) in [("Export CSV…", "csv"), ("Export JSON…", "json")] {
-                        if ui_kit::icon_label_button(ui, label, "export_tray", true, false).clicked() {
-                            app.pick_save_command(&format!("parameters.{ext}"), &[ext], "parameters.export", json!({"format": ext}));
-                        }
-                    }
-                });
-                if let Some(error) = &d.error {
-                    ui_kit::text(ui, error, ui_kit::Text::Error("parameters_error"));
-                }
-                let filter = d.filter.to_ascii_lowercase();
-                let visible: Vec<_> = all
-                    .iter()
-                    .filter(|r| {
-                        filter.is_empty()
-                            || r.name.to_ascii_lowercase().contains(&filter)
-                            || r.comment.to_ascii_lowercase().contains(&filter)
-                            || r.group.to_ascii_lowercase().contains(&filter)
-                    })
-                    .collect();
-                let favorites: Vec<_> = visible.iter().copied().filter(|r| r.favorite).collect();
-                if !favorites.is_empty() {
-                    ui_kit::section_count(ui, "favorites", "Favorites", true, Some(favorites.len()), |ui| table(app, ui, &mut d, &favorites, "fav"));
-                }
-                let users: Vec<_> = visible.iter().copied().filter(|r| r.source == "user").collect();
-                ui_kit::section_count(ui, "users", "User Parameters", true, Some(users.len()), |ui| {
-                    table(app, ui, &mut d, &users, "user");
-                });
-                ui_kit::section(ui, "models", "Model Parameters", true, |ui| {
-                    // Group once, in listing order, rather than scanning every parameter for
-                    // each feature on every frame (#2733).
-                    let mut groups: Vec<(&str, Vec<&Row>)> = Vec::new();
-                    let mut indices = std::collections::HashMap::new();
-                    for r in visible.iter().filter(|r| r.source != "user") {
-                        let index = *indices.entry(r.group.as_str()).or_insert_with(|| {
-                            groups.push((&r.group, Vec::new()));
-                            groups.len() - 1
-                        });
-                        if let Some((_, members)) = groups.get_mut(index) {
-                            members.push(r);
-                        }
-                    }
-                    ui.scope(|ui| {
-                        ui.spacing_mut().indent = crate::theme::Tokens::get().space_14;
-                        ui.indent("model_groups", |ui| {
-                            let layout = GroupLayout {
-                                revision: app.session.revision,
-                                filter: filter.clone(),
-                                width: ui.available_width(),
-                                pixels_per_point: ui.ctx().pixels_per_point(),
-                                style: ui.style().clone(),
-                                font: app.applied_ui_font.clone(),
-                                system_fonts: app.applied_system_fonts,
-                                language: crate::i18n::language(),
-                            };
-                            if d.group_layout.as_ref() != Some(&layout) {
-                                d.group_sizes.clear();
-                                d.group_layout = Some(layout);
-                            }
-                            #[cfg(test)]
-                            {
-                                d.groups_drawn = 0;
-                            }
-                            for (group, members) in groups {
-                                model_group(app, ui, &mut d, group, &members);
-                            }
-                        });
-                    });
-                });
-                ui_kit::ComputeStatus { text: None, busy: false, applying: false }
-            },
+            |ui| contents(app, ui, d),
         );
         d.reset_scroll = false;
         close = closed || matches!(action, ui_kit::Action::Ok | ui_kit::Action::Cancel);
     });
-    // Each cell owns fresh Enter from raw events. The panel itself must not submit on
-    // Enter in the filter or with unrelated focus (the legacy editor left those alone), but
-    // the filter, rename and comment fields still see Enter first to give up focus.
-    if let Some(at) = crate::scenario::handle_at("dialog:close") {
-        crate::scenario::publish_handle("params:close", at);
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(response) = response {
+        detach_when_dragged_out(ctx, d, response.response.rect);
     }
-    if let Some(rect) = crate::scenario::rect_of("dialog:header") {
-        crate::scenario::publish_handle("params:title", rect.center());
+    #[cfg(target_arch = "wasm32")]
+    let _ = response;
+    publish_handles();
+    close
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn detach_when_dragged_out(ctx: &egui::Context, d: &mut ParamsDialog, rect: egui::Rect) {
+    if ctx.input(|i| i.pointer.primary_pressed()) {
+        d.drag_offset = ctx.input(|i| i.pointer.press_origin()).filter(|p| rect.contains(*p)).map(|p| p - rect.min);
     }
-    if !close {
-        app.params = Some(d);
+    if !crate::frame::title_dragging(ctx, "PARAMETERS") {
+        if !ctx.input(|i| i.pointer.primary_down()) {
+            d.drag_offset = None;
+        }
+        return;
     }
+    let Some(pointer) = ctx.input(|i| i.pointer.latest_pos()) else { return };
+    let grab = *d.drag_offset.get_or_insert_with(|| ctx.input(|i| i.pointer.press_origin()).unwrap_or(pointer) - rect.min);
+    let desired = egui::Rect::from_min_size(pointer - grab, rect.size());
+    // Hand off while the pointer is still captured, before the OS clips pointer movement
+    // at the app edge. Use the intended position, not the card's on-screen clamped rectangle.
+    if !ui_kit::floating::crosses_border(ctx.content_rect(), desired, pointer, grab) {
+        return;
+    }
+    let origin = ctx.input(|i| i.viewport().inner_rect.map(|r| r.min)).unwrap_or_default();
+    let position = origin + pointer.to_vec2() - grab;
+    d.window.place = Some([position.x, position.y, rect.width(), rect.height()]);
+    d.window.detached = true;
+    d.window_placed = false;
+    d.tear_off = Some(ui_kit::floating::TearOff::new(position, grab, ctx.input(|i| i.pointer.primary_down())));
+    d.native_drag = NativeDockDrag::default();
+    ui_kit::floating::mark_handoff(ctx);
+    ctx.request_repaint();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn snap_native_back(ctx: &egui::Context, d: &mut ParamsDialog, outer: egui::Rect, inner: egui::Rect, parent: egui::Rect, now: f64) {
+    if d.native_drag.update(outer, inner, parent, now) {
+        d.window.detached = false;
+        d.window_placed = false;
+        d.tear_off = None;
+        d.drag_offset = None;
+        d.dock_at = Some(outer.min - parent.min.to_vec2());
+        d.native_drag = NativeDockDrag::default();
+        ui_kit::floating::end_handoff(ctx);
+        ctx.data_mut(|data| {
+            data.insert_persisted(egui::Id::new("sc_params_dialog").with("size"), inner.size());
+            data.remove::<u64>(egui::Id::new(("sc_title_drag_frame", "PARAMETERS")));
+        });
+        ctx.send_viewport_cmd_to(egui::ViewportId::ROOT, egui::ViewportCommand::Focus);
+        ctx.request_repaint_of(egui::ViewportId::ROOT);
+    } else if d.native_drag.moving {
+        // Native drags can stop without a pointer-up event; observe settled geometry too.
+        ctx.request_repaint_after(std::time::Duration::from_millis(50));
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn native_window_builder(app: &SolveApp, ctx: &egui::Context, d: &ParamsDialog) -> egui::ViewportBuilder {
+    let t = crate::theme::Tokens::get();
+    let title = format!("{} — {}", crate::i18n::tr_label("Parameters"), app.session.doc.name);
+    let builder = egui::ViewportBuilder::default().with_title(title).with_min_inner_size([t.form_card_width, 200.0]).with_resizable(true);
+    if d.window_placed {
+        return builder;
+    }
+    if let Some([x, y, w, h]) = d.window.place
+        && [x, y, w, h].iter().all(|v| v.is_finite())
+        && x.abs() <= 100_000.0
+        && y.abs() <= 100_000.0
+        && (t.form_card_width..=10_000.0).contains(&w)
+        && (200.0..=10_000.0).contains(&h)
+    {
+        return builder.with_position([x, y]).with_inner_size([w, h]);
+    }
+    let size = ctx
+        .data_mut(|data| data.get_persisted::<egui::Vec2>(egui::Id::new("sc_params_dialog").with("size")))
+        .filter(|s| s.is_finite() && s.x >= t.form_card_width && s.y >= 200.0)
+        .unwrap_or(egui::vec2(t.form_card_width * 3.0, 640.0));
+    builder.with_inner_size(size)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn native_window(app: &mut SolveApp, ctx: &egui::Context, d: &mut ParamsDialog) -> bool {
+    let parent = ctx.input_for(egui::ViewportId::ROOT, |i| i.viewport().inner_rect);
+    let builder = native_window_builder(app, ctx, d);
+    let builder = d.tear_off.as_ref().map_or_else(|| builder.clone(), |drag| drag.prepare(builder.clone()));
+    let opening = !d.window_placed;
+    d.window_placed = true;
+    let mut close = false;
+    ctx.show_viewport_immediate(egui::ViewportId::from_hash_of("sc_parameters_window"), builder, |ui, class| {
+        let child = ui.ctx().clone();
+        crate::expression_complete::begin_frame(&child);
+        if child.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            close = true;
+            child.request_repaint_of(egui::ViewportId::ROOT);
+            return;
+        }
+        child.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+        let frame = ui_kit::Container::new(&child, ui_kit::Surface::Panel).edge_frame(crate::theme::Tokens::get().dialog_body);
+        let response = ui_kit::Container::new(&child, ui_kit::Surface::Viewport).central().frame(frame).show(ui, |ui| {
+            let rect = ui.max_rect();
+            let title = crate::i18n::tr_label("Parameters");
+            let panel =
+                ui_kit::Panel::new(title, egui::Id::new("sc_parameters_native_content"), rect.left_top(), rect, crate::frame::Side::Left, frame)
+                    .native_content()
+                    .reset_scroll(d.reset_scroll);
+            let (closed, action) = panel.feature(
+                ui,
+                ui_kit::FeatureOptions {
+                    icon: solidcraft_engine::find_command("parameters.change").map_or("", |c| c.icon),
+                    title,
+                    drag_key: "PARAMETERS_NATIVE",
+                    moved: egui::Vec2::ZERO,
+                    docked: rect.left_top(),
+                    apply_label: None,
+                },
+                false,
+                true,
+                |ui| contents(app, ui, d),
+            );
+            close |= closed || matches!(action, ui_kit::Action::Ok | ui_kit::Action::Cancel);
+        });
+        d.reset_scroll = false;
+        crate::scenario::publish_rect("params:native_window", response.response.rect);
+        publish_handles();
+        if class != egui::ViewportClass::EmbeddedWindow {
+            let (outer, inner, closing) = child.input(|i| (i.viewport().outer_rect, i.viewport().inner_rect, i.viewport().close_requested()));
+            if d.tear_off.is_none() {
+                ui_kit::floating::native_resize(ui, egui::vec2(crate::theme::Tokens::get().form_card_width, 200.0));
+            }
+            let following = ui_kit::floating::follow_pointer(&child, &mut d.tear_off, outer, inner);
+            if opening && following.is_none() {
+                child.send_viewport_cmd(egui::ViewportCommand::Focus);
+            }
+            if let (Some(outer), Some(inner)) = (outer, inner) {
+                let position = following.unwrap_or(outer.min);
+                d.window.place = Some([position.x, position.y, inner.width(), inner.height()]);
+                if !closing
+                    && following.is_none()
+                    && d.window.detached
+                    && let Some(parent) = parent
+                {
+                    snap_native_back(&child, d, outer, inner, parent, child.input(|i| i.time));
+                }
+            }
+            close |= closing;
+        }
+        if close || !d.window.detached {
+            child.request_repaint_of(egui::ViewportId::ROOT);
+        }
+    });
+    close
+}
+
+fn contents(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog) -> ui_kit::ComputeStatus {
+    let all = if let Some((_, rows)) = d.listed.as_ref().filter(|(rev, _)| *rev == app.session.revision) {
+        rows.clone()
+    } else {
+        let rows = Arc::new(rows(app));
+        d.listed = Some((app.session.revision, rows.clone()));
+        d.lists += 1;
+        rows
+    };
+    ui_kit::text(ui, crate::i18n::tr("manage.parameters_hint"), ui_kit::Text::Hint("manage"));
+    ui_kit::row(ui, "Filter", |ui| {
+        let id = ui.make_persistent_id("parameter_filter");
+        ui_kit::search_field(ui, id, &mut d.filter, "Filter");
+    });
+    ui.horizontal_wrapped(|ui| {
+        if ui_kit::icon_label_button(ui, "Import…", "import_tray", true, false)
+            .on_hover_text(crate::i18n::tr_label("CSV or JSON: updates existing parameters, adds new ones"))
+            .clicked()
+        {
+            app.pick_open_command("parameters.import", json!({}), IMPORT_TYPES);
+        }
+        for (label, ext) in [("Export CSV…", "csv"), ("Export JSON…", "json")] {
+            if ui_kit::icon_label_button(ui, label, "export_tray", true, false).clicked() {
+                app.pick_save_command(&format!("parameters.{ext}"), &[ext], "parameters.export", json!({"format": ext}));
+            }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let label = crate::i18n::tr(if d.window.detached { "manage.parameters_dock" } else { "manage.parameters_pop_out" });
+            let response = ui_kit::button(ui, label, ui_kit::Button::Normal);
+            crate::scenario::publish_handle("params:window_mode", response.rect.center());
+            if response.clicked() {
+                d.window.detached = !d.window.detached;
+                d.window_placed = false;
+                d.native_drag = NativeDockDrag::default();
+                ui.ctx().request_repaint_of(egui::ViewportId::ROOT);
+            }
+        }
+    });
+    if let Some(error) = &d.error {
+        ui_kit::text(ui, error, ui_kit::Text::Error("parameters_error"));
+    }
+    let filter = d.filter.to_ascii_lowercase();
+    let visible: Vec<_> = all
+        .iter()
+        .filter(|r| {
+            filter.is_empty()
+                || r.name.to_ascii_lowercase().contains(&filter)
+                || r.comment.to_ascii_lowercase().contains(&filter)
+                || r.group.to_ascii_lowercase().contains(&filter)
+        })
+        .collect();
+    let favorites: Vec<_> = visible.iter().copied().filter(|r| r.favorite).collect();
+    if !favorites.is_empty() {
+        ui_kit::section_count(ui, "favorites", "Favorites", true, Some(favorites.len()), |ui| table(app, ui, d, &favorites, "fav", "favorites"));
+    }
+    let users: Vec<_> = visible.iter().copied().filter(|r| r.source == "user").collect();
+    ui_kit::section_count(ui, "users", "User Parameters", true, Some(users.len()), |ui| {
+        table(app, ui, d, &users, "user", "users");
+    });
+    ui_kit::section(ui, "models", "Model Parameters", true, |ui| {
+        // Group once, in listing order, rather than scanning every parameter for
+        // each feature on every frame (#2733).
+        let mut groups: Vec<(&str, Vec<&Row>)> = Vec::new();
+        let mut indices = std::collections::HashMap::new();
+        for r in visible.iter().filter(|r| r.source != "user") {
+            let index = *indices.entry(r.group.as_str()).or_insert_with(|| {
+                groups.push((&r.group, Vec::new()));
+                groups.len() - 1
+            });
+            if let Some((_, members)) = groups.get_mut(index) {
+                members.push(r);
+            }
+        }
+        ui.scope(|ui| {
+            ui.spacing_mut().indent = crate::theme::Tokens::get().space_14;
+            ui.indent("model_groups", |ui| {
+                let layout = GroupLayout {
+                    revision: app.session.revision,
+                    filter: filter.clone(),
+                    width: ui.available_width(),
+                    pixels_per_point: ui.ctx().pixels_per_point(),
+                    style: ui.style().clone(),
+                    font: app.applied_ui_font.clone(),
+                    system_fonts: app.applied_system_fonts,
+                    language: crate::i18n::language(),
+                    fit_columns: app.preferences.parameters_fit_columns,
+                };
+                if d.group_layout.as_ref() != Some(&layout) {
+                    d.group_sizes.clear();
+                    d.group_layout = Some(layout);
+                }
+                #[cfg(test)]
+                {
+                    d.groups_drawn = 0;
+                }
+                for (group, members) in groups {
+                    model_group(app, ui, d, group, &members);
+                }
+            });
+        });
+    });
+    ui_kit::ComputeStatus { text: None, busy: false, applying: false }
 }
 
 fn model_group(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, group: &str, rows: &[&Row]) {
@@ -360,7 +575,7 @@ fn model_group(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, grou
         {
             d.groups_drawn += 1;
         }
-        ui_kit::section_count(ui, ("pgroup", group), group, true, Some(rows.len()), |ui| table(app, ui, d, rows, group));
+        ui_kit::section_count(ui, ("pgroup", group), group, true, Some(rows.len()), |ui| table(app, ui, d, rows, group, "model"));
     });
     d.group_sizes.insert(group.to_owned(), response.response.rect.size());
 }
@@ -393,19 +608,42 @@ fn new_check(app: &mut SolveApp, d: &mut ParamsDialog, unit: &str) -> Result<Str
     r
 }
 
-fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&Row], salt: &str) {
+fn table(app: &mut SolveApp, ui: &mut egui::Ui, d: &mut ParamsDialog, rows: &[&Row], salt: &str, kind: &str) {
     let units: Vec<_> = UNITS.iter().map(|unit| unit_label(unit)).collect();
-    let columns = [
+    let t = crate::theme::Tokens::get();
+    let name_width = rows
+        .iter()
+        .map(|r| ui.painter().layout_no_wrap(r.name.clone(), crate::fonts::medium(t.font_label), t.form_ink).size().x.ceil())
+        .fold(ui_kit::ContentWidth::label(ui, "Name"), f32::max)
+        + t.space_12;
+    let expression_width = rows
+        .iter()
+        .map(|r| ui.painter().layout_no_wrap(r.expression.clone(), egui::FontId::monospace(t.font_label), t.form_ink).size().x.ceil())
+        .fold(0.0, f32::max)
+        + t.space_16;
+    let value_width = rows
+        .iter()
+        .map(|r| ui.painter().layout_no_wrap(show_value(r), egui::FontId::monospace(t.font_body), t.form_ink).size().x.ceil())
+        .fold(0.0, f32::max)
+        + t.space_8;
+    let auto_fit = app.preferences.parameters_fit_columns;
+    let fit = |column: Column<'static>, width| if auto_fit { column.fit_content(width) } else { column };
+    let mut columns = [
         Column::new("", 0.0).min_content_width(crate::theme::Tokens::get().space_24 * 3.0),
-        Column::new("Name", 1.1).flex(),
-        Column::new("Unit", 0.65).min_content_width(
-            ui_kit::ContentWidth::dropdown(ui, &units).max(crate::theme::Tokens::get().space_24 * 3.0 + crate::theme::Tokens::get().space_6),
-        ),
-        Column::new("Expression", 1.5).flex(),
-        Column::new("Value", 1.1).flex(),
-        Column::new("Comment", 1.2).flex(),
+        fit(Column::new("Name", 1.1).flex(), name_width).resizable(t.control_height),
+        Column::new("Unit", 0.65)
+            .min_content_width(
+                ui_kit::ContentWidth::dropdown(ui, &units).max(crate::theme::Tokens::get().space_24 * 3.0 + crate::theme::Tokens::get().space_6),
+            )
+            .resizable(t.control_height),
+        fit(Column::new("Expression", 1.5).flex(), expression_width).resizable(t.control_height * 2.0),
+        fit(Column::new("Value", 1.1).flex(), value_width).resizable(t.control_height),
+        Column::new("Comment", 1.2).flex().resizable(t.control_height),
         Column::new("Actions", 0.0).icon_only().min_content_width(ui_kit::table_row_height()),
     ];
+    for (column, label) in columns.iter_mut().zip(["", "Name", "Unit", "Expression", "Value", "Comment", "Actions"]) {
+        column.set_resize_id(egui::Id::new(("parameters_columns", kind, salt, label)));
+    }
     ui_kit::table(ui, salt, &columns, crate::i18n::tr("manage.empty"), |ui, table| {
         for (index, r) in rows.iter().enumerate() {
             // Skip cells outside the clip while preserving the table's row geometry (#2723).
@@ -813,6 +1051,407 @@ pub fn complete(ui: &mut egui::Ui, resp: &egui::Response, text: &mut String) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parameter_edges_and_corners_resize_their_axes_and_keep_the_size_on_reopening() {
+        for layout in ["floating", "docked"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.set", json!({"layout": layout}));
+            h.call("ui.resize", json!({"width": 2000, "height": 1400}));
+            h.app.run("parameters.add", json!({"name": "width", "expression": "10 mm"})).unwrap();
+            h.step(&json!({"start": "parameters.change"})).unwrap();
+            h.frames(6);
+            let title = crate::scenario::handle_at("dialog:title").unwrap();
+            h.step(&json!({"drag": [{"handle": "dialog:title"}, [title.x - 400.0, title.y + 80.0]]})).unwrap();
+            h.frames(6);
+            let before = crate::scenario::rect_of("dialog:resize:PARAMETERS:bounds").unwrap();
+            let header = crate::scenario::rect_of("dialog:header").unwrap();
+            let press = egui::pos2(header.center().x, header.top() + 12.0);
+            h.step(&json!({"drag": [[press.x, press.y], [press.x - 30.0, press.y + 40.0]]})).unwrap();
+            h.frames(6);
+            let moved = crate::scenario::rect_of("dialog:resize:PARAMETERS:bounds").unwrap();
+            assert!((moved.size() - before.size()).length() < 2.0, "the upper title band moves without resizing");
+            assert!((moved.min - before.min - egui::vec2(-30.0, 40.0)).length() < 2.0);
+            let document = h.app.session.doc.to_json();
+            for (corner, delta) in [
+                ("bottom_left", egui::vec2(80.0, -40.0)),
+                ("top_left", egui::vec2(40.0, 30.0)),
+                ("top_right", egui::vec2(-40.0, 20.0)),
+                ("bottom_right", egui::vec2(-40.0, -30.0)),
+            ] {
+                let before = crate::scenario::rect_of("dialog:resize:PARAMETERS:bounds").unwrap();
+                let handle = format!("dialog:resize:PARAMETERS:{corner}");
+                let at = crate::scenario::handle_at(&handle).unwrap();
+                let hit = crate::scenario::rect_of(&handle).unwrap();
+                assert_eq!(hit.size(), egui::vec2(16.0, 16.0));
+                assert_eq!(hit.center(), at);
+                assert_eq!(at.x, if corner.ends_with("left") { before.left() } else { before.right() });
+                assert_eq!(at.y, if corner.starts_with("top") { before.top() } else { before.bottom() });
+                // The outside half must be interactive, beyond the card's content clip.
+                let press = at + egui::vec2(if corner.ends_with("left") { -6.0 } else { 6.0 }, if corner.starts_with("top") { -6.0 } else { 6.0 });
+                h.step(&json!({"drag": [[press.x, press.y], [press.x + delta.x, press.y + delta.y]]})).unwrap();
+                h.frames(6);
+                let after = crate::scenario::rect_of("dialog:resize:PARAMETERS:bounds").unwrap();
+                assert!(after.width() < before.width() - 20.0, "{layout} {corner}: {before:?} -> {after:?}");
+                assert!(after.height() < before.height() - 10.0, "{layout} {corner}: {before:?} -> {after:?}");
+                assert!(after.contains(crate::scenario::handle_at("dialog:ok").unwrap()));
+            }
+            for (edge, delta) in [
+                ("left", egui::vec2(40.0, 20.0)),
+                ("right", egui::vec2(-40.0, -20.0)),
+                ("top", egui::vec2(20.0, 30.0)),
+                ("bottom", egui::vec2(-20.0, -30.0)),
+            ] {
+                let before = crate::scenario::rect_of("dialog:resize:PARAMETERS:bounds").unwrap();
+                let handle = format!("dialog:resize:PARAMETERS:{edge}");
+                let at = crate::scenario::handle_at(&handle).unwrap();
+                let hit = crate::scenario::rect_of(&handle).unwrap();
+                assert_eq!(hit.center(), at);
+                let outside = match edge {
+                    "left" => egui::vec2(-3.0, 0.0),
+                    "right" => egui::vec2(3.0, 0.0),
+                    "top" => egui::vec2(0.0, -3.0),
+                    _ => egui::vec2(0.0, 3.0),
+                };
+                if edge == "left" || edge == "right" {
+                    assert_eq!(hit.width(), 8.0);
+                    assert_eq!(at.x, if edge == "left" { before.left() } else { before.right() });
+                } else {
+                    assert_eq!(hit.height(), 8.0);
+                    assert_eq!(at.y, if edge == "top" { before.top() } else { before.bottom() });
+                }
+                let press = at + outside;
+                h.step(&json!({"drag": [[press.x, press.y], [press.x + delta.x, press.y + delta.y]]})).unwrap();
+                h.frames(6);
+                let after = crate::scenario::rect_of("dialog:resize:PARAMETERS:bounds").unwrap();
+                if edge == "left" || edge == "right" {
+                    assert!((after.width() - before.width() + 40.0).abs() < 2.0, "{layout} {edge}: {before:?} -> {after:?}");
+                    assert!((after.height() - before.height()).abs() < 2.0, "{edge} only resizes width");
+                    assert!((after.top() - before.top()).abs() < 2.0, "{edge} must not move vertically");
+                } else {
+                    assert!((after.height() - before.height() + 30.0).abs() < 2.0, "{layout} {edge}: {before:?} -> {after:?}");
+                    assert!((after.width() - before.width()).abs() < 2.0, "{edge} only resizes height");
+                    assert!((after.left() - before.left()).abs() < 2.0, "{edge} must not move horizontally");
+                }
+            }
+            let size = crate::scenario::rect_of("dialog:resize:PARAMETERS:bounds").unwrap().size();
+            h.app.params = None;
+            h.frames(2);
+            h.step(&json!({"start": "parameters.change"})).unwrap();
+            h.frames(6);
+            let reopened = crate::scenario::rect_of("dialog:resize:PARAMETERS:bounds").unwrap();
+            assert!((reopened.size() - size).length() < 2.0, "{layout}: {size:?} -> {reopened:?}");
+            h.call("ui.resize", json!({"width": 640, "height": 480}));
+            h.frames(6);
+            let small = crate::scenario::rect_of("dialog:resize:PARAMETERS:bounds").unwrap();
+            assert!(small.right() <= 640.0 && small.bottom() <= 480.0, "{layout}: {small:?}");
+            assert!(small.contains(crate::scenario::handle_at("dialog:ok").unwrap()));
+            assert_eq!(h.app.session.doc.to_json(), document, "resizing is presentation only");
+        }
+    }
+
+    #[test]
+    fn resize_arrows_cover_the_full_inside_and_outside_grab_regions() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width": 2000, "height": 1400}));
+        h.step(&json!({"start": "parameters.change"})).unwrap();
+        h.frames(6);
+        let title = crate::scenario::handle_at("dialog:title").unwrap();
+        h.step(&json!({"drag": [[title.x, title.y], [title.x - 400.0, title.y + 80.0]]})).unwrap();
+        h.frames(6);
+        for (name, x, y) in [
+            ("top_left", -1, -1),
+            ("top_right", 1, -1),
+            ("bottom_left", -1, 1),
+            ("bottom_right", 1, 1),
+            ("left", -1, 0),
+            ("right", 1, 0),
+            ("top", 0, -1),
+            ("bottom", 0, 1),
+        ] {
+            let hit = crate::scenario::rect_of(&format!("dialog:resize:PARAMETERS:{name}")).unwrap();
+            let cursor = if x == 0 {
+                egui::CursorIcon::ResizeVertical
+            } else if y == 0 {
+                egui::CursorIcon::ResizeHorizontal
+            } else if x == y {
+                egui::CursorIcon::ResizeNwSe
+            } else {
+                egui::CursorIcon::ResizeNeSw
+            };
+            for fraction in [-0.75, 0.0, 0.75] {
+                let p = hit.center() + egui::vec2(x as f32 * hit.width() * 0.5 * fraction, y as f32 * hit.height() * 0.5 * fraction);
+                h.call("ui.move", json!({"x": p.x, "y": p.y}));
+                h.frames(2);
+                assert_eq!(h.output.cursor_icon, cursor, "{name} at {p:?}: the entire resize target advertises resizing without a mouse press");
+            }
+        }
+        let header = crate::scenario::rect_of("dialog:header").unwrap();
+        h.call("ui.move", json!({"x": header.center().x, "y": header.top() + 12.0}));
+        h.frames(2);
+        assert_eq!(h.output.cursor_icon, egui::CursorIcon::Grab, "the title keeps its move cursor outside the top resize band");
+    }
+
+    #[test]
+    fn parameter_names_fit_and_manual_column_widths_survive_reopening() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width": 1900, "height": 1200}));
+        let name = "scc_nozzle_contraction_internal_angle";
+        h.app.run("parameters.add", json!({"name": name, "expression": "155 deg"})).unwrap();
+        h.step(&json!({"start": "parameters.change"})).unwrap();
+        h.frames(6);
+        let at = crate::scenario::handle_at("dialog:resize:PARAMETERS:top_left").unwrap();
+        h.step(&json!({"drag": [{"handle": "dialog:resize:PARAMETERS:top_left"}, [at.x - 600.0, at.y]]})).unwrap();
+        h.frames(6);
+        let name_cell = crate::scenario::rect_of("dialog:column:user:Name").unwrap();
+        let t = crate::theme::Tokens::get();
+        let measured = h.ctx.fonts_mut(|fonts| fonts.layout_no_wrap(name.into(), crate::fonts::medium(t.font_label), t.form_ink).size().x);
+        assert!(name_cell.width() >= measured, "the full name must fit: {measured} in {name_cell:?}");
+        let document = h.app.session.doc.to_json();
+        for column in ["Comment", "Name", "Expression", "Value", "Unit"] {
+            let before = crate::scenario::rect_of(&format!("dialog:column:user:{column}")).unwrap();
+            let handle = format!("dialog:column:user:{column}:resize");
+            let at = crate::scenario::handle_at(&handle).unwrap();
+            for dx in [-3.0, 0.0, 3.0] {
+                h.call("ui.move", json!({"x": at.x + dx, "y": at.y}));
+                h.frames(2);
+                assert_eq!(h.output.cursor_icon, egui::CursorIcon::ResizeHorizontal, "{column}: arrow throughout the divider's grab band");
+            }
+            h.step(&json!({"drag": [[at.x - 3.0, at.y], [at.x + 45.0, at.y]]})).unwrap();
+            h.frames(6);
+            let after = crate::scenario::rect_of(&format!("dialog:column:user:{column}")).unwrap();
+            assert!((after.width() - before.width() - 48.0).abs() < 2.0, "{column}: {before:?} -> {after:?}");
+            let cell = crate::scenario::rect_of(&format!("dialog:table:user:{name}:cell:{column}")).unwrap();
+            assert_eq!(cell.x_range(), after.x_range(), "header and editor must align");
+        }
+        let width = crate::scenario::rect_of("dialog:column:user:Name").unwrap().width();
+        h.app.params = None;
+        h.frames(2);
+        h.step(&json!({"start": "parameters.change"})).unwrap();
+        h.frames(6);
+        assert!((crate::scenario::rect_of("dialog:column:user:Name").unwrap().width() - width).abs() < 1.0);
+        h.step(&json!({"click": {"handle": "dialog:column:user:Name:resize"}, "double": true})).unwrap();
+        h.frames(6);
+        assert!((crate::scenario::rect_of("dialog:column:user:Name").unwrap().width() - name_cell.width()).abs() < 1.0);
+        assert_eq!(h.app.session.doc.to_json(), document, "column sizing must not edit parameters");
+    }
+
+    #[test]
+    fn parameter_column_fit_preference_preserves_proportional_sizing_and_manual_widths() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width": 1900, "height": 1200}));
+        h.app
+            .run("parameters.add", json!({"name":"secondary_combustion_chamber_nozzle_contraction_internal_angle", "expression":"155 deg"}))
+            .unwrap();
+        h.step(&json!({"start":"parameters.change"})).unwrap();
+        h.frames(6);
+        let fitted = crate::scenario::rect_of("dialog:column:user:Name").unwrap().width();
+        let document = h.app.session.doc.to_json();
+        h.app.preferences.parameters_fit_columns = false;
+        h.frames(6);
+        let proportional = crate::scenario::rect_of("dialog:column:user:Name").unwrap().width();
+        assert!(fitted > proportional + 100.0, "off restores the compact proportional width: {fitted} > {proportional}");
+        let prefs: crate::prefs::Prefs = serde_json::from_value(serde_json::to_value(&h.app.preferences).unwrap()).unwrap();
+        assert!(!prefs.parameters_fit_columns, "the choice persists");
+        h.call("ui.prefs", json!({"open":"Interface"}));
+        h.frames(6);
+        h.step(&json!({"click":{"handle":"prefs:parameters_fit_columns"}})).unwrap();
+        assert!(h.app.preferences.parameters_fit_columns);
+        h.call("ui.prefs", json!({"button":"ok"}));
+        h.frames(6);
+        assert!((crate::scenario::rect_of("dialog:column:user:Name").unwrap().width() - fitted).abs() < 2.0);
+        let at = crate::scenario::handle_at("dialog:column:user:Name:resize").unwrap();
+        h.step(&json!({"drag":[[at.x,at.y],[at.x+40.0,at.y]]})).unwrap();
+        h.frames(6);
+        let manual = crate::scenario::rect_of("dialog:column:user:Name").unwrap().width();
+        h.app.preferences.parameters_fit_columns = false;
+        h.frames(6);
+        assert!(
+            (crate::scenario::rect_of("dialog:column:user:Name").unwrap().width() - manual).abs() < 2.0,
+            "manual widths take precedence in both modes"
+        );
+        assert_eq!(h.app.session.doc.to_json(), document);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn parameters_pop_out_and_dock_with_their_drafts_and_column_widths() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width": 1900, "height": 1200}));
+        h.app.run("parameters.add", json!({"name": "width", "expression": "10 mm"})).unwrap();
+        h.step(&json!({"start": "parameters.change"})).unwrap();
+        h.frames(6);
+        let at = crate::scenario::handle_at("dialog:column:user:Name:resize").unwrap();
+        h.step(&json!({"drag": [[at.x, at.y], [at.x + 50.0, at.y]]})).unwrap();
+        h.frames(6);
+        let width = crate::scenario::rect_of("dialog:column:user:Name").unwrap().width();
+        let d = h.app.params.as_mut().unwrap();
+        d.adding = true;
+        d.new_name = "unsubmitted".into();
+        d.new_expr = "missing + 1 mm".into();
+        h.frames(3);
+        let document = h.app.session.doc.to_json();
+        h.step(&json!({"click": {"handle": "params:window_mode"}})).unwrap();
+        h.frames(6);
+        assert!(h.app.params.as_ref().unwrap().window.detached);
+        assert!(crate::scenario::rect_of("params:native_window").is_some());
+        assert!((crate::scenario::rect_of("dialog:column:user:Name").unwrap().width() - width).abs() < 1.0);
+        assert_eq!(h.app.params.as_ref().unwrap().new_expr, "missing + 1 mm");
+        h.step(&json!({"click": {"handle": "params:window_mode"}})).unwrap();
+        h.frames(6);
+        assert!(!h.app.params.as_ref().unwrap().window.detached);
+        assert!(crate::scenario::rect_of("params:native_window").is_none());
+        assert!((crate::scenario::rect_of("dialog:column:user:Name").unwrap().width() - width).abs() < 1.0);
+        assert_eq!(h.app.params.as_ref().unwrap().new_name, "unsubmitted");
+        assert_eq!(h.app.session.doc.to_json(), document);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn dragging_the_parameters_title_outside_the_app_detaches_it() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width": 1600, "height": 1200}));
+        h.step(&json!({"start": "parameters.change"})).unwrap();
+        h.frames(6);
+        let title = crate::scenario::handle_at("params:title").unwrap();
+        h.step(&json!({"drag": [[title.x, title.y], [-30.0, title.y]]})).unwrap();
+        h.frames(6);
+        let d = h.app.params.as_ref().unwrap();
+        assert!(d.window.detached);
+        assert!(d.window.place.is_some());
+        assert!(crate::scenario::rect_of("params:native_window").is_some());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn crossing_each_app_border_detaches_before_the_pointer_leaves_the_app() {
+        for edge in ["left", "right", "top", "bottom"] {
+            let mut h = crate::scenario::Harness::new();
+            h.app.home.open = false;
+            h.call("ui.resize", json!({"width": 1600, "height": 1200}));
+            h.step(&json!({"start": "parameters.change"})).unwrap();
+            h.frames(6);
+            let title = crate::scenario::handle_at("params:title").unwrap();
+            let delta = match edge {
+                "left" => egui::vec2(8.0 - title.x, 0.0),
+                "right" => egui::vec2(1592.0 - title.x, 0.0),
+                "top" => egui::vec2(0.0, 4.0 - title.y),
+                _ => egui::vec2(0.0, 1192.0 - title.y),
+            };
+            let to = title + delta;
+            assert!(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1200.0)).contains(to), "{edge}: {to:?}");
+            h.step(&json!({"drag": [[title.x, title.y], [to.x, to.y]]})).unwrap();
+            h.frames(6);
+            assert!(h.app.params.as_ref().unwrap().window.detached, "{edge} must hand off before pointer capture ends");
+            assert!(crate::scenario::rect_of("params:native_window").is_some());
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn native_inner(outer: egui::Rect) -> egui::Rect {
+        egui::Rect::from_min_max(outer.min + egui::vec2(0.0, 24.0), outer.max)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_title_drags_snap_back_from_each_side_without_pointer_events() {
+        for origin in [egui::pos2(100.0, 50.0), egui::pos2(-2000.0, 50.0)] {
+            let parent = egui::Rect::from_min_size(origin, egui::vec2(1600.0, 1000.0));
+            let inside = egui::Rect::from_min_size(origin + egui::vec2(250.0, 180.0), egui::vec2(700.0, 500.0));
+            for offset in [egui::vec2(-1000.0, 0.0), egui::vec2(1800.0, 0.0), egui::vec2(0.0, -800.0), egui::vec2(0.0, 1200.0)] {
+                let outside = inside.translate(offset);
+                let mut drag = NativeDockDrag::default();
+                assert!(!drag.update(outside, native_inner(outside), parent, 0.0));
+                let moved = outside.translate(egui::vec2(10.0, 10.0));
+                assert!(!drag.update(moved, native_inner(moved), parent, 0.1));
+                assert!(!drag.update(inside, native_inner(inside), parent, 0.2));
+                assert!(!drag.update(inside, native_inner(inside), parent, 0.3));
+                assert!(drag.update(inside, native_inner(inside), parent, 0.41), "{origin:?} {offset:?}");
+            }
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn opening_resizing_or_moving_the_main_window_does_not_snap_a_native_panel_back() {
+        let parent = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 1000.0));
+        let outer = egui::Rect::from_min_size(egui::pos2(250.0, 180.0), egui::vec2(700.0, 500.0));
+        let mut drag = NativeDockDrag::default();
+        assert!(!drag.update(outer, native_inner(outer), parent, 0.0));
+        let jitter = outer.translate(egui::vec2(2.0, 0.0));
+        assert!(!drag.update(jitter, native_inner(jitter), parent, 0.1));
+        assert!(!drag.update(jitter, native_inner(jitter), parent, 0.6));
+        assert!(!drag.moving, "placement jitter must stop repainting");
+        let resized = egui::Rect::from_min_max(jitter.min - egui::vec2(40.0, 0.0), jitter.max);
+        assert!(!drag.update(resized, native_inner(resized), parent, 1.0));
+        assert!(!drag.update(resized, native_inner(resized), parent, 1.3));
+        let moved_parent = parent.translate(egui::vec2(50.0, 50.0));
+        assert!(!drag.update(resized, native_inner(resized), moved_parent, 1.5));
+        let moved = resized.translate(egui::vec2(50.0, 30.0));
+        assert!(!drag.update(moved, native_inner(moved), moved_parent, 2.0));
+        assert!(drag.update(moved, native_inner(moved), moved_parent, 2.2), "a later deliberate title drag over the app does snap back");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn snapping_back_keeps_drafts_column_widths_and_the_native_window_size() {
+        let mut h = escape_dialog();
+        h.call("ui.resize", json!({"width": 1900, "height": 1200}));
+        h.frames(6);
+        let at = crate::scenario::handle_at("dialog:column:user:Name:resize").unwrap();
+        h.step(&json!({"drag": [[at.x, at.y], [at.x + 50.0, at.y]]})).unwrap();
+        h.frames(6);
+        let width = crate::scenario::rect_of("dialog:column:user:Name").unwrap().width();
+        let document = h.app.session.doc.to_json();
+        h.step(&json!({"click": {"handle": "params:window_mode"}})).unwrap();
+        h.frames(6);
+        let parent = egui::Rect::from_min_size(egui::pos2(100.0, 50.0), egui::vec2(1900.0, 1200.0));
+        let outside = egui::Rect::from_min_size(egui::pos2(2100.0, 250.0), egui::vec2(700.0, 524.0));
+        let inside = outside.translate(egui::vec2(-1600.0, 0.0));
+        let d = h.app.params.as_mut().unwrap();
+        d.adding = true;
+        d.new_name = "unsubmitted".into();
+        d.new_expr = "missing + 1 mm".into();
+        snap_native_back(&h.ctx, d, outside, native_inner(outside), parent, 0.0);
+        snap_native_back(&h.ctx, d, inside, native_inner(inside), parent, 1.0);
+        snap_native_back(&h.ctx, d, inside, native_inner(inside), parent, 1.2);
+        assert!(!d.window.detached);
+        assert_eq!(d.dock_at, Some(egui::pos2(400.0, 200.0)));
+        h.frames(6);
+        let d = h.app.params.as_ref().unwrap();
+        assert_eq!(d.new_name, "unsubmitted");
+        assert_eq!(d.new_expr, "missing + 1 mm");
+        assert!(crate::scenario::rect_of("params:native_window").is_none());
+        assert!((crate::scenario::rect_of("dialog:column:user:Name").unwrap().width() - width).abs() < 1.0);
+        assert_eq!(
+            h.ctx.data_mut(|data| data.get_persisted::<egui::Vec2>(egui::Id::new("sc_params_dialog").with("size"))),
+            Some(egui::vec2(700.0, 500.0))
+        );
+        assert_eq!(h.app.session.doc.to_json(), document);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_native_parameters_window_accepts_a_second_monitor_place_once() {
+        let app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+        let ctx = crate::fonts::test_context();
+        let mut d = ParamsDialog::new();
+        d.window.place = Some([-1600.0, 100.0, 900.0, 700.0]);
+        let first = native_window_builder(&app, &ctx, &d);
+        assert_eq!(first.position, Some(egui::pos2(-1600.0, 100.0)));
+        assert_eq!(first.inner_size, Some(egui::vec2(900.0, 700.0)));
+        d.window_placed = true;
+        assert!(native_window_builder(&app, &ctx, &d).position.is_none(), "the OS owns subsequent movement");
+        d.window_placed = false;
+        d.window.place = Some([f32::NAN, 0.0, 900.0, 700.0]);
+        assert!(native_window_builder(&app, &ctx, &d).position.is_none(), "invalid saved positions are ignored");
+    }
 
     fn escape_dialog() -> crate::scenario::Harness {
         let mut h = crate::scenario::Harness::new();

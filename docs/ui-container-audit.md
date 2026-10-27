@@ -36,12 +36,12 @@ windows use the shared composition, including its header and fixed outer frame.
 | Browser, vertical History and Browser/History shared column | `browser`, `timeline_left`, `lib` | Adaptive panel; shared shell placement, resizing and fold state remain with owners |
 | Horizontal History | `timeline` | Adaptive panel surface; floating strip or bottom dock |
 | Assistant sheet and folded strip | `agent_chat/panel` → `Panel` | Adaptive feature surface; left/right position, resize, drag targets and native pop-out retained |
-| Feature forms, Parameters, material review, Redefine Sketch Plane | `dialogs`, `params_dialog`, `material_card_review`, `sketch_attachment_ui` → `Panel` | Adaptive feature surface; bounded anchors and pinned actions retained |
-| Sketch options | `sketch_palette` → `Panel` | Adaptive palette surface, preserving transparency |
+| Feature forms, Parameters, material review, Redefine Sketch Plane | `dialogs`, `params_dialog`, `material_card_review`, `sketch_attachment_ui` → `Panel` | Adaptive feature surface; content-fitted initial size, resizing, desktop tear-off/snap-back and pinned actions |
+| Sketch options | `sketch_palette` → `Panel` | Adaptive palette surface, preserving transparency; resizing and desktop tear-off/snap-back |
 | Application bar, workspace and ribbon | `toolbar`, `shell` | Chrome hosts; adaptive card geometry comes from the shared policy |
 | Render settings | `render_workspace` | Panel host; existing right dock retained |
-| Preferences, managers, About, update/install/recovery/crash/issue prompts | `Window`, `Confirm` | System windows and modal sheets retain modality; these are not workspace sidebars |
-| BOM, Messages, mouse gestures, 3D mouse calibration | respective modules → `Window::show_body` | Shared header, tokenised frame and bounded body; native egui title bars/resize highlights and legacy report/width helpers removed |
+| Preferences, managers, About, update/install/recovery/crash/issue prompts | `Window`, `Confirm` | Nonmodal managers/reports resize and tear off; modal sheets and required choices retain modality |
+| BOM, Messages, mouse gestures, 3D mouse calibration | respective modules → `Window::show_body` | Shared header, tokenised frame, resizing and desktop tear-off/snap-back; legacy report/width helpers removed |
 | Web stored-files and web recovery windows | `apps/solidcraft-web` → `Window::show_body` | Same shared composition; recovery requires an explicit choice and cannot be dismissed through the header |
 | File/workspace/document/Help/context/overflow menus, radial menu, Select Other and inline rename | respective owners → `Menu` / container popup | Anchored transient hosts; never consume workspace dock space |
 | Search, completions, colour and library popovers | `shortcut_box`, kit fields/choice/colour/table | Anchored popup containers; editor focus and completion semantics retained |
@@ -49,7 +49,7 @@ windows use the shared composition, including its header and fixed outer frame.
 | Status and loading/progress messages | `viewport`, `open_meshing` | Notification surfaces independent of layout |
 | Navigation bar | `viewport` | Shared navigation surface; shell still computes its available canvas bounds |
 | OK and Cancel in the view's corner | `view_confirm` | Navigation surface in its own area; the viewport layout reserves its corner and the shell counts it as covered |
-| Home, model viewport, Render canvas and native Assistant window content | `home`, `lib`, `agent_chat/panel` | Central content hosts, not floating workspace panels |
+| Home, model viewport, Render canvas and native tool, manager, Assistant and Parameters window content | `home`, `lib`, `agent_chat/panel`, `params_dialog` | Central content hosts, not floating workspace panels |
 | Loading input shield | `file_load` | Explicit input shield; must remain interactive while CAD input is blocked |
 
 The compass, geometry previews, drag handles, selection outlines, dimension lines,

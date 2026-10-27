@@ -11,11 +11,14 @@ pub(crate) struct Column<'a> {
     min_content_width: f32,
     icon_only: bool,
     flexible: bool,
+    fitted_width: Option<f32>,
+    resize_min: Option<f32>,
+    resize_id: Option<egui::Id>,
 }
 
 impl<'a> Column<'a> {
     pub(crate) fn new(label: &'a str, width: f32) -> Self {
-        Self { label, width, min_content_width: 0.0, icon_only: false, flexible: false }
+        Self { label, width, min_content_width: 0.0, icon_only: false, flexible: false, fitted_width: None, resize_min: None, resize_id: None }
     }
 
     /// Share the remaining visible table width using this column's width as its weight.
@@ -35,6 +38,23 @@ impl<'a> Column<'a> {
     pub(crate) fn min_content_width(mut self, width: f32) -> Self {
         self.min_content_width = dimension(width);
         self
+    }
+
+    /// Start at the measured content width. A manual resize takes precedence over this fit.
+    pub(crate) fn fit_content(mut self, width: f32) -> Self {
+        self.fitted_width = Some(dimension(width));
+        self
+    }
+
+    /// Let the header's trailing divider change this column's width, down to the control minimum.
+    pub(crate) fn resizable(mut self, minimum: f32) -> Self {
+        self.resize_min = Some(dimension(minimum));
+        self
+    }
+
+    /// Share a manual width when the same table moves between embedded and native viewports.
+    pub(crate) fn set_resize_id(&mut self, id: egui::Id) {
+        self.resize_id = Some(id);
     }
 }
 
@@ -70,7 +90,7 @@ pub(crate) fn table_custom<R>(ui: &mut Ui, id: &str, columns: &[Column<'_>], emp
             let available = (dimension(ui.available_width()).min(viewport.width()) * ppp).floor() / ppp;
             let mut table = Table {
                 columns,
-                widths: column_widths(ui, columns, available),
+                widths: column_widths(ui, id, columns, available),
                 id: id.to_owned(),
                 rows: 0,
                 empty: empty.to_owned(),
@@ -96,11 +116,28 @@ pub(crate) fn table_custom<R>(ui: &mut Ui, id: &str, columns: &[Column<'_>], emp
     output.inner
 }
 
-fn column_widths(ui: &Ui, columns: &[Column<'_>], available: f32) -> Vec<f32> {
+fn column_widths(ui: &Ui, id: &str, columns: &[Column<'_>], available: f32) -> Vec<f32> {
     let t = Tokens::get();
-    let mut widths: Vec<_> = columns
+    let overrides: Vec<_> = columns
         .iter()
         .map(|c| {
+            c.resize_min.and_then(|minimum| {
+                ui.data_mut(|d| d.get_persisted::<f32>(c.resize_id.unwrap_or_else(|| ui.make_persistent_id(("table_column", id, c.label)))))
+                    .filter(|width| width.is_finite())
+                    .map(|width| width.clamp(minimum, t.form_card_width * 16.0))
+            })
+        })
+        .collect();
+    let mut widths: Vec<_> = columns
+        .iter()
+        .zip(&overrides)
+        .map(|(c, resized)| {
+            if let Some(width) = resized {
+                return *width;
+            }
+            if let Some(width) = c.fitted_width {
+                return width.max(label_width(ui, c.label) + t.space_8).max(c.min_content_width).max(t.control_height);
+            }
             if c.flexible || c.icon_only {
                 c.min_content_width.max(t.control_height)
             } else {
@@ -108,9 +145,10 @@ fn column_widths(ui: &Ui, columns: &[Column<'_>], available: f32) -> Vec<f32> {
             }
         })
         .collect();
-    let fixed: f32 = columns.iter().zip(&widths).filter(|(c, _)| !c.flexible).map(|(_, w)| *w).sum();
+    let shares: Vec<_> = columns.iter().zip(&overrides).map(|(c, resized)| c.flexible && c.fitted_width.is_none() && resized.is_none()).collect();
+    let fixed: f32 = shares.iter().zip(&widths).filter(|(share, _)| !**share).map(|(_, w)| *w).sum();
     let mut remaining = (available - fixed - t.space_8 * (columns.len().saturating_sub(1) + 2) as f32).max(0.0);
-    let mut sharing: Vec<_> = columns.iter().map(|c| c.flexible && dimension(c.width) > 0.0).collect();
+    let mut sharing: Vec<_> = columns.iter().zip(shares).map(|(c, share)| share && dimension(c.width) > 0.0).collect();
     // Freeze columns at their control minimum before sharing the remaining width. The bounded
     // passes also keep a hostile design with many columns from creating an unbounded loop.
     for _ in 0..columns.len().min(64) {
@@ -174,6 +212,37 @@ impl Table<'_> {
                 },
             );
             scenario::publish_rect(&format!("dialog:column:{}:{}", self.id, column.label), cell);
+            if let Some(minimum) = column.resize_min {
+                let x = cell.right() + t.space_4;
+                let hit = egui::Rect::from_center_size(egui::pos2(x, cell.center().y), vec2(t.space_8, cell.height()));
+                let key = column.resize_id.unwrap_or_else(|| ui.make_persistent_id(("table_column", &self.id, column.label)));
+                let response = ui.interact(hit, key, egui::Sense::click_and_drag()).on_hover_text(crate::i18n::tr("table.resize_column_hint"));
+                super::panel::resize_cursor(ui, hit, &response, egui::CursorIcon::ResizeHorizontal);
+                scenario::publish_handle(&format!("dialog:column:{}:{}:resize", self.id, column.label), hit.center());
+                let base = key.with("drag_base");
+                if response.drag_started()
+                    && let Some(origin) = ui.input(|i| i.pointer.press_origin())
+                {
+                    ui.data_mut(|d| d.insert_temp(base, (*width, origin.x)));
+                }
+                if (response.dragged() || response.drag_stopped())
+                    && let Some((start, from)) = ui.data(|d| d.get_temp::<(f32, f32)>(base))
+                    && let Some(now) = ui.input(|i| i.pointer.latest_pos())
+                {
+                    let next = (start + now.x - from).clamp(minimum, t.form_card_width * 16.0);
+                    ui.data_mut(|d| d.insert_persisted(key, next));
+                    ui.ctx().request_repaint();
+                }
+                if response.double_clicked() {
+                    ui.data_mut(|d| d.remove::<f32>(key));
+                    ui.ctx().request_repaint();
+                }
+                ui.painter().vline(
+                    x,
+                    cell.y_range().shrink(t.space_6),
+                    t.tertiary_border(if response.hovered() || response.dragged() { t.form_primary } else { t.dialog_rule }),
+                );
+            }
             left = cell.right() + t.space_8;
         }
         ui.painter().hline(rect.x_range(), rect.bottom(), t.tertiary_border(t.dialog_rule));
