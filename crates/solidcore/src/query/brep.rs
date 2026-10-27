@@ -53,17 +53,18 @@
 //!   fresh one just before and drops it on failure), with [`EntityRef`] objects. Its
 //!   boundary solve and ray fires need the B-rep's cache and object identities, which
 //!   upstream reaches through the B-rep (`CacheMakeOrValidate`): a [`BrepQuery`] holds
-//!   the identities and builds the cache lazily, on the first solve that needs it (so a
-//!   single-region B-rep never builds one, as upstream). A caller keeps one query while
+//!   the identities and builds the cache lazily, on the first solve that needs it (so
+//!   single-region classification without boundary intersections skips it, as upstream).
+//!   A caller keeps one query while
 //!   the B-rep is not edited and makes a fresh one after an edit (upstream revalidates).
 //!   [`BrepQuery::of_brep`] and [`BrepClassifier::of_brep`] resolve a lone B-rep's
 //!   identities from its [`Brep::naming`] scheme and proven owner keys
-//!   ([`BrepIdentity::default`] assumes [`arena_identity`]). The ray fires may add
-//!   missing UV trim curves, which
-//!   upstream's `const` method does to the B-rep itself; [`BrepClassifier`] serves
-//!   callers that hold the B-rep shared and makes a private copy on the first ray fire
-//!   only ([`Brep::clone_standing_for_self`]: its geometry keeps its owners, which the
-//!   copy constructor resets, so the copy's cache still holds its curves and surfaces).
+//!   ([`BrepIdentity::default`] assumes [`arena_identity`]). Face boundary solves prepare
+//!   face caches, and ray fires may add missing UV trim curves, which upstream's `const`
+//!   method does to the B-rep itself. [`BrepClassifier`] serves callers that hold the
+//!   B-rep shared and makes a private copy on the first face boundary solve or ray fire
+//!   ([`Brep::clone_standing_for_self`]: its geometry keeps its owners, which the copy
+//!   constructor resets, so the copy's caches still hold its curves and surfaces).
 //!   A ray fire that fails with an ordinary error moves on to the next direction,
 //!   as a failing status does upstream; [`SolidError::Unported`] propagates.
 //! - **Out-params.** The evaluated point, normal or point and derivatives are the
@@ -650,29 +651,32 @@ impl<'a> BrepQuery<'a> {
             };
             // XSects point with the Brep verts, edges, and faces returning lowest dim
             // topology intersection found.
-            let solutions = match &mut target {
-                Target::Own(b) => {
-                    let cache = self.cache(k, b)?;
-                    solve_mutable_brep_point(k, b, &identity, cache, point, options)?
-                }
-                Target::Shared { .. } => {
-                    let b = target.shared();
-                    let objects = BrepObjects {
-                        preparation: None,
-                        brep: b,
-                        brep_id,
-                        cache: Some(self.cache(k, b)?),
-                        keys,
-                        owner_of,
-                    };
-                    TopologySolver::brep_point_solve(
-                        k,
-                        &objects,
-                        Some(CacheObject::Brep),
-                        point,
-                        options,
-                    )?
-                }
+            // A face-owned surface cache needs mutable access to its actual face.
+            // A shared target without faces cannot reach that lookup and can use
+            // the read-only solver without copying the B-rep.
+            let solutions = if matches!(&target, Target::Shared { .. })
+                && target.shared().faces().ids().next().is_none()
+            {
+                let b = target.shared();
+                let objects = BrepObjects {
+                    preparation: None,
+                    brep: b,
+                    brep_id,
+                    cache: Some(self.cache(k, b)?),
+                    keys,
+                    owner_of,
+                };
+                TopologySolver::brep_point_solve(
+                    k,
+                    &objects,
+                    Some(CacheObject::Brep),
+                    point,
+                    options,
+                )?
+            } else {
+                let b = target.mutable()?;
+                let cache = self.cache(k, b)?;
+                solve_mutable_brep_point(k, b, &identity, cache, point, options)?
             };
 
             // when the point is on a Brep Face
@@ -859,7 +863,7 @@ impl LazyBrep<'_> {
 }
 
 /// The B-rep a classification runs on: the caller's, lent mutably, or one it holds
-/// shared, copied when a ray fire first needs it mutably.
+/// shared, copied when a face boundary solve or ray fire needs it mutably.
 enum Target<'t> {
     Own(&'t mut Brep),
     Shared {
@@ -879,7 +883,7 @@ impl Target<'_> {
 
     /// The B-rep to edit, copying a shared one first: the copy stands for the B-rep
     /// ([`Brep::clone_standing_for_self`]), so its geometry keeps naming its edges and
-    /// faces and the ray fires' cache holds them.
+    /// faces and the face boundary solves' and ray fires' caches hold them.
     fn mutable(&mut self) -> Result<&mut Brep> {
         match self {
             Self::Own(b) => Ok(b),
@@ -892,11 +896,10 @@ impl Target<'_> {
 }
 
 /// Point classification against a B-rep the caller holds shared: its [`BrepQuery`], and
-/// a private copy for the ray fires, which may add missing UV trim curves (upstream's
-/// `const` `Point3DClassify` adds them to the B-rep itself). The copy is made when a ray
-/// is first fired, so boundary hits and single-region B-reps copy nothing. Keep one per
-/// B-rep state and classify every point through it: the copy and the cache are made
-/// once.
+/// a private copy for face boundary solves and ray fires, which may add missing UV trim
+/// curves (upstream's `const` `Point3DClassify` adds them to the B-rep itself). The
+/// copy is made when either solve first needs it. Keep one per B-rep state and classify
+/// every point through it: the copy and the cache are made once.
 #[derive(Debug)]
 pub struct BrepClassifier<'a, 'b> {
     query: BrepQuery<'a>,
@@ -949,8 +952,8 @@ impl<'a, 'b> BrepClassifier<'a, 'b> {
         self.copy.is_some()
     }
 
-    /// [`BrepQuery::point_3d_classify`] on the B-rep, copied when a ray fire first
-    /// needs it.
+    /// [`BrepQuery::point_3d_classify`] on the B-rep, copied when a face boundary solve
+    /// or ray fire first needs it.
     ///
     /// # Errors
     ///
@@ -1271,7 +1274,6 @@ mod tests {
         let mut classifier = BrepClassifier::new(&b, BrepIdentity::arena(BrepId::from_index(0)));
         let pc = classifier.point_3d_classify(&k, p, 1e-6, true).unwrap();
         assert_eq!(pc.object(), b.infinite_region().map(EntityRef::Region));
-        assert!(!classifier.has_copied());
     }
 
     #[test]
