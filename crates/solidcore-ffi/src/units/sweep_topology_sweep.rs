@@ -23,6 +23,13 @@ mod sys {
             values: *mut f64,
             value_cap: i64,
         ) -> i32;
+        pub fn sc_sweep_topology_sweep_whole(
+            input: *const f64,
+            n: i64,
+            out: *mut f64,
+            cap: i64,
+            len: *mut i64,
+        ) -> i32;
     }
 }
 /// Validate a script and execute it against upstream. Entity 64 denotes null;
@@ -82,6 +89,42 @@ pub fn eval_with_values(
         }
     })?;
     Ok((state, values))
+}
+/// Whole-B-rep `DoSweep` (all six target arrays null) of an `SmApiCreateBox` solid:
+/// `input` = `[length, width, height, kind (1 translation, 2 rotation), vx, vy, vz,
+/// angle_deg, stitch, merge, repetitions]`, the rotation about axis `v` through the
+/// origin. Returns the status (`0` = success), then on success the region, shell,
+/// face, loop, edge and vertex counts, each vertex point in `GetVertices` order and
+/// each `GetEdges` edge's start/end vertex indices (`-1` for none).
+///
+/// # Errors
+/// Non-finite input, non-positive sizes, an unknown kind, more than four
+/// repetitions, or native exceptions.
+pub fn whole(input: [f64; 11]) -> Result<Vec<f64>, FfiError> {
+    let reps = input[10];
+    if input.iter().any(|v| !v.is_finite())
+        || !(input[0] > 0.0 && input[1] > 0.0 && input[2] > 0.0)
+        || (input[3] != 1.0 && input[3] != 2.0)
+        || !(0.0..=4.0).contains(&reps)
+        || reps.fract() != 0.0
+    {
+        return Err(FfiError::InvalidArgument(
+            "invalid whole-B-rep sweep input".into(),
+        ));
+    }
+    call_with_buffer(4096, |out, len| {
+        // SAFETY: the fixed-size input is read only; C++ writes at most `cap`
+        // doubles and retains no pointers to either buffer.
+        unsafe {
+            sys::sc_sweep_topology_sweep_whole(
+                input.as_ptr(),
+                input.len() as i64,
+                out.as_mut_ptr(),
+                out.len() as i64,
+                &raw mut *len,
+            )
+        }
+    })
 }
 #[cfg(test)]
 mod tests {

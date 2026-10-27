@@ -3,7 +3,9 @@
 //! including null entries, reverse-map leftovers and both B-rep namespaces.
 //! Vertex construction is deferred at the exact missing B-rep constructor;
 //! whole-B-rep geometry construction and the tails behind those calls are not
-//! claimed as compared coverage.
+//! claimed as compared coverage by the map scripts. `whole` cases instead run the
+//! whole-B-rep `DoSweep` branch (all six target arrays null) on a real box in the
+//! production `SweepStore` and compare the swept B-rep (see [`whole_output`]).
 #![allow(clippy::indexing_slicing)]
 use crate::{Case, CaseContext, HarnessError, Output, Rng, UnitDiff};
 use serde::{Deserialize, Serialize};
@@ -34,6 +36,10 @@ struct Input {
     kind: u8,
     #[serde(default = "vector")]
     vector: [f64; 3],
+    /// Whole-B-rep `DoSweep` of a box instead of a map script
+    /// (`solidcore_ffi::units::sweep_topology_sweep::whole` input layout).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    whole: Option<[f64; 11]>,
 }
 fn vector() -> [f64; 3] {
     [1., 0., 0.]
@@ -396,7 +402,196 @@ impl SweepAccess for Model {
         unsupported()
     }
 }
+/// Distinct identities for the whole-B-rep store: kind and index under the B-rep
+/// handle, as a native object has one address per topology object.
+struct WholeIdentities;
+impl solidcore::sweep::topology_sweep::store::SweepIdentities for WholeIdentities {
+    fn topology(
+        &self,
+        b: BrepId,
+        e: solidcore::error::EntityRef,
+    ) -> solidcore::geom::object::ObjectRef {
+        use solidcore::error::EntityRef as R;
+        // (kind, index, native type code)
+        let (kind, index, type_code) = match e {
+            R::Brep(i) => (0_u64, i.index(), 16011),
+            R::Shell(i) => (1, i.index(), 16013),
+            R::Face(i) => (2, i.index(), 16002),
+            R::Loop(i) => (3, i.index(), 16003),
+            R::Edge(i) => (4, i.index(), 16016),
+            R::Vertex(i) => (5, i.index(), 16021),
+            R::Region(i) => (6, i.index(), 16012),
+            R::Faceuse(i) => (7, i.index(), 16022),
+            R::Loopuse(i) => (8, i.index(), 16004),
+            R::Edgeuse(i) => (9, i.index(), 16005),
+            R::Vertexuse(i) => (10, i.index(), 16006),
+        };
+        solidcore::geom::object::ObjectRef {
+            type_code,
+            key: ObjectKey((u64::from(b.index()) << 40) | (kind << 32) | u64::from(index)),
+        }
+    }
+    fn curve(
+        &self,
+        b: BrepId,
+        e: EdgeId,
+        _: &solidcore::curve::curve::Curve,
+    ) -> solidcore::geom::object::ObjectRef {
+        solidcore::geom::object::ObjectRef {
+            type_code: 11001,
+            key: ObjectKey((u64::from(b.index()) << 40) | (20 << 32) | u64::from(e.index())),
+        }
+    }
+    fn owned_auxiliary_objects(&self, _: BrepId, _: &Brep) -> Vec<ObjectKey> {
+        Vec::new()
+    }
+}
+
+/// The whole-B-rep record from the native layout, in a canonical order. Upstream
+/// takes the silhouette edges from a pointer hash (`SmHCR::GetSilhouetteEdges`,
+/// `plan/upstream-issues` ND-2), so the creation order of the swept topology is not
+/// reproducible; the record therefore compares, in `whole`, the status, the six
+/// counts and the number of edges without two vertices, and in `points` the vertex
+/// points sorted, then each edge's two end points (lesser first) sorted.
+fn whole_output(record: &[f64]) -> Output {
+    let Some((&status, rest)) = record.split_first() else {
+        return Output::err("empty whole-B-rep record".to_string());
+    };
+    let mut ints = vec![status as i64];
+    let mut values = Vec::new();
+    if let Some(counts) = rest.get(..6) {
+        ints.extend(counts.iter().map(|&c| c as i64));
+        let n = counts[5] as usize;
+        let tail = &rest[6..];
+        let vertices: Vec<[f64; 3]> = tail
+            .get(..3 * n)
+            .unwrap_or_default()
+            .as_chunks::<3>()
+            .0
+            .to_vec();
+        let cmp = |a: &[f64; 3], b: &[f64; 3]| {
+            a.iter()
+                .zip(b)
+                .map(|(x, y)| x.total_cmp(y))
+                .find(|o| o.is_ne())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        };
+        let mut sorted = vertices.clone();
+        sorted.sort_by(cmp);
+        let mut open = 0;
+        let mut edges = Vec::new();
+        for pair in tail.get(3 * n..).unwrap_or_default().as_chunks::<2>().0 {
+            let end = |i: f64| (i >= 0.).then(|| vertices.get(i as usize).copied()).flatten();
+            match (end(pair[0]), end(pair[1])) {
+                (Some(p), Some(q)) => edges.push(if cmp(&p, &q).is_le() { [p, q] } else { [q, p] }),
+                _ => open += 1,
+            }
+        }
+        edges.sort_by(|a, b| cmp(&a[0], &b[0]).then_with(|| cmp(&a[1], &b[1])));
+        ints.push(open);
+        values.extend(sorted.into_iter().flatten());
+        values.extend(edges.into_iter().flatten().flatten());
+    }
+    Output::new().ints("whole", ints).values("points", values)
+}
+
+/// Rust side of `sc_sweep_topology_sweep_whole`: the same box (`create_box`) in a
+/// [`SweepStore`] with distinct caller identities, swept with all targets null.
+fn whole_rust(input: [f64; 11]) -> Result<Output> {
+    use solidcore::sweep::topology_sweep::store::{SweepIdentities, SweepStore};
+    use solidcore::topology::brep::p1;
+    let [length, width, height, kind, vx, vy, vz, angle, stitch, merge, reps] = input;
+    let mut k = Kernel::default();
+    let mut record = Vec::new();
+    let mut b = match solidcore::primitive::api_primitives::create_box(
+        &mut k,
+        Point3::ZERO,
+        length,
+        width,
+        height,
+    ) {
+        Ok(b) => b,
+        Err(e @ SolidError::Unported { .. }) => return Err(e),
+        Err(e) => return Ok(whole_output(&[status(&e) as f64])),
+    };
+    let v = Point3::new(vx, vy, vz);
+    let g = if kind == 1. {
+        SweepGeometry::Translation(TranslationalSweepGeometry::new(v))
+    } else {
+        SweepGeometry::Rotation(RotationalSweepGeometry::new(
+            Point3::ZERO,
+            v,
+            angle,
+            solidcore::geom::tol::ZONE_TOL_3D,
+        ))
+    };
+    let mut records = BTreeMap::new();
+    let mut attributes = AttributeStore::new();
+    let mut next = 0;
+    let mut store = SweepStore::new(&WholeIdentities, &mut records, &mut attributes, &mut next);
+    let context = store.register_kernel(&mut k)?;
+    let handle = BrepId::from_index(0);
+    b.set_key(WholeIdentities.topology(handle, solidcore::error::EntityRef::Brep(handle)).key);
+    let id = store.register_brep(context, &mut b)?;
+    let region = store.infinite_region(id)?;
+    let mut sweep = TopologySweep {
+        do_stitching: stitch != 0.,
+        do_merge: merge != 0.,
+        repetitions: reps as u64,
+        ..TopologySweep::default()
+    };
+    let result = sweep.do_sweep(
+        &mut store,
+        &g,
+        Some(id),
+        Some((id, region)),
+        &mut solidcore::sweep::topology_sweep::engine::SweepTargets::default(),
+    );
+    drop(store);
+    match result {
+        Err(e @ SolidError::Unported { .. }) => return Err(e),
+        Err(e) => record.push(status(&e) as f64),
+        Ok(()) => {
+            record.push(0.);
+            let vertices = p1::vertices(&b, None)?;
+            let edges = p1::edges(&b, None)?;
+            let faces = p1::faces(&b, None)?;
+            // SmBrep::GetLoops: the loops of every face, in face order.
+            let mut loops = 0;
+            for &f in &faces {
+                loops += solidcore::topology::face::p2::loops(&b, f, false, None)?.len();
+            }
+            for n in [
+                p1::regions(&b, None)?.len(),
+                p1::shells(&mut k, &b, None)?.len(),
+                faces.len(),
+                loops,
+                edges.len(),
+                vertices.len(),
+            ] {
+                record.push(n as f64);
+            }
+            for &v in &vertices {
+                let p = solidcore::topology::vertex::point(&b, v)?;
+                record.extend([p.x, p.y, p.z]);
+            }
+            let index = |v: Option<VertexId>| {
+                v.and_then(|v| vertices.iter().position(|&w| w == v))
+                    .map_or(-1., |i| i as f64)
+            };
+            for e in edges {
+                record.push(index(solidcore::topology::edge::start_vertex(&b, e)?));
+                record.push(index(solidcore::topology::edge::end_vertex(&b, e)?));
+            }
+        }
+    }
+    Ok(whole_output(&record))
+}
+
 fn rust(i: &Input) -> Result<Output> {
+    if let Some(whole) = i.whole {
+        return whole_rust(whole);
+    }
     let mut s = TopologySweep::default();
     let mut out = Vec::new();
     let mut values = Vec::new();
@@ -580,6 +775,11 @@ impl UnitDiff for Runner {
     }
     fn run_cpp(&self, c: &Case) -> std::result::Result<Output, HarnessError> {
         let i: Input = c.parse()?;
+        if let Some(whole) = i.whole {
+            return solidcore_ffi::units::sweep_topology_sweep::whole(whole)
+                .map(|record| whole_output(&record))
+                .map_err(|e| HarnessError::new(e.to_string()));
+        }
         solidcore_ffi::units::sweep_topology_sweep::eval_with_values(&i.steps, i.vector, i.kind)
             .map(|(state, values)| {
                 Output::new()

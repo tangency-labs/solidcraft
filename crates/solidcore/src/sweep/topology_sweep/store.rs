@@ -16,7 +16,9 @@
 //! HCR entries own their actual scene; no scene copy is kept. Native dependency
 //! errors and partial geometry are preserved. No numerical algorithm or recursion
 //! is introduced. Destruction releases the Rust-owned registry/attribute state;
-//! the unported native B-rep destructor is not emulated.
+//! the unported native B-rep destructor is not emulated. `RemoveFaces`,
+//! `RemoveAllTopology` and the sweep stitch edit through the context the store has
+//! already lent to the edit (the trait defaults lend it again and fail).
 
 pub(crate) mod classification;
 mod merge;
@@ -1213,6 +1215,66 @@ impl SweepAccess for SweepStore<'_> {
             None,
             None,
         )
+    }
+    /// `SmBrep::RemoveFaces`, notifying the store's lent context. The default's
+    /// kernel-callback variant would lend that context a second time.
+    fn remove_faces(&mut self, brep: BrepId, faces: &[FaceId]) -> Result<()> {
+        self.with_brep_mut(brep, |kernel, brep, _, env| {
+            let editing = brep.editing_enabled();
+            crate::topology::brep::p5::remove_faces_notified(kernel, brep, editing, faces, env)
+        })
+    }
+    /// `SmBrep::RemoveAllTopology`, notifying the store's lent context (as
+    /// [`Self::remove_faces`]).
+    fn remove_all_topology(&mut self, brep: BrepId) -> Result<()> {
+        self.with_brep_mut(brep, |kernel, brep, _, env| {
+            crate::topology::brep::p10::remove_all_topology_notified(kernel, brep, env)
+        })
+    }
+    /// `SmStitch(SmSweepStitchCallback, tol, TRUE, TRUE).DoStitching()`, editing
+    /// through the store's lent context (as [`Self::remove_faces`]). Split curves
+    /// take the caller's identities.
+    fn stitch(
+        &mut self,
+        brep: BrepId,
+        sweep: &mut super::TopologySweep,
+        tolerance: f64,
+        making_manifold_solid: bool,
+    ) -> Result<()> {
+        let identities = self.identities;
+        let new_curve = |edge: EdgeId, type_code: i64| {
+            identities
+                .0
+                .ok_or_else(|| invalid("new split curve needs its caller identity"))?
+                .new_curve(brep, edge, type_code)
+        };
+        self.with_brep_mut(brep, |kernel, model, _, env| {
+            let curve_identity = if identities.actual_curve_identities() {
+                crate::topology::brep::p9::CurveIdentity::Actual(
+                    &crate::topology::brep::p9::issue_curve_identity,
+                )
+            } else {
+                crate::topology::brep::p9::CurveIdentity::Checked(&new_curve)
+            };
+            let mut edits = crate::heal::stitch::p1::BorrowedStitchEdits {
+                env,
+                curve_identity,
+            };
+            let mut callback = super::access::SweepStitchCallback { brep, sweep };
+            let mut stitch =
+                crate::heal::stitch::p1::Stitch::new(&mut callback, tolerance, true, true);
+            stitch.making_manifold_solid = making_manifold_solid;
+            stitch.edits = Some(&mut edits);
+            stitch
+                .do_stitching(
+                    kernel,
+                    model,
+                    None,
+                    None,
+                    crate::heal::stitch::p2::MinGapRequest::default(),
+                )
+                .map(|_| ())
+        })
     }
 }
 

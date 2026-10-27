@@ -9,6 +9,9 @@
 #include <SmRegion.h>
 #include <SmLine.h>
 #include <SmAttribute.h>
+#include <SmApiGeneral.h>
+#include <SmApiPrimitives.h>
+#include <SmShell.h>
 #include <memory>
 #include <vector>
 #include <cmath>
@@ -113,5 +116,49 @@ SC_EXPORT int32_t sc_sweep_topology_sweep_eval(const int64_t* steps, int64_t n,
         for(int k=0;k<8;++k) result.push_back(tag ? tag->GetLongElementsAddress()[k] : 0);
     }
     return sc_copy_out(result.data(),result.size(),out,cap,len);
+    SC_CATCH
+}
+
+// Whole-B-rep DoSweep (all six target arrays NULL): an SmApiCreateBox solid swept
+// by a translation or rotation. in = [length, width, height, kind (1 translation,
+// 2 rotation), vx, vy, vz, angle_deg, stitch, merge, repetitions]; the rotation is
+// about the axis (vx, vy, vz) through the origin. Out (doubles): status, then on
+// success the B-rep's region, shell, face, loop, edge and vertex counts, each
+// vertex point in GetVertices order and, per GetEdges edge, its two vertex indices
+// (-1 for none).
+SC_EXPORT int32_t sc_sweep_topology_sweep_whole(const double* in, int64_t n_in, double* out,
+                                                int64_t cap, int64_t* out_len) {
+    if (!in || !out_len || n_in != 11) return SC_ERR_ARG;
+    for (int64_t i = 0; i < n_in; ++i) if (!std::isfinite(in[i])) return SC_ERR_ARG;
+    if (!(in[0] > 0 && in[1] > 0 && in[2] > 0) || (in[3] != 1 && in[3] != 2)
+        || in[10] < 0 || in[10] > 4 || in[10] != std::floor(in[10])) return SC_ERR_ARG;
+    SC_TRY
+    SmApiGetOrCreateContext();
+    SmBrep* box = nullptr;
+    std::vector<double> o;
+    SmStatus status = SmApiCreateBox(SmVector3d(0, 0, 0), in[0], in[1], in[2], box);
+    std::unique_ptr<SmBrep> owned(box);
+    if (status != SM_SUCCESS || !box) { o.push_back(status == SM_SUCCESS ? SM_ERR : status); return sc_copy_out(o.data(), (int64_t)o.size(), out, cap, out_len); }
+    SmVector3d v(in[4], in[5], in[6]);
+    SmTranslationalSweepGeometry translation(v);
+    SmRotationalSweepGeometry rotation(SmPoint3d(0, 0, 0), v, in[7], SM_ZONE_TOL_3D);
+    SmSweepGeometryCreation* g = in[3] == 1 ? (SmSweepGeometryCreation*)&translation : (SmSweepGeometryCreation*)&rotation;
+    SmTopologySweep sweep(*g, in[8] != 0, FALSE, FALSE, in[9] != 0);
+    sweep.SetRepetitions((ULONG)in[10]);
+    status = sweep.DoSweep(box, box->GetInfiniteRegion(), NULL, NULL, NULL, NULL, NULL, NULL);
+    o.push_back(status == SM_SUCCESS ? 0 : status);
+    if (status == SM_SUCCESS) {
+        SmTArray<SmRegion*> regions; box->GetRegions(regions);
+        SmTArray<SmShell*> shells; box->GetShells(shells);
+        SmTArray<SmFace*> faces; box->GetFaces(faces);
+        SmTArray<SmLoop*> loops; box->GetLoops(loops);
+        SmTArray<SmEdge*> edges; box->GetEdges(edges);
+        SmTArray<SmVertex*> vertices; box->GetVertices(vertices);
+        for (ULONG n : {regions.GetSize(), shells.GetSize(), faces.GetSize(), loops.GetSize(), edges.GetSize(), vertices.GetSize()}) o.push_back(n);
+        for (ULONG i = 0; i < vertices.GetSize(); ++i) { auto p = vertices[i]->GetPoint(); o.push_back(p.x); o.push_back(p.y); o.push_back(p.z); }
+        auto index = [&](SmVertex* p) -> double { for (ULONG i = 0; i < vertices.GetSize(); ++i) if (vertices[i] == p) return (double)i; return -1; };
+        for (ULONG i = 0; i < edges.GetSize(); ++i) { o.push_back(index(edges[i]->GetStartVertex())); o.push_back(index(edges[i]->GetEndVertex())); }
+    }
+    return sc_copy_out(o.data(), (int64_t)o.size(), out, cap, out_len);
     SC_CATCH
 }

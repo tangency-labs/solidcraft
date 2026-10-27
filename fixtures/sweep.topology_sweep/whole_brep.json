@@ -1,0 +1,264 @@
+{
+  "cases": [
+    {
+      "name": "whole_linear_z",
+      "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp:628 (DoSweep, bSweepWholeBrep): bounding box, interior-face removal, SmHCR silhouettes, scene copy, silhouette edge sweep, back-face move; stitching off (stitched results follow the pointer-hash silhouette order, ND-2)",
+      "inputs": {
+        "steps": [],
+        "whole": [
+          10,
+          10,
+          10,
+          1,
+          0,
+          0,
+          5,
+          0,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "whole_linear_oblique",
+      "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp:628 (DoSweep, bSweepWholeBrep): bounding box, interior-face removal, SmHCR silhouettes, scene copy, silhouette edge sweep, back-face move; stitching off (stitched results follow the pointer-hash silhouette order, ND-2)",
+      "inputs": {
+        "steps": [],
+        "whole": [
+          10,
+          10,
+          10,
+          1,
+          1,
+          2,
+          5,
+          0,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "whole_linear_x_flat_box",
+      "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp:628 (DoSweep, bSweepWholeBrep): bounding box, interior-face removal, SmHCR silhouettes, scene copy, silhouette edge sweep, back-face move; stitching off (stitched results follow the pointer-hash silhouette order, ND-2)",
+      "inputs": {
+        "steps": [],
+        "whole": [
+          3,
+          7,
+          2,
+          1,
+          5,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "whole_linear_neg_y_flat_box",
+      "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp:628 (DoSweep, bSweepWholeBrep): bounding box, interior-face removal, SmHCR silhouettes, scene copy, silhouette edge sweep, back-face move; stitching off (stitched results follow the pointer-hash silhouette order, ND-2)",
+      "inputs": {
+        "steps": [],
+        "whole": [
+          3,
+          7,
+          2,
+          1,
+          0,
+          -4,
+          0,
+          0,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "whole_linear_shorter_than_box",
+      "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp:628 (DoSweep, bSweepWholeBrep): bounding box, interior-face removal, SmHCR silhouettes, scene copy, silhouette edge sweep, back-face move; stitching off (stitched results follow the pointer-hash silhouette order, ND-2)",
+      "inputs": {
+        "steps": [],
+        "whole": [
+          10,
+          10,
+          10,
+          1,
+          0,
+          0,
+          0.25,
+          0,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "whole_linear_zero_repetitions",
+      "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp:628 (DoSweep, bSweepWholeBrep): bounding box, interior-face removal, SmHCR silhouettes, scene copy, silhouette edge sweep, back-face move; stitching off (stitched results follow the pointer-hash silhouette order, ND-2)",
+      "inputs": {
+        "steps": [],
+        "whole": [
+          10,
+          10,
+          10,
+          1,
+          0,
+          0,
+          5,
+          0,
+          1,
+          0,
+          0
+        ]
+      }
+    },
+    {
+      "name": "whole_linear_tiny_box",
+      "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp:628 (DoSweep, bSweepWholeBrep): bounding box, interior-face removal, SmHCR silhouettes, scene copy, silhouette edge sweep, back-face move; stitching off (stitched results follow the pointer-hash silhouette order, ND-2)",
+      "inputs": {
+        "steps": [],
+        "whole": [
+          0.001,
+          0.002,
+          0.001,
+          1,
+          0,
+          0,
+          0.001,
+          0,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "whole_linear_large_box",
+      "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp:628 (DoSweep, bSweepWholeBrep): bounding box, interior-face removal, SmHCR silhouettes, scene copy, silhouette edge sweep, back-face move; stitching off (stitched results follow the pointer-hash silhouette order, ND-2)",
+      "inputs": {
+        "steps": [],
+        "whole": [
+          10000.0,
+          10000.0,
+          10000.0,
+          1,
+          0,
+          0,
+          5000.0,
+          0,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "whole_rotation_y_90",
+      "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp:628 (DoSweep, bSweepWholeBrep): bounding box, interior-face removal, SmHCR silhouettes, scene copy, silhouette edge sweep, back-face move; stitching off (stitched results follow the pointer-hash silhouette order, ND-2)",
+      "inputs": {
+        "steps": [],
+        "whole": [
+          10,
+          10,
+          10,
+          2,
+          0,
+          1,
+          0,
+          90,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "whole_rotation_z_45",
+      "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp:628 (DoSweep, bSweepWholeBrep): bounding box, interior-face removal, SmHCR silhouettes, scene copy, silhouette edge sweep, back-face move; stitching off (stitched results follow the pointer-hash silhouette order, ND-2)",
+      "inputs": {
+        "steps": [],
+        "whole": [
+          10,
+          10,
+          10,
+          2,
+          0,
+          0,
+          1,
+          45,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "whole_rotation_x_30",
+      "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp:628 (DoSweep, bSweepWholeBrep): bounding box, interior-face removal, SmHCR silhouettes, scene copy, silhouette edge sweep, back-face move; stitching off (stitched results follow the pointer-hash silhouette order, ND-2)",
+      "inputs": {
+        "steps": [],
+        "whole": [
+          10,
+          10,
+          10,
+          2,
+          1,
+          0,
+          0,
+          30,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "whole_rotation_full_turn",
+      "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp:628 (DoSweep, bSweepWholeBrep): bounding box, interior-face removal, SmHCR silhouettes, scene copy, silhouette edge sweep, back-face move; stitching off (stitched results follow the pointer-hash silhouette order, ND-2)",
+      "inputs": {
+        "steps": [],
+        "whole": [
+          10,
+          10,
+          10,
+          2,
+          0,
+          0,
+          1,
+          360,
+          0,
+          0,
+          1
+        ]
+      }
+    },
+    {
+      "name": "whole_linear_two_repetitions",
+      "upstream_ref": "source/SMLib/src/SmTopologySweep.cpp:628 (DoSweep, bSweepWholeBrep): bounding box, interior-face removal, SmHCR silhouettes, scene copy, silhouette edge sweep, back-face move; stitching off (stitched results follow the pointer-hash silhouette order, ND-2)",
+      "inputs": {
+        "steps": [],
+        "whole": [
+          10,
+          10,
+          10,
+          1,
+          0,
+          0,
+          5,
+          0,
+          0,
+          0,
+          2
+        ]
+      }
+    }
+  ]
+}
