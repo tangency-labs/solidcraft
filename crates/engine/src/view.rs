@@ -195,11 +195,14 @@ pub fn grid_plane(back: Vec3, last: GridPlane) -> GridPlane {
     GridPlane::Ground
 }
 
-/// Grid spacing (minor, major) for a view of the given half height.
+/// Grid spacing (minor, major) for a view of the given half height, in the same units as
+/// `half_height`.
 pub fn grid_step(half_height: f64) -> (f64, f64) {
-    let raw = (half_height / 10.0).max(1e-3);
+    let raw = if half_height.is_finite() { (half_height / 10.0).max(1e-3) } else { 1e-3 };
     let p = 10f64.powf(raw.log10().floor());
-    let minor = if raw / p < 2.0 {
+    let minor = if !p.is_finite() || p <= 0.0 {
+        1e-3
+    } else if raw / p < 2.0 {
         p
     } else if raw / p < 5.0 {
         2.0 * p
@@ -317,6 +320,100 @@ pub fn grid_ext(half_height: f64, major: f64, slant: f64) -> f64 {
     let major = major.max(1e-3);
     let ext = (half_height * 3.0 / major).ceil() * major;
     (ext / slant.abs().max(0.25) / major).ceil() * major
+}
+
+/// Grid spacing (minor, major) in millimetres, chosen so the steps are round numbers in the
+/// design's `units`. A millimetre design keeps [`grid_step`]. Zooming out coarsens the step.
+pub fn grid_step_units(half_height: f64, units: &str) -> (f64, f64) {
+    let (scale, _) = solidcraft_doc::display_units::unit_scale(units);
+    let half = if half_height.is_finite() { half_height.max(0.0) } else { 0.0 };
+    if !scale.is_finite() || scale <= 0.0 {
+        return grid_step(half);
+    }
+    let (minor_u, major_u) = grid_step(half * scale);
+    let minor = minor_u / scale;
+    let major = major_u / scale;
+    if minor.is_finite() && major.is_finite() && minor > 0.0 && major > 0.0 { (minor, major) } else { grid_step(half) }
+}
+
+/// One number on a grid axis: `mm` along that axis, written in `units` with no unit suffix.
+/// A whole number stays whole, so a 50 mm mark reads `50` and the same length in centimetres
+/// reads `5`.
+pub fn grid_mark(mm: f64, units: &str) -> String {
+    if !mm.is_finite() {
+        return String::new();
+    }
+    let (scale, _) = solidcraft_doc::display_units::unit_scale(units);
+    let value = mm * scale;
+    if !value.is_finite() {
+        return String::new();
+    }
+    let nearest = value.round();
+    if nearest.abs() <= 1e9 && (value - nearest).abs() <= 1e-6 * value.abs().max(1.0) {
+        return format!("{nearest:.0}");
+    }
+    let mut text = format!("{value:.4}");
+    while text.contains('.') && (text.ends_with('0') || text.ends_with('.')) {
+        text.pop();
+    }
+    text
+}
+
+/// A number drawn on the grid.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GridMark {
+    /// World position, on the axis through `origin`.
+    pub at: Vec3,
+    /// The coordinate, in the design's units.
+    pub text: String,
+}
+
+/// Numbers on the two axes through `origin`. Coordinates are millimetres from `origin` along
+/// `u` and `v`, and the label is omitted at the origin. `centre` and `extent` are the drawn
+/// grid, so a mark is kept only when its coordinate falls inside that grid. `major` is the
+/// labeled step, in millimetres.
+pub fn grid_marks(origin: Vec3, u: Vec3, v: Vec3, centre: Vec3, extent: f64, major: f64, units: &str) -> Vec<GridMark> {
+    let mut out = Vec::new();
+    marks_along(&mut out, origin, u, centre, extent, major, units);
+    marks_along(&mut out, origin, v, centre, extent, major, units);
+    out
+}
+
+/// Labels along `axis`, on the line through `origin`.
+fn marks_along(out: &mut Vec<GridMark>, origin: Vec3, axis: Vec3, centre: Vec3, extent: f64, major: f64, units: &str) {
+    let len = axis.len();
+    if !len.is_finite() || len <= 1e-9 || !major.is_finite() || major <= 0.0 || !extent.is_finite() || extent < 0.0 {
+        return;
+    }
+    let axis = axis / len;
+    let along = (centre - origin).dot(axis);
+    if !along.is_finite() {
+        return;
+    }
+    let mut first = ((along - extent) / major).ceil();
+    let mut last = ((along + extent) / major).floor();
+    if !first.is_finite() || !last.is_finite() || first > last {
+        return;
+    }
+    if last - first > 80.0 {
+        let mid = (along / major).round();
+        first = (mid - 40.0).max(first);
+        last = (mid + 40.0).min(last);
+    }
+    let mut k = first;
+    let mut n = 0u32;
+    while k <= last + 1e-6 && n < 81 {
+        let coord = k.round() * major;
+        let from_centre = coord - along;
+        if coord.abs() > major * 1e-4 && from_centre.abs() <= extent + major * 1e-6 {
+            let text = grid_mark(coord, units);
+            if !text.is_empty() {
+                out.push(GridMark { at: origin + axis * coord, text });
+            }
+        }
+        k += 1.0;
+        n += 1;
+    }
 }
 
 /// Sketch curves as world polylines with their colour.
@@ -589,7 +686,7 @@ fn build_scene(
     sc.radius = (b.diagonal() * 0.5).max(cam.half_height()).max(10.0) + b.center().dist(cam.target);
     // Grid on the ground plane (XY with Z up, XZ with Y up), drawn under the model as in the viewport.
     if guides.grid {
-        let (minor, major) = grid_step(cam.half_height());
+        let (minor, major) = grid_step_units(cam.half_height(), &s.doc.units);
         // Headless pictures keep the grid on the ground, the viewport's default; an open sketch
         // has its own plane's grid (world coordinates, no camera frame).
         let (c, u, v, slant, w): (Vec3, Vec3, Vec3, f64, Box<dyn Fn(Vec3) -> Vec3>) = if let Some(pl) = open_sketch_plane(s) {
@@ -1098,6 +1195,53 @@ mod tests {
         assert_eq!(solid(&hatched), 0, "the hatched cut is tinted");
         let shades = |img: &[u8]| img.chunks(4).map(|p| [p[0], p[1], p[2]]).collect::<std::collections::BTreeSet<_>>().len();
         assert!(shades(&hatched) > shades(&plain), "the hatch adds its stripes' shades");
+    }
+
+    /// Major grid steps stay on the millimetre rule for a millimetre design, and land on round
+    /// numbers in any other design unit. Zooming out coarsens them.
+    #[test]
+    fn grid_steps_follow_the_design_units_and_coarsen_when_zoomed_out() {
+        for half in [0.01, 1.0, 8.0, 20.0, 80.0, 320.0, 1000.0] {
+            assert_eq!(grid_step_units(half, "mm"), grid_step(half), "{half}");
+            assert_eq!(grid_step_units(half, "nope"), grid_step(half), "{half}");
+        }
+        assert_eq!(grid_step_units(80.0, "mm").1, 25.0);
+        assert_eq!(grid_step_units(320.0, "mm").1, 100.0);
+        let (minor, major) = grid_step_units(80.0, "in");
+        assert!((minor / 25.4 - 0.2).abs() < 1e-9 && (major / 25.4 - 1.0).abs() < 1e-9, "{minor} {major}");
+        assert!(grid_step_units(320.0, "in").1 > major);
+        assert_eq!(grid_step_units(f64::NAN, "mm"), grid_step(0.0));
+    }
+
+    /// Axis numbers are the coordinate in the design's units, with no suffix, and the origin
+    /// itself is not labeled.
+    #[test]
+    fn grid_marks_read_in_the_design_units_and_skip_the_origin() {
+        assert_eq!(grid_mark(50.0, "mm"), "50");
+        assert_eq!(grid_mark(-50.0, "mm"), "-50");
+        assert_eq!(grid_mark(50.0, "cm"), "5");
+        assert_eq!(grid_mark(25.4, "in"), "1");
+        assert_eq!(grid_mark(25.4 * 2.5, "in"), "2.5");
+        assert_eq!(grid_mark(f64::NAN, "mm"), "");
+        let marks = grid_marks(Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::ZERO, 100.0, 25.0, "mm");
+        let along = |keep_x: bool| -> Vec<String> {
+            marks
+                .iter()
+                .filter(|m| if keep_x { m.at.y.abs() < 1e-6 && m.at.x.abs() > 1.0 } else { m.at.x.abs() < 1e-6 && m.at.y.abs() > 1.0 })
+                .map(|m| m.text.clone())
+                .collect()
+        };
+        assert_eq!(along(true), ["-100", "-75", "-50", "-25", "25", "50", "75", "100"]);
+        assert_eq!(along(false), ["-100", "-75", "-50", "-25", "25", "50", "75", "100"]);
+        assert!(marks.iter().all(|m| m.text != "0"));
+        let coarse = grid_marks(Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::ZERO, 100.0, 100.0, "mm");
+        let xs: Vec<_> = coarse.iter().filter(|m| m.at.y.abs() < 1e-6).map(|m| m.text.as_str()).collect();
+        assert_eq!(xs, ["-100", "100"]);
+        // A view centred away from the origin still numbers the origin's own axes.
+        let shifted = grid_marks(Vec3::ZERO, Vec3::X, Vec3::Y, Vec3::new(1000.0, 400.0, 0.0), 1500.0, 1000.0, "mm");
+        assert!(shifted.iter().any(|m| m.text == "1000" && m.at.dist(Vec3::new(1000.0, 0.0, 0.0)) < 1e-6));
+        assert!(shifted.iter().any(|m| m.text == "-1000" && m.at.dist(Vec3::new(0.0, -1000.0, 0.0)) < 1e-6));
+        assert!(shifted.iter().all(|m| m.at.x.abs() < 1e-6 || m.at.y.abs() < 1e-6));
     }
 }
 
