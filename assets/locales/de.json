@@ -1308,6 +1308,7 @@
   "cmd.model.mesh": "Körpernetz lesen",
   "cmd.model_body_features": "Körper-Features auflisten",
   "cmd.model_edges": "Kanten auflisten",
+  "cmd.drawing_hole_callout": "Bohrungsangabe",
   "cmd.model_faces": "Flächen auflisten",
   "cmd.model_threads": "Gewinde auflisten",
   "cmd.motion_delete": "Bewegungsuntersuchung löschen",

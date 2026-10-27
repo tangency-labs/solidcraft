@@ -75,6 +75,7 @@ pub mod dimension;
 pub mod fields;
 mod fill;
 pub mod fold;
+pub mod hole_callout;
 pub mod image;
 pub mod note;
 pub mod sheet_set;

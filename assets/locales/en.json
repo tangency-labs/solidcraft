@@ -1565,6 +1565,7 @@
   "cmd.model.mesh": "Read Body Mesh",
   "cmd.model_body_features": "List Body Features",
   "cmd.model_edges": "List Edges",
+  "cmd.drawing_hole_callout": "Hole Callout",
   "cmd.model_faces": "List Faces",
   "cmd.model_threads": "List Threads",
   "cmd.motion_delete": "Delete Motion Study",
