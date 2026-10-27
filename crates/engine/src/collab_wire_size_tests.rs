@@ -1,16 +1,20 @@
-//! What the co-editing mesh codec sends for a real design (#5184, the plan's "Network weight"):
-//! the sensor enclosure's bodies whole, at the reference mesh's and the display plan's quality,
-//! and after a local edit, as a delta against the shape before. A measurement, so it only prints:
+//! The co-editing mesh codec on real bodies (#5184, the plan's "Network weight"). Small bodies
+//! (a box, the box filleted, a short modelled thread) check that their triangles come back and
+//! that each edit, sent as a delta, rebuilds the shape after it. The measurements are ignored and
+//! only print: the sensor enclosure's bodies whole, at the reference mesh's and the display plan's
+//! quality, and after a local edit as a delta; and an imported 10k-triangle mesh as it comes, a
+//! face per triangle, and without its normals:
 //! `cargo test -p solidcraft-engine --lib collab_wire_size -- --ignored --nocapture`.
 
 use std::collections::HashMap;
+use std::f64::consts::TAU;
 use std::sync::Arc;
 use std::time::Instant;
 
 use serde_json::{Value, json};
 use solidcraft_collab_wire::{FaceChunk, Hash, Held, Shape};
 use solidcraft_doc::display_quality::DisplayQuality;
-use solidcraft_doc::{ModelBody, naming};
+use solidcraft_doc::{Document, FeatureKind, MeshData, ModelBody, naming};
 use solidcraft_geom::Mesh;
 
 use crate::Session;
@@ -32,9 +36,58 @@ impl Held for Base {
     }
 }
 
+/// What the sender passes by audience: the reference mesh to collaborators, the display plan's at
+/// Normal quality to Viewers.
+const QUALITIES: [&str; 2] = ["reference", "display"];
+
 /// The mesh at `quality`: the reference mesh, or the display plan's at Normal quality.
 fn mesh(body: &ModelBody, quality: &str) -> Arc<Mesh> {
     if quality == "display" { body.plan_mesh_at(DisplayQuality::Normal).unwrap() } else { body.mesh() }
+}
+
+#[test]
+fn small_bodies_come_back_and_each_edit_goes_as_a_delta() {
+    let designs: [&[(&str, Value)]; 2] = [
+        &[
+            ("solid.box", json!({"length": 20, "width": 20, "height": 10, "body_name": "Part"})),
+            ("solid.fillet", json!({"body": "Part", "radius": 2, "edges": [[0, 10, 10]]})),
+        ],
+        &[
+            ("solid.cylinder", json!({"radius": 3, "height": 4, "body_name": "Part"})),
+            ("solid.thread", json!({"face": [3, 0, 3.5], "designation": "M6x1", "length": 3, "modeled": true})),
+        ],
+    ];
+    for steps in designs {
+        let mut s = Session::default();
+        let mut before: Vec<Base> = Vec::new();
+        for (id, params) in steps {
+            s.execute(id, params).unwrap_or_else(|e| panic!("{id}: {e}"));
+            let state = s.world_state().unwrap();
+            let body = state.bodies.iter().find(|b| b.name == "Part").unwrap();
+            let mut after = Vec::new();
+            for (k, quality) in QUALITIES.into_iter().enumerate() {
+                let mesh = mesh(body, quality);
+                let sent = shape(body, &mesh);
+                let whole = sent.encode(|_| false);
+                let got = Shape::decode(&whole, &()).unwrap();
+                assert_eq!(got.hash(), sent.hash(), "{id} ({quality})");
+                assert_eq!(got.to_mesh().unwrap().triangles.len(), mesh.triangles.len(), "{id} ({quality}): triangles");
+                let delta = before.get(k).map(|base| {
+                    let delta = sent.encode_delta(&base.0, |_| false);
+                    assert_eq!(Shape::decode(&delta, base).unwrap().hash(), sent.hash(), "{id} ({quality}): the delta");
+                    delta.len()
+                });
+                println!(
+                    "{id} ({quality}): {} triangles, {} faces; {} B whole, {delta:?} B as a delta",
+                    mesh.triangles.len(),
+                    sent.faces().len(),
+                    whole.len()
+                );
+                after.push(Base(Arc::new(sent)));
+            }
+            before = after;
+        }
+    }
 }
 
 #[test]
@@ -45,7 +98,10 @@ fn collab_wire_sizes_of_the_sensor_enclosure() {
     s.run_script(&script).unwrap();
     let mut held: HashMap<(String, &str), Base> = HashMap::new();
     for body in &s.world_state().unwrap().bodies {
-        for quality in ["reference", "display"] {
+        let names = naming::face_names(body);
+        let longest = names.iter().max_by_key(|n| n.len()).unwrap();
+        println!("{}: the longest face name is {} bytes: {longest}", body.name, longest.len());
+        for quality in QUALITIES {
             let mesh = mesh(body, quality);
             let t = Instant::now();
             let sent = shape(body, &mesh);
@@ -73,7 +129,7 @@ fn collab_wire_sizes_of_the_sensor_enclosure() {
     // A local edit: the USB cut-out moves 2 mm. Only the faces that changed go.
     s.execute("parameters.change", &json!({"name": "usb_offset", "expression": "12 mm"})).unwrap();
     for body in &s.world_state().unwrap().bodies {
-        for quality in ["reference", "display"] {
+        for quality in QUALITIES {
             let after = shape(body, &mesh(body, quality));
             let base = &held[&(body.name.clone(), quality)];
             let delta = after.encode_delta(&base.0, |_| false);
@@ -90,5 +146,52 @@ fn collab_wire_sizes_of_the_sensor_enclosure() {
                 after.encode(|_| false).len()
             );
         }
+    }
+}
+
+#[test]
+#[ignore = "a measurement: prints what an imported mesh costs as one face and a face per triangle"]
+fn collab_wire_sizes_of_an_imported_mesh() {
+    // A torus of 100 x 50 quads, welded as an STL import leaves it: 10,000 triangles.
+    let (around, across) = (100u32, 50u32);
+    let mut positions = Vec::new();
+    for i in 0..around {
+        let (si, ci) = (TAU * f64::from(i) / f64::from(around)).sin_cos();
+        for j in 0..across {
+            let (sj, cj) = (TAU * f64::from(j) / f64::from(across)).sin_cos();
+            positions.extend([(40.0 + 10.0 * cj) * ci, (40.0 + 10.0 * cj) * si, 10.0 * sj]);
+        }
+    }
+    let at = |i: u32, j: u32| (i % around) * across + j % across;
+    let triangles: Vec<u32> = (0..around)
+        .flat_map(|i| (0..across).flat_map(move |j| [at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j), at(i + 1, j + 1), at(i, j + 1)]))
+        .collect();
+    let mut doc = Document::default();
+    let meshes = vec![MeshData { name: "Scan".into(), positions: positions.into(), triangles: triangles.into(), color: None }];
+    doc.add_feature(FeatureKind::MeshImport { file: "torus.stl".into(), meshes }, Some("Imported mesh")).unwrap();
+    let s = Session::new(doc);
+    let state = s.world_state().unwrap();
+    let body = state.bodies.iter().find(|b| b.name == "Scan").unwrap();
+    let mesh = body.mesh();
+    // A mesh body is one face already (its triangles all on face 0); a face per triangle, each
+    // named, is what it would cost otherwise. Its normals are flat, one per triangle, so without
+    // them the corners weld and the receiver works them out again.
+    let as_it_comes = shape(body, &mesh);
+    let n = mesh.triangles.len() as u32;
+    let names: Vec<String> = (0..n).map(|k| format!("{}:face:{k}", body.name)).collect();
+    let per_triangle = Shape::from_mesh(&Mesh { tri_face: (0..n).collect(), ..(*mesh).clone() }, &names).unwrap();
+    let bare = shape(body, &Mesh { normals: Vec::new(), ..(*mesh).clone() });
+    for (how, sent) in [("as it comes", &as_it_comes), ("a face per triangle", &per_triangle), ("one face without normals", &bare)] {
+        let bytes = sent.encode(|_| false);
+        let got = Shape::decode(&bytes, &()).unwrap().to_mesh().unwrap();
+        assert_eq!(got.triangles.len(), mesh.triangles.len());
+        println!(
+            "imported mesh, {how}: {} triangles, {} vertices in the mesh, {} sent, {} faces; {} B whole",
+            mesh.triangles.len(),
+            mesh.positions.len(),
+            got.positions.len(),
+            sent.faces().len(),
+            bytes.len()
+        );
     }
 }
