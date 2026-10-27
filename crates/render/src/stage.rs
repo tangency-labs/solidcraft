@@ -253,6 +253,8 @@ mod tests {
         assert_eq!(scene.meshes[0].mesh.triangles.len(), 2);
         assert_eq!(scene.meshes[0].surface.unwrap().dielectric_ior(), 1.0);
         assert!(scene.meshes[0].transmission.is_none());
+        // Linear 0.18 shows as sRGB 118.
+        assert_eq!(scene.meshes[0].color, [118; 3]);
         let before = scene.meshes[0].mesh.clone();
         assert!(stage.append_to(&mut scene, &CancelToken::default()).is_err());
         assert_eq!(scene.meshes.len(), 1);

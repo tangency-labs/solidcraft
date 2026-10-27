@@ -84,6 +84,14 @@ fn finish(host: &ImageHost, handle: &JobHandle) {
 }
 
 #[test]
+fn an_empty_pixel_shows_the_background_code_unchanged() {
+    let display = Presentation { background: [40, 80, 120], ..Default::default() }.display(1, 1).unwrap();
+    let mut rgba = [0; 4];
+    display.encode(&[[0.0; 4]], &mut rgba, &CancelToken::default()).unwrap();
+    assert_eq!(rgba, [40, 80, 120, 255]);
+}
+
+#[test]
 fn regrade_is_exact_nondestructive_geometry_free_and_flattens_repeated_master_ownership() {
     let (host, source, begins, settings) = fixture(true);
     let original = source.frame().unwrap().unwrap();

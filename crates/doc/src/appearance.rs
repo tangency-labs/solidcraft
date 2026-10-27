@@ -426,6 +426,8 @@ mod tests {
                 bad.boundary = GlassBoundary::Thin { thickness_mm: 10001.0 };
                 assert!(bad.validate().is_err());
             }
+            // The swatch shows the transmission as sRGB codes.
+            assert_eq!(find("starter.glass.smoky-neutral").unwrap().preview_color(), [160, 166, 173]);
         }
 
         #[test]
