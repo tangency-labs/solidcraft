@@ -56,12 +56,50 @@ pub struct Palette {
     entries: Vec<[u8; 4]>,
     lookup: std::collections::HashMap<[u8; 4], u32>,
     stable_len: usize,
+    /// PBR materials by palette index ([`Material`]); entries past its end, or with no
+    /// material, are not PBR. Only the product preview has any.
+    materials: Vec<Material>,
+}
+
+/// An opaque PBR surface for the entry of the same index: its linear base colour, metallic
+/// fraction, roughness and dielectric IOR, as `fs_pbr` reads them. `pbr` false: none.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Material {
+    pub base: [f32; 3],
+    pub metallic: f32,
+    pub roughness: f32,
+    pub ior: f32,
+    pub pbr: bool,
+}
+
+impl Material {
+    /// The surface `s` as the shader takes it.
+    pub fn of(s: &solidcraft_render::surface::OpaqueSurface) -> Material {
+        let base = s.base_color().to_f32();
+        Material { base, metallic: s.metallic() as f32, roughness: s.roughness() as f32, ior: s.dielectric_ior() as f32, pbr: true }
+    }
+
+    /// Its two texels in the material texture: base and flag, then the optical parameters.
+    fn texels(&self) -> [[f32; 4]; 2] {
+        [[self.base[0], self.base[1], self.base[2], if self.pbr { 1.0 } else { 0.0 }], [self.metallic, self.roughness, self.ior, 0.0]]
+    }
 }
 
 impl Palette {
     /// A palette whose entries are all stable (the model scene's body/face slots).
     pub fn with_stable(entries: Vec<[u8; 4]>) -> Palette {
-        Palette { stable_len: entries.len(), entries, lookup: std::collections::HashMap::new() }
+        Palette { stable_len: entries.len(), entries, lookup: std::collections::HashMap::new(), materials: Vec::new() }
+    }
+
+    /// This palette with PBR `materials` by index.
+    pub fn with_materials(mut self, materials: Vec<Material>) -> Palette {
+        self.materials = materials;
+        self
+    }
+
+    /// The PBR materials by palette index.
+    pub fn materials(&self) -> &[Material] {
+        &self.materials
     }
 
     /// Where the stable entries end and the per-build interned ones begin.
@@ -597,12 +635,14 @@ pub struct BlockTris {
     pub vertices: std::ops::Range<u32>,
 }
 
-/// How a built triangle is drawn: opaque, see-through (glass), or faded context.
+/// How a built triangle is drawn: opaque, see-through (glass), faded context, or (in the
+/// product preview) an opaque PBR surface whose material its palette entry names.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TriClass {
     Opaque,
     Glass,
     Faded,
+    Pbr,
 }
 
 /// A block's geometry: one canonical triangle vertex stream (`TRI_SIZE` bytes a vertex, three a
@@ -618,6 +658,8 @@ pub struct BlockBytes {
     pub opaque: Arc<Vec<std::ops::Range<u32>>>,
     pub glass: Arc<Vec<std::ops::Range<u32>>>,
     pub faded: Arc<Vec<std::ops::Range<u32>>>,
+    /// Opaque PBR triangles (the product preview's), drawn with their palette entries' materials.
+    pub pbr: Arc<Vec<std::ops::Range<u32>>>,
     pub lines: Arc<Vec<u8>>,
     pub hidden: Arc<Vec<u8>>,
 }
@@ -629,6 +671,7 @@ impl BlockBytes {
             TriClass::Opaque => &self.opaque,
             TriClass::Glass => &self.glass,
             TriClass::Faded => &self.faded,
+            TriClass::Pbr => &self.pbr,
         }
     }
 }
@@ -686,6 +729,7 @@ pub struct BlockBuilder {
     opaque: Vec<std::ops::Range<u32>>,
     glass: Vec<std::ops::Range<u32>>,
     faded: Vec<std::ops::Range<u32>>,
+    pbr: Vec<std::ops::Range<u32>>,
     lines: Vec<u8>,
     hidden: Vec<u8>,
     bodies: Vec<BodySpan>,
@@ -739,6 +783,7 @@ impl BlockBuilder {
             TriClass::Opaque => &mut self.opaque,
             TriClass::Glass => &mut self.glass,
             TriClass::Faded => &mut self.faded,
+            TriClass::Pbr => &mut self.pbr,
         };
         extend_runs(runs, at);
     }
@@ -749,6 +794,7 @@ impl BlockBuilder {
             TriClass::Opaque => &self.opaque,
             TriClass::Glass => &self.glass,
             TriClass::Faded => &self.faded,
+            TriClass::Pbr => &self.pbr,
         };
         runs_within(runs, vertices)
     }
@@ -784,6 +830,7 @@ impl BlockBuilder {
             opaque: Arc::new(self.opaque),
             glass: Arc::new(self.glass),
             faded: Arc::new(self.faded),
+            pbr: Arc::new(self.pbr),
             lines: Arc::new(self.lines),
             hidden: Arc::new(self.hidden),
         })
@@ -1318,11 +1365,12 @@ struct BlockGpu {
     opaque: Option<ClassGpu>,
     glass: Option<ClassGpu>,
     faded: Option<ClassGpu>,
+    pbr: Option<ClassGpu>,
     lines: Option<Batch>,
     hidden: Option<Batch>,
-    /// The runs of each class (opaque, glass, faded) without the bodies out of the view, while
+    /// The runs of each class (opaque, glass, faded, PBR) without the bodies out of the view, while
     /// some are ([`Batches::cull`]); `None`: every body is drawn.
-    culled: Option<[Vec<std::ops::Range<u32>>; 3]>,
+    culled: Option<[Vec<std::ops::Range<u32>>; 4]>,
 }
 
 fn class_gpu(
@@ -1378,7 +1426,7 @@ impl BlockGpu {
             let old_pair = old.as_ref().and_then(|o| o.class(class).map(|c| (c, o.bytes.runs(class))));
             class_gpu(device, fits, &bytes.vertices, bytes.runs(class), old_pair, same_vertices, uploaded)
         };
-        let (opaque, glass, faded) = (class(TriClass::Opaque), class(TriClass::Glass), class(TriClass::Faded));
+        let (opaque, glass, faded, pbr) = (class(TriClass::Opaque), class(TriClass::Glass), class(TriClass::Faded), class(TriClass::Pbr));
         let keep = |old: Option<&BlockGpu>, pick: fn(&BlockBytes) -> &Arc<Vec<u8>>, old_lines: fn(&BlockGpu) -> Option<&Batch>| {
             old.filter(|o| Arc::ptr_eq(pick(&o.bytes), pick(&bytes))).and_then(old_lines).cloned()
         };
@@ -1388,7 +1436,7 @@ impl BlockGpu {
         };
         let lines = keep(old.as_ref(), |b| &b.lines, |b| b.lines.as_ref()).or_else(|| fresh(&bytes.lines, "sc_block_lines"));
         let hidden = keep(old.as_ref(), |b| &b.hidden, |b| b.hidden.as_ref()).or_else(|| fresh(&bytes.hidden, "sc_block_hidden"));
-        BlockGpu { bytes, vertices, opaque, glass, faded, lines, hidden, culled: None }
+        BlockGpu { bytes, vertices, opaque, glass, faded, pbr, lines, hidden, culled: None }
     }
 
     fn class(&self, class: TriClass) -> Option<&ClassGpu> {
@@ -1396,6 +1444,7 @@ impl BlockGpu {
             TriClass::Opaque => self.opaque.as_ref(),
             TriClass::Glass => self.glass.as_ref(),
             TriClass::Faded => self.faded.as_ref(),
+            TriClass::Pbr => self.pbr.as_ref(),
         }
     }
 
@@ -1405,7 +1454,10 @@ impl BlockGpu {
             Some(ClassGpu::Runs(runs)) => {
                 let Some(vertices) = &self.vertices else { return };
                 pass.set_vertex_buffer(0, vertices.slice(..));
-                let runs = self.culled.as_ref().map_or(&runs[..], |c| &c[class as usize][..]);
+                let runs = match self.culled.as_ref().and_then(|c| c.get(class as usize)) {
+                    Some(culled) => &culled[..],
+                    None => &runs[..],
+                };
                 for r in runs.iter() {
                     pass.draw(r.clone(), 0..1);
                     tally.triangles(r.len() as u32, 1);
@@ -1450,9 +1502,61 @@ struct PaletteGpu {
     palette: Arc<Palette>,
     /// Held for the bind group, which views it.
     _texture: wgpu::Texture,
+    /// The PBR materials ([`Material`]): two texel rows for each palette row that has any.
+    materials: wgpu::Texture,
+    material_rows: u32,
     bind: wgpu::BindGroup,
     rows: u32,
     entries: Vec<[u8; 4]>,
+}
+
+/// The material texture for `rows` palette rows of materials (two texel rows each).
+fn material_texture(device: &wgpu::Device, rows: u32) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("sc_materials"),
+        size: wgpu::Extent3d { width: PALETTE_WIDTH, height: 2 * rows.max(1), depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba32Float,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    })
+}
+
+/// Palette rows `first..last` of `materials` as the material texture's texels: for each, a row
+/// of base colours and flags, then a row of optical parameters.
+fn material_bytes(materials: &[Material], first: u32, last: u32) -> Vec<u8> {
+    let width = PALETTE_WIDTH as usize;
+    let mut out = Vec::with_capacity((last - first) as usize * 2 * width * 16);
+    for row in first..last {
+        for half in 0..2 {
+            for col in 0..width {
+                let texels = materials.get(row as usize * width + col).map_or([[0.0; 4]; 2], Material::texels);
+                for v in texels[half] {
+                    out.extend_from_slice(&v.to_le_bytes());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Palette rows that hold materials (at least one, for the texture's sake).
+fn material_rows(materials: &[Material]) -> u32 {
+    u32::try_from(materials.len().div_ceil(PALETTE_WIDTH as usize)).unwrap_or(1).max(1)
+}
+
+/// Write palette rows `first..last` of `materials` into `texture`.
+fn write_materials(queue: &wgpu::Queue, texture: &wgpu::Texture, materials: &[Material], first: u32, last: u32, written: &mut u64) {
+    let bytes = material_bytes(materials, first, last);
+    *written += bytes.len() as u64;
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo { texture, mip_level: 0, origin: wgpu::Origin3d { x: 0, y: 2 * first, z: 0 }, aspect: wgpu::TextureAspect::All },
+        &bytes,
+        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(PALETTE_WIDTH * 16), rows_per_image: Some(2 * (last - first)) },
+        wgpu::Extent3d { width: PALETTE_WIDTH, height: 2 * (last - first), depth_or_array_layers: 1 },
+    );
 }
 
 fn palette_texture(device: &wgpu::Device, rows: u32) -> wgpu::Texture {
@@ -1507,15 +1611,20 @@ impl PaletteGpu {
             wgpu::Extent3d { width: PALETTE_WIDTH, height: rows, depth_or_array_layers: 1 },
         );
         let view = texture.create_view(&Default::default());
+        let material_rows = material_rows(palette.materials());
+        let materials = material_texture(device, material_rows);
+        write_materials(queue, &materials, palette.materials(), 0, material_rows, written);
+        let material_view = materials.create_view(&Default::default());
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("sc_palette"),
             layout: bgl,
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&view) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&material_view) },
             ],
         });
-        PaletteGpu { palette, _texture: texture, bind, rows, entries }
+        PaletteGpu { palette, _texture: texture, materials, material_rows, bind, rows, entries }
     }
 
     /// Bring the texture up to `palette`, writing only the rows whose entries changed (or the
@@ -1534,9 +1643,18 @@ impl PaletteGpu {
         }
         let entries = palette.entries().to_vec();
         let rows = palette_rows(&entries);
-        if rows != self.rows {
+        if rows != self.rows || material_rows(palette.materials()) != self.material_rows {
             *self = PaletteGpu::new(device, queue, uniform, bgl, palette, written);
             return;
+        }
+        // The material rows that changed.
+        let (old, new) = (self.palette.materials(), palette.materials());
+        let width = PALETTE_WIDTH as usize;
+        for row in 0..self.material_rows {
+            let at = |m: &[Material]| m.get(row as usize * width..((row as usize + 1) * width).min(m.len())).unwrap_or_default().to_vec();
+            if at(old) != at(new) {
+                write_materials(queue, &self.materials, new, row, row + 1, written);
+            }
         }
         let width = PALETTE_WIDTH as usize;
         let same = |row: u32| {
@@ -1800,8 +1918,9 @@ impl Batches {
         for block in self.blocks.values_mut() {
             let hidden: Vec<std::ops::Range<u32>> =
                 block.bytes.bodies.iter().filter(|b| !placed_box_in_view(&ROWS, &b.bounds, vp)).map(|b| b.vertices.clone()).collect();
-            block.culled = (!hidden.is_empty())
-                .then(|| [TriClass::Opaque, TriClass::Glass, TriClass::Faded].map(|class| runs_without(block.bytes.runs(class), &hidden)));
+            block.culled = (!hidden.is_empty()).then(|| {
+                [TriClass::Opaque, TriClass::Glass, TriClass::Faded, TriClass::Pbr].map(|class| runs_without(block.bytes.runs(class), &hidden))
+            });
         }
     }
 
@@ -2012,6 +2131,9 @@ pub struct Renderer {
     tri_hl_instanced: wgpu::RenderPipeline,
     tri_hl_instanced_flat: wgpu::RenderPipeline,
     pbr: wgpu::RenderPipeline,
+    /// `pbr` for built triangles whose palette entries name their materials (the product
+    /// preview's blocks, [`TriClass::Pbr`]).
+    pbr_palette: wgpu::RenderPipeline,
     trans: wgpu::RenderPipeline,
     /// Glass: far sides (front faces culled), then near sides (back faces culled).
     glass_far: wgpu::RenderPipeline,
@@ -2442,6 +2564,17 @@ impl Renderer {
                     },
                     count: None,
                 },
+                // The palette's PBR materials (read with `textureLoad`, never filtered).
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -2457,12 +2590,15 @@ impl Renderer {
         });
         let dummy_palette = palette_texture(device, 1);
         let dummy_view = dummy_palette.create_view(&Default::default());
+        let dummy_materials = material_texture(device, 1);
+        let dummy_material_view = dummy_materials.create_view(&Default::default());
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("sc_viewport"),
             layout: &bgl,
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: uniform.as_entire_binding() },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&dummy_view) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&dummy_material_view) },
             ],
         });
         let reversed = t.reversed_depth();
@@ -2877,7 +3013,12 @@ impl Renderer {
                 solid("sc_tris_hl_instanced_flat", "fs_tri", None, highlight_depth(t.depth), TriSource::InstancedFlat),
             )
         };
-        let pbr = || pipeline("sc_pbr", "vs_pbr", "fs_pbr", pbr_layout(), opaque(), None);
+        let pbr = || {
+            (
+                pipeline("sc_pbr", "vs_pbr", "fs_pbr", pbr_layout(), opaque(), None),
+                pipeline("sc_pbr_palette", "vs_pbr_palette", "fs_pbr", tri_layout(), opaque(), None),
+            )
+        };
         let lines = || {
             (
                 pipeline("sc_lines", "vs_line", "fs_line", line_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
@@ -2925,6 +3066,7 @@ impl Renderer {
             let (overlay, guide_line) = lines_all.join();
             let (ss_blit, copy_blit, ss_filter) = blits.join();
             let (depth_reset, section_reset, section_clear) = resets.join();
+            let (pbr, pbr_palette) = pbr.join();
             let oit = oit.join();
             Renderer {
                 ao: ao.join(),
@@ -2983,7 +3125,8 @@ impl Renderer {
                 tri_hl_selected_built,
                 tri_hl_instanced,
                 tri_hl_instanced_flat,
-                pbr: pbr.join(),
+                pbr,
+                pbr_palette,
                 trans,
                 glass_far,
                 glass_near,
@@ -3707,6 +3850,7 @@ impl Renderer {
         if !cb.product {
             res.clouds.paint(pass, &res.cloud_pipes, tally);
         }
+        block_class(pass, &res.pbr_palette, TriClass::Pbr);
         // Whole-body tints first, so a face or an edge highlighted over the body (in `h.tris`
         // and `h.lines`) keeps its own colour, as it did when the body's triangles were built
         // into the same list before them.
@@ -4737,6 +4881,35 @@ mod glass_tests {
         assert_ne!(middle_pixel(scene(0.0, 5.0, false), false), Some(red), "behind a face in front");
         assert_eq!(middle_pixel(scene(0.0, 5.0, true), false), Some(red), "a hidden marker behind a face in front");
         assert_ne!(middle_pixel(scene(1.5, 0.0, true), false), Some(red), "no hidden marker where it is seen");
+    }
+
+    /// A product scene whose PBR material changes (the same blocks, another material table)
+    /// uploads the changed material rows and no geometry.
+    #[test]
+    fn a_material_edit_uploads_material_rows_only() {
+        let Ok((_, device, queue)) = crate::open_headless() else { return };
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let mut r =
+            Renderer::new(&device, GpuTarget { format, depth: Some(crate::depth_format(&device, true)), samples: 1, tess: false, oit: false }, None);
+        let mut b = BlockBuilder::default();
+        b.triangle([[0.0; 3], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], [[0.0, 0.0, 1.0]; 3], PaletteIndex(0), TriClass::Pbr);
+        let bytes = b.freeze();
+        let material = |roughness: f32| Material { base: [0.5, 0.3, 0.2], metallic: 1.0, roughness, ior: 1.5, pbr: true };
+        let scene = |m: Material| GpuScene {
+            palette: Arc::new(Palette::with_stable(vec![[180, 120, 70, 255]]).with_materials(vec![m])),
+            blocks: vec![SceneBlock { key: 3, bytes: bytes.clone() }],
+            ..GpuScene::default()
+        };
+        let take = |r: &mut Renderer, key: u64, sc: GpuScene| {
+            let slot: SceneSlot = Arc::new(Mutex::new(Some(sc)));
+            r.product.take(&device, &queue, &r.uniform, &r.uniform_bgl, key, &slot, None, false);
+            r.product.uploads
+        };
+        let first = take(&mut r, 1, scene(material(0.2)));
+        assert!(first.geometry > 0 && first.palette > 0, "the first scene uploads its block and tables: {first:?}");
+        let edited = take(&mut r, 2, scene(material(0.6)));
+        assert_eq!(edited.geometry, 0, "a material edit uploads no geometry: {edited:?}");
+        assert_eq!(edited.palette, u64::from(2 * PALETTE_WIDTH * 16), "one row of materials (two texel rows): {edited:?}");
     }
 
     /// Without order-independent transparency, the sorted glass stream is kept while the blocks'

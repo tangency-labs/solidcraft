@@ -878,7 +878,21 @@ fn product_preview_rebuild_cost() {
     h.app.run("appearance.assign", json!({"bodies": [&part], "color": "#336699", "opacity": 0.5})).unwrap();
     let opacity = time(&h, &mut cache);
     let extract_ms = ms(|| drop(extract(&h)));
+    // Every body PBR, then one roughness change for all of them.
+    let bodies: Vec<String> = h.app.session.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+    let pbr = |r: f64| json!({"bodies": &bodies, "color": "#b47846", "pbr": {"metallic": 1.0, "roughness": r, "dielectric_ior": 1.5}});
+    h.app.run("appearance.assign", pbr(0.2)).unwrap();
+    let to_pbr = time(&h, &mut cache);
+    let pbr_bytes: usize = crate::render_workspace::gpu_scene_cached(&extract(&h), u64::MAX, &mut crate::render_workspace::ProductCache::default())
+        .unwrap()
+        .1
+        .blocks
+        .iter()
+        .map(|b| b.bytes.vertices.len())
+        .sum();
+    h.app.run("appearance.assign", pbr(0.6)).unwrap();
+    let roughness = time(&h, &mut cache);
     println!(
-        "PRODUCTCACHE bodies=200 cold_ms={cold:.1} unchanged_ms={again:.1} colour_ms={colour:.1} opacity_ms={opacity:.1} extract_ms={extract_ms:.1}"
+        "PRODUCTCACHE bodies=200 cold_ms={cold:.1} unchanged_ms={again:.1} colour_ms={colour:.1} opacity_ms={opacity:.1} extract_ms={extract_ms:.1} to_pbr_ms={to_pbr:.1} pbr_bytes={pbr_bytes} roughness_ms={roughness:.1}"
     );
 }

@@ -1783,7 +1783,8 @@ impl PreviewUploadPlan {
         self.pbr.checked_add(self.tris).and_then(|n| n.checked_add(self.glass)).ok_or_else(|| crate::i18n::tr("render.error_geometry_size").into())
     }
     fn add(&mut self, pbr: bool, glass: bool, triangles: usize, limit: usize) -> Result<(), String> {
-        let stride = if pbr { crate::gpu::PBR_SIZE } else { crate::gpu::TRI_SIZE };
+        // PBR triangles are built triangles too; their materials are in the palette.
+        let stride = crate::gpu::TRI_SIZE;
         let bytes = triangles.checked_mul(3).and_then(|n| n.checked_mul(stride)).ok_or(crate::i18n::tr("render.error_geometry_size"))?;
         let count = if pbr {
             &mut self.pbr
@@ -1856,6 +1857,8 @@ const PRODUCT_BLOCK_BODIES: usize = 64;
 #[derive(Default)]
 pub struct ProductCache {
     arena: crate::scene_palette::PaletteArena,
+    /// The PBR material of each palette slot (none for a plain colour).
+    materials: Vec<crate::gpu::Material>,
     blocks: std::collections::HashMap<u64, ProductBlock>,
 }
 
@@ -1867,12 +1870,11 @@ struct ProductBlock {
     _meshes: Vec<Arc<solidcraft_engine::geom::Mesh>>,
 }
 
-/// How a product triangle is drawn: in a block (opaque or see-through, its palette slot), as
-/// PBR (its own stream), or not at all (opacity 0).
+/// How a product triangle is drawn: in a block (opaque, see-through or PBR, its palette slot
+/// holding its colour and material), or not at all (opacity 0).
 #[derive(Clone, Copy, PartialEq)]
 enum ProductDraw {
     Block(crate::gpu::TriClass, crate::gpu::PaletteIndex),
-    Pbr(solidcraft_engine::render::surface::OpaqueSurface),
     Hidden,
 }
 
@@ -1893,8 +1895,8 @@ impl BodyLooks<'_> {
         };
         if opacity <= 0.0 {
             ProductDraw::Hidden
-        } else if let Some(surface) = surface {
-            ProductDraw::Pbr(surface)
+        } else if surface.is_some() {
+            ProductDraw::Block(crate::gpu::TriClass::Pbr, slot)
         } else if opacity < 0.999 {
             ProductDraw::Block(crate::gpu::TriClass::Glass, slot)
         } else {
@@ -1903,13 +1905,13 @@ impl BodyLooks<'_> {
     }
 
     /// What a block keeps of this body: its mesh, its slots, and for the body and each face
-    /// look whether it is drawn in the block at all (not PBR, not hidden).
+    /// look whether it is drawn at all, and whether as PBR (whose normals are made unit).
     fn geometry(&self, h: &mut impl Hasher) {
         (Arc::as_ptr(&self.body.mesh) as usize, self.slots.body.0, self.slots.faces).hash(h);
-        let in_block = |opacity: f64, pbr: bool| opacity > 0.0 && !pbr;
-        in_block(self.body.opacity, self.body.surface.is_some() && self.body.transmission.is_none()).hash(h);
+        let drawn = |opacity: f64, pbr: bool| (opacity > 0.0, pbr);
+        drawn(self.body.opacity, self.body.surface.is_some() && self.body.transmission.is_none()).hash(h);
         for (face, (_, l)) in &self.faces {
-            (face, in_block(l.opacity, l.surface.is_some() && l.transmission.is_none())).hash(h);
+            (face, drawn(l.opacity, l.surface.is_some() && l.transmission.is_none())).hash(h);
         }
     }
 
@@ -1929,7 +1931,6 @@ pub fn gpu_scene_cached(scene: &ProductScene, budget: u64, cache: &mut ProductCa
     let limit = usize::try_from(budget).unwrap_or(usize::MAX);
     let plan = preview_upload_plan(scene, limit)?;
     let mut gpu = GpuScene::default();
-    gpu.pbr.try_reserve_exact(plan.pbr).map_err(|_| crate::i18n::tr("render.error_vertex_allocation").to_string())?;
     // Stable slots for every body and face look, allocated before the palette is copied.
     cache.arena.sync(scene.meshes.iter().map(|b| b.name.as_str()));
     let mut looks = Vec::with_capacity(scene.meshes.len());
@@ -1939,14 +1940,29 @@ pub fn gpu_scene_cached(scene: &ProductScene, budget: u64, cache: &mut ProductCa
         let slots = cache.arena.body(&body.name, body.faces.len());
         let alpha = |opacity: f64| (opacity.clamp(0.0, 1.0) * 255.0).round() as u8;
         cache.arena.set(slots.body, [body.color[0], body.color[1], body.color[2], alpha(body.opacity)]);
+        let material = |surface: Option<solidcraft_engine::render::surface::OpaqueSurface>, opaque: bool| {
+            surface.filter(|_| opaque).map(|s| crate::gpu::Material::of(&s)).unwrap_or_default()
+        };
+        let materials = &mut cache.materials;
+        let mut set_material = |slot: crate::gpu::PaletteIndex, m: crate::gpu::Material| {
+            let at = slot.0 as usize;
+            if materials.len() <= at {
+                materials.resize(at + 1, crate::gpu::Material::default());
+            }
+            if let Some(entry) = materials.get_mut(at) {
+                *entry = m;
+            }
+        };
+        set_material(slots.body, material(body.surface, body.transmission.is_none()));
         for (k, l) in body.faces.iter().enumerate() {
             cache.arena.set(slots.face(k), [l.color[0], l.color[1], l.color[2], alpha(l.opacity)]);
+            set_material(slots.face(k), material(l.surface, l.transmission.is_none()));
         }
         looks.push(BodyLooks { body, slots, faces });
     }
     let mut key = std::collections::hash_map::DefaultHasher::new();
     let mut used = std::collections::HashSet::new();
-    let (mut block_bytes, mut pbr_hash) = (0usize, std::collections::hash_map::DefaultHasher::new());
+    let mut block_bytes = 0usize;
     for chunk in looks.chunks(PRODUCT_BLOCK_BODIES) {
         let (mut geometry, mut classes) = (std::collections::hash_map::DefaultHasher::new(), std::collections::hash_map::DefaultHasher::new());
         for b in chunk {
@@ -1958,17 +1974,24 @@ pub fn gpu_scene_cached(scene: &ProductScene, budget: u64, cache: &mut ProductCa
             Some(block) if block.classes == classes => Some(block.bytes.clone()),
             // The same triangles in other runs: the runs again, the vertices kept.
             Some(block) => {
-                let mut runs: [Vec<std::ops::Range<u32>>; 2] = Default::default();
+                let mut runs: [Vec<std::ops::Range<u32>>; 3] = Default::default();
                 let mut at = 0u32;
                 for b in chunk {
                     for t in 0..b.body.mesh.triangles.len() {
                         if let ProductDraw::Block(class, _) = b.draw(t) {
-                            crate::gpu::extend_runs(&mut runs[usize::from(class == TriClass::Glass)], at);
+                            let list = match class {
+                                TriClass::Glass => 1,
+                                TriClass::Pbr => 2,
+                                TriClass::Opaque | TriClass::Faded => 0,
+                            };
+                            if let Some(list) = runs.get_mut(list) {
+                                crate::gpu::extend_runs(list, at);
+                            }
                             at = at.saturating_add(3);
                         }
                     }
                 }
-                let [opaque, glass] = runs;
+                let [opaque, glass, pbr] = runs;
                 let old = &block.bytes;
                 Some(Arc::new(crate::gpu::BlockBytes {
                     vertices: old.vertices.clone(),
@@ -1976,6 +1999,7 @@ pub fn gpu_scene_cached(scene: &ProductScene, budget: u64, cache: &mut ProductCa
                     opaque: Arc::new(opaque),
                     glass: Arc::new(glass),
                     faded: old.faded.clone(),
+                    pbr: Arc::new(pbr),
                     lines: old.lines.clone(),
                     hidden: old.hidden.clone(),
                 }))
@@ -1997,6 +2021,13 @@ pub fn gpu_scene_cached(scene: &ProductScene, budget: u64, cache: &mut ProductCa
                             else {
                                 return Err(crate::i18n::tr("render.error_product_triangle").into());
                             };
+                            // PBR shades with unit normals; plain colours keep the mesh's.
+                            let normal = if class == TriClass::Pbr {
+                                solidcraft_engine::render::surface::unit_direction(*normal)
+                                    .map_err(|_| crate::i18n::tr("render.error_surface_normals").to_string())?
+                            } else {
+                                *normal
+                            };
                             let (position, normal) = (position.to_f32(), normal.to_f32());
                             if !position.iter().chain(&normal).all(|v| v.is_finite()) {
                                 return Err(crate::i18n::tr("render.error_product_triangle").into());
@@ -2014,45 +2045,19 @@ pub fn gpu_scene_cached(scene: &ProductScene, budget: u64, cache: &mut ProductCa
         gpu.blocks.push(crate::gpu::SceneBlock { key: block_key, bytes: bytes.clone() });
         used.insert(block_key);
         cache.blocks.insert(block_key, ProductBlock { classes, bytes, _meshes: chunk.iter().map(|b| b.body.mesh.clone()).collect() });
-        // PBR triangles in their own stream, as before.
-        for b in chunk {
-            for (t, triangle) in b.body.mesh.triangles.iter().enumerate() {
-                let ProductDraw::Pbr(surface) = b.draw(t) else { continue };
-                (Arc::as_ptr(&b.body.mesh) as usize, t).hash(&mut pbr_hash);
-                hash_surface(Some(surface), &mut pbr_hash);
-                for i in triangle {
-                    let (Some(position), Some(normal)) = (b.body.mesh.positions.get(*i as usize), b.body.mesh.normals.get(*i as usize)) else {
-                        return Err(crate::i18n::tr("render.error_product_triangle").into());
-                    };
-                    let n = solidcraft_engine::render::surface::unit_direction(*normal)
-                        .map_err(|_| crate::i18n::tr("render.error_surface_normals").to_string())?;
-                    let (p, n) = (position.to_f32(), n.to_f32());
-                    if !p.iter().chain(&n).all(|v| v.is_finite()) {
-                        return Err(crate::i18n::tr("render.error_product_triangle").into());
-                    }
-                    gpu.pbr_tri(p, n, surface);
-                }
-            }
-        }
     }
     cache.blocks.retain(|k, _| used.contains(k));
-    if (gpu.pbr.len(), block_bytes) != (plan.pbr, plan.tris.saturating_add(plan.glass)) {
+    if block_bytes != plan.bytes()? {
         return Err(crate::i18n::tr("render.error_vertex_packing").into());
     }
-    gpu.palette = Arc::new(crate::gpu::Palette::with_stable(cache.arena.entries()));
+    let mut materials = cache.materials.clone();
+    materials.truncate(cache.arena.entries().len());
+    gpu.palette = Arc::new(crate::gpu::Palette::with_stable(cache.arena.entries()).with_materials(materials));
     gpu.palette.entries().hash(&mut key);
-    pbr_hash.finish().hash(&mut key);
-    Ok((key.finish(), gpu))
-}
-
-fn hash_surface(surface: Option<solidcraft_engine::render::surface::OpaqueSurface>, hash: &mut impl Hasher) {
-    surface.is_some().hash(hash);
-    if let Some(s) = surface {
-        let c = s.base_color();
-        for value in [c.x, c.y, c.z, s.metallic(), s.roughness(), s.dielectric_ior()] {
-            value.to_bits().hash(hash);
-        }
+    for m in gpu.palette.materials() {
+        (m.base.map(f32::to_bits), m.metallic.to_bits(), m.roughness.to_bits(), m.ior.to_bits(), m.pbr).hash(&mut key);
     }
+    Ok((key.finish(), gpu))
 }
 
 /// The image's width over its height.
