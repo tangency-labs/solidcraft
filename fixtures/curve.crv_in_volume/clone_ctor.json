@@ -1,0 +1,1191 @@
+{
+ "cases": [
+  {
+   "name": "clone_ctor_raw_gap1.5e-12_owner0_param_space",
+   "upstream_ref": "source/SMLib/src/SmCrvInVolume.cpp:102 (copy constructor: m_pCurve/m_pVolume are shared unless the owner flag owns them (126, 133); the curve of an owned base is Copy()'d, whose knot fix-up rewrites knots 1e-12..2e-12 apart); source/SMLib/src/SmCrvInVolume.cpp:167 (operator==: a shared base curve and volume compare by pointer, so the copy of a borrowed base equals the original; a copy-constructor knot fix-up moves knots by ~1e-12, below the harness's 1e-9 value tolerance, so this equality is the sharp comparison)",
+   "inputs": {
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0.1,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.2,
+         0.4,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.4,
+         0.2,
+         0.3,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.5,
+         0.2,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.7,
+         0.3,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.6,
+         0.4,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.1,
+         0.5,
+         0.7,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.3,
+         0.7,
+         0.6,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.25,
+        0.5,
+        0.5000000000015,
+        0.75,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+       ],
+       "raw_knots": true
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 0
+    },
+    "op": "clone"
+   }
+  },
+  {
+   "name": "clone_ctor_raw_gap1.5e-12_owner0_in_space",
+   "upstream_ref": "source/SMLib/src/SmCrvInVolume.cpp:102 (copy constructor: m_pCurve/m_pVolume are shared unless the owner flag owns them (126, 133); the curve of an owned base is Copy()'d, whose knot fix-up rewrites knots 1e-12..2e-12 apart); source/SMLib/src/SmCrvInVolume.cpp:167 (operator==: a shared base curve and volume compare by pointer, so the copy of a borrowed base equals the original; a copy-constructor knot fix-up moves knots by ~1e-12, below the harness's 1e-9 value tolerance, so this equality is the sharp comparison)",
+   "inputs": {
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0.1,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.2,
+         0.4,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.4,
+         0.2,
+         0.3,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.5,
+         0.2,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.7,
+         0.3,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.6,
+         0.4,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.1,
+         0.5,
+         0.7,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.3,
+         0.7,
+         0.6,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.25,
+        0.5,
+        0.5000000000015,
+        0.75,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+       ],
+       "raw_knots": true
+      }
+     },
+     "in_param": false,
+     "copy": 0,
+     "owner": 0
+    },
+    "op": "clone"
+   }
+  },
+  {
+   "name": "clone_ctor_raw_gap1.5e-12_owner2_param_space",
+   "upstream_ref": "source/SMLib/src/SmCrvInVolume.cpp:102 (copy constructor: m_pCurve/m_pVolume are shared unless the owner flag owns them (126, 133); the curve of an owned base is Copy()'d, whose knot fix-up rewrites knots 1e-12..2e-12 apart); source/SMLib/src/SmCrvInVolume.cpp:167 (operator==: a shared base curve and volume compare by pointer, so the copy of a borrowed base equals the original; a copy-constructor knot fix-up moves knots by ~1e-12, below the harness's 1e-9 value tolerance, so this equality is the sharp comparison)",
+   "inputs": {
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0.1,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.2,
+         0.4,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.4,
+         0.2,
+         0.3,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.5,
+         0.2,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.7,
+         0.3,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.6,
+         0.4,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.1,
+         0.5,
+         0.7,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.3,
+         0.7,
+         0.6,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.25,
+        0.5,
+        0.5000000000015,
+        0.75,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+       ],
+       "raw_knots": true
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 2
+    },
+    "op": "clone"
+   }
+  },
+  {
+   "name": "clone_ctor_raw_gap1.9e-12_owner0_in_space",
+   "upstream_ref": "source/SMLib/src/SmCrvInVolume.cpp:102 (copy constructor: m_pCurve/m_pVolume are shared unless the owner flag owns them (126, 133); the curve of an owned base is Copy()'d, whose knot fix-up rewrites knots 1e-12..2e-12 apart); source/SMLib/src/SmCrvInVolume.cpp:167 (operator==: a shared base curve and volume compare by pointer, so the copy of a borrowed base equals the original; a copy-constructor knot fix-up moves knots by ~1e-12, below the harness's 1e-9 value tolerance, so this equality is the sharp comparison)",
+   "inputs": {
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0.1,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.2,
+         0.4,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.4,
+         0.2,
+         0.3,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.5,
+         0.2,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.7,
+         0.3,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.6,
+         0.4,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.1,
+         0.5,
+         0.7,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.3,
+         0.7,
+         0.6,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.25,
+        0.5,
+        0.5000000000019,
+        0.75,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+       ],
+       "raw_knots": true
+      }
+     },
+     "in_param": false,
+     "copy": 0,
+     "owner": 0
+    },
+    "op": "clone"
+   }
+  },
+  {
+   "name": "clone_ctor_raw_gap1.9e-12_owner2_in_space",
+   "upstream_ref": "source/SMLib/src/SmCrvInVolume.cpp:102 (copy constructor: m_pCurve/m_pVolume are shared unless the owner flag owns them (126, 133); the curve of an owned base is Copy()'d, whose knot fix-up rewrites knots 1e-12..2e-12 apart); source/SMLib/src/SmCrvInVolume.cpp:167 (operator==: a shared base curve and volume compare by pointer, so the copy of a borrowed base equals the original; a copy-constructor knot fix-up moves knots by ~1e-12, below the harness's 1e-9 value tolerance, so this equality is the sharp comparison)",
+   "inputs": {
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0.1,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.2,
+         0.4,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.4,
+         0.2,
+         0.3,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.5,
+         0.2,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.7,
+         0.3,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.6,
+         0.4,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.1,
+         0.5,
+         0.7,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.3,
+         0.7,
+         0.6,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.25,
+        0.5,
+        0.5000000000019,
+        0.75,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+       ],
+       "raw_knots": true
+      }
+     },
+     "in_param": false,
+     "copy": 0,
+     "owner": 2
+    },
+    "op": "clone"
+   }
+  },
+  {
+   "name": "clone_ctor_raw_gap1.5e-12_owner1_param_space",
+   "upstream_ref": "source/SMLib/src/SmCrvInVolume.cpp:102 (copy constructor: m_pCurve/m_pVolume are shared unless the owner flag owns them (126, 133); the curve of an owned base is Copy()'d, whose knot fix-up rewrites knots 1e-12..2e-12 apart)",
+   "inputs": {
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0.1,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.2,
+         0.4,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.4,
+         0.2,
+         0.3,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.5,
+         0.2,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.7,
+         0.3,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.6,
+         0.4,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.1,
+         0.5,
+         0.7,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.3,
+         0.7,
+         0.6,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.25,
+        0.5,
+        0.5000000000015,
+        0.75,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+       ],
+       "raw_knots": true
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 1
+    },
+    "op": "clone"
+   }
+  },
+  {
+   "name": "clone_ctor_raw_gap1.5e-12_owner3_in_space",
+   "upstream_ref": "source/SMLib/src/SmCrvInVolume.cpp:102 (copy constructor: m_pCurve/m_pVolume are shared unless the owner flag owns them (126, 133); the curve of an owned base is Copy()'d, whose knot fix-up rewrites knots 1e-12..2e-12 apart)",
+   "inputs": {
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0.1,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.2,
+         0.4,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.4,
+         0.2,
+         0.3,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.5,
+         0.2,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.7,
+         0.3,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.6,
+         0.4,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.1,
+         0.5,
+         0.7,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.3,
+         0.7,
+         0.6,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.25,
+        0.5,
+        0.5000000000015,
+        0.75,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+       ],
+       "raw_knots": true
+      }
+     },
+     "in_param": false,
+     "copy": 0,
+     "owner": 3
+    },
+    "op": "clone"
+   }
+  },
+  {
+   "name": "clone_ctor_raw_gap1.9e-12_owner1_in_space",
+   "upstream_ref": "source/SMLib/src/SmCrvInVolume.cpp:102 (copy constructor: m_pCurve/m_pVolume are shared unless the owner flag owns them (126, 133); the curve of an owned base is Copy()'d, whose knot fix-up rewrites knots 1e-12..2e-12 apart)",
+   "inputs": {
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0.1,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.2,
+         0.4,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.4,
+         0.2,
+         0.3,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.5,
+         0.2,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.7,
+         0.3,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.6,
+         0.4,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.1,
+         0.5,
+         0.7,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.3,
+         0.7,
+         0.6,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.25,
+        0.5,
+        0.5000000000019,
+        0.75,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+       ],
+       "raw_knots": true
+      }
+     },
+     "in_param": false,
+     "copy": 0,
+     "owner": 1
+    },
+    "op": "clone"
+   }
+  },
+  {
+   "name": "clone_ctor_raw_gap1.9e-12_owner3_param_space",
+   "upstream_ref": "source/SMLib/src/SmCrvInVolume.cpp:102 (copy constructor: m_pCurve/m_pVolume are shared unless the owner flag owns them (126, 133); the curve of an owned base is Copy()'d, whose knot fix-up rewrites knots 1e-12..2e-12 apart)",
+   "inputs": {
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0.1,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.2,
+         0.4,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.4,
+         0.2,
+         0.3,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.5,
+         0.2,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.7,
+         0.3,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.6,
+         0.4,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.1,
+         0.5,
+         0.7,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.3,
+         0.7,
+         0.6,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.25,
+        0.5,
+        0.5000000000019,
+        0.75,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+       ],
+       "raw_knots": true
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 3
+    },
+    "op": "clone"
+   }
+  },
+  {
+   "name": "clone_ctor_owner0_current_cache",
+   "upstream_ref": "source/SMLib/src/SmCrvInVolume.cpp:146 (the copy constructor copies m_sBreaks/m_sConts only when m_bNeedBreaks is FALSE); source/SMLib/src/SmCrvInVolume.cpp:167 (operator==: a shared base curve and volume compare by pointer, so the copy of a borrowed base equals the original; a copy-constructor knot fix-up moves knots by ~1e-12, below the harness's 1e-9 value tolerance, so this equality is the sharp comparison)",
+   "inputs": {
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0.1,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.2,
+         0.4,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.4,
+         0.2,
+         0.3,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.5,
+         0.2,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.7,
+         0.3,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.6,
+         0.4,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.1,
+         0.5,
+         0.7,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.3,
+         0.7,
+         0.6,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.25,
+        0.5,
+        0.5000000000015,
+        0.75,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+       ],
+       "raw_knots": true
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 0,
+     "cache": {
+      "need": false,
+      "breaks": [
+       0.0,
+       0.25,
+       0.5,
+       0.75,
+       1.0
+      ],
+      "conts": [
+       13,
+       13,
+       13,
+       13,
+       13
+      ]
+     }
+    },
+    "op": "clone"
+   }
+  },
+  {
+   "name": "clone_ctor_owner3_current_cache",
+   "upstream_ref": "source/SMLib/src/SmCrvInVolume.cpp:146 (the copy constructor copies m_sBreaks/m_sConts only when m_bNeedBreaks is FALSE)",
+   "inputs": {
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0.1,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.2,
+         0.4,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.4,
+         0.2,
+         0.3,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.5,
+         0.2,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.7,
+         0.3,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.6,
+         0.4,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.1,
+         0.5,
+         0.7,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.3,
+         0.7,
+         0.6,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.25,
+        0.5,
+        0.5000000000015,
+        0.75,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+       ],
+       "raw_knots": true
+      }
+     },
+     "in_param": false,
+     "copy": 0,
+     "owner": 3,
+     "cache": {
+      "need": false,
+      "breaks": [
+       0.0,
+       0.25,
+       0.5,
+       0.75,
+       1.0
+      ],
+      "conts": [
+       13,
+       13,
+       13,
+       13,
+       13
+      ]
+     }
+    },
+    "op": "clone"
+   }
+  },
+  {
+   "name": "clone_ctor_owner4_param_space",
+   "upstream_ref": "source/SMLib/src/SmCrvInVolume.cpp:102 (copy constructor: m_pCurve/m_pVolume are shared unless the owner flag owns them (126, 133); the curve of an owned base is Copy()'d, whose knot fix-up rewrites knots 1e-12..2e-12 apart); source/SMLib/src/SmCrvInVolume.cpp:167 (operator==: a shared base curve and volume compare by pointer, so the copy of a borrowed base equals the original; a copy-constructor knot fix-up moves knots by ~1e-12, below the harness's 1e-9 value tolerance, so this equality is the sharp comparison)",
+   "inputs": {
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0.1,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.2,
+         0.4,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.4,
+         0.2,
+         0.3,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.5,
+         0.2,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.7,
+         0.3,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.6,
+         0.4,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.1,
+         0.5,
+         0.7,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.3,
+         0.7,
+         0.6,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.25,
+        0.5,
+        0.5000000000015,
+        0.75,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+       ],
+       "raw_knots": true
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 4
+    },
+    "op": "clone"
+   }
+  },
+  {
+   "name": "clone_ctor_owner6_in_space",
+   "upstream_ref": "source/SMLib/src/SmCrvInVolume.cpp:102 (copy constructor: m_pCurve/m_pVolume are shared unless the owner flag owns them (126, 133); the curve of an owned base is Copy()'d, whose knot fix-up rewrites knots 1e-12..2e-12 apart); source/SMLib/src/SmCrvInVolume.cpp:167 (operator==: a shared base curve and volume compare by pointer, so the copy of a borrowed base equals the original; a copy-constructor knot fix-up moves knots by ~1e-12, below the harness's 1e-9 value tolerance, so this equality is the sharp comparison)",
+   "inputs": {
+    "civ": {
+     "curve": {
+      "bspline": {
+       "dim": 3,
+       "cpts": [
+        [
+         0.1,
+         0.0,
+         0.0,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.2,
+         0.4,
+         0.1,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.4,
+         0.2,
+         0.3,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.6,
+         0.5,
+         0.2,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.7,
+         0.3,
+         0.5,
+         -1.7976931348623157e+308
+        ],
+        [
+         0.9,
+         0.6,
+         0.4,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.1,
+         0.5,
+         0.7,
+         -1.7976931348623157e+308
+        ],
+        [
+         1.3,
+         0.7,
+         0.6,
+         -1.7976931348623157e+308
+        ]
+       ],
+       "p": 3,
+       "u": [
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.25,
+        0.5,
+        0.5000000000015,
+        0.75,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+       ],
+       "raw_knots": true
+      }
+     },
+     "in_param": false,
+     "copy": 0,
+     "owner": 6
+    },
+    "op": "clone"
+   }
+  },
+  {
+   "name": "clone_ctor_hermite_owner0_param_space",
+   "upstream_ref": "source/SMLib/src/SmCrvInVolume.cpp:102 (copy constructor: m_pCurve/m_pVolume are shared unless the owner flag owns them (126, 133); the curve of an owned base is Copy()'d, whose knot fix-up rewrites knots 1e-12..2e-12 apart); source/SMLib/src/SmCrvInVolume.cpp:167 (operator==: a shared base curve and volume compare by pointer, so the copy of a borrowed base equals the original; a copy-constructor knot fix-up moves knots by ~1e-12, below the harness's 1e-9 value tolerance, so this equality is the sharp comparison)",
+   "inputs": {
+    "civ": {
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "d1": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "p2": [
+        0.5,
+        0.5,
+        0.25
+       ],
+       "d2": [
+        0.0,
+        1.0,
+        0.5
+       ]
+      }
+     },
+     "in_param": true,
+     "copy": 0,
+     "owner": 0
+    },
+    "op": "clone"
+   }
+  },
+  {
+   "name": "clone_ctor_hermite_owner2_in_space",
+   "upstream_ref": "source/SMLib/src/SmCrvInVolume.cpp:102 (copy constructor: m_pCurve/m_pVolume are shared unless the owner flag owns them (126, 133); the curve of an owned base is Copy()'d, whose knot fix-up rewrites knots 1e-12..2e-12 apart); source/SMLib/src/SmCrvInVolume.cpp:167 (operator==: a shared base curve and volume compare by pointer, so the copy of a borrowed base equals the original; a copy-constructor knot fix-up moves knots by ~1e-12, below the harness's 1e-9 value tolerance, so this equality is the sharp comparison)",
+   "inputs": {
+    "civ": {
+     "curve": {
+      "hermite": {
+       "dim": 3,
+       "p1": [
+        0.0,
+        0.0,
+        0.0
+       ],
+       "d1": [
+        1.0,
+        0.0,
+        0.0
+       ],
+       "p2": [
+        0.5,
+        0.5,
+        0.25
+       ],
+       "d2": [
+        0.0,
+        1.0,
+        0.5
+       ]
+      }
+     },
+     "in_param": false,
+     "copy": 0,
+     "owner": 2
+    },
+    "op": "clone"
+   }
+  }
+ ]
+}

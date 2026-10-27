@@ -36,7 +36,11 @@
 //! - **Nesting.** `new` returns `InvalidInput` when the curve or the volume would nest
 //!   deeper than [`MAX_GEOMETRY_NESTING`](crate::surface::surface::p2::MAX_GEOMETRY_NESTING)
 //!   (32; upstream fixtures nest at most 3), which bounds the recursive dispatch,
-//!   cloning and dropping of nested geometry (no limit upstream).
+//!   cloning and dropping of nested geometry (no limit upstream). A database read bounds
+//!   the same graph through `DatabaseReader::enter_nested` (32) on both nested readers.
+//!   No method replaces the curve or the volume after construction, so every
+//!   `CrvInVolume` holds a bounded graph; that is what [`CrvInVolume::copy`] and the
+//!   infallible `Clone` rely on.
 //! - **Volumes.** The volume is a [`Volume`] (units `surface.volume_p1`, `_p2`);
 //!   the queries of the unported volume kinds return [`SolidError::Unported`].
 //! - **Curve classification.** `GetKnots` classifies the base curve against the
@@ -49,9 +53,18 @@
 //!   in is already this object's copy) and the owner flag is kept as data: it
 //!   decides [`CrvInVolume::owns_curve`], [`CrvInVolume::owns_volume`] and whether
 //!   `Trim` / `ReverseParameterization` are allowed, as upstream. The copy
-//!   constructor clones both parts (upstream copies owned parts and shares the
-//!   rest; the result is the same geometry) and recomputes the owner flag as
-//!   upstream. The owner links of the contained objects (`SetOwner(this)`) and the
+//!   constructor - [`CrvInVolume::copy`] and `Clone` alike - follows upstream part by
+//!   part: a part this object owns is copied with that part's copy constructor, one it
+//!   does not own is an exact copy that keeps its owner (upstream shares it), and the
+//!   owner flag is normalized using the recognized ownership predicates, not a bit
+//!   mask: noncanonical flags own neither part. The volume is copied field-wise; upstream
+//!   copy-constructs the volume whenever it owns either part (also for flag 1, which
+//!   owns only the curve) and shares it at flag 0, and the `Copy` knot fix-up of a
+//!   B-spline volume is not modelled, as in [`CrvInVolume::copy`]. The break cache is
+//!   copied only when `m_bNeedBreaks` is FALSE, as upstream; the operations here leave
+//!   the cache empty whenever they invalidate it (`Trim` and `EditParameterization`
+//!   clear both arrays when they set the flag), so that branch is not observable
+//!   through them. The owner links of the contained objects (`SetOwner(this)`) and the
 //!   notifications (`Notify`) are not modelled; `SetContext` and the `SmContext`
 //!   arguments (they only choose where upstream allocates) are dropped.
 //! - **Equality.** Upstream first compares the curve and volume pointers; held by
@@ -309,7 +322,7 @@ pub const fn continuity_from_code(code: i64) -> Option<ContinuityType> {
 /// volume's parameter space or in-space and is mapped to the volume's final
 /// out-space. Its "knots" are the base curve's knots plus the parameters where the
 /// base curve crosses the volume's discontinuity iso-planes, cached once computed.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct CrvInVolume {
     /// `m_pCurve`: the base curve.
     curve: Curve,
@@ -327,6 +340,51 @@ pub struct CrvInVolume {
     /// `m_lOwnerFlag`: bit 1 owns the curve, bit 2 owns the volume (only the values
     /// 1 and 3, and 2 and 3, count as owning).
     owner_flag: u64,
+}
+
+/// The copy constructor `SmCrvInVolume::SmCrvInVolume(const SmCrvInVolume&)`
+/// (`SmCrvInVolume.cpp:102-159`), not the virtual `Copy` (that is
+/// [`CrvInVolume::copy`]): the owner flag is normalized from the recognized ownership
+/// predicates, the break cache is kept only when it is current, and the base curve is
+/// copied with the copy constructor (which fixes its knots up) when this object owns
+/// it, but exactly - keeping the curve and its owner - when upstream would share it
+/// instead. The volume is held by value, so it is a field-wise copy either way.
+///
+/// Infallible, unlike [`CrvInVolume::copy`]: the exact copy of a borrowed curve is
+/// [`Curve`]'s `clone_exact_bounded`, which walks the same nesting-bounded graph the
+/// derived `Clone` this replaces walked (see the module's nesting deviation).
+impl Clone for CrvInVolume {
+    fn clone(&self) -> Self {
+        let owns_curve = self.owns_curve();
+        let owns_volume = self.owns_volume();
+        let owner_flag = match (owns_curve, owns_volume) {
+            (true, true) => 3,
+            (true, false) => 1,
+            (false, true) => 2,
+            (false, false) => 0,
+        };
+        // copy knots when appropriate
+        let (breaks, conts) = if self.need_breaks {
+            (Vec::new(), Vec::new())
+        } else {
+            (self.breaks.clone(), self.conts.clone())
+        };
+        Self {
+            curve: if owns_curve {
+                // an owned curve is copied by its copy constructor
+                self.curve.clone()
+            } else {
+                // a curve shared upstream is an exact copy here
+                self.curve.clone_exact_bounded()
+            },
+            in_param_space: self.in_param_space,
+            volume: self.volume.clone(),
+            need_breaks: self.need_breaks,
+            breaks,
+            conts,
+            owner_flag,
+        }
+    }
 }
 
 impl CrvInVolume {

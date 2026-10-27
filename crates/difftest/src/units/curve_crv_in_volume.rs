@@ -14,6 +14,17 @@
 //! `SmStatus`; `1007` for a Rust `InvalidInput`, `-1` for a Rust error upstream cannot
 //! produce) and the rest as `out`.
 //!
+//! The `clone` op runs the native copy constructor (`SmCrvInVolume(const
+//! SmCrvInVolume&)`, shim op `CopyCtor`, not the virtual `Copy`) against the port's
+//! `Curve::clone`: the object is moved into a [`Curve`], the kind's `Clone` dispatches
+//! through `CurveKind` to `CrvInVolume`'s copy-constructor clone, and only the clone is
+//! examined (the original is only compared with). Its record is `copy`'s (the copy's
+//! state, then its `operator==` with the original). Upstream's copy constructor shares a
+//! base curve the owner flag does not own and copies one it does; it normalizes the owner
+//! flag to 0/1/2/3 and copies the break cache only when that cache is current. A shared
+//! base keeps its raw knots, so the copy's `operator==` with the original is the sharp
+//! comparison: a copy-constructor knot fix-up moves knots by ~1e-12, below the harness's
+//! 1e-9 value tolerance.
 //! `exact_volume_*` cases run `MakeExactBSplineIfPossible` on an object built from a
 //! B-spline, Hermite, line or circle base curve and a chain of transform, bend, unbend
 //! and twist maps (built in C++ and Rust from the same parameters), with the base curve
@@ -30,23 +41,23 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use solidcore::curve::crv_in_volume::{continuity_from_code, CrvInVolume};
-use solidcore::geom::transform::Transform;
-use solidcore::nurbs::math::{NOW, NOZ};
-use solidcore::surface::volume::{Volume, VolumeKind};
 use solidcore::curve::curve::p2::{Curve, CurveKind};
 use solidcore::curve::ellipse::{Ellipse, EllipseOptions};
 use solidcore::curve::hermite_curve::HermiteCurve;
 use solidcore::curve::line::Line;
 use solidcore::geom::axis2_placement::Axis2Placement;
 use solidcore::geom::extent1d::Extent1d;
+use solidcore::geom::transform::Transform;
 use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::Kernel;
 use solidcore::nurbs::b_spline_curve::BSplineCurve;
 use solidcore::nurbs::b_spline_curve_n_lib::TrimMode;
+use solidcore::nurbs::math::{NOW, NOZ};
 use solidcore::nurbs::nurbs_crv::allocate_nurb_curve;
 use solidcore::surface::bend_volume::BendVolume;
 use solidcore::surface::twist_volume::TwistVolume;
 use solidcore::surface::unbend_volume::UnbendVolume;
+use solidcore::surface::volume::{Volume, VolumeKind};
 use solidcore::topology::database_io::{DatabaseReader, FileType, InputStream};
 use solidcore::SolidError;
 use solidcore_ffi::units::curve_crv_in_volume::{self as ffi, Op};
@@ -195,6 +206,7 @@ enum OpIn {
         other: Option<CivIn>,
     },
     Copy,
+    Clone,
     EditParam {
         a: f64,
         b: f64,
@@ -315,6 +327,7 @@ fn op_of(op: &OpIn) -> Op {
         OpIn::Conts { .. } => Op::Conts,
         OpIn::Equal { .. } => Op::Equal,
         OpIn::Copy => Op::Copy,
+        OpIn::Clone => Op::CopyCtor,
         OpIn::EditParam { .. } => Op::EditParam,
         OpIn::Reverse { .. } => Op::Reverse,
         OpIn::Trim { .. } => Op::Trim,
@@ -328,7 +341,10 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
     let op = op_of(&i.op);
     let mut v = Vec::new();
     if !op.is_static() {
-        let c = i.civ.as_ref().ok_or_else(|| harness("object op without civ"))?;
+        let c = i
+            .civ
+            .as_ref()
+            .ok_or_else(|| harness("object op without civ"))?;
         civ_block(&mut v, c);
     }
     match &i.op {
@@ -351,7 +367,7 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
             v.push(knots.len() as f64);
             v.extend_from_slice(knots);
         }
-        OpIn::Nnk | OpIn::Copy => {}
+        OpIn::Nnk | OpIn::Copy | OpIn::Clone => {}
         OpIn::Conts { angle } => v.push(*angle),
         OpIn::Equal { other } => match other {
             None => v.push(1.0),
@@ -443,7 +459,10 @@ fn build_curve(c: &CurveIn) -> Result<Curve, HarnessError> {
                 .len()
                 .checked_sub(1)
                 .ok_or_else(|| harness("no points"))?;
-            let m = bs.u.len().checked_sub(1).ok_or_else(|| harness("no knots"))?;
+            let m =
+                bs.u.len()
+                    .checked_sub(1)
+                    .ok_or_else(|| harness("no knots"))?;
             let mut cur =
                 allocate_nurb_curve(n, bs.p, m).map_err(|e| harness(format!("curve: {e}")))?;
             for (d, s) in cur.cpts_mut().iter_mut().zip(&bs.cpts) {
@@ -481,7 +500,8 @@ fn build(c: &CivIn) -> Result<CrvInVolume, HarnessError> {
         Volume::new(VolumeKind::Transform(Transform::IDENTITY)),
         c.copy,
         c.owner,
-    ).map_err(|e| HarnessError::new(e.to_string()))?;
+    )
+    .map_err(|e| HarnessError::new(e.to_string()))?;
     if let Some(k) = &c.cache {
         let conts = k
             .conts
@@ -712,6 +732,17 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let eq = tri!(o, d.approx_eq(&k, &c));
             o.push(b(eq));
         }
+        OpIn::Clone => {
+            // the native copy constructor against the port's derived-dispatch
+            // `Curve::clone` (the original is moved into a `Curve`; only the clone is
+            // examined, so both sides start from the same object)
+            let c = Curve::from(civ);
+            let d = c.clone();
+            o.push(0.0);
+            put_state(&mut o, civ_of(&d)?);
+            let eq = tri!(o, d.approx_eq(&k, &c));
+            o.push(b(eq));
+        }
         OpIn::EditParam { a, b: bb } => {
             let r = civ.edit_parameterization(&Kernel::default(), &Extent1d::from_min_max(*a, *bb));
             o.push(match st_of(&r) {
@@ -721,7 +752,8 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             put_state(&mut o, &civ);
         }
         OpIn::Reverse { a, b: bb } => {
-            let r = civ.reverse_parameterization(&Kernel::default(), &Extent1d::from_min_max(*a, *bb));
+            let r =
+                civ.reverse_parameterization(&Kernel::default(), &Extent1d::from_min_max(*a, *bb));
             o.push(match st_of(&r) {
                 Ok(s) => s,
                 Err(d) => return Ok(*d),
@@ -993,7 +1025,11 @@ fn gen_case(rng: &mut Rng) -> Inputs {
         }
         12 | 13 => OpIn::Nnk,
         14 | 15 => OpIn::Conts {
-            angle: if rng.chance(0.5) { 0.5 } else { rng.uniform(0.0, 10.0) },
+            angle: if rng.chance(0.5) {
+                0.5
+            } else {
+                rng.uniform(0.0, 10.0)
+            },
         },
         16 | 17 => OpIn::Equal {
             other: match rng.below(20) {

@@ -71,6 +71,7 @@ enum : int32_t
     OP_REVERSE = 10,
     OP_TRIM = 11,
     OP_TRANSFORM = 12,
+    OP_COPY_CTOR = 13,
     OP_READ_DB = 40,
     OP_EXACT = 41,
 };
@@ -271,6 +272,24 @@ void free_civ(Built& b)
     delete b.civ;
 }
 
+// The state of a copy made by the copy constructor and whether it equals the original,
+// then frees the parts the copy does not own (never the originals when copied) and the
+// copy itself.
+void report_copy(const SmCrvInVolume& original, SmCrvInVolume* cp, std::vector<double>& o)
+{
+    put_state(o, cp);
+    o.push_back(sc::flg(*cp == original));
+    SmCurve* ccur = cp->GetCurve();
+    SmVolume* cvol = cp->GetVolume();
+    bool del_c = cp->OwnsCurve() != FALSE;
+    bool del_v = cp->OwnsVolume() != FALSE;
+    if (ccur != original.GetCurve() && !del_c)
+        delete ccur;
+    if (cvol != original.GetVolume() && !del_v)
+        delete cvol;
+    delete cp;
+}
+
 void civ_op(int32_t op, Rd& rd, const SmContext& ctx, Built& bb, std::vector<double>& o)
 {
     ScCiv* c = bb.civ;
@@ -400,24 +419,16 @@ void civ_op(int32_t op, Rd& rd, const SmContext& ctx, Built& bb, std::vector<dou
         SmStatus s = c->Copy(ctx, cp);
         o.push_back(st(s));
         if (s == SM_SUCCESS && cp != NULL)
-        {
-            SmCrvInVolume* cc = (SmCrvInVolume*)cp;
-            put_state(o, cc);
-            o.push_back(sc::flg(*cp == *c));
-            // the copy deletes what it owns; free the copies it does not own (they are
-            // never the originals when copied)
-            SmCurve* ccur = cc->GetCurve();
-            SmVolume* cvol = cc->GetVolume();
-            bool del_c = cc->OwnsCurve() != FALSE;
-            bool del_v = cc->OwnsVolume() != FALSE;
-            bool cur_copied = ccur != c->GetCurve();
-            bool vol_copied = cvol != c->GetVolume();
-            if (cur_copied && !del_c)
-                delete ccur;
-            if (vol_copied && !del_v)
-                delete cvol;
-            delete cc;
-        }
+            report_copy(*c, (SmCrvInVolume*)cp, o);
+        break;
+    }
+    case OP_COPY_CTOR:
+    {
+        // the copy constructor itself (Copy() only forwards to it), so the base curve
+        // and the volume are handled by the constructor, not by the virtual Copy
+        SmCrvInVolume* cc = new (ctx) SmCrvInVolume(*c);
+        o.push_back(0.0);
+        report_copy(*c, cc, o);
         break;
     }
     case OP_EDIT_PARAM:
