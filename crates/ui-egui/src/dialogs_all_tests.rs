@@ -69,6 +69,9 @@ fn representative(h: &Harness, command: &str) -> Dialog {
         if command == "solid.coil" {
             continue; // an empty Profile input keeps the primitive section, which this form checks
         }
+        if command == "solid.cylinder" {
+            continue; // its face and reference edges place it (cylinder reference tests); this form checks its fields
+        }
         if matches!(input.label, "Rail" | "Second Rail" | "Pass through" | "Direction" | "Roller (optional)" | "Tip (optional)") {
             continue;
         }

@@ -978,6 +978,7 @@ impl Dialog {
                     ],
                     operation: 0,
                     at: None,
+                    refs: Default::default(),
                 },
                 vec![],
             ),
@@ -5584,6 +5585,7 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                 ],
                 operation: op_index(operation),
                 at: None,
+                refs: Default::default(),
             };
             d.extra.insert("base".into(), pt_expr(base));
             d.extra.insert("axis".into(), pt3(axis.0));
