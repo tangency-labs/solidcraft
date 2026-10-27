@@ -5,7 +5,7 @@
     python3 site/build.py --out DIR       # elsewhere
 
 Standard library only (Python 3.11+ for tomllib). Every number comes from the repo:
-plan/units/*.toml, plan/PROGRESS.md (claims), harness/callgraph/units.json,
+plan/units/*.toml, plan/PROGRESS.md (claims; generated, not committed), harness/callgraph/units.json,
 reports/difftest/*.json (not committed: CI's artifact, see scripts/fetch-reports.sh),
 reports/solids/solids.json (not committed: CI's artifact, see scripts/fetch-solids.sh),
 reports/ssi-corpus.json, plan/upstream-issues/*.md, the
@@ -163,7 +163,7 @@ def aggregate(samples):
 # ---------------------------------------------------------------- data
 
 def load_claims():
-    """id -> claim text from the bot-maintained "In progress" section of PROGRESS.md."""
+    """id -> claim text from the "In progress" section of the generated PROGRESS.md."""
     claims = {}
     path = ROOT / "plan/PROGRESS.md"
     if not path.exists():
@@ -823,6 +823,11 @@ def build(out):
     def write(rel, text):
         (out / rel).write_text(text)
 
+    # The checklist harness/plan/progress.py generated (not committed; pages.yml runs it).
+    checklist = ROOT / "plan/PROGRESS.md"
+    if checklist.exists():
+        shutil.copy(checklist, out / "PROGRESS.md")
+
     # ---- overview
     count = s["count"]
     pct = 100 * s["done_lines"] / s["total_lines"]
@@ -925,7 +930,7 @@ Rust and C++ are compared where the Rust path is ported: {par.get('compared', 0)
 <li><a href="issues.html">{len(issues)} upstream issues</a> found while porting.</li>
 <li><a href="{VIEWER_URL}">Model viewer</a>: the upstream test models rendered by SMLib and by solidcore, side by side.</li>
 <li><a href="{REPO_URL}">Repository</a>: <a href="{REPO_URL}/blob/main/AGENTS.md">how to port a unit</a>,
-<a href="{REPO_URL}/blob/main/plan/PROGRESS.md">checklist</a>.</li>
+<a href="PROGRESS.md">checklist</a>.</li>
 </ul>
 </section>
 """

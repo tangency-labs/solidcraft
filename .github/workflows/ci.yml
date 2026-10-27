@@ -304,7 +304,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-      # main's reports are published from here (site, PROGRESS.md case counts,
+      # main's reports are published from here (site, checklist case counts,
       # scripts/fetch-reports.sh), never committed.
       - name: Upload difftest reports
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.green.outputs.any == 'true' && !cancelled()

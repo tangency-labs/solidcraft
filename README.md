@@ -34,7 +34,7 @@ Use the [live unit results](https://tangency-labs.github.io/solidcore/units/inde
 for current differential coverage and blockers, and the
 [primitive checks](https://tangency-labs.github.io/solidcore/solids.html) for whole-solid
 results. Per-unit plans and notes live in [`plan/units/`](plan/units/); the generated
-checklist is [`plan/PROGRESS.md`](plan/PROGRESS.md), with handoff notes in
+checklist is [`PROGRESS.md`](https://tangency-labs.github.io/solidcore/PROGRESS.md) on the site, with handoff notes in
 [`plan/STATUS.md`](plan/STATUS.md). The progress site is built by
 [`site/build.py`](site/README.md) (`python3 site/build.py` -> `bin/site/`).
 

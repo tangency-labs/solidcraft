@@ -1,27 +1,30 @@
 name: Pages
 
-# Builds the progress site (site/build.py) from the repository and deploys it to GitHub
-# Pages. Requires Settings -> Pages -> Source = "GitHub Actions".
+# Builds the progress site (site/build.py) and the unit checklist (harness/plan/progress.py,
+# published as PROGRESS.md on the site) from main and deploys them to GitHub Pages.
+# Requires Settings -> Pages -> Source = "GitHub Actions". Nothing is committed back: main
+# only changes through the merge queue.
 #
 # Triggers:
-# - push to main: every merge (statuses, reports, upstream-issues.md, the site itself).
-# - workflow_run of "Progress checklist": that workflow commits plan/PROGRESS.md with
-#   "[skip ci]", which suppresses push events, so the claims it records would otherwise
-#   only appear on the next merge. It runs hourly and on PR events and usually pushes
-#   nothing, so the build is skipped unless main moved past the commit it started from.
+# - push to main: every merge (statuses, upstream issues, the site itself).
+# - workflow_run of "CI" on main: fresh difftest reports (case counts).
+# - schedule (hourly): claims from open "port: <unit id>" PRs.
 # - workflow_dispatch: manual rebuild.
 on:
   push:
     branches: [main]
   workflow_run:
-    workflows: ["Progress checklist"]
+    workflows: ["CI"]
     types: [completed]
     branches: [main]
+  schedule:
+    - cron: "17 * * * *"
   workflow_dispatch:
 
 permissions:
   contents: read
   actions: read  # download main's difftest-reports artifact
+  pull-requests: read  # open "port:" PRs for the checklist's claims
   pages: write
   id-token: write
 
@@ -37,43 +40,29 @@ jobs:
         with:
           ref: main
           fetch-depth: 0 # full history for the progress timeline
-      - name: Skip if the progress run pushed nothing
-        id: gate
-        env:
-          EVENT: ${{ github.event_name }}
-          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
-        run: |
-          if [ "$EVENT" = workflow_run ] && [ "$(git rev-parse HEAD)" = "$RUN_SHA" ]; then
-            echo "main unchanged since $RUN_SHA; nothing to rebuild"
-            echo "build=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "build=true" >> "$GITHUB_OUTPUT"
-          fi
       - name: Fetch main's difftest reports
-        if: steps.gate.outputs.build == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: scripts/fetch-reports.sh || echo "no reports; unit pages will say so"
       - name: Fetch main's solids report
-        if: steps.gate.outputs.build == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: scripts/fetch-solids.sh || echo "no solids report; the Solids page will say so"
+      - name: Test checklist generator
+        run: python3 -m unittest discover -s harness/plan -p 'test_*.py'
+      - name: Generate checklist
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 harness/plan/progress.py --prs
       - name: Build site
-        if: steps.gate.outputs.build == 'true'
         run: python3 site/build.py --out _site
-      - if: steps.gate.outputs.build == 'true'
-        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
-      - if: steps.gate.outputs.build == 'true'
-        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
           path: _site
-    outputs:
-      build: ${{ steps.gate.outputs.build }}
 
   deploy:
     needs: build
-    if: needs.build.outputs.build == 'true'
     runs-on: blacksmith-2vcpu-ubuntu-2404
     environment:
       name: github-pages

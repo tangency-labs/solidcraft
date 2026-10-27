@@ -29,7 +29,8 @@ filters tables, drives the chart tooltips and the overview's module picker (with
 shows the all-units chart). The only third-party code is d3-force (ISC), vendored under
 `site/assets/vendor/` and used only by the graph page (see `ATTRIBUTION.md`). No external assets.
 
-Deployment: `.github/workflows/pages.yml` rebuilds on every push to `main`, after a
-"Progress checklist" run that pushed a new `plan/PROGRESS.md` (those commits carry
-`[skip ci]`, so they do not trigger a push build), and on manual dispatch. GitHub Pages
+Deployment: `.github/workflows/pages.yml` rebuilds on every push to `main`, after each CI
+run on `main` (fresh difftest reports), hourly (claims from open `port:` PRs) and on manual
+dispatch. It first generates the unit checklist (`harness/plan/progress.py --prs`), which
+the site publishes as `PROGRESS.md`; nothing is committed back to `main`. GitHub Pages
 must be enabled with source "GitHub Actions".

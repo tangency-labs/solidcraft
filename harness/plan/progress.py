@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Regenerate plan/PROGRESS.md from plan/units/*.toml and the difftest reports.
 
-CI (.github/workflows/progress.yml) runs this on main and commits the result; PRs never
-edit plan/PROGRESS.md. Locally:
+The Pages workflow (.github/workflows/pages.yml) runs this on main and publishes the result
+on the site as PROGRESS.md; plan/PROGRESS.md is gitignored and never committed. Locally:
     python3 harness/plan/progress.py          # from plan/units and reports/difftest/
     python3 harness/plan/progress.py --prs    # also mark units with an open "port: <id>" PR
 Output is deterministic (no timestamps); statuses, claims and report counts drive changes.
