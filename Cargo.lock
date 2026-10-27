@@ -4123,6 +4123,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcraft-collab-wire"
+version = "0.40.0-rc.2"
+dependencies = [
+ "miniz_oxide 0.9.1",
+ "sha2 0.10.9",
+ "solidcore-record",
+ "solidcraft-geom",
+ "solidcraft-testkit",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "solidcraft-derive"
 version = "0.40.0-rc.2"
 dependencies = [
@@ -4172,6 +4184,7 @@ dependencies = [
  "serde_json",
  "serde_path_to_error",
  "solidcore-record",
+ "solidcraft-collab-wire",
  "solidcraft-doc",
  "solidcraft-geom",
  "solidcraft-io",
