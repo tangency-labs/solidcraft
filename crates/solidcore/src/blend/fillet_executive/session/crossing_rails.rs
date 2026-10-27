@@ -98,7 +98,14 @@ impl FilletSession<'_> {
                     let Some(curve) = record.curve.as_ref() else {
                         continue;
                     };
-                    let (lo, hi) = (record.interval.min(), record.interval.max());
+                    // The rails are not trimmed yet: their interval is still
+                    // the inside-out `Extent1d::new()`, whose samples lie ~1e21 away.
+                    let span = if record.interval.is_init() {
+                        curve.natural_interval()
+                    } else {
+                        record.interval
+                    };
+                    let (lo, hi) = (span.min(), span.max());
                     let mut points = Vec::with_capacity(SAMPLES);
                     let mut width = f64::INFINITY;
                     for i in 0..SAMPLES {
