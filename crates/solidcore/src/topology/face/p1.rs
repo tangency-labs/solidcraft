@@ -2207,6 +2207,18 @@ fn last_index(size: usize) -> Result<usize> {
     })
 }
 
+/// The vertex a seam classification's end names (upstream's `GetVertexObject`): the B-rep
+/// vertex its handle names, as `MergeIntervals` resolves the classification's handles
+/// ([`merge_intervals`]: the B-rep's own objects first, then the caller's `resolve`). The
+/// ends `HasSeamProblem` classifies to vertices hold the B-rep's own handles, which the
+/// caller's `resolve` need not know.
+fn seam_vertex<O: LoopObject>(o: O, resolve: &dyn Fn(O) -> Option<EntityRef>) -> Option<VertexId> {
+    match o.as_topology().or_else(|| resolve(o)) {
+        Some(EntityRef::Vertex(v)) => Some(v),
+        _ => None,
+    }
+}
+
 /// The merges of [`split_at_seam_depth`] (`merge` = `(bMergeU, bMergeV)`), with the
 /// B-rep's editing and the context's Boolean flag set; then, for a closed surface that
 /// had only vertex loops, the inserted seams' loop becomes the outer loop.
@@ -2227,9 +2239,8 @@ fn split_at_seam_merges<O: LoopObject>(
     let mut out = SeamSplit::default();
     let mut this_new = SeamSplit::default();
     if merge_u {
-        fp2::remove_suspect_split_at_seam_uv_trim_curves(b, crv_class_u, |o| match resolve(o) {
-            Some(EntityRef::Vertex(v)) => Some(v),
-            _ => None,
+        fp2::remove_suspect_split_at_seam_uv_trim_curves(b, crv_class_u, |o| {
+            seam_vertex(o, resolve)
         })?;
         this_new = merge_intervals(k, crv_class_u, Sp::U, b, f, resolve)?;
         if !merge_v {
@@ -2317,9 +2328,8 @@ fn split_at_seam_merges<O: LoopObject>(
             out.edges.extend_from_slice(&this_new.edges);
             out.vertices.extend_from_slice(&this_new.vertices);
         }
-        fp2::remove_suspect_split_at_seam_uv_trim_curves(b, crv_class_v, |o| match resolve(o) {
-            Some(EntityRef::Vertex(v)) => Some(v),
-            _ => None,
+        fp2::remove_suspect_split_at_seam_uv_trim_curves(b, crv_class_v, |o| {
+            seam_vertex(o, resolve)
         })?;
         this_new = merge_intervals(k, crv_class_v, Sp::V, b, f, resolve)?;
         out.faces.extend_from_slice(&this_new.faces);
@@ -2704,6 +2714,92 @@ mod tests {
         assert_eq!(r.u, FixSeamPlanType::NoChanges);
         assert_eq!(r.v, FixSeamPlanType::NoChanges);
         assert_eq!(r.split, SeamSplit::default());
+    }
+
+    /// A handle that names the B-rep's topology too, as the `BrepSeamObjects` handles
+    /// `HasSeamProblem` classifies seam ends with.
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    enum T {
+        Loop(LoopId),
+        Topo(EntityRef),
+    }
+
+    impl ClassObject for T {
+        fn class_kind(&self) -> ClassObjectKind {
+            match self {
+                Self::Loop(_) => ClassObjectKind::Loop,
+                Self::Topo(e) => e.class_kind(),
+            }
+        }
+    }
+
+    impl LoopObject for T {
+        fn from_loop(l: LoopId) -> Self {
+            Self::Loop(l)
+        }
+
+        fn as_loop(&self) -> Option<LoopId> {
+            match self {
+                Self::Loop(l) => Some(*l),
+                Self::Topo(e) => e.as_loop(),
+            }
+        }
+
+        fn as_vertex(&self) -> Option<VertexId> {
+            match self {
+                Self::Topo(EntityRef::Vertex(v)) => Some(*v),
+                _ => None,
+            }
+        }
+
+        fn from_topology(t: EntityRef) -> Option<Self> {
+            Some(Self::Topo(t))
+        }
+
+        fn as_topology(&self) -> Option<EntityRef> {
+            match self {
+                Self::Topo(t) => Some(*t),
+                Self::Loop(l) => Some(EntityRef::Loop(*l)),
+            }
+        }
+    }
+
+    /// A seam whose classification starts at an existing vertex (a vertex loop on the seam,
+    /// a corner): the vertex is named by the B-rep's own handle and the caller's `resolve`
+    /// knows nothing, as for every caller but the healer. Clearing the suspect UV trims
+    /// before the merge must still find the vertex (upstream: `GetVertexObject`) instead of
+    /// failing `InvalidInput` ("unresolved vertex").
+    #[test]
+    fn split_at_seam_resolves_seam_vertices_by_their_own_handles() {
+        let (mut b, f) = plane_face();
+        let v = b.add_vertex(Point3::new(0.0, 0.0, 0.0)).unwrap();
+        let mut k = Kernel::default();
+        let mut cu = CurveClassification::<T>::new(&k);
+        cu.set_size(&k, 1).unwrap();
+        cu.at_mut(0)
+            .unwrap()
+            .start
+            .set_class_object(PointClassType::Vertex, Some(T::Topo(EntityRef::Vertex(v))));
+        let mut cv = CurveClassification::<T>::new(&k);
+        let r = split_at_seam_merges(
+            &mut k,
+            &mut b,
+            f,
+            &mut cu,
+            &mut cv,
+            None,
+            &|_| None,
+            0,
+            (true, false),
+            false,
+        );
+        // (the plane has no seam curve, so the merge after it may still fail; not on the
+        // seam's vertex)
+        let unresolved = matches!(
+            &r,
+            Err(SolidError::InvalidInput { reason, .. }) if reason.contains("unresolved vertex")
+        );
+        assert!(!unresolved, "{r:?}");
     }
 
     #[test]
