@@ -148,3 +148,85 @@ fn a_hole_whose_face_is_gone_keeps_its_marker_through_the_restored_direction() {
     h.frames(2);
     assert!(handle_at("hole:0").is_none(), "no face and no direction: nowhere to stand");
 }
+
+/// The open Hole dialog's reference distances, as typed.
+fn distances(h: &Harness) -> [String; 2] {
+    match h.app.dialog.as_ref().map(|d| &d.kind) {
+        Some(crate::dialogs::Kind::Hole { opts, .. }) => opts.refs.distance.clone(),
+        _ => panic!("the hole dialog is open"),
+    }
+}
+
+/// Reference distance `k` as a length (mm); a measured one carries floating-point noise in its text.
+fn distance(h: &Harness, k: usize) -> f64 {
+    h.app.session.doc.eval(&distances(h)[k], solidcraft_engine::doc::expr::Kind::Length).unwrap_or(f64::NAN)
+}
+
+/// A hole at (10, 10) on the first block's top, held by the block's left edge (x = 0) at 10 mm.
+fn held_by_the_left_edge() -> Harness {
+    let mut h = blocks();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let at = screen(&mut h, Vec3::new(10.0, 10.0, 20.0));
+    h.step(&json!({"click": at})).unwrap();
+    h.step(&json!({"click": {"handle": "dialog:Reference 1"}})).unwrap();
+    let left = screen(&mut h, Vec3::new(0.0, 15.0, 20.0));
+    h.step(&json!({"click": left})).unwrap();
+    h.settle();
+    assert!(matches!(places(&h).as_slice(), [p] if p.dist(Vec3::new(10.0, 10.0, 20.0)) < 0.3), "{:?}", places(&h));
+    assert!((distance(&h, 0) - 10.0).abs() < 1e-6, "measured from the pick: {:?}", distances(&h));
+    h
+}
+
+#[test]
+fn one_reference_edge_holds_the_hole_to_a_line_the_marker_drags_along() {
+    let mut h = held_by_the_left_edge();
+    // The next reference input is the active one now; the marker still moves the hole.
+    assert!(handle_at("hole:0").is_some(), "the held hole keeps its marker");
+    let to = screen(&mut h, Vec3::new(25.0, 22.0, 20.0));
+    h.step(&json!({"drag": [{"handle": "hole:0"}, to], "steps": 12})).unwrap();
+    h.settle();
+    let p = places(&h);
+    assert!(matches!(p.as_slice(), [p] if (p.x - 10.0).abs() < 1e-6 && (p.y - 22.0).abs() < 0.3), "along the edge, 10 mm from it: {p:?}");
+    assert!((distance(&h, 0) - 10.0).abs() < 1e-6, "the distance is kept, not measured again: {:?}", distances(&h));
+}
+
+#[test]
+fn a_typed_distance_survives_a_drag_along_the_edge() {
+    let mut h = held_by_the_left_edge();
+    h.step(&json!({"click": {"handle": "dialog:Distance 1"}})).unwrap();
+    h.step(&json!({"key": "A", "cmd": true})).unwrap();
+    h.step(&json!({"text": "12"})).unwrap();
+    h.frames(3);
+    assert!(matches!(places(&h).as_slice(), [p] if (p.x - 12.0).abs() < 1e-6), "typed: the hole goes to 12 mm: {:?}", places(&h));
+    let to = screen(&mut h, Vec3::new(30.0, 24.0, 20.0));
+    h.step(&json!({"drag": [{"handle": "hole:0"}, to], "steps": 12})).unwrap();
+    h.settle();
+    assert_eq!(distances(&h)[0].trim(), "12", "the typed text is left alone by the drag");
+    assert!(matches!(places(&h).as_slice(), [p] if (p.x - 12.0).abs() < 1e-6 && (p.y - 24.0).abs() < 0.3), "{:?}", places(&h));
+}
+
+#[test]
+fn a_pick_elsewhere_on_the_face_keeps_a_held_hole_on_its_line() {
+    let mut h = held_by_the_left_edge();
+    h.step(&json!({"click": {"handle": "dialog:Face"}})).unwrap();
+    let at = screen(&mut h, Vec3::new(30.0, 25.0, 20.0));
+    h.step(&json!({"click": at})).unwrap();
+    h.settle();
+    let p = places(&h);
+    assert!(matches!(p.as_slice(), [p] if (p.x - 10.0).abs() < 1e-6 && (p.y - 25.0).abs() < 0.3), "moved along the edge only: {p:?}");
+}
+
+#[test]
+fn two_reference_edges_free_the_hole_again_and_a_drag_sets_both_distances() {
+    let mut h = held_by_the_left_edge();
+    h.step(&json!({"click": {"handle": "dialog:Reference 2"}})).unwrap();
+    let front = screen(&mut h, Vec3::new(20.0, 0.0, 20.0));
+    h.step(&json!({"click": front})).unwrap();
+    h.settle();
+    assert!((distance(&h, 1) - 10.0).abs() < 1e-4, "{:?}", distances(&h));
+    let to = screen(&mut h, Vec3::new(25.0, 22.0, 20.0));
+    h.step(&json!({"drag": [{"handle": "hole:0"}, to], "steps": 12})).unwrap();
+    h.settle();
+    assert!(matches!(places(&h).as_slice(), [p] if p.dist(Vec3::new(25.0, 22.0, 20.0)) < 0.3), "free again: {:?}", places(&h));
+    assert!((distance(&h, 0) - 25.0).abs() < 0.3 && (distance(&h, 1) - 22.0).abs() < 0.3, "both distances follow: {:?}", distances(&h));
+}
