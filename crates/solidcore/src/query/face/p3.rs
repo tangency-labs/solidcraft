@@ -593,7 +593,7 @@ impl<'b, O: LoopObject> LoopObjectCurves<'b, O> {
     /// queries left on it: the UV trim curves and tolerances upstream's later queries
     /// read from the one B-rep.
     #[must_use]
-    pub(crate) fn rebind<'c>(self, b: &'c Brep) -> LoopObjectCurves<'c, O> {
+    pub(crate) fn rebind(self, b: &Brep) -> LoopObjectCurves<'_, O> {
         LoopObjectCurves {
             b,
             f: self.f,
