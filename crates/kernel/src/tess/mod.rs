@@ -182,6 +182,7 @@ pub(crate) fn plan(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result
     .into_iter()
     .collect::<Result<_>>()?;
     relax_crowded_faces(b, &jobs, &rules, &mut nodes)?;
+    split_thin_loops(b, &mut nodes)?;
     let indexed: Vec<usize> = (0..faces.len()).collect();
     let face_boundary = |fi: usize, nodes: &[edges::Nodes]| {
         let (Some(face), Some(eval), Some(map)) = (faces.get(fi), evals.get(fi), params.get(fi)) else {
@@ -412,6 +413,39 @@ fn untangle(
 /// as often as it takes, down to the tolerance alone (a plate with a thousand small holes is
 /// not worth a hundred times the work to draw each hole round). An edge keeps one set of nodes
 /// for both its faces, at the coarser of their levels, so every rim of a crowded face gets the
+/// Segments an edge loop needs to enclose an area in its face's (u, v).
+const MIN_LOOP_SEGMENTS: usize = 3;
+
+/// Every edge loop with fewer than [`MIN_LOOP_SEGMENTS`] segments has its edges' segments halved
+/// until it has them: two short arcs (a lens), each within the chord tolerance and so one
+/// segment, would otherwise be two chords on one line, a boundary of no area. The new nodes are
+/// on the edges' curves and shared by every face that runs them, as all edge nodes are.
+fn split_thin_loops(b: &brep::Brep, nodes: &mut [edges::Nodes]) -> Result<()> {
+    for f in &b.faces {
+        for l in &f.loops {
+            let brep::Loop::Edges { edges: uses } = l else { continue };
+            let mut es: Vec<usize> = uses.iter().map(|u| u.edge as usize).collect();
+            es.sort_unstable();
+            es.dedup();
+            let count = |nodes: &[edges::Nodes]| -> usize {
+                uses.iter().map(|u| nodes.get(u.edge as usize).map_or(0, |n| n.points.len().saturating_sub(1))).sum()
+            };
+            // Each round at least doubles every edge's segments: a few rounds always do.
+            for _ in 0..MIN_LOOP_SEGMENTS {
+                if count(nodes) >= MIN_LOOP_SEGMENTS {
+                    break;
+                }
+                for &e in &es {
+                    let Some(slot) = nodes.get_mut(e) else { continue };
+                    let segs: Vec<u32> = (0..slot.points.len().saturating_sub(1)).filter_map(|k| u32::try_from(k).ok()).collect();
+                    edges::split_segments(b, e, slot, &segs)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 /// same share whatever the order of the faces.
 fn relax_crowded_faces(b: &brep::Brep, jobs: &[(usize, f64)], rules: &size::Rules, nodes: &mut [edges::Nodes]) -> Result<()> {
     let Some(turn) = rules.turn else { return Ok(()) };

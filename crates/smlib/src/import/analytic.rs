@@ -331,8 +331,10 @@ impl Revolution {
             let v = [v[0].max(-FRAC_PI_2), v[1].min(FRAC_PI_2)];
             return Ok((b::Surface::Sphere { frame: frame(foot), radius }, [angle, v]));
         }
+        // A ring torus only (SMLib has no other): a tube that reaches the axis to rounding (a
+        // horn torus, major = minor) is none.
         let major = off.dot(x);
-        if !(major > radius) {
+        if !(major > radius + slack) {
             return Err(NOT_ANALYTIC);
         }
         let torus = b::Surface::Torus { frame: frame(foot), major_radius: major, minor_radius: radius };

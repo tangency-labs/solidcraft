@@ -750,3 +750,44 @@ fn a_face_filled_leniently_is_named_in_the_stats() {
     assert_eq!(lenient.face, 7);
     assert!(lenient.reason.contains("face 7 (spline)"), "{}", lenient.reason);
 }
+
+#[test]
+fn a_face_bounded_by_two_short_arcs_keeps_an_area_to_mesh() {
+    // A lens on z = 0 between two radius-1000 circles crossing at (±10, 0), in a record whose
+    // other face, a 2 m square, sets the segment length: each arc sags 0.05 mm off its chord,
+    // inside a 0.5 mm tolerance, so each samples as one segment and the two chords lie on one
+    // line, a boundary of no area. Its loop's segments are split until it encloses one.
+    use crate::sew::{PartEdge, PartFace, PartUse, Parts, assemble};
+    use solidcraft_geom::brep::{Curve, Frame, Surface};
+    use std::f64::consts::{PI, TAU};
+    let (r, half) = (1000.0f64, 10.0f64);
+    let c = (r * r - half * half).sqrt();
+    let circle = |cy: f64| Curve::Circle { frame: Frame { origin: [0.0, cy, 0.0], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 1.0, 0.0] }, radius: r };
+    let top = c.atan2(half);
+    let line = |a: [f64; 3], z: [f64; 3]| Curve::Line { start: a, end: z };
+    let sq = [[3000.0, 0.0, 0.0], [5000.0, 0.0, 0.0], [5000.0, 2000.0, 0.0], [3000.0, 2000.0, 0.0]];
+    let plane = Surface::Plane { origin: [0.0; 3], u_axis: [1.0, 0.0, 0.0], v_axis: [0.0, 1.0, 0.0] };
+    let mut edges = vec![
+        PartEdge { curve: circle(-c), interval: [top, PI - top], vertices: [0, 1] },
+        PartEdge { curve: circle(c), interval: [PI + top, TAU - top], vertices: [1, 0] },
+    ];
+    for k in 0..4 {
+        edges.push(PartEdge { curve: line(sq[k], sq[(k + 1) % 4]), interval: [0.0, 1.0], vertices: [2 + k as u32, 2 + ((k + 1) % 4) as u32] });
+    }
+    let uses = |es: &[u32]| es.iter().map(|&edge| PartUse { edge, forward: true, given: None }).collect::<Vec<_>>();
+    let mut vertices = vec![[half, 0.0, 0.0], [-half, 0.0, 0.0]];
+    vertices.extend(sq);
+    let parts = Parts {
+        vertices,
+        edges,
+        faces: vec![
+            PartFace { surface: plane.clone(), forward: true, loops: vec![uses(&[0, 1])] },
+            PartFace { surface: plane, forward: true, loops: vec![uses(&[2, 3, 4, 5])] },
+        ],
+        tolerance: 1e-6,
+    };
+    let made = ok(assemble(parts, false));
+    let (plan, _) = ok(plan(&made.brep, 0.5, None));
+    let lens = made.faces.first().and_then(|&f| plan.faces.get(f)).expect("the lens's plan");
+    assert!(!lens.triangles.is_empty(), "the lens has triangles");
+}

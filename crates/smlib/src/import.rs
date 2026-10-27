@@ -185,8 +185,11 @@ fn laid_out(brep: &b::Brep, trusted: bool, analytic: bool, bare: &HashSet<(u32, 
         a.i(flat::FACE_LOOP_COUNT).push(int(f.loops.len())?);
         a.i(flat::FACE_TRIM_TYPE).push(0);
         // A face with a NURBS form: what it is (its analytic entry), then the NURBS it is
-        // parameterised on, whose range and trims these are (FACE_NURBS_FORM).
+        // parameterised on, whose range and trims these are (FACE_NURBS_FORM). A revolution
+        // (SMLib has no class for one) is that form alone, a NURBS face.
+        let form_is_face = f.nurbs.is_some() && matches!(f.surface, b::Surface::PlacedRevolution { .. });
         let spline = match &f.nurbs {
+            Some(n) if form_is_face => surface(&mut a, n, f.domain, analytic)?,
             Some(n) => {
                 surface(&mut a, &f.surface, f.domain, analytic)?;
                 nurbs_block(&mut a, n)?;
@@ -195,7 +198,7 @@ fn laid_out(brep: &b::Brep, trusted: bool, analytic: bool, bare: &HashSet<(u32, 
             None => surface(&mut a, &f.surface, f.domain, analytic)?,
         };
         if any_form {
-            a.i(flat::FACE_NURBS_FORM).push(i64::from(f.nurbs.is_some()));
+            a.i(flat::FACE_NURBS_FORM).push(i64::from(f.nurbs.is_some() && !form_is_face));
         }
         for (li, l) in f.loops.iter().enumerate() {
             match l {

@@ -1738,3 +1738,71 @@ fn step_conformance_parts_read_into_smlib() {
         assert_eq!(n, faces, "{name}: faces");
     }
 }
+
+/// A domed cubic patch 30 mm across whose four edges, cubic B-splines on its boundary rows,
+/// are written `dz` mm above it, in a file that states 1e-6 mm: an intersection curve written
+/// looser than its context. The patch has no closed-form pcurves for them, so SMLib makes them,
+/// on the surface, and they lie `dz` from their edges.
+fn dome_with_edges_raised(dz: f64) -> String {
+    let z = |i: usize, j: usize| if (1..=2).contains(&i) && (1..=2).contains(&j) { 6.0 } else { 0.0 };
+    let mut t = String::from(HEAD);
+    let mut rows = Vec::new();
+    for i in 0..4 {
+        let row: Vec<String> = (0..4).map(|j| format!("#{}", 100 + i * 4 + j)).collect();
+        for j in 0..4 {
+            t += &format!("#{}=CARTESIAN_POINT('',({}.,{}.,{}));\n", 100 + i * 4 + j, i * 10, j * 10, z(i, j));
+        }
+        rows.push(format!("({})", row.join(",")));
+    }
+    t += &format!(
+        "#10=B_SPLINE_SURFACE_WITH_KNOTS('',3,3,({}),.UNSPECIFIED.,.F.,.F.,.F.,(4,4),(4,4),(0.,1.),(0.,1.),.UNSPECIFIED.);\n",
+        rows.join(",")
+    );
+    // The boundary, counter-clockwise from above: (i, j) runs i = 0 → 3 at j = 0, j = 0 → 3 at
+    // i = 3, then back; each side's control points are the patch's, raised.
+    let sides: [[(usize, usize); 4]; 4] =
+        [[(0, 0), (1, 0), (2, 0), (3, 0)], [(3, 0), (3, 1), (3, 2), (3, 3)], [(3, 3), (2, 3), (1, 3), (0, 3)], [(0, 3), (0, 2), (0, 1), (0, 0)]];
+    let p = |(i, j): (usize, usize)| format!("({}.,{}.,{})", i * 10, j * 10, z(i, j) + dz);
+    for (k, side) in sides.iter().enumerate() {
+        t += &format!("#{}=CARTESIAN_POINT('',{});\n#{}=VERTEX_POINT('',#{});\n", 200 + k, p(side[0]), 210 + k, 200 + k);
+        let pts: Vec<String> = (0..4).map(|m| format!("#{}", 300 + k * 4 + m)).collect();
+        for (m, &q) in side.iter().enumerate() {
+            t += &format!("#{}=CARTESIAN_POINT('',{});\n", 300 + k * 4 + m, p(q));
+        }
+        t += &format!("#{}=B_SPLINE_CURVE_WITH_KNOTS('',3,({}),.UNSPECIFIED.,.F.,.F.,(4,4),(0.,1.),.UNSPECIFIED.);\n", 400 + k, pts.join(","));
+    }
+    for k in 0..4 {
+        t += &format!(
+            "#{}=EDGE_CURVE('',#{},#{},#{},.T.);\n#{}=ORIENTED_EDGE('',*,*,#{},.T.);\n",
+            500 + k,
+            210 + k,
+            210 + (k + 1) % 4,
+            400 + k,
+            510 + k,
+            500 + k
+        );
+    }
+    t += "#520=EDGE_LOOP('',(#510,#511,#512,#513));\n#521=FACE_OUTER_BOUND('',#520,.T.);\n#522=ADVANCED_FACE('',(#521),#10,.T.);\n";
+    t += "#530=OPEN_SHELL('',(#522));\n#531=SHELL_BASED_SURFACE_MODEL('Dome',(#530));\n#532=MANIFOLD_SURFACE_SHAPE_REPRESENTATION('',(#531),#540);\n";
+    t += &context(540, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += TAIL;
+    t
+}
+
+#[test]
+fn edges_written_off_their_spline_face_carry_their_gap_as_their_tolerance() {
+    // 0.2 µm off, 200 times the file's stated uncertainty: each edge's tolerance covers its
+    // gap and the face imports, its notes saying how many edges and how far.
+    let imp = step_import(&dome_with_edges_raised(2e-4)).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert!(imp.warnings.iter().any(|w| w.contains("4 edges lie off their faces' surfaces")), "{:?}", imp.warnings);
+    let r = imp.bodies[0].body.record();
+    assert!(r.edges.iter().all(|e| e.tolerance >= 2e-4 && e.tolerance < 1e-3), "{:?}", r.edges.iter().map(|e| e.tolerance).collect::<Vec<_>>());
+    // Far off (1.5 mm) is refused, naming the gap.
+    let far = step_import(&dome_with_edges_raised(1.5));
+    let refused = match &far {
+        Ok(i) => i.bodies.is_empty() && i.warnings.iter().any(|w| w.contains("off the face's surface")),
+        Err(e) => e.to_string().contains("off the face's surface"),
+    };
+    assert!(refused, "{far:?}");
+}

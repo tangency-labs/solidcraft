@@ -237,3 +237,33 @@ fn arcs_past_a_turn_come_a_turn_back() {
     let line = Curve::Line { start: [0.0; 3], end: [1.0, 0.0, 0.0] };
     assert_eq!(turned(&line, [7.0, 9.0]), ([7.0, 9.0], 0.0));
 }
+
+/// A revolved circle is SMLib's ring torus only where its tube stays off the axis: a tube that
+/// reaches it to rounding (a horn torus, its centre as far from the axis as its radius, give or
+/// take an ulp) and one across it (a spindle) go as their rational B-splines.
+#[test]
+fn only_a_tube_clear_of_its_axis_is_a_ring_torus() {
+    let ring = |major: f64| {
+        let frame = solidcraft_geom::brep::Frame { origin: [major, 0.0, 0.0], x_axis: [1.0, 0.0, 0.0], y_axis: [0.0, 0.0, 1.0] };
+        let (profile, _) = solidcraft_geom::brep::form::curve(&Curve::Circle { frame, radius: 1.0 }, [-1.0, 1.0]).unwrap();
+        let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
+        let surface =
+            Surface::PlacedRevolution { profile: Box::new(profile), origin: [0.0; 3], axis: [0.0, 0.0, 1.0], matrix: identity, forward: false };
+        let face = Face { surface, nurbs: None, domain: [[0.0, 1.0], [-0.5, 0.5]], loops: Vec::new() };
+        let record = Record {
+            version: b::VERSION,
+            tolerance: 1e-6,
+            regions: Vec::new(),
+            shells: Vec::new(),
+            faces: vec![face],
+            edges: Vec::new(),
+            vertices: Vec::new(),
+        };
+        let made = analytic::analytic(&record).unwrap();
+        made.faces[0].surface.clone()
+    };
+    assert!(matches!(ring(1.5), Surface::Torus { .. }));
+    for major in [1.0, 1.0 + 4.0 * f64::EPSILON, 0.5] {
+        assert!(matches!(ring(major), Surface::PlacedRevolution { .. }), "major {major}");
+    }
+}

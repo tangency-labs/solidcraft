@@ -23,9 +23,9 @@
 //!
 //! Tolerances: the representation context's distance uncertainty (default [`DEFAULT_TOLERANCE`]
 //! when the file has none, never below [`MIN_TOLERANCE`]) is the brep's tolerance and every
-//! vertex's and edge's to start with. A vertex measurably off its curve or surface gets that
-//! distance (with margin) as its tolerance; a face whose edges lie off its surface gets its
-//! pcurves fitted at a looser tolerance, which its edges then carry.
+//! vertex's and edge's to start with. A vertex measurably off its curve or surface, or an edge
+//! whose curve lies measurably off a face's surface, gets that distance (with margin) as its
+//! tolerance, and the solid's notes say how many and how far.
 //!
 //! Pcurves are the closed forms the 3D edges have on our surfaces ([`pcurve::exact_pcurves`]); a
 //! use with none gets its pcurve from the kernel ([`read_solids_with`], SMLib's own trims). The
@@ -79,6 +79,12 @@ const MAX_SPLINE_DEGREE: usize = 16;
 const MAX_SAMPLES: usize = 4096;
 /// How far (mm) a vertex may lie from its curve before the edge is refused.
 const MAX_VERTEX_GAP: f64 = 1.0;
+/// How far (mm) an edge's curve may lie from a face's surface before the face is refused.
+const MAX_EDGE_GAP: f64 = 1.0;
+/// Intervals an edge's curve is measured over against each face's surface it bounds.
+const EDGE_GAP_SAMPLES: usize = 16;
+/// An edge's tolerance over the largest gap measured on its samples, as a vertex's is.
+const EDGE_GAP_MARGIN: f64 = 1.5;
 
 /// A solid (or sheet) read from the file.
 #[derive(Clone, Debug)]
@@ -385,6 +391,8 @@ struct Builder<'b, 'a> {
     face_ids: HashSet<u64>,
     faces: Vec<FaceB>,
     sense_mismatches: usize,
+    /// Edges whose tolerance was raised to the gap their curve has to a face's surface.
+    raised_edges: HashSet<u32>,
 }
 
 impl<'b, 'a> Builder<'b, 'a> {
@@ -402,6 +410,7 @@ impl<'b, 'a> Builder<'b, 'a> {
             face_ids: HashSet::new(),
             faces: Vec::new(),
             sense_mismatches: 0,
+            raised_edges: HashSet::new(),
         }
     }
 
@@ -432,6 +441,50 @@ impl<'b, 'a> Builder<'b, 'a> {
         }
         if let Some(x) = self.vertices.get_mut(v as usize) {
             x.tolerance = x.tolerance.max(1.5 * gap);
+        }
+        Ok(())
+    }
+
+    /// Edge `e`'s tolerance covers `gap` (with margin): refused if far off.
+    fn cover_edge(&mut self, e: u32, gap: f64) -> R<()> {
+        let Some(x) = self.edges.get_mut(e as usize) else { return Err("edge reference".into()) };
+        if gap <= x.tolerance {
+            return Ok(());
+        }
+        if !(gap <= MAX_EDGE_GAP) {
+            return Err(format!("an edge lies {gap} mm off the face's surface"));
+        }
+        x.tolerance = EDGE_GAP_MARGIN * gap;
+        self.raised_edges.insert(e);
+        Ok(())
+    }
+
+    /// An edge's curve as the file has it may lie off a face's surface by more than the file's
+    /// uncertainty states (an intersection curve written looser than its context). Each use's
+    /// gap, between its pcurve on the surface and its edge's curve, is measured along the edge as
+    /// the record check measures it, and the edge's tolerance covers it, as a vertex's covers its
+    /// gap: the pcurves are as made and the record says how far its geometry agrees.
+    fn raise_edges(&mut self, surface: &BSurface, edge_loops: &[Vec<(u32, bool)>], pcs: &[Vec<Curve2>]) -> R<()> {
+        let on = SurfaceEval::new(surface).map_err(|m| m.to_string())?;
+        for (l, pc) in edge_loops.iter().zip(pcs) {
+            for (&(e, _), c) in l.iter().zip(pc) {
+                let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                let (curve, [t0, t1]) = match &edge.form {
+                    Some((c, i)) => (c, *i),
+                    None => (&edge.curve, edge.interval),
+                };
+                let eval = CurveEval::new(curve).map_err(|m| m.to_string())?;
+                let mut gap = 0.0f64;
+                for k in 0..=EDGE_GAP_SAMPLES {
+                    let t = t0 + (t1 - t0) * (k as f64 / EDGE_GAP_SAMPLES as f64);
+                    // A point a pcurve or surface lacks is the record check's to name.
+                    let (Some(q), Some(p)) = (c.eval(t), eval.point(t)) else { continue };
+                    if let Some(s) = on.point(q) {
+                        gap = gap.max(s.dist(p));
+                    }
+                }
+                self.cover_edge(e, gap)?;
+            }
         }
         Ok(())
     }
@@ -749,6 +802,14 @@ impl<'b, 'a> Builder<'b, 'a> {
         if let Some(first) = first_failure {
             return Err(format!("pcurves failed on {failed} of {} faces; first: {first}", self.faces.len()));
         }
+        if !self.raised_edges.is_empty() {
+            let most = self.raised_edges.iter().filter_map(|&e| self.edges.get(e as usize)).map(|e| e.tolerance).fold(0.0, f64::max);
+            notes.push(format!(
+                "{} edges lie off their faces' surfaces by more than {} mm: their tolerances are the gaps they have (up to {most:.3e} mm)",
+                self.raised_edges.len(),
+                self.tol
+            ));
+        }
         let flipped = turned.iter().filter(|t| **t).count();
         if flipped > 0 {
             notes.push(format!("{flipped} faces turned over: their loops disagree with their same_sense"));
@@ -1036,6 +1097,7 @@ impl<'b, 'a> Builder<'b, 'a> {
         };
         let pcs =
             pcurve::pcurves_within(&surface, &uses_of(&self.edges, &edge_loops, made.as_ref())?, tol, box_on_form).map_err(|e| e.to_string())?;
+        self.raise_edges(&surface, &edge_loops, &pcs)?;
         // Signed areas of the loops that close in (u, v).
         let periods = natural_periods(&surface);
         // Each use starts near where the one before it ends, along a bounded direction that
