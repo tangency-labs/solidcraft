@@ -70,6 +70,7 @@ pub mod sheet;
 pub mod sketch_constraints;
 pub mod sketch_create;
 pub mod sketch_equation;
+pub mod sketch_links;
 pub mod surface_analysis;
 pub mod ui_prefs;
 pub mod view_navigation;
