@@ -692,6 +692,33 @@ fn a_drawing_a_design_cant_read_refuses_the_design() {
     assert!(out_of_range.starts_with("drawing 1: damaged drawing: the number "), "{out_of_range}");
 }
 
+/// A copy that must open again (an autosave, a crash report's design) keeps every drawing a read
+/// takes: one breaking its own rules, the later of two with one id and those past the cap are left
+/// out, each named with its rule.
+#[test]
+fn a_copy_that_must_open_leaves_out_only_the_drawings_a_read_refuses() {
+    let numbered = |id: u64| Arc::new(Drawing { id, name: format!("Plate {id}"), ..plate() });
+    let mut doc = crate::Document::new("Plate");
+    doc.drawings = vec![numbered(1), numbered(2)];
+    assert!(matches!(openable(&doc), (Cow::Borrowed(_), ref left_out) if left_out.is_empty()));
+
+    let broken = Arc::new(Drawing { language: "?".into(), ..(*numbered(3)).clone() });
+    let again = Arc::new(Drawing { name: "Plate 1 again".into(), ..(*numbered(1)).clone() });
+    doc.drawings = vec![numbered(1), broken, again, numbered(4)];
+    let (kept, left_out) = openable(&doc);
+    assert_eq!(kept.drawings, [numbered(1), numbered(4)]);
+    assert_eq!(left_out.len(), 2);
+    let (three, one) = (ids::encode(3), ids::encode(1));
+    assert!(left_out[0].starts_with(&format!(r#"drawing "Plate 3" ({three}) left out: the language is not"#)), "{left_out:?}");
+    assert_eq!(left_out[1], format!(r#"drawing "Plate 1 again" ({one}) left out: two drawings have the id {one}"#));
+
+    doc.drawings = (1..=MAX_DRAWINGS as u64 + 2).map(numbered).collect();
+    let (kept, left_out) = openable(&doc);
+    assert_eq!(kept.drawings, doc.drawings[..MAX_DRAWINGS]);
+    let over = |id: u64| format!(r#"drawing "Plate {id}" ({}) left out: a design holds at most {MAX_DRAWINGS} drawings"#, ids::encode(id));
+    assert_eq!(left_out, [over(MAX_DRAWINGS as u64 + 1), over(MAX_DRAWINGS as u64 + 2)]);
+}
+
 /// The number of values in `v`, itself included.
 fn count(v: &Value) -> usize {
     1 + match v {

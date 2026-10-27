@@ -420,7 +420,12 @@ pub fn sort(drawings: &mut [Arc<Drawing>]) {
 pub fn check_in_design(drawings: &[Arc<Drawing>]) -> Result<()> {
     check_count(drawings.len())?;
     let mut seen = BTreeSet::new();
-    drawings.iter().try_for_each(|d| require(seen.insert(d.id), || format!("two drawings have the id {}", ids::encode(d.id))))
+    drawings.iter().try_for_each(|d| take_id(&mut seen, d.id))
+}
+
+/// A drawing takes `id`, which no drawing before it in its design (`seen`) has.
+fn take_id(seen: &mut BTreeSet<u64>, id: u64) -> Result<()> {
+    require(seen.insert(id), || format!("two drawings have the id {}", ids::encode(id)))
 }
 
 /// A design of `count` drawings keeps the cap: what a reader checks before it reads any of them.
@@ -449,17 +454,27 @@ fn no_revisions(revisions: &Arc<RevisionRecord>) -> bool {
     **revisions == RevisionRecord::default()
 }
 
-/// `doc` without its drawings that break a rule of the record, and a line naming each one left
-/// out and the rule. Reading refuses a design whole for one such drawing, so a copy that must open
-/// again (an autosave, a crash report's design) keeps the rest.
+/// `doc` without the drawings that break a rule, and a line naming each one left out and the
+/// rule. Reading refuses a design whole for one such drawing, so a copy that must open again (an
+/// autosave, a crash report's design) keeps the rest: the first [`MAX_DRAWINGS`], the first of
+/// two with one id, and only those keeping their own rules.
 pub fn openable(doc: &crate::Document) -> (Cow<'_, crate::Document>, Vec<String>) {
-    let (kept, broken): (Vec<_>, Vec<_>) = doc.drawings.iter().map(|d| (d, d.validate())).partition(|(_, checked)| checked.is_ok());
-    if broken.is_empty() {
-        return (Cow::Borrowed(doc), Vec::new());
+    let (mut seen, mut left_out) = (BTreeSet::new(), Vec::new());
+    let kept: Vec<_> = doc
+        .drawings
+        .iter()
+        .filter(|d| {
+            // Its own rules before its id: a drawing left out takes no id from a later one.
+            let checked = check_count(seen.len() + 1).and_then(|()| d.validate()).and_then(|()| take_id(&mut seen, d.id));
+            checked.map_err(|e| left_out.push(format!("{} left out: {e}", d.label()))).is_ok()
+        })
+        .cloned()
+        .collect();
+    if left_out.is_empty() {
+        return (Cow::Borrowed(doc), left_out);
     }
-    let left_out = broken.iter().filter_map(|(d, checked)| checked.as_ref().err().map(|e| format!("{} left out: {e}", d.label()))).collect();
     let mut doc = doc.clone();
-    doc.drawings = kept.into_iter().map(|(d, _)| d.clone()).collect();
+    doc.drawings = kept;
     (Cow::Owned(doc), left_out)
 }
 
