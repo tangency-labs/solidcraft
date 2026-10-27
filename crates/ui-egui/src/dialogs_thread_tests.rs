@@ -76,7 +76,7 @@ fn every_option_reaches_the_command() {
     choose(&mut h, "Ease In", "Standard (2.5 P)");
     choose(&mut h, "Ease Out", "Length");
     type_in(&mut h, "Ease Out Length", "1.5 mm");
-    choose(&mut h, "Tip", "Chamfer");
+    choose(&mut h, "Tip", "Both");
     type_in(&mut h, "Chamfer Angle", "30 deg");
     type_in(&mut h, "Chamfer Depth", "0.5 mm");
     click(&mut h, &["dialog:Modeled"]);
@@ -86,7 +86,7 @@ fn every_option_reaches_the_command() {
         p,
         json!({
             "designation": "Tr20x4", "form": "trapezoidal", "hand": "left", "starts": 2, "extent": "length", "length": "6 mm",
-            "ease_in": "standard", "ease_out": "1.5 mm", "tip": "chamfer", "chamfer_angle": "30 deg", "chamfer_depth": "0.5 mm",
+            "ease_in": "standard", "ease_out": "1.5 mm", "tip": "both", "chamfer_angle": "30 deg", "chamfer_depth": "0.5 mm",
             "modeled": true,
         })
     );
@@ -133,7 +133,7 @@ fn only_the_fields_that_apply_are_shown() {
     choose(&mut h, "Ease In", "Length");
     assert_eq!(inputs(&h), ["Cylindrical face", START_END], "a runout starts at an end");
     assert!(shown("Ease In Length") && !shown("Ease Out Length"));
-    choose(&mut h, "Tip", "Chamfer");
+    choose(&mut h, "Tip", "Start");
     assert!(shown("Chamfer Angle") && shown("Chamfer Depth"));
     let p = params(&h);
     assert!(p.get("chamfer_angle").is_none() && p.get("chamfer_depth").is_none(), "empty values take ISO 4753's: {p}");
@@ -246,7 +246,7 @@ fn a_saved_thread_reopens_with_every_option() {
     for (made, picks) in [
         (
             json!({"designation":"S20x4","steep_flank":"start","hand":"left","starts":2,"length":"12 mm","from":[10,0,20],"modeled":true,
-                "ease_in":"standard","ease_out":"1 mm","tip":"chamfer","chamfer_angle":"30 deg","chamfer_depth":"0.5 mm"}),
+                "ease_in":"standard","ease_out":"1 mm","tip":"start","chamfer_angle":"30 deg","chamfer_depth":"0.5 mm"}),
             vec!["Cylindrical face", START_END],
         ),
         (json!({"designation":"M20","from":[10,0,20],"up_to":[10,0,5]}), vec!["Cylindrical face", START_END, UP_TO]),

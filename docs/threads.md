@@ -23,6 +23,31 @@ modelled: a modelled thread is the maximum-material design profile below.
 | Metric buttress | `buttress` | `S20x4`, `S40x14(P7)` | 3° (load) / 30° | H1 = 0.75 P | (P − 0.75 P (tan 3° + tan 30°))/2 = 0.26384 P | d3 = d − 2 × 0.86777 P | D1 = d − 1.5 P, D = d |
 | Buttress inch | `buttress_asme` | `2.5-8 BUTT` | 7° (load) / 45° | h = 0.6 P | (P − 0.6 P (tan 7° + 1))/2 = 0.16316 P | d − 1.2 P (basic) | d − 1.2 P, d (basic) |
 
+| Parallel pipe | `bspp` | `G 1/2` | 27.5° / 27.5° | h = 0.640327 P of H = 0.960491 P | (H − h) tan 27.5° = 0.1667 P, both | d − 2h | d − 2h, d |
+| Taper pipe (ISO 7-1) | `bspt` | `R 1/2`, `Rc 1/2` | 27.5° / 27.5° | h = 0.640327 P of H = 0.960237 P | (H − h) tan 27.5°, both | d − 2h at the gauge plane | d − 2h, d at the gauge plane |
+| NPT | `npt` | `1/2-14 NPT` | 30° / 30° | h = 0.8 P of H = 0.866025 P | (H − h) tan 30° = 0.038 P, both | E − h at the plane of E | E − h, E + h |
+
+The pipe threads' crest and root rounds (ISO 228-1/7-1 r = 0.137329 P, 0.137278 P taper) are
+modelled as flats at the basic height, as the other forms' radii; NPT takes the minimum truncation
+0.033 P at both. The flanks' bisector is square to the axis in all three.
+
+**Taper pipe threads** (`bspt`, `npt`): the diameters change 1 in 16 along the axis. The thread
+starts at a free end, the pipe's end or the hole's mouth (`from`), with the diameter its standard
+puts there: an external thread its major diameter at the gauge (reference) plane its gauge length
+in from the small end (ISO 7-1: the basic gauge length, R 1/2 20.955 mm at 8.2 mm; NPT: E1 + h at
+the hand-tight length L1, E1 = E0 + L1/16), an internal one the reference diameter at its face
+(ISO 7-1's gauge plane; NPT's E1 at the large end). The groove is SMLib's screw sweep with its
+section moved 1/32 of the axial travel off the axis per unit length (the radial law that also
+makes runouts), its walls within the sweep's tolerance of the true surfaces; its section reaches
+just past the crest, and the material beyond the major cone (external) or inside the minor cone
+(internal) is cut with it, as the die or tap cuts the crests. Past the major cone the crests
+vanish into the pipe's surface (ISO 7-1's incomplete thread). An external taper thread runs its
+standard length unless `length` or `up_to` says otherwise (ISO 7-1's useful thread for the basic
+gauge length, NPT's effective thread L2); an internal one the face. A pipe thread has one start and
+turns one way; a chamfered tip is not cut on a taper thread yet. ISO 228-1's G sizes are ISO 7-1's
+gauge-plane diameters (1/16 to 6); ISO 228-1's extra sizes (5/8, 7/8, …) are not tabulated yet, nor
+is ISO 7-1's parallel internal Rp.
+
 Trapezoidal clearance ac (ISO 2904): 0.15 mm for P = 1.5, 0.25 mm for P 2 to 5, 0.5 mm for P 6 to
 12, 1 mm for P 14 to 44.
 
@@ -81,8 +106,8 @@ reaching nothing at the end. No end gets a runout unless asked. Where the sectio
 sweep's walls are within its tolerance (1e-4 P) of the true surfaces; full-depth turns are exact
 radially.
 
-**Tip** (`tip: chamfer`, ISO 4753's chamfered end): at each free end of a modelled external
-thread, after the groove, the material outside a cone `chamfer_angle` to the axis (45°) reaching
+**Tip** (ISO 4753's chamfered end; `tip: start` the end the thread starts from, which must be
+free, `tip: both` each free end it reaches): at those ends of a modelled external thread, after the groove, the material outside a cone `chamfer_angle` to the axis (45°) reaching
 d_f = d − 2 `chamfer_depth` at the end is cut, the last teeth tapering into it. ISO 4753 bounds
 d_f by the minor diameter; the default is that bound, the external minor diameter d3 = d −
 1.226869 P of ISO 724 (8.160 for M10), which lies below the modelled basic root d1. The cone
@@ -112,5 +137,15 @@ the hole's countersink instead.
   <https://cdn.standards.iteh.ai/samples/55928/38ddde12863b4c2db35dc929fd502a4d/ISO-4753-2011.pdf>):
   the end's diameter "Maximum diameter at the minor thread diameter", the angle ≤ 50°, the
   incomplete thread u ≤ 2 P.
+- ISO 7-1:1978 (taper and parallel 55° profiles: H = 0.960237 P / 0.960491 P, h = 0.640327 P,
+  r = 0.137278 P / 0.137329 P, figures 1 and 2; Table 1, columns 1 to 8 and 15: threads per 25.4
+  mm, major diameter at the gauge plane, basic gauge length, useful thread), from the public
+  preview <https://cdn.standards.iteh.ai/samples/2856/96e1948d3d734f28b2563bcab2920245/ISO-7-1-1978.pdf>;
+  the same diameters as G sizes in <https://en.wikipedia.org/wiki/British_Standard_Pipe> and the
+  Yamawa YEU23 tables `pipe_thread_catalog.rs` cites.
+- ASME B1.20.1 (NPT) as NBS Handbook H28 (1957) Part II, section VII publishes it: 60°, H =
+  0.866025 p, h = 0.800 p, truncation at least 0.033 p, taper 1 in 16, E0 = D − (0.05 D + 1.1) p,
+  E1 = E0 + 0.0625 L1, L2 = (0.80 D + 6.8) p, and Table VII.2 (D, n, E0, L1, L2 for 1/16 to 12):
+  <https://nvlpubs.nist.gov/nistpubs/Legacy/hb/nbshandbook28supp1957pt2.pdf>.
 - ISO 724 (external minor diameter d3 = d1 − H/6 = d − 1.226869 P, M10x1.5: 8.16), as given at
   <https://www.valvias.com/miscellanea-metric-thread-din-13.php>.

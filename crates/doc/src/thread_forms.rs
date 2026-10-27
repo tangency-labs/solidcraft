@@ -26,6 +26,14 @@ pub enum ThreadForm {
     ButtressAsme,
     /// The square thread: no current standard defines it, so it is refused.
     Square,
+    /// Parallel pipe thread, 55° (ISO 228-1, the Whitworth form with H = 0.960491 P): `G 1/2`.
+    Bspp,
+    /// Taper pipe thread, 55°, taper 1 in 16 (ISO 7-1, H = 0.960237 P): `R 1/2` external, `Rc 1/2`
+    /// internal.
+    Bspt,
+    /// American National Standard taper pipe thread, 60°, taper 1 in 16 (ASME B1.20.1):
+    /// `1/2-14 NPT`.
+    Npt,
 }
 
 /// Which way a thread turns.
@@ -49,13 +57,17 @@ pub enum SteepFlank {
     End,
 }
 
-/// The thread's free end: as cut, or chamfered (ISO 4753).
+/// Which of the thread's free ends are chamfered (ISO 4753's chamfered end).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ThreadTip {
+    /// Every end as cut.
     #[default]
     None,
-    Chamfer,
+    /// The end the thread starts from, which must be free.
+    Start,
+    /// Every free end the thread reaches.
+    Both,
 }
 
 /// For `skip_serializing_if`: a field at its default is left out of the saved document.
@@ -227,8 +239,17 @@ impl GrooveProfile {
 }
 
 impl ThreadForm {
-    pub const ALL: [ThreadForm; 6] =
-        [ThreadForm::Metric, ThreadForm::Trapezoidal, ThreadForm::Acme, ThreadForm::Buttress, ThreadForm::ButtressAsme, ThreadForm::Square];
+    pub const ALL: [ThreadForm; 9] = [
+        ThreadForm::Metric,
+        ThreadForm::Trapezoidal,
+        ThreadForm::Acme,
+        ThreadForm::Buttress,
+        ThreadForm::ButtressAsme,
+        ThreadForm::Square,
+        ThreadForm::Bspp,
+        ThreadForm::Bspt,
+        ThreadForm::Npt,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
@@ -238,6 +259,9 @@ impl ThreadForm {
             ThreadForm::Buttress => "buttress",
             ThreadForm::ButtressAsme => "buttress_asme",
             ThreadForm::Square => "square",
+            ThreadForm::Bspp => "bspp",
+            ThreadForm::Bspt => "bspt",
+            ThreadForm::Npt => "npt",
         }
     }
 
@@ -254,7 +278,29 @@ impl ThreadForm {
             ThreadForm::Buttress => "DIN 513-1, DIN 513-2",
             ThreadForm::ButtressAsme => "ASME B1.9",
             ThreadForm::Square => "none",
+            ThreadForm::Bspp => "ISO 228-1",
+            ThreadForm::Bspt => "ISO 7-1",
+            ThreadForm::Npt => "ASME B1.20.1",
         }
+    }
+
+    /// A taper pipe thread (1 in 16 on the diameter).
+    pub fn is_taper(self) -> bool {
+        matches!(self, ThreadForm::Bspt | ThreadForm::Npt)
+    }
+
+    /// The pipe sizes of a pipe-thread form (ISO 228-1's G sizes are ISO 7-1's gauge diameters).
+    pub fn pipe_sizes(self) -> Vec<crate::pipe_thread_sizes::PipeSize> {
+        match self {
+            ThreadForm::Bspp | ThreadForm::Bspt => crate::pipe_thread_sizes::iso_7_1().collect(),
+            ThreadForm::Npt => crate::pipe_thread_sizes::npt().collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The pipe size of major diameter `d` (at its reference plane).
+    pub fn pipe_size(self, d: f64) -> Option<crate::pipe_thread_sizes::PipeSize> {
+        self.pipe_sizes().into_iter().find(|s| (s.major - d).abs() < 1e-6)
     }
 
     /// Why a form cannot be cut, if it cannot.
@@ -268,7 +314,10 @@ impl ThreadForm {
     /// size with `ACME` or `BUTT`.
     pub fn of_designation(s: &str) -> Option<ThreadForm> {
         let t = s.trim().to_ascii_uppercase();
-        if t.contains("ACME") {
+        let then_size = |rest: &str| rest.trim_start().starts_with(|c: char| c.is_ascii_digit());
+        if t.contains("NPT") {
+            Some(ThreadForm::Npt)
+        } else if t.contains("ACME") {
             Some(ThreadForm::Acme)
         } else if t.contains("BUTT") {
             Some(ThreadForm::ButtressAsme)
@@ -278,6 +327,10 @@ impl ThreadForm {
             Some(ThreadForm::Buttress)
         } else if t.starts_with('M') {
             Some(ThreadForm::Metric)
+        } else if t.strip_prefix("RC").or_else(|| t.strip_prefix('R')).is_some_and(then_size) {
+            Some(ThreadForm::Bspt)
+        } else if t.strip_prefix('G').is_some_and(then_size) {
+            Some(ThreadForm::Bspp)
         } else {
             None
         }
@@ -292,6 +345,7 @@ impl ThreadForm {
             ThreadForm::Buttress => ISO_2902_MEDIUM.iter().copied().filter(|(d, _)| *d >= 10.0).collect(),
             ThreadForm::Acme => ACME_SIZES.iter().map(|(_, d, n)| (d * INCH, INCH / n)).collect(),
             ThreadForm::ButtressAsme | ThreadForm::Square => Vec::new(),
+            ThreadForm::Bspp | ThreadForm::Bspt | ThreadForm::Npt => self.pipe_sizes().iter().map(|s| (s.major, s.pitch())).collect(),
         }
     }
 
@@ -310,6 +364,13 @@ impl ThreadForm {
             && f != self
         {
             return Err(format!("`{s}` is a {} designation, not {}", f.name(), self.name()));
+        }
+        if !self.pipe_sizes().is_empty() {
+            let size = self.pipe_designation(s).ok_or_else(bad)?;
+            if starts > 1 {
+                return Err(format!("a pipe thread has one start (`{s}`)"));
+            }
+            return Ok(ThreadSize { form: self, major: size.major, pitch: size.pitch(), lead: size.pitch() });
         }
         let t = s.trim().to_ascii_uppercase().replace('×', "X").replace(' ', "");
         let n = f64::from(starts.max(1));
@@ -371,7 +432,7 @@ impl ThreadForm {
                 let p = INCH / tpi;
                 (d * INCH, p, p * n)
             }
-            ThreadForm::Square => return Err(bad()),
+            ThreadForm::Square | ThreadForm::Bspp | ThreadForm::Bspt | ThreadForm::Npt => return Err(bad()),
         };
         if !(major.is_finite() && pitch.is_finite() && lead.is_finite() && major > 0.0 && pitch > 0.0 && pitch < major) {
             return Err(bad());
@@ -391,7 +452,39 @@ impl ThreadForm {
             ThreadForm::Buttress => "like S20x4 or S40x14(P7)",
             ThreadForm::ButtressAsme => "like 2.5-8 BUTT",
             ThreadForm::Square => "no standard",
+            ThreadForm::Bspp => "like G 1/2 (ISO 228-1, 1/16 to 6)",
+            ThreadForm::Bspt => "like R 1/2 external or Rc 1/2 internal (ISO 7-1, 1/16 to 6)",
+            ThreadForm::Npt => "like 1/2-14 NPT (1/16 to 12)",
         }
+    }
+
+    /// The pipe size a pipe-thread designation names: `G 1/2` (a class A or B after it is a
+    /// tolerance, ignored), `R 1 1/4`, `Rc 1/2`, `1/2-14 NPT` or `1/2 NPT`.
+    fn pipe_designation(self, s: &str) -> Option<crate::pipe_thread_sizes::PipeSize> {
+        let t = s.trim().to_ascii_uppercase().replace(' ', "");
+        let same = |n: &str, given: &str| n.replace(' ', "") == given;
+        let find = |given: &str| self.pipe_sizes().into_iter().find(|z| same(z.nominal, given));
+        match self {
+            ThreadForm::Bspp => {
+                let body = t.strip_prefix('G')?;
+                find(body.strip_suffix(['A', 'B']).unwrap_or(body))
+            }
+            ThreadForm::Bspt => find(t.strip_prefix("RC").or_else(|| t.strip_prefix('R'))?),
+            ThreadForm::Npt => {
+                let body = t.strip_suffix("NPT")?;
+                let (nominal, tpi) = match body.split_once('-') {
+                    Some((n, tpi)) => (n, Some(num(tpi)?)),
+                    None => (body, None),
+                };
+                find(nominal).filter(|z| tpi.is_none_or(|n| (n - z.tpi).abs() < 1e-9))
+            }
+            _ => None,
+        }
+    }
+
+    /// An ISO 7-1 designation on an internal thread: `Rc` (the taper internal thread), else `R`.
+    pub fn pipe_internal(designation: &str) -> bool {
+        designation.trim().to_ascii_uppercase().starts_with("RC")
     }
 
     /// The standard pitch of a diameter in the form's table.
@@ -425,6 +518,11 @@ impl ThreadForm {
                 format!("{name}-{tpi} {}", if self == ThreadForm::Acme { "ACME" } else { "BUTT" })
             }
             ThreadForm::Square => format!("{}x{}", show(d), show(p)),
+            ThreadForm::Bspp | ThreadForm::Bspt | ThreadForm::Npt => match self.pipe_size(d) {
+                Some(z) if self == ThreadForm::Npt => format!("{}-{} NPT", z.nominal, show(z.tpi)),
+                Some(z) => format!("{} {}", if self == ThreadForm::Bspp { "G" } else { "R" }, z.nominal),
+                None => format!("{}x{}", show(d), show(p)),
+            },
         }
     }
 
@@ -502,6 +600,20 @@ impl ThreadForm {
                 let flat = (p - 0.6 * p * (deg(7.0).tan() + deg(45.0).tan())) / 2.0;
                 ((deg(7.0), deg(45.0)), flat, 0.6 * p, d / 2.0 - 0.6 * p, d / 2.0 - 0.6 * p, d / 2.0)
             }
+            ThreadForm::Bspp | ThreadForm::Bspt | ThreadForm::Npt => {
+                // ISO 228-1 / ISO 7-1: 55°, h = 0.640327 P of the triangle H = 0.960491 P
+                // (parallel) or 0.960237 P (taper), rounded equally at crest and root (r =
+                // 0.137329 P / 0.137278 P), modelled as flats where the rounds would be. ASME
+                // B1.20.1: 60°, h = 0.8 P of H = 0.866025 P, truncated equally at crest and root
+                // (the minimum, 0.033 P). The flanks' bisector is square to the axis.
+                let (half_angle, big_h, h) = match self {
+                    ThreadForm::Bspp => (27.5, 0.960491 * p, 0.640327 * p),
+                    ThreadForm::Bspt => (27.5, 0.960237 * p, 0.640327 * p),
+                    _ => (30.0, 0.866025 * p, crate::pipe_thread_sizes::NPT_HEIGHT * p),
+                };
+                let flat = (big_h - h) * deg(half_angle).tan();
+                (half(half_angle), flat, h, d / 2.0 - h, d / 2.0 - h, d / 2.0)
+            }
         };
         // The steep flank faces +z on the screw's teeth: the external groove's −z wall, the
         // internal groove's +z wall (the nut's teeth face the other way).
@@ -541,6 +653,31 @@ fn show(v: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Pipe-thread designations read to their table's size and write back as the standards write
+    /// them; a size or a threads-per-inch the table lacks is refused.
+    #[test]
+    fn pipe_designations_read_and_write_back() {
+        for (s, form, major, tpi, written) in [
+            ("G 1/2", ThreadForm::Bspp, 20.955, 14.0, "G 1/2"),
+            ("G1/2A", ThreadForm::Bspp, 20.955, 14.0, "G 1/2"),
+            ("R 1 1/4", ThreadForm::Bspt, 41.910, 11.0, "R 1 1/4"),
+            ("Rc1/2", ThreadForm::Bspt, 20.955, 14.0, "R 1/2"),
+            ("1/2-14 NPT", ThreadForm::Npt, (0.77843 + 0.8 / 14.0) * INCH, 14.0, "1/2-14 NPT"),
+            ("1 NPT", ThreadForm::Npt, (1.21363 + 0.4 / 16.0 + 0.8 / 11.5) * INCH, 11.5, "1-11.5 NPT"),
+        ] {
+            assert_eq!(ThreadForm::of_designation(s), Some(form), "{s}");
+            let z = form.parse(s, 1).unwrap();
+            assert!((z.major - major).abs() < 1e-9 && (z.pitch - INCH / tpi).abs() < 1e-12, "{s}");
+            assert_eq!(form.format(z.major, z.pitch, z.lead), written);
+        }
+        for bad in ["G 7/8", "R 1/2x", "1/2-18 NPT", "Rp 1/2"] {
+            let parsed = ThreadForm::of_designation(bad).map(|f| f.parse(bad, 1));
+            assert!(!matches!(parsed, Some(Ok(_))), "{bad}");
+        }
+        assert!(ThreadForm::Npt.parse("1/2 NPT", 2).is_err());
+        assert!(ThreadForm::Bspt.is_taper() && ThreadForm::Npt.is_taper() && !ThreadForm::Bspp.is_taper());
+    }
 
     #[test]
     fn designations_read_and_write_back() {

@@ -176,7 +176,8 @@ const EXTENTS: &[(&str, &str)] = &[("Full", "full"), ("Length", "length"), ("Up 
 /// Runout choices (ISO 3508); the last one is a typed length.
 const EASES: &[(&str, &str)] = &[("None", ""), ("Standard (2.5 P)", "standard"), ("Short (1.25 P)", "short"), ("Length", "")];
 const EASE_LENGTH: usize = 3;
-const TIPS: &[(&str, ThreadTip)] = &[("None", ThreadTip::None), ("Chamfer", ThreadTip::Chamfer)];
+/// Which free ends are chamfered (ISO 4753).
+const TIPS: &[(&str, ThreadTip)] = &[("None", ThreadTip::None), ("Start", ThreadTip::Start), ("Both", ThreadTip::Both)];
 const FLANKS: &[(&str, SteepFlank)] = &[("End", SteepFlank::End), ("Start", SteepFlank::Start)];
 
 /// The pick of the end the thread is measured from (`from`).
@@ -404,7 +405,7 @@ pub(crate) fn rows(
         enter |= ease_rows(ui, "Ease In", "thread_ease_in", &mut o.ease_in);
         enter |= ease_rows(ui, "Ease Out", "thread_ease_out", &mut o.ease_out);
         pick(ui, "Tip", "thread_tip", &mut o.tip, TIPS);
-        if o.tip == ThreadTip::Chamfer {
+        if o.tip != ThreadTip::None {
             enter |= hint_row(ui, "Chamfer Angle", &mut o.chamfer_angle, tr("ui.iso_4753"));
             enter |= hint_row(ui, "Chamfer Depth", &mut o.chamfer_depth, tr("ui.iso_4753"));
         }

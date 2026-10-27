@@ -113,6 +113,8 @@ pub(super) struct ThreadOn {
     steep: SteepFlank,
     /// Runout lengths (mm) at the thread's start and end along the axis.
     ease: [f64; 2],
+    /// The end of the axis (0: its start, 1: its end) the thread starts from.
+    from: usize,
 }
 
 /// The free-end test of a face's two ends (`side` 0 at its start, 1 at its end), each made
@@ -199,7 +201,24 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
         return Err(DocError::Invalid(format!("`{}` has {named} start(s), not {starts}", ask.designation.unwrap_or_default())));
     }
     let starts = named.max(1);
-    let designation = tapped.as_ref().map(|t| t.designation.clone()).unwrap_or_else(|| form.format(major, pitch, size.lead));
+    let mut designation = tapped.as_ref().map(|t| t.designation.clone()).unwrap_or_else(|| form.format(major, pitch, size.lead));
+    if !form.pipe_sizes().is_empty() && tapped.is_none() {
+        if ask.hand == ThreadHand::Both {
+            return Err(DocError::Invalid("a pipe thread turns one way: right or left".into()));
+        }
+        // ISO 7-1 names the internal taper thread Rc and the external one R.
+        if form == ThreadForm::Bspt {
+            if let Some(given) = ask.designation
+                && ThreadForm::pipe_internal(given) != cyl.internal
+            {
+                let want = if cyl.internal { "an internal taper thread is Rc" } else { "an external taper thread is R" };
+                return Err(DocError::Invalid(format!("`{given}` on this {}: {want} (ISO 7-1)", if cyl.internal { "hole" } else { "shaft" })));
+            }
+            if cyl.internal {
+                designation = designation.replacen("R ", "Rc ", 1);
+            }
+        }
+    }
     let minor = 2.0 * form.groove(major, pitch, true).crest_r;
     let fits = if let Some(t) = tapped.as_ref().filter(|t| t.family != crate::TappedThreadFamily::Metric) {
         // The hole drilled for it, without borrowing an ISO minor-diameter rule.
@@ -232,7 +251,13 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
         Ok((a, b))
     };
     let from_side = |ends: &mut FaceEnds| start_side(ends, ask.from.map(along), along(p));
-    let (a, b, side) = match ask.extent {
+    // An external taper thread runs its standard length (ISO 7-1's useful thread, NPT's
+    // effective thread L2) unless told otherwise; an internal one the face, as a tapped hole.
+    let extent = match (ask.extent, form.is_taper() && !cyl.internal) {
+        (Extent::Full, true) => form.pipe_size(major).map_or(Extent::Full, |z| Extent::Length(z.length)),
+        (e, _) => e,
+    };
+    let (a, b, side) = match extent {
         Extent::Full => (lo, hi, ask.from.map(|q| usize::from((along(q) - lo).abs() > (hi - along(q)).abs())).unwrap_or(0)),
         Extent::Length(l) => {
             if !(l > 0.0) {
@@ -286,6 +311,12 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
         })
     };
     let ends = [kind(a, 0)?, kind(b, 1)?];
+    if form.is_taper() && ask.modeled && ends.get(side) != Some(&End::Free) {
+        return Err(DocError::Invalid(format!(
+            "a taper pipe thread starts at a free end, the pipe's end or the {}: start it there (`from`, a point near that end)",
+            if cyl.internal { "hole's mouth" } else { "shaft's end" }
+        )));
+    }
     let info = ThreadInfo {
         feature,
         body: mb.name.clone(),
@@ -302,7 +333,7 @@ pub(super) fn thread_on(st: &ModelState, feature: u64, p: Vec3, ask: &ThreadAsk)
         hand: ask.hand,
         starts,
     };
-    Ok(ThreadOn { info, cyl, ends, steep: ask.steep, ease })
+    Ok(ThreadOn { info, cyl, ends, steep: ask.steep, ease, from: side })
 }
 
 /// The end of the face (0: its start, 1: its end) a thread of limited length starts at: the end
@@ -351,8 +382,18 @@ struct GrooveShape {
 /// The helical spaces between the teeth of a modelled thread of the form's profile: cut from
 /// the shaft (external) or the hole wall (internal), running from `start` to `end` along the
 /// axis, one groove per start and hand. `radius` is the face's own radius, `face` its extent
-/// along the axis and `ends` how the thread's two ends meet it.
-fn thread_grooves(t: &ThreadInfo, radius: f64, face: (f64, f64), ends: [End; 2], steep: SteepFlank, ease: [f64; 2]) -> Result<Vec<GrooveShape>> {
+/// along the axis and `ends` how the thread's two ends meet it. A taper thread's `taper` is
+/// (its major diameter where it starts, the end of the axis it starts from): its diameters grow
+/// 1 in 16 from there into an external thread's material and shrink into an internal one's.
+fn thread_grooves(
+    t: &ThreadInfo,
+    radius: f64,
+    face: (f64, f64),
+    ends: [End; 2],
+    steep: SteepFlank,
+    ease: [f64; 2],
+    taper: Option<(f64, usize)>,
+) -> Result<Vec<GrooveShape>> {
     let (p, d, form) = (t.pitch, t.major_diameter, t.form);
     let lead = p * f64::from(t.starts.max(1));
     let len = t.end - t.start;
@@ -365,10 +406,24 @@ fn thread_grooves(t: &ThreadInfo, radius: f64, face: (f64, f64), ends: [End; 2],
             190.0 * lead
         )));
     }
-    let mut g = form.groove(d, p, t.internal);
-    if steep == SteepFlank::Start {
-        std::mem::swap(&mut g.flank_lo, &mut g.flank_hi);
-    }
+    // The major diameter at axial position z: fixed, or a taper's from where it starts.
+    let major_at = |z: f64| match taper {
+        Some((d0, from)) => {
+            let (z0, into) = if from == 0 { (t.start, 1.0) } else { (t.end, -1.0) };
+            let grow = if t.internal { -1.0 } else { 1.0 };
+            d0 + grow * into * (z - z0) / 16.0
+        }
+        None => d,
+    };
+    let d = taper.map_or(d, |(d0, _)| d0);
+    let profile = |d: f64| {
+        let mut g = form.groove(d, p, t.internal);
+        if steep == SteepFlank::Start {
+            std::mem::swap(&mut g.flank_lo, &mut g.flank_hi);
+        }
+        g
+    };
+    let g = profile(d);
     let alt = |dia: f64| form.fit(dia, t.internal).map(|(n, q)| form.format(n, q, q)).filter(|a| *a != t.designation);
     // How deep the groove cuts into the material: from the hole wall out to the internal
     // thread's root, or from the shaft's surface in to the external thread's root. Next to
@@ -391,7 +446,17 @@ fn thread_grooves(t: &ThreadInfo, radius: f64, face: (f64, f64), ends: [End; 2],
     }
     // The section's radial span: from the root out past the surface (external), or from inside
     // the hole wall out to the root (internal), so the cut leaves no skin.
-    let (r0, r1) = if t.internal { (radius.min(g.crest_r) - 0.1 * p, g.root_r) } else { (g.root_r, radius.max(d / 2.0) + 0.05 * p) };
+    // A taper thread's crests are cut by its major cone (external) or minor cone (internal),
+    // as the die or tap cuts them ([`taper_envelope`]): its groove reaches just past the crest,
+    // by as much as narrows the tooth's crest flat by a quarter (NPT's flat is 0.038 P).
+    let past = |g: &crate::thread_forms::GrooveProfile| 0.25 * g.crest_flat / (g.flank_lo.tan() + g.flank_hi.tan());
+    let span = |g: &crate::thread_forms::GrooveProfile| match (taper.is_some(), t.internal) {
+        (true, true) => (g.crest_r - past(g), g.root_r),
+        (true, false) => (g.root_r, g.crest_r + past(g)),
+        (false, true) => (radius.min(g.crest_r) - 0.1 * p, g.root_r),
+        (false, false) => (g.root_r, radius.max(d / 2.0) + 0.05 * p),
+    };
+    let (r0, r1) = span(&g);
     let wide = if t.internal { r0 } else { r1 };
     if g.width(p, wide) >= p * 0.98 {
         // The groove would be wider than a pitch: the face is far inside the thread (a hole
@@ -408,7 +473,7 @@ fn thread_grooves(t: &ThreadInfo, radius: f64, face: (f64, f64), ends: [End; 2],
     }
     let (lo0, hi0) = g.extents(p, r0);
     let (lo1, hi1) = g.extents(p, r1);
-    let section = vec![Vec2::new(r0, -lo0), Vec2::new(r1, -lo1), Vec2::new(r1, hi1), Vec2::new(r0, hi0)];
+    let mut section = vec![Vec2::new(r0, -lo0), Vec2::new(r1, -lo1), Vec2::new(r1, hi1), Vec2::new(r0, hi0)];
     if !(r0.is_finite() && r1.is_finite() && r0 > 0.0) {
         return Err(DocError::Invalid("thread dimensions are out of range".into()));
     }
@@ -441,6 +506,20 @@ fn thread_grooves(t: &ThreadInfo, radius: f64, face: (f64, f64), ends: [End; 2],
         )));
     }
     let turns = (s1 - s0) / lead;
+    // A taper thread's section is the profile where the sweep begins, moved off the axis as it
+    // turns by the taper's 1/32 of the axial travel.
+    let mut r0 = r0;
+    let taper_rate = match taper {
+        Some(_) => {
+            let gb = profile(major_at(s0));
+            let (a, b) = span(&gb);
+            let ((l0, h0), (l1, h1)) = (gb.extents(p, a), gb.extents(p, b));
+            section = vec![Vec2::new(a, -l0), Vec2::new(b, -l1), Vec2::new(b, h1), Vec2::new(a, h0)];
+            r0 = a;
+            (major_at(s0 + lead) - major_at(s0)) / 2.0
+        }
+        None => 0.0,
+    };
     // How far the section moves to leave the material, a little past it.
     let out = if t.internal { -(r1 - radius + 0.05 * p) } else { radius - r0 + 0.05 * p };
     if t.internal && r0 + out < 0.1 * p {
@@ -456,6 +535,12 @@ fn thread_grooves(t: &ThreadInfo, radius: f64, face: (f64, f64), ends: [End; 2],
     }
     if r_in > 0.0 && r_out > 0.0 && !(turns - r_out > r_in + 1e-9) || r_in.max(r_out) > turns {
         return Err(DocError::Invalid(format!("the runouts ({} and {} mm) are longer than the thread", show_mm(ease[0]), show_mm(ease[1]))));
+    }
+    if taper_rate != 0.0 {
+        law = with_taper(&law, turns, taper_rate);
+        if t.internal && law.iter().any(|(_, o)| r0 + o < 0.1 * p) {
+            return Err(DocError::Invalid("the hole is too small for this taper thread".into()));
+        }
     }
     let k = *t.axis;
     let u = k.cross(if k.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) });
@@ -489,6 +574,74 @@ fn thread_grooves(t: &ThreadInfo, radius: f64, face: (f64, f64), ends: [End; 2],
         }
     }
     Ok(grooves)
+}
+
+/// A radial law (turn, offset) with a taper's `rate` mm per turn added: the law's own points and
+/// both ends, each offset the law's (held past its first and last points) plus the taper's.
+fn with_taper(law: &[(f64, f64)], turns: f64, rate: f64) -> Vec<(f64, f64)> {
+    let at = |t: f64| -> f64 {
+        match (law.first(), law.last()) {
+            (Some(a), _) if t <= a.0 => a.1,
+            (_, Some(b)) if t >= b.0 => b.1,
+            _ => law
+                .windows(2)
+                .find_map(|w| match w {
+                    [a, b] if t >= a.0 && t <= b.0 && b.0 > a.0 => Some(a.1 + (b.1 - a.1) * (t - a.0) / (b.0 - a.0)),
+                    _ => None,
+                })
+                .unwrap_or(0.0),
+        }
+    };
+    let mut ts: Vec<f64> = law.iter().map(|(t, _)| *t).chain([0.0, turns]).collect();
+    ts.sort_by(f64::total_cmp);
+    ts.dedup_by(|a, b| (*a - *b).abs() < 1e-12);
+    ts.into_iter().map(|t| (t, at(t) + rate * t)).collect()
+}
+
+/// A taper thread's crests, as its die or tap cuts them: the ring of material outside its major
+/// cone (external) or inside its minor cone (internal) along the thread, from a pitch past the
+/// end it starts at (`from`, a free end; `d0` its major diameter there) to its other end (a pitch
+/// past that too when it is free). None when the cone misses the material.
+fn taper_envelope(t: &ThreadInfo, radius: f64, ends: [End; 2], (d0, from): (f64, usize)) -> Result<Option<Body>> {
+    let p = t.pitch;
+    let k = *t.axis;
+    let u = k.cross(if k.x.abs() < 0.9 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 1.0, 0.0) });
+    let u = u.normalized().ok_or_else(|| DocError::Invalid("thread axis".into()))?;
+    let (at, into) = if from == 0 { (t.start, k) } else { (t.end, -k) };
+    let far = 1 - from.min(1);
+    let len = t.end - t.start + if ends.get(far) == Some(&End::Free) { p } else { 0.0 };
+    let e = p;
+    // In the plane: x radial, y along the axis into the material from the start.
+    let plane = Plane { origin: t.axis_point + k * at, x: u, y: into };
+    let pts = if t.internal {
+        // The minor cone shrinks into the hole: what lies inside it, down to well inside the hole.
+        let minor0 = t.form.groove(d0, p, true).crest_r;
+        let rm = |y: f64| minor0 - y / 32.0;
+        if !(rm(-e) > radius) {
+            return Ok(None);
+        }
+        let r_in = 0.5 * radius.min(rm(len));
+        if !(r_in > 0.0) {
+            return Err(DocError::Invalid("the hole is too small for this taper thread".into()));
+        }
+        vec![Vec2::new(r_in, -e), Vec2::new(rm(-e), -e), Vec2::new(rm(len), len), Vec2::new(r_in, len)]
+    } else {
+        // The major cone grows into the shaft: what lies outside it, out past the surface.
+        let rc = |y: f64| d0 / 2.0 + y / 32.0;
+        let r_out = radius + 0.1 * p;
+        if !(rc(-e) < r_out) {
+            return Ok(None);
+        }
+        let hit = (r_out - d0 / 2.0) * 32.0;
+        if hit < len {
+            vec![Vec2::new(rc(-e), -e), Vec2::new(r_out, hit), Vec2::new(r_out, -e)]
+        } else {
+            vec![Vec2::new(rc(-e), -e), Vec2::new(rc(len), len), Vec2::new(r_out, len), Vec2::new(r_out, -e)]
+        }
+    };
+    let region = Region2 { outer: solidcraft_geom::Loop2::polygon(&pts), holes: Vec::new() };
+    let mut ring = kernel::revolve(&plane, &[region], Vec2::new(0.0, 0.0), Vec2::new(0.0, 1.0), std::f64::consts::TAU)?;
+    Ok(ring.pop())
 }
 
 /// Evaluate a thread feature: a cosmetic thread is listed in the model's threads, a modelled
@@ -550,7 +703,10 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
         return Err(DocError::Invalid("a runout is cut only on a modelled thread".into()));
     }
     let ask = ThreadAsk { ease: [runout(ease_in)?, runout(ease_out)?], ..ask };
-    let ThreadOn { info: t, cyl, ends, steep, ease } = thread_on(st, f.id, face.0, &ask)?;
+    let ThreadOn { info: t, cyl, ends, steep, ease, from: from_side } = thread_on(st, f.id, face.0, &ask)?;
+    if *tip != ThreadTip::None && t.form.is_taper() {
+        return Err(DocError::Invalid("not supported yet: a chamfered tip on a taper pipe thread".into()));
+    }
     if !*modeled {
         st.threads.push(t);
         return Ok(());
@@ -559,10 +715,24 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
     let Some(mb) = st.bodies.get(i).cloned() else { return Err(DocError::Invalid("body".into())) };
     let (input, radius) = (mb.traced(), cyl.radius);
     // The exact grooves: SMLib's screw sweeps, cut by one B-rep boolean.
+    // A taper thread starts at its free end at the major diameter its standard puts there: an
+    // internal one's gauge (reference) plane at its face, an external one's that far in.
+    let taper = match t.form.is_taper() {
+        true => {
+            let z = t.form.pipe_size(t.major_diameter).ok_or_else(|| DocError::Invalid(format!("no pipe size {}", t.designation)))?;
+            Some((if t.internal { t.major_diameter } else { t.major_diameter - z.gauge / 16.0 }, from_side))
+        }
+        false => None,
+    };
     let mut grooves = Vec::new();
-    for g in thread_grooves(&t, radius, (cyl.start, cyl.end), ends, steep, ease)? {
+    for g in thread_grooves(&t, radius, (cyl.start, cyl.end), ends, steep, ease, taper)? {
         let section = Region2 { outer: solidcraft_geom::Loop2::polygon(&g.section), holes: Vec::new() };
         grooves.push(kernel::sweep_helix_radial(&g.plane, &section, g.base, g.axis, g.pitch, g.turns, &g.law)?);
+    }
+    if let Some(taper) = taper
+        && let Some(envelope) = taper_envelope(&t, radius, ends, taper)?
+    {
+        grooves.push(envelope);
     }
     let tool = match grooves.as_slice() {
         [one] => one.clone(),
@@ -574,10 +744,10 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
     let groove = crate::lineage::Lineage::unnamed_faces(groove_faces);
     let lineage = input.lineage.and_then(|l| crate::lineage::Lineage::step(&nb, &[&l, &groove]));
     let mut nb = Traced { body: nb, lineage };
-    if *tip == ThreadTip::Chamfer {
+    if *tip != ThreadTip::None {
         let angle = chamfer_angle.as_deref().map(|e| val(vals, e, Kind::Angle)).transpose()?;
         let depth = chamfer_depth.as_deref().map(|e| val(vals, e, Kind::Length)).transpose()?;
-        for cone in tip_cones(&t, radius, ends, angle, depth)? {
+        for cone in tip_cones(&t, radius, ends, (*tip, from_side), angle, depth)? {
             let faces = cone.face_count();
             let cut = kernel::boolean(&nb.body, &cone, BoolOp::Cut)?.ok_or_else(|| DocError::Invalid("the chamfer removed everything".into()))?;
             let unnamed = crate::lineage::Lineage::unnamed_faces(faces);
@@ -591,7 +761,8 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
     Ok(())
 }
 
-/// The chamfered tip of an external thread (ISO 4753, chamfered end CH) at each of its free ends:
+/// The chamfered tip of an external thread (ISO 4753, chamfered end CH) at the free ends `tip`
+/// names (`Start`: the end of the axis `from`, which must be free; `Both`: each free end):
 /// the material outside a cone `angle` to the axis (default 45°) that reaches the diameter
 /// d_f = d - 2 `depth` at the face's end, as a ring to cut after the groove, so the last teeth
 /// taper into it. ISO 4753 bounds d_f by the external thread's minor diameter; the default is
@@ -599,7 +770,14 @@ pub(super) fn eval(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
 /// below the modelled basic root d1, so the cone crosses the root cylinder and leaves a whole
 /// ring on the end; one ending on the root itself would pinch to nothing wherever the groove
 /// reaches the end. ISO 4753 is for ISO metric threads: other forms give `depth`.
-fn tip_cones(t: &ThreadInfo, radius: f64, ends: [End; 2], angle: Option<f64>, depth: Option<f64>) -> Result<Vec<Body>> {
+fn tip_cones(
+    t: &ThreadInfo,
+    radius: f64,
+    ends: [End; 2],
+    (tip, from): (ThreadTip, usize),
+    angle: Option<f64>,
+    depth: Option<f64>,
+) -> Result<Vec<Body>> {
     if t.internal {
         return Err(DocError::Invalid("a chamfered tip is for an external thread (ISO 4753); countersink the hole's entry instead".into()));
     }
@@ -633,8 +811,12 @@ fn tip_cones(t: &ThreadInfo, radius: f64, ends: [End; 2], angle: Option<f64>, de
     // nothing past a free end beyond the thread is touched.
     let e = 0.5 * t.pitch;
     let mut out = Vec::new();
+    let free = |side: usize| ends.get(side) == Some(&End::Free);
+    if tip == ThreadTip::Start && !free(from) {
+        return Err(DocError::Invalid("the end the thread starts from is not a free end (material goes on past it, or the thread stops inside the face): chamfer it with `tip: both`, or start the thread from its free end".into()));
+    }
     for (side, at, out_dir) in [(0usize, t.start, -k), (1, t.end, k)] {
-        if ends.get(side) != Some(&End::Free) {
+        if !free(side) || (tip == ThreadTip::Start && side != from) {
             continue;
         }
         // In the plane: x radial, y outward along the axis from the end.
