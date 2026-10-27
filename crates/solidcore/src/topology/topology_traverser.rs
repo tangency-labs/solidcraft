@@ -15,7 +15,8 @@
 //! | [`face_edges`] | `SmFace::GetEdges` (CO-PORTED, `topology.face_p4`, default arguments) |
 //!
 //! Deviations: stateless constructor/destructor become free functions. Marks are
-//! [`Marks`] records alongside one B-rep, using the kernel context's counters;
+//! [`Marks`] records alongside one B-rep, one slot per arena index of each kind
+//! (upstream keeps the record in the object itself), using the kernel context's counters;
 //! pointers become typed ids. Null dereferences and `NoMark` on cyclic traversals
 //! return errors. Wire recursion becomes explicit continuation frames, in exactly
 //! the upstream order (no input-dependent call-stack growth). Outputs remain mutable
@@ -68,8 +69,11 @@ pub enum Entity {
 }
 
 /// Topology mark records for one B-rep; retain across calls using the same context.
+///
+/// One optional record per arena slot of each entity kind, as upstream keeps the
+/// record in the object: lookups are indexed, not searched.
 #[derive(Debug, Clone, Default)]
-pub struct Marks(BTreeMap<Entity, Topology>);
+pub struct Marks([Vec<Option<Topology>>; 6]);
 
 /// Mark access shared by face traversal and a production topology record store.
 /// Implementations must retain marks across calls under the same kernel context.
@@ -90,22 +94,46 @@ impl FaceTraversalMarks for Marks {
 }
 
 impl Marks {
+    /// The kind table and arena index of `entity`.
+    fn slot(entity: Entity) -> (usize, usize) {
+        match entity {
+            Entity::Face(x) => (0, x.index() as usize),
+            Entity::Edge(x) => (1, x.index() as usize),
+            Entity::Vertex(x) => (2, x.index() as usize),
+            Entity::Faceuse(x) => (3, x.index() as usize),
+            Entity::Vertexuse(x) => (4, x.index() as usize),
+            Entity::Shell(x) => (5, x.index() as usize),
+        }
+    }
+
+    /// The record of `entity`, made default first if it has none.
+    fn record_mut(&mut self, entity: Entity) -> Option<&mut Topology> {
+        let (kind, i) = Self::slot(entity);
+        let table = self.0.get_mut(kind)?;
+        if table.len() <= i {
+            table.resize(i + 1, None);
+        }
+        Some(table.get_mut(i)?.get_or_insert_with(Topology::default))
+    }
+
     /// Import the caller's persistent topology record before traversal.
     pub fn set_record(&mut self, entity: Entity, record: Topology) {
-        self.0.insert(entity, record);
+        if let Some(r) = self.record_mut(entity) {
+            *r = record;
+        }
     }
 
     /// The updated topology record, including marks written before an error.
     #[must_use]
     pub fn record(&self, entity: Entity) -> Option<&Topology> {
-        self.0.get(&entity)
+        let (kind, i) = Self::slot(entity);
+        self.0.get(kind)?.get(i)?.as_ref()
     }
 
     /// Whether `entity` carries the kernel's current `mark` value.
     #[must_use]
     pub fn is_marked(&self, k: &Kernel, entity: Entity, mark: MarkType) -> bool {
-        self.0
-            .get(&entity)
+        self.record(entity)
             .copied()
             .unwrap_or_default()
             .is_marked(&k.context, mark)
@@ -113,10 +141,9 @@ impl Marks {
 
     /// Set `entity` to the kernel's current `mark` value.
     pub fn mark(&mut self, k: &Kernel, entity: Entity, mark: MarkType) {
-        self.0
-            .entry(entity)
-            .or_default()
-            .mark(Some(&k.context), mark);
+        if let Some(r) = self.record_mut(entity) {
+            r.mark(Some(&k.context), mark);
+        }
     }
 }
 
