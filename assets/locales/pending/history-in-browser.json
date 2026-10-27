@@ -1,6 +1,23 @@
 {
-  "en": { "prefs.in_browser": "In browser" },
-  "de": { "prefs.in_browser": "Im Browser" },
-  "ja": { "prefs.in_browser": "ブラウザー内" },
-  "zh": { "prefs.in_browser": "在浏览器中" }
+  "en": {
+    "prefs.in_browser": "In browser"
+  },
+  "de": {
+    "prefs.in_browser": "Im Browser"
+  },
+  "ar": {
+    "prefs.in_browser": "في المستعرض"
+  },
+  "he": {
+    "prefs.in_browser": "בעץ התכן"
+  },
+  "ja": {
+    "prefs.in_browser": "ブラウザー内"
+  },
+  "vi": {
+    "prefs.in_browser": "Trong cây thư mục"
+  },
+  "zh": {
+    "prefs.in_browser": "在浏览器中"
+  }
 }
