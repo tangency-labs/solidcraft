@@ -610,6 +610,146 @@ impl Surface {
         }
     }
 
+    /// The rational branch of [`Surface::basis_derivs_n`] (`N_SrfBasisDerivs`): from
+    /// the spans `ku`, `kv` and the univariate derivative tables `du`, `dv`, gives
+    /// `put(k, l, n, m, BD[k][l][n][m])` for every derivative it computes, one basis
+    /// function `(n, m)` at a time, in upstream's order.
+    #[allow(clippy::range_plus_one)] // exclusive ranges: `RangeInclusive` is measurably slower here
+    #[allow(clippy::too_many_arguments)] // the spans, both tables, the orders and the sink
+    fn rational_basis_derivs<const N: usize>(
+        &self,
+        ku: isize,
+        kv: isize,
+        du: &Derivatives<N>,
+        dv: &Derivatives<N>,
+        upper_half: bool,
+        udr: usize,
+        vdr: usize,
+        mut put: impl FnMut(usize, usize, usize, usize, f64) -> Result<()>,
+    ) -> Result<()> {
+        const OP: &str = "nurbs::srf_nurb::Surface::basis_derivs";
+        const D: usize = MAX_DERIVATIVE + 1;
+        let (pu, qu) = self.degrees();
+        let (p, q) = (sx(pu, OP)?, sx(qu, OP)?);
+        // (every scratch table below is sized by `N` > both degrees and
+        // `MAX_DERIVATIVE`; a call outside them is refused before any work, where the
+        // per-access checks this replaces would have refused it on first use)
+        if pu >= N || qu >= N || udr > MAX_DERIVATIVE || vdr > MAX_DERIVATIVE {
+            return Err(oob(OP));
+        }
+        let at = |a: &[[f64; D]], i: usize, j: usize| -> Result<f64> {
+            a.get(i)
+                .and_then(|r| r.get(j))
+                .copied()
+                .ok_or_else(|| oob(OP))
+        };
+        let at_n = |a: &Derivatives<N>, i: usize, j: usize| -> Result<f64> {
+            a.get(i)
+                .and_then(|r| r.get(j))
+                .copied()
+                .ok_or_else(|| oob(OP))
+        };
+
+        // The weights of the (p+1) x (q+1) control points of the span, read once, in
+        // the order the denominator loop below first reads them.
+        let s1 = ku - p;
+        let s2 = kv - q;
+        let mut w = [[0.0_f64; N]; N];
+        for (i, row) in (0..=p).zip(w.iter_mut()) {
+            for (j, wij) in (0..=q).zip(row.iter_mut()) {
+                *wij = self.cpt(ux(s1 + i, OP)?, ux(s2 + j, OP)?)?.w;
+            }
+        }
+
+        // Get derivatives of denominator.
+        let mut tu = [0.0_f64; N];
+        let mut d = [[0.0_f64; D]; D];
+        for l in 0..vdr + 1 {
+            let dv_l = dv.get(l).ok_or_else(|| oob(OP))?;
+            for (t, w_row) in tu.iter_mut().zip(&w).take(pu + 1) {
+                *t = 0.0;
+                for (wij, dvlj) in w_row.iter().zip(dv_l).take(qu + 1) {
+                    *t += wij * dvlj;
+                }
+            }
+            for (du_k, d_k) in du.iter().zip(d.iter_mut()).take(udr + 1) {
+                let dkl = d_k.get_mut(l).ok_or_else(|| oob(OP))?;
+                *dkl = 0.0;
+                for (t, duki) in tu.iter().zip(du_k).take(pu + 1) {
+                    *dkl += t * duki;
+                }
+            }
+        }
+
+        // Compute derivatives of rational basis.
+        let d00 = at(&d, 0, 0)?;
+        if float_op_is_bad(1.0, d00, FloatOp::Division) {
+            return Err(SolidError::nlib(OP, NlibCode::Convergence));
+        }
+        let inv_w00 = 1.0 / d00;
+
+        // Upstream's static `NL_PascalTri` (the rows `0..=NL_MAXDER` this loop reads).
+        // Every product of the recurrence is `tri * d * BD`, evaluated left to right, so
+        // its `tri * d` factor depends on the orders only: computed once here instead of
+        // once per basis function, with the same rounding.
+        let tri = |a: usize, b: usize| -> Result<f64> { pascal_entry(a, b).ok_or_else(|| oob(OP)) };
+        let mut tri_k = [[0.0_f64; D]; D]; // [k][i] = tri(k, i)
+        let mut c0 = [[0.0_f64; D]; D]; // [l][j] = tri(l, j) * d[0][j]
+        let mut c1 = [[0.0_f64; D]; D]; // [k][i] = tri(k, i) * d[i][0]
+        let mut c2 = [[[0.0_f64; D]; D]; D]; // [i][l][j] = tri(l, j) * d[i][j]
+        let top = udr.max(vdr);
+        for a in 0..top + 1 {
+            for b in 0..a + 1 {
+                let t = tri(a, b)?;
+                *cell_mut(&mut tri_k, a, b).ok_or_else(|| oob(OP))? = t;
+                *cell_mut(&mut c0, a, b).ok_or_else(|| oob(OP))? = t * at(&d, 0, b)?;
+                *cell_mut(&mut c1, a, b).ok_or_else(|| oob(OP))? = t * at(&d, b, 0)?;
+                for (i, c2_i) in c2.iter_mut().enumerate().take(udr + 1) {
+                    let x = c2_i
+                        .get_mut(a)
+                        .and_then(|r| r.get_mut(b))
+                        .ok_or_else(|| oob(OP))?;
+                    *x = t * at(&d, i, b)?;
+                }
+            }
+        }
+
+        // One basis function at a time: its derivatives only read its own lower
+        // orders, kept in `own`. Every entry read was written earlier in this loop
+        // order for the same function (a lower `k`, or the same `k` and a lower `l`;
+        // with the upper half, a lower `k + l`), so `own` is cleared once, not per
+        // function.
+        let mut own = [[0.0_f64; D]; D];
+        for (n, w_row) in w.iter().enumerate().take(pu + 1) {
+            for (m, &wnm) in w_row.iter().enumerate().take(qu + 1) {
+                for k in 0..udr + 1 {
+                    let lmax = if upper_half { udr - k } else { vdr };
+                    for l in 0..lmax + 1 {
+                        let mut v1 = wnm * at_n(du, k, n)? * at_n(dv, l, m)?;
+                        for j in 1..l + 1 {
+                            v1 -= at(&c0, l, j)? * at(&own, k, l - j)?;
+                        }
+                        for i in 1..k + 1 {
+                            v1 -= at(&c1, k, i)? * at(&own, k - i, l)?;
+                            let c2_i = c2.get(i).ok_or_else(|| oob(OP))?;
+                            let mut v2 = 0.0;
+                            for j in 1..l + 1 {
+                                v2 += at(c2_i, l, j)? * at(&own, k - i, l - j)?;
+                            }
+                            v1 -= at(&tri_k, k, i)? * v2;
+                        }
+                        let value = v1 * inv_w00;
+                        *own.get_mut(k)
+                            .and_then(|r| r.get_mut(l))
+                            .ok_or_else(|| oob(OP))? = value;
+                        put(k, l, n, m, value)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     /// [`Surface::basis_derivs`] after its argument checks, with scratch width `N`
     /// (above both degrees).
     #[allow(clippy::range_plus_one)] // exclusive ranges: `RangeInclusive` is measurably slower here
@@ -626,7 +766,6 @@ impl Surface {
         const OP: &str = "nurbs::srf_nurb::Surface::basis_derivs";
         let (pu, qu) = self.degrees();
         let (_, _, s1u, s2u) = self.array_sizes();
-        let (p, q) = (sx(pu, OP)?, sx(qu, OP)?);
         let (udri, vdri) = (sx(udr, OP)?, sx(vdr, OP)?);
 
         // u- then v-direction.
@@ -641,128 +780,24 @@ impl Surface {
         let upper_half = upper && udr == vdr;
 
         if self.is_rational() {
-            const D: usize = MAX_DERIVATIVE + 1;
-            // (every scratch table below is sized by `N` > both degrees and
-            // `MAX_DERIVATIVE`; a call outside them is refused before any work, where the
-            // per-access checks this replaces would have refused it on first use)
-            if pu >= N || qu >= N || udr > MAX_DERIVATIVE || vdr > MAX_DERIVATIVE {
-                return Err(oob(OP));
-            }
-            let at = |a: &[[f64; D]], i: usize, j: usize| -> Result<f64> {
-                a.get(i)
-                    .and_then(|r| r.get(j))
-                    .copied()
-                    .ok_or_else(|| oob(OP))
-            };
-            let at_n = |a: &Derivatives<N>, i: usize, j: usize| -> Result<f64> {
-                a.get(i)
-                    .and_then(|r| r.get(j))
-                    .copied()
-                    .ok_or_else(|| oob(OP))
-            };
-
-            // The weights of the (p+1) x (q+1) control points of the span, read once, in
-            // the order the denominator loop below first reads them.
-            let s1 = ku - p;
-            let s2 = kv - q;
-            let mut w = [[0.0_f64; N]; N];
-            for (i, row) in (0..=p).zip(w.iter_mut()) {
-                for (j, wij) in (0..=q).zip(row.iter_mut()) {
-                    *wij = self.cpt(ux(s1 + i, OP)?, ux(s2 + j, OP)?)?.w;
-                }
-            }
-
-            // Get derivatives of denominator.
-            let mut tu = [0.0_f64; N];
-            let mut d = [[0.0_f64; D]; D];
-            for l in 0..vdr + 1 {
-                let dv_l = dv.get(l).ok_or_else(|| oob(OP))?;
-                for (t, w_row) in tu.iter_mut().zip(&w).take(pu + 1) {
-                    *t = 0.0;
-                    for (wij, dvlj) in w_row.iter().zip(dv_l).take(qu + 1) {
-                        *t += wij * dvlj;
-                    }
-                }
-                for (du_k, d_k) in du.iter().zip(d.iter_mut()).take(udr + 1) {
-                    let dkl = d_k.get_mut(l).ok_or_else(|| oob(OP))?;
-                    *dkl = 0.0;
-                    for (t, duki) in tu.iter().zip(du_k).take(pu + 1) {
-                        *dkl += t * duki;
-                    }
-                }
-            }
-
-            // Compute derivatives of rational basis.
-            let d00 = at(&d, 0, 0)?;
-            if float_op_is_bad(1.0, d00, FloatOp::Division) {
-                return Err(SolidError::nlib(OP, NlibCode::Convergence));
-            }
-            let inv_w00 = 1.0 / d00;
-
-            // Upstream's static `NL_PascalTri` (the rows `0..=NL_MAXDER` this loop reads).
-            // Every product of the recurrence is `tri * d * BD`, evaluated left to right, so
-            // its `tri * d` factor depends on the orders only: computed once here instead of
-            // once per basis function, with the same rounding.
-            let tri =
-                |a: usize, b: usize| -> Result<f64> { pascal_entry(a, b).ok_or_else(|| oob(OP)) };
-            let mut tri_k = [[0.0_f64; D]; D]; // [k][i] = tri(k, i)
-            let mut c0 = [[0.0_f64; D]; D]; // [l][j] = tri(l, j) * d[0][j]
-            let mut c1 = [[0.0_f64; D]; D]; // [k][i] = tri(k, i) * d[i][0]
-            let mut c2 = [[[0.0_f64; D]; D]; D]; // [i][l][j] = tri(l, j) * d[i][j]
-            let top = udr.max(vdr);
-            for a in 0..top + 1 {
-                for b in 0..a + 1 {
-                    let t = tri(a, b)?;
-                    *cell_mut(&mut tri_k, a, b).ok_or_else(|| oob(OP))? = t;
-                    *cell_mut(&mut c0, a, b).ok_or_else(|| oob(OP))? = t * at(&d, 0, b)?;
-                    *cell_mut(&mut c1, a, b).ok_or_else(|| oob(OP))? = t * at(&d, b, 0)?;
-                    for (i, c2_i) in c2.iter_mut().enumerate().take(udr + 1) {
-                        let x = c2_i
-                            .get_mut(a)
-                            .and_then(|r| r.get_mut(b))
-                            .ok_or_else(|| oob(OP))?;
-                        *x = t * at(&d, i, b)?;
-                    }
-                }
-            }
-
-            // One basis function at a time: its derivatives only read its own lower
-            // orders, kept in `own`. Every entry read was written earlier in this loop
-            // order for the same function (a lower `k`, or the same `k` and a lower `l`;
-            // with the upper half, a lower `k + l`), so `own` is cleared once, not per
-            // function.
             let (q1, pq1) = (qu + 1, (pu + 1) * (qu + 1));
             let sk = (vdr + 1) * pq1;
-            let mut own = [[0.0_f64; D]; D];
-            for (n, w_row) in w.iter().enumerate().take(pu + 1) {
-                for (m, &wnm) in w_row.iter().enumerate().take(qu + 1) {
-                    for k in 0..udr + 1 {
-                        let lmax = if upper_half { udr - k } else { vdr };
-                        for l in 0..lmax + 1 {
-                            let mut v1 = wnm * at_n(&du, k, n)? * at_n(&dv, l, m)?;
-                            for j in 1..l + 1 {
-                                v1 -= at(&c0, l, j)? * at(&own, k, l - j)?;
-                            }
-                            for i in 1..k + 1 {
-                                v1 -= at(&c1, k, i)? * at(&own, k - i, l)?;
-                                let c2_i = c2.get(i).ok_or_else(|| oob(OP))?;
-                                let mut v2 = 0.0;
-                                for j in 1..l + 1 {
-                                    v2 += at(c2_i, l, j)? * at(&own, k - i, l - j)?;
-                                }
-                                v1 -= at(&tri_k, k, i)? * v2;
-                            }
-                            let value = v1 * inv_w00;
-                            *own.get_mut(k)
-                                .and_then(|r| r.get_mut(l))
-                                .ok_or_else(|| oob(OP))? = value;
-                            *bd.values
-                                .get_mut(k * sk + l * pq1 + n * q1 + m)
-                                .ok_or_else(|| oob(OP))? = value;
-                        }
-                    }
-                }
-            }
+            let values = &mut bd.values;
+            self.rational_basis_derivs::<N>(
+                ku,
+                kv,
+                &du,
+                &dv,
+                upper_half,
+                udr,
+                vdr,
+                |k, l, n, m, x| {
+                    *values
+                        .get_mut(k * sk + l * pq1 + n * q1 + m)
+                        .ok_or_else(|| oob(OP))? = x;
+                    Ok(())
+                },
+            )?;
         } else {
             // Compute derivative matrix.
             let at2u = |a: &[[f64; N]], i: usize, j: usize| -> Result<f64> {
@@ -897,8 +932,8 @@ impl Surface {
         const BD_OP: &str = "nurbs::srf_nurb::Surface::basis_derivs";
         let (pu, qu) = self.degrees();
         *sd = [[Vec3::ZERO; 2]; 2];
-        if self.is_rational() || pu > MAX_DEGREE || qu > MAX_DEGREE {
-            // (the rational basis, and the degree error of `basis_derivs`)
+        if pu > MAX_DEGREE || qu > MAX_DEGREE {
+            // (the degree error of `basis_derivs`)
             let full = self.derivs(u, v, ufl, vfl, upper, 1, 1)?;
             for (out, row) in sd.iter_mut().zip(&full) {
                 for (o, x) in out.iter_mut().zip(row) {
@@ -907,6 +942,15 @@ impl Surface {
             }
             return Ok(());
         }
+        if self.is_rational() {
+            return if pu < TINY_NP && qu < TINY_NP {
+                self.first_derivs_rational_n::<TINY_NP>(u, v, ufl, vfl, upper, sd, OP, BD_OP)
+            } else if pu < SMALL_NP && qu < SMALL_NP {
+                self.first_derivs_rational_n::<SMALL_NP>(u, v, ufl, vfl, upper, sd, OP, BD_OP)
+            } else {
+                self.first_derivs_rational_n::<NP>(u, v, ufl, vfl, upper, sd, OP, BD_OP)
+            };
+        }
         if pu < TINY_NP && qu < TINY_NP {
             self.first_derivs_n::<TINY_NP>(u, v, ufl, vfl, upper, sd, OP, BD_OP)
         } else if pu < SMALL_NP && qu < SMALL_NP {
@@ -914,6 +958,64 @@ impl Surface {
         } else {
             self.first_derivs_n::<NP>(u, v, ufl, vfl, upper, sd, OP, BD_OP)
         }
+    }
+
+    /// [`Surface::first_derivs_into`] for a rational surface, scratch width `N`: the
+    /// steps of [`Surface::basis_derivs_n`] and [`Surface::derivs`] in their order, with
+    /// the basis derivatives `BD[k][l]` (`k, l <= 1`) in a stack table instead of a
+    /// heap [`BasisDerivs`], and the result written into `sd` directly.
+    #[allow(clippy::too_many_arguments)] // the evaluation arguments plus both names
+    fn first_derivs_rational_n<const N: usize>(
+        &self,
+        u: f64,
+        v: f64,
+        ufl: Side,
+        vfl: Side,
+        upper: bool,
+        sd: &mut [[Vec3; 2]; 2],
+        op: &'static str,
+        bd_op: &'static str,
+    ) -> Result<()> {
+        let (pu, qu) = self.degrees();
+        let (_, _, s1u, s2u) = self.array_sizes();
+        let mut du: Derivatives<N> = [[0.0; N]; MAX_DERIVATIVE + 1];
+        let mut dv: Derivatives<N> = [[0.0; N]; MAX_DERIVATIVE + 1];
+        let ku = univariate_derivs::<N>(self.u_knots(), s1u, pu, u, ufl, 1, &mut du, bd_op)?;
+        let kv = univariate_derivs::<N>(self.v_knots(), s2u, qu, v, vfl, 1, &mut dv, bd_op)?;
+
+        // `BD[k][l][i][j]` at `[2 * k + l][i][j]`; with `upper` the `[1][1]` block stays
+        // zero, as `BasisDerivs` leaves it
+        let mut bd = [[[0.0_f64; N]; N]; 4];
+        self.rational_basis_derivs::<N>(ku, kv, &du, &dv, upper, 1, 1, |k, l, n, m, x| {
+            *bd.get_mut(2 * k + l)
+                .and_then(|b| b.get_mut(n))
+                .and_then(|r| r.get_mut(m))
+                .ok_or_else(|| oob(bd_op))? = x;
+            Ok(())
+        })?;
+        let bd = &bd;
+        // (as `BasisDerivs::row_u`: the row of `i <= p`, read for `j <= q`)
+        let alpha = |k: usize, l: usize, i: usize| {
+            let row = bd
+                .get(2 * k + l)
+                .filter(|_| k <= 1 && l <= 1 && i <= pu)
+                .and_then(|b| b.get(i))
+                .ok_or_else(|| oob(op))?;
+            Ok(move |j: usize| -> Result<f64> {
+                if j > qu {
+                    return Err(oob(op));
+                }
+                row.get(j).copied().ok_or_else(|| oob(op))
+            })
+        };
+
+        let (p, q) = (sx(pu, op)?, sx(qu, op)?);
+        let l2 = ku - p;
+        let l3 = kv - q;
+        let p00 = self.cpt(0, 0)?;
+        let no_w = p00.w == NOW;
+        let no_z = p00.z == NOZ;
+        derivative_matrix::<N, _, _>(self, no_w, no_z, upper, p, q, 1, 1, l2, l3, alpha, sd, op)
     }
 
     /// [`Surface::first_derivs_into`] for a non-rational surface, scratch width `N`:
