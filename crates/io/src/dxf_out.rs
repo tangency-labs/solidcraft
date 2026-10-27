@@ -13,9 +13,13 @@
 use std::f64::consts::TAU;
 use std::fmt::Write as _;
 
-use solidcraft_geom::{Loop2, MAX_BEZIER_DEGREE, Seg2, Vec2};
+use solidcraft_geom::Vec2;
 
 use crate::{IoError, Result};
+
+mod path;
+
+pub use path::{DxfPath, DxfPathStyle, DxfVertex, path_shapes};
 
 /// A layer's linetype, defined in the file's LTYPE table so a viewer needs nothing else.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -66,6 +70,12 @@ pub enum DxfShape {
     Polyline {
         points: Vec<Vec2>,
     },
+    /// Lines and arcs with signed outgoing bulges. At most a half turn per edge.
+    /// Open polylines have a terminal zero bulge; closed ones do not repeat the first vertex.
+    BulgedPolyline {
+        vertices: Vec<DxfVertex>,
+        closed: bool,
+    },
     Circle {
         c: Vec2,
         r: f64,
@@ -114,96 +124,10 @@ pub struct DxfEntity {
     pub shape: DxfShape,
 }
 
-/// The entity of one profile segment, exactly: a line, an arc (a circle when it is a whole
-/// turn), an elliptical arc for a conic of weight below 1, a spline for any other conic, and for a
-/// Bézier a spline of its own degree over all its control points.
-pub fn seg_shape(s: &Seg2) -> DxfShape {
-    match *s {
-        Seg2::Line { a, b } => DxfShape::Line(a, b),
-        Seg2::Arc { center, radius, start, sweep } => {
-            if (sweep.abs() - TAU).abs() < 1e-9 {
-                return DxfShape::Circle { c: center, r: radius };
-            }
-            let (a0, a1) = if sweep >= 0.0 { (start, start + sweep) } else { (start + sweep, start) };
-            DxfShape::Arc { c: center, r: radius, a0: a0.to_degrees().rem_euclid(360.0), a1: a1.to_degrees().rem_euclid(360.0) }
-        }
-        Seg2::Conic { a, apex, b, w } => match conic_ellipse(a, apex, b, w) {
-            Some(e) => DxfShape::Ellipse { c: e.c, major: e.major, ratio: e.ratio, t0: wrap(e.t0), t1: wrap(e.t1) },
-            None => bezier_spline(&[a, apex, b], ((w - 1.0).abs() > 1e-12).then(|| vec![1.0, w, 1.0])),
-        },
-        Seg2::Cubic { p0, p1, p2, p3 } => bezier_spline(&[p0, p1, p2, p3], None),
-        Seg2::Bezier { n, p } => bezier_spline(p.get(..=(n as usize).clamp(1, MAX_BEZIER_DEGREE)).unwrap_or(&p), None),
-    }
-}
-
-/// The entities of a closed loop: one ELLIPSE when it is a whole ellipse of conic arcs, else
-/// one entity for each segment.
-pub fn loop_shapes(lp: &Loop2) -> Vec<DxfShape> {
-    let arcs: Option<Vec<EllipseArc>> =
-        lp.segs.iter().map(|s| if let Seg2::Conic { a, apex, b, w } = *s { conic_ellipse(a, apex, b, w) } else { None }).collect();
-    if let Some(arcs) = arcs
-        && let Some(first) = arcs.first()
-        && arcs.iter().all(|e| e.same_ellipse(first))
-        && (arcs.iter().map(|e| e.t1 - e.t0).sum::<f64>() - TAU).abs() < 1e-7
-    {
-        return vec![DxfShape::Ellipse { c: first.c, major: first.major, ratio: first.ratio, t0: 0.0, t1: TAU }];
-    }
-    lp.segs.iter().map(seg_shape).collect()
-}
-
 /// A parameter reduced to [0, 2π); one within 1e-12 of a full turn is 0.
 fn wrap(t: f64) -> f64 {
     let r = t.rem_euclid(TAU);
     if r > TAU - 1e-12 { 0.0 } else { r }
-}
-
-/// An elliptical arc as DXF describes it (the parameters are not yet reduced to 0…2π).
-#[derive(Clone, Copy, Debug)]
-struct EllipseArc {
-    c: Vec2,
-    major: Vec2,
-    ratio: f64,
-    t0: f64,
-    t1: f64,
-}
-
-impl EllipseArc {
-    fn same_ellipse(&self, o: &EllipseArc) -> bool {
-        let tol = 1e-7 * self.major.len().max(1.0);
-        let parallel = self.major.cross(o.major).abs() <= tol * self.major.len();
-        self.c.dist(o.c) <= tol && parallel && (self.major.len() - o.major.len()).abs() <= tol && (self.ratio - o.ratio).abs() <= 1e-9
-    }
-}
-
-/// The ellipse a rational quadratic Bézier of weight `w` below 1 (end weights 1) lies on. The
-/// arc is `c + u·cos θ + v·sin θ` for θ from −α to α, `cos α = w`, with the conjugate
-/// semi-diameters `u` (from the centre towards the arc's middle) and `v` (towards its end).
-/// With `m` the middle of the chord, `apex − m = u·(1 − w²)/w` and `m − c = w·u`, so
-/// `c = m − (apex − m)·w²/(1 − w²)`, and `v = (b − m)/sin α`. The principal axes are where
-/// |u cos t + v sin t| is largest and smallest, tan 2t = 2 u·v / (u² − v²).
-fn conic_ellipse(a: Vec2, apex: Vec2, b: Vec2, w: f64) -> Option<EllipseArc> {
-    // Within 1e-6 of 1 the centre is hundreds of metres away: a rational spline is exact too.
-    if !(w > 1e-9 && w < 1.0 - 1e-6) {
-        return None;
-    }
-    let m = (a + b) * 0.5;
-    let c = m - (apex - m) * (w * w / (1.0 - w * w));
-    let alpha = w.acos();
-    let (u, v) = ((m - c) / w, (b - m) / alpha.sin());
-    if !(c.is_finite() && u.is_finite() && v.is_finite()) || u.cross(v).abs() < 1e-18 {
-        return None;
-    }
-    let t = 0.5 * (2.0 * u.dot(v)).atan2(u.dot(u) - v.dot(v));
-    let major = u * t.cos() + v * t.sin();
-    let minor = v * t.cos() - u * t.sin();
-    if !(major.len() > 1e-12) {
-        return None;
-    }
-    let ratio = (minor.len() / major.len()).clamp(1e-12, 1.0);
-    // DXF runs counter-clockwise with the minor axis a quarter turn ahead of the major one. If
-    // `minor` lies on the other side the arc, which runs a → b with increasing θ, is clockwise.
-    let (t0, t1) = if major.cross(minor) > 0.0 { (-alpha - t, alpha - t) } else { (t - alpha, t + alpha) };
-    Some(EllipseArc { c, major, ratio, t0, t1 })
 }
 
 /// A Bézier over `pts` (weights `weights`) as a clamped spline of degree `pts.len() − 1`.
@@ -215,10 +139,11 @@ fn bezier_spline(pts: &[Vec2], weights: Option<Vec<f64>>) -> DxfShape {
 
 impl DxfShape {
     /// Points on the shape (or its control polygon) for the drawing's extents.
-    fn sample(&self, out: &mut Vec<Vec2>) {
+    fn sample(&self, out: &mut Vec<Vec2>) -> Result<()> {
         match self {
             DxfShape::Line(a, b) => out.extend([*a, *b]),
             DxfShape::Polyline { points } => out.extend(points.iter().copied()),
+            DxfShape::BulgedPolyline { vertices, closed } => sample_bulged(vertices, *closed, out)?,
             DxfShape::Circle { c, r } => out.extend([*c - Vec2::new(*r, *r), *c + Vec2::new(*r, *r)]),
             DxfShape::Arc { c, r, a0, a1 } => {
                 let sweep = (a1 - a0).rem_euclid(360.0);
@@ -241,7 +166,58 @@ impl DxfShape {
                 out.extend([-half, half].map(|s| *at + along * s + up * *height));
             }
         }
+        Ok(())
     }
+}
+
+// Validate before sampling; Out::num's legacy non-finite substitution is never the
+// admission policy for a new bulged polyline. All fields here retain f64 round trips.
+fn sample_bulged(vertices: &[DxfVertex], closed: bool, out: &mut Vec<Vec2>) -> Result<()> {
+    if !(2..=path::MAX_PATH_ITEMS).contains(&vertices.len()) {
+        return Err(IoError::Invalid("bulged polyline requires 2..=200000 vertices".into()));
+    }
+    if vertices.iter().any(|v| !v.at.is_finite() || !v.bulge.is_finite() || v.bulge.abs() > 1.0) {
+        return Err(IoError::Invalid("bulged polyline has a non-finite value or an arc beyond a half turn".into()));
+    }
+    if !closed && vertices.last().is_some_and(|v| v.bulge != 0.0) {
+        return Err(IoError::Invalid("open bulged polyline must end with a zero bulge".into()));
+    }
+    for (from, to) in vertices.iter().zip(vertices.iter().skip(1)) {
+        sample_bulged_edge(*from, to.at, out)?;
+    }
+    if closed && let Some((from, to)) = vertices.last().zip(vertices.first()) {
+        sample_bulged_edge(*from, to.at, out)?;
+    }
+    Ok(())
+}
+
+fn sample_bulged_edge(from: DxfVertex, to: Vec2, out: &mut Vec<Vec2>) -> Result<()> {
+    out.try_reserve(6).map_err(|_| IoError::Invalid("cannot allocate bulged polyline bounds".into()))?;
+    out.extend([from.at, to]);
+    if from.bulge == 0.0 {
+        return Ok(());
+    }
+    let Some(solidcraft_geom::Seg2::Arc { center, radius, start, sweep }) = path::bulge_arc(from, to) else {
+        return Err(IoError::Invalid("bulged polyline arc has collapsed or non-finite geometry".into()));
+    };
+    // Endpoints alone miss cardinal extrema. Check the directed interval, including its
+    // phase seam; construct cardinal offsets directly instead of evaluating sin/cos there.
+    for (angle, offset) in [
+        (0.0, Vec2::new(radius, 0.0)),
+        (std::f64::consts::FRAC_PI_2, Vec2::new(0.0, radius)),
+        (std::f64::consts::PI, Vec2::new(-radius, 0.0)),
+        (3.0 * std::f64::consts::FRAC_PI_2, Vec2::new(0.0, -radius)),
+    ] {
+        let delta = if sweep > 0.0 { (angle - start).rem_euclid(TAU) } else { (start - angle).rem_euclid(TAU) };
+        if delta <= sweep.abs() {
+            let point = center + offset;
+            if !point.is_finite() {
+                return Err(IoError::Invalid("bulged polyline arc bounds are not finite".into()));
+            }
+            out.push(point);
+        }
+    }
+    Ok(())
 }
 
 /// Group codes and handles, in file order.
@@ -260,6 +236,20 @@ impl Out {
         let text = text.trim_end_matches('0');
         let text = if text.ends_with('.') { format!("{text}0") } else { text.to_string() };
         self.code(c, if text == "-0.0" { "0.0" } else { text.as_str() });
+    }
+    /// New bulged-polyline fields retain their admitted f64 values. Keep the legacy
+    /// twelve-decimal formatter above unchanged for every pre-existing entity.
+    fn precise_num(&mut self, c: i32, value: f64) {
+        if value == 0.0 {
+            self.code(c, "0.0");
+        } else {
+            self.code(c, value);
+        }
+    }
+    fn precise_point(&mut self, c: i32, point: Vec2) {
+        self.precise_num(c, point.x);
+        self.precise_num(c + 10, point.y);
+        self.precise_num(c + 20, 0.0);
     }
     /// A point in the plane at height 0: codes `c`, `c + 10`, `c + 20`.
     fn point(&mut self, c: i32, p: Vec2) {
@@ -343,8 +333,8 @@ fn text_value(s: &str) -> Result<String> {
 /// character, its position, the entity and its layer; no drawing is returned on failure.
 pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<String> {
     let mut pts = Vec::new();
-    for e in entities {
-        e.shape.sample(&mut pts);
+    for (index, e) in entities.iter().enumerate() {
+        e.shape.sample(&mut pts).map_err(|error| IoError::Invalid(format!("DXF entity {} on layer {:?}: {error}", index + 1, e.layer)))?;
     }
     pts.retain(|p| p.is_finite());
     let (lo, hi) = pts
@@ -439,7 +429,7 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<
     for (index, e) in entities.iter().enumerate() {
         let kind = match &e.shape {
             DxfShape::Line(..) => "LINE",
-            DxfShape::Polyline { .. } => "LWPOLYLINE",
+            DxfShape::Polyline { .. } | DxfShape::BulgedPolyline { .. } => "LWPOLYLINE",
             DxfShape::Circle { .. } => "CIRCLE",
             DxfShape::Arc { .. } => "ARC",
             DxfShape::Ellipse { .. } => "ELLIPSE",
@@ -461,6 +451,16 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<
                 for p in points {
                     o.num(10, p.x);
                     o.num(20, p.y);
+                }
+            }
+            DxfShape::BulgedPolyline { vertices, closed } => {
+                o.code(100, "AcDbPolyline");
+                o.code(90, vertices.len());
+                o.code(70, 128 + i32::from(*closed));
+                for vertex in vertices {
+                    o.precise_num(10, vertex.at.x);
+                    o.precise_num(20, vertex.at.y);
+                    o.precise_num(42, vertex.bulge);
                 }
             }
             DxfShape::Line(a, b) => {
@@ -555,9 +555,18 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<
     head.code(9, "$MEASUREMENT");
     head.code(70, 1);
     head.code(9, "$EXTMIN");
-    head.point(10, lo);
+    let precise_bounds = entities.iter().any(|e| matches!(e.shape, DxfShape::BulgedPolyline { .. }));
+    if precise_bounds {
+        head.precise_point(10, lo);
+    } else {
+        head.point(10, lo);
+    }
     head.code(9, "$EXTMAX");
-    head.point(10, hi);
+    if precise_bounds {
+        head.precise_point(10, hi);
+    } else {
+        head.point(10, hi);
+    }
     head.code(0, "ENDSEC");
     Ok(head.s + &o.s)
 }
@@ -566,8 +575,21 @@ pub fn write_dxf_drawing(layers: &[DxfLayer], entities: &[DxfEntity]) -> Result<
 mod tests {
     use std::f64::consts::{FRAC_1_SQRT_2, FRAC_PI_2, PI};
 
+    use solidcraft_geom::{Loop2, Seg2};
+
     use super::*;
     use crate::{Geom2, read_dxf};
+
+    // Keep the existing ordinary writer regressions on the new public conversion path.
+    fn seg_shape(seg: &Seg2) -> DxfShape {
+        let shapes = path_shapes(DxfPath::Open(std::slice::from_ref(seg)), DxfPathStyle::Exact).unwrap();
+        assert_eq!(shapes.len(), 1);
+        shapes.into_iter().next().unwrap()
+    }
+
+    fn loop_shapes(lp: &Loop2) -> Vec<DxfShape> {
+        path_shapes(DxfPath::Closed(lp), DxfPathStyle::Exact).unwrap()
+    }
 
     /// The conic quarter of the ellipse `c ± u`, `c ± v` from `c + u` to `c + v`.
     fn quarter(c: Vec2, u: Vec2, v: Vec2) -> Seg2 {
@@ -706,10 +728,51 @@ mod tests {
             assert_eq!((degree, knots.len(), weights), (n, 2 * k, None), "degree {n}");
             assert_eq!(ctrl, q[..k], "degree {n}");
         }
-        // A degree no piece can have (hostile data) is held to what the piece holds, never past it.
-        let shape = |n: u8| seg_shape(&Seg2::Bezier { n, p: q });
-        assert!(matches!(shape(0), DxfShape::Spline { degree: 1, ref ctrl, .. } if ctrl.len() == 2));
-        assert!(matches!(shape(u8::MAX), DxfShape::Spline { degree: 9, ref ctrl, .. } if ctrl[..] == q[..]));
+        // The fallible path API refuses malformed storage before any helper can clamp it.
+        for n in [0, 1, 2, 3, 10, u8::MAX] {
+            assert!(path_shapes(DxfPath::Open(&[Seg2::Bezier { n, p: q }]), DxfPathStyle::Exact).is_err());
+        }
+    }
+
+    #[test]
+    fn bulged_polyline_fields_and_bounds_keep_small_finite_coordinates() {
+        let shape = DxfShape::BulgedPolyline {
+            vertices: vec![DxfVertex { at: Vec2::new(1e-14, -0.0), bulge: 0.0 }, DxfVertex { at: Vec2::new(2e-14, 1e-14), bulge: 0.0 }],
+            closed: false,
+        };
+        let text = write_dxf_drawing(&[], &[DxfEntity { layer: "0".into(), shape }]).unwrap();
+        let e = entities(&text);
+        assert_eq!(e.len(), 1);
+        assert_eq!(e[0].0, "LWPOLYLINE");
+        assert_eq!(values(&e[0], 10), vec![1e-14, 2e-14]);
+        assert_eq!(values(&e[0], 20), vec![0.0, 1e-14]);
+        assert!(!values(&e[0], 20)[0].is_sign_negative());
+        assert_eq!(values(&e[0], 42), vec![0.0, 0.0]);
+        let pairs = pairs(&text);
+        let min = pairs.iter().position(|p| *p == (9, "$EXTMIN".into())).unwrap();
+        let max = pairs.iter().position(|p| *p == (9, "$EXTMAX".into())).unwrap();
+        assert_eq!(pairs[min + 1].1.parse::<f64>().unwrap(), 1e-14);
+        assert_eq!(pairs[max + 1].1.parse::<f64>().unwrap(), 2e-14);
+    }
+
+    #[test]
+    fn bulged_polyline_writer_rejects_invalid_vertices_before_serializing() {
+        let first = DxfVertex { at: Vec2::ZERO, bulge: 0.0 };
+        let last = DxfVertex { at: Vec2::X, bulge: 0.0 };
+        let invalid = [
+            (vec![], false),
+            (vec![first], true),
+            (vec![DxfVertex { at: Vec2::new(f64::NAN, 0.0), ..first }, last], false),
+            (vec![DxfVertex { bulge: f64::INFINITY, ..first }, last], false),
+            (vec![DxfVertex { bulge: 1.1, ..first }, last], false),
+            (vec![first, DxfVertex { bulge: 0.5, ..last }], false),
+            (vec![DxfVertex { bulge: 0.5, ..first }, first], false),
+        ];
+        for (vertices, closed) in invalid {
+            let shape = DxfShape::BulgedPolyline { vertices, closed };
+            let error = write_dxf_drawing(&[], &[DxfEntity { layer: "CUT".into(), shape }]).unwrap_err().to_string();
+            assert!(error.contains("entity 1") && error.contains("CUT"), "{error}");
+        }
     }
 
     #[test]

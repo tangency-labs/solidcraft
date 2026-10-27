@@ -31,7 +31,7 @@ pub mod urdf;
 pub mod vfs;
 
 pub use dxf::{read_dxf, write_dxf};
-pub use dxf_out::{DxfEntity, DxfLayer, DxfLinetype, DxfShape, loop_shapes, seg_shape, write_dxf_drawing};
+pub use dxf_out::{DxfEntity, DxfLayer, DxfLinetype, DxfPath, DxfPathStyle, DxfShape, DxfVertex, path_shapes, write_dxf_drawing};
 pub use legacy_dir::{APP_ID, LEGACY_APP_ID, adopt_legacy_dir, legacy_flatpak_path};
 pub use safe_write::{backup_path, write_atomic};
 pub use sketch2d::{Geom2, MAX_DRAWING_BYTES};
