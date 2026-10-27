@@ -81,14 +81,14 @@ fn hash(value: &str) -> bool {
 }
 
 /// A queued tip offered for explicit offline inspection.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct LocalRevision {
     pub revision: String,
     pub title: String,
 }
 
 /// Durable listing details, carried separately from the destination array for older callers.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct StoredDesign {
     pub destination: Destination,
     pub revision: Option<String>,
@@ -201,6 +201,50 @@ pub fn stored_designs(cached: Vec<CachedEntry>, pending: Vec<PendingSave>) -> Re
     Ok(entries.into_values().collect())
 }
 
+/// Shared local-first listing policy. Adapters only fetch remote metadata and persist
+/// observed outdated heads; recoverable local work and queued deletions win everywhere.
+pub struct Listing {
+    pub catalog: Vec<StoredDesign>,
+    destinations: BTreeMap<String, Destination>,
+    hidden: BTreeSet<String>,
+    has_local: bool,
+}
+impl Listing {
+    pub fn new(cached: Vec<CachedEntry>, pending: Vec<PendingSave>, job: &crate::jobs::Job) -> Result<Self> {
+        let has_local = !cached.is_empty() || !pending.is_empty();
+        let mut hidden: BTreeSet<_> = pending.iter().filter(|s| s.manifest.deleted()).map(|s| s.destination.design_path()).collect::<Result<_>>()?;
+        let catalog = stored_designs(cached, pending)?;
+        job.local_catalog(catalog.clone())?;
+        let destinations: BTreeMap<_, _> =
+            catalog.iter().map(|e| Ok((e.destination.design_path()?, e.destination.clone()))).collect::<Result<_>>()?;
+        hidden.retain(|path| !destinations.contains_key(path));
+        Ok(Self { catalog, destinations, hidden, has_local })
+    }
+    pub fn merge(&mut self, remote: Result<Vec<Destination>>, job: &crate::jobs::Job) -> Result<()> {
+        match remote {
+            Ok(destinations) => {
+                for destination in destinations {
+                    self.destinations.insert(destination.design_path()?, destination);
+                }
+            }
+            Err(error @ Error::Storage(_)) if self.has_local => job.update(|s| s.message = Some(error.to_string()))?,
+            Err(error) => return Err(error),
+        }
+        Ok(())
+    }
+    pub fn finish(mut self, job: &crate::jobs::Job) -> Result<()> {
+        crate::sync::check_cancelled(job)?;
+        for path in self.hidden {
+            self.destinations.remove(&path);
+        }
+        job.update(|s| {
+            s.result = Some(serde_json::json!(self.destinations.into_values().collect::<Vec<_>>()));
+            s.catalog = self.catalog;
+            s.phase = Phase::Ready;
+        })
+    }
+}
+
 /// Presentation-only content identity. Required capabilities and asset mappings count;
 /// publication bookkeeping and compatible optional metadata do not change the payload.
 pub fn manifest_digest(manifest: &Manifest) -> Result<String> {
@@ -297,5 +341,50 @@ mod tests {
         other.project = "Other".into();
         assert!(PendingSave::local_head(records.clone(), &other, Some(&child.id)).is_err());
         assert!(PendingSave::local_head(records, &child.destination, Some(&"f".repeat(64))).is_err());
+    }
+
+    #[test]
+    fn queued_deletions_hide_only_sole_tips_and_keep_all_competing_revisions_visible() {
+        let parent = save("parent", None);
+        let mut manifest = parent.manifest.clone();
+        manifest.set_change(&crate::management::Change::Delete).unwrap();
+        let deletion = PendingSave::describe(&parent.connection, "Robot", "parts/bracket", Some(parent.id.clone()), manifest).unwrap();
+        let cache = CachedEntry::new(parent.clone(), parent.destination.clone(), Some(parent.id.clone()), true).unwrap();
+        let mut orders = BTreeSet::new();
+        for index in 0..32 {
+            let edit = save(&format!("edit {index}"), Some(parent.id.clone()));
+            orders.insert(edit.id < deletion.id);
+            let pending = vec![parent.clone(), deletion.clone(), edit.clone()];
+            let job = crate::jobs::Job::new(parent.connection.id.clone()).unwrap();
+            let mut listing = Listing::new(vec![cache.clone()], pending.clone(), &job).unwrap();
+            assert_eq!(listing.catalog.len(), 1);
+            let stored = &listing.catalog[0];
+            assert_eq!(stored.phase, Phase::Failed);
+            assert!(stored.revision.is_none());
+            assert_eq!(stored.local_revisions.len(), 2);
+            for revision in [&edit.id, &deletion.id] {
+                assert!(stored.local_revisions.iter().any(|r| &r.revision == revision));
+            }
+            assert!(matches!(PendingSave::local_head(pending, &parent.destination, None), Err(Error::Conflict)));
+            stored.validate(&parent.connection.id).unwrap();
+            listing.merge(Ok(vec![parent.destination.clone()]), &job).unwrap();
+            listing.finish(&job).unwrap();
+            assert_eq!(job.status().unwrap().result, Some(serde_json::json!([parent.destination])));
+        }
+        assert_eq!(orders.len(), 2, "exercise both hash-sorted tip orders");
+
+        let job = crate::jobs::Job::new(parent.connection.id.clone()).unwrap();
+        let mut listing = Listing::new(vec![cache.clone()], vec![parent.clone(), deletion.clone()], &job).unwrap();
+        assert!(listing.catalog.is_empty());
+        listing.merge(Ok(vec![parent.destination.clone()]), &job).unwrap();
+        listing.finish(&job).unwrap();
+        assert_eq!(job.status().unwrap().result, Some(serde_json::json!([])));
+
+        // A later edit supersedes its queued deletion, so the older tombstone must not hide it.
+        let restored = save("restored", Some(deletion.id.clone()));
+        let listing = Listing::new(vec![cache], vec![parent, deletion, restored.clone()], &job).unwrap();
+        assert_eq!(listing.catalog[0].revision.as_deref(), Some(restored.id.as_str()));
+        listing.finish(&job).unwrap();
+        assert_eq!(job.status().unwrap().result, Some(serde_json::json!([restored.destination])));
     }
 }

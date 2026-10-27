@@ -194,7 +194,17 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
     if let Err(error) = https::poll(app, &mut wizard) {
         wizard.error = Some(error);
     }
-    match wizard.poll(&statuses(app)) {
+    let pending = wizard.pending.clone();
+    let all = statuses(app);
+    let outcome = wizard.poll(&all);
+    if let Some(id) = pending
+        && outcome.is_ok()
+        && (wizard.pending.as_ref() != Some(&id) || matches!(outcome, Ok(true)))
+        && all.iter().any(|s| s.operation == id && s.phase == Phase::Ready)
+    {
+        crate::cloud::consume_result(app, &id);
+    }
+    match outcome {
         Ok(true) => {
             crate::cloud_browser::select(app, &wizard.connection.id);
             app.set_status(tr("cloud.connected"), false);

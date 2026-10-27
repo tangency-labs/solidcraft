@@ -909,7 +909,7 @@ impl Session {
         let command_check = self.command_check.take();
         let mut cloud = std::mem::take(&mut self.cloud);
         cloud.binding = fresh.cloud.binding.clone();
-        cloud.captures.clear();
+        cloud.clear_captures();
         *self = fresh;
         self.crash_journal = crash_journal;
         self.command_check = command_check;

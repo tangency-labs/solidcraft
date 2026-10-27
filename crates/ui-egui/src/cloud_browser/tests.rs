@@ -1110,3 +1110,23 @@ fn cloud_open_uses_the_file_worker_and_keeps_loading_frames_responsive() {
     assert_eq!(h.app.docs.count(), 2);
     assert_eq!(h.app.status.as_ref().map(|status| status.0.as_str()), Some("Opened Opened locally in a new tab"));
 }
+
+#[test]
+fn repeated_listings_consume_their_results_without_exhausting_operation_history() {
+    let (mut h, worker, destination) = setup(true);
+    let connection = h.app.session.cloud_settings().connection("github").unwrap().clone();
+    for _ in 0..140 {
+        request(&mut h.app, &connection);
+        let listing = latest(&worker, "list");
+        listing
+            .update(|s| {
+                s.phase = Phase::Ready;
+                s.result = Some(json!([destination]));
+            })
+            .unwrap();
+        h.frames(2);
+        assert!(listing.status().unwrap().result.is_none());
+        assert_eq!(h.app.cloud.browser.catalogs["github"].entries.as_ref(), &[destination.clone()]);
+    }
+    assert!(h.app.session.cloud_operations().unwrap().len() <= 128);
+}

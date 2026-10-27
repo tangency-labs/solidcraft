@@ -224,14 +224,14 @@ fn a_proposed_connection_can_be_tested_without_changing_saved_preferences() {
         ..Default::default()
     };
     session.execute("cloud.test", &json!({"proposed":proposed, "git_executable":"/example/git"})).unwrap();
-    assert_eq!(session.cloud_settings(), &before);
+    assert_eq!(session.cloud_settings(), before);
     let jobs = host.0.lock().unwrap();
     let (_, Operation::Test(actual)) = jobs.last().unwrap() else { panic!("connection test") };
     assert_eq!(actual, &proposed);
     drop(jobs);
     assert!(session.execute("cloud.test", &json!({"connection":"github","proposed":proposed})).is_err());
     assert!(session.execute("cloud.test", &json!({"proposed":proposed,"git_executable":"git\nother"})).is_err());
-    assert_eq!(session.cloud_settings(), &before);
+    assert_eq!(session.cloud_settings(), before);
 }
 
 #[test]
@@ -261,12 +261,10 @@ fn configuration_is_adopted_after_storage_and_failure_keeps_previous_settings() 
         .unwrap();
     session.execute("cloud.status", &json!({"operation":job["operation"]})).unwrap();
     assert!(!session.cloud_configuring());
-    assert_eq!(session.take_cloud_settings_change(), Some(requested.clone()));
     session.execute("cloud.configure", &json!({"settings":Settings::default()})).unwrap();
     host.0.lock().unwrap()[1].fail(solidcraft_cloud::Error::Storage("disk full".into())).unwrap();
     session.poll_cloud().unwrap();
-    assert_eq!(session.cloud_settings(), &requested);
-    assert_eq!(session.take_cloud_settings_change(), None);
+    assert_eq!(session.cloud_settings(), requested);
     session.execute("cloud.settings", &json!({"reload":true})).unwrap();
     host.0.lock().unwrap()[2]
         .update(|s| {
@@ -485,6 +483,55 @@ fn partial_synchronization_confirms_an_older_offline_save_and_its_conflict_desti
 }
 
 #[test]
+fn operation_pruning_preserves_unread_results_and_evicts_numeric_oldest_first() {
+    let (mut session, _, _) = configured();
+    session.cloud.runtime().jobs.clear();
+    // Keep generated IDs above the two synthetic history entries.
+    for _ in 0..12 {
+        Job::new("github".into()).unwrap();
+    }
+    let mut unread = Vec::new();
+    for index in 0..128 {
+        let job = Job::new("github".into()).unwrap();
+        let id = match index {
+            0 => "cloud-2".into(),
+            1 => "cloud-10".into(),
+            _ => job.status().unwrap().operation,
+        };
+        job.update(|status| {
+            status.operation = id.clone();
+            status.phase = if index < 2 { Phase::Synced } else { Phase::Ready };
+            status.result = (index >= 2 && index != 127).then(|| json!({"index":index}));
+        })
+        .unwrap();
+        if index == 127 {
+            job.opened(Snapshot::prepare(b"{}".to_vec(), Default::default()).unwrap()).unwrap();
+        }
+        if index >= 2 {
+            unread.push(id.clone());
+        }
+        session.cloud.runtime().jobs.insert(id, job);
+    }
+    let opened = unread.last().unwrap().clone();
+    for removed in ["cloud-2", "cloud-10"] {
+        session.execute("cloud.list", &json!({})).unwrap();
+        assert!(!session.cloud.runtime().jobs.contains_key(removed));
+        assert!(session.cloud.runtime().jobs.contains_key(&opened));
+        assert!(session.cloud.runtime().jobs[&unread[0]].status().unwrap().result.is_some());
+    }
+    let consumed = session.execute("cloud.status", &json!({"operation":unread[0],"consume":true})).unwrap();
+    assert_eq!(consumed["result"]["index"], 2);
+    assert!(session.cloud.runtime().jobs[&unread[0]].status().unwrap().result.is_none());
+    session.execute("cloud.list", &json!({})).unwrap();
+    assert!(!session.cloud.runtime().jobs.contains_key(&unread[0]));
+    session.cloud.runtime().jobs[&opened].take_opened().unwrap();
+    session.execute("cloud.list", &json!({})).unwrap();
+    assert!(!session.cloud.runtime().jobs.contains_key(&opened));
+    assert_eq!(session.cloud.runtime().jobs.len(), 128);
+    assert!(session.execute("cloud.status", &json!({"consume":true})).is_err());
+}
+
+#[test]
 fn offline_operation_history_does_not_limit_the_number_of_durable_saves() {
     let (mut session, host, destination) = configured();
     for index in 0..140 {
@@ -622,7 +669,7 @@ fn native_save_as_detaches_the_cloud_binding_and_ignores_its_late_capture() {
     session.poll_cloud().unwrap();
     assert!(session.cloud_binding().is_none());
     assert!(!session.is_dirty());
-    assert_eq!(solidcraft_io::read_design(&std::fs::read(&path).unwrap()).unwrap().name, "Native copy");
+    assert_eq!(solidcraft_io::read_design(&std::fs::read(&path).unwrap()).unwrap().name, path.file_stem().unwrap().to_string_lossy());
     std::fs::remove_file(path).unwrap();
 }
 
@@ -671,4 +718,165 @@ fn preview_commands_validate_destinations_and_consume_transient_results_once() {
     assert!(Arc::ptr_eq(&before, &session.doc));
     let invalid = Destination { connection: "not-connected".into(), ..destination };
     assert!(session.execute("cloud.thumbnail", &json!({"destination":invalid})).is_err());
+}
+
+#[test]
+fn runtime_operations_and_settings_are_shared_while_document_baselines_stay_separate() {
+    let (mut first, host, destination) = configured();
+    let mut second = Session::default();
+    second.inherit_cloud_services(&first);
+    first.execute("cloud.save", &json!({"destination":destination})).unwrap();
+    let operation = host.job(0).status().unwrap().operation;
+    assert!(second.cloud_operations().unwrap().iter().any(|s| s.operation == operation));
+    let mut settings = first.cloud_settings();
+    settings.retry_pending = !settings.retry_pending;
+    second.execute("cloud.configure", &json!({"settings":settings})).unwrap();
+    assert_eq!(first.cloud_settings(), settings);
+    host.saved(0);
+    second.poll_cloud().unwrap();
+    assert!(second.cloud_binding().is_none());
+    assert!(first.cloud_save_pending());
+    first.poll_cloud().unwrap();
+    assert!(!first.cloud_save_pending());
+    assert_eq!(first.cloud_binding().unwrap().destination, destination);
+    assert!(!first.is_dirty());
+    assert!(second.cloud_binding().is_none());
+}
+
+#[test]
+fn a_deferred_save_requires_a_revision_before_advancing_the_saved_baseline() {
+    let (mut session, host, destination) = configured();
+    session.execute("cloud.save", &json!({"destination":destination})).unwrap();
+    host.job(0)
+        .update(|s| {
+            s.saved_locally = true;
+            s.phase = Phase::SavedLocally;
+        })
+        .unwrap();
+    session.poll_cloud().unwrap();
+    assert!(!session.cloud_save_pending() && session.is_dirty());
+    let operation = host.job(0).status().unwrap().operation;
+    assert_eq!(session.cloud_operations().unwrap().iter().find(|s| s.operation == operation).unwrap().phase, Phase::Failed);
+    assert!(session.cloud_binding().is_none());
+    // A late reply from the quarantined worker cannot mark this editor saved.
+    host.saved(0);
+    session.poll_cloud().unwrap();
+    assert!(!session.cloud_save_pending() && session.is_dirty());
+    session.execute("cloud.save", &json!({"destination":destination})).unwrap();
+    host.saved(1);
+    session.poll_cloud().unwrap();
+    assert!(!session.is_dirty());
+}
+
+#[test]
+fn malformed_cloud_acknowledgements_fail_only_the_offending_jobs() {
+    for invalid in ["revision", "connection", "conflict"] {
+        let (mut session, host, destination) = configured();
+        session.execute("cloud.save", &json!({"destination":destination})).unwrap();
+        let malformed = host.job(0);
+        if invalid == "revision" {
+            malformed
+                .update(|s| {
+                    s.saved_locally = true;
+                    s.phase = Phase::SavedLocally;
+                })
+                .unwrap();
+        } else {
+            let job = session.execute("cloud.sync", &json!({})).unwrap();
+            let other = host.job(1);
+            let publication =
+                solidcraft_cloud::Published { destination: destination.clone(), revision: "a".repeat(64), commit: "b".repeat(40), conflict: false };
+            malformed
+                .update(|s| {
+                    let mut publication = publication.clone();
+                    if invalid == "connection" {
+                        publication.destination.connection = "another".into();
+                    }
+                    s.publications.push(publication);
+                })
+                .unwrap();
+            if invalid == "conflict" {
+                other
+                    .update(|s| {
+                        let mut publication = publication.clone();
+                        publication.destination.file = "parts/other".into();
+                        s.publications.push(publication);
+                    })
+                    .unwrap();
+            } else {
+                other.update(|s| s.phase = Phase::Ready).unwrap();
+            }
+            assert!(job.get("operation").is_some());
+        }
+        for _ in 0..2 {
+            session.poll_cloud().unwrap();
+        }
+        assert!(!session.cloud_save_pending());
+        assert!(session.is_dirty());
+        assert!(session.cloud_binding().is_none());
+        let status = session.execute("cloud.status", &json!({"operation":malformed.status().unwrap().operation})).unwrap();
+        assert_eq!(status["phase"], "failed");
+        session.execute("cloud.save", &json!({"destination":destination})).unwrap();
+        let next = host.0.lock().unwrap().len() - 1;
+        host.saved(next);
+        session.poll_cloud().unwrap();
+        assert!(!session.is_dirty());
+    }
+}
+
+#[test]
+fn malformed_management_acknowledgements_do_not_block_other_jobs_or_later_saves() {
+    use solidcraft_cloud::management::{Change, Managed};
+    for invalid in ["change", "destination", "revision", "connection"] {
+        let (mut session, host, destination) = configured();
+        session.execute("cloud.save", &json!({"destination":destination})).unwrap();
+        host.saved(0);
+        session.poll_cloud().unwrap();
+        let binding = session.cloud_binding().unwrap().clone();
+        let valid = Managed {
+            source: destination.clone(),
+            previous: binding.revision.clone(),
+            revision: "a".repeat(64),
+            change: Change::Rename { file: "parts/Renamed".into() },
+            destination: Destination { file: "parts/Renamed".into(), ..destination.clone() },
+        };
+        let mut malformed = valid.clone();
+        match invalid {
+            "change" => malformed.change = Change::Rename { file: "../outside".into() },
+            "destination" => malformed.destination.file = "parts/Unexpected".into(),
+            "revision" => malformed.revision = "malformed".into(),
+            "connection" => {
+                malformed.source.connection = "another".into();
+                malformed.destination.connection = "another".into();
+            }
+            _ => unreachable!(),
+        }
+        session.execute("cloud.sync", &json!({})).unwrap();
+        let bad = host.job(1);
+        bad.update(|s| s.managed.push(malformed.clone())).unwrap();
+        session.execute("cloud.sync", &json!({})).unwrap();
+        let good = host.job(2);
+        good.update(|s| s.managed.push(valid.clone())).unwrap();
+        for _ in 0..2 {
+            session.poll_cloud().unwrap();
+        }
+        assert_eq!(session.cloud_binding().unwrap().destination, valid.destination);
+        let status = session.execute("cloud.status", &json!({"operation":bad.status().unwrap().operation})).unwrap();
+        assert_eq!(status["phase"], "failed");
+        // A detached worker cannot revive its malformed response.
+        bad.update(|s| s.phase = Phase::Synced).unwrap();
+        session.poll_cloud().unwrap();
+        assert_eq!(session.cloud_binding().unwrap().destination, valid.destination);
+        let confirmed = session.poll_cloud_management(&[malformed]);
+        if invalid == "connection" {
+            assert!(confirmed.is_ok(), "unowned confirmations may belong to another repository");
+        } else {
+            assert!(confirmed.is_err(), "unowned malformed confirmations still return validation errors");
+        }
+        session.doc_mut().name = "Later edit".into();
+        session.execute("file.save", &json!({})).unwrap();
+        host.saved(3);
+        session.poll_cloud().unwrap();
+        assert!(!session.is_dirty());
+    }
 }

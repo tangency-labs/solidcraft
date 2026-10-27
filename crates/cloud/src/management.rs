@@ -6,7 +6,7 @@ use crate::{Destination, Error, Manifest, PendingSave, Published, Result};
 
 pub const LIFECYCLE: &str = "lifecycle/1";
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Change {
     Rename { file: String },
@@ -114,7 +114,7 @@ impl Revision {
 }
 
 /// A confirmed management revision can update only the binding it was captured against.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Managed {
     pub source: Destination,
     pub previous: Option<String>,

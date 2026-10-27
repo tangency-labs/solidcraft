@@ -49,6 +49,15 @@ async fn fetch(request: Request<OctoBody>) -> Result<Response<Full<Bytes>>, BoxE
     Ok(result.body(Full::new(bytes.freeze()))?)
 }
 
+// Dropping a failed/cancelled listing must also stop sibling Fetch tasks whose
+// Send response receivers were dropped by the bounded stream.
+struct RequestAbort(futures::future::AbortHandle);
+impl Drop for RequestAbort {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 pub fn client(token: Option<&str>) -> Result<Octocrab, BoxError> {
     client_for_job(token, None)
 }
@@ -57,14 +66,19 @@ pub fn client_for_job(token: Option<&str>, job: Option<solidcraft_cloud::jobs::J
     let service = service_fn(move |request: Request<OctoBody>| {
         let (sender, receiver) = oneshot::channel();
         let job = job.clone();
+        let (handle, registration) = futures::future::AbortHandle::new_pair();
+        let request_abort = RequestAbort(handle.clone());
         wasm_bindgen_futures::spawn_local(async move {
-            let (handle, registration) = futures::future::AbortHandle::new_pair();
-            if let Some(job) = job
-                && let Err(error) = job.set_cancel_handler(move || handle.abort())
-            {
-                let _ = sender.send(Err(BoxError::from(error.to_string())));
-                return;
-            }
+            let _cancellation = match job {
+                Some(job) => match job.on_cancel(move || handle.abort()) {
+                    Ok(guard) => Some(guard),
+                    Err(error) => {
+                        let _ = sender.send(Err(BoxError::from(error.to_string())));
+                        return;
+                    }
+                },
+                None => None,
+            };
             // Dropping reqwest's Fetch future aborts its browser request. Durable OPFS/IDB
             // operations are outside this scope and always finish their acknowledgement.
             let result = futures::future::Abortable::new(fetch(request), registration)
@@ -72,7 +86,10 @@ pub fn client_for_job(token: Option<&str>, job: Option<solidcraft_cloud::jobs::J
                 .unwrap_or_else(|_| Err(BoxError::from("browser request cancelled")));
             let _ = sender.send(result);
         });
-        async move { receiver.await.map_err(|_| BoxError::from("browser request cancelled"))? }
+        async move {
+            let _request_abort = request_abort;
+            receiver.await.map_err(|_| BoxError::from("browser request cancelled"))?
+        }
     });
     let header = token
         .map(|token| -> Result<http::HeaderValue, BoxError> {

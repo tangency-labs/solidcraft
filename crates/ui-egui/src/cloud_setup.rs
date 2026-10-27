@@ -135,13 +135,13 @@ fn poll(app: &mut SolveApp, wizard: &mut Wizard) -> Result<bool, String> {
             }
         }
         Pending::Setup(id) | Pending::Apply(id) => {
-            let mut statuses = app.session.cloud_operations().map_err(|e| e.to_string())?;
-            for slot in app.docs.background_mut() {
-                statuses.extend(slot.session.cloud_operations().map_err(|e| e.to_string())?);
-            }
+            let statuses = app.session.cloud_operations().map_err(|e| e.to_string())?;
             let status = statuses.into_iter().find(|s| s.operation == id).ok_or("setup operation no longer available")?;
             match status.phase {
                 Phase::Ready | Phase::Synced => {
+                    if status.phase == Phase::Ready {
+                        crate::cloud::consume_result(app, &id);
+                    }
                     if applying {
                         if let Some(connection) = &wizard.candidate {
                             crate::cloud_browser::select(app, &connection.id);
@@ -302,11 +302,9 @@ pub(crate) fn show(app: &mut SolveApp, ctx: &egui::Context) {
         wizard.error = None;
         let result = (|| -> Result<Pending, String> {
             let mut connection = solidcraft_cloud::setup::github_connection(&wizard.repository).map_err(|e| e.to_string())?;
-            if let Some(existing) = wizard
-                .candidate
-                .as_ref()
-                .filter(|c| c.id == connection.id)
-                .or_else(|| app.session.cloud_settings().connections.iter().find(|c| c.id == connection.id))
+            let settings = app.session.cloud_settings();
+            if let Some(existing) =
+                wizard.candidate.as_ref().filter(|c| c.id == connection.id).or_else(|| settings.connections.iter().find(|c| c.id == connection.id))
             {
                 connection = existing.clone();
             }
@@ -601,7 +599,7 @@ mod tests {
             assert!(provider.credentials.lock().unwrap().is_empty(), "reuse never reads or copies a secret through the UI");
             job.fail(solidcraft_cloud::Error::Storage("token does not grant access to the additional repository".into())).unwrap();
             h.frames(2);
-            assert_eq!(h.app.session.cloud_settings(), &settings);
+            assert_eq!(h.app.session.cloud_settings(), settings);
             h.step(&serde_json::json!({"click":{"handle":"cloud:token-source"}})).unwrap();
             h.frames(2);
             h.step(&serde_json::json!({"click":{"handle":"cloud:token-new"}})).unwrap();
@@ -620,7 +618,7 @@ mod tests {
             let (job, replacement) = provider.setups.lock().unwrap().last().unwrap().clone();
             assert_ne!(replacement.credential, second.credential);
             assert_eq!(provider.credentials.lock().unwrap().len(), 1);
-            assert_eq!(h.app.session.cloud_settings(), &settings);
+            assert_eq!(h.app.session.cloud_settings(), settings);
             job.fail(solidcraft_cloud::Error::Storage("offline".into())).unwrap();
             h.frames(2);
             h.step(&serde_json::json!({"click":{"handle":"dialog:cancel"}})).unwrap();
@@ -669,8 +667,8 @@ mod tests {
         assert!(!crate::cloud_settings::apply(&mut h.app, false));
         h.frames(4);
         let settings = h.app.session.cloud_settings();
-        let restored: Settings = serde_json::from_str(&serde_json::to_string(settings).unwrap()).unwrap();
-        assert_eq!(restored, *settings);
+        let restored: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert_eq!(restored, settings);
         assert_eq!(restored.connections.len(), 2);
         assert!(provider.credentials.lock().unwrap().is_empty());
     }

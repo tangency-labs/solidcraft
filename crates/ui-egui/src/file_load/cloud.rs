@@ -4,11 +4,7 @@ use solidcraft_cloud::jobs::Phase;
 
 pub(super) fn target(app: &SolveApp, request: &Request) -> Result<Option<Session>, String> {
     let Kind::CloudOpen { operation, .. } = &request.kind else { return Ok(None) };
-    std::iter::once(&app.session)
-        .chain(app.docs.background())
-        .find_map(|session| session.cloud_open_target(operation).ok())
-        .map(Some)
-        .ok_or_else(|| "opening operation no longer available".into())
+    app.session.cloud_open_target(operation).map(Some).map_err(|e| e.to_string())
 }
 
 pub(super) fn ready(session: &mut Session, params: &Value, cancelled: bool) -> Result<bool, String> {
@@ -43,13 +39,7 @@ pub(super) fn wait(session: &mut Session, command: &str, params: &Value, progres
 
 pub(super) fn status(app: &SolveApp, request: &Request) -> Option<String> {
     let Kind::CloudOpen { operation, .. } = &request.kind else { return None };
-    let status = app
-        .session
-        .cloud_operations()
-        .ok()?
-        .into_iter()
-        .chain(app.docs.background().flat_map(|slot| slot.cloud_operations().unwrap_or_default()))
-        .find(|status| &status.operation == operation)?;
+    let status = app.session.cloud_operations().ok()?.into_iter().find(|status| &status.operation == operation)?;
     if status.phase == Phase::Ready {
         return None;
     }
