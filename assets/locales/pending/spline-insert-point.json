@@ -14,6 +14,9 @@
   "ja": {
     "cmd.sketch_spline_insert_point": "スプライン点を追加"
   },
+  "vi": {
+    "cmd.sketch_spline_insert_point": "Thêm điểm vào đường cong Spline"
+  },
   "zh": {
     "cmd.sketch_spline_insert_point": "添加样条曲线点"
   }
