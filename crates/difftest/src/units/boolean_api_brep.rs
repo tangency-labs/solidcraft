@@ -5,8 +5,8 @@
 //!
 //! A case is one API call (`api` plus its arguments). Operands are boxes
 //! (`SmApiCreateBox`) or spheres (`SmApiCreateSphere`); fixture cases also use sheets
-//! (`SmApiCreatePlane`), tori (`SmApiCreateTorus`) and the result of an `SmApiBoolean` of
-//! two operands. Both sides
+//! (`SmApiCreatePlane`), tori (`SmApiCreateTorus`), operands moved by `SmApiRotate` /
+//! `SmApiTranslate` steps and the result of an `SmApiBoolean` of two operands. Both sides
 //! build them with the same constructors (`primitive::api_primitives` and
 //! `boolean::api_brep::boolean` on the Rust side) in the case's one kernel / context, at the default `Kernel::fixes` (SMLib behaviour). A
 //! constructor that fails is a harness error on both sides (the shim's `SC_ERR_ARG`);
@@ -31,13 +31,16 @@ use serde_json::Value;
 use solidcore::boolean::api_brep as api;
 use solidcore::boolean::merge::MergeOptions;
 use solidcore::geom::a_object::BooleanOperation;
-use solidcore::geom::vector3d::Point3;
 use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+use solidcore::geom::vector3d::Point3;
 use solidcore::kernel::Kernel;
 use solidcore::mass::integrator::properties::{brep_volume, face_area, PropertyAttributes};
 use solidcore::primitive::api_primitives as primitives;
 use solidcore::topology::brep::{p1 as brep_p1, p2 as brep_p2};
 use solidcore::topology::edgeuse::p1 as edgeuse_p1;
+use solidcore::topology::proto_topology::p1::api_transform::{
+    api_rotate, api_translate, TransformObject,
+};
 use solidcore::topology::shell::shell_region;
 use solidcore::topology::{Brep, FaceuseId, RegionId};
 use solidcore::SolidError;
@@ -76,12 +79,27 @@ enum BrepIn {
     Plane { origin: P3, size: [f64; 2] },
     /// `SmApiCreateTorus` (`SmBrep*&` overload; axis +Z).
     Torus { center: P3, major: f64, minor: f64 },
+    /// `brep` moved by `steps` in order (`SmApiRotate` / `SmApiTranslate`).
+    Moved {
+        steps: Vec<MoveIn>,
+        brep: Box<BrepIn>,
+    },
     /// `SmApiBoolean(a, b, operation)`'s result.
     Boolean {
         operation: i32,
         a: Box<BrepIn>,
         b: Box<BrepIn>,
     },
+}
+
+/// One step of a moved operand.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum MoveIn {
+    /// `SmApiRotate(brep, point, axis, angle_deg)`.
+    Rotate { point: P3, axis: P3, angle_deg: f64 },
+    /// `SmApiTranslate(brep, vector)`.
+    Translate { vector: P3 },
 }
 
 /// `SmApiBooleanWithOptions` flags; missing ones take the `SmMergeOptions` defaults.
@@ -172,6 +190,24 @@ fn spec(b: &BrepIn) -> BrepSpec {
             center,
             major,
             minor,
+        },
+        BrepIn::Moved { steps, brep } => BrepSpec::Moved {
+            steps: steps
+                .iter()
+                .map(|m| match *m {
+                    MoveIn::Rotate {
+                        point,
+                        axis,
+                        angle_deg,
+                    } => ffi::Move::Rotate {
+                        point,
+                        axis,
+                        angle_deg,
+                    },
+                    MoveIn::Translate { vector } => ffi::Move::Translate { vector },
+                })
+                .collect(),
+            brep: Box::new(spec(brep)),
         },
         BrepIn::Boolean { operation, a, b } => BrepSpec::Boolean {
             operation: *operation,
@@ -399,6 +435,29 @@ fn build_at(k: &mut Kernel, b: &BrepIn, depth: usize) -> Result<Brep, Stop> {
                 }
             });
         }
+        BrepIn::Moved { steps, brep } => {
+            let mut b = build_at(k, brep, depth + 1)?;
+            for m in steps {
+                let moved = match *m {
+                    MoveIn::Rotate {
+                        point,
+                        axis,
+                        angle_deg,
+                    } => api_rotate(
+                        k,
+                        Some(TransformObject::Brep(&mut b)),
+                        p3(point),
+                        p3(axis),
+                        angle_deg,
+                    ),
+                    MoveIn::Translate { vector } => {
+                        api_translate(k, Some(TransformObject::Brep(&mut b)), p3(vector))
+                    }
+                };
+                moved.map_err(|e| stop("operand move", &e))?;
+            }
+            Ok(b)
+        }
         BrepIn::Boolean { operation, a, b } => {
             let (a, b) = (build_at(k, a, depth + 1)?, build_at(k, b, depth + 1)?);
             api::boolean(k, a, b, op(*operation)?).map(|out| out.result)
@@ -454,7 +513,11 @@ fn put_brep(o: &mut Vec<i64>, b: &Brep) -> Result<(), Stop> {
 
 /// Index in `regions` of the region on the other side of `fu` (the shell's first
 /// faceuse), `-1` without one (the shim's `mate_region`).
-fn mate_region(b: &Brep, fu: solidcore::Result<Option<FaceuseId>>, regions: &[RegionId]) -> Result<i64, Stop> {
+fn mate_region(
+    b: &Brep,
+    fu: solidcore::Result<Option<FaceuseId>>,
+    regions: &[RegionId],
+) -> Result<i64, Stop> {
     let Some(fu) = fu.map_err(|e| stop("GetFirstFaceuse", &e))? else {
         return Ok(-1);
     };

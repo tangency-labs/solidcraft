@@ -9,11 +9,11 @@
 // which validates every input so upstream only touches valid memory. Every read is bounds
 // checked here as well (a malformed program is SC_ERR_ARG). The whole program is parsed before
 // any upstream object is built. Operand B-reps are boxes (SmApiCreateBox), spheres
-// (SmApiCreateSphere), sheets (SmApiCreatePlane), tori (SmApiCreateTorus) or the SmApiBoolean
-// result of two operands; a failing constructor or operand Boolean is SC_ERR_ARG, except a
-// failing SmApiCreateTorus, whose status becomes the call's (record `2`) so its radius guard is
-// compared. `out` receives the API status (0 = SM_SUCCESS, else the SmStatus) and, on success,
-// the op's outputs.
+// (SmApiCreateSphere), sheets (SmApiCreatePlane), tori (SmApiCreateTorus), an operand moved
+// by SmApiRotate / SmApiTranslate steps or the SmApiBoolean result of two operands; a failing
+// constructor or operand Boolean is SC_ERR_ARG, except a failing SmApiCreateTorus, whose
+// status becomes the call's (record `2`) so its radius guard is compared. `out` receives the
+// API status (0 = SM_SUCCESS, else the SmStatus) and, on success, the op's outputs.
 //
 // Ownership follows source/SM_API/inc/SmApiBrep.h: a rejected or failed two-B-rep call leaves
 // both operands with the caller (deleted here); on success the result is deleted and the second
@@ -69,7 +69,18 @@ enum : int32_t
     BK_PLANE = 3,    // SmApiCreatePlane(origin, x, y)
     BK_BOOLEAN = 4,  // SmApiBoolean(a, b, operation)'s result
     BK_TORUS = 5,    // SmApiCreateTorus(center, major, minor)
+    BK_MOVED = 6,    // an operand moved by SmApiRotate / SmApiTranslate steps
 };
+
+// Steps of a BK_MOVED operand.
+enum : int32_t
+{
+    STEP_ROTATE = 0,    // SmApiRotate(brep, point, axis, angle_deg)
+    STEP_TRANSLATE = 1, // SmApiTranslate(brep, vector)
+};
+
+// Most steps of one BK_MOVED operand (MAX_STEPS in the Rust module).
+const int64_t MAX_STEPS = 8;
 
 // Deepest operand block (MAX_DEPTH in the Rust module).
 const int MAX_DEPTH = 4;
@@ -110,7 +121,8 @@ struct BrepSpec
 {
     int32_t kind = BK_BOX;
     double d[6] = {0, 0, 0, 0, 0, 0};
-    std::vector<BrepSpec> sub; // BK_BOOLEAN: a, b
+    std::vector<BrepSpec> sub; // BK_BOOLEAN: a, b; BK_MOVED: the operand
+    std::vector<double> steps; // BK_MOVED: per step its kind then 7 (rotate) or 3 numbers
 };
 
 BrepSpec read_spec(Rd& rd, int depth = 0)
@@ -118,7 +130,7 @@ BrepSpec read_spec(Rd& rd, int depth = 0)
     if (depth >= MAX_DEPTH)
         throw Bad();
     BrepSpec s;
-    s.kind = (int32_t)rd.idx(1, 5);
+    s.kind = (int32_t)rd.idx(1, 6);
     int k = 0;
     switch (s.kind)
     {
@@ -127,6 +139,7 @@ BrepSpec read_spec(Rd& rd, int depth = 0)
     case BK_PLANE: k = 5; break;
     case BK_BOOLEAN: k = 0; break;
     case BK_TORUS: k = 5; break;
+    case BK_MOVED: k = 0; break;
     default: throw Bad();
     }
     if (s.kind == BK_BOOLEAN)
@@ -140,6 +153,19 @@ BrepSpec read_spec(Rd& rd, int depth = 0)
     if (s.kind == BK_BOOLEAN)
     {
         s.sub.push_back(read_spec(rd, depth + 1));
+        s.sub.push_back(read_spec(rd, depth + 1));
+    }
+    if (s.kind == BK_MOVED)
+    {
+        int64_t n = rd.idx(0, MAX_STEPS);
+        for (int64_t i = 0; i < n; i++)
+        {
+            int64_t t = rd.idx(STEP_ROTATE, STEP_TRANSLATE);
+            s.steps.push_back((double)t);
+            int m = t == STEP_ROTATE ? 7 : 3;
+            for (int j = 0; j < m; j++)
+                s.steps.push_back(rd.num());
+        }
         s.sub.push_back(read_spec(rd, depth + 1));
     }
     return s;
@@ -165,6 +191,27 @@ SmBrep* build(const BrepSpec& s)
     case BK_SPHERE: stat = SmApiCreateSphere(o, s.d[3], r); break;
     case BK_PLANE: stat = SmApiCreatePlane(o, s.d[3], s.d[4], r); break;
     case BK_TORUS: stat = SmApiCreateTorus(o, s.d[3], s.d[4], r); break;
+    case BK_MOVED:
+    {
+        r = build(s.sub[0]);
+        stat = SM_SUCCESS;
+        const std::vector<double>& p = s.steps;
+        for (size_t i = 0; i < p.size() && stat == SM_SUCCESS;)
+        {
+            if ((int32_t)p[i] == STEP_ROTATE)
+            {
+                stat = SmApiRotate(r, SmVector3d(p[i + 1], p[i + 2], p[i + 3]),
+                                   SmVector3d(p[i + 4], p[i + 5], p[i + 6]), p[i + 7]);
+                i += 8;
+            }
+            else
+            {
+                stat = SmApiTranslate(r, SmVector3d(p[i + 1], p[i + 2], p[i + 3]));
+                i += 4;
+            }
+        }
+        break;
+    }
     case BK_BOOLEAN:
     {
         SmBrep* a = build(s.sub[0]);

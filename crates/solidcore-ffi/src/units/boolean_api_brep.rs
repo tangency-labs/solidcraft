@@ -10,7 +10,9 @@
 //! then its data: `1 O[3] length width height` (`SmApiCreateBox`), `2 C[3] radius`
 //! (`SmApiCreateSphere`), `3 O[3] x y` (`SmApiCreatePlane`, the `SmBrep*&` overload),
 //! `4 operation brep brep` (the `SmApiBoolean` result of two operand blocks) or
-//! `5 C[3] major minor` (`SmApiCreateTorus`, the `SmBrep*&` overload). Nested
+//! `5 C[3] major minor` (`SmApiCreateTorus`, the `SmBrep*&` overload) or
+//! `6 n steps... brep` (the operand block moved by `n` steps, each `0 P[3] A[3] angle_deg`
+//! for `SmApiRotate` or `1 V[3]` for `SmApiTranslate`, at most [`MAX_STEPS`]). Nested
 //! blocks are at most [`MAX_DEPTH`] deep.
 //!
 //! | [`Call`]        | op | args                                   | output after the status (on success)            |
@@ -59,6 +61,8 @@ pub const MAX_LIST: usize = 8;
 pub const MAX_TREE: usize = 64;
 /// Deepest operand block accepted by [`run`] (a plain primitive is depth 1).
 pub const MAX_DEPTH: usize = 4;
+/// Most steps of one [`BrepSpec::Moved`] operand.
+pub const MAX_STEPS: usize = 8;
 /// `dRelativeAccuracy` of the [`Call::Measured`] volume (`SmApiBrepComputeVolume`).
 pub const VOLUME_ACCURACY: f64 = 1e-6;
 /// `dRelativeAccuracy` of the [`Call::Measured`] face areas (`SmApiFaceComputeArea`).
@@ -109,6 +113,13 @@ pub enum BrepSpec {
         /// Minor (tube) radius.
         minor: f64,
     },
+    /// `brep` moved by `steps` in order (`SmApiRotate` / `SmApiTranslate`).
+    Moved {
+        /// The steps.
+        steps: Vec<Move>,
+        /// The operand moved.
+        brep: Box<BrepSpec>,
+    },
     /// `SmApiBoolean(a, b, operation)`'s result.
     Boolean {
         /// `SmBooleanOperationType` value: union, intersection, difference or slice.
@@ -117,6 +128,25 @@ pub enum BrepSpec {
         a: Box<BrepSpec>,
         /// Second operand (deleted by upstream).
         b: Box<BrepSpec>,
+    },
+}
+
+/// One step of a [`BrepSpec::Moved`] operand.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Move {
+    /// `SmApiRotate(brep, point, axis, angle_deg)` (a zero axis fails cleanly upstream).
+    Rotate {
+        /// A point on the axis.
+        point: [f64; 3],
+        /// The axis direction.
+        axis: [f64; 3],
+        /// The angle in degrees.
+        angle_deg: f64,
+    },
+    /// `SmApiTranslate(brep, vector)`.
+    Translate {
+        /// The translation.
+        vector: [f64; 3],
     },
 }
 
@@ -258,10 +288,28 @@ fn check_spec(s: &BrepSpec, depth: usize) -> Result<(), FfiError> {
             major,
             minor,
         } => {
-            if !center.iter().all(|x| x.is_finite()) || !major.is_finite() || !minor.is_finite()
-            {
+            if !center.iter().all(|x| x.is_finite()) || !major.is_finite() || !minor.is_finite() {
                 return Err(bad("torus: non-finite value"));
             }
+        }
+        BrepSpec::Moved { steps, brep } => {
+            if steps.len() > MAX_STEPS {
+                return Err(bad("moved operand: too many steps"));
+            }
+            for m in steps {
+                let finite = match m {
+                    Move::Rotate {
+                        point,
+                        axis,
+                        angle_deg,
+                    } => point.iter().chain(axis).all(|x| x.is_finite()) && angle_deg.is_finite(),
+                    Move::Translate { vector } => vector.iter().all(|x| x.is_finite()),
+                };
+                if !finite {
+                    return Err(bad("moved operand: non-finite value"));
+                }
+            }
+            check_spec(brep, depth + 1)?;
         }
         BrepSpec::Boolean { operation, a, b } => {
             if ![1, 2, 3, 10].contains(operation) {
@@ -316,6 +364,29 @@ fn push_checked(o: &mut Vec<f64>, s: &BrepSpec) {
             o.extend_from_slice(center);
             o.push(*major);
             o.push(*minor);
+        }
+        BrepSpec::Moved { steps, brep } => {
+            o.push(6.0);
+            o.push(steps.len() as f64);
+            for m in steps {
+                match m {
+                    Move::Rotate {
+                        point,
+                        axis,
+                        angle_deg,
+                    } => {
+                        o.push(0.0);
+                        o.extend_from_slice(point);
+                        o.extend_from_slice(axis);
+                        o.push(*angle_deg);
+                    }
+                    Move::Translate { vector } => {
+                        o.push(1.0);
+                        o.extend_from_slice(vector);
+                    }
+                }
+            }
+            push_checked(o, brep);
         }
         BrepSpec::Boolean { operation, a, b } => {
             o.push(4.0);

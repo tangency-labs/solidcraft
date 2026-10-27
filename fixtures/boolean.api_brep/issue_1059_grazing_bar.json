@@ -1,0 +1,160 @@
+{
+ "cases": [
+  {
+   "name": "issue1059_grazing_bar_union_alpha-1.0_beta30",
+   "note": "#1059 / WR-410 probe geometry (crates/solidcore/tests/issue_1059_grazing_edge_crossing_probe.rs): box A [0,10]^3 united with a 20 x 4 x 4 bar centred on the origin, tilted -1.0 degrees about y and turned 30 degrees about z, then moved by (5, 5, 8): its top edges pierce A's top face at a shallow angle. At the default fixes (upstream behaviour) this compares the port with the C++; Kernel::fixes.boolean_vertex_by_best_crossing changes the result's last digits here (2026-10-26).",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         1.0,
+         0.0
+        ],
+        "angle_deg": -1.0
+       }
+      },
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 30.0
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         5.0,
+         5.0,
+         8.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       -10.0,
+       -2.0,
+       -2.0
+      ],
+      "size": [
+       20.0,
+       4.0,
+       4.0
+      ]
+     }
+    },
+    "operation": 1
+   }
+  },
+  {
+   "name": "issue1059_grazing_bar_union_alpha-0.1_beta30",
+   "note": "#1059 / WR-410 probe geometry (crates/solidcore/tests/issue_1059_grazing_edge_crossing_probe.rs): box A [0,10]^3 united with a 20 x 4 x 4 bar centred on the origin, tilted -0.1 degrees about y and turned 30 degrees about z, then moved by (5, 5, 8): its top edges pierce A's top face at a shallow angle. At the default fixes (upstream behaviour) this compares the port with the C++; Kernel::fixes.boolean_vertex_by_best_crossing changes the result's last digits here (2026-10-26).",
+   "inputs": {
+    "api": "measured",
+    "a": {
+     "kind": "box",
+     "origin": [
+      0.0,
+      0.0,
+      0.0
+     ],
+     "size": [
+      10.0,
+      10.0,
+      10.0
+     ]
+    },
+    "b": {
+     "kind": "moved",
+     "steps": [
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         1.0,
+         0.0
+        ],
+        "angle_deg": -0.1
+       }
+      },
+      {
+       "rotate": {
+        "point": [
+         0.0,
+         0.0,
+         0.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ],
+        "angle_deg": 30.0
+       }
+      },
+      {
+       "translate": {
+        "vector": [
+         5.0,
+         5.0,
+         8.0
+        ]
+       }
+      }
+     ],
+     "brep": {
+      "kind": "box",
+      "origin": [
+       -10.0,
+       -2.0,
+       -2.0
+      ],
+      "size": [
+       20.0,
+       4.0,
+       4.0
+      ]
+     }
+    },
+    "operation": 1
+   }
+  }
+ ]
+}
