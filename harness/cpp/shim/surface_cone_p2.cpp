@@ -463,6 +463,7 @@ enum : int32_t
     ED_SCALE_LAST = 2, // (x, y, z, w) * f on the last generator-direction row
     ED_MOVE_ALL = 3,   // R p + w t on every control point
     ED_FLATTEN = 4,    // z = 0 on every control point
+    ED_SCALE_LAST_XY = 5, // scale x/y on the last row, preserving z and weight
 };
 
 // Reaches the protected constructors and members.
@@ -743,6 +744,11 @@ void edit_nurb(Rd& rd, gw_SURFACE* sur, bool swap)
             else if (kind == ED_FLATTEN)
             {
                 p.z = 0.0;
+            }
+            else if (kind == ED_SCALE_LAST_XY && last)
+            {
+                p.x *= f;
+                p.y *= f;
             }
         }
 }
