@@ -49,7 +49,7 @@ fn schemas_and_the_key_check_agree() {
     );
     assert_keys(
         input_schema_for::<CylinderParams>(),
-        &["axis", "base", "body_name", "body_names", "diameter", "height", "name", "operation", "participants", "radius", "targets"],
+        &["axis", "base", "body_name", "body_names", "diameter", "height", "name", "operation", "participants", "radius", "references", "targets"],
     );
     assert_keys(
         input_schema_for::<SphereParams>(),

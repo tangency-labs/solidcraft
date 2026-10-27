@@ -189,6 +189,12 @@ pub struct CylinderParams {
     #[serde(default, deserialize_with = "present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "AxisDir")]
     pub axis: Option<AxisDir>,
+    /// Up to two straight edges of the face it stands on, each `{edge: [x, y, z], distance: expr}`
+    /// (as `solid.hole`'s): the base centre goes that far from each edge's line, in the face's
+    /// plane, and follows the edges. With a numeric `base` only.
+    #[serde(default)]
+    #[schemars(with = "Option<Vec<serde_json::Value>>")]
+    pub references: Option<serde_json::Value>,
     /// How the cylinder combines with existing bodies. Default: new.
     #[serde(default)]
     pub operation: Option<OperationParam>,
