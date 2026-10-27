@@ -1061,6 +1061,216 @@ fn horn_torus_written_as_one_spline_face() {
     assert!(rel(measure(&imp.bodies[0].body).unwrap().volume, v) < 1e-3);
 }
 
+/// How a torus-capped cylinder ([`torus_capped_cylinder`]) ends.
+enum Tip {
+    /// The tube's quarter from its outside over to its top, at `z`, and a disc there of radius `r`.
+    Disc { z: f64, r: f64 },
+    /// The tube on to where it meets the axis: the pole, a vertex at height `apex` on the axis
+    /// reached by the tube's meridian as the torus face's seam, or (`seam` false) not, its one
+    /// bound the circle at z = 0.
+    Pole { apex: f64, seam: bool },
+}
+
+/// A cylinder about Z of radius `major + minor` from z = -2 to 0, its top a torus about Z with
+/// those radii (`torus`: the surface entity at #5 on placement #4) ending as `tip` says.
+fn torus_capped_cylinder(torus: &str, major: f64, minor: f64, tip: Tip) -> String {
+    let outer = major + minor;
+    let mut t = String::from(HEAD);
+    t += "#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=DIRECTION('',(0.,0.,1.));\n#3=DIRECTION('',(1.,0.,0.));\n#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n";
+    t += &format!("{torus}\n#6=CYLINDRICAL_SURFACE('',#4,{outer:.16});\n");
+    t += "#7=CARTESIAN_POINT('',(0.,0.,-2.));\n#8=AXIS2_PLACEMENT_3D('',#7,#2,#3);\n#9=PLANE('',#8);\n";
+    t += &format!(
+        "#13=CARTESIAN_POINT('',({outer:.16},0.,-2.));\n#14=VERTEX_POINT('',#13);\n#15=CARTESIAN_POINT('',({outer:.16},0.,0.));\n#16=VERTEX_POINT('',#15);\n"
+    );
+    t += &format!(
+        "#19=CIRCLE('',#8,{outer:.16});\n#20=EDGE_CURVE('',#14,#14,#19,.T.);\n#21=CIRCLE('',#4,{outer:.16});\n#22=EDGE_CURVE('',#16,#16,#21,.T.);\n"
+    );
+    t += "#25=VECTOR('',#2,1.);\n#26=LINE('',#13,#25);\n#27=EDGE_CURVE('',#14,#16,#26,.T.);\n";
+    t += "#40=ORIENTED_EDGE('',*,*,#20,.F.);\n#41=EDGE_LOOP('',(#40));\n#42=FACE_OUTER_BOUND('',#41,.T.);\n#43=ADVANCED_FACE('',(#42),#9,.F.);\n";
+    t += "#44=ORIENTED_EDGE('',*,*,#20,.T.);\n#45=ORIENTED_EDGE('',*,*,#27,.T.);\n#46=ORIENTED_EDGE('',*,*,#22,.F.);\n#47=ORIENTED_EDGE('',*,*,#27,.F.);\n";
+    t += "#48=EDGE_LOOP('',(#44,#45,#46,#47));\n#49=FACE_OUTER_BOUND('',#48,.T.);\n#50=ADVANCED_FACE('',(#49),#6,.T.);\n#51=ORIENTED_EDGE('',*,*,#22,.T.);\n";
+    // The tube's meridian at u = 0 from (outer, 0, 0) to `end`, the torus face's seam: centre
+    // (major, 0, 0), angle from X towards Z (its axis -Y).
+    let meridian = |t: &mut String, end: [f64; 2]| {
+        *t += &format!("#17=CARTESIAN_POINT('',({:.16},0.,{:.16}));\n#18=VERTEX_POINT('',#17);\n", end[0], end[1]);
+        *t += &format!(
+            "#28=CARTESIAN_POINT('',({major:.16},0.,0.));\n#29=DIRECTION('',(0.,-1.,0.));\n#30=AXIS2_PLACEMENT_3D('',#28,#29,#3);\n#31=CIRCLE('',#30,{minor:.16});\n#32=EDGE_CURVE('',#16,#18,#31,.T.);\n"
+        );
+        *t += "#52=ORIENTED_EDGE('',*,*,#32,.T.);\n#54=ORIENTED_EDGE('',*,*,#32,.F.);\n";
+    };
+    let faces = match tip {
+        Tip::Disc { z, r } => {
+            meridian(&mut t, [r, z]);
+            t += &format!("#10=CARTESIAN_POINT('',(0.,0.,{z:.16}));\n#11=AXIS2_PLACEMENT_3D('',#10,#2,#3);\n#12=PLANE('',#11);\n");
+            t += &format!("#23=CIRCLE('',#11,{r:.16});\n#24=EDGE_CURVE('',#18,#18,#23,.T.);\n#53=ORIENTED_EDGE('',*,*,#24,.F.);\n");
+            t += "#55=EDGE_LOOP('',(#51,#52,#53,#54));\n#56=FACE_OUTER_BOUND('',#55,.T.);\n#57=ADVANCED_FACE('',(#56),#5,.T.);\n";
+            t += "#58=ORIENTED_EDGE('',*,*,#24,.T.);\n#59=EDGE_LOOP('',(#58));\n#60=FACE_OUTER_BOUND('',#59,.T.);\n#61=ADVANCED_FACE('',(#60),#12,.T.);\n";
+            "#43,#50,#57,#61"
+        }
+        Tip::Pole { apex, seam } => {
+            if seam {
+                meridian(&mut t, [0.0, apex]);
+                t += "#55=EDGE_LOOP('',(#51,#52,#54));\n";
+            } else {
+                t += "#55=EDGE_LOOP('',(#51));\n";
+            }
+            t += "#56=FACE_OUTER_BOUND('',#55,.T.);\n#57=ADVANCED_FACE('',(#56),#5,.T.);\n";
+            "#43,#50,#57"
+        }
+    };
+    t += &format!("#62=CLOSED_SHELL('',({faces}));\n#63=MANIFOLD_SOLID_BREP('Pin',#62);\n#64=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#63),#70);\n");
+    t += &context(70, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+    t += TAIL;
+    t
+}
+
+/// The one closed body of `text`, its volume and area against the closed forms; `warnings`
+/// the import's warnings.
+fn assert_closed_measures(text: &str, volume: f64, area: f64, warnings: &[&str]) {
+    let imp = step_import(text).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert_eq!(imp.warnings, warnings, "{:?}", imp.warnings);
+    assert!(imp.bodies[0].closed);
+    let m = measure(&imp.bodies[0].body).unwrap();
+    assert!(rel(m.volume, volume) < 1e-3, "volume {} vs {volume}", m.volume);
+    assert!(rel(m.area, area) < 1e-3, "area {} vs {area}", m.area);
+}
+
+/// A horn torus (major radius = minor, its tube touching its axis) as a round of radius 1 on a
+/// cylinder of radius 2, from the cylinder's top edge over to a disc of radius 1 at z = 1 (a
+/// round pin tip). Under the round, the solid's radius at height z is 1 + √(1 − z²):
+/// V = 8π + π∫₀¹(1 + √(1 − z²))² dz = 8π + π(5/3 + π/2); the round's area is
+/// 2π∫₀^{π/2}(1 + cos v) dv = π² + 2π, with the cylinder's 8π and the discs' 4π and π.
+#[test]
+fn horn_torus_round_on_a_pin_imports_whole() {
+    use std::f64::consts::PI;
+    let t = torus_capped_cylinder("#5=TOROIDAL_SURFACE('',#4,1.,1.);", 1.0, 1.0, Tip::Disc { z: 1.0, r: 1.0 });
+    assert_closed_measures(&t, 8.0 * PI + PI * (5.0 / 3.0 + PI / 2.0), 15.0 * PI + PI * PI, &[]);
+}
+
+/// The volume and area of a spindle torus's pin end ([`Tip::Pole`]): in the meridian plane the
+/// disc of radius `r` about (`major`, 0) above z = 0 and right of the axis, which the tube meets
+/// at z = c = √(r² − R²) (cos v = −R/r). With s = √(r² − z²) and S(a) = ∫₀^a s dz =
+/// (a√(r² − a²) + r² asin(a/r))/2: V = π∫₀^c (R + s)² dz + π∫_c^r 4Rs dz =
+/// π(R²c + r²c − c³/3 + 2R·S(c)) + 4πR(S(r) − S(c)); area 2πr(R·acos(−R/r) + c).
+fn pin_end(major: f64, r: f64) -> (f64, f64) {
+    use std::f64::consts::PI;
+    let c = (r * r - major * major).sqrt();
+    let s = |a: f64| 0.5 * (a * (r * r - a * a).max(0.0).sqrt() + r * r * (a / r).asin());
+    let volume = PI * (major * major * c + r * r * c - c.powi(3) / 3.0 + 2.0 * major * s(c)) + 4.0 * PI * major * (s(r) - s(c));
+    (volume, 2.0 * PI * r * (major * (-major / r).acos() + c))
+}
+
+/// A spindle torus (major radius below the minor, its tube across its axis) as a pin's end: the
+/// apple's part from the cylinder at z = 0 up over the tube's top and down to where the tube
+/// meets the axis, a pole in a dimple ([`pin_end`], with the cylinder's side and its disc).
+/// Major 1, minor 2 (the tube meets the axis at z = √3: V = 3√3π + 8π²/3, area
+/// 4π(2π/3 + √3)), written as a TOROIDAL_SURFACE (as SolidWorks writes it) and as the schema's
+/// DEGENERATE_TOROIDAL_SURFACE, its apple selected; with a seam to the pole, and with the
+/// circle at z = 0 its one bound (the reader adds the seam).
+#[test]
+fn spindle_torus_pin_tip_imports_whole() {
+    use std::f64::consts::PI;
+    let s3 = 3f64.sqrt();
+    let (volume, area) = pin_with_cylinder(1.0, 2.0);
+    assert!(rel(volume, 18.0 * PI + 3.0 * s3 * PI + 8.0 * PI * PI / 3.0) < 1e-12 && rel(area, 21.0 * PI + 4.0 * PI * (2.0 * PI / 3.0 + s3)) < 1e-12);
+    for torus in ["#5=TOROIDAL_SURFACE('',#4,1.,2.);", "#5=DEGENERATE_TOROIDAL_SURFACE('',#4,1.,2.,.T.);"] {
+        for (seam, warnings) in [(true, &[][..]), (false, &["solid 'Pin': 1 seam edges added to faces that wind around their surface"][..])] {
+            let t = torus_capped_cylinder(torus, 1.0, 2.0, Tip::Pole { apex: s3, seam });
+            assert_closed_measures(&t, volume, area, warnings);
+        }
+    }
+}
+
+/// [`pin_end`] on its cylinder from z = -2 ([`torus_capped_cylinder`]): its volume and area.
+fn pin_with_cylinder(major: f64, minor: f64) -> (f64, f64) {
+    use std::f64::consts::PI;
+    let (v, a) = pin_end(major, minor);
+    let outer = major + minor;
+    (v + 2.0 * PI * outer * outer, a + 4.0 * PI * outer + PI * outer * outer)
+}
+
+/// A nearly round pin end as SolidWorks writes it: a spindle torus of major radius 0.005 and
+/// minor 0.345 on a cylinder of radius 0.35, its apple's part in two halves (u in [0, π] and
+/// [π, 2π]) between the meridians at u = 0 and π, which meet at an apex vertex written at the
+/// tube's top, z = 0.345: 3.6e-5 mm above the pole (z = √(0.345² − 0.005²)), in a file of
+/// uncertainty 1e-5 mm. The meridians end 1.7e-6 rad short of the pole, where the tube's
+/// circle about the axis is 1.2e-6 mm across: a pole to within the uncertainty, so each half's
+/// loop jumps from one meridian to the other there. Volume and area as [`pin_end`].
+#[test]
+fn nearly_round_spindle_torus_pin_end_in_halves_imports_whole() {
+    let (major, minor) = (0.005, 0.345);
+    let outer = major + minor;
+    let mut t = String::from(HEAD);
+    t += "#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=DIRECTION('',(0.,0.,1.));\n#3=DIRECTION('',(1.,0.,0.));\n#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n";
+    // The torus's angle from 45° below X: the halves are u in [π/4, 5π/4] and [5π/4, 9π/4] on
+    // it, three quarters of its NURBS form each, the meridians two apart.
+    t += "#88=DIRECTION('',(0.7071067811865476,-0.7071067811865476,0.));\n#89=AXIS2_PLACEMENT_3D('',#1,#2,#88);\n";
+    t += &format!("#5=TOROIDAL_SURFACE('',#89,{major:.16},{minor:.16});\n#6=CYLINDRICAL_SURFACE('',#4,{outer:.16});\n");
+    t += "#7=CARTESIAN_POINT('',(0.,0.,-2.));\n#8=AXIS2_PLACEMENT_3D('',#7,#2,#3);\n#9=PLANE('',#8);\n";
+    t += &format!(
+        "#13=CARTESIAN_POINT('',({outer:.16},0.,-2.));\n#14=VERTEX_POINT('',#13);\n#15=CARTESIAN_POINT('',({outer:.16},0.,0.));\n#16=VERTEX_POINT('',#15);\n"
+    );
+    t += &format!(
+        "#65=CARTESIAN_POINT('',({:.16},0.,0.));\n#66=VERTEX_POINT('',#65);\n#17=CARTESIAN_POINT('',(0.,0.,{minor:.16}));\n#18=VERTEX_POINT('',#17);\n",
+        -outer
+    );
+    t += &format!("#19=CIRCLE('',#8,{outer:.16});\n#20=EDGE_CURVE('',#14,#14,#19,.T.);\n#21=CIRCLE('',#4,{outer:.16});\n");
+    t += "#22=EDGE_CURVE('',#16,#66,#21,.T.);\n#67=EDGE_CURVE('',#66,#16,#21,.T.);\n#25=VECTOR('',#2,1.);\n#26=LINE('',#13,#25);\n#27=EDGE_CURVE('',#14,#16,#26,.T.);\n";
+    // The meridians, each angle from -Z: at u = 0 about (major, 0, 0) towards X (axis -Y); at
+    // u = π about (-major, 0, 0) towards -X (axis +Y).
+    t += "#82=DIRECTION('',(0.,0.,-1.));\n";
+    t += &format!(
+        "#28=CARTESIAN_POINT('',({major:.16},0.,0.));\n#29=DIRECTION('',(0.,-1.,0.));\n#30=AXIS2_PLACEMENT_3D('',#28,#29,#82);\n#31=CIRCLE('',#30,{minor:.16});\n#32=EDGE_CURVE('',#16,#18,#31,.T.);\n"
+    );
+    t += &format!(
+        "#80=CARTESIAN_POINT('',({:.16},0.,0.));\n#81=DIRECTION('',(0.,1.,0.));\n#83=AXIS2_PLACEMENT_3D('',#80,#81,#82);\n#84=CIRCLE('',#83,{minor:.16});\n#85=EDGE_CURVE('',#66,#18,#84,.T.);\n",
+        -major
+    );
+    t += "#40=ORIENTED_EDGE('',*,*,#20,.F.);\n#41=EDGE_LOOP('',(#40));\n#42=FACE_OUTER_BOUND('',#41,.T.);\n#43=ADVANCED_FACE('',(#42),#9,.F.);\n";
+    t += "#44=ORIENTED_EDGE('',*,*,#20,.T.);\n#45=ORIENTED_EDGE('',*,*,#27,.T.);\n#46=ORIENTED_EDGE('',*,*,#67,.F.);\n#47=ORIENTED_EDGE('',*,*,#22,.F.);\n#48=ORIENTED_EDGE('',*,*,#27,.F.);\n";
+    t += "#49=EDGE_LOOP('',(#44,#45,#46,#47,#48));\n#50=FACE_OUTER_BOUND('',#49,.T.);\n#51=ADVANCED_FACE('',(#50),#6,.T.);\n";
+    t += "#52=ORIENTED_EDGE('',*,*,#22,.T.);\n#53=ORIENTED_EDGE('',*,*,#85,.T.);\n#54=ORIENTED_EDGE('',*,*,#32,.F.);\n#55=EDGE_LOOP('',(#52,#53,#54));\n#56=FACE_OUTER_BOUND('',#55,.T.);\n#57=ADVANCED_FACE('',(#56),#5,.T.);\n";
+    t += "#58=ORIENTED_EDGE('',*,*,#67,.T.);\n#59=ORIENTED_EDGE('',*,*,#32,.T.);\n#60=ORIENTED_EDGE('',*,*,#85,.F.);\n#61=EDGE_LOOP('',(#58,#59,#60));\n#62=FACE_OUTER_BOUND('',#61,.T.);\n#63=ADVANCED_FACE('',(#62),#5,.T.);\n";
+    t += "#64=CLOSED_SHELL('',(#43,#51,#57,#63));\n#86=MANIFOLD_SOLID_BREP('Pin',#64);\n#87=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#86),#70);\n";
+    t += &context(70, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))").replace("LENGTH_MEASURE(1.E-6)", "LENGTH_MEASURE(1.E-5)");
+    t += TAIL;
+    let (volume, area) = pin_with_cylinder(major, minor);
+    assert_closed_measures(&t, volume, area, &[]);
+}
+
+/// The lemon of a spindle torus (the tube's part across the axis: a closed surface with a pole
+/// at each end), one face bounded by its meridian used both ways, written with a negative major
+/// radius (-1, minor 2: the tube's centre on the other side of the axis, as some writers have
+/// it) and as the schema's DEGENERATE_TOROIDAL_SURFACE with its lemon selected (major radius 1,
+/// where the lemon is the tube's far side, R + r cos v < 0, and the surface's normal
+/// ∂S/∂u × ∂S/∂v points into it: `same_sense` .F.). Its radius at height z is √(4 − z²) − 1
+/// for |z| ≤ √3: V = π∫(5 − z² − 2√(4 − z²)) dz = π(6√3 − 8π/3); area
+/// 2π∫_{−π/3}^{π/3}(2 cos v − 1)·2 dv = 4π(2√3 − 2π/3).
+#[test]
+fn spindle_torus_lemon_with_a_negative_major_radius_imports_whole() {
+    use std::f64::consts::PI;
+    let s3 = 3f64.sqrt();
+    for (torus, sense) in [("#5=TOROIDAL_SURFACE('',#4,-1.,2.);", "T"), ("#5=DEGENERATE_TOROIDAL_SURFACE('',#4,1.,2.,.F.);", "F")] {
+        let mut t = String::from(HEAD);
+        t += "#1=CARTESIAN_POINT('',(0.,0.,0.));\n#2=DIRECTION('',(0.,0.,1.));\n#3=DIRECTION('',(1.,0.,0.));\n#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);\n";
+        t += torus;
+        // The meridian at u = 0: the circle about (-1, 0, 0) from v = -π/3 to π/3, angle from X
+        // towards Z (its axis -Y).
+        t += &format!(
+            "\n#6=CARTESIAN_POINT('',(0.,0.,{:.16}));\n#7=VERTEX_POINT('',#6);\n#8=CARTESIAN_POINT('',(0.,0.,{s3:.16}));\n#9=VERTEX_POINT('',#8);\n",
+            -s3
+        );
+        t += "#10=CARTESIAN_POINT('',(-1.,0.,0.));\n#11=DIRECTION('',(0.,-1.,0.));\n#12=AXIS2_PLACEMENT_3D('',#10,#11,#3);\n#13=CIRCLE('',#12,2.);\n#14=EDGE_CURVE('',#7,#9,#13,.T.);\n";
+        t += "#15=ORIENTED_EDGE('',*,*,#14,.T.);\n#16=ORIENTED_EDGE('',*,*,#14,.F.);\n#17=EDGE_LOOP('',(#15,#16));\n#18=FACE_OUTER_BOUND('',#17,.T.);\n";
+        t += &format!("#19=ADVANCED_FACE('',(#18),#5,.{sense}.);\n");
+        t += "#20=CLOSED_SHELL('',(#19));\n#21=MANIFOLD_SOLID_BREP('Lemon',#20);\n#22=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#21),#70);\n";
+        t += &context(70, "(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.))");
+        t += TAIL;
+        assert_closed_measures(&t, PI * (6.0 * s3 - 8.0 * PI / 3.0), 4.0 * PI * (2.0 * s3 - 2.0 * PI / 3.0), &[]);
+    }
+}
+
 /// Booleans and blends build the same body every time, so an export is byte-identical from
 /// run to run (an export once listed a boolean's faces in hash order of their addresses). The
 /// tee of oracle 35 with its rolling-ball fillet round the junction.
@@ -1744,7 +1954,13 @@ fn step_conformance_parts_read_into_smlib() {
 /// looser than its context. The patch has no closed-form pcurves for them, so SMLib makes them,
 /// on the surface, and they lie `dz` from their edges.
 fn dome_with_edges_raised(dz: f64) -> String {
-    let z = |i: usize, j: usize| if (1..=2).contains(&i) && (1..=2).contains(&j) { 6.0 } else { 0.0 };
+    patch_with_edges_raised(dz, false)
+}
+
+/// [`dome_with_edges_raised`], or with `flat` the plane z = 0 in its place: its edges' pcurves
+/// are then their control points' projections onto it, in closed form.
+fn patch_with_edges_raised(dz: f64, flat: bool) -> String {
+    let z = |i: usize, j: usize| if !flat && (1..=2).contains(&i) && (1..=2).contains(&j) { 6.0 } else { 0.0 };
     let mut t = String::from(HEAD);
     let mut rows = Vec::new();
     for i in 0..4 {
@@ -1754,10 +1970,14 @@ fn dome_with_edges_raised(dz: f64) -> String {
         }
         rows.push(format!("({})", row.join(",")));
     }
-    t += &format!(
-        "#10=B_SPLINE_SURFACE_WITH_KNOTS('',3,3,({}),.UNSPECIFIED.,.F.,.F.,.F.,(4,4),(4,4),(0.,1.),(0.,1.),.UNSPECIFIED.);\n",
-        rows.join(",")
-    );
+    if flat {
+        t += "#10=PLANE('',#13);\n#11=CARTESIAN_POINT('',(0.,0.,0.));\n#12=DIRECTION('',(0.,0.,1.));\n#14=DIRECTION('',(1.,0.,0.));\n#13=AXIS2_PLACEMENT_3D('',#11,#12,#14);\n";
+    } else {
+        t += &format!(
+            "#10=B_SPLINE_SURFACE_WITH_KNOTS('',3,3,({}),.UNSPECIFIED.,.F.,.F.,.F.,(4,4),(4,4),(0.,1.),(0.,1.),.UNSPECIFIED.);\n",
+            rows.join(",")
+        );
+    }
     // The boundary, counter-clockwise from above: (i, j) runs i = 0 → 3 at j = 0, j = 0 → 3 at
     // i = 3, then back; each side's control points are the patch's, raised.
     let sides: [[(usize, usize); 4]; 4] =
@@ -1805,4 +2025,17 @@ fn edges_written_off_their_spline_face_carry_their_gap_as_their_tolerance() {
         Err(e) => e.to_string().contains("off the face's surface"),
     };
     assert!(refused, "{far:?}");
+}
+
+#[test]
+fn spline_edges_off_their_plane_by_less_than_the_file_states_get_their_closed_form() {
+    // 0.8e-6 mm off, inside the file's 1e-6 mm but past the half of it a closed-form pcurve is
+    // checked within: each edge's distance from the plane, measured first, is its tolerance
+    // (with margin), and the face reads with its pcurves the edges' projections. A plane has no
+    // parameter box for SMLib to make pcurves in, so without them the face is refused.
+    let imp = step_import(&patch_with_edges_raised(0.8e-6, true)).unwrap();
+    assert_eq!(imp.bodies.len(), 1, "{:?}", imp.warnings);
+    assert!(imp.warnings.iter().any(|w| w.contains("4 edges lie off their faces' surfaces")), "{:?}", imp.warnings);
+    let m = measure(&imp.bodies[0].body).unwrap();
+    assert!(rel(m.area, 900.0) < 1e-6, "{}", m.area);
 }

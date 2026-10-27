@@ -83,8 +83,13 @@ const MAX_VERTEX_GAP: f64 = 1.0;
 const MAX_EDGE_GAP: f64 = 1.0;
 /// Intervals an edge's curve is measured over against each face's surface it bounds.
 const EDGE_GAP_SAMPLES: usize = 16;
-/// An edge's tolerance over the largest gap measured on its samples, as a vertex's is.
+/// An edge's tolerance over the largest gap measured between its pcurves and its curve, as the
+/// record check measures it: with margin, as a vertex's.
 const EDGE_GAP_MARGIN: f64 = 1.5;
+/// An edge's tolerance over its largest distance from a face's surface, measured before its
+/// pcurve is made: a closed-form pcurve is accepted within half its edge's tolerance
+/// (`pcurve::pcurves_within`), so the tolerance goes past twice the distance.
+const EDGE_SURFACE_MARGIN: f64 = 3.0;
 
 /// A solid (or sheet) read from the file.
 #[derive(Clone, Debug)]
@@ -445,16 +450,58 @@ impl<'b, 'a> Builder<'b, 'a> {
         Ok(())
     }
 
-    /// Edge `e`'s tolerance covers `gap` (with margin): refused if far off.
-    fn cover_edge(&mut self, e: u32, gap: f64) -> R<()> {
+    /// An edge's curve as the file has it may lie off a face's surface by more than the file's
+    /// uncertainty states (a B-spline edge whose control points stand 9 µm off its plane, in a
+    /// file that states 10 µm, gets no closed-form pcurve, which is checked within half that).
+    /// On a surface whose nearest point is in closed form (a plane, cylinder, cone, sphere or
+    /// torus) the edge's distance from it is measured along the edge before its pcurve is made,
+    /// and the edge's tolerance covers it. A spline face's gaps are measured on the pcurves its
+    /// kernel makes (`raise_edges`): an iterative nearest point may settle elsewhere on it.
+    fn measure_edges(&mut self, surface: &BSurface, edge_loops: &[Vec<(u32, bool)>]) -> R<()> {
+        if !matches!(
+            surface,
+            BSurface::Plane { .. }
+                | BSurface::PlaneThrough { .. }
+                | BSurface::Cylinder { .. }
+                | BSurface::Cone { .. }
+                | BSurface::Sphere { .. }
+                | BSurface::Torus { .. }
+        ) {
+            return Ok(());
+        }
+        let on = SurfaceEval::new(surface).map_err(|m| m.to_string())?;
+        for l in edge_loops {
+            for &(e, _) in l {
+                let edge = self.edges.get(e as usize).ok_or("edge reference")?;
+                let (curve, [t0, t1]) = match &edge.form {
+                    Some((c, i)) => (c, *i),
+                    None => (&edge.curve, edge.interval),
+                };
+                let eval = CurveEval::new(curve).map_err(|m| m.to_string())?;
+                let mut gap = 0.0f64;
+                for k in 0..=EDGE_GAP_SAMPLES {
+                    let t = t0 + (t1 - t0) * (k as f64 / EDGE_GAP_SAMPLES as f64);
+                    let Some(p) = eval.point(t) else { continue };
+                    // A point with no nearest point is the pcurves' to refuse, with why.
+                    let Some(s) = on.project(p, None, f64::INFINITY).and_then(|q| on.point(q)) else { continue };
+                    gap = gap.max(s.dist(p));
+                }
+                self.cover_edge(e, gap, EDGE_SURFACE_MARGIN)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Edge `e`'s tolerance covers `gap` with `margin`: refused if far off.
+    fn cover_edge(&mut self, e: u32, gap: f64, margin: f64) -> R<()> {
         let Some(x) = self.edges.get_mut(e as usize) else { return Err("edge reference".into()) };
-        if gap <= x.tolerance {
+        if margin * gap <= x.tolerance {
             return Ok(());
         }
         if !(gap <= MAX_EDGE_GAP) {
             return Err(format!("an edge lies {gap} mm off the face's surface"));
         }
-        x.tolerance = EDGE_GAP_MARGIN * gap;
+        x.tolerance = margin * gap;
         self.raised_edges.insert(e);
         Ok(())
     }
@@ -483,7 +530,7 @@ impl<'b, 'a> Builder<'b, 'a> {
                         gap = gap.max(s.dist(p));
                     }
                 }
-                self.cover_edge(e, gap)?;
+                self.cover_edge(e, gap, EDGE_GAP_MARGIN)?;
             }
         }
         Ok(())
@@ -1082,6 +1129,8 @@ impl<'b, 'a> Builder<'b, 'a> {
             None => (None, None),
         };
         let surface = form.clone().unwrap_or_else(|| label.clone());
+        // How far each edge lies off this surface, so its closed form is checked at that.
+        self.measure_edges(&label, &edge_loops)?;
         // Closed forms where the geometry has them; the kernel makes the rest (`trims`).
         let exact = pcurve::exact_pcurves(&surface, &uses_of(&self.edges, &edge_loops, None)?, tol, box_on_form).map_err(|e| e.to_string())?;
         // Without a kernel, a use with neither is refused below with why.
@@ -1104,10 +1153,11 @@ impl<'b, 'a> Builder<'b, 'a> {
         // does not wrap: a loop around a closed spline surface without a seam edge jumps across
         // its domain.
         let natural = surface.natural();
-        // At a pole (where the surface collapses to a point across a direction) a loop may jump
-        // in that direction: the seam's two uses meet there a period apart.
+        // At a pole (where the surface collapses to a point across a direction, to within the
+        // tolerance, as the pcurves closed the loop there) a loop may jump in that direction: the
+        // seam's two uses meet there a period apart.
         let poles = SurfaceEval::new(&surface).ok();
-        let at_pole = |uv: [f64; 2]| poles.as_ref().is_some_and(|e| e.pole(uv).iter().any(|p| *p));
+        let at_pole = |uv: [f64; 2]| poles.as_ref().is_some_and(|e| e.pole_within(uv, tol).iter().any(|p| *p));
         for (l, pc) in edge_loops.iter().zip(&pcs) {
             let mut ends = Vec::with_capacity(l.len());
             for (&(_, forward), c) in l.iter().zip(pc) {
@@ -1230,7 +1280,7 @@ fn uses_of<'e>(edges: &'e [EdgeB], edge_loops: &[Vec<(u32, bool)>], given: Optio
                 Some(g) => Some(g.get(li).and_then(|l| l.get(p)).ok_or("a pcurve the kernel did not make")?),
                 None => None,
             };
-            u.push(EdgeUse { edge: e, curve, interval, forward, tolerance: 0.0, given });
+            u.push(EdgeUse { edge: e, curve, interval, forward, tolerance: edge.tolerance, given });
         }
         uses.push(u);
     }

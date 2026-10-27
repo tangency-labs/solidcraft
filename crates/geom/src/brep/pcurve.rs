@@ -529,19 +529,7 @@ impl On {
     /// parameter by half its period (or across its range) moves the point by no more than `reach`
     /// at its speed there. There the parameter is as free as at the pole itself.
     fn pole(&self, uv: [f64; 2], reach: f64) -> [bool; 2] {
-        let mut out = self.surface.pole(uv);
-        let Some((_, su, sv)) = self.surface.derivs(uv[0], uv[1]) else { return out };
-        for (d, speed) in [su.len(), sv.len()].into_iter().enumerate() {
-            let span = match (self.dom.period.get(d).copied().flatten(), self.dom.range.get(d).copied().flatten()) {
-                (Some(period), _) => 0.5 * period,
-                (None, Some((a, b))) => (b - a).abs(),
-                (None, None) => continue,
-            };
-            if let Some(flag) = out.get_mut(d) {
-                *flag |= speed * span <= reach;
-            }
-        }
-        out
+        self.surface.pole_within(uv, reach)
     }
 
     /// The loop's uses moved by whole periods so each starts where the one before it ends (in

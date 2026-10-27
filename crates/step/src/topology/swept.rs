@@ -323,21 +323,99 @@ fn revolution(profile: &Curve, axis: &Axis1, ext: &Extent) -> R<BSurface> {
                 Some(r) => Span::Open { inner: r, outer: r },
                 None => span(&ts, &seam, is_closed(c))?,
             };
-            // Stop where the profile crosses the axis outside the face.
+            // Stop where the profile meets the axis outside the face: a circle or ellipse that
+            // meets it is its whole arc on the face's side, pole to pole (closed form), so a face
+            // with one bound around the axis reaches its pole and nothing folds over; another
+            // profile stops where it crosses.
+            let face_mid = match s {
+                Span::Open { inner, .. } => 0.5 * (inner.0 + inner.1),
+                Span::Turn { start } => start + (mid - start).rem_euclid(TAU),
+            };
+            let arc = conic_side_arc(c, o, e, face_mid);
             let side = |t: f64| probe(t).map(|q| (q - o).dot(e));
-            let s = match s {
-                Span::Open { inner, outer } => {
+            let s = match (s, arc) {
+                (_, Some(arc)) => Span::Open { inner: arc, outer: arc },
+                (Span::Open { inner, outer }, None) => {
                     let lo = crossing(&side, inner.0, outer.0).unwrap_or(outer.0);
                     let hi = crossing(&side, inner.1, outer.1).unwrap_or(outer.1);
                     Span::Open { inner, outer: (lo, hi) }
                 }
-                turn => turn,
+                (turn, None) => turn,
             };
-            bounded(c, s)?
+            let curve = bounded(c, s)?;
+            match arc {
+                Some(arc) => clip_form(curve, arc)?,
+                None => curve,
+            }
         }
     };
     let identity = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]];
     Ok(BSurface::PlacedRevolution { profile: Box::new(curve), origin: p3(o), axis: p3(k), matrix: identity, forward: false })
+}
+
+/// A torus whose tube reaches its axis (a spindle or horn torus: major radius at most the
+/// minor, or written with a negative major radius, its tube on the other side of the axis) as
+/// what it is, its tube's meridian circle revolved about its axis: ISO 10303-42 gives the torus
+/// `C + (R + r cos v)(cos u X + sin u Y) + r sin v Z`, the revolution of the circle about `C`'s
+/// Z through `C + R X` with the same normal (∂S/∂u × ∂S/∂v). The revolution keeps the tube's
+/// arc on the face's side of the axis, pole to pole (`revolution`): the face's boundary, not a
+/// degenerate torus's `select_outer`, says which part (the apple or the lemon) it is on.
+fn torus_revolved(position: &Placement, major: f64, minor: f64, ext: &Extent) -> R<BSurface> {
+    // The circle in the X–Z half-plane: its parameter from X towards Z, as the torus's v.
+    let circle = Curve::Circle {
+        position: Placement {
+            origin: crate::geom::add(position.origin, crate::geom::scale(position.ref_direction, major)),
+            axis: crate::geom::scale(position.y(), -1.0),
+            ref_direction: position.ref_direction,
+        },
+        radius: minor,
+    };
+    revolution(&circle, &Axis1 { origin: position.origin, direction: position.axis }, ext)
+}
+
+/// The arc of a circle or ellipse profile on the positive side of the plane through the axis
+/// point `o` square to `e` (the face's side of its axis), as angles: the one round `near`, its
+/// ends where the profile meets that plane; `None` for another profile, or one that does not
+/// meet it. On the conic `O + a cos t X + b sin t Y` the side is `s₀ + A cos t + B sin t =
+/// s₀ + M cos(t − φ)`, zero at `φ ± acos(−s₀/M)`; a profile that only touches the axis (a horn
+/// torus's tube) has its arc a whole turn, both ends at the touching point.
+fn conic_side_arc(c: &Curve, o: Vec3, e: Vec3, near: f64) -> Option<(f64, f64)> {
+    let (position, a, b) = match c {
+        Curve::Circle { position, radius } => (position, *radius, *radius),
+        Curve::Ellipse { position, semi_axis_1, semi_axis_2 } => (position, *semi_axis_1, *semi_axis_2),
+        _ => return None,
+    };
+    let s0 = (v3(position.origin) - o).dot(e);
+    let (ca, cb) = (a * v3(position.ref_direction).dot(e), b * v3(position.y()).dot(e));
+    let m = ca.hypot(cb);
+    let ratio = -s0 / m;
+    if !(m > 0.0 && (-1.0..=1.0).contains(&ratio)) {
+        return None;
+    }
+    let half = ratio.acos();
+    let phi = cb.atan2(ca);
+    let centre = phi + ((near - phi) / TAU).round() * TAU;
+    (centre.is_finite() && half > 0.0).then_some((centre - half, centre + half))
+}
+
+/// A conic's NURBS form (on its quarter grid) cut to the angles `arc` where it reaches past
+/// them: the same curve at the same parameters (`bspline::segment`, exact knot insertion), so
+/// it keeps the grid its edges' forms share and stops where the profile meets the axis.
+fn clip_form(curve: BCurve, (a0, a1): (f64, f64)) -> R<BCurve> {
+    use solidcraft_geom::bspline::{HPoint, segment};
+    let BCurve::RationalSpline { knots, homogeneous } = curve else { return Ok(curve) };
+    let (Some(&k0), Some(&k1)) = (knots.first(), knots.last()) else { return Err("a profile without knots".into()) };
+    let (lo, hi) = (solidcraft_geom::brep::form::param(a0).max(k0), solidcraft_geom::brep::form::param(a1).min(k1));
+    if lo <= k0 && hi >= k1 {
+        return Ok(BCurve::RationalSpline { knots, homogeneous });
+    }
+    if !(lo < hi) {
+        return Err(unsupported("a revolved profile on its axis"));
+    }
+    let degree = knots.len().checked_sub(homogeneous.len() + 1).ok_or("a profile's knots")?;
+    let ctrl: Vec<HPoint> = homogeneous.iter().map(|h| HPoint { x: h[0], y: h[1], z: h[2], w: h[3] }).collect();
+    let (knots, ctrl) = segment(degree, &knots, &ctrl, lo, hi).map_err(|e| format!("a revolved profile cut at its axis: {e}"))?;
+    Ok(BCurve::RationalSpline { knots, homogeneous: ctrl.iter().map(|h| [h.x, h.y, h.z, h.w]).collect() })
 }
 
 /// Going from `from` (where `side` is positive or zero) towards `to`, the first parameter
@@ -561,11 +639,13 @@ fn map_surface_in(s: &Surface, ext: &Extent, tol: f64, depth: usize, reversed: &
         Surface::Sphere { position, radius } => BSurface::Sphere { frame: frame(position), radius: *radius },
         Surface::Torus { position, major_radius, minor_radius } => {
             if !(major_radius > minor_radius) {
-                return Err(unsupported("a spindle or horn torus"));
+                return torus_revolved(position, *major_radius, *minor_radius, ext);
             }
             BSurface::Torus { frame: frame(position), major_radius: *major_radius, minor_radius: *minor_radius }
         }
-        Surface::DegenerateTorus { .. } => return Err(unsupported("DEGENERATE_TOROIDAL_SURFACE")),
+        Surface::DegenerateTorus { position, major_radius, minor_radius, .. } => {
+            return torus_revolved(position, *major_radius, *minor_radius, ext);
+        }
         Surface::BSpline(b) => super::map_bspline_surface(b)?,
         Surface::RectangularTrimmed { basis, .. } => map_surface_in(basis, ext, tol, depth + 1, reversed)?,
         Surface::Revolution { profile, axis } => revolution(profile, axis, ext)?,

@@ -530,6 +530,21 @@ fn shift(c: &mut Curve2, by: [f64; 2]) {
     }
 }
 
+/// A pcurve whose interval ends a rounding short of its edge's (as a kernel that snaps an edge's
+/// end to its knot hands it back) is read at its end: the record validates and checks.
+#[test]
+fn a_pcurve_a_rounding_short_of_its_edge_is_read_at_its_end() {
+    let mut b = sheet();
+    let Curve2::Spline { knots, .. } = pcurve_of(&mut b, 0, 0) else { panic!("a spline pcurve") };
+    let end = *knots.last().unwrap();
+    let short = end - 1e-11 * end.abs().max(1.0);
+    for k in knots.iter_mut().filter(|k| **k == end) {
+        *k = short;
+    }
+    b.validate().unwrap();
+    b.check_geometry().unwrap();
+}
+
 /// One geometric defect each, structurally valid: every one is refused, naming the record.
 #[test]
 fn geometric_defects_are_refused_by_record() {
@@ -843,4 +858,17 @@ fn a_face_box_reaches_its_boundary_extremes() {
     let cut = Curve::Ellipse { frame: Frame { origin: [0., 0., 30.], x_axis: [c, 0., c], y_axis: [0., 1., 0.] }, radii: [r * 2f64.sqrt(), r] };
     let [_, v] = form::extent(&cylinder, &[vec![(&cut, [0.1, 0.1 + TAU], true)]]).expect("an extent");
     assert!((v[0] - 10.0).abs() < 1e-9 && (v[1] - 50.0).abs() < 1e-9, "{v:?}");
+}
+
+/// A point next to a sphere's pole is a pole to within the reach it is given: crossing half a
+/// turn of longitude there moves it about π times its distance from the axis, and no further.
+#[test]
+fn a_point_beside_a_pole_is_one_within_its_reach() {
+    let sphere = eval::SurfaceEval::new(&Surface::Sphere { frame: a_frame(), radius: 2. }).unwrap();
+    let near = [0.3, FRAC_PI_2 - 1e-7];
+    // 2e-7 mm from the axis: half a turn moves it 2π·1e-7.
+    assert_eq!(sphere.pole(near), [false, false]);
+    assert_eq!(sphere.pole_within(near, 1e-6), [true, false]);
+    assert_eq!(sphere.pole_within(near, 1e-7), [false, false]);
+    assert_eq!(sphere.pole_within([0.3, 0.2], 1e-3), [false, false]);
 }

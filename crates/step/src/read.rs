@@ -668,8 +668,10 @@ impl<'a> Reader<'a> {
             "TOROIDAL_SURFACE" | "DEGENERATE_TOROIDAL_SURFACE" => {
                 let major_radius = self.length(p.get(2), "major radius")?;
                 let minor_radius = positive(self.length(p.get(3), "minor radius")?, "torus minor radius")?;
-                if major_radius < 0.0 {
-                    return Err("torus major radius must not be negative".into());
+                // A negative major radius (outside the schema, which some writers use for a
+                // spindle torus) is the same formula: its tube on the other side of the axis.
+                if !major_radius.is_finite() {
+                    return Err("torus major radius must be finite".into());
                 }
                 let position = position(self)?;
                 if e.name() == "DEGENERATE_TOROIDAL_SURFACE" {

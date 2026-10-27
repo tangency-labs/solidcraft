@@ -12,7 +12,7 @@
 //! an edge's for its pcurves, an edge's and its vertex's together where they meet, a vertex's on
 //! its surface. A point that cannot be evaluated is an error, never a panic.
 use super::eval::{CurveEval, SurfaceEval};
-use super::{Brep, Loop};
+use super::{Brep, Curve2, Loop};
 use crate::Vec3;
 
 /// Where a record disagrees with itself.
@@ -84,6 +84,14 @@ fn v3(p: [f64; 3]) -> Vec3 {
 fn unevaluable(record: Record, what: impl std::fmt::Display) -> Mismatch {
     Mismatch { record, problem: Problem::Unevaluable(what.to_string()) }
 }
+/// A use's pcurve at its edge's parameter `t`. The pcurve's interval is its edge's to within
+/// rounding ([`Brep::validate`], `PCURVE_INTERVAL`), so an edge parameter just past it is read at
+/// the pcurve's end.
+fn on_pcurve(pc: &Curve2, t: f64) -> Option<[f64; 2]> {
+    let [a, b] = pc.interval()?;
+    pc.eval(t.clamp(a.min(b), a.max(b)))
+}
+
 /// `gap` within `tolerance` (a non-finite gap never is).
 fn within(record: Record, what: &'static str, gap: f64, tolerance: f64) -> Result<()> {
     if gap <= tolerance { Ok(()) } else { Err(Mismatch { record, problem: Problem::Off { what, gap, tolerance } }) }
@@ -147,7 +155,7 @@ impl Brep {
                             let [t0, t1] = e.interval;
                             let mut uv = [[0.0; 2]; 3];
                             for (k, t) in [t0, 0.5 * (t0 + t1), t1].into_iter().enumerate() {
-                                let q = u.pcurve.eval(t).ok_or_else(|| unevaluable(at, format!("the pcurve has no point at {t}")))?;
+                                let q = on_pcurve(&u.pcurve, t).ok_or_else(|| unevaluable(at, format!("the pcurve has no point at {t}")))?;
                                 let s = surface.point(q).ok_or_else(|| unevaluable(at, format!("the surface has no point at {q:?}")))?;
                                 let (Some(c), Some(what), Some(slot)) = (p.get(k), PCURVE_POINTS.get(k), uv.get_mut(k)) else {
                                     return Err(unevaluable(at, "pcurve sample"));
@@ -181,7 +189,7 @@ impl Brep {
                             for k in 0..AREA_SAMPLES {
                                 let f = k as f64 / AREA_SAMPLES as f64;
                                 let t = if u.forward { t0 + (t1 - t0) * f } else { t1 - (t1 - t0) * f };
-                                ring.push(u.pcurve.eval(t).ok_or_else(|| unevaluable(at, format!("the pcurve has no point at {t}")))?);
+                                ring.push(on_pcurve(&u.pcurve, t).ok_or_else(|| unevaluable(at, format!("the pcurve has no point at {t}")))?);
                             }
                         }
                         let area = signed_area(&ring);
