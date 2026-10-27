@@ -65,12 +65,16 @@
 //!   flags only set the owner bits (the value moved in is already this object's
 //!   copy) and the owner flag is kept as data: it decides
 //!   [`SrfInVolume::owns_surface`], [`SrfInVolume::owns_volume`] and whether
-//!   `Reverse`, `SwapUV` and `TrimWithDomain` are allowed, as upstream. The copy
-//!   constructor clones both parts (upstream copies owned parts and shares the
-//!   rest; the result is the same geometry) and recomputes the owner flag as
-//!   upstream. The owner links of the contained objects (`SetOwner(this)`), the
-//!   notifications (`Notify`) and the `SmContext` arguments (they only choose where
-//!   upstream allocates) are not modelled.
+//!   `Reverse`, `SwapUV` and `TrimWithDomain` are allowed, as upstream. `Clone` is the
+//!   copy constructor: an owned base surface gets the ordinary copy constructor, which
+//!   fixes near-coincident knots up, a borrowed one an exact copy (upstream shares it,
+//!   so no copy fix-up ever reaches it), the volume is copied in either case (upstream
+//!   also copies it for owner flag 1, whose result does not own it) and the owner flag
+//!   is recomputed as upstream. The exact copy is infallible and does not re-check the
+//!   nesting: the constructors, the setters and the database reader keep the graph
+//!   within the bound it relies on. The owner links of the contained objects
+//!   (`SetOwner(this)`), the notifications (`Notify`) and the `SmContext` arguments
+//!   (they only choose where upstream allocates) are not modelled.
 //! - **`Evaluate`.** Out-params become the matrix `D[u][v]` of the requested size.
 //!   Upstream's flat arrays are reproduced index for index, including the stride
 //!   quirks of the special cases (`bOnlyUpperHalf == FALSE`, unequal orders). The
@@ -299,7 +303,7 @@ fn copy_volume(volume: &Volume) -> Result<Volume> {
 /// A surface mapped through a volume (`SmSrfInVolume`): the base surface lives in
 /// the volume's parameter space or in-space and is mapped to the volume's final
 /// out-space.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct SrfInVolume {
     /// `m_pSurface`: the base surface.
     surface: Box<Surface>,
@@ -311,6 +315,37 @@ pub struct SrfInVolume {
     /// `m_lOwnerFlag`: bit 1 owns the surface, bit 2 owns the volume (only the
     /// values 1 and 3, and 2 and 3, count as owning).
     owner_flag: u64,
+}
+
+/// The copy constructor: an owned base surface gets the ordinary copy constructor, a
+/// borrowed one is an exact copy (upstream shares it, so the knot fix-up of a copy never
+/// reaches it), the volume is always copied (upstream copies it whenever the original
+/// owns either part, also for owner flag 1, whose result does not own that copy), and
+/// the owner flag becomes 3, 1, 2 or 0 from what the original owns.
+impl Clone for SrfInVolume {
+    fn clone(&self) -> Self {
+        let owns_surface = self.owns_surface();
+        let owns_volume = self.owns_volume();
+        Self {
+            surface: Box::new(if owns_surface {
+                (*self.surface).clone()
+            } else {
+                // infallible: the constructors, setters and database reader bounded it
+                self.surface.clone_exact_bounded()
+            }),
+            in_param_space: self.in_param_space,
+            volume: self.volume.clone(),
+            owner_flag: if owns_surface && owns_volume {
+                3
+            } else if owns_surface {
+                1
+            } else if owns_volume {
+                2
+            } else {
+                0
+            },
+        }
+    }
 }
 
 impl From<SrfInVolume> for Surface {

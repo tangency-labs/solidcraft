@@ -11,6 +11,7 @@
 //! | [`compute_crvs_normal`]                           | `SmCurve::ComputeCrvsNormal` (static)            |
 //! | [`crvs_fix_gaps`], [`FixedGaps`]                  | `SmCurve::CrvsFixGaps` (static)                  |
 //! | [`Curve::find_parameter_at_arc_length`], [`ArcLengthParameter`] | `SmCurve::FindParameterAtArcLength` |
+//! | `Curve::find_parameter_at_arc_length_with_zone_tol` (crate helper) | `SmCurve::FindParameterAtArcLength` (edge-owned curve) |
 //! | [`Curve::local_point_solve`], [`PointSolveOptions`] | `SmCurve::LocalPointSolve`                     |
 //! | [`Curve::local_curve_solve`], [`local_curve_solve`] | `SmCurve::LocalCurveSolve`                     |
 //! | [`local_curve_intersect`], [`CurveIntersection`]  | `SmCurve::LocalCurveIntersect`                   |
@@ -35,6 +36,10 @@
 //!   its values); the solution objects are the caller's handles. A start parameter
 //!   below the first knot when stepping backwards (an out of bounds read upstream) is
 //!   `InvalidInput`; a failed `SetMinMax` keeps the previous interval, as upstream.
+//! - **Owner tolerance.** The crate-private arc-length entry point carries the
+//!   owning edge's resolved zone tolerance through every length cache. This is
+//!   independent of Newton's integration accuracy; the public entry point keeps
+//!   the ordinary unresolved-owner behavior.
 //! - **Generic operands.** [`local_curve_solve`] and [`local_curve_intersect`] are
 //!   generic over [`CurveEvaluate`] (so the ellipse and B-spline callers can use
 //!   them). The `SM_SO_3D_SIGNED_DIRECTED_MINIMIZE` operation builds
@@ -468,6 +473,18 @@ impl Curve {
         start_param: f64,
         arc_length: f64,
     ) -> Result<ArcLengthParameter> {
+        self.find_parameter_at_arc_length_with_zone_tol(k, start_param, arc_length, None)
+    }
+
+    /// Finds an arc-length parameter using the owning edge's resolved zone
+    /// tolerance for each temporary length cache.
+    pub(crate) fn find_parameter_at_arc_length_with_zone_tol(
+        &self,
+        k: &Kernel,
+        start_param: f64,
+        arc_length: f64,
+        owner_zone_tol_3d: Option<f64>,
+    ) -> Result<ArcLengthParameter> {
         let mut out = ArcLengthParameter {
             end_param: 0.0,
             past_end: false,
@@ -539,7 +556,7 @@ impl Curve {
             set_min_max(&mut interval, knot(ik)?, start_param);
         }
 
-        if let Some(l) = ignored(self.length(k, &interval, tol))? {
+        if let Some(l) = ignored(self.length_with_zone_tol(k, &interval, tol, owner_zone_tol_3d))? {
             span_len = l;
         }
 
@@ -567,7 +584,9 @@ impl Curve {
             }
 
             set_min_max(&mut interval, knot(ik)?, knot(ik + 1)?);
-            if let Some(l) = ignored(self.length(k, &interval, tol))? {
+            if let Some(l) =
+                ignored(self.length_with_zone_tol(k, &interval, tol, owner_zone_tol_3d))?
+            {
                 span_len = l;
             }
 
@@ -593,7 +612,7 @@ impl Curve {
         } else {
             set_min_max(&mut interval, curr_t, start_param);
         }
-        let mut curr_len = self.length(k, &interval, tol)?;
+        let mut curr_len = self.length_with_zone_tol(k, &interval, tol, owner_zone_tol_3d)?;
         if !increasing {
             curr_len = -curr_len;
         }
@@ -665,7 +684,7 @@ impl Curve {
                 set_min_max(&mut interval, curr_t, start_param);
             }
 
-            curr_len = self.length(k, &interval, tol)?;
+            curr_len = self.length_with_zone_tol(k, &interval, tol, owner_zone_tol_3d)?;
 
             if !increasing {
                 curr_len = -curr_len;

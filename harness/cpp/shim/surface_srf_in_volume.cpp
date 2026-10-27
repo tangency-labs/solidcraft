@@ -69,6 +69,7 @@ enum : int32_t
     OP_SET_VOLUME = 17,
     OP_MIRROR = 18,
     OP_EXACT = 19,
+    OP_COPY_CTOR = 20, // the copy constructor: SmSrfInVolume(const SmSrfInVolume&)
     OP_READ_DB = 40,  // static: SmSrfInVolume::ReadFromDB
     OP_WRITE_DB = 41, // generator helper: WriteToDB of the object
 };
@@ -635,6 +636,26 @@ void siv_op(int32_t op, Rd& rd, const SmContext& ctx, Built& bb, std::vector<dou
                 delete cvol;
             delete cc;
         }
+        break;
+    }
+    case OP_COPY_CTOR:
+    {
+        // SmSrfInVolume(const SmSrfInVolume&): shares a part the original does not own,
+        // copies an owned one, and copies the volume whenever the original owns either
+        // part (also for owner flag 1, whose result does not own that copied volume);
+        // the owner flag becomes 1, 2, 3 or 0 from what the original owns.
+        SmSrfInVolume* cc = new (ctx) SmSrfInVolume(*c);
+        o.push_back(0.0);
+        put_state(o, cc);
+        o.push_back((*c == *(SmSurface*)cc) ? 1.0 : 0.0);
+        // the copy deletes what it owns; free a copied part it does not own
+        SmSurface* csur = cc->GetSurface();
+        SmVolume* cvol = cc->GetVolume();
+        if (csur != c->GetSurface() && cc->OwnsSurface() == FALSE)
+            delete csur;
+        if (cvol != c->GetVolume() && cc->OwnsVolume() == FALSE)
+            delete cvol;
+        delete cc;
         break;
     }
     case OP_EQUAL:

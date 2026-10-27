@@ -25,6 +25,7 @@
 //! | [`Curve::is_domain_boundary`]                | `SmCurve::IsDomainBoundary` (virtual: base, ellipse, line) |
 //! | [`is_periodic`], [`Curve::is_periodic`]      | `SmCurve::IsPeriodic`                          |
 //! | [`Curve::length`], [`Curve::length_base`]    | `SmCurve::Length` (virtual: base, line)        |
+//! | `Curve::length_with_zone_tol` (crate helper) | `SmCurve::Length` (edge-owned curve)          |
 //! | [`local_property_analysis`]                  | `SmCurve::LocalPropertyAnalysis`               |
 //! | [`CcTangentIntEnfo`] (`EvalNFunctions`)      | `SmCCTangentIntENFO::Evaluate` (in `p3`)       |
 //! | [`CcIntersectEnfo::evaluate_equations`]      | `SmCCIntersectENFO::Evaluate`                  |
@@ -56,9 +57,9 @@
 //!   has the kernel's context).
 //! - **Owner tolerance.** Upstream builds the cache on the curve object itself, so a
 //!   curve that defines an edge's shape tessellates with half the edge's tolerance
-//!   (`SmTol::GetApproxTol3d(&m_crCurve)`). The cache holds an owner-free copy and
-//!   no `Brep`, so a caller holding the B-rep passes the edge's tolerance
-//!   ([`make_curve_cache_with_zone_tol`]); it is part of the memo key.
+//!   (`SmTol::GetApproxTol3d(&m_crCurve)`). The caches hold no `Brep`, so a caller
+//!   holding the B-rep passes the edge's tolerance (`make_curve_cache_with_zone_tol`
+//!   or `Curve::length_with_zone_tol`); it is part of the memo key where cached.
 //! - **Curve lists.** `CrvsCleanup` and `RemoveDuplicateCurves` take owned lists;
 //!   removed curves are dropped (`bDelCrv` is always true; `NULL` entries are
 //!   `None`). `CrvsCleanup` casts the curves around a removed one to
@@ -1645,9 +1646,21 @@ impl Curve {
     ///
     /// Those of [`Curve::length_base`].
     pub fn length(&self, k: &Kernel, interval: &Extent1d, desired_accuracy: f64) -> Result<f64> {
+        self.length_with_zone_tol(k, interval, desired_accuracy, None)
+    }
+
+    /// Arc length with the owning edge's resolved zone tolerance, independent of
+    /// the desired integration accuracy. Retains the virtual line override.
+    pub(crate) fn length_with_zone_tol(
+        &self,
+        k: &Kernel,
+        interval: &Extent1d,
+        desired_accuracy: f64,
+        owner_zone_tol_3d: Option<f64>,
+    ) -> Result<f64> {
         match self.kind() {
             CurveKind::Line(l) => Ok(l.length(interval)),
-            _ => self.length_base(k, interval, desired_accuracy),
+            _ => self.length_base_with_zone_tol(k, interval, desired_accuracy, owner_zone_tol_3d),
         }
     }
 
@@ -1666,6 +1679,16 @@ impl Curve {
         k: &Kernel,
         interval: &Extent1d,
         desired_accuracy: f64,
+    ) -> Result<f64> {
+        self.length_base_with_zone_tol(k, interval, desired_accuracy, None)
+    }
+
+    fn length_base_with_zone_tol(
+        &self,
+        k: &Kernel,
+        interval: &Extent1d,
+        desired_accuracy: f64,
+        owner_zone_tol_3d: Option<f64>,
     ) -> Result<f64> {
         // Now compute a reasonable a chord height tolerance based on
         // approximate total size of the curve.
@@ -1694,6 +1717,7 @@ impl Curve {
                 min_parametric_ratio: 0.0001,
             },
         );
+        cache.set_owner_zone_tol_3d(owner_zone_tol_3d);
         let degenerate = interval.length() < EFF_ZERO;
         let tessellated = degenerate || ignored(cache.tessellate(k))?.is_some();
 

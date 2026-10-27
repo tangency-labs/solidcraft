@@ -340,8 +340,13 @@ pub fn combine_with_notifications(
             .curve
             .as_ref()
             .ok_or_else(|| SolidError::invalid_input(OP, "common edge without curve"))?;
-        let length = crate::error::ignored(curve.length(k, &record.interval, target.tolerance))?
-            .unwrap_or(0.0);
+        let length = crate::error::ignored(curve.length_with_zone_tol(
+            k,
+            &record.interval,
+            target.tolerance,
+            Some(record.tolerance),
+        ))?
+        .unwrap_or(0.0);
         if length > target.minimum_edge_length {
             // Retain a long common edge; GlueVertices will close it.
             common = None;

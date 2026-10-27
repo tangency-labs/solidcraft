@@ -28,6 +28,32 @@
 //! transform, and 60 `CreateMirrorSurface` cases (fixed seed). Every run has at least
 //! [`MIN_GENERATED`] generated cases; generated inputs the ffi wrapper rejects are
 //! redrawn.
+//!
+//! `CopyCtor` runs the native copy constructor `SmSrfInVolume(const SmSrfInVolume&)`
+//! directly, not through `Copy`, and compares the copy's state, the original-versus-copy
+//! equality, against `Surface::clone` of the object moved into a [`Surface`]. Its
+//! fixtures (`fixtures/surface.srf_in_volume/copy_ctor_knots.json`) write raw
+//! near-coincident knots back over the base surface after construction, so an owned and
+//! a borrowed base surface take different upstream paths. The generator does not produce
+//! this op. Observed before the port's ownership-aware `Clone`: the original 15
+//! fixtures gave 7 passes and 8 failures (owner flags 0 and 2); the native copy keeps
+//! `out[62] = 0.5` for the raw U pair and `out[118] = 0.5` for the raw V pair, where the
+//! derived clone had fixed the borrowed base surface up to `0.49999999399`. After the
+//! fix all 17 fixtures pass, including the plain-volume owner 0/1 controls, and the whole
+//! unit ran 2149 cases: 2074 with values, 0 failures, 0 deferrals, maximum relative
+//! error 0, and 75 platform skips — this runner's existing `ReadDb` skips (native
+//! `istream` extraction differs between libc++ and libstdc++), none added here; the
+//! canonical x86-64 CI run is authoritative. Owner 0 and 1 objects with a plain
+//! `SmVolume` head are legal inputs: the base `SmVolume::Copy` returns `SM_ERR` without
+//! setting the output pointer, so a copy that does not own the volume shares it; owner 2
+//! and 3 are rejected (an owning copy would delete the original's volume), and so is the
+//! constructor's own copy of a plain volume.
+//!
+//! Virtual `Copy` invokes the same copy constructor, so its plain-volume domain
+//! also admits effective owner flags 0/1 and rejects owning results 2/3.
+//! `fixtures/surface.srf_in_volume/copy_volume_domain.json` compares real copied
+//! surface and volume-chain state, including raw knots and a non-identity next map.
+//! Existing generated inputs retain their copyable-head sampling domain.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -204,6 +230,9 @@ enum OpIn {
         t: f64,
     },
     Copy,
+    /// The copy constructor `SmSrfInVolume(const SmSrfInVolume&)`, invoked directly,
+    /// against Rust's `Surface::clone` of the same object.
+    CopyCtor,
     Equal {
         other: Option<SivIn>,
     },
@@ -332,6 +361,7 @@ fn op_of(op: &OpIn) -> Op {
         OpIn::Transform { .. } => Op::Transform,
         OpIn::Split { .. } => Op::Split,
         OpIn::Copy => Op::Copy,
+        OpIn::CopyCtor => Op::CopyCtor,
         OpIn::Equal { .. } => Op::Equal,
         OpIn::SetOwner { .. } => Op::SetOwner,
         OpIn::MakeOwner => Op::MakeOwner,
@@ -396,7 +426,12 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
             v.push(*tol);
         }
         OpIn::Reverse { v_dir } => v.push(b(*v_dir)),
-        OpIn::SwapUv | OpIn::Copy | OpIn::MakeOwner | OpIn::Exact | OpIn::ReadDb { .. } => {}
+        OpIn::SwapUv
+        | OpIn::Copy
+        | OpIn::CopyCtor
+        | OpIn::MakeOwner
+        | OpIn::Exact
+        | OpIn::ReadDb { .. } => {}
         OpIn::Trim { dom } => v.extend_from_slice(dom),
         OpIn::Transform {
             origin,
@@ -573,6 +608,34 @@ fn siv_of(s: &Surface) -> Result<&SrfInVolume, HarnessError> {
         SurfaceKind::SrfInVolume(x) => Ok(x),
         _ => Err(harness("not a surface in volume")),
     }
+}
+
+/// Rejects `CopyCtor` object blocks whose native copy constructor would copy a domain
+/// upstream leaves undefined: a cylinder base (the ffi wrapper admits it for the
+/// evaluation ops only) and a plain `SmVolume` head that the constructor copies or that
+/// the copy constructor's result owns (the base `Copy` fails without setting the output
+/// pointer, so an owning result would delete the original's volume; an owner-1 result
+/// only shares it). Mirrors the ffi wrapper's guards, so the Rust side never reaches its
+/// clone on an input the shim must not see.
+fn copy_ctor_defined(c: &SivIn) -> Result<(), HarnessError> {
+    if matches!(c.surface, SurfIn::Cylinder { .. }) {
+        return Err(harness("copy constructor: cylinder base is undefined"));
+    }
+    if c.volume.first().is_some_and(|m| m.kind == 0) {
+        // the constructor itself copies the volume for copy flags 2 and 3
+        if c.copy == 2 || c.copy == 3 {
+            return Err(harness(
+                "copy constructor: the constructor copies a plain volume",
+            ));
+        }
+        // the result owns the volume only for owner flags 2 and 3
+        if matches!(c.owner | c.copy, 2 | 3) {
+            return Err(harness(
+                "copy constructor: the copy owns a plain volume upstream cannot copy",
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn pv(o: &mut Vec<f64>, v: Vec3) {
@@ -785,7 +848,11 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
                 s.degree(SurfParamType::U) as f64,
                 s.degree(SurfParamType::V) as f64,
             ]);
-            put_dom(&mut o, &s.natural_uv_domain_with_nurb(&k).map_err(|e| HarnessError::new(e.to_string()))?);
+            put_dom(
+                &mut o,
+                &s.natural_uv_domain_with_nurb(&k)
+                    .map_err(|e| HarnessError::new(e.to_string()))?,
+            );
             put_dom(&mut o, &step);
             put_dom(&mut o, &max);
             o.extend([b(c.owns_surface()), b(c.owns_volume())]);
@@ -892,6 +959,19 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             let c = tri!(o, s.copy(&k));
             o.push(0.0);
             put_state(&mut o, siv_of(&c)?);
+        }
+        OpIn::CopyCtor => {
+            copy_ctor_defined(&i.siv)?;
+            let c = siv_of(&s)?;
+            // the Rust copy constructor: `Surface::clone` of the object moved into a
+            // `Surface` (not `SrfInVolume::copy`)
+            let copy = s.clone();
+            let cc = siv_of(&copy)?;
+            o.push(0.0);
+            put_state(&mut o, cc);
+            o.push(b(c.approx_eq(&k, cc).map_err(|e| {
+                harness(format!("copy constructor equality: {e}"))
+            })?));
         }
         OpIn::Equal { other } => {
             let c = siv_of(&s)?;
@@ -1426,6 +1506,7 @@ fn patch(rng: &mut Rng, p: [[[f64; 3]; 2]; 2]) -> SurfIn {
     let (u1, v1) = (u0 + rng.uniform(0.5, 3.0), v0 + rng.uniform(0.5, 3.0));
     let row = |r: [[f64; 3]; 2]| r.iter().map(|q| [q[0], q[1], q[2], 1.0]).collect();
     SurfIn::Bspline {
+        raw_knots: false,
         bss: BssIn {
             oob: false,
             form: default_form(),
@@ -1653,6 +1734,7 @@ fn exact_volume_cases() -> Result<Vec<Case>, HarnessError> {
         }
         let row = |r: [[f64; 3]; 2]| r.iter().map(|q| [q[0], q[1], q[2], 1.0]).collect();
         SurfIn::Bspline {
+            raw_knots: false,
             bss: BssIn {
                 oob: false,
                 form: default_form(),
@@ -1924,6 +2006,11 @@ impl UnitDiff for Runner {
     fn generate(&self, rng: &mut Rng) -> Option<Value> {
         for _ in 0..64 {
             let i = gen_case(rng);
+            // Keep generated cases in their established copyable-head domain;
+            // the newly admitted plain-volume Copy domain has named fixtures.
+            if matches!(i.op, OpIn::Copy) && i.siv.volume.first().is_some_and(|map| map.kind == 0) {
+                continue;
+            }
             let Ok((op, input)) = cpp_input(&i) else {
                 continue;
             };
