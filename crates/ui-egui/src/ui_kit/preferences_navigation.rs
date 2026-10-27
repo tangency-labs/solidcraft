@@ -188,7 +188,7 @@ pub(crate) fn live_axis_bar_in(ui: &Ui, live_rect: Rect, value: f32, dead_zone: 
 
 /// Compact per-axis gain uses a consistent two-decimal specimen and the real accepted range.
 pub(crate) fn settings_axis_gain(ui: &mut Ui, gain: &mut f32) -> egui::Response {
-    if !ui.is_visible() || crate::prefs_search::suppress_chrome(ui) {
+    if crate::prefs_search::querying(ui) && (!ui.is_visible() || crate::prefs_search::suppress_chrome(ui)) {
         return crate::prefs_search::hidden_response(ui);
     }
     let response =

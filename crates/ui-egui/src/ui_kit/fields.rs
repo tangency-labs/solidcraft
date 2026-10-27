@@ -292,7 +292,11 @@ pub(crate) fn dropdown_menu_with_close_behavior(
     add: impl FnOnce(&mut Ui),
 ) -> Response {
     crate::prefs_search::note_current(ui, current);
-    if !ui.is_visible() || (crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[current])) {
+    // Only a search probe may skip the real control. A dialog's first frame is not visible yet,
+    // and a stand-in there makes the next frame too short to show OK.
+    if crate::prefs_search::querying(ui)
+        && (!ui.is_visible() || (crate::prefs_search::suppress_chrome(ui) && !crate::prefs_search::texts_hit(ui, &[current])))
+    {
         return crate::prefs_search::hidden_response(ui);
     }
     let response = egui::ComboBox::from_id_salt(id)

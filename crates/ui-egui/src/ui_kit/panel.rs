@@ -958,8 +958,11 @@ fn page_list_sized<S>(
     on_select: Option<fn(&mut S)>,
 ) {
     let t = Tokens::get();
+    // The search strip, the gap under it, and the following item spacing sit above the page.
+    // They must not eat the rows the page already had, or the graphics checkboxes fall out of view.
+    let header_band = if header.is_some() { t.control_height + t.form_gap_y + t.space_8 } else { 0.0 };
     let height = (dimension(ui.ctx().content_rect().height()) - t.form_header_height - t.form_footer_height - t.space_24 * 3.0)
-        .clamp(0.0, t.control_height * rows);
+        .clamp(0.0, t.control_height * rows + header_band);
     let (body, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), height), egui::Sense::hover());
     let width = (t.form_label_width * 2.0 + t.space_24 * 2.0).min(body.width());
     let nav = egui::Rect::from_min_size(body.min, vec2(width, body.height()));

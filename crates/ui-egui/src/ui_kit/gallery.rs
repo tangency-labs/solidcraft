@@ -1092,6 +1092,9 @@ const ELEMENTS: &[Element] = &[
     element!("section", "dialog:section:Advanced", Some("dialog:section:Advanced"), |ui, _| {
         section(ui, "gallery", "Advanced", false, |_| {});
     }),
+    element!("search_fold", "prefs:search:shortcuts", Some("prefs:search:shortcuts"), |ui, _| {
+        search_fold(ui, "Shortcuts", 3, |_| {});
+    }),
     element!("divider", "dialog:divider:gallery", None, |ui, _| {
         divider(ui, "gallery");
     }),
