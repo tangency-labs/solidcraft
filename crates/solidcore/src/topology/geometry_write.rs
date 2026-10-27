@@ -3,8 +3,9 @@
 //! surfaces of revolution and extrusion and their analytic kinds.
 //!
 //! Upstream: `source/SMLib/src/SmSurfOfRevolution.cpp`, `SmSurfOfExtrusion.cpp`,
-//! `SmCone.cpp`, `SmCylinder.cpp`, `SmSphere.cpp`, `SmTorus.cpp` (and the `WriteToDB`
-//! overrides of the other curve and surface classes, dispatched to).
+//! `SmCone.cpp`, `SmCylinder.cpp`, `SmSphere.cpp`, `SmTorus.cpp`, `SmCrvOnSurf.cpp`,
+//! `SmTangentField.cpp` (and the `WriteToDB` overrides of the other curve and surface
+//! classes, dispatched to).
 //!
 //! | Rust                         | Upstream                                         |
 //! |------------------------------|--------------------------------------------------|
@@ -15,12 +16,15 @@
 //! | `write_cone` (private)       | `SmCone::WriteToDB`, `SmCylinder::WriteToDB`     |
 //! | `write_sphere` (private)     | `SmSphere::WriteToDB`                            |
 //! | `write_torus` (private)      | `SmTorus::WriteToDB`                             |
+//! | `write_crv_on_surf` (private) | `SmCrvOnSurf::WriteToDB`                        |
+//! | `write_tangent_field` (private) | `SmTangentField::WriteToDB`                   |
 //!
 //! Deviations:
 //! - **Kinds without a writer.** The write side is not in the plan (see
 //!   `plan/findings.md`); only the kinds B-rep files hold are ported: B-spline curves,
-//!   lines, ellipses and circles; B-spline surfaces, planes, cones and cylinders,
-//!   spheres, tori, surfaces of revolution and extrusion, offset surfaces. Another
+//!   lines, ellipses and circles, curves on surfaces and tangent fields; B-spline
+//!   surfaces, planes, cones and cylinders, spheres, tori, surfaces of revolution and
+//!   extrusion, offset surfaces. Another
 //!   kind is [`SolidError::Unported`] with its `WriteToDB` symbol and unit
 //!   `(not in plan)`.
 //! - **Missing NURB.** Upstream's analytic writers ignore the status of the B-spline
@@ -33,8 +37,10 @@
 //!   constructor and the reader keep), past which the write is
 //!   [`SolidError::InvalidInput`].
 
+use crate::curve::crv_on_surf::CrvOnSurf;
 use crate::curve::curve::{Curve, CurveKind};
-use crate::error::{Result, SolidError};
+use crate::curve::tangent_field::TangentFieldCurve;
+use crate::error::{ignore_status, Result, SolidError};
 use crate::surface::cone::Cone;
 use crate::surface::sphere::Sphere;
 use crate::surface::surf_of_extrusion::SurfOfExtrusion;
@@ -82,7 +88,8 @@ pub fn write_curve_at(
         CurveKind::Offset(_) => Err(unported("SmOffsetCurve::WriteToDB")),
         CurveKind::Conic(_) => Err(unported("SmConic::WriteToDB")),
         CurveKind::CrvInVolume(_) => Err(unported("SmCrvInVolume::WriteToDB")),
-        CurveKind::CrvOnSurf(_) => Err(unported("SmCrvOnSurf::WriteToDB")),
+        CurveKind::CrvOnSurf(c) => write_crv_on_surf(c, db, version, depth),
+        CurveKind::TangentField(t) => write_tangent_field(t, db, version, depth),
         CurveKind::Parabola(_) => Err(unported("SmParabola::WriteToDB")),
         CurveKind::Composite(_) => Err(unported("SmCompositeCurve::WriteToDB")),
     }
@@ -125,6 +132,111 @@ pub fn write_surface_at(
         SurfaceKind::Step(_) => Err(unported("SmSTEPSurface::WriteToDB")),
         SurfaceKind::SrfInVolume(_) => Err(unported("SmSrfInVolume::WriteToDB")),
     }
+}
+
+/// `SmCrvOnSurf::WriteToDB`: the domain of interest and the breaks flag, the UV curve
+/// (type header with its dimension, then its record), the surface (type header, then
+/// its record) and, when the breaks are cached, their count and values.
+fn write_crv_on_surf(
+    c: &CrvOnSurf,
+    db: &mut DatabaseWriter,
+    version: u64,
+    depth: usize,
+) -> Result<()> {
+    let dom = c.uv_domain();
+    let need_breaks = i32::from(c.need_breaks());
+    if is_ascii(db) {
+        db.out_reals(&[dom.u_min(), dom.v_min(), dom.u_max(), dom.v_max()]);
+        db.out_str(" SmCrvOnSurf Domain of interest \n");
+        db.out_i64(need_breaks.into());
+        db.out_str(" SmCrvOnSurf Has breaks flag \n");
+    } else {
+        db.write_double(dom.u_min());
+        db.write_double(dom.v_min());
+        db.write_double(dom.u_max());
+        db.write_double(dom.v_max());
+        db.write_boolean(need_breaks);
+    }
+
+    // parameter space curve
+    let uv = c.uv_curve();
+    if is_ascii(db) {
+        db.out_str(" CrvOnSurf->UVCurve \n");
+    }
+    db.write_type(uv.type_code(), Some(uv.dim()));
+    write_curve_at(uv, db, version, depth + 1)?;
+
+    // compounding surface
+    if is_ascii(db) {
+        db.out_str(" CrvOnSurf->Surface \n");
+    }
+    db.write_type(c.surface().type_code(), None);
+    write_surface_at(c.surface(), db, version, depth + 1)?;
+
+    // when appropriate - breaks
+    if need_breaks == 0 {
+        let breaks = c.breaks();
+        // number of breaks
+        if is_ascii(db) {
+            db.out_u64(breaks.len() as u64);
+            db.out_str(" Number of Curve internal discontinuities\n");
+        } else {
+            db.write_long(breaks.len() as i64);
+        }
+
+        // for every break
+        if is_ascii(db) {
+            for &b in &breaks {
+                db.out_f64(b);
+                db.out_str(" ");
+            }
+            if !breaks.is_empty() {
+                db.out_str(" \n");
+            }
+        } else {
+            for &b in &breaks {
+                db.write_double(b);
+            }
+        }
+    }
+
+    // all done
+    Ok(())
+}
+
+/// `SmTangentField::WriteToDB`: the interpolation type and the start and end tangents,
+/// then the `SmCrvOnSurf` part (whose status upstream ignores: the write succeeds).
+fn write_tangent_field(
+    t: &TangentFieldCurve,
+    db: &mut DatabaseWriter,
+    version: u64,
+    depth: usize,
+) -> Result<()> {
+    let (s, e) = (t.start_tangent(), t.end_tangent());
+    if is_ascii(db) {
+        db.out_u64(t.dir_type_code());
+        db.out_str(" SmTangentField Tangent Dir Interpolation Type \n");
+        db.out_reals(&[s.x, s.y, s.z]);
+        db.out_str(" SmTangentField Start Point CrossTangent vector \n");
+        db.out_reals(&[e.x, e.y, e.z]);
+        db.out_str(" SmTangentField End Point CrossTangent vector \n");
+    } else {
+        db.write_long(t.dir_type_code() as i64);
+
+        db.write_double(s.x);
+        db.write_double(s.y);
+        db.write_double(s.z);
+
+        db.write_double(e.x);
+        db.write_double(e.y);
+        db.write_double(e.z);
+    }
+
+    // Write the base object (status ignored; an unported part still propagates)
+    ignore_status(write_crv_on_surf(t.base(), db, version, depth))?;
+
+    // all done
+    Ok(())
 }
 
 fn unported(symbol: &'static str) -> SolidError {

@@ -26,6 +26,7 @@
 #include <SmTangentField.h>
 #include <SmVector2d.h>
 #include <SmVector3d.h>
+#include <SmTArray.h>
 #include <nurbs.h>
 
 #include <sstream>
@@ -46,7 +47,8 @@ enum Op : int32_t
     OP_EQ = 3,
     OP_CREATE = 4,
     OP_READ_DB = 5,
-    OP_LAST = 5,
+    OP_WRITE_READ = 6,
+    OP_LAST = 6,
 };
 
 struct Rd
@@ -153,6 +155,107 @@ const SM_TYPE kKinds[] = {SmCurve_TYPE,        SmCrvOnSurf_TYPE,    SmTangentFie
                           SmBSplineCurve_TYPE, SmHermiteCurve_TYPE, SmLine_TYPE,
                           14000,               0};
 
+void put_bytes(std::vector<double>& o, const std::string& b)
+{
+    o.push_back((double)b.size());
+    for (unsigned char c : b)
+        o.push_back((double)c);
+}
+
+// `type ReadType+WriteToDB` of `c` (the record a file holds for a curve) into `bytes`.
+SmStatus write_curve(const SmCurve& c, SmFileType ft, ULONG version, std::string& bytes)
+{
+    std::ostringstream oss;
+    if (ft == SM_ASCII)
+    {
+        // as SmDatabaseIOFile::OpenFileForWrite
+        oss.setf(std::ios::fixed);
+        oss.precision(16);
+    }
+    SmDatabaseIOStream db(ft, &oss);
+    ULONG dim = c.GetDim();
+    SmStatus s = db.WriteType(c.GetType(), &dim);
+    if (s == SM_SUCCESS)
+        s = c.WriteToDB(db, version);
+    bytes = oss.str();
+    return s;
+}
+
+// The queries of OP_WRITE_READ on the curve read back (see the ffi module docs).
+void put_read_queries(std::vector<double>& o, const SmCurve& orig, SmCurve& c, const std::vector<double>& params,
+                      double ang, SmFileType ft, ULONG version, const SmContext& ctx)
+{
+    o.push_back((double)c.GetType());
+    for (SM_TYPE k : kKinds)
+        o.push_back(c.IsKindOf(k) ? 1.0 : 0.0);
+    SmExtent1d ivl = c.GetNaturalInterval();
+    o.push_back(ivl.GetMin());
+    o.push_back(ivl.GetMax());
+    o.push_back((c == orig) ? 1.0 : 0.0);
+    for (double t : params)
+    {
+        SmVector3d p(0.0, 0.0, 0.0);
+        SmStatus s = c.EvaluatePoint(t, p);
+        o.push_back(st(s));
+        if (s == SM_SUCCESS)
+            put_vec(o, p);
+        SmVector3d pd[3] = {SmVector3d(0.0, 0.0, 0.0), SmVector3d(0.0, 0.0, 0.0), SmVector3d(0.0, 0.0, 0.0)};
+        s = c.Evaluate(t, 1, TRUE, pd, TRUE);
+        o.push_back(st(s));
+        if (s == SM_SUCCESS)
+        {
+            put_vec(o, pd[0]);
+            put_vec(o, pd[1]);
+        }
+        s = c.Evaluate(t, 2, TRUE, pd, TRUE);
+        o.push_back(st(s));
+    }
+    // SmCrvOnSurf::CalculateContinuities on the derived object
+    SmContinuityType mn = SM_CT_UNDEFINED;
+    SmTArray<SmContinuityType> conts;
+    SmStatus s = c.CalculateContinuities(mn, conts, ang);
+    o.push_back(st(s));
+    if (s == SM_SUCCESS)
+    {
+        // The interior entries and the minimum are indeterminate for a tangent field (its
+        // Evaluate fails for 3 derivatives and the ignored EvaluateContinuity leaves
+        // eThisContinuity uninitialised, UB-263): the count and the end entries, and the
+        // minimum only without interior breaks.
+        ULONG n = conts.GetSize();
+        o.push_back((double)n);
+        if (n > 0)
+        {
+            o.push_back((double)conts[0]);
+            o.push_back((double)conts[n - 1]);
+        }
+        if (n < 3)
+            o.push_back((double)mn);
+    }
+    // SmCrvOnSurf::Copy (not overridden): a plain SmCrvOnSurf
+    SmCurve* cp = NULL;
+    s = c.Copy(ctx, cp);
+    o.push_back(st(s));
+    if (s == SM_SUCCESS && cp)
+    {
+        o.push_back((double)cp->GetType());
+        for (double t : params)
+        {
+            SmVector3d p(0.0, 0.0, 0.0);
+            SmStatus se = cp->EvaluatePoint(t, p);
+            o.push_back(st(se));
+            if (se == SM_SUCCESS)
+                put_vec(o, p);
+        }
+        delete cp;
+    }
+    // written again (the round trip)
+    std::string again;
+    s = write_curve(c, ft, version, again);
+    o.push_back(st(s));
+    if (s == SM_SUCCESS)
+        put_bytes(o, again);
+}
+
 void run(int32_t op, Rd& rd, const SmContext& ctx, std::vector<double>& o)
 {
     if (op == OP_READ_DB)
@@ -204,6 +307,82 @@ void run(int32_t op, Rd& rd, const SmContext& ctx, std::vector<double>& o)
         delete sc;
         delete base_uv;
         delete base3d;
+        delete srf;
+        return;
+    }
+
+    if (op == OP_WRITE_READ)
+    {
+        int64_t mode = rd.idx();
+        SmTangentField* tf = NULL;
+        SmCurve* uv = NULL;
+        SmCurve* others[3] = {NULL, NULL, NULL};
+        SmStatus cs = SM_SUCCESS;
+        if (mode == 0)
+            tf = read_field(rd, ctx, srf, uv, NULL);
+        else
+        {
+            double tol = rd.num();
+            others[0] = read_curve(rd, ctx);
+            uv = read_curve(rd, ctx);
+            others[1] = read_curve(rd, ctx);
+            double sp = rd.num();
+            SmOrientType so = rd.flag() ? SM_OT_OPPOSITE : SM_OT_SAME;
+            others[2] = read_curve(rd, ctx);
+            double ep = rd.num();
+            SmOrientType eo = rd.flag() ? SM_OT_OPPOSITE : SM_OT_SAME;
+            cs = SmTangentField::Create(ctx, tol, *others[0], *(SmBSplineCurve*)uv, *srf, *others[1], sp, so,
+                                        *others[2], ep, eo, tf);
+        }
+        SmFileType ft = rd.idx() == 0 ? SM_ASCII : SM_BINARY;
+        ULONG version = (ULONG)rd.idx();
+        bool cache_breaks = rd.flag();
+        double ang = rd.num();
+        int64_t np = rd.idx();
+        std::vector<double> params;
+        for (int64_t i = 0; i < np; i++)
+            params.push_back(rd.num());
+        o.push_back(st(cs));
+        if (cs == SM_SUCCESS && tf)
+        {
+            if (cache_breaks)
+            {
+                SmTArray<double> knots;
+                SmStatus ks = tf->GetKnots(knots);
+                o.push_back(st(ks));
+                if (ks == SM_SUCCESS)
+                {
+                    o.push_back((double)knots.GetSize());
+                    for (ULONG i = 0; i < knots.GetSize(); i++)
+                        o.push_back(knots[i]);
+                }
+            }
+            std::string bytes;
+            SmStatus ws = write_curve(*tf, ft, version, bytes);
+            o.push_back(st(ws));
+            if (ws == SM_SUCCESS)
+            {
+                put_bytes(o, bytes);
+                std::istringstream iss(bytes);
+                SmDatabaseIOStream db(ft, &iss);
+                SM_TYPE type = 0;
+                ULONG dim = 0;
+                SmCurve* c = NULL;
+                SmStatus rs = db.ReadType(type, &dim);
+                if (rs == SM_SUCCESS)
+                    rs = SmCurve::ReadFromDB(type, db, dim, ctx, c, version);
+                o.push_back(st(rs));
+                if (rs == SM_SUCCESS && c)
+                {
+                    put_read_queries(o, *tf, *c, params, ang, ft, version, ctx);
+                    delete c;
+                }
+            }
+            delete tf;
+        }
+        delete uv;
+        for (SmCurve* c : others)
+            delete c;
         delete srf;
         return;
     }

@@ -407,7 +407,10 @@ fn memo_pure(curve: &Curve) -> bool {
             CurveKind::Composite(cc) => {
                 stack.extend(cc.segments().iter().map(|seg| (&seg.curve, depth + 1)));
             }
-            CurveKind::Iso(_) | CurveKind::CrvOnSurf(_) | CurveKind::CrvInVolume(_) => {
+            CurveKind::Iso(_)
+            | CurveKind::CrvOnSurf(_)
+            | CurveKind::TangentField(_)
+            | CurveKind::CrvInVolume(_) => {
                 return false;
             }
         }
@@ -557,6 +560,7 @@ impl Curve {
             | CurveKind::Offset(_)
             | CurveKind::CrvInVolume(_)
             | CurveKind::CrvOnSurf(_)
+            | CurveKind::TangentField(_)
             | CurveKind::Composite(_) => curve_is_line_base(k, self, num_samples, tol),
         }
     }

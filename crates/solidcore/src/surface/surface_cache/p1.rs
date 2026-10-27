@@ -258,6 +258,7 @@ const fn bspline_curve_of(curve: &Curve) -> Option<&BSplineCurve> {
         | CurveKind::Offset(_)
         | CurveKind::CrvInVolume(_)
         | CurveKind::CrvOnSurf(_)
+        | CurveKind::TangentField(_)
         | CurveKind::Composite(_) => None,
     }
 }

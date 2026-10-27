@@ -637,6 +637,7 @@ impl<O: Copy + PartialEq> CurveCache<O> {
             | CurveKind::Offset(_)
             | CurveKind::CrvInVolume(_)
             | CurveKind::CrvOnSurf(_)
+            | CurveKind::TangentField(_)
             | CurveKind::Composite(_) => false,
         };
 
@@ -664,6 +665,7 @@ impl<O: Copy + PartialEq> CurveCache<O> {
                 | CurveKind::Offset(_)
                 | CurveKind::CrvInVolume(_)
                 | CurveKind::CrvOnSurf(_)
+                | CurveKind::TangentField(_)
                 | CurveKind::Composite(_) => None,
             };
             create_bezier_segment_block(k, nurb, &self.curve)?

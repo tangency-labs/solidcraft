@@ -460,6 +460,22 @@ impl Curve {
                     achieved_tol: Some(gap),
                 })
             }
+            // the SmCrvOnSurf override on the derived object (its Evaluate approximates)
+            CurveKind::TangentField(c) => {
+                let members = c.members();
+                let mut c = c.base().clone();
+                let (curve, gap) = c.approximate_curve_as(
+                    k,
+                    breaks,
+                    approx_tol_3d,
+                    opts.match_parameterization,
+                    Some(members),
+                )?;
+                Ok(CurveApproximation {
+                    curve: Curve::from(curve),
+                    achieved_tol: Some(gap),
+                })
+            }
             // the SmCompositeCurve override (breaks and flags unused)
             CurveKind::Composite(c) => {
                 let a = c.approximate_curve(k, approx_tol_3d)?;
@@ -2108,6 +2124,7 @@ impl Curve {
             | CurveKind::Offset(_)
             | CurveKind::CrvInVolume(_)
             | CurveKind::CrvOnSurf(_)
+            | CurveKind::TangentField(_)
             | CurveKind::Composite(_) => {
                 self.tessellate_base(k, interval, chord_height_tol, angle_tol_deg, min_segments)
             }

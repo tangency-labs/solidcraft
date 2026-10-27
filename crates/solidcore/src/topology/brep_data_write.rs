@@ -487,6 +487,7 @@ const fn bspline_curve_part(c: &Curve) -> Option<&BSplineCurve> {
         | CurveKind::Conic(_)
         | CurveKind::CrvInVolume(_)
         | CurveKind::CrvOnSurf(_)
+        | CurveKind::TangentField(_)
         | CurveKind::Composite(_) => None,
     }
 }

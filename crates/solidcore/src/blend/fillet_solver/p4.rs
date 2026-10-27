@@ -575,6 +575,7 @@ const fn bspline_curve_cast(curve: &Curve) -> Option<&BSplineCurve> {
         | CurveKind::Conic(_)
         | CurveKind::CrvInVolume(_)
         | CurveKind::CrvOnSurf(_)
+        | CurveKind::TangentField(_)
         | CurveKind::Composite(_) => None,
     }
 }

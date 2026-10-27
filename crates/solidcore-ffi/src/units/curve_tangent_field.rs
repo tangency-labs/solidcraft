@@ -21,6 +21,14 @@
 //! - `Create`: `surface tol base3d base_uv(B-spline) start_curve start_param start_opposite
 //!   end_curve end_param end_opposite` -> `status [start_tangent end_tangent]`.
 //! - `ReadDb`: `file_type dim version nbytes bytes` -> `status`.
+//! - `WriteRead`: `surface mode (field | create) file_type version cache_breaks angle_tol
+//!   nparams params` (`mode` 0: a field block, built with the data constructor; 1: a
+//!   `Create` block as for `Create`). The field is written (`WriteType` + `WriteToDB`) and
+//!   read back (`ReadType` + `SmCurve::ReadFromDB`) -> `create_status [knots_status nknots
+//!   knots (cache_breaks)] write_status [nbytes bytes read_status [type kinds(8) ivl_min
+//!   ivl_max eq_to_original per-param(ep_status [xyz] ev1_status [2 x xyz] ev2_status)
+//!   cont_status [min n conts] copy_status [copy_type per-param(status [xyz])]
+//!   rewrite_status [nbytes bytes]]]`.
 use crate::validate::{bad, euclid, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
@@ -52,6 +60,8 @@ pub enum Op {
     Create,
     /// `ReadFromDB`.
     ReadDb,
+    /// `WriteToDB` then `SmCurve::ReadFromDB`, and queries on the curve read back.
+    WriteRead,
 }
 
 impl Op {
@@ -65,6 +75,7 @@ impl Op {
             Op::Equal => 3,
             Op::Create => 4,
             Op::ReadDb => 5,
+            Op::WriteRead => 6,
         }
     }
 }
@@ -218,6 +229,28 @@ fn field(rd: &mut Reader<'_>) -> Result<CurveInfo, FfiError> {
     Ok(c)
 }
 
+/// Most parameters of a `WriteRead` op.
+pub const MAX_PARAMS: usize = 16;
+
+/// A `Create` block (after the surface); returns the base UV curve.
+fn create_block(rd: &mut Reader<'_>) -> Result<CurveInfo, FfiError> {
+    let tol = rd.finite()?;
+    if tol < 0.0 {
+        return Err(bad("create: negative tolerance"));
+    }
+    curve_block(rd)?;
+    let uv = curve_block(rd)?;
+    if !uv.bspline {
+        return Err(bad("create: the base UV curve must be a B-spline"));
+    }
+    for _ in 0..2 {
+        let c = curve_block(rd)?;
+        param(rd, &c)?;
+        rd.flag()?;
+    }
+    Ok(uv)
+}
+
 /// Checks `input` for `op` (layouts in the module docs).
 ///
 /// # Errors
@@ -240,19 +273,22 @@ pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
         }
         Op::Create => {
             surface(&mut rd)?;
-            let tol = rd.finite()?;
-            if tol < 0.0 {
-                return Err(bad("create: negative tolerance"));
-            }
-            curve_block(&mut rd)?;
-            let uv = curve_block(&mut rd)?;
-            if !uv.bspline {
-                return Err(bad("create: the base UV curve must be a B-spline"));
-            }
-            for _ in 0..2 {
-                let c = curve_block(&mut rd)?;
+            create_block(&mut rd)?;
+        }
+        Op::WriteRead => {
+            surface(&mut rd)?;
+            let c = if rd.index(1)? == 0 {
+                field(&mut rd)?
+            } else {
+                create_block(&mut rd)?
+            };
+            rd.index(1)?;
+            rd.index(1000)?;
+            rd.flag()?;
+            rd.finite()?;
+            let np = rd.index(MAX_PARAMS)?;
+            for _ in 0..np {
                 param(&mut rd, &c)?;
-                rd.flag()?;
             }
         }
         Op::State | Op::Eval | Op::EvalPoint => {

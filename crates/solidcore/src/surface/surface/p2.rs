@@ -668,6 +668,10 @@ pub(crate) fn check_geometry_nesting(
                     push(Geometry::Curve(c.uv_curve()));
                     push(Geometry::Surface(c.surface()));
                 }
+                CurveKind::TangentField(c) => {
+                    push(Geometry::Curve(c.base().uv_curve()));
+                    push(Geometry::Surface(c.base().surface()));
+                }
                 CurveKind::Composite(c) => {
                     for segment in c.segments() {
                         push(Geometry::Curve(&segment.curve));

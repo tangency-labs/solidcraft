@@ -9,14 +9,27 @@
 //! streams are never truncated inside the tangent-field members (a short read is
 //! undefined upstream, see `plan/findings.md`).
 //!
-//! Every run uses at least [`MIN_GENERATED`] generated inputs (more with `--seeds`).
+//! `write_read` cases (their own seed stream, named `wrNNNN`) build a real field (data
+//! constructor or `Create`, B-spline UV curve, the bilinear surface) on each side, write
+//! it with `WriteType` + `WriteToDB` (ASCII or binary, versions 30 and 33), read each
+//! side's own bytes back through `SmCurve::ReadFromDB`, and compare the bytes and, on
+//! the curve read, the type queries, `operator==` with the original, `EvaluatePoint`
+//! and `Evaluate` (1 and 2 derivatives) at sample parameters, `CalculateContinuities`
+//! (status, count and end entries; the interior entries are indeterminate upstream,
+//! UB-263), `Copy` (a plain `SmCrvOnSurf`) and its evaluation, and the bytes written
+//! again. Optionally `GetKnots` caches the breaks first (the record then holds them).
+//!
+//! Every run uses at least [`MIN_GENERATED`] generated inputs (more with `--seeds`) and
+//! [`WRITE_READ_CASES`] `write_read` cases.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use solidcore::curve::curve::Curve;
 use solidcore::curve::hermite_curve::HermiteCurve;
-use solidcore::curve::tangent_field::{self as tf, CurveEnd, TangentDirType, TangentField};
+use solidcore::curve::tangent_field::{
+    self as tf, CurveEnd, TangentDirType, TangentField, TangentFieldCurve,
+};
 use solidcore::geom::extent2d::Extent2d;
 use solidcore::geom::vector2d::Point2;
 use solidcore::geom::vector3d::Vec3;
@@ -25,7 +38,9 @@ use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::math::{CPoint, NOW, NOZ};
 use solidcore::nurbs::nurbs_crv::allocate_nurb_curve;
 use solidcore::nurbs::srf_basic::Surface as NlSurface;
-use solidcore::topology::database_io::{DatabaseReader, FileType};
+use solidcore::surface::surface::Surface;
+use solidcore::topology::database_io::{DatabaseReader, DatabaseWriter, FileType};
+use solidcore::topology::geometry_write::write_curve;
 use solidcore::SolidError;
 use solidcore_ffi::units::curve_tangent_field::{self as ffi, Op};
 
@@ -137,6 +152,22 @@ impl ReadIn {
     }
 }
 
+/// `write_read`: the field (`field`, or `create` when `create` is set) written and read
+/// back through `SmCurve::ReadFromDB`, then queried.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct WriteReadIn {
+    /// `0` ASCII, `1` binary.
+    file_type: u64,
+    version: u64,
+    /// `GetKnots` before writing (caches the breaks the record then holds).
+    #[serde(default)]
+    cache_breaks: bool,
+    /// `CalculateContinuities`' angle tolerance.
+    angle_tol: f64,
+    /// Evaluation parameters.
+    params: Vec<f64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Inputs {
     op: String,
@@ -160,6 +191,8 @@ struct Inputs {
     create: Option<CreateIn>,
     #[serde(default)]
     read: Option<ReadIn>,
+    #[serde(default)]
+    write_read: Option<WriteReadIn>,
 }
 
 const UNIT_SQUARE: [[f64; 3]; 4] = [
@@ -177,6 +210,7 @@ fn op_of(s: &str) -> Result<Op, HarnessError> {
         "equal" => Op::Equal,
         "create" => Op::Create,
         "read_db" => Op::ReadDb,
+        "write_read" => Op::WriteRead,
         _ => return Err(harness(format!("unknown op {s}"))),
     })
 }
@@ -225,6 +259,18 @@ fn push_field(v: &mut Vec<f64>, f: &FieldIn) -> Result<(), HarnessError> {
     Ok(())
 }
 
+fn push_create(v: &mut Vec<f64>, c: &CreateIn) -> Result<(), HarnessError> {
+    v.push(c.tol);
+    push_curve(v, &c.base3d)?;
+    push_curve(v, &c.base_uv)?;
+    for e in [&c.start, &c.end] {
+        push_curve(v, &e.curve)?;
+        v.push(e.param);
+        v.push(if e.opposite { 1.0 } else { 0.0 });
+    }
+    Ok(())
+}
+
 fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
     let op = op_of(&i.op)?;
     let mut v = Vec::new();
@@ -240,14 +286,29 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
         Op::Create => {
             let c = i.create.as_ref().ok_or_else(|| harness("missing create"))?;
             push_surface(&mut v, &srf);
-            v.push(c.tol);
-            push_curve(&mut v, &c.base3d)?;
-            push_curve(&mut v, &c.base_uv)?;
-            for e in [&c.start, &c.end] {
-                push_curve(&mut v, &e.curve)?;
-                v.push(e.param);
-                v.push(if e.opposite { 1.0 } else { 0.0 });
+            push_create(&mut v, c)?;
+        }
+        Op::WriteRead => {
+            let w = i
+                .write_read
+                .as_ref()
+                .ok_or_else(|| harness("missing write_read"))?;
+            push_surface(&mut v, &srf);
+            if let Some(c) = &i.create {
+                v.push(1.0);
+                push_create(&mut v, c)?;
+            } else {
+                v.push(0.0);
+                push_field(&mut v, field()?)?;
             }
+            v.extend([
+                w.file_type as f64,
+                w.version as f64,
+                if w.cache_breaks { 1.0 } else { 0.0 },
+                w.angle_tol,
+                w.params.len() as f64,
+            ]);
+            v.extend_from_slice(&w.params);
         }
         Op::State | Op::Eval | Op::EvalPoint => {
             push_surface(&mut v, &srf);
@@ -396,6 +457,9 @@ fn rust(k: &solidcore::kernel::Kernel, i: &Inputs) -> Result<Output, HarnessErro
             Err(e) => fail(&e),
         });
     }
+    if op == Op::WriteRead {
+        return rust_write_read(k, i, srf);
+    }
     if op == Op::Create {
         let c = i.create.as_ref().ok_or_else(|| harness("missing create"))?;
         let base3d = build(&c.base3d)?;
@@ -497,9 +561,181 @@ fn rust(k: &solidcore::kernel::Kernel, i: &Inputs) -> Result<Output, HarnessErro
                 Err(e) => return Ok(fail(&e)),
             }
         }
-        Op::Create | Op::ReadDb => {}
+        Op::Create | Op::ReadDb | Op::WriteRead => {}
     }
     Ok(to_output(&o))
+}
+
+/// An error of a step whose status is compared: its `SmStatus`, or the deferral of an
+/// unported step.
+fn step_status(e: &SolidError) -> Result<f64, Box<Output>> {
+    match Output::unported(e) {
+        Some(d) => Err(Box::new(d)),
+        None => Ok(status(e) as f64),
+    }
+}
+
+fn push_bytes(o: &mut Vec<f64>, b: &[u8]) {
+    o.push(b.len() as f64);
+    o.extend(b.iter().map(|&x| f64::from(x)));
+}
+
+/// `WriteType` + `WriteToDB` of `c` (as the shim's `write_curve`).
+fn write_record(c: &Curve, ft: FileType, version: u64) -> solidcore::Result<Vec<u8>> {
+    let mut w = DatabaseWriter::open_for_write(ft);
+    w.write_type(c.type_code(), Some(c.dim()));
+    write_curve(c, &mut w, version)?;
+    Ok(w.into_bytes())
+}
+
+fn rust_write_read(
+    k: &solidcore::kernel::Kernel,
+    i: &Inputs,
+    srf: BSplineSurface,
+) -> Result<Output, HarnessError> {
+    match write_read_outputs(k, i, srf)? {
+        Ok(o) => Ok(to_output(&o)),
+        Err(deferred) => Ok(*deferred),
+    }
+}
+
+fn write_read_outputs(
+    k: &solidcore::kernel::Kernel,
+    i: &Inputs,
+    srf: BSplineSurface,
+) -> Result<Result<Vec<f64>, Box<Output>>, HarnessError> {
+    let w = i
+        .write_read
+        .as_ref()
+        .ok_or_else(|| harness("missing write_read"))?;
+    let ft = if w.file_type == 0 {
+        FileType::Ascii
+    } else {
+        FileType::Binary
+    };
+    let srf = Surface::from(srf);
+    let made = if let Some(c) = &i.create {
+        let base3d = build(&c.base3d)?;
+        let base_uv = build(&c.base_uv)?;
+        let sc = build(&c.start.curve)?;
+        let ec = build(&c.end.curve)?;
+        let start = CurveEnd {
+            curve: &sc,
+            param: c.start.param,
+            opposite: c.start.opposite,
+        };
+        let end = CurveEnd {
+            curve: &ec,
+            param: c.end.param,
+            opposite: c.end.opposite,
+        };
+        TangentFieldCurve::create(k, c.tol, &base3d, base_uv, srf, start, end)
+    } else {
+        let f = i.field.as_ref().ok_or_else(|| harness("missing field"))?;
+        TangentFieldCurve::new(
+            k,
+            build(&f.curve)?,
+            srf,
+            dir_type(f.dir)?,
+            v3(f.start),
+            v3(f.end),
+            domain(f.domain)?,
+        )
+    };
+    let mut o = Vec::new();
+    let tf = match made {
+        Ok(tf) => Curve::from(tf),
+        Err(e) => {
+            match step_status(&e) {
+                Ok(s) => o.push(s),
+                Err(d) => return Ok(Err(d)),
+            }
+            return Ok(Ok(o));
+        }
+    };
+    o.push(0.0);
+    macro_rules! status_of {
+        ($r:expr) => {
+            match $r {
+                Ok(v) => {
+                    o.push(0.0);
+                    Some(v)
+                }
+                Err(e) => match step_status(&e) {
+                    Ok(s) => {
+                        o.push(s);
+                        None
+                    }
+                    Err(d) => return Ok(Err(d)),
+                },
+            }
+        };
+    }
+    if w.cache_breaks {
+        if let Some((knots, _)) = status_of!(tf.knots(k, None)) {
+            o.push(knots.len() as f64);
+            o.extend(knots);
+        }
+    }
+    let Some(bytes) = status_of!(write_record(&tf, ft, w.version)) else {
+        return Ok(Ok(o));
+    };
+    push_bytes(&mut o, &bytes);
+    let mut db = DatabaseReader::new();
+    db.open_for_read(bytes, ft);
+    let read = db.read_type(true).and_then(|h| {
+        let (Some(t), Some(d)) = (h.type_code, h.dim) else {
+            return Err(SolidError::invalid_input("difftest", "type header"));
+        };
+        Curve::read_from_db(k, t, &mut db, d, w.version)
+    });
+    let Some(c) = status_of!(read) else {
+        return Ok(Ok(o));
+    };
+    o.push(c.type_code() as f64);
+    for kind in KINDS {
+        o.push(if c.is_kind_of(kind) { 1.0 } else { 0.0 });
+    }
+    let ivl = c.natural_interval();
+    o.extend([ivl.min(), ivl.max()]);
+    let eq = match c.approx_eq(k, &tf) {
+        Ok(eq) => eq,
+        Err(e) => return Ok(Err(Box::new(fail(&e)))),
+    };
+    o.push(if eq { 1.0 } else { 0.0 });
+    for &t in &w.params {
+        if let Some(p) = status_of!(c.evaluate_point(k, t)) {
+            push3(&mut o, p);
+        }
+        if let Some(pd) = status_of!(c.evaluate(k, t, 1, true, true)) {
+            for j in 0..2 {
+                push3(&mut o, pd.get(j).copied().unwrap_or(Vec3::UNDEF));
+            }
+        }
+        status_of!(c.evaluate(k, t, 2, true, true));
+    }
+    if let Some((min, conts)) = status_of!(c.calculate_continuities(k, w.angle_tol)) {
+        // the interior entries and the minimum are indeterminate upstream (UB-263)
+        o.push(conts.len() as f64);
+        if let (Some(&first), Some(&last)) = (conts.first(), conts.last()) {
+            o.extend([f64::from(first as i32), f64::from(last as i32)]);
+        }
+        if conts.len() < 3 {
+            o.push(f64::from(min as i32));
+        }
+    }
+    if let Some(cp) = status_of!(c.copy(k)) {
+        o.push(cp.type_code() as f64);
+        for &t in &w.params {
+            if let Some(p) = status_of!(cp.evaluate_point(k, t)) {
+                push3(&mut o, p);
+            }
+        }
+    }
+    if let Some(again) = status_of!(write_record(&c, ft, w.version)) {
+        push_bytes(&mut o, &again);
+    }
+    Ok(Ok(o))
 }
 
 // ---- generation -------------------------------------------------------------------------
@@ -720,6 +956,7 @@ fn generate(rng: &mut Rng) -> Inputs {
         field_b: None,
         create: None,
         read: None,
+        write_read: None,
     };
     match rng.below(10) {
         0 => {
@@ -767,6 +1004,64 @@ fn generate(rng: &mut Rng) -> Inputs {
     i
 }
 
+/// Generated `write_read` cases (their own seed stream, `<unit>:write_read`).
+pub const WRITE_READ_CASES: usize = 240;
+
+/// A `write_read` case: a field built from data (B-spline UV curves: the Rust writer has
+/// no `SmHermiteCurve::WriteToDB`) or with `Create`, written in either format.
+fn generate_write_read(rng: &mut Rng) -> Option<Value> {
+    let surface = Some(gen_surface(rng));
+    let (field, create, (a, b)) = if rng.chance(0.25) {
+        let c = gen_create(rng);
+        let r = range_of(&c.base_uv);
+        (None, Some(c), r)
+    } else {
+        let mut f = gen_field(rng);
+        let a = if rng.chance(0.5) { 0.0 } else { rng.uniform(-5.0, 5.0) };
+        let len = match rng.below(6) {
+            0 => 1e-3,
+            1 => 1e3,
+            _ if rng.chance(0.5) => 1.0,
+            _ => rng.uniform(0.5, 10.0),
+        };
+        f.curve = gen_bspline(rng, 2, a, a + len);
+        if rng.chance(0.1) {
+            // huge and tiny tangents
+            let s = if rng.chance(0.5) { 1e-9 } else { 1e2 };
+            f.start = f.start.map(|x| x * s);
+            f.end = f.end.map(|x| x * s);
+        }
+        let r = range_of(&f.curve);
+        (Some(f), None, r)
+    };
+    let np = 1 + rng.below(4) as usize;
+    let params = (0..np).map(|_| gen_t(rng, a, b)).collect();
+    let i = Inputs {
+        op: "write_read".into(),
+        surface,
+        field,
+        t: 0.0,
+        n: 0,
+        flags: 0,
+        surface_b: None,
+        field_b: None,
+        create,
+        read: None,
+        write_read: Some(WriteReadIn {
+            file_type: u64::from(!rng.chance(0.3)),
+            version: if rng.chance(0.3) { 33 } else { 30 },
+            cache_breaks: rng.chance(0.3),
+            angle_tol: if rng.chance(0.5) {
+                0.01
+            } else {
+                rng.uniform(1e-6, 0.5)
+            },
+            params,
+        }),
+    };
+    serde_json::to_value(i).ok()
+}
+
 impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "curve.tangent_field"
@@ -777,11 +1072,23 @@ impl UnitDiff for Runner {
     }
 
     fn cases(&self, ctx: &CaseContext) -> Result<Vec<Case>, HarnessError> {
-        let ctx = CaseContext {
+        let main = CaseContext {
             seeds: ctx.seeds.max(MIN_GENERATED),
             ..ctx.clone()
         };
-        default_cases(self, &ctx)
+        let mut v = default_cases(self, &main)?;
+        // write/read round trips: their own seed stream, so the other generated cases
+        // are unchanged; named `wrNNNN`.
+        let wr = CaseContext {
+            seeds: ctx.seeds.max(WRITE_READ_CASES),
+            ..ctx.clone()
+        };
+        for mut c in wr.generated_cases("curve.tangent_field:write_read", generate_write_read) {
+            c.name = c.name.replacen("gen", "wr", 1);
+            c.unit = self.id().to_string();
+            v.push(c);
+        }
+        Ok(v)
     }
 
     fn run_cpp(&self, case: &Case) -> Result<Output, HarnessError> {

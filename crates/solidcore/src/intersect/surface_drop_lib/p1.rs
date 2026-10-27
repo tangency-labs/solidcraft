@@ -1007,6 +1007,7 @@ const fn is_bspline_kind(curve: &Curve) -> bool {
         | CurveKind::Offset(_)
         | CurveKind::CrvInVolume(_)
         | CurveKind::CrvOnSurf(_)
+        | CurveKind::TangentField(_)
         | CurveKind::Composite(_) => false,
     }
 }

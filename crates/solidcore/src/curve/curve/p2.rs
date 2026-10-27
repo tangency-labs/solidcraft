@@ -176,6 +176,7 @@ use crate::curve::line::Line;
 use crate::curve::offset_curve::OffsetCurve;
 use crate::curve::parabola::Parabola;
 use crate::curve::projected_curve::ProjectedCurve;
+use crate::curve::tangent_field::TangentFieldCurve;
 use crate::error::{ignore_status, ignored, Result, SolidError};
 use crate::geom::a_object::{self, AObject, CacheStore};
 use crate::geom::attribute::{AttributeStore, ObjectKey};
@@ -531,6 +532,7 @@ impl CurveEvaluate for Curve {
     fn as_crv_on_surf(&self) -> Option<&CrvOnSurf> {
         match &self.kind {
             CurveKind::CrvOnSurf(c) => Some(c),
+            CurveKind::TangentField(c) => Some(c.base()),
             _ => None,
         }
     }
@@ -564,6 +566,8 @@ pub enum CurveKind {
     CrvInVolume(Box<CrvInVolume>),
     /// `SmCrvOnSurf`.
     CrvOnSurf(Box<CrvOnSurf>),
+    /// `SmTangentField` (an `SmCrvOnSurf`).
+    TangentField(Box<TangentFieldCurve>),
     /// `SmLine`.
     Line(Line),
     /// `SmEllipse` and `SmCircle` (an `SmBSplineCurve`).
@@ -621,6 +625,7 @@ impl Curve {
             CurveKind::Conic(c) => CurveKind::Conic(*c),
             CurveKind::CrvInVolume(c) => CurveKind::CrvInVolume(Box::new(c.clone_exact_bounded())),
             CurveKind::CrvOnSurf(c) => CurveKind::CrvOnSurf(Box::new(c.as_ref().clone())),
+            CurveKind::TangentField(c) => CurveKind::TangentField(Box::new(c.as_ref().clone())),
             CurveKind::Line(c) => CurveKind::Line(c.clone_exact_bounded()),
             CurveKind::Ellipse(c) => CurveKind::Ellipse(c.clone_exact_bounded()),
             CurveKind::Parabola(c) => CurveKind::Parabola(c.clone_exact_bounded()),
@@ -693,6 +698,12 @@ impl From<CrvInVolume> for Curve {
 impl From<CrvOnSurf> for Curve {
     fn from(c: CrvOnSurf) -> Self {
         Self::new(CurveKind::CrvOnSurf(Box::new(c)))
+    }
+}
+
+impl From<TangentFieldCurve> for Curve {
+    fn from(c: TangentFieldCurve) -> Self {
+        Self::new(CurveKind::TangentField(Box::new(c)))
     }
 }
 
@@ -772,6 +783,9 @@ impl Curve {
             }
             CurveKind::CrvOnSurf(c) => {
                 CurveKind::CrvOnSurf(Box::new(c.clone_for_evaluation(depth + 1)?))
+            }
+            CurveKind::TangentField(c) => {
+                CurveKind::TangentField(Box::new(c.clone_for_evaluation(depth + 1)?))
             }
             CurveKind::Composite(c) => CurveKind::Composite(c.clone_for_evaluation(depth + 1)?),
         };
@@ -860,6 +874,7 @@ impl Curve {
             CurveKind::Offset(_) => OffsetCurve::TYPE,
             CurveKind::CrvInVolume(_) => CrvInVolume::TYPE,
             CurveKind::CrvOnSurf(_) => CrvOnSurf::TYPE,
+            CurveKind::TangentField(_) => TangentFieldCurve::TYPE,
             CurveKind::Line(_) => Line::TYPE,
             CurveKind::Ellipse(c) => c.type_code(),
             CurveKind::Parabola(_) => Parabola::TYPE,
@@ -880,6 +895,7 @@ impl Curve {
             CurveKind::Offset(_) => "SmOffsetCurve_TYPE",
             CurveKind::CrvInVolume(_) => "SmCrvInVolume_TYPE",
             CurveKind::CrvOnSurf(_) => "SmCrvOnSurf_TYPE",
+            CurveKind::TangentField(_) => crate::curve::tangent_field::TYPE_STRING,
             CurveKind::Line(_) => "SmLine_TYPE",
             CurveKind::Ellipse(c) => c.type_string(),
             CurveKind::Parabola(_) => "SmParabola_TYPE",
@@ -900,6 +916,7 @@ impl Curve {
             CurveKind::Offset(_) => "SmOffsetCurve",
             CurveKind::CrvInVolume(_) => "SmCrvInVolume",
             CurveKind::CrvOnSurf(_) => "SmCrvOnSurf",
+            CurveKind::TangentField(_) => crate::curve::tangent_field::CLASS_STRING,
             CurveKind::Line(_) => "SmLine",
             CurveKind::Ellipse(c) => c.class_string(),
             CurveKind::Parabola(_) => "SmParabola",
@@ -914,6 +931,7 @@ impl Curve {
             CurveKind::Line(c) => c.is_kind_of(t),
             CurveKind::Ellipse(c) => c.kind_of(t),
             CurveKind::Parabola(c) => c.is_kind_of(t),
+            CurveKind::TangentField(c) => c.is_kind_of(t),
             _ => t == self.type_code() || is_kind_of(t),
         }
     }
@@ -940,6 +958,7 @@ impl Curve {
             (CurveKind::Offset(a), CurveKind::Offset(b)) => a.approx_eq(k, b),
             (CurveKind::CrvInVolume(a), CurveKind::CrvInVolume(b)) => a.approx_eq(k, b),
             (CurveKind::CrvOnSurf(a), CurveKind::CrvOnSurf(b)) => a.approx_eq(k, b),
+            (CurveKind::TangentField(a), CurveKind::TangentField(b)) => a.approx_eq(k, b),
             (CurveKind::Line(a), CurveKind::Line(b)) => Ok(a.approx_eq(b)),
             (CurveKind::Ellipse(a), CurveKind::Ellipse(b)) => {
                 Ok(a.type_code() == b.type_code() && a.approx_eq(b))
@@ -968,6 +987,7 @@ impl Curve {
             CurveKind::Offset(c) => c.dim(),
             CurveKind::CrvInVolume(c) => c.dim(),
             CurveKind::CrvOnSurf(c) => c.dim(),
+            CurveKind::TangentField(c) => c.base().dim(),
             CurveKind::Line(c) => c.dim(),
             CurveKind::Parabola(c) => c.dim(),
         }
@@ -991,6 +1011,7 @@ impl Curve {
             | CurveKind::Offset(_)
             | CurveKind::CrvInVolume(_)
             | CurveKind::CrvOnSurf(_)
+            | CurveKind::TangentField(_)
             | CurveKind::Composite(_) => Ok(3),
             CurveKind::Line(c) => Ok(c.degree()),
         }
@@ -1015,6 +1036,7 @@ impl Curve {
             CurveKind::Projected(c) => c.number_natural_knots(k),
             CurveKind::CrvInVolume(c) => c.number_natural_knots_ref(k),
             CurveKind::CrvOnSurf(c) => c.number_natural_knots_ref(k),
+            CurveKind::TangentField(c) => c.base().number_natural_knots_ref(k),
             CurveKind::Line(c) => Ok(c.number_natural_knots()),
         }
     }
@@ -1037,6 +1059,7 @@ impl Curve {
             | CurveKind::Offset(_)
             | CurveKind::CrvInVolume(_)
             | CurveKind::CrvOnSurf(_)
+            | CurveKind::TangentField(_)
             | CurveKind::Composite(_) => Ok(0),
             CurveKind::Line(c) => c.base_with_nurb()?.number_control_points(),
         }
@@ -1057,6 +1080,7 @@ impl Curve {
             CurveKind::Offset(c) => c.natural_interval(),
             CurveKind::CrvInVolume(c) => c.natural_interval(),
             CurveKind::CrvOnSurf(c) => c.natural_interval(),
+            CurveKind::TangentField(c) => c.base().natural_interval(),
             CurveKind::Line(c) => c.natural_interval(),
             CurveKind::Parabola(c) => c.base().natural_interval(),
         }
@@ -1079,6 +1103,7 @@ impl Curve {
             | CurveKind::Offset(_)
             | CurveKind::CrvInVolume(_)
             | CurveKind::CrvOnSurf(_)
+            | CurveKind::TangentField(_)
             | CurveKind::Composite(_) => false,
         }
     }
@@ -1101,6 +1126,7 @@ impl Curve {
             CurveKind::Projected(c) => c.is_bounded(),
             CurveKind::CrvInVolume(c) => c.is_bounded(),
             CurveKind::CrvOnSurf(c) => c.is_bounded(),
+            CurveKind::TangentField(c) => c.base().is_bounded(),
         }
     }
 
@@ -1122,6 +1148,7 @@ impl Curve {
             | CurveKind::Offset(_)
             | CurveKind::CrvInVolume(_)
             | CurveKind::CrvOnSurf(_)
+            | CurveKind::TangentField(_)
             | CurveKind::Composite(_) => Ok(false),
             CurveKind::Line(c) => c.base_with_nurb()?.is_rational(),
         }
@@ -1145,6 +1172,7 @@ impl Curve {
             | CurveKind::Offset(_)
             | CurveKind::CrvInVolume(_)
             | CurveKind::CrvOnSurf(_)
+            | CurveKind::TangentField(_)
             | CurveKind::Composite(_) => Ok(false),
             CurveKind::Line(c) => c.base_with_nurb()?.has_repeated_end_control_points(k, tol),
         }
@@ -1267,6 +1295,8 @@ impl Curve {
             CurveKind::Offset(c) => c.evaluate(k, t, num_derivs, from_left, non_zero_tangents),
             CurveKind::CrvInVolume(c) => c.evaluate(k, t, num_derivs, from_left, non_zero_tangents),
             CurveKind::CrvOnSurf(c) => c.evaluate(k, t, num_derivs, from_left, non_zero_tangents),
+            // SmTangentField::Evaluate (bFromLeft and bNonZeroTangents unused)
+            CurveKind::TangentField(c) => c.evaluate(k, t, num_derivs),
             CurveKind::Line(c) => {
                 // The line evaluator is infallible: bound its output size here.
                 crate::curve::check_eval_derivs(num_derivs, OP_EVAL)?;
@@ -1304,6 +1334,7 @@ impl Curve {
             | CurveKind::Offset(_)
             | CurveKind::CrvInVolume(_)
             | CurveKind::CrvOnSurf(_)
+            | CurveKind::TangentField(_)
             | CurveKind::Line(_) => None,
         };
         if let Some(b) = base {
@@ -1339,6 +1370,7 @@ impl Curve {
             CurveKind::Offset(c) => c.evaluate_point(k, t),
             CurveKind::CrvInVolume(c) => c.evaluate_point(k, t),
             CurveKind::CrvOnSurf(c) => c.evaluate_point(k, t),
+            CurveKind::TangentField(c) => c.evaluate_point(k, t),
             CurveKind::Line(c) => Ok(c.evaluate_point(t)),
         }
     }
@@ -1367,6 +1399,11 @@ impl Curve {
             CurveKind::Offset(c) => c.calculate_continuities(k, angle_tol),
             CurveKind::CrvInVolume(c) => c.calculate_continuities_ref(k, angle_tol),
             CurveKind::CrvOnSurf(c) => c.calculate_continuities_ref(k, angle_tol),
+            // SmCrvOnSurf::CalculateContinuities on the derived object (its Evaluate)
+            CurveKind::TangentField(c) => {
+                c.base()
+                    .calculate_continuities_as(k, angle_tol, Some(c.members()))
+            }
             CurveKind::Line(c) => c.base_with_nurb()?.calculate_continuities(k, angle_tol),
         }
     }
@@ -1385,6 +1422,7 @@ impl Curve {
         match &self.kind {
             CurveKind::CrvInVolume(c) => c.knots_with_status_ref(k, interval),
             CurveKind::CrvOnSurf(c) => c.knots_with_status(k, interval),
+            CurveKind::TangentField(c) => c.base().knots_with_status(k, interval),
             _ => {
                 let (knots, mults) = self.knots(k, interval)?;
                 Ok(KnotsWithStatus::success(knots, mults))
@@ -1418,6 +1456,7 @@ impl Curve {
             CurveKind::Offset(c) => c.knots(k, interval),
             CurveKind::CrvInVolume(c) => c.knots_ref(k, interval),
             CurveKind::CrvOnSurf(c) => c.knots_ref(k, interval),
+            CurveKind::TangentField(c) => c.base().knots_ref(k, interval),
             CurveKind::Line(c) => c.base_with_nurb()?.knots(interval),
         }
     }
@@ -1442,6 +1481,7 @@ impl Curve {
             CurveKind::Offset(c) => base_ends(k, c),
             CurveKind::CrvInVolume(c) => base_ends(k, c.as_ref()),
             CurveKind::CrvOnSurf(c) => base_ends(k, c.as_ref()),
+            CurveKind::TangentField(c) => base_ends(k, c.as_ref()),
             CurveKind::Line(c) => c.ends_copy(),
         }
     }
@@ -1513,6 +1553,7 @@ impl Curve {
             | CurveKind::Offset(_)
             | CurveKind::CrvInVolume(_)
             | CurveKind::CrvOnSurf(_)
+            | CurveKind::TangentField(_)
             | CurveKind::Composite(_) => Err(base_err()),
         }
     }
@@ -1613,6 +1654,7 @@ impl Curve {
             | CurveKind::Offset(_)
             | CurveKind::CrvInVolume(_)
             | CurveKind::CrvOnSurf(_)
+            | CurveKind::TangentField(_)
             | CurveKind::Composite(_) => Err(base_err()),
             CurveKind::Line(c) => c.convert_to_2d_owned(self.owner),
         }
@@ -1639,6 +1681,7 @@ impl Curve {
             CurveKind::Projected(c) => c.edit_parameterization(k, new_param),
             CurveKind::CrvInVolume(c) => c.edit_parameterization(k, new_param),
             CurveKind::CrvOnSurf(c) => c.edit_parameterization(k, new_param),
+            CurveKind::TangentField(c) => c.base_mut().edit_parameterization(k, new_param),
             CurveKind::Line(c) => c.edit_parameterization_owned(self.owner, new_param),
         }
     }
@@ -1669,6 +1712,7 @@ impl Curve {
             CurveKind::Offset(c) => Ok(c.reverse_parameterization(old_interval)),
             CurveKind::CrvInVolume(c) => c.reverse_parameterization(k, old_interval),
             CurveKind::CrvOnSurf(c) => c.reverse_parameterization(k, old_interval),
+            CurveKind::TangentField(c) => c.base_mut().reverse_parameterization(k, old_interval),
             CurveKind::Line(c) => Ok(c.reverse_parameterization(old_interval)),
         }
     }
@@ -1710,6 +1754,10 @@ impl Curve {
             CurveKind::Projected(c) => c.transform_at_depth(k, rotate_n_move, scale, depth),
             CurveKind::CrvInVolume(c) => c.transform_at_depth(rotate_n_move, scale, depth),
             CurveKind::CrvOnSurf(c) => c.transform_at_depth(k, rotate_n_move, scale, depth),
+            CurveKind::TangentField(c) => {
+                c.base_mut()
+                    .transform_at_depth(k, rotate_n_move, scale, depth)
+            }
             CurveKind::Line(c) => c.transform(rotate_n_move, scale),
         }
     }
@@ -1756,6 +1804,10 @@ impl Curve {
             CurveKind::Offset(c) => c.trim(trim_interval, mode == TrimMode::IntervalOnly),
             CurveKind::CrvInVolume(c) => c.trim_with_zone_tol(k, trim_interval, mode, zone_tol_3d),
             CurveKind::CrvOnSurf(c) => c.trim_with_zone_tol(k, trim_interval, mode, zone_tol_3d),
+            CurveKind::TangentField(c) => {
+                c.base_mut()
+                    .trim_with_zone_tol(k, trim_interval, mode, zone_tol_3d)
+            }
             CurveKind::Line(c) => c.trim_owned(self.owner, trim_interval, mode),
         }
     }
@@ -1777,6 +1829,8 @@ impl Curve {
             CurveKind::Offset(c) => Ok(Self::from(c.copy())),
             CurveKind::CrvInVolume(c) => Ok(Self::from(c.copy())),
             CurveKind::CrvOnSurf(c) => c.copy(k).map(Self::from),
+            // SmCrvOnSurf::Copy (not overridden): `new SmCrvOnSurf(*this)`, the base only
+            CurveKind::TangentField(c) => c.base().copy(k).map(Self::from),
             CurveKind::Line(c) => Ok(Self::from(c.copy())),
         }
     }
@@ -1817,6 +1871,7 @@ impl Curve {
             | CurveKind::Offset(_)
             | CurveKind::CrvInVolume(_)
             | CurveKind::CrvOnSurf(_)
+            | CurveKind::TangentField(_)
             | CurveKind::Composite(_) => Ok(None),
         }
     }
@@ -1987,9 +2042,6 @@ impl Curve {
         dim: u64,
         version: u64,
     ) -> Result<Self> {
-        let unported = |upstream: &'static str, unit: &'static str| -> Result<Self> {
-            Err(SolidError::Unported { upstream, unit })
-        };
         // Bound nesting (a projected/offset/... curve reads its base curve through
         // here): upstream recurses without limit on crafted input.
         db.enter_nested(OP_READ)?;
@@ -2008,12 +2060,7 @@ impl Curve {
             CRV_ON_SURF_TYPE => CrvOnSurf::read_from_db(k, db, version).map(Self::from),
             CRV_IN_VOLUME_TYPE => CrvInVolume::read_from_db(k, db, version).map(Self::from),
             TANGENT_FIELD_TYPE => {
-                // SmTangentField::ReadFromDB; its SmCrvOnSurf part is unported (no early
-                // return: the nesting level must be left below)
-                crate::curve::tangent_field::read_from_db(k, db, dim, version).and_then(|_| {
-                    // UNPORTED(curve.crv_on_surf): SmTangentField as a curve kind
-                    unported("SmCrvOnSurf::ReadFromDB", "curve.crv_on_surf")
-                })
+                TangentFieldCurve::read_from_db(k, db, dim, version).map(Self::from)
             }
             HERMITE_CURVE_TYPE => HermiteCurve::read_from_db(db).map(Self::from),
             ISO_CURVE_TYPE => IsoCurve::read_from_db(k, db, version).map(Self::from),

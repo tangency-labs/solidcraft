@@ -741,6 +741,7 @@ fn state(o: &mut Vec<f64>, c: &Curve) {
         | CurveKind::Offset(_)
         | CurveKind::CrvInVolume(_)
         | CurveKind::CrvOnSurf(_)
+        | CurveKind::TangentField(_)
         | CurveKind::Line(_) => o.push(-1.0),
     }
 }

@@ -1787,6 +1787,7 @@ const fn as_b_spline(c: &Curve) -> Option<&BSplineCurve> {
         | CurveKind::Offset(_)
         | CurveKind::CrvInVolume(_)
         | CurveKind::CrvOnSurf(_)
+        | CurveKind::TangentField(_)
         | CurveKind::Composite(_) => None,
     }
 }
