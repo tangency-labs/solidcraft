@@ -110,3 +110,41 @@ fn the_depth_arrow_stands_clear_of_the_marker_only_while_holes_move() {
     crate::prefs::set(&mut h.app, &json!({"hole_moves": false})).unwrap();
     assert_eq!(crate::place_gizmo::arrow_clearance(&h.app, &d), 0.0, "no marker, no clearance");
 }
+
+#[test]
+fn the_markers_follow_the_holes_own_setting_not_the_shared_one() {
+    let mut h = blocks();
+    crate::prefs::set(&mut h.app, &json!({"hole_moves": false, "placement_handles": true})).unwrap();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let at = screen(&mut h, Vec3::new(10.0, 10.0, 20.0));
+    h.step(&json!({"click": at})).unwrap();
+    h.frames(2);
+    assert_eq!(places(&h).len(), 1);
+    assert!(handle_at("hole:0").is_none(), "Placement handles alone show no hole marker");
+    crate::prefs::set(&mut h.app, &json!({"hole_moves": true, "placement_handles": false})).unwrap();
+    h.frames(2);
+    assert!(handle_at("hole:0").is_some(), "Move holes by clicking or dragging alone shows it");
+}
+
+#[test]
+fn a_hole_whose_face_is_gone_keeps_its_marker_through_the_restored_direction() {
+    // Edit Feature restores a hole whose face no longer resolves as a bare place with the
+    // `direction` it had (dialogs.rs); the marker stands there all the same.
+    let mut h = blocks();
+    h.step(&json!({"start": "solid.hole"})).unwrap();
+    let at = screen(&mut h, Vec3::new(10.0, 10.0, 20.0));
+    h.step(&json!({"click": at})).unwrap();
+    h.frames(2);
+    assert!(handle_at("hole:0").is_some());
+    {
+        let d = h.app.dialog.as_mut().expect("a dialog");
+        d.inputs[0].items = vec![Sel::Face { body: String::new(), index: 0, point: Vec3::new(10.0, 10.0, 20.0) }];
+        d.extra.insert("direction".into(), crate::place_gizmo::pt(Vec3::new(0.0, 0.0, 1.0)));
+    }
+    h.frames(2);
+    assert!(handle_at("hole:0").is_some(), "the marker stays with the place");
+    let d = h.app.dialog.as_mut().expect("a dialog");
+    d.extra.remove("direction");
+    h.frames(2);
+    assert!(handle_at("hole:0").is_none(), "no face and no direction: nowhere to stand");
+}

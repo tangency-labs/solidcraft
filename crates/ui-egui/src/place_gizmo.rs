@@ -37,6 +37,7 @@ use look::{
 use solidcore_record::Vec3;
 use solidcraft_engine::doc::expr::Kind as ValueKind;
 use solidcraft_engine::geom::prelude::*;
+use solidcraft_engine::{Sel, Session};
 
 use crate::SolveApp;
 use crate::dialogs::Dialog;
@@ -47,6 +48,10 @@ use crate::theme::Tokens;
 use crate::viewport::{Hit, Proj};
 
 /// One tool's use of the handles.
+///
+/// While `places`, `footprint` and the turn's `reach` and `angle` run, the dialog is in the app;
+/// inside `move_to`, `click` and [`Turn::set`] it is taken out (`app.dialog` is `None`): read the
+/// session and `d` there, never `app.dialog`.
 pub(crate) struct Spec {
     /// Handle names (`<name>:position`, `<name>:rotate`; `<name>:<n>` with `many`) and widget ids.
     pub name: &'static str,
@@ -58,7 +63,8 @@ pub(crate) struct Spec {
     /// The move marker's tooltip.
     pub move_tip: &'static str,
     /// A marker on each of the tool's places, named `<name>:<n>` by their order, with no ring
-    /// (a Single hole's). Off: one place, `<name>:position`, and the ring if any.
+    /// (a Single hole's; `turn` is then ignored). Off: one place, `<name>:position`, and the ring
+    /// if any.
     pub many: bool,
     /// The places the handles stand at.
     pub places: fn(&SolveApp, &Dialog) -> Vec<Place>,
@@ -93,6 +99,13 @@ pub(crate) fn one(frame: Option<(Vec3, Vec3)>) -> Vec<Place> {
 /// tool but the hole, whose markers keep the hole's own setting.
 pub(crate) fn on(app: &SolveApp) -> bool {
     app.preferences.placement_handles
+}
+
+/// The face place a click with `hits` would add to the dialog's first input: snapped to a sketch
+/// point as a click is when the input takes points; none when nothing there is a face.
+pub(crate) fn face_pick(d: &Dialog, s: &Session, hits: &[Hit]) -> Option<Sel> {
+    let snap = d.face_snap(s, hits);
+    hits.iter().find_map(|h| d.candidate_on(s, h, snap.as_ref()).filter(|c| matches!(c, Sel::Face { .. })))
 }
 
 /// A ring whose grip turns the feature about its face normal.
@@ -296,17 +309,21 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
         }
         markers.push((pl.key, r));
     }
-    // Read the places again: a drag moved one this frame, a click may have taken one out.
+    // Read the places again: a drag moved one this frame, a click may have taken one out. A key
+    // is an index, not an identity: with a place gone, the ones after it have moved down, so the
+    // markers' states are left alone for this frame rather than given to the wrong place.
+    let now = places(app);
+    let settled = now.len() == markers.len();
     let ctx = ui.ctx().clone();
     // The marker steps back while the ring works (the ring's drag is last frame's).
     let turning = ui.data(|m| m.get_temp::<bool>(id("turning"))).unwrap_or(false);
     let mut first: Option<(Place, Pos2, bool)> = None;
-    for (n, pl) in places(app).into_iter().enumerate() {
+    for (n, pl) in now.into_iter().enumerate() {
         let Some(bs) = proj.to_screen(pl.base) else { continue };
         let name = if sp.many { format!("{}:{n}", sp.name) } else { format!("{}:position", sp.name) };
         crate::scenario::publish_handle(&name, bs);
         DRAWN.with(|h| h.borrow_mut().push(bs));
-        let r = markers.iter().find(|(k, _)| *k == pl.key).map(|(_, r)| r);
+        let r = markers.iter().filter(|_| settled).find(|(k, _)| *k == pl.key).map(|(_, r)| r);
         let (hovered, dragging) = r.map_or((false, false), |r| (r.hovered(), r.dragged()));
         // The tip while pointing, not while dragging: the hand is busy and the footprint says it all.
         if hovered
