@@ -603,6 +603,115 @@ fn parameters_header_drag_retains_offset_and_bounds_the_card() {
     }
 }
 
+#[test]
+fn parameters_compact_view_lists_every_parameter_as_name_and_expression() {
+    let mut h = fixture();
+    h.app.run("parameters.favorite", json!({"name":"width","favorite":true})).unwrap();
+    h.app.start("parameters.change");
+    h.frames(6);
+    let full = scenario::rect_of("dialog:header").unwrap();
+    assert!(scenario::handle_at("param:star:width").is_some(), "Full has the favourite column");
+    h.step(&json!({"click":{"handle":"dialog:View:Compact"}})).unwrap();
+    h.frames(2);
+    scenario::clear_handles();
+    h.frames(4);
+    assert!(h.app.preferences.parameters_compact);
+    let compact = scenario::rect_of("dialog:header").unwrap();
+    assert!(compact.width() < full.width() / 2.0, "Compact is narrow: {full:?} -> {compact:?}");
+    // Every parameter is still listed and editable, by name and expression; hovering an
+    // expression shows what it works out to.
+    for name in ["width", "d1"] {
+        assert!(scenario::handle_at(&format!("param:{name}")).is_some(), "{name} listed");
+    }
+    assert!(h.widget("10.0000 mm").is_none(), "no Value column");
+    h.step(&json!({"move":{"handle":"param:d1"}})).unwrap();
+    h.frames(90);
+    assert!(h.widget("10.0000 mm").is_some(), "hovering d1 (`width`) shows its value");
+    assert!(scenario::handle_at("param:star:width").is_none() && scenario::handle_at("param:before:width").is_none());
+    assert!(scenario::handle_at("param:favorite:width").is_some(), "Favourites keep their section");
+    h.step(&json!({"click":{"handle":"param:width"}})).unwrap();
+    h.step(&json!({"key":"A","cmd":true})).unwrap();
+    h.step(&json!({"text":"12 mm"})).unwrap();
+    h.step(&json!({"key":"Enter"})).unwrap();
+    let width = h.app.session.doc.params.iter().find(|p| p.name == "width").map(|p| p.expr.clone());
+    assert_eq!(width.as_deref(), Some("12 mm"));
+
+    // Reopening comes back in the view it was left in, at that view's width.
+    h.step(&json!({"click":{"handle":"params:close"}})).unwrap();
+    h.app.start("parameters.change");
+    h.frames(6);
+    assert!((scenario::rect_of("dialog:header").unwrap().width() - compact.width()).abs() < 1.0);
+    h.step(&json!({"click":{"handle":"dialog:View:Full"}})).unwrap();
+    h.frames(6);
+    assert!(!h.app.preferences.parameters_compact);
+    assert!((scenario::rect_of("dialog:header").unwrap().width() - full.width()).abs() < 1.0);
+}
+
+#[test]
+fn parameters_compact_auto_hide_folds_away_from_the_pointer_and_opens_near_it() {
+    let folded = |h: &Harness| h.app.params.as_ref().unwrap().folded;
+    let away = |h: &mut Harness| {
+        h.call("ui.move", json!({"x":700.0,"y":1000.0}));
+    };
+    let mut h = fixture();
+    h.app.preferences.parameters_compact = true;
+    h.app.start("parameters.change");
+    h.frames(6);
+    // Off (the default): it stays open wherever the pointer goes.
+    away(&mut h);
+    h.frames(120);
+    assert!(!folded(&h));
+
+    // On: it folds to its title bar a moment after the pointer leaves, not at once.
+    h.step(&json!({"click":{"handle":"params:auto_hide"}})).unwrap();
+    assert!(h.app.preferences.parameters_auto_hide);
+    away(&mut h);
+    h.frames(30);
+    assert!(!folded(&h), "not at once");
+    h.frames(60);
+    assert!(folded(&h), "folded after a moment away");
+    scenario::clear_handles();
+    h.frames(2);
+    assert!(scenario::rect_of("dialog:footer").is_none(), "only its title bar is left");
+    let header = scenario::rect_of("dialog:header").unwrap();
+
+    // The pointer coming near its title bar opens it.
+    h.call("ui.move", json!({"x":header.center().x,"y":header.bottom() + 12.0}));
+    h.frames(3);
+    assert!(!folded(&h), "opens when the pointer comes near");
+    assert!(scenario::rect_of("dialog:footer").is_some());
+
+    // Typing in it keeps it open with the pointer away.
+    h.step(&json!({"click":{"handle":"param:width"}})).unwrap();
+    away(&mut h);
+    h.frames(120);
+    assert!(!folded(&h), "typing keeps it open");
+
+    // Full never folds.
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:View:Full"}})).unwrap();
+    away(&mut h);
+    h.frames(120);
+    assert!(!folded(&h) && scenario::handle_at("dialog:collapse").is_none(), "Full has no fold");
+}
+
+#[test]
+fn parameters_compact_fold_button_keeps_only_the_title_bar() {
+    let mut h = fixture();
+    h.app.preferences.parameters_compact = true;
+    h.app.start("parameters.change");
+    h.frames(6);
+    h.step(&json!({"click":{"handle":"dialog:collapse"}})).unwrap();
+    scenario::clear_handles();
+    h.frames(120);
+    assert!(h.app.params.as_ref().unwrap().folded, "auto-hide off: it stays folded");
+    assert!(scenario::rect_of("dialog:footer").is_none() && scenario::rect_of("dialog:header").is_some());
+    h.step(&json!({"click":{"handle":"dialog:collapse"}})).unwrap();
+    h.frames(3);
+    assert!(!h.app.params.as_ref().unwrap().folded);
+    assert!(scenario::rect_of("dialog:footer").is_some());
+}
+
 fn physical_editor(h: &mut Harness) -> &mut crate::material_editor::Editor {
     let dialogs::Kind::Material { editor, .. } = &mut h.app.dialog.as_mut().unwrap().kind else { panic!("physical material panel") };
     editor

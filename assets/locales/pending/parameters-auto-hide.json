@@ -1,0 +1,14 @@
+{
+  "en": {
+    "Auto-hide": "Auto-hide",
+    "Fold to the title bar while the pointer is away; open when it comes near": "Fold to the title bar while the pointer is away; open when it comes near"
+  },
+  "ja": {
+    "Auto-hide": "自動で隠す",
+    "Fold to the title bar while the pointer is away; open when it comes near": "ポインターが離れている間はタイトルバーに折りたたみ、近づくと開きます"
+  },
+  "zh": {
+    "Auto-hide": "自动隐藏",
+    "Fold to the title bar while the pointer is away; open when it comes near": "指针离开时折叠为标题栏，靠近时展开"
+  }
+}

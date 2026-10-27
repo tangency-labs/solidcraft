@@ -191,6 +191,7 @@ pub(crate) struct Panel<'a> {
     frame: egui::Frame,
     width: f32,
     body_rows: Option<f32>,
+    fold_actions: bool,
     ok: &'a str,
     cancel: &'a str,
     reset_scroll: bool,
@@ -262,6 +263,7 @@ impl<'a> Panel<'a> {
             frame,
             width: Tokens::get().form_card_width,
             body_rows: None,
+            fold_actions: false,
             ok: "OK",
             cancel: "Cancel",
             reset_scroll: false,
@@ -297,6 +299,12 @@ impl<'a> Panel<'a> {
         if rows.is_finite() {
             self.body_rows = Some(rows.clamp(1.0, 32.0));
         }
+        self
+    }
+
+    /// A folded card keeps only its title bar: its actions fold away with its fields.
+    pub(crate) fn fold_actions(mut self) -> Self {
+        self.fold_actions = true;
         self
     }
 
@@ -390,6 +398,19 @@ impl<'a> Panel<'a> {
         self.feature_impl(ui, heading, disabled, valid, Some(collapsed), body)
     }
 
+    /// `feature_collapsible` when `collapsed` is given, else `feature`.
+    pub(crate) fn feature_folding(
+        &self,
+        ui: &mut Ui,
+        heading: FeatureOptions<'_>,
+        disabled: bool,
+        valid: bool,
+        collapsed: Option<&mut bool>,
+        body: impl FnOnce(&mut Ui) -> ComputeStatus,
+    ) -> (bool, super::Action) {
+        self.feature_impl(ui, heading, disabled, valid, collapsed, body)
+    }
+
     fn feature_impl(
         &self,
         ui: &mut Ui,
@@ -460,13 +481,18 @@ impl<'a> Panel<'a> {
                 return (close, action);
             }
             let corners = self.positioned_frame(ui.ctx()).corner_radius;
-            let action = super::footer(
-                ui,
-                self.ok,
-                self.cancel,
-                valid && !state.applying,
-                super::Footer { apply: heading.apply_label, status: state.text.as_deref(), corners: Some(corners), ..Default::default() },
-            );
+            let folded = self.fold_actions && collapsed.as_deref().copied().unwrap_or(false);
+            let action = if folded {
+                super::Action::None
+            } else {
+                super::footer(
+                    ui,
+                    self.ok,
+                    self.cancel,
+                    valid && !state.applying,
+                    super::Footer { apply: heading.apply_label, status: state.text.as_deref(), corners: Some(corners), ..Default::default() },
+                )
+            };
             if state.busy {
                 let rect = egui::Rect::from_min_size(
                     egui::pos2(ui.min_rect().left(), ui.min_rect().bottom() - super::row_height()),
