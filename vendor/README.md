@@ -318,6 +318,13 @@ SolidCraft changes:
   submits nothing (`DeviceLost::probe`), so a device the driver lost is found by that
   submission rather than by the first queue write, which panicked inside wgpu-core
   (`PendingWrites::activate`, #4172).
+- `src/lib.rs`, `src/winit.rs`: a surface configure that meets a lost device is not taken as
+  configured (`configure_captured`): wgpu reports device-loss errors to no error scope, and on
+  D3D12 a driver reset found by the configure has already dropped the surface's configuration.
+  The next acquire failed with "Surface is not configured for presentation" and the device's
+  default handler panicked (#7007). An unsupported surface is a refused configure too. The
+  acquire runs under `capture_errors`, and the `Validation` status it then returns reconfigures
+  the surface instead of skipping every later frame.
 - `src/lib.rs`: creation of the egui renderer uses validation, internal and out-of-memory
   error scopes, awaiting every result before returning it. A refused UI pipeline (D3D12
   `egui_pipeline` shader compilation, #6648) returns `WgpuError::CreateRendererError` through

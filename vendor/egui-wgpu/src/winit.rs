@@ -107,13 +107,14 @@ impl Painter {
 
     /// SolidCraft: a configuration the device refuses (D3D12: "Failed to wait for GPU to come
     /// idle before reconfiguring the Surface", #1935) comes back as the error instead of reaching
-    /// the device's uncaptured-error handler, which panics. Called only through
-    /// [`Self::try_configure`], which says what follows.
+    /// the device's uncaptured-error handler, which panics; so does a configure that met a lost
+    /// device, or a surface the adapter doesn't support, neither of which configured it (#7007).
+    /// Called only through [`Self::try_configure`], which says what follows.
     fn configure_surface(
         surface_state: &SurfaceState,
         render_state: &RenderState,
         config: &SurfaceConfig,
-    ) -> Result<(), wgpu::Error> {
+    ) -> Result<(), crate::ConfigureError> {
         profiling::function_scope!();
 
         let SurfaceConfig {
@@ -133,13 +134,12 @@ impl Painter {
         let width = surface_state.width;
         let height = surface_state.height;
 
-        // SolidCraft: an unsupported surface is logged, not a panic.
+        // SolidCraft: an unsupported surface is a refused configure, not a panic.
         let Some(default_config) = surface_state
             .surface
             .get_default_config(&render_state.adapter, width, height)
         else {
-            log::error!("The surface isn't supported by this adapter");
-            return Ok(());
+            return Err(crate::ConfigureError::Unsupported);
         };
         let mut surf_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -155,10 +155,9 @@ impl Painter {
         }
 
         let device = &render_state.device;
-        let ((), failed) = crate::capture_errors(device, || {
-            surface_state.surface.configure(device, &surf_config)
-        });
-        failed.map_or(Ok(()), Err)
+        crate::configure_captured(device, &render_state.device_lost, || {
+            surface_state.surface.configure(device, &surf_config);
+        })
     }
 
     /// SolidCraft: configures the surface at `now` unless a refused configure's retry isn't due
@@ -723,7 +722,15 @@ impl Painter {
             if !FIRST_PRESENT.swap(true, std::sync::atomic::Ordering::Relaxed) {
                 crate::startup_step(crate::STEP_FIRST_PRESENT, "");
             }
-            let output_frame = surface_state.surface.get_current_texture();
+            // SolidCraft: an acquire wgpu refuses (a surface left without its configuration,
+            // #7007) comes back as `CurrentSurfaceTexture::Validation` instead of reaching the
+            // device's uncaptured-error handler, which panics by default.
+            let (output_frame, failed) = crate::capture_errors(&render_state.device, || {
+                surface_state.surface.get_current_texture()
+            });
+            if let Some(error) = failed {
+                log::warn!("The surface gave no frame: {error}");
+            }
             vsync_sec += start.elapsed().as_secs_f32();
             output_frame
         };
