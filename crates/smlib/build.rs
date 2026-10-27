@@ -11,6 +11,7 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=SMLIB_REV");
     println!("cargo:rerun-if-env-changed=SOLIDCRAFT_SMLIB_DIR");
+    println!("cargo:rerun-if-env-changed=WASI_SDK_PATH");
     if std::env::var_os("CARGO_FEATURE_NATIVE").is_none() {
         return;
     }
@@ -42,6 +43,7 @@ fn build() -> Result<(), String> {
     let api = sources(&src.join("SM_API/src"), &["StdAfx.cpp"])?;
     let target = std::env::var("TARGET").unwrap_or_default();
     let msvc = target.contains("msvc");
+    let wasi = if target == "wasm32-unknown-unknown" { Some(wasi_sdk()?) } else { None };
 
     let base = || {
         let mut b = cc::Build::new();
@@ -49,6 +51,13 @@ fn build() -> Result<(), String> {
         // Rust links the MSVC runtime as a DLL; the cc crate's default (/MD) matches.
         if msvc {
             b.flag("/EHsc").flag("/bigobj");
+        }
+        if let Some(sdk) = &wasi {
+            b.compiler(sdk.join("bin/clang++")).archiver(sdk.join("bin/llvm-ar")).target(WASI_TARGET);
+            b.flag(format!("--sysroot={}", sdk.join("share/wasi-sysroot").display())).flag("-fwasm-exceptions");
+            // The exnref encoding, as wasi-sdk's libc++ and Rust use: a module may not mix it with
+            // the legacy one clang still defaults to.
+            b.flag("-mllvm").flag("-wasm-use-legacy-eh=false");
         }
         b
     };
@@ -77,7 +86,32 @@ fn build() -> Result<(), String> {
     k.files(&core).include(src.join("SMLib/inc"));
     quiet(&mut k);
     k.try_compile("smlib_core").map_err(|e| e.to_string())?;
+
+    // The C++ runtime and the C library SMLib needs, from wasi-sdk: the exception-handling build of
+    // libc++. The few WASI calls libc makes are answered by src/wasi.rs.
+    if let Some(sdk) = &wasi {
+        let lib = sdk.join("share/wasi-sysroot/lib").join(WASI_TARGET);
+        println!("cargo:rustc-link-search=native={}", lib.join("eh").display());
+        println!("cargo:rustc-link-search=native={}", lib.display());
+        for l in ["c++", "c++abi", "unwind", "c"] {
+            println!("cargo:rustc-link-lib=static={l}");
+        }
+    }
     Ok(())
+}
+
+/// The C target SMLib is compiled for inside a `wasm32-unknown-unknown` build: wasi-sdk's, the
+/// one with a C++ standard library.
+const WASI_TARGET: &str = "wasm32-wasip1";
+
+/// wasi-sdk, from `WASI_SDK_PATH` (github.com/WebAssembly/wasi-sdk, release 34 or later).
+fn wasi_sdk() -> Result<PathBuf, String> {
+    let sdk =
+        std::env::var_os("WASI_SDK_PATH").map(PathBuf::from).ok_or("building SMLib for wasm32-unknown-unknown needs wasi-sdk: set WASI_SDK_PATH")?;
+    if !sdk.join("bin/clang++").is_file() {
+        return Err(format!("WASI_SDK_PATH={} has no bin/clang++", sdk.display()));
+    }
+    Ok(sdk)
 }
 
 /// The `.cpp` files in `dir`, sorted, without `skip`.

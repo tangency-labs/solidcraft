@@ -16,6 +16,9 @@ path = "src/main.rs"
 [features]
 default = []
 bundled-render-library = ["solidcraft-engine/bundled-render-library"]
+# Link SMLib into the kernel (solidcraft-engine/smlib): needs scripts/fetch-smlib.sh and wasi-sdk in
+# WASI_SDK_PATH (crates/smlib/build.rs). Off by default until CI has wasi-sdk.
+smlib = ["solidcraft-engine/smlib"]
 
 [dependencies]
 solidcraft-engine = { workspace = true }
