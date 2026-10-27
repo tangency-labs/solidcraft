@@ -18,6 +18,18 @@ pub fn is_native_cad_path(path: &str) -> bool {
     std::path::Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| NATIVE_CAD_EXTS.iter().any(|x| e.eq_ignore_ascii_case(x)))
 }
 
+/// Is this a FreeCAD file name (any case)?
+pub fn is_freecad_path(path: &str) -> bool {
+    std::path::Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("fcstd"))
+}
+
+/// Whether `bytes` are a FreeCAD design, from the contents alone: the file's name is not used
+/// (a Rhino file can be called `.FCStd`, and a FreeCAD file `.3dm`). Panics inside cadmpeg
+/// become `false`.
+pub fn detects_freecad(bytes: &[u8]) -> bool {
+    matches!(solidcraft_kernel::guard("cadmpeg detect", || Ok(convert::contents_are_freecad(bytes))), Ok(true))
+}
+
 /// Restate a FreeCAD or Rhino file (`file` is its name) as STEP text, with the losses
 /// and warnings cadmpeg reported. Panics inside cadmpeg become errors.
 pub fn native_cad_to_step(bytes: &[u8], file: &str) -> Result<(String, Vec<String>), String> {
@@ -30,12 +42,56 @@ pub fn native_cad_to_step(bytes: &[u8], file: &str) -> Result<(String, Vec<Strin
     )
 }
 
+/// A FreeCAD file's design history rebuilt as features (sketches, Pad and Pocket, Revolution and
+/// Groove, Fillet and Chamfer), checked against the file's own solids: each rebuilt body has the
+/// volume and extent of one of them. The error says why the history was not rebuilt; the file's
+/// solids then import as before ([`native_cad_to_step`]). Rhino files carry no such history.
+pub fn native_cad_design(bytes: &[u8], file: &str) -> Result<NativeDesign, String> {
+    let name = std::path::Path::new(file).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| file.to_string());
+    let design = solidcraft_kernel::guard("cadmpeg design", || convert::design(&name, bytes).map_err(solidcraft_kernel::KernelError::Invalid))
+        .map_err(|e| match e {
+            solidcraft_kernel::KernelError::Invalid(m) => m,
+            e => e.to_string(),
+        })?;
+    let rebuilt = design::evaluate(&design.doc)?;
+    let file_solids = crate::step_import_feature(bytes, file).map_err(|e| e.to_string())?;
+    let skip = match &file_solids.kind {
+        solidcraft_doc::FeatureKind::Import { skip, .. } => skip.clone(),
+        _ => Vec::new(),
+    };
+    let theirs: Vec<_> = file_solids.import.bodies.iter().zip(0u64..).filter(|(_, i)| !skip.contains(i)).map(|(b, _)| b.body.clone()).collect();
+    design::check_against(&rebuilt, &theirs)?;
+    Ok(design)
+}
+
+mod design;
+pub use design::NativeDesign;
+
+/// The STEP items a FreeCAD restatement marks invisible: a body's intermediate shapes (each Pad
+/// and Pocket, the tool shapes, sketch wires), which FreeCAD hides and only its body's own shape
+/// shows. Their bodies are left out of the import ([`crate::StepFeature`]'s `skip`).
+pub(crate) fn invisible_items(step: &str) -> std::collections::HashSet<u64> {
+    let mut out = std::collections::HashSet::new();
+    let mut rest = step;
+    while let Some(at) = rest.find("INVISIBILITY(") {
+        let after = rest.get(at + "INVISIBILITY(".len()..).unwrap_or_default();
+        let list = after.split_once(';').map_or(after, |(l, _)| l);
+        out.extend(list.split('#').skip(1).filter_map(|n| n.split(|c: char| !c.is_ascii_digit()).next()?.parse::<u64>().ok()));
+        rest = after;
+    }
+    out
+}
+
 mod convert {
     use std::io::Cursor;
 
+    use cadmpeg_core::decode::WorkBudget;
     use cadmpeg_core::decode::{DecodeArena, DecodeContext, DecodeDepth, DecodeMode, DecodePolicy, ResourceLimits, View};
     use cadmpeg_ir::codec::write::{EncodeInput, target::TargetRequest};
-    use cadmpeg_ir::codec::{DecodeFailure, DecodeOptions, DecodeResult};
+    use cadmpeg_ir::codec::{Codec, DecodeFailure, DecodeOptions, DecodeResult};
+    use cadmpeg_ir::document::CadIr;
+    use cadmpeg_ir::eval::{admission::EvaluationAdmission, finite_or_refusal, model_curve_point_by_id};
+    use cadmpeg_ir::index::ModelIndex;
     use cadmpeg_ir::validate::validate_neutral_for_decode;
     use cadmpeg_registry::{DETECTION_PREFIX_LEN, Format, InputCatalog, ResolveSourceError, ResolvedSource, build_encoder, forced_input};
 
@@ -53,32 +109,46 @@ mod convert {
         }
     }
 
+    /// The native codec that reads `bytes`: the format the contents state, else the one `ext`
+    /// names when the contents are not recognised (an empty `ext` asks the contents alone).
+    /// `None` when neither names a native codec.
+    fn detect<'a>(catalog: &'a InputCatalog, policy: &DecodePolicy, ext: &str, bytes: &[u8]) -> Result<Option<&'a dyn Codec>, String> {
+        let arena = DecodeArena::new();
+        let (ctx, _) = DecodeContext::from_root_bytes(&[], &arena, policy).map_err(|e| e.to_string())?;
+        let prefix = bytes.get(..DETECTION_PREFIX_LEN).unwrap_or(bytes);
+        let resolved = catalog.resolve_seekable_source(&ctx, View::over_retained(prefix), &mut Cursor::new(bytes), None);
+        let resolved = match resolved {
+            Ok(ResolvedSource::Unrecognized | ResolvedSource::Cadir) | Err(ResolveSourceError::Ambiguous(_)) => {
+                match forced_input(ext).map_err(|e| e.to_string())? {
+                    Some(forced) => catalog.resolve_source(&ctx, View::over_retained(prefix), Some(forced)),
+                    None => Ok(ResolvedSource::Unrecognized),
+                }
+            }
+            other => other,
+        };
+        ctx.finish_session().map_err(|e| e.to_string())?;
+        match resolved.map_err(|e| e.to_string())? {
+            ResolvedSource::Native { codec, .. } => Ok(Some(codec)),
+            _ => Ok(None),
+        }
+    }
+
+    /// Whether `bytes` are a FreeCAD design, from the contents alone (no extension is consulted).
+    pub(super) fn contents_are_freecad(bytes: &[u8]) -> bool {
+        let catalog = InputCatalog::with_builtins();
+        let policy = policy();
+        matches!(detect(&catalog, &policy, "", bytes), Ok(Some(codec)) if codec.id().as_str() == "fcstd")
+    }
+
     /// Decode `bytes` (a file called `name`, extension `ext`) with the codec cadmpeg detects from
     /// the bytes, else the one the extension names, if it is one of `accepted`. Returns the codec id
     /// and the decoded model.
-    pub(super) fn decode(name: &str, ext: &str, bytes: &[u8], accepted: &[&str]) -> Result<(String, DecodeResult), String> {
+    pub(super) fn decode_at(name: &str, ext: &str, bytes: &[u8], accepted: &[&str], depth: DecodeDepth) -> Result<(String, DecodeResult), String> {
         let policy = policy();
         let catalog = InputCatalog::with_builtins();
-        let codec = {
-            let arena = DecodeArena::new();
-            let (ctx, _) = DecodeContext::from_root_bytes(&[], &arena, &policy).map_err(|e| e.to_string())?;
-            let prefix = bytes.get(..DETECTION_PREFIX_LEN).unwrap_or(bytes);
-            let resolved = catalog.resolve_seekable_source(&ctx, View::over_retained(prefix), &mut Cursor::new(bytes), None);
-            let resolved = match resolved {
-                Ok(ResolvedSource::Unrecognized | ResolvedSource::Cadir) | Err(ResolveSourceError::Ambiguous(_)) => {
-                    match forced_input(ext).map_err(|e| e.to_string())? {
-                        Some(forced) => catalog.resolve_source(&ctx, View::over_retained(prefix), Some(forced)),
-                        None => Ok(ResolvedSource::Unrecognized),
-                    }
-                }
-                other => other,
-            };
-            ctx.finish_session().map_err(|e| e.to_string())?;
-            match resolved.map_err(|e| format!("{name}: {e}"))? {
-                ResolvedSource::Native { codec, .. } => codec,
-                _ => return Err(format!("{name}: unrecognised file contents")),
-            }
-        };
+        let codec = detect(&catalog, &policy, ext, bytes)
+            .map_err(|e| format!("{name}: {e}"))?
+            .ok_or_else(|| format!("{name}: unrecognised file contents"))?;
         let format = codec.id().as_str().to_string();
         if !accepted.contains(&format.as_str()) {
             return Err(format!("{name}: {format} files are not supported (FreeCAD .FCStd and Rhino .3dm only)"));
@@ -86,7 +156,7 @@ mod convert {
 
         // Decode in memory under the caps, as deep as the STEP writer reads: solids and products,
         // not the design history, which the import does not keep.
-        let options = DecodeOptions { depth: DecodeDepth::Geometry, policy };
+        let options = DecodeOptions { depth, policy };
         let decoded = codec.decode(&mut Cursor::new(bytes), &options).map_err(|e| match e {
             DecodeFailure::Codec(e) => format!("{name}: could not read this {format} file: {e}"),
             other => format!("{name}: {other}"),
@@ -94,12 +164,51 @@ mod convert {
         Ok((format, decoded))
     }
 
+    /// The design history of a FreeCAD file (`name`), rebuilt.
+    pub(super) fn design(name: &str, bytes: &[u8]) -> Result<super::NativeDesign, String> {
+        let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
+        let (format, decoded) = decode_at(name, &ext, bytes, &ACCEPTED, DecodeDepth::Full)?;
+        if format != "fcstd" {
+            return Err(format!("{format} files carry no feature history to rebuild"));
+        }
+        let (ir, _, _) = decoded.into_parts();
+        let mut arenas = super::design::Arenas::of(&ir.model)?;
+        // Each object's placement, from cadmpeg's record of FreeCAD's attachments.
+        for r in ir.native.namespace("fcstd").and_then(|n| n.arenas().get("attachments")).into_iter().flatten() {
+            let object = r.field("object").and_then(|o| o.as_str().and_then(|o| o.rsplit_once('#')).map(|(_, n)| n.to_string()));
+            let placement = r.field("placement").and_then(|m| serde_json::from_value::<super::design::Mat4>(m).ok());
+            if let (Some(object), Some(m)) = (object, placement)
+                && m.iter().flatten().all(|v| v.is_finite())
+            {
+                arenas.placements.insert(object, m);
+            }
+        }
+        let index = std::cell::OnceCell::new();
+        let work = WorkBudget::new(EDGE_WORK);
+        let edge_point = |id: &str| edge_point(&ir, index.get_or_init(|| ModelIndex::build(&ir)), &work, id);
+        super::design::rebuild(&arenas, &edge_point)
+    }
+
+    /// Curve evaluation steps spent placing fillet and chamfer edges, at most.
+    const EDGE_WORK: usize = 1 << 22;
+
+    /// A point on model edge `id`: its carrier at the middle of its range.
+    fn edge_point(ir: &CadIr, index: &ModelIndex<'_>, work: &WorkBudget, id: &str) -> Option<solidcraft_geom::Vec3> {
+        let edge = ir.model.edges.iter().find(|e| e.id.as_str() == id)?;
+        let curve = edge.carrier.curve()?;
+        let [a, b] = edge.param_range()?.get();
+        let t = 0.5 * (a + b);
+        let p =
+            finite_or_refusal(EvaluationAdmission::Standard.within_work_slice(work, |adm| model_curve_point_by_id(adm, index, curve, t))).ok()??;
+        Some(solidcraft_geom::Vec3::new(p.x, p.y, p.z))
+    }
+
     pub(super) fn to_step(name: &str, bytes: &[u8]) -> Result<(String, Vec<String>), String> {
         let ext = name.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
         if !super::NATIVE_CAD_EXTS.contains(&ext.as_str()) {
             return Err(format!("{name}: not supported (FreeCAD .FCStd and Rhino .3dm only)"));
         }
-        let (format, decoded) = decode(name, &ext, bytes, &ACCEPTED)?;
+        let (format, decoded) = decode_at(name, &ext, bytes, &ACCEPTED, DecodeDepth::Full)?;
         let policy = policy();
         let (ir, report, fidelity) = decoded.into_parts();
         if !report.geometry_transferred() {

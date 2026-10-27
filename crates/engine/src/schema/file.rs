@@ -453,6 +453,18 @@ impl JsonSchema for MaxPoints {
     }
 }
 
+/// `history` of `doc.open`: rebuild a FreeCAD file's sketches and features, or bring in only
+/// its solids.
+#[derive(Clone, Copy, Debug, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum HistoryParam {
+    /// The file's sketches and features, when every one rebuilds and they build what the file
+    /// holds; otherwise the solids come in with a warning.
+    Features,
+    /// Only the file's solids, as one Import feature.
+    Solids,
+}
+
 /// Open a file as the design: a SolidCraft design (`.sc`, or a `.solidcraft` design from an
 /// earlier release), a `.dxf` or `.svg` drawing (a new, unsaved design with an XY sketch, with
 /// the units and defaults of `sketch.insert_dxf` and `sketch.insert_svg`), a STEP, IGES,
@@ -478,6 +490,10 @@ pub struct OpenParams {
     /// its parts) into a new history folder named `Group #N`. Default: false.
     #[serde(default)]
     pub folder: Option<bool>,
+    /// For a FreeCAD file only (ignored for other files): its sketches and features rebuilt as
+    /// SolidCraft features, or only its solids as one Import feature. Default: features.
+    #[serde(default)]
+    pub history: Option<HistoryParam>,
     /// For a 3MF, STL, OBJ or glTF file only (refused for any other): true moves the mesh so its
     /// box is centred on X and Y with its base on Z = 0. Default: false.
     #[serde(default)]
@@ -658,6 +674,10 @@ pub struct OpenedFile {
     /// saved-model cache, false when the file was imported afresh.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub import_reused: Option<bool>,
+    /// A FreeCAD file only: `"features"` when its sketches and features were rebuilt; absent
+    /// when its solids came in as one Import feature.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history: Option<String>,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub param_warnings: Vec<String>,
