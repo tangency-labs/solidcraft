@@ -508,7 +508,7 @@ fn build_curve_cache<O: Copy + PartialEq>(
 
     // construct new CurveCache Object
     let mut cache = CurveCache::new(
-        curve.clone_detached(),
+        curve.clone_detached()?,
         ivl,
         CurveCacheOptions {
             make_full_tree: true,
@@ -1678,9 +1678,10 @@ impl Curve {
         // which values are optimal for the length function.
         let angular_tol = 90.0; // 90 degrees might be ok
 
-        // Create the cache
+        // Create the cache (over the curve itself upstream: an exact copy that keeps
+        // the owner, not the copy constructor's fixed-up knots)
         let mut cache: CurveCache<()> = CurveCache::new(
-            self.clone(),
+            self.clone_for_evaluation()?,
             *interval,
             CurveCacheOptions {
                 make_full_tree: true,

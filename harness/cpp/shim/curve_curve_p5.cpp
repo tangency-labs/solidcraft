@@ -16,7 +16,8 @@
 // documented in crates/solidcore-ffi/src/units/curve_curve_p5.rs, which validates every
 // input. A curve block is `kind dim ...` (0: SmBSplineCurve `oob n p m cpts(x y z w)
 // knots`; 1: SmHermiteCurve `P1 D1 P2 D2`; 2: bounded SmLine `P V d0 d1 scale io`;
-// 3: SmEllipse `C X Y d0 d1 rx ry io`; 4: SmCircle `C X Y d0 d1 r io`). `out` receives the
+// 3: SmEllipse `C X Y d0 d1 rx ry io`; 4: SmCircle `C X Y d0 d1 r io`; 5: kind 0 with the
+// given knots written back over the curve's own NURB after construction). `out` receives the
 // op status (0 = SM_SUCCESS, else the SmStatus value) and the op's outputs.
 #include "sc_shim.h"
 
@@ -1711,10 +1712,18 @@ SmCurve* read_curve(Rd& rd, const SmContext& ctx)
 {
     int64_t kind = rd.idx();
     ULONG dim = (ULONG)rd.idx();
-    if (kind == 0)
+    if (kind == 0 || kind == 5)
     {
         bool oob = rd.flag();
         SmBSplineCurve* c = new (ctx) SmBSplineCurve(read_nurb(rd), dim, FALSE);
+        if (kind == 5)
+        {
+            // write the given knots back over the fixed-up NURB
+            gw_CURVE* own = c->GetGwNurbPointer();
+            gw_INDEX m = own->knt->m;
+            for (gw_INDEX i = 0; i <= m; i++)
+                own->knt->U[i] = rd.in[rd.at - (int64_t)(m + 1) + (int64_t)i];
+        }
         c->SetOutOfBoundsEnabled(oob ? TRUE : FALSE);
         return c;
     }

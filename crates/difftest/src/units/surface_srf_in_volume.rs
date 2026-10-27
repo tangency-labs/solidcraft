@@ -78,6 +78,11 @@ fn harness(msg: impl Into<String>) -> HarnessError {
 enum SurfIn {
     Bspline {
         bss: BssIn,
+        /// Knots written back over the surface's own NURB after construction, undoing
+        /// the constructor's knot fix-up (surface block kind `3`). Omitted when false,
+        /// so existing case identities are unchanged.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        raw_knots: bool,
     },
     Plane {
         o: [f64; 3],
@@ -246,8 +251,8 @@ fn b(x: bool) -> f64 {
 
 fn surf_block(v: &mut Vec<f64>, s: &SurfIn) -> Result<(), HarnessError> {
     match s {
-        SurfIn::Bspline { bss } => {
-            v.push(0.0);
+        SurfIn::Bspline { bss, raw_knots } => {
+            v.push(if *raw_knots { 3.0 } else { 0.0 });
             push_bss(v, bss)?;
         }
         SurfIn::Plane { o, n } => {
@@ -505,7 +510,19 @@ fn build_volume(v: &Vol) -> Result<Volume, HarnessError> {
 
 fn build_surface(k: &Kernel, s: &SurfIn) -> Result<Surface, HarnessError> {
     match s {
-        SurfIn::Bspline { bss } => Ok(Surface::from(bss_of(bss)?)),
+        SurfIn::Bspline { bss, raw_knots } => {
+            let mut b = bss_of(bss)?;
+            if *raw_knots {
+                // undo the constructor's fix-up, as the shim does
+                let raw = srf(&bss.srf)?;
+                let nurb = b
+                    .get_or_create_gw_nurb()
+                    .map_err(|e| harness(format!("surface: {e}")))?;
+                nurb.u_knots_mut().copy_from_slice(&raw.u);
+                nurb.v_knots_mut().copy_from_slice(&raw.v);
+            }
+            Ok(Surface::from(b))
+        }
         SurfIn::Plane { o, n } => Ok(Surface::from(Plane::from_normal(v3(*o), v3(*n)))),
         SurfIn::Cylinder {
             o,
@@ -999,6 +1016,7 @@ fn gen_surface(rng: &mut Rng) -> (SurfIn, [f64; 4]) {
         (
             SurfIn::Bspline {
                 bss: gen_bss(rng, s),
+                raw_knots: false,
             },
             dom,
         )

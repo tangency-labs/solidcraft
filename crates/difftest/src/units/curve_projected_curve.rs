@@ -69,6 +69,11 @@ struct BSplineIn {
     cpts: Vec<[f64; 4]>,
     p: usize,
     u: Vec<f64>,
+    /// Knots written back over the curve's own NURB after construction, undoing the
+    /// constructor's knot fix-up (curve block kind `2`). Omitted when false, so
+    /// existing case identities are unchanged.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    raw_knots: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -311,7 +316,8 @@ fn curve_block(v: &mut Vec<f64>, c: &CurveIn) {
         CurveIn::Bspline(bs) => {
             let n = bs.cpts.len().saturating_sub(1);
             let m = bs.u.len().saturating_sub(1);
-            v.extend([0.0, bs.dim as f64, b(bs.oob)]);
+            let kind = if bs.raw_knots { 2.0 } else { 0.0 };
+            v.extend([kind, bs.dim as f64, b(bs.oob)]);
             v.extend([n as f64, bs.p as f64, m as f64]);
             for c in &bs.cpts {
                 v.extend_from_slice(c);
@@ -444,6 +450,13 @@ fn build_curve(c: &CurveIn) -> Result<Curve, HarnessError> {
             }
             cur.knots_mut().copy_from_slice(&bs.u);
             let mut c = BSplineCurve::from_nurb(cur, bs.dim, false);
+            if bs.raw_knots {
+                // undo the constructor's fix-up, as the shim does
+                c.get_or_create_gw_nurb()
+                    .map_err(|e| harness(format!("curve: {e}")))?
+                    .knots_mut()
+                    .copy_from_slice(&bs.u);
+            }
             c.set_out_of_bounds_enabled(bs.oob);
             Ok(Curve::from(c))
         }
@@ -618,11 +631,15 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
     match &i.op {
         OpIn::ReadDb(_) => {}
         OpIn::State => {
-            // through the curve object, as upstream's virtual calls
-            let c = Curve::from(pc.clone());
+            // through the curve object, as upstream's virtual calls (the curve itself:
+            // a Rust clone would fix the base curve's knots up)
+            let c = Curve::from(pc);
+            let CurveKind::Projected(pc) = c.kind() else {
+                return Err(harness("not a projected curve"));
+            };
             let ivl = c.natural_interval();
             o.push(ctor_status);
-            state(&mut o, &pc);
+            state(&mut o, pc);
             o.push(c.type_code() as f64);
             o.push(c.dim() as f64);
             let deg = tri!(o, c.degree());
@@ -733,16 +750,18 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
             projected_state(&mut o, &c)?;
         }
         OpIn::Copy => {
-            let c = Curve::from(pc.clone());
+            // the curve itself (a Rust clone would fix the base curve's knots up)
+            let shared = pc.owns_curve() == OwnsCurve::No;
+            let c = Curve::from(pc);
             let nc = tri!(o, c.copy(&Kernel::default()));
             o.push(0.0);
             projected_state(&mut o, &nc)?;
-            o.push(b(pc.owns_curve() == OwnsCurve::No));
+            o.push(b(shared));
             let eq = tri!(o, nc.approx_eq(&k, &c));
             o.push(b(eq));
         }
         OpIn::Equal { other } => {
-            let c = Curve::from(pc.clone());
+            let c = Curve::from(pc);
             o.push(0.0);
             match other {
                 None => {
@@ -826,6 +845,7 @@ fn gen_bspline(rng: &mut Rng) -> BSplineIn {
         cpts,
         p,
         u,
+        raw_knots: false,
     }
 }
 

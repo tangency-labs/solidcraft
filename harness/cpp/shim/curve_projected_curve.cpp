@@ -7,7 +7,8 @@
 // documented in crates/solidcore-ffi/src/units/curve_projected_curve.rs, which validates every
 // input. Curve ops start with a projected-curve block: a base curve block (as unit
 // curve.curve_p2: 0 = SmBSplineCurve `dim oob n p m cpts(x y z w) knots`, 1 = SmHermiteCurve
-// `dim P1 D1 P2 D2`) then `ctor has_P P[3] has_V V[3] has_A A[3] type owns`.
+// `dim P1 D1 P2 D2`, 2 = kind 0 with the given knots written back over the curve's own NURB
+// after construction) then `ctor has_P P[3] has_V V[3] has_A A[3] type owns`.
 // `out` receives the op status (0 = SM_SUCCESS, else the SmStatus value) and the outputs.
 //
 // The private members are read through the explicit-instantiation access rule (no upstream
@@ -114,10 +115,18 @@ SmCurve* read_curve(Rd& rd, const SmContext& ctx)
 {
     int64_t kind = rd.idx();
     ULONG dim = (ULONG)rd.idx();
-    if (kind == 0)
+    if (kind == 0 || kind == 2)
     {
         bool oob = rd.flag();
         SmBSplineCurve* c = new (ctx) SmBSplineCurve(read_nurb(rd), dim, FALSE);
+        if (kind == 2)
+        {
+            // write the given knots back over the fixed-up NURB
+            gw_CURVE* own = c->GetGwNurbPointer();
+            gw_INDEX m = own->knt->m;
+            for (gw_INDEX i = 0; i <= m; i++)
+                own->knt->U[i] = rd.in[rd.at - (int64_t)(m + 1) + (int64_t)i];
+        }
         c->SetOutOfBoundsEnabled(oob ? TRUE : FALSE);
         return c;
     }

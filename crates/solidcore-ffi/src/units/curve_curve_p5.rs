@@ -8,7 +8,8 @@
 //! `1 dim P1[3] D1[3] P2[3] D2[3]` (an `SmHermiteCurve`), `2 3 P[3] V[3] d0 d1 scale io`
 //! (a bounded `SmLine(P, V, [d0, d1], scale, 3, ctx, NULL, io)`), `3 3 C[3] X[3] Y[3] d0 d1
 //! rx ry io` (an `SmEllipse` without source NURB) or `4 3 C[3] X[3] Y[3] d0 d1 r io` (an
-//! `SmCircle`). Every output starts with the status (`0` = `SM_SUCCESS`, else the
+//! `SmCircle`). Kind `5` is kind `0` with the given knots written back over the curve's
+//! own NURB after construction (undoing `sm_FixupKnotVector`). Every output starts with the status (`0` = `SM_SUCCESS`, else the
 //! `SmStatus`); the rest:
 //!
 //! | [`Op`]         | upstream                                       | parameters                          | outputs |
@@ -255,7 +256,7 @@ fn radius(rd: &mut Reader<'_>) -> Result<(), FfiError> {
 
 /// A curve block (see the module docs).
 fn curve_block(rd: &mut Reader<'_>) -> Result<CurveInfo, FfiError> {
-    let kind = rd.index(4)?;
+    let kind = rd.index(5)?;
     let dim = rd.index(3)?;
     if dim < 2 {
         return Err(bad("curve block: dimension must be 2 or 3"));
@@ -268,10 +269,16 @@ fn curve_block(rd: &mut Reader<'_>) -> Result<CurveInfo, FfiError> {
         b: MAX_COORD / 8.0,
     };
     match kind {
-        0 => {
+        // 5: a B-spline whose raw knots are written back after construction
+        0 | 5 => {
             rd.flag()?;
             let (a, b) = bspline(rd)?;
-            Ok(CurveInfo { kind, dim, a, b })
+            Ok(CurveInfo {
+                kind: 0,
+                dim,
+                a,
+                b,
+            })
         }
         1 => {
             for _ in 0..4 {

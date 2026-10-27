@@ -245,7 +245,8 @@ fn check_points(rd: &mut Reader<'_>, k: usize) -> Result<(), FfiError> {
 /// A surface block; returns its parameter domain (`None` for a plane or a cylinder) and
 /// whether it is a cylinder (only where `cylinder_ok`).
 fn surface(rd: &mut Reader<'_>, cylinder_ok: bool) -> Result<(Option<[f64; 4]>, bool), FfiError> {
-    let kind = rd.index(2)?;
+    // 3: a B-spline (as 0) whose raw knots are written back after construction
+    let kind = rd.index(3)?;
     if kind == 1 {
         rd.vec3()?;
         rd.nonzero3()?;

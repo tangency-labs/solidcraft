@@ -80,6 +80,11 @@ struct BSplineIn {
     cpts: Vec<[f64; 4]>,
     p: usize,
     u: Vec<f64>,
+    /// Knots written back over the curve's own NURB after construction, so the
+    /// constructor's knot fix-up is undone (curve block kind `5`). Omitted when false,
+    /// so existing case identities are unchanged.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    raw_knots: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -281,6 +286,7 @@ fn resolve(c: &CurveIn) -> Result<CurveIn, HarnessError> {
         cpts: cur.cpts().iter().map(|p| [p.x, p.y, p.z, p.w]).collect(),
         p: cur.degree(),
         u: cur.knots().to_vec(),
+        raw_knots: false,
     }))
 }
 
@@ -299,7 +305,8 @@ fn curve_block(v: &mut Vec<f64>, c: &CurveIn) -> Result<(), HarnessError> {
         CurveIn::Bspline(bs) => {
             let n = bs.cpts.len().saturating_sub(1);
             let m = bs.u.len().saturating_sub(1);
-            v.extend([0.0, bs.dim as f64, b(bs.oob)]);
+            let kind = if bs.raw_knots { 5.0 } else { 0.0 };
+            v.extend([kind, bs.dim as f64, b(bs.oob)]);
             v.extend([n as f64, bs.p as f64, m as f64]);
             for c in &bs.cpts {
                 v.extend_from_slice(c);
@@ -576,6 +583,13 @@ fn build(k: &Kernel, c: &CurveIn) -> Result<Curve, HarnessError> {
             }
             cur.knots_mut().copy_from_slice(&bs.u);
             let mut c = BSplineCurve::from_nurb(cur, bs.dim, false);
+            if bs.raw_knots {
+                // undo the constructor's fix-up, as the shim does
+                c.get_or_create_gw_nurb()
+                    .map_err(|e| harness(format!("curve: {e}")))?
+                    .knots_mut()
+                    .copy_from_slice(&bs.u);
+            }
             c.set_out_of_bounds_enabled(bs.oob);
             Ok(Curve::from(c))
         }
@@ -1000,6 +1014,7 @@ fn gen_bspline(rng: &mut Rng) -> BSplineIn {
         cpts,
         p,
         u,
+        raw_knots: false,
     }
 }
 
@@ -1037,6 +1052,7 @@ fn gen_linear_bspline(rng: &mut Rng, p: [f64; 3], q: [f64; 3], deg: usize, even:
         cpts,
         p: deg,
         u,
+        raw_knots: false,
     }
 }
 

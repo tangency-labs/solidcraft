@@ -121,15 +121,24 @@ struct Peek : public SmCrvInVolume
 
 double st(SmStatus s) { return s == SM_SUCCESS ? 0.0 : (double)s; }
 
-// A curve block `0 dim oob n p m cpts knots` or `1 dim P1 D1 P2 D2`.
+// A curve block `0 dim oob n p m cpts knots` or `1 dim P1 D1 P2 D2` (`2`: kind 0 with the
+// given knots written back over the curve's own NURB after construction).
 SmCurve* read_curve(Rd& rd, const SmContext& ctx)
 {
     int64_t kind = rd.idx();
     ULONG dim = (ULONG)rd.idx();
-    if (kind == 0)
+    if (kind == 0 || kind == 2)
     {
         bool oob = rd.flag();
         SmBSplineCurve* c = new (ctx) SmBSplineCurve(read_nurb(rd), dim, FALSE);
+        if (kind == 2)
+        {
+            // write the given knots back over the fixed-up NURB
+            gw_CURVE* own = c->GetGwNurbPointer();
+            gw_INDEX m = own->knt->m;
+            for (gw_INDEX i = 0; i <= m; i++)
+                own->knt->U[i] = rd.in[rd.at - (int64_t)(m + 1) + (int64_t)i];
+        }
         c->SetOutOfBoundsEnabled(oob ? TRUE : FALSE);
         return c;
     }
@@ -394,6 +403,7 @@ void civ_op(int32_t op, Rd& rd, const SmContext& ctx, Built& bb, std::vector<dou
         {
             SmCrvInVolume* cc = (SmCrvInVolume*)cp;
             put_state(o, cc);
+            o.push_back(sc::flg(*cp == *c));
             // the copy deletes what it owns; free the copies it does not own (they are
             // never the originals when copied)
             SmCurve* ccur = cc->GetCurve();

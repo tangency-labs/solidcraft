@@ -201,14 +201,29 @@ impl OffsetCurve {
         }
     }
 
-    /// `Copy` (the copy constructor): an equal offset curve with its own base curve.
-    #[must_use]
-    pub fn copy(&self) -> Self {
-        let mut c = self.clone();
-        if self.owns_curve != 0 {
-            c.owns_curve = 1;
-        }
-        c
+    /// `Copy` (the copy constructor): an equal offset curve. An owned base curve
+    /// (`TRUE` or `UNSURE`) is copied and owned by the copy; a borrowed one is shared
+    /// upstream, so here it is an exact copy that keeps its owner (`Curve::clone`
+    /// would fix its knots up).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Curve::clone_for_evaluation`] on a borrowed base curve (geometry
+    /// nested too deeply).
+    pub fn copy(&self) -> Result<Self> {
+        let base = match &self.base {
+            Some(b) if self.owns_curve == 0 => Some(Box::new(b.clone_for_evaluation()?)),
+            b => b.clone(),
+        };
+        Ok(Self {
+            dim: self.dim,
+            base,
+            normal: self.normal,
+            distance: self.distance,
+            interval: self.interval,
+            reversed: self.reversed,
+            owns_curve: i32::from(self.owns_curve != 0),
+        })
     }
 
     /// Image-space dimension (`GetDim`).
@@ -820,7 +835,7 @@ mod tests {
     fn equality_copy_and_types() {
         let k = &Kernel::default();
         let a = offset(0.5);
-        let b = a.copy();
+        let b = a.copy().unwrap();
         assert!(a.approx_eq(k, &b).unwrap());
         assert!(!a.approx_eq(k, &offset(0.6)).unwrap());
         assert!(a.is_kind_of(OffsetCurve::TYPE));

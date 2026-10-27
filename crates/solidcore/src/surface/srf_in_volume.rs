@@ -394,11 +394,15 @@ impl SrfInVolume {
     }
 
     /// The copy constructor (`Copy`): copies both parts and sets the owner flag to
-    /// 3, 1, 2 or 0 from what this object owns.
+    /// 3, 1, 2 or 0 from what this object owns. A surface this object does not own is
+    /// shared upstream, so here it is an exact copy that keeps its owner
+    /// (`Surface::clone` would fix its knots up).
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] from copying an unported volume kind.
+    /// [`SolidError::Unported`] from copying an unported volume kind; those of
+    /// [`Surface::clone_for_evaluation`] on a surface not owned (geometry nested too
+    /// deeply).
     pub fn copy(&self, k: &Kernel) -> Result<Self> {
         let owns_surface = self.owns_surface();
         let owns_volume = self.owns_volume();
@@ -421,7 +425,8 @@ impl SrfInVolume {
         let surface = if owns_surface {
             ignored(self.surface.copy(k))?.unwrap_or_else(|| (*self.surface).clone())
         } else {
-            (*self.surface).clone()
+            // shared upstream: the same surface
+            self.surface.clone_for_evaluation()?
         };
         Ok(Self {
             surface: Box::new(surface),

@@ -55,6 +55,11 @@ struct BSplineIn {
     cpts: Vec<[f64; 4]>,
     p: usize,
     u: Vec<f64>,
+    /// Knots written back over the curve's own NURB after construction, undoing the
+    /// constructor's knot fix-up (base block kind `2`). Omitted when false, so
+    /// existing case identities are unchanged.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    raw_knots: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -177,7 +182,8 @@ fn base_block(v: &mut Vec<f64>, c: &BaseIn) -> Result<(), HarnessError> {
         BaseIn::Bspline(bs) => {
             let n = bs.cpts.len().checked_sub(1).ok_or_else(|| harness("no points"))?;
             let m = bs.u.len().checked_sub(1).ok_or_else(|| harness("no knots"))?;
-            v.extend([0.0, bs.dim as f64, b(bs.oob), n as f64, bs.p as f64, m as f64]);
+            let kind = if bs.raw_knots { 2.0 } else { 0.0 };
+            v.extend([kind, bs.dim as f64, b(bs.oob), n as f64, bs.p as f64, m as f64]);
             for p in &bs.cpts {
                 v.extend(p);
             }
@@ -336,6 +342,13 @@ fn build_base(c: &BaseIn) -> Result<Curve, HarnessError> {
             }
             cur.knots_mut().copy_from_slice(&bs.u);
             let mut c = BSplineCurve::from_nurb(cur, bs.dim, false);
+            if bs.raw_knots {
+                // undo the constructor's fix-up, as the shim does
+                c.get_or_create_gw_nurb()
+                    .map_err(|e| harness(format!("curve: {e}")))?
+                    .knots_mut()
+                    .copy_from_slice(&bs.u);
+            }
             c.set_out_of_bounds_enabled(bs.oob);
             Ok(Curve::from(c))
         }
@@ -381,13 +394,15 @@ fn build(i: &Inputs) -> Result<(Curve, Curve), HarnessError> {
             return Err(harness("nrev above the runner's reversal bound"));
         }
     }
-    let base = build_base(i.base.as_ref().ok_or_else(|| harness("no base"))?)?;
+    // the curves are built again rather than cloned: a Rust clone would fix the base
+    // curve's knots up, while upstream offsets the curve itself
+    let base_in = i.base.as_ref().ok_or_else(|| harness("no base"))?;
     let spec = i.spec.as_ref().ok_or_else(|| harness("no spec"))?;
     let built = |base: Curve, spec: &SpecIn| build_offset(base, spec).map_err(|e| harness(e.to_string()));
-    let inner = built(base.clone(), spec)?;
+    let inner = built(build_base(base_in)?, spec)?;
     Ok(match &i.outer {
-        None => (base, inner),
-        Some(o) => (inner.clone(), built(inner, o)?),
+        None => (build_base(base_in)?, inner),
+        Some(o) => (built(build_base(base_in)?, spec)?, built(inner, o)?),
     })
 }
 
@@ -687,6 +702,7 @@ fn gen_bspline(rng: &mut Rng, planar: bool) -> BSplineIn {
         cpts,
         p,
         u,
+        raw_knots: false,
     }
 }
 

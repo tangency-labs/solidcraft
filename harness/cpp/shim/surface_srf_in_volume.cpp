@@ -226,7 +226,8 @@ void put_volume(std::vector<double>& o, const SmVolume* v)
 // A surface block: `0 oob form n m p q r s cpts(x y z w) u v` (SmBSplineSurface(gw_SURFACE*,
 // FALSE, NULL)), `1 O[3] N[3]` (SmPlane(O, N)) or `2 O[3] X[3] Y[3] r start end h swap inside`
 // (SmCylinder(O, X, Y, r, start, end, h, swap, inside, FALSE) + MakeNurb, status ignored: the
-// ffi wrapper admits only inputs it succeeds on).
+// ffi wrapper admits only inputs it succeeds on); `3 ...` is kind 0 with the given knots written
+// back over the surface's own NURB after construction.
 SmSurface* read_surface(Rd& rd, const SmContext& ctx)
 {
     int64_t kind = rd.idx();
@@ -273,6 +274,16 @@ SmSurface* read_surface(Rd& rd, const SmContext& ctx)
     for (gw_INDEX i = 0; i <= s; i++)
         sur->knv->U[i] = rd.num();
     SmBSplineSurface* b = new (ctx) SmBSplineSurface(sur, FALSE, NULL);
+    if (kind == 3)
+    {
+        // write the given knots back over the fixed-up NURB
+        gw_SURFACE* own = b->GetGwNurbPointer();
+        int64_t at = rd.at - (int64_t)(r + 1) - (int64_t)(s + 1);
+        for (gw_INDEX i = 0; i <= r; i++)
+            own->knu->U[i] = rd.in[at++];
+        for (gw_INDEX i = 0; i <= s; i++)
+            own->knv->U[i] = rd.in[at++];
+    }
     b->GetOutOfBoundsEnabled() = oob ? TRUE : FALSE;
     b->SetBSplineSurfaceForm(form);
     return b;

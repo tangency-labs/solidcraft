@@ -809,16 +809,21 @@ impl Curve {
         }
     }
 
-    /// A copy (as `Clone`) with an empty curve cache memo of its own: the curve a
-    /// cache keeps of its own, so a memo never holds itself.
-    #[must_use]
-    pub(crate) fn clone_detached(&self) -> Self {
-        Self {
-            kind: self.kind.clone(),
+    /// The curve a cache keeps of its own: an exact copy (as
+    /// [`Curve::clone_for_evaluation`], without the copy constructor's knot fix-up,
+    /// since upstream's `SmCurveCache::m_crCurve` references the curve itself) without
+    /// owner and with an empty curve cache memo of its own, so a memo never holds
+    /// itself.
+    /// # Errors
+    /// Those of [`Curve::clone_for_evaluation`] (geometry nested too deeply).
+    pub(crate) fn clone_detached(&self) -> Result<Self> {
+        let copy = self.clone_for_evaluation()?;
+        Ok(Self {
+            kind: copy.kind,
             owner: None,
             notify_identity: IdentitySlot::new(),
             memo: CurveMemo::new(),
-        }
+        })
     }
 
     /// The curve cache memo (see [`CurveMemo`]).
@@ -1826,8 +1831,8 @@ impl Curve {
             CurveKind::Parabola(c) => Ok(Self::from(c.copy())),
             CurveKind::Hermite(_) | CurveKind::Conic(_) | CurveKind::Iso(_) => Err(base_err()),
             CurveKind::Projected(c) => c.copy(k).map(Self::from),
-            CurveKind::Offset(c) => Ok(Self::from(c.copy())),
-            CurveKind::CrvInVolume(c) => Ok(Self::from(c.copy())),
+            CurveKind::Offset(c) => c.copy().map(Self::from),
+            CurveKind::CrvInVolume(c) => c.copy().map(Self::from),
             CurveKind::CrvOnSurf(c) => c.copy(k).map(Self::from),
             // SmCrvOnSurf::Copy (not overridden): `new SmCrvOnSurf(*this)`, the base only
             CurveKind::TangentField(c) => c.base().copy(k).map(Self::from),

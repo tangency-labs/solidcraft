@@ -40,7 +40,8 @@
 //!   (`EditParameterization`, `ReverseParameterization` and `Trim` refuse a
 //!   `FALSE` owner, `Transform` anything below `UNSURE`). The copy constructor
 //!   copies the base curve when it is owned (`Copy`) and shares the pointer
-//!   otherwise; here both are a copy, with the same values. When the owned base
+//!   otherwise; here both are a copy, the borrowed one exact (no knot fix-up, owner
+//!   kept) so it has the same values. When the owned base
 //!   curve has no `Copy` (a Hermite curve, `SM_ERR`) upstream ignores the status
 //!   and returns a projected curve with a null base curve, which crashes on first
 //!   use; [`ProjectedCurve::copy`] returns that `SM_ERR` instead.
@@ -284,10 +285,13 @@ impl ProjectedCurve {
     /// # Errors
     ///
     /// When the base curve is owned, those of its [`Curve::copy`] (`SM_ERR` for a
-    /// Hermite curve; upstream ignores it, see the module notes).
+    /// Hermite curve; upstream ignores it, see the module notes); when it is borrowed,
+    /// those of [`Curve::clone_for_evaluation`] (geometry nested too deeply).
     pub fn copy(&self, k: &Kernel) -> Result<Self> {
         let curve = if self.owns_curve == OwnsCurve::No {
-            self.curve.as_ref().clone()
+            // upstream shares the borrowed base curve: an exact copy that keeps its
+            // owner (`Curve::clone` would fix its knots up)
+            self.curve.clone_for_evaluation()?
         } else {
             // copy the Curve
             self.curve.copy(k)?

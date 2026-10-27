@@ -5,7 +5,8 @@
 //!
 //! Curve ops start with a projected-curve block: a base curve block (as unit
 //! `curve.curve_p2`: `0 dim oob n p m cpts(x y z w) knots`, an `SmBSplineCurve`, or
-//! `1 dim P1[3] D1[3] P2[3] D2[3]`, an `SmHermiteCurve`) followed by
+//! `1 dim P1[3] D1[3] P2[3] D2[3]`, an `SmHermiteCurve`; `2` is kind `0` with the given
+//! knots written back over the curve's own NURB after construction) followed by
 //! `ctor has_P P[3] has_V V[3] has_A A[3] type owns`: `ctor` 0 builds the curve with
 //! the constructor (a vector without its `has_` flag is passed as `NULL`), 1 with
 //! `SetCanonical` on an empty curve (missing vectors default-constructed, i.e.
@@ -189,12 +190,13 @@ fn bspline(rd: &mut Reader<'_>) -> Result<Range, FfiError> {
 
 /// A base curve block.
 fn curve_block(rd: &mut Reader<'_>) -> Result<Range, FfiError> {
-    let kind = rd.index(1)?;
+    let kind = rd.index(2)?;
     let dim = rd.index(3)?;
     if dim < 2 {
         return Err(bad("curve block: dimension must be 2 or 3"));
     }
-    if kind == 0 {
+    // 2: a B-spline whose raw knots are written back after construction
+    if kind == 0 || kind == 2 {
         rd.flag()?;
         bspline(rd)
     } else {

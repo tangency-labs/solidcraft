@@ -8,7 +8,8 @@
 //   READ_DB:    op  file_type version nb bytes[nb]  probes
 //   WRITE_DB:   curve op with args `file_type version` (a fixture helper: upstream
 //               WriteToDB, not part of the unit)
-// base-block: 0 dim oob n p m cpts(x y z w) knots   (SmBSplineCurve(gw_CURVE*, dim, FALSE))
+// base-block: 0 dim oob n p m cpts(x y z w) knots   (SmBSplineCurve(gw_CURVE*, dim, FALSE);
+//             2: the same with the given knots written back over its own NURB)
 //             1 dim P1 D1 P2 D2                      (SmHermiteCurve)
 // spec:       dim a b nx ny nz dist owns nrev        (SmOffsetCurve(dim, base, SmExtent1d(a, b),
 //             normal, dist, owns), then nrev x ReverseParameterization(natural interval))
@@ -69,7 +70,7 @@ SmCurve* read_base(Rd& rd, const SmContext& ctx)
 {
     int64_t kind = rd.idx();
     ULONG dim = (ULONG)rd.idx();
-    if (kind == 0)
+    if (kind == 0 || kind == 2)
     {
         bool oob = rd.flag();
         gw_INDEX n = (gw_INDEX)rd.idx();
@@ -86,6 +87,13 @@ SmCurve* read_base(Rd& rd, const SmContext& ctx)
         for (gw_INDEX i = 0; i <= m; i++)
             cur->knt->U[i] = rd.num();
         SmBSplineCurve* c = new (ctx) SmBSplineCurve(cur, dim, FALSE);
+        if (kind == 2)
+        {
+            // write the given knots back over the fixed-up NURB
+            gw_CURVE* own = c->GetGwNurbPointer();
+            for (gw_INDEX i = 0; i <= m; i++)
+                own->knt->U[i] = rd.in[rd.at - (int64_t)(m + 1) + (int64_t)i];
+        }
         c->SetOutOfBoundsEnabled(oob ? TRUE : FALSE);
         return c;
     }

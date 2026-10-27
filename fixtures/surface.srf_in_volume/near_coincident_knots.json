@@ -1,0 +1,1228 @@
+{
+ "cases": [
+  {
+   "name": "copy_raw_gap1e-10_owner0",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (copy constructor keeps m_pSurface unless the owner flag owns it (1, 3); an owned surface is Copy()'d, whose knot fix-up spreads knots closer than SM_EFF_ZERO_PARAM)",
+   "inputs": {
+    "siv": {
+     "surface": {
+      "kind": "bspline",
+      "bss": {
+       "srf": {
+        "p": 3,
+        "q": 1,
+        "net": [
+         [
+          [
+           0.0,
+           0.0,
+           0.0,
+           1.0
+          ],
+          [
+           0.0,
+           2.0,
+           0.0,
+           1.0
+          ]
+         ],
+         [
+          [
+           1.0,
+           0.0,
+           0.1,
+           1.0
+          ],
+          [
+           1.0,
+           2.0,
+           0.3,
+           1.0
+          ]
+         ],
+         [
+          [
+           2.0,
+           0.0,
+           0.4,
+           1.0
+          ],
+          [
+           2.0,
+           2.0,
+           0.6,
+           1.0
+          ]
+         ],
+         [
+          [
+           3.0,
+           0.0,
+           0.9000000000000001,
+           1.0
+          ],
+          [
+           3.0,
+           2.0,
+           0.8999999999999999,
+           1.0
+          ]
+         ],
+         [
+          [
+           4.0,
+           0.0,
+           1.6,
+           1.0
+          ],
+          [
+           4.0,
+           2.0,
+           1.2,
+           1.0
+          ]
+         ],
+         [
+          [
+           5.0,
+           0.0,
+           2.5,
+           1.0
+          ],
+          [
+           5.0,
+           2.0,
+           1.5,
+           1.0
+          ]
+         ]
+        ],
+        "u": [
+         0,
+         0,
+         0,
+         0,
+         0.5,
+         0.5000000001,
+         1,
+         1,
+         1,
+         1
+        ],
+        "v": [
+         0,
+         0,
+         1,
+         1
+        ]
+       }
+      },
+      "raw_knots": true
+     },
+     "volume": [
+      {
+       "kind": 1,
+       "t": [
+        [
+         0,
+         0,
+         0
+        ],
+        [
+         1,
+         0,
+         0
+        ],
+        [
+         0,
+         1,
+         0
+        ],
+        [
+         0,
+         0,
+         1
+        ]
+       ]
+      }
+     ],
+     "in_param": false,
+     "copy": 0,
+     "owner": 0
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "copy_raw_gap1e-10_owner1",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (copy constructor keeps m_pSurface unless the owner flag owns it (1, 3); an owned surface is Copy()'d, whose knot fix-up spreads knots closer than SM_EFF_ZERO_PARAM)",
+   "inputs": {
+    "siv": {
+     "surface": {
+      "kind": "bspline",
+      "bss": {
+       "srf": {
+        "p": 3,
+        "q": 1,
+        "net": [
+         [
+          [
+           0.0,
+           0.0,
+           0.0,
+           1.0
+          ],
+          [
+           0.0,
+           2.0,
+           0.0,
+           1.0
+          ]
+         ],
+         [
+          [
+           1.0,
+           0.0,
+           0.1,
+           1.0
+          ],
+          [
+           1.0,
+           2.0,
+           0.3,
+           1.0
+          ]
+         ],
+         [
+          [
+           2.0,
+           0.0,
+           0.4,
+           1.0
+          ],
+          [
+           2.0,
+           2.0,
+           0.6,
+           1.0
+          ]
+         ],
+         [
+          [
+           3.0,
+           0.0,
+           0.9000000000000001,
+           1.0
+          ],
+          [
+           3.0,
+           2.0,
+           0.8999999999999999,
+           1.0
+          ]
+         ],
+         [
+          [
+           4.0,
+           0.0,
+           1.6,
+           1.0
+          ],
+          [
+           4.0,
+           2.0,
+           1.2,
+           1.0
+          ]
+         ],
+         [
+          [
+           5.0,
+           0.0,
+           2.5,
+           1.0
+          ],
+          [
+           5.0,
+           2.0,
+           1.5,
+           1.0
+          ]
+         ]
+        ],
+        "u": [
+         0,
+         0,
+         0,
+         0,
+         0.5,
+         0.5000000001,
+         1,
+         1,
+         1,
+         1
+        ],
+        "v": [
+         0,
+         0,
+         1,
+         1
+        ]
+       }
+      },
+      "raw_knots": true
+     },
+     "volume": [
+      {
+       "kind": 1,
+       "t": [
+        [
+         0,
+         0,
+         0
+        ],
+        [
+         1,
+         0,
+         0
+        ],
+        [
+         0,
+         1,
+         0
+        ],
+        [
+         0,
+         0,
+         1
+        ]
+       ]
+      }
+     ],
+     "in_param": false,
+     "copy": 0,
+     "owner": 1
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "copy_raw_gap1e-10_owner2",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (copy constructor keeps m_pSurface unless the owner flag owns it (1, 3); an owned surface is Copy()'d, whose knot fix-up spreads knots closer than SM_EFF_ZERO_PARAM)",
+   "inputs": {
+    "siv": {
+     "surface": {
+      "kind": "bspline",
+      "bss": {
+       "srf": {
+        "p": 3,
+        "q": 1,
+        "net": [
+         [
+          [
+           0.0,
+           0.0,
+           0.0,
+           1.0
+          ],
+          [
+           0.0,
+           2.0,
+           0.0,
+           1.0
+          ]
+         ],
+         [
+          [
+           1.0,
+           0.0,
+           0.1,
+           1.0
+          ],
+          [
+           1.0,
+           2.0,
+           0.3,
+           1.0
+          ]
+         ],
+         [
+          [
+           2.0,
+           0.0,
+           0.4,
+           1.0
+          ],
+          [
+           2.0,
+           2.0,
+           0.6,
+           1.0
+          ]
+         ],
+         [
+          [
+           3.0,
+           0.0,
+           0.9000000000000001,
+           1.0
+          ],
+          [
+           3.0,
+           2.0,
+           0.8999999999999999,
+           1.0
+          ]
+         ],
+         [
+          [
+           4.0,
+           0.0,
+           1.6,
+           1.0
+          ],
+          [
+           4.0,
+           2.0,
+           1.2,
+           1.0
+          ]
+         ],
+         [
+          [
+           5.0,
+           0.0,
+           2.5,
+           1.0
+          ],
+          [
+           5.0,
+           2.0,
+           1.5,
+           1.0
+          ]
+         ]
+        ],
+        "u": [
+         0,
+         0,
+         0,
+         0,
+         0.5,
+         0.5000000001,
+         1,
+         1,
+         1,
+         1
+        ],
+        "v": [
+         0,
+         0,
+         1,
+         1
+        ]
+       }
+      },
+      "raw_knots": true
+     },
+     "volume": [
+      {
+       "kind": 1,
+       "t": [
+        [
+         0,
+         0,
+         0
+        ],
+        [
+         1,
+         0,
+         0
+        ],
+        [
+         0,
+         1,
+         0
+        ],
+        [
+         0,
+         0,
+         1
+        ]
+       ]
+      }
+     ],
+     "in_param": false,
+     "copy": 0,
+     "owner": 2
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "copy_raw_gap1e-10_owner3",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (copy constructor keeps m_pSurface unless the owner flag owns it (1, 3); an owned surface is Copy()'d, whose knot fix-up spreads knots closer than SM_EFF_ZERO_PARAM)",
+   "inputs": {
+    "siv": {
+     "surface": {
+      "kind": "bspline",
+      "bss": {
+       "srf": {
+        "p": 3,
+        "q": 1,
+        "net": [
+         [
+          [
+           0.0,
+           0.0,
+           0.0,
+           1.0
+          ],
+          [
+           0.0,
+           2.0,
+           0.0,
+           1.0
+          ]
+         ],
+         [
+          [
+           1.0,
+           0.0,
+           0.1,
+           1.0
+          ],
+          [
+           1.0,
+           2.0,
+           0.3,
+           1.0
+          ]
+         ],
+         [
+          [
+           2.0,
+           0.0,
+           0.4,
+           1.0
+          ],
+          [
+           2.0,
+           2.0,
+           0.6,
+           1.0
+          ]
+         ],
+         [
+          [
+           3.0,
+           0.0,
+           0.9000000000000001,
+           1.0
+          ],
+          [
+           3.0,
+           2.0,
+           0.8999999999999999,
+           1.0
+          ]
+         ],
+         [
+          [
+           4.0,
+           0.0,
+           1.6,
+           1.0
+          ],
+          [
+           4.0,
+           2.0,
+           1.2,
+           1.0
+          ]
+         ],
+         [
+          [
+           5.0,
+           0.0,
+           2.5,
+           1.0
+          ],
+          [
+           5.0,
+           2.0,
+           1.5,
+           1.0
+          ]
+         ]
+        ],
+        "u": [
+         0,
+         0,
+         0,
+         0,
+         0.5,
+         0.5000000001,
+         1,
+         1,
+         1,
+         1
+        ],
+        "v": [
+         0,
+         0,
+         1,
+         1
+        ]
+       }
+      },
+      "raw_knots": true
+     },
+     "volume": [
+      {
+       "kind": 1,
+       "t": [
+        [
+         0,
+         0,
+         0
+        ],
+        [
+         1,
+         0,
+         0
+        ],
+        [
+         0,
+         1,
+         0
+        ],
+        [
+         0,
+         0,
+         1
+        ]
+       ]
+      }
+     ],
+     "in_param": false,
+     "copy": 0,
+     "owner": 3
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "copy_raw_gap3e-9_owner0",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (copy constructor keeps m_pSurface unless the owner flag owns it (1, 3); an owned surface is Copy()'d, whose knot fix-up spreads knots closer than SM_EFF_ZERO_PARAM)",
+   "inputs": {
+    "siv": {
+     "surface": {
+      "kind": "bspline",
+      "bss": {
+       "srf": {
+        "p": 3,
+        "q": 1,
+        "net": [
+         [
+          [
+           0.0,
+           0.0,
+           0.0,
+           1.0
+          ],
+          [
+           0.0,
+           2.0,
+           0.0,
+           1.0
+          ]
+         ],
+         [
+          [
+           1.0,
+           0.0,
+           0.1,
+           1.0
+          ],
+          [
+           1.0,
+           2.0,
+           0.3,
+           1.0
+          ]
+         ],
+         [
+          [
+           2.0,
+           0.0,
+           0.4,
+           1.0
+          ],
+          [
+           2.0,
+           2.0,
+           0.6,
+           1.0
+          ]
+         ],
+         [
+          [
+           3.0,
+           0.0,
+           0.9000000000000001,
+           1.0
+          ],
+          [
+           3.0,
+           2.0,
+           0.8999999999999999,
+           1.0
+          ]
+         ],
+         [
+          [
+           4.0,
+           0.0,
+           1.6,
+           1.0
+          ],
+          [
+           4.0,
+           2.0,
+           1.2,
+           1.0
+          ]
+         ],
+         [
+          [
+           5.0,
+           0.0,
+           2.5,
+           1.0
+          ],
+          [
+           5.0,
+           2.0,
+           1.5,
+           1.0
+          ]
+         ]
+        ],
+        "u": [
+         0,
+         0,
+         0,
+         0,
+         0.499999997,
+         0.5,
+         1,
+         1,
+         1,
+         1
+        ],
+        "v": [
+         0,
+         0,
+         1,
+         1
+        ]
+       }
+      },
+      "raw_knots": true
+     },
+     "volume": [
+      {
+       "kind": 1,
+       "t": [
+        [
+         0,
+         0,
+         0
+        ],
+        [
+         1,
+         0,
+         0
+        ],
+        [
+         0,
+         1,
+         0
+        ],
+        [
+         0,
+         0,
+         1
+        ]
+       ]
+      }
+     ],
+     "in_param": false,
+     "copy": 0,
+     "owner": 0
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "copy_raw_gap3e-9_owner1",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (copy constructor keeps m_pSurface unless the owner flag owns it (1, 3); an owned surface is Copy()'d, whose knot fix-up spreads knots closer than SM_EFF_ZERO_PARAM)",
+   "inputs": {
+    "siv": {
+     "surface": {
+      "kind": "bspline",
+      "bss": {
+       "srf": {
+        "p": 3,
+        "q": 1,
+        "net": [
+         [
+          [
+           0.0,
+           0.0,
+           0.0,
+           1.0
+          ],
+          [
+           0.0,
+           2.0,
+           0.0,
+           1.0
+          ]
+         ],
+         [
+          [
+           1.0,
+           0.0,
+           0.1,
+           1.0
+          ],
+          [
+           1.0,
+           2.0,
+           0.3,
+           1.0
+          ]
+         ],
+         [
+          [
+           2.0,
+           0.0,
+           0.4,
+           1.0
+          ],
+          [
+           2.0,
+           2.0,
+           0.6,
+           1.0
+          ]
+         ],
+         [
+          [
+           3.0,
+           0.0,
+           0.9000000000000001,
+           1.0
+          ],
+          [
+           3.0,
+           2.0,
+           0.8999999999999999,
+           1.0
+          ]
+         ],
+         [
+          [
+           4.0,
+           0.0,
+           1.6,
+           1.0
+          ],
+          [
+           4.0,
+           2.0,
+           1.2,
+           1.0
+          ]
+         ],
+         [
+          [
+           5.0,
+           0.0,
+           2.5,
+           1.0
+          ],
+          [
+           5.0,
+           2.0,
+           1.5,
+           1.0
+          ]
+         ]
+        ],
+        "u": [
+         0,
+         0,
+         0,
+         0,
+         0.499999997,
+         0.5,
+         1,
+         1,
+         1,
+         1
+        ],
+        "v": [
+         0,
+         0,
+         1,
+         1
+        ]
+       }
+      },
+      "raw_knots": true
+     },
+     "volume": [
+      {
+       "kind": 1,
+       "t": [
+        [
+         0,
+         0,
+         0
+        ],
+        [
+         1,
+         0,
+         0
+        ],
+        [
+         0,
+         1,
+         0
+        ],
+        [
+         0,
+         0,
+         1
+        ]
+       ]
+      }
+     ],
+     "in_param": false,
+     "copy": 0,
+     "owner": 1
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "copy_raw_gap3e-9_owner2",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (copy constructor keeps m_pSurface unless the owner flag owns it (1, 3); an owned surface is Copy()'d, whose knot fix-up spreads knots closer than SM_EFF_ZERO_PARAM)",
+   "inputs": {
+    "siv": {
+     "surface": {
+      "kind": "bspline",
+      "bss": {
+       "srf": {
+        "p": 3,
+        "q": 1,
+        "net": [
+         [
+          [
+           0.0,
+           0.0,
+           0.0,
+           1.0
+          ],
+          [
+           0.0,
+           2.0,
+           0.0,
+           1.0
+          ]
+         ],
+         [
+          [
+           1.0,
+           0.0,
+           0.1,
+           1.0
+          ],
+          [
+           1.0,
+           2.0,
+           0.3,
+           1.0
+          ]
+         ],
+         [
+          [
+           2.0,
+           0.0,
+           0.4,
+           1.0
+          ],
+          [
+           2.0,
+           2.0,
+           0.6,
+           1.0
+          ]
+         ],
+         [
+          [
+           3.0,
+           0.0,
+           0.9000000000000001,
+           1.0
+          ],
+          [
+           3.0,
+           2.0,
+           0.8999999999999999,
+           1.0
+          ]
+         ],
+         [
+          [
+           4.0,
+           0.0,
+           1.6,
+           1.0
+          ],
+          [
+           4.0,
+           2.0,
+           1.2,
+           1.0
+          ]
+         ],
+         [
+          [
+           5.0,
+           0.0,
+           2.5,
+           1.0
+          ],
+          [
+           5.0,
+           2.0,
+           1.5,
+           1.0
+          ]
+         ]
+        ],
+        "u": [
+         0,
+         0,
+         0,
+         0,
+         0.499999997,
+         0.5,
+         1,
+         1,
+         1,
+         1
+        ],
+        "v": [
+         0,
+         0,
+         1,
+         1
+        ]
+       }
+      },
+      "raw_knots": true
+     },
+     "volume": [
+      {
+       "kind": 1,
+       "t": [
+        [
+         0,
+         0,
+         0
+        ],
+        [
+         1,
+         0,
+         0
+        ],
+        [
+         0,
+         1,
+         0
+        ],
+        [
+         0,
+         0,
+         1
+        ]
+       ]
+      }
+     ],
+     "in_param": false,
+     "copy": 0,
+     "owner": 2
+    },
+    "op": "copy"
+   }
+  },
+  {
+   "name": "copy_raw_gap3e-9_owner3",
+   "upstream_ref": "source/SMLib/src/SmSrfInVolume.cpp (copy constructor keeps m_pSurface unless the owner flag owns it (1, 3); an owned surface is Copy()'d, whose knot fix-up spreads knots closer than SM_EFF_ZERO_PARAM)",
+   "inputs": {
+    "siv": {
+     "surface": {
+      "kind": "bspline",
+      "bss": {
+       "srf": {
+        "p": 3,
+        "q": 1,
+        "net": [
+         [
+          [
+           0.0,
+           0.0,
+           0.0,
+           1.0
+          ],
+          [
+           0.0,
+           2.0,
+           0.0,
+           1.0
+          ]
+         ],
+         [
+          [
+           1.0,
+           0.0,
+           0.1,
+           1.0
+          ],
+          [
+           1.0,
+           2.0,
+           0.3,
+           1.0
+          ]
+         ],
+         [
+          [
+           2.0,
+           0.0,
+           0.4,
+           1.0
+          ],
+          [
+           2.0,
+           2.0,
+           0.6,
+           1.0
+          ]
+         ],
+         [
+          [
+           3.0,
+           0.0,
+           0.9000000000000001,
+           1.0
+          ],
+          [
+           3.0,
+           2.0,
+           0.8999999999999999,
+           1.0
+          ]
+         ],
+         [
+          [
+           4.0,
+           0.0,
+           1.6,
+           1.0
+          ],
+          [
+           4.0,
+           2.0,
+           1.2,
+           1.0
+          ]
+         ],
+         [
+          [
+           5.0,
+           0.0,
+           2.5,
+           1.0
+          ],
+          [
+           5.0,
+           2.0,
+           1.5,
+           1.0
+          ]
+         ]
+        ],
+        "u": [
+         0,
+         0,
+         0,
+         0,
+         0.499999997,
+         0.5,
+         1,
+         1,
+         1,
+         1
+        ],
+        "v": [
+         0,
+         0,
+         1,
+         1
+        ]
+       }
+      },
+      "raw_knots": true
+     },
+     "volume": [
+      {
+       "kind": 1,
+       "t": [
+        [
+         0,
+         0,
+         0
+        ],
+        [
+         1,
+         0,
+         0
+        ],
+        [
+         0,
+         1,
+         0
+        ],
+        [
+         0,
+         0,
+         1
+        ]
+       ]
+      }
+     ],
+     "in_param": false,
+     "copy": 0,
+     "owner": 3
+    },
+    "op": "copy"
+   }
+  }
+ ]
+}

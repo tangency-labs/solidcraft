@@ -401,9 +401,14 @@ impl CrvInVolume {
 
     /// The copy constructor (`Copy`): copies both parts, keeps the break cache when
     /// it is current, and sets the owner flag to 3, 1, 2 or 0 from what this object
-    /// owns.
-    #[must_use]
-    pub fn copy(&self) -> Self {
+    /// owns. A curve this object does not own is shared upstream, so here it is an
+    /// exact copy that keeps its owner (`Curve::clone` would fix its knots up).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`Curve::clone_for_evaluation`] on a curve not owned (geometry
+    /// nested too deeply).
+    pub fn copy(&self) -> Result<Self> {
         let owns_curve = self.owns_curve();
         let owns_volume = self.owns_volume();
         let owner_flag = if owns_curve && owns_volume {
@@ -420,15 +425,20 @@ impl CrvInVolume {
         } else {
             (self.breaks.clone(), self.conts.clone())
         };
-        Self {
-            curve: self.curve.clone(),
+        let curve = if owns_curve {
+            self.curve.clone()
+        } else {
+            self.curve.clone_for_evaluation()?
+        };
+        Ok(Self {
+            curve,
             in_param_space: self.in_param_space,
             volume: self.volume.clone(),
             need_breaks: self.need_breaks,
             breaks,
             conts,
             owner_flag,
-        }
+        })
     }
 
     // ---- simple access --------------------------------------------------------------
@@ -1548,7 +1558,7 @@ mod tests {
         .unwrap();
         assert_eq!(c.owner_flag(), 5);
         assert!(!c.owns_curve() && !c.owns_volume());
-        assert_eq!(c.copy().owner_flag(), 0);
+        assert_eq!(c.copy().unwrap().owner_flag(), 0);
         assert!(c.need_breaks());
         assert!(c.is_kind_of(CrvInVolume::TYPE) && c.is_kind_of(crate::curve::curve::p2::TYPE));
         assert_eq!(c.natural_interval().max(), 1.0);

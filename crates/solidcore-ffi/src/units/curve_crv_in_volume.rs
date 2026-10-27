@@ -5,7 +5,8 @@
 //!
 //! Object ops start with a block building the `SmCrvInVolume` `c` the op runs on:
 //! a curve block (`0 dim oob n p m cpts(x y z w) knots`: an `SmBSplineCurve`; or
-//! `1 dim P1[3] D1[3] P2[3] D2[3]`: an `SmHermiteCurve`), then `in_param copy_flag
+//! `1 dim P1[3] D1[3] P2[3] D2[3]`: an `SmHermiteCurve`; `2` is kind `0` with the given
+//! knots written back over the curve's own NURB after construction), then `in_param copy_flag
 //! owner_flag` (the constructor's arguments; the volume is a fresh identity
 //! `SmTransform`), then `has_cache` and, when set, `need nb B[nb] nc C[nc]` loaded
 //! into `m_bNeedBreaks`, `m_sBreaks`, `m_sConts`. Static ops have no block. Every
@@ -21,7 +22,7 @@
 //! | `Nnk`        | `GetNumberNaturalKnots`                    |                         | `count` cache |
 //! | `Conts`      | `CalculateContinuities`                    | `angle`                 | `min nc C` cache |
 //! | `Equal`      | `operator==`                               | `self` [object block]   | flag |
-//! | `Copy`       | `Copy` (copy constructor)                  |                         | state of the copy (on success) |
+//! | `Copy`       | `Copy` (copy constructor)                  |                         | state of the copy, then whether it equals the original (`operator==`) (on success) |
 //! | `EditParam`  | `EditParameterization`                     | `a b`                   | state |
 //! | `Reverse`    | `ReverseParameterization`                  | `a b`                   | `[a' b']` state |
 //! | `Trim`       | `Trim(ivl, notify, FALSE)`                 | `a b mode` (0 `TRUE`, 1 `FALSE`, 2 `UNSURE`) | `a' b'` state |
@@ -239,12 +240,13 @@ fn near(t: f64, a: f64, b: f64) -> Result<f64, FfiError> {
 
 /// An object block (see the module docs).
 fn object_block(rd: &mut Reader<'_>) -> Result<Block, FfiError> {
-    let kind = rd.index(1)?;
+    let kind = rd.index(2)?;
     let dim = rd.index(3)?;
     if dim < 2 {
         return Err(bad("curve block: dimension must be 2 or 3"));
     }
-    let (bspline, a, b) = if kind == 0 {
+    // 2: a B-spline whose raw knots are written back after construction
+    let (bspline, a, b) = if kind == 0 || kind == 2 {
         rd.flag()?;
         let (a, b) = bspline(rd)?;
         (true, a, b)
