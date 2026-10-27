@@ -3,15 +3,14 @@
 //! more than [`MAX_POINTS`] points is refused, never drawn coarser. It is the one flattener for the
 //! paper scene: a writer that needs a curve as lines (PDF or DXF for what they can't hold) uses it.
 //!
-//! Each piece becomes the [`Seg2`] it is and takes [`Seg2::chords`]' steps, the bound
-//! [`Seg2::polyline`] uses too. `polyline` itself doesn't fit here: it floors an arc's tolerance at
+//! Each piece becomes the [`Seg2`](solidcore_record::Seg2) it is and takes its `chords` steps, the bound
+//! `Seg2::polyline` uses too. `polyline` itself doesn't fit here: it floors an arc's tolerance at
 //! a millionth of its radius and caps a piece at 4096 steps, both coarser than asked, without a
-//! word. An arc comes from the walk as its ends, radius and direction, which fix its centre (well
-//! conditioned up to the walk's quarter turns).
+//! word. Each piece is the curve [`Piece::seg`](super::Piece::seg) says.
 
-use super::{GridPath, GridPoint, Invalid, Piece, Result};
+use super::{GridPath, Invalid, Result};
 use crate::prelude::*;
-use solidcore_record::{Seg2, Vec2};
+use solidcore_record::Vec2;
 
 /// The most points one path may flatten to.
 pub const MAX_POINTS: usize = 1 << 20;
@@ -22,35 +21,16 @@ pub fn flatten(path: &GridPath, tolerance: f64) -> Result<Vec<Vec2>> {
     if !(tolerance > 0.0 && tolerance.is_finite()) {
         return Err(Invalid("a flattening tolerance is above 0"));
     }
-    let mut points = vec![v(path.start)];
-    let mut at = v(path.start);
+    let mut points = vec![path.start.vec()];
+    let mut at = path.start;
     for piece in &path.pieces {
-        let to = v(piece.to());
-        let seg = match *piece {
-            Piece::Line { .. } => Seg2::Line { a: at, b: to },
-            Piece::Arc { radius, clockwise, .. } => {
-                let r = radius as f64;
-                let half = at.dist(to) / 2.0;
-                // The centre sits off the chord's middle, left of it for an anticlockwise turn.
-                let off = (r * r - half * half).max(0.0).sqrt();
-                let side = (to - at).normalized().map_or(Vec2::new(0.0, 0.0), Vec2::perp);
-                let center = (at + to) / 2.0 + side * if clockwise { -off } else { off };
-                let sweep = 2.0 * (half / r).min(1.0).asin() * if clockwise { -1.0 } else { 1.0 };
-                Seg2::Arc { center, radius: r, start: (at - center).angle(), sweep }
-            }
-            Piece::Cubic { c1, c2, .. } => Seg2::Cubic { p0: at, p1: v(c1), p2: v(c2), p3: to },
-            Piece::Quadratic { c, .. } => Seg2::Conic { a: at, apex: v(c), b: to, w: 1.0 },
-        };
+        let seg = piece.seg(at);
         let n = steps(seg.chords(tolerance), points.len())?;
         points.extend((1..n).map(|i| seg.point_at(i as f64 / n as f64)));
-        points.push(to);
-        at = to;
+        points.push(piece.to().vec());
+        at = piece.to();
     }
     Ok(points)
-}
-
-fn v(p: GridPoint) -> Vec2 {
-    Vec2::new(p.x as f64, p.y as f64)
 }
 
 /// `bound` rounded up to whole steps, at least one, refused when a path that has `so_far` points
@@ -137,7 +117,7 @@ mod tests {
         let quarter = on_grid(Seg2::Arc { center: p(50.0, 50.0), radius: 10.0, start: 0.0, sweep: FRAC_PI_2 });
         let points = flatten(&quarter, 1e3).unwrap();
         assert_eq!(points.len(), 57);
-        assert_eq!(points.last().copied(), Some(v(quarter.pieces[0].to())));
+        assert_eq!(points.last().copied(), Some(quarter.pieces[0].to().vec()));
         // A cubic whose largest second difference is √1700 ≈ 41.2 mm, within 1 µm: √(0.75 · 4.12e7 / 1e3) → 176.
         let cubic = on_grid(Seg2::Cubic { p0: p(0.0, 0.0), p1: p(10.0, 40.0), p2: p(30.0, 40.0), p3: p(40.0, 0.0) });
         assert_eq!(flatten(&cubic, 1e3).unwrap().len(), 1 + 176);

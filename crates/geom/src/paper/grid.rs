@@ -61,6 +61,8 @@ pub struct Grid {
 impl Grid {
     /// Whole nanometres, six decimals of a millimetre: SVG's numbers.
     pub const NANOMETRE: Grid = Grid { per_mm: 1e6 };
+    /// Steps of 10 nm, five decimals of a millimetre: PDF's numbers (ISO 32000-1 Annex C's precision).
+    pub const TEN_NANOMETRES: Grid = Grid { per_mm: 1e5 };
 
     /// A grid of `per_mm` steps a millimetre, from 1 to 1e9. A power of two keeps every number
     /// exact in binary floating point, as a writer of 32-bit numbers (PDF) wants.
@@ -120,6 +122,34 @@ impl Piece {
         match *self {
             Piece::Line { to } | Piece::Arc { to, .. } | Piece::Cubic { to, .. } | Piece::Quadratic { to, .. } => to,
         }
+    }
+
+    /// The curve this piece is, from `from`, in steps. An arc's ends, radius and direction fix its
+    /// centre, well conditioned up to the walk's quarter turns.
+    pub fn seg(&self, from: GridPoint) -> Seg2 {
+        let (at, to) = (from.vec(), self.to().vec());
+        match *self {
+            Piece::Line { .. } => Seg2::Line { a: at, b: to },
+            Piece::Arc { radius, clockwise, .. } => {
+                let r = radius as f64;
+                let half = at.dist(to) / 2.0;
+                // The centre sits off the chord's middle, left of it for an anticlockwise turn.
+                let off = (r * r - half * half).max(0.0).sqrt();
+                let side = (to - at).normalized().map_or(Vec2::new(0.0, 0.0), Vec2::perp);
+                let center = (at + to) / 2.0 + side * if clockwise { -off } else { off };
+                let sweep = 2.0 * (half / r).min(1.0).asin() * if clockwise { -1.0 } else { 1.0 };
+                Seg2::Arc { center, radius: r, start: (at - center).angle(), sweep }
+            }
+            Piece::Cubic { c1, c2, .. } => Seg2::Cubic { p0: at, p1: c1.vec(), p2: c2.vec(), p3: to },
+            Piece::Quadratic { c, .. } => Seg2::Conic { a: at, apex: c.vec(), b: to, w: 1.0 },
+        }
+    }
+}
+
+impl GridPoint {
+    /// The point in steps, as a [`Vec2`].
+    pub fn vec(self) -> Vec2 {
+        Vec2::new(self.x as f64, self.y as f64)
     }
 }
 

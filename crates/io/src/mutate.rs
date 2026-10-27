@@ -384,6 +384,39 @@ fn paper_scenes_survive_mutation_into_png() {
     survives("paper scene to PNG", &mutations(&json, true, 0x5a4), usize::MAX, write);
 }
 
+/// The same scene's JSON with a picture, mutated, read, prepared and written as a PDF with a title
+/// and a date: an error or a document, never a panic. The writer draws geometry only, so the
+/// picture is passed over.
+#[test]
+fn paper_scenes_survive_mutation_into_pdf() {
+    use solidcore_record::{Loop2, Region2, Seg2, Vec2};
+    use solidcraft_geom::Aabb2;
+    use solidcraft_geom::paper::{Dashes, Group, Item, ObjectKind, Picture, Scene};
+    let p = Vec2::new;
+    let border = Loop2::polygon(&[p(20.0, 10.0), p(410.0, 10.0), p(410.0, 287.0), p(20.0, 287.0)]);
+    let dashes = Dashes { lengths_mm: vec![4.2, 1.05, 0.5, 1.05], phase_mm: 0.5 };
+    let items = vec![
+        Item::Stroke { path: border.segs.clone(), closed: true, width_mm: 0.7, pattern: None },
+        Item::Stroke {
+            path: vec![Seg2::Arc { center: p(50.0, 50.0), radius: 10.0, start: 0.0, sweep: 4.0 }],
+            closed: false,
+            width_mm: 0.35,
+            pattern: Some(dashes),
+        },
+        Item::Fill { region: Region2 { outer: border, holes: vec![Loop2::circle(p(100.0, 100.0), 20.0)] } },
+        Item::Picture(Picture { source: 3, rect: Aabb2 { min: p(150.0, 100.0), max: p(250.0, 150.0) }, opacity: 0.8 }),
+    ];
+    let scene = Scene::new(p(420.0, 297.0), vec![Group { object: 7, kind: ObjectKind::DrawingBorder, items }]);
+    let json = serde_json::to_vec(&scene).unwrap();
+    let options = crate::paper::PdfOptions { title: Some("Sheet 1".into()), output_time: Some(1_761_436_800) };
+    let write = |b: &[u8]| -> Option<usize> {
+        let scene: Scene = serde_json::from_slice(b).ok()?;
+        crate::paper::paper_pdf(&scene.prepare().ok()?, &options).ok().map(|(bytes, _)| bytes.len())
+    };
+    assert!(write(&json).is_some());
+    survives("paper scene to PDF", &mutations(&json, true, 0x5a7), usize::MAX, write);
+}
+
 /// Standard base64 (RFC 4648) of `bytes`, for a data URI.
 fn base64(bytes: &[u8]) -> String {
     const A: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
