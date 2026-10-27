@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Extrude Cut</title>
+  <path d="M12.08 25.31L32 36.81L32 59.81L12.08 48.31Z" fill="#b8c3cf"/>
+  <path d="M51.92 25.31L32 36.81L32 59.81L51.92 48.31Z" fill="#8e9faf"/>
+  <path d="M32 13.81L51.92 25.31L32 36.81L12.08 25.31Z" fill="#e2e8ef"/>
+  <path d="M32 13.81L51.92 25.31L51.92 48.31L32 59.81L12.08 48.31L12.08 25.31Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M12.08 25.31L32 36.81L51.92 25.31" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 36.81L32 59.81" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <defs><clipPath id="extrude_cut_pocket"><path d="M32 17.64L45.28 25.31L32 32.98L18.72 25.31Z" fill="none"/></clipPath></defs>
+  <g clip-path="url(#extrude_cut_pocket)">
+  <path d="M32 28.19L45.28 35.85L32 43.52L18.72 35.85Z" fill="#b9ddf8"/>
+  <path d="M32 17.64L45.28 25.31L45.28 35.85L32 28.19Z" fill="#328bd3"/>
+  <path d="M32 17.64L45.28 25.31L45.28 35.85L32 28.19Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M18.72 25.31L32 17.64L32 28.19L18.72 35.85Z" fill="#236ead"/>
+  <path d="M18.72 25.31L32 17.64L32 28.19L18.72 35.85Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  </g>
+  <path d="M32 17.64L45.28 25.31L32 32.98L18.72 25.31Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 6.14L32 12.52" fill="none" stroke="#ffffff" stroke-width="6.45" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 20.52L27.5 11.52L36.5 11.52Z" fill="#ffffff" stroke="#ffffff" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 6.14L32 12.52" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M32 20.52L27.5 11.52L36.5 11.52Z" fill="#236ead"/>
+</svg>

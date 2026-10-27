@@ -189,8 +189,18 @@ fn key(tab: &str, panel: &str) -> String {
 /// The buttons a panel shows: the user's list, or the first `promoted` commands of the panel.
 pub fn buttons(app: &SolveApp, tab: &str, panel: &str, cmds: &[&'static CommandSpec], promoted: usize) -> Vec<&'static CommandSpec> {
     match app.toolbar_custom.panels.get(&key(tab, panel)) {
-        Some(ids) => ids.iter().filter_map(|id| solidcraft_engine::find_command(id)).collect(),
-        None => cmds.iter().take(promoted).copied().collect(),
+        Some(ids) => ids.iter().filter_map(|id| solidcraft_engine::find_command(id)).filter(|c| crate::workspace::offered(app, c.id)).collect(),
+        None => {
+            let shown = cmds.iter().take(promoted).copied();
+            if !app.preferences.cut_buttons {
+                return shown.collect();
+            }
+            // Each tool's cut button right after it (#7905).
+            let cut_of = |c: &CommandSpec| {
+                crate::dialogs::CUT_TOOLS.iter().find(|(_, tool)| *tool == c.id).and_then(|(cut, _)| solidcraft_engine::find_command(cut))
+            };
+            shown.flat_map(|c| std::iter::once(c).chain(cut_of(c))).collect()
+        }
     }
 }
 
@@ -436,7 +446,8 @@ pub fn window(app: &mut SolveApp, ctx: &egui::Context) {
                         .min(crate::theme::Tokens::get().control_height * 20.0),
                 )
                 .show(ui, |ui| {
-                    for (panel, cmds, n) in panel_lists(&tab) {
+                    for (panel, mut cmds, n) in panel_lists(&tab) {
+                        cmds.retain(|c| crate::workspace::offered(app, c.id));
                         if cmds.is_empty() {
                             continue;
                         }

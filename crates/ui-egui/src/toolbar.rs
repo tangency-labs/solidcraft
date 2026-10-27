@@ -1491,6 +1491,7 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 if !app.preferences.sketch_construction_lines {
                     cmds.retain(|c| solidcraft_engine::cmd::construction_line_mode(c.id).is_none());
                 }
+                cmds.retain(|c| crate::workspace::offered(app, c.id));
                 let mut shown = crate::toolbar_custom::buttons(app, &tab, panel, &cmds, promote);
                 // Gallery cells are painted together after the large buttons, in reading order.
                 if tab == "SKETCH" && panel == "CONSTRAIN" {

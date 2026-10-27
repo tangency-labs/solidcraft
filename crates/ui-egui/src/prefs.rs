@@ -1090,6 +1090,8 @@ preference_settings! {
     /// blinks there, and a running command that sits in a drop-down marks its section label. Off
     /// by default: the ribbon stays as it was.
     ribbon_reveal: bool = false, PAGE_INTERFACE => check_id("prefs.ribbon_reveal");
+    /// Extrude Cut and Revolve Cut as buttons right after Extrude and Revolve (#7905).
+    cut_buttons: bool = false, PAGE_INTERFACE => check_id("prefs.cut_buttons");
     /// Where a dialog's OK and Cancel sit: under its inputs (the default) or in its title row (#6708).
     dialog_buttons: crate::ui_kit::DialogButtons = Default::default(), PAGE_INTERFACE;
     /// Where notices and offers stack: the view's bottom-right corner (the default) or the bottom
@@ -5050,6 +5052,7 @@ mod tests {
             ("viewport_status_summary", json!(false), PAGE_INTERFACE),
             ("sketch_tab_always", json!(true), PAGE_INTERFACE),
             ("ribbon_reveal", json!(true), PAGE_INTERFACE),
+            ("cut_buttons", json!(true), PAGE_INTERFACE),
             ("dialog_buttons", json!("top"), PAGE_INTERFACE),
             ("toast_place", json!("centre"), PAGE_INTERFACE),
             ("ribbon_icon_grid", json!(true), PAGE_INTERFACE),

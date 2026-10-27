@@ -29,6 +29,8 @@ pub mod context_menu;
 pub mod control;
 pub mod control_job;
 pub mod crash_ui;
+#[cfg(test)]
+mod cut_buttons_tests;
 pub mod deferred;
 pub mod delete;
 pub mod design_properties;

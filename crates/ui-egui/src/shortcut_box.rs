@@ -199,7 +199,7 @@ pub fn search(app: &SolveApp, q: &str) -> Vec<Row> {
     let q = q.trim().to_lowercase();
     let mut v: Vec<(u32, Row)> = command_specs()
         .into_iter()
-        .filter(|c| !crate::workspace::AGENT_ONLY.contains(&c.id))
+        .filter(|c| !crate::workspace::AGENT_ONLY.contains(&c.id) && crate::workspace::offered(app, c.id))
         .filter_map(|c| {
             let (home_tab, home_panel) = crate::workspace::destination(c).unwrap_or(("", ""));
             let info = crate::render_workspace::interactive_command_info(app, c);

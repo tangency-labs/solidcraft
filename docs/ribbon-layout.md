@@ -6,12 +6,14 @@ Shown by default, in order: MODEL, SURFACE, ASSEMBLE, INSERT, INSPECT, MANAGE, V
 
 SKETCH appears during sketch editing; with Preferences › Interface › **Keep the Sketch tab shown** (`sketch_tab_always`, #7904) it stays right after MODEL all the time, and outside a sketch the tools in its CREATE and REFERENCE sections open Create Sketch first and then start in the new sketch. Hidden tabs stay hidden when creating features, opening designs, selecting bodies or undoing changes. When shown, SHEET METAL takes the contextual style and selects itself when the selected body (or the last body of the active component) has evaluated sheet-metal data. When shown, WELDMENTS selects itself when that body is a frame member, keeping the ordinary tab look (sheet metal comes first). Entering a context selects its tab; the other tabs remain available. RENDER belongs to the Render workspace.
 
+The four cut commands (`solid.*_cut`, #7905) show only with Preferences › Interface › **Cut buttons** (`cut_buttons`) on: then all four are in MODEL › CREATE's menu and in command search, and Extrude Cut and Revolve Cut are buttons right after Extrude and Revolve. Off, the ribbon and search leave them out (`workspace::offered`).
+
 **Bold command ids are default promoted buttons.** Every listed command remains in the section menu. Saved user pins can add buttons, as before.
 
 | Tab | Section | Command ids, in menu order |
 |---|---|---|
 | MODEL | SKETCH | **`sketch.create`**, `sketch.edit`, `sketch.line3d`, `sketch.spline3d`, `sketch.point3d`, `sketch.move3d` |
-| MODEL | CREATE | **`solid.extrude`**, **`solid.revolve`**, **`solid.hole`**, `solid.sweep`, `solid.loft`, `solid.box`, `solid.cylinder`, `solid.sphere`, `solid.torus`, `solid.cone`, `solid.pipe`, `solid.bounding_solid`, `solid.thread`, `solid.boundary_fill`, `solid.coil`, `solid.rib`, `solid.web`, `solid.emboss`, `plastic.boss`, `plastic.lip`, `plastic.snap_fit`, `plastic.rest` |
+| MODEL | CREATE | **`solid.extrude`**, **`solid.revolve`**, **`solid.hole`**, `solid.sweep`, `solid.loft`, `solid.box`, `solid.cylinder`, `solid.sphere`, `solid.torus`, `solid.cone`, `solid.pipe`, `solid.bounding_solid`, `solid.thread`, `solid.extrude_cut`, `solid.revolve_cut`, `solid.sweep_cut`, `solid.loft_cut`, `solid.boundary_fill`, `solid.coil`, `solid.rib`, `solid.web`, `solid.emboss`, `plastic.boss`, `plastic.lip`, `plastic.snap_fit`, `plastic.rest` |
 | MODEL | MODIFY | **`solid.fillet`**, **`solid.chamfer`**, **`solid.shell`**, **`solid.press_pull`**, `sheet.convert`, `solid.combine`, `solid.scale`, `solid.offset_face`, `solid.draft`, `solid.split_face`, `solid.split_body`, `solid.replace_face`, `solid.remove`, `timeline.delete`, `face.delete` |
 | MODEL | ARRANGE | **`solid.move`**, **`solid.mirror`**, **`solid.pattern.rectangular`**, `solid.align`, `solid.pattern.circular`, `solid.pattern.path` |
 | MODEL | CONFIGURE | **`parameters.change`**, **`config.table`**, `config.configure` |
@@ -98,7 +100,7 @@ Explicit command-id lists override the default placement mapping. Shared command
 | SOLID / CONSTRUCT | MODEL / CONSTRUCT | `construct.plane.offset`, `construct.plane.at_angle`, `construct.axis.through_cylinder`, `construct.axis.normal_to_face`, `construct.axis.two_planes`, `construct.axis.two_points`, `construct.axis.edge`, `construct.point.vertex`, `construct.point.two_edges`, `construct.point.three_planes`, `construct.point.center`, `construct.point.edge_plane`, `construct.point.along_path`, `construct.plane.midplane`, `construct.plane.two_edges`, `construct.plane.three_points`, `construct.plane.tangent`, `construct.plane.along_path`, `construct.plane.perpendicular` |
 | SOLID / CREATE | ASSEMBLE / JOINTS | `joint.origin` |
 | SOLID / CREATE | MODEL / ARRANGE | `solid.pattern.rectangular`, `solid.pattern.circular`, `solid.pattern.path`, `solid.mirror` |
-| SOLID / CREATE | MODEL / CREATE | `solid.extrude`, `solid.revolve`, `solid.sweep`, `solid.loft`, `solid.box`, `solid.cylinder`, `solid.sphere`, `solid.torus`, `solid.cone`, `solid.hole`, `solid.pipe`, `solid.bounding_solid`, `solid.thread`, `solid.boundary_fill`, `solid.coil`, `solid.rib`, `solid.web`, `solid.emboss` |
+| SOLID / CREATE | MODEL / CREATE | `solid.extrude`, `solid.revolve`, `solid.sweep`, `solid.loft`, `solid.box`, `solid.cylinder`, `solid.sphere`, `solid.torus`, `solid.cone`, `solid.hole`, `solid.pipe`, `solid.bounding_solid`, `solid.thread`, `solid.extrude_cut`, `solid.revolve_cut`, `solid.sweep_cut`, `solid.loft_cut`, `solid.boundary_fill`, `solid.coil`, `solid.rib`, `solid.web`, `solid.emboss` |
 | SOLID / CREATE | MODEL / SKETCH | `sketch.create` |
 | SOLID / INSERT | INSERT / FILES | `file.insert_step`, `file.insert_mesh` |
 | SOLID / INSERT | INSERT / LIBRARY | `parts.fastener` |
