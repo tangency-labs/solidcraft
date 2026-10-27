@@ -170,6 +170,7 @@ impl LocalOutbox {
     }
 
     /// Local process coordination only; this is not a collaborative file lock.
+    #[cfg(test)]
     pub(super) fn synchronization_lock(&self) -> Result<ProcessLock> {
         self.process_lock("sync.lock", "this connection is already synchronizing; saved copies are retained")
     }

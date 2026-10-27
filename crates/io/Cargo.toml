@@ -76,6 +76,7 @@ rustix = { version = "1", default-features = false, features = ["std", "fs"] }
 
 # The computer's name for a design's lock file (src/design_lock.rs; the browser keeps no lock files).
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+futures-lite = "2"
 gethostname = { workspace = true }
 # A temporary file in its target folder; also a rename that never replaces a file (src/safe_write.rs, create_atomic).
 tempfile = "3.27"

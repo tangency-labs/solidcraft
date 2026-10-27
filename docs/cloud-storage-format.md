@@ -107,6 +107,13 @@ and restart recovery as an ordinary save. Opening never changes these records.
 Conflict copies use the reserved project-relative path
 `conflicts/<original-path>-<first-12-hex-digits-of-captured-revision>`. Readers derive
 the original path from this convention, including copies created on another device.
+When that suffix would exceed the original path's limits, use
+`conflicts/<first-12-hex-digits-of-captured-revision>/<original-path>` instead.
+The original basename remains unchanged, including Unicode names. User project
+and design paths are each bounded to 512 bytes and components to 128 bytes;
+generated conflict prefixes reserve separate space, with at most 16 nested copies.
+Repository-relative payload paths are bounded to 1536 bytes. Both conflict forms
+are recognized for resolution and retry.
 An explicit resolution capture requires `conflict-resolution/1` in addition to
 `lifecycle/1`, and stores `{"kind":"resolve","file":"parts/original",`
 `"revision":"<observed-original-revision>","keep":"local"}` (or `"remote"`). Its

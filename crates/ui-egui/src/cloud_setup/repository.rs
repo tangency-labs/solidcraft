@@ -87,12 +87,10 @@ impl Check {
             return;
         }
         if let Some(operation) = &self.operation {
-            let mut statuses = app.session.cloud_operations().unwrap_or_default();
-            for slot in app.docs.background_mut() {
-                statuses.extend(slot.session.cloud_operations().unwrap_or_default());
-            }
+            let statuses = app.session.cloud_operations().unwrap_or_default();
             match statuses.iter().find(|s| &s.operation == operation) {
                 Some(status) if status.phase == Phase::Ready => {
+                    crate::cloud::consume_result(app, operation);
                     self.outcome = Some(if status.result.as_ref().and_then(|v| v.get("exists")).and_then(serde_json::Value::as_bool) == Some(true) {
                         Outcome::Available
                     } else {

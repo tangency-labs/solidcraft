@@ -2164,7 +2164,7 @@ fn write_bytes(
     s.provenance_chain = solidcraft_io::read_design_provenance_chain(&bytes);
     s.provenance = None;
     s.cloud.binding = None;
-    s.cloud.captures.clear();
+    s.cloud.clear_captures();
     s.mark_saved();
     let bytes_len = bytes.len();
     let mut out = SaveResult {
@@ -2468,7 +2468,7 @@ impl Session {
         self.provenance_chain.clone_from(&done.provenance_chain);
         self.provenance.clone_from(&done.provenance);
         self.cloud.binding.clone_from(&done.cloud.binding);
-        self.cloud.captures.clear();
+        self.cloud.clear_captures();
         self.saved = done.saved.clone();
         self.saved_visibility = done.saved_visibility.clone();
     }

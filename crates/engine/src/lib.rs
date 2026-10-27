@@ -1525,7 +1525,7 @@ impl Session {
         let redo_watch = self.redo_watch.take();
         let mut cloud = std::mem::take(&mut self.cloud);
         cloud.binding = fresh.cloud.binding.clone();
-        cloud.captures.clear();
+        cloud.clear_captures();
         *self = fresh;
         self.crash_journal = crash_journal;
         #[cfg(feature = "usage-stats")]

@@ -62,6 +62,11 @@ pub(crate) fn tick(app: &mut SolveApp, ctx: &egui::Context) {
     startup::tick(app, ctx, &statuses);
 }
 
+/// The owning UI has copied this completed response into its own state.
+pub(crate) fn consume_result(app: &mut SolveApp, operation: &str) {
+    let _ = app.run("cloud.status", serde_json::json!({"operation":operation,"consume":true}));
+}
+
 pub(crate) fn notices(app: &SolveApp) -> Vec<String> {
     let mut messages: Vec<_> = app.cloud.error.iter().cloned().collect();
     for connection in &app.session.cloud_settings().connections {
@@ -74,38 +79,10 @@ pub(crate) fn notices(app: &SolveApp) -> Vec<String> {
 
 fn poll(app: &mut SolveApp) -> Result<Vec<JobStatus>, String> {
     app.session.poll_cloud().map_err(|e| e.to_string())?;
-    let mut changed = app.session.take_cloud_settings_change().is_some();
     for slot in app.docs.background_mut() {
         slot.session.poll_cloud().map_err(|e| e.to_string())?;
-        if slot.session.take_cloud_settings_change().is_some() {
-            app.session.inherit_cloud_services(&slot.session);
-            changed = true;
-        }
     }
-    if changed {
-        for slot in app.docs.background_mut() {
-            slot.session.inherit_cloud_services(&app.session);
-        }
-    }
-    let mut statuses = app.session.cloud_operations().map_err(|e| e.to_string())?;
-    for slot in app.docs.background_mut() {
-        statuses.extend(slot.session.cloud_operations().map_err(|e| e.to_string())?);
-    }
-    let publications: Vec<_> = statuses.iter().flat_map(|status| status.publications.iter().cloned()).collect();
-    let managed: Vec<_> = statuses.iter().flat_map(|status| status.managed.iter().cloned()).collect();
-    if !managed.is_empty() {
-        app.session.poll_cloud_management(&managed).map_err(|e| e.to_string())?;
-        for slot in app.docs.background_mut() {
-            slot.session.poll_cloud_management(&managed).map_err(|e| e.to_string())?;
-        }
-    }
-    if !publications.is_empty() {
-        app.session.poll_cloud_with_publications(&publications).map_err(|e| e.to_string())?;
-        for slot in app.docs.background_mut() {
-            slot.session.poll_cloud_with_publications(&publications).map_err(|e| e.to_string())?;
-        }
-    }
-    Ok(statuses)
+    app.session.cloud_operations().map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

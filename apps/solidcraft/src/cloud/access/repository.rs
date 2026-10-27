@@ -27,6 +27,9 @@ impl ProviderRepository for Repository {
     fn list(&mut self, stored: &mut [StoredDesign]) -> Result<Vec<Destination>> {
         self.call(|api| async move { api.list_with_status(stored).await })
     }
+    fn list_cached(&mut self, stored: &mut [StoredDesign], cache: &solidcraft_engine::io::cloud::LocalOutbox) -> Result<Vec<Destination>> {
+        self.call(|api| async move { api.list_with_status_cached(stored, cache).await })
+    }
     fn trash(&mut self) -> Result<Vec<Destination>> {
         self.call(|api| async move { api.list_deleted().await })
     }

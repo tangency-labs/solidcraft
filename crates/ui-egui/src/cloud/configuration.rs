@@ -3,7 +3,7 @@ use crate::SolveApp;
 use serde_json::Value;
 
 fn pending(app: &mut SolveApp) -> bool {
-    app.session.cloud_configuring() || app.docs.background_mut().any(|slot| slot.session.cloud_configuring())
+    app.session.cloud_configuring()
 }
 fn changes(id: &str, params: &Value) -> bool {
     id == "cloud.configure" || (id == "cloud.settings" && params.get("reload").and_then(Value::as_bool) == Some(true))
