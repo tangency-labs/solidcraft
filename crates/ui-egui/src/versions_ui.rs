@@ -246,7 +246,7 @@ fn act(app: &mut SolveApp, notice: &mut Option<String>, error: &mut bool, comman
 
 /// An empty name becomes Branch 2, Branch 3, and so on. A name already in use is returned as
 /// typed, so the command can say it is taken.
-fn fresh_branch_name(app: &SolveApp, typed: &str) -> String {
+pub(crate) fn fresh_branch_name(app: &SolveApp, typed: &str) -> String {
     let versions = &app.session.doc.versions;
     let taken = |candidate: &str| {
         versions.versions.iter().any(|item| item.name == candidate) || versions.workspaces.iter().any(|item| item.name == candidate)

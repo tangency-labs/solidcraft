@@ -403,6 +403,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
         x += t.space_24 + t.space_2;
     }
     x += 14.0;
+    x += history_branch(app, ui, pos2(x, r.center().y)) + t.space_8;
     // The features scroll horizontally in the space right of the playback controls.
     let strip = Rect::from_min_max(pos2(x, r.top()), r.right_bottom());
     ui.scope_builder(UiBuilder::new().max_rect(strip), |ui| {
@@ -631,6 +632,58 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
             }
         });
     });
+}
+
+/// The branch the History shows, as a button left of the features. Its menu switches to
+/// another branch, starts a new one from here, or opens the Versions window. Returns its width.
+fn history_branch(app: &mut SolveApp, ui: &mut egui::Ui, left_center: egui::Pos2) -> f32 {
+    let t = Tokens::get();
+    let versions = &app.session.doc.versions;
+    let open = versions.workspaces.iter().find(|w| w.id == versions.current).map_or_else(|| "Main".to_string(), |w| w.name.clone());
+    let branches: Vec<(String, String)> = versions.workspaces.iter().map(|w| (w.id.clone(), w.name.clone())).collect();
+    let current = versions.current.clone();
+    let rect = Rect::from_min_size(pos2(left_center.x, left_center.y - t.space_24 / 2.0), vec2(ui.max_rect().right() - left_center.x, t.space_24));
+    let mut child = ui.new_child(UiBuilder::new().max_rect(rect).layout(egui::Layout::left_to_right(egui::Align::Center)));
+    let mut chosen: Option<(&str, Value)> = None;
+    let response = crate::ui_kit::Menu::button(&mut child, open, |ui| {
+        for (id, name) in &branches {
+            let mut item = crate::ui_kit::MenuItem::new(id, name, "");
+            item.checked = Some(*id == current);
+            let row = item.show(ui);
+            crate::scenario::publish_handle(&format!("history:branch:{id}"), row.rect.center());
+            if row.clicked() {
+                if *id != current {
+                    chosen = Some(("version.switch", json!({ "workspace": id })));
+                }
+                ui.close();
+            }
+        }
+        crate::ui_kit::Menu::separator(ui);
+        let new = crate::context_menu::button(ui, crate::i18n::tr_label("New Branch"), "");
+        crate::scenario::publish_handle("history:branch_new", new.rect.center());
+        if new.clicked() {
+            chosen = Some(("version.branch", json!({ "name": crate::dialogs::versions_ui::fresh_branch_name(app, "") })));
+            ui.close();
+        }
+        if crate::context_menu::button(ui, crate::i18n::tr_label("Versions"), "").clicked() {
+            chosen = Some(("version.graph", Value::Null));
+            ui.close();
+        }
+    })
+    .response;
+    crate::scenario::publish_handle("history:branch", response.rect.center());
+    let width = response.rect.width();
+    response.on_hover_text(crate::i18n::tr_label("Versions"));
+    match chosen {
+        Some(("version.graph", _)) => app.start("version.graph"),
+        Some((id, params)) => {
+            if let Err(e) = app.run(id, params) {
+                app.set_status(e, true);
+            }
+        }
+        None => {}
+    }
+    width
 }
 
 /// Select what a feature made, so the browser shows it.
@@ -1078,5 +1131,32 @@ mod tests {
         let marker = crate::scenario::rect_of("history:marker").unwrap();
         assert!(out.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Circle(c)
             if marker.contains(c.center) && c.fill == t.timeline && c.stroke == egui::Stroke::new(t.space_2, accent.color))));
+    }
+
+    /// The History's branch button starts a branch, and switching back shows the other line's features.
+    #[test]
+    fn the_history_starts_and_switches_branches() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.timeline_left = false;
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "First"})).unwrap();
+        h.frames(4);
+        h.step(&json!({"click": {"handle": "history:branch"}})).unwrap();
+        h.frames(2);
+        h.step(&json!({"click": {"handle": "history:branch_new"}})).unwrap();
+        h.frames(4);
+        let branch = h.app.session.doc.versions.current.clone();
+        assert_ne!(branch, "main");
+        assert_eq!(h.app.session.doc.versions.workspaces.len(), 2);
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "corner": [20, 0, 0], "name": "Second"})).unwrap();
+        h.frames(4);
+        for (to, features) in [("main", 1), (branch.as_str(), 2)] {
+            h.step(&json!({"click": {"handle": "history:branch"}})).unwrap();
+            h.frames(2);
+            h.step(&json!({"click": {"handle": format!("history:branch:{to}")}})).unwrap();
+            h.frames(4);
+            assert_eq!(h.app.session.doc.versions.current, to);
+            assert_eq!(h.app.session.doc.features.len(), features, "{to}");
+        }
     }
 }
