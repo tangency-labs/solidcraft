@@ -5,6 +5,18 @@
     "prefs.bodies_folders_never": "Never",
     "prefs.bodies_folders_several": "Several bodies only"
   },
+  "ar": {
+    "prefs.bodies_folders": "مجلدات الأجسام",
+    "prefs.bodies_folders_always": "دائمًا",
+    "prefs.bodies_folders_never": "أبدًا",
+    "prefs.bodies_folders_several": "عند تعدد الأجسام فقط"
+  },
+  "he": {
+    "prefs.bodies_folders": "תיקיות גופים",
+    "prefs.bodies_folders_always": "תמיד",
+    "prefs.bodies_folders_never": "אף פעם",
+    "prefs.bodies_folders_several": "רק כשיש כמה גופים"
+  },
   "de": {
     "prefs.bodies_folders": "Körperordner",
     "prefs.bodies_folders_always": "Immer",
@@ -22,6 +34,12 @@
     "prefs.bodies_folders_always": "항상 표시",
     "prefs.bodies_folders_never": "표시 안 함",
     "prefs.bodies_folders_several": "바디가 여러 개일 때만"
+  },
+  "vi": {
+    "prefs.bodies_folders": "Thư mục thân khối",
+    "prefs.bodies_folders_always": "Luôn luôn",
+    "prefs.bodies_folders_never": "Không bao giờ",
+    "prefs.bodies_folders_several": "Chỉ khi có nhiều thân khối"
   },
   "zh": {
     "prefs.bodies_folders": "实体文件夹",
