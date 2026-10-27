@@ -129,7 +129,17 @@
     "cmd.frame_trim": "Обрізати/подовжити"
   },
   "vi": {
-    "cmd.frame_trim": "Cắt/Kéo dài"
+    "cmd.frame_trim": "Cắt/Kéo dài",
+    "ui.frame_trim.end": "Cuối",
+    "ui.frame_trim.keep": "Giữ lại",
+    "ui.frame_trim.members": "Thanh khung",
+    "ui.frame_trim.more_targets": "Đích bổ sung: {count}",
+    "ui.frame_trim.nearer_end": "Đầu gần hơn",
+    "ui.frame_trim.pick_members": "Chọn các thanh khung cần cắt.",
+    "ui.frame_trim.pick_members_first": "Trước tiên, chọn các thanh cần cắt.",
+    "ui.frame_trim.pick_targets": "Chọn đối tượng làm đích cắt.",
+    "ui.frame_trim.start": "Đầu",
+    "ui.frame_trim.target_kinds": "Cắt đến thanh khung, mặt phẳng của vật thể hoặc mặt phẳng."
   },
   "zh": {
     "cmd.frame_trim": "修剪/延伸",
