@@ -175,6 +175,9 @@ pub struct DrawStats {
     pub line_segments: u64,
     /// The frame was drawn supersampled and filtered down.
     pub supersampled: bool,
+    /// The device refused the memory for a frame (#7296): the view is drawn at a lower
+    /// resolution, or with its see-through surfaces sorted.
+    pub lowered: bool,
 }
 
 /// What the last scene change uploaded to the GPU, in bytes: what an edit costs beyond the CPU
@@ -224,7 +227,13 @@ impl Tally {
     }
 
     fn stats(&self) -> DrawStats {
-        DrawStats { draw_calls: self.calls.get(), triangles: self.triangles.get(), line_segments: self.segments.get(), supersampled: false }
+        DrawStats {
+            draw_calls: self.calls.get(),
+            triangles: self.triangles.get(),
+            line_segments: self.segments.get(),
+            supersampled: false,
+            lowered: false,
+        }
     }
 }
 
@@ -2033,6 +2042,13 @@ pub struct Renderer {
     /// The filtered picture at the viewport's own size, made on the first still frame and blitted
     /// as it is until the content changes: a still view does not pay for the filter every frame.
     cached: Option<CachedPicture>,
+    /// The device refused the cached picture's texture: still frames are filtered every time.
+    no_cache: bool,
+    /// Most memory (bytes) an offscreen frame may take ([`frame_bytes`]): [`SS_BUDGET`], halved
+    /// below each frame the device refused (out of video memory, #7296).
+    frame_budget: u64,
+    /// The device refused memory for a frame or its see-through targets ([`DrawStats::lowered`]).
+    lowered: bool,
     /// Reversed depth drawn into the window's pass: egui clears its depth to 1, which is the near
     /// plane then, so the viewport first sets its rectangle to the far plane (0).
     depth_reset: Option<wgpu::RenderPipeline>,
@@ -2078,11 +2094,23 @@ struct CachedPicture {
 /// Most memory (bytes) a supersampled frame's colour and depth may take.
 const SS_BUDGET: u64 = 384 << 20;
 
+/// The least [`Renderer::frame_budget`] falls to after refused frames: about 256 × 256 pixels at
+/// 4× MSAA.
+const MIN_FRAME_BUDGET: u64 = 2 << 20;
+
+/// How many smaller frames one frame asks for after the device refuses one.
+const FRAME_TRIES: usize = 8;
+
 /// The size (px) to draw a `size` viewport supersampled `factor` times in each direction:
 /// within the device's largest texture side (#869) and the memory budget (at `samples` per pixel,
 /// four bytes of colour and four of depth each). `None` when that leaves under 1.25×: the frame
 /// is drawn as usual. A `factor` under 1 draws it that much smaller, to be filtered up.
 pub fn supersampled_size(size: [f32; 2], factor: f32, max_side: u32, samples: u32) -> Option<[u32; 2]> {
+    supersampled_within(size, factor, max_side, samples, SS_BUDGET)
+}
+
+/// [`supersampled_size`] within `budget` bytes instead of [`SS_BUDGET`].
+fn supersampled_within(size: [f32; 2], factor: f32, max_side: u32, samples: u32, budget: u64) -> Option<[u32; 2]> {
     let [w, h] = size;
     if w >= 1.0 && h >= 1.0 && factor > 0.0 && factor < 1.0 {
         return Some([((w * factor).floor() as u32).clamp(1, max_side.max(1)), ((h * factor).floor() as u32).clamp(1, max_side.max(1))]);
@@ -2092,9 +2120,43 @@ pub fn supersampled_size(size: [f32; 2], factor: f32, max_side: u32, samples: u3
     }
     let side = max_side as f32;
     let bytes_per_px = 8.0 * samples.max(1) as f32;
-    let by_memory = (SS_BUDGET as f32 / (w * h * bytes_per_px)).sqrt();
+    let by_memory = (budget as f32 / (w * h * bytes_per_px)).sqrt();
     let f = factor.min(side / w).min(side / h).min(by_memory);
     (f >= 1.25).then(|| [((w * f).floor() as u32).clamp(1, max_side), ((h * f).floor() as u32).clamp(1, max_side)])
+}
+
+/// The memory (bytes) a frame of `size` pixels at `samples` per pixel takes by the measure of
+/// the budgets: four bytes of colour and four of depth per sample.
+fn frame_bytes(size: [u32; 2], samples: u32) -> u64 {
+    u64::from(size[0]) * u64::from(size[1]) * 8 * u64::from(samples.max(1))
+}
+
+/// `size` made smaller, keeping its shape, until its frame ([`frame_bytes`]) fits `budget`: a
+/// device that refused a frame of the viewport's own size draws it smaller, filtered up (#7296).
+/// At least 1 × 1.
+fn fitted_size(size: [u32; 2], samples: u32, budget: u64) -> [u32; 2] {
+    let bytes = frame_bytes(size, samples);
+    if bytes <= budget {
+        return size;
+    }
+    let f = (budget as f64 / bytes as f64).sqrt();
+    size.map(|side| ((f64::from(side) * f).floor() as u32).max(1))
+}
+
+/// `make`'s value, or the error the device raised while it ran. A texture the device has no
+/// memory for (#7296) would otherwise reach the uncaptured-error handler (a panic by default)
+/// and be drawn into, invalid, every frame. A browser answers later and is not waited for (no
+/// error is assumed).
+fn allocated<T>(device: &wgpu::Device, make: impl FnOnce() -> T) -> Result<T, wgpu::Error> {
+    let scopes = [wgpu::ErrorFilter::OutOfMemory, wgpu::ErrorFilter::Internal, wgpu::ErrorFilter::Validation].map(|f| device.push_error_scope(f));
+    let value = make();
+    let mut failed = None;
+    for scope in scopes.into_iter().rev() {
+        if let Some(e) = crate::popped(scope.pop()) {
+            failed.get_or_insert(e);
+        }
+    }
+    failed.map_or(Ok(value), Err)
 }
 
 /// The filter: each viewport pixel the mean of the supersampled pixels under it (four bilinear
@@ -2805,6 +2867,9 @@ impl Renderer {
                 ss_stats: DrawStats::default(),
                 ss_key: None,
                 cached: None,
+                no_cache: false,
+                frame_budget: SS_BUDGET,
+                lowered: false,
                 image: image.join(),
                 image_bgl,
                 sampler,
@@ -3285,6 +3350,12 @@ impl Renderer {
             self.publish(DrawStats { draw_calls: self.ss_stats.draw_calls + 1, supersampled: self.ss_scaled, ..self.ss_stats });
             return;
         }
+        // The pipelines draw into the scene's kind of target, not the window's pass: with no
+        // offscreen frame (the device had no memory for one, #7296) nothing can be drawn.
+        if self.window_differs() {
+            self.publish(DrawStats::default());
+            return;
+        }
         let tally = Tally::default();
         if let Some(reset) = &self.depth_reset {
             pass.set_pipeline(reset);
@@ -3307,7 +3378,7 @@ impl Renderer {
 
     fn publish(&self, drawn: DrawStats) {
         if let Ok(mut s) = self.stats.lock() {
-            *s = drawn;
+            *s = DrawStats { lowered: self.lowered, ..drawn };
         }
     }
 
@@ -3631,21 +3702,32 @@ impl Renderer {
     fn cache_picture(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, size_px: [f32; 2]) {
         let Some(ss) = &self.ss else { return };
         let [w, h] = size_px;
-        if !(w >= 1.0 && h >= 1.0) {
+        if !(w >= 1.0 && h >= 1.0) || self.no_cache {
             return;
         }
         let max = self.max_texture.max(1);
         let size = [(w.round() as u32).clamp(1, max), (h.round() as u32).clamp(1, max)];
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("sc_ssaa_cached"),
-            size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: self.target.format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
+        let made = allocated(device, || {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("sc_ssaa_cached"),
+                size: wgpu::Extent3d { width: size[0], height: size[1], depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.target.format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
         });
+        let texture = match made {
+            Ok(texture) => texture,
+            Err(e) => {
+                log::warn!("still frames are filtered every time: the GPU refused a {} × {} picture: {e}", size[0], size[1]);
+                self.no_cache = true;
+                self.lowered = true;
+                return;
+            }
+        };
         let view = texture.create_view(&Default::default());
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("sc_ssaa_cached"),
@@ -3683,27 +3765,66 @@ impl Renderer {
     fn supersample(&mut self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, cb: &Frame, see_through: bool) -> bool {
         // Supersampled when asked (and worth it); else, for order-independent transparency, at
         // the viewport's own size.
+        let max = self.max_texture.max(1);
         let own = || {
             let [w, h] = cb.size_px;
-            (w >= 1.0 && h >= 1.0)
-                .then(|| [(w.round() as u32).clamp(1, self.max_texture.max(1)), (h.round() as u32).clamp(1, self.max_texture.max(1))])
+            (w >= 1.0 && h >= 1.0).then(|| [(w.round() as u32).clamp(1, max), (h.round() as u32).clamp(1, max)])
         };
-        let scaled = if cb.ssaa != 1.0 { supersampled_size(cb.size_px, cb.ssaa, self.max_texture, self.target.samples) } else { None };
         // See-through surfaces (order-independent transparency) and a window pass of another kind
         // (samples, depth) need a frame of their own, even at the viewport's own size.
-        let Some(size) = scaled.or_else(|| if see_through || self.window_differs() { own() } else { None }) else {
+        let needs_own = see_through || self.window_differs();
+        let samples = self.target.samples;
+        let mut drawn = None;
+        for _ in 0..FRAME_TRIES {
+            let budget = self.frame_budget;
+            let scaled = if cb.ssaa != 1.0 { supersampled_within(cb.size_px, cb.ssaa, self.max_texture, samples, budget) } else { None };
+            // After refused frames, one of the viewport's own size may not fit either: it is drawn
+            // smaller and filtered up.
+            let frame = scaled.map(|s| (s, true)).or_else(|| {
+                needs_own.then(own).flatten().map(|s| {
+                    let fitted = fitted_size(s, samples, budget);
+                    (fitted, fitted != s)
+                })
+            });
+            let Some((size, filtered)) = frame else {
+                self.ss = None;
+                return false;
+            };
+            if self.ss.as_ref().is_some_and(|ss| ss.size == size) {
+                drawn = Some((size, filtered));
+                break;
+            }
+            // The old frame goes before the new one is asked for.
             self.ss = None;
-            return false;
-        };
-        self.ss_scaled = scaled.is_some();
-        if self.ss.as_ref().is_none_or(|ss| ss.size != size) {
-            self.ss = Some(self.supersampled(device, size));
+            match allocated(device, || self.supersampled(device, size)) {
+                Ok(ss) => {
+                    self.ss = Some(ss);
+                    drawn = Some((size, filtered));
+                    break;
+                }
+                Err(e) => {
+                    let before = self.frame_budget;
+                    self.refused(size, &e);
+                    // Already at the least budget: no smaller frame to ask for.
+                    if self.frame_budget == before {
+                        break;
+                    }
+                }
+            }
         }
-        if see_through
-            && let Some(p) = &self.oit
-            && self.oit_targets.as_ref().is_none_or(|t| t.size != size)
-        {
-            self.oit_targets = Some(p.targets(device, size, self.target.samples));
+        let Some((size, filtered)) = drawn else { return false };
+        self.ss_scaled = filtered;
+        if see_through && self.oit_targets.as_ref().is_none_or(|t| t.size != size) {
+            self.oit_targets = None;
+            match self.oit.as_ref().map(|p| allocated(device, || p.targets(device, size, samples))) {
+                Some(Ok(targets)) => self.oit_targets = Some(targets),
+                Some(Err(e)) => {
+                    log::warn!("see-through surfaces are sorted: the GPU refused their {} × {} targets: {e}", size[0], size[1]);
+                    self.oit = None;
+                    self.lowered = true;
+                }
+                None => {}
+            }
         }
         let Some(ss) = &self.ss else { return false };
         let depth_format = self.target.depth;
@@ -3756,6 +3877,14 @@ impl Renderer {
         }
         self.ss_stats = tally.stats();
         true
+    }
+
+    /// The device refused a frame of `size` pixels (out of video memory, #7296): the next one
+    /// asked for takes at most half its memory.
+    fn refused(&mut self, size: [u32; 2], e: &wgpu::Error) {
+        self.frame_budget = (self.frame_budget.min(frame_bytes(size, self.target.samples)) / 2).max(MIN_FRAME_BUDGET);
+        self.lowered = true;
+        log::warn!("the view is drawn at a lower resolution: the GPU refused a {} × {} frame: {e}", size[0], size[1]);
     }
 
     /// Textures for a supersampled frame of `size` pixels.
@@ -4572,6 +4701,43 @@ mod glass_tests {
         assert!(split.ss_ready, "the split frame is drawn offscreen");
         let max = drawn.iter().zip(&shown).map(|(a, b)| a.abs_diff(*b)).max().unwrap_or(0);
         assert!(max <= 1, "the blitted picture matches the direct one (max difference {max})");
+    }
+
+    /// A GT 740 had no video memory left for the viewport's frame, and the app closed with "wgpu
+    /// error: Out of Memory" (#7296). A frame the device refuses is drawn smaller instead, and the
+    /// device's refusals are reported. A texture past the device's largest side stands in for
+    /// one past its memory: the renderer is told the device takes larger textures than it does,
+    /// and the device refuses them the same way. An error that escaped would panic here (the
+    /// test device keeps wgpu's default handler).
+    #[test]
+    fn a_frame_the_device_refuses_is_drawn_smaller() {
+        let Some((_, device, queue)) = crate::open_headless().ok() else { return };
+        let depth = crate::depth_format(&device, true);
+        let format = wgpu::TextureFormat::Rgba8Unorm;
+        let scene_target = GpuTarget { format, depth: Some(depth), samples: 1, tess: false };
+        let window_target = GpuTarget { format, depth: None, samples: 1, tess: false };
+        let limit = device.limits().max_texture_dimension_2d;
+        let red = |pixels: &[u8]| pixels.get((32 * 64 + 32) * 4..(32 * 64 + 32) * 4 + 4).is_some_and(|p| p[0] > 200 && p[1] < 60 && p[2] < 60);
+        // Supersampled 4× (a wide, flat viewport) and at the viewport's own size: each frame is
+        // refused at first, so drawn smaller, and the view still shows the model.
+        for (width, ssaa) in [(limit / 2 + 64, 4.0), (limit * 2, 1.0)] {
+            let mut r = Renderer::with_window_target(&device, scene_target, window_target, None);
+            r.max_texture = limit.saturating_mul(4);
+            let mut frame = test_frame(test_scene(), ssaa);
+            frame.size_px = [width as f32, 64.0];
+            let shown = render_frame(&mut r, &device, &queue, &frame, false);
+            let size = r.ss.as_ref().map(|ss| ss.size);
+            assert!(r.ss_ready && size.is_some_and(|[w, _]| w <= limit), "{width} px at {ssaa}×: drawn within the device ({size:?})");
+            assert!(red(&shown), "{width} px at {ssaa}×: the view shows the model");
+            let stats = r.stats().lock().map(|s| *s).unwrap_or_default();
+            assert!(stats.lowered, "{width} px at {ssaa}×: the lower quality is reported");
+            // The next frame asks for no more than the device gave.
+            let budget = r.frame_budget;
+            frame.view_proj[3][0] += 0.01;
+            assert!(
+                red(&render_frame(&mut r, &device, &queue, &frame, false)) && r.frame_budget == budget && r.ss.as_ref().map(|ss| ss.size) == size
+            );
+        }
     }
 
     /// The Render workspace's preview once painted the modelling viewport's last frame instead of

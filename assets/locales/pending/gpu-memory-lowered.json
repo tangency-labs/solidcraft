@@ -1,0 +1,14 @@
+{
+  "en": {
+    "ui.gpu_memory_lowered": "The graphics card is out of memory: the view is drawn at a lower quality."
+  },
+  "de": {
+    "ui.gpu_memory_lowered": "Die Grafikkarte hat keinen Speicher mehr frei: Die Ansicht wird in geringerer Qualität gezeichnet."
+  },
+  "ja": {
+    "ui.gpu_memory_lowered": "グラフィックカードのメモリが不足しています。ビューは低い画質で描画されます。"
+  },
+  "zh": {
+    "ui.gpu_memory_lowered": "显卡内存不足：视图以较低画质绘制。"
+  }
+}

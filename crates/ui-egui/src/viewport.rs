@@ -118,6 +118,10 @@ pub struct ViewportState {
     pub(crate) tess_ready: Option<crate::gpu::TessReady>,
     /// What the GPU drew last frame, shared with the renderer (the frame-rate details, #2548).
     pub(crate) draw_stats: Option<crate::gpu::DrawStatsHandle>,
+    /// The status line has said the view is drawn at a lower quality ([`DrawStats::lowered`]).
+    ///
+    /// [`DrawStats::lowered`]: crate::gpu::DrawStats::lowered
+    lowered_noted: bool,
     /// The graphics backend and adapter, as the frame-rate details show them.
     pub(crate) adapter: String,
     slot: SceneSlot,
@@ -3933,6 +3937,12 @@ pub fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
             },
         });
         painter.add(egui_wgpu::Callback::new_paint_callback(rect, cb));
+        // The graphics card had no memory for the view's frame (#7296): say once why it looks
+        // coarser.
+        if !app.viewport.lowered_noted && app.viewport.draw_stats.as_ref().is_some_and(|s| s.lock().is_ok_and(|s| s.lowered)) {
+            app.viewport.lowered_noted = true;
+            app.set_status(app.tr("ui.gpu_memory_lowered"), false);
+        }
     }
     let overlay_rect = crate::shell::bottom_overlay_rect(app, rect);
     analysis_legend(app, &painter, overlay_rect);
