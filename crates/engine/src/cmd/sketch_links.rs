@@ -196,20 +196,21 @@ fn piece_on(sk: &Sketch, ci: usize, g: &LinkGeom, tol: f64) -> bool {
 /// Before curves and points of a sketch are deleted: each link that keeps some of its members
 /// records the source edges of the members going ([`solidcraft_sketch::Link::omit_edges`], by
 /// their persistent names), so exactly those stay deleted when it is next updated, however
-/// its source moves or is resized. A curve on a point that goes, goes too.
+/// its source moves or is resized. A curve on a point that goes, goes too. Returns the links
+/// that stay linked that way.
 ///
-/// Only whole source edges of a face's boundary can be told apart that way. Deleting part of a
-/// projection that is not, or cannot be (part of one source edge, one of several edges between
-/// the same two faces that are numbered by where they lie, an edge whose faces' names are not
-/// exact, a silhouette, a section, a mesh body), is refused: Remove Projection removes it
-/// whole, Break Link makes its geometry editable.
+/// Only whole source edges of a face's boundary can be told apart that way. A link whose deleted
+/// part is not, or cannot be (part of one source edge, one of several edges between the same two
+/// faces that are numbered by where they lie, an edge whose faces' names are not exact, a
+/// silhouette, a section, a mesh body), is not returned, with the reason: the delete breaks off
+/// what remains of it where it is (#5098).
 pub(super) fn omit_removed(
     sk: &mut Sketch,
     pieces: &std::collections::BTreeMap<String, std::result::Result<Vec<solidcraft_doc::project::EdgePieces>, String>>,
     curves: &[usize],
     points: &[usize],
     cmd: &str,
-) -> Result<()> {
+) -> Result<(std::collections::BTreeSet<String>, Vec<(String, String)>)> {
     let going: std::collections::BTreeSet<usize> = sk
         .curves
         .iter()
@@ -217,7 +218,10 @@ pub(super) fn omit_removed(
         .filter(|(i, c)| curves.contains(i) || c.kind.point_ids().iter().any(|q| points.contains(q)))
         .map(|(i, _)| i)
         .collect();
-    let mut add: Vec<(String, String)> = Vec::new();
+    let scale = sk.points.iter().fold(1.0_f64, |m, p| m.max(p.pos.x.abs()).max(p.pos.y.abs()));
+    let tol = scale * 1e-7;
+    let mut add: Vec<(String, Vec<String>)> = Vec::new();
+    let mut broken = Vec::new();
     for l in sk.links.iter().filter(|l| l.kind != LinkKind::Text) {
         let link_curves = sk.link_curves(&l.id);
         let on_curves: std::collections::BTreeSet<usize> =
@@ -229,58 +233,62 @@ pub(super) fn omit_removed(
         if !survives || (deleted.is_empty() && !lone_gone) {
             continue;
         }
-        let whole = |why: &str| {
-            bad(cmd, format!("the {} is kept whole ({why}): Remove Projection removes it, Break Link makes its curves editable", l.source.describe()))
+        // The names of the source edges (families) that stay out, or why they cannot be told apart.
+        let families = || -> std::result::Result<Vec<String>, String> {
+            if lone_gone {
+                return Err("its points belong to it".into());
+            }
+            let edges = match pieces.get(&l.id) {
+                Some(Ok(edges)) => edges,
+                Some(Err(why)) => return Err(why.clone()),
+                None => return Err("its source edges are not known".into()),
+            };
+            // Which deleted curve each piece of each source edge lies on, if any.
+            let on: Vec<Vec<Option<usize>>> =
+                edges.iter().map(|e| e.geom.iter().map(|g| deleted.iter().copied().find(|c| piece_on(sk, *c, g, tol))).collect()).collect();
+            let covered = |i: usize| on.get(i).is_some_and(|pieces| !pieces.is_empty() && pieces.iter().all(Option::is_some));
+            if on.iter().enumerate().any(|(i, pieces)| pieces.iter().any(Option::is_some) && !covered(i)) {
+                return Err("one source edge gives more curves than the ones deleted".into());
+            }
+            if deleted.iter().any(|c| !on.iter().enumerate().any(|(i, pieces)| covered(i) && pieces.contains(&Some(*c)))) {
+                return Err("a deleted curve is not one of its face's source edges".into());
+            }
+            let mut out = Vec::new();
+            for (i, e) in edges.iter().enumerate().filter(|(i, _)| covered(*i)) {
+                if !e.exact {
+                    return Err("its source edge's name is not exact".into());
+                }
+                let family = solidcraft_doc::project::omit_name(&e.name);
+                // One of a family of edges told apart only by numbers (several edges between the
+                // same two faces, or the pieces of a split face, such as a hole's two halves): the
+                // numbers may pass between them, so only the whole family is kept out.
+                if edges.iter().enumerate().any(|(j, other)| j != i && solidcraft_doc::project::omit_name(&other.name) == family && !covered(j)) {
+                    return Err("its source edge is one of several told apart only by number".into());
+                }
+                out.push(family);
+            }
+            Ok(out)
         };
-        if lone_gone {
-            return Err(whole("its points belong to it"));
-        }
-        let edges = match pieces.get(&l.id) {
-            Some(Ok(edges)) => edges,
-            Some(Err(why)) => return Err(whole(why)),
-            None => return Err(whole("its source edges are not known")),
-        };
-        let scale = sk.points.iter().fold(1.0_f64, |m, p| m.max(p.pos.x.abs()).max(p.pos.y.abs()));
-        let tol = scale * 1e-7;
-        // Which deleted curve each piece of each source edge lies on, if any.
-        let on: Vec<Vec<Option<usize>>> =
-            edges.iter().map(|e| e.geom.iter().map(|g| deleted.iter().copied().find(|c| piece_on(sk, *c, g, tol))).collect()).collect();
-        let covered = |i: usize| on.get(i).is_some_and(|pieces| !pieces.is_empty() && pieces.iter().all(Option::is_some));
-        for (i, pieces) in on.iter().enumerate() {
-            if pieces.iter().any(Option::is_some) && !covered(i) {
-                return Err(whole("one source edge gives more curves than the ones deleted: delete them together"));
-            }
-        }
-        for c in &deleted {
-            if !on.iter().enumerate().any(|(i, pieces)| covered(i) && pieces.contains(&Some(*c))) {
-                return Err(whole("a deleted curve is not one of its face's source edges"));
-            }
-        }
-        for (i, e) in edges.iter().enumerate().filter(|(i, _)| covered(*i)) {
-            if !e.exact {
-                return Err(whole("its source edge's name is not exact"));
-            }
-            let family = solidcraft_doc::project::omit_name(&e.name);
-            // One of a family of edges told apart only by numbers (several edges between the same
-            // two faces, or the pieces of a split face, such as a hole's two halves): the numbers
-            // may pass between them, so only the whole family is kept out.
-            if edges.iter().enumerate().any(|(j, other)| j != i && solidcraft_doc::project::omit_name(&other.name) == family && !covered(j)) {
-                return Err(whole("its source edge is one of several told apart only by number: delete them together"));
-            }
-            add.push((l.id.clone(), family));
+        match families() {
+            Ok(names) => add.push((l.id.clone(), names)),
+            Err(why) => broken.push((l.id.clone(), why)),
         }
     }
-    for (id, name) in add {
-        if let Some(l) = sk.links.iter_mut().find(|l| l.id == id)
-            && !l.omit_edges.contains(&name)
-        {
+    let mut kept = std::collections::BTreeSet::new();
+    for (id, names) in add {
+        let Some(l) = sk.links.iter_mut().find(|l| l.id == id) else { continue };
+        for name in names {
+            if l.omit_edges.contains(&name) {
+                continue;
+            }
             if l.omit_edges.len() >= solidcraft_sketch::MAX_LINK_OMIT {
                 return Err(bad(cmd, "too many deleted members of one projection"));
             }
             l.omit_edges.push(name);
         }
+        kept.insert(id);
     }
-    Ok(())
+    Ok((kept, broken))
 }
 
 fn references(s: &mut Session, p: &Value) -> Result<Value> {
