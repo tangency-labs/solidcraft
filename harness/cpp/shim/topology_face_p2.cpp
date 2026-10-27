@@ -34,6 +34,7 @@
 #include <SmBSplineCurve.h>
 #include <SmBSplineSurface.h>
 #include <SmBrep.h>
+#include <SmCacheMgr.h>
 #include <SmContext.h>
 #include <SmCurve.h>
 #include <SmEdge.h>
@@ -1744,6 +1745,12 @@ void run_brep_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
     {
         SmFace* p = g.faces[(size_t)rd.idx()];
         SmPoint3d q(SM_UNDEF_DOUBLE, SM_UNDEF_DOUBLE, SM_UNDEF_DOUBLE);
+        // Drop the untrimmed trimmed-surface cache that reading the file left on the face's
+        // surface (ReadFromFile's healer builds it while Brep editing is enabled); the Rust
+        // side imports the exported B-rep without caches (query.face_p3 does the same).
+        SmSurface* srf = p->GetSurface();
+        if (srf != nullptr && SmCacheMgr::GetObjectCache(SM_OC_TRIMSRF, srf) != nullptr)
+            SmCacheMgr::DeleteObjectsCache(SM_OC_TRIMSRF, srf);
         o.push_back(st(p->CalculateAnInternalPoint(q)));
         put_vec(o, q);
         break;

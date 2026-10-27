@@ -362,6 +362,18 @@ void sector_run(std::vector<double>& o, Sector& c)
     o.push_back((double)eProblem);
 }
 
+// Drop the trimmed surface cache that reading the file left on the face's surface: the healer
+// that SmBrep::ReadFromFile runs (Fix_InfiniteRegion -> RayFire -> GlobalLineIntersect)
+// builds it while Brep editing is enabled, so it stays untrimmed (no UV trim curves, no
+// containment) and later queries reuse it. The Rust side imports the exported B-rep without
+// caches, so both sides start from no cache (as query.face_p1/p2 do).
+void drop_trim_cache(SmFace* f)
+{
+    SmSurface* srf = f->GetSurface();
+    if (srf != nullptr && SmCacheMgr::GetObjectCache(SM_OC_TRIMSRF, srf) != nullptr)
+        SmCacheMgr::DeleteObjectsCache(SM_OC_TRIMSRF, srf);
+}
+
 // ---- dispatch ---------------------------------------------------------------------------------
 
 void run(int32_t kind, bool export_only, Rd& rd, const char* path, std::vector<double>& o)
@@ -411,6 +423,7 @@ void run(int32_t kind, bool export_only, Rd& rd, const char* path, std::vector<d
             else
             {
                 SmPoint3d p(9, 9, 9);
+                drop_trim_cache(f);
                 SmStatus s = f->CalculateAnInternalPoint(p);
                 o.push_back(st(s));
                 put_pt(o, p);
