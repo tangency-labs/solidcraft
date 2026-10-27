@@ -1059,11 +1059,12 @@ fn rust(i: &Input) -> Result<Output> {
                 keep = false;
                 g.is_sweep_closed(arg as u64).map(|v| keep = v)
             }
-            8 | 9 => {
-                let result = if op == 8 {
-                    g.start_coord_system(Point3::ZERO)
-                } else {
-                    g.sweep_transform()
+            // 16: `GetEndCoordSystem` at the script vector.
+            8 | 9 | 16 => {
+                let result = match op {
+                    8 => g.start_coord_system(Point3::ZERO),
+                    9 => g.sweep_transform(),
+                    _ => g.end_coord_system(Point3::new(i.vector[0], i.vector[1], i.vector[2])),
                 };
                 result.map(|placement| {
                     let v = [

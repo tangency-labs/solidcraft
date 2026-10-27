@@ -2,7 +2,7 @@
 //! Rust: `solidcore::curve::tangent_field`.
 //!
 //! Every case runs one op of `SmTangentField` (type queries, `Evaluate`, `EvaluatePoint`,
-//! `operator==`, `Create`, `ReadFromDB`) on fields built from a UV curve (B-spline or
+//! `operator==`, `Create`, `ReadFromDB`, routed base methods) on fields built from a UV curve (B-spline or
 //! Hermite), a bilinear B-spline surface and start/end tangents. The surface is only
 //! reached through unported `SmSurface` members on the Rust side (those cases are
 //! deferred), so the Rust side stands in a plain struct holding its corners. Binary
@@ -19,21 +19,43 @@
 //! UB-263), `Copy` (a plain `SmCrvOnSurf`) and its evaluation, and the bytes written
 //! again. Optionally `GetKnots` caches the breaks first (the record then holds them).
 //!
-//! Every run uses at least [`MIN_GENERATED`] generated inputs (more with `--seeds`) and
-//! [`WRITE_READ_CASES`] `write_read` cases.
+//! `whNNNN` cases ([`WRITE_READ_HERMITE_CASES`], their own seed stream) are `write_read`
+//! round trips of fields on Hermite UV curves (`SmHermiteCurve::WriteToDB` inside the
+//! record). The read curve owns its UV curve, and the C++ copy constructor then shares a
+//! Hermite UV curve whose `Copy` failed (UB-267, a double delete), so `Copy` is skipped
+//! there on both sides (record `-2`).
+//!
+//! `route` cases (`rtNNNN`, [`ROUTE_CASES`], their own seed stream) call an
+//! `SmCrvOnSurf` method on a real `SmTangentField` built with the data constructor, so
+//! the base's virtual calls reach the field's `Evaluate`: `CalculateBoundingBox` (normal
+//! box), `DropPoint` (with and without a guess, solver operations 0/3/4/5) or
+//! `ApproximateCurve` (with analytics; breaks, tolerance and parameterisation matching
+//! varied). UV curves are B-splines or Hermites whose polygon lies in the surface's
+//! `[0, 1]^2` (some degenerate: coincident points, zero derivatives, closed; collinear
+//! B-splines), on unit, random and scaled (1e-3 .. 1e5) surfaces, with zero, tiny and
+//! huge tangents and parameter ranges from 1e-3 to 1e3. Rust calls the `Curve`
+//! dispatch (`TangentFieldCurve` routed through the `*_as` base methods).
+//!
+//! Every run uses at least [`MIN_GENERATED`] generated inputs (more with `--seeds`),
+//! [`WRITE_READ_CASES`] `write_read` cases, [`WRITE_READ_HERMITE_CASES`] Hermite ones
+//! and [`ROUTE_CASES`] `route` cases.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use solidcore::curve::curve::Curve;
+use solidcore::curve::curve::p1::ApproximateCurveOptions;
+use solidcore::curve::curve::p6::DroppedPoint;
+use solidcore::curve::curve::{Curve, CurveKind};
 use solidcore::curve::hermite_curve::HermiteCurve;
 use solidcore::curve::tangent_field::{
     self as tf, CurveEnd, TangentDirType, TangentField, TangentFieldCurve,
 };
+use solidcore::geom::extent1d::Extent1d;
 use solidcore::geom::extent2d::Extent2d;
+use solidcore::geom::global_solver::SolverOperation;
 use solidcore::geom::vector2d::Point2;
 use solidcore::geom::vector3d::Vec3;
-use solidcore::nurbs::b_spline_curve::BSplineCurve;
+use solidcore::nurbs::b_spline_curve::{BSplineCurve, BoundingBoxRequest};
 use solidcore::nurbs::b_spline_surface::BSplineSurface;
 use solidcore::nurbs::math::{CPoint, NOW, NOZ};
 use solidcore::nurbs::nurbs_crv::allocate_nurb_curve;
@@ -168,6 +190,31 @@ struct WriteReadIn {
     params: Vec<f64>,
 }
 
+/// `route`: an `SmCrvOnSurf` method called on the field (its virtual `Evaluate`
+/// reaches `SmTangentField`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RouteIn {
+    /// `CalculateBoundingBox(ivl, &box, NULL, NULL, TRUE)`.
+    Bbox { a: f64, b: f64 },
+    /// `DropPoint`.
+    Drop {
+        a: f64,
+        b: f64,
+        point: [f64; 3],
+        vec: Option<[f64; 3]>,
+        tol: f64,
+        guess: Option<f64>,
+        solver_op: i32,
+    },
+    /// `ApproximateCurve(ctx, breaks, tol, gap, nc, TRUE, match, FALSE)`.
+    Approx {
+        breaks: Vec<f64>,
+        tol: f64,
+        match_param: bool,
+    },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Inputs {
     op: String,
@@ -193,6 +240,8 @@ struct Inputs {
     read: Option<ReadIn>,
     #[serde(default)]
     write_read: Option<WriteReadIn>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    route: Option<RouteIn>,
 }
 
 const UNIT_SQUARE: [[f64; 3]; 4] = [
@@ -211,6 +260,7 @@ fn op_of(s: &str) -> Result<Op, HarnessError> {
         "create" => Op::Create,
         "read_db" => Op::ReadDb,
         "write_read" => Op::WriteRead,
+        "route" => Op::Route,
         _ => return Err(harness(format!("unknown op {s}"))),
     })
 }
@@ -309,6 +359,40 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
                 w.params.len() as f64,
             ]);
             v.extend_from_slice(&w.params);
+        }
+        Op::Route => {
+            push_surface(&mut v, &srf);
+            push_field(&mut v, field()?)?;
+            match i.route.as_ref().ok_or_else(|| harness("missing route"))? {
+                RouteIn::Bbox { a, b } => v.extend([0.0, *a, *b]),
+                RouteIn::Drop {
+                    a,
+                    b,
+                    point,
+                    vec,
+                    tol,
+                    guess,
+                    solver_op,
+                } => {
+                    v.extend([1.0, *a, *b]);
+                    v.extend_from_slice(point);
+                    v.push(if vec.is_some() { 1.0 } else { 0.0 });
+                    v.extend_from_slice(&vec.unwrap_or([0.0; 3]));
+                    v.push(*tol);
+                    v.push(if guess.is_some() { 1.0 } else { 0.0 });
+                    v.push(guess.unwrap_or(*a));
+                    v.push(f64::from(*solver_op));
+                }
+                RouteIn::Approx {
+                    breaks,
+                    tol,
+                    match_param,
+                } => {
+                    v.extend([2.0, breaks.len() as f64]);
+                    v.extend_from_slice(breaks);
+                    v.extend([*tol, if *match_param { 1.0 } else { 0.0 }]);
+                }
+            }
         }
         Op::State | Op::Eval | Op::EvalPoint => {
             push_surface(&mut v, &srf);
@@ -460,6 +544,9 @@ fn rust(k: &solidcore::kernel::Kernel, i: &Inputs) -> Result<Output, HarnessErro
     if op == Op::WriteRead {
         return rust_write_read(k, i, srf);
     }
+    if op == Op::Route {
+        return rust_route(k, i, srf);
+    }
     if op == Op::Create {
         let c = i.create.as_ref().ok_or_else(|| harness("missing create"))?;
         let base3d = build(&c.base3d)?;
@@ -561,9 +648,136 @@ fn rust(k: &solidcore::kernel::Kernel, i: &Inputs) -> Result<Output, HarnessErro
                 Err(e) => return Ok(fail(&e)),
             }
         }
-        Op::Create | Op::ReadDb | Op::WriteRead => {}
+        Op::Create | Op::ReadDb | Op::WriteRead | Op::Route => {}
     }
     Ok(to_output(&o))
+}
+
+/// `route`: the field built with the data constructor as a [`Curve`] (a real
+/// `TangentFieldCurve`), and the `SmCrvOnSurf` method called through it.
+fn rust_route(
+    k: &solidcore::kernel::Kernel,
+    i: &Inputs,
+    srf: BSplineSurface,
+) -> Result<Output, HarnessError> {
+    let f = i.field.as_ref().ok_or_else(|| harness("missing field"))?;
+    let r = i.route.as_ref().ok_or_else(|| harness("missing route"))?;
+    let tf = match TangentFieldCurve::new(
+        k,
+        build(&f.curve)?,
+        Surface::from(srf),
+        dir_type(f.dir)?,
+        v3(f.start),
+        v3(f.end),
+        domain(f.domain)?,
+    ) {
+        Ok(tf) => Curve::from(tf),
+        Err(e) => return Ok(fail(&e)),
+    };
+    let mut o = Vec::new();
+    match r {
+        RouteIn::Bbox { a, b } => {
+            let req = BoundingBoxRequest {
+                normal: true,
+                pseudo: false,
+                polar: false,
+            };
+            match tf.calculate_bounding_box(k, &Extent1d::from_min_max(*a, *b), req, true) {
+                Ok(bx) => {
+                    let n = bx.normal.ok_or_else(|| harness("no normal box"))?;
+                    o.push(0.0);
+                    push3(&mut o, n.min());
+                    push3(&mut o, n.max());
+                }
+                Err(e) => match step_status(&e) {
+                    Ok(s) => o.push(s),
+                    Err(d) => return Ok(*d),
+                },
+            }
+        }
+        RouteIn::Drop {
+            a,
+            b,
+            point,
+            vec,
+            tol,
+            guess,
+            solver_op,
+        } => {
+            let sop = SolverOperation::from_code(*solver_op)
+                .ok_or_else(|| harness("bad solver op"))?;
+            let r = tf.drop_point(
+                k,
+                &Extent1d::from_min_max(*a, *b),
+                v3(*point),
+                vec.map(v3),
+                *tol,
+                *guess,
+                sop,
+            );
+            let d = match r {
+                Ok(d) => {
+                    o.push(0.0);
+                    d
+                }
+                Err(e) => match step_status(&e) {
+                    Ok(s) => {
+                        o.push(s);
+                        DroppedPoint::default()
+                    }
+                    Err(d) => return Ok(*d),
+                },
+            };
+            o.extend([
+                if d.success { 1.0 } else { 0.0 },
+                d.parameter,
+                d.distance,
+            ]);
+        }
+        RouteIn::Approx {
+            breaks,
+            tol,
+            match_param,
+        } => {
+            let opts = ApproximateCurveOptions {
+                create_analytics: true,
+                match_parameterization: *match_param,
+                just_copy_bsplines: false,
+            };
+            match tf.approximate_curve(k, breaks, *tol, &opts) {
+                Ok(ap) => {
+                    o.push(0.0);
+                    o.push(ap.achieved_tol.unwrap_or(f64::NAN));
+                    o.push(1.0);
+                    o.push(ap.curve.type_code() as f64);
+                    o.push(ap.curve.dim() as f64);
+                    match ap.curve.kind() {
+                        CurveKind::BSpline(bs) => put_nurb(&mut o, bs),
+                        CurveKind::Line(l) => put_nurb(&mut o, l.base()),
+                        _ => o.push(-1.0),
+                    }
+                }
+                Err(e) => match step_status(&e) {
+                    Ok(s) => o.extend([s, 0.0]),
+                    Err(d) => return Ok(*d),
+                },
+            }
+        }
+    }
+    Ok(to_output(&o))
+}
+
+fn put_nurb(o: &mut Vec<f64>, bs: &BSplineCurve) {
+    match bs.gw_nurb() {
+        None => o.push(-1.0),
+        Some(cur) => {
+            o.extend([cur.n() as f64, cur.degree() as f64, cur.m() as f64]);
+            for p in cur.cpts() {
+                o.extend([p.x, p.y, p.z, p.w]);
+            }
+            o.extend_from_slice(cur.knots());
+        }
+    }
 }
 
 /// An error of a step whose status is compared: its `SmStatus`, or the deferral of an
@@ -724,7 +938,12 @@ fn write_read_outputs(
             o.push(f64::from(min as i32));
         }
     }
-    if let Some(cp) = status_of!(c.copy(k)) {
+    // an input Hermite UV curve: the C++ copy is undefined (UB-267) and skipped (-2)
+    let hermite_uv = i.create.is_none()
+        && matches!(i.field.as_ref().map(|f| &f.curve), Some(CurveIn::Hermite(_)));
+    if hermite_uv {
+        o.push(-2.0);
+    } else if let Some(cp) = status_of!(c.copy(k)) {
         o.push(cp.type_code() as f64);
         for &t in &w.params {
             if let Some(p) = status_of!(cp.evaluate_point(k, t)) {
@@ -957,6 +1176,7 @@ fn generate(rng: &mut Rng) -> Inputs {
         create: None,
         read: None,
         write_read: None,
+        route: None,
     };
     match rng.below(10) {
         0 => {
@@ -1007,11 +1227,26 @@ fn generate(rng: &mut Rng) -> Inputs {
 /// Generated `write_read` cases (their own seed stream, `<unit>:write_read`).
 pub const WRITE_READ_CASES: usize = 240;
 
-/// A `write_read` case: a field built from data (B-spline UV curves: the Rust writer has
-/// no `SmHermiteCurve::WriteToDB`) or with `Create`, written in either format.
+/// A `write_read` case: a field built from data (B-spline UV curves; the Hermite ones
+/// are [`generate_write_read_hermite`]) or with `Create`, written in either format.
 fn generate_write_read(rng: &mut Rng) -> Option<Value> {
+    write_read_case(rng, false)
+}
+
+/// Generated `write_read` cases with Hermite UV curves (their own seed stream,
+/// `<unit>:write_read_hermite`, named `whNNNN`).
+pub const WRITE_READ_HERMITE_CASES: usize = 160;
+
+/// A `write_read` case on a Hermite UV curve (data constructor only: `Create` takes a
+/// B-spline UV curve).
+fn generate_write_read_hermite(rng: &mut Rng) -> Option<Value> {
+    write_read_case(rng, true)
+}
+
+/// A `write_read` case; `hermite`: the field's UV curve is an `SmHermiteCurve`.
+fn write_read_case(rng: &mut Rng, hermite: bool) -> Option<Value> {
     let surface = Some(gen_surface(rng));
-    let (field, create, (a, b)) = if rng.chance(0.25) {
+    let (field, create, (a, b)) = if rng.chance(0.25) && !hermite {
         let c = gen_create(rng);
         let r = range_of(&c.base_uv);
         (None, Some(c), r)
@@ -1024,7 +1259,11 @@ fn generate_write_read(rng: &mut Rng) -> Option<Value> {
             _ if rng.chance(0.5) => 1.0,
             _ => rng.uniform(0.5, 10.0),
         };
-        f.curve = gen_bspline(rng, 2, a, a + len);
+        f.curve = if hermite {
+            gen_hermite(rng, 2)
+        } else {
+            gen_bspline(rng, 2, a, a + len)
+        };
         if rng.chance(0.1) {
             // huge and tiny tangents
             let s = if rng.chance(0.5) { 1e-9 } else { 1e2 };
@@ -1058,6 +1297,221 @@ fn generate_write_read(rng: &mut Rng) -> Option<Value> {
             },
             params,
         }),
+        route: None,
+    };
+    serde_json::to_value(i).ok()
+}
+
+/// Generated `route` cases (their own seed stream, `<unit>:route`).
+pub const ROUTE_CASES: usize = 300;
+
+/// A UV point in `[0, 1]^2`: interior, or on an edge or a corner.
+fn gen_uv_point(rng: &mut Rng) -> [f64; 2] {
+    let mut c = || match rng.below(8) {
+        0 => 0.0,
+        1 => 1.0,
+        _ => rng.unit(),
+    };
+    [c(), c()]
+}
+
+/// A UV curve (dim 2) whose polygon lies in `[0, 1]^2` over `[a, b]` (B-spline) or
+/// `[0, 1]` (Hermite: its Bezier points); some degenerate (coincident points, zero
+/// derivatives).
+fn gen_route_uv(rng: &mut Rng, a: f64, b: f64) -> CurveIn {
+    let degenerate = rng.chance(0.08);
+    if rng.chance(0.4) {
+        let p1 = gen_uv_point(rng);
+        let mut q1 = gen_uv_point(rng);
+        let mut q2 = gen_uv_point(rng);
+        let mut p2 = gen_uv_point(rng);
+        if degenerate {
+            match rng.below(3) {
+                // zero end derivatives
+                0 => {
+                    q1 = p1;
+                    q2 = p2;
+                }
+                // a point
+                1 => {
+                    q1 = p1;
+                    q2 = p1;
+                    p2 = p1;
+                }
+                // closed
+                _ => p2 = p1,
+            }
+        }
+        let d1 = [3.0 * (q1[0] - p1[0]), 3.0 * (q1[1] - p1[1]), 0.0];
+        let d2 = [3.0 * (p2[0] - q2[0]), 3.0 * (p2[1] - q2[1]), 0.0];
+        return CurveIn::Hermite(HermiteIn {
+            dim: 2,
+            p1: [p1[0], p1[1], 0.0],
+            d1,
+            p2: [p2[0], p2[1], 0.0],
+            d2,
+        });
+    }
+    let CurveIn::Bspline(mut bs) = gen_bspline(rng, 2, a, b) else {
+        return gen_hermite(rng, 2);
+    };
+    let first = gen_uv_point(rng);
+    let line = rng.chance(0.15);
+    let last = gen_uv_point(rng);
+    let n = bs.cpts.len();
+    for (j, c) in bs.cpts.iter_mut().enumerate() {
+        let [u, v] = if degenerate {
+            first
+        } else if line {
+            // collinear control points (an analytic line approximation)
+            let f = j as f64 / (n.max(2) - 1) as f64;
+            [
+                first[0] + f * (last[0] - first[0]),
+                first[1] + f * (last[1] - first[1]),
+            ]
+        } else {
+            gen_uv_point(rng)
+        };
+        c[0] = u;
+        c[1] = v;
+    }
+    CurveIn::Bspline(bs)
+}
+
+/// A field on `[0, 1]^2` for the routed methods, with tangents from zero to huge.
+fn gen_route_field(rng: &mut Rng) -> (FieldIn, f64, f64) {
+    let a = if rng.chance(0.5) { 0.0 } else { rng.uniform(-5.0, 5.0) };
+    let len = match rng.below(8) {
+        0 => 1e-3,
+        1 => 1e3,
+        2 | 3 => rng.uniform(0.5, 10.0),
+        _ => 1.0,
+    };
+    let curve = gen_route_uv(rng, a, a + len);
+    let (a, b) = range_of(&curve);
+    let mut start = gen_vec(rng);
+    let mut end = gen_vec(rng);
+    match rng.below(10) {
+        0 => {
+            let s = if rng.chance(0.5) { 1e-9 } else { 1e2 };
+            start = start.map(|x| x * s);
+            end = end.map(|x| x * s);
+        }
+        1 => end = start,
+        _ => {}
+    }
+    let domain = match rng.below(5) {
+        0 => Some([0.0, 0.0, 1.0, 1.0]),
+        1 => Some([-0.5, -0.25, 1.5, 1.25]),
+        _ => None,
+    };
+    let f = FieldIn {
+        curve,
+        dir: if rng.chance(0.7) { 1 } else { rng.below(3) },
+        start,
+        end,
+        domain,
+    };
+    (f, a, b)
+}
+
+/// The bilinear surface of a `route` case: unit square, random, or scaled.
+fn gen_route_surface(rng: &mut Rng) -> [[f64; 3]; 4] {
+    let s = gen_surface(rng);
+    let f = match rng.below(8) {
+        0 => 1e-3,
+        1 => 1e3,
+        2 => 1e5,
+        _ => 1.0,
+    };
+    s.map(|p| p.map(|x| x * f))
+}
+
+/// An interval inside `[a, b]`: the whole range, or a sub-interval (down to a
+/// tiny one).
+fn gen_sub_interval(rng: &mut Rng, a: f64, b: f64) -> (f64, f64) {
+    let l = b - a;
+    match rng.below(5) {
+        0 | 1 => (a, b),
+        2 => {
+            let x = a + l * rng.uniform(0.0, 0.99);
+            (x, x + (b - x) * rng.uniform(1e-3, 1.0))
+        }
+        3 => (a + 0.25 * l, a + 0.75 * l),
+        _ => {
+            let x = a + l * rng.uniform(0.1, 0.9);
+            (x, x + 1e-3 * l)
+        }
+    }
+}
+
+/// A `route` case: a field (B-spline or Hermite UV curve) and one routed method.
+fn generate_route(rng: &mut Rng) -> Option<Value> {
+    let surface = gen_route_surface(rng);
+    let (f, a, b) = gen_route_field(rng);
+    let scale = surface
+        .iter()
+        .flatten()
+        .fold(0.0_f64, |m, x| m.max(x.abs()))
+        .max(1e-3);
+    let route = match rng.below(3) {
+        0 => {
+            let (x, y) = gen_sub_interval(rng, a, b);
+            RouteIn::Bbox { a: x, b: y }
+        }
+        1 => {
+            let (x, y) = gen_sub_interval(rng, a, b);
+            let [px, py, pz] = rng.point3(-1.5, 1.5);
+            let point = [px * scale, py * scale, pz * scale];
+            RouteIn::Drop {
+                a: x,
+                b: y,
+                point,
+                vec: rng.chance(0.15).then(|| rng.point3(-1.0, 1.0)),
+                tol: *rng.choose(&[1e-6, 1e-6, 1e-3, 0.0, 1e-10, 1.0]).unwrap_or(&1e-6),
+                guess: rng.chance(0.4).then(|| x + (y - x) * rng.unit()),
+                solver_op: *rng.choose(&[3, 3, 3, 0, 5, 4]).unwrap_or(&3),
+            }
+        }
+        _ => {
+            let l = b - a;
+            let breaks = match rng.below(4) {
+                0 => vec![a, b],
+                1 => vec![a, a + 0.5 * l, b],
+                2 => {
+                    let mut v: Vec<f64> = (0..rng.below(4))
+                        .map(|_| a + l * rng.uniform(0.05, 0.95))
+                        .collect();
+                    v.sort_by(f64::total_cmp);
+                    v.dedup();
+                    v.insert(0, a);
+                    v.push(b);
+                    v
+                }
+                _ => vec![],
+            };
+            RouteIn::Approx {
+                breaks,
+                tol: *rng
+                    .choose(&[1e-3, 1e-3, 1e-6, 1e-7, 0.1, 1.0])
+                    .unwrap_or(&1e-3),
+                match_param: rng.chance(0.5),
+            }
+        }
+    };
+    let i = Inputs {
+        op: "route".into(),
+        surface: Some(surface),
+        field: Some(f),
+        t: 0.0,
+        n: 0,
+        flags: 0,
+        surface_b: None,
+        field_b: None,
+        create: None,
+        read: None,
+        write_read: None,
+        route: Some(route),
     };
     serde_json::to_value(i).ok()
 }
@@ -1085,6 +1539,28 @@ impl UnitDiff for Runner {
         };
         for mut c in wr.generated_cases("curve.tangent_field:write_read", generate_write_read) {
             c.name = c.name.replacen("gen", "wr", 1);
+            c.unit = self.id().to_string();
+            v.push(c);
+        }
+        // round trips with Hermite UV curves: their own seed stream; `whNNNN`
+        let wh = CaseContext {
+            seeds: ctx.seeds.max(WRITE_READ_HERMITE_CASES),
+            ..ctx.clone()
+        };
+        for mut c in
+            wh.generated_cases("curve.tangent_field:write_read_hermite", generate_write_read_hermite)
+        {
+            c.name = c.name.replacen("gen", "wh", 1);
+            c.unit = self.id().to_string();
+            v.push(c);
+        }
+        // routed SmCrvOnSurf methods on the field: their own seed stream; `rtNNNN`
+        let rt = CaseContext {
+            seeds: ctx.seeds.max(ROUTE_CASES),
+            ..ctx.clone()
+        };
+        for mut c in rt.generated_cases("curve.tangent_field:route", generate_route) {
+            c.name = c.name.replacen("gen", "rt", 1);
             c.unit = self.id().to_string();
             v.push(c);
         }

@@ -38,7 +38,7 @@ SC_EXPORT int32_t sc_sweep_topology_sweep_eval(const int64_t* steps, int64_t n,
     for(int j=0;j<3;++j) if(!std::isfinite(vector[j])) return SC_ERR_ARG;
     for(int64_t i=0;i<n;++i) {
         auto p=steps+4*i;
-        if(p[0]<0 || p[0]>15 || p[1]<0 || p[1]>64 || p[2]<0 || p[2]>64) return SC_ERR_ARG;
+        if(p[0]<0 || p[0]>16 || p[1]<0 || p[1]>64 || p[2]<0 || p[2]>64) return SC_ERR_ARG;
         if(p[0]==14 && (p[1]<16 || p[1]>=32 || p[2]<16 || p[2]>=32)) return SC_ERR_ARG;
         if(p[0]==5 && (p[3]<0 || p[3]>3)) return SC_ERR_ARG;
         if((p[0]==10 || p[0]==11) && p[1]>=16) return SC_ERR_ARG;
@@ -86,6 +86,7 @@ SC_EXPORT int32_t sc_sweep_topology_sweep_eval(const int64_t* steps, int64_t n,
             case 7:{SmBoolean closed=TRUE;status=g->IsSweepClosed(p[3],closed);keep=closed;break;}
             case 8:{status=g->GetStartCoordSystem(SmPoint3d(0,0,0),frame);has_frame=status==SM_SUCCESS;break;}
             case 9:{status=g->GetSweepTransform(frame);has_frame=status==SM_SUCCESS;break;}
+            case 16:{status=g->GetEndCoordSystem(SmPoint3d(vector[0],vector[1],vector[2]),frame);has_frame=status==SM_SUCCESS;break;}
             case 10:{SmTArray<SmVertex*> vs;vs.Add((SmVertex*)a);status=sweep.DoSweepVerticesSame(target.GetInfiniteRegion(),vs);break;}
             case 11:{SmTArray<SmVertex*> vs;vs.Add((SmVertex*)a);status=sweep.DoSweepVerticesHigher(target.GetInfiniteRegion(),vs);break;}
             case 15:{

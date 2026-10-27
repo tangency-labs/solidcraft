@@ -20,6 +20,7 @@
 #include <SmDatabaseIO.h>
 #include <SmExtent1d.h>
 #include <SmExtent2d.h>
+#include <SmExtent3d.h>
 #include <SmHermiteCurve.h>
 #include <SmNurbsCrv.h>
 #include <SmNurbsSrf.h>
@@ -48,7 +49,8 @@ enum Op : int32_t
     OP_CREATE = 4,
     OP_READ_DB = 5,
     OP_WRITE_READ = 6,
-    OP_LAST = 6,
+    OP_ROUTE = 7,
+    OP_LAST = 7,
 };
 
 struct Rd
@@ -181,9 +183,98 @@ SmStatus write_curve(const SmCurve& c, SmFileType ft, ULONG version, std::string
     return s;
 }
 
+// A NURB curve `n p m cpts(x y z w) knots`, or -1 for none.
+void put_nurb(std::vector<double>& o, const gw_CURVE* cur)
+{
+    if (cur == NULL)
+    {
+        o.push_back(-1.0);
+        return;
+    }
+    gw_INDEX n = cur->pol->n;
+    gw_INDEX m = cur->knt->m;
+    o.push_back((double)n);
+    o.push_back((double)cur->p);
+    o.push_back((double)m);
+    for (gw_INDEX i = 0; i <= n; i++)
+    {
+        o.push_back(cur->pol->Pw[i].x);
+        o.push_back(cur->pol->Pw[i].y);
+        o.push_back(cur->pol->Pw[i].z);
+        o.push_back(cur->pol->Pw[i].w);
+    }
+    for (gw_INDEX i = 0; i <= m; i++)
+        o.push_back(cur->knt->U[i]);
+}
+
+// OP_ROUTE: a base-class (SmCrvOnSurf) method called on the field, so its virtual calls
+// (Evaluate) reach SmTangentField. `sub` 0: CalculateBoundingBox, 1: DropPoint,
+// 2: ApproximateCurve (see the ffi module docs).
+void route(Rd& rd, const SmContext& ctx, SmTangentField& tf, std::vector<double>& o)
+{
+    int64_t sub = rd.idx();
+    if (sub == 0)
+    {
+        double a = rd.num();
+        double b = rd.num();
+        SmExtent1d ivl(a, b);
+        SmExtent3d box;
+        SmStatus s = tf.CalculateBoundingBox(ivl, &box, NULL, NULL, TRUE);
+        o.push_back(st(s));
+        if (s == SM_SUCCESS)
+        {
+            put_vec(o, box.GetMin());
+            put_vec(o, box.GetMax());
+        }
+    }
+    else if (sub == 1)
+    {
+        double a = rd.num();
+        double b = rd.num();
+        SmExtent1d ivl(a, b);
+        SmPoint3d p = rd.vec();
+        bool has_vec = rd.flag();
+        SmVector3d v = rd.vec();
+        double tol = rd.num();
+        bool has_guess = rd.flag();
+        double guess = rd.num();
+        SmSolverOperationType eop = (SmSolverOperationType)rd.idx();
+        SmBoolean ok = FALSE;
+        double par = 0.0, dist = 0.0;
+        SmStatus s = tf.DropPoint(ivl, p, has_vec ? &v : NULL, tol, has_guess ? &guess : NULL, ok, par, dist, eop);
+        o.push_back(st(s));
+        o.push_back(ok ? 1.0 : 0.0);
+        o.push_back(par);
+        o.push_back(dist);
+    }
+    else
+    {
+        int64_t nb = rd.idx();
+        SmTArray<double> br;
+        for (int64_t i = 0; i < nb; i++)
+            br.Add(rd.num());
+        double tol = rd.num();
+        bool match = rd.flag();
+        double gap = SM_UNDEF_DOUBLE;
+        SmBSplineCurve* nc = NULL;
+        SmStatus s = tf.ApproximateCurve(ctx, br, tol, gap, nc, TRUE, match ? TRUE : FALSE, FALSE);
+        o.push_back(st(s));
+        if (s == SM_SUCCESS)
+            o.push_back(gap);
+        o.push_back(nc ? 1.0 : 0.0);
+        if (nc)
+        {
+            o.push_back((double)nc->GetType());
+            o.push_back((double)nc->GetDim());
+            put_nurb(o, nc->GetGwNurbPointer());
+            delete nc;
+        }
+    }
+}
+
 // The queries of OP_WRITE_READ on the curve read back (see the ffi module docs).
 void put_read_queries(std::vector<double>& o, const SmCurve& orig, SmCurve& c, const std::vector<double>& params,
-                      double ang, SmFileType ft, ULONG version, const SmContext& ctx)
+                      double ang, SmFileType ft, ULONG version, const SmContext& ctx, bool hermite_uv)
 {
     o.push_back((double)c.GetType());
     for (SM_TYPE k : kKinds)
@@ -231,10 +322,13 @@ void put_read_queries(std::vector<double>& o, const SmCurve& orig, SmCurve& c, c
         if (n < 3)
             o.push_back((double)mn);
     }
-    // SmCrvOnSurf::Copy (not overridden): a plain SmCrvOnSurf
+    // SmCrvOnSurf::Copy (not overridden): a plain SmCrvOnSurf. The curve read owns its
+    // UV curve; for an input Hermite UV curve the copy constructor's ignored
+    // SmHermiteCurve Copy failure leaves both objects owning one UV curve (UB-267:
+    // double delete), so the copy is skipped (-2).
     SmCurve* cp = NULL;
-    s = c.Copy(ctx, cp);
-    o.push_back(st(s));
+    s = hermite_uv ? SM_ERR : c.Copy(ctx, cp);
+    o.push_back(hermite_uv ? -2.0 : st(s));
     if (s == SM_SUCCESS && cp)
     {
         o.push_back((double)cp->GetType());
@@ -374,7 +468,8 @@ void run(int32_t op, Rd& rd, const SmContext& ctx, std::vector<double>& o)
                 o.push_back(st(rs));
                 if (rs == SM_SUCCESS && c)
                 {
-                    put_read_queries(o, *tf, *c, params, ang, ft, version, ctx);
+                    put_read_queries(o, *tf, *c, params, ang, ft, version, ctx,
+                                     uv != NULL && uv->IsKindOf(SmHermiteCurve_TYPE));
                     delete c;
                 }
             }
@@ -391,6 +486,9 @@ void run(int32_t op, Rd& rd, const SmContext& ctx, std::vector<double>& o)
     SmTangentField* a = read_field(rd, ctx, srf, uv_a, NULL);
     switch (op)
     {
+    case OP_ROUTE:
+        route(rd, ctx, *a, o);
+        break;
     case OP_STATE:
     {
         o.push_back(0.0);

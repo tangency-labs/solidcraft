@@ -28,7 +28,18 @@
 //!   knots (cache_breaks)] write_status [nbytes bytes read_status [type kinds(8) ivl_min
 //!   ivl_max eq_to_original per-param(ep_status [xyz] ev1_status [2 x xyz] ev2_status)
 //!   cont_status [min n conts] copy_status [copy_type per-param(status [xyz])]
+//!   (copy_status `-2`: the copy is skipped for an input Hermite UV curve, UB-267)
 //!   rewrite_status [nbytes bytes]]]`.
+//! - `Route`: `surface field sub ...`, an `SmCrvOnSurf` method called on the field (its
+//!   virtual `Evaluate` reaches `SmTangentField`). `sub` 0 (`CalculateBoundingBox`, normal
+//!   box, expand): `a b` -> `status [min(3) max(3)]`; 1 (`DropPoint`): `a b P(3) has_v V(3)
+//!   tol has_guess guess op` -> `status ok param dist`; 2 (`ApproximateCurve`, with
+//!   analytics, no B-spline copy): `nb breaks tol match` -> `status [gap] made [type dim n p
+//!   m cpts knots]`. Accepted only for a UV curve whose control polygon (B-spline) or
+//!   Bezier polygon (Hermite) lies in the surface's `[0,1]^2`, intervals inside the curve's
+//!   range, increasing breaks inside it, approximation tolerances in `[1e-7, 1]`, drop
+//!   tolerances in `[0, 1]` and the solver operations `0 3 4 5 6`: the limits of the
+//!   `curve.crv_on_surf` shim for the same methods.
 use crate::validate::{bad, euclid, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
 
@@ -62,6 +73,8 @@ pub enum Op {
     ReadDb,
     /// `WriteToDB` then `SmCurve::ReadFromDB`, and queries on the curve read back.
     WriteRead,
+    /// `CalculateBoundingBox`, `DropPoint` or `ApproximateCurve` on the field.
+    Route,
 }
 
 impl Op {
@@ -76,6 +89,7 @@ impl Op {
             Op::Create => 4,
             Op::ReadDb => 5,
             Op::WriteRead => 6,
+            Op::Route => 7,
         }
     }
 }
@@ -251,6 +265,87 @@ fn create_block(rd: &mut Reader<'_>) -> Result<CurveInfo, FfiError> {
     Ok(uv)
 }
 
+/// The UV polygon of the field block at `input[at..]` (B-spline control points, or the
+/// Bezier points of a Hermite) lies in `[0,1]^2` (to `1e-9`).
+fn uv_inside(input: &[f64], at: usize) -> Result<bool, FfiError> {
+    let short = || bad("route: short field block");
+    let get = |i: usize| input.get(at + i).copied().ok_or_else(short);
+    let inside = |u: f64, v: f64| (-1e-9..=1.0 + 1e-9).contains(&u) && (-1e-9..=1.0 + 1e-9).contains(&v);
+    if get(0)? == 0.0 {
+        let n = get(2)? as usize;
+        for i in 0..=n {
+            let (x, y, w) = (get(5 + 4 * i)?, get(6 + 4 * i)?, get(8 + 4 * i)?);
+            let (u, v) = if w == NOW { (x, y) } else { (x / w, y / w) };
+            if !inside(u, v) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    } else {
+        let p = |i: usize| -> Result<[f64; 2], FfiError> { Ok([get(2 + 3 * i)?, get(3 + 3 * i)?]) };
+        let [p1, d1, p2, d2] = [p(0)?, p(1)?, p(2)?, p(3)?];
+        let bez = [
+            p1,
+            [p1[0] + d1[0] / 3.0, p1[1] + d1[1] / 3.0],
+            [p2[0] - d2[0] / 3.0, p2[1] - d2[1] / 3.0],
+            p2,
+        ];
+        Ok(bez.iter().all(|q| inside(q[0], q[1])))
+    }
+}
+
+/// An interval `a b` inside the curve's range, longer than `1e-4` of it.
+fn inner_interval(rd: &mut Reader<'_>, c: &CurveInfo) -> Result<(), FfiError> {
+    let x = rd.finite()?;
+    let y = rd.finite()?;
+    let eps = 1e-12 * (c.b - c.a);
+    if !(x >= c.a - eps && y <= c.b + eps && y - x > 1e-4 * (c.b - c.a)) {
+        return Err(bad("route: interval not inside the curve range"));
+    }
+    Ok(())
+}
+
+/// The arguments of a `Route` op after the field.
+fn route_args(rd: &mut Reader<'_>, c: &CurveInfo) -> Result<(), FfiError> {
+    match rd.index(2)? {
+        0 => inner_interval(rd, c)?,
+        1 => {
+            inner_interval(rd, c)?;
+            rd.vec3()?;
+            rd.flag()?;
+            rd.vec3()?;
+            let tol = rd.finite()?;
+            if !(0.0..=1.0).contains(&tol) {
+                return Err(bad("route: drop tolerance out of range"));
+            }
+            rd.flag()?;
+            param(rd, c)?;
+            let o = rd.index(24)?;
+            if ![0, 3, 4, 5, 6].contains(&o) {
+                return Err(bad("route: drop operation"));
+            }
+        }
+        _ => {
+            let nb = rd.index(MAX_PARAMS)?;
+            let eps = 1e-12 * (c.b - c.a);
+            let mut prev = f64::NEG_INFINITY;
+            for _ in 0..nb {
+                let t = rd.finite()?;
+                if t < c.a - eps || t > c.b + eps || t <= prev {
+                    return Err(bad("route: breaks not increasing inside the range"));
+                }
+                prev = t;
+            }
+            let tol = rd.finite()?;
+            if !(1e-7..=1.0).contains(&tol) {
+                return Err(bad("route: tolerance out of range"));
+            }
+            rd.flag()?;
+        }
+    }
+    Ok(())
+}
+
 /// Checks `input` for `op` (layouts in the module docs).
 ///
 /// # Errors
@@ -290,6 +385,14 @@ pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
             for _ in 0..np {
                 param(&mut rd, &c)?;
             }
+        }
+        Op::Route => {
+            surface(&mut rd)?;
+            if !uv_inside(input, 12)? {
+                return Err(bad("route: UV curve outside the surface domain"));
+            }
+            let c = field(&mut rd)?;
+            route_args(&mut rd, &c)?;
         }
         Op::State | Op::Eval | Op::EvalPoint => {
             surface(&mut rd)?;

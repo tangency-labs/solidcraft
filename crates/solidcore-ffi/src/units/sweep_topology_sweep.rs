@@ -43,6 +43,7 @@ mod sys {
 /// 0..15 are vertices, 16..31 edges, 32..47 faces, 48..63 regions (two sets of eight).
 /// Ops: same, higher, callback, erase-forward, erase-reverse, raw-map-insert,
 /// repetitions, closure, start-frame, transform, vertices-same, vertices-higher,
+/// end-frame (op 16, at `vector`),
 /// option setters, and the null-B-rep `DoSweep` early return, edge-profile tagging, and a selected-vertex `DoSweep` (stitch/merge disabled). Each instruction has `[op,a,b,argument]`.
 ///
 /// # Errors
@@ -65,7 +66,7 @@ pub fn eval_with_values(
         || vector.iter().any(|v| !v.is_finite())
         || steps.iter().any(|s| {
             let [op, a, b, arg] = *s;
-            !(0..=15).contains(&op)
+            !(0..=16).contains(&op)
                 || !(0..=64).contains(&a)
                 || !(0..=64).contains(&b)
                 || (op == 5 && !(0..=3).contains(&arg))

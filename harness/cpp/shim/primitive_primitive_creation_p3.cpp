@@ -224,7 +224,10 @@ SC_EXPORT int32_t sc_primitive_primitive_creation_p3_eval(int32_t op,const doubl
             double(starts.GetSize()),double(sides.GetSize()),double(ends.GetSize())};
         pc3_geometry(out,brep,status==SM_SUCCESS);
         // Only non-consuming entry points retain caller ownership of these curves.
-        for(ULONG i=0;i<curves.GetSize();i++)
+        // SM_ERR_AXIS_INSIDE_FACE: CreatePlanarFacesWith3DCurves consumed every curve
+        // and DeleteFaces freed those of the base face, so none is the caller's.
+        bool consumed=op==3 && status==SM_ERR_AXIS_INSIDE_FACE;
+        for(ULONG i=0;i<curves.GetSize() && !consumed;i++)
             if(curves[i] && (op>=4 || curves[i]->GetOwner()==NULL)) delete curves[i];
     }
     return sc_copy_out(out.data(),(int64_t)out.size(),output,cap,length);

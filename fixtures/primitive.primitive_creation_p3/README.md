@@ -15,6 +15,7 @@ seeds and scales from 1e-6 through 1e6.
 | Sliver rejection | Error and mutated inputs, with below/equal/above length-threshold fixtures |
 | Invalid capped repetition counts, empty curve sweep, null blend edge uses | Entry-point status and edit/context/output-list state; these are early exits, not geometry coverage |
 | Swung primitive with no profiles | Successful empty-loop return and unchanged state, not a constructed surface |
+| Capped partial rotational sweep axis check (`capped_rotation_axis_classification.json`) | Square, disc and half-disc base faces against axes outside, on an edge or chord, through a vertex, crossing and piercing the face: `SmFace::CurveOnClassify` of the axis, then either `SM_ERR_AXIS_INSIDE_FACE` (base face deleted, partial topology compared) or the full capped sweep geometry |
 
 The construction fixtures run through the production `PrimitiveModel`, using the
 same new B-rep and primitive options as the native probe. In addition to the
@@ -25,7 +26,7 @@ face's UV domain and nine surface evaluations. Evaluation statuses are retained;
 failed operations compare partial topology counts without evaluating unfinished
 geometry. Neither side substitutes cached B-splines for virtual geometry dispatch.
 
-The current 296 cases yield 295 passes, no deferrals or failures, and the unchanged
+The current 330 cases yield 329 passes, no deferrals or failures, and the unchanged
 UB-78 rejection. All 295 comparable native/Rust output digests agree exactly.
 Nine former topology-construction deferrals now compare actual nonempty geometry,
 including the existing zero and

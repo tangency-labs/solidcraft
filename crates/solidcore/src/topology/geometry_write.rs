@@ -22,7 +22,8 @@
 //! Deviations:
 //! - **Kinds without a writer.** The write side is not in the plan (see
 //!   `plan/findings.md`); only the kinds B-rep files hold are ported: B-spline curves,
-//!   lines, ellipses and circles, curves on surfaces and tangent fields; B-spline
+//!   lines, ellipses and circles, Hermite curves (the UV curves of tangent fields),
+//!   curves on surfaces and tangent fields; B-spline
 //!   surfaces, planes, cones and cylinders, spheres, tori, surfaces of revolution and
 //!   extrusion, offset surfaces. Another
 //!   kind is [`SolidError::Unported`] with its `WriteToDB` symbol and unit
@@ -81,7 +82,7 @@ pub fn write_curve_at(
         CurveKind::BSpline(b) => b.write_to_db(db, version),
         CurveKind::Line(l) => l.write_to_db(db, version),
         CurveKind::Ellipse(e) => e.write_to_db(db, version),
-        CurveKind::Hermite(_) => Err(unported("SmHermiteCurve::WriteToDB")),
+        CurveKind::Hermite(h) => h.write_to_db(db, version),
         CurveKind::Hyperbola(_) => Err(unported("SmHyperbola::WriteToDB")),
         CurveKind::Projected(_) => Err(unported("SmProjectedCurve::WriteToDB")),
         CurveKind::Iso(_) => Err(unported("SmIsoCurve::WriteToDB")),

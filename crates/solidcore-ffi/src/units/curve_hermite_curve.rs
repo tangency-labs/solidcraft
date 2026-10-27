@@ -82,6 +82,13 @@ pub enum Op {
     /// `SmHermiteCurve::ReadFromDB` of `data`: status, then type, dimension and the 18
     /// member doubles of the read curve.
     ReadDb = 10,
+    /// `WriteType` + `WriteToDB` of A (`file_type`, version `n`), read back through
+    /// `ReadType` + `SmCurve::ReadFromDB`: write status, byte count, bytes, read status,
+    /// then type, dimension, the 18 member doubles, `== A`, `EvaluatePoint(t)` status
+    /// and point, and the status, count and bytes of a second write of the read curve.
+    /// Accepted for finite vectors and versions up to 1000 (a non-finite ASCII value is
+    /// written as text the reader cannot extract).
+    WriteRead = 11,
 }
 
 /// Curve description.
@@ -123,8 +130,17 @@ pub fn op(op: Op, a: &Built, b: &Built, x: &Operands) -> Result<Vec<f64>, FfiErr
                 "no bounding box requested".into(),
             ))
         }
-        Op::ReadDb if x.file_type != 0 && x.file_type != 1 => {
+        Op::ReadDb | Op::WriteRead if x.file_type != 0 && x.file_type != 1 => {
             return Err(FfiError::InvalidArgument("file type".into()))
+        }
+        Op::WriteRead
+            if !(0..=1000).contains(&x.n)
+                || !x.t.is_finite()
+                || a.v.iter().flatten().any(|c| !c.is_finite()) =>
+        {
+            return Err(FfiError::InvalidArgument(
+                "write_read: version or non-finite value".into(),
+            ))
         }
         _ => {}
     }

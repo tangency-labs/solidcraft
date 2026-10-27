@@ -4,6 +4,7 @@
 #include "sc_shim.h"
 
 #include <SmApiGeneral.h>
+#include <SmCurve.h>
 #include <SmDatabaseIO.h>
 #include <SmExtent1d.h>
 #include <SmExtent3d.h>
@@ -46,7 +47,8 @@ enum ScHcOp : int32_t
     OP_IS_KIND_OF = 8,
     OP_TYPE_STRINGS = 9,
     OP_READ_DB = 10,
-    OP_LAST = 10,
+    OP_WRITE_READ = 11,
+    OP_LAST = 11,
 };
 
 static SmVector3d sc_vec(const double* v, int i)
@@ -90,6 +92,32 @@ static int32_t put_members(std::vector<double>& o, const SmHermiteCurve& h)
 }
 
 static double flg(SmBoolean b) { return b ? 1.0 : 0.0; }
+
+// `WriteType` + `WriteToDB` of `c` (the record a file holds for a curve), in an ASCII
+// stream set up as SmDatabaseIOFile::OpenFileForWrite does, or a binary one.
+static SmStatus write_record(const SmCurve& c, SmFileType ft, ULONG version, std::string& bytes)
+{
+    std::ostringstream oss;
+    if (ft == SM_ASCII)
+    {
+        oss.setf(std::ios::fixed);
+        oss.precision(16);
+    }
+    SmDatabaseIOStream db(ft, &oss);
+    ULONG dim = c.GetDim();
+    SmStatus s = db.WriteType(c.GetType(), &dim);
+    if (s == SM_SUCCESS)
+        s = c.WriteToDB(db, version);
+    bytes = oss.str();
+    return s;
+}
+
+static void put_bytes(std::vector<double>& o, const std::string& b)
+{
+    o.push_back((double)b.size());
+    for (unsigned char c : b)
+        o.push_back((double)c);
+}
 
 // op: one of ScHcOp. Curve A = (kind_a, va[12], dim_a), curve B likewise.
 // t: parameter; n: derivative count / type code; flags: per-op bits; w[6]: extra values;
@@ -274,6 +302,57 @@ SC_EXPORT int32_t sc_curve_hermite_curve_op(int32_t op, int32_t kind_a, const do
             if (ms != SC_OK)
                 return ms;
         }
+        break;
+    }
+    case OP_WRITE_READ:
+    {
+        // A written (file_type, version n) and read back through ReadType +
+        // SmCurve::ReadFromDB; then the read curve's type, dimension, members, `== A`,
+        // EvaluatePoint(t) and its bytes written again.
+        if (file_type != 0 && file_type != 1)
+            return SC_ERR_ARG;
+        SmFileType ft = file_type == 0 ? SM_ASCII : SM_BINARY;
+        ULONG version = (ULONG)n;
+        std::string bytes;
+        SmStatus st = write_record(a, ft, version, bytes);
+        o.push_back((double)st);
+        if (st != SM_SUCCESS)
+            break;
+        put_bytes(o, bytes);
+        std::istringstream iss(bytes);
+        SmDatabaseIOStream db(ft, &iss);
+        SM_TYPE type = 0;
+        ULONG dim = 0;
+        SmCurve* c = NULL;
+        st = db.ReadType(type, &dim);
+        if (st == SM_SUCCESS)
+            st = SmCurve::ReadFromDB(type, db, dim, *SmApiGetOrCreateContext(), c, version);
+        o.push_back((double)st);
+        if (st != SM_SUCCESS || c == NULL)
+        {
+            delete c;
+            break;
+        }
+        o.push_back((double)c->GetType());
+        o.push_back((double)c->GetDim());
+        int32_t ms = c->IsKindOf(SmHermiteCurve_TYPE) ? put_members(o, *(SmHermiteCurve*)c) : SC_ERR_ARG;
+        if (ms != SC_OK)
+        {
+            delete c;
+            return ms;
+        }
+        o.push_back(flg(*c == a));
+        SmVector3d p(0.0, 0.0, 0.0);
+        st = c->EvaluatePoint(t, p);
+        o.push_back((double)st);
+        if (st == SM_SUCCESS)
+            put_vec(o, p);
+        std::string again;
+        st = write_record(*c, ft, version, again);
+        o.push_back((double)st);
+        if (st == SM_SUCCESS)
+            put_bytes(o, again);
+        delete c;
         break;
     }
     default: return SC_ERR_ARG;
