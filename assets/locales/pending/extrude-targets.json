@@ -1,0 +1,48 @@
+{
+  "en": {
+    "All bodies": "All bodies",
+    "All bodies of the component": "All bodies of the component",
+    "Pick the bodies to change, or choose New Body": "Pick the bodies to change, or choose New Body",
+    "ui.targets": "Targets"
+  },
+  "ar": {
+    "All bodies": "كل الأجسام",
+    "All bodies of the component": "كل أجسام المكوّن",
+    "Pick the bodies to change, or choose New Body": "اختر الأجسام المراد تغييرها، أو اختر جسمًا جديدًا",
+    "ui.targets": "الأهداف"
+  },
+  "de": {
+    "All bodies of the component": "Alle Körper der Komponente",
+    "Pick the bodies to change, or choose New Body": "Die zu ändernden Körper wählen oder Neuer Körper wählen",
+    "ui.targets": "Ziele"
+  },
+  "he": {
+    "All bodies": "כל הגופים",
+    "All bodies of the component": "כל גופי הרכיב",
+    "Pick the bodies to change, or choose New Body": "יש לבחור את הגופים לשינוי, או לבחור גוף חדש",
+    "ui.targets": "יעדים"
+  },
+  "ja": {
+    "All bodies": "すべてのボディ",
+    "All bodies of the component": "コンポーネントのすべてのボディ",
+    "Pick the bodies to change, or choose New Body": "変更するボディを選ぶか、新規ボディを選んでください",
+    "ui.targets": "ターゲット"
+  },
+  "ko": {
+    "All bodies of the component": "구성요소의 모든 바디",
+    "Pick the bodies to change, or choose New Body": "변경할 바디를 선택하거나 새 바디를 선택하세요",
+    "ui.targets": "대상"
+  },
+  "vi": {
+    "All bodies": "Tất cả thân khối",
+    "All bodies of the component": "Tất cả thân khối của cụm chi tiết",
+    "Pick the bodies to change, or choose New Body": "Chọn các thân khối cần thay đổi, hoặc chọn Tạo mới Thân khối",
+    "ui.targets": "Mục tiêu"
+  },
+  "zh": {
+    "All bodies": "所有实体",
+    "All bodies of the component": "零部件的所有实体",
+    "Pick the bodies to change, or choose New Body": "请选择要更改的实体，或选择新建实体",
+    "ui.targets": "目标"
+  }
+}
