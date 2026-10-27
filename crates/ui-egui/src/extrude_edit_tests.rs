@@ -968,7 +968,9 @@ mod targets {
         assert_eq!(d.active, 0, "the profiles stay the active input");
         let index = d.inputs.iter().position(|i| i.label == TARGETS).unwrap();
         assert_eq!(d.inputs[index].items, vec![Sel::Body { name: "Plate".into() }, Sel::Body { name: "Ref".into() }]);
+        assert!(!h.app.highlighted().iter().any(|x| matches!(x, Sel::Body { .. })), "targets light up only while their row is active");
         h.call("ui.dialogInput", json!({"index":index}));
+        assert!(h.app.highlighted().contains(&Sel::Body { name: "Ref".into() }));
         h.call("ui.view", json!({"view":"front"}));
         h.frames(2);
         h.step(&json!({"click":{"world":[20,0,12.5]}})).unwrap();

@@ -64,7 +64,8 @@ component holds them all. Automatic operation decides from that list, and with n
 makes a new body.
 
 Showing or hiding bodies while the dialog is open updates the list, until you edit it: the × on a
-body's row takes it out, and clicking bodies with Targets active adds or removes them. The listed
+body's row takes it out, and clicking bodies with Targets active adds or removes them; the listed
+bodies are highlighted only while Targets is active, so a profile's highlight stays clear. The listed
 bodies are saved as the extrude's `targets`, so showing or hiding bodies later never changes the
 model.
 

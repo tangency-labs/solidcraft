@@ -1447,9 +1447,14 @@ impl Dialog {
         matches!(self.kind, Kind::Align { components: true, .. }) && self.active == 0
     }
 
-    /// Everything the inputs hold (for highlighting).
+    /// Everything the inputs hold (for highlighting); Extrude's Targets only while that row is active.
     pub fn items(&self) -> Vec<Sel> {
-        self.inputs.iter().flat_map(|i| i.items.iter().cloned()).collect()
+        self.inputs
+            .iter()
+            .enumerate()
+            .filter(|(i, inp)| inp.label != TARGETS || *i == self.active)
+            .flat_map(|(_, inp)| inp.items.iter().cloned())
+            .collect()
     }
 
     /// Faces Shell will open, including the tangent chain. Keep the input itself as the
