@@ -6993,15 +6993,9 @@ fn height_at(st: &ModelState, face: Option<(usize, usize)>, plane: &Plane, centr
         if !lo.is_finite() || !hi.is_finite() {
             return h(p);
         }
-        let end = if lo > tol {
-            lo
-        } else if hi < -tol {
-            hi
-        } else if h(p) >= 0.0 {
-            hi
-        } else {
-            lo
-        };
+        // Ahead of the profile: its near edge; behind: its near edge on that side; across the
+        // profile's plane: the end on the pick's side.
+        let end = if lo > tol || (hi >= -tol && h(p) < 0.0) { lo } else { hi };
         return if end.abs() > tol { end } else { h(p) };
     }
     // A curved or slanted face: where the profile's middle meets it.
