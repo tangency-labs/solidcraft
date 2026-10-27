@@ -183,21 +183,23 @@ fn editing_a_primitive_after_the_design_goes_to_inches_keeps_its_millimetres() {
     h.frames(2);
     let before = volume(&mut h.app.session);
     let ids: Vec<u64> = h.app.session.doc.features.iter().map(|f| f.id).collect();
-    let want: [&[(&str, &str)]; 4] = [
-        &[("length", "40 mm"), ("width", "w"), ("height", "20 mm")],
-        &[("radius", "(10 mm) / 2"), ("height", "12 mm")],
-        &[("radius", "4 mm")],
-        &[("major", "10 mm"), ("minor", "2 mm")],
+    // What OK keeps: the cylinder's diameter is kept as the radius `(10 mm) / 2`, and Edit shows
+    // the diameter it was typed as (#6609).
+    let want: [(&[(&str, &str)], &[&str]); 4] = [
+        (&[("length", "40 mm"), ("width", "w"), ("height", "20 mm")], &["40 mm", "w", "20 mm"]),
+        (&[("diameter", "10 mm"), ("height", "12 mm")], &["(10 mm) / 2", "12 mm"]),
+        (&[("radius", "4 mm")], &["4 mm"]),
+        (&[("major", "10 mm"), ("minor", "2 mm")], &["10 mm", "2 mm"]),
     ];
     assert_eq!(ids.len(), want.len());
-    for (id, want) in ids.into_iter().zip(want) {
+    for (id, (want, kept)) in ids.into_iter().zip(want) {
         h.app.edit_feature(id);
         h.frames(3);
         let shown = fields(&h);
         assert_eq!(shown, want.iter().map(|(k, v)| (*k, (*v).to_string())).collect::<Vec<_>>());
         assert_shown(&h, &shown);
         ok(&mut h);
-        assert_eq!(stored(&h, id), want.iter().map(|(_, v)| (*v).to_string()).collect::<Vec<_>>());
+        assert_eq!(stored(&h, id), kept);
         let after = volume(&mut h.app.session);
         assert!((after - before).abs() < 1e-6 * before, "the part is unchanged: {after} mm³, was {before} mm³");
     }
@@ -231,6 +233,152 @@ fn editing_in_a_millimetre_design_keeps_the_sizes_as_they_are_kept() {
     assert_eq!(stored(&h, id), ["40", "30", "20"]);
     assert!(h.app.session.doc.configuration_matches(), "an edit without a change keeps the configuration matched");
     assert_size(&mut h.app.session, [40.0, 30.0, 20.0]);
+}
+
+/// Click one choice of the dialog's Size row (Diameter | Radius), as a person does.
+fn size_choice(h: &mut Harness, choice: &str) {
+    h.step(&json!({"click": {"handle": format!("dialog:Size:{choice}")}})).unwrap();
+    h.frames(2);
+}
+
+#[test]
+fn editing_a_cylinder_or_sphere_made_from_a_diameter_shows_that_diameter() {
+    // #6609: a diameter given to Cylinder or Sphere is kept as the radius `(D) / 2`. Edit Feature
+    // shows the diameter, as the window that made it asked, on Diameter; OK without a change keeps
+    // the feature and the part. Small, typical and large sizes.
+    for d in ["0.2", "20", "5000"] {
+        let mut h = design("mm");
+        h.app.run("solid.box", json!({"length": 80, "width": 50, "height": 10})).unwrap();
+        h.app.run("solid.cylinder", json!({"diameter": d, "height": 20, "base": [40, 25, 10], "operation": "join", "name": "Pin"})).unwrap();
+        h.app.run("solid.sphere", json!({"diameter": d, "center": [0, 0, 6000], "operation": "new", "name": "Ball"})).unwrap();
+        let before = volume(&mut h.app.session);
+        let ids: Vec<u64> = h.app.session.doc.features.iter().skip(1).map(|f| f.id).collect();
+        let want: [&[(&str, String)]; 2] = [&[("diameter", format!("{d} mm")), ("height", "20".into())], &[("diameter", format!("{d} mm"))]];
+        for (id, want) in ids.into_iter().zip(want) {
+            let kept = stored(&h, id);
+            assert_eq!(kept[0], format!("({d} mm) / 2"));
+            h.app.edit_feature(id);
+            h.frames(3);
+            assert_eq!(fields(&h), want, "{d}");
+            assert_shown(&h, want);
+            ok(&mut h);
+            assert_eq!(stored(&h, id), kept, "an unchanged edit keeps the radius as it was");
+        }
+        let after = volume(&mut h.app.session);
+        assert!((after - before).abs() <= 1e-9 * before, "{d}: the part is unchanged: {after} mm³, was {before} mm³");
+    }
+}
+
+#[test]
+fn a_saved_design_that_keeps_a_radius_opens_and_edits_it_as_made() {
+    // A Cylinder made from a radius (a script's `radius`) opens on Radius. A Sphere's diameter
+    // saved before #779 as `(20) / 2` opens as the diameter 20 in the design's units, as an
+    // expression's bare number reads: 20 in once the design is in inches. OK keeps both sizes,
+    // and a new diameter typed into the Cylinder after switching it to Diameter makes it.
+    let mut h = design("mm");
+    h.app.run("solid.cylinder", json!({"radius": 5, "height": 10, "name": "Pin"})).unwrap();
+    h.app.run("solid.sphere", json!({"diameter": 20, "center": [50, 0, 0], "operation": "new", "name": "Ball"})).unwrap();
+    let saved = h.app.session.doc.to_json().replace("(20 mm) / 2", "(20) / 2");
+    assert!(saved.contains("\"(20) / 2\""), "the design keeps the older text");
+    h.app.session = Session::new(solidcraft_engine::doc::Document::from_json(&saved).unwrap());
+    h.app.session.refresh();
+    h.app.run("document.units", json!({"units": "in"})).unwrap();
+    h.frames(2);
+    let before = volume(&mut h.app.session);
+    let pi = std::f64::consts::PI;
+    let ball_volume = 4.0 / 3.0 * pi * 254.0_f64.powi(3);
+    assert!((before - (pi * 25.0 * 10.0 + ball_volume)).abs() < 1e-3 * before, "{before}");
+    let [pin, ball] = [0, 1].map(|i| h.app.session.doc.features[i].id);
+    for (id, want, kept) in
+        [(pin, vec![("radius", "5 mm"), ("height", "10 mm")], ["5 mm", "10 mm"].as_slice()), (ball, vec![("diameter", "20 in")], &["(20 in) / 2"])]
+    {
+        let want: Vec<_> = want.into_iter().map(|(k, v)| (k, v.to_string())).collect();
+        h.app.edit_feature(id);
+        h.frames(3);
+        assert_eq!(fields(&h), want);
+        assert_shown(&h, &want);
+        ok(&mut h);
+        assert_eq!(stored(&h, id), kept);
+    }
+    let after = volume(&mut h.app.session);
+    assert!((after - before).abs() <= 1e-9 * before, "the part is unchanged: {after} mm³, was {before} mm³");
+    h.app.edit_feature(pin);
+    h.frames(3);
+    size_choice(&mut h, "Diameter");
+    assert_eq!(fields(&h), [("diameter", "10 mm".to_string()), ("height", "10 mm".to_string())]);
+    type_into(&mut h, "diameter", "30 mm");
+    h.frames(2);
+    ok(&mut h);
+    assert_eq!(stored(&h, pin)[0], "(30 mm) / 2");
+    let after = volume(&mut h.app.session);
+    assert!(((after - before) - pi * (225.0 - 25.0) * 10.0).abs() < 1e-6 * before, "the cylinder is 30 mm across: {after}, was {before}");
+}
+
+#[test]
+fn the_size_switches_between_diameter_and_radius_and_ok_sends_the_one_shown() {
+    // #6609: a new Cylinder asks for a diameter; Radius turns the size into the radius of the same
+    // part and OK sends `radius`. Back on Diameter the size is the diameter again, and an
+    // expression is wrapped rather than worked out.
+    let mut h = design("mm");
+    h.app.run("parameters.add", json!({"name": "w", "expression": "12 mm"})).unwrap();
+    h.app.start("solid.cylinder");
+    h.frames(3);
+    assert_eq!(fields(&h), [("diameter", "20 mm".to_string()), ("height", "20 mm".to_string())]);
+    size_choice(&mut h, "Radius");
+    assert_eq!(fields(&h)[0], ("radius", "10 mm".to_string()));
+    assert_eq!(apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap()[0].1["radius"], "10 mm");
+    size_choice(&mut h, "Diameter");
+    assert_eq!(fields(&h)[0], ("diameter", "20 mm".to_string()));
+    type_into(&mut h, "diameter", "w");
+    h.frames(2);
+    size_choice(&mut h, "Radius");
+    assert_eq!(fields(&h)[0], ("radius", "(w) / 2".to_string()));
+    size_choice(&mut h, "Diameter");
+    assert_eq!(fields(&h)[0], ("diameter", "w".to_string()));
+    size_choice(&mut h, "Radius");
+    type_into(&mut h, "radius", "7");
+    h.frames(2);
+    ok(&mut h);
+    let id = h.app.session.doc.features.last().map(|f| f.id).unwrap();
+    assert_eq!(stored(&h, id)[0], "7");
+    let v = volume(&mut h.app.session);
+    assert!((v - std::f64::consts::PI * 49.0 * 20.0).abs() < 1e-3 * v, "radius 7, height 20: {v}");
+    // Edit opens a radius on Radius; Diameter doubles it and keeps the part.
+    h.app.edit_feature(id);
+    h.frames(3);
+    assert_eq!(fields(&h)[0], ("radius", "7".to_string()));
+    size_choice(&mut h, "Diameter");
+    assert_eq!(fields(&h)[0], ("diameter", "14".to_string()));
+    ok(&mut h);
+    assert_eq!(stored(&h, id)[0], "(14 mm) / 2");
+    assert!((volume(&mut h.app.session) - v).abs() < 1e-9 * v);
+    // The Sphere window has the same choice.
+    h.app.start("solid.sphere");
+    h.frames(3);
+    size_choice(&mut h, "Radius");
+    assert_eq!(fields(&h), [("radius", "10 mm".to_string())]);
+}
+
+#[test]
+fn a_size_switched_between_diameter_and_radius_keeps_its_unit_and_its_text() {
+    use crate::length_input::{diameter_of, scaled};
+    assert_eq!(diameter_of("(20 mm) / 2"), Some("20 mm"));
+    assert_eq!(diameter_of("(w + (2 mm)) / 2"), Some("w + (2 mm)"));
+    for other in ["10 mm", "(a) / (b) / 2", "(a) + (b) / 2", "() / 2", "w / 2"] {
+        assert_eq!(diameter_of(other), None, "{other}");
+    }
+    for (diameter, radius) in
+        [("0.2 mm", "0.1 mm"), ("20 mm", "10 mm"), ("5000 mm", "2500 mm"), ("1 in", "0.5 in"), ("3", "1.5"), ("1e3 mm", "500 mm")]
+    {
+        assert_eq!(scaled(diameter, false), radius);
+    }
+    assert_eq!(scaled("7 mm", true), "14 mm");
+    assert_eq!(scaled("1,5 mm", true), "3 mm");
+    assert_eq!(scaled("w", false), "(w) / 2");
+    assert_eq!(scaled("(w) / 2", true), "w");
+    assert_eq!(scaled("r + 1 mm", true), "2 * (r + 1 mm)");
+    assert_eq!(scaled("2 * (r + 1 mm)", false), "r + 1 mm");
+    assert_eq!(scaled("", true), "");
 }
 
 #[test]
