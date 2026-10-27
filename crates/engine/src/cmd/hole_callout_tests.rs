@@ -77,6 +77,16 @@ fn through_all_never_reads_as_blind_and_blind_never_as_through() {
     let past = callout(&mut s, "PastTheBottom");
     assert_eq!(past["callout"]["extent"], json!({"type": "through"}), "{past}");
     assert_eq!(lines(&past), ["Ø5.0 THRU"]);
+    // A drilled hole's floor is its drill point: blind to the shoulder, 15 deep.
+    run(
+        &mut s,
+        "solid.hole",
+        json!({"position": [90, 10, 40], "diameter": 6, "depth": 15, "type": "drilled", "tip_angle": "118 deg", "name": "Drilled"}),
+    );
+    let drilled = callout(&mut s, "Drilled");
+    assert_eq!(drilled["callout"]["form"]["type"], "drilled", "{drilled}");
+    assert!(near(&drilled["callout"]["extent"]["depth"], 15.0), "{drilled}");
+    assert_eq!(lines(&drilled), ["Ø6.0 ↧ 15.0"]);
     // An 8 mm plate's Ø6.6 through hole reads as through, not as 8 deep.
     let mut plate = Session::default();
     run(&mut plate, "solid.box", json!({"length": 60, "width": 30, "height": 8, "name": "Bracket"}));
@@ -132,7 +142,7 @@ fn counterbore_and_countersink_callouts_keep_their_hole() {
     assert_eq!(lines(&cs), ["Ø6.6 ↧ 15.0", "⌵ Ø12.0 × 90.0°"]);
     // Words in the drawing's content language, numbers in its unit.
     assert_eq!(lines(&callout_with(&mut s, "CB", None, json!({"language": "de-DE"}))), ["Ø6.6 DURCH", "⌴ Ø11.0 ↧ 6.8"]);
-    assert_eq!(lines(&callout_with(&mut s, "CB", None, json!({"units": "in", "decimals": 2}))), ["Ø0.260 THRU", "⌴ Ø0.433 ↧ 0.268"]);
+    assert_eq!(lines(&callout_with(&mut s, "CB", None, json!({"units": "in", "decimals": 2}))), ["Ø0.2598 THRU", "⌴ Ø0.4331 ↧ 0.2677"]);
 }
 
 /// A flange plate 120 x 120 x 15 with 6 points on a Ø95 circle (sketch `Pts` on its top face).

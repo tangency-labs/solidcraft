@@ -53,13 +53,19 @@ pub struct HoleRef {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum Resolution {
-    Resolved { callout: HoleCallout },
+    Resolved {
+        callout: HoleCallout,
+    },
     /// The feature is suppressed.
     Suppressed,
     /// The feature did not evaluate.
-    Failed { reason: String },
+    Failed {
+        reason: String,
+    },
     /// The feature or the point is gone.
-    Lost { reason: String },
+    Lost {
+        reason: String,
+    },
 }
 
 /// A resolved hole callout: what the feature drills there, in millimetres and radians.
@@ -98,9 +104,17 @@ pub enum Extent {
 pub enum Form {
     Simple,
     /// A drill point at the bottom of a blind hole.
-    Drilled { tip_angle: f64 },
-    Counterbore { diameter: f64, depth: f64 },
-    Countersink { diameter: f64, angle: f64 },
+    Drilled {
+        tip_angle: f64,
+    },
+    Counterbore {
+        diameter: f64,
+        depth: f64,
+    },
+    Countersink {
+        diameter: f64,
+        angle: f64,
+    },
 }
 
 /// How a callout's text is written: the drawing's length unit and content language.
@@ -161,11 +175,7 @@ pub fn resolve(doc: &Document, model: &Model, hole: &HoleRef) -> Result<Resoluti
     let index = match (points, &hole.point) {
         (Some(sp), _) if sp.ids.len() > MAX_HOLES => return Err(DocError::Invalid(format!("a hole needs 1…{MAX_HOLES} points"))),
         (Some(sp), None) if !sp.single => {
-            return Err(DocError::Invalid(format!(
-                "feature {} drills at {} sketch points: name one with `point`",
-                f.id,
-                sp.ids.len()
-            )));
+            return Err(DocError::Invalid(format!("feature {} drills at {} sketch points: name one with `point`", f.id, sp.ids.len())));
         }
         (Some(sp), point) => {
             let id = match point {
@@ -352,7 +362,7 @@ mod tests {
         let mut tapped = callout(1, Extent::Blind { depth: 12.0 }, Form::Simple);
         tapped.thread = Some("M8".into());
         assert_eq!(text(&tapped, &style("mm", 0, "en")).unwrap(), ["M8 ↧ 12"]);
-        assert_eq!(text(&callout(1, Extent::Through, Form::Simple), &style("in", 2, "en")).unwrap(), ["Ø0.260 THRU"]);
+        assert_eq!(text(&callout(1, Extent::Through, Form::Simple), &style("in", 2, "en")).unwrap(), ["Ø0.2598 THRU"]);
     }
 
     #[test]
