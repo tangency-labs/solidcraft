@@ -142,9 +142,10 @@ pub(super) fn interface(app: &mut SolveApp, ui: &mut egui::Ui, t: &Tokens) {
                             crate::scenario::publish_handle(&format!("dialog:{row}:{}", app.tr(legacy)), at);
                         }
                     }
-                    // Only the History at the left can list a sketch under its feature (#6489).
+                    // The History at the left and the one in the browser can list a sketch under its
+                    // feature (#6489); the timeline at the bottom can't.
                     ui_kit::row(ui, app.tr("prefs.history_sketches"), |ui| {
-                        ui.add_enabled_ui(app.preferences.timeline_left, |ui| {
+                        ui.add_enabled_ui(app.preferences.timeline_left || app.preferences.history_in_browser, |ui| {
                             let mut selected = usize::from(app.preferences.history_sketches == HistorySketches::UnderFeature);
                             if ui_kit::segmented(
                                 ui,

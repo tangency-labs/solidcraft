@@ -859,7 +859,7 @@ fn group_last_feature(
 }
 
 /// Whether Sketches: Under their feature is on (#6489).
-fn nests(app: &SolveApp) -> bool {
+pub(crate) fn nests(app: &SolveApp) -> bool {
     app.preferences.history_sketches == crate::prefs::HistorySketches::UnderFeature
 }
 
@@ -877,7 +877,7 @@ fn drawn_rows(app: &SolveApp, nest: bool) -> HistoryRows {
 }
 
 /// The fold of a feature's listed sketches; closed until opened.
-fn sketches_key(feature: u64) -> String {
+pub(crate) fn sketches_key(feature: u64) -> String {
     format!("timeline/feature/{feature}/sketches")
 }
 

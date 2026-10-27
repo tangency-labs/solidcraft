@@ -1,6 +1,7 @@
 //! Native feature rows in the component browser, separate from timeline layout and order.
 
 use super::*;
+use crate::history_rows::{HistoryFeature, HistoryRows};
 
 #[derive(Clone, Debug)]
 pub(crate) struct Reveal {
@@ -91,82 +92,160 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
             .filter_map(|(i, f)| (f.component == component && (compact || !matches!(f.kind, FeatureKind::Sketch { .. }))).then_some(i))
             .collect(),
     };
+    let here = Here { component, path, scope: &scope };
     // The feature that made what is under the cursor or picked in the viewport, as the history
-    // lights it.
+    // lights it, and in the history layout what a selected history row lights.
     let from_view = [crate::timeline::hovered_feature(app), crate::timeline::picked_feature(app)];
-    let marker = app.session.doc.marker.unwrap_or(app.session.doc.features.len());
-    // Where the marker can be dropped: the top of each row (that feature first rolled back) and
-    // below the last.
+    let lit = if compact { lit_by_selection(app) } else { BTreeSet::new() };
+    let mark = |app: &SolveApp, index: usize| {
+        let id = app.session.doc.features.get(index).map(|f| f.id);
+        if id.is_some_and(|id| lit.contains(&id) || from_view.contains(&Some(id))) { Mark::Here } else { Mark::None }
+    };
+    if !compact {
+        for index in indices {
+            let _ = feature_row(app, ui, acts, &here, index, depth + 1, None, mark(app, index));
+        }
+        return;
+    }
+    let n = app.session.doc.features.len();
+    let marker = app.session.doc.marker.unwrap_or(n);
+    let plan = history_plan(app, &indices, marker);
+    // `plan` counts in the component's own features; a timeline position is a global index.
+    let global = |at: usize| indices.get(at).copied().unwrap_or_else(|| indices.last().map_or(n, |last| last + 1));
+    // Where the marker can be dropped: the top of each row (it and the sketches listed under it
+    // first rolled back) and below the last.
     let mut slots: Vec<(f32, usize)> = Vec::new();
     let mut marker_resp = None;
-    for index in indices {
-        if compact && marker_resp.is_none() && index >= marker {
+    for row in &plan.rows {
+        let index = global(row.index);
+        if marker_resp.is_none() && index >= marker {
             marker_resp = Some(marker_row(app, ui, depth + 1));
         }
-        let Some(feature) = app.session.doc.features.get(index) else { continue };
-        if compact {
-            slots.push((ui.cursor().min.y, index));
+        slots.push((ui.cursor().min.y, global(row.slot)));
+        // The same fold as in the vertical History, so it stays open when the layout changes.
+        let key = crate::timeline_left::sketches_key(row.feature);
+        let open = is_open(app, &key, false);
+        let listed: Vec<usize> = row.listed.iter().filter(|listed| !listed.reference).map(|listed| global(listed.index)).collect();
+        let fold = (!listed.is_empty()).then_some(open);
+        if feature_row(app, ui, acts, &here, index, depth + 1, fold, mark(app, index)) {
+            toggle(app, &key, false);
         }
-        let (id, label, icon) = (feature.id, feature.name.clone(), crate::timeline::icon_of(&feature.kind));
-        let sketch = crate::timeline::TimelineKind::of(&feature.kind).profile_sketch();
-        // Behind the history marker or suppressed: not built, drawn faint as in the timeline.
-        let dim = feature.suppressed || app.session.doc.marker.is_some_and(|marker| index >= marker);
-        let selected = app.session.selection.contains(&Sel::Feature { id });
-        let mark = if from_view.contains(&Some(id)) { Mark::Here } else { Mark::None };
-        app.tree.remember(&format!("f:{id}"));
-        let action = sketch.map(|_| ("sketch", "Edit Profile Sketch"));
-        // The bodies it made show and hide with its eye (#5099); a component listed on its own
-        // stands for all of its placements.
-        let placement = (component == 0 || !path.is_empty()).then_some((component, path));
-        let bodies = app.session.feature_bodies(&[id], placement);
-        let visible = bodies.iter().any(|b| !app.session.visibility.hidden_bodies.contains(b));
-        let eye = (!bodies.is_empty()).then_some(visible);
-        let r = draw_row(
-            ui,
-            ui.id().with(("browser_feature", id)),
-            &Row { depth: depth + 1, eye, icon, label: &label, selected, dim: dim || eye == Some(false), mark, action, ..Default::default() },
-        );
-        if r.eye {
-            let mut p = json!({"visible": !visible, "features": [id]});
-            if !path.is_empty() {
-                p["path"] = json!(path);
+        if open {
+            for index in listed {
+                let _ = feature_row(app, ui, acts, &here, index, depth + 2, None, mark(app, index));
             }
-            let _ = app.run("browser.visibility", p);
-        }
-        if r.action
-            && let Some(sketch) = sketch
-        {
-            app.edit_sketch(sketch.0);
-            continue;
-        }
-        if let Some(rect) = r.rect {
-            crate::scenario::publish_handle(&format!("row:browser-feature:{scope}:{id}"), rect.center());
-            if app.tree.reveal_feature.as_ref().is_some_and(|target| target.id == id && target.path == path) {
-                ui.scroll_to_rect(rect, Some(egui::Align::Center));
-                app.tree.reveal_feature = None;
-            }
-        }
-        if r.double {
-            if !path.is_empty() {
-                let _ = app.run("component.activate", json!({"component":component,"occurrence":path.last(),"path":path}));
-            }
-            app.edit_feature(id);
-        } else if r.clicked {
-            click_select(app, ui, format!("f:{id}"), Some(Sel::Feature { id }));
-        }
-        if let Some(at) = r.secondary {
-            let is_sketch = app.session.doc.feature(id).is_some_and(|f| matches!(f.kind, FeatureKind::Sketch { .. }));
-            acts.menu = Some((at, if is_sketch { Target::Sketch { id } } else { Target::Feature { id } }));
         }
     }
-    if compact {
-        let end = slots.last().map(|&(_, index)| index + 1);
-        let resp = marker_resp.unwrap_or_else(|| marker_row(app, ui, depth + 1));
-        if let Some(end) = end {
-            slots.push((ui.cursor().min.y, end));
-        }
-        drag_marker(app, ui, &resp, &slots, marker);
+    let resp = marker_resp.unwrap_or_else(|| marker_row(app, ui, depth + 1));
+    if !plan.rows.is_empty() {
+        slots.push((ui.cursor().min.y, global(indices.len())));
     }
+    drag_marker(app, ui, &resp, &slots, marker);
+}
+
+/// Where a history row is drawn: its component and placement.
+struct Here<'a> {
+    component: u64,
+    path: &'a [u64],
+    scope: &'a str,
+}
+
+/// The component's history rows, `indices` its features' timeline positions: with Sketches:
+/// Under their feature, each sketch listed under the feature built from it as the vertical
+/// History lists it (`history_rows`, without reference rows); otherwise in creation order.
+fn history_plan(app: &SolveApp, indices: &[usize], marker: usize) -> HistoryRows {
+    let doc = &app.session.doc;
+    let features: Vec<HistoryFeature> = indices.iter().filter_map(|index| doc.features.get(*index)).map(HistoryFeature::of).collect();
+    if !crate::timeline_left::nests(app) {
+        return HistoryRows::in_order(features.iter().map(|feature| (feature.id, feature.sketch)));
+    }
+    let local = indices.iter().take_while(|index| **index < marker).count();
+    crate::history_rows::rows(&features, &doc.timeline_groups, (local < features.len()).then_some(local), false)
+}
+
+/// What a selected history row lights up: a feature's sketches, and the features built from a
+/// selected sketch.
+fn lit_by_selection(app: &SolveApp) -> BTreeSet<u64> {
+    let mut lit = BTreeSet::new();
+    let doc = &app.session.doc;
+    for selection in &app.session.selection {
+        let Sel::Feature { id } = selection else { continue };
+        let Some(feature) = doc.feature(*id) else { continue };
+        if matches!(feature.kind, FeatureKind::Sketch { .. }) {
+            lit.extend(doc.features.iter().filter(|f| f.kind.input_sketches().contains(id)).map(|f| f.id));
+        } else {
+            lit.extend(feature.kind.input_sketches());
+        }
+    }
+    lit
+}
+
+/// One feature or sketch row; returns whether its fold arrow was clicked.
+#[allow(clippy::too_many_arguments)]
+fn feature_row(
+    app: &mut SolveApp,
+    ui: &mut egui::Ui,
+    acts: &mut Actions,
+    here: &Here,
+    index: usize,
+    depth: usize,
+    fold: Option<bool>,
+    mark: Mark,
+) -> bool {
+    let Some(feature) = app.session.doc.features.get(index) else { return false };
+    let (component, path) = (here.component, here.path);
+    let (id, label, icon) = (feature.id, feature.name.clone(), crate::timeline::icon_of(&feature.kind));
+    let is_sketch = matches!(feature.kind, FeatureKind::Sketch { .. });
+    let sketch = crate::timeline::TimelineKind::of(&feature.kind).profile_sketch();
+    // Behind the history marker or suppressed: not built, drawn faint as in the timeline.
+    let dim = feature.suppressed || app.session.doc.marker.is_some_and(|marker| index >= marker);
+    let selected = app.session.selection.contains(&Sel::Feature { id });
+    app.tree.remember(&format!("f:{id}"));
+    let action = sketch.map(|_| ("sketch", "Edit Profile Sketch"));
+    // The bodies it made show and hide with its eye (#5099); a component listed on its own
+    // stands for all of its placements.
+    let placement = (component == 0 || !path.is_empty()).then_some((component, path));
+    let bodies = app.session.feature_bodies(&[id], placement);
+    let visible = bodies.iter().any(|b| !app.session.visibility.hidden_bodies.contains(b));
+    let eye = (!bodies.is_empty()).then_some(visible);
+    let r = draw_row(
+        ui,
+        ui.id().with(("browser_feature", id)),
+        &Row { depth, fold, eye, icon, label: &label, selected, dim: dim || eye == Some(false), action, mark, ..Default::default() },
+    );
+    if r.eye {
+        let mut p = json!({"visible": !visible, "features": [id]});
+        if !path.is_empty() {
+            p["path"] = json!(path);
+        }
+        let _ = app.run("browser.visibility", p);
+    }
+    if r.action
+        && let Some(sketch) = sketch
+    {
+        app.edit_sketch(sketch.0);
+        return false;
+    }
+    let scope = here.scope;
+    if let Some(rect) = r.rect {
+        crate::scenario::publish_handle(&format!("row:browser-feature:{scope}:{id}"), rect.center());
+        if app.tree.reveal_feature.as_ref().is_some_and(|target| target.id == id && target.path == path) {
+            ui.scroll_to_rect(rect, Some(egui::Align::Center));
+            app.tree.reveal_feature = None;
+        }
+    }
+    if r.double {
+        if !path.is_empty() {
+            let _ = app.run("component.activate", json!({"component":component,"occurrence":path.last(),"path":path}));
+        }
+        app.edit_feature(id);
+    } else if r.clicked {
+        click_select(app, ui, format!("f:{id}"), Some(Sel::Feature { id }));
+    }
+    if let Some(at) = r.secondary {
+        acts.menu = Some((at, if is_sketch { Target::Sketch { id } } else { Target::Feature { id } }));
+    }
+    r.fold
 }
 
 /// The history marker between the rows, as in the vertical timeline.
@@ -584,35 +663,107 @@ mod tests {
         assert!(labels.contains(&block_name), "a rolled-back feature stays listed: {labels:?}");
     }
 
-    /// History in the browser: no timeline, the component lists its sketches and features in
-    /// history order, and dragging the marker rolls the history back with the timeline's command.
-    #[test]
-    fn browser_history_mode_lists_the_history_and_drags_the_marker() {
-        let mut h = Harness::new();
-        let sketch = h.app.run("sketch.create", json!({"plane":"XY","name":"Profile"})).unwrap()["sketch"].as_u64().unwrap();
-        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,15]})).unwrap();
-        h.app.run("sketch.finish", json!({})).unwrap();
-        let pad = h.app.run("solid.extrude", json!({"distance":10,"body_name":"Plate"})).unwrap()["feature"].as_u64().unwrap();
-        h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"body_name":"Block"})).unwrap();
-        h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
-        assert!(h.app.preferences.history_in_browser && !h.app.preferences.timeline_left);
-        h.frames(3);
-        assert!(h.app.shell.history.is_none(), "no timeline beside the browser history");
-        assert!(crate::scenario::handle_at(&format!("row:browser-feature:c0:{sketch}")).is_some(), "the sketch is in the history");
-        assert!(crate::scenario::handle_at("browser:rollback").is_some(), "the marker is drawn");
-
-        let row = crate::scenario::handle_at(&format!("row:browser-feature:c0:{pad}")).unwrap();
-        h.step(&json!({"drag":[{"handle":"browser:rollback"},[row.x, row.y - 8.0]]})).unwrap();
+    fn settle_heavy(h: &mut Harness) {
         for _ in 0..500 {
             if h.app.deferred.is_none() && h.app.deferred_queue.is_empty() {
                 break;
             }
             h.frame();
         }
-        let pad_index = h.app.session.doc.feature_index(pad).unwrap();
-        assert_eq!(h.app.session.doc.marker, Some(pad_index), "dropped above the extrusion, which is rolled back");
+        h.frames(2);
+    }
+
+    fn count(label: &str) -> usize {
+        drawn_rows().iter().filter(|(l, ..)| l == label).count()
+    }
+
+    fn fold_of(label: &str) -> Option<bool> {
+        drawn_rows().into_iter().find(|(l, ..)| l == label).and_then(|(.., open)| open)
+    }
+
+    /// History in the browser: no timeline; with Sketches: Under their feature a sketch sits
+    /// under its extrusion, folded; dragging the marker above that extrusion rolls both back with
+    /// the timeline's command.
+    #[test]
+    fn browser_history_mode_nests_a_sketch_under_its_feature_and_drags_the_marker() {
+        let mut h = Harness::new();
+        let sketch = h.app.run("sketch.create", json!({"plane":"XY","name":"Profile"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,15]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        let pad = h.app.run("solid.extrude", json!({"distance":10,"name":"Pad","body_name":"Plate"})).unwrap()["feature"].as_u64().unwrap();
+        h.app.run("solid.box", json!({"length":5,"width":5,"height":5,"name":"Block","body_name":"Block"})).unwrap();
+        h.app.tree.collapsed.insert("c0/sketches".into());
+        h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
+        assert!(h.app.preferences.history_in_browser && !h.app.preferences.timeline_left);
+        h.frames(3);
+        assert!(h.app.shell.history.is_none(), "no timeline beside the browser history");
+        assert_eq!(fold_of("Pad"), None, "in creation order nothing is listed under the extrusion");
+        assert_eq!(count("Profile"), 1);
+
+        h.app.preferences.history_sketches = crate::prefs::HistorySketches::UnderFeature;
+        h.frames(2);
+        assert_eq!(fold_of("Pad"), Some(false), "the extrusion folds over its sketch");
+        assert_eq!(count("Profile"), 0, "folded: the sketch is not a row of its own");
+        h.step(&json!({"click": {"handle": "fold:Pad"}})).unwrap();
+        h.frames(2);
+        assert_eq!(count("Profile"), 1, "unfolded: the sketch is under the extrusion");
+        assert!(h.app.tree.expanded.contains(&crate::timeline_left::sketches_key(pad)), "the same fold as the vertical History");
+        let rows = drawn_rows();
+        let (sketch_row, pad_row) = (rows.iter().find(|(l, ..)| l == "Profile").unwrap().1, rows.iter().find(|(l, ..)| l == "Pad").unwrap().1);
+        assert!(sketch_row.top() > pad_row.top(), "the sketch is below its feature");
+
+        let row = crate::scenario::handle_at(&format!("row:browser-feature:c0:{pad}")).unwrap();
+        h.step(&json!({"drag":[{"handle":"browser:rollback"},[row.x, row.y - 8.0]]})).unwrap();
+        settle_heavy(&mut h);
+        let sketch_index = h.app.session.doc.feature_index(sketch).unwrap();
+        assert_eq!(h.app.session.doc.marker, Some(sketch_index), "dropped above the extrusion: it and its sketch are rolled back");
+        assert_eq!(fold_of("Pad"), Some(true), "rolled back together, the sketch stays under it");
 
         h.app.run("view.history_layout", json!({"dock":"bottom"})).unwrap();
         assert!(!h.app.preferences.history_in_browser);
+    }
+
+    /// The browser lists sketches as the vertical History does (`history_rows`): a shared sketch
+    /// under its first feature, an unused one and one the marker separates from its feature as
+    /// rows of their own; selecting a feature lights its sketch.
+    #[test]
+    fn browser_history_mode_lists_sketches_like_the_vertical_history() {
+        let mut h = Harness::new();
+        let two = h.app.run("sketch.create", json!({"plane":"XY","name":"Two"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[20,0],"p1":[30,10]})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("solid.extrude", json!({"sketch":"Two","profiles":[0],"distance":5,"name":"Low","body_name":"A"})).unwrap();
+        let high = h.app.run("solid.extrude", json!({"sketch":"Two","profiles":[1],"distance":15,"name":"High","body_name":"B"})).unwrap()["feature"]
+            .as_u64()
+            .unwrap();
+        let post = h.app.run("sketch.create", json!({"plane":"XY","name":"PostSketch"})).unwrap()["sketch"].as_u64().unwrap();
+        h.app.run("sketch.circle.center", json!({"center":[50,5],"radius":3})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.run("solid.extrude", json!({"distance":8,"name":"Post","body_name":"C"})).unwrap();
+        h.app.run("sketch.create", json!({"plane":"XZ","name":"Unused"})).unwrap();
+        h.app.run("sketch.circle.center", json!({"center":[0,0],"radius":3})).unwrap();
+        h.app.run("sketch.finish", json!({})).unwrap();
+        h.app.tree.collapsed.insert("c0/sketches".into());
+        h.app.preferences.history_sketches = crate::prefs::HistorySketches::UnderFeature;
+        h.app.run("view.history_layout", json!({"dock":"browser"})).unwrap();
+        h.frames(3);
+        assert_eq!(fold_of("Low"), Some(false), "a shared sketch is listed under its first feature");
+        assert_eq!(fold_of("High"), None, "no reference rows in the browser");
+        assert_eq!(count("Unused"), 1, "an unused sketch is its own row");
+        assert_eq!(fold_of("Post"), Some(false), "the post's own sketch is under it");
+
+        // Selecting a feature lights the row of the sketch it is built from.
+        h.app.run("select.set", json!({"items":[{"type":"feature","id":high}]})).unwrap();
+        h.frames(2);
+        assert!(lit_by_selection(&h.app).contains(&two));
+
+        // The marker between the post's sketch and the post: the sketch is built, the post is
+        // not, so the sketch shows on its own above the marker.
+        let index = h.app.session.doc.feature_index(post).unwrap();
+        h.app.run("timeline.roll_to", json!({"position": index + 1})).unwrap();
+        h.frames(2);
+        assert_eq!(fold_of("Post"), None, "split by the marker: nothing under the post");
+        assert_eq!(count("PostSketch"), 1, "the sketch is its own row");
     }
 }
