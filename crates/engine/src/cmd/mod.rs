@@ -71,6 +71,7 @@ mod parameter_sweep;
 mod parameters;
 mod plastic;
 mod render;
+mod reverse;
 #[cfg(test)]
 mod script_tests;
 mod sheet;
@@ -320,6 +321,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(view_dxf::COMMANDS.iter());
     v.extend(diagnostics::COMMANDS.iter());
     v.extend(render::COMMANDS.iter());
+    v.extend(reverse::COMMANDS.iter());
     v
 }
 
