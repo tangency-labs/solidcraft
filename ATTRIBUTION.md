@@ -31,6 +31,7 @@ Editable drawing code, native projects and shipped exports are collected under `
 | examples/studio/stage1-sweep.json | SolidCraft contributors | original tangent circular-arc CAD cyclorama; no external assets | MIT OR Apache-2.0 |
 | examples/studio/stage1.json | SolidCraft contributors | original editable CAD studio scene; no imported geometry or external image assets | MIT OR Apache-2.0 |
 | examples/studio/stage1-render.json | SolidCraft contributors | original studio camera and lighting parameters | MIT OR Apache-2.0 |
+| crates/kernel/src/curveblend.rs | SolidCraft and truck contributors | Cached surface-search grid adapted from truck-geotrait `algo::surface::presearch` (https://github.com/ricosjp/truck); the grid samples are reused across rolling-ball sections | Apache-2.0 (adapted grid) |
 | examples/render-studio.json | SolidCraft contributors | original procedural box/cylinder enclosure script for the integrated Render workspace | MIT OR Apache-2.0 |
 | examples/render-opaque-studio.json | SolidCraft contributors | original procedural sphere study varying opaque metal fraction and roughness independently; no external assets or engineering data | MIT OR Apache-2.0 |
 | crates/gpu/src/path/denoise.wgsl | SolidCraft contributors | original bounded edge-aware a-trous spatial filter; GPU2 donor d710e31, no external shader source | MIT OR Apache-2.0 |
@@ -592,7 +593,8 @@ copied into SolidCraft.
 | vendor/truck-meshalgo | truck-meshalgo 0.4.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | meshing: bounded parameter searches, collapsed-boundary projection, subdivision and provisional fixed-grid previews (vendor/README.md) |
 | vendor/truck-stepio | truck-stepio 0.3.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | STEP writer: intersection-curve surfaces written at unique ids (vendor/README.md) |
 | vendor/truck-shapeops | truck-shapeops 0.4.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | robust meshing and nearest-parameter fallback in booleans; degenerate intersection-curve rejection; face and edge history of booleans; trace macro; corner choice at vertices several intersection curves end on; reuse of an operand's meshes (vendor/README.md) |
-| vendor/truck-geometry | truck-geometry 0.5.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | intersection curves divided from their neighbours' surface parameters; surface second derivatives (vendor/README.md) |
+| vendor/truck-geometry | truck-geometry 0.5.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | intersection curves divided from their neighbours' surface parameters; surface second derivatives; compact-support spline evaluation (vendor/README.md) |
+| vendor/truck-modeling | truck-modeling 0.6.0, https://github.com/ricosjp/truck (RICOS Co. Ltd.) | Apache-2.0 | bounded immutable surface sample grids and exact nearest-sample spatial indexes (vendor/README.md) |
 | vendor/matext4cgmath | matext4cgmath 0.1.0, https://github.com/ricosjp/matext4cgmath (RICOS Co. Ltd.) | Apache-2.0 | root refinement stops after 100 Newton steps (vendor/README.md) |
 
 ## Vendored renderer compatibility fix

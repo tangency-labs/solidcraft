@@ -522,7 +522,7 @@ pub(crate) fn accept(input: &Body, out: Body, edges: &[Vec3], size: Size) -> Res
 /// away) or concave (`Some(false)`: it fills), from the two faces' outward normals and the
 /// directions into each face across the edge at `p`. `None` unless that is clear-cut: faces
 /// meeting at a few degrees of tangent or of a knife edge, an edge not between two faces.
-fn convex_at(body: &Body, p: Vec3) -> Option<bool> {
+pub(crate) fn convex_at(body: &Body, p: Vec3) -> Option<bool> {
     use mt::{BoundedCurve, ParametricCurve, SearchNearestParameter};
     let tol = (body.size() * 1e-4).max(1e-4);
     let (i, _) = body.nearest_edge(p, tol).ok()??;

@@ -524,3 +524,34 @@ fn stacked_pieces_of_one_cylinder_keep_their_walls() {
         }
     }
 }
+
+#[test]
+fn prepared_modifier_healing_is_scoped_to_the_exact_input_and_restores_nested_operations() {
+    use crate::boolean_record::{healed, with_prepared};
+    let a = box_solid(Vec3::ZERO, Vec3::new(10.0, 12.0, 14.0)).unwrap();
+    let b = box_solid(Vec3::ZERO, Vec3::new(20.0, 22.0, 24.0)).unwrap();
+    let first = with_prepared(&a, || {
+        let first = healed(&a).unwrap();
+        assert!(first.same_shape(&healed(&a).unwrap()));
+        let clone = a.clone();
+        assert!(!first.same_shape(&healed(&clone).unwrap()));
+        with_prepared(&b, || {
+            let inner = healed(&b).unwrap();
+            assert!(inner.same_shape(&healed(&b).unwrap()));
+            assert!(!inner.same_shape(&first));
+        });
+        assert!(first.same_shape(&healed(&a).unwrap()));
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            with_prepared(&b, || {
+                let _ = healed(&b).unwrap();
+                panic!("test scope restoration");
+            })
+        }));
+        assert!(first.same_shape(&healed(&a).unwrap()));
+        assert_eq!(first.history().unwrap().faces, healed(&a).unwrap().history().unwrap().faces);
+        first
+    });
+    assert!(!first.same_shape(&healed(&a).unwrap()));
+    assert!(a.validity().is_empty());
+    assert!(b.validity().is_empty());
+}

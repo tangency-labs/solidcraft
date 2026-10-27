@@ -62,3 +62,18 @@ fn issue1557_failed_radius_keeps_the_existing_rounds() {
     assert_eq!(s.undo.len(), undo);
     assert!((volume(&mut s) - v).abs() < 1e-6);
 }
+
+#[test]
+fn a_flat_fillet_seam_reports_no_corner_without_changing_the_design() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":30,"width":20,"height":10}));
+    run(&mut s, "solid.split_face", json!({"faces":[[15,0,5]],"plane":{"origin":[15,0,0],"normal":[1,0,0]}}));
+    let before = s.doc.to_json();
+    let undo = s.undo.len();
+    for style in ["constant", "chord", "curvature", "variable"] {
+        let error = s.execute("solid.fillet", &json!({"edges":[[15,0,5]],"radius":1,"type":style,"radius2":2,"start":[15,0,0]})).unwrap_err();
+        assert!(error.to_string().contains("approximately 180 degrees"), "{style}: {error}");
+        assert_eq!(s.doc.to_json(), before);
+        assert_eq!(s.undo.len(), undo);
+    }
+}

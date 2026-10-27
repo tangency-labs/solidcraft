@@ -169,17 +169,20 @@ fn fit_strip(list: &[Section], before: &[Section], after: &[Section], round: boo
     ext.extend(after.iter().copied());
     let before = before.len();
     let ctrl: Vec<[mt::Vector4; 3]> = ext.iter().map(|s| section_controls(s, round)).collect::<Option<_>>().ok_or_else(|| fail("section"))?;
+    let interpolation = crate::build::UniformCubic::new(ctrl.len()).ok_or_else(|| fail("blend surface"))?;
     let mut rows = Vec::with_capacity(3);
-    let mut vknots = None;
     for j in 0..3 {
-        let xyz: Vec<Vec3> = ctrl.iter().filter_map(|c| c.get(j)).map(|c| Vec3::new(c.x, c.y, c.z)).collect();
-        let ww: Vec<Vec3> = ctrl.iter().filter_map(|c| c.get(j)).map(|c| Vec3::new(c.w, 0.0, 0.0)).collect();
-        let bx = crate::build::interpolate_cubic(&xyz).ok_or_else(|| fail("blend surface"))?;
-        let bw = crate::build::interpolate_cubic(&ww).ok_or_else(|| fail("blend surface"))?;
-        vknots = Some(bx.knot_vec().clone());
-        rows.push(bx.control_points().iter().zip(bw.control_points()).map(|(p, w)| mt::Vector4::new(p.x, p.y, p.z, w.x)).collect::<Vec<_>>());
+        let values: Vec<[f64; 4]> = ctrl.iter().filter_map(|c| c.get(j)).map(|c| [c.x, c.y, c.z, c.w]).collect();
+        rows.push(
+            interpolation
+                .solve(&values)
+                .ok_or_else(|| fail("blend surface"))?
+                .into_iter()
+                .map(|p| mt::Vector4::new(p[0], p[1], p[2], p[3]))
+                .collect::<Vec<_>>(),
+        );
     }
-    let vk = vknots.ok_or_else(|| fail("knots"))?;
+    let vk = interpolation.knots;
     let den = ext.len().saturating_sub(1) as f64;
     if den <= 0.0 {
         return Err(fail("empty sections"));
@@ -215,9 +218,27 @@ fn section_fits(fit: &Fit, section: &Section, along: f64, round: bool, sigma: f6
             return false;
         }
         let exact = Vec3::new(h.x / h.w, h.y / h.w, h.z / h.w);
-        // The input intersection edge may use piecewise leader-curve parameters. A
-        // parameter-speed change is not a geometric error: compare nearest points, with
-        // contacts constrained to the corresponding boundary and all probes to the strip.
+        let fits_at = |pu: f64, pv: f64| {
+            let actual = from_p3(fit.surface.subs(pu, pv));
+            if !actual.is_finite() || actual.dist(exact) > tolerance {
+                return false;
+            }
+            if round && (u == 0.0 || u == 1.0) {
+                let Some(want) = ((section.c - exact) * sigma).normalized() else { return false };
+                let normal = fit.surface.normal(pu, pv);
+                let Some(normal) = Vec3::new(normal.x, normal.y, normal.z).normalized() else { return false };
+                if normal.dot(want).abs() < 0.5f64.to_radians().cos() {
+                    return false;
+                }
+            }
+            true
+        };
+        // A point already within the positional and normal tolerances proves the
+        // fit without inversion. Most arc-length stations are parameterized this
+        // way; speed changes in an intersection spine still take the search below.
+        if fits_at(u, v) {
+            continue;
+        }
         let (probe_u, probe_v) = if u == 0.0 || u == 1.0 {
             let Some(contact) = fit.contacts.get(usize::from(u == 1.0)) else { return false };
             let Some(parameter) = contact.search_nearest_parameter(p3(exact), v, 32) else { return false };
@@ -226,17 +247,8 @@ fn section_fits(fit: &Fit, section: &Section, along: f64, round: bool, sigma: f6
             let Some((pu, pv)) = fit.surface.search_nearest_parameter(p3(exact), Some((u, v)), 32) else { return false };
             (pu.clamp(0.0, 1.0), pv.clamp(fit.range.0, fit.range.1))
         };
-        let actual = from_p3(fit.surface.subs(probe_u, probe_v));
-        if !actual.is_finite() || actual.dist(exact) > tolerance {
+        if !fits_at(probe_u, probe_v) {
             return false;
-        }
-        if round && (u == 0.0 || u == 1.0) {
-            let Some(want) = ((section.c - exact) * sigma).normalized() else { return false };
-            let normal = fit.surface.normal(probe_u, probe_v);
-            let Some(normal) = Vec3::new(normal.x, normal.y, normal.z).normalized() else { return false };
-            if normal.dot(want).abs() < 0.5f64.to_radians().cos() {
-                return false;
-            }
         }
     }
     true
@@ -356,6 +368,7 @@ fn snap_to_seams(pts: &mut [Vec3], seams: [Option<&mt::Edge>; 2], tolerance: f64
 /// the vertex's section: the curve runs inwards along the edge or out along the extension.
 fn tangent_cap(fit: &Fit, g: &mt::Face, tangent_side: u8, seams: [Option<&mt::Edge>; 2], tolerance: f64) -> Result<(f64, f64, mt::Curve)> {
     use mt::{BoundedCurve, ParametricCurve, ParametricSurface, SearchNearestParameter};
+    let projection = SectionProjection::default();
     let fail = || unsupported("the blend's end on its end face");
     let surf = &fit.surface;
     let (lo, hi) = (fit.range.0.min(fit.range.1), fit.range.0.max(fit.range.1));
@@ -403,7 +416,7 @@ fn tangent_cap(fit: &Fit, g: &mt::Face, tangent_side: u8, seams: [Option<&mt::Ed
     // How far the strip's point (u, v) is outside the end face (negative: inside the body).
     let outside = |u: f64, v: f64| -> Option<f64> {
         let x = from_p3(surf.subs(u, v));
-        let (q, n, _) = project(g, x, None)?;
+        let (q, n, _) = projection.project(g, x, None)?;
         Some((x - q).dot(n))
     };
     // Root of `f` between `lo` and `hi`, `f(lo)` and `f(hi)` of different sign.
@@ -508,6 +521,28 @@ pub(crate) fn project(f: &mt::Face, p: Vec3, hint: Option<(f64, f64)>) -> Option
     Some((q, Vec3::new(n.x, n.y, n.z).normalized()?, uv))
 }
 
+/// Oriented surfaces shared by all stations of one rolling-ball build. Cold
+/// inversion shares the modeling dispatcher's bounded spatial sample index with
+/// the other callers of these surfaces, including intersection-edge evaluation.
+#[derive(Default)]
+pub(crate) struct SectionProjection {
+    faces: std::cell::RefCell<HashMap<(mt::FaceID, bool), mt::Surface>>,
+}
+
+impl SectionProjection {
+    pub(crate) fn project(&self, face: &mt::Face, point: Vec3, hint: Option<(f64, f64)>) -> Option<(Vec3, Vec3, (f64, f64))> {
+        use mt::{ParametricSurface, ParametricSurface3D, SearchNearestParameter};
+        let mut faces = self.faces.try_borrow_mut().ok()?;
+        let surface = faces.entry((face.id(), face.orientation())).or_insert_with(|| face.oriented_surface());
+        // The modeling dispatcher shares its bounded spatial sample index with
+        // intersection-edge evaluation and meshing as well as section solves.
+        let uv = surface.search_nearest_parameter(p3(point), hint, 100).or_else(|| surface.search_nearest_parameter(p3(point), None, 100))?;
+        let q = from_p3(surface.subs(uv.0, uv.1));
+        let n = surface.normal(uv.0, uv.1);
+        Some((q, Vec3::new(n.x, n.y, n.z).normalized()?, uv))
+    }
+}
+
 /// Whether `uv` lies within the parameters of the face's surface (unbounded directions pass).
 pub(crate) fn in_range(f: &mt::Face, uv: (f64, f64)) -> bool {
     use mt::ParametricSurface;
@@ -550,6 +585,25 @@ fn solve_from(
     tol: f64,
     start: Option<Vec3>,
 ) -> Option<Section> {
+    solve_projected(f1, f2, p, t, r, sigma, cusp, extra, tol, start, &SectionProjection::default())
+}
+
+/// The section solve with surface samples shared across stations; hints within the Newton
+/// solve and the fallback to a cold search retain the same acceptance checks.
+#[allow(clippy::too_many_arguments)]
+fn solve_projected(
+    f1: &[&mt::Face],
+    f2: &[&mt::Face],
+    p: Vec3,
+    t: Vec3,
+    r: f64,
+    sigma: f64,
+    cusp: f64,
+    extra: Option<Extra<'_>>,
+    tol: f64,
+    start: Option<Vec3>,
+    projection: &SectionProjection,
+) -> Option<Section> {
     // The nearest face of a side (several faces on one smooth surface group). Each face's
     // search starts from its last answer: the centre moves little between iterations. An
     // answer outside the surface's parameters, or farther than that last point (the search
@@ -559,11 +613,12 @@ fn solve_from(
         fs.iter()
             .filter_map(|f| {
                 let prev = last.borrow().get(&f.id()).copied();
-                let warm =
-                    prev.and_then(|(uv, q)| project(f, c, Some(uv)).filter(|(x, _, uv)| in_range(f, *uv) && x.dist(c) <= q.dist(c) + tol * 1e-3));
+                let warm = prev.and_then(|(uv, q)| {
+                    projection.project(f, c, Some(uv)).filter(|(x, _, uv)| in_range(f, *uv) && x.dist(c) <= q.dist(c) + tol * 1e-3)
+                });
                 let (q, n, uv) = match warm {
                     Some(x) => x,
-                    None => project(f, c, None)?,
+                    None => projection.project(f, c, None)?,
                 };
                 last.borrow_mut().insert(f.id(), (uv, q));
                 Some((q, n))
@@ -707,6 +762,7 @@ struct Sizer<'a> {
     size: Size<'a>,
     /// The tolerance the section's equations are solved at.
     tol: f64,
+    projection: SectionProjection,
 }
 
 impl Sizer<'_> {
@@ -725,14 +781,14 @@ impl Sizer<'_> {
         extra: Option<Extra<'_>>,
     ) -> Option<(Section, f64)> {
         match self.size {
-            Size::Constant(r) => solve(f1, f2, p, t, r, sigma, cusp, extra, self.tol).map(|x| (x, r)),
+            Size::Constant(r) => solve_projected(f1, f2, p, t, r, sigma, cusp, extra, self.tol, None, &self.projection).map(|x| (x, r)),
             Size::Chord(chord) => solve_chord(f1, f2, p, t, chord, sigma, cusp, extra, self.tol),
             Size::Law(law) => {
                 let r = law_beyond(law, s)?;
                 if !(r.is_finite() && (0.0..1e6).contains(&r)) {
                     return None;
                 }
-                solve(f1, f2, p, t, r, sigma, cusp, extra, self.tol).map(|x| (x, r))
+                solve_projected(f1, f2, p, t, r, sigma, cusp, extra, self.tol, None, &self.projection).map(|x| (x, r))
             }
         }
     }
@@ -1290,7 +1346,7 @@ fn curve_blend_sized(solid: &Solid, ids: &[mt::EdgeID], size: f64, size_law: Siz
         let s = sampled(table, along).unwrap_or(0.0);
         ((lo + s) / total).clamp(0.0, 1.0)
     };
-    let sizer = Sizer { size: size_law, tol: tol * 100.0 };
+    let sizer = Sizer { size: size_law, tol: tol * 100.0, projection: SectionProjection::default() };
     // Arcs on a planar side that curve round the ball: its centre runs round them at their
     // radius less the blend's. Less than nothing is too large; nothing is a pivot.
     let mut pivots: Vec<Option<Pivot>> = vec![None; n];

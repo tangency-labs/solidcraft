@@ -902,3 +902,61 @@ edited New Body and Offset Face drag regressions fail while Join passes. With th
 all six distance-preview regressions pass, covering intermediate geometry, exact final
 convergence, unchanged document/undo, obsolete errors and setup changes. A separate regression
 checks the arrow's position on each held input frame.
+
+## Face fillet projection index (#3549)
+
+The reference design's R2 fillet expands three selected faces to fourteen edges.
+The original desktop operation was cancelled after more than 240 seconds. The
+first correctness fix completed in about 8.5 seconds for preview and 7 seconds
+for Apply in the `ci` profile. Those desktop observations include different work
+from the isolated release benchmark below and are not directly comparable.
+
+The production performance change replaces repeated exhaustive cold-grid searches
+with an immutable, shared k-d tree. It preserves the original 51 × 51 spline and
+101 × 101 revolution samples, first-sample tie rule, Newton iterations, explicit
+parameter/range hints and fallback. The retained cache is bounded to 32 MiB and
+128 entries, keyed by owned geometry snapshots rather than pointer identities.
+Unique edge validation and scoped reuse of the same input body's healing remove
+additional repeated work. No model data or serialized design format changes.
+
+Measured on macOS arm64, release profile, Rust 1.99.0, with the correctness fix
+rebased onto `a0c1a672` (baseline feature commit `a7d7bfd8`). Three alternating
+batches started a fresh process for each implementation; no build ran concurrently.
+Each process decoded a fresh native body before timing `kernel::fillet`. Validation,
+output serialization, rendering, file I/O and decode are outside the fillet clock.
+The `tessellate_ms` diagnostic is nested work within that clock, not extra latency.
+
+| Implementation | Rayon workers | Cold fillet, three runs (ms) | Median (ms) |
+|---|---:|---|---:|
+| Correctness fix, exhaustive projection grids | 4 | 3930.850, 3915.485, 3992.391 | 3930.850 |
+| Production projection index and reuse | 4 | 326.447, 313.969, 321.709 | 321.709 |
+| Production projection index and reuse | 16 | 288.357, 289.026, 291.657 | 289.026 |
+
+The same four-worker comparison is **12.2× faster**. Repeated calls in one process
+were about 268 ms; the 100 ms target has not been reached. All nine cold outputs
+had 121 faces, no validity diagnostics, and byte-identical native bodies with
+SHA-256 `7c07db688583e6b8949ad3dd062a766959d00972a30ab68491a5310f8e1a5f12`.
+The input native body SHA-256 is
+`0baec55e1d1359659e83e948121394c282aafd0f660256e7bfde5104eb3d930c`.
+The private reference design and extracted geometry are not committed.
+
+The rebuilt desktop app on the final UI rebase (`8e77d9fd`) also completed the
+three-face R2 / Tangent Chain preview: its worker reported 445.519 ms. Applying
+it produced a 357.353 ms Fillet feature, one shell, 121 kernel faces and no
+feature error. These are one observed preview/feature evaluation in the `ci`
+profile while test binaries were building, not end-to-end Apply wall time or
+an additional controlled release benchmark. The result was inspected visually
+and saved separately; the supplied design was not overwritten.
+
+The reusable benchmark takes an extracted native body and explicit fillet JSON:
+
+```sh
+cargo build --release -p solidcraft-kernel --example blend_bench
+RAYON_NUM_THREADS=4 target/release/examples/blend_bench body.bin params.json 1 result.bin
+```
+
+Use a separate invocation per cold run: the cache persists between runs inside a
+process. Earlier PR research measurements of 290 ms (four workers) and 250 ms
+(sixteen workers) used a more aggressive prototype with different revolution
+seeds; that algorithm is not included in this production change. The measurements
+above describe the implementation actually committed in the PR.

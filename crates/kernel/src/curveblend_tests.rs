@@ -398,6 +398,12 @@ fn a_refused_edge_is_not_rolled_again_after_blends_far_from_it() {
     assert!(matches!(e, KernelError::TooLarge(_)), "{e}");
     let rolls = crate::blend::ROLLS.with(|n| n.get());
     assert_eq!(rolls, 1, "the seam was rolled {rolls} times");
+    // Two picks of the same refused chain used to repeat the rolling-ball build,
+    // even though no successful blend had changed its geometry.
+    crate::blend::ROLLS.with(|n| n.set(0));
+    let e = fillet(&body, &[seam - Vec3::Z * 2.0, seam + Vec3::Z * 2.0], 3.0).unwrap_err();
+    assert!(matches!(e, KernelError::TooLarge(_)), "{e}");
+    assert_eq!(crate::blend::ROLLS.with(|n| n.get()), 1);
     // The far edges alone still round.
     assert!(fillet(&body, &ends, 3.0).is_ok());
 }
@@ -728,4 +734,285 @@ fn round_along_long_lines_and_small_turns_measures_its_volume() {
     assert!((m.volume - want).abs() < 1e-5 * want, "{} vs {want}", m.volume);
     // Centred across the bar, as the part is.
     assert!(m.centroid.x.abs() < 1e-3, "centre of mass x {}", m.centroid.x);
+}
+
+/// #3549: every rolling-ball station used to evaluate the same 2,601 surface points
+/// again. The prepared search retains the cold inversion's answer on both sides of
+/// a rational cylindrical patch, including near its ends.
+#[test]
+fn rolling_sections_reuse_the_surface_search_grid() {
+    let body = crate::box_solid(Vec3::ZERO, Vec3::new(20.0, 30.0, 10.0)).unwrap();
+    let rounded = fillet(&body, &[Vec3::new(0.0, 0.0, 5.0)], 2.0).unwrap();
+    let face = rounded.solid.face_iter().find(|f| matches!(f.surface(), mt::Surface::NurbsSurface(_))).unwrap();
+    for face in [face.clone(), face.inverse()] {
+        let projection = SectionProjection::default();
+        let surface = face.oriented_surface();
+        let (Some((u0, u1)), Some((v0, v1))) = surface.try_range_tuple() else { panic!("bounded round") };
+        for i in 0..20 {
+            let u = u0 + (u1 - u0) * (f64::from(i) + 0.25) / 20.0;
+            let v = v0 + (v1 - v0) * (f64::from(19 - i) + 0.75) / 20.0;
+            let at = from_p3(surface.subs(u, v));
+            let normal = surface.normal(u, v);
+            let normal = Vec3::new(normal.x, normal.y, normal.z).normalized().unwrap();
+            for offset in [-0.5, 0.5] {
+                let p = at + normal * offset;
+                let cold = project(&face, p, None).unwrap();
+                let cached = projection.project(&face, p, None).unwrap();
+                assert!(cold.0.dist(cached.0) < 1e-10, "{cold:?} vs {cached:?}");
+                assert!(cold.1.dot(cached.1) > 1.0 - 1e-10);
+                assert!(cached.0.dist(at) < 1e-8);
+            }
+        }
+        let prepared = projection.faces.borrow();
+        assert_eq!(prepared.len(), 1);
+        assert!(prepared.contains_key(&(face.id(), face.orientation())));
+    }
+}
+
+/// The banded factorization gives the same controls as the old pivoted dense solve,
+/// including the maximum refinement used by a rolling-ball strip. Independent
+/// polynomial values between stations also check that the curve still interpolates.
+#[test]
+fn uniform_cubic_band_solve_matches_dense_interpolation() {
+    for count in [4, 5, 8, 24, 47, 93, 185, 369] {
+        let u: Vec<f64> = (0..count).map(|i| i as f64 / (count - 1) as f64).collect();
+        let value = |t: f64| Vec3::new(20.0 * t, 100.0 * t * t, 50.0 * t * t * t);
+        let points: Vec<Vec3> = u.iter().copied().map(value).collect();
+        let system = crate::build::UniformCubic::new(count).unwrap();
+        let values: Vec<_> = points.iter().map(|p| [p.x, p.y, p.z]).collect();
+        let controls = system.solve(&values).unwrap().into_iter().map(|p| mt::Point3::new(p[0], p[1], p[2])).collect();
+        let band = mt::BSplineCurve::try_new(system.knots, controls).unwrap();
+        let dense = crate::build::interpolate_cubic_at(&points, &u).unwrap();
+        for (a, b) in band.control_points().iter().zip(dense.control_points()) {
+            assert!(from_p3(*a).dist(from_p3(*b)) < 1e-9, "count {count}: {a:?} vs {b:?}");
+        }
+        for i in 0..=50 {
+            let t = f64::from(i) / 50.0;
+            assert!(from_p3(band.subs(t)).dist(value(t)) < 1e-9, "count {count}, t {t}");
+        }
+    }
+}
+
+/// Face selection across pieces of one cylinder must see one rim, including a
+/// chord-sized Boolean fragment; it must not try to fillet artificial seams.
+#[test]
+fn cylindrical_blend_supports_coalesce_with_their_rims() {
+    use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
+    let angles = [-1.0_f64, -0.2, -0.2 + 3.4e-6, 0.2, 1.0];
+    let at = |r: f64, a: f64| Vec2::new(r * a.cos(), r * a.sin());
+    let mut segments = Vec::new();
+    for pair in angles.windows(2) {
+        segments.push(Seg2::Arc { center: Vec2::ZERO, radius: 30.0, start: pair[0], sweep: pair[1] - pair[0] });
+    }
+    segments.push(Seg2::Line { a: at(30.0, 1.0), b: at(25.0, 1.0) });
+    for pair in angles.windows(2).rev() {
+        segments.push(Seg2::Arc { center: Vec2::ZERO, radius: 25.0, start: pair[1], sweep: pair[0] - pair[1] });
+    }
+    segments.push(Seg2::Line { a: at(25.0, -1.0), b: at(30.0, -1.0) });
+    let region = Region2 { outer: Loop2 { segs: segments }, holes: vec![] };
+    let body = crate::extrude(&Plane::XY, &[region], 0.0, 10.0).unwrap().remove(0);
+    assert_eq!(body.face_count(), 12);
+    // A Boolean may represent this 0.1-micrometre rim arc by its chord.
+    let solid = body.deep_copy();
+    let tiny = Body::unique_edges(&solid)
+        .into_iter()
+        .find(|e| {
+            let (a, b) = (from_p3(e.front().point()), from_p3(e.back().point()));
+            a.z.abs() < 1e-9 && b.z.abs() < 1e-9 && a.dist(b) < 0.001 && a.x.hypot(a.y) > 29.
+        })
+        .unwrap();
+    let chord = mt::builder::line(tiny.absolute_front(), tiny.absolute_back());
+    let subst = std::collections::HashMap::from([(tiny.id(), chord)]);
+    // Boolean trim pieces retain the very same underlying support. Give the
+    // separately authored profile arcs that common support for this fixture.
+    let support = |radius: f64, convex: bool| {
+        let (a, b) = if convex { (10., 0.) } else { (0., 10.) };
+        let line = mt::Curve::Line(mt::Line(p3(Vec3::new(radius, 0., a)), p3(Vec3::new(radius, 0., b))));
+        mt::Surface::RevolutedCurve(mt::Processor::new(mt::RevolutedCurve::by_revolution(line, p3(Vec3::ZERO), mt::Vector3::unit_z())))
+    };
+    let faces: Vec<_> = solid
+        .face_iter()
+        .map(|f| {
+            let f = crate::blend::rebuild_face(f, &subst, &[]).unwrap();
+            if matches!(f.surface(), mt::Surface::Plane(_)) {
+                return f;
+            }
+            let points: Vec<_> = f.vertex_iter().map(|v| from_p3(v.point())).collect();
+            let radius = if points.iter().all(|p| p.x.hypot(p.y) > 29.) { 30. } else { 25. };
+            mt::Face::try_new(f.boundaries(), support(radius, radius == 30.)).unwrap()
+        })
+        .collect();
+    let body = Body::new_placed(crate::body::Solid::try_new(vec![faces.into()]).unwrap(), false, None, true).unwrap();
+    let body = crate::boolean_record::operand(&body, 0, &[(body.face_count(), body.edge_count())]);
+    let healed = crate::blend_heal::coalesce(&body, &[Vec3::new(30., 0., 10.), Vec3::new(25., 0., 10.)]).unwrap();
+    assert_eq!(healed.face_count(), 6);
+    assert_eq!(healed.edge_count(), 12);
+    assert!(healed.validity().is_empty(), "{:?}", healed.validity());
+    let volume = crate::measure(&healed).unwrap().volume;
+    assert!((volume - 2750.0).abs() < 0.3, "{volume}");
+    assert!(healed.history().is_some());
+    let split_at = Vec3::new(30. * (-0.2_f64).cos(), 30. * (-0.2_f64).sin(), 0.);
+    let split = body.clone().with_split_lines(Some(std::sync::Arc::new(vec![vec![split_at, split_at + Vec3::Z * 10.]])));
+    let kept = crate::blend_heal::coalesce(&split, &[Vec3::new(30., 0., 10.), Vec3::new(25., 0., 10.)]).unwrap();
+    assert_eq!(kept.face_count(), 7, "an authored cylinder seam must survive");
+    assert!(kept.validity().is_empty());
+    let round = fillet(&body, &[Vec3::new(30.0, 0.0, 10.0)], 1.0).unwrap();
+    assert!(round.validity().is_empty(), "{:?}", round.validity());
+    assert!(crate::measure(&round).unwrap().volume < volume);
+}
+
+#[test]
+fn flat_and_nearly_flat_fillet_seams_have_a_distinct_error() {
+    use crate::extrude;
+    use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
+    for rise in [0., 0.001] {
+        let points = [Vec2::new(0., 0.), Vec2::new(20., 0.), Vec2::new(20., 10.), Vec2::new(10., 10. + rise), Vec2::new(0., 10.)];
+        let outer = Loop2 { segs: (0..points.len()).map(|i| Seg2::Line { a: points[i], b: points[(i + 1) % points.len()] }).collect() };
+        let body = extrude(&Plane::XY, &[Region2 { outer, holes: vec![] }], 0., 10.).unwrap().remove(0);
+        crate::blend::ROLLS.with(|n| n.set(0));
+        let error = fillet(&body, &[Vec3::new(10., 10. + rise, 5.)], 1.).unwrap_err();
+        assert!(matches!(error, KernelError::Invalid(_)), "{error}");
+        assert!(error.to_string().contains("approximately 180 degrees"), "{error}");
+        assert!(!error.to_string().contains("mixes convex"));
+        assert_eq!(crate::blend::ROLLS.with(|n| n.get()), 0);
+    }
+}
+
+#[test]
+fn fillet_selection_preflight_rejects_hostile_points() {
+    let body = crate::box_solid(Vec3::ZERO, Vec3::new(20., 20., 10.)).unwrap();
+    for points in
+        [vec![], vec![Vec3::new(f64::NAN, 0., 0.)], vec![Vec3::new(f64::INFINITY, 0., 0.)], vec![Vec3::ZERO; 1001], vec![Vec3::new(1e10, 0., 0.)]]
+    {
+        assert!(crate::check_fillet_edges(&body, &points).is_err());
+    }
+}
+
+/// The bottom rim is concave, the two wall corners and top rim convex. They
+/// round together by following the new base fillet's end arcs, not by treating
+/// mixed sense alone as an error.
+#[test]
+fn a_cylindrical_face_can_round_its_convex_and_concave_edges_together() {
+    use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2};
+    let at = |r: f64, a: f64| Vec2::new(r * a.cos(), r * a.sin());
+    let outer = Loop2 {
+        segs: vec![
+            Seg2::Arc { center: Vec2::ZERO, radius: 30., start: -1., sweep: 2. },
+            Seg2::Line { a: at(30., 1.), b: at(25., 1.) },
+            Seg2::Arc { center: Vec2::ZERO, radius: 25., start: 1., sweep: -2. },
+            Seg2::Line { a: at(25., -1.), b: at(30., -1.) },
+        ],
+    };
+    let post = crate::extrude(&Plane::XY, &[Region2 { outer, holes: vec![] }], 5., 25.).unwrap().remove(0);
+    let base = crate::box_solid(Vec3::new(-40., -40., 0.), Vec3::new(40., 40., 10.)).unwrap();
+    let body = boolean(&base, &post, BoolOp::Union).unwrap().unwrap();
+    let points = [
+        Vec3::new(30., 0., 10.),
+        Vec3::new(30., 0., 30.),
+        Vec3::new(30. * 1_f64.cos(), 30. * 1_f64.sin(), 20.),
+        Vec3::new(30. * 1_f64.cos(), -30. * 1_f64.sin(), 20.),
+    ];
+    for picks in [points.to_vec(), points.into_iter().rev().collect()] {
+        let out = fillet(&body, &picks, 2.).unwrap();
+        assert!(out.validity().is_empty(), "{:?}", out.validity());
+        assert_eq!(out.crossed_face_loops().unwrap(), 0);
+        assert!(crate::tess::boundaries_on_surfaces(&out.solid, out.size() * 1e-4));
+        assert!(out.face_count() > body.face_count());
+    }
+}
+
+/// The index must select the *same sample*, including ties, as the old scan;
+/// the sample is only a seed for the unchanged exact Newton projection.
+#[test]
+fn spatial_projection_seeds_match_cold_grids_and_preserve_surface_changes() {
+    use mt::{InnerSpace, Invertible, Transformed};
+    let control: Vec<Vec<_>> =
+        (0..4).map(|i| (0..4).map(|j| mt::Point3::new(i as f64 * 2.0, j as f64 * 3.0, 0.13 * (i * j) as f64)).collect()).collect();
+    let spline = mt::BSplineSurface::new((mt::KnotVec::bezier_knot(3), mt::KnotVec::bezier_knot(3)), control.clone());
+    let rational = mt::NurbsSurface::new(mt::BSplineSurface::new(
+        (mt::KnotVec::bezier_knot(3), mt::KnotVec::bezier_knot(3)),
+        control
+            .iter()
+            .enumerate()
+            .map(|(i, row)| {
+                row.iter()
+                    .enumerate()
+                    .map(|(j, p)| {
+                        let w = 1.0 + (i + j) as f64 * 0.17;
+                        mt::Vector4::new(p.x * w, p.y * w, p.z * w, w)
+                    })
+                    .collect()
+            })
+            .collect(),
+    ));
+    let profile = mt::Curve::Line(mt::Line(mt::Point3::new(4.0, 0.0, -2.0), mt::Point3::new(4.0, 0.0, 9.0)));
+    let mut revolved =
+        mt::Processor::new(mt::RevolutedCurve::by_revolution(profile, mt::Point3::new(0.0, 0.0, 0.0), mt::Vector3::new(0.0, 0.0, 1.0)));
+    revolved.transform_by(mt::Matrix4::new(1.2, 0.0, 0.0, 0.0, 0.3, 0.8, 0.0, 0.0, 0.0, 0.0, -1.1, 0.0, 2.0, -3.0, 4.0, 1.0));
+    let mut changed = spline.clone();
+    for p in changed.control_points_mut() {
+        p.x += 2.125;
+        p.z -= 0.75;
+    }
+    let mut surfaces = vec![
+        mt::Surface::BSplineSurface(spline),
+        mt::Surface::NurbsSurface(rational),
+        mt::Surface::RevolutedCurve(revolved),
+        mt::Surface::BSplineSurface(changed),
+    ];
+    // Reversed charts swap the revolved parameter axes; the cache cannot alias
+    // these with the forward surface or with a modified geometry snapshot.
+    surfaces.extend(surfaces.clone().into_iter().map(|mut s| {
+        s.invert();
+        s
+    }));
+    for surface in surfaces.iter().chain(surfaces.iter().rev()) {
+        let (Some(ur), Some(vr)) = surface.try_range_tuple() else { panic!("bounded fixture") };
+        let division = if matches!(surface, mt::Surface::RevolutedCurve(_)) { 100 } else { 50 };
+        for k in 0..12 {
+            let u = ur.0 + (ur.1 - ur.0) * f64::from(k) / 11.0;
+            let v = vr.0 + (vr.1 - vr.0) * f64::from(11 - k) / 11.0;
+            let on = surface.subs(u, v);
+            let n = surface.normal(u, v);
+            let p = on + n * 0.23;
+            let reference = mt::algo::surface::presearch(surface, p, (ur, vr), division);
+            assert_eq!(mt::projection_seed(surface, p), Some(reference));
+            let expected = mt::algo::surface::search_nearest_parameter(surface, p, reference, 100);
+            let actual = surface.search_nearest_parameter(p, None, 100);
+            match (expected, actual) {
+                (Some(a), Some(b)) => assert!((surface.subs(a.0, a.1) - surface.subs(b.0, b.1)).magnitude() < 1e-9),
+                (None, None) => {}
+                other => panic!("projection changed: {other:?}"),
+            }
+        }
+    }
+    // A rank-deficient patch has many identical grid points. Tie handling must
+    // retain the first grid index instead of depending on tree traversal order.
+    let tied = mt::Surface::BSplineSurface(mt::BSplineSurface::new(
+        (mt::KnotVec::bezier_knot(1), mt::KnotVec::bezier_knot(1)),
+        vec![vec![mt::Point3::new(0.0, 0.0, 0.0); 2]; 2],
+    ));
+    assert_eq!(mt::projection_seed(&tied, mt::Point3::new(1.0, 2.0, 3.0)), Some((0.0, 0.0)));
+    assert!(mt::projection_seed(&tied, mt::Point3::new(f64::NAN, 0.0, 0.0)).is_none());
+    let mut invalid = control;
+    invalid[0][0].x = f64::NAN;
+    let invalid = mt::Surface::BSplineSurface(mt::BSplineSurface::new((mt::KnotVec::bezier_knot(3), mt::KnotVec::bezier_knot(3)), invalid));
+    assert!(mt::projection_seed(&invalid, mt::Point3::new(1.0, 2.0, 3.0)).is_none());
+    let oversized = mt::Surface::BSplineSurface(mt::BSplineSurface::new(
+        (mt::KnotVec::bezier_knot(1), mt::KnotVec::uniform_knot(1, 5999)),
+        vec![vec![mt::Point3::new(0.0, 0.0, 0.0); 6000]; 2],
+    ));
+    assert!(mt::projection_seed(&oversized, mt::Point3::new(1.0, 2.0, 3.0)).is_none());
+    std::thread::scope(|scope| {
+        for surface in &surfaces {
+            scope.spawn(move || {
+                let (Some(ur), Some(vr)) = surface.try_range_tuple() else { panic!("bounded fixture") };
+                for k in 0..4 {
+                    let p = mt::Point3::new(f64::from(k), 1.23, -0.73);
+                    let division = if matches!(surface, mt::Surface::RevolutedCurve(_)) { 100 } else { 50 };
+                    assert_eq!(mt::projection_seed(surface, p), Some(mt::algo::surface::presearch(surface, p, (ur, vr), division)));
+                }
+            });
+        }
+    });
 }

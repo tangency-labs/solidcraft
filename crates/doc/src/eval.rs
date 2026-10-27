@@ -7605,6 +7605,9 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                 let Some(mb) = st.bodies.get(*ti) else { return Err(DocError::Invalid("body".into())) };
                 let mut w = None;
                 let edges = blend_edges_on(mb, f, edges, idx, &mut w)?;
+                if matches!(f.kind, FeatureKind::Fillet { .. }) {
+                    kernel::check_fillet_edges(&mb.body, &edges)?;
+                }
                 if let Some(w) = w {
                     notes.push(w);
                 }

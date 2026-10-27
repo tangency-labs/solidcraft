@@ -3,10 +3,11 @@
 //! surfaces from nothing for every point. These pin the hinted division to the search from
 //! nothing, so a refresh of the vendored crate can't quietly lose the speedup or change a body.
 
-use std::time::{Duration, Instant};
+use std::cell::Cell;
 
 use solidcraft_geom::{Loop2, Plane, Region2, Seg2, Vec2, Vec3};
 use truck_modeling as mt;
+use truck_modeling::base as truck_geotrait;
 use truck_modeling::{BoundedCurve, ParameterDivision1D};
 
 use crate::{Body, BoolOp, build::extrude, cylinder, ops::boolean};
@@ -28,10 +29,37 @@ fn intersection_curves(body: &Body) -> Vec<mt::Curve> {
     body.solid.edge_iter().map(|e| e.curve()).filter(|c| matches!(c, mt::Curve::IntersectionCurve(_))).collect()
 }
 
-fn timed<T>(f: impl Fn() -> T) -> (T, Duration) {
-    let start = Instant::now();
+// Count the work #1038 removes instead of comparing wall clocks: #3549 also
+// accelerates cold searches, so their relative latency no longer measures
+// whether neighbour hints are retained. Keep both algorithms' geometry checks.
+#[derive(Clone, mt::ParametricSurface)]
+struct CountedSurface(mt::Surface);
+
+impl mt::ParametricSurface3D for CountedSurface {
+    fn normal(&self, u: f64, v: f64) -> mt::Vector3 {
+        self.0.normal(u, v)
+    }
+}
+
+thread_local! {
+    static COLD_SEARCHES: Cell<usize> = const { Cell::new(0) };
+}
+
+impl mt::SearchNearestParameter<mt::D2> for CountedSurface {
+    type Point = mt::Point3;
+    fn search_nearest_parameter<H: Into<mt::SPHint2D>>(&self, point: mt::Point3, hint: H, trials: usize) -> Option<(f64, f64)> {
+        let hint = hint.into();
+        if matches!(hint, mt::SPHint2D::None) {
+            COLD_SEARCHES.with(|n| n.set(n.get() + 1));
+        }
+        self.0.search_nearest_parameter(point, hint, trials)
+    }
+}
+
+fn counted<T>(f: impl Fn() -> T) -> (T, usize) {
+    COLD_SEARCHES.with(|n| n.set(0));
     let out = f();
-    (out, start.elapsed())
+    (out, COLD_SEARCHES.with(Cell::get))
 }
 
 #[test]
@@ -51,17 +79,23 @@ fn a_small_hole_in_a_large_spline_face_cuts_cleanly() {
 }
 
 #[test]
-fn hinted_division_matches_the_search_from_nothing_and_is_faster() {
+fn hinted_division_matches_the_indexed_search_and_uses_fewer_cold_queries() {
     let (_, cut) = holed();
-    let (mut hinted_time, mut scratch_time) = (Duration::ZERO, Duration::ZERO);
+    let (mut hinted_queries, mut scratch_queries) = (0, 0);
     for curve in intersection_curves(&cut) {
         let mt::Curve::IntersectionCurve(ic) = &curve else { continue };
+        let counted_curve = mt::IntersectionCurve::new_unchecked(
+            Box::new(CountedSurface(ic.surface0().clone())),
+            Box::new(CountedSurface(ic.surface1().clone())),
+            ic.leader().clone(),
+            ic.tolerance(),
+        );
         let range = ic.range_tuple();
         for tol in [0.01, 0.001] {
-            let ((hp, hq), ht) = timed(|| ic.parameter_division(range, tol));
-            let ((sp, _), st) = timed(|| mt::algo::curve::parameter_division(ic, range, tol));
-            hinted_time += ht;
-            scratch_time += st;
+            let ((hp, hq), hq_count) = counted(|| counted_curve.parameter_division(range, tol));
+            let ((sp, _), sq_count) = counted(|| mt::algo::curve::parameter_division(&counted_curve, range, tol));
+            hinted_queries += hq_count;
+            scratch_queries += sq_count;
             // The same division up to rounding: the hinted projections converge to within the
             // Newton tolerance of the searched ones, so a split the chord test only just asks for
             // can come out one way or the other, but no more than that.
@@ -74,10 +108,7 @@ fn hinted_division_matches_the_search_from_nothing_and_is_faster() {
             }
         }
     }
-    eprintln!("hinted {hinted_time:?}, from nothing {scratch_time:?}");
-    // The hinted path skips each point's grid search of the B-spline face; a loose bound, so a
-    // loaded runner doesn't trip it, but one a fallback to the search for every point would.
-    assert!(hinted_time * 2 < scratch_time, "hinted {hinted_time:?}, from nothing {scratch_time:?}");
+    assert!(hinted_queries * 2 < scratch_queries, "hinted {hinted_queries} cold queries, from nothing {scratch_queries}");
 }
 
 /// #4623: dividing an intersection edge at a tolerance finer than truck's 1e-6 (or one that is

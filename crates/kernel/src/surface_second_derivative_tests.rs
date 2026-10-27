@@ -94,3 +94,73 @@ fn nurbs_surface_second_derivatives_match_finite_differences() {
         assert!(v3(s.vvder(u, v)).dist(vv) < 1e-4 * scale, "vvder at ({u}, {v}): {:?} vs {vv:?}", s.vvder(u, v));
     }
 }
+
+/// Dense basis sums independently check that skipping exactly zero coefficients
+/// preserves long curves and strips, their ends, extrapolation and all derivatives.
+#[test]
+fn compact_support_spline_evaluation_matches_dense_sums() {
+    use mt::ParametricCurve;
+    fn knots(count: usize) -> mt::KnotVec {
+        let mut k = vec![0.0; 4];
+        k.extend((1..count - 3).map(|i| i as f64 / (count - 3) as f64));
+        k.extend([1.0; 4]);
+        mt::KnotVec::from(k)
+    }
+    fn basis(k: &mt::KnotVec, degree: usize, t: f64, derivative: usize) -> Vec<f64> {
+        if derivative == 0 {
+            return k.bspline_basis_functions(degree, t);
+        }
+        let lower = basis(k, degree - 1, t, derivative - 1);
+        (0..k.len() - degree - 1)
+            .map(|i| {
+                let a = k[i + degree] - k[i];
+                let b = k[i + degree + 1] - k[i + 1];
+                degree as f64 * (if a == 0.0 { 0.0 } else { lower[i] / a } - if b == 0.0 { 0.0 } else { lower[i + 1] / b })
+            })
+            .collect()
+    }
+    let (nu, nv) = (9, 385);
+    let (ku, kv) = (knots(nu), knots(nv));
+    let rows: Vec<Vec<mt::Point3>> = (0..nu)
+        .map(|i| {
+            (0..nv)
+                .map(|j| {
+                    let (x, y) = (i as f64 / (nu - 1) as f64, j as f64 / (nv - 1) as f64);
+                    mt::Point3::new(x, 30.0 * y, (x * 2.0).sin() + (y * 3.0).cos() + x * y)
+                })
+                .collect()
+        })
+        .collect();
+    let surface = mt::BSplineSurface::new((ku.clone(), kv.clone()), rows.clone());
+    let curve = mt::BSplineCurve::new(kv.clone(), rows[3].clone());
+    for (u, v) in [(-0.1, 0.23), (0.0, 0.0), (0.01, 0.87), (0.37, 0.5), (0.7, 0.001), (1.0, 1.0), (1.1, 0.83)] {
+        for (du, dv) in [(0, 0), (1, 0), (0, 1), (2, 0), (0, 2), (1, 1)] {
+            let (bu, bv) = (basis(&ku, 3, u, du), basis(&kv, 3, v, dv));
+            let mut expected = Vec3::ZERO;
+            for (i, row) in rows.iter().enumerate() {
+                for (j, p) in row.iter().enumerate() {
+                    expected += from_p3(*p) * (bu[i] * bv[j]);
+                }
+            }
+            let actual = match (du, dv) {
+                (0, 0) => from_p3(surface.subs(u, v)),
+                (1, 0) => v3(surface.uder(u, v)),
+                (0, 1) => v3(surface.vder(u, v)),
+                (2, 0) => v3(surface.uuder(u, v)),
+                (0, 2) => v3(surface.vvder(u, v)),
+                _ => v3(surface.uvder(u, v)),
+            };
+            assert!(actual.dist(expected) < 1e-9 * expected.len().max(1.0), "({u},{v}) derivative ({du},{dv}): {actual:?} vs {expected:?}");
+        }
+        for d in 0..=2 {
+            let weights = basis(&kv, 3, v, d);
+            let expected = rows[3].iter().zip(weights).fold(Vec3::ZERO, |sum, (p, w)| sum + from_p3(*p) * w);
+            let actual = match d {
+                0 => from_p3(curve.subs(v)),
+                1 => v3(curve.der(v)),
+                _ => v3(curve.der2(v)),
+            };
+            assert!(actual.dist(expected) < 1e-9 * expected.len().max(1.0), "curve {v}, derivative {d}: {actual:?} vs {expected:?}");
+        }
+    }
+}

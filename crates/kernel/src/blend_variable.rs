@@ -208,7 +208,7 @@ pub fn fillet_variable_points(body: &Body, edge_at: Vec3, start: Vec3, points: &
 /// nearest `start`. One end's radius may be zero. A curved edge, or one between curved faces, is
 /// rolled by a ball of the law's radius instead ([`curved_variable`]).
 pub fn fillet_variable_spline(body: &Body, edge_at: Vec3, start: Vec3, spline: &RadiusSpline) -> Result<Body> {
-    body.require_brep("fillet")?;
+    crate::check_fillet_edges(body, &[edge_at])?;
     spline.check()?;
     let edge = crate::surfaces::edge_near(body, edge_at).ok_or_else(|| KernelError::Invalid(format!("no edge at {edge_at:?}")))?;
     guard("variable fillet", || {
@@ -592,7 +592,7 @@ pub fn fillet_tapered(body: &Body, edges: &[Vec3], radius: f64) -> Result<(Body,
 /// curved edge, or one between curved faces (or a chain of selected edges running on into one),
 /// is rolled by a ball whose radius gives the same width, which follows the face angle along it.
 pub fn fillet_chord(body: &Body, edges: &[Vec3], chord: f64) -> Result<Body> {
-    body.require_brep("fillet")?;
+    crate::check_fillet_edges(body, edges)?;
     if !(chord.is_finite() && chord > 1e-6 && chord < 1e6) {
         return Err(KernelError::Invalid("the chord length must be positive".into()));
     }

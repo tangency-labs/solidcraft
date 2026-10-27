@@ -2455,6 +2455,96 @@ pub(crate) fn interpolate_cubic(pts: &[Vec3]) -> Option<mt::BSplineCurve<mt::Poi
     interpolate_cubic_at(pts, &u)
 }
 
+/// The uniform cubic interpolation system, factored once for all coordinates of a
+/// strip. Averaged cubic knots give a totally positive collocation matrix with
+/// at most three diagonals on either side: elimination needs no pivoting or fill
+/// outside that band. Keep the factors in seven entries per row, rather than
+/// repeatedly cloning and eliminating dense rows (#3549).
+pub(crate) struct UniformCubic {
+    pub knots: mt::KnotVec,
+    lu: Vec<[f64; 7]>,
+}
+
+impl UniformCubic {
+    pub fn new(count: usize) -> Option<Self> {
+        if count < 4 {
+            return None;
+        }
+        let u: Vec<f64> = (0..count).map(|i| i as f64 / (count - 1) as f64).collect();
+        let mut knots = vec![0.0; 4];
+        for j in 1..count - 3 {
+            knots.push(u.get(j..j + 3)?.iter().sum::<f64>() / 3.0);
+        }
+        knots.extend([1.0; 4]);
+        let lu = u
+            .iter()
+            .enumerate()
+            .map(|(row, u)| {
+                let basis = cubic_basis(&knots, count, *u);
+                std::array::from_fn(|k| row.checked_add(k)?.checked_sub(3).and_then(|col| basis.get(col)).copied()).map(|v| v.unwrap_or(0.0))
+            })
+            .collect();
+        let mut fit = Self { knots: mt::KnotVec::from(knots), lu };
+        for col in 0..count {
+            let pivot = fit.at(col, col);
+            if !pivot.is_finite() || pivot.abs() < 1e-14 {
+                return None;
+            }
+            for row in col + 1..(col + 4).min(count) {
+                let factor = fit.at(row, col) / pivot;
+                fit.set(row, col, factor)?;
+                for k in col + 1..(col + 4).min(count) {
+                    fit.set(row, k, fit.at(row, k) - factor * fit.at(col, k))?;
+                }
+            }
+        }
+        Some(fit)
+    }
+
+    fn at(&self, row: usize, col: usize) -> f64 {
+        col.checked_add(3).and_then(|v| v.checked_sub(row)).and_then(|k| self.lu.get(row)?.get(k)).copied().unwrap_or(0.0)
+    }
+
+    fn set(&mut self, row: usize, col: usize, value: f64) -> Option<()> {
+        let k = col.checked_add(3)?.checked_sub(row)?;
+        *self.lu.get_mut(row)?.get_mut(k)? = value;
+        Some(())
+    }
+
+    pub fn solve<const D: usize>(&self, samples: &[[f64; D]]) -> Option<Vec<[f64; D]>> {
+        if samples.len() != self.lu.len() {
+            return None;
+        }
+        let mut q = samples.to_vec();
+        for row in 0..q.len() {
+            for col in row.saturating_sub(3)..row {
+                let prev = *q.get(col)?;
+                let factor = self.at(row, col);
+                for (x, y) in q.get_mut(row)?.iter_mut().zip(prev) {
+                    *x -= factor * y;
+                }
+            }
+        }
+        for row in (0..q.len()).rev() {
+            for col in row + 1..(row + 4).min(q.len()) {
+                let next = *q.get(col)?;
+                let factor = self.at(row, col);
+                for (x, y) in q.get_mut(row)?.iter_mut().zip(next) {
+                    *x -= factor * y;
+                }
+            }
+            let pivot = self.at(row, row);
+            for x in q.get_mut(row)? {
+                *x /= pivot;
+                if !x.is_finite() {
+                    return None;
+                }
+            }
+        }
+        Some(q)
+    }
+}
+
 /// A cubic B-spline surface through a grid of samples at uniform parameters: cubics across v
 /// through each u index's samples, then cubics across u through their control points.
 pub(crate) struct NetFit {
@@ -2504,7 +2594,7 @@ pub(crate) fn interpolate_cubic_chordal(pts: &[Vec3]) -> Option<(mt::BSplineCurv
 }
 
 /// The cubic B-spline through `pts` at parameters `u` (rising from 0 to 1), its knots averaged.
-fn interpolate_cubic_at(pts: &[Vec3], u: &[f64]) -> Option<mt::BSplineCurve<mt::Point3>> {
+pub(crate) fn interpolate_cubic_at(pts: &[Vec3], u: &[f64]) -> Option<mt::BSplineCurve<mt::Point3>> {
     let m = pts.len();
     if m < 4 || u.len() != m {
         return None;

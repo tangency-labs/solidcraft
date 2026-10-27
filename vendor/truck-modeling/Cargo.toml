@@ -1,0 +1,58 @@
+# SolidCraft: published 0.6.0 manifest without upstream example/dev targets.
+[package]
+edition = "2021"
+name = "truck-modeling"
+version = "0.6.0"
+authors = ["Yoshinori Tanimura <tanimura@ricos.co.jp>"]
+build = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+description = "integrated modeling algorithms by geometry and topology"
+homepage = "https://github.com/ricosjp/truck"
+readme = "README.md"
+keywords = [
+    "truck",
+    "graphics",
+]
+categories = ["graphics"]
+license = "Apache-2.0"
+repository = "https://github.com/ricosjp/truck"
+
+[lib]
+name = "truck_modeling"
+path = "src/lib.rs"
+
+# SolidCraft: run vendored equivalence checks through the workspace kernel tests.
+[features]
+test-hooks = []
+
+[dependencies.derive_more]
+version = "0.99.18"
+
+[dependencies.rustc-hash]
+version = "2.0.0"
+
+[dependencies.serde]
+version = "1.0.210"
+features = ["derive"]
+
+[dependencies.thiserror]
+version = "1.0.63"
+
+[dependencies.truck-base]
+version = "0.5.0"
+
+[dependencies.truck-geometry]
+version = "0.5.0"
+
+[dependencies.truck-geotrait]
+version = "0.4.0"
+features = ["derive"]
+
+[dependencies.truck-polymesh]
+version = "0.6.0"
+
+[dependencies.truck-topology]
+version = "0.6.0"

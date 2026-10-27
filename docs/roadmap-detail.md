@@ -599,6 +599,13 @@ completed drawings publish atomically. The browser still exports synchronously.
   clear of the flange beside it, and the returns of one feature are mitred toward each other
   with the rule's gap where their flanges meet at a corner; returns of separate features, and
   flanges on returns, are not closed toward each other.
+- Face fillets heal fragmented cylindrical rims, order concave rims and convex corners
+  so supported mixed selections build, and reuse surface-search grids and banded spline
+  solves. Smooth seams near 180 degrees are refused before fitting.
+- Cold surface projection shares bounded nearest-sample spatial indexes across
+  fillet sections, intersection curves, healing and meshing. A fillet reuses its
+  unchanged input's healing through construction and acceptance checks.
+
 - Rolling-ball fillet accuracy: independent offset-cylinder tee references check surface
   distance, actual trimmed tessellation, supporting-cylinder contacts and tangency at two
   scales. The measured trimmed-part error is below 0.0001 mm; this is an analytic geometry

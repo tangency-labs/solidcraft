@@ -295,6 +295,7 @@ impl<P: ControlPoint<f64>> ParametricCurve for BSplineCurve<P> {
     /// ```
     #[inline(always)]
     fn subs(&self, t: f64) -> P {
+        // SolidCraft: omit zero-support controls, as for B-spline surfaces.
         let basis = self
             .knot_vec
             .try_bspline_basis_functions(self.degree(), t)
@@ -302,6 +303,7 @@ impl<P: ControlPoint<f64>> ParametricCurve for BSplineCurve<P> {
         self.control_points
             .iter()
             .zip(basis)
+            .filter(|(_, b)| *b != 0.0)
             .fold(P::origin(), |sum, (pt, basis)| sum + pt.to_vec() * basis)
     }
     /// Substitutes to the derived B-spline curve.
@@ -331,6 +333,7 @@ impl<P: ControlPoint<f64>> ParametricCurve for BSplineCurve<P> {
             .bspline_basis_functions(k - 1, t)
             .into_iter()
             .enumerate()
+            .filter(|(_, b)| *b != 0.0)
             .fold(P::Diff::zero(), closure)
             * k as f64
     }
@@ -369,6 +372,7 @@ impl<P: ControlPoint<f64>> ParametricCurve for BSplineCurve<P> {
             .bspline_basis_functions(k - 2, t)
             .into_iter()
             .enumerate()
+            .filter(|(_, b)| *b != 0.0)
             .fold(P::Diff::zero(), closure)
             * k as f64
             * (k - 1) as f64

@@ -152,6 +152,7 @@ debug = "line-tables-only"
 
 # truck-shapeops with SolidCraft fixes (Apache-2.0, see vendor/truck-shapeops and ATTRIBUTION.md).
 [patch.crates-io]
+truck-modeling = { path = "vendor/truck-modeling" }
 truck-geometry = { path = "vendor/truck-geometry" }
 truck-shapeops = { path = "vendor/truck-shapeops" }
 truck-stepio = { path = "vendor/truck-stepio" }

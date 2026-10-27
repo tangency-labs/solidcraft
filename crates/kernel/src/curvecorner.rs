@@ -20,8 +20,8 @@ use solidcraft_geom::Vec3;
 use truck_modeling::{self as mt, builder};
 
 use super::{
-    Guide, MAX_SAMPLES, SAMPLES, Section, fit_sections, in_proportion, knife_convex, knife_start, nearest_on, project, section_fits, solve_from,
-    unsupported,
+    Guide, MAX_SAMPLES, SAMPLES, Section, SectionProjection, fit_sections, in_proportion, knife_convex, knife_start, nearest_on, project,
+    section_fits, solve_projected, unsupported,
 };
 use crate::blend::{too_large, vtx};
 use crate::body::{Solid, from_p3, p3, v3};
@@ -506,13 +506,14 @@ fn strip(
     // At a knife edge each ball starts where the last one was, beside it (the first where the
     // faces are a diameter apart): the edge itself is no start.
     let offset: Cell<Option<Vec3>> = Cell::new(None);
+    let projection = SectionProjection::default();
     let ball = |p: Vec3, t: Vec3| -> Option<Section> {
         let start = match (knife, offset.get()) {
             (None, _) => None,
             (Some(_), Some(o)) => Some(p + o),
             (Some(into), None) => Some(knife_start(&o1, &o2, p, t, into, r)?),
         };
-        let s = solve_from(&o1, &o2, p, t, r, sigma, 0.0, None, tol * 100.0, start)?;
+        let s = solve_projected(&o1, &o2, p, t, r, sigma, 0.0, None, tol * 100.0, start, &projection)?;
         if knife.is_some() {
             offset.set(Some(s.c - p));
         }
@@ -565,7 +566,7 @@ fn strip(
             return guide.sections.last().copied().ok_or_else(|| fail("section"));
         }
         let (anchor, t) = guide.anchor(along).ok_or_else(|| unsupported("degenerate rolling-ball spine"))?;
-        solve_from(&o1, &o2, anchor, t, r, sigma, 0.0, None, tol * 100.0, None)
+        solve_projected(&o1, &o2, anchor, t, r, sigma, 0.0, None, tol * 100.0, None, &projection)
             .ok_or_else(|| unsupported("the ball doesn't fit along the resampled spine"))
     };
     let mut samples = SAMPLES;

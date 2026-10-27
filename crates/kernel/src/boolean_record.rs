@@ -5,7 +5,7 @@
 //! they take ([`History::over`], [`History::substitute`]); a path that cannot leaves the result
 //! without history.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use solidcraft_geom::Vec3;
 use truck_modeling as mt;
@@ -126,7 +126,8 @@ const EVALUATION_SAMPLES: usize = 32;
 pub(crate) fn edges_evaluate(solid: &Solid) -> bool {
     use truck_meshalgo::prelude::TrySubs;
     use truck_modeling::BoundedCurve;
-    solid.boundaries().iter().flat_map(|shell| shell.edge_iter()).all(|edge| {
+    let mut checked = HashSet::new();
+    solid.boundaries().iter().flat_map(|shell| shell.edge_iter()).filter(|edge| checked.insert(edge.id())).all(|edge| {
         let curve = edge.curve();
         let (t0, t1) = curve.range_tuple();
         (0..=EVALUATION_SAMPLES).all(|k| {
@@ -202,8 +203,54 @@ pub(crate) fn heal_prism_result(body: &Body, size: f64, keep: &[Vec<Vec3>], coun
 /// `body` healed as the local modifiers take it (coplanar neighbours as one face, as after a
 /// join; faces split on purpose kept apart), with its history over `[body]`.
 pub(crate) fn healed(body: &Body) -> Result<Body> {
+    if let Some(healed) = PREPARED.with(|slot| slot.try_borrow().ok()?.as_ref().filter(|entry| std::ptr::eq(entry.input, body))?.healed.clone()) {
+        return Ok(healed);
+    }
     let counts = record::counts(&[body]);
-    heal_body(&operand(body, 0, &counts), body.deep_copy(), body.size(), body.split_keep(), &counts)
+    let healed = heal_body(&operand(body, 0, &counts), body.deep_copy(), body.size(), body.split_keep(), &counts)?;
+    PREPARED.with(|slot| {
+        if let Ok(mut slot) = slot.try_borrow_mut()
+            && let Some(entry) = slot.as_mut().filter(|entry| std::ptr::eq(entry.input, body))
+        {
+            entry.healed = Some(healed.clone());
+        }
+    });
+    Ok(healed)
+}
+
+/// The exact input reference of one synchronous modifier invocation. The pointer
+/// is only compared, never dereferenced: `with_prepared` keeps its borrow alive
+/// until the scope restores the prior entry. A clone with different metadata is
+/// a different reference and cannot accidentally use another input's history.
+struct PreparedInput {
+    input: *const Body,
+    healed: Option<Body>,
+}
+
+thread_local! {
+    static PREPARED: std::cell::RefCell<Option<PreparedInput>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Reuse healing of this unchanged input during a fillet's construction and
+/// acceptance checks. Nested operations and escaped panics restore the outer
+/// scope; no cached body survives the operation that borrowed its input.
+pub(crate) fn with_prepared<T>(input: &Body, run: impl FnOnce() -> T) -> T {
+    struct Restore(Option<PreparedInput>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            PREPARED.with(|slot| {
+                if let Ok(mut slot) = slot.try_borrow_mut() {
+                    *slot = self.0.take();
+                }
+            });
+        }
+    }
+    let previous = PREPARED
+        .with(|slot| slot.try_borrow_mut().ok().map(|mut slot| slot.replace(PreparedInput { input: std::ptr::from_ref(input), healed: None })));
+    let restore = previous.map(Restore);
+    let result = run();
+    drop(restore);
+    result
 }
 
 /// `body` copied as it is, unhealed (`Body::deep_copy`, which keeps its face and edge order),
