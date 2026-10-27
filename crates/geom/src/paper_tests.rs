@@ -83,6 +83,7 @@ fn each_kind_names_its_layer_in_the_capitals_of_its_id() {
         (TitleBlock, "TITLE_BLOCK"),
         (PartsList, "PARTS_LIST"),
         (RevisionTable, "REVISION_TABLE"),
+        (View, "VIEW"),
     ] {
         assert_eq!(kind.layer(), layer);
         let id = layer.to_ascii_lowercase();

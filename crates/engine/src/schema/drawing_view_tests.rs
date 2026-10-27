@@ -16,6 +16,7 @@ fn schemas_and_the_key_check_agree() {
         "reference_margin_mm",
         "reference_style",
         "scale",
+        "scene",
         "sheet",
         "tangent_edges",
         "view",
@@ -55,9 +56,9 @@ fn the_contract_lists_the_view_settings() {
     // With a scale: none is left out when written.
     let settings = serde_json::to_value(ViewSettings { scale: "1:2".parse().ok(), ..ViewSettings::default() }).unwrap_or_default();
     let mut theirs: Vec<String> = settings.as_object().map(|o| o.keys().cloned().collect()).unwrap_or_default();
-    // Beside a view's settings, the request's own: where it goes, its page, and its lines' chord
-    // and accuracy check.
-    theirs.extend(["position_mm", "sheet", "chord_mm", "max_error_mm"].map(String::from));
+    // Beside a view's settings, the request's own: where it goes, its page, its lines' chord and
+    // accuracy check, and whether it wants the paper scene.
+    theirs.extend(["position_mm", "sheet", "chord_mm", "max_error_mm", "scene"].map(String::from));
     theirs.sort();
     let schema = input_schema_for::<SnapshotParams>();
     let mut ours: Vec<String> = schema.as_value()["properties"].as_object().map(|o| o.keys().cloned().collect()).unwrap_or_default();

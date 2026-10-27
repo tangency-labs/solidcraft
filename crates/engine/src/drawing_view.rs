@@ -20,7 +20,7 @@ use crate::{Result, Session};
 #[path = "drawing_view_lines.rs"]
 mod lines;
 
-pub use lines::{CHORD_MM, CHORD_RANGE, Lines, Piece, ViewLine, lines};
+pub use lines::{CHORD_MM, CHORD_RANGE, Lines, Piece, VISIBLE_MM, ViewLine, lines, paper_group};
 
 /// The paper millimetres each way of a view's boundary when there's nothing to measure, round its
 /// centre, so it can still be picked, moved and deleted.

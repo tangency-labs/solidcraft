@@ -82,6 +82,8 @@ pub enum ObjectKind {
     PartsList,
     /// The sheet table that lists the drawing's revisions.
     RevisionTable,
+    /// A drawing view's lines.
+    View,
 }
 
 impl ObjectKind {
@@ -94,6 +96,7 @@ impl ObjectKind {
             ObjectKind::TitleBlock => "TITLE_BLOCK",
             ObjectKind::PartsList => "PARTS_LIST",
             ObjectKind::RevisionTable => "REVISION_TABLE",
+            ObjectKind::View => "VIEW",
         }
     }
 }

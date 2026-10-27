@@ -10,9 +10,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use solidcraft_doc::Mat;
 use solidcraft_geom::drawing_view::ViewFrame;
 use solidcraft_geom::hlr::{Source, Visibility};
-use solidcraft_geom::paper::MAX_RECORDS;
+use solidcraft_geom::paper::{Group, Item, MAX_RECORDS, ObjectKind};
 use solidcraft_geom::section::CurveAccuracy;
-use solidcraft_geom::{Plane, Seg2, Similarity2, Vec2, Vec3};
+use solidcraft_geom::{EPS, Plane, Seg2, Similarity2, Vec2, Vec3};
 
 use super::ShownSet;
 use crate::mesh_lines::{self, Ask, Origin, Owner, Scene, View};
@@ -145,6 +145,35 @@ pub fn lines(s: &Session, shown: &ShownSet, frame: &ViewFrame, hidden: bool, tan
         occlusion_ms: drawing.occlusion_ms,
     };
     Ok(Lines { lines: out, covered, model_chord_mm, stats })
+}
+
+/// A visible line's width on paper until D2 sets widths by kind of line: the thick line of ISO
+/// 128's 0.5 mm line group.
+pub const VISIBLE_MM: f64 = 0.5;
+
+/// `lines` as the paper scene group of the view `object`: each visible piece one stroke,
+/// [`VISIBLE_MM`] wide, closed when it ends where it starts. Hidden pieces are left out until the
+/// paper scene has dashed lines (V7b).
+pub fn paper_group(lines: &Lines, object: u64) -> Group {
+    let stroke = |piece: &Piece| {
+        let path: Vec<Seg2> = piece.path.iter().copied().filter_map(drawable).collect();
+        let ends_meet = path.first().zip(path.last()).is_some_and(|(first, last)| last.end().dist(first.start()) <= EPS);
+        // One straight line never closes on itself, however short.
+        let closed = ends_meet && !matches!(path.as_slice(), [Seg2::Line { .. }]);
+        (!path.is_empty()).then_some(Item::Stroke { path, closed, width_mm: VISIBLE_MM })
+    };
+    let visible = lines.lines.iter().flat_map(|l| &l.pieces).filter(|p| p.visibility == Visibility::Visible);
+    Group { object, kind: ObjectKind::View, items: visible.filter_map(stroke).collect() }
+}
+
+/// `seg`, or nothing where it has no length to draw: a line whose ends are one point. An arc too
+/// short to sweep is drawn as its chord.
+fn drawable(seg: Seg2) -> Option<Seg2> {
+    match seg {
+        Seg2::Arc { sweep, .. } if sweep.abs() < 1e-9 => drawable(Seg2::Line { a: seg.start(), b: seg.end() }),
+        Seg2::Line { a, b } if a == b => None,
+        _ => Some(seg),
+    }
 }
 
 /// The edges `runs` draw that are one circular arc (or a whole circle) in a plane parallel to the
@@ -297,6 +326,60 @@ fn chain(stretches: &[(Vec2, Vec2, bool)], join: f64) -> Vec<(bool, Vec<Vec2>)> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn lines_of(pieces: Vec<Piece>) -> Lines {
+        let line = ViewLine { shown: 0, source: Source::Edge { edge: 0, tangent: false }, pieces };
+        Lines { lines: vec![line], covered: 0, model_chord_mm: 0.01, stats: Stats::default() }
+    }
+
+    fn piece(visibility: Visibility, path: Vec<Seg2>) -> Piece {
+        Piece { visibility, path, accuracy: CurveAccuracy::Sampled { max_sample_deviation_mm: 0.0 } }
+    }
+
+    /// Each visible piece is one stroke of the view's kind, 0.5 mm wide; a whole circle and a run
+    /// that comes back to its start are closed; a line with no length is left out of its stroke,
+    /// and a piece with nothing left is no stroke; an arc too short to sweep is its chord; hidden
+    /// pieces aren't drawn yet.
+    #[test]
+    fn visible_pieces_are_strokes_and_closed_ones_join() {
+        let (a, b, c) = (Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(10.0, 5.0));
+        let circle = Seg2::Arc { center: a, radius: 5.0, start: 0.0, sweep: std::f64::consts::TAU };
+        let lines = lines_of(vec![
+            piece(Visibility::Visible, vec![Seg2::Line { a, b }, Seg2::Line { a: b, b }, Seg2::Line { a: b, b: c }]),
+            piece(Visibility::Visible, vec![circle]),
+            piece(Visibility::Visible, vec![Seg2::Line { a, b }, Seg2::Line { a: b, b: c }, Seg2::Line { a: c, b: a }]),
+            piece(Visibility::Visible, vec![Seg2::Line { a: c, b: c }]),
+            piece(Visibility::Visible, vec![Seg2::Arc { center: a, radius: 5.0, start: 0.0, sweep: 1e-13 }]),
+            piece(Visibility::Hidden, vec![Seg2::Line { a, b: c }]),
+        ]);
+        let group = paper_group(&lines, 7);
+        assert_eq!((group.object, group.kind), (7, ObjectKind::View));
+        let strokes: Vec<(usize, bool, f64)> = group
+            .items
+            .iter()
+            .filter_map(|i| match i {
+                Item::Stroke { path, closed, width_mm } => Some((path.len(), *closed, *width_mm)),
+                Item::Fill { .. } => None,
+            })
+            .collect();
+        assert_eq!(strokes, [(2, false, 0.5), (1, true, 0.5), (3, true, 0.5), (1, false, 0.5)]);
+        let chord = group.items.last().and_then(|i| match i {
+            Item::Stroke { path, .. } => path.first().copied(),
+            Item::Fill { .. } => None,
+        });
+        assert!(matches!(chord, Some(Seg2::Line { .. })), "{chord:?}");
+        let scene = solidcraft_geom::paper::Scene { size_mm: Vec2::new(420.0, 297.0), groups: vec![group] };
+        assert!(scene.validate().is_ok());
+    }
+
+    /// A view's group past the paper scene's 100,000 records is caught by the scene's own check.
+    #[test]
+    fn a_group_past_the_scenes_records_is_refused_by_its_check() {
+        let one = |i: usize| piece(Visibility::Visible, vec![Seg2::Line { a: Vec2::new(i as f64 * 1e-3, 0.0), b: Vec2::new(i as f64 * 1e-3, 1.0) }]);
+        let lines = lines_of((0..MAX_RECORDS).map(one).collect());
+        let scene = solidcraft_geom::paper::Scene { size_mm: Vec2::new(420.0, 297.0), groups: vec![paper_group(&lines, 0)] };
+        assert!(scene.validate().is_err());
+    }
 
     /// A quarter of a 5 mm circle round the origin, from 0 to 90 degrees.
     const QUARTER: Seg2 = Seg2::Arc { center: Vec2 { x: 0.0, y: 0.0 }, radius: 5.0, start: 0.0, sweep: std::f64::consts::FRAC_PI_2 };

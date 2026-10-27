@@ -708,6 +708,7 @@ fn seeded_views_of_the_sample_stay_in_bounds_and_apart() {
             "scale": scale,
             "chord_mm": chord,
             "display_style": style,
+            "scene": style == "visible",
             "tangent_edges": tangent,
         });
         let v = snap(&mut s, p.clone());
@@ -718,6 +719,12 @@ fn seeded_views_of_the_sample_stay_in_bounds_and_apart() {
         assert!(!visible.is_empty(), "{p}");
         assert!(visible.iter().chain(&hidden).all(|seg| reach(seg).iter().all(inside)), "{p}: a line leaves the boundary");
         assert!(!hidden.iter().any(|h| visible.iter().any(|w| share_a_stretch(h, w))), "{p}: a stretch is both visible and hidden");
+        if style == "visible" {
+            let scene: solidcraft_geom::paper::Scene = serde_json::from_value(v["scene"].clone()).unwrap();
+            assert!(scene.validate().is_ok(), "{p}");
+            let pieces = v["lines"].as_array().unwrap().iter().flat_map(|l| l["pieces"].as_array().unwrap()).count();
+            assert_eq!(strokes(&v).len(), pieces, "{p}: a stroke per piece");
+        }
     }
 }
 
@@ -838,6 +845,80 @@ fn each_placements_hole_is_its_own_exact_circle() {
     }
     assert_eq!(round.keys().copied().collect::<Vec<_>>(), [160, 210, 260], "{v}");
     assert!(round.values().all(|r| (r - std::f64::consts::TAU).abs() < 1e-9), "{v}");
+}
+
+/// Every stroke of `v`'s paper scene: its path, whether it is closed, and its width.
+fn strokes(v: &Value) -> Vec<(Vec<solidcraft_geom::Seg2>, bool, f64)> {
+    use solidcraft_geom::paper::{Item, Scene};
+    let scene: Scene = serde_json::from_value(v["scene"].clone()).unwrap();
+    let items = scene.groups.into_iter().flat_map(|g| g.items);
+    items
+        .filter_map(|item| match item {
+            Item::Stroke { path, closed, width_mm } => Some((path, closed, width_mm)),
+            Item::Fill { .. } => None,
+        })
+        .collect()
+}
+
+/// The block's front view at 1:2 as a paper scene of the A3 sheet: one group of the view's kind,
+/// object 0, its strokes open and 0.5 mm wide along the 120 mm outline, and the SVG writer takes
+/// it as one group with a path per stroke. Without `scene` the reply has none.
+#[test]
+fn a_views_scene_is_its_visible_lines_as_strokes() {
+    let mut s = block();
+    assert!(snap(&mut s, json!({"scale": "1:2"})).get("scene").is_none());
+    let v = snap(&mut s, json!({"scale": "1:2", "scene": true}));
+    let schema = output_schema_for::<SnapshotResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &v), "{v}");
+    let groups = &v["scene"]["groups"];
+    let head = (&v["scene"]["size_mm"], groups.as_array().map(Vec::len), &groups[0]["object"], &groups[0]["kind"]);
+    assert_eq!(head, (&json!([420.0, 297.0]), Some(1), &json!(0), &json!("view")), "{v}");
+    let strokes = strokes(&v);
+    assert!(strokes.iter().all(|(_, closed, width)| !closed && *width == 0.5), "{v}");
+    let length: f64 = strokes.iter().flat_map(|(path, _, _)| path).map(|seg| seg.start().dist(seg.end())).sum();
+    assert!((length - 120.0).abs() < 1e-6, "{v}");
+    let scene: solidcraft_geom::paper::Scene = serde_json::from_value(v["scene"].clone()).unwrap();
+    let (svg, _) = solidcraft_io::paper::paper_svg(&scene.prepare().unwrap()).unwrap();
+    let svg = String::from_utf8(svg).unwrap();
+    let counts = (svg.matches("<g data-object=\"0\" data-kind=\"view\">").count(), svg.matches("<path").count());
+    assert_eq!(counts, (1, strokes.len()), "{svg}");
+}
+
+/// The plate's hole in the scene, from above at 1:1: its rim's strokes are arcs of radius 5 round
+/// the sheet's centre, 2π × 5 mm in all, and a stroke that is a whole circle is closed.
+#[test]
+fn a_holes_rim_is_arcs_in_the_scene() {
+    let mut s = plate();
+    let v = snap(&mut s, json!({"view": "top", "scale": "1:1", "scene": true}));
+    let mut round = 0.0;
+    for (path, closed, _) in strokes(&v) {
+        for seg in &path {
+            if let solidcraft_geom::Seg2::Arc { center, radius, sweep, .. } = *seg {
+                assert!(center.dist(Vec2::new(210.0, 148.5)) < 1e-9 && (radius - 5.0).abs() < 1e-9, "{v}");
+                round += radius * sweep.abs();
+                let whole = path.len() == 1 && (sweep.abs() - std::f64::consts::TAU).abs() < 1e-9;
+                assert!(closed || !whole, "a whole circle is closed: {v}");
+            }
+        }
+    }
+    assert!((round - std::f64::consts::TAU * 5.0).abs() < 1e-6, "{round}: {v}");
+}
+
+/// `scene` is true or false, and with `visible_hidden` it waits for dashed lines (V7b).
+#[test]
+fn a_scene_with_hidden_lines_or_a_bad_flag_is_refused() {
+    let mut s = block();
+    let doc = s.doc.clone();
+    for (p, says) in [
+        (json!({"scene": "yes"}), "scene"),
+        (json!({"scene": 1}), "scene"),
+        (json!({"scene": null}), "scene"),
+        (json!({"scene": true, "display_style": "visible_hidden"}), "not supported yet: hidden lines in the paper scene"),
+    ] {
+        let e = refused(&mut s, p.clone());
+        assert!(e.contains(says), "{p}: {e}");
+        assert!(std::sync::Arc::ptr_eq(&doc, &s.doc), "{p}");
+    }
 }
 
 /// A view shows every body the design places, so a design whose assembly walk stops at its depth

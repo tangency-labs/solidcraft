@@ -55,6 +55,9 @@ pub struct SnapshotParams {
     #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
     #[schemars(with = "f64")]
     pub max_error_mm: Option<f64>,
+    /// Whether the reply carries the view's lines as a paper scene of the sheet (`scene`), the
+    /// strokes the sheet writers draw (false when not given).
+    pub scene: bool,
 }
 
 impl SnapshotParams {
@@ -600,6 +603,40 @@ pub struct LinesStatsResult {
     pub occlusion_ms: f64,
 }
 
+/// A view's lines as a paper scene: the sheet's size and the view's one group of strokes (kind
+/// `view`, object 0), in paint order, in paper millimetres from the sheet's lower-left corner.
+#[derive(Debug, Serialize)]
+#[serde(transparent)]
+pub struct SceneResult(pub solidcraft_geom::paper::Scene);
+
+impl JsonSchema for SceneResult {
+    fn schema_name() -> Cow<'static, str> {
+        "ViewPaperScene".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let point = json!({"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2});
+        let segment = generator.subschema_for::<PathSegResult>();
+        let stroke = json!({
+            "type": "object",
+            "properties": {"kind": {"const": "stroke"}, "path": {"type": "array", "items": segment}, "closed": {"type": "boolean"}, "width_mm": {"type": "number", "exclusiveMinimum": 0}},
+            "required": ["kind", "path", "closed", "width_mm"],
+            "additionalProperties": false
+        });
+        let group = json!({
+            "type": "object",
+            "properties": {"object": {"type": "integer", "minimum": 0}, "kind": {"const": "view"}, "items": {"type": "array", "items": stroke}},
+            "required": ["object", "kind", "items"],
+            "additionalProperties": false
+        });
+        json_schema!({
+            "type": "object",
+            "properties": {"size_mm": point, "groups": {"type": "array", "items": group}},
+            "required": ["size_mm", "groups"],
+            "additionalProperties": false
+        })
+    }
+}
+
 /// What `drawing.view.snapshot` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct SnapshotResult {
@@ -617,6 +654,9 @@ pub struct SnapshotResult {
     pub lines: Vec<LineResult>,
     pub status: LinesStatusResult,
     pub stats: LinesStatsResult,
+    /// With `scene: true`: the lines as a paper scene of the sheet.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scene: Option<SceneResult>,
     pub source: SourceResult,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
