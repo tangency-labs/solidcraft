@@ -949,9 +949,14 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                         } else if let Some(w) = warnings.filter(|w| !w.is_empty()) {
                             format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or(""))
                         } else {
-                            let name = std::path::Path::new(&request.path)
-                                .file_name()
-                                .map_or_else(|| request.path.clone(), |n| n.to_string_lossy().into_owned());
+                            // An opened design is named as its tab names it.
+                            let name = if request.insert() {
+                                std::path::Path::new(&request.path)
+                                    .file_stem()
+                                    .map_or_else(|| request.path.clone(), |n| n.to_string_lossy().into_owned())
+                            } else {
+                                app.session.doc.name.clone()
+                            };
                             // A blank design is replaced in place; anything else gets a tab of its own.
                             let key = if request.insert() {
                                 "file_load.inserted"
