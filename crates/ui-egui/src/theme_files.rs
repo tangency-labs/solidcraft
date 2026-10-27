@@ -21,7 +21,7 @@ use crate::theme::{IconColors, Tokens};
 /// The `format` tag of a theme file.
 pub const FORMAT: &str = "solidcraft-theme/1";
 /// Hostile-input caps: file size, colours per file, name length, imported themes kept.
-const MAX_BYTES: usize = 256 * 1024;
+pub const MAX_BYTES: usize = 256 * 1024;
 pub const MAX_COLORS: usize = 512;
 const MAX_NAME: usize = 80;
 pub const MAX_CUSTOM: usize = 64;

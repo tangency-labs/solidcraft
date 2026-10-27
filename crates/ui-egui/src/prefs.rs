@@ -992,7 +992,10 @@ fn theme_row(app: &mut SolveApp, ui: &mut egui::Ui) {
     match action {
         Some("import") => app.pick_open_for(&["json"], |app, path| {
             let Some(path) = path else { return };
-            let r = std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|text| import_theme(app, &serde_json::Value::String(text)));
+            // Through `vfs`, like every other import: in the web app a picked file is there.
+            let r = solidcraft_engine::io::vfs::read_to_string(&path, crate::theme_files::MAX_BYTES)
+                .map_err(|e| e.to_string())
+                .and_then(|text| import_theme(app, &serde_json::Value::String(text)));
             match r {
                 Ok(id) => {
                     let name = crate::theme_files::find(&id, &app.preferences.custom_themes).map(|t| t.name.clone()).unwrap_or(id);
@@ -3587,6 +3590,43 @@ mod tests {
         assert!(h.call("ui.prefs", json!({"viewport_theme": "dim"}))["error"].is_string());
         let read: crate::theme::ViewportTheme = serde_json::from_value(json!("dim")).unwrap();
         assert_eq!(read, crate::theme::ViewportTheme::Theme);
+    }
+
+    /// The theme strip's Import… reads the theme file through `vfs`, like the other imports: in the
+    /// web app a picked file is kept there, where `std::fs` can't read it (#7643). On the disk it
+    /// is the same file; a folder scope active while it is read refuses a path outside it, which
+    /// shows the read goes through `vfs`.
+    #[test]
+    fn theme_import_reads_through_vfs() {
+        use serde_json::json;
+        use solidcraft_engine::io::vfs;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"theme": "dark", "open": "Interface"}));
+        h.frames(2);
+        super::reveal_preference(&mut h, "dialog:Import…");
+        let (root, out) = (h.dir.join("root"), h.dir.join("out"));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&out).unwrap();
+        let file = json!({"format": "solidcraft-theme/1", "name": "Paper", "base": "light", "colors": {"panel": "#fffdf0"}});
+        for (path, inside) in [(out.join("Paper.json"), false), (root.join("Paper.json"), true)] {
+            std::fs::write(&path, file.to_string()).unwrap();
+            let answer = path.to_string_lossy().to_string();
+            h.app.services.pick_open = Some(Box::new(move |_| Box::pin(std::future::ready(Some(answer.clone())))));
+            h.app.status = None;
+            vfs::scoped(Some(vfs::PathScope::new([root.clone()])), || {
+                h.step(&json!({"click":{"handle":"dialog:Import…"}})).unwrap();
+                h.frames(4);
+            });
+            let status = h.app.status.clone().map(|(text, ..)| text);
+            if inside {
+                assert_eq!(status.as_deref(), Some("Theme imported: Paper"));
+                assert_eq!(h.app.preferences.theme, "paper");
+            } else {
+                assert!(status.as_deref().is_some_and(|s| s.contains("outside the folders this agent may use")), "{status:?}");
+                assert!(h.app.preferences.custom_themes.is_empty(), "nothing imported");
+            }
+        }
     }
 
     #[test]

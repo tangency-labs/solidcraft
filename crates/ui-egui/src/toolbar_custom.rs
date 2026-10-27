@@ -302,6 +302,9 @@ pub fn export(app: &SolveApp) -> Value {
     json!({ "format": "solidcraft-shortcuts/1", "shortcuts": app.keymap.prefs(), "favourites": app.sbox.pinned, "toolbar": app.toolbar_custom.prefs() })
 }
 
+/// The largest shortcuts file Import… reads (hostile input; an export is a few tens of KiB).
+pub const MAX_IMPORT_BYTES: usize = 1 << 20;
+
 pub fn import(app: &mut SolveApp, v: &Value) -> Result<(), String> {
     // "solvecraft-shortcuts/1": files exported before the rename (compatibility shim).
     if !matches!(v.get("format").and_then(Value::as_str), Some("solidcraft-shortcuts/1" | "solvecraft-shortcuts/1")) {

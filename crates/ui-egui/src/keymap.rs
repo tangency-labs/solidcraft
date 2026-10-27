@@ -651,7 +651,8 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
         Some((_, "import")) => {
             app.pick_open(|app, path| {
                 let Some(path) = path else { return };
-                let r = std::fs::read_to_string(&path)
+                // Through `vfs`, like every other import: in the web app a picked file is there.
+                let r = solidcraft_engine::io::vfs::read_to_string(&path, crate::toolbar_custom::MAX_IMPORT_BYTES)
                     .map_err(|e| e.to_string())
                     .and_then(|t| serde_json::from_str::<Value>(&t).map_err(|e| e.to_string()))
                     .and_then(|v| crate::toolbar_custom::import(app, &v));
@@ -1160,5 +1161,41 @@ mod card_tests {
             assert!(scenario::handle_at(&format!("keymap:{action}:solid.extrude")).is_none());
         }
         assert_eq!(effective(&h.app, "solid.extrude").as_deref(), Some("E"));
+    }
+
+    /// Import… reads the shortcuts file through `vfs`, like the other imports: in the web app a
+    /// picked file is kept there, where `std::fs` can't read it (#7643). On the disk it is the same
+    /// file; a folder scope active while it is read refuses a path outside it, which shows the
+    /// read goes through `vfs`.
+    #[test]
+    fn shortcut_import_reads_through_vfs() {
+        use solidcraft_engine::io::vfs;
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        bind(&mut h.app, "solid.extrude", "Shift+E", true).unwrap();
+        let text = crate::toolbar_custom::export(&h.app).to_string();
+        reset(&mut h.app, None);
+        h.call("ui.prefs", json!({"open":"Keyboard Shortcuts"}));
+        h.frames(2);
+        let (root, out) = (h.dir.join("root"), h.dir.join("out"));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&out).unwrap();
+        for (path, inside) in [(out.join("keys.json"), false), (root.join("keys.json"), true)] {
+            std::fs::write(&path, &text).unwrap();
+            let answer = path.to_string_lossy().to_string();
+            h.app.services.pick_open = Some(Box::new(move |_| Box::pin(std::future::ready(Some(answer.clone())))));
+            vfs::scoped(Some(vfs::PathScope::new([root.clone()])), || {
+                h.step(&json!({"widget":"Import…"})).unwrap();
+                h.frames(4);
+            });
+            let message = h.app.keymap.message.clone();
+            if inside {
+                assert_eq!(message, None);
+                assert_eq!(effective(&h.app, "solid.extrude").as_deref(), Some("Shift+E"));
+            } else {
+                assert!(message.as_deref().is_some_and(|m| m.contains("outside the folders this agent may use")), "{message:?}");
+                assert_eq!(effective(&h.app, "solid.extrude").as_deref(), Some("E"), "nothing imported");
+            }
+        }
     }
 }
