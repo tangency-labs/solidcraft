@@ -119,12 +119,61 @@ pub(crate) fn route_wheel_vertical(points: egui::Vec2, modifiers: egui::Modifier
     }
 }
 
+/// The inertia macOS sends once the fingers lift (#7327): its own scroll bracket, starting as the
+/// fingers' bracket ends, with the modifiers held at the time. It coasts in the mode the fingers
+/// had; when the modifiers change it ends, so the rest never orbits a pan or pans an orbit.
+/// Fingers that touch during a coast end it and start a new swipe, so a bracket that follows a
+/// coast is never one. Browsers keep the inertia inside the swipe's bracket ([`WebWheelGestures`]),
+/// so there are no coasts on the web.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct TrackpadCoast {
+    /// Whether the current bracket's last move orbited (Shift) rather than panned.
+    last_orbit: Option<bool>,
+    /// The current bracket is a coast, keeping this mode (orbit or not).
+    keeps: Option<bool>,
+    /// The coast's mode changed: the rest of its moves are dropped.
+    stopped: bool,
+    /// When the last swipe of the fingers ended, and whether its last move orbited.
+    lifted: Option<(f64, bool)>,
+}
+
+impl TrackpadCoast {
+    /// A coast starts at most this long (seconds) after the fingers lift; macOS sends it at once.
+    const GAP: f64 = 0.1;
+
+    fn start(&mut self, now: f64) {
+        let lifted = self.lifted.take().filter(|(at, _)| !cfg!(target_arch = "wasm32") && now >= *at && now - *at <= Self::GAP);
+        *self = TrackpadCoast { keeps: lifted.map(|(_, orbit)| orbit), ..Default::default() };
+    }
+
+    fn end(&mut self, now: f64) {
+        let lifted = if self.keeps.is_none() { self.last_orbit.map(|orbit| (now, orbit)) } else { None };
+        *self = TrackpadCoast { lifted, ..Default::default() };
+    }
+
+    /// Whether a move in this mode still counts.
+    fn moves(&mut self, orbit: bool) -> bool {
+        self.last_orbit = Some(orbit);
+        self.stopped |= self.keeps.is_some_and(|keeps| keeps != orbit);
+        !self.stopped
+    }
+}
+
 /// Match egui's wheel units and modifier routing, without its temporal smoothing.
 ///
 /// `gesture` tracks an ongoing bracketed trackpad scroll (`Start` … `End`):
 /// moves inside one pan, bare `Move` input is a mouse (vertical zooms,
 /// horizontal pans). Only point input brackets; line/page input always zooms.
-pub(crate) fn immediate_wheel(input: &egui::InputState, options: egui::InputOptions, page_height: f32, gesture: &mut bool) -> RawWheel {
+/// With `shift_orbits` (Shift + two fingers orbits), `coast` ends the inertia
+/// when the modifiers change.
+pub(crate) fn immediate_wheel(
+    input: &egui::InputState,
+    options: egui::InputOptions,
+    page_height: f32,
+    gesture: &mut bool,
+    coast: &mut TrackpadCoast,
+    shift_orbits: bool,
+) -> RawWheel {
     let mut out = RawWheel { zoom: 0.0, point_zoom: 0.0, pan: egui::Vec2::ZERO, shift_pan: egui::Vec2::ZERO, mouse_pan: egui::Vec2::ZERO };
     for event in &input.events {
         let egui::Event::MouseWheel { unit, delta, modifiers, phase } = event else { continue };
@@ -135,12 +184,18 @@ pub(crate) fn immediate_wheel(input: &egui::InputState, options: egui::InputOpti
         match phase {
             egui::TouchPhase::Start => {
                 if point {
+                    if !*gesture {
+                        coast.start(input.time);
+                    }
                     *gesture = true;
                 }
                 continue;
             }
             egui::TouchPhase::End | egui::TouchPhase::Cancel => {
                 if point {
+                    if *gesture {
+                        coast.end(input.time);
+                    }
                     *gesture = false;
                 }
                 continue;
@@ -152,8 +207,12 @@ pub(crate) fn immediate_wheel(input: &egui::InputState, options: egui::InputOpti
             egui::MouseWheelUnit::Line => *delta * options.line_scroll_speed,
             egui::MouseWheelUnit::Page => *delta * page_height,
         };
+        let shift = modifiers.shift && !modifiers.ctrl && !modifiers.command && !modifiers.alt;
+        if point && *gesture && !coast.moves(shift) && shift_orbits {
+            continue;
+        }
         if point && *gesture {
-            if modifiers.shift && !modifiers.ctrl && !modifiers.command && !modifiers.alt {
+            if shift {
                 if points.is_finite() {
                     out.shift_pan += points.clamp(vec2(-1e4, -1e4), vec2(1e4, 1e4));
                 }
@@ -430,8 +489,9 @@ pub(crate) fn handle(app: &mut SolveApp, ui: &mut egui::Ui, rect: Rect, resp: &e
     }
     let options = ui.ctx().options(|o| o.input_options);
     let page_height = ui.ctx().viewport_rect().height();
-    let raw = ui.input(|i| immediate_wheel(i, options, page_height, &mut app.viewport.trackpad_gesture));
     let trackpad_orbit = trackpad_pan && app.preferences.nav == "fusion";
+    let viewport = &mut app.viewport;
+    let raw = ui.input(|i| immediate_wheel(i, options, page_height, &mut viewport.trackpad_gesture, &mut viewport.trackpad_coast, trackpad_orbit));
     if trackpad_pan && (raw.pan != egui::Vec2::ZERO || raw.shift_pan != egui::Vec2::ZERO) {
         // Swallow egui's smoothing tail while the trackpad runs (a wheel-only
         // tail ends the moment trackpad input starts; mixed input is rare).
@@ -887,7 +947,7 @@ mod tests {
         let events = raw.events.clone();
         let mut input = egui::InputState::default();
         input.events = raw.events;
-        (super::immediate_wheel(&input, egui::InputOptions::default(), 600.0, gesture), events)
+        (super::immediate_wheel(&input, egui::InputOptions::default(), 600.0, gesture, &mut Default::default(), false), events)
     }
 
     #[test]

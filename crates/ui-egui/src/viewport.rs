@@ -158,6 +158,8 @@ pub struct ViewportState {
     /// Inside a bracketed trackpad scroll (`Start` without its `End` yet):
     /// point moves pan, bare moves are a mouse.
     pub(crate) trackpad_gesture: bool,
+    /// The inertia after the fingers lift, which ends when the modifiers change (#7327).
+    pub(crate) trackpad_coast: crate::navigation::TrackpadCoast,
     /// A primary press on the axis gizmo: the pointer position used by its last orbit step.
     pub axis_drag: Option<Pos2>,
     /// Unsnapped camera while Shift-orbit previews a standard or diagonal view.
@@ -8230,6 +8232,68 @@ mod tests {
         let after = h.app.cam;
         h.frames(90);
         assert_eq!(h.app.cam, after);
+    }
+
+    /// #7327: macOS sends the inertia after the fingers lift as its own scroll bracket, right after
+    /// the fingers' one, with the modifiers held at the time. Releasing Shift while an orbit coasts
+    /// (or pressing it while a pan coasts) ends the coast instead of carrying it into the other mode.
+    #[test]
+    fn fusion_trackpad_inertia_stops_when_shift_changes() {
+        use egui::{Modifiers, TouchPhase::*};
+        let mut h = crate::scenario::Harness::new();
+        h.app.preferences.nav = "fusion".into();
+        h.app.preferences.orbit_around = crate::prefs::OrbitAround::ViewCentre;
+        h.call("ui.move", json!({"x":800,"y":500}));
+        let gesture = |phase, modifiers| egui::Event::MouseWheel { unit: egui::MouseWheelUnit::Point, delta: vec2(20.0, -10.0), modifiers, phase };
+        let play = |h: &mut crate::scenario::Harness, phase, modifiers| {
+            h.app.synthetic.push(gesture(phase, modifiers));
+            h.frame();
+        };
+        for (held, other) in [(Modifiers::SHIFT, Modifiers::NONE), (Modifiers::NONE, Modifiers::SHIFT)] {
+            // The fingers swipe and lift; the coast starts in the next frame and keeps their mode.
+            for phase in [Start, Move, Move, End, Start, Move] {
+                play(&mut h, phase, held);
+            }
+            let coasting = h.app.cam;
+            play(&mut h, Move, held);
+            assert_ne!(h.app.cam, coasting, "{held:?}: the coast keeps moving while the modifiers stay");
+            // The modifiers change: the rest of the coast is dropped, even when they change back.
+            let stopped = h.app.cam;
+            for modifiers in [other, other, held, other] {
+                play(&mut h, Move, modifiers);
+                assert_eq!(h.app.cam, stopped, "{held:?}: the coast must end, not pan or orbit");
+            }
+            play(&mut h, End, other);
+            h.frames(30);
+            assert_eq!(h.app.cam, stopped);
+        }
+        // Fingers touching during a coast are a new swipe: it moves at once and still switches
+        // between pan and orbit with Shift while the fingers stay down.
+        for phase in [Start, Move, Move, End, Start, Move] {
+            play(&mut h, phase, Modifiers::SHIFT);
+        }
+        play(&mut h, End, Modifiers::SHIFT);
+        play(&mut h, Start, Modifiers::SHIFT);
+        for modifiers in [Modifiers::SHIFT, Modifiers::NONE, Modifiers::SHIFT] {
+            let before = h.app.cam;
+            play(&mut h, Move, modifiers);
+            if modifiers.shift {
+                let mut expected = before;
+                expected.orbit(20.0, -10.0);
+                assert_eq!(h.app.cam, expected, "a new swipe orbits with Shift");
+            } else {
+                assert_eq!(h.app.cam.back(), before.back());
+                assert_ne!(h.app.cam.target, before.target, "a new swipe pans without Shift");
+            }
+        }
+        play(&mut h, End, Modifiers::NONE);
+        // A swipe after a pause is a new swipe too, whatever the last one did.
+        h.frames(30);
+        play(&mut h, Start, Modifiers::NONE);
+        let before = h.app.cam;
+        play(&mut h, Move, Modifiers::NONE);
+        assert_ne!(h.app.cam.target, before.target, "a later swipe pans");
+        play(&mut h, End, Modifiers::NONE);
     }
 
     #[test]
