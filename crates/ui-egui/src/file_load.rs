@@ -918,6 +918,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                 // Not meshed yet: framing it while it goes in must not mesh it here.
                 app.open_meshing_next = true;
                 crate::frame_watch::step(app, "before the open");
+                let tabs = app.docs.count();
                 if request.insert() {
                     app.session.accept_computed(made.session);
                     app.big_operation = true;
@@ -948,7 +949,18 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                         } else if let Some(w) = warnings.filter(|w| !w.is_empty()) {
                             format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or(""))
                         } else {
-                            format!("{} done", if request.insert() { "Insert" } else { "Open" })
+                            let name = std::path::Path::new(&request.path)
+                                .file_name()
+                                .map_or_else(|| request.path.clone(), |n| n.to_string_lossy().into_owned());
+                            // A blank design is replaced in place; anything else gets a tab of its own.
+                            let key = if request.insert() {
+                                "file_load.inserted"
+                            } else if app.docs.count() > tabs {
+                                "file_load.opened_in_tab"
+                            } else {
+                                "file_load.opened"
+                            };
+                            crate::i18n::format(key, &[("name", &name)])
                         },
                         false,
                     );
@@ -1552,7 +1564,7 @@ mod tests {
             frames += 1;
         }
         assert_eq!(bodies(&app), 6, "{:?}", app.status);
-        assert!(app.status.as_ref().is_some_and(|s| s.0.contains("Insert done")), "{:?}", app.status);
+        assert!(app.status.as_ref().is_some_and(|s| s.0.starts_with("Inserted ")), "{:?}", app.status);
         // Cancelled after the parse: nothing is inserted, and nothing waits.
         let before = app.session.doc.clone();
         app.file_load.queued.push_back(Request::new(&path, Kind::Insert));
