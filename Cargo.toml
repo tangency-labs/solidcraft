@@ -165,6 +165,9 @@ egui-wgpu = { path = "vendor/egui-wgpu" }
 # winit 0.30 never binds and eframe 0.36 still requires winit 0.30.
 winit = { path = "vendor/winit" }
 
+# Upload memory in system RAM instead of BAR-mapped VRAM (#3595).
+gpu-allocator = { path = "vendor/gpu-allocator" }
+
 # Mutation testing (cargo-mutants, docs/mutation-testing.md): the ci profile with incremental
 # builds, since every mutant rebuilds the crates above the one it changes.
 [profile.mutants]
