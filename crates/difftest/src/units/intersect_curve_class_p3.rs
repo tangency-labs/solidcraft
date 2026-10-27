@@ -1681,7 +1681,7 @@ fn gen_script(rng: &mut Rng) -> Script {
     let corners: Vec<[f64; 3]> = match face.as_ref().and_then(|f| f.loops.as_ref()) {
         Some(LoopsIn::Edges { loops }) => loops.iter().flatten().copied().collect(),
         Some(LoopsIn::Vertex { at }) => vec![*at],
-        None => Vec::new(),
+        Some(LoopsIn::Circles { .. }) | None => Vec::new(),
     };
     let along = corners.len() > 1 && rng.chance(0.6);
     if along {

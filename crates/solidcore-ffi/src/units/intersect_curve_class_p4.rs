@@ -407,6 +407,8 @@ pub fn topology_count(face: Option<&FaceSpec>) -> usize {
         None => 0,
         Some(Loops::Vertex(_)) => 3,
         Some(Loops::Edges(loops)) => 1 + loops.iter().map(|l| 1 + 3 * l.len()).sum::<usize>(),
+        // one edge use per circle loop
+        Some(Loops::Circles(loops)) => 1 + 4 * loops.len(),
     }
 }
 

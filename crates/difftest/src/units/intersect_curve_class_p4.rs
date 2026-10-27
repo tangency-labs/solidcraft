@@ -1451,6 +1451,11 @@ pub(crate) fn topology_kinds(face: &FaceIn) -> Vec<usize> {
                 }
             }
         }
+        Some(LoopsIn::Circles { circles }) => {
+            for _ in circles {
+                v.extend([kind::LOOP, kind::EDGE, kind::VERTEX, kind::EDGEUSE]);
+            }
+        }
     }
     v
 }

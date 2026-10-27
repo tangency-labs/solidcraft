@@ -588,6 +588,23 @@ impl<'b, O: LoopObject> LoopObjectCurves<'b, O> {
         self.uv_curve.as_ref().map(|(_, c)| c)
     }
 
+    /// The same handles and classification curves resolved against `b`, a copy of the
+    /// B-rep these were made for (same ids) that holds what the classification's lazy
+    /// queries left on it: the UV trim curves and tolerances upstream's later queries
+    /// read from the one B-rep.
+    #[must_use]
+    pub(crate) fn rebind<'c>(self, b: &'c Brep) -> LoopObjectCurves<'c, O> {
+        LoopObjectCurves {
+            b,
+            f: self.f,
+            face: self.face,
+            surface: self.surface,
+            curve_handles: self.curve_handles,
+            curve: self.curve,
+            uv_curve: self.uv_curve,
+        }
+    }
+
     /// The handle of `t`; [`Self::new`] checked that `O` names topology, so the face
     /// handle fallback is never taken.
     fn topology(&self, t: EntityRef) -> O {

@@ -545,6 +545,11 @@ pub(crate) fn classify_loops_cached<O: LoopObject>(
             }
             crv = ClassifyCrv::Bisector;
         }
+        // Upstream's crossings read the one B-rep, which the bisector's classification
+        // just edited (UV trim curves made, tolerances raised; the vertex sectors then
+        // use those trims): resolve the bisector's handles on the query snapshot that
+        // holds those edits.
+        let bisector_curves = bisector_curves.map(|c| c.rebind(cache.snapshot(b)));
 
         // upstream holds pointers to the face's touch lists (seams) or to the lists it
         // just computed (bisector, UV containment): borrow the former, own the latter
