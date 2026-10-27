@@ -166,5 +166,29 @@
     "ui.plate_width": "רוחב",
     "ui.plate_x_offset": "היסט X",
     "ui.plate_y_offset": "היסט Y"
+  },
+  "vi": {
+    "cmd.frame.plate": "Tấm lắp",
+    "error.plate_count": "Số lỗ phải là số nguyên từ 2 đến 128.",
+    "error.plate_pattern": "Chọn bố trí lỗ bu lông.",
+    "error.plate_shape": "Chọn hình dạng tấm.",
+    "error.plate_support": "Chọn một mặt tựa phẳng.",
+    "ui.mounting_plate_title": "TẤM LẮP",
+    "ui.plate_bolt_circle": "Đường kính vòng bu lông",
+    "ui.plate_circle_pattern": "Vòng bu lông",
+    "ui.plate_count": "Số lỗ",
+    "ui.plate_height": "Chiều cao",
+    "ui.plate_hole_diameter": "Đường kính lỗ",
+    "ui.plate_holes": "Bố trí lỗ bu lông",
+    "ui.plate_none": "Không có",
+    "ui.plate_pattern_angle": "Góc bố trí",
+    "ui.plate_pitch_x": "Khoảng cách ngang",
+    "ui.plate_pitch_y": "Khoảng cách dọc",
+    "ui.plate_rect_pattern": "Bốn lỗ",
+    "ui.plate_round": "Tròn",
+    "ui.plate_shape": "Hình dạng",
+    "ui.plate_width": "Chiều rộng",
+    "ui.plate_x_offset": "Độ lệch X",
+    "ui.plate_y_offset": "Độ lệch Y"
   }
 }
