@@ -914,7 +914,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                 request.answer(r);
             }
             Ok(_) if reuse_open(app, request) => {}
-            Ok(made) if running.matches(&app.session) => {
+            Ok(made) if running.matches(&app.session) => 'open: {
                 // Not meshed yet: framing it while it goes in must not mesh it here.
                 app.open_meshing_next = true;
                 crate::frame_watch::step(app, "before the open");
@@ -923,7 +923,12 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                     app.session.accept_computed(made.session);
                     app.big_operation = true;
                 } else {
-                    crate::documents::adopt(app, made.session);
+                    // No tab left for it: `adopt` said why, and nothing else of the open happens.
+                    if !crate::documents::adopt(app, made.session) {
+                        app.open_meshing_next = false;
+                        request.answer(Err(app.status.as_ref().map_or_else(String::new, |s| s.0.clone())));
+                        break 'open;
+                    }
                     if request.kind == Kind::Open {
                         app.home.add_recent(&request.path);
                     }
@@ -949,13 +954,19 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                         } else if let Some(w) = warnings.filter(|w| !w.is_empty()) {
                             format!("imported with {} warning(s): {}", w.len(), w.first().and_then(Value::as_str).unwrap_or(""))
                         } else {
-                            // An opened design is named as its tab names it.
+                            // Built here, outside the window's language scope: in the language
+                            // chosen, as the other statuses of this file are.
+                            let language = crate::i18n::Locale::for_language(&app.preferences.language);
+                            // An opened design is named as its tab names it, an inserted one as
+                            // its component is named.
                             let name = if request.insert() {
-                                std::path::Path::new(&request.path)
-                                    .file_stem()
-                                    .map_or_else(|| request.path.clone(), |n| n.to_string_lossy().into_owned())
+                                made.result.get("component_name").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| {
+                                    std::path::Path::new(&request.path)
+                                        .file_stem()
+                                        .map_or_else(|| request.path.clone(), |n| n.to_string_lossy().into_owned())
+                                })
                             } else {
-                                app.session.doc.name.clone()
+                                language.given_name(&app.session.doc.name)
                             };
                             // A blank design is replaced in place; anything else gets a tab of its own.
                             let key = if request.insert() {
@@ -965,7 +976,7 @@ pub fn tick(app: &mut SolveApp, ctx: &egui::Context) {
                             } else {
                                 "file_load.opened"
                             };
-                            crate::i18n::format(key, &[("name", &name)])
+                            language.format(key, &[("name", &name)])
                         },
                         false,
                     );
@@ -1178,31 +1189,33 @@ mod tests {
     /// a tab of its own or replaced the blank design.
     #[test]
     fn an_open_names_the_design_and_says_when_it_got_a_new_tab() {
-        let dir = std::env::temp_dir().join(format!("solidcraft-opened-status-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        for name in ["plate", "post"] {
-            let mut part = Session::default();
-            part.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
-            part.execute("file.save", &json!({"path": dir.join(format!("{name}.solidcraft")), "overwrite": true})).unwrap();
-        }
-        let ctx = crate::fonts::test_context();
+        let ctx = egui::Context::default();
         let mut app = SolveApp::new(Session::default(), Default::default());
         let open = |app: &mut SolveApp, name: &str| {
-            app.open_path_async(&dir.join(format!("{name}.solidcraft")).to_string_lossy());
-            for _ in 0..10_000 {
-                tick(app, &ctx);
-                if app.file_load.idle() {
-                    break;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(1));
-            }
-            app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default()
+            let mut part = Session::default();
+            part.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+            Arc::make_mut(&mut part.doc).name = name.into();
+            part.path = Some(format!("{name}.solidcraft"));
+            completed_open(app, Request::new(&format!("{name}.solidcraft"), Kind::Open), part);
+            tick(app, &ctx);
+            app.status.clone().map(|s| (s.0, s.2)).unwrap_or_default()
         };
-        assert_eq!(open(&mut app, "plate"), "Opened plate", "the blank design is replaced in its tab");
+        assert_eq!(open(&mut app, "plate"), ("Opened plate".into(), false), "the blank design is replaced in its tab");
         assert_eq!(app.docs.count(), 1);
-        assert_eq!(open(&mut app, "post"), "Opened post in a new tab");
+        assert_eq!(open(&mut app, "post"), ("Opened post in a new tab".into(), false));
         assert_eq!(app.docs.count(), 2);
-        let _ = std::fs::remove_dir_all(&dir);
+        // In the language chosen, though the status is set outside the window's language scope
+        app.preferences.language = "de".into();
+        assert_eq!(open(&mut app, "knob"), ("knob in neuem Tab geöffnet".into(), false));
+        // No tab left (and no blank design to take): the open says so, and names nothing it did not open
+        while app.docs.count() < crate::documents::MAX_OPEN {
+            let mut saved = Session::default();
+            saved.path = Some(format!("tab{}.solidcraft", app.docs.count()));
+            crate::documents::open_tab(&mut app, saved).unwrap();
+        }
+        let (status, error) = open(&mut app, "full");
+        assert!(error && status.contains(&crate::documents::MAX_OPEN.to_string()), "{status}");
+        assert_eq!(app.docs.count(), crate::documents::MAX_OPEN);
     }
 
     #[test]
@@ -1600,7 +1613,7 @@ mod tests {
             frames += 1;
         }
         assert_eq!(bodies(&app), 6, "{:?}", app.status);
-        assert!(app.status.as_ref().is_some_and(|s| s.0.starts_with("Inserted ")), "{:?}", app.status);
+        assert_eq!(app.status.as_ref().map(|s| s.0.as_str()), Some("Inserted boxes"), "named as its component is");
         // Cancelled after the parse: nothing is inserted, and nothing waits.
         let before = app.session.doc.clone();
         app.file_load.queued.push_back(Request::new(&path, Kind::Insert));
