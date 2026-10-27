@@ -4,6 +4,10 @@
 //! read from the actual Rust B-rep. Native result graphs are freshly imported and
 //! projected to the same digest. Curve/surface values and adjacency are not compared.
 //! Geometric merges remain deferred at the exact missing dependency call.
+//! Family 2's lists may hold surface operands (`Operand::surface`, planes and spheres):
+//! upstream copies them with the base copy constructor, so a surface list fails with
+//! `SM_ERR` (WR-196) and a list with B-reps ignores its surfaces; the fixture
+//! `surface-operands.json` compares both.
 //! Family 6 runs `NonManifoldBoolean` through `DependencyMerge::with_engine` against a
 //! context-only native `SmMerge` with the same explicit members and at most one
 //! operand: it compares the NER status, the restored manifold flag, the lamina mode
@@ -28,8 +32,12 @@ use solidcore::boolean::topology_intersector::p1::TopologyIntersector;
 use solidcore::geom::a_object::BooleanOperation;
 use solidcore::geom::attribute::{ids, Attribute, AttributeStore, Behavior, ObjectKey};
 use solidcore::geom::context::MarkLock;
+use solidcore::geom::extent2d::Extent2d;
 use solidcore::kernel::Kernel;
-use solidcore::math::Point3;
+use solidcore::math::{Point3, Vec3};
+use solidcore::surface::plane::Plane;
+use solidcore::surface::sphere::{Sphere, SphereOptions};
+use solidcore::surface::surface::Surface;
 use solidcore::topology::brep_cache::{arena_identity, CacheObject};
 use solidcore::topology::topology_traverser::Marks;
 use solidcore::topology::{brep::p1 as bp, Brep, FaceId, NamingScheme};
@@ -43,6 +51,20 @@ struct Operand {
     point: [f64; 3],
     #[serde(default)]
     size: Option<[f64; 3]>,
+    /// A surface operand of a `BooleanLists` list (family 2; shim kinds 2 and 3): `point`
+    /// is its origin (plane) or centre (sphere). A list with B-rep operands ignores its
+    /// surfaces, as upstream reads the surface list only when the B-rep list is empty.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    surface: Option<SurfaceOperand>,
+}
+/// The surface kinds a list operand can be.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SurfaceOperand {
+    /// `SmPlane(origin, normal)`: the infinite plane through the point.
+    Plane { normal: [f64; 3] },
+    /// `SmSphere(centre, X, Y, [0, 360] x [-90, 90] degrees, radius)`.
+    Sphere { radius: f64 },
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Inputs {
@@ -84,10 +106,26 @@ fn encode(i: &Inputs) -> Vec<f64> {
         i.b.len() as f64,
     ];
     for operand in i.a.iter().chain(&i.b) {
-        data.push(f64::from(u8::from(operand.size.is_some())));
-        data.extend(operand.point);
-        if let Some(size) = operand.size {
-            data.extend(size);
+        match (&operand.surface, operand.size) {
+            (Some(SurfaceOperand::Plane { normal }), _) => {
+                data.push(2.0);
+                data.extend(operand.point);
+                data.extend(*normal);
+            }
+            (Some(SurfaceOperand::Sphere { radius }), _) => {
+                data.push(3.0);
+                data.extend(operand.point);
+                data.extend([*radius, 0.0, 0.0]);
+            }
+            (None, Some(size)) => {
+                data.push(1.0);
+                data.extend(operand.point);
+                data.extend(size);
+            }
+            (None, None) => {
+                data.push(0.0);
+                data.extend(operand.point);
+            }
         }
     }
     data.push(i.tree.len() as f64);
@@ -381,6 +419,11 @@ fn list_result(result: &port::BooleanListsResult, values: &mut Vec<f64>) -> soli
 
 struct Pool {
     breps: Vec<Brep>,
+    /// The first list's B-rep operands are `breps[..first_breps]`.
+    first_breps: usize,
+    /// The first and the second list's surface operands (family 2).
+    surfaces_a: Vec<Surface>,
+    surfaces_b: Vec<Surface>,
     original_count: usize,
     retired: BTreeSet<usize>,
     attributes: AttributeStore,
@@ -393,10 +436,44 @@ struct Pool {
 impl Pool {
     fn load(k: &mut Kernel, i: &Inputs) -> Result<Self, HarnessError> {
         let mut breps = Vec::new();
+        let mut first_breps = 0;
+        let mut surfaces_a = Vec::new();
+        let mut surfaces_b = Vec::new();
 
-        for operand in i.a.iter().chain(&i.b) {
+        let lists = i.a.iter().map(|o| (true, o)).chain(i.b.iter().map(|o| (false, o)));
+        for (first, operand) in lists {
             let [x, y, z] = operand.point;
             let point = Point3::new(x, y, z);
+            if let Some(surface) = &operand.surface {
+                let surface = match surface {
+                    SurfaceOperand::Plane { normal } => {
+                        let [nx, ny, nz] = *normal;
+                        Surface::from(Plane::from_normal(point, Vec3::new(nx, ny, nz)))
+                    }
+                    SurfaceOperand::Sphere { radius } => Surface::from(
+                        Sphere::new(
+                            k,
+                            point,
+                            Vec3::new(1.0, 0.0, 0.0),
+                            Vec3::new(0.0, 1.0, 0.0),
+                            Extent2d::from_bounds(0.0, -90.0, 360.0, 90.0),
+                            *radius,
+                            SphereOptions {
+                                swap_uv: false,
+                                inside_out: false,
+                                circle_nurb: None,
+                            },
+                        )
+                        .map_err(|error| harness(&error))?,
+                    ),
+                };
+                if first {
+                    surfaces_a.push(surface);
+                } else {
+                    surfaces_b.push(surface);
+                }
+                continue;
+            }
             let mut brep = if let Some([dx, dy, dz]) = operand.size {
                 solidcore::primitive::api_primitives::create_box(k, point, dx, dy, dz)
                     .map_err(|error| harness(&error))?
@@ -421,14 +498,21 @@ impl Pool {
             };
             brep.use_arena_naming().map_err(|error| harness(&error))?;
             breps.push(brep);
+            if first {
+                first_breps += 1;
+            }
         }
+        let original_count = breps.len();
         Ok(Self {
             breps,
-            original_count: i.a.len() + i.b.len(),
+            first_breps,
+            surfaces_a,
+            surfaces_b,
+            original_count,
             retired: BTreeSet::new(),
             attributes: AttributeStore::new(),
             primary: Some(0),
-            other: Some(i.a.len()),
+            other: Some(first_breps),
             manifold: true,
             engine: None,
         })
@@ -945,13 +1029,13 @@ fn rust(i: &Inputs) -> Result<Output, HarnessError> {
         2 => port::boolean_lists(
             &mut k,
             pool.breps
-                .get(..i.a.len())
+                .get(..pool.first_breps)
                 .ok_or_else(|| harness("bad first list"))?,
-            &[],
+            &pool.surfaces_a,
             pool.breps
-                .get(i.a.len()..)
+                .get(pool.first_breps..)
                 .ok_or_else(|| harness("bad second list"))?,
-            &[],
+            &pool.surfaces_b,
             i.operation,
             opts.as_ref(),
         )
@@ -1066,6 +1150,7 @@ impl UnitDiff for Runner {
         let mut operand = || Operand {
             point: rng.point3(-scale, scale),
             size: None,
+            surface: None,
         };
         let a: Vec<_> = (0..n).map(|_| operand()).collect();
         let b: Vec<_> = (0..m).map(|_| operand()).collect();
@@ -1114,10 +1199,12 @@ mod tests {
             a: vec![Operand {
                 point: [0.0, 0.0, 0.0],
                 size: Some([2.0, 3.0, 4.0]),
+                surface: None,
             }],
             b: vec![Operand {
                 point: [5.0, 0.0, 0.0],
                 size: None,
+                surface: None,
             }],
             tree: Vec::new(),
             expected_refusal: None,
@@ -1158,6 +1245,40 @@ mod tests {
                     .sum();
                 assert_eq!(vertices, expected_vertices, "{}", fixture["name"]);
                 assert!(!result.values["record"].is_empty(), "{}", fixture["name"]);
+            }
+        }
+    }
+
+    /// Surface operands: both engines refuse a surface list the same way (the base-sliced
+    /// copy, WR-196) and ignore surfaces next to B-reps the same way (a real result).
+    #[cfg(feature = "cpp")]
+    #[test]
+    fn surface_operand_fixtures_agree_with_the_native_engine() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../fixtures/boolean.merge_p3/surface-operands.json"
+        );
+        let text = std::fs::read_to_string(path).unwrap();
+        let fixtures: Value = serde_json::from_str(&text).unwrap();
+        for fixture in fixtures["cases"].as_array().unwrap() {
+            let name = &fixture["name"];
+            let input: Inputs = serde_json::from_value(fixture["inputs"].clone()).unwrap();
+            let expected = fixture["expected_status"].as_i64().unwrap();
+            let native = native_output(&ffi::eval(&encode(&input)).unwrap(), input.family).unwrap();
+            let rust = rust(&input).unwrap();
+            for result in [&rust, &native] {
+                assert!(result.deferred.is_none(), "{name}: {:?}", result.deferred);
+                assert!(result.rejected.is_none(), "{name}: {:?}", result.rejected);
+            }
+            if expected == 0 {
+                assert_eq!(rust.ints["status"], [0], "{name}: {:?}", rust.error);
+                assert_eq!(native.ints["status"], [0], "{name}: {:?}", native.error);
+                assert_eq!(rust.ints["topology_counts"], native.ints["topology_counts"], "{name}");
+                assert!(!rust.values["record"].is_empty(), "{name}");
+            } else {
+                let status = format!("status={expected}");
+                assert_eq!(rust.error.as_deref(), Some(status.as_str()), "{name}");
+                assert_eq!(native.error, rust.error, "{name}");
             }
         }
     }
@@ -1216,9 +1337,9 @@ mod tests {
             native_output(&native, 2).unwrap()
         );
         result.surfaces.push(
-            solidcore::surface::plane::Plane::from_normal(
-                solidcore::math::Vec3::ZERO,
-                solidcore::math::Vec3::new(0.0, 0.0, 1.0),
+            Plane::from_normal(
+                Vec3::ZERO,
+                Vec3::new(0.0, 0.0, 1.0),
             )
             .into(),
         );

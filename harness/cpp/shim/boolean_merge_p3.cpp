@@ -5,6 +5,8 @@
 #include "sc_sm.h"
 #include <SmMerge.h>
 #include <SmApiPrimitives.h>
+#include <SmPlane.h>
+#include <SmSphere.h>
 #include <SmApiGeneral.h>
 #include <cmath>
 #include <algorithm>
@@ -60,15 +62,25 @@ SC_EXPORT int32_t sc_boolean_merge_p3_eval(const double* input, int64_t n,
         int mask=rd.integer(0,31); bool have_options=rd.integer(0,1)!=0;
         int na=rd.integer(0,16), nb=rd.integer(0,16);
         if(na+nb>16 || ((family==3 || family==4) && (na!=1 || nb!=1))) throw Bad();
+        // Operand kinds: 0 shell vertex (point), 1 box (origin, dimensions), and for
+        // BooleanLists (family 2) only: 2 plane (origin, normal), 3 sphere (centre, radius,
+        // two zeros). Kinds 2 and 3 go into the call's surface lists; the others into its
+        // B-rep lists.
+        std::vector<int> kinds;
         std::vector<SmPoint3d> points;
         std::vector<std::vector<double>> sizes;
         for(int i=0;i<na+nb;++i) {
-            int kind=rd.integer(0,1);
+            int kind=rd.integer(0,3);
+            if(kind>=2 && family!=2) throw Bad();
             double x=rd.number(), y=rd.number(), z=rd.number();
             if(!std::isfinite(x)||!std::isfinite(y)||!std::isfinite(z)) throw Bad();
+            kinds.push_back(kind);
             points.emplace_back(x,y,z);
             std::vector<double> dimensions;
-            if(kind==1) for(int j=0;j<3;++j) { double d=rd.number(); if(!std::isfinite(d)||d<=0) throw Bad(); dimensions.push_back(d); }
+            if(kind>=1) for(int j=0;j<3;++j) { double d=rd.number(); if(!std::isfinite(d)) throw Bad(); dimensions.push_back(d); }
+            if(kind==1 && (dimensions[0]<=0||dimensions[1]<=0||dimensions[2]<=0)) throw Bad();
+            if(kind==2 && dimensions[0]==0&&dimensions[1]==0&&dimensions[2]==0) throw Bad();
+            if(kind==3 && (dimensions[0]<=0||dimensions[1]!=0||dimensions[2]!=0)) throw Bad();
             sizes.push_back(dimensions);
         }
         // UB-190: boxes have multiple surfaces and reuse the other operand
@@ -101,29 +113,40 @@ SC_EXPORT int32_t sc_boolean_merge_p3_eval(const double* input, int64_t n,
         // observable. Their context must outlive the call, like the API fixture
         // context used by SmApiCreateBox; a stack context leaves dangling caches.
         SmContext& context = *SmApiGetOrCreateContext();
-        std::vector<SmBrep*> originals;
+        std::vector<SmBrep*> originals;       // the B-rep operands, in input order
+        std::vector<SmSurface*> surface_inputs; // the surface operands (BooleanLists retains them)
+        SmTArray<SmBrep*> a,b,result;
+        SmTArray<SmSurface*> sa,sb,result_surfaces;
         for(size_t i=0;i<points.size();++i) {
             auto point=points[i];
-            SmBrep* b=nullptr;
+            bool first_list=i<static_cast<size_t>(na);
+            if(kinds[i]>=2) {
+                SmSurface* s=nullptr;
+                if(kinds[i]==2) s=new(context) SmPlane(point,SmVector3d(sizes[i][0],sizes[i][1],sizes[i][2]),&context);
+                else s=new(context) SmSphere(point,SmVector3d(1,0,0),SmVector3d(0,1,0),
+                    SmExtent2d(SmPoint2d(0,-90),SmPoint2d(360,90)),sizes[i][0],FALSE,FALSE,NULL,&context);
+                surface_inputs.push_back(s);
+                (first_list ? sa : sb).Add(s);
+                continue;
+            }
+            SmBrep* made_brep=nullptr;
             SmStatus made=SM_ERR;
             if(sizes[i].empty()) {
-                b=new(context) SmBrep(SM_USE_DEFAULT,SM_USE_DEFAULT,&context);
+                made_brep=new(context) SmBrep(SM_USE_DEFAULT,SM_USE_DEFAULT,&context);
                 SmShell* shell=nullptr; SmVertex* vertex=nullptr;
-                made=b->MakeShellVertex(b->GetInfiniteRegion(),point,shell,vertex);
+                made=made_brep->MakeShellVertex(made_brep->GetInfiniteRegion(),point,shell,vertex);
             } else {
-                made=SmApiCreateBox(point,sizes[i][0],sizes[i][1],sizes[i][2],b);
+                made=SmApiCreateBox(point,sizes[i][0],sizes[i][1],sizes[i][2],made_brep);
             }
-            if(made!=SM_SUCCESS || !b) {
-                delete b; for(auto* original:originals) delete original; throw Bad();
+            if(made!=SM_SUCCESS || !made_brep) {
+                delete made_brep; for(auto* original:originals) delete original;
+                for(auto* s:surface_inputs) delete s; throw Bad();
             }
-            originals.push_back(b);
+            originals.push_back(made_brep);
+            (first_list ? a : b).Add(made_brep);
         }
         SmMergeOptions options((mask&1)!=0,(mask&2)!=0,(mask&4)!=0,(mask&8)!=0,(mask&16)!=0);
         auto* opt=have_options ? &options : nullptr;
-        SmTArray<SmBrep*> a,b,result;
-        SmTArray<SmSurface*> empty_surfaces, result_surfaces;
-        for(int i=0;i<na;++i) a.Add(originals[i]);
-        for(int i=0;i<nb;++i) b.Add(originals[na+i]);
         SmBrep* single=nullptr;
         SmStatus status=SM_ERR;
         std::vector<double> values;
@@ -143,7 +166,7 @@ SC_EXPORT int32_t sc_boolean_merge_p3_eval(const double* input, int64_t n,
         }
         if(family==0) status=SmMerge::BooleanTrees(a,tree,opt);
         else if(family==1) status=SmMerge::merge_breps(a,static_cast<ULONG>(operation),single,opt);
-        else if(family==2) status=SmMerge::BooleanLists(&context,a,empty_surfaces,b,empty_surfaces,
+        else if(family==2) status=SmMerge::BooleanLists(&context,a,sa,b,sb,
             operation,result,result_surfaces,opt);
         else {
             MergeAccess merge(context,originals[0],originals[1],opt);
@@ -170,11 +193,14 @@ SC_EXPORT int32_t sc_boolean_merge_p3_eval(const double* input, int64_t n,
         }
         // BooleanLists retains every original and returns independent copies.
         // Release those copies first, while any source attribute users are live.
+        // (A surface list's base-sliced copies and their empty B-rep leak upstream when
+        // CreateFaceFromSurface fails on them, WR-196; they are never returned.)
         if(family==2) {
             std::set<SmBrep*> copied;
             for(ULONG i=0;i<result.GetSize();++i) if(result[i]) copied.insert(result[i]);
             for(auto* live:copied) delete live;
             for(ULONG i=0;i<result_surfaces.GetSize();++i) delete result_surfaces[i];
+            for(auto* s:surface_inputs) delete s;
         }
         std::set<SmBrep*> cleanup;
         if(tree_no_binary || family==2 || (family==1 && (na<2 || operation<0 || operation>3))) {

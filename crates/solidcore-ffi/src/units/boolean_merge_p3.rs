@@ -1,6 +1,8 @@
 //! Guarded calls to the five `SmMerge` entry points of `boolean.merge_p3`.
-//! The flat program is family, operation, option-mask, has-options, list lengths,
-//! shell-vertex points or box origins/dimensions, tree length, tree nodes. Family 0 evaluates
+//! The flat program is family, operation, option-mask, has-options, list lengths, the
+//! operands (kind 0: a shell-vertex point; 1: a box origin and dimensions; for family 2 only,
+//! 2: a plane origin and normal; 3: a sphere centre, radius and two zeros), tree length, tree
+//! nodes. Operands of kinds 2 and 3 go into `BooleanLists`' surface lists. Family 0 evaluates
 //! trees, 1 folds a list, 2 combines lists, 3 nonmanifold Boolean, 4 piecewise,
 //! 5 exports one fixture operand, and 6 runs a nonmanifold Boolean on a context-only
 //! `SmMerge` with explicit members and at most one operand (status and controls).
@@ -48,13 +50,35 @@ pub fn validate(input: &[f64]) -> Result<(), FfiError> {
     }
     let mut other_has_surfaces = false;
     for operand in 0..na + nb {
-        let shape = rd.index(1)?;
+        let shape = rd.index(3)?;
+        if shape >= 2 && family != 2 {
+            return Err(bad("surface operands belong to BooleanLists (family 2)"));
+        }
         if operand == na {
             other_has_surfaces = shape == 1;
         }
         rd.slice(3)?;
-        if shape == 1 && rd.slice(3)?.iter().any(|&d| d <= 0.0) {
-            return Err(bad("nonpositive box dimension"));
+        match shape {
+            1 => {
+                if rd.slice(3)?.iter().any(|&d| d <= 0.0) {
+                    return Err(bad("nonpositive box dimension"));
+                }
+            }
+            2 => {
+                if rd.slice(3)?.iter().all(|&c| c == 0.0) {
+                    return Err(bad("zero plane normal"));
+                }
+            }
+            3 => {
+                let tail = rd.slice(3)?;
+                let (Some(&radius), Some(padding)) = (tail.first(), tail.get(1..)) else {
+                    return Err(bad("sphere operand too short"));
+                };
+                if radius <= 0.0 || padding.iter().any(|&c| c != 0.0) {
+                    return Err(bad("sphere radius must be positive, padded with zeros"));
+                }
+            }
+            _ => {}
         }
     }
     // UB-190: boxes have multiple surfaces. The imprint early return deletes
@@ -137,6 +161,35 @@ pub fn eval(input: &[f64]) -> Result<Vec<f64>, FfiError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A family-2 program with one operand per list: `first` and `second` are an operand's
+    /// kind, point and tail (none for a shell vertex).
+    fn lists(family: f64, first: &[f64], second: &[f64]) -> Vec<f64> {
+        let mut input = vec![family, 1.0, 0.0, 0.0, 1.0, 1.0];
+        input.extend(first);
+        input.extend(second);
+        input.push(0.0);
+        input
+    }
+
+    #[test]
+    fn surface_operands_are_lists_only_and_well_formed() {
+        let plane = [2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+        let sphere = [3.0, 1.0, 2.0, 3.0, 0.5, 0.0, 0.0];
+        let vertex = [0.0, 1.0, 2.0, 3.0];
+        assert!(validate(&lists(2.0, &plane, &sphere)).is_ok());
+        assert!(validate(&lists(2.0, &vertex, &plane)).is_ok());
+        // only BooleanLists takes surfaces
+        assert!(validate(&lists(3.0, &plane, &vertex)).is_err());
+        assert!(validate(&lists(1.0, &vertex, &sphere)).is_err());
+        // a zero normal, a nonpositive radius and padding that is not zero
+        let zero_normal = [2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        assert!(validate(&lists(2.0, &zero_normal, &vertex)).is_err());
+        let flat_sphere = [3.0, 1.0, 2.0, 3.0, 0.0, 0.0, 0.0];
+        assert!(validate(&lists(2.0, &vertex, &flat_sphere)).is_err());
+        let padded_sphere = [3.0, 1.0, 2.0, 3.0, 0.5, 1.0, 0.0];
+        assert!(validate(&lists(2.0, &vertex, &padded_sphere)).is_err());
+    }
 
     fn tree(nodes: &[f64]) -> Vec<f64> {
         let mut input = vec![
