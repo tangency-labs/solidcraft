@@ -38,6 +38,7 @@ nice -n 10 cargo test -p difftest --features cpp                     # harness s
 | `--seeds N` | generated cases per unit (default 16) |
 | `--filter S` | only cases whose name contains `S` |
 | `--perturb` | change one item of each case's Rust output (below); passes only if **every** perturbed case is caught. No report written. |
+| `--heap-pads N[,N...]` | after each case, rerun its C++ side (a forked child's heap padded by N small blocks) and list the cases whose C++ output changes ([below](#address-dependent-c-output---heap-pads)). Flag only, not a gate. No report written. |
 | `--compare-reports R` | with `--baseline D` only: run no case, apply the same ratchet to the finished reports in `R` (CI's `difftest-compare` job; needs no C++) |
 | `--baseline D` | regression ratchet: compare each unit with its earlier report `D/<unit>.json` (see [Regression gate](#regression-gate---baseline-value-share)). CI passes the exact base revision's validated report artifact |
 | `--report-dir D` / `--no-report` | report location (default `reports/difftest/`) / skip writing |
@@ -210,6 +211,54 @@ is written the same way (so it can be re-run), but does not fail the run.
 
 `.github/workflows/nightly.yml` runs `--fuzz 300` on every green and partial unit
 each night and uploads failing inputs as the `fuzz-failures` artifact.
+
+## Address-dependent C++ output (`--heap-pads`)
+
+Some upstream results depend on heap addresses: containers keyed by pointers iterate
+in hash-of-address order (ND-2), and the order can choose a result (ND-258: which of two
+coincident planes survives a boolean). The Rust port uses arena ids, so it is
+deterministic and matches one of the C++ outcomes. Such a case can fail in one run and
+pass in the next: a forked C++ child inherits the parent's heap, so the outcome moves
+with the cases run before it, with `--filter` and with unrelated changes to the binary.
+
+```sh
+cargo run --profile difftest -p difftest --features cpp -- --unit <id> --heap-pads 1,3,8
+```
+
+After each case runs as usual, its C++ side is rerun once per pad. The rerun happens
+after the Rust side, in a fresh C++-phase export memo of its own, so the Rust side never
+sees a rerun's result. For a C++ call made through `solidcore_ffi::isolate::fresh_process`
+(a forked child), the child allocates that many small blocks (24 to 264 bytes) before
+the case and frees them after it. That moves the child's addresses and nothing else.
+Each rerun is compared with the first C++ run (the usual comparison, C++ against C++)
+and the first one that differs or fails labels the case:
+
+- `address-dependent`: a padded rerun differs. The note shows the pad, the field, the
+  unpadded value and then the padded one.
+- `unstable (in-process)`: an unpadded rerun differs. Runners that call C++ in-process
+  (most of them; on this tree only `blend.fillet_solver_p4`'s fresh-static-step helper,
+  used by `blend.fillet_executive_p3` and others, `topology.brep_p7` and one
+  `sweep.topology_sweep` branch fork) are rerun without a pad, so a change there is
+  C++ state carried between calls (statics, `rand()`, caches), not the heap.
+- `rerun-error`: a rerun failed (harness error, child crash or timeout) where the first
+  run did not.
+
+```text
+HEAP blend.fillet_executive_p3 pads=1,3,8 checked=1 padded=1 address_dependent=1 unstable=0 rerun_errors=0
+  address-dependent fuzz00712: pad=1: values.result_geometry[801]: -5.75e0 vs -7.5e-1
+```
+
+`padded=` counts the cases whose reruns really forked a padded child. With
+`padded=0` the line says so (`C++ runs in-process here: reruns unpadded, no address
+check`), because then nothing was tested for address dependence.
+
+It is a flag, not a gate: each case's outcome is judged against that run's first C++
+result, the summary line and exit status follow those outcomes, and no report is
+written. The reruns do shift the parent's heap and any in-process C++ state before the
+next case, so for exactly the kind of case this flag hunts, an outcome can differ from a
+plain run's. Compare with a plain run before drawing conclusions. A case that is not
+flagged is not proven address-independent: try several pads. `--heap-pads` cannot be
+combined with `--baseline`, `--fuzz`, `--list`, `--status-of` or the corpus modes.
 
 ## Fuzzing the `.smb` readers (`examples/reader_fuzz.rs`)
 

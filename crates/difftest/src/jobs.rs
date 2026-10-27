@@ -39,6 +39,7 @@ pub const TIMES_FILE: &str = "times.tsv";
 /// Command-line flags that take a value (forwarded to children with it).
 const VALUE_FLAGS: &[&str] = &[
     "--seeds",
+    "--heap-pads",
     "--filter",
     "--report-dir",
     "--status-of",

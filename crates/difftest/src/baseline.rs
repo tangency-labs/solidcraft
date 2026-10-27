@@ -815,6 +815,7 @@ mod tests {
             abs_floors: Vec::new(),
             seeds: 16,
             timing: crate::runner::UnitTiming::default(),
+            heap_check: crate::runner::HeapCheck::default(),
         }
     }
 

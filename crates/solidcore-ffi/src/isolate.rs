@@ -10,6 +10,11 @@
 //! after the run. Nothing read in the child is ever handed to the Rust kernel: it is a
 //! compared output.
 //!
+//! [`set_heap_pad`] (off by default) makes the child allocate a few small blocks before
+//! the closure and free them after it. That moves the C++ side's heap addresses and
+//! nothing else, so a C++ result that changes with it depends on addresses (ND-2,
+//! ND-258): `difftest --heap-pads`. [`padded_children`] counts the children that padded.
+//!
 //! A child that dies (signal, the 600 s alarm, an abnormal exit) or sends a short
 //! message is [`SC_ERR_CHILD_CRASHED`](crate::SC_ERR_CHILD_CRASHED). Where fork is not
 //! available (non-Unix, wasm32) or fails, the closure runs in-process.
@@ -22,6 +27,38 @@ extern "C" {
     fn sc_isolate_alarm(seconds: u32);
     fn sc_isolate_exit() -> !;
     fn sc_isolate_wait(pid: i64) -> i32;
+}
+
+// Per thread: `fresh_process` forks from the thread that calls it, so a setting made on
+// one thread never pads (or counts) another thread's children, e.g. parallel tests.
+thread_local! {
+    /// Blocks the forked child allocates before a case ([`set_heap_pad`]); 0 = none.
+    static HEAP_PAD: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Forked children that applied a nonzero pad ([`padded_children`]).
+    static PADDED_CHILDREN: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Sets how many small blocks (24 to 264 bytes) every later [`fresh_process`] child
+/// started from this thread allocates before running its case and frees after it; `0`
+/// (the default) allocates nothing. Only forked children are padded: a case run
+/// in-process (no fork, or a failed fork) is not.
+pub fn set_heap_pad(blocks: usize) {
+    HEAP_PAD.with(|p| p.set(blocks));
+}
+
+/// This thread's [`set_heap_pad`] setting.
+#[must_use]
+pub fn heap_pad() -> usize {
+    HEAP_PAD.with(std::cell::Cell::get)
+}
+
+/// How many [`fresh_process`] children this thread has forked with a nonzero
+/// [`set_heap_pad`]. A case run in-process (no fork, or a failed fork) is never padded
+/// and never counted, so a caller tells a padded run from an unpadded one by the change
+/// in this count.
+#[must_use]
+pub fn padded_children() -> usize {
+    PADDED_CHILDREN.with(std::cell::Cell::get)
 }
 
 const TAG_OK: u8 = 0;
@@ -118,6 +155,8 @@ pub fn fresh_process_within(
         use std::os::fd::FromRawFd;
 
         let mut fd: i32 = -1;
+        // read once, before the fork: the child pads with it and the parent counts it
+        let pad_blocks = heap_pad();
         // SAFETY: `fd` is a valid i32 the shim writes once.
         let pid = unsafe { sc_isolate_fork(&raw mut fd) };
         if pid == 0 {
@@ -125,7 +164,12 @@ pub fn fresh_process_within(
             // without unwinding into the parent's frames).
             // SAFETY: only sets this child's alarm.
             unsafe { sc_isolate_alarm(seconds.clamp(1, MAX_SECONDS)) };
+            // Held across the case so the C++ side allocates around it (`set_heap_pad`).
+            let pad: Vec<Vec<u8>> = (0..pad_blocks)
+                .map(|i| vec![1u8; 24 + 40 * (i % 7)])
+                .collect();
             let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(case));
+            drop(std::hint::black_box(pad));
             if let Ok(r) = r {
                 // SAFETY: `fd` is the pipe's write end, owned by this child only.
                 let mut pipe = unsafe { std::fs::File::from_raw_fd(fd) };
@@ -135,6 +179,9 @@ pub fn fresh_process_within(
             unsafe { sc_isolate_exit() }
         }
         if pid > 0 {
+            if pad_blocks > 0 {
+                PADDED_CHILDREN.with(|n| n.set(n.get() + 1));
+            }
             let mut buf = Vec::new();
             // SAFETY: `fd` is the pipe's read end, owned by this parent only.
             let mut pipe = unsafe { std::fs::File::from_raw_fd(fd) };

@@ -316,6 +316,7 @@ mod tests {
             abs_floors: Vec::new(),
             seeds: 16,
             timing: crate::runner::UnitTiming::default(),
+            heap_check: crate::runner::HeapCheck::default(),
         };
         let text = to_canonical_string(&unit_report(&r));
         assert_eq!(ReportCounts::parse(&text), Some(ReportCounts::of(&r)));
@@ -403,6 +404,7 @@ mod tests {
             abs_floors: Vec::new(),
             seeds: 16,
             timing: crate::runner::UnitTiming::default(),
+            heap_check: crate::runner::HeapCheck::default(),
         };
         let v = unit_report(&r);
         assert_eq!((&v["status"], &v["pass"]), (&json!("green"), &json!(true)));
