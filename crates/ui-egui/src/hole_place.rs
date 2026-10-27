@@ -242,7 +242,8 @@ pub(crate) fn move_place(d: &mut Dialog, s: &Session, i: usize, to: Sel) -> bool
 
 /// A Single hole's face place picked on a face that already has a hole moves that hole there
 /// (true), when holes move by clicking. A pick on the hole itself (within its radius) is left to
-/// take it out, as before.
+/// take it out, as before. A hole held along one reference edge goes along it only, and the pick
+/// is spent either way (it never takes the hole out instead).
 pub(crate) fn pick_moves(d: &mut Dialog, s: &Session, sel: &Sel) -> bool {
     let Kind::Hole { opts, diameter, .. } = &d.kind else { return false };
     let Sel::Face { point, .. } = sel else { return false };
@@ -257,7 +258,13 @@ pub(crate) fn pick_moves(d: &mut Dialog, s: &Session, sel: &Sel) -> bool {
     if was.dist(*point) <= radius {
         return false;
     }
-    move_place(d, s, i, sel.clone())
+    match crate::hole_refs::freedom(d) {
+        crate::place_gizmo::Freedom::Plane => move_place(d, s, i, sel.clone()),
+        crate::place_gizmo::Freedom::Line(_) => {
+            crate::hole_refs::drag_to(s, d, i, *point);
+            true
+        }
+    }
 }
 
 /// Take out the hole placed by item `i` of the face input (with the other half of a round face

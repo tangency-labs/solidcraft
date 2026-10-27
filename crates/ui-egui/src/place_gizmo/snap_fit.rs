@@ -19,6 +19,7 @@ pub(super) static SPEC: Spec = Spec {
     move_to: |app, d, hits, _| crate::dialogs_plastic::handle_move(app, d, hits),
     click: None,
     footprint,
+    freedom: super::anywhere,
     turn: Some(Turn { tip: "Drag to point the catch in another direction.", reach, angle, set }),
 };
 
