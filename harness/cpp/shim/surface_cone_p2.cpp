@@ -2,7 +2,7 @@
 // difftest shim for unit `surface.cone_p2`.
 // Wraps the SmCone members owned by the unit (source/SMLib/src/SmCone.cpp):
 // CreateOffsetSurface, IsNurbSurfaceCone and RebuildSTEPFromNURBParameters, plus a verbatim
-// copy of the file-static sm_GetEllipseTrimIntervals.
+// copy of the file-statics sm_IsConePointInTrimDomain and sm_GetEllipseTrimIntervals.
 //
 // One entry point, sc_surface_cone_p2_eval(op, in, n_in, out, cap, out_len). Layouts are
 // documented in crates/solidcore-ffi/src/units/surface_cone_p2.rs, which validates every
@@ -47,6 +47,35 @@
 // ---- verbatim copy of file-static upstream code (SmCone.cpp) ---------------------------
 
 /*******************************************************************//**
+PURPOSE: Test whether a point on a cone lies inside a STEP trim domain
+            of that cone.
+
+NOTES: SmCone::STEPInversion ignores its domain argument and only
+       reports whether the point is inside the whole cone, so the
+       trim domain limits are checked here.
+***********************************************************************/
+static SmBoolean sm_IsConePointInTrimDomain
+  (const SmCone      & crCone,          // in : cone the point lies on
+   const SmExtent2d  & crAnalUVDomain,  // in : STEP trim domain of the cone
+   const SmPoint3d   & crPoint,         // in : point on the cone
+   double              dTol)            // in : 3d tolerance
+{
+  SmPoint2d      sSTEPUV ;
+  SmLocationType eLoc ;
+  crCone.STEPInversion(crAnalUVDomain, crPoint, dTol, sSTEPUV, eLoc) ;
+  if(eLoc == SM_LT_EXTERIOR)
+    { return FALSE ; }
+
+  if(!crAnalUVDomain.GetVInterval().ContainsValue(sSTEPUV.y, dTol))
+    { return FALSE ; }
+
+  // the sweep angle is arbitrary at a pole
+  return(   eLoc == SM_LT_POLE
+         || crAnalUVDomain.GetUInterval().ContainsPeriodicValue(sSTEPUV.x, 360.0)) ;
+
+} // end sm_IsConePointInTrimDomain
+
+/*******************************************************************//**
 PURPOSE: Find the set of intervals on an ellipse known to be
             on the cone's surface that are inside given cone's 
             trim boundaries.
@@ -87,18 +116,20 @@ void sm_GetEllipseTrimIntervals
                                 SmExtent1d(0.0, 360.0),
                                 dEllipseXRadius, dEllipseYRadius,
                                 3, &crContext) ;
-  // cone locals
-  double           dHeight       = crCone.GetHeight();
-  SmVector3d       sConeAxis     = crCone.GetPosition().GetZAxis();
-//cbi change:  const SmPoint3d &rCenterBot    = crCone.GetPosition().GetOriginRef();
-  SmPoint3d rCenterBot = crCone.GetPosition().GetOriginRef()
-                         + crCone.GetSTEPUVDomain().GetVMin() * sConeAxis;
-  SmPoint3d        sCenterTop    = rCenterBot + dHeight * sConeAxis;
-
   // map given NurbDomain into StepDomain - m_bInsideOut swaps Nurb GenCurve Min/Max Points
   SmExtent2d       sAnalUVDomain ;
   crCone.ConvertDomainFromNURBSToSTEP(crUVDomain, sAnalUVDomain) ;
   SmExtent1d       sSweepIvl     = sAnalUVDomain.GetUInterval() ;
+
+  // cone locals - bottom and top trim circles sit at the v limits of the trim domain,
+  //               which may be a subset of the whole cone
+  SmVector3d       sConeAxis     = crCone.GetPosition().GetZAxis();
+  double           dBotHeight    = sAnalUVDomain.GetVMin() ;
+  double           dTopHeight    = sAnalUVDomain.GetVMax() ;
+  double           dBotRadius    = crCone.GetRadius(dBotHeight) ;
+  double           dTopRadius    = crCone.GetRadius(dTopHeight) ;
+  SmPoint3d        rCenterBot    = crCone.GetPosition().GetOriginRef() + dBotHeight * sConeAxis;
+  SmPoint3d        sCenterTop    = crCone.GetPosition().GetOriginRef() + dTopHeight * sConeAxis;
   //SmBoolean        bIsClosed     = sSweepIvl.IsClosed(360.0) ;  //unused
   //double           dStartAng     = sSweepIvl.GetMin();        //unused
   //double           dEndAng       = sSweepIvl.GetMax();        //unused
@@ -119,22 +150,22 @@ static ULONG lDebugCount = 0 ;
   if (bDebugMe || lCount == lDebugCount) 
     {
       SmBSplineCurve *pCirc1 = NULL ; 
-      if(SM_IS_ZERO(crCone.GetTopRadius()))
+      if(SM_IS_ZERO(dTopRadius))
            { SmBSplineCurve::CreateDegenerateCurve(crContext, 3, sCenterTop, pCirc1) ; }
       else { pCirc1 = new (crContext) SmCircle(sCenterTop, 
                                                crCone.GetPosition().GetXAxisRef(), 
                                                crCone.GetPosition().GetYAxisRef(),
-                                               sSweepIvl, crCone.GetTopRadius(), 3, &crContext) ;
+                                               sSweepIvl, dTopRadius, 3, &crContext) ;
            }
       SmObjDelete sClean1(pCirc1) ;
 
       SmBSplineCurve *pCirc2 = NULL ; 
-      if(SM_IS_ZERO(crCone.GetBotRadius()))
+      if(SM_IS_ZERO(dBotRadius))
            { SmBSplineCurve::CreateDegenerateCurve(crContext, 3, rCenterBot, pCirc2) ; }
       else { pCirc2 = new (crContext) SmCircle(rCenterBot, 
                                                crCone.GetPosition().GetXAxisRef(), 
                                                crCone.GetPosition().GetYAxisRef(),
-                                               sSweepIvl, crCone.GetBotRadius(), 3, &crContext) ;
+                                               sSweepIvl, dBotRadius, 3, &crContext) ;
            }
       SmObjDelete sClean2(pCirc2) ;
       SmFace *pFace = (SmFace *)crCone.GetFace() ;
@@ -164,11 +195,11 @@ static ULONG lDebugCount = 0 ;
   SmPoint3d sTsectPoints[6] ;
   double dParam[2] ;
   smgu_CirclePlaneIntersect(dTol, 
-                            crCone.GetTopRadius(), sCenterTop, sConeAxis,
+                            dTopRadius, sCenterTop, sConeAxis,
                             rEllipseOrigin, sEllipseZ, 
                             lNumTsect1, sTsectPoints) ;
   smgu_CirclePlaneIntersect(dTol, 
-                            crCone.GetBotRadius(), rCenterBot, sConeAxis,
+                            dBotRadius, rCenterBot, sConeAxis,
                             rEllipseOrigin, sEllipseZ, 
                             lNumTsect2, sTsectPoints+2) ;
   smgu_LinePlaneIntersect  (sCorners[0], sStartLineVec,
@@ -218,7 +249,7 @@ static ULONG lDebugCount = 0 ;
           // when ConeUV is cone trim boundaries
           //      skip circle instersections on seams because the line intersections will catch seam intersections
           if(   eLoc == SM_LT_INTERIOR
-             && eLoc != SM_LT_U_SEAM)
+             && sSweepIvl.ContainsPeriodicValue(sConeSTEPUV.x, 360.0))
             {
               // add ellipse angleDeg for intersection to in/out angle dXSectAngle array
               sFullEllipse.STEPInversion(sTsectPoints[ii], dXSectAngle[lCnt]) ;
@@ -235,9 +266,16 @@ static ULONG lDebugCount = 0 ;
   //    This computation needs both functions to have the same behavior near corners.
   double dScaledZero = SM_EFF_ZERO * (1.0 + smos_Max(sCorners[0].GetMaxDimension(),
                                                      sCorners[3].GetMaxDimension())) ;
+
+  // circle crossings within dTol of a seam line were skipped above,
+  // so seam line crossings within dTol of the line ends must be kept here
+  double dStartLineLen    = sStartLineVec.Length() ;
+  double dEndLineLen      = sEndLineVec.Length() ;
+  double dStartParamTol   = (dStartLineLen > SM_EFF_ZERO) ? smos_Max(dScaledZero, dTol / dStartLineLen) : dScaledZero ;
+  double dEndParamTol     = (dEndLineLen   > SM_EFF_ZERO) ? smos_Max(dScaledZero, dTol / dEndLineLen)   : dScaledZero ;
   if(   (   lNumTsect1 == 3 || lNumTsect2 == 3)
-     || (   dParam[0] >= 0.0 - dScaledZero
-         && dParam[0] <= 1.0 + dScaledZero))
+     || (   dParam[0] >= 0.0 - dStartParamTol
+         && dParam[0] <= 1.0 + dStartParamTol))
     {
       sTsectPoints[4] = sCorners[0] + dParam[0] * sStartLineVec;
       sFullEllipse.STEPInversion( sTsectPoints[4], dXSectAngle[lCnt] );
@@ -246,8 +284,8 @@ static ULONG lDebugCount = 0 ;
 
   // for EndSeamLine/ellipse xsect
   if(   (   lNumTsect1 == 3 || lNumTsect2 == 3)
-     || (   dParam[1] >= 0.0 - dScaledZero
-         && dParam[1] <= 1.0 + dScaledZero))
+     || (   dParam[1] >= 0.0 - dEndParamTol
+         && dParam[1] <= 1.0 + dEndParamTol))
     {
       sTsectPoints[5] = sCorners[2] + dParam[1] * sEndLineVec;
       sFullEllipse.STEPInversion( sTsectPoints[5], dXSectAngle[lCnt] );
@@ -301,10 +339,9 @@ static ULONG lDebugCount = 0 ;
       SmPoint3d sSegmentMidPoint ;
       double sSegmentMidAngDeg = (dEndAngDeg + dStartAngDeg) / 2.0 ;
       sFullEllipse.EvaluateSTEPPoint(sSegmentMidAngDeg, sSegmentMidPoint) ;
-      crCone.STEPInversion(sAnalUVDomain, sSegmentMidPoint, dTol, sConeSTEPUV, eLoc) ;
 
       // Remember if segment MidPointUV is within cone trim boundaries
-      bInside[iThis] = (eLoc == SM_LT_EXTERIOR) ? FALSE : TRUE ;
+      bInside[iThis] = sm_IsConePointInTrimDomain(crCone, sAnalUVDomain, sSegmentMidPoint, dTol) ;
 
     } // end iter every interval to classify it
 

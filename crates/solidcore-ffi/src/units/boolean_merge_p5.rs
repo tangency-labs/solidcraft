@@ -86,7 +86,7 @@ fn validate(o: Operand<'_>) -> Result<CString, FfiError> {
         }
         _ => {
             if o.block.first() == Some(&0.0) {
-                // UB-1: part containers such as SmallBox.smb are NOT B-rep
+                // UB-1: part containers such as SmallBox.smp are NOT B-rep
                 // streams. ReadFromFile misreads their header and dereferences
                 // null in SmTopologyData::ReadFromDB. Reject this wrong format
                 // before even the shared fixture validator invokes C++.
@@ -349,7 +349,7 @@ mod tests {
         )
         .is_ok());
         let part = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../upstream/TestFiles/pt_TestFiles/SmallBox.smb");
+            .join("../../upstream/TestFiles/pt_TestFiles/SmallBox.smp");
         assert!(matches!(
             export(Operand {
                 path: part.to_str().unwrap(),

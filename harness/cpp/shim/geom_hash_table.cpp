@@ -30,8 +30,6 @@
 // Rejected with SC_ERR_ARG (upstream undefined behaviour):
 //  * counts above 2^20 each / 2^20 voxels, estimates above 2^20;
 //  * Add on a sized model with zero voxels (indexes m_sBuckets[SM_UNDEF_ULONG]);
-//  * Add that grows a model whose hash table still has items: SmObjsInVoxels::IncMaxItemCount
-//    re-points the bucket items at the old point-item array and then frees it;
 //  * FindCoincidentPairs with an empty bucket list (GetAt(0)) or a bucket index out of range,
 //    including a tracked bucket (mode 1) recorded before a SetSize that shrank the model;
 //  * MapVoxelIndexToIndices with x*y == 0 (division by zero).
@@ -219,10 +217,6 @@ int32_t run(const double* p, int64_t n, std::vector<int64_t>& oi, std::vector<do
             SmPoint3d pt(a[1], a[2], a[3]);
             bool live = !box.IsInit();
             if (live && cnt[0] * cnt[1] * cnt[2] == 0)
-                return SC_ERR_ARG;
-            ULONG size = v.GetPointItems().GetSize();
-            ULONG data = v.GetPointItems().GetDataSize();
-            if (live && size > 0 && size + 7 > data && v.hash().GetUsedBucketItemCount() > 0)
                 return SC_ERR_ARG;
             ULONG r = v.Add(item_ptr(a[0]), pt, SmZoneTol3d(a[4]), a[5] != 0.0 ? &upd : NULL, NULL);
             oi.push_back((int64_t)r);

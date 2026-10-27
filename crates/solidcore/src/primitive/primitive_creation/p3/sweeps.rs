@@ -52,7 +52,8 @@ const OP: &str = "primitive::primitive_creation::p3::sweeps";
 pub struct RepeatedSweepOptions {
     /// Number of incremental sweeps, including zero as accepted upstream.
     pub repetitions: u64,
-    /// Create end caps; repeated capped sweeps require exactly one repetition.
+    /// Create end caps on the first and last profiles; capped sweeps require at least
+    /// one repetition.
     pub cap_ends: bool,
     /// Split inputs at C1 discontinuities (default true).
     pub test_continuity: bool,
@@ -201,7 +202,7 @@ impl PrimitiveCreation {
         options: RepeatedSweepOptions,
     ) -> Result<()> {
         self.init_entity_maps();
-        if options.cap_ends && options.repetitions != 1 {
+        if options.cap_ends && options.repetitions == 0 {
             return Err(SolidError::sm_err(OP));
         }
         let region = target(self, brep)?;
@@ -222,6 +223,12 @@ impl PrimitiveCreation {
             }
             let mut faces = Vec::new();
             let mut edges = Vec::new();
+            // the profile the end cap is copied from (the planar faces consume the curves)
+            let profile: Vec<Curve> = if options.cap_ends {
+                curves.iter().flatten().cloned().collect()
+            } else {
+                Vec::new()
+            };
             if let Some(()) = ignored(a.planar_faces(region, curves, tolerance, &mut faces))? {
                 for &face in &faces {
                     edges.extend(a.face_edges((brep, face))?);
@@ -242,28 +249,47 @@ impl PrimitiveCreation {
             if distance == 0.0 {
                 return Ok(());
             }
-            let mut cap = options.cap_ends;
-            if let Some(&base) = faces.first() {
-                edges = a.face_edges((brep, base))?;
-            } else {
-                cap = false;
-            }
-            let mut geometry = TranslationalSweepGeometry::new(distance * direction);
-            geometry.base.eps = tolerance;
-            let geometry = SweepGeometry::Translation(geometry);
+            // without planar faces there is nothing to cap
+            let cap = options.cap_ends && !faces.is_empty();
+
+            // Each step is distance along the unit direction; a zero vector is rejected.
+            let sweep_dir = direction.unitize()?;
+
+            let mut translation = TranslationalSweepGeometry::new(distance * sweep_dir);
+            translation.base.eps = tolerance;
+            let step = translation.sweep_transform();
+            let geometry = SweepGeometry::Translation(translation);
             let mut sweep = TopologySweep {
                 do_tagging: self.tag_id() > 0,
                 tag_id: self.tag_id(),
                 repetitions: options.repetitions,
                 ..Default::default()
             };
-            let mut selected = targets(brep, &faces, &edges, cap);
+
+            // when asked and it's possible - build the end cap: the profile moved by
+            // every step
             if cap {
-                sweep.do_stitching = false;
-                sweep.do_sweep(a, &geometry, Some(brep), Some(region), &mut selected)?;
-                a.stitch_linear_caps(brep, &mut sweep, tolerance)?;
+                let mut end_curves = Vec::new();
+                for curve in &profile {
+                    let mut end_curve = curve.copy(a.kernel(brep)?)?;
+                    for _ in 0..options.repetitions {
+                        ignore_status(end_curve.transform(a.kernel(brep)?, &step, None))?;
+                    }
+                    end_curves.push(Some(end_curve));
+                }
+                let mut end_faces = Vec::new();
+                a.planar_faces(region, &mut end_curves, tolerance, &mut end_faces)?;
+                sweep.do_stitching = true; // stitch the sides to the caps
+            }
+
+            let mut selected = targets(brep, &faces, &edges, false);
+            sweep.do_sweep(a, &geometry, Some(brep), Some(region), &mut selected)?;
+
+            if cap {
+                // both caps have the profile's orientation
+                a.orient(brep, true, false)?;
             } else {
-                sweep.do_sweep(a, &geometry, Some(brep), Some(region), &mut selected)?;
+                // unrelated clean up - we didn't use the tmp faces (if any - delete them)
                 for face in faces {
                     ignore_status(a.delete_primitive_face((brep, face)))?;
                 }

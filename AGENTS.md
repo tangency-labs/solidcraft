@@ -1,7 +1,8 @@
 # AGENTS.md — solidcore
 
 solidcore is a port of NVIDIA's SMLib B-rep kernel (C++, Apache-2.0) to idiomatic safe
-Rust. Upstream is cloned (gitignored) at `upstream/`, pinned to commit `c9c5979`. Many
+Rust. Upstream is cloned (gitignored) at `upstream/`, pinned to v1.0.1, commit `3fd5b95`
+(`scripts/upstream-pin.env` is the single source of truth for scripts, CI and the site). Many
 agents work here at once: read this whole file before your first change.
 
 ```

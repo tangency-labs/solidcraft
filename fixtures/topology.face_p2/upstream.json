@@ -35491,7 +35491,7 @@
   },
   {
    "name": "trim_uv_plane",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:2040",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1771",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -35577,7 +35577,7 @@
   },
   {
    "name": "trim_3d_plane",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:2040",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1771",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -35846,7 +35846,7 @@
   },
   {
    "name": "trim_uv_plane_box_side",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:2040",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1771",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -35932,7 +35932,7 @@
   },
   {
    "name": "trim_3d_plane_box_side",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:2040",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1771",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -36201,7 +36201,7 @@
   },
   {
    "name": "trim_uv_plane_tilted",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:2040",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1771",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -36287,7 +36287,7 @@
   },
   {
    "name": "trim_3d_plane_tilted",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:2040",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1771",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -36556,7 +36556,7 @@
   },
   {
    "name": "trim_uv_bss",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:2040",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1771",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -36712,7 +36712,7 @@
   },
   {
    "name": "trim_3d_bss",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:2040",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1771",
    "inputs": {
     "brep": {
      "kind": "face",

@@ -62,6 +62,7 @@ use crate::error::{Result, SolidError};
 use crate::geom::extent2d::Extent2d;
 use crate::geom::extent3d::Extent3d;
 use crate::geom::pseudo_box::PseudoBox;
+use crate::geom::tol::ZONE_TOL_3D;
 use crate::geom::tree::{
     AuxDataType, NodeClass, NodeData, NodeGeomType, NodeId, SplitDir, SurfaceAux, TreeNode,
 };
@@ -570,7 +571,16 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
 
         // chordheight
         if chord_height_squared >= EFF_ZERO {
-            let height = pseudo_box.interval(2).map_or(0.0, |i| i.length());
+            let mut height = pseudo_box.interval(2).map_or(0.0, |i| i.length());
+
+            // Bezier patch boxes are padded by SM_ZONE_TOL_3D on each side, so a chord
+            // height tolerance no larger than that could never be met; test the
+            // unpadded height.
+            if aux_type == AuxDataType::BezierSurface && chord_tol <= 2.0 * ZONE_TOL_3D {
+                let unpadded = height - 2.0 * ZONE_TOL_3D;
+                height = if unpadded > 0.0 { unpadded } else { 0.0 };
+            }
+
             if height * height <= chord_height_squared {
                 self.aux_mut(node)?.chord_height_satisfied = true;
             } else {

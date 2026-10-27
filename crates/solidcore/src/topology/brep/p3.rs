@@ -2422,12 +2422,32 @@ fn delete_face_nesting(
 ) -> Result<()> {
     // (unsigned counts upstream)
     let remaining = |c: usize| c.wrapping_sub(new_shell_vertex_count);
+    let mut vertices_needing_new_shell = 0usize;
     if any_edgeuse.is_none() && remaining(*vertex_count) == 0 {
         let r = eu1::shell_region(b, shell)?.ok_or(null_deref("shell without region"))?;
         ignore_soft(shell::region_remove_shell(b, r, shell))?;
         // delete pShell
         shell::destroy(k, b, shell, env)?;
     } else {
+        // Vertex-only loops supply no boundary edgeuse. An attached wire
+        // can nevertheless survive after the shell loses its last faceuse.
+        let mut any_edgeuse = any_edgeuse;
+        if shell::shell_list_size(b, shell)? == 0 && any_edgeuse.is_none() {
+            'vertices: for v in verts.iter().flatten().copied() {
+                for vu in vertex::vertexuses(b, v)? {
+                    if !vertexuse::is_edge_vertexuse(b, vu)? {
+                        continue;
+                    }
+                    let eu = vertexuse::edgeuse(b, vu)?
+                        .ok_or(null_deref("edge vertex use without edge use"))?;
+                    if eu1::is_shell_edgeuse(b, eu)? && eu1::shell(b, eu)? == Some(shell) {
+                        any_edgeuse = Some(eu);
+                        break 'vertices;
+                    }
+                }
+            }
+        }
+
         // See if shell is now a wire shell - if it is point it to an edgeuse
         if shell::shell_list_size(b, shell)? == 0 {
             if let Some(eu) = any_edgeuse {
@@ -2458,10 +2478,14 @@ fn delete_face_nesting(
                 *vertex_count = vertex_count.wrapping_sub(1);
             }
         }
+
+        // The shell vertices counted in new_shell_vertex_count are already subtracted
+        // above.
+        vertices_needing_new_shell = *vertex_count;
     }
 
     // if any vertices no longer connect to pShell - need 1 or more new shells
-    if remaining(*vertex_count) == 0 {
+    if vertices_needing_new_shell == 0 {
         return Ok(());
     }
     lock.new_mark(core::slice::from_mut(&mut k.context))?;

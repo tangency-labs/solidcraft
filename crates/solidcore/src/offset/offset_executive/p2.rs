@@ -11,6 +11,7 @@
 //! | [`OffsetExecutive::shell_brep`], [`ShellOutcome`] | both `SmOffsetExecutive::ShellBrep` overloads, including input ownership |
 //! | [`OffsetExecutive::do_solid_offset`] | `SmOffsetExecutive::DoSolidOffset` |
 //! | [`OffsetExecutive::do_extended_offset`] | `SmOffsetExecutive::DoExtendedOffset` |
+//! | `order_edgeuses_by_brep` (private) | `sm_OrderEdgeusesByBrep` |
 //! | [`api_shell_brep_full`], [`ShellCopyIdentities`] | `SmApiShellBrepFull` (and its working copy's identities) |
 //! | [`api_offset_brep_full`] | `SmApiOffsetBrepFull` |
 //!
@@ -25,6 +26,8 @@
 //! upstream); member null is native 1006, API null/invalid selection is native 1007.
 //! Offset/member inputs are mutable so existing queries can populate lazy UV trim
 //! geometry in the same arena; this adds no constructive capability or topology copy.
+//! `sm_OrderEdgeusesByBrep` (void upstream) propagates a dangling-id error from its
+//! face and edge-use queries; only a corrupt B-rep reaches it.
 //! Source faces use the native owning-list order. Temporary allocation uses the real
 //! empty constructor's void infinite region, tolerance, editing flag and caller-reserved
 //! result key. No offset geometry is fabricated. Copied faces pass the actual region
@@ -522,7 +525,7 @@ impl OffsetExecutive {
             }
         }
 
-        let mapped = self.mapped_original_edgeuses();
+        let mapped = order_edgeuses_by_brep(original, &self.mapped_original_edgeuses())?;
         with_mark_lock(kernel, ALL_MARKS, |kernel, mark_type| {
             // The same claimed mark reaches both mapped-edge passes. Source and
             // result keys stay disjoint through p1's synchronization and Copy calls.
@@ -1765,6 +1768,35 @@ fn invalid_input(operation: &'static str) -> SolidError {
     }
 }
 
+/// `sm_OrderEdgeusesByBrep`: `edgeuses` ordered by `brep` (its faces, each face's
+/// two face uses, their edge uses), not by identity: the B-rep order is walked from
+/// its end and each listed edge use is placed at its first sighting. Edge uses not
+/// found in `brep` go last, in their input order.
+fn order_edgeuses_by_brep(brep: &Brep, edgeuses: &[EdgeuseId]) -> Result<Vec<EdgeuseId>> {
+    let mut unplaced: BTreeSet<EdgeuseId> = edgeuses.iter().copied().collect();
+
+    let mut brep_order = Vec::new();
+    for f in bp1::faces(brep, None)? {
+        let (faceuse1, faceuse2) = face::faceuses(brep, f)?;
+        for faceuse in [faceuse1, faceuse2].into_iter().flatten() {
+            brep_order.extend(eu::faceuse_edgeuses(brep, faceuse, false, None)?);
+        }
+    }
+
+    let mut ordered = Vec::new();
+    for &edgeuse in brep_order.iter().rev() {
+        if unplaced.remove(&edgeuse) {
+            ordered.push(edgeuse);
+        }
+    }
+    for &edgeuse in edgeuses {
+        if unplaced.contains(&edgeuse) {
+            ordered.push(edgeuse);
+        }
+    }
+    Ok(ordered)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1775,6 +1807,37 @@ mod tests {
     use crate::surface::plane::Plane;
     use crate::surface::surface::Surface;
     use crate::topology::{Faceuse, FaceuseId, Region, Shell};
+
+    /// `sm_OrderEdgeusesByBrep`: the B-rep's edge uses come from the end of its
+    /// face/face-use/edge-use order, each once; an edge use not in the B-rep goes last.
+    #[test]
+    fn edgeuses_are_ordered_by_their_brep_then_input_order() {
+        let mut k = Kernel::default();
+        let brep = crate::primitive::api_primitives::create_box(
+            &mut k,
+            crate::math::Point3::new(0.0, 0.0, 0.0),
+            1.0,
+            2.0,
+            3.0,
+        )
+        .unwrap();
+        let mut brep_order = Vec::new();
+        for f in bp1::faces(&brep, None).unwrap() {
+            let (a, b) = face::faceuses(&brep, f).unwrap();
+            for fu in [a, b].into_iter().flatten() {
+                brep_order.extend(eu::faceuse_edgeuses(&brep, fu, false, None).unwrap());
+            }
+        }
+        let last = *brep_order.last().unwrap();
+        let first = brep_order[0];
+        let foreign = [
+            EdgeuseId::from_index(900_001),
+            EdgeuseId::from_index(900_000),
+        ];
+        let input = vec![foreign[0], first, foreign[1], last];
+        let ordered = order_edgeuses_by_brep(&brep, &input).unwrap();
+        assert_eq!(ordered, vec![last, first, foreign[0], foreign[1]]);
+    }
 
     fn fixture_key(entity: EntityRef, namespace: u64) -> ObjectRef {
         let (index, type_code) = match entity {

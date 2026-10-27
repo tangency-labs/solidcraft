@@ -346,7 +346,7 @@
   },
   {
    "name": "crv_crv_line_join_io00",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "op": "gf",
     "gf": {
@@ -407,7 +407,7 @@
   },
   {
    "name": "crv_crv_line_join_io01",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "op": "gf",
     "gf": {
@@ -468,7 +468,7 @@
   },
   {
    "name": "crv_crv_line_join_io10",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "op": "gf",
     "gf": {
@@ -529,7 +529,7 @@
   },
   {
    "name": "crv_crv_line_join_io11",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "op": "gf",
     "gf": {
@@ -590,7 +590,7 @@
   },
   {
    "name": "topo_network_kind0_0.0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4656",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3579",
    "inputs": {
     "op": "topo",
     "brep": {
@@ -605,7 +605,7 @@
   },
   {
    "name": "topo_network_kind0_1.0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4656",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3579",
    "inputs": {
     "op": "topo",
     "brep": {
@@ -620,7 +620,7 @@
   },
   {
    "name": "topo_network_kind3_1.0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4656",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3579",
    "inputs": {
     "op": "topo",
     "brep": {
@@ -635,7 +635,7 @@
   },
   {
    "name": "topo_network_kind3_0.5",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4656",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3579",
    "inputs": {
     "op": "topo",
     "brep": {

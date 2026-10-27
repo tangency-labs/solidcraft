@@ -34,7 +34,7 @@
 //! | [`MapMates`]                                          | `GetOtherMate` / `RemoveRelationship` for `SmProtoTopologyManager::GlueCoincidentBrepVertices` |
 //!
 //! The two constructors are in [`p1`](super::p1) (co-ported there). `CloseIntersectionLoop`
-//! (`SmTopologyIntersector.cpp:6108-6354`, called from `SmMerge.cpp:2958`) and its only
+//! (`SmTopologyIntersector.cpp:6108-6368`, called from `SmMerge.cpp:2961`) and its only
 //! callee `IIREdgeBrep` (`:2836-2971`) are listed by no unit in `units.json`; they are
 //! co-ported here.
 //!
@@ -912,7 +912,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         Ok(merged)
     }
 
-    /// `CloseIntersectionLoop(pBrepVertex, rbMadeNewTopology)`: tries to close a gap in
+    /// `CloseIntersectionLoop(pBrepVertex, rbMadeNewTopology, rDeletedVertices,
+    /// rDeletedEdges)`: tries to close a gap in
     /// the intersection loop at a B-rep vertex mated to an other-B-rep vertex. For each
     /// unmated edge of the vertex whose far vertex is mated: when the two mated
     /// vertices of the other B-rep share exactly one edge and the edge's midpoint drops
@@ -921,8 +922,12 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
     /// (`BrepCurveSolve` gives a range of values), it is intersected, inserted and
     /// related there ([`TopologyIntersector::iir_edge_brep`]). Without new topology in
     /// the other B-rep, the same is tried the other way round for the other vertex's
-    /// unmated edges. Returns `rbMadeNewTopology`. Unowned in `units.json` (called from
-    /// `SmMerge.cpp:2958`); co-ported into this part.
+    /// unmated edges. Returns `rbMadeNewTopology`; `deleted_vertices` and
+    /// `deleted_edges` are reset once the vertex and its mate are found, then receive
+    /// the vertices and edges (of either B-rep) each completed
+    /// [`TopologyIntersector::iir_edge_brep`] deleted by squeezing, so they hold the
+    /// completed calls' deletions also when a later call fails. Unowned in `units.json`
+    /// (called from `SmMerge.cpp:2961`); co-ported into this part.
     ///
     /// # Errors
     ///
@@ -935,6 +940,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
         k: &mut Kernel,
         brep: &mut impl IntersectorBrepP3<O>,
         brep_vertex: Option<O>,
+        deleted_vertices: &mut Vec<O>,
+        deleted_edges: &mut Vec<O>,
     ) -> Result<bool> {
         // check input
         let brep_vertex = brep_vertex.ok_or(SolidError::null_pointer(OP_CLOSE_LOOP))?;
@@ -945,6 +952,8 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
 
         // init output
         let mut made_new_topology = false;
+        deleted_vertices.clear();
+        deleted_edges.clear();
 
         // get all edges connected to target vertex
         let brep_edges = brep.vertex_edges(brep_vertex)?;
@@ -1025,7 +1034,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                 let old_edges = brep.brep_edges(other)?;
 
                 // intersect, insert, and relate target Edge with m_pOther brep
-                self.iir_edge_brep(k, brep, be, other, false, true)?;
+                let deleted = self.iir_edge_brep(k, brep, be, other, false, true)?;
+                deleted_vertices.extend(deleted.deleted_vertices);
+                deleted_edges.extend(deleted.deleted_edges);
 
                 // remember if  new edges were added to m_pOther
                 let new_edges = brep.brep_edges(other)?;
@@ -1070,7 +1081,9 @@ impl<O: ClassObject + SolutionObject + Ord> TopologyIntersector<O> {
                     let old_edges = brep.brep_edges(this)?;
 
                     // intersect, insert, and relate target edge into this  m_pBrep
-                    self.iir_edge_brep(k, brep, oe, this, true, true)?;
+                    let deleted = self.iir_edge_brep(k, brep, oe, this, true, true)?;
+                    deleted_vertices.extend(deleted.deleted_vertices);
+                    deleted_edges.extend(deleted.deleted_edges);
 
                     // remember if new topology was added to m_pBrep
                     let new_edges = brep.brep_edges(this)?;

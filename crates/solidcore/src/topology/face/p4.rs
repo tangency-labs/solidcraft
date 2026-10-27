@@ -1791,9 +1791,12 @@ fn classify_seam<O: LoopObject, M: CurveOnClassifyBrep<O>>(
 /// `HasSeamProblem`: whether the seams of the face's periodic surface are badly
 /// represented: crossed by face edges without a vertex there, or not represented by
 /// seam edges (allowing for edge/face gaps beyond tolerance). Each periodic direction's
-/// seam curve is classified against the face (`class_u`, `class_v`); a doubly periodic
-/// surface whose seam does not meet any loop but the other seam enters the face has
-/// that seam missing (the torus case). Without stage 2 face properties
+/// seam curve is classified against the face (`class_u`, `class_v`). A whole closed
+/// surface with only vertex loops has the unclassified parts of its seams in the face
+/// (missing). On a doubly periodic surface a seam that does not meet any loop is missing
+/// when the other seam starts in or enters the face (the torus case; crossed only when
+/// that other seam touches an edge loop), and both are missing when neither meets a loop
+/// and every closed edge loop runs clockwise in 3D. Without stage 2 face properties
 /// (`opts.face_props` below `PropStage::Stage2A`), `SetProps_Stage2` runs instead
 /// (which calls back here) and its results are returned with `has_problem` `true` (the
 /// `SM_SUCCESS`, `1000`, upstream returns as `SmBoolean`).
@@ -2023,6 +2026,32 @@ pub fn has_seam_problem_mut<O: LoopObject, M: CurveOnClassifyBrep<O>>(
         (crossed_v, missing_v, near_miss_v) = (crossed, missing, near_miss);
     }
 
+    // With only isolated vertex loops, the whole closed surface is retained. Fill the
+    // unknown portions of each seam, keeping existing vertex hits so insertion connects
+    // to the original graph, including shared vertices.
+    if super::p3::is_closed_surface_with_vertex_loops(k, objects.brep(), f, Some(&*props))? {
+        let this = objects.face(f);
+        let seams = [
+            (&mut out.class_u, periodic_u),
+            (&mut out.class_v, periodic_v),
+        ];
+        for (class, periodic) in seams {
+            if !periodic {
+                continue;
+            }
+            for interval in 0..class.size() {
+                let ivl = class.at_mut(interval)?;
+                for point in [&mut ivl.start, &mut ivl.mid, &mut ivl.end] {
+                    if point.point_class() == PointClassType::Unknown {
+                        point.set_class_object(PointClassType::Face, Some(this));
+                    }
+                }
+            }
+        }
+        missing_u = periodic_u && out.class_u.is_crossing_face(Some(this));
+        missing_v = periodic_v && out.class_v.is_crossing_face(Some(this));
+    }
+
     // remember when SeamCrvU / SeamCrvV has no FaceLoop Bndry XSects
     let no_xsect_seam_u = no_xsect(&out.class_u)?;
     let no_xsect_seam_v = no_xsect(&out.class_v)?;
@@ -2031,29 +2060,131 @@ pub fn has_seam_problem_mut<O: LoopObject, M: CurveOnClassifyBrep<O>>(
     // NonIntersecting Seam may be Missing
     if periodic_u && periodic_v {
         let this = objects.face(f);
+
+        // Both seam curves start at (Umin,Vmin). If a nonintersecting seam has this point
+        // inside the face, its entire curve is inside. Coincident IN/ON/IN touches can
+        // disappear from the processed crossing list.
+        let starts_in_face = |class: &CurveClassification<O>| -> Result<bool> {
+            Ok(class.size() > 0 && {
+                let start = &class.at(0)?.start;
+                start.point_class() == PointClassType::Face && start.object() == Some(this)
+            })
+        };
+        let v_start_in_face = starts_in_face(&out.class_v)?;
+        let u_start_in_face = starts_in_face(&out.class_u)?;
+
+        // Point-only touches divide a seam but do not cross a face boundary. Keep them out
+        // of the crossing flags used to request MoveSeam. Use the raw lists so coincident
+        // edge touches remain visible after processing.
+        let mut touches_boundary = [false, false];
+        for (touches_seam, touches) in touches_boundary
+            .iter_mut()
+            .zip([&props.raw_touch_list_u, &props.raw_touch_list_v])
+        {
+            for touch in touches {
+                let Some(o) = touch.connected_to else {
+                    continue;
+                };
+                // (SmLoop*) cast
+                let l = o
+                    .as_loop()
+                    .ok_or_else(|| null("HasSeamProblem: touch not connected to a loop"))?;
+                let lu = objects
+                    .brep()
+                    .loop_(l)?
+                    .loopuse
+                    .ok_or_else(|| null("HasSeamProblem: loop without loop use"))?;
+                if !loopuse::is_vertex_loopuse(objects.brep(), lu)? {
+                    *touches_seam = true;
+                    break;
+                }
+            }
+        }
+
+        // use the shared seam point or crossing list to detect a missing SeamU
         if no_xsect_seam_u
-            && props
-                .done_touch_list_v
-                .first()
-                .is_some_and(|t| t.loop_dir == CrvDirOnFaceType::In)
+            && (v_start_in_face
+                || props
+                    .done_touch_list_v
+                    .first()
+                    .is_some_and(|t| t.loop_dir == CrvDirOnFaceType::In))
         {
             missing_u = true;
             mark_in_face(&mut out.class_u, this)?;
-            crossed_u = true;
-            crossed_v = true;
+
+            // A boundary crossing can require relocating either seam. Isolated vertex
+            // loops only require insertion through their existing vertices.
+            if touches_boundary[1] {
+                crossed_u = true;
+                crossed_v = true;
+            }
         }
+
+        // use the shared seam point or crossing list to detect a missing SeamV
         if no_xsect_seam_v
-            && props
-                .done_touch_list_u
-                .first()
-                .is_some_and(|t| t.loop_dir == CrvDirOnFaceType::In)
+            && (u_start_in_face
+                || props
+                    .done_touch_list_u
+                    .first()
+                    .is_some_and(|t| t.loop_dir == CrvDirOnFaceType::In))
         {
             missing_v = true;
             mark_in_face(&mut out.class_v, this)?;
-            crossed_u = true;
-            crossed_v = true;
+
+            // A boundary crossing can require relocating either seam. Isolated vertex
+            // loops only require insertion through their existing vertices.
+            if touches_boundary[0] {
+                crossed_u = true;
+                crossed_v = true;
+            }
         }
     }
+
+    // If neither seam intersects a boundary on a doubly periodic surface, all closed
+    // clockwise area loops describe holes in the retained face. Use the defining curves,
+    // not stored loop labels or optional UV trims. Stage 3 loop containment is not
+    // available while these Stage 2 properties are built.
+    if periodic_u && periodic_v && no_xsect_seam_u && no_xsect_seam_v && !loops.is_empty() {
+        let mut all_clockwise = true;
+        for &l in &loops {
+            // Isolated vertices do not enclose a retained patch. They have no measured
+            // loop orientation and cannot disprove missing seams.
+            let lu = objects
+                .brep()
+                .loop_(l)?
+                .loopuse
+                .ok_or_else(|| null("HasSeamProblem: loop without loop use"))?;
+            if loopuse::is_vertex_loopuse(objects.brep(), lu)? {
+                continue;
+            }
+            if !loopuse::is_closed_ptrs(objects.brep(), lu)? {
+                all_clockwise = false;
+                break;
+            }
+            // (a failing status is not clockwise)
+            let orient = match super::p3::compute_loop_orientation_3d(k, objects.brep(), f, l, None)
+            {
+                Ok(o) => o,
+                Err(e) if must_propagate(&e) => return Err(e),
+                Err(_) => OrientType::Unknown,
+            };
+            if orient != OrientType::Opposite {
+                all_clockwise = false;
+                break;
+            }
+        }
+        if all_clockwise {
+            missing_u = true;
+            missing_v = true;
+            let this = objects.face(f);
+            mark_in_face(&mut out.class_u, this)?;
+            mark_in_face(&mut out.class_v, this)?;
+        }
+    }
+
+    // Other nonintersecting cases remain unresolved. In particular, stored loop
+    // order/orientation cannot replace geometric evidence for singly periodic surfaces
+    // or ambiguous, degenerate, and mixed-orientation loops.
 
     out.problem = SeamProblem {
         crossed: sp_of(crossed_u, crossed_v),

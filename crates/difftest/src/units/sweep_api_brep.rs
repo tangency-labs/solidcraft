@@ -977,8 +977,10 @@ fn gen_consumed(rng: &mut Rng, s: f64, off: P3, empty_ok: bool) -> Vec<CrvIn> {
     }
 }
 
-/// Whether a profile holds a full circle (the FFI rejects sweeping one over a
-/// negative distance: upstream never returns).
+/// Whether a profile holds a full circle. The generator sweeps one over a positive
+/// distance only (at c9c5979 a negative distance never returned, HANG-13), which keeps
+/// the generated inputs unchanged; the fixture `hang13-negative-full-circle.json`
+/// covers negative distances.
 fn has_full_circle(cs: &[CrvIn]) -> bool {
     cs.iter().any(|c| match c {
         CrvIn::Circle { .. } | CrvIn::AnalyticCircle { .. } => true,

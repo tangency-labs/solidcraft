@@ -23,7 +23,7 @@
 //! | [`Surface::eval_pt_deriv_normal_fast`], [`PtDerivNormal`] | `N_SrfEvalPtPtDerivNormalFast` |
 //! | [`Surface::translate`]                       | `N_SrfTranslate`                      |
 //! | [`Surface::rotate_at_pt`]                    | `N_SrfRotateAtPt`                     |
-//! | [`Surface::reverse`] / [`Surface::reversed`] | `N_SrfReverse` (in place / into a new surface) |
+//! | [`Surface::reverse`] / [`Surface::reversed`] | `N_SrfReverse` (in place / into a new surface; knots by `NI_ReverseKnots`) |
 //! | [`Surface::surface_type`], [`SurfaceType`], [`SurfaceKind`] | `N_SrfType`            |
 //! | [`Surface::reparam`]                         | `N_SrfReparam`                        |
 //! | [`Surface::is_closed_smooth`], [`Surface::is_closed_smooth_flag`] | `N_SrfIsClosedSmooth` |
@@ -78,6 +78,7 @@
 #![allow(clippy::if_not_else)]
 
 use crate::error::{NlibCode, Result, SolidError};
+use crate::geom::a_object::reverse_knots;
 use crate::math::Vec3;
 use crate::nurbs::crv_basic::{curves_are_coincident, ConicType, Curve};
 use crate::nurbs::crv_nurb::{line_from_pt_and_vector, CurveType};
@@ -1107,50 +1108,37 @@ impl Surface {
     }
 
     /// Reverses the surface in place in `dir` (`N_SrfReverse` with `surQ == surP`):
-    /// the rows (u) or columns (v) of the net are swapped end for end and the inner
-    /// knots mirrored about the domain centre (the end knots are kept).
+    /// the rows (u) or columns (v) of the net are swapped end for end and that
+    /// direction's knots reversed by
+    /// [`reverse_knots`](crate::geom::a_object::reverse_knots) (`NI_ReverseKnots`).
     ///
     /// Errors with [`NlibCode::Call`] for [`Direction::UV`] (nothing changes).
     pub fn reverse(&mut self, dir: Direction) -> Result<()> {
         const OP: &str = "nurbs::srf_nurb::Surface::reverse";
         let (nu, mu, ru, su) = self.array_sizes();
-        let (pu, qu) = self.degrees();
-        let (n, m, r, s) = (sx(nu, OP)?, sx(mu, OP)?, sx(ru, OP)?, sx(su, OP)?);
-        let (p, q) = (sx(pu, OP)?, sx(qu, OP)?);
+        let (n, m) = (sx(nu, OP)?, sx(mu, OP)?);
         match dir {
             Direction::U => {
-                let c = get(self.u_knots(), 0, OP)? + get(self.u_knots(), r, OP)?;
                 let k = n / 2;
                 for j in 0..=m {
                     for i in 0..=k {
                         self.swap_cpts((i, j), (n - i, j), OP)?;
                     }
                 }
-                let k = r / 2 - p;
-                let up = self.u_knots_mut();
-                for i in 1..=k {
-                    let a = get(up, r - p - i, OP)?;
-                    let b = c - get(up, p + i, OP)?;
-                    set(up, r - p - i, b, OP)?;
-                    set(up, p + i, c - a, OP)?;
-                }
+                // (each pair of the in-place knot reversal is read before it is
+                // written, so reversing from a copy gives the same knots)
+                let up = self.u_knots().to_vec();
+                reverse_knots(&up, ru, self.u_knots_mut())?;
             }
             Direction::V => {
-                let c = get(self.v_knots(), 0, OP)? + get(self.v_knots(), s, OP)?;
                 let k = m / 2;
                 for i in 0..=n {
                     for j in 0..=k {
                         self.swap_cpts((i, j), (i, m - j), OP)?;
                     }
                 }
-                let k = s / 2 - q;
-                let vp = self.v_knots_mut();
-                for j in 1..=k {
-                    let a = get(vp, s - q - j, OP)?;
-                    let b = c - get(vp, q + j, OP)?;
-                    set(vp, s - q - j, b, OP)?;
-                    set(vp, q + j, c - a, OP)?;
-                }
+                let vp = self.v_knots().to_vec();
+                reverse_knots(&vp, su, self.v_knots_mut())?;
             }
             Direction::UV => return Err(SolidError::nlib(OP, NlibCode::Call)),
         }
@@ -1168,8 +1156,9 @@ impl Surface {
     }
 
     /// The surface reversed in `dir` (`N_SrfReverse` into a NULL `surQ`): net rows
-    /// (u) or columns (v) in reverse order, end knots copied, inner knots mirrored
-    /// about the domain centre.
+    /// (u) or columns (v) in reverse order, that direction's knots reversed by
+    /// [`reverse_knots`](crate::geom::a_object::reverse_knots) (`NI_ReverseKnots`), the
+    /// other's copied.
     ///
     /// Errors with [`NlibCode::Call`] for [`Direction::UV`].
     pub fn reversed(&self, dir: Direction) -> Result<Surface> {
@@ -1181,7 +1170,6 @@ impl Surface {
             sx(idx.r, OP)?,
             sx(idx.s, OP)?,
         );
-        let (p, q) = (sx(idx.p, OP)?, sx(idx.q, OP)?);
         let up = self.u_knots();
         let vp = self.v_knots();
         let mut uq = vec![0.0; idx.r + 1];
@@ -1195,42 +1183,26 @@ impl Surface {
 
         match dir {
             Direction::U => {
-                let c = get(up, 0, OP)? + get(up, r, OP)?;
-                for i in 0..=p {
-                    set(&mut uq, i, get(up, i, OP)?, OP)?;
-                    set(&mut uq, n + i + 1, get(up, n + i + 1, OP)?, OP)?;
-                }
                 for j in 0..=m {
                     for i in 0..=n {
                         put(&mut net, i, j, cpt(n - i, j)?)?;
                     }
                 }
-                let k = r - 2 * p - 1;
-                for i in 1..=k {
-                    set(&mut uq, r - p - i, c - get(up, p + i, OP)?, OP)?;
-                }
+                reverse_knots(up, idx.r, &mut uq)?;
                 for j in 0..=s {
                     set(&mut vq, j, get(vp, j, OP)?, OP)?;
                 }
             }
             Direction::V => {
-                let c = get(vp, 0, OP)? + get(vp, s, OP)?;
-                for j in 0..=q {
-                    set(&mut vq, j, get(vp, j, OP)?, OP)?;
-                    set(&mut vq, m + j + 1, get(vp, m + j + 1, OP)?, OP)?;
-                }
                 for i in 0..=n {
                     for j in 0..=m {
                         put(&mut net, i, j, cpt(i, m - j)?)?;
                     }
                 }
-                let k = s - 2 * q - 1;
                 for i in 0..=r {
                     set(&mut uq, i, get(up, i, OP)?, OP)?;
                 }
-                for j in 1..=k {
-                    set(&mut vq, s - q - j, c - get(vp, q + j, OP)?, OP)?;
-                }
+                reverse_knots(vp, idx.s, &mut vq)?;
             }
             Direction::UV => return Err(SolidError::nlib(OP, NlibCode::Call)),
         }

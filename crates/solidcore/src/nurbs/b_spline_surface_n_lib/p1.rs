@@ -127,8 +127,8 @@ use crate::nurbs::knots::{Side, MAX_DEGREE};
 use crate::nurbs::math::{
     combine2_pts, power_basis_srf_eval_pts, srf_power_basis_eval_derivs, CPoint,
 };
-use crate::nurbs::srf_adv::p1::{eval_pt_derivs_unbounded, extend_by_dist};
-use crate::nurbs::srf_adv::p2::SrfContinuity;
+use crate::nurbs::srf_adv::p1::eval_pt_derivs_unbounded;
+use crate::nurbs::srf_adv::p2::{extend_by_dist_in_place, SrfContinuity};
 use crate::nurbs::srf_adv::p3::{
     create_swung_srf, create_trans_sweep_srf, extend_by_param_dist, ExtendContinuity,
 };
@@ -1924,14 +1924,12 @@ fn extend_side(
 ) -> Result<()> {
     const OP: &str = OP_EXTEND;
 
-    // extend Surf - shorter dists until extension succeeds
+    // extend Surf - shorter dists until extension succeeds (in place: a failed
+    // extension can leave its extended surface in esur, which the retry extends)
     let mut halvings = 0usize;
     loop {
-        match extend_by_dist(esur, *ext_dist, dir, end, gflg) {
-            Ok(s) => {
-                *esur = s;
-                break;
-            }
+        match extend_by_dist_in_place(esur, *ext_dist, dir, end, gflg) {
+            Ok(()) => break,
             Err(e @ SolidError::Unported { .. }) => return Err(e),
             Err(_) => {
                 *ext_dist /= 2.0;
@@ -1967,7 +1965,7 @@ fn extend_side(
             });
         }
         *ext_dist *= 2.0;
-        *esur = extend_by_dist(esur, *ext_dist, dir, end, gflg).map_err(SolidError::nl_ser(OP))?;
+        extend_by_dist_in_place(esur, *ext_dist, dir, end, gflg).map_err(SolidError::nl_ser(OP))?;
         if esur.is_valid().is_err() {
             return Err(SolidError::sm_err(OP));
         }

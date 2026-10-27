@@ -37,7 +37,8 @@
 //! - **Looptree.** The tree is a [`Looptree`] arena; `m_pClassifyLoopIO` is the index of
 //!   the record in `out.classify_loop_ios`; `m_pLoopProps` stays unset (`NULL`), as
 //!   upstream. As upstream, each pass over a target loop deletes the tree of the pass
-//!   before, so the tree of the last pass is returned.
+//!   before, so the tree of the last pass is returned; it is built locally and handed
+//!   to `out` only when every loop has been classified (an early return leaves `None`).
 //! - **Dropped** (no effect on results in the reference build, which defines neither
 //!   `SM_DEBUG_CODE` nor active asserts): the `SM_DEBUG_CODE` dumps and graphics, every
 //!   `SM_ASSERT*` and `SM_DBG_WARN`, `ebClassifyCrvClosed3d` (read only by asserts),
@@ -49,10 +50,9 @@
 //!   [`LoopObject::from_classify_curve`]; `EntityRef` cannot name curves) cannot run
 //!   the bisector: `ClassifyLoops` then returns [`SolidError::InvalidInput`]
 //!   ([`qf3::NO_CURVE_HANDLES`]) instead of ignoring it as a status.
-//! - **Ignored `GetLoopCrossings` status.** A failing call leaves the touch lists it
-//!   reset at entry; an `SM_ERR` return keeps what it filled. Errors for upstream's
-//!   undefined behaviour ([`SolidError::InvalidInput`], [`SolidError::NotFound`]) and
-//!   unported callees propagate.
+//! - **Touch lists.** Upstream's raw and done touch list pointers name either the face
+//!   props' seam lists (borrowed) or the lists computed for a bisector or for UV
+//!   containment (owned for the pass).
 //! - **Undefined behaviour upstream** is [`SolidError::InvalidInput`]: an index read
 //!   outside `rClassifyLoopIOs`, the face props' loop props or a touch list (odd length),
 //!   an empty seam classification read at its first or last interval, a loop without
@@ -68,11 +68,12 @@ use crate::heal::face_props::{
     SS_VMAX, SS_VMIN, UNDEF_ULONG,
 };
 use crate::intersect::curve_class::p1::{
-    get_connected_touches, CrvDirOnFaceType, CurveClassification, TouchData,
+    get_connected_touches, remove_non_crossings, CrvDirOnFaceType, CurveClassification, TouchData,
 };
 use crate::intersect::curve_class::p2::ResetOptions;
 use crate::intersect::point_class::{PointClassType, PointClassification};
 use crate::kernel::Kernel;
+use crate::nurbs::b_spline_surface::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::face::p2::CurveOnClassifyCache;
 use crate::query::face::p3 as qf3;
@@ -265,13 +266,32 @@ fn find_and_classify_loop_bisector<O: LoopObject>(
     r
 }
 
-/// `rCrvClassification.GetLoopCrossings(rLoops, &rFaceProps, &sCrossingCounts,
-/// &sRawTouchDirList, &sDoneTouchDirList)`: the done touch list (the counts and the raw
-/// list are not read by `ClassifyLoops`). `curves` are the bisector curves
-/// `classification` names. The status is not checked upstream: a failing call leaves
-/// the lists it reset at entry empty, except where upstream's behaviour is undefined or
-/// a callee is unported (propagated).
+/// Crossings found by [`get_loop_crossings`]: the touch lists for the two crossing
+/// directions, in the order upstream returns them.
+type LoopCrossings<O> = (Vec<TouchData<O>>, Vec<TouchData<O>>);
+
+/// `SER(pCrvClassification->GetLoopCrossings(rLoops, &rFaceProps, &sCrossingCounts,
+/// &sRawTouchDirList, &sDoneTouchDirList))`: the raw and the done touch lists (the
+/// counts are not read by `ClassifyLoops`). `curves` are the bisector curves
+/// `classification` names.
 fn get_loop_crossings<O: LoopObject>(
+    k: &Kernel,
+    curves: &qf3::LoopObjectCurves<'_, O>,
+    classification: &CurveClassification<O>,
+    loops: &[LoopId],
+    props: &mut FaceProps<O>,
+) -> Result<LoopCrossings<O>> {
+    let handles: Vec<O> = loops.iter().map(|&l| O::from_loop(l)).collect();
+    let c = classification.get_loop_crossings(k, curves, &handles, Some(props))?;
+    if let Some(e) = c.status {
+        return Err(e);
+    }
+    Ok((c.raw_touches, c.done_touches))
+}
+
+/// `SER(pCrvClassification->GetLoopTouches(rLoops, &rFaceProps, sRawTouchDirList))`:
+/// the complete encounters of the bisector `classification` with the loops.
+fn get_loop_touches<O: LoopObject>(
     k: &Kernel,
     curves: &qf3::LoopObjectCurves<'_, O>,
     classification: &CurveClassification<O>,
@@ -279,11 +299,42 @@ fn get_loop_crossings<O: LoopObject>(
     props: &mut FaceProps<O>,
 ) -> Result<Vec<TouchData<O>>> {
     let handles: Vec<O> = loops.iter().map(|&l| O::from_loop(l)).collect();
-    match classification.get_loop_crossings(k, curves, &handles, Some(props)) {
-        Ok(c) => Ok(c.done_touches),
-        Err(e @ (SolidError::InvalidInput { .. } | SolidError::NotFound { .. })) => Err(e),
-        Err(e) => ignored(Err(e)).map(|_: Option<()>| Vec::new()),
+    classification.get_loop_touches(k, curves, &handles, Some(props))
+}
+
+/// The UV containment view of a raw touch list: a copy whose seam ends take the
+/// opposite of their inward neighbour's direction, reduced to transverse crossings
+/// (`SmTouchData::RemoveNonCrossings`). `None` when an inward neighbour is neither in
+/// nor out (coincidence establishes no outside starting state).
+fn uv_containment_touches<O: Copy>(raw: &[TouchData<O>]) -> Result<Option<Vec<TouchData<O>>>> {
+    let mut done = raw.to_vec();
+    let touch_count = done.len();
+    if touch_count > 0 {
+        for end in 0..2 {
+            let (outside, inside) = if end == 0 {
+                (0, 1)
+            } else {
+                (touch_count - 1, touch_count.wrapping_sub(2))
+            };
+            if touch_at(&done, outside)?.loop_dir != CrvDirOnFaceType::Seam {
+                continue;
+            }
+            let inside_dir = touch_at(&done, inside)?.loop_dir;
+            // Coincidence does not establish an outside starting state.
+            if inside_dir != CrvDirOnFaceType::In && inside_dir != CrvDirOnFaceType::Out {
+                return Ok(None);
+            }
+            done.get_mut(outside)
+                .ok_or_else(|| invalid("touch list index out of range"))?
+                .loop_dir = if inside_dir == CrvDirOnFaceType::In {
+                CrvDirOnFaceType::Out
+            } else {
+                CrvDirOnFaceType::In
+            };
+        }
     }
+    remove_non_crossings(&mut done)?;
+    Ok(Some(done))
 }
 
 /// The orientation of an entering or pairing touch: `SM_OT_SAME` for an arrive-out /
@@ -320,10 +371,10 @@ fn touch_orient<O: Copy>(done: &[TouchData<O>], j1: usize) -> Result<OrientType>
 /// [`NO_SURFACE`]) when the first loop is not on `face` or the face has no surface, and
 /// where upstream's behaviour is undefined (module docs); [`SolidError::InvalidInput`]
 /// ([`qf3::NO_CURVE_HANDLES`]) when a target loop that crosses no seam meets a handle
-/// type that cannot name the bisector's curves; the errors of the bisector and of
-/// [`CurveClassification::get_loop_crossings`] other than its ignored statuses; the
-/// errors of the topology queries and of [`FaceProps::set_props_stage2`]'s
-/// [`SolidError::Unported`].
+/// type that cannot name the bisector's curves; the errors of the bisector, of
+/// [`CurveClassification::get_loop_touches`], [`CurveClassification::get_loop_crossings`]
+/// and [`remove_non_crossings`]; the errors of the topology queries and of
+/// [`FaceProps::set_props_stage2`]'s [`SolidError::Unported`].
 pub fn classify_loops<O: LoopObject>(
     k: &Kernel,
     b: &Brep,
@@ -401,6 +452,15 @@ pub(crate) fn classify_loops_cached<O: LoopObject>(
     let mut stop_on_seam = false;
     let n_loops = loops.len();
 
+    // Keep incomplete trees local until every loop has been classified.
+    let mut looptree: Option<Looptree> = None;
+
+    // Complete seams allow a bounded UV containment walk. Each endpoint's classification
+    // identifies whether that UV side has a boundary edgeuse.
+    let complete_seams = (truthy(props.closed_u) || truthy(props.closed_v))
+        && props.bad_missing_seam_dir == SurfParamType::Neither
+        && props.bad_crossed_seam_dir == SurfParamType::Neither;
+
     // for every target Loop - until they are all classified - some passes may classify
     // more than one loop at a time
     for ii in 0..n_loops {
@@ -410,6 +470,8 @@ pub(crate) fn classify_loops_cached<O: LoopObject>(
         if marked.contains(&loop_ii) {
             continue;
         }
+
+        let uv_containment = complete_seams;
 
         if loop_is_vertex_loopuse(b, loop_ii)? {
             let io = out
@@ -432,9 +494,7 @@ pub(crate) fn classify_loops_cached<O: LoopObject>(
         };
         let crosses_u = truthy(props.closed_u) && loop_props(props)?.seam_crossing_cnt_u > 0;
         let crv: ClassifyCrv;
-        // upstream holds a pointer to one of the face's done touch lists (seams) or to
-        // the crossings it just computed (bisector): borrow the former, own the latter
-        let bisector_done: Vec<TouchData<O>>;
+        let mut bisector_curves: Option<qf3::LoopObjectCurves<'_, O>> = None;
         if crosses_u && truthy(props.closed_v) && loop_props(props)?.seam_crossing_cnt_v > 0 {
             // a Loop on a Torus crossing both Seams: use the U touch lists unless the
             // loop winds once about V only
@@ -448,26 +508,23 @@ pub(crate) fn classify_loops_cached<O: LoopObject>(
             } else {
                 ClassifyCrv::SeamV
             };
-            bisector_done = Vec::new();
             start_on_seam = true;
             stop_on_seam = true;
         } else if crosses_u {
             // Srf is U Periodic and Loop crosses SeamU
             crv = ClassifyCrv::SeamU;
-            bisector_done = Vec::new();
             start_on_seam = doubly_periodic;
             stop_on_seam = doubly_periodic;
         } else if truthy(props.closed_v) && loop_props(props)?.seam_crossing_cnt_v > 0 {
             // Srf is V Periodic and Loop crosses SeamV
             crv = ClassifyCrv::SeamV;
-            bisector_done = Vec::new();
             start_on_seam = doubly_periodic;
             stop_on_seam = doubly_periodic;
         } else {
             // loop does not cross an existing seam ClassifyCrv (the status is not
             // checked upstream; a handle type that cannot name the bisector's curves is
             // an error of the caller, not a status)
-            let mut bisector_curves = qf3::LoopObjectCurves::new(b, face)?;
+            let curves = bisector_curves.insert(qf3::LoopObjectCurves::new(b, face)?);
             ignored(find_and_classify_loop_bisector(
                 k,
                 b,
@@ -477,7 +534,7 @@ pub(crate) fn classify_loops_cached<O: LoopObject>(
                 &out.classify_loop_ios,
                 &marked,
                 props,
-                &mut bisector_curves,
+                curves,
                 scratch,
                 &mut start_on_seam,
                 &mut stop_on_seam,
@@ -486,15 +543,48 @@ pub(crate) fn classify_loops_cached<O: LoopObject>(
             if scratch.size() == 0 {
                 continue;
             }
-
-            // UVTrimLine Vertex and Edge TgtLoop_Crossings (the status is not checked)
             crv = ClassifyCrv::Bisector;
-            bisector_done = get_loop_crossings(k, &bisector_curves, scratch, loops, props)?;
         }
-        let done: &[TouchData<O>] = match crv {
-            ClassifyCrv::SeamU => &props.done_touch_list_u,
-            ClassifyCrv::SeamV => &props.done_touch_list_v,
-            ClassifyCrv::Bisector => &bisector_done,
+
+        // upstream holds pointers to the face's touch lists (seams) or to the lists it
+        // just computed (bisector, UV containment): borrow the former, own the latter
+        let mut own_raw: Option<Vec<TouchData<O>>> = None;
+        let mut own_done: Option<Vec<TouchData<O>>> = None;
+
+        // Reuse complete encounters from Stage 2. Periodic counts remain in their own
+        // cache; containment interprets a local copy of the UV boundary hits.
+        if uv_containment {
+            if let (ClassifyCrv::Bisector, Some(curves)) = (crv, bisector_curves.as_ref()) {
+                own_raw = Some(get_loop_touches(k, curves, scratch, loops, props)?);
+            }
+            let raw: &[TouchData<O>] = match (&own_raw, crv) {
+                (Some(r), _) => r,
+                (None, ClassifyCrv::SeamU) => &props.raw_touch_list_u,
+                (None, ClassifyCrv::SeamV) => &props.raw_touch_list_v,
+                (None, ClassifyCrv::Bisector) => return Err(invalid("no raw touch list")),
+            };
+            let Some(done) = uv_containment_touches(raw)? else {
+                out.classifiable = HealNotYetFaceType::NoClassifyZeroCrosscnt;
+                scratch.reset(k, &ResetOptions::default())?;
+                return Ok(());
+            };
+            own_done = Some(done);
+        } else if let (ClassifyCrv::Bisector, Some(curves)) = (crv, bisector_curves.as_ref()) {
+            let (raw, done) = get_loop_crossings(k, curves, scratch, loops, props)?;
+            own_raw = Some(raw);
+            own_done = Some(done);
+        }
+        let raw: &[TouchData<O>] = match (&own_raw, crv) {
+            (Some(r), _) => r,
+            (None, ClassifyCrv::SeamU) => &props.raw_touch_list_u,
+            (None, ClassifyCrv::SeamV) => &props.raw_touch_list_v,
+            (None, ClassifyCrv::Bisector) => return Err(invalid("no raw touch list")),
+        };
+        let done: &[TouchData<O>] = match (&own_done, crv) {
+            (Some(d), _) => d,
+            (None, ClassifyCrv::SeamU) => &props.done_touch_list_u,
+            (None, ClassifyCrv::SeamV) => &props.done_touch_list_v,
+            (None, ClassifyCrv::Bisector) => return Err(invalid("no done touch list")),
         };
 
         // for every Loop being classified - Get UVTrimLine/Loop crossings to Set Loop
@@ -521,6 +611,7 @@ pub(crate) fn classify_loops_cached<O: LoopObject>(
                     if crossing_cnt == 0 {
                         out.classifiable = HealNotYetFaceType::NoClassifyZeroCrosscnt;
                         props.not_yet_face_type = HealNotYetFaceType::NoClassifyZeroCrosscnt;
+                        scratch.reset(k, &ResetOptions::default())?;
                         return Ok(());
                     }
                     if is_odd(crossing_cnt)
@@ -529,6 +620,7 @@ pub(crate) fn classify_loops_cached<O: LoopObject>(
                     {
                         out.classifiable = HealNotYetFaceType::NoClassifyOddCrosscnt;
                         props.not_yet_face_type = HealNotYetFaceType::NoClassifyOddCrosscnt;
+                        scratch.reset(k, &ResetOptions::default())?;
                         return Ok(());
                     }
                 }
@@ -566,15 +658,27 @@ pub(crate) fn classify_loops_cached<O: LoopObject>(
             }
             .ok_or_else(|| invalid("no seam classification"))?;
             let ivl_cnt = classification.size();
+
+            let mut start_seam_type = CrvDirOnFaceType::SeamNoEdgeuse;
+            let mut stop_seam_type = CrvDirOnFaceType::SeamNoEdgeuse;
+            if let (Some(first), Some(last)) = (raw.first(), raw.last()) {
+                if first.loop_dir == CrvDirOnFaceType::Seam {
+                    start_seam_type = CrvDirOnFaceType::Seam;
+                }
+                if last.loop_dir == CrvDirOnFaceType::Seam {
+                    stop_seam_type = CrvDirOnFaceType::Seam;
+                }
+            }
+
             out.start_type = if start_on_seam {
-                CrvDirOnFaceType::Seam
+                start_seam_type
             } else if props.poles & (SS_UMIN | SS_VMIN) != 0 {
                 pole_end_type(b, &classification.at(0)?.start)?
             } else {
                 CrvDirOnFaceType::None
             };
             out.stop_type = if stop_on_seam {
-                CrvDirOnFaceType::Seam
+                stop_seam_type
             } else if props.poles & (SS_UMAX | SS_VMAX) != 0 {
                 let last = ivl_cnt
                     .checked_sub(1)
@@ -614,11 +718,19 @@ pub(crate) fn classify_loops_cached<O: LoopObject>(
         let end_with_no_vertex_pole =
             out.stop_type == CrvDirOnFaceType::PoleNoVertex && odd_no_area;
 
-        // set lIncIndx to find the start point on a closed-periodic classify curve
+        // Complete seams bound the UV walk even when its 3D curve is closed. Otherwise
+        // seam endpoints require a cyclic walk with a selected IN entry.
+        let is_seam_type = |t: CrvDirOnFaceType| {
+            t == CrvDirOnFaceType::Seam || t == CrvDirOnFaceType::SeamNoEdgeuse
+        };
+        let cyclic_walk =
+            !uv_containment && (is_seam_type(out.start_type) || is_seam_type(out.stop_type));
+
+        // set lIncIndx to find the start point on a closed-periodic classify curve: a
+        // bounded walk starts at the 1st DoneTouchDirList entry, either on a nonperiodic
+        // surface or in the UV domain enclosed by complete seams
         let mut inc_indx: Option<usize> = None;
-        if out.start_type != CrvDirOnFaceType::Seam && out.stop_type != CrvDirOnFaceType::Seam {
-            inc_indx = Some(0);
-        } else {
+        if cyclic_walk {
             let mut jj = 0;
             while jj < done_size {
                 if touch_at(done, jj)?.loop_dir == CrvDirOnFaceType::Out
@@ -635,12 +747,14 @@ pub(crate) fn classify_loops_cached<O: LoopObject>(
                 }
                 jj += 2;
             }
+        } else {
+            inc_indx = Some(0);
         }
 
         let iter_cnt = done_size + usize::from(end_with_no_vertex_pole);
         stack.clear();
         item_stack.clear();
-        out.looptree = None;
+        looptree = None;
         if start_with_no_vertex_pole {
             stack.push(NO_VERTEX_POLE);
         }
@@ -669,6 +783,21 @@ pub(crate) fn classify_loops_cached<O: LoopObject>(
             let stack_cnt = stack.len();
             let last_indx = stack.last().copied().unwrap_or(UNDEF_ULONG);
             let (entering, exiting, pairing) = if stack_cnt == 0 {
+                // A bounded walk starts geometrically outside, even when the outer loop
+                // has reversed winding. Preserve that orientation error. Cyclic walks
+                // still require their independently selected IN entry.
+                if cyclic_walk
+                    && !(touch_at(done, j1)?.loop_dir == CrvDirOnFaceType::Out
+                        && touch_at(done, j1 + 1)?.loop_dir == CrvDirOnFaceType::In)
+                    && !(io_at(&out.classify_loop_ios, loop_indx)?.area_loop == Tri::False
+                        && start_with_no_vertex_pole)
+                {
+                    // Without an outside starting state, depth zero cannot establish
+                    // containment. Leave this face unclassified.
+                    out.classifiable = HealNotYetFaceType::NoLoopTreeRoot;
+                    scratch.reset(k, &ResetOptions::default())?;
+                    return Ok(());
+                }
                 (true, false, false)
             } else {
                 let no_area = |i: u64| -> Result<bool> {
@@ -743,7 +872,7 @@ pub(crate) fn classify_loops_cached<O: LoopObject>(
                 // magic number '999' = entering face through a NoVertex_Pole to be
                 // paired with a NoArea_Loop
                 stack.push(loop_indx);
-                if let Some(tree) = out.looptree.as_mut() {
+                if let Some(tree) = looptree.as_mut() {
                     let root = tree
                         .root()
                         .ok_or_else(|| invalid("looptree without root"))?;
@@ -763,7 +892,7 @@ pub(crate) fn classify_loops_cached<O: LoopObject>(
                     let mut tree = Looptree::new();
                     let root = tree.push(LooptreeItem::with_loop(p_loop, None, io_indx));
                     item_stack.push(root);
-                    out.looptree = Some(tree);
+                    looptree = Some(tree);
                 }
             } else if pairing {
                 if let Some(io_i) = io_indx {
@@ -783,8 +912,7 @@ pub(crate) fn classify_loops_cached<O: LoopObject>(
                 }
                 stack.pop();
                 if let Some(top_of_stack) = item_stack.pop() {
-                    let tree = out
-                        .looptree
+                    let tree = looptree
                         .as_mut()
                         .ok_or_else(|| invalid("item stack without looptree"))?;
                     tree.item_mut(top_of_stack)?
@@ -798,9 +926,17 @@ pub(crate) fn classify_loops_cached<O: LoopObject>(
             jj += 2;
             j1 = (j1 + 2) % done_size;
         }
+
+        // An unmatched entry leaves only a partial nesting tree. Do not expose it as a
+        // containment result for a face that could not be classified.
+        if uv_containment && !stack.is_empty() {
+            out.classifiable = HealNotYetFaceType::NoLoopTreeRoot;
+            scratch.reset(k, &ResetOptions::default())?;
+            return Ok(());
+        }
     }
 
-    if out.looptree.is_none() {
+    if looptree.is_none() {
         // failed to build the Looptree
         out.classifiable = HealNotYetFaceType::NoLoopTreeRoot;
     }
@@ -808,6 +944,9 @@ pub(crate) fn classify_loops_cached<O: LoopObject>(
     // don't ReSet pCrvClassification: it might point to the seam classifications of
     // the face props
     scratch.reset(k, &ResetOptions::default())?;
+
+    // Transfer the completed tree to the caller.
+    out.looptree = looptree;
     Ok(())
 }
 
@@ -958,6 +1097,40 @@ mod tests {
         assert_eq!(root.classify_loop_io, Some(0));
         assert_eq!(root.partner_classify_loop_io, Some(1));
         assert_eq!(tree.len(), 1);
+    }
+
+    #[test]
+    fn uv_containment_flips_seam_ends_against_their_inward_neighbours() {
+        let raw = vec![
+            touch(0, CrvDirOnFaceType::Seam),
+            touch(0, CrvDirOnFaceType::In),
+            touch(0, CrvDirOnFaceType::Out),
+            touch(0, CrvDirOnFaceType::Seam),
+        ];
+        let done = uv_containment_touches(&raw).unwrap().unwrap();
+        let dirs: Vec<_> = done.iter().map(|t| t.loop_dir).collect();
+        assert_eq!(
+            dirs,
+            vec![
+                CrvDirOnFaceType::Out,
+                CrvDirOnFaceType::In,
+                CrvDirOnFaceType::Out,
+                CrvDirOnFaceType::In
+            ]
+        );
+        // the raw list is the caller's to keep
+        assert_eq!(raw[0].loop_dir, CrvDirOnFaceType::Seam);
+
+        // a coincident inward neighbour establishes no outside state
+        let raw = vec![
+            touch(0, CrvDirOnFaceType::Seam),
+            touch(0, CrvDirOnFaceType::On),
+        ];
+        assert!(uv_containment_touches(&raw).unwrap().is_none());
+        assert!(uv_containment_touches::<EntityRef>(&[])
+            .unwrap()
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

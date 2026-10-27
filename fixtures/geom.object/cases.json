@@ -624,7 +624,7 @@
   },
   {
    "name": "shape_whole_box_brep",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:2647",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:2376",
    "inputs": {
     "kind": "shape",
     "source": {

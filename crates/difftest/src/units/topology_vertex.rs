@@ -936,7 +936,7 @@ fn target(ty: i64, index: i64) -> Option<EntityRef> {
 // ---- generation -------------------------------------------------------------------------
 
 /// The upstream `.smb` files used (all B-spline geometry).
-/// (`SmallBox.smb` and `Platform.smb` crash upstream's `SmBrep::ReadFromFile`; see
+/// (`SmallBox.smp` and `Platform.smp` crash upstream's `SmBrep::ReadFromFile`; see
 /// `plan/findings.md`.)
 const FILES: [&str; 15] = [
     "Mouse.smb",
@@ -1054,7 +1054,7 @@ fn domain(s: &SrfIn) -> [f64; 4] {
 fn gen_brep(rng: &mut Rng) -> BrepIn {
     match rng.below(13) {
         0..=5 => BrepIn::File {
-            file: (*rng.choose(&FILES).unwrap_or(&"SmallBox.smb")).to_string(),
+            file: (*rng.choose(&FILES).unwrap_or(&"SmallBox.smp")).to_string(),
             rebuild: rng.chance(0.25),
         },
         6 => {

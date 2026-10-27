@@ -680,6 +680,11 @@ pub(super) fn cpp(i: &TopoIn) -> Result<Output, HarnessError> {
     input.extend(&args);
     let o = ffi::topo(code, &r.path, &input).map_err(|e| harness(format!("c++: {e}")))?;
     match o.first() {
+        // the op's own guard (`run_vertices`: a large-gap vertex without a vertex use on
+        // the gap face, which `GetVertexuseOfFace` returns NULL for since v1.0.1)
+        Some(&0.0) if o.get(1..) == Some(&[-3.0][..]) => Ok(Output::rejected(
+            "upstream would dereference a null edge curve, end vertex, surface owner or vertex use",
+        )),
         Some(&0.0) => Ok(Output::new().values("out", o.get(1..).unwrap_or(&[]).to_vec())),
         Some(&-3.0) => Ok(Output::rejected(
             "upstream would dereference a null edge curve, end vertex, surface owner or vertex use",

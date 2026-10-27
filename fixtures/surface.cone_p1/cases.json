@@ -828,7 +828,7 @@
   },
   {
    "name": "topo_cylinder_adjust",
-   "upstream_ref": "prog_test smTopoTest.cpp:1161",
+   "upstream_ref": "prog_test smTopoTest.cpp:893",
    "inputs": {
     "op": "adjust",
     "cone": {
@@ -862,7 +862,7 @@
   },
   {
    "name": "topo_coax_A_build",
-   "upstream_ref": "prog_test smTopoTest.cpp:3609 (coaxial bounded cylinders, 4 variants)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3058 (coaxial bounded cylinders, 4 variants)",
    "inputs": {
     "op": "build",
     "cone": {
@@ -893,7 +893,7 @@
   },
   {
    "name": "topo_coax_B0_build",
-   "upstream_ref": "prog_test smTopoTest.cpp:3609 (coaxial bounded cylinders, 4 variants)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3058 (coaxial bounded cylinders, 4 variants)",
    "inputs": {
     "op": "build",
     "cone": {
@@ -924,7 +924,7 @@
   },
   {
    "name": "topo_coax_B0_inversion",
-   "upstream_ref": "prog_test smTopoTest.cpp:3609 (coaxial bounded cylinders, 4 variants)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3058 (coaxial bounded cylinders, 4 variants)",
    "inputs": {
     "op": "inversion",
     "cone": {
@@ -961,7 +961,7 @@
   },
   {
    "name": "topo_coax_B0_iso_v",
-   "upstream_ref": "prog_test smTopoTest.cpp:3609 (coaxial bounded cylinders, 4 variants)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3058 (coaxial bounded cylinders, 4 variants)",
    "inputs": {
     "op": "iso",
     "cone": {
@@ -994,7 +994,7 @@
   },
   {
    "name": "topo_coax_B1_build",
-   "upstream_ref": "prog_test smTopoTest.cpp:3609 (coaxial bounded cylinders, 4 variants)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3058 (coaxial bounded cylinders, 4 variants)",
    "inputs": {
     "op": "build",
     "cone": {
@@ -1025,7 +1025,7 @@
   },
   {
    "name": "topo_coax_B1_inversion",
-   "upstream_ref": "prog_test smTopoTest.cpp:3609 (coaxial bounded cylinders, 4 variants)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3058 (coaxial bounded cylinders, 4 variants)",
    "inputs": {
     "op": "inversion",
     "cone": {
@@ -1062,7 +1062,7 @@
   },
   {
    "name": "topo_coax_B1_iso_v",
-   "upstream_ref": "prog_test smTopoTest.cpp:3609 (coaxial bounded cylinders, 4 variants)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3058 (coaxial bounded cylinders, 4 variants)",
    "inputs": {
     "op": "iso",
     "cone": {
@@ -1095,7 +1095,7 @@
   },
   {
    "name": "topo_coax_B2_build",
-   "upstream_ref": "prog_test smTopoTest.cpp:3609 (coaxial bounded cylinders, 4 variants)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3058 (coaxial bounded cylinders, 4 variants)",
    "inputs": {
     "op": "build",
     "cone": {
@@ -1126,7 +1126,7 @@
   },
   {
    "name": "topo_coax_B2_inversion",
-   "upstream_ref": "prog_test smTopoTest.cpp:3609 (coaxial bounded cylinders, 4 variants)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3058 (coaxial bounded cylinders, 4 variants)",
    "inputs": {
     "op": "inversion",
     "cone": {
@@ -1163,7 +1163,7 @@
   },
   {
    "name": "topo_coax_B2_iso_v",
-   "upstream_ref": "prog_test smTopoTest.cpp:3609 (coaxial bounded cylinders, 4 variants)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3058 (coaxial bounded cylinders, 4 variants)",
    "inputs": {
     "op": "iso",
     "cone": {
@@ -1196,7 +1196,7 @@
   },
   {
    "name": "topo_coax_B3_build",
-   "upstream_ref": "prog_test smTopoTest.cpp:3609 (coaxial bounded cylinders, 4 variants)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3058 (coaxial bounded cylinders, 4 variants)",
    "inputs": {
     "op": "build",
     "cone": {
@@ -1227,7 +1227,7 @@
   },
   {
    "name": "topo_coax_B3_inversion",
-   "upstream_ref": "prog_test smTopoTest.cpp:3609 (coaxial bounded cylinders, 4 variants)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3058 (coaxial bounded cylinders, 4 variants)",
    "inputs": {
     "op": "inversion",
     "cone": {
@@ -1264,7 +1264,7 @@
   },
   {
    "name": "topo_coax_B3_iso_v",
-   "upstream_ref": "prog_test smTopoTest.cpp:3609 (coaxial bounded cylinders, 4 variants)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3058 (coaxial bounded cylinders, 4 variants)",
    "inputs": {
     "op": "iso",
     "cone": {
@@ -1297,7 +1297,7 @@
   },
   {
    "name": "topo_flags_f0_s0_i0_build",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "build",
     "cone": {
@@ -1330,7 +1330,7 @@
   },
   {
    "name": "topo_flags_f0_s0_i0_to_step0",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -1365,7 +1365,7 @@
   },
   {
    "name": "topo_flags_f0_s0_i0_to_step1",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -1400,7 +1400,7 @@
   },
   {
    "name": "topo_flags_f0_s0_i0_to_step2",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -1435,7 +1435,7 @@
   },
   {
    "name": "topo_flags_f0_s0_i0_to_step3",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -1470,7 +1470,7 @@
   },
   {
    "name": "topo_flags_f0_s0_i0_to_nurbs",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_nurbs",
     "cone": {
@@ -1505,7 +1505,7 @@
   },
   {
    "name": "topo_flags_f0_s0_i0_eval",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "eval",
     "cone": {
@@ -1542,7 +1542,7 @@
   },
   {
    "name": "topo_flags_f0_s0_i0_iso_u",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "iso",
     "cone": {
@@ -1577,7 +1577,7 @@
   },
   {
    "name": "topo_flags_f0_s0_i0_iso_v_dom",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "iso",
     "cone": {
@@ -1619,7 +1619,7 @@
   },
   {
    "name": "topo_flags_f0_s0_i1_build",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "build",
     "cone": {
@@ -1652,7 +1652,7 @@
   },
   {
    "name": "topo_flags_f0_s0_i1_to_step0",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -1687,7 +1687,7 @@
   },
   {
    "name": "topo_flags_f0_s0_i1_to_step1",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -1722,7 +1722,7 @@
   },
   {
    "name": "topo_flags_f0_s0_i1_to_step2",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -1757,7 +1757,7 @@
   },
   {
    "name": "topo_flags_f0_s0_i1_to_step3",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -1792,7 +1792,7 @@
   },
   {
    "name": "topo_flags_f0_s0_i1_to_nurbs",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_nurbs",
     "cone": {
@@ -1827,7 +1827,7 @@
   },
   {
    "name": "topo_flags_f0_s0_i1_eval",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "eval",
     "cone": {
@@ -1864,7 +1864,7 @@
   },
   {
    "name": "topo_flags_f0_s0_i1_iso_u",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "iso",
     "cone": {
@@ -1899,7 +1899,7 @@
   },
   {
    "name": "topo_flags_f0_s0_i1_iso_v_dom",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "iso",
     "cone": {
@@ -1941,7 +1941,7 @@
   },
   {
    "name": "topo_flags_f0_s1_i0_build",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "build",
     "cone": {
@@ -1974,7 +1974,7 @@
   },
   {
    "name": "topo_flags_f0_s1_i0_to_step0",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -2009,7 +2009,7 @@
   },
   {
    "name": "topo_flags_f0_s1_i0_to_step1",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -2044,7 +2044,7 @@
   },
   {
    "name": "topo_flags_f0_s1_i0_to_step2",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -2079,7 +2079,7 @@
   },
   {
    "name": "topo_flags_f0_s1_i0_to_step3",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -2114,7 +2114,7 @@
   },
   {
    "name": "topo_flags_f0_s1_i0_to_nurbs",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_nurbs",
     "cone": {
@@ -2149,7 +2149,7 @@
   },
   {
    "name": "topo_flags_f0_s1_i0_eval",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "eval",
     "cone": {
@@ -2186,7 +2186,7 @@
   },
   {
    "name": "topo_flags_f0_s1_i0_iso_u",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "iso",
     "cone": {
@@ -2221,7 +2221,7 @@
   },
   {
    "name": "topo_flags_f0_s1_i0_iso_v_dom",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "iso",
     "cone": {
@@ -2263,7 +2263,7 @@
   },
   {
    "name": "topo_flags_f0_s1_i1_build",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "build",
     "cone": {
@@ -2296,7 +2296,7 @@
   },
   {
    "name": "topo_flags_f0_s1_i1_to_step0",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -2331,7 +2331,7 @@
   },
   {
    "name": "topo_flags_f0_s1_i1_to_step1",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -2366,7 +2366,7 @@
   },
   {
    "name": "topo_flags_f0_s1_i1_to_step2",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -2401,7 +2401,7 @@
   },
   {
    "name": "topo_flags_f0_s1_i1_to_step3",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -2436,7 +2436,7 @@
   },
   {
    "name": "topo_flags_f0_s1_i1_to_nurbs",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_nurbs",
     "cone": {
@@ -2471,7 +2471,7 @@
   },
   {
    "name": "topo_flags_f0_s1_i1_eval",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "eval",
     "cone": {
@@ -2508,7 +2508,7 @@
   },
   {
    "name": "topo_flags_f0_s1_i1_iso_u",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "iso",
     "cone": {
@@ -2543,7 +2543,7 @@
   },
   {
    "name": "topo_flags_f0_s1_i1_iso_v_dom",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "iso",
     "cone": {
@@ -2585,7 +2585,7 @@
   },
   {
    "name": "topo_flags_f1_s0_i0_build",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "build",
     "cone": {
@@ -2618,7 +2618,7 @@
   },
   {
    "name": "topo_flags_f1_s0_i0_to_step0",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -2653,7 +2653,7 @@
   },
   {
    "name": "topo_flags_f1_s0_i0_to_step1",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -2688,7 +2688,7 @@
   },
   {
    "name": "topo_flags_f1_s0_i0_to_step2",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -2723,7 +2723,7 @@
   },
   {
    "name": "topo_flags_f1_s0_i0_to_step3",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -2758,7 +2758,7 @@
   },
   {
    "name": "topo_flags_f1_s0_i0_to_nurbs",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_nurbs",
     "cone": {
@@ -2793,7 +2793,7 @@
   },
   {
    "name": "topo_flags_f1_s0_i0_eval",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "eval",
     "cone": {
@@ -2830,7 +2830,7 @@
   },
   {
    "name": "topo_flags_f1_s0_i0_iso_u",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "iso",
     "cone": {
@@ -2865,7 +2865,7 @@
   },
   {
    "name": "topo_flags_f1_s0_i0_iso_v_dom",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "iso",
     "cone": {
@@ -2907,7 +2907,7 @@
   },
   {
    "name": "topo_flags_f1_s0_i1_build",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "build",
     "cone": {
@@ -2940,7 +2940,7 @@
   },
   {
    "name": "topo_flags_f1_s0_i1_to_step0",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -2975,7 +2975,7 @@
   },
   {
    "name": "topo_flags_f1_s0_i1_to_step1",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -3010,7 +3010,7 @@
   },
   {
    "name": "topo_flags_f1_s0_i1_to_step2",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -3045,7 +3045,7 @@
   },
   {
    "name": "topo_flags_f1_s0_i1_to_step3",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -3080,7 +3080,7 @@
   },
   {
    "name": "topo_flags_f1_s0_i1_to_nurbs",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_nurbs",
     "cone": {
@@ -3115,7 +3115,7 @@
   },
   {
    "name": "topo_flags_f1_s0_i1_eval",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "eval",
     "cone": {
@@ -3152,7 +3152,7 @@
   },
   {
    "name": "topo_flags_f1_s0_i1_iso_u",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "iso",
     "cone": {
@@ -3187,7 +3187,7 @@
   },
   {
    "name": "topo_flags_f1_s0_i1_iso_v_dom",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "iso",
     "cone": {
@@ -3229,7 +3229,7 @@
   },
   {
    "name": "topo_flags_f1_s1_i0_build",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "build",
     "cone": {
@@ -3262,7 +3262,7 @@
   },
   {
    "name": "topo_flags_f1_s1_i0_to_step0",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -3297,7 +3297,7 @@
   },
   {
    "name": "topo_flags_f1_s1_i0_to_step1",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -3332,7 +3332,7 @@
   },
   {
    "name": "topo_flags_f1_s1_i0_to_step2",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -3367,7 +3367,7 @@
   },
   {
    "name": "topo_flags_f1_s1_i0_to_step3",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -3402,7 +3402,7 @@
   },
   {
    "name": "topo_flags_f1_s1_i0_to_nurbs",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_nurbs",
     "cone": {
@@ -3437,7 +3437,7 @@
   },
   {
    "name": "topo_flags_f1_s1_i0_eval",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "eval",
     "cone": {
@@ -3474,7 +3474,7 @@
   },
   {
    "name": "topo_flags_f1_s1_i0_iso_u",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "iso",
     "cone": {
@@ -3509,7 +3509,7 @@
   },
   {
    "name": "topo_flags_f1_s1_i0_iso_v_dom",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "iso",
     "cone": {
@@ -3551,7 +3551,7 @@
   },
   {
    "name": "topo_flags_f1_s1_i1_build",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "build",
     "cone": {
@@ -3584,7 +3584,7 @@
   },
   {
    "name": "topo_flags_f1_s1_i1_to_step0",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -3619,7 +3619,7 @@
   },
   {
    "name": "topo_flags_f1_s1_i1_to_step1",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -3654,7 +3654,7 @@
   },
   {
    "name": "topo_flags_f1_s1_i1_to_step2",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -3689,7 +3689,7 @@
   },
   {
    "name": "topo_flags_f1_s1_i1_to_step3",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_step",
     "cone": {
@@ -3724,7 +3724,7 @@
   },
   {
    "name": "topo_flags_f1_s1_i1_to_nurbs",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "to_nurbs",
     "cone": {
@@ -3759,7 +3759,7 @@
   },
   {
    "name": "topo_flags_f1_s1_i1_eval",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "eval",
     "cone": {
@@ -3796,7 +3796,7 @@
   },
   {
    "name": "topo_flags_f1_s1_i1_iso_u",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "iso",
     "cone": {
@@ -3831,7 +3831,7 @@
   },
   {
    "name": "topo_flags_f1_s1_i1_iso_v_dom",
-   "upstream_ref": "prog_test smTopoTest.cpp:3915 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
+   "upstream_ref": "prog_test smTopoTest.cpp:3364 (cylinders with every bSwapUV / bInsideOut, ConvertDomainFromNURBSToSTEP)",
    "inputs": {
     "op": "iso",
     "cone": {

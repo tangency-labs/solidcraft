@@ -618,7 +618,7 @@
   },
   {
    "name": "topo_circle_adjust_0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1177 (CreateCanonical r=2, AdjustSTEPInterval(0,90))",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:909 (CreateCanonical r=2, AdjustSTEPInterval(0,90))",
    "inputs": {
     "build": {
      "circle_canonical": {
@@ -685,7 +685,7 @@
   },
   {
    "name": "topo_circle_adjust_1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1177 (CreateCanonical r=2, AdjustSTEPInterval(0,90))",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:909 (CreateCanonical r=2, AdjustSTEPInterval(0,90))",
    "inputs": {
     "build": {
      "circle_canonical": {
@@ -752,7 +752,7 @@
   },
   {
    "name": "topo_quarter_circle_0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:395 (CreateCanonical r=0.5 over [0,90])",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:90 (CreateCanonical r=0.5 over [0,90])",
    "inputs": {
     "build": {
      "circle_canonical": {
@@ -809,7 +809,7 @@
   },
   {
    "name": "topo_quarter_circle_1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:395 (CreateCanonical r=0.5 over [0,90])",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:90 (CreateCanonical r=0.5 over [0,90])",
    "inputs": {
     "build": {
      "circle_canonical": {
@@ -866,7 +866,7 @@
   },
   {
    "name": "topo_quarter_circle_2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:395 (CreateCanonical r=0.5 over [0,90])",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:90 (CreateCanonical r=0.5 over [0,90])",
    "inputs": {
     "build": {
      "circle_canonical": {
@@ -923,7 +923,7 @@
   },
   {
    "name": "topo_circle_edit_param",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4345 (CreateCanonical r=1, EditParameterization)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1259 (CreateCanonical r=1, EditParameterization)",
    "inputs": {
     "build": {
      "circle_canonical": {
@@ -976,7 +976,7 @@
   },
   {
    "name": "torus_seam_circle_edit_param",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4423 (CreateCanonical r=4, EditParameterization)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1337 (CreateCanonical r=4, EditParameterization)",
    "inputs": {
     "build": {
      "circle_canonical": {

@@ -1484,6 +1484,28 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
     } else {
         (OrientType::Same, input.interval.max(), input.interval.min())
     };
+    // Decide before editing: a full periodic cut can split the boundary without
+    // separating the face. A same-vertex/same-loop connection alone is insufficient.
+    // Implementation restriction: only SmCrvOnSurf seams, as supplied by
+    // SplitAtSeam, are recognized using their defining UV curves. Equivalent
+    // SmCircle or SmBSplineCurve seams are not yet recognized and follow the
+    // existing same-loop face-splitting path. This curve-type restriction is
+    // an implementation limitation, not a requirement of the BRep topology.
+    let new_loop_without_new_face = match curve.kind() {
+        crate::curve::curve::CurveKind::CrvOnSurf(on_surf) => {
+            super::p1::is_first_nonseparating_seam(
+                k,
+                b,
+                face,
+                start,
+                end,
+                on_surf,
+                &input.interval,
+            )?
+        }
+        _ => false,
+    };
+
     let edge_id = b.add_edge_record(crate::topology::Edge::new([start_vertex, end_vertex]))?;
     let mut uses = Vec::new();
     let mut vertexuses = Vec::new();
@@ -1679,51 +1701,60 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
             .unwrap_or(end);
         }
         edge::insert_manifold_edge_end(b, edge_id, Some(end), false)?;
-        // the split face's shell as `GetShell` reads it, through its primary face use
-        // (the port's `Face::shell` is a cache the native shell moves do not maintain)
-        let cached_shell = b.face(face)?.shell;
-        let shell = match b.face(face)?.faceuse {
-            Some(fu) => b.faceuse(fu)?.shell.unwrap_or(cached_shell),
-            None => cached_shell,
+        let (new_face, new_fu1, new_fu2) = if new_loop_without_new_face {
+            let fu1 = required(fp2::upward_faceuse(b, face)?, "face without upward use")?;
+            let fu2 = required(b.faceuse(fu1)?.mate, "faceuse without mate")?;
+            (None, fu1, fu2)
+        } else {
+            // separating cut: create one new face, in the split face's shell as `GetShell`
+            // reads it, through its primary face use (the port's `Face::shell` is a cache
+            // the native shell moves do not maintain)
+            let cached_shell = b.face(face)?.shell;
+            let shell = match b.face(face)?.faceuse {
+                Some(fu) => b.faceuse(fu)?.shell.unwrap_or(cached_shell),
+                None => cached_shell,
+            };
+            let new_face = b.add_face_record(crate::topology::Face::new(shell))?;
+            let mut surface =
+                required(b.face(face)?.surface.as_ref(), "split face without surface")?
+                    .copy_and_add_analytics(k)?;
+            let new_face_owner = (env.key_of)(EntityRef::Face(new_face));
+            surface.set_owner(Some(new_face_owner));
+            b.face_mut(new_face)?.surface = Some(surface);
+            b.set_geometry_owner_key(EntityRef::Face(new_face), Some(new_face_owner));
+            set_face_tolerance(b, new_face, b.tolerance(), true, true)?;
+            b.face_mut(new_face)?.uv_domain = b.face(face)?.uv_domain;
+            let new_fu1 = b.add_faceuse_record(crate::topology::Faceuse::default())?;
+            let new_fu2 = b.add_faceuse_record(crate::topology::Faceuse::default())?;
+            register_entities(
+                env,
+                &[
+                    EntityRef::Face(new_face),
+                    EntityRef::Faceuse(new_fu1),
+                    EntityRef::Faceuse(new_fu2),
+                ],
+            );
+            b.face_mut(new_face)?.faceuse = Some(new_fu1);
+            for (fu, mate, orientation) in [
+                (new_fu1, new_fu2, OrientType::Same),
+                (new_fu2, new_fu1, OrientType::Opposite),
+            ] {
+                let record = b.faceuse_mut(fu)?;
+                record.face = Some(new_face);
+                record.mate = Some(mate);
+                record.orientation = orientation;
+            }
+            let up = required(fp2::upward_faceuse(b, face)?, "face without upward use")?;
+            let down = required(b.faceuse(up)?.mate, "faceuse without mate")?;
+            let up_shell = required(b.faceuse(up)?.shell, "upward use without shell")?;
+            let down_shell = required(b.faceuse(down)?.shell, "downward use without shell")?;
+            shell_post_insert(b, up_shell, new_fu1)?;
+            shell_post_insert(b, down_shell, new_fu2)?;
+            insert_brep_entity(b, EntityRef::Face(new_face))?;
+            (Some(new_face), new_fu1, new_fu2)
         };
-        let new_face = b.add_face_record(crate::topology::Face::new(shell))?;
-        let mut surface = required(b.face(face)?.surface.as_ref(), "split face without surface")?
-            .copy_and_add_analytics(k)?;
-        let new_face_owner = (env.key_of)(EntityRef::Face(new_face));
-        surface.set_owner(Some(new_face_owner));
-        b.face_mut(new_face)?.surface = Some(surface);
-        b.set_geometry_owner_key(EntityRef::Face(new_face), Some(new_face_owner));
-        set_face_tolerance(b, new_face, b.tolerance(), true, true)?;
-        b.face_mut(new_face)?.uv_domain = b.face(face)?.uv_domain;
-        let new_fu1 = b.add_faceuse_record(crate::topology::Faceuse::default())?;
-        let new_fu2 = b.add_faceuse_record(crate::topology::Faceuse::default())?;
-        register_entities(
-            env,
-            &[
-                EntityRef::Face(new_face),
-                EntityRef::Faceuse(new_fu1),
-                EntityRef::Faceuse(new_fu2),
-            ],
-        );
-        b.face_mut(new_face)?.faceuse = Some(new_fu1);
-        for (fu, mate, orientation) in [
-            (new_fu1, new_fu2, OrientType::Same),
-            (new_fu2, new_fu1, OrientType::Opposite),
-        ] {
-            let record = b.faceuse_mut(fu)?;
-            record.face = Some(new_face);
-            record.mate = Some(mate);
-            record.orientation = orientation;
-        }
-        let up = required(fp2::upward_faceuse(b, face)?, "face without upward use")?;
-        let down = required(b.faceuse(up)?.mate, "faceuse without mate")?;
-        let up_shell = required(b.faceuse(up)?.shell, "upward use without shell")?;
-        let down_shell = required(b.faceuse(down)?.shell, "downward use without shell")?;
-        shell_post_insert(b, up_shell, new_fu1)?;
-        shell_post_insert(b, down_shell, new_fu2)?;
-        insert_brep_entity(b, EntityRef::Face(new_face))?;
         let new_loop = b.add_loop_record(Loop {
-            face: new_face,
+            face: new_face.unwrap_or(face),
             edges: Vec::new(),
             loopuse: None,
         })?;
@@ -1765,36 +1796,57 @@ pub fn make_edge_in_face_with_vu_with_curve_identity(
             true,
             true,
         ))?;
-        if !lu::is_outer_loop(b, start_loop)? {
-            if let Some(orientation) = crate::error::ignored(compute_loop_orientation(
-                k, b, new_face, new_loop, None, true,
-            ))? {
-                if orientation != OrientType::Same
-                    && crate::error::ignored(compute_loop_orientation(
-                        k, b, face, start_loop, None, true,
-                    ))?
-                    .is_some()
-                {
-                    // The old-loop orientation is diagnostic only, even if opposite.
-                    fp1::remove_loop(b, new_face, new_loop)?;
-                    fp1::remove_loop(b, face, start_loop)?;
-                    for (loop_, orientation) in [
-                        (start_loop, OrientType::Same),
-                        (new_loop, OrientType::Opposite),
-                    ] {
-                        let (a, z) = lu::loop_loopuses(b, loop_)?;
-                        let z = required(z, "loop without mate")?;
-                        b.loopuse_mut(a)?.orientation = orientation;
-                        b.loopuse_mut(z)?.orientation = orientation;
+        if let Some(new_face) = new_face {
+            // separating cut
+            if !lu::is_outer_loop(b, start_loop)? {
+                if let Some(orientation) = crate::error::ignored(compute_loop_orientation(
+                    k, b, new_face, new_loop, None, true,
+                ))? {
+                    if orientation != OrientType::Same
+                        && crate::error::ignored(compute_loop_orientation(
+                            k, b, face, start_loop, None, true,
+                        ))?
+                        .is_some()
+                    {
+                        // The old-loop orientation is diagnostic only, even if opposite.
+                        fp1::remove_loop(b, new_face, new_loop)?;
+                        fp1::remove_loop(b, face, start_loop)?;
+                        for (loop_, orientation) in [
+                            (start_loop, OrientType::Same),
+                            (new_loop, OrientType::Opposite),
+                        ] {
+                            let (a, z) = lu::loop_loopuses(b, loop_)?;
+                            let z = required(z, "loop without mate")?;
+                            b.loopuse_mut(a)?.orientation = orientation;
+                            b.loopuse_mut(z)?.orientation = orientation;
+                        }
+                        fp1::insert_loop(b, new_face, start_loop)?;
+                        fp1::insert_loop(b, face, new_loop)?;
                     }
-                    fp1::insert_loop(b, new_face, start_loop)?;
-                    fp1::insert_loop(b, face, new_loop)?;
                 }
             }
+            redistribute_inner_loops(k, b, face, new_face, start_loop, new_loop, env)?;
+        } else {
+            // Both boundary cycles belong to this face. Put one seam side first;
+            // the orthogonal seam will join the two cycles into its outer loop.
+            faceuse_remove_loopuse(b, new_fu1, old_top)?;
+            faceuse_remove_loopuse(b, new_fu2, old_bottom)?;
+            faceuse_pre_insert_loopuse(b, new_fu1, old_top)?;
+            faceuse_pre_insert_loopuse(b, new_fu2, old_bottom)?;
+            for (i, loop_) in fp2::loops(b, face, false, None)?.into_iter().enumerate() {
+                let orientation = if i == 0 {
+                    OrientType::Same
+                } else {
+                    OrientType::Opposite
+                };
+                let (a, z) = lu::loop_loopuses(b, loop_)?;
+                let z = required(z, "loop without mate")?;
+                b.loopuse_mut(a)?.orientation = orientation;
+                b.loopuse_mut(z)?.orientation = orientation;
+            }
         }
-        redistribute_inner_loops(k, b, face, new_face, start_loop, new_loop, env)?;
         output.loop_ = Some(new_loop);
-        output.face = Some(new_face);
+        output.face = new_face;
     } else {
         let (mut keep, mut delete) = if lu::is_outer_loop(b, start_loop)? {
             (start_loop, end_loop)
@@ -1993,6 +2045,36 @@ fn compute_loop_orientation(
         uv_bounds,
         do_3d_loop_computation,
     )
+}
+
+/// `pFU->Remove(pLU)`: takes the loop use off the face use's list (`SM_ERR` when it is
+/// not there).
+fn faceuse_remove_loopuse(
+    b: &mut Brep,
+    fu: crate::topology::FaceuseId,
+    lu: crate::topology::LoopuseId,
+) -> Result<()> {
+    if b.loopuse(lu)?.faceuse != Some(fu) {
+        return Err(SolidError::sm_err(OP));
+    }
+    let list = &mut b.faceuse_mut(fu)?.loopuses;
+    let Some(at) = list.iter().position(|&x| x == lu) else {
+        return Err(SolidError::sm_err(OP));
+    };
+    list.remove(at);
+    b.loopuse_mut(lu)?.faceuse = None;
+    Ok(())
+}
+
+/// `pFU->PreInsert(pLU)`: puts the loop use first on the face use's list.
+fn faceuse_pre_insert_loopuse(
+    b: &mut Brep,
+    fu: crate::topology::FaceuseId,
+    lu: crate::topology::LoopuseId,
+) -> Result<()> {
+    b.faceuse_mut(fu)?.loopuses.insert(0, lu);
+    b.loopuse_mut(lu)?.faceuse = Some(fu);
+    Ok(())
 }
 
 fn shell_post_insert(

@@ -379,6 +379,9 @@ fn unmeasured(name: &'static str, expected: Value, e: &solidcore::SolidError) ->
 /// Builds `spec`, measures it and runs every check (none stops the others).
 pub fn evaluate(spec: &Spec) -> Evaluation {
     let mut k = Kernel::default();
+    // SMLib 1.0.1's precise properties cannot converge at ACCURACY on a sphere (WR-472);
+    // the opt-in fix holds every component to the area's share of its size.
+    k.fixes.precise_properties_body_length_scale = true;
     let mut b = match (spec.build)(&mut k) {
         Ok(b) => b,
         Err(e) => {

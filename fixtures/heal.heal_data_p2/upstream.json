@@ -48,7 +48,7 @@
     ],
     "validate_only": false
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:222 my_test_squeeze_edge_tracks_removal"
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:215 my_test_squeeze_edge_tracks_removal"
   },
   {
    "name": "missing_poles_box_two_faces",
@@ -86,7 +86,7 @@
     ],
     "validate_only": false
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:637 my_test_missing_poles_refreshes_all_faces"
+   "upstream_ref": "tests/prog_test/src/smHealTest.cpp:145 my_test_missing_poles_refreshes_all_faces"
   },
   {
    "name": "closed_sphere_swap0",
@@ -137,7 +137,7 @@
     ],
     "validate_only": false
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties"
+   "upstream_ref": "tests/prog_test/src/smHealTest.cpp:378 my_test_closed_sphere_properties"
   },
   {
    "name": "closed_sphere_swap0_through_fix_tol",
@@ -194,7 +194,7 @@
     ],
     "validate_only": false
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties (HealBrep to SM_HO_CACHE_FACEPROPS_2)"
+   "upstream_ref": "tests/prog_test/src/smHealTest.cpp:378 my_test_closed_sphere_properties (HealBrep to SM_HO_CACHE_FACEPROPS_2)"
   },
   {
    "name": "closed_sphere_swap1",
@@ -245,7 +245,7 @@
     ],
     "validate_only": false
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties"
+   "upstream_ref": "tests/prog_test/src/smHealTest.cpp:378 my_test_closed_sphere_properties"
   },
   {
    "name": "closed_sphere_swap1_through_fix_tol",
@@ -302,7 +302,7 @@
     ],
     "validate_only": false
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties (HealBrep to SM_HO_CACHE_FACEPROPS_2)"
+   "upstream_ref": "tests/prog_test/src/smHealTest.cpp:378 my_test_closed_sphere_properties (HealBrep to SM_HO_CACHE_FACEPROPS_2)"
   },
   {
    "name": "heal_box_10",
@@ -4439,7 +4439,7 @@
     ],
     "validate_only": false
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:222 my_test_squeeze_edge_tracks_removal"
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:215 my_test_squeeze_edge_tracks_removal"
   },
   {
    "name": "closed_sphere_swap0_cached_gaps",
@@ -4490,7 +4490,7 @@
     ],
     "validate_only": false
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties"
+   "upstream_ref": "tests/prog_test/src/smHealTest.cpp:378 my_test_closed_sphere_properties"
   },
   {
    "name": "closed_sphere_swap1_cached_gaps",
@@ -4541,7 +4541,7 @@
     ],
     "validate_only": false
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties"
+   "upstream_ref": "tests/prog_test/src/smHealTest.cpp:378 my_test_closed_sphere_properties"
   },
   {
    "name": "network_full",

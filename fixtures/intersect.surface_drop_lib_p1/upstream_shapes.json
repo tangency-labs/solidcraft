@@ -1209,7 +1209,7 @@
   },
   {
    "name": "cylinder_circle_iso_0.00",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3899",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3348",
    "inputs": {
     "op": "iso",
     "surface": {
@@ -1281,7 +1281,7 @@
   },
   {
    "name": "cylinder_circle_iso_3.14",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3899",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3348",
    "inputs": {
     "op": "iso",
     "surface": {
@@ -1353,7 +1353,7 @@
   },
   {
    "name": "cylinder_seam_jump",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3899",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3348",
    "inputs": {
     "op": "seam",
     "surface": {
@@ -1469,7 +1469,7 @@
   },
   {
    "name": "cylinder_seam_no_jump",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3899",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3348",
    "inputs": {
     "op": "seam",
     "surface": {
@@ -1585,7 +1585,7 @@
   },
   {
    "name": "cylinder_seam_moving",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3899",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3348",
    "inputs": {
     "op": "moving",
     "surface": {
@@ -1671,7 +1671,7 @@
   },
   {
    "name": "cylinder_swapped_circle_iso_0.00",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3899",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3348",
    "inputs": {
     "op": "iso",
     "surface": {
@@ -1743,7 +1743,7 @@
   },
   {
    "name": "cylinder_swapped_circle_iso_3.14",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3899",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3348",
    "inputs": {
     "op": "iso",
     "surface": {
@@ -1815,7 +1815,7 @@
   },
   {
    "name": "cylinder_swapped_seam_jump",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3899",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3348",
    "inputs": {
     "op": "seam",
     "surface": {
@@ -1931,7 +1931,7 @@
   },
   {
    "name": "cylinder_swapped_seam_no_jump",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3899",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3348",
    "inputs": {
     "op": "seam",
     "surface": {
@@ -2047,7 +2047,7 @@
   },
   {
    "name": "cylinder_swapped_seam_moving",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3899",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3348",
    "inputs": {
     "op": "moving",
     "surface": {
@@ -2133,7 +2133,7 @@
   },
   {
    "name": "reversed_line_span",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "op": "span",
     "surface": {
@@ -2273,7 +2273,7 @@
   },
   {
    "name": "line_span_leaves_domain",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "op": "span",
     "surface": {
@@ -2667,7 +2667,7 @@
   },
   {
    "name": "cylinder_seam_jump_beyond_tol",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3899",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3348",
    "inputs": {
     "op": "seam",
     "surface": {

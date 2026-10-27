@@ -14,7 +14,7 @@
 //! |----------|-------|--------|
 //! | `Export` | block | `0` and the graph of [`super::topology_vertexuse`]'s export (walked with the vertex lists), or `-1 status` |
 //! | `VertexLists` | block | `0`, per vertex its vertex use list (`len vu*`), then the cached gap records of every edge use (`init gap eu0 eu1 t0 t1`, `init gap eu t u v`) and vertex use (`init gap vu t`, `init gap vu u v`); or `-1 status` |
-//! | `Prob`   | `kind n nops (code a b c)*` | per op `code result` (`-2`: upstream would read past the end or a null member, and nothing follows), then `-100`, the array (`size elem* orig get_op labels`), `coin_pair_cnt orig`, and per object its 18 flags, 2 mixed and 3 tried members |
+//! | `Prob`   | `kind n nops (code a b c)*` | per op `code result` (`-2`: upstream would read past the end or a null member, and nothing follows), then `-100`, the array (`size elem* orig get_op labels`), `coin_pair_cnt orig`, and per object its 19 flags, 2 mixed and 3 tried members |
 //! | `Heal`   | block `targets vx vy vz nsteps step*` | `0`, per step `code` and its outputs, then `-100` and the healer's state (layout in the difftest runner); or `-1 status` |
 //!
 //! `targets` is `nv sel* ne sel* nf sel*` (selectors modulo the B-rep's counts). A
@@ -324,7 +324,10 @@ fn targets(rd: &mut Reader<'_>) -> Result<(), FfiError> {
 /// loaded face targets for the single-vertex-sphere regression. `42 null_face`
 /// seeds degenerate/missing/crossed face queues with no crossed direction, only
 /// immediately before a final step 38 (or 35/39 for null faces). Step 38
-/// also outputs each current face props' crossed direction, flag and tried state.
+/// also outputs each current face props' crossed direction, flag and tried state. While
+/// a target face props has no face, whose mark v1.0.1's `Fix_SplitEdgesAtSeam` reads
+/// unchecked (UB-265), the shim replaces the whole record by `-999 265` (a rejected
+/// case).
 /// Selectors use the
 /// fixture graph's traversal order. Step 33 refuses catch-up into an uninitialized
 /// incremental vertex voxel model (`-2`). A nonempty add list also requires every

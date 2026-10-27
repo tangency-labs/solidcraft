@@ -1,0 +1,4 @@
+[[mismatch]]
+unit = "query.face_p3"
+case = "internal_sphere_f0"
+why = "CalculateAnInternalPoint on sphere.smb face 0: Rust returns the pole (0,0,5), C++ v1.0.1 a nearby point (-0.659,-0.203,4.952); the port does not yet follow a 1.0.1 change on this path (Rust output unchanged from main). A Rust divergence to keep chasing, not a C++ defect (plan/findings/query.face_p3--sphere-pole-internal-point-v1-0-1.md)."

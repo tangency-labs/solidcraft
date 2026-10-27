@@ -63,10 +63,8 @@
 //!   bucket list to `SmObjsInVoxels::FindCoincidentPairs`, the port returns
 //!   [`SolidError::InvalidInput`]. Statuses upstream ignores (`SetProps` in the cache
 //!   steps) are ignored; [`SolidError::Unported`] propagates.
-//! - **`SM_HISTOGRAM_EDGELEN_INDEX`** converts `floor(log10(a))` to `ULONG` before adding
-//!   6; the x86-64 conversion of a negative value wraps, which
-//!   [`edge_len_histogram_index`] reproduces (a NaN length, an index past the
-//!   histogram upstream, is [`SolidError::InvalidInput`]).
+//! - **`SM_HISTOGRAM_EDGELEN_INDEX`**: a NaN length (an index past the histogram
+//!   upstream) is [`SolidError::InvalidInput`] in [`edge_len_histogram_index`].
 //! - **`pbNewProbs` out-params** become the returned `bool`. Upstream
 //!   `Cache_CoinVertices` returns early on its no-work path (no target vertices or
 //!   no new ones) before writing `*pbNewProbs = FALSE`, leaving the caller's value;
@@ -136,7 +134,7 @@ fn remove_first<T: PartialEq>(v: &mut Vec<T>, x: &T) -> bool {
 }
 
 /// `SM_HISTOGRAM_EDGELEN_INDEX(a)`: `0` below `1e-5`, `10` above `1e4`, else
-/// `(ULONG)floor(log10(a)) + 6` with the wrapping conversion of x86-64.
+/// `(ULONG)(floor(log10(a)) + 6)`.
 ///
 /// # Errors
 ///
@@ -155,8 +153,8 @@ pub fn edge_len_histogram_index(a: f64) -> Result<usize> {
                 "SM_HISTOGRAM_EDGELEN_INDEX of NaN indexes past the histogram",
             ));
         }
-        // (ULONG)(double) of a value in [-5, 4]: two's complement wrap, then + 6
-        let idx = (f as i64 as u64).wrapping_add(6);
+        // (ULONG)(floor(log10(a)) + 6): a value in [1, 10]
+        let idx = (f + 6.0) as u64;
         usize::try_from(idx)
             .ok()
             .filter(|&i| i < EDGELEN_BUCKET_CNT)
@@ -1169,11 +1167,13 @@ pub enum FaceFlag {
     BadClosedPtrLoopCnt,
     /// `m_lBadMissingPoles`.
     BadMissingPoles,
+    /// `m_bBadCrossedPole` (listed last so the other links keep their indices).
+    BadCrossedPole,
 }
 
 impl FaceFlag {
     /// Every link, in declaration order.
-    pub const ALL: [Self; 18] = [
+    pub const ALL: [Self; 19] = [
         Self::BadHasNotYetProb,
         Self::BadSmallZoneTol3d,
         Self::BadLargeZoneTol3d,
@@ -1192,6 +1192,7 @@ impl FaceFlag {
         Self::BadClosed3dLoopCnt,
         Self::BadClosedPtrLoopCnt,
         Self::BadMissingPoles,
+        Self::BadCrossedPole,
     ];
 
     /// The `SmBooleanUL` member, `None` for a counter.
@@ -1202,6 +1203,7 @@ impl FaceFlag {
             Self::BadLargeZoneTol3d => &mut p.bad_large_zone_tol_3d,
             Self::BadDegenFace => &mut p.bad_degen_face,
             Self::BadMissingSeam => &mut p.bad_missing_seam,
+            Self::BadCrossedPole => &mut p.bad_crossed_pole,
             Self::BadCrossedSeam => &mut p.bad_crossed_seam,
             Self::BadNearMissSeam => &mut p.bad_near_miss_seam,
             Self::BadLoopProblems => &mut p.bad_loop_problems,
@@ -1236,6 +1238,7 @@ impl FaceFlag {
             Self::BadDegenFace => ul(p.bad_degen_face),
             Self::BadFlatCorners => p.bad_flat_corners,
             Self::BadMissingSeam => ul(p.bad_missing_seam),
+            Self::BadCrossedPole => ul(p.bad_crossed_pole),
             Self::BadCrossedSeam => ul(p.bad_crossed_seam),
             Self::BadNearMissSeam => ul(p.bad_near_miss_seam),
             Self::BadLoopProblems => ul(p.bad_loop_problems),
@@ -1906,6 +1909,8 @@ pub struct HealData<O: LoopObject> {
     pub bad_face_props_flat_corner: FaceProbArray<O>,
     /// `m_sBadFaceProps_MissingSeam`.
     pub bad_face_props_missing_seam: FaceProbArray<O>,
+    /// `m_sBadFaceProps_CrossedPole`: boundary edges crossing an interior surface pole.
+    pub bad_face_props_crossed_pole: FaceProbArray<O>,
     /// `m_sBadFaceProps_CrossedSeam`.
     pub bad_face_props_crossed_seam: FaceProbArray<O>,
     /// `m_sBadFaceProps_NearMissSeam`.
@@ -2108,6 +2113,7 @@ impl<O: LoopObject> HealData<O> {
             face_props_no_vertex_pole: MixedProbArray::default(),
             bad_face_props_flat_corner: ProbArray::default(),
             bad_face_props_missing_seam: ProbArray::default(),
+            bad_face_props_crossed_pole: ProbArray::default(),
             bad_face_props_crossed_seam: ProbArray::default(),
             bad_face_props_near_miss_seam: ProbArray::default(),
             ran_face_props_move_seam: TriedProbArray::default(),
@@ -2287,6 +2293,8 @@ impl<O: LoopObject> HealData<O> {
 
         self.bad_face_props_missing_seam
             .setup(H::CacheFaceprops2, ff(F::BadMissingSeam));
+        self.bad_face_props_crossed_pole
+            .setup(H::CacheFaceprops2, ff(F::BadCrossedPole));
         self.bad_face_props_crossed_seam
             .setup(H::CacheFaceprops2, ff(F::BadCrossedSeam));
         self.bad_face_props_near_miss_seam
@@ -2442,6 +2450,11 @@ impl<O: LoopObject> HealData<O> {
             "MissingSeam Cnt    ",
             bad,
         );
+        self.bad_face_props_crossed_pole.set_labels(
+            "Face boundary crosses a pole            ",
+            "CrossedPole Cnt    ",
+            bad,
+        );
         self.bad_face_props_crossed_seam.set_labels(
             "Face on closed srf crosses a seam       ",
             "CrossedSeam Cnt    ",
@@ -2555,6 +2568,7 @@ impl<O: LoopObject> HealData<O> {
         self.bad_face_props_flat_corner.reset();
 
         self.bad_face_props_missing_seam.reset();
+        self.bad_face_props_crossed_pole.reset();
         self.bad_face_props_crossed_seam.reset();
         self.bad_face_props_near_miss_seam.reset();
 
@@ -2722,6 +2736,7 @@ impl<O: LoopObject> HealData<O> {
         self.face_props_no_vertex_pole.base.remove(props);
         self.bad_face_props_flat_corner.remove(props);
         self.bad_face_props_missing_seam.remove(props);
+        self.bad_face_props_crossed_pole.remove(props);
         self.bad_face_props_crossed_seam.remove(props);
         self.bad_face_props_near_miss_seam.remove(props);
         self.ran_face_props_move_seam.base.remove(props);
@@ -3486,7 +3501,7 @@ mod tests {
     }
 
     #[test]
-    fn edge_len_index_wraps_like_x86() {
+    fn edge_len_index_buckets_by_decade() {
         assert_eq!(edge_len_histogram_index(1e-6).unwrap(), 0);
         assert_eq!(edge_len_histogram_index(5e-5).unwrap(), 1);
         assert_eq!(edge_len_histogram_index(0.5).unwrap(), 5);

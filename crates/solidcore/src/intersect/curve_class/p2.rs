@@ -225,6 +225,8 @@ impl<O: ClassObject> CurveClassification<O> {
             _ => self.curve = other.curve,
         }
 
+        // sm_CopiedUVCurve1: the copy keeps `other`'s curve handle, so the UV curve of the
+        // copied SmCrvOnSurf is `other`'s UV curve
         self.uv_curve1 = other.uv_curve1;
         self.is_curve_current = other.is_curve_current;
         self.surface1 = other.surface1;

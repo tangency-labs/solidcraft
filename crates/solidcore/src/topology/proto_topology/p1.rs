@@ -706,8 +706,10 @@ mod tests {
         assert!(deleted.is_empty());
         assert!(m.proto_vertex(v0).is_none());
         assert!(m.proto_vertex(v1).is_some());
-        // the deleted proto vertex is cleared from the end of the unlisted proto edge
-        assert_eq!(m.proto_edge(pe).unwrap().end_proto_vertex(), None);
+        // v1.0.1's ~SmProtoTopologyManager (3fd5b95) empties the listed proto vertices'
+        // edge lists before deleting them, so the deleted vertex no longer clears itself
+        // from the unlisted proto edge: its ends stay as they were
+        assert_eq!(m.proto_edge(pe).unwrap().end_proto_vertex(), Some(v0));
         assert_eq!(m.proto_edge(pe).unwrap().start_proto_vertex(), Some(v1));
     }
 

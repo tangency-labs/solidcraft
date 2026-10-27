@@ -440,6 +440,11 @@ impl SolutionObject for Object {
 struct Objects<'a> {
     lives: [LiveBrepObjects<'a, 'a>; 2],
     caches: [BrepCache<Object>; 2],
+    /// The two B-reps as they were when the scene was built, for the face queries that
+    /// take a `&Brep` (`SmFace::CurveOnClassify` of a curve/face solve,
+    /// [`TopologyObjects::face_entity`]): the live B-reps are held mutably. The solves
+    /// only add caches, so their topology and geometry stay the snapshot's.
+    snapshots: [Brep; 2],
 }
 impl<'a> Objects<'a> {
     fn new(k: &Kernel, breps: [&'a mut Brep; 2], identities: &'a [BrepIdentity<'a>; 2]) -> Result<Self> {
@@ -450,6 +455,7 @@ impl<'a> Objects<'a> {
         for (i, (cache, brep)) in caches.iter_mut().zip(&breps).enumerate() {
             cache.build_trees(k, CacheSource::Brep(brep), |o| Object(i, o), &arena_identity)?;
         }
+        let snapshots = [breps[0].clone(), breps[1].clone()];
         let [b0, b1] = breps;
         let [i0, i1] = identities;
         Ok(Self {
@@ -458,6 +464,7 @@ impl<'a> Objects<'a> {
                 LiveBrepObjects::new(b1, i1, None)?,
             ],
             caches,
+            snapshots,
         })
     }
     fn live(&self, o: Object) -> Result<&LiveBrepObjects<'a, 'a>> {
@@ -513,6 +520,12 @@ impl TopologyObjects<Object> for Objects<'_> {
             Ok(live) => live.classifies_on_face(k, face.1, point, tolerance),
             Err(e) => Some(Err(e)),
         }
+    }
+    fn face_entity(&self, face: Object) -> Option<(&Brep, FaceId)> {
+        let CacheObject::Face(f) = face.1 else {
+            return None;
+        };
+        self.snapshots.get(face.0).map(|b| (b, f))
     }
     fn brep_cache(&self, o: Object) -> Result<&BrepCache<Object>> {
         self.caches
@@ -691,7 +704,16 @@ fn topology(k: &mut Kernel, i: &Inputs, b: &mut Brep, second: &mut Brep) -> Resu
             )?;
             let [l0, l1] = &objects.lives;
             let result = l0.with_brep(|a| {
-                l1.with_brep(|b| api::brep_relationship_classify(k, &objects, &solution, a, b))
+                l1.with_brep(|b| {
+                    api::brep_relationship_classify(
+                        k,
+                        &objects,
+                        &solution,
+                        [Object(0, CacheObject::Brep), Object(1, CacheObject::Brep)],
+                        a,
+                        b,
+                    )
+                })
             })?;
             if i.op == 7 {
                 o.extend([result.distance, f64::from(result.relationship)]);

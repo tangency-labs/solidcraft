@@ -2,7 +2,7 @@
  "cases": [
   {
    "name": "closed_sphere_properties_swap0_loops0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties (HealBrep SM_HO_CACHE_FACEPROPS_2 over the natural sphere face)",
+   "upstream_ref": "tests/prog_test/src/smHealTest.cpp:378 my_test_closed_sphere_properties (HealBrep SM_HO_CACHE_FACEPROPS_2 over the natural sphere face)",
    "inputs": {
     "brep": {
      "kind": "natural",
@@ -19,7 +19,7 @@
   },
   {
    "name": "closed_sphere_properties_swap0_loops1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties (HealBrep SM_HO_CACHE_FACEPROPS_2 over the natural sphere face)",
+   "upstream_ref": "tests/prog_test/src/smHealTest.cpp:378 my_test_closed_sphere_properties (HealBrep SM_HO_CACHE_FACEPROPS_2 over the natural sphere face)",
    "inputs": {
     "brep": {
      "kind": "natural",
@@ -36,7 +36,7 @@
   },
   {
    "name": "closed_sphere_properties_swap0_fresh",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties (fresh props: rejected, they read the empty loop props)",
+   "upstream_ref": "tests/prog_test/src/smHealTest.cpp:378 my_test_closed_sphere_properties (fresh props: rejected, they read the empty loop props)",
    "inputs": {
     "brep": {
      "kind": "natural",
@@ -53,7 +53,7 @@
   },
   {
    "name": "closed_sphere_properties_swap1_loops0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties (HealBrep SM_HO_CACHE_FACEPROPS_2 over the natural sphere face)",
+   "upstream_ref": "tests/prog_test/src/smHealTest.cpp:378 my_test_closed_sphere_properties (HealBrep SM_HO_CACHE_FACEPROPS_2 over the natural sphere face)",
    "inputs": {
     "brep": {
      "kind": "natural",
@@ -70,7 +70,7 @@
   },
   {
    "name": "closed_sphere_properties_swap1_loops1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties (HealBrep SM_HO_CACHE_FACEPROPS_2 over the natural sphere face)",
+   "upstream_ref": "tests/prog_test/src/smHealTest.cpp:378 my_test_closed_sphere_properties (HealBrep SM_HO_CACHE_FACEPROPS_2 over the natural sphere face)",
    "inputs": {
     "brep": {
      "kind": "natural",
@@ -87,7 +87,7 @@
   },
   {
    "name": "closed_sphere_properties_swap1_fresh",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties (fresh props: rejected, they read the empty loop props)",
+   "upstream_ref": "tests/prog_test/src/smHealTest.cpp:378 my_test_closed_sphere_properties (fresh props: rejected, they read the empty loop props)",
    "inputs": {
     "brep": {
      "kind": "natural",
@@ -104,7 +104,7 @@
   },
   {
    "name": "natural_torus",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4520 (as my_test_closed_sphere_properties, SmTorus)",
+   "upstream_ref": "tests/prog_test/src/smHealTest.cpp:378 (as my_test_closed_sphere_properties, SmTorus)",
    "inputs": {
     "brep": {
      "kind": "natural",
@@ -121,7 +121,7 @@
   },
   {
    "name": "tsurf_cyl_creation_loops_on_cone",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:690 my_test_tsurf_cyl_creation_fast (its three loops, on a real SmCone)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:425 my_test_tsurf_cyl_creation_fast (its three loops, on a real SmCone)",
    "inputs": {
     "brep": {
      "kind": "curves",
@@ -544,7 +544,7 @@
   },
   {
    "name": "sphere_cap_pole_vertex_swap0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4590 my_test_heal_single_vertex_sphere (a vertex loop at the pole); source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "upstream_ref": "tests/prog_test/src/smHealTest.cpp:425 my_test_heal_single_vertex_sphere (a vertex loop at the pole); source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
    "inputs": {
     "brep": {
      "kind": "curves",
@@ -1049,7 +1049,7 @@
   },
   {
    "name": "sphere_cap_pole_vertex_swap1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4590 my_test_heal_single_vertex_sphere (a vertex loop at the pole); source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
+   "upstream_ref": "tests/prog_test/src/smHealTest.cpp:425 my_test_heal_single_vertex_sphere (a vertex loop at the pole); source/SMLib/src/SmFaceProps.cpp:1374 (SetProps_Stage3's ClassifyLoops call)",
    "inputs": {
     "brep": {
      "kind": "curves",

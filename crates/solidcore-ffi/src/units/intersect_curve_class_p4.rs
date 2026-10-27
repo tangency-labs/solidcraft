@@ -2,8 +2,8 @@
 //!
 //! Shim: `harness/cpp/shim/intersect_curve_class_p4.cpp` (`sc_intersect_curve_class_p4_run`).
 //! Upstream: `source/SMLib/src/SmCurveClass.cpp`, `source/SMLib/inc/SmCurveClass.h` (the full
-//! `SmCurveClassification` constructor, `GetLoopCrossings`, `SmCurveInterval::GetIvlBound_EdgeuseObj`
-//! and the static `sm_SqueezeOutSmallestInterval`).
+//! `SmCurveClassification` constructor, `GetLoopCrossings`, `GetLoopTouches`,
+//! `SmCurveInterval::GetIvlBound_EdgeuseObj` and the static `sm_SqueezeOutSmallestInterval`).
 //!
 //! A script is `has_face [face] n_obj obj*n_obj n_ops op*n_ops`. It builds a pool of objects
 //! (curves, planes, B-spline surfaces, points and "other" stand-ins; the objects of unit
@@ -24,6 +24,7 @@
 //! | 31   | `j do_min`                                   | `cc[j].GetIvlBound_EdgeuseObj(do_min, NULL)` | `edgeuse` (pool id, `-1` none) |
 //! | 32   | `n loop*n with_props n_seeds (field idx value)*n_seeds` | `GetLoopCrossings(loops, with_props ? &props : NULL, ..)`, `props` an `SmFaceProps(ctx)` with the seeds of the `heal.face_props` shim applied (a preset at `SM_PROPSTAGE_2a` or later skips `SetProps_Stage2`) | `counts raw done` (each a length and its entries; a touch is `connected dir loop_index param pt_classify_index`), then with `with_props` the props snapshot ([`heal_face_props::SNAP_LEN`] values) |
 //! | 33   | `curve a b uv tol data_size owned current s1 s2 uv2` | `cc = SmCurveClassification(curve, [a, b], uv, tol, data_size, NULL, owned, current, s1, s2, uv2, NULL)` | |
+//! | 34   | as 32                                        | `GetLoopTouches(loops, with_props ? &props : NULL, touches)` | on success `touches` (a length and its entries, as 32), then with `with_props` the props snapshot; nothing else on a failing status (the list then holds what was collected before the failure) |
 //!
 //! Each op writes `op status outputs state`, the state of `cc[t]` being as in
 //! `intersect_curve_class_p3`.
@@ -34,8 +35,9 @@
 //! interval past the intervals, of an interval whose back pointer is not its classification, on a
 //! classification without face (UB-124: `GetUpwardFaceuse` / `GetSurface` on `NULL`), and of an
 //! edge end on a face with a surface when the classification or edge curve is `NULL` (both are
-//! evaluated); `GetLoopCrossings` over loops for a classification without curve (UB-124:
-//! `GetNaturalInterval` on `NULL`).
+//! evaluated); `GetLoopCrossings` or `GetLoopTouches` over loops for a classification without
+//! curve (UB-124: `GetNaturalInterval` on `NULL`) or without intervals
+//! (`GetPointClassifiesConnectedTo` reads `m_pData[0]`).
 
 use crate::units::heal_face_props::{self, FaceSpec, Loops};
 use crate::{call_with_buffer, FfiError};
@@ -118,8 +120,9 @@ pub mod op {
     pub const IVL_BOUND: usize = 31;
     pub const LOOP_CROSSINGS: usize = 32;
     pub const CONSTRUCT: usize = 33;
+    pub const LOOP_TOUCHES: usize = 34;
     /// Largest op code.
-    pub const LAST: usize = 33;
+    pub const LAST: usize = 34;
 }
 
 mod sys {
@@ -518,7 +521,7 @@ pub fn validate(face: Option<&FaceSpec>, input: &[f64]) -> Result<(), FfiError> 
                 rd.index(MAX_SIZE)?;
                 rd.flag()?;
             }
-            op::LOOP_CROSSINGS => {
+            op::LOOP_CROSSINGS | op::LOOP_TOUCHES => {
                 let n = rd.index(MAX_LOOPS)?;
                 for _ in 0..n {
                     obj(&mut rd)?;

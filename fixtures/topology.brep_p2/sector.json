@@ -530,7 +530,7 @@
   },
   {
    "name": "sector_wire_103_0_1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -616,7 +616,7 @@
   },
   {
    "name": "sector_wire_103_0_2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -702,7 +702,7 @@
   },
   {
    "name": "sector_wire_103_1_1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -788,7 +788,7 @@
   },
   {
    "name": "sector_wire_103_1_2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -874,7 +874,7 @@
   },
   {
    "name": "sector_wire_103_2_1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -960,7 +960,7 @@
   },
   {
    "name": "sector_wire_103_2_2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -1046,7 +1046,7 @@
   },
   {
    "name": "sector_wire_104_0_1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -1132,7 +1132,7 @@
   },
   {
    "name": "sector_wire_104_0_2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -1218,7 +1218,7 @@
   },
   {
    "name": "sector_wire_104_1_1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -1304,7 +1304,7 @@
   },
   {
    "name": "sector_wire_104_1_2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -1390,7 +1390,7 @@
   },
   {
    "name": "sector_wire_104_2_1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -1476,7 +1476,7 @@
   },
   {
    "name": "sector_wire_104_2_2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -1562,7 +1562,7 @@
   },
   {
    "name": "sector_plane10_102_0_1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -1626,7 +1626,7 @@
   },
   {
    "name": "sector_plane10_102_0_2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -1690,7 +1690,7 @@
   },
   {
    "name": "sector_plane10_102_1_1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -1754,7 +1754,7 @@
   },
   {
    "name": "sector_plane10_102_1_2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -1818,7 +1818,7 @@
   },
   {
    "name": "sector_plane10_102_2_1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -1882,7 +1882,7 @@
   },
   {
    "name": "sector_plane10_102_2_2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -1946,7 +1946,7 @@
   },
   {
    "name": "sector_plane10_103_0_1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -2010,7 +2010,7 @@
   },
   {
    "name": "sector_plane10_103_0_2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -2074,7 +2074,7 @@
   },
   {
    "name": "sector_plane10_103_1_1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -2138,7 +2138,7 @@
   },
   {
    "name": "sector_plane10_103_1_2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -2202,7 +2202,7 @@
   },
   {
    "name": "sector_plane10_103_2_1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -2266,7 +2266,7 @@
   },
   {
    "name": "sector_plane10_103_2_2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -2330,7 +2330,7 @@
   },
   {
    "name": "sector_plane10_104_0_1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -2394,7 +2394,7 @@
   },
   {
    "name": "sector_plane10_104_0_2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -2458,7 +2458,7 @@
   },
   {
    "name": "sector_plane10_104_1_1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -2522,7 +2522,7 @@
   },
   {
    "name": "sector_plane10_104_1_2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -2586,7 +2586,7 @@
   },
   {
    "name": "sector_plane10_104_2_1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -2650,7 +2650,7 @@
   },
   {
    "name": "sector_plane10_104_2_2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -15216,7 +15216,7 @@
   },
   {
    "name": "sector_wire_100_default",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -15302,7 +15302,7 @@
   },
   {
    "name": "sector_wire_101_default",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -15388,7 +15388,7 @@
   },
   {
    "name": "sector_wire_105_default",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -15474,7 +15474,7 @@
   },
   {
    "name": "sector_wire_110_default",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -15560,7 +15560,7 @@
   },
   {
    "name": "sector_wire_103_unknown_orient",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -15646,7 +15646,7 @@
   },
   {
    "name": "sector_wire_103_extrapolated",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -15732,7 +15732,7 @@
   },
   {
    "name": "sector_wire_104_unknown_orient",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -15818,7 +15818,7 @@
   },
   {
    "name": "sector_wire_104_extrapolated",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -15904,7 +15904,7 @@
   },
   {
    "name": "sector_plane10_100_default",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -15968,7 +15968,7 @@
   },
   {
    "name": "sector_plane10_101_default",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -16032,7 +16032,7 @@
   },
   {
    "name": "sector_plane10_105_default",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -16096,7 +16096,7 @@
   },
   {
    "name": "sector_plane10_110_default",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -16160,7 +16160,7 @@
   },
   {
    "name": "sector_plane10_102_unknown_orient",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -16224,7 +16224,7 @@
   },
   {
    "name": "sector_plane10_102_extrapolated",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -16288,7 +16288,7 @@
   },
   {
    "name": "sector_plane10_103_unknown_orient",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -16352,7 +16352,7 @@
   },
   {
    "name": "sector_plane10_103_extrapolated",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -16416,7 +16416,7 @@
   },
   {
    "name": "sector_plane10_104_unknown_orient",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -16480,7 +16480,7 @@
   },
   {
    "name": "sector_plane10_104_extrapolated",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -23382,7 +23382,7 @@
   },
   {
    "name": "sector_wire_103_0_1_inverted",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (inverted interval: SmExtent1d(t0, t1) swaps it, SmExtent1d.cpp:115-128)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (inverted interval: SmExtent1d(t0, t1) swaps it, SmExtent1d.cpp:115-128)",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -23468,7 +23468,7 @@
   },
   {
    "name": "sector_wire_104_0_1_inverted",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (inverted interval: SmExtent1d(t0, t1) swaps it, SmExtent1d.cpp:115-128)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (inverted interval: SmExtent1d(t0, t1) swaps it, SmExtent1d.cpp:115-128)",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -23554,7 +23554,7 @@
   },
   {
    "name": "sector_plane10_102_0_1_inverted",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640 (inverted interval: SmExtent1d(t0, t1) swaps it, SmExtent1d.cpp:115-128)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372 (inverted interval: SmExtent1d(t0, t1) swaps it, SmExtent1d.cpp:115-128)",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -23618,7 +23618,7 @@
   },
   {
    "name": "sector_plane10_103_0_1_inverted",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640 (inverted interval: SmExtent1d(t0, t1) swaps it, SmExtent1d.cpp:115-128)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372 (inverted interval: SmExtent1d(t0, t1) swaps it, SmExtent1d.cpp:115-128)",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -23682,7 +23682,7 @@
   },
   {
    "name": "sector_plane10_104_0_1_inverted",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640 (inverted interval: SmExtent1d(t0, t1) swaps it, SmExtent1d.cpp:115-128)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372 (inverted interval: SmExtent1d(t0, t1) swaps it, SmExtent1d.cpp:115-128)",
    "inputs": {
     "brep": {
      "kind": "face",

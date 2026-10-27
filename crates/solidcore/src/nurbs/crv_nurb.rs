@@ -22,7 +22,7 @@
 //! | [`Curve::scale_cpts`]                   | `N_CrvScaleCPts`                |
 //! | [`Curve::translate`]                    | `N_CrvTranslate`                |
 //! | [`Curve::project_onto_plane`], [`Projection`] | `N_CrvProjectOntoPlane` (`NL_PARALLEL` / `NL_PERSPECTIVE`) |
-//! | [`Curve::reverse`] / [`Curve::reversed`] | `N_CrvReverse` (in place / into a new curve) |
+//! | [`Curve::reverse`] / [`Curve::reversed`] | `N_CrvReverse` (in place / into a new curve; knots by `NI_ReverseKnots`) |
 //! | [`Curve::bbox_max_diag_dist`]           | `N_CrvGetBBoxMaxDiagDist`       |
 //! | [`Curve::max_pos_vector`]               | `N_CrvGetMaxPosVector`          |
 //! | [`Curve::linear_segs`], [`LinearSeg`]   | `N_CrvGetLinearSegs`            |
@@ -694,21 +694,16 @@ impl Curve {
     }
 
     /// Reverses the curve in place (`N_CrvReverse` with `curQ == curP`): control
-    /// points swapped end for end, interior knots `U[p+i]` and `U[m-p-i]` exchanged
-    /// as `c - U`, `c = U[0] + U[m]`; the `p + 1` end knots are kept.
+    /// points swapped end for end and the knots reversed by
+    /// [`reverse_knots`](crate::geom::a_object::reverse_knots) (`NI_ReverseKnots`).
     ///
     /// Errors with `InvalidInput` (the curve may then be partly reversed) only for
     /// knot vectors shorter than upstream indexes.
     pub fn reverse(&mut self) -> Result<()> {
         const OP: &str = "nurbs::crv_nurb::Curve::reverse";
         check_short_degree(self.degree(), OP)?;
-        let p = sx(self.degree(), OP)?;
         let n = sx(self.n(), OP)?;
-        let m = sx(self.m(), OP)?;
-
-        // Prepare for reversal.
-        let up = self.knots();
-        let c = get(up, 0, OP)? + get(up, m, OP)?;
+        let m = self.m();
 
         // Reverse curve.
         let pw = self.cpts_mut();
@@ -719,49 +714,32 @@ impl Curve {
             set(pw, i, b, OP)?;
             set(pw, n - i, a, OP)?;
         }
-        let up = self.knots_mut();
-        let k = m / 2 - p;
-        for i in 1..=k {
-            let a = get(up, m - p - i, OP)?;
-            let v = c - get(up, p + i, OP)?;
-            set(up, m - p - i, v, OP)?;
-            set(up, p + i, c - a, OP)?;
-        }
-        Ok(())
+        // (each pair of the in-place knot reversal is read before it is written, so
+        // reversing from a copy gives the same knots)
+        let up = self.knots().to_vec();
+        crate::geom::a_object::reverse_knots(&up, m, self.knots_mut())
     }
 
     /// The reversed curve (`N_CrvReverse` into a new curve): control points in reverse
-    /// order, the first and last `p + 1` knots copied, interior knots
-    /// `UQ[m-p-i] = c - U[p+i]`, `c = U[0] + U[m]`.
+    /// order and the knots reversed by
+    /// [`reverse_knots`](crate::geom::a_object::reverse_knots) (`NI_ReverseKnots`).
     ///
     /// Errors with `InvalidInput` when the knots do not match the control points as
-    /// upstream indexes them (`n + p + 1 > m`).
+    /// upstream indexes them.
     pub fn reversed(&self) -> Result<Curve> {
         const OP: &str = "nurbs::crv_nurb::Curve::reversed";
         check_short_degree(self.degree(), OP)?;
-        let p = sx(self.degree(), OP)?;
         let n = sx(self.n(), OP)?;
-        let m = sx(self.m(), OP)?;
         let pw = self.cpts();
         let up = self.knots();
         let mut qw = vec![CPoint::default(); self.n() + 1];
         let mut uq = vec![0.0; self.m() + 1];
 
-        // Prepare for reversal.
-        let c = get(up, 0, OP)? + get(up, m, OP)?;
-        for i in 0..=p {
-            set(&mut uq, i, get(up, i, OP)?, OP)?;
-            set(&mut uq, n + i + 1, get(up, n + i + 1, OP)?, OP)?;
-        }
-
         // Reverse curve.
         for i in 0..=n {
             set(&mut qw, i, get(pw, n - i, OP)?, OP)?;
         }
-        let k = m - 2 * p - 1;
-        for i in 1..=k {
-            set(&mut uq, m - p - i, c - get(up, p + i, OP)?, OP)?;
-        }
+        crate::geom::a_object::reverse_knots(up, self.m(), &mut uq)?;
         Curve::new(qw, self.degree(), uq).map_err(|_| oob(OP))
     }
 

@@ -54,7 +54,9 @@
 //! runaway work: well-formed clamped curves (`m = n+p+1`, `1 <= p <= n`, `p <= 17`,
 //! finite data, consistent dimension and rationality, positive weights, bounded
 //! Euclidean points, non-decreasing knots with end multiplicity exactly `p+1` and
-//! interior multiplicity at most `p`), dimensions 1 to 8, a curve without NURB only for
+//! interior multiplicity at most `p`; for `Reverse` also unclamped knots with a
+//! non-empty defined interval `[U[p], U[m-p]]` and no multiplicity above `p+1`, which
+//! 1.0.1's `ReverseParameterization` handles), dimensions 1 to 8, a curve without NURB only for
 //! the op that handles one (`Repeated`), and per op the restrictions
 //! documented on [`validate_op`].
 
@@ -187,8 +189,11 @@ impl CurveInfo {
     }
 }
 
-/// Reads and validates a curve `n p m cpts knots`.
-fn curve(rd: &mut Reader<'_>, dim: usize) -> Result<CurveInfo, FfiError> {
+/// Reads and validates a curve `n p m cpts knots`. With `unclamped_ok` (the `Reverse`
+/// op: 1.0.1's `ReverseParameterization` reverses any knot vector, `NI_ReverseKnots`)
+/// the end knots need not be clamped: the defined interval `[U[p], U[m-p]]` must be
+/// non-empty and no knot repeat more than `p + 1` times.
+fn curve(rd: &mut Reader<'_>, dim: usize, unclamped_ok: bool) -> Result<CurveInfo, FfiError> {
     let n = rd.index(MAX_INDEX)?;
     let p = rd.index(MAX_DEGREE)?;
     let m = rd.index(MAX_INDEX + MAX_DEGREE + 1)?;
@@ -228,6 +233,29 @@ fn curve(rd: &mut Reader<'_>, dim: usize) -> Result<CurveInfo, FfiError> {
     let head = knots.get(..=p).ok_or_else(short)?;
     let tail = knots.get(m - p..).ok_or_else(short)?;
     let inner = knots.get(p + 1..m - p).ok_or_else(short)?;
+    if unclamped_ok {
+        let (Some(&lo), Some(&hi)) = (knots.get(p), knots.get(m - p)) else {
+            return Err(short());
+        };
+        if lo >= hi || hi - lo < 1e-6 * lo.abs().max(hi.abs()) {
+            return Err(bad("curve: defined interval empty or too small"));
+        }
+        let mut run = 1;
+        for w in knots.windows(2) {
+            run = if w.first() == w.last() { run + 1 } else { 1 };
+            if run > p + 1 {
+                return Err(bad("curve: knot multiplicity above p + 1"));
+            }
+        }
+        return Ok(CurveInfo {
+            dim,
+            pts,
+            p,
+            knots: knots.to_vec(),
+            three_d: z0 != NOZ,
+            has_nurb: true,
+        });
+    }
     if a >= b || head.iter().any(|&k| k != a) || tail.iter().any(|&k| k != b) {
         return Err(bad("curve: knots not clamped"));
     }
@@ -256,6 +284,11 @@ fn curve(rd: &mut Reader<'_>, dim: usize) -> Result<CurveInfo, FfiError> {
 
 /// A curve block `has_nurb dim oob [curve]`.
 fn curve_block(rd: &mut Reader<'_>) -> Result<CurveInfo, FfiError> {
+    curve_block_for(rd, false)
+}
+
+/// [`curve_block`], unclamped knots allowed with `unclamped_ok` (see [`curve`]).
+fn curve_block_for(rd: &mut Reader<'_>, unclamped_ok: bool) -> Result<CurveInfo, FfiError> {
     let has = rd.flag()?;
     let dim = rd.index(8)?;
     if dim == 0 {
@@ -263,7 +296,7 @@ fn curve_block(rd: &mut Reader<'_>) -> Result<CurveInfo, FfiError> {
     }
     rd.flag()?;
     if has {
-        curve(rd, dim)
+        curve(rd, dim, unclamped_ok)
     } else {
         Ok(CurveInfo {
             dim,
@@ -588,7 +621,7 @@ pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
     if op.is_static() {
         validate_static(op, &mut rd)?;
     } else {
-        let this = curve_block(&mut rd)?;
+        let this = curve_block_for(&mut rd, op == Op::Reverse)?;
         validate_op(op, &mut rd, &this)?;
     }
     rd.done()

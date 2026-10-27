@@ -2169,7 +2169,7 @@
         ],
         "validate_only": false
       },
-      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:222 my_test_squeeze_edge_tracks_removal"
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:215 my_test_squeeze_edge_tracks_removal"
     },
     {
       "name": "upstream_seams_squeeze_edge_box_stage2_faces_only",
@@ -2212,7 +2212,7 @@
         ],
         "validate_only": false
       },
-      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:222 my_test_squeeze_edge_tracks_removal"
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:215 my_test_squeeze_edge_tracks_removal"
     },
     {
       "name": "replace_initialized_target_kind_3",
@@ -2357,7 +2357,7 @@
           }
         ]
       },
-      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4572 my_test_heal_single_vertex_sphere (Fix_DegenFaces target)"
+      "upstream_ref": "tests/prog_test/src/smHealTest.cpp:407 my_test_heal_single_vertex_sphere (Fix_DegenFaces target)"
     },
     {
       "name": "single_vertex_sphere_rebuild_swap_True",
@@ -2383,7 +2383,7 @@
           }
         ]
       },
-      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4572 my_test_heal_single_vertex_sphere (Fix_DegenFaces target)"
+      "upstream_ref": "tests/prog_test/src/smHealTest.cpp:407 my_test_heal_single_vertex_sphere (Fix_DegenFaces target)"
     }
   ]
 }

@@ -286,8 +286,8 @@ void op_set_params(Rd& rd, std::vector<double>& o)
     ULONG cont = (ULONG)rd.idx();
     double thumb = rd.num();
 
-    // Upstream dereferences a null B-rep (once the list sizes pass, with any edge) and
-    // a null law list (at the first variable-radius edge it reaches). Refuse exactly
+    // Upstream dereferences a null law list (at the first variable-radius edge it
+    // reaches; a null B-rep is refused first by CheckEdgesAreInBrep). Refuse exactly
     // those inputs, following SetFilletParameters' order of early returns; the runner
     // reaches the same points (or defers before them).
     bool null_deref = false;
@@ -298,11 +298,9 @@ void op_set_params(Rd& rd, std::vector<double>& o)
     auto fsg_ok = [](SmFilletSurfaceGeneratorType t) {
         return t == SM_FSG_LINEAR || t == SM_FSG_CIRCULAR || t == SM_FSG_BLEND_CURVE;
     };
-    if (ne > 0 && sizes_ok)
+    if (ne > 0 && has_brep && sizes_ok)
     {
-        if (!has_brep)
-            null_deref = true;
-        else if (!has_laws && (xs.GetSize() != 1 || fsg_ok(xs[0])))
+        if (!has_laws && (xs.GetSize() != 1 || fsg_ok(xs[0])))
         {
             for (ULONG i = 0; i < ne; i++)
             {

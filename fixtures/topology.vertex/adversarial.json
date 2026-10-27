@@ -2,7 +2,7 @@
  "cases": [
   {
    "name": "scale1em06_turn0p0_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -52,7 +52,7 @@
   },
   {
    "name": "scale1em06_turn0p0_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -105,7 +105,7 @@
   },
   {
    "name": "scale1em06_turn0p0_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -155,7 +155,7 @@
   },
   {
    "name": "scale1em06_turn0p49_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -205,7 +205,7 @@
   },
   {
    "name": "scale1em06_turn0p49_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -258,7 +258,7 @@
   },
   {
    "name": "scale1em06_turn0p49_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -308,7 +308,7 @@
   },
   {
    "name": "scale1em06_turn0p51_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -358,7 +358,7 @@
   },
   {
    "name": "scale1em06_turn0p51_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -411,7 +411,7 @@
   },
   {
    "name": "scale1em06_turn0p51_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -461,7 +461,7 @@
   },
   {
    "name": "scale1em06_turn180p0_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -511,7 +511,7 @@
   },
   {
    "name": "scale1em06_turn180p0_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -564,7 +564,7 @@
   },
   {
    "name": "scale1em06_turn180p0_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -614,7 +614,7 @@
   },
   {
    "name": "scale1em06_turn90p0_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -664,7 +664,7 @@
   },
   {
    "name": "scale1em06_turn90p0_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -717,7 +717,7 @@
   },
   {
    "name": "scale1em06_turn90p0_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -767,7 +767,7 @@
   },
   {
    "name": "scale1em06_gaps_g0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -812,7 +812,7 @@
   },
   {
    "name": "scale1em06_setpt_g0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -859,7 +859,7 @@
   },
   {
    "name": "scale1em06_gaps_g1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -904,7 +904,7 @@
   },
   {
    "name": "scale1em06_setpt_g1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -951,7 +951,7 @@
   },
   {
    "name": "scale1em06_face_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -983,7 +983,7 @@
   },
   {
    "name": "scale0p001_turn0p0_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -1033,7 +1033,7 @@
   },
   {
    "name": "scale0p001_turn0p0_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -1086,7 +1086,7 @@
   },
   {
    "name": "scale0p001_turn0p0_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -1136,7 +1136,7 @@
   },
   {
    "name": "scale0p001_turn0p49_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -1186,7 +1186,7 @@
   },
   {
    "name": "scale0p001_turn0p49_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -1239,7 +1239,7 @@
   },
   {
    "name": "scale0p001_turn0p49_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -1289,7 +1289,7 @@
   },
   {
    "name": "scale0p001_turn0p51_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -1339,7 +1339,7 @@
   },
   {
    "name": "scale0p001_turn0p51_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -1392,7 +1392,7 @@
   },
   {
    "name": "scale0p001_turn0p51_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -1442,7 +1442,7 @@
   },
   {
    "name": "scale0p001_turn180p0_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -1492,7 +1492,7 @@
   },
   {
    "name": "scale0p001_turn180p0_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -1545,7 +1545,7 @@
   },
   {
    "name": "scale0p001_turn180p0_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -1595,7 +1595,7 @@
   },
   {
    "name": "scale0p001_turn90p0_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -1645,7 +1645,7 @@
   },
   {
    "name": "scale0p001_turn90p0_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -1698,7 +1698,7 @@
   },
   {
    "name": "scale0p001_turn90p0_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -1748,7 +1748,7 @@
   },
   {
    "name": "scale0p001_gaps_g0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -1793,7 +1793,7 @@
   },
   {
    "name": "scale0p001_setpt_g0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -1840,7 +1840,7 @@
   },
   {
    "name": "scale0p001_gaps_g1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -1885,7 +1885,7 @@
   },
   {
    "name": "scale0p001_setpt_g1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -1932,7 +1932,7 @@
   },
   {
    "name": "scale0p001_face_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -1964,7 +1964,7 @@
   },
   {
    "name": "scale1000p0_turn0p0_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -2014,7 +2014,7 @@
   },
   {
    "name": "scale1000p0_turn0p0_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -2067,7 +2067,7 @@
   },
   {
    "name": "scale1000p0_turn0p0_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -2117,7 +2117,7 @@
   },
   {
    "name": "scale1000p0_turn0p49_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -2167,7 +2167,7 @@
   },
   {
    "name": "scale1000p0_turn0p49_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -2220,7 +2220,7 @@
   },
   {
    "name": "scale1000p0_turn0p49_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -2270,7 +2270,7 @@
   },
   {
    "name": "scale1000p0_turn0p51_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -2320,7 +2320,7 @@
   },
   {
    "name": "scale1000p0_turn0p51_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -2373,7 +2373,7 @@
   },
   {
    "name": "scale1000p0_turn0p51_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -2423,7 +2423,7 @@
   },
   {
    "name": "scale1000p0_turn180p0_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -2473,7 +2473,7 @@
   },
   {
    "name": "scale1000p0_turn180p0_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -2526,7 +2526,7 @@
   },
   {
    "name": "scale1000p0_turn180p0_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -2576,7 +2576,7 @@
   },
   {
    "name": "scale1000p0_turn90p0_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -2626,7 +2626,7 @@
   },
   {
    "name": "scale1000p0_turn90p0_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -2679,7 +2679,7 @@
   },
   {
    "name": "scale1000p0_turn90p0_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -2729,7 +2729,7 @@
   },
   {
    "name": "scale1000p0_gaps_g0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -2774,7 +2774,7 @@
   },
   {
    "name": "scale1000p0_setpt_g0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -2821,7 +2821,7 @@
   },
   {
    "name": "scale1000p0_gaps_g1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -2866,7 +2866,7 @@
   },
   {
    "name": "scale1000p0_setpt_g1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -2913,7 +2913,7 @@
   },
   {
    "name": "scale1000p0_face_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -2945,7 +2945,7 @@
   },
   {
    "name": "scale1000000p0_turn0p0_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -2995,7 +2995,7 @@
   },
   {
    "name": "scale1000000p0_turn0p0_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -3048,7 +3048,7 @@
   },
   {
    "name": "scale1000000p0_turn0p0_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -3098,7 +3098,7 @@
   },
   {
    "name": "scale1000000p0_turn0p49_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -3148,7 +3148,7 @@
   },
   {
    "name": "scale1000000p0_turn0p49_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -3201,7 +3201,7 @@
   },
   {
    "name": "scale1000000p0_turn0p49_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -3251,7 +3251,7 @@
   },
   {
    "name": "scale1000000p0_turn0p51_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -3301,7 +3301,7 @@
   },
   {
    "name": "scale1000000p0_turn0p51_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -3354,7 +3354,7 @@
   },
   {
    "name": "scale1000000p0_turn0p51_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -3404,7 +3404,7 @@
   },
   {
    "name": "scale1000000p0_turn180p0_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -3454,7 +3454,7 @@
   },
   {
    "name": "scale1000000p0_turn180p0_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -3507,7 +3507,7 @@
   },
   {
    "name": "scale1000000p0_turn180p0_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -3557,7 +3557,7 @@
   },
   {
    "name": "scale1000000p0_turn90p0_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -3607,7 +3607,7 @@
   },
   {
    "name": "scale1000000p0_turn90p0_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -3660,7 +3660,7 @@
   },
   {
    "name": "scale1000000p0_turn90p0_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -3710,7 +3710,7 @@
   },
   {
    "name": "scale1000000p0_gaps_g0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -3755,7 +3755,7 @@
   },
   {
    "name": "scale1000000p0_setpt_g0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -3802,7 +3802,7 @@
   },
   {
    "name": "scale1000000p0_gaps_g1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -3847,7 +3847,7 @@
   },
   {
    "name": "scale1000000p0_setpt_g1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -3894,7 +3894,7 @@
   },
   {
    "name": "scale1000000p0_face_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -3926,7 +3926,7 @@
   },
   {
    "name": "zero_len_sml_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -3968,7 +3968,7 @@
   },
   {
    "name": "tiny_sml_v0_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -4036,7 +4036,7 @@
   },
   {
    "name": "tiny_sml_v0_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -4104,7 +4104,7 @@
   },
   {
    "name": "tiny_sml_v0_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -4175,7 +4175,7 @@
   },
   {
    "name": "tiny_sml_v0_common",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -4245,7 +4245,7 @@
   },
   {
    "name": "tiny_sml_v1_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -4313,7 +4313,7 @@
   },
   {
    "name": "tiny_sml_v1_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -4381,7 +4381,7 @@
   },
   {
    "name": "tiny_sml_v1_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -4452,7 +4452,7 @@
   },
   {
    "name": "tiny_sml_v1_common",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -4522,7 +4522,7 @@
   },
   {
    "name": "tiny_sml_v2_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -4590,7 +4590,7 @@
   },
   {
    "name": "tiny_sml_v2_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -4658,7 +4658,7 @@
   },
   {
    "name": "tiny_sml_v2_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -4729,7 +4729,7 @@
   },
   {
    "name": "tiny_sml_v2_common",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -4799,7 +4799,7 @@
   },
   {
    "name": "tiny_sml_v3_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -4867,7 +4867,7 @@
   },
   {
    "name": "tiny_sml_v3_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -4935,7 +4935,7 @@
   },
   {
    "name": "tiny_sml_v3_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -5006,7 +5006,7 @@
   },
   {
    "name": "tiny_sml_v3_common",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -5076,7 +5076,7 @@
   },
   {
    "name": "zero_len_bsl_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -5118,7 +5118,7 @@
   },
   {
    "name": "tiny_bsl_v0_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -5174,7 +5174,7 @@
   },
   {
    "name": "tiny_bsl_v0_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -5230,7 +5230,7 @@
   },
   {
    "name": "tiny_bsl_v0_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -5289,7 +5289,7 @@
   },
   {
    "name": "tiny_bsl_v0_common",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -5347,7 +5347,7 @@
   },
   {
    "name": "tiny_bsl_v1_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -5403,7 +5403,7 @@
   },
   {
    "name": "tiny_bsl_v1_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -5459,7 +5459,7 @@
   },
   {
    "name": "tiny_bsl_v1_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -5518,7 +5518,7 @@
   },
   {
    "name": "tiny_bsl_v1_common",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -5576,7 +5576,7 @@
   },
   {
    "name": "tiny_bsl_v2_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -5632,7 +5632,7 @@
   },
   {
    "name": "tiny_bsl_v2_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -5688,7 +5688,7 @@
   },
   {
    "name": "tiny_bsl_v2_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -5747,7 +5747,7 @@
   },
   {
    "name": "tiny_bsl_v2_common",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -5805,7 +5805,7 @@
   },
   {
    "name": "tiny_bsl_v3_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -5861,7 +5861,7 @@
   },
   {
    "name": "tiny_bsl_v3_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -5917,7 +5917,7 @@
   },
   {
    "name": "tiny_bsl_v3_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -5976,7 +5976,7 @@
   },
   {
    "name": "tiny_bsl_v3_common",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -6034,7 +6034,7 @@
   },
   {
    "name": "point_curve_v0_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -6119,7 +6119,7 @@
   },
   {
    "name": "point_curve_v0_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -6204,7 +6204,7 @@
   },
   {
    "name": "point_curve_v0_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -6292,7 +6292,7 @@
   },
   {
    "name": "point_curve_v0_tan1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -6380,7 +6380,7 @@
   },
   {
    "name": "point_curve_v0_gaps_g0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -6468,7 +6468,7 @@
   },
   {
    "name": "point_curve_v0_gaps_g1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -6556,7 +6556,7 @@
   },
   {
    "name": "point_curve_v1_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -6641,7 +6641,7 @@
   },
   {
    "name": "point_curve_v1_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -6726,7 +6726,7 @@
   },
   {
    "name": "point_curve_v1_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -6814,7 +6814,7 @@
   },
   {
    "name": "point_curve_v1_tan1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -6902,7 +6902,7 @@
   },
   {
    "name": "point_curve_v1_gaps_g0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -6990,7 +6990,7 @@
   },
   {
    "name": "point_curve_v1_gaps_g1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -7078,7 +7078,7 @@
   },
   {
    "name": "point_curve_v2_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -7163,7 +7163,7 @@
   },
   {
    "name": "point_curve_v2_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -7248,7 +7248,7 @@
   },
   {
    "name": "point_curve_v2_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -7336,7 +7336,7 @@
   },
   {
    "name": "point_curve_v2_tan1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -7424,7 +7424,7 @@
   },
   {
    "name": "point_curve_v2_gaps_g0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -7512,7 +7512,7 @@
   },
   {
    "name": "point_curve_v2_gaps_g1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -7600,7 +7600,7 @@
   },
   {
    "name": "point_curve_v3_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -7685,7 +7685,7 @@
   },
   {
    "name": "point_curve_v3_topo",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -7770,7 +7770,7 @@
   },
   {
    "name": "point_curve_v3_tan",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -7858,7 +7858,7 @@
   },
   {
    "name": "point_curve_v3_tan1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -7946,7 +7946,7 @@
   },
   {
    "name": "point_curve_v3_gaps_g0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -8034,7 +8034,7 @@
   },
   {
    "name": "point_curve_v3_gaps_g1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "chain",
@@ -8122,7 +8122,7 @@
   },
   {
    "name": "settol0_l0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -8137,7 +8137,7 @@
   },
   {
    "name": "settol0_l1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -8152,7 +8152,7 @@
   },
   {
    "name": "settol1_l0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -8167,7 +8167,7 @@
   },
   {
    "name": "settol1_l1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -8182,7 +8182,7 @@
   },
   {
    "name": "settol2_l0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -8197,7 +8197,7 @@
   },
   {
    "name": "settol2_l1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -8212,7 +8212,7 @@
   },
   {
    "name": "settol3_l0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -8227,7 +8227,7 @@
   },
   {
    "name": "settol3_l1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -8242,7 +8242,7 @@
   },
   {
    "name": "settol4_l0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -8257,7 +8257,7 @@
   },
   {
    "name": "settol4_l1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -8272,7 +8272,7 @@
   },
   {
    "name": "settol5_l0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -8287,7 +8287,7 @@
   },
   {
    "name": "settol5_l1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -8302,7 +8302,7 @@
   },
   {
    "name": "settol6_l0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -8317,7 +8317,7 @@
   },
   {
    "name": "settol6_l1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -8332,7 +8332,7 @@
   },
   {
    "name": "settol7_l0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -8347,7 +8347,7 @@
   },
   {
    "name": "settol7_l1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -8362,7 +8362,7 @@
   },
   {
    "name": "settol8_l0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -8377,7 +8377,7 @@
   },
   {
    "name": "settol8_l1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3767",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3216",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -8644,7 +8644,7 @@
   },
   {
    "name": "notify0_net",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -8685,7 +8685,7 @@
   },
   {
    "name": "notify1_net",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -8726,7 +8726,7 @@
   },
   {
    "name": "notify2_net",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -8767,7 +8767,7 @@
   },
   {
    "name": "notify3_net",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -8808,7 +8808,7 @@
   },
   {
    "name": "notify4_net",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -8849,7 +8849,7 @@
   },
   {
    "name": "notify5_net",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -8890,7 +8890,7 @@
   },
   {
    "name": "notify6_net",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -8931,7 +8931,7 @@
   },
   {
    "name": "notify7_net",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -8972,7 +8972,7 @@
   },
   {
    "name": "notify8_net",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -9013,7 +9013,7 @@
   },
   {
    "name": "notify9_net",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -9054,7 +9054,7 @@
   },
   {
    "name": "notify10_net",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -9095,7 +9095,7 @@
   },
   {
    "name": "notify11_net",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -9136,7 +9136,7 @@
   },
   {
    "name": "notify12_net",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -9177,7 +9177,7 @@
   },
   {
    "name": "notify13_net",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -9218,7 +9218,7 @@
   },
   {
    "name": "notify14_net",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -9259,7 +9259,7 @@
   },
   {
    "name": "notify15_net",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "network"
@@ -9300,7 +9300,7 @@
   },
   {
    "name": "notify16_net",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "network"

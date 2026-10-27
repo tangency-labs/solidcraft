@@ -354,6 +354,7 @@ fn geometry_rust(g: &Geometry) -> Output {
     use solidcore::curve::curve::Curve;
     use solidcore::geom::extent1d::Extent1d;
     use solidcore::geom::extent2d::Extent2d;
+    use solidcore::geom::extent3d::Extent3d;
     use solidcore::kernel::Kernel;
     use solidcore::mass::integrator::properties as props;
     use solidcore::math::{Vec2, Vec3};
@@ -535,6 +536,15 @@ fn geometry_rust(g: &Geometry) -> Output {
                     });
                 }
                 let estimated_area = it.next().ok_or_else(|| SolidError::sm_err("bbox export"))?;
+                let mut face_box = [0.0; 6];
+                for v in &mut face_box {
+                    *v = it
+                        .next()
+                        .ok_or_else(|| SolidError::sm_err("face box export"))?;
+                }
+                let [x0, y0, z0, x1, y1, z1] = face_box;
+                let face_box =
+                    Extent3d::from_points(Vec3::new(x0, y0, z0), Vec3::new(x1, y1, z1));
                 let u0 = it
                     .next()
                     .ok_or_else(|| SolidError::sm_err("domain export"))?;
@@ -618,6 +628,7 @@ fn geometry_rust(g: &Geometry) -> Output {
                     &surface,
                     &curves,
                     &domain,
+                    &face_box,
                     if p[14] == 0.0 {
                         OrientType::Same
                     } else {

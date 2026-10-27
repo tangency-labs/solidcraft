@@ -128,7 +128,7 @@ mod tests {
     #[test]
     fn part_container_is_rejected_before_native_fixture_loading() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../upstream/TestFiles/pt_TestFiles/SmallBox.smb");
+            .join("../../upstream/TestFiles/pt_TestFiles/SmallBox.smp");
         let request = Request {
             op: 4,
             selector: 0,

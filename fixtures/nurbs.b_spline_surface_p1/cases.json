@@ -1733,7 +1733,7 @@
   },
   {
    "name": "cone_quarter_cylinder",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:471",
+   "upstream_ref": "tests/prog_test/src/smHealTest.cpp:68",
    "inputs": {
     "op": "cone",
     "frame": [
@@ -1763,7 +1763,7 @@
   },
   {
    "name": "cone_seam_frame",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:478",
+   "upstream_ref": "tests/prog_test/src/smHealTest.cpp:75",
    "inputs": {
     "op": "cone",
     "frame": [
@@ -1793,7 +1793,7 @@
   },
   {
    "name": "cone_10_5_half",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:701",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:436",
    "inputs": {
     "op": "cone",
     "frame": [

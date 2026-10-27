@@ -37,6 +37,7 @@
 //! | [`BooleanOperation`]                   | `SmBooleanOperationType`                              |
 //! | [`cpt_to_pt_euclid_specialized`]       | `NI_CPtToPtEuclid_specialized`                        |
 //! | [`vector_blend_cpt_specialized`]       | `NI_VectorBlendCPt_specialized`                       |
+//! | [`reverse_knots`]                      | `NI_ReverseKnots`                                     |
 //!
 //! Deviations:
 //! - **Object model.** There is no class hierarchy: an attributed object is an
@@ -1141,6 +1142,42 @@ pub fn vector_blend_cpt_specialized(
     let z = if noz { NOZ } else { bw.z + alpha * aw.z };
     let w = if now { NOW } else { bw.w + alpha * aw.w };
     CPoint::new(x, y, z, w)
+}
+
+/// `NI_ReverseKnots`: the knots `u[0..=m]` reversed, `v[i] = u[0] + u[m] - u[m - i]`,
+/// with the end values swapped exactly (a knot equal to `u[m]` becomes `u[0]` and one
+/// equal to `u[0]` becomes `u[m]`), so a clamped end block is copied bit for bit and only
+/// the other knots go through the subtraction. `v` may hold the same values as `u` (the
+/// in-place form): each pair is read before it is written.
+///
+/// # Errors
+///
+/// `InvalidInput` when `u` or `v` has fewer than `m + 1` knots.
+pub fn reverse_knots(u: &[f64], m: usize, v: &mut [f64]) -> Result<()> {
+    const OP: &str = "geom::a_object::reverse_knots";
+    let short = || SolidError::invalid_input(OP, "fewer than m + 1 knots");
+    if u.len() <= m || v.len() <= m {
+        return Err(short());
+    }
+    let u0 = *u.first().ok_or_else(short)?;
+    let um = *u.get(m).ok_or_else(short)?;
+    let c = u0 + um;
+    let rev = |x: f64| {
+        if x == um {
+            u0
+        } else if x == u0 {
+            um
+        } else {
+            c - x
+        }
+    };
+    for i in 0..=m / 2 {
+        let a = *u.get(i).ok_or_else(short)?;
+        let b = *u.get(m - i).ok_or_else(short)?;
+        *v.get_mut(i).ok_or_else(short)? = rev(b);
+        *v.get_mut(m - i).ok_or_else(short)? = rev(a);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

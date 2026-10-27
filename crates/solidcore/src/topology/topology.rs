@@ -36,7 +36,8 @@
 //! | [`TrackTopologyChanges`]                     | `SmTrackTopologyChanges`                         |
 //! | [`TrackTopologyChanges::new`]                | `SmTrackTopologyChanges::SmTrackTopologyChanges` |
 //! | [`TrackTopologyChanges::start_tracking`]     | `SmTrackTopologyChanges::StartTracking`          |
-//! | [`TrackTopologyChanges::stop_tracking`]      | `SmTrackTopologyChanges::StopTracking`           |
+//! | [`TrackTopologyChanges::stop_tracking`], [`TrackTopologyChanges::stop_tracking_with_brep`] | `SmTrackTopologyChanges::StopTracking` |
+//! | [`TopologyChangeLists::record_dependencies`] | `SmTopologyChangeCallback::RecordDependencies`   |
 //! | [`TrackTopologyChanges::is_tracking`]        | `SmTrackTopologyChanges::IsTracking`             |
 //! | [`TrackTopologyChanges::rm_list`], [`TrackTopologyChanges::add_list`] | `SmTrackTopologyChanges::GetRmList`, `GetAddList` |
 //! | [`TrackTopologyChanges::reset_arrays`]       | `SmTrackTopologyChanges::ReSetArrays`            |
@@ -80,6 +81,10 @@
 //!   keeps captured events alive across callback replacement, matches active reset
 //!   and keeps `Kernel: Send`; getters return owned snapshots. `Dump` and debug
 //!   index arrays remain omitted.
+//! - **`RecordDependencies`** runs on the tracker's lists, which hold notification
+//!   keys: the caller translates keys and B-rep entities. `StopTracking` without the
+//!   B-rep ([`TrackTopologyChanges::stop_tracking`], [`TrackTopologyChanges::finish`])
+//!   records none; [`TrackTopologyChanges::stop_tracking_with_brep`] is the full one.
 //! - `AssertValid`, `CheckPointerChain`, `Dump`, the obsolete `NewMark*` / `Mark2`
 //!   helpers, `UnMark`, `IsUnMarked`, `IsMarkLocked`, the flag bit helpers and the
 //!   placement `operator new` / `delete` are not part of this unit.
@@ -87,13 +92,14 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use crate::error::{Result, SolidError};
+use crate::error::{EntityRef, Result, SolidError};
 use crate::geom::a_object;
 use crate::geom::attribute::{AttributeStore, ObjectKey};
 use crate::geom::context::{Context, MarkType, NotifyCallback};
 use crate::geom::object::{NotifyOperation, ObjectRef};
 use crate::geom::tol;
-use crate::topology::BrepId;
+use crate::topology::brep::p1::is_live_topology_member;
+use crate::topology::{edge, vertex, Brep, BrepId, EdgeId, FaceId};
 
 /// `SmTopology_TYPE` (`TOPO_BASE_TYPE + 1`).
 pub const TYPE: i64 = 16001;
@@ -483,7 +489,7 @@ pub struct TopologyChangeLists {
     pub rm_list: Vec<ObjectKey>,
     /// Objects added and not removed since.
     pub add_list: Vec<ObjectKey>,
-    /// Objects whose geometry changed.
+    /// Objects whose geometry changed: diagnostics only, they request no healing.
     pub chg_list: Vec<ObjectKey>,
     /// The events that changed the lists.
     pub notify_events: Vec<NotifyEvent>,
@@ -497,6 +503,68 @@ impl TopologyChangeLists {
         self.add_list.clear();
         self.chg_list.clear();
         self.notify_events.clear();
+    }
+
+    /// `SmTopologyChangeCallback::RecordDependencies(pBrep)`: after a completed edit,
+    /// every live vertex or edge on the add list (and every edge reached from such a
+    /// vertex) puts its connected edges and faces on both the remove and the add list,
+    /// so their properties are replaced. The change list stays diagnostic; removed
+    /// handles are never traversed. `entity_of` names a key's entity of `b` (`None`:
+    /// not a live member), `key_of` the key of an entity.
+    ///
+    /// # Errors
+    ///
+    /// Those of the vertex and edge queries.
+    pub fn record_dependencies(
+        &mut self,
+        b: &Brep,
+        entity_of: &dyn Fn(ObjectKey) -> Option<EntityRef>,
+        key_of: &dyn Fn(EntityRef) -> ObjectKey,
+    ) -> Result<()> {
+        let mut targets: Vec<ObjectKey> = Vec::new();
+        for &key in &self.add_list {
+            if !targets.contains(&key) {
+                targets.push(key);
+            }
+        }
+        let mut target = 0;
+        while let Some(&key) = targets.get(target) {
+            target += 1;
+            let entity = entity_of(key);
+            if !is_live_topology_member(b, entity) {
+                continue;
+            }
+
+            let mut edges: Vec<EdgeId> = Vec::new();
+            let mut faces: Vec<FaceId> = Vec::new();
+            match entity {
+                Some(EntityRef::Vertex(v)) => {
+                    edges = vertex::edges(b, v, None)?;
+                    faces = vertex::faces(b, v)?;
+                }
+                Some(EntityRef::Edge(e)) => faces = edge::faces(b, e, None)?,
+                _ => {}
+            }
+
+            for e in edges {
+                let key = key_of(EntityRef::Edge(e));
+                push_unique(&mut self.rm_list, key);
+                push_unique(&mut self.add_list, key);
+                push_unique(&mut targets, key);
+            }
+            for f in faces {
+                let key = key_of(EntityRef::Face(f));
+                push_unique(&mut self.rm_list, key);
+                push_unique(&mut self.add_list, key);
+            }
+        }
+        Ok(())
+    }
+}
+
+fn push_unique(list: &mut Vec<ObjectKey>, key: ObjectKey) {
+    if !list.contains(&key) {
+        list.push(key);
     }
 }
 
@@ -867,7 +935,9 @@ impl TrackTopologyChanges {
 
     /// When the B-rep and its context exist and this tracker found no callback
     /// installed when it started, clears the context's system notify callback
-    /// (`StopTracking`); otherwise does nothing (upstream asserts).
+    /// (`StopTracking`); otherwise does nothing (upstream asserts). Without the B-rep
+    /// no dependencies are recorded: [`TrackTopologyChanges::stop_tracking_with_brep`]
+    /// is the full `StopTracking`.
     pub fn stop_tracking(&mut self, context: Option<&mut Context>) {
         // when m_pBrep and its Context exist
         if let (Some(_), Some(context)) = (self.brep, context) {
@@ -877,6 +947,39 @@ impl TrackTopologyChanges {
                 context.set_sys_notify_callback(None);
             }
         }
+    }
+
+    /// `StopTracking` with the tracked B-rep `b`: [`TrackTopologyChanges::stop_tracking`],
+    /// then, when this tracker had installed the callback, its lists record the
+    /// dependencies of the completed edit ([`TopologyChangeLists::record_dependencies`];
+    /// notifications can occur midway through rewiring edge uses, so they are traversed
+    /// only now). `entity_of` / `key_of` translate the notification keys.
+    ///
+    /// # Errors
+    ///
+    /// Those of [`TopologyChangeLists::record_dependencies`].
+    pub fn stop_tracking_with_brep(
+        &mut self,
+        context: Option<&mut Context>,
+        b: &Brep,
+        entity_of: &dyn Fn(ObjectKey) -> Option<EntityRef>,
+        key_of: &dyn Fn(EntityRef) -> ObjectKey,
+    ) -> Result<()> {
+        // when m_pBrep and its Context exist
+        if let (Some(_), Some(context)) = (self.brep, context) {
+            // when LastNotifyCallback was NULL (it was turned on by this object)
+            if !self.last_notify_callback {
+                // turn off SmObject::Notify() tracking
+                context.set_sys_notify_callback(None);
+
+                // Notifications can occur midway through rewiring edgeuses. Traverse
+                // dependencies only now, after the caller has completed its edit.
+                change_state(&self.state)
+                    .lists
+                    .record_dependencies(b, entity_of, key_of)?;
+            }
+        }
+        Ok(())
     }
 
     /// Removed identities (which can be stale), captured even if a foreign
@@ -929,6 +1032,144 @@ impl TrackTopologyChanges {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A test key per entity: `kind * 1_000_000 + index` (vertex 1, edge 2, face 3).
+    fn dep_key(e: EntityRef) -> ObjectKey {
+        match e {
+            EntityRef::Vertex(v) => ObjectKey(1_000_000 + u64::from(v.index())),
+            EntityRef::Edge(x) => ObjectKey(2_000_000 + u64::from(x.index())),
+            EntityRef::Face(f) => ObjectKey(3_000_000 + u64::from(f.index())),
+            _ => ObjectKey(0),
+        }
+    }
+
+    fn dep_entity(key: ObjectKey) -> Option<EntityRef> {
+        let i = u32::try_from(key.0 % 1_000_000).ok()?;
+        match key.0 / 1_000_000 {
+            1 => Some(EntityRef::Vertex(crate::topology::VertexId::from_index(i))),
+            2 => Some(EntityRef::Edge(EdgeId::from_index(i))),
+            3 => Some(EntityRef::Face(FaceId::from_index(i))),
+            _ => None,
+        }
+    }
+
+    /// `StopTracking` after a tracked `MakeVertexSplitEdge` of a box edge: the split
+    /// vertex's two edges and the faces around it are recorded for replacement.
+    #[test]
+    fn stop_tracking_records_the_dependencies_of_an_edge_split() {
+        use crate::topology::brep::p3 as brep_p3;
+        use crate::topology::brep::p9;
+        let mut k = crate::kernel::Kernel::default();
+        let mut b = crate::primitive::api_primitives::create_box(
+            &mut k,
+            crate::math::Point3::new(0.0, 0.0, 0.0),
+            1.0,
+            2.0,
+            3.0,
+        )
+        .unwrap();
+        b.set_editing_enabled(true);
+        let e = b.edge_list()[0];
+        let ivl = b.edge(e).unwrap().interval;
+        let faces = edge::faces(&b, e, None).unwrap();
+        assert_eq!(faces.len(), 2);
+
+        let (split, lists, failure) = brep_p3::with_lent_context(&mut k, |k, ctx| {
+            let mut tracker =
+                TrackTopologyChanges::new(Some(BrepId::from_index(0)), 7, true, Some(&mut *ctx));
+            let split = brep_p3::kernel_named_edit(k, ctx, &mut b, |k, b, env| {
+                p9::make_vertex_split_edge_with_curve_identity(
+                    k,
+                    b,
+                    e,
+                    ivl.mid(),
+                    env,
+                    p9::CurveIdentity::Actual(&p9::issue_curve_identity),
+                )
+            })
+            .unwrap();
+            let serial = b.notify_serial().unwrap();
+            tracker
+                .stop_tracking_with_brep(
+                    Some(&mut *ctx),
+                    &b,
+                    &|key| brep_p3::topology_entity(serial, key),
+                    &|x| brep_p3::topology_ref(serial, x).key,
+                )
+                .unwrap();
+            let lists = tracker.lists();
+            let failure = tracker.failure();
+            tracker.finish(Some(ctx));
+            (split, lists, failure)
+        })
+        .unwrap();
+        assert!(failure.is_none());
+        assert!(split.split);
+        let serial = b.notify_serial().unwrap();
+        let key = |x| brep_p3::topology_ref(serial, x).key;
+        let [e1, e2] = split.edges.unwrap();
+        for x in [EntityRef::Edge(e1), EntityRef::Edge(e2)]
+            .into_iter()
+            .chain(faces.iter().map(|&f| EntityRef::Face(f)))
+        {
+            assert!(lists.rm_list.contains(&key(x)), "{x:?} not removed");
+            assert!(lists.add_list.contains(&key(x)), "{x:?} not added");
+        }
+    }
+
+    #[test]
+    fn record_dependencies_adds_a_box_vertex_s_edges_and_faces() {
+        let mut k = crate::kernel::Kernel::default();
+        let b = crate::primitive::api_primitives::create_box(
+            &mut k,
+            crate::math::Point3::new(0.0, 0.0, 0.0),
+            1.0,
+            2.0,
+            3.0,
+        )
+        .unwrap();
+        let v = b.vertex_list()[0];
+        let edges = vertex::edges(&b, v, None).unwrap();
+        let faces = vertex::faces(&b, v).unwrap();
+        assert_eq!((edges.len(), faces.len()), (3, 3));
+
+        // an added vertex and a stale key (no live entity)
+        let stale = ObjectKey(9_000_000);
+        let mut lists = TopologyChangeLists {
+            add_list: vec![dep_key(EntityRef::Vertex(v)), stale],
+            ..TopologyChangeLists::default()
+        };
+        lists
+            .record_dependencies(&b, &dep_entity, &dep_key)
+            .unwrap();
+
+        // edges first (each also a target, whose faces are already listed), then faces
+        let mut expected: Vec<ObjectKey> =
+            edges.iter().map(|&e| dep_key(EntityRef::Edge(e))).collect();
+        expected.extend(faces.iter().map(|&f| dep_key(EntityRef::Face(f))));
+        assert_eq!(lists.rm_list, expected);
+        let mut added = vec![dep_key(EntityRef::Vertex(v)), stale];
+        added.extend(expected.iter().copied());
+        assert_eq!(lists.add_list, added);
+        assert!(lists.chg_list.is_empty() && lists.notify_events.is_empty());
+
+        // an added edge records only its two faces
+        let e = edges[0];
+        let mut lists = TopologyChangeLists {
+            add_list: vec![dep_key(EntityRef::Edge(e))],
+            ..TopologyChangeLists::default()
+        };
+        lists
+            .record_dependencies(&b, &dep_entity, &dep_key)
+            .unwrap();
+        let edge_faces: Vec<ObjectKey> = edge::faces(&b, e, None)
+            .unwrap()
+            .into_iter()
+            .map(|f| dep_key(EntityRef::Face(f)))
+            .collect();
+        assert_eq!(edge_faces.len(), 2);
+        assert_eq!(lists.rm_list, edge_faces);
+    }
 
     fn r(k: u64) -> ObjectRef {
         ObjectRef {

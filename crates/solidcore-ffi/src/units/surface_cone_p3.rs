@@ -318,8 +318,8 @@ mod tests {
         let a = cone();
         let mut b = cone();
         b[16] = 1.0;
-        // SmCylinder_TYPE falls through the native global switch into the
-        // general intersector; it never dereferences the analytic tolerance.
+        // SmCylinder_TYPE reaches IntersectWithCone through the native global
+        // switch; the tolerance guard applies only when both are cylinders.
         assert!(intersect(3, &a, &b, &DOMAINS, None, false).is_ok());
     }
 

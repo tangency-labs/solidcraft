@@ -70,10 +70,6 @@
 //!   `SM_NO_GET_BREP(this)`, which is `NULL` in the reference build.
 //! - **Attributes.** `GetVertexuses(list, &id)` is [`vertexuses_with_attribute`], which
 //!   takes the attribute store and each use's identity from the caller.
-//! - **`GetVertexuseOfFace`** ignores its face (upstream's face test is commented out
-//!   with the composite face code): it returns the first vertex use of any face whose
-//!   face use is that face's upward face use, else the last vertex use with a face use
-//!   (`plan/upstream-issues.md`). Ported as written.
 //! - **Unported callees.** The gap evaluations reached through the vertex uses
 //!   (`heal.gap`, surface units) return [`SolidError::Unported`].
 //! - **Co-ports.** The small `SmEdge` and `SmLoopuse` accessors this unit reaches are
@@ -461,9 +457,8 @@ pub fn loop_vertices(b: &Brep, l: LoopId) -> Result<Vec<Option<VertexId>>> {
 
 // ---- vertex uses of a face or edge -------------------------------------------------------
 
-/// `GetVertexuseOfFace`: `None` for no face; else, ignoring the face (see the module
-/// docs), the first vertex use whose face use is its face's upward face use, or the
-/// last vertex use with a face use.
+/// `GetVertexuseOfFace`: `None` for no face; else the first vertex use on `face`'s
+/// upward face use, or the last vertex use on `face`.
 ///
 /// # Errors
 ///
@@ -482,7 +477,7 @@ pub fn vertexuse_of_face(
         return Ok(ret);
     }
 
-    // for every Vertexuse - check for a face == pFace match (commented out upstream)
+    // for every Vertexuse - check for a face == pFace match
     for vu in vertexuses(b, v)? {
         // skip vertices not connected to a Face
         let Some(fu) = vertexuse::faceuse(b, vu)? else {
@@ -490,14 +485,14 @@ pub fn vertexuse_of_face(
         };
         let this_face = b.faceuse(fu)?.face;
 
-        // remember any found Vertexuses
-        ret = Some(vu);
+        if let Some(this_face) = this_face.filter(|&f| Some(f) == face) {
+            // remember any found Vertexuses
+            ret = Some(vu);
 
-        // Use the first Vertexuse found on an upward Faceuse.
-        let this_face =
-            this_face.ok_or_else(|| null("GetVertexuseOfFace: face use without face"))?;
-        if crate::topology::face::p2::upward_faceuse(b, this_face)? == Some(fu) {
-            break;
+            // Use the first Vertexuse found on an upward Faceuse.
+            if crate::topology::face::p2::upward_faceuse(b, this_face)? == Some(fu) {
+                break;
+            }
         }
     }
 

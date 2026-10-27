@@ -1547,7 +1547,7 @@
   },
   {
    "name": "join0_simple",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "simple",
     "c1": {
@@ -1605,7 +1605,7 @@
   },
   {
    "name": "join0_max_dist",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "max_dist",
     "c1": {
@@ -1660,7 +1660,7 @@
   },
   {
    "name": "join0_drop_common",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "drop_point",
     "curve": {
@@ -1700,7 +1700,7 @@
   },
   {
    "name": "join0_gps_step",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "gps_step",
     "curve": {
@@ -1740,7 +1740,7 @@
   },
   {
    "name": "join1_simple",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "simple",
     "c1": {
@@ -1798,7 +1798,7 @@
   },
   {
    "name": "join1_max_dist",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "max_dist",
     "c1": {
@@ -1853,7 +1853,7 @@
   },
   {
    "name": "join1_drop_common",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "drop_point",
     "curve": {
@@ -1893,7 +1893,7 @@
   },
   {
    "name": "join1_gps_step",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "gps_step",
     "curve": {
@@ -1933,7 +1933,7 @@
   },
   {
    "name": "join2_simple",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "simple",
     "c1": {
@@ -1991,7 +1991,7 @@
   },
   {
    "name": "join2_max_dist",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "max_dist",
     "c1": {
@@ -2046,7 +2046,7 @@
   },
   {
    "name": "join2_drop_common",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "drop_point",
     "curve": {
@@ -2086,7 +2086,7 @@
   },
   {
    "name": "join2_gps_step",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "gps_step",
     "curve": {
@@ -2126,7 +2126,7 @@
   },
   {
    "name": "join3_simple",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "simple",
     "c1": {
@@ -2184,7 +2184,7 @@
   },
   {
    "name": "join3_max_dist",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "max_dist",
     "c1": {
@@ -2239,7 +2239,7 @@
   },
   {
    "name": "join3_drop_common",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "drop_point",
     "curve": {
@@ -2279,7 +2279,7 @@
   },
   {
    "name": "join3_gps_step",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "gps_step",
     "curve": {
@@ -2319,7 +2319,7 @@
   },
   {
    "name": "join4_simple",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "simple",
     "c1": {
@@ -2377,7 +2377,7 @@
   },
   {
    "name": "join4_max_dist",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "max_dist",
     "c1": {
@@ -2432,7 +2432,7 @@
   },
   {
    "name": "join4_drop_common",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "drop_point",
     "curve": {
@@ -2472,7 +2472,7 @@
   },
   {
    "name": "join4_gps_step",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "gps_step",
     "curve": {
@@ -2512,7 +2512,7 @@
   },
   {
    "name": "join5_simple",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "simple",
     "c1": {
@@ -2570,7 +2570,7 @@
   },
   {
    "name": "join5_max_dist",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "max_dist",
     "c1": {
@@ -2625,7 +2625,7 @@
   },
   {
    "name": "join5_drop_common",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "drop_point",
     "curve": {
@@ -2665,7 +2665,7 @@
   },
   {
    "name": "join5_gps_step",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "gps_step",
     "curve": {
@@ -2705,7 +2705,7 @@
   },
   {
    "name": "join6_simple",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "simple",
     "c1": {
@@ -2763,7 +2763,7 @@
   },
   {
    "name": "join6_max_dist",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "max_dist",
     "c1": {
@@ -2818,7 +2818,7 @@
   },
   {
    "name": "join6_drop_common",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "drop_point",
     "curve": {
@@ -2858,7 +2858,7 @@
   },
   {
    "name": "join6_gps_step",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "gps_step",
     "curve": {
@@ -2898,7 +2898,7 @@
   },
   {
    "name": "join7_simple",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "simple",
     "c1": {
@@ -2956,7 +2956,7 @@
   },
   {
    "name": "join7_max_dist",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "max_dist",
     "c1": {
@@ -3011,7 +3011,7 @@
   },
   {
    "name": "join7_drop_common",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "drop_point",
     "curve": {
@@ -3051,7 +3051,7 @@
   },
   {
    "name": "join7_gps_step",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "gps_step",
     "curve": {
@@ -3091,7 +3091,7 @@
   },
   {
    "name": "join8_simple",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "simple",
     "c1": {
@@ -3149,7 +3149,7 @@
   },
   {
    "name": "join8_max_dist",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "max_dist",
     "c1": {
@@ -3204,7 +3204,7 @@
   },
   {
    "name": "join8_drop_common",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "drop_point",
     "curve": {
@@ -3244,7 +3244,7 @@
   },
   {
    "name": "join8_gps_step",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "gps_step",
     "curve": {
@@ -3284,7 +3284,7 @@
   },
   {
    "name": "join9_simple",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "simple",
     "c1": {
@@ -3342,7 +3342,7 @@
   },
   {
    "name": "join9_max_dist",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "max_dist",
     "c1": {
@@ -3397,7 +3397,7 @@
   },
   {
    "name": "join9_drop_common",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "drop_point",
     "curve": {
@@ -3437,7 +3437,7 @@
   },
   {
    "name": "join9_gps_step",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "gps_step",
     "curve": {
@@ -3477,7 +3477,7 @@
   },
   {
    "name": "join10_simple",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "simple",
     "c1": {
@@ -3535,7 +3535,7 @@
   },
   {
    "name": "join10_max_dist",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "max_dist",
     "c1": {
@@ -3590,7 +3590,7 @@
   },
   {
    "name": "join10_drop_common",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "drop_point",
     "curve": {
@@ -3630,7 +3630,7 @@
   },
   {
    "name": "join10_gps_step",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "gps_step",
     "curve": {
@@ -3670,7 +3670,7 @@
   },
   {
    "name": "join11_simple",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "simple",
     "c1": {
@@ -3728,7 +3728,7 @@
   },
   {
    "name": "join11_max_dist",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "max_dist",
     "c1": {
@@ -3783,7 +3783,7 @@
   },
   {
    "name": "join11_drop_common",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "drop_point",
     "curve": {
@@ -3823,7 +3823,7 @@
   },
   {
    "name": "join11_gps_step",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "gps_step",
     "curve": {
@@ -3863,7 +3863,7 @@
   },
   {
    "name": "join12_simple",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "simple",
     "c1": {
@@ -3921,7 +3921,7 @@
   },
   {
    "name": "join12_max_dist",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "max_dist",
     "c1": {
@@ -3976,7 +3976,7 @@
   },
   {
    "name": "join12_drop_common",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "drop_point",
     "curve": {
@@ -4016,7 +4016,7 @@
   },
   {
    "name": "join12_gps_step",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "gps_step",
     "curve": {
@@ -4056,7 +4056,7 @@
   },
   {
    "name": "join13_simple",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "simple",
     "c1": {
@@ -4114,7 +4114,7 @@
   },
   {
    "name": "join13_max_dist",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "max_dist",
     "c1": {
@@ -4169,7 +4169,7 @@
   },
   {
    "name": "join13_drop_common",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "drop_point",
     "curve": {
@@ -4209,7 +4209,7 @@
   },
   {
    "name": "join13_gps_step",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "gps_step",
     "curve": {
@@ -4249,7 +4249,7 @@
   },
   {
    "name": "join14_simple",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "simple",
     "c1": {
@@ -4307,7 +4307,7 @@
   },
   {
    "name": "join14_max_dist",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "max_dist",
     "c1": {
@@ -4362,7 +4362,7 @@
   },
   {
    "name": "join14_drop_common",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "drop_point",
     "curve": {
@@ -4402,7 +4402,7 @@
   },
   {
    "name": "join14_gps_step",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "gps_step",
     "curve": {
@@ -4442,7 +4442,7 @@
   },
   {
    "name": "join15_simple",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "simple",
     "c1": {
@@ -4500,7 +4500,7 @@
   },
   {
    "name": "join15_max_dist",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "max_dist",
     "c1": {
@@ -4555,7 +4555,7 @@
   },
   {
    "name": "join15_drop_common",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "drop_point",
     "curve": {
@@ -4595,7 +4595,7 @@
   },
   {
    "name": "join15_gps_step",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3858 (my_test_reversed_line_join line pairs, before the join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3307 (my_test_reversed_line_join line pairs, before the join)",
    "inputs": {
     "op": "gps_step",
     "curve": {

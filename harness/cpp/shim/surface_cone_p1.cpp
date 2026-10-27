@@ -13,7 +13,7 @@
 // One entry point, sc_surface_cone_p1_eval(op, in, n_in, out, cap, out_len). Layouts are
 // documented in crates/solidcore-ffi/src/units/surface_cone_p1.rs, which validates every
 // input so upstream only touches valid memory. Statuses are written raw (SM_SUCCESS is
-// 1000; sm_TotalCoincidenceChecker can return 0).
+// 1000).
 #include "sc_shim.h"
 
 #include "StdAfx.h"
@@ -98,14 +98,14 @@ SmStatus sm_TotalCoincidenceChecker(
           rbReversed = FALSE;
           return SM_SUCCESS;
       }
-      dDist_E_S = sPt01.DistanceBetween( sPt11 );
+      dDist_E_S = sPt01.DistanceBetween( sPt10 );
       if ( dDist_S_E < sApproxTol3d && dDist_E_S < sApproxTol3d )
       {
           rbAreCoinc = TRUE;
           rbReversed = TRUE;
           return SM_SUCCESS;
       }
-      return FALSE;
+      return SM_SUCCESS;
   }
 
   // Not a line.  If not a circle, return no coincidence.

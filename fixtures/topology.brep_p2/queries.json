@@ -68,7 +68,7 @@
   },
   {
    "name": "query_wire_0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -121,7 +121,7 @@
   },
   {
    "name": "query_wire_1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -174,7 +174,7 @@
   },
   {
    "name": "query_wire_2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -227,7 +227,7 @@
   },
   {
    "name": "query_wire_3",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -280,7 +280,7 @@
   },
   {
    "name": "query_wire_4",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -333,7 +333,7 @@
   },
   {
    "name": "query_wire_5",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -386,7 +386,7 @@
   },
   {
    "name": "query_plane10_0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -417,7 +417,7 @@
   },
   {
    "name": "query_plane10_1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -448,7 +448,7 @@
   },
   {
    "name": "query_plane10_2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -479,7 +479,7 @@
   },
   {
    "name": "query_plane10_3",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -510,7 +510,7 @@
   },
   {
    "name": "query_plane10_4",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",
@@ -541,7 +541,7 @@
   },
   {
    "name": "query_plane10_5",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1640",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1372",
    "inputs": {
     "brep": {
      "kind": "face",

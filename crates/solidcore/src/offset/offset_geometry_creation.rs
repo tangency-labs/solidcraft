@@ -3144,7 +3144,9 @@ impl OffsetGeometryCreation {
 
     /// `EdgeuseOffset(ctx, exec, cpOriginalEdgeuse, cpOtherOriginalEdgeuse,
     /// cpOffsetEdgeuse, cpOtherOffsetEdgeuse, ..)`: the cap surface of an edge of the
-    /// offset. When the executive extends convex edges, lamina and tangent edges are
+    /// offset. A tangent edge between an offset face and a shell face whose offset edge
+    /// uses leave gaps is always bridged by a cap below. Otherwise, when the executive
+    /// extends convex edges, lamina and tangent edges are
     /// extended/trimmed (`ExtendTrimEdges`) and the others mated (`MateEdges`),
     /// problems only reported. Otherwise a non-convex radial sector gets nothing
     /// (`SM_ERR` for a tangent sector with gaps between the offsets), a lamina edge
@@ -3184,8 +3186,27 @@ impl OffsetGeometryCreation {
             .edgeuse_edge(original_edgeuse)?
             .ok_or(dangling("edge use without edge"))?;
 
+        // A tangent edge between an offset face and a shell face can't be closed by
+        // extension: bridge it below.
+        let shell_faces = executive.shell_faces();
+        let gap_edgeuses = (other_original_edgeuse, offset_edgeuse, other_offset_edgeuse);
+        let shell_tangent_gap = match gap_edgeuses {
+            (Some(other_orig), Some(off), Some(other_off)) => {
+                let on_shell = |face: Option<O>| face.is_some_and(|f| contains(&shell_faces, &f));
+                on_shell(brep.edgeuse_face(original_edgeuse)?)
+                    != on_shell(brep.edgeuse_face(other_orig)?)
+                    && brep.edgeuse_is_tangent_sector(
+                        k,
+                        original_edgeuse,
+                        self.tangency_tol_degrees(),
+                    )?
+                    && self.have_tangent_gaps(k, brep, 10, off, other_off)?
+            }
+            _ => false,
+        };
+
         // If we are extending convex edges, extend both offset surfaces to hit each other.
-        if executive.extend_convex_edges() {
+        if executive.extend_convex_edges() && !shell_tangent_gap {
             let lamina = brep.edge_is_lamina(orig_edge)?;
 
             // No, we have to call ExtendTrimEdges() for Lamina Edges.  [cbi B01; B256 ok]
@@ -3222,7 +3243,8 @@ impl OffsetGeometryCreation {
         } // end when extending convex edges
 
         // Make sure sector being offset is convex otherwise just skip it
-        if brep.edgeuse_radial(original_edgeuse)? == other_original_edgeuse
+        if !shell_tangent_gap
+            && brep.edgeuse_radial(original_edgeuse)? == other_original_edgeuse
             && !brep.edgeuse_is_convex_radial_sector(k, original_edgeuse, 10)?
         {
             if brep.edgeuse_is_tangent_sector(k, original_edgeuse, 3.0)? {
@@ -3249,10 +3271,10 @@ impl OffsetGeometryCreation {
         let other_orig_face = brep
             .edgeuse_face(other_original_edgeuse)?
             .ok_or(dangling("edge use without face"))?;
-        let shell_faces = executive.shell_faces();
 
         // when Orig or OtherOrig face is a ShellFace (not offset - just copied) and we are insetting
-        if (contains(&shell_faces, &orig_face) || contains(&shell_faces, &other_orig_face))
+        if !shell_tangent_gap
+            && (contains(&shell_faces, &orig_face) || contains(&shell_faces, &other_orig_face))
             && executive.inset()
         {
             // when OrigFace is not a shell face and we have an OffsetEdgeuse

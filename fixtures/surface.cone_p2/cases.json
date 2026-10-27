@@ -1772,6 +1772,122 @@
      "tol": 1e-06
     }
    }
+  },
+  {
+   "name": "wr490_ellipse_on_cylinder_trimmed_v30",
+   "upstream_ref": "WR-490 / #868: ellipse whose only seam crossing (z = 20) lies below a cylinder face trimmed to v >= 30 (crates/solidcore/src/surface/cone/p2.rs tests)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 10.0,
+      "top": 10.0,
+      "height": 100.0
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "trim",
+     "origin": [
+      0,
+      0,
+      50
+     ],
+     "x": [
+      0.31622776601683794,
+      0,
+      -0.9486832980505138
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "rx": 31.622776601683793,
+     "ry": 10.0,
+     "start": 0.0,
+     "end": 360.0,
+     "dom": [
+      0,
+      0.3,
+      1,
+      1
+     ],
+     "tol": 1e-06
+    }
+   }
+  },
+  {
+   "name": "wr490_ellipse_on_cylinder_natural",
+   "upstream_ref": "WR-490 / #868: ellipse whose only seam crossing (z = 20) lies below a cylinder face trimmed to v >= 30 (crates/solidcore/src/surface/cone/p2.rs tests)",
+   "inputs": {
+    "cone": {
+     "mode": {
+      "kind": "canonical",
+      "bot": 10.0,
+      "top": 10.0,
+      "height": 100.0
+     },
+     "origin": [
+      0,
+      0,
+      0
+     ],
+     "x": [
+      1,
+      0,
+      0
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ]
+    },
+    "op": {
+     "kind": "trim",
+     "origin": [
+      0,
+      0,
+      50
+     ],
+     "x": [
+      0.31622776601683794,
+      0,
+      -0.9486832980505138
+     ],
+     "y": [
+      0,
+      1,
+      0
+     ],
+     "rx": 31.622776601683793,
+     "ry": 10.0,
+     "start": 0.0,
+     "end": 360.0,
+     "dom": [
+      0,
+      0,
+      1,
+      1
+     ],
+     "tol": 1e-06
+    }
+   }
   }
  ]
 }

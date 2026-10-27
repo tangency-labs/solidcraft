@@ -54990,7 +54990,7 @@
   },
   {
    "name": "adv_wire_tiny_vu0_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -55036,7 +55036,7 @@
   },
   {
    "name": "adv_wire_tiny_vu0_conn_face",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -55084,7 +55084,7 @@
   },
   {
    "name": "adv_wire_tiny_vu0_conn_loop",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -55132,7 +55132,7 @@
   },
   {
    "name": "adv_wire_tiny_vu0_conn_region",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -55180,7 +55180,7 @@
   },
   {
    "name": "adv_wire_tiny_vu0_gap0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -55229,7 +55229,7 @@
   },
   {
    "name": "adv_wire_tiny_vu0_init_gap0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -55278,7 +55278,7 @@
   },
   {
    "name": "adv_wire_tiny_vu0_gap2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -55327,7 +55327,7 @@
   },
   {
    "name": "adv_wire_tiny_vu0_init_gap2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -55376,7 +55376,7 @@
   },
   {
    "name": "adv_wire_tiny_vu0_gap2_nocache",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -55425,7 +55425,7 @@
   },
   {
    "name": "adv_wire_tiny_vu0_init_gap2_nocache",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -55474,7 +55474,7 @@
   },
   {
    "name": "adv_wire_tiny_vu0_gap1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -55523,7 +55523,7 @@
   },
   {
    "name": "adv_wire_tiny_vu0_init_gap1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -55572,7 +55572,7 @@
   },
   {
    "name": "adv_wire_tiny_vu0_gap4",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -55621,7 +55621,7 @@
   },
   {
    "name": "adv_wire_tiny_vu0_init_gap4",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -55670,7 +55670,7 @@
   },
   {
    "name": "adv_wire_tiny_vu0_notify_split",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -55717,7 +55717,7 @@
   },
   {
    "name": "adv_wire_tiny_vu0_init_notify_split",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -55764,7 +55764,7 @@
   },
   {
    "name": "adv_wire_tiny_vu0_notify_pre",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -55811,7 +55811,7 @@
   },
   {
    "name": "adv_wire_tiny_vu0_init_notify_pre",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -55858,7 +55858,7 @@
   },
   {
    "name": "adv_wire_tiny_vu0_uvpt",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -55905,7 +55905,7 @@
   },
   {
    "name": "adv_wire_tiny_vu0_sector",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -55952,7 +55952,7 @@
   },
   {
    "name": "adv_wire_tiny_vu0_seam",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -56001,7 +56001,7 @@
   },
   {
    "name": "adv_wire_tiny_vu0_pole",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -56047,7 +56047,7 @@
   },
   {
    "name": "adv_wire_tiny_vu0_init_pole",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -56093,7 +56093,7 @@
   },
   {
    "name": "adv_wire_tiny_vu1_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -56139,7 +56139,7 @@
   },
   {
    "name": "adv_wire_tiny_vu1_conn_face",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -56187,7 +56187,7 @@
   },
   {
    "name": "adv_wire_tiny_vu1_conn_loop",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -56235,7 +56235,7 @@
   },
   {
    "name": "adv_wire_tiny_vu1_conn_region",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -56283,7 +56283,7 @@
   },
   {
    "name": "adv_wire_tiny_vu1_gap0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -56332,7 +56332,7 @@
   },
   {
    "name": "adv_wire_tiny_vu1_init_gap0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -56381,7 +56381,7 @@
   },
   {
    "name": "adv_wire_tiny_vu1_gap2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -56430,7 +56430,7 @@
   },
   {
    "name": "adv_wire_tiny_vu1_init_gap2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -56479,7 +56479,7 @@
   },
   {
    "name": "adv_wire_tiny_vu1_gap2_nocache",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -56528,7 +56528,7 @@
   },
   {
    "name": "adv_wire_tiny_vu1_init_gap2_nocache",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -56577,7 +56577,7 @@
   },
   {
    "name": "adv_wire_tiny_vu1_gap1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -56626,7 +56626,7 @@
   },
   {
    "name": "adv_wire_tiny_vu1_init_gap1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -56675,7 +56675,7 @@
   },
   {
    "name": "adv_wire_tiny_vu1_gap4",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -56724,7 +56724,7 @@
   },
   {
    "name": "adv_wire_tiny_vu1_init_gap4",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -56773,7 +56773,7 @@
   },
   {
    "name": "adv_wire_tiny_vu1_notify_split",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -56820,7 +56820,7 @@
   },
   {
    "name": "adv_wire_tiny_vu1_init_notify_split",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -56867,7 +56867,7 @@
   },
   {
    "name": "adv_wire_tiny_vu1_notify_pre",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -56914,7 +56914,7 @@
   },
   {
    "name": "adv_wire_tiny_vu1_init_notify_pre",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -56961,7 +56961,7 @@
   },
   {
    "name": "adv_wire_tiny_vu1_uvpt",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -57008,7 +57008,7 @@
   },
   {
    "name": "adv_wire_tiny_vu1_sector",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -57055,7 +57055,7 @@
   },
   {
    "name": "adv_wire_tiny_vu1_seam",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -57104,7 +57104,7 @@
   },
   {
    "name": "adv_wire_tiny_vu1_pole",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -57150,7 +57150,7 @@
   },
   {
    "name": "adv_wire_tiny_vu1_init_pole",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -57196,7 +57196,7 @@
   },
   {
    "name": "adv_wire_tiny_vu2_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -57242,7 +57242,7 @@
   },
   {
    "name": "adv_wire_tiny_vu2_conn_face",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -57290,7 +57290,7 @@
   },
   {
    "name": "adv_wire_tiny_vu2_conn_loop",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -57338,7 +57338,7 @@
   },
   {
    "name": "adv_wire_tiny_vu2_conn_region",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -57386,7 +57386,7 @@
   },
   {
    "name": "adv_wire_tiny_vu2_gap0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -57435,7 +57435,7 @@
   },
   {
    "name": "adv_wire_tiny_vu2_init_gap0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -57484,7 +57484,7 @@
   },
   {
    "name": "adv_wire_tiny_vu2_gap2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -57533,7 +57533,7 @@
   },
   {
    "name": "adv_wire_tiny_vu2_init_gap2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -57582,7 +57582,7 @@
   },
   {
    "name": "adv_wire_tiny_vu2_gap2_nocache",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -57631,7 +57631,7 @@
   },
   {
    "name": "adv_wire_tiny_vu2_init_gap2_nocache",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -57680,7 +57680,7 @@
   },
   {
    "name": "adv_wire_tiny_vu2_gap1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -57729,7 +57729,7 @@
   },
   {
    "name": "adv_wire_tiny_vu2_init_gap1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -57778,7 +57778,7 @@
   },
   {
    "name": "adv_wire_tiny_vu2_gap4",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -57827,7 +57827,7 @@
   },
   {
    "name": "adv_wire_tiny_vu2_init_gap4",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -57876,7 +57876,7 @@
   },
   {
    "name": "adv_wire_tiny_vu2_notify_split",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -57923,7 +57923,7 @@
   },
   {
    "name": "adv_wire_tiny_vu2_init_notify_split",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -57970,7 +57970,7 @@
   },
   {
    "name": "adv_wire_tiny_vu2_notify_pre",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -58017,7 +58017,7 @@
   },
   {
    "name": "adv_wire_tiny_vu2_init_notify_pre",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -58064,7 +58064,7 @@
   },
   {
    "name": "adv_wire_tiny_vu2_uvpt",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -58111,7 +58111,7 @@
   },
   {
    "name": "adv_wire_tiny_vu2_sector",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -58158,7 +58158,7 @@
   },
   {
    "name": "adv_wire_tiny_vu2_seam",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -58207,7 +58207,7 @@
   },
   {
    "name": "adv_wire_tiny_vu2_pole",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -58253,7 +58253,7 @@
   },
   {
    "name": "adv_wire_tiny_vu2_init_pole",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -58299,7 +58299,7 @@
   },
   {
    "name": "adv_wire_tiny_vu3_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -58345,7 +58345,7 @@
   },
   {
    "name": "adv_wire_tiny_vu3_conn_face",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -58393,7 +58393,7 @@
   },
   {
    "name": "adv_wire_tiny_vu3_conn_loop",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -58441,7 +58441,7 @@
   },
   {
    "name": "adv_wire_tiny_vu3_conn_region",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -58489,7 +58489,7 @@
   },
   {
    "name": "adv_wire_tiny_vu3_gap0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -58538,7 +58538,7 @@
   },
   {
    "name": "adv_wire_tiny_vu3_init_gap0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -58587,7 +58587,7 @@
   },
   {
    "name": "adv_wire_tiny_vu3_gap2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -58636,7 +58636,7 @@
   },
   {
    "name": "adv_wire_tiny_vu3_init_gap2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -58685,7 +58685,7 @@
   },
   {
    "name": "adv_wire_tiny_vu3_gap2_nocache",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -58734,7 +58734,7 @@
   },
   {
    "name": "adv_wire_tiny_vu3_init_gap2_nocache",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -58783,7 +58783,7 @@
   },
   {
    "name": "adv_wire_tiny_vu3_gap1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -58832,7 +58832,7 @@
   },
   {
    "name": "adv_wire_tiny_vu3_init_gap1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -58881,7 +58881,7 @@
   },
   {
    "name": "adv_wire_tiny_vu3_gap4",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -58930,7 +58930,7 @@
   },
   {
    "name": "adv_wire_tiny_vu3_init_gap4",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -58979,7 +58979,7 @@
   },
   {
    "name": "adv_wire_tiny_vu3_notify_split",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -59026,7 +59026,7 @@
   },
   {
    "name": "adv_wire_tiny_vu3_init_notify_split",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -59073,7 +59073,7 @@
   },
   {
    "name": "adv_wire_tiny_vu3_notify_pre",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -59120,7 +59120,7 @@
   },
   {
    "name": "adv_wire_tiny_vu3_init_notify_pre",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -59167,7 +59167,7 @@
   },
   {
    "name": "adv_wire_tiny_vu3_uvpt",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -59214,7 +59214,7 @@
   },
   {
    "name": "adv_wire_tiny_vu3_sector",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -59261,7 +59261,7 @@
   },
   {
    "name": "adv_wire_tiny_vu3_seam",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -59310,7 +59310,7 @@
   },
   {
    "name": "adv_wire_tiny_vu3_pole",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -59356,7 +59356,7 @@
   },
   {
    "name": "adv_wire_tiny_vu3_init_pole",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -59402,7 +59402,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu0_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -59456,7 +59456,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu0_conn_face",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -59512,7 +59512,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu0_conn_loop",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -59568,7 +59568,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu0_conn_region",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -59624,7 +59624,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu0_gap0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -59681,7 +59681,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu0_init_gap0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -59738,7 +59738,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu0_gap2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -59795,7 +59795,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu0_init_gap2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -59852,7 +59852,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu0_gap2_nocache",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -59909,7 +59909,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu0_init_gap2_nocache",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -59966,7 +59966,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu0_gap1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -60023,7 +60023,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu0_init_gap1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -60080,7 +60080,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu0_gap4",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -60137,7 +60137,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu0_init_gap4",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -60194,7 +60194,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu0_notify_split",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -60249,7 +60249,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu0_init_notify_split",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -60304,7 +60304,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu0_notify_pre",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -60359,7 +60359,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu0_init_notify_pre",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -60414,7 +60414,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu0_uvpt",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -60469,7 +60469,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu0_sector",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -60524,7 +60524,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu0_seam",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -60581,7 +60581,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu0_pole",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -60635,7 +60635,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu0_init_pole",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -60689,7 +60689,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu1_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -60743,7 +60743,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu1_conn_face",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -60799,7 +60799,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu1_conn_loop",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -60855,7 +60855,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu1_conn_region",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -60911,7 +60911,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu1_gap0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -60968,7 +60968,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu1_init_gap0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -61025,7 +61025,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu1_gap2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -61082,7 +61082,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu1_init_gap2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -61139,7 +61139,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu1_gap2_nocache",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -61196,7 +61196,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu1_init_gap2_nocache",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -61253,7 +61253,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu1_gap1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -61310,7 +61310,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu1_init_gap1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -61367,7 +61367,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu1_gap4",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -61424,7 +61424,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu1_init_gap4",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -61481,7 +61481,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu1_notify_split",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -61536,7 +61536,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu1_init_notify_split",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -61591,7 +61591,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu1_notify_pre",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -61646,7 +61646,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu1_init_notify_pre",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -61701,7 +61701,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu1_uvpt",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -61756,7 +61756,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu1_sector",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -61811,7 +61811,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu1_seam",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -61868,7 +61868,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu1_pole",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -61922,7 +61922,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu1_init_pole",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -61976,7 +61976,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu2_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -62030,7 +62030,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu2_conn_face",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -62086,7 +62086,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu2_conn_loop",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -62142,7 +62142,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu2_conn_region",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -62198,7 +62198,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu2_gap0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -62255,7 +62255,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu2_init_gap0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -62312,7 +62312,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu2_gap2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -62369,7 +62369,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu2_init_gap2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -62426,7 +62426,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu2_gap2_nocache",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -62483,7 +62483,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu2_init_gap2_nocache",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -62540,7 +62540,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu2_gap1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -62597,7 +62597,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu2_init_gap1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -62654,7 +62654,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu2_gap4",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -62711,7 +62711,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu2_init_gap4",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -62768,7 +62768,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu2_notify_split",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -62823,7 +62823,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu2_init_notify_split",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -62878,7 +62878,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu2_notify_pre",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -62933,7 +62933,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu2_init_notify_pre",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -62988,7 +62988,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu2_uvpt",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -63043,7 +63043,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu2_sector",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -63098,7 +63098,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu2_seam",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -63155,7 +63155,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu2_pole",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -63209,7 +63209,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu2_init_pole",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -63263,7 +63263,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu3_q",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -63317,7 +63317,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu3_conn_face",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -63373,7 +63373,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu3_conn_loop",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -63429,7 +63429,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu3_conn_region",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -63485,7 +63485,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu3_gap0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -63542,7 +63542,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu3_init_gap0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -63599,7 +63599,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu3_gap2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -63656,7 +63656,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu3_init_gap2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -63713,7 +63713,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu3_gap2_nocache",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -63770,7 +63770,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu3_init_gap2_nocache",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -63827,7 +63827,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu3_gap1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -63884,7 +63884,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu3_init_gap1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -63941,7 +63941,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu3_gap4",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -63998,7 +63998,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu3_init_gap4",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -64055,7 +64055,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu3_notify_split",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -64110,7 +64110,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu3_init_notify_split",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -64165,7 +64165,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu3_notify_pre",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -64220,7 +64220,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu3_init_notify_pre",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -64275,7 +64275,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu3_uvpt",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -64330,7 +64330,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu3_sector",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -64385,7 +64385,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu3_seam",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -64442,7 +64442,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu3_pole",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",
@@ -64496,7 +64496,7 @@
   },
   {
    "name": "adv_wire_huge_sub_vu3_init_pole",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546",
    "inputs": {
     "brep": {
      "kind": "wire",

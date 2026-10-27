@@ -929,7 +929,8 @@ bool fresh_props_closed(Rd rd, const char* path, int64_t face_sel)
 // of a loop crossing that seam, more target loops than loop props on a closed surface.
 bool staged_guard(const SmFaceProps& p, ULONG n_target)
 {
-    const SmTArray<SmTouchData>* lists[2] = {&p.m_sDoneTouchListU, &p.m_sDoneTouchListV};
+    const SmTArray<SmTouchData>* lists[4] = {&p.m_sDoneTouchListU, &p.m_sDoneTouchListV,
+                                             &p.m_sRawTouchListU, &p.m_sRawTouchListV};
     for (const SmTArray<SmTouchData>* l : lists)
     {
         if (l->GetSize() % 2 != 0)
@@ -1100,6 +1101,11 @@ void put_props(std::vector<double>& o, Graph& g, const SmFaceProps& p)
         o.push_back(p.m_sPolePoints[i].y);
         o.push_back(p.m_sPolePoints[i].z);
     }
+    // what 1.0.1 ClassifyLoops reads: the seam raw touch lists (start/stop types, UV
+    // containment) and the crossed-seam direction (bCompleteSeams)
+    put_touches(o, g, p.m_sRawTouchListU);
+    put_touches(o, g, p.m_sRawTouchListV);
+    o.push_back((double)p.m_eBadCrossedSeam);
 }
 
 void put_loops(std::vector<double>& o, Graph& g, const SmTArray<SmLoop*>& l)

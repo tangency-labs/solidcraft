@@ -373,7 +373,10 @@
      "tol": 0.01,
      "formula": "4/3*pi*(40^3 - 18.5^3) + F(18.5) - 8*64, F(18.5) = 1165.3429089562, F(R) = int_{-4}^{4} int_{-4}^{4} sqrt(R^2 - y^2 - z^2) dy dz = 4*G(4, 4), G(x, y) = [x*(3R^2 - x^2)*atan(y/s) + y*(3R^2 - y^2)*atan(x/s) + 2*x*y*s - 2R^3*atan(x*y/(R*s))]/6, s = sqrt(R^2 - x^2 - y^2); the block lies inside r 40 (max r = sqrt(432) = 20.78)"
     }
-   }
+   },
+   "fixes": [
+    "precise_properties_body_length_scale"
+   ]
   },
   {
    "name": "block_crossing_inner_sphere_cut_by_sphere_difference",

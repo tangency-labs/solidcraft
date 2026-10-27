@@ -42,9 +42,6 @@
 //! - `N_CrvDecomposeBez` returns a C array of curves and its highest index; the Rust
 //!   method returns a `Vec`. A knot vector without a non-zero-length span (where
 //!   upstream allocates an array of `-1` curves) is `InvalidInput`.
-//! - `N_CrvRemoveKnot` returns its error flag after finishing the removal when the last
-//!   `N_BasisFindGlobalMax` it called failed (it then assumes a maximum of `1`); the
-//!   Rust method returns only that error then, not the curve.
 //! - A degree above [`MAX_SHORT_DEGREE`](crate::nurbs::bezier::MAX_SHORT_DEGREE)
 //!   (impossible upstream, where `NL_DEGREE` is a `short`) is
 //!   [`SolidError::InvalidInput`], so index arithmetic and allocations sized from the
@@ -628,8 +625,8 @@ impl Curve {
     /// (`N_CrvRemoveKnot`, algorithm A5.8 with the basis-maximum error bound).
     ///
     /// Errors with [`NlibCode::Parameter`] when `u` is on or outside the ends of the
-    /// knot vector, with the error of `N_BasisFindGlobalMax` when its last call failed
-    /// (see the module deviations).
+    /// knot vector. A failing `N_BasisFindGlobalMax` is handled: its maximum is taken
+    /// as `1`.
     pub fn remove_knot(&self, u: f64, nu: usize, tol: f64) -> Result<KnotRemoval> {
         const OP: &str = "nurbs::crv_tool::p1::Curve::remove_knot";
         let pw = self.cpts();
@@ -664,19 +661,12 @@ impl Curve {
         let mut uq = up.to_vec();
         let mut rw: Vec<CPoint> = storage(2 * p, OP)?;
 
-        // The error flag of the last `N_BasisFindGlobalMax` call.
-        let mut error: Option<SolidError> = None;
-        let global_max = |uq: &[f64], i: isize, error: &mut Option<SolidError>| -> Result<f64> {
+        // A failing `N_BasisFindGlobalMax` is handled: fall back to the bound max == 1.
+        let global_max = |uq: &[f64], i: isize| -> Result<f64> {
             let knq = KnotVector::new(uq, ux(m, OP)?)?;
             Ok(match find_global_max(&knq, ux(i, OP)?, pu, lto) {
-                Ok((max, _)) => {
-                    *error = None;
-                    max
-                }
-                Err(e) => {
-                    *error = Some(e);
-                    1.0
-                }
+                Ok((max, _)) => max,
+                Err(_) => 1.0,
             })
         };
 
@@ -723,8 +713,8 @@ impl Curve {
                 let lam = alf / (alf + bet);
                 let oml = 1.0 - lam;
                 let dw = dist_cpt_cpt_homo(get(&rw, ii - 1, OP)?, get(&rw, jj + 1, OP)?);
-                let maxl = global_max(&uq, i - 1, &mut error)?;
-                let maxr = global_max(&uq, i, &mut error)?;
+                let maxl = global_max(&uq, i - 1)?;
+                let maxr = global_max(&uq, i)?;
                 let max = (lam * alf * maxl).max(oml * omd * maxr);
                 if max * dw > tol {
                     break;
@@ -734,7 +724,7 @@ impl Curve {
             } else {
                 let a = CPoint::combine2(del, get(&rw, jj + 1, OP)?, omd, get(&rw, ii - 1, OP)?);
                 let dw = dist_cpt_cpt_homo(get(&qw, i, OP)?, a);
-                let max = global_max(&uq, i, &mut error)?;
+                let max = global_max(&uq, i)?;
                 if max * dw > tol {
                     break;
                 }
@@ -790,14 +780,12 @@ impl Curve {
             k += 1;
         }
 
-        let finish = |curve: Curve, removed: usize, error: Option<SolidError>| match error {
-            Some(e) => Err(e),
-            None => Ok(KnotRemoval { curve, removed }),
-        };
-
         // If no knot was removed --> out.
         if k == 0 {
-            return finish(curve(qw, pu, uq, OP)?, 0, error);
+            return Ok(KnotRemoval {
+                curve: curve(qw, pu, uq, OP)?,
+                removed: 0,
+            });
         }
 
         // Shift down control points.
@@ -818,7 +806,10 @@ impl Curve {
 
         let mut out = curve(qw, pu, uq, OP)?;
         out.set_size_indices(ux(n - k, OP)?, pu, ux(m - k, OP)?)?;
-        finish(out, ux(k, OP)?, error)
+        Ok(KnotRemoval {
+            curve: out,
+            removed: ux(k, OP)?,
+        })
     }
 
     /// The error bound of removing the knot `U[r]` (multiplicity `s`, `U[r] != U[r+1]`)

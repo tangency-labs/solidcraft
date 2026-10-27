@@ -240,7 +240,8 @@ fn retry_rail_search_holds_the_radius_as_the_first_does() {
         f.fillet_retry_radius_as_first = true;
         f.fillet_nx1_end_rib_global_merge = true;
     };
-    for (r0, off, gain) in [(1.0, 47_751.094_836, 3.774), (2.0, 47_719.705_412, 3.952)] {
+    // gains measured on the v1.0.1 port (3.774 and 3.952 on the c9c5979 one)
+    for (r0, off, gain) in [(1.0, 47_751.094_836, 3.777), (2.0, 47_719.705_412, 3.950)] {
         let mut k = Kernel::default();
         let Outcome::Built { volume: v, .. } = round_into_a_rounded_corner(&mut k, r0, 5.0) else {
             panic!("{r0}: refused");

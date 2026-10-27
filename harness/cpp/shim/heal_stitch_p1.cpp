@@ -429,7 +429,7 @@ void run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         // that is safe because no block of this harness builds a face without a surface. The
         // face kinds, the sheets and SmApiCreateBox always attach one, and none of the 15
         // upstream .smb files in topology.edgeuse_p1's FILES has a surface-less face (checked
-        // over every face after ReadFromFile; SmallBox.smb and Platform.smb are excluded because
+        // over every face after ReadFromFile; SmallBox.smp and Platform.smp are excluded because
         // ReadFromFile itself crashes on them).
         if (t1 == TY_EDGE && t2 == TY_EDGE)
             for (SmFace* f : g.faces)

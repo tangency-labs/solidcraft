@@ -27,6 +27,7 @@
 //! | [`DatabaseReader::read_characters`]   | `SmDatabaseIO::ReadCharacters`                   |
 //! | [`DatabaseReader::read_type`]         | `SmDatabaseIO::ReadType`                         |
 //! | [`DatabaseReader::go_to_next_line`]   | `SmDatabaseIO::GoToNextLine`                     |
+//! | [`DatabaseReader::read_failed`]       | `SmDatabaseIO::ReadFailed`                       |
 //! | [`DatabaseWriter`]                    | `SmDatabaseIO` / `SmDatabaseIOFile` (write side) |
 //! | [`DatabaseWriter::open_for_write`]    | `SmDatabaseIOFile::OpenFileForWrite` (new file)  |
 //! | [`DatabaseWriter::write_long`] / [`DatabaseWriter::write_longs`] | `WriteLong` / `WriteLongs` |
@@ -861,11 +862,23 @@ impl DatabaseReader {
     pub fn end_reading(&mut self) {}
 
     /// Skips to the start of the next line, at most [`MAX_LINE`] bytes
-    /// (`GoToNextLine`: `ignore(SM_MAXSIZE, '\n')`).
+    /// (`GoToNextLine`: `ignore(SM_MAXSIZE, '\n')`). At the end of the input there is no
+    /// next line: skipping there would mark the stream failed, as if the last value read
+    /// had not been a number, so nothing is done.
     pub fn go_to_next_line(&mut self) {
         if let Some(s) = self.stream.as_mut() {
-            s.ignore(MAX_LINE, b'\n');
+            if !s.eof() {
+                s.ignore(MAX_LINE, b'\n');
+            }
         }
+    }
+
+    /// Whether a read has run past the end of the input or met text that is not a number
+    /// (`ReadFailed`: the stream's `fail()`); `false` without a stream. The `read_*` and
+    /// `extract_*` reads do not report either, so callers check this.
+    #[must_use]
+    pub fn read_failed(&self) -> bool {
+        self.stream.as_ref().is_some_and(InputStream::fail)
     }
 
     /// Reads exactly `N` raw bytes.

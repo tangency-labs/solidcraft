@@ -1622,7 +1622,7 @@
   },
   {
    "name": "topo_nested_zero_offsets",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:572 (nested 0.0 offsets of an extruded unit square)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:353 (nested 0.0 offsets of an extruded unit square)",
    "inputs": {
     "kind": "script",
     "off": {
@@ -1906,7 +1906,7 @@
   },
   {
    "name": "topo_nested_zero_offsets_create_offset",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:572 (nested 0.0 offsets of an extruded unit square)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:353 (nested 0.0 offsets of an extruded unit square)",
    "inputs": {
     "kind": "script",
     "off": {

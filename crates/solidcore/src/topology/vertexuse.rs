@@ -21,6 +21,7 @@
 //! | [`is_sector_missing_seam`], [`MissingSeam`] | `SmVertexuse::IsSectorMissingSeam`               |
 //! | [`compute_uv_point`]                        | `SmVertexuse::ComputeUVPoint`                    |
 //! | [`compute_uv_sector`], [`UvSectorIo`], [`UvSector`] | `SmVertexuse::ComputeUVSector`, `SmUVSectorIO` |
+//! | [`compute_t_point`]                          | `SmVertexuse::ComputeTPoint`                     |
 //! | [`notify`]                                  | `SmVertexuse::Notify`                            |
 //! | [`edge_is_wire`]                            | `SmEdge::IsWire` (CO-PORTED, `topology.edge`)    |
 //!
@@ -48,11 +49,6 @@
 //!   [`SolidError::Unported`] still propagates. The edge curve and surface
 //!   evaluations of `ComputeUVSector`, whose failure leaves uninitialised locals
 //!   upstream, propagate their error instead.
-//! - **Operator precedence.** `ComputeUVSector` counts opposite orientations as
-//!   `FU == OPPOSITE ? 1 : 0 + LU == OPPOSITE ? 1 : 0`, which C++ parses as
-//!   `FU == OPPOSITE ? 1 : (LU == OPPOSITE ? 1 : 0)`: the count is never 2 and the
-//!   loop use is only consulted when the face use is not opposite. Ported as parsed
-//!   (`plan/upstream-issues.md`).
 //! - **`IsKindOf(SmFilletVertex_TYPE)`** in `HasVertexFaceGap` is always false for a
 //!   vertex use (`SmFilletVertex` derives from `SmVertex`) and is dropped.
 //! - **Notify.** The vertex use part (clearing the cached gaps) is applied to the
@@ -230,6 +226,33 @@ pub fn is_shell_vertexuse(b: &Brep, vu: VertexuseId) -> Result<bool> {
 /// [`SolidError::NotFound`] for a dangling id.
 pub fn is_edge_vertexuse(b: &Brep, vu: VertexuseId) -> Result<bool> {
     Ok(matches!(b.vertexuse(vu)?.owner, VertexuseOwner::Edgeuse(_)))
+}
+
+/// `ComputeTPoint`: the parameter of the vertex use's edge end that is expected to
+/// connect to its vertex: the edge interval's minimum for a same-oriented edge use, else
+/// its maximum.
+///
+/// # Errors
+///
+/// [`SolidError::NotFound`] for a dangling id; `SM_ERR` for a vertex use that is not an
+/// edge vertex use; `SM_ERR_NULL_POINTER` for one without edge use;
+/// [`SolidError::InvalidInput`] for an edge use without edge (upstream dereferences it).
+pub fn compute_t_point(b: &Brep, vu: VertexuseId) -> Result<f64> {
+    // for edgeuse type vertexuses
+    if !is_edge_vertexuse(b, vu)? {
+        // no TPoint to compute
+        return Err(sm_err(vu));
+    }
+    let eu = edgeuse(b, vu)?.ok_or_else(|| ner(vu))?;
+    let e = eu1::edge(b, eu)?.ok_or_else(|| null("ComputeTPoint: edge use without edge"))?;
+    let ivl = b.edge(e)?.interval;
+
+    // set output
+    Ok(if eu1::orientation(b, eu)? == OrientType::Same {
+        ivl.min()
+    } else {
+        ivl.max()
+    })
 }
 
 /// `GetEdgeuse`: the edge use of an edge vertex use, `None` for the other kinds.
@@ -966,7 +989,7 @@ pub fn compute_uv_point(
         return Err(ner(vu));
     }
     let uv_domain = face_uv_domain(b, f)?;
-    let nat_domain = face_surface(b, f)?.natural_uv_domain();
+    let nat_domain = face_surface(b, f)?.natural_uv_domain_with_nurb(k)?;
 
     let sol = if is_edge_vertexuse(b, vu)? {
         // Edgeuse locals - thisEdgeuse->StartPt == CWEdgeuse->EndPt (with tolerances)
@@ -1023,14 +1046,17 @@ pub fn compute_uv_point(
                     prev_uv_tan = -prev_uv_tan;
                 }
 
-                // for cases of just one closed direction - orthogonalize the endTans to
-                // cross the seam
-                if closed_u && !closed_v {
-                    this_uv_tan.y = 0.0;
-                    prev_uv_tan.y = 0.0;
-                } else if !closed_u && closed_v {
-                    this_uv_tan.x = 0.0;
-                    prev_uv_tan.x = 0.0;
+                // Away from a doubly periodic corner, only motion across the crossed seam
+                // can choose its side. A torus seam partitioned at a vertex can have both
+                // adjacent tangents along the seam.
+                if !doubly_periodic_corner {
+                    if closed_u && tol::are_same_to_tol(dist_u, domain_length_u, tol_1000) {
+                        this_uv_tan.y = 0.0;
+                        prev_uv_tan.y = 0.0;
+                    } else {
+                        this_uv_tan.x = 0.0;
+                        prev_uv_tan.x = 0.0;
+                    }
                 }
 
                 // skip cases where the EndTans are parallel to Seam
@@ -1051,6 +1077,7 @@ pub fn compute_uv_point(
                         uv_guess = xy(prev_uv_pnt);
                     } else if doubly_periodic_corner {
                         // select the corner entered by both inward probes
+                        let mut found_corner = false;
                         for corner in 0..4u32 {
                             let c = Point2::new(
                                 if corner & 1 != 0 { umax } else { umin },
@@ -1066,7 +1093,24 @@ pub fn compute_uv_point(
                             );
                             if inside(this_step) && inside(prev_step) {
                                 uv_guess = c;
+                                found_corner = true;
                                 break;
+                            }
+                        }
+                        // Before a missing seam is inserted, the two sector arms can enter
+                        // opposite periodic sides without a common corner. Preserve this
+                        // edgeuse's UV; ComputeUVSector keeps both ends.
+                        if !found_corner {
+                            let across_u = tol::are_same_to_tol(dist_u, domain_length_u, tol_1000);
+                            let across_v = tol::are_same_to_tol(dist_v, domain_length_v, tol_1000);
+                            let missing_seam = (across_u || tol::is_zero_to_tol(dist_u, tol_1000))
+                                && (across_v || tol::is_zero_to_tol(dist_v, tol_1000))
+                                && ((across_u && this_uv_tan.x * prev_uv_tan.x < 0.0)
+                                    || (across_v && this_uv_tan.y * prev_uv_tan.y < 0.0))
+                                && inside(this_step_from_this)
+                                && inside(prev_step_from_prev);
+                            if missing_seam {
+                                uv_guess = xy(this_uv_pnt);
                             }
                         }
                     }
@@ -1327,27 +1371,19 @@ pub fn compute_uv_sector(
                 Some(beg) => eu1::corner_mate_edgeuse(b, beg, Some(v))?,
                 None => None,
             };
-            let end = io
-                .end_edgeuse
-                .ok_or_else(|| null("ComputeUVSector: sector without end edge use"))?;
-            let end_vu_of = |b: &Brep, eu: EdgeuseId| -> Result<VertexuseId> {
-                b.edgeuse(eu)?
-                    .vertexuse
-                    .ok_or_else(|| null("ComputeUVSector: edge use without vertex use"))
-            };
-            let end_vu = end_vu_of(b, end)?;
-            let end_vu = if b.vertexuse(end_vu)?.vertex == Some(v) {
-                end_vu
-            } else {
-                let m = eu1::mate(b, end)?
-                    .ok_or_else(|| null("ComputeUVSector: end edge use without mate"))?;
-                end_vu_of(b, m)?
-            };
-
             // no work - no face sector - attached to wires
-            let Some(beg) = io.beg_edgeuse else {
+            let (Some(beg), Some(end)) = (io.beg_edgeuse, io.end_edgeuse) else {
                 return fail(io);
             };
+
+            // The preceding edgeuse ends at this corner. Comparing vertex objects cannot
+            // distinguish its starting and ending uses when the edge is closed.
+            let m = eu1::mate(b, end)?
+                .ok_or_else(|| null("ComputeUVSector: end edge use without mate"))?;
+            let end_vu = b
+                .edgeuse(m)?
+                .vertexuse
+                .ok_or_else(|| null("ComputeUVSector: edge use without vertex use"))?;
 
             // locals
             let beg_edge = b.edgeuse(beg)?.edge;
@@ -1500,14 +1536,10 @@ pub fn compute_uv_sector(
                 }
             }
 
-            // count Opposite orientations: `FU == OPP ? 1 : 0 + LU == OPP ? 1 : 0`
-            // parses as `FU == OPP ? 1 : (LU == OPP ? 1 : 0)` (module docs)
-            let opposite_count = if b.faceuse(fu)?.orientation == OrientType::Opposite {
-                1
-            } else {
-                let lu = lu.ok_or_else(|| null("ComputeUVSector: edge use without loop use"))?;
-                u32::from(loopuse_orientation(b, lu)? == OrientType::Opposite)
-            };
+            // count Opposite orientations
+            let lu = lu.ok_or_else(|| null("ComputeUVSector: edge use without loop use"))?;
+            let opposite_count = u32::from(b.faceuse(fu)?.orientation == OrientType::Opposite)
+                + u32::from(loopuse_orientation(b, lu)? == OrientType::Opposite);
 
             // UVSector AngDeg in SurfNormal coordinates (a failed angle is 0)
             let ang = if opposite_count == 0 || opposite_count == 2 {

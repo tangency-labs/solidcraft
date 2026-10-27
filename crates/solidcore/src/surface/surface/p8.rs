@@ -1853,7 +1853,7 @@ impl Surface {
                 // (the drop's trace gets the surface's cache, `smsurf_GetSurfaceCache`:
                 // the caller's, else the face's through a face-aware context)
                 let mut from_context;
-                let held = match (held, context) {
+                let held = match (held, context.as_deref_mut()) {
                     (Some(c), _) => Some(c),
                     (None, Some(context)) if self.face()?.is_some() => {
                         from_context = context.build_surface_cache(k, self, surface)?;
@@ -1876,7 +1876,9 @@ impl Surface {
                 let mut uv_curves: Vec<Curve> = dropped.uv_curves;
 
                 // If the curve is entirely interior to the surface, then
-                // DropAndTrimCurve won't find it; in that case use DropCurve.
+                // DropAndTrimCurve won't find it; in that case use DropCurve. (Its trace
+                // gets the surface's cache as above: the face's through a face-aware
+                // context, whose point test classifies against the face.)
                 if uv_curves.is_empty() {
                     let (curves, dist, _deviation) = surface_drop_curve(
                         k,
@@ -1886,7 +1888,10 @@ impl Surface {
                         &line_interval_used,
                         distance_tolerance,
                         false,
-                        None::<DropSolveContext<'_, NoObject>>,
+                        context.as_mut().map(|solver| DropSolveContext {
+                            solver: &mut **solver,
+                            handle: surface,
+                        }),
                     )?;
                     uv_curves = curves;
                     dist_to_surface = dist;

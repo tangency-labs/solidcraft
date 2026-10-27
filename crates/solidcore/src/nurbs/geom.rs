@@ -66,11 +66,12 @@
 //!   [`project_pt_line`] return a [`LinePlaneIsect`] that carries the parameter only
 //!   when upstream sets it; [`dist_perp_pt_line_seg`] returns `None` where upstream
 //!   writes `-1.0`.
-//! - [`project_pt_plane`] and [`dist_pt_inf_line`] read an intersection point that
-//!   upstream leaves uninitialised when the (unbounded) line along the normal does
-//!   not hit the plane. That cannot happen for finite input (the line direction and
-//!   the plane normal are the same unit vector); the Rust functions return
-//!   `InvalidInput` there instead of reading garbage.
+//! - [`project_pt_plane`] reads an intersection point that upstream leaves
+//!   uninitialised when the (unbounded) line along the normal does not hit the plane.
+//!   That cannot happen for finite input (the line direction and the plane normal are
+//!   the same unit vector); the Rust function returns `InvalidInput` there instead of
+//!   reading garbage. ([`dist_pt_inf_line`] starts its point at the origin, as upstream
+//!   does.)
 //! - [`dist_pt_line_seg`] leaves the distance unwritten when the position tests are
 //!   all false (NaN coordinates); the Rust function returns NaN.
 //!   [`cpts_are_colinear`] (3D) ignores the error of `N_DistPtLineSeg` and then reads
@@ -114,7 +115,6 @@ const OP_ISECT_LP: &str = "nurbs::geom::isect_line_plane";
 const OP_PROJECT_PLANE: &str = "nurbs::geom::project_pt_plane";
 const OP_DIST_LSEG: &str = "nurbs::geom::dist_pt_line_seg";
 const OP_DIST_PERP: &str = "nurbs::geom::dist_perp_pt_line_seg";
-const OP_DIST_INF: &str = "nurbs::geom::dist_pt_inf_line";
 const OP_BBOX: &str = "nurbs::geom::polygon_bbox";
 const OP_NET_BBOX: &str = "nurbs::geom::net_bbox";
 const OP_ROTATION: &str = "nurbs::geom::rotation_matrix_about_axis";
@@ -645,15 +645,12 @@ pub fn dist_pt_inf_line(lsg: LineSeg, p: Vec3) -> Result<f64> {
         bounded: false,
         ..lsg
     };
-    match project_pt_line(lsg, p)? {
-        LinePlaneIsect::Hit { p: q, .. } => Ok(dist_pt_pt(p, q)),
-        LinePlaneIsect::Parallel | LinePlaneIsect::OutOfBounds { .. } => {
-            Err(SolidError::InvalidInput {
-                operation: OP_DIST_INF,
-                reason: "projection misses the line (upstream reads an unset point)",
-            })
-        }
-    }
+    // `Q` starts at the origin: a projection that misses the line leaves it there
+    let q = match project_pt_line(lsg, p)? {
+        LinePlaneIsect::Hit { p: q, .. } => q,
+        LinePlaneIsect::Parallel | LinePlaneIsect::OutOfBounds { .. } => Vec3::new(0.0, 0.0, 0.0),
+    };
+    Ok(dist_pt_pt(p, q))
 }
 
 /// `a*x + b*y + c*z + d` (`N_DistSignedPtPlane`).

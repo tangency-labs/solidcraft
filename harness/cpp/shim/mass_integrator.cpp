@@ -188,6 +188,10 @@ SC_EXPORT int32_t sc_mass_integrator_face(int32_t op,int32_t kind,const double* 
         if(st==SM_SUCCESS){
             // Export integration inputs only: actual UV domain and bbox-derived scale.
             result.push_back(d*d/100.0);
+            // ComputePreciseProperties' own face box, taken after the oriented trims.
+            SmExtent3d fbox;face->CalculateBoundingBox(fbox);
+            result.push_back(fbox.GetMin().x);result.push_back(fbox.GetMin().y);result.push_back(fbox.GetMin().z);
+            result.push_back(fbox.GetMax().x);result.push_back(fbox.GetMax().y);result.push_back(fbox.GetMax().z);
             SmExtent2d domain=face->GetUVDomain();
             result.push_back(domain.GetMin().x);result.push_back(domain.GetMin().y);
             result.push_back(domain.GetMax().x);result.push_back(domain.GetMax().y);

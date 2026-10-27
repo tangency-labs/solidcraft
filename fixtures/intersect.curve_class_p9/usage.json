@@ -2,7 +2,7 @@
   "cases": [
     {
       "name": "isolated_vertex_uv",
-      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3040 (my_test_get_loop_crossings vertex-loop recipe, isolated boundary)",
+      "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:370 (my_test_get_loop_crossings vertex-loop recipe, isolated boundary)",
       "inputs": {
         "op": 1,
         "vertices": [
@@ -16,7 +16,7 @@
     },
     {
       "name": "isolated_vertex_3d",
-      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3040 (my_test_get_loop_crossings vertex-loop recipe, isolated boundary)",
+      "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:370 (my_test_get_loop_crossings vertex-loop recipe, isolated boundary)",
       "inputs": {
         "op": 1,
         "check3d": true,
@@ -109,7 +109,7 @@
     },
     {
       "name": "trim_rectangle_interior",
-      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3015 (my_test_get_loop_crossings rectangular sheet, restricted interior subdomain)",
+      "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:345 (my_test_get_loop_crossings rectangular sheet, restricted interior subdomain)",
       "inputs": {
         "op": 1,
         "rectangle": true

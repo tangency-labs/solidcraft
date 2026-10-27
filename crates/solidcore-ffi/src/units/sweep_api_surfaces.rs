@@ -47,7 +47,8 @@
 //! where upstream takes `SmBSplineCurve*` and no `NULL` curve where upstream dereferences it unchecked (all but
 //! `Revolution` and `SkinPrimitive`); `SmApiCreateCurve` with at least 4 points and
 //! positive arc / circle radii (a failing constructor is `SC_ERR_ARG`); at most 12
-//! skin profiles; a skin-from-faces degree of 1 to 3 with 1 to 4 positive-radius
+//! skin profiles; a skin-from-faces degree of 0 to 3 or 18 to 2^20 (outside 1 to 17 the
+//! API returns `SM_ERR_INVALID_INPUT` first) with 1 to 4 positive-radius
 //! circles (no faces crash upstream, `plan/upstream-issues.md` UB-78).
 
 use crate::validate::{bad, NOW, NOZ};
@@ -518,8 +519,9 @@ fn encode(call: &Call) -> Result<Vec<f64>, FfiError> {
             if circles.is_empty() || circles.len() > 4 {
                 return Err(bad("skin from faces: need 1 to 4 faces"));
             }
-            if !(1..=3).contains(degree) {
-                return Err(bad("skin from faces: degree must be 1 to 3"));
+            // 0 and above NL_MAXDEG are refused by the API before any work
+            if (4..=MAX_DEGREE as u64).contains(degree) || *degree > 1 << 20 {
+                return Err(bad("skin from faces: degree must be 0 to 3 or above 17"));
             }
             o.extend([7.0, circles.len() as f64]);
             for (center, radius) in circles {

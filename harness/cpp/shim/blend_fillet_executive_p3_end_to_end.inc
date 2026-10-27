@@ -418,6 +418,75 @@ SC_EXPORT int32_t sc_blend_fillet_executive_p3_surface_surface_bodies(
     SC_CATCH
 }
 
+#include <SmPlane.h>
+
+// tangency-labs/solidcore#460 comparison: the real_solid wire, then the shell distance
+// and an open-top flag (1 = the plane faces at z = the box's height are removed, 0 =
+// closed). Fillets the box as real_solid does, then SmApiShellBrepFull(distance,
+// extended convex edges, merged results, no offset solid). Record: fillet status,
+// shell status, then for a shell result its vertex/edge/face counts, the manifold
+// query's status and flag, and the mass status with area, volume and mass.
+SC_EXPORT int32_t sc_blend_fillet_executive_p3_fillet_then_shell(
+    const double* input, int64_t n, double* out, int64_t cap, int64_t* out_len) {
+    if (!input || n < 11) return SC_ERR_ARG;
+    for (int64_t i=0; i<n; ++i) if (!std::isfinite(input[i])) return SC_ERR_ARG;
+    for (int i=0; i<3; ++i) if (input[i] <= SM_EFF_ZERO) return SC_ERR_ARG;
+    const double ulong_limit=std::ldexp(1.0,std::numeric_limits<ULONG>::digits);
+    for (int i : {4,5}) if (input[i] < 0 || std::floor(input[i]) != input[i]
+        || input[i] >= ulong_limit) return SC_ERR_ARG;
+    const int64_t m=n-2; // the real_solid wire
+    if (input[7] < 1 || std::floor(input[7]) != input[7]
+        || input[7] != double(m-8)) return SC_ERR_ARG;
+    const double distance=input[m];
+    const double open_top=input[m+1];
+    if (open_top != 0.0 && open_top != 1.0) return SC_ERR_ARG;
+    SC_TRY
+    SmBrep* raw=nullptr;
+    if (SmApiCreateBox(SmVector3d(0,0,0),input[0],input[1],input[2],raw) != SM_SUCCESS || !raw)
+        return SC_ERR_ARG;
+    std::unique_ptr<SmBrep> body(raw);
+    SmTArray<SmEdge*> edges, selected; body->GetEdges(edges);
+    for (int64_t i=8; i<m; ++i) {
+        if (input[i] < 0 || input[i] >= edges.GetSize() || std::floor(input[i]) != input[i]) return SC_ERR_ARG;
+        selected.Add(edges[ULONG(input[i])]);
+    }
+    std::vector<double> values;
+    const auto filleted=SmApiFilletEdges(body.get(),selected,input[3],ULONG(input[4]),ULONG(input[5]),input[6]);
+    values.push_back(fillet_real_solid::status(filleted));
+    if (filleted == SM_SUCCESS) {
+        SmTArray<const SmFace*> open;
+        if (open_top == 1.0) {
+            SmTArray<SmFace*> faces; body->GetFaces(faces);
+            for (ULONG i=0; i<faces.GetSize(); ++i) {
+                SmSurface* surface=faces[i]->GetSurface();
+                if (!surface || !surface->IsKindOf(SmPlane_TYPE)) continue;
+                SmPoint3d p;
+                if (surface->EvaluatePoint(faces[i]->GetUVDomain().GetMid(),p) == SM_SUCCESS
+                    && std::fabs(p.z-input[2]) < 1e-6) open.Add(faces[i]);
+            }
+        }
+        SmBrep* shelled=nullptr;
+        const auto shell=SmApiShellBrepFull(body.get(),distance,TRUE,TRUE,FALSE,open,shelled);
+        std::unique_ptr<SmBrep> result(shelled);
+        values.push_back(fillet_real_solid::status(shell));
+        values.push_back(double(open.GetSize()));
+        if (shell == SM_SUCCESS && result) {
+            fillet_real_solid::counts(values,result.get());
+            SmBoolean manifold=FALSE;
+            const auto manifold_status=SmApiBrepIsManifoldSolid(result.get(),manifold);
+            values.insert(values.end(),{fillet_real_solid::status(manifold_status),double(manifold != FALSE)});
+            double area,volume,mass; SmPoint3d centroid; SmVector3d inertia,products;
+            const auto mass_status=SmApiBrepComputeMassProperties(result.get(),1e-4,1.0,SmPoint3d(0,0,0),area,volume,mass,centroid,inertia,products);
+            values.push_back(fillet_real_solid::status(mass_status));
+            if (mass_status == SM_SUCCESS) values.insert(values.end(),{area,volume,mass});
+            std::vector<double> geometry; primitive_record::append(geometry,result.get());
+            fillet_real_solid::section(values,geometry);
+        }
+    }
+    return sc_copy_out(values.data(),int64_t(values.size()),out,cap,out_len);
+    SC_CATCH
+}
+
 #include <SmFilletCorner.h>
 #include <SmFilletGeom.h>
 #include <SmFilletSolver.h>

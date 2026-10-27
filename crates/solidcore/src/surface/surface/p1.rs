@@ -1333,6 +1333,8 @@ impl Surface {
             }
             (SurfaceKind::SurfOfExtrusion(a), SurfaceKind::SurfOfExtrusion(b)) => a.approx_eq(k, b),
             (SurfaceKind::SrfInVolume(a), SurfaceKind::SrfInVolume(b)) => a.approx_eq(k, b),
+            (SurfaceKind::Sphere(a), SurfaceKind::Sphere(b)) => Ok(a.approx_eq(b)),
+            (SurfaceKind::Torus(a), SurfaceKind::Torus(b)) => Ok(a.approx_eq(b)),
             _ => Ok(false),
         }
     }
@@ -4177,6 +4179,29 @@ mod tests {
             )
             .unwrap(),
         )
+    }
+
+    #[test]
+    fn approx_eq_compares_spheres_and_tori_by_their_own_operator() {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::surface::sphere::Sphere;
+        use crate::surface::torus::{Torus, TorusOptions};
+        let k = &Kernel::default();
+        let frame = Axis2Placement::IDENTITY;
+        let sphere = |r: f64| Surface::from(Sphere::create_canonical(k, &frame, r).unwrap());
+        let torus = |major: f64, minor: f64| {
+            Surface::from(
+                Torus::create_canonical(k, &frame, major, minor, TorusOptions::default(), None)
+                    .unwrap(),
+            )
+        };
+        // distinct objects, so the pointer-identity shortcut does not apply
+        assert!(sphere(2.0).approx_eq(k, &sphere(2.0)).unwrap());
+        assert!(torus(4.0, 0.5).approx_eq(k, &torus(4.0, 0.5)).unwrap());
+        assert!(!sphere(2.0).approx_eq(k, &torus(4.0, 0.5)).unwrap());
+        assert!(!torus(4.0, 0.5).approx_eq(k, &sphere(2.0)).unwrap());
+        assert!(!sphere(2.0).approx_eq(k, &sphere(3.0)).unwrap());
+        assert!(!torus(4.0, 0.5).approx_eq(k, &torus(4.0, 0.75)).unwrap());
     }
 
     #[test]

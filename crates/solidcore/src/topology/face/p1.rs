@@ -61,8 +61,9 @@
 //!   [`MoveSeamResult`] / [`SeamSplit`]. Statuses upstream ignores (curve
 //!   `EvaluateGeometric`, `DropPoint`, `DropVectors`, `ComputeUVPoint`, `GetKnots`,
 //!   `SmPeriodicExtent1d::SetMinMax` / `AddInterval`, `CopyAndAddAnalytics`, the
-//!   recursive `SplitAtSeam` / `HasSeamProblem` / `MergeIntervals` of `SplitAtSeam`) are
-//!   ignored; [`SolidError::Unported`] always propagates. A failed drop leaves the UV
+//!   recursive `SplitAtSeam` / `HasSeamProblem` of `SplitAtSeam`) are ignored
+//!   (`SplitAtSeam`'s `MergeIntervals` statuses are checked); [`SolidError::Unported`]
+//!   always propagates. A failed drop leaves the UV
 //!   point undefined (upstream's initial `rResultUV`). An empty vertex use list in the
 //!   full-period branch of `MoveSeam` is [`SolidError::InvalidInput`] (upstream reads
 //!   index 0 of an empty array), and the paired vertex use loop does not underflow on
@@ -172,6 +173,9 @@ use crate::topology::{
 };
 
 const OP: &str = "topology::face::p1";
+
+/// Upstream `SM_ERR_ASSERT_FAILURE` (`SmMessages.h`).
+const SM_ERR_ASSERT_FAILURE: i32 = 1005;
 
 /// The deepest [`split_at_seam`] recursion accepted (upstream recurses once, from a U
 /// merge into the V merges of the faces it made).
@@ -347,15 +351,9 @@ fn merge_intervals<O: LoopObject>(
     f: FaceId,
     resolve: &dyn Fn(O) -> Option<EntityRef>,
 ) -> Result<SeamSplit> {
-    // (the merge's status is ignored, as upstream, keeping what it made before a
-    // failure; a handle the objects cannot resolve is caller error and propagates)
-    let merged = match crate::topology::face::p4::merge_seam_intervals(k, b, f, dir, c)? {
-        Ok(merged) => merged,
-        Err(e) if e.error.is_unported() || matches!(e.error, SolidError::InvalidInput { .. }) => {
-            return Err(e.error)
-        }
-        Err(e) => *e.merged,
-    };
+    // (SER: a failing merge returns its status)
+    let merged =
+        crate::topology::face::p4::merge_seam_intervals(k, b, f, dir, c)?.map_err(|e| e.error)?;
     let objects = BrepSeamObjects::new(k, &*b, f)?;
     let resolve = |o: O| objects.entity(o).or_else(|| resolve(o));
     let mut out = SeamSplit::default();
@@ -914,7 +912,7 @@ pub fn find_if_rectangular_trim(
 
     let min = Point2::new(uv_bbox.min().x, uv_bbox.min().y);
     let max = Point2::new(uv_bbox.max().x, uv_bbox.max().y);
-    let nat_domain = surface_deref(b, f)?.natural_uv_domain();
+    let nat_domain = surface_deref(b, f)?.natural_uv_domain_with_nurb(k)?;
 
     // set output (SetMinMax's status ignored)
     let _ = out
@@ -1152,7 +1150,8 @@ fn remove_uv_trim_curves_notifying(
 
 /// `SwapUV`: transposes the face's UV domain, mirrors every UV trim curve about the
 /// `u = v` line, swaps the surface's `u` and `v` and makes the other face use and loop
-/// uses primary (reversing the face).
+/// uses primary (reversing the face). The mirrors are made before anything changes, so a
+/// failing mirror leaves the face unchanged.
 ///
 /// # Errors
 ///
@@ -1203,26 +1202,13 @@ fn swap_uv_notifying(
     // x:[1 1 0] y:[0 0 1] z=cross(x,y):[1 -1 0] (status ignored)
     let _ = mirror.set_canonical(Point3::new(0.0, 0.0, 0.0), x_axis, Vec3::new(0.0, 0.0, 1.0));
 
-    // Transpose the Face->UVDomain
-    let d = fp2::uv_domain(b, f)?;
-    let transpose = Extent2d::from_points(
-        Point2::new(d.min().y, d.min().x),
-        Point2::new(d.max().y, d.max().x),
-    );
-    fp2::set_uv_domain(b, f, &transpose)?;
+    // Mirror the UV trims and swap the surface (the steps that can fail) before changing
+    // the face, so that a failure leaves the face unchanged.
 
     let upward = upward_loopuses(b, f)?;
 
-    // prepare to Edit
-    notify(b, NotifyOperation::PreEdit)?;
-
     let mut to_set: Vec<(EdgeuseId, Curve)> = Vec::new();
-    for lu in upward {
-        // Swap primary and secondary loopuses
-        let l = lu1::loop_(b, lu)?.ok_or_else(|| null("loop use without loop"))?;
-        let mate = lu1::other_loopuse(b, lu)?;
-        b.loop_mut(l)?.loopuse = mate;
-
+    for &lu in &upward {
         // for every Edgeuse mated pair - mirror the UVTrimCurve
         for eu in eu1::loopuse_edgeuses(b, lu)? {
             if let Some(uv) = eu1::uv_trim_curve(b, eu)?.0 {
@@ -1271,12 +1257,30 @@ fn swap_uv_notifying(
         }
     }
 
+    // prepare to Edit
+    notify(b, NotifyOperation::PreEdit)?;
+
     // swap theSurface UV orientation
     b.face_mut(f)?
         .surface
         .as_mut()
         .ok_or_else(|| null("face without surface"))?
         .swap_uv(k)?;
+
+    // Transpose the Face->UVDomain
+    let d = fp2::uv_domain(b, f)?;
+    let transpose = Extent2d::from_points(
+        Point2::new(d.min().y, d.min().x),
+        Point2::new(d.max().y, d.max().x),
+    );
+    fp2::set_uv_domain(b, f, &transpose)?;
+
+    // Swap primary and secondary loopuses
+    for &lu in &upward {
+        let l = lu1::loop_(b, lu)?.ok_or_else(|| null("loop use without loop"))?;
+        let mate = lu1::other_loopuse(b, lu)?;
+        b.loop_mut(l)?.loopuse = mate;
+    }
 
     for (eu, c) in to_set {
         // status ignored upstream
@@ -1378,7 +1382,7 @@ fn shrink_geometry_notifying(
     let tol = face_domain.size().length() / 1000.0;
 
     // get surface's current natural UVDomain
-    let surf_domain = surface_deref(b, f)?.natural_uv_domain();
+    let surf_domain = surface_deref(b, f)?.natural_uv_domain_with_nurb(k)?;
 
     // If the face domain is dTol close within surface domain, choose the surface domain
     let mut min = face_domain.min();
@@ -2065,13 +2069,18 @@ fn order(a: f64, b: f64) -> (f64, f64) {
 /// V). `crv_class_u` / `crv_class_v` and `problem` come from `HasSeamProblem` (they are
 /// rebuilt over all loops when they were made for target loops only); `props`
 /// replaces the surface periodicity and missing-seam verdict when given; `resolve` maps
-/// a classification object to the face, edge or vertex it names.
+/// a classification object to the face, edge or vertex it names. A whole closed surface
+/// that had only vertex loops ([`fp3::is_closed_surface_with_vertex_loops`]) needs no
+/// pole vertices or loop orientation beforehand: afterwards its only edge loop is the
+/// outer loop (heading the face uses' lists) and its vertex loops are inner.
 ///
 /// # Errors
 ///
 /// [`SolidError::InvalidInput`] for a face without surface or a recursion deeper than
-/// [`MAX_SPLIT_AT_SEAM_DEPTH`]; those of [`Surface::is_periodic`] and
-/// [`fp2::remove_suspect_split_at_seam_uv_trim_curves`]; [`SolidError::Unported`]
+/// [`MAX_SPLIT_AT_SEAM_DEPTH`]; those of [`Surface::is_periodic`],
+/// [`fp2::remove_suspect_split_at_seam_uv_trim_curves`] and `MergeIntervals`;
+/// `SM_ERR_ASSERT_FAILURE` for a vertex-only closed surface left with two edge loops,
+/// `SM_ERR_NULL_POINTER` for one left with none; [`SolidError::Unported`]
 /// (`HasSeamProblem`; the deferrals of `MergeIntervals`' callees).
 #[allow(clippy::too_many_arguments)] // one upstream routine
 pub fn split_at_seam<O: LoopObject>(
@@ -2158,6 +2167,8 @@ fn split_at_seam_depth<O: LoopObject>(
         return Ok(out);
     }
 
+    let vertex_only_closed_surface = fp3::is_closed_surface_with_vertex_loops(k, b, f, props)?;
+
     let merge_u = names(problem.crossed, Sp::U) || names(problem.missing, Sp::U);
     let merge_v = names(problem.crossed, Sp::V) || names(problem.missing, Sp::V);
 
@@ -2178,15 +2189,27 @@ fn split_at_seam_depth<O: LoopObject>(
         resolve,
         depth,
         (merge_u, merge_v),
+        vertex_only_closed_surface,
     );
     b.set_editing_enabled(editing);
     k.context.set_doing_boolean(doing_boolean);
     r
 }
 
+/// `GetLast()`'s index of a classification of `size` intervals (the callers check
+/// `GetSize() > 0` first); an empty one is `SM_ERR_ASSERT_FAILURE`.
+fn last_index(size: usize) -> Result<usize> {
+    size.checked_sub(1).ok_or(SolidError::Upstream {
+        operation: OP,
+        code: SM_ERR_ASSERT_FAILURE,
+        entity: None,
+    })
+}
+
 /// The merges of [`split_at_seam_depth`] (`merge` = `(bMergeU, bMergeV)`), with the
-/// B-rep's editing and the context's Boolean flag set.
-#[allow(clippy::too_many_arguments)]
+/// B-rep's editing and the context's Boolean flag set; then, for a closed surface that
+/// had only vertex loops, the inserted seams' loop becomes the outer loop.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn split_at_seam_merges<O: LoopObject>(
     k: &mut Kernel,
     b: &mut Brep,
@@ -2197,6 +2220,7 @@ fn split_at_seam_merges<O: LoopObject>(
     resolve: &dyn Fn(O) -> Option<EntityRef>,
     depth: usize,
     (merge_u, merge_v): (bool, bool),
+    vertex_only_closed_surface: bool,
 ) -> Result<SeamSplit> {
     use SurfParamType as Sp;
     let mut out = SeamSplit::default();
@@ -2259,6 +2283,39 @@ fn split_at_seam_merges<O: LoopObject>(
             }
         }
     } else if merge_v {
+        // A nonseparating U seam leaves the face intact. Keep the known interior
+        // classification of V and attach its ends to the shared seam vertex. Either seam
+        // may be divided at existing vertices; carry the corner between the complete
+        // walks without changing intermediate classifications. Reclassifying this
+        // intermediate two-boundary face loses the V interior.
+        if merge_u && !this_new.edges.is_empty() && crv_class_u.size() > 0 && crv_class_v.size() > 0
+        {
+            let first_u = &crv_class_u.at(0)?.start;
+            let last_u = &crv_class_u.at(last_index(crv_class_u.size())?)?.end;
+            if first_u.point_class() == PointClassType::Vertex
+                && last_u.point_class() == PointClassType::Vertex
+                && first_u.object() == last_u.object()
+            {
+                let corner = first_u.vertex_object();
+                let this = O::from_face(f);
+                let last_v = last_index(crv_class_v.size())?;
+                for (interval, at_start) in [(0, true), (last_v, false)] {
+                    let ivl = crv_class_v.at_mut(interval)?;
+                    let end = if at_start {
+                        &mut ivl.start
+                    } else {
+                        &mut ivl.end
+                    };
+                    if end.point_class() == PointClassType::Face && end.object() == this {
+                        end.set_class_object(PointClassType::Vertex, corner);
+                    }
+                }
+            }
+        }
+        if merge_u {
+            out.edges.extend_from_slice(&this_new.edges);
+            out.vertices.extend_from_slice(&this_new.vertices);
+        }
         fp2::remove_suspect_split_at_seam_uv_trim_curves(b, crv_class_v, |o| match resolve(o) {
             Some(EntityRef::Vertex(v)) => Some(v),
             _ => None,
@@ -2267,6 +2324,57 @@ fn split_at_seam_merges<O: LoopObject>(
         out.faces.extend_from_slice(&this_new.faces);
         out.edges.extend_from_slice(&this_new.edges);
         out.vertices.extend_from_slice(&this_new.vertices);
+    }
+
+    if vertex_only_closed_surface {
+        // Seam insertion makes the only edge loop the natural outer boundary. Any
+        // original vertices off the seams remain inner vertex loops.
+        let loops = fp2::loops(b, f, false, None)?;
+        let mut outer_loop: Option<LoopId> = None;
+        for &l in &loops {
+            let (lu, _) = lu1::loop_loopuses(b, l)?;
+            if !lu1::is_vertex_loopuse(b, lu)? {
+                // AERN(pOuterLoop == NULL, SM_ERR_ASSERT_FAILURE)
+                if outer_loop.is_some() {
+                    return Err(SolidError::Upstream {
+                        operation: OP,
+                        code: SM_ERR_ASSERT_FAILURE,
+                        entity: None,
+                    });
+                }
+                outer_loop = Some(l);
+            }
+        }
+        let Some(outer_loop) = outer_loop else {
+            return Err(SolidError::null_pointer(OP));
+        };
+        face_notify(b, f, NotifyOperation::PreEdit)?;
+        for &l in &loops {
+            let (lu, mate) = lu1::loop_loopuses(b, l)?;
+            let mate = mate.ok_or_else(|| null("SplitAtSeam: loop use without mate"))?;
+            for side in [lu, mate] {
+                let orientation = if l == outer_loop {
+                    OrientType::Same
+                } else {
+                    OrientType::Opposite
+                };
+                lu1::set_orientation(b, side, orientation)?;
+                if l == outer_loop {
+                    // pUses[lSide]->GetFaceuse()->SetList(pUses[lSide]): the loop use
+                    // heads its face use's circular list
+                    let fu = lu1::faceuse(b, side)?
+                        .ok_or_else(|| null("SplitAtSeam: loop use without face use"))?;
+                    let list = &mut b.faceuse_mut(fu)?.loopuses;
+                    let at = list
+                        .iter()
+                        .position(|&x| x == side)
+                        .ok_or_else(|| null("SplitAtSeam: loop use not on its face use"))?;
+                    list.rotate_left(at);
+                }
+            }
+        }
+        remove_uv_trim_curves(b, f)?;
+        face_notify(b, f, NotifyOperation::PostEdit)?;
     }
     Ok(out)
 }

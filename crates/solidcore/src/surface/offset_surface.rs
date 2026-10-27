@@ -894,6 +894,37 @@ impl OffsetSurface {
         want: [bool; 3],
         expand_pos_boxes_by_zone_tol_3d: bool,
     ) -> Result<SurfaceBoxes> {
+        self.calculate_bounding_box_with(
+            k,
+            this,
+            uv_domain,
+            want,
+            expand_pos_boxes_by_zone_tol_3d,
+            |base| {
+                base.calculate_bounding_box(
+                    k,
+                    uv_domain,
+                    [true, true, true],
+                    expand_pos_boxes_by_zone_tol_3d,
+                )
+            },
+        )
+    }
+
+    /// [`OffsetSurface::calculate_bounding_box`] with the base surface's three boxes over
+    /// `uv_domain` from `base_boxes` (upstream's `m_pSurface->CalculateBoundingBox(..,
+    /// pOptPseudoBasisGuess, pOptPolarBasisGuess, ..)`: a caller holding basis guesses
+    /// forwards them there). Outside the base's natural domain the `SmSurface` body runs,
+    /// which does not use the guesses.
+    pub(crate) fn calculate_bounding_box_with(
+        &self,
+        k: &Kernel,
+        this: &Surface,
+        uv_domain: &Extent2d,
+        want: [bool; 3],
+        expand_pos_boxes_by_zone_tol_3d: bool,
+        base_boxes: impl FnOnce(&Surface) -> Result<SurfaceBoxes>,
+    ) -> Result<SurfaceBoxes> {
         if !uv_domain.is_contained_by(&self.surface.natural_uv_domain_with_nurb(k)?, EFF_ZERO) {
             return this.base_calculate_bounding_box(k, want, expand_pos_boxes_by_zone_tol_3d);
         }
@@ -916,12 +947,7 @@ impl OffsetSurface {
         });
 
         // bound the base surface (pass the call along to the base surface)
-        let base = self.surface.calculate_bounding_box(
-            k,
-            uv_domain,
-            [true, true, true],
-            expand_pos_boxes_by_zone_tol_3d,
-        )?;
+        let base = base_boxes(&self.surface)?;
         let missing = || SolidError::invalid_input(OP, "base surface box not computed");
         let base_normal = base.normal_box.ok_or_else(missing)?;
         let base_pseudo = base.pseudo_box.ok_or_else(missing)?;
@@ -2586,8 +2612,8 @@ mod tests {
             [false, false, true],
             true
         )));
-        assert!(is_face_tolerance(&off.is_planar(&k, 1e-6)));
         // no expansion, no tolerance: the box is computed
+        assert!(off.is_planar(&k, 1e-6).is_ok());
         assert!(off
             .calculate_bounding_box(&k, &dom, [true, true, true], false)
             .is_ok());

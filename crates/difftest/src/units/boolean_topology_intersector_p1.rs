@@ -4374,10 +4374,15 @@ fn run_part2_op(
                     return Ok(());
                 }
             }
-            let Some(made) = status(ti.close_intersection_loop(k, two, bv), o)? else {
+            let (mut dv, mut de) = (Vec::new(), Vec::new());
+            let Some(made) = status(ti.close_intersection_loop(k, two, bv, &mut dv, &mut de), o)?
+            else {
                 return Ok(());
             };
             o.push(flag(made));
+            // (the counts of the vertices and edges its squeezes deleted)
+            o.push(dv.len() as f64);
+            o.push(de.len() as f64);
             // (the shim's read-back: the other mate of each edge of the vertex)
             let bv = bv.ok_or_else(|| Fail::Harness(harness("success without a vertex")))?;
             let edges = two.vertex_edges(bv)?;
@@ -4630,7 +4635,7 @@ fn domain(s: &SrfIn) -> [f64; 4] {
 pub(super) fn gen_brep(rng: &mut Rng) -> BrepIn {
     match rng.below(10) {
         0..=5 => BrepIn::File {
-            file: (*rng.choose(&FILES).unwrap_or(&"SmallBox.smb")).to_string(),
+            file: (*rng.choose(&FILES).unwrap_or(&"SmallBox.smp")).to_string(),
             rebuild: rng.chance(0.2),
         },
         6 => {

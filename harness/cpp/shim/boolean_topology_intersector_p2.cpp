@@ -612,11 +612,16 @@ bool run_extra_op(int64_t op, Rd& rd, Two& t, SmTopologyIntersector* ti, SmProto
             return true;
         }
         SmBoolean made = FALSE;
-        SmStatus s = ti->CloseIntersectionLoop(bv, made);
+        SmTArray<SmVertex*> dv;
+        SmTArray<SmEdge*> de;
+        SmStatus s = ti->CloseIntersectionLoop(bv, made, dv, de);
         o.push_back(st(s));
         if (s != SM_SUCCESS)
             return true;
         o.push_back(flg(made));
+        // the counts of the vertices and edges its squeezes deleted
+        o.push_back((double)dv.GetSize());
+        o.push_back((double)de.GetSize());
         // the relationships it made: the other mate of each edge of the vertex (op 6
         // cannot follow an op that may change topology)
         SmTArray<SmEdge*> es;

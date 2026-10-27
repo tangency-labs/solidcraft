@@ -266,19 +266,6 @@ SC_EXPORT int32_t sc_primitive_primitive_creation_p1_eval(int32_t op, const doub
                         curves.Add(curve);
                     }
                 }
-                if(data[1]<0) {
-                    // The full-circle/cylinder branch hangs on its reversed V
-                    // domain. Preserve negative line/open-arc sweeps: only this
-                    // exact upstream branch is excluded (plan/upstream-issues.md).
-                    for(ULONG i=0;i<curves.GetSize();++i) {
-                        if(curves[i]->IsLinear()) continue;
-                        SmAxis2Placement arc_frame;
-                        double radius=0,start=0,end=0;
-                        if(curves[i]->IsArc(8,b.GetTolerance(),arc_frame,radius,start,end)
-                           && end-start<360.0+b.GetTolerance() && end-start>360.0-b.GetTolerance()
-                           && arc_frame.GetZAxis().IsParallelTo(frame.GetZAxis(),0.5)) return -1010;
-                    }
-                }
                 cleanup.Clear(); // CreateLinearSweep consumes every input, including on error.
                 status=primitive.CreateLinearSweep(curves,frame.GetZAxis(),data[1],data[7]!=0);
             }

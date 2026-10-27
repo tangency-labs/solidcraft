@@ -22,11 +22,9 @@
 //!   crosses the edge its end lies on (`crossing_sine`).
 //! - **Removed proto edges** (SolidCraft fix, tangency-labs/smlib 93efd6d, UB-239).
 //!   Upstream's `SplitIntersectingProtoEdges` deletes the combined-away proto edge while
-//!   proto faces (coincident lists) and other proto edges (overlap lists) still name
-//!   it, and `GlueCoincidentBrepVertices` reads it after the free. Here the faces it
-//!   bounded get the surviving edge first
-//!   ([`ProtoTopologyManager::hand_over_coincident_proto_edge`]), and every reference
-//!   to it is dropped before the delete ([`ProtoTopologyManager::forget_proto_edge`],
+//!   other proto edges (overlap lists) still name it (`CombineProtoEdge` hands its
+//!   proto faces to the survivor), and later passes read it after the free. Here every
+//!   reference to it is dropped before the delete ([`ProtoTopologyManager::forget_proto_edge`],
 //!   part 1), here and in `ResolveOverlappingProtoEdges`. The fork does that inside
 //!   `RemoveProtoEdge`; the port does it at these library deletes, so unlisting or
 //!   deleting a proto edge on its own (the difftest's script ops) stays upstream's.
@@ -963,10 +961,6 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     pe2_to_combine,
                 ))?;
 
-                // ProtoFaces bounded by the combined-away PE are bounded by the
-                // survivor now (SolidCraft change, tangency-labs/smlib 93efd6d)
-                self.hand_over_coincident_proto_edge(pe1_to_combine, pe2_to_combine);
-
                 ignore_soft(self.remove_proto_edge(pe2_to_combine))?;
                 self.forget_proto_edge(pe2_to_combine);
                 deleted.extend(self.delete_proto_edge_object(pe2_to_combine));
@@ -1203,9 +1197,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                                             ignore_soft(mates.remove_relationship(edge, m))?;
                                         }
                                         if let Some(m) = vertex_mate {
-                                            // (upstream uses the Brep 2 vertex in both
-                                            // B-reps)
-                                            ignore_soft(mates.remove_relationship(b2v2, m))?;
+                                            ignore_soft(mates.remove_relationship(v2, m))?;
                                         }
                                         let found =
                                             self.find_edge_definition_from_edge(Some(edge), which)?;
@@ -1324,11 +1316,10 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                                     .ok_or(dangling("proto edge is deleted"))?
                                     .remove_edge_definition(ed),
                             )?;
-                            deleted_curves.extend(
-                                self.edge_def_mut(ed)
-                                    .ok_or(dangling("edge definition is deleted"))?
-                                    .destruct(),
-                            );
+                            // No Destruct(): this EdgeDefinition was imprinted, so its
+                            // curves belong to the Breps' Edges (the deleted Edge took
+                            // its own along). The destructor deletes only the curves no
+                            // Brep took.
                             deleted_curves.extend(self.delete_edge_definition(ed));
                         }
                         // (the index advances past the element that moved down)
@@ -1434,12 +1425,13 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 }
             }
 
-            // PFs keep a list of coincident PEs.
+            // PFs keep a list of coincident PEs. Check every ProtoFace: the group can be
+            // coincident with more than one, and its PEs are deleted below.
             let mut replace_coin_pe = false;
-            let mut coin_pf: Option<ProtoFaceId> = None;
+            // every ProtoFace that listed a PE of the group
+            let mut replace_pfs: Vec<ProtoFaceId> = Vec::new();
             let pfs: Vec<ProtoFaceId> = self.proto_faces().to_vec();
             for &pf in &pfs {
-                coin_pf = Some(pf);
                 let face = self
                     .proto_face_mut(pf)
                     .ok_or(dangling("proto face is deleted"))?;
@@ -1448,7 +1440,7 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                 list.retain(|p| !group.contains(p));
                 if list.len() != size {
                     replace_coin_pe = true;
-                    break;
+                    replace_pfs.push(pf);
                 }
             }
 
@@ -1667,17 +1659,18 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
                     *cc1.at_mut(kk)? = ci1;
                     *cc2.at_mut(kk)? = ci2;
 
-                    // when any OverlappingPE was a CoinPE in pPF - add all New or Found
-                    // PEs back into the PF->CoincPE list
+                    // when any OverlappingPE was a CoinPE in a PF - add all New or Found
+                    // PEs back into each of those PF->CoincPE lists
                     if let Some((Some(new_pe), _)) = result {
                         if replace_coin_pe {
-                            let pf = coin_pf.ok_or(dangling("proto face is null"))?;
-                            let list = self
-                                .proto_face_mut(pf)
-                                .ok_or(dangling("proto face is deleted"))?
-                                .coinc_proto_edges_mut();
-                            if !list.contains(&new_pe) {
-                                list.push(new_pe);
+                            for &pf in &replace_pfs {
+                                let list = self
+                                    .proto_face_mut(pf)
+                                    .ok_or(dangling("proto face is deleted"))?
+                                    .coinc_proto_edges_mut();
+                                if !list.contains(&new_pe) {
+                                    list.push(new_pe);
+                                }
                             }
                         }
                     }

@@ -368,6 +368,24 @@ fn key_of(e: EntityRef) -> ObjectRef {
     }
 }
 
+/// The entity a [`key_of`] key names (`None` for another key).
+fn entity_of_key(key: ObjectKey) -> Option<EntityRef> {
+    let i = u32::try_from((key.0 & 0xffff_ffff).checked_sub(1)?).ok()?;
+    Some(match key.0 >> 32 {
+        1 => EntityRef::Region(RegionId::from_index(i)),
+        2 => EntityRef::Shell(ShellId::from_index(i)),
+        3 => EntityRef::Faceuse(FaceuseId::from_index(i)),
+        4 => EntityRef::Face(FaceId::from_index(i)),
+        5 => EntityRef::Loopuse(LoopuseId::from_index(i)),
+        6 => EntityRef::Loop(LoopId::from_index(i)),
+        7 => EntityRef::Edgeuse(EdgeuseId::from_index(i)),
+        8 => EntityRef::Edge(EdgeId::from_index(i)),
+        9 => EntityRef::Vertexuse(VertexuseId::from_index(i)),
+        10 => EntityRef::Vertex(VertexId::from_index(i)),
+        _ => return None,
+    })
+}
+
 /// The identity of the source B-rep's entities in a copy or merge into another B-rep
 /// (its ids overlap the destination's, which are notified under [`key_of`]).
 fn source_key_of(e: EntityRef) -> ObjectRef {
@@ -1213,8 +1231,13 @@ fn run_rust_op(
     // Execute's owner walk: each pre-op curve's GetOwner() is its edge
     tracker.set_owner_metadata(owners.into_iter().map(|(c, e)| (c.key, Some(e))).collect());
     let r = run_rust_op_in(k, b, second, op, a, Some(&mut ctx));
+    // the shim's StopTracking before put_tracker: 1.0.1 records the completed edit's
+    // dependencies (RecordDependencies) on the tracker's lists
+    let recorded =
+        tracker.stop_tracking_with_brep(Some(&mut ctx), b, &entity_of_key, &|e| key_of(e).key);
     let lists = tracker.lists();
     tracker.finish(Some(&mut ctx));
+    must(recorded)?;
     drop(must(ctx.take_notify_lease())?);
     let mut out = r?;
     let geometry_seen = seen

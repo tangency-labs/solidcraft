@@ -1366,9 +1366,8 @@ impl BSplineSurface {
             let tol_min = EFF_ZERO_SQRT * (1.0 + vl.abs());
             let tol_max = EFF_ZERO_SQRT * (1.0 + vr.abs());
 
-            // upstream sets only idxMin in this direction (also for the upper boundary)
             let mut idx_min: Option<usize> = None;
-            let idx_max: Option<usize> = None;
+            let mut idx_max: Option<usize> = None;
 
             let knots: Vec<f64> = self
                 .knots(SurfParamType::V, None)
@@ -1390,6 +1389,7 @@ impl BSplineSurface {
                         let prev = at(&knots, i - 1, OP)?;
                         if vl < prev {
                             vl = prev;
+                            idx_min = Some(i - 1);
                         }
                     }
                 }
@@ -1401,14 +1401,14 @@ impl BSplineSurface {
                             req_vr = knot;
                         }
                         vr = knot;
-                        idx_min = Some(i);
+                        idx_max = Some(i);
                     } else {
                         vr = knot + 10.0 * tol_max;
-                        idx_min = Some(i);
+                        idx_max = Some(i);
                         let next = at(&knots, i + 1, OP)?;
                         if vr > next {
                             vr = next;
-                            idx_min = Some(i + 1);
+                            idx_max = Some(i + 1);
                         }
                     }
                 }

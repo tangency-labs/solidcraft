@@ -197,6 +197,47 @@ pub fn real_variable_solid(input: &[f64], end_radius: f64) -> Result<Vec<f64>, F
 }
 
 extern "C" {
+    fn sc_blend_fillet_executive_p3_fillet_then_shell(
+        input: *const f64,
+        n: i64,
+        out: *mut f64,
+        cap: i64,
+        len: *mut i64,
+    ) -> i32;
+}
+
+/// tangency-labs/solidcore#460 comparison: the [`real_solid`] wire followed by the shell
+/// distance and an open-top flag (`1`: the plane faces at the box's height are
+/// removed; `0`: a closed shell). The real box is filleted, then shelled with
+/// `SmApiShellBrepFull` (extended convex edges, merged results, no offset solid). The
+/// record is the fillet status, the shell status, the number of open faces, and for a
+/// shell result its vertex/edge/face counts, the manifold query's status and flag,
+/// and the mass status with area, volume and mass.
+pub fn fillet_then_shell(input: &[f64]) -> Result<Vec<f64>, FfiError> {
+    let n = input.len();
+    if n < 11 {
+        return Err(FfiError::InvalidArgument("fillet-then-shell wire too short".into()));
+    }
+    let (wire, shell) = input.split_at(n - 2);
+    validate_real_solid(wire)?;
+    let &[distance, open_top] = shell else {
+        return Err(FfiError::InvalidArgument("fillet-then-shell wire too short".into()));
+    };
+    if !distance.is_finite() || (open_top != 0.0 && open_top != 1.0) {
+        return Err(FfiError::InvalidArgument("invalid shell distance or open-top flag".into()));
+    }
+    call_with_buffer(4096, |out, len| unsafe {
+        sc_blend_fillet_executive_p3_fillet_then_shell(
+            input.as_ptr(),
+            input.len() as i64,
+            out.as_mut_ptr(),
+            out.len() as i64,
+            len,
+        )
+    })
+}
+
+extern "C" {
     fn sc_blend_fillet_executive_p3_real_prefix(
         input: *const f64,
         n: i64,

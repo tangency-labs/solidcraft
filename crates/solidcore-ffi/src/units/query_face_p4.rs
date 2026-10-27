@@ -38,7 +38,9 @@
 //!
 //! `props` is `stage face_index closed_u closed_v poles not_yet n_lp (cross_u wind_u
 //! cross_v wind_v)* class_u class_v done_u done_v zone_tol no_vertex_poles
-//! bad_missing_seam n_pp (x y z)*` (`n_pp` pole points); a classification is `0` (none) or `1
+//! bad_missing_seam n_pp (x y z)* raw_u raw_v bad_crossed_seam` (`n_pp` pole points; the
+//! seam raw touch lists and `m_eBadCrossedSeam` that 1.0.1 `ClassifyLoops` reads); a
+//! classification is `0` (none) or `1
 //! n (start_class start_vertex end_class end_vertex)*` (the vertex's export index for a
 //! vertex classification, else `-1`); a touch list `n (loop dir loop_index)*` (`loop`: the
 //! loop's export index, `-1` none, `-2` not a loop); `loops` `n idx*`; `tree` `n (pole
@@ -46,7 +48,7 @@
 //!
 //! **Rejected** (`rejected` `1`, nothing else is run): inputs `ClassifyLoops` reads
 //! outside its arrays with — fresh props on a closed surface (it reads the empty loop
-//! props), a seam touch list of odd length, connected to something other than a loop or
+//! props), a seam touch list (done or raw) of odd length, connected to something other than a loop or
 //! with a loop index outside the target loops, an empty seam classification of a loop
 //! crossing the seam, more target loops than loop props on a closed surface — and a
 //! B-rep without faces or a next face without loops (loops mode `4`).
@@ -190,7 +192,9 @@ fn check_knots(knots: &[f64], p: usize, what: &str) -> Result<(f64, f64), FfiErr
     for w in inner.windows(2) {
         run = if w.first() == w.last() { run + 1 } else { 1 };
         if run > p {
-            return Err(bad(format!("{what}: interior multiplicity above the degree")));
+            return Err(bad(format!(
+                "{what}: interior multiplicity above the degree"
+            )));
         }
     }
     Ok((a, b))
@@ -216,7 +220,10 @@ fn check_points(rd: &mut Reader<'_>, k: usize, planar: bool, what: &str) -> Resu
             return Err(bad(format!("{what}: weight out of range")));
         }
         let z = if z == NOZ { 0.0 } else { z };
-        if [x, y, z].iter().any(|c| !c.is_finite() || c.abs() > MAX_COORD) {
+        if [x, y, z]
+            .iter()
+            .any(|c| !c.is_finite() || c.abs() > MAX_COORD)
+        {
             return Err(bad(format!("{what}: point out of range")));
         }
     }
@@ -255,12 +262,15 @@ fn surface(rd: &mut Reader<'_>) -> Result<Domain, FfiError> {
     Ok(Some([u0, v0, u1, v1]))
 }
 
-
 /// An `any_surface` block (kinds 4 and 5): a B-spline `surface` block (not a plane,
 /// whose natural domain is unbounded) or an analytic surface. Returns its periodic
 /// parameter directions `[u, v]` (none for a B-spline).
 fn any_surface(rd: &mut Reader<'_>) -> Result<[bool; 2], FfiError> {
-    let kind = rd.input.get(rd.at).copied().ok_or_else(|| bad("input too short"))?;
+    let kind = rd
+        .input
+        .get(rd.at)
+        .copied()
+        .ok_or_else(|| bad("input too short"))?;
     if kind == 0.0 {
         return surface(rd).map(|_| [false, false]);
     }
@@ -274,7 +284,9 @@ fn any_surface(rd: &mut Reader<'_>) -> Result<[bool; 2], FfiError> {
     let c = rd.finite()?;
     let swap = rd.flag()?;
     if !(1e-3..=1e3).contains(&scale) || !(0.1..=10.0).contains(&a) {
-        return Err(bad("analytic surface: scale in [1e-3, 1e3], a in [0.1, 10]"));
+        return Err(bad(
+            "analytic surface: scale in [1e-3, 1e3], a in [0.1, 10]",
+        ));
     }
     let ok = match kind as i64 {
         12 => (0.01 * a..=0.9 * a).contains(&b),
@@ -349,7 +361,11 @@ fn face_block(rd: &mut Reader<'_>) -> Result<(), FfiError> {
                 if (a - c).abs() < 1e-3 && (b - d).abs() < 1e-3 {
                     return Err(bad("line: degenerate"));
                 }
-                let (s, e) = if orient == 2 { ([c, d], [a, b]) } else { ([a, b], [c, d]) };
+                let (s, e) = if orient == 2 {
+                    ([c, d], [a, b])
+                } else {
+                    ([a, b], [c, d])
+                };
                 ends.push((s, e));
             }
         }
@@ -397,7 +413,8 @@ fn brep_block(rd: &mut Reader<'_>, path: &str) -> Result<(), FfiError> {
         2 => {
             let dom = surface(rd)?;
             let d = rd.finites(4)?;
-            let (Some(&a), Some(&b2), Some(&c), Some(&e)) = (d.first(), d.get(1), d.get(2), d.get(3))
+            let (Some(&a), Some(&b2), Some(&c), Some(&e)) =
+                (d.first(), d.get(1), d.get(2), d.get(3))
             else {
                 return Err(bad("domain too short"));
             };

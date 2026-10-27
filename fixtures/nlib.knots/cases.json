@@ -46,7 +46,7 @@
     ],
     "degree": 3
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_valid_wrong_degree",
@@ -64,7 +64,7 @@
     ],
     "degree": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_span_count",
@@ -82,7 +82,7 @@
     ],
     "degree": 3
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_params_0",
@@ -100,7 +100,7 @@
     ],
     "u": -0.51253127294337
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_span_0_left",
@@ -120,7 +120,7 @@
     "u": -0.51253127294337,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_spanmult_0_left",
@@ -140,7 +140,7 @@
     "u": -0.51253127294337,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_eval_0_left",
@@ -160,7 +160,7 @@
     "u": -0.51253127294337,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_0_0_left",
@@ -181,7 +181,7 @@
     "u": -0.51253127294337,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_0_0_left",
@@ -203,7 +203,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_0_1_left",
@@ -224,7 +224,7 @@
     "u": -0.51253127294337,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_0_1_left",
@@ -246,7 +246,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_0_2_left",
@@ -267,7 +267,7 @@
     "u": -0.51253127294337,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_0_2_left",
@@ -289,7 +289,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_0_3_left",
@@ -310,7 +310,7 @@
     "u": -0.51253127294337,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_0_3_left",
@@ -332,7 +332,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_0_4_left",
@@ -353,7 +353,7 @@
     "u": -0.51253127294337,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_0_4_left",
@@ -375,7 +375,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_span_0_right",
@@ -395,7 +395,7 @@
     "u": -0.51253127294337,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_spanmult_0_right",
@@ -415,7 +415,7 @@
     "u": -0.51253127294337,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_eval_0_right",
@@ -435,7 +435,7 @@
     "u": -0.51253127294337,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_0_0_right",
@@ -456,7 +456,7 @@
     "u": -0.51253127294337,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_0_0_right",
@@ -478,7 +478,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_0_1_right",
@@ -499,7 +499,7 @@
     "u": -0.51253127294337,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_0_1_right",
@@ -521,7 +521,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_0_2_right",
@@ -542,7 +542,7 @@
     "u": -0.51253127294337,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_0_2_right",
@@ -564,7 +564,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_0_3_right",
@@ -585,7 +585,7 @@
     "u": -0.51253127294337,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_0_3_right",
@@ -607,7 +607,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_0_4_right",
@@ -628,7 +628,7 @@
     "u": -0.51253127294337,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_0_4_right",
@@ -650,7 +650,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_params_1",
@@ -668,7 +668,7 @@
     ],
     "u": -0.01253127294337
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_span_1_left",
@@ -688,7 +688,7 @@
     "u": -0.01253127294337,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_spanmult_1_left",
@@ -708,7 +708,7 @@
     "u": -0.01253127294337,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_eval_1_left",
@@ -728,7 +728,7 @@
     "u": -0.01253127294337,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_1_0_left",
@@ -749,7 +749,7 @@
     "u": -0.01253127294337,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_1_0_left",
@@ -771,7 +771,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_1_1_left",
@@ -792,7 +792,7 @@
     "u": -0.01253127294337,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_1_1_left",
@@ -814,7 +814,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_1_2_left",
@@ -835,7 +835,7 @@
     "u": -0.01253127294337,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_1_2_left",
@@ -857,7 +857,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_1_3_left",
@@ -878,7 +878,7 @@
     "u": -0.01253127294337,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_1_3_left",
@@ -900,7 +900,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_1_4_left",
@@ -921,7 +921,7 @@
     "u": -0.01253127294337,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_1_4_left",
@@ -943,7 +943,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_span_1_right",
@@ -963,7 +963,7 @@
     "u": -0.01253127294337,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_spanmult_1_right",
@@ -983,7 +983,7 @@
     "u": -0.01253127294337,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_eval_1_right",
@@ -1003,7 +1003,7 @@
     "u": -0.01253127294337,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_1_0_right",
@@ -1024,7 +1024,7 @@
     "u": -0.01253127294337,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_1_0_right",
@@ -1046,7 +1046,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_1_1_right",
@@ -1067,7 +1067,7 @@
     "u": -0.01253127294337,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_1_1_right",
@@ -1089,7 +1089,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_1_2_right",
@@ -1110,7 +1110,7 @@
     "u": -0.01253127294337,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_1_2_right",
@@ -1132,7 +1132,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_1_3_right",
@@ -1153,7 +1153,7 @@
     "u": -0.01253127294337,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_1_3_right",
@@ -1175,7 +1175,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_1_4_right",
@@ -1196,7 +1196,7 @@
     "u": -0.01253127294337,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_1_4_right",
@@ -1218,7 +1218,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_params_2",
@@ -1236,7 +1236,7 @@
     ],
     "u": 0.617931635756815
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_span_2_left",
@@ -1256,7 +1256,7 @@
     "u": 0.617931635756815,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_spanmult_2_left",
@@ -1276,7 +1276,7 @@
     "u": 0.617931635756815,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_eval_2_left",
@@ -1296,7 +1296,7 @@
     "u": 0.617931635756815,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_2_0_left",
@@ -1317,7 +1317,7 @@
     "u": 0.617931635756815,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_2_0_left",
@@ -1339,7 +1339,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_2_1_left",
@@ -1360,7 +1360,7 @@
     "u": 0.617931635756815,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_2_1_left",
@@ -1382,7 +1382,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_2_2_left",
@@ -1403,7 +1403,7 @@
     "u": 0.617931635756815,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_2_2_left",
@@ -1425,7 +1425,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_2_3_left",
@@ -1446,7 +1446,7 @@
     "u": 0.617931635756815,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_2_3_left",
@@ -1468,7 +1468,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_2_4_left",
@@ -1489,7 +1489,7 @@
     "u": 0.617931635756815,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_2_4_left",
@@ -1511,7 +1511,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_span_2_right",
@@ -1531,7 +1531,7 @@
     "u": 0.617931635756815,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_spanmult_2_right",
@@ -1551,7 +1551,7 @@
     "u": 0.617931635756815,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_eval_2_right",
@@ -1571,7 +1571,7 @@
     "u": 0.617931635756815,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_2_0_right",
@@ -1592,7 +1592,7 @@
     "u": 0.617931635756815,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_2_0_right",
@@ -1614,7 +1614,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_2_1_right",
@@ -1635,7 +1635,7 @@
     "u": 0.617931635756815,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_2_1_right",
@@ -1657,7 +1657,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_2_2_right",
@@ -1678,7 +1678,7 @@
     "u": 0.617931635756815,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_2_2_right",
@@ -1700,7 +1700,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_2_3_right",
@@ -1721,7 +1721,7 @@
     "u": 0.617931635756815,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_2_3_right",
@@ -1743,7 +1743,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_2_4_right",
@@ -1764,7 +1764,7 @@
     "u": 0.617931635756815,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_2_4_right",
@@ -1786,7 +1786,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_params_3",
@@ -1804,7 +1804,7 @@
     ],
     "u": 1.248394544457
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_span_3_left",
@@ -1824,7 +1824,7 @@
     "u": 1.248394544457,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_spanmult_3_left",
@@ -1844,7 +1844,7 @@
     "u": 1.248394544457,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_eval_3_left",
@@ -1864,7 +1864,7 @@
     "u": 1.248394544457,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_3_0_left",
@@ -1885,7 +1885,7 @@
     "u": 1.248394544457,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_3_0_left",
@@ -1907,7 +1907,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_3_1_left",
@@ -1928,7 +1928,7 @@
     "u": 1.248394544457,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_3_1_left",
@@ -1950,7 +1950,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_3_2_left",
@@ -1971,7 +1971,7 @@
     "u": 1.248394544457,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_3_2_left",
@@ -1993,7 +1993,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_3_3_left",
@@ -2014,7 +2014,7 @@
     "u": 1.248394544457,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_3_3_left",
@@ -2036,7 +2036,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_3_4_left",
@@ -2057,7 +2057,7 @@
     "u": 1.248394544457,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_3_4_left",
@@ -2079,7 +2079,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_span_3_right",
@@ -2099,7 +2099,7 @@
     "u": 1.248394544457,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_spanmult_3_right",
@@ -2119,7 +2119,7 @@
     "u": 1.248394544457,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_eval_3_right",
@@ -2139,7 +2139,7 @@
     "u": 1.248394544457,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_3_0_right",
@@ -2160,7 +2160,7 @@
     "u": 1.248394544457,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_3_0_right",
@@ -2182,7 +2182,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_3_1_right",
@@ -2203,7 +2203,7 @@
     "u": 1.248394544457,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_3_1_right",
@@ -2225,7 +2225,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_3_2_right",
@@ -2246,7 +2246,7 @@
     "u": 1.248394544457,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_3_2_right",
@@ -2268,7 +2268,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_3_3_right",
@@ -2289,7 +2289,7 @@
     "u": 1.248394544457,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_3_3_right",
@@ -2311,7 +2311,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_3_4_right",
@@ -2332,7 +2332,7 @@
     "u": 1.248394544457,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_3_4_right",
@@ -2354,7 +2354,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_params_4",
@@ -2372,7 +2372,7 @@
     ],
     "u": 1.748394544457
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_span_4_left",
@@ -2392,7 +2392,7 @@
     "u": 1.748394544457,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_spanmult_4_left",
@@ -2412,7 +2412,7 @@
     "u": 1.748394544457,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_eval_4_left",
@@ -2432,7 +2432,7 @@
     "u": 1.748394544457,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_4_0_left",
@@ -2453,7 +2453,7 @@
     "u": 1.748394544457,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_4_0_left",
@@ -2475,7 +2475,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_4_1_left",
@@ -2496,7 +2496,7 @@
     "u": 1.748394544457,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_4_1_left",
@@ -2518,7 +2518,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_4_2_left",
@@ -2539,7 +2539,7 @@
     "u": 1.748394544457,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_4_2_left",
@@ -2561,7 +2561,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_4_3_left",
@@ -2582,7 +2582,7 @@
     "u": 1.748394544457,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_4_3_left",
@@ -2604,7 +2604,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_4_4_left",
@@ -2625,7 +2625,7 @@
     "u": 1.748394544457,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_4_4_left",
@@ -2647,7 +2647,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_span_4_right",
@@ -2667,7 +2667,7 @@
     "u": 1.748394544457,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_spanmult_4_right",
@@ -2687,7 +2687,7 @@
     "u": 1.748394544457,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_eval_4_right",
@@ -2707,7 +2707,7 @@
     "u": 1.748394544457,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_4_0_right",
@@ -2728,7 +2728,7 @@
     "u": 1.748394544457,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_4_0_right",
@@ -2750,7 +2750,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_4_1_right",
@@ -2771,7 +2771,7 @@
     "u": 1.748394544457,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_4_1_right",
@@ -2793,7 +2793,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_4_2_right",
@@ -2814,7 +2814,7 @@
     "u": 1.748394544457,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_4_2_right",
@@ -2836,7 +2836,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_4_3_right",
@@ -2857,7 +2857,7 @@
     "u": 1.748394544457,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_4_3_right",
@@ -2879,7 +2879,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_ieval_4_4_right",
@@ -2900,7 +2900,7 @@
     "u": 1.748394544457,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_u_iderivs_4_4_right",
@@ -2922,7 +2922,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_valid",
@@ -2940,7 +2940,7 @@
     ],
     "degree": 3
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_valid_wrong_degree",
@@ -2958,7 +2958,7 @@
     ],
     "degree": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_span_count",
@@ -2976,7 +2976,7 @@
     ],
     "degree": 3
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_params_0",
@@ -2994,7 +2994,7 @@
     ],
     "u": -0.916060457619
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_span_0_left",
@@ -3014,7 +3014,7 @@
     "u": -0.916060457619,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_spanmult_0_left",
@@ -3034,7 +3034,7 @@
     "u": -0.916060457619,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_eval_0_left",
@@ -3054,7 +3054,7 @@
     "u": -0.916060457619,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_0_0_left",
@@ -3075,7 +3075,7 @@
     "u": -0.916060457619,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_0_0_left",
@@ -3097,7 +3097,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_0_1_left",
@@ -3118,7 +3118,7 @@
     "u": -0.916060457619,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_0_1_left",
@@ -3140,7 +3140,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_0_2_left",
@@ -3161,7 +3161,7 @@
     "u": -0.916060457619,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_0_2_left",
@@ -3183,7 +3183,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_0_3_left",
@@ -3204,7 +3204,7 @@
     "u": -0.916060457619,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_0_3_left",
@@ -3226,7 +3226,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_0_4_left",
@@ -3247,7 +3247,7 @@
     "u": -0.916060457619,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_0_4_left",
@@ -3269,7 +3269,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_span_0_right",
@@ -3289,7 +3289,7 @@
     "u": -0.916060457619,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_spanmult_0_right",
@@ -3309,7 +3309,7 @@
     "u": -0.916060457619,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_eval_0_right",
@@ -3329,7 +3329,7 @@
     "u": -0.916060457619,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_0_0_right",
@@ -3350,7 +3350,7 @@
     "u": -0.916060457619,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_0_0_right",
@@ -3372,7 +3372,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_0_1_right",
@@ -3393,7 +3393,7 @@
     "u": -0.916060457619,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_0_1_right",
@@ -3415,7 +3415,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_0_2_right",
@@ -3436,7 +3436,7 @@
     "u": -0.916060457619,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_0_2_right",
@@ -3458,7 +3458,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_0_3_right",
@@ -3479,7 +3479,7 @@
     "u": -0.916060457619,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_0_3_right",
@@ -3501,7 +3501,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_0_4_right",
@@ -3522,7 +3522,7 @@
     "u": -0.916060457619,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_0_4_right",
@@ -3544,7 +3544,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_params_1",
@@ -3562,7 +3562,7 @@
     ],
     "u": -0.416060457619
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_span_1_left",
@@ -3582,7 +3582,7 @@
     "u": -0.416060457619,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_spanmult_1_left",
@@ -3602,7 +3602,7 @@
     "u": -0.416060457619,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_eval_1_left",
@@ -3622,7 +3622,7 @@
     "u": -0.416060457619,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_1_0_left",
@@ -3643,7 +3643,7 @@
     "u": -0.416060457619,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_1_0_left",
@@ -3665,7 +3665,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_1_1_left",
@@ -3686,7 +3686,7 @@
     "u": -0.416060457619,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_1_1_left",
@@ -3708,7 +3708,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_1_2_left",
@@ -3729,7 +3729,7 @@
     "u": -0.416060457619,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_1_2_left",
@@ -3751,7 +3751,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_1_3_left",
@@ -3772,7 +3772,7 @@
     "u": -0.416060457619,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_1_3_left",
@@ -3794,7 +3794,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_1_4_left",
@@ -3815,7 +3815,7 @@
     "u": -0.416060457619,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_1_4_left",
@@ -3837,7 +3837,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_span_1_right",
@@ -3857,7 +3857,7 @@
     "u": -0.416060457619,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_spanmult_1_right",
@@ -3877,7 +3877,7 @@
     "u": -0.416060457619,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_eval_1_right",
@@ -3897,7 +3897,7 @@
     "u": -0.416060457619,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_1_0_right",
@@ -3918,7 +3918,7 @@
     "u": -0.416060457619,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_1_0_right",
@@ -3940,7 +3940,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_1_1_right",
@@ -3961,7 +3961,7 @@
     "u": -0.416060457619,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_1_1_right",
@@ -3983,7 +3983,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_1_2_right",
@@ -4004,7 +4004,7 @@
     "u": -0.416060457619,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_1_2_right",
@@ -4026,7 +4026,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_1_3_right",
@@ -4047,7 +4047,7 @@
     "u": -0.416060457619,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_1_3_right",
@@ -4069,7 +4069,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_1_4_right",
@@ -4090,7 +4090,7 @@
     "u": -0.416060457619,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_1_4_right",
@@ -4112,7 +4112,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_params_2",
@@ -4130,7 +4130,7 @@
     ],
     "u": 0.40798677283299994
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_span_2_left",
@@ -4150,7 +4150,7 @@
     "u": 0.40798677283299994,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_spanmult_2_left",
@@ -4170,7 +4170,7 @@
     "u": 0.40798677283299994,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_eval_2_left",
@@ -4190,7 +4190,7 @@
     "u": 0.40798677283299994,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_2_0_left",
@@ -4211,7 +4211,7 @@
     "u": 0.40798677283299994,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_2_0_left",
@@ -4233,7 +4233,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_2_1_left",
@@ -4254,7 +4254,7 @@
     "u": 0.40798677283299994,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_2_1_left",
@@ -4276,7 +4276,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_2_2_left",
@@ -4297,7 +4297,7 @@
     "u": 0.40798677283299994,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_2_2_left",
@@ -4319,7 +4319,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_2_3_left",
@@ -4340,7 +4340,7 @@
     "u": 0.40798677283299994,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_2_3_left",
@@ -4362,7 +4362,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_2_4_left",
@@ -4383,7 +4383,7 @@
     "u": 0.40798677283299994,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_2_4_left",
@@ -4405,7 +4405,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_span_2_right",
@@ -4425,7 +4425,7 @@
     "u": 0.40798677283299994,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_spanmult_2_right",
@@ -4445,7 +4445,7 @@
     "u": 0.40798677283299994,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_eval_2_right",
@@ -4465,7 +4465,7 @@
     "u": 0.40798677283299994,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_2_0_right",
@@ -4486,7 +4486,7 @@
     "u": 0.40798677283299994,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_2_0_right",
@@ -4508,7 +4508,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_2_1_right",
@@ -4529,7 +4529,7 @@
     "u": 0.40798677283299994,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_2_1_right",
@@ -4551,7 +4551,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_2_2_right",
@@ -4572,7 +4572,7 @@
     "u": 0.40798677283299994,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_2_2_right",
@@ -4594,7 +4594,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_2_3_right",
@@ -4615,7 +4615,7 @@
     "u": 0.40798677283299994,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_2_3_right",
@@ -4637,7 +4637,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_2_4_right",
@@ -4658,7 +4658,7 @@
     "u": 0.40798677283299994,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_2_4_right",
@@ -4680,7 +4680,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_params_3",
@@ -4698,7 +4698,7 @@
     ],
     "u": 1.232034003285
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_span_3_left",
@@ -4718,7 +4718,7 @@
     "u": 1.232034003285,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_spanmult_3_left",
@@ -4738,7 +4738,7 @@
     "u": 1.232034003285,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_eval_3_left",
@@ -4758,7 +4758,7 @@
     "u": 1.232034003285,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_3_0_left",
@@ -4779,7 +4779,7 @@
     "u": 1.232034003285,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_3_0_left",
@@ -4801,7 +4801,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_3_1_left",
@@ -4822,7 +4822,7 @@
     "u": 1.232034003285,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_3_1_left",
@@ -4844,7 +4844,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_3_2_left",
@@ -4865,7 +4865,7 @@
     "u": 1.232034003285,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_3_2_left",
@@ -4887,7 +4887,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_3_3_left",
@@ -4908,7 +4908,7 @@
     "u": 1.232034003285,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_3_3_left",
@@ -4930,7 +4930,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_3_4_left",
@@ -4951,7 +4951,7 @@
     "u": 1.232034003285,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_3_4_left",
@@ -4973,7 +4973,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_span_3_right",
@@ -4993,7 +4993,7 @@
     "u": 1.232034003285,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_spanmult_3_right",
@@ -5013,7 +5013,7 @@
     "u": 1.232034003285,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_eval_3_right",
@@ -5033,7 +5033,7 @@
     "u": 1.232034003285,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_3_0_right",
@@ -5054,7 +5054,7 @@
     "u": 1.232034003285,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_3_0_right",
@@ -5076,7 +5076,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_3_1_right",
@@ -5097,7 +5097,7 @@
     "u": 1.232034003285,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_3_1_right",
@@ -5119,7 +5119,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_3_2_right",
@@ -5140,7 +5140,7 @@
     "u": 1.232034003285,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_3_2_right",
@@ -5162,7 +5162,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_3_3_right",
@@ -5183,7 +5183,7 @@
     "u": 1.232034003285,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_3_3_right",
@@ -5205,7 +5205,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_3_4_right",
@@ -5226,7 +5226,7 @@
     "u": 1.232034003285,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_3_4_right",
@@ -5248,7 +5248,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_params_4",
@@ -5266,7 +5266,7 @@
     ],
     "u": 1.732034003285
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_span_4_left",
@@ -5286,7 +5286,7 @@
     "u": 1.732034003285,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_spanmult_4_left",
@@ -5306,7 +5306,7 @@
     "u": 1.732034003285,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_eval_4_left",
@@ -5326,7 +5326,7 @@
     "u": 1.732034003285,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_4_0_left",
@@ -5347,7 +5347,7 @@
     "u": 1.732034003285,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_4_0_left",
@@ -5369,7 +5369,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_4_1_left",
@@ -5390,7 +5390,7 @@
     "u": 1.732034003285,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_4_1_left",
@@ -5412,7 +5412,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_4_2_left",
@@ -5433,7 +5433,7 @@
     "u": 1.732034003285,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_4_2_left",
@@ -5455,7 +5455,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_4_3_left",
@@ -5476,7 +5476,7 @@
     "u": 1.732034003285,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_4_3_left",
@@ -5498,7 +5498,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_4_4_left",
@@ -5519,7 +5519,7 @@
     "u": 1.732034003285,
     "flag": "left"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_4_4_left",
@@ -5541,7 +5541,7 @@
     "flag": "left",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_span_4_right",
@@ -5561,7 +5561,7 @@
     "u": 1.732034003285,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_spanmult_4_right",
@@ -5581,7 +5581,7 @@
     "u": 1.732034003285,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_eval_4_right",
@@ -5601,7 +5601,7 @@
     "u": 1.732034003285,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_4_0_right",
@@ -5622,7 +5622,7 @@
     "u": 1.732034003285,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_4_0_right",
@@ -5644,7 +5644,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_4_1_right",
@@ -5665,7 +5665,7 @@
     "u": 1.732034003285,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_4_1_right",
@@ -5687,7 +5687,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_4_2_right",
@@ -5708,7 +5708,7 @@
     "u": 1.732034003285,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_4_2_right",
@@ -5730,7 +5730,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_4_3_right",
@@ -5751,7 +5751,7 @@
     "u": 1.732034003285,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_4_3_right",
@@ -5773,7 +5773,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_ieval_4_4_right",
@@ -5794,7 +5794,7 @@
     "u": 1.732034003285,
     "flag": "right"
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "topo_v_iderivs_4_4_right",
@@ -5816,7 +5816,7 @@
     "flag": "right",
     "der": 4
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)"
   },
   {
    "name": "ex23_valid",

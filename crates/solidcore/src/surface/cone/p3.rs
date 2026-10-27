@@ -59,7 +59,7 @@ use crate::surface::sphere::Sphere;
 use crate::surface::surf_of_extrusion::SurfOfExtrusion;
 use crate::surface::surf_of_revolution::p3::Revolved;
 use crate::surface::surf_of_revolution::SurfOfRevolution;
-use crate::surface::surface::p2::{SurfaceIntersection, TsectCurveType, CONE_TYPE};
+use crate::surface::surface::p2::{SurfaceIntersection, TsectCurveType, CONE_TYPE, CYLINDER_TYPE};
 use crate::surface::surface::{Surface, SurfaceKind};
 
 const OP: &str = "surface::cone::p3";
@@ -1028,14 +1028,15 @@ impl Cone {
             IntersectTarget::Plane(p) => {
                 self.intersect_with_plane(k, domain, p, other_domain, approx_tol_3d)?
             }
-            IntersectTarget::Cone(c) if c.type_code() == CONE_TYPE => self.intersect_with_cone_on(
-                k,
-                domain,
-                c,
-                other_domain,
-                approx_tol_3d,
-                [this, other_surface],
-            )?,
+            IntersectTarget::Cone(c) if matches!(c.type_code(), CONE_TYPE | CYLINDER_TYPE) => self
+                .intersect_with_cone_on(
+                    k,
+                    domain,
+                    c,
+                    other_domain,
+                    approx_tol_3d,
+                    [this, other_surface],
+                )?,
             IntersectTarget::Revolution(r) => {
                 let (more, mut out) =
                     r.intersect_with_cone(k, other_domain, self, domain, approx_tol_3d)?;
@@ -1088,13 +1089,13 @@ mod tests {
     fn general_dispatch_preserves_cone_and_all_parameters() {
         let k = Kernel::default();
         let cone = Cone::empty(false);
-        let cylinder = Cone::empty(true);
+        let torus = Surface::from(crate::surface::torus::Torus::empty());
         let domain = Extent2d::from_bounds(1.0, 2.0, 3.0, 4.0);
         let other_domain = Extent2d::from_bounds(-1.0, -2.0, 5.0, 6.0);
-        // SmCylinder_TYPE deliberately does not match SmCone_TYPE in the native
-        // switch, even though its object derives from SmCone.
+        // A torus has no case in the native switch: the general intersector gets every
+        // parameter unchanged.
         let error = cone.global_surface_intersect_with(&k, &domain,
-            IntersectTarget::Cone(&cylinder), &other_domain, [false, true], Some(0.0123), Some(0.456),
+            IntersectTarget::Surface(&torus), &other_domain, [false, true], Some(0.0123), Some(0.456),
             |request| {
                 assert!(core::ptr::eq(request.kernel, &raw const k));
                 assert!(core::ptr::eq(request.cone, &raw const cone));
@@ -1103,10 +1104,34 @@ mod tests {
                 assert_eq!(request.use_surface_edges, [false, true]);
                 assert_eq!(request.approx_tol_3d, Some(0.0123));
                 assert_eq!(request.ang_tol_rad, Some(0.456));
-                assert!(matches!(request.other, IntersectTarget::Cone(c) if core::ptr::eq(c, &raw const cylinder)));
+                assert!(matches!(request.other, IntersectTarget::Surface(s) if core::ptr::eq(s, &raw const torus)));
                 Err(SolidError::sm_err("test::general_dispatch"))
             }).unwrap_err();
         assert_eq!(error.operation(), "test::general_dispatch");
+    }
+
+    #[test]
+    fn cylinder_target_reaches_intersect_with_cone() {
+        let k = Kernel::default();
+        let cone = Cone::empty(false);
+        let cylinder = Cone::empty(true);
+        let domain = Extent2d::from_bounds(1.0, 2.0, 3.0, 4.0);
+        // v1.0.1 SmCone::GlobalSurfaceIntersect (SmCone.cpp:2376-2377) handles
+        // SmCylinder_TYPE with SmCone_TYPE in IntersectWithCone; the empty cylinder
+        // fails there, before any general fallback.
+        let error = cone
+            .global_surface_intersect_with(
+                &k,
+                &domain,
+                IntersectTarget::Cone(&cylinder),
+                &domain,
+                [true, true],
+                None,
+                None,
+                |_| Err(SolidError::sm_err("test::general_dispatch")),
+            )
+            .unwrap_err();
+        assert_ne!(error.operation(), "test::general_dispatch");
     }
 
     #[test]

@@ -1362,7 +1362,7 @@
   },
   {
    "name": "set_cylinder_seam_degen",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3899",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3348",
    "inputs": {
     "op": "set",
     "surface": {
@@ -1446,7 +1446,7 @@
   },
   {
    "name": "set_cylinder_interior_degen_outside",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3899",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3348",
    "inputs": {
     "op": "set",
     "surface": {
@@ -1530,7 +1530,7 @@
   },
   {
    "name": "next_reversed_line_start_outside",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "op": "next",
     "surface": {
@@ -1634,7 +1634,7 @@
   },
   {
    "name": "next_reversed_line_start_leaving",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "op": "next",
     "surface": {
@@ -1738,7 +1738,7 @@
   },
   {
    "name": "next_reversed_line_interior",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "op": "next",
     "surface": {
@@ -1842,7 +1842,7 @@
   },
   {
    "name": "add_reversed_line_bottom_edge",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "op": "add",
     "surface": {

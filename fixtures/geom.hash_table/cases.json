@@ -2,7 +2,7 @@
  "cases": [
   {
    "name": "heal_points_pts",
-   "upstream_ref": "source/SMLib/src/SmHealData.cpp:3127 (Cache_CoinVertices; reached from tests/SM_API_test/src/TestSmHeal.cpp:22 TestSmHealBrep and tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties)",
+   "upstream_ref": "source/SMLib/src/SmHealData.cpp:3127 (Cache_CoinVertices; reached from tests/SM_API_test/src/TestSmHeal.cpp:22 TestSmHealBrep and tests/prog_test/src/smHealTest.cpp:378 my_test_closed_sphere_properties)",
    "inputs": {
     "kind": "heal",
     "pts": {
@@ -20,7 +20,7 @@
   },
   {
    "name": "heal_points_pts_loose",
-   "upstream_ref": "source/SMLib/src/SmHealData.cpp:3127 (Cache_CoinVertices; reached from tests/SM_API_test/src/TestSmHeal.cpp:22 TestSmHealBrep and tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties)",
+   "upstream_ref": "source/SMLib/src/SmHealData.cpp:3127 (Cache_CoinVertices; reached from tests/SM_API_test/src/TestSmHeal.cpp:22 TestSmHealBrep and tests/prog_test/src/smHealTest.cpp:378 my_test_closed_sphere_properties)",
    "inputs": {
     "kind": "heal",
     "pts": {
@@ -33,7 +33,7 @@
   },
   {
    "name": "heal_fitcrv_incremental",
-   "upstream_ref": "source/SMLib/src/SmHealData.cpp:3127 (Cache_CoinVertices; reached from tests/SM_API_test/src/TestSmHeal.cpp:22 TestSmHealBrep and tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties)",
+   "upstream_ref": "source/SMLib/src/SmHealData.cpp:3127 (Cache_CoinVertices; reached from tests/SM_API_test/src/TestSmHeal.cpp:22 TestSmHealBrep and tests/prog_test/src/smHealTest.cpp:378 my_test_closed_sphere_properties)",
    "inputs": {
     "kind": "heal",
     "pts": {
@@ -70,7 +70,7 @@
   },
   {
    "name": "heal_section00_incremental",
-   "upstream_ref": "source/SMLib/src/SmHealData.cpp:3127 (Cache_CoinVertices; reached from tests/SM_API_test/src/TestSmHeal.cpp:22 TestSmHealBrep and tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties)",
+   "upstream_ref": "source/SMLib/src/SmHealData.cpp:3127 (Cache_CoinVertices; reached from tests/SM_API_test/src/TestSmHeal.cpp:22 TestSmHealBrep and tests/prog_test/src/smHealTest.cpp:378 my_test_closed_sphere_properties)",
    "inputs": {
     "kind": "heal",
     "pts": {
@@ -98,7 +98,7 @@
   },
   {
    "name": "heal_section05",
-   "upstream_ref": "source/SMLib/src/SmHealData.cpp:3127 (Cache_CoinVertices; reached from tests/SM_API_test/src/TestSmHeal.cpp:22 TestSmHealBrep and tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties)",
+   "upstream_ref": "source/SMLib/src/SmHealData.cpp:3127 (Cache_CoinVertices; reached from tests/SM_API_test/src/TestSmHeal.cpp:22 TestSmHealBrep and tests/prog_test/src/smHealTest.cpp:378 my_test_closed_sphere_properties)",
    "inputs": {
     "kind": "heal",
     "pts": {
@@ -113,7 +113,7 @@
   },
   {
    "name": "heal_section10_tol0",
-   "upstream_ref": "source/SMLib/src/SmHealData.cpp:3127 (Cache_CoinVertices; reached from tests/SM_API_test/src/TestSmHeal.cpp:22 TestSmHealBrep and tests/prog_test/src/smTopoTest.cpp:4520 my_test_closed_sphere_properties)",
+   "upstream_ref": "source/SMLib/src/SmHealData.cpp:3127 (Cache_CoinVertices; reached from tests/SM_API_test/src/TestSmHeal.cpp:22 TestSmHealBrep and tests/prog_test/src/smHealTest.cpp:378 my_test_closed_sphere_properties)",
    "inputs": {
     "kind": "heal",
     "pts": {

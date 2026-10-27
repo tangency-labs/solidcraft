@@ -181,8 +181,11 @@ impl Reader<'_> {
     }
 }
 
-/// Checks a clamped knot vector of degree `p` with `m + 1` knots.
-fn check_knots(knots: &[f64], p: usize, what: &str) -> Result<(), FfiError> {
+/// Checks a clamped knot vector of degree `p` with `m + 1` knots; with `unclamped_ok`
+/// (the `Reverse` op: 1.0.1's `SmBSplineSurface::Reverse` reverses any knot vector,
+/// `NI_ReverseKnots`) the end knots need not be clamped: the defined interval
+/// `[U[p], U[m-p]]` must be non-empty and no knot repeat more than `p + 1` times.
+fn check_knots(knots: &[f64], p: usize, what: &str, unclamped_ok: bool) -> Result<(), FfiError> {
     let m = knots
         .len()
         .checked_sub(1)
@@ -200,6 +203,22 @@ fn check_knots(knots: &[f64], p: usize, what: &str) -> Result<(), FfiError> {
     let head = knots.get(..=p).ok_or_else(short)?;
     let tail = knots.get(m - p..).ok_or_else(short)?;
     let inner = knots.get(p + 1..m - p).ok_or_else(short)?;
+    if unclamped_ok {
+        let (Some(&lo), Some(&hi)) = (knots.get(p), knots.get(m - p)) else {
+            return Err(short());
+        };
+        if lo >= hi {
+            return Err(bad(format!("{what}: defined interval empty")));
+        }
+        let mut run = 1;
+        for w in knots.windows(2) {
+            run = if w.first() == w.last() { run + 1 } else { 1 };
+            if run > p + 1 {
+                return Err(bad(format!("{what}: knot multiplicity above degree + 1")));
+            }
+        }
+        return Ok(());
+    }
     if a >= b || head.iter().any(|&k| k != a) || tail.iter().any(|&k| k != b) {
         return Err(bad(format!("{what}: knots not clamped")));
     }
@@ -251,6 +270,11 @@ fn points(rd: &mut Reader<'_>, k: usize) -> Result<Vec<[f64; 4]>, FfiError> {
 
 /// Reads and validates a surface `n m p q r s cpts u v`; returns `(p, q)`.
 fn surface(rd: &mut Reader<'_>) -> Result<(usize, usize), FfiError> {
+    surface_for(rd, false)
+}
+
+/// [`surface`], unclamped knots allowed with `unclamped_ok` (see [`check_knots`]).
+fn surface_for(rd: &mut Reader<'_>, unclamped_ok: bool) -> Result<(usize, usize), FfiError> {
     let n = rd.index(MAX_INDEX)?;
     let m = rd.index(MAX_INDEX)?;
     let p = rd.index(MAX_DEGREE)?;
@@ -266,8 +290,8 @@ fn surface(rd: &mut Reader<'_>) -> Result<(usize, usize), FfiError> {
     let u = rd.finites(r + 1)?;
     let v = rd.finites(s + 1)?;
     check_points(&pts, "surface")?;
-    check_knots(&u, p, "surface u")?;
-    check_knots(&v, q, "surface v")?;
+    check_knots(&u, p, "surface u", unclamped_ok)?;
+    check_knots(&v, q, "surface v", unclamped_ok)?;
     Ok((p, q))
 }
 
@@ -299,7 +323,7 @@ fn curve(rd: &mut Reader<'_>) -> Result<Vec<[f64; 4]>, FfiError> {
     let pts = points(rd, n + 1)?;
     let knots = rd.finites(m + 1)?;
     check_points(&pts, "curve")?;
-    check_knots(&knots, p, "curve")?;
+    check_knots(&knots, p, "curve", false)?;
     Ok(pts)
 }
 
@@ -492,7 +516,7 @@ fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
         rd.flag()?;
         let form = rd.index(11)?;
         let degrees = if ctor == 2 {
-            Some(surface(&mut rd)?)
+            Some(surface_for(&mut rd, op == Op::Reverse)?)
         } else {
             None
         };

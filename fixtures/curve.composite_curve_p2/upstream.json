@@ -6979,7 +6979,7 @@
   },
   {
    "name": "line_join_nurb_io0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "op": "nurb",
     "comp": {
@@ -7026,7 +7026,7 @@
   },
   {
    "name": "line_join_offsets_io0",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "op": "offsets",
     "comps": [
@@ -7090,7 +7090,7 @@
   },
   {
    "name": "line_join_nurb_io1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "op": "nurb",
     "comp": {
@@ -7137,7 +7137,7 @@
   },
   {
    "name": "line_join_offsets_io1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310",
    "inputs": {
     "op": "offsets",
     "comps": [

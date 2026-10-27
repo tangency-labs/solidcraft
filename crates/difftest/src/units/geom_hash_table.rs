@@ -14,10 +14,8 @@
 //!
 //! Outputs: `ints` (voxel / item indices, counts, the full bucket structure on
 //! `dump`; `SM_UNDEF_ULONG` = 123456789, `-1` = null) and `floats` (voxel
-//! boxes, stored points and tolerances). Programs never reach the upstream
-//! use-after-free of `SmObjsInVoxels::IncMaxItemCount` (growth of a model with
-//! items still in buckets): the generator simulates the model and skips such
-//! adds. Every run has at least [`MIN_GENERATED`] generated cases.
+//! boxes, stored points and tolerances). Every run has at least
+//! [`MIN_GENERATED`] generated cases.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -405,15 +403,6 @@ fn rust_err(e: &SolidError) -> Output {
 
 // ---- generation -------------------------------------------------------
 
-/// Whether upstream `Add` would grow a model whose buckets still hold items
-/// (the use-after-free path the shim refuses).
-fn add_grows_live(m: &Model) -> bool {
-    !m.bbox().is_init()
-        && !m.is_empty()
-        && m.len() + 7 > m.point_capacity()
-        && m.hash_table().used_bucket_item_count() > 0
-}
-
 fn gen_sizes(rng: &mut Rng, scale: f64, n_hint: usize) -> (Sizes, f64) {
     let c = |rng: &mut Rng| *rng.choose(&[1u32, 1, 2, 3, 4, 5, 8]).unwrap_or(&2);
     let (x, y, z) = (c(rng), c(rng), c(rng));
@@ -516,7 +505,7 @@ fn gen_program(rng: &mut Rng) -> Option<Inputs> {
                 next_item - 1
             };
             let t = if rng.chance(0.1) { tol * rng.uniform(0.0, 3.0) } else { tol };
-            if add_grows_live(&m) || (sizes.bbox.is_some() && voxels == 0) {
+            if sizes.bbox.is_some() && voxels == 0 {
                 continue;
             }
             anchors.push(p);

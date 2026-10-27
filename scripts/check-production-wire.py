@@ -15,7 +15,8 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "bin/adapter-evidence"
 RUST = ROOT / "bin/debug/examples/wire_sweep"
 CPP = OUT / "wire-sweep-cpp"
-PIN = "c9c5979f04cea8c38213004d4f04df0dcfb40d05"
+PIN = next(line.split("=", 1)[1].strip() for line in (ROOT / "scripts/upstream-pin.env").read_text().splitlines()
+           if line.startswith("UPSTREAM_COMMIT="))
 
 
 def run(command):

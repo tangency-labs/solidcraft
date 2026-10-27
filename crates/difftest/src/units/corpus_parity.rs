@@ -532,7 +532,7 @@ fn measure_isolated(side: &str, path: &str) -> Measured {
         .arg(ACCURACY.to_string())
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn();
     let mut child = match child {
         Ok(c) => c,
@@ -545,6 +545,12 @@ fn measure_isolated(side: &str, path: &str) -> Measured {
             s
         })
     });
+    // stderr is drained concurrently (a full pipe would stall the child) and only its tail
+    // is kept, for the reason of a side that crashed, timed out or printed no result
+    let err_reader = child
+        .stderr
+        .take()
+        .map(|err| std::thread::spawn(move || stderr_tail(err)));
     let start = Instant::now();
     let status = loop {
         match child.try_wait() {
@@ -559,13 +565,65 @@ fn measure_isolated(side: &str, path: &str) -> Measured {
         }
     };
     let stdout = reader.and_then(|h| h.join().ok()).unwrap_or_default();
+    let stderr = err_reader.and_then(|h| h.join().ok()).unwrap_or_default();
     let Some(status) = status else {
-        return Measured::Failed(format!("timeout after {}s", TIMEOUT.as_secs()));
+        return Measured::Failed(with_stderr(
+            format!("timeout after {}s", TIMEOUT.as_secs()),
+            &stderr,
+        ));
     };
     if !status.success() {
-        return Measured::Failed(format!("crash ({status})"));
+        return Measured::Failed(with_stderr(format!("crash ({status})"), &stderr));
     }
-    parse_child(&stdout)
+    match parse_child(&stdout) {
+        Measured::Failed(why) if why == NO_RESULT => Measured::Failed(with_stderr(why, &stderr)),
+        m => m,
+    }
+}
+
+/// Most trailing lines of a failed child's stderr kept in its reason.
+const STDERR_TAIL_LINES: usize = 40;
+/// Most trailing bytes of a child's stderr held while it runs.
+const STDERR_TAIL_BYTES: usize = 64 * 1024;
+/// The reason of a child that exited without printing a result.
+const NO_RESULT: &str = "no result from the child";
+
+/// Reads `err` to its end, keeping its last [`STDERR_TAIL_BYTES`] bytes.
+fn stderr_tail(mut err: impl std::io::Read) -> String {
+    let mut tail: Vec<u8> = Vec::new();
+    let mut buf = [0u8; 8192];
+    loop {
+        match err.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                tail.extend_from_slice(buf.get(..n).unwrap_or_default());
+                if tail.len() > 2 * STDERR_TAIL_BYTES {
+                    tail.drain(..tail.len() - STDERR_TAIL_BYTES);
+                }
+            }
+        }
+    }
+    if tail.len() > STDERR_TAIL_BYTES {
+        tail.drain(..tail.len() - STDERR_TAIL_BYTES);
+    }
+    String::from_utf8_lossy(&tail).into_owned()
+}
+
+/// `why` followed by the last [`STDERR_TAIL_LINES`] non-empty lines of the child's
+/// `stderr` (a panic message, an allocation failure, a thread or stack limit), if any.
+fn with_stderr(why: String, stderr: &str) -> String {
+    let lines: Vec<&str> = stderr.lines().filter(|l| !l.trim().is_empty()).collect();
+    if lines.is_empty() {
+        return why;
+    }
+    let tail = lines
+        .get(lines.len().saturating_sub(STDERR_TAIL_LINES)..)
+        .unwrap_or_default();
+    format!(
+        "{why}; child stderr (last {} lines):\n{}",
+        tail.len(),
+        tail.join("\n")
+    )
 }
 
 /// The measurement a child printed.
@@ -592,7 +650,7 @@ fn parse_child(stdout: &str) -> Measured {
             _ => {}
         }
     }
-    Measured::Failed("no result from the child".to_string())
+    Measured::Failed(NO_RESULT.to_string())
 }
 
 // ---- the cases ------------------------------------------------------------------------
@@ -741,5 +799,36 @@ impl UnitDiff for Runner {
 
     fn generate(&self, _rng: &mut crate::Rng) -> Option<Value> {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_reason_keeps_the_stderr_tail() {
+        assert_eq!(
+            with_stderr("crash (exit status: 3)".into(), "\n \n"),
+            "crash (exit status: 3)"
+        );
+        let err: String = (0..50).fold(String::new(), |mut s, i| {
+            s.push_str("line ");
+            s.push_str(&i.to_string());
+            s.push('\n');
+            s
+        });
+        let why = with_stderr("crash (exit status: 3)".into(), &err);
+        assert!(why.starts_with("crash (exit status: 3); child stderr (last 40 lines):\nline 10\n"));
+        assert!(why.ends_with("line 49"));
+    }
+
+    #[test]
+    fn stderr_tail_keeps_the_last_bytes() {
+        let mut input = vec![b'x'; 3 * STDERR_TAIL_BYTES];
+        input.extend_from_slice(b"\npanicked at end");
+        let tail = stderr_tail(&input[..]);
+        assert_eq!(tail.len(), STDERR_TAIL_BYTES);
+        assert!(tail.ends_with("panicked at end"));
     }
 }

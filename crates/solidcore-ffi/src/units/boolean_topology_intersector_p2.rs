@@ -23,7 +23,7 @@
 //! | 49 | `FixupSplitVertexPair`      | `index cc cc`            | `status changed ccf ccf` |
 //! | 50 | `EdgeEdgeIntersect`         | `n h* n h* manifold ignore` | `status n h*(split1) n_new1 n h*(split2) n_new2 n_verts max min` |
 //! | 51 | `EdgeFaceCoincidence`       | `n h* n h* ignore nesting` | `status n h*(imprinted) n h*(processed) n_new n h*(split) max min` |
-//! | 52 | `CloseIntersectionLoop`     | `h`                      | `status made_new_topology n h*` (the other mate of each edge of the vertex) |
+//! | 52 | `CloseIntersectionLoop`     | `h`                      | `status made_new_topology dv de n h*` (the deleted vertex and edge counts, then the other mate of each edge of the vertex) |
 //!
 //! `ccf` is `n (a b pcf pcf pcf)*`. Ops 42 to 44 and 47 to 52 emit their outputs only
 //! on a success status. Ops 42 to 44, 47 and 50 to 52 may change topology (52 through

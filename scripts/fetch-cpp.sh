@@ -57,7 +57,7 @@ fallback() {
 }
 
 KEY="$("$ROOT/scripts/cpp-ref-key.sh")"
-COMMIT="${UPSTREAM_COMMIT:-$(sed -n 's/^PINNED=//p' "$ROOT/scripts/cpp-ref-key.sh")}"
+COMMIT="${UPSTREAM_COMMIT:-$(sed -n 's/^UPSTREAM_COMMIT=//p' "$ROOT/scripts/upstream-pin.env")}"
 NAME="solidcore-cpp-ref-$KEY-linux-x86_64.tar.zst"
 URL="$REPO_URL/releases/download/cpp-ref-$KEY/$NAME"
 

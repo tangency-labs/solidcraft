@@ -1575,8 +1575,15 @@ fn set_params(
         Ok(a) => a,
         Err(o) => return Ok(o),
     };
+    // the shim drops an index past the box's edges
+    let edge_count = access
+        .brep(Handle::Brep(0))
+        .map_err(|e| harness(format!("box: {e}")))?
+        .edges()
+        .len();
     let edges: Vec<Handle> = edges
         .iter()
+        .filter(|&&e| e < edge_count)
         .map(|&e| Handle::Edge(EdgeId::from_index(e as u32)))
         .collect();
     let xsect_types = xsect_types

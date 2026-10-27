@@ -166,7 +166,7 @@ SmBrep* build_any(Rd& rd, const char* path, SmStatus& status)
                 {
                     SmShell *outer = NULL, *inner = NULL;
                     status = builder.StartShell(outer, inner);
-                    if (status == SM_SUCCESS && !builder.StartFace(SM_OT_SAME)) status = SM_ERR;
+                    if (status == SM_SUCCESS && !builder.StartFace(swap ? SM_OT_OPPOSITE : SM_OT_SAME)) status = SM_ERR;
                     if (status == SM_SUCCESS) status = builder.SetFaceSurface(sphere, sphere->GetNaturalUVDomain());
                     if (status == SM_SUCCESS && !builder.StartAndEndSingleVertexLoop(SmPoint3d(0, 0, r))) status = SM_ERR;
                     if (status == SM_SUCCESS) status = builder.EndFace();
@@ -300,8 +300,9 @@ const FaceFlagPtr FACE_FLAGS[] = {
     &SmFaceProps::m_bBadOuterLoopOrder,   &SmFaceProps::m_lBadOrient_LoopCnt,     &SmFaceProps::m_lBadNoArea_LoopCnt,
     &SmFaceProps::m_lOuterLoopCnt,        &SmFaceProps::m_lBadNested_LoopCnt,     &SmFaceProps::m_bBadUnpairedNoArea_Loop,
     &SmFaceProps::m_lBadClosed3d_LoopCnt, &SmFaceProps::m_lBadClosedPtr_LoopCnt,  &SmFaceProps::m_lBadMissingPoles,
+    &SmFaceProps::m_bBadCrossedPole,
 };
-const int N_FACE_FLAGS = 18;
+const int N_FACE_FLAGS = 19;
 typedef SmMixedLinkType SmFaceProps::*FaceMixedPtr;
 const FaceMixedPtr FACE_MIXED[] = {&SmFaceProps::m_eSheet, &SmFaceProps::m_ePoles};
 typedef SmTriedLinkType SmFaceProps::*FaceTriedPtr;
@@ -838,6 +839,7 @@ void dump(SmHealData& h, Graph& g, Registry& r, std::vector<double>& o)
     put_base(o, h.m_sFaceProps_NoVertexPole, r.iff);
     put_base(o, h.m_sBadFaceProps_FlatCorner, r.iff);
     put_base(o, h.m_sBadFaceProps_MissingSeam, r.iff);
+    put_base(o, h.m_sBadFaceProps_CrossedPole, r.iff);
     put_base(o, h.m_sBadFaceProps_CrossedSeam, r.iff);
     put_base(o, h.m_sBadFaceProps_NearMissSeam, r.iff);
     put_base(o, h.m_sRanFaceProps_MoveSeam, r.iff);
@@ -1149,7 +1151,7 @@ void run_heal(Rd& rd, const char* path, std::vector<double>& o)
                    || (code == 35 && h->m_sBadFaceProps_DegenFaces.GetSize() != 0)
                    || (code == 36 && h->m_sBadEdgeProps_DegenEdges.GetSize() != 0)
                    || (code == 37 && (h->m_sBadFaceProps_MissingSeam.GetSize() != 0 || h->m_sBadFaceProps_CrossedSeam.GetSize() != 0 || h->m_sBadFaceProps_NearMissSeam.GetSize() != 0))
-                   || (code == 38 && h->m_sBadFaceProps_CrossedSeam.GetSize() != 0)
+                   || (code == 38 && (h->m_sBadFaceProps_CrossedSeam.GetSize() != 0 || h->m_sBadFaceProps_CrossedPole.GetSize() != 0))
                    || (code == 39 && h->m_sBadFaceProps_MissingSeam.GetSize() != 0);
         if (repair) mark_all_dead(*h, r);
         switch (code)
@@ -1578,6 +1580,24 @@ void run_heal(Rd& rd, const char* path, std::vector<double>& o)
         case 37:
         case 38:
         {
+            // UB-265: v1.0.1 Fix_SplitEdgesAtSeam ends by reading the mark of every target
+            // face props' m_pFace (IsMarked) without a null check. Reject the whole case
+            // (`-999 265`, replacing the record) while a target face props has no face
+            // (before Cache_FaceProps_Gaps, or seeded with a null face).
+            if (code == 38)
+            {
+                bool null_face = false;
+                for (ULONG i = 0; i < h->m_sTgtFaceProps.GetSize(); ++i)
+                    null_face |= h->m_sTgtFaceProps[i]->m_pFace == NULL;
+                if (null_face)
+                {
+                    o.clear();
+                    o.push_back(-999.0);
+                    o.push_back(265.0);
+                    stop = true;
+                    continue;
+                }
+            }
             SmNewMarkAndLock lock(brep->GetContext());
             stat = code == 37 ? h->Fix_MoveSeam(brep, lock, SM_HO_FIX_MOVESEAM)
                               : h->Fix_SplitEdgesAtSeam(brep, lock, SM_HO_FIX_SPLITEDGE_ATSEAM);

@@ -8,6 +8,7 @@
 //! | [`extend_by_dist_at_depth`]                  | `ST_surxsdr`             |
 //! | [`SrfContinuity`]                            | `NL_G1`, `NL_G2`, `NL_CMAX`, `NL_G1R` |
 //! | [`MAX_EXTEND_DEPTH`]                         | recursion limit of `ST_surxsdr` |
+//! | [`extend_by_dist_in_place`]                  | `ST_surxsdr` in place (`surP == surQ`) |
 //! | [`KNOT_TOL`] (defined in `p3`)               | `KN_TOL` (file-private)  |
 //! | [`eval_pt_normal_deriv`], [`NormalDerivs`]   | `N_SrfEvalPtNormalDeriv` |
 //!
@@ -16,9 +17,18 @@
 //!   extended surface instead of filling `surQ`. Upstream's in-place mode
 //!   (`surP == surQ`, used by its own second recursive step and by every upstream
 //!   caller) builds the result into fresh arrays from a copy of the input, so a caller
-//!   replaces its surface with the returned one. The `NL_STACKS` arguments have no
-//!   counterpart. [`eval_pt_normal_deriv`] returns the five derivatives in a struct
-//!   instead of `ND[k][l]`.
+//!   replaces its surface with the returned one; [`extend_by_dist_in_place`] does that
+//!   for the in-place callers. When the closing `N_SrfRemoveKnotConditional` fails (it
+//!   returns the error of its last failed basis-maximum search after finishing the
+//!   removal), upstream returns the error with the extended surface already in `surQ`,
+//!   so its callers retry from that surface; [`extend_by_dist_in_place`] leaves the
+//!   same surface in its argument (also when the second recursive step fails before
+//!   writing, which leaves the first step's surface). Other errors after
+//!   `N_AllocSrfArrays` gave `surQ` new arrays (a `Cmax` weight error, a failed knot
+//!   insertion or solve) leave them partly written, and upstream's retry reads the
+//!   unwritten entries (UB-107); the port leaves the input unchanged then. The
+//!   `NL_STACKS` arguments have no counterpart. [`eval_pt_normal_deriv`] returns the
+//!   five derivatives in a struct instead of `ND[k][l]`.
 //! - Errors are [`SolidError::Nlib`] values with the upstream `NL_*_ERR` number
 //!   instead of a flag plus the global `NL_ERROR` record. Past [`MAX_EXTEND_DEPTH`]
 //!   recursion levels upstream returns its bare error flag, leaving in `NL_ERROR`
@@ -56,7 +66,7 @@ use crate::nurbs::math::{float_op_is_bad, CPoint, FloatOp, MatrixType, RealMatri
 use crate::nurbs::srf_adv::p3::KNOT_TOL;
 use crate::nurbs::srf_basic::{Direction, Surface, WEIGHT_MAX, WEIGHT_MIN};
 use crate::nurbs::srf_tool::p1::{extract_iso_crv, insert_knot};
-use crate::nurbs::srf_tool::p2::remove_knot_conditional;
+use crate::nurbs::srf_tool::p2::remove_knot_conditional_with_status;
 
 /// Recursion limit of [`extend_by_dist_at_depth`] (upstream: `depth > 10` fails).
 pub const MAX_EXTEND_DEPTH: usize = 10;
@@ -216,6 +226,86 @@ pub fn extend_by_dist_at_depth(
     cont: SrfContinuity,
     depth: usize,
 ) -> Result<Surface> {
+    xsdr(sur, dist, dir, end, cont, depth, &mut InPlace::Unwritten)
+}
+
+/// [`extend_by_dist_at_depth`] at depth `0` in upstream's in-place mode (`surP ==
+/// surQ`, how every upstream caller extends): on success `esur` becomes the extended
+/// surface. On a failing knot removal at the end of the extension (or of its second
+/// recursive step), upstream has already written the extended surface, as that
+/// removal left it, into `surQ`; `esur` becomes that surface and the error is
+/// returned. On the other errors `esur` is unchanged.
+///
+/// # Errors
+///
+/// Those of [`extend_by_dist_at_depth`].
+pub fn extend_by_dist_in_place(
+    esur: &mut Surface,
+    dist: f64,
+    dir: Direction,
+    end: CurveEnd,
+    cont: SrfContinuity,
+) -> Result<()> {
+    let mut state = InPlace::Unwritten;
+    match xsdr(esur, dist, dir, end, cont, 0, &mut state) {
+        Ok(s) => {
+            *esur = s;
+            Ok(())
+        }
+        Err(e) => {
+            if let InPlace::Written(s) = state {
+                *esur = s;
+            }
+            Err(e)
+        }
+    }
+}
+
+/// What upstream's in-place `ST_surxsdr` (`surP == surQ`) leaves in `surQ` when it
+/// fails.
+enum InPlace {
+    /// It failed before giving `surQ` new arrays: `surQ` is the input.
+    Unwritten,
+    /// It failed after `N_AllocSrfArrays` gave `surQ` new arrays and before they were
+    /// complete: upstream's retry then reads unwritten entries (UB-107); the port
+    /// leaves the input unchanged.
+    HalfWritten,
+    /// It failed with `surQ` complete: this surface.
+    Written(Surface),
+}
+
+/// `N_SrfRemoveKnotConditional(surQ, .., surQ)` inside `ST_surxsdr`: the surface after
+/// the removal, or its error. Upstream finishes the removal before it returns the error
+/// of its last failed basis-maximum search, so that surface is what `surQ` holds then:
+/// it goes to `state`.
+fn remove_conditional(
+    s: &Surface,
+    t: f64,
+    nt: usize,
+    tol: f64,
+    dir: Direction,
+    state: &mut InPlace,
+) -> Result<Surface> {
+    match remove_knot_conditional_with_status(s, t, nt, tol, dir)? {
+        (removal, None) => Ok(removal.surface),
+        (removal, Some(e)) => {
+            *state = InPlace::Written(removal.surface);
+            Err(e)
+        }
+    }
+}
+
+/// `ST_surxsdr` (see [`extend_by_dist_at_depth`]); on an error, `state` tells what
+/// upstream's in-place mode leaves in `surQ` (see [`extend_by_dist_in_place`]).
+fn xsdr(
+    sur: &Surface,
+    dist: f64,
+    dir: Direction,
+    end: CurveEnd,
+    cont: SrfContinuity,
+    depth: usize,
+    state: &mut InPlace,
+) -> Result<Surface> {
     const OP: &str = OP_XSDR;
 
     // Limit recursion to 10 levels.
@@ -286,8 +376,15 @@ pub fn extend_by_dist_at_depth(
         } else {
             (dist * (ker - ke0)) / (2.0 * (ext - ker))
         };
-        let q = extend_by_dist_at_depth(sur, dist - d2, dir, end, cont, depth + 1)?;
-        return extend_by_dist_at_depth(&q, d2, dir, end, cont, depth + 1);
+        let q = xsdr(sur, dist - d2, dir, end, cont, depth + 1, state)?;
+        // the second step extends surQ in place: until it gives surQ new arrays, surQ
+        // holds the first step's surface
+        *state = InPlace::Unwritten;
+        let r = xsdr(&q, d2, dir, end, cont, depth + 1, state);
+        if r.is_err() && matches!(state, InPlace::Unwritten) {
+            *state = InPlace::Written(q);
+        }
+        return r;
     }
 
     // Set the reflection parameter from the extension parameter.
@@ -379,7 +476,9 @@ pub fn extend_by_dist_at_depth(
     }
     let rqe = nqe + pe + 1;
 
-    // Output net `Q[other][ext]` and ext knots.
+    // Output net `Q[other][ext]` and ext knots (upstream's in-place mode gives surQ
+    // new arrays here: an error from now on leaves them partly written).
+    *state = InPlace::HalfWritten;
     let row: Vec<CPoint> = storage(nqe, OP)?;
     let mut qw: Net = vec![row; ux(no + 1, OP)?];
     let mut uq: Vec<f64> = storage(rqe, OP)?;
@@ -460,7 +559,7 @@ pub fn extend_by_dist_at_depth(
 
         // Try to remove one occurrence of the old end knot.
         let s = build(sur, udir, qw, uq)?;
-        return Ok(remove_knot_conditional(&s, end_prm, 1, MODEL_TOL, ext_dir)?.surface);
+        return remove_conditional(&s, end_prm, 1, MODEL_TOL, ext_dir, state);
     }
 
     // Reflection or last-interval extension (G1, G2, Cmax): insert the knot into a
@@ -855,7 +954,7 @@ pub fn extend_by_dist_at_depth(
     // then those at the old boundary.
     let mut s = build(sur, udir, qw, uq)?;
     if rem > 0 {
-        s = remove_knot_conditional(&s, uuu, ux(rem, OP)?, 100.0 * MODEL_TOL, ext_dir)?.surface;
+        s = remove_conditional(&s, uuu, ux(rem, OP)?, 100.0 * MODEL_TOL, ext_dir, state)?;
     }
     let old_end = if start { ke0 } else { ker };
     let rem = match cont {
@@ -863,7 +962,7 @@ pub fn extend_by_dist_at_depth(
         SrfContinuity::G2 => 2,
         _ => ux(pe, OP)?,
     };
-    Ok(remove_knot_conditional(&s, old_end, rem, MODEL_TOL, ext_dir)?.surface)
+    remove_conditional(&s, old_end, rem, MODEL_TOL, ext_dir, state)
 }
 
 /// First and second derivatives of the unit normal `N = (S_u x S_v) / |S_u x S_v|`

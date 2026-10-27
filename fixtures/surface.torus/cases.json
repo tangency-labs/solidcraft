@@ -1327,7 +1327,7 @@
   },
   {
    "name": "topo_build",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4398 (my_test_doubly_periodic_vertexuse_corners: SmTorus::CreateCanonical(SmAxis2Placement(), 3, 1))",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1312 (my_test_doubly_periodic_vertexuse_corners: SmTorus::CreateCanonical(SmAxis2Placement(), 3, 1))",
    "inputs": {
     "torus": {
      "origin": [
@@ -1353,7 +1353,7 @@
   },
   {
    "name": "topo_to_step_corner",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4398 (my_test_doubly_periodic_vertexuse_corners: SmTorus::CreateCanonical(SmAxis2Placement(), 3, 1))",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1312 (my_test_doubly_periodic_vertexuse_corners: SmTorus::CreateCanonical(SmAxis2Placement(), 3, 1))",
    "inputs": {
     "torus": {
      "origin": [
@@ -1381,7 +1381,7 @@
   },
   {
    "name": "topo_rebuild",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4398 (my_test_doubly_periodic_vertexuse_corners: SmTorus::CreateCanonical(SmAxis2Placement(), 3, 1))",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1312 (my_test_doubly_periodic_vertexuse_corners: SmTorus::CreateCanonical(SmAxis2Placement(), 3, 1))",
    "inputs": {
     "torus": {
      "origin": [

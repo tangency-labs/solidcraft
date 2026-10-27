@@ -4,7 +4,8 @@ solidcore is a Rust port of **SMLib**, the NURBS B-rep solid modeling kernel by
 NVIDIA, published as part of USD BRep:
 
 - Repository: <https://github.com/NVIDIA-Omniverse/usd-brep>
-- Pinned commit: `c9c5979`
+- Pinned release: v1.0.1, commit `3fd5b95` (`scripts/upstream-pin.env`; ported from
+  `c9c5979` up to the move to v1.0.1)
 - Licence: Apache License, Version 2.0 (see [`LICENSE`](LICENSE), copied verbatim
   from upstream, and [`NOTICE`](NOTICE))
 - Copyright: (c) 2020-2026 NVIDIA CORPORATION & AFFILIATES

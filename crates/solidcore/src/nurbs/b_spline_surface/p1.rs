@@ -84,19 +84,15 @@
 //!   [`SolidError::InvalidInput`]. Where upstream would index outside its arrays or
 //!   allocate from wrapped or negative sizes (fewer multiplicities than knots or no
 //!   control points in `CreateCanonical`, too short arrays for the data constructor,
-//!   negative sizes, an unreadable header or a short binary stream in `ReadFromDB`,
-//!   knot type / form values outside the enums) the port returns `InvalidInput`.
+//!   knot type / form values outside the enums in `ReadFromDB`) the port returns
+//!   `InvalidInput`. An unreadable header or stream, a degree or a size `ReadFromDB`
+//!   rejects itself (`SM_ERR_INVALID_INPUT`) is `InvalidInput` as well.
 //! - **Canonical knots.** `CreateCanonical` expands the knots by the caller's
 //!   multiplicities with `SmTArray::Add` (failed growth ignored). The port counts the
 //!   expanded knots first and materialises them only after the control point rows
 //!   are taken, which bounds them by the point count; the checks and their order are
 //!   upstream's, so an absurd multiplicity fails the same point-count check without
 //!   allocating. A total count above `usize::MAX` is `InvalidInput`.
-//! - **Data constructor.** `SmBSplineSurface(n, m, p, q, r, s, Pw, U, V)` copies `V`
-//!   with `smos_MemCpy(.., (s+1) doubles, (r+1) doubles)`: the destination size is the
-//!   u knot count, so the copy is refused (status ignored) when `s > r` and the v
-//!   knots stay 0 (then fixed up). [`BSplineSurface::from_data`] keeps that
-//!   (`plan/findings.md`).
 //! - **Returned pointers.** `GetControlPointsPointer` returns a pointer into the NURB;
 //!   [`BSplineSurface::control_points`] returns a copy of the control points, row by
 //!   row (u index slowest).
@@ -150,6 +146,7 @@ use crate::nurbs::b_spline_curve::p1::ExpandedKnots;
 use crate::nurbs::b_spline_curve::{BSplineCurve, KnotType, NurbCircleParam};
 use crate::nurbs::crv_basic::ConicType;
 use crate::nurbs::iges::{iges_128_surface, Entity128};
+use crate::nurbs::knots::MAX_DEGREE;
 use crate::nurbs::math::{CPoint, MatrixType, RealMatrix, NOW};
 use crate::nurbs::nurbs_crv::{extract_frame, fixup_knot_vector, get_knots, to_euclid};
 use crate::nurbs::nurbs_srf::{allocate_nurb_surface, copy_nurb_surface};
@@ -183,6 +180,8 @@ const OP_KNOTS: &str = "nurbs::b_spline_surface::p1::BSplineSurface::knots";
 const OP_STEP_INV: &str = "nurbs::b_spline_surface::p1::BSplineSurface::step_inversion";
 const OP_XFORM: &str = "nurbs::b_spline_surface::p1::BSplineSurface::transform";
 const OP_READ: &str = "nurbs::b_spline_surface::p1::BSplineSurface::read_from_db";
+/// `ReadFromDB`'s message when the stream fails part way (`ReadFailed`).
+const READ_FAILED: &str = "NURBS surface data ends early or holds text that is not a number";
 const OP_WRITE: &str = "nurbs::b_spline_surface::p1::BSplineSurface::write_to_db";
 
 /// `SmBSplineSurfaceForm`: the STEP form of a B-spline surface; discriminants are the
@@ -704,14 +703,10 @@ impl BSplineSurface {
             .get(..=r)
             .ok_or_else(|| invalid(OP_DATA, "fewer than r + 1 u knots"))?;
         new_sur.u_knots_mut().copy_from_slice(src_u);
-        // upstream passes the u size (r + 1) as the destination size of the v copy, so
-        // smos_MemCpy refuses it (status ignored) when s > r: the v knots stay 0
-        if s <= r {
-            let src_v = v
-                .get(..=s)
-                .ok_or_else(|| invalid(OP_DATA, "fewer than s + 1 v knots"))?;
-            new_sur.v_knots_mut().copy_from_slice(src_v);
-        }
+        let src_v = v
+            .get(..=s)
+            .ok_or_else(|| invalid(OP_DATA, "fewer than s + 1 v knots"))?;
+        new_sur.v_knots_mut().copy_from_slice(src_v);
 
         // copy control point values from target surface to new surface one row at a time
         for i in 0..=n {
@@ -2061,9 +2056,10 @@ impl BSplineSurface {
     ///
     /// # Errors
     ///
-    /// `SM_ERR` for a rational flag other than 0 or 1; `InvalidInput` for an
-    /// unreadable or negative header, a knot type or form outside its enum, or a
-    /// short binary stream (upstream: undefined values).
+    /// `InvalidInput` (`SM_ERR_INVALID_INPUT`) when a read fails part way (data ends
+    /// early or is not a number), for degrees outside `1..=NL_MAXDEG`, fewer control
+    /// points than degree + 1 in a direction or too many to size, a rational flag other
+    /// than 0 or 1, a knot type or form outside its enum, or a short binary stream.
     pub fn read_from_db(db: &mut DatabaseReader, version: u64) -> Result<Self> {
         let bad = |reason: &'static str| invalid(OP_READ, reason);
 
@@ -2102,7 +2098,7 @@ impl BSplineSurface {
             }
             match (n, m, p, q, rat) {
                 (Some(n), Some(m), Some(p), Some(q), Some(rat)) => (n, m, p, q, rat),
-                _ => return Err(bad("unreadable header (uninitialised upstream)")),
+                _ => return Err(bad(READ_FAILED)),
             }
         } else {
             let n = db.read_long()?;
@@ -2116,6 +2112,40 @@ impl BSplineSurface {
             }
             (n, m, p, q, rat)
         };
+        if db.read_failed() {
+            return Err(bad(READ_FAILED));
+        }
+
+        // NLib's surface evaluators (e.g. N_SrfBasisDerivs) size their basis-function
+        // stack arrays by NL_MAXDEG, so a higher degree overflows the stack on the first
+        // evaluation. A degree-0 surface reads, but its derivatives fail and its normal is
+        // zero. The degrees come straight from the file, so reject anything outside
+        // [1, NL_MAXDEG].
+        let max_degree = MAX_DEGREE as i64;
+        if p < 1 || i64::from(p) > max_degree || q < 1 || i64::from(q) > max_degree {
+            return Err(bad(
+                "NURBS surface degree is outside the supported range 1 to NL_MAXDEG",
+            ));
+        }
+
+        // The counts come straight from the file too, as highest indices. Each direction
+        // needs at least degree + 1 control points, and the NURB is one block whose byte
+        // size is a ULONG, so reject counts that would overflow it before they size
+        // anything.
+        let max_cpoints = u64::MAX / (4 * 32);
+        if n < i64::from(p) || m < i64::from(q) {
+            return Err(bad(
+                "NURBS surface control point counts are fewer than degree + 1",
+            ));
+        }
+        if n as u64 >= max_cpoints || m as u64 >= max_cpoints / (n as u64 + 1) {
+            return Err(bad("NURBS surface control point counts are too large"));
+        }
+        if rat != 0 && rat != 1 {
+            return Err(bad(
+                "NURBS surface rational flag is neither NL_NO nor NL_YES",
+            ));
+        }
 
         // surface knot counts
         let to_size = |x: i64| usize::try_from(x).map_err(|_| bad("negative size"));
@@ -2131,14 +2161,8 @@ impl BSplineSurface {
             .and_then(|x| x.checked_add(1))
             .ok_or_else(too_big)?;
 
-        // Upstream checks the rational flag right after allocating; check it before
-        // the size bound so a bad flag reports the same error as upstream.
-        let rational = match rat {
-            0 => false,
-            1 => true,
-            // Wrong type
-            _ => return Err(SolidError::sm_err(OP_READ)),
-        };
+        // (any other flag was rejected with the header above)
+        let rational = rat == 1;
 
         // Bound the header against the bytes left before allocating (Rust aborts on a
         // failed huge allocation where upstream's malloc returned NULL). Binary: three
@@ -2170,24 +2194,18 @@ impl BSplineSurface {
         let mut wy = f64::NAN;
         let mut wz = f64::NAN;
         let mut w = f64::NAN;
-        let mut first = true;
         for i in 0..=n {
             for j in 0..=m {
                 if ascii {
                     let s = db.in_stream_mut().ok_or_else(|| bad("no input stream"))?;
-                    let mut all = true;
                     let targets: [&mut f64; 4] = [&mut wx, &mut wy, &mut wz, &mut w];
                     for (k, t) in targets.into_iter().enumerate() {
                         if k == 3 && !rational {
                             break;
                         }
-                        match s.extract_double() {
-                            Some(x) => *t = x,
-                            None => all = false,
+                        if let Some(x) = s.extract_double() {
+                            *t = x;
                         }
-                    }
-                    if first && !all {
-                        return Err(bad("unreadable control point (uninitialised upstream)"));
                     }
                     db.go_to_next_line();
                 } else {
@@ -2198,7 +2216,9 @@ impl BSplineSurface {
                         w = db.read_double()?;
                     }
                 }
-                first = false;
+                if db.read_failed() {
+                    return Err(bad(READ_FAILED));
+                }
                 *sur.cpt_mut(i, j)? = CPoint::new(wx, wy, wz, if rational { w } else { NOW });
             }
         }
@@ -2217,6 +2237,9 @@ impl BSplineSurface {
             if let (Some(k), Some(slot)) = (k, sur.u_knots_mut().get_mut(i)) {
                 *slot = k;
             }
+            if db.read_failed() {
+                return Err(bad(READ_FAILED));
+            }
         }
         for j in 0..=s {
             let k = if ascii {
@@ -2230,6 +2253,9 @@ impl BSplineSurface {
             };
             if let (Some(k), Some(slot)) = (k, sur.v_knots_mut().get_mut(j)) {
                 *slot = k;
+            }
+            if db.read_failed() {
+                return Err(bad(READ_FAILED));
             }
         }
 

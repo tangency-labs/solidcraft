@@ -5,7 +5,8 @@ name: C++ reference
 # solidcore-cpp-ref-<key>-linux-x86_64.tar.zst plus .sha256), which scripts/fetch-cpp.sh
 # downloads in CI and on contributors' machines instead of compiling SMLib (about a
 # minute on a 16-vCPU runner plus tool installs, much longer on a laptop).
-# <key> comes from scripts/cpp-ref-key.sh: the pinned upstream commit plus a hash of
+# <key> comes from scripts/cpp-ref-key.sh: the pinned upstream commit
+# (scripts/upstream-pin.env, the single source of truth for the pin) plus a hash of
 # harness/cpp/{CMakeLists.txt,build.sh,stubs/**,patches/**}. Shims are compiled by
 # solidcore-ffi, so editing them never needs a new release. Until a new key is published,
 # CI falls back to building from source (and caches that build).
@@ -16,6 +17,7 @@ on:
       - 'harness/cpp/**'
       - '!harness/cpp/shim/**'
       - 'scripts/cpp-ref-key.sh'
+      - 'scripts/upstream-pin.env'
       - 'scripts/package-cpp-ref.sh'
       - '.github/workflows/cpp-reference.yml'
   workflow_dispatch:
@@ -33,11 +35,6 @@ concurrency:
   group: cpp-reference-${{ github.ref }}
   cancel-in-progress: false
 
-env:
-  # Must match ci.yml / ATTRIBUTION.md / scripts/cpp-ref-key.sh.
-  UPSTREAM_REPO: https://github.com/NVIDIA-Omniverse/usd-brep
-  UPSTREAM_COMMIT: c9c5979f04cea8c38213004d4f04df0dcfb40d05  # c9c5979
-
 jobs:
   publish:
     # Ubuntu 24.04 (glibc 2.39, GCC 13): the image every CI job runs on, and the
@@ -52,6 +49,7 @@ jobs:
         id: key
         run: |
           echo "SOLIDCORE_CPP_DIR=$RUNNER_TEMP/cpp" >> "$GITHUB_ENV"
+          grep -E '^UPSTREAM_(REPO|VERSION|COMMIT)=' scripts/upstream-pin.env >> "$GITHUB_ENV"
           key="$(scripts/cpp-ref-key.sh)"
           echo "key=$key" >> "$GITHUB_OUTPUT"
           echo "tag=cpp-ref-$key" >> "$GITHUB_OUTPUT"

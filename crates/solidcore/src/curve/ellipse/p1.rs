@@ -265,8 +265,10 @@ impl PolarConversion {
 
         let exact = true;
 
-        // make sure to return the proper end value for closed curve seam conversions
-        if is_closed_base(k, &curve.base, &curve.base.natural_interval(), 0.0)? {
+        // make sure to return the proper end value for closed curve seam conversions.
+        // The seam adjustments only apply at the ends of the knot/angle tables, so test those
+        // cheap conditions first and evaluate IsClosed() (three curve evaluations) only there.
+        if !self.natural_knots.is_empty() && !self.angles.is_empty() {
             let inside_out = curve.inside_out;
             let knots = &self.natural_knots;
             let angles = &self.angles;
@@ -277,7 +279,7 @@ impl PolarConversion {
             let same = |a: f64, b: f64, tol: f64| are_same_to_tol(a, b, tol);
 
             // when values are at opposing ends - move the end angle
-            let move_down = if inside_out {
+            let move_to_min = if inside_out {
                 same(nurbs_param, at(knots, last, OP_TO_POLAR)?, scaled_zero)
                     && same(polar_deg, at(angles, 0, OP_TO_POLAR)?, EFF_ZERO_DEG)
             } else {
@@ -288,11 +290,8 @@ impl PolarConversion {
                         EFF_ZERO_DEG,
                     )
             };
-            if move_down {
-                // increment, rather than PolarParam = minAngle, to preserve tolerances
-                polar_deg -= 360.0;
-            } else {
-                let move_up = if inside_out {
+            let move_to_max = !move_to_min
+                && if inside_out {
                     same(nurbs_param, at(knots, 0, OP_TO_POLAR)?, scaled_zero)
                         && same(
                             polar_deg,
@@ -303,8 +302,14 @@ impl PolarConversion {
                     same(nurbs_param, at(knots, last, OP_TO_POLAR)?, scaled_zero)
                         && same(polar_deg, at(angles, 0, OP_TO_POLAR)?, EFF_ZERO_DEG)
                 };
-                if move_up {
-                    // increment, rather than PolarParam = maxAngle, to preserve tolerances
+
+            if (move_to_min || move_to_max)
+                && is_closed_base(k, &curve.base, &curve.base.natural_interval(), 0.0)?
+            {
+                // increment, rather than PolarParam = min/maxAngle, to preserve tolerances
+                if move_to_min {
+                    polar_deg -= 360.0;
+                } else {
                     polar_deg += 360.0;
                 }
             }

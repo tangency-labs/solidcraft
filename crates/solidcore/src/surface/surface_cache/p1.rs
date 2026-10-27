@@ -161,6 +161,7 @@ use crate::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
 use crate::nurbs::math::NOW;
 use crate::nurbs::nurbs_crv::to_euclid;
 use crate::nurbs::srf_basic::Surface as NurbSurface;
+use crate::surface::surface::p1::SurfaceBoxes;
 use crate::surface::surface::p5::SS_NONE;
 use crate::surface::surface::{Surface, SurfaceKind};
 
@@ -376,13 +377,36 @@ pub(super) fn calculate_bounding_box(
                 polar: boxes.polar_box,
             })
         }
-        // DISPATCH GAP: upstream forwards the basis guesses to the base, which
-        // Surface::calculate_bounding_box does not take. No UNPORTED marker: the callees
-        // are ported; the error names this callback's unit.
-        SurfaceKind::OffsetSurface(_) => Err(SolidError::unported(
-            "SmOffsetSurface::CalculateBoundingBox from a surface cache",
-            "surface.surface_cache_p1",
-        )),
+        // SmOffsetSurface::CalculateBoundingBox forwarding the basis guesses to its base's
+        // CalculateBoundingBox (this dispatcher, all three boxes)
+        SurfaceKind::OffsetSurface(o) => {
+            let base_req = BoundingBoxRequest {
+                normal: true,
+                pseudo: true,
+                polar: true,
+                ..*req
+            };
+            let boxes = o.calculate_bounding_box_with(
+                k,
+                surface,
+                domain,
+                [req.normal, req.pseudo, req.polar],
+                req.expand_by_zone_tol,
+                |base| {
+                    let b = calculate_bounding_box(k, base, domain, &base_req)?;
+                    Ok(SurfaceBoxes {
+                        normal_box: b.normal,
+                        pseudo_box: b.pseudo,
+                        polar_box: b.polar,
+                    })
+                },
+            )?;
+            Ok(BoundingBoxes {
+                normal: boxes.normal_box,
+                pseudo: boxes.pseudo_box,
+                polar: boxes.polar_box,
+            })
+        }
     }
 }
 

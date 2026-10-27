@@ -1255,9 +1255,9 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
 
     /// Merges the proto edge `other` into `pe` (`CombineProtoEdge`): the larger
     /// tolerance, `other`'s overlapping proto edges, `other`'s ends moved to `pe`'s
-    /// (listing `pe` at `pe`'s ends), and `other`'s edge definitions added to `pe`.
-    /// As upstream, the definitions are walked while they are being unlisted, so only
-    /// every other one moves (plan/upstream-issues.md WR-95).
+    /// (listing `pe` at `pe`'s ends), `other`'s edge definitions added to `pe` (all
+    /// of them, from a copy of the list), and `other`'s coincident proto faces moved
+    /// to `pe`.
     ///
     /// # Errors
     ///
@@ -1324,20 +1324,43 @@ impl<O: ClassObject> ProtoTopologyManager<O> {
         }
 
         // Add in other PE's EdgeDefinitions, and remove them from pOtherPE.
-        let mut ii = 0;
-        loop {
-            let eds = self
-                .proto_edge(other)
-                .ok_or(dangling("proto edge is deleted"))?
-                .edge_definitions();
-            let Some(&ed) = eds.get(ii) else { break };
+        // AddEdgeDefinition already removes the definition from its previous owner, so
+        // walk a copy of the list.
+        let other_eds = self
+            .proto_edge(other)
+            .ok_or(dangling("proto edge is deleted"))?
+            .edge_definitions()
+            .to_vec();
+        for ed in other_eds {
             ignore_soft(self.add_edge_definition(k, brep, pe, ed))?;
             let _ = self
                 .proto_edge_mut(other)
                 .ok_or(dangling("proto edge is deleted"))?
                 .remove_edge_definition(ed);
-            ii += 1;
         }
+
+        // Take over pOtherPE's coincident ProtoFaces. The caller deletes pOtherPE right
+        // after this call, and RemoveProtoEdge does not update ProtoFaces, so a
+        // ProtoFace would otherwise keep pOtherPE in its coincident proto edges.
+        let other_pfs = self
+            .proto_edge(other)
+            .ok_or(dangling("proto edge is deleted"))?
+            .coinc_proto_faces()
+            .to_vec();
+        for pf in other_pfs {
+            let pf_edges = self
+                .proto_face_mut(pf)
+                .ok_or(dangling("proto face is deleted"))?
+                .coinc_proto_edges_mut();
+            if let Some(idx) = pf_edges.iter().position(|&x| x == other) {
+                pf_edges.remove(idx);
+            }
+            self.relate_coincident_pf(pe, pf)?;
+        }
+        self.proto_edge_mut(other)
+            .ok_or(dangling("proto edge is deleted"))?
+            .coinc_proto_faces_mut()
+            .clear();
         Ok(())
     }
 
@@ -2884,8 +2907,15 @@ mod tests {
             .unwrap();
         assert_eq!(found, Some(pe));
         assert!(identical);
+        // the other proto edge's coincident proto face moves to pe
+        let pf = m.new_proto_face(None, None, &[]).unwrap();
+        m.add_proto_face(pf);
+        m.relate_coincident_pf(pe2, pf).unwrap();
         m.combine_proto_edge(&k, &mut geo, pe, pe2).unwrap();
         assert_eq!(m.proto_edge(pe).unwrap().num_edge_definitions(), 3);
+        assert_eq!(m.proto_face(pf).unwrap().coinc_proto_edges(), &[pe]);
+        assert_eq!(m.proto_edge(pe).unwrap().coinc_proto_faces(), &[pf]);
+        assert!(m.proto_edge(pe2).unwrap().coinc_proto_faces().is_empty());
 
         // removing the only definition of an edge deletes it
         let e2 = m.proto_edge(pe2).unwrap().edge_definitions().to_vec();

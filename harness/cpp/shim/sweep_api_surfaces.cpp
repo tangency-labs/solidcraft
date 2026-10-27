@@ -424,8 +424,9 @@ void run(Rd& rd, std::vector<double>& o)
     {
         int64_t nf = rd.idx(0, 16);
         std::vector<double> circles = rd.nums(4 * nf);
-        ULONG degree = (ULONG)rd.idx(1, 3);
-        if (rd.at != rd.n)
+        // 0 and above NL_MAXDEG are refused by the API before any work
+        ULONG degree = (ULONG)rd.idx(0, 1 << 20);
+        if ((degree >= 4 && degree <= 17) || rd.at != rd.n)
             throw Bad();
         std::vector<SmBrep*> planes;
         SmTArray<SmFace*> faces;

@@ -65,21 +65,18 @@
 //!   [`SolidError::InvalidInput`] (upstream reads an uninitialised local).
 //! - `GetRootCurve`, `DrawPolygon`, `GetMemoryUsed`, `WriteToDB`, `AssertValid`
 //!   and `Dump` are not part of this unit.
-//! - Upstream behaviours kept as they are (see `plan/findings.md`):
-//!   `MakeOrthoNormal` unitizes the projection vector only when it is *zero*
-//!   (giving `(0, 0, 1)`) and fails for every non-zero vector, leaving it as
-//!   given; for rotations it discards the result of `NormalInPlane`. `Transform`
+//! - Upstream behaviours kept as they are (see `plan/findings.md`): `Transform`
 //!   fails unless the ownership flag is `UNSURE`. `ReadFromDB` does not call
 //!   `MakeOrthoNormal`.
 
 use crate::curve::curve::p2::{self as curve_base, Curve, PROJECTED_CURVE_TYPE};
-use crate::error::{Result, SolidError};
+use crate::error::{Result, SolidError, SM_ERR_INVALID_INPUT};
 use crate::geom::axis2_placement::Axis2Placement;
 use crate::geom::extent1d::Extent1d;
 use crate::geom::geom_utility::p2::ContinuityType;
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::kernel::Kernel;
-use crate::math::EFF_ZERO;
+use crate::math::{EFF_ZERO, EFF_ZERO_SQ};
 use crate::nurbs::b_spline_curve::ProjectionType;
 use crate::nurbs::b_spline_curve_n_lib::TrimMode;
 use crate::surface::surface::p2::{check_geometry_nesting, NestedGeometry};
@@ -337,19 +334,20 @@ impl ProjectedCurve {
         self.make_ortho_normal()
     }
 
-    /// `MakeOrthoNormal`, as upstream: the projection vector is unitized only
-    /// when it is initialised and zero (becoming `(0, 0, 1)`); for rotations the
-    /// auxiliary vector likewise.
+    /// Unitizes the projection vector and, for rotations, replaces the auxiliary
+    /// vector by its unit component normal to the projection vector
+    /// (`MakeOrthoNormal`).
     ///
     /// # Errors
     ///
     /// `SM_ERR` when the projection vector (or, for rotations, the auxiliary
-    /// vector) is uninitialised or non-zero.
+    /// vector) is uninitialised or zero; `SM_ERR_INVALID_INPUT` when the auxiliary
+    /// vector is parallel to the projection vector (it becomes `(0, 0, 1)`).
     pub fn make_ortho_normal(&mut self) -> Result<()> {
         // when ProjVec is nonZero - unitize it
         let proj_init = self.proj_vec.is_initialized();
         let proj_zero = self.proj_vec.is_zero(EFF_ZERO);
-        if proj_init && proj_zero {
+        if proj_init && !proj_zero {
             self.proj_vec = self.proj_vec.unitize_or_z();
         } else {
             return Err(SolidError::sm_err(OP));
@@ -360,10 +358,18 @@ impl ProjectedCurve {
             // when xAuxData is nonZero - make orthonormal to ProjVec
             let aux_init = self.aux_data.is_initialized();
             let aux_zero = self.aux_data.is_zero(EFF_ZERO);
-            if aux_init && aux_zero {
-                // upstream discards the NormalInPlane result
-                let _ = self.proj_vec.normal_in_plane(self.aux_data);
+            if aux_init && !aux_zero {
+                self.aux_data = self.proj_vec.normal_in_plane(self.aux_data);
+                // SER(Unitize()): a zero vector becomes (0, 0, 1) and fails
+                let zero = self.aux_data.length_squared() < EFF_ZERO_SQ;
                 self.aux_data = self.aux_data.unitize_or_z();
+                if zero {
+                    return Err(SolidError::Upstream {
+                        operation: OP,
+                        code: SM_ERR_INVALID_INPUT,
+                        entity: None,
+                    });
+                }
             } else {
                 return Err(SolidError::sm_err(OP));
             }
@@ -801,6 +807,7 @@ mod tests {
             Err(SolidError::InvalidInput { .. })
         ));
         assert_eq!(format!("{projected:?}"), before);
+        // a zero projection vector fails, the fields are set anyway
         assert!(projected
             .set_canonical(
                 base(),
@@ -810,11 +817,22 @@ mod tests {
                 ProjectionType::Parallel,
                 OwnsCurve::Yes,
             )
+            .is_err());
+        assert_eq!(projected.proj_type(), ProjectionType::Parallel);
+        assert!(projected
+            .set_canonical(
+                base(),
+                Vec3::ZERO,
+                Vec3::Z,
+                Vec3::ZERO,
+                ProjectionType::Parallel,
+                OwnsCurve::Yes,
+            )
             .is_ok());
     }
 
     #[test]
-    fn nonzero_proj_vec_is_kept_and_rejected() {
+    fn nonzero_proj_vec_is_unitized() {
         let mut c = ProjectedCurve::new(
             base(),
             Some(Vec3::new(0.0, 0.0, 0.0)),
@@ -824,12 +842,38 @@ mod tests {
             OwnsCurve::No,
         )
         .unwrap();
-        assert_eq!(c.proj_vec(), Vec3::new(0.0, 0.0, 2.0));
-        assert!(c.make_ortho_normal().is_err());
+        assert_eq!(c.proj_vec(), Vec3::Z);
+        assert!(c.make_ortho_normal().is_ok());
     }
 
     #[test]
-    fn zero_proj_vec_becomes_z() {
+    fn rotation_aux_is_made_orthonormal() {
+        let mut c = ProjectedCurve::new(
+            base(),
+            Some(Vec3::new(0.0, 0.0, 0.0)),
+            Some(Vec3::new(0.0, 0.0, 2.0)),
+            Some(Vec3::new(3.0, 0.0, 5.0)),
+            ProjectionType::Rotation,
+            OwnsCurve::No,
+        )
+        .unwrap();
+        assert_eq!(c.proj_vec(), Vec3::Z);
+        assert!((c.aux_data() - Vec3::X).length() < 1e-15);
+        assert!(c.make_ortho_normal().is_ok());
+        // an auxiliary vector along the projection vector has no normal part
+        c.aux_data = Vec3::new(0.0, 0.0, 4.0);
+        assert!(matches!(
+            c.make_ortho_normal(),
+            Err(SolidError::Upstream {
+                code: SM_ERR_INVALID_INPUT,
+                ..
+            })
+        ));
+        assert_eq!(c.aux_data(), Vec3::Z);
+    }
+
+    #[test]
+    fn zero_proj_vec_is_rejected() {
         let mut c = ProjectedCurve::new(
             base(),
             Some(Vec3::new(0.0, 0.0, 0.0)),
@@ -839,9 +883,8 @@ mod tests {
             OwnsCurve::No,
         )
         .unwrap();
-        assert_eq!(c.proj_vec(), Vec3::Z);
-        assert_eq!(c.aux_data(), Vec3::Z);
-        // (0, 0, 1) is not zero: a second call fails, as upstream
+        assert_eq!(c.proj_vec(), Vec3::ZERO);
+        assert_eq!(c.aux_data(), Vec3::ZERO);
         assert!(c.make_ortho_normal().is_err());
     }
 

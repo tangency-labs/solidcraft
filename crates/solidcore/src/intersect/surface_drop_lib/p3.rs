@@ -1039,6 +1039,11 @@ impl Surface {
         let num_drop_points = solutions.len();
         let mut curve_cache = None;
         for ii in 0..num_drop_points {
+            // a trace from this start point that is abandoned must not leave its drop
+            // distances in the reported maximums
+            let max_drop_to_surf_before_trace = max_drop_to_surf;
+            let max_approx_dev_before_trace = max_approx_dev;
+
             // set Start
             start.t = s_interval.min();
             start.uv_pd[0] = start_uv(&solutions, ii)?;
@@ -1261,6 +1266,8 @@ impl Surface {
                         default_path(&mut record, CreateUvTrimCurvePathType::DropStartPointFail);
                         ctrl_poly.clear();
                         knots.clear();
+                        max_drop_to_surf = max_drop_to_surf_before_trace;
+                        max_approx_dev = max_approx_dev_before_trace;
                         break;
                     }
                 }
@@ -1383,6 +1390,8 @@ impl Surface {
                         );
                         ctrl_poly.clear();
                         knots.clear();
+                        max_drop_to_surf = max_drop_to_surf_before_trace;
+                        max_approx_dev = max_approx_dev_before_trace;
                         stop_spans = true;
                         break;
                     }

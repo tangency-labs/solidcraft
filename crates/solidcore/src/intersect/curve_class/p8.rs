@@ -20,9 +20,8 @@
 //! temporary native owner clearing. Debug-only drawing is
 //! omitted. Ignored ordinary statuses use initialized results where available;
 //! evaluation failures without defined outputs return errors, and Unported always propagates.
-//! Empty knot lists/interval arrays and out-of-range native volume W/V indexing return
-//! errors instead of native undefined behaviour. The native V+V solution-slot formulas,
-//! W-plane coordinates taken from V, and U-only unaligned test are retained.
+//! Empty knot lists/interval arrays return errors instead of native undefined
+//! behaviour. The native U-only unaligned test is retained.
 //! Volume slots 4 and 5 share one 20-solution borrowed buffer natively (WR-155): slot
 //! 5's final solutions overwrite slot 4's leading entries while slot 4 fits the buffer;
 //! an overflowing slot 5 over a borrowed slot 4 returns an error (native buffer state
@@ -631,14 +630,13 @@ impl<O: ClassObject> CurveClassification<O> {
             core::array::from_fn(|_| Vec::new());
         for (ii, boundary) in boundaries.iter().enumerate() {
             let mut sols = intersections(k, curve, &self.interval(), boundary, tol, uv)?;
-            // Preserve upstream's V+V typo rather than silently repairing it.
             let slot = if ii == 0 {
                 Some(0)
             } else if ii == u.len() - 1 {
                 Some(1)
             } else if ii == u.len() {
                 Some(2)
-            } else if ii == v.len() + v.len() - 1 {
+            } else if ii == u.len() + v.len() - 1 {
                 Some(3)
             } else {
                 None
@@ -795,7 +793,7 @@ impl<O: ClassObject> CurveClassification<O> {
                         Point3::new(
                             umin,
                             vmin,
-                            *d.v.params.get(j).ok_or_else(|| SolidError::sm_err(OP))?,
+                            *d.w.params.get(j).ok_or_else(|| SolidError::sm_err(OP))?,
                         ),
                         Vec3::X,
                         Vec3::Y,
@@ -831,11 +829,11 @@ impl<O: ClassObject> CurveClassification<O> {
                 Some(1)
             } else if i == nu {
                 Some(2)
-            } else if i == nv + nv - 1 {
+            } else if i == nu + nv - 1 {
                 Some(3)
-            } else if i == nv + nv {
+            } else if i == nu + nv {
                 Some(4)
-            } else if i == nv + nv + nw - 1 {
+            } else if i == nu + nv + nw - 1 {
                 Some(5)
             } else {
                 None

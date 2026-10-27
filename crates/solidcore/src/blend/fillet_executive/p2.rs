@@ -7,6 +7,7 @@
 //! | Rust | Upstream |
 //! |------|----------|
 //! | [`FilletExecutive::set_fillet_parameters`], [`FilletParameters`] | `SmFilletExecutive::SetFilletParameters` (edge pointers, per-edge parameters) |
+//! | `check_edges_are_in_brep` (private) | `SmFilletExecutive::CheckEdgesAreInBrep` |
 //! | [`surface_surface_fillet`], [`SurfaceFilletOptions`] | `SmFilletExecutive::SurfaceSurfaceFillet` |
 //! | [`FilletExecutive::do_surface_filleting`] | `SmFilletExecutive::DoSurfaceFilleting` |
 //! | [`FilletExecutive::set_fillet_brep_edge_map`] | `SmFilletExecutive::SetFilletBrepEdgeMap` |
@@ -39,10 +40,9 @@
 //! - **Error notes.** `SmFilletErrorInfo::NoteError` and
 //!   `SmFilletExecutive::NoteFilletError` belong to `blend.fillet_executive_p1`; their
 //!   `%p` message text cannot be reproduced and the messages carry the edge index only.
-//! - **Null input.** `SetFilletParameters` dereferences a null B-rep (with a non-empty
-//!   edge list) and a null variable-radius law list (for a variable-radius type)
-//!   (UB-206); `SurfaceSurfaceFillet` dereferences a null UV curve. The port returns
-//!   `SM_ERR_NULL_POINTER` there.
+//! - **Null input.** `SetFilletParameters` dereferences a null variable-radius law list
+//!   (for a variable-radius type) (UB-206); `SurfaceSurfaceFillet` dereferences a null
+//!   UV curve. The port returns `SM_ERR_NULL_POINTER` there.
 //! - **Bounds.** `CollectTangentEdgeSequence` follows tangent solver chains through
 //!   the corners until a null tangent solver or the first solver. Upstream's corners pair
 //!   their solvers symmetrically, so every chain ends there; as a defence against
@@ -428,6 +428,11 @@ pub trait FilletParametersAccess<O: ClassObject + SolutionObject + Ord>:
     /// # Errors
     /// Solver or generator resolution failures.
     fn parameters_set_generator(&mut self, solver: O, generator: O) -> Result<()>;
+    /// `pBrep->IsLiveTopologyMember(pEdge)`: whether `edge` is on the B-rep's edge list.
+    ///
+    /// # Errors
+    /// Object resolution failures.
+    fn parameters_edge_is_live(&self, brep: O, edge: O) -> Result<bool>;
 }
 
 impl<O, A> FilletParametersAccess<O> for A
@@ -456,6 +461,9 @@ where
     }
     fn parameters_set_generator(&mut self, solver: O, generator: O) -> Result<()> {
         ExecutiveAccess::set_surface_generator(self, solver, generator)
+    }
+    fn parameters_edge_is_live(&self, brep: O, edge: O) -> Result<bool> {
+        Ok(ExecutiveAccess::edges(self, brep)?.contains(&edge))
     }
 }
 
@@ -507,6 +515,36 @@ fn single(len: usize, n: usize) -> Option<bool> {
 }
 
 impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
+    /// `CheckEdgesAreInBrep`: every edge must be a live edge of `brep`; otherwise a
+    /// foreign edge's own B-rep would be modified before the fillet fails.
+    ///
+    /// # Errors
+    ///
+    /// `SM_ERR_INVALID_INPUT` (after noting the error) for a null B-rep or an edge not
+    /// on its edge list; those of the adapter.
+    fn check_edges_are_in_brep<A>(&mut self, access: &A, brep: Option<O>, edges: &[O]) -> Result<()>
+    where
+        A: FilletParametersAccess<O> + ?Sized,
+    {
+        let Some(brep) = brep else {
+            self.error.note_error(
+                FilletErrorType::InvalidInput,
+                Some("SetFilletParameters: Null target Brep.\n"),
+            );
+            return Err(status(SM_ERR_INVALID_INPUT));
+        };
+        for (ie, &edge) in edges.iter().enumerate() {
+            if !access.parameters_edge_is_live(brep, edge)? {
+                self.error.note_error(
+                    FilletErrorType::InvalidInput,
+                    Some(&format!("Edge[ {ie:2} ]: not an edge of the target Brep\n")),
+                );
+                return Err(status(SM_ERR_INVALID_INPUT));
+            }
+        }
+        Ok(())
+    }
+
     /// `SetFilletParameters`: resets the five operation switches to their common
     /// values and, for each edge, creates its fillet solver (of the edge's radius type
     /// and value, on its blend edge use) and gives it the surface generator of its
@@ -515,11 +553,12 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
     ///
     /// # Errors
     ///
-    /// `SM_ERR_INVALID_INPUT` (after noting the error) for list sizes that fit neither
+    /// `SM_ERR_INVALID_INPUT` (after noting the error) for a null B-rep or an edge that
+    /// is not a live edge of it (`CheckEdgesAreInBrep`), list sizes that fit neither
     /// one nor every edge, an unknown cross-section type, an edge without blend edge
     /// use, a missing variable-radius law or an unsupported radius type;
-    /// `SM_ERR_NULL_POINTER` for a null B-rep or law list upstream dereferences; those
-    /// of the adapter calls.
+    /// `SM_ERR_NULL_POINTER` for a null law list upstream dereferences; those of the
+    /// adapter calls.
     #[allow(clippy::too_many_lines)] // one upstream routine
     pub fn set_fillet_parameters<A>(
         &mut self,
@@ -550,6 +589,8 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             return Ok(());
         }
 
+        self.check_edges_are_in_brep(access, params.brep, params.edges)?;
+
         let single_xsect_type = single(params.xsect_types.len(), num_filleted_edges);
         let single_radius_type = single(params.radius_types.len(), num_filleted_edges);
         let single_radius_value = single(params.radius_values.len(), num_filleted_edges);
@@ -564,7 +605,7 @@ impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {
             return Err(status(SM_ERR_INVALID_INPUT));
         };
 
-        // pBrep->GetContext()
+        // pBrep->GetContext() (checked above)
         let brep = params.brep.ok_or_else(|| null!("null B-rep"))?;
 
         // Note, dApproxTol will be reset for each edge: the default (10 times the B-rep

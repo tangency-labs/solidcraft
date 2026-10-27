@@ -23,6 +23,8 @@ import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 UNITS_DIR = pathlib.PurePosixPath("plan/units")
+PIN_FILE = pathlib.PurePosixPath("scripts/upstream-pin.env")
+CALLGRAPH_UNITS = pathlib.PurePosixPath("harness/callgraph/units.json")
 # Canonical key order of a unit file (plan/modules.schema.md).
 FIELDS = ["id", "upstream", "rust_module", "depends_on", "soft_depends_on", "est_lines",
           "layer", "tests", "status", "claimed_by", "claimed_at", "notes"]
@@ -53,6 +55,30 @@ def load_units(root=None):
             raise ValueError(f"{p}: id {u['id']!r} does not match the file name")
         out.append(u)
     return out
+
+
+def load_pin(root=None):
+    """The upstream pin from `scripts/upstream-pin.env` (the single source of truth that
+    scripts, CI and the site read): {"UPSTREAM_REPO", "UPSTREAM_VERSION", "UPSTREAM_COMMIT"}."""
+    pin = {}
+    for line in (pathlib.Path(root or ROOT) / PIN_FILE).read_text().splitlines():
+        key, sep, value = line.partition("=")
+        if sep and not key.lstrip().startswith("#"):
+            pin[key.strip()] = value.strip()
+    for key in ("UPSTREAM_REPO", "UPSTREAM_VERSION", "UPSTREAM_COMMIT"):
+        if not pin.get(key):
+            raise ValueError(f"{PIN_FILE}: missing {key}")
+    return pin
+
+
+def callgraph_lines(root=None):
+    """{unit id: upstream lines} summed over the functions each unit owns in
+    `harness/callgraph/units.json` (extracted at the pinned upstream commit)."""
+    path = pathlib.Path(root or ROOT) / CALLGRAPH_UNITS
+    if not path.exists():
+        return {}
+    data = json.loads(path.read_text())
+    return {uid: sum(f["lines"] for f in u.get("functions", [])) for uid, u in data.items()}
 
 
 def units_from_texts(texts):

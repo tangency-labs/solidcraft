@@ -2,7 +2,7 @@
  "cases": [
   {
    "name": "loop_crossings_sheet_line",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_get_loop_crossings (sm_make_xy_sheet(20) and the line (0,10,0)-(20,10,0)); EdgeEdgeIntersect / EdgeFaceCoincidence / IntersectTopology of the pair",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:my_test_get_loop_crossings (sm_make_xy_sheet(20) and the line (0,10,0)-(20,10,0)); EdgeEdgeIntersect / EdgeFaceCoincidence / IntersectTopology of the pair",
    "inputs": {
     "brep_a": {
      "kind": "face",
@@ -127,7 +127,7 @@
   },
   {
    "name": "loop_crossings_sheet_line_topology",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:my_test_get_loop_crossings; the manager of IntersectInsertRelate and IntersectTopology on the sheet/line pair",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:my_test_get_loop_crossings; the manager of IntersectInsertRelate and IntersectTopology on the sheet/line pair",
    "inputs": {
     "brep_a": {
      "kind": "face",

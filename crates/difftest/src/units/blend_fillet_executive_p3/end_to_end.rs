@@ -200,18 +200,73 @@ pub(super) struct RealSolid {
     /// `piecewise_merge`).
     #[serde(default)]
     curve_blend_sih: Option<f64>,
+    /// tangency-labs/solidcore#460: edges chosen by geometry instead of `edges` (box
+    /// only).
+    #[serde(default)]
+    select: Option<EdgeSelect>,
+    /// tangency-labs/solidcore#460: shell the filleted box (`SmApiShellBrepFull`).
+    #[serde(default)]
+    shell: Option<ShellAfter>,
+}
+
+/// Edges a case picks by geometry on the constructed box (the same owning-list order
+/// on both sides).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum EdgeSelect {
+    /// The four edges parallel to Z.
+    Vertical,
+    /// The first edge parallel to Z.
+    FirstVertical,
+}
+
+/// The shell after the fillet: `SmApiShellBrepFull(distance, extended convex edges,
+/// merged results, no offset solid)`, closed or without the plane faces at the box's
+/// height.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub(super) struct ShellAfter {
+    distance: f64,
+    #[serde(default)]
+    open_top: bool,
 }
 impl RealSolid {
     fn fillet_wire(&self) -> Vec<f64> {
+        let edges = self.edge_indices().unwrap_or_default();
         let mut out = vec![
             self.radius,
             f64::from(self.xsect),
             f64::from(self.continuity),
             self.thumbweight,
-            self.edges.len() as f64,
+            edges.len() as f64,
         ];
-        out.extend(self.edges.iter().map(|v| *v as f64));
+        out.extend(edges.iter().map(|v| *v as f64));
         out
+    }
+    /// The selected owning-list edge indices: `edges`, or those `select` picks on the
+    /// box (empty when the box cannot be built; the shim then rejects the wire).
+    fn edge_indices(&self) -> SolidResult<Vec<usize>> {
+        let Some(select) = self.select else {
+            return Ok(self.edges.clone());
+        };
+        let mut k = Kernel::default();
+        let [x, y, z] = self.dimensions.unwrap_or_default();
+        let body = solidcore::primitive::api_primitives::create_box(&mut k, Vec3::ZERO, x, y, z)?;
+        let mut picked = Vec::new();
+        for (index, id) in p1::edges(&body, None)?.into_iter().enumerate() {
+            let edge = body.edge(id)?;
+            let Some(curve) = edge.curve.as_ref() else {
+                continue;
+            };
+            let p = curve.evaluate_point(&k, edge.interval.min())?;
+            let q = curve.evaluate_point(&k, edge.interval.max())?;
+            if (p.x - q.x).abs() < 1e-9 && (p.y - q.y).abs() < 1e-9 {
+                picked.push(index);
+            }
+        }
+        if select == EdgeSelect::FirstVertical {
+            picked.truncate(1);
+        }
+        Ok(picked)
     }
     /// The box wire: dimensions then the fillet wire.
     fn wire(&self) -> Vec<f64> {
@@ -230,6 +285,20 @@ impl RealSolid {
     /// Rejects mixed or incomplete forms (a box needs `dimensions`; a source no
     /// `dimensions`, the full checkpoint, and exactly one of `edges` / `all_edges`).
     fn check_form(&self) -> Result<(), HarnessError> {
+        if (self.select.is_some() || self.shell.is_some())
+            && (self.checkpoint != Checkpoint::Full
+                || self.source.is_some()
+                || self.radius_end.is_some()
+                || self.piecewise_merge
+                || self.curve_blend_sih.is_some())
+        {
+            return Err(HarnessError::new(
+                "select and shell take the full checkpoint on a box without other options",
+            ));
+        }
+        if self.select.is_some() && !self.edges.is_empty() {
+            return Err(HarnessError::new("select replaces edges"));
+        }
         if self.radius_end.is_some()
             && (self.checkpoint != Checkpoint::Full
                 || self.source.is_some()
@@ -388,6 +457,13 @@ fn solid_output(
 
 pub(super) fn cpp(input: &RealSolid) -> Result<Output, HarnessError> {
     input.check_form()?;
+    if let Some(shell) = input.shell {
+        let mut wire = input.wire();
+        wire.extend([shell.distance, f64::from(u8::from(shell.open_top))]);
+        let (values, step) = super::fresh_cpp(|| ffi::fillet_then_shell(&wire))
+            .map_err(|e| HarnessError::new(e.to_string()))?;
+        return Ok(super::with_point_step(shell_output(&values)?, step));
+    }
     if let (Some(step_back), Some(source)) = (input.curve_blend_sih, &input.source) {
         return source_output(super::fresh_cpp(|| {
             ffi::curve_sih_source(step_back, &input.source_wire(source), source.path())
@@ -537,7 +613,8 @@ fn run_rust(k: &mut Kernel, body: SolidResult<Brep>, input: &RealSolid) -> Solid
     let mut selected = Vec::<EdgeId>::new();
     let mut before = Vec::new();
     let all: Vec<usize> = (0..edges.len()).collect();
-    let indices = if input.all_edges { &all } else { &input.edges };
+    let picked = input.edge_indices()?;
+    let indices = if input.all_edges { &all } else { &picked };
     for &index in indices {
         let id = *edges.get(index).ok_or_else(|| {
             SolidError::invalid_input("harness::real_fillet", "selected edge out of range")
@@ -707,6 +784,331 @@ fn curve_sih_fillet_edges(
     }
     stitch_and_orient(k, body, &StitchAndOrientOptions::default())
 }
+/// The fillet-then-shell record (`sc_blend_fillet_executive_p3_fillet_then_shell`):
+/// fillet status; then, after a fillet, the shell status and the open-face count;
+/// after a shell, the result's v/e/f counts, the manifold query's status and flag,
+/// the mass status with area, volume and mass, and the result's geometry section.
+fn shell_output(values: &[f64]) -> Result<Output, HarnessError> {
+    let integer = |v: &f64| v.is_finite() && v.fract() == 0.0;
+    let bad = || HarnessError::new("invalid fillet-then-shell record");
+    let (&fillet, rest) = values.split_first().ok_or_else(bad)?;
+    let mut out = Output::new();
+    if !integer(&fillet) {
+        return Err(bad());
+    }
+    if fillet != 0.0 {
+        if !rest.is_empty() {
+            return Err(bad());
+        }
+        out.ints
+            .insert("fillet_shell_status".into(), vec![fillet as i64]);
+        return Ok(out);
+    }
+    let (statuses, rest) = (
+        rest.get(..2).ok_or_else(bad)?,
+        rest.get(2..).ok_or_else(bad)?,
+    );
+    if !statuses.iter().all(integer) {
+        return Err(bad());
+    }
+    let mut status = vec![0];
+    status.extend(statuses.iter().map(|v| *v as i64));
+    out.ints.insert("fillet_shell_status".into(), status);
+    if statuses.first() != Some(&0.0) {
+        if !rest.is_empty() {
+            return Err(bad());
+        }
+        return Ok(out);
+    }
+    let counts = rest.get(..6).ok_or_else(bad)?;
+    if !counts.iter().all(integer) {
+        return Err(bad());
+    }
+    out.ints.insert(
+        "shell_counts_manifold_mass_status".into(),
+        counts.iter().map(|v| *v as i64).collect(),
+    );
+    let mass_len = if counts.get(5) == Some(&0.0) { 3 } else { 0 };
+    let mass = rest.get(6..6 + mass_len).ok_or_else(bad)?;
+    out.values
+        .insert("shell_mass_properties".into(), mass.to_vec());
+    let mut tail = rest.get(6 + mass_len..).ok_or_else(bad)?;
+    let geometry = take_section(&mut tail)?;
+    if !tail.is_empty() {
+        return Err(bad());
+    }
+    out.values
+        .insert("shell_geometry".into(), geometry.to_vec());
+    Ok(out)
+}
+
+/// The Rust side of the fillet-then-shell record: `fillet_edges`, then
+/// `OffsetExecutive::shell_brep` with `SmApiShellBrepFull`'s options, on the
+/// identities of [`shell_notifications`].
+fn shell_rust(k: &mut Kernel, input: &RealSolid, shell: ShellAfter) -> SolidResult<Vec<f64>> {
+    use solidcore::offset::offset_executive::p1::OffsetExecutive;
+    use solidcore::offset::offset_executive::p2::{OffsetOptions, ShellOptions};
+    let [x, y, z] = input.dimensions.unwrap_or_default();
+    let mut body = solidcore::primitive::api_primitives::create_box(k, Vec3::ZERO, x, y, z)?;
+    let all = p1::edges(&body, None)?;
+    let edges: Vec<EdgeId> = input
+        .edge_indices()?
+        .into_iter()
+        .map(|i| {
+            all.get(i).copied().ok_or_else(|| {
+                SolidError::invalid_input(
+                    "harness::fillet_then_shell",
+                    "selected edge out of range",
+                )
+            })
+        })
+        .collect::<SolidResult<_>>()?;
+    let mut values = Vec::new();
+    match apply(k, &mut body, &edges, input) {
+        Ok(()) => values.push(0.0),
+        Err(error) => {
+            values.push(status(error)?);
+            return Ok(values);
+        }
+    }
+    let mut open = Vec::new();
+    if shell.open_top {
+        for f in p1::faces(&body, None)? {
+            let face = body.face(f)?;
+            let Some(s) = face.surface.as_ref() else {
+                continue;
+            };
+            if s.is_kind_of(solidcore::surface::plane::Plane::TYPE)?
+                && (s.evaluate_point(k, face.uv_domain.mid())?.z - z).abs() < 1e-6
+            {
+                open.push(f);
+            }
+        }
+    }
+    let mut stores = shell_notifications::Stores::new(&mut body);
+    let shelled = OffsetExecutive::shell_brep(
+        k,
+        body,
+        ShellOptions {
+            offset: OffsetOptions {
+                distance: shell.distance,
+                extend_convex_edges: true,
+                merge_results: true,
+            },
+            create_offset_solid: false,
+            merge_sheet_side_walls: false,
+        },
+        &open,
+        &mut stores.context(),
+    )
+    .result;
+    let mut result = match shelled {
+        Ok(result) => result,
+        Err(error) => {
+            values.extend([status(error)?, open.len() as f64]);
+            return Ok(values);
+        }
+    };
+    values.extend([0.0, open.len() as f64]);
+    values.extend([
+        p1::vertices(&result, None)?.len() as f64,
+        p1::edges(&result, None)?.len() as f64,
+        p1::faces(&result, None)?.len() as f64,
+    ]);
+    match solidcore::query::api_queries::brep_is_manifold_solid(&result) {
+        Ok(manifold) => values.extend([0.0, f64::from(u8::from(manifold))]),
+        Err(error) => values.extend([status(error)?, 0.0]),
+    }
+    let store = solidcore::geom::attribute::AttributeStore::default();
+    let attributes = solidcore::mass::integrator::properties::PropertyAttributes {
+        store: &store,
+        key_of: &|_| solidcore::geom::attribute::ObjectKey(0),
+    };
+    match solidcore::mass::integrator::properties::brep_mass_properties(
+        k,
+        &mut result,
+        1e-4,
+        1.0,
+        Vec3::ZERO,
+        &attributes,
+    ) {
+        Ok(mass) => values.extend([
+            0.0,
+            mass.properties.area,
+            mass.properties.volume,
+            mass.properties.mass,
+        ]),
+        Err(error) => values.push(status(error)?),
+    }
+    let mut geometry = Vec::new();
+    crate::util::primitive::append(k, &result, &mut geometry)?;
+    section(&mut values, &geometry);
+    Ok(values)
+}
+
+/// The caller-owned notification identities `OffsetExecutive::shell_brep` needs: the
+/// filleted body as B-rep 0 of one namespace, results in another, merge bodies and
+/// curves in their own (all disjoint).
+mod shell_notifications {
+    use std::collections::BTreeMap;
+
+    use solidcore::curve::curve::Curve;
+    use solidcore::geom::attribute::{AttributeStore, ObjectKey};
+    use solidcore::geom::object::ObjectRef;
+    use solidcore::offset::offset_executive::p2::OffsetNotifications;
+    use solidcore::sweep::topology_sweep::store::SweepIdentities;
+    use solidcore::topology::topology::Topology;
+    use solidcore::topology::{Brep, BrepId, EdgeId, Region, RegionId, Shell};
+    use solidcore::{EntityRef, Result as SolidResult};
+
+    fn key(entity: EntityRef, namespace: u64) -> ObjectRef {
+        let (index, type_code) = match entity {
+            EntityRef::Brep(id) => (id.index(), solidcore::geom::a_object::BREP_TYPE),
+            EntityRef::Shell(id) => (id.index(), Shell::type_code()),
+            EntityRef::Face(id) => (id.index(), solidcore::topology::face::p2::TYPE),
+            EntityRef::Faceuse(id) => (id.index(), 16022),
+            EntityRef::Edge(id) => (id.index(), solidcore::topology::edge::TYPE),
+            EntityRef::Edgeuse(id) => (id.index(), solidcore::topology::edgeuse::p1::TYPE),
+            EntityRef::Vertex(id) => (id.index(), solidcore::topology::vertex::TYPE),
+            EntityRef::Vertexuse(id) => (id.index(), solidcore::topology::vertexuse::TYPE),
+            EntityRef::Loopuse(id) => (id.index(), solidcore::topology::loopuse::TYPE),
+            EntityRef::Region(id) => (id.index(), Region::type_code()),
+            EntityRef::Loop(id) => (id.index(), solidcore::topology::topology::TYPE),
+        };
+        ObjectRef {
+            key: ObjectKey(namespace + type_code.unsigned_abs() * 1_000_000 + u64::from(index)),
+            type_code,
+        }
+    }
+    fn original_key(entity: EntityRef) -> ObjectRef {
+        key(entity, 100_000_000_000)
+    }
+    fn result_key(entity: EntityRef) -> ObjectRef {
+        key(entity, 200_000_000_000)
+    }
+    fn original_curve(edge: EdgeId, type_code: i64) -> ObjectRef {
+        ObjectRef {
+            key: ObjectKey(400_000_000_000 + u64::from(edge.index())),
+            type_code,
+        }
+    }
+    fn result_curve(edge: EdgeId, type_code: i64) -> ObjectRef {
+        ObjectRef {
+            key: ObjectKey(300_000_000_000 + u64::from(edge.index())),
+            type_code,
+        }
+    }
+    fn source_lists(result: bool, region: RegionId) -> [ObjectRef; 2] {
+        [0, 1].map(|list| ObjectRef {
+            key: ObjectKey(
+                500_000_000_000
+                    + u64::from(result) * 10_000_000_000
+                    + u64::from(region.index()) * 2
+                    + list,
+            ),
+            type_code: 0,
+        })
+    }
+    fn merge_curve(brep: BrepId, edge: EdgeId, type_code: i64) -> ObjectRef {
+        ObjectRef {
+            key: ObjectKey(
+                700_000_000_000 + u64::from(brep.index()) * 1_000_000_000 + u64::from(edge.index()),
+            ),
+            type_code,
+        }
+    }
+    struct MergeBodies;
+    impl SweepIdentities for MergeBodies {
+        fn topology(&self, brep: BrepId, entity: EntityRef) -> ObjectRef {
+            key(
+                entity,
+                1_000_000_000_000 + u64::from(brep.index()) * 100_000_000_000,
+            )
+        }
+        fn owned_auxiliary_objects(&self, brep: BrepId, model: &Brep) -> Vec<ObjectKey> {
+            model
+                .edges()
+                .iter()
+                .filter(|(_, e)| e.curve.is_some())
+                .map(|(edge, _)| merge_curve(brep, edge, 0).key)
+                .collect()
+        }
+        fn curve(&self, brep: BrepId, edge: EdgeId, curve: &Curve) -> ObjectRef {
+            merge_curve(brep, edge, curve.type_code())
+        }
+        fn new_curve(&self, brep: BrepId, edge: EdgeId, type_code: i64) -> SolidResult<ObjectRef> {
+            Ok(merge_curve(brep, edge, type_code))
+        }
+        fn source_lists(&self, brep: BrepId, region: RegionId) -> SolidResult<[ObjectRef; 2]> {
+            Ok([0, 1].map(|list| ObjectRef {
+                key: ObjectKey(
+                    800_000_000_000
+                        + u64::from(brep.index()) * 1_000_000_000
+                        + u64::from(region.index()) * 2
+                        + list,
+                ),
+                type_code: 0,
+            }))
+        }
+    }
+
+    /// The topology records and attributes of one shell run.
+    pub(super) struct Stores {
+        records: BTreeMap<ObjectKey, Topology>,
+        attributes: AttributeStore,
+    }
+    impl Stores {
+        /// Keys `body` as B-rep 0 of the original namespace and registers it.
+        pub(super) fn new(body: &mut Brep) -> Self {
+            body.set_key(original_key(EntityRef::Brep(BrepId::from_index(0))).key);
+            let mut records = BTreeMap::new();
+            records.insert(body.key(), Topology::new());
+            records.insert(
+                result_key(EntityRef::Brep(BrepId::from_index(0))).key,
+                Topology::new(),
+            );
+            let entities: Vec<EntityRef> = body
+                .shells()
+                .iter()
+                .map(|(id, _)| EntityRef::Shell(id))
+                .chain(body.faces().iter().map(|(id, _)| EntityRef::Face(id)))
+                .chain(body.faceuses().iter().map(|(id, _)| EntityRef::Faceuse(id)))
+                .chain(body.edges().iter().map(|(id, _)| EntityRef::Edge(id)))
+                .chain(body.edgeuses().iter().map(|(id, _)| EntityRef::Edgeuse(id)))
+                .chain(body.vertices().iter().map(|(id, _)| EntityRef::Vertex(id)))
+                .chain(
+                    body.vertexuses()
+                        .iter()
+                        .map(|(id, _)| EntityRef::Vertexuse(id)),
+                )
+                .chain(body.loopuses().iter().map(|(id, _)| EntityRef::Loopuse(id)))
+                .chain(body.regions().iter().map(|(id, _)| EntityRef::Region(id)))
+                .collect();
+            for entity in entities {
+                records.insert(original_key(entity).key, Topology::new());
+            }
+            Self {
+                records,
+                attributes: AttributeStore::default(),
+            }
+        }
+        /// The executive's view of the stores.
+        pub(super) fn context(&mut self) -> OffsetNotifications<'_> {
+            OffsetNotifications {
+                records: &mut self.records,
+                attributes: &mut self.attributes,
+                original_key_of: &original_key,
+                result_key_of: &result_key,
+                original_curve_ref: &original_curve,
+                result_curve_ref: &result_curve,
+                boolean_source_lists: &source_lists,
+                result_brep: result_key(EntityRef::Brep(BrepId::from_index(0))),
+                merge_identities: Some(&MergeBodies),
+            }
+        }
+    }
+}
+
 /// The `TestSmFillets.cpp` examples 0-6, as the shim runs them (examples 2-4 on the
 /// 10x10x10 box with its first four edges in `GetEdges` order: `SmApiFilletEdges(r=1,
 /// circular)`, `SmApiFilletEdgesPerEdge(r = 0.5 + 0.25 i, circular)` and
@@ -787,6 +1189,19 @@ pub(super) fn upstream_example(example: usize) -> Result<Option<Output>, Harness
 }
 pub(super) fn rust(input: &RealSolid) -> Result<Output, HarnessError> {
     input.validate()?;
+    if let Some(shell) = input.shell {
+        let mut k = Kernel::default();
+        return match shell_rust(&mut k, input, shell) {
+            Ok(values) => Ok(super::with_point_step(
+                shell_output(&values)?,
+                super::rust_point_step(&k),
+            )),
+            Err(error) => match Output::unported(&error) {
+                Some(deferred) => Ok(deferred),
+                None => Err(HarnessError::new(error.to_string())),
+            },
+        };
+    }
     let mut k = Kernel::default();
     let body = build(&mut k, input)?;
     match run_rust(&mut k, body, input) {

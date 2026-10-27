@@ -2,7 +2,7 @@
  "cases": [
   {
    "name": "endcap_defaults",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1920",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1651",
    "inputs": {
     "op": "box",
     "brep": {
@@ -214,7 +214,7 @@
   },
   {
    "name": "endcap_rebuilt_defaults",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1920",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1651",
    "inputs": {
     "op": "box",
     "brep": {
@@ -426,7 +426,7 @@
   },
   {
    "name": "mouse_defaults",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1920",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1651",
    "inputs": {
     "op": "box",
     "brep": {
@@ -638,7 +638,7 @@
   },
   {
    "name": "mouse_rebuilt_defaults",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1920",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1651",
    "inputs": {
     "op": "box",
     "brep": {
@@ -850,7 +850,7 @@
   },
   {
    "name": "box_with_large_fillet_defaults",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1920",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1651",
    "inputs": {
     "op": "box",
     "brep": {
@@ -1062,7 +1062,7 @@
   },
   {
    "name": "box_with_large_fillet_rebuilt_defaults",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1920",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1651",
    "inputs": {
     "op": "box",
     "brep": {
@@ -1274,7 +1274,7 @@
   },
   {
    "name": "disk_defaults",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1920",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1651",
    "inputs": {
     "op": "box",
     "brep": {
@@ -1486,7 +1486,7 @@
   },
   {
    "name": "disk_rebuilt_defaults",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1920",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1651",
    "inputs": {
     "op": "box",
     "brep": {
@@ -1698,7 +1698,7 @@
   },
   {
    "name": "ellips_ts2_defaults",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1920",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1651",
    "inputs": {
     "op": "box",
     "brep": {
@@ -1910,7 +1910,7 @@
   },
   {
    "name": "ellips_ts2_rebuilt_defaults",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1920",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1651",
    "inputs": {
     "op": "box",
     "brep": {
@@ -2122,7 +2122,7 @@
   },
   {
    "name": "plane_circ_defaults",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1920",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1651",
    "inputs": {
     "op": "box",
     "brep": {
@@ -2334,7 +2334,7 @@
   },
   {
    "name": "plane_circ_rebuilt_defaults",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1920",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1651",
    "inputs": {
     "op": "box",
     "brep": {
@@ -2546,7 +2546,7 @@
   },
   {
    "name": "plane_square_defaults",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1920",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1651",
    "inputs": {
     "op": "box",
     "brep": {
@@ -2758,7 +2758,7 @@
   },
   {
    "name": "plane_square_rebuilt_defaults",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1920",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1651",
    "inputs": {
     "op": "box",
     "brep": {
@@ -2970,7 +2970,7 @@
   },
   {
    "name": "network_defaults",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1920",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1651",
    "inputs": {
     "op": "box",
     "brep": {
@@ -3168,7 +3168,7 @@
   },
   {
    "name": "no_vertices_defaults",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1920",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1651",
    "inputs": {
     "op": "box",
     "brep": {
@@ -3373,7 +3373,7 @@
   },
   {
    "name": "one_vertex_defaults",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1920",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1651",
    "inputs": {
     "op": "box",
     "brep": {
@@ -3620,7 +3620,7 @@
   },
   {
    "name": "huge_vertices_defaults",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1920",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1651",
    "inputs": {
     "op": "box",
     "brep": {
@@ -3902,7 +3902,7 @@
   },
   {
    "name": "tiny_vertices_defaults",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1920",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1651",
    "inputs": {
     "op": "box",
     "brep": {
@@ -4184,7 +4184,7 @@
   },
   {
    "name": "box_solid_defaults",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1920",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1651",
    "inputs": {
     "op": "box",
     "brep": {
@@ -4452,7 +4452,7 @@
   },
   {
    "name": "box_solid_tiny_defaults",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1920",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1651",
    "inputs": {
     "op": "box",
     "brep": {
@@ -4720,7 +4720,7 @@
   },
   {
    "name": "box_solid_large_defaults",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1920",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:1651",
    "inputs": {
     "op": "box",
     "brep": {

@@ -18,3 +18,8 @@ why = "one face's tolerance (5.2976e-5 vs 4e-5) and UV domain minimum ((0, 0.586
 unit = "blend.fillet_executive_p3"
 case = "sweep5-ext_w_hole-e14-r1.0"
 why = "one near-zero vertex coordinate differs (C++ 1.4453956777755315e-15, Rust 3.6012056774890033e-16); everything else agrees (plan/findings/blend.fillet_executive_p3--sweep5-ext-w-hole-e14-near-zero-vertex.md)"
+
+[[mismatch]]
+unit = "blend.fillet_executive_p3"
+case = "private-upstream-rollover-404-cyl-on-box1-edge12-r2"
+why = "values.mass_properties[11] (product of inertia zx, about -3.365e-4) differs by about 8e-13 absolute (rel 2.4e-9); every other value agrees. Root cause: face 11 of the filleted body stores a UV domain whose v-min is -2.0000000000000013 in Rust and exactly -2 in C++ (about 6 ulp); SmFace::ComputePreciseProperties starts each iso-line integral from that v-min, so the face's area moves 2 ulp and its moments more, while its trims and the integrator agree bit for bit. SMLib v1.0.1's SmApiBrepComputeMassProperties (integrate about the B-rep box midpoint, then shift to the origin) amplifies the drift through cancellation in the product. A Rust divergence (where the fillet pipeline sets face 11's uv_domain), not a C++ defect (plan/findings/blend.fillet_executive_p3--rollover-404-face-uv-domain-vmin.md)."

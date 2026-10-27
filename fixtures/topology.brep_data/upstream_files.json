@@ -2663,7 +2663,7 @@
     "version": 32,
     "persist": true,
     "path": {
-     "$upstream_file": "Platform.smb"
+     "$upstream_file": "Platform.smp"
     },
     "skip_lines": 12
    }
@@ -3302,7 +3302,7 @@
     "version": 32,
     "persist": true,
     "path": {
-     "$upstream_file": "SmallBox.smb"
+     "$upstream_file": "SmallBox.smp"
     },
     "skip_lines": 12
    }

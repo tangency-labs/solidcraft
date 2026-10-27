@@ -18,9 +18,7 @@
 //!
 //! Deferred cases: `HasPlaneCrossings` with planes (`SmSurface::GlobalCurveIntersect`,
 //! `surface.surface_p8`) and ellipse intersections that reach the general curve solvers
-//! (`curve.curve_p1`, `curve.curve_p3`, `curve.curve_p6`). `FixChainCurvesList` cases
-//! that would delete a duplicate are not generated (a use after free upstream, see
-//! `plan/findings.md`).
+//! (`curve.curve_p1`, `curve.curve_p3`, `curve.curve_p6`).
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -847,9 +845,6 @@ fn rust(k: &Kernel, op: &OpIn) -> Result<Output, HarnessError> {
                 });
             }
             let r = tri!(o, fix_chain_curves_list(&Kernel::default(), list, *tol, *del));
-            if r.deleted > 0 {
-                return Err(harness("a duplicate was deleted (use after free upstream)"));
-            }
             o.extend([
                 0.0,
                 r.chain_starts.len() as f64,
@@ -1641,28 +1636,6 @@ fn gen_case(rng: &mut Rng) -> OpIn {
     }
 }
 
-/// Whether the Rust side would delete a duplicate in `op` (upstream then uses the
-/// deleted curve).
-fn deletes_duplicates(op: &OpIn) -> bool {
-    let OpIn::FixChain { curves, tol, del } = op else {
-        return false;
-    };
-    if !*del {
-        return false;
-    }
-    let mut list = Vec::new();
-    for c in curves {
-        match c {
-            Some(c) => match build(c) {
-                Ok(c) => list.push(Some(c)),
-                Err(_) => return true,
-            },
-            None => list.push(None),
-        }
-    }
-    fix_chain_curves_list(&Kernel::default(), list, *tol, true).map_or(true, |r| r.deleted > 0)
-}
-
 impl UnitDiff for Runner {
     fn id(&self) -> &'static str {
         "curve.curve_p4"
@@ -1674,7 +1647,7 @@ impl UnitDiff for Runner {
             let Ok((code, input)) = cpp_input(&op) else {
                 continue;
             };
-            if ffi::validate(code, &input).is_err() || deletes_duplicates(&op) {
+            if ffi::validate(code, &input).is_err() {
                 continue;
             }
             return serde_json::to_value(op).ok();

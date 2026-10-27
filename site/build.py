@@ -5,7 +5,8 @@
     python3 site/build.py --out DIR       # elsewhere
 
 Standard library only (Python 3.11+ for tomllib). Every number comes from the repo:
-plan/units/*.toml, plan/PROGRESS.md (claims; generated, not committed), harness/callgraph/units.json,
+plan/units/*.toml, plan/PROGRESS.md (claims; generated, not committed), harness/callgraph/units.json (upstream
+line counts at the pin), scripts/upstream-pin.env (upstream version and commit),
 reports/difftest/*.json (not committed: CI's artifact, see scripts/fetch-reports.sh),
 reports/solids/solids.json (not committed: CI's artifact, see scripts/fetch-solids.sh),
 reports/ssi-corpus.json, plan/upstream-issues/*.md, the
@@ -37,8 +38,12 @@ import units as plan_units  # noqa: E402  (the shared plan loader)
 REPO = os.environ.get("GITHUB_REPOSITORY", "tangency-labs/solidcore")
 REPO_URL = f"https://github.com/{REPO}"
 VIEWER_URL = "https://tangency-labs.github.io/solidcore-viewer/"
-UPSTREAM_URL = "https://github.com/NVIDIA-Omniverse/usd-brep"
-UPSTREAM_COMMIT = "c9c5979f04cea8c38213004d4f04df0dcfb40d05"
+PIN = plan_units.load_pin(ROOT)  # scripts/upstream-pin.env: the one place the pin is set
+UPSTREAM_URL = PIN["UPSTREAM_REPO"]
+UPSTREAM_VERSION = PIN["UPSTREAM_VERSION"]
+UPSTREAM_COMMIT = PIN["UPSTREAM_COMMIT"]
+UPSTREAM_PIN_HTML = (f'<a href="{UPSTREAM_URL}/tree/{UPSTREAM_COMMIT}">usd-brep v{html.escape(UPSTREAM_VERSION)} '
+                     f'(<code>{UPSTREAM_COMMIT[:7]}</code>)</a>')
 STATUSES = ["green", "partial", "claimed", "blocked", "todo"]
 STATUS_TEXT = {"green": "green", "partial": "partial", "claimed": "claimed",
                "blocked": "blocked", "todo": "todo"}
@@ -550,7 +555,8 @@ def page(title, body, depth, nav, head_sha, head_date, description="", path="", 
 {body}
 </main>
 <footer class="wrap">Generated from <a href="{REPO_URL}/tree/{head_sha}"><code>{short}</code></a>
-({esc(head_date)}) by <code>site/build.py</code>. Apache-2.0. Not affiliated with or endorsed by NVIDIA.</footer>
+({esc(head_date)}) by <code>site/build.py</code>; upstream reference {UPSTREAM_PIN_HTML}.
+Apache-2.0. Not affiliated with or endorsed by NVIDIA.</footer>
 <script src="{up}assets/app.js"></script>{extra_js}
 </body>
 </html>
@@ -875,7 +881,8 @@ def build(out):
 <section class="hero">
 <h1>solidcore</h1>
 <p class="lede">solidcore is a Rust port of NVIDIA's SMLib, the boundary-representation (B-rep) solid
-modeling kernel from <a href="{UPSTREAM_URL}">usd-brep</a> (Apache-2.0), written in safe Rust: no
+modeling kernel from <a href="{UPSTREAM_URL}">usd-brep</a> (Apache-2.0; ported from and tested against
+{UPSTREAM_PIN_HTML}), written in safe Rust: no
 <code>unsafe</code>, no panics on bad input, deterministic, and buildable for WebAssembly. The upstream
 code is split into {s['units']} port units. A unit only counts as <strong>green</strong> when the
 <em>difftest</em> gate runs the Rust and the upstream C++ (through FFI) on the same inputs (upstream tests,
@@ -886,8 +893,8 @@ fixtures and fixed-seed generated cases) and the topology is identical and every
 </section>
 <section class="kpis">
 <div class="tile big"><div class="k">Upstream lines ported</div><div class="v">{pct:.1f}%</div>
-<div class="sub">{fmt_int(s['done_lines'])} of {fmt_int(s['total_lines'])} lines in green or partial units;
-{gpct:.1f}% green</div></div>
+<div class="sub">{fmt_int(s['done_lines'])} of {fmt_int(s['total_lines'])} lines of usd-brep
+v{esc(UPSTREAM_VERSION)} in green or partial units; {gpct:.1f}% green</div></div>
 {tiles}
 <div class="tile"><div class="k">ready to claim</div><div class="v">{ready_n}</div><div class="sub">todo with all dependencies done</div></div>
 {solids_tile}

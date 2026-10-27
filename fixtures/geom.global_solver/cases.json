@@ -3465,7 +3465,7 @@
   },
   {
    "name": "reversed_line_join_intersection_test",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join: overlapping reversed lines)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join: overlapping reversed lines)",
    "inputs": {
     "ops": [
      {

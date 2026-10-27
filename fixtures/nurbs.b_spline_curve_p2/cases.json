@@ -3962,7 +3962,7 @@
   },
   {
    "name": "line_join_case00",
-   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join, as SmBSplineCurve lines)",
    "inputs": {
     "op": "join",
     "segs": [
@@ -4029,7 +4029,7 @@
   },
   {
    "name": "line_join_case01",
-   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join, as SmBSplineCurve lines)",
    "inputs": {
     "op": "join",
     "segs": [
@@ -4096,7 +4096,7 @@
   },
   {
    "name": "line_join_case02",
-   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join, as SmBSplineCurve lines)",
    "inputs": {
     "op": "join",
     "segs": [
@@ -4163,7 +4163,7 @@
   },
   {
    "name": "line_join_case03",
-   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join, as SmBSplineCurve lines)",
    "inputs": {
     "op": "join",
     "segs": [
@@ -4230,7 +4230,7 @@
   },
   {
    "name": "line_join_case04",
-   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join, as SmBSplineCurve lines)",
    "inputs": {
     "op": "join",
     "segs": [
@@ -4297,7 +4297,7 @@
   },
   {
    "name": "line_join_case05",
-   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join, as SmBSplineCurve lines)",
    "inputs": {
     "op": "join",
     "segs": [
@@ -4364,7 +4364,7 @@
   },
   {
    "name": "line_join_case06",
-   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join, as SmBSplineCurve lines)",
    "inputs": {
     "op": "join",
     "segs": [
@@ -4431,7 +4431,7 @@
   },
   {
    "name": "line_join_case07",
-   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join, as SmBSplineCurve lines)",
    "inputs": {
     "op": "join",
     "segs": [
@@ -4498,7 +4498,7 @@
   },
   {
    "name": "line_join_case08",
-   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join, as SmBSplineCurve lines)",
    "inputs": {
     "op": "join",
     "segs": [
@@ -4565,7 +4565,7 @@
   },
   {
    "name": "line_join_case09",
-   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join, as SmBSplineCurve lines)",
    "inputs": {
     "op": "join",
     "segs": [
@@ -4632,7 +4632,7 @@
   },
   {
    "name": "line_join_case10",
-   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join, as SmBSplineCurve lines)",
    "inputs": {
     "op": "join",
     "segs": [
@@ -4699,7 +4699,7 @@
   },
   {
    "name": "line_join_case11",
-   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join, as SmBSplineCurve lines)",
    "inputs": {
     "op": "join",
     "segs": [
@@ -4766,7 +4766,7 @@
   },
   {
    "name": "line_join_case12",
-   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join, as SmBSplineCurve lines)",
    "inputs": {
     "op": "join",
     "segs": [
@@ -4833,7 +4833,7 @@
   },
   {
    "name": "line_join_case13",
-   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join, as SmBSplineCurve lines)",
    "inputs": {
     "op": "join",
     "segs": [
@@ -4900,7 +4900,7 @@
   },
   {
    "name": "line_join_case14",
-   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join, as SmBSplineCurve lines)",
    "inputs": {
     "op": "join",
     "segs": [
@@ -4967,7 +4967,7 @@
   },
   {
    "name": "line_join_case15",
-   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join, as SmBSplineCurve lines)",
+   "upstream_ref": "upstream/tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join, as SmBSplineCurve lines)",
    "inputs": {
     "op": "join",
     "segs": [

@@ -25,9 +25,8 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: 0
-  # Must match ci.yml.
-  UPSTREAM_REPO: https://github.com/NVIDIA-Omniverse/usd-brep
-  UPSTREAM_COMMIT: c9c5979f04cea8c38213004d4f04df0dcfb40d05  # c9c5979
+  # The upstream pin comes from scripts/upstream-pin.env, loaded by
+  # .github/actions/cpp-reference.
 
 jobs:
   fuzz:

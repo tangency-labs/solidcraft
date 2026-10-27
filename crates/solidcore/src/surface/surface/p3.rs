@@ -1830,18 +1830,22 @@ mod tests {
         Ok(())
     }
 
-    /// Default (pinned SMLib `c9c5979`): the cover succeeds and extends the domain onto
-    /// the fold, as upstream does (WR-407).
+    /// Default (SMLib v1.0.1): the flat sheet is now planar to `SM_EFF_ZERO` (`IsPlanar`
+    /// tests the unpadded pseudo box, `SmSurface.cpp:22371` at `3fd5b95`), so
+    /// `GetMaxAnalyticDomain` expands it relatively by 100 instead of by half a span per
+    /// cubic direction. The search over that domain reaches the folded continuation and
+    /// the cover fails, changing nothing. At `c9c5979` the padded box was not planar; the
+    /// domain ended at the fold (u = 1.5) and the cover succeeded (WR-407).
     #[test]
-    fn issue_434_default_covers_across_the_fold() -> Result<()> {
+    fn issue_434_default_refuses_the_fold_of_a_planar_sheet() -> Result<()> {
         let k = Kernel::default();
         assert!(!k.fixes.cover_refuses_folded_continuation);
         let (covered, u_max) = issue_434_cover_across_a_fold(&k)?;
         assert!(
-            covered.success,
-            "upstream covers across the fold: {covered:?}"
+            !covered.success,
+            "the planar sheet's cover across the fold fails: {covered:?}"
         );
-        assert!(u_max > 1.0, "upstream extends the u domain: {u_max}");
+        assert_eq!(u_max, 1.0);
         Ok(())
     }
 }

@@ -78,7 +78,8 @@
 //!   queries still leave the B-rep unchanged; no geometry or topology is copied back.
 
 use crate::error::{ignored, EntityRef, Result, SolidError};
-use crate::geom::tol::{calc_face_zone_tol_3d, xsect_tol_3d_from_zones};
+use crate::geom::global_solver::SolverOperation;
+use crate::geom::tol::{calc_face_zone_tol_3d, xsect_tol_3d_from_zones, zone_tol3d};
 use crate::geom::vector3d::{Point3, Vec3};
 use crate::intersect::curve_class::p1::{
     get_connected_touches, get_winding_count, CrvDirOnFaceType, CurveClassification, TouchData,
@@ -90,8 +91,10 @@ use crate::math::EFF_ZERO;
 use crate::nurbs::b_spline_surface::p1::SurfParamType;
 use crate::nurbs::b_spline_surface_n_lib::p2::OrientType;
 use crate::query::face::p2::{CurveOnClassifyCache, FaceBrep};
+use crate::topology::edge as edge_mod;
 use crate::topology::edgeuse::p1 as eu1;
 use crate::topology::face::p2 as face_p2;
+use crate::topology::face::p4 as face_p4;
 use crate::topology::loopuse;
 use crate::topology::vertex as vertex_mod;
 use crate::topology::{
@@ -1386,6 +1389,13 @@ pub struct FaceProps<O: LoopObject> {
     pub raw_touch_list_v: Vec<TouchData<O>>,
     /// `m_sDoneTouchListV`.
     pub done_touch_list_v: Vec<TouchData<O>>,
+    /// `m_bBadCrossedPole`: one interior pole crossing is cached (after splitting,
+    /// Stage 2 finds the next crossing).
+    pub bad_crossed_pole: Tri,
+    /// `m_pCrossedPoleEdge`: the boundary edge of the cached crossing.
+    pub crossed_pole_edge: Option<EdgeId>,
+    /// `m_dCrossedPoleParameter`: the split parameter on [`FaceProps::crossed_pole_edge`].
+    pub crossed_pole_parameter: f64,
     /// `m_bBadCrossedSeam`.
     pub bad_crossed_seam: Tri,
     /// `m_eBadCrossedSeam`.
@@ -1479,6 +1489,9 @@ impl<O: LoopObject> FaceProps<O> {
             crv_class_v: None,
             raw_touch_list_v: Vec::new(),
             done_touch_list_v: Vec::new(),
+            bad_crossed_pole: Tri::False,
+            crossed_pole_edge: None,
+            crossed_pole_parameter: 0.0,
             bad_crossed_seam: Tri::False,
             bad_crossed_seam_dir: SurfParamType::Unknown,
             bad_missing_seam: Tri::False,
@@ -1596,16 +1609,21 @@ impl<O: LoopObject> FaceProps<O> {
                 self.raw_touch_list_v.clear();
                 self.done_touch_list_v.clear();
             }
+            self.bad_crossed_pole = Tri::False;
+            self.crossed_pole_edge = None;
+            self.crossed_pole_parameter = 0.0;
             self.bad_crossed_seam = Tri::False;
             self.bad_crossed_seam_dir = SurfParamType::Unknown;
             self.bad_missing_seam = Tri::False;
             self.bad_missing_seam_dir = SurfParamType::Unknown;
             self.bad_near_miss_seam = Tri::False;
             self.bad_near_miss_seam_dir = SurfParamType::Unknown;
+
+            // Stage 3 loop classification must retain the earlier crossing-repair result.
+            self.been_through_split_edges_at_seam = TriedLinkType::None;
         }
 
         self.been_through_move_seam = TriedLinkType::None;
-        self.been_through_split_edges_at_seam = TriedLinkType::None;
         self.been_through_split_faces_at_seam = TriedLinkType::None;
 
         // when asked - clear SetProps_AfterSplitEdge values
@@ -2050,6 +2068,16 @@ impl<O: LoopObject> FaceProps<O> {
             };
         }
 
+        // Find a boundary edge passing through a pole, using defining 3D geometry.
+        // Endpoints already on the pole do not need splitting. Cache one crossing:
+        // the repair refreshes Stage 2 after each split before consuming another.
+        self.bad_crossed_pole = Tri::False;
+        self.crossed_pole_edge = None;
+        self.crossed_pole_parameter = 0.0;
+        if self.poles_link == MixedLinkType::Prob {
+            self.find_crossed_pole(k, b.brep(), m_face)?;
+        }
+
         // Flat Corner Surface Classification: m_lBadFlatCorners (GetFlatCorners with
         // the points array and the default angle tolerance SM_EFF_ZERO_DEG)
         let flat = surface.flat_corners(k, crate::math::EFF_ZERO_DEG, true)?;
@@ -2079,6 +2107,90 @@ impl<O: LoopObject> FaceProps<O> {
 
         // all done
         self.prop_stage = PropStage::Stage2;
+        Ok(())
+    }
+
+    /// `SetProps_Stage2`'s pole-crossing search: the first boundary edge of `face` whose
+    /// interior passes through a pole no vertex marks, cached with its split parameter.
+    fn find_crossed_pole(&mut self, k: &Kernel, b: &Brep, face: FaceId) -> Result<()> {
+        let edges = face_p4::edges(b, face, None, false, None)?;
+        let face_tol = zone_tol3d(k, face_p2::tolerance(b, face)?);
+        let sides = [SS_UMIN, SS_VMIN, SS_UMAX, SS_VMAX];
+
+        // for every pole
+        for (pole_index, &pole) in self.pole_points.iter().enumerate() {
+            if self.bad_crossed_pole.is_true() {
+                break;
+            }
+
+            // no work unless pole is not marked with a vertex
+            if sides
+                .get(pole_index)
+                .is_some_and(|&side| (self.no_vertex_poles & side) == 0)
+            {
+                continue;
+            }
+
+            // for every edge on this face
+            for &edge in &edges {
+                // loop locals
+                let tol = xsect_tol_3d_from_zones(
+                    k,
+                    zone_tol3d(k, edge_mod::tolerance(b, edge)?),
+                    face_tol,
+                );
+                let interval = edge_mod::interval(b, edge)?;
+
+                let (start_vertex, end_vertex) = edge_mod::start_end_vertices(b, edge)?;
+                let start_vertex =
+                    start_vertex.ok_or_else(|| null(OP_STAGE2, "edge without start vertex"))?;
+                let end_vertex =
+                    end_vertex.ok_or_else(|| null(OP_STAGE2, "edge without end vertex"))?;
+                let start_tol = xsect_tol_3d_from_zones(
+                    k,
+                    zone_tol3d(k, vertex_mod::tolerance(b, start_vertex)?),
+                    face_tol,
+                );
+                let end_tol = xsect_tol_3d_from_zones(
+                    k,
+                    zone_tol3d(k, vertex_mod::tolerance(b, end_vertex)?),
+                    face_tol,
+                );
+
+                if vertex_mod::point(b, start_vertex)?.distance(pole) <= start_tol
+                    || vertex_mod::point(b, end_vertex)?.distance(pole) <= end_tol
+                {
+                    continue;
+                }
+
+                // Drop the pole to the edge curve. INTERSECT will be faster than MINIMIZE
+                // by culling out points that are too far away. (`SE`: a failing status
+                // is ignored, read as no drop point.)
+                let curve = edge_mod::curve(b, edge)?
+                    .ok_or_else(|| null(OP_STAGE2, "edge without curve"))?;
+                let drop = ignored(curve.drop_point(
+                    k,
+                    &interval,
+                    pole,
+                    None,
+                    tol,
+                    None,
+                    SolverOperation::Intersect,
+                ))?
+                .unwrap_or_default();
+
+                if drop.success
+                    && drop.distance <= tol
+                    && drop.parameter > interval.min()
+                    && drop.parameter < interval.max()
+                {
+                    self.bad_crossed_pole = Tri::True;
+                    self.crossed_pole_edge = Some(edge);
+                    self.crossed_pole_parameter = drop.parameter;
+                    break;
+                }
+            }
+        }
         Ok(())
     }
 
@@ -2588,6 +2700,7 @@ impl<O: LoopObject> FaceProps<O> {
                 || (self.bad_flat_corners & FC_UMIN_VMAX) != 0
                 || (self.bad_flat_corners & FC_UMAX_VMIN) != 0
                 || (self.bad_flat_corners & FC_UMAX_VMAX) != 0;
+            prob |= self.bad_crossed_pole.is_true();
             prob |= self.bad_crossed_seam.is_true();
             prob |= self.bad_missing_seam.is_true();
             // NOT yet - needed later when Fix_BadGaps() gets built: bad_near_miss_seam
@@ -2685,6 +2798,44 @@ mod tests {
         p.reset(PropStage::Gaps);
         assert_eq!(p.prop_stage, PropStage::Stage0);
         assert_eq!(p.face, None);
+    }
+
+    #[test]
+    fn stage3_reset_keeps_the_crossing_repair_result_and_stage2_clears_it() {
+        let mut p: FaceProps<H> = FaceProps::new();
+        p.prop_stage = PropStage::Stage3;
+        p.been_through_split_edges_at_seam = TriedLinkType::NoFix;
+        p.been_through_split_faces_at_seam = TriedLinkType::NoFix;
+        p.bad_crossed_pole = Tri::True;
+        p.crossed_pole_edge = Some(EdgeId::from_index(2));
+        p.crossed_pole_parameter = 0.5;
+        p.reset(PropStage::Stage3);
+        assert_eq!(p.been_through_split_edges_at_seam, TriedLinkType::NoFix);
+        assert_eq!(p.been_through_split_faces_at_seam, TriedLinkType::None);
+        assert_eq!(p.bad_crossed_pole, Tri::True);
+        p.reset(PropStage::Stage2);
+        assert_eq!(p.been_through_split_edges_at_seam, TriedLinkType::None);
+        assert_eq!(
+            (
+                p.bad_crossed_pole,
+                p.crossed_pole_edge,
+                p.crossed_pole_parameter
+            ),
+            (Tri::False, None, 0.0)
+        );
+    }
+
+    #[test]
+    fn a_crossed_pole_is_a_stage2_problem() {
+        let mut p: FaceProps<H> = FaceProps::new();
+        p.prop_stage = PropStage::Stage2;
+        p.sheet = MixedLinkType::NoProp;
+        p.poles_link = MixedLinkType::Okay;
+        p.bad_flat_corners = 0;
+        assert!(!p.has_problems(2));
+        p.bad_crossed_pole = Tri::True;
+        assert!(p.has_problems(2));
+        assert!(!p.has_problems(1));
     }
 
     #[test]

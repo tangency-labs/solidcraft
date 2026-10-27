@@ -18172,7 +18172,7 @@
   },
   {
    "name": "v18_topo_derivs_array_left",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)",
    "inputs": {
     "op": "derivs_array",
     "knots": [
@@ -18197,7 +18197,7 @@
   },
   {
    "name": "v18_topo_derivs_array_right",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)",
    "inputs": {
     "op": "derivs_array",
     "knots": [
@@ -18222,7 +18222,7 @@
   },
   {
    "name": "v18_topo_insert_mids",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)",
    "inputs": {
     "op": "insert",
     "r": [
@@ -18243,7 +18243,7 @@
   },
   {
    "name": "v18_topo_inc_mult_t1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)",
    "inputs": {
     "op": "inc_mult",
     "u": [
@@ -18262,7 +18262,7 @@
   },
   {
    "name": "v18_topo_inc_mult_t2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)",
    "inputs": {
     "op": "inc_mult",
     "u": [
@@ -18281,7 +18281,7 @@
   },
   {
    "name": "v19_topo_derivs_array_left",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)",
    "inputs": {
     "op": "derivs_array",
     "knots": [
@@ -18306,7 +18306,7 @@
   },
   {
    "name": "v19_topo_derivs_array_right",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)",
    "inputs": {
     "op": "derivs_array",
     "knots": [
@@ -18331,7 +18331,7 @@
   },
   {
    "name": "v19_topo_insert_mids",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)",
    "inputs": {
     "op": "insert",
     "r": [
@@ -18352,7 +18352,7 @@
   },
   {
    "name": "v19_topo_inc_mult_t1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)",
    "inputs": {
     "op": "inc_mult",
     "u": [
@@ -18371,7 +18371,7 @@
   },
   {
    "name": "v19_topo_inc_mult_t2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)",
    "inputs": {
     "op": "inc_mult",
     "u": [
@@ -18390,7 +18390,7 @@
   },
   {
    "name": "v20_topo_derivs_array_left",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)",
    "inputs": {
     "op": "derivs_array",
     "knots": [
@@ -18415,7 +18415,7 @@
   },
   {
    "name": "v20_topo_derivs_array_right",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)",
    "inputs": {
     "op": "derivs_array",
     "knots": [
@@ -18440,7 +18440,7 @@
   },
   {
    "name": "v20_topo_insert_mids",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)",
    "inputs": {
     "op": "insert",
     "r": [
@@ -18461,7 +18461,7 @@
   },
   {
    "name": "v20_topo_inc_mult_t1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)",
    "inputs": {
     "op": "inc_mult",
     "u": [
@@ -18480,7 +18480,7 @@
   },
   {
    "name": "v20_topo_inc_mult_t2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)",
    "inputs": {
     "op": "inc_mult",
     "u": [
@@ -18499,7 +18499,7 @@
   },
   {
    "name": "v21_topo_derivs_array_left",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)",
    "inputs": {
     "op": "derivs_array",
     "knots": [
@@ -18524,7 +18524,7 @@
   },
   {
    "name": "v21_topo_derivs_array_right",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)",
    "inputs": {
     "op": "derivs_array",
     "knots": [
@@ -18549,7 +18549,7 @@
   },
   {
    "name": "v21_topo_insert_mids",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)",
    "inputs": {
     "op": "insert",
     "r": [
@@ -18570,7 +18570,7 @@
   },
   {
    "name": "v21_topo_inc_mult_t1",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)",
    "inputs": {
     "op": "inc_mult",
     "u": [
@@ -18589,7 +18589,7 @@
   },
   {
    "name": "v21_topo_inc_mult_t2",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)",
    "inputs": {
     "op": "inc_mult",
     "u": [
@@ -21182,7 +21182,7 @@
   },
   {
    "name": "v15_offset_v18_topo_compat_mult",
-   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (U knots) + tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (U knots) + tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)",
    "inputs": {
     "op": "compat_mult",
     "r": [
@@ -21212,7 +21212,7 @@
   },
   {
    "name": "v18_topo_v15_offset_compat_mult",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots) + TestFiles/pt_TestFiles/offset_nurb.sms (U knots)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots) + TestFiles/pt_TestFiles/offset_nurb.sms (U knots)",
    "inputs": {
     "op": "compat_mult",
     "r": [
@@ -21242,7 +21242,7 @@
   },
   {
    "name": "v18_topo_v20_topo_compat_mult",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots) + tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots) + tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)",
    "inputs": {
     "op": "compat_mult",
     "r": [
@@ -21270,7 +21270,7 @@
   },
   {
    "name": "v20_topo_v18_topo_compat_mult",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots) + tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots) + tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)",
    "inputs": {
     "op": "compat_mult",
     "r": [
@@ -21298,7 +21298,7 @@
   },
   {
    "name": "v20_topo_v31_global_compat_mult",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots) + NL_BasisBasic.cpp N_BasisDerivs docs (edge cases)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots) + NL_BasisBasic.cpp N_BasisDerivs docs (edge cases)",
    "inputs": {
     "op": "compat_mult",
     "r": [
@@ -21329,7 +21329,7 @@
   },
   {
    "name": "v31_global_v20_topo_compat_mult",
-   "upstream_ref": "NL_BasisBasic.cpp N_BasisDerivs docs (edge cases) + tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)",
+   "upstream_ref": "NL_BasisBasic.cpp N_BasisDerivs docs (edge cases) + tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)",
    "inputs": {
     "op": "compat_mult",
     "r": [
@@ -22072,7 +22072,7 @@
   },
   {
    "name": "v16_offset_v19_topo_compat_mult",
-   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (U knots) + tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)",
+   "upstream_ref": "TestFiles/pt_TestFiles/offset_nurb.sms (U knots) + tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)",
    "inputs": {
     "op": "compat_mult",
     "r": [
@@ -22102,7 +22102,7 @@
   },
   {
    "name": "v19_topo_v16_offset_compat_mult",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots) + TestFiles/pt_TestFiles/offset_nurb.sms (U knots)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots) + TestFiles/pt_TestFiles/offset_nurb.sms (U knots)",
    "inputs": {
     "op": "compat_mult",
     "r": [
@@ -22132,7 +22132,7 @@
   },
   {
    "name": "v19_topo_v21_topo_compat_mult",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots) + tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots) + tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)",
    "inputs": {
     "op": "compat_mult",
     "r": [
@@ -22160,7 +22160,7 @@
   },
   {
    "name": "v21_topo_v19_topo_compat_mult",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots) + tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots) + tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)",
    "inputs": {
     "op": "compat_mult",
     "r": [
@@ -22188,7 +22188,7 @@
   },
   {
    "name": "v21_topo_v23_circle_compat_mult",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots) + SM_API_test:TestSmCreateRegularPolygon / rational circle knot layout (p=2, double interior knots)",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots) + SM_API_test:TestSmCreateRegularPolygon / rational circle knot layout (p=2, double interior knots)",
    "inputs": {
     "op": "compat_mult",
     "r": [
@@ -22220,7 +22220,7 @@
   },
   {
    "name": "v23_circle_v21_topo_compat_mult",
-   "upstream_ref": "SM_API_test:TestSmCreateRegularPolygon / rational circle knot layout (p=2, double interior knots) + tests/prog_test/src/smTopoTest.cpp:4137 (bicubic SmBSplineSurface U/V knots)",
+   "upstream_ref": "SM_API_test:TestSmCreateRegularPolygon / rational circle knot layout (p=2, double interior knots) + tests/prog_test/src/smFaceTest.cpp:1051 (bicubic SmBSplineSurface U/V knots)",
    "inputs": {
     "op": "compat_mult",
     "r": [

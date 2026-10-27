@@ -1358,8 +1358,8 @@ fn edge_cases() -> Vec<(String, Value)> {
         ]);
         out.push((format!("edge_pe_life_{sname}"), ops));
 
-        // combining a proto edge with three definitions moves the first and the third
-        // (the walk advances while the list shrinks, plan/upstream-issues.md WR-95)
+        // combining a proto edge with three definitions moves all three (WR-95 was the
+        // c9c5979 walk that skipped every second one)
         let mut ops = base.clone();
         ops.extend([
             opv(q::MGR_CREATE_PE, &cat(&[&[0.0, 1.0], &ci(3.0, 0.0, 2.0, &reg(0.0)), &ci(3.0, 0.0, 2.0, &reg(1.0))])),

@@ -675,7 +675,7 @@
     },
     {
       "name": "identity_kind1_scale_tols_False",
-      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4616 (my_test_topology)",
+      "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3546 (my_test_topology)",
       "inputs": {
         "op": 12,
         "fixture": [

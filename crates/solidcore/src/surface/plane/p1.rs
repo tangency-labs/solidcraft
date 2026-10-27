@@ -905,8 +905,8 @@ impl Plane {
     ///
     /// # Errors
     ///
-    /// Those of [`BSplineSurface::canonical`], [`BSplineSurface::set_canonical`] and
-    /// [`Plane::rebuild_step_from_nurb_parameters`].
+    /// Those of [`BSplineSurface::canonical`], [`BSplineSurface::set_canonical`] (the
+    /// swap bit is then restored) and [`Plane::rebuild_step_from_nurb_parameters`].
     pub fn swap_uv(&mut self) -> Result<()> {
         // get current surface description
         self.ensure_nurb();
@@ -922,8 +922,8 @@ impl Plane {
         transpose(&mut cpts, num_v_cpts);
         transpose(&mut weights, num_v_cpts);
 
-        // Transpose Surface definition
-        self.base.set_canonical(&CanonicalSurfaceData {
+        // Transpose Surface definition; on failure, restore the bit
+        let status = self.base.set_canonical(&CanonicalSurfaceData {
             u_degree: c.v_degree,
             v_degree: c.u_degree,
             control_points: &cpts,
@@ -935,7 +935,11 @@ impl Plane {
             knot_type: c.knot_type,
             weights: Some(&weights),
             uv_domain: None,
-        })?;
+        });
+        if let Err(e) = status {
+            self.toggle_swap_uv_bit();
+            return Err(e);
+        }
         self.rebuild_step_from_nurb_parameters()
     }
 
@@ -2552,9 +2556,11 @@ mod tests {
         let c = p.coincidence_check(&k, &q, 1e-6, true).unwrap();
         assert!(!c.are_coincident);
         let b = Surface::from(p.base_with_nurb().unwrap().into_owned());
-        // (a B-spline other surface runs SmSurface::IsPlanar, surface.surface_p7)
+        // (a B-spline other surface runs SmSurface::IsPlanar, surface.surface_p7; since
+        // SMLib v1.0.1 its pseudo box is unpadded (SmSurface.cpp:22371 at 3fd5b95), so the
+        // plane's own B-spline passes a 1e-6 planarity test and is coincident)
         assert!(
-            !p.coincidence_check(&k, &b, 1e-6, true)
+            p.coincidence_check(&k, &b, 1e-6, true)
                 .unwrap()
                 .are_coincident
         );

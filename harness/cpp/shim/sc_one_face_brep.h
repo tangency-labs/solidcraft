@@ -109,6 +109,9 @@ inline void snapshot(std::vector<double>& o, SmFaceProps& p, SmFace* face)
         put(o, ok ? p.m_sFlatCornerPoints[i].y : 0.0);
         put(o, ok ? p.m_sFlatCornerPoints[i].z : 0.0);
     }
+    put(o, (double)p.m_bBadCrossedPole);
+    put(o, p.m_pCrossedPoleEdge != NULL ? 1.0 : 0.0);
+    put(o, p.m_dCrossedPoleParameter);
     while (o.size() < start + SNAP_LEN)
         o.push_back(0.0);
 }

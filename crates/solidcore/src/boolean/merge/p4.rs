@@ -299,11 +299,13 @@ pub trait ManifoldIntersector {
     fn clear_topology_deleted(&mut self);
     /// Current `m_bTopologyDeleted`, including changes during a failed close.
     fn topology_deleted(&self) -> bool;
-    /// `CloseIntersectionLoop(pVertex,bMadeNewTopology)`. The callgraph omits
-    /// this live callee; it is co-ported into `boolean.topology_intersector_p2`
+    /// `CloseIntersectionLoop(pVertex,bMadeNewTopology,sDelVerts,sDelEdges)`. The
+    /// callgraph omits this live callee; it is co-ported into
+    /// `boolean.topology_intersector_p2`
     /// (`TopologyIntersector::close_intersection_loop`). `made_new_topology` is
-    /// written only on success. Topology it inserts notifies through `attributes`.
-    /// The retry/cleanup tail stays at the call site.
+    /// written only on success. `deleted` receives the primary vertices and edges its
+    /// intersections deleted, also when it fails. Topology it inserts notifies through
+    /// `attributes`. The retry/cleanup tail stays at the call site.
     fn close_intersection_loop(
         &mut self,
         kernels: &mut BooleanKernels<'_>,
@@ -312,6 +314,7 @@ pub trait ManifoldIntersector {
         attributes: &mut AttributeStore,
         vertex: VertexId,
         made_new_topology: &mut bool,
+        deleted: &mut (Vec<VertexId>, Vec<EdgeId>),
     ) -> Result<()>;
     /// `FixGaps(sSingleVertices,bModifiedTopology,sDelVerts,sDelEdges)`.
     fn fix_gaps(
@@ -516,14 +519,25 @@ fn mark_common(
             }
             let mut made = false;
             intersector.clear_topology_deleted();
-            if manifold
-                && ignored(
-                    intersector
-                        .close_intersection_loop(kernels, primary, other, attributes, v, &mut made),
-                )?
-                .is_none()
-            {
-                made = false;
+            if manifold {
+                // This could delete entities in our stored pointers:
+                let mut deleted = (Vec::new(), Vec::new());
+                let status = ignored(intersector.close_intersection_loop(
+                    kernels,
+                    primary,
+                    other,
+                    attributes,
+                    v,
+                    &mut made,
+                    &mut deleted,
+                ));
+                state
+                    .intersection_vertices
+                    .retain(|x| !deleted.0.contains(x));
+                state.intersection_edges.retain(|x| !deleted.1.contains(x));
+                if status?.is_none() {
+                    made = false;
+                }
             }
             if made || intersector.topology_deleted() {
                 done = false;

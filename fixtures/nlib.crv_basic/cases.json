@@ -6898,7 +6898,7 @@
   },
   {
    "name": "line_join_00_equal",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "equal",
     "a": {
@@ -6953,7 +6953,7 @@
   },
   {
    "name": "line_join_00_compatible",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "compatible",
     "curves": [
@@ -7008,7 +7008,7 @@
   },
   {
    "name": "line_join_00_inspect",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "inspect",
     "crv": {
@@ -7043,7 +7043,7 @@
   },
   {
    "name": "line_join_00_reparam",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "modify",
     "crv": {
@@ -7078,7 +7078,7 @@
   },
   {
    "name": "line_join_01_equal",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "equal",
     "a": {
@@ -7133,7 +7133,7 @@
   },
   {
    "name": "line_join_01_compatible",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "compatible",
     "curves": [
@@ -7188,7 +7188,7 @@
   },
   {
    "name": "line_join_01_inspect",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "inspect",
     "crv": {
@@ -7223,7 +7223,7 @@
   },
   {
    "name": "line_join_01_reparam",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "modify",
     "crv": {
@@ -7258,7 +7258,7 @@
   },
   {
    "name": "line_join_02_equal",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "equal",
     "a": {
@@ -7313,7 +7313,7 @@
   },
   {
    "name": "line_join_02_compatible",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "compatible",
     "curves": [
@@ -7368,7 +7368,7 @@
   },
   {
    "name": "line_join_02_inspect",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "inspect",
     "crv": {
@@ -7403,7 +7403,7 @@
   },
   {
    "name": "line_join_02_reparam",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "modify",
     "crv": {
@@ -7438,7 +7438,7 @@
   },
   {
    "name": "line_join_03_equal",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "equal",
     "a": {
@@ -7493,7 +7493,7 @@
   },
   {
    "name": "line_join_03_compatible",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "compatible",
     "curves": [
@@ -7548,7 +7548,7 @@
   },
   {
    "name": "line_join_03_inspect",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "inspect",
     "crv": {
@@ -7583,7 +7583,7 @@
   },
   {
    "name": "line_join_03_reparam",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "modify",
     "crv": {
@@ -7618,7 +7618,7 @@
   },
   {
    "name": "line_join_04_equal",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "equal",
     "a": {
@@ -7673,7 +7673,7 @@
   },
   {
    "name": "line_join_04_compatible",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "compatible",
     "curves": [
@@ -7728,7 +7728,7 @@
   },
   {
    "name": "line_join_04_inspect",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "inspect",
     "crv": {
@@ -7763,7 +7763,7 @@
   },
   {
    "name": "line_join_04_reparam",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "modify",
     "crv": {
@@ -7798,7 +7798,7 @@
   },
   {
    "name": "line_join_05_equal",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "equal",
     "a": {
@@ -7853,7 +7853,7 @@
   },
   {
    "name": "line_join_05_compatible",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "compatible",
     "curves": [
@@ -7908,7 +7908,7 @@
   },
   {
    "name": "line_join_05_inspect",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "inspect",
     "crv": {
@@ -7943,7 +7943,7 @@
   },
   {
    "name": "line_join_05_reparam",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "modify",
     "crv": {
@@ -7978,7 +7978,7 @@
   },
   {
    "name": "line_join_06_equal",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "equal",
     "a": {
@@ -8033,7 +8033,7 @@
   },
   {
    "name": "line_join_06_compatible",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "compatible",
     "curves": [
@@ -8088,7 +8088,7 @@
   },
   {
    "name": "line_join_06_inspect",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "inspect",
     "crv": {
@@ -8123,7 +8123,7 @@
   },
   {
    "name": "line_join_06_reparam",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "modify",
     "crv": {
@@ -8158,7 +8158,7 @@
   },
   {
    "name": "line_join_07_equal",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "equal",
     "a": {
@@ -8213,7 +8213,7 @@
   },
   {
    "name": "line_join_07_compatible",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "compatible",
     "curves": [
@@ -8268,7 +8268,7 @@
   },
   {
    "name": "line_join_07_inspect",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "inspect",
     "crv": {
@@ -8303,7 +8303,7 @@
   },
   {
    "name": "line_join_07_reparam",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "modify",
     "crv": {
@@ -8338,7 +8338,7 @@
   },
   {
    "name": "line_join_08_equal",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "equal",
     "a": {
@@ -8393,7 +8393,7 @@
   },
   {
    "name": "line_join_08_compatible",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "compatible",
     "curves": [
@@ -8448,7 +8448,7 @@
   },
   {
    "name": "line_join_08_inspect",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "inspect",
     "crv": {
@@ -8483,7 +8483,7 @@
   },
   {
    "name": "line_join_08_reparam",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "modify",
     "crv": {
@@ -8518,7 +8518,7 @@
   },
   {
    "name": "line_join_09_equal",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "equal",
     "a": {
@@ -8573,7 +8573,7 @@
   },
   {
    "name": "line_join_09_compatible",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "compatible",
     "curves": [
@@ -8628,7 +8628,7 @@
   },
   {
    "name": "line_join_09_inspect",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "inspect",
     "crv": {
@@ -8663,7 +8663,7 @@
   },
   {
    "name": "line_join_09_reparam",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "modify",
     "crv": {
@@ -8698,7 +8698,7 @@
   },
   {
    "name": "line_join_10_equal",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "equal",
     "a": {
@@ -8753,7 +8753,7 @@
   },
   {
    "name": "line_join_10_compatible",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "compatible",
     "curves": [
@@ -8808,7 +8808,7 @@
   },
   {
    "name": "line_join_10_inspect",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "inspect",
     "crv": {
@@ -8843,7 +8843,7 @@
   },
   {
    "name": "line_join_10_reparam",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "modify",
     "crv": {
@@ -8878,7 +8878,7 @@
   },
   {
    "name": "line_join_11_equal",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "equal",
     "a": {
@@ -8933,7 +8933,7 @@
   },
   {
    "name": "line_join_11_compatible",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "compatible",
     "curves": [
@@ -8988,7 +8988,7 @@
   },
   {
    "name": "line_join_11_inspect",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "inspect",
     "crv": {
@@ -9023,7 +9023,7 @@
   },
   {
    "name": "line_join_11_reparam",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "modify",
     "crv": {
@@ -9058,7 +9058,7 @@
   },
   {
    "name": "line_join_12_equal",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "equal",
     "a": {
@@ -9113,7 +9113,7 @@
   },
   {
    "name": "line_join_12_compatible",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "compatible",
     "curves": [
@@ -9168,7 +9168,7 @@
   },
   {
    "name": "line_join_12_inspect",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "inspect",
     "crv": {
@@ -9203,7 +9203,7 @@
   },
   {
    "name": "line_join_12_reparam",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "modify",
     "crv": {
@@ -9238,7 +9238,7 @@
   },
   {
    "name": "line_join_13_equal",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "equal",
     "a": {
@@ -9293,7 +9293,7 @@
   },
   {
    "name": "line_join_13_compatible",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "compatible",
     "curves": [
@@ -9348,7 +9348,7 @@
   },
   {
    "name": "line_join_13_inspect",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "inspect",
     "crv": {
@@ -9383,7 +9383,7 @@
   },
   {
    "name": "line_join_13_reparam",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "modify",
     "crv": {
@@ -9418,7 +9418,7 @@
   },
   {
    "name": "line_join_14_equal",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "equal",
     "a": {
@@ -9473,7 +9473,7 @@
   },
   {
    "name": "line_join_14_compatible",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "compatible",
     "curves": [
@@ -9528,7 +9528,7 @@
   },
   {
    "name": "line_join_14_inspect",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "inspect",
     "crv": {
@@ -9563,7 +9563,7 @@
   },
   {
    "name": "line_join_14_reparam",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "modify",
     "crv": {
@@ -9598,7 +9598,7 @@
   },
   {
    "name": "line_join_15_equal",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "equal",
     "a": {
@@ -9653,7 +9653,7 @@
   },
   {
    "name": "line_join_15_compatible",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "compatible",
     "curves": [
@@ -9708,7 +9708,7 @@
   },
   {
    "name": "line_join_15_inspect",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "inspect",
     "crv": {
@@ -9743,7 +9743,7 @@
   },
   {
    "name": "line_join_15_reparam",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3861 (my_test_reversed_line_join)",
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:3310 (my_test_reversed_line_join)",
    "inputs": {
     "op": "modify",
     "crv": {

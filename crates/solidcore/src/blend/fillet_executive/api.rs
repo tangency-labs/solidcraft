@@ -38,6 +38,7 @@
 //! upstream `SM_SUCCESS` with a null result); the temporary B-reps are dropped (upstream
 //! `SetOwner(NULL)` and `delete`). No recursion.
 
+use super::p1::is_radius_supported;
 use super::session::FilletSession;
 use crate::blend::fillet_executive::p2::SurfaceFilletOptions;
 use crate::blend::fillet_geom::p1::FilletSolverId;
@@ -69,8 +70,9 @@ fn invalid_input() -> SolidError {
 /// `thumbweight` apply to blend-curve cross-sections.
 ///
 /// # Errors
-/// `SM_ERR_INVALID_INPUT` for an empty edge list; the fillet executive's errors
-/// (the body keeps the edits made before the failure, as upstream).
+/// `SM_ERR_INVALID_INPUT` for an empty edge list or a radius below 8 times the
+/// B-rep tolerance ([`is_radius_supported`]); the fillet executive's errors (the body
+/// keeps the edits made before the failure, as upstream).
 pub fn fillet_edges(
     k: &mut Kernel,
     brep: &mut Brep,
@@ -81,6 +83,9 @@ pub fn fillet_edges(
     thumbweight: f64,
 ) -> Result<()> {
     if edges.is_empty() {
+        return Err(invalid_input());
+    }
+    if !is_radius_supported(radius, brep.tolerance()) {
         return Err(invalid_input());
     }
     {
@@ -102,8 +107,9 @@ pub fn fillet_edges(
 /// cross-section type per edge, then `StitchAndOrient` with its defaults.
 ///
 /// # Errors
-/// `SM_ERR_INVALID_INPUT` for an empty edge list or when `radii` or `xsect_types`
-/// does not hold one entry per edge; the fillet executive's errors.
+/// `SM_ERR_INVALID_INPUT` for an empty edge list, when `radii` or `xsect_types`
+/// does not hold one entry per edge, or for a radius below 8 times the B-rep
+/// tolerance ([`is_radius_supported`]); the fillet executive's errors.
 pub fn fillet_edges_per_edge(
     k: &mut Kernel,
     brep: &mut Brep,
@@ -118,6 +124,11 @@ pub fn fillet_edges_per_edge(
     }
     if radii.len() != edges.len() || xsect_types.len() != edges.len() {
         return Err(invalid_input());
+    }
+    for &radius in radii {
+        if !is_radius_supported(radius, brep.tolerance()) {
+            return Err(invalid_input());
+        }
     }
     {
         let mut session = FilletSession::new(k, brep)?;
@@ -142,7 +153,8 @@ pub fn fillet_edges_per_edge(
 /// thumbweight is the `SetFilletParameters` default `1.0`.
 ///
 /// # Errors
-/// `SM_ERR_INVALID_INPUT` for an empty edge list; the fillet executive's errors
+/// `SM_ERR_INVALID_INPUT` for an empty edge list or a start or end radius below 8
+/// times the B-rep tolerance ([`is_radius_supported`]); the fillet executive's errors
 /// (the body keeps the edits made before the failure, as upstream).
 pub fn variable_radius_fillet(
     k: &mut Kernel,
@@ -154,6 +166,11 @@ pub fn variable_radius_fillet(
     continuity: u32,
 ) -> Result<()> {
     if edges.is_empty() {
+        return Err(invalid_input());
+    }
+    if !is_radius_supported(start_radius, brep.tolerance())
+        || !is_radius_supported(end_radius, brep.tolerance())
+    {
         return Err(invalid_input());
     }
     let law = FilletLaw::linear(start_radius, end_radius, None);
@@ -247,9 +264,13 @@ fn fillet_all_edges(
 /// defaults.
 ///
 /// # Errors
-/// The fillet executive's errors (the body keeps the edits made before the
-/// failure, as upstream).
+/// `SM_ERR_INVALID_INPUT` for a radius below 8 times the B-rep tolerance
+/// ([`is_radius_supported`]); the fillet executive's errors (the body keeps the edits
+/// made before the failure, as upstream).
 pub fn circular_fillet(k: &mut Kernel, brep: &mut Brep, radius: f64) -> Result<()> {
+    if !is_radius_supported(radius, brep.tolerance()) {
+        return Err(invalid_input());
+    }
     {
         let mut session = FilletSession::new(k, brep)?;
         fillet_all_edges(
@@ -271,9 +292,13 @@ pub fn circular_fillet(k: &mut Kernel, brep: &mut Brep, radius: f64) -> Result<(
 /// there is no `StitchAndOrient`.
 ///
 /// # Errors
-/// The fillet executive's errors (the body keeps the edits made before the
-/// failure, as upstream).
+/// `SM_ERR_INVALID_INPUT` for a distance below 8 times the B-rep tolerance
+/// ([`is_radius_supported`]); the fillet executive's errors (the body keeps the edits
+/// made before the failure, as upstream).
 pub fn chamfer_fillet(k: &mut Kernel, brep: &mut Brep, distance: f64) -> Result<()> {
+    if !is_radius_supported(distance, brep.tolerance()) {
+        return Err(invalid_input());
+    }
     let mut session = FilletSession::new(k, brep)?;
     fillet_all_edges(
         k,
@@ -291,8 +316,9 @@ pub fn chamfer_fillet(k: &mut Kernel, brep: &mut Brep, distance: f64) -> Result<
 /// `StitchAndOrient` with its defaults.
 ///
 /// # Errors
-/// `SM_ERR_INVALID_INPUT` for an empty edge list; `SM_ERR_NULL_POINTER` for a bevel
-/// vertex without a corner entry; the fillet executive's errors.
+/// `SM_ERR_INVALID_INPUT` for an empty edge list or a radius below 8 times the B-rep
+/// tolerance ([`is_radius_supported`]); `SM_ERR_NULL_POINTER` for a bevel vertex
+/// without a corner entry; the fillet executive's errors.
 pub fn set_bevel_corners(
     k: &mut Kernel,
     brep: &mut Brep,
@@ -301,6 +327,9 @@ pub fn set_bevel_corners(
     bevel_vertices: &[VertexId],
 ) -> Result<()> {
     if edges.is_empty() {
+        return Err(invalid_input());
+    }
+    if !is_radius_supported(radius, brep.tolerance()) {
         return Err(invalid_input());
     }
     {

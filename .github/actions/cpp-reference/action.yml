@@ -2,10 +2,22 @@ name: C++ reference
 description: >
   Clones upstream at the pinned commit, enables sccache and installs the C++ reference
   (bin/cpp layout) into $SOLIDCORE_CPP_DIR, so the cpp feature of solidcore-ffi builds.
-  Expects UPSTREAM_REPO, UPSTREAM_COMMIT and SOLIDCORE_CPP_DIR in the job environment.
+  Expects SOLIDCORE_CPP_DIR in the job environment; the upstream pin (UPSTREAM_REPO,
+  UPSTREAM_VERSION, UPSTREAM_COMMIT) comes from scripts/upstream-pin.env unless the job
+  environment already sets it.
 runs:
   using: composite
   steps:
+    - name: Load upstream pin
+      shell: bash
+      run: |
+        while IFS='=' read -r k v; do
+          case "$k" in
+            UPSTREAM_REPO|UPSTREAM_VERSION|UPSTREAM_COMMIT)
+              if [ -z "${!k:-}" ]; then echo "$k=$v" >> "$GITHUB_ENV"; fi ;;
+          esac
+        done < scripts/upstream-pin.env
+
     - name: Clone upstream at pinned commit
       shell: bash
       run: |

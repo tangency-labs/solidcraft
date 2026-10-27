@@ -58,10 +58,6 @@
 //!   (a line of length `1.2e-5`, a circle of radius `1.7e-6`): curves whose extent
 //!   (line length, arc / circle diameter, the bounding-box diagonal of the
 //!   `SmApiCreateCurve` points) is below [`MIN_TAPER_EXTENT`] are rejected;
-//! - `Linear` / `LinearReps` with a negative distance and a full circle (B-spline or
-//!   analytic circle, or an arc spanning 360 degrees or more) never return (not
-//!   rejected for a capped `LinearReps` with other than one repetition, which
-//!   `CreateLinearSweep` refuses with `SM_ERR` first);
 //! - `PlanarPath` with a `Hermite` curve crashes: `CreateSweepAlongPlanarPath` uses the
 //!   `NULL` result of the profile `Copy` and casts the path curves to `SmBSplineCurve*`
 //!   unchecked;
@@ -519,25 +515,6 @@ fn check_taper_curves(curves: &[CurveSpec]) -> Result<(), FfiError> {
     Ok(())
 }
 
-/// Rejects the negative-distance sweeps of a full circle that never return.
-/// `refused`: `CreateLinearSweep` refuses the call before sweeping (capped with
-/// other than one repetition).
-fn check_linear(curves: &[CurveSpec], dist: f64, refused: bool) -> Result<(), FfiError> {
-    let full_circle = |c: &CurveSpec| match c {
-        CurveSpec::ApiCircle { .. } | CurveSpec::AnalyticCircle { .. } => true,
-        CurveSpec::ApiArc {
-            start_deg, end_deg, ..
-        } => (end_deg - start_deg).abs() >= 360.0,
-        _ => false,
-    };
-    if dist < 0.0 && !refused && copies_ok(curves) && curves.iter().any(full_circle) {
-        return Err(bad(
-            "linear sweep: negative distance with a full circle (upstream hang)",
-        ));
-    }
-    Ok(())
-}
-
 fn caps_of(caps: i32) -> Result<f64, FfiError> {
     if (-16..=16).contains(&caps) {
         Ok(f64::from(caps))
@@ -574,11 +551,6 @@ fn encode(call: &Call) -> Result<Vec<f64>, FfiError> {
             let reps = matches!(call, Call::LinearReps { .. });
             finite(dir, "sweep direction")?;
             finite(&[*dist], "sweep distance")?;
-            let refused = match call {
-                Call::LinearReps { reps, cap, .. } => *cap && *reps != 1,
-                _ => false,
-            };
-            check_linear(curves, *dist, refused)?;
             o.push(if reps { 10.0 } else { 1.0 });
             push_curves(&mut o, curves, false, true, false)?;
             o.extend_from_slice(dir);

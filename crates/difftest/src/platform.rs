@@ -20,10 +20,10 @@ impl ReferencePlatform {
     }
 }
 
-/// Native voxel mapping and edge-length histograms depend on x86-64 float casts.
+/// Native voxel mapping (`SmObjsInVoxels::MapPointToVoxel`) depends on x86-64 float casts.
 pub const X86_64_HASH_CASTS: ReferencePlatform = ReferencePlatform {
     arch: "x86_64",
-    reason: "C++ float-to-ULONG conversions require x86-64 (UB-35/UB-194, #448)",
+    reason: "C++ float-to-ULONG conversions require x86-64 (UB-35, #448)",
 };
 
 /// Native twist-period reduction uses an out-of-range float-to-LONG conversion.

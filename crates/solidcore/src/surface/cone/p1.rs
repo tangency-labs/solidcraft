@@ -143,7 +143,6 @@ const OP_EVAL: &str = "surface::cone::p1::Cone::evaluate";
 const OP_EVAL_STEP: &str = "surface::cone::p1::Cone::evaluate_step";
 const OP_GEN: &str = "surface::cone::p1::Cone::gen_curve";
 const OP_TRANSFORM: &str = "surface::cone::p1::Cone::transform";
-const OP_COINCIDENCE: &str = "surface::cone::p1::total_coincidence_checker";
 
 /// Upstream `SmStatus` value `SM_ERR_INVALID_INPUT`.
 const SM_ERR_INVALID_INPUT: i32 = 1007;
@@ -1806,8 +1805,7 @@ impl Cone {
 ///
 /// # Errors
 ///
-/// `SmStatus` `0` (upstream `return FALSE`) for two lines that are not coincident;
-/// those of the evaluations and of the curve comparison.
+/// Those of the evaluations and of the curve comparison.
 pub fn total_coincidence_checker(
     k: &Kernel,
     this: &Curve,
@@ -1855,14 +1853,14 @@ pub fn total_coincidence_checker(
                 reversed: Some(false),
             });
         }
-        let dist_e_s = pt01.distance(pt11);
+        let dist_e_s = pt01.distance(pt10);
         if dist_s_e < tol && dist_e_s < tol {
             return Ok(Coincidence {
                 coincident: true,
                 reversed: Some(true),
             });
         }
-        return Err(status(OP_COINCIDENCE, 0));
+        return Ok(none);
     }
 
     // Not a line.  If not a circle, return no coincidence.
@@ -2285,12 +2283,22 @@ mod tests {
                 reversed: Some(false)
             }
         );
-        // upstream compares the wrong end point for reversed lines: `return FALSE`
         let rev = line(Vec3::new(1.0, 2.0, 3.0), Vec3::ZERO);
-        assert!(matches!(
-            total_coincidence_checker(&k, &a, &unit, &rev, &unit, 1e-6),
-            Err(SolidError::Upstream { code: 0, .. })
-        ));
+        assert_eq!(
+            total_coincidence_checker(&k, &a, &unit, &rev, &unit, 1e-6).unwrap(),
+            Coincidence {
+                coincident: true,
+                reversed: Some(true)
+            }
+        );
+        let apart = line(Vec3::new(5.0, 0.0, 0.0), Vec3::new(6.0, 0.0, 0.0));
+        assert_eq!(
+            total_coincidence_checker(&k, &a, &unit, &apart, &unit, 1e-6).unwrap(),
+            Coincidence {
+                coincident: false,
+                reversed: None
+            }
+        );
         let circle = |y: Vec3| {
             Curve::from(
                 Ellipse::new_circle(

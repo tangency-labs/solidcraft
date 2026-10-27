@@ -46,6 +46,7 @@
 //! | [`FilletExecutive::add_fillet_surface_generator`] | `AddFilletSurfaceGenerator`                |
 //! | [`FilletExecutive::remove_from_topo_edges`] | `RemoveFromTopoEdges`                            |
 //! | [`FilletExecutive::set_do_global_merge`], [`FilletExecutive::set_do_trimming`], [`FilletExecutive::set_self_intersection_handler`] | `SetDoGlobalMerge`, `SetDoTrimming`, `SetSelfIntersectionHandler` |
+//! | [`is_radius_supported`]                | `SmFilletExecutive::IsRadiusSupported` (static)       |
 //! | fields `fillet`, `pseudo_brep`, `corners`, `solvers`, `error` | `GetFilletBrep`, `GetPseudoBrep`, `GetFilletCorners`, `GetFilletSolvers`, `GetFilletErrorInfo` |
 //! | [`FilletExecutive::fillet_corner_of_vertex`] | `GetFilletCornerOfVertex`                       |
 //! | [`FilletExecutive::fillet_solver_of_edgeuse`], [`FilletExecutive::fillet_solver_of_edge`] | `GetFilletSolverOfEdgeuse`, `GetFilletSolverOfEdge` |
@@ -119,7 +120,7 @@ use crate::geom::object;
 use crate::geom::solution_array::SolutionObject;
 use crate::intersect::point_class::ClassObject;
 use crate::kernel::Kernel;
-use crate::math::{Point3, EFF_ZERO, EFF_ZERO_SQ, PI};
+use crate::math::{Point3, EFF_ZERO, EFF_ZERO_SQ, EFF_ZERO_SQRT, PI};
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::surface::surface::Surface;
 use crate::topology::brep::{p4 as brep_p4, p5 as brep_p5};
@@ -621,6 +622,14 @@ pub struct ExecutiveObjects<O> {
     /// `m_pAttributeE`: a new `SmAttribute(SM_AI_ALL_FILLET_EDGES,
     /// SM_AB_STANDALONE_REFERENCE)`.
     pub edge_attribute: O,
+}
+
+/// `SmFilletExecutive::IsRadiusSupported`: `false` for a radius or chamfer width below
+/// 8 times the B-rep tolerance `brep_tol` (below that, some fillets come out
+/// non-manifold, crash or hang), and for NaN.
+#[must_use]
+pub fn is_radius_supported(radius: f64, brep_tol: f64) -> bool {
+    radius >= 8.0 * brep_tol * (1.0 - EFF_ZERO_SQRT)
 }
 
 impl<O: ClassObject + SolutionObject + Ord> FilletExecutive<O> {

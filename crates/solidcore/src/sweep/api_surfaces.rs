@@ -49,6 +49,7 @@ use crate::kernel::Kernel;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface::{BSplineSurface, SurfParamType};
 use crate::nurbs::b_spline_surface_n_lib::p2::SkinnedSurfaceOptions;
+use crate::nurbs::knots::MAX_DEGREE;
 use crate::primitive::primitive_creation::model::PrimitiveModel;
 use crate::primitive::primitive_creation::p3::RepeatedSweepOptions;
 use crate::surface::surface::Surface;
@@ -57,6 +58,7 @@ use crate::topology::{Brep, FaceId};
 const OP_SKIN_PRIMITIVE: &str = "sweep::api_surfaces::create_skin_primitive";
 const OP_REVOLUTION: &str = "sweep::api_surfaces::create_surface_revolution";
 const OP_SKIN: &str = "sweep::api_surfaces::create_skin";
+const OP_SKIN_FROM_FACES: &str = "sweep::api_surfaces::create_skin_from_faces";
 
 /// The sweep approximation tolerance `SmApiCreateSweep` passes to
 /// `CreateSweepSurface` (`dTol`).
@@ -210,12 +212,22 @@ pub fn create_skin_primitive(
 ///
 /// # Errors
 ///
-/// Those of `SmPrimitiveCreation::CreateSkinFromFaces`.
+/// [`SolidError::InvalidInput`] for a degree outside `1..=NL_MAXDEG` (NLib's surface
+/// evaluators size their basis-function arrays by `NL_MAXDEG`); those of
+/// `SmPrimitiveCreation::CreateSkinFromFaces`.
 pub fn create_skin_from_faces(
     k: &mut Kernel,
     faces: &[(&Brep, FaceId)],
     degree: usize,
 ) -> Result<SkinFromFaces> {
+    // NLib's surface evaluators size their basis-function stack arrays by
+    // NL_MAXDEG, so evaluating a loft of higher degree overflows the stack.
+    if !(1..=MAX_DEGREE).contains(&degree) {
+        return Err(SolidError::invalid_input(
+            OP_SKIN_FROM_FACES,
+            "loft degree outside 1..=NL_MAXDEG",
+        ));
+    }
     let (brep, new_faces) = PrimitiveModel::build_new(k, |pc, model| {
         let input = model.add_owner_breps(faces)?;
         let mut new_faces = Vec::new();

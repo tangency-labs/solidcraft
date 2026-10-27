@@ -2964,15 +2964,14 @@ pub enum AnalyticTestSurface<'a> {
     Torus(&'a Torus),
 }
 
-/// `sm_TestAnalyticSurface(pSurface)`: a plane or cone by type (`GetType()`), or a
-/// surface that is planar (`IsPlanar()`, tolerance `SM_EFF_ZERO`) or a canonical cone
-/// (`SmCone::IsNurbSurfaceCone`). A cylinder is not `SmCone_TYPE`.
+/// `sm_TestAnalyticSurface(pSurface)`: a plane by type (`GetType()`), a cone or
+/// cylinder (`IsKindOf(SmCone_TYPE)`), or a surface that is planar (`IsPlanar()`,
+/// tolerance `SM_EFF_ZERO`) or a canonical cone (`SmCone::IsNurbSurfaceCone`).
 ///
 /// # Errors
 ///
-/// Those of `IsPlanar` and of the cone test (`SmCone::IsNurbSurfaceCone`), except a
-/// failing iso curve status, which upstream returns as the `SmBoolean` and which
-/// reads as `true`; `InvalidInput` for a surface kind that is not an
+/// Those of `IsPlanar` and of the cone test (`SmCone::IsNurbSurfaceCone`);
+/// `InvalidInput` for a surface kind that is not an
 /// `SmBSplineSurface` (a plane is accepted by type before).
 pub fn test_analytic_surface(k: &Kernel, surface: AnalyticTestSurface<'_>) -> Result<bool> {
     use crate::surface::surface::p2::{CONE_TYPE, PLANE_TYPE};
@@ -2983,7 +2982,16 @@ pub fn test_analytic_surface(k: &Kernel, surface: AnalyticTestSurface<'_>) -> Re
         AnalyticTestSurface::Torus(t) => t.type_code(),
     };
     // return TRUE when surface type is Plane or Cone
-    if type_code == PLANE_TYPE || type_code == CONE_TYPE {
+    if type_code == PLANE_TYPE {
+        return Ok(true);
+    }
+    let kind_of_cone = match surface {
+        AnalyticTestSurface::Surface(s) => s.is_kind_of(CONE_TYPE)?,
+        AnalyticTestSurface::Cone(c) => c.is_kind_of(CONE_TYPE)?,
+        AnalyticTestSurface::Sphere(s) => s.is_kind_of(CONE_TYPE)?,
+        AnalyticTestSurface::Torus(t) => t.is_kind_of(CONE_TYPE)?,
+    };
+    if kind_of_cone {
         return Ok(true);
     }
 
@@ -3022,13 +3030,7 @@ pub fn test_analytic_surface(k: &Kernel, surface: AnalyticTestSurface<'_>) -> Re
         AnalyticTestSurface::Sphere(s) => s.base().base(),
         AnalyticTestSurface::Torus(t) => t.base().base(),
     };
-    match Cone::is_nurb_surface_cone(k, bss, 1.0) {
-        Ok(None) => Ok(false),
-        // upstream returns the iso curve status as the SmBoolean: a failing (non-zero)
-        // status reads as TRUE
-        Ok(Some(_)) | Err(SolidError::Upstream { .. }) => Ok(true),
-        Err(e) => Err(e),
-    }
+    Ok(Cone::is_nurb_surface_cone(k, bss, 1.0)?.is_some())
 }
 
 /// `SE(pEU->EvaluateBinormal(dParameter, FALSE, rPnt, rBinVec, NULL, &rFaceuseNormal))`

@@ -390,7 +390,27 @@ fn notification_record(b: &Brep, i: &Inputs) -> SolidResult<Vec<f64>> {
         if i.mode != 1 {
             context.set_sys_notify_callback(Some(Box::new(TopologyChangeCallback::new(2))));
         }
-        tracker.stop_tracking(Some(&mut context));
+        // StopTracking records the dependencies of the completed edit (1.0.1
+        // `RecordDependencies`), under the shim's keys: vertex, edge and face
+        // `1/2/4_000_000 + index`
+        let entity_of = |key: ObjectKey| {
+            let i = u32::try_from(key.0 % 1_000_000).ok()?;
+            match key.0 / 1_000_000 {
+                1 => Some(solidcore::EntityRef::Vertex(VertexId::from_index(i))),
+                2 => Some(solidcore::EntityRef::Edge(EdgeId::from_index(i))),
+                4 => Some(solidcore::EntityRef::Face(FaceId::from_index(i))),
+                _ => None,
+            }
+        };
+        let key_of = |e: solidcore::EntityRef| {
+            ObjectKey(match e {
+                solidcore::EntityRef::Vertex(v) => 1_000_000 + u64::from(v.index()),
+                solidcore::EntityRef::Edge(x) => 2_000_000 + u64::from(x.index()),
+                solidcore::EntityRef::Face(x) => 4_000_000 + u64::from(x.index()),
+                _ => 999,
+            })
+        };
+        tracker.stop_tracking_with_brep(Some(&mut context), b, &entity_of, &key_of)?;
         out.extend(notification_values(&tracker.lists()));
         out.push(f(context.sys_notify_callback().is_none()));
         context.set_sys_notify_callback(None);
@@ -545,7 +565,8 @@ impl UnitDiff for Runner {
         }
         let mut kernel = Kernel::default();
         if i.op == 12 {
-            bind_transform_owners(&mut kernel, &mut b).map_err(|e| HarnessError::new(e.to_string()))?;
+            bind_transform_owners(&mut kernel, &mut b)
+                .map_err(|e| HarnessError::new(e.to_string()))?;
         }
         match rust_record(&mut kernel, &mut b, &i) {
             Ok(record) if i.op == 2 => Ok(Output::new().values("target_stage", record)),

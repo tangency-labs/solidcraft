@@ -79,7 +79,7 @@ pub(super) const NULL_DEREF: &str = "upstream dereferences null";
 
 /// The box-like fillet test files (planar faces with convex and concave corners, one
 /// all-NURBS box, one with a cylinder; filleted and B-spline parts whose tangential
-/// edges reach the success paths of the tangency tests). Not `SmallBox.smb`: `SmBrep::ReadFromFile`
+/// edges reach the success paths of the tangency tests). Not `SmallBox.smp`: `SmBrep::ReadFromFile`
 /// crashes on it (UB-1).
 pub(super) const CORNER_FILES: [&str; 13] = [
     "Fillet/box1x1x2.smb",

@@ -174,7 +174,7 @@ const STATE: f64 = -100.0;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum Prim {
-    /// The single-vertex sphere regression of `smTopoTest.cpp`.
+    /// The single-vertex sphere regression of `smHealTest.cpp`.
     SingleVertexSphere {
         radius: f64,
         #[serde(default)]
@@ -560,6 +560,13 @@ fn prob_input(kind: u8, n: u64, ops: &[[i64; 4]]) -> Vec<f64> {
 
 fn ffi_out(r: Result<Vec<f64>, solidcore_ffi::FfiError>) -> Result<Output, HarnessError> {
     match r {
+        // the shim refused an input whose upstream path is undefined (`-999 id`)
+        Ok(v) if v.first() == Some(&-999.0) => Ok(Output::rejected(match v.get(1) {
+            Some(&265.0) => {
+                "UB-265: Fix_SplitEdgesAtSeam reads the mark of a null target face".to_string()
+            }
+            id => format!("shim refusal {id:?}"),
+        })),
         Ok(v) => Ok(Output::new().values("out", v)),
         Err(solidcore_ffi::FfiError::Status(s)) => Ok(Output::err(format!("status_{s}"))),
         Err(e) => Err(harness(format!("c++: {e}"))),
@@ -1115,6 +1122,7 @@ fn dump(h: &HealData<H>, b: &Brep, o: &mut Vec<f64>) -> Result<(), SolidError> {
     put_base(o, &h.face_props_no_vertex_pole.base, fi);
     put_base(o, &h.bad_face_props_flat_corner, fi);
     put_base(o, &h.bad_face_props_missing_seam, fi);
+    put_base(o, &h.bad_face_props_crossed_pole, fi);
     put_base(o, &h.bad_face_props_crossed_seam, fi);
     put_base(o, &h.bad_face_props_near_miss_seam, fi);
     put_base(o, &h.ran_face_props_move_seam.base, fi);
@@ -1386,7 +1394,10 @@ fn rust_heal(
                         || !h.bad_face_props_crossed_seam.is_empty()
                         || !h.bad_face_props_near_miss_seam.is_empty()
                 }
-                Step::FixSplitEdgesAtSeam => !h.bad_face_props_crossed_seam.is_empty(),
+                Step::FixSplitEdgesAtSeam => {
+                    !h.bad_face_props_crossed_seam.is_empty()
+                        || !h.bad_face_props_crossed_pole.is_empty()
+                }
                 Step::FixSplitFaceAtSeams => !h.bad_face_props_missing_seam.is_empty(),
                 _ => false,
             };

@@ -3,7 +3,7 @@ Copyright (c) 2026 The solidcore contributors
 
 This product is a Rust port (a derivative work) of the SMLib and SM_API
 components of USD BRep, https://github.com/NVIDIA-Omniverse/usd-brep
-(commit c9c5979), licensed under the Apache License, Version 2.0.
+(v1.0.1, commit 3fd5b95), licensed under the Apache License, Version 2.0.
 See ATTRIBUTION.md for exactly which upstream material is used.
 
 The upstream work carries the following notice:

@@ -667,7 +667,7 @@
     ],
     "validate_only": false
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:222 my_test_squeeze_edge_tracks_removal"
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:215 my_test_squeeze_edge_tracks_removal"
   },
   {
    "name": "squeeze_edge_box_stage2_faces_only",
@@ -729,7 +729,7 @@
     ],
     "validate_only": false
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:222 my_test_squeeze_edge_tracks_removal"
+   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:215 my_test_squeeze_edge_tracks_removal"
   },
   {
    "name": "missing_poles_box_two_faces",
@@ -796,7 +796,7 @@
     ],
     "validate_only": false
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:637 my_test_missing_poles_refreshes_all_faces"
+   "upstream_ref": "tests/prog_test/src/smHealTest.cpp:145 my_test_missing_poles_refreshes_all_faces"
   },
   {
    "name": "closed_sphere_swap0",
@@ -882,7 +882,7 @@
     ],
     "validate_only": false
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp my_test_closed_sphere_properties"
+   "upstream_ref": "tests/prog_test/src/smHealTest.cpp my_test_closed_sphere_properties"
   },
   {
    "name": "closed_sphere_swap0_faces_only",
@@ -941,7 +941,7 @@
     ],
     "validate_only": false
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp my_test_closed_sphere_properties"
+   "upstream_ref": "tests/prog_test/src/smHealTest.cpp my_test_closed_sphere_properties"
   },
   {
    "name": "closed_sphere_swap1",
@@ -1027,7 +1027,7 @@
     ],
     "validate_only": false
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp my_test_closed_sphere_properties"
+   "upstream_ref": "tests/prog_test/src/smHealTest.cpp my_test_closed_sphere_properties"
   },
   {
    "name": "closed_sphere_swap1_faces_only",
@@ -1086,7 +1086,7 @@
     ],
     "validate_only": false
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp my_test_closed_sphere_properties"
+   "upstream_ref": "tests/prog_test/src/smHealTest.cpp my_test_closed_sphere_properties"
   },
   {
    "name": "file_plane_square",

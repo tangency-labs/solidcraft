@@ -916,11 +916,13 @@ impl ManifoldIntersector for ManifoldKernelAdapter<'_> {
         attributes: &mut AttributeStore,
         vertex: VertexId,
         made_new_topology: &mut bool,
+        deleted: &mut (Vec<VertexId>, Vec<EdgeId>),
     ) -> Result<()> {
         let vertex = arena_pair::encode(EntityRef::Vertex(vertex), false);
         // IIREdgeBrep's MergeCurveClasses sets m_bTopologyDeleted on this same flag.
         self.intersector.topology_deleted = self.topology_deleted;
-        Context::with_notification_context(kernels.primary, |k, context| {
+        let (mut gone_vertices, mut gone_edges) = (Vec::new(), Vec::new());
+        let result = Context::with_notification_context(kernels.primary, |k, context| {
             let mut pair = ArenaPair::new(
                 primary,
                 Some(other),
@@ -937,12 +939,33 @@ impl ManifoldIntersector for ManifoldKernelAdapter<'_> {
                 &mut self.intersector,
                 arena_pair::encode,
                 arena_pair::decode,
-                |ti| ti.close_intersection_loop(k, &mut pair, Some(vertex)),
+                |ti| {
+                    ti.close_intersection_loop(
+                        k,
+                        &mut pair,
+                        Some(vertex),
+                        &mut gone_vertices,
+                        &mut gone_edges,
+                    )
+                },
             );
             self.topology_deleted = self.intersector.topology_deleted;
             *made_new_topology = result?;
             Ok(())
-        })?
+        });
+        // SmTArray::RemoveElements compares pointers: the other B-rep's entities match
+        // nothing in the primary's lists, so only primary ones are reported.
+        deleted.0.extend(
+            gone_vertices
+                .into_iter()
+                .filter_map(|h| arena_pair::deleted_vertex(h).ok()),
+        );
+        deleted.1.extend(
+            gone_edges
+                .into_iter()
+                .filter_map(|h| arena_pair::deleted_edge(h).ok()),
+        );
+        result?
     }
 
     fn fix_gaps(
@@ -1471,7 +1494,9 @@ mod tests {
             .unwrap();
         let mut b = Brep::new();
         let mut made = true;
-        // An unmated vertex is p2's NER early return; the flag is left alone.
+        let mut deleted = (Vec::new(), Vec::new());
+        // An unmated vertex is p2's NER early return; the flag is left alone and
+        // nothing is deleted.
         let error = adapter
             .close_intersection_loop(
                 &mut kernels,
@@ -1480,6 +1505,7 @@ mod tests {
                 &mut AttributeStore::new(),
                 v,
                 &mut made,
+                &mut deleted,
             )
             .unwrap_err();
         assert!(matches!(
@@ -1490,6 +1516,7 @@ mod tests {
             }
         ));
         assert!(made);
+        assert!(deleted.0.is_empty() && deleted.1.is_empty());
         assert!(!adapter.topology_deleted());
     }
 

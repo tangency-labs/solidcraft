@@ -2729,20 +2729,14 @@ mod tests {
             ..Kernel::default()
         };
         // at 1e10 the Bezier spans' rounding (above half the system tolerance) splits
-        // spans, half an edge tolerance of 1 does not
-        let mut pts = vec![
+        // spans, half an edge tolerance of 1 does not; a Hermite curve, since spans cut
+        // from a B-spline skip the distance check (v1.0.1)
+        let big = hermite(
             [1.2e9, 0.0, 0.0],
-            [1.1e10, 2e10, 0.0],
-            [3.1e10, -1e10, 1e10],
-        ];
-        pts.extend([[4.1e10, 1e10, 0.0], [6.1e10, 0.0, 2e10]]);
-        let mut cur = allocate_nurb_curve(4, 3, 8).unwrap();
-        for (d, p) in cur.cpts_mut().iter_mut().zip(pts) {
-            *d = crate::nurbs::math::CPoint::new(p[0], p[1], p[2], crate::nurbs::math::NOW);
-        }
-        cur.knots_mut()
-            .copy_from_slice(&[0.0, 0.0, 0.0, 0.0, 0.37, 1.0, 1.0, 1.0, 1.0]);
-        let big = Curve::from(BSplineCurve::from_nurb(cur, 3, false));
+            [3e10, 6e10, 0.0],
+            [6.1e10, 0.0, 2e10],
+            [3e10, -6e10, 3e10],
+        );
         let system = make_curve_cache(&k, &big, None::<u32>).unwrap();
         let edge = make_curve_cache_with_zone_tol(&k, &big, None::<u32>, Some(1.0)).unwrap();
         assert!(system.span_count() > edge.span_count());

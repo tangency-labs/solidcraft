@@ -1446,8 +1446,9 @@ pub struct OrderedLoops {
     pub plane_normal: Vec3,
     /// `rsCurvesBBox`: the bounding box of all curves.
     pub curves_box: Extent3d,
-    /// `false` when a loop was open or compound, or a single curve not closed
-    /// (upstream's tentative `sRet = SM_ERR`).
+    /// `false` when a loop was open or compound, ended away from its first curve's
+    /// start point, or a single curve was not closed (upstream's tentative
+    /// `sRet = SM_ERR`).
     pub closed: bool,
     /// `false` when a curve was found off the plane (upstream returns `SM_ERR` there).
     pub on_plane: bool,
@@ -1553,6 +1554,7 @@ pub fn order_curves_into_loops(k: &Kernel, curves: &[Curve], tol_3d: f64) -> Res
         let mut loop_points: Vec<Point3> = Vec::new();
         let mut orient = OrientType::Same;
         let mut loop_edges: usize = 0;
+        let first_curve_index = curve_index;
 
         // build-this-loop while block
         loop {
@@ -1631,6 +1633,21 @@ pub fn order_curves_into_loops(k: &Kernel, curves: &[Curve], tol_3d: f64) -> Res
 
             // expected exit: closed loop
             if at(&seen, next_index)? {
+                // a closed loop ends at its first curve's start point; ending on another
+                // seen curve (e.g. the start of a closed curve in the chain) leaves it open
+                let loop_end_pt = if orient == OrientType::Same {
+                    end
+                } else {
+                    start
+                };
+                let loop_tol = if tol_3d > feature_size {
+                    tol_3d
+                } else {
+                    feature_size
+                };
+                if loop_end_pt.distance(at(&vertex_points, 2 * first_curve_index)?) >= loop_tol {
+                    out.closed = false;
+                }
                 break;
             }
 

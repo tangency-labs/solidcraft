@@ -652,7 +652,7 @@
   },
   {
    "name": "topo_test_canonical_frame",
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:368",
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:63",
    "inputs": {
     "make": {
      "kind": "canonical",

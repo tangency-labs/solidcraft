@@ -38,10 +38,7 @@
 //! - **`FixChainCurvesList`** takes the curve list by value (`None` for a `NULL`
 //!   entry) and returns the chained curves with the chain starts, the input index of
 //!   every output curve and the number of deleted duplicates (not reported upstream).
-//!   Upstream deletes a duplicate but leaves its dangling pointer in the input array
-//!   (a use after free on the next scan) and may then pick the `NULL` local as the
-//!   next link; the port removes the duplicate from the list, and a link choice that
-//!   would be the deleted curve is `InvalidInput`. `FindElement` (pointer identity)
+//!   `FindElement` (pointer identity)
 //!   becomes the index of the chosen link. Statuses of `EvaluatePoint` and
 //!   `ReverseParameterization` are ignored, as upstream.
 //! - **`sm_FilterSolution`** passes a two-entry evaluation to `sm_UnitizeTangent`,
@@ -156,8 +153,6 @@ pub struct ChainedCurves {
 enum Link {
     /// `pNextCrv == NULL` (no link yet).
     None,
-    /// The local of a curve deleted as a duplicate (upstream's `NULL` local).
-    Deleted,
     /// The curve at this input index.
     Index(usize),
 }
@@ -175,15 +170,14 @@ fn ends_and_mid(k: &Kernel, curve: &Curve) -> Result<(Point3, Point3, Point3)> {
 /// Orders `curves` (any order and direction, `None` entries skipped) into head to
 /// tail chains whose matching end points are less than `sqrt(tol*tol)` apart,
 /// reversing curves as needed; with `delete_duplicates`, a curve whose start, end and
-/// mid points match the chain end it would join is deleted
+/// mid points match the chain end it would join is deleted and removed from the list
 /// (`SmCurve::FixChainCurvesList`). An O(n^2) scan: each chain starts with the first
 /// unused curve and grows at either end by the closest matching link until none is
 /// left.
 ///
 /// # Errors
 ///
-/// `InvalidInput` when the chosen link is a curve deleted as a duplicate in the same
-/// scan (upstream dereferences `NULL`); [`SolidError::Unported`] from the evaluators.
+/// [`SolidError::Unported`] from the evaluators.
 pub fn fix_chain_curves_list(
     k: &Kernel,
     mut curves: Vec<Option<Curve>>,
@@ -243,14 +237,11 @@ pub fn fix_chain_curves_list(
                 let d_e1s = (end_point1 - start_point).length_squared();
                 let d_s1s = (start_point1 - start_point).length_squared();
 
-                // the local pBSp1 (NULL once deleted)
-                let mut this_link = Link::Index(j);
-                let mut delete = |this_link: &mut Link, curves: &mut [Option<Curve>]| {
-                    // (a second delete of the same curve is a double free upstream)
+                // delete this curve and remove it from the list too
+                let mut delete = |curves: &mut [Option<Curve>]| {
                     if curves.get_mut(j).and_then(Option::take).is_some() {
                         deleted += 1;
                     }
-                    *this_link = Link::Deleted;
                 };
 
                 // when links connects 1 of 4, (ThisLinkStart == LastLinkEnd to tol2)
@@ -260,15 +251,15 @@ pub fn fix_chain_curves_list(
                         && d_e1s < dtol2
                         && (mid_end_point - mid_point).length_squared() < dtol2
                     {
-                        delete(&mut this_link, &mut curves);
-                    } else {
-                        // add link to end
-                        case = 1;
-                        dist2 = d_s1e;
-                        next = this_link;
-                        tmp_end_pt = end_point1;
-                        tmp_mid_end_pt = mid_point;
+                        delete(&mut curves);
+                        continue;
                     }
+                    // add link to end
+                    case = 1;
+                    dist2 = d_s1e;
+                    next = Link::Index(j);
+                    tmp_end_pt = end_point1;
+                    tmp_mid_end_pt = mid_point;
                 }
 
                 // when links connects 2 of 4, (ThisLinkEnd == LastLinkEnd to tol2)
@@ -277,15 +268,15 @@ pub fn fix_chain_curves_list(
                         && d_s1s < dtol2
                         && (mid_end_point - mid_point).length_squared() < dtol2
                     {
-                        delete(&mut this_link, &mut curves);
-                    } else {
-                        // Reverse link and add to end
-                        case = 2;
-                        dist2 = d_e1e;
-                        next = this_link;
-                        tmp_end_pt = start_point1;
-                        tmp_mid_end_pt = mid_point;
+                        delete(&mut curves);
+                        continue;
                     }
+                    // Reverse link and add to end
+                    case = 2;
+                    dist2 = d_e1e;
+                    next = Link::Index(j);
+                    tmp_end_pt = start_point1;
+                    tmp_mid_end_pt = mid_point;
                 }
 
                 // when links connects 3 of 4, (ThisLinkEnd == LastLinkStart to tol2)
@@ -294,15 +285,15 @@ pub fn fix_chain_curves_list(
                         && d_s1e < dtol2
                         && (mid_start_point - mid_point).length_squared() < dtol2
                     {
-                        delete(&mut this_link, &mut curves);
-                    } else {
-                        // insert link before start
-                        case = 3;
-                        dist2 = d_e1s;
-                        next = this_link;
-                        tmp_start_pt = start_point1;
-                        tmp_mid_start_pt = mid_point;
+                        delete(&mut curves);
+                        continue;
                     }
+                    // insert link before start
+                    case = 3;
+                    dist2 = d_e1s;
+                    next = Link::Index(j);
+                    tmp_start_pt = start_point1;
+                    tmp_mid_start_pt = mid_point;
                 }
 
                 // when links connects 4 of 4, (ThisLinkStart == LastLinkStart to tol2)
@@ -311,12 +302,12 @@ pub fn fix_chain_curves_list(
                         && d_e1e < dtol2
                         && (mid_start_point - mid_point).length_squared() < dtol2
                     {
-                        delete(&mut this_link, &mut curves);
+                        delete(&mut curves);
                     } else {
                         // reverse and insert at start
                         case = 4;
                         dist2 = d_s1s;
-                        next = this_link;
+                        next = Link::Index(j);
                         tmp_start_pt = end_point1;
                         tmp_mid_start_pt = mid_point;
                     }
@@ -327,14 +318,12 @@ pub fn fix_chain_curves_list(
             if case == 0 {
                 break;
             }
-            let idx = match next {
-                Link::Index(i) => i,
-                Link::None | Link::Deleted => {
-                    return Err(SolidError::InvalidInput {
-                        operation: OP_CHAIN,
-                        reason: "the chosen link was deleted as a duplicate (upstream NULL)",
-                    })
-                }
+            let Link::Index(idx) = next else {
+                // (a case is set only with a link)
+                return Err(SolidError::InvalidInput {
+                    operation: OP_CHAIN,
+                    reason: "a link case without a link",
+                });
             };
             let mut next_crv =
                 curves

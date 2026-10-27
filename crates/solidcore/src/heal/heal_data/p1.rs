@@ -384,11 +384,12 @@ impl<O: LoopObject> HealData<O> {
             }
 
             // count the kinds of faces that force healing checks later on
-            let (sheet, poles_link, flat, missing, crossed, near_miss) = (
+            let (sheet, poles_link, flat, missing, crossed_pole, crossed, near_miss) = (
                 p.sheet,
                 p.poles_link,
                 p.bad_flat_corners,
                 p.bad_missing_seam,
+                p.bad_crossed_pole,
                 p.bad_crossed_seam,
                 p.bad_near_miss_seam,
             );
@@ -416,6 +417,13 @@ impl<O: LoopObject> HealData<O> {
             // Missing Seam List
             if missing.code() != 0 {
                 self.bad_face_props_missing_seam
+                    .add(&mut self.face_props, id, true)?;
+                new_probs = true;
+            }
+
+            // Crossed Pole List
+            if crossed_pole.code() != 0 {
+                self.bad_face_props_crossed_pole
                     .add(&mut self.face_props, id, true)?;
                 new_probs = true;
             }
@@ -583,9 +591,11 @@ impl<O: LoopObject> HealData<O> {
     }
 
     /// `Cache_FaceProps_Stage3`: sets the stage 3 (loop) props of the (new) target
-    /// faces that lack them, last face first, moves the faces with a not-yet supported
-    /// problem to the not-yet list and lists the loop problems. Returns whether new
-    /// problems were found (always `false`, as upstream).
+    /// faces that lack them, last face first (skipping a face missing a seam whose
+    /// closed surface has only vertex loops: it stays active for seam insertion),
+    /// moves the faces with a not-yet supported problem to the not-yet list and lists
+    /// the loop problems. Returns whether new problems were found (always `false`, as
+    /// upstream).
     ///
     /// # Errors
     ///
@@ -615,6 +625,22 @@ impl<O: LoopObject> HealData<O> {
             ii -= 1;
             let done_heal_op = self.done_heal_op;
             let p = &mut self.face_props.props_mut(id)?.props;
+
+            // Vertex loops alone cannot form a loop tree. Keep this face active for
+            // seam insertion; its completed edge boundary can then be classified.
+            if p.bad_missing_seam.is_true() {
+                let Some(face) = p.face else {
+                    return Err(no_face());
+                };
+                if crate::topology::face::p3::is_closed_surface_with_vertex_loops(
+                    k,
+                    b,
+                    face,
+                    Some(&*p),
+                )? {
+                    continue;
+                }
+            }
 
             // when needed - compute FaceProps After Fix_SplitEdgesAtSeam() -
             // SM_PROPSTAGE_3
@@ -766,9 +792,9 @@ impl<O: LoopObject> HealData<O> {
     }
 
     /// `Fix_InfiniteRegion`: a B-rep with one region (a sheet model) gets a void
-    /// region; with two, an infinite region that is not void or a second region that
-    /// is not solid is fixed by ray casting for the infinite region; with more, a
-    /// non-void infinite region is fixed the same way (the other regions are left).
+    /// region; with two, ray casting finds the infinite region, which is set void and
+    /// the other solid; with more, a non-void infinite region is fixed by ray casting
+    /// (the other regions are left).
     ///
     /// # Errors
     ///
@@ -793,22 +819,16 @@ impl<O: LoopObject> HealData<O> {
 
             // case: 2 regions - 1 Void InfiniteRegion, 1 solid Region
             2 => {
+                // Plausible void flags do not establish which region is geometrically
+                // infinite.
+                brep_find_and_set_infinite_region(k, b)?;
+
+                // Refresh region pointers after classification, then set Void/Solid data.
+                let regions = brep_regions_from_infinite(b)?;
+                let infinite_region = tgt(&regions, 0)?;
                 let next_region = tgt(&regions, 1)?;
-
-                // only check obviously broken Regions
-                if !region_is_void(b, infinite_region)? || region_is_void(b, next_region)? {
-                    // use ray casting to find and set the InfiniteRegion
-                    brep_find_and_set_infinite_region(k, b)?;
-
-                    // refresh Region ptrs
-                    let regions = brep_regions_from_infinite(b)?;
-                    let infinite_region = tgt(&regions, 0)?;
-                    let next_region = tgt(&regions, 1)?;
-
-                    // Set region Void/Solid data
-                    set_region_is_void(b, infinite_region, true)?;
-                    set_region_is_void(b, next_region, false)?;
-                }
+                set_region_is_void(b, infinite_region, true)?;
+                set_region_is_void(b, next_region, false)?;
             }
 
             // case: more than 2 regions

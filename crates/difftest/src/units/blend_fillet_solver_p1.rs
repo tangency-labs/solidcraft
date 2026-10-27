@@ -2071,7 +2071,7 @@ fn gen_rail_uv(rng: &mut Rng) -> Inputs {
 fn gen_brep_case(rng: &mut Rng) -> BrepIn {
     if rng.chance(0.6) {
         return BrepIn::File {
-            file: (*rng.choose(&FILES).unwrap_or(&"SmallBox.smb")).to_string(),
+            file: (*rng.choose(&FILES).unwrap_or(&"SmallBox.smp")).to_string(),
             rebuild: false,
         };
     }
@@ -2407,7 +2407,7 @@ fn gen_static(rng: &mut Rng) -> Inputs {
         4 => gen_clipped(rng),
         5 => Inputs::Convexity {
             brep: BrepIn::File {
-                file: (*rng.choose(&FILES).unwrap_or(&"SmallBox.smb")).to_string(),
+                file: (*rng.choose(&FILES).unwrap_or(&"SmallBox.smp")).to_string(),
                 rebuild: false,
             },
             edge: if rng.chance(0.6) { -1 } else { s(rng) },

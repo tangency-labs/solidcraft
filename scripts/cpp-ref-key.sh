@@ -4,18 +4,21 @@
 #   v1-<upstream commit, 12 hex>-<16 hex of a sha256 over the harness inputs>
 #
 # The inputs are exactly what build.sh compiles into bin/cpp/lib: the pinned upstream
-# commit plus harness/cpp/{CMakeLists.txt,build.sh,stubs/**,patches/**}. The shims
+# commit (UPSTREAM_COMMIT in scripts/upstream-pin.env) plus
+# harness/cpp/{CMakeLists.txt,build.sh,stubs/**,patches/**}. The shims
 # (harness/cpp/shim/**) are compiled by crates/solidcore-ffi, not by build.sh, so they
 # are not part of the key. CI (actions/cache key), .github/workflows/cpp-reference.yml
 # (release tag cpp-ref-<key>) and scripts/fetch-cpp.sh all call this script, so they
 # always agree. Bump the "v1" prefix when the packaging itself changes.
 #
-# UPSTREAM_COMMIT overrides the pinned commit (CI exports the same value).
+# An UPSTREAM_COMMIT environment variable overrides the pinned commit.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-# Must match ATTRIBUTION.md / AGENTS.md / .github/workflows/ci.yml.
-PINNED=c9c5979f04cea8c38213004d4f04df0dcfb40d05
+# The pin lives in scripts/upstream-pin.env (also read by fetch-cpp.sh, package-cpp-ref.sh,
+# the site and CI); ATTRIBUTION.md / AGENTS.md / README.md quote it for humans.
+PINNED="$(sed -n 's/^UPSTREAM_COMMIT=//p' "$ROOT/scripts/upstream-pin.env")"
+[ -n "$PINNED" ] || { echo "cpp-ref-key.sh: no UPSTREAM_COMMIT in scripts/upstream-pin.env" >&2; exit 1; }
 COMMIT="${UPSTREAM_COMMIT:-$PINNED}"
 
 if command -v sha256sum >/dev/null 2>&1; then

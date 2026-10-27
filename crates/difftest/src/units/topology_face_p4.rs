@@ -469,6 +469,21 @@ impl LoopObject for H {
     fn from_loop(l: LoopId) -> Self {
         Self::Loop(l)
     }
+
+    // (`HasSeamProblem` reads a raw touch's loop: `(SmLoop*)m_pConnectedTo`)
+    fn as_loop(&self) -> Option<LoopId> {
+        match self {
+            Self::Loop(l) => Some(*l),
+            _ => None,
+        }
+    }
+
+    fn as_vertex(&self) -> Option<VertexId> {
+        match self {
+            Self::Vertex(v) => Some(*v),
+            _ => None,
+        }
+    }
 }
 
 /// The B-rep behind the `Seam` handles.

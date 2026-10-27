@@ -17,7 +17,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CPP="${1:?usage: package-cpp-ref.sh <cpp dir> <out dir>}"
 OUTDIR="${2:?usage: package-cpp-ref.sh <cpp dir> <out dir>}"
 KEY="$("$ROOT/scripts/cpp-ref-key.sh")"
-COMMIT="${UPSTREAM_COMMIT:-$(sed -n 's/^PINNED=//p' "$ROOT/scripts/cpp-ref-key.sh")}"
+COMMIT="${UPSTREAM_COMMIT:-$(sed -n 's/^UPSTREAM_COMMIT=//p' "$ROOT/scripts/upstream-pin.env")}"
 NAME="solidcore-cpp-ref-$KEY-linux-x86_64.tar.zst"
 
 for f in lib/libSMLib.a lib/libSM_API.a ffi.env; do

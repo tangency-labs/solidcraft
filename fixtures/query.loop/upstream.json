@@ -8862,7 +8862,7 @@
      }
     ]
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4311"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1225"
   },
   {
    "name": "cylinder_seamless_circle_above",
@@ -8962,7 +8962,7 @@
      }
     ]
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4311"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1225"
   },
   {
    "name": "cylinder_seamless_circle_on",
@@ -9062,7 +9062,7 @@
      }
     ]
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4311"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1225"
   },
   {
    "name": "cylinder_seamless_circle_on_seam_side",
@@ -9162,7 +9162,7 @@
      }
     ]
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4311"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1225"
   },
   {
    "name": "cylinder_seamless_circle_start",
@@ -9262,7 +9262,7 @@
      }
     ]
    },
-   "upstream_ref": "tests/prog_test/src/smTopoTest.cpp:4311"
+   "upstream_ref": "tests/prog_test/src/smFaceTest.cpp:1225"
   }
  ]
 }
