@@ -16,36 +16,74 @@ use solidcraft_sketch::{LinkGeom, LinkKind, Sketch};
 use super::sketch::{edit, target_sketch};
 use super::{CommandSpec, in_sketch};
 use crate::params::{bad, bool_, str_, string_list};
+use crate::schema::sketch_links::{
+    FailedFeature, FilesUpdate, FreezeLinkResult, LinkUpdate, LinkVisibilityParams, LinkVisibilityResult, LinksParams, PlacementInfo, ReferenceEntry,
+    ReferencesParams, ReferencesResult, RemoveLinkResult, RepairLinkParams, RepairLinkResult, ResumeLinkResult, SolveInfo, UnavailableFile,
+    UpdateReferencesParams, UpdateReferencesResult,
+};
+use crate::schema::{TypedContract, output_schema_for};
 use crate::{EngineError, Result, Session};
 
+const REFERENCES_CONTRACT: TypedContract<ReferencesParams> = TypedContract::new();
+const UPDATE_REFERENCES_CONTRACT: TypedContract<UpdateReferencesParams> = TypedContract::new();
+const LINKS_CONTRACT: TypedContract<LinksParams> = TypedContract::new();
+const REPAIR_LINK_CONTRACT: TypedContract<RepairLinkParams> = TypedContract::new();
+const LINK_VISIBILITY_CONTRACT: TypedContract<LinkVisibilityParams> = TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
-    CommandSpec::new("sketch.references", "Sketch References", references).icon("list").noundo().params(
+    CommandSpec::new("sketch.references", "Sketch References", crate::checked!("sketch.references", references))
+        .icon("list")
+        .noundo()
+        .contract(&REFERENCES_CONTRACT)
+        .output(output_schema_for::<ReferencesResult>)
+        .params(
         "sketch?: id|name (default: the active sketch, else every sketch with links). Each link: its source, the occurrence placement it \
          reads (path and name) and the placement of the sketch's component it was made in, its curves and points, hidden, frozen and \
          status: current; stale (shown where the source is now, but stored where it was: editing the sketch or Update References stores it); pending (a placement it \
          reads has an uncaptured move, which it follows once captured); frozen; lost (with the reason; it keeps its last geometry)",
     ),
-    CommandSpec::new("sketch.update_references", "Update References", update_references).icon("update").params(
+    CommandSpec::new("sketch.update_references", "Update References", crate::checked!("sketch.update_references", update_references))
+        .icon("update")
+        .contract(&UPDATE_REFERENCES_CONTRACT)
+        .output(output_schema_for::<UpdateReferencesResult>)
+        .params(
         "sketch?: id|name (default: every sketch with links); capture?: bool (first capture the uncaptured moves of the placements \
          the links read); files?: bool (first update linked designs, one component at a time: a component whose file cannot be read \
          keeps its bodies and is reported unavailable). Reads each link where its source is now, solves and stores the sketch, \
          rebuilds what follows. Reports each link changed, unchanged, frozen or lost, and the features that failed (ok: false)",
     ),
-    CommandSpec::new("sketch.freeze_link", "Freeze Link", freeze_link)
+    CommandSpec::new("sketch.freeze_link", "Freeze Link", crate::checked!("sketch.freeze_link", freeze_link))
         .icon("ground")
+        .contract(&LINKS_CONTRACT)
+        .output(output_schema_for::<FreezeLinkResult>)
         .params("link?: id | links?: [ids] | entities?: [curve or point ids]; sketch?: id|name (default: the active sketch). The links keep the geometry they show and stop following their sources until resumed"),
-    CommandSpec::new("sketch.resume_link", "Resume Link", resume_link)
+    CommandSpec::new("sketch.resume_link", "Resume Link", crate::checked!("sketch.resume_link", resume_link))
         .icon("play")
+        .contract(&LINKS_CONTRACT)
+        .output(output_schema_for::<ResumeLinkResult>)
         .params("link?: id | links?: [ids] | entities?: [curve or point ids]; sketch?: id|name (default: the active sketch). Frozen links follow their sources again, from now"),
-    CommandSpec::new("sketch.repair_link", "Repair Link", repair_link).icon("project").enabled(in_sketch).params(
+    CommandSpec::new("sketch.repair_link", "Repair Link", crate::checked!("sketch.repair_link", repair_link))
+        .icon("project")
+        .enabled(in_sketch)
+        .contract(&REPAIR_LINK_CONTRACT)
+        .output(output_schema_for::<RepairLinkResult>)
+        .params(
         "link: id; ref: a reference as sketch.project takes it (with path?: [occurrence ids]). The link reads the new source; its \
          curves and points keep their ids, and the constraints on them, where the new geometry has the same shape",
     ),
-    CommandSpec::new("sketch.remove_link", "Remove Projection", remove_link).icon("delete").params(
+    CommandSpec::new("sketch.remove_link", "Remove Projection", crate::checked!("sketch.remove_link", remove_link))
+        .icon("delete")
+        .contract(&LINKS_CONTRACT)
+        .output(output_schema_for::<RemoveLinkResult>)
+        .params(
         "link?: id | links?: [ids] | entities?: [curve or point ids]; sketch?: id|name (default: the active sketch). Removes whole \
          links: their curves, points and 3D curves, and the constraints and dimensions on them (Break Link keeps the geometry instead)",
     ),
-    CommandSpec::new("sketch.link_visibility", "Show/Hide Projection", link_visibility).icon("eye").params(
+    CommandSpec::new("sketch.link_visibility", "Show/Hide Projection", crate::checked!("sketch.link_visibility", link_visibility))
+        .icon("eye")
+        .contract(&LINK_VISIBILITY_CONTRACT)
+        .output(output_schema_for::<LinkVisibilityResult>)
+        .params(
         "link?: id | links?: [ids] | entities?: [curve or point ids]; sketch?: id|name (default: the active sketch); visible?: bool \
          (default toggles). Hidden links are not drawn or picked; they still bound profiles, keep their constraints and follow their sources",
     ),
@@ -114,8 +152,18 @@ fn moved(a: &[(String, solidcraft_geom::Vec2)], b: &[(String, solidcraft_geom::V
     a.len() != b.len() || a.iter().zip(b).any(|((ia, pa), (ib, pb))| ia != ib || pa.dist(*pb) > 1e-9)
 }
 
-fn placement_json(s: &Session, path: &[u64]) -> Value {
-    json!({"path": path, "name": solidcraft_doc::project::path_label(&s.doc, path)})
+fn placement_info(s: &Session, path: &[u64]) -> PlacementInfo {
+    PlacementInfo { path: path.to_vec(), name: solidcraft_doc::project::path_label(&s.doc, path) }
+}
+
+/// The solve report `edit` returns (`null` when the sketch wasn't solved), typed.
+fn solve_info(info: &Value) -> Option<SolveInfo> {
+    Some(SolveInfo { solved: info.get("solved")?.as_bool()?, dof: usize::try_from(info.get("dof")?.as_u64()?).ok()? })
+}
+
+/// A command's reply, from its reply type.
+fn reply(r: impl serde::Serialize) -> Result<Value> {
+    serde_json::to_value(r).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 /// The links a deletion of `ids` (curve and point ids of `sk`) takes members from: the links
@@ -316,27 +364,10 @@ fn references(s: &mut Session, p: &Value) -> Result<Value> {
             } else {
                 "current"
             };
-            let curves: Vec<&str> = stored.link_curves(&l.id).iter().filter_map(|c| stored.curves.get(*c)).map(|c| c.id.as_str()).collect();
-            let points: Vec<&str> = stored.link_points(&l.id).iter().filter_map(|q| stored.points.get(*q)).map(|q| q.id.as_str()).collect();
+            let curves: Vec<String> = stored.link_curves(&l.id).iter().filter_map(|c| stored.curves.get(*c)).map(|c| c.id.clone()).collect();
+            let points: Vec<String> = stored.link_points(&l.id).iter().filter_map(|q| stored.points.get(*q)).map(|q| q.id.clone()).collect();
             let construction = !curves.is_empty() && stored.link_curves(&l.id).iter().all(|c| stored.curves.get(*c).is_some_and(|c| c.construction));
-            let mut entry = json!({
-                "sketch": id,
-                "sketch_name": name,
-                "link": l.id,
-                "kind": l.kind,
-                "source": l.source.describe(),
-                "bodies": l.source.bodies(),
-                "occurrence": l.placement.as_ref().map(|p| placement_json(s, &p.source)),
-                "author": l.placement.as_ref().map(|p| placement_json(s, &p.author)),
-                "status": status,
-                "hidden": l.hidden,
-                "frozen": l.frozen,
-                "construction": construction,
-                "omitted": l.omit_edges,
-                "curves": curves,
-                "points": points,
-            });
-            if lost && let Some(w) = result.and_then(|r| r.warning.clone().or_else(|| r.error.clone())) {
+            let reason = if lost && let Some(w) = result.and_then(|r| r.warning.clone().or_else(|| r.error.clone())) {
                 // The sketch's warnings, each once.
                 let mut parts: Vec<&str> = Vec::new();
                 for part in w.split("; ") {
@@ -344,22 +375,40 @@ fn references(s: &mut Session, p: &Value) -> Result<Value> {
                         parts.push(part);
                     }
                 }
-                entry["reason"] = json!(parts.join("; "));
+                Some(parts.join("; "))
             } else if status == "stale" {
                 // What the model shows already follows the source; only the saved copy is behind.
-                entry["reason"] =
-                    json!("the model shows where the source is now; the sketch stores it when it is next edited or Update References runs");
-            }
-            out.push(entry);
+                Some("the model shows where the source is now; the sketch stores it when it is next edited or Update References runs".into())
+            } else {
+                None
+            };
+            out.push(ReferenceEntry {
+                sketch: id,
+                sketch_name: name.clone(),
+                link: l.id.clone(),
+                kind: serde_json::to_value(l.kind).ok().and_then(|k| k.as_str().map(str::to_string)).unwrap_or_default(),
+                source: l.source.describe(),
+                bodies: l.source.bodies().into_iter().map(str::to_string).collect(),
+                occurrence: l.placement.as_ref().map(|p| placement_info(s, &p.source)),
+                author: l.placement.as_ref().map(|p| placement_info(s, &p.author)),
+                status: status.into(),
+                hidden: l.hidden,
+                frozen: l.frozen,
+                construction,
+                omitted: l.omit_edges.clone(),
+                curves,
+                points,
+                reason,
+            });
         }
     }
-    Ok(json!({"references": out}))
+    reply(ReferencesResult { references: out, param_warnings: Vec::new() })
 }
 
 fn update_references(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "sketch.update_references";
     let targets = target_sketches(s, p, cmd, true)?;
-    let mut files = Value::Null;
+    let mut files: Option<FilesUpdate> = None;
     if bool_(p, "files").unwrap_or(false) {
         let update = super::find_command("component.update_links").ok_or_else(|| bad(cmd, "component.update_links is missing"))?;
         let (mut updated, mut unchanged, mut unavailable) = (Vec::new(), Vec::new(), Vec::new());
@@ -367,14 +416,15 @@ fn update_references(s: &mut Session, p: &Value) -> Result<Value> {
         for comp in linked {
             match update.run_nested(s, &json!({"component": comp})) {
                 Ok(v) => {
-                    updated.extend(v["updated"].as_array().cloned().unwrap_or_default());
-                    unchanged.extend(v["unchanged"].as_array().cloned().unwrap_or_default());
+                    let names = |k: &str| v[k].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect::<Vec<_>>();
+                    updated.extend(names("updated"));
+                    unchanged.extend(names("unchanged"));
                 }
                 // Its bodies stay as they were: usable, but not known to be current.
-                Err(e) => unavailable.push(json!({"component": comp, "error": e.to_string()})),
+                Err(e) => unavailable.push(UnavailableFile { component: comp, error: e.to_string() }),
             }
         }
-        files = json!({"updated": updated, "unchanged": unchanged, "unavailable": unavailable});
+        files = Some(FilesUpdate { updated, unchanged, unavailable });
     }
     let mut captured: Vec<u64> = Vec::new();
     if bool_(p, "capture").unwrap_or(false) {
@@ -415,7 +465,7 @@ fn update_references(s: &mut Session, p: &Value) -> Result<Value> {
             } else {
                 "unchanged"
             };
-            links.push(json!({"sketch": id, "link": l.id, "source": l.source.describe(), "status": status}));
+            links.push(LinkUpdate::Link { sketch: *id, link: l.id.clone(), source: l.source.describe(), status: status.into() });
         }
         if sk != before {
             *doc.sketch_mut(*id)? = sk;
@@ -423,29 +473,26 @@ fn update_references(s: &mut Session, p: &Value) -> Result<Value> {
             s.refresh();
         }
         if !warnings.is_empty() {
-            links.push(json!({"sketch": id, "warnings": warnings}));
+            links.push(LinkUpdate::Warnings { sketch: *id, warnings });
         }
     }
     // What follows the first updated sketch is rebuilt by the refresh; report what failed.
     let first = targets.iter().filter_map(|id| s.doc.features.iter().position(|f| f.id == *id)).min();
-    let failed: Vec<Value> = match first {
+    let failed: Vec<FailedFeature> = match first {
         Some(at) => s
             .doc
             .features
             .iter()
             .skip(at)
-            .filter_map(|f| s.model.result(f.id).and_then(|r| r.error.clone()).map(|e| json!({"feature": f.id, "name": f.name, "error": e})))
+            .filter_map(|f| {
+                s.model.result(f.id).and_then(|r| r.error.clone()).map(|error| FailedFeature { feature: f.id, name: f.name.clone(), error })
+            })
             .collect(),
         None => Vec::new(),
     };
-    let unavailable = files.get("unavailable").and_then(Value::as_array).is_some_and(|a| !a.is_empty());
-    Ok(json!({
-        "links": links,
-        "captured": captured,
-        "files": files,
-        "failed": failed,
-        "ok": failed.is_empty() && !lost && !unavailable,
-    }))
+    let unavailable = files.as_ref().is_some_and(|f| !f.unavailable.is_empty());
+    let ok = failed.is_empty() && !lost && !unavailable;
+    reply(UpdateReferencesResult { links, captured, files, failed, ok, param_warnings: Vec::new() })
 }
 
 fn freeze_link(s: &mut Session, p: &Value) -> Result<Value> {
@@ -458,7 +505,7 @@ fn freeze_link(s: &mut Session, p: &Value) -> Result<Value> {
         }
         Ok(links)
     })?;
-    Ok(json!({"frozen": links, "sketch": info}))
+    reply(FreezeLinkResult { frozen: links, sketch: solve_info(&info), param_warnings: Vec::new() })
 }
 
 fn resume_link(s: &mut Session, p: &Value) -> Result<Value> {
@@ -473,7 +520,7 @@ fn resume_link(s: &mut Session, p: &Value) -> Result<Value> {
     let warnings = super::sketch_project::refresh(s, &doc, id, &mut sk);
     *doc.sketch_mut(id)? = sk;
     *s.doc_mut() = doc;
-    Ok(json!({"resumed": links, "warnings": warnings}))
+    reply(ResumeLinkResult { resumed: links, warnings, param_warnings: Vec::new() })
 }
 
 fn repair_link(s: &mut Session, p: &Value) -> Result<Value> {
@@ -517,9 +564,9 @@ fn repair_link(s: &mut Session, p: &Value) -> Result<Value> {
     *doc.sketch_mut(id)? = sk;
     *s.doc_mut() = doc;
     let sk = s.doc.sketch(id)?;
-    let curves: Vec<&str> = sk.link_curves(&link).iter().filter_map(|c| sk.curves.get(*c)).map(|c| c.id.as_str()).collect();
-    let points: Vec<&str> = sk.link_points(&link).iter().filter_map(|q| sk.points.get(*q)).map(|q| q.id.as_str()).collect();
-    Ok(json!({"link": link, "rebuilt": update.rebuilt, "dropped_constraints": update.dropped, "curves": curves, "points": points}))
+    let curves: Vec<String> = sk.link_curves(&link).iter().filter_map(|c| sk.curves.get(*c)).map(|c| c.id.clone()).collect();
+    let points: Vec<String> = sk.link_points(&link).iter().filter_map(|q| sk.points.get(*q)).map(|q| q.id.clone()).collect();
+    reply(RepairLinkResult { link, rebuilt: update.rebuilt, dropped_constraints: update.dropped, curves, points, param_warnings: Vec::new() })
 }
 
 fn remove_link(s: &mut Session, p: &Value) -> Result<Value> {
@@ -541,7 +588,7 @@ fn remove_link(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(links)
     })?;
     s.doc_mut().prune_model_params();
-    Ok(json!({"removed": removed, "sketch": info}))
+    reply(RemoveLinkResult { removed, sketch: solve_info(&info), param_warnings: Vec::new() })
 }
 
 fn link_visibility(s: &mut Session, p: &Value) -> Result<Value> {
@@ -553,9 +600,10 @@ fn link_visibility(s: &mut Session, p: &Value) -> Result<Value> {
         for l in sk.links.iter_mut().filter(|l| links.contains(&l.id)) {
             l.hidden = !visible;
         }
-        Ok(json!({"links": links, "visible": visible}))
+        Ok((links, visible))
     })?;
-    Ok(json!({"links": out["links"], "visible": out["visible"], "sketch": info}))
+    let (links, visible) = out;
+    reply(LinkVisibilityResult { links, visible, sketch: solve_info(&info), param_warnings: Vec::new() })
 }
 
 #[cfg(test)]
