@@ -24,6 +24,11 @@
     "issue.note_details_kept": "スクリーンショットをローカルに取得しました。編集した技術的な詳細はそのまま残しました。現在の表示と合っているか確認してください。",
     "issue.note_details_updated": "技術的な詳細を現在の表示に合わせて更新しました。スクリーンショットをローカルに取得しました。GitHub に添付する前に確認してください。"
   },
+  "vi": {
+    "issue.note_changed_while_waiting": "Cài đặt hoặc mô hình đã thay đổi trong lúc chờ bản xem trước. Hãy chụp lại màn hình để cập nhật chi tiết kỹ thuật cho góc nhìn hiện tại.",
+    "issue.note_details_kept": "Đã chụp ảnh màn hình trên máy. Chi tiết kỹ thuật bạn đã chỉnh sửa được giữ lại: hãy kiểm tra xem chúng còn khớp với góc nhìn hiện tại không.",
+    "issue.note_details_updated": "Chi tiết kỹ thuật đã được cập nhật theo góc nhìn hiện tại. Đã chụp ảnh màn hình trên máy. Hãy xem lại trước khi đính kèm trên GitHub."
+  },
   "zh": {
     "issue.note_changed_while_waiting": "等待预览时设置或模型已更改。重新截图即可按当前视图更新技术详情。",
     "issue.note_details_kept": "已在本地截图。已保留你编辑过的技术详情：请检查它们是否仍与当前视图一致。",
