@@ -1004,8 +1004,9 @@ fn theme_row(app: &mut SolveApp, ui: &mut egui::Ui) {
             let name = file.get("name").and_then(serde_json::Value::as_str).unwrap_or("Theme").to_string();
             let text = serde_json::to_string_pretty(&file).unwrap_or_default();
             app.pick_save(&format!("{name}.json"), &["json"], move |app, path| {
+                // Through `vfs`, like every other save: the web app hands it out as a download.
                 if let Some(path) = path
-                    && let Err(e) = std::fs::write(&path, text)
+                    && let Err(e) = solidcraft_engine::io::vfs::write(&path, text.as_bytes())
                 {
                     app.set_status(format!("Theme export: {e}"), true);
                 }
@@ -3651,6 +3652,42 @@ mod tests {
         h.frames(2);
         assert_eq!(Tokens::get().panel, Tokens::dark().panel);
         assert_eq!((Tokens::get().control_radius, Tokens::get().radius_xl), (6, 10));
+    }
+
+    /// A theme tile's Export… writes the theme file through `vfs`, like the other saves, so the
+    /// web app hands it out as a download (#7192). On the disk it is the same file, and an
+    /// agent's folders hold for it as they do for any other write.
+    #[test]
+    fn theme_export_writes_through_vfs() {
+        use serde_json::json;
+        use solidcraft_engine::io::vfs;
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"theme": "dark", "open": "Interface"}));
+        h.frames(2);
+        super::reveal_preference(&mut h, "prefs:theme_tile:dark");
+        let (root, out) = (h.dir.join("root"), h.dir.join("out"));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&out).unwrap();
+        for (path, inside) in [(root.join("Dark.json"), true), (out.join("Dark.json"), false)] {
+            let answer = path.to_string_lossy().to_string();
+            h.app.services.pick_save = Some(Box::new(move |_, _| Box::pin(std::future::ready(Some(answer.clone())))));
+            h.app.status = None;
+            vfs::scoped(Some(vfs::PathScope::new([root.clone()])), || {
+                h.step(&json!({"click":{"handle":"prefs:theme_tile:dark"},"button":"right"})).unwrap();
+                h.step(&json!({"click":{"handle":"menu:theme_export"}})).unwrap();
+                h.frames(4);
+            });
+            let status = h.app.status.clone().map(|(text, ..)| text);
+            if inside {
+                assert_eq!(status, None);
+                let file: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+                assert_eq!(file, super::theme_file(&h.app, "dark", true));
+            } else {
+                assert!(status.as_deref().is_some_and(|s| s.contains("outside the folders this agent may use")), "{status:?}");
+                assert!(!path.exists(), "nothing written outside");
+            }
+        }
     }
 
     /// Picking a font closes the font list, not the Preferences window's body: that folded the

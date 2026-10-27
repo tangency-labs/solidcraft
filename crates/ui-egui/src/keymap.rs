@@ -644,7 +644,8 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
             let text = crate::toolbar_custom::export(app).to_string();
             app.pick_save("SolidCraft shortcuts.json", &["json"], move |app, path| {
                 if let Some(path) = path {
-                    app.keymap.message = std::fs::write(&path, text).err().map(|e| format!("export: {e}"));
+                    // Through `vfs`, like every other save: the web app hands it out as a download.
+                    app.keymap.message = solidcraft_engine::io::vfs::write(&path, text.as_bytes()).err().map(|e| format!("export: {e}"));
                 }
             });
         }
@@ -1146,6 +1147,38 @@ mod card_tests {
         assert!(h.app.prefs_window.open && h.app.keymap.capturing.is_none());
         h.step(&json!({"key":"Escape"})).unwrap();
         assert!(!h.app.prefs_window.open);
+    }
+
+    /// Export… writes the shortcuts file through `vfs`, like the other saves, so the web app hands
+    /// it out as a download (#7192). On the disk it is the same file, and an agent's folders hold
+    /// for it as they do for any other write.
+    #[test]
+    fn shortcut_export_writes_through_vfs() {
+        use solidcraft_engine::io::vfs;
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.call("ui.prefs", json!({"open":"Keyboard Shortcuts"}));
+        h.frames(2);
+        let (root, out) = (h.dir.join("root"), h.dir.join("out"));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&out).unwrap();
+        for (path, inside) in [(root.join("keys.json"), true), (out.join("keys.json"), false)] {
+            let answer = path.to_string_lossy().to_string();
+            h.app.services.pick_save = Some(Box::new(move |_, _| Box::pin(std::future::ready(Some(answer.clone())))));
+            vfs::scoped(Some(vfs::PathScope::new([root.clone()])), || {
+                h.step(&json!({"widget":"Export…"})).unwrap();
+                h.frames(4);
+            });
+            let message = h.app.keymap.message.clone();
+            if inside {
+                assert_eq!(message, None);
+                let file: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+                assert_eq!(file, crate::toolbar_custom::export(&h.app));
+            } else {
+                assert!(message.as_deref().is_some_and(|m| m.contains("outside the folders this agent may use")), "{message:?}");
+                assert!(!path.exists(), "nothing written outside");
+            }
+        }
     }
 
     #[test]
