@@ -534,8 +534,9 @@ impl FileAction {
         let needs_design = matches!(self, Self::Save | Self::SaveAs | Self::Undo | Self::Redo | Self::ExportMesh(_) | Self::Command(_))
             || matches!(self, Self::Export(extension) if *extension != "json");
         // An open bug report describes the designs as they are, and a window opened behind it
-        // covers it: only Quit, which asks about unsaved designs first, stays (#7188).
-        let behind_report = app.issue_report.draft.is_some() && !matches!(self, Self::Quit);
+        // covers it (#7188). Quit too, as behind any modal window: it would switch to a design
+        // with unsaved changes under the report, and ask about it where it can't be answered.
+        let behind_report = app.issue_report.draft.is_some();
         let available = match self {
             Self::Undo => !app.session.undo.is_empty(),
             Self::Redo => !app.session.redo.is_empty(),
@@ -2316,12 +2317,24 @@ mod header_report_tests {
         }
         assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.docs.count(), h.app.home.recent.clone()));
         assert!(h.app.dialog.is_none() && h.app.file_picker.is_none() && !h.app.prefs_window.open && !h.app.keymap.open && !h.app.agent_chat.open);
-        // A focused report field still gets the menu's Undo and Redo; Quit still asks about unsaved designs.
+        // A focused report field still gets the menu's Undo and Redo.
         assert!(FileAction::Undo.menu_enabled(&h.app, true) && !FileAction::Undo.menu_enabled(&h.app, false));
         assert!(!FileAction::Save.menu_enabled(&h.app, true));
-        assert!(FileAction::Quit.enabled(&h.app));
+        // Quit waits as behind any modal window: it would switch to a design with unsaved changes
+        // under the report.
+        assert!(!FileAction::Quit.enabled(&h.app));
+        FileAction::Quit.run(&mut h.app);
+        assert!(h.app.docs.quitting.is_none() && h.app.docs.closing.is_none());
+        // Help's windows wait too; Report an Issue… shows the report.
+        for item in ["about", "shortcuts", "messages", "crashes", "connect"] {
+            assert!(!crate::help::available(&h.app, item), "{item}");
+            crate::help::run(&mut h.app, &h.ctx, item);
+        }
+        assert!(!h.app.help.about && !h.app.keymap.open && !h.app.messages.open && h.app.help.connect.is_none());
+        assert!(crate::help::available(&h.app, "report") && crate::help::available(&h.app, "docs"));
         h.app.issue_report.draft = None;
-        assert!(FileAction::Undo.enabled(&h.app) && FileAction::Settings.enabled(&h.app));
+        assert!(FileAction::Undo.enabled(&h.app) && FileAction::Settings.enabled(&h.app) && FileAction::Quit.enabled(&h.app));
+        assert!(crate::help::available(&h.app, "shortcuts"));
     }
 
     #[test]

@@ -156,6 +156,12 @@ impl NativeMenu {
                 item.set_enabled(enabled);
             }
         }
+        for (item, action) in &self.help_actions {
+            let enabled = solidcraft_ui_egui::help::available(app, action);
+            if item.is_enabled() != enabled {
+                item.set_enabled(enabled);
+            }
+        }
         if !self.recent_paths.iter().eq(app.home.recent.iter().take(32))
             && let Err(error) = self.update_recent(app)
         {
