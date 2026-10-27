@@ -52,7 +52,8 @@ ending in the same word (`file.open`: did you mean `doc.open`?).
 6. A command the ribbon shows (through `.at(…)` or a section in `crates/ui-egui/src/workspace.rs`)
    ships with its help tooltip: two short sentences, what the tool does and then when to use it,
    in your own words. Add the message `help.<id>` to a new file in `assets/locales/pending/`
-   (English, plus the languages you can write; a test requires Japanese and Chinese) and the id to
-   `DOCUMENTED` in `crates/ui-egui/src/command_help.rs`. The test
+   (English, every catalog in `COMPLETE` in `crates/ui-egui/src/i18n.rs`, which a test requires,
+   and any other language you can write) and the id to `DOCUMENTED` in
+   `crates/ui-egui/src/command_help.rs`. The test
    `every_toolbar_command_has_help_or_is_on_the_backlog` fails for a ribbon command without help;
    the older ones on its `BACKLOG` only shrink (#2758).
