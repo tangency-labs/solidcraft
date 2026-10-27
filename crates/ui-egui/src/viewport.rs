@@ -8373,7 +8373,10 @@ mod tests {
         let b = st.bodies.first().unwrap();
         let mesh = b.mesh();
         assert_eq!(mesh.edges.len(), 1536);
-        assert_eq!(mesh.smooth_edges.iter().filter(|f| **f).count(), 512);
+        // Of the 512 wall joins, the offset curves' pieces meet with one curvature at 400; at the
+        // other 112 the curvature jumps by 0.9-3.6% (the offsets' pieces meet only tangentially)
+        // and the join is drawn.
+        assert_eq!(mesh.smooth_edges.iter().filter(|f| **f).count(), 400);
         let smooth = mesh.smooth_edges.iter().position(|f| *f).unwrap();
         let expected = mesh.edges.iter().enumerate().filter(|(i, _)| mesh.shaded_edge_visible(*i)).map(|(_, e)| e.len() - 1).sum::<usize>();
         let shaded = build_scene(&app).merged();
@@ -8381,8 +8384,9 @@ mod tests {
         assert!(!shaded.tris.is_empty());
         app.ui.visual_style = 2;
         let wire = build_scene(&app).merged();
-        let expected_wire =
-            mesh.edges.iter().enumerate().filter(|(i, _)| !mesh.seams.get(*i).copied().unwrap_or(false)).map(|(_, e)| e.len() - 1).sum::<usize>();
+        // The wireframe draws every edge but seams, and a seam measured as a crease (the offset
+        // ellipse's pieces meet at small real creases) is no seam.
+        let expected_wire = mesh.edges.iter().enumerate().filter(|(i, _)| mesh.edge_visible(*i)).map(|(_, e)| e.len() - 1).sum::<usize>();
         assert_eq!(wire.lines.len() / crate::gpu::LINE_SIZE, expected_wire);
         assert!(expected_wire > expected);
         assert!(wire.tris.is_empty());

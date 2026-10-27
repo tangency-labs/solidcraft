@@ -927,3 +927,47 @@ fn a_runout_fades_the_groove_out_before_each_shoulder() {
     let e = s.execute("solid.thread", &json!({"face": [5, 0, 20], "designation": "M10", "ease_in": 14, "ease_out": 14, "modeled": true}));
     assert!(e.err().map(|e| e.to_string()).unwrap_or_default().contains("longer than the thread"));
 }
+
+/// A modelled M10 thread's flanks are several B-spline faces per turn (spans of one sweep); where
+/// two of them meet with one tangent plane and one curvature the join is left out of the shaded
+/// view (still pickable and in the wireframe), so the flank reads as one surface. The normal angle across each join is measured
+/// independently (`seam_diagnostics`, projecting stations onto both surfaces).
+#[test]
+fn a_modelled_threads_flank_joins_are_not_drawn() {
+    use solidcraft_geom::brep::Surface;
+    let mut s = Session::default();
+    run(&mut s, "solid.cylinder", json!({"radius": 5.0, "height": 12, "body_name": "Shaft"}));
+    run(&mut s, "solid.thread", json!({"face": [5.0, 0, 6.0], "designation": "M10x1.5", "modeled": true}));
+    let st = s.model.state();
+    let body = &st.body("Shaft").unwrap().body;
+    let mesh = body.mesh(&solidcraft_kernel::MeshTolerance::chord(0.01)).unwrap();
+    let record = body.record();
+    let free_form = |f: u32| {
+        record
+            .faces
+            .get(f as usize)
+            .is_some_and(|f| f.nurbs.is_none() && matches!(f.surface, Surface::Spline { .. } | Surface::RationalSpline { .. }))
+    };
+    let tolerances = solidcraft_kernel::ContinuityTolerances { gap_mm: 1e-3, angle_deg: 0.5, curvature_per_mm: 1.0 };
+    let report = solidcraft_kernel::seam_diagnostics(body, &[], 33, tolerances).unwrap();
+    let mut flank_joins = 0;
+    let mut worst: f64 = 0.0;
+    for seam in &report.seams {
+        let e = seam.edge;
+        let uses = &record.edges[e].uses;
+        if uses.len() != 2 || !uses.iter().all(|u| free_form(u.face)) {
+            continue;
+        }
+        let angle = seam.normal_angle_deg.value;
+        if angle < 0.5 {
+            flank_joins += 1;
+            worst = worst.max(angle);
+            assert!(mesh.smooth_edges[e] && !mesh.shaded_edge_visible(e), "join {e} at {angle} deg is drawn");
+            assert!(mesh.edge_visible(e) && mesh.edge_pickable(e), "join {e} stays in the wireframe and pickable");
+        } else {
+            assert!(mesh.shaded_edge_visible(e), "crease {e} at {angle} deg is hidden");
+        }
+    }
+    // SMLib's flank pieces meet with normals about 1.5e-6 degrees apart (measured).
+    assert!(flank_joins >= 32 && worst < 1e-4, "{flank_joins} flank joins, the worst {worst} deg apart");
+}

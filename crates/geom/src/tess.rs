@@ -362,11 +362,27 @@ impl EvalSurface {
 }
 
 /// The values and first two derivatives of the `p + 1` basis functions of degree `p` alive at
-/// `t` ([`crate::bspline::basis_derivatives`]), and the span they live on.
+/// `t` ([`crate::bspline::basis_derivatives`]), and the span they live on. A `t` past an end of
+/// the knot range by no more than rounding (a boundary point carried off by a pcurve's
+/// evaluation, which [`nurbs_derivs`] takes as it is) is that end: the basis functions are zero
+/// outside their supports, so the derivatives there would not exist.
 fn basis_second(knots: &[f64], p: usize, n: usize, t: f64) -> Option<(usize, Vec<[f64; 3]>)> {
+    let (&lo, &hi) = (knots.get(p)?, knots.get(n)?);
+    let slack = BOUNDARY_ROUNDING * (hi - lo).abs().max(lo.abs()).max(hi.abs()).max(1.0);
+    let t = if t < lo && t >= lo - slack {
+        lo
+    } else if t > hi && t <= hi + slack {
+        hi
+    } else {
+        t
+    };
     let (first, ders) = crate::bspline::basis_derivatives(knots, p, n, t, 2)?;
     Some((first + p, ders.iter().map(|d| Some([*d.first()?, *d.get(1)?, *d.get(2)?])).collect::<Option<_>>()?))
 }
+
+/// How far past its knot range, relative to the range's magnitude, a parameter is still the range's
+/// end: the room a pcurve's interval has for rounding (`brep::topology::PCURVE_INTERVAL`).
+const BOUNDARY_ROUNDING: f64 = 1e-9;
 
 fn nurbs_second(degree: [usize; 2], knots: &[Vec<f64>; 2], count: [usize; 2], ctrl: &[[f64; 4]], u: f64, v: f64) -> Option<(Vec3, Vec3, Vec3)> {
     let [pu, pv] = degree;

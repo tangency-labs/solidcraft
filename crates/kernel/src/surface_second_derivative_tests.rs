@@ -86,3 +86,18 @@ fn nurbs_surface_second_derivatives_match_finite_differences() {
     let s = SurfaceEval::new(&Surface::RationalSpline { u_knots, v_knots, homogeneous }).unwrap();
     check(&s, &[(0.0, 0.0), (0.37, 0.0), (0.5, 0.61), (1.0, 0.2)], "rational");
 }
+
+/// A boundary point a pcurve carries a rounding step past the knot range still has second
+/// derivatives, those of the range's end, as it has a point and first derivatives; a parameter
+/// well outside the range has none.
+#[test]
+fn second_derivatives_hold_at_a_boundary_carried_off_by_rounding() {
+    let (u_knots, v_knots, points) = net(3, 2);
+    let s = SurfaceEval::new(&Surface::Spline { u_knots, v_knots, points }).unwrap();
+    for (u, v) in [(0.4f64, 1.0f64 + 1e-15), (0.4, -1e-16), (1.0 + 4e-16, 0.3), (-1e-15, 0.6)] {
+        let (cu, cv) = (u.clamp(0.0, 1.0), v.clamp(0.0, 1.0));
+        assert_eq!(s.second(u, v), s.second(cu, cv), "({u}, {v})");
+        assert!(s.second(u, v).is_some() && s.derivs(u, v).is_some(), "({u}, {v})");
+    }
+    assert!(s.second(0.4, 1.1).is_none());
+}
