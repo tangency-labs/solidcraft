@@ -74,7 +74,7 @@ pub fn start(_app: &SolveApp, id: &str) -> Option<(Kind, Vec<SelInput>)> {
         }
         "frame.trim" => Some((
             Kind::FrameTrim(Trim::default()),
-            vec![SelInput::new("Members", BODIES | PLANAR_FACES, true), SelInput::new("To", BODIES | PLANAR_FACES | PLANES, true)],
+            vec![SelInput::new("ui.frame_trim.members", BODIES | PLANAR_FACES, true), SelInput::new("To", BODIES | PLANAR_FACES | PLANES, true)],
         )),
         _ => None,
     }
@@ -222,7 +222,7 @@ pub fn for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec<SelI
 }
 
 /// Which end of each member moves, as `frame.trim` names it, and its label.
-const ENDS: [(&str, &str); 3] = [("auto", "Nearer End"), ("start", "Start"), ("end", "End")];
+const ENDS: [(&str, &str); 3] = [("auto", "ui.frame_trim.nearer_end"), ("start", "ui.frame_trim.start"), ("end", "ui.frame_trim.end")];
 
 /// The Trim/Extend dialog's values (the members and targets are its selection inputs).
 #[derive(Clone, Debug, Default)]
@@ -239,11 +239,11 @@ pub struct Trim {
 /// The Trim/Extend rows (after the selection inputs); true when Enter was pressed in a value.
 pub fn trim_rows(ui: &mut egui::Ui, t: &mut Trim) -> bool {
     let ends: Vec<&str> = ENDS.iter().map(|e| e.1).collect();
-    choice_row(ui, "End", "frame_trim_end", &mut t.end, &ends);
+    choice_row(ui, "ui.frame_trim.end", "frame_trim_end", &mut t.end, &ends);
     let enter = hint_row(ui, "Gap", &mut t.gap, "0 mm");
     if !t.kept.is_empty() {
-        let label = format!("{} {}", t.kept.len(), tr("more targets"));
-        form_row(ui, "Keep", |ui| crate::ui_kit::checkbox(ui, &label, &mut t.keep));
+        let label = crate::i18n::format("ui.frame_trim.more_targets", &[("count", &t.kept.len().to_string())]);
+        form_row(ui, "ui.frame_trim.keep", |ui| crate::ui_kit::checkbox(ui, &label, &mut t.keep));
     }
     enter
 }
@@ -262,17 +262,26 @@ fn member_body(app: &SolveApp, pick: &Sel) -> Option<String> {
 pub fn trim_commands(app: &SolveApp, t: &Trim, inputs: &[SelInput], extra: &Map<String, Value>) -> Result<Vec<(String, Value)>, String> {
     let mut members: Vec<String> = Vec::new();
     for pick in crate::selection::items(inputs, 0) {
-        let body = member_body(app, pick).ok_or("pick frame members to trim")?;
+        let body = member_body(app, pick).ok_or_else(|| crate::i18n::tr("ui.frame_trim.pick_members").to_string())?;
         if !members.contains(&body) {
             members.push(body);
         }
     }
     if members.is_empty() {
-        return Err("pick the members to trim first".into());
+        return Err(crate::i18n::tr("ui.frame_trim.pick_members_first").to_string());
     }
     let mut to: Vec<Value> = Vec::new();
     for pick in crate::selection::items(inputs, 1) {
-        let target = match (member_body(app, pick), pick) {
+        let member = member_body(app, pick).filter(|name| {
+            // A face picked on a changed member follows that actual face, rather than using
+            // a stale sketch/profile side. Picking the whole body still gives the refusal.
+            if !matches!(pick, Sel::Face { .. }) {
+                return true;
+            }
+            let st = app.session.model.state();
+            st.frame_member(name).zip(st.body(name)).is_some_and(|(r, b)| !b.transferred && r.is_unchanged(&b.body))
+        });
+        let target = match (member, pick) {
             // A member, or a face of one: a butt joint against it.
             (Some(body), _) => json!(body),
             // The exact face (its body, index and path), as Start Sketch picks one.
@@ -280,7 +289,7 @@ pub fn trim_commands(app: &SolveApp, t: &Trim, inputs: &[SelInput], extra: &Map<
                 "plane": crate::sketch_attachment_ui::face_plane(app, face).unwrap_or_else(|| json!({"face": [point.x, point.y, point.z]}))
             }),
             (None, Sel::Plane { name }) => json!({"plane": name}),
-            _ => return Err("trim to members, planar faces or planes".into()),
+            _ => return Err(crate::i18n::tr("ui.frame_trim.target_kinds").to_string()),
         };
         if !to.contains(&target) {
             to.push(target);
@@ -290,7 +299,7 @@ pub fn trim_commands(app: &SolveApp, t: &Trim, inputs: &[SelInput], extra: &Map<
         to.extend(t.kept.iter().cloned());
     }
     if to.is_empty() {
-        return Err("pick what to trim them to".into());
+        return Err(crate::i18n::tr("ui.frame_trim.pick_targets").to_string());
     }
     let mut p = json!({"members": members, "to": to});
     if let Some((end, _)) = ENDS.get(t.end).filter(|_| t.end != 0) {
@@ -308,7 +317,9 @@ pub fn trim_commands(app: &SolveApp, t: &Trim, inputs: &[SelInput], extra: &Map<
 /// The body of a member in the current model, by its feature and line.
 fn body_of(app: &SolveApp, r: &MemberRef) -> Option<String> {
     let id = app.session.doc.find_feature(&r.feature)?.id;
-    app.session.model.state().frame_members.iter().find(|m| m.feature == id && m.line == r.line).map(|m| m.body.clone())
+    let st = app.session.model.state();
+    let record = st.frame_members.iter().find(|m| m.feature == id && m.line == r.line)?;
+    st.body(&record.body).filter(|b| b.feature == id).map(|b| b.name.clone())
 }
 
 /// The Trim/Extend dialog editing a trim feature, filled from it.
@@ -324,7 +335,9 @@ pub fn trim_for_feature(app: &SolveApp, kind: &FeatureKind) -> Option<(Kind, Vec
         match target {
             TrimTarget::Member { member, side: None } if let Some(name) = body_of(app, member) => picks.push(Sel::Body { name }),
             TrimTarget::Plane { plane: PlaneRef::Origin { name } } => picks.push(Sel::Plane { name: name.clone() }),
-            TrimTarget::Plane { plane: PlaneRef::Construction { name } } => picks.push(Sel::Plane { name: name.to_string() }),
+            TrimTarget::Plane { plane: PlaneRef::Construction { feature } } if let Some(f) = app.session.doc.feature(feature.0) => {
+                picks.push(Sel::Plane { name: f.name.clone() })
+            }
             TrimTarget::Member { member, side } => {
                 t.kept.push(json!({"member": {"feature": member.feature.to_string(), "line": member.line}, "side": side}))
             }

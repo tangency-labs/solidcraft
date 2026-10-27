@@ -1,0 +1,150 @@
+{
+  "ar": {
+    "cmd.frame_trim": "قص/تمديد",
+    "ui.frame_trim.end": "الطرف",
+    "ui.frame_trim.keep": "احتفاظ",
+    "ui.frame_trim.members": "عناصر هيكلية",
+    "ui.frame_trim.more_targets": "أهداف إضافية: {count}",
+    "ui.frame_trim.nearer_end": "الطرف الأقرب",
+    "ui.frame_trim.pick_members": "اختر العناصر الهيكلية لقصّها.",
+    "ui.frame_trim.pick_members_first": "اختر العناصر الهيكلية التي تريد قصّها أولاً.",
+    "ui.frame_trim.pick_targets": "اختر ما تريد قصّ العناصر إليه.",
+    "ui.frame_trim.start": "البداية",
+    "ui.frame_trim.target_kinds": "يمكن القص إلى عناصر هيكلية أو أوجه مستوية أو مستويات."
+  },
+  "cs": {
+    "cmd.frame_trim": "Oříznout/prodloužit"
+  },
+  "da": {
+    "cmd.frame_trim": "Trim/forlæng"
+  },
+  "de": {
+    "cmd.frame_trim": "Trimmen/Verlängern",
+    "ui.frame_trim.end": "Ende",
+    "ui.frame_trim.keep": "Behalten",
+    "ui.frame_trim.members": "Stäbe",
+    "ui.frame_trim.more_targets": "Weitere Ziele: {count}",
+    "ui.frame_trim.nearer_end": "Näheres Ende",
+    "ui.frame_trim.pick_members": "Wählen Sie die zuzuschneidenden Stäbe.",
+    "ui.frame_trim.pick_members_first": "Wählen Sie zuerst die zuzuschneidenden Stäbe.",
+    "ui.frame_trim.pick_targets": "Wählen Sie die Zuschneideziele.",
+    "ui.frame_trim.start": "Anfang",
+    "ui.frame_trim.target_kinds": "Schneiden Sie auf Stäbe, ebene Flächen oder Ebenen zu."
+  },
+  "en": {
+    "cmd.frame_trim": "Trim/Extend",
+    "ui.frame_trim.end": "End",
+    "ui.frame_trim.keep": "Keep",
+    "ui.frame_trim.members": "Members",
+    "ui.frame_trim.more_targets": "Additional targets: {count}",
+    "ui.frame_trim.nearer_end": "Nearer End",
+    "ui.frame_trim.pick_members": "Pick frame members to trim.",
+    "ui.frame_trim.pick_members_first": "Pick the members to trim first.",
+    "ui.frame_trim.pick_targets": "Pick what to trim them to.",
+    "ui.frame_trim.start": "Start",
+    "ui.frame_trim.target_kinds": "Trim to members, planar faces or planes."
+  },
+  "es": {
+    "cmd.frame_trim": "Recortar/extender"
+  },
+  "fr": {
+    "cmd.frame_trim": "Ajuster/prolonger"
+  },
+  "gl": {
+    "cmd.frame_trim": "Recortar/estender"
+  },
+  "he": {
+    "cmd.frame_trim": "קיטום/הארכה",
+    "ui.frame_trim.end": "קצה",
+    "ui.frame_trim.keep": "שמירה",
+    "ui.frame_trim.members": "איברי מסגרת",
+    "ui.frame_trim.more_targets": "יעדים נוספים: {count}",
+    "ui.frame_trim.nearer_end": "הקצה הקרוב",
+    "ui.frame_trim.pick_members": "יש לבחור איברי מסגרת לקיטום.",
+    "ui.frame_trim.pick_members_first": "יש לבחור תחילה את איברי המסגרת לקיטום.",
+    "ui.frame_trim.pick_targets": "יש לבחור את יעד הקיטום.",
+    "ui.frame_trim.start": "התחלה",
+    "ui.frame_trim.target_kinds": "קיטום אל איברי מסגרת, פאות מישוריות או מישורים."
+  },
+  "hu": {
+    "cmd.frame_trim": "Vágás/hosszabbítás"
+  },
+  "id": {
+    "cmd.frame_trim": "Pangkas/Perpanjang"
+  },
+  "it": {
+    "cmd.frame_trim": "Taglia/estendi"
+  },
+  "ja": {
+    "cmd.frame_trim": "トリム/延長",
+    "ui.frame_trim.end": "端",
+    "ui.frame_trim.keep": "保持",
+    "ui.frame_trim.members": "部材",
+    "ui.frame_trim.more_targets": "{count} 件の他の対象",
+    "ui.frame_trim.nearer_end": "近い方の端",
+    "ui.frame_trim.pick_members": "トリムする部材を選択してください。",
+    "ui.frame_trim.pick_members_first": "先にトリムする部材を選択してください。",
+    "ui.frame_trim.pick_targets": "トリム先を選択してください。",
+    "ui.frame_trim.start": "始点",
+    "ui.frame_trim.target_kinds": "部材、平面の面、または平面をトリム先に選択してください。"
+  },
+  "ko": {
+    "cmd.frame_trim": "자르기/연장",
+    "ui.frame_trim.end": "끝점",
+    "ui.frame_trim.keep": "유지",
+    "ui.frame_trim.members": "부재",
+    "ui.frame_trim.more_targets": "다른 대상 {count}개",
+    "ui.frame_trim.nearer_end": "가까운 끝점",
+    "ui.frame_trim.pick_members": "자를 부재를 선택하세요.",
+    "ui.frame_trim.pick_members_first": "먼저 자를 부재를 선택하세요.",
+    "ui.frame_trim.pick_targets": "자를 대상을 선택하세요.",
+    "ui.frame_trim.start": "시작점",
+    "ui.frame_trim.target_kinds": "부재, 평평한 면 또는 평면을 대상으로 선택하세요."
+  },
+  "ms": {
+    "cmd.frame_trim": "Pangkas/Panjangkan"
+  },
+  "nl": {
+    "cmd.frame_trim": "Inkorten/verlengen"
+  },
+  "pl": {
+    "cmd.frame_trim": "Przytnij/wydłuż"
+  },
+  "pt-BR": {
+    "cmd.frame_trim": "Aparar/estender"
+  },
+  "ro": {
+    "cmd.frame_trim": "Taie/extinde"
+  },
+  "ru": {
+    "cmd.frame_trim": "Обрезать/удлинить"
+  },
+  "sv": {
+    "cmd.frame_trim": "Kapa/förläng"
+  },
+  "tr": {
+    "cmd.frame_trim": "Kırp/Uzat"
+  },
+  "uk": {
+    "cmd.frame_trim": "Обрізати/подовжити"
+  },
+  "vi": {
+    "cmd.frame_trim": "Cắt/Kéo dài"
+  },
+  "zh": {
+    "cmd.frame_trim": "修剪/延伸",
+    "ui.frame_trim.end": "端",
+    "ui.frame_trim.keep": "保留",
+    "ui.frame_trim.members": "构件",
+    "ui.frame_trim.more_targets": "{count} 个其他目标",
+    "ui.frame_trim.nearer_end": "较近端",
+    "ui.frame_trim.pick_members": "请选择要修剪的构件。",
+    "ui.frame_trim.pick_members_first": "请先选择要修剪的构件。",
+    "ui.frame_trim.pick_targets": "请选择修剪目标。",
+    "ui.frame_trim.start": "起点",
+    "ui.frame_trim.target_kinds": "请以构件、平面面或平面为修剪目标。"
+  },
+  "zh-TW": {
+    "cmd.frame_trim": "修剪/延伸"
+  }
+}
