@@ -198,8 +198,8 @@ into `upstream/` (see README), then run `scripts/fetch-cpp.sh`, or
    Never implement a competing version of an actively claimed change.
 
    Push WIP or post a concrete progress update at least daily while implementing.
-   After 48 h without either, comment with the exact scope you propose to take over
-   and allow 24 h for a response; then continue from published WIP, crediting its
+   After 24 h without either, comment with the exact scope you propose to take over
+   and allow 12 h for a response; then continue from published WIP, crediting its
    author. Do not take over a PR merely because it awaits review or CI: offer review,
    conflict resolution or a coordinated follow-up instead. A blocker update should
    identify what is blocked and release independent work, rather than reserve the
