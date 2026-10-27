@@ -3655,8 +3655,9 @@ mod tests {
     }
 
     /// A theme tile's Export… writes the theme file through `vfs`, like the other saves, so the
-    /// web app hands it out as a download (#7192). On the disk it is the same file, and an
-    /// agent's folders hold for it as they do for any other write.
+    /// web app hands it out as a download (#7192). On the disk it is the same file; a folder scope
+    /// active while it is written refuses a path outside it, which shows the write goes through
+    /// `vfs`.
     #[test]
     fn theme_export_writes_through_vfs() {
         use serde_json::json;

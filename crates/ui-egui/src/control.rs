@@ -1853,8 +1853,10 @@ mod tests {
     }
 
     /// A screenshot is written through `vfs`, as other saves are, so the web app can hand it out
-    /// as a download (#7192). On the disk it is the same PNG with the same reply, and an agent's
-    /// folders hold for it as they do for any other write.
+    /// as a download (#7192). On the disk it is the same PNG with the same reply. A folder scope
+    /// active while it is written refuses a path outside it, which shows the write goes through
+    /// `vfs`. (`ui.screenshot` checks an agent's folders when the request arrives; the write comes
+    /// in a later frame, outside the request's scope, as before.)
     #[test]
     fn screenshots_are_written_through_vfs_with_the_same_reply() {
         let base = vfs::temp_dir().join(format!("solidcraft-shot-scope-{}", std::process::id()));
