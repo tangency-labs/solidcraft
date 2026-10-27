@@ -422,6 +422,9 @@ fn imported(k: &Kernel, a: &[f64; 22], export_op: i32) -> std::result::Result<Br
         b.sync_face_surface_tolerance(id)
             .map_err(|e| HarnessError::new(e.to_string()))?;
     }
+    // record the arena naming given to the owners above (and each owner)
+    b.use_arena_naming()
+        .map_err(|e| HarnessError::new(e.to_string()))?;
     Ok(b)
 }
 

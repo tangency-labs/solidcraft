@@ -903,6 +903,11 @@ pub(crate) fn import_raw(ex: &[f64], graph_at: usize) -> Result<(Brep, ImportTyp
             }
         }
     }
+    // the import names every geometry owner by arena identity (above); record that
+    // naming (and each owner) on the B-rep, so library queries that name geometry under
+    // another scheme's identities (a glue's notification identities, overridden by
+    // recorded owners) resolve the owners instead of failing internally
+    b.use_arena_naming().map_err(|e| harness(e.to_string()))?;
     Ok((b, types))
 }
 

@@ -66,6 +66,8 @@ fn import(input: &Operand) -> Result<Option<Brep>, HarnessError> {
     }
     let (mut b, _) = super::topology_vertexuse::import(&raw)?;
     own_geometry(&mut b)?;
+    // record the arena naming `own_geometry` gives the owners (and each owner)
+    b.use_arena_naming().map_err(|x| error(&x.to_string()))?;
     Ok(Some(b))
 }
 

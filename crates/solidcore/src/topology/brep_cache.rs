@@ -38,6 +38,13 @@ use crate::query::poly::{PolyBrep, PolyEdgeId, PolyFaceId, PolyVertexId};
 use crate::topology::{edge, Brep, EdgeId, FaceId, VertexId};
 
 const OP: &str = "topology::brep_cache";
+
+/// Whether `e` is this module's own identity or handle error: an owner, handle or tree
+/// the B-rep cache could not resolve under the caller's identities. Upstream addresses
+/// these objects by pointer, so no upstream status corresponds to it.
+pub(crate) fn is_identity_error(e: &SolidError) -> bool {
+    matches!(e, SolidError::InvalidInput { operation, .. } if *operation == OP)
+}
 /// `SmBrepCache_TYPE`.
 pub const TYPE: i64 = 16400;
 /// `SmBrepCache::GetTypeString`.

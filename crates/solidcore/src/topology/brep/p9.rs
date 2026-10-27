@@ -17,6 +17,9 @@
 //! their external context, including null. Editing state is part 1's `Brep::editing_enabled`.
 //! Ordinary split failures retain the nearby vertex alongside their status. All six
 //! owned bodies are present; individual dependency calls defer to their owners.
+//! `FindInfiniteRegion` retries a failed `SmShell::RayFire` as upstream, but propagates
+//! errors that have no upstream status (unported, stale id, pending preparation, B-rep
+//! cache owner/handle resolution) instead of treating them as a missed ray.
 //! Part 1's `add_*_record` appends a face, edge or vertex to its owning list at
 //! allocation; native `PostInsert`s later, with no same-kind allocation in between,
 //! so the list order matches, but a record allocated before a dependency error stays
@@ -426,10 +429,20 @@ fn ray_direction(direction: Vec3) -> Result<Vec3> {
     })
 }
 
+/// Whether a `SmShell::RayFire` call succeeded. Upstream retries on any failed status;
+/// an error with no upstream status (an unported callee, a stale id, a pending
+/// geometry preparation, or the B-rep cache failing to resolve an owner under the
+/// query's identities) is propagated instead, so a naming mismatch cannot pass for a
+/// missed ray and silently select another region.
 fn ray_success(status: &Result<()>) -> Result<bool> {
     match status {
         Ok(()) => Ok(true),
-        Err(e @ SolidError::Unported { .. }) => Err(e.clone()),
+        Err(
+            e @ (SolidError::Unported { .. }
+            | SolidError::NotFound { .. }
+            | SolidError::PreparationRequired { .. }),
+        ) => Err(e.clone()),
+        Err(e) if crate::topology::brep_cache::is_identity_error(e) => Err(e.clone()),
         Err(_) => Ok(false),
     }
 }
@@ -3129,6 +3142,28 @@ mod tests {
                 callbacks::assert_installed(&k.context, &events);
                 assert_eq!((b.edge_list().len(), b.vertex_list().len()), (1, 2));
             }
+        }
+    }
+
+    #[test]
+    fn ray_errors_without_an_upstream_status_propagate() {
+        assert!(ray_success(&Ok(())).unwrap());
+        assert!(!ray_success(&Err(SolidError::sm_err(OP))).unwrap());
+        assert!(!ray_success(&Err(SolidError::invalid_input(OP, "native"))).unwrap());
+        let internal = [
+            SolidError::Unported {
+                upstream: "SmShell::RayFire",
+                unit: "topology.shell",
+            },
+            SolidError::NotFound {
+                operation: OP,
+                entity: EntityRef::Edge(EdgeId::from_index(7)),
+            },
+            SolidError::PreparationRequired { operation: OP },
+            SolidError::invalid_input("topology::brep_cache", "edge owner is not in source B-rep"),
+        ];
+        for e in internal {
+            assert_eq!(ray_success(&Err(e.clone())), Err(e));
         }
     }
 
