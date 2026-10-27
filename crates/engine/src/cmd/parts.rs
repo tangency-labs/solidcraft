@@ -387,12 +387,12 @@ fn identity(family: &str, size: &str, sh: &Shape) -> (String, String) {
 /// Give a standard part its part number and description; a field someone changed since the last
 /// size (`was`) is theirs and stays.
 fn set_identity(s: &mut Session, comp: u64, now: (String, String), was: Option<(String, String)>) {
-    use solidcraft_doc::metadata::{DESCRIPTION, PART_NUMBER};
+    use solidcraft_doc::metadata::{DESCRIPTION, Owner, PART_NUMBER};
     let Some(c) = s.doc.components.iter().find(|c| c.id == comp) else { return };
     let mut m = c.metadata.clone();
     for (k, new, old) in [(PART_NUMBER, now.0, was.as_ref().map(|w| w.0.as_str())), (DESCRIPTION, now.1, was.as_ref().map(|w| w.1.as_str()))] {
         if m.text(k).is_none_or(|cur| Some(cur) == old) {
-            let _ = m.set(k, Value::String(new));
+            let _ = m.set(Owner::Component, k, Value::String(new));
         }
     }
     if m != c.metadata

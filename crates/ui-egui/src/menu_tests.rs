@@ -348,6 +348,88 @@ fn sketch_entities_offer_the_constraints_that_fit() {
 }
 
 #[test]
+fn sketch_dimension_menu_deletes_only_the_dimension_and_supports_undo() {
+    for (driven, preselected) in [(false, false), (false, true), (true, false), (true, true)] {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let line = h.app.run("sketch.line", json!({"points":[[0,0],[30,0]],"connect":false,"infer":false})).unwrap()["curves"][0]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let horizontal = h.app.run("sketch.constrainer", json!({"entities":[line]})).unwrap()["constraint"].as_str().unwrap().to_owned();
+        let dimension = h.app.run("sketch.dimension", json!({"entities":[line],"value":30})).unwrap();
+        let id = dimension["created"]["dimensions"][0].as_str().unwrap();
+        if driven {
+            h.app.run("sketch.toggle_driven", json!({"constraint":id})).unwrap();
+        }
+        let saved = h.app.session.doc.to_json();
+        let undo = h.app.session.undo.len();
+        h.call("ui.view", json!({"view":"top"}));
+        h.call("ui.view", json!({"view":"fit"}));
+        if preselected {
+            h.step(&json!({"click":{"dimension":id}})).unwrap();
+        }
+        h.step(&json!({"click":{"dimension":id},"button":"right"})).unwrap();
+        assert_eq!(h.app.session.selection, vec![solidcraft_engine::Sel::SketchConstraint { id: id.to_owned() }]);
+        let menu = h.call("ui.menu", json!({}));
+        assert!(menu["result"]["items"].as_array().unwrap().iter().any(|i| i["id"] == "ui.delete" && i["enabled"] == true), "{menu}");
+        assert_eq!(h.call("ui.menuPick", json!({"item":"ui.delete"}))["ok"], true);
+        let after = h.app.run("sketch.inspect", json!({})).unwrap();
+        assert_eq!(after["curves"].as_array().unwrap().len(), 1);
+        assert_eq!(after["curves"][0]["id"], line);
+        assert_eq!(after["constraints"].as_array().unwrap().len(), 1);
+        assert_eq!(after["constraints"][0]["id"], horizontal);
+        assert_eq!(h.app.session.undo.len(), undo + 1);
+        h.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(h.app.session.doc.to_json(), saved);
+        h.app.run("edit.redo", json!({})).unwrap();
+        assert_eq!(h.app.run("sketch.inspect", json!({})).unwrap(), after);
+    }
+}
+
+#[test]
+fn sketch_constraint_menu_keeps_the_selection_and_respects_pick_filters() {
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+    let line =
+        h.app.run("sketch.line", json!({"points":[[0,0],[30,0]],"connect":false,"infer":false})).unwrap()["curves"][0].as_str().unwrap().to_owned();
+    let horizontal = h.app.run("sketch.constrainer", json!({"entities":[line]})).unwrap()["constraint"].as_str().unwrap().to_owned();
+    let dimension = h.app.run("sketch.dimension", json!({"entities":[line],"value":30})).unwrap();
+    let id = dimension["created"]["dimensions"][0].as_str().unwrap();
+    h.call("ui.view", json!({"view":"top"}));
+    h.call("ui.view", json!({"view":"fit"}));
+
+    // An empty selection, including a dimension whose picking is disabled, has no Delete.
+    assert!(!context_menu::items(&h.app, &Target::Viewport).iter().any(|i| i.id == "ui.delete"));
+    h.app.ui.pick_off.push("dimensions".into());
+    h.step(&json!({"click":{"dimension":id},"button":"right"})).unwrap();
+    assert!(h.app.session.selection.is_empty());
+    assert!(!context_menu::items(&h.app, &Target::Viewport).iter().any(|i| i.id == "ui.delete"));
+    h.call("ui.menu", json!({"close":true}));
+    h.app.ui.pick_off.clear();
+
+    // A non-dimensional constraint can be deleted too. Right-clicking a dimension already
+    // in a multi-selection retains all the selected constraints for the same Delete action.
+    for ids in [vec![horizontal.clone()], vec![horizontal.clone(), id.to_owned()]] {
+        let selection: Vec<_> = ids.iter().map(|id| solidcraft_engine::Sel::SketchConstraint { id: id.clone() }).collect();
+        h.app.session.selection = selection.clone();
+        if ids.len() > 1 {
+            h.step(&json!({"click":{"dimension":id},"button":"right"})).unwrap();
+            assert_eq!(h.app.session.selection, selection);
+        }
+        let item = find(&context_menu::items(&h.app, &Target::Viewport), "Delete");
+        assert!(item.enabled);
+        context_menu::run_item(&mut h.app, &item, pos2(0.0, 0.0));
+        let after = h.app.run("sketch.inspect", json!({})).unwrap();
+        assert_eq!(after["curves"].as_array().unwrap().len(), 1);
+        assert_eq!(after["constraints"].as_array().unwrap().len(), 2 - ids.len());
+        h.app.run("edit.undo", json!({})).unwrap();
+    }
+}
+
+#[test]
 fn component_menu_activates_grounds_and_pastes() {
     let mut app = sample_app();
     let b = body(&app);
@@ -364,7 +446,15 @@ fn component_menu_activates_grounds_and_pastes() {
     act(&mut app, &t, "Ground");
     assert!(app.session.doc.occurrence_of(c).unwrap().grounded);
     assert!(!find(&context_menu::items(&app, &t), "Move/Copy").enabled, "grounded");
-    act(&mut app, &t, "Paste New");
+    // Paste New pastes an independent copy of the copied component into another one (here the
+    // design): it is off until a component is copied, and never into itself.
+    let placement = Target::Occurrence { path: app.session.doc.first_path(c) };
+    app.session.selection = vec![solidcraft_engine::Sel::Occurrence { path: app.session.doc.first_path(c) }];
+    act(&mut app, &placement, "Copy");
+    assert_eq!(app.copied_placements.len(), 1, "{:?}", app.status);
+    let design = Target::Component { id: 0 };
+    assert!(find(&context_menu::items(&app, &design), "Paste New").enabled);
+    act(&mut app, &design, "Paste New");
     assert_eq!(app.session.doc.components.len(), 2);
 }
 

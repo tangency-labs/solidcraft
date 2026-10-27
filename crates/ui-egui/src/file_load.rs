@@ -52,11 +52,20 @@ pub struct Request {
     /// What that caller asked of an open or import besides its path (`up`, `names`, `matrix`,
     /// `name`, ...): the command gets them as given and checks them as it does run directly.
     pub options: serde_json::Map<String, Value>,
+    /// Network servers the user allowed for this one request ("Allow once", `network_prompt`).
+    pub allow_hosts: Vec<String>,
 }
 
 impl Request {
     pub fn new(path: &str, kind: Kind) -> Self {
-        Request { path: path.into(), kind, reply: None, scope: solidcraft_engine::io::vfs::current_scope(), options: Default::default() }
+        Request {
+            path: path.into(),
+            kind,
+            reply: None,
+            scope: solidcraft_engine::io::vfs::current_scope(),
+            options: Default::default(),
+            allow_hosts: Vec::new(),
+        }
     }
     fn insert(&self) -> bool {
         self.kind == Kind::Insert
@@ -259,7 +268,7 @@ pub fn begin_request(app: &mut SolveApp, request: Request) -> Result<(), String>
             }
             Kind::UpdateLinks => {
                 let (command, params) = request.command();
-                app.run(command, params)
+                solidcraft_engine::io::vfs::allowing_hosts(&request.allow_hosts, || app.run(command, params))
             }
         };
         request.answer(r);
@@ -350,7 +359,7 @@ pub fn control(app: &mut SolveApp, req: crate::control::ControlRequest) -> Optio
         options.remove("path");
         options.retain(|_, v| !v.is_null());
     }
-    let _ = begin_request(app, Request { path: path.into(), kind, reply: Some(req.reply.clone()), scope, options });
+    let _ = begin_request(app, Request { path: path.into(), kind, reply: Some(req.reply.clone()), scope, options, allow_hosts: Vec::new() });
     None
 }
 
@@ -420,6 +429,7 @@ fn start(app: &mut SolveApp) {
     let (preview_tx, preview_rx) = std::sync::mpsc::channel();
     let (command, params) = request.command();
     let scope = request.scope.clone();
+    let allow_hosts = request.allow_hosts.clone();
     let thumbnail = request.kind == Kind::Open;
     // While a design rebuilds, a picture of what is built so far (a large design takes a while).
     let finished = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -479,8 +489,11 @@ fn start(app: &mut SolveApp) {
                 }
             }));
         }
+        // Servers allowed once hold for this request only, on this worker thread.
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            compute(scratch, command, &params, scope, thumbnail, &worker_phase, &worker_progress)
+            solidcraft_engine::io::vfs::allowing_hosts(&allow_hosts, || {
+                compute(scratch, command, &params, scope, thumbnail, &worker_phase, &worker_progress)
+            })
         }))
         .unwrap_or_else(|_| Err("the file operation failed; the current design is unchanged".into()));
         worker_finished.store(true, Ordering::Relaxed);

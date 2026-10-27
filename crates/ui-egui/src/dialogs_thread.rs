@@ -1,7 +1,9 @@
 //! Tapped-hole catalogues and metric Thread choices share document sizing data.
 //! Browsing choices does not edit the model or freeze an automatic Thread feature.
 
-use solidcraft_engine::doc::{Document, TappedThreadFamily, metric_thread_sizes, parse_metric_thread, parse_tapped_thread, tapped_thread_sizes};
+use solidcraft_engine::doc::{
+    Document, TappedThreadFamily, ThreadHandedness, metric_thread_sizes, parse_metric_thread, parse_tapped_thread, tapped_thread_sizes,
+};
 
 use crate::dialogs::{combo, form_row};
 use crate::i18n::tr;
@@ -144,6 +146,14 @@ pub(crate) fn hole_rows(ui: &mut egui::Ui, doc: &Document, designation: &mut Str
         }
     });
     enter || (response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)))
+}
+
+pub(crate) fn handedness_row(ui: &mut egui::Ui, handedness: &mut ThreadHandedness, id: &str) {
+    let mut selected = usize::from(*handedness == ThreadHandedness::Left);
+    form_row(ui, "thread.direction", |ui| {
+        combo(ui, id, &["thread.right_hand", "thread.left_hand"], &mut selected);
+    });
+    *handedness = if selected == 1 { ThreadHandedness::Left } else { ThreadHandedness::Right };
 }
 
 /// Returns (Enter pressed, automatic sizing requested).

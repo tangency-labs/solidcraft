@@ -62,6 +62,124 @@ fn header_impl(ui: &mut Ui, icon: &str, title: &str, collapsed: Option<&mut bool
     t.secondary_hline(ui.painter(), rect.x_range(), rect.bottom(), t.dialog_rule);
 }
 
+/// Where a feature panel's OK, Cancel and Apply sit (Preferences › Interface › Dialog buttons,
+/// #6708). The app publishes the preference each frame, so every `Panel::feature` follows it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DialogButtons {
+    /// In a footer row under the inputs (how it always was). Also what a value this version
+    /// doesn't know reads as (`prefs::lenient`).
+    #[default]
+    Bottom,
+    /// In the header row, right of the title, where they stay while sections open and close.
+    Top,
+}
+
+impl DialogButtons {
+    pub(crate) fn publish(self, ctx: &egui::Context) {
+        ctx.data_mut(|data| data.insert_temp(egui::Id::new("sc_dialog_buttons"), self));
+    }
+
+    pub(crate) fn current(ctx: &egui::Context) -> Self {
+        ctx.data(|data| data.get_temp(egui::Id::new("sc_dialog_buttons"))).unwrap_or_default()
+    }
+}
+
+/// The header row of a feature panel whose actions sit at the top. It is laid out before the
+/// body, and its icon, title and buttons are drawn after it, once the compute status and whether
+/// OK is enabled are known. Same tokens as `header`, plus `HeaderActions`'.
+struct TopHeader<'a> {
+    icon: egui::Rect,
+    title: egui::Rect,
+    actions: super::HeaderActions<'a>,
+}
+
+impl<'a> TopHeader<'a> {
+    fn new(ui: &mut Ui, ok: &'a str, apply: Option<&'a str>, cancel: &'a str, collapsed: Option<&mut bool>, close: &mut bool) -> Self {
+        let t = Tokens::get();
+        let (band, _) = ui.allocate_exact_size(vec2(dimension(ui.available_width()), header_height()), egui::Sense::hover());
+        let icon = egui::Rect::from_center_size(
+            egui::pos2(band.left() + t.space_12 + t.form_icon_size / 2.0, band.center().y),
+            vec2(t.form_icon_size, t.form_icon_size),
+        );
+        // The buttons end where the fields below do.
+        let end = (band.right() - t.space_12).max(band.left());
+        let actions = super::HeaderActions::new(ui, band, end, ok, apply, cancel);
+        let buttons = actions.left(end);
+        // Nothing placed yet beside the buttons: the next control keeps clear of them.
+        let beside_buttons = |right: f32| buttons < end && right >= buttons;
+        // An icon target to the left of what is already placed, `space_4` clear of the buttons.
+        let target = |right: f32| {
+            let right = if beside_buttons(right) { right - t.space_4 } else { right };
+            egui::Rect::from_center_size(
+                egui::pos2((right - t.form_close_size / 2.0).max(band.left()), band.center().y),
+                vec2(t.form_close_size, t.form_close_size),
+            )
+        };
+        let mut right = buttons;
+        // The header's close does what Cancel does in every panel, so with Cancel up here it is
+        // left out: one control for one action, and its width goes to the title. Its handle
+        // moves to Cancel, so automation that closes a panel keeps working.
+        if let Some(cancel_rect) = actions.rect(super::Action::Cancel) {
+            scenario::publish_handle("dialog:close", cancel_rect.center());
+        } else {
+            let close_rect = target(right);
+            let response = icon_button_at(ui, close_rect, "close", "Close");
+            scenario::publish_handle("dialog:close", response.rect.center());
+            if response.clicked() {
+                *close = true;
+            }
+            right = close_rect.left();
+        }
+        if let Some(collapsed) = collapsed {
+            let fold = target(right);
+            let response = super::disclosure_button_at(ui, fold, !*collapsed, crate::i18n::tr_label(if *collapsed { "Expand" } else { "Collapse" }));
+            scenario::publish_handle("dialog:collapse", response.rect.center());
+            if response.clicked() {
+                *collapsed = !*collapsed;
+            }
+            right = fold.left();
+        }
+        // Text next to a text button keeps a gap; an icon target carries its own padding.
+        if beside_buttons(right) {
+            right = (right - t.space_6).max(band.left());
+        }
+        let left = (icon.right() + t.space_8).min(right);
+        let title = egui::Rect::from_min_max(egui::pos2(left, band.top()), egui::pos2(right.max(left), band.bottom()));
+        // Dragging the panel by its title must not start on a button.
+        scenario::publish_handle("dialog:title", title.center());
+        scenario::publish_rect("dialog:header", band);
+        t.secondary_hline(ui.painter(), band.x_range(), band.bottom(), t.dialog_rule);
+        Self { icon, title, actions }
+    }
+
+    /// The icon (the compute spinner while busy), the title (the compute status while there is
+    /// one: the footer that showed it is gone) and the buttons. Returns the action asked for.
+    fn finish(&self, ui: &mut Ui, icon: &str, title: &str, state: &ComputeStatus, ok_enabled: bool) -> super::Action {
+        let t = Tokens::get();
+        if state.busy {
+            egui::Spinner::new().size(t.space_14).paint_at(ui, self.icon);
+            let status = state.text.as_deref().unwrap_or_else(|| crate::i18n::tr_label("Updating the preview"));
+            ui.interact(self.icon, ui.id().with("compute_status"), egui::Sense::hover()).on_hover_text(status);
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
+        } else {
+            crate::icons::paint_icon(ui.painter(), self.icon, icon, 1.0);
+        }
+        let heading = crate::fonts::semibold(t.font_heading);
+        match state.text.as_deref() {
+            Some(status) => paint_text(ui, self.title, status, crate::fonts::medium(t.font_label), t.form_dim, false),
+            None => paint_text(ui, self.title, title, heading.clone(), t.form_ink, false),
+        }
+        let title_response = ui.interact(self.title, ui.make_persistent_id("title_text"), egui::Sense::hover());
+        title_response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), title));
+        // The buttons take the row's width first; a title that no longer fits says itself on hover.
+        if ui.painter().layout_no_wrap(title.to_owned(), heading, t.form_ink).size().x > self.title.width() {
+            title_response.on_hover_text(title);
+        }
+        self.actions.show(ui, ok_enabled)
+    }
+}
+
 /// A bounded docked or floating card. Uses form_card_width and the caller's tokenised frame.
 /// Window IDs and content scopes are retained so moving a card does not reset field focus.
 pub(crate) struct Panel<'a> {
@@ -287,16 +405,21 @@ impl<'a> Panel<'a> {
             let band = egui::Rect::from_min_size(min, vec2(ui.available_width(), super::header_height()));
             crate::frame::drag_dock(ui, band, heading.drag_key, heading.moved, self.bounded_anchor(ui.ctx()) - heading.docked);
             let mut close = false;
-            if let Some(collapsed) = collapsed.as_deref_mut() {
-                collapsible_header(ui, heading.icon, heading.title, collapsed, || close = true);
+            let top = if DialogButtons::current(ui.ctx()) == DialogButtons::Top {
+                Some(TopHeader::new(ui, self.ok, heading.apply_label, self.cancel, collapsed.as_deref_mut(), &mut close))
             } else {
-                header(ui, heading.icon, heading.title, || close = true);
-            }
+                if let Some(collapsed) = collapsed.as_deref_mut() {
+                    collapsible_header(ui, heading.icon, heading.title, collapsed, || close = true);
+                } else {
+                    header(ui, heading.icon, heading.title, || close = true);
+                }
+                None
+            };
             let bottom = self.viewport.bottom()
                 - super::Container::new(ui.ctx(), super::Surface::Feature).gap()
                 - self.frame.inner_margin.bottomf()
                 - self.frame.stroke.width;
-            let footer_height = t.form_footer_height;
+            let footer_height = if top.is_some() { 0.0 } else { t.form_footer_height };
             let fields_height = (bottom - ui.cursor().top() - footer_height - ui.spacing().item_spacing.y).max(0.0);
             let fields_height = self.body_rows.map_or(fields_height, |rows| fields_height.min(rows * t.control_height + t.space_12 * 2.0));
             let fields_rect = egui::Rect::from_min_size(ui.cursor().min, vec2(ui.available_width(), fields_height));
@@ -331,6 +454,11 @@ impl<'a> Panel<'a> {
                 })
                 .inner
             };
+            if let Some(top) = &top {
+                let action = top.finish(ui, heading.icon, heading.title, &state, valid && !state.applying);
+                super::Container::finish_content(ui, self.positioned_frame(ui.ctx()));
+                return (close, action);
+            }
             let corners = self.positioned_frame(ui.ctx()).corner_radius;
             let action = super::footer(
                 ui,

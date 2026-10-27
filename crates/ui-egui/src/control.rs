@@ -226,7 +226,15 @@ fn execute(app: &mut SolveApp, id: &str, params: Value) -> Result<Value, String>
     if r.is_ok()
         && !matches!(
             id,
-            "view.layout"
+            "view.fit"
+                | "view.home"
+                | "view.tool"
+                | "view.spin"
+                | "view.visual_style"
+                | "view.grid"
+                | "view.ground_shadow"
+                | "view.navigation_bar"
+                | "view.layout"
                 | "view.navigate"
                 | "view.ambient_occlusion"
                 | "view.perspective"
@@ -730,6 +738,10 @@ fn dispatch(app: &mut SolveApp, ctx: &egui::Context, method: &str, p: &Value) ->
             "dialog": app.dialog.as_ref().map(|d| d.inputs.iter().map(|i| json!({"label": i.label, "items": i.items})).collect::<Vec<_>>()),
             "hover": app.viewport.hover.as_ref().map(|h| format!("{h:?}")),
             "dimensions": crate::dim_view::drawn().into_iter().map(|(id, p)| json!({"id": id, "x": p.x, "y": p.y})).collect::<Vec<_>>(),
+            "shown_dimensions": crate::dim_view::model_drawn()
+                .into_iter()
+                .map(|(sketch, id, p)| json!({"sketch": sketch, "id": id, "x": p.x, "y": p.y}))
+                .collect::<Vec<_>>(),
             "dimension_selected": crate::dim_view::selected(app),
             "dimension_editing": crate::dim_view::editing(),
         })),
@@ -1140,19 +1152,31 @@ fn occurrence(s: &solidcraft_engine::Session, v: &Value) -> Result<u64, String> 
         .ok_or_else(|| format!("no occurrence `{key}`"))
 }
 
-/// Save a screenshot PNG.
+/// Save a screenshot PNG; without a `path`, in the temporary folder ([`vfs::temp_dir`], which in
+/// the browser keeps it in memory: std's would panic there).
 pub fn save_screenshot(image: &egui::ColorImage, path: Option<&str>) -> Value {
+    let [w, h] = image.size;
+    let path = path.map(str::to_string).unwrap_or_else(|| vfs::temp_dir().join("solidcraft-shot.png").to_string_lossy().to_string());
+    match write_screenshot(image, &path) {
+        Ok(()) => json!({"ok": true, "result": {"path": path, "width": w, "height": h}}),
+        Err(e) => json!({"ok": false, "error": e}),
+    }
+}
+
+/// Write `image` to `path` in the format its extension names (a PNG for `.png`), through
+/// [`vfs`] like every other save: the disk natively, a download or browser storage in the web
+/// app (#7192).
+pub(crate) fn write_screenshot(image: &egui::ColorImage, path: &str) -> Result<(), String> {
     let [w, h] = image.size;
     let mut buf = Vec::with_capacity(w * h * 4);
     for c in &image.pixels {
         buf.extend_from_slice(&c.to_array());
     }
-    let Some(img) = image::RgbaImage::from_raw(w as u32, h as u32, buf) else { return json!({"ok": false, "error": "bad image"}) };
-    let path = path.map(str::to_string).unwrap_or_else(|| std::env::temp_dir().join("solidcraft-shot.png").to_string_lossy().to_string());
-    match img.save(&path) {
-        Ok(()) => json!({"ok": true, "result": {"path": path, "width": w, "height": h}}),
-        Err(e) => json!({"ok": false, "error": e.to_string()}),
-    }
+    let img = image::RgbaImage::from_raw(w as u32, h as u32, buf).ok_or("bad image")?;
+    let format = image::ImageFormat::from_path(path).map_err(|e| e.to_string())?;
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    img.write_to(&mut bytes, format).map_err(|e| e.to_string())?;
+    vfs::write(path, bytes.get_ref()).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -1440,17 +1464,21 @@ mod tests {
     }
 
     /// `ui.render` with extra request parameters.
-    fn render_with(app: &mut SolveApp, path: &std::path::Path, extra: serde_json::Value) -> Vec<u8> {
+    /// A `ui.render` of `app` to `path` with `extra` parameters: the PNG, and what drew it.
+    fn render_with(app: &mut SolveApp, path: &std::path::Path, extra: serde_json::Value) -> (Vec<u8>, String) {
         let mut params = json!({"path": path.to_string_lossy(), "width": 200, "height": 140});
         for (k, v) in extra.as_object().into_iter().flatten() {
             params[k.as_str()] = v.clone();
         }
         let (req, _rx) = ControlRequest::new("ui.render", params);
-        match handle(app, &crate::fonts::test_context(), &req) {
-            Outcome::Done(v) => assert_eq!(v["ok"], true, "{v}"),
+        let renderer = match handle(app, &crate::fonts::test_context(), &req) {
+            Outcome::Done(v) => {
+                assert_eq!(v["ok"], true, "{v}");
+                v["result"]["renderer"].as_str().or(v["renderer"].as_str()).unwrap_or("unknown").to_string()
+            }
             Outcome::Screenshot { .. } => panic!("ui.render took a screenshot"),
-        }
-        std::fs::read(path).unwrap()
+        };
+        (std::fs::read(path).unwrap(), renderer)
     }
 
     /// A model render draws the ground grid (it cuts through a part that straddles Z 0) and the
@@ -1468,7 +1496,13 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("solidcraft-render-guides-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("shot.png");
-        let shot = |app: &mut SolveApp, extra: serde_json::Value| render_with(app, &path, extra);
+        // Every picture is compared byte for byte, so each must come from the same renderer.
+        let drawn_by = std::cell::RefCell::new(Vec::new());
+        let shot = |app: &mut SolveApp, extra: serde_json::Value| {
+            let (png, renderer) = render_with(app, &path, extra);
+            drawn_by.borrow_mut().push(renderer);
+            png
+        };
         let all = shot(&mut app, json!({}));
         let no_grid = shot(&mut app, json!({"grid": false}));
         let no_axes = shot(&mut app, json!({"axes": false}));
@@ -1479,18 +1513,38 @@ mod tests {
                 assert!(a != b, "two of the pictures are the same");
             }
         }
+        // A picture that is not the one expected: both are kept, with how much they differ, so a
+        // failure that does not come back on a rerun still leaves its evidence.
+        let same = |step: &str, got: Vec<u8>, want: &Vec<u8>| {
+            if got == *want {
+                return;
+            }
+            let kept = std::env::temp_dir().join(format!("solidcraft-render-guides-failed-{}", std::process::id()));
+            let _ = std::fs::create_dir_all(&kept);
+            let _ = std::fs::write(kept.join(format!("{step}-got.png")), &got);
+            let _ = std::fs::write(kept.join(format!("{step}-want.png")), want);
+            let differ = match (image::load_from_memory(&got), image::load_from_memory(want)) {
+                (Ok(a), Ok(b)) if a.width() == b.width() && a.height() == b.height() => {
+                    let (a, b) = (a.to_rgba8(), b.to_rgba8());
+                    format!("{} of {} pixels differ", a.pixels().zip(b.pixels()).filter(|(x, y)| x != y).count(), a.width() * a.height())
+                }
+                (Ok(a), Ok(b)) => format!("{}×{} against {}×{}", a.width(), a.height(), b.width(), b.height()),
+                _ => "a picture does not decode".to_string(),
+            };
+            panic!("{step}: not the picture expected ({differ}; drawn by {:?}); both kept in {}", drawn_by.borrow(), kept.display());
+        };
         // With the Grid switch off the render has no grid, and `grid: true` brings it back.
         app.ui.show_grid = false;
-        assert!(shot(&mut app, json!({})) == no_grid);
-        assert!(shot(&mut app, json!({"grid": true})) == all);
+        same("grid-off", shot(&mut app, json!({})), &no_grid);
+        same("grid-off-asked-on", shot(&mut app, json!({"grid": true})), &all);
         // With the Origin off too it has neither; `axes: true` puts the axes back.
         app.set_origin_shown(false);
-        assert!(shot(&mut app, json!({})) == bare);
-        assert!(shot(&mut app, json!({"axes": true})) == no_grid);
+        same("both-off", shot(&mut app, json!({})), &bare);
+        same("both-off-axes-asked-on", shot(&mut app, json!({"axes": true})), &no_grid);
         // The Origin and the Grid back on: the first picture again.
         app.ui.show_grid = true;
         app.set_origin_shown(true);
-        assert!(shot(&mut app, json!({})) == all);
+        same("both-on-again", shot(&mut app, json!({})), &all);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1826,6 +1880,40 @@ mod tests {
         let bad = call("engine.execute", json!({"command": "file.new", "allow_paths": "/"}), false);
         assert!(bad["error"].as_str().is_some_and(|e| e.contains("allow_paths")), "{bad}");
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// A screenshot is written through `vfs`, as other saves are, so the web app can hand it out
+    /// as a download (#7192). On the disk it is the same PNG with the same reply. A folder scope
+    /// active while it is written refuses a path outside it, which shows the write goes through
+    /// `vfs`. (`ui.screenshot` checks an agent's folders when the request arrives; the write comes
+    /// in a later frame, outside the request's scope, as before.)
+    #[test]
+    fn screenshots_are_written_through_vfs_with_the_same_reply() {
+        let base = vfs::temp_dir().join(format!("solidcraft-shot-scope-{}", std::process::id()));
+        let (root, out) = (base.join("root"), base.join("out"));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&out).unwrap();
+        let image = egui::ColorImage::new([4, 3], vec![egui::Color32::GREEN; 12]);
+        let path = root.join("shot.png").to_string_lossy().to_string();
+        assert_eq!(save_screenshot(&image, Some(&path)), json!({"ok": true, "result": {"path": path, "width": 4, "height": 3}}));
+        let png = image::load_from_memory_with_format(&std::fs::read(&path).unwrap(), image::ImageFormat::Png).unwrap().into_rgba8();
+        assert_eq!((png.dimensions(), png.get_pixel(0, 0).0), ((4, 3), [0, 255, 0, 255]));
+        let outside = out.join("shot.png").to_string_lossy().to_string();
+        let v = vfs::scoped(Some(vfs::PathScope::new([root.clone()])), || save_screenshot(&image, Some(&outside)));
+        assert!(v["ok"] == false && v["error"].as_str().is_some_and(|e| e.contains("outside the folders this agent may use")), "{v}");
+        assert_eq!(std::fs::read_dir(&out).unwrap().count(), 0, "nothing written outside");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// Without a `path`, a screenshot goes to `vfs::temp_dir`: in the web app a folder kept in
+    /// memory, where std's temporary folder panics (#7192).
+    #[test]
+    fn a_screenshot_without_a_path_goes_to_the_vfs_temporary_folder() {
+        let image = egui::ColorImage::new([4, 3], vec![egui::Color32::GREEN; 12]);
+        let path = vfs::temp_dir().join("solidcraft-shot.png");
+        let reply = save_screenshot(&image, None);
+        assert_eq!(reply, json!({"ok": true, "result": {"path": path.to_string_lossy(), "width": 4, "height": 3}}));
+        assert!(path.is_file());
     }
 
     /// `ui.camera` reads the camera and sets it; its reply, passed back, sets the same view

@@ -1132,3 +1132,142 @@ fn midpoint_dimension_orientation_follows_the_pointer_before_placement() {
         }
     }
 }
+
+/// A finished, extruded 20 x 10 rectangle whose dimensions are shown in the model view (Show
+/// Dimensions): the width `d1` is driven by the user parameter `width`, the height `d2` is a
+/// plain value. Returns the harness and the sketch id.
+fn shown_dimensions() -> (Harness, u64) {
+    crate::dim_view::cancel();
+    let mut h = Harness::new();
+    h.app.run("parameters.add", json!({"name":"width","expression":"20 mm"})).unwrap();
+    let sketch = h.app.run("sketch.create", json!({"plane":"XY"})).unwrap()["sketch"].as_u64().unwrap();
+    h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[20,10]})).unwrap();
+    h.app.run("sketch.dimension", json!({"entities":["l1"],"value":"width","text_at":[10,-4]})).unwrap();
+    h.app.run("sketch.dimension", json!({"entities":["l2"],"value":10,"text_at":[24,5]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.app.run("solid.extrude", json!({"sketch":sketch,"distance":5,"body_name":"Plate"})).unwrap();
+    crate::browser::set_sketch_visible(&mut h.app, sketch, true);
+    h.app.session.visibility.shown_dimensions.push(sketch);
+    h.call("ui.view", json!({"view":"top"}));
+    h.app.cam.distance = 80.0;
+    h.app.cam.target = solidcraft_engine::geom::Vec3::new(10.0, 5.0, 0.0);
+    h.settle();
+    (h, sketch)
+}
+
+/// The model view's text of the dimension driven by `param` (screen).
+fn model_text(h: &Harness, param: &str) -> [f32; 2] {
+    let sk = h
+        .app
+        .session
+        .world_state()
+        .sketch(h.app.session.doc.features.iter().find(|f| f.name.starts_with("Sketch")).unwrap().id)
+        .unwrap()
+        .sketch
+        .clone();
+    let id = sk.constraints.iter().find(|c| c.param.as_deref() == Some(param)).unwrap().id.clone();
+    let (_, _, p) = crate::dim_view::model_drawn().into_iter().find(|(_, d, _)| *d == id).expect("the dimension is shown in the model view");
+    [p.x, p.y]
+}
+
+/// The extruded plate's width and depth (x, y), rounded to 0.001 mm.
+fn plate_max(h: &Harness) -> [f64; 2] {
+    let b = h.app.session.world_state().body("Plate").unwrap().mesh().bounds();
+    [((b.max.x - b.min.x) * 1000.0).round() / 1000.0, ((b.max.y - b.min.y) * 1000.0).round() / 1000.0]
+}
+
+#[test]
+fn double_clicking_a_shown_dimension_edits_it_without_editing_the_sketch() {
+    let (mut h, _) = shown_dimensions();
+    let camera = (h.app.cam.target, h.app.cam.distance);
+    let undo = h.app.session.undo.len();
+    assert!((plate_max(&h)[1] - 10.0).abs() < 1e-6);
+    let at = model_text(&h, "d2");
+    h.step(&json!({"click":at,"double":true})).unwrap();
+    assert!(crate::dim_view::editing(), "the double-click opens the value");
+    assert_eq!(h.ctx.memory(|m| m.focused()), Some(egui::Id::new("sc_dim_edit")));
+    assert_eq!(h.app.session.active_sketch, None, "the sketch is not edited");
+    type_value(&mut h, "14");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.settle();
+    assert!(!crate::dim_view::editing());
+    assert_eq!(h.app.session.active_sketch, None);
+    assert_eq!((h.app.cam.target, h.app.cam.distance), camera, "the view stays put");
+    assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
+    assert!((plate_max(&h)[1] - 14.0).abs() < 1e-6, "the extrude follows: {:?}", plate_max(&h));
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.settle();
+    assert!((plate_max(&h)[1] - 10.0).abs() < 1e-6, "undo restores it");
+}
+
+#[test]
+fn escape_cancels_a_shown_dimensions_value() {
+    let (mut h, _) = shown_dimensions();
+    let doc = h.app.session.doc.to_json();
+    let at = model_text(&h, "d2");
+    h.step(&json!({"click":at,"double":true})).unwrap();
+    assert!(crate::dim_view::editing());
+    type_value(&mut h, "30");
+    h.step(&json!({"key":"Escape"})).unwrap();
+    h.settle();
+    assert!(!crate::dim_view::editing());
+    assert_eq!(h.app.session.doc.to_json(), doc, "nothing changed");
+    assert!((plate_max(&h)[1] - 10.0).abs() < 1e-6);
+}
+
+#[test]
+fn a_parameter_driven_shown_dimension_edits_its_own_expression() {
+    let (mut h, _) = shown_dimensions();
+    let at = model_text(&h, "d1");
+    h.step(&json!({"click":at,"double":true})).unwrap();
+    assert!(crate::dim_view::editing());
+    assert!(h.widget("width").is_some(), "the box shows the expression that drives it");
+    type_value(&mut h, "width + 5");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.settle();
+    assert_eq!(h.app.session.doc.param("width").unwrap().expr, "20 mm", "the user parameter is left alone");
+    assert_eq!(h.app.session.doc.param("d1").unwrap().expr, "width + 5");
+    assert!((plate_max(&h)[0] - 25.0).abs() < 1e-6, "{:?}", plate_max(&h));
+    assert_eq!(h.app.session.active_sketch, None);
+}
+
+#[test]
+fn a_driven_shown_dimension_is_read_only() {
+    let (mut h, sketch) = shown_dimensions();
+    h.app.run("sketch.edit", json!({"sketch":sketch})).unwrap();
+    h.app.run("sketch.dimension", json!({"entities":["l3"],"driven":true,"text_at":[10,14]})).unwrap();
+    h.app.run("sketch.finish", json!({})).unwrap();
+    h.settle();
+    let id = h.app.session.world_state().sketch(sketch).unwrap().sketch.constraints.iter().find(|c| c.driven).unwrap().id.clone();
+    let (_, _, p) = crate::dim_view::model_drawn().into_iter().find(|(_, d, _)| *d == id).unwrap();
+    let doc = h.app.session.doc.to_json();
+    h.step(&json!({"click":[p.x, p.y],"double":true})).unwrap();
+    assert!(!crate::dim_view::editing());
+    assert!(h.app.status.as_ref().is_some_and(|s| s.0.contains("driven")), "{:?}", h.app.status);
+    assert_eq!(h.app.session.doc.to_json(), doc);
+}
+
+/// The value applies like any other change: the fillet it breaks reports its error on the
+/// timeline, and Undo brings back the value and the fillet.
+#[test]
+fn a_shown_dimension_that_breaks_a_later_feature_reports_it_and_undoes() {
+    let (mut h, _) = shown_dimensions();
+    h.app.run("solid.fillet", json!({"edges":[[10,10,5]],"radius":4,"name":"Round"})).unwrap();
+    h.settle();
+    let round = h.app.session.doc.features.iter().find(|f| f.name == "Round").unwrap().id;
+    let failed = |h: &Harness| h.app.session.model.result(round).is_some_and(|r| r.error.is_some());
+    assert!(!failed(&h));
+    let before = h.app.session.doc.to_json();
+    let at = model_text(&h, "d2");
+    h.step(&json!({"click":at,"double":true})).unwrap();
+    type_value(&mut h, "3");
+    h.step(&json!({"key":"Enter"})).unwrap();
+    h.settle();
+    assert_eq!(h.app.session.doc.param("d2").unwrap().expr, "3");
+    assert!(failed(&h), "the fillet no longer fits and says so");
+    assert_eq!(h.app.session.active_sketch, None);
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.settle();
+    assert_eq!(h.app.session.doc.to_json(), before);
+    assert!(!failed(&h), "undo brings the fillet back");
+}

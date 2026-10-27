@@ -68,6 +68,45 @@ pub fn tick(app: &mut SolveApp, wait: bool) {
 mod tests {
     use serde_json::json;
 
+    #[test]
+    fn a_pending_save_blocks_feature_computation_and_completed_transaction_adoption() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.rectangle.two_point", json!({"p0":[0,0],"p1":[10,10]})).unwrap();
+        h.app.finish_sketch();
+        h.app.start("solid.extrude");
+        h.frames(2);
+        let dialog = h.app.dialog.as_ref().unwrap().clone();
+        let cmds = crate::dialogs::apply_commands(&h.app, &dialog).unwrap();
+        let prepared = h.app.session.scratch().compute_commands(&cmds, None).unwrap();
+        let document = h.app.session.doc.clone();
+        let history = h.app.session.undo.len();
+        let (_save_finish, save_done) = std::sync::mpsc::channel();
+        h.app.saving = Some(super::Saving { command: "file.save", done: save_done });
+        h.app.apply_off_thread = Some(std::time::Duration::ZERO);
+        assert!(crate::dialogs::begin_applying(&h.app, &dialog).is_none());
+        assert!(crate::dialogs::run_dialog(&mut h.app, &dialog).unwrap_err().contains("file operation"));
+        let (finish, done) = std::sync::mpsc::channel();
+        h.app.applying = Some(crate::dialogs::Applying {
+            done,
+            ready: None,
+            seen: true,
+            started: crate::now_ms(),
+            cmds,
+            progress: Default::default(),
+            quality: Default::default(),
+        });
+        finish.send(Ok(prepared)).ok().unwrap();
+        // Run just the dialog, without the normal frame's save polling.
+        let mut out = h.ctx.run_ui(Default::default(), |ui| crate::dialogs::show(&mut h.app, ui.ctx()));
+        // Not drawn: discard the texture updates explicitly.
+        out.textures_delta.clear();
+        assert!(std::sync::Arc::ptr_eq(&document, &h.app.session.doc));
+        assert_eq!(h.app.session.undo.len(), history);
+        assert!(h.app.dialog.as_ref().unwrap().error.as_ref().unwrap().contains("file operation"));
+    }
+
     /// #3044: Save writes on a worker while the window keeps drawing; the design waits (commands
     /// are refused) until the save is taken up, which leaves it saved under its file, in the
     /// recent files, with the command echoed, as a save run here does.

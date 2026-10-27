@@ -143,16 +143,12 @@ fn unique_name(base: &str, used: &mut BTreeSet<String>) -> Result<String> {
         used.insert(base.to_string());
         return Ok(base.to_string());
     }
-    for index in 1..=MAX_RECORDS {
-        let name = if index == 1 { format!("{base} (copy)") } else { format!("{base} (copy {index})") };
-        if name.len() > MAX_NAME {
-            return Err(invalid("copied assembly name is too long"));
-        }
-        if used.insert(name.clone()) {
-            return Ok(name);
-        }
+    let name = solidcraft_doc::copy_name(base, |n| used.contains(n));
+    if name.len() > MAX_NAME {
+        return Err(invalid("copied assembly name is too long"));
     }
-    Err(invalid("could not allocate a unique assembly name"))
+    used.insert(name.clone());
+    Ok(name)
 }
 
 fn next_id(id: &mut u64) -> Result<u64> {

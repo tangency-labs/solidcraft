@@ -130,7 +130,7 @@ impl AcpBackend {
                 }
             }
             Incoming::Text { thought, text } => out.push(Event::Text { thought, text }),
-            Incoming::Tool { id, title, kind, status, output } => out.push(Event::Tool { id, title, kind, status, output }),
+            Incoming::Tool { id, title, kind, status, input, output } => out.push(Event::Tool { id, title, kind, status, input, output }),
             Incoming::Plan(p) => out.push(Event::Plan(p)),
             Incoming::Permission { rpc, title, options } => {
                 self.next_key += 1;

@@ -1511,6 +1511,7 @@ pub fn gpu_scene(scene: &ProductScene) -> Result<(u64, GpuScene), String> {
             });
             let [Some(a), Some(b), Some(c)] = vertices else { return Err("invalid product triangle".into()) };
             let rgba = [color[0], color[1], color[2], (opacity * 255.0).round() as u8];
+            let index = gpu.color(rgba);
             for (p, n) in [a, b, c] {
                 if let Some(surface) = surface {
                     if n.iter().all(|v| *v == 0.0) {
@@ -1518,9 +1519,9 @@ pub fn gpu_scene(scene: &ProductScene) -> Result<(u64, GpuScene), String> {
                     }
                     gpu.pbr_tri(p, n, surface);
                 } else if opacity < 0.999 {
-                    gpu.glass_tri(p, n, rgba);
+                    gpu.glass_tri(p, n, index);
                 } else {
-                    gpu.tri(p, n, rgba);
+                    gpu.tri(p, n, index);
                 }
             }
         }

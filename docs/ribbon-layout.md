@@ -2,14 +2,14 @@
 
 The UI layout in `crates/ui-egui/src/workspace.rs` maps the original engine registry placements into ribbon sections. `docs/features.md` continues to document registry placements; command registrations and ids are unchanged.
 
-Always shown, in order: MODEL, SURFACE, ASSEMBLE, INSERT, INSPECT, MANAGE, VIEW, SHEET METAL. SKETCH appears during sketch editing. SHEET METAL is reachable in every document, so a sheet-metal part can start from a sketch or a solid; it takes the contextual style and selects itself when the selected body (or the last body of the active component) has evaluated sheet-metal data. Entering a context selects its tab; the other tabs remain available. RENDER belongs to the Render workspace.
+Always shown, in order: MODEL, SURFACE, ASSEMBLE, INSERT, INSPECT, MANAGE, VIEW, SHEET METAL, WELDMENTS. SKETCH appears during sketch editing. SHEET METAL is reachable in every document, so a sheet-metal part can start from a sketch or a solid; it takes the contextual style and selects itself when the selected body (or the last body of the active component) has evaluated sheet-metal data. WELDMENTS is reachable in every document too, since a frame starts from a sketch of its lines; it selects itself when that body is a frame member, keeping the ordinary tab look (sheet metal comes first). Entering a context selects its tab; the other tabs remain available. RENDER belongs to the Render workspace.
 
 **Bold command ids are default promoted buttons.** Every listed command remains in the section menu. Saved user pins can add buttons, as before.
 
 | Tab | Section | Command ids, in menu order |
 |---|---|---|
 | MODEL | SKETCH | **`sketch.create`**, `sketch.edit`, `sketch.line3d`, `sketch.spline3d`, `sketch.point3d`, `sketch.move3d` |
-| MODEL | CREATE | **`solid.extrude`**, **`solid.revolve`**, **`solid.hole`**, `solid.sweep`, `solid.loft`, `solid.box`, `solid.cylinder`, `solid.sphere`, `solid.torus`, `solid.pipe`, `solid.bounding_solid`, `solid.thread`, `solid.boundary_fill`, `solid.coil`, `solid.rib`, `solid.web`, `solid.emboss`, `plastic.boss`, `plastic.lip`, `plastic.snap_fit`, `plastic.rest`, `frame.member` |
+| MODEL | CREATE | **`solid.extrude`**, **`solid.revolve`**, **`solid.hole`**, `solid.sweep`, `solid.loft`, `solid.box`, `solid.cylinder`, `solid.sphere`, `solid.torus`, `solid.cone`, `solid.pipe`, `solid.bounding_solid`, `solid.thread`, `solid.boundary_fill`, `solid.coil`, `solid.rib`, `solid.web`, `solid.emboss`, `plastic.boss`, `plastic.lip`, `plastic.snap_fit`, `plastic.rest` |
 | MODEL | MODIFY | **`solid.fillet`**, **`solid.chamfer`**, **`solid.shell`**, **`solid.press_pull`**, `sheet.convert`, `solid.combine`, `solid.scale`, `solid.offset_face`, `solid.draft`, `solid.split_face`, `solid.split_body`, `solid.replace_face`, `solid.remove`, `timeline.delete`, `face.delete` |
 | MODEL | ARRANGE | **`solid.move`**, **`solid.mirror`**, **`solid.pattern.rectangular`**, `solid.align`, `solid.pattern.circular`, `solid.pattern.path` |
 | MODEL | CONFIGURE | **`parameters.change`**, **`config.table`**, `config.configure` |
@@ -52,6 +52,9 @@ Always shown, in order: MODEL, SURFACE, ASSEMBLE, INSERT, INSPECT, MANAGE, VIEW,
 | SHEET METAL | OUTPUT | **`sheet.export_dxf`**, **`sheet.export_bend_table`** |
 | SHEET METAL | RULES | **`sheet.manage_rules`** |
 | SHEET METAL | CONFIGURE | **`parameters.change`**, **`config.table`**, `config.configure` |
+| WELDMENTS | SKETCH | **`sketch.create`** |
+| WELDMENTS | CREATE | **`frame.member`** |
+| WELDMENTS | CONFIGURE | **`parameters.change`**, **`config.table`**, `config.configure` |
 | SKETCH | CONFIGURE | **`parameters.change`**, **`config.table`**, `config.configure` |
 | RENDER | SCENE | **`render.scene`** |
 | RENDER | IMAGE | **`render.start`** |
@@ -93,7 +96,7 @@ Explicit command-id lists override the default placement mapping. Shared command
 | SOLID / CONSTRUCT | MODEL / CONSTRUCT | `construct.plane.offset`, `construct.plane.at_angle`, `construct.axis.through_cylinder`, `construct.axis.normal_to_face`, `construct.axis.two_planes`, `construct.axis.two_points`, `construct.axis.edge`, `construct.point.vertex`, `construct.point.two_edges`, `construct.point.three_planes`, `construct.point.center`, `construct.point.edge_plane`, `construct.point.along_path`, `construct.plane.midplane`, `construct.plane.two_edges`, `construct.plane.three_points`, `construct.plane.tangent`, `construct.plane.along_path`, `construct.plane.perpendicular` |
 | SOLID / CREATE | ASSEMBLE / JOINTS | `joint.origin` |
 | SOLID / CREATE | MODEL / ARRANGE | `solid.pattern.rectangular`, `solid.pattern.circular`, `solid.pattern.path`, `solid.mirror` |
-| SOLID / CREATE | MODEL / CREATE | `solid.extrude`, `solid.revolve`, `solid.sweep`, `solid.loft`, `solid.box`, `solid.cylinder`, `solid.sphere`, `solid.torus`, `solid.hole`, `solid.pipe`, `solid.bounding_solid`, `solid.thread`, `solid.boundary_fill`, `solid.coil`, `solid.rib`, `solid.web`, `solid.emboss`, `frame.member` |
+| SOLID / CREATE | MODEL / CREATE | `solid.extrude`, `solid.revolve`, `solid.sweep`, `solid.loft`, `solid.box`, `solid.cylinder`, `solid.sphere`, `solid.torus`, `solid.cone`, `solid.hole`, `solid.pipe`, `solid.bounding_solid`, `solid.thread`, `solid.boundary_fill`, `solid.coil`, `solid.rib`, `solid.web`, `solid.emboss` |
 | SOLID / CREATE | MODEL / SKETCH | `sketch.create` |
 | SOLID / INSERT | INSERT / FILES | `file.insert_step`, `file.insert_mesh` |
 | SOLID / INSERT | INSERT / LIBRARY | `parts.fastener` |
@@ -110,6 +113,7 @@ Explicit command-id lists override the default placement mapping. Shared command
 | SURFACE / CREATE | SURFACE / CREATE | `surface.boundary`, `surface.patch`, `surface.extrude`, `surface.revolve`, `surface.sweep`, `surface.loft`, `surface.offset`, `surface.ruled`, `surface.blend` |
 | SURFACE / INSPECT | INSPECT / SURFACE QUALITY | `inspect.continuity` |
 | SURFACE / MODIFY | SURFACE / EDIT | `surface.stitch`, `surface.extend`, `surface.trim`, `surface.untrim`, `surface.unstitch`, `surface.reverse_normal`, `surface.fair`, `surface.fillet`, `surface.match` |
+| WELDMENTS / CREATE | WELDMENTS / CREATE | `frame.member` |
 
 ## Placement decisions and missing commands
 

@@ -1,11 +1,12 @@
 //! The Bill of Materials window: `assembly.bom`'s rows (flat or top level, grouped by part
 //! number or by definition, a part's sub-parts in its row or not), with Export CSV… and Export
 //! JSON…. Picking a row edits its part
-//! number, description and revision through one `component.metadata.set` per definition. The
-//! toolbar's Bill of Materials (`ui.start` of `assembly.bom`) opens it.
+//! number, description and revision (`metadata::BOM_KEYS`) through one `component.metadata.set`
+//! per definition. The toolbar's Bill of Materials (`ui.start` of `assembly.bom`) opens it.
 
 use egui::RichText;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
+use solidcraft_engine::doc::metadata::{self, BOM_KEYS};
 
 use crate::SolveApp;
 use crate::theme::Tokens;
@@ -21,9 +22,9 @@ pub struct BomPanel {
     pub group_children: bool,
     /// The rows for (design revision, top, by_definition, group_children).
     cache: Option<(u64, [bool; 3], Value)>,
-    /// The picked row's index, and its fields as edited.
+    /// The picked row's index, and its fields as edited (one for each of [`BOM_KEYS`]).
     pub picked: Option<usize>,
-    pub fields: [String; 3],
+    pub fields: Vec<String>,
     /// The last refusal.
     pub error: Option<String>,
 }
@@ -68,11 +69,17 @@ fn text(row: &Value, k: &str) -> String {
     }
 }
 
+/// The label of one of [`BOM_KEYS`].
+fn field_label(key: &str) -> &str {
+    metadata::key(key).map_or(key, |k| crate::i18n::tr(k.label))
+}
+
 /// Apply the picked row's fields to each of its definitions (one undo step each).
 fn apply(app: &mut SolveApp, d: &mut BomPanel, row: &Value) {
-    let [pn, desc, rev] = d.fields.clone();
+    let mut params: Map<String, Value> = BOM_KEYS.iter().zip(&d.fields).map(|(k, v)| (k.to_string(), json!(v))).collect();
     for c in row["components"].as_array().into_iter().flatten() {
-        let r = app.run("component.metadata.set", json!({"component": c, "part_number": pn, "description": desc, "revision": rev}));
+        params.insert("component".into(), c.clone());
+        let r = app.run("component.metadata.set", Value::Object(params.clone()));
         if let Err(e) = r {
             d.error = Some(e);
             return;
@@ -124,7 +131,7 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
                         let picked = d.picked == Some(i);
                         if crate::ui_kit::list_picker(ui, &i.to_string(), &text(row, "item"), picked).clicked() {
                             d.picked = if picked { None } else { Some(i) };
-                            d.fields = [text(row, "part_number"), text(row, "description"), text(row, "revision")];
+                            d.fields = BOM_KEYS.iter().map(|k| text(row, k)).collect();
                         }
                         ui.label(text(row, "part_number"));
                         ui.label(text(row, "description"));
@@ -148,10 +155,11 @@ pub fn show(app: &mut SolveApp, ctx: &egui::Context) {
             if let Some(row) = d.picked.and_then(|i| rows.get(i)) {
                 ui.separator();
                 egui::Grid::new("sc_bom_edit").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-                    for (label, field) in ["Part number", "Description", "Revision"].into_iter().zip(d.fields.iter_mut()) {
+                    for (key, field) in BOM_KEYS.iter().zip(d.fields.iter_mut()) {
+                        let label = field_label(key);
                         ui.label(label);
                         ui.allocate_ui(egui::vec2(280.0, crate::ui_kit::row_height()), |ui| {
-                            crate::ui_kit::cell_editor(ui, ui.make_persistent_id(label), field, label, false);
+                            crate::ui_kit::cell_editor(ui, ui.make_persistent_id(key), field, label, false);
                         });
                         ui.end_row();
                     }
@@ -215,6 +223,32 @@ mod tests {
         assert_eq!(h.app.session.undo.len(), undo + 1, "one undo step");
         h.frames(2);
         assert!(h.widget("PL-100").is_some(), "the list follows the change");
+    }
+
+    #[test]
+    fn a_picked_row_edits_each_bill_of_materials_key_under_its_label() {
+        let mut h = Harness::new();
+        h.app.run("component.create", json!({"name": "Plate"})).unwrap();
+        h.app.run("solid.box", json!({"length": 40, "width": 20, "height": 3})).unwrap();
+        h.app.run("component.activate", json!({"component": 0})).unwrap();
+        // Two placed, so the Qty cell ("2") isn't mistaken for the row's item number ("1").
+        h.app.run("occurrence.copy", json!({"component": "Plate", "translate": [50, 0, 0]})).unwrap();
+        h.app.run("component.metadata.set", json!({"component": "Plate", "part_number": "PL-100", "revision": "A"})).unwrap();
+        h.step(&json!({"start": "assembly.bom"})).unwrap();
+        h.frames(2);
+        // The grid's own column says "Rev"; "Revision" is the edit field's label, from the table.
+        assert!(h.widget("Revision").is_none());
+        h.step(&json!({"widget": "1"})).unwrap();
+        h.frames(2);
+        assert!(h.widget("Revision").is_some());
+        let d = h.app.bom.as_mut().unwrap();
+        assert_eq!(d.fields, ["PL-100", "", "A"], "the row's fields, in the bill of materials' order");
+        d.fields[1] = "Plate, 3 mm".into();
+        d.fields[2] = "B".into();
+        h.frames(2);
+        h.step(&json!({"widget": "Apply"})).unwrap();
+        let m = h.app.session.execute("component.metadata", &json!({"component": "Plate"})).unwrap();
+        assert_eq!((&m["part_number"], &m["description"], &m["revision"]), (&json!("PL-100"), &json!("Plate, 3 mm"), &json!("B")), "{m}");
     }
 
     #[test]

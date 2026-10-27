@@ -167,8 +167,8 @@ impl AgentCursor {
 
     /// Since when the pointer has waited at its last stop for its command to compute (ms), and
     /// the command.
-    pub fn computing(&self) -> Option<(f64, &str)> {
-        self.job.as_ref().filter(|j| j.stops.is_empty()).and_then(|j| j.ahead.as_ref()).map(|a| (a.started, a.label.as_str()))
+    pub fn computing(&self) -> Option<(f64, String)> {
+        self.job.as_ref().filter(|j| j.stops.is_empty()).and_then(|j| j.ahead.as_ref()).map(|a| (a.started, a.steps.shown()))
     }
 
     /// Follow the pointer input an agent sends itself (`ui.move`, `ui.click`, `ui.drag`,

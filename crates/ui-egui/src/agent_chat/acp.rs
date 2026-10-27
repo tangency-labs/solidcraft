@@ -311,7 +311,7 @@ pub enum Incoming {
     /// Text the agent streams (`thought`: its reasoning, shown dimmed).
     Text { thought: bool, text: String },
     /// A new tool call, or news about one (`title`/`status` when they changed).
-    Tool { id: String, title: Option<String>, kind: Option<String>, status: Option<ToolStatus>, output: Option<String> },
+    Tool { id: String, title: Option<String>, kind: Option<String>, status: Option<ToolStatus>, input: Option<Value>, output: Option<String> },
     /// The agent's plan: each entry with its status.
     Plan(Vec<(String, String)>),
     /// The agent asks before running a tool call; answered with [`permission_reply`].
@@ -420,6 +420,8 @@ fn update(u: &Value) -> Incoming {
                 title: s("title"),
                 kind: s("kind"),
                 status: u.get("status").and_then(Value::as_str).and_then(ToolStatus::parse),
+                // ACP's `rawInput`: the arguments the tool was called with.
+                input: u.get("rawInput").filter(|v| v.is_object()).cloned(),
                 output: tool_output(u),
             },
             None => Incoming::Ignored,
@@ -598,7 +600,14 @@ mod tests {
         let tool = r#"{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","toolCallId":"t1","status":"completed","content":[{"type":"content","content":{"type":"text","text":"ok"}}]}}}"#;
         assert_eq!(
             parse(tool),
-            Some(Incoming::Tool { id: "t1".into(), title: None, kind: None, status: Some(ToolStatus::Completed), output: Some("ok".into()) })
+            Some(Incoming::Tool {
+                id: "t1".into(),
+                title: None,
+                kind: None,
+                status: Some(ToolStatus::Completed),
+                input: None,
+                output: Some("ok".into())
+            })
         );
         let perm = r#"{"jsonrpc":"2.0","id":7,"method":"session/request_permission","params":{"sessionId":"s","toolCall":{"toolCallId":"t1","title":"batch"},"options":[{"optionId":"allow","name":"Allow","kind":"allow_once"},{"optionId":"reject","name":"Reject","kind":"reject_once"}]}}"#;
         let Some(Incoming::Permission { rpc, title, options }) = parse(perm) else { panic!() };

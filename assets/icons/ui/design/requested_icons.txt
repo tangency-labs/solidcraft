@@ -63,6 +63,7 @@ combine	false
 compare	false
 component	false
 compute	false
+cone	false
 configuration_table	false
 conic	false
 constrainer	false

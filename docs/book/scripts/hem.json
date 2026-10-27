@@ -1,0 +1,8 @@
+{"commands": [
+  {"command": "sheet.manage_rules", "params": {"name": "Hem demo", "thickness": "1.5 mm", "bend_radius": "1.5 mm", "k_factor": 0.44, "active": true}},
+  {"command": "sketch.create", "params": {"plane": "XY", "name": "Base"}},
+  {"command": "sketch.rectangle.two_point", "params": {"p0": [0, 0], "p1": [80, 50]}},
+  {"command": "sketch.finish", "params": {}},
+  {"command": "sheet.flange", "params": {"type": "base"}},
+  {"command": "sheet.hem", "params": {"edges": [[40, 0, 1.5]], "length": "8 mm", "gap": "1.5 mm"}}
+]}

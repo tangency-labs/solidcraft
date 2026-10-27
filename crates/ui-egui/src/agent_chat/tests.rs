@@ -104,8 +104,15 @@ fn streamed_text_joins_and_tool_updates_change_their_call() {
     for e in [
         Event::Text { thought: false, text: "Mak".into() },
         Event::Text { thought: false, text: "ing a box".into() },
-        Event::Tool { id: "t".into(), title: Some("batch".into()), kind: Some("other".into()), status: Some(ToolStatus::Pending), output: None },
-        Event::Tool { id: "t".into(), title: None, kind: None, status: Some(ToolStatus::Completed), output: Some("ok".into()) },
+        Event::Tool {
+            id: "t".into(),
+            title: Some("batch".into()),
+            kind: Some("other".into()),
+            status: Some(ToolStatus::Pending),
+            input: None,
+            output: None,
+        },
+        Event::Tool { id: "t".into(), title: None, kind: None, status: Some(ToolStatus::Completed), input: None, output: Some("ok".into()) },
     ] {
         c.on_event(e);
     }
@@ -1966,15 +1973,119 @@ fn assistant_marks_follow_chat_login_turns_and_approvals() {
     }
     assert_eq!(mark(State::Off, "signed_out", true), NeedsAuth);
     for login in ["", "signed_out", "unknown", "signed_in"] {
-        for (state, expected) in
-            [(State::Ready, Ready), (State::Busy, Busy), (State::Starting, Busy), (State::NeedsAuth, NeedsAuth), (State::Exited, Stopped)]
-        {
+        for (state, expected) in [
+            (State::Ready, Ready),
+            (State::Busy, Busy),
+            (State::Starting, Busy),
+            (State::NeedsAuth, NeedsAuth),
+            (State::Exited, Stopped),
+            (State::Failed, Stopped),
+        ] {
             assert_eq!(mark(state, login, true), expected);
             assert_eq!(assistant_mark_for(state, login, true, 12, false, false), Waiting(12));
         }
     }
     assert_eq!(assistant_mark_for(State::Ready, "signed_in", true, 0, true, false), Stopped);
     assert_eq!(assistant_mark_for(State::Ready, "signed_in", true, 0, false, true), Stopped);
+}
+
+/// An app whose endpoint agents answer at once (offline), with `api-1` and `api-2` added.
+#[cfg(not(target_arch = "wasm32"))]
+fn app_with_endpoints() -> SolveApp {
+    let http: backend::HttpFn = Arc::new(|_| Err("offline".into()));
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services { agent_http: Some(http), ..Default::default() });
+    for id in ["api-1", "api-2"] {
+        app.preferences.agents.push(agents::AgentConfig {
+            id: id.into(),
+            kind: agents::Kind::Api,
+            base_url: "http://localhost:11434/v1".into(),
+            model: "m".into(),
+            ..Default::default()
+        });
+    }
+    app
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_agent_started_last_connects_at_start_once_the_agents_are_known() {
+    let ctx = crate::fonts::test_context();
+    let mut app = app_with_endpoints();
+    // Off by default: a launch starts nothing and leaves the panel closed.
+    begin(&mut app);
+    poll(&mut app, &ctx);
+    assert!(!app.agent_chat.open && app.agent_chat.backend.is_none() && app.agent_chat.detecting.is_none());
+
+    app.preferences.agent_connect_at_start = true;
+    app.preferences.agent_chat_open_at_start = true;
+    app.preferences.agent_last = "api-2".into();
+    begin(&mut app);
+    assert!(app.agent_chat.open);
+    // Nothing waits for discovery: the agent starts when it is in, in whichever tab is shown.
+    let (found, detecting) = channel();
+    app.agent_chat.detecting = Some(detecting);
+    poll(&mut app, &ctx);
+    assert!(app.agent_chat.backend.is_none());
+    crate::documents::open_tab(&mut app, solidcraft_engine::Session::default()).unwrap();
+    found.send(discover::Detection::default()).unwrap();
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.agent_id.as_deref(), Some("api-2"), "the agent started last, not the default");
+    assert_eq!(app.agent_chat.state(), State::Starting);
+    assert!(app.agent_chat.backend.is_some());
+    // A design opened over the launch's blank one keeps the agent: nothing was asked yet.
+    crate::documents::adopt(&mut app, solidcraft_engine::Session::default());
+    assert!(app.agent_chat.backend.is_some() && app.agent_chat.items.is_empty());
+    assert_eq!(app.docs.count(), 2);
+    // Once per launch.
+    disconnect(&mut app);
+    poll(&mut app, &ctx);
+    assert!(app.agent_chat.backend.is_none());
+    // Connecting another agent makes it the one started last.
+    app.agent_chat.agent_id = Some("api-1".into());
+    connect(&mut app, &ctx);
+    assert_eq!(app.preferences.agent_last, "api-1");
+    assert!(status(&app)["lastAgent"] == "api-1" && status(&app)["connectAtStart"] == true);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_connection_that_never_gets_ready_says_connection_failed_and_offers_retry() {
+    let ctx = crate::fonts::test_context();
+    // The agent started last is gone: the chat says so, and no other agent starts by itself.
+    let mut app = app_with_endpoints();
+    app.preferences.agent_connect_at_start = true;
+    app.preferences.agent_last = "claude".into();
+    app.agent_chat.detection = Some(discover::Detection::default());
+    begin(&mut app);
+    poll(&mut app, &ctx);
+    assert_eq!(app.agent_chat.state(), State::Failed);
+    assert!(app.agent_chat.backend.is_none() && app.agent_chat.agent_id.is_none());
+    assert!(matches!(app.agent_chat.items.last(), Some(Item::Notice { text, error: true }) if text.contains("claude")));
+    assert!(!State::Failed.running(), "the Connect button reads Retry, not Stop");
+    assert_eq!(status(&app)["state"], "failed");
+
+    // An agent that cannot start.
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.preferences.agents.push(agents::AgentConfig { id: "custom-1".into(), command: "solidcraft-no-such-agent-7009".into(), ..Default::default() });
+    connect(&mut app, &ctx);
+    assert_eq!(app.agent_chat.state(), State::Failed);
+    assert!(app.preferences.agent_last.is_empty(), "only an agent that started is remembered");
+
+    // No agent at all: the picker opens on what to install.
+    let mut app = SolveApp::new(solidcraft_engine::Session::default(), crate::Services::default());
+    app.agent_chat.detection = Some(discover::Detection::default());
+    connect(&mut app, &ctx);
+    assert_eq!((app.agent_chat.state(), app.agent_chat.picking), (State::Failed, Some(true)));
+
+    // An agent that ends while starting failed to connect; one that ends later stopped.
+    let mut c = chat();
+    c.state = Some(State::Starting);
+    c.on_event(Event::Error("initialize failed".into()));
+    c.on_event(Event::Exited { tail: Vec::new() });
+    assert_eq!(c.state(), State::Failed);
+    let mut c = chat();
+    c.on_event(Event::Exited { tail: Vec::new() });
+    assert_eq!(c.state(), State::Exited);
 }
 
 #[test]
@@ -2510,7 +2621,14 @@ fn no_tool_turn_warning_does_not_follow_a_tool_call() {
     let (mut app, _, _) = app_with_script();
     app.agent_chat.tools_port = Some(12345);
     start_turn(&mut app, "Make a box".into(), false, None, vec![]);
-    app.agent_chat.on_event(Event::Tool { id: "t".into(), title: Some("batch".into()), kind: None, status: Some(ToolStatus::Failed), output: None });
+    app.agent_chat.on_event(Event::Tool {
+        id: "t".into(),
+        title: Some("batch".into()),
+        kind: None,
+        status: Some(ToolStatus::Failed),
+        input: None,
+        output: None,
+    });
     app.agent_chat.on_event(Event::TurnEnded { reason: String::new() });
     end_turn(&mut app);
     assert!(status(&app).get("turnWarning").is_some());
@@ -2537,4 +2655,192 @@ fn no_tool_turn_warning_leaves_answers_and_incomplete_turns_quiet() {
         assert!(status(&app)["turnWarning"].is_null(), "{prompt}: {reason}");
         assert!(!app.agent_chat.items.iter().any(|i| matches!(i, Item::Notice { text, .. } if text == tr("ui.agent_chat_no_tool_call"))));
     }
+}
+
+// ---- Tool calls in words (#1457) ----
+
+fn in_mm() -> summary::Units<'static> {
+    summary::Units { units: "mm", decimals: 2 }
+}
+
+fn said(title: &str, input: Value, output: Option<&str>) -> Option<String> {
+    summary::summary(title, Some(&input), output, true, in_mm())
+}
+
+/// The issue's examples: a card says what the call did, from the command's label, its main
+/// parameters and what it returned.
+#[test]
+fn tool_calls_read_as_what_they_did() {
+    let extrude = json!({"command": "solid.extrude", "params": {"sketch": "Sketch1", "distance": 10}});
+    assert_eq!(said("execute: solid.extrude", extrude.clone(), None).as_deref(), Some("Extrude Sketch1 by 10 mm"));
+    // As an ACP agent names the bridged tool, with the body the result made.
+    let made = r#"{"feature": 4, "name": "Extrude1", "created_bodies": ["Body2"], "changed_bodies": []}"#;
+    assert_eq!(said("mcp__solidcraft-app__execute", extrude, Some(made)).as_deref(), Some("Extrude Sketch1 by 10 mm → Body2"));
+    let edges = json!([[20, 0, 20], [20, 30, 20], [0, 15, 20], [40, 15, 20]]);
+    let batch = json!({"commands": [
+        {"command": "solid.box", "params": {"length": 40, "width": 30, "height": 20}},
+        {"command": "solid.fillet", "params": {"edges": edges, "radius": 4}},
+    ]});
+    assert_eq!(said("batch: solid.box, solid.fillet", batch, None).as_deref(), Some("Box 40 × 30 × 20 mm, then Fillet 4 edges (r 4 mm)"));
+    let measured = r#"{"body_count": 1, "bodies": [{"name": "Block", "volume_mm3": 23620.4, "bbox": {"min": [0, 0, 0], "max": [40, 30, 20]}}]}"#;
+    assert_eq!(said("measure", json!({"body": "Block"}), Some(measured)).as_deref(), Some("Measured Block: 40 × 30 × 20 mm, 23.6 cm³"));
+    assert_eq!(said("save", json!({"path": "C:\\designs\\block.solidcraft"}), None).as_deref(), Some("Saved block.solidcraft"));
+    // Still running, or failed: what it does, not what it did.
+    let running = summary::summary("save", Some(&json!({"path": "/home/me/block.solidcraft"})), None, false, in_mm());
+    assert_eq!(running.as_deref(), Some("Save block.solidcraft"));
+    // Lengths in the design's units; an expression as written; one edge is one.
+    let inches = summary::Units { units: "in", decimals: 3 };
+    let one = json!({"command": "solid.fillet", "params": {"edges": [[0, 0, 0]], "radius": 2.54}});
+    assert_eq!(summary::summary("execute: solid.fillet", Some(&one), None, true, inches).as_deref(), Some("Fillet 1 edge (r 0.1 in)"));
+    let expr = json!({"command": "solid.extrude", "params": {"sketch": "Sketch1", "distance": "2 * depth"}});
+    assert_eq!(said("execute: solid.extrude", expr, None).as_deref(), Some("Extrude Sketch1 by 2 * depth"));
+    // A long batch names its first steps and counts the rest.
+    let steps: Vec<Value> = (0..6).map(|_| json!({"command": "edit.undo"})).collect();
+    assert_eq!(said("batch: edit.undo", json!({"commands": steps}), None).as_deref(), Some("Undo, then Undo, then Undo, then Undo, and 2 more"));
+}
+
+/// Paths in a card never show their folders (the owner's "way too much"): the screenshot is just
+/// "Screenshot", files are their names, temporary files are not named, and the full text stays in
+/// Details and the tooltip.
+#[test]
+fn tool_cards_show_file_names_never_paths() {
+    let shot = r"ui.screenshot: C:\Users\bherbruck\AppData\Local\Temp\solidcraft-mcp-8608-b4c7b64\shot-0.png";
+    assert_eq!(said(shot, json!({}), None).as_deref(), Some("Screenshot"));
+    assert_eq!(said("mcp__solidcraft-app__ui.screenshot", json!({}), None).as_deref(), Some("Screenshot"));
+    // The fallback title (another agent's tools) is cut to file names; temp files drop out.
+    assert_eq!(summary::plain_title(shot), "ui.screenshot");
+    assert_eq!(summary::plain_title(r"Read C:\Users\Jane Doe\Documents\part.step"), "Read part.step");
+    assert_eq!(summary::plain_title(r"Write D:/work/out/block.solidcraft now"), "Write block.solidcraft now");
+    assert_eq!(summary::plain_title(r"Open \\nas\share\parts\bracket.step"), "Open bracket.step");
+    assert_eq!(summary::plain_title("Read /home/bherbruck/designs/part.step"), "Read part.step");
+    assert_eq!(summary::plain_title("Edit ~/designs/part.step."), "Edit part.step.");
+    assert_eq!(summary::plain_title("cat \"/home/me/a b.txt\" | head"), "cat \"a b.txt\" | head");
+    assert_eq!(summary::plain_title("Read /tmp/claude-1000/scratch/out.txt"), "Read");
+    assert_eq!(summary::plain_title("ui.render: /var/folders/xy/T/shot.png"), "ui.render");
+    assert_eq!(summary::plain_title("Run mcp__x__y with a/b and /"), "Run mcp__x__y with a/b and /");
+    // SolidCraft's own file tools: the name alone; a temp file has none.
+    assert_eq!(
+        said("export", json!({"path": "/home/me/cad/part.step"}), None).as_deref().map(|s| s.ends_with("part.step") && !s.contains('/')),
+        Some(true)
+    );
+    assert_eq!(
+        said("open", json!({"path": r"C:\cad\block.solidcraft"}), None).as_deref().map(|s| s.ends_with(" block.solidcraft") && !s.contains('\\')),
+        Some(true)
+    );
+    assert_eq!(said("save", json!({"path": "/tmp/x/block.solidcraft"}), None).as_deref(), Some("Save"));
+    assert_eq!(said("save", json!({"path": r"C:\Users\me\AppData\Local\Temp\a.solidcraft"}), Some("")).as_deref(), Some("Save"));
+}
+
+/// Another agent's own tools, an unknown command and malformed or hostile calls keep the card's
+/// title (no words), and nothing panics or grows without bound.
+#[test]
+fn unknown_or_malformed_tool_calls_keep_their_title_and_never_panic() {
+    for title in ["Read /etc/hosts", "mcp__github__create_issue", "mcp__github__save", "save /tmp/x.txt", "", "  ", "__", "mcp____"] {
+        assert_eq!(said(title, json!({"path": "x.solidcraft", "command": "solid.box"}), None), None, "{title}");
+    }
+    assert_eq!(said("execute: solid.nope", json!({"command": "solid.nope"}), None), None, "an unknown command");
+    assert_eq!(summary::summary("execute: solid.box", None, None, true, in_mm()), None, "arguments that did not parse");
+    let long = "x".repeat(100_000);
+    let many: Vec<Value> = (0..10_000).map(|i| json!({"command": format!("solid.{i}"), "params": {"distance": i}})).collect();
+    let hostile = [
+        json!(null),
+        json!([1, 2, 3]),
+        json!("text"),
+        json!({"command": 5, "params": "x"}),
+        json!({"command": "solid.box", "params": {"length": "", "width": [], "height": {"a": 1}}}),
+        json!({"command": "solid.box", "params": {"length": 1e308, "width": -1e308, "height": 0}}),
+        json!({"command": "solid.extrude", "params": {"sketch": long, "distance": long, "edges": [long], "angle": 1e300}}),
+        json!({"command": "solid.extrude", "params": {"sketch": "a\nb\u{0}\u{202e}c", "distance": -0.0}}),
+        json!({"commands": many}),
+        json!({"commands": [null, 1, {"command": "batch", "params": {"commands": [{"command": "solid.box"}]}}, {"id": "save"}]}),
+        json!({"body": ["Block"], "path": {"x": 1}, "name": 3, "value": null}),
+    ];
+    let outputs = [
+        None,
+        Some(""),
+        Some("{"),
+        Some("[]"),
+        Some(r#"{"bodies": [{"bbox": {"min": [1], "max": "x"}}]}"#),
+        Some(r#"{"created_bodies": [1, null, "B"]}"#),
+    ];
+    for tool in ["execute", "batch", "measure", "save", "export", "open", "new_design", "set_parameter", "mcp__solidcraft__batch"] {
+        for input in &hostile {
+            for output in outputs {
+                for done in [true, false] {
+                    if let Some(s) = summary::summary(tool, Some(input), output, done, in_mm()) {
+                        assert!(s.chars().count() <= 240 && !s.contains('\n'), "{tool}: {s}");
+                    }
+                }
+            }
+        }
+    }
+    let huge = format!("{{\"bodies\": [{}]}}", "{\"name\": \"B\"},".repeat(20_000));
+    assert_eq!(said("measure", json!({}), Some(&huge)).as_deref(), Some("Measure"), "a result too large is not read");
+}
+
+/// The card's title is the summary; the raw arguments and result wait behind Details until it is
+/// opened. A call with no words keeps its title.
+#[test]
+fn a_tool_card_shows_its_summary_and_keeps_the_json_behind_details() {
+    use crate::scenario::handle_at;
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    h.frames(3);
+    let input = json!({"command": "solid.extrude", "params": {"sketch": "Sketch1", "distance": 10}});
+    let output = r#"{"feature": 4, "name": "Extrude1", "created_bodies": []}"#;
+    let n = h.app.agent_chat.items.len();
+    h.app.agent_chat.items.push(Item::Tool {
+        id: "t".into(),
+        title: "execute: solid.extrude".into(),
+        kind: String::new(),
+        status: Some(ToolStatus::Completed),
+        input: Some(input.clone()),
+        output: Some(output.into()),
+    });
+    h.app.agent_chat.items.push(Item::Tool {
+        id: "u".into(),
+        title: "mcp__github__create_issue".into(),
+        kind: String::new(),
+        status: Some(ToolStatus::InProgress),
+        input: None,
+        output: None,
+    });
+    h.frames(3);
+    assert!(h.widget("Extrude Sketch1 by 10 mm").is_some(), "the summary is the card's title");
+    assert!(h.widget("execute: solid.extrude").is_none(), "the raw title is not shown");
+    assert!(h.widget("mcp__github__create_issue").is_some(), "a call with no words keeps its title");
+    assert!(h.widget("Details").is_some(), "the expander is named");
+    let pretty = serde_json::to_string_pretty(&input).unwrap();
+    assert!(h.widget("Arguments").is_none() && h.widget(&pretty).is_none() && h.widget(output).is_none(), "the JSON waits behind Details");
+    let card = handle_at(&format!("agent_chat:tool:{n}")).expect("the card");
+    h.call("ui.click", json!({"x": card.x, "y": card.y}));
+    h.frames(3);
+    assert!(h.widget("Arguments").is_some() && h.widget(&pretty).is_some(), "the arguments unfold");
+    assert!(h.widget("Result").is_some() && h.widget(output).is_some(), "and what it returned");
+}
+
+/// The card says "Screenshot"; the full temp path is only under Details.
+#[test]
+fn a_screenshot_card_hides_the_path_until_details() {
+    use crate::scenario::handle_at;
+    let mut h = crate::scenario::Harness::new();
+    h.call("ui.agent_chat", json!({"open": true}));
+    h.frames(3);
+    let path = r"C:\Users\bherbruck\AppData\Local\Temp\solidcraft-mcp-8608-b4c7b64\shot-0.png";
+    let n = h.app.agent_chat.items.len();
+    h.app.agent_chat.items.push(Item::Tool {
+        id: "s".into(),
+        title: format!("ui.screenshot: {path}"),
+        kind: String::new(),
+        status: Some(ToolStatus::Completed),
+        input: Some(json!({"path": path})),
+        output: Some(path.into()),
+    });
+    h.frames(3);
+    assert!(h.widget("Screenshot").is_some(), "the card says what it did");
+    assert!(h.widget(path).is_none() && h.widget(&format!("ui.screenshot: {path}")).is_none(), "no path in the card");
+    let card = handle_at(&format!("agent_chat:tool:{n}")).expect("the card");
+    h.call("ui.click", json!({"x": card.x, "y": card.y}));
+    h.frames(3);
+    assert!(h.widget("Result").is_some() && h.widget(path).is_some(), "Details holds the full path");
 }

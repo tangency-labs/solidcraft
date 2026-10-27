@@ -184,11 +184,10 @@ fn a_sketch_on_a_fixed_plane_costs_the_same_in_a_large_placed_design() {
     let plane = doc.add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Origin { name: "XZ".into() } }, Some("Datum")).unwrap();
     assert_eq!(counted(|| model.evaluate(&doc)), Counts::default(), "construction plane");
     assert!(model.result(plane).unwrap().error.is_none());
-    let datum = doc.feature(plane).unwrap().name.clone();
     let planes = [
         PlaneRef::Origin { name: "XY".into() },
         PlaneRef::Offset { base: Box::new(PlaneRef::Origin { name: "YZ".into() }), distance: "5 mm".into() },
-        PlaneRef::Construction { name: datum.into() },
+        PlaneRef::Construction { feature: plane.into() },
     ];
     for (k, plane) in planes.into_iter().enumerate() {
         let id = doc.add_feature(line_sketch(plane, Vec2::new(10.0, 1.0 + k as f64)), None).unwrap();
@@ -474,4 +473,146 @@ fn placed_bodies_taken_as_before_keep_their_measure() {
     let centroid = before.bodies[0].measure().unwrap().centroid;
     let again = world_state_reusing(&doc, &state, &mut cache);
     assert_eq!(counted(|| assert_eq!(again.bodies[0].measure().unwrap().centroid, centroid)).measures, 0);
+}
+
+#[test]
+fn shared_evaluation_requires_its_actual_model_and_unmodified_geometry_inputs() {
+    let mut doc = Document::new("shared evaluation");
+    let feature = doc
+        .add_feature(
+            FeatureKind::Box {
+                corner: point_expr(Vec3::ZERO),
+                length: "2".into(),
+                width: "3".into(),
+                height: "4".into(),
+                operation: Operation::NewBody,
+            },
+            None,
+        )
+        .unwrap();
+    let mut doc = Arc::new(doc);
+    let mut model = Model::new();
+    assert!(model.evaluate_shared(&doc));
+    let original = model.state();
+    assert!(!model.evaluate_shared(&doc));
+    assert_eq!(model.last_recomputed, 0);
+    assert!(Arc::ptr_eq(&original, &model.state()));
+
+    // A geometry edit must be seen even when a caller did not evaluate it before moving.
+    let FeatureKind::Box { length, .. } = &mut Arc::make_mut(&mut doc).feature_mut(feature).unwrap().kind else { panic!("box") };
+    *length = "5".into();
+    assert!(model.evaluate_shared(&doc));
+    assert!((model.state().bodies[0].measure().unwrap().volume - 60.).abs() < 1e-8);
+    assert!((original.bodies[0].measure().unwrap().volume - 24.).abs() < 1e-8);
+    assert!(!model.evaluate_shared(&doc));
+
+    let mut other_doc = (*doc).clone();
+    let FeatureKind::Box { length, .. } = &mut other_doc.feature_mut(feature).unwrap().kind else { panic!("box") };
+    *length = "7".into();
+    let mut other = Model::new();
+    other.evaluate(&other_doc);
+    model.results = other.results;
+    assert!(model.evaluate_shared(&doc), "replaced results cannot use the retained proof");
+    assert_eq!(model.state().bodies.len(), 1);
+    model.no_cache = true;
+    assert!(model.evaluate_shared(&doc));
+    model.no_cache = false;
+    assert!(model.evaluate_shared(&doc));
+    let ahead = model.clone();
+    model.prime(&ahead);
+    assert!(model.evaluate_shared(&doc), "primed results use normal evaluation");
+    model.unprime();
+    assert!(model.evaluate_shared(&doc));
+    model.evaluate(&doc);
+    assert!(model.evaluate_shared(&doc), "the borrowed-document API invalidates the shared-input proof");
+    Arc::make_mut(&mut doc).set_param("Width", "6 mm", None, None).unwrap();
+    let FeatureKind::Box { width, .. } = &mut Arc::make_mut(&mut doc).feature_mut(feature).unwrap().kind else { panic!("box") };
+    *width = "Width".into();
+    assert!(model.evaluate_shared(&doc));
+    assert!((model.state().bodies[0].measure().unwrap().volume - 120.).abs() < 1e-8);
+    Arc::make_mut(&mut doc).set_param("Width", "9 mm", None, None).unwrap();
+    assert!(model.evaluate_shared(&doc));
+    assert!((model.state().bodies[0].measure().unwrap().volume - 180.).abs() < 1e-8);
+    // A primitive's label can change its result without replacing the geometry state.
+    // Restoring the earlier document must restore that label and fingerprint too.
+    let name = doc.feature(feature).unwrap().name.clone();
+    let mut renamed = (*doc).clone();
+    renamed.feature_mut(feature).unwrap().name = "Renamed box".into();
+    assert!(model.rename_feature(&renamed, feature));
+    assert!(model.evaluate_shared(&doc), "refingerprinted results must not keep the old shared-input proof");
+    assert_eq!(model.result(feature).unwrap().name, name);
+    assert!(model.is_current(&doc));
+}
+
+#[test]
+fn shared_imported_mesh_inputs_keep_payload_identity_and_invalidate_replacements() {
+    let mut doc = Document::new("shared mesh input");
+    let component = doc.add_component(Some("Part"), 0).unwrap();
+    let feature = doc
+        .add_feature(
+            FeatureKind::MeshImport {
+                file: "triangle.stl".into(),
+                meshes: vec![MeshData {
+                    name: "Triangle".into(),
+                    positions: Arc::from([0., 0., 0., 1., 0., 0., 0., 1., 0.]),
+                    triangles: Arc::from([0, 1, 2]),
+                    color: None,
+                }],
+            },
+            None,
+        )
+        .unwrap();
+    doc.feature_mut(feature).unwrap().component = component;
+    let mut doc = Arc::new(doc);
+    let mut model = Model::new();
+    assert!(model.evaluate_shared(&doc));
+    let original = model.state();
+    Arc::make_mut(&mut doc).occurrences[0].transform = rigid(Vec3::new(10., 0., 0.), Vec3::ZERO, Vec3::Z, 0.3);
+    assert!(!model.evaluate_shared(&doc));
+    assert!(Arc::ptr_eq(&original, &model.state()));
+    for edit in 0..5 {
+        let FeatureKind::MeshImport { meshes, .. } = &mut Arc::make_mut(&mut doc).feature_mut(feature).unwrap().kind else { panic!("mesh") };
+        let mesh = &mut meshes[0];
+        match edit {
+            0 => Arc::make_mut(&mut mesh.positions)[3] = 2.,
+            1 => Arc::make_mut(&mut mesh.triangles).swap(1, 2),
+            2 => mesh.color = Some([0.2, 0.4, 0.6]),
+            3 => mesh.name = "Renamed".into(),
+            _ => mesh.positions = Arc::from(mesh.positions.to_vec()),
+        }
+        assert!(model.evaluate_shared(&doc), "mesh edit {edit} must invalidate");
+        assert!(model.results.iter().all(|r| r.error.is_none()));
+        let mut fresh = Model::new();
+        fresh.no_cache = true;
+        fresh.evaluate(&doc);
+        let (actual, expected) = (model.state(), fresh.state());
+        assert_eq!(actual.bodies[0].name, expected.bodies[0].name);
+        let (actual, expected) = (actual.bodies[0].mesh(), expected.bodies[0].mesh());
+        assert_eq!(actual.positions, expected.positions);
+        assert_eq!(actual.triangles, expected.triangles);
+        assert_eq!(actual.normals, expected.normals);
+        assert!(!model.evaluate_shared(&doc));
+    }
+}
+
+#[test]
+fn shared_evaluation_refreshes_live_sketches_and_keeps_unknown_features_conservative() {
+    let mut doc = Document::new("live and unknown inputs");
+    let feature = doc.add_feature(line_sketch(PlaneRef::Origin { name: "XY".into() }, Vec2::new(2., 1.)), None).unwrap();
+    let mut doc = Arc::new(doc);
+    let mut model = Model::new();
+    assert!(model.evaluate_shared(&doc));
+    assert!(!model.evaluate_shared(&doc));
+    let solved = model.state().sketch(feature).unwrap().clone();
+    let mut live = solved.sketch.clone();
+    live.points[1].pos.y += 2.;
+    assert!(model.show_live_sketch(feature, live, solved.report.clone()));
+    assert!(model.is_stale());
+    assert!(model.evaluate_shared(&doc));
+    assert!(!model.is_stale());
+    assert_eq!(model.state().sketch(feature).unwrap().sketch.points, solved.sketch.points);
+    Arc::make_mut(&mut doc).add_feature(FeatureKind::ConstructionPlane { plane: PlaneRef::Origin { name: "XY".into() } }, None).unwrap();
+    assert!(model.evaluate_shared(&doc));
+    assert!(model.results.iter().all(|r| r.error.is_none()));
+    assert!(model.evaluate_shared(&doc), "an unclassified feature must keep the ordinary evaluation path");
 }

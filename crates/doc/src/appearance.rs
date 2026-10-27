@@ -324,6 +324,21 @@ pub(crate) fn closest_on_triangle(p: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
 mod tests {
     use super::*;
 
+    /// Only an appearance change is appearance-only: with any other field changed too, or with
+    /// nothing changed, the model must be evaluated as usual.
+    #[test]
+    fn appearance_only_changes_are_proved_on_the_whole_document() {
+        let before = crate::Document::default();
+        let mut painted = before.clone();
+        painted.appearances.bodies.insert("Body1".into(), Look::custom([255, 0, 0], 0.5));
+        assert!(painted.differs_only_in_appearance(&before));
+        assert!(before.differs_only_in_appearance(&painted), "clearing it too");
+        assert!(!before.differs_only_in_appearance(&before.clone()), "nothing changed");
+        let mut mixed = painted.clone();
+        mixed.materials.insert("Body1".into(), "Steel".into());
+        assert!(!mixed.differs_only_in_appearance(&before), "a material change is not appearance-only");
+    }
+
     #[test]
     fn library_and_materials() {
         assert_eq!(library("abs - red").map(|l| l.color), Some([196, 40, 40]));

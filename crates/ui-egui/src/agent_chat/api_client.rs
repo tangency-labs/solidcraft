@@ -329,6 +329,7 @@ impl Worker {
                     title: Some(title),
                     kind: Some(String::new()),
                     status: Some(ToolStatus::InProgress),
+                    input: c.arguments.as_ref().ok().filter(|a| a.is_object()).cloned(),
                     output: None,
                 });
                 let (text, failed) = if self.cancel.load(Ordering::Relaxed) {
@@ -350,6 +351,7 @@ impl Worker {
                     title: None,
                     kind: None,
                     status: Some(if failed { ToolStatus::Failed } else { ToolStatus::Completed }),
+                    input: None,
                     output: Some(shown),
                 });
                 match self.cfg.protocol {

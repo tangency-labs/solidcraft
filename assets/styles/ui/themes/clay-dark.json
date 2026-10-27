@@ -1,0 +1,275 @@
+{
+  "base": "dark",
+  "colors": {
+    "accent": "#e8845e",
+    "accent_soft": "#44281d",
+    "agent_busy": "#6daff7",
+    "agent_ok": "#89cf8e",
+    "app_bar": "#1b1814",
+    "app_bar_hover": "#e4e1dd14",
+    "app_bar_hover_button": "#e4e1dd18",
+    "app_bar_hover_strong": "#e4e1dd22",
+    "app_bar_hover_subtle": "#e4e1dd0c",
+    "app_bar_icon": [
+      "#c3bdb5",
+      "#706354",
+      "#e8845e"
+    ],
+    "app_bar_separator": "#5d5246",
+    "app_bar_tab_active": "#29241f",
+    "app_bar_text": "#c3bdb5",
+    "axis_x": "#f85052",
+    "axis_y": "#89cf8e",
+    "axis_z": "#6daff7",
+    "bend_down": "#ab9acd",
+    "bend_up": "#89cf8e",
+    "body": "#8b8378",
+    "body_edge": "#1b1814",
+    "body_selected": "#b8603f",
+    "border": "#403930",
+    "box_crossing": "#89cf8e",
+    "box_window": "#6daff7",
+    "chip": "#e8845e",
+    "construction_geom": "#ceb687",
+    "construction_plane": "#ceb68740",
+    "continuity": [
+      "#89cf8e",
+      "#6daff7",
+      "#e6af2b",
+      "#f38bb7"
+    ],
+    "control_border": "#5d5246",
+    "control_fill": "#3c352d",
+    "cube_border": "#706354",
+    "cube_face": "#3c352d",
+    "cube_hover": "#5d5246",
+    "cube_text": "#e4e1dd",
+    "dialog_bg": "#312b25",
+    "dialog_body": "#312b25",
+    "dialog_border": "#4b4238",
+    "dialog_footer": "#29241f",
+    "dialog_label": "#c3bdb5",
+    "dialog_rule": "#403930",
+    "dimension": "#c3bdb5",
+    "dimension_driven": "#9d9285",
+    "error": "#f85052",
+    "field": "#3c352d",
+    "form_accent": "#a6a2fc",
+    "form_dim": "#9d9285",
+    "form_error": "#ff6060",
+    "form_error_fill": "#37292b",
+    "form_fill": "#a6a2fc",
+    "form_ink": "#ece6d9",
+    "form_primary": "#e8845e",
+    "form_soft": "#2f3043",
+    "form_success": "#89cf8e",
+    "form_success_fill": "#2c3631",
+    "form_tab_ink": "#a6a2fc",
+    "gizmo": [
+      "#ff6060",
+      "#98dfa2",
+      "#7abfff"
+    ],
+    "glyph_bg": "#312b25",
+    "glyph_edge": "#5d5246",
+    "glyph_text": "#ab9acd",
+    "grid": "#373029",
+    "grid_major": "#3c352d",
+    "heading_bg": "#221e1a",
+    "hover": "#4b4238",
+    "hover_edge": "#1b1814",
+    "hover_edge_halo": "#e4e1dd",
+    "hover_profile": "#e4e1dd22",
+    "hover_profile_edge": "#c3bdb5",
+    "icon": "#c3bdb5",
+    "icon_fill": "#5d5246",
+    "icons.access": [
+      "#89cf8e",
+      "#f85052"
+    ],
+    "icons.agent": "#aba3ff",
+    "icons.axes": [
+      "#f85052",
+      "#89cf8e",
+      "#6daff7"
+    ],
+    "icons.curvature": [
+      "#6daff7",
+      "#89cf8e",
+      "#f85052"
+    ],
+    "icons.draft": [
+      "#89cf8e",
+      "#e6af2b"
+    ],
+    "icons.floor": "#4b4238",
+    "icons.fold": "#8a7b68",
+    "icons.folder": "#ceb687",
+    "icons.glint": "#fdfcfca0",
+    "icons.highlight": "#e4e1dd",
+    "icons.interference": "#f85052",
+    "icons.marker_halo": "#1b181496",
+    "icons.paint": [
+      "#f85052",
+      "#6daff7",
+      "#e6af2b"
+    ],
+    "icons.plane": "#dcc9a0",
+    "icons.sheet": "#a2bedb",
+    "icons.sheet_2": "#8fb0d2",
+    "icons.sheet_light": "#dcd8d3",
+    "icons.sheet_line": "#6daff7",
+    "icons.sky": "#a2bedb",
+    "icons.stripe": "#1b1814",
+    "icons.warning": "#e6af2b",
+    "interference": "#f85052",
+    "logo": [
+      "#f0a07f",
+      "#e8845e",
+      "#b1573a"
+    ],
+    "manipulator": "#7abfff",
+    "mesh_accent": "#cfc152",
+    "mesh_fill": "#cfc152",
+    "mesh_ink": "#cfc152",
+    "mesh_soft": "#363624",
+    "on_accent": "#1d1a17",
+    "origin_plane": "#9d928538",
+    "origin_plane_edge": "#9d9285c8",
+    "origin_plane_hover": "#6daff770",
+    "origin_point": "#c3bdb5",
+    "overlay": "#221e1af0",
+    "panel": "#221e1a",
+    "panel_header": "#312b25",
+    "preview_add": "#4c78a7",
+    "preview_cut": "#f850526e",
+    "preview_new": "#e6af2b",
+    "preview_sketch": "#8eca96",
+    "profile_fill": "#6daff71c",
+    "render_accent": "#f38bb7",
+    "render_fill": "#f38bb7",
+    "render_ink": "#f38bb7",
+    "render_soft": "#3d2c36",
+    "rubber_band": "#7abfff",
+    "section_cap": "#ceb687",
+    "sel_edge": "#e8845e",
+    "sel_edge_rim": "#f5b9a0",
+    "sel_face": "#d4693f",
+    "sel_profile": "#e8845eb0",
+    "sel_profile_edge": "#e8845e",
+    "sel_vertex": "#e8845e",
+    "selected_bg": "#4d3329",
+    "selected_ink": "#ece6d9",
+    "sheet_fill": "#6daff7",
+    "sheet_ink": "#6daff7",
+    "sheet_soft": "#253242",
+    "sketch": "#6daff7",
+    "sketch_accent": "#8eca96",
+    "sketch_centerline": "#c3bdb5",
+    "sketch_construction": "#ceb687",
+    "sketch_fixed": "#e4e1dd",
+    "sketch_ink": "#8eca96",
+    "sketch_locked": "#89cf8e",
+    "sketch_lost": "#f85052",
+    "sketch_point": "#e4e1dd",
+    "sketch_point_free": "#6daff7",
+    "sketch_projected": "#998cb3",
+    "sketch_soft": "#2b3730",
+    "subheading_bg": "#29241f",
+    "surface_accent": "#ceb687",
+    "surface_fill": "#ceb687",
+    "surface_ink": "#ceb687",
+    "surface_soft": "#36342e",
+    "tab_on_fill_dark": "#1b1814",
+    "text": "#ece6d9",
+    "text_dim": "#9d9484",
+    "timeline": "#221e1a",
+    "timeline_item": "#312b25",
+    "timeline_item_error": "#552f31",
+    "timeline_marker": "#e8845e",
+    "toolbar": "#221e1a",
+    "triad": [
+      "#f85052",
+      "#89cf8e",
+      "#6daff7"
+    ],
+    "viewport_bottom": "#29241f",
+    "viewport_top": "#312b25",
+    "warning": "#e6af2b"
+  },
+  "format": "solidcraft-theme/1",
+  "name": "Clay Dark",
+  "radii": {
+    "radius_sm": 6,
+    "radius_md": 9,
+    "radius_lg": 13,
+    "radius_xl": 18,
+    "control_radius": 9,
+    "sketch_mode_radius": 10
+  },
+  "borders": {
+    "primary": {
+      "width": 1,
+      "color": "#4a433b"
+    },
+    "secondary": {
+      "width": 1,
+      "color": "#3b362f"
+    },
+    "tertiary": {
+      "width": 1,
+      "color": "#332f2a"
+    },
+    "container": {
+      "width": 1,
+      "color": "#443d35"
+    },
+    "control": {
+      "width": 1,
+      "color": "#4a433b"
+    }
+  },
+  "icon_palette": {
+    "ink": "#262320",
+    "line": "#ece6d9",
+    "passive-1": "#c5bdae",
+    "passive-2": "#9a9283",
+    "passive-3": "#6f6859",
+    "guide": "#a6a093",
+    "solid": [
+      "#a0d7fb",
+      "#65bdf3",
+      "#4aa3d8"
+    ],
+    "surface": [
+      "#fcc28e",
+      "#dea572",
+      "#c38c59"
+    ],
+    "mesh": [
+      "#e8cd7d",
+      "#cab060",
+      "#b19747"
+    ],
+    "form": [
+      "#d5c4fd",
+      "#b9a7df",
+      "#a08fc4"
+    ],
+    "sketch": [
+      "#b0dbc0",
+      "#94bea4",
+      "#7ba58b"
+    ],
+    "constraint": [
+      "#febbb9",
+      "#fb8e8d",
+      "#e57071"
+    ],
+    "construction": [
+      "#fcc28e",
+      "#dea572",
+      "#c38c59"
+    ]
+  }
+}

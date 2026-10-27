@@ -17,8 +17,12 @@ use crate::{Result, Session};
 mod drag;
 #[path = "component_matrix.rs"]
 pub(super) mod matrix;
+#[path = "component_placing.rs"]
+pub(super) mod placing;
 #[path = "component_properties.rs"]
 pub(super) mod properties;
+#[path = "component_reparent.rs"]
+mod reparent;
 #[path = "component_transfer.rs"]
 mod transfer;
 
@@ -55,11 +59,21 @@ pub static COMMANDS: &[CommandSpec] = &[
         "component: removes the rigid joints that hold its contents together (an imported assembly's rigid group), so its parts \
          move and take joints one by one → joints (the ids removed)",
     ),
-    CommandSpec::new("component.move_bodies", "Move Bodies to Component", move_bodies).icon("move").params("bodies: [names], component"),
+    CommandSpec::new("component.move_bodies", "Move Bodies to Component", move_bodies).icon("move").params(
+        "bodies: [names], component; component_path?: its placement to place them by (default: its only one, else the active \
+         one; a component placed more than once gets them in every instance); from_path?: the placement of their component they \
+         move from (default: its only one, else its first, where its bodies have their own names)",
+    ),
+    CommandSpec::new("component.copy_bodies", "Paste Bodies", copy_bodies).icon("paste").params(
+        "bodies: [names, as the Browser shows them: a body seen in another placement of its component (`Cube (B:2)`) is copied \
+         from there]; component?: where the copies go (default: the active one); component_path?: its placement to place them \
+         by (default: its only one, else the active one; a component placed more than once gets them in every instance). Each \
+         copy stays where its body is in the world; the copies' names come back as `bodies`",
+    ),
     CommandSpec::new("component.move_sketches", "Move Sketches to Component", move_sketches).icon("move").params("sketches: [ids or names], component"),
     CommandSpec::new("occurrence.copy", "Paste (Instance)", copy_occurrence).icon("copy")
-        .params("component (or occurrence): what to place again; path?: validates selected occurrence; parent?: component (default: the same parent); translate?: [x,y,z]. Copies the selected effective transform, including pending moves"),
-    CommandSpec::new("component.paste_new", "Paste New", paste_new).icon("paste").params("component: independently copy its nested definition graph and history, materials and styles; occurrence?, path?: selected source placement; translate?: [x,y,z]. Reassigned external bodies become base geometry; retained external links and omitted boundary joints are reported"),
+        .params("component (or occurrence): what to place again; path?: validates selected occurrence; parent?: component (default: the same parent); translate?: [x,y,z]; in_place?: bool (default false: the selected transform within the parent; true: where the selected placement is in the world, translate in world axes; a parent placed more than once is placed by parent_path?, else the active placement, and every instance gets the copy). Copies the selected effective transform, including pending moves"),
+    CommandSpec::new("component.paste_new", "Paste New", paste_new).icon("paste").params("component: independently copy its nested definition graph and history, materials and styles; occurrence?, path?: selected source placement; parent?: component the copy goes in (default: the source placement's; not the component or one inside it); in_place?, parent_path?: as occurrence.copy; translate?: [x,y,z]. Reassigned external bodies become base geometry; retained external links and omitted boundary joints are reported"),
     CommandSpec::new("occurrence.move", "Move Occurrence", move_occurrence).icon("move")
         .params("occurrence; path?: exact placement; space?: local|world (default local); translate?: [x,y,z]; axis?: [x,y,z], angle?: radians or \"30 deg\", origin?: [x,y,z]; matrix?: [12 or 16 numbers] (instead of translate/axis/angle/origin: a rigid move as a row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows; one that is a rotation only up to rounding is orthonormalised, a scale, shear or mirror is refused); tolerance?: largest accepted |RᵀR − I| (default 1e-9, at most 1e-3); capture?: bool (default true; false keeps it pending until Capture Position); move_grounded?: bool (default false: a grounded occurrence refuses; true moves it and it stays grounded). Nested occurrence definitions remain shared"),
     CommandSpec::new("occurrence.drag", "Drag Occurrence", drag::drag).icon("move").params(
@@ -68,6 +82,11 @@ pub static COMMANDS: &[CommandSpec] = &[
          moves stay pending. Shared definitions move in all placements. Grounded parts and parts joints hold to something fixed are refused (joint.reach moves those)",
     ),
     CommandSpec::new("occurrence.ground", "Ground", ground).icon("ground").params("occurrence; grounded?: bool (default toggles)"),
+    CommandSpec::new("occurrence.reparent", "Move to Component", reparent::reparent).icon("move").params(
+        "occurrence; path?: exact placement; parent: component id or name (0 or \"root\" for the design); parent_path?: the parent's \
+         placement to place it by (default: its only one, else the active one; every instance of the parent gets it). The placement \
+         keeps its world position; a move that would break a feature is refused",
+    ),
     CommandSpec::new("component.capture_position", "Capture Position", capture).at("SOLID", "POSITION").icon("capture").params("keeps pending occurrence moves"),
     CommandSpec::new("component.revert_position", "Revert Position", revert).at("SOLID", "POSITION").icon("revert").noundo().params("occurrences?: [ids] (default all); drops selected pending occurrence moves"),
 ];
@@ -303,6 +322,74 @@ fn move_bodies(s: &mut Session, p: &Value) -> Result<Value> {
     transfer::move_bodies(s, p)
 }
 
+/// Copies of bodies in a component (Ctrl+C, Ctrl+V on bodies): each body is copied in place in
+/// its own component, then the copies move to the target keeping their place in the world, as
+/// `component.move_bodies` keeps it. One step to undo.
+fn copy_bodies(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "component.copy_bodies";
+    let to = if p.get("component").is_some() { component(s, p, "component", cmd)? } else { s.active_component };
+    let names = string_list(p, "bodies");
+    if names.is_empty() || names.len() > 1000 {
+        return Err(bad(cmd, "`bodies` must list 1…1000 bodies"));
+    }
+    let state = s.model.state();
+    // Bodies by their component, and the placement they are copied as: a body is named as its
+    // component's first placement shows it, and one seen in another placement (`Cube (B:2)`) is
+    // that body, copied from where that placement shows it.
+    let mut groups: std::collections::BTreeMap<(u64, Option<Vec<u64>>), Vec<String>> = std::collections::BTreeMap::new();
+    let mut placed_bodies = None;
+    for name in &names {
+        if let Some(body) = state.body(name) {
+            groups.entry((s.doc.model_body_component(body), None)).or_default().push(name.clone());
+            continue;
+        }
+        let placed = placed_bodies.get_or_insert_with(|| s.doc.body_frames_with_source(&state));
+        let (_, source, component, path, _) = placed.iter().find(|(shown, ..)| shown == name).ok_or_else(|| bad(cmd, format!("no body `{name}`")))?;
+        groups.entry((*component, Some(path.clone()))).or_default().push(source.clone());
+    }
+    drop(state);
+    let mut scratch = s.scratch();
+    let mut copies = Vec::new();
+    for ((from, from_path), bodies) in groups {
+        // The copy is made where its body is, so it starts out in the same place.
+        scratch.active_component = from;
+        scratch.active_occurrence_path = None;
+        let mut made = string_list(&scratch.execute("solid.move", &json!({"bodies": bodies, "copy": true}))?, "created_bodies");
+        // Each copy is its body's name numbered as all copies are (`Cube (2)`, `Cube (2)(2)`): the
+        // move names a copy of `Cube (2)` `Cube (2) (2)`.
+        if made.len() == bodies.len() {
+            for (copy, original) in made.iter_mut().zip(&bodies) {
+                let state = scratch.model.state();
+                let name = solidcraft_doc::copy_name(original, |n| n != copy.as_str() && state.body(n).is_some());
+                drop(state);
+                if name != *copy {
+                    scratch.execute("body.rename", &json!({"body": copy, "name": name}))?;
+                    *copy = name;
+                }
+            }
+        }
+        // The active placement again: a target placed more than once is placed by it.
+        scratch.active_component = s.active_component;
+        scratch.active_occurrence_path = s.active_occurrence_path.clone();
+        if from != to && !made.is_empty() {
+            let mut moved = json!({"bodies": made, "component": to});
+            if let Some(path) = p.get("component_path") {
+                moved["component_path"] = path.clone();
+            }
+            if let Some(path) = from_path {
+                moved["from_path"] = json!(path);
+            }
+            transfer::move_bodies(&mut scratch, &moved)?;
+        }
+        copies.extend(made);
+    }
+    // The steps above are this command's one undo step.
+    scratch.undo.clear();
+    scratch.selection = copies.iter().map(|name| crate::Sel::Body { name: name.clone() }).collect();
+    s.accept_computed(scratch);
+    Ok(json!({"bodies": copies, "component": to}))
+}
+
 pub(crate) fn transfer_constructor_result(s: &mut Session, p: &Value) -> Result<Value> {
     transfer::move_result(s, p)
 }
@@ -350,8 +437,12 @@ pub(super) fn copy_occurrence(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let parent = if p.get("parent").is_some() { component(s, p, "parent", cmd)? } else { src.parent };
     let t = move_vector(p, "translate", Vec3::ZERO, true, cmd)?;
-    let base = s.pending_moves.get(&src.id).unwrap_or(&src.transform);
-    let m = solidcraft_doc::mat_mul(&translation(t), base);
+    let m = if bool_(p, "in_place") == Some(true) {
+        placing::in_place(s, &occurrence_path(s, p, src.id, cmd)?, parent, placing::parent_path(p, cmd)?.as_deref(), t, cmd)?
+    } else {
+        let base = s.pending_moves.get(&src.id).unwrap_or(&src.transform);
+        solidcraft_doc::mat_mul(&translation(t), base)
+    };
     if !valid_position(&m) {
         return Err(bad(cmd, "copy transform exceeds supported numeric range"));
     }
@@ -380,12 +471,21 @@ fn paste_new(s: &mut Session, p: &Value) -> Result<Value> {
         s.doc.occurrence_of(comp).cloned()
     };
     let t = move_vector(p, "translate", Vec3::ZERO, true, cmd)?;
-    let base = occ.as_ref().map(|o| s.pending_moves.get(&o.id).copied().unwrap_or(o.transform)).unwrap_or(solidcraft_doc::IDENTITY);
-    let transform = solidcraft_doc::mat_mul(&translation(t), &base);
+    let parent = if p.get("parent").is_some() { component(s, p, "parent", cmd)? } else { occ.as_ref().map(|o| o.parent).unwrap_or(src.parent) };
+    // A copy of a component holds what the component holds: not a place for it to go.
+    if s.doc.inside_component(parent, comp) {
+        return Err(bad(cmd, format!("can't paste a copy of {} inside itself", src.name)));
+    }
+    let transform = match occ.as_ref().filter(|_| bool_(p, "in_place") == Some(true)) {
+        Some(o) => placing::in_place(s, &occurrence_path(s, p, o.id, cmd)?, parent, placing::parent_path(p, cmd)?.as_deref(), t, cmd)?,
+        None => {
+            let base = occ.as_ref().map(|o| s.pending_moves.get(&o.id).copied().unwrap_or(o.transform)).unwrap_or(solidcraft_doc::IDENTITY);
+            solidcraft_doc::mat_mul(&translation(t), &base)
+        }
+    };
     if !valid_position(&transform) {
         return Err(bad(cmd, "copy transform exceeds supported numeric range"));
     }
-    let parent = occ.as_ref().map(|o| o.parent).unwrap_or(src.parent);
     super::component_clone::paste(s, comp, occ, transform, parent, p)
 }
 

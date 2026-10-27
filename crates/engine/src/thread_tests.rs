@@ -150,6 +150,149 @@ fn tapped_thread_depth_rejects_invalid_or_excessive_values_atomically() {
     assert_eq!(s.doc.to_json(), before);
 }
 
+#[test]
+fn thread_handedness_cosmetic_defaults_and_save_reopen_keep_axis_and_extent() {
+    use solidcraft_doc::{Document, FeatureKind, ThreadHandedness};
+    for (hole, designation) in [(false, "M6"), (true, "M6"), (true, "G 1/4"), (true, "1/4-20 UNC")] {
+        let mut reference = None;
+        for hand in [None, Some("right"), Some("left")] {
+            let mut s = Session::default();
+            let (command, mut params) = if hole {
+                run(&mut s, "solid.box", json!({"length":20,"width":20,"height":10}));
+                (
+                    "solid.hole",
+                    json!({"position":[10,10,10],"thread":designation,"depth":6,"thread_depth":3,
+                        "references":[{"edge":[0,10,10],"distance":"7 mm"},{"edge":[10,0,10],"distance":"8 mm"}]}),
+                )
+            } else {
+                run(&mut s, "solid.cylinder", json!({"radius":3,"height":6}));
+                ("solid.thread", json!({"face":[3,0,2],"designation":"M6","length":4}))
+            };
+            if let Some(hand) = hand {
+                params["handedness"] = json!(hand);
+            }
+            run(&mut s, command, params);
+            let expected = if hand == Some("left") { ThreadHandedness::Left } else { ThreadHandedness::Right };
+            let info = s.model.state().threads[0].clone();
+            assert_eq!(info.handedness, expected);
+            if hole {
+                assert!((info.end - info.start - 3.0).abs() < 1e-8, "direction must retain the independent thread depth");
+            }
+            let dimensions = (info.axis_point, info.axis, info.start, info.end, info.major_diameter, info.pitch);
+            assert_eq!(*reference.get_or_insert(dimensions), dimensions, "direction must not change axis, length or size");
+            let mut kind = serde_json::to_value(&s.doc.features.last().unwrap().kind).unwrap();
+            assert_eq!(kind.get("handedness"), (expected == ThreadHandedness::Left).then(|| json!("left")).as_ref());
+            // An old feature with no field still deserializes to Right, for both feature types.
+            kind.as_object_mut().unwrap().remove("handedness");
+            let old: FeatureKind = serde_json::from_value(kind).unwrap();
+            assert!(matches!(
+                old,
+                FeatureKind::Hole { handedness: ThreadHandedness::Right, .. } | FeatureKind::Thread { handedness: ThreadHandedness::Right, .. }
+            ));
+            let reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+            assert_eq!(reopened.model.state().threads[0], info);
+        }
+    }
+}
+
+#[test]
+fn thread_handedness_invalid_values_fail_without_changing_the_document() {
+    for hole in [false, true] {
+        let mut s = Session::default();
+        run(&mut s, "solid.cylinder", json!({"radius":3,"height":6}));
+        let saved = s.doc.to_json();
+        for hand in [json!("clockwise"), json!("LEFT"), json!(null), json!(true), json!(1)] {
+            let (command, params) = if hole {
+                ("solid.hole", json!({"position":[0,0,6],"thread":"M6","handedness":hand}))
+            } else {
+                ("solid.thread", json!({"face":[3,0,2],"designation":"M6","handedness":hand}))
+            };
+            assert!(s.execute(command, &params).unwrap_err().to_string().contains("handedness"));
+            assert_eq!(s.doc.to_json(), saved);
+        }
+        if hole {
+            assert!(s.execute("solid.hole", &json!({"position":[0,0,6],"diameter":2,"handedness":"left"})).is_err());
+            assert_eq!(s.doc.to_json(), saved);
+        }
+    }
+}
+
+#[test]
+fn thread_handedness_modelled_internal_and_external_keep_chirality_and_bounded_volume() {
+    use solidcraft_doc::Document;
+    for internal in [false, true] {
+        let mut bodies = Vec::new();
+        for hand in ["right", "left"] {
+            let mut s = Session::default();
+            run(&mut s, "solid.cylinder", json!({"radius":if internal {6.0} else {3.0},"height":4,"body_name":"Stock"}));
+            if internal {
+                run(&mut s, "solid.hole", json!({"position":[0,0,4],"diameter":5}));
+            }
+            let face = json!([if internal { 2.5 } else { 3.0 }, 0, 3.5]);
+            run(&mut s, "solid.thread", json!({"face":face,"designation":"M6x1","length":3,"modeled":true,"handedness":hand}));
+            let state = s.model.state();
+            let body = state.body("Stock").unwrap().body.clone();
+            assert!(body.validity().is_empty(), "{internal}/{hand}: {:?}", body.validity());
+            let before = volume(&mut s, "Stock");
+            let mut reopened = Session::new(Document::from_json(&s.doc.to_json()).unwrap());
+            assert!((volume(&mut reopened, "Stock") - before).abs() < 1e-8);
+            let brep_volume = crate::kernel::measure(&body).unwrap().volume;
+            bodies.push((body, before, brep_volume));
+        }
+        let [(right, vr, br), (left, vl, bl)] = bodies.as_slice() else { panic!("two directions") };
+        eprintln!("handedness internal={internal}: mesh_mm3={vr}/{vl}, brep_mm3={br}/{bl}");
+        for body in [right, left] {
+            let mesh = body.tessellate(0.001).unwrap();
+            let low = mesh.positions.iter().map(|p| p.z).fold(f64::INFINITY, f64::min);
+            let high = mesh.positions.iter().map(|p| p.z).fold(f64::NEG_INFINITY, f64::max);
+            assert!(low.abs() < 1e-8 && (high - 4.0).abs() < 1e-8, "physical axial bounds: {low}/{high}");
+            for z in [0.25, 1.5, 2.5, 3.75] {
+                assert_eq!(body.contains(Vec3::new(0.0, 0.0, z)), !internal, "axis stays solid in a shaft and open in a bore");
+                if internal {
+                    for i in 0..24 {
+                        let a = 2.0 * PI * i as f64 / 24.0;
+                        assert!(body.contains(Vec3::new(4.5 * a.cos(), 4.5 * a.sin(), z)), "the outer wall remains whole");
+                    }
+                }
+            }
+        }
+        let radius = if internal { 2.75 } else { 2.65 };
+        let mut different = 0;
+        for z in [0.4, 1.1, 1.4, 1.8, 2.2, 2.6, 3.1, 3.5] {
+            for i in 0..24 {
+                let angle = 2.0 * PI * (i as f64 + 0.17) / 24.0;
+                let p = Vec3::new(radius * angle.cos(), radius * angle.sin(), z);
+                let reflected = Vec3::new(-p.x, p.y, p.z);
+                assert_eq!(right.contains(p), left.contains(reflected), "actual mirrored helix: {internal} at {p:?}");
+                different += usize::from(right.contains(p) != left.contains(p));
+                if z < 1.0 {
+                    assert!(right.contains(p), "the 3 mm thread must leave the lower stub unchanged");
+                }
+            }
+        }
+        assert!(different > 20, "Left must change real geometry, not just metadata: {internal}: {different}");
+        // The sweep itself is an exact reflection (doc test). The existing Boolean first
+        // facets the curved stock within pitch * .005 mm. A nominal stock-faceting
+        // regression envelope uses radial annuli [r-d, r+d], with flat caps unchanged:
+        // pi*h*((r+d)^2-(r-d)^2) = 4*pi*h*r*d, summed over the outer and bore cylinders.
+        // Exact-set cutting would not enlarge the stock's symmetric difference. The BSP
+        // and rebuild also use numerical epsilons, so this conservative secondary ceiling
+        // is not a rigorous bound on every Boolean error, nor a precision/equal-volume proof.
+        let delta = 1.0 * 0.005;
+        let radii = if internal { 6.0 + 2.5 } else { 3.0 };
+        let budget = 4.0 * PI * 4.0 * radii * delta;
+        eprintln!(
+            "handedness internal={internal}: post_boolean_delta_mm3={}, stock_faceting_budget_mm3={budget}, relative_delta={}",
+            (br - bl).abs(),
+            (br - bl).abs() / br
+        );
+        assert!(
+            (br - bl).abs() <= budget,
+            "post-Boolean volume exceeds the configured stock faceting envelope: {internal}: {br}/{bl}, budget {budget}"
+        );
+    }
+}
+
 /// Keep the original 48-station reproduction of the shell error even though new fine
 /// threads now use more stations. The same cut polygons must rebuild as a closed solid.
 #[test]

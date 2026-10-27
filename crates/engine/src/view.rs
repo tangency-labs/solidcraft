@@ -848,10 +848,15 @@ fn sketch_component_visible(s: &Session, id: u64) -> bool {
     s.occurrence_visible(&path)
 }
 
-/// Is a sketch used by a later feature?
+/// Is a sketch used by a later feature? A sheet metal base or contour flange uses its sketch as
+/// an Extrude does: shown, its lines lie on the sheet's edges and take the clicks meant for
+/// them (#6804).
 pub fn sketch_consumed(s: &Session, id: u64) -> bool {
     use solidcraft_doc::FeatureKind;
-    s.doc.features.iter().any(|f| matches!(f.kind, FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. } if sketch == id))
+    s.doc.features.iter().any(|f| {
+        matches!(f.kind, FeatureKind::Extrude { sketch, .. } | FeatureKind::Revolve { sketch, .. }
+            | FeatureKind::SheetBase { sketch, .. } | FeatureKind::SheetContour { sketch, .. } if sketch == id)
+    })
 }
 
 /// Camera framing the model (iso view).

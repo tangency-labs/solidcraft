@@ -6,7 +6,9 @@
 //!
 //! A click selects a dimension (Delete removes it), a drag moves its text (and so the offset of
 //! its dimension line), a double-click (or one click with the Dimension tool) edits its value
-//! in place with parameter completion.
+//! in place with parameter completion. A finished sketch's shown dimensions (Show Dimensions,
+//! drawn by `crate::browser::dims_overlay`) take the same double-click from the model view: the
+//! value is edited without editing the sketch.
 //! Everything acts through commands: `sketch.dimension_text`, `sketch.delete`,
 //! `parameters.change`.
 
@@ -18,7 +20,9 @@ use egui::{FontId, Pos2, Rect, Shape, Stroke, vec2};
 use serde_json::json;
 use solidcraft_engine::Sel;
 use solidcraft_engine::geom::Vec2;
-use solidcraft_engine::sketch::{ConstraintKind, DimFrame, chain_centres, default_text, dim_frame, dim_layout_reaching, dim_reach};
+use solidcraft_engine::sketch::{
+    ConstraintKind, DimFrame, chain_centres, default_text, default_text_offset, dim_frame, dim_layout_reaching, dim_reach,
+};
 
 use crate::SolveApp;
 use crate::theme::Tokens;
@@ -55,6 +59,9 @@ struct Edit {
     /// The last dimension a click referenced, and when: the second click of a double-click on
     /// it must not insert its name again.
     picked: Option<(String, f64)>,
+    /// A shown dimension of a finished sketch, edited from the model view without editing the
+    /// sketch (its id). None: a dimension of the sketch being edited.
+    sketch: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -148,7 +155,7 @@ pub fn begin_dimension(app: &mut SolveApp, entities: Vec<String>, at: Vec2) -> R
     }
     EDIT.with(|edit| {
         *edit.borrow_mut() =
-            Some(Edit { param, expr, at: None, fresh: FRESH, wait: 10, draft: Some(draft), live: None, selection: None, picked: None })
+            Some(Edit { param, expr, at: None, fresh: FRESH, wait: 10, draft: Some(draft), live: None, selection: None, picked: None, sketch: None })
     });
     PLACEMENT.with(|preview| *preview.borrow_mut() = None);
     Ok(())
@@ -168,7 +175,8 @@ pub fn begin_live(app: &mut SolveApp, entities: Vec<String>, pointer: Option<Pos
     }
     let live = Some(Live { origin: pointer, moved: false, typed: false });
     EDIT.with(|edit| {
-        *edit.borrow_mut() = Some(Edit { param, expr, at: None, fresh: FRESH, wait: 10, draft: Some(draft), live, selection: None, picked: None })
+        *edit.borrow_mut() =
+            Some(Edit { param, expr, at: None, fresh: FRESH, wait: 10, draft: Some(draft), live, selection: None, picked: None, sketch: None })
     });
     PLACEMENT.with(|preview| *preview.borrow_mut() = None);
     Ok(true)
@@ -329,6 +337,64 @@ thread_local! {
     static DRAG: RefCell<Option<(String, usize, Vec2)>> = const { RefCell::new(None) };
     static EDIT: RefCell<Option<Edit>> = const { RefCell::new(None) };
     static PLACEMENT: RefCell<Option<Placement>> = const { RefCell::new(None) };
+    /// Value texts of finished sketches' shown dimensions (Show Dimensions), as the model view
+    /// drew them last frame: sketch, constraint id, parameter (None: driven), text box.
+    static MODEL: RefCell<Vec<ModelDim>> = const { RefCell::new(Vec::new()) };
+}
+
+/// A shown dimension of a finished sketch, as drawn in the model view (screen space).
+#[derive(Clone, Debug)]
+pub(crate) struct ModelDim {
+    pub sketch: u64,
+    pub id: String,
+    pub param: Option<String>,
+    pub text: Rect,
+}
+
+/// Remember the finished sketches' dimensions the model view drew this frame.
+pub(crate) fn set_model_drawn(dims: Vec<ModelDim>) {
+    MODEL.with(|m| *m.borrow_mut() = dims);
+}
+
+/// The finished sketch's shown dimension whose value text is under a screen position.
+fn model_hit(pos: Pos2) -> Option<ModelDim> {
+    MODEL.with(|m| m.borrow().iter().rev().find(|x| x.text.expand(2.0).contains(pos)).cloned())
+}
+
+/// Shown dimensions of finished sketches drawn last frame: (sketch, id, text centre), for tests
+/// and the control channel.
+pub fn model_drawn() -> Vec<(u64, String, Pos2)> {
+    MODEL.with(|m| m.borrow().iter().map(|x| (x.sketch, x.id.clone(), x.text.center())).collect())
+}
+
+/// A double-click on a finished sketch's shown dimension (outside sketch editing) opens its value
+/// in the same inline editor, without editing the sketch or moving the view (true: it was on one).
+/// Enter changes the dimension's own expression through `parameters.change`, one undo step.
+pub fn model_double_click(app: &mut SolveApp, pos: Pos2) -> bool {
+    if app.session.active_sketch.is_some() {
+        return false;
+    }
+    let Some(d) = model_hit(pos) else { return false };
+    let Some(param) = d.param else {
+        app.set_status("A driven dimension measures the sketch; it has no value to edit", false);
+        return true;
+    };
+    let expr = app.session.doc.param(&param).map(|p| p.expr.clone()).unwrap_or_default();
+    EDIT.with(|e| {
+        *e.borrow_mut() = Some(Edit {
+            param,
+            expr,
+            at: Some(d.text.center()),
+            fresh: FRESH,
+            wait: 0,
+            draft: None,
+            live: None,
+            selection: None,
+            picked: None,
+            sketch: Some(d.sketch),
+        })
+    });
+    true
 }
 
 /// Frames the inline editor holds on to the keyboard after opening.
@@ -405,8 +471,18 @@ fn open_editor(app: &mut SolveApp, id: Option<String>) -> bool {
     };
     let expr = app.session.doc.param(&param).map(|p| p.expr.clone()).unwrap_or_default();
     EDIT.with(|e| {
-        *e.borrow_mut() =
-            Some(Edit { param, expr, at: Some(d.text.center()), fresh: FRESH, wait: 0, draft: None, live: None, selection: None, picked: None })
+        *e.borrow_mut() = Some(Edit {
+            param,
+            expr,
+            at: Some(d.text.center()),
+            fresh: FRESH,
+            wait: 0,
+            draft: None,
+            live: None,
+            selection: None,
+            picked: None,
+            sketch: None,
+        })
     });
     true
 }
@@ -508,9 +584,31 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
     let st = app.session.world_state();
     let Some(ss) = app.session.active_sketch.and_then(|s| st.sketch(s)) else {
         DRAWN.with(|d| d.borrow_mut().clear());
-        EDIT.with(|e| *e.borrow_mut() = None);
+        // Only a finished sketch's dimension edited from the model view stays open, at its text.
+        let model = EDIT.with(|e| {
+            let mut e = e.borrow_mut();
+            let keep = e.as_ref().and_then(|x| x.sketch).is_some_and(|s| app.session.active_sketch.is_none() && st.sketch(s).is_some());
+            if !keep {
+                *e = None;
+            } else if let Some(x) = e.as_mut()
+                && let Some(d) = MODEL.with(|m| m.borrow().iter().find(|d| d.param.as_deref() == Some(x.param.as_str())).cloned())
+            {
+                x.at = Some(d.text.center());
+            }
+            keep
+        });
+        if model {
+            edit_box(app, ui.ctx());
+        }
         return;
     };
+    // Editing a sketch closes a value opened from the model view.
+    EDIT.with(|e| {
+        let mut e = e.borrow_mut();
+        if e.as_ref().is_some_and(|x| x.sketch.is_some()) {
+            *e = None;
+        }
+    });
     let sk = &ss.sketch;
     if sk.view.hide_dimensions {
         DRAWN.with(|d| d.borrow_mut().clear());
@@ -531,6 +629,9 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         let ours = |c: &&solidcraft_engine::sketch::Constraint| c.param.as_deref() == Some(param.as_str()) || (c.driven && c.id == *param);
         constraints.extend(source.sketch.constraints.iter().filter(ours).map(|c| (source, c, true)));
     }
+    // Text boxes already drawn this frame, in draw order: a later dimension that would land
+    // on one of them steps clear of it (#44).
+    let mut placed: Vec<Rect> = Vec::new();
     for (source, c, is_draft) in constraints {
         if ss.sketch.view.hide_dimensions && !is_draft {
             continue;
@@ -569,7 +670,25 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         let half = Vec2::new(f64::from(size.x) * 0.5 * px, f64::from(size.y) * 0.5 * px);
         // Unplaced linear dimensions sit outside the shape they measure.
         let away = first_point(sk, &c.kind).and_then(|p| centres.get(p).copied()).unwrap_or(anchor);
-        let lay = dim_layout_reaching(&frame, c.text.or_else(|| default_text(&frame, away, px)), px, half, dim_reach(sk, &c.kind));
+        let reach = dim_reach(sk, &c.kind);
+        let mut text = c.text.or_else(|| default_text(&frame, away, px));
+        let mut lay = dim_layout_reaching(&frame, text, px, half, reach);
+        // #44: a text that would land on an already-drawn dimension's text steps to the next
+        // row — across the dimension line for a linear one, out from the centre for the rest —
+        // so stacked dimensions read as rows instead of one overwriting the next.
+        for _ in 0..6 {
+            let Some(t) = to(lay.text) else { break };
+            if !placed.iter().any(|q| q.expand(-0.5).intersects(Rect::from_center_size(t, size).expand(-0.5))) {
+                break;
+            }
+            let row = (f64::from(size.y) + 2.0) * px;
+            let base = text.unwrap_or_else(|| default_text_offset(&frame, px));
+            text = Some(match frame {
+                DimFrame::Linear { .. } => base + Vec2::new(0.0, row * if base.y < 0.0 { -1.0 } else { 1.0 }),
+                _ => base + base.normalized().unwrap_or(Vec2::X) * row,
+            });
+            lay = dim_layout_reaching(&frame, text, px, half, reach);
+        }
         let stroke = Stroke::new(1.0, col);
         let mut segs = Vec::new();
         for line in &lay.lines {
@@ -586,6 +705,7 @@ pub fn show(app: &mut SolveApp, ui: &egui::Ui, painter: &egui::Painter, proj: &P
         }
         let Some(tc) = to(lay.text) else { continue };
         let r = Rect::from_center_size(tc, size);
+        placed.push(r);
         painter.rect_filled(r, tk.radius_sm / 2, tk.viewport_top.gamma_multiply(0.85));
         painter.galley(r.min + vec2(3.0, 1.0), galley, col);
         if matches!(frame, DimFrame::ArcLength { .. }) {
@@ -635,8 +755,18 @@ fn pos2_mid_top(r: Rect) -> Pos2 {
 pub fn edit_param(app: &SolveApp, param: &str) {
     let expr = app.session.doc.param(param).map(|p| p.expr.clone()).unwrap_or_default();
     EDIT.with(|e| {
-        *e.borrow_mut() =
-            Some(Edit { param: param.to_string(), expr, at: None, fresh: FRESH, wait: 10, draft: None, live: None, selection: None, picked: None })
+        *e.borrow_mut() = Some(Edit {
+            param: param.to_string(),
+            expr,
+            at: None,
+            fresh: FRESH,
+            wait: 10,
+            draft: None,
+            live: None,
+            selection: None,
+            picked: None,
+            sketch: None,
+        })
     });
 }
 
@@ -694,8 +824,13 @@ pub fn pick_reference(ctx: &egui::Context, pos: Pos2, double: bool) -> bool {
     EDIT.with(|editor| {
         let mut editor = editor.borrow_mut();
         let Some(edit) = editor.as_mut() else { return false };
-        let Some(id) = hit(pos) else { return false };
-        let param = DRAWN.with(|d| d.borrow().iter().find(|d| d.id == id).and_then(|d| d.param.clone()));
+        let param = if edit.sketch.is_some() {
+            let Some(d) = model_hit(pos) else { return false };
+            d.param
+        } else {
+            let Some(id) = hit(pos) else { return false };
+            DRAWN.with(|d| d.borrow().iter().find(|d| d.id == id).and_then(|d| d.param.clone()))
+        };
         // Self references and driven dimensions cannot supply a reference.
         if let Some(param) = param.filter(|p| p != &edit.param) {
             let now = ctx.input(|i| i.time);
@@ -1079,6 +1214,60 @@ mod tests {
         assert_eq!(h.app.session.doc.to_json(), baseline);
         assert_eq!(h.app.session.undo.len(), undo);
         cancel();
+    }
+
+    /// Two dimensions whose texts were placed on the same spot: the later one steps to the
+    /// next row instead of sitting on the first (#44).
+    #[test]
+    fn dimension_texts_placed_on_each_other_step_clear() {
+        cancel();
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[0,10],[20,10]],"infer":false})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[0,0],[20,0]],"infer":false})).unwrap();
+        // Both texts are placed at the same sketch point: unnudged, they would coincide.
+        h.app.run("sketch.dimension", json!({"entities":["l1"],"text_at":[10,20]})).unwrap();
+        h.app.run("sketch.dimension", json!({"entities":["l2"],"text_at":[10,20]})).unwrap();
+        h.call("ui.view", json!({"view":"top"}));
+        h.app.cam.distance = 90.;
+        h.app.cam.target = solidcraft_engine::geom::Vec3::new(10., 10., 0.);
+        h.settle();
+        let rects = crate::dim_view::text_rects();
+        assert_eq!(rects.len(), 2, "{rects:?}");
+        let want = h.at(&json!({"world":[10., 20., 0.]})).unwrap();
+        let first = rects[0].1.center();
+        assert!((first.x as f64 - want[0]).abs() < 1.5 && (first.y as f64 - want[1]).abs() < 1.5, "the first text stays where it was clicked");
+        assert!(!rects[0].1.expand(-0.5).intersects(rects[1].1.expand(-0.5)), "the second text stepped clear: {:?} {:?}", rects[0].1, rects[1].1);
+    }
+
+    /// Editing a dimension's value moves the geometry it measures; its placed text keeps its
+    /// offset from that geometry rather than jumping to the default place (#44).
+    #[test]
+    fn a_dimension_text_keeps_its_offset_from_the_geometry_when_edited() {
+        cancel();
+        let mut h = crate::scenario::Harness::new();
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        h.app.run("sketch.line", json!({"points":[[0,10],[20,10]],"infer":false})).unwrap();
+        let param = h.app.run("sketch.dimension", json!({"entities":["l1"],"text_at":[10,25]})).unwrap()["param"].as_str().unwrap().to_string();
+        h.call("ui.view", json!({"view":"top"}));
+        h.app.cam.distance = 120.;
+        h.app.cam.target = solidcraft_engine::geom::Vec3::new(10., 12., 0.);
+        h.settle();
+        h.app.run("parameters.change", json!({"name":param,"expression":"30"})).unwrap();
+        h.settle();
+        let state = h.app.session.world_state();
+        let solved = state.sketch(h.app.session.active_sketch.unwrap()).unwrap();
+        let c = solved.sketch.constraints.iter().find(|c| c.param.as_deref() == Some(param.as_str())).unwrap();
+        // The placed offset (15 above the measured line) is kept with the dimension.
+        assert_eq!(c.text, Some(Vec2::new(0.0, 15.0)), "{c:?}");
+        // And the text draws at that offset from the edited geometry, not at the default place.
+        let DimFrame::Linear { p0, p1, dir } = dim_frame(&solved.sketch, &c.kind).unwrap() else { panic!("a length dimension is linear") };
+        let t = c.text.unwrap();
+        let want = h
+            .at(&json!({"world":[(p0 + p1).x * 0.5 + dir.x * t.x + dir.perp().x * t.y, (p0 + p1).y * 0.5 + dir.y * t.y + dir.perp().y * t.y, 0.]}))
+            .unwrap();
+        let shown = crate::dim_view::text_at(&param).unwrap();
+        assert!((shown.x as f64 - want[0]).abs() < 1.5 && (shown.y as f64 - want[1]).abs() < 1.5, "the text stayed put relative to the geometry");
     }
 
     #[test]

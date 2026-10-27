@@ -641,14 +641,13 @@ pub(crate) fn status_palette_sample(ui: &mut Ui, mode: ColorVision) {
 }
 
 /// The names under the Colour vision sample (message ids).
-#[cfg(test)]
 pub(crate) const COLOUR_VISION_SAMPLE: [&str; 6] =
     ["ui.colour_vision_fixed", "ui.colour_vision_projected", "ui.axes", "Bends", "ui.draft", "ui.colour_vision_failed"];
 
 /// The Colour vision sample (#778): fixed and projected sketch lines, the X and Y axes, bends up
 /// and down, Draft Analysis and a failed feature, each drawn as it is where it appears, in the
-/// colours on now. The six cells share one responsive, clipped area.
-#[cfg(test)]
+/// colours of `t` (the preference passes the mode being chosen, #7152). The six cells share one
+/// responsive, clipped area.
 pub(crate) fn colour_vision_sample(ui: &mut egui::Ui, t: &Tokens) {
     let width = (dimension(ui.available_width()) / COLOUR_VISION_SAMPLE.len() as f32).min(t.space_24 * 3.0);
     let line_width = t.space_4;

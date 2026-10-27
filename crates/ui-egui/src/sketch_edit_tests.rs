@@ -238,3 +238,132 @@ mod view_corner {
         assert!(scenario::rect_of("view:confirm").is_some(), "the pair answers the sketch again");
     }
 }
+
+/// The "When a sketch ends" preference (#7038): back to the view from before the sketch, or back
+/// only when the sketch view was panned or zoomed and not turned. Keep, the default, is above.
+mod exit_view_preference {
+    use crate::prefs::SketchExitView;
+    use crate::scenario::Harness;
+    use serde_json::json;
+    use solidcraft_engine::render::Camera;
+
+    /// A sketch on XY started from the iso view with `choice` set, and that iso view.
+    fn sketching(choice: SketchExitView) -> (Harness, Camera) {
+        let mut h = Harness::new();
+        h.app.preferences.sketch_exit_view = choice;
+        h.call("ui.view", json!({"view": "iso"}));
+        h.settle();
+        let iso = h.app.cam;
+        h.step(&json!({"start": "sketch.create"})).unwrap();
+        h.step(&json!({"click": {"plane": "XY"}})).unwrap();
+        h.settle();
+        crate::scenario::check(&mut h, &json!({"sketching": true, "camera": {"yaw_deg": 0, "pitch_deg": 90}})).unwrap();
+        (h, iso)
+    }
+
+    fn pan_and_zoom(h: &mut Harness) {
+        h.app.cam.pan(25.0, 15.0, 800.0);
+        h.app.cam.zoom_at(0.5, None);
+        h.app.cam_anim = None;
+    }
+
+    fn finish(h: &mut Harness) {
+        h.app.run("sketch.line", json!({"points": [[0, 0], [30, 10]]})).unwrap();
+        h.app.finish_sketch();
+        h.settle();
+        assert_eq!(h.app.session.active_sketch, None);
+    }
+
+    #[test]
+    fn keep_is_the_default() {
+        assert_eq!(crate::prefs::Prefs::default().sketch_exit_view, SketchExitView::Keep);
+    }
+
+    #[test]
+    fn previous_goes_back_after_a_turn() {
+        let (mut h, iso) = sketching(SketchExitView::Previous);
+        h.app.cam.orbit(60.0, -40.0);
+        pan_and_zoom(&mut h);
+        finish(&mut h);
+        assert_eq!(h.app.cam, iso);
+    }
+
+    #[test]
+    fn unless_rotated_goes_back_after_only_panning_and_zooming() {
+        let (mut h, iso) = sketching(SketchExitView::UnlessRotated);
+        pan_and_zoom(&mut h);
+        finish(&mut h);
+        assert_eq!(h.app.cam, iso);
+    }
+
+    #[test]
+    fn unless_rotated_keeps_a_turned_view() {
+        let (mut h, _) = sketching(SketchExitView::UnlessRotated);
+        h.app.cam.orbit(60.0, -40.0);
+        pan_and_zoom(&mut h);
+        let cam = h.app.cam;
+        finish(&mut h);
+        assert_eq!(h.app.cam, cam);
+    }
+
+    #[test]
+    fn double_escape_and_cancel_go_back_too() {
+        let (mut h, iso) = sketching(SketchExitView::Previous);
+        h.app.cam.orbit(60.0, -40.0);
+        h.app.cam_anim = None;
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.step(&json!({"key": "Escape"})).unwrap();
+        h.settle();
+        assert_eq!(h.app.session.active_sketch, None);
+        assert_eq!(h.app.cam, iso, "double Esc");
+
+        let (mut h, iso) = sketching(SketchExitView::Previous);
+        h.app.run("sketch.line", json!({"points": [[0, 0], [30, 10]]})).unwrap();
+        h.app.cam.orbit(60.0, -40.0);
+        h.app.cam_anim = None;
+        h.app.cancel_sketch();
+        h.settle();
+        assert_eq!(h.app.session.active_sketch, None);
+        assert_eq!(h.app.cam, iso, "Cancel");
+    }
+
+    #[test]
+    fn editing_a_sketch_goes_back_to_the_view_before_the_edit() {
+        let mut app = crate::test_support::sample_app();
+        app.preferences.sketch_exit_view = SketchExitView::Previous;
+        let id = super::first_sketch(&app);
+        let before = app.cam;
+        app.edit_sketch(id);
+        let facing = app.cam_anim.take().map(|a| a.to).unwrap();
+        app.cam = facing;
+        app.finish_sketch();
+        assert_eq!(app.settled_cam(), before);
+    }
+
+    #[test]
+    fn a_sketch_opened_by_a_command_leaves_the_view_alone() {
+        let (mut h, _) = sketching(SketchExitView::Previous);
+        // Finished by the command, so the views saved for this sketch stay behind.
+        h.app.run("sketch.finish", json!({})).unwrap();
+        assert!(h.app.pre_sketch_cam.is_some());
+        h.app.run("sketch.create", json!({"plane": "XZ"})).unwrap();
+        h.app.cam.orbit(60.0, -40.0);
+        h.app.cam_anim = None;
+        let cam = h.app.cam;
+        finish(&mut h);
+        assert_eq!(h.app.cam, cam, "the views saved for the earlier sketch don't apply");
+    }
+
+    #[test]
+    fn going_back_keeps_the_current_projection() {
+        let before = Camera::default();
+        let facing = Camera { yaw: 0.0, pitch: std::f64::consts::FRAC_PI_2, ..before };
+        let now = Camera { fov: 0.6, distance: 80.0, ..facing };
+        for choice in [SketchExitView::Previous, SketchExitView::UnlessRotated] {
+            assert_eq!(choice.view_after(before, facing, now), Some(Camera { fov: 0.6, ..before }), "{choice:?}");
+        }
+        assert_eq!(SketchExitView::Keep.view_after(before, facing, now), None);
+        let turned = Camera { yaw: 0.2, ..now };
+        assert_eq!(SketchExitView::UnlessRotated.view_after(before, facing, turned), None);
+    }
+}

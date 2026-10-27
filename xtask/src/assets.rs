@@ -38,7 +38,7 @@ fn walk(dir: &Path, root: &Path, out: &mut Vec<String>) -> Result<(), String> {
     for e in std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))? {
         let e = e.map_err(|e| e.to_string())?;
         let name = e.file_name().to_string_lossy().into_owned();
-        if name.starts_with('.') || name.starts_with("target") || matches!(name.as_str(), "plan" | "dist" | "node_modules") {
+        if name.starts_with('.') || name.starts_with("target") || matches!(name.as_str(), "plan" | "dist" | "node_modules" | "corpus") {
             continue;
         }
         let p = e.path();

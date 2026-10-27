@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Same Look — the bodies wearing this look selected</title>
+  <path d="M6.3 41.5L15.83 47L15.83 58L6.3 52.5Z" fill="#b8c3cf"/>
+  <path d="M25.36 41.5L15.83 47L15.83 58L25.36 52.5Z" fill="#8e9faf"/>
+  <path d="M15.83 36L25.36 41.5L15.83 47L6.3 41.5Z" fill="#e2e8ef"/>
+  <path d="M15.83 36L25.36 41.5L25.36 52.5L15.83 58L6.3 52.5L6.3 41.5Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M6.3 41.5L15.83 47L25.36 41.5" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M15.83 47L15.83 58" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M37.17 12L45.83 17L45.83 27L37.17 22Z" fill="#328bd3"/>
+  <path d="M54.48 12L45.83 17L45.83 27L54.48 22Z" fill="#236ead"/>
+  <path d="M45.83 7L54.48 12L45.83 17L37.17 12Z" fill="#b9ddf8"/>
+  <path d="M45.83 7L54.48 12L54.48 22L45.83 27L37.17 22L37.17 12Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M37.17 12L45.83 17L54.48 12" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M45.83 17L45.83 27" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M37.33 4L54.33 4A4.5 4.5 0 0 1 58.83 8.5L58.83 25.5A4.5 4.5 0 0 1 54.33 30L37.33 30A4.5 4.5 0 0 1 32.83 25.5L32.83 8.5A4.5 4.5 0 0 1 37.33 4Z" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M37.17 42L45.83 47L45.83 57L37.17 52Z" fill="#328bd3"/>
+  <path d="M54.48 42L45.83 47L45.83 57L54.48 52Z" fill="#236ead"/>
+  <path d="M45.83 37L54.48 42L45.83 47L37.17 42Z" fill="#b9ddf8"/>
+  <path d="M45.83 37L54.48 42L54.48 52L45.83 57L37.17 52L37.17 42Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M37.17 42L45.83 47L54.48 42" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M45.83 47L45.83 57" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M37.33 34L54.33 34A4.5 4.5 0 0 1 58.83 38.5L58.83 55.5A4.5 4.5 0 0 1 54.33 60L37.33 60A4.5 4.5 0 0 1 32.83 55.5L32.83 38.5A4.5 4.5 0 0 1 37.33 34Z" fill="none" stroke="#236ead" stroke-width="4.25" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="15.83" cy="17" r="11.5" fill="#328bd3"/>
+  <path d="M26.64 13.07A11.5 11.5 0 0 1 11.9 27.81A15.04 15.04 0 0 0 26.64 13.07Z" fill="#236ead"/>
+  <circle cx="11.92" cy="13.09" r="3.11" fill="#b9ddf8"/>
+  <circle cx="15.83" cy="17" r="11.5" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

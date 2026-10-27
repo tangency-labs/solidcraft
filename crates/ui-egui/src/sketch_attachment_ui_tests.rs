@@ -291,6 +291,7 @@ fn nested_anchor_saved_fixed_conversion_preserves_rotated_second_author_plane() 
         axis_origin: Vec3::ZERO,
         axis_dir: Vec3::X,
         angle: "15 deg".into(),
+        line: None,
     };
     h.app.session = solidcraft_engine::Session::new(document);
     let raw = h.app.session.doc.sketch(id).unwrap().clone();
@@ -412,10 +413,10 @@ fn redefine_panel_names_the_plane_a_sketch_is_on() {
         let id = h.app.run("sketch.create", json!({"plane": plane})).unwrap()["sketch"].as_u64().unwrap();
         h.app.run("sketch.finish", json!({})).unwrap();
         let FeatureKind::Sketch { plane: on, .. } = &h.app.session.doc.feature(id).unwrap().kind else { panic!("a sketch") };
-        assert_eq!(plane_description(on), expected, "{plane}");
+        assert_eq!(plane_description(&h.app.session.doc, on), expected, "{plane}");
     }
     let xy = Box::new(PlaneRef::Origin { name: "XY".into() });
     let offset = PlaneRef::Offset { base: xy.clone(), distance: "12 mm".into() };
-    assert_eq!(plane_description(&offset), "The XY plane, offset by 12 mm");
-    assert_eq!(plane_description(&PlaneRef::Flipped { base: xy, about_y: false }), "The XY plane, from its other side");
+    assert_eq!(plane_description(&h.app.session.doc, &offset), "The XY plane, offset by 12 mm");
+    assert_eq!(plane_description(&h.app.session.doc, &PlaneRef::Flipped { base: xy, about_y: false }), "The XY plane, from its other side");
 }

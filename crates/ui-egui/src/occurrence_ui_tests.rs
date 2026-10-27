@@ -99,10 +99,18 @@ fn occurrence_second_row_selects_exact_path_and_menu_actions() {
     assert!((bounds.center().x - 55.0).abs() < 1e-8);
     let target = Target::Occurrence { path: vec![second] };
     let items = context_menu::items(&h.app, &target);
-    let independent = items.iter().find(|i| i.id == "component.paste_new").unwrap();
-    assert_eq!(independent.label, "Paste New (Own Features)");
-    assert_eq!(independent.params.as_ref().unwrap()["occurrence"], second);
-    assert_eq!(independent.params.as_ref().unwrap()["path"], json!([second]));
+    // Copy takes this placement (the row right-clicked). Paste New pastes an independent copy of
+    // it into the design, never into itself: off on its own row, on on the design's.
+    let copy = items.iter().find(|i| i.id == "ui.copy").unwrap();
+    assert!(copy.enabled);
+    context_menu::run_item(&mut h.app, copy, egui::Pos2::ZERO);
+    assert_eq!(h.app.copied_placements, vec![vec![second]]);
+    let own = context_menu::items(&h.app, &target);
+    assert!(!own.iter().find(|i| i.id == "ui.pasteNew").unwrap().enabled, "not into itself");
+    let design = context_menu::items(&h.app, &Target::Component { id: 0 });
+    let independent = design.iter().find(|i| i.id == "ui.pasteNew").unwrap();
+    assert!(independent.enabled);
+    assert_eq!(independent.params.as_ref().unwrap()["component"], 0);
     let properties = items.iter().find(|i| i.id == "ui.properties").unwrap();
     assert_eq!(properties.params.as_ref().unwrap()["occurrence"], second);
     context_menu::run_item(&mut h.app, properties, egui::Pos2::ZERO);
@@ -300,4 +308,30 @@ fn a_body_dropped_on_a_bodies_folder_moves_into_that_component() {
     h.step(&json!({"drag": [pin, folder], "steps": 12})).unwrap();
     h.frames(3);
     assert_eq!(owner(&h, "Pin"), 0, "Pin moved back into the root component");
+}
+
+/// Paste on a component's row pastes inside it: never a component inside itself, so that Paste
+/// is off on its own row, and a copy of it pastes into its parent (here the design) from there.
+#[test]
+fn a_copied_component_pastes_into_its_parent_not_into_itself() {
+    let (mut h, component, _, second) = fixture();
+    click(&mut h, &[second], "row");
+    let own = Target::Occurrence { path: vec![second] };
+    let design = Target::Component { id: 0 };
+    let find = |h: &Harness, target: &Target, id: &str| context_menu::items(&h.app, target).into_iter().find(|i| i.id == id).unwrap();
+    assert!(!find(&h, &own, "ui.pasteNew").enabled, "nothing copied yet");
+    let copy = find(&h, &own, "ui.copy");
+    context_menu::run_item(&mut h.app, &copy, egui::Pos2::ZERO);
+    assert!(!find(&h, &own, "ui.paste").enabled, "not inside itself");
+    assert!(!find(&h, &own, "ui.pasteNew").enabled);
+    let paste = find(&h, &design, "ui.paste");
+    assert!(paste.enabled);
+    let before = h.app.session.doc.occurrences.len();
+    context_menu::run_item(&mut h.app, &paste, egui::Pos2::ZERO);
+    assert_eq!(h.app.session.doc.occurrences.len(), before + 1);
+    let pasted = h.app.session.doc.occurrences.last().unwrap().clone();
+    assert_eq!((pasted.component, pasted.parent), (component, 0), "an instance of Block, in the design");
+    assert_eq!(h.app.session.selection, vec![Sel::Occurrence { path: vec![pasted.id] }]);
+    assert!((pasted.transform[3][0] - 50.0).abs() < 1e-9, "where the copied instance is");
+    assert!(!crate::browser::is_open(&h.app, &format!("o:{}", pasted.id), true), "it arrives folded");
 }

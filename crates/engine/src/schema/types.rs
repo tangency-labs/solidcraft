@@ -41,11 +41,15 @@ pub(crate) const WHITESPACE: [(char, char); 10] = [
     ('\u{3000}', '\u{3000}'),
 ];
 
+/// [`WHITESPACE`] as the inside of a regex character class.
+fn whitespace_class() -> String {
+    let u = |c: char| format!("\\u{:04x}", c as u32);
+    WHITESPACE.iter().map(|&(a, b)| if a == b { u(a) } else { format!("{}-{}", u(a), u(b)) }).collect()
+}
+
 /// A pattern for text that isn't blank once trimmed: a character outside [`WHITESPACE`].
 pub(crate) fn not_blank_pattern() -> String {
-    let u = |c: char| format!("\\u{:04x}", c as u32);
-    let class: String = WHITESPACE.iter().map(|&(a, b)| if a == b { u(a) } else { format!("{}-{}", u(a), u(b)) }).collect();
-    format!("[^{class}]")
+    format!("[^{}]", whitespace_class())
 }
 
 /// `v` as the only key of an object, for the helpers that read `p.get(key)`.
@@ -96,6 +100,52 @@ expr_type!(
     "AngleExpr",
     "An angle: a number of degrees, or an expression such as \"30 deg\" or \"a / 2\"."
 );
+expr_type!(
+    /// A plain number, or an expression such as `"k / 2"`: a ratio or a factor, with no unit.
+    NumberExpr,
+    "NumberExpr",
+    "A number with no unit, or an expression such as \"k / 2\"."
+);
+
+/// Scale's `factors`: three factors, along X, Y and Z, each a [`NumberExpr`]. The handler takes
+/// any three values, reading an item that isn't text as its JSON text (`true`, `null`), and
+/// reports one that doesn't evaluate as a bad expression. Strict refuses, with this type's
+/// message, a blank item, a number of 1e9 or more in size, text over 4 KB, or one that isn't a
+/// number or an expression.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScaleFactors(pub [NumberExpr; 3]);
+
+impl<'de> Deserialize<'de> for ScaleFactors {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        match Value::deserialize(d)? {
+            Value::Array(a) if a.len() == 3 => {
+                let factors = a.into_iter().map(|v| params::expr(&wrap(v), "v").map(NumberExpr)).collect::<Option<Vec<_>>>();
+                factors
+                    .and_then(|f| <[NumberExpr; 3]>::try_from(f).ok())
+                    .map(ScaleFactors)
+                    .ok_or_else(|| D::Error::custom("must be three numbers or expressions"))
+            }
+            Value::Array(_) => Err(D::Error::custom(whole("`factors` must have three values"))),
+            _ => Err(D::Error::custom("must be three numbers or expressions")),
+        }
+    }
+}
+
+impl JsonSchema for ScaleFactors {
+    fn schema_name() -> Cow<'static, str> {
+        "ScaleFactors".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let f = generator.subschema_for::<NumberExpr>();
+        json_schema!({
+            "description": "Factors along X, Y and Z: three numbers or expressions.",
+            "type": "array",
+            "items": f,
+            "minItems": 3,
+            "maxItems": 3
+        })
+    }
+}
 
 /// A point in mm: `[x, y, z]` or `{x, y, z}` of finite numbers (read by `params::vec3`).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -190,6 +240,30 @@ impl JsonSchema for FacesParam {
         json_schema!({
             "description": "Points in mm, one on each of the coplanar faces of one body to extrude together.",
             "type": "array", "items": point, "minItems": 1, "maxItems": 1024
+        })
+    }
+}
+
+/// A direction given as an axis, as `features::axis_dir_param` reads it: X, Y or Z (trimmed, any
+/// case) or a non-zero `[x, y, z]` (or `{x, y, z}`), with its messages.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AxisDir(pub Vec3);
+
+impl<'de> Deserialize<'de> for AxisDir {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        crate::cmd::axis_dir_form(&Value::deserialize(d)?).map(AxisDir).map_err(|why| D::Error::custom(whole(why)))
+    }
+}
+
+impl JsonSchema for AxisDir {
+    fn schema_name() -> Cow<'static, str> {
+        "AxisDir".into()
+    }
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let point = generator.subschema_for::<Point3>();
+        json_schema!({
+            "description": "An axis: X, Y or Z (any case), or a direction [x, y, z] that isn't zero.",
+            "anyOf": [{"type": "string", "pattern": format!("^[{ws}]*[XYZxyz][{ws}]*$", ws = whitespace_class())}, point]
         })
     }
 }
@@ -769,7 +843,8 @@ pub struct FeatureCommon {
     /// Names for the new bodies, in order.
     #[serde(default)]
     pub body_names: Option<StringList>,
-    /// The bodies taking part; overrides the default scope.
+    /// The bodies taking part, each an existing body or `*`; what that changes depends on the
+    /// feature.
     #[serde(default)]
     pub participants: Option<StringList>,
 }

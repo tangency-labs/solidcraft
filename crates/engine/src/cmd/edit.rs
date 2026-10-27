@@ -12,6 +12,14 @@ use crate::{EngineError, Result, Sel, Session, Snapshot};
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("edit.undo", "Undo", undo).icon("undo").key("Ctrl+Z").noundo().doc_only(),
     CommandSpec::new("edit.redo", "Redo", redo).icon("redo").key("Ctrl+Y").noundo().doc_only(),
+    CommandSpec::new("edit.repeat", "Repeat Last Command", crate::checked!("edit.repeat", repeat))
+        .icon("redo")
+        .key("Shift+R")
+        .noundo()
+        .doc_only()
+        .contract(&REPEAT_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::RepeatResult>)
+        .params("Starts the last tool or dialog started in the app again, with its defaults (a toolbar click, not a replay of its values). Only the app has a tool to start: called here it is refused, and changes nothing"),
     CommandSpec::new("edit.checkpoint", "Checkpoint", checkpoint).icon("checkpoint")
         .noundo()
         .doc_only()
@@ -25,7 +33,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         .at("SOLID", "MODIFY")
         .icon("delete")
         .key("Delete")
-        .params("feature: id|name | features: [id|name] (one undo step; a sketch takes its dependent features with it) → deleted: [ids]; failing?: [{feature, error}] (later features that worked and now fail)"),
+        .params("feature: id|name | features: [id|name] | groups: [timeline folder ids] (a folder goes with all its features and nested folders; one undo step; a sketch takes its dependent features with it) → deleted: [ids]; groups?: [folder ids deleted]; failing?: [{feature, error}] (later features that worked and now fail)"),
     CommandSpec::new("timeline.rename", "Rename", rename).icon("rename").params("feature: id|name, name (references to it follow)"),
     CommandSpec::new("timeline.group", "New Feature Folder", group)
         .icon("folder")
@@ -55,8 +63,9 @@ pub static COMMANDS: &[CommandSpec] = &[
         .noundo()
         .params("feature: id|name → features deleted with it, and features that would fail without it"),
     CommandSpec::new("timeline.suppress", "Suppress Feature", suppress).icon("suppress").params(
-        "feature: id|name | features: [id|name] (one undo step), suppressed?: bool (default toggles: several features are all \
-         suppressed unless all of them already are, then all are unsuppressed) → feature: id (or features: [ids]), suppressed",
+        "feature: id|name | features: [id|name] | groups: [timeline folder ids] (every feature in those folders and their nested \
+         folders; one undo step), suppressed?: bool (default toggles: several features are all \
+         suppressed unless all of them already are, then all are unsuppressed) → feature: id (or features: [ids]; groups: [ids] when given), suppressed",
     ),
     CommandSpec::new("timeline.edit", "Edit Feature", edit_feature).icon("edit").params(
         "feature: id|name, set: {fields to change, merged into the feature's definition as timeline.inspect returns it, \
@@ -88,6 +97,16 @@ fn redo(s: &mut Session, _p: &Value) -> Result<Value> {
     let label = now.label.clone();
     s.undo.push(now);
     Ok(json!({"redone": label}))
+}
+
+const REPEAT_CONTRACT: crate::schema::TypedContract<crate::schema::edit::RepeatParams> = crate::schema::TypedContract::new();
+
+/// Repeat Last Command (#7077) starts a tool, which only the app has: it starts the last one in
+/// `SolveApp::start` and never reaches this. A script runs the command it wants itself.
+fn repeat(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(EngineError::Other(
+        "edit.repeat starts the last tool or dialog again in the app (its key, the canvas menu or command search); there is no tool to start here: run that command itself".into(),
+    ))
 }
 
 /// Put the session at `snap`; returns where it was, under the same label.
@@ -162,9 +181,13 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
             _ => String::new(),
         });
     }
-    if keys.is_empty() {
-        return Err(bad(cmd, "`features` must list features"));
+    let groups = group_ids(s, p, false, cmd)?;
+    if keys.is_empty() && groups.is_empty() {
+        return Err(bad(cmd, "`features` must list features, or `groups` timeline folders"));
     }
+    // A folder goes with its features and nested folders, its features in timeline order.
+    let (folders, contents) = group_tree(&s.doc, &groups);
+    keys.extend(s.doc.features.iter().filter(|f| contents.contains(&f.id)).map(|f| f.id.to_string()));
     // Features that work now; any of them failing after the delete is reported (a later
     // feature that names a deleted body, #267).
     let worked: std::collections::BTreeSet<u64> = s.model.results.iter().filter(|r| r.error.is_none() && !r.skipped).map(|r| r.id).collect();
@@ -177,6 +200,9 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
             continue;
         };
         gone.extend(s.doc_mut().delete_feature(id)?);
+    }
+    if !folders.is_empty() {
+        s.doc_mut().timeline_groups.retain(|group| !folders.contains(&group.id));
     }
     if s.active_sketch.is_some_and(|a| gone.contains(&a)) {
         s.active_sketch = None;
@@ -194,10 +220,14 @@ fn delete(s: &mut Session, p: &Value) -> Result<Value> {
         .filter(|r| worked.contains(&r.id))
         .filter_map(|r| r.error.as_ref().map(|e| json!({"feature": r.name, "error": e})))
         .collect();
-    if failing.is_empty() {
-        return Ok(json!({"deleted": gone}));
+    let mut out = json!({"deleted": gone});
+    if !folders.is_empty() {
+        out["groups"] = json!(folders);
     }
-    Ok(json!({"deleted": gone, "failing": failing}))
+    if !failing.is_empty() {
+        out["failing"] = json!(failing);
+    }
+    Ok(out)
 }
 
 fn rename(s: &mut Session, p: &Value) -> Result<Value> {
@@ -312,6 +342,11 @@ fn group_move_would_cycle(s: &Session, target: u64, sources: &[u64]) -> bool {
 }
 
 fn group_feature_ids(doc: &solidcraft_doc::Document, roots: &[u64]) -> std::collections::BTreeSet<u64> {
+    group_tree(doc, roots).1
+}
+
+/// The timeline folders `roots` and every folder nested in them, and the features they hold.
+fn group_tree(doc: &solidcraft_doc::Document, roots: &[u64]) -> (std::collections::BTreeSet<u64>, std::collections::BTreeSet<u64>) {
     let by_id: std::collections::BTreeMap<u64, &solidcraft_doc::TimelineGroup> = doc.timeline_groups.iter().map(|group| (group.id, group)).collect();
     let mut children = std::collections::BTreeMap::<u64, Vec<u64>>::new();
     for group in &doc.timeline_groups {
@@ -331,7 +366,7 @@ fn group_feature_ids(doc: &solidcraft_doc::Document, roots: &[u64]) -> std::coll
             pending.extend(children.get(&id).into_iter().flatten().copied());
         }
     }
-    features
+    (visited, features)
 }
 
 fn sort_group_features(doc: &mut solidcraft_doc::Document) {
@@ -620,7 +655,15 @@ fn counted_names_from(s: &Session, ids: &[u64]) -> Vec<(u64, Vec<String>)> {
 
 fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "timeline.suppress";
-    let ids = feature_ids(s, p, cmd)?;
+    let groups = group_ids(s, p, false, cmd)?;
+    let named = |key: &str| p.get(key).is_some_and(|v| !v.is_null());
+    let mut ids = if groups.is_empty() || named("feature") || named("features") { feature_ids(s, p, cmd)? } else { Vec::new() };
+    let contents = group_feature_ids(&s.doc, &groups);
+    let more: Vec<u64> = s.doc.features.iter().map(|f| f.id).filter(|id| contents.contains(id) && !ids.contains(id)).collect();
+    ids.extend(more);
+    if ids.is_empty() {
+        return Err(bad(cmd, "the timeline folders hold no features"));
+    }
     let want = match bool_(p, "suppressed") {
         Some(b) => b,
         None if p.get("suppressed").is_some_and(|v| !v.is_null()) => return Err(bad(cmd, "`suppressed` must be true or false")),
@@ -640,8 +683,9 @@ fn suppress(s: &mut Session, p: &Value) -> Result<Value> {
         f.suppressed = want;
     }
     match ids.as_slice() {
-        [id] if p.get("features").is_none_or(Value::is_null) => Ok(json!({"feature": id, "suppressed": want})),
-        _ => Ok(json!({"features": ids, "suppressed": want})),
+        [id] if groups.is_empty() && p.get("features").is_none_or(Value::is_null) => Ok(json!({"feature": id, "suppressed": want})),
+        _ if groups.is_empty() => Ok(json!({"features": ids, "suppressed": want})),
+        _ => Ok(json!({"features": ids, "groups": groups, "suppressed": want})),
     }
 }
 
@@ -952,6 +996,42 @@ fn command_profiles(set: &Value, cmd: &str) -> Result<Value> {
 /// the name and suppression, which timeline.rename and timeline.suppress change.
 const NOT_EDITABLE: &[&str] = &["id", "type", "name", "suppressed", "param_names", "edge_refs", "edge_names", "face_names"];
 
+/// timeline.edit keeps accepting names for pattern and mirror seeds and for construction planes
+/// (#1134): each name in the merged definition resolves to the feature's id, refused when it
+/// finds no feature, as the commands that take names refuse it.
+fn resolve_feature_names(v: &mut Value, doc: &solidcraft_doc::Document, cmd: &str) -> Result<()> {
+    match v {
+        Value::Object(o) => {
+            if o.get("type").and_then(Value::as_str) == Some("construction") {
+                // Only a construction plane's name becomes an id: a revolve axis with the same
+                // shape names a construction axis, which is still keyed by name.
+                if let Some(name) = o.get("name").and_then(Value::as_str)
+                    && let Some(f) = doc.find_feature(name).filter(|f| matches!(f.kind, FeatureKind::ConstructionPlane { .. }))
+                {
+                    o.remove("name");
+                    o.insert("feature".into(), json!(f.id));
+                }
+                return Ok(());
+            }
+            for (_, x) in o.iter_mut() {
+                resolve_feature_names(x, doc, cmd)?;
+            }
+            if let Some(Value::Array(seeds)) = o.get_mut("features") {
+                for s in seeds.iter_mut() {
+                    if let Value::String(name) = s {
+                        let name = name.clone();
+                        let id = doc.seed_feature(&name).ok_or_else(|| bad(cmd, format!("no feature `{name}`")))?;
+                        *s = json!(id.id);
+                    }
+                }
+            }
+            Ok(())
+        }
+        Value::Array(a) => a.iter_mut().try_for_each(|x| resolve_feature_names(x, doc, cmd)),
+        _ => Ok(()),
+    }
+}
+
 /// Large payloads that timeline.edit cannot change, left out of a feature's definition: (field,
 /// what it holds).
 fn heavy_fields(kind: &FeatureKind) -> &'static [(&'static str, &'static str)] {
@@ -1009,6 +1089,7 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     let set = &numbers_as_expressions(command_profiles(&set, cmd)?, &before);
     let mut v = before.clone();
     merge(&mut v, set, 0);
+    resolve_feature_names(&mut v, &s.doc, cmd)?;
     let mut nf: Feature = serde_json::from_value(v.clone()).map_err(|e| bad(cmd, format!("invalid feature: {e}")))?;
     nf.id = f.id;
     if let (FeatureKind::Extrude { extent: old, .. }, FeatureKind::Extrude { extent: new, .. }) = (&f.kind, &mut nf.kind)
@@ -1070,7 +1151,7 @@ fn edit_feature(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // Profiles picked by index or point are kept by their curves, as when the feature was made.
     if nf.kind.clone().profile_sels_mut() != f.kind.clone().profile_sels_mut() {
-        super::features::stable_profiles(s, &mut nf.kind)?;
+        super::features::stable_profiles(s, &mut nf.kind, false)?;
     }
     // New face points: their faces' names now.
     if nf.kind.face_points() != f.kind.face_points() {
@@ -1403,6 +1484,11 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     // Run the constructor on a scratch session: failed edits must not disturb sketch mode,
     // selections, component authoring state or the original feature's definition.
     let mut trial = s.scratch();
+    // What the trial computes is kept for the session's own evaluation at the end: the cache may
+    // hold only the last few states of a large design, which would be computed twice.
+    let kept = s.model.kept();
+    let shared = kept.clone().unwrap_or_default();
+    trial.model.keep(Some(shared.clone()));
     trial.active_component = old.component;
     if let FeatureKind::Emboss { face: Some(face), .. } = &old.kind {
         trial.active_occurrence_path = (!face.author_path.is_empty()).then(|| face.author_path.clone());
@@ -1436,7 +1522,7 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     }
     // The trial still holds the old feature, so a plane offset from its own name was made there,
     // and once swapped in it would be built on itself (#3567).
-    if new.kind.names_feature(&old.name) {
+    if new.kind.names_feature(old.id, &old.name) {
         return Err(bad(cmd, format!("{} can't be built on itself: pick another plane or face", old.name)));
     }
     // Optional inputs can move other inputs' positions (e.g. Distance 2 goes before Taper).
@@ -1512,7 +1598,9 @@ fn redefine(s: &mut Session, p: &Value) -> Result<Value> {
     }
     s.pending_moves = trial.pending_moves;
     s.doc = trial.doc;
+    s.model.keep(Some(shared));
     s.refresh();
+    s.model.keep(kept);
     if let Some(e) = s.model.result(id).and_then(|r| r.error.clone()) {
         return Err(EngineError::Other(e));
     }

@@ -71,6 +71,9 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
             .filter_map(|(i, f)| (f.component == component && !matches!(f.kind, FeatureKind::Sketch { .. })).then_some(i))
             .collect(),
     };
+    // The feature that made what is under the cursor or picked in the viewport, as the history
+    // lights it.
+    let from_view = [crate::timeline::hovered_feature(app), crate::timeline::picked_feature(app)];
     for index in indices {
         let Some(feature) = app.session.doc.features.get(index) else { continue };
         let (id, label, icon) = (feature.id, feature.name.clone(), crate::timeline::icon_of(&feature.kind));
@@ -78,13 +81,27 @@ pub(super) fn rows(app: &mut SolveApp, ui: &mut egui::Ui, component: u64, path: 
         // Behind the history marker or suppressed: not built, drawn faint as in the timeline.
         let dim = feature.suppressed || app.session.doc.marker.is_some_and(|marker| index >= marker);
         let selected = app.session.selection.contains(&Sel::Feature { id });
+        let mark = if from_view.contains(&Some(id)) { Mark::Here } else { Mark::None };
         app.tree.remember(&format!("f:{id}"));
         let action = sketch.map(|_| ("sketch", "Edit Profile Sketch"));
+        // The bodies it made show and hide with its eye (#5099); a component listed on its own
+        // stands for all of its placements.
+        let placement = (component == 0 || !path.is_empty()).then_some((component, path));
+        let bodies = app.session.feature_bodies(&[id], placement);
+        let visible = bodies.iter().any(|b| !app.session.visibility.hidden_bodies.contains(b));
+        let eye = (!bodies.is_empty()).then_some(visible);
         let r = draw_row(
             ui,
             ui.id().with(("browser_feature", id)),
-            &Row { depth: depth + 1, icon, label: &label, selected, dim, action, ..Default::default() },
+            &Row { depth: depth + 1, eye, icon, label: &label, selected, dim: dim || eye == Some(false), mark, action, ..Default::default() },
         );
+        if r.eye {
+            let mut p = json!({"visible": !visible, "features": [id]});
+            if !path.is_empty() {
+                p["path"] = json!(path);
+            }
+            let _ = app.run("browser.visibility", p);
+        }
         if r.action
             && let Some(sketch) = sketch
         {
@@ -129,6 +146,19 @@ mod tests {
         let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))), ..Default::default() };
         h.ctx.run_ui(raw, |ui| rows(&mut h.app, ui, 0, &[], 0, &mut Actions::default())).textures_delta.clear();
         drawn_rows().into_iter().map(|(label, ..)| label).collect()
+    }
+
+    /// #5099: a feature row's eye shows and hides the bodies the feature made.
+    #[test]
+    fn a_feature_rows_eye_hides_the_bodies_it_made() {
+        let mut h = Harness::new();
+        h.app.run("solid.box", json!({"length":10,"width":10,"height":10,"body_name":"Plate"})).unwrap();
+        h.app.tree.expanded.insert("c0/features".into());
+        h.settle();
+        h.step(&json!({"click":{"handle":"eye:Box1"}})).unwrap();
+        assert_eq!(h.app.session.visibility.hidden_bodies, ["Plate"]);
+        h.step(&json!({"click":{"handle":"eye:Box1"}})).unwrap();
+        assert!(h.app.session.visibility.hidden_bodies.is_empty());
     }
 
     #[test]

@@ -7,6 +7,8 @@ plane, in the view or on its browser row, offers **Create Sketch** on that plane
 keeping what changed since the sketch was created or opened for editing: a new sketch is removed,
 an edited one goes back to how it was, as one step that Undo brings back.
 
+Opening a sketch turns the view to face it. When the sketch ends, the view stays where it is by default. Preferences › Sketch › **When a sketch ends** changes that: **Return to the previous view** goes back to the view from before the sketch, and **Return unless rotated** goes back only when you panned or zoomed the sketch view but didn't turn it.
+
 In scripts, `XY`, `XZ`, `YZ` and their `Top`, `Front`, `Right` aliases name origin planes.
 These names are reserved: a construction plane cannot be created with or renamed to one
 (case-insensitive). If an older design already has a construction plane with such a name, a

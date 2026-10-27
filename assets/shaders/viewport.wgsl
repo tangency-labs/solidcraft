@@ -37,6 +37,15 @@ fn clipped(p: vec3<f32>) -> bool {
     return length(u.clip.xyz) > 0.5 && dot(u.clip.xyz, p) > u.clip.w;
 }
 @group(0) @binding(0) var<uniform> u: U;
+// The scene's colours, 2048 entries to a row: an R32Uint texture rather than a storage buffer,
+// so the viewport draws on WebGL2 (which has no storage buffers) as well.
+@group(0) @binding(1) var pal: texture_2d<u32>;
+
+/// The colour at palette entry `i`, as byte/255 (the old Unorm8x4 conversion, bit for bit).
+fn palette(i: u32) -> vec4<f32> {
+    let v = textureLoad(pal, vec2<i32>(i32(i & 2047u), i32(i >> 11u)), 0).x;
+    return vec4<f32>(f32(v & 255u), f32((v >> 8u) & 255u), f32((v >> 16u) & 255u), f32((v >> 24u) & 255u)) / 255.0;
+}
 
 fn to_linear(c: vec3<f32>) -> vec3<f32> {
     return select(c, pow((c + vec3<f32>(0.055)) / vec3<f32>(1.055), vec3<f32>(2.4)), c > vec3<f32>(0.04045));
@@ -57,11 +66,11 @@ struct TOut {
 };
 
 @vertex
-fn vs_tri(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: vec4<f32>) -> TOut {
+fn vs_tri(@location(0) p: vec3<f32>, @location(1) n: vec3<f32>, @location(2) c: u32) -> TOut {
     var o: TOut;
     o.pos = u.vp * vec4<f32>(p, 1.0);
     o.n = n;
-    o.c = c;
+    o.c = palette(c);
     o.wp = p;
     return o;
 }
@@ -76,14 +85,14 @@ fn vs_tri_inst(
     @location(3) r0: vec4<f32>,
     @location(4) r1: vec4<f32>,
     @location(5) r2: vec4<f32>,
-    @location(6) c: vec4<f32>,
+    @location(6) c: u32,
 ) -> TOut {
     let q = vec4<f32>(p, 1.0);
     let wp = vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q));
     var o: TOut;
     o.pos = u.vp * vec4<f32>(wp, 1.0);
     o.n = vec3<f32>(dot(r0.xyz, n), dot(r1.xyz, n), dot(r2.xyz, n));
-    o.c = c;
+    o.c = palette(c);
     o.wp = wp;
     return o;
 }
@@ -106,14 +115,14 @@ fn vs_tri_inst_flat(
     @location(3) r0: vec4<f32>,
     @location(4) r1: vec4<f32>,
     @location(5) r2: vec4<f32>,
-    @location(6) c: vec4<f32>,
+    @location(6) c: u32,
 ) -> FOut {
     let q = vec4<f32>(p, 1.0);
     let wp = vec3<f32>(dot(r0, q), dot(r1, q), dot(r2, q));
     var o: FOut;
     o.pos = u.vp * vec4<f32>(wp, 1.0);
     o.rp = wp - u.eye.xyz;
-    o.c = c;
+    o.c = palette(c);
     return o;
 }
 
@@ -546,7 +555,7 @@ fn lifted_z(p: vec3<f32>, c: vec4<f32>, px: f32, half: vec2<f32>) -> f32 {
 }
 
 @vertex
-fn vs_line(@builtin(vertex_index) vi: u32, @location(0) a: vec3<f32>, @location(1) b: vec3<f32>, @location(2) c: vec4<f32>, @location(3) wbits: u32) -> LOut {
+fn vs_line(@builtin(vertex_index) vi: u32, @location(0) a: vec3<f32>, @location(1) b: vec3<f32>, @location(2) c: u32, @location(3) wbits: u32) -> LOut {
     var pa = a;
     var pb = b;
     var ca = u.vp * vec4<f32>(a, 1.0);
@@ -596,7 +605,8 @@ fn vs_line(@builtin(vertex_index) vi: u32, @location(0) a: vec3<f32>, @location(
     }
     var o: LOut;
     o.pos = vec4<f32>(base.xy + off / half * base.w, z, base.w);
-    o.c = vec4<f32>(c.rgb, c.a * (wa / wd));
+    let col = palette(c);
+    o.c = vec4<f32>(col.rgb, col.a * (wa / wd));
     o.wp = select(pa, pb, t > 0.5);
     return o;
 }

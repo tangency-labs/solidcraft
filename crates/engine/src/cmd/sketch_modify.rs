@@ -81,6 +81,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("sketch_scale")
         .enabled(in_sketch)
         .params("entities: [curve/point ids], base: [x,y] or point ref, factor: number"),
+    CommandSpec::new("sketch.transform", "Transform", transform)
+        .at("SKETCH", "MODIFY")
+        .icon("sketch_move")
+        .key("G")
+        .enabled(in_sketch)
+        .params("entities: [curve/point ids], factor?: number (scale), angle?: degrees (turn), center?: [x,y] or point ref (what scales and turns stay put; default [0,0]), translate?: [dx,dy] (applied last); scales, turns and moves in one step"),
     CommandSpec::new("sketch.move", "Move/Copy Sketch Entities", move_copy)
         .at("SKETCH", "MODIFY")
         .icon("sketch_move")
@@ -2517,6 +2523,30 @@ fn move_copy(s: &mut Session, p: &Value) -> Result<Value> {
         Ok(ids_of(sk, &cs))
     })?;
     s.doc_mut().prune_model_params();
+    Ok(json!({"curves": out, "sketch": info}))
+}
+
+/// Scale, turn and move the entities in one step: scaled about `center`, then turned about it,
+/// then moved by `translate`.
+fn transform(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.transform";
+    let k = match p.get("factor") {
+        Some(v) => v.as_f64().filter(|k| *k > 1e-9 && *k < 1e6).ok_or_else(|| bad(cmd, "`factor` must be a positive number"))?,
+        None => 1.0,
+    };
+    let ang = match p.get("angle") {
+        Some(v) => v.as_f64().filter(|a| a.is_finite()).ok_or_else(|| bad(cmd, "`angle` must be a number (degrees)"))?.to_radians(),
+        None => 0.0,
+    };
+    let t = if p.get("translate").is_some() { req_vec2(cmd, p, "translate")? } else { Vec2::ZERO };
+    let (out, info) = edit(s, p, cmd, false, |sk, _| {
+        let (cs, ps) = entities(sk, p, cmd)?;
+        let c = if p.get("center").is_some() { point_or_ref(sk, p, "center", cmd)? } else { Vec2::ZERO };
+        let rot = rotate(c, ang);
+        let f = move |q: Vec2| rot(c + (q - c) * k) + t;
+        transform_in_place(sk, &cs, &ps, &f, k, cmd)?;
+        Ok(ids_of(sk, &cs))
+    })?;
     Ok(json!({"curves": out, "sketch": info}))
 }
 

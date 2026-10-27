@@ -393,3 +393,48 @@ fn inch_extrude_secondary_lengths_and_unchanged_edit_keep_their_physical_sizes()
     let reopened = Session::new(solidcraft_engine::doc::Document::from_json(&h.app.session.doc.to_json()).unwrap());
     assert_eq!(reopened.doc.length_inputs(), h.app.session.doc.length_inputs());
 }
+
+/// The Cone dialog (#5641) shows its three sizes in the design's units with a full cone by
+/// default, makes what the bare numbers make, and its Edit shows the kept radii; a top radius
+/// typed there makes a frustum, and the operation is sent as chosen.
+#[test]
+fn cone_dialog_makes_a_cone_and_edits_it_into_a_frustum() {
+    let sizes: &[(&str, &str)] = &[("diameter", "20"), ("top_diameter", "0"), ("height", "20")];
+    let mut h = design("mm");
+    h.app.start("solid.cone");
+    h.frames(3);
+    let shown = fields(&h);
+    let want: Vec<(&str, String)> = sizes.iter().map(|(k, v)| (*k, format!("{v} mm"))).collect();
+    assert_eq!(shown, want);
+    assert_shown(&h, &shown);
+    ok(&mut h);
+    let made = volume(&mut h.app.session);
+    let before = bare_volume("mm", "solid.cone", sizes);
+    assert!((made - before).abs() < 1e-6 * before, "{made} mm³, the bare numbers made {before} mm³");
+    let full = std::f64::consts::PI * 100.0 * 20.0 / 3.0;
+    assert!((made - full).abs() < 2e-3 * full, "{made} vs {full}");
+    // (The round base is measured on its facets: within a micrometre or so of 20 mm across.)
+    let got = size(&mut h.app.session);
+    assert!(got.iter().all(|g| (g - 20.0).abs() < 1e-3), "{got:?}");
+    // Edit shows the radii it keeps; a top radius makes a frustum.
+    let id = h.app.session.doc.features.first().map(|f| f.id).unwrap();
+    h.app.edit_feature(id);
+    h.frames(3);
+    let shown = fields(&h);
+    assert_eq!(shown, vec![("radius", "(20 mm) / 2".to_string()), ("top_radius", "(0 mm) / 2".to_string()), ("height", "20 mm".to_string())]);
+    type_into(&mut h, "top_radius", "4");
+    h.frames(2);
+    ok(&mut h);
+    let frustum = std::f64::consts::PI * 20.0 * (100.0 + 40.0 + 16.0) / 3.0;
+    let got = volume(&mut h.app.session);
+    assert!((got - frustum).abs() < 2e-3 * frustum, "{got} vs {frustum}");
+    assert_eq!(h.app.session.doc.features.len(), 1, "the edit changed the cone in place");
+    // The operation choice reaches the command.
+    h.app.start("solid.cone");
+    h.frames(3);
+    if let Some(Kind::Primitive { operation, .. }) = h.app.dialog.as_mut().map(|d| &mut d.kind) {
+        *operation = 2;
+    }
+    let (_, params) = apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap().remove(0);
+    assert_eq!(params["operation"], json!("cut"));
+}

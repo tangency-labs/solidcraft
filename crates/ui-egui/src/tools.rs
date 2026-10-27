@@ -105,6 +105,7 @@ impl Tool {
             "sketch.circle.two_point" => ("sketch.circle.two_point", Kind::Draw(2)),
             "sketch.circle.three_point" => ("sketch.circle.three_point", Kind::Draw(3)),
             "sketch.arc.three_point" => ("sketch.arc.three_point", Kind::Draw(3)),
+            "sketch.arc3d" => ("sketch.arc3d", Kind::Draw(3)),
             "sketch.arc.center_point" => ("sketch.arc.center_point", Kind::Draw(3)),
             "sketch.polygon.inscribed" => ("sketch.polygon.inscribed", Kind::Draw(2)),
             "sketch.polygon.circumscribed" => ("sketch.polygon.circumscribed", Kind::Draw(2)),
@@ -150,6 +151,7 @@ pub fn hint(id: &str) -> String {
         "sketch.rectangle.three_point" => "3-point rectangle: click two points of one edge, then the width".into(),
         "sketch.circle.center" => "Circle: click the centre, then a point on the circle".into(),
         "sketch.arc.three_point" => "Arc: click start, end, then a point on the arc".into(),
+        "sketch.arc3d" => "3D Arc: click start, end, then a point on the arc (points may leave the sketch plane)".into(),
         "sketch.arc.center_point" => "Arc: click centre and start, then click end or type a signed sweep".into(),
         "sketch.dimension" => {
             "Dimension: pick one or two entities and type the value (or click to place it first); click a dimension to edit it; Enter applies".into()
@@ -522,8 +524,15 @@ fn run_shape(app: &mut SolveApp, t: &Tool) -> Result<Vec<String>, String> {
         }
         "sketch.rectangle.three_point" => json!({"p0": xy(&p[0]), "p1": xy(&p[1]), "p2": xy(&p[2])}),
         "sketch.circle.center" => {
-            // A second click snapped to a point keeps the circle on that point (#3099).
-            let mut v = json!({"center": arg(&p[0]), "radius": d(0, 1)});
+            // A centre snapped to an existing point goes as its place, where `connect` ties
+            // them with a Coincident the sketch shows (#7299); a midpoint, on-curve, crossing or
+            // body-vertex snap goes as itself, so the centre is held there. A second click
+            // snapped to a point keeps the circle on that point (#3099).
+            let center = match &p[0].1 {
+                Some(id) if ["mid:", "on:", "vertex:", "x:"].iter().any(|k| id.starts_with(k)) => json!(id),
+                _ => xy(&p[0]),
+            };
+            let mut v = json!({"center": center, "radius": d(0, 1)});
             if p[1].1.is_some() {
                 v["through"] = arg(&p[1]);
             }
@@ -532,10 +541,19 @@ fn run_shape(app: &mut SolveApp, t: &Tool) -> Result<Vec<String>, String> {
         "sketch.circle.two_point" => json!({"p0": xy(&p[0]), "p1": xy(&p[1])}),
         "sketch.circle.three_point" => json!({"p0": xy(&p[0]), "p1": xy(&p[1]), "p2": xy(&p[2])}),
         "sketch.arc.three_point" => json!({"start": arg(&p[0]), "end": arg(&p[1]), "through": arg(&p[2])}),
-        "sketch.arc.center_point" => match crate::sketch_dims::locked_value(app, t, "Sweep") {
-            Some(sweep) => json!({"center": arg(&p[0]), "start": arg(&p[1]), "sweep": sweep.to_degrees()}),
-            None => json!({"center": arg(&p[0]), "start": arg(&p[1]), "end": xy(&p[2])}),
-        },
+        "sketch.arc.center_point" => {
+            // A centre snapped to an existing point goes as its place, where `connect` ties
+            // them with a Coincident the sketch shows (#7299); a midpoint, on-curve, crossing or
+            // body-vertex snap goes as itself, so the centre is held there.
+            let center = match &p[0].1 {
+                Some(id) if ["mid:", "on:", "vertex:", "x:"].iter().any(|k| id.starts_with(k)) => json!(id),
+                _ => xy(&p[0]),
+            };
+            match crate::sketch_dims::locked_value(app, t, "Sweep") {
+                Some(sweep) => json!({"center": center, "start": arg(&p[1]), "sweep": sweep.to_degrees()}),
+                None => json!({"center": center, "start": arg(&p[1]), "end": xy(&p[2])}),
+            }
+        }
         "sketch.polygon.inscribed" | "sketch.polygon.circumscribed" => {
             let a = (p[1].0 - p[0].0).angle().to_degrees();
             json!({"center": xy(&p[0]), "radius": d(0, 1), "sides": sides, "angle": a})

@@ -8,12 +8,15 @@
 //! the design gives them (`Feature::link_faces`), so a joint on a linked face stays on that face
 //! when the design changes, as it would inside the design, and reports it when the face is gone.
 
-use std::path::{Component as PathPart, Path, PathBuf};
+use std::hash::{Hash, Hasher};
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use serde_json::{Value, json};
 use solidcraft_doc::{DesignLink, Document, FeatureKind};
 
 use super::CommandSpec;
+use super::design_link::{absolute, resolve, stored};
 use crate::params::{bad, str_, vec3};
 use crate::{EngineError, Result, Session};
 
@@ -54,74 +57,25 @@ pub static COMMANDS: &[CommandSpec] = &[
          (its link here, else a new linked component) → each component's history goes and its placements become placements of the linked \
          component; refused when its bodies are not the same as the link's; returns component, name, replaced and warnings",
     ),
-    CommandSpec::new("component.links", "List Links", list_links)
-        .icon("chain")
-        .noundo()
-        .params("→ linked components: component, name, path, file (resolved), found"),
+    CommandSpec::new("component.links", "List Links", list_links).icon("chain").noundo().params(
+        "→ linked components: component, name, path, file (resolved), found (null when the file is on a network location not allowed, \
+         or names a device: it is not looked for), and then host (the network location) and reason",
+    ),
 ];
 
-/// The folder relative link paths are kept against: the design's own, once it has a file.
-fn base_dir(path: Option<&str>) -> Option<PathBuf> {
-    path.and_then(|p| absolute(Path::new(p)).parent().map(Path::to_path_buf))
+/// Why the file a stored link names may not be reached, from its text alone (`None`: it may): a
+/// device, or a network location not allowed (`vfs::design_path_refusal`). Both the link as
+/// stored and the file it resolves to are judged, before anything asks the disk or the network.
+fn link_refusal(design: Option<&str>, link: &str) -> Option<solidcraft_io::vfs::Remote> {
+    let file = resolve(design, link);
+    solidcraft_io::vfs::design_path_refusal(link, design).or_else(|| solidcraft_io::vfs::design_path_refusal(&file.to_string_lossy(), design))
 }
 
-/// A path as given, made absolute when the platform can, with `.` and `..` worked out.
-fn absolute(p: &Path) -> PathBuf {
-    let full = std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf());
-    let mut out = PathBuf::new();
-    for c in full.components() {
-        match c {
-            PathPart::CurDir => {}
-            PathPart::ParentDir if matches!(out.components().next_back(), Some(PathPart::Normal(_))) => {
-                out.pop();
-            }
-            c => out.push(c.as_os_str()),
-        }
-    }
-    out
-}
-
-/// `target` relative to the folder `base` (both absolute), when they share a root.
-fn relative(base: &Path, target: &Path) -> Option<PathBuf> {
-    let (b, t): (Vec<_>, Vec<_>) = (base.components().collect(), target.components().collect());
-    let root = |c: &[PathPart]| c.iter().take_while(|x| matches!(x, PathPart::Prefix(_) | PathPart::RootDir)).count();
-    if root(&b) == 0 || b.get(..root(&b)) != t.get(..root(&b)) {
-        return None;
-    }
-    let common = b.iter().zip(&t).take_while(|(x, y)| x == y).count();
-    let mut out = PathBuf::new();
-    for _ in common..b.len() {
-        out.push("..");
-    }
-    for c in t.iter().skip(common) {
-        out.push(c.as_os_str());
-    }
-    Some(out)
-}
-
-/// How a link stores `file` for a design saved at `design` (`None`: not saved yet).
-fn stored(design: Option<&str>, file: &Path) -> String {
-    let file = absolute(file);
-    match base_dir(design).and_then(|d| relative(&d, &file)) {
-        // Relative paths are written with `/`, so a design moves between systems with its parts.
-        Some(rel) => rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/"),
-        None => file.to_string_lossy().into_owned(),
-    }
-}
-
-/// The file a stored link path names, for a design saved at `design`.
-fn resolve(design: Option<&str>, link: &str) -> PathBuf {
-    let p = Path::new(link);
-    match base_dir(design) {
-        // Browser storage keys do not let the OS resolve `..` for us.
-        Some(d) if p.is_relative() => absolute(&d.join(p)),
-        _ => p.to_path_buf(),
-    }
-}
-
-/// The links of `doc` stored for a design saved at `to` instead of at `from`.
-pub(super) fn rebased(doc: &Document, from: Option<&str>, to: &str) -> std::collections::BTreeMap<u64, DesignLink> {
-    doc.links.iter().map(|(c, l)| (*c, DesignLink { path: stored(Some(to), &resolve(from, &l.path)), feature: l.feature })).collect()
+/// The error for a link [`link_refusal`] refuses.
+fn link_refused(design: Option<&str>, link: &str) -> Result<()> {
+    solidcraft_io::vfs::check_design_path(link, design).map_err(|e| EngineError::Other(e.to_string()))?;
+    let file = resolve(design, link);
+    solidcraft_io::vfs::check_design_path(&file.to_string_lossy(), design).map_err(|e| EngineError::Other(e.to_string()))
 }
 
 /// Resolve a design's component links against its original file, before opening it from a
@@ -136,15 +90,87 @@ pub fn resolve_design_links(doc: &mut Document, from: Option<&str>) {
 /// the design gives their faces (`Feature::link_faces`), with the source's design properties.
 type Linked = (String, solidcraft_io::StepFeature, Vec<Vec<String>>, solidcraft_doc::Metadata);
 
-/// The solid bodies of the design at `file`, evaluated, as an Import feature.
-fn linked_bodies(file: &Path, own: Option<&str>) -> Result<Linked> {
+/// What a linked file last gave, by the file: digests of its bytes, of the STEP text it gave and
+/// of its face names, and that read's warnings. Update Links evaluates a file again only when its
+/// bytes or the linked bodies changed since (#5606). Bounded, oldest first out.
+static READS: Mutex<Vec<LinkRead>> = Mutex::new(Vec::new());
+const READS_SIZE: usize = 256;
+
+struct LinkRead {
+    file: PathBuf,
+    bytes: u64,
+    step: u64,
+    faces: u64,
+    warnings: Vec<String>,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Linked designs read and evaluated on this thread, for tests.
+    static EVALUATED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn digest<T: Hash + ?Sized>(value: &T) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    value.hash(&mut h);
+    h.finish()
+}
+
+/// The warnings of the last read of `file`, when it had these bytes and gave the STEP text
+/// `step` and the face names `faces`: the bodies it gives are the ones the link holds.
+fn unchanged_read(file: &Path, bytes: u64, step: u64, faces: u64) -> Option<Vec<String>> {
+    let file = absolute(file);
+    let reads = READS.lock().ok()?;
+    reads.iter().find(|r| r.file == file && r.bytes == bytes && r.step == step && r.faces == faces).map(|r| r.warnings.clone())
+}
+
+fn remember_read(file: &Path, bytes: u64, feature: &solidcraft_io::StepFeature, faces: &[Vec<String>]) {
+    let FeatureKind::Import { step, .. } = &feature.kind else { return };
+    let file = absolute(file);
+    let Ok(mut reads) = READS.lock() else { return };
+    reads.retain(|r| r.file != file);
+    if reads.len() >= READS_SIZE {
+        reads.remove(0);
+    }
+    reads.push(LinkRead { file, bytes, step: digest(step.as_bytes()), faces: digest(faces), warnings: feature.warnings.clone() });
+}
+
+/// The bytes of the design at `file`, which must not be the design saved at `own`.
+fn read_link(file: &Path, own: Option<&str>) -> Result<Vec<u8>> {
     let shown = file.display().to_string();
     if own.is_some_and(|o| absolute(Path::new(o)) == absolute(file)) {
         return Err(EngineError::Other(format!("{shown}: a design can't be linked into itself")));
     }
-    let bytes = solidcraft_io::vfs::read(&shown, solidcraft_io::MAX_DESIGN_BYTES).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
-    let doc = solidcraft_io::read_design(&bytes).map_err(|e| EngineError::Other(format!("{shown}: {e}")))?;
-    session_bodies(&Session::opened_at(doc, None, Some(&shown)), &shown)
+    // A network location only when its server is allowed, a device never: judged from the text
+    // before anything is read (on Windows, reading `\\host\share\x` connects to the host).
+    solidcraft_io::vfs::read_design_path(&shown, own, solidcraft_io::MAX_DESIGN_BYTES).map_err(|e| {
+        let e = e.to_string();
+        EngineError::Other(if e.starts_with(&shown) { e } else { format!("{shown}: {e}") })
+    })
+}
+
+/// The solid bodies of the design at `file`, evaluated, as an Import feature.
+fn linked_bodies(file: &Path, own: Option<&str>) -> Result<Linked> {
+    design_bodies(file, &read_link(file, own)?)
+}
+
+/// The solid bodies of `bytes`, the design at `file`, as an Import feature. The model the file
+/// keeps is its evaluation when this build saved it for exactly that design, as when it is opened.
+fn design_bodies(file: &Path, bytes: &[u8]) -> Result<Linked> {
+    #[cfg(test)]
+    EVALUATED.with(|n| n.set(n.get() + 1));
+    let shown = file.display().to_string();
+    let fail = |e: solidcraft_io::IoError| EngineError::Other(format!("{shown}: {e}"));
+    let (doc, saved) = if solidcraft_io::is_design_container(bytes) {
+        let mut reader = solidcraft_io::DesignContainerReader::new(std::io::Cursor::new(bytes)).map_err(fail)?;
+        let saved = reader.geometry();
+        (reader.read_document().map_err(fail)?, saved)
+    } else {
+        (solidcraft_io::read_design(bytes).map_err(fail)?, None)
+    };
+    let (name, feature, faces, metadata) = session_bodies(&Session::opened_at(doc, saved.as_ref(), Some(&shown)), &shown)?;
+    remember_read(file, digest(bytes), &feature, &faces);
+    Ok((name, feature, faces, metadata))
 }
 
 /// The solid bodies of `part`, the design saved as `shown`, as an Import feature.
@@ -186,6 +212,8 @@ fn insert_design(s: &mut Session, p: &Value) -> Result<Value> {
         None => solidcraft_geom::Vec3::ZERO,
         Some(v) => vec3(v).filter(|t| t.is_finite() && t.len() < 1e9).ok_or_else(|| bad(cmd, "`translate` must be [x, y, z] in mm"))?,
     };
+    // A network or device path is judged from its text, as given, before anything reads it.
+    link_refused(s.path.as_deref(), given).map_err(|e| bad(cmd, e.to_string()))?;
     let file = absolute(Path::new(given));
     if s.path.as_deref().is_some_and(|own| absolute(Path::new(own)) == file) {
         return Err(bad(cmd, "a design can't be linked into itself"));
@@ -263,8 +291,16 @@ fn update_links(s: &mut Session, p: &Value) -> Result<Value> {
             ));
         };
         let old = old.clone();
+        link_refused(s.path.as_deref(), &link.path).map_err(|e| bad(cmd, format!("{cname}: {e}")))?;
         let file = resolve(s.path.as_deref(), &link.path);
-        let (_, sf, faces, _) = linked_bodies(&file, s.path.as_deref()).map_err(|e| bad(cmd, format!("{cname}: {e}")))?;
+        let bytes = read_link(&file, s.path.as_deref()).map_err(|e| bad(cmd, format!("{cname}: {e}")))?;
+        let kept_faces = s.doc.feature(link.feature).map(|f| digest(f.link_faces.as_slice()));
+        if let Some(known) = kept_faces.and_then(|faces| unchanged_read(&file, digest(bytes.as_slice()), digest(old.as_bytes()), faces)) {
+            warnings.extend(known);
+            unchanged.push(cname);
+            continue;
+        }
+        let (_, sf, faces, _) = design_bodies(&file, &bytes).map_err(|e| bad(cmd, format!("{cname}: {e}")))?;
         warnings.extend(sf.warnings.iter().cloned());
         let same = matches!(&sf.kind, FeatureKind::Import { step, .. } if *step == old);
         let kept = s.doc.feature(link.feature).map(|f| &f.link_faces);
@@ -334,6 +370,8 @@ fn relink(s: &mut Session, p: &Value) -> Result<Value> {
     if !file.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("solidcraft")) {
         return Err(bad(cmd, "choose a saved .solidcraft design"));
     }
+    // A network or device path is judged from its text before the disk is asked anything.
+    link_refused(s.path.as_deref(), given).map_err(|e| bad(cmd, e.to_string()))?;
     // The ordinary lexical check in linked_bodies also works in the browser VFS. On native
     // hosts, reject an alias of this assembly too (a symlink or a path with different case).
     if let (Ok(candidate), Some(Ok(own))) = (file.canonicalize(), s.path.as_deref().map(std::fs::canonicalize))
@@ -401,7 +439,16 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
             let name = s.doc.components.iter().find(|x| x.id == *c).map(|x| x.name.clone());
             let path = stored(s.path.as_deref(), &file);
             let file = file.to_string_lossy();
-            json!({"component": c, "name": name, "path": path, "file": file, "found": solidcraft_io::vfs::is_file(&file)})
+            // A refused path is not looked for at all: on Windows asking whether a file on
+            // `\\host\share` exists already connects to the host.
+            match link_refusal(s.path.as_deref(), &l.path) {
+                None => json!({"component": c, "name": name, "path": path, "file": file,
+                    "found": solidcraft_io::vfs::design_path_is_file(&file, s.path.as_deref())}),
+                Some(solidcraft_io::vfs::Remote::Network(host)) => json!({"component": c, "name": name, "path": path, "file": file,
+                    "found": null, "host": host, "reason": format!("on the network location \\\\{host}, which is not allowed")}),
+                Some(solidcraft_io::vfs::Remote::Device) => json!({"component": c, "name": name, "path": path, "file": file,
+                    "found": null, "reason": "names a device, not a file"}),
+            }
         })
         .collect();
     Ok(json!({"links": links}))
@@ -411,30 +458,6 @@ fn list_links(s: &mut Session, _p: &Value) -> Result<Value> {
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn link_paths_are_kept_relative_to_the_design_and_follow_save_as() {
-        let root = absolute(Path::new("projects"));
-        let part = root.join("parts").join("plate.solidcraft");
-        let design = root.join("assembly").join("case.solidcraft");
-        let design = design.to_string_lossy().into_owned();
-        assert_eq!(stored(Some(&design), &part), "../parts/plate.solidcraft");
-        assert_eq!(resolve(Some(&design), "../parts/plate.solidcraft"), part);
-        // A design path given relative to the working folder works the same.
-        assert_eq!(stored(Some("case.solidcraft"), &absolute(Path::new("parts/plate.solidcraft"))), "parts/plate.solidcraft");
-        // Before the design has a file the path is kept whole; saving it makes it relative.
-        let unsaved = stored(None, &part);
-        assert!(Path::new(&unsaved).is_absolute(), "{unsaved}");
-        let mut doc = Document::default();
-        doc.links.insert(7, DesignLink { path: unsaved, feature: 3 });
-        let moved = rebased(&doc, None, &design);
-        assert_eq!(moved.get(&7).map(|l| l.path.as_str()), Some("../parts/plate.solidcraft"));
-        let beside = root.join("parts").join("asm.solidcraft").to_string_lossy().into_owned();
-        assert_eq!(
-            rebased(&Document { links: moved, ..Document::default() }, Some(&design), &beside).get(&7).map(|l| l.path.as_str()),
-            Some("plate.solidcraft")
-        );
-    }
 
     fn run(s: &mut Session, id: &str, p: Value) -> Value {
         s.execute(id, &p).unwrap_or_else(|e| panic!("{id} {p}: {e}"))
@@ -575,6 +598,43 @@ mod tests {
         assert_eq!(run(&mut b, "component.links", json!({}))["links"], json!([]));
         assert!((volume(&mut b) - 9000.0).abs() < 1e-6);
         assert!(b.execute("component.update_links", &json!({"component": "plate"})).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn update_links_reads_again_only_the_designs_that_changed() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-reads-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (plate, block) = (dir.join("plate.solidcraft"), dir.join("block.solidcraft"));
+        save_box(&plate, 30.0);
+        save_box(&block, 10.0);
+        let mut a = Session::default();
+        run(&mut a, "component.insert_design", json!({"path": plate}));
+        run(&mut a, "component.insert_design", json!({"path": block, "translate": [50, 0, 0]}));
+        let evaluated = || EVALUATED.with(std::cell::Cell::get);
+        // Unchanged files are not evaluated again.
+        let before = evaluated();
+        let r = run(&mut a, "component.update_links", json!({}));
+        assert_eq!((r["updated"].clone(), r["unchanged"].clone()), (json!([]), json!(["plate", "block"])), "{r}");
+        assert_eq!(evaluated(), before);
+        // An edited file is, and only that one.
+        save_box(&plate, 45.0);
+        let r = run(&mut a, "component.update_links", json!({}));
+        assert_eq!((r["updated"].clone(), r["unchanged"].clone()), (json!(["plate"]), json!(["block"])), "{r}");
+        assert_eq!(evaluated(), before + 1);
+        assert!((volume(&mut a) - 11000.0).abs() < 1e-6, "{}", volume(&mut a));
+        // Undone, the link holds the old bodies again: the same file brings the new ones back.
+        run(&mut a, "edit.undo", json!({}));
+        assert!((volume(&mut a) - 8000.0).abs() < 1e-6, "{}", volume(&mut a));
+        assert_eq!(run(&mut a, "component.update_links", json!({}))["updated"], json!(["plate"]));
+        assert!((volume(&mut a) - 11000.0).abs() < 1e-6, "{}", volume(&mut a));
+        // A file saved again without its model is evaluated, and gives the same bodies.
+        let mut part = Session::default();
+        run(&mut part, "doc.open", json!({"path": block}));
+        run(&mut part, "file.save", json!({"cache": false}));
+        let before = evaluated();
+        assert_eq!(run(&mut a, "component.update_links", json!({}))["unchanged"], json!(["plate", "block"]));
+        assert_eq!(evaluated(), before + 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -751,5 +811,113 @@ mod tests {
         let update = run(&mut s, "component.update_links", json!({}));
         assert!(update["warnings"].to_string().contains("joint PinInHole refers to faces of Plate by their place"), "{update}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A design someone sends may name a linked file on another computer (`\\host\share\…`) or a
+    /// device. On Windows, reading it or only asking whether it exists connects to that computer
+    /// and may send it the user's sign-in. Update Links and List Links judge the stored path from
+    /// its text and touch nothing: List Links reports it unknown with a reason, Update Links
+    /// refuses with the server's name, and nothing in the design changes.
+    #[test]
+    fn links_to_network_locations_or_devices_touch_nothing_until_allowed() {
+        let dir = std::env::temp_dir().join(format!("solidcraft-link-network-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("parts")).unwrap();
+        let part = dir.join("parts").join("plate.solidcraft");
+        save_box(&part, 30.0);
+        let case = dir.join("case.solidcraft");
+        let mut a = Session::default();
+        let comp = run(&mut a, "component.insert_design", json!({"path": part}))["component"].as_u64().unwrap();
+        run(&mut a, "file.save", json!({"path": case}));
+        let feature = a.doc.links[&comp].feature;
+        // On Unix these names are plain files beside the design, so a check that was skipped would
+        // find them: the refusal below comes from the text alone.
+        let crafted = [r"\\evil.example\share\plate.solidcraft", "//evil.example/share/plate.solidcraft", r"\\?\UNC\evil.example\share\p.solidcraft"];
+        if cfg!(unix) {
+            std::fs::copy(&part, dir.join(crafted[0])).unwrap();
+        }
+        let devices = [r"\\.\pipe\plate.solidcraft", r"\\.\COM1", "parts/NUL.solidcraft", "parts/com1.solidcraft", r"parts\CON.part.solidcraft"];
+        std::fs::copy(&part, dir.join("parts").join("NUL.solidcraft")).unwrap();
+        let before = volume(&mut a);
+        for link in crafted.iter().chain(&devices) {
+            a.doc_mut().links.insert(comp, DesignLink { path: link.to_string(), feature });
+            let calls = solidcraft_io::vfs::file_calls();
+            let listed = run(&mut a, "component.links", json!({}));
+            let entry = &listed["links"][0];
+            assert!(entry["found"].is_null() && entry["reason"].is_string(), "{link}: {listed}");
+            let err = a.execute("component.update_links", &json!({})).unwrap_err().to_string();
+            assert_eq!(solidcraft_io::vfs::file_calls(), calls, "{link}: a file call was made");
+            if devices.contains(link) {
+                assert!(entry["host"].is_null() && err.contains("names a device"), "{link}: {listed} {err}");
+            } else {
+                assert_eq!(entry["host"], "evil.example", "{link}: {listed}");
+                assert!(err.contains(r"network location \\evil.example"), "{link}: {err}");
+            }
+            assert_eq!(volume(&mut a), before, "{link}: the design changed");
+        }
+        // Allowed (Allow once, a preference, …), the same link is read as any other.
+        #[cfg(unix)]
+        {
+            a.doc_mut().links.insert(comp, DesignLink { path: crafted[0].to_string(), feature });
+            solidcraft_io::vfs::allowing_hosts(&["EVIL.example".to_string()], || {
+                let listed = run(&mut a, "component.links", json!({}));
+                assert_eq!(listed["links"][0]["found"], true, "{listed}");
+                assert_eq!(run(&mut a, "component.update_links", json!({}))["unchanged"], json!(["plate"]));
+            });
+            assert!(run(&mut a, "component.links", json!({}))["links"][0]["found"].is_null(), "allowed for that action only");
+        }
+        // A local link, relative or absolute, is found and read as before.
+        for local in ["parts/plate.solidcraft".to_string(), part.to_string_lossy().to_string()] {
+            a.doc_mut().links.insert(comp, DesignLink { path: local.clone(), feature });
+            assert_eq!(run(&mut a, "component.links", json!({}))["links"][0]["found"], true, "{local}");
+            assert_eq!(run(&mut a, "component.update_links", json!({}))["unchanged"], json!(["plate"]), "{local}");
+        }
+        // Relink to a network path (programmatic: no prompt) is refused before the disk is asked.
+        let calls = solidcraft_io::vfs::file_calls();
+        let err = a.execute("component.relink", &json!({"component": comp, "path": r"\\evil.example\share\x.solidcraft"})).unwrap_err().to_string();
+        assert!(err.contains("network location"), "{err}");
+        assert_eq!(solidcraft_io::vfs::file_calls(), calls);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Every place that reaches a file through a link path goes through the design-path rule
+    /// (`vfs::check_design_path` / `read_design_path` / `design_path_is_file` / `link_refusal`):
+    /// no plain file call on a link's path in the link commands, and the font file a design's text
+    /// names is checked before it is read.
+    #[test]
+    fn every_link_path_goes_through_the_design_path_rule() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let code = |file: &str| {
+            let text = std::fs::read_to_string(root.join(file)).unwrap();
+            // The code before its test module.
+            text.split("\n#[cfg(test)]\n#[allow(clippy::unwrap_used").next().unwrap_or("").to_string()
+        };
+        for file in ["src/cmd/component_link.rs", "src/cmd/component_extract.rs"] {
+            let text = code(file);
+            for raw in [
+                "vfs::read(",
+                "vfs::read_to_string(",
+                "vfs::is_file(",
+                "vfs::exists(",
+                "vfs::len(",
+                "std::fs::read",
+                "std::fs::metadata",
+                ".is_file()",
+                ".exists()",
+                ".metadata()",
+            ] {
+                assert!(!text.contains(raw), "{file}: `{raw}` on a link's path must go through vfs::check_design_path");
+            }
+            // Relink canonicalises the path it is given, after the rule.
+            if let Some(at) = text.find("canonicalize") {
+                let rule = text[..at].rfind("link_refused(s.path.as_deref(), given)").unwrap_or(usize::MAX);
+                assert!(rule < at, "{file}: canonicalize before check_design_path");
+            }
+        }
+        let fonts = std::fs::read_to_string(root.join("../sketch/src/fonts.rs")).unwrap();
+        let (check, read) = (fonts.find("FILE_CHECK.get()").unwrap(), fonts.find("read_font(&path)").unwrap());
+        assert!(check < read, "a font file named by a design is checked before it is read");
+        let io = std::fs::read_to_string(root.join("../io/src/vfs.rs")).unwrap();
+        assert!(io.contains("set_font_file_check(|p| check_design_path("), "the font check is the design-path rule");
     }
 }

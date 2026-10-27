@@ -23,6 +23,7 @@
 # Developer guide
 
 - [Contributing](dev/contributing.md)
+- [Command guides and community resources](dev/command-guides.md)
 - [Architecture](dev/architecture.md)
 - [UI kit](dev/ui-kit.md)
 - [Extensible library proposal](dev/libraries.md)

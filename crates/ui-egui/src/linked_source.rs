@@ -44,7 +44,11 @@ pub(crate) fn start(app: &mut SolveApp, component: u64) {
             app.set_status(app.tr_label("ui.relink_design_changed").to_string(), true);
             return;
         }
-        if let Ok(result) = app.run("component.relink", json!({"component": component, "path": path})) {
+        // Picked in the file dialog: its server is the user's choice.
+        let hosts: Vec<String> = solidcraft_engine::io::vfs::network_host(&path).into_iter().collect();
+        let relinked =
+            solidcraft_engine::io::vfs::allowing_hosts(&hosts, || app.run("component.relink", json!({"component": component, "path": path})));
+        if let Ok(result) = relinked {
             let warnings: Vec<&str> = result["warnings"].as_array().into_iter().flatten().filter_map(|w| w.as_str()).collect();
             if warnings.is_empty() {
                 app.set_status(app.tr_label("ui.relink_done").to_string(), false);

@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 
 fn plane(chain: &str) -> Value {
     json!({"type": "at_angle", "angle": format!("{chain}.angle"), "axis_origin": [0, 0, 0], "axis_dir": [1, 0, 0],
-        "base": {"type": "offset", "distance": format!("{chain}.offset"), "base": {"type": "construction", "name": "CP"}}})
+        "base": {"type": "offset", "distance": format!("{chain}.offset"), "base": {"type": "construction", "feature": 8}}})
 }
 
 fn geo_plane(chain: &str) -> Value {
@@ -25,7 +25,7 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             "taper": format!("{n}.taper"), "to_offset": format!("{n}.to_offset")})
     };
     let fillet = |style: Value| json!({"type": "fillet", "edges": [o], "radius": "fillet.radius", "style": style});
-    let pattern = |p: Value| json!({"type": "pattern", "features": ["F"], "pattern": p});
+    let pattern = |p: Value| json!({"type": "pattern", "features": [7], "pattern": p});
     let hole =
         |h: Value| json!({"type": "hole", "position": o, "direction": [0, 0, 1], "diameter": "hole.diameter", "depth": "hole.depth", "hole": h});
     vec![
@@ -58,6 +58,10 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ("cylinder", json!({"type": "cylinder", "base": ["cyl.x", "cyl.y", "cyl.z"], "radius": "cyl.radius", "height": "cyl.height"})),
         ("sphere", json!({"type": "sphere", "center": ["sph.x", "sph.y", "sph.z"], "radius": "sph.radius"})),
         ("torus", json!({"type": "torus", "center": ["tor.x", "tor.y", "tor.z"], "major": "tor.major", "minor": "tor.minor"})),
+        (
+            "cone",
+            json!({"type": "cone", "base": ["cone.x", "cone.y", "cone.z"], "radius": "cone.radius", "top_radius": "cone.top_radius", "height": "cone.height"}),
+        ),
         ("combine", json!({"type": "combine", "target": "A", "tools": ["B"], "operation": "join"})),
         (
             "pattern_rectangular",
@@ -67,7 +71,7 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
         ),
         ("pattern_circular", pattern(json!({"type": "circular", "origin": o, "axis": [0, 0, 1], "count": "circ.count", "angle": "circ.angle"}))),
         ("pattern_path", pattern(json!({"type": "path", "path_sketch": 1, "path": ["l1"], "count": "path.count", "spacing": "path.spacing"}))),
-        ("mirror", json!({"type": "mirror", "features": ["F"], "plane": plane("mirror")})),
+        ("mirror", json!({"type": "mirror", "features": [7], "plane": plane("mirror")})),
         ("hole_simple", hole(json!({"type": "simple"}))),
         ("hole_drilled", hole(json!({"type": "drilled", "tip_angle": "hole.tip_angle"}))),
         ("hole_counterbore", hole(json!({"type": "counterbore", "cb_diameter": "hole.cb_diameter", "cb_depth": "hole.cb_depth"}))),
@@ -232,7 +236,7 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
 
 /// The reference fields a fixture leaves out (they don't change its expressions), set here so
 /// every sketch, feature and body reference is exercised: sketches 1–8, feature `F`,
-/// construction plane `CP`, body `B`.
+/// construction plane feature 8, body `B`.
 pub(super) fn with_refs(name: &str, mut v: Value) -> Value {
     let o = [0, 0, 0];
     let tool = json!({"body": "B", "point": o});

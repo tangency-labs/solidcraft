@@ -145,6 +145,59 @@ fn physical_material_is_dense_and_keeps_assignment() {
 }
 
 #[test]
+fn material_selector_clicking_the_suggested_material_preserves_that_choice_for_new_targets() {
+    let mut h = fixture();
+    h.app.run("material.assign", json!({"bodies":["Body1"],"material":"Aluminum"})).unwrap();
+    h.app.run("solid.box", json!({"corner":[30,0,0],"length":10,"width":10,"height":10,"body_name":"Other"})).unwrap();
+    h.app.run("material.assign", json!({"bodies":["Other"],"material":"Steel"})).unwrap();
+    h.app.session.selection = vec![Sel::Body { name: "Body1".into() }];
+    let doc = h.app.session.doc.clone();
+    let history = (h.app.session.undo.len(), h.app.session.redo.len());
+    h.app.start("material.assign");
+    h.frames(3);
+    assert!(h.widget("Density: 2.7 g/cm³").is_some());
+    h.step(&json!({"click":{"handle":"dialog:Material"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Material:Aluminum"}})).unwrap();
+    let d = h.app.dialog.as_mut().unwrap();
+    d.active = 0;
+    d.take_box(&h.app.session, vec![Sel::Body { name: "Other".into() }], false);
+    h.frames(3);
+    let commands = dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).unwrap();
+    assert_eq!(commands[0].1["material"], "Aluminum");
+    assert_eq!(commands[0].1["bodies"], json!(["Other"]));
+    h.step(&json!({"click":{"handle":"dialog:cancel"}})).unwrap();
+    assert!(std::sync::Arc::ptr_eq(&doc, &h.app.session.doc));
+    assert_eq!(history, (h.app.session.undo.len(), h.app.session.redo.len()));
+}
+
+#[test]
+fn material_selector_mixed_targets_show_a_placeholder_and_cannot_confirm_until_chosen() {
+    let mut h = fixture();
+    h.app.run("solid.box", json!({"corner":[30,0,0],"length":10,"width":10,"height":10,"body_name":"Other"})).unwrap();
+    h.app.run("material.assign", json!({"bodies":["Body1"],"material":"Aluminum"})).unwrap();
+    h.app.run("material.assign", json!({"bodies":["Other"],"material":"Steel"})).unwrap();
+    h.app.session.selection = vec![Sel::Body { name: "Body1".into() }, Sel::Body { name: "Other".into() }];
+    let before = h.app.session.doc.clone();
+    h.app.start("material.assign");
+    h.frames(3);
+    assert!(h.widget("Different materials").is_some());
+    assert!(dialogs::apply_commands(&h.app, h.app.dialog.as_ref().unwrap()).is_err());
+    assert_eq!(scenario::count_of("dialog:ok:enabled"), Some(0.0));
+    h.step(&json!({"click":{"handle":"dialog:Material"}})).unwrap();
+    h.step(&json!({"click":{"handle":"dialog:Material:Copper"}})).unwrap();
+    h.frames(2);
+    assert_eq!(scenario::count_of("dialog:ok:enabled"), Some(1.0));
+    assert!(std::sync::Arc::ptr_eq(&before, &h.app.session.doc));
+    let undo = h.app.session.undo.len();
+    h.step(&json!({"click":{"handle":"dialog:ok"}})).unwrap();
+    assert_eq!(h.app.session.doc.body_material("Body1"), "Copper");
+    assert_eq!(h.app.session.doc.body_material("Other"), "Copper");
+    assert_eq!(h.app.session.undo.len(), undo + 1);
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(h.app.session.doc.materials, before.materials);
+}
+
+#[test]
 fn physical_material_panel_reviews_saved_si_card_without_changing_the_design() {
     let mut h = fixture();
     let card = json!({"schema_version":1,"designation":"Original saved candidate","family":"other",

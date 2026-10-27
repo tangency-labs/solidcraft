@@ -16,11 +16,15 @@ pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("sketch.insert_dxf", "Insert DXF", insert_dxf)
         .at("SKETCH", "INSERT")
         .icon("sketch_dxf")
-        .params(concat!("path | text: ASCII DXF (blocks expanded); at?: [x,y] offset, scale?, tolerance?: mm within which ends join (default 0.0001); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
+        .params(concat!("path | text: ASCII DXF (blocks expanded); at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
     CommandSpec::new("sketch.insert_svg", "Insert SVG", insert_svg)
         .at("SKETCH", "INSERT")
         .icon("svg")
-        .params(concat!("path | text: SVG; at?: [x,y] offset, scale?, tolerance?: mm within which ends join (default 0.0001); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
+        .params(concat!("path | text: SVG; at?: [x,y] offset, scale? | width? | height?: mm, the drawing's size before rotation, aspect kept (win over scale); angle?: degrees, about the drawing's origin (or its centre); align?: \"origin\" (default: `at` is where the file's origin goes) | \"center\" (`at` is where the drawing's middle goes and it turns and scales about it); tolerance?: mm within which ends join (default 0.0001); plane?: (when no sketch is active, a new sketch on it; default XY)", created_doc!())),
+    CommandSpec::new("sketch.drawing_bounds", "Drawing Size", drawing_bounds)
+        .icon("svg")
+        .noundo()
+        .params("path | text: SVG or DXF (by `format`: \"svg\" | \"dxf\", default by the file name, else SVG); returns min, max, width and height in the file's own size"),
     CommandSpec::new("sketch.export_dxf", "Save As DXF", export_dxf).icon("sketch_dxf")
         .noundo()
         .params("sketch?: id|name (default active); path?: file to write (else the DXF text is returned)"),
@@ -53,7 +57,7 @@ fn source_text(p: &Value, cmd: &str) -> Result<String> {
 /// Add imported geometry to a sketch, sharing end points that meet.
 /// Adds the geometry; end points closer than `q` (mm) become one point, so drawings whose
 /// ends almost meet still make closed profiles.
-fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> Vec2, k: f64, q: f64) -> Result<(Vec<usize>, Vec<Geom2>)> {
+pub(super) fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> Vec2, k: f64, q: f64) -> Result<(Vec<usize>, Vec<Geom2>)> {
     let mut map: HashMap<(i64, i64), Vec<(Vec2, usize)>> = HashMap::new();
     let mut pt = |sk: &mut Sketch, p: Vec2| -> Result<usize> {
         let p = f(p);
@@ -117,13 +121,92 @@ fn add_geometry(sk: &mut Sketch, geom: &[Geom2], f: &dyn Fn(Vec2) -> Vec2, k: f6
     Ok((curves, texts))
 }
 
-fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
+/// The box around a drawing's geometry (arcs, circles and curves by their extent).
+fn bounds_of(geom: &[Geom2]) -> Option<(Vec2, Vec2)> {
+    let mut pts: Vec<Vec2> = Vec::new();
+    for g in geom {
+        match g {
+            Geom2::Point(p) => pts.push(*p),
+            Geom2::Line(a, b) => pts.extend([*a, *b]),
+            Geom2::Circle(c, r) => pts.extend([*c + Vec2::new(*r, *r), *c - Vec2::new(*r, *r)]),
+            Geom2::Arc { c, a, b } => {
+                let r = c.dist(*a);
+                let (a0, mut a1) = ((*a - *c).angle(), (*b - *c).angle());
+                while a1 <= a0 {
+                    a1 += std::f64::consts::TAU;
+                }
+                pts.extend([*a, *b]);
+                // The four extreme directions that lie on the arc.
+                for q in 0..4 {
+                    let mut d = f64::from(q) * std::f64::consts::FRAC_PI_2;
+                    while d < a0 {
+                        d += std::f64::consts::TAU;
+                    }
+                    if d < a1 {
+                        pts.push(*c + Vec2::from_angle(d) * r);
+                    }
+                }
+            }
+            Geom2::Ellipse { c, major, minor } => {
+                let r = c.dist(*major).max(*minor);
+                pts.extend([*c + Vec2::new(r, r), *c - Vec2::new(r, r)]);
+            }
+            Geom2::Spline { pts: sp, .. } => pts.extend(sp.iter().copied()),
+            Geom2::Conic { a, apex, b, .. } => pts.extend([*a, *apex, *b]),
+            Geom2::Text { at, .. } => pts.push(*at),
+        }
+    }
+    let first = *pts.first()?;
+    let (lo, hi) = pts.iter().fold((first, first), |(lo, hi), p| (Vec2::new(lo.x.min(p.x), lo.y.min(p.y)), Vec2::new(hi.x.max(p.x), hi.y.max(p.y))));
+    (lo.x.is_finite() && lo.y.is_finite() && hi.x.is_finite() && hi.y.is_finite()).then_some((lo, hi))
+}
+
+fn read_drawing(p: &Value, cmd: &str, svg: bool) -> Result<Vec<Geom2>> {
     let text = source_text(p, cmd)?;
-    let geom = if svg { solidcraft_io::read_svg(&text) } else { solidcraft_io::read_dxf(&text) }.map_err(|e| bad(cmd, e.to_string()))?;
+    if svg { solidcraft_io::read_svg(&text) } else { solidcraft_io::read_dxf(&text) }.map_err(|e| bad(cmd, e.to_string()))
+}
+
+/// How big a drawing is in its own file, to size it before it is inserted.
+fn drawing_bounds(_s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "sketch.drawing_bounds";
+    let name_is_dxf = str_(p, "path").is_some_and(|x| x.to_ascii_lowercase().ends_with(".dxf"));
+    let svg = match str_(p, "format") {
+        Some(f) => !f.eq_ignore_ascii_case("dxf"),
+        None => !name_is_dxf,
+    };
+    let geom = read_drawing(p, cmd, svg)?;
+    let (lo, hi) = bounds_of(&geom).ok_or_else(|| bad(cmd, "the drawing has no geometry SolidCraft reads"))?;
+    Ok(json!({"min": [lo.x, lo.y], "max": [hi.x, hi.y], "width": hi.x - lo.x, "height": hi.y - lo.y}))
+}
+
+fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
+    let geom = read_drawing(p, cmd, svg)?;
     if geom.is_empty() {
         return Err(bad(cmd, "the drawing has no geometry SolidCraft reads"));
     }
-    let k = num(p, "scale").filter(|k| *k > 1e-9 && *k < 1e6).unwrap_or(1.0);
+    // A size in millimetres wins over a factor; the aspect ratio is always kept.
+    let natural = bounds_of(&geom).map(|(lo, hi)| (hi.x - lo.x, hi.y - lo.y));
+    let sized = |key: &str, of: fn(&(f64, f64)) -> f64| -> Result<Option<f64>> {
+        let Some(v) = p.get(key) else { return Ok(None) };
+        let want = v.as_f64().filter(|w| w.is_finite() && *w > 0.0).ok_or_else(|| bad(cmd, format!("`{key}` must be a positive number (mm)")))?;
+        let have = natural.as_ref().map(of).filter(|h| *h > 1e-9).ok_or_else(|| bad(cmd, format!("the drawing has no {key} to size")))?;
+        Ok(Some(want / have))
+    };
+    let from_size = match sized("width", |n| n.0)? {
+        Some(k) => Some(k),
+        None => sized("height", |n| n.1)?,
+    };
+    let k = from_size.or_else(|| num(p, "scale")).filter(|k| *k > 1e-9 && *k < 1e6).unwrap_or(1.0);
+    let angle = match p.get("angle") {
+        Some(v) => v.as_f64().filter(|a| a.is_finite()).ok_or_else(|| bad(cmd, "`angle` must be a number (degrees)"))?.to_radians(),
+        None => 0.0,
+    };
+    let (sin, cos) = angle.sin_cos();
+    let pivot = match str_(p, "align") {
+        None | Some("origin") => Vec2::ZERO,
+        Some("center") => bounds_of(&geom).map(|(lo, hi)| (lo + hi) * 0.5).unwrap_or(Vec2::ZERO),
+        Some(_) => return Err(bad(cmd, "`align` must be \"origin\" or \"center\"")),
+    };
     let off = p.get("at").and_then(vec2).unwrap_or(Vec2::ZERO);
     let mut created = None;
     if s.active_sketch.is_none() {
@@ -135,7 +218,10 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
         created = r.get("sketch").and_then(Value::as_u64);
     }
     let tol = num(p, "tolerance").filter(|t| t.is_finite() && *t > 0.0).unwrap_or(1e-4).clamp(1e-9, 10.0);
-    let f = move |q: Vec2| q * k + off;
+    let f = move |q: Vec2| {
+        let v = (q - pivot) * k;
+        Vec2::new(v.x * cos - v.y * sin, v.x * sin + v.y * cos) + off
+    };
     let ((curves, texts), info) = edit(s, p, cmd, false, |sk, _| {
         let (cs, texts) = add_geometry(sk, &geom, &f, k, tol)?;
         Ok((ids_of(sk, &cs), texts))
@@ -144,7 +230,7 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
     let id = s.active_sketch.ok_or_else(|| bad(cmd, "no sketch"))?;
     let mut n_text = 0;
     for t in texts {
-        if let Geom2::Text { text, at, height, angle } = t {
+        if let Geom2::Text { text, at, height, angle: own } = t {
             let mut doc = (*s.doc).clone();
             let mut sk = doc.sketch(id)?.clone();
             if super::sketch_project::add_link(
@@ -153,7 +239,7 @@ fn insert(s: &mut Session, p: &Value, cmd: &str, svg: bool) -> Result<Value> {
                 id,
                 &mut sk,
                 LinkKind::Text,
-                LinkSource::Text { text, at, height, angle, font: None, style: Default::default(), exprs: Default::default() },
+                LinkSource::Text { text, at, height, angle: own + angle, font: None, style: Default::default(), exprs: Default::default() },
             )
             .is_ok()
             {
@@ -263,6 +349,56 @@ mod tests {
             let r = s.execute("sketch.insert_dxf", &json!({"text": dxf})).unwrap();
             assert_eq!(r["curves"], 1, "{n} points: {r}");
             s.execute("sketch.finish", &json!({})).unwrap();
+        }
+    }
+
+    const PLATE: &str =
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="20mm" height="10mm" viewBox="0 0 20 10"><rect x="0" y="0" width="20" height="10"/></svg>"#;
+
+    fn span(s: &Session) -> (f64, f64, f64, f64) {
+        let st = s.model.state();
+        let sk = &st.sketch(s.active_sketch.unwrap()).unwrap().sketch;
+        let (mut lo, mut hi) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
+        for p in (0..sk.curves.len()).flat_map(|i| sk.polyline(i)) {
+            lo = (lo.0.min(p.x), lo.1.min(p.y));
+            hi = (hi.0.max(p.x), hi.1.max(p.y));
+        }
+        (lo.0, lo.1, hi.0, hi.1)
+    }
+
+    fn inserted(params: serde_json::Value) -> (f64, f64, f64, f64) {
+        let mut s = Session::default();
+        s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+        let mut p = json!({"text": PLATE});
+        p.as_object_mut().unwrap().extend(params.as_object().unwrap().clone());
+        s.execute("sketch.insert_svg", &p).unwrap();
+        span(&s)
+    }
+
+    /// A drawing can be given a size in millimetres (its aspect kept), turned about its origin and
+    /// placed; the size of the file itself is read without inserting anything.
+    #[test]
+    fn an_inserted_drawing_takes_a_width_a_height_and_an_angle() {
+        let mut s = Session::default();
+        let b = s.execute("sketch.drawing_bounds", &json!({"text": PLATE, "format": "svg"})).unwrap();
+        assert_eq!((b["width"].as_f64(), b["height"].as_f64()), (Some(20.0), Some(10.0)));
+        let near = |a: (f64, f64, f64, f64), e: (f64, f64, f64, f64)| {
+            assert!((a.0 - e.0).abs() < 1e-6 && (a.1 - e.1).abs() < 1e-6 && (a.2 - e.2).abs() < 1e-6 && (a.3 - e.3).abs() < 1e-6, "{a:?} vs {e:?}")
+        };
+        near(inserted(json!({"width": 40})), (0.0, -20.0, 40.0, 0.0));
+        near(inserted(json!({"height": 5, "at": [3, 4]})), (3.0, -1.0, 13.0, 4.0));
+        near(inserted(json!({"width": 40, "scale": 9})), (0.0, -20.0, 40.0, 0.0));
+        // Turned 90 degrees about the origin, then placed.
+        near(inserted(json!({"angle": 90, "at": [100, 0]})), (100.0, 0.0, 110.0, 20.0));
+        // About its centre: the middle lands on `at` whatever the size and angle.
+        near(inserted(json!({"align": "center", "at": [50, 50]})), (40.0, 45.0, 60.0, 55.0));
+        near(inserted(json!({"align": "center", "at": [50, 50], "width": 40})), (30.0, 40.0, 70.0, 60.0));
+        near(inserted(json!({"align": "center", "at": [50, 50], "angle": 90})), (45.0, 40.0, 55.0, 60.0));
+        for bad in [json!({"width": 0}), json!({"height": -1}), json!({"angle": "x"}), json!({"align": "left"})] {
+            s.execute("sketch.create", &json!({"plane": "XY"})).unwrap();
+            let mut p = json!({"text": PLATE});
+            p.as_object_mut().unwrap().extend(bad.as_object().unwrap().clone());
+            assert!(s.execute("sketch.insert_svg", &p).is_err(), "{bad}");
         }
     }
 }

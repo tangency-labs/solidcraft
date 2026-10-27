@@ -318,9 +318,8 @@ fn groups(t: &Tokens) -> Vec<Group> {
             ],
             &[("body", t.body), ("viewport_top", t.viewport_top)],
         ),
-        // The scale's three stops, unlit. Shaded (a stop at one angle to the light, the next at
-        // another), middle and tight merge for a red-green loss (3.3 protan, 5.2 deutan) and flat
-        // and middle for tritan (4.6). That is the scale's own fault, in Off too: #975.
+        // The scale's three stops, unlit. Along the scale, see
+        // `the_curvature_scale_lightens_steadily_for_every_eye` (#975).
         group(
             "curvature map",
             &[
@@ -966,6 +965,39 @@ fn ui_prefs_sets_each_mode_and_refuses_anything_else() {
 /// Random values (fixed seed): strings near the four ids and far from them, numbers, nesting.
 /// `ui.prefs` takes exactly the four ids and refuses the rest without a change; saved
 /// preferences load every value, unknown ones as Off. Nothing panics.
+/// The section previews the mode being chosen (#7152): the sample's lines take that mode's
+/// colours. The status chips beside it keep theirs in every mode.
+#[test]
+fn the_sample_previews_the_mode_being_chosen() {
+    let mut h = crate::scenario::Harness::new();
+    crate::prefs::control(&mut h.app, &json!({"open": "Interface"})).unwrap();
+    let lines = |h: &crate::scenario::Harness| {
+        let mut out = BTreeSet::new();
+        for s in &h.shapes {
+            crate::test_support::each_shape(&s.shape, &mut |shape| {
+                if let egui::Shape::LineSegment { stroke, .. } = shape {
+                    out.insert(stroke.color.to_array());
+                }
+            });
+        }
+        out
+    };
+    for mode in [ColorVision::Protan, ColorVision::Tritan, ColorVision::Off] {
+        crate::prefs::control(&mut h.app, &json!({"color_vision": mode.id()})).unwrap();
+        h.frames(2);
+        let (want, off) = (Tokens::get_in(mode), Tokens::get_in(ColorVision::Off));
+        let painted = lines(&h);
+        for (name, c) in [("axis_x", want.axis_x), ("axis_y", want.axis_y), ("sketch_locked", want.sketch_locked)] {
+            assert!(painted.contains(&c.to_array()), "{mode:?}: the sample draws {name} {c:?}");
+        }
+        if mode != ColorVision::Off {
+            let changed = [(want.axis_x, off.axis_x), (want.sketch_locked, off.sketch_locked)];
+            assert!(changed.iter().any(|(a, b)| a != b), "{mode:?} recolours what the sample shows");
+        }
+    }
+    crate::prefs::control(&mut h.app, &json!({"button": "cancel"})).unwrap();
+}
+
 #[test]
 fn random_values_never_panic_and_only_the_four_ids_are_taken() {
     fn value(next: &mut impl FnMut() -> u64, depth: u32) -> serde_json::Value {
@@ -1042,4 +1074,25 @@ fn cancel_puts_the_mode_back_ok_keeps_it_and_restore_defaults_resets_interface_o
     control(&mut app, json!({"button": "defaults"}));
     assert_eq!(app.preferences.color_vision, ColorVision::Off);
     control(&mut app, json!({"button": "ok"}));
+}
+
+/// #975: the Curvature Map reads from flat to tight with hue lost too. Along the shader's two
+/// blends its lightness rises the whole way, and each quarter of the scale is a clear step, for
+/// normal vision and each simulated loss. The former blue, green, red scale rose and fell.
+#[test]
+fn the_curvature_scale_lightens_steadily_for_every_eye() {
+    let c = Tokens::light().analysis.curvature;
+    // Flat to middle over the first half, middle to tight over the second, as the shader mixes.
+    let at = |t: f64| -> Rgb8 {
+        let (a, b, u) = if t < 0.5 { (c[0], c[1], t * 2.0) } else { (c[1], c[2], t * 2.0 - 1.0) };
+        std::array::from_fn(|k| ((f64::from(a[k]) + (f64::from(b[k]) - f64::from(a[k])) * u) * 255.0).round().clamp(0.0, 255.0) as u8)
+    };
+    for eye in [Eye::Normal, Eye::Protan, Eye::Deutan, Eye::Tritan] {
+        let labs: Vec<V3> = (0..=4).map(|i| lab(simulate(at(f64::from(i) / 4.0), eye, Instrument::Machado))).collect();
+        for w in labs.windows(2) {
+            assert!(w[1][0] > w[0][0], "{eye:?}: the lightness falls along the scale: {labs:?}");
+            let step = de2000(w[0], w[1]);
+            assert!(step >= 10.0, "{eye:?}: a quarter of the scale is only {step:.1} apart: {labs:?}");
+        }
+    }
 }

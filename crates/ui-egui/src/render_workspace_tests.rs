@@ -465,8 +465,12 @@ fn saved_camera_survives_frames_and_product_fit_ignores_selection() {
     let bounds = solidcraft_engine::product_scene::extract(&h.app.session).unwrap().bounds;
     let mut expected = camera;
     expected.fit(&bounds);
-    h.app.animate_view("fit");
+    h.call("engine.execute", json!({"command":"view.fit","params":{}}));
     h.frames(3);
+    assert_eq!(h.app.cam, expected);
+    expected.set_view(solidcraft_engine::render::StandardView::Iso);
+    expected.fit(&bounds);
+    h.call("engine.execute", json!({"command":"view.home","params":{}}));
     assert_eq!(h.app.cam, expected);
     enter(&mut h.app, false).unwrap();
     assert_eq!(h.app.cam, design);
@@ -641,7 +645,11 @@ fn product_gpu_buffers_preserve_opacity_and_never_contain_overlays() {
     let (key, gpu) = gpu_scene(&scene).unwrap();
     assert!(gpu.tris.is_empty());
     assert!(!gpu.glass.is_empty());
-    assert!(gpu.glass.as_chunks::<{ crate::gpu::TRI_SIZE }>().0.iter().all(|v| v[24..] == [51, 102, 153, 102]));
+    let color = |v: &[u8]| {
+        let i = v.get(crate::gpu::TRI_SIZE - 4..).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes)?;
+        gpu.palette.get(crate::gpu::PaletteIndex(i))
+    };
+    assert!(gpu.glass.as_chunks::<{ crate::gpu::TRI_SIZE }>().0.iter().all(|v| color(v) == Some([51, 102, 153, 102])));
     assert!(gpu.lines.is_empty() && gpu.overlay.is_empty() && gpu.under.is_empty() && gpu.hidden.is_empty() && gpu.ghost.is_empty());
     s.selection = vec![solidcraft_engine::Sel::Body { name: "Glass".into() }];
     s.section = Some((solidcraft_engine::geom::Vec3::ZERO, solidcraft_engine::geom::Vec3::X));
@@ -1073,9 +1081,12 @@ fn result_navigation_uses_shared_pan_zoom_and_leaves_product_camera_unchanged() 
     assert!(crate::navigation::view_key(&mut h.app, &ctx, Key::ArrowRight, Modifiers::CTRL, false));
     assert_ne!(h.app.render_workspace.view.result_camera.target, before_key);
     assert!(!crate::navigation::view_key(&mut h.app, &ctx, Key::ArrowRight, Modifiers::NONE, false));
-    h.app.animate_view("home");
-    nav_frame(&mut h.app, &ctx, true, &mut time, Modifiers::NONE, vec![]);
-    assert_eq!(h.app.render_workspace.view.result_camera, fitted);
+    for command in ["view.fit", "view.home"] {
+        h.app.render_workspace.view.result_camera.target.x += 20.0;
+        h.app.run(command, json!({})).unwrap();
+        nav_frame(&mut h.app, &ctx, true, &mut time, Modifiers::NONE, vec![]);
+        assert_eq!(h.app.render_workspace.view.result_camera, fitted);
+    }
     assert_eq!(h.app.cam, preview);
     assert!(h.app.ui.perspective);
     assert_eq!(serde_json::to_value(&h.app.render_workspace.view.draft).unwrap(), draft);

@@ -8,6 +8,7 @@ const LABEL_DESCRIPTION = 'Someone is working on this';
 const CLAIM_HOURS = 72;
 const PR_IDLE_DAYS = 14;
 const HOUR = 3600 * 1000;
+const BOT = 'github-actions[bot]';
 
 function parseCommand(body) {
   const text = String(body || '').trimStart();
@@ -94,6 +95,19 @@ function linkedPulls(timeline, context, number) {
     }
   }
   return [...seen.values()].sort((a, b) => a.number - b.number);
+}
+
+// Who the bot's latest "Claimed by @user" reply names, unless the label came off after it.
+// GitHub doesn't assign people who aren't collaborators, so for them this reply is the only record.
+function recordedClaimant(timeline) {
+  let who = null;
+  for (const ev of timeline) {
+    if (ev.event === 'unlabeled' && ev.label && ev.label.name === LABEL) who = null;
+    const mine = ev.event === 'commented' && ev.user && ev.user.login === BOT;
+    const m = mine && /^Claimed by @([A-Za-z0-9-]+)/.exec(ev.body || '');
+    if (m) who = m[1];
+  }
+  return who;
 }
 
 async function lastPush(github, context, pr) {
@@ -234,7 +248,10 @@ async function unclaim(github, context) {
     await react(github, context, 'eyes'); // only the owner releases their own issues
     return;
   }
-  const allowed = assignees.includes(user) || (await isMaintainer(github, context, user));
+  let allowed = assignees.includes(user) || (await isMaintainer(github, context, user));
+  if (!allowed && assignees.length === 0) {
+    allowed = recordedClaimant(await getTimeline(github, context, issue.number)) === user;
+  }
   if (!allowed) {
     await react(github, context, 'eyes');
     await reply(github, context, `Only the person who claimed this, or a maintainer, can release it, @${user}.`);

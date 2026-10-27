@@ -145,3 +145,37 @@ fn inch_pattern_arrows_follow_bare_primary_and_secondary_distances() {
     assert!(bare.0.distance(explicit.0) < 0.01, "primary: {bare:?} vs {explicit:?}");
     assert!(bare.1.distance(explicit.1) < 0.01, "secondary: {bare:?} vs {explicit:?}");
 }
+
+/// Dragging a solid pattern's Spacing arrow back past its start gives a negative spacing, as
+/// typing one does (#5497): the arrow was floored at one snap step.
+#[test]
+fn a_solid_pattern_spacing_arrow_dragged_past_zero_goes_negative() {
+    let mut h = Harness::new();
+    h.run(&json!([
+        {"call": "engine.execute", "params": {"command": "solid.box", "params": {"length": 10, "width": 10, "height": 10}}},
+        {"call": "ui.view", "params": {"view": "iso"}},
+        {"start": "solid.pattern.rectangular"},
+        {"click": {"world": [5, 5, 10]}},
+        {"call": "ui.dialogInput", "params": {"index": 1}},
+        {"click": {"axis": "X"}}
+    ]))
+    .unwrap();
+    // Keep the arrow's tip clear of its value box, which the iso view pushes onto it at the
+    // viewport's edge.
+    h.call("ui.camera", json!({"target": [15, 5, 5]}));
+    h.settle();
+    let (at, dir) = crate::canvas::anchor(&h.app, h.app.dialog.as_ref().unwrap()).expect("an anchor");
+    let to = at - dir.expect("a direction") * 10.0;
+    h.step(&json!({"drag": [{"handle": "arrow"}, {"world": [to.x, to.y, to.z]}], "ctrl": true})).unwrap();
+    let (spacing, _) = spacings(&h);
+    let v = h.app.session.doc.eval(&spacing, solidcraft_engine::doc::expr::Kind::Length).unwrap();
+    assert!((v + 10.0).abs() < 0.5, "dragging 10 mm back from the start gave Spacing {spacing}");
+    // Applied, the copies sit on the negative side, as a typed negative spacing puts them.
+    h.step(&json!({"widget": "OK"})).unwrap();
+    assert!(h.app.dialog.is_none(), "{:?}", h.app.status);
+    let st = h.app.session.world_state();
+    for (copy, k) in [("Body1 (2)", 1.0), ("Body1 (3)", 2.0)] {
+        let x = st.body(copy).unwrap_or_else(|| panic!("no {copy}: {:?}", h.app.status)).mesh().bounds().center().x;
+        assert!((x - (5.0 + k * v)).abs() < 1e-6, "{copy} centred at x = {x} for Spacing {spacing}");
+    }
+}

@@ -109,6 +109,31 @@ new commits were added. An existing tag or published release is never overwritte
 version after publication. Do not push the version tag yourself: publishing the draft creates
 it at the draft's target commit.
 
+## macOS disk image
+
+`packaging/macos/package.sh` builds the `.dmg` with [dmgbuild](https://github.com/dmgbuild/dmgbuild)
+(MIT; hash-pinned in `packaging/macos/dmg-requirements.txt`, installed into a throwaway venv under
+`target/`). It writes the Finder layout, the background and the icon positions straight into the
+image, so the build needs no Finder session or AppleScript, which are unreliable on CI runners.
+
+The look lives in `assets/platforms/macos/dmg/`: `layout.json` (window size, icon size and
+positions, shared by both files below), `settings.py` (the dmgbuild settings) and `background.tiff`
+(a blueprint sheet, 540×360 pt, with a 1x and a 2x representation so Retina screens get the sharp one). Change the art with
+`make_background.py` (needs Pillow; its docstring has the commands), view the result by mounting the
+image, and commit the TIFF with the script. Rules the design follows:
+
+- The title bar adds to the window rectangle (`title_bar` in `layout.json`, 32 pt on macOS 27); the
+  content area must equal the background's size. Older macOS versions have a thinner title bar and
+  were not checked.
+- Finder draws the icon names itself, black in Light and white in Dark appearance, and art cannot
+  change that. Each name therefore sits on a mid-tone plate that both colours read on. Keep the
+  plates under the icons if you move them.
+- `README.txt` stays on the disk but is hidden (`SetFile -a V`), so the window stays calm.
+
+`package.sh` mounts the finished image and checks the layout files, the volume icon, the bundle and
+its signature. `hdiutil` prints deprecation warnings on macOS 27 (dmgbuild still uses it); if a
+later macOS removes it, dmgbuild needs a release that uses `diskutil image`.
+
 ## Notes for the next release
 
 Items to carry into the next release's notes (step 3 below), then remove from here:
@@ -129,8 +154,9 @@ change release infrastructure does not itself request publication of the applica
    other platforms; report any platform you could not exercise yourself.
 3. Review the generated notes. Add a concise description of features, fixes, breaking changes,
    and known limitations. Keep the installation instructions. The macOS app is Developer ID
-   signed and notarized only when the build summary says so; other packages are unsigned. Do not
-   claim otherwise. Resolve failed checks or missing artifacts before publication.
+   signed and notarized only when the build summary says so, and the Windows files are signed only
+   when it says which SignPath policy signed them (`test-signing` is a self-signed test certificate
+   that Windows does not trust); other packages are unsigned. Do not claim otherwise. Resolve failed checks or missing artifacts before publication.
 4. Publish the verified draft using `gh` or the equivalent GitHub release API. For example:
 
    ```sh
@@ -290,6 +316,29 @@ valid, because the signature carries a secure timestamp.
 Signing currently uses a maintainer's **personal** Developer ID, so downloads show that person's
 name, not an organisation's. Moving to an organisation account means replacing the certificate
 and the API key secrets (`APPLE_API_KEY_P8`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`).
+
+## Windows signing (SignPath Foundation)
+
+When the `SIGNPATH_API_TOKEN` secret (the API token of the SignPath CI user) exists, the release
+workflow's Windows jobs Authenticode-sign through [SignPath Foundation](https://signpath.org)
+(organization `fa603ff4-c702-404b-8588-a524371c7a4e`, project `solidcraft`). Each architecture
+sends two signing requests: `solidcraft.exe`, `solidcraft-cli.exe` and `solvecraft-cli.exe` first,
+so the MSI, the portable zip and the plain `.exe` are made from signed binaries, then the MSI. Each
+request uploads the files as a workflow artifact, SignPath fetches and signs it, and the job checks
+that every file came back signed. Without the secret (forks) the jobs build unsigned as before.
+
+- **Policy:** `test-signing` (a self-signed test certificate) unless the dispatch input
+  `signpath_signing_policy` or the repository variable `SIGNPATH_SIGNING_POLICY` says otherwise.
+  Switch to the real certificate with `gh variable set SIGNPATH_SIGNING_POLICY -b release-signing
+  -R tangency-labs/solidcraft` once SignPath has issued it. Requests under `release-signing` wait
+  for approval in SignPath; the workflow waits up to an hour for each.
+- **Artifact configuration:** `packaging/windows/signpath-artifact-configuration.xml`. When it
+  changes, paste the new version into the SignPath project's artifact configuration when it lands.
+- **Test-sign without publishing:** `gh workflow run release.yml -R tangency-labs/solidcraft --ref
+  <branch> -f draft=false`, then check the Windows jobs' summaries and the `release-assets`
+  artifact.
+- SignPath only signs runs whose jobs all ran on GitHub-hosted runners, so keep the `version`,
+  `icons` and `windows` jobs off self-hosted runners.
 
 ## Homebrew tap
 

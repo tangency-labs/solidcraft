@@ -114,10 +114,16 @@ fn remap_plane(p: &mut PlaneRef, ids: &BTreeMap<u64, u64>, bodies: &BTreeMap<Str
         return Err(crate::DocError::Invalid("clone plane reference depth exceeded".into()));
     }
     match p {
-        PlaneRef::Offset { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::Flipped { base, .. } => remap_plane(base, ids, bodies, depth + 1)?,
+        PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } => remap_plane(base, ids, bodies, depth + 1)?,
         PlaneRef::ThroughPoint { base, point } => {
             remap_plane(base, ids, bodies, depth + 1)?;
             remap_geo(point, ids, bodies, depth + 1)?;
+        }
+        PlaneRef::AtAngle { base, line, .. } => {
+            remap_plane(base, ids, bodies, depth + 1)?;
+            if let Some(g) = line {
+                remap_geo(g, ids, bodies, depth + 1)?;
+            }
         }
         PlaneRef::Face { name, anchor, .. } => {
             if let Some(name) = name {
@@ -209,6 +215,9 @@ impl crate::Feature {
                     checked_geo(r, 0)?;
                 }
             }
+            K::Revolve { axis: crate::AxisRef::Model { geo }, .. }
+            | K::SurfaceRevolve { axis: crate::AxisRef::Model { geo }, .. }
+            | K::Pattern { pattern: crate::PatternKind::Circular { axis_ref: Some(geo), .. }, .. } => checked_geo(geo, 0)?,
             _ => {}
         }
         // Feature names are remapped once here; the geometry pass below handles only
@@ -269,6 +278,9 @@ impl crate::Feature {
                     remap_geo(r, ids, bodies, 0)?;
                 }
             }
+            K::Revolve { axis: crate::AxisRef::Model { geo }, .. }
+            | K::SurfaceRevolve { axis: crate::AxisRef::Model { geo }, .. }
+            | K::Pattern { pattern: crate::PatternKind::Circular { axis_ref: Some(geo), .. }, .. } => remap_geo(geo, ids, bodies, 0)?,
             _ => {}
         }
         Ok(())
@@ -289,7 +301,13 @@ fn checked_plane(p: &PlaneRef, depth: usize) -> crate::Result<()> {
         return Err(crate::DocError::Invalid("copy reference nesting exceeds 64".into()));
     }
     match p {
-        PlaneRef::Offset { base, .. } | PlaneRef::AtAngle { base, .. } | PlaneRef::Flipped { base, .. } => checked_plane(base, depth + 1)?,
+        PlaneRef::Offset { base, .. } | PlaneRef::Flipped { base, .. } => checked_plane(base, depth + 1)?,
+        PlaneRef::AtAngle { base, line, .. } => {
+            checked_plane(base, depth + 1)?;
+            if let Some(g) = line {
+                checked_geo(g, depth + 1)?;
+            }
+        }
         PlaneRef::Midplane { a, b } | PlaneRef::TwoEdges { a, b } => {
             checked_geo(a, depth + 1)?;
             checked_geo(b, depth + 1)?;
@@ -333,7 +351,9 @@ mod clone_tests {
         use serde_json::json;
 
         let names = BTreeMap::from([("Old".into(), "New".into()), ("New".into(), "Wrong".into())]);
-        let origin = json!({"type": "plane", "plane": {"type": "construction", "name": "Old"}});
+        // Construction plane references are keyed by id (#1134): a copy remap moves the id map,
+        // not this one; the axis and point names below are what a rename and a copy rewrite.
+        let origin = json!({"type": "plane", "plane": {"type": "construction", "feature": 7}});
         for kind in [
             json!({"type": "construction_axis", "def": {"type": "two_points", "a": {"type": "construct_point", "name": "Old"}, "b": {"type": "point", "p": [1, 2, 3]}}}),
             json!({"type": "construction_point", "def": {"type": "edge_and_plane", "edge": {"type": "axis", "name": "Old"}, "plane": origin}}),

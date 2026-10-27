@@ -40,6 +40,10 @@ impl Renderer {
             return Ok(MsaaCheck::FailedAtOne);
         }
         replacement.tess = self.tess.take();
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            replacement.tess_later = self.tess_later.take();
+        }
         *self = replacement;
         Ok(MsaaCheck::Fallback)
     }
@@ -80,12 +84,14 @@ impl Renderer {
     fn probe_pixels(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, blank_samples: u32) -> Result<bool> {
         const SIZE: u32 = 16;
         let mut model = GpuScene::default();
+        let red = model.color([255, 0, 0, 255]);
         for p in [[-0.9, -0.9, 0.0], [0.9, -0.9, 0.0], [0.0, 0.9, 0.0]] {
-            model.tri(p, [0.0, 0.0, 1.0], [255, 0, 0, 255]);
+            model.tri(p, [0.0, 0.0, 1.0], red);
         }
         let mut highlight = GpuScene::default();
+        let blue = highlight.color([0, 0, 255, 64]);
         for p in [[-0.8, -0.8, 0.0], [0.8, -0.8, 0.0], [0.8, 0.8, 0.0], [-0.8, -0.8, 0.0], [0.8, 0.8, 0.0], [-0.8, 0.8, 0.0]] {
-            highlight.xray_tri(p, [0.0, 0.0, 1.0], [0, 0, 255, 64]);
+            highlight.xray_tri(p, [0.0, 0.0, 1.0], blue);
         }
         let slot = |scene| Arc::new(Mutex::new(scene));
         let frame = Frame {

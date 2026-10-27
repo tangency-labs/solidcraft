@@ -792,7 +792,7 @@ pub(super) fn create_face_profile(s: &mut Session, p: &Value, body: &str, index:
     create_sketch_with_plane(s, p, plane, Some((body, index)))
 }
 
-fn create_sketch_with_plane(s: &mut Session, p: &Value, plane: PlaneRef, internal_body: Option<(&str, usize)>) -> Result<Value> {
+pub(super) fn create_sketch_with_plane(s: &mut Session, p: &Value, plane: PlaneRef, internal_body: Option<(&str, usize)>) -> Result<Value> {
     let before = entry_point(s);
     if face::is_face(p) {
         face::capture_positions(s, &plane)?;
@@ -1419,8 +1419,20 @@ fn polygon(s: &mut Session, p: &Value, cmd: &str, center: Vec2, r_vertex: f64, s
                 cons.push(add_c(sk, ConstraintKind::PointOnCurve { p: *pt, c: circ })?);
             }
         } else {
-            for li in &l {
-                cons.push(add_c(sk, ConstraintKind::Tangent { a: *li, b: circ })?);
+            // Equal sides tangent to one circle don't make a polygon regular: every other corner
+            // stays free (a rhombus round a circle), and a drag pulled it out of shape (#7395).
+            // The corners on a second circle, concentric, make it regular as the inscribed one
+            // is; one side tangent to the support circle then sets its size (the others follow).
+            let corner = sk.add_circle(center, r_vertex, None, None)?;
+            if let Some(cu) = sk.curves.get_mut(corner) {
+                cu.construction = true;
+            }
+            cons.push(add_c(sk, ConstraintKind::Concentric { a: circ, b: corner })?);
+            for pt in &pts {
+                cons.push(add_c(sk, ConstraintKind::PointOnCurve { p: *pt, c: corner })?);
+            }
+            if let Some(first) = l.first() {
+                cons.push(add_c(sk, ConstraintKind::Tangent { a: *first, b: circ })?);
             }
         }
         Ok((ids_of(sk, &l), cons))

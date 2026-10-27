@@ -840,8 +840,14 @@ impl Tokens {
     /// The tokens of the current theme and colour vision mode, the colours drawn in the 3D view
     /// from the view's own dark or light ([`viewport_dark`]).
     pub fn get() -> Tokens {
-        let window = Tokens::themed(is_dark(), vision());
-        if viewport_dark() == is_dark() { window } else { window.with_viewport(Tokens::themed(viewport_dark(), vision())) }
+        Tokens::get_in(vision())
+    }
+
+    /// [`Tokens::get`] in another colour vision mode: the Colour vision preference previews the
+    /// mode being chosen before it is applied (#7152).
+    pub fn get_in(mode: ColorVision) -> Tokens {
+        let window = Tokens::themed(is_dark(), mode);
+        if viewport_dark() == is_dark() { window } else { window.with_viewport(Tokens::themed(viewport_dark(), mode)) }
     }
 
     /// The tokens of the 3D view's side (#4146), for a window colour drawn straight onto the view

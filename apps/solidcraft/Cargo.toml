@@ -13,8 +13,9 @@ bundled-render-library = ["solidcraft-engine/bundled-render-library"]
 raytrace-cpu = ["solidcraft-engine/raytrace-cpu"]
 
 # The workspace lints, except unsafe_code: denied, not forbidden, so that src/open_documents.rs
-# (macOS file-open events), src/native_crash.rs (Windows exception filter) and src/native_frame.rs
-# (Windows resize border, taskbar icon) can allow it: none has a safe API. Keep the rest in sync with [workspace.lints].
+# (macOS file-open events), src/native_crash.rs (Windows exception filter), src/native_crash_macos.rs
+# (macOS crash signal handler) and src/native_frame.rs (Windows resize border, taskbar icon) can
+# allow it: none has a safe API. Keep the rest in sync with [workspace.lints].
 [lints.rust]
 unsafe_code = "deny"
 
@@ -31,6 +32,7 @@ solidcraft-ui-egui = { workspace = true }
 solidcraft-space-mouse = { workspace = true }
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "links"] }
 egui = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 log = { workspace = true }
 rfd = { workspace = true }
@@ -88,6 +90,9 @@ objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSWindow"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "block2", "NSArray", "NSNotification", "NSOperation", "NSProcessInfo", "NSString", "NSURL"] }
 block2 = "0.6"
+# Native crash capture (src/native_crash_macos.rs): the signal handler, the faulting module
+# (already in the tree through many crates).
+libc = "0.2"
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 winit = { version = "0.30", default-features = false, features = ["x11"] }

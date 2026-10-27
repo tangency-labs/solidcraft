@@ -128,6 +128,161 @@ fn panel_keeps_actions_and_body_geometry_in_both_layouts() {
     }
 }
 
+/// One frame of a feature panel with `rows` body rows, the given `placement` published.
+fn feature_frame_with(
+    ctx: &egui::Context,
+    placement: DialogButtons,
+    rows: usize,
+    valid: bool,
+    collapsed: Option<&mut bool>,
+    events: Vec<egui::Event>,
+) -> (bool, Action) {
+    let vp = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 480.0));
+    scenario::clear_handles();
+    let mut result = (false, Action::None);
+    let mut collapsed = collapsed;
+    crate::test_support::frame(ctx, egui::RawInput { screen_rect: Some(vp), events, focused: true, ..Default::default() }, |_| {
+        placement.publish(ctx);
+        let side = crate::frame::Side::Right;
+        let frame = Panel::feature_frame(ctx, crate::shell::LayoutMode::Floating, side);
+        let anchor = egui::pos2(vp.right() - crate::shell::SHELL_GAP, vp.top());
+        let panel = Panel::new("Fillet", egui::Id::new("top_actions"), anchor, vp, side, frame);
+        panel.window(ctx).show(ctx, |ui| {
+            let heading = FeatureOptions {
+                icon: "fillet",
+                title: "Fillet",
+                drag_key: "top_actions",
+                moved: egui::Vec2::ZERO,
+                docked: anchor,
+                apply_label: Some("Apply"),
+            };
+            let body = |ui: &mut Ui| {
+                for row_index in 0..rows {
+                    text(ui, &format!("Input {row_index}"), Text::Note("row"));
+                }
+                ComputeStatus { text: None, busy: false, applying: false }
+            };
+            result = match collapsed.as_deref_mut() {
+                Some(collapsed) => panel.feature_collapsible(ui, heading, false, valid, collapsed, body),
+                None => panel.feature(ui, heading, false, valid, body),
+            };
+        });
+    });
+    result
+}
+
+#[test]
+fn top_placement_puts_the_actions_in_the_header_row_where_they_stay() {
+    let ctx = crate::fonts::test_context();
+    for _ in 0..3 {
+        feature_frame_with(&ctx, DialogButtons::Top, 2, true, None, Vec::new());
+    }
+    let header = scenario::rect_of("dialog:header").unwrap();
+    assert_eq!(header.height(), Tokens::get().form_header_height);
+    assert!(scenario::rect_of("dialog:footer").is_none(), "the footer row is gone");
+    let (ok, apply, cancel) =
+        (scenario::rect_of("dialog:ok").unwrap(), scenario::rect_of("dialog:apply").unwrap(), scenario::rect_of("dialog:cancel").unwrap());
+    for (name, rect) in [("ok", ok), ("apply", apply), ("cancel", cancel)] {
+        assert!(header.contains_rect(rect), "{name} {rect:?} sits in the header {header:?}");
+        assert_eq!(rect.height(), Tokens::get().form_button_height, "{name}");
+    }
+    assert!(cancel.right() < apply.left() && apply.right() < ok.left(), "the footer's order: Cancel, Apply, then OK at the right");
+    assert_eq!(scenario::handle_at("dialog:close"), Some(cancel.center()), "Cancel stands in for the close button");
+    assert!(scenario::handle_at("dialog:OK").is_some() && scenario::handle_at("dialog:Cancel").is_some());
+    assert!(scenario::handle_at("dialog:title").is_some_and(|at| at.x < cancel.left()), "the title drags clear of the buttons");
+    assert_eq!(scenario::count_of("dialog:ok:enabled"), Some(1.0));
+
+    // More inputs, a longer card: the buttons stay where they were.
+    for _ in 0..2 {
+        feature_frame_with(&ctx, DialogButtons::Top, 24, true, None, Vec::new());
+    }
+    assert_eq!(scenario::rect_of("dialog:ok"), Some(ok));
+    assert_eq!(scenario::rect_of("dialog:cancel"), Some(cancel));
+
+    // OK greys out exactly as it does in the footer, and a click on it then does nothing.
+    feature_frame_with(&ctx, DialogButtons::Top, 2, false, None, Vec::new());
+    assert_eq!(scenario::count_of("dialog:ok:enabled"), Some(0.0));
+    let at = ok.center();
+    feature_frame_with(&ctx, DialogButtons::Top, 2, false, None, crate::test_support::pointer(at, true));
+    assert_eq!(feature_frame_with(&ctx, DialogButtons::Top, 2, false, None, crate::test_support::pointer(at, false)).1, Action::None);
+    feature_frame_with(&ctx, DialogButtons::Bottom, 2, false, None, Vec::new());
+    assert_eq!(scenario::count_of("dialog:ok:enabled"), Some(0.0), "the same state at the bottom");
+
+    // The buttons and the keys answer as the footer's do.
+    for (target, expected) in [(ok, Action::Ok), (apply, Action::Apply), (cancel, Action::Cancel)] {
+        feature_frame_with(&ctx, DialogButtons::Top, 2, true, None, Vec::new());
+        feature_frame_with(&ctx, DialogButtons::Top, 2, true, None, crate::test_support::pointer(target.center(), true));
+        let clicked = feature_frame_with(&ctx, DialogButtons::Top, 2, true, None, crate::test_support::pointer(target.center(), false));
+        assert_eq!(clicked, (false, expected));
+    }
+    for (key, expected) in [(egui::Key::Escape, Action::Cancel), (egui::Key::Enter, Action::Ok)] {
+        feature_frame_with(&ctx, DialogButtons::Top, 2, true, None, Vec::new());
+        assert_eq!(feature_frame_with(&ctx, DialogButtons::Top, 2, true, None, crate::test_support::key(key)).1, expected, "{key:?}");
+    }
+}
+
+/// With no footer to show it, the compute status takes the title's place and the spinner the
+/// icon's, until the feature is in; OK stays grey meanwhile, as in the footer.
+#[test]
+fn top_placement_shows_the_compute_status_in_the_title_row() {
+    let ctx = crate::fonts::test_context();
+    let vp = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(640.0, 480.0));
+    let mut output = None;
+    for _ in 0..3 {
+        scenario::clear_handles();
+        output = Some(crate::test_support::frame(&ctx, egui::RawInput { screen_rect: Some(vp), ..Default::default() }, |_| {
+            DialogButtons::Top.publish(&ctx);
+            let side = crate::frame::Side::Right;
+            let anchor = egui::pos2(vp.right() - crate::shell::SHELL_GAP, vp.top());
+            let panel = Panel::new(
+                "Fillet",
+                egui::Id::new("top_status"),
+                anchor,
+                vp,
+                side,
+                Panel::feature_frame(&ctx, crate::shell::LayoutMode::Floating, side),
+            );
+            panel.window(&ctx).show(&ctx, |ui| {
+                let heading = FeatureOptions {
+                    icon: "fillet",
+                    title: "Fillet",
+                    drag_key: "top_status",
+                    moved: egui::Vec2::ZERO,
+                    docked: anchor,
+                    apply_label: None,
+                };
+                panel.feature(ui, heading, true, true, |ui| {
+                    text(ui, "Input", Text::Note("row"));
+                    ComputeStatus { text: Some("Computing… 3 s".into()), busy: true, applying: true }
+                });
+            });
+        }));
+    }
+    let texts: Vec<String> = output.iter().flat_map(crate::test_support::text_shapes).map(|shape| shape.galley.job.text.clone()).collect();
+    assert!(texts.iter().any(|text| text == "Computing… 3 s"), "{texts:?}");
+    assert!(!texts.iter().any(|text| text == "Fillet"), "the status stands in for the title: {texts:?}");
+    assert_eq!(scenario::count_of("dialog:ok:enabled"), Some(0.0), "OK waits for the feature");
+    assert!(scenario::rect_of("dialog:header").unwrap().contains_rect(scenario::rect_of("dialog:cancel").unwrap()));
+}
+
+#[test]
+fn top_placement_keeps_a_managers_fold_beside_the_actions() {
+    let ctx = crate::fonts::test_context();
+    let mut collapsed = false;
+    for _ in 0..3 {
+        feature_frame_with(&ctx, DialogButtons::Top, 4, true, Some(&mut collapsed), Vec::new());
+    }
+    let header = scenario::rect_of("dialog:header").unwrap();
+    let fold = scenario::handle_at("dialog:collapse").unwrap();
+    let cancel = scenario::rect_of("dialog:cancel").unwrap();
+    assert!(header.contains(fold) && fold.x < cancel.left(), "{fold:?} left of {cancel:?}");
+    assert!(scenario::handle_at("dialog:title").is_some_and(|at| at.x < fold.x));
+    feature_frame_with(&ctx, DialogButtons::Top, 4, true, Some(&mut collapsed), crate::test_support::pointer(fold, true));
+    feature_frame_with(&ctx, DialogButtons::Top, 4, true, Some(&mut collapsed), crate::test_support::pointer(fold, false));
+    assert!(collapsed);
+    assert_eq!(scenario::rect_of("dialog:cancel"), Some(cancel), "folding leaves the buttons in place");
+}
+
 #[test]
 fn palette_scrolls_short_views_and_retains_its_status_and_action_handles() {
     for layout in [crate::shell::LayoutMode::Docked, crate::shell::LayoutMode::Floating] {

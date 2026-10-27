@@ -6,6 +6,7 @@
 mod app_icons;
 mod assets;
 mod book;
+mod external_corpus;
 mod features;
 mod i18n;
 mod icons;
@@ -53,6 +54,12 @@ commands:
   book [--no-build]
                   generate docs/book's command reference and screenshots, then mdbook build
                   into target/book
+  external-corpus [--bless WHY] [--only NAME] [--cli PATH]
+                  import the real-world STEP files listed in tests/external-corpus.toml and
+                  check body counts, total volumes and areas within tolerances and time and
+                  memory budgets (#1397); run nightly by the External corpus workflow, not by
+                  ci (it downloads from the internet). --bless re-records the expected values
+                  in the manifest with the reason given
   licences [--check]
                   write THIRD-PARTY-LICENSES.txt (the licences of every shipped crate, embedded
                   in the programs); --check only reports when it is out of date: pull requests
@@ -101,6 +108,7 @@ fn main() -> ExitCode {
             cmd_action_matrix(rest.contains(&"--bless"), arg("--results"), arg("--from"))
         }
         Some("book") => book::run(&root(), !rest.contains(&"--no-build")),
+        Some("external-corpus") => external_corpus::run(&root(), &rest),
         Some("licences") => licences::run(&root(), rest.contains(&"--check")),
         Some("fold-pending") => pending::run(&root()),
         Some("skills") => skills::run(&root()),

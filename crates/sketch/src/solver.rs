@@ -1990,6 +1990,10 @@ enum Orient {
     OfLine(usize, usize, f64),
     /// Which of two nested circles or arcs encloses the other.
     RadiusOrder(usize, usize),
+    /// Which way along line `l` the point `q` is from `p`: a `Distance` between two points that
+    /// both lie on `l` (its ends, points on it, or points coincident with either; one of them may
+    /// lie on it by what else holds it).
+    Along(usize, usize, usize, f64),
 }
 
 /// An orientation's signed offset in a state (a corner's distance from the opposite side, an
@@ -2022,6 +2026,11 @@ fn offset(s: &State, o: Orient) -> Option<(f64, f64, f64)> {
             // Even a thin wall has an inside and an outside. Use the radius difference as
             // its size; rounding still accounts for the radii and the arc coordinates.
             (ra - rb, (ra - rb).abs(), ra.max(rb).max(coords(&[ca, cb])))
+        }
+        Orient::Along(p, q, l, size) => {
+            let (a, b) = s.line(l);
+            let (pp, pq) = (s.p(p), s.p(q));
+            ((b - a).normalized()?.dot(pq - pp), size, coords(&[pp, pq, a, b]))
         }
     })
 }
@@ -2154,11 +2163,17 @@ fn orients(s: &State, sub: &[(Block, Vec<usize>)]) -> Vec<(Orient, Vec<usize>)> 
     let mut out = Vec::new();
     let mut joins = Vec::new();
     let mut edges = Vec::new();
+    let mut spans: Vec<(usize, usize, f64, usize)> = Vec::new();
     for (b, _) in sub {
-        let Block::User(ci, kind) = b else { continue };
+        // A tangency at a point the two curves share (or a line's end held on the round) is a
+        // block of its own; its round keeps its side of the line all the same.
+        let (Block::User(ci, kind) | Block::TangentAt(ci, kind, _)) = b else { continue };
         match **kind {
             ConstraintKind::Coincident { p, q } => joins.push((p, q)),
-            ConstraintKind::Distance { p, q, .. } => edges.push((p, q, *ci)),
+            ConstraintKind::Distance { p, q, value } => {
+                edges.push((p, q, *ci));
+                spans.push((p, q, value, *ci));
+            }
             ConstraintKind::Length { l, .. } => edges.extend(line(l).map(|(p, q)| (p, q, *ci))),
             ConstraintKind::DistanceX { p, q, value } if free(p) || free(q) => out.push((Orient::SideX(p, q, value), vec![*ci])),
             ConstraintKind::DistanceY { p, q, value } if free(p) || free(q) => out.push((Orient::SideY(p, q, value), vec![*ci])),
@@ -2175,8 +2190,9 @@ fn orients(s: &State, sub: &[(Block, Vec<usize>)]) -> Vec<(Orient, Vec<usize>)> 
                     out.push((Orient::OfLine(*centre, l, value + s.round(c).1), vec![*ci]));
                 }
             }
-            // A line tangent to a circle away from both their ends: the circle stays on its side
-            // (the other tangent of that direction is a diameter away).
+            // A line tangent to a circle: the circle stays on its side (away from their ends, the
+            // other tangent of that direction is a diameter away; at an end they share, the other
+            // tangent from the line's far end is its mirror image).
             ConstraintKind::Tangent { a, b } => {
                 let (l, c) = if s.is_line(a) { (a, b) } else { (b, a) };
                 if s.is_line(l)
@@ -2186,6 +2202,57 @@ fn orients(s: &State, sub: &[(Block, Vec<usize>)]) -> Vec<(Orient, Vec<usize>)> 
                 }
             }
             _ => {}
+        }
+    }
+    // A distance between two points on one line leaves which way along it open: the other
+    // solution is the same distance back past `p`. A point is on a line as one of its ends, as a
+    // point held on it, or coincident with either, read from the whole sketch (the line may be
+    // fixed, solved apart from these points).
+    let ends = |l: usize| line(l).map(|(a, b)| [a, b]).unwrap_or([usize::MAX; 2]);
+    let mut lines_at: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    let mut together: Vec<(usize, usize)> = Vec::new();
+    if !spans.is_empty() {
+        for (l, c) in s.sk.curves.iter().enumerate() {
+            if let CurveKind::Line { a, b } = c.kind {
+                lines_at.entry(a).or_default().push(l);
+                lines_at.entry(b).or_default().push(l);
+            }
+        }
+        for c in &s.sk.constraints {
+            match c.kind {
+                ConstraintKind::PointOnCurve { p, c } if line(c).is_some() => lines_at.entry(p).or_default().push(c),
+                ConstraintKind::Coincident { p, q } => together.push((p, q)),
+                _ => {}
+            }
+        }
+    }
+    let lines_of = |p: usize| -> Vec<usize> {
+        let joined = together.iter().filter_map(|&(x, y)| {
+            if x == p {
+                Some(y)
+            } else if y == p {
+                Some(x)
+            } else {
+                None
+            }
+        });
+        std::iter::once(p).chain(joined).flat_map(|x| lines_at.get(&x).into_iter().flatten().copied()).collect()
+    };
+    // One of the two may lie on the line by what else holds it (the mirror image of a point on
+    // it, across a line square to it): where it is now, as exactly as a solve puts it.
+    let lies_on = |x: usize, l: usize| {
+        let ((a, b), px) = (s.line(l), s.p(x));
+        let reach = 1e-7 * crate::loci::mag(a).max(crate::loci::mag(b)).max(crate::loci::mag(px)).max(1.0);
+        (b - a).normalized().is_some_and(|d| d.cross(px - a).abs() <= reach)
+    };
+    for &(p, q, value, ci) in &spans {
+        if !(free(p) || free(q)) {
+            continue;
+        }
+        let (lp, lq) = (lines_of(p), lines_of(q));
+        let both = |l: &usize| (lp.contains(l) || lies_on(p, *l)) && (lq.contains(l) || lies_on(q, *l));
+        if let Some(l) = lp.iter().chain(&lq).copied().find(|l| both(l) && !(ends(*l).contains(&p) && ends(*l).contains(&q))) {
+            out.push((Orient::Along(p, q, l, value), vec![ci]));
         }
     }
     // Union-find over the points these constraints name (not the whole sketch).

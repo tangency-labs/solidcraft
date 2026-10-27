@@ -189,14 +189,15 @@ fn update_links_names_the_design_it_reads_while_the_window_draws() {
     let dir = scratch("links");
     let part = dir.join("plate.solidcraft");
     let case = dir.join("case.solidcraft");
-    // A plate with two holes (three features: the read can be held at the third).
+    // A plate with two holes (three features: the read can be held at the third), saved without
+    // its model so reading it rebuilds the features.
     let save_part = |height: f64| {
         let mut s = Session::default();
         s.execute("solid.box", &json!({"length": 40, "width": 20, "height": height})).unwrap();
         for x in [10, 30] {
             s.execute("solid.cylinder", &json!({"radius": 2, "height": 200, "base": [x, 10, -1], "operation": "cut"})).unwrap();
         }
-        s.execute("file.save", &json!({"path": part})).unwrap();
+        s.execute("file.save", &json!({"path": part, "cache": false})).unwrap();
         s.execute("inspect.measure", &json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap()
     };
     let volume = |app: &mut SolveApp| app.session.execute("inspect.measure", &json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
@@ -248,6 +249,83 @@ fn update_links_names_the_design_it_reads_while_the_window_draws() {
     h.app.run("edit.undo", json!({})).unwrap();
     // One undo step takes it back.
     near(&mut h.app, thin);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// A design may link to a file on another computer (`\\host\share\…`); on Windows reading it, or
+/// only asking whether it is there, connects to that computer and may send it the user's sign-in.
+/// Update Links and Open Linked Design ask first, naming the server: Cancel reads nothing, Allow
+/// once reads it for that action alone, Always allow this server keeps it in the preferences.
+/// (Unix: the crafted link names a file beside the design, so nothing leaves this computer.)
+#[cfg(unix)]
+#[test]
+fn update_links_and_open_linked_design_ask_before_a_network_location() {
+    use crate::network_prompt::{Answer, NetworkPrompt, Then, answer};
+    let dir = scratch("network");
+    let part = dir.join("plate.solidcraft");
+    let case = dir.join("case.solidcraft");
+    let crafted = r"\\evil.example\share\plate.solidcraft";
+    let save_part = |height: f64| {
+        let mut s = Session::default();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": height})).unwrap();
+        s.execute("file.save", &json!({"path": part})).unwrap();
+        // The same file under the crafted name, beside the design (a plain file name on Unix).
+        std::fs::copy(&part, format!("{}/{crafted}", dir.display())).unwrap();
+    };
+    let volume = |app: &mut SolveApp| app.session.execute("inspect.measure", &json!({})).unwrap()["total"]["volume_mm3"].as_f64().unwrap();
+    save_part(5.0);
+    let mut h = crate::scenario::Harness::new();
+    h.app.home.open = false;
+    let comp = h.app.run("component.insert_design", json!({"path": part})).unwrap()["component"].as_u64().unwrap();
+    h.app.run("file.save", json!({"path": case})).unwrap();
+    let feature = h.app.session.doc.links[&comp].feature;
+    h.app.session.doc_mut().links.insert(comp, solidcraft_engine::doc::DesignLink { path: crafted.into(), feature });
+    save_part(8.0);
+    let until_idle = |h: &mut crate::scenario::Harness| {
+        let began = std::time::Instant::now();
+        while !h.app.file_load.idle() {
+            assert!(began.elapsed() < std::time::Duration::from_secs(120), "Update Links went on");
+            h.frames(1);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        h.frames(3);
+    };
+
+    // Update Links asks, naming the server, and Cancel reads nothing.
+    let assembly = h.app.session.doc.clone();
+    h.app.start("component.update_links");
+    let asked = Some(NetworkPrompt { hosts: vec!["evil.example".into()], then: Then::UpdateLinks });
+    assert_eq!(h.app.network_prompt, asked);
+    assert!(h.app.file_load.idle(), "nothing is read while it asks");
+    h.frames(2);
+    assert!(h.widget("Always allow this server").is_some() && h.widget("Allow once").is_some(), "the question is shown");
+    answer(&mut h.app, Answer::Cancel);
+    h.frames(2);
+    assert!(h.app.network_prompt.is_none() && h.app.file_load.idle());
+    assert!(std::sync::Arc::ptr_eq(&h.app.session.doc, &assembly), "Cancel changes nothing");
+    assert!((volume(&mut h.app) - 500.0).abs() < 1e-3);
+
+    // Allow once: the link is read for that update alone.
+    h.app.start("component.update_links");
+    answer(&mut h.app, Answer::Once);
+    until_idle(&mut h);
+    assert!((volume(&mut h.app) - 800.0).abs() < 1e-3, "{}", volume(&mut h.app));
+    let links = h.app.session.execute("component.links", &json!({})).unwrap();
+    assert!(links["links"][0]["found"].is_null(), "allowed once, not for good: {links}");
+    assert!(h.app.preferences.network_hosts.is_empty());
+
+    // Open Linked Design asks the same; Always allow keeps the server and opens the file.
+    let link = links["links"][0].clone();
+    crate::network_prompt::open_linked(&mut h.app, &link);
+    assert_eq!(h.app.network_prompt.as_ref().map(|p| p.hosts.clone()), Some(vec!["evil.example".to_string()]));
+    assert!(matches!(h.app.network_prompt.as_ref().map(|p| &p.then), Some(Then::OpenLinked(_))));
+    assert!(h.app.file_load.idle(), "nothing is opened while it asks");
+    answer(&mut h.app, Answer::Always);
+    assert_eq!(h.app.preferences.network_hosts, vec!["evil.example".to_string()]);
+    assert!(!h.app.file_load.idle(), "the linked design opens");
+    until_idle(&mut h);
+    h.app.preferences.network_hosts.clear();
+    crate::prefs::apply_network(&h.app.preferences);
     let _ = std::fs::remove_dir_all(&dir);
 }
 

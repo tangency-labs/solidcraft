@@ -187,6 +187,35 @@ fn send(out: &mut impl Write, reply: &Value) -> std::io::Result<()> {
     out.write_all(&line)
 }
 
+/// The `"token"` of a request line that is a JSON object, read without building the rest of it.
+/// Until a connection shows the token, a line costs only its own bytes: parsed whole, a 16 MiB
+/// line of `[0,0,…]` is hundreds of MB, and 16 such connections could exhaust memory before any
+/// token was checked.
+fn token_of(line: &str) -> Option<String> {
+    struct Token;
+    impl<'de> serde::de::Visitor<'de> for Token {
+        type Value = Option<String>;
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("a request object")
+        }
+        fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+            let mut token = None;
+            while let Some(key) = map.next_key::<String>()? {
+                if key == "token" {
+                    token = Some(map.next_value::<String>()?);
+                } else {
+                    map.next_value::<serde::de::IgnoredAny>()?;
+                }
+            }
+            Ok(token)
+        }
+    }
+    let mut de = serde_json::Deserializer::from_str(line);
+    let token = serde::Deserializer::deserialize_map(&mut de, Token).ok()?;
+    de.end().ok()?;
+    token
+}
+
 /// The reply to a connection that didn't show the token; the connection is then closed.
 fn unauthorized() -> Value {
     json!({"ok": false, "error": "unauthorized: send the control token as \"token\" (see docs/control-protocol.md)"})
@@ -388,7 +417,6 @@ impl Lines {
 struct Subscription {
     lines: Arc<Lines>,
     stop: Arc<AtomicBool>,
-    _counted: Subscriber,
 }
 
 impl Subscription {
@@ -406,10 +434,13 @@ impl Subscription {
         let stop = Arc::new(AtomicBool::new(false));
         let first = lines.turn.lock().unwrap_or_else(PoisonError::into_inner);
         let (l, s) = (lines.clone(), stop.clone());
-        std::thread::Builder::new().stack_size(64 * 1024).spawn(move || send_events(design, &l, &s, seen)).ok()?;
+        // The connection's seat on the watch rides the events thread: it leaves when the thread
+        // does, so the next failed write to a closed client retires it even while the connection's
+        // own thread is slow to see the end of the stream (#7226).
+        std::thread::Builder::new().stack_size(64 * 1024).spawn(move || send_events(design, &l, &s, seen, counted)).ok()?;
         let sent = send(&mut &lines.socket, reply);
         drop(first);
-        Some((Subscription { lines, stop, _counted: counted }, sent))
+        Some((Subscription { lines, stop }, sent))
     }
 }
 
@@ -429,8 +460,10 @@ impl Drop for Subscription {
 }
 
 /// The `design.changed` lines of a subscribed connection, each time the design differs from the
-/// last one it was told of (`seen`), until `stop`.
-fn send_events(design: &DesignWatch, lines: &Lines, stop: &AtomicBool, mut seen: (String, u64)) {
+/// last one it was told of (`seen`), until `stop`. Owns the connection's seat on the watch
+/// (`counted`), so the seat leaves exactly when this thread does: on `stop`, or on the first
+/// write a closed client refuses (#7226).
+fn send_events(design: &DesignWatch, lines: &Lines, stop: &AtomicBool, mut seen: (String, u64), _counted: Subscriber) {
     while !stop.load(Ordering::Relaxed) {
         let Some(now) = design.wait(&seen, stop, Duration::from_secs(1)).filter(|now| *now != seen) else { continue };
         if lines.send(&json!({"event": "design.changed", "params": {"document_id": now.0, "revision": now.1}})).is_err() {
@@ -486,18 +519,18 @@ fn serve_with(
         if line.trim().is_empty() {
             continue;
         }
+        // The first request must carry the token; later ones on the same connection may.
+        if !authenticated {
+            match token_of(&line) {
+                Some(t) if control_auth::tokens_match(&t, token) => authenticated = true,
+                _ => {
+                    refuse(&mut out, &mut reader);
+                    break;
+                }
+            }
+        }
         let reply = match serde_json::from_str::<Value>(&line) {
             Ok(msg) => {
-                // The first request must carry the token; later ones on the same connection may.
-                if !authenticated {
-                    match msg.get("token").and_then(Value::as_str) {
-                        Some(t) if control_auth::tokens_match(t, token) => authenticated = true,
-                        _ => {
-                            refuse(&mut out, &mut reader);
-                            break;
-                        }
-                    }
-                }
                 let id = msg.get("id").cloned().unwrap_or(Value::Null);
                 let method = msg.get("method").and_then(Value::as_str).unwrap_or("").to_string();
                 let params = msg.get("params").cloned().unwrap_or(json!({}));
@@ -562,10 +595,6 @@ fn serve_with(
                     o.insert("id".into(), id);
                 }
                 r
-            }
-            Err(_) if !authenticated => {
-                refuse(&mut out, &mut reader);
-                break;
             }
             Err(e) => {
                 bad += 1;
@@ -841,11 +870,17 @@ mod tests {
         assert_eq!(next(&mut lines), json!({"id": 3, "ok": true, "result": "ui.view"}));
         writeln!(quiet_out, "{}", json!({"id": 2, "method": "ui.view"})).unwrap();
         assert_eq!(next(&mut quiet), json!({"id": 2, "ok": true, "result": "ui.view"}), "no events without subscribing");
-        // Closed, it is no longer counted.
+        // Closed, it is no longer counted. Each publish asks the events thread for one more line,
+        // and its write to the closed connection is what retires the seat; that keeps the wait off
+        // the connection's own thread, which anything else this process is doing may hold up past
+        // the deadline (#7226).
         drop((out, lines));
+        let mut revision = 11;
         let deadline = Instant::now() + Duration::from_secs(10);
         while WATCH.subscribed() && Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(10));
+            WATCH.publish("d-1", revision);
+            revision += 1;
+            std::thread::sleep(Duration::from_millis(20));
         }
         assert!(!WATCH.subscribed());
     }
@@ -867,6 +902,19 @@ mod tests {
         assert!(save.contains("will still write the file") && !save.contains("apply"), "{save}");
         let render = says("ui.render", json!({"path": "/tmp/a.png"}));
         assert!(render.contains("will still write the file"), "{render}");
+    }
+
+    /// The token is read from a request object without building the rest of it: other fields,
+    /// however large or nested, are only skipped. Anything but an object with a string token is
+    /// no token.
+    #[test]
+    fn token_is_read_without_parsing_the_request() {
+        assert_eq!(token_of(r#"{"id":1,"token":"abc","params":{"a":[1,[2,{"b":null}]]}}"#).as_deref(), Some("abc"));
+        let flood = format!(r#"{{"params":[{}0],"token":"t"}}"#, "0,".repeat(1 << 20));
+        assert_eq!(token_of(&flood).as_deref(), Some("t"));
+        for no in [r#"["abc"]"#, r#"{"token":5}"#, r#"{"token":"a"} x"#, r#"{"id":1}"#, "GET / HTTP/1.1", r#""token""#] {
+            assert_eq!(token_of(no), None, "{no}");
+        }
     }
 
     /// #205: a connection runs nothing until a request carries the launch's token; a wrong or

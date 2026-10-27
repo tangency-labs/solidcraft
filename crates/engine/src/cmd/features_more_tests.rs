@@ -1133,6 +1133,111 @@ fn loft_joined_onto_a_box_exports_one_connected_mesh() {
     assert_eq!(pieces.len(), 1);
 }
 
+fn loft_between_blocks() -> (Session, Value) {
+    let mut s = Session::default();
+    for (name, z) in [("Lower", -5), ("Upper", 15)] {
+        run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 5, "corner": [0, 0, z], "body_name": name}));
+    }
+    for (name, z) in [("Start", -2), ("End", 18)] {
+        run(&mut s, "sketch.create", json!({"plane": "XY", "offset": z, "name": name}));
+        run(&mut s, "sketch.rectangle.two_point", json!({"p0": [2, 2], "p1": [8, 8]}));
+        run(&mut s, "sketch.finish", json!({}));
+    }
+    (s, json!({"sections": [{"sketch": "Start"}, {"sketch": "End"}], "operation": "join"}))
+}
+
+fn assert_loft_leaves_upper_block(s: &Session) {
+    let st = s.model.state();
+    assert_eq!(st.bodies.len(), 2, "a hidden body must not be consumed by Join (#1988)");
+    for (name, expected) in [("Lower", 1148.0), ("Upper", 500.0)] {
+        let body = &st.body(name).unwrap().body;
+        let got = solidcraft_kernel::measure(body).unwrap().volume;
+        assert!((got - expected).abs() < 1e-6, "{name}: {got} vs {expected}");
+        assert!(body.validity().is_empty());
+    }
+}
+
+#[test]
+fn loft_join_keeps_hidden_bodies_and_persists_its_targets() {
+    let (mut s, params) = loft_between_blocks();
+    run(&mut s, "browser.visibility", json!({"items": ["Upper"], "visible": false}));
+    run(&mut s, "solid.loft", params);
+    assert_loft_leaves_upper_block(&s);
+    run(&mut s, "edit.undo", json!({}));
+    assert!((volume(&mut s) - 1000.0).abs() < 1e-6);
+    run(&mut s, "edit.redo", json!({}));
+    assert_loft_leaves_upper_block(&s);
+    // Visibility is only consulted when the feature is made, never when it is rebuilt.
+    run(&mut s, "browser.visibility", json!({"items": ["Upper"], "visible": true}));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    assert!(reopened.model.results.iter().all(|r| r.error.is_none()));
+    assert_loft_leaves_upper_block(&reopened);
+}
+
+#[test]
+fn loft_join_with_only_hidden_targets_is_refused_atomically() {
+    for hide in [json!({"items": ["Lower", "Upper"], "visible": false}), json!({"tree_folders": ["c0/bodies"], "visible": false})] {
+        let (mut s, params) = loft_between_blocks();
+        run(&mut s, "browser.visibility", hide);
+        let before = s.doc.to_json();
+        let err = s.execute("solid.loft", &params).unwrap_err().to_string();
+        assert!(err.contains("no visible body to join"), "{err}");
+        assert_eq!(s.doc.to_json(), before);
+        assert!((volume(&mut s) - 1000.0).abs() < 1e-6);
+    }
+}
+
+#[test]
+fn loft_join_honours_explicit_hidden_targets_and_participants() {
+    for (key, targets) in [("targets", json!(["Lower", "Upper"])), ("participants", json!(["Lower", "Upper"])), ("participants", json!(["*"]))] {
+        let (mut s, mut params) = loft_between_blocks();
+        run(&mut s, "browser.visibility", json!({"items": ["Upper"], "visible": false}));
+        params[key] = targets;
+        run(&mut s, "solid.loft", params);
+        assert_eq!(s.model.state().bodies.len(), 1);
+        assert!((volume(&mut s) - 1540.0).abs() < 1e-6);
+    }
+    let (mut s, params) = loft_between_blocks();
+    run(&mut s, "solid.loft", params);
+    assert_eq!(s.model.state().bodies.len(), 1, "all-visible Join keeps its automatic scope");
+    assert!((volume(&mut s) - 1540.0).abs() < 1e-6);
+}
+
+#[test]
+fn loft_new_body_still_works_when_every_body_is_hidden() {
+    let (mut s, mut params) = loft_between_blocks();
+    run(&mut s, "browser.visibility", json!({"tree_folders": ["c0/bodies"], "visible": false}));
+    params["operation"] = json!("new_body");
+    run(&mut s, "solid.loft", params);
+    assert_eq!(s.model.state().bodies.len(), 3);
+    assert!((volume(&mut s) - 1720.0).abs() < 1e-6);
+}
+
+#[test]
+fn loft_join_visibility_does_not_expand_its_component_scope() {
+    let (mut s, params) = loft_between_blocks();
+    let part = run(&mut s, "component.create", json!({"name": "Part", "activate": false}));
+    run(&mut s, "component.move_bodies", json!({"bodies": ["Lower", "Upper"], "component": part["component"]}));
+    run(&mut s, "browser.visibility", json!({"items": ["Upper"], "visible": false}));
+    run(&mut s, "solid.loft", params);
+    assert_eq!(s.model.state().bodies.len(), 3, "a plain-plane loft in the empty root still creates its own body");
+    assert!((volume(&mut s) - 1720.0).abs() < 1e-6);
+}
+
+#[test]
+fn loft_join_does_not_fall_back_from_a_hidden_sketch_face_body() {
+    let (mut s, mut params) = loft_between_blocks();
+    run(&mut s, "sketch.create", json!({"plane": {"face": [5, 5, 0]}, "project_edges": false, "name": "OnLower"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [2, 2], "p1": [8, 8]}));
+    run(&mut s, "sketch.finish", json!({}));
+    params["sections"][0]["sketch"] = json!("OnLower");
+    run(&mut s, "browser.visibility", json!({"items": ["Lower"], "visible": false}));
+    let before = s.doc.to_json();
+    let err = s.execute("solid.loft", &params).unwrap_err().to_string();
+    assert!(err.contains("no visible body to join"), "{err}");
+    assert_eq!(s.doc.to_json(), before);
+}
+
 /// A cone that takes only a 1 mm chamfer off a cylinder's top edge leaves nearly all of the
 /// cylinder inside it; the intersection is still the chamfered cylinder (#443).
 #[test]

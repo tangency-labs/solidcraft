@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Ground — the floor the product stands on, with its contact shadow</title>
+  <path d="M5.06 42L30 56.4L30 58.8L5.06 44.4Z" fill="#328bd3"/>
+  <path d="M54.94 42L30 56.4L30 58.8L54.94 44.4Z" fill="#236ead"/>
+  <path d="M30 27.6L54.94 42L30 56.4L5.06 42Z" fill="#b9ddf8"/>
+  <path d="M30 27.6L54.94 42L54.94 44.4L30 58.8L5.06 44.4L5.06 42Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M5.06 42L30 56.4L54.94 42" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M30 56.4L30 58.8" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M30 35.6L45.93 44.8L34.85 51.2L18.91 42Z" fill="#328bd3"/>
+  <path d="M18.91 29.2L30 35.6L30 48.4L18.91 42Z" fill="#b8c3cf"/>
+  <path d="M41.09 29.2L30 35.6L30 48.4L41.09 42Z" fill="#8e9faf"/>
+  <path d="M30 22.8L41.09 29.2L30 35.6L18.91 29.2Z" fill="#e2e8ef"/>
+  <path d="M30 22.8L41.09 29.2L41.09 42L30 48.4L18.91 42L18.91 29.2Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M18.91 29.2L30 35.6L41.09 29.2" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M30 35.6L30 48.4" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

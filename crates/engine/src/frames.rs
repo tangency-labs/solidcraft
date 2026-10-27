@@ -54,7 +54,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
         }
         "solid.revolve" => &[("face", Pick), ("axis", Axis), ("to", Make), ("targets", Body), ("participants", Body)],
         "solid.box" | "solid.sphere" => &[("corner", Make), ("center", Make)],
-        "solid.cylinder" | "solid.coil" | "solid.torus" => &[("base", Make), ("center", Make), ("axis", Dir)],
+        "solid.cylinder" | "solid.coil" | "solid.torus" | "solid.cone" => &[("base", Make), ("center", Make), ("axis", Dir)],
         "solid.fillet" | "solid.chamfer" => &[("edges", Picks), ("body", Body)],
         "solid.hole" => &[("position", Pick), ("direction", Dir), ("body", Body)],
         "solid.scale" => &[("origin", Make), ("bodies", Body)],
@@ -101,7 +101,7 @@ fn table(id: &str) -> &'static [(&'static str, K)] {
 struct Frames {
     /// Worked out on first use: most commands pick no body, and a large assembly's frames cost
     /// a walk of every body on every command.
-    bodies: std::cell::OnceCell<Vec<(String, String, Mat)>>,
+    bodies: std::cell::OnceCell<crate::BodyFrames>,
     active: Mat,
     /// The frame of the sketch being edited (its component), else the active component's.
     sketch: Mat,
@@ -117,10 +117,7 @@ fn frames(s: &Session) -> Frames {
 impl Frames {
     /// World name, the component's own body name, and its frame, for every body.
     fn bodies(&self, s: &Session) -> &[(String, String, Mat)] {
-        self.bodies.get_or_init(|| {
-            let st = s.model.state();
-            s.placed_document().body_frames_with_source(&st).into_iter().map(|(world, own, _, _, m)| (world, own, m)).collect()
-        })
+        self.bodies.get_or_init(|| s.body_frames())
     }
 }
 

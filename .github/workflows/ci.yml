@@ -98,15 +98,16 @@ jobs:
     runs-on: blacksmith-2vcpu-ubuntu-2404
     permissions:
       contents: read
-      # To ask whether the merge queue already tested a commit pushed to main.
+      # To ask whether the merge queue already tested a commit pushed to main, and which labels the
+      # pull requests of a merge group carry (the render-tests opt-in).
+      pull-requests: read
       actions: read
     outputs:
       native: ${{ steps.paths.outputs.native }}
       kernel: ${{ steps.paths.outputs.kernel }}
       goldens: ${{ steps.paths.outputs.goldens }}
       windows: ${{ steps.paths.outputs.windows }}
-      # The GPU path tests run: native, and the whole workspace or solidcraft-gpu selected. The
-      # job's `if` and the `ci` job's check both read this, so they cannot disagree.
+      # The GPU path tests run (see the rule where it is computed). The job's `if` and the `ci` job's check both read this, so they cannot disagree.
       gpu: ${{ steps.paths.outputs.gpu }}
       full: ${{ steps.paths.outputs.full }}
       # Code changed on a pull request that has no approved-for-ci label yet: only Quick compile.
@@ -131,6 +132,7 @@ jobs:
           GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          RENDER_LABEL: ${{ contains(github.event.pull_request.labels.*.name, 'render-tests') }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           REPO: ${{ github.repository }}
           APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'approved-for-ci') }}
@@ -140,6 +142,7 @@ jobs:
           kernel=false
           goldens=false
           windows=false
+          gpu_paths=false
           full=true
           packages=
           # Whether the NUL-separated paths in $1 reach any code: scripts/ci/affected.py selects
@@ -167,6 +170,29 @@ jobs:
                 | grep -Eq '^[ +-]name = "(wgpu[a-z_-]*|naga|egui[a-z_-]*|eframe|winit|windows[a-z_-]*|d3d12)"'; then
               windows=true
             fi
+          }
+          # Whether the NUL-separated paths in $1 are render code: the render crate, the path
+          # tracer and its shaders in the GPU crate, the render workspace UI, the render assets.
+          # Core, kernel and CI changes do not trigger the path tests (about 56 runner-minutes):
+          # the tracer reads the scene through interfaces the other tests cover, and the nightly
+          # runs them for everything.
+          gpu_paths() {
+            while IFS= read -r -d '' path; do
+              case "$path" in
+                crates/render/*|crates/gpu/src/path/*|crates/ui-egui/src/render_workspace*|assets/render/*) gpu_paths=true ;;
+              esac
+            done < "$1"
+          }
+          # Opt-in for a big render change: a pull request labelled render-tests, or a merge group
+          # holding one (its pull requests are the (#N) of its squash commits), runs them whatever
+          # the paths say.
+          group_has_render_label() {
+            for pr in $(git log --format=%s "$1" | grep -o '(#[0-9]*)$' | tr -d '(#)'); do
+              if gh api "repos/$REPO/issues/$pr" --jq '.labels[].name' | grep -qx render-tests; then
+                return 0
+              fi
+            done
+            return 1
           }
           if [ "$EVENT_NAME" = push ]; then
             # The queue lands the very commit its merge_group run tested. If that run passed,
@@ -201,14 +227,20 @@ jobs:
             # the nightly runs it whatever changed. A group that can't be compared runs it.
             if git diff --no-renames --name-only -z "$GROUP_BASE_SHA...$GROUP_HEAD_SHA" > "$RUNNER_TEMP/ci-paths"; then
               windows_paths "$RUNNER_TEMP/ci-paths" "$GROUP_BASE_SHA...$GROUP_HEAD_SHA"
+              gpu_paths "$RUNNER_TEMP/ci-paths"
+              if [ "$gpu_paths" = false ] && group_has_render_label "$GROUP_BASE_SHA..$GROUP_HEAD_SHA"; then
+                gpu_paths=true
+              fi
             else
               windows=true
+              gpu_paths=true
             fi
-            echo "windows=$windows for $GROUP_BASE_SHA...$GROUP_HEAD_SHA"
+            echo "windows=$windows gpu_paths=$gpu_paths for $GROUP_BASE_SHA...$GROUP_HEAD_SHA"
           elif [ "$EVENT_NAME" != pull_request ]; then
             # The nightly run and Run workflow: everything, Windows included.
             native=true
             windows=true
+            gpu_paths=true
           else
             # Compare both old and new paths of renames; unknown paths run native checks.
             git diff --no-renames --name-only -z "$BASE_SHA...$HEAD_SHA" > "$RUNNER_TEMP/ci-paths"
@@ -268,12 +300,24 @@ jobs:
               goldens=false
             fi
           fi
-          # The GPU path tests (their own job) run with the other tests, when solidcraft-gpu is
-          # among the packages they test.
+          # The GPU path tests (their own job, about 56 runner-minutes) are for render changes only:
+          # - on a pull request, when it carries the render-tests label (opt-in for a big render
+          #   change) or touches render code (gpu_paths); no other pull request runs them;
+          # - in the merge queue, when the group's diff touches render code or one of its pull
+          #   requests carries render-tests;
+          # - in the nightly and by hand, always, so anything the above skipped is caught within a day;
+          # - not on a push to main: the queue tested that commit, or the nightly will.
           gpu=false
           if [ "$native" = true ]; then
-            case " $packages " in *" solidcraft-gpu "*) gpu=true ;; esac
-            if [ "$full" = true ]; then gpu=true; fi
+            case "$EVENT_NAME" in
+              pull_request)
+                gpu_paths "$RUNNER_TEMP/ci-paths"
+                gpu=$gpu_paths
+                if [ "$RENDER_LABEL" = true ]; then gpu=true; fi ;;
+              merge_group) gpu=$gpu_paths ;;
+              push) gpu=false ;;
+              *) gpu=true ;;
+            esac
           fi
           {
             echo "native=$native"

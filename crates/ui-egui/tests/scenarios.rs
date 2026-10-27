@@ -181,6 +181,9 @@ fn sketch_toolbar_imports_use_file_picker() {
         {"call":"engine.execute","params":{"command":"sketch.create","params":{"plane":"XY"}}},
         {"choose_file":path},
         {"start":"sketch.insert_svg"},
+        // The picked drawing is placed first (#2605): OK adds it.
+        {"expect":{"dialog":"InsertDrawing","sketch_curves":{"own":0}}},
+        {"key":"Enter"},
         {"expect":{"errors":0,"sketch_curves":{"own":4}}}
     ]))
     .unwrap();

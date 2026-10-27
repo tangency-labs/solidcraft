@@ -29,6 +29,36 @@ macro_rules! element {
 
 // One entry per element/variant: names, rendering and geometry expectations stay together.
 const ELEMENTS: &[Element] = &[
+    element!("sphere_thumbnail", |ui, _| {
+        ui.horizontal(|ui| {
+            for kind in [FinishKind::Matte, FinishKind::Satin, FinishKind::Gloss, FinishKind::Metal, FinishKind::Glass] {
+                sphere_thumbnail(
+                    ui,
+                    &format!("gallery:sphere:{kind:?}"),
+                    Sphere { color: Tokens::get().render_accent, kind, opacity: None },
+                    Tokens::get().space_24 * 2.0,
+                );
+            }
+        });
+    }),
+    element!("look_chain", "gallery:chain", Some("gallery:chain:body"), |ui, _| {
+        let t = Tokens::get();
+        look_chain(
+            ui,
+            "gallery:chain",
+            ["Face", "Body", "Component", "Material"],
+            [
+                None,
+                Some(Sphere { color: t.render_accent, kind: FinishKind::Satin, opacity: None }),
+                None,
+                Some(Sphere { color: t.control_border, kind: FinishKind::Metal, opacity: None }),
+            ],
+            LookStep::Body,
+        );
+    }),
+    element!("look_chain_empty", |ui, _| {
+        look_chain(ui, "gallery:empty-chain", ["Face", "Body", "Component", "Material"], [None; 4], LookStep::Face);
+    }),
     element!("settings_form", |ui, state| {
         settings_form(ui, Tokens::get().form_label_width, |ui| {
             row(ui, "Sample", |ui| {
@@ -650,6 +680,14 @@ const ELEMENTS: &[Element] = &[
     element!("dropdown_menu", |ui, _| {
         dropdown_menu(ui, "gallery_menu", "Preset", |ui| {
             list_picker(ui, "preset", "Preset", true);
+        });
+    }),
+    element!("dropdown_menu_with_close_behavior", |ui, s| {
+        dropdown_menu_with_close_behavior(ui, "gallery_editable_menu", "Preset", egui::PopupCloseBehavior::CloseOnClickOutside, |ui| {
+            text_field(ui, &mut s.value, "Filter…");
+            if list_picker(ui, "preset", "Preset", true).clicked() {
+                ui.close();
+            }
         });
     }),
     element!("message_field", |ui, s| {
@@ -1400,10 +1438,12 @@ fn gallery_covers_every_inline_element() {
         "disclosure.rs",
         "fields.rs",
         "layout.rs",
+        "look_chain.rs",
         "menu.rs",
         "metrics.rs",
         "radial.rs",
         "reports.rs",
+        "sphere.rs",
         "status.rs",
         "table.rs",
     ] {
@@ -1725,6 +1765,7 @@ fn confirm_radial_and_history_rows_keep_multitone_artwork() {
                             suppressed: false,
                             error: false,
                             warning: false,
+                            reference: false,
                             accent: crate::theme::TabAccent::for_tab(&Tokens::get(), "MODEL"),
                         }
                         .paint(
@@ -1954,4 +1995,41 @@ fn file_view_application_evidence_in_both_themes_and_widths() {
     crate::theme::set_dark(previous);
     std::fs::remove_file(path).unwrap();
     std::fs::remove_dir(fixture_dir).unwrap();
+}
+
+/// CPU-rendered review board using the actual gallery widgets, without a window.
+#[test]
+fn material_widgets_board_in_both_themes() {
+    use super::checks::tests::{raster, textures_update};
+    use std::collections::HashMap;
+    let previous = crate::theme::is_dark();
+    for dark in [false, true] {
+        crate::theme::set_dark(dark);
+        let ctx = crate::fonts::test_context();
+        let bounds = egui::Rect::from_min_size(egui::Pos2::ZERO, vec2(360.0, 240.0));
+        let mut textures = HashMap::new();
+        let mut image = None;
+        for _ in 0..3 {
+            let mut output = ctx.run_ui(egui::RawInput { screen_rect: Some(bounds), ..Default::default() }, |ui| {
+                ui.set_width(320.0);
+                ui.painter().rect_filled(bounds, 0.0, Tokens::get().panel);
+                scope(ui, |ui| {
+                    for name in ["sphere_thumbnail", "look_chain", "look_chain_empty"] {
+                        example(ui, ELEMENTS.iter().find(|e| e.name == name).unwrap());
+                        ui.add_space(Tokens::get().space_12);
+                    }
+                });
+            });
+            textures_update(&mut textures, &output.textures_delta);
+            output.textures_delta.clear();
+            image = Some(raster(&ctx, output.shapes, output.pixels_per_point, bounds, &textures));
+        }
+        let image = image.unwrap();
+        assert!(image.pixels().any(|p| p.0[3] != 0));
+        if let Some(dir) = std::env::var_os("SOLIDCRAFT_MATERIAL_WIDGET_EVIDENCE") {
+            std::fs::create_dir_all(&dir).unwrap();
+            image.save(std::path::Path::new(&dir).join(if dark { "material-widgets-dark.png" } else { "material-widgets-light.png" })).unwrap();
+        }
+    }
+    crate::theme::set_dark(previous);
 }

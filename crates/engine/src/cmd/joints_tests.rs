@@ -192,6 +192,9 @@ fn rigid_cycles_solve_and_conflicts_report() {
     let c = r["conflicts"].as_array().cloned().unwrap_or_default();
     assert_eq!(c.len(), 1, "{r}");
     assert!(c[0]["why"].as_str().unwrap_or("").contains("off by"), "{r}");
+    // A rigid joint has nothing to drive: the refusal names the types that move (#6981).
+    let e = s.execute("joint.drive", &json!({"joint": "Wrong", "value": 1})).map(|_| ()).unwrap_err().to_string();
+    assert!(e.contains("does not move") && e.contains("joint.edit") && e.contains("revolute") && e.contains("cylindrical"), "{e}");
     // Suppressing it clears the conflict.
     let r = run(&mut s, "joint.edit", json!({"joint": "Wrong", "suppressed": true}));
     assert_eq!(r["conflicts"].as_array().map(Vec::len), Some(0));
@@ -299,6 +302,38 @@ fn faces_mate_by_default() {
     assert!(near(place(&s, "B", Vec3::new(25.0, 5.0, 10.0)), Vec3::new(5.0, 5.0, 20.0)), "{:?}", place(&s, "B", Vec3::new(25.0, 5.0, 10.0)));
     run(&mut s, "joint.edit", json!({"joint": "Stack", "flip": true}));
     assert!(near(place(&s, "B", Vec3::new(25.0, 5.0, 10.0)), Vec3::new(5.0, 5.0, 0.0)), "{:?}", place(&s, "B", Vec3::new(25.0, 5.0, 10.0)));
+}
+
+/// A move of a jointed part that the joint takes back: the model is evaluated for the
+/// placements the solve leaves, so a mirror of the part's body, made from the root, is where a
+/// fresh evaluation of the design puts it. The model was the one evaluated for the move before
+/// the solve took it back, and its mirror didn't match the part.
+#[test]
+fn a_feature_reading_a_jointed_parts_placement_follows_the_solve() {
+    let mut s = Session::default();
+    for (cmd, p) in [
+        ("component.create", json!({"grounded": true, "name": "Base"})),
+        ("solid.box", json!({"corner": [-11, -25, 0], "height": 9, "length": 11, "width": 14})),
+        ("component.create", json!({"grounded": false, "name": "Slide"})),
+        ("solid.cylinder", json!({"base": [-2, -10, 7], "height": 7, "radius": 2})),
+        ("component.activate", json!({"component": "root"})),
+        ("joint.as_built", json!({"a": "Base:1", "b": "Slide:1", "name": "Rail", "type": "slider"})),
+        ("solid.mirror", json!({"bodies": ["Body2"], "plane": "XY"})),
+        ("occurrence.move", json!({"occurrence": "Slide:1", "translate": [-10, -18, 2]})),
+    ] {
+        s.execute(cmd, &p).unwrap_or_else(|e| panic!("{cmd}: {e}"));
+    }
+    let boxes = |st: &solidcraft_doc::ModelState| {
+        st.bodies
+            .iter()
+            .map(|b| (b.name.clone(), b.body.outline_bounds()))
+            .map(|(n, bb)| format!("{n} {:.6?} {:.6?}", bb.min, bb.max))
+            .collect::<Vec<_>>()
+    };
+    let mut fresh = solidcraft_doc::Model::new();
+    fresh.no_cache = true;
+    fresh.evaluate(&s.doc);
+    assert_eq!(boxes(&s.model.state()), boxes(&fresh.state()));
 }
 
 /// #1239: two parts as bodies of one component (a multi-body STEP import). The refusal names the

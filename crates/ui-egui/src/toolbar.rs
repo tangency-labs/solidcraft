@@ -529,10 +529,14 @@ pub enum FileAction {
 }
 
 impl FileAction {
-    /// Whether this action is available in the current document and picker state.
+    /// Whether this action is available in the current document, picker and report state.
     pub fn enabled(&self, app: &SolveApp) -> bool {
         let needs_design = matches!(self, Self::Save | Self::SaveAs | Self::Undo | Self::Redo | Self::ExportMesh(_) | Self::Command(_))
             || matches!(self, Self::Export(extension) if *extension != "json");
+        // An open bug report describes the designs as they are, and a window opened behind it
+        // covers it (#7188). Quit too, as behind any modal window: it would switch to a design
+        // with unsaved changes under the report, and ask about it where it can't be answered.
+        let behind_report = app.issue_report.draft.is_some();
         let available = match self {
             Self::Undo => !app.session.undo.is_empty(),
             Self::Redo => !app.session.redo.is_empty(),
@@ -540,7 +544,13 @@ impl FileAction {
             Self::AgentChat => crate::agent_chat::app_bar_button_shown(app),
             _ => true,
         };
-        !app.file_picker_busy() && !app.file_load.busy() && (!needs_design || design_shown(app)) && available
+        !app.file_picker_busy() && !app.file_load.busy() && !behind_report && (!needs_design || design_shown(app)) && available
+    }
+
+    /// Whether the native menu offers this action: while a widget has keyboard focus (a report's
+    /// text field too), its Undo and Redo go to that widget instead of the design.
+    pub fn menu_enabled(&self, app: &SolveApp, keyboard_focus: bool) -> bool {
+        self.enabled(app) || (matches!(self, Self::Undo | Self::Redo) && keyboard_focus && !app.file_picker_busy() && !app.file_load.busy())
     }
 
     /// Execute through the same document, save-job and preferences paths as the toolbar.
@@ -670,6 +680,10 @@ fn file_menu(app: &mut SolveApp, ctx: &egui::Context) {
                 }
                 if item_if(ui, "Export 3MF…", "", "mesh_export", shown) {
                     FileAction::ExportMesh("3mf").run(app);
+                    close = true;
+                }
+                if item_if(ui, "Send to Slicer", "", "mesh_export", shown && crate::dialogs_save_mesh::available(app)) {
+                    app.start("file.send_to_slicer");
                     close = true;
                 }
                 if item_if(ui, "Export STEP…", "", "export", shown) {
@@ -814,15 +828,23 @@ fn export_as(app: &mut SolveApp, ext: &str, format: Option<&str>) {
 /// Unicode character boundaries. An oversized word stays on one line with an ellipsis.
 fn ribbon_button_lines(painter: &egui::Painter, label: &str, width: f32) -> Vec<String> {
     let mut lines = ribbon_label_lines(painter, label, width);
+    // Right-to-left labels come in display order (see `bidi`): a line reads from its right end,
+    // so a shortened line loses characters on the left, where the ellipsis then goes.
+    let rtl = crate::bidi::has_rtl(label);
     for line in &mut lines {
         if ribbon_label_width(painter, line) > width {
             while !line.is_empty() {
-                line.pop();
-                if ribbon_label_width(painter, &format!("{}…", line.trim_end())) <= width {
+                if rtl {
+                    line.remove(0);
+                } else {
+                    line.pop();
+                }
+                let shortened = if rtl { format!("…{}", line.trim_start()) } else { format!("{}…", line.trim_end()) };
+                if ribbon_label_width(painter, &shortened) <= width {
                     break;
                 }
             }
-            *line = format!("{}…", line.trim_end());
+            *line = if rtl { format!("…{}", line.trim_start()) } else { format!("{}…", line.trim_end()) };
         }
     }
     lines
@@ -847,6 +869,27 @@ fn ribbon_label_lines(painter: &egui::Painter, label: &str, width: f32) -> Vec<S
     let measure = |text: &str| ribbon_label_width(painter, text);
     let normalized = label.split_whitespace().collect::<Vec<_>>().join(" ");
     let label = normalized.as_str();
+    if crate::bidi::has_rtl(label) {
+        // Display-order right-to-left text reads from its end: the first line takes the words
+        // at the end of the string, the second line the words before them.
+        let breaks = label.char_indices().filter(|(_, c)| c.is_whitespace() || *c == '/').map(|(at, c)| at + c.len_utf8());
+        let mut start = label.len();
+        for cut in std::iter::once(0).chain(breaks).collect::<Vec<_>>().into_iter().rev() {
+            if cut >= start {
+                continue;
+            }
+            if start < label.len() && measure(label.get(cut..).unwrap_or_default().trim()) > width {
+                break;
+            }
+            start = cut;
+        }
+        let (rest, first) = label.split_at(start);
+        let mut lines = vec![first.trim().to_owned()];
+        if !rest.trim().is_empty() {
+            lines.push(rest.trim().to_owned());
+        }
+        return lines;
+    }
     let mut end = 0;
     for token in label.split_inclusive(|c: char| c.is_whitespace() || c == '/') {
         let next = end + token.len();
@@ -898,8 +941,9 @@ fn ribbon_text(ui: &egui::Ui, at: egui::Pos2, text: &str, size: f32, color: Colo
 }
 
 /// SKETCH while editing a sketch and SHEET METAL while a sheet body is active take the contextual
-/// tab style; SHEET METAL is an ordinary tab otherwise.
-fn contextual_tab(app: &SolveApp, tab: &str) -> bool {
+/// tab style; SHEET METAL is an ordinary tab otherwise. WELDMENTS selects itself on a frame member
+/// but keeps the ordinary tab look, as MODEL has when selected.
+pub(crate) fn contextual_tab(app: &SolveApp, tab: &str) -> bool {
     tab == "SKETCH" || (tab == "SHEET METAL" && crate::workspace::sheet_body(app).is_some())
 }
 
@@ -1193,7 +1237,10 @@ pub fn toolbar(app: &mut SolveApp, ui: &mut egui::Ui) {
                 overflow.push((*panel, menu_commands(&cmds, &shown)));
                 continue;
             }
-            let collapsed = plan.fit == Fit::Collapsed;
+            // A panel left with no buttons (all removed from the toolbar, or saved buttons that no
+            // longer exist) is drawn collapsed too: one button that opens its drop-down, so its
+            // commands never vanish from the toolbar (#7166). Both are COLLAPSED_WIDTH wide.
+            let collapsed = plan.fit == Fit::Collapsed || (shown.is_empty() && !cmds.is_empty());
             let trimmed = plan.shown < plan.widths.len();
             let finish = tab == "SKETCH" && *panel == "FINISH SKETCH";
             let pinned = finish || (tab == "RENDER" && *panel == "IMAGE");
@@ -1690,6 +1737,8 @@ fn ribbon_tooltip(app: &SolveApp, response: egui::Response, command: &solidcraft
         let description = match command.id {
             "render.scene" => Some(app.tr("render.preview_help")),
             "render.start" => Some(app.tr("render.image_help")),
+            // Sending again replaces the file the slicer has open.
+            "file.send_to_slicer" => Some(app.tr("ui.slicer_resend_hint")),
             "render.preset.resolve" | "render.preset.apply" => Some(app.tr("render.ribbon_studios_help")),
             "render.library.appearance.apply" | "render.library.surface.bind" => Some(app.tr("render.ribbon_materials_help")),
             "render.library.studio.prepare" | "render.library.studio.apply" => Some(app.tr("render.ribbon_lights_help")),
@@ -1998,7 +2047,12 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     }
     // A dimension value that is taking the keyboard: letters belong to it (a parameter name
     // starting with L or D), even on the frame before its field holds the focus.
-    if egui::Popup::is_any_open(ctx) || ctx.egui_wants_keyboard_input() || crate::dim_view::editing() || crate::dialogs_save_mesh::popup_open(ctx) {
+    if egui::Popup::is_any_open(ctx)
+        || ctx.egui_wants_keyboard_input()
+        || crate::dim_view::editing()
+        || crate::dialogs_save_mesh::popup_open(ctx)
+        || crate::hole_presets::name_prompt_open(ctx, app.dialog.as_ref())
+    {
         return;
     }
     let (keys, mods) = ctx.input(|i| {
@@ -2014,7 +2068,7 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
     if shown {
         crate::edit_clipboard::handle(app, ctx);
     } else {
-        crate::edit_clipboard::flush(ctx);
+        crate::edit_clipboard::flush(app, ctx);
     }
     for (k, repeat) in keys {
         use egui::Key;
@@ -2043,8 +2097,9 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     }
                 }
                 Key::Y => drop(app.run("edit.redo", json!({}))),
-                // Copy, Cut and Paste (`edit_clipboard::handle`).
-                Key::C | Key::X | Key::V if !mods.shift && !mods.alt => {}
+                // Copy, Cut and Paste, and Paste New with Shift (`edit_clipboard::handle`).
+                Key::C | Key::X if !mods.shift && !mods.alt => {}
+                Key::V if !mods.alt => {}
                 // Ctrl+Shift+S is Save As; Ctrl+S keeps saving over the current file (#6558).
                 Key::S if mods.shift && !mods.alt => save_as(app),
                 Key::S => save(app),
@@ -2094,9 +2149,10 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                     crate::select_other::close(app);
                 } else if app.tool.is_some() {
                     crate::tools::finish(app);
-                } else if app.dialog.is_some() {
+                } else if app.dialog.is_some() || app.pending_feature_edit.is_some() {
                     crate::dialogs::cancel(app);
                 } else if !app.session.selection.is_empty() || app.session.active_sketch.is_none() {
+                    crate::edit_clipboard::drop_cut(app);
                     app.tree.picked_joints.clear();
                     let _ = app.run("select.clear", json!({}));
                 }
@@ -2107,9 +2163,6 @@ pub fn shortcuts(app: &mut SolveApp, ctx: &egui::Context) {
                 app.start("ui.palette");
             }
             Key::V => crate::context_menu::toggle_visibility(app),
-            Key::R if mods.shift && !mods.alt => {
-                app.repeat_last();
-            }
             Key::F2 => {
                 let at = ctx.input(|i| i.pointer.latest_pos()).unwrap_or(ctx.content_rect().center());
                 crate::context_menu::rename_selection(app, at);
@@ -2260,6 +2313,57 @@ mod header_report_tests {
         h.app.home.open = false;
         assert!(FileAction::Save.enabled(&h.app));
         assert!(FileAction::Export("step").enabled(&h.app));
+    }
+
+    #[test]
+    fn native_menu_actions_are_disabled_behind_an_open_issue_report() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("solid.box", json!({"length":2,"width":3,"height":4})).unwrap();
+        h.app.home.recent = vec!["elsewhere.solidcraft".into()];
+        h.app.issue_report.draft = Some(crate::issue_report::draft_for(&h.app, None, None));
+        let before = (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.docs.count(), h.app.home.recent.clone());
+        for action in [
+            FileAction::Undo,
+            FileAction::New,
+            FileAction::Open,
+            FileAction::OpenRecent("elsewhere.solidcraft".into()),
+            FileAction::ClearRecent,
+            FileAction::Command("file.insert_step"),
+            FileAction::Save,
+            FileAction::SaveAs,
+            FileAction::SaveJson,
+            FileAction::ExportMesh("stl"),
+            FileAction::Export("step"),
+            FileAction::Export("json"),
+            FileAction::Command("document.metadata"),
+            FileAction::Settings,
+            FileAction::Shortcuts,
+            FileAction::AgentChat,
+        ] {
+            assert!(!action.enabled(&h.app), "{action:?} behind the report");
+            action.run(&mut h.app);
+        }
+        assert_eq!(before, (h.app.session.doc.to_json(), h.app.session.undo.len(), h.app.docs.count(), h.app.home.recent.clone()));
+        assert!(h.app.dialog.is_none() && h.app.file_picker.is_none() && !h.app.prefs_window.open && !h.app.keymap.open && !h.app.agent_chat.open);
+        // A focused report field still gets the menu's Undo and Redo.
+        assert!(FileAction::Undo.menu_enabled(&h.app, true) && !FileAction::Undo.menu_enabled(&h.app, false));
+        assert!(!FileAction::Save.menu_enabled(&h.app, true));
+        // Quit waits as behind any modal window: it would switch to a design with unsaved changes
+        // under the report.
+        assert!(!FileAction::Quit.enabled(&h.app));
+        FileAction::Quit.run(&mut h.app);
+        assert!(h.app.docs.quitting.is_none() && h.app.docs.closing.is_none());
+        // Help's windows wait too; Report an Issue… shows the report.
+        for item in ["about", "shortcuts", "messages", "crashes", "connect"] {
+            assert!(!crate::help::available(&h.app, item), "{item}");
+            crate::help::run(&mut h.app, &h.ctx, item);
+        }
+        assert!(!h.app.help.about && !h.app.keymap.open && !h.app.messages.open && h.app.help.connect.is_none());
+        assert!(crate::help::available(&h.app, "report") && crate::help::available(&h.app, "docs"));
+        h.app.issue_report.draft = None;
+        assert!(FileAction::Undo.enabled(&h.app) && FileAction::Settings.enabled(&h.app) && FileAction::Quit.enabled(&h.app));
+        assert!(crate::help::available(&h.app, "shortcuts"));
     }
 
     #[test]
@@ -3169,6 +3273,25 @@ mod ribbon_label_tests {
                         let galley = ribbon_button_galley(&painter, label, width, Color32::WHITE);
                         assert!(galley.rows.len() <= 2, "{}: {label}", command.id);
                         assert!(galley.size().x <= width + 0.01, "{}: {label}: {} > {width}", command.id, galley.size().x);
+                        if crate::bidi::has_rtl(label) {
+                            // epaint adds zero-width glyphs to right-to-left rows, so their text
+                            // is not the source text: check the lines the galley is built from.
+                            let lines = ribbon_button_lines(&painter, label, width);
+                            let first = lines[0].strip_prefix('…').unwrap_or(&lines[0]);
+                            assert!(label.ends_with(first), "{}: {label} -> {lines:?}", command.id);
+                            if let [first, second] = lines.as_slice()
+                                && !first.starts_with('…')
+                                && !second.starts_with('…')
+                            {
+                                // Both lines whole: they split the label at a space or after a slash.
+                                assert!(
+                                    *label == format!("{second} {first}") || *label == format!("{second}{first}"),
+                                    "{}: {label} -> {lines:?}",
+                                    command.id
+                                );
+                            }
+                            continue;
+                        }
                         let first = galley.rows.first().unwrap().text();
                         let visible = first.strip_suffix('…').unwrap_or(&first);
                         assert!(label.starts_with(visible), "{}: {label} -> {first}", command.id);
@@ -3220,6 +3343,15 @@ mod ribbon_label_tests {
             let lines = ribbon_button_lines(&painter, "長い日本語のラベル 続き", 50.0);
             assert_eq!(lines.len(), 2);
             assert!(lines[0].ends_with('…'));
+            // Hebrew comes in display order (`bidi::visual`): the reader starts at the right end,
+            // so "סקיצה חדשה" (New Sketch, stored as "חדשה סקיצה") puts סקיצה on the first line.
+            let label = crate::bidi::visual("סקיצה חדשה").into_owned();
+            let width = ribbon_label_width(&painter, "סקיצה").max(ribbon_label_width(&painter, "חדשה")) + 1.0;
+            assert!(ribbon_label_width(&painter, &label) > width);
+            assert_eq!(ribbon_button_lines(&painter, &label, width), vec!["סקיצה", "חדשה"]);
+            let lines = ribbon_button_lines(&painter, &crate::bidi::visual("אחת שתיים שלוש ארבע חמש"), 50.0);
+            assert_eq!(lines.len(), 2);
+            assert!(lines[1].starts_with('…'), "{lines:?}");
         });
         output.textures_delta.clear();
     }
@@ -3417,6 +3549,29 @@ mod fill_width_tests {
                 );
             }
         }
+    }
+
+    /// #7166: a panel whose buttons were all removed keeps one button, its first command's icon,
+    /// which opens the panel's drop-down: New Sketch stays reachable from the Model tab instead of
+    /// leaving an empty Sketch panel. It takes the room an empty panel took before.
+    #[test]
+    fn a_panel_without_buttons_keeps_one_that_opens_its_menu() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.call("ui.resize", json!({"width":1600,"height":900}));
+        crate::toolbar_custom::remove(&mut h.app, "MODEL", "sketch.create");
+        assert!(crate::toolbar_custom::pinned_on(&h.app, "MODEL", "sketch.create").is_none());
+        h.frames(3);
+        assert!(crate::scenario::handle_at("button:sketch.create").is_none(), "New Sketch is no longer a full button");
+        let panel = crate::scenario::rect_of("panel:MODEL:SKETCH").unwrap();
+        assert_eq!(panel.width(), COLLAPSED_WIDTH, "the panel takes a collapsed panel's room");
+        let button = crate::scenario::handle_at("collapsed:MODEL:SKETCH").expect("the Sketch panel keeps a button");
+        assert!(panel.contains(button));
+        h.step(&json!({"click":[button.x, button.y]})).unwrap();
+        h.frames(2);
+        assert!(crate::scenario::rect_of("toolbar_dropdown").is_some(), "the button opens the panel's drop-down");
+        h.step(&json!({"click":{"handle":"dropdown:sketch.create"}})).unwrap();
+        assert!(matches!(h.app.dialog.as_ref().map(|d| &d.kind), Some(crate::dialogs::Kind::Sketch)), "New Sketch starts from it");
     }
 }
 

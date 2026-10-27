@@ -47,7 +47,8 @@ A fixed crash turns into a regression test with the same two files.
 `diagnostics.crash_test` has three modes:
 - `panic`: an internal error in a command
 - `kernel`: an internal error inside the geometry kernel
-- `abort`: the app ends at once, and the report appears at the next start
+- `abort`: the app ends at once, and the report appears at the next start. On macOS the
+  signal handler catches it, so the report names SIGABRT and the frames that called `abort()`.
 
 ## What a report holds
 
@@ -58,7 +59,7 @@ A folder `crashes/<YYYYMMDD-HHMMSS>-<signature>/`:
     - `command_panic`: a command hit an internal error; it was caught and the design was left unchanged
     - `kernel_panic_recovered`: the third-party geometry kernel panicked and was caught. This is harmless on the desktop, but it would crash the web build.
     - `panic`: an internal error outside any command
-    - `unclean_exit`: a previous session ended without recording a clean exit. It is detected at the next start, which may be days later. Possible causes include an abort, a stack overflow, a segfault, a crash inside a graphics driver, a system shutdown, or the process being forcibly stopped. This kind alone does not identify the cause. When the app died while starting up, the message and `location` name the startup step (see below). On Windows, a captured native exception also says the exception, the module it happened in and the offset into it.
+    - `unclean_exit`: a previous session ended without recording a clean exit. It is detected at the next start, which may be days later. Possible causes include an abort, a stack overflow, a segfault, a crash inside a graphics driver, a system shutdown, or the process being forcibly stopped. This kind alone does not identify the cause. When the app died while starting up, the message and `location` name the startup step (see below). On Windows and macOS, a captured native crash also says the exception or signal, the module it happened in and the offset into it.
   - `message`, `location` (file:line), `thread`
   - `backtrace`: frames `symbol (file:line)`, without the panic machinery, std internals or the user's home folder
   - `app` (version, commit, build date), `system` (OS, architecture, renderer and GPU), `session.uptime_s`
@@ -74,12 +75,21 @@ A folder `crashes/<YYYYMMDD-HHMMSS>-<signature>/`:
     `viewport pipelines (shader compile)`, `first frame`, `first frame (present)`) and how many
     milliseconds after launch it began. `system.environment` names the renderer (backend, GPU,
     driver) as soon as the adapter is picked, so it is there even when the device never started.
-  - `native` (Windows): what the exception filter caught: `code`, `name`, `address`, `module`,
-    `offset` (into the module), `detail` (for an access violation, the address read or written)
-    and `thread`. The `backtrace` then shows the same in two lines.
+  - `native` (Windows and macOS): what the native crash handler caught: `code`, `name`,
+    `address` (of the faulting instruction), `module`, `offset` (into the module), `detail` (for
+    an access violation or a segfault, the address read or written) and `thread`. The `backtrace`
+    then shows the same in two lines.
+    - On macOS, where a signal handler catches SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGTRAP and SIGABRT,
+      `code` and `signal` are the signal's name (`SIGSEGV`), `name` says it in words (`segmentation
+      fault`, or `stack overflow` when the fault is just below the thread's stack), and it adds
+      `si_code`, `thread_name`, `pid` and `frames`: up to 24 `module+offset symbol+offset` lines
+      walked up the frame pointers from the faulting instruction, which the `backtrace` lists too.
+      The process still ends with the signal, so macOS also writes its own crash report, with every
+      thread's stack: `~/Library/Logs/DiagnosticReports/solidcraft-<date>.ips` (Console ▸ Crash
+      Reports), whose `pid` is the one in `native`.
 - `design.solidcraft`: the design the replay starts from
 - `replay.json`: `{"commands": [{command, params}, …]}`
-- `minidump.dmp` (Windows, native crashes): the threads' stacks and the loaded modules at the
+- `minidump.dmp` (Windows, native crashes; on macOS, see the system's own report above): the threads' stacks and the loaded modules at the
   crash, for WinDbg or Visual Studio. It holds stack memory only, not the design, but it stays
   on this computer like the rest of the report; share it only on request.
 

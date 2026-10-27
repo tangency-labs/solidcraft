@@ -384,6 +384,39 @@ fn patterns_of_components_place_occurrences() {
     assert!(s.execute("solid.pattern.circular", &json!({"components": ["Nope"], "axis": "Z", "count": 2})).is_err());
 }
 
+/// #4763: a body of a component moved 60 mm along X, patterned from the root. The copy goes
+/// where the pattern puts the body as it is shown (beside it), not where the body sits before
+/// its component is placed (x 10, near the origin).
+#[test]
+fn patterns_of_a_body_in_a_moved_component_follow_its_placement() {
+    for (kind, params, want) in [
+        ("solid.pattern.path", json!({"bodies": ["Pin"], "path_sketch": "Path", "path": ["l1"], "count": 2, "spacing": 10}), [70.0, 0.0]),
+        ("solid.pattern.rectangular", json!({"bodies": ["Pin"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 10}), [70.0, 0.0]),
+        ("solid.pattern.circular", json!({"bodies": ["Pin"], "axis": "Z", "count": 2, "angle": "90 deg"}), [-4.0, 60.0]),
+    ] {
+        let mut s = Session::default();
+        run(&mut s, "component.create", json!({"name": "Screw"}));
+        run(&mut s, "solid.box", json!({"length": 4, "width": 4, "height": 4, "body_name": "Pin"}));
+        run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Path"}));
+        run(&mut s, "sketch.line", json!({"points": [[0, 0], [20, 0]]}));
+        run(&mut s, "sketch.finish", json!({}));
+        run(&mut s, "component.activate", json!({"component": "root"}));
+        // The first part is grounded when it is made; this one is moved.
+        run(&mut s, "occurrence.ground", json!({"occurrence": 2, "grounded": false}));
+        run(&mut s, "occurrence.move", json!({"occurrence": 2, "translate": [60, 0, 0]}));
+        run(&mut s, kind, params);
+        let m = run(&mut s, "inspect.measure", json!({}));
+        let bodies = m["bodies"].as_array().unwrap();
+        let at = |name: &str| {
+            let b = bodies.iter().find(|b| b["name"] == name).unwrap_or_else(|| panic!("{kind}: no `{name}` in {m}"));
+            [b["bbox"]["min"][0].as_f64().unwrap(), b["bbox"]["min"][1].as_f64().unwrap()]
+        };
+        assert!((at("Pin")[0] - 60.0).abs() < 1e-6, "{kind}: the source stays at x 60");
+        let copy = at("Pin (2)");
+        assert!((copy[0] - want[0]).abs() < 1e-6 && (copy[1] - want[1]).abs() < 1e-6, "{kind}: the copy is at {copy:?}, want {want:?}");
+    }
+}
+
 #[test]
 fn path_pattern_orientation_follows_the_path() {
     let width_of_copy = |orient: &str| {
@@ -436,23 +469,42 @@ fn patterns_of_a_blind_hole_drill_every_copy() {
     assert!((c - 2.0 * one).abs() < 1e-3 * one, "{c} vs 2 × {one}");
 }
 
-/// Feature patterns and mirrors reference features by name; a rename follows (#401).
+/// Feature patterns and mirrors reference features by id (#1134): a rename leaves the
+/// references alone, and they keep pointing at the same feature (#401).
 #[test]
-fn renaming_a_source_feature_follows_pattern_and_mirror_references() {
+fn renaming_a_source_feature_leaves_pattern_and_mirror_references_alone() {
     let mut s = plate_with_hole();
     run(&mut s, "construct.plane.offset", json!({"base": "YZ", "offset": 0, "name": "Mirror plane"}));
     run(&mut s, "solid.pattern.rectangular", json!({"features": ["Hole1"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 20, "name": "Copies"}));
     run(&mut s, "solid.mirror", json!({"features": ["Hole1"], "plane": "Mirror plane", "name": "Mirrored"}));
+    let hole = s.doc.find_feature("Hole1").unwrap().id;
+    let mirror_plane = s.doc.find_feature("Mirror plane").unwrap().id;
     let renamed = run(&mut s, "timeline.rename", json!({"feature": "Hole1", "name": "Single hole"}));
     assert_eq!(renamed["name"], "Single hole", "{renamed}");
     run(&mut s, "timeline.rename", json!({"feature": "Mirror plane", "name": "Renamed plane"}));
     for feature in ["Copies", "Mirrored"] {
         let inspected = run(&mut s, "timeline.inspect", json!({"feature": feature}));
         assert!(inspected["error"].is_null(), "{feature}: {inspected}");
-        assert_eq!(inspected["definition"]["features"], json!(["Single hole"]), "{inspected}");
+        assert_eq!(inspected["definition"]["features"], json!([hole]), "{inspected}");
     }
     let inspected = run(&mut s, "timeline.inspect", json!({"feature": "Mirrored"}));
-    assert_eq!(inspected["definition"]["plane"]["name"], "Renamed plane", "{inspected}");
+    assert_eq!(inspected["definition"]["plane"], json!({"type": "construction", "feature": mirror_plane}), "{inspected}");
+}
+
+/// timeline.edit keeps accepting seed and plane names as input: they resolve to ids (#1134).
+#[test]
+fn editing_a_pattern_by_seed_name_resolves_it_to_the_id() {
+    let mut s = plate_with_hole();
+    run(&mut s, "solid.pattern.rectangular", json!({"features": ["Hole1"], "dir1": [1, 0, 0], "count1": 2, "spacing1": 20, "name": "Copies"}));
+    run(&mut s, "timeline.rename", json!({"feature": "Hole1", "name": "Single hole"}));
+    run(&mut s, "timeline.edit", json!({"feature": "Copies", "set": {"features": ["Single hole"]}}));
+    let inspected = run(&mut s, "timeline.inspect", json!({"feature": "Copies"}));
+    assert!(inspected["error"].is_null(), "{inspected}");
+    let hole = s.doc.find_feature("Single hole").unwrap().id;
+    assert_eq!(inspected["definition"]["features"], json!([hole]), "{inspected}");
+    // A name that finds no feature is refused, as the commands that take names refuse it.
+    let e = s.execute("timeline.edit", &json!({"feature": "Copies", "set": {"features": ["Nope"]}})).unwrap_err().to_string();
+    assert!(e.contains("Nope"), "{e}");
 }
 
 /// A plate with a `count1` × `count2` feature pattern of one through-hole cut: its volume and how

@@ -236,7 +236,7 @@ fn sketch_json(s: &Session, id: u64) -> Option<Value> {
         "constraints": constraints,
         "profiles": profiles,
         "links": sk.links,
-        "wires": sk.wires.iter().map(|w| json!({"id": w.id, "points": w.pts.len(), "start": w.pts.first(), "end": w.pts.last(), "link": w.link})).collect::<Vec<_>>(),
+        "wires": sk.wires.iter().map(|w| json!({"id": w.id, "points": w.pts.len(), "start": w.pts.first(), "end": w.pts.last(), "link": w.link, "arc": w.arc.map(|a| json!({"center": a.center, "radius": a.radius, "start": a.start, "end": a.end, "sweep_deg": solidcraft_sketch::arc_sweep(&a).to_degrees()}))})).collect::<Vec<_>>(),
         "visible": crate::view::sketch_shown(s, id),
     }))
 }

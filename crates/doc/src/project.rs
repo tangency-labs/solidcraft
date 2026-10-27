@@ -263,7 +263,10 @@ fn resolve_uncached(
             let pr = if Plane::named(name).is_some() {
                 PlaneRef::Origin { name: name.clone() }
             } else {
-                PlaneRef::Construction { name: name.clone().into() }
+                // Resolved to the feature's id here, once (#1134); a name that finds no feature
+                // dangles below, as it did when the reference carried the name.
+                let feature = doc.find_feature(name).map(|f| crate::FeatureId(f.id)).unwrap_or(crate::FeatureId::DANGLING);
+                PlaneRef::Construction { feature }
             };
             let other = doc.resolve_plane_in(vals, &pr, 0, Some(st)).map_err(|_| lost(&format!("plane {name}")))?;
             plane_trace(plane, &other).into_iter().collect()

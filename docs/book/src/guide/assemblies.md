@@ -56,7 +56,9 @@ joined to the rest of the design.
 circles and vertices: rigid, revolute, slider, cylindrical, pin-slot, planar and ball, with
 offsets, flip and limits. **As-built Joint** keeps the current position, **Rigid Group** locks
 components together, **Drive Joints** moves a joint through its values, and **Motion Link**
-couples two joints. Links can be chained (one joint drives a second, which drives a
+couples two joints. A rigid joint holds its parts still, so Drive Joints has nothing to drive on
+it: it says so and offers **Edit Joint**, where the joint's type changes to Revolute (rotate),
+Slider (slide) or Cylindrical (both). Links can be chained (one joint drives a second, which drives a
 third), and a value is carried through a chain of up to 64 links in whatever order they were
 made. Contact sets stop motion where bodies would pass through each other,
 **Motion Study** keys joint values along a timeline, and **Interference** shows overlapping

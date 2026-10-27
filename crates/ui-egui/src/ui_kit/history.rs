@@ -36,6 +36,9 @@ pub(crate) struct HistoryChip<'a> {
     pub suppressed: bool,
     pub error: bool,
     pub warning: bool,
+    /// A row that points at an item listed elsewhere (a sketch under its first feature, #6489):
+    /// its name is in secondary text.
+    pub reference: bool,
     pub accent: TabAccent,
 }
 
@@ -107,7 +110,13 @@ impl HistoryChip<'_> {
             Rect::from_center_size(if names { pos2(rect.left() + t.space_8 + side / 2.0, rect.center().y) } else { rect.center() }, vec2(side, side));
         icons::paint_accented(&p, icon, self.icon, feature_icon_accent(self.kind, self.icon), 1.0);
         if names {
-            let ink = if self.selected { self.accent.ink } else { t.text };
+            let ink = if self.selected {
+                self.accent.ink
+            } else if self.reference {
+                t.text_dim
+            } else {
+                t.text
+            };
             let font = if self.selected { crate::fonts::semibold(t.font_body) } else { egui::FontId::proportional(t.font_body) };
             let text_rect = Rect::from_min_max(
                 pos2(icon.right() + t.space_6 + 1.0, rect.top()),
@@ -534,6 +543,7 @@ mod tests {
                             suppressed: false,
                             error,
                             warning: false,
+                            reference: false,
                             accent,
                         }
                         .paint(ui.painter(), rect, style)
@@ -594,6 +604,7 @@ mod tests {
                             suppressed: false,
                             error: false,
                             warning: false,
+                            reference: false,
                             accent: TabAccent::for_tab(&t, "MODEL"),
                         }
                         .paint(ui.painter(), rect, style);

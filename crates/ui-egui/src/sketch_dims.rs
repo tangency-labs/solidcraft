@@ -410,6 +410,17 @@ pub fn locked_value(app: &SolveApp, t: &Tool, label: &str) -> Option<f64> {
     locked(app, t, label)
 }
 
+/// Give the keyboard back to the box it was in, after a click in another panel took it (#2927).
+/// The box that owned the keyboard is still the one that had it last frame; the active tool must
+/// still show its boxes, so a finished or restarted shape is left alone.
+pub fn restore_box_focus(app: &SolveApp, ctx: &egui::Context) {
+    let Some(count) = app.tool.as_ref().map(|t| t.dims.len()) else { return };
+    let holder = ctx.memory(|memory| (0..count).map(|i| egui::Id::new(("sc_dim", i))).find(|id| memory.had_focus_last_frame(*id)));
+    if let Some(id) = holder {
+        ctx.memory_mut(|memory| memory.request_focus(id));
+    }
+}
+
 /// Draw the boxes of the active tool next to what they measure. Enter places the point.
 pub fn show(app: &mut SolveApp, ui: &mut egui::Ui, proj: &Proj) {
     // Esc in a box ends the shape (the box had the keyboard, so the shortcut didn't see it).
@@ -523,7 +534,7 @@ fn boxes(app: &SolveApp, ui: &mut egui::Ui, proj: &Proj, t: &mut Tool) -> Option
 }
 
 /// About the size of a value box, for keeping it in view.
-const BOX: egui::Vec2 = egui::vec2(76.0, 24.0);
+pub(crate) const BOX: egui::Vec2 = egui::vec2(76.0, 24.0);
 
 /// Where a value box whose top left would be `pos` goes so it stays in the drawing area `view`:
 /// as it is when it fits; else mirrored through the pointer (a box set off the cursor, past the

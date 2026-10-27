@@ -13,11 +13,13 @@ pub struct Catalog {
     pub name: &'static str,
     source: &'static str,
     messages: OnceLock<Messages>,
+    /// The messages in display order, for a catalog with right-to-left text (see [`crate::bidi`]).
+    shown: OnceLock<Option<Messages>>,
 }
 
 impl Catalog {
     const fn new(id: &'static str, name: &'static str, source: &'static str) -> Self {
-        Self { id, name, source, messages: OnceLock::new() }
+        Self { id, name, source, messages: OnceLock::new(), shown: OnceLock::new() }
     }
 
     fn messages(&'static self) -> &'static Messages {
@@ -29,9 +31,32 @@ impl Catalog {
             }
         })
     }
+
+    /// The messages as egui must be given them: right-to-left lines in display order, since egui
+    /// has no bidirectional layout (see [`crate::bidi`]). The same map as [`Self::messages`] for
+    /// every other catalog.
+    fn shown(&'static self) -> &'static Messages {
+        let shown = self.shown.get_or_init(|| {
+            let messages = self.messages();
+            messages
+                .values()
+                .any(|text| crate::bidi::has_rtl(text))
+                .then(|| messages.iter().map(|(id, text)| (id.clone(), crate::bidi::visual_template(text).into_owned())).collect())
+        });
+        match shown {
+            Some(shown) => shown,
+            None => self.messages(),
+        }
+    }
+
+    /// The language's own name as the language list draws it.
+    pub fn display_name(&self) -> std::borrow::Cow<'static, str> {
+        crate::bidi::visual(self.name)
+    }
 }
 
 static ENGLISH: Catalog = Catalog::new("en", "English", include_str!(concat!(env!("OUT_DIR"), "/locales/en.json")));
+static ARABIC: Catalog = Catalog::new("ar", "العربية", include_str!(concat!(env!("OUT_DIR"), "/locales/ar.json")));
 static CZECH: Catalog = Catalog::new("cs", "Čeština", include_str!(concat!(env!("OUT_DIR"), "/locales/cs.json")));
 static DANISH: Catalog = Catalog::new("da", "Dansk", include_str!(concat!(env!("OUT_DIR"), "/locales/da.json")));
 static GERMAN: Catalog = Catalog::new("de", "Deutsch", include_str!(concat!(env!("OUT_DIR"), "/locales/de.json")));
@@ -40,6 +65,7 @@ static ENGLISH_UK: Catalog = Catalog::new("en-GB", "English (UK)", include_str!(
 static SPANISH: Catalog = Catalog::new("es", "Español (España)", include_str!(concat!(env!("OUT_DIR"), "/locales/es.json")));
 static FRENCH: Catalog = Catalog::new("fr", "Français", include_str!(concat!(env!("OUT_DIR"), "/locales/fr.json")));
 static GALICIAN: Catalog = Catalog::new("gl", "Galego", include_str!(concat!(env!("OUT_DIR"), "/locales/gl.json")));
+static HEBREW: Catalog = Catalog::new("he", "עברית", include_str!(concat!(env!("OUT_DIR"), "/locales/he.json")));
 static HUNGARIAN: Catalog = Catalog::new("hu", "Magyar", include_str!(concat!(env!("OUT_DIR"), "/locales/hu.json")));
 static INDONESIAN: Catalog = Catalog::new("id", "Bahasa Indonesia", include_str!(concat!(env!("OUT_DIR"), "/locales/id.json")));
 static ITALIAN: Catalog = Catalog::new("it", "Italiano", include_str!(concat!(env!("OUT_DIR"), "/locales/it.json")));
@@ -63,6 +89,7 @@ static CHINESE_TRADITIONAL: Catalog = Catalog::new("zh-TW", "繁體中文", incl
 #[rustfmt::skip]
 pub const LOCALES: &[&Catalog] = &[
     &ENGLISH,
+    &ARABIC,
     &CZECH,
     &DANISH,
     &GERMAN,
@@ -70,6 +97,7 @@ pub const LOCALES: &[&Catalog] = &[
     &SPANISH,
     &FRENCH,
     &GALICIAN,
+    &HEBREW,
     &HUNGARIAN,
     &INDONESIAN,
     &ITALIAN,
@@ -107,9 +135,14 @@ impl Locale {
         self.0.name
     }
 
-    /// Stable message ID → translation → English → ID.
+    /// The language's own name as the language list draws it.
+    pub fn display_name(self) -> std::borrow::Cow<'static, str> {
+        self.0.display_name()
+    }
+
+    /// Stable message ID → translation → English → ID, in display order (see [`crate::bidi`]).
     pub fn text(self, id: &str) -> &str {
-        self.0.messages().get(id).or_else(|| ENGLISH.messages().get(id)).map_or(id, String::as_str)
+        self.0.shown().get(id).or_else(|| ENGLISH.messages().get(id)).map_or(id, String::as_str)
     }
 
     /// Translate source labels from engine/UI tables, preserving unknown labels.
@@ -131,7 +164,7 @@ impl Locale {
         if let Some(candidates) = ids.get(label) {
             // Preserve the old last-ID preference among available translations. A new
             // English-only alias must not hide a translation that already exists here.
-            if let Some(text) = candidates.iter().rev().find_map(|id| self.0.messages().get(*id)) {
+            if let Some(text) = candidates.iter().rev().find_map(|id| self.0.shown().get(*id)) {
                 return text;
             }
             if let Some(id) = candidates.last() {
@@ -293,7 +326,9 @@ mod tests {
             let pending: BTreeMap<String, Messages> = serde_json::from_str(&std::fs::read_to_string(entry.path()).unwrap()).unwrap();
             for (locale, messages) in pending {
                 for (id, text) in messages {
-                    assert_eq!(Locale::for_language(&locale).text(&id), text, "{locale}: {id}");
+                    // The catalogs hand right-to-left text out in display order (`crate::bidi`);
+                    // pending files hold it in reading order, as the catalogs do (#7527).
+                    assert_eq!(Locale::for_language(&locale).text(&id), crate::bidi::visual_template(&text), "{locale}: {id}");
                 }
             }
         }
@@ -397,13 +432,13 @@ mod tests {
         ENGLISH.messages().values().map(String::as_str).collect()
     }
 
-    /// Catalogs delivered complete. English is the source catalog; Czech, Italian, Japanese and Chinese
+    /// Catalogs delivered complete. English is the source catalog; Arabic, Czech, Italian, Japanese and Chinese
     /// are complete. German, Korean, Malay, Russian, French and Ukrainian
     /// are partial (German and Korean predate the coverage guards; Russian, French and Ukrainian
     /// are kept partial so a new label doesn't need more translations), so their gaps fall back
     /// to English and are reported by `cargo xtask i18n` without failing the build, while
     /// nothing in the complete catalogs may regress.
-    const COMPLETE: &[&str] = &["ja", "zh"];
+    const COMPLETE: &[&str] = &["ar", "he", "ja", "vi", "zh"];
 
     /// `text()` falls back to English silently, so a message a complete locale never received is
     /// shown in English inside an otherwise translated UI, with nothing in the build to say so.
@@ -895,6 +930,61 @@ mod tests {
         assert_eq!(pt.format("document.save_changes", &[("name", "My {design}")]), "Salvar as alterações em My {design}?");
         assert_eq!(pt.format("dialog.selected_count", &[("count", "2")]), "↖ 2 selecionados");
         assert_eq!(pt.label("NonExistentKey"), "NonExistentKey");
+    }
+
+    /// Hebrew is stored in reading order; egui reverses each run of Hebrew letters but places
+    /// the runs of a line left to right, so every message comes back with its words, numbers,
+    /// units and placeholders in display order and brackets mirrored (#3457).
+    /// Arabic goes through the same right-to-left path as Hebrew: its words, numbers, units and
+    /// placeholders come back in display order, and each Arabic word's letters stay in reading
+    /// order for the shaper, which joins and reverses them.
+    #[test]
+    fn arabic_catalog_is_registered_and_comes_back_in_display_order() {
+        let ar = Locale::for_language("ar");
+        assert!(is_supported("ar"));
+        assert_eq!(ar.name(), "العربية");
+        assert_eq!(ar.display_name(), "العربية");
+        assert_eq!(ar.text("ui.preferences"), "التفضيلات");
+        assert_eq!(ar.label("Extrude"), "بثق");
+        // Two words: the second is drawn first, on the left.
+        assert_eq!(ar.text("ui.new_design"), "جديد تصميم");
+        assert_eq!(ar.dynamic("Units: mm"), "mm :الوحدات");
+        assert_eq!(ar.dynamic("Sketch1"), "1 رسم");
+        let saved = ar.format("document.save_changes", &[("name", "Bracket")]);
+        assert!(saved.starts_with("؟Bracket "), "{saved}");
+        let english: Messages = serde_json::from_str(ENGLISH.source).unwrap();
+        for id in english.keys() {
+            let text = ar.text(id);
+            assert!(
+                !text.chars().any(|c| matches!(c, '\u{200E}' | '\u{200F}' | '\u{061C}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')),
+                "{id}: {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn hebrew_catalog_is_registered_and_comes_back_in_display_order() {
+        let he = Locale::for_language("he");
+        assert!(is_supported("he"));
+        assert_eq!(he.name(), "עברית");
+        assert_eq!(he.display_name(), "עברית");
+        assert_eq!(he.text("ui.preferences"), "העדפות");
+        assert_eq!(he.label("Extrude"), "שליפה");
+        assert_eq!(he.dynamic("Sketch1"), "1סקיצה");
+        assert_eq!(he.dynamic("Units: mm"), "mm :יחידות");
+        assert_eq!(he.dynamic("Parameters (5)"), "(5) פרמטרים");
+        assert_eq!(he.format("document.save_changes", &[("name", "My {design}")]), "?My {design}ב־ השינויים את לשמור");
+        assert_eq!(he.given_name("Sketch of bracket"), "Sketch of bracket");
+        assert_eq!(he.label("NonExistentKey"), "NonExistentKey");
+        // No directional control characters reach egui, which would draw them as boxes.
+        let english: Messages = serde_json::from_str(ENGLISH.source).unwrap();
+        for id in english.keys() {
+            let text = he.text(id);
+            assert!(
+                !text.chars().any(|c| matches!(c, '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')),
+                "{id}: {text:?}"
+            );
+        }
     }
 
     #[test]

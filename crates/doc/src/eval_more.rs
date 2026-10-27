@@ -1168,6 +1168,57 @@ pub(super) fn sheet_drill_cuts(
     Ok(Some(handled))
 }
 
+/// The largest size a cone takes (mm): beyond it the tessellation and booleans lose precision.
+const MAX_CONE_SIZE: f64 = 1e7;
+
+/// A cone or truncated cone (#5641): the base circle of `radius` centred on `base`, the top circle
+/// of `top_radius` `height` along `axis` (a negative height goes the other way). A top radius of
+/// 0 (or below a micrometre) makes a full cone ending in an apex. Built, as the torus is, by
+/// revolving its half section, a trapezoid (a triangle for a full cone) with an edge on the axis.
+pub(super) fn cone(base: Vec3, axis: Vec3, radius: f64, top_radius: f64, height: f64) -> Result<Body> {
+    let in_range = |v: f64| v.is_finite() && v.abs() <= MAX_CONE_SIZE;
+    if !(in_range(base.x) && in_range(base.y) && in_range(base.z)) {
+        return Err(DocError::Invalid("the cone's base is out of range".into()));
+    }
+    if !(in_range(radius) && in_range(top_radius) && in_range(height)) {
+        return Err(DocError::Invalid(format!("cone sizes must be finite and within {MAX_CONE_SIZE} mm")));
+    }
+    if !(radius > 1e-6) {
+        return Err(DocError::Invalid("the cone's radius must be positive".into()));
+    }
+    if top_radius < 0.0 {
+        return Err(DocError::Invalid("the cone's top radius must be 0 or more".into()));
+    }
+    if !(height.abs() > 1e-6) {
+        return Err(DocError::Invalid("the cone's height must not be zero".into()));
+    }
+    let dir = axis.normalized().ok_or_else(|| DocError::Invalid("the cone's axis has no direction".into()))?;
+    let (dir, h) = if height < 0.0 { (-dir, -height) } else { (dir, height) };
+    // The half section in the XZ plane, the axis along +Z through the origin, revolved there
+    // (where an apex on the axis comes out exact; built in a slanted frame directly, its side
+    // surface measured too large) and then moved into place.
+    let section = if top_radius > 1e-6 {
+        vec![Vec2::ZERO, Vec2::new(radius, 0.0), Vec2::new(top_radius, h), Vec2::new(0.0, h)]
+    } else {
+        vec![Vec2::ZERO, Vec2::new(radius, 0.0), Vec2::new(0.0, h)]
+    };
+    let plane = Plane { origin: Vec3::ZERO, x: Vec3::X, y: Vec3::Z };
+    let region = Region2 { outer: Loop2::polygon(&section), holes: vec![] };
+    let mut bodies = kernel::revolve(&plane, &[region], Vec2::ZERO, Vec2::Y, std::f64::consts::TAU)?;
+    let body = match (bodies.pop(), bodies.is_empty()) {
+        (Some(b), true) => b,
+        _ => return Err(DocError::Invalid("the cone could not be built".into())),
+    };
+    if (dir - Vec3::Z).len() < 1e-12 && base.len() == 0.0 {
+        return Ok(body);
+    }
+    // A rotation taking +Z onto the axis (x and y square to it, right-handed), then the base.
+    let x = Plane::from_normal(base, dir).ok_or_else(|| DocError::Invalid("the cone's axis has no direction".into()))?.x;
+    let y = dir.cross(x);
+    let m = [[x.x, x.y, x.z, 0.0], [y.x, y.y, y.z, 0.0], [dir.x, dir.y, dir.z, 0.0], [base.x, base.y, base.z, 1.0]];
+    Ok(kernel::transform_matrix(&body, m)?)
+}
+
 /// A primitive tool's exact geometry, for [`sheet_primitive_cut`].
 #[derive(Clone, Copy, Debug)]
 pub(super) enum PrimitivePrism {

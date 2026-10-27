@@ -35,14 +35,16 @@ fn section(s: &mut Session, p: &Value) -> Result<Value> {
         // A construction plane (name or id): where it is now.
         Some(v @ (Value::String(_) | Value::Number(_))) => {
             let r = super::features::plane_param(s, Some(v), cmd)?;
-            let solidcraft_doc::PlaneRef::Construction { name } = &r else { return Err(bad(cmd, "`plane` must be a plane")) };
+            let solidcraft_doc::PlaneRef::Construction { feature } = &r else { return Err(bad(cmd, "`plane` must be a plane")) };
             let st = s.model.state();
-            let pl = st
+            let c = st
                 .construct
                 .iter()
-                .find(|c| &c.name == name)
-                .and_then(|c| if let solidcraft_doc::construct::ConstructGeom::Plane(pl) = &c.geom { Some(*pl) } else { None })
-                .ok_or_else(|| bad(cmd, format!("construction plane `{name}` is not built (rolled back, suppressed or failed)")))?;
+                .find(|c| c.feature == feature.0)
+                .ok_or_else(|| bad(cmd, format!("construction plane `{feature}` is not built (rolled back, suppressed or failed)")))?;
+            let solidcraft_doc::construct::ConstructGeom::Plane(pl) = &c.geom else {
+                return Err(bad(cmd, format!("construction plane `{}` is not built (rolled back, suppressed or failed)", c.name)));
+            };
             (pl.origin, pl.normal(), None)
         }
         Some(o @ Value::Object(_)) => {

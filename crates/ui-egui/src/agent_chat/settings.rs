@@ -249,6 +249,12 @@ pub fn page(app: &mut SolveApp, ui: &mut egui::Ui) {
                 let response = ui_kit::checkbox(ui, tr("ui.ai_toolbar_button"), &mut app.preferences.ai_toolbar_button)
                     .on_hover_text(tr("ui.ai_toolbar_button_note"));
                 crate::scenario::publish_handle("prefs:ai_toolbar_button", response.rect.center());
+                let response = ui_kit::checkbox(ui, tr("ai.prefs.connect_at_start"), &mut app.preferences.agent_connect_at_start)
+                    .on_hover_text(tr("ai.prefs.connect_at_start_note"));
+                crate::scenario::publish_handle("prefs:agent_connect_at_start", response.rect.center());
+                let response = ui_kit::checkbox(ui, tr("ai.prefs.open_at_start"), &mut app.preferences.agent_chat_open_at_start)
+                    .on_hover_text(tr("ai.prefs.open_at_start_note"));
+                crate::scenario::publish_handle("prefs:agent_chat_open_at_start", response.rect.center());
             }
             let response = ui_kit::checkbox(ui, tr("ai.prefs.background_commands"), &mut app.preferences.agent_off_thread)
                 .on_hover_text(tr("ui.agent_off_thread_note"));
@@ -534,6 +540,10 @@ fn agents_section(app: &mut SolveApp, ui: &mut egui::Ui) {
         }
         if app.agent_chat.agent_id.as_deref() == Some(id.as_str()) {
             app.agent_chat.agent_id = None;
+        }
+        // A removed agent is not missed at the next start: the default connects instead.
+        if app.preferences.agent_last == id {
+            app.preferences.agent_last.clear();
         }
     }
     if app.agent_chat.settings.tests.values().any(|t| matches!(t, Test::Running(_))) {

@@ -325,9 +325,10 @@ pub fn component_bodies(app: &SolveApp, id: u64) -> Vec<String> {
 
 /// The eight radial commands, clockwise from the top.
 pub fn radial_items(app: &SolveApp) -> Vec<Item> {
+    let key = crate::keymap::display_for(app, "edit.repeat").unwrap_or_default();
     let repeat = match &app.last_command {
-        Some((_, label)) => act("ui.repeat", &format!("Repeat {label}"), "redo").key(crate::keymap::REPEAT_KEY),
-        None => act("ui.repeat", "Repeat", "redo").key(crate::keymap::REPEAT_KEY).on(false),
+        Some((_, label)) => act("ui.repeat", &format!("Repeat {label}"), "redo").key(&key),
+        None => act("ui.repeat", "Repeat", "redo").key(&key).on(false),
     };
     let delete = act("ui.delete", "Delete", "delete").key("Del").on(!app.session.selection.is_empty());
     if app.session.active_sketch.is_some() {
@@ -449,6 +450,11 @@ fn picked_face_feature(app: &SolveApp) -> Option<u64> {
         Sel::Face { body, index, .. } => Some((body, *index)),
         _ => None,
     })?;
+    face_feature(app, body, index)
+}
+
+/// The feature that made face `index` of `body` (by its world name).
+pub(crate) fn face_feature(app: &SolveApp, body: &str, index: usize) -> Option<u64> {
     let state = app.session.world_state();
     let body = state.body(body)?;
     let names = solidcraft_engine::doc::naming::face_names(body);
@@ -500,7 +506,8 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
     let has = |f: fn(&Sel) -> bool| sel.iter().any(f);
     let mut v = Vec::new();
     if let Some((_, label)) = &app.last_command {
-        v.push(act("ui.repeat", &format!("Repeat {label}"), "redo").key(crate::keymap::REPEAT_KEY));
+        let key = crate::keymap::display_for(app, "edit.repeat").unwrap_or_default();
+        v.push(act("ui.repeat", &format!("Repeat {label}"), "redo").key(&key));
         v.push(Item::sep());
     }
     // Everything under the cursor, for what lies beneath something else.
@@ -643,8 +650,13 @@ fn body_items(app: &SolveApp, bodies: &[String], browser: bool) -> Vec<Item> {
         act("ui.properties", "Properties", "measure").with(json!({ "bodies": names })),
         Item::sep(),
         act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": names })),
+        act("ui.sendToSlicer", "Send to Slicer", "export").with(json!({ "bodies": names })).on(crate::dialogs_save_mesh::available(app)),
         act("ui.export", "Export…", "export").with(json!({ "bodies": names })),
         Item::sep(),
+        // The clipboard beside Delete, Remove and Rename, as in every menu.
+        act("ui.cut", "Cut", "cut").key("Ctrl+X").on(crate::edit_clipboard::can_cut(app)),
+        act("ui.copy", "Copy", "copy").key("Ctrl+C").on(crate::edit_clipboard::something_to_copy(app)),
+        act("ui.paste", "Paste", "paste").key("Ctrl+V").on(crate::edit_clipboard::can_paste(app)),
         act("ui.delete", "Delete", "delete").key("Del").with(json!({ "items": items })).on(!locked),
         cmd(app, "solid.remove", "Remove").with(json!({ "bodies": names })).on(!locked),
         act("ui.rename", "Rename", "rename").with(json!({ "body": bodies.first() })).on(one),
@@ -680,6 +692,8 @@ fn sketch_items(app: &SolveApp, id: u64) -> Vec<Item> {
         act("ui.redefineSketch", "Redefine Sketch Plane", "plane").with(json!({ "sketch": id })),
         act("ui.exportDxf", "Export DXF…", "export").with(json!({ "sketch": id })),
         Item::sep(),
+        act("ui.copy", "Copy", "copy").key("Ctrl+C").on(crate::edit_clipboard::something_to_copy(app)),
+        act("ui.paste", "Paste", "paste").key("Ctrl+V").on(crate::edit_clipboard::can_paste(app)),
         act("ui.delete", "Delete", "delete").key("Del").with(json!({ "items": [{"type": "feature", "id": id}] })),
         act("ui.rename", "Rename", "rename").with(json!({ "feature": id })),
         Item::sep(),
@@ -780,11 +794,8 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
                 }
             }
             "occurrence.copy" => item.params = Some(json!({"occurrence": placement.occurrence, "translate": [10,10,0]})),
+            "ui.paste" | "ui.pasteNew" => item.params = Some(json!({"component": placement.component, "path": path})),
             "component.create" => item.params = Some(json!({"parent": placement.component, "parent_path": path})),
-            "component.paste_new" => {
-                item.label = "Paste New (Own Features)".into();
-                item.params = Some(json!({"component":placement.component,"occurrence":placement.occurrence,"path":path,"translate":[10,10,0]}));
-            }
             "ui.rename" => item.label = "Rename Component".into(),
             "ui.appearance" => item.label = "Component Appearance".into(),
             "ui.material" => item.label = "Component Physical Material".into(),
@@ -798,7 +809,7 @@ fn occurrence_items(app: &SolveApp, path: &[u64]) -> Vec<Item> {
                 item.id = "ui.isolateOccurrence".into();
                 item.params = Some(json!({"path": path}));
             }
-            "ui.export" | "ui.saveMesh" => item.params = Some(json!({"bodies": bodies})),
+            "ui.export" | "ui.saveMesh" | "ui.sendToSlicer" => item.params = Some(json!({"bodies": bodies})),
             "browser.expand_all" | "browser.collapse_all" => item.params = Some(json!({"path": path})),
             _ => {}
         }
@@ -826,6 +837,11 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     let bodies = component_bodies(app, id);
     let hidden = !bodies.is_empty() && bodies.iter().all(|b| app.session.visibility.hidden_bodies.contains(b));
     let names = json!(bodies);
+    // The clipboard: Copy takes the selection (the row right-clicked); Paste puts what was copied
+    // inside this component (never a component inside itself or what it holds); Paste New pastes
+    // copied components as independent copies.
+    let into = json!({ "component": id, "path": app.session.doc.first_path(id) });
+    let pastes_here = crate::edit_clipboard::can_paste_into(app, id);
     let mut v = Vec::new();
     if doc.parts.contains_key(&id) {
         v.push(cmd(app, "parts.resize", "Edit").with(json!({"component":id})));
@@ -857,8 +873,6 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     }
     v.push(cmd(app, "component.create", "New Component").with(json!({ "parent": id })));
     if id == 0 {
-        v.push(act("ui.copyDesign", "Copy", "copy").key("Ctrl+C"));
-        v.push(act("ui.paste", "Paste", "paste").key("Ctrl+V").on(crate::edit_clipboard::can_paste(app)));
         v.push(cmd(app, "component.from_bodies", "Create Components from Bodies").with(json!({ "bodies": names })).on(!bodies.is_empty()));
     }
     v.push(Item::sep());
@@ -884,10 +898,28 @@ fn component_items(app: &SolveApp, id: u64) -> Vec<Item> {
     v.push(Item::sep());
     v.push(act("ui.export", "Export…", "export").with(json!({ "bodies": names })).on(!bodies.is_empty()));
     v.push(act("ui.saveMesh", "Save As Mesh", "export").with(json!({ "bodies": names })).on(!bodies.is_empty()));
+    v.push(
+        act("ui.sendToSlicer", "Send to Slicer", "export")
+            .with(json!({ "bodies": names }))
+            .on(!bodies.is_empty() && crate::dialogs_save_mesh::available(app)),
+    );
     v.push(Item::sep());
+    // The clipboard, then Delete and Rename, in the same place for the design and its components
+    // (the design is copied as a saved design to link, and is neither cut nor deleted).
+    if id == 0 {
+        v.push(act("ui.copyDesign", "Copy", "copy").key("Ctrl+C"));
+    } else {
+        v.push(act("ui.cut", "Cut", "cut").key("Ctrl+X").on(crate::edit_clipboard::can_cut(app)));
+        v.push(act("ui.copy", "Copy", "copy").key("Ctrl+C").on(crate::edit_clipboard::something_to_copy(app)));
+    }
+    v.push(act("ui.paste", "Paste", "paste").key("Ctrl+V").with(into.clone()).on(pastes_here));
+    v.push(
+        act("ui.pasteNew", "Paste New", "paste")
+            .key("Ctrl+Shift+V")
+            .with(into.clone())
+            .on(pastes_here && crate::edit_clipboard::pasting_components(app)),
+    );
     if id != 0 {
-        v.push(cmd(app, "occurrence.copy", "Paste (Instance)").with(json!({ "component": id, "translate": [10, 10, 0] })));
-        v.push(cmd(app, "component.paste_new", "Paste New").with(json!({ "component": id, "translate": [10, 10, 0] })));
         v.push(act("ui.delete", "Delete", "delete").key("Del").with(json!({ "occurrences": [occ.map(|o| o.id)] })).on(occ.is_some()));
     }
     v.push(act("ui.rename", "Rename", "rename").with(json!({ "component": id })));
@@ -970,6 +1002,9 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     if curves.is_empty() && points.is_empty() {
         if dims.len() == 1 {
             v.push(cmd(app, "sketch.toggle_driven", "Toggle Driven Dimension").with(json!({ "constraint": dims[0] })));
+        }
+        if app.session.selection.iter().any(|s| matches!(s, Sel::SketchConstraint { .. })) {
+            v.push(act("ui.delete", "Delete", "delete").key("Del"));
             v.push(Item::sep());
         }
         if crate::sketch_text::selected_entity(app).is_some() {
@@ -997,9 +1032,7 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
         v.extend(explode_text(app));
     }
     v.push(cmd(app, "sketch.move", "Move/Copy").key("M"));
-    v.push(act("ui.cut", "Cut", "cut").key("Ctrl+X"));
-    v.push(act("ui.copy", "Copy", "copy").key("Ctrl+C"));
-    v.push(act("ui.paste", "Paste", "paste").key("Ctrl+V").on(app.session.sketch_clipboard.is_some()));
+    v.push(cmd(app, "sketch.transform", "Transform").key("G"));
     if !curves.is_empty() {
         v.push(cmd(app, "sketch.construction", "Normal / Construction").with(json!({ "curves": curves })));
     }
@@ -1020,7 +1053,22 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
     if curves.len() == 1 && ss.sketch.offset_distance(&curves[0]).is_some() {
         v.push(cmd(app, "sketch.offset.break", "Break Offset Association").with(json!({"curve":curves[0]})));
     }
+    // #6533: a fit point on a fit point spline, where the menu was opened over it.
+    if let [curve] = curves.as_slice()
+        && ss
+            .sketch
+            .curve_index(curve)
+            .and_then(|i| ss.sketch.curves.get(i))
+            .is_some_and(|c| matches!(c.kind, CurveKind::Spline { control: false, .. }))
+        && let Some(at) = menu_sketch_point(app, &ss.plane)
+    {
+        v.push(cmd(app, "sketch.spline.insert_point", "Add Spline Point").with(json!({"curve": curve, "at": [at.x, at.y]})));
+    }
     v.push(act("ui.fix", "Fix/Unfix", "c_fix").with(json!({ "entities": ents })));
+    // The clipboard beside Delete, as in every menu.
+    v.push(act("ui.cut", "Cut", "cut").key("Ctrl+X"));
+    v.push(act("ui.copy", "Copy", "copy").key("Ctrl+C"));
+    v.push(act("ui.paste", "Paste", "paste").key("Ctrl+V").on(app.session.sketch_clipboard.is_some()));
     v.push(act("ui.delete", "Delete", "delete").key("Del"));
     v.push(cmd(app, "sketch.dimension", "Sketch Dimension").with(json!({ "entities": ents })).on(ents.len() <= 2));
     let mut c = Vec::new();
@@ -1075,6 +1123,14 @@ fn sketch_entity_items(app: &SolveApp) -> Vec<Item> {
         v.extend(c);
     }
     v
+}
+
+/// Where on the active sketch's plane the viewport menu was opened (sketch coordinates).
+fn menu_sketch_point(app: &SolveApp, plane: &solidcraft_engine::geom::Plane) -> Option<solidcraft_engine::geom::Vec2> {
+    let (at, _) = app.menu.opened?;
+    let proj = crate::viewport::projection(app, app.viewport.rect?);
+    let (o, d) = proj.ray(at);
+    Some(plane.to_local(plane.intersect_ray(o, d)?))
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1142,7 +1198,21 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
         "ui.copy" => drop(crate::edit_clipboard::copy(app)),
         "ui.copyDesign" => drop(crate::edit_clipboard::copy_design(app)),
         "ui.cut" => drop(crate::edit_clipboard::cut(app)),
-        "ui.paste" => drop(crate::edit_clipboard::paste(app, Some(at))),
+        "ui.paste" | "ui.pasteNew" => {
+            // A component's menu pastes into it (that placement); the others into the active one.
+            let into = id_of(&p, "component").map(|c| {
+                let path = p.get("path").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_u64).collect());
+                (c, path.unwrap_or_else(|| app.session.doc.first_path(c)))
+            });
+            match id_of(&p, "group") {
+                // A Bodies group's menu: into the group too.
+                Some(group) => {
+                    let folder = p.get("folder").and_then(Value::as_str).unwrap_or("bodies");
+                    let _ = crate::edit_clipboard::paste_into_group(app, Some(at), into, Some(group), folder);
+                }
+                None => drop(crate::edit_clipboard::paste_into(app, Some(at), item.id == "ui.pasteNew", into)),
+            }
+        }
         "ui.editSketchPattern" => {
             if let Some(id) = p.get("pattern").and_then(Value::as_str) {
                 crate::sketch_modify_ui::edit_pattern(app, id);
@@ -1315,15 +1385,8 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
                 app.set_status("This component is no longer linked to a design", true);
                 return;
             };
-            let Some(file) = link["file"].as_str() else {
-                app.set_status("The linked design has no file path", true);
-                return;
-            };
-            if link["found"] != true {
-                app.set_status(format!("Linked design not found: {file}"), true);
-                return;
-            }
-            app.open_path_async(file);
+            // A link on a network server not allowed yet asks first.
+            crate::network_prompt::open_linked(app, link);
         }
         "ui.moveOccurrence" => {
             if let Some(o) = id_of(&p, "occurrence") {
@@ -1429,10 +1492,10 @@ pub fn run_item(app: &mut SolveApp, item: &Item, at: Pos2) {
             let _ = app.run("select.set", json!({ "items": items }));
             app.start("material.assign");
         }
-        "ui.saveMesh" => {
+        "ui.saveMesh" | "ui.sendToSlicer" => {
             let items: Vec<Value> = bodies.iter().map(|b| json!({"type": "body", "name": b})).collect();
             let _ = app.run("select.set", json!({ "items": items }));
-            app.start("file.save_mesh");
+            app.start(if item.id == "ui.saveMesh" { "file.save_mesh" } else { "file.send_to_slicer" });
         }
         "ui.exportDxf" => {
             if let Some(id) = id_of(&p, "sketch") {
@@ -1682,7 +1745,12 @@ pub fn open(app: &mut SolveApp, at: Pos2, held: crate::tool_modifiers::Held) {
         _ => None,
     });
     crate::select_other::close(app);
-    if app.session.active_sketch.is_none()
+    if let Some(sel) = crate::viewport::sketch_constraint_at(app, at, app.viewport.hover.as_ref()) {
+        if !in_selection(app, &sel) {
+            let _ = app.run("select.set", json!({ "items": [sel] }));
+            app.menu.picked = Some((at, before, app.session.selection.clone()));
+        }
+    } else if app.session.active_sketch.is_none()
         && let Some(h) = app.viewport.hover.clone()
         && let Some((_, sel)) = crate::viewport::candidate(app, &[h])
         && !in_selection(app, &sel)
@@ -2309,6 +2377,61 @@ mod tests {
         let remaining = sk.shape(sk.curve_index(&output).unwrap()).unwrap();
         assert!(matches!(remaining, Shape::Line { a, b } if (a.dist(b) - 10.0).abs() < 1e-6), "{remaining:?}");
         assert!(remaining.dist(cut) > 1.0);
+    }
+
+    /// #6533: a right-click on a fit point spline offers Add Spline Point at the clicked spot, and
+    /// the item puts a fit point there. A control point spline is not offered it.
+    #[test]
+    fn spline_context_menu_adds_a_fit_point_where_it_was_clicked() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.app.run("sketch.create", json!({"plane":"XY"})).unwrap();
+        let fit = h.app.run("sketch.spline.fit_point", json!({"points":[[0,0],[10,8],[20,0],[30,6]],"connect":false})).unwrap()["curves"][0]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let control = h.app.run("sketch.spline.control_point", json!({"points":[[0,-12],[10,-4],[20,-12]],"connect":false})).unwrap()["curves"][0]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let sid = h.app.session.active_sketch.unwrap();
+        let spot = |h: &crate::scenario::Harness, id: &str, piece: usize| {
+            let state = h.app.session.world_state();
+            let sk = &state.sketch(sid).unwrap().sketch;
+            sk.exact_segs(sk.curve_index(id).unwrap()).unwrap()[piece].point_at(0.5)
+        };
+        let count = |h: &crate::scenario::Harness, id: &str| {
+            let state = h.app.session.world_state();
+            let sk = &state.sketch(sid).unwrap().sketch;
+            sk.curves[sk.curve_index(id).unwrap()].kind.point_ids().len()
+        };
+        h.call("ui.view", json!({"view":"top"}));
+        h.app.cam.distance = 80.0;
+        h.settle();
+
+        let c = spot(&h, &control, 0);
+        h.step(&json!({"click":{"world":[c.x,c.y,0]},"button":"right"})).unwrap();
+        assert_eq!(h.app.session.selection, vec![Sel::SketchCurve { id: control.clone(), sketch: None }]);
+        assert!(items(&h.app, &Target::Viewport).iter().all(|item| item.id != "sketch.spline.insert_point"));
+        close(&mut h.app);
+
+        let at = spot(&h, &fit, 1);
+        h.step(&json!({"click":{"world":[at.x,at.y,0]},"button":"right"})).unwrap();
+        assert_eq!(h.app.session.selection, vec![Sel::SketchCurve { id: fit.clone(), sketch: None }]);
+        let menu = items(&h.app, &Target::Viewport);
+        let item = menu.iter().find(|item| item.id == "sketch.spline.insert_point").expect("a fit spline offers Add Spline Point");
+        assert_eq!(item.label, "Add Spline Point");
+        assert!(item.enabled);
+        let p = item.params.clone().unwrap();
+        assert_eq!(p["curve"], json!(fit));
+        let clicked = solidcraft_engine::geom::Vec2::new(p["at"][0].as_f64().unwrap(), p["at"][1].as_f64().unwrap());
+        assert!(clicked.dist(at) < 0.5, "the item carries the clicked spot: {clicked:?} for {at:?}");
+        h.step(&json!({"click":{"handle":"menu:sketch.spline.insert_point"}})).unwrap();
+        assert_eq!(count(&h, &fit), 5);
+        let state = h.app.session.world_state();
+        let sk = &state.sketch(sid).unwrap().sketch;
+        let added = sk.point(sk.curves[sk.curve_index(&fit).unwrap()].kind.point_ids()[2]).unwrap();
+        assert!(added.dist(at) < 0.5, "the new fit point is where the menu was opened: {added:?}");
     }
 
     #[test]

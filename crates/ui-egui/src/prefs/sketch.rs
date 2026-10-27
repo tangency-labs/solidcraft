@@ -25,6 +25,24 @@ pub(super) fn show(app: &mut SolveApp, ui: &mut egui::Ui) {
                 });
             });
         });
+        ui_kit::settings_block_hint(
+            ui,
+            app.tr("prefs.sketch_exit_view"),
+            app.tr("prefs.sketch_exit_view_note"),
+            t.space_24 * 8.0 + t.space_8,
+            |ui| {
+                let exit = &mut app.preferences.sketch_exit_view;
+                ui_kit::settings_control_width(ui, t.space_24 * 7.0 + t.space_12, |ui| {
+                    ui_kit::dropdown_menu(ui, "pref_sketch_exit_view", crate::i18n::tr(exit.label_id()), |ui| {
+                        for choice in SketchExitView::ALL {
+                            if ui_kit::list_picker(ui, choice.label_id(), crate::i18n::tr(choice.label_id()), *exit == choice).clicked() {
+                                *exit = choice;
+                            }
+                        }
+                    });
+                });
+            },
+        );
         ui_kit::checkbox(ui, app.tr("prefs.alt_frees_manipulators"), &mut app.preferences.manipulator_free_alt).on_hover_text(crate::i18n::tr_label(
             "On: Alt/Option or Ctrl/Cmd on extrude / gizmo arrows disables value snapping. Off: Ctrl/Cmd only.",
         ));

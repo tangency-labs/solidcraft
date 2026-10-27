@@ -1071,6 +1071,101 @@ fn a_degree_nine_control_spline_stays_exact_and_closes_a_profile_exactly() {
     assert!(sk.add_curve(CurveKind::Spline { pts: high, control: true, degree: 10, periodic: false }, None).is_err());
 }
 
+/// How far apart two curves run: the largest distance from a sample of either to the other.
+fn curves_apart(a: &[Vec2], b: &[Vec2]) -> f64 {
+    let one_way = |from: &[Vec2], to: &[Vec2]| from.iter().map(|q| crate::curves::polyline_signed_dist(to, *q).abs()).fold(0.0, f64::max);
+    one_way(a, b).max(one_way(b, a))
+}
+
+/// A fit spline through five points, its points and curve index.
+fn wave_spline(sk: &mut Sketch, periodic: bool) -> (Vec<usize>, usize) {
+    let mut shape = vec![v(0.0, 0.0), v(10.0, 12.0), v(25.0, 4.0), v(38.0, 15.0), v(50.0, 0.0)];
+    if periodic {
+        shape.push(v(0.0, 0.0));
+    }
+    let mut pts: Vec<usize> = shape.iter().map(|q| sk.add_point(*q, None).unwrap()).collect();
+    if periodic {
+        pts.pop();
+        pts.push(pts[0]);
+    }
+    let s = sk.add_curve(CurveKind::Spline { pts: pts.clone(), control: false, degree: 3, periodic }, None).unwrap();
+    (pts, s)
+}
+
+/// The distance from `q` to the exact curve `ci`.
+fn off_curve(sk: &Sketch, ci: usize, q: Vec2) -> f64 {
+    sk.exact_pieces(ci).iter().map(|seg| seg.point_at(seg.closest_param(q)).dist(q)).fold(f64::INFINITY, f64::min)
+}
+
+/// #6533: a fit point added to a spline lands on the curve where it was asked for, in order
+/// between its neighbours. The curve still runs through every old point and the new one, and
+/// elsewhere barely moves: most where interpolation through one more point bends the end span.
+#[test]
+fn a_fit_point_inserted_into_a_spline_keeps_the_curve_through_its_points() {
+    let mut sk = Sketch::new();
+    let (pts, s) = wave_spline(&mut sk, false);
+    let before = sk.polyline(s);
+    let old: Vec<Vec2> = pts.iter().map(|i| sk.point(*i).unwrap()).collect();
+    for (at, slot, apart) in [(v(18.0, 9.0), 2, 0.05), (v(31.0, 9.0), 3, 0.05), (v(44.0, 9.0), 4, 1.0)] {
+        let mut k = sk.clone();
+        let p = k.insert_spline_point(s, at).unwrap();
+        let new = k.point(p).unwrap();
+        assert!(off_curve(&sk, s, new) < 1e-9, "the new point is on the old curve: {new:?}");
+        assert!(new.dist(at) < 2.0, "near the spot asked for: {new:?}");
+        let CurveKind::Spline { pts: now, control, periodic, .. } = &k.curves[s].kind else { panic!() };
+        assert!(!control && !periodic);
+        assert_eq!(now.len(), pts.len() + 1);
+        assert_eq!(now[slot], p, "between its neighbours: {now:?}");
+        assert_eq!(now.iter().filter(|i| **i != p).copied().collect::<Vec<_>>(), pts, "the old points keep their order");
+        for q in old.iter().chain([&new]) {
+            assert!(off_curve(&k, s, *q) < 1e-9, "the new curve runs through {q:?}");
+        }
+        let moved = curves_apart(&before, &k.polyline(s));
+        assert!(moved < apart, "at {at:?} the curve moved {moved}");
+    }
+    // A spot on an existing point, a control point spline and something not a spline are refused.
+    let mut k = sk.clone();
+    assert!(k.insert_spline_point(s, old[2]).is_err());
+    assert_eq!(k, sk, "a refused insertion changes nothing");
+    let cv: Vec<usize> = old.iter().map(|q| k.add_point(*q + v(0.0, 30.0), None).unwrap()).collect();
+    let c = k.add_curve(CurveKind::Spline { pts: cv, control: true, degree: 3, periodic: false }, None).unwrap();
+    assert!(k.insert_spline_point(c, v(20.0, 38.0)).is_err());
+    let l = k.add_line(v(0.0, -10.0), v(50.0, -10.0), None, None, None).unwrap();
+    assert!(k.insert_spline_point(l, v(20.0, -10.0)).is_err());
+    assert!(k.insert_spline_point(s, v(f64::NAN, 0.0)).is_err());
+}
+
+/// #6533: a closed spline takes a point in its closing span too, before the repeated first point,
+/// and stays closed.
+#[test]
+fn a_fit_point_inserted_into_a_closed_spline_keeps_it_closed() {
+    let mut sk = Sketch::new();
+    let (pts, s) = wave_spline(&mut sk, true);
+    let p = sk.insert_spline_point(s, v(25.0, -8.0)).unwrap();
+    let CurveKind::Spline { pts: now, periodic, .. } = &sk.curves[s].kind else { panic!() };
+    assert!(periodic);
+    assert_eq!(now.len(), pts.len() + 1);
+    assert_eq!((now[now.len() - 2], now.first(), now.last()), (p, Some(&pts[0]), Some(&pts[0])));
+    assert!(off_curve(&sk, s, sk.point(p).unwrap()) < 1e-9);
+    assert!(sk.extend_spline(s, v(60.0, 0.0), false).is_err(), "a closed spline has no end");
+}
+
+/// #6533: a spline runs on to a new first or last point, unless that end is joined to something.
+#[test]
+fn a_spline_extends_to_a_new_end_unless_the_end_is_joined() {
+    let mut sk = Sketch::new();
+    let (pts, s) = wave_spline(&mut sk, false);
+    let end = sk.extend_spline(s, v(60.0, 10.0), false).unwrap();
+    let start = sk.extend_spline(s, v(-10.0, 5.0), true).unwrap();
+    let CurveKind::Spline { pts: now, .. } = &sk.curves[s].kind else { panic!() };
+    assert_eq!((now.first(), now.last(), now.len()), (Some(&start), Some(&end), pts.len() + 2));
+    assert_eq!(sk.curves[s].kind.ends(), Some((start, end)));
+    // A line from the end: the end is shared, so the spline does not run past it.
+    sk.add_line(v(60.0, 10.0), v(70.0, 10.0), Some(end), None, None).unwrap();
+    assert!(sk.extend_spline(s, v(65.0, 20.0), false).is_err());
+    assert!(sk.extend_spline(s, v(-10.0, 5.0), true).is_err(), "already a point there");
+}
+
 /// #755: a line drawn through a junction of a loop, but 2e-5 off it, still splits the loop. The
 /// junction lies on the loop's two curves only, so it cuts neither of them where the line
 /// crosses, and that crossing, next to the junction, was taken for one already cut there: the

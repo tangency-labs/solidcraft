@@ -543,9 +543,16 @@ mod tests {
 
     #[test]
     fn probing_a_backend_alone_never_panics() {
-        // Whatever this machine has (often nothing): an answer, not a crash.
-        for b in WINDOWS_ORDER {
-            let _ = has_hardware_adapter(b);
+        // Whatever this machine has (often nothing): an answer, not a crash. On Windows the probe
+        // goes the way the app's does, stopping at the first backend with a GPU: a machine with
+        // D3D12 never loads its OpenGL driver into the test process, and AMD's (`atio6axx.dll`)
+        // aborted the process as it exited (#1156).
+        if cfg!(target_os = "windows") {
+            let _ = choose_backends(true, false, false, None, has_hardware_adapter);
+        } else {
+            for b in WINDOWS_ORDER {
+                let _ = has_hardware_adapter(b);
+            }
         }
     }
 
@@ -558,8 +565,18 @@ mod tests {
     #[test]
     fn the_software_adapter_is_preferred_and_its_absence_is_an_error_not_a_panic() {
         assert!(pick_cpu_adapter(&[], None).unwrap_err().contains("none"));
-        let instance = eframe::wgpu::Instance::new(eframe::wgpu::InstanceDescriptor::new_without_display_handle());
-        let adapters = pollster::block_on(instance.enumerate_adapters(eframe::wgpu::Backends::all()));
+        // The adapters the software renderer chooses among: it starts D3D12 alone on Windows
+        // (WARP), not every backend, so the test doesn't load the OpenGL driver either (#1156).
+        let options = crate::wgpu_options(true, None);
+        let eframe::egui_wgpu::WgpuSetup::CreateNew(setup) = &options.wgpu_setup else { panic!("the software renderer makes its own device") };
+        let backends = setup.instance_descriptor.backends;
+        if cfg!(target_os = "windows") && std::env::var_os(WGPU_BACKEND_ENV).is_none() {
+            assert_eq!(backends, eframe::wgpu::Backends::DX12);
+        }
+        let mut desc = eframe::wgpu::InstanceDescriptor::new_without_display_handle_from_env();
+        desc.backends = backends;
+        let instance = eframe::wgpu::Instance::new(desc);
+        let adapters = pollster::block_on(instance.enumerate_adapters(backends));
         if adapters.is_empty() {
             return;
         }

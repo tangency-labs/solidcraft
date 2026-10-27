@@ -189,17 +189,21 @@ fn an_edge_on_a_face_draws_whole_at_any_angle() {
     }
 }
 
+/// A selected edge's highlight from `a` to `b` on a face of normal `n`, in a highlight scene of
+/// its own: a 3 px core in a 6 px halo (`GpuScene::lifted_line`).
+fn highlight(a: Vec3, b: Vec3, n: Vec3) -> solidcraft_gpu::view::GpuScene {
+    let mut sc = solidcraft_gpu::view::GpuScene::default();
+    let red = sc.color([255, 0, 0, 255]);
+    sc.lifted_line(a.to_f32(), b.to_f32(), red, 6.0, [n.to_f32(), n.to_f32()]);
+    sc
+}
+
 /// A selected edge's highlight (a 3 px core in a 6 px halo, drawn by `GpuScene::lifted_line`
 /// in the highlight scene) lying on a face seen almost edge on draws its whole width: the face
 /// no longer buries part of the band, which showed as a thin wedge instead of a line. The same
 /// band 5 mm behind a face seen square, beside faces seen square, stays hidden.
 #[test]
 fn a_selected_edge_on_a_grazing_face_draws_whole() {
-    let highlight = |a: Vec3, b: Vec3, n: Vec3| {
-        let mut sc = solidcraft_gpu::view::GpuScene::default();
-        sc.lifted_line(a.to_f32(), b.to_f32(), [255, 0, 0, 255], 6.0, [n.to_f32(), n.to_f32()]);
-        sc
-    };
     let reference = |a: Vec3, b: Vec3| vec![SceneLine { points: vec![a, b], color: Rgb(255, 0, 0), alpha: 1.0, width: 6.0, on_top: true }];
     for (mode, c) in capturers() {
         for tilt in [60.0_f64, 80.0, 85.0, 88.0] {
@@ -207,7 +211,10 @@ fn a_selected_edge_on_a_grazing_face_draws_whole() {
             let t = tr.tan();
             let n = Vec3::new(0.0, -tr.cos(), tr.sin());
             let (a, b) = (Vec3::new(-12.0, 5.0 * t, 5.0), Vec3::new(12.0, 5.0 * t, 5.0));
-            for radius in [30.0, 17_000.0] {
+            // The small design holds the edge, 5·tan(tilt) behind the sheet's middle: at 88° that
+            // is 143 mm, past the far plane of a design of radius 30, where the reference band drew
+            // nothing (the check only passed by counting a band left from another picture).
+            for radius in [(5.0 * t).max(30.0), 17_000.0] {
                 for fov in [0.0, 0.6] {
                     let (plain, cam) = front(sheet(tr), Vec::new(), radius, fov, false);
                     let (top, _) = front(sheet(tr), reference(a, b), radius, fov, false);
@@ -227,6 +234,23 @@ fn a_selected_edge_on_a_grazing_face_draws_whole() {
                 assert_eq!(n, 0, "{mode} depth, radius {radius}, fov {fov}: the band behind shows in {n} px");
             }
         }
+    }
+}
+
+/// A picture drawn without a highlight shows none of the highlight of the picture before it. The
+/// capturer kept its last highlight scene, so a band drawn for one check showed in the next
+/// picture on the same capturer, and the checks here, which share their capturers across test
+/// threads, failed at random: an edge "192 of 612 px drawn", a washer through its plate.
+#[test]
+fn a_picture_without_a_highlight_shows_none_of_the_one_before() {
+    for (mode, c) in capturers() {
+        let (plain, cam) = front(sheet(0.0), Vec::new(), 30.0, 0.0, false);
+        let (a, b) = (Vec3::new(-12.0, 0.0, 5.0), Vec3::new(12.0, 0.0, 5.0));
+        let highlighted = c.rgba_highlighted(&plain, Some(highlight(a, b, Vec3::new(0.0, -1.0, 0.0))), &cam, 200, 200).unwrap();
+        let band = pixels(&highlighted).filter(|p| red(*p)).count();
+        assert!(band > 100, "{mode}: the band itself ({band} px)");
+        let after = red_pixels(c, &plain, &cam);
+        assert_eq!(after, 0, "{mode}: the picture after the highlighted one shows its band in {after} px");
     }
 }
 

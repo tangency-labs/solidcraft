@@ -1,4 +1,4 @@
-//! Bounded HTTPS downloads, handed to the normal design-open command as unsaved copies.
+//! Bounded HTTPS or same-origin downloads, handed to the normal design-open command as unsaved copies.
 use std::{cell::RefCell, rc::Rc};
 
 use js_sys::{Reflect, Uint8Array};
@@ -87,14 +87,15 @@ impl Download {
 }
 
 async fn fetch(value: &str) -> Reply {
-    let url = design_url(value)?;
+    let window = web_sys::window().ok_or("No browser window")?;
+    let page_origin = window.location().origin().map_err(|_| "Cannot read page origin")?;
+    let url = design_url(value, &page_origin)?;
     let name = url.path_segments().and_then(|mut segments| segments.next_back()).filter(|name| !name.is_empty()).unwrap_or("Design.solidcraft");
     let decoded = js_sys::decode_uri_component(name).ok().and_then(|name| name.as_string()).unwrap_or_else(|| name.to_owned());
     let name: String = decoded.strip_suffix(".solidcraft").unwrap_or(&decoded).chars().take(255).collect();
-    let window = web_sys::window().ok_or("No browser window")?;
     let response = JsFuture::from(window.fetch_with_str(url.as_str())).await.map_err(|_| "Network request failed or the host refused CORS access")?;
     let response: web_sys::Response = response.dyn_into().map_err(|_| "Invalid download response")?;
-    design_url(&response.url()).map_err(|_| "Design redirected to a URL that does not use HTTPS")?;
+    design_url(&response.url(), &page_origin).map_err(|_| "Design redirected to a URL that does not use HTTPS or the page's own origin")?;
     if !response.ok() {
         return Err(format!("HTTP {} {}", response.status(), response.status_text()));
     }

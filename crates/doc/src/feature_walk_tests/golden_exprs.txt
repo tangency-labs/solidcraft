@@ -82,6 +82,12 @@ torus
     Major radius = tor.major (Length)
     Minor radius = tor.minor (Length)
   expressions: tor.major, tor.minor, tor.x, tor.y, tor.z
+cone
+  inputs:
+    Radius = cone.radius (Length)
+    Top radius = cone.top_radius (Length)
+    Height = cone.height (Length)
+  expressions: cone.radius, cone.top_radius, cone.height, cone.x, cone.y, cone.z
 combine
 pattern_rectangular
   inputs:

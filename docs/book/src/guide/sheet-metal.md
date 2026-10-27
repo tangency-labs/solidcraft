@@ -4,9 +4,10 @@ MODEL → MODIFY offers Convert to Sheet Metal. The SHEET METAL tab is always av
 and selected when the active body is a sheet), and builds parts from a sheet of constant thickness under a **sheet metal rule**
 (thickness, bend radius, K-factor), set in **Sheet Metal Rules** (`sheet.manage_rules`).
 
-- **Flange** (`sheet.flange`): a base flange from a sketch profile, a contour flange from an open
+- [**Flange**](../reference/commands.md#command-sheet.flange): a base flange from a sketch profile, a contour flange from an open
   sketch, or an edge flange from a part edge.
-- **Hem** (`sheet.hem`) and **Fold** (`sheet.fold`) along a sketch line.
+- [**Hem**](../reference/commands.md#command-sheet.hem) returns a sheet edge back toward the sheet; no new sketch is required.
+- **Fold** (`sheet.fold`) bends the sheet along a sketch line.
 - **Unfold / Refold** (`sheet.unfold`, `sheet.refold`) for working on the flat part.
 - **Convert** (`sheet.convert`) turns a plate of constant thickness into sheet metal, or, with
   bend edges, a solid or a shelled body.

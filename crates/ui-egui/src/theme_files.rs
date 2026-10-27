@@ -21,7 +21,7 @@ use crate::theme::{IconColors, Tokens};
 /// The `format` tag of a theme file.
 pub const FORMAT: &str = "solidcraft-theme/1";
 /// Hostile-input caps: file size, colours per file, name length, imported themes kept.
-const MAX_BYTES: usize = 256 * 1024;
+pub const MAX_BYTES: usize = 256 * 1024;
 pub const MAX_COLORS: usize = 512;
 const MAX_NAME: usize = 80;
 pub const MAX_CUSTOM: usize = 64;
@@ -610,8 +610,8 @@ pub fn export(name: &str, base: Base, t: &Tokens) -> Value {
     json!({"format": FORMAT, "name": name, "base": base, "colors": colors, "radii": radii, "borders": borders, "icon_palette": icon_palette})
 }
 
-/// The theme files that come with SolidCraft (original files; Gruvbox, Tokyo Night, Solarized, Nord, Nosferatu and Catppuccin map open-source palettes, MIT; Okibi and Akari map the Okibi design system).
-const BUILTIN: [(&str, &str); 22] = [
+/// The theme files that come with SolidCraft (original files; Gruvbox, Tokyo Night, Solarized, Nord, Nosferatu and Catppuccin map open-source palettes, MIT; Okibi and Akari map the Okibi design system; Clay and Clay Dark are original warm paper and charcoal palettes; CGA keeps to the 16 colours of the IBM Color Graphics Adapter).
+const BUILTIN: [(&str, &str); 25] = [
     ("gruvbox-dark", include_str!("../../../assets/styles/ui/themes/gruvbox-dark.json")),
     ("gruvbox-dark-hard", include_str!("../../../assets/styles/ui/themes/gruvbox-dark-hard.json")),
     ("gruvbox-dark-soft", include_str!("../../../assets/styles/ui/themes/gruvbox-dark-soft.json")),
@@ -634,6 +634,9 @@ const BUILTIN: [(&str, &str); 22] = [
     ("catppuccin-mocha", include_str!("../../../assets/styles/ui/themes/catppuccin-mocha.json")),
     ("okibi", include_str!("../../../assets/styles/ui/themes/okibi.json")),
     ("akari", include_str!("../../../assets/styles/ui/themes/akari.json")),
+    ("clay", include_str!("../../../assets/styles/ui/themes/clay.json")),
+    ("clay-dark", include_str!("../../../assets/styles/ui/themes/clay-dark.json")),
+    ("cga", include_str!("../../../assets/styles/ui/themes/cga.json")),
 ];
 
 /// The built-in themes, read once (one that fails to read is left out; a test reads them all).
@@ -823,6 +826,35 @@ mod tests {
         }
     }
 
+    /// CGA uses only the 16 colours of the IBM Color Graphics Adapter (alpha only on translucent
+    /// tokens) and sets every colour, so nothing falls back to Dark's palette.
+    #[test]
+    fn cga_uses_only_the_sixteen_cga_colours() {
+        const CGA: [&str; 16] = [
+            "000000", "0000aa", "00aa00", "00aaaa", "aa0000", "aa00aa", "aa5500", "aaaaaa", "555555", "5555ff", "55ff55", "55ffff", "ff5555",
+            "ff55ff", "ffff55", "ffffff",
+        ];
+        fn colours<'a>(v: &'a Value, out: &mut Vec<&'a str>) {
+            match v {
+                Value::String(s) if s.starts_with('#') => out.push(s),
+                Value::Array(a) => a.iter().for_each(|v| colours(v, out)),
+                Value::Object(o) => o.values().for_each(|v| colours(v, out)),
+                _ => {}
+            }
+        }
+        let text = BUILTIN.iter().find(|(id, _)| *id == "cga").map(|(_, text)| *text).unwrap();
+        let file: Value = serde_json::from_str(text).unwrap();
+        let mut found = Vec::new();
+        colours(&file, &mut found);
+        assert!(found.len() > keys().len(), "CGA sets every colour and its icon palette");
+        for c in found {
+            let rgb = c.get(1..7).unwrap_or_default().to_ascii_lowercase();
+            assert!(CGA.contains(&rgb.as_str()) && parse_color(c).is_some(), "{c} is not a CGA colour");
+        }
+        let theme = find("cga", &[]).unwrap();
+        assert_eq!((theme.name.as_str(), theme.colors.len()), ("CGA", keys().len()), "CGA sets every colour");
+    }
+
     /// #4868: a theme that sets none of the File view's colours (all the built-in ones) gets them
     /// from its own palette, readable: the rail and primary action from its accent, the page from
     /// its panel, not Dark's or Light's blue and grey. One it does set stays as set.
@@ -857,6 +889,19 @@ mod tests {
         let own = parse(r##"{"format":"solidcraft-theme/1","name":"Own rail","base":"dark","colors":{"accent":"#ff0000","file_rail":"#102030"}}"##)
             .unwrap();
         assert_eq!(resolve(&own).file_rail, Color32::from_rgb(0x10, 0x20, 0x30));
+    }
+
+    /// Okibi and Akari spend their ember on one or two marks a screen: the start page's rail is
+    /// one of their neutrals, not their accent.
+    #[test]
+    fn okibi_and_akari_rails_are_neutral() {
+        for id in ["okibi", "akari"] {
+            let t = resolve(builtin().iter().find(|t| t.id == id).unwrap());
+            for c in [t.file_rail, t.file_rail_hover] {
+                let [r, g, b, _] = c.to_array();
+                assert!(r.max(g).max(b) - r.min(g).min(b) <= 12, "{id}: {c:?} is tinted");
+            }
+        }
     }
 
     #[test]
@@ -1030,6 +1075,9 @@ mod tests {
         assert_eq!(values("solidcraft-95"), [3, 3, 4, 4, 3, 3]);
         assert_eq!(values("blueprint"), [4, 6, 8, 10, 6, 7]);
         assert_eq!(values("cupertino"), [6, 8, 12, 16, 8, 9]);
+        for id in ["clay", "clay-dark"] {
+            assert_eq!(values(id), [6, 9, 13, 18, 9, 10], "{id}");
+        }
         let defaults = radius_values(Tokens::dark());
         assert_eq!(defaults, radius_values(Tokens::light()));
         for suffix in ["", "-hard", "-soft"] {

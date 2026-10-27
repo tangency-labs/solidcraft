@@ -385,6 +385,8 @@ completed drawings publish atomically. The browser still exports synchronously.
   to 26 standard and diagonal views. Pointer motion accumulates independently of a lightly
   damped spring, with a boundary margin to prevent flicker. Z-up/Y-up and the nearest square
   top/bottom heading are preserved. Diagonals include 45-degree edge and isometric corner views.
+- Navigation bar overhaul (#6585): the viewport's Fit, Home, camera tools, Spin, visual style, Grid, Ground
+  shadow and bar visibility are registered `view.*` commands, and Fit/Home follow the active canvas.
 
 ## Known limitations
 

@@ -9,6 +9,7 @@
 use serde_json::Value;
 use solidcraft_doc::construct::{AxisDef, GeoRef, PointDef};
 use solidcraft_doc::{FeatureKind, PlaneRef};
+use solidcraft_geom::Vec3;
 
 use super::CommandSpec;
 use super::features::{add_feature, check_expr, plane_param, sketch_id};
@@ -87,6 +88,18 @@ pub static COMMANDS: &[CommandSpec] = &[
         "plane: plane or planar face ref; line: straight edge, sketch line or axis ref; name? The plane holds the line and is square to the plane",
     ),
 ];
+
+/// An axis on an edge or round face of the model (`{edge: [x,y,z]}` or `{face: [x,y,z]}`, the
+/// point on it), with the line it gives now (`solidcraft_doc::construct::model_axis`); `None`
+/// for any other form of `axis`.
+pub(super) fn model_axis_param(s: &Session, v: Option<&Value>, cmd: &str) -> Result<Option<(GeoRef, Vec3, Vec3)>> {
+    // Also as saved (`{type: edge|face, at, name?}`), as an edit dialog gives back one it kept.
+    let saved = |v: &Value| matches!(v.get("type").and_then(Value::as_str), Some("edge" | "face"));
+    let Some(v) = v.filter(|v| v.get("edge").is_some() || v.get("face").is_some() || saved(v)) else { return Ok(None) };
+    let g = geo(s, Some(v), cmd, "axis")?;
+    let (o, d) = solidcraft_doc::construct::model_axis(&s.world_state(), &g).map_err(|e| bad(cmd, format!("`axis`: {e}")))?;
+    Ok(Some((g, o, d)))
+}
 
 /// A reference from its JSON form.
 pub(super) fn geo(s: &Session, v: Option<&Value>, cmd: &str, what: &str) -> Result<GeoRef> {
