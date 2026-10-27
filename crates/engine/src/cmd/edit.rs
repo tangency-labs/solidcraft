@@ -9,6 +9,8 @@ use super::CommandSpec;
 use crate::params::{bad, bool_, num, str_, string_list};
 use crate::{EngineError, Result, Sel, Session, Snapshot};
 
+const EFFECTS_CONTRACT: crate::schema::TypedContract<crate::schema::inspect::FeatureEffectsParams> = crate::schema::TypedContract::new();
+
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("edit.undo", "Undo", undo).icon("undo").key("Ctrl+Z").noundo().doc_only(),
     CommandSpec::new("edit.redo", "Redo", redo).icon("redo").key("Ctrl+Y").noundo().doc_only(),
@@ -77,6 +79,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         "feature: id|name → type, definition (the fields timeline.edit's set changes, with their current values), \
          inputs: [{label, param, expression, unit}] (named inputs parameters.change can also set), error, warning",
     ),
+    CommandSpec::new("timeline.effects", "Affected Bodies", crate::checked!("timeline.effects", feature_effects)).icon("inspect")
+        .noundo()
+        .contract(&EFFECTS_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::inspect::FeatureEffects>)
+        .params("feature: id|name → evaluated, created_bodies, changed_bodies, removed_bodies; each body includes its component and current selectable world-body names. Suppressed, rolled-back and failed features have no evaluated effects."),
     CommandSpec::new("select.set", "Select", select_set).icon("select")
         .noundo()
         .params("items: [{type: body|edge|face|feature|sketch_curve|sketch_point|profile, …}], add?: bool"),
@@ -1040,6 +1047,71 @@ fn heavy_fields(kind: &FeatureKind) -> &'static [(&'static str, &'static str)] {
         FeatureKind::Import { .. } => &[("step", "the imported STEP text"), ("components", "the imported product tree")],
         FeatureKind::MeshImport { .. } => &[("meshes", "the imported meshes")],
         _ => &[],
+    }
+}
+
+fn feature_effects(s: &mut Session, p: &Value) -> Result<Value> {
+    let id = feature_id(s, p.get("feature"), "timeline.effects")?;
+    serde_json::to_value(s.feature_effects(id)).map_err(|e| EngineError::Other(e.to_string()))
+}
+
+impl Session {
+    /// Read a feature's evaluated effects without recomputing geometry. The UI uses the same
+    /// query as timeline.effects; never infer historical effects from the final model alone.
+    pub fn feature_effects(&self, id: u64) -> crate::schema::inspect::FeatureEffects {
+        use crate::schema::inspect::{AffectedBody, FeatureEffects};
+        let mut effects = FeatureEffects {
+            feature: id,
+            evaluated: false,
+            created_bodies: Vec::new(),
+            changed_bodies: Vec::new(),
+            removed_bodies: Vec::new(),
+            param_warnings: Vec::new(),
+        };
+        let Some(result) = self.model.result(id).filter(|r| !r.skipped && r.error.is_none() && !r.stale) else {
+            return effects;
+        };
+        if self.model.is_stale() {
+            return effects;
+        }
+        effects.evaluated = true;
+        let before = self.model.state_before(id);
+        let after = &result.state;
+        let old: BTreeMap<_, _> = before.bodies.iter().map(|b| (b.name.as_str(), b)).collect();
+        let now: BTreeMap<_, _> = after.bodies.iter().map(|b| (b.name.as_str(), b)).collect();
+        let current = self.model.state();
+        let world = self.world_state();
+        let describe = |body: &solidcraft_doc::ModelBody| {
+            let component = self.doc.model_body_component(body);
+            let present = current.body(&body.name).is_some_and(|b| b.feature == body.feature);
+            AffectedBody {
+                name: body.name.clone(),
+                component,
+                component_name: self.doc.components.iter().find(|c| c.id == component).map(|c| c.name.clone()),
+                selectable_bodies: if present {
+                    world.bodies.iter().filter(|b| b.definition_name() == body.name).map(|b| b.name.clone()).collect()
+                } else {
+                    Vec::new()
+                },
+            }
+        };
+        for body in &after.bodies {
+            match old.get(body.name.as_str()) {
+                None => effects.created_bodies.push(describe(body)),
+                Some(previous)
+                    if !previous.body.same(&body.body) || self.doc.model_body_component(previous) != self.doc.model_body_component(body) =>
+                {
+                    effects.changed_bodies.push(describe(body));
+                }
+                _ => {}
+            }
+        }
+        for body in &before.bodies {
+            if !now.contains_key(body.name.as_str()) {
+                effects.removed_bodies.push(describe(body));
+            }
+        }
+        effects
     }
 }
 

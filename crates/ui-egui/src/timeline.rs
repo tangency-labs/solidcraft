@@ -11,6 +11,48 @@ use solidcraft_engine::doc::{
 use crate::SolveApp;
 use crate::theme::Tokens;
 
+/// Historical effects and current selections share the engine's query in both timelines.
+pub(crate) fn affected_bodies_menu(app: &mut SolveApp, ui: &mut egui::Ui, id: u64) {
+    let menu = crate::ui_kit::Menu::button(ui, crate::i18n::tr("timeline.effects.title"), |ui| {
+        let effects = app.session.feature_effects(id);
+        if !effects.evaluated {
+            ui.label(crate::i18n::tr("timeline.effects.unevaluated"));
+            return;
+        }
+        if effects.created_bodies.is_empty() && effects.changed_bodies.is_empty() && effects.removed_bodies.is_empty() {
+            ui.label(crate::i18n::tr("timeline.effects.empty"));
+            return;
+        }
+        egui::ScrollArea::vertical().max_height(Tokens::get().space_24 * 12.0).show(ui, |ui| {
+            for (label, bodies) in [
+                ("timeline.effects.created", effects.created_bodies),
+                ("timeline.effects.changed", effects.changed_bodies),
+                ("timeline.effects.removed", effects.removed_bodies),
+            ] {
+                if bodies.is_empty() {
+                    continue;
+                }
+                ui.strong(crate::i18n::tr(label));
+                for body in bodies {
+                    let label = match body.component_name {
+                        Some(component) => crate::i18n::format("timeline.effects.body_component", &[("body", &body.name), ("component", &component)]),
+                        None => body.name.clone(),
+                    };
+                    let available = !body.selectable_bodies.is_empty();
+                    let response = ui.add_enabled_ui(available, |ui| crate::ui_kit::button(ui, label, crate::ui_kit::Button::Normal)).inner;
+                    crate::scenario::publish_handle(&format!("timeline:affected:{}", body.name), response.rect.center());
+                    if response.on_disabled_hover_text(crate::i18n::tr("timeline.effects.unavailable")).clicked() {
+                        let items: Vec<_> = body.selectable_bodies.iter().map(|name| json!({"type": "body", "name": name})).collect();
+                        let _ = app.run("select.set", json!({"items": items}));
+                        ui.close();
+                    }
+                }
+            }
+        });
+    });
+    crate::scenario::publish_handle("timeline:effects", menu.response.rect.center());
+}
+
 /// Apply transport actions from the current marker; endpoints stay bounded, including an
 /// empty design. All orientations reach the same rollback command.
 pub(crate) fn run_transport(app: &mut SolveApp, control: crate::ui_kit::HistoryTransport) {
@@ -648,6 +690,7 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
                         ui.close();
                     }
                     ui.separator();
+                    affected_bodies_menu(app, ui, *id);
                     clipboard_buttons(app, ui, *id);
                     message_button(app, ui, *id);
                     ui.separator();
@@ -1025,6 +1068,24 @@ mod tests {
             h.step(&json!({"click": {"handle": "timeline:Depth"}, "button": "right"})).unwrap();
             h.step(&json!({"widget": "Edit Profile Sketch"})).unwrap();
             assert_eq!(h.app.session.active_sketch, Some(sketch), "left: {left}");
+        }
+    }
+
+    #[test]
+    fn affected_bodies_menu_selects_a_body_in_both_timelines() {
+        for left in [false, true] {
+            let mut h = Harness::new();
+            h.app.preferences.timeline_left = left;
+            h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Block", "body_name": "Plate"})).unwrap();
+            h.app.run("solid.box", json!({"length": 2, "width": 2, "height": 2, "operation": "cut", "name": "Pocket"})).unwrap();
+            h.frames(4);
+            for feature in ["Block", "Pocket"] {
+                h.step(&json!({"click": {"handle": format!("timeline:{feature}")}, "button": "right"})).unwrap();
+                h.step(&json!({"widget": "Affected bodies"})).unwrap();
+                h.step(&json!({"click": {"handle": "timeline:affected:Plate"}})).unwrap();
+                assert_eq!(h.app.session.selection, [solidcraft_engine::Sel::Body { name: "Plate".into() }], "left: {left}, {feature}");
+                h.step(&json!({"key": "Escape"})).unwrap();
+            }
         }
     }
 

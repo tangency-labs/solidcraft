@@ -1219,3 +1219,109 @@ fn a_reorder_keeps_the_model_it_was_checked_on() {
     fresh.evaluate(&s.doc);
     assert_eq!(fresh.state().bodies.len(), bodies(&s));
 }
+
+fn effect_names(reply: &Value, field: &str) -> Vec<String> {
+    reply[field].as_array().unwrap().iter().map(|body| body["name"].as_str().unwrap().to_string()).collect()
+}
+
+#[test]
+fn feature_effects_use_each_features_history_and_survive_reopening() {
+    let mut s = Session::default();
+    let base = run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Base", "name": "Block"}));
+    let cut = run(
+        &mut s,
+        "solid.box",
+        json!({"length": 4, "width": 4, "height": 10, "corner": [3, 3, 5], "operation": "cut", "targets": ["Base"], "name": "Pocket"}),
+    );
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "corner": [20, 0, 0], "body_name": "Tool"}));
+    let combine = run(&mut s, "solid.combine", json!({"target": "Base", "tools": ["Tool"], "operation": "join"}));
+    let reopened = Session::new(solidcraft_doc::Document::from_json(&s.doc.to_json()).unwrap());
+    for mut s in [s, reopened] {
+        let before = s.doc.to_json();
+        let recomputed = s.model.recomputed;
+        let created = run(&mut s, "timeline.effects", json!({"feature": base["feature"]}));
+        assert_eq!(effect_names(&created, "created_bodies"), ["Base"]);
+        assert!(effect_names(&created, "changed_bodies").is_empty());
+        let changed = run(&mut s, "timeline.effects", json!({"feature": "Pocket"}));
+        assert_eq!(changed["feature"], cut["feature"]);
+        assert_eq!(effect_names(&changed, "changed_bodies"), ["Base"]);
+        assert!(effect_names(&changed, "created_bodies").is_empty());
+        let removed = run(&mut s, "timeline.effects", json!({"feature": combine["feature"]}));
+        assert_eq!(effect_names(&removed, "changed_bodies"), ["Base"]);
+        assert_eq!(effect_names(&removed, "removed_bodies"), ["Tool"]);
+        assert_eq!(removed["removed_bodies"][0]["selectable_bodies"], json!([]));
+        assert_eq!(changed["changed_bodies"][0]["selectable_bodies"], json!(["Base"]));
+        assert_eq!(s.doc.to_json(), before);
+        assert_eq!(s.model.recomputed, recomputed, "inspection does not rebuild geometry");
+    }
+}
+
+#[test]
+fn feature_effects_handle_sketches_suppression_rollback_errors_and_edits() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Sketch"}));
+    run(&mut s, "sketch.finish", json!({}));
+    let sketch = run(&mut s, "timeline.effects", json!({"feature": "Sketch"}));
+    assert_eq!(sketch["evaluated"], true);
+    assert!(effect_names(&sketch, "created_bodies").is_empty());
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "Block", "body_name": "Base"}));
+    run(&mut s, "solid.box", json!({"length": 2, "width": 2, "height": 2, "operation": "cut", "name": "Pocket"}));
+    for (cmd, params) in [("timeline.suppress", json!({"feature": "Pocket", "suppressed": true})), ("timeline.roll_to", json!({"feature": "Block"}))]
+    {
+        run(&mut s, cmd, params);
+        let effects = run(&mut s, "timeline.effects", json!({"feature": "Pocket"}));
+        assert_eq!(effects["evaluated"], false);
+        assert!(effect_names(&effects, "changed_bodies").is_empty());
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(effect_names(&run(&mut s, "timeline.effects", json!({"feature": "Pocket"})), "changed_bodies"), ["Base"]);
+    }
+    run(&mut s, "timeline.edit", json!({"feature": "Pocket", "set": {"operation": "new_body"}}));
+    let effects = run(&mut s, "timeline.effects", json!({"feature": "Pocket"}));
+    assert_eq!(effect_names(&effects, "created_bodies").len(), 1);
+    assert!(effect_names(&effects, "changed_bodies").is_empty());
+    // Invalid stored input: failed features must not present the retained state as effects.
+    let id = s.doc.find_feature("Pocket").unwrap().id;
+    if let solidcraft_doc::FeatureKind::Box { length, .. } = &mut s.doc_mut().feature_mut(id).unwrap().kind {
+        *length = solidcraft_doc::Expr::new("missing_parameter");
+    }
+    s.refresh();
+    assert!(s.model.result(id).unwrap().error.is_some());
+    assert!(!s.feature_effects(id).evaluated);
+    for params in [json!({}), json!({"feature": null}), json!({"feature": []}), json!({"feature": "missing"}), json!({"feature": -1})] {
+        assert!(s.execute("timeline.effects", &params).is_err(), "{params}");
+    }
+}
+
+#[test]
+fn feature_effects_identify_components_and_select_all_current_occurrences() {
+    let mut s = Session::default();
+    let component = run(&mut s, "component.create", json!({"name": "Bracket"}));
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Plate", "name": "Block"}));
+    run(&mut s, "component.activate", json!({"component": 0}));
+    run(&mut s, "occurrence.copy", json!({"component": component["component"], "translate": [20, 0, 0]}));
+    let effects = run(&mut s, "timeline.effects", json!({"feature": "Block"}));
+    let body = &effects["created_bodies"][0];
+    assert_eq!(body["component"], component["component"]);
+    assert_eq!(body["component_name"], "Bracket");
+    let selections: Vec<_> = body["selectable_bodies"].as_array().unwrap().iter().map(|name| json!({"type": "body", "name": name})).collect();
+    assert_eq!(selections.len(), 2);
+    run(&mut s, "select.set", json!({"items": selections}));
+    assert_eq!(s.selection.len(), 2);
+    for item in &s.selection {
+        let Sel::Body { name } = item else { panic!("not a body") };
+        assert!(s.world_state().body(name).is_some());
+    }
+}
+
+#[test]
+fn feature_effects_include_new_pieces_from_a_cut() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10, "body_name": "Stock"}));
+    let cut =
+        run(&mut s, "solid.box", json!({"length": 2, "width": 12, "height": 12, "corner": [4, -1, -1], "operation": "cut", "targets": ["Stock"]}));
+    let effects = run(&mut s, "timeline.effects", json!({"feature": cut["feature"]}));
+    assert_eq!(json!(effect_names(&effects, "created_bodies")), cut["created_bodies"]);
+    assert_eq!(json!(effect_names(&effects, "changed_bodies")), cut["changed_bodies"]);
+    assert_eq!(effect_names(&effects, "created_bodies").len(), 1);
+    assert_eq!(effect_names(&effects, "changed_bodies").len(), 1);
+}

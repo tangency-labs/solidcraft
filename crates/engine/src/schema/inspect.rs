@@ -37,6 +37,37 @@ pub struct DescribeResult {
     pub param_warnings: Vec<String>,
 }
 
+/// Inspect the bodies affected by one timeline feature.
+#[derive(Debug, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct FeatureEffectsParams {
+    pub feature: super::types::IdOrName,
+}
+
+/// A body at the selected feature's point in history.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct AffectedBody {
+    pub name: String,
+    pub component: u64,
+    pub component_name: Option<String>,
+    /// Current world-body names accepted by select.set, including repeated occurrences.
+    /// Empty when the body no longer exists in the current model.
+    pub selectable_bodies: Vec<String>,
+}
+
+/// Effects computed from the states immediately before and after a feature.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct FeatureEffects {
+    pub feature: u64,
+    /// False for suppressed, rolled-back, failed or stale features; their lists are empty.
+    pub evaluated: bool,
+    pub created_bodies: Vec<AffectedBody>,
+    pub changed_bodies: Vec<AffectedBody>,
+    pub removed_bodies: Vec<AffectedBody>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub param_warnings: Vec<String>,
+}
+
 #[cfg(test)]
 #[path = "inspect_tests.rs"]
 mod tests;
