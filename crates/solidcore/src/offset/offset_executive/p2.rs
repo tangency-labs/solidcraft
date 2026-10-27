@@ -4400,6 +4400,71 @@ mod tests {
         );
     }
 
+    /// tangency-labs/solidcore#403 (WR-463): a sphere r10 cut by a box to a hemisphere has
+    /// a rim of two arcs (270 and 90 degrees) of one circle. Shelled 2 inward open at the
+    /// flat face, the offset of that circle is trimmed to the interval between two points
+    /// for both arcs, so the flat face gets the long arc twice and the cavity is no solid.
+    /// With the opt-in each arc takes the part of the circle it runs along: a solid of
+    /// volume 2/3 pi (10^3 - 8^3).
+    #[test]
+    fn issue_403_hemisphere_rim_arcs_keep_their_own_trim() {
+        use crate::primitive::api_primitives::{create_box, create_sphere};
+        let shell = |fixed: bool| -> Result<(bool, f64)> {
+            let mut kernel = Kernel::default();
+            kernel.fixes.offset_closed_curve_trim_arc = fixed;
+            let ball = create_sphere(&mut kernel, Vec3::new(0.0, 0.0, 0.0), 10.0).unwrap();
+            let upper =
+                create_box(&mut kernel, Vec3::new(-20.0, -20.0, 0.0), 40.0, 40.0, 20.0).unwrap();
+            let mut part =
+                crate::boolean::api_brep::boolean_intersection(&mut kernel, ball, upper).unwrap();
+            part.set_key(original_key(EntityRef::Brep(BrepId::from_index(0))).key);
+            let flat = planar_faces_at_z(&kernel, &part, 0.0);
+            assert_eq!(flat.len(), 1);
+            let mut notifications = NotificationFixture::new(&part);
+            OffsetExecutive::shell_brep(
+                &mut kernel,
+                part,
+                ShellOptions {
+                    offset: OffsetOptions {
+                        distance: -2.0,
+                        extend_convex_edges: true,
+                        merge_results: true,
+                    },
+                    create_offset_solid: false,
+                    merge_sheet_side_walls: false,
+                },
+                &flat,
+                &mut notifications.context(),
+            )
+            .result
+            .map(|mut shell| {
+                let store = AttributeStore::default();
+                let key_of = |_| ObjectKey(0);
+                let attributes = crate::mass::integrator::properties::PropertyAttributes {
+                    store: &store,
+                    key_of: &key_of,
+                };
+                let volume = crate::mass::integrator::properties::brep_volume(
+                    &kernel,
+                    &mut shell,
+                    1e-6,
+                    &attributes,
+                )
+                .unwrap();
+                (brep_is_manifold_solid(&shell).unwrap(), volume)
+            })
+        };
+        // upstream: the cavity is no solid and encloses no volume
+        let (solid, volume) = shell(false).unwrap();
+        assert!(!solid && volume.abs() < 1e-9, "{solid} {volume}");
+        let (solid, volume) = shell(true).unwrap();
+        let expected = 2.0 / 3.0 * PI * (1000.0 - 512.0);
+        assert!(
+            solid && (volume - expected).abs() < 1e-6 * expected,
+            "{volume}"
+        );
+    }
+
     /// A 40 x 40 x 10 plate with a 4 mm through hole at (4.5, 20), 0.5 from the side
     /// x = 0, and its top face.
     fn plate_with_hole_by_side(k: &mut Kernel) -> (Brep, Vec<FaceId>) {

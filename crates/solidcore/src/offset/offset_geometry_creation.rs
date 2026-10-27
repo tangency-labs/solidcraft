@@ -2284,6 +2284,42 @@ impl OffsetGeometryCreation {
             trim_ivl.add_value(found_param);
         } // end iter twice
 
+        // `Kernel::fixes.offset_closed_curve_trim_arc` (WR-463, #403): on a closed curve the
+        // two trim points bound two arcs and the interval between them is only one of them.
+        // The edge takes the arc that runs where the base edge does; when a trim point lies
+        // on the curve's seam the other arc is an interval too, else the edge is not trimmed.
+        if k.fixes.offset_closed_curve_trim_arc {
+            let nat_ivl = curve_of(brep, curve_3d)?.natural_interval();
+            let seam_tol = EFF_ZERO * (1.0 + nat_ivl.max_dimension());
+            let tol = self.this_approx_tol_3d;
+            if trim_ivl.length() > seam_tol
+                && curve_of(brep, curve_3d)?.is_closed(k, &nat_ivl, tol)?
+            {
+                let base_mid =
+                    edgeuse_normalized_evaluate(k, brep, base_edgeuse, 0.5, false, false, true)?;
+                let curve = curve_of(brep, curve_3d)?;
+                let in_mid = curve.evaluate_point(k, trim_ivl.evaluate(0.5))?;
+                let mut out_param = trim_ivl.max() + 0.5 * (nat_ivl.length() - trim_ivl.length());
+                if out_param > nat_ivl.max() {
+                    out_param -= nat_ivl.length();
+                }
+                let out_mid = curve.evaluate_point(k, out_param)?;
+                if distance(out_mid, base_mid) < distance(in_mid, base_mid) {
+                    let seam = curve.evaluate_point(k, nat_ivl.min())?;
+                    let lo = curve.evaluate_point(k, trim_ivl.min())?;
+                    let hi = curve.evaluate_point(k, trim_ivl.max())?;
+                    if distance(lo, seam) <= tol {
+                        trim_ivl = Extent1d::from_raw(trim_ivl.max(), nat_ivl.max());
+                    } else if distance(hi, seam) <= tol {
+                        trim_ivl = Extent1d::from_raw(nat_ivl.min(), trim_ivl.min());
+                    } else {
+                        // the arc runs across the seam: no interval of this curve gives it
+                        return Ok(None);
+                    }
+                }
+            }
+        }
+
         // cull zero length curves
         let scaled_zero = EFF_ZERO * (1.0 + trim_ivl.max_dimension());
         if trim_ivl.length() > scaled_zero {
