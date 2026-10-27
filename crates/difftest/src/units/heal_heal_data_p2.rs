@@ -1171,6 +1171,38 @@ fn dump(h: &HealData<H>, b: &Brep, o: &mut Vec<f64>) -> Result<(), SolidError> {
     Ok(())
 }
 
+/// The owners a native B-rep's geometry has (set by the B-rep build upstream), under the
+/// arena identities the library's own queries of the B-rep resolve (`BrepQuery::of_brep`
+/// of an `Unknown`-named B-rep, e.g. `FindInfiniteRegion`'s ray fires): every edge curve
+/// its edge, and a face surface its face only when the export says the face owns it (the
+/// import keys those `1 + index` and leaves the others unowned), as `topology_brep_p3`.
+/// Without it the B-rep cache holds no curves or surfaces and every ray misses.
+fn own_imported_geometry(b: &mut Brep) -> Result<(), HarnessError> {
+    use solidcore::topology::brep_cache::{arena_identity, CacheObject};
+    crate::util::own_edge_curves(
+        b,
+        &|e| arena_identity(CacheObject::Edge(e)),
+        Some(arena_identity(CacheObject::Brep)),
+    );
+    let faces: Vec<FaceId> = b.faces().ids().collect();
+    for f in faces {
+        if let Some(surface) = b
+            .face_mut(f)
+            .map_err(|e| harness(e.to_string()))?
+            .surface
+            .as_mut()
+        {
+            if surface.owner().is_some() {
+                let _ = surface.set_owner(Some(arena_identity(CacheObject::Face(f))));
+            }
+        }
+        // a new owner drops the face tolerance the import cached on the surface
+        b.sync_face_surface_tolerance(f)
+            .map_err(|e| harness(e.to_string()))?;
+    }
+    Ok(())
+}
+
 /// Restores what the import cannot carry: each vertex's vertex use order and the
 /// cached gap records of every edge use and vertex use (see the shim's
 /// `put_cached_gaps`).
@@ -1321,6 +1353,7 @@ fn rust_heal(
     // each vertex's vertex use order and the cached gaps, as upstream has them
     let extra = ffi::vertex_lists(&path, &block).map_err(|e| harness(format!("c++ lists: {e}")))?;
     restore(&mut b, &extra, c)?;
+    own_imported_geometry(&mut b)?;
 
     let mut k = Kernel::default();
     let mut marks = Marks::default();
