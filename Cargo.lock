@@ -4229,6 +4229,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "solidcraft-profile"
+version = "0.24.0"
+dependencies = [
+ "serde_json",
+ "web-time",
+]
+
+[[package]]
 name = "solidcraft-render"
 version = "0.24.0"
 dependencies = [
