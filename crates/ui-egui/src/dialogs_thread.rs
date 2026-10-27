@@ -267,7 +267,7 @@ mod contribution_tests {
         h.step(&json!({"click":{"handle":"dialog:Hole Tap Type:Tapped"}})).unwrap();
         h.step(&json!({"click":{"handle":"dialog:Size"}})).unwrap();
         let at = crate::scenario::handle_at("dialog:Size:M5").unwrap();
-        h.call("ui.scroll", json!({"x":at.x,"y":at.y,"delta":-2000}));
+        h.call("ui.scroll", json!({"x":at.x,"y":at.y,"delta":-4000}));
         h.frames(20);
         h.step(&json!({"widget":"Custom"})).unwrap();
         h.frames(3);
