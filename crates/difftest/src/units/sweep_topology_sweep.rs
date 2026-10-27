@@ -40,6 +40,14 @@ struct Input {
     /// (`solidcore_ffi::units::sweep_topology_sweep::whole` input layout).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     whole: Option<[f64; 11]>,
+    /// Whole-B-rep `DoSweep` of a non-manifold body instead of a map script
+    /// (`solidcore_ffi::units::sweep_topology_sweep::body` input layout).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    body: Option<[f64; 16]>,
+    /// Explicit `DoSweep` target lists for `body` (its `targets` is 2):
+    /// `solidcore_ffi::units::sweep_topology_sweep::body_lists` layout.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    lists: Option<[f64; 7]>,
 }
 fn vector() -> [f64; 3] {
     [1., 0., 0.]
@@ -631,9 +639,363 @@ fn whole_rust(input: [f64; 11]) -> Result<Output> {
     Ok(whole_output(&record))
 }
 
+/// The non-manifold body record: [`whole_output`] of its prefix, then the wire-edge
+/// and shell-vertex counts in `body` and the face and edge tags, each as a sorted
+/// multiset (creation order is not reproducible, see [`whole_output`]), in `tags`.
+fn body_output(record: &[f64]) -> Output {
+    let counts = record.get(1..7);
+    let Some(counts) = counts else {
+        return whole_output(record);
+    };
+    let (faces, edges, vertices) = (counts[2] as usize, counts[4] as usize, counts[5] as usize);
+    let prefix = 7 + 3 * vertices + 2 * edges;
+    let Some(head) = record.get(..prefix) else {
+        return Output::err("short non-manifold body record".to_string());
+    };
+    let rest = &record[prefix..];
+    let mut output = whole_output(head);
+    let extra: Vec<i64> = rest.iter().take(2).map(|&c| c as i64).collect();
+    let tags = rest.get(2..).unwrap_or_default();
+    let mut tag_ints = Vec::new();
+    for (n, from) in [(faces, 0), (edges, 9 * faces)] {
+        let mut list: Vec<Vec<i64>> = tags
+            .get(from..from + 9 * n)
+            .unwrap_or_default()
+            .chunks(9)
+            .map(|c| c.iter().map(|&x| x as i64).collect())
+            .collect();
+        list.sort();
+        tag_ints.push(n as i64);
+        tag_ints.extend(list.into_iter().flatten());
+    }
+    output = output.ints("body", extra).ints("tags", tag_ints);
+    output
+}
+
+/// A B-spline line segment as an edge curve (`SmBSplineCurve::CreateLineSegment`, 3D).
+fn bspline_line(a: [f64; 3], b: [f64; 3]) -> Result<solidcore::curve::curve::Curve> {
+    use solidcore::nurbs::b_spline_curve::BSplineCurve;
+    Ok(BSplineCurve::create_line_segment(3, Point3::new(a[0], a[1], a[2]), Point3::new(b[0], b[1], b[2]))?.into())
+}
+
+/// The shim's `sc_test_tsurf_creation` (`prog_test` `my_test_tsurf_creation`): a 10x10
+/// B-spline plane face with a notched outer loop and two inner loops.
+fn test_tsurf_creation(
+    k: &mut Kernel,
+    b: &mut Brep,
+    env: &mut solidcore::topology::edge::NotifyEnv<'_>,
+) -> Result<()> {
+    use solidcore::geom::axis2_placement::Axis2Placement;
+    use solidcore::nurbs::b_spline_curve::{p1::NurbCircleParam, BSplineCurve};
+    use solidcore::nurbs::b_spline_surface::BSplineSurface;
+    use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
+    use solidcore::topology::brep::p7::{self as brep_p7, FaceCurvesInput};
+    solidcore::topology::brep::p2::set_tolerance(k, b, 0.0001, true, true)?;
+    let plane = BSplineSurface::create_bilinear_surface(
+        Point3::new(0., 0., 0.),
+        Point3::new(10., 0., 0.),
+        Point3::new(0., 10., 0.),
+        Point3::new(10., 10., 0.),
+    )?;
+    let surface = plane.copy_and_add_analytics(k)?;
+    let (same, opposite) = (OrientType::Same, OrientType::Opposite);
+    let segments = [
+        ([0., 0., 0.], [10., 0., 0.], same),
+        ([10., 5., 0.], [10., 0., 0.], opposite),
+        ([10., 5., 0.], [5., 5., 0.], same),
+        ([5., 5., 0.], [5., 10., 0.], same),
+        ([5., 10., 0.], [0., 10., 0.], same),
+        ([0., 10., 0.], [0., 0., 0.], same),
+        ([1., 5., 0.], [1., 8., 0.], same),
+        ([1., 8., 0.], [4., 5., 0.], same),
+        ([4., 5., 0.], [1., 5., 0.], same),
+    ];
+    let mut curves = Vec::new();
+    let mut orientations = Vec::new();
+    for (a, z, o) in segments {
+        curves.push(Some(bspline_line(a, z)?));
+        orientations.push(o);
+    }
+    let mut frame = Axis2Placement::IDENTITY;
+    frame.set_canonical(
+        Point3::new(6., 2.5, 0.),
+        Point3::new(-1., 0., 0.),
+        Point3::new(0., -1., 0.),
+    )?;
+    curves.push(Some(
+        BSplineCurve::create_circle_segment(3, &frame, 1.5, 0.0, 360.0, NurbCircleParam::Quadratic)?
+            .into(),
+    ));
+    orientations.push(opposite);
+    let input = FaceCurvesInput {
+        loops: vec![6, 3, 1],
+        curves_3d: Some(curves),
+        uv_curves: None,
+        orientations,
+        loop_points: Vec::new(),
+    };
+    let domain = surface.natural_uv_domain_with_nurb(k)?;
+    let region = b.infinite_region();
+    let key_of = env.key_of;
+    let this_face = |face| key_of(solidcore::error::EntityRef::Face(face));
+    brep_p7::make_face_with_curves(k, b, region, input, surface, &domain, same, None, &this_face, env)?;
+    Ok(())
+}
+
+/// The shim's `sc_create_test_brep` (`prog_test` `my_create_test_brep`), with the
+/// context's doing-Boolean flag set while it adds the vertex loop, the edge loop,
+/// the wire edge and the shell vertex.
+fn create_test_brep(
+    k: &mut Kernel,
+    b: &mut Brep,
+    env: &mut solidcore::topology::edge::NotifyEnv<'_>,
+) -> Result<()> {
+    test_tsurf_creation(k, b, env)?;
+    let old = k.context.doing_boolean();
+    k.context.set_doing_boolean(true);
+    let result = (|| {
+        use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
+        use solidcore::topology::brep::{p1, p3, p5, p9};
+        let vertices = p1::vertices(b, None)?;
+        let faces = p1::faces(b, None)?;
+        let (Some(&face), Some(&v0), Some(&v1), Some(&v3)) =
+            (faces.first(), vertices.first(), vertices.get(1), vertices.get(3))
+        else {
+            return Err(SolidError::invalid_input("sweep fixture", "test face"));
+        };
+        p9::make_vertex_loop(b, face, Point3::new(3.5, 8.5, 0.), OrientType::Opposite, env)?;
+        let line = bspline_line([0., 0., 0.], [5., 5., 0.])?;
+        let interval = line.natural_interval();
+        b.set_editing_enabled(true);
+        let mut made = p5::EdgeInFace::default();
+        p5::make_edge_in_face(
+            k,
+            b,
+            true,
+            Some(face),
+            Some(v0),
+            Some(v3),
+            line,
+            None,
+            interval,
+            OrientType::Same,
+            solidcore::geom::tol::ZONE_TOL_3D,
+            &mut made,
+            Some(&mut *env),
+        )?;
+        let wire = bspline_line([10., 0., 0.], [15., 2., 0.])?;
+        let interval = wire.natural_interval();
+        let region = b.infinite_region();
+        p3::make_wire_edge_vertex(k, b, env, region, v1, wire, &interval, OrientType::Same, Point3::new(15., 2., 0.))?;
+        let region = b.infinite_region();
+        p9::make_shell_vertex(b, region, Point3::new(-5., 0., 0.), env)?;
+        Ok(())
+    })();
+    k.context.set_doing_boolean(old);
+    result
+}
+
+/// The shim's `sc_add_wire`: a shell vertex at (10,0,0) extended by a wire edge to
+/// (15,2,0).
+fn add_wire(k: &mut Kernel, b: &mut Brep, env: &mut solidcore::topology::edge::NotifyEnv<'_>) -> Result<()> {
+    use solidcore::nurbs::b_spline_surface_n_lib::p2::OrientType;
+    use solidcore::topology::brep::{p3, p9};
+    let region = b.infinite_region();
+    let (_, start) = p9::make_shell_vertex(b, region, Point3::new(10., 0., 0.), env)?;
+    let wire = bspline_line([10., 0., 0.], [15., 2., 0.])?;
+    let interval = wire.natural_interval();
+    let region = b.infinite_region();
+    p3::make_wire_edge_vertex(k, b, env, region, start, wire, &interval, OrientType::Same, Point3::new(15., 2., 0.))?;
+    Ok(())
+}
+
+/// The shim's `sc_build_body`.
+fn build_body(
+    k: &mut Kernel,
+    body: f64,
+    key: ObjectKey,
+    env: &mut solidcore::topology::edge::NotifyEnv<'_>,
+) -> Result<Brep> {
+    use solidcore::topology::brep::p9;
+    let mut b = if body == 0. || body == 5. {
+        solidcore::primitive::api_primitives::create_box(k, Point3::ZERO, 4., 3., 2.)?
+    } else {
+        Brep::new_with_infinite_region()?
+    };
+    b.set_key(key);
+    if body == 0. {
+        add_wire(k, &mut b, env)?;
+        let region = b.infinite_region();
+        p9::make_shell_vertex(&mut b, region, Point3::new(-5., 0., 0.), env)?;
+    } else if body == 1. {
+        create_test_brep(k, &mut b, env)?;
+    } else if body == 6. {
+        test_tsurf_creation(k, &mut b, env)?;
+    } else if body == 3. {
+        let region = b.infinite_region();
+        p9::make_shell_vertex(&mut b, region, Point3::new(-5., 0., 0.), env)?;
+    } else if body == 4. {
+        add_wire(k, &mut b, env)?;
+    }
+    Ok(b)
+}
+
+/// One explicit target list from its selector (the shim's `pick`): `None` for -1
+/// (NULL), else every entity of `all` (0), `wire` (1), none (2), every entity but the
+/// last (3) or the single entity `all[sel - 10]`.
+fn pick_list<T: Copy>(all: &[T], wire: &[T], sel: f64) -> Result<Option<Vec<T>>> {
+    Ok(Some(match sel {
+        s if s < 0. => return Ok(None),
+        0. => all.to_vec(),
+        1. => wire.to_vec(),
+        2. => Vec::new(),
+        3. => all.get(..all.len().saturating_sub(1)).unwrap_or_default().to_vec(),
+        s => vec![*all
+            .get((s - 10.) as usize)
+            .ok_or_else(|| SolidError::invalid_input("runner", "target index past the list"))?],
+    }))
+}
+
+/// Rust side of `sc_sweep_topology_sweep_body`: the same body built by the same
+/// kernel calls in a [`SweepStore`], swept whole (all targets null), with every face
+/// as faces-higher, or with the explicit `lists`.
+fn body_rust(input: [f64; 16], lists: Option<[f64; 7]>) -> Result<Output> {
+    use solidcore::sweep::topology_sweep::store::{SweepIdentities, SweepStore};
+    use solidcore::topology::brep::p1;
+    let [body, kind, vx, vy, vz, angle, cx, cy, cz, eps, stitch, merge, reps, tagging, tag_id, targets] =
+        input;
+    let mut k = Kernel::default();
+    let mut records = BTreeMap::new();
+    let mut attributes = AttributeStore::new();
+    let handle = BrepId::from_index(0);
+    let key_of = |e: solidcore::error::EntityRef| WholeIdentities.topology(handle, e);
+    let built = {
+        let mut env = solidcore::topology::edge::NotifyEnv {
+            records: &mut records,
+            attributes: &mut attributes,
+            context: None,
+            key_of: &key_of,
+        };
+        build_body(&mut k, body, key_of(solidcore::error::EntityRef::Brep(handle)).key, &mut env)
+    };
+    let mut b = match built {
+        Ok(b) => b,
+        Err(e @ SolidError::Unported { .. }) => return Err(e),
+        Err(e) => return Ok(body_output(&[status(&e) as f64])),
+    };
+    let v = Point3::new(vx, vy, vz);
+    let g = if kind == 0. {
+        SweepGeometry::Base(SweepGeometryCreation { eps, ..SweepGeometryCreation::default() })
+    } else if kind == 1. {
+        SweepGeometry::Translation(TranslationalSweepGeometry::new(v))
+    } else {
+        SweepGeometry::Rotation(RotationalSweepGeometry::new(Point3::new(cx, cy, cz), v, angle, eps))
+    };
+    let mut next = 0;
+    let mut store = SweepStore::new(&WholeIdentities, &mut records, &mut attributes, &mut next);
+    let context = store.register_kernel(&mut k)?;
+    let id = store.register_brep(context, &mut b)?;
+    let region = store.infinite_region(id)?;
+    let mut sweep = TopologySweep {
+        do_stitching: stitch != 0.,
+        do_merge: merge != 0.,
+        do_tagging: tagging != 0.,
+        tag_id: tag_id as i64,
+        repetitions: reps as u64,
+        ..TopologySweep::default()
+    };
+    let mut sweep_targets = solidcore::sweep::topology_sweep::engine::SweepTargets::default();
+    if targets == 1. {
+        let faces = p1::faces(store.brep(id)?, None)?;
+        sweep_targets.faces_higher = Some(faces.into_iter().map(|f| Some((id, f))).collect());
+    }
+    let mut destination = Some((id, region));
+    if let Some(lists) = lists {
+        let brep = store.brep(id)?;
+        let faces = p1::faces(brep, None)?;
+        let edges = p1::edges(brep, None)?;
+        let wires = p1::wire_edges(brep, None)?;
+        let vertices = p1::vertices(brep, None)?;
+        let shell_vertices = solidcore::topology::brep::p2::shell_vertices(brep, None)?;
+        sweep_targets.faces_higher = pick_list(&faces, &faces, lists[0])?.map(|l| l.into_iter().map(|x| Some((id, x))).collect());
+        sweep_targets.edges_higher = pick_list(&edges, &wires, lists[1])?.map(|l| l.into_iter().map(|x| Some((id, x))).collect());
+        sweep_targets.vertices_higher =
+            pick_list(&vertices, &shell_vertices, lists[2])?.map(|l| l.into_iter().map(|x| Some((id, x))).collect());
+        sweep_targets.faces_same = pick_list(&faces, &faces, lists[3])?.map(|l| l.into_iter().map(|x| Some((id, x))).collect());
+        sweep_targets.edges_same = pick_list(&edges, &wires, lists[4])?.map(|l| l.into_iter().map(|x| Some((id, x))).collect());
+        sweep_targets.vertices_same =
+            pick_list(&vertices, &shell_vertices, lists[5])?.map(|l| l.into_iter().map(|x| Some((id, x))).collect());
+        if lists[6] == 1. {
+            destination = None;
+        }
+    }
+    let result = sweep.do_sweep(&mut store, &g, Some(id), destination, &mut sweep_targets);
+    let mut tags = Vec::new();
+    if result.is_ok() {
+        let tag = |t: Option<TagData>| {
+            let mut block = vec![f64::from(u8::from(t.is_some()))];
+            block.extend(t.unwrap_or_default().to_array().map(|x| x as f64));
+            block
+        };
+        let faces = p1::faces(store.brep(id)?, None)?;
+        let edges = p1::edges(store.brep(id)?, None)?;
+        for face in faces {
+            tags.extend(tag(store.tag(E::Face(id, face))?));
+        }
+        for edge in edges {
+            tags.extend(tag(store.tag(E::Edge(id, edge))?));
+        }
+    }
+    drop(store);
+    let mut record = Vec::new();
+    match result {
+        Err(e @ SolidError::Unported { .. }) => return Err(e),
+        Err(e) => record.push(status(&e) as f64),
+        Ok(()) => {
+            record.push(0.);
+            let vertices = p1::vertices(&b, None)?;
+            let edges = p1::edges(&b, None)?;
+            let faces = p1::faces(&b, None)?;
+            let mut loops = 0;
+            for &f in &faces {
+                loops += solidcore::topology::face::p2::loops(&b, f, false, None)?.len();
+            }
+            for n in [
+                p1::regions(&b, None)?.len(),
+                p1::shells(&mut k, &b, None)?.len(),
+                faces.len(),
+                loops,
+                edges.len(),
+                vertices.len(),
+            ] {
+                record.push(n as f64);
+            }
+            for &v in &vertices {
+                let p = solidcore::topology::vertex::point(&b, v)?;
+                record.extend([p.x, p.y, p.z]);
+            }
+            let index = |v: Option<VertexId>| {
+                v.and_then(|v| vertices.iter().position(|&w| w == v))
+                    .map_or(-1., |i| i as f64)
+            };
+            for e in edges {
+                record.push(index(solidcore::topology::edge::start_vertex(&b, e)?));
+                record.push(index(solidcore::topology::edge::end_vertex(&b, e)?));
+            }
+            record.push(p1::wire_edges(&b, None)?.len() as f64);
+            record.push(solidcore::topology::brep::p2::shell_vertices(&b, None)?.len() as f64);
+            record.extend(tags);
+        }
+    }
+    Ok(body_output(&record))
+}
+
 fn rust(i: &Input) -> Result<Output> {
     if let Some(whole) = i.whole {
         return whole_rust(whole);
+    }
+    if let Some(body) = i.body {
+        return body_rust(body, i.lists);
     }
     let mut s = TopologySweep::default();
     let mut out = Vec::new();
@@ -818,6 +1180,20 @@ impl UnitDiff for Runner {
     }
     fn run_cpp(&self, c: &Case) -> std::result::Result<Output, HarnessError> {
         let i: Input = c.parse()?;
+        if let Some(body) = i.body {
+            // An input whose C++ path is undefined (UB-269, UB-270) is refused by the
+            // FFI guard before the call; Rust is not run on it.
+            if let Some(reason) = solidcore_ffi::units::sweep_topology_sweep::body_undefined(&body) {
+                return Ok(Output::rejected(reason));
+            }
+            // Fresh process per case, as for `whole` below.
+            return solidcore_ffi::isolate::fresh_process(|| match i.lists {
+                Some(lists) => solidcore_ffi::units::sweep_topology_sweep::body_lists(body, lists),
+                None => solidcore_ffi::units::sweep_topology_sweep::body(body),
+            })
+            .map(|record| body_output(&record))
+            .map_err(|e| HarnessError::new(e.to_string()));
+        }
         if let Some(whole) = i.whole {
             // Each whole-B-rep case runs in a fresh process: native stitching follows
             // heap layout (the pointer-hash silhouette order), so a case's C++ result

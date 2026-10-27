@@ -42,3 +42,23 @@ case = "whole_merge_rotation_y_90"
 libc = "glibc"
 cpp_defect = "ND-491"
 why = "C++ heap-layout dependent (ND-491): 95/200 fresh processes give 3 regions, 20 faces (the Rust result), 87/200 give 2 regions, 19 faces, 18/200 give 3 regions, 19 faces"
+
+# Whole-B-rep DoSweep of non-manifold bodies
+# (plan/findings/sweep.topology_sweep--nonmanifold-body-whole-sweep.md).
+[[mismatch]]
+unit = "sweep.topology_sweep"
+case = "nm_box_only_linear_z_stitch"
+libc = "glibc"
+cpp_defect = "ND-491"
+why = "C++ heap-layout dependent (ND-491): 394/400 heap-varied fresh processes succeed with 1 region, 14 faces, 28 edges, 16 vertices, 6/400 return SM_ERR (the Rust result)"
+
+[[mismatch]]
+unit = "sweep.topology_sweep"
+case = "nm_box_linear_z_stitch"
+libc = "glibc"
+why = "C++ succeeds (3 regions, 15 faces, 33 edges, 22 vertices) in 400/400 heap-varied processes; Rust returns SM_ERR in the stitch of the box part, the same B-rep as nm_box_only_linear_z_stitch whose C++ results include SM_ERR (suspected ND-491 order, not demonstrated for this body)"
+
+[[mismatch]]
+unit = "sweep.topology_sweep"
+case = "nm_test_rotation_neg_y_36"
+why = "C++ returns SM_ERR in 400/400 heap-varied processes, in the final ManifoldBoolean union with the swept wire B-rep; Rust's union succeeds (1 region, 11 shells, 15 faces, 66 edges, 63 vertices). Unexplained Rust/C++ union divergence"

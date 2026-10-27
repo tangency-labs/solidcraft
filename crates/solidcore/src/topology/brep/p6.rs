@@ -4,7 +4,7 @@
 //!
 //! | Rust | Upstream |
 //! |------|----------|
-//! | [`copy_edges`] | `SmBrep::CopyEdges` |
+//! | [`copy_edges`], [`copy_edges_with_context`] | `SmBrep::CopyEdges` |
 //! | [`make_face_topology`], [`FaceTopologyOptions`], [`FaceTopology`] | `SmBrep::MakeFaceTopology` |
 //! | [`make_face_topology_attempt`], [`FaceTopologyAttempt`] | same, retaining native status and partial outputs |
 //! | `connect_edge_loops`, `find_sector`, `assign_uv_curves` (private) | its mark-locked edge-loop block, radial-sector recovery and `cpOptUVCurves` block |
@@ -173,6 +173,96 @@ pub fn copy_edges(
         result.push(new_edge);
     }
     Ok(result)
+}
+
+/// [`copy_edges`] notifying through the caller's environment: `env` names
+/// `destination`'s objects (`env.key_of`) and `source` names those of `src`, as
+/// [`crate::topology::brep::p3::copy_vertices_with_context`] does for `CopyVertices`.
+/// Each new wire edge is made by `CreateWireEdgeFromCurve` under `env`, and each copy
+/// is reported to `env` (`Notify(SM_NO_COPY, pNew, pDestinationBrep, this)`).
+///
+/// # Errors
+///
+/// As [`copy_edges`]; `InvalidInput` for a caller key in the kernel's reserved range.
+pub fn copy_edges_with_context(
+    destination_kernel: &mut Kernel,
+    src: &Brep,
+    edges: &[EdgeId],
+    destination: &mut Brep,
+    env: &mut NotifyEnv<'_>,
+    source: crate::topology::brep::p3::CopySource<'_>,
+) -> Result<Vec<EdgeId>> {
+    use crate::topology::brep::p3;
+    let p3::CopySource {
+        key_of: source_key,
+        context: mut source_context,
+    } = source;
+    p3::with_caller_identities_for(
+        destination_kernel,
+        destination,
+        env,
+        Some((src, source_key)),
+        edges.len(),
+        |k, destination, env| {
+            let mut result = Vec::new();
+            for &edge in edges {
+                let curve = required(crate::topology::edge::create_trimmed_nurbs_curve(
+                    k, src, edge,
+                )?)?;
+                let interval = curve.natural_interval();
+                let new_edge = brep_p5::create_wire_edge_from_curve_notified(
+                    k,
+                    destination,
+                    curve,
+                    interval,
+                    env,
+                )?;
+
+                // Notify Copy Edge - propogates attributes and reports copy
+                let data = (brep_p2::brep_ref(destination), brep_p2::brep_ref(src));
+                let mut notify_copy = |env: &mut NotifyEnv<'_>, old: EntityRef, new: EntityRef| {
+                    let this = source_key(old);
+                    let to = (env.key_of)(new);
+                    p3::notify_copy_with_context(
+                        env,
+                        source_context.as_deref_mut(),
+                        this,
+                        Some(to),
+                        Some(data.0),
+                        Some(data.1),
+                    )
+                };
+                notify_copy(env, EntityRef::Edge(edge), EntityRef::Edge(new_edge))?;
+
+                // Notify Copy Vertices - propogates attributes and reports copy
+                let new_start =
+                    required(crate::topology::edge::start_vertex(destination, new_edge)?)?;
+                let new_end = required(crate::topology::edge::other_vertex(
+                    destination,
+                    new_edge,
+                    Some(new_start),
+                )?)?;
+                let old_start = required(crate::topology::edge::start_vertex(src, edge)?)?;
+                let old_end = required(crate::topology::edge::other_vertex(
+                    src,
+                    edge,
+                    Some(old_start),
+                )?)?;
+                notify_copy(
+                    env,
+                    EntityRef::Vertex(old_start),
+                    EntityRef::Vertex(new_start),
+                )?;
+                if old_start != old_end && new_start != new_end {
+                    notify_copy(env, EntityRef::Vertex(old_end), EntityRef::Vertex(new_end))?;
+                }
+
+                // set optional output
+                result.push(new_edge);
+            }
+            Ok(result)
+        },
+    )
 }
 
 /// Topology created by `MakeFaceTopology` when construction succeeds.

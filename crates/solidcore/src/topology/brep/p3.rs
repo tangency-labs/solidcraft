@@ -1005,7 +1005,7 @@ fn with_caller_identities<R>(
 
 /// [`with_caller_identities`] for an edit that allocates per entry of an input list of
 /// `inputs` entries ([`allocation_window`]).
-fn with_caller_identities_for<R>(
+pub(crate) fn with_caller_identities_for<R>(
     k: &mut Kernel,
     b: &mut Brep,
     env: &mut NotifyEnv<'_>,
@@ -1236,7 +1236,7 @@ fn copy_vertices_in(
 /// `SmTopology::Notify`, which carries the flags and user values of `this` to `to`
 /// (resetting its marks) and then the attributes and callbacks (`SmAObject`).
 /// `Notify` is `void`: only the errors of [`ignore_soft`] propagate.
-fn notify_copy_with_context(
+pub(crate) fn notify_copy_with_context(
     env: &mut NotifyEnv<'_>,
     source_context: Option<&mut Context>,
     this: ObjectRef,

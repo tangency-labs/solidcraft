@@ -506,7 +506,8 @@ pub trait SweepAccess {
     fn shell_vertices(&mut self, brep: BrepId) -> Result<Vec<VertexId>> {
         crate::topology::brep::p2::shell_vertices(self.brep(brep)?, None)
     }
-    /// `SmBrep::CopyEdges`, using the destination's context.
+    /// `SmBrep::CopyEdges`, notifying through the lent environment (the plain
+    /// entry point would lend the context a second time).
     fn copy_edges(
         &mut self,
         source: BrepId,
@@ -516,8 +517,18 @@ pub trait SweepAccess {
         self.with_breps_mut(
             source,
             destination,
-            |kernel, source, destination, _, _, _, _| {
-                crate::topology::brep::p6::copy_edges(kernel, source, edges, destination)
+            |k, src, dst, source_key, _, source_context, env| {
+                crate::topology::brep::p6::copy_edges_with_context(
+                    k,
+                    src,
+                    edges,
+                    dst,
+                    env,
+                    crate::topology::brep::p3::CopySource {
+                        key_of: source_key,
+                        context: source_context,
+                    },
+                )
             },
         )
     }
