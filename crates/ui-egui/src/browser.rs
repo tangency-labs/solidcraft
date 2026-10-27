@@ -222,7 +222,7 @@ fn find_group(app: &SolveApp, id: u64) -> Option<&solidcraft_engine::doc::Browse
 /// World bodies of a component picked in the tree. The root is the whole design; a nested
 /// component is its own placement, including bodies inside it.
 pub(crate) fn bodies_of_component(app: &SolveApp, id: u64) -> Vec<String> {
-    let present: Vec<String> = app.session.world_state().bodies.iter().map(|b| b.name.clone()).collect();
+    let present: Vec<String> = crate::open_meshing::session_world(&app.session).bodies.iter().map(|b| b.name.clone()).collect();
     let mut names = if id == 0 {
         present.clone()
     } else {
@@ -261,7 +261,7 @@ fn offer_bodies(app: &mut SolveApp, names: &[String], take: Take) -> bool {
     if !dialog_takes_body(app) {
         return false;
     }
-    let world = app.session.world_state();
+    let world = crate::open_meshing::session_world(&app.session);
     let picked: Vec<Sel> =
         names.iter().filter(|n| world.body(n).is_some() && !app.session.body_removed_later(n)).map(|n| Sel::Body { name: n.clone() }).collect();
     if picked.is_empty() {

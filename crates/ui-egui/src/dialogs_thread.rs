@@ -166,6 +166,8 @@ const FORMS: &[(&str, ThreadForm)] = &[
     ("Buttress (ASME B1.9)", ThreadForm::ButtressAsme),
 ];
 const HANDS: &[(&str, ThreadHand)] = &[("Right", ThreadHand::Right), ("Left", ThreadHand::Left), ("Both", ThreadHand::Both)];
+/// A tapped hole's hands: one groove, so never both.
+const HOLE_HANDS: &[(&str, ThreadHand)] = &[("Right", ThreadHand::Right), ("Left", ThreadHand::Left)];
 const STARTS: &[(&str, u32)] = &[("1", 1), ("2", 2), ("3", 3), ("4", 4), ("5", 5), ("6", 6), ("7", 7), ("8", 8)];
 const FULL: usize = 0;
 const LENGTH: usize = 1;
@@ -321,6 +323,11 @@ fn change_form(designation: &mut String, suggested: &mut Option<String>, from: T
 }
 
 /// A choice row over typed values.
+/// The hole dialog's Hand row for a tapped hole, the same choice the thread dialog offers.
+pub(crate) fn hole_hand_row(ui: &mut egui::Ui, hand: &mut ThreadHand) {
+    pick(ui, "Hand", "hole_hand", hand, HOLE_HANDS);
+}
+
 fn pick<T: Copy + PartialEq>(ui: &mut egui::Ui, label: &str, id: &str, value: &mut T, choices: &[(&str, T)]) {
     let labels: Vec<&str> = choices.iter().map(|c| c.0).collect();
     let mut index = choices.iter().position(|c| c.1 == *value).unwrap_or(0);

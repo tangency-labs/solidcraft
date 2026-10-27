@@ -6279,7 +6279,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
             let extra: Vec<String> = if *operation == Operation::Join { to_body.into_iter().collect() } else { Vec::new() };
             apply_traced_with(doc, st, f, tools, *operation, &crate::plain(targets), &extra)
         }
-        FeatureKind::Hole { thread, thread_depth, diameter, .. } => {
+        FeatureKind::Hole { thread, thread_depth, diameter, hand, .. } => {
             let thread_depth = thread_depth.as_ref().map(|d| val(vals, d, Kind::Length)).transpose()?;
             if thread_depth.is_some() && thread.is_none() {
                 return Err(DocError::Invalid("thread depth requires a tapped hole".into()));
@@ -6306,7 +6306,7 @@ fn eval_feature(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st:
                     } else {
                         parallel_tapped_wall(st, p, dir, r).unwrap_or(p + dir.any_perp() * r + dir * (r * 0.5))
                     };
-                    let ask = thread::ThreadAsk { designation: Some(d), tapped: true, ..Default::default() };
+                    let ask = thread::ThreadAsk { designation: Some(d), tapped: true, hand: *hand, ..Default::default() };
                     let mut t = thread_on(st, f.id, wall, &ask)?.info;
                     if let Some(depth) = thread_depth {
                         let available = t.end - t.start;

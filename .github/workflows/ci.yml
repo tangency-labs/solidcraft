@@ -350,6 +350,9 @@ jobs:
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
       - uses: dtolnay/rust-toolchain@stable
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: quick-compile
@@ -368,6 +371,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
       # Main saves the cache; every other run restores it, read-only.
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
@@ -402,6 +408,9 @@ jobs:
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
       - uses: dtolnay/rust-toolchain@stable
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
       # sccache lives on a Blacksmith sticky disk (an ext4 volume cloned from the last snapshot,
       # no 10 GB limit and no download). Only main commits it; pull requests, the merge queue and
       # forks mount a clone and never write back, so nothing they build can reach main's cache.
@@ -472,6 +481,9 @@ jobs:
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
       - uses: dtolnay/rust-toolchain@stable
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
       # sccache lives on a Blacksmith sticky disk (an ext4 volume cloned from the last snapshot,
       # no 10 GB limit and no download). Only main commits it; pull requests, the merge queue and
       # forks mount a clone and never write back, so nothing they build can reach main's cache.
@@ -749,6 +761,9 @@ jobs:
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
       - uses: dtolnay/rust-toolchain@stable
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
       # sccache lives on a Blacksmith sticky disk (an ext4 volume cloned from the last snapshot,
       # no 10 GB limit and no download). Only main commits it; pull requests, the merge queue and
       # forks mount a clone and never write back, so nothing they build can reach main's cache.
@@ -807,6 +822,9 @@ jobs:
       - name: Size parallel compiles to the job's memory
         run: scripts/ci/build-jobs.sh
       - uses: dtolnay/rust-toolchain@stable
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
       # sccache lives on a Blacksmith sticky disk (an ext4 volume cloned from the last snapshot,
       # no 10 GB limit and no download). Only main commits it; pull requests, the merge queue and
       # forks mount a clone and never write back, so nothing they build can reach main's cache.
@@ -881,6 +899,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@stable
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: windows-startup
@@ -1002,6 +1023,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: wasm
@@ -1024,6 +1048,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: riscv64gc-unknown-linux-gnu
+      - name: Fetch SMLib (crates/smlib/SMLIB_REV)
+        shell: bash
+        run: scripts/fetch-smlib.sh riscv64gc-unknown-linux-gnu
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: riscv64
@@ -1043,11 +1070,13 @@ jobs:
           EOF
           sudo dpkg --add-architecture riscv64
           sudo apt-get update
-          sudo apt-get install -y gcc-riscv64-linux-gnu libasound2-dev:riscv64 libxkbcommon-dev:riscv64 \
+          sudo apt-get install -y gcc-riscv64-linux-gnu g++-riscv64-linux-gnu libasound2-dev:riscv64 libxkbcommon-dev:riscv64 \
             libwayland-dev:riscv64 libx11-dev:riscv64 libxrandr-dev:riscv64 libxi-dev:riscv64 libgl1-mesa-dev:riscv64
       - name: Cargo check on RISC-V
         env:
           CARGO_TARGET_RISCV64GC_UNKNOWN_LINUX_GNU_LINKER: riscv64-linux-gnu-gcc
+          # SMLib has no prebuilt library for RISC-V: its sources are compiled with this.
+          CXX_riscv64gc_unknown_linux_gnu: riscv64-linux-gnu-g++
           PKG_CONFIG_SYSROOT_DIR: /
           PKG_CONFIG_PATH: /usr/lib/riscv64-linux-gnu/pkgconfig:/usr/share/pkgconfig
           PKG_CONFIG_ALLOW_CROSS: 1

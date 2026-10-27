@@ -35,6 +35,8 @@ enum Extent {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 struct ThreadOptions {
+    /// `right` or `left`, under the name v0.24.0 saved it with.
+    handedness: String,
     full_length: bool,
     depth: Option<String>,
     #[serde(flatten)]
@@ -43,7 +45,7 @@ struct ThreadOptions {
 
 impl Default for ThreadOptions {
     fn default() -> Self {
-        Self { full_length: true, depth: None, unknown: BTreeMap::new() }
+        Self { handedness: "right".into(), full_length: true, depth: None, unknown: BTreeMap::new() }
     }
 }
 
@@ -106,6 +108,7 @@ impl Preset {
         }
         if required.into_iter().any(|text| text.trim().is_empty())
             || self.thread_options.depth.as_ref().is_some_and(|text| !valid_text(text, MAX_EXPRESSION))
+            || !["right", "left"].contains(&self.thread_options.handedness.as_str())
             || self.thread_options.unknown.len() > 8
             || self.thread_options.unknown.iter().any(|(key, value)| {
                 key.is_empty()
@@ -183,6 +186,7 @@ impl Preset {
             thread: opts.thread.clone(),
             thread_options: if opts.tapped {
                 ThreadOptions {
+                    handedness: if opts.hand == solidcraft_engine::doc::thread_forms::ThreadHand::Left { "left".into() } else { "right".into() },
                     full_length: opts.thread_full_depth,
                     depth: if opts.thread_full_depth { None } else { Some(portable_length(&opts.thread_depth, true)?) },
                     unknown: BTreeMap::new(),
@@ -262,6 +266,8 @@ impl Preset {
         opts.thread.clone_from(&self.thread);
         opts.custom_thread = None;
         opts.thread_full_depth = self.thread_options.full_length;
+        opts.hand =
+            if self.thread_options.handedness == "left" { solidcraft_engine::doc::thread_forms::ThreadHand::Left } else { solidcraft_engine::doc::thread_forms::ThreadHand::Right };
         opts.thread_depth = self.thread_options.depth.clone().unwrap_or_else(|| crate::dialogs::HoleOpts::default().thread_depth);
         // Existing placement picks stay with this dialog. To Object stores its mode only:
         // recalling it always asks for a fresh destination in the current design.
