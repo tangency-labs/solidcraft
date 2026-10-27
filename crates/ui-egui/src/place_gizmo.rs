@@ -17,7 +17,10 @@
 //!
 //! The handles are behind the `placement_handles` preference (Preferences > Design > Placement), off by
 //! default: off, a feature is placed by its click only, as before, and its Position input takes faces
-//! only.
+//! only; each tool's [`Spec::serves`] says what turns its handles on.
+//!
+//! A tool has one place (a Rest) or one per item of its first input (a marker on each): [`Spec::places`]
+//! lists them, and a drag or a click names the place by its key.
 
 mod boss;
 mod look;
@@ -39,27 +42,53 @@ pub(crate) use crate::dialogs::vec3_of;
 use crate::motion;
 pub(crate) use crate::selection::point_value as pt;
 use crate::theme::Tokens;
-use crate::viewport::Proj;
+use crate::viewport::{Hit, Proj};
 
 /// One tool's use of the handles.
 pub(crate) struct Spec {
-    /// Handle names (`<name>:position`, `<name>:rotate`) and widget ids.
+    /// Handle names (`<name>:position`, `<name>:rotate`; `<name>:<n>` with `many`) and widget ids.
     pub name: &'static str,
-    /// Is this dialog one of the tool's?
-    pub serves: fn(&Dialog) -> bool,
+    /// Is this dialog one of the tool's, with the tool's handles turned on?
+    pub serves: fn(&SolveApp, &Dialog) -> bool,
     /// The tool's commands whose face place also snaps to sketch points on the face while the
     /// handles are on (the place input then takes points, as a Single hole's does).
     pub snap_commands: &'static [&'static str],
     /// The move marker's tooltip.
     pub move_tip: &'static str,
-    /// The place and the direction the feature grows out of its face.
-    pub frame: fn(&SolveApp, &Dialog) -> Option<(Vec3, Vec3)>,
-    /// Re-place the feature where a click at the pointer would put it; false when nothing there
-    /// can take it.
-    pub move_to: fn(&SolveApp, &mut Dialog, &Proj, Pos2) -> bool,
+    /// A marker on each of the tool's places, named `<name>:<n>` by their order, with no ring.
+    /// Off: one place, `<name>:position`, and the ring if any.
+    pub many: bool,
+    /// The places the handles stand at.
+    pub places: fn(&SolveApp, &Dialog) -> Vec<Place>,
+    /// Re-place the feature at `key` where a click with these hits (the pick under the pointer,
+    /// taken while the dialog is open, so it snaps as a click does) would put it; false when
+    /// nothing there can take it.
+    pub move_to: fn(&SolveApp, &mut Dialog, &[Hit], usize) -> bool,
+    /// What a click (a press without a drag) on the marker at `key` does. `None`: nothing.
+    pub click: Option<fn(&SolveApp, &mut Dialog, usize)>,
     /// The footprint outlined while dragging, in world points (empty: no outline).
     pub footprint: fn(&SolveApp, &Dialog, Vec3, Vec3) -> Vec<Vec3>,
     pub turn: Option<Turn>,
+}
+
+/// One place a tool's handles stand at.
+pub(crate) struct Place {
+    /// Which of the tool's places: the item's index in the first input for a tool with `many`,
+    /// 0 otherwise.
+    pub key: usize,
+    /// The place and the direction the feature grows out of its face.
+    pub base: Vec3,
+    pub n: Vec3,
+}
+
+/// A one-place tool's places from its frame: one, or none.
+pub(crate) fn one(frame: Option<(Vec3, Vec3)>) -> Vec<Place> {
+    frame.map(|(base, n)| Place { key: 0, base, n }).into_iter().collect()
+}
+
+/// Are the shared handles on (Preferences > Design > Placement handles)?
+pub(crate) fn on(app: &SolveApp) -> bool {
+    app.preferences.placement_handles
 }
 
 /// A ring whose grip turns the feature about its face normal.
@@ -102,12 +131,9 @@ pub(crate) fn drawn_at(p: Pos2) -> bool {
     DRAWN.with(|h| h.borrow().iter().any(|c| c.distance(p) <= REACH))
 }
 
-/// The tool whose dialog this is, if it has handles.
+/// The tool whose dialog this is, if it has handles and they are on.
 fn spec(app: &SolveApp, d: &Dialog) -> Option<&'static Spec> {
-    if !app.preferences.placement_handles {
-        return None;
-    }
-    TOOLS.iter().copied().find(|s| (s.serves)(d))
+    TOOLS.iter().copied().find(|s| (s.serves)(app, d))
 }
 
 /// How much of the screen around the base the dialog's drag arrow leaves to the move marker
@@ -234,64 +260,97 @@ pub(crate) fn marker(ui: &egui::Ui, painter: &egui::Painter, id: egui::Id, c: Po
     crosshair(painter, c, &style, &Tokens::get());
 }
 
-/// Draw the handles and take their drags (after the dialog's own arrow, so the marker wins
-/// the pointer near the base).
-pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj, d: &mut Dialog) {
+/// The dialog taken out of `app` for a change (a drag's move, a click, a turn), and put back.
+fn with_dialog(app: &mut SolveApp, f: impl FnOnce(&SolveApp, &mut Dialog)) {
+    if let Some(mut d) = app.dialog.take() {
+        f(app, &mut d);
+        app.dialog = Some(d);
+    }
+}
+
+/// Draw the handles of the open dialog and take their drags (after the dialog's own arrow, so the
+/// marker wins the pointer near the base). The dialog stays in `app` while the pointer is picked
+/// under, so a drag snaps as a click does.
+pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painter, proj: &Proj) {
     DRAWN.with(|h| h.borrow_mut().clear());
     RING_ABOUT.with(|c| c.set(None));
-    let Some(sp) = spec(app, d) else { return };
-    let Some((base, _)) = (sp.frame)(app, d) else { return };
-    let Some(bs) = proj.to_screen(base) else { return };
+    let Some(sp) = app.dialog.as_ref().and_then(|d| spec(app, d)) else { return };
+    let places = |app: &SolveApp| app.dialog.as_ref().map(|d| (sp.places)(app, d)).unwrap_or_default();
     let t = Tokens::get();
     let area = |c: Pos2| egui::Rect::from_center_size(c, vec2(2.0 * REACH, 2.0 * REACH));
     let id = |what: &str| egui::Id::unique(("sc_place", sp.name, what));
+    let at = |key: usize, what: &str| egui::Id::unique(("sc_place", sp.name, key, what));
+    let sense = if sp.click.is_some() { egui::Sense::click_and_drag() } else { egui::Sense::drag() };
 
-    // The crosshair that moves the feature. The press lands where the finger is, not always the
-    // centre: the drag keeps that gap.
-    let r = ui.interact(area(bs), id("position"), egui::Sense::drag());
-    let off = motion::grab(ui, id("grab"), &r, |p| Some(p - bs));
-    if r.dragged() {
-        crate::tool_modifiers::set_manipulator_dragging(true);
-        if let Some(p) = r.interact_pointer_pos() {
-            (sp.move_to)(app, d, proj, p - off.unwrap_or_default());
+    // The crosshairs that move the feature, one per place. The press lands where the finger is,
+    // not always the centre: the drag keeps that gap.
+    let mut markers: Vec<(usize, egui::Response)> = Vec::new();
+    for pl in places(app) {
+        let Some(bs) = proj.to_screen(pl.base) else { continue };
+        let r = ui.interact(area(bs), at(pl.key, "position"), sense);
+        let off = motion::grab(ui, at(pl.key, "grab"), &r, |p| Some(p - bs));
+        if r.dragged() {
+            crate::tool_modifiers::set_manipulator_dragging(true);
+            if let Some(p) = r.interact_pointer_pos() {
+                let hits = crate::viewport::pick(app, proj, p - off.unwrap_or_default());
+                with_dialog(app, |app, d| {
+                    (sp.move_to)(app, d, &hits, pl.key);
+                });
+            }
+        } else if r.clicked()
+            && let Some(click) = sp.click
+        {
+            with_dialog(app, |app, d| click(app, d, pl.key));
         }
+        markers.push((pl.key, r));
     }
-    // Read the frame again: a drag moved it this frame.
-    let Some((base, n)) = (sp.frame)(app, d) else { return };
-    let Some(bs) = proj.to_screen(base) else { return };
-    crate::scenario::publish_handle(&format!("{}:position", sp.name), bs);
-    DRAWN.with(|h| h.borrow_mut().push(bs));
-    let (hovered, dragging) = (r.hovered(), r.dragged());
-    // The tip while pointing, not while dragging: the hand is busy and the footprint says it all.
-    if hovered && !dragging {
-        r.clone().backing_on_hover_text(crate::i18n::tr_label(sp.move_tip));
-    }
-    // The handle not in use steps back while the other one works (the ring's drag is last frame's).
-    let turning = ui.data(|m| m.get_temp::<bool>(id("turning"))).unwrap_or(false);
+    // Read the places again: a drag moved one this frame, a click may have taken one out.
     let ctx = ui.ctx().clone();
-    let style = CrossStyle {
-        hot: MARKER_HOT.run(&ctx, id("hot"), hovered || dragging).t,
-        active: MARKER_ACTIVE.run(&ctx, id("active"), dragging).t,
-        alpha: motion::step_back(&ctx, id("marker_dim"), turning, DIM, DIM_S),
-    };
-    if dragging {
-        let pts: Option<Vec<Pos2>> = (sp.footprint)(app, d, base, n).into_iter().map(|p| proj.to_screen(p)).collect();
-        if let Some(pts) = pts.filter(|p| p.len() >= 3) {
-            footprint(painter, &pts, &t);
+    // The marker steps back while the ring works (the ring's drag is last frame's).
+    let turning = ui.data(|m| m.get_temp::<bool>(id("turning"))).unwrap_or(false);
+    let mut first: Option<(Place, Pos2, bool)> = None;
+    for (n, pl) in places(app).into_iter().enumerate() {
+        let Some(bs) = proj.to_screen(pl.base) else { continue };
+        let name = if sp.many { format!("{}:{n}", sp.name) } else { format!("{}:position", sp.name) };
+        crate::scenario::publish_handle(&name, bs);
+        DRAWN.with(|h| h.borrow_mut().push(bs));
+        let r = markers.iter().find(|(k, _)| *k == pl.key).map(|(_, r)| r);
+        let (hovered, dragging) = r.map_or((false, false), |r| (r.hovered(), r.dragged()));
+        // The tip while pointing, not while dragging: the hand is busy and the footprint says it all.
+        if hovered
+            && !dragging
+            && let Some(r) = r
+        {
+            r.clone().backing_on_hover_text(crate::i18n::tr_label(sp.move_tip));
+        }
+        let style = CrossStyle {
+            hot: MARKER_HOT.run(&ctx, at(pl.key, "hot"), hovered || dragging).t,
+            active: MARKER_ACTIVE.run(&ctx, at(pl.key, "active"), dragging).t,
+            alpha: motion::step_back(&ctx, at(pl.key, "marker_dim"), turning, DIM, DIM_S),
+        };
+        if dragging && let Some(d) = app.dialog.as_ref() {
+            let pts: Option<Vec<Pos2>> = (sp.footprint)(app, d, pl.base, pl.n).into_iter().map(|p| proj.to_screen(p)).collect();
+            if let Some(pts) = pts.filter(|p| p.len() >= 3) {
+                footprint(painter, &pts, &t);
+            }
+        }
+        crosshair(painter, bs, &style, &t);
+        if hovered || dragging {
+            ui.ctx().set_cursor_icon(if dragging { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Move });
+        }
+        if n == 0 {
+            first = Some((pl, bs, dragging));
         }
     }
-    crosshair(painter, bs, &style, &t);
-    let moving = dragging;
-    if hovered || dragging {
-        ui.ctx().set_cursor_icon(if dragging { egui::CursorIcon::Grabbing } else { egui::CursorIcon::Move });
-    }
 
-    // The ring that turns it: on the face about the same centre, a fixed size on screen.
+    // The ring that turns a one-place feature: on the face about the same centre, a fixed size
+    // on screen.
     let Some(turn) = &sp.turn else { return };
-    if (turn.reach)(app, d).is_none() {
+    let Some((Place { base, n, .. }, bs, moving)) = first.filter(|_| !sp.many) else { return };
+    if app.dialog.as_ref().and_then(|d| (turn.reach)(app, d)).is_none() {
         return;
     }
-    let mut angle = (turn.angle)(app, d, n);
+    let Some(mut angle) = app.dialog.as_ref().map(|d| (turn.angle)(app, d, n)) else { return };
     let (x, y) = axes(n);
     // The world radius that makes the ring RING_PX across its least foreshortened face direction
     // (the larger singular value of the projected x, y pair), so it keeps its size as the view
@@ -320,8 +379,11 @@ pub(crate) fn show(app: &mut SolveApp, ui: &mut egui::Ui, painter: &egui::Painte
     {
         crate::tool_modifiers::set_manipulator_dragging(true);
         if let Some(raw) = pointer_angle(p).filter(|a| a.is_finite()).map(|a| a - grab.unwrap_or(0.0)) {
-            angle = (turn.set)(app, d, n, raw, crate::tool_modifiers::manipulator_free());
-            d.error = None;
+            let free = crate::tool_modifiers::manipulator_free();
+            with_dialog(app, |app, d| {
+                angle = (turn.set)(app, d, n, raw, free);
+                d.error = None;
+            });
             if let Some(g) = at(angle) {
                 gs = g;
             }
