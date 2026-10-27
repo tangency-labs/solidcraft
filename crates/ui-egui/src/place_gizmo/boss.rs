@@ -18,6 +18,7 @@ pub(super) static SPEC: Spec = Spec {
     move_to: |app, d, hits, _| crate::dialogs_plastic::handle_move(app, d, hits),
     click: None,
     footprint,
+    freedom: super::anywhere,
     turn: None,
 };
 
