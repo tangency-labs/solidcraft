@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Corner Join</title>
+  <path d="M8.62 18.5L32 32L32 57L8.62 43.5Z" fill="#b8c3cf"/>
+  <path d="M11.22 17L34.6 30.5L32 32L8.62 18.5Z" fill="#e2e8ef"/>
+  <path d="M11.22 17L34.6 30.5L32 57L8.62 43.5L8.62 18.5Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M8.62 18.5L32 32L32 57" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M29.4 33.5L55.38 18.5L55.38 43.5L29.4 58.5Z" fill="#236ead"/>
+  <path d="M26.8 32L29.4 33.5L29.4 58.5L26.8 57Z" fill="#328bd3"/>
+  <path d="M26.8 32L52.78 17L55.38 18.5L29.4 33.5Z" fill="#b9ddf8"/>
+  <path d="M26.8 32L52.78 17L55.38 18.5L55.38 43.5L29.4 58.5L26.8 57Z" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+  <path d="M26.8 32L29.4 33.5L55.38 18.5M29.4 33.5L29.4 58.5" fill="none" stroke="#34465b" stroke-width="2.55" stroke-linejoin="round" stroke-linecap="round"/>
+</svg>

@@ -145,6 +145,10 @@ pub(super) fn fixtures() -> Vec<(&'static str, Value)> {
             "sheet_flange",
             json!({"type": "sheet_flange", "edges": [{"point": o, "angle": "flange.e1_angle", "height": "flange.e1_height"}, {"point": o, "angle": null, "height": "flange.e2_height"}], "height": "flange.height", "angle": "flange.angle", "radius": "flange.radius", "corner_relief_shape": "round", "corner_relief": "flange.relief"}),
         ),
+        (
+            "sheet_corner_join",
+            json!({"type":"sheet_corner_join", "covering":"F3.0", "covered":"F4.0", "corner_type":"partial", "overlap":"join.overlap", "body":"B"}),
+        ),
         ("sheet_hem", json!({"type": "sheet_hem", "edges": [o], "length": "hem.length", "gap": "hem.gap"})),
         (
             "sheet_perforate",

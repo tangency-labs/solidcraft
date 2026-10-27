@@ -7227,6 +7227,7 @@ fn eval_feature(
         FeatureKind::SheetBase { .. }
         | FeatureKind::SheetContour { .. }
         | FeatureKind::SheetFlange { .. }
+        | FeatureKind::SheetCornerJoin { .. }
         | FeatureKind::SheetHem { .. }
         | FeatureKind::SheetPerforate { .. }
         | FeatureKind::SheetFold { .. }

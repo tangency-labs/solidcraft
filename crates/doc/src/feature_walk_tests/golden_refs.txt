@@ -140,6 +140,8 @@ sheet_contour
   remap_refs: sketch
 sheet_flange
   remap_bodies: body
+sheet_corner_join
+  remap_bodies: body
 sheet_hem
   remap_bodies: body
 sheet_perforate
