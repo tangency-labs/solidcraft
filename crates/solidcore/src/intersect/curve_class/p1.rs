@@ -160,7 +160,8 @@ use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::nurbs::b_spline_surface_n_lib::p2::{EvaluateFlags, OrientType};
 use crate::surface::surface::p1::map_to_2d_on_curve;
 use crate::surface::surface::p2::surface_cache;
-use crate::surface::surface::{Surface, SurfaceKind};
+use crate::surface::surface::Surface;
+use crate::surface::surface_point_solve::p2::with_out_of_bounds_enabled;
 use crate::EntityRef;
 
 const OP_CC: &str = "intersect::curve_class::p1::CurveClassification";
@@ -1249,55 +1250,21 @@ fn surface_zone_tol_3d(k: &Kernel, surface: &Surface) -> Result<f64> {
 
 // ---- static helpers -----------------------------------------------------------------------
 
-/// A copy of `surface` evaluating out of bounds when it is an `SmBSplineSurface` kind
-/// (`SmTemporaryChangeValue<SmBoolean>(GetOutOfBoundsEnabled(), TRUE)`).
-pub(super) fn out_of_bounds(surface: &Surface) -> Cow<'_, Surface> {
-    match surface.kind() {
-        SurfaceKind::BSpline(s) => {
-            let mut s = s.clone();
-            *s.out_of_bounds_enabled_mut() = true;
-            Cow::Owned(Surface::from(s))
-        }
-        SurfaceKind::Plane(p) => {
-            let mut p = p.copy();
-            *p.out_of_bounds_enabled_mut() = true;
-            Cow::Owned(Surface::from(p))
-        }
-        SurfaceKind::Cone(s) => {
-            // the SmBSplineSurface base flag only (not SetOutOfBoundsEnabled)
-            let mut c = s.as_ref().clone();
-            *c.rev.base_mut().out_of_bounds_enabled_mut() = true;
-            Cow::Owned(Surface::from(c))
-        }
-        SurfaceKind::Sphere(s) => {
-            // the SmBSplineSurface base flag only (not SetOutOfBoundsEnabled)
-            let mut c = s.as_ref().clone();
-            *c.base.base_mut().out_of_bounds_enabled_mut() = true;
-            Cow::Owned(Surface::from(c))
-        }
-        SurfaceKind::Torus(s) => {
-            // the SmBSplineSurface base flag only (not SetOutOfBoundsEnabled)
-            let mut c = s.as_ref().clone();
-            *c.base.base_mut().out_of_bounds_enabled_mut() = true;
-            Cow::Owned(Surface::from(c))
-        }
-        SurfaceKind::SurfOfRevolution(s) => {
-            // the SmBSplineSurface base flag only (not SetOutOfBoundsEnabled)
-            let mut s = s.as_ref().clone();
-            *s.base_mut().out_of_bounds_enabled_mut() = true;
-            Cow::Owned(Surface::from(s))
-        }
-        SurfaceKind::SurfOfExtrusion(s) => {
-            // the SmBSplineSurface base flag only (not SetOutOfBoundsEnabled)
-            let mut s = s.as_ref().clone();
-            *s.base_mut().out_of_bounds_enabled_mut() = true;
-            Cow::Owned(Surface::from(s))
-        }
-        SurfaceKind::CurveBounded(_)
-        | SurfaceKind::Step(_)
-        | SurfaceKind::OffsetSurface(_)
-        | SurfaceKind::SrfInVolume(_) => Cow::Borrowed(surface),
-    }
+/// `surface` evaluating out of bounds when it is an `SmBSplineSurface` kind
+/// (`SmTemporaryChangeValue<SmBoolean>(GetOutOfBoundsEnabled(), TRUE)`): upstream changes
+/// the flag on the surface itself, so this is an evaluation copy with the flag set
+/// ([`with_out_of_bounds_enabled`]: knots exactly as they are, owner kept), not the copy
+/// constructor, whose knot fix-up can move near-coincident knots; the surface itself
+/// when nothing changes.
+///
+/// # Errors
+///
+/// Those of [`Surface::clone_for_evaluation`] (a geometry graph nested too deep).
+pub(super) fn out_of_bounds(surface: &Surface) -> Result<Cow<'_, Surface>> {
+    Ok(match with_out_of_bounds_enabled(surface)? {
+        Some(copy) => Cow::Owned(copy),
+        None => Cow::Borrowed(surface),
+    })
 }
 
 /// `SmSurface::Evaluate(uv, 1, 1, TRUE, TRUE, TRUE, vals)` (status ignored upstream):
@@ -1422,8 +1389,8 @@ pub fn set_xsect_curve_through_point(
 
     // temporarily allow out of bound evaluations for surface[0], surface[1]
     let (orig0, orig1) = (*s0, *s1);
-    let s0 = out_of_bounds(orig0);
-    let s1 = out_of_bounds(orig1);
+    let s0 = out_of_bounds(orig0)?;
+    let s1 = out_of_bounds(orig1)?;
 
     // evaluate each surface at the given intersection parameter points
     let (ok0, mut surf_val0) = surface_evaluate_11(k, &s0, uv0)?;
@@ -1514,16 +1481,17 @@ pub fn set_xsect_curve_through_point(
     // insert throughPoint=p3DPoint (tangent=sXSectTangent3d) at dParam into pSrcCurve3d
     if let Some(bs) = bspline_part_mut(src_curve) {
         let uv_opts: Vec<Option<Vec2>> = uv_points.iter().copied().map(Some).collect();
-        // the surfaces as evaluated here (copies; evaluation does not use the owner)
+        // the surfaces as evaluated here (upstream passes the surfaces themselves, the
+        // first two with out-of-bounds evaluation on): evaluation copies, exact knots
         let evaluators: Vec<Surface> = surfaces
             .iter()
             .enumerate()
             .map(|(i, s)| match i {
-                0 => s0.as_ref().clone(),
-                1 => s1.as_ref().clone(),
-                _ => (*s).clone(),
+                0 => s0.as_ref().clone_for_evaluation(),
+                1 => s1.as_ref().clone_for_evaluation(),
+                _ => s.clone_for_evaluation(),
             })
-            .collect();
+            .collect::<Result<_>>()?;
         let mut new_param = out.param;
         let r = bs.set_intersection_curve_through_point(
             k,
@@ -1647,8 +1615,8 @@ pub fn set_xsect_edge_through_point_in(
     };
 
     // temporarily allow out of bound evaluations for surface[0], surface[1]
-    let s0 = out_of_bounds(orig0);
-    let s1 = out_of_bounds(orig1);
+    let s0 = out_of_bounds(orig0)?;
+    let s1 = out_of_bounds(orig1)?;
     let (_, mut surf_val0) = surface_evaluate_11(k, &s0, uv0)?;
     let (_, mut surf_val1) = surface_evaluate_11(k, &s1, uv1)?;
 

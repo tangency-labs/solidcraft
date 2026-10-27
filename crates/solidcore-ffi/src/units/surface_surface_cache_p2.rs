@@ -7,7 +7,8 @@
 //! (`SmBSplineSurface(gw_SURFACE*, FALSE, NULL)`, control points with the v index fastest), `N`
 //! a bare NURB `n m p q r s cpts u v`, `S` a surface `kind ..` (`0 B`: B-spline; `1 o x y sx sy
 //! D`: bounded `SmPlane(o, x, y, (sx, sy), D)`; `2 B`: `SmCurveBoundedSurface` with implicit
-//! outer boundary and no boundary curves over the B-spline), `V` a vector `x y z`, `D` a domain
+//! outer boundary and no boundary curves over the B-spline; `3 B` / `4 B`: `0` / `2` with
+//! the B-spline's knots kept as given), `V` a vector `x y z`, `D` a domain
 //! `umin vmin umax vmax`, `K` alternate cache user data and `C` a curve as in
 //! [`super::surface_surface_cache_p1`], `O` the cache options `chord angtol_rad aspect
 //! max_side min_side min_ratio start_fast_angle_deg`.
@@ -96,7 +97,8 @@ fn len2(v: [f64; 3]) -> f64 {
 
 /// An `S` block; returns its kind and natural domain.
 fn surface_spec(rd: &mut Reader<'_>) -> Result<(Kind, Srf), FfiError> {
-    match rd.index(2)? {
+    // 3 / 4: 0 / 2 with the B-spline's knots kept as given
+    match rd.index(4)? {
         1 => {
             rd.vec3()?;
             let x = rd.vec3()?;
@@ -135,7 +137,7 @@ fn surface_spec(rd: &mut Reader<'_>) -> Result<(Kind, Srf), FfiError> {
         k => {
             let srf = bspline_block(rd)?;
             Ok((
-                if k == 0 {
+                if k == 0 || k == 3 {
                     Kind::BSpline
                 } else {
                     Kind::CurveBounded

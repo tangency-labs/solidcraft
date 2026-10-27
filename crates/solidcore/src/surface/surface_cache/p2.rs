@@ -832,7 +832,18 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
             }
         };
         let handle = fields.surface.ok_or(SolidError::null_pointer(OP_BLOCK))?;
-        let surface = self.node_surface(Some(handle))?.clone();
+        // upstream works on the node's surface itself (`pAux->mBA_pSurface`); the cache is
+        // edited below, so an evaluation copy (exact knots, owner kept) stands for it: the
+        // copy constructor's knot fix-up would move near-coincident knots and so the splits.
+        // An `SmPlane` keeps the copy constructor: its copy carries the NURB upstream has
+        // made on the plane by now (the port keeps none on the original), and a freshly
+        // made plane NURB has no knots for the fix-up to move.
+        let node_surface = self.node_surface(Some(handle))?;
+        let surface = if let SurfaceKind::Plane(_) = node_surface.kind() {
+            node_surface.clone()
+        } else {
+            node_surface.clone_for_evaluation()?
+        };
         let uv_domain = surface.natural_uv_domain_with_nurb(k)?;
         let opts = *self.options();
 

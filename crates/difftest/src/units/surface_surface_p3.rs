@@ -25,7 +25,10 @@ use solidcore::geom::matrix::Matrix;
 use solidcore::geom::vector3d::Vec3;
 use solidcore::kernel::{Kernel, KernelOptions};
 use solidcore::nurbs::b_spline_surface_n_lib::p2::EvaluateFlags;
+use solidcore::nurbs::b_spline_surface::{BSplineSurface, BSplineSurfaceForm};
 use solidcore::nurbs::knots::Side;
+use solidcore::nurbs::math::CPoint;
+use solidcore::nurbs::srf_basic::Surface as NlSurface;
 use solidcore::surface::surface::p2::GeometricProperties;
 use solidcore::geom::global_solver::SolverOperation;
 use solidcore::surface::surface::p1::{FindPsNormalEnfo, SssIntersectEnfo};
@@ -122,6 +125,57 @@ enum OpIn {
 struct Inputs {
     surface: SrfIn,
     op: OpIn,
+    /// Per surface (the surface, then `s2` and `s3` of `local_sss`): keep the B-spline
+    /// knots exactly as given. The shim's surface kind `4` writes them back over the NURB
+    /// after `SmBSplineSurface(gw_SURFACE*, FALSE, ..)` has fixed them up; Rust builds
+    /// that surface over a borrowed NURB, whose knots `from_nurb(.., true)` leaves as
+    /// they are. Omitted when all false, so existing case identities are unchanged.
+    #[serde(default, skip_serializing_if = "no_raw_knots")]
+    raw_knots: [bool; 3],
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if passes the field by reference"
+)]
+fn no_raw_knots(r: &[bool; 3]) -> bool {
+    !r.iter().any(|&x| x)
+}
+
+/// [`push_srf`], as surface kind `4` (knots kept as given) when `raw`.
+fn push_srf_raw(v: &mut Vec<f64>, s: &SrfIn, raw: bool) -> Result<(), HarnessError> {
+    let at = v.len();
+    push_srf(v, s)?;
+    if raw {
+        match v.get_mut(at) {
+            Some(code) if *code == 0.0 => *code = 4.0,
+            _ => return Err(harness("raw knots need an inline B-spline surface")),
+        }
+    }
+    Ok(())
+}
+
+/// [`surface_of`], over a borrowed NURB (knots kept as given) when `raw`.
+fn surface_raw(s: &SrfIn, raw: bool) -> Result<Surface, HarnessError> {
+    if !raw {
+        return surface_of(s);
+    }
+    let SrfIn::Bspline(bs) = s else {
+        return Err(harness("raw knots need an inline B-spline surface"));
+    };
+    let net = bs
+        .net
+        .iter()
+        .map(|r| r.iter().map(|&[x, y, z, w]| CPoint::new(x, y, z, w)).collect())
+        .collect();
+    let nl = NlSurface::new(net, bs.p, bs.q, bs.u.clone(), bs.v.clone())
+        .map_err(|e| harness(format!("surface input: {e}")))?;
+    let mut b = BSplineSurface::from_nurb(nl, true);
+    *b.out_of_bounds_enabled_mut() = bs.oob;
+    let form = BSplineSurfaceForm::from_code(u64::from(bs.form))
+        .ok_or_else(|| harness(format!("bad form {}", bs.form)))?;
+    b.set_b_spline_surface_form(form);
+    Ok(Surface::from(b))
 }
 
 // ---- C++ side -----------------------------------------------------------------------
@@ -135,7 +189,10 @@ fn push_pts(o: &mut Vec<f64>, pts: &[Vec<f64>]) {
 
 fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
     let mut v = Vec::new();
-    push_srf(&mut v, &i.surface)?;
+    push_srf_raw(&mut v, &i.surface, i.raw_knots[0])?;
+    if (i.raw_knots[1] || i.raw_knots[2]) && !matches!(i.op, OpIn::LocalSss { .. }) {
+        return Err(harness("raw knots for s2/s3 are only read by local_sss"));
+    }
     let op = match &i.op {
         OpIn::EvalGeometric { uv, fu, fv } => {
             v.extend_from_slice(uv);
@@ -200,8 +257,8 @@ fn cpp_input(i: &Inputs) -> Result<(Op, Vec<f64>), HarnessError> {
             Op::LocalSolve
         }
         OpIn::LocalSss { s2, s3, doms, g1, g2, g3 } => {
-            push_srf(&mut v, s2)?;
-            push_srf(&mut v, s3)?;
+            push_srf_raw(&mut v, s2, i.raw_knots[1])?;
+            push_srf_raw(&mut v, s3, i.raw_knots[2])?;
             for d in doms {
                 v.extend_from_slice(d);
             }
@@ -318,7 +375,7 @@ fn push_found(o: &mut Vec<f64>, found: Option<(f64, Vec<f64>)>) {
 }
 
 fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
-    let mut s = surface_of(&i.surface)?;
+    let mut s = surface_raw(&i.surface, i.raw_knots[0])?;
     let mut o = Vec::new();
     match &i.op {
         OpIn::EvalGeometric { uv, fu, fv } => {
@@ -439,7 +496,7 @@ fn rust_run(k: &Kernel, i: &Inputs) -> Result<Vec<f64>, Fail> {
             }
         }
         OpIn::LocalSss { s2, s3, doms, g1, g2, g3 } => {
-            let (s2, s3) = (surface_of(s2)?, surface_of(s3)?);
+            let (s2, s3) = (surface_raw(s2, i.raw_knots[1])?, surface_raw(s3, i.raw_knots[2])?);
             match stat(s.local_surface_surface_intersect(
                 k, &dom_of(doms[0]),
                 &s2,
@@ -711,7 +768,11 @@ fn gen_op(k: &Kernel, rng: &mut Rng, s: &SrfIn) -> OpIn {
 fn gen_case(k: &Kernel, rng: &mut Rng) -> Inputs {
     let surface = gen_surface3(rng);
     let op = gen_op(k, rng, &surface);
-    Inputs { surface, op }
+    Inputs {
+        surface,
+        op,
+        raw_knots: [false; 3],
+    }
 }
 
 impl UnitDiff for Runner {

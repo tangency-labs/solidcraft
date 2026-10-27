@@ -177,8 +177,10 @@ pub(super) fn implicit_iso(
             true,
         )?));
     }
+    // (`SmIsoCurve(*this, ..)` refers to the surface itself: an exact copy, not the copy
+    // constructor, whose knot fix-up can move near-coincident knots)
     Ok(Curve::from(IsoCurve::new(
-        bss(k, surface)?.copy(),
+        bss(k, surface)?.clone_exact(),
         direction,
         value,
         left,

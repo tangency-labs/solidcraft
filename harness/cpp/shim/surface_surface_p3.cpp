@@ -569,6 +569,10 @@ SmSurface* read_surface(Rd& rd, const SmContext& ctx)
         SmVector3d n = rd.vec();
         return new (ctx) SmPlane(o, n, &ctx);
     }
+    // `0 ..` an SmBSplineSurface; `4 ..` the same with the given knots written back over
+    // the NURB after the constructor has fixed them up (sm_FixupKnotVector), so
+    // near-coincident knots stay as given
+    bool raw_knots = kind == 4;
     bool oob = rd.flag();
     SmBSplineSurfaceForm form = (SmBSplineSurfaceForm)rd.idx();
     gw_INDEX n = (gw_INDEX)rd.idx();
@@ -590,7 +594,17 @@ SmSurface* read_surface(Rd& rd, const SmContext& ctx)
         sur->knu->U[i] = rd.num();
     for (gw_INDEX i = 0; i <= s; i++)
         sur->knv->U[i] = rd.num();
+    std::vector<double> ku(sur->knu->U, sur->knu->U + r + 1);
+    std::vector<double> kv(sur->knv->U, sur->knv->U + s + 1);
     SmBSplineSurface* b = new (ctx) SmBSplineSurface(sur, FALSE, NULL);
+    if (raw_knots)
+    {
+        gw_SURFACE* own = b->GetGwNurbPointer();
+        for (gw_INDEX i = 0; i <= r; i++)
+            own->knu->U[i] = ku[i];
+        for (gw_INDEX i = 0; i <= s; i++)
+            own->knv->U[i] = kv[i];
+    }
     b->GetOutOfBoundsEnabled() = oob ? TRUE : FALSE;
     b->SetBSplineSurfaceForm(form);
     return b;

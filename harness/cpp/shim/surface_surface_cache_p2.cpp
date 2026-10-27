@@ -592,12 +592,24 @@ gw_SURFACE* read_nurb(Rd& rd)
     return sur;
 }
 
-// `oob form nurb`.
-SmBSplineSurface* read_bspline(Rd& rd, const SmContext& ctx)
+// `oob form nurb`; with `raw_knots` the given knots are written back over the NURB after
+// the constructor has fixed them up (sm_FixupKnotVector), so near-coincident knots stay.
+SmBSplineSurface* read_bspline(Rd& rd, const SmContext& ctx, bool raw_knots = false)
 {
     bool oob = rd.flag();
     SmBSplineSurfaceForm form = (SmBSplineSurfaceForm)rd.idx();
-    SmBSplineSurface* s = new (ctx) SmBSplineSurface(read_nurb(rd), FALSE, NULL);
+    gw_SURFACE* sur = read_nurb(rd);
+    std::vector<double> ku(sur->knu->U, sur->knu->U + sur->knu->m + 1);
+    std::vector<double> kv(sur->knv->U, sur->knv->U + sur->knv->m + 1);
+    SmBSplineSurface* s = new (ctx) SmBSplineSurface(sur, FALSE, NULL);
+    if (raw_knots)
+    {
+        gw_SURFACE* own = s->GetGwNurbPointer();
+        for (size_t i = 0; i < ku.size(); i++)
+            own->knu->U[i] = ku[i];
+        for (size_t i = 0; i < kv.size(); i++)
+            own->knv->U[i] = kv[i];
+    }
     s->GetOutOfBoundsEnabled() = oob ? TRUE : FALSE;
     s->SetBSplineSurfaceForm(form);
     return s;
@@ -665,7 +677,8 @@ struct Key
 };
 
 // A surface `kind ...`: 0 B-spline `oob form nurb`; 1 bounded plane `o x y sx sy D`;
-// 2 curve-bounded surface (implicit outer, no boundary curves) over a B-spline block.
+// 2 curve-bounded surface (implicit outer, no boundary curves) over a B-spline block;
+// 3 / 4 are 0 / 2 with the B-spline's knots kept as given (read_bspline's raw_knots).
 // `*basis` receives a separately allocated surface to delete after it (always NULL now).
 SmSurface* read_surface(Rd& rd, const SmContext& ctx, SmSurface** basis)
 {
@@ -681,8 +694,8 @@ SmSurface* read_surface(Rd& rd, const SmContext& ctx, SmSurface** basis)
         SmExtent2d d = rd.domain();
         return new (ctx) SmPlane(o, x, y, SmVector2d(sx, sy), d, &ctx);
     }
-    SmBSplineSurface* b = read_bspline(rd, ctx);
-    if (kind == 0)
+    SmBSplineSurface* b = read_bspline(rd, ctx, kind == 3 || kind == 4);
+    if (kind == 0 || kind == 3)
         return b;
     // the curve-bounded surface owns (deletes) its basis
     SmTArray<SmCurve*> c3d(ctx), cuv(ctx);

@@ -29,7 +29,9 @@
 //!   `OutOfBoundsEnabled` flag of the (B-spline based) surfaces is done on the surface
 //!   itself where it is `&mut` ([`Surface::cover_coincident_surface_deferring_trims`]) and on an
 //!   out-of-bounds copy where upstream changes a `const` surface
-//!   ([`Surface::local_surface_surface_intersect`]).
+//!   ([`Surface::local_surface_surface_intersect`]); that copy is an evaluation copy
+//!   (exact knots, owner kept), not the copy constructor, so it evaluates the surface
+//!   upstream evaluates.
 //! - **Ignored statuses.** Where upstream ignores the status of an evaluation its
 //!   outputs keep their previous values (initially undefined); the port does the same
 //!   and still propagates [`SolidError::Unported`].
@@ -188,13 +190,20 @@ pub(crate) fn set_out_of_bounds_enabled(surface: &mut Surface, enabled: bool) {
 
 /// A copy of `surface` that evaluates out of bounds, when it is a B-spline based
 /// surface that does not already (the `SmTemporaryChangeValue` of a `const` surface).
-fn out_of_bounds_copy(surface: &Surface) -> Option<Surface> {
+/// Upstream changes the flag on the surface itself, so this is an evaluation copy
+/// ([`Surface::clone_for_evaluation`]: knots exactly as they are, owner kept), not the
+/// copy constructor, whose knot fix-up can move near-coincident knots.
+///
+/// # Errors
+///
+/// Those of [`Surface::clone_for_evaluation`] (a geometry graph nested too deep).
+fn out_of_bounds_copy(surface: &Surface) -> Result<Option<Surface>> {
     if out_of_bounds_enabled(surface) == Some(false) {
-        let mut copy = surface.clone();
+        let mut copy = surface.clone_for_evaluation()?;
         set_out_of_bounds_enabled(&mut copy, true);
-        Some(copy)
+        Ok(Some(copy))
     } else {
-        None
+        Ok(None)
     }
 }
 
@@ -1406,9 +1415,9 @@ impl Surface {
         uv_guess3: Point2,
     ) -> Result<Option<LocalSssSolution>> {
         // temporarily enable OutOfBounds evaluations for all B-spline based surfaces
-        let copy1 = out_of_bounds_copy(self);
-        let copy2 = out_of_bounds_copy(surface2);
-        let copy3 = out_of_bounds_copy(surface3);
+        let copy1 = out_of_bounds_copy(self)?;
+        let copy2 = out_of_bounds_copy(surface2)?;
+        let copy3 = out_of_bounds_copy(surface3)?;
         let s1 = copy1.as_ref().unwrap_or(self);
         let s2 = copy2.as_ref().unwrap_or(surface2);
         let s3 = copy3.as_ref().unwrap_or(surface3);
@@ -1741,7 +1750,7 @@ mod tests {
         let mut s = Surface::from(rev);
         assert_eq!(out_of_bounds_enabled(&s), Some(false));
         assert_eq!(gen_flag(&s), Some(false));
-        let copy = out_of_bounds_copy(&s).unwrap();
+        let copy = out_of_bounds_copy(&s).unwrap().unwrap();
         assert_eq!(out_of_bounds_enabled(&copy), Some(true));
         assert_eq!(gen_flag(&copy), Some(false));
         set_out_of_bounds_enabled(&mut s, true);

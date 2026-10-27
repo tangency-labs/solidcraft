@@ -969,8 +969,8 @@ impl<O: ClassObject> CurveClassification<O> {
                     };
                 (resolve(self.surface1())?, resolve(self.surface2())?)
             };
-        let solve1 = out_of_bounds(&surface1).into_owned();
-        let solve2 = out_of_bounds(&surface2).into_owned();
+        let solve1 = out_of_bounds(&surface1)?.into_owned();
+        let solve2 = out_of_bounds(&surface2)?.into_owned();
 
         // ClassificationCurve's Param RangeSize
         let crv_param_range = {

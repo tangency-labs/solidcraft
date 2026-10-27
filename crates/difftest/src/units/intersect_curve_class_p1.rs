@@ -169,6 +169,13 @@ pub(crate) enum CurveIn {
 pub(crate) struct SurfIn {
     #[serde(default)]
     pub(crate) oob: bool,
+    /// Keep the knots exactly as given: the shim writes them back over the NURB after
+    /// `SmBSplineSurface(gw_SURFACE*, FALSE, ..)` has fixed them up (`sm_FixupKnotVector`);
+    /// Rust builds the surface over a borrowed NURB, whose knots stay as they are. Only
+    /// this unit's shim reads it (the flag slot of the block carries `2`); omitted when
+    /// false, so existing case identities are unchanged.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub(crate) raw_knots: bool,
     pub(crate) net: Vec<Vec<[f64; 4]>>,
     pub(crate) p: usize,
     pub(crate) q: usize,
@@ -371,10 +378,18 @@ pub(crate) fn curve_block(v: &mut Vec<f64>, c: &CurveIn) {
     }
 }
 
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde's skip_serializing_if passes the field by reference"
+)]
+fn is_false(x: &bool) -> bool {
+    !*x
+}
+
 pub(crate) fn surface_block(v: &mut Vec<f64>, s: &SurfIn) {
     let n = s.net.len().saturating_sub(1);
     let m = s.net.first().map_or(0, Vec::len).saturating_sub(1);
-    v.push(b(s.oob));
+    v.push(b(s.oob) + if s.raw_knots { 2.0 } else { 0.0 });
     v.extend([
         n as f64,
         m as f64,
@@ -460,7 +475,7 @@ pub(crate) fn build_surface(s: &SurfIn) -> Result<Surface, HarnessError> {
         .collect();
     let sur = NurbSurface::new(net, s.p, s.q, s.u.clone(), s.v.clone())
         .map_err(|e| harness(format!("surface: {e}")))?;
-    let mut bs = BSplineSurface::from_nurb(sur, false);
+    let mut bs = BSplineSurface::from_nurb(sur, s.raw_knots);
     *bs.out_of_bounds_enabled_mut() = s.oob;
     Ok(Surface::from(bs))
 }
@@ -1985,6 +2000,7 @@ pub(crate) fn gen_surface(rng: &mut Rng, o: [f64; 3], x: [f64; 3], y: [f64; 3], 
         .collect();
     SurfIn {
         oob: rng.chance(0.2),
+        raw_knots: false,
         net,
         p,
         q,

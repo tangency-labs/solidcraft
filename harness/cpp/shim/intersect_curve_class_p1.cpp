@@ -2126,8 +2126,22 @@ int32_t run(Rd& rd, std::vector<double>& o)
         }
         case K_BSURF:
         {
-            bool oob = rd.flag();
-            SmBSplineSurface* s = new (ctx) SmBSplineSurface(read_nurb_surface(rd), FALSE, NULL);
+            // bit 0: out-of-bounds evaluation; bit 1: the given knots are written back
+            // over the NURB after the constructor has fixed them up (sm_FixupKnotVector)
+            int64_t flags = rd.idx();
+            bool oob = (flags & 1) != 0;
+            gw_SURFACE* sur = read_nurb_surface(rd);
+            std::vector<double> ku(sur->knu->U, sur->knu->U + sur->knu->m + 1);
+            std::vector<double> kv(sur->knv->U, sur->knv->U + sur->knv->m + 1);
+            SmBSplineSurface* s = new (ctx) SmBSplineSurface(sur, FALSE, NULL);
+            if ((flags & 2) != 0)
+            {
+                gw_SURFACE* own = s->GetGwNurbPointer();
+                for (size_t i = 0; i < ku.size(); i++)
+                    own->knu->U[i] = ku[i];
+                for (size_t i = 0; i < kv.size(); i++)
+                    own->knv->U[i] = kv[i];
+            }
             s->GetOutOfBoundsEnabled() = oob ? TRUE : FALSE;
             p = s;
             break;

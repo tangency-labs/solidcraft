@@ -408,7 +408,8 @@ fn curve_block(rd: &mut Reader<'_>) -> Result<(), FfiError> {
 
 /// A B-spline surface block `oob n m p q r s cpts u v`.
 fn surface_block(rd: &mut Reader<'_>) -> Result<(), FfiError> {
-    rd.flag()?;
+    // out-of-bounds flag (bit 0) and keep-the-knots flag (bit 1)
+    rd.index(3)?;
     let n = rd.index(MAX_SURF_INDEX)?;
     let m = rd.index(MAX_SURF_INDEX)?;
     let p = rd.index(MAX_DEGREE)?;

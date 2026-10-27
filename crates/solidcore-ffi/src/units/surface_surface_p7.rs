@@ -237,14 +237,15 @@ pub(crate) type Domain = Option<[f64; 4]>;
 /// A surface block (no nested curve-bounded surfaces): its domain (`None` for a plane
 /// basis) and whether it is a plain B-spline.
 ///
-/// Kind 3 (a surface of revolution) is accepted only when `revolution` is set: only the
-/// `surface_p3` shim builds one; the `surface_p4`/`surface_p7` shims have no such branch.
+/// Kinds 3 (a surface of revolution) and 4 (a B-spline block whose knots the shim keeps
+/// as given) are accepted only when `revolution` is set: only the `surface_p3` shim
+/// builds them; the `surface_p4`/`surface_p7` shims have no such branches.
 pub(crate) fn surface_kind(
     rd: &mut Reader<'_>,
     nested: bool,
     revolution: bool,
 ) -> Result<(Domain, bool), FfiError> {
-    let kind = rd.index(if revolution { 3 } else { 2 })?;
+    let kind = rd.index(if revolution { 4 } else { 2 })?;
     if kind == 3 {
         // a surface of revolution of the line a-b about the axis p, axis (domain: its own)
         for _ in 0..3 {
