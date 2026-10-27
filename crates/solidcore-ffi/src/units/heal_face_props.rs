@@ -14,21 +14,25 @@
 //! `IsPoint3dOnPole`(p0, p1, p2), `5` seed field p0 (index p1, value p2; see [`SEED_FIELDS`]),
 //! `6` `SetProps_Gaps` / `Stage2` / `Stage3` directly (which p0 in 1..=3, heal op p1, index
 //! p2), `7` `IsPeriodicU` + 2 `IsPeriodicV`, `8` `SmLoopProps::SetProps` of every loop of the
-//! face (the loop-props loop of `SetProps_Stage3`, without its `ClassifyLoops`). Output per
-//! op: the result then [`SNAP_LEN`] snapshot values (for op `8` the first [`MAX_LOOP_SNAPS`]
-//! loops' props instead of the face snapshot).
+//! face (the loop-props loop of `SetProps_Stage3`, without its `ClassifyLoops`), `9` the loop
+//! props `SetProps_Stage3` left in `m_sLoopProps` (with the `ClassifyLoops` containment and
+//! orientations). Output per op: the result then [`SNAP_LEN`] snapshot values (for ops `8`
+//! and `9` the first [`MAX_LOOP_SNAPS`] loops' props instead of the face snapshot).
 //!
 //! Surface block: `0 O[3] X[3] Y[3] umin vmin umax vmax` (`SmPlane`) or `1 gen P[3] A[3] swap
 //! sweep` (`SmSurfOfRevolution::CreateCanonical`, generator `0 a[3] b[3]` line or `1 c[3]
 //! x[3] y[3] d0 d1 r` circle; a `sweep` below 360 degrees then `AdjustSTEPUVDomain` to
 //! `[u0, u0 + sweep]` by the generator interval, an open surface). Loops block: `0 P[3]` (one
 //! vertex loop at P) or `1 n_loops` then per loop `n_pts pts[3 * n_pts]` (an edge loop of
-//! `SmLine` edges `p[i] -> p[i + 1]`; the first loop is the outer one).
+//! `SmLine` edges `p[i] -> p[i + 1]`; the first loop is the outer one) or `2 n_loops` then per
+//! loop `c[3] x[3] y[3] d0 d1 r` (one `SmCircle` edge over `[d0, d1]` degrees, its one vertex
+//! at the circle's start: below 360 degrees an open loop).
 //!
 //! Guards (inputs the shim or upstream cannot take): finite values, a face tolerance above
 //! zero, a plane with non-parallel axes and a non-empty domain, a revolution that
 //! `CreateCanonical` builds, loops of at least three points with edges longer than
-//! `1e-3`, stage and heal op codes in range, field ids in range with values in the range
+//! `1e-3`, circle loops with non-parallel axes, a radius of at least `1e-3` and 1 to 360
+//! degrees, stage and heal op codes in range, field ids in range with values in the range
 //! of their field (an unsigned member takes no negative value: the cast is undefined),
 //! and scripts that would dereference the null face pointer of upstream's `SetProps_Stage2` /
 //! `SetProps_Stage3` ([`validate`] simulates the stage and face pointer; UB-131,
@@ -48,6 +52,8 @@ pub const SEED_FIELDS: i64 = 26;
 pub const MAX_LOOP_SNAPS: usize = 4;
 /// Values per loop in an op `8` snapshot.
 pub const LOOP_SNAP_LEN: usize = 14;
+/// Values per loop in an op `9` snapshot.
+pub const STAGE3_LOOP_SNAP_LEN: usize = 11;
 /// Largest number of loops.
 pub const MAX_LOOPS: usize = 4;
 /// Largest number of points per loop.
@@ -143,6 +149,23 @@ pub enum Loops {
     Vertex([f64; 3]),
     /// Edge loops (the first one outer): per loop its corner points, joined by line edges.
     Edges(Vec<Vec<[f64; 3]>>),
+    /// Circle loops: per loop one circle edge.
+    Circles(Vec<CircleLoop>),
+}
+
+/// A loop of one `SmCircle(c, x, y, [d0, d1], r, 3)` edge.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CircleLoop {
+    /// Centre.
+    pub c: [f64; 3],
+    /// X axis.
+    pub x: [f64; 3],
+    /// Y axis.
+    pub y: [f64; 3],
+    /// Domain in degrees.
+    pub d: [f64; 2],
+    /// Radius.
+    pub r: f64,
 }
 
 /// The face of the one-face B-rep.
@@ -253,6 +276,21 @@ pub fn validate_face(face: &FaceSpec) -> Result<(), FfiError> {
                     if !finite(p.iter().copied()) || sq_dist(*p, q) < 1e-6 {
                         return bad("loop point");
                     }
+                }
+            }
+        }
+        Loops::Circles(loops) => {
+            if loops.is_empty() || loops.len() > MAX_LOOPS {
+                return bad("loop count");
+            }
+            for l in loops {
+                if !finite(l.c.iter().chain(&l.x).chain(&l.y).chain(&l.d).copied().chain([l.r]))
+                    || sq_len(cross(l.x, l.y)) < 1e-6
+                    || l.r < 1e-3
+                    || l.d[1] - l.d[0] < 1.0
+                    || l.d[1] - l.d[0] > 360.0
+                {
+                    return bad("circle loop");
                 }
             }
         }
@@ -482,7 +520,7 @@ pub fn validate(face: &FaceSpec, ops: &[Op]) -> Result<(), FfiError> {
             1 | 2 => (0.0..=6.0).contains(&o.p[0]),
             // the bit mask is cast to ULONG
             3 => o.p[0] >= 0.0,
-            4 | 7 | 8 => true,
+            4 | 7 | 8 | 9 => true,
             5 => {
                 (0.0..SEED_FIELDS as f64).contains(&o.p[0])
                     && o.p[0].fract() == 0.0
@@ -505,12 +543,14 @@ pub fn validate(face: &FaceSpec, ops: &[Op]) -> Result<(), FfiError> {
 pub const MIN_PLANE_SIDE_FOR_STAGE3: f64 = 1e-6;
 
 /// Rejects a script that can reach `SetProps_Stage3` (op `0` with stage `3a` or `3`, or op `6`
-/// with `which == 3`) on a plane with edge loops whose domain has a side below
+/// with `which == 3`) on a plane with edge or circle loops whose domain has a side below
 /// [`MIN_PLANE_SIDE_FOR_STAGE3`]: `SmFace::ClassifyLoops` ends in `SmCrvOnSurf::GetKnots` and a
 /// SIGSEGV in `SmCurveClassification::IntersectUVDiscontinuties` (UB-128). A vertex loop, or a
 /// script that stops at Stage 2, does not crash.
 fn reject_degenerate_plane_stage3(face: &FaceSpec, ops: &[Op]) -> Result<(), FfiError> {
-    let (Surf::Plane { domain, .. }, Loops::Edges(_)) = (&face.surf, &face.loops) else {
+    let (Surf::Plane { domain, .. }, Loops::Edges(_) | Loops::Circles(_)) =
+        (&face.surf, &face.loops)
+    else {
         return Ok(());
     };
     // `!(x >= bound)` also rejects a NaN side (already refused as non-finite)
@@ -583,6 +623,17 @@ pub fn encode_face(face: &FaceSpec, input: &mut Vec<f64>) {
                 for p in l {
                     push_vec(input, p);
                 }
+            }
+        }
+        Loops::Circles(loops) => {
+            input.push(2.0);
+            input.push(loops.len() as f64);
+            for l in loops {
+                push_vec(input, &l.c);
+                push_vec(input, &l.x);
+                push_vec(input, &l.y);
+                push_vec(input, &l.d);
+                input.push(l.r);
             }
         }
     }
@@ -783,6 +834,26 @@ mod tests {
             f.loops = Loops::Vertex([0.0; 3]);
             assert!(validate(&f, &[op(0, [6.0, 26.0, 0.0, 0.0])]).is_ok());
         }
+    }
+
+    #[test]
+    fn checks_circle_loops() {
+        let circle = |r: f64, d: [f64; 2]| CircleLoop {
+            c: [0.0; 3],
+            x: [1.0, 0.0, 0.0],
+            y: [0.0, 1.0, 0.0],
+            d,
+            r,
+        };
+        let mut f = plane();
+        f.loops = Loops::Circles(vec![circle(0.5, [0.0, 360.0])]);
+        assert!(validate(&f, &[op(0, [6.0, 26.0, 0.0, 0.0]), op(9, [0.0; 4])]).is_ok());
+        for bad in [circle(1e-4, [0.0, 360.0]), circle(0.5, [0.0, 0.5]), circle(0.5, [0.0, 400.0])] {
+            f.loops = Loops::Circles(vec![bad]);
+            assert!(validate(&f, &[]).is_err());
+        }
+        f.loops = Loops::Circles(Vec::new());
+        assert!(validate(&f, &[]).is_err());
     }
 
     #[test]

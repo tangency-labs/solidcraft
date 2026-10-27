@@ -227,7 +227,8 @@ struct OneFace
 // exists (the caller deletes it, also on failure). Loops: `0 P[3]` one vertex loop, or `1
 // n_loops` then per loop `n_pts pts[3 n_pts]` an edge loop of SmLine edges p[i] -> p[i + 1]
 // (the first loop outer). False when a constructor call fails or the realised loop is not the
-// requested one.
+// requested one. Or `2 n_loops` then per loop `c[3] x[3] y[3] d0 d1 r`: one SmCircle edge per
+// loop (degrees), its one vertex at the circle's start.
 template <class R>
 bool build(R& rd, const SmContext& ctx, SmBrep*& brep, OneFace& of)
 {
@@ -261,6 +262,43 @@ bool build(R& rd, const SmContext& ctx, SmBrep*& brep, OneFace& of)
         of.loops.push_back(loop);
         of.loop_vertex.push_back(vus[0]->GetVertex());
         of.loop_edgeuses.push_back(std::vector<SmEdgeuse*>());
+    }
+    else if (loops_kind == 2)
+    {
+        // circle loops: per loop one SmCircle edge over its natural interval, its one vertex
+        // at the circle's start (EndLoop puts it there; an arc below 360 degrees is then an
+        // open loop with a closed pointer chain)
+        int64_t n_loops = rd.idx();
+        for (int64_t li = 0; li < n_loops; li++)
+        {
+            SmPoint3d c = rd.vec();
+            SmVector3d x = rd.vec();
+            SmVector3d y = rd.vec();
+            double d0 = rd.num();
+            double d1 = rd.num();
+            double r = rd.num();
+            SmLoop* loop = b.StartLoop(SM_OT_SAME);
+            if (loop == NULL)
+                return false;
+            SmEdge* edge = b.StartEdge(SM_OT_SAME, NULL, NULL, NULL);
+            if (edge == NULL)
+                return false;
+            SmCurve* crv = new (ctx) SmCircle(c, x, y, SmExtent1d(d0, d1), r, 3, &ctx);
+            SmExtent1d ivl = crv->GetNaturalInterval();
+            if (b.SetEdgeCurve(crv, FALSE) != SM_SUCCESS ||
+                b.SetLimits(SmVertexNode(ivl.GetMin()), SmVertexNode(ivl.GetMax())) != SM_SUCCESS ||
+                b.EndEdge() != SM_SUCCESS)
+                return false;
+            if (b.EndLoop() != SM_SUCCESS)
+                return false;
+            SmTArray<SmEdgeuse*> eus;
+            loop->GetEdgeuses(eus);
+            if (eus.GetSize() != 1 || eus[0]->GetOrientation() != SM_OT_SAME)
+                return false;
+            of.loops.push_back(loop);
+            of.loop_vertex.push_back(NULL);
+            of.loop_edgeuses.push_back(std::vector<SmEdgeuse*>(1, eus[0]));
+        }
     }
     else
     {

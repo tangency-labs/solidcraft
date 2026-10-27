@@ -132,6 +132,33 @@ int32_t run(Rd& rd, std::vector<double>& out)
             }
             break;
         }
+        case 9: // the loop props SetProps_Stage3 left in m_sLoopProps (first 4)
+        {
+            SmTArray<SmLoop*> loops;
+            face->GetLoops(loops);
+            res = (double)props.m_sLoopProps.GetSize();
+            use_alt = true;
+            for (ULONG li = 0; li < props.m_sLoopProps.GetSize() && li < 4; li++)
+            {
+                const SmLoopProps& lp = props.m_sLoopProps[li];
+                double at = -1.0;
+                for (ULONG lj = 0; lj < loops.GetSize(); lj++)
+                    if (loops[lj] == lp.m_cpLoop)
+                        at = (double)lj;
+                alt.push_back(at);
+                alt.push_back((double)lp.m_tLoopuseType);
+                alt.push_back((double)lp.m_lEdgeCnt);
+                alt.push_back((double)lp.m_bClosed3d);
+                alt.push_back((double)lp.m_bClosedPtrs);
+                alt.push_back((double)lp.m_bGoodClosed);
+                alt.push_back((double)lp.m_bArea_Loop);
+                alt.push_back((double)lp.m_eContainmentType);
+                alt.push_back((double)lp.m_eLoopOrient);
+                alt.push_back((double)lp.m_eDesiredLoopOrient);
+                alt.push_back((double)lp.m_bGoodOrient);
+            }
+            break;
+        }
         default: break;
         }
         (void)p3;
