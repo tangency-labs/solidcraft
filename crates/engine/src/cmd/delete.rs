@@ -160,7 +160,11 @@ fn apply(s: &mut Session, p: &Value) -> Result<Value> {
             return Err(bad(cmd, format!("no occurrence `{k}`")));
         };
         if s.doc.occurrences.iter().filter(|x| x.component == o.component).count() > 1 {
-            s.doc_mut().occurrences.retain(|x| x.id != o.id);
+            // The joints on it and the other assembly records naming it go with it: left behind,
+            // a joint stays in the Browser joined to nothing (#7749).
+            let gone = s.doc_mut().remove_occurrences(&std::collections::BTreeSet::from([o.id]));
+            s.visibility.hidden_joints.retain(|h| !gone.contains(h));
+            joints.extend(gone);
             s.pending_moves.remove(&o.id);
             done = true;
         } else {
@@ -404,6 +408,30 @@ mod tests {
             run(&mut s, "edit.undo", json!({}));
             assert_eq!(s.doc.assembly.joints.len(), 2);
         }
+    }
+
+    /// An instance deleted while its component has others goes alone, and the joints on it go
+    /// with it, with their motion links (#7749): left behind, a joint names an occurrence that is
+    /// gone, and every solve reports it.
+    #[test]
+    fn an_instance_deleted_alone_takes_its_joints_with_it() {
+        let mut s = joint_assembly();
+        let b1 = s.doc.occurrences.iter().find(|o| o.name == "B:1").unwrap().id;
+        let b2 = run(&mut s, "occurrence.copy", json!({"occurrence": "B:1", "translate": [0, 40, 0]}))["occurrence"].as_u64().unwrap();
+        let dry = run(&mut s, "selection.delete", json!({"occurrences": [b1], "dry_run": true}));
+        assert_eq!(s.doc.assembly.joints.len(), 2, "a dry run changes nothing");
+        let deleted = run(&mut s, "selection.delete", json!({"occurrences": [b1]}));
+        assert_eq!(deleted, dry);
+        let left: Vec<&str> = s.doc.assembly.joints.iter().map(|j| j.name.as_str()).collect();
+        assert_eq!(left, ["Glue"], "the joint on the deleted instance goes with it");
+        assert!(s.doc.assembly.links.is_empty(), "and so does its motion link");
+        assert_eq!(deleted["deleted_joints"].as_array().map(Vec::len), Some(1), "the reply names it: {deleted}");
+        assert!(s.doc.occurrences.iter().any(|o| o.id == b2), "the other instance stays");
+        let solved = run(&mut s, "joint.solve", json!({}));
+        assert_eq!(solved["errors"], json!([]), "no joint is left pointing at the deleted instance");
+        run(&mut s, "edit.undo", json!({}));
+        assert_eq!(s.doc.assembly.joints.len(), 2);
+        assert_eq!(s.doc.assembly.links.len(), 1);
     }
 
     #[test]
