@@ -31,6 +31,7 @@ mod component_clone_assembly;
 mod construct;
 mod delete;
 mod diagnostics;
+mod drawing_break;
 mod edit;
 mod face;
 mod features;
@@ -304,6 +305,7 @@ pub fn command_specs() -> Vec<&'static CommandSpec> {
     v.extend(view_navigation::COMMANDS.iter());
     v.extend(view_dxf::COMMANDS.iter());
     v.extend(diagnostics::COMMANDS.iter());
+    v.extend(drawing_break::COMMANDS.iter());
     v.extend(render::COMMANDS.iter());
     v
 }

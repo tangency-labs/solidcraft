@@ -13,6 +13,7 @@ pub mod access;
 pub mod agent_chat;
 pub mod agent_cursor;
 pub mod bom_panel;
+pub mod broken_view_preview;
 pub mod browser;
 pub mod browser_canvas;
 pub mod browser_prompts;
