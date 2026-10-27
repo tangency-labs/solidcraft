@@ -1668,4 +1668,39 @@ mod tests {
             assert!((p - q).length() < 1e-9, "{p:?} {q:?}");
         }
     }
+
+    /// A torus record read with its generator flagged non-planar takes the inherited
+    /// general-solver branch of `STEPInversion`, converting through the torus's own
+    /// parameter conversions: it finds the parameters the analytic branch finds.
+    #[test]
+    fn non_planar_flag_step_inversion_converts_through_the_torus() {
+        use crate::surface::surface::Surface;
+        let k = Kernel::default();
+        for swap in [false, true] {
+            for inside_out in [false, true] {
+                let planar = canonical(&k, swap, inside_out);
+                let mut non_planar = planar.clone();
+                non_planar.base.planar_generator = false;
+                let dom = planar.base.anal_uv_domain;
+                let (u, v) = (dom.u_interval(), dom.v_interval());
+                let sp = Surface::from(planar.clone());
+                let sn = Surface::from(non_planar);
+                for (fu, fv) in [(0.3, 0.4), (0.7, 0.15), (0.55, 0.8)] {
+                    let step = Point2::new(
+                        u.min() + fu * (u.max() - u.min()),
+                        v.min() + fv * (v.max() - v.min()),
+                    );
+                    let p = planar.evaluate_step_point(step).unwrap();
+                    let (a, la) = sp.step_inversion(&k, &dom, p, 1e-7, None).unwrap();
+                    let (b, lb) = sn.step_inversion(&k, &dom, p, 1e-7, None).unwrap();
+                    assert!((a - step).length() < 1e-6, "{a:?} {step:?}");
+                    assert!(
+                        (a - b).length() < 1e-6,
+                        "{a:?} {b:?} swap={swap} io={inside_out}"
+                    );
+                    assert_eq!(la, lb);
+                }
+            }
+        }
+    }
 }

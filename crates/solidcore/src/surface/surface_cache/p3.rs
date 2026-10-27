@@ -90,10 +90,11 @@
 //!   into the children through the virtual `ImplantEdgeuse` / `ImplantPolyEdge`:
 //!   [`SurfaceCache::subdivide_node`] runs the base class's (which fail: the edge uses are
 //!   dropped), and the trimmed surface cache splits through
-//!   [`SurfaceCache::subdivide_node_split`] and its own implants. DISPATCH GAP: `GetTree`
-//!   (also called at the start of `SubdivideNode`, where it may build or rebuild the tree)
-//!   dispatches `BuildTree()` virtually, to `SmTrimSrfCache::BuildTree` on a trimmed
-//!   surface cache. [`SurfaceCache::get_tree`] preserves standalone trimmed-cache
+//!   [`SurfaceCache::subdivide_node_split`] and its own implants. `GetTree` dispatches
+//!   `BuildTree()` virtually, to `SmTrimSrfCache::BuildTree` on a trimmed surface cache.
+//!   `SubdivideNode` also starts with `GetTree`; its build or rebuild is not reached
+//!   there (the node is of the built tree, and the builds that subdivide are under
+//!   construction), so [`SurfaceCache::subdivide_node_split`] reads the built tree. [`SurfaceCache::get_tree`] preserves standalone trimmed-cache
 //!   flags and rejects a face-owned trimmed build without a [`CacheFace`](crate::surface::trim_srf_cache::CacheFace)
 //!   adapter, instead of silently building a plain cache. [`SurfaceCache::subdivide_node`]
 //!   does not call `GetTree` (it needs a built tree and fails without one).
@@ -414,8 +415,13 @@ impl<O: Copy + PartialEq> SurfaceCache<O> {
         only_aux_data: bool,
     ) -> Result<Option<(NodeId, NodeId)>> {
         let mut only_aux_data = only_aux_data;
-        // DISPATCH GAP: upstream starts with GetTree(), which may build or rebuild the tree
-        // (through the virtual BuildTree()); the port needs a built tree
+        // Upstream starts with GetTree(), which builds the tree when there is none or
+        // rebuilds it for a face-owned plain cache outside a build (m_bHaveTSurfaceCache
+        // FALSE, m_bFaceContainmentDone != 2). Neither is reached: `node` is a node of
+        // this cache's tree, the builds that subdivide hold FaceContainment::
+        // UnderConstruction (SmTemporaryChangeValue in BuildTree), and a face-owned
+        // trimmed build without its face is refused before it subdivides. (A rebuild
+        // there would free `node` upstream.) The port reads the built tree.
         let (aux_type, parent_bbox, has_children, is_top) = {
             let tree = self.tree_or(OP_NODE)?;
             let n = tree.node(node)?;

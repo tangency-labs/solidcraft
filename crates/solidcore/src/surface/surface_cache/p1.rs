@@ -347,36 +347,18 @@ pub(super) fn calculate_bounding_box(
                     crate::surface::surface::p1::POLAR_RECURSION,
                 ));
             }
-            // DISPATCH GAP: the other boxes come from the surface's own cache
-            // (Surface::base_calculate_bounding_box, surface::surface::p1), whose build
-            // needs the kernel this signature does not take. No UNPORTED marker: the
-            // callees are ported (the continuities of the tree build are
-            // surface::surface::p6); the error names the owner of the base body. Once the
-            // kernel is plumbed, the next blocker for these kinds is surface.surface_p5:
-            // CalculateContinuities calls the base CreateIsoParametricCurve, which that
-            // unit owns.
+            // The other boxes come from the base body (Surface::base_calculate_bounding_box,
+            // surface::surface::p1): the top node of the surface's own cache, the cache
+            // this callback is building. Not reached: the callers are the polar box of a
+            // node (refused above) and the tolerance test of an SM_AD_AUX_DATA node,
+            // which upstream casts to an SmBSplineSurface unchecked and the port refuses
+            // for these kinds before calling here (`bspline_of`). Routing it would build
+            // a second cache of the surface from inside the first build, which recurses.
+            // The error names the owner of the base body.
             Err(SolidError::unported(
                 "SmSurface::CalculateBoundingBox",
                 "surface.surface_p1",
             ))
-        }
-        // SmOffsetSurface::CalculateBoundingBox (OffsetSurface::calculate_bounding_box)
-        // when there are no basis guesses to forward to the base.
-        SurfaceKind::OffsetSurface(o)
-            if req.pseudo_guess.is_none() && req.polar_guess.is_none() =>
-        {
-            let boxes = o.calculate_bounding_box(
-                k,
-                surface,
-                domain,
-                [req.normal, req.pseudo, req.polar],
-                req.expand_by_zone_tol,
-            )?;
-            Ok(BoundingBoxes {
-                normal: boxes.normal_box,
-                pseudo: boxes.pseudo_box,
-                polar: boxes.polar_box,
-            })
         }
         // SmOffsetSurface::CalculateBoundingBox forwarding the basis guesses to its base's
         // CalculateBoundingBox (this dispatcher, all three boxes)
@@ -3680,5 +3662,64 @@ mod tests {
         let o = Vec3::new(0.0, 0.0, 0.0);
         let z = SurfaceCache::<u32>::size_tolerances_from_corners(o, o, o, o);
         assert_eq!(z.aspect_ratio, Vec2::new(0.5, 0.5));
+    }
+
+    /// A node box of an offset surface with basis guesses (the polar box chain of
+    /// `BuildPolarBox` passes the parent's box) runs `SmOffsetSurface::
+    /// CalculateBoundingBox`, which hands the guesses to its base surface: the polar
+    /// box is the base's, computed with the same guess.
+    #[test]
+    fn offset_node_boxes_pass_the_basis_guesses_to_the_base() {
+        use crate::geom::axis2_placement::Axis2Placement;
+        use crate::nurbs::b_spline_surface::BoundingBoxRequest;
+        use crate::surface::offset_surface::OffsetSurface;
+        use crate::surface::torus::{Torus, TorusOptions};
+        let k = Kernel::default();
+        let torus = Torus::create_canonical(
+            &k,
+            &Axis2Placement::IDENTITY,
+            3.0,
+            1.0,
+            TorusOptions::default(),
+            None,
+        )
+        .unwrap();
+        let base = Surface::from(torus);
+        let natural = base.natural_uv_domain_with_nurb(&k).unwrap();
+        let sub = |a: f64, b: f64, c: f64, d: f64| {
+            Extent2d::from_points(natural.evaluate(a, b), natural.evaluate(c, d))
+        };
+        let wide = sub(0.1, 0.1, 0.6, 0.6);
+        let node = sub(0.2, 0.25, 0.35, 0.4);
+        let guess = base
+            .calculate_bounding_box(&k, &wide, [false, false, true], true)
+            .unwrap()
+            .polar_box
+            .unwrap();
+        let offset = Surface::from(
+            OffsetSurface::new(&k, 0.5, base.clone(), true, crate::geom::extent2d::SS_NONE)
+                .unwrap(),
+        );
+        let req = BoundingBoxRequest {
+            normal: false,
+            pseudo: false,
+            polar: true,
+            pseudo_guess: None,
+            polar_guess: Some(&guess),
+            expand_by_zone_tol: true,
+            expand_tolerance: None,
+        };
+        let boxes = calculate_bounding_box(&k, &offset, &node, &req).unwrap();
+        let from_base = base
+            .calculate_bounding_box_with_guesses(
+                &k,
+                &node,
+                [true, true, true],
+                true,
+                None,
+                Some(&guess),
+            )
+            .unwrap();
+        assert_eq!(boxes.polar, from_base.polar_box);
     }
 }

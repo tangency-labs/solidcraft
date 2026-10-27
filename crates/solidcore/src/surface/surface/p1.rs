@@ -2016,6 +2016,32 @@ impl Surface {
         want: [bool; 3],
         expand_pos_boxes_by_zone_tol_3d: bool,
     ) -> Result<SurfaceBoxes> {
+        self.calculate_bounding_box_with_guesses(
+            k,
+            uv_domain,
+            want,
+            expand_pos_boxes_by_zone_tol_3d,
+            None,
+            None,
+        )
+    }
+
+    /// [`Surface::calculate_bounding_box`] with upstream's optional basis guesses
+    /// (`pOptPseudoBasisGuess`, `pOptPolarBasisGuess`): the B-spline override uses them,
+    /// an offset surface passes them to its base surface, the base body ignores them.
+    ///
+    /// # Errors
+    ///
+    /// As [`Surface::calculate_bounding_box`].
+    pub fn calculate_bounding_box_with_guesses(
+        &self,
+        k: &Kernel,
+        uv_domain: &Extent2d,
+        want: [bool; 3],
+        expand_pos_boxes_by_zone_tol_3d: bool,
+        pseudo_guess: Option<&PseudoBox>,
+        polar_guess: Option<&PolarBox>,
+    ) -> Result<SurfaceBoxes> {
         match self.kind() {
             // (SmSurfOfRevolution inherits the B-spline override)
             SurfaceKind::Cone(_)
@@ -2038,8 +2064,8 @@ impl Surface {
                     normal: want[0],
                     pseudo: want[1],
                     polar: want[2],
-                    pseudo_guess: None,
-                    polar_guess: None,
+                    pseudo_guess,
+                    polar_guess,
                     expand_by_zone_tol: expand_pos_boxes_by_zone_tol_3d,
                     expand_tolerance,
                 };
@@ -2064,9 +2090,24 @@ impl Surface {
             SurfaceKind::CurveBounded(_) | SurfaceKind::Step(_) | SurfaceKind::SrfInVolume(_) => {
                 self.base_calculate_bounding_box(k, want, expand_pos_boxes_by_zone_tol_3d)
             }
-            SurfaceKind::OffsetSurface(s) => {
-                s.calculate_bounding_box(k, self, uv_domain, want, expand_pos_boxes_by_zone_tol_3d)
-            }
+            // (the basis guesses are passed along to the base surface's boxes)
+            SurfaceKind::OffsetSurface(s) => s.calculate_bounding_box_with(
+                k,
+                self,
+                uv_domain,
+                want,
+                expand_pos_boxes_by_zone_tol_3d,
+                |base| {
+                    base.calculate_bounding_box_with_guesses(
+                        k,
+                        uv_domain,
+                        [true, true, true],
+                        expand_pos_boxes_by_zone_tol_3d,
+                        pseudo_guess,
+                        polar_guess,
+                    )
+                },
+            ),
         }
     }
 

@@ -1598,8 +1598,8 @@ impl Cone {
     /// # Errors
     ///
     /// `SM_ERR` when the point does not drop onto the generator (upstream leaves the
-    /// height unset); those of the start-plane transform and the generator solve;
-    /// [`SolidError::Unported`] for a non-planar generator.
+    /// height unset); those of the start-plane transform and the generator solve; for a
+    /// non-planar generator, those of the B-spline inversion and the conversions.
     pub fn step_inversion(
         &self,
         k: &Kernel,
@@ -1633,7 +1633,10 @@ impl Cone {
 
     /// `SmSurfOfRevolution::STEPInversion` on the cone's base parts
     /// ([`SurfOfRevolution::step_inversion_with_outputs`], unit
-    /// `surface.surf_of_revolution_p2`), over the cone's STEP domain.
+    /// `surface.surf_of_revolution_p2`), over the cone's STEP domain. A non-planar
+    /// generator (a cone record read with that flag) converts through the cone's own
+    /// `ConvertUVFromSTEPToNURBS` / `ConvertUVFromNURBSToSTEP`, which upstream calls
+    /// virtually.
     fn rev_step_inversion(
         &self,
         k: &Kernel,
@@ -1643,7 +1646,20 @@ impl Cone {
         uv_guess: Option<Point2>,
     ) -> Result<ConeStepInversion> {
         let rev = &self.rev;
-        let r = rev.step_inversion_with_outputs(k, anal_domain, point_on_surf, tol_3d, uv_guess)?;
+        let r = if rev.planar_generator {
+            rev.step_inversion_with_outputs(k, anal_domain, point_on_surf, tol_3d, uv_guess)?
+        } else {
+            rev.step_inversion_non_planar(
+                k,
+                anal_domain,
+                point_on_surf,
+                tol_3d,
+                uv_guess,
+                None,
+                |uv| self.convert_uv_from_step_to_nurbs(k, uv),
+                |uv| self.convert_uv_from_nurbs_to_step(k, uv),
+            )?
+        };
         Ok(ConeStepInversion {
             uv: r.uv,
             location: r.location,
@@ -2319,5 +2335,37 @@ mod tests {
                 .unwrap();
         assert!(r.coincident);
         assert_eq!(r.reversed, Some(true));
+    }
+
+    /// A cone record read with its generator flagged non-planar takes the inherited
+    /// general-solver branch of `STEPInversion`, converting through the cone's own
+    /// parameter conversions: it finds the parameters the analytic branch finds.
+    #[test]
+    fn non_planar_flag_step_inversion_converts_through_the_cone() {
+        let k = k();
+        for swap in [false, true] {
+            for inside in [false, true] {
+                let planar =
+                    Cone::create_canonical(&k, &std_placement(), 1.0, 2.0, 3.0, swap, inside)
+                        .unwrap();
+                let mut non_planar = planar.clone();
+                non_planar.rev.planar_generator = false;
+                let dom = planar.rev.anal_uv_domain;
+                let (u, v) = (dom.u_interval(), dom.v_interval());
+                for (fu, fv) in [(0.3, 0.4), (0.7, 0.15), (0.55, 0.8)] {
+                    let step = Point2::new(
+                        u.min() + fu * (u.max() - u.min()),
+                        v.min() + fv * (v.max() - v.min()),
+                    );
+                    let p = planar.evaluate_step_point(step).unwrap();
+                    let a = planar.step_inversion(&k, p, 1e-7, None).unwrap();
+                    let b = non_planar.step_inversion(&k, p, 1e-7, None).unwrap();
+                    assert!((a.uv - step).length() < 1e-6, "{:?} {step:?}", a.uv);
+                    assert!((a.uv - b.uv).length() < 1e-6, "{:?} {:?}", a.uv, b.uv);
+                    assert_eq!(a.location, b.location);
+                    assert!(b.inside);
+                }
+            }
+        }
     }
 }

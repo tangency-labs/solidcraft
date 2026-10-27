@@ -2244,13 +2244,21 @@ impl Surface {
                 s.base()
                     .step_inversion(k, anal_domain, point_on_surf, tol_3d, uv_guess)
             }
-            SurfaceKind::Torus(_) => {
-                // DISPATCH GAP (#76): the non-planar branch converts through the torus's
-                // virtual ConvertUVFromSTEPToNURBS / ConvertUVFromNURBSToSTEP.
-                Err(SolidError::unported(
-                    "SurfaceKind::Torus::STEPInversion conversions",
-                    "surface.surface_p2",
-                ))
+            // a torus record read with a non-planar generator flag: the inherited
+            // general-solver branch converts through the torus's virtual
+            // ConvertUVFromSTEPToNURBS / ConvertUVFromNURBSToSTEP
+            SurfaceKind::Torus(s) => {
+                let r = s.base().step_inversion_non_planar(
+                    k,
+                    anal_domain,
+                    point_on_surf,
+                    tol_3d,
+                    uv_guess,
+                    Some(self),
+                    |uv| s.convert_uv_from_step_to_nurbs(k, uv),
+                    |uv| s.convert_uv_from_nurbs_to_step(k, uv),
+                )?;
+                Ok((r.uv, r.location))
             }
         }
     }
@@ -6384,8 +6392,11 @@ pub fn cc_local_solve<O: SolutionObject>(
 /// # Errors
 ///
 /// Those of `SmExtent3d::ComputeConeBoundTo`; [`SolidError::Unported`] once the
-/// patch's polar box is needed (a dispatch gap: the `SmBezierPatch` of a tree node is
-/// held by the surface cache).
+/// patch's polar box is needed (the `SmBezierPatch` of a tree node is held by the
+/// surface cache, which this signature does not take). Production solves never
+/// reach that: every `SmCSGlobalSolver` the port builds holds its surface cache and
+/// runs [`cs_are_perpen_disjoint_in`]; this cache-less form serves solvers built
+/// without one (tests, the `surface.surface_p2` runner's node-only cases).
 pub fn cs_are_perpen_disjoint<O>(
     curve_tree: &Tree<O>,
     curve_node: &TreeNode<O>,
@@ -6400,12 +6411,12 @@ pub fn cs_are_perpen_disjoint<O>(
             return Ok(false);
         }
 
-        // SmBezierPatch::GetPolarBox is SurfaceCache::polar_box, but the patch data
-        // lives in the surface cache, which the tree reaches once the tree
-        // construction hands it over.
-        // DISPATCH GAP: SmBezierPatch::GetPolarBox (surface.surface_cache_p1, ported;
-        // no UNPORTED marker: the callee is ported, the tree cannot reach the cache's data yet) (then IsDisjointWithCone, and for a curve span node the chord cone test
-        // smgu_ConesAreDisjointPerpen with the span's turning angle plus 3 degrees)
+        // SmBezierPatch::GetPolarBox is SurfaceCache::polar_box_unstored, but the patch
+        // data lives in the surface cache, which a solver built with one passes to
+        // cs_are_perpen_disjoint_in (every production CS solve; see the doc). Without
+        // the cache the polar box is out of reach (then IsDisjointWithCone, and for a
+        // curve span node the chord cone test smgu_ConesAreDisjointPerpen with the
+        // span's turning angle plus 3 degrees).
         let _ = (curve_tree, cone_vec);
         return Err(SolidError::unported(
             "SmBezierPatch::GetPolarBox",

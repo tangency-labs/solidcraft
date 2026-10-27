@@ -294,6 +294,65 @@ impl SurfOfRevolution {
         }
     }
 
+    /// The non-planar generator branch of `STEPInversion`: the general B-spline
+    /// inversion over the NURB image of `anal_domain`, with the parameter conversions
+    /// upstream calls virtually (`ConvertUVFromSTEPToNURBS` /
+    /// `ConvertUVFromNURBSToSTEP`): this class's own, or those of a derived class that
+    /// inherits `STEPInversion` (`SmTorus`, `SmCone`). The B-spline inversion's own
+    /// virtual solves run on `surface` (the derived surface upstream's `this` is) when
+    /// given, else on a plain B-spline surface of this NURB
+    /// ([`BSplineSurface::step_inversion`]).
+    ///
+    /// # Errors
+    ///
+    /// Those of [`BSplineSurface::step_inversion`] and of `to_step`;
+    /// [`SolidError::Unported`] from `to_nurbs` (its other errors are ignored, as
+    /// upstream ignores the status).
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn step_inversion_non_planar(
+        &self,
+        k: &Kernel,
+        anal_domain: &Extent2d,
+        point_on_surf: Point3,
+        tol_3d: f64,
+        uv_guess: Option<Point2>,
+        surface: Option<&Surface>,
+        to_nurbs: impl Fn(Point2) -> Result<Point2>,
+        to_step: impl Fn(Point2) -> Result<Point2>,
+    ) -> Result<StepInversionOutputs> {
+        // Not planar, must use the general solver.
+
+        // Have to convert the analytical domain to a NURBS domain (the statuses are
+        // ignored: a failed conversion leaves the STEP point).
+        let mut nurbs_domain = Extent2d::new();
+        let step_min = anal_domain.min();
+        let nurbs_min = ignored(to_nurbs(step_min))?.unwrap_or(step_min);
+        nurbs_domain.add_point(nurbs_min);
+        let step_max = anal_domain.max();
+        let nurbs_max = ignored(to_nurbs(step_max))?.unwrap_or(step_max);
+        nurbs_domain.add_point(nurbs_max);
+
+        let (nurbs_parameter, location) = match surface {
+            Some(surface) => self.base.step_inversion_on(
+                k,
+                surface,
+                &nurbs_domain,
+                point_on_surf,
+                tol_3d,
+                uv_guess,
+            )?,
+            None => self
+                .base
+                .step_inversion(k, &nurbs_domain, point_on_surf, tol_3d, uv_guess)?,
+        };
+        let step = to_step(nurbs_parameter)?;
+        Ok(StepInversionOutputs {
+            uv: step,
+            location,
+            inside: true,
+        })
+    }
+
     /// [`Self::step_inversion`] with the outputs upstream writes before returning
     /// `SM_ERR` for a point outside the sweep interval (`inside` is `false` then),
     /// for derived classes that read them (`SmCone`).
@@ -311,29 +370,16 @@ impl SurfOfRevolution {
     ) -> Result<StepInversionOutputs> {
         // pass call along for nonPlanar generator curves
         if !self.planar_generator {
-            // Not planar, must use the general solver.
-
-            // Have to convert the analytical domain to a NURBS domain (the statuses are
-            // ignored: a failed conversion leaves the STEP point).
-            let mut nurbs_domain = Extent2d::new();
-            let step_min = anal_domain.min();
-            let nurbs_min =
-                ignored(self.convert_uv_from_step_to_nurbs(k, step_min))?.unwrap_or(step_min);
-            nurbs_domain.add_point(nurbs_min);
-            let step_max = anal_domain.max();
-            let nurbs_max =
-                ignored(self.convert_uv_from_step_to_nurbs(k, step_max))?.unwrap_or(step_max);
-            nurbs_domain.add_point(nurbs_max);
-
-            let (nurbs_parameter, location) =
-                self.base
-                    .step_inversion(k, &nurbs_domain, point_on_surf, tol_3d, uv_guess)?;
-            let step = self.convert_uv_from_nurbs_to_step(k, nurbs_parameter)?;
-            return Ok(StepInversionOutputs {
-                uv: step,
-                location,
-                inside: true,
-            });
+            return self.step_inversion_non_planar(
+                k,
+                anal_domain,
+                point_on_surf,
+                tol_3d,
+                uv_guess,
+                None,
+                |uv| self.convert_uv_from_step_to_nurbs(k, uv),
+                |uv| self.convert_uv_from_nurbs_to_step(k, uv),
+            );
         }
 
         // Generator curve is planar, so we can solve it analytically.

@@ -2821,9 +2821,9 @@ impl<O: SolutionObject> SsGlobalSolver<'_, '_, O> {
     ///
     /// # Errors
     ///
-    /// [`SolidError::Unported`] for two patch nodes when normalizing (the patch data
-    /// lives in the surface caches, which a `Tree` does not reach yet:
-    /// `surface.surface_cache_p1`).
+    /// [`SolidError::Unported`] for two patch nodes when normalizing without
+    /// [`SsGlobalSolver::caches`] (the patch data lives in the surface caches:
+    /// `surface.surface_cache_p1`); the production solve always sets them.
     pub fn may_contain_answers(&self, branch: &Branch) -> Result<bool> {
         let k = self.kernel;
         if self.base.operation == SolverOperation::Normalize {
@@ -2873,12 +2873,11 @@ impl<O: SolutionObject> SsGlobalSolver<'_, '_, O> {
                     return self.base.branch_may_contain_answers(branch);
                 }
                 // The patches (the nodes' m_pData) are SurfaceCache::patch(node) of the
-                // two surface caches. DISPATCH GAP: the constructor (SsGlobalSolver::new,
-                // surface::surface::p1) takes the trees as upstream does, and a Tree does
-                // not reach its cache; handing the caches over needs them mutable (the
-                // polar boxes are built lazily). No UNPORTED marker: the constructor is
-                // ported; the error names the owner of the patch data
-                // (surface.surface_cache_p1).
+                // two surface caches, which the branch above reads. Without them (a
+                // solver built without caches: tests and runners; the production SS
+                // solve, Surface::global_surface_solve_in here, always sets `caches`
+                // after SsGlobalSolver::new) the polar boxes are out of reach; the
+                // error names the owner of the patch data (surface.surface_cache_p1).
                 // (then sm_IsNodeValid of both nodes, returning SM_SUCCESS = FALSE when
                 // outside, ComputeConeBoundTo and the polar box cone tests)
                 return Err(SolidError::unported(

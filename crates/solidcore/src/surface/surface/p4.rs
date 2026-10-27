@@ -1622,12 +1622,24 @@ impl Surface {
                             }
                         }
                     } else {
-                        get_surface_cache(k, self, None::<NoObject>)?;
-                        // DISPATCH GAP: SmFace::PointClassify (bare face-owned surface without FaceQueries)
-                        return Err(SolidError::unported(
-                            "SmFace::PointClassify",
-                            "query.face_p2",
-                        ));
+                        // Without a context the surface's own cache is made here. For a
+                        // face-owned surface its trimmed cache needs the face's
+                        // topology, so `get_surface_cache` already returns `Unported`
+                        // when it would build one; a plain cache it falls back to is not
+                        // an SmTrimSrfCache (SM_CAST_PTR gives NULL): no test, as
+                        // upstream.
+                        let cache = get_surface_cache(k, self, None::<NoObject>)?;
+                        if cache.is_trimmed()
+                            && cache.point_test_enabled
+                            && !cache.face_was_modified
+                        {
+                            // SmFace::PointClassify of a bare face-owned surface: the
+                            // classifier is the context's FaceQueries
+                            return Err(SolidError::unported(
+                                "SmFace::PointClassify",
+                                "query.face_p2",
+                            ));
+                        }
                     }
                 }
 
