@@ -59,8 +59,8 @@ Handbook gives only historical proportions (depth and width P/2; the "modified s
 trapezoidal and Acme forms replaced it.
 
 **Sizes.** Without a designation the thread takes the standard size that fits the face: a shaft
-its major diameter, a hole its drill (metric: the tap drill d − P; the other forms: the internal
-minor diameter). Metric uses the ISO 261/262 coarse pitches (M1.6 to M56); trapezoidal and metric
+its major diameter, a hole its drill (metric: the tap maker's drill, `docs/thread-catalogue.md`;
+the other forms: the internal minor diameter). Metric uses the ISO 261/262 coarse pitches (M1.6 to M56); trapezoidal and metric
 buttress the ISO 2902 middle pitch of each diameter (Tr8x1.5 to Tr130x14; buttress from S10x2),
 the series DIN 513-2 shares; Acme ASME B1.5's preferred sizes (1/4-16 to 5-2). Buttress inch has
 no size table here: its pitch is always given.

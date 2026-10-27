@@ -2,8 +2,8 @@
 
 The Hole dialog offers ISO metric coarse sizes, 15 additional fine diameter/pitch
 pairs, a finite set of 14 UNC and 14 UNF sizes, six sizes each for internal
-G/BSPP and Rp parallel pipe threads, and the ISO 7-1 Rc and ASME B1.20.1 NPT
-internal taper threads (every size of their tables, `docs/threads.md`). This is a verified subset,
+G/BSPP and Rp parallel pipe threads, and the ISO 7-1 Rc (1/16 to 4) and ASME
+B1.20.1 NPT (1/16 to 3) internal taper threads. This is a verified subset,
 not complete coverage of these standards. Unified sizes range from #4 through
 #12 and 1/4 through 1 inch. Include the family in a designation, for example
 `1/4-20 UNC` or `#10-32 UNF`.
@@ -21,11 +21,31 @@ depth, tolerances, drilling accuracy and the tap manufacturer's process guidance
 still determine the appropriate drill; the command's explicit `diameter` can
 override the recommendation.
 
-Metric holes retain the existing major-minus-pitch estimate, rounded to 0.001 mm.
-This preserves existing command behavior, including M8's 6.75 mm default. It is
-not presented as a tabulated 75% cut-tap recommendation. Existing files retain
-their saved diameter expressions. Custom metric dimensions remain editable, and
-Custom stays selected even when its current dimensions match a catalogue entry.
+Metric holes take the tap maker's drill: Yamawa YEU23's drill size column for
+cutting taps, printed p.704 (M, coarse) and pp.704 to 706 (MF, fine); M8 drills
+6.8 mm, M12 10.3 mm. A custom size the table lacks takes the major diameter less
+the pitch, to 0.001 mm (M8.5x1: 7.5 mm). This replaces the major-minus-pitch
+estimate every metric size took before (M8 6.75 mm). A saved design keeps the
+diameter it stored, so it builds as before; editing such a hole keeps its drill.
+The Design preference "Metric tapped holes drill the major diameter less the
+pitch" (`metric_tap_drill_major_less_pitch`, off by default) gives new metric
+holes that older drill again, in the Hole dialog and for the `solid.hole` command
+given no `diameter`.
+Custom metric dimensions remain editable, and Custom stays selected even when its
+current dimensions match a catalogue entry.
+
+## Choosing another drill
+
+The Hole dialog's Tap drill diameter is the tap maker's drill for the size and can
+be changed; the command's `diameter` does the same. A drill is accepted from the
+internal thread's standard minor diameter (ISO metric and Unified D1 = D −
+1.082532 P, G and Rp their basic minor, Rc and NPT the minor where the thread
+ends) up to 5% over the tap maker's drill. Where the tap maker's drill lies below
+that minor (Rp, Rc, NPT), the drill itself is the lower end. A smaller drill would
+leave the tap cutting inside the thread's minor diameter; a larger one leaves too
+little of the thread engaged. M8 accepts 6.647 to 7.14 mm. The field's tooltip
+gives the minor diameter and the range. A new size takes its own tap maker's drill
+again.
 
 Tapped holes create the physical pilot bore and the thread, listed (cosmetic) or,
 with `modeled`, cut into the wall as the Thread command cuts a modelled thread:

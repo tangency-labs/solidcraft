@@ -386,7 +386,7 @@ fn a_hole_too_narrow_or_a_shaft_too_thick_says_which_and_what_fits() {
     let before = volume(&mut s, "Nut");
     let e = s.execute("solid.thread", &json!({"face": [3.0, 0, 2], "designation": "M8", "modeled": true})).err().map(|e| e.to_string());
     let e = e.unwrap_or_default();
-    assert!(e.contains("this 6 mm hole is too narrow for a modelled M8 thread") && e.contains("drill 6.75 mm for M8"), "{e}");
+    assert!(e.contains("this 6 mm hole is too narrow for a modelled M8 thread") && e.contains("drill 6.8 mm for M8"), "{e}");
     assert!(!e.contains("too far"), "{e}");
     assert!((volume(&mut s, "Nut") - before).abs() < 1e-9);
 
@@ -1256,4 +1256,14 @@ fn a_modelled_tapped_hole_stops_clear_of_its_bottom_or_fades_out_before_it() {
     assert!(err(json!({"position":[0,0,0],"diameter":5,"modeled":true})).contains("`modeled` needs `thread`"));
     assert!(err(json!({"position":[0,0,0],"thread":"M8","ease_out":"standard"})).contains("modelled thread"));
     assert!(err(json!({"position":[0,0,0],"thread":"Rc 5"})).contains("no tap drill is tabulated"));
+    // Another drill than the tap maker's (M8: 6.8 mm): from the minor diameter to 5% over it.
+    let drill = |d: f64| {
+        let mut s = Session::default();
+        run(&mut s, "solid.box", json!({"length":30,"width":30,"height":20,"body_name":"Plate"}));
+        s.execute("solid.hole", &json!({"position":[15,15,20],"thread":"M8","diameter":d})).err().map(|e| e.to_string()).unwrap_or_default()
+    };
+    let e = drill(7.5);
+    assert!(e.contains("from 6.647 to 7.14 mm") && e.contains("too little of the thread"), "{e}");
+    assert!(drill(6.5).contains("the tap cannot cut"));
+    assert!(drill(7.1).is_empty() && drill(6.7).is_empty(), "inside the range");
 }

@@ -115,6 +115,13 @@ pub(crate) fn text_field(ui: &mut Ui, value: &mut String, hint: &str) -> (bool, 
     (enter, changed)
 }
 
+/// [`text_field`] with a tooltip; returns (Enter, changed). Tokens: `same as field`.
+pub(crate) fn text_field_tip(ui: &mut Ui, value: &mut String, hint: &str, tip: &str) -> (bool, bool) {
+    let (enter, changed, response) = editor(ui, value, hint, false);
+    response.on_hover_text(tip);
+    (enter, changed)
+}
+
 /// Expression field for a single-value popup which keeps ownership of keyboard focus.
 /// Tokens: field tokens. Preserves the legacy Edit Dimension focus behavior.
 pub(crate) fn focused_field(ui: &mut Ui, value: &mut String) -> bool {

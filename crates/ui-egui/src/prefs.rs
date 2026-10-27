@@ -617,6 +617,10 @@ preference_settings! {
     /// Up/Down and the wheel over a focused value field step its plain number (`value_step`,
     /// #2320). Off by default: the keys move the text cursor and the wheel scrolls, as before.
     step_values: bool = false, PAGE_DESIGN => check_id("ui.step_values");
+    /// New metric tapped holes drill the major diameter less the pitch (M8: 6.75 mm), as before
+    /// the tap maker's drills; off by default: the tap maker's drill (M8: 6.8 mm). Saved designs
+    /// keep the drill they stored either way.
+    metric_tap_drill_major_less_pitch: bool = false, PAGE_DESIGN => check_id("prefs.metric_tap_drill_major_less_pitch");
     /// Reopen the saved designs that were open when the app was last closed (#5542).
     reopen_designs: bool = true, PAGE_GENERAL;
     /// Those designs' files, in tab order, as the last quit left them.
@@ -1102,6 +1106,8 @@ fn defaults(app: &mut SolveApp, page: usize) {
 /// the interface scale.
 pub fn apply(app: &mut SolveApp, ctx: &egui::Context) {
     apply_network(&app.preferences);
+    // The hole command reads the metric tapped drill rule from the session.
+    app.session.metric_tap_drill_major_less_pitch = app.preferences.metric_tap_drill_major_less_pitch;
     // The profiler records while the preference is on (switched when it changes; at start-up only
     // when on, so SOLIDCRAFT_PROFILE=1 is not undone by the default).
     let profile = app.preferences.profile_operations;
@@ -2420,6 +2426,46 @@ mod tests {
         h.call("ui.prefs", json!({"profile_operations": false}));
         h.frames(2);
         assert!(!solidcraft_engine::profile::enabled());
+    }
+
+    /// New metric tapped holes drill the tap maker's drill (M8: 6.8 mm); the preference keeps
+    /// the major diameter less the pitch they took before (6.75 mm). It reaches the hole command
+    /// whether set through the control channel or the Preferences page, and a hole given its
+    /// diameter keeps it either way.
+    #[test]
+    fn the_metric_tap_drill_preference_keeps_major_less_pitch() {
+        use serde_json::json;
+        let plate = || {
+            let mut h = crate::scenario::Harness::new();
+            h.app.run("solid.box", json!({"length":40,"width":20,"height":10,"body_name":"Plate"})).unwrap();
+            h
+        };
+        let drilled = |h: &mut crate::scenario::Harness, params: serde_json::Value| {
+            let id = h.app.run("solid.hole", params).unwrap()["feature"].as_u64().unwrap();
+            match &h.app.session.doc.feature(id).unwrap().kind {
+                solidcraft_engine::doc::FeatureKind::Hole { diameter, .. } => diameter.to_string(),
+                k => panic!("{k:?}"),
+            }
+        };
+        let m8 = json!({"position":[10,10,10],"thread":"M8"});
+        let mut h = plate();
+        h.frames(1);
+        assert!(!h.app.preferences.metric_tap_drill_major_less_pitch, "off by default");
+        assert_eq!(drilled(&mut h, m8.clone()), "6.8 mm");
+        let mut h = plate();
+        h.call("ui.prefs", json!({"metric_tap_drill_major_less_pitch": true}));
+        h.frames(2);
+        assert!(h.app.session.metric_tap_drill_major_less_pitch);
+        assert_eq!(drilled(&mut h, m8.clone()), "6.75 mm");
+        // Only metric changes: a Unified size keeps its tabulated drill.
+        assert_eq!(drilled(&mut h, json!({"position":[25,10,10],"thread":"1/4-20 UNC"})), "5.1054 mm");
+        let mut given = m8;
+        given["position"] = json!([33, 10, 10]);
+        given["diameter"] = json!("6.9 mm");
+        assert_eq!(drilled(&mut h, given), "6.9 mm");
+        // A design opened or started keeps the user's choice.
+        h.app.run("file.new", json!({})).unwrap();
+        assert!(h.app.session.metric_tap_drill_major_less_pitch);
     }
 
     #[test]

@@ -544,11 +544,11 @@ impl ThreadForm {
         }
     }
 
-    /// The minor diameter a hole for this size is drilled to: the tap drill (major − pitch) for
-    /// metric, the internal thread's minor diameter for the others.
+    /// The minor diameter a hole for this size is drilled to: the tap maker's drill for metric
+    /// ([`crate::metric_tap_drill`]), the internal thread's minor diameter for the others.
     pub fn drill(self, d: f64, p: f64) -> f64 {
         match self {
-            ThreadForm::Metric => d - p,
+            ThreadForm::Metric => crate::metric_tap_drill(d, p),
             _ => 2.0 * self.groove(d, p, true).crest_r,
         }
     }

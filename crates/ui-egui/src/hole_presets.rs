@@ -46,13 +46,16 @@ struct ThreadOptions {
     /// runout, any other text a fade length.
     #[serde(skip_serializing_if = "Option::is_none")]
     ease_out: Option<String>,
+    /// A drill other than the tap maker's for the size; none: the tap maker's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    drill: Option<String>,
     #[serde(flatten)]
     unknown: BTreeMap<String, serde_json::Value>,
 }
 
 impl Default for ThreadOptions {
     fn default() -> Self {
-        Self { handedness: "right".into(), full_length: true, depth: None, modeled: false, ease_out: None, unknown: BTreeMap::new() }
+        Self { handedness: "right".into(), full_length: true, depth: None, modeled: false, ease_out: None, drill: None, unknown: BTreeMap::new() }
     }
 }
 
@@ -121,6 +124,7 @@ impl Preset {
         if required.into_iter().any(|text| text.trim().is_empty())
             || self.thread_options.depth.as_ref().is_some_and(|text| !valid_text(text, MAX_EXPRESSION))
             || self.thread_options.ease_out.as_ref().is_some_and(|text| text.trim().is_empty() || !valid_text(text, MAX_EXPRESSION))
+            || self.thread_options.drill.as_ref().is_some_and(|text| text.trim().is_empty() || !valid_text(text, MAX_EXPRESSION))
             || (self.thread_options.ease_out.is_some() && !(self.tapped && self.thread_options.modeled))
             || !["right", "left"].contains(&self.thread_options.handedness.as_str())
             || self.thread_options.unknown.len() > 8
@@ -210,6 +214,7 @@ impl Preset {
                         Some(_) if opts.modeled => Some(portable_length(&opts.ease_out.length, true)?),
                         _ => None,
                     },
+                    drill: opts.drill.as_deref().filter(|d| !d.trim().is_empty()).map(|d| portable_length(d, true)).transpose()?,
                     unknown: BTreeMap::new(),
                 }
             } else {
@@ -254,6 +259,10 @@ impl Preset {
             || (self.extent != Extent::All && (self.angled_bottom || self.style == Style::Drilled) && !angle(&self.tip_angle))
             || (self.tapped && solidcraft_engine::doc::parse_tapped_thread(&self.thread).is_none())
             || self.thread_options.ease_out.as_deref().is_some_and(|text| !named_runout(text) && !length(text))
+            || self.thread_options.drill.as_deref().is_some_and(|text| {
+                !solidcraft_engine::doc::parse_tapped_thread(&self.thread)
+                    .is_some_and(|t| doc.eval(text, expr::Kind::Length).is_ok_and(|v| t.check_drill(v).is_ok()))
+            })
             || (self.tapped && !self.thread_options.full_length && self.thread_options.depth.as_deref().is_none_or(|text| !length(text)))
         {
             return Err("hole_presets.invalid_parameters");
@@ -295,6 +304,7 @@ impl Preset {
         };
         opts.thread_depth = self.thread_options.depth.clone().unwrap_or_else(|| crate::dialogs::HoleOpts::default().thread_depth);
         opts.modeled = self.thread_options.modeled;
+        opts.drill.clone_from(&self.thread_options.drill);
         opts.ease_out = match self.thread_options.ease_out.as_deref() {
             None => crate::dialogs_thread::Ease::default(),
             Some(text) if named_runout(text) => crate::dialogs_thread::Ease { fade: true, short: text == "short", ..Default::default() },
@@ -604,6 +614,8 @@ mod tests {
             opts.thread_depth = "8 mm".into();
             opts.modeled = modeled;
             opts.ease_out = ease.clone();
+            // An Rc 1/2 drilled 17.8 mm, inside its 17.6 to 18.48 mm.
+            opts.drill = (thread == "Rc 1/2").then(|| "17.8 mm".to_string());
             let captured = opts.clone();
             let preset = Preset::capture(&dialog, "Pipe", &doc).unwrap();
             let row = serde_json::to_value(&preset).unwrap();
@@ -616,8 +628,8 @@ mod tests {
             read.recall(&mut fresh).unwrap();
             let Kind::Hole { opts, .. } = &fresh.kind else { panic!("expected Hole") };
             assert_eq!(
-                (&opts.thread, opts.hand, opts.thread_full_depth, &opts.thread_depth, opts.modeled, &opts.ease_out),
-                (&captured.thread, captured.hand, false, &captured.thread_depth, modeled, &ease),
+                (&opts.thread, opts.hand, opts.thread_full_depth, &opts.thread_depth, opts.modeled, &opts.ease_out, &opts.drill),
+                (&captured.thread, captured.hand, false, &captured.thread_depth, modeled, &ease, &captured.drill),
                 "{thread}"
             );
         }
@@ -629,5 +641,9 @@ mod tests {
         let mut preset = Preset::capture(&dialog, "Square", &doc).unwrap();
         preset.thread_options.ease_out = Some("standard".into());
         assert!(preset.validate().is_err());
+        // A drill outside the size's range is no preset to recall.
+        preset.thread_options.ease_out = None;
+        preset.thread_options.drill = Some("7.5 mm".into());
+        assert!(preset.validate().is_ok() && preset.validate_active(&doc).is_err(), "M8 takes 6.647 to 7.14 mm");
     }
 }

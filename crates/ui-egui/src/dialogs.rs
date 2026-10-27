@@ -424,6 +424,9 @@ pub struct HoleOpts {
     pub modeled: bool,
     /// A modelled tapped thread's inner end, towards the bottom: square or a fade.
     pub ease_out: crate::dialogs_thread::Ease,
+    /// A tapped hole's drill when it is not the tap maker's for the size (the command's
+    /// `diameter`); none: the tap maker's.
+    pub drill: Option<String>,
 }
 
 impl Default for HoleOpts {
@@ -442,6 +445,7 @@ impl Default for HoleOpts {
             hand: solidcraft_engine::doc::thread_forms::ThreadHand::Right,
             modeled: false,
             ease_out: crate::dialogs_thread::Ease::default(),
+            drill: None,
         }
     }
 }
@@ -4478,6 +4482,8 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                 let mut params = place;
                 if !opts.tapped {
                     params["diameter"] = json!(diameter);
+                } else if let Some(drill) = opts.drill.as_deref().map(str::trim).filter(|d| !d.is_empty()) {
+                    params["diameter"] = json!(drill);
                 }
                 params["type"] = json!(ty);
                 if to_object_on(&d.inputs) {
@@ -5457,6 +5463,13 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
                     opts.hand = *hand;
                     opts.modeled = *modeled;
                     opts.ease_out = crate::dialogs_thread::Ease::of(ease_out);
+                    // A saved drill other than the tap maker's for the size stays the hole's
+                    // (an older design's d - P metric drill among them).
+                    let saved = s.doc.eval(diameter, ValueKind::Length).ok();
+                    let tabulated = solidcraft_engine::doc::parse_tapped_thread(th).map(|t| t.tap_drill);
+                    if saved.zip(tabulated).is_none_or(|(a, b)| (a - b).abs() > 1e-9) {
+                        opts.drill = Some(diameter.to_string());
+                    }
                 }
                 opts.thread_full_depth = thread_depth.is_none();
                 if let Some(depth) = thread_depth {

@@ -710,14 +710,14 @@
     },
     "ladder/05-holes-and-taps/007-tapped-m8-blind": {
       "measured": {
-        "area_mm2": 9060.431918590197,
+        "area_mm2": 9062.405544647674,
         "body_count": 1,
         "edges": 17,
         "faces": 8,
         "vertices": 12,
-        "volume_mm3": 47546.393985981646
+        "volume_mm3": 47539.467162202374
       },
-      "seconds": 0.044542724,
+      "seconds": 0.057993293,
       "status": "pass"
     },
     "ladder/05-holes-and-taps/008-tapped-m5-into-curved-face": {
@@ -1638,14 +1638,14 @@
     },
     "ladder/11-cumulative-parts/003-threaded-flange": {
       "measured": {
-        "area_mm2": 17355.838402078,
+        "area_mm2": 17357.35813902275,
         "body_count": 1,
         "edges": 104,
         "faces": 38,
         "vertices": 69,
-        "volume_mm3": 52978.053115805815
+        "volume_mm3": 52962.08974469333
       },
-      "seconds": 1.821271078,
+      "seconds": 2.199779541,
       "status": "pass"
     },
     "ladder/11-cumulative-parts/004-housing": {
