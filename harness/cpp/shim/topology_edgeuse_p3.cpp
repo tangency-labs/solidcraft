@@ -30,6 +30,7 @@
 #include <vector>
 
 #include "sc_edgeuse_graph.h"
+#include "sc_trim_curve_record.h"
 
 namespace
 {
@@ -80,6 +81,17 @@ void put_edge_state(std::vector<double>& o, SmEdgeuse* p)
     o.push_back(ivl.GetMin());
     o.push_back(ivl.GetMax());
     o.push_back((double)e->GetTolerance());
+}
+
+// The tail every op reports: the edge use's and its mate's state, the edge state, then
+// the full records of the edge use's and its mate's UV trim curves.
+void put_states(std::vector<double>& o, Graph& g, SmEdgeuse* p, SmEdgeuse* mate)
+{
+    put_eu_state(o, g, p);
+    put_eu_state(o, g, mate);
+    put_edge_state(o, p);
+    sc_trim_curve::put_trim_curve(o, p->*EuPeek::uv());
+    sc_trim_curve::put_trim_curve(o, mate ? mate->*EuPeek::uv() : nullptr);
 }
 
 int32_t run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
@@ -147,12 +159,10 @@ int32_t run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         o.push_back(st(s));
         o.push_back(c ? dist : -1.0);
         o.push_back(want_dev && c ? dev : -1.0);
-        put_curve_id(o, c);
+        sc_trim_curve::put_trim_curve(o, c);
         o.push_back(has_fail ? (double)fail.m_eCreatePathType : -1.0);
         o.push_back(has_fail && fail.m_pBrep ? 1.0 : 0.0);
-        put_eu_state(o, g, p);
-        put_eu_state(o, g, mate);
-        put_edge_state(o, p);
+        put_states(o, g, p, mate);
         if (c)
         {
             c->SetOwner(NULL);
@@ -189,9 +199,7 @@ int32_t run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
         o.push_back(want_dist ? dist : -2.0);
         o.push_back(want_dev ? dev : -2.0);
         o.push_back(uv ? 1.0 : 0.0);
-        put_eu_state(o, g, p);
-        put_eu_state(o, g, mate);
-        put_edge_state(o, p);
+        put_states(o, g, p, mate);
         break;
     }
     case OP_BINORMAL:
@@ -227,9 +235,7 @@ int32_t run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
             o.push_back(uvvec.x);
             o.push_back(uvvec.y);
         }
-        put_eu_state(o, g, p);
-        put_eu_state(o, g, mate);
-        put_edge_state(o, p);
+        put_states(o, g, p, mate);
         break;
     }
     case OP_NORMALIZED:
@@ -270,9 +276,7 @@ int32_t run_op(int32_t op, Rd& rd, const char* path, std::vector<double>& o)
             put_vec(o, pnt);
             put_vec(o, d1);
         }
-        put_eu_state(o, g, p);
-        put_eu_state(o, g, mate);
-        put_edge_state(o, p);
+        put_states(o, g, p, mate);
         break;
     }
     default:

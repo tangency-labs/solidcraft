@@ -8,12 +8,14 @@
 //! edge use's index in the export's traversal order. Outputs start with `0`, or with
 //! `-1 status` when the B-rep could not be built. `-2` in an output is "upstream would
 //! dereference null". An edge use state is that of the `topology.edgeuse_p1` `SetUv` op
-//! (`put_eu_state`); the edge state is its interval and tolerance.
+//! (`put_eu_state`); the edge state is its interval and tolerance. "The states" are the
+//! edge use's and its mate's state, the edge state, then the full UV trim curve records
+//! (`harness/cpp/shim/sc_trim_curve_record.h`) of the edge use and its mate.
 //!
 //! | [`Op`]         | parameters after `eu`                  | outputs |
 //! |----------------|----------------------------------------|---------|
-//! | `Create`       | `want_dev has_fail`                    | `-2`, or `status`; without a wire edge use also `dist dev` (`-1` without a curve), the curve's fingerprint, the record's path type (`-1` without record) and B-rep flag, the edge use's and its mate's state and the edge state |
-//! | `Binormal`     | `frac use_3d want_uv_vector`           | `-2`, or `status` and, on success, `P[3] B[3] T[3] N[3] u v du dv`, then the two states and the edge state (`CreateUVTrimCurve` may attach a curve) |
+//! | `Create`       | `want_dev has_fail`                    | `-2`, or `status`; without a wire edge use also `dist dev` (`-1` without a curve), the curve's full UV trim curve record, the record's path type (`-1` without record) and B-rep flag, then the states |
+//! | `Binormal`     | `frac use_3d want_uv_vector`           | `-2`, or `status` and, on success, `P[3] B[3] T[3] N[3] u v du dv`, then the states (`CreateUVTrimCurve` may attach a curve) |
 //! | `Normalized`   | `t parameter_space want_deriv ok_make` | `-2`, or `status` and, on success, `P[3] D[3]`, then the states |
 //! | `ExportGaps` | no selector or arguments | `n (edgeuse_index gap edge_t u v)*`, initial cached fields in traversal order, without gap calculation |
 //! | `GetOrCreate`  | `ok_make want_dist want_dev`           | `-2`, or `status dist dev has_curve`, then the states (`dist`/`dev` are `-2` when not asked) |

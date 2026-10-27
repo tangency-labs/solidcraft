@@ -7,8 +7,9 @@
 //! network of `prog_test` `my_test_topology`). The Rust side imports the graph that
 //! runner's shim exports (raw members, in traversal order; planes as planes, lines as
 //! lines) with [`shared::import`] and runs the ported functions on it; results are
-//! compared as flags, statuses, tolerances, edge use / vertex use states and sampled
-//! curve points (see the FFI module docs for each op's output).
+//! compared as flags, statuses, tolerances, edge use / vertex use states, the full UV trim
+//! curves `CreateUVTrimCurves` leaves ([`crate::util::trim_curve`]) and sampled curve
+//! points (see the FFI module docs for each op's output).
 //!
 //! **Inexact geometry.** The shared export carries an analytic face surface (surface of
 //! revolution, cone, cylinder, sphere, torus, extrusion) exactly, as its upstream database
@@ -46,6 +47,7 @@ use solidcore_ffi::units::topology_face_p3::{self as ffi, Op, N_ARGS};
 use solidcore_ffi::units::topology_vertexuse::{self as fixture, Op as FixtureOp};
 
 use super::topology_vertexuse::{self as shared, BrepIn};
+use crate::util::trim_curve::put_trim_curve;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// The difftest runner.
@@ -735,6 +737,9 @@ fn run_rust_case(i: &Inputs) -> Result<Output, HarnessError> {
             }
             put_tols(&b, &mut out);
             put_use_states(&b, &mut out);
+            for (_, eu) in b.edgeuses().iter() {
+                value!(put_trim_curve(&k, &mut out, eu.uv_trim_curve.as_ref()));
+            }
         }
         OpIn::Intersect { .. } => {
             let other = FaceId::from_index(a[1] as u32);

@@ -14,8 +14,11 @@
 //! trim curves, the 3D evaluation, the null dereferences and the wire edge uses; the
 //! cases that reach a unit not ported yet (the face's `CreateUVTrimCurves`, B-rep
 //! makers, surface kinds, the curve classifier) are deferred. The state compared after an op is that of
-//! `topology.edgeuse_p2`'s `put_eu_state` for the edge use and its mate and the edge's
-//! interval and tolerance. A unit-local auxiliary export carries the complete initial
+//! `topology.edgeuse_p2`'s `put_eu_state` for the edge use and its mate, the edge's
+//! interval and tolerance, then the full records of the edge use's and its mate's UV trim
+//! curves ([`crate::util::trim_curve`]: type, degree, control points, weights, knots,
+//! interval and samples, a failed sample as its status); `CreateUVTrimCurve`'s result
+//! curve is compared with the same record. A unit-local auxiliary export carries the complete initial
 //! maximum edge/face gap cache, so `GetOrCreateUVTrimCurve` compares cached distances too.
 //! `EvaluateBinormal` builds the face's trimmed surface cache; on the tiny adversarial
 //! surfaces that tree grows to about 2 million nodes on both sides (2 014 255 in the C++
@@ -33,7 +36,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use solidcore::curve::curve::Curve as SmCurve;
 use solidcore::kernel::Kernel;
 use solidcore::surface::surface::p2::DropCurveFail;
 use solidcore::topology::edgeuse::p1 as eu1;
@@ -48,6 +50,7 @@ use super::topology_edgeuse_p1::{
     seed_cache_tree_states, sel, BrepIn, SrfIn, FILES,
 };
 use super::topology_edgeuse_p2::{flag, inexact_geometry, put_eu_state, Setup};
+use crate::util::trim_curve::put_trim_curve;
 use crate::{Case, HarnessError, Output, Rng, UnitDiff};
 
 /// The difftest runner.
@@ -261,21 +264,6 @@ fn output_of(body: &[f64]) -> Output {
 
 // ---- Rust side --------------------------------------------------------------------------
 
-/// A curve's fingerprint as the shim's `put_curve_id`.
-fn put_curve_id(k: &Kernel, o: &mut Vec<f64>, c: Option<&SmCurve>) {
-    let Some(c) = c else {
-        o.push(-1.0);
-        return;
-    };
-    o.push(1.0);
-    let ivl = c.natural_interval();
-    o.extend([ivl.min(), ivl.max()]);
-    for t in [ivl.min(), ivl.mid(), ivl.max()] {
-        let p = c.evaluate_point(k, t).unwrap_or(Vec3::UNDEF);
-        o.extend([p.x, p.y, p.z]);
-    }
-}
-
 /// The status a failed Rust op reports (`None`: not an upstream status).
 fn status_of(e: &SolidError) -> Option<f64> {
     match e {
@@ -296,7 +284,11 @@ fn put_states(k: &Kernel, o: &mut Vec<f64>, b: &Brep, eu: EdgeuseId) -> Result<(
         }
         None => o.extend([0.0; 3]),
     }
-    Ok(())
+    put_trim_curve(k, o, b.edgeuse(eu)?.uv_trim_curve.as_ref())?;
+    match mate {
+        Some(m) => put_trim_curve(k, o, b.edgeuse(m)?.uv_trim_curve.as_ref()),
+        None => put_trim_curve(k, o, None),
+    }
 }
 
 /// The Rust outcome of an op body; `Err` carries a [`SolidError`] that is not an
@@ -333,12 +325,12 @@ fn run_rust_op(op: &OpIn, b: &mut Brep, eu: EdgeuseId) -> Result<Vec<f64>, Solid
                         c.max_dist_to_surf,
                         c.max_deviation.filter(|_| *want_dev).unwrap_or(-1.0),
                     ]);
-                    put_curve_id(&k, &mut v, Some(&c.curve));
+                    put_trim_curve(&k, &mut v, Some(&c.curve))?;
                 }
                 Err(e) => {
                     v.push(status_of(&e).ok_or(e)?);
                     v.extend([-1.0, -1.0]);
-                    put_curve_id(&k, &mut v, None);
+                    put_trim_curve(&k, &mut v, None)?;
                 }
             }
             v.push(

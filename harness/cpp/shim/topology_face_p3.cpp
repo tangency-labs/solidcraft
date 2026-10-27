@@ -10,6 +10,7 @@
 // `topology.vertexuse` export of the same block); the other ops output `-1 status` when
 // the B-rep could not be built, else `0` and the op's results.
 #include "sc_topology_fixture.h"
+#include "sc_trim_curve_record.h"
 
 #include <SmCompositeCurve.h>
 
@@ -246,6 +247,8 @@ void run(int32_t op, Graph& g, const double* a, std::vector<double>& o)
             o.push_back(x);
         put_tols(o, g);
         put_eu_state(o, g);
+        for (SmEdgeuse* eu : g.edgeuses)
+            sc_trim_curve::put_trim_curve(o, eu->*EuPeek::uv());
         break;
     }
     case P3_INTERSECT:
