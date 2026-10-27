@@ -6959,8 +6959,9 @@ pub(crate) mod frame_member;
 mod surface;
 
 /// Height above `plane` (along its normal) of the object at `p` as seen from `centre`: the face
-/// there if it is planar and parallel (its plane), else where a ray from `centre` along the
-/// normal meets the body there, else the point itself.
+/// there if it is planar and parallel (its plane), its nearest edge if it is planar and runs
+/// along the normal, else where a ray from `centre` along the normal meets the body there, else
+/// the point itself.
 pub fn object_height(st: &ModelState, plane: &Plane, centre: Vec3, p: Vec3) -> f64 {
     height_at(st, face_at(st, p, Some(plane.normal())), plane, centre, p)
 }
@@ -6978,8 +6979,32 @@ fn height_at(st: &ModelState, face: Option<(usize, usize)>, plane: &Plane, centr
     {
         return h(f.centroid);
     }
-    // A curved or slanted face: where the profile's middle meets it.
     let m = b.mesh();
+    // A plane running along the normal (the top of a block ahead of the profile): where the face
+    // begins, its nearest edge. Not the pick, which is anywhere along it. A face that starts at
+    // the profile's plane or crosses it (a step's side wall) is reached at its end on the pick's side.
+    if let Some(f) = faces.iter().find(|f| f.index == fi)
+        && f.plane_normal.is_some_and(|fnrm| runs_along(fnrm, n))
+    {
+        let hs: Vec<f64> =
+            m.triangles.iter().zip(&m.tri_face).filter(|(_, x)| **x as usize == fi).filter_map(|(t, _)| m.tri(t)).flatten().map(h).collect();
+        let lo = hs.iter().copied().fold(f64::INFINITY, f64::min);
+        let hi = hs.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        if !lo.is_finite() || !hi.is_finite() {
+            return h(p);
+        }
+        let end = if lo > tol {
+            lo
+        } else if hi < -tol {
+            hi
+        } else if h(p) >= 0.0 {
+            hi
+        } else {
+            lo
+        };
+        return if end.abs() > tol { end } else { h(p) };
+    }
+    // A curved or slanted face: where the profile's middle meets it.
     for dir in [n, n * -1.0] {
         if let Some((t, tri)) = m.raycast(centre, dir)
             && m.tri_face.get(tri).is_some_and(|x| *x as usize == fi)
@@ -7060,11 +7085,17 @@ fn curved_face(st: &ModelState, face: Option<(usize, usize)>, n: Option<Vec3>) -
     let b = st.bodies.get(bi)?;
     let tol = (b.body.size() * 1e-3).max(1e-3);
     let normal = b.body.faces(tol).ok()?.into_iter().find(|f| f.index == fi).map(|f| f.plane_normal);
+    // A plane square to `n` or running along it ends the tool flat (see `height_at`).
     let planar = match n {
-        Some(n) => normal.flatten().is_some_and(|fnrm| fnrm.cross(n).len() < 1e-6),
+        Some(n) => normal.flatten().is_some_and(|fnrm| fnrm.cross(n).len() < 1e-6 || runs_along(fnrm, n)),
         None => normal.is_some_and(|fnrm| fnrm.is_some()),
     };
     (!planar).then_some(bi)
+}
+
+/// Does a plane with normal `fnrm` run along the direction `n` (contain it)?
+fn runs_along(fnrm: Vec3, n: Vec3) -> bool {
+    fnrm.dot(n).abs() < 1e-6
 }
 
 /// The body at `p` when the face there is not planar.
