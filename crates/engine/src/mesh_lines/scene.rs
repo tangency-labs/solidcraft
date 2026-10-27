@@ -2,6 +2,7 @@
 //! triangle hierarchy per shared mesh. Per-placement node bounds are small; projected
 //! triangle coordinates are evaluated only in visited leaves. Covered line intervals prune
 //! subsequent nodes and instances, including the entire query once coverage is complete.
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
@@ -11,7 +12,7 @@ use solidcraft_geom::{Aabb3, Mesh, Vec3};
 
 use super::meshes::{Placement, Scene, WORKERS, claim, transformed_bounds};
 use super::progress::Stage;
-use super::projection::{Drawing, Line, Part, Path, View, bounds, clip, cross, key, merge_lines, occluded, overlap, xy};
+use super::projection::{Drawing, Line, Origin, Owner, Part, Path, View, bounds, clip, key, merge_lines, occluded, overlap, xy};
 
 const TOO_COMPLEX: &str = "view exceeds export work budget; hide bodies or increase tolerance";
 const MAX_LINES: usize = 1_000_000;
@@ -94,6 +95,7 @@ struct Shared {
 }
 impl Shared {
     fn new(mesh: &Arc<Mesh>, eps: f64, progress: &Stage) -> Result<Self, &'static str> {
+        let welded = weld(&mesh.positions, eps, progress)?;
         let mut boxes = Vec::with_capacity(mesh.triangles.len());
         let mut sides = Vec::new();
         for (i, indices) in mesh.triangles.iter().enumerate() {
@@ -106,10 +108,12 @@ impl Shared {
             }
             boxes.push(bounds(points));
             for (a, b) in [(0, 1), (1, 2), (2, 0)] {
-                let (Some(pa), Some(pb), Some(ia), Some(ib)) = (points.get(a), points.get(b), indices.get(a), indices.get(b)) else {
+                let (Some(ia), Some(ib)) = (indices.get(a), indices.get(b)) else {
                     return Err("invalid export edge");
                 };
-                let (ka, kb) = (key(*pa, eps), key(*pb, eps));
+                let (Some(ka), Some(kb)) = (welded.get(*ia as usize).copied(), welded.get(*ib as usize).copied()) else {
+                    return Err("invalid export edge");
+                };
                 if ka == kb {
                     continue;
                 }
@@ -136,6 +140,34 @@ impl Shared {
     }
 }
 
+/// Each position's weld key. Positions within `eps` of one another are one point: a position takes
+/// the key of the first one near it, in its own rounding cell or a neighbouring one, so two copies
+/// of a vertex either side of a cell boundary still meet.
+fn weld(positions: &[Vec3], eps: f64, progress: &Stage) -> Result<Vec<[i64; 3]>, &'static str> {
+    let mut first: HashMap<[i64; 3], Vec3> = HashMap::with_capacity(positions.len());
+    let mut keys = Vec::with_capacity(positions.len());
+    for (i, p) in positions.iter().enumerate() {
+        if i.is_multiple_of(1 << 16) {
+            progress.check()?;
+        }
+        let own = key(*p, eps);
+        let mut cells = (-1..=1i64).flat_map(|x| (-1..=1i64).flat_map(move |y| (-1..=1i64).map(move |z| (x, y, z))));
+        let near = if first.contains_key(&own) {
+            Some(own)
+        } else {
+            cells.find_map(|(x, y, z)| {
+                let cell = [own[0].saturating_add(x), own[1].saturating_add(y), own[2].saturating_add(z)];
+                first.get(&cell).is_some_and(|q| q.dist(*p) <= eps).then_some(cell)
+            })
+        };
+        keys.push(near.unwrap_or_else(|| {
+            first.insert(own, *p);
+            own
+        }));
+    }
+    Ok(keys)
+}
+
 /// A placed triangle in the view.
 fn triangle(view: &View, shared: &Shared, placed: &Placement, id: usize) -> Result<[Vec3; 3], &'static str> {
     let indices = shared.mesh.triangles.get(id).ok_or("invalid export triangle")?;
@@ -149,10 +181,20 @@ fn triangle(view: &View, shared: &Shared, placed: &Placement, id: usize) -> Resu
 
 struct Projected {
     nodes: Vec<Aabb3>,
-    segments: Vec<(Vec3, Vec3)>,
+    segments: Vec<(Vec3, Vec3, Option<Owner>)>,
 }
 impl Projected {
-    fn new(shared: &Shared, placed: &Placement, view: &View, eps: f64, segments: &AtomicUsize, progress: &Stage) -> Result<Self, &'static str> {
+    /// Placement `index`'s triangle tree bounds and line segments in `view`, each segment with its
+    /// owner when the scene keeps sources.
+    fn new(
+        shared: &Shared,
+        placed: &Placement,
+        index: Option<u32>,
+        view: &View,
+        eps: f64,
+        segments: &AtomicUsize,
+        progress: &Stage,
+    ) -> Result<Self, &'static str> {
         let mut nodes = vec![Aabb3::EMPTY; shared.tree.nodes.len()];
         // Exact projected leaf bounds avoid false near-eye errors from empty corners of a
         // rotated model-space box. Interior bounds are just unions of the child bounds.
@@ -169,8 +211,11 @@ impl Projected {
                     let p = triangle(view, shared, placed, *id)?;
                     b = b.union(&bounds(p));
                     if let Some(f) = front.get_mut(*id) {
-                        // A positive projective scale preserves the projected winding.
-                        *f = cross(xy(p[1] - p[0]), xy(p[2] - p[0])) > 0.;
+                        // A positive projective scale preserves the projected winding. A triangle seen
+                        // edge on, its normal at most 1e-3 (cosine) toward the view, faces away whatever
+                        // sign the mesh's own error gives it: no silhouette lies between two of them.
+                        let n = (p[1] - p[0]).cross(p[2] - p[0]);
+                        *f = n.z > 1e-3 * n.len();
                     }
                 }
             }
@@ -179,13 +224,13 @@ impl Projected {
             }
         }
         let mut result = Vec::new();
-        let mut add = |a: Vec3, b: Vec3| -> Result<(), &'static str> {
+        let mut add = |a: Vec3, b: Vec3, origin: Origin| -> Result<(), &'static str> {
             let (a, b) = (view.project(apply_point(&placed.transform, a))?, view.project(apply_point(&placed.transform, b))?);
             if xy(a).dist(xy(b)) > eps {
                 if !claim(segments, 1, MAX_SEGMENTS) {
                     return Err(TOO_COMPLEX);
                 }
-                result.push((a, b));
+                result.push((a, b, index.map(|placement| Owner { placement, origin })));
             }
             Ok(())
         };
@@ -193,26 +238,39 @@ impl Projected {
             if !placed.visibility.get(i).copied().unwrap_or(false) {
                 continue;
             }
+            let origin = Origin::Edge(u32::try_from(i).map_err(|_| TOO_COMPLEX)?);
             for w in edge.windows(2) {
                 if let (Some(a), Some(b)) = (w.first(), w.get(1)) {
-                    add(*a, *b)?;
+                    add(*a, *b, origin)?;
                 }
             }
         }
         for edge in &shared.edges {
             let mut positive = false;
             let mut negative = false;
+            // The face of a triangle that faces the view names the silhouette (the first one's).
+            let mut facing = None;
             for id in shared.incident.get(edge.start..edge.end).ok_or("invalid export adjacency")? {
                 if front.get(*id).copied().ok_or("invalid export adjacency")? {
                     positive = true;
+                    facing = facing.or(Some(*id));
                 } else {
                     negative = true;
                 }
             }
-            if (positive && negative) || edge.end - edge.start == 1 {
+            // A side between two faces whose edges are all drawn lies on one of them: the line is that
+            // edge's, drawn from its own curve.
+            let face = |t: &usize| shared.mesh.tri_face.get(*t).copied();
+            let on_drawn_edge = match shared.incident.get(edge.start..edge.end) {
+                Some([s, t]) => face(s).zip(face(t)).is_some_and(|(f, g)| f != g && placed.joins.binary_search(&[f.min(g), f.max(g)]).is_ok()),
+                _ => false,
+            };
+            if ((positive && negative) || edge.end - edge.start == 1) && !on_drawn_edge {
                 let a = shared.mesh.positions.get(edge.vertices[0] as usize).ok_or("invalid silhouette")?;
                 let b = shared.mesh.positions.get(edge.vertices[1] as usize).ok_or("invalid silhouette")?;
-                add(*a, *b)?;
+                let triangle = facing.or_else(|| shared.incident.get(edge.start).copied());
+                let face = triangle.and_then(|t| shared.mesh.tri_face.get(t)).copied().unwrap_or(0);
+                add(*a, *b, Origin::Silhouette(face))?;
             }
         }
         Ok(Self { nodes, segments: result })
@@ -407,9 +465,11 @@ pub(crate) fn drawing(scene: &Scene, sketch: &[Part], view: &View) -> Result<Dra
     }
     let count = AtomicUsize::new(0);
     let progress = Stage::new("dxf_projection", scene.placements.len());
-    let projected = parallel(&scene.placements, |p| {
+    let indexed: Vec<(usize, &Placement)> = scene.placements.iter().enumerate().collect();
+    let projected = parallel(&indexed, |(i, p)| {
         progress.check()?;
-        let projected = Projected::new(shared.get(p.mesh).ok_or("missing shared geometry")?, p, view, eps, &count, &progress)?;
+        let index = if scene.sources { Some(u32::try_from(*i).map_err(|_| TOO_COMPLEX)?) } else { None };
+        let projected = Projected::new(shared.get(p.mesh).ok_or("missing shared geometry")?, p, index, view, eps, &count, &progress)?;
         progress.advance(1)?;
         Ok(projected)
     })?;
@@ -440,7 +500,7 @@ pub(crate) fn drawing(scene: &Scene, sketch: &[Part], view: &View) -> Result<Dra
         progress.check()?;
         let mut budget = Budget::new(&global, &progress);
         let mut lines = Vec::new();
-        for &(a, b) in *chunk {
+        for &(a, b, owner) in *chunk {
             let mut query = Query {
                 shared: &shared,
                 scene,
@@ -462,7 +522,8 @@ pub(crate) fn drawing(scene: &Scene, sketch: &[Part], view: &View) -> Result<Dra
                     if !claim(&output, 1, MAX_LINES) {
                         return Err(TOO_COMPLEX);
                     }
-                    lines.push(Line { a: p, b: q, hidden });
+                    let depth = a.z + (b.z - a.z) * (lo + hi) / 2.;
+                    lines.push(Line { a: p, b: q, hidden, owner, covered: false, depth });
                 }
                 Ok(())
             };
@@ -544,7 +605,15 @@ pub(crate) fn drawing(scene: &Scene, sketch: &[Part], view: &View) -> Result<Dra
     let work = results.iter().fold(work, |n: usize, (_, spent)| n.saturating_add(*spent));
     let sketch = results.into_iter().flat_map(|(paths, _)| paths).collect();
     progress.check()?;
-    Ok(Drawing { lines, work, segments: count.load(Ordering::Relaxed), projection_ms, occlusion_ms: start.elapsed().as_secs_f64() * 1000., sketch })
+    Ok(Drawing {
+        lines,
+        work,
+        segments: count.load(Ordering::Relaxed),
+        projection_ms,
+        occlusion_ms: start.elapsed().as_secs_f64() * 1000.,
+        sketch,
+        eps,
+    })
 }
 
 #[cfg(test)]
@@ -605,13 +674,13 @@ mod tests {
         let mut flat = Vec::new();
         for (offset, angle) in [(Vec3::ZERO, 0.), (Vec3::new(3., 2., 4.), 0.3), (Vec3::new(2., 1., -4.), -0.6)] {
             let transform = solidcraft_doc::rigid(offset, Vec3::ZERO, Vec3::Z, angle);
-            placements.push(Placement { mesh: 0, transform, visibility: vec![true; mesh.edges.len()] });
+            placements.push(Placement { mesh: 0, transform, visibility: vec![true; mesh.edges.len()], tangent: Vec::new(), joins: Vec::new() });
             let mut placed = mesh.clone();
             placed.positions = placed.positions.iter().map(|p| apply_point(&transform, *p)).collect();
             placed.edges = placed.edges.iter().map(|e| e.iter().map(|p| apply_point(&transform, *p)).collect()).collect();
             flat.push(placed);
         }
-        let scene = Scene { meshes: vec![Arc::new(mesh)], placements, triangles: 36, bytes: 0 };
+        let scene = Scene { meshes: vec![Arc::new(mesh)], placements, triangles: 36, bytes: 0, sources: false };
         for (yaw, pitch, roll) in [(0., std::f64::consts::FRAC_PI_2, 0.), (0.7, 0.4, 0.2), (0., 0., 0.)] {
             for fov in [0., 0.6] {
                 let cam = Camera { target: Vec3::new(4., 3., 1.), yaw, pitch, roll, fov, distance: 100., ..Default::default() };
@@ -649,9 +718,11 @@ mod tests {
                 mesh: 0,
                 transform: solidcraft_doc::rigid(Vec3::new((i % 10) as f64 * 20., (i / 10) as f64 * 20., 0.), Vec3::ZERO, Vec3::Z, 0.),
                 visibility: vec![true; 4],
+                tangent: Vec::new(),
+                joins: Vec::new(),
             })
             .collect();
-        let scene = Scene { meshes: vec![Arc::new(mesh)], placements, triangles: 1_200_000, bytes: 0 };
+        let scene = Scene { meshes: vec![Arc::new(mesh)], placements, triangles: 1_200_000, bytes: 0, sources: false };
         let mut cam = Camera { target: Vec3::new(95., 55., 0.), fov: 0., distance: 300., ..Default::default() };
         cam.set_view(StandardView::Top);
         let result = drawing(&scene, &[], &View::from_camera(&cam)).unwrap();

@@ -17,6 +17,11 @@ use solidcraft_geom::{Aabb2, EPS, Plane, Vec2};
 use crate::params::bad;
 use crate::{Result, Session};
 
+#[path = "drawing_view_lines.rs"]
+mod lines;
+
+pub use lines::{CHORD_MM, CHORD_RANGE, Lines, Piece, ViewLine, lines};
+
 /// The paper millimetres each way of a view's boundary when there's nothing to measure, round its
 /// centre, so it can still be picked, moved and deleted.
 pub const PLACEHOLDER_MM: f64 = 20.0;
@@ -132,11 +137,15 @@ pub fn measure(shown: &ShownSet, basis: &Plane) -> std::result::Result<Extents, 
     if extents.model.is_empty() { Err(Unmeasured::NoBodies) } else { Ok(extents) }
 }
 
-/// The boundary on the sheet of a view through `basis` at `scale`, with the middle of `shown`
-/// (model mm on its plane) at `centre`: the one rule the snapshot and saved views are placed by.
+/// The view through `basis` at `scale` on paper, with the middle of `shown` (model mm on its
+/// plane) at `centre`: the one rule the snapshot and saved views are placed by.
+pub fn frame(basis: Plane, scale: Scale, shown: &Aabb2, centre: Vec2, cmd: &str) -> Result<ViewFrame> {
+    ViewFrame::new(basis, scale, shown.center(), centre).map_err(|e| bad(cmd, e.to_string()))
+}
+
+/// The boundary on the sheet of [`frame`]'s view: the box round `shown` there.
 pub fn boundary(basis: Plane, scale: Scale, shown: &Aabb2, centre: Vec2, cmd: &str) -> Result<Aabb2> {
-    let frame = ViewFrame::new(basis, scale, shown.center(), centre).map_err(|e| bad(cmd, e.to_string()))?;
-    frame.boundary(shown).map_err(|e| bad(cmd, e.to_string()))
+    frame(basis, scale, shown, centre, cmd)?.boundary(shown).map_err(|e| bad(cmd, e.to_string()))
 }
 
 /// Saved view `id` of `drawing`, one of `s`'s design's drawings, on its sheet: the design's extents

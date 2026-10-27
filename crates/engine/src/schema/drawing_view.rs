@@ -12,9 +12,13 @@ use schemars::{JsonSchema, Schema, SchemaGenerator, json_schema};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use solidcraft_doc::drawing_view::{TangentEdges, ViewDirection, ViewSettings};
+use solidcraft_geom::Seg2;
 use solidcraft_geom::drawing_sheet::{Orientation, PaperSize, SheetSize};
 use solidcraft_geom::drawing_view::{NamedView, Scale};
+use solidcraft_geom::section::CurveAccuracy;
 use solidcraft_render::VisualStyle;
+
+use crate::drawing_view::{CHORD_MM, CHORD_RANGE};
 
 use super::Point2;
 
@@ -45,6 +49,12 @@ pub struct SnapshotParams {
     #[serde(deserialize_with = "super::present")]
     #[schemars(with = "Point2")]
     pub position_mm: Option<Point2>,
+    pub chord_mm: ChordParam,
+    /// The accuracy the lines must certify, in paper millimetres: a check, never a setting. When
+    /// not given, the reply says what they achieved.
+    #[serde(deserialize_with = "super::present", skip_serializing_if = "Option::is_none")]
+    #[schemars(with = "f64")]
+    pub max_error_mm: Option<f64>,
 }
 
 impl SnapshotParams {
@@ -134,6 +144,31 @@ impl JsonSchema for TangentEdgesParam {
     }
     fn json_schema(_: &mut SchemaGenerator) -> Schema {
         json_schema!({"description": "Edges where faces meet smoothly: hide (the default) or show.", "type": "string", "enum": ["hide", "show"]})
+    }
+}
+
+/// The chord the lines are sampled at, in paper millimetres.
+#[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
+#[serde(transparent)]
+pub struct ChordParam(pub f64);
+
+impl Default for ChordParam {
+    fn default() -> Self {
+        ChordParam(CHORD_MM)
+    }
+}
+
+impl JsonSchema for ChordParam {
+    fn schema_name() -> Cow<'static, str> {
+        "ViewChord".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        json_schema!({
+            "description": "The chord, in paper millimetres, of the meshes a view's lines are sampled from (0.01 when not given): a sampling setting, never an accuracy promise.",
+            "type": "number",
+            "minimum": *CHORD_RANGE.start(),
+            "maximum": *CHORD_RANGE.end()
+        })
     }
 }
 
@@ -463,6 +498,108 @@ pub struct SourceResult {
     pub timeline_at_end: bool,
 }
 
+/// One source's lines in a view: a placed body's edge or silhouette.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct LineResult {
+    /// The occurrences that place its body, from the design's root.
+    pub occurrence: Vec<u64>,
+    /// Its body's name in its definition.
+    pub body: String,
+    /// Whether the body is a reference part (none yet: reference parts come with V5).
+    pub reference: bool,
+    pub source: LineSourceResult,
+    pub pieces: Vec<PieceResult>,
+}
+
+/// What drew a line: an edge of the body (as `model.edges` numbers them), or a silhouette across
+/// one of its faces.
+#[derive(Debug, Serialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum LineSourceResult {
+    Edge { edge: usize, tangent: bool },
+    Silhouette { face: usize },
+}
+
+/// A run of a line at one visibility, on the sheet.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct PieceResult {
+    /// `visible` or `hidden`.
+    pub visibility: &'static str,
+    pub path: Vec<PathSegResult>,
+    pub accuracy: AccuracyResult,
+}
+
+/// A segment of a piece in paper millimetres: a line, or an arc from `start` sweeping `sweep`
+/// radians (counter-clockwise when positive).
+#[derive(Debug, Serialize)]
+#[serde(transparent)]
+pub struct PathSegResult(pub Seg2);
+
+impl JsonSchema for PathSegResult {
+    fn schema_name() -> Cow<'static, str> {
+        "PaperSegment".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let point = json!({"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2});
+        json_schema!({
+            "anyOf": [
+                {"type": "object", "properties": {"type": {"const": "line"}, "a": point, "b": point}, "required": ["type", "a", "b"], "additionalProperties": false},
+                {"type": "object", "properties": {"type": {"const": "arc"}, "center": point, "radius": {"type": "number"}, "start": {"type": "number"}, "sweep": {"type": "number"}}, "required": ["type", "center", "radius", "start", "sweep"], "additionalProperties": false}
+            ]
+        })
+    }
+}
+
+/// How closely a piece follows the true projected curve, on paper: `analytic`, `bounded` by
+/// `max_deviation_mm`, or `sampled` (measured at its points only, `max_sample_deviation_mm`).
+#[derive(Debug, Serialize)]
+#[serde(transparent)]
+pub struct AccuracyResult(pub CurveAccuracy);
+
+impl JsonSchema for AccuracyResult {
+    fn schema_name() -> Cow<'static, str> {
+        "CurveAccuracy".into()
+    }
+    fn json_schema(_: &mut SchemaGenerator) -> Schema {
+        let mm = json!({"type": "number", "minimum": 0});
+        json_schema!({
+            "anyOf": [
+                {"type": "object", "properties": {"kind": {"const": "analytic"}}, "required": ["kind"], "additionalProperties": false},
+                {"type": "object", "properties": {"kind": {"const": "bounded"}, "max_deviation_mm": mm}, "required": ["kind", "max_deviation_mm"], "additionalProperties": false},
+                {"type": "object", "properties": {"kind": {"const": "sampled"}, "max_sample_deviation_mm": mm}, "required": ["kind", "max_sample_deviation_mm"], "additionalProperties": false}
+            ]
+        })
+    }
+}
+
+/// What a view's lines are and how they were made.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct LinesStatusResult {
+    /// `approximate`: from the meshes, until the exact lines (W06).
+    pub lines: &'static str,
+    /// `mesh_projection`.
+    pub provenance: &'static str,
+    /// The chord asked for on paper, and of the meshes in model millimetres.
+    pub chord_mm: f64,
+    pub model_chord_mm: f64,
+    /// Pieces whose visibility couldn't be told (none from the meshes).
+    pub uncertain_pieces: usize,
+    /// Pieces drawn where another source lay too.
+    pub covered_pieces: usize,
+}
+
+/// What working out the lines cost, as the view DXF reports it.
+#[derive(Debug, Serialize, JsonSchema)]
+pub struct LinesStatsResult {
+    pub bodies: usize,
+    pub shared_meshes: usize,
+    pub triangles: usize,
+    pub segments: usize,
+    pub prepare_ms: f64,
+    pub projection_ms: f64,
+    pub occlusion_ms: f64,
+}
+
 /// What `drawing.view.snapshot` returns.
 #[derive(Debug, Serialize, JsonSchema)]
 pub struct SnapshotResult {
@@ -476,6 +613,10 @@ pub struct SnapshotResult {
     pub extents: ExtentsResult,
     /// The view's box on the sheet: `position_mm` at its centre, the extents at the scale.
     pub boundary_mm: BoxResult,
+    /// Each placed source's lines, in placement order, then edges before silhouettes.
+    pub lines: Vec<LineResult>,
+    pub status: LinesStatusResult,
+    pub stats: LinesStatsResult,
     pub source: SourceResult,
     /// In the warn parameter-check mode: what the call's parameters got wrong.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

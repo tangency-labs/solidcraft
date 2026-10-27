@@ -56,7 +56,7 @@ fn export(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let started = std::time::Instant::now();
     Stage::new("dxf_meshes", 1).check().map_err(|e| bad(CMD, e))?;
-    let meshes = mesh_lines::prepare(s, CMD, tolerance, |b| s.body_visible(&b.name))?;
+    let meshes = mesh_lines::prepare(s, CMD, tolerance, mesh_lines::Ask::default(), |b| s.body_visible(&b.name))?;
     let prepare_ms = started.elapsed().as_secs_f64() * 1000.;
     // The sketch runs (up to 4,000,000 points) go once the lines are made, not through writing.
     let drawing = {

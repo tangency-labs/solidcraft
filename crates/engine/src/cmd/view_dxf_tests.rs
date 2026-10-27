@@ -20,6 +20,14 @@ fn camera(view: StandardView) -> Camera {
 fn export(s: &mut Session, c: Camera, hidden: &str) -> Value {
     run(s, CMD, json!({"camera":c,"hidden":hidden}))
 }
+/// The LINE entities of an export's DXF.
+fn lines(v: &Value) -> Vec<(Vec2, Vec2)> {
+    solidcraft_io::read_dxf(v["dxf"].as_str().unwrap())
+        .unwrap()
+        .into_iter()
+        .filter_map(|g| if let solidcraft_io::Geom2::Line(a, b) = g { Some((a, b)) } else { None })
+        .collect()
+}
 
 #[test]
 fn view_dxf_cancellation_at_each_stage_preserves_the_destination_and_document() {
@@ -187,11 +195,7 @@ fn view_dxf_front_view_of_a_box_is_its_outline() {
     run(&mut s, "solid.box", json!({"length":40,"width":30,"height":10,"body_name":"Plate"}));
     let v = export(&mut s, camera(StandardView::Front), "dashed");
     assert_eq!(v["hidden"], 0, "{v}");
-    let lines: Vec<(Vec2, Vec2)> = solidcraft_io::read_dxf(v["dxf"].as_str().unwrap())
-        .unwrap()
-        .into_iter()
-        .filter_map(|g| if let solidcraft_io::Geom2::Line(a, b) = g { Some((a, b)) } else { None })
-        .collect();
+    let lines = lines(&v);
     let lo = lines.iter().fold(Vec2::new(f64::INFINITY, f64::INFINITY), |m, (a, b)| Vec2::new(m.x.min(a.x).min(b.x), m.y.min(a.y).min(b.y)));
     let hi = lines.iter().fold(Vec2::new(f64::NEG_INFINITY, f64::NEG_INFINITY), |m, (a, b)| Vec2::new(m.x.max(a.x).max(b.x), m.y.max(a.y).max(b.y)));
     assert!(((hi - lo) - Vec2::new(40.0, 10.0)).len() < 1e-6, "{lo:?} {hi:?}");
@@ -202,6 +206,53 @@ fn view_dxf_front_view_of_a_box_is_its_outline() {
     }
     let length: f64 = lines.iter().map(|(a, b)| a.dist(*b)).sum();
     assert!((length - 100.0).abs() < 1e-6, "{length}");
+}
+
+/// A plate with a through hole, seen from the iso view, has every line drawn once: no two lines
+/// lie along each other. The faces round the rim are meshed apart, a hair off each other, and the
+/// mesh sides between them lie on the rim's own edge: they are no silhouettes.
+#[test]
+fn view_dxf_draws_a_holes_rim_once() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length":40,"width":30,"height":10,"body_name":"Plate"}));
+    run(&mut s, "solid.cylinder", json!({"radius":3,"height":12,"base":[10,10,-1],"operation":"cut","targets":["Plate"]}));
+    let lines = lines(&export(&mut s, camera(StandardView::Iso), "omit"));
+    assert!(!lines.is_empty());
+    for (i, &(a, b)) in lines.iter().enumerate() {
+        let dir = (b - a) / a.dist(b);
+        let (off, along) = (|p: Vec2| dir.cross(p - a).abs(), |p: Vec2| (p - a).dot(dir));
+        for &(c, d) in &lines[i + 1..] {
+            let overlap = along(c).max(along(d)).min(a.dist(b)) - along(c).min(along(d)).max(0.0);
+            assert!(off(c).max(off(d)) > 1e-5 || overlap < 1e-4, "drawn twice: {a:?} {b:?} and {c:?} {d:?}");
+        }
+    }
+}
+
+/// A bend seen end on draws each of its arcs once. The plate is 2 mm sheet, bent up 60° on its x = 60 edge
+/// with an inner radius of its thickness, and seen from the front: every triangle of the bend's surface is
+/// seen edge on, whatever facing the mesh's rounding gives it, so its rows draw no chords beside the arcs.
+/// The lines on each bend circle add up to its arc, less only what sampling takes off.
+#[test]
+fn view_dxf_draws_a_bends_arcs_once() {
+    let mut s = Session::default();
+    run(&mut s, "sheet.manage_rules", json!({"name": "Steel 2mm", "thickness": "2 mm", "bend_radius": "Thickness", "active": true}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Base"}));
+    run(&mut s, "sketch.rectangle.two_point", json!({"p0": [0, 0], "p1": [60, 40]}));
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "sheet.flange", json!({"sketch": "Base"}));
+    run(&mut s, "sheet.flange", json!({"edges": [[60, 20, 2]], "height": 20, "angle": "60 deg"}));
+    let mut c = Camera { target: Vec3::new(30., 20., 5.), fov: 0., distance: 200., ..Default::default() };
+    c.set_view(StandardView::Front);
+    let lines = lines(&export(&mut s, c, "omit"));
+    // The bend's axis, 4 mm (radius and thickness) above the plate's underside, where the flange's
+    // outside meets the edge flanged: on the view, less the camera's target.
+    let axis = Vec2::new(60. - 4. * 30f64.to_radians().tan() - 30., 4. - 5.);
+    for radius in [2., 4.] {
+        let on = |p: Vec2| (p.dist(axis) - radius).abs() < 1e-3;
+        let drawn: f64 = lines.iter().filter(|&&(a, b)| on(a) && on(b)).map(|(a, b)| a.dist(*b)).sum();
+        let arc = radius * 60f64.to_radians();
+        assert!(drawn > 0.99 * arc && drawn <= arc, "radius {radius}: {drawn} mm of lines on a {arc} mm arc");
+    }
 }
 
 #[test]

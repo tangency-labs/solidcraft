@@ -429,8 +429,15 @@ fn scale_position_and_margin_set_the_boundary_and_the_design_is_untouched() {
     assert!((one.0 - half.0 * 2.0).len() < EPS && one.1.len() < EPS && half.1.len() < EPS);
     let margin = boundary(&snap(&mut s, json!({"scale": "1:2", "position_mm": [0, 0], "reference_margin_mm": 5})));
     assert!((margin.0 - (half.0 + Vec2::new(5.0, 5.0))).len() < EPS, "2.5 mm a side at 1:2: {margin:?}");
-    let first = snap(&mut s, json!({"view": "top"}));
-    assert_eq!(snap(&mut s, json!({"view": "top"})), first, "the same call gives the same answer");
+    // The same call gives the same answer, apart from what working it out took.
+    let answer = |mut v: Value| {
+        if let Some(reply) = v.as_object_mut() {
+            reply.remove("stats");
+        }
+        v
+    };
+    let first = answer(snap(&mut s, json!({"view": "top"})));
+    assert_eq!(answer(snap(&mut s, json!({"view": "top"}))), first, "the same call gives the same answer");
     assert_eq!((s.undo.len(), s.is_dirty()), (undo, dirty));
     assert!(std::sync::Arc::ptr_eq(&doc, &s.doc), "nothing in the design changes");
     run(&mut s, "browser.visibility", json!({"items": ["Block"], "visible": false}));
@@ -458,6 +465,7 @@ fn hostile_snapshots_are_refused() {
         (json!({"display_style": "shaded"}), "not supported yet"),
         (json!({"reference_style": "shaded_visible"}), "not supported yet"),
         (json!({"display_style": "Shaded"}), "unknown variant"),
+        (json!({"tangent_edges": "thin"}), "thin"),
         (json!({"sheet": {"dpi": 24.9}}), "dpi"),
         (json!({"sheet": {"dpi": 2400.1}}), "dpi"),
         (json!({"sheet": {"size": {"custom": {"sides_mm": [0, 10]}}}}), "sheet"),
@@ -492,6 +500,260 @@ fn a_view_shows_each_placement_of_a_part_with_its_path() {
     assert_eq!(v["source"]["bodies"], 2, "{v}");
     let (min, max) = (point(&v["extents"]["min"]), point(&v["extents"]["max"]));
     assert!((max.x - min.x - 40.0).abs() < 1e-6 && (max.y - min.y - 10.0).abs() < 1e-6, "{v}");
+}
+
+/// Every segment of `v`'s pieces at `visibility`, on the sheet.
+fn segments(v: &Value, visibility: &str) -> Vec<(Vec2, Vec2)> {
+    let pieces = v["lines"].as_array().into_iter().flatten().flat_map(|l| l["pieces"].as_array().into_iter().flatten());
+    pieces
+        .filter(|p| p["visibility"] == visibility)
+        .flat_map(|p| p["path"].as_array().into_iter().flatten())
+        .map(|seg| (point(&seg["a"]), point(&seg["b"])))
+        .collect()
+}
+
+/// How long `v`'s pieces at `visibility` are altogether, on the sheet.
+fn drawn_length(v: &Value, visibility: &str) -> f64 {
+    segments(v, visibility).iter().map(|(a, b)| a.dist(*b)).sum()
+}
+
+/// The block's front view at 1:2, centred on the A3 sheet at (210, 148.5): visible lines round its
+/// 50 x 10 mm outline and nothing else. The back edges lie under the front ones and are counted as
+/// covered; the edges seen end on draw nothing. The lines are the mesh's, so they say sampled.
+#[test]
+fn a_views_lines_are_the_blocks_outline() {
+    let mut s = block();
+    let v = snap(&mut s, json!({"scale": "1:2"}));
+    let schema = output_schema_for::<SnapshotResult>();
+    assert!(conforms(schema.as_value(), schema.as_value(), &v), "{v}");
+    assert!((drawn_length(&v, "visible") - 120.0).abs() < 1e-6, "{v}");
+    assert!(segments(&v, "hidden").is_empty(), "{v}");
+    let on_outline = |p: Vec2| {
+        let inside = (185.0 - 1e-6..=235.0 + 1e-6).contains(&p.x) && (143.5 - 1e-6..=153.5 + 1e-6).contains(&p.y);
+        let on_side = [(p.x - 185.0), (p.x - 235.0), (p.y - 143.5), (p.y - 153.5)].iter().any(|d| d.abs() < 1e-6);
+        inside && on_side
+    };
+    assert!(segments(&v, "visible").iter().all(|(a, b)| on_outline(*a) && on_outline(*b)), "{v}");
+    for line in v["lines"].as_array().unwrap() {
+        assert_eq!((&line["body"], &line["occurrence"], &line["reference"]), (&json!("Block"), &json!([]), &json!(false)), "{line}");
+        assert!(line["pieces"].as_array().unwrap().iter().all(|p| p["accuracy"]["kind"] == "sampled"), "{line}");
+    }
+    assert_eq!((&v["status"]["lines"], &v["status"]["provenance"]), (&json!("approximate"), &json!("mesh_projection")));
+    assert!(v["status"]["covered_pieces"].as_u64().unwrap() >= 4, "{v}");
+}
+
+/// A 20 x 20 x 40 tower behind the block, 40 to 60 mm across: in the front view at 1:1 its sides
+/// show above the block (20 to 40 mm up) and are hidden behind it below, 2 x 20 mm of hidden line,
+/// which only `visible_hidden` draws.
+#[test]
+fn hidden_lines_are_drawn_only_when_the_style_asks() {
+    let mut s = block();
+    run(&mut s, "solid.box", json!({"length": 20, "width": 20, "height": 40, "corner": [40, 60, 0], "body_name": "Tower", "operation": "new"}));
+    let v = snap(&mut s, json!({"scale": "1:1", "display_style": "visible_hidden"}));
+    assert!((drawn_length(&v, "hidden") - 40.0).abs() < 1e-6, "{v}");
+    let tower = v["lines"].as_array().unwrap().iter().filter(|l| l["body"] == "Tower").count();
+    assert!(tower > 0, "{v}");
+    let v = snap(&mut s, json!({"scale": "1:1"}));
+    assert!(segments(&v, "hidden").is_empty(), "{v}");
+}
+
+/// The lines name the occurrence each copy of a part is placed by.
+#[test]
+fn each_copys_lines_name_its_occurrence() {
+    let (mut s, [first, second]) = two_cubes();
+    let v = snap(&mut s, json!({"scale": "1:1"}));
+    let mut paths: Vec<Value> = v["lines"].as_array().unwrap().iter().map(|l| l["occurrence"].clone()).collect();
+    paths.dedup();
+    paths.sort_by_key(|p| p.to_string());
+    let mut want = vec![json!([first]), json!([second])];
+    want.sort_by_key(|p| p.to_string());
+    assert_eq!(paths, want, "{v}");
+}
+
+/// The mesh's chord is `chord_mm` on paper over the scale. Below 1:100 it passes 1 mm and is still
+/// taken, while the view DXF keeps its own 1 mm limit; at 1000:1 the default is finer than the
+/// mesh's 0.0001 mm floor and is refused with the chord that would do.
+#[test]
+fn the_meshs_chord_follows_the_scale() {
+    let mut s = block();
+    let v = snap(&mut s, json!({"scale": "1:200"}));
+    assert!((v["status"]["model_chord_mm"].as_f64().unwrap() - 2.0).abs() < 1e-12, "{v}");
+    assert!((v["status"]["chord_mm"].as_f64().unwrap() - 0.01).abs() < 1e-15, "{v}");
+    let e = refused(&mut s, json!({"scale": "1000:1"}));
+    assert!(e.contains("finer than 0.0001 mm") && e.contains("chord_mm 0.1"), "{e}");
+    let v = snap(&mut s, json!({"scale": "1000:1", "chord_mm": 0.2}));
+    assert!((v["status"]["model_chord_mm"].as_f64().unwrap() - 2e-4).abs() < 1e-15, "{v}");
+    let dxf = s.execute("file.export_view_dxf", &json!({"camera": solidcraft_render::Camera::default(), "tolerance": 2})).unwrap_err().to_string();
+    assert!(dxf.contains("tolerance must be 0.0001..1 mm"), "{dxf}");
+}
+
+/// A pocket 40 x 10 mm into the block's back face, 10 mm deep: from the front at 1:1 only the
+/// outline shows, and `visible_hidden` adds the pocket's outline as hidden lines, a 40 x 10
+/// rectangle 190 to 230 across and 143.5 to 153.5 up (its floor lies under its mouth, covered).
+#[test]
+fn a_pocket_behind_the_front_face_is_hidden() {
+    let mut s = block();
+    run(&mut s, "solid.box", json!({"length": 40, "width": 10, "height": 10, "corner": [30, 40, 5], "operation": "cut", "targets": ["Block"]}));
+    let v = snap(&mut s, json!({"scale": "1:1"}));
+    assert!(segments(&v, "hidden").is_empty() && (drawn_length(&v, "visible") - 240.0).abs() < 1e-6, "{v}");
+    let v = snap(&mut s, json!({"scale": "1:1", "display_style": "visible_hidden"}));
+    assert!((drawn_length(&v, "hidden") - 100.0).abs() < 1e-6, "{v}");
+    let on_pocket = |p: Vec2| {
+        let inside = (190.0 - 1e-6..=230.0 + 1e-6).contains(&p.x) && (143.5 - 1e-6..=153.5 + 1e-6).contains(&p.y);
+        inside && [p.x - 190.0, p.x - 230.0, p.y - 143.5, p.y - 153.5].iter().any(|d| d.abs() < 1e-6)
+    };
+    assert!(segments(&v, "hidden").iter().all(|(a, b)| on_pocket(*a) && on_pocket(*b)), "{v}");
+}
+
+/// Two blocks side by side, touching at x = 100: from the front at 1:2 their shared side, 222.5 mm
+/// across the sheet, is drawn once, by the first block, and the second block's copy is covered.
+#[test]
+fn two_touching_blocks_draw_their_shared_side_once() {
+    let mut s = block();
+    run(&mut s, "solid.box", json!({"length": 50, "width": 50, "height": 20, "corner": [100, 0, 0], "body_name": "Second", "operation": "new"}));
+    let v = snap(&mut s, json!({"scale": "1:2"}));
+    assert!((drawn_length(&v, "visible") - 180.0).abs() < 1e-6, "{v}");
+    let at_shared = |line: &&Value| {
+        let segs = line["pieces"].as_array().into_iter().flatten().flat_map(|p| p["path"].as_array().into_iter().flatten());
+        segs.into_iter().any(|seg| (point(&seg["a"]).x - 222.5).abs() < 1e-6 && (point(&seg["b"]).x - 222.5).abs() < 1e-6)
+    };
+    let owners: Vec<&Value> = v["lines"].as_array().unwrap().iter().filter(at_shared).map(|l| &l["body"]).collect();
+    assert_eq!(owners, [&json!("Block")], "{v}");
+    assert!(v["status"]["covered_pieces"].as_u64().unwrap() >= 1, "{v}");
+}
+
+/// Every segment of `v`'s pieces at `visibility`, lines and arcs alike, on the sheet.
+fn drawn(v: &Value, visibility: &str) -> Vec<solidcraft_geom::Seg2> {
+    let pieces = v["lines"].as_array().into_iter().flatten().flat_map(|l| l["pieces"].as_array().into_iter().flatten());
+    let segs = pieces.filter(|p| p["visibility"] == visibility).flat_map(|p| p["path"].as_array().into_iter().flatten());
+    segs.map(|seg| serde_json::from_value(seg.clone()).unwrap()).collect()
+}
+
+/// The points of `seg` furthest out: its ends, and for an arc each quarter-turn point it passes.
+fn reach(seg: &solidcraft_geom::Seg2) -> Vec<Vec2> {
+    let mut out = vec![seg.start(), seg.end()];
+    if let solidcraft_geom::Seg2::Arc { center, radius, start, sweep } = *seg {
+        let (lo, span) = if sweep >= 0.0 { (start, sweep) } else { (start + sweep, -sweep) };
+        for k in 0..8 {
+            let angle = f64::from(k) * std::f64::consts::FRAC_PI_2;
+            if (angle - lo).rem_euclid(std::f64::consts::TAU) <= span {
+                out.push(center + Vec2::from_angle(angle) * radius);
+            }
+        }
+    }
+    out
+}
+
+/// Whether `a` and `b` share a stretch longer than 1e-6 mm: collinear lines that overlap, or arcs
+/// of one circle whose turns overlap.
+fn share_a_stretch(a: &solidcraft_geom::Seg2, b: &solidcraft_geom::Seg2) -> bool {
+    use solidcraft_geom::Seg2::{Arc, Line};
+    use std::f64::consts::TAU;
+    match (*a, *b) {
+        (Line { a: p, b: q }, Line { a: c, b: d }) => {
+            let Some(u) = (q - p).normalized() else { return false };
+            let off = |r: Vec2| (r - p).cross(u).abs();
+            let (t0, t1) = ((c - p).dot(u), (d - p).dot(u));
+            off(c) < 1e-7 && off(d) < 1e-7 && t0.max(t1).min((q - p).len()) - t0.min(t1).max(0.0) > 1e-6
+        }
+        (Arc { center: c0, radius: r0, start: s0, sweep: w0 }, Arc { center: c1, radius: r1, start: s1, sweep: w1 }) => {
+            let range = |s: f64, w: f64| if w >= 0.0 { (s.rem_euclid(TAU), w) } else { ((s + w).rem_euclid(TAU), -w) };
+            let ((l0, n0), (l1, n1)) = (range(s0, w0), range(s1, w1));
+            let overlap = [-TAU, 0.0, TAU].iter().map(|k| (l0 + n0).min(l1 + k + n1) - l0.max(l1 + k)).fold(0.0, f64::max);
+            c0.dist(c1) < 1e-6 && (r0 - r1).abs() < 1e-6 && overlap * r0 > 1e-6
+        }
+        _ => false,
+    }
+}
+
+/// Seeded views of the sample design at mixed views, scales, chords, styles and tangent settings:
+/// nothing panics, every piece stays inside the view's boundary (to within the chord and the
+/// extents' own error on paper), and no stretch is drawn both visible and hidden.
+#[test]
+fn seeded_views_of_the_sample_stay_in_bounds_and_apart() {
+    let mut s = Session::default();
+    s.run_script(&crate::sample::script()).unwrap();
+    let pick = |seed: u64, salt: u64, n: usize| ((seed ^ salt).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 33) as usize % n;
+    for seed in 1..=12u64 {
+        let chord = [0.005, 0.01, 0.05, 0.2][pick(seed, 1, 4)];
+        let view = ["front", "back", "top", "bottom", "left", "right", "iso"][pick(seed, 2, 7)];
+        let scale = ["1:5", "1:2", "1:1", "2:1"][pick(seed, 3, 4)];
+        let style = ["visible", "visible_hidden"][pick(seed, 4, 2)];
+        let tangent = ["hide", "show"][pick(seed, 5, 2)];
+        let p = json!({
+            "view": view,
+            "scale": scale,
+            "chord_mm": chord,
+            "display_style": style,
+            "tangent_edges": tangent,
+        });
+        let v = snap(&mut s, p.clone());
+        let slack = chord + v["extents"]["error_mm"].as_f64().unwrap() * v["scale"]["factor"].as_f64().unwrap() + 1e-6;
+        let (min, max) = (point(&v["boundary_mm"]["min"]), point(&v["boundary_mm"]["max"]));
+        let inside = |q: &Vec2| q.x >= min.x - slack && q.x <= max.x + slack && q.y >= min.y - slack && q.y <= max.y + slack;
+        let (visible, hidden) = (drawn(&v, "visible"), drawn(&v, "hidden"));
+        assert!(!visible.is_empty(), "{p}");
+        assert!(visible.iter().chain(&hidden).all(|seg| reach(seg).iter().all(inside)), "{p}: a line leaves the boundary");
+        assert!(!hidden.iter().any(|h| visible.iter().any(|w| share_a_stretch(h, w))), "{p}: a stretch is both visible and hidden");
+    }
+}
+
+/// `chord_mm` and `max_error_mm` out of range are refused by name; a `max_error_mm` the mesh's
+/// lines can't certify is refused with the count of pieces short of it.
+#[test]
+fn chords_and_accuracy_checks_out_of_range_are_refused() {
+    let mut s = block();
+    let doc = s.doc.clone();
+    for (p, says) in [
+        (json!({"chord_mm": 0}), "chord_mm is a number from"),
+        (json!({"chord_mm": 0.00099}), "chord_mm is a number from"),
+        (json!({"chord_mm": 1.0001}), "chord_mm is a number from"),
+        (json!({"chord_mm": "fine"}), "chord_mm"),
+        (json!({"max_error_mm": 0}), "max_error_mm is a number above 0"),
+        (json!({"max_error_mm": -1}), "max_error_mm is a number above 0"),
+        (json!({"max_error_mm": null}), "max_error_mm"),
+        (json!({"scale": "1:2", "max_error_mm": 0.5}), "accuracy not met: 0 bounded and"),
+    ] {
+        let e = refused(&mut s, p.clone());
+        assert!(e.contains(says), "{p}: {e}");
+        assert!(std::sync::Arc::ptr_eq(&doc, &s.doc), "{p}");
+    }
+}
+
+/// A stadium of cubic segments, two straight sides and four quarter circles, extruded 20: seen from
+/// the front, its straight sides meet its round ends at tangent edges, drawn, and saying they are
+/// tangent, only when the view shows tangent edges. (The kernel marks a join smooth only between
+/// faces swept from cubic segments, and one between two pieces of one surface, as in the middle of
+/// a round end, is a seam, never drawn; a fillet's round keeps its edges, as the viewport draws it.)
+#[test]
+fn tangent_edges_are_drawn_only_when_the_view_shows_them() {
+    let mut s = Session::default();
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "Stadium"}));
+    // Quarter circles of radius 10 as cubics, their handles 10 x 4(sqrt 2 - 1)/3 = 5.5228 long.
+    for points in [
+        [[0.0, -10.0], [10.0, -10.0], [20.0, -10.0], [30.0, -10.0]],
+        [[30.0, -10.0], [35.5228, -10.0], [40.0, -5.5228], [40.0, 0.0]],
+        [[40.0, 0.0], [40.0, 5.5228], [35.5228, 10.0], [30.0, 10.0]],
+        [[30.0, 10.0], [20.0, 10.0], [10.0, 10.0], [0.0, 10.0]],
+        [[0.0, 10.0], [-5.5228, 10.0], [-10.0, 5.5228], [-10.0, 0.0]],
+        [[-10.0, 0.0], [-10.0, -5.5228], [-5.5228, -10.0], [0.0, -10.0]],
+    ] {
+        run(&mut s, "sketch.spline.control_point", json!({"points": points}));
+    }
+    run(&mut s, "sketch.finish", json!({}));
+    run(&mut s, "solid.extrude", json!({"sketch": "Stadium", "distance": 20, "body_name": "Stadium"}));
+    let tangent = |v: &Value| v["lines"].as_array().unwrap().iter().filter(|l| l["source"]["tangent"] == true).count();
+    let v = snap(&mut s, json!({"scale": "1:1", "tangent_edges": "show"}));
+    assert!(tangent(&v) > 0, "{v}");
+    let v = snap(&mut s, json!({"scale": "1:1"}));
+    assert_eq!(tangent(&v), 0, "{v}");
+    // The round ends' middles are seams, never drawn: the outline there is the round's silhouette,
+    // 20 mm tall at x -10 and 40 (185 and 235 on the sheet).
+    for x in [185.0, 235.0] {
+        let upright = segments(&v, "visible").into_iter().filter(|(a, b)| (a.x - x).abs() < 1e-6 && (b.x - x).abs() < 1e-6);
+        let tall: f64 = upright.map(|(a, b)| a.dist(b)).sum();
+        assert!((tall - 20.0).abs() < 1e-6, "{x}: {tall}: {v}");
+    }
 }
 
 /// A view shows every body the design places, so a design whose assembly walk stops at its depth

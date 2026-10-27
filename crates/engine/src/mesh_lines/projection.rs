@@ -2,7 +2,7 @@
 //! its depth plane, then union occluded parameter intervals. A BVH bounds the candidate work.
 #[cfg(test)]
 use solidcraft_geom::Mesh;
-use solidcraft_geom::{Aabb3, Vec2, Vec3};
+use solidcraft_geom::{Aabb3, Plane, Vec2, Vec3};
 use solidcraft_render::Camera;
 use std::collections::BTreeMap;
 
@@ -14,6 +14,8 @@ pub(crate) struct Drawing {
     pub occlusion_ms: f64,
     /// Shown sketch curves: one path per visible or hidden run of each curve.
     pub sketch: Vec<Path>,
+    /// The tolerance the lines were merged at: spans no longer than it are dropped.
+    pub eps: f64,
 }
 
 /// A connected run of a projected sketch curve.
@@ -46,6 +48,12 @@ impl View {
     pub(crate) fn from_camera(cam: &Camera) -> Self {
         let (right, up, back) = cam.basis();
         Self { origin: cam.target, right, up, back, perspective: (cam.fov > 0.).then_some(cam.distance) }
+    }
+
+    /// A drawing view's: orthographic, on `basis`, so lines come out in its plane's coordinates
+    /// ([`Plane::to_local`]) and depth grows toward the viewer.
+    pub(crate) fn orthographic(basis: &Plane) -> Self {
+        Self { origin: basis.origin, right: basis.x, up: basis.y, back: basis.normal(), perspective: None }
     }
 
     /// `p` in the view: right and up, and a depth that grows toward the eye (the distance
@@ -82,6 +90,30 @@ pub(crate) struct Line {
     pub a: Vec2,
     pub b: Vec2,
     pub hidden: bool,
+    /// What drew it, when the scene keeps sources ([`super::meshes::Ask::sources`]).
+    pub owner: Option<Owner>,
+    /// Another source lay on this stretch too, and this one's owner drew it.
+    pub covered: bool,
+    /// How near the viewer its middle lies, in the depth [`View::project`] gives: of the sources
+    /// on one stretch, the nearest draws it.
+    pub depth: f64,
+}
+
+/// What drew a line: a placement, and its edge or a silhouette. Of sources level with each other on
+/// a stretch, the first in this order draws it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) struct Owner {
+    /// The index of the placement among the scene's.
+    pub placement: u32,
+    pub origin: Origin,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Origin {
+    /// The placement's edge, as the body's edges are numbered.
+    Edge(u32),
+    /// A silhouette across the B-rep face of a triangle that faces the view.
+    Silhouette(u32),
 }
 
 pub(super) fn xy(p: Vec3) -> Vec2 {
@@ -190,9 +222,12 @@ pub(super) fn key(p: Vec3, eps: f64) -> [i64; 3] {
 }
 
 /// Merge collinear projected intervals, giving visible strokes precedence. This also removes
-/// a rear edge underneath only part of a visible edge, and rejoins subdivided silhouettes.
+/// a rear edge underneath only part of a visible edge, and rejoins subdivided silhouettes. With
+/// owners, a stretch belongs to its nearest visible owner, else its nearest hidden one (owners level
+/// within `eps` go in [`Owner`] order), and ends where that changes; the others there are counted
+/// as covered (`covered` on the drawn line).
 pub(super) fn merge_lines(lines: Vec<Line>, eps: f64) -> Vec<Line> {
-    type Events = (Vec2, Vec2, Vec<(f64, i32, i32)>);
+    type Events = (Vec2, Vec2, Vec<(f64, Option<Owner>, i32, i32, f64)>);
     let mut groups: BTreeMap<[i64; 3], Events> = BTreeMap::new();
     for line in lines {
         let delta = line.b - line.a;
@@ -205,34 +240,53 @@ pub(super) fn merge_lines(lines: Vec<Line>, eps: f64) -> Vec<Line> {
         let (origin, dir, events) = groups.entry(k).or_insert((line.a, dir, Vec::new()));
         let (a, b) = ((line.a - *origin).dot(*dir), (line.b - *origin).dot(*dir));
         let (v, h) = if line.hidden { (0, 1) } else { (1, 0) };
-        events.push((a.min(b), v, h));
-        events.push((a.max(b), -v, -h));
+        events.push((a.min(b), line.owner, v, h, line.depth));
+        events.push((a.max(b), line.owner, -v, -h, line.depth));
     }
     let mut result = Vec::new();
     for (_, (origin, dir, mut events)) in groups {
         events.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
-        let (mut visible, mut hidden, mut last) = (0, 0, 0.0);
+        // How many visible and hidden stretches of each owner lie here, and the nearest of their
+        // depths (one entry without owners).
+        let mut active: BTreeMap<Option<Owner>, (i32, i32, f64)> = BTreeMap::new();
+        let mut last = 0.0;
         let mut path: Option<Line> = None;
-        for (at, v, h) in events {
+        for (at, owner, v, h, depth) in events {
             if at - last > eps {
-                if visible > 0 || hidden > 0 {
-                    let is_hidden = visible == 0;
+                // The nearest owner with a stretch of this visibility here; a later one only when
+                // it is nearer by more than eps.
+                let nearest = |hidden: bool| {
+                    let here = active.iter().filter(|(_, (v, h, _))| if hidden { *h > 0 } else { *v > 0 });
+                    here.fold(None, |best: Option<(Option<Owner>, f64)>, (o, (_, _, d))| match best {
+                        Some((_, near)) if *d <= near + eps => best,
+                        _ => Some((*o, *d)),
+                    })
+                };
+                let drawn = nearest(false).map(|(o, d)| (o, false, d)).or_else(|| nearest(true).map(|(o, d)| (o, true, d)));
+                if let Some((owner, is_hidden, depth)) = drawn {
                     let a = origin + dir * last;
                     let b = origin + dir * at;
-                    if let Some(p) = path.as_mut().filter(|p| p.hidden == is_hidden && p.b.dist(a) <= eps) {
+                    let covered = active.len() > 1;
+                    if let Some(p) = path.as_mut().filter(|p| p.hidden == is_hidden && p.owner == owner && p.b.dist(a) <= eps) {
                         p.b = b;
+                        p.covered |= covered;
                     } else {
                         if let Some(p) = path.take() {
                             result.push(p);
                         }
-                        path = Some(Line { a, b, hidden: is_hidden });
+                        path = Some(Line { a, b, hidden: is_hidden, owner, covered, depth });
                     }
                 } else if let Some(p) = path.take() {
                     result.push(p);
                 }
             }
-            visible += v;
-            hidden += h;
+            let count = active.entry(owner).or_insert((0, 0, f64::NEG_INFINITY));
+            count.0 += v;
+            count.1 += h;
+            count.2 = count.2.max(depth);
+            if (count.0, count.1) == (0, 0) {
+                active.remove(&owner);
+            }
             last = at;
         }
         if let Some(p) = path {
@@ -255,7 +309,7 @@ fn edges(mesh: &Mesh, cam: &Camera, eps: f64) -> Vec<(Vec3, Vec3)> {
         let Some([a, b, c]) = mesh.tri(indices) else { continue };
         let n = (b - a).cross(c - a);
         let toward = if cam.fov > 0.0 { cam.eye() - (a + b + c) / 3.0 } else { cam.basis().2 };
-        let front = n.dot(toward) > 0.0;
+        let front = n.dot(toward) > 1e-3 * n.len() * toward.len();
         for (a, b) in [(a, b), (b, c), (c, a)] {
             let (ka, kb) = (key(a, eps), key(b, eps));
             let k = if ka < kb { (ka, kb) } else { (kb, ka) };
@@ -331,11 +385,12 @@ pub(super) fn reference_drawing(meshes: &[Mesh], cam: &Camera) -> Result<Vec<Lin
             }
         }
         let mut emit = |lo: f64, hi: f64, hidden: bool| {
+            let depth = a.z + (b.z - a.z) * (lo + hi) / 2.0;
             let (a, b) = (xy(a + (b - a) * lo), xy(a + (b - a) * hi));
             if a.dist(b) <= eps {
                 return;
             }
-            result.push(Line { a, b, hidden });
+            result.push(Line { a, b, hidden, owner: None, covered: false, depth });
         };
         let mut cursor = 0.0;
         for (lo, hi) in merged {
@@ -356,12 +411,58 @@ mod tests {
     use super::*;
     #[test]
     fn a_visible_edge_overrides_only_the_overlapping_part_of_a_hidden_edge() {
-        let lines =
-            vec![Line { a: Vec2::ZERO, b: Vec2::new(10., 0.), hidden: true }, Line { a: Vec2::new(3., 0.), b: Vec2::new(7., 0.), hidden: false }];
-        let merged = merge_lines(lines, 1e-8);
+        let line = |a: f64, b: f64, hidden| Line { a: Vec2::new(a, 0.), b: Vec2::new(b, 0.), hidden, owner: None, covered: false, depth: 0. };
+        let merged = merge_lines(vec![line(0., 10., true), line(3., 7., false)], 1e-8);
         assert_eq!(merged.len(), 3);
         let length = |hidden| merged.iter().filter(|l| l.hidden == hidden).map(|l| l.a.dist(l.b)).sum::<f64>();
         assert!((length(false) - 4.).abs() < 1e-8 && (length(true) - 6.).abs() < 1e-8);
+    }
+
+    /// Two sources on one stretch: the first visible one draws it and the stretch says another lay
+    /// there; where only a hidden source lies, the first hidden one draws it; a stretch ends where
+    /// its owner changes, even at the same visibility.
+    #[test]
+    fn a_shared_stretch_belongs_to_its_first_visible_source() {
+        let owner = |placement| Some(Owner { placement, origin: Origin::Edge(0) });
+        let line = |a: f64, b: f64, hidden, placement| Line {
+            a: Vec2::new(a, 0.),
+            b: Vec2::new(b, 0.),
+            hidden,
+            owner: owner(placement),
+            covered: false,
+            depth: 0.,
+        };
+        let merged = merge_lines(vec![line(0., 10., true, 0), line(2., 6., false, 1), line(4., 8., false, 2), line(5., 9., true, 3)], 1e-8);
+        let mut got: Vec<(i64, i64, bool, u32, bool)> = merged
+            .iter()
+            .map(|l| ((l.a.x * 1e6).round() as i64, (l.b.x * 1e6).round() as i64, l.hidden, l.owner.map_or(9, |o| o.placement), l.covered))
+            .collect();
+        got.sort_unstable();
+        let mm = |v: i64| v * 1_000_000;
+        let want =
+            vec![(mm(0), mm(2), true, 0, false), (mm(2), mm(6), false, 1, true), (mm(6), mm(8), false, 2, true), (mm(8), mm(10), true, 0, true)];
+        assert_eq!(got, want);
+    }
+
+    /// Two visible sources on one stretch at different depths: the nearer draws it whatever the
+    /// order of their owners, and the farther is counted as covered; level within eps, the first.
+    #[test]
+    fn a_shared_stretch_belongs_to_its_nearest_source() {
+        let line = |placement, depth| Line {
+            a: Vec2::new(0., 0.),
+            b: Vec2::new(10., 0.),
+            hidden: false,
+            owner: Some(Owner { placement, origin: Origin::Edge(0) }),
+            covered: false,
+            depth,
+        };
+        for (near, far) in [(0, 1), (1, 0)] {
+            let merged = merge_lines(vec![line(far, 0.), line(near, 5.)], 1e-8);
+            let got: Vec<(Option<u32>, bool, f64)> = merged.iter().map(|l| (l.owner.map(|o| o.placement), l.covered, l.depth)).collect();
+            assert_eq!(got, [(Some(near), true, 5.)]);
+        }
+        let merged = merge_lines(vec![line(1, 5.), line(0, 5. + 1e-9)], 1e-8);
+        assert_eq!(merged.iter().map(|l| l.owner.map(|o| o.placement)).collect::<Vec<_>>(), [Some(0)]);
     }
     #[test]
     fn a_line_is_split_at_triangle_boundaries_and_depth_crossings() {

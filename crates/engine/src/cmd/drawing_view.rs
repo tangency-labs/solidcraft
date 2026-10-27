@@ -23,22 +23,24 @@ use solidcraft_doc::drawing::Drawing;
 use solidcraft_doc::drawing::balloon::Balloon;
 use solidcraft_doc::drawing::dimension::Dimension;
 use solidcraft_doc::drawing::view::{ResolvedView, SetBy, Setting, View, ViewKind, ViewPlace};
-use solidcraft_doc::drawing_view::{Looking, ViewDirection, ViewOverrides};
+use solidcraft_doc::drawing_view::{Looking, TangentEdges, ViewDirection, ViewOverrides};
 use solidcraft_doc::ids;
 use solidcraft_geom::Plane;
 use solidcraft_geom::drawing_sheet::{DrawingBorderProfile, Sheet};
 use solidcraft_geom::drawing_view::{NamedView, PRESETS, Scale};
+use solidcraft_geom::hlr::{Source, Visibility};
 use solidcraft_geom::paper::MAX_COORDINATE_MM;
+use solidcraft_geom::section::CurveAccuracy;
 use solidcraft_geom::{Aabb2, Vec2};
 use solidcraft_render::VisualStyle;
 
 use super::CommandSpec;
-use crate::drawing_view::{Extents, OnSheet, Unmeasured};
+use crate::drawing_view::{CHORD_RANGE, Extents, Lines, OnSheet, ShownSet, Unmeasured};
 use crate::params::bad;
 use crate::schema::drawing_view::{
-    BoxResult, ChoicesResult, CopyParams, DPI_RANGE, EditParams, EditResult, ExtentsResult, FromResult, InspectParams, InspectResult, MoveParams,
-    OutsideResult, PlaceParam, ScaleResult, SettingResult, SettingsResult, SnapshotParams, SnapshotResult, SourceResult, ToSheetResult, ViewResult,
-    ViewSet,
+    AccuracyResult, BoxResult, ChoicesResult, CopyParams, DPI_RANGE, EditParams, EditResult, ExtentsResult, FromResult, InspectParams, InspectResult,
+    LineResult, LineSourceResult, LinesStatsResult, LinesStatusResult, MoveParams, OutsideResult, PathSegResult, PieceResult, PlaceParam,
+    ScaleResult, SettingResult, SettingsResult, SnapshotParams, SnapshotResult, SourceResult, ToSheetResult, ViewResult, ViewSet,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
@@ -59,7 +61,7 @@ pub static COMMANDS: &[CommandSpec] = &[CommandSpec::new(CMD, "Drawing View Snap
     .noundo()
     .contract(&CONTRACT)
     .output(output_schema_for::<SnapshotResult>)
-    .params("view?: front (default), back, top, bottom, left, right, iso (= iso_front_right), iso_front_left, iso_back_right, iso_back_left, or {direction, up, origin?}; scale?: \"paper:model\" such as \"1:2\" (default: the largest ISO 5455 scale that fits the sheet's drawing area); position_mm?: [x, y] for the view's centre on the sheet (default the sheet's centre); sheet?: {size: {standard: a3} or {custom: {sides_mm: [w, h]}}, orientation?: landscape|portrait, dpi?: 25..2400} (default A3 landscape, 300 dpi); display_style?, reference_style?: visible (default) or visible_hidden (the shaded styles aren't supported yet); reference_hides_model?: false; reference_margin_mm?: 0..100000 model mm on every side; tangent_edges?: hide (default) or show. Every body the design places, whatever the browser shows. Returns {view, scale: {text, factor, fitted}, position_mm, sheet, extents (model mm on the view's plane), boundary_mm (on the sheet), source}. Read-only: saves nothing."),
+    .params("view?: front (default), back, top, bottom, left, right, iso (= iso_front_right), iso_front_left, iso_back_right, iso_back_left, or {direction, up, origin?}; scale?: \"paper:model\" such as \"1:2\" (default: the largest ISO 5455 scale that fits the sheet's drawing area); position_mm?: [x, y] for the view's centre on the sheet (default the sheet's centre); sheet?: {size: {standard: a3} or {custom: {sides_mm: [w, h]}}, orientation?: landscape|portrait, dpi?: 25..2400} (default A3 landscape, 300 dpi); display_style?, reference_style?: visible (default) or visible_hidden (the shaded styles aren't supported yet); reference_hides_model?: false; reference_margin_mm?: 0..100000 model mm on every side; tangent_edges?: hide (default) or show; chord_mm?: 0.001..1 paper mm the lines are sampled at (default 0.01); max_error_mm?: the accuracy the lines must certify on paper (refused while they come from the mesh). Every body the design places, whatever the browser shows. Returns {view, scale: {text, factor, fitted}, position_mm, sheet, extents (model mm on the view's plane), boundary_mm (on the sheet), lines: [{occurrence, body, reference, source: {kind: edge, edge, tangent} or {kind: silhouette, face}, pieces: [{visibility, path: [paper mm segments], accuracy}]}], status: {lines: approximate, provenance: mesh_projection, chord_mm, model_chord_mm, uncertain_pieces, covered_pieces}, stats, source}. Read-only: saves nothing."),
     CommandSpec::new(INSPECT, "Inspect Drawing View", crate::checked!("drawing.view.inspect", INSPECT_CONTRACT, inspect))
         .icon("inspect")
         .in_drawing()
@@ -101,6 +103,13 @@ fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
     if !(request.sheet.dpi.is_finite() && DPI_RANGE.contains(&request.sheet.dpi)) {
         return Err(bad(CMD, format!("sheet.dpi is a number from {} to {}", DPI_RANGE.start(), DPI_RANGE.end())));
     }
+    let chord_mm = request.chord_mm.0;
+    if !(chord_mm.is_finite() && CHORD_RANGE.contains(&chord_mm)) {
+        return Err(bad(CMD, format!("chord_mm is a number from {} to {} (paper mm)", CHORD_RANGE.start(), CHORD_RANGE.end())));
+    }
+    if request.max_error_mm.is_some_and(|e| !(e.is_finite() && e > 0.0)) {
+        return Err(bad(CMD, "max_error_mm is a number above 0 (paper mm)"));
+    }
     let sheet = Sheet { size: request.sheet.size, orientation: request.sheet.orientation };
     let paper = sheet.size_mm().map_err(|e| bad(CMD, e.to_string()))?;
     let border = DrawingBorderProfile::iso().layout(&sheet).map_err(|e| bad(CMD, e.to_string()))?.drawing_border;
@@ -113,10 +122,16 @@ fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
         Some(scale) => (scale, false),
         None => (fit(shown.size(), position, border)?, true),
     };
-    let boundary = crate::drawing_view::boundary(basis, scale, &shown, position, CMD)?;
+    let frame = crate::drawing_view::frame(basis, scale, &shown, position, CMD)?;
+    let boundary = frame.boundary(&shown).map_err(|e| bad(CMD, e.to_string()))?;
     let on_paper = [boundary.min, boundary.max].iter().all(|c| c.is_finite() && c.x.abs() <= MAX_COORDINATE_MM && c.y.abs() <= MAX_COORDINATE_MM);
     if !on_paper {
         return Err(bad(CMD, format!("at scale {scale} the view reaches past ±{MAX_COORDINATE_MM} mm on paper: choose a smaller scale")));
+    }
+    let hidden = settings.display_style == VisualStyle::VisibleHidden;
+    let drawn = crate::drawing_view::lines(s, &set, &frame, hidden, settings.tangent_edges == TangentEdges::Show, chord_mm, CMD)?;
+    if let Some(max) = request.max_error_mm {
+        certify(&drawn, max, scale)?;
     }
 
     let named = match settings.view {
@@ -139,10 +154,77 @@ fn snapshot(s: &mut Session, p: &Value) -> Result<Value> {
         reference_style: snake_name(settings.reference_style),
         extents: extents_result(&extents, None),
         boundary_mm: BoxResult { min: boundary.min.into(), max: boundary.max.into() },
+        lines: line_results(&set, &drawn),
+        status: LinesStatusResult {
+            lines: "approximate",
+            provenance: "mesh_projection",
+            chord_mm,
+            model_chord_mm: drawn.model_chord_mm,
+            uncertain_pieces: 0,
+            covered_pieces: drawn.covered,
+        },
+        stats: LinesStatsResult {
+            bodies: drawn.stats.bodies,
+            shared_meshes: drawn.stats.shared_meshes,
+            triangles: drawn.stats.triangles,
+            segments: drawn.stats.segments,
+            prepare_ms: drawn.stats.prepare_ms,
+            projection_ms: drawn.stats.projection_ms,
+            occlusion_ms: drawn.stats.occlusion_ms,
+        },
         source: SourceResult { bodies: extents.bodies, timeline_at_end: s.doc.marker.is_none() },
         param_warnings: Vec::new(),
     };
     serde_json::to_value(reply).map_err(|e| crate::EngineError::Other(e.to_string()))
+}
+
+/// Refused unless every piece of `drawn` certifies `max` paper mm at `scale` (the accuracy rule on
+/// #5866): an analytic piece meets any, a bounded one its bound, a sampled one none.
+fn certify(drawn: &Lines, max: f64, scale: Scale) -> Result<()> {
+    let (mut bounded, mut sampled) = (0usize, 0usize);
+    for piece in drawn.lines.iter().flat_map(|l| &l.pieces) {
+        match piece.accuracy {
+            CurveAccuracy::Analytic => {}
+            CurveAccuracy::Bounded { max_deviation_mm } if max_deviation_mm <= max => {}
+            CurveAccuracy::Bounded { .. } => bounded += 1,
+            CurveAccuracy::Sampled { .. } => sampled += 1,
+        }
+    }
+    if bounded + sampled == 0 {
+        return Ok(());
+    }
+    Err(bad(
+        CMD,
+        format!(
+            "accuracy not met: {bounded} bounded and {sampled} sampled pieces can't certify max_error_mm {max} at scale {scale}; the lines come from the mesh until the exact lines (W06) are used"
+        ),
+    ))
+}
+
+/// `drawn`'s lines as the reply gives them, each named by the shown body it is of.
+fn line_results(shown: &ShownSet, drawn: &Lines) -> Vec<LineResult> {
+    let line = |l: &crate::drawing_view::ViewLine| {
+        let body = shown.bodies.get(l.shown);
+        LineResult {
+            occurrence: body.map(|b| b.path.clone()).unwrap_or_default(),
+            body: body.map(|b| b.body.clone()).unwrap_or_default(),
+            reference: false,
+            source: match l.source {
+                Source::Edge { edge, tangent } => LineSourceResult::Edge { edge, tangent },
+                Source::Silhouette { face } => LineSourceResult::Silhouette { face },
+            },
+            pieces: l
+                .pieces
+                .iter()
+                .map(|p| PieceResult {
+                    visibility: if p.visibility == Visibility::Hidden { "hidden" } else { "visible" },
+                    path: p.path.iter().copied().map(PathSegResult).collect(),
+                    accuracy: AccuracyResult(p.accuracy),
+                })
+                .collect(),
+        }
+    };
+    drawn.lines.iter().map(line).collect()
 }
 
 fn inspect(s: &mut Session, p: &Value) -> Result<Value> {
