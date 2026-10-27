@@ -420,7 +420,7 @@ fn control_role(command: &str, label: &str) -> Option<egui::accesskit::Role> {
         "Operation" if command == "solid.mirror" => return None,
         "Operation" | "Type" | "Orientation" | "Move Type" | "Object Type" | "Rule" | "Rim Edge" | "Catch Direction" | "Shape" | "Holes" | "Size"
         | "Bend Line Position" | "From Snap" | "To Snap" | "Joint" | "Joint 1" | "Joint 2" | "Gear 1" | "Gear 2" | "Pinion" | "Rack" | "Screw"
-        | "Nut" | "Cam" | "Follower" | "Anchor" => Role::ComboBox,
+        | "Nut" | "Cam" | "Follower" | "Anchor" | "Bolt Pattern" => Role::ComboBox,
         "Radius" if command == "joint.rack_pinion" => Role::Label,
         "Pitch" | "Form" | "Hand" | "Starts" | "Extent" | "Start" | "End" if command == "solid.thread" => Role::ComboBox,
         "Automatic size" | "Reverse" | "Other side" | "All Lines" | "Mirror" => Role::CheckBox,
@@ -674,6 +674,7 @@ form_case!(remove, "solid.remove", []);
 form_case!(path_pattern, "solid.pattern.path", ["Type", "Object Type", "Quantity", "Spacing"]);
 form_case!(pipe, "solid.pipe", ["Diameter", "Wall", "Operation"]);
 form_case!(stock, "solid.bounding_solid", ["Margin"]);
+form_case!(frame_plate, "frame.plate", ["Shape", "Width", "Height", "Thickness", "Offset", "Bolt Pattern"]);
 form_case!(frame_member, "frame.member", ["All Lines", "Anchor", "Angle", "Mirror", "Name"]);
 form_case!(thread, "solid.thread", ["Form", "Size", "Pitch", "Designation", "Hand", "Starts", "Extent", "Start", "End"]);
 form_case!(primitive_box, "solid.box", ["ui.length", "ui.width", "ui.height", "Operation"]);
