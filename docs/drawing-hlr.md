@@ -32,7 +32,9 @@ hidden_lines(&[Prepared], &[Placement], &View, &Options, &cancel) -> Result<Draw
   `(p . x, p . y)` in millimetres, with `x = direction x up` normalised and `y = x x
   direction`.
 - `cancel` is polled during the work, from every worker thread, so it must be `Sync`; when
-  it returns true the call ends with `HlrError::Cancelled`.
+  it returns true the call ends with `HlrError::Cancelled`. `prepare_cancellable(&Brep,
+  &Options, &cancel)` is `prepare` with such a callback, polled between edges, faces and
+  surface comparisons.
 - `Options::threads` sets the number of worker threads (0, the default, means one per core);
   see [Parallel work](#parallel-work).
 
@@ -157,6 +159,7 @@ Inputs are checked before any work:
 | Records of one body | `brep::MAX_ITEMS` (1 000 000), checked by `Brep::validate` in `prepare` | `Invalid("portable B-rep")` |
 | Placements in one scene | `hlr::MAX_ITEMS` (100 000) | `Budget("placement")` |
 | `Options::trim_samples` | 1 to `MAX_TRIM_SAMPLES` (4096) | `Invalid("trim samples")` |
+| Coordinates of a placed body's box | at most `MAX_COORDINATE` (1e12 mm, the bound `geom::section` and `geom::brep` put on stored numbers) | `Invalid("scene extent")` |
 | `Options::threads` | at most `MAX_THREADS` (64) | capped |
 
 Work budgets are totals over the whole call and all worker threads. Whether one is exceeded
@@ -164,6 +167,7 @@ does not depend on the number of threads or on their scheduling:
 
 | Work | Budget | Error |
 | --- | --- | --- |
+| Surface comparisons grouping a body's faces, in `prepare` | 50 million | `Budget("surface group")` |
 | Curves: drawable edges and silhouette pieces | `Options::max_tracks`, default `hlr::MAX_ITEMS` | `Budget("curve")` |
 | Visibility rays | `Options::max_rays`, default 20 000 000 | `Budget("ray")` |
 | Crossing grid entries | 50 million | `Budget("crossing grid")` |
@@ -244,6 +248,13 @@ and intervals:
   there;
 - two strips of a torus 0.0003 rad wide keep their 0.006 mm of outline;
 - two touching boxes draw each shared edge once;
+- a box whose top plane record stands one rounding (or 1e-11 of 100 mm) off its edges still
+  hides its back edges, and so does a 0.001 mm cube 1e7 mm out whose top plane is one step
+  above its edges; a plate's sixteen holes each hide the same part of their bottom circle;
+  eight coaxial cylinders seen along their axis show one circle; 300 boxes apart on screen
+  are each drawn as the first one; an arc that bulges across a line 1 mm off its chord still
+  crosses it twice; the trim's chord grid agrees with a scan of every chord; surface groups
+  agree with comparing every pair of faces, and preparing can be cancelled;
 - mirrored placements, bad body indices and bad views are refused; cancellation and
   budgets return errors;
 - a box stored with planes through three points draws the same bits as one with
