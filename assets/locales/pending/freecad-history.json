@@ -1,0 +1,30 @@
+{
+  "en": {
+    "settings.freecad_history": "Rebuild FreeCAD sketches and features when opening or inserting",
+    "prefs.freecad_files": "FreeCAD files"
+  },
+  "ar": {
+    "settings.freecad_history": "إعادة بناء رسومات FreeCAD وميزاته عند الفتح أو الإدراج",
+    "prefs.freecad_files": "ملفات FreeCAD"
+  },
+  "de": {
+    "settings.freecad_history": "FreeCAD-Skizzen und -Features beim Öffnen oder Einfügen nachbilden",
+    "prefs.freecad_files": "FreeCAD-Dateien"
+  },
+  "he": {
+    "settings.freecad_history": "בנייה מחדש של סקיצות ותכונות FreeCAD בעת פתיחה או הוספה",
+    "prefs.freecad_files": "קובצי FreeCAD"
+  },
+  "ja": {
+    "settings.freecad_history": "開くときや挿入するときに FreeCAD のスケッチとフィーチャーを再構築",
+    "prefs.freecad_files": "FreeCAD ファイル"
+  },
+  "ko": {
+    "settings.freecad_history": "열거나 삽입할 때 FreeCAD 스케치와 피처 다시 만들기",
+    "prefs.freecad_files": "FreeCAD 파일"
+  },
+  "zh": {
+    "settings.freecad_history": "打开或插入时重建 FreeCAD 草图和特征",
+    "prefs.freecad_files": "FreeCAD 文件"
+  }
+}

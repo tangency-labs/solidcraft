@@ -6,7 +6,7 @@
 //! not built again by the Import feature (`skip`). The contents of an imported assembly are held
 //! together by rigid joints, so the import moves as one; `component.unlock` releases them.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::hash::{Hash, Hasher};
 
 use serde_json::{Value, json};
@@ -277,7 +277,11 @@ pub(crate) fn add_in_component(
         }
     }
     if let FeatureKind::Import { skip, .. } = &mut kind {
-        skip.clone_from(&plan.skip);
+        // Bodies the reader already leaves out (a FreeCAD body's hidden intermediate shapes),
+        // and later instances of a part placed more than once.
+        skip.extend_from_slice(&plan.skip);
+        skip.sort_unstable();
+        skip.dedup();
     }
     // The bodies' names, as the feature will give them (checked once it is built).
     let names = match (&kind, imp) {
@@ -318,6 +322,78 @@ pub(crate) fn add_in_component(
     }
     let name = s.doc.components.iter().find(|c| c.id == top).map(|c| c.name.clone()).unwrap_or_default();
     Ok((id, Placed { component: top, occurrence: top_occ, name, components: comps.len(), joints: joint_ids }))
+}
+
+/// Add a design rebuilt from a file's feature history (a FreeCAD file's sketches and the
+/// features that use them) inside a new component named `name`. Each sketch dimension gets a
+/// parameter of its own, and a body named like one the design already has is numbered.
+/// Evaluates the design. Returns the features made and the component.
+pub(crate) fn add_design(s: &mut Session, design: &solidcraft_io::NativeDesign, name: &str) -> Result<(Vec<u64>, Placed)> {
+    let (top, top_occ) = new_component(s, name)?;
+    let source = &design.doc;
+    let mut sketches: BTreeMap<u64, u64> = BTreeMap::new();
+    let mut names: BTreeMap<String, String> = BTreeMap::new();
+    let mut bodies: BTreeMap<String, String> = BTreeMap::new();
+    let mut used: BTreeSet<String> = s.model.state().bodies.iter().map(|b| b.name.clone()).collect();
+    let mut made = Vec::new();
+    for f in &source.features {
+        let mut kind = f.kind.clone();
+        kind.remap_refs(&sketches, &names);
+        kind.remap_bodies(&bodies);
+        if let FeatureKind::Sketch { sketch, .. } = &mut kind {
+            for c in &mut sketch.constraints {
+                if let Some(pn) = c.param.clone() {
+                    let (e, u) = source
+                        .param(&pn)
+                        .map(|x| (x.expr.clone(), x.unit.clone()))
+                        .ok_or_else(|| EngineError::Other(format!("import: no parameter {pn}")))?;
+                    c.param = Some(s.doc_mut().new_model_param(&e, &u));
+                }
+            }
+        }
+        let body_names: Vec<String> = f
+            .body_names
+            .iter()
+            .map(|b| {
+                let n = if used.contains(b) { solidcraft_doc::copy_name(b, |n| used.contains(n)) } else { b.clone() };
+                used.insert(n.clone());
+                bodies.insert(b.clone(), n.clone());
+                n
+            })
+            .collect();
+        // A fillet's or chamfer's edges are pinned by name, as the commands pin them, so they
+        // are found again after an upstream edit moves them.
+        let (edge_refs, edge_names) = match &kind {
+            FeatureKind::Fillet { edges, body, .. } | FeatureKind::Chamfer { edges, body, .. } => {
+                s.refresh();
+                let st = s.model.state();
+                (
+                    solidcraft_doc::edge_refs(&st, body, &solidcraft_doc::plain(edges)),
+                    solidcraft_doc::edge_names_for(&st, body, &solidcraft_doc::plain(edges)),
+                )
+            }
+            _ => (Vec::new(), Vec::new()),
+        };
+        let id = s.doc_mut().add_feature(kind, Some(&f.name))?;
+        if let Some(nf) = s.doc_mut().feature_mut(id) {
+            nf.component = top;
+            nf.body_names = body_names;
+            nf.suppressed = f.suppressed;
+            nf.edge_refs = edge_refs;
+            nf.edge_names = edge_names;
+        }
+        let new_name = s.doc.feature(id).map(|x| x.name.clone()).unwrap_or_default();
+        sketches.insert(f.id, id);
+        names.insert(f.name.clone(), new_name);
+        made.push(id);
+    }
+    s.active_sketch = None;
+    s.refresh();
+    if let Some(e) = made.iter().find_map(|id| s.model.result(*id).and_then(|r| r.error.clone())) {
+        return Err(EngineError::Other(e));
+    }
+    let name = s.doc.components.iter().find(|c| c.id == top).map(|c| c.name.clone()).unwrap_or_default();
+    Ok((made, Placed { component: top, occurrence: top_occ, name, components: 0, joints: Vec::new() }))
 }
 
 /// Record that body `names[b]` lives in component `c`, placed by `offset`.

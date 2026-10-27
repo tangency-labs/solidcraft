@@ -6,7 +6,8 @@
 | `.json` (self-contained plain JSON design) | yes | yes |
 | STEP (AP203, AP214, AP242) | solids, assemblies, units, names, colours | AP242 with names, colours and the component tree |
 | IGES 5.3 | manifold solids, or trimmed surfaces sewn into solids | manifold solids with names and colours |
-| FreeCAD `.FCStd`, Rhino `.3dm` | solids, through cadmpeg | |
+| FreeCAD `.FCStd` | sketches and features (Pad, Pocket, Revolution, Groove, Fillet, Chamfer, primitives, Mirrored, patterns), else solids, through cadmpeg | |
+| Rhino `.3dm` | solids, through cadmpeg | |
 | 3MF, STL, OBJ | mesh bodies | yes |
 | glTF 2.0 (`.glb`, `.gltf` with its `.bin` files) | mesh bodies in the node tree's components, materials as appearances | |
 | 3MF with face tags | as 3MF | each triangle tagged with its B-rep face, exact coordinates |
@@ -15,7 +16,10 @@
 | PNG, JPEG | canvases and decals | |
 
 Opening a STEP, IGES, FreeCAD or Rhino file creates a design with the file's bodies as a base feature, and
-inserting one adds them to the current design. Later features build on them. Mesh bodies render,
+inserting one adds them to the current design. Later features build on them. A FreeCAD file's
+sketches and features are rebuilt as SolidCraft features instead, so its dimensions can be edited;
+when one cannot be, its bodies come in as a base feature and a warning says why (Preferences ›
+General › FreeCAD files turns the rebuild off). Mesh bodies render,
 measure, move and export, but solid features need B-rep bodies.
 
 Every imported file (STEP, IGES, 3MF, STL, OBJ or glTF) comes in as a new component named after the

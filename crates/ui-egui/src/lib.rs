@@ -1718,7 +1718,9 @@ impl SolveApp {
         }
         self.home.open = false;
         documents::prepare_open(self);
-        if let Ok(r) = self.run("doc.open", json!({ "path": path })) {
+        let mut params = file_load::preferred_options(self, path);
+        params.insert("path".into(), json!(path));
+        if let Ok(r) = self.run("doc.open", Value::Object(params)) {
             self.fit_view();
             stand_up::offer(self, path, &[], Some(&r));
         }
@@ -1735,7 +1737,9 @@ impl SolveApp {
     pub fn insert_path(&mut self, path: &str) {
         let cmd = file_load::insert_command(path);
         let before: Vec<String> = self.session.world_state().bodies.iter().map(|b| b.name.clone()).collect();
-        if let Ok(r) = self.run(cmd, json!({ "path": path })) {
+        let mut params = file_load::preferred_options(self, path);
+        params.insert("path".into(), json!(path));
+        if let Ok(r) = self.run(cmd, Value::Object(params)) {
             self.fit_view();
             stand_up::offer(self, path, &before, Some(&r));
             if let Some(w) = r["warnings"].as_array().filter(|w| !w.is_empty()) {

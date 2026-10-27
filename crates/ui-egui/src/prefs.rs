@@ -618,6 +618,9 @@ preference_settings! {
     reopen_designs: bool = true, PAGE_GENERAL;
     /// Those designs' files, in tab order, as the last quit left them.
     open_designs: Vec<String> = Vec::new(), PAGE_GENERAL;
+    /// A FreeCAD file opens or inserts as its sketches and features, rebuilt; off brings in only
+    /// its solids as one Import feature, as before.
+    freecad_history: bool = true, PAGE_GENERAL => check_id("settings.freecad_history");
     /// `dark`, `light` or `system` (follow the operating system), or a theme file's id: a
     /// built-in one (`gruvbox-dark`, …) or one of `custom_themes` (#2255).
     theme: String = "dark".into(), PAGE_INTERFACE;

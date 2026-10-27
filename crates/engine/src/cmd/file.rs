@@ -27,11 +27,11 @@ pub static COMMANDS: &[CommandSpec] = &[
         .icon("open")
         .key("Ctrl+O")
         .noundo()
-        .params("path: .solidcraft design, .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ or glTF; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh)"),
+        .params("path: .solidcraft design, .dxf/.svg drawing (opens as a new, unsaved design with an XY sketch, using sketch.insert_dxf/sketch.insert_svg units and defaults), or a .step/.stp/.igs/.fcstd/.3dm/.3mf/.stl/.obj/.glb/.gltf file (STEP, IGES, FreeCAD, Rhino, 3MF, STL, OBJ or glTF; opens as a new design holding the file as a component named after it, as file.insert_step and file.insert_mesh make); up?: z|y for a STEP, IGES, FreeCAD, Rhino or glTF file (see file.insert_step and file.insert_mesh); names?: auto|solid|product|instance for a STEP, IGES, FreeCAD or Rhino file (see file.insert_step); history?: features|solids for a FreeCAD file (see file.insert_step); read_only?: bool (a design: saving to its own file is refused, file.save_as keeps the changes elsewhere) → open_elsewhere: {host, user, app, opened} when another SolidCraft has the design open (its lock file is fresh)"),
     CommandSpec::new("file.insert_step", "Insert STEP", insert_step)
         .at("SOLID", "INSERT")
         .icon("import")
-        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it; a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move)"),
+        .params("path: STEP, IGES, FreeCAD .FCStd or Rhino .3dm file (its bodies join the design as an Import base feature in a new component named after the file, placed in the active component; an assembly's products become nested components, a repeated part one component with an occurrence per placement, all held as one rigid group until component.unlock → component, component_name, occurrence, subcomponents?, rigid_joints?); name? (the feature's and the component's); up?: z|y (default z: the file's axes are kept; y: the file has Y up, so the import's component is turned a quarter turn about X, Y becoming Z → stand_up: its occurrence); names?: auto|solid|product|instance (default auto: keep meaningful solid names, replace placeholders with the nearest named product, else instance; solid: the solid's own name; product: the part's name; instance: the occurrence's name, else the product's); history?: features|solids for a FreeCAD file (default features: its sketches and the Pad, Pocket, Revolution, Groove, Fillet, Chamfer and primitive features that use them are rebuilt as features in the new component, when every one can be and they build what the file holds → features_added, history: \"features\"; else, or with solids, the file's solids come in as an Import feature, and a warning says why the history was not rebuilt); matrix?: [12 or 16 numbers] (where the new component's occurrence sits in the active component, after `up`: a rigid row-major 3x4 rotation-and-translation or 4x4 matrix, flat or as rows, as occurrence.move takes it; a scale, shear or mirror is refused before the file is read); tolerance? (see occurrence.move)"),
     CommandSpec::new("file.insert_mesh", "Insert Mesh", insert_mesh)
         .at("SOLID", "INSERT")
         .icon("import")
@@ -94,6 +94,8 @@ struct StepOptions {
     /// (Y becomes Z), as the app's "Stand it up" offer does. `z` (the default) keeps the file's axes.
     y_up: bool,
     names: solidcraft_io::StepNames,
+    /// A FreeCAD file's feature history is rebuilt as features (else only its solids come in).
+    history: bool,
 }
 
 fn step_options(p: &Value, cmd: &str) -> Result<StepOptions> {
@@ -112,13 +114,30 @@ fn step_options(p: &Value, cmd: &str) -> Result<StepOptions> {
             .and_then(solidcraft_io::StepNames::parse)
             .ok_or_else(|| bad(cmd, "`names` must be \"auto\", \"solid\", \"product\" or \"instance\""))?,
     };
-    Ok(StepOptions { y_up, names })
+    let history = match p.get("history") {
+        None | Some(Value::Null) => true,
+        Some(v) => match v.as_str().map(|h| h.trim().to_ascii_lowercase()).as_deref() {
+            Some("features") => true,
+            Some("solids") => false,
+            _ => {
+                return Err(bad(
+                    cmd,
+                    "`history` must be \"features\" (a FreeCAD file's sketches and features are rebuilt) or \"solids\" (only its solids)",
+                ));
+            }
+        },
+    };
+    Ok(StepOptions { y_up, names, history })
 }
 
 /// Read a STEP file as an Import feature.
-fn read_step(path: &str, names: solidcraft_io::StepNames) -> Result<solidcraft_io::StepFeature> {
-    let bytes = solidcraft_io::vfs::read(path, solidcraft_io::MAX_STEP_BYTES).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
-    solidcraft_io::step_import_feature_named(&bytes, path, names).map_err(|e| EngineError::Other(format!("{path}: {e}")))
+fn read_step(path: &str, bytes: &[u8], names: solidcraft_io::StepNames) -> Result<solidcraft_io::StepFeature> {
+    solidcraft_io::step_import_feature_named(bytes, path, names).map_err(|e| EngineError::Other(format!("{path}: {e}")))
+}
+
+/// Is this a FreeCAD file name (any case)? Its feature history may be rebuilt.
+fn is_freecad_path(path: &str) -> bool {
+    std::path::Path::new(path).extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("fcstd"))
 }
 
 /// Which way is up in a STEP or IGES file, from the program its header names: `("y", name)` for
@@ -142,7 +161,18 @@ fn quarter_turn_x() -> solidcraft_doc::Mat {
 /// Add an Import feature for a STEP file to the session's design, in a new component named
 /// after the file (#1386).
 fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptions) -> Result<Value> {
-    let sf = read_step(path, options.names)?;
+    let bytes = solidcraft_io::vfs::read(path, solidcraft_io::MAX_STEP_BYTES).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
+    // A FreeCAD file's sketches and features, when they can all be rebuilt and build what the
+    // file holds; else its solids, saying why.
+    let mut not_rebuilt = None;
+    if options.history && is_freecad_path(path) {
+        match solidcraft_io::native_cad_design(&bytes, path) {
+            Ok(design) => return add_rebuilt(s, path, name, options, &design),
+            Err(why) => not_rebuilt = Some(format!("the feature history was not rebuilt, so the file's solids were imported instead: {why}")),
+        }
+    }
+    let mut sf = read_step(path, &bytes, options.names)?;
+    sf.warnings.splice(0..0, not_rebuilt);
     let fname = name.filter(|n| !n.trim().is_empty()).unwrap_or(&sf.name).to_string();
     let cname = import::component_name(path, name);
     let (id, placed) = import::add_in_component(s, sf.kind, &fname, sf.body_names, &cname, import::Tree::Step(&sf.import))?;
@@ -156,6 +186,29 @@ fn add_step(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptio
         out["exporter"] = json!(exporter);
         out["exporter_up"] = json!(up);
     }
+    placed.report(&mut out);
+    if let Some(turned) = turned {
+        out["stand_up"] = json!(turned);
+    }
+    Ok(out)
+}
+
+/// Add a FreeCAD file's rebuilt history (`design`) in a new component named after the file.
+fn add_rebuilt(s: &mut Session, path: &str, name: Option<&str>, options: &StepOptions, design: &solidcraft_io::NativeDesign) -> Result<Value> {
+    let cname = import::component_name(path, name);
+    let (ids, placed) = import::add_design(s, design, &cname)?;
+    let turned = if options.y_up { turn_up(s, &placed)? } else { None };
+    let created: Vec<String> = s.model.state().bodies.iter().filter(|b| ids.contains(&b.feature)).map(|b| b.name.clone()).collect();
+    let mut out = json!({
+        "path": path,
+        "feature": ids.first(),
+        "features_added": ids,
+        "name": placed.name,
+        "bodies": created,
+        "created_bodies": created,
+        "warnings": design.warnings,
+        "history": "features",
+    });
     placed.report(&mut out);
     if let Some(turned) = turned {
         out["stand_up"] = json!(turned);
@@ -308,7 +361,9 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
         s.replace_design(fresh);
         let errors = s.model.results.iter().filter(|r| r.error.is_some()).count();
         let mut out = json!({"path": path, "features": s.doc.features.len(), "errors": errors, "bodies": r["bodies"], "warnings": r["warnings"]});
-        for k in ["component", "component_name", "occurrence", "subcomponents", "rigid_joints", "stand_up", "system", "exporter", "exporter_up"] {
+        for k in
+            ["component", "component_name", "occurrence", "subcomponents", "rigid_joints", "stand_up", "system", "exporter", "exporter_up", "history"]
+        {
             if let Some(v) = r.get(k) {
                 out[k] = v.clone();
             }

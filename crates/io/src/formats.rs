@@ -135,6 +135,16 @@ const STEP_NAMES: OptionSpec = OptionSpec {
 
 const BREP_IMPORT: &[OptionSpec] = &[UP_Z, STEP_NAMES];
 
+/// What a FreeCAD file brings: its feature history rebuilt as features (sketches, Pad, Pocket,
+/// Revolution, Groove, Fillet, Chamfer, primitives), or only its solids (see `doc.open`).
+const HISTORY: OptionSpec = OptionSpec {
+    param: "history",
+    label: "FreeCAD history",
+    kind: OptionKind::Choice { choices: &[("features", "Rebuild its sketches and features"), ("solids", "Solids only")], default: 0 },
+};
+
+const FREECAD_IMPORT: &[OptionSpec] = &[UP_Z, STEP_NAMES, HISTORY];
+
 /// Binary is the `stl` format value, ASCII is `stla` (see `file.export`).
 const STL_ENCODING: OptionSpec =
     OptionSpec { param: "format", label: "Encoding", kind: OptionKind::Choice { choices: &[("stl", "Binary"), ("stla", "ASCII")], default: 0 } };
@@ -204,7 +214,7 @@ pub static FORMATS: &[FormatSpec] = &[
         label: "FreeCAD",
         extensions: &["fcstd"],
         role: Role::Artifact,
-        import: Some(ImportSpec { target: ImportTarget::Brep, options: BREP_IMPORT, native_only: true }),
+        import: Some(ImportSpec { target: ImportTarget::Brep, options: FREECAD_IMPORT, native_only: true }),
         export: None,
     },
     FormatSpec {
