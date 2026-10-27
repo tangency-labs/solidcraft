@@ -1,6 +1,6 @@
 //! Frame members (#4003): one body per straight line of a frame sketch, its cross-section a
 //! profile laid square to the line (`frame::member_axes`) and run from one end to the other; and
-//! their trims, which rebuild a member with its ends moved to the planes they meet.
+//! their trims and corners, which rebuild a member with its ends moved to the planes they meet.
 
 use solidcraft_geom::prelude::*;
 use std::borrow::Cow;
@@ -15,7 +15,7 @@ use solidcraft_sketch::CurveKind;
 
 use super::{ModelBody, ModelState, SolvedSketch, new_name, path_in_frame, select_profiles, sketch_in_feature_frame, val};
 use crate::expr::{Kind, Value};
-use crate::frame::{self, MAX_MEMBERS, MemberProfile, MemberRecord, MemberRef, Side, TrimEnd, TrimTarget};
+use crate::frame::{self, CornerKind, MAX_MEMBERS, MemberProfile, MemberRecord, MemberRef, Side, TrimEnd, TrimTarget};
 use crate::{DocError, Document, Feature, FeatureKind, ProfileSel, Result};
 
 /// Most profiles a profile sketch may have for its material to be worked out.
@@ -319,16 +319,119 @@ pub(super) fn trim(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, 
             return Err(DocError::Invalid(format!("`{}` meets none of the targets", m.name)));
         }
         let body = build(laid, lay, &ends, rec.feature)?;
-        let i = st.bodies.iter().position(|b| b.name == rec.body).ok_or_else(|| DocError::Unknown(format!("body `{}`", rec.body)))?;
-        let Some(mb) = st.bodies.get(i) else { return Err(DocError::Unknown(format!("body `{}`", rec.body))) };
-        let made = record(rec.feature, &rec.line, &rec.body, ends, &body.body);
-        // Its faces keep the names the member feature gave them, so what later features picked
-        // on it stays picked.
-        let rebuilt = ModelBody::traced_new(mb.name.clone(), body, mb.feature);
-        if let (Some(slot), Some(r)) = (st.bodies.get_mut(i), st.frame_members.get_mut(m.record)) {
-            *slot = rebuilt;
-            *r = made;
+        replace(st, m.record, &rec, ends, body)?;
+    }
+    Ok(())
+}
+
+/// Put member `rec` (record `at` in the model), rebuilt as `body` with `ends`, in place of its
+/// body, and record its new ends.
+fn replace(st: &mut ModelState, at: usize, rec: &MemberRecord, ends: [Option<Plane>; 2], body: Traced) -> Result<()> {
+    let i = st.bodies.iter().position(|b| b.name == rec.body).ok_or_else(|| DocError::Unknown(format!("body `{}`", rec.body)))?;
+    let Some(mb) = st.bodies.get(i) else { return Err(DocError::Unknown(format!("body `{}`", rec.body))) };
+    let made = record(rec.feature, &rec.line, &rec.body, ends, &body.body);
+    // Its faces keep the names the member feature gave them, so what later features picked
+    // on it stays picked.
+    let rebuilt = ModelBody::traced_new(mb.name.clone(), body, mb.feature);
+    if let (Some(slot), Some(r)) = (st.bodies.get_mut(i), st.frame_members.get_mut(at)) {
+        *slot = rebuilt;
+        *r = made;
+    }
+    Ok(())
+}
+
+/// Evaluate a `FrameCorner` feature: the two members meet where their middle lines cross, and
+/// each is rebuilt with its end nearer that point cut on the plane halfway between them (the
+/// plane through it square to the difference of their directions away from it), each cut face
+/// `gap / 2` back from that plane. The members keep their bodies' names and their records.
+pub(super) fn corner(doc: &Document, vals: &BTreeMap<String, Value>, f: &Feature, st: &mut ModelState) -> Result<()> {
+    let FeatureKind::FrameCorner { members, kind, gap } = &f.kind else {
+        return Err(DocError::Invalid("not a frame corner feature".into()));
+    };
+    let [ra, rb] = members.as_slice() else {
+        return Err(DocError::Invalid("a corner takes two members".into()));
+    };
+    let gap = match gap {
+        Some(e) => val(vals, e, Kind::Length)?,
+        None => 0.0,
+    };
+    if !(0.0..=frame::MAX_TRIM_GAP).contains(&gap) {
+        return Err(DocError::Invalid(format!("the gap must be 0…{} mm", frame::MAX_TRIM_GAP)));
+    }
+    let mut layouts: BTreeMap<u64, Layout> = BTreeMap::new();
+    let found = [find(doc, vals, f, st, &mut layouts, ra)?, find(doc, vals, f, st, &mut layouts, rb)?];
+    let [a, b] = &found;
+    if a.record == b.record {
+        return Err(DocError::Invalid(format!("`{}` can't make a corner with itself", a.name)));
+    }
+    // Each member: its record, its layout, its line laid out, and its middle line.
+    let mut sides = Vec::with_capacity(2);
+    for m in &found {
+        let rec = st.frame_members.get(m.record).cloned().ok_or_else(|| DocError::Invalid("member record".into()))?;
+        let lay = layouts.get(&m.feature).ok_or_else(|| DocError::Invalid("member layout".into()))?;
+        let laid = lay.member(&rec.line).ok_or_else(|| DocError::Unknown(format!("line `{}` of `{}`", rec.line, m.name)))?;
+        let axis = laid.axis(lay, &rec.ends)?;
+        sides.push((rec, lay, laid, axis));
+    }
+    let [(_, la, ma, (ca, a0, a1)), (_, lb, mb, (cb, b0, b1))] = sides.as_slice() else {
+        return Err(DocError::Invalid("a corner takes two members".into()));
+    };
+    // Where the two middle lines come closest: at `ta` along the first, `tb` along the second.
+    let cos = ma.d.dot(mb.d);
+    let denom = 1.0 - cos * cos;
+    if !(denom > 1e-12) {
+        return Err(DocError::Invalid(format!("`{}` and `{}` are parallel: a corner needs members at an angle", a.name, b.name)));
+    }
+    let w = *ca - *cb;
+    let ta = (cos * mb.d.dot(w) - ma.d.dot(w)) / denom;
+    let tb = mb.d.dot(w) + cos * ta;
+    let (pa, pb) = (*ca + ma.d * ta, *cb + mb.d * tb);
+    let size = |lay: &Layout| (lay.hi - lay.lo).len();
+    let tol = 1e-6 * (1.0 + size(la) + size(lb) + ma.len + mb.len);
+    let apart = pa.dist(pb);
+    if !(apart <= tol) {
+        return Err(DocError::Invalid(format!("the middle lines of `{}` and `{}` don't meet (they pass {apart:.3} mm apart)", a.name, b.name)));
+    }
+    let at = (pa + pb) * 0.5;
+    // Each member's end nearer the corner, which must be at the corner (within its section's
+    // size of it), and the way from the corner along the member.
+    let mut away = [Vec3::ZERO; 2];
+    let mut which = [0usize; 2];
+    for (k, (m, (t, t0, t1), laid, lay)) in [(a, (ta, *a0, *a1), ma, la), (b, (tb, *b0, *b1), mb, lb)].into_iter().enumerate() {
+        let end = which_end(t, (t0, t1), TrimEnd::Auto);
+        let off = (t - if end == 0 { t0 } else { t1 }).abs();
+        if !(off <= size(lay) + gap) {
+            return Err(DocError::Invalid(format!(
+                "`{}` doesn't end at the corner with `{}`: its nearer end is {off:.3} mm from it",
+                m.name,
+                if k == 0 { &b.name } else { &a.name }
+            )));
         }
+        if let (Some(w), Some(e)) = (away.get_mut(k), which.get_mut(k)) {
+            *w = if end == 0 { laid.d } else { -laid.d };
+            *e = end;
+        }
+    }
+    let [wa, wb] = away;
+    let planes = match kind {
+        CornerKind::Mitre => {
+            // The plane halfway between the members, its normal towards the first.
+            let n = (wa - wb).normalized().ok_or_else(|| DocError::Invalid(format!("`{}` and `{}` run the same way", a.name, b.name)))?;
+            // Each cut faces out of its member, towards the other.
+            [Plane::from_normal(at + n * (gap / 2.0), -n), Plane::from_normal(at - n * (gap / 2.0), n)]
+        }
+    };
+    let mut built = Vec::with_capacity(2);
+    for ((m, (rec, lay, laid, _)), (end, plane)) in found.iter().zip(&sides).zip(which.into_iter().zip(planes)) {
+        let plane = plane.ok_or_else(|| DocError::Invalid(format!("no corner plane for `{}`", m.name)))?;
+        let mut ends = rec.ends;
+        if let Some(e) = ends.get_mut(end) {
+            *e = Some(plane);
+        }
+        built.push((m.record, rec.clone(), ends, build(laid, lay, &ends, rec.feature)?));
+    }
+    for (at, rec, ends, body) in built {
+        replace(st, at, &rec, ends, body)?;
     }
     Ok(())
 }
