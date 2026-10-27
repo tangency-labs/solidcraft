@@ -36,7 +36,13 @@ fn setback_hole(r: f64, s: f64, g2: bool) -> impl FnMut(usize, &[f64]) -> Result
                     _ => return Err(format!("no side {k}")),
                 };
                 let up = Vec3::new(1.0, 1.0, 1.0).normalized().unwrap_or(Vec3::Z);
-                Ok(Station { p, up, across: Some(Across { leave, normal, bend: g2.then_some(Vec3::ZERO) }), corner: *t == 0.0, clash: false })
+                Ok(Station {
+                    p,
+                    up,
+                    across: Some(Across { leave, normal, bend: g2.then_some(Vec3::ZERO), jet: None }),
+                    corner: *t == 0.0,
+                    clash: false,
+                })
             })
             .collect()
     }
@@ -110,7 +116,7 @@ fn a_hole_in_a_cylinder_is_filled_with_the_cylinder_to_the_second_order() {
                 // over the radius, bending away from the normal.
                 let across = leave - Vec3::X * leave.x;
                 let bend = normal * (-across.len2() / r);
-                Ok(Station { p, up: normal, across: Some(Across { leave, normal, bend: Some(bend) }), corner: false, clash: false })
+                Ok(Station { p, up: normal, across: Some(Across { leave, normal, bend: Some(bend), jet: None }), corner: false, clash: false })
             })
             .collect()
     };
@@ -131,7 +137,7 @@ fn hostile_matched_fills_are_refused() {
             .map(|t| {
                 let a = t * std::f64::consts::TAU / 3.0;
                 let p = Vec3::new(a.cos(), a.sin(), 0.0);
-                Station { p, up: Vec3::Z, across: Some(Across { leave: Vec3::Z, normal: p, bend: None }), corner: false, clash: false }
+                Station { p, up: Vec3::Z, across: Some(Across { leave: Vec3::Z, normal: p, bend: None, jet: None }), corner: false, clash: false }
             })
             .collect())
     };
