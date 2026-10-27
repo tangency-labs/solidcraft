@@ -15,6 +15,7 @@
 use crate::bspline::MAX_SPLINE_DEGREE;
 use crate::{Mesh, Vec3};
 
+pub mod partials;
 pub mod uv;
 
 /// Most knots in one evaluable knot vector (bounds the shader's span search).
@@ -367,17 +368,22 @@ impl EvalSurface {
 /// evaluation, which [`nurbs_derivs`] takes as it is) is that end: the basis functions are zero
 /// outside their supports, so the derivatives there would not exist.
 fn basis_second(knots: &[f64], p: usize, n: usize, t: f64) -> Option<(usize, Vec<[f64; 3]>)> {
+    let (first, ders) = crate::bspline::basis_derivatives(knots, p, n, onto_knots(knots, p, n, t)?, 2)?;
+    Some((first + p, ders.iter().map(|d| Some([*d.first()?, *d.get(1)?, *d.get(2)?])).collect::<Option<_>>()?))
+}
+
+/// `t`, or the end of the knot range of a spline of degree `p` over `n` points when `t` is past
+/// it by no more than rounding ([`basis_second`]).
+pub(crate) fn onto_knots(knots: &[f64], p: usize, n: usize, t: f64) -> Option<f64> {
     let (&lo, &hi) = (knots.get(p)?, knots.get(n)?);
     let slack = BOUNDARY_ROUNDING * (hi - lo).abs().max(lo.abs()).max(hi.abs()).max(1.0);
-    let t = if t < lo && t >= lo - slack {
+    Some(if t < lo && t >= lo - slack {
         lo
     } else if t > hi && t <= hi + slack {
         hi
     } else {
         t
-    };
-    let (first, ders) = crate::bspline::basis_derivatives(knots, p, n, t, 2)?;
-    Some((first + p, ders.iter().map(|d| Some([*d.first()?, *d.get(1)?, *d.get(2)?])).collect::<Option<_>>()?))
+    })
 }
 
 /// How far past its knot range, relative to the range's magnitude, a parameter is still the range's

@@ -12,6 +12,7 @@ use super::pcurve::Error;
 use super::{Curve, Frame, Surface};
 use crate::Vec3;
 use crate::bspline::MAX_SPLINE_DEGREE;
+use crate::tess::partials::{Partials, tabulate, trig_derivative};
 use crate::tess::uv::{self, Domain};
 use crate::tess::{EvalCurve, EvalSurface, MAX_EVAL_KNOTS, MAX_EVAL_POINTS};
 use std::f64::consts::{FRAC_PI_2, TAU};
@@ -200,6 +201,53 @@ impl SurfaceEval {
                 (r * -(major + minor * c), dr * (-s * minor), (r * c + a.z * s) * -*minor)
             }
         })
+    }
+
+    /// The partial derivatives at (u, v) up to the fourth order ([`Partials`]), exactly: in closed
+    /// form on the analytic surfaces (angles differentiate as `cos(t + kπ/2)`), on the display
+    /// evaluator otherwise ([`EvalSurface::partials`]).
+    pub fn partials(&self, u: f64, v: f64) -> Option<Partials> {
+        if !(u.is_finite() && v.is_finite()) {
+            return None;
+        }
+        // The i-th derivative of the radial direction at angle u, and the k-th of cos and sin at v.
+        let radial = |a: &Axes, i: usize| {
+            let (c, s) = trig_derivative(u, i);
+            a.x * c + a.y * s
+        };
+        let at_v = |k: usize| trig_derivative(v, k);
+        let lift = |a: &Axes, i: usize, j: usize, x: Vec3| if i == 0 && j == 0 { a.o + x } else { x };
+        match self {
+            SurfaceEval::Eval(e, _) => e.partials(u, v),
+            SurfaceEval::Cylinder { axes: a, radius } => tabulate(|i, j| {
+                let height = match j {
+                    0 if i == 0 => a.z * v,
+                    1 if i == 0 => a.z,
+                    _ => Vec3::ZERO,
+                };
+                let ring = if j == 0 { radial(a, i) * *radius } else { Vec3::ZERO };
+                Some(lift(a, i, j, ring + height))
+            }),
+            SurfaceEval::Cone { axes: a, radius_at_origin, slope } => tabulate(|i, j| {
+                let (height, rv) = match j {
+                    0 => (if i == 0 { a.z * v } else { Vec3::ZERO }, radius_at_origin + v * slope),
+                    1 => (if i == 0 { a.z } else { Vec3::ZERO }, *slope),
+                    _ => (Vec3::ZERO, 0.0),
+                };
+                Some(lift(a, i, j, radial(a, i) * rv + height))
+            }),
+            SurfaceEval::Sphere { axes: a, radius } => tabulate(|i, j| {
+                let (c, s) = at_v(j);
+                let pole = if i == 0 { a.z * s } else { Vec3::ZERO };
+                Some(lift(a, i, j, (radial(a, i) * c + pole) * *radius))
+            }),
+            SurfaceEval::Torus { axes: a, major, minor } => tabulate(|i, j| {
+                let (c, s) = at_v(j);
+                let ring = if j == 0 { major + minor * c } else { minor * c };
+                let tube = if i == 0 { a.z * (minor * s) } else { Vec3::ZERO };
+                Some(lift(a, i, j, radial(a, i) * ring + tube))
+            }),
+        }
     }
 
     /// The parameters of `p`, a point within `accept` of the surface, from `near` when given
