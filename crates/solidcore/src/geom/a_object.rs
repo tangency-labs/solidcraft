@@ -617,10 +617,11 @@ fn region_is_void(
     region: ObjectKey,
     regions: Option<&dyn topology::shell::RegionLookup>,
 ) -> Result<bool> {
-    // DOCUMENTED GAP (not an UNPORTED stub: topology.shell is green): SmRegion::IsVoid need a caller-supplied
-    // `RegionLookup`; plan/findings/topology.shell--borrowed-region-context-for-attribute-backedges-pr-80-issue.md.
-    // Every notify caller that passes `None` (change-owner, geometry edits) never reaches
-    // a region handler; the `None` deferral is covered by the unit tests of this file.
+    // UNPORTED(topology.shell): SmRegion::IsVoid need a caller-supplied
+    // `RegionLookup`; see plan/findings/topology.shell--borrowed-region-context-for-attribute-backedges-pr-80-issue.md.
+    // Callers that pass no lookup (`a_object::notify` from change-owner / geometry edits in
+    // brep p6/p9/p10, edge, face, fillet) never send a region Merge or RegPropagation
+    // notification, so no region handler runs without one; the `None` deferral is covered by the unit tests of this file.
     // REGION-LOOKUP(#86): no library `RegionLookup` exists yet, so a region handler
     // reached without a caller-supplied context defers here instead of inferring
     // region state. The owner of issue #86 replaces this with the real lookup

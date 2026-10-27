@@ -678,8 +678,8 @@ impl shell::RegionLookup for BrepRegions<'_> {
                 });
             }
         }
-        // DOCUMENTED GAP (not an UNPORTED stub: topology.shell is green): upstream
-        // `SmRegion::GetBrep` follows the region's own pointer into any B-rep, but this
+        // UNPORTED(topology.shell): SmRegion::GetBrep of a region outside the notifying B-rep.
+        // Needs a cross-B-rep lookup (design change). Upstream `SmRegion::GetBrep` follows the region's own pointer into any B-rep, but this
         // lookup borrows only the notifying one. The handlers reach regions through
         // this lookup only for the regions of the merge/split being notified, which
         // all belong to the notifying B-rep; the boolean propagation path resolves
