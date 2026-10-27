@@ -128,7 +128,10 @@
      "tol": 18.66420195497696,
      "formula": "pi*r0^2*1 + pi*h/3*(r0^2 + r0*r1 + r1^2) - pi*h/3*((r0-1)^2 + (r0-1)*(r1-1) + (r1-1)^2) = pi*(r0^2 + h*(r0 + r1 - 1)), r0 = 26, r1 = 33.5, h = 90: disc 2123.716634 + tube 16540.485321"
     }
-   }
+   },
+   "fixes": [
+    "precise_properties_body_length_scale"
+   ]
   },
   {
    "name": "dia_45",
@@ -254,7 +257,10 @@
      "tol": 17.14131491614931,
      "formula": "pi*r0^2*1 + pi*h/3*(r0^2 + r0*r1 + r1^2) - pi*h/3*((r0-1)^2 + (r0-1)*(r1-1) + (r1-1)^2) = pi*(r0^2 + h*(r0 + r1 - 1)), r0 = 22.5, r1 = 33.5, h = 90: disc 1590.431281 + tube 15550.883635"
     }
-   }
+   },
+   "fixes": [
+    "precise_properties_body_length_scale"
+   ]
   },
   {
    "name": "dia_30",
@@ -380,7 +386,10 @@
      "tol": 14.13716694115407,
      "formula": "pi*r0^2*1 + pi*h/3*(r0^2 + r0*r1 + r1^2) - pi*h/3*((r0-1)^2 + (r0-1)*(r1-1) + (r1-1)^2) = pi*(r0^2 + h*(r0 + r1 - 1)), r0 = 15, r1 = 33.5, h = 90: disc 706.858347 + tube 13430.308594"
     }
-   }
+   },
+   "fixes": [
+    "precise_properties_body_length_scale"
+   ]
   }
  ]
 }
