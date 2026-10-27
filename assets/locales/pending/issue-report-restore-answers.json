@@ -3,9 +3,17 @@
     "Close this draft to report the new problem.": "Close this draft to report the new problem.",
     "Restore what you typed before": "Restore what you typed before"
   },
+  "ar": {
+    "Close this draft to report the new problem.": "أغلق هذه المسودة للإبلاغ عن المشكلة الجديدة.",
+    "Restore what you typed before": "استعادة ما كتبته سابقًا"
+  },
   "de": {
     "Close this draft to report the new problem.": "Schließe diesen Entwurf, um das neue Problem zu melden.",
     "Restore what you typed before": "Vorherige Eingaben wiederherstellen"
+  },
+  "he": {
+    "Close this draft to report the new problem.": "סגור את הטיוטה הזו כדי לדווח על הבעיה החדשה.",
+    "Restore what you typed before": "שחזור מה שהקלדת קודם"
   },
   "ja": {
     "Close this draft to report the new problem.": "新しい問題を報告するには、この下書きを閉じてください。",
