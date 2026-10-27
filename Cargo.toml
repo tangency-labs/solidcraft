@@ -28,6 +28,8 @@ solidcraft-space-mouse = { path = "crates/space-mouse" }
 solidcraft-mcp = { path = "crates/mcp" }
 solidcraft-derive = { path = "crates/derive" }
 solidcraft-3dx-client = { path = "crates/threedx-client" }
+# test tooling: a dev-dependency only (xtask/src/layers.rs)
+solidcraft-testkit = { path = "crates/testkit" }
 
 # foundation
 thiserror = "2"
