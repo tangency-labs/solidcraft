@@ -311,26 +311,29 @@ impl SurfOfExtrusion {
     ) -> Result<ExtrusionIntersection> {
         // (the general intersection takes the edge flags and angle tolerance)
 
-        let plane = match other {
-            IntersectTarget::Plane(p) => Some(p),
-            IntersectTarget::Surface(s) => match s.kind() {
-                SurfaceKind::Plane(p) => Some(p),
-                _ => None,
+        // switch on the other surface's type: a wrapped surface by its kind, as
+        // `global_surface_intersect_on_in`
+        let target = match other {
+            IntersectTarget::Surface(s) => match s.kind_with_nurb(k)? {
+                SurfaceKind::Plane(p) => IntersectTarget::Plane(p),
+                SurfaceKind::Cone(c) => IntersectTarget::Cone(c.as_ref()),
+                SurfaceKind::SurfOfExtrusion(e) => IntersectTarget::SurfOfExtrusion(e.as_ref()),
+                _ => other,
             },
-            IntersectTarget::Cone(_) | IntersectTarget::SurfOfExtrusion(_) => None,
+            _ => other,
         };
-        let special = if let Some(p) = plane {
-            Some(self.intersect_with_plane(k, uv_domain, p, other_uv_domain, approx_tol_3d)?)
-        } else {
-            match other {
-                IntersectTarget::Cone(c) if c.type_code() == CONE_TYPE => {
-                    Some(self.intersect_with_cylinder(k, c, approx_tol_3d)?)
-                }
-                IntersectTarget::SurfOfExtrusion(s) => {
-                    Some(self.intersect_with_surf_of_extrusion(k, s, approx_tol_3d)?)
-                }
-                _ => None,
+        let special = match target {
+            IntersectTarget::Plane(p) => {
+                Some(self.intersect_with_plane(k, uv_domain, p, other_uv_domain, approx_tol_3d)?)
             }
+            // (an SmCylinder is not SmCone_TYPE: the default branch)
+            IntersectTarget::Cone(c) if c.type_code() == CONE_TYPE => {
+                Some(self.intersect_with_cylinder(k, c, approx_tol_3d)?)
+            }
+            IntersectTarget::SurfOfExtrusion(s) => {
+                Some(self.intersect_with_surf_of_extrusion(k, s, approx_tol_3d)?)
+            }
+            _ => None,
         };
 
         // when bNeedNurbIntersection == TRUE, intersection was too complicated for
@@ -1470,6 +1473,51 @@ mod tests {
     fn extrusion() -> SurfOfExtrusion {
         let k = k();
         SurfOfExtrusion::create_canonical(&k, arc_gen(), Vec3::new(0.0, 0.0, 2.0)).unwrap()
+    }
+
+    #[test]
+    fn surface_wrapped_cone_takes_the_cone_special_case() {
+        let k = k();
+        // a line along X swept along Z, against a vertical SmCone_TYPE cylinder shape
+        let pw = vec![
+            CPoint::new(-2.0, 0.0, 0.0, NOW),
+            CPoint::new(2.0, 0.0, 0.0, NOW),
+        ];
+        let line = NurbCurve::new(pw, 1, vec![0.0, 0.0, 1.0, 1.0]).unwrap();
+        let s = SurfOfExtrusion::create_canonical(
+            &k,
+            Curve::from(BSplineCurve::from_nurb(line, 3, false)),
+            Vec3::new(0.0, 0.0, 2.0),
+        )
+        .unwrap();
+        let cone =
+            Cone::create_canonical(&k, &Axis2Placement::IDENTITY, 1.0, 1.0, 3.0, false, false)
+                .unwrap();
+        assert_eq!(cone.type_code(), CONE_TYPE);
+        let wrapped = Surface::from(cone.clone());
+        let d = s.base().natural_uv_domain();
+        let od = cone.rev().base().natural_uv_domain();
+        let run = |target| {
+            s.global_surface_intersect(&k, &d, target, &od, [true, true], None, None)
+                .unwrap()
+        };
+        let direct = run(IntersectTarget::Cone(&cone));
+        let via_surface = run(IntersectTarget::Surface(&wrapped));
+        // the direct cone takes the special case: curves, no UV curves (NULL upstream)
+        assert!(!direct.curves_3d.is_empty());
+        assert!(direct.surface1_uv_curves.iter().all(Option::is_none));
+        // upstream switches on the other surface's type (SmSurfOfExtrusion.cpp:1677-1695
+        // at c9c5979: SmPlane_TYPE, SmCone_TYPE, SmSurfOfExtrusion_TYPE), so the wrapped
+        // cone takes the same special case
+        assert_eq!(direct.curves_3d.len(), via_surface.curves_3d.len());
+        assert_eq!(direct.curve_types, via_surface.curve_types);
+        let none = |r: &ExtrusionIntersection| {
+            r.surface1_uv_curves
+                .iter()
+                .map(Option::is_none)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(none(&direct), none(&via_surface));
     }
 
     #[test]
