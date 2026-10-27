@@ -1,6 +1,7 @@
 //! Frames and weldments (#4003). `frame.member` lays structural members along the lines of a frame
 //! sketch, their cross-section a built-in profile, a standard size or a profile sketch;
-//! `frame.trim` trims or extends them to other members (butt joints), planes and faces.
+//! `frame.trim` trims or extends them to other members (butt joints), planes and faces;
+//! `frame.corner` mitres two members that meet at their ends.
 //! `frame.profile.list` lists the built-in profiles and the standard sizes,
 //! `frame.profile.properties` works out a profile's section, and `frame.profile.insert` draws one
 //! into a sketch.
@@ -12,7 +13,7 @@ use serde_json::Value;
 use solidcore_record::{Loop2, Seg2, Vec2};
 use solidcraft_doc::expr::Kind;
 use solidcraft_doc::frame::sizes::{self, Family};
-use solidcraft_doc::frame::{self, Anchor, MemberProfile, MemberRef, Profile, ProfileSpec, Side, TrimEnd, TrimTarget};
+use solidcraft_doc::frame::{self, Anchor, CornerKind, MemberProfile, MemberRef, Profile, ProfileSpec, Side, TrimEnd, TrimTarget};
 use solidcraft_doc::{FeatureKind, SketchId};
 use solidcraft_sketch::Sketch;
 
@@ -22,13 +23,14 @@ use super::{CommandSpec, in_sketch, not_in_sketch};
 use crate::params::{bad, bool_, expr, num, str_, string_list, vec2};
 use crate::schema::features::FeatureResult;
 use crate::schema::frame::{
-    CreatedIds, FrameMemberParams, ProfileInsertParams, ProfileInsertResult, ProfileKindInfo, ProfileListParams, ProfileListResult, ProfileOut,
-    ProfilePropertiesParams, ProfilePropertiesResult, ProfileSection, SizeFamilyInfo, TrimParams,
+    CornerParams, CreatedIds, FrameMemberParams, ProfileInsertParams, ProfileInsertResult, ProfileKindInfo, ProfileListParams, ProfileListResult,
+    ProfileOut, ProfilePropertiesParams, ProfilePropertiesResult, ProfileSection, SizeFamilyInfo, TrimParams,
 };
 use crate::schema::{TypedContract, output_schema_for};
 use crate::{Result, Session};
 
 const TRIM_CONTRACT: TypedContract<TrimParams> = TypedContract::new();
+const CORNER_CONTRACT: TypedContract<CornerParams> = TypedContract::new();
 
 #[cfg(test)]
 #[path = "frame_tests.rs"]
@@ -63,6 +65,12 @@ pub static COMMANDS: &[CommandSpec] = &[
         "to: [target…] (or one target: what each member's end is trimmed or extended to: a member (its body name, or {member, side?: right|left|top|bottom of its profile; default the side the trimmed member meets}): a butt joint against that side, worked out from its line and profile so it follows edits; or {plane: XY|XZ|YZ|a construction plane|{origin, normal}|{face: [x,y,z]} a planar face}, or {plane_ref} a plane as the design saves it, as Edit Feature keeps it); ",
         "end?: auto|start|end (which end of each member moves; default auto: for each target the end nearer it); gap?: length expr (the weld gap between each end and its target, default 0, at most 1 m). ",
         "Each member's end that meets a target is rebuilt flat against it (a slanted face cuts it at a slant); a member keeps its body and name. Members changed by later features are refused as members or member targets; use a planar face target for a modified body. Every member must meet a target, and two targets may not move the same end. Returns the feature and the bodies it changed"
+    )),
+    CommandSpec::new("frame.corner", "Corner", crate::checked!("frame.corner", corner)).contract(&CORNER_CONTRACT).output(output_schema_for::<FeatureResult>).icon("frame_trim").enabled(not_in_sketch).params(concat!(
+        "members: [member, member] (the two members that meet at the corner: each a member's body name, or {feature: the frame member feature (name or id), line: its line's id}); ",
+        "kind?: mitre (default: both cut on the plane halfway between them); gap?: length expr (the weld gap between the two cut faces, default 0, at most 1 m). ",
+        "The members meet where the lines through the middle of their profiles cross, which must be at an end of each (within its profile's size); each member's end there is rebuilt cut on the corner plane, extending or shortening it, and keeps its body and name. ",
+        "Refused, with the reason, for parallel members, members whose middle lines pass apart or cross away from their ends, one member twice, and members changed by later features. Returns the feature and the bodies it changed"
     )),
     CommandSpec::new("frame.profile.list", "Profile Library", crate::checked!("frame.profile.list", list))
         .icon("library")
@@ -473,21 +481,43 @@ fn trim(s: &mut Session, p: &Value) -> Result<Value> {
         None | Some(Value::Null) => TrimEnd::Auto,
         Some(v) => serde_json::from_value(v.clone()).map_err(|_| bad(cmd, "`end` must be auto, start or end"))?,
     };
-    let gap = match p.get("gap") {
-        None | Some(Value::Null) => None,
-        Some(_) => {
-            let e = expr(p, "gap").ok_or_else(|| bad(cmd, "`gap` must be a length expression"))?;
-            let g = s.doc.eval(&s.doc.with_design_unit(&e, Kind::Length), Kind::Length).map_err(|err| bad(cmd, format!("gap: {err}")))?;
-            if !(0.0..=frame::MAX_TRIM_GAP).contains(&g) {
-                return Err(bad(cmd, format!("`gap` must be 0…{} mm", frame::MAX_TRIM_GAP)));
-            }
-            Some(e)
-        }
-    };
+    let gap = gap(s, p, cmd)?;
     // A face's attachment holds the placements it was picked under, as a sketch's does.
     for face in &faces {
         super::sketch::face::capture_positions(s, face)?;
     }
     // Every target is in the active component's frame already.
     super::features::add_feature_in(s, p, FeatureKind::FrameTrim { members, to, end, gap }, false)
+}
+
+/// The weld `gap` parameter of a trim or a corner: none, or a length expression of 0…1 m.
+fn gap(s: &Session, p: &Value, cmd: &str) -> Result<Option<solidcraft_doc::Expr>> {
+    match p.get("gap") {
+        None | Some(Value::Null) => Ok(None),
+        Some(_) => {
+            let e = expr(p, "gap").ok_or_else(|| bad(cmd, "`gap` must be a length expression"))?;
+            let g = s.doc.eval(&s.doc.with_design_unit(&e, Kind::Length), Kind::Length).map_err(|err| bad(cmd, format!("gap: {err}")))?;
+            if !(0.0..=frame::MAX_TRIM_GAP).contains(&g) {
+                return Err(bad(cmd, format!("`gap` must be 0…{} mm", frame::MAX_TRIM_GAP)));
+            }
+            Ok(Some(e))
+        }
+    }
+}
+
+fn corner(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "frame.corner";
+    let members = match p.get("members") {
+        Some(Value::Array(a)) if a.len() == 2 => a.iter().map(|v| member_ref(s, v, cmd)).collect::<Result<Vec<_>>>()?,
+        _ => return Err(bad(cmd, "`members` must list the two members that meet (body names or {feature, line})")),
+    };
+    if members.first() == members.get(1) {
+        return Err(bad(cmd, "`members` lists the same member twice: a corner needs two"));
+    }
+    let kind: CornerKind = match p.get("kind") {
+        None | Some(Value::Null) => CornerKind::Mitre,
+        Some(v) => serde_json::from_value(v.clone()).map_err(|_| bad(cmd, "`kind` must be mitre"))?,
+    };
+    let gap = gap(s, p, cmd)?;
+    add_feature(s, p, FeatureKind::FrameCorner { members, kind, gap })
 }
