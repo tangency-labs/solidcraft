@@ -12,6 +12,14 @@ use crate::{EngineError, Result, Sel, Session, Snapshot};
 pub static COMMANDS: &[CommandSpec] = &[
     CommandSpec::new("edit.undo", "Undo", undo).icon("undo").key("Ctrl+Z").noundo().doc_only(),
     CommandSpec::new("edit.redo", "Redo", redo).icon("redo").key("Ctrl+Y").noundo().doc_only(),
+    CommandSpec::new("edit.repeat", "Repeat Last Command", crate::checked!("edit.repeat", repeat))
+        .icon("redo")
+        .key("Shift+R")
+        .noundo()
+        .doc_only()
+        .contract(&REPEAT_CONTRACT)
+        .output(crate::schema::output_schema_for::<crate::schema::edit::RepeatResult>)
+        .params("Starts the last tool or dialog started in the app again, with its defaults (a toolbar click, not a replay of its values). Only the app has a tool to start: called here it is refused, and changes nothing"),
     CommandSpec::new("edit.checkpoint", "Checkpoint", checkpoint).icon("checkpoint")
         .noundo()
         .doc_only()
@@ -88,6 +96,16 @@ fn redo(s: &mut Session, _p: &Value) -> Result<Value> {
     let label = now.label.clone();
     s.undo.push(now);
     Ok(json!({"redone": label}))
+}
+
+const REPEAT_CONTRACT: crate::schema::TypedContract<crate::schema::edit::RepeatParams> = crate::schema::TypedContract::new();
+
+/// Repeat Last Command (#7077) starts a tool, which only the app has: it starts the last one in
+/// `SolveApp::start` and never reaches this. A script runs the command it wants itself.
+fn repeat(_s: &mut Session, _p: &Value) -> Result<Value> {
+    Err(EngineError::Other(
+        "edit.repeat starts the last tool or dialog again in the app (its key, the canvas menu or command search); there is no tool to start here: run that command itself".into(),
+    ))
 }
 
 /// Put the session at `snap`; returns where it was, under the same label.

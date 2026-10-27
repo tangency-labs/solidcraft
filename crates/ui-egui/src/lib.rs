@@ -1135,10 +1135,14 @@ impl SolveApp {
         workspace::sync_context(self);
     }
 
-    /// Start the last tool or dialog started again (Repeat in the menus, Shift+R; #3045).
-    /// `false` when none was started yet.
+    /// Start the last tool or dialog started again, with its defaults (Repeat in the menus,
+    /// the `edit.repeat` command and its key, Shift+R by default; #3045, #7077). `false` when
+    /// none was started yet: the status line says so.
     pub fn repeat_last(&mut self) -> bool {
-        let Some((id, _)) = self.last_command.clone() else { return false };
+        let Some((id, _)) = self.last_command.clone() else {
+            self.set_status(self.tr("ui.repeat_nothing").to_string(), false);
+            return false;
+        };
         self.start(&id);
         true
     }
@@ -1167,6 +1171,11 @@ impl SolveApp {
         }
         // A file is loading: the design waits for it.
         if self.file_load.busy() || self.file_picker.is_some() {
+            return;
+        }
+        // Repeat Last Command starts the tool it names; it is never the one repeated itself.
+        if id == "edit.repeat" {
+            self.repeat_last();
             return;
         }
         // Front … Isometric (Ctrl+1…7 by default) turn the view as the view cube's faces do. The

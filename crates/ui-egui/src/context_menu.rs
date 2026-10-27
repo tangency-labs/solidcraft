@@ -325,9 +325,10 @@ pub fn component_bodies(app: &SolveApp, id: u64) -> Vec<String> {
 
 /// The eight radial commands, clockwise from the top.
 pub fn radial_items(app: &SolveApp) -> Vec<Item> {
+    let key = crate::keymap::display_for(app, "edit.repeat").unwrap_or_default();
     let repeat = match &app.last_command {
-        Some((_, label)) => act("ui.repeat", &format!("Repeat {label}"), "redo").key(crate::keymap::REPEAT_KEY),
-        None => act("ui.repeat", "Repeat", "redo").key(crate::keymap::REPEAT_KEY).on(false),
+        Some((_, label)) => act("ui.repeat", &format!("Repeat {label}"), "redo").key(&key),
+        None => act("ui.repeat", "Repeat", "redo").key(&key).on(false),
     };
     let delete = act("ui.delete", "Delete", "delete").key("Del").on(!app.session.selection.is_empty());
     if app.session.active_sketch.is_some() {
@@ -500,7 +501,8 @@ fn viewport_items(app: &SolveApp) -> Vec<Item> {
     let has = |f: fn(&Sel) -> bool| sel.iter().any(f);
     let mut v = Vec::new();
     if let Some((_, label)) = &app.last_command {
-        v.push(act("ui.repeat", &format!("Repeat {label}"), "redo").key(crate::keymap::REPEAT_KEY));
+        let key = crate::keymap::display_for(app, "edit.repeat").unwrap_or_default();
+        v.push(act("ui.repeat", &format!("Repeat {label}"), "redo").key(&key));
         v.push(Item::sep());
     }
     // Everything under the cursor, for what lies beneath something else.

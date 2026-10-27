@@ -11,12 +11,8 @@ use solidcraft_engine::{CommandSpec, command_specs};
 use crate::SolveApp;
 use crate::ui_kit;
 
-/// Repeats the last tool or dialog started (`SolveApp::repeat_last`, #3045).
-pub const REPEAT_KEY: &str = "Shift+R";
-
 /// Keys the application handles before any command shortcut.
 pub const RESERVED: &[&str] = &[
-    REPEAT_KEY,
     "Escape",
     "S",
     "V",
@@ -1071,8 +1067,7 @@ mod tests {
     }
 
     /// #3045: Shift+R starts the last tool again (here a sketch's Line after Escape put it
-    /// down), R alone is still the rectangle; the menus show the key on Repeat, and no command
-    /// can take it.
+    /// down), R alone is still the rectangle; the menus show the key on Repeat.
     #[test]
     fn shift_r_repeats_the_last_tool() {
         let mut h = crate::scenario::Harness::new();
@@ -1092,9 +1087,60 @@ mod tests {
         let rectangle = h.app.tool.as_ref().map(|t| t.cmd.to_string()).unwrap_or_default();
         assert!(rectangle.starts_with("sketch.rectangle"), "R alone: {rectangle}");
         let repeat = crate::context_menu::radial_items(&h.app).into_iter().find(|i| i.id == "ui.repeat").unwrap();
-        assert_eq!(repeat.shortcut, REPEAT_KEY);
-        let mut a = app();
-        assert!(bind(&mut a, "solid.extrude", REPEAT_KEY, true).is_err(), "Shift+R is the app's");
+        assert_eq!(repeat.shortcut, display("Shift+R"));
+    }
+
+    /// #7077: Repeat Last Command is the command `edit.repeat`: Keyboard Shortcuts lists it and
+    /// can give it another key (the old one then does nothing, and the menus show the new one),
+    /// another command takes its key only on request, and command search finds and starts it.
+    /// Typing Shift+R into a field is text, not Repeat.
+    #[test]
+    fn repeat_last_command_is_a_command_with_a_key_that_can_change() {
+        let mut h = crate::scenario::Harness::new();
+        h.app.home.open = false;
+        h.frames(2);
+        assert_eq!(effective(&h.app, "edit.repeat").as_deref(), Some("Shift+R"));
+        assert_eq!(commands_for(&h.app, "Shift+R"), ["edit.repeat"], "no other default uses Shift+R");
+        assert!(bind(&mut h.app, "solid.extrude", "Shift+R", false).unwrap_err().contains("Repeat Last Command"));
+        // Nothing was started yet: Repeat says so and starts nothing.
+        h.step(&json!({"key": "R", "shift": true})).unwrap();
+        assert!(h.app.dialog.is_none() && h.app.tool.is_none());
+        assert_eq!(h.app.status.as_ref().map(|s| s.0.as_str()), Some(h.app.tr("ui.repeat_nothing")));
+        h.step(&json!({"start": "solid.box"})).unwrap();
+        h.frames(2);
+        assert!(h.app.dialog.is_some(), "Box opens its dialog");
+        crate::dialogs::cancel(&mut h.app);
+        h.frames(1);
+        assert!(h.app.dialog.is_none());
+        // Another key for Repeat: Shift+R is free again, Alt+Shift+R starts Box's dialog again.
+        bind(&mut h.app, "edit.repeat", "Alt+Shift+R", false).unwrap();
+        h.step(&json!({"key": "R", "shift": true})).unwrap();
+        h.frames(1);
+        assert!(h.app.dialog.is_none(), "the old key no longer repeats");
+        h.step(&json!({"key": "R", "shift": true, "alt": true})).unwrap();
+        h.frames(2);
+        assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.box"), "the new key repeats");
+        let repeat = crate::context_menu::radial_items(&h.app).into_iter().find(|i| i.id == "ui.repeat").unwrap();
+        assert_eq!(repeat.shortcut, display("Alt+Shift+R"));
+        crate::dialogs::cancel(&mut h.app);
+        reset(&mut h.app, Some("edit.repeat"));
+        // Command search lists it, and choosing it starts the last command again.
+        assert_eq!(crate::shortcut_box::search(&h.app, "repeat last").first().map(|r| r.0), Some("edit.repeat"));
+        h.call("ui.palette", json!({"text": "repeat last"}));
+        h.frames(3);
+        h.step(&json!({"key": "Enter"})).unwrap();
+        h.frames(2);
+        assert!(!h.app.ui.palette_open);
+        assert_eq!(h.app.dialog.as_ref().and_then(|d| d.command()), Some("solid.box"), "chosen in command search");
+        assert_eq!(h.app.last_command.as_ref().map(|c| c.0.as_str()), Some("solid.box"), "Repeat is never what is repeated");
+        crate::dialogs::cancel(&mut h.app);
+        h.frames(1);
+        // While command search's field takes the keyboard, Shift+R is a letter typed there.
+        h.call("ui.palette", json!({}));
+        h.frames(3);
+        h.step(&json!({"key": "R", "shift": true})).unwrap();
+        h.frames(1);
+        assert!(h.app.ui.palette_open && h.app.dialog.is_none(), "typing in a field never repeats");
     }
 }
 

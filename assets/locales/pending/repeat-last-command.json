@@ -1,0 +1,22 @@
+{
+  "en": {
+    "cmd.edit_repeat": "Repeat Last Command",
+    "ui.repeat_nothing": "Nothing to repeat yet: start a tool or dialog first."
+  },
+  "de": {
+    "cmd.edit_repeat": "Letzten Befehl wiederholen",
+    "ui.repeat_nothing": "Noch nichts zu wiederholen: Starten Sie zuerst ein Werkzeug oder einen Dialog."
+  },
+  "ja": {
+    "cmd.edit_repeat": "最後のコマンドを繰り返す",
+    "ui.repeat_nothing": "まだ繰り返すものがありません。先にツールかダイアログを開始してください。"
+  },
+  "ko": {
+    "cmd.edit_repeat": "마지막 명령 반복",
+    "ui.repeat_nothing": "아직 반복할 것이 없습니다. 먼저 도구나 대화 상자를 시작하세요."
+  },
+  "zh": {
+    "cmd.edit_repeat": "重复上一个命令",
+    "ui.repeat_nothing": "还没有可重复的操作：请先启动一个工具或对话框。"
+  }
+}

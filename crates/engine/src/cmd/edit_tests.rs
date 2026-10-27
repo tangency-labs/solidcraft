@@ -40,6 +40,20 @@ fn roll_to_takes_a_number_or_end_and_refuses_anything_else() {
     }
 }
 
+/// #7077: Repeat Last Command is a command (its key can change, command search finds it), but
+/// only the app has a tool to start, so a script's call is refused and changes nothing.
+#[test]
+fn repeat_is_refused_outside_the_app_and_changes_nothing() {
+    let mut s = Session::default();
+    run(&mut s, "solid.box", json!({"length": 10, "width": 10, "height": 10}));
+    let (doc, undo) = (s.doc.to_json(), s.undo.len());
+    let e = s.execute("edit.repeat", &json!({})).unwrap_err().to_string();
+    assert!(e.contains("in the app"), "{e}");
+    assert_eq!((s.doc.to_json(), s.undo.len()), (doc, undo));
+    let spec = crate::find_command("edit.repeat").unwrap();
+    assert_eq!((spec.shortcut, spec.tab, spec.undoable), (Some("Shift+R"), "", false));
+}
+
 #[test]
 fn g2_fillet_survives_edit_undo_and_reopen() {
     use solidcraft_doc::{Document, FeatureKind, FilletStyle};
