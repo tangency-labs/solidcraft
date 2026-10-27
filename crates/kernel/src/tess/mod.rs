@@ -13,10 +13,14 @@
 //! 2. otherwise, the general method for every face: constrained Delaunay in the face's (u, v),
 //!    with interior seeds and Ruppert refinement, every node then evaluated on the exact
 //!    surface (and refined where a triangle sags off it);
-//! 3. a face even that refuses (its loops cross or do not close in (u, v), or wind round a
-//!    seam or pole), or whose pcurves do not lie on its edges, is an error naming the face (and
-//!    the edge) and why. Its cause is upstream, in the record's pcurves or seams, and is fixed
-//!    there; there is no other mesher to fall back to.
+//! 3. a face even that refuses because its loops cross in (u, v) (a cusp, a sliver whose sides
+//!    sag across each other) is still a defect upstream, in the record's pcurves or seams, and is
+//!    named in the plan's stats ([`PlanStats::lenient`], with why it was refused) so it is
+//!    reported and fixed there; it is filled leniently in (u, v) (the sides crossing one already
+//!    kept are left out, see [`Lenient`]) so the display has no hole. A face that refuses even
+//!    that (its loops do not close in (u, v), or wind round a seam or pole), or whose pcurves do
+//!    not lie on its edges, is an error naming the face (and the edge) and why; there is no
+//!    other mesher to fall back to.
 
 pub(crate) mod cdt;
 pub(crate) mod collar;
@@ -41,12 +45,33 @@ use solidcraft_geom::tess::{EvalSurface, FacePlan, TessPlan};
 
 use crate::{KernelError, Result};
 
+/// Whether [`plan_face`] may leave out of its constrained Delaunay the boundary sides that cross
+/// a side already kept, and not hold the triangles to every side: the last resort for a face
+/// that crosses itself in (u, v) (a cusp, a sliver whose sides sag across each other), so the
+/// display has no hole. Its points stay in (u, v), so a curved face is still drawn on its
+/// surface. Such a face is named in [`PlanStats::lenient`]: its pcurves or seams are wrong.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Lenient {
+    No,
+    Yes,
+}
+
 /// How the faces of a plan were meshed.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PlanStats {
     pub planar: usize,
     pub structured: usize,
     pub delaunay: usize,
+    /// Faces every method refused, filled leniently in (u, v) (see [`Lenient`]) so the display
+    /// has no hole: each still a defect upstream, in its pcurves or seams.
+    pub lenient: Vec<LenientFace>,
+}
+
+/// A face filled leniently: its index in the record and why the strict plan refused it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LenientFace {
+    pub face: usize,
+    pub reason: String,
 }
 
 /// Curved faces from which their sizes are worked out on the worker pool.
@@ -171,8 +196,7 @@ pub(crate) fn plan(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result
         let (Some(face), Some(eval), Some(size), Some(fb)) = (faces.get(fi), evals.get(fi), sizes.get(fi), boundaries.get(fi)) else {
             return Err(unsupported(format!("face {fi}: missing")));
         };
-        let mut stats = PlanStats::default();
-        let fp = plan_face(fi, kind(face.parameters()), eval, &fb.loops, &rules, *size, &mut stats)?;
+        let (fp, stats) = plan_or_fill(fi, kind(face.parameters()), eval, &fb.loops, &rules, *size)?;
         let fwd = forward.get(fi).copied().unwrap_or(true);
         let fp =
             FacePlan { flip: !fwd, triangles: if fwd { fp.triangles } else { fp.triangles.into_iter().map(|[a, b, c]| [a, c, b]).collect() }, ..fp };
@@ -188,6 +212,7 @@ pub(crate) fn plan(b: &brep::Brep, tol: f64, turn: Option<size::Turn>) -> Result
         stats.planar += s.planar;
         stats.structured += s.structured;
         stats.delaunay += s.delaunay;
+        stats.lenient.extend(s.lenient);
     }
     plan.edges = nodes.into_iter().map(|n| n.points).collect();
     plan.edge_faces = edge_faces.into_iter().map(|fs| fs.into_iter().map(|f| u32::try_from(f).unwrap_or(u32::MAX)).collect()).collect();
@@ -564,8 +589,38 @@ fn holes_beside_outer(dom: &uv::Domain, loops: &mut [seam::Loop]) {
     }
 }
 
+/// One face, planned by [`plan_face`]; a face it refuses because its loops cross in (u, v) is
+/// planned once more leniently (see [`Lenient`]) and named in the stats with the first refusal,
+/// so the defect upstream is still reported. When the lenient fill refuses too, the first
+/// refusal is the error.
+fn plan_or_fill(
+    fi: usize,
+    kind: &str,
+    s: &EvalSurface,
+    loops: &[seam::Loop],
+    rules: &size::Rules,
+    size: (f64, [f64; 2]),
+) -> Result<(FacePlan, PlanStats)> {
+    let mut stats = PlanStats::default();
+    match plan_face(fi, kind, s, loops, rules, size, &mut stats, Lenient::No) {
+        Ok(fp) => Ok((fp, stats)),
+        Err(first) => {
+            let mut stats = PlanStats::default();
+            match plan_face(fi, kind, s, loops, rules, size, &mut stats, Lenient::Yes) {
+                Ok(fp) => {
+                    stats.lenient.push(LenientFace { face: fi, reason: first.to_string() });
+                    Ok((fp, stats))
+                }
+                Err(_) => Err(first),
+            }
+        }
+    }
+}
+
 /// One face: boundary loops in 3D (shared edge nodes) to parameters and triangles.
 /// `size`: the face's target side length (mm) and the surface's mean speed along u and v.
+/// `lenient`: the last resort for a face no method could plan (see [`Lenient`]).
+#[allow(clippy::too_many_arguments)]
 fn plan_face(
     fi: usize,
     kind: &str,
@@ -574,6 +629,7 @@ fn plan_face(
     rules: &size::Rules,
     size: (f64, [f64; 2]),
     stats: &mut PlanStats,
+    lenient: Lenient,
 ) -> Result<FacePlan> {
     let tol = rules.tol;
     let (h, speed) = size;
@@ -659,13 +715,21 @@ fn plan_face(
         let seeds = cdt::lattice(bbox, step, &polys, speed);
         let eval = |u: f64, v: f64| s.derivs(u, v).map(|(p, su, sv)| (p, su.cross(sv).normalized()));
         let sag = cdt::Sag { eval: &eval, tol, h, turn: rules.turn, scale: speed };
-        let fill = cdt::Fill { seeds: &seeds, refine: Some((sag, MAX_REFINE)), shape: !matches!(s, EvalSurface::Plane { .. }) };
+        let fill = cdt::Fill {
+            seeds: &seeds,
+            refine: Some((sag, MAX_REFINE)),
+            shape: !matches!(s, EvalSurface::Plane { .. }),
+            lenient: lenient == Lenient::Yes,
+        };
         cdt::triangulate(&uvs, &ranges, fill).ok_or_else(|| fail("boundary crosses itself"))
     };
     // Planar and curved faces alike: a structured grid where the boundary runs along the
     // parameter box (a rectangle, a cylinder half), a Coons grid on four corners, else Delaunay.
     let planar = matches!(s, EvalSurface::Plane { .. });
-    let (extra, triangles) = {
+    // The lenient fill is the constrained Delaunay alone: the caller names the face in the stats.
+    let (extra, triangles) = if lenient == Lenient::Yes {
+        delaunay()?
+    } else {
         let mut us = uv::divide(s, 0, bbox[0], bbox[1], rules, h, MAX_LINES);
         let mut vs = uv::divide(s, 1, bbox[1], bbox[0], rules, h, MAX_LINES);
         grid::thin(&mut us, &mut vs, grid::MAX_FACE_GRID);
@@ -755,7 +819,8 @@ fn plan_face(
     let pole_pair = |i: u32, j: u32| i != j && fixed.get(i as usize).zip(fixed.get(j as usize)).is_some_and(|(p, q)| p == q);
     let mut triangles = triangles;
     triangles.retain(|t| !(pole_pair(t[0], t[1]) || pole_pair(t[1], t[2]) || pole_pair(t[2], t[0])));
-    if !closed_boundary(&ranges, &fixed, &uvs, &triangles) {
+    // A lenient fill leaves out the sides that cross: the boundary is followed everywhere else.
+    if lenient == Lenient::No && !closed_boundary(&ranges, &fixed, &uvs, &triangles) {
         return Err(fail("triangulation does not follow the boundary"));
     }
     let mut all = uvs;
@@ -896,7 +961,7 @@ fn plan_pieces(f: &Region) -> Option<(Vec<[f64; 2]>, Vec<[u32; 3]>)> {
                 let seeds = cdt::lattice(bbox, [f.h / f.speed[0], f.h / f.speed[1]], &polys, f.speed);
                 let eval = |u: f64, v: f64| s.derivs(u, v).map(|(p, su, sv)| (p, su.cross(sv).normalized()));
                 let sag = cdt::Sag { eval: &eval, tol: f.rules.tol, h: f.h, turn: f.rules.turn, scale: f.speed };
-                cdt::triangulate(&luv, &ranges, cdt::Fill { seeds: &seeds, refine: Some((sag, MAX_REFINE)), shape: true })
+                cdt::triangulate(&luv, &ranges, cdt::Fill { seeds: &seeds, refine: Some((sag, MAX_REFINE)), shape: true, lenient: false })
             })?;
         let (lextra, ltris) = local;
         let base = u32::try_from(n + extra.len()).ok()?;

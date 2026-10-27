@@ -188,6 +188,9 @@ crate::dialog_descriptor::dialog_descriptors! {
                 distance2: String,
                 angle: String,
                 flip: bool,
+                /// A smooth-patch corner's setback along each edge, as typed; empty for the
+                /// command's own default (1.5 × the radius).
+                setback: String,
             },
             Mirror,
             /// Rectangular pattern of bodies: along one direction, optionally a second.
@@ -1629,6 +1632,72 @@ fn fillet_edges(s: &Session, sel: &Sel, chain: bool) -> Vec<Sel> {
         }
     }
     picked
+}
+
+/// How close two edge ends are to be one vertex (mm).
+const VERTEX_TOLERANCE: f64 = 1e-6;
+
+/// The B-rep edges a Fillet dialog rounds, by body and index: the picked edges, and each edge of a
+/// picked face but its seams.
+fn fillet_edge_ids(s: &Session, items: &[Sel]) -> Vec<(String, usize)> {
+    let st = crate::open_meshing::session_world(s);
+    let mut ids: Vec<(String, usize)> = Vec::new();
+    for x in items {
+        match x {
+            Sel::Edge { body, index, .. } => ids.push((body.clone(), *index)),
+            Sel::Face { body, index, .. } => {
+                if let Some(b) = st.body(body) {
+                    let m = b.mesh();
+                    for e in m.face_edges(u32::try_from(*index).unwrap_or(u32::MAX)) {
+                        if !m.seams.get(e).copied().unwrap_or(false) {
+                            ids.push((body.clone(), e));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
+/// The corners of a Fillet dialog's edges where a smooth patch goes (`corner: g2`): each vertex
+/// where three or more of the edges meet and every other edge there is rounded too, once.
+pub(crate) fn fillet_corners(s: &Session, items: &[Sel]) -> Vec<Vec3> {
+    let st = crate::open_meshing::session_world(s);
+    let ids = fillet_edge_ids(s, items);
+    let mut corners: Vec<Vec3> = Vec::new();
+    let mut bodies: Vec<&str> = ids.iter().map(|(b, _)| b.as_str()).collect();
+    bodies.dedup();
+    for body in bodies {
+        let Some(b) = st.body(body) else { continue };
+        let m = b.mesh();
+        let picked: Vec<usize> = ids.iter().filter(|(x, _)| x == body).map(|(_, e)| *e).collect();
+        // An open edge's two ends (a closed one has no vertex to share).
+        let ends = |e: usize| m.edges.get(e).and_then(|p| Some((*p.first()?, *p.last()?))).filter(|(a, b)| a.dist(*b) > VERTEX_TOLERANCE);
+        let mut meeting: Vec<(Vec3, usize)> = Vec::new();
+        for (a, b) in picked.iter().filter_map(|e| ends(*e)) {
+            for v in [a, b] {
+                match meeting.iter_mut().find(|(c, _)| c.dist(v) < VERTEX_TOLERANCE) {
+                    Some((_, n)) => *n += 1,
+                    None => meeting.push((v, 1)),
+                }
+            }
+        }
+        for (v, n) in meeting {
+            let at = |e: &usize| ends(*e).is_some_and(|(a, b)| a.dist(v) < VERTEX_TOLERANCE || b.dist(v) < VERTEX_TOLERANCE);
+            let real = |e: &usize| !m.seams.get(*e).copied().unwrap_or(false);
+            if n >= 3
+                && (0..m.edges.len()).filter(real).filter(at).all(|e| picked.contains(&e))
+                && !corners.iter().any(|c| c.dist(v) < VERTEX_TOLERANCE)
+            {
+                corners.push(v);
+            }
+        }
+    }
+    corners
 }
 
 /// Profiles of the sketch a feature would use, when there is just one: the active sketch's, else
@@ -3381,7 +3450,16 @@ pub(crate) const CHAMFER_TYPES: [&str; 3] = ["Equal Distance", "Two Distances", 
 
 /// A new Fillet or Chamfer dialog's values.
 fn fillet_kind(size: &str, chamfer: bool) -> Kind {
-    Kind::Fillet { radius: size.into(), chamfer, chain: true, ctype: 0, distance2: size.into(), angle: "45 deg".into(), flip: false }
+    Kind::Fillet {
+        radius: size.into(),
+        chamfer,
+        chain: true,
+        ctype: 0,
+        distance2: size.into(),
+        angle: "45 deg".into(),
+        flip: false,
+        setback: String::new(),
+    }
 }
 
 /// A length field's first text: `number` in the design's units, with the unit written out so the
@@ -3913,7 +3991,7 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
             }
             ("solid.revolve", p)
         }
-        Kind::Fillet { radius, chamfer, ctype, distance2, angle, flip, .. } => {
+        Kind::Fillet { radius, chamfer, ctype, distance2, angle, flip, setback, .. } => {
             need(0, "edges")?;
             // Faces stand for all their edges.
             let st = crate::open_meshing::session_world(s);
@@ -3975,6 +4053,14 @@ fn dialog_commands(app: &SolveApp, d: &Dialog) -> Result<Vec<(String, Value)>, S
                         if d.extra.get("smooth").and_then(Value::as_bool).unwrap_or(false) {
                             p["smooth"] = json!(true);
                         }
+                    }
+                }
+                // A smooth patch's setback, typed once, goes to each of the dialog's corners; left
+                // empty, the command sets them back by its default (1.5 × the radius).
+                if d.extra.get("corner").and_then(Value::as_str) == Some("g2") && !setback.trim().is_empty() {
+                    let corners = fillet_corners(s, sels(d, 0));
+                    if !corners.is_empty() {
+                        p["setbacks"] = Value::Array(corners.into_iter().map(|v| json!({"vertex": pt3(v), "distance": setback.trim()})).collect());
                     }
                 }
                 ("solid.fillet", p)
@@ -5273,6 +5359,23 @@ pub fn for_feature(app: &SolveApp, id: u64, marker: Option<usize>) -> Option<Dia
             if let Some(inp) = d.inputs.first_mut() {
                 inp.items = edges.iter().enumerate().filter_map(|(i, p)| edge_pick(i, p.0)).collect();
                 d.picked_edges = inp.items.clone();
+            }
+            // Setbacks: one distance at exactly the dialog's smooth-patch corners shows in Setback;
+            // any other list (from the command) is kept as saved.
+            if let FeatureKind::Fillet { setbacks, corner, .. } = &f.kind
+                && let Some(first) = setbacks.first()
+            {
+                let corners = fillet_corners(s, sels(&d, 0));
+                let uniform = setbacks.iter().all(|c| c.distance == first.distance);
+                let at_corners =
+                    corners.len() == setbacks.len() && setbacks.iter().all(|c| corners.iter().any(|v| v.dist(c.vertex.0) < VERTEX_TOLERANCE));
+                match &mut d.kind {
+                    Kind::Fillet { setback, .. } if !corner.is_rolling() && uniform && at_corners => *setback = first.distance.to_string(),
+                    _ => {
+                        let saved = setbacks.iter().map(|c| json!({"vertex": pt3(c.vertex.0), "distance": c.distance.to_string()}));
+                        d.extra.insert("setbacks".into(), Value::Array(saved.collect()));
+                    }
+                }
             }
             d.chain_applied = false;
             d

@@ -99,7 +99,7 @@ fn a_box_is_a_regular_grid_on_every_face() {
 fn primitives_are_watertight_with_the_right_volume() {
     for tol in [0.05, 0.005] {
         let s = check("box", &ok(crate::box_solid(Vec3::ZERO, Vec3::new(10.0, 6.0, 4.0))), tol, 240.0);
-        assert_eq!(s, PlanStats { planar: 6, structured: 0, delaunay: 0 });
+        assert_eq!(s, PlanStats { planar: 6, structured: 0, delaunay: 0, lenient: Vec::new() });
         let s = check("cylinder", &ok(crate::cylinder(Vec3::new(1.0, 2.0, 3.0), Vec3::new(0.0, 1.0, 1.0), 2.5, 7.0)), tol, PI * 2.5 * 2.5 * 7.0);
         assert_eq!(s.delaunay, 0, "cylinder walls are structured");
         let s = check("torus", &ok(crate::torus(Vec3::ZERO, 6.0, 1.5)), tol, 2.0 * PI * PI * 6.0 * 1.5 * 1.5);
@@ -645,7 +645,7 @@ fn loops_touching_at_a_shared_vertex_bound_the_face() {
     let uvs: Vec<[f64; 2]> = outer.iter().chain(&left).chain(&right).copied().collect();
     let fixed: Vec<Vec3> = uvs.iter().map(|q| Vec3::new(q[0], q[1], 0.0)).collect();
     let ranges = vec![0..4, 4..7, 7..10];
-    let fill = cdt::Fill { seeds: &[], refine: None, shape: false };
+    let fill = cdt::Fill { seeds: &[], refine: None, shape: false, lenient: false };
     let Some((_, triangles)) = cdt::triangulate(&uvs, &ranges, fill) else { panic!("triangulates") };
     assert!(closed_boundary(&ranges, &fixed, &uvs, &triangles), "the triangles follow both holes through their shared vertex");
 }
@@ -682,4 +682,71 @@ fn a_thin_lune_whose_chords_cross_meshes() {
     let m = p.evaluate();
     assert_watertight(&m, "lune");
     assert!(m.measure().volume > 0.0, "inside out");
+}
+
+/// A doubly curved patch 40 mm across, and a loop on it in (u, v) whose right side folds back
+/// past itself near the top: the last chord of the fold crosses the side, as a cusp or a sliver
+/// whose sides sag across each other leaves a face's boundary.
+fn a_face_crossing_itself() -> (EvalSurface, seam::Loop, size::Rules) {
+    let mut ctrl = Vec::new();
+    for j in 0..3 {
+        for i in 0..3 {
+            let bump = if i == 1 && j == 1 { 12.0 } else { 0.0 };
+            ctrl.push([20.0 * f64::from(i), 20.0 * f64::from(j), bump, 1.0]);
+        }
+    }
+    let s = EvalSurface::Nurbs {
+        degree: [2, 2],
+        knots: [vec![0., 0., 0., 1., 1., 1.], vec![0., 0., 0., 1., 1., 1.]],
+        count: [3, 3],
+        ctrl,
+        closed: [false, false],
+    };
+    let corners = [[0.1, 0.1], [0.9, 0.1], [0.9, 0.7], [0.7, 0.95], [0.86, 0.8], [0.1, 0.9]];
+    let mut uv: Vec<[f64; 2]> = Vec::new();
+    for k in 0..corners.len() {
+        let (a, b) = (corners[k], corners[(k + 1) % corners.len()]);
+        for t in 0..8 {
+            let f = f64::from(t) / 8.0;
+            uv.push([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f]);
+        }
+    }
+    let pts: Vec<Vec3> = uv.iter().filter_map(|q| s.derivs(q[0], q[1]).map(|(p, _, _)| p)).collect();
+    assert_eq!(pts.len(), uv.len());
+    (s, seam::Loop { uv, pts }, size::Rules::new(0.05, 40.0, None))
+}
+
+/// A curved face crossing itself in (u, v) is refused by every method; the lenient fill leaves
+/// the crossing side out and plans the rest in (u, v), with points inside the face on its surface
+/// (the GPU evaluates them there), not flat between boundary nodes.
+#[test]
+fn a_curved_face_crossing_itself_is_filled_on_its_surface() {
+    let (s, l, rules) = a_face_crossing_itself();
+    let size = size::face_size(&s, &uv::domain(&s), &rules);
+    let loops = std::slice::from_ref(&l);
+    let mut stats = PlanStats::default();
+    assert!(plan_face(0, "spline", &s, loops, &rules, size, &mut stats, Lenient::No).is_err());
+    let Ok(fp) = plan_face(0, "spline", &s, loops, &rules, size, &mut stats, Lenient::Yes) else { panic!("a lenient fill") };
+    assert!(!fp.triangles.is_empty());
+    assert!(fp.uv.len() > fp.fixed.len(), "{} points, {} on the boundary", fp.uv.len(), fp.fixed.len());
+    // Each point inside the face on the surface where its parameters put it.
+    let mesh = TessPlan { surfaces: vec![s.clone()], faces: vec![FacePlan { surface: Some(0), ..fp.clone() }], ..TessPlan::default() }.evaluate();
+    for (q, p) in fp.uv.iter().zip(&mesh.positions).skip(fp.fixed.len()) {
+        let Some((on, _, _)) = s.derivs(q[0], q[1]) else { panic!("evaluates at {q:?}") };
+        assert!(on.dist(*p) < 1e-9, "{q:?}");
+    }
+}
+
+/// The face filled leniently is named in the plan's stats with why the strict plan refused it, and
+/// counted under no method: the display has no hole, and the defect is still reported.
+#[test]
+fn a_face_filled_leniently_is_named_in_the_stats() {
+    let (s, l, rules) = a_face_crossing_itself();
+    let size = size::face_size(&s, &uv::domain(&s), &rules);
+    let Ok((fp, stats)) = plan_or_fill(7, "spline", &s, std::slice::from_ref(&l), &rules, size) else { panic!("filled leniently") };
+    assert!(!fp.triangles.is_empty());
+    assert_eq!((stats.planar, stats.structured, stats.delaunay), (0, 0, 0));
+    let [lenient] = stats.lenient.as_slice() else { panic!("one lenient face: {:?}", stats.lenient) };
+    assert_eq!(lenient.face, 7);
+    assert!(lenient.reason.contains("face 7 (spline)"), "{}", lenient.reason);
 }

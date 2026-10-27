@@ -389,7 +389,12 @@ fn draft_tilts_a_side_about_its_line_on_the_neutral_plane() {
 fn a_setback_corner_left_open_returns_its_hole() {
     let b = Brep::make_box([0.0; 3], [60.0, 40.0, 20.0]).unwrap();
     let edges = [[30.0, 40.0, 20.0], [60.0, 20.0, 20.0], [60.0, 40.0, 10.0]];
+    solidcraft_profile::set_enabled(true);
+    let mark = solidcraft_profile::mark();
     let (open, holes) = b.blend_setback_open(Blend::Round, &edges, &[5.0; 3], &[[60.0, 40.0, 20.0]], &[8.0], 0.1).unwrap();
+    // The call is a profiler span like every other, timed by the C API.
+    let report = mark.report();
+    assert!(report.rows.iter().any(|r| r.category == "smlib" && r.name == "smlib_blend_setback_open"), "{report:?}");
     shot(&open, "setback_open");
     assert_eq!(open.counts().unwrap(), [9, 30, 22]);
     assert!(!open.is_manifold_solid().unwrap());

@@ -103,9 +103,60 @@ const FILLET_TYPES: [(&str, &str); 5] = [
     ("Constant radius", "constant"),
     ("Chord length", "chord"),
     ("Variable radius", "variable"),
-    ("Curvature continuous (G2)", "curvature"),
+    ("ui.fillet_type_curvature", "curvature"),
     ("Spline", "spline"),
 ];
+
+/// What fills a fillet's corners where three or more rounded edges meet (labels and hover texts,
+/// in the order of the `corner` words `rolling` and `g2`).
+const FILLET_CORNERS: [(&str, &str); 2] =
+    [("ui.fillet_corner_ball", "ui.fillet_corner_ball_tip"), ("ui.fillet_corner_patch", "ui.fillet_corner_patch_tip")];
+
+/// A fillet's Corners row (`corner`) and, with a smooth patch, its Setback (`setbacks`, one
+/// distance for every corner). Shown only while the edges have a corner where three or more
+/// rounded edges meet, or the fillet already has a smooth patch; a patch takes Constant radius
+/// and Exact fit.
+fn fillet_corner_rows(
+    ui: &mut egui::Ui,
+    s: &solidcraft_engine::Session,
+    extra: &mut serde_json::Map<String, Value>,
+    inputs: &[selection::SelInput],
+    rtype: usize,
+    setback: &mut String,
+) -> bool {
+    let patch = extra.get("corner").and_then(Value::as_str) == Some("g2");
+    if !patch && fillet_corners(s, selection::items(inputs, 0)).is_empty() {
+        return false;
+    }
+    let exact = extra.get("fit").and_then(Value::as_str).is_none_or(|fit| fit == "exact");
+    let mut enter = false;
+    ui.add_enabled_ui(rtype == 0 && exact, |ui| {
+        form_row(ui, "ui.corners", |ui| {
+            let mut choice = usize::from(patch);
+            let response = ui_kit::dropdown(ui, "fi_corner", &mut choice, &FILLET_CORNERS.map(|(label, _)| label));
+            if choice != usize::from(patch) {
+                if choice == 1 {
+                    extra.insert("corner".into(), json!("g2"));
+                } else {
+                    extra.remove("corner");
+                }
+            }
+            response
+        })
+        .on_hover_text(FILLET_CORNERS.map(|(_, tip)| tr(tip)).join("\n"));
+        if extra.get("corner").and_then(Value::as_str) == Some("g2") {
+            ui.scope(|ui| {
+                let hint = crate::i18n::format("ui.fillet_setback_hint", &[("factor", "1.5")]);
+                enter |= hint_row(ui, "ui.fillet_setback", setback, &hint);
+            })
+            .response
+            .on_hover_text(crate::i18n::format("ui.fillet_setback_tip", &[("factor", "1.5")]));
+        }
+    })
+    .response
+    .on_disabled_hover_text(tr("ui.fillet_corner_needs_constant"));
+    enter
+}
 
 /// The most instances a solid pattern makes in one direction (the document's own limit).
 const MAX_PATTERN_INSTANCES: i64 = 1000;
@@ -133,6 +184,7 @@ fn choose_fillet_type(extra: &mut serde_json::Map<String, Value>, index: usize, 
     if index != 0 {
         extra.remove("fit");
         extra.remove("corner");
+        extra.remove("setbacks");
     }
     if index == 2 {
         extra.entry("radius2").or_insert_with(|| json!("1 mm"));
@@ -341,7 +393,7 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                 }
             });
         }
-        Kind::Fillet { radius, chamfer, chain, ctype, distance2, angle, flip } => {
+        Kind::Fillet { radius, chamfer, chain, ctype, distance2, angle, flip, setback } => {
             if *chamfer {
                 choice_row(ui, "Chamfer Type", "ch_type", ctype, &CHAMFER_TYPES);
             }
@@ -350,21 +402,14 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
             if !*chamfer {
                 form_row(ui, "Type", |ui| {
                     let previous = rtype;
-                    combo(ui, "fi_type", &FILLET_TYPES.map(|(label, _)| label), &mut rtype);
+                    let response = ui_kit::dropdown(ui, "fi_type", &mut rtype, &FILLET_TYPES.map(|(label, _)| label));
                     if previous != rtype {
                         choose_fillet_type(&mut d.extra, rtype, radius);
                     }
-                });
-                form_row(ui, "Continuity", |ui| {
-                    let mut continuity = usize::from(rtype == 3);
-                    if ui_kit::segmented(ui, &mut continuity, &["G1", "G2"], Default::default()) {
-                        rtype = if continuity == 1 { 3 } else { 0 };
-                        choose_fillet_type(&mut d.extra, rtype, radius);
-                        // G1 explicitly returns to rolling corners. G2 describes the edge blend,
-                        // whereas the separate advanced Corner control describes a vertex patch.
-                        d.extra.remove("corner");
-                    }
-                });
+                    response
+                })
+                .on_hover_text(tr("ui.fillet_type_tip"));
+                enter |= fillet_corner_rows(ui, &app.session, &mut d.extra, &d.inputs, rtype, setback);
             }
             if *chamfer && *ctype == 1 {
                 enter |= expr_row(ui, "Distance 2", distance2);
@@ -421,9 +466,13 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                                 }
                             });
                             d.extra.insert("mid".into(), json!(mids.iter().map(|(t, r)| json!([t, r])).collect::<Vec<_>>()));
-                            form_row(ui, "Smooth", |ui| {
-                                extra_check(ui, &mut d.extra, "smooth");
-                            });
+                            // How the radius runs between the radii: smoothly, or straight.
+                            let was = d.extra.get("smooth").and_then(Value::as_bool).unwrap_or(false);
+                            let mut smooth = was;
+                            ui_kit::checkbox_grid(ui, &mut [("ui.fillet_smooth_radius", &mut smooth)], 1);
+                            if smooth != was {
+                                d.extra.insert("smooth".into(), json!(smooth));
+                            }
                         }
                         if rtype == 4 {
                             // The radius along the edge as a B-spline: its control radii from the
@@ -467,16 +516,8 @@ pub(super) fn rows(app: &mut SolveApp, ctx: &egui::Context, d: &mut Dialog, ui: 
                             });
                         }
                     });
-                    let exact = d.extra.get("fit").and_then(Value::as_str).is_none_or(|fit| fit == "exact");
-                    ui.add_enabled_ui(constant && exact, |ui| {
-                        form_row(ui, "Corner", |ui| {
-                            extra_choice(ui, &mut d.extra, "fi_corner", "corner", &[("Rolling", "rolling"), ("G2", "g2")]);
-                        });
-                    })
-                    .response
-                    .on_hover_text(tr("G2 corners require a constant radius and Exact fit. G2 corner construction is not supported yet."));
                     if !constant {
-                        ui.label(RichText::new(tr("Fit and G2 corners require Constant radius.")).color(t.text_dim).size(t.font_small));
+                        ui.label(RichText::new(tr("ui.fillet_fit_needs_constant")).color(t.text_dim).size(t.font_small));
                     }
                 });
             }
@@ -1021,13 +1062,13 @@ mod tests {
     }
 
     #[test]
-    fn fillet_options_and_continuity_keep_the_existing_command_parameters() {
+    fn fillet_options_keep_the_existing_command_parameters() {
         let mut h = Harness::new();
         h.call("ui.resize", json!({"width":1400,"height":1000}));
         sample(&mut h);
         h.step(&json!({"start":"solid.fillet"})).unwrap();
         h.frames(4);
-        h.step(&json!({"click":{"handle":"dialog:Continuity:G2"}})).unwrap();
+        choose(&mut h, "Type", "ui.fillet_type_curvature");
         assert_eq!(h.app.dialog.as_ref().unwrap().extra.get("type"), Some(&json!("curvature")));
         h.step(&json!({"click":{"handle":"dialog:Tangent Chain"}})).unwrap();
         assert!(matches!(h.app.dialog.as_ref().unwrap().kind, Kind::Fillet { chain: false, .. }));
@@ -1083,33 +1124,136 @@ mod tests {
                 assert_eq!(p["knots"].as_array().unwrap().len(), 9);
                 assert!(p["start"].is_array());
             }
-            assert!(scenario::handle_at("dialog:Continuity:G3").is_none());
+            // Type is the one place the section is chosen: no second Continuity control.
+            assert!(scenario::handle_at("dialog:Continuity").is_none());
         }
     }
 
     #[test]
-    fn continuity_and_advanced_controls_map_to_edge_type_fit_and_corner() {
+    fn advanced_controls_map_to_fit() {
         let mut h = fillet_harness();
         assert!(scenario::handle_at("dialog:Radius Fit").is_none(), "Advanced starts collapsed");
         h.step(&json!({"click":{"handle":"dialog:section:Advanced"}})).unwrap();
-        choose(&mut h, "Corner", "G2");
-        assert_eq!(parameters(&h)["corner"], json!("g2"));
-        choose(&mut h, "Corner", "Rolling");
-        assert!(parameters(&h).get("corner").is_none());
+        assert!(scenario::handle_at("dialog:Corner").is_none(), "the corner is no longer an advanced choice");
         choose(&mut h, "Radius Fit", "Reduce to Fit");
         assert_eq!(parameters(&h)["fit"], json!("reduce"));
         choose(&mut h, "Radius Fit", "Taper to Fit");
         assert_eq!(parameters(&h)["fit"], json!("taper"));
         choose(&mut h, "Radius Fit", "Exact");
         assert!(parameters(&h).get("fit").is_none());
-        h.step(&json!({"click":{"handle":"dialog:Continuity:G2"}})).unwrap();
-        assert_eq!(parameters(&h)["type"], json!("curvature"));
-        h.step(&json!({"click":{"handle":"dialog:Continuity:G1"}})).unwrap();
+    }
+
+    /// The three edges of the sample's corner at (10, 0, 5): top front, top right and upright.
+    fn corner_edges(h: &Harness, count: usize) -> Vec<Sel> {
+        [Vec3::new(5.0, 0.0, 5.0), Vec3::new(10.0, 5.0, 5.0), Vec3::new(10.0, 0.0, 2.5)]
+            .into_iter()
+            .take(count)
+            .map(|p| edge_sel(&h.app.session, p).unwrap())
+            .collect()
+    }
+
+    fn set_edges(h: &mut Harness, count: usize) {
+        let edges = corner_edges(h, count);
+        h.app.dialog.as_mut().unwrap().inputs.first_mut().unwrap().items = edges;
+        h.frames(3);
+    }
+
+    /// Corners shows only once three rounded edges meet at a corner; Smooth patch then writes
+    /// `corner: g2`, its Setback (empty for the command's 1.5 × radius) goes to that corner as
+    /// `setbacks`, and Ball writes neither.
+    #[test]
+    fn corners_row_follows_the_selection_and_maps_to_corner_and_setbacks() {
+        let mut h = fillet_harness();
+        for count in [1, 2] {
+            set_edges(&mut h, count);
+            assert!(scenario::handle_at("dialog:ui.corners").is_none(), "{count} edges: no corner where three rounded edges meet");
+        }
+        set_edges(&mut h, 3);
+        let corners = fillet_corners(&h.app.session, &h.app.dialog.as_ref().unwrap().inputs[0].items);
+        assert_eq!(corners.len(), 1, "{corners:?}");
+        assert!(corners[0].dist(Vec3::new(10.0, 0.0, 5.0)) < 1e-6, "{corners:?}");
+        assert!(scenario::handle_at("dialog:ui.corners").is_some(), "three rounded edges meet at (10, 0, 5)");
+        assert!(scenario::handle_at("dialog:ui.fillet_setback").is_none(), "Setback goes with a smooth patch");
+        assert!(parameters(&h).get("corner").is_none(), "Ball is the default and writes nothing");
+        choose(&mut h, "ui.corners", "ui.fillet_corner_patch");
         let p = parameters(&h);
-        assert!(p.get("type").is_none() && p.get("corner").is_none());
+        assert_eq!(p["corner"], json!("g2"));
+        assert!(p.get("setbacks").is_none(), "an empty Setback leaves the command's default: {p}");
+        assert!(scenario::handle_at("dialog:ui.fillet_setback").is_some());
+        if let Some(Dialog { kind: Kind::Fillet { setback, .. }, .. }) = h.app.dialog.as_mut() {
+            *setback = "3 mm".into();
+        }
+        assert_eq!(parameters(&h)["setbacks"], json!([{"vertex": [10.0, 0.0, 5.0], "distance": "3 mm"}]));
+        choose(&mut h, "ui.corners", "ui.fillet_corner_ball");
+        let p = parameters(&h);
+        assert!(p.get("corner").is_none() && p.get("setbacks").is_none(), "{p}");
+        assert!(scenario::handle_at("dialog:ui.fillet_setback").is_none());
+        // Another type clears the patch; the row stays, disabled, saying why in its hover text.
+        choose(&mut h, "ui.corners", "ui.fillet_corner_patch");
         choose(&mut h, "Type", "Chord length");
-        h.step(&json!({"click":{"handle":"dialog:Continuity:G1"}})).unwrap();
-        assert!(parameters(&h).get("type").is_none(), "even an already highlighted G1 explicitly selects Constant radius");
+        let p = parameters(&h);
+        assert!(p.get("corner").is_none() && p.get("setbacks").is_none(), "{p}");
+        assert!(scenario::handle_at("dialog:ui.corners").is_some());
+    }
+
+    /// No visible label of the fillet dialog names a continuity by its code (G0 … G3): the words
+    /// are on the controls, the codes only in hover texts. Every section open, the corner row shown.
+    #[test]
+    fn fillet_labels_use_words_not_continuity_codes() {
+        let coded = |text: &str| ["G0", "G1", "G2", "G3"].iter().any(|code| text.contains(code));
+        for label in FILLET_TYPES.map(|(label, _)| label).into_iter().chain(FILLET_CORNERS.map(|(label, _)| label)) {
+            assert!(!coded(crate::i18n::tr_label(label)), "{label}: {}", crate::i18n::tr_label(label));
+        }
+        for tip in FILLET_CORNERS.map(|(_, tip)| tip) {
+            assert!(coded(crate::i18n::tr(tip)), "the hover text keeps the code for those who know it: {tip}");
+        }
+        let mut h = fillet_harness();
+        set_edges(&mut h, 3);
+        choose(&mut h, "ui.corners", "ui.fillet_corner_patch");
+        for section in ["Variable Radius", "Advanced"] {
+            h.step(&json!({"click":{"handle":format!("dialog:section:{section}")}})).unwrap();
+        }
+        h.frames(3);
+        assert!(scenario::handle_at("dialog:ui.fillet_setback").is_some() && scenario::handle_at("dialog:Radius Fit").is_some());
+        let tree = h.output.accesskit_update.as_ref().unwrap();
+        let labels: Vec<String> = tree.nodes.iter().flat_map(|(_, node)| [node.label(), node.value()]).flatten().map(str::to_string).collect();
+        assert!(labels.iter().any(|l| l == "Smooth patch"), "{labels:?}");
+        let shown: Vec<&String> = labels.iter().filter(|l| coded(l)).collect();
+        assert!(shown.is_empty(), "labels with a continuity code: {shown:?}");
+    }
+
+    /// A smooth-patch fillet reopens with its corner and setback, and OK writes them as saved; a
+    /// setback list the dialog cannot show as one distance is kept as it is.
+    #[test]
+    fn a_saved_smooth_patch_reopens_with_its_setback() {
+        for (setbacks, field) in [
+            (json!([{"vertex": [0, 0, 0], "distance": 7}]), "7"),
+            // Named near the vertex, as the command allows, rather than at it.
+            (json!([{"vertex": [0.1, 0.1, 0], "distance": 7}]), ""),
+        ] {
+            let mut h = Harness::new();
+            // The command's own smooth-patch corner: a 20 mm box, its three edges at the origin.
+            h.app.run("solid.box", json!({"length": 20, "width": 20, "height": 20, "body_name": "B"})).unwrap();
+            let edges = json!([[10, 0, 0], [0, 10, 0], [0, 0, 10]]);
+            h.app.run("solid.fillet", json!({"edges": edges, "radius": 4, "corner": "g2", "setbacks": setbacks})).unwrap();
+            let id = h.app.session.doc.features.last().unwrap().id;
+            let corner_of = |h: &Harness| match &h.app.session.doc.feature(id).unwrap().kind {
+                FeatureKind::Fillet { corner, setbacks, .. } => (*corner, setbacks.clone()),
+                other => panic!("{other:?}"),
+            };
+            let saved = corner_of(&h);
+            assert!(!saved.0.is_rolling() && saved.1.len() == 1, "{saved:?}");
+            h.app.edit_feature(id);
+            h.frames(3);
+            let d = h.app.dialog.as_ref().unwrap();
+            assert!(matches!(&d.kind, Kind::Fillet { setback, .. } if setback == field), "{:?}", d.kind);
+            assert_eq!(d.extra.get("corner"), Some(&json!("g2")));
+            for (command, params) in apply_commands(&h.app, d).unwrap() {
+                crate::dialogs::roll_marker(&mut h.app, None).unwrap();
+                h.app.run(&command, params).unwrap();
+            }
+            assert_eq!(corner_of(&h), saved, "OK keeps the corner and its setbacks");
+        }
     }
 
     #[test]
@@ -1129,9 +1273,12 @@ mod tests {
         assert!(scenario::handle_at("dialog:End Radius").is_none(), "the section stays collapsed after a type choice");
         h.step(&json!({"click":{"handle":"dialog:section:Variable Radius"}})).unwrap();
         assert!(scenario::handle_at("dialog:End Radius").is_some());
-        assert!(scenario::handle_at("dialog:Smooth").is_some(), "Smooth is a supported variable-radius option even before adding a middle radius");
+        assert!(
+            scenario::handle_at("dialog:ui.fillet_smooth_radius").is_some(),
+            "Smooth radius change is a supported variable-radius option even before adding a middle radius"
+        );
         h.step(&json!({"widget":"Add Mid Radius"})).unwrap();
-        h.step(&json!({"click":{"handle":"dialog:Smooth"}})).unwrap();
+        h.step(&json!({"click":{"handle":"dialog:ui.fillet_smooth_radius"}})).unwrap();
         let saved = parameters(&h);
         assert_eq!(saved["mid"].as_array().unwrap().len(), 1);
         assert_eq!(saved["smooth"], json!(true));

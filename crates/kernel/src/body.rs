@@ -950,7 +950,13 @@ impl Body {
             return Err(KernelError::Invalid("a mesh body has no surfaces to mesh".into()));
         }
         let (tol, turn) = t.rules(self.size());
-        guard("mesh", || crate::tess::plan(&self.record, tol, turn).map(|(plan, _)| plan))
+        let (plan, stats) = guard("mesh", || crate::tess::plan(&self.record, tol, turn))?;
+        // A face filled leniently has no hole on screen, but its pcurves or seams are still wrong:
+        // it is reported, never silent.
+        for f in &stats.lenient {
+            log::warn!("display plan: face {} filled leniently in (u, v), a defect in its pcurves or seams: {}", f.face, f.reason);
+        }
+        Ok(plan)
     }
 
     /// The mesh of `plan`, a plan [`Body::mesh_plan`] made of this body: what [`Body::mesh`]

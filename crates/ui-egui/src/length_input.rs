@@ -91,7 +91,14 @@ pub(crate) fn fields<'a>(doc: &Document, kind: &'a mut crate::dialogs::Kind) -> 
     use crate::dialogs_surface::Surf;
     match kind {
         D::Extrude { distance, distance2, to_offset, start, wall, wall2, .. } => vec![distance, distance2, to_offset, start, wall, wall2],
-        D::Fillet { radius, distance2, .. } => vec![radius, distance2],
+        D::Fillet { radius, distance2, setback, .. } => {
+            // An empty setback stands for the command's default and stays empty.
+            let mut lengths = vec![radius, distance2];
+            if !setback.trim().is_empty() {
+                lengths.push(setback);
+            }
+            lengths
+        }
         D::Shell { thickness } => vec![thickness],
         D::PatternRect { spacing, spacing2, .. } => vec![spacing, spacing2],
         D::OffsetPlane { offset } | D::Section { offset, .. } => vec![offset],
