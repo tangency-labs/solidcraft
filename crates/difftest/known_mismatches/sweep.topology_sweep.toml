@@ -56,9 +56,11 @@ why = "C++ heap-layout dependent (ND-491): 394/400 heap-varied fresh processes s
 unit = "sweep.topology_sweep"
 case = "nm_box_linear_z_stitch"
 libc = "glibc"
-why = "C++ succeeds (3 regions, 15 faces, 33 edges, 22 vertices) in 400/400 heap-varied processes; Rust returns SM_ERR in the stitch of the box part, the same B-rep as nm_box_only_linear_z_stitch whose C++ results include SM_ERR (suspected ND-491 order, not demonstrated for this body)"
+cpp_defect = "ND-491"
+why = "C++ heap-layout dependent (ND-491): 993/1000 heap-varied fresh processes succeed with 3 regions, 15 faces, 33 edges, 22 vertices, 7/1000 return SM_ERR in the box stitch (956/44 with shuffled free lists); the Rust result is SM_ERR, and C++ given the Rust silhouette order (its own HCR insertion order) returns SM_ERR with every value equal"
 
 [[mismatch]]
 unit = "sweep.topology_sweep"
 case = "nm_test_rotation_neg_y_36"
-why = "C++ returns SM_ERR in 400/400 heap-varied processes, in the final ManifoldBoolean union with the swept wire B-rep; Rust's union succeeds (1 region, 11 shells, 15 faces, 66 edges, 63 vertices). Unexplained Rust/C++ union divergence"
+libc = "glibc"
+why = "C++ SM_ERR, Rust succeeds. The cause is C++'s pointer-keyed silhouette order (see plan/upstream-issues/ND-492); the evidence comes from forced-order probes only, not from a confirmed C++ defect, so the case stays a visible known mismatch. C++ result follows the std::unordered_map iteration order of the HCR silhouette edges (ND-492, an ND-2 instance at SmHCR.cpp:312): libstdc++ visits the first-inserted silhouette last in every observed process (5450/5450 heap-varied fresh processes return SM_ERR, in ManifoldBoolean's MakeFaceuse after SetRelationships relates the wire arc to the other duplicate arc edge); C++ given its own insertion order, which Rust uses, succeeds with every value equal to Rust (1 region, 11 shells, 15 faces, 66 edges, 63 vertices)"
