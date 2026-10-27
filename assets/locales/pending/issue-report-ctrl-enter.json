@@ -3,9 +3,17 @@
     "Ctrl+Enter continues on GitHub.": "Ctrl+Enter continues on GitHub.",
     "⌘Enter continues on GitHub.": "⌘Enter continues on GitHub."
   },
+  "ar": {
+    "Ctrl+Enter continues on GitHub.": "Ctrl+Enter يتابع في GitHub.",
+    "⌘Enter continues on GitHub.": "⌘Enter يتابع في GitHub."
+  },
   "de": {
     "Ctrl+Enter continues on GitHub.": "Strg+Enter geht weiter zu GitHub.",
     "⌘Enter continues on GitHub.": "⌘Enter geht weiter zu GitHub."
+  },
+  "he": {
+    "Ctrl+Enter continues on GitHub.": "Ctrl+Enter ממשיך ב־GitHub.",
+    "⌘Enter continues on GitHub.": "⌘Enter ממשיך ב־GitHub."
   },
   "ja": {
     "Ctrl+Enter continues on GitHub.": "Ctrl+EnterでGitHubに進みます。",
