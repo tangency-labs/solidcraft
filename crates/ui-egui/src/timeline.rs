@@ -637,6 +637,16 @@ fn timeline_contents(app: &mut SolveApp, ui: &mut egui::Ui, floating: bool) {
 /// The widest the History's branch button gets.
 const BRANCH_BUTTON_MAX: f32 = 160.0;
 
+fn branch_rename_id() -> egui::Id {
+    egui::Id::new("sc_history_branch_rename")
+}
+
+/// The History's branch name field is open: keys belong to it, not to shortcuts, even on a
+/// frame where egui has dropped its focus (Escape).
+pub(crate) fn renaming_branch(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp::<String>(branch_rename_id()).is_some())
+}
+
 /// The branch the History shows, as a button left of the features. Its menu switches to
 /// another branch, starts a new one from here, renames the open one in place, or opens the
 /// Versions window. Returns its width.
@@ -656,7 +666,7 @@ fn history_branch(app: &mut SolveApp, ui: &mut egui::Ui, left_center: egui::Pos2
     child.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
     // Renaming: the button is a name field until Enter renames the open branch, or Escape or a
     // click elsewhere leaves the name as it was. An empty name changes nothing.
-    let rename_id = egui::Id::new("sc_history_branch_rename");
+    let rename_id = branch_rename_id();
     if let Some(mut name) = ui.data(|d| d.get_temp::<String>(rename_id)) {
         let enter = crate::ui_kit::focused_text_field(&mut child, &mut name, &open);
         let field = child.min_rect();
@@ -665,6 +675,9 @@ fn history_branch(app: &mut SolveApp, ui: &mut egui::Ui, left_center: egui::Pos2
             ui.input(|i| (i.key_pressed(egui::Key::Escape), i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !field.contains(p))));
         if enter || escape || elsewhere {
             ui.data_mut(|d| d.remove::<String>(rename_id));
+            // The key ends the rename only: an open dialog drawn later neither applies nor cancels.
+            ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+            app.esc_handled |= escape;
         } else {
             ui.data_mut(|d| d.insert_temp(rename_id, name.clone()));
         }
@@ -678,8 +691,7 @@ fn history_branch(app: &mut SolveApp, ui: &mut egui::Ui, left_center: egui::Pos2
     }
     let mut chosen: Option<(&str, Value)> = None;
     let mut rename = false;
-    let shown = open.clone();
-    let response = crate::ui_kit::Menu::button(&mut child, shown, |ui| {
+    let response = crate::ui_kit::Menu::button(&mut child, open, |ui| {
         for (id, name) in &branches {
             let mut item = crate::ui_kit::MenuItem::new(id, name, "");
             item.checked = Some(*id == current);
@@ -1159,7 +1171,8 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(texts, ["History"]);
+        // The title and the open branch; feature names are not drawn as text.
+        assert_eq!(texts, ["History", "Main"]);
         let chips: Vec<_> = out
             .shapes
             .iter()
@@ -1216,5 +1229,32 @@ mod tests {
             assert_eq!(open.as_deref(), Some(name), "{key}");
         }
         assert!(crate::scenario::rect_of("history:branch").unwrap().width() <= super::BRANCH_BUTTON_MAX + 1.0);
+    }
+
+    /// Enter or Escape in the branch name field ends the rename, and leaves an open dialog open.
+    #[test]
+    fn renaming_a_branch_leaves_an_open_dialog_alone() {
+        let mut h = Harness::new();
+        h.app.home.open = false;
+        h.app.preferences.timeline_left = false;
+        h.app.run("solid.box", json!({"length": 10, "width": 10, "height": 10, "name": "First"})).unwrap();
+        h.frames(4);
+        for (key, name) in [("Escape", "Main"), ("Enter", "Renamed")] {
+            h.step(&json!({"start": "solid.fillet"})).unwrap();
+            h.frames(2);
+            assert!(h.app.dialog.is_some());
+            h.step(&json!({"click": {"handle": "history:branch"}})).unwrap();
+            h.frames(2);
+            h.step(&json!({"click": {"handle": "history:branch_rename"}})).unwrap();
+            h.frames(2);
+            h.step(&json!({"text": "Renamed"})).unwrap();
+            h.frames(1);
+            h.step(&json!({"key": key})).unwrap();
+            h.frames(3);
+            assert!(h.app.dialog.is_some(), "{key} reached the dialog");
+            assert_eq!(h.app.session.doc.versions.workspaces[0].name, name, "{key}");
+            h.app.dialog = None;
+            h.frames(2);
+        }
     }
 }
