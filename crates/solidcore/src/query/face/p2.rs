@@ -22,6 +22,7 @@
 //! | [`BrepCacheFace`] | `GetFace()` of a face surface's trimmed cache (`SmTrimSrfCache::BuildTree`, `PointClassify`) |
 //! | [`face_surface_cache`], [`FaceSurfaceCache`], [`note_face_surface_cache`] | `smsurf_GetSurfaceCache(GetSurface())` through `SmCacheMgrTSrf::CacheMakeOrValidate` |
 //! | [`owned_surface_cache`], [`solve_surface_cache_of_face`] | `smsurf_GetSurfaceCache(pSurface)` / `GetTree` of a face-owned surface (a solve's cache) |
+//! | [`surface_cache_state_of_face`] | `smsurf_GetSurfaceCache(pSurface)` of a face-owned surface without `GetTree` |
 //! | [`face_cache_tree`] | `SmSurfaceCache::GetTree` of a face surface's trimmed cache |
 //!
 //! Deviations:
@@ -160,7 +161,7 @@ use crate::surface::surface::p1::{
     get_surface_cache_with_face, get_trim_surface_cache, make_surface_cache, make_trim_srf_cache,
     make_trim_srf_cache_with_face,
 };
-use crate::surface::surface::{Surface, SurfaceKind, TrimCacheSlot};
+use crate::surface::surface::{CacheTreeState, Surface, SurfaceKind, TrimCacheSlot};
 use crate::surface::surface_cache::p1::{FaceContainment, SurfaceCache};
 use crate::surface::trim_srf_cache::{CacheFace, TrimSrfCache};
 use crate::topology::edgeuse::p1 as eu1;
@@ -457,6 +458,45 @@ pub fn solve_surface_cache_of_face<O: Copy + PartialEq>(
     handle: Option<O>,
     map: impl Fn(EntityRef) -> Result<O>,
 ) -> Result<Option<SurfaceCache<O>>> {
+    surface_cache_copy_of_face(k, b, f, owner, surface, handle, map, true)
+}
+
+/// [`solve_surface_cache_of_face`] without the solve's `GetTree`: the surface's
+/// trimmed cache as `smsurf_GetSurfaceCache` hands it to a reader of its state bits
+/// only (`GlobalPointSolve`'s fast-drop face test). A kept cache is handed out as it
+/// is; a new one has its tree only when its factory builds it (not during a Boolean
+/// operation), unless the surface's cache slot says upstream's cache is built.
+/// Deviation: a cache left without tree gets the face's missing UV trim curves made
+/// now, which upstream's classification makes when it first needs them.
+///
+/// # Errors
+///
+/// As [`solve_surface_cache_of_face`].
+pub fn surface_cache_state_of_face<O: Copy + PartialEq>(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    owner: crate::geom::object::ObjectRef,
+    surface: &Surface,
+    handle: Option<O>,
+    map: impl Fn(EntityRef) -> Result<O>,
+) -> Result<Option<SurfaceCache<O>>> {
+    // upstream reuses a cache whose tree is built, with the built tree's state bits
+    let get_tree = surface.cache_tree_state() == CacheTreeState::Built;
+    surface_cache_copy_of_face(k, b, f, owner, surface, handle, map, get_tree)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn surface_cache_copy_of_face<O: Copy + PartialEq>(
+    k: &Kernel,
+    b: &mut Brep,
+    f: FaceId,
+    owner: crate::geom::object::ObjectRef,
+    surface: &Surface,
+    handle: Option<O>,
+    map: impl Fn(EntityRef) -> Result<O>,
+    get_tree: bool,
+) -> Result<Option<SurfaceCache<O>>> {
     let mut lease = owned_surface_cache(k, b, f, surface)?;
     if !lease.trimmed {
         return Ok(None);
@@ -466,7 +506,22 @@ pub fn solve_surface_cache_of_face<O: Copy + PartialEq>(
         lease
             .cache
             .bind_face(owner, EntityRef::Face(f), tolerance)?;
-        face_cache_tree(k, b, f, &mut lease.cache)?;
+        if get_tree {
+            face_cache_tree(k, b, f, &mut lease.cache)?;
+        } else if lease.cache.base().tree().is_none() {
+            // The state reader's face classifications are read-only
+            // (`PreparedFaceQueries`), so the UV trim curves upstream's classification
+            // makes on the face (`GetOrCreateUVTrimCurve`) are made here, as the tree
+            // build makes them; the tree and its state bits wait for `GetTree`.
+            let mut face = BrepCacheFace { b: &mut *b, f };
+            let created = face.create_uv_trim_curves(k);
+            // Creation may raise the owning face's tolerance even on an error.
+            let refreshed = face
+                .zone_tol_3d(k, EntityRef::Face(f))
+                .map(|tol| lease.cache.base_mut().set_owner_zone_tol_3d(tol));
+            created?;
+            refreshed?;
+        }
         let mut copy = lease.cache.map_handles(&map)?;
         copy.base_mut().set_surface_handle(handle);
         Ok(copy.into_base())

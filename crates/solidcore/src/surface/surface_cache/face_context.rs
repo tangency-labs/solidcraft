@@ -7,6 +7,7 @@
 //! | [`MappedCacheFace`] | `GetFace()->GetBrep()` during `SmTrimSrfCache::BuildTree` |
 //! | [`FaceQueries`], [`PreparedFaceQueries`] | `SmFace::PointClassify`, `SmTol::GetZoneTol3d` |
 //! | [`prepare_face_surface_cache`] | `smsurf_GetSurfaceCache` of a face's surface, then `GetTree` |
+//! | [`prepare_face_surface_cache_state`] | `smsurf_GetSurfaceCache` of a face's surface (no `GetTree`) |
 //!
 //! Deviations: [`MappedCacheFace`] only translates handles over the shared
 //! [`BrepCacheFace`] implementation of [`CacheFace`]; it does not duplicate topology
@@ -23,6 +24,7 @@ use crate::math::Point2;
 use crate::nurbs::b_spline_curve::BSplineCurve;
 use crate::query::face::p2::{point_classify_prepared, BrepCacheFace, PointClassifyOptions};
 use crate::surface::surface::p1::get_surface_cache_with_face;
+use crate::surface::surface::CacheTreeState;
 use crate::surface::surface_cache::p1::{FaceContainment, SurfaceCache};
 use crate::surface::trim_srf_cache::CacheFace;
 use crate::topology::{Brep, FaceId};
@@ -325,6 +327,39 @@ pub fn prepare_face_surface_cache<O: Copy + PartialEq>(
     handle_of: &dyn Fn(EntityRef) -> Result<O>,
     entity_of: &dyn Fn(O) -> Result<EntityRef>,
 ) -> Result<SurfaceCache<O>> {
+    face_surface_cache(k, b, face, surface_handle, handle_of, entity_of, true)
+}
+
+/// [`prepare_face_surface_cache`] without the solve's `GetTree`: the cache as
+/// `smsurf_GetSurfaceCache` hands it to a reader that reads only its state bits
+/// (`GlobalPointSolve`'s fast-drop face test). A cache the factory leaves without
+/// tree (made during a Boolean operation, or reused unbuilt:
+/// [`crate::surface::surface::Surface::cache_tree_state`]) keeps the state bits the `SmTrimSrfCache`
+/// constructor set; a surface whose cache upstream has built is built here as well.
+///
+/// # Errors
+///
+/// As [`prepare_face_surface_cache`].
+pub fn prepare_face_surface_cache_state<O: Copy + PartialEq>(
+    k: &Kernel,
+    b: &mut Brep,
+    face: FaceId,
+    surface_handle: O,
+    handle_of: &dyn Fn(EntityRef) -> Result<O>,
+    entity_of: &dyn Fn(O) -> Result<EntityRef>,
+) -> Result<SurfaceCache<O>> {
+    face_surface_cache(k, b, face, surface_handle, handle_of, entity_of, false)
+}
+
+fn face_surface_cache<O: Copy + PartialEq>(
+    k: &Kernel,
+    b: &mut Brep,
+    face: FaceId,
+    surface_handle: O,
+    handle_of: &dyn Fn(EntityRef) -> Result<O>,
+    entity_of: &dyn Fn(O) -> Result<EntityRef>,
+    get_tree: bool,
+) -> Result<SurfaceCache<O>> {
     const OP: &str = "surface::surface_cache::face_context::prepare_face_surface_cache";
     // the cache refers to the face's surface (an exact evaluation copy: the face's
     // B-rep is changed through the face while the cache is built)
@@ -334,13 +369,16 @@ pub fn prepare_face_surface_cache<O: Copy + PartialEq>(
         .as_ref()
         .ok_or(SolidError::null_pointer(OP))?
         .clone_for_evaluation()?;
+    // upstream reuses a cache whose tree is built, with the built tree's state bits
+    let get_tree = get_tree || surface.cache_tree_state() == CacheTreeState::Built;
     let mut mapped = MappedCacheFace::new(BrepCacheFace { b, f: face }, handle_of, entity_of)?;
     let mut cache = get_surface_cache_with_face(k, &surface, Some(surface_handle), &mut mapped)?;
     // A Boolean operation can defer the factory's tree build until GetTree.
-    if cache.base().tree().is_none()
-        || (!cache.base().have_t_surface_cache
-            && surface.face()?.is_some()
-            && cache.base().face_containment_done != FaceContainment::UnderConstruction)
+    if get_tree
+        && (cache.base().tree().is_none()
+            || (!cache.base().have_t_surface_cache
+                && surface.face()?.is_some()
+                && cache.base().face_containment_done != FaceContainment::UnderConstruction))
     {
         cache.build_tree_with_face(k, &mut mapped)?;
     }

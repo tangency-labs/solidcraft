@@ -630,18 +630,22 @@ impl FaceQueries<Handle> for EdgeBrep<'_> {
     }
 }
 
-impl OffsetBrep<Handle> for EdgeBrep<'_> {
-    fn prepare_surface_solve_cache(
+impl EdgeBrep<'_> {
+    /// `smsurf_GetSurfaceCache` of `surface` for a solve: with its `GetTree` when
+    /// `get_tree` ([`OffsetBrep::prepare_surface_solve_cache`]), else as handed to a
+    /// reader of the state bits only ([`OffsetBrep::prepare_surface_state_cache`]).
+    fn surface_cache_for(
         &mut self,
         k: &Kernel,
         surface: &Surface,
         handle: Option<Handle>,
+        get_tree: bool,
     ) -> Result<SurfaceCache<Handle>> {
-        use crate::query::face::p2::solve_surface_cache_of_face;
+        use crate::query::face::p2::{solve_surface_cache_of_face, surface_cache_state_of_face};
         use crate::surface::surface::p1::{get_surface_cache, make_surface_cache};
         // the solve's GetTree: a reused cache whose tree is not built builds it now
         let with_tree = |mut cache: SurfaceCache<Handle>| {
-            if cache.tree().is_none() {
+            if get_tree && cache.tree().is_none() {
                 cache.get_tree(k)?;
             }
             Ok(cache)
@@ -671,10 +675,35 @@ impl OffsetBrep<Handle> for EdgeBrep<'_> {
         // the surface's trimmed cache, kept with it as upstream keeps it (reused by
         // later solves on the same surface)
         let map = cache_handle(arena);
-        match solve_surface_cache_of_face(k, b, face, owner, surface, handle, map)? {
+        let cache = if get_tree {
+            solve_surface_cache_of_face(k, b, face, owner, surface, handle, map)?
+        } else {
+            surface_cache_state_of_face(k, b, face, owner, surface, handle, map)?
+        };
+        match cache {
             Some(cache) => Ok(cache),
             None => make_surface_cache(k, surface, handle),
         }
+    }
+}
+
+impl OffsetBrep<Handle> for EdgeBrep<'_> {
+    fn prepare_surface_solve_cache(
+        &mut self,
+        k: &Kernel,
+        surface: &Surface,
+        handle: Option<Handle>,
+    ) -> Result<SurfaceCache<Handle>> {
+        self.surface_cache_for(k, surface, handle, true)
+    }
+
+    fn prepare_surface_state_cache(
+        &mut self,
+        k: &Kernel,
+        surface: &Surface,
+        handle: Option<Handle>,
+    ) -> Result<SurfaceCache<Handle>> {
+        self.surface_cache_for(k, surface, handle, false)
     }
 
     fn prepared_face_queries(&self) -> Option<&dyn FaceQueries<Handle>> {
