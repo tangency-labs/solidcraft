@@ -1,0 +1,25 @@
+# Known mismatches of topology.brep_p7 (format: crates/difftest/src/known.rs).
+
+[[mismatch]]
+unit = "topology.brep_p7"
+case = "read_plane_square.smb_index1"
+why = "edge use 0's type 0 -> 9: C++ builds an inconsistent radial list (status 0, counts 1 1 1 1 4 4); Rust's MakeTopologyFromData returns InvalidInput (radial list links disagree), a documented brep_p10 deviation; C++ SmBrep::ValidatePointers rejects the B-rep its read returned as SM_SUCCESS (WR-470; plan/findings/topology.brep_p7--modified-stream-inconsistent-radial-list.md)"
+cpp_defect = "WR-470"
+
+[[mismatch]]
+unit = "topology.brep_p7"
+case = "read_surf_extrude.smb_index1"
+why = "edge use 0's type 0 -> 9: C++ builds an inconsistent radial list (status 0, counts 1 1 1 1 4 4); Rust's MakeTopologyFromData returns InvalidInput (radial list links disagree), a documented brep_p10 deviation; C++ SmBrep::ValidatePointers rejects the B-rep its read returned as SM_SUCCESS (WR-470; plan/findings/topology.brep_p7--modified-stream-inconsistent-radial-list.md)"
+cpp_defect = "WR-470"
+
+[[mismatch]]
+unit = "topology.brep_p7"
+case = "read_surf_rev.smb_index1"
+why = "edge use 0's type 0 -> 9: C++ builds an inconsistent radial list (status 0, counts 1 1 1 1 4 4); Rust's MakeTopologyFromData returns InvalidInput (radial list links disagree), a documented brep_p10 deviation; C++ SmBrep::ValidatePointers rejects the B-rep its read returned as SM_SUCCESS (WR-470; plan/findings/topology.brep_p7--modified-stream-inconsistent-radial-list.md)"
+cpp_defect = "WR-470"
+
+[[mismatch]]
+unit = "topology.brep_p7"
+case = "read_ellips_ts2.smb_index1"
+why = "edge use 11's edge 11 -> 19: C++ builds an inconsistent radial list (status 0, counts 1 1 1 3 20 20); Rust's MakeTopologyFromData returns InvalidInput (radial list leaves out an edge use of its edge), a documented brep_p10 deviation; C++ SmBrep::ValidatePointers rejects the B-rep its read returned as SM_SUCCESS (WR-470; plan/findings/topology.brep_p7--modified-stream-inconsistent-radial-list.md)"
+cpp_defect = "WR-470"

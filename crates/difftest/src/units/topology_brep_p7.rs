@@ -14,13 +14,13 @@
 //! `InvalidInput` is `SM_ERR_INVALID_INPUT`, `1007`).
 //!
 //! **Guards.** A `read` stream goes through the stream guard of unit `topology.brep_data`
-//! on both sides (a rejected stream is an `err("guard")` case). A modified stream whose
-//! C++ `SmBrepData` read succeeds is not run in C++: `MakeTopologyFromData` uses its
-//! cross-reference indices unchecked and crashes on some of them
-//! (`plan/upstream-issues.md` UB-164). Both sides decide this with the C++ reader; the
-//! C++ side reports `-3` and the Rust side defers to `cpp-guard:unvalidated-topology`.
-//! **Revisit when `topology.brep_p10` lands** (e.g. run the C++ read out of process): a
-//! guard-free sweep crashed in 13 of 15 files, while most such streams are safe. The other
+//! on both sides (its pure-Rust stream simulator, no C++ call; a rejected stream is an
+//! `err("guard")` case). A modified stream (not byte-identical to a shipped file) has its
+//! C++ read run in a fresh child process (`solidcore_ffi::isolate`):
+//! `MakeTopologyFromData` uses its cross-reference indices unchecked and crashes on some
+//! of them (`plan/upstream-issues/UB-164--*.md`), and a child that crashes, or runs past
+//! `READ_SECONDS`, makes the case `rejected`. The streams that survive are compared;
+//! the Rust side always runs its own read (no C++ verdict decides it). The other
 //! shim guards answer `-2` (upstream would dereference null). A `MakeFaceWithCurves` with
 //! a curve on surface, 3D curves and no UV curves that gets past its own input checks
 //! crashes upstream (`plan/upstream-issues.md` UB-165): `run_cpp` rejects it from the
@@ -333,9 +333,9 @@ fn read_bytes(file: &str, damage: Option<Damage>) -> Result<Vec<u8>, HarnessErro
     Ok(bytes)
 }
 
-/// Whether the C++ `SmBrepData::ReadFromFile` (through the `topology.brep_data` shim)
-/// reads the bytes successfully: the FFI's test for not running a modified stream.
-fn cpp_brep_data_reads(bytes: &[u8]) -> Result<bool, Fail> {
+/// The `topology.brep_data` stream guard of the bytes (its pure-Rust stream simulator; no
+/// C++ call): `false` when it rejects them.
+fn guard_accepts(bytes: &[u8], upstream_file: bool) -> Result<bool, HarnessError> {
     let req = bd::Request {
         mode: bd::Mode::ReadFile,
         // every read case is ASCII: the encoder sends `binary = 0` to the FFI
@@ -346,30 +346,52 @@ fn cpp_brep_data_reads(bytes: &[u8]) -> Result<bool, Fail> {
         source: 0,
         pre: 0,
         data: bytes.to_vec(),
-        upstream_file: false,
-    };
-    let items = bd::run(&req).map_err(|e| hfail(format!("c++ brep data: {e}")))?;
-    Ok(items.first() == Some(&bd::Item::Int(0)))
-}
-
-/// The `topology.brep_data` stream guard of the bytes: `false` when it rejects them.
-fn guard_accepts(bytes: &[u8], upstream_file: bool) -> Result<bool, HarnessError> {
-    let req = bd::Request {
-        mode: bd::Mode::ReadFile,
-        binary: false,
-        version: 0,
-        dim: 0,
-        persist: false,
-        source: 0,
-        pre: 0,
-        data: bytes.to_vec(),
         upstream_file,
     };
-    match bd::run(&req) {
-        Ok(_) => Ok(true),
+    match bd::guard(&req) {
+        Ok(()) => Ok(true),
         Err(FfiError::InvalidArgument(_)) => Ok(false),
-        Err(e) => Err(harness(format!("c++ guard: {e}"))),
+        Err(e) => Err(harness(format!("guard: {e}"))),
     }
+}
+
+/// The positions of the last digit of every integer token of the topology records of an
+/// ASCII `.smb` stream (the lines from `//Region Data` up to `//Vertex Data`, comments
+/// skipped): the cross-reference indices, flags and counts.
+fn topology_index_digits(bytes: &[u8]) -> Vec<usize> {
+    let mut out = Vec::new();
+    let mut inside = false;
+    let mut start = 0;
+    for line in bytes.split(|&b| b == b'\n') {
+        let at = start;
+        start += line.len() + 1;
+        if line.starts_with(b"//Region Data") {
+            inside = true;
+        } else if line.starts_with(b"//Vertex Data") {
+            break;
+        }
+        if !inside || line.starts_with(b"//") {
+            continue;
+        }
+        let mut i = 0;
+        while i < line.len() {
+            if line.get(i).is_some_and(u8::is_ascii_whitespace) {
+                i += 1;
+                continue;
+            }
+            let t0 = i;
+            while i < line.len() && !line.get(i).is_some_and(u8::is_ascii_whitespace) {
+                i += 1;
+            }
+            let tok = line.get(t0..i).unwrap_or_default();
+            if tok.last().is_some_and(u8::is_ascii_digit)
+                && tok.iter().all(|&c| c.is_ascii_digit() || c == b'-')
+            {
+                out.push(at + i - 1);
+            }
+        }
+    }
+    out
 }
 
 /// A cached export with its key (the `.smb` path and the block's bits).
@@ -574,8 +596,16 @@ fn run_cpp(i: &Inputs) -> Result<Output, HarnessError> {
         ));
     }
     let (op, path, input) = encode(&r)?;
-    let out = ffi::eval(op, &path, &input).map_err(|e| harness(format!("c++: {e}")))?;
-    Ok(Output::new().values("out", out))
+    match ffi::eval(op, &path, &input) {
+        Ok(out) => Ok(Output::new().values("out", out)),
+        // a modified stream's read runs in a fresh child process (the FFI)
+        Err(FfiError::Status(solidcore_ffi::SC_ERR_CHILD_CRASHED)) => Ok(Output::rejected(
+            "UB-164: SmBrep::ReadFromFile of the modified stream crashed (or ran past \
+             READ_SECONDS) in its fresh child process: MakeTopologyFromData uses the \
+             stream's cross-reference indices unchecked",
+        )),
+        Err(e) => Err(harness(format!("c++: {e}"))),
+    }
 }
 
 /// A `MakeFaceWithCurves` that crashes upstream (`plan/upstream-issues.md` UB-165,
@@ -872,15 +902,6 @@ fn rust_record(k: &mut Kernel, i: &Inputs, ex: Option<&[f64]>) -> Record {
             rebuild,
         } => {
             let bytes = read_bytes(file, *damage)?;
-            // the C++ side does not run a modified stream its SmBrepData read accepts
-            // (MakeTopologyFromData does not validate the topology: UB-164); decided with
-            // the same C++ reader as the FFI
-            if !is_test_file(file, &bytes)? && cpp_brep_data_reads(&bytes)? {
-                return Err(Fail::Deferred(Box::new(Output::deferred(
-                    "cpp-guard:unvalidated-topology",
-                    "SmBrep::MakeTopologyFromData",
-                ))));
-            }
             // a B-rep as `new SmBrep(ctx)` makes it (with the infinite region)
             let mut b = Brep::new_with_infinite_region().map_err(hfail)?;
             let mut records = BTreeMap::new();
@@ -1918,6 +1939,88 @@ impl UnitDiff for Runner {
                         found += 1;
                         break;
                     }
+                }
+            }
+        }
+        // modified streams the B-rep data guard accepts and Rust's B-rep data read reads
+        // (chosen from the Rust side only), so that `MakeTopologyFromData` runs on them.
+        // The C++ read runs in a fresh child process (UB-164: a crash there is rejected);
+        // the reads that survive are compared. First one digit overwritten from a
+        // quarter, a half and three quarters into each file (mostly geometry values)...
+        for file in FILES {
+            let bytes = read_bytes(file, None)?;
+            for (j, quarter) in [1usize, 2, 3].into_iter().enumerate() {
+                let start = bytes.len() * quarter / 4;
+                let mut found = None;
+                'scan: for at in start..bytes.len().min(start + 4000) {
+                    if !bytes.get(at).is_some_and(u8::is_ascii_digit) {
+                        continue;
+                    }
+                    for byte in *b"19" {
+                        let d = Damage::Overwrite { at, byte };
+                        let b2 = read_bytes(file, Some(d))?;
+                        if b2 == bytes || !guard_accepts(&b2, false)? {
+                            continue;
+                        }
+                        let reads = solidcore::topology::brep_data::BrepData::read_from_file(
+                            &k,
+                            b2,
+                            FileType::Ascii,
+                        )
+                        .is_ok();
+                        if reads {
+                            found = Some(d);
+                            break 'scan;
+                        }
+                    }
+                }
+                if let Some(d) = found {
+                    push(
+                        &mut v,
+                        format!("read_{file}_modified{j}"),
+                        &Inputs::Read {
+                            file: file.to_string(),
+                            damage: Some(d),
+                            rebuild: j == 1,
+                        },
+                    )?;
+                }
+            }
+        }
+        // ...then one integer of the topology records (a cross-reference index, flag or
+        // count: UB-164's trigger): four tokens spread over each file's topology section,
+        // their last digit made `9` (`1` where it is `9`)
+        for file in FILES {
+            let bytes = read_bytes(file, None)?;
+            let tokens = topology_index_digits(&bytes);
+            let mut j = 0;
+            for q in 1..=4usize {
+                let Some(&at) = tokens.get(tokens.len() * q / 5) else {
+                    continue;
+                };
+                let byte = if bytes.get(at) == Some(&b'9') { b'1' } else { b'9' };
+                let d = Damage::Overwrite { at, byte };
+                let b2 = read_bytes(file, Some(d))?;
+                if b2 == bytes || !guard_accepts(&b2, false)? {
+                    continue;
+                }
+                let reads = solidcore::topology::brep_data::BrepData::read_from_file(
+                    &k,
+                    b2,
+                    FileType::Ascii,
+                )
+                .is_ok();
+                if reads {
+                    push(
+                        &mut v,
+                        format!("read_{file}_index{j}"),
+                        &Inputs::Read {
+                            file: file.to_string(),
+                            damage: Some(d),
+                            rebuild: j % 2 == 1,
+                        },
+                    )?;
+                    j += 1;
                 }
             }
         }

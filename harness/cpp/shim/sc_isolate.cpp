@@ -15,6 +15,8 @@
 //    fresh (unlocked) mutex in its place. Returns the child's pid in the parent (*fd = the
 //    read end of the pipe), 0 in the child (*fd = the write end), or -1 when the pipe or
 //    fork fails (*fd = -1; the caller then runs the case in-process).
+//  * sc_isolate_alarm(seconds): in the child, replaces the 600 s alarm with one of
+//    `seconds` (1 to 600; others leave it), for a case whose native call may never end.
 //  * sc_isolate_exit(): ends the child (_exit(0): no atexit handlers, no stdio flush).
 //  * sc_isolate_wait(pid): 1 when the child exited with status 0, else 0 (killed by a
 //    signal, the 600 s alarm, or another exit).
@@ -74,6 +76,12 @@ SC_EXPORT int64_t sc_isolate_fork(int32_t* fd)
     mutex.unlock();
     *fd = fds[0];
     return int64_t(pid);
+}
+
+SC_EXPORT void sc_isolate_alarm(uint32_t seconds)
+{
+    if (seconds >= 1 && seconds <= 600)
+        alarm(seconds);
 }
 
 SC_EXPORT void sc_isolate_exit() { _exit(0); }

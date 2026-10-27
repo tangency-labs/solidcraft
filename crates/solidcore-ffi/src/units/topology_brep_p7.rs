@@ -26,9 +26,10 @@
 //! the curves, indices inside the B-rep's export. For `Read` it applies the guard of
 //! unit `topology.brep_data` to the bytes (a rejected stream is
 //! [`FfiError::InvalidArgument`]) and, for bytes that are not exactly one of the shipped
-//! ASCII test files, runs `SmBrepData::ReadFromFile` first: when that read succeeds the
-//! topology it read is not known to be safe for `MakeTopologyFromData`, and `[-3]` is
-//! returned without calling the shim.
+//! ASCII test files, runs the read in a fresh child process
+//! ([`crate::isolate::fresh_process`]): `MakeTopologyFromData` uses the cross-reference
+//! indices of such a stream unchecked (`plan/upstream-issues.md` UB-164), and a read that
+//! crashes there, or runs past [`READ_SECONDS`], is [`FfiError::Status`]`(`[`SC_ERR_CHILD_CRASHED`](crate::SC_ERR_CHILD_CRASHED)`)`.
 
 use super::topology_brep_data as bd;
 use super::topology_vertexuse as fixture;
@@ -49,8 +50,10 @@ pub const MAX_BYTES: usize = 1 << 22;
 const NOW: f64 = -f64::MAX;
 /// `NOZ`: the z of a 2D control point.
 const NOZ: f64 = f64::MAX;
-/// "not run".
-const NOT_RUN: f64 = -3.0;
+
+/// The run time in seconds of a modified stream's read in its child process (a shipped
+/// file reads in well under a second).
+pub const READ_SECONDS: u32 = 30;
 
 /// Shim operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -250,8 +253,8 @@ pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
             rd.flag()?;
             rd.done()?;
             let trust = trusted(&bytes, binary);
-            // the B-rep data guard (and, for a modified stream, its read status)
-            let req = bd::Request {
+            // the B-rep data guard
+            bd::guard(&bd::Request {
                 mode: bd::Mode::ReadFile,
                 binary,
                 version: 0,
@@ -261,10 +264,14 @@ pub fn eval(op: Op, path: &str, input: &[f64]) -> Result<Vec<f64>, FfiError> {
                 pre: 0,
                 data: bytes,
                 upstream_file: trust,
-            };
-            let items = bd::run(&req)?;
-            if !trust && items.first() == Some(&bd::Item::Int(0)) {
-                return Ok(vec![NOT_RUN]);
+            })?;
+            if !trust {
+                // MakeTopologyFromData uses a modified stream's indices unchecked (UB-164):
+                // its read runs in a fresh child process, which some such indices also
+                // keep looping: one that runs past READ_SECONDS is ended as crashed
+                return crate::isolate::fresh_process_within(READ_SECONDS, || {
+                    raw(op, path, input)
+                });
             }
         }
         Op::MakeFaceWithCurves => {

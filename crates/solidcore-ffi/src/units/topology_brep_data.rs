@@ -194,6 +194,16 @@ pub fn run(req: &Request) -> Result<Vec<Item>, FfiError> {
     Err(FfiError::Status(SC_ERR_BUFFER))
 }
 
+/// The [guard](self#guard) of [`run`] alone: `Ok` when `run` would call the C++ kernel
+/// on `req`. Pure Rust (the stream simulator): nothing is read from C++.
+///
+/// # Errors
+///
+/// [`FfiError::InvalidArgument`] when the guard rejects the request.
+pub fn guard(req: &Request) -> Result<(), FfiError> {
+    validate(req)
+}
+
 /// `SM_BIG_ULONG`: `SmTArray::SetSize` refuses this size or more.
 const BIG_ULONG: u64 = 99_999_999;
 /// Largest attribute count / index accepted (as the Rust port).

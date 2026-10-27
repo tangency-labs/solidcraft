@@ -19,6 +19,7 @@ use crate::FfiError;
 #[cfg(unix)]
 extern "C" {
     fn sc_isolate_fork(fd: *mut i32) -> i64;
+    fn sc_isolate_alarm(seconds: u32);
     fn sc_isolate_exit() -> !;
     fn sc_isolate_wait(pid: i64) -> i32;
 }
@@ -94,6 +95,23 @@ fn decode(b: &[u8]) -> Option<Result<Vec<f64>, FfiError>> {
 pub fn fresh_process(
     case: impl FnOnce() -> Result<Vec<f64>, FfiError>,
 ) -> Result<Vec<f64>, FfiError> {
+    fresh_process_within(MAX_SECONDS, case)
+}
+
+/// The child's default (and longest) run time in seconds.
+pub const MAX_SECONDS: u32 = 600;
+
+/// [`fresh_process`] with the child's alarm at `seconds` (clamped to `1..=`[`MAX_SECONDS`])
+/// instead of [`MAX_SECONDS`]: for a case whose native call may never end, so that a
+/// child that runs past it is reported as crashed sooner.
+///
+/// # Errors
+///
+/// As [`fresh_process`].
+pub fn fresh_process_within(
+    seconds: u32,
+    case: impl FnOnce() -> Result<Vec<f64>, FfiError>,
+) -> Result<Vec<f64>, FfiError> {
     #[cfg(unix)]
     {
         use std::io::{Read, Write};
@@ -105,6 +123,8 @@ pub fn fresh_process(
         if pid == 0 {
             // The child: run the case, send its result, end without returning (and
             // without unwinding into the parent's frames).
+            // SAFETY: only sets this child's alarm.
+            unsafe { sc_isolate_alarm(seconds.clamp(1, MAX_SECONDS)) };
             let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(case));
             if let Ok(r) = r {
                 // SAFETY: `fd` is the pipe's write end, owned by this child only.
@@ -130,6 +150,8 @@ pub fn fresh_process(
             };
         }
     }
+    #[cfg(not(unix))]
+    let _ = seconds;
     case()
 }
 
@@ -181,5 +203,17 @@ mod tests {
         });
         assert_eq!(r, Ok(vec![1.0]));
         assert_eq!(seen, 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn child_past_its_alarm() {
+        assert_eq!(
+            fresh_process_within(1, || {
+                std::thread::sleep(std::time::Duration::from_secs(5));
+                Ok(vec![1.0])
+            }),
+            Err(FfiError::Status(crate::SC_ERR_CHILD_CRASHED))
+        );
     }
 }
