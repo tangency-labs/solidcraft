@@ -484,6 +484,29 @@ mod tests {
         let _ = fs::remove_dir_all(&d);
     }
 
+    /// A design's drawings are part of it (#3890), so a change to a drawing alone is unsaved
+    /// work: it is autosaved, and after a crash it comes back with the design.
+    #[test]
+    fn a_drawing_change_alone_is_autosaved_and_recovered() {
+        let d = dir("drawing");
+        let mut s = Session::default();
+        let mut a = Autosaver::new(&d, Duration::from_secs(3600)).unwrap();
+        s.execute("solid.box", &json!({"length": 10, "width": 10, "height": 10})).unwrap();
+        s.execute("drawing.create", &json!({"name": "Box drawing"})).unwrap();
+        s.mark_saved();
+        assert!(!a.save(&s).unwrap(), "nothing unsaved");
+        s.execute("drawing.properties.set", &json!({"values": {"author": "Jane Doe"}})).unwrap();
+        assert!(a.save(&s).unwrap(), "the drawing's change is unsaved");
+        drop(a);
+        let found = orphans(&d);
+        assert_eq!(found.len(), 1);
+        let (doc, entry) = load(&d, &found[0].id).unwrap();
+        assert_eq!(doc.drawings, s.doc.drawings);
+        assert_eq!(doc, *s.doc);
+        remove(&d, &entry.id).unwrap();
+        let _ = fs::remove_dir_all(&d);
+    }
+
     /// A tick doesn't wait for the autosave (#3044): it starts the write on a worker and
     /// returns; the outcome is taken up by a later tick, and nothing new starts meanwhile. The
     /// entry is the design as it was when the write started, even when it changed since.
