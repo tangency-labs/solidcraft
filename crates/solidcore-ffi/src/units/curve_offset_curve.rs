@@ -30,14 +30,26 @@
 //! | `Trim`         | `Trim`                      | `a b mode` probes              | `a' b'` state probes (always) |
 //! | `Eq`           | `operator==`                | `self copy [spec]`             | `this==other [other==this]` |
 //! | `Copy`         | `Copy`                      | probes                         | state probes |
+//! | `CloneCtor`    | `SmOffsetCurve(const SmOffsetCurve&)` | probes                | `this==copy copy==this` state probes |
 //! | `IsKindOf`     | `IsKindOf`                  | `type`                         | flag |
 //! | `ReadDb`       | `SmOffsetCurve::ReadFromDB` | (no curve) see above, probes   | state probes |
 //! | `WriteDb`      | `WriteToDB` (fixture helper, not in the unit) | `file_type version` | `bytes` (always) |
 //!
 //! [`eval`] accepts only what upstream handles without undefined behaviour: well-formed
 //! clamped B-splines and finite Hermite data, finite bounded values, derivative counts
-//! up to [`MAX_DERIVS`], and no `Copy` of an owning offset whose base cannot be copied
-//! (a Hermite curve: upstream then shares and deletes it twice).
+//! up to [`MAX_DERIVS`], and no copy (`Copy` or the copy constructor behind `CloneCtor`)
+//! of an owning offset whose base cannot be copied (a Hermite curve: upstream then
+//! shares the base with ownership `TRUE` and both delete it). The copy constructor's
+//! path is rejected only when it actually copies that base: without an outer offset the
+//! original owns the base itself, with one the outer offset must own the inner offset
+//! (a borrowed inner offset is shared, so a borrowed Hermite chain stays safe).
+//!
+//! The protocol's `owns` is a flag (`FALSE`/`TRUE`): a nonempty offset with `UNSURE`
+//! ownership cannot be built here, and only the empty object carries it. The copy
+//! constructor is undefined for that empty object (`SmOffsetCurve()`: no base, `UNSURE`
+//! ownership), which this unit never builds for `CloneCtor` (the base block is
+//! mandatory); Rust's `Clone` keeps `empty()` a defined value, a port divergence, not a
+//! case here.
 
 use crate::validate::{bad, NOW, NOZ};
 use crate::{call_with_buffer, FfiError};
@@ -75,6 +87,7 @@ pub enum Op {
     IsKindOf = 9,
     ReadDb = 10,
     WriteDb = 11,
+    CloneCtor = 12,
 }
 
 mod sys {
@@ -225,12 +238,18 @@ pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
     }
     let is_bspline = base_block(&mut rd)?;
     let inner_owns = spec(&mut rd)?;
-    if rd.flag()? {
-        spec(&mut rd)?;
-    }
+    let outer_owns = if rd.flag()? {
+        Some(spec(&mut rd)?)
+    } else {
+        None
+    };
     // Copying an offset that owns a Hermite base: upstream's base Copy fails, the copy
     // shares the base and both delete it.
     let copy_unsafe = !is_bspline && inner_owns;
+    // The copy constructor's own base Copy: without an outer offset the original owns
+    // the base itself; with one the outer offset must own the inner offset it copies
+    // (a borrowed inner offset is shared, never copied).
+    let ctor_unsafe = !is_bspline && inner_owns && outer_owns != Some(false);
     match op {
         // ReadDb was handled above
         Op::State | Op::ReadDb => {}
@@ -282,6 +301,12 @@ pub fn validate(op: Op, input: &[f64]) -> Result<(), FfiError> {
             }
             probes(&mut rd)?;
         }
+        Op::CloneCtor => {
+            if ctor_unsafe {
+                return Err(bad("copy constructor of an offset owning a Hermite curve"));
+            }
+            probes(&mut rd)?;
+        }
         Op::IsKindOf => {
             rd.int(0, 1 << 20)?;
         }
@@ -317,4 +342,68 @@ pub fn eval(op: Op, input: &[f64]) -> Result<Vec<f64>, FfiError> {
             )
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A curve op's input record: base block, inner spec, optional outer spec, probes.
+    fn curve_op(hermite: bool, inner_owns: f64, outer_owns: Option<f64>) -> Vec<f64> {
+        let mut v = Vec::new();
+        if hermite {
+            v.extend([1.0, 3.0]);
+            v.extend([0.0; 12]);
+        } else {
+            v.extend([0.0, 3.0, 0.0, 2.0, 1.0, 4.0]);
+            for p in [[0.0, 0.0], [1.0, 1.0], [2.0, 0.0]] {
+                v.extend([p[0], p[1], 0.0, NOW]);
+            }
+            v.extend([0.0, 0.0, 0.5, 1.0, 1.0]);
+        }
+        v.extend([3.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.5, inner_owns, 0.0]);
+        match outer_owns {
+            None => v.push(0.0),
+            Some(owns) => {
+                v.push(1.0);
+                v.extend([3.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.5, owns, 0.0]);
+            }
+        }
+        v.extend([2.0, 0.25, 0.75]);
+        v
+    }
+
+    fn rejected(op: Op, input: &[f64]) -> bool {
+        matches!(validate(op, input), Err(FfiError::InvalidArgument(_)))
+    }
+
+    #[test]
+    fn clone_ctor_rejects_only_an_owned_hermite_base() {
+        // a borrowed Hermite base is shared by the constructor, so it stays safe
+        assert!(validate(Op::CloneCtor, &curve_op(true, 0.0, None)).is_ok());
+        assert!(validate(Op::CloneCtor, &curve_op(false, 0.0, None)).is_ok());
+        // an owned Hermite base cannot be copied: upstream shares it and both delete it
+        assert!(rejected(Op::CloneCtor, &curve_op(true, 1.0, None)));
+        assert!(validate(Op::CloneCtor, &curve_op(false, 1.0, None)).is_ok());
+    }
+
+    #[test]
+    fn clone_ctor_rejects_a_nested_owned_hermite_chain() {
+        // the outer offset's base Copy clones the inner offset, whose base Copy fails
+        assert!(rejected(Op::CloneCtor, &curve_op(true, 1.0, Some(1.0))));
+        // an owning outer offset over a B-spline base copies safely
+        assert!(validate(Op::CloneCtor, &curve_op(false, 1.0, Some(1.0))).is_ok());
+        // a borrowed inner offset is shared, never copied: the chain stays safe
+        assert!(validate(Op::CloneCtor, &curve_op(true, 0.0, Some(1.0))).is_ok());
+        // an outer offset sharing the inner one does not copy it
+        assert!(validate(Op::CloneCtor, &curve_op(true, 1.0, Some(0.0))).is_ok());
+    }
+
+    #[test]
+    fn copy_keeps_its_owned_hermite_guard() {
+        // `Copy` is the virtual entry point: its guard is unchanged
+        assert!(validate(Op::Copy, &curve_op(true, 0.0, None)).is_ok());
+        assert!(rejected(Op::Copy, &curve_op(true, 1.0, None)));
+        assert!(validate(Op::Copy, &curve_op(false, 1.0, None)).is_ok());
+    }
 }

@@ -60,7 +60,8 @@ enum ScOcOp : int32_t
     OP_IS_KIND_OF = 9,
     OP_READ_DB = 10,
     OP_WRITE_DB = 11,
-    OP_LAST = 11,
+    OP_CLONE_CTOR = 12,
+    OP_LAST = 12,
 };
 
 double st(SmStatus s) { return s == SM_SUCCESS ? 0.0 : (double)s; }
@@ -383,6 +384,19 @@ int32_t run(int32_t op, Rd& rd, std::vector<double>& o)
         }
         else
             skip_probes(rd);
+        break;
+    }
+    case OP_CLONE_CTOR:
+    {
+        // the copy constructor itself (upstream Copy() calls it): the original, its
+        // base and any nested offset stay alive until the copy is destroyed
+        SmOffsetCurve* cp = new (ctx) SmOffsetCurve(*c);
+        o.push_back(0.0);
+        o.push_back(flg(*c == *cp));
+        o.push_back(flg(*cp == *c));
+        put_state(o, cp);
+        put_probes(o, rd, cp);
+        delete cp;
         break;
     }
     case OP_WRITE_DB:
