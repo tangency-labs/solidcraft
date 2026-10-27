@@ -2375,6 +2375,8 @@ pub fn script_steps(script: &Value) -> Result<&Vec<Value>> {
 #[cfg(test)]
 mod boolean_regression_tests;
 #[cfg(test)]
+mod collab_wire_size_tests;
+#[cfg(test)]
 mod computed_commands_tests;
 #[cfg(test)]
 mod construct_tests;
