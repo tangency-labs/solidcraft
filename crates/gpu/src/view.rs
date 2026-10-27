@@ -2441,7 +2441,7 @@ impl Renderer {
                 bias: Default::default(),
             })
         };
-        // Opaque faces pushed back by their own slope (FACE_BIAS); ghosts twice as far.
+        // Opaque faces pushed back by their own slope (FACE_BIAS).
         let pushed = |compare: wgpu::CompareFunction, write: bool, bias: wgpu::DepthBiasState| -> Option<wgpu::DepthStencilState> {
             depth(compare, write).map(|d| wgpu::DepthStencilState { bias: depth_bias(reversed, bias), ..d })
         };
@@ -2791,7 +2791,7 @@ impl Renderer {
                 pipeline("sc_trans", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::LessEqual, false), alpha),
                 glass("sc_glass_far", wgpu::Face::Front),
                 glass("sc_glass_near", wgpu::Face::Back),
-                pipeline("sc_ghost", "vs_tri", "fs_tri", tri_layout(), pushed(wgpu::CompareFunction::LessEqual, false, GHOST_BIAS), alpha),
+                pipeline("sc_ghost", "vs_tri", "fs_ghost", tri_layout(), highlight_depth(t.depth), alpha),
                 pipeline("sc_xray", "vs_tri", "fs_tri", tri_layout(), depth(wgpu::CompareFunction::Always, false), alpha),
                 see_through_instanced(TriSource::Instanced, ""),
                 solid("sc_tris_hl_instanced", "fs_tri", None, highlight_depth(t.depth), TriSource::Instanced),
@@ -2935,6 +2935,9 @@ impl Renderer {
 /// in f32 while the highlight's copy of the same triangles is evaluated on the CPU, so the two
 /// depths differ by rounding and an unbiased equal test lights the face in speckles and wedges.
 /// The bias is a few depth steps plus the face's own slope: far less than any real gap.
+/// A preview's ghost (the material a change removes) is drawn the same way: the preview keeps
+/// only the old surface that stands off the new shape, so it belongs in front of it, right down
+/// to where the removed material thins out.
 fn highlight_depth(format: Option<wgpu::TextureFormat>) -> Option<wgpu::DepthStencilState> {
     let reversed = reversed_depth(format);
     format.map(|format| wgpu::DepthStencilState {
@@ -2966,9 +2969,6 @@ pub const FACE_STEPS: i32 = 8;
 /// 3.5 px) may lose its outer edge on one side where it lies on a steep face. The section cap,
 /// which writes its own depth, adds the same in the shader.
 pub const FACE_SLOPE: f32 = 1.0;
-/// The removed material of a preview, drawn translucent: behind the faces it shares with the new
-/// shape, so twice [`FACE_BIAS`].
-const GHOST_BIAS: wgpu::DepthBiasState = wgpu::DepthBiasState { constant: 2 * FACE_STEPS, slope_scale: 2.0 * FACE_SLOPE, clamp: 0.0 };
 
 /// A pipeline that sets the depth of the viewport in a pass of `t`'s kind back to the far plane,
 /// leaving colour and stencil as they are. None without a depth buffer.
